@@ -1,0 +1,23 @@
+# Build output
+/build/
+
+# Editor/IDE junk
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Compiled artifacts anywhere in the tree
+*.o
+*.a
+*.so
+*.so.*
+
+# Core dumps
+core
+core.*
+
+# Local, machine-specific
+compile_commands.json
