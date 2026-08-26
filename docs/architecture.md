@@ -62,13 +62,19 @@ backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
 ## Current state (Phase 2 — Platform Layer)
 
 Implemented: `src/core/` (context lifecycle, logging, error codes,
-allocation, versioning — Phase 1) plus `src/platform/x11/`,
-`src/platform/wayland/`, and `src/window/` (Phase 2). `fdk_init()`
-performs a real platform connection with backend auto-detection;
-`fdk_run()` is a real `poll()`-based event loop; windows can be
-created, shown, resized, and receive real translated input/configure/
-close events on both backends. See `docs/roadmap.md`'s Phase 2 entry
-for the precise, honest list of what is and isn't covered — in
-particular, custom window decorations and rendering are NOT part of
-this phase (Phase 7 and Phase 3 respectively), and Wayland has no
-automated integration test yet (see `docs/testing.md`).
+allocation, versioning — Phase 1, plus the Phase 2 additions to
+`context.c` and `context_internal.h` that perform the real backend
+selection and the real poll()-based event loop) plus
+`src/platform/x11/`, `src/platform/wayland/` (optional — see
+`docs/build.md`'s "Optional Wayland build"), `src/platform/wayland_disabled.c`
+(the build-time stub used when Wayland dev headers aren't available),
+and `src/window/` (Phase 2). `fdk_init()` performs a real platform
+connection with backend auto-detection; `fdk_run()` is a real
+`poll()`-based event loop that exits on `fdk_quit()` or when the last
+top-level window closes; windows can be created, shown, resized, and
+receive real translated input/configure/close events on both backends.
+See `docs/roadmap.md`'s Phase 2 entry for the precise, honest list of
+what is and isn't covered — in particular, custom window decorations
+and rendering are NOT part of this phase (Phase 7 and Phase 3
+respectively), and Wayland has no automated integration test yet (see
+`docs/testing.md`).

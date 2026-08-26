@@ -1,14 +1,19 @@
 # Faded Dream ToolKit (FDK)
 
-FDK is a native C GUI toolkit being built for Artix Linux, targeting
-the practical role GTK and Qt currently serve for applications that
-choose to target it. Pure C17, minimal dependencies, no GTK/Qt
-dependency, real X11 and Wayland backends, and its own `.fdk` theme
-format (coming in Phase 6). See `docs/roadmap.md` for the full project
-plan and current status.
+FDK is a native C17 GUI toolkit being built for modern Linux desktops,
+targeting the practical role GTK and Qt currently serve for
+applications that choose to target it. Minimal dependencies, no
+GTK/Qt dependency, real X11 and Wayland backends, and its own `.fdk`
+theme format (coming in Phase 6). See `docs/roadmap.md` for the
+full project plan and current status.
 
-**Status: Phase 2 — Platform Layer complete.** Core lifecycle, a real
-X11 backend, and a real Wayland backend are implemented and tested.
+FDK is **distro-agnostic**: it should build and run on any modern
+Linux distribution where its genuinely unavoidable system interfaces
+(X11 protocol, Wayland protocol, POSIX) are available. It is not
+designed around any specific distribution.
+
+**Status: Phase 2 — Platform Layer.** Core lifecycle, a real X11
+backend, and a real Wayland backend are implemented and tested.
 Applications can create windows, show them, resize them, and receive
 real translated keyboard/pointer/configure/close events on both
 backends. There is no rendering, widget system, or window decoration
@@ -18,12 +23,16 @@ specific list of what is and isn't covered.
 
 ## Requirements
 
-- GCC with C17 support (GNU Make + GCC 13+ on Artix Linux; see
-  `docs/build.md`)
-- X11 and Wayland development headers/tools — see `docs/dependencies.md`
-  for exact packages, purposes, and licenses
-- `Xvfb`, optionally, only if you want to run `make test-x11` without
-  an existing desktop session
+- GCC with C17 support (developed against GCC 13+; any reasonably
+  current GCC should work — see `docs/build.md`)
+- X11 development headers (always required — X11 is FDK's baseline
+  backend, see `docs/dependencies.md`)
+- Optional: Wayland development headers (`libwayland-dev`,
+  `wayland-protocols`, `libxkbcommon-dev`) — auto-detected at build
+  time; if absent, FDK builds as X11-only and the runtime
+  FDK_PLATFORM_WAYLAND selection fails cleanly with FDK_ERR_NO_DISPLAY
+- `Xvfb`, optionally, only if you want to run `make test-x11`
+  without an existing desktop session
 
 ## Building
 
@@ -35,8 +44,22 @@ make test-x11   # X11 integration test suite (real window lifecycle,
 make examples   # build the example programs
 ```
 
-See `docs/build.md` for the full command reference, including release
-builds and `make install`.
+To require the Wayland backend at build time (rather than the default
+auto-skip when its dev headers are missing):
+
+```sh
+make FDK_ENABLE_WAYLAND=1   # errors if wayland-dev / xkbcommon-dev absent
+```
+
+To force-build X11-only even on a system with Wayland dev headers:
+
+```sh
+make FDK_DISABLE_WAYLAND=1
+```
+
+See `docs/build.md` for the full command reference, including
+release builds, `make install`, and the optional-build knobs in
+detail.
 
 ## What works today
 

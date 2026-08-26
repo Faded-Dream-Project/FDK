@@ -3,13 +3,18 @@
 ## Requirements
 
 - GCC with C17 support (developed against GCC 13; any reasonably
-  current GCC on Artix Linux should work)
+  current GCC should work — FDK is distro-agnostic and is not built
+  around any specific distribution's toolchain)
 - GNU Make
-- X11 development headers (`libx11-dev`/`xorg-x11proto-devel`
-  equivalent on Artix) and Wayland development headers/tools
-  (`libwayland-dev`, `wayland-protocols`, `libxkbcommon-dev`
-  equivalent) — see `docs/dependencies.md` for exact package purposes
-  and licenses
+- X11 development headers (`libx11-dev` on Debian/Ubuntu,
+  `xorg-x11proto-devel`/`libX11-devel` on Arch/Fedora, etc.) —
+  always required; X11 is FDK's baseline backend and the runtime
+  auto-detection's fall-through when Wayland is unavailable
+- Optional: Wayland development headers (`libwayland-dev`,
+  `wayland-protocols`, `libxkbcommon-dev` on Debian/Ubuntu and most
+  others) — auto-detected at build time; if absent, FDK builds as
+  X11-only and the runtime `FDK_PLATFORM_WAYLAND` selection fails
+  cleanly with `FDK_ERR_NO_DISPLAY` rather than crashing
 - `Xvfb`, only if you want to run `make test-x11` without an existing
   desktop session (optional — `make test` never needs it)
 
@@ -38,9 +43,48 @@ make release PREFIX=/usr
 make CC=clang
 ```
 
+## Optional Wayland build
+
+By default (`make` with no knobs), FDK auto-detects Wayland dev
+availability via `pkg-config`:
+
+- If `wayland-client` AND `xkbcommon` are both found → the Wayland
+  backend is built and `FDK_PLATFORM_WAYLAND` works at runtime.
+- If either is missing → the Wayland backend is silently skipped,
+  `src/platform/wayland_disabled.c` is compiled in its place (it
+  returns `NULL` from `fdk_platform_wayland_ops()` and 0 from
+  `fdk_platform_wayland_display_present()`), and at runtime
+  `FDK_PLATFORM_AUTO` falls through to X11 while
+  `FDK_PLATFORM_WAYLAND` fails cleanly with `FDK_ERR_NO_DISPLAY`.
+  No link dependency on `libwayland-client` / `libxkbcommon` is
+  produced in this configuration.
+
+This is the build that runs by default in environments without
+Wayland dev headers — for example, a minimal CI container, or any
+distribution whose base install doesn't pull in Wayland development
+files. FDK should build cleanly there; this is what makes the project
+genuinely distro-agnostic rather than implicitly requiring a
+Wayland-rich environment.
+
+Two overrides exist for cases where the build's intent should be
+explicit rather than inferred:
+
+```sh
+make FDK_DISABLE_WAYLAND=1   # never build Wayland, even if pkg-config finds it
+make FDK_ENABLE_WAYLAND=1   # require Wayland — hard error if missing,
+                             # rather than silently building X11-only
+```
+
+Use `FDK_DISABLE_WAYLAND=1` when building for a system that
+specifically does not want Wayland support linked in (e.g. an
+embedded target where Wayland's runtime dependencies are
+unavailable). Use `FDK_ENABLE_WAYLAND=1` in CI configurations where
+a silent X11-only fallback would mask a real packaging regression
+that removed Wayland dev headers from the image.
+
 ## Why debug builds default to ASan+UBSan
 
-Per project principle ("do not fake completion," `docs/memory.md"), a
+Per project principle ("do not fake completion," `docs/memory.md`), a
 test suite that passes but leaks memory or triggers undefined behavior
 isn't actually passing. Sanitizers are on by default specifically so
 that's caught locally, every time, without needing a separate CI-only
@@ -69,3 +113,13 @@ The build compiles with `-Wall -Wextra -Wpedantic -Wshadow
 Per project principle, warnings get fixed, not suppressed — if a
 warning flag is ever removed from this list, that removal itself
 should be justified in the commit that does it.
+
+The single exception is the Wayland backend's own translation units,
+which get `-Wno-cast-qual` applied via `extra_flags` only when their
+source path is under `src/platform/wayland/`. The reason is
+`wayland-scanner`'s generated `xdg-shell-client-protocol.h` and
+`libwayland-client`'s own listener-registration inlines
+(`wl_proxy_add_listener`'s `(void (**)(void))` cast) trigger that
+warning upstream, in code FDK does not own or control. No other
+warning is suppressed anywhere in the project, and no source file
+outside `src/platform/wayland/` receives any `-Wno-...` flag.

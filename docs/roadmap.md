@@ -61,15 +61,16 @@ Implemented and tested:
   destroy/show/hide/resize/size-limits, event translation (configure,
   focus, keyboard via `XLookupString` for layout-aware codepoints,
   pointer motion/buttons/scroll, enter/leave)
-- `src/platform/wayland/` backend: connection + registry global
-  discovery (compositor, shm, seat, xdg_wm_base), `xdg-shell` toplevel
-  lifecycle (surface → xdg_surface → xdg_toplevel, configure/ack/
-  commit handshake, close handling), seat capability binding, keyboard
-  via `libxkbcommon` (compositor-supplied keymap compilation, modifier
-  state tracking), pointer (motion/enter/leave/button/axis), correct
-  external-event-loop integration (`prepare_read`/`poll`/
-  `read_events`/`dispatch_pending`, not the simpler self-blocking
-  `wl_display_dispatch()`)
+- `src/platform/wayland/` backend (optional at build time — see
+  `docs/build.md`'s "Optional Wayland build"): connection + registry
+  global discovery (compositor, shm, seat, xdg_wm_base),
+  `xdg-shell` toplevel lifecycle (surface → xdg_surface →
+  xdg_toplevel, configure/ack/commit handshake, close handling), seat
+  capability binding, keyboard via `libxkbcommon` (compositor-supplied
+  keymap compilation, modifier state tracking), pointer (motion/
+  enter/leave/button/axis), correct external-event-loop integration
+  (`prepare_read`/`poll`/`read_events`/`dispatch_pending`, not the
+  simpler self-blocking `wl_display_dispatch()`)
 - xdg-shell protocol bindings generated via `wayland-scanner` from the
   real upstream `wayland-protocols` XML (vendored with attribution in
   `third_party/wayland-protocols/`) — not hand-rolled protocol
@@ -79,11 +80,20 @@ Implemented and tested:
 - Real event loop in `fdk_run()`: `poll()`-based, blocks efficiently
   (no busy-spinning) on the platform connection's fd, exits when
   `fdk_quit()` is called or the last window closes, per its documented
-  contract in `fdk_core.h`
+  contract in `fdk_core.h`. The dispatch glue (`context_dispatch_event`
+  in `src/core/context.c`) resolves the backend's opaque
+  `fdk_platform_window *` back to the owning `fdk_window *` via the
+  context's window registry, then calls `fdk_window_dispatch_event()`
+  which caches configure sizes and invokes the application's
+  registered callback — this is what closes the loop from the backend
+  vtable all the way back to the public API.
 - `fdk_init()` now performs real backend auto-detection
   (`FDK_PLATFORM_AUTO`: Wayland if `$WAYLAND_DISPLAY` is set and
   reachable, else X11) and produces real `FDK_ERR_NO_DISPLAY` /
-  `FDK_ERR_PLATFORM_INIT` results
+  `FDK_ERR_PLATFORM_INIT` results. Each explicit backend
+  (`FDK_PLATFORM_X11` / `FDK_PLATFORM_WAYLAND`) is tried without
+  silent fallback to the other (per `fdk_core.h`'s documented
+  contract and the `test_platform_no_display.c` assertion).
 - Public `fdk_window.h` and `fdk_event.h` APIs: window lifecycle,
   size/title/limits, and a backend-neutral event model (configure,
   close-request, focus, keyboard, pointer, scroll) — no Xlib or
