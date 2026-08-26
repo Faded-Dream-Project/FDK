@@ -17,6 +17,18 @@
 #
 # Override on the command line, e.g.:
 #   make release PREFIX=/usr
+#
+# Backend build knobs (see docs/build.md "Optional Wayland"):
+#   FDK_DISABLE_WAYLAND=1   — never build the Wayland backend, even if
+#                              libwayland-client / libxkbcommon are present
+#   FDK_ENABLE_WAYLAND=1     — require the Wayland backend at build time
+#                              (errors out if its dev deps are missing
+#                              rather than silently skipping)
+#   (default)               — auto: build Wayland iff pkg-config finds
+#                              wayland-client AND xkbcommon; otherwise
+#                              silently skip and the runtime FDK_PLATFORM_*
+#                              selection will report FDK_ERR_NO_DISPLAY
+#                              or FDK_ERR_UNSUPPORTED as appropriate
 
 CC       ?= gcc
 AR       ?= ar
@@ -30,15 +42,50 @@ WARN     := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
             -Wcast-qual -Wpointer-arith -Wundef -Wwrite-strings
 FEATURE  := -D_POSIX_C_SOURCE=200809L
 
-# Platform backend dependencies. See docs/dependencies.md for the
-# justification of each. Both are always built on Linux per project
-# requirements — there is no "X11-only" or "Wayland-only" build
-# configuration (the backend actually used at runtime is chosen by
-# fdk_init(), not by what's compiled in — see docs/architecture.md).
+# ---- Platform backend dependencies -------------------------------------
+# X11 is required (FDK's documented baseline — an FDK build without X11
+# support is not a configuration the project currently supports; the
+# runtime auto-detection in src/core/context.c still falls through to
+# the X11 backend when Wayland is unavailable, so a build without X11
+# would have no Wayland-only fall-through to offer).
 X11_CFLAGS     := $(shell pkg-config --cflags x11)
 X11_LIBS       := $(shell pkg-config --libs x11)
-WAYLAND_CFLAGS := $(shell pkg-config --cflags wayland-client xkbcommon)
-WAYLAND_LIBS   := $(shell pkg-config --libs wayland-client xkbcommon)
+
+# Wayland is optional. Detection order:
+# 1. If FDK_DISABLE_WAYLAND=1 is set, never build Wayland (skip).
+# 2. Else if FDK_ENABLE_WAYLAND=1 is set, require both dev packages —
+#    a missing one is a hard build error, not a silent skip.
+# 3. Else (default): build Wayland iff both pkg-config packages are
+#    found. If either is missing, silently skip Wayland and continue
+#    with an X11-only build. The runtime fdk_platform_wayland_ops()
+#    then returns NULL (see wayland_ops.c) and the context's
+#    select_and_connect() cleanly skips it.
+WAYLAND_PKGS    := wayland-client xkbcommon
+HAVE_WAYLAND    := $(shell pkg-config --exists $(WAYLAND_PKGS) && echo yes || echo no)
+
+ifeq ($(FDK_DISABLE_WAYLAND),1)
+  BUILD_WAYLAND := 0
+else ifeq ($(FDK_ENABLE_WAYLAND),1)
+  ifeq ($(HAVE_WAYLAND),yes)
+    BUILD_WAYLAND := 1
+  else
+    $(error FDK_ENABLE_WAYLAND=1 but pkg-config did not find $(WAYLAND_PKGS) — install libwayland-dev / libxkbcommon-dev or unset FDK_ENABLE_WAYLAND to auto-skip)
+  endif
+else
+  BUILD_WAYLAND := $(HAVE_WAYLAND:yes=1)
+  BUILD_WAYLAND := $(filter 1,$(BUILD_WAYLAND))
+endif
+
+ifeq ($(BUILD_WAYLAND),1)
+  WAYLAND_CFLAGS := $(shell pkg-config --cflags $(WAYLAND_PKGS))
+  WAYLAND_LIBS   := $(shell pkg-config --libs $(WAYLAND_PKGS))
+  $(info FDK build: X11 + Wayland backends)
+else
+  WAYLAND_CFLAGS :=
+  WAYLAND_LIBS   :=
+  WAYLAND_DEFS   := -DFDK_DISABLE_WAYLAND=1
+  $(info FDK build: X11 backend only (Wayland not available — set FDK_ENABLE_WAYLAND=1 with libwayland-dev/libxkbcommon-dev installed to enable))
+endif
 
 BUILD_DIR   := build
 DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1 -fsanitize=address,undefined
@@ -64,8 +111,18 @@ extra_flags = $(if $(findstring src/platform/x11/,$(1)),$(X11_CFLAGS)) \
 
 CORE_SRCS     := $(wildcard src/core/*.c)
 PLATFORM_X11_SRCS     := $(wildcard src/platform/x11/*.c)
-PLATFORM_WAYLAND_SRCS := $(wildcard src/platform/wayland/*.c) \
-                         src/platform/wayland/generated/xdg-shell-protocol.c
+ifeq ($(BUILD_WAYLAND),1)
+  PLATFORM_WAYLAND_SRCS := $(wildcard src/platform/wayland/*.c) \
+                           src/platform/wayland/generated/xdg-shell-protocol.c
+else
+  # Stub providing fdk_platform_wayland_ops() returning NULL and
+  # fdk_platform_wayland_display_present() returning 0, so
+  # src/core/context.c's select_and_connect() cleanly skips Wayland
+  # and falls through to X11. See wayland_disabled.c for why this is
+  # a separate file (NOT under src/platform/wayland/, which would
+  # break the wildcard that's active when Wayland IS enabled).
+  PLATFORM_WAYLAND_SRCS := src/platform/wayland_disabled.c
+endif
 WINDOW_SRCS   := $(wildcard src/window/*.c)
 LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS)
 
@@ -101,11 +158,11 @@ shared: $(SHARED_LIB)
 
 $(BUILD_DIR)/obj/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(call extra_flags,$<) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -c $< -o $@
 
 $(BUILD_DIR)/obj-pic/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(call extra_flags,$<) -fPIC -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -fPIC -c $< -o $@
 
 $(STATIC_LIB): $(LIB_OBJS)
 	@mkdir -p $(dir $@)
