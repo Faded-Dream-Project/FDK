@@ -7,6 +7,29 @@
 #include <errno.h>
 #include <poll.h>
 
+/* Flush libwayland's output buffer after listener callbacks have run.
+ *
+ * Requests marshalled by a listener (or by any window-op call made
+ * outside the poll loop) sit in the connection's output buffer until
+ * something flushes them — libwayland does NOT auto-flush. Without
+ * this trailing flush, context.c's loop goes back to blocking in
+ * poll() with requests still queued: the compositor is waiting for
+ * our data, we're waiting for its events, and the window appears
+ * only when an unrelated event (a ping, a capture) happens to wake
+ * the loop. Flushing here guarantees everything queued during this
+ * dispatch reaches the compositor before we block again.
+ *
+ * EAGAIN (socket send buffer full) is not an error here: the request
+ * is still queued and will go out on the next flush; large transfers
+ * just need the compositor to drain first. */
+static int flush_output(fdk_platform_connection *conn) {
+    if (wl_display_flush(conn->display) < 0 && errno != EAGAIN) {
+        FDK_ERROR("wl_display_flush failed (errno=%d)", errno);
+        return (int)FDK_ERR_PLATFORM_INIT;
+    }
+    return 0;
+}
+
 /* Unlike X11 (x11_dispatch.c), Wayland's client library already does
  * event translation FOR us at the wl_*_listener callback level — each
  * listener function above (wayland_seat.c, wayland_window.c) calls
@@ -31,7 +54,12 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
      * buffered" behavior; the protocol requires this (you must not
      * call prepare_read() again until the queue is drained). */
     if (wl_display_prepare_read(conn->display) != 0) {
-        return wl_display_dispatch_pending(conn->display);
+        int dispatched = wl_display_dispatch_pending(conn->display);
+        if (dispatched < 0) {
+            FDK_ERROR("wl_display_dispatch_pending failed (errno=%d)", errno);
+            return (int)FDK_ERR_PLATFORM_INIT;
+        }
+        return flush_output(conn) < 0 ? (int)FDK_ERR_PLATFORM_INIT : dispatched;
     }
 
     if (wl_display_flush(conn->display) < 0 && errno != EAGAIN) {
@@ -67,5 +95,5 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
         FDK_ERROR("wl_display_dispatch_pending failed (errno=%d)", errno);
         return (int)FDK_ERR_PLATFORM_INIT;
     }
-    return dispatched;
+    return flush_output(conn) < 0 ? (int)FDK_ERR_PLATFORM_INIT : dispatched;
 }

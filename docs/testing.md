@@ -63,22 +63,43 @@ just not exercised by an automated test yet.
 
 ## Wayland test coverage
 
-There is no automated Wayland integration test yet. Reason, stated
-plainly: unlike X11 (where Xvfb gives a real, if minimal, headless
-server), there is no equivalently simple, universally-available
-headless Wayland compositor to spin up the way `make test-x11` spins
-up Xvfb. (Candidates like a nested `weston --backend=headless-backend`
-exist but were not available/verified in the environment this backend
-was developed in — see the project's "no fake completion" principle:
-this is recorded as a gap to close, not silently worked around.) The
-Wayland backend (`src/platform/wayland/`) does compile cleanly and
-link correctly, and its logic mirrors the X11 backend's structure
-closely enough that the same category of bugs would likely be caught
-by code review and by eventually adding `make test-wayland` against a
-headless Weston, once that's set up and verified in a real CI
-environment. Until then, treat the Wayland backend as **implemented
-but only integration-tested manually against a real compositor**, not
-as verified to the same bar as the X11 backend.
+There is no automated `make test-wayland` yet (see the gap note
+below), but the Wayland backend **has been integration-tested against
+a real compositor**: Weston 14 running with its headless backend and
+pixman renderer, driven end-to-end with the hello-world example as a
+client. Verified in that setup:
+
+- `fdk_init()` connects, binds wl_compositor/wl_shm/xdg_wm_base, and
+  reports the backend honestly (including the no-seat warning).
+- The xdg-shell handshake completes: initial empty commit, configure
+  received and acked, then the solid background buffer is created,
+  attached (with full-surface damage), and committed.
+- `WAYLAND_DEBUG=1` protocol traces confirm the exact request order
+  above, and a compositor screenshot pixel-verifies the window is
+  actually mapped and visible (solid white covering the output).
+- Clean shutdown path (window destroy, buffer destroy, disconnect)
+  exercised when the compositor connection closes.
+
+Two real bugs were found and fixed by exactly this testing, both of
+which would have reproduced on any compositor:
+
+1. **Missing `wl_surface.damage`** — compositors schedule repaints
+   from the damage region; a committed-but-undamaged surface is never
+   drawn (the buffer latches, the window stays invisible).
+2. **Missing output flush after listener callbacks** — requests
+   queued by event handlers sat in libwayland's output buffer while
+   the poll() loop blocked, deadlocking the handshake until an
+   unrelated event (e.g. a compositor ping) happened to wake it.
+
+The remaining gap: this is not yet wired into `make test-wayland`
+because the test environment assembled a fully user-space Weston
+(extracted distribution packages with no root access, path relocation
+via `WESTON_MODULE_MAP`, `--shell=kiosk-shell` to avoid
+desktop-shell's helper clients, `--use-pixman` for real software
+rendering) — reproducible, but too environment-specific to hard-code
+into the Makefile honestly. The X11 backend remains the coverage bar;
+Wayland is verified to a manual-but-real integration level, one step
+short of automated CI.
 
 ## Known Xvfb flakiness (investigated and fixed)
 

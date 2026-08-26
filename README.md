@@ -97,10 +97,11 @@ version of this — it opens a real window, logs resize/keyboard events,
 and exits cleanly when closed. It needs a reachable X11 or Wayland
 display to run.
 
-There is no renderer yet (Phase 3), so a created window shows whatever
-blank/undefined content the platform gives an unbuffered surface —
-the window, its events, and its lifecycle are all real; there's just
-nothing drawn inside it.
+There is no renderer yet (Phase 3), so a created window shows a solid
+platform background (white on both backends — X11's background pixel,
+or the Wayland backend's committed solid-color wl_shm buffer). The
+window, its events, and its lifecycle are all real; there's just
+nothing drawn inside it yet.
 
 ## Project principles
 

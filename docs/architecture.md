@@ -76,5 +76,6 @@ receive real translated input/configure/close events on both backends.
 See `docs/roadmap.md`'s Phase 2 entry for the precise, honest list of
 what is and isn't covered — in particular, custom window decorations
 and rendering are NOT part of this phase (Phase 7 and Phase 3
-respectively), and Wayland has no automated integration test yet (see
-`docs/testing.md`).
+respectively), and Wayland has no automated integration test yet,
+though the backend is verified end-to-end against a real headless
+Weston (see `docs/testing.md`).

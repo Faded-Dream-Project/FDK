@@ -129,11 +129,15 @@ Explicitly NOT done in Phase 2 (do not mistake for oversights — see
   compositor supports `xdg-decoration`, otherwise none) — FDK-drawn
   title bars are Phase 7, deliberately not pulled forward (per the
   directive's explicit instruction not to rush this).
-- **`fdk_window_hide()` and `fdk_window_resize()` are no-ops on
-  Wayland**, with a logged warning explaining why (both fundamentally
-  need the renderer — attaching a buffer — which doesn't exist until
-  Phase 3). Documented honestly in `wayland_window.c`'s doc comments
-  and `fdk_window.h`, not silently broken.
+- **Wayland windows show a solid background buffer, not rendered
+  content.** The Wayland backend commits a white wl_shm buffer when
+  the window is shown (and a fresh one on resize) — the functional
+  equivalent of X11's background pixel, without which a Wayland
+  window would be invisible (compositors map nothing until a buffer
+  is committed). `fdk_window_hide()` unmaps via a NULL-buffer commit,
+  and `fdk_window_resize()` commits a buffer at the new size — both
+  previously documented no-ops, now real. Full rendering remains
+  Phase 3.
 - **No rendering.** A created window has no drawn content — Phase 3.
 - **No timers or idle callbacks**, and no `fdk_invoke_on_ui_thread()`
   (the worker-thread-to-UI-thread scheduling primitive sketched in

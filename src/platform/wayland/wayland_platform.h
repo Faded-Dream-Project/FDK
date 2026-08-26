@@ -73,6 +73,20 @@ struct fdk_platform_window {
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
 
+    /* Solid background buffer — the Wayland equivalent of X11's
+     * background pixel. Wayland compositors map nothing until a
+     * client commits an actual buffer, so without this a Phase 2
+     * window would be invisible (see attach_background_buffer() in
+     * wayland_window.c). wl_shm_pool objects are destroyed at buffer
+     * creation time — legal per the wl_shm spec, which keeps the
+     * server-side mapping alive until the buffer itself is destroyed
+     * — so only the buffer needs tracking here. The buffer is
+     * destroyed from its wl_buffer::release listener, never reused:
+     * content never changes, a resize simply makes a new one. */
+    struct wl_buffer *buffer;   /* current background buffer, NULL when none */
+    fdk_size buffer_size;       /* dimensions of `buffer` */
+    int buffer_attached;        /* nonzero while `buffer` is committed to the surface */
+
     fdk_size last_size;
     fdk_size pending_size;   /* accumulated from configure until ack+commit */
     int configured;          /* nonzero once the first xdg_surface.configure

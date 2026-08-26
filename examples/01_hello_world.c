@@ -4,12 +4,12 @@
  *
  * Requires a reachable X11 or Wayland display to run (fdk_init()
  * genuinely connects to one as of Phase 2 — see docs/roadmap.md).
- * There is no renderer yet (Phase 3), so the window will appear with
- * whatever blank/undefined content the platform gives an unbuffered
- * surface — on X11 that's typically the border/background color set
- * at creation; on Wayland, nothing is shown until Phase 3 attaches a
- * buffer (see fdk_wayland_window_show()'s doc comment in
- * src/platform/wayland/wayland_window.c for why). The window still
+ * There is no renderer yet (Phase 3), so the window appears as a
+ * solid platform background — white on both backends: X11 windows
+ * get the background pixel set at creation, and the Wayland backend
+ * commits a solid-color wl_shm buffer for the same effect (see
+ * attach_background_buffer() in
+ * src/platform/wayland/wayland_window.c). The window still
  * genuinely exists, receives real events, and responds to being
  * closed or resized — that's what this example demonstrates.
  *
