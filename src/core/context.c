@@ -5,9 +5,24 @@
 #include "core/alloc_internal.h"
 #include "core/context_internal.h"
 #include "core/log_internal.h"
+#include "window/window_internal.h"
 
+#include <errno.h>
+#include <poll.h>
+#include <stdlib.h>
 #include <string.h>
 
+/* ---- small static helpers (forward-declared by being defined above
+ * their use site; both are file-local to context.c) ---- */
+
+static int errno_value(void) { return errno; }
+static int errno_is_eintr(void) { return errno == EINTR; }
+
+/* ---- string helper ----
+ * Strdup is POSIX-200809 (we are in _POSIX_C_SOURCE=200809L per
+ * Makefile) but the FDK allocator path already centralizes OOM
+ * logging; using it here keeps allocation tracking consistent and
+ * lets a future debug allocator hook see app_id allocation too. */
 static char *dup_string(const char *s) {
     if (s == NULL) {
         return NULL;
@@ -18,6 +33,132 @@ static char *dup_string(const char *s) {
         memcpy(copy, s, len);
     }
     return copy;
+}
+
+/* ---- dispatch glue ----
+ * This is the function handed to a backend's connect() (see
+ * fdk_platform_ops in platform_internal.h). When the backend has
+ * translated a backend-specific event into an fdk_event_data, it calls
+ * us with the opaque `fdk_platform_window *` it delivered the event
+ * against; we look that pwindow up in the context's window registry to
+ * find the owning public fdk_window, then call fdk_window_dispatch_event()
+ * which caches configure sizes and invokes the application's
+ * registered callback.
+ *
+ * `dispatch_user_data` is the fdk_context* itself (set by fdk_init()
+ * below) — the same value the backend was handed at connect time. */
+static void context_dispatch_event(fdk_platform_window *pwindow,
+                                    const fdk_event_data *event,
+                                    void *dispatch_user_data) {
+    fdk_context *ctx = dispatch_user_data;
+    if (ctx == NULL || pwindow == NULL || event == NULL) {
+        return;
+    }
+    fdk_window *window = fdk_context_find_window_by_pwindow(ctx, pwindow);
+    if (window == NULL) {
+        /* Backend delivered an event for a pwindow FDK doesn't track.
+         * This can happen during teardown (a window was destroyed but
+         * the backend still had a queued event for it) — not an error,
+         * just nothing to dispatch. */
+        return;
+    }
+    fdk_window_dispatch_event(window, event);
+}
+
+/* ---- backend selection ----
+ * FDK_PLATFORM_AUTO: try Wayland first if $WAYLAND_DISPLAY looks set
+ * (existence-only check here; the actual connection attempt in
+ * wayland_ops->connect() is what proves reachability — see
+ * platform_internal.h's doc comment on
+ * fdk_platform_wayland_display_present). If that fails, fall back to
+ * X11. Each backend's connect() returns FDK_ERR_NO_DISPLAY if no
+ * display of that kind is reachable.
+ *
+ * Explicit FDK_PLATFORM_X11 / FDK_PLATFORM_WAYLAND: try ONLY that
+ * backend, no silent fallback (per fdk_core.h's documented contract
+ * and the test_platform_no_display.c test that asserts this). */
+static fdk_result select_and_connect(
+    fdk_platform_backend requested,
+    fdk_context *ctx,
+    const fdk_platform_ops **out_ops,
+    fdk_platform_connection **out_conn) {
+
+    /* Build the candidate list in selection order. */
+    const fdk_platform_ops *candidates[2];
+    size_t candidate_count = 0;
+
+    if (requested == FDK_PLATFORM_AUTO) {
+        if (fdk_platform_wayland_display_present()) {
+            const fdk_platform_ops *wl = fdk_platform_wayland_ops();
+            if (wl != NULL) {
+                candidates[candidate_count++] = wl;
+            }
+        }
+        const fdk_platform_ops *x11 = fdk_platform_x11_ops();
+        if (x11 != NULL) {
+            candidates[candidate_count++] = x11;
+        }
+        /* If Wayland wasn't even detected at the env-var level (or was
+         * compiled out), we just try X11 — X11's connect() returns
+         * FDK_ERR_NO_DISPLAY if XOpenDisplay(NULL) finds nothing. */
+    } else if (requested == FDK_PLATFORM_WAYLAND) {
+        const fdk_platform_ops *wl = fdk_platform_wayland_ops();
+        if (wl != NULL) {
+            candidates[candidate_count++] = wl;
+        }
+    } else { /* FDK_PLATFORM_X11 */
+        const fdk_platform_ops *x11 = fdk_platform_x11_ops();
+        if (x11 != NULL) {
+            candidates[candidate_count++] = x11;
+        }
+    }
+
+    /* A backend that was compiled out (Wayland in a build with
+     * FDK_DISABLE_WAYLAND=1, see Makefile) returns NULL from its
+     * fdk_platform_*_ops() entry point — skip it. The check is what
+     * makes "optional Wayland" possible without touching this code
+     * path beyond what's above. */
+    fdk_result last_failure = FDK_ERR_NO_DISPLAY;
+    for (size_t i = 0; i < candidate_count; i++) {
+        const fdk_platform_ops *ops = candidates[i];
+        FDK_INFO("attempting %s backend", ops->name);
+        fdk_platform_connection *conn = NULL;
+        /* Pass `ctx` as dispatch_user_data — by this point in
+         * fdk_init(), ctx is fully allocated and field-initialized
+         * (only `ops`/`conn` are unset, which the dispatch callback
+         * doesn't read). Backends store this value at connect time
+         * and use it for every future dispatch invocation; doing it
+         * this way avoids needing to peek into the opaque
+         * fdk_platform_connection struct (which lives inside
+         * src/platform/{x11,wayland}/ and is intentionally opaque to
+         * the core layer — see docs/architecture.md's "no backend
+         * leakage" rule). */
+        fdk_result r = ops->connect(context_dispatch_event, ctx, &conn);
+        if (fdk_ok(r)) {
+            *out_ops = ops;
+            *out_conn = conn;
+            return FDK_OK;
+        }
+        last_failure = r;
+        /* FDK_ERR_NO_DISPLAY means "this backend isn't reachable in
+         * this environment" — for FDK_PLATFORM_AUTO we want to fall
+         * through and try the next candidate. Other errors
+         * (FDK_ERR_PLATFORM_INIT) mean the backend WAS reachable but
+         * couldn't complete setup; for AUTO we still try the next
+         * candidate, because the alternative is failing the whole
+         * fdk_init() when the other backend might work fine. The
+         * last_failure is preserved so if every candidate fails, the
+         * reported error reflects the most informative non-NO_DISPLAY
+         * failure (preferred) or NO_DISPLAY if all were no-display. */
+        if (r != FDK_ERR_NO_DISPLAY) {
+            FDK_WARN("%s backend failed to initialize: %s",
+                     ops->name, fdk_result_to_string(r));
+        }
+    }
+
+    *out_ops = NULL;
+    *out_conn = NULL;
+    return last_failure;
 }
 
 fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
@@ -34,9 +175,16 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->app_id = NULL;
     ctx->running = 0;
     ctx->quit_requested = 0;
+    ctx->ops = NULL;
+    ctx->conn = NULL;
+    ctx->windows = NULL;
+    ctx->window_count = 0;
+    ctx->window_capacity = 0;
 
+    fdk_platform_backend requested = FDK_PLATFORM_AUTO;
     if (options != NULL) {
         ctx->backend = options->backend;
+        requested = options->backend;
         if (options->app_id != NULL) {
             ctx->app_id = dup_string(options->app_id);
             if (ctx->app_id == NULL) {
@@ -46,17 +194,35 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
         }
     }
 
-    /* NOTE: Phase 1 deliberately does not attempt an X11/Wayland
-     * connection — that is the platform layer, built in Phase 2 (see
-     * src/platform/). A context is fully constructed and usable for
-     * core-level bookkeeping (logging, version queries, future timers)
-     * without one. Once the platform layer lands, fdk_init() will
-     * attempt that connection here and return FDK_ERR_NO_DISPLAY /
-     * FDK_ERR_PLATFORM_INIT on failure, per the documented contract in
-     * fdk_core.h — that contract is written now so the header does not
-     * need to change shape later. */
+    /* Actually perform the platform connection. This is what turns
+     * fdk_init() from a stub into a real Phase 2 entry point: a context
+     * with no reachable display genuinely fails with
+     * FDK_ERR_NO_DISPLAY (test_platform_no_display.c asserts exactly
+     * this), and a context with one available genuinely connects.
+     *
+     * ctx is fully constructed by the time we hand it to
+     * select_and_connect() (and thence to a backend's connect() as
+     * dispatch_user_data) — every field except `ops`/`conn` is set,
+     * and the dispatch callback never reads either of those from a
+     * partially-constructed state. */
+    const fdk_platform_ops *ops = NULL;
+    fdk_platform_connection *conn = NULL;
+    fdk_result r = select_and_connect(requested, ctx, &ops, &conn);
+    if (!fdk_ok(r)) {
+        /* On any connection failure, the context is fully torn down
+         * — no half-initialized state escapes to the caller. */
+        fdk_free(ctx->app_id);
+        fdk_free(ctx->windows); /* empty but defensive */
+        fdk_free(ctx);
+        return r;
+    }
 
-    FDK_INFO("initialized (app_id=%s)", ctx->app_id ? ctx->app_id : "(none)");
+    ctx->ops = ops;
+    ctx->conn = conn;
+
+    FDK_INFO("initialized (backend=%s, app_id=%s)",
+             ops->name ? ops->name : "?",
+             ctx->app_id ? ctx->app_id : "(none)");
 
     *out_ctx = ctx;
     return FDK_OK;
@@ -66,15 +232,77 @@ void fdk_run(fdk_context *ctx) {
     if (ctx == NULL) {
         return;
     }
+    if (ctx->ops == NULL || ctx->conn == NULL) {
+        /* Should not happen for a context that came out of a
+         * successful fdk_init(); a NULL ops here means fdk_shutdown()
+         * was already called, or the context was never initialized.
+         * Match the no-op contract fdk_core.h documents for these
+         * edge cases rather than crashing. */
+        FDK_WARN("fdk_run() called on a context with no platform connection");
+        return;
+    }
 
     ctx->running = 1;
     ctx->quit_requested = 0;
 
-    FDK_WARN("fdk_run() called but no platform event source exists yet "
-             "(Phase 2) — returning immediately");
+    /* Drain anything the backend already queued during connect()'s
+     * initial roundtrips (Wayland does at least one wl_display_roundtrip
+     * in connect() for registry discovery; the resulting listener
+     * callbacks fire here rather than inside connect() so they go
+     * through the normal dispatch path. X11's XOpenDisplay doesn't
+     * pre-queue anything to drain, so this is a near no-op for X11.) */
+    (void)ctx->ops->dispatch_pending(ctx->conn);
 
-    /* Phase 2 replaces this with a real poll/dispatch loop over the
-     * platform connection's event fd, timers, and idle queue. */
+    /* Exit condition (per fdk_core.h): stop when fdk_quit() was called
+     * OR when there are no top-level windows left. The "no windows"
+     * case returns immediately even on the first iteration — that's
+     * what test_run_returns_when_no_windows_open verifies. */
+    while (!ctx->quit_requested && ctx->window_count > 0) {
+        int fd = ctx->ops->get_event_fd(ctx->conn);
+        if (fd < 0) {
+            FDK_ERROR("backend gave no event fd; cannot poll");
+            break;
+        }
+
+        struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
+        int pr = poll(&pfd, 1, -1); /* block until something is readable */
+        if (pr < 0) {
+            if (errno_is_eintr()) {
+                /* EINTR is benign — a signal was caught mid-poll. Loop
+                 * back and re-check the exit condition (a fdk_quit()
+                 * called from a signal handler would be honored here). */
+                continue;
+            }
+            FDK_ERROR("poll() failed (errno=%d)", errno_value());
+            break;
+        }
+
+        if (pfd.revents & (POLLERR | POLLNVAL)) {
+            FDK_ERROR("poll() reported fd error condition");
+            break;
+        }
+
+        if (pfd.revents & (POLLIN | POLLHUP)) {
+            int dispatched = ctx->ops->dispatch_pending(ctx->conn);
+            if (dispatched < 0) {
+                /* Backend returned a negative fdk_result cast to int —
+                 * unrecoverable connection failure. Treat the
+                 * connection as dead and exit the loop, leaving
+                 * cleanup to fdk_shutdown(). */
+                FDK_ERROR("backend dispatch_pending failed (%d)",
+                          dispatched);
+                break;
+            }
+        }
+        /* POLLHUP (peer closed) doesn't necessarily mean an error for
+         * our backends — X11 and Wayland both speak over a socket the
+         * server owns, but a clean compositor shutdown is rare in
+         * practice. We still try one more dispatch_pending to let the
+         * backend surface any final events; the next poll() will
+         * return immediately with the same POLLHUP and we'll exit on
+         * the next iteration's dispatch returning a negative result,
+         * or just spin briefly until something errors out. */
+    }
 
     ctx->running = 0;
 }
@@ -93,6 +321,82 @@ void fdk_shutdown(fdk_context *ctx) {
 
     FDK_INFO("shutting down");
 
+    /* Destroy any windows the application leaked — mirrors each
+     * backend's own disconnect() safety net but at the FDK window
+     * level so application callbacks aren't bypassed. Iterating from
+     * the end because fdk_window_destroy() calls
+     * fdk_context_unregister_window() which swap-removes (mutating
+     * indices). */
+    while (ctx->window_count > 0) {
+        FDK_WARN("shutdown with %zu window(s) still open — destroying",
+                 ctx->window_count);
+        fdk_window_destroy(ctx->windows[ctx->window_count - 1]);
+    }
+
+    if (ctx->ops != NULL && ctx->conn != NULL) {
+        ctx->ops->disconnect(ctx->conn);
+    }
+    fdk_free(ctx->windows);
     fdk_free(ctx->app_id);
     fdk_free(ctx);
+}
+
+/* ---- window registry ---- */
+
+fdk_result fdk_context_register_window(fdk_context *ctx, fdk_window *window) {
+    if (ctx == NULL || window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx->window_count == ctx->window_capacity) {
+        size_t new_capacity = (ctx->window_capacity == 0)
+            ? 4
+            : ctx->window_capacity * 2;
+        /* Overflow check on the array size multiplication. */
+        if (new_capacity > (SIZE_MAX / sizeof(fdk_window *))) {
+            FDK_ERROR("window registry capacity overflow");
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        fdk_window **new_array = fdk_realloc(
+            ctx->windows, new_capacity * sizeof(fdk_window *));
+        if (new_array == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        ctx->windows = new_array;
+        ctx->window_capacity = new_capacity;
+    }
+    ctx->windows[ctx->window_count++] = window;
+    return FDK_OK;
+}
+
+void fdk_context_unregister_window(fdk_context *ctx, fdk_window *window) {
+    if (ctx == NULL || window == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < ctx->window_count; i++) {
+        if (ctx->windows[i] == window) {
+            /* Swap-remove: dispatch order doesn't matter, only
+             * membership. */
+            ctx->windows[i] = ctx->windows[ctx->window_count - 1];
+            ctx->window_count--;
+            return;
+        }
+    }
+    FDK_WARN("unregister_window: window not in registry (double destroy?)");
+}
+
+fdk_window *fdk_context_find_window_by_pwindow(fdk_context *ctx,
+                                                fdk_platform_window *pwindow) {
+    if (ctx == NULL || pwindow == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < ctx->window_count; i++) {
+        /* fdk_window's `pwindow` field is private to the library —
+         * this function lives in the same internal compilation unit
+         * boundary as window_internal.h, which exposes the struct
+         * layout to context.c (already included above). */
+        if (ctx->windows[i]->pwindow == pwindow) {
+            return ctx->windows[i];
+        }
+    }
+    return NULL;
 }

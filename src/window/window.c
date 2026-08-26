@@ -3,7 +3,7 @@
 #include "fdk/fdk_window.h"
 
 #include "core/alloc_internal.h"
-#include "core/context_windows_internal.h"
+#include "core/context_internal.h"
 #include "core/log_internal.h"
 #include "window/window_internal.h"
 
