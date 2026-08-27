@@ -145,10 +145,9 @@ Explicitly NOT done in Phase 2 (do not mistake for oversights — see
   `context.c` has an obvious place to add a timer queue when needed,
   but adding one before anything needs it would be speculative.
 
-## Phase 3 — Rendering (first slice shipped; phase in progress)
+## Phase 3 — Rendering (second slice shipped; phase in progress)
 
-Implemented and tested (the first slice — the foundation the rest of
-Phase 3 builds on):
+Implemented and tested in the FIRST slice (the foundation):
 - `fdk_surface` public API (`include/fdk/fdk_surface.h`): a window's
   software drawing target — framebuffer acquisition with live
   resize-following (`fdk_surface_get_info`, XRGB8888 pixels + stride),
@@ -189,19 +188,69 @@ Phase 3 builds on):
   all verified at exact packed-pixel values), and a resize test that
   confirms the new framebuffer at the new geometry
 
-Explicitly NOT done in this first slice (do not mistake for
-oversights — each is the next step in `src/render/`):
-- **No dirty-rectangle tracking** — every present redraws the whole
-  window; fine at the current workload, wasteful beyond it
+Explicitly NOT done in the first slice — of that list, the SECOND
+slice (this commit series) has now closed the four big ones below;
+see `docs/rendering.md` for the full design:
+
+Second slice — damage tracking, clip stack, offscreen surfaces,
+full primitive set, and frame pacing (all tested headless + on both
+backends):
+- **Damage tracking**: every drawing helper records what it touched;
+  `present()` sends only the damaged region (X11: per-rect sub-image
+  `XPutImage`, with a >=75%-damaged whole-image fallback; Wayland:
+  per-rect `wl_surface.damage` hints) and is a TRUE no-op when
+  nothing changed — verified end-to-end on X11 by writing a raw
+  pixel WITHOUT invalidating and proving the server never receives
+  it (see test_x11_integration.c). Raw-pointer writers declare
+  damage with `fdk_surface_invalidate()`. Bounded bookkeeping: 64
+  rects, overflow degrades to full damage. `02_software_render`
+  phase 2 runs at 1-2% of window damage per frame.
+- **Wayland buffer recycling + prefetch**: released wl_shm buffers
+  stay alive in their slots and are reused; every acquired buffer is
+  pre-filled with a copy of the visible frame, which is what makes
+  partial damage CORRECT (not just fast) — compositors may ignore
+  damage hints and scan out the whole buffer, and every pixel
+  outside the damage region genuinely matches the screen. Verified:
+  3 shm pools created for 173 commits (was ~1 pool per frame).
+- **Frame pacing on Wayland**: every present requests a
+  4-wayland-callback; `fdk_surface_frame_ready()` gates the next
+  frame on the compositor's acknowledgment (arrives while pumping
+  events), with a 250 ms starvation guard because hidden surfaces
+  legitimately never receive frame callbacks. X11/offscreen: always
+  ready (no core-protocol feedback). Verified: 171 frame requests,
+  170 callbacks delivered, commits spaced at the compositor's clock.
+- **Clip stack**: `fdk_surface_push_clip`/`pop_clip`/`get_clip` —
+  intersecting, LIFO, depth-bounded (32), enforced by every
+  primitive and by blit; empty intersections make drawing a safe
+  no-op. This is the widget layer's parent-constraint primitive.
+- **Offscreen surfaces**: `fdk_surface_create`/`destroy` —
+  windowless application-owned drawing targets with deliberately
+  padded stride (16-px multiples) so stride-aware paths are always
+  exercised; they are also what makes the whole renderer testable
+  with no display (tests/test_render.c, 13 cases in `make test`).
+- **Primitive set completed (for now)**: `draw_line` (Bresenham),
+  `draw_circle`/`fill_circle` (midpoint/scanline),
+  `fill_rounded_rect`/`draw_rounded_rect` (radius-clamped, arcs
+  plotted once — no double-blended pixels), `blit`
+  (surface-to-surface opaque copy, clipped both sides, damages the
+  destination). `draw_rect` corners now blend exactly once (was a
+  subtle double-blend with translucent colors).
+
+Still NOT done (next structural gaps, in rough order):
 - **No MIT-SHM fast path on X11** — XPutImage over a local socket is
-  a memcpy per frame; the shared-memory path slots invisibly inside
-  `x11_surface.c` when needed (and is required anyway for remote X)
-- **No double buffering / frame-callback pacing on Wayland** — one
-  buffer per present is allocation-heavy (~1 pool + buffer + fd per
-  frame); correctness over speed first, pacing next
-- **Primitive set is minimal** — no lines, rounded rects, clipping
-  stacks, transforms, images, or alpha-blitted blits yet; the
-  existing four fills are the building blocks, not the finish line
+  a memcpy per frame (now per-damage-rect); the shared-memory path
+  slots invisibly inside `x11_surface.c` when needed (and is
+  required anyway for remote X)
+- **No double-buffer presentation on X11** — the single XImage is
+  both draw target and blit source; correct (XPutImage copies into
+  the request stream) but a resize-acquire can race an in-flight
+  blit on a real desktop. Frame-callback PACING is now implemented
+  on Wayland (see above); X11 has no core-protocol equivalent
+- **Primitive set remains 2D-raster basics** — no transforms, image
+  decode (PNG etc.), alpha-masked blits, or antialiased
+  primitives yet; lines/circles/rounded rects are crisp 1px
+  geometry, and the demo ball's antialiasing is application code
+  (deliberately — it demonstrates the raw-pixel level)
 - **Text integration** (`src/text/`) not started — the demo draws
   block letters as rects precisely because there is no font path yet
 - **Single window scale handling** — buffer scale / fractional-scale

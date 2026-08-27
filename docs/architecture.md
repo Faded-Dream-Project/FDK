@@ -71,20 +71,25 @@ primitive rendered apps are built on) plus `src/platform/x11/`,
 `src/platform/wayland/` (optional — see `docs/build.md`'s "Optional
 Wayland build"), `src/platform/wayland_disabled.c` (the build-time
 stub used when Wayland dev headers aren't available), `src/window/`
-(Phase 2), and `src/render/` (first Phase 3 slice: the `fdk_surface`
-software framebuffer API — pixel access, present, and blending fill
-primitives — implemented on both backends via two new optional
-`fdk_platform_ops` entries, `window_get_framebuffer` and
-`window_present`). `fdk_init()` performs a real platform connection
+(Phase 2), and `src/render/` (Phase 3: the `fdk_surface` software
+renderer — pixel access, damage-tracked presentation, a clip stack,
+offscreen surfaces, and the blending primitive set — implemented on
+both backends via optional `fdk_platform_ops` entries
+(`window_get_framebuffer`, damage-taking `window_present`, and the
+`window_frame_ready` pacing query); see `docs/rendering.md` for the
+full design). `fdk_init()` performs a real platform connection
 with backend auto-detection; `fdk_run()` is a real `poll()`-based
 event loop that exits on `fdk_quit()` or when the last top-level
 window closes; windows can be created, shown, resized, and receive
 real translated input/configure/close events on both backends; and
 applications can now draw real pixels into a window's surface and
-present them on either backend (see `examples/02_software_render.c`).
+present them — sending only what changed — on either backend (see
+`examples/02_software_render.c`).
 See `docs/roadmap.md`'s Phase 3 entry for the precise, honest list of
-what is and isn't covered — in particular, this is deliberately a
-FIRST SLICE (no lines/transforms/text yet, no double buffering or
-frame pacing on Wayland, no MIT-SHM fast path on X11), and Wayland
-has no automated integration test yet, though the backend is verified
-end-to-end against a real headless Weston (see `docs/testing.md`).
+what is and isn't covered — in particular, transforms, image
+decoding, text, and the MIT-SHM fast path are still future work,
+while damage tracking, the clip stack, offscreen surfaces, the full
+crisp-primitive set, and Wayland frame-callback pacing are in and
+tested; Wayland still has no automated integration test, though the
+backend is verified end-to-end against a real headless Weston (see
+`docs/testing.md`).

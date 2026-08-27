@@ -4,10 +4,22 @@
 
 **`make test`** — platform-independent. Never requires a display of
 any kind (X11 or Wayland). Safe to run in any CI container with zero
-setup. Covers: allocation, version/error-string correctness, and
+setup. Covers: allocation, version/error-string correctness,
 `fdk_init()`'s behavior when no display is reachable at all (including
 with a display explicitly requested — `FDK_PLATFORM_X11` /
-`FDK_PLATFORM_WAYLAND` — to confirm there's no silent fallback).
+`FDK_PLATFORM_WAYLAND` — to confirm there's no silent fallback), and —
+since the Phase 3 second slice — the entire software renderer via
+OFFSCREEN surfaces (`tests/test_render.c`): primitive geometry
+(fills, gradient interpolation, Bresenham lines, circle chords,
+rounded-rect corner cutouts and radius clamping), single-blend
+border/arc invariants, the clip stack (nesting, empty intersections,
+LIFO unwind, depth bound), damage bookkeeping (bounds, union,
+clamping, overflow-to-full, the raw-write declaration contract),
+blit semantics (full/partial/clipped/clip-stack/argument checks),
+and offscreen lifecycle. Offscreen surfaces are display-independent
+by design, which is exactly what makes this coverage headless —
+their stride is deliberately padded so the stride-aware paths real
+backends hit are always exercised.
 
 **`make test-x11`** — X11 platform integration. Requires a reachable
 X11 display. If `$DISPLAY` is already set when you run it, it tests
@@ -60,6 +72,22 @@ Real, observable behavior against a live X server (see
   application loop shape), re-acquire the framebuffer — which must
   now be the new geometry — render, and verify a pixel that only
   exists in the NEW geometry reads back as the freshly drawn color.
+- **Damage-tracked partial present** (second slice): present frame
+  1, then damage only a small rect — the server must show the new
+  rect AND keep frame 1's pixels everywhere else (proving the
+  client-side content outside the damage survives); then write a
+  pixel RAW without `fdk_surface_invalidate()` and prove the server
+  never receives it (present is a true no-op on empty damage); then
+  declare the damage and watch exactly that pixel arrive. The no-op
+  skip is OBSERVABLE here, not just asserted.
+- **New primitives readback**: line, filled circle, circle outline,
+  and rounded rect (middle filled, corners cut, radius clamped)
+  verified server-side at exact pixel values; `frame_ready()` is
+  asserted always-true on X11.
+- **Offscreen blit to window**: a sprite composed on an offscreen
+  surface, blitted (full and partial source rects) onto a window
+  surface, presented, and verified server-side — the cache/sprite
+  pattern end to end.
 
 **Known, honest gap:** `WM_DELETE_WINDOW` (the close-request path,
 `FDK_EVENT_WINDOW_CLOSE_REQUEST`) is not exercised by `make test-x11`.
