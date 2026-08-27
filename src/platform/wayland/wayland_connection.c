@@ -2,6 +2,9 @@
 
 #include "platform/wayland/wayland_platform.h"
 
+#include "generated/viewporter-client-protocol.h"
+#include "generated/fractional-scale-v1-client-protocol.h"
+
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
 
@@ -28,9 +31,32 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->decoration_manager =
             wl_registry_bind(registry, name,
                              &zxdg_decoration_manager_v1_interface, 1);
+    } else if (strcmp(interface, wl_output_interface.name) == 0) {
+        /* HiDPI (Phase 3 completion): bind every output at the
+         * highest version both sides support, capped at 3 — v2 adds
+         * the scale + done events (the minimum FDK needs), v3 only
+         * adds name/description strings FDK has no use for. */
+        uint32_t v = version < 2 ? version : (version > 3 ? 3 : version);
+        struct wl_output *output =
+            wl_registry_bind(registry, name, &wl_output_interface, v);
+        if (output != NULL) {
+            fdk_wayland_track_output(conn, output);
+        }
+    } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
+        /* OPTIONAL (HiDPI): the source-rectangle mechanism fractional
+         * scaling rides on. Absent -> integer buffer scale only. */
+        conn->viewporter =
+            wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
+    } else if (strcmp(interface,
+                      wp_fractional_scale_manager_v1_interface.name) == 0) {
+        /* OPTIONAL (HiDPI): per-window preferred scale in 120ths.
+         * Absent -> integer buffer scale only. */
+        conn->fractional_manager =
+            wl_registry_bind(registry, name,
+                             &wp_fractional_scale_manager_v1_interface, 1);
     }
-    /* Other globals (wl_output, wl_data_device_manager, etc.) are
-     * intentionally not bound — out of Phase 2 scope, see
+    /* Other globals (wl_data_device_manager, etc.) are
+     * intentionally not bound — out of current scope, see
      * docs/roadmap.md. Ignoring an unrecognized global is the correct
      * behavior per the registry protocol, not a gap. */
 }
@@ -176,6 +202,13 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     if (conn->decoration_manager) {
         zxdg_decoration_manager_v1_destroy(conn->decoration_manager);
     }
+    if (conn->fractional_manager) {
+        wp_fractional_scale_manager_v1_destroy(conn->fractional_manager);
+    }
+    if (conn->viewporter) {
+        wp_viewporter_destroy(conn->viewporter);
+    }
+    fdk_wayland_destroy_outputs(conn);
     if (conn->wm_base) xdg_wm_base_destroy(conn->wm_base);
     if (conn->shm) wl_shm_destroy(conn->shm);
     if (conn->compositor) wl_compositor_destroy(conn->compositor);

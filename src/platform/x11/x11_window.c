@@ -85,7 +85,15 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->saved_y = 0;
     pwindow->saved_w = 0;
     pwindow->saved_h = 0;
-    pwindow->render_image = NULL;
+    pwindow->render_slots[0].image = NULL;
+    pwindow->render_slots[1].image = NULL;
+    pwindow->render_slots[0].malloc_data = NULL;
+    pwindow->render_slots[1].malloc_data = NULL;
+    pwindow->render_slots[0].shm_attached = 0;
+    pwindow->render_slots[1].shm_attached = 0;
+    pwindow->render_slots[0].in_flight = 0;
+    pwindow->render_slots[1].in_flight = 0;
+    pwindow->render_back = 0;
     pwindow->render_gc = NULL;
     pwindow->render_size.width = 0;
     pwindow->render_size.height = 0;

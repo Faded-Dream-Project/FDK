@@ -13,6 +13,9 @@
 #include "platform/platform_internal.h"
 
 #include <X11/Xlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <X11/extensions/XShm.h>
 #include <stddef.h>
 
 struct fdk_platform_connection {
@@ -41,6 +44,17 @@ struct fdk_platform_connection {
     Atom wm_change_state;  /* ICCCM iconify request message type      */
     int ewmh_wm;           /* nonzero: an EWMH WM is running          */
     int ewmh_state_ok;     /* nonzero: it advertises _NET_WM_STATE    */
+
+    /* --- MIT-SHM (Phase 3 completion) ---
+     *
+     * Probed once at connect. shm_ok: the server supports the shared
+     * memory extension AND runtime policy allows using it (see
+     * x11_connection.c for the env-var opt-out). shm_event_base: the
+     * extension's first event code, needed to recognize
+     * ShmCompletion events in the dispatch loop (they arrive like any
+     * other X event; their drawable is the window we put to). */
+    int shm_ok;
+    int shm_event_base;
 
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
@@ -78,12 +92,25 @@ struct fdk_platform_window {
     int has_saved;
     fdk_i32 saved_x, saved_y, saved_w, saved_h;
 
-    /* Software-rendering state, owned by x11_surface.c: an XImage
-     * holding the application's pixels plus the GC used to blit it.
-     * NULL until the first fdk_surface acquisition. */
-    XImage *render_image;
+    /* Software-rendering state, owned by x11_surface.c: a
+     * DOUBLE-BUFFERED pair of pixel buffers plus the GC used to blit
+     * them. Slots are created lazily on first acquisition and
+     * recreated on resize. `back` indexes the slot the application is
+     * currently drawing into; a present swaps the indices, so a
+     * blit already handed to the server (which for MIT-SHM reads the
+     * segment asynchronously) never aliases the buffer being drawn —
+     * the Phase 3 completion fix for the documented resize/blit
+     * race. NULL images until the first fdk_surface acquisition. */
+    struct {
+        XImage *image;      /* NULL = slot not created               */
+        char *malloc_data;  /* non-SHM path: Xlib-freed pixel buffer */
+        int shm_attached;   /* SHM path active for this slot          */
+        XShmSegmentInfo shm;
+        int in_flight;      /* SHM put awaiting ShmCompletion        */
+    } render_slots[2];
+    int render_back;        /* slot index the app draws into          */
     GC render_gc;
-    fdk_size render_size; /* dimensions render_image was created at */
+    fdk_size render_size;   /* dimensions both slots were created at  */
 };
 
 /* Implemented in x11_events.c, used by x11_dispatch.c. Not part of
@@ -163,5 +190,11 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
 fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                   const fdk_platform_damage *damage);
 void fdk_x11_surface_cleanup(fdk_platform_window *pwindow);
+
+/* Clears the in-flight flag of the slot owning `shmseg` on this
+ * window (ShmCompletion routing; see x11_surface.c). Called from
+ * x11_dispatch.c and from the acquire-side sync wait. */
+void fdk_x11_surface_shm_completion(fdk_platform_window *pwindow,
+                                    unsigned long shmseg);
 
 #endif /* FDK_X11_PLATFORM_H */

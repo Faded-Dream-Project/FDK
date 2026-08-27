@@ -4,6 +4,9 @@
 
 #include "platform/wayland/wayland_platform.h"
 
+#include "generated/viewporter-client-protocol.h"
+#include "generated/fractional-scale-v1-client-protocol.h"
+
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
 
@@ -29,6 +32,12 @@
 
 /* Defined below — needed by xdg_surface_configure() above it. */
 static fdk_result attach_background_buffer(fdk_platform_window *pwindow, fdk_size size);
+
+/* HiDPI helpers defined below (the scale machinery block). */
+static fdk_i32 physical_dim(fdk_i32 logical, int scale_x120);
+fdk_result fdk_wayland_window_recompute_scale(fdk_platform_window *pwindow,
+                                              struct wl_output *output,
+                                              int entered);
 
 /* Creates a WL_SHM_FORMAT_XRGB8888 wl_buffer of `size` backed by a
  * fresh memfd. Shared by the solid-background path and the software
@@ -132,7 +141,19 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
          pwindow->buffer_size.width != pwindow->last_size.width ||
          pwindow->buffer_size.height != pwindow->last_size.height) &&
         !pwindow->rendered_ever && pwindow->render_pending == NULL) {
-        attach_background_buffer(pwindow, pwindow->last_size);
+        attach_background_buffer(
+            pwindow, (fdk_size){
+                         .width = physical_dim(
+                             pwindow->last_size.width < 1
+                                 ? 1
+                                 : pwindow->last_size.width,
+                             pwindow->scale_x120),
+                         .height = physical_dim(
+                             pwindow->last_size.height < 1
+                                 ? 1
+                                 : pwindow->last_size.height,
+                             pwindow->scale_x120),
+                     });
     }
 
     /* The very first configure is required before the first
@@ -198,6 +219,57 @@ static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
 static const struct xdg_toplevel_listener g_xdg_toplevel_listener = {
     .configure = xdg_toplevel_configure,
     .close = xdg_toplevel_close,
+};
+
+/* wl_surface enter/leave (core protocol, HiDPI — Phase 3
+ * completion): the surface is being shown on (or removed from) this
+ * output. The window's output-derived preferred scale is the MAXIMUM
+ * scale of the outputs it currently occupies — Wayland's rule for
+ * never rendering a window at less detail than the sharpest screen
+ * it is visible on. (These are wl_surface events in the CORE
+ * protocol, not xdg_toplevel ones — the classic confusion.) */
+static void wl_surface_enter_output(void *data, struct wl_surface *surface,
+                                    struct wl_output *output) {
+    (void)surface;
+    fdk_platform_window *pwindow = data;
+    (void)fdk_wayland_window_recompute_scale(pwindow, output, 1);
+}
+
+static void wl_surface_leave_output(void *data, struct wl_surface *surface,
+                                    struct wl_output *output) {
+    (void)surface;
+    fdk_platform_window *pwindow = data;
+    (void)fdk_wayland_window_recompute_scale(pwindow, output, 0);
+}
+
+static const struct wl_surface_listener g_wl_surface_listener = {
+    .enter = wl_surface_enter_output,
+    .leave = wl_surface_leave_output,
+};
+
+/* wp_fractional_scale_v1::preferred_scale (HiDPI): the compositor's
+ * authoritative per-window preference, in 120ths of a unit — this
+ * OVERRIDES the output-derived integer maximum (it arrives from the
+ * compositor that also owns enter/leave, with fresher knowledge of
+ * e.g. a 150% desktop setting). */
+static void fractional_preferred_scale(void *data,
+                                       struct wp_fractional_scale_v1 *frac,
+                                       uint32_t scale) {
+    (void)frac;
+    fdk_platform_window *pwindow = data;
+    if (scale < 120) {
+        scale = 120; /* protocol floor: 1x */
+    }
+    if ((int)scale != pwindow->scale_x120) {
+        pwindow->scale_x120 = (int)scale;
+        pwindow->scale_applied = 0; /* re-apply before the next commit */
+        FDK_DEBUG("fractional preferred scale: %d/120", scale);
+    }
+}
+
+static const struct wp_fractional_scale_v1_listener
+    g_fractional_scale_listener = {
+    .preferred_scale = fractional_preferred_scale,
 };
 
 /* Compositor is done reading a background buffer — the only safe
@@ -385,15 +457,172 @@ static void prefetch_visible_frame(fdk_platform_window *pwindow,
      * frame at a given size is expected to cover everything. */
 }
 
+/* ---- HiDPI scale machinery (Phase 3 completion) ------------------------ */
+
+/* Physical (buffer) dimension for a logical one at the window's
+ * current scale: ceil(logical * scale_x120 / 120). Exact for integer
+ * factors; rounds UP fractionally so the viewport's source rectangle
+ * (which may be fractional) is always fully backed by buffer pixels. */
+static fdk_i32 physical_dim(fdk_i32 logical, int scale_x120) {
+    long long v = (long long)logical * (long long)scale_x120;
+    fdk_i32 p = (fdk_i32)((v + 119) / 120);
+    return p < 1 ? 1 : p;
+}
+
+/* Updates the entered-outputs set and re-derives the preferred scale
+ * from it — used when the fractional-scale protocol is unavailable
+ * (with it, the compositor's preferred_scale event is authoritative
+ * and arrives by itself; this path would only fight it). */
+fdk_result fdk_wayland_window_recompute_scale(fdk_platform_window *pwindow,
+                                              struct wl_output *output,
+                                              int entered) {
+    if (pwindow == NULL || output == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+
+    if (entered) {
+        int known = 0;
+        for (size_t i = 0; i < pwindow->entered_count; i++) {
+            if (pwindow->entered_outputs[i] == output) {
+                known = 1;
+                break;
+            }
+        }
+        if (!known) {
+            if (pwindow->entered_count == pwindow->entered_capacity) {
+                size_t cap =
+                    pwindow->entered_capacity == 0 ? 4
+                                                   : pwindow->entered_capacity * 2;
+                if (cap > SIZE_MAX / sizeof(struct wl_output *)) {
+                    return FDK_ERR_OUT_OF_MEMORY;
+                }
+                struct wl_output **grown =
+                    fdk_realloc(pwindow->entered_outputs,
+                                cap * sizeof(struct wl_output *));
+                if (grown == NULL) {
+                    return FDK_ERR_OUT_OF_MEMORY;
+                }
+                pwindow->entered_outputs = grown;
+                pwindow->entered_capacity = cap;
+            }
+            pwindow->entered_outputs[pwindow->entered_count++] = output;
+        }
+    } else {
+        for (size_t i = 0; i < pwindow->entered_count; i++) {
+            if (pwindow->entered_outputs[i] == output) {
+                pwindow->entered_outputs[i] =
+                    pwindow->entered_outputs[pwindow->entered_count - 1];
+                pwindow->entered_count--;
+                break;
+            }
+        }
+    }
+
+    if (pwindow->fractional != NULL) {
+        return FDK_OK; /* preferred_scale events own the value */
+    }
+
+    /* Max scale of the outputs we occupy (scale 0 = output gone:
+     * skipped), floor 1 — the Wayland "never under-detail" rule. */
+    int best = 1;
+    fdk_platform_connection *conn = pwindow->conn;
+    for (size_t i = 0; i < pwindow->entered_count; i++) {
+        for (size_t j = 0; j < conn->output_count; j++) {
+            if (conn->outputs[j].output == pwindow->entered_outputs[i] &&
+                conn->outputs[j].scale > best) {
+                best = conn->outputs[j].scale;
+            }
+        }
+    }
+    int want = best * 120;
+    if (want != pwindow->scale_x120) {
+        pwindow->scale_x120 = want;
+        pwindow->scale_applied = 0; /* re-apply before the next commit */
+        FDK_DEBUG("output-derived scale -> %d/120 (%d output(s))", want,
+                  (int)pwindow->entered_count);
+    }
+    return FDK_OK;
+}
+
+/* Pushes the current scale to the protocol, before a commit. Integer
+ * factors: wl_surface.set_buffer_scale(k) (and a stale viewport is
+ * removed — viewport state supersedes buffer scale, so leaving one
+ * behind would silently override k). Fractional factors (needs the
+ * viewporter): buffer scale stays 1 and the viewport maps the exact
+ * fractional source rectangle onto the logical surface size. */
+static void apply_window_scale(fdk_platform_window *pwindow) {
+    if (pwindow->scale_applied || pwindow->surface == NULL) {
+        return;
+    }
+
+    int integer = (pwindow->scale_x120 % 120) == 0;
+    if (integer || pwindow->viewport == NULL) {
+        int k = pwindow->scale_x120 / 120;
+        if (k < 1) {
+            k = 1;
+        }
+        if (pwindow->viewport != NULL) {
+            wp_viewport_destroy(pwindow->viewport);
+            pwindow->viewport = NULL;
+            /* The fractional object wraps the viewport mechanism;
+             * without one the compositor stops sending preferred_scale
+             * for this window, so the output-derived path resumes. */
+            if (pwindow->fractional != NULL) {
+                wp_fractional_scale_v1_destroy(pwindow->fractional);
+                pwindow->fractional = NULL;
+            }
+        }
+        wl_surface_set_buffer_scale(pwindow->surface, k);
+        pwindow->buffer_scale = k;
+    } else {
+        wl_surface_set_buffer_scale(pwindow->surface, 1);
+        pwindow->buffer_scale = 1;
+        fdk_i32 lw = pwindow->last_size.width;
+        fdk_i32 lh = pwindow->last_size.height;
+        if (lw <= 0) lw = 1;
+        if (lh <= 0) lh = 1;
+        /* Source rectangle: logical size scaled by exactly
+         * scale_x120/120 (wl_fixed precision is 1/256 — far finer
+         * than the 1/120 quantum, so this is lossless). */
+        wl_fixed_t sw = wl_fixed_from_double(
+            (double)lw * (double)pwindow->scale_x120 / 120.0);
+        wl_fixed_t sh = wl_fixed_from_double(
+            (double)lh * (double)pwindow->scale_x120 / 120.0);
+        wp_viewport_set_source(pwindow->viewport, wl_fixed_from_int(0),
+                               wl_fixed_from_int(0), sw, sh);
+        wp_viewport_set_destination(pwindow->viewport, lw, lh);
+    }
+    pwindow->scale_applied = 1;
+}
+
+fdk_result fdk_wayland_window_get_scale(fdk_platform_window *pwindow,
+                                        fdk_f32 *out_scale) {
+    if (pwindow == NULL || out_scale == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    *out_scale = (fdk_f32)pwindow->scale_x120 / 120.0f;
+    return FDK_OK;
+}
+
 fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                                                fdk_platform_framebuffer *out_fb) {
     if (pwindow == NULL || out_fb == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
 
-    fdk_size size = pwindow->last_size;
-    if (size.width <= 0) size.width = 1;
-    if (size.height <= 0) size.height = 1;
+    /* PHYSICAL buffer size: the window's logical size at the current
+     * scale (ceil for fractional factors). A scale change therefore
+     * changes the fb size, which the surface layer treats exactly
+     * like a resize — damage resets to full and the app redraws. */
+    fdk_size size;
+    size.width = physical_dim(pwindow->last_size.width < 1
+                                  ? 1
+                                  : pwindow->last_size.width,
+                              pwindow->scale_x120);
+    size.height = physical_dim(pwindow->last_size.height < 1
+                                   ? 1
+                                   : pwindow->last_size.height,
+                               pwindow->scale_x120);
 
     /* Reuse the pending buffer when the size still matches — apps
      * that draw in several passes (or call get_info more than once
@@ -550,6 +779,12 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
         }
     }
 
+    /* HiDPI: push the current scale to the protocol before this
+     * commit (set_buffer_scale / viewport — see apply_window_scale),
+     * so the freshly attached physical buffer is interpreted at the
+     * right factor. */
+    apply_window_scale(pwindow);
+
     wl_surface_attach(pwindow->surface, pwindow->render_pending, 0, 0);
 
     /* Damage hints. full == 1 (or the defensive count == 0 with
@@ -558,7 +793,13 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
      * compositor can then limit its own repaint to what actually
      * changed. Compositors are allowed to ignore hints entirely,
      * which is why get_framebuffer pre-fills buffers with the
-     * visible frame (see prefetch_visible_frame). */
+     * visible frame (see prefetch_visible_frame).
+     *
+     * Damage rects arrive in PHYSICAL buffer pixels; wl_surface_damage
+     * takes SURFACE-LOCAL LOGICAL coordinates, so each edge converts
+     * by 120/scale_x120, rounding OUTWARD (the hinted region must
+     * cover every damaged physical pixel — over-hinting is always
+     * safe, under-hinting is not). */
     if (damage->full || damage->count == 0) {
         wl_surface_damage(pwindow->surface, 0, 0, INT32_MAX, INT32_MAX);
     } else {
@@ -572,9 +813,17 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
             if (x1 > size.width) x1 = size.width;
             if (y1 > size.height) y1 = size.height;
             if (x1 > x0 && y1 > y0) {
-                wl_surface_damage(pwindow->surface, (int32_t)x0,
-                                  (int32_t)y0, (int32_t)(x1 - x0),
-                                  (int32_t)(y1 - y0));
+                long long lx0 = x0 * 120 / pwindow->scale_x120;
+                long long ly0 = y0 * 120 / pwindow->scale_x120;
+                long long lx1 =
+                    (x1 * 120 + pwindow->scale_x120 - 1) /
+                    pwindow->scale_x120;
+                long long ly1 =
+                    (y1 * 120 + pwindow->scale_x120 - 1) /
+                    pwindow->scale_x120;
+                wl_surface_damage(pwindow->surface, (int32_t)lx0,
+                                  (int32_t)ly0, (int32_t)(lx1 - lx0),
+                                  (int32_t)(ly1 - ly0));
             }
         }
     }
@@ -588,6 +837,14 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
      * fires. */
     struct wl_callback *cb = wl_surface_frame(pwindow->surface);
     if (cb != NULL) {
+        /* A previous callback that never fired (hidden/minimized
+         * surface, or a compositor that simply hasn't presented yet)
+         * must be destroyed BEFORE the pointer is replaced — the
+         * leaked wl_callback proxy found by the HiDPI test's second
+         * paint. Its frame_ack stays 0; the pacing guard covers it. */
+        if (pwindow->frame_cb != NULL) {
+            wl_callback_destroy(pwindow->frame_cb);
+        }
         wl_callback_add_listener(cb, &g_frame_callback_listener, pwindow);
         pwindow->frame_cb = cb;
     }
@@ -658,6 +915,14 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->buffer_attached = 0;
     pwindow->render_pending = NULL;
     pwindow->rendered_ever = 0;
+    pwindow->scale_x120 = 120;    /* 1x until an output says otherwise */
+    pwindow->buffer_scale = 1;
+    pwindow->scale_applied = 0;   /* applied on the first commit      */
+    pwindow->viewport = NULL;
+    pwindow->fractional = NULL;
+    pwindow->entered_outputs = NULL;
+    pwindow->entered_count = 0;
+    pwindow->entered_capacity = 0;
     pwindow->frame_ack = 1;       /* nothing presented yet = ready */
     pwindow->frame_commit_ms = 0;
     pwindow->frame_cb = NULL;
@@ -677,6 +942,8 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
         return FDK_ERR_WINDOW_CREATE;
     }
 
+    wl_surface_add_listener(pwindow->surface, &g_wl_surface_listener,
+                             pwindow);
     pwindow->xdg_surface = xdg_wm_base_get_xdg_surface(conn->wm_base, pwindow->surface);
     if (pwindow->xdg_surface == NULL) {
         FDK_ERROR("xdg_wm_base_get_xdg_surface failed");
@@ -720,8 +987,43 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
         }
     }
 
+    /* HiDPI (Phase 3 completion): the fractional-scale objects are
+     * created at WINDOW-CREATE time, like the decoration object —
+     * surface state objects with no buffer-ordering constraint, but
+     * binding them here means the compositor's preferred_scale event
+     * (which arrives around the first configure) is never missed.
+     * Viewporter without the fractional manager is still bound per
+     * window: the viewport is the mechanism that carries a fractional
+     * source rectangle. Both are NULL-safe absent globals: integer
+     * buffer scale alone then, honestly. */
+    if (conn->viewporter != NULL) {
+        pwindow->viewport = wp_viewporter_get_viewport(conn->viewporter,
+                                                       pwindow->surface);
+        if (pwindow->viewport == NULL) {
+            FDK_WARN("wp_viewporter_get_viewport failed; integer scale "
+                     "only for this window");
+        }
+    }
+    if (conn->fractional_manager != NULL && pwindow->viewport != NULL) {
+        pwindow->fractional = wp_fractional_scale_manager_v1_get_fractional_scale(
+            conn->fractional_manager, pwindow->surface);
+        if (pwindow->fractional == NULL) {
+            FDK_WARN("get_fractional_scale failed; output scale only "
+                     "for this window");
+        } else {
+            wp_fractional_scale_v1_add_listener(
+                pwindow->fractional, &g_fractional_scale_listener, pwindow);
+        }
+    }
+
     fdk_result r = fdk_wayland_register_window(conn, pwindow);
     if (!fdk_ok(r)) {
+        if (pwindow->fractional != NULL) {
+            wp_fractional_scale_v1_destroy(pwindow->fractional);
+        }
+        if (pwindow->viewport != NULL) {
+            wp_viewport_destroy(pwindow->viewport);
+        }
         if (pwindow->toplevel_decoration != NULL) {
             zxdg_toplevel_decoration_v1_destroy(
                 pwindow->toplevel_decoration);
@@ -766,6 +1068,20 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         }
     }
     pwindow->render_pending = NULL;
+
+    /* HiDPI objects die with the window (both wrap this surface). */
+    if (pwindow->fractional != NULL) {
+        wp_fractional_scale_v1_destroy(pwindow->fractional);
+        pwindow->fractional = NULL;
+    }
+    if (pwindow->viewport != NULL) {
+        wp_viewport_destroy(pwindow->viewport);
+        pwindow->viewport = NULL;
+    }
+    fdk_free(pwindow->entered_outputs);
+    pwindow->entered_outputs = NULL;
+    pwindow->entered_count = 0;
+    pwindow->entered_capacity = 0;
 
     /* If a background buffer is still attached here (it usually was
      * already released and destroyed by its release listener), drop
@@ -861,11 +1177,18 @@ void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_
     if (pwindow->buffer_size.width == width && pwindow->buffer_size.height == height) {
         return; /* already at that size — avoid a pointless new buffer */
     }
-    fdk_size new_size = { .width = width, .height = height };
+    /* Background path resizes in PHYSICAL pixels too (the buffer
+     * must cover the scaled surface; a logical-sized solid buffer
+     * would display at 1/scale its size). */
+    fdk_size new_size = {
+        .width = physical_dim(width < 1 ? 1 : width, pwindow->scale_x120),
+        .height = physical_dim(height < 1 ? 1 : height, pwindow->scale_x120),
+    };
     if (!fdk_ok(attach_background_buffer(pwindow, new_size))) {
         return; /* attach_background_buffer already logged the reason */
     }
-    pwindow->last_size = new_size;
+    pwindow->last_size.width = width;
+    pwindow->last_size.height = height;
 }
 
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,

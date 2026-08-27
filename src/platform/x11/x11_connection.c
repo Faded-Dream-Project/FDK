@@ -7,6 +7,7 @@
 
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
@@ -32,6 +33,29 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->windows = NULL;
     conn->window_count = 0;
     conn->window_capacity = 0;
+
+    /* MIT-SHM probe (Phase 3 completion): use the shared-memory fast
+     * path for present() when the server supports the extension and
+     * the environment has not opted out (FDK_NO_MIT_SHM=1 — escape
+     * hatch for servers that implement it brokenly and for
+     * debugging/measuring the copy path). Probing once here keeps
+     * per-window acquisition cheap and makes the capability a
+     * property of the CONNECTION, which is what the protocol says it
+     * is. */
+    conn->shm_ok = 0;
+    conn->shm_event_base = 0;
+    if (getenv("FDK_NO_MIT_SHM") == NULL) {
+        int major = 0, minor = 0, pixmaps = 0;
+        if (XShmQueryVersion(display, &major, &minor,
+                             (Bool *)&pixmaps) == True) {
+            conn->shm_ok = 1;
+            conn->shm_event_base = XShmGetEventBase(display);
+            FDK_DEBUG("MIT-SHM available (v%d.%d) — presentation uses "
+                      "the shared-memory path", major, minor);
+        }
+    } else {
+        FDK_DEBUG("FDK_NO_MIT_SHM set — presentation uses the copy path");
+    }
 
     /* WM_DELETE_WINDOW: without registering for this via WM_PROTOCOLS,
      * the window manager would just kill our connection when the user

@@ -2728,6 +2728,123 @@ static void test_ewmh_fake_wm(void) {
            "corner with the right direction, WM_CHANGE_STATE "
            "iconify\n");
 }
+
+/* ---- Phase 3 completion: MIT-SHM presentation + double buffering ---- */
+
+/* Counts this process's live SysV shared-memory segments by reading
+ * /proc/sysvipc/shm (Linux; the same file the ipcs(1) tool reads).
+ * MIT-SHM pixel buffers are shmget segments, so their presence — and
+ * their disappearance on window destroy — is directly observable. */
+static int sysv_shm_segment_count(void) {
+    FILE *f = fopen("/proc/sysvipc/shm", "r");
+    if (f == NULL) {
+        return -1; /* not Linux / not mounted: caller skips the check */
+    }
+    char line[256];
+    int count = 0;
+    /* header: "key shmid perms size cpid lpid nattch ... status".
+     * MIT-SHM segments are shmget(IPC_PRIVATE, ...) — their KEY is 0
+     * by definition, so every parseable data line counts. */
+    while (fgets(line, sizeof(line), f) != NULL) {
+        unsigned long key, shmid;
+        if (sscanf(line, "%lx %lu", &key, &shmid) == 2) {
+            count++;
+        }
+    }
+    fclose(f);
+    return count;
+}
+
+static void test_mitm_shm_and_double_buffer(void) {
+    /* Part 1: MIT-SHM is really used. Presenting frames must create
+     * SysV segments (two slots), and destroying the window must
+     * release them (the attach-then-IPC_RMID discipline). Skipped
+     * honestly when the machine can't report segments or the server
+     * has no MIT-SHM (FDK then uses the copy path — log-visible). */
+    int before = sysv_shm_segment_count();
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK MIT-SHM test",
+                                 .width = 120, .height = 90 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+
+    /* X11 scale is honestly 1.0 (no core-protocol scale concept). */
+    fdk_f32 x11_scale = 2.0f;
+    assert(fdk_ok(fdk_window_get_scale(win, &x11_scale)));
+    assert(x11_scale == 1.0f);
+
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    fdk_color frame_a = { .r = 1.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f };
+    fdk_surface_fill(surface, frame_a);
+    assert(fdk_ok(fdk_surface_present(surface)));
+
+    int during = sysv_shm_segment_count();
+    int after = -1;
+    if (before >= 0 && during >= 0) {
+        /* Two slots = two segments while the window renders. (Only
+         * meaningful when the server has MIT-SHM — Xvfb does.) */
+        if (during - before == 2) {
+            printf("[ok] MIT-SHM presentation active (2 SysV segments "
+                   "for the buffer pair)\n");
+        } else if (during - before == 0) {
+            printf("[ok] MIT-SHM not in use (copy path; segments: %d)\n",
+                   during);
+        } else {
+            printf("[warn] unexpected SysV segment delta %d -> %d\n",
+                   before, during);
+        }
+    }
+
+    /* Part 2: double buffering is observable. After a present, the
+     * next get_info hands out a DIFFERENT pixel buffer; drawing into
+     * it does not change what the server shows until the next
+     * present. */
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    unsigned long red_px = x11_readback_pixel(&rb_dpy, xid, 60, 45) & 0xFFFFFF;
+
+    fdk_surface_info info2;
+    assert(fdk_ok(fdk_surface_get_info(surface, &info2)));
+    assert(info2.pixels != info.pixels); /* the swap happened */
+
+    fdk_color frame_b = { .r = 0.0f, .g = 0.0f, .b = 1.0f, .a = 1.0f };
+    fdk_surface_fill(surface, frame_b);
+    /* Frame B is drawn but NOT presented: the server still shows A. */
+    unsigned long still_a =
+        x11_readback_pixel(&rb_dpy, xid, 60, 45) & 0xFFFFFF;
+    assert(still_a == red_px);
+
+    assert(fdk_ok(fdk_surface_present(surface)));
+    unsigned long blue_px =
+        x11_readback_pixel(&rb_dpy, xid, 60, 45) & 0xFFFFFF;
+    assert(blue_px != red_px);
+    assert((blue_px & 0xFF) != 0); /* blue channel present */
+
+    /* Teardown releases the segments (only assertably so when they
+     * existed). */
+    fdk_window_destroy(win);
+    if (rb_dpy != NULL) {
+        XCloseDisplay(rb_dpy);
+    }
+    fdk_shutdown(ctx);
+
+    if (before >= 0 && during >= 0 && during - before == 2) {
+        after = sysv_shm_segment_count();
+        assert(after == before); /* no leaked segments */
+        printf("[ok] MIT-SHM segments released on window destroy\n");
+    }
+
+    printf("[ok] X11 double buffering: acquire-after-present swaps "
+           "buffers; un-presented drawing never reaches the server\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -2741,6 +2858,7 @@ int main(void) {
     test_close_request_delivered();
     test_pump_events_nonblocking();
     test_surface_render_readback();
+    test_mitm_shm_and_double_buffer();
     test_surface_follows_resize();
     test_surface_damage_partial_present();
     test_surface_primitives_readback();

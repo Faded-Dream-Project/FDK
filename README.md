@@ -322,6 +322,21 @@ its band, double-click to maximize, resize by its edges, manage by
 its buttons, and close by its button — with a runtime toggle between
 FDK-drawn and platform decorations.
 
+### Images, alpha compositing, transforms, antialiasing (Phase 3
+### completion)
+
+Run `examples/10_images.c`: four panels — a PNG decoded from disk and
+composited with per-pixel alpha (the file's 50%-transparent band
+actually blends over the panel background), the same image through
+the transform pipeline (exact 2x integer block scaling, a slowly
+rotating bilinear copy, an enlarged fractional scale), crisp vs
+antialiased primitives side by side, and a runtime-built transparent
+sprite blended twice so the alpha visibly ACCUMULATES where the two
+copies overlap. On X11 this all travels through the MIT-SHM shared
+memory path on a double buffer; on a scaled Wayland output the widget
+layer composites through the logical intermediate while raw pixels
+stay physical.
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The

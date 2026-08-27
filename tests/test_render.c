@@ -20,6 +20,7 @@
 #include "fdk/fdk_surface.h"
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -562,6 +563,471 @@ static void test_frame_ready_offscreen(void) {
     printf("[ok] frame_ready: offscreen surfaces are always ready\n");
 }
 
+
+/* ---- Phase 3 completion: ARGB surfaces, image decode, alpha blits,
+ * transforms, antialiased primitives ---- */
+
+static fdk_u32 px_at32(fdk_surface *s, int x, int y) {
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    return info.pixels[(size_t)y * (size_t)info.stride + (size_t)x];
+}
+
+static void test_argb_surface_and_blending(void) {
+    /* ARGB surfaces start fully transparent. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create_format(20, 20,
+                                            FDK_SURFACE_FORMAT_ARGB8888, &s)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    assert(info.format == FDK_SURFACE_FORMAT_ARGB8888);
+    assert(px_at32(s, 5, 5) == 0x00000000u);
+
+    /* Unknown format values are refused. */
+    fdk_surface *bad = NULL;
+    assert(fdk_surface_create_format(4, 4, (fdk_surface_format)99, &bad) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(bad == NULL);
+
+    /* Opaque fill sets alpha to 255. */
+    fdk_surface_fill_rect(s, (fdk_rect){ .x = 0, .y = 0, .width = 10,
+                                         .height = 10 }, rgb(255, 0, 0));
+    assert(px_at32(s, 5, 5) == 0xFFFF0000u);
+
+    /* Translucent blend over transparency: source-over with da=0 —
+     * out_a = sa, out_rgb = src_rgb (a 50% red over transparent is
+     * (255,0,0) at alpha 128, NOT a washed-out red). */
+    fdk_color half_red = { .r = 1.0f, .g = 0.0f, .b = 0.0f, .a = 0.5f };
+    fdk_surface_fill_rect(s, (fdk_rect){ .x = 10, .y = 0, .width = 10,
+                                         .height = 10 }, half_red);
+    fdk_u32 got = px_at32(s, 15, 5);
+    assert(((got >> 24) & 0xFFu) == 128);
+    assert(((got >> 16) & 0xFFu) == 255);
+    assert(((got >> 8) & 0xFFu) == 0);
+    assert((got & 0xFFu) == 0);
+
+    /* Stacking two 50% fills: out_a = .5 + .5*.5 = .75 -> 191. */
+    fdk_surface_fill_rect(s, (fdk_rect){ .x = 10, .y = 0, .width = 10,
+                                         .height = 10 }, half_red);
+    got = px_at32(s, 15, 5);
+    assert(((got >> 24) & 0xFFu) == 192);
+
+    /* XRGB source blitted opaquely onto ARGB forces alpha 255 (the
+     * "ignored" top byte must not fake transparency). */
+    fdk_surface *x = NULL;
+    assert(fdk_ok(fdk_surface_create(4, 4, &x)));
+    fdk_surface_fill(x, rgb(0, 255, 0));
+    assert(fdk_ok(fdk_surface_blit(s, 0, 16,
+                                   x, (fdk_rect){ .x = 0, .y = 0,
+                                                  .width = 4, .height = 4 })));
+    assert(px_at32(s, 1, 17) == 0xFF00FF00u);
+
+    fdk_surface_destroy(x);
+    fdk_surface_destroy(s);
+    printf("[ok] ARGB surfaces: format, transparency, alpha-accumulating "
+           "blends, opaque blit forcing\n");
+}
+
+static void test_blit_blend(void) {
+    /* Source sprite: left half opaque red, right half 50% blue. */
+    fdk_surface *src = NULL;
+    assert(fdk_ok(fdk_surface_create_format(
+        8, 8, FDK_SURFACE_FORMAT_ARGB8888, &src)));
+    fdk_color red = rgb(255, 0, 0);
+    fdk_color blue50 = { .r = 0.0f, .g = 0.0f, .b = 1.0f, .a = 0.5f };
+    fdk_surface_fill_rect(src, (fdk_rect){ .x = 0, .y = 0, .width = 4,
+                                           .height = 8 }, red);
+    fdk_surface_fill_rect(src, (fdk_rect){ .x = 4, .y = 0, .width = 4,
+                                           .height = 8 }, blue50);
+
+    /* XRGB sources are refused — that's fdk_surface_blit's job. */
+    fdk_surface *xsrc = NULL;
+    assert(fdk_ok(fdk_surface_create(2, 2, &xsrc)));
+    assert(fdk_surface_blit_blend(NULL, 0, 0, src,
+                                  (fdk_rect){ .x = 0, .y = 0, .width = 1,
+                                              .height = 1 }) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_surface_blit_blend(NULL, 0, 0, xsrc,
+                                  (fdk_rect){ .x = 0, .y = 0, .width = 1,
+                                              .height = 1 }) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* Onto an opaque white XRGB destination: red replaces, blue50
+     * blends to (127-ish, 127-ish, 255) — the classic half-blue tint
+     * over white is (128,128,255) by the rounding discipline. */
+    fdk_surface *dst = NULL;
+    assert(fdk_ok(fdk_surface_create(16, 16, &dst)));
+    fdk_surface_fill(dst, rgb(255, 255, 255));
+    assert(fdk_ok(fdk_surface_blit_blend(dst, 4, 4, src,
+                                         (fdk_rect){ .x = 0, .y = 0,
+                                                     .width = 8,
+                                                     .height = 8 })));
+    assert(is_color(dst, 5, 5, pack(255, 0, 0)));
+    fdk_u32 b = px_at(dst, 9, 5) & 0x00FFFFFFu;
+    int br = (int)((b >> 16) & 0xFFu);
+    int bg = (int)((b >> 8) & 0xFFu);
+    int bb = (int)(b & 0xFFu);
+    assert(br == 127 && bg == 127 && bb == 255);
+
+    /* The untouched margin is still pure white (transparent-source
+     * pixels skip; nothing else moved). */
+    assert(is_color(dst, 0, 0, pack(255, 255, 255)));
+    assert(is_color(dst, 15, 15, pack(255, 255, 255)));
+
+    /* Clip stack constrains the blended blit's destination: reset
+     * the background FIRST (unclipped), then blend under a 1px-wide
+     * clip — everything outside it must stay background. */
+    fdk_surface_fill(dst, rgb(255, 255, 255));
+    assert(fdk_ok(fdk_surface_push_clip(dst, (fdk_rect){ .x = 4, .y = 4,
+                                                          .width = 1,
+                                                          .height = 16 })));
+    assert(fdk_ok(fdk_surface_blit_blend(dst, 4, 4, src,
+                                         (fdk_rect){ .x = 0, .y = 0,
+                                                     .width = 8,
+                                                     .height = 8 })));
+    fdk_surface_pop_clip(dst);
+    assert(is_color(dst, 4, 5, pack(255, 0, 0)));      /* inside clip */
+    assert(is_color(dst, 9, 5, pack(255, 255, 255)));  /* outside clip */
+
+    fdk_surface_destroy(dst);
+    fdk_surface_destroy(xsrc);
+    fdk_surface_destroy(src);
+    printf("[ok] blit_blend: per-pixel source-over, XRGB refusal, clip "
+           "conformance\n");
+}
+
+/* The embedded PNG (tests/test_png_bytes.h, generated once): 8x8 RGBA —
+ * left half opaque red, right half 50% blue, green pixel at (4,4),
+ * transparent pixel at (5,5). Written to a temp file at runtime so the
+ * decoder exercises the real file path. */
+#include "test_png_bytes.h"
+
+static void test_image_decode(void) {
+    /* Failure paths first. */
+    fdk_surface *s = NULL;
+    assert(fdk_surface_create_from_image(NULL, &s) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_surface_create_from_image("build/no_such_image.png", &s) ==
+           FDK_ERR_NOT_FOUND);
+    assert(fdk_surface_create_from_image(".", &s) == FDK_ERR_NOT_A_FILE);
+    assert(fdk_surface_create_from_image("Makefile", &s) ==
+           FDK_ERR_UNSUPPORTED); /* real file, not an image */
+
+    /* Write the embedded PNG bytes to a temp file. */
+    FILE *f = fopen("build/test_image_decode.png", "wb");
+    assert(f != NULL);
+    assert(fwrite(test_png_bytes, 1, TEST_PNG_LEN, f) == TEST_PNG_LEN);
+    fclose(f);
+
+    assert(fdk_ok(fdk_surface_create_from_image(
+        "build/test_image_decode.png", &s)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    assert(info.width == 8 && info.height == 8);
+    assert(info.format == FDK_SURFACE_FORMAT_ARGB8888);
+
+    /* Known pixels: red, blue50, green, transparent. */
+    assert(px_at32(s, 0, 0) == 0xFFFF0000u);
+    assert(px_at32(s, 7, 7) == 0x800000FFu);
+    assert(px_at32(s, 4, 4) == 0xFF00FF00u);
+    assert(px_at32(s, 5, 5) == 0x00000000u);
+
+    /* The decoded surface composites: blend onto white. */
+    fdk_surface *dst = NULL;
+    assert(fdk_ok(fdk_surface_create(16, 16, &dst)));
+    fdk_surface_fill(dst, rgb(255, 255, 255));
+    assert(fdk_ok(fdk_surface_blit_blend(dst, 4, 4, s,
+                                         (fdk_rect){ .x = 0, .y = 0,
+                                                     .width = 8,
+                                                     .height = 8 })));
+    assert(is_color(dst, 4, 4, pack(255, 0, 0)));
+    assert(is_color(dst, 11, 11, pack(127, 127, 255)));
+    assert(is_color(dst, 8, 8, pack(0, 255, 0)));      /* green over white */
+    assert(is_color(dst, 9, 9, pack(255, 255, 255)));  /* transparent */
+
+    fdk_surface_destroy(dst);
+    fdk_surface_destroy(s);
+    remove("build/test_image_decode.png");
+    printf("[ok] image decode: PNG -> ARGB surface, known pixels, "
+           "failure codes, compositing\n");
+}
+
+static void test_matrix_algebra(void) {
+    /* identity / mul / invert round trips on non-trivial transforms */
+    fdk_matrix t = fdk_matrix_translate(13.0f, -7.0f);
+    fdk_matrix sc = fdk_matrix_scale_xy(2.0f, 3.0f);
+    fdk_matrix rot = fdk_matrix_rotate(0.7f);
+
+    fdk_matrix m = fdk_matrix_mul(t, fdk_matrix_mul(sc, rot));
+    fdk_matrix inv = fdk_matrix_invert(m);
+
+    /* inv(m) * (m * p) == p for a probe point. */
+    float px = 5.0f, py = -2.0f;
+    float ax, ay;
+    /* apply m */
+    ax = m.m00 * px + m.m01 * py + m.tx;
+    ay = m.m10 * px + m.m11 * py + m.ty;
+    /* apply inv */
+    float rx = inv.m00 * ax + inv.m01 * ay + inv.tx;
+    float ry = inv.m10 * ax + inv.m11 * ay + inv.ty;
+    assert(fabsf(rx - px) < 1e-4f && fabsf(ry - py) < 1e-4f);
+
+    /* Degenerate (singular) matrix inverts to identity by contract. */
+    fdk_matrix zero = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    fdk_matrix zi = fdk_matrix_invert(zero);
+    assert(zi.m00 == 1.0f && zi.m11 == 1.0f && zi.tx == 0.0f);
+
+    /* Composition order: translate-then-scale vs scale-then-translate
+     * differ (documented left-to-right reading). */
+    fdk_matrix ts = fdk_matrix_mul(fdk_matrix_translate(10, 0),
+                                   fdk_matrix_scale(2));
+    fdk_matrix st = fdk_matrix_mul(fdk_matrix_scale(2),
+                                   fdk_matrix_translate(10, 0));
+    /* ts maps x=1 -> (1+10)*2 = 22; st maps x=1 -> 1*2+10 = 12. */
+    assert(ts.m00 == 2.0f && ts.tx == 20.0f);
+    assert(st.m00 == 2.0f && st.tx == 10.0f);
+
+    printf("[ok] matrix algebra: compose, invert, degenerate, order\n");
+}
+
+static void test_blit_transformed(void) {
+    /* A 4x4 red/green checkerboard source. */
+    fdk_surface *src = NULL;
+    assert(fdk_ok(fdk_surface_create(4, 4, &src)));
+    for (int y = 0; y < 4; y++) {
+        for (int x = 0; x < 4; x++) {
+            fdk_surface_fill_rect(src,
+                (fdk_rect){ .x = x, .y = y, .width = 1, .height = 1 },
+                ((x + y) & 1) ? rgb(0, 255, 0) : rgb(255, 0, 0));
+        }
+    }
+
+    fdk_surface *dst = NULL;
+    assert(fdk_ok(fdk_surface_create(40, 40, &dst)));
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+
+    /* Identity = plain blit (fast path): pixel-exact. */
+    assert(fdk_ok(fdk_surface_blit_transformed(dst, fdk_matrix_identity(),
+                                               src)));
+    assert(is_color(dst, 0, 0, pack(255, 0, 0)));
+    assert(is_color(dst, 1, 1, pack(255, 0, 0)));
+    assert(is_color(dst, 1, 0, pack(0, 255, 0)));
+    assert(is_color(dst, 5, 5, pack(9, 9, 9)));
+
+    /* Integer translation: exact relocation. */
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+    assert(fdk_ok(fdk_surface_blit_transformed(
+        dst, fdk_matrix_translate(10.0f, 20.0f), src)));
+    assert(is_color(dst, 10, 20, pack(255, 0, 0)));
+    assert(is_color(dst, 13, 23, pack(255, 0, 0)));
+    assert(is_color(dst, 9, 20, pack(9, 9, 9)));
+    assert(is_color(dst, 14, 20, pack(9, 9, 9)));
+
+    /* 3x integer scale-up: nearest-neighbor fast path — each source
+     * pixel becomes an exact 3x3 block, NO interpolated values. */
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+    assert(fdk_ok(fdk_surface_blit_transformed(dst, fdk_matrix_scale(3.0f),
+                                               src)));
+    for (int y = 0; y < 4; y++) {
+        for (int x = 0; x < 4; x++) {
+            fdk_u32 want = ((x + y) & 1) ? pack(0, 255, 0) : pack(255, 0, 0);
+            for (int sy = 0; sy < 3; sy++) {
+                for (int sx = 0; sx < 3; sx++) {
+                    assert(is_color(dst, x * 3 + sx, y * 3 + sy, want));
+                }
+            }
+        }
+    }
+    assert(is_color(dst, 12, 0, pack(9, 9, 9))); /* just past the edge */
+
+    /* Fractional 2.5x scale: bilinear path — the destination at the
+     * boundary between source pixels must hold an INTERPOLATED value
+     * (strictly between the two colors), proving filtering happened. */
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+    assert(fdk_ok(fdk_surface_blit_transformed(dst, fdk_matrix_scale(2.5f),
+                                               src)));
+    fdk_u32 mid = px_at(dst, 4, 0) & 0x00FFFFFFu; /* x in [1.6..2.0] */
+    int mr = (int)((mid >> 16) & 0xFFu);
+    int mg = (int)((mid >> 8) & 0xFFu);
+    assert(mr > 0 && mr < 255);
+    assert(mg > 0 && mg < 255);
+    assert(mr + mg == 255 || mr + mg == 254 || mr + mg == 256);
+
+    /* Degenerate matrix: documented no-op, FDK_OK. */
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+    fdk_matrix zero = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    assert(fdk_ok(fdk_surface_blit_transformed(dst, zero, src)));
+    assert(is_color(dst, 0, 0, pack(9, 9, 9)));
+
+    /* Rotation by 90 degrees: exact quarter-turn (bilinear path but
+     * the sample points land exactly on pixel centers). rotate maps
+     * (x,y) -> (-y, x): source (0,0)->(0,0), (3,0)->(0,3),
+     * (0,3)->(-3,0). FIRST rotate, THEN translate +4 in x to stay in
+     * bounds. */
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+    fdk_matrix r90 = fdk_matrix_rotate(1.57079632679f);
+    fdk_matrix m = fdk_matrix_mul(r90, fdk_matrix_translate(4.0f, 0.0f));
+    assert(fdk_ok(fdk_surface_blit_transformed(dst, m, src)));
+    /* Rotating PIXEL CENTERS (not indices): source pixel (0,0)'s
+     * center (0.5,0.5) maps to (3.5,0.5) = dest pixel (3,0)'s
+     * center; and likewise down the diagonal. */
+    assert(is_color(dst, 3, 0, pack(255, 0, 0))); /* src (0,0) red    */
+    assert(is_color(dst, 3, 3, pack(0, 255, 0))); /* src (3,0) green  */
+    assert(is_color(dst, 0, 0, pack(0, 255, 0))); /* src (0,3) green  */
+    assert(is_color(dst, 0, 3, pack(255, 0, 0))); /* src (3,3) red    */
+    assert(is_color(dst, 5, 0, pack(9, 9, 9)));   /* past the quad   */
+
+    /* NULL argument refusal. */
+    assert(fdk_surface_blit_transformed(NULL, fdk_matrix_identity(), src) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_surface_blit_transformed(dst, fdk_matrix_identity(), NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    fdk_surface_destroy(dst);
+    fdk_surface_destroy(src);
+    printf("[ok] blit_transformed: identity/translate/scale exactness, "
+           "bilinear, degenerate no-op, rotation\n");
+}
+
+static void test_transformed_alpha(void) {
+    /* An ARGB sprite (50% blue square) scaled 2x with bilinear
+     * filtering: the interior stays exactly 50% blue-over-background;
+     * the alpha rides through the transform. */
+    fdk_surface *src = NULL;
+    assert(fdk_ok(fdk_surface_create_format(
+        4, 4, FDK_SURFACE_FORMAT_ARGB8888, &src)));
+    fdk_color blue50 = { .r = 0.0f, .g = 0.0f, .b = 1.0f, .a = 0.5f };
+    fdk_surface_fill_rect(src, (fdk_rect){ .x = 1, .y = 1, .width = 2,
+                                           .height = 2 }, blue50);
+
+    fdk_surface *dst = NULL;
+    assert(fdk_ok(fdk_surface_create(20, 20, &dst)));
+    fdk_surface_fill(dst, rgb(255, 255, 255));
+    assert(fdk_ok(fdk_surface_blit_transformed(dst, fdk_matrix_scale(2.0f),
+                                               src)));
+    /* Interior pixel: exactly the 50% blue-over-white blend
+     * (127 = 255 * (1 - 128/255), the honest sa=128 arithmetic). */
+    assert(is_color(dst, 4, 4, pack(127, 127, 255)));
+    /* Corner pixel (0,0): outside the blue square, fully transparent
+     * source — stays background. */
+    assert(is_color(dst, 0, 0, pack(255, 255, 255)));
+
+    fdk_surface_destroy(dst);
+    fdk_surface_destroy(src);
+    printf("[ok] transformed alpha compositing: alpha rides through "
+           "scale\n");
+}
+
+static void test_aa_primitives(void) {
+    /* Axis-aligned AA lines are pixel-identical to crisp ones. */
+    fdk_surface *crisp = NULL, *aa = NULL;
+    assert(fdk_ok(fdk_surface_create(30, 30, &crisp)));
+    assert(fdk_ok(fdk_surface_create(30, 30, &aa)));
+    fdk_color c = rgb(200, 30, 90);
+    fdk_surface_draw_line(crisp, 3, 7, 24, 7, c);
+    fdk_surface_draw_line_aa(aa, 3, 7, 24, 7, c);
+    fdk_surface_draw_line(crisp, 9, 2, 9, 27, c);
+    fdk_surface_draw_line_aa(aa, 9, 2, 9, 27, c);
+    for (int y = 0; y < 30; y++) {
+        for (int x = 0; x < 30; x++) {
+            assert(px_at(crisp, x, y) == px_at(aa, x, y));
+        }
+    }
+
+    /* Diagonal AA line: every touched pixel lies between background
+     * and line color (no overshoot), and both endpoints are exactly
+     * the line color. */
+    fdk_surface_fill(aa, rgb(0, 0, 0));
+    fdk_surface_draw_line_aa(aa, 2, 2, 27, 14, c);
+    assert(px_at(aa, 2, 2) == pack(200, 30, 90)); /* endpoint exact */
+    assert(px_at(aa, 27, 14) == pack(200, 30, 90));
+    int touched = 0;
+    for (int y = 0; y < 30; y++) {
+        for (int x = 0; x < 30; x++) {
+            fdk_u32 p = px_at(aa, x, y) & 0x00FFFFFFu;
+            if (p != 0u) {
+                touched++;
+                int pr = (int)((p >> 16) & 0xFFu);
+                int pg = (int)((p >> 8) & 0xFFu);
+                int pb = (int)(p & 0xFFu);
+                assert(pr <= 200 && pg <= 30 && pb <= 90);
+                assert(pr + pg + pb > 0);
+            }
+        }
+    }
+    assert(touched > 25); /* it is a line, not a point */
+
+    /* AA circle: center pixel fully covered; pixels at distance r+2
+     * untouched; coverage monotone along a radius. */
+    fdk_surface_fill(aa, rgb(0, 0, 0));
+    fdk_surface_fill_circle_aa(aa, 15, 15, 8, c);
+    assert(px_at(aa, 15, 15) == pack(200, 30, 90));
+    /* One INSIDE the radius is fully covered; exactly ON the radius
+     * is the documented half-coverage ramp; far outside is empty. */
+    assert(px_at(aa, 15, 15 - 7) == pack(200, 30, 90));
+    fdk_u32 edge = px_at(aa, 15, 15 - 8) & 0x00FFFFFFu;
+    int er = (int)((edge >> 16) & 0xFFu);
+    assert(er > 50 && er < 200); /* half-ish blend, not either extreme */
+    assert((px_at(aa, 15, 15 - 10) & 0x00FFFFFFu) == 0u); /* far outside */
+    int prev = 255;
+    for (int d = 0; d <= 10; d++) {
+        fdk_u32 p = px_at(aa, 15 + d, 15) & 0x00FFFFFFu;
+        int pr = (int)((p >> 16) & 0xFFu);
+        assert(pr <= prev + 1); /* coverage non-increasing outward */
+        prev = pr;
+    }
+
+    /* AA circle OUTLINE: interior empty, ring present, far outside
+     * empty. */
+    fdk_surface_fill(aa, rgb(0, 0, 0));
+    fdk_surface_draw_circle_aa(aa, 15, 15, 8, c);
+    assert((px_at(aa, 15, 15) & 0x00FFFFFFu) == 0u);
+    assert((px_at(aa, 15 + 8, 15) & 0x00FFFFFFu) != 0u);
+    assert((px_at(aa, 15 + 11, 15) & 0x00FFFFFFu) == 0u);
+
+    /* AA rounded rect with radius 0: matches the crisp fill_rect's
+     * interior exactly on the boundary row/col. */
+    fdk_surface *crisp2 = NULL;
+    assert(fdk_ok(fdk_surface_create(24, 24, &crisp2)));
+    fdk_surface_fill(aa, rgb(0, 0, 0));
+    fdk_surface_fill(crisp2, rgb(0, 0, 0));
+    fdk_rect r = { .x = 4, .y = 6, .width = 12, .height = 9 };
+    fdk_surface_fill_rect(crisp2, r, c);
+    fdk_surface_fill_rounded_rect_aa(aa, r, 0, c);
+    /* Interior pixels identical (boundary may have partial coverage
+     * by design — the AA variant smooths the right/bottom edges). */
+    for (int y = r.y + 1; y < r.y + r.height - 1; y++) {
+        for (int x = r.x + 1; x < r.x + r.width - 1; x++) {
+            assert(px_at(aa, x, y) == px_at(crisp2, x, y));
+        }
+    }
+
+    /* AA rounded rect with a real radius: interior full, outside
+     * empty, corner-region boundary pixels strictly between. */
+    fdk_surface_fill(aa, rgb(0, 0, 0));
+    fdk_rect rr = { .x = 2, .y = 2, .width = 20, .height = 20 };
+    fdk_surface_fill_rounded_rect_aa(aa, rr, 6, c);
+    assert(px_at(aa, 12, 12) == pack(200, 30, 90));      /* center */
+    assert(px_at(aa, 2, 2) != pack(200, 30, 90));        /* clipped corner */
+    assert((px_at(aa, 2, 2) & 0x00FFFFFFu) == 0u);       /* ...to nothing */
+    /* On the corner arc (corner circle center (8,8), r=6): pixel (5,2)
+     * sits in the coverage ramp — strictly between empty and full. */
+    fdk_u32 corner_edge = px_at(aa, 5, 2) & 0x00FFFFFFu;
+    int cer = (int)((corner_edge >> 16) & 0xFFu);
+    assert(cer > 0 && cer < 200);
+    /* And its neighbor further out on the arc is strictly less
+     * covered (monotone ramp away from the shape). */
+    fdk_u32 outer = px_at(aa, 4, 2) & 0x00FFFFFFu;
+    int orr = (int)((outer >> 16) & 0xFFu);
+    assert(orr < cer);
+
+    fdk_surface_destroy(crisp2);
+    fdk_surface_destroy(crisp);
+    fdk_surface_destroy(aa);
+    printf("[ok] AA primitives: axis-exactness, bounded coverage, "
+           "monotone falloff, rounded-rect SDF\n");
+}
+
 int main(void) {
     test_offscreen_create_info_destroy();
     test_offscreen_argument_checks();
@@ -576,6 +1042,13 @@ int main(void) {
     test_damage_bookkeeping();
     test_blit();
     test_frame_ready_offscreen();
+    test_argb_surface_and_blending();
+    test_blit_blend();
+    test_image_decode();
+    test_matrix_algebra();
+    test_blit_transformed();
+    test_transformed_alpha();
+    test_aa_primitives();
     printf("all headless render tests passed\n");
     return 0;
 }

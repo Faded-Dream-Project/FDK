@@ -30,11 +30,14 @@
  *
  * Phase 3 scope of this header: software framebuffer access,
  * presentation with damage tracking (only what changed is sent to
- * the display), a clip stack, offscreen surfaces, a small blending
+ * the display), a clip stack, offscreen surfaces, a blending
  * primitive set (fills, rects, gradients, lines, circles, rounded
- * rects, surface-to-surface blit), and a frame-pacing query. The
- * remaining Phase 3 work (images, transforms, text — see
- * docs/roadmap.md and docs/rendering.md) builds on this foundation.
+ * rects, surface-to-surface blits), image decoding into surfaces
+ * (PNG/JPEG/BMP/… via the vendored stb_image), per-pixel alpha
+ * compositing, affine-transformed blits, antialiased primitive
+ * variants, and a frame-pacing query. The remaining Phase 3 work
+ * (HiDPI scale handling is the last item) is tracked in
+ * docs/roadmap.md and docs/rendering.md.
  */
 
 #ifndef FDK_SURFACE_H
@@ -53,7 +56,20 @@ extern "C" {
  * fdk_surface_info carries the value, and applications that only
  * accept a specific layout can check it. */
 typedef enum fdk_surface_format {
-    FDK_SURFACE_FORMAT_XRGB8888 = 1, /* fdk_u32, R<<16 | G<<8 | B */
+    FDK_SURFACE_FORMAT_XRGB8888 = 1, /* fdk_u32, R<<16 | G<<8 | B; the top
+                                      * byte is ignored (treated as opaque).
+                                      * The format of every WINDOW surface
+                                      * and of offscreen surfaces created by
+                                      * fdk_surface_create(). */
+    FDK_SURFACE_FORMAT_ARGB8888 = 2, /* fdk_u32, A<<24 | R<<16 | G<<8 | B,
+                                      * STRAIGHT (non-premultiplied) alpha.
+                                      * The format of surfaces created by
+                                      * fdk_surface_create_from_image() and
+                                      * requestable for offscreen surfaces
+                                      * (fdk_surface_create_format). Drawing
+                                      * helpers composite alpha correctly
+                                      * onto these; blit_blend and
+                                      * blit_transformed read the alpha. */
 } fdk_surface_format;
 
 /* A snapshot of the surface's framebuffer. `pixels` points at the
@@ -151,6 +167,45 @@ fdk_result fdk_surface_present(fdk_surface *surface);
  */
 fdk_result fdk_surface_create(fdk_i32 width, fdk_i32 height,
                              fdk_surface **out_surface);
+
+/* Same as fdk_surface_create, but picks the pixel format. ARGB8888
+ * surfaces start fully transparent (all zero) — draw onto them and
+ * composite them with fdk_surface_blit_blend /
+ * fdk_surface_blit_transformed; drawing helpers composite source-over
+ * including the alpha channel (see FDK_SURFACE_FORMAT_ARGB8888).
+ *
+ * Can fail with the same codes as fdk_surface_create, plus:
+ *   FDK_ERR_INVALID_ARGUMENT - unknown `format` value
+ */
+fdk_result fdk_surface_create_format(fdk_i32 width, fdk_i32 height,
+                                     fdk_surface_format format,
+                                     fdk_surface **out_surface);
+
+/* Decodes an image file (PNG, JPEG, BMP, PSD, TGA, GIF, HDR, PIC —
+ * anything the vendored stb_image understands) into a new offscreen
+ * ARGB8888 surface with STRAIGHT alpha, ready for
+ * fdk_surface_blit_blend / fdk_surface_blit_transformed. The surface
+ * is application-owned; release it with fdk_surface_destroy.
+ *
+ * Decoding is bounded and defensive: FDK checks the file size BEFORE
+ * allocating (rejecting anything over 512 MiB or not a regular file)
+ * and stb_image itself caps allocations by the header's declared
+ * dimensions, which FDK re-validates after decode (width/height in
+ * 1..16384, matching fdk_surface_create's limits). 16-bit-per-channel
+ * source pixels are converted to 8-bit; paletted/GIF animation frames
+ * are not (the first frame is decoded).
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - path or out_surface is NULL
+ *   FDK_ERR_NOT_FOUND        - the file does not exist
+ *   FDK_ERR_NOT_A_FILE       - path exists but is not a regular file
+ *   FDK_ERR_OUT_OF_MEMORY    - allocation failure
+ *   FDK_ERR_UNSUPPORTED      - the data is not a decodable image (or
+ *                              exceeds the dimension/size bounds) —
+ *                              logged at WARN with the decoder's reason
+ */
+fdk_result fdk_surface_create_from_image(const char *path,
+                                         fdk_surface **out_surface);
 
 /* Destroys an offscreen surface created by fdk_surface_create,
  * releasing its pixel memory. Passing a WINDOW surface here is an
@@ -275,12 +330,21 @@ void fdk_surface_fill_gradient_vertical(fdk_surface *surface,
                                         fdk_color top, fdk_color bottom);
 
 /* Draws a 1-pixel line from (x0, y0) to (x1, y1) inclusive, using
- * Bresenham's algorithm (crisp integer pixels, no smoothing —
- * antialiased lines are later rendering work). */
+ * Bresenham's algorithm (crisp integer pixels, no smoothing — pass
+ * the _aa variant below when smoothing is wanted). */
 void fdk_surface_draw_line(fdk_surface *surface,
                            fdk_i32 x0, fdk_i32 y0,
                            fdk_i32 x1, fdk_i32 y1,
                            fdk_color color);
+
+/* Antialiased line (Xiaolin Wu style): per-pixel coverage blends the
+ * color over the background, so diagonal edges lose their staircase.
+ * Endpoints are drawn at their fractional-weighted coverage; the
+ * crisp Bresenham variant above remains the exact-geometry default. */
+void fdk_surface_draw_line_aa(fdk_surface *surface,
+                              fdk_i32 x0, fdk_i32 y0,
+                              fdk_i32 x1, fdk_i32 y1,
+                              fdk_color color);
 
 /* Draws the 1-pixel outline of the circle with center (cx, cy) and
  * radius `radius` (midpoint algorithm, 8-way symmetric). radius <= 0
@@ -288,6 +352,20 @@ void fdk_surface_draw_line(fdk_surface *surface,
 void fdk_surface_draw_circle(fdk_surface *surface,
                              fdk_i32 cx, fdk_i32 cy, fdk_i32 radius,
                              fdk_color color);
+
+/* Antialiased circle OUTLINE: each pixel's coverage is its exact
+ * signed distance from the ideal circle (clamped 0..1), so the edge
+ * is a smooth 2-pixel ramp. radius <= 0 draws nothing. */
+void fdk_surface_draw_circle_aa(fdk_surface *surface,
+                                fdk_i32 cx, fdk_i32 cy, fdk_i32 radius,
+                                fdk_color color);
+
+/* Antialiased FILLED circle: interior pixels are fully covered, the
+ * boundary ring gets exact-distance coverage. radius <= 0 draws
+ * nothing. */
+void fdk_surface_fill_circle_aa(fdk_surface *surface,
+                                fdk_i32 cx, fdk_i32 cy, fdk_i32 radius,
+                                fdk_color color);
 
 /* Fills the circle with center (cx, cy) and radius `radius` — every
  * pixel whose center lies within the radius. radius <= 0 draws
@@ -308,6 +386,14 @@ void fdk_surface_fill_rounded_rect(fdk_surface *surface, fdk_rect rect,
 void fdk_surface_draw_rounded_rect(fdk_surface *surface, fdk_rect rect,
                                    fdk_i32 corner_radius, fdk_color color);
 
+/* Antialiased filled rounded rectangle: per-pixel exact distance to
+ * the rounded-rect boundary (row chords on the corner bands, exact
+ * verticals in the straight bands) produces smooth corners and a
+ * smooth bottom/right edge. Same radius clamping as the crisp
+ * variant. */
+void fdk_surface_fill_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
+                                      fdk_i32 corner_radius, fdk_color color);
+
 /* Copies `src_rect` (in SOURCE surface coordinates) of `src` to
  * (dst_x, dst_y) on `dst`, opaque pixel copy, clipped against the
  * source bounds, the destination bounds, and the destination's clip
@@ -322,6 +408,90 @@ void fdk_surface_draw_rounded_rect(fdk_surface *surface, fdk_rect rect,
  */
 fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
                             fdk_surface *src, fdk_rect src_rect);
+
+/* Composites `src_rect` of `src` onto `dst` at (dst_x, dst_y) with
+ * per-pixel SOURCE-OVER alpha blending: `src` must be an ARGB8888
+ * surface (straight alpha) — typically one produced by
+ * fdk_surface_create_from_image — and its alpha channel weights every
+ * composited pixel. `dst` may be any surface format; if dst is itself
+ * ARGB8888 the result's alpha is composited too (a = sa + da*(1-sa)),
+ * if dst is XRGB8888 the top byte stays ignored. Semantics otherwise
+ * match fdk_surface_blit: clipped against source bounds, destination
+ * bounds, and the destination's clip stack; damages the destination
+ * for the copied region; overlapping self-blits are undefined.
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - dst/src NULL, src_rect empty, or src
+ *                              is not an ARGB8888 surface
+ */
+fdk_result fdk_surface_blit_blend(fdk_surface *dst, fdk_i32 dst_x,
+                                  fdk_i32 dst_y, fdk_surface *src,
+                                  fdk_rect src_rect);
+
+/* ---- Affine-transformed blit ---- */
+
+/* A 2x3 affine transform, row-major, mapping SOURCE pixel (x, y) to
+ * DESTINATION pixel:
+ *
+ *   dst_x = m00 * x + m01 * y + tx
+ *   dst_y = m10 * x + m11 * y + ty
+ *
+ * (The third row is implicitly 0 0 1.) Constructors below build the
+ * common ones; multiply combines them LEFT-TO-RIGHT so that
+ * fdk_matrix_mul(a, b) maps a point as b-after-a — read it as
+ * "first a, then b". Degenerate (non-invertible) matrices make
+ * transformed blits a documented no-op (FDK_OK, nothing drawn) —
+ * collapsing a surface to a line or point has no pixels to paint. */
+typedef struct fdk_matrix {
+    float m00, m01, tx;
+    float m10, m11, ty;
+} fdk_matrix;
+
+/* The identity transform. */
+fdk_matrix fdk_matrix_identity(void);
+
+/* Translation by (tx, ty), in destination pixels. */
+fdk_matrix fdk_matrix_translate(float tx, float ty);
+
+/* Uniform scaling by `factor` about the source origin (1.0 = same
+ * size). */
+fdk_matrix fdk_matrix_scale(float factor);
+
+/* Non-uniform scaling about the source origin. */
+fdk_matrix fdk_matrix_scale_xy(float sx, float sy);
+
+/* Rotation by `radians` about the source origin (positive = clockwise
+ * in FDK's y-down pixel space). */
+fdk_matrix fdk_matrix_rotate(float radians);
+
+/* Composition: the transform that applies `first` and THEN `second`. */
+fdk_matrix fdk_matrix_mul(fdk_matrix first, fdk_matrix second);
+
+/* Inverse (returns identity if non-invertible, matching the no-op
+ * degenerate rule above). */
+fdk_matrix fdk_matrix_invert(fdk_matrix m);
+
+/* Draws `src` transformed by `m` onto `dst`: every destination pixel
+ * covered by the transformed source rectangle is computed by INVERSE
+ * mapping and BILINEAR sampling of the source (edge-clamped), then
+ * composited SOURCE-OVER — per-pixel alpha if `src` is ARGB8888,
+ * opaque copy otherwise. Because inverse mapping visits each
+ * destination pixel exactly once, translucent sources never double-
+ * blend. The destination clip stack applies. Damage recorded for the
+ * transformed source's destination bounding box (clipped). `src` may
+ * be offscreen or a window surface; overlapping self-blits are
+ * undefined, as with the other blits.
+ *
+ * Integer-exact special cases: the identity matrix, pure translations
+ * by whole pixels, and integer uniform scale-ups (2x, 3x, ...) take
+ * the nearest-neighbor fast path — scaling up an image never blurs
+ * it, and translating it never resamples it.
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - dst or src NULL
+ */
+fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
+                                        fdk_surface *src);
 
 /* ---- Frame pacing ----
  *

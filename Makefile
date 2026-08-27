@@ -49,7 +49,10 @@ FEATURE  := -D_POSIX_C_SOURCE=200809L
 # the X11 backend when Wayland is unavailable, so a build without X11
 # would have no Wayland-only fall-through to offer).
 X11_CFLAGS     := $(shell pkg-config --cflags x11)
-X11_LIBS       := $(shell pkg-config --libs x11)
+# Xext: the MIT-SHM extension (XShmPutImage presentation fast path,
+# Phase 3 completion). It is part of the base X11 distribution and
+# present wherever libX11 is.
+X11_LIBS       := $(shell pkg-config --libs x11) -lXext
 
 # Wayland is optional. Detection order:
 # 1. If FDK_DISABLE_WAYLAND=1 is set, never build Wayland (skip).
@@ -107,7 +110,8 @@ LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm
 extra_flags = $(if $(findstring src/platform/x11/,$(1)),$(X11_CFLAGS)) \
               $(if $(findstring src/platform/wayland/,$(1)),$(WAYLAND_CFLAGS) -Wno-cast-qual) \
               $(if $(findstring src/text/,$(1)),-Ithird_party/stb) \
-              $(if $(findstring src/widget/,$(1)),-Ithird_party/stb)
+              $(if $(findstring src/widget/,$(1)),-Ithird_party/stb) \
+              $(if $(findstring src/render/,$(1)),-Ithird_party/stb)
 
 # --- Sources ------------------------------------------------------------
 
@@ -116,7 +120,9 @@ PLATFORM_X11_SRCS     := $(wildcard src/platform/x11/*.c)
 ifeq ($(BUILD_WAYLAND),1)
   PLATFORM_WAYLAND_SRCS := $(wildcard src/platform/wayland/*.c) \
                            src/platform/wayland/generated/xdg-shell-protocol.c \
-                           src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c
+                           src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c \
+                           src/platform/wayland/generated/viewporter-protocol.c \
+                           src/platform/wayland/generated/fractional-scale-v1-protocol.c
 else
   # Stub providing fdk_platform_wayland_ops() returning NULL and
   # fdk_platform_wayland_display_present() returning 0, so

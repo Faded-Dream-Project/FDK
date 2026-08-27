@@ -39,6 +39,15 @@ struct fdk_surface {
     /* 1 = application-owned offscreen surface (own_pixels below). */
     int offscreen;
 
+    /* Pixel format of `fb`/`own_pixels`. Window surfaces are always
+     * XRGB8888 (both current backends hand out XRGB framebuffers —
+     * see fdk_platform_framebuffer); offscreen surfaces carry the
+     * format they were created with (XRGB via fdk_surface_create,
+     * ARGB via fdk_surface_create_format / create_from_image). The
+     * drawing helpers branch on this for alpha compositing; the
+     * branch is per-primitive-call, never per-pixel. */
+    fdk_surface_format format;
+
     /* Last framebuffer handed out (backend framebuffer for window
      * surfaces, own_pixels for offscreen). `has_fb` tracks whether it
      * is still meaningful — cleared by a real fdk_surface_present()
@@ -52,7 +61,9 @@ struct fdk_surface {
     int has_fb;
 
     /* Offscreen pixel memory (offscreen surfaces only). Stride is
-     * fb.stride * 4 bytes; allocated zeroed with fdk_alloc. */
+     * fb.stride * 4 bytes; allocated zeroed with fdk_alloc. For ARGB
+     * surfaces "zeroed" means fully transparent (A=R=G=B=0), which
+     * is the documented initial state. */
     fdk_u32 *own_pixels;
     size_t own_length; /* bytes, for fdk_free symmetry */
 
@@ -89,6 +100,17 @@ struct fdk_surface {
  * src/window/window.c) to release the window's lazily-created surface,
  * if any. Safe to call on a window whose surface was never created. */
 void fdk_surface_detach_from_window(fdk_window *window);
+
+/* Shared render-layer internals (implemented in surface.c, used by
+ * the sibling TUs surface_transform.c / surface_aa.c): damage-region
+ * accumulation (bounds-checked, overflow degrades to full), the
+ * acquire-a-live-framebuffer prologue every drawing helper runs, and
+ * the coverage-weighted blend atom the antialiased primitives are
+ * built from. */
+void fdk__surface_damage_add(fdk_surface *surface, fdk_rect rect);
+fdk_result fdk__surface_acquire(fdk_surface *surface);
+void fdk__surface_blend_coverage(fdk_surface *surface, int x, int y,
+                                 fdk_color color, fdk_f32 coverage);
 
 /* Alpha-mask blit (internal) — composites a 1-byte-per-pixel coverage
  * mask with a solid color, source-over, clip-stack-honoring, across

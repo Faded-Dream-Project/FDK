@@ -51,7 +51,7 @@ static void recompute_clip(fdk_surface *surface) {
  * framebuffer. Fully-outside / empty rects are dropped. Overflow of
  * the bounded rect list degrades to full damage (documented in
  * fdk_surface.h). */
-static void damage_add(fdk_surface *surface, fdk_rect rect) {
+void fdk__surface_damage_add(fdk_surface *surface, fdk_rect rect) {
     if (surface->damage_full) {
         return; /* already "everything" */
     }
@@ -94,14 +94,18 @@ static void damage_add(fdk_surface *surface, fdk_rect rect) {
 
 /* ---- framebuffer acquisition ---- */
 
-static fdk_result surface_acquire(fdk_surface *surface);
+/* Both renamed to fdk__* (shared across the render TUs, see
+ * surface_internal.h); the original names stay as macros so the many
+ * call sites in this file read unchanged. */
+#define surface_acquire fdk__surface_acquire
+#define damage_add fdk__surface_damage_add
 
 /* Acquires the backend framebuffer (window surfaces), or re-acquires
  * it if the previous one was invalidated by a present. Offscreen
  * surfaces own their pixels permanently and never take this path.
  * Fails with FDK_ERR_UNSUPPORTED if the backend provides no software
  * framebuffer — the ops fields are optional by design. */
-static fdk_result surface_acquire(fdk_surface *surface) {
+fdk_result fdk__surface_acquire(fdk_surface *surface) {
     if (surface->has_fb) {
         return FDK_OK;
     }
@@ -158,6 +162,7 @@ fdk_result fdk_window_get_surface(fdk_window *window,
     }
     surface->window = window;
     surface->offscreen = 0;
+    surface->format = FDK_SURFACE_FORMAT_XRGB8888; /* backends hand out XRGB */
     surface->has_fb = 0;
     surface->fb.pixels = NULL;
     surface->fb.width = 0;
@@ -199,7 +204,7 @@ fdk_result fdk_surface_get_info(fdk_surface *surface,
     out_info->width = surface->fb.width;
     out_info->height = surface->fb.height;
     out_info->stride = surface->fb.stride;
-    out_info->format = FDK_SURFACE_FORMAT_XRGB8888;
+    out_info->format = surface->format;
     return FDK_OK;
 }
 
@@ -272,11 +277,10 @@ void fdk_surface_detach_from_window(fdk_window *window) {
 
 /* ---- offscreen surfaces ---- */
 
-fdk_result fdk_surface_create(fdk_i32 width, fdk_i32 height,
-                              fdk_surface **out_surface) {
-    if (out_surface == NULL) {
-        return FDK_ERR_INVALID_ARGUMENT;
-    }
+/* Shared body of fdk_surface_create / fdk_surface_create_format. */
+static fdk_result surface_create_common(fdk_i32 width, fdk_i32 height,
+                                        fdk_surface_format format,
+                                        fdk_surface **out_surface) {
     if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
@@ -301,6 +305,7 @@ fdk_result fdk_surface_create(fdk_i32 width, fdk_i32 height,
 
     surface->window = NULL;
     surface->offscreen = 1;
+    surface->format = format;
     surface->own_pixels = pixels;
     surface->own_length = length;
     surface->fb.pixels = pixels;
@@ -316,11 +321,33 @@ fdk_result fdk_surface_create(fdk_i32 width, fdk_i32 height,
     surface->ever_acquired = 1;
     recompute_clip(surface);
 
-    FDK_DEBUG("offscreen surface created (%dx%d, stride %d)", width, height,
-              stride);
+    FDK_DEBUG("offscreen surface created (%dx%d, stride %d, format %d)",
+              width, height, stride, (int)format);
 
     *out_surface = surface;
     return FDK_OK;
+}
+
+fdk_result fdk_surface_create(fdk_i32 width, fdk_i32 height,
+                              fdk_surface **out_surface) {
+    if (out_surface == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    return surface_create_common(width, height, FDK_SURFACE_FORMAT_XRGB8888,
+                                 out_surface);
+}
+
+fdk_result fdk_surface_create_format(fdk_i32 width, fdk_i32 height,
+                                     fdk_surface_format format,
+                                     fdk_surface **out_surface) {
+    if (out_surface == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (format != FDK_SURFACE_FORMAT_XRGB8888 &&
+        format != FDK_SURFACE_FORMAT_ARGB8888) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    return surface_create_common(width, height, format, out_surface);
 }
 
 void fdk_surface_destroy(fdk_surface *surface) {
@@ -480,7 +507,16 @@ bool fdk_surface_frame_ready(fdk_surface *surface) {
 
 /* Blends `color` (straight alpha) source-over the pixel at (x, y),
  * clipped to the effective clip (which includes the fb bounds).
- * Inline-hot; called by every helper. */
+ * Inline-hot; called by every helper.
+ *
+ * XRGB destinations (every window surface, plain offscreen surfaces):
+ * the destination is implicitly opaque, so out = src*a + dst*(1-a).
+ *
+ * ARGB destinations: the full straight-alpha source-over, including
+ * the alpha channel — out_a = sa + da*(1-sa), out_rgb =
+ * (src_rgb*sa + dst_rgb*da*(1-sa)) / out_a — so translucent drawing
+ * onto a partially transparent sprite accumulates correctly when the
+ * sprite is later composited by blit_blend/blit_transformed. */
 static inline void blend_pixel(fdk_surface *surface, int x, int y,
                                fdk_color color) {
     if (x < surface->clip_x0 || y < surface->clip_y0 ||
@@ -488,8 +524,9 @@ static inline void blend_pixel(fdk_surface *surface, int x, int y,
         return;
     }
 
-    fdk_u32 dst = surface->fb.pixels[(size_t)y * (size_t)surface->fb.stride +
-                                     (size_t)x];
+    fdk_u32 *px = surface->fb.pixels + (size_t)y * (size_t)surface->fb.stride +
+                   (size_t)x;
+    fdk_u32 dst = *px;
     fdk_f32 da_r = (fdk_f32)((dst >> 16) & 0xFFu) / 255.0f;
     fdk_f32 da_g = (fdk_f32)((dst >> 8) & 0xFFu) / 255.0f;
     fdk_f32 da_b = (fdk_f32)(dst & 0xFFu) / 255.0f;
@@ -501,24 +538,48 @@ static inline void blend_pixel(fdk_surface *surface, int x, int y,
         a = 1.0f;
     }
 
-    /* Source-over with straight alpha on a destination that is
-     * implicitly opaque (XRGB target): out = src*a + dst*(1-a). */
-    fdk_f32 r = color.r * a + da_r * (1.0f - a);
-    fdk_f32 g = color.g * a + da_g * (1.0f - a);
-    fdk_f32 b = color.b * a + da_b * (1.0f - a);
+    fdk_f32 r, g, b, out_a;
+    if (surface->format == FDK_SURFACE_FORMAT_ARGB8888) {
+        fdk_f32 da = (fdk_f32)((dst >> 24) & 0xFFu) / 255.0f;
+        fdk_f32 inv = 1.0f - a;
+        out_a = a + da * inv;
+        if (out_a <= 0.0f) {
+            r = g = b = 0.0f;
+        } else {
+            /* Source-over with a NON-opaque destination (see comment
+             * above); da == 1 reduces exactly to the XRGB formula. */
+            fdk_f32 w_s = a / out_a;
+            fdk_f32 w_d = da * inv / out_a;
+            r = color.r * w_s + da_r * w_d;
+            g = color.g * w_s + da_g * w_d;
+            b = color.b * w_s + da_b * w_d;
+        }
+    } else {
+        out_a = 1.0f;
+        r = color.r * a + da_r * (1.0f - a);
+        g = color.g * a + da_g * (1.0f - a);
+        b = color.b * a + da_b * (1.0f - a);
+    }
 
     if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
     if (g < 0.0f) g = 0.0f; else if (g > 1.0f) g = 1.0f;
     if (b < 0.0f) b = 0.0f; else if (b > 1.0f) b = 1.0f;
 
-    fdk_u32 px = ((fdk_u32)(r * 255.0f + 0.5f) << 16) |
-                 ((fdk_u32)(g * 255.0f + 0.5f) << 8) |
-                 (fdk_u32)(b * 255.0f + 0.5f);
-    surface->fb.pixels[(size_t)y * (size_t)surface->fb.stride +
-                       (size_t)x] = px;
+    fdk_u32 packed = ((fdk_u32)(r * 255.0f + 0.5f) << 16) |
+                     ((fdk_u32)(g * 255.0f + 0.5f) << 8) |
+                     (fdk_u32)(b * 255.0f + 0.5f);
+    if (surface->format == FDK_SURFACE_FORMAT_ARGB8888) {
+        if (out_a < 0.0f) out_a = 0.0f;
+        if (out_a > 1.0f) out_a = 1.0f;
+        packed |= (fdk_u32)(out_a * 255.0f + 0.5f) << 24;
+    }
+    *px = packed;
 }
 
-/* Packs a color to its XRGB8888 pixel value, clamping channels. */
+/* Packs a color to its XRGB8888 pixel value, clamping channels. The
+ * top byte is 0 — meaningless for XRGB surfaces (ignored), and only
+ * correct for OPAQUE ARGB fills when OR'd with 0xFF000000 (see
+ * pack_opaque_argb below). */
 static fdk_u32 pack_color(fdk_color color) {
     fdk_f32 r = color.r < 0.0f ? 0.0f : (color.r > 1.0f ? 1.0f : color.r);
     fdk_f32 g = color.g < 0.0f ? 0.0f : (color.g > 1.0f ? 1.0f : color.g);
@@ -526,6 +587,30 @@ static fdk_u32 pack_color(fdk_color color) {
     return ((fdk_u32)(r * 255.0f + 0.5f) << 16) |
            ((fdk_u32)(g * 255.0f + 0.5f) << 8) |
            (fdk_u32)(b * 255.0f + 0.5f);
+}
+
+/* pack_color | full alpha — the opaque-fill value for ARGB surfaces. */
+static fdk_u32 pack_opaque_argb(fdk_color color) {
+    return pack_color(color) | 0xFF000000u;
+}
+
+/* Coverage-weighted blend (internal) — the antialiased primitives'
+ * atom: blends `color` with alpha scaled by `coverage` (0..1) over the
+ * pixel at (x, y), clip-checked and format-aware exactly like
+ * blend_pixel (which is what it runs underneath). Used by
+ * surface_aa.c. */
+void fdk__surface_blend_coverage(fdk_surface *surface, int x, int y,
+                                 fdk_color color, fdk_f32 coverage) {
+    if (coverage <= 0.0f) {
+        return;
+    }
+    if (coverage >= 1.0f) {
+        blend_pixel(surface, x, y, color);
+        return;
+    }
+    fdk_color c = color;
+    c.a = color.a * coverage;
+    blend_pixel(surface, x, y, c);
 }
 
 /* Clips a rect against the EFFECTIVE clip (clip stack intersected
@@ -587,7 +672,9 @@ void fdk_surface_fill(fdk_surface *surface, fdk_color color) {
     /* Opaque colors are the common case for fill() — a memset-fast
      * path avoids per-pixel float math for them. */
     if (color.a >= 1.0f) {
-        fdk_u32 px = pack_color(color);
+        fdk_u32 px = (surface->format == FDK_SURFACE_FORMAT_ARGB8888)
+                         ? pack_opaque_argb(color)
+                         : pack_color(color);
         for (int y = y0; y < y1; y++) {
             fdk_u32 *row =
                 surface->fb.pixels + (size_t)y * (size_t)surface->fb.stride;
@@ -1027,6 +1114,18 @@ void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
             if (am <= 0) {
                 continue;
             }
+            if (surface->format == FDK_SURFACE_FORMAT_ARGB8888) {
+                /* Full straight source-over including the alpha
+                 * channel (see blend_pixel's ARGB branch). Text into
+                 * transparent sprites is not the hot path — the
+                 * float form keeps the math provably identical to
+                 * blend_pixel instead of a second integer rounding.
+                 */
+                fdk_color cov_color = { .r = rf, .g = gf, .b = bf,
+                                        .a = af * (fdk_f32)mrow[i] / 255.0f };
+                blend_pixel(surface, x0 + i, y, cov_color);
+                continue;
+            }
             fdk_u32 d = drow[i];
             int dr = (int)((d >> 16) & 0xFFu);
             int dg = (int)((d >> 8) & 0xFFu);
@@ -1096,8 +1195,16 @@ fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
         return FDK_OK;
     }
 
-    /* Opaque row copies (documented: blit is an opaque pixel copy). */
+    /* Opaque row copies (documented: blit is an opaque pixel copy).
+     * An XRGB source onto an ARGB destination gets alpha forced to
+     * opaque — the source's "ignored" top byte must not leak a fake
+     * transparency into a compositing surface. All other format
+     * combinations copy verbatim (an ARGB source's alpha byte is
+     * either meaningful, or ignored by an XRGB destination). */
     size_t copy_len = (size_t)(dx1 - dx0);
+    int force_opaque =
+        (dst->format == FDK_SURFACE_FORMAT_ARGB8888 &&
+         src->format != FDK_SURFACE_FORMAT_ARGB8888);
     for (long long row = 0; row < dy1 - dy0; row++) {
         fdk_u32 *dst_row =
             dst->fb.pixels +
@@ -1106,6 +1213,129 @@ fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
             src->fb.pixels +
             (size_t)(sy0 + row) * (size_t)src->fb.stride + (size_t)sx0;
         memcpy(dst_row, src_row, copy_len * sizeof(fdk_u32));
+        if (force_opaque) {
+            for (size_t i = 0; i < copy_len; i++) {
+                dst_row[i] |= 0xFF000000u;
+            }
+        }
+    }
+
+    damage_add(dst, (fdk_rect){ .x = (fdk_i32)dx0, .y = (fdk_i32)dy0,
+                                .width = (fdk_i32)(dx1 - dx0),
+                                .height = (fdk_i32)(dy1 - dy0) });
+    return FDK_OK;
+}
+
+fdk_result fdk_surface_blit_blend(fdk_surface *dst, fdk_i32 dst_x,
+                                  fdk_i32 dst_y, fdk_surface *src,
+                                  fdk_rect src_rect) {
+    if (dst == NULL || src == NULL || src_rect.width <= 0 ||
+        src_rect.height <= 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (src->format != FDK_SURFACE_FORMAT_ARGB8888) {
+        /* Per-pixel alpha lives in the source's alpha channel — an
+         * XRGB source has none, so the request is refused (apps that
+         * want an opaque copy have fdk_surface_blit). */
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+
+    fdk_result r = surface_acquire(dst);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    r = surface_acquire(src);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+
+    /* Same two-sided clipping as fdk_surface_blit (source bounds,
+     * then destination effective clip). */
+    long long sx0 = src_rect.x;
+    long long sy0 = src_rect.y;
+    long long sx1 = (long long)src_rect.x + src_rect.width;
+    long long sy1 = (long long)src_rect.y + src_rect.height;
+    if (sx0 < 0) sx0 = 0;
+    if (sy0 < 0) sy0 = 0;
+    if (sx1 > src->fb.width) sx1 = src->fb.width;
+    if (sy1 > src->fb.height) sy1 = src->fb.height;
+    if (sx0 >= sx1 || sy0 >= sy1) {
+        return FDK_OK;
+    }
+
+    long long dx0 = (long long)dst_x + (sx0 - src_rect.x);
+    long long dy0 = (long long)dst_y + (sy0 - src_rect.y);
+    long long dx1 = dx0 + (sx1 - sx0);
+    long long dy1 = dy0 + (sy1 - sy0);
+
+    if (dx1 <= dst->clip_x0 || dy1 <= dst->clip_y0 ||
+        dx0 >= dst->clip_x1 || dy0 >= dst->clip_y1) {
+        return FDK_OK;
+    }
+    if (dx0 < dst->clip_x0) {
+        sx0 += dst->clip_x0 - dx0;
+        dx0 = dst->clip_x0;
+    }
+    if (dy0 < dst->clip_y0) {
+        sy0 += dst->clip_y0 - dy0;
+        dy0 = dst->clip_y0;
+    }
+    if (dx1 > dst->clip_x1) dx1 = dst->clip_x1;
+    if (dy1 > dst->clip_y1) dy1 = dst->clip_y1;
+    if (dx0 >= dx1 || dy0 >= dy1) {
+        return FDK_OK;
+    }
+
+    int dst_argb = (dst->format == FDK_SURFACE_FORMAT_ARGB8888);
+
+    /* Integer source-over, one rounded blend per channel — the same
+     * rounding discipline as fdk_surface_blend_mask. Fully transparent
+     * source pixels skip the write (the common case for sprites with
+     * padded bounds). */
+    for (long long row = 0; row < dy1 - dy0; row++) {
+        const fdk_u32 *srow =
+            src->fb.pixels +
+            (size_t)(sy0 + row) * (size_t)src->fb.stride + (size_t)sx0;
+        fdk_u32 *drow =
+            dst->fb.pixels +
+            (size_t)(dy0 + row) * (size_t)dst->fb.stride + (size_t)dx0;
+        long long n = dx1 - dx0;
+        for (long long i = 0; i < n; i++) {
+            fdk_u32 s = srow[i];
+            int sa = (int)((s >> 24) & 0xFFu);
+            if (sa <= 0) {
+                continue;
+            }
+            fdk_u32 d = drow[i];
+            int sr = (int)((s >> 16) & 0xFFu);
+            int sg = (int)((s >> 8) & 0xFFu);
+            int sb = (int)s & 0xFF;
+            int dr = (int)((d >> 16) & 0xFFu);
+            int dg = (int)((d >> 8) & 0xFFu);
+            int db = (int)d & 0xFF;
+            int inv = 255 - sa;
+            fdk_u32 out;
+            if (dst_argb) {
+                int da = (int)((d >> 24) & 0xFFu);
+                int oa = sa + (da * inv + 127) / 255;
+                if (oa <= 0) {
+                    continue;
+                }
+                /* out_rgb = (src_rgb*sa + dst_rgb*da*inv/255) / oa,
+                 * rearranged into one integer expression. */
+                int rr = (sr * sa * 255 + dr * da * inv) / (255 * oa);
+                int gg = (sg * sa * 255 + dg * da * inv) / (255 * oa);
+                int bb = (sb * sa * 255 + db * da * inv) / (255 * oa);
+                out = ((fdk_u32)oa << 24) | ((fdk_u32)rr << 16) |
+                      ((fdk_u32)gg << 8) | (fdk_u32)bb;
+            } else {
+                int rr = (sr * sa + dr * inv + 127) / 255;
+                int gg = (sg * sa + dg * inv + 127) / 255;
+                int bb = (sb * sa + db * inv + 127) / 255;
+                out = ((fdk_u32)rr << 16) | ((fdk_u32)gg << 8) | (fdk_u32)bb;
+            }
+            drow[i] = out;
+        }
     }
 
     damage_add(dst, (fdk_rect){ .x = (fdk_i32)dx0, .y = (fdk_i32)dy0,

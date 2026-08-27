@@ -82,6 +82,32 @@ void fdk_window_resize(fdk_window *window, fdk_i32 width, fdk_i32 height);
  * Returns FDK_ERR_INVALID_ARGUMENT if window or out_size is NULL. */
 fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
 
+/* ---- HiDPI (Phase 3 completion) ----
+ *
+ * Reports the window's current scale factor: the number of BUFFER
+ * (physical) pixels per logical unit. 1.0 = the window's pixels are
+ * its logical units (every X11 window — the X11 core protocol has no
+ * scale concept, and X11 HiDPI conventions live in font/DPI settings
+ * outside FDK's scope, honestly). On Wayland this is the live
+ * wl_surface buffer scale / fractional-scale preference, updated by
+ * the compositor as the window moves between outputs.
+ *
+ * What scales and what doesn't:
+ *   - fdk_surface_get_info() reports PHYSICAL dimensions (logical
+ *     size x scale); raw-pixel drawing is physical by definition.
+ *   - The WIDGET layer (fdk_window_set_content, decorations) stays
+ *     LOGICAL: FDK composites the widget tree onto the physical
+ *     buffer at the current scale automatically (fdk_window_paint).
+ *   - Apps that want crisp text/images at scale > 1 load fonts and
+ *     images at size x scale themselves; fdk_window_get_scale tells
+ *     them the factor.
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - window or out_scale is NULL
+ */
+fdk_result fdk_window_get_scale(const fdk_window *window,
+                                fdk_f32 *out_scale);
+
 /* Sets minimum/maximum size hints. Pass 0 for either dimension of
  * either struct to mean "no constraint" in that dimension. These are
  * hints handed to the platform (WM_NORMAL_HINTS on X11, xdg_toplevel

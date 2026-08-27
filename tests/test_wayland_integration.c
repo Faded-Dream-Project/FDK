@@ -129,12 +129,23 @@ int main(void) {
             assert(fdk_ok(fdk_window_get_surface(win, &surface)));
             fdk_surface_info info;
             assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+            /* Band probes in PHYSICAL rows: the band is 28 LOGICAL
+             * rows tall (title_bar_height metric), so the below-band
+             * probe must clear it at any scale — 40 logical rows up,
+             * converted through the live scale. */
+            fdk_f32 p_scale = 1.0f;
+            (void)fdk_window_get_scale(win, &p_scale);
+            fdk_i32 below_row = (fdk_i32)(40.0f * p_scale);
+            if (below_row >= info.height) {
+                below_row = info.height - 1;
+            }
             fdk_u32 mid = info.pixels[(fdk_i32)(info.stride * 2) +
                                       info.width / 2];
-            fdk_u32 below = info.pixels[(fdk_i32)(info.stride * 40) +
+            fdk_u32 below = info.pixels[(size_t)info.stride * (size_t)below_row +
                                         info.width / 2];
             assert(pixel_is_band_fill(mid));
-            assert(!pixel_is_band_fill(below) || info.height < 48);
+            assert(!pixel_is_band_fill(below) ||
+                   info.height < (fdk_i32)(48.0f * p_scale));
             printf("[ok] client-side decorations confirmed: themed band "
                    "rendered in-frame (pixel-verified), content below\n");
         }
@@ -198,6 +209,73 @@ int main(void) {
     assert(fdk_window_restore(win) == FDK_ERR_UNSUPPORTED);
     printf("[ok] minimize: request sent, optimistic state flagged, "
            "restore honestly UNSUPPORTED\n");
+
+    /* ---- HiDPI scale (Phase 3 completion) ----
+     *
+     * Whatever scale the compositor prefers (sway's config decides:
+     * 1x by default, 2x in the rig's scaled run), the invariants are
+     * the same: fdk_window_get_scale reports it, the surface's
+     * framebuffer is PHYSICAL (logical x scale, ceil), and the widget
+     * tree still covers the window proportionally after a paint (the
+     * scale > 1 path composites through the logical intermediate). */
+    {
+        fdk_f32 scale = 1.0f;
+        assert(fdk_ok(fdk_window_get_scale(win, &scale)));
+        assert(scale >= 0.99f);
+
+        /* Unmaximize first so the window has a compositor-decided
+         * (not screen-filling) logical size — cleaner math. */
+        (void)fdk_window_unmaximize(win);
+        for (int i = 0; i < 40; i++) {
+            (void)fdk_pump_events(ctx, 50);
+            if (!fdk_window_is_maximized(win)) {
+                break;
+            }
+        }
+        /* Let enter/leave + preferred_scale settle. */
+        for (int i = 0; i < 8; i++) {
+            (void)fdk_pump_events(ctx, 50);
+        }
+
+        fdk_size logical = { 0, 0 };
+        assert(fdk_ok(fdk_window_get_size(win, &logical)));
+        assert(logical.width > 0 && logical.height > 0);
+
+        fdk_f32 scale_now = 1.0f;
+        assert(fdk_ok(fdk_window_get_scale(win, &scale_now)));
+
+        fdk_surface *hs = NULL;
+        assert(fdk_ok(fdk_window_get_surface(win, &hs)));
+        fdk_surface_info hinfo;
+        assert(fdk_ok(fdk_surface_get_info(hs, &hinfo)));
+
+        /* Physical = ceil(logical * scale), within one pixel of the
+         * float prediction (rounding at the 120th quantum). */
+        fdk_f32 want_w = (fdk_f32)logical.width * scale_now;
+        fdk_f32 want_h = (fdk_f32)logical.height * scale_now;
+        assert((fdk_f32)hinfo.width >= want_w - 1.0f);
+        assert((fdk_f32)hinfo.width <= want_w + 1.0f);
+        assert((fdk_f32)hinfo.height >= want_h - 1.0f);
+        assert((fdk_f32)hinfo.height <= want_h + 1.0f);
+
+        /* Paint through the (possibly scaled) path and verify the
+         * content widget's green still fills the area below any
+         * decoration band — proportionally correct at any scale. */
+        assert(fdk_ok(fdk_window_paint(win)));
+        fdk_surface_info hinfo2;
+        assert(fdk_ok(fdk_surface_get_info(hs, &hinfo2)));
+        fdk_i32 probe_y = hinfo2.height - hinfo2.height / 4;
+        fdk_u32 px = hinfo2.pixels[(size_t)probe_y * (size_t)hinfo2.stride +
+                                   (size_t)(hinfo2.width / 2)];
+        int green = ((px >> 8) & 0xFFu) > 200 &&
+                    ((px >> 16) & 0xFFu) < 60 && (px & 0xFFu) < 60;
+        assert(green); /* content green, not background black */
+
+        printf("[ok] HiDPI: scale=%.3f logical %dx%d physical %dx%d "
+               "(=logical x scale), content paints proportionally\n",
+               (double)scale_now, logical.width, logical.height,
+               hinfo2.width, hinfo2.height);
+    }
 
     fdk_window_destroy(win);
     fdk_shutdown(ctx);

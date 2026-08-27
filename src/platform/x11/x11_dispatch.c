@@ -11,6 +11,24 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
         XEvent xevent;
         XNextEvent(conn->display, &xevent);
 
+        /* ShmCompletion (MIT-SHM): the server finished reading a
+         * shared pixel segment — clear that slot's in-flight flag so
+         * the next acquisition can hand it out again. Routed BEFORE
+         * the translate path: it is a backend-internal event the
+         * application never sees. */
+        if (conn->shm_ok &&
+            xevent.type == conn->shm_event_base + ShmCompletion) {
+            fdk_platform_window *shm_window =
+                fdk_x11_find_window(conn, xevent.xany.window);
+            if (shm_window != NULL) {
+                fdk_x11_surface_shm_completion(
+                    shm_window,
+                    (unsigned long)((const XShmCompletionEvent *)&xevent)
+                        ->shmseg);
+            }
+            continue;
+        }
+
         Window xwindow = xevent.xany.window;
         fdk_platform_window *pwindow = fdk_x11_find_window(conn, xwindow);
         if (pwindow == NULL) {

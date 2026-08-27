@@ -85,6 +85,14 @@ struct fdk_window {
      * first asks to render into this window. */
     struct fdk_surface *surface;
 
+    /* HiDPI paint intermediate (Phase 3 completion): at scale > 1 the
+     * widget tree paints into this LOGICAL-sized ARGB surface, which
+     * fdk_window_paint then composites onto the physical window
+     * surface at the window's scale (see fdk_window_paint). Lazily
+     * created, resized on window resize, destroyed with the window;
+     * unused (NULL) at scale 1 — that path paints directly. */
+    struct fdk_surface *paint_intermediate;
+
     /* Lazily created by fdk_window_get_root() (src/widget/widget.c's
      * window glue below), destroyed with the window. NULL until the
      * application builds a widget tree on this window. While set,

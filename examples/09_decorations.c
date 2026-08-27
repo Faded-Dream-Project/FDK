@@ -29,6 +29,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static struct {
     fdk_window *window;
@@ -204,31 +205,39 @@ int main(int argc, char **argv) {
      * input devices (weston headless kiosk-shell has no seat). Each
      * step prints the same markers the input-driven rig reads. */
     int auto_step = 0;
-    int auto_next = 0; /* frame at which the next step fires */
+    /* Time-based auto cycle (was frame-count-based): under HiDPI the
+     * scaled framebuffer costs 4x the fill per frame under the
+     * sanitized debug build, so frame counters made the rig's wall
+     * clock budget flaky. Two seconds of real time per phase. */
+    double auto_next_ms = 0.0;
     while (!app.quit) {
         (void)fdk_pump_events(ctx, 15);
         if (app.quit) {
             break;
         }
-        if (wayland_auto && frames >= auto_next) {
+        struct timespec auto_now;
+        clock_gettime(CLOCK_MONOTONIC, &auto_now);
+        double auto_now_ms =
+            (double)auto_now.tv_sec * 1000.0 + (double)auto_now.tv_nsec / 1e6;
+        if (wayland_auto && auto_now_ms >= auto_next_ms) {
             switch (auto_step) {
             case 0:
                 printf("AUTO: maximize\n");
                 fflush(stdout);
                 (void)fdk_window_maximize(app.window);
-                auto_next = frames + 180;
+                auto_next_ms = auto_now_ms + 2000.0;
                 break;
             case 1:
                 printf("AUTO: unmaximize\n");
                 fflush(stdout);
                 (void)fdk_window_unmaximize(app.window);
-                auto_next = frames + 180;
+                auto_next_ms = auto_now_ms + 2000.0;
                 break;
             case 2:
                 printf("AUTO: minimize\n");
                 fflush(stdout);
                 (void)fdk_window_minimize(app.window);
-                auto_next = frames + 180;
+                auto_next_ms = auto_now_ms + 2000.0;
                 break;
             case 3:
                 printf("AUTO: undecorate\n");
@@ -236,7 +245,7 @@ int main(int argc, char **argv) {
                 (void)fdk_window_set_decorated(app.window, false);
                 printf("PHASE: off\n");
                 fflush(stdout);
-                auto_next = frames + 180;
+                auto_next_ms = auto_now_ms + 2000.0;
                 break;
             case 4:
                 /* End visible + decorated + maximized: the screenshot
@@ -247,10 +256,10 @@ int main(int argc, char **argv) {
                 printf("PHASE: on\n");
                 fflush(stdout);
                 (void)fdk_window_maximize(app.window);
-                auto_next = frames + 180;
+                auto_next_ms = auto_now_ms + 2000.0;
                 break;
             default:
-                auto_next = frames + 180; /* hold the final state */
+                auto_next_ms = auto_now_ms + 2000.0; /* hold the final state */
                 break;
             }
             auto_step++;

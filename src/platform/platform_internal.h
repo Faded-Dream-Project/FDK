@@ -251,6 +251,18 @@ typedef struct fdk_platform_ops {
      * and any backend without display-driven frame feedback). Must
      * never block and never busy-wait — it is a state query. */
     int (*window_frame_ready)(fdk_platform_window *pwindow);
+
+    /* OPTIONAL HiDPI scale query behind fdk_window_get_scale()
+     * (Phase 3 completion): writes the window's current scale factor
+     * (1.0 = one buffer pixel per logical unit) to *out_scale.
+     * NULL means "always 1.0" — the honest answer for X11, whose
+     * core protocol has no scale concept (X11 windows are their
+     * pixels; HiDPI there is a font-size/DPI convention outside
+     * FDK's scope, see docs/rendering.md). The Wayland backend
+     * reports its live wl_surface buffer scale / fractional
+     * preferred scale. */
+    fdk_result (*window_get_scale)(fdk_platform_window *pwindow,
+                                   fdk_f32 *out_scale);
 } fdk_platform_ops;
 
 /* Backend entry points. Each returns NULL if that backend was not

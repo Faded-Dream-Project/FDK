@@ -145,7 +145,8 @@ Explicitly NOT done in Phase 2 (do not mistake for oversights — see
   `context.c` has an obvious place to add a timer queue when needed,
   but adding one before anything needs it would be speculative.
 
-## Phase 3 — Rendering (second slice shipped; phase in progress)
+## Phase 3 — Rendering ✅ (completion slice: images, alpha compositing,
+## transforms, antialiasing, MIT-SHM + double buffering, HiDPI)
 
 Implemented and tested in the FIRST slice (the foundation):
 - `fdk_surface` public API (`include/fdk/fdk_surface.h`): a window's
@@ -236,27 +237,86 @@ backends):
   destination). `draw_rect` corners now blend exactly once (was a
   subtle double-blend with translucent colors).
 
-Still NOT done (next structural gaps, in rough order):
-- **No MIT-SHM fast path on X11** — XPutImage over a local socket is
-  a memcpy per frame (now per-damage-rect); the shared-memory path
-  slots invisibly inside `x11_surface.c` when needed (and is
-  required anyway for remote X)
-- **No double-buffer presentation on X11** — the single XImage is
-  both draw target and blit source; correct (XPutImage copies into
-  the request stream) but a resize-acquire can race an in-flight
-  blit on a real desktop. Frame-callback PACING is now implemented
-  on Wayland (see above); X11 has no core-protocol equivalent
-- **Primitive set remains 2D-raster basics** — no transforms, image
-  decode (PNG etc.), alpha-masked blits, or antialiased
-  primitives yet; lines/circles/rounded rects are crisp 1px
-  geometry, and the demo ball's antialiasing is application code
-  (deliberately — it demonstrates the raw-pixel level)
-- **Text integration** (`src/text/`) not started — the demo draws
-  block letters as rects precisely because there is no font path yet
-- **Single window scale handling** — buffer scale / fractional-scale
-  (HiDPI) protocols not wired up; surface dimensions equal window
-  dimensions in pixels, which is wrong under any non-1x scale factor
-  and is Phase 3's next structural gap to close
+Completion slice (Phase 3 is now CLOSED — every item of the original
+"Primitives: rects, rounded rects, lines, borders, fills, gradients,
+clipping, transforms, images, alpha compositing, high-DPI scaling +
+text" promise is implemented and tested):
+
+- **Image decoding** (`fdk_surface_create_from_image`,
+  src/render/surface_image.c): PNG/JPEG/BMP/PSD/TGA/GIF/HDR/PIC via
+  the vendored stb_image v2.30 (FDK's second third-party component,
+  same dual MIT/public-domain license as stb_truetype — provenance
+  and update procedure in third_party/stb/README.md). Security
+  discipline per docs/security.md: file stat'd before any decode
+  (non-regular / >512 MiB refused), decoded dimensions re-validated
+  against the surface bounds, nothing partial ever handed out, zero
+  partial results.
+- **ARGB8888 surfaces + per-pixel alpha compositing**:
+  `fdk_surface_create_format` creates straight-alpha ARGB offscreen
+  surfaces (fully transparent initial state); every drawing helper
+  composites the alpha channel with the full straight source-over
+  formula on ARGB destinations; `fdk_surface_blit_blend` is the
+  per-pixel source-over blit (XRGB sources refused); opaque blits
+  onto ARGB force alpha 255. Text rendering (blend_mask) composites
+  into transparent sprites correctly too.
+- **Transforms**: `fdk_matrix` (2x3 affine, translate/scale/rotate
+  constructors, mul/invert) + `fdk_surface_blit_transformed` —
+  inverse-mapped so translucent sources never double-blend, bilinear
+  sampling (edge-clamped), with INTEGER-EXACT fast paths (identity,
+  whole-pixel translation, integer scale-up = nearest-neighbor block
+  copy — upscaling never blurs); degenerate matrices are documented
+  no-ops. Tests caught one real bug here before it shipped
+  (fdk_matrix_invert computed the inverse translation from the wrong
+  matrix elements).
+- **Antialiased primitives**: `draw_line_aa` (integer-endpoint Wu
+  with per-column direct evaluation — no incremental drift),
+  `draw_circle_aa` / `fill_circle_aa` (exact-distance coverage),
+  `fill_rounded_rect_aa` (box-SDF coverage). Axis-aligned AA lines
+  are byte-identical to crisp ones; coverage is bounded and monotone
+  (all pinned by test).
+- **MIT-SHM + double buffering on X11** (x11_surface.c): two pixel
+  slots per window, swapped every present; SHM-backed when the
+  server supports it (probed once per connection; FDK_NO_MIT_SHM=1
+  opts out), with ShmCompletion tracked per segment so the server is
+  never racing the app's redraw (the completion-event routing caught
+  the classic shmseg-vs-shmid confusion — the fix took the flaky
+  "overdue" warnings and an abort with it). Attach-then-IPC_RMID
+  segments leak nothing on crash. The X11 integration test observes
+  the two SysV segments while rendering and their release on
+  destroy, and proves the double-buffer swap behaviorally (un-
+  presented drawing never reaches the server).
+- **HiDPI**: `fdk_window_get_scale()`; Wayland wires wl_output
+  tracking + wl_surface enter/leave (output-derived integer max),
+  wp_fractional_scale_manager_v1 + wp_viewporter for fractional
+  factors (viewport source = logical x exact scale in 120ths), and
+  `wl_surface.preferred_buffer_scale`/fractional preferred_scale
+  events; buffers are PHYSICAL (logical x scale); damage converts to
+  surface-local logical coords at present; the WIDGET layer stays
+  logical and composites through an ARGB intermediate at scale > 1
+  (scale 1 path byte-identical, pinned by the existing suites).
+  X11 honestly reports 1.0 (no core-protocol scale). Verified
+  end-to-end against sway at output scale 2: physical exactly 2x
+  logical, content proportional, decoration band correct at any
+  scale. The scaled test run also caught a REAL pre-existing leak
+  (a pending frame callback's proxy overwritten by the next one) —
+  fixed.
+- **Demo + rig**: examples/10_images.c (four panels: decode+blend,
+  2x/rotated/1.7x transforms, crisp-vs-AA, runtime ARGB sprite
+  accumulation) + scripts/run_images_demo_x11.sh — 13 PIL checks,
+  ALL PASS.
+- Tests added: 7 headless render groups (ARGB blending + accumulation
+  math, blit_blend incl. clip conformance, image decode failure codes
+  + known pixels + compositing, matrix algebra, transformed blit
+  exactness/bilinear/degenerate/rotation, transformed alpha, AA
+  primitives incl. axis-exactness) + X11 MIT-SHM/double-buffer case +
+  Wayland HiDPI case (scale 1 and 2 runs) — headless suite 91 checks,
+  X11 26, all demo rigs PASS.
+
+Remaining (parked, honest — none are Phase 3's promised scope):
+premultiplied-alpha fast paths and subpixel-RGB text rasterization
+(Phase 11 performance territory); a compositor-config with a true
+fractional output scale for the rig (the fractional code paths are
+built and bound; sway's headless output here runs integer 2x).
 
 ## Phase 4 — Widget Foundation ✅ (this milestone)
 
@@ -496,10 +556,10 @@ expectations recomputed to the contract.
 **Still to build (rest of Phase 6):**
 - Subpixel glyph positioning; bold/italic faces beyond file choice
 
-Phase 3's original "src/text/ gap" is closed; remaining Phase 3
-rendering gaps (MIT-SHM, X11 double buffering, transforms, image
-decode, alpha blits, AA primitives, HiDPI) stay parked as recorded —
-none block the widget catalog. The wrap label's documented v1
+Phase 3's original "src/text/ gap" is closed (and Phase 3 itself is
+now COMPLETE — its completion slice landed after Phase 8, closing
+MIT-SHM, X11 double buffering, transforms, image decode, alpha
+blits, AA primitives, and HiDPI; see the Phase 3 entry). The wrap label's documented v1
 limitation (natural height measured at the natural width; no
 width-for-height layout) is recorded above and in fdk_widgets.h —
 it wants the Phase 5 grid/constraint work or a later layout pass.

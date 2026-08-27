@@ -3,8 +3,12 @@
 This document describes FDK's software rendering layer: the public
 `fdk_surface` API (`include/fdk/fdk_surface.h`), the damage-tracking
 model that makes partial redraws correct, the clip stack, offscreen
-surfaces, frame pacing, and how the X11 and Wayland backends present
-pixels without any backend type leaking into application code.
+surfaces (two pixel formats), image decoding, per-pixel alpha
+compositing, affine-transformed blits, antialiased primitives, frame
+pacing, HiDPI scale handling, and how the X11 (MIT-SHM,
+double-buffered) and Wayland (buffer scale / fractional viewport)
+backends present pixels without any backend type leaking into
+application code.
 
 Everything here is implemented and tested — headless in
 `tests/test_render.c` (`make test`, no display needed, thanks to
@@ -132,6 +136,9 @@ geometry (no antialiasing yet — that is deliberate, listed in
 | `fill_rounded_rect` | corner-band rows widen by the chord toward the middle; radius clamped to half the shorter side |
 | `draw_rounded_rect` | straight edges + four exact quarter arcs, each pixel plotted once |
 | `blit` | opaque surface-to-surface copy; clipped on source AND destination (bounds + clip stack); damages the destination |
+| `blit_blend` | per-pixel source-over from an ARGB8888 source (integer blend, one rounding per channel); an XRGB source is refused — that is `blit`'s job |
+| `blit_transformed` | inverse-mapped affine blit (see "Transforms") |
+| `draw_line_aa` / `draw_circle_aa` / `fill_circle_aa` / `fill_rounded_rect_aa` | coverage-based antialiased variants (see "Antialiasing") |
 
 `draw_rect`'s corners and `draw_rounded_rect`'s arcs are plotted
 exactly once each — with translucent colors a double blend is a
@@ -208,13 +215,107 @@ A backend with no software framebuffer (a hypothetical GPU-only
 backend) leaves the two render ops NULL and the public API reports
 `FDK_ERR_UNSUPPORTED` — nothing pretends to work.
 
+## Pixel formats and alpha compositing
+
+`fdk_surface_create_format` makes offscreen surfaces in either
+`FDK_SURFACE_FORMAT_XRGB8888` (the default; top byte ignored) or
+`FDK_SURFACE_FORMAT_ARGB8888` — **straight** (non-premultiplied) alpha,
+`A<<24 | R<<16 | G<<8 | B`. ARGB surfaces start fully transparent.
+
+Every drawing helper composites source-over; on ARGB destinations the
+ALPHA CHANNEL composites too, with the full straight-alpha formula
+(`out_a = sa + da*(1-sa)`, `out_rgb = (src*sa + dst*da*(1-sa))/out_a`)
+so translucent drawing onto a partially transparent sprite accumulates
+correctly when the sprite is later composited. `fdk_surface_blit_blend`
+is the per-pixel source-over blit from an ARGB source (XRGB sources are
+refused — opaque copies are `fdk_surface_blit`'s job); an XRGB source
+blitted OPAQUELY onto an ARGB destination gets alpha forced to 255 so
+the "ignored" top byte cannot fake transparency into a compositing
+surface.
+
+## Image decoding
+
+`fdk_surface_create_from_image(path, &surface)` decodes a PNG / JPEG /
+BMP / PSD / TGA / GIF / HDR / PIC file (vendored stb_image v2.30 — same
+provenance and license discipline as stb_truetype, see
+`third_party/stb/README.md`) into an ARGB8888 surface with straight
+alpha, ready for `blit_blend` / `blit_transformed`. Decoding follows
+`docs/security.md`'s rules for attacker-controlled data: the file is
+stat'd BEFORE any decode (not a regular file, or over 512 MiB ->
+refused), decoded dimensions are re-validated against the surface-size
+bounds, nothing partial is ever handed out, and the decoder's buffers
+live in FDK's allocator (same sanitizer accounting as everything
+else).
+
+## Transforms
+
+`fdk_matrix` is a 2x3 affine (see `fdk_surface.h` for the exact
+conventions — constructors for translate/scale/rotate, `fdk_matrix_mul`
+composes first-then-second, `fdk_matrix_invert` maps degenerate
+matrices to identity). `fdk_surface_blit_transformed` draws a source
+surface through one:
+
+- every destination pixel in the transformed source's bounding box is
+  INVERSE-mapped and sampled BILINEARLY (edge-clamped), so translucent
+  sources never double-blend — each destination pixel is visited once;
+- INTEGER-EXACT fast paths skip the filtering: the identity, whole-
+  pixel translations, and integer uniform scale-ups (2x, 3x, ...) are
+  nearest-neighbor block copies — upscaling pixel art never blurs;
+- degenerate (non-invertible) matrices are a documented no-op.
+
+## Antialiasing
+
+The `_aa` primitive variants (line, circle outline, filled circle,
+rounded rect) compute each pixel's exact geometric coverage — signed
+distance to the ideal shape — and blend the color weighted by that
+coverage through the same source-over math as everything else. The
+axis-aligned cases collapse to exactly 0/1 coverage (an AA horizontal
+line is byte-identical to the crisp one — pinned by test), and every
+blended value stays inside the convex hull of background and shape
+color. The crisp variants remain the defaults: exact integer geometry
+at lower cost; `_aa` is opt-in smoothness.
+
+## X11 presentation: MIT-SHM + double buffering
+
+Each window keeps TWO pixel slots and swaps them every present. With
+plain `XPutImage` (the fallback path, and under `FDK_NO_MIT_SHM=1`)
+this is belt-and-braces; with MIT-SHM it is a CORRECTNESS requirement:
+the server reads a shared segment asynchronously after `XShmPutImage`
+returns, so the app may only redraw a segment the server has finished
+with. Acquire therefore hands out the back slot (syncing first if its
+completion hasn't arrived), present blits it with `XShmPutImage`
+(zero-copy — also the only sane path over remote X) and swaps. The
+attach-then-`IPC_RMID` discipline means a crashed client leaks nothing
+in `/dev/shm`; the X11 integration test observes the two SysV segments
+while rendering and their release on destroy.
+
+## HiDPI scale
+
+`fdk_window_get_scale()` reports the window's buffer-pixels-per-logical-
+unit factor: always 1.0 on X11 (the core protocol has no scale concept
+— honestly documented, not faked), and on Wayland the live wl_surface
+buffer scale — integer factors via `wl_surface.set_buffer_scale`,
+fractional factors via the `wp_fractional_scale_manager_v1` +
+`wp_viewporter` pair (source rectangle = logical x exact scale in
+120ths, destination = logical) when the compositor offers them, with
+the output-derived integer maximum as the fallback when it doesn't.
+
+The framebuffer is PHYSICAL (`fdk_surface_get_info` reports logical x
+scale); raw-pixel drawing is physical by definition. The WIDGET layer
+stays LOGICAL: `fdk_window_paint` composites the tree through a
+logical-sized ARGB intermediate and `blit_transformed`'s exact integer
+scale path at scale > 1 (at scale 1 the direct path is unchanged and
+pixel-identical). Damage rects convert to surface-local logical
+coordinates at present time, rounding outward. Verified end-to-end
+against sway at output scale 2 (physical exactly 2x logical).
+
 ## What is deliberately not here yet
 
-Honest gaps, tracked in `docs/roadmap.md`'s Phase 3 section: no
-MIT-SHM fast path on X11 (per-damage-rect `XPutImage` is a memcpy —
-fine locally, worth replacing eventually and required for remote
-X), no X11 double-buffering, no transforms, no image decoding, no
-alpha-masked (as opposed to opaque) blits, no antialiased
-primitives, no text (`src/text/` is future work), and no HiDPI
-buffer-scale handling. Each of those has a designed-in place to land
-without reshaping this layer.
+Honest remaining gaps: no premultiplied-alpha fast paths (everything is
+straight-alpha float/integer math — a performance refinement for the
+Phase 11 stabilization pass); no subpixel-antialiased text (text
+rendering is `src/text/`'s AA glyph masks — Subpixel RGB glyph
+rasterization is a possible later refinement); fractional HiDPI is
+exercised by the code paths but the sway test rig runs integer scale 2
+(headless outputs with true fractional scales are a compositor-config
+matter). None of these reshape this layer's contracts.

@@ -630,6 +630,7 @@ fdk_result fdk_window_create(fdk_context *ctx,
     window->event_callback = NULL;
     window->event_callback_user_data = NULL;
     window->surface = NULL;
+    window->paint_intermediate = NULL;
     window->root = NULL;
     window->content = NULL;
     window->decorated = false;
@@ -734,6 +735,8 @@ void fdk_window_destroy(fdk_window *window) {
     fdk_free(window->title);
     window->title = NULL;
     fdk_surface_detach_from_window(window);
+    fdk_surface_destroy(window->paint_intermediate);
+    window->paint_intermediate = NULL;
     fdk_context_unregister_window(window->ctx, window);
     window->ops->window_destroy(window->pwindow);
     fdk_free(window);
@@ -774,6 +777,20 @@ fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size) {
     }
     *out_size = window->last_size;
     return FDK_OK;
+}
+
+fdk_result fdk_window_get_scale(const fdk_window *window,
+                                fdk_f32 *out_scale) {
+    if (window == NULL || out_scale == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* NULL op = backend has no scale concept (X11): 1.0 is the
+     * honest answer, not a fallback masquerading as information. */
+    if (window->ops->window_get_scale == NULL) {
+        *out_scale = 1.0f;
+        return FDK_OK;
+    }
+    return window->ops->window_get_scale(window->pwindow, out_scale);
 }
 
 void fdk_window_set_size_limits(fdk_window *window, fdk_size min_size, fdk_size max_size) {
@@ -1091,6 +1108,62 @@ fdk_result fdk_window_paint(fdk_window *window) {
      * it); cache the context/pwindow and re-verify before presenting. */
     fdk_context *ctx = window->ctx;
     fdk_platform_window *pwindow = window->pwindow;
+
+    /* HiDPI compositing (Phase 3 completion): the widget tree is
+     * LOGICAL; the window surface's framebuffer is PHYSICAL (logical
+     * x scale — see fdk_window_get_scale). At scale 1 the tree paints
+     * straight into the window surface exactly as it always has (the
+     * pixel-identical path every existing test pins). At scale > 1
+     * the tree paints into a logical-sized ARGB intermediate and is
+     * composited on with blit_transformed's exact integer-scale path
+     * (nearest-neighbor block scaling — no resampling artifacts);
+     * the intermediate's transparent regions let the application's
+     * own physical-resolution background show through, preserving
+     * the scale-1 layering semantics widget-over-app-background. */
+    fdk_f32 scale = 1.0f;
+    (void)fdk_window_get_scale(window, &scale);
+
+    if (scale > 1.01f) {
+        fdk_i32 lw = window->last_size.width;
+        fdk_i32 lh = window->last_size.height;
+        if (lw > 0 && lh > 0) {
+            if (window->paint_intermediate == NULL ||
+                window->paint_intermediate->fb.width != lw ||
+                window->paint_intermediate->fb.height != lh) {
+                fdk_surface_destroy(window->paint_intermediate);
+                window->paint_intermediate = NULL;
+                fdk_surface *inter = NULL;
+                if (fdk_ok(fdk_surface_create_format(
+                        lw, lh, FDK_SURFACE_FORMAT_ARGB8888, &inter))) {
+                    window->paint_intermediate = inter;
+                }
+            }
+            if (window->paint_intermediate != NULL) {
+                fdk_surface *inter = window->paint_intermediate;
+                /* Clear to transparent: this frame's widget coverage
+                 * only. (The widgets blend over whatever the app put
+                 * in the window surface — same layering as scale 1.) */
+                fdk_color transparent = { .r = 0.0f, .g = 0.0f, .b = 0.0f,
+                                          .a = 0.0f };
+                fdk_surface_fill(inter, transparent);
+                fdk_widget_tree_paint(window->root, inter);
+                if (fdk_context_find_window_by_pwindow(ctx, pwindow) !=
+                    window) {
+                    return FDK_OK; /* destroyed mid-paint */
+                }
+                fdk_surface_blit_transformed(surface,
+                                             fdk_matrix_scale(scale), inter);
+                return fdk_surface_present(surface);
+            }
+            /* Intermediate allocation failed: fall through to the
+             * direct path (tree squeezed into the top-left of the
+             * physical buffer) rather than not painting at all —
+             * degraded, logged once by the allocator, honest. */
+            FDK_WARN("HiDPI intermediate surface unavailable; painting "
+                     "unscaled");
+        }
+    }
+
     fdk_widget_tree_paint(window->root, surface);
     if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
         return FDK_OK; /* window destroyed mid-paint; the tree went

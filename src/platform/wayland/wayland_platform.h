@@ -40,6 +40,33 @@ struct fdk_platform_connection {
      * compositor's server-side decorations. */
     struct zxdg_decoration_manager_v1 *decoration_manager;
 
+    /* --- HiDPI (Phase 3 completion) --------------------------------
+     *
+     * wl_output globals are bound (version >= 2 for the scale event)
+     * and tracked so windows can derive their scale from the outputs
+     * they are displayed on (xdg_toplevel enter/leave). Both optional
+     * globals below extend scale support to FRACTIONAL factors:
+     *   - wp_viewporter: maps an exact source rectangle of the buffer
+     *     onto the surface (the mechanism fractional scaling needs);
+     *   - wp_fractional_scale_manager_v1: the compositor's preferred
+     *     scale in 120ths of a unit, per window.
+     * When either is missing, FDK uses integer wl_surface buffer
+     * scale only — correct on every compositor, fractional factors
+     * just round to the nearest supported integer. */
+    struct wp_viewporter *viewporter;
+    struct wp_fractional_scale_manager_v1 *fractional_manager;
+
+    /* Bound outputs (grown on demand; wl_output v2+ carries the
+     * scale event). Kept for the window's lifetime of the
+     * connection; outputs that disappear are left in place with
+     * scale 0 = "gone" and skipped by the max-scale walk. */
+    struct {
+        struct wl_output *output;
+        int scale; /* wl_output::scale, or 0 once the global is gone */
+    } *outputs;
+    size_t output_count;
+    size_t output_capacity;
+
     /* Serial of the most recent pointer-button event (Phase 8):
      * xdg_toplevel.move/resize require the serial of the triggering
      * input event — the compositor validates it against its own
@@ -143,6 +170,35 @@ struct fdk_platform_window {
     struct wl_buffer *render_pending; /* acquired but not yet presented */
     int rendered_ever;                /* first render present() completed */
 
+    /* --- HiDPI (Phase 3 completion) --------------------------------
+     *
+     * The window's scale in 120ths of a logical unit (240 = 2x,
+     * 300 = 2.5x), exactly the fractional-scale-v1 unit — integer
+     * factors are multiples of 120. Sources, in precedence order:
+     * the compositor's wp_fractional_scale_v1::preferred_scale (when
+     * the protocol pair is available), else the maximum wl_output
+     * scale among the outputs the toplevel is currently shown on
+     * (xdg_toplevel enter/leave), else 120 = 1x. buffer_scale is the
+     * INTEGER wl_surface scale actually applied (exact for integer
+     * factors; the viewport carries the fractional remainder — see
+     * apply_window_scale()). Render buffers are PHYSICAL pixels:
+     * logical size x buffer_scale (rounded up under a viewport).
+     * scale_applied tracks that the protocol objects match the
+     * current value (re-applied on change before the next commit). */
+    int scale_x120;      /* preferred scale, 120ths (>= 120)          */
+    int buffer_scale;    /* integer wl_surface buffer scale (>= 1)    */
+    int scale_applied;   /* scale_x120 pushed to the protocol yet?    */
+    struct wp_viewport *viewport;          /* NULL without viewporter */
+    struct wp_fractional_scale_v1 *fractional; /* NULL without mgr    */
+
+    /* Outputs this toplevel currently occupies (xdg_toplevel
+     * enter/leave), driving the output-derived scale when the
+     * fractional-scale protocol is unavailable. Small dynamic array
+     * of borrowed wl_output pointers; capacity grows on demand. */
+    struct wl_output **entered_outputs;
+    size_t entered_count;
+    size_t entered_capacity;
+
     /* --- Frame pacing (wl_surface.frame) ---
      *
      * Every render present requests a frame callback after its
@@ -192,6 +248,13 @@ struct fdk_platform_window {
 };
 
 /* Registry helpers, implemented in wayland_registry.c. */
+/* HiDPI output tracking (wayland_registry.c). track_output binds
+ * listener state for a freshly bound wl_output; destroy_outputs
+ * releases everything at disconnect. */
+void fdk_wayland_track_output(fdk_platform_connection *conn,
+                              struct wl_output *output);
+void fdk_wayland_destroy_outputs(fdk_platform_connection *conn);
+
 fdk_result fdk_wayland_register_window(fdk_platform_connection *conn,
                                         fdk_platform_window *pwindow);
 void fdk_wayland_unregister_window(fdk_platform_connection *conn,
@@ -245,6 +308,14 @@ void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
  * lifecycle. */
 fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                                                fdk_platform_framebuffer *out_fb);
+
+/* HiDPI (Phase 3 completion): recompute the window's scale from the
+ * enter/leave output set (wayland_window.c), and the
+ * fdk_window_get_scale() query op. */
+fdk_result fdk_wayland_window_recompute_scale(
+    fdk_platform_window *pwindow, struct wl_output *output, int entered);
+fdk_result fdk_wayland_window_get_scale(fdk_platform_window *pwindow,
+                                        fdk_f32 *out_scale);
 fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
                                       const fdk_platform_damage *damage);
 int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
