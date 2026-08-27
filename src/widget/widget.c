@@ -1372,7 +1372,8 @@ void fdk_widget_tree_paint(fdk_widget *any, fdk_surface *surface) {
 
 static bool dispatch_pointer(fdk_widget *root, fdk_widget *target,
                              fdk_widget_event_type type, fdk_pointf pos,
-                             fdk_u32 button, fdk_f32 dx, fdk_f32 dy) {
+                             fdk_u32 button, fdk_f32 dx, fdk_f32 dy,
+                             fdk_u32 modifiers) {
     fdk_widget_event ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = type;
@@ -1381,6 +1382,7 @@ static bool dispatch_pointer(fdk_widget *root, fdk_widget *target,
         case FDK_WIDGET_POINTER_UP:
             ev.pointer.position = pos;
             ev.pointer.button = button;
+            ev.pointer.modifiers = modifiers;
             break;
         case FDK_WIDGET_SCROLL:
             ev.scroll.position = pos;
@@ -1454,7 +1456,7 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
                      * frozen until release. */
                     return dispatch_pointer(root, root->grab,
                                             FDK_WIDGET_POINTER_MOTION,
-                                            pos, 0, 0.0f, 0.0f);
+                                            pos, 0, 0.0f, 0.0f, 0);
                 }
                 root->grab = NULL; /* destroyed mid-grab */
             }
@@ -1465,7 +1467,7 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
                 return false;
             }
             return dispatch_pointer(root, hit, FDK_WIDGET_POINTER_MOTION,
-                                    pos, 0, 0.0f, 0.0f);
+                                    pos, 0, 0.0f, 0.0f, 0);
         }
 
         case FDK_EVENT_POINTER_BUTTON_DOWN: {
@@ -1482,7 +1484,8 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
             return dispatch_pointer(root, target,
                                     FDK_WIDGET_POINTER_DOWN, pos,
                                     event->pointer_button.button,
-                                    0.0f, 0.0f);
+                                    0.0f, 0.0f,
+                                    event->pointer_button.modifiers);
         }
 
         case FDK_EVENT_POINTER_BUTTON_UP: {
@@ -1497,7 +1500,8 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
                 handled = dispatch_pointer(root, target,
                                            FDK_WIDGET_POINTER_UP, pos,
                                            event->pointer_button.button,
-                                           0.0f, 0.0f);
+                                           0.0f, 0.0f,
+                                           event->pointer_button.modifiers);
             }
             root->grab = NULL; /* release always ends the grab */
             return handled;
@@ -1515,7 +1519,7 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
             }
             return dispatch_pointer(root, target, FDK_WIDGET_SCROLL, pos,
                                     0, event->scroll.delta_x,
-                                    event->scroll.delta_y);
+                                    event->scroll.delta_y, 0);
         }
 
         case FDK_EVENT_POINTER_ENTER: {

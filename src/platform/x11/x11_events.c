@@ -172,6 +172,8 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             out->pointer_button.position.x = (fdk_f32)xevent->xbutton.x;
             out->pointer_button.position.y = (fdk_f32)xevent->xbutton.y;
             out->pointer_button.button = xevent->xbutton.button;
+            out->pointer_button.modifiers =
+                translate_modifiers(xevent->xbutton.state);
             return 1;
         }
 

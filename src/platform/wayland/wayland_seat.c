@@ -6,6 +6,7 @@
 
 #include <sys/mman.h>
 #include <unistd.h>
+#include <string.h>
 
 /* ---- Keyboard ---- */
 
@@ -247,11 +248,17 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
     }
 
     fdk_event_data event;
+    memset(&event, 0, sizeof(event));
     event.type = (state == WL_POINTER_BUTTON_STATE_PRESSED)
         ? FDK_EVENT_POINTER_BUTTON_DOWN : FDK_EVENT_POINTER_BUTTON_UP;
     event.pointer_button.position.x = (fdk_f32)conn->pointer_x;
     event.pointer_button.position.y = (fdk_f32)conn->pointer_y;
     event.pointer_button.button = fdk_button;
+    /* Phase 9: the xkb state tracks modifier keys from the same
+     * keyboard's key events, so shift/ctrl-click semantics work on
+     * Wayland exactly like X11's state-mask translation. */
+    event.pointer_button.modifiers =
+        xkb_modifiers_to_fdk(conn->xkb_state);
     conn->dispatch(conn->pointer_focus, &event, conn->dispatch_user_data);
 }
 

@@ -248,9 +248,8 @@ fdk_result fdk_frame_set_title(fdk_widget *frame, const char *title);
  * buffer until the IME commits (the application then inserts the
  * committed text like any other input).
  *
- * The v1 pointer event carries no modifier state, so shift-click
- * selection EXTENSION is not expressible (shift+arrows and drag do
- * the extending); noted here so it reads as scope, not a bug.
+ * Shift+click extends the selection from its anchor; shift+arrows
+ * and drag do the same from the keyboard/pointer side.
  *
  * Max text length: 64 KiB (bounded input, docs/security.md); longer
  * inserts are refused with FDK_ERR_INVALID_ARGUMENT and a warning.
@@ -301,6 +300,155 @@ void fdk_entry_set_on_changed(fdk_widget *entry,
 void fdk_entry_set_on_activate(fdk_widget *entry,
                                fdk_entry_activate_fn on_activate,
                                void *user_data);
+
+/* ---- ScrollView (Phase 9) ----
+ *
+ * A scrolling container: exactly one content child, clipped to the
+ * viewport, with overlay scrollbars that appear only when their axis
+ * overflows. Scroll with the wheel anywhere over the content, by
+ * dragging the scrollbar thumbs, by clicking a trough (page), or —
+ * when the scrollview itself is focused (opt in with
+ * fdk_widget_set_can_focus) — with arrows/PageUp/PageDown/Home/End.
+ *
+ * Ownership: set_content REPARENTS the widget into the scrollview
+ * (and destroys any previous content, the standard FDK
+ * parent-owns-children model). Natural size = the content's natural
+ * size, so a scrollview only actually scrolls once something SMALLER
+ * is assigned to it (an explicit set_bounds, or a fixed slot in a
+ * layout); that is the intended use. Wheel notches step 48 px;
+ * themed metric scrollbar_width (6..24, default 12) sizes the bars.
+ */
+
+fdk_result fdk_scrollview_create(fdk_widget *parent,
+                                 fdk_widget **out_scrollview);
+
+/* Adopts `content` as the scrollable child (reparented, replacing
+ * and destroying any previous content). NULL clears (and destroys)
+ * the current content. */
+fdk_result fdk_scrollview_set_content(fdk_widget *scrollview,
+                                      fdk_widget *content);
+
+/* Absolute scroll offsets; clamped to [0, content - viewport] on
+ * both axes. get returns the clamped truth. */
+fdk_result fdk_scrollview_scroll_to(fdk_widget *scrollview, fdk_i32 x,
+                                    fdk_i32 y);
+void fdk_scrollview_scroll_by(fdk_widget *scrollview, fdk_i32 dx,
+                              fdk_i32 dy);
+fdk_result fdk_scrollview_get_scroll_offset(fdk_widget *scrollview,
+                                            fdk_i32 *out_x,
+                                            fdk_i32 *out_y);
+
+/* ---- List (Phase 9) ----
+ *
+ * A scrolling list of text rows with single / multiple / no
+ * selection, built on the ScrollView (bars, wheel, clipping come
+ * from it). Rows are left-aligned text at a fixed per-font row
+ * height; the list is focusable and keyboard-navigable
+ * (Up/Down/Home/End/PageUp/PageDown; shift extends in MULTIPLE
+ * mode). Click selects; ctrl+click toggles; shift+click ranges —
+ * the pointer event's modifier state (Phase 9) drives it.
+ *
+ * Selection reads: get_selected (first selected, -1 when none) for
+ * SINGLE mode; selected_count + selected_at(position) enumerate
+ * MULTIPLE selections in row order. The selection-changed callback
+ * fires once per settled change (clicks, keyboard, programmatic).
+ */
+
+typedef enum fdk_list_selection_mode {
+    FDK_LIST_SELECTION_NONE = 0,
+    FDK_LIST_SELECTION_SINGLE = 1,
+    FDK_LIST_SELECTION_MULTIPLE = 2,
+} fdk_list_selection_mode;
+
+/* Notified after the selection settles. */
+typedef void (*fdk_list_selection_fn)(fdk_widget *list,
+                                      void *user_data);
+
+fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
+                           fdk_widget **out_list);
+
+void fdk_list_set_selection_mode(fdk_widget *list,
+                                 fdk_list_selection_mode mode);
+
+/* Row CRUD. append writes the new row's index to *out_index when
+ * non-NULL. Row text is copied. */
+fdk_result fdk_list_append(fdk_widget *list, const char *text,
+                           size_t *out_index);
+fdk_result fdk_list_insert(fdk_widget *list, size_t index,
+                           const char *text);
+fdk_result fdk_list_remove(fdk_widget *list, size_t index);
+void fdk_list_clear(fdk_widget *list);
+size_t fdk_list_row_count(fdk_widget *list);
+const char *fdk_list_row_text(fdk_widget *list, size_t row);
+fdk_result fdk_list_set_row_text(fdk_widget *list, size_t row,
+                                 const char *text);
+
+/* Selection queries and programmatic select (which follows the
+ * current mode: cleared-then-one, honoring MULTIPLE's additive
+ * contract). */
+fdk_i64 fdk_list_get_selected(fdk_widget *list);
+bool fdk_list_is_selected(fdk_widget *list, size_t row);
+size_t fdk_list_selected_count(fdk_widget *list);
+fdk_result fdk_list_selected_at(fdk_widget *list, size_t position,
+                                size_t *out_row);
+fdk_result fdk_list_select(fdk_widget *list, size_t row);
+
+void fdk_list_set_on_selection_changed(fdk_widget *list,
+                                       fdk_list_selection_fn fn,
+                                       void *user_data);
+
+/* ---- Tree (Phase 9) ----
+ *
+ * A hierarchical expandable tree on the ScrollView: nodes hold text,
+ * children nest under indentation, parents get a stroked-triangle
+ * expander (font-independent, like the title-bar glyphs). Click a
+ * row to select (SINGLE selection — multi-select trees are parked
+ * honestly); click the expander zone to collapse/expand. Keyboard:
+ * Up/Down walk VISIBLE nodes, Left collapses-or-jumps-to-parent,
+ * Right expands-or-enters-first-child, Home/End/PageUp/PageDown as
+ * in List.
+ *
+ * Node handles (fdk_tree_node) are stable for the tree's lifetime:
+ * they index the internal node store, which only ever grows.
+ * FDK_TREE_NODE_NONE means "no node" (root parent, no selection).
+ */
+
+typedef size_t fdk_tree_node;
+#define FDK_TREE_NODE_NONE ((size_t)-1)
+
+typedef void (*fdk_tree_selection_fn)(fdk_widget *tree,
+                                      void *user_data);
+
+fdk_result fdk_tree_create(fdk_widget *parent, fdk_font *font,
+                           fdk_widget **out_tree);
+
+/* Adds `text` as the last child of `parent` (FDK_TREE_NODE_NONE =
+ * a root-level node). Writes the new handle to *out_node when
+ * non-NULL. */
+fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
+                             const char *text,
+                             fdk_tree_node *out_node);
+fdk_result fdk_tree_node_set_text(fdk_widget *tree,
+                                  fdk_tree_node node,
+                                  const char *text);
+const char *fdk_tree_node_text(fdk_widget *tree, fdk_tree_node node);
+
+/* Expand/collapse (parents only; leaves return
+ * FDK_ERR_INVALID_ARGUMENT). */
+fdk_result fdk_tree_node_expand(fdk_widget *tree, fdk_tree_node node,
+                                bool expanded);
+bool fdk_tree_node_is_expanded(fdk_widget *tree,
+                               fdk_tree_node node);
+size_t fdk_tree_node_child_count(fdk_widget *tree,
+                                 fdk_tree_node node);
+
+fdk_tree_node fdk_tree_get_selected(fdk_widget *tree);
+fdk_result fdk_tree_select(fdk_widget *tree, fdk_tree_node node);
+size_t fdk_tree_visible_count(fdk_widget *tree);
+
+void fdk_tree_set_on_selection_changed(fdk_widget *tree,
+                                       fdk_tree_selection_fn fn,
+                                       void *user_data);
 
 #ifdef __cplusplus
 }

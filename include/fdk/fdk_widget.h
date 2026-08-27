@@ -114,7 +114,7 @@ typedef struct fdk_widget_event {
 
     union {
         fdk_pointf position; /* ENTER / LEAVE / MOTION: widget-local */
-        struct { fdk_pointf position; fdk_u32 button; } pointer; /* DOWN / UP */
+        struct { fdk_pointf position; fdk_u32 button; fdk_u32 modifiers; } pointer; /* DOWN / UP */
         struct { fdk_pointf position; fdk_f32 delta_x, delta_y; } scroll;
         fdk_key_event key; /* KEY_DOWN / KEY_UP                     */
     };

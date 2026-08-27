@@ -36,6 +36,7 @@
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
 #include "widget/widget_internal.h"
+#include "widget/widgets_internal.h" /* scrollview class (notifier) */
 
 #include <string.h>
 
@@ -576,6 +577,11 @@ void fdk_widget_child_layout_changed(fdk_widget *parent) {
     }
     if (box_class_of(parent)) {
         box_layout(parent);
+    } else if (parent->klass == &fdk_scrollview_class_def) {
+        /* Phase 9 ScrollView: re-clip and re-place content + bars at
+         * the CURRENT bounds (the content's natural size may have
+         * changed what fits / where the clamped offsets land). */
+        fdk__scrollview_layout_changed(parent);
     } else if (notifier_grid_class_of(parent)) {
         /* Re-run the grid's arrangement at its CURRENT bounds — the
          * exact equivalent of box_layout for the track policy

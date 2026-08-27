@@ -464,11 +464,15 @@ static bool entry_handle_event(fdk_widget *w,
             entry_set_selection(e, 0, e->len);
             e->selecting = 1;
         } else {
-            /* Plain click: caret to hit; the anchor collapses (the
-             * v1 pointer event carries no modifiers, so shift-click
-             * EXTENSION is not expressible yet — documented in
-             * fdk_widgets.h; shift+arrows does the extending). */
-            entry_set_selection(e, hit, hit);
+            /* Plain click: caret to hit. Shift extends the current
+             * selection from its anchor instead of collapsing (the
+             * Phase 9 pointer modifiers make this expressible). */
+            bool shift = (ev->pointer.modifiers & FDK_MOD_SHIFT) != 0;
+            if (shift) {
+                entry_set_selection(e, e->anchor, hit);
+            } else {
+                entry_set_selection(e, hit, hit);
+            }
             e->selecting = 1;
         }
         return true;

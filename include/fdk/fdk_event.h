@@ -191,6 +191,11 @@ typedef struct fdk_pointer_button_event {
     fdk_pointf position;
     fdk_u32 button; /* an fdk_pointer_button value, or a higher button
                        index the platform reports (side buttons etc.) */
+    fdk_u32 modifiers; /* bitmask of fdk_key_modifier held at press/
+                          release (Phase 9: shift/ctrl-click selection
+                          in List/Tree/Entry). Appended field — zero
+                          for events synthesized by older code, and
+                          safe to ignore. */
 } fdk_pointer_button_event;
 
 typedef struct fdk_scroll_event {

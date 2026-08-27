@@ -32,6 +32,17 @@ extern const fdk_widget_class fdk_radio_class_def;
 extern const fdk_widget_class fdk_progress_class_def;
 extern const fdk_widget_class fdk_separator_class_def;
 extern const fdk_widget_class fdk_frame_class_def;
+extern const fdk_widget_class fdk_scrollview_class_def;
+
+/* scroll.c: relayout hook the layout notifier (box.c) calls when a
+ * scrollview's subtree changed (content added / natural size
+ * changed) — re-runs the internal arrangement at current bounds. */
+void fdk__scrollview_layout_changed(fdk_widget *w);
+
+/* scroll.c: the scroll area's viewport size (bounds minus visible
+ * bars) for keyboard page-stepping in ScrollView-based widgets. */
+void fdk__scrollview_viewport(fdk_widget *w, fdk_i32 *out_w,
+                              fdk_i32 *out_h);
 
 /* ---- shared helpers ---- */
 
