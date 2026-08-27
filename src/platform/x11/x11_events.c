@@ -161,10 +161,14 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
 
         case EnterNotify:
             out->type = FDK_EVENT_POINTER_ENTER;
+            out->pointer.position.x = (fdk_f32)xevent->xcrossing.x;
+            out->pointer.position.y = (fdk_f32)xevent->xcrossing.y;
             return 1;
 
         case LeaveNotify:
             out->type = FDK_EVENT_POINTER_LEAVE;
+            out->pointer.position.x = (fdk_f32)xevent->xcrossing.x;
+            out->pointer.position.y = (fdk_f32)xevent->xcrossing.y;
             return 1;
 
         default:

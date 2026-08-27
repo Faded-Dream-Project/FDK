@@ -15,6 +15,7 @@
 #include "fdk/fdk_window.h"
 
 #include "platform/platform_internal.h"
+#include "widget/widget_internal.h"
 
 struct fdk_window {
     fdk_context *ctx;                 /* owning context, not owned by us */
@@ -30,6 +31,14 @@ struct fdk_window {
      * destroyed by fdk_window_destroy(). NULL until the application
      * first asks to render into this window. */
     struct fdk_surface *surface;
+
+    /* Lazily created by fdk_window_get_root() (src/widget/widget.c's
+     * window glue below), destroyed with the window. NULL until the
+     * application builds a widget tree on this window. While set,
+     * fdk_window_dispatch_event routes pointer/key events through the
+     * tree before the application callback, and fdk_window_paint()
+     * repaints+ presents the tree. */
+    struct fdk_widget *root;
 };
 
 /* Called by the context's platform dispatch callback (see

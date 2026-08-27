@@ -95,6 +95,28 @@ typedef struct fdk_expose_event {
  * numbering space on Linux — see docs/platform-input.md. */
 typedef fdk_u32 fdk_scancode;
 
+/* Named scancodes for the keys the toolkit itself references (focus
+ * traversal, activation) and applications most commonly bind. These are
+ * Linux evdev constants — the same numbering space fdk_scancode uses on
+ * both backends — given FDK_ names so applications (and FDK's own
+ * widget layer) never hardcode bare integers. The list is deliberately
+ * small: it is not a keyboard enumeration, just the keys with
+ * toolkit-level meaning. */
+#define FDK_KEY_TAB        ((fdk_scancode)15)
+#define FDK_KEY_BACKSPACE  ((fdk_scancode)14)
+#define FDK_KEY_ENTER      ((fdk_scancode)28)
+#define FDK_KEY_ESC        ((fdk_scancode)1)
+#define FDK_KEY_SPACE      ((fdk_scancode)57)
+#define FDK_KEY_DELETE     ((fdk_scancode)111)
+#define FDK_KEY_HOME       ((fdk_scancode)102)
+#define FDK_KEY_END        ((fdk_scancode)107)
+#define FDK_KEY_PAGE_UP    ((fdk_scancode)104)
+#define FDK_KEY_PAGE_DOWN  ((fdk_scancode)109)
+#define FDK_KEY_LEFT       ((fdk_scancode)105)
+#define FDK_KEY_RIGHT      ((fdk_scancode)106)
+#define FDK_KEY_UP         ((fdk_scancode)103)
+#define FDK_KEY_DOWN       ((fdk_scancode)108)
+
 typedef struct fdk_key_event {
     fdk_scancode scancode;
 

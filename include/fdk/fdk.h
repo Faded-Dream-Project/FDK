@@ -19,11 +19,14 @@
 #include "fdk_window.h"
 #include "fdk_event.h"
 #include "fdk_surface.h"
+#include "fdk_widget.h"
 
 /* Widget, layout, and theme public headers are added here as their
  * respective phases land (see docs/roadmap.md). Phase 2 added window
  * lifecycle and the backend-neutral event model; the first slice of
  * Phase 3 (software rendering surfaces) added fdk_surface.h on top
- * of them. */
+ * of them; Phase 4 added fdk_widget.h — the retained-mode widget
+ * foundation (hierarchy, state, focus, event routing, invalidation,
+ * painting, subclassing). Layout and theme headers follow. */
 
 #endif /* FDK_H */
