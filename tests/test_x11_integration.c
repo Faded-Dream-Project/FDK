@@ -17,6 +17,19 @@
 #include "fdk/fdk_event.h"
 #include "fdk/fdk_window.h"
 
+/* Test harness only: the X11 integration test is allowed to reach
+ * into the library's internals for VERIFICATION (the library itself
+ * never crosses these layers — see docs/architecture.md). Xlib is
+ * used for server-side pixel readback (XGetImage over a second X
+ * connection, so nothing can be satisfied from an FDK-side cache);
+ * the internal headers expose the backend's XID for the readback
+ * target. */
+#include "platform/x11/x11_platform.h"
+#include "window/window_internal.h"
+
+#include <X11/Xlib.h>
+#include <X11/Xutil.h> /* XGetImage / XGetPixel / XDestroyImage */
+
 #include <assert.h>
 #include <signal.h>
 #include <stdio.h>
@@ -239,6 +252,204 @@ static void test_close_request_delivered(void) {
            "Xvfb) — see docs/testing.md\n");
 }
 
+/* ---- Renderer (fdk_surface) tests ----
+ *
+ * These verify REAL pixels: the app draws through FDK's surface API,
+ * presents, then XGetImage reads the window's contents back from the
+ * X SERVER side. If the XImage/XPutImage plumbing (x11_surface.c)
+ * blitted nothing, misaligned, or mangled the channel order, these
+ * comparisons fail — they are not compile-only smoke checks.
+ *
+ * Pixel channel tolerance: X stores 24-bit TrueColor exactly, and
+ * our helpers round-to-nearest on write, so equality on the packed
+ * 0x00RRGGBB value is exact. */
+
+/* Reads one pixel of the FDK window via the X server, through a
+ * SEPARATE X connection from FDK's (so the readback cannot be
+ * satisfied from any FDK-side cache). Helper-owned display, opened
+ * lazily. */
+static unsigned long x11_readback_pixel(Display **out_dpy, unsigned long xid,
+                                         int x, int y) {
+    if (*out_dpy == NULL) {
+        *out_dpy = XOpenDisplay(NULL);
+        assert(*out_dpy != NULL);
+    }
+    XImage *img = XGetImage(*out_dpy, (Drawable)xid, x, y, 1, 1,
+                            ~0UL /* AllPlanes */, ZPixmap);
+    assert(img != NULL);
+    unsigned long px = (unsigned long)XGetPixel(img, 0, 0);
+    XDestroyImage(img);
+    return px;
+}
+
+typedef struct {
+    fdk_context *ctx;
+    int configure_count;
+    fdk_size last_size;
+} surface_capture;
+
+static void surface_event_callback(fdk_window *window,
+                                    const fdk_event_data *event,
+                                    void *user_data) {
+    (void)window;
+    surface_capture *cap = user_data;
+    if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
+        cap->configure_count++;
+        cap->last_size = event->configure.size;
+    }
+}
+
+static unsigned long fdk_window_xid(fdk_window *win) {
+    return (unsigned long)win->pwindow->xwindow;
+}
+
+static void test_surface_render_readback(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK render test",
+                                 .width = 320, .height = 240 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    /* Map FIRST: drawing into an unmapped window is discarded once
+     * mapped again (no backing store under Xvfb), so the draw must
+     * happen after the map request has been processed. */
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+    assert(surface != NULL);
+
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    assert(info.pixels != NULL);
+    assert(info.width == 320);
+    assert(info.height == 240);
+    assert(info.stride >= 320);
+    assert(info.format == FDK_SURFACE_FORMAT_XRGB8888);
+
+    /* Draw: solid red field, a green inner rect, a blue 1px border,
+     * and a white pixel via direct writes. */
+    fdk_surface_fill(surface, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+    fdk_surface_fill_rect(surface,
+                          (fdk_rect){ .x = 40, .y = 40, .width = 120,
+                                      .height = 80 },
+                          (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+    fdk_surface_draw_rect(surface,
+                          (fdk_rect){ .x = 10, .y = 10, .width = 300,
+                                      .height = 220 },
+                          (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+    fdk_surface_info info2;
+    assert(fdk_ok(fdk_surface_get_info(surface, &info2)));
+    info2.pixels[200 * info2.stride + 200] = 0x00FFFFFFu;
+
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Red field at a spot clear of the rects (bottom-left area). */
+    unsigned long px = x11_readback_pixel(&rb_dpy, xid, 30, 200);
+    assert(px == 0x00FF0000u);
+    /* Green inner rect center. */
+    px = x11_readback_pixel(&rb_dpy, xid, 100, 80);
+    assert(px == 0x0000FF00u);
+    /* Blue border. */
+    px = x11_readback_pixel(&rb_dpy, xid, 10, 120);
+    assert(px == 0x000000FFu);
+    /* Direct white pixel. */
+    px = x11_readback_pixel(&rb_dpy, xid, 200, 200);
+    assert(px == 0x00FFFFFFu);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 surface render + server-side pixel readback\n");
+}
+
+static void test_surface_follows_resize(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK render resize test",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    surface_capture cap = { .ctx = ctx, .configure_count = 0 };
+    fdk_window_set_event_callback(win, surface_event_callback, &cap);
+
+    fdk_window_show(win);
+    /* Presenting before the map is processed must not crash or hang
+     * (an app can legitimately draw its first frame before showing);
+     * correctness of READBACK only matters after mapping below. */
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+    fdk_surface_fill(surface, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(surface)));
+
+    fdk_window_resize(win, 400, 300);
+
+    /* Pump-driven wait for the ConfigureNotify (the documented
+     * application loop shape — and a test of fdk_pump_events itself). */
+    alarm(5);
+    while (cap.configure_count == 0) {
+        int r = fdk_pump_events(ctx, 200);
+        assert(r >= 0);
+    }
+    alarm(0);
+    assert(cap.last_size.width == 400);
+    assert(cap.last_size.height == 300);
+
+    /* New framebuffer at the new size; render and read back. */
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    assert(info.width == 400);
+    assert(info.height == 300);
+    fdk_surface_fill(surface, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    /* A pixel only present in the NEW geometry (right/bottom corner
+     * area, inside the window now, outside it before): must be the
+     * freshly drawn blue, not stale red or the white background. */
+    unsigned long px = x11_readback_pixel(&rb_dpy, xid, 390, 290);
+    assert(px == 0x000000FFu);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 surface follows resize (new framebuffer, pixels "
+           "read back)\n");
+}
+
+static void test_pump_events_nonblocking(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* No windows: nothing can arrive, but the call must be well-
+     * behaved — timeout 0 returns promptly, timeout 100 returns
+     * within ~100 ms (both non-negative). */
+    int r0 = fdk_pump_events(ctx, 0);
+    assert(r0 >= 0);
+    int r100 = fdk_pump_events(ctx, 100);
+    assert(r100 >= 0);
+
+    /* NULL/invalid contexts report errors, not crashes. */
+    assert(fdk_pump_events(NULL, 0) < 0);
+
+    fdk_shutdown(ctx);
+    printf("[ok] fdk_pump_events timeout semantics + argument checks\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -250,6 +461,9 @@ int main(void) {
     test_window_set_title();
     test_resize_delivers_configure_event();
     test_close_request_delivered();
+    test_pump_events_nonblocking();
+    test_surface_render_readback();
+    test_surface_follows_resize();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
