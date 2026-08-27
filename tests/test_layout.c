@@ -149,14 +149,18 @@ static void test_box_arrange_vertical_margins(void) {
     fdk_rect area = {10, 20, 100, 200};
     fdk_widget_arrange(box, area);
 
-    /* content starts at (16,26); a's slot is 40 tall (30+10 margins),
-     * its bounds inset by margins: y 31..61. Cross align defaults to
-     * FILL: a spans the content width (88) minus its side margins. */
-    assert_bounds(a, 19, 31, 82, 30, "a fills cross, margins inset");
-    /* b starts after a's slot + spacing: 26+40+4 = 70; its cross
-     * align is START so it keeps its natural 20-wide size. */
+    /* Bounds are PARENT-RELATIVE to the box (the core contract), so
+     * the box sitting at (10,20) does NOT shift its children: content
+     * starts at (6,6) IN BOX SPACE; a's slot is 40 tall (30+10
+     * margins), its bounds inset by margins: y 11..41. Cross align
+     * defaults to FILL: a spans the content width (88) minus its side
+     * margins. (The pre-Phase-6 engine baked the box's own position
+     * into children — double-offsetting them in absolute space.) */
+    assert_bounds(a, 9, 11, 82, 30, "a fills cross, margins inset");
+    /* b starts after a's slot + spacing: 6+40+4 = 50 in box space;
+     * its cross align is START so it keeps its natural 20-wide size. */
     fdk_widget_set_align(b, FDK_ALIGN_START, FDK_ALIGN_START);
-    assert_bounds(b, 16, 70, 20, 50, "b start-aligned cross");
+    assert_bounds(b, 6, 50, 20, 50, "b start-aligned cross");
 
     /* along-axis expand with margins: b grows, its bounds grow by the
      * same amount (margins fixed) */
@@ -268,8 +272,11 @@ static void test_nested_boxes(void) {
     assert_bounds(header, 0, 0, 300, 30, "header");
     assert_bounds(hbox, 0, 30, 300, 150, "hbox cross-expanded");
     assert_bounds(footer, 0, 180, 300, 20, "footer");
-    assert_bounds(left, 0, 30, 200, 150, "left expanded along, fills hbox");
-    assert_bounds(right, 200, 30, 100, 150, "right fixed, fills hbox");
+    /* left/right are hbox's children: parent-relative to the hbox,
+     * which itself sits at (0,30) — the position lives in the hbox's
+     * own bounds, not its children's. */
+    assert_bounds(left, 0, 0, 200, 150, "left expanded along, fills hbox");
+    assert_bounds(right, 200, 0, 100, 150, "right fixed, fills hbox");
 
     fdk_widget_destroy(root);
     printf("[ok] nested boxes: vertical containing horizontal, "

@@ -39,15 +39,10 @@
 
 #include <string.h>
 
-/* ---- the box subclass ---- */
-
-typedef struct fdk_box {
-    fdk_widget base;
-    fdk_orientation orientation;
-    fdk_i32 spacing;
-    fdk_i32 padding;
-    bool homogeneous;
-} fdk_box;
+/* ---- the box subclass ----
+ * (struct fdk_box lives in layout_internal.h — container subclasses
+ * like the widget catalog's Frame embed it and reuse the packing
+ * hooks via fdk_box_class_def.) */
 
 static bool box_class_of(const fdk_widget *w) {
     return w != NULL && w->klass == &fdk_box_class_def;
@@ -68,13 +63,12 @@ static void child_natural(fdk_widget *child, fdk_size *out) {
                   child->margin_bottom;
 }
 
-static void box_measure(fdk_widget *w, fdk_size *out) {
+void fdk_box_measure_hook(fdk_widget *w, fdk_size *out) {
     fdk_box *box = box_of(w);
     fdk_i32 along = box->padding * 2;
     fdk_i32 max_child_along = 0;
     fdk_i32 max_child_cross = 0;
     size_t visible = 0;
-
     for (size_t i = 0; i < w->child_count; i++) {
         fdk_widget *child = w->children[i];
         if ((child->flags & FDK_WF_VISIBLE) == 0 ||
@@ -107,6 +101,7 @@ static void box_measure(fdk_widget *w, fdk_size *out) {
                 (visible > 1 ? box->spacing * (fdk_i32)(visible - 1)
                              : 0);
     }
+    along += box->title_inset; /* Frame's title band, vertical only */
     fdk_i32 cross = box->padding * 2 + max_child_cross;
     if (box->orientation == FDK_HORIZONTAL) {
         *out = (fdk_size){along, cross};
@@ -124,10 +119,18 @@ static void box_layout(fdk_widget *w) {
     }
     fdk_rect bounds = w->bounds;
     fdk_i32 pad = box->padding;
-    fdk_i32 content_x = bounds.x + pad;
-    fdk_i32 content_y = bounds.y + pad;
+    fdk_i32 inset = (box->orientation == FDK_VERTICAL) ? box->title_inset
+                                                       : 0;
+    /* Children slots are PARENT-RELATIVE (the core contract), so
+     * packing starts at the box's own origin — NOT at the box's
+     * parent-relative position (bounds.x/y), which paint_rec would
+     * stack on top of the box's absolute origin again. Using
+     * bounds.x/y here double-offset every child of any box not
+     * sitting at (0, 0) relative to ITS parent. */
+    fdk_i32 content_x = pad;
+    fdk_i32 content_y = pad + inset;
     fdk_i32 content_w = bounds.width - pad * 2;
-    fdk_i32 content_h = bounds.height - pad * 2;
+    fdk_i32 content_h = bounds.height - pad * 2 - inset;
     if (content_w < 0) {
         content_w = 0;
     }
@@ -279,7 +282,7 @@ static void box_layout(fdk_widget *w) {
     fdk_free(sizes);
 }
 
-static void box_arrange(fdk_widget *w, fdk_rect assigned) {
+void fdk_box_arrange_hook(fdk_widget *w, fdk_rect assigned) {
     /* The default bounds assignment (core), then relayout children
      * into the new geometry. */
     fdk_widget_set_bounds(w, assigned);
@@ -300,8 +303,8 @@ const struct fdk_widget_class fdk_box_class_def = {
     .name = "box",
     .handle_event = NULL,
     .paint = box_paint,
-    .measure = box_measure,
-    .arrange = box_arrange,
+    .measure = fdk_box_measure_hook,
+    .arrange = fdk_box_arrange_hook,
     .destroy = NULL,
 };
 
@@ -326,6 +329,11 @@ fdk_result fdk_box_create(fdk_widget *parent, fdk_orientation orientation,
     box->spacing = 0;
     box->padding = 0;
     box->homogeneous = false;
+    /* fdk_widget_create already relayouted the parent once, but that
+     * pass measured this box with its subclass fields still zeroed
+     * (orientation 0 = horizontal). Re-notify now that the fields are
+     * real. */
+    fdk_widget_child_layout_changed(w->parent);
     *out_box = w;
     return FDK_OK;
 }
