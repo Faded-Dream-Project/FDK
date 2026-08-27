@@ -21,6 +21,13 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->seat = wl_registry_bind(registry, name, &wl_seat_interface, 5);
     } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
         conn->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
+    } else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0) {
+        /* OPTIONAL global (Phase 8): its absence is not an error —
+         * fdk_window_set_decorated() reports FDK_ERR_UNSUPPORTED
+         * then, rather than double-decorating. */
+        conn->decoration_manager =
+            wl_registry_bind(registry, name,
+                             &zxdg_decoration_manager_v1_interface, 1);
     }
     /* Other globals (wl_output, wl_data_device_manager, etc.) are
      * intentionally not bound — out of Phase 2 scope, see
@@ -80,6 +87,8 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
     conn->shm = NULL;
     conn->seat = NULL;
     conn->wm_base = NULL;
+    conn->decoration_manager = NULL;
+    conn->last_button_serial = 0;
     conn->keyboard = NULL;
     conn->pointer = NULL;
     conn->xkb_context = NULL;
@@ -164,6 +173,9 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
 
     fdk_wayland_teardown_seat(conn);
 
+    if (conn->decoration_manager) {
+        zxdg_decoration_manager_v1_destroy(conn->decoration_manager);
+    }
     if (conn->wm_base) xdg_wm_base_destroy(conn->wm_base);
     if (conn->shm) wl_shm_destroy(conn->shm);
     if (conn->compositor) wl_compositor_destroy(conn->compositor);

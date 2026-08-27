@@ -93,6 +93,15 @@ static fdk_result create_shm_buffer(fdk_platform_connection *conn,
     return FDK_OK;
 }
 
+/* Defined below (Phase 8 section), forward-declared for the window
+ * create path, which must create the xdg-decoration object before
+ * the surface's first buffer per protocol. */
+static void toplevel_decoration_configure(void *data,
+                                          struct zxdg_toplevel_decoration_v1 *deco,
+                                          uint32_t mode);
+static const struct zxdg_toplevel_decoration_v1_listener
+    g_toplevel_decoration_listener;
+
 static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
                                    uint32_t serial) {
     fdk_platform_window *pwindow = data;
@@ -145,7 +154,6 @@ static const struct xdg_surface_listener g_xdg_surface_listener = {
 static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
                                     int32_t width, int32_t height, struct wl_array *states) {
     (void)toplevel;
-    (void)states;
     fdk_platform_window *pwindow = data;
 
     /* width/height == 0 means "compositor has no opinion, keep your
@@ -157,6 +165,27 @@ static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
     } else {
         pwindow->pending_size = pwindow->last_size;
     }
+
+    /* Phase 8: the states array is the compositor's authoritative
+     * window state. MAXIMIZED is tracked directly; ACTIVATED is what
+     * clears the (request-optimistic) minimized flag — the protocol
+     * has no minimized state and no unminimize request, but
+     * compositors report activated when a window is brought back. */
+    int maximized = 0, activated = 0;
+    uint32_t *state;
+    wl_array_for_each(state, states) {
+        if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED) {
+            maximized = 1;
+        }
+        if (*state == XDG_TOPLEVEL_STATE_ACTIVATED) {
+            activated = 1;
+        }
+    }
+    int minimized = pwindow->minimized;
+    if (activated && minimized) {
+        minimized = 0;
+    }
+    fdk_wayland_window_update_state(pwindow, maximized, minimized);
 }
 
 static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
@@ -305,6 +334,7 @@ static void frame_callback_done(void *data, struct wl_callback *callback,
     (void)callback_data;
     fdk_platform_window *pwindow = data;
     pwindow->frame_ack = 1;
+    pwindow->frame_cb = NULL; /* about to die; don't double-destroy */
     wl_callback_destroy(callback);
     FDK_DEBUG("frame acknowledged by compositor");
 }
@@ -553,10 +583,13 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
     pwindow->rendered_ever = 1;
 
     /* Frame callback for pacing: fires when the compositor has
-     * presented this commit (see frame_callback_done). */
+     * presented this commit (see frame_callback_done). Tracked in
+     * pwindow->frame_cb so window_destroy can reap one that never
+     * fires. */
     struct wl_callback *cb = wl_surface_frame(pwindow->surface);
     if (cb != NULL) {
         wl_callback_add_listener(cb, &g_frame_callback_listener, pwindow);
+        pwindow->frame_cb = cb;
     }
     pwindow->frame_ack = 0;
     pwindow->frame_commit_ms = now_ms();
@@ -615,6 +648,10 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->last_size.height = height;
     pwindow->pending_size = pwindow->last_size;
     pwindow->configured = 0;
+    pwindow->maximized = 0;
+    pwindow->minimized = 0;
+    pwindow->toplevel_decoration = NULL;
+    pwindow->deco_client_side = 0;
     pwindow->buffer = NULL;
     pwindow->buffer_size.width = 0;
     pwindow->buffer_size.height = 0;
@@ -623,6 +660,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->rendered_ever = 0;
     pwindow->frame_ack = 1;       /* nothing presented yet = ready */
     pwindow->frame_commit_ms = 0;
+    pwindow->frame_cb = NULL;
     for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
         pwindow->render_slots[i].buffer = NULL;
         pwindow->render_slots[i].pixels = NULL;
@@ -659,8 +697,35 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     xdg_toplevel_add_listener(pwindow->xdg_toplevel, &g_xdg_toplevel_listener, pwindow);
     xdg_toplevel_set_title(pwindow->xdg_toplevel, title);
 
+    /* xdg-decoration object creation must happen HERE, before any
+     * buffer is ever attached: the protocol is explicit that a
+     * toplevel decoration created after the surface has a buffer is
+     * a fatal protocol error (caught live by sway: "xdg_toplevel_
+     * decoration must not have a buffer at creation"). set_mode may
+     * then be called at any time — fdk_window_set_decorated() does
+     * that part. Created only when the compositor advertised the
+     * manager global; absent global = set_decorated honestly
+     * reports FDK_ERR_UNSUPPORTED later. */
+    if (conn->decoration_manager != NULL) {
+        pwindow->toplevel_decoration =
+            zxdg_decoration_manager_v1_get_toplevel_decoration(
+                conn->decoration_manager, pwindow->xdg_toplevel);
+        if (pwindow->toplevel_decoration == NULL) {
+            FDK_WARN("zxdg_decoration_manager_v1_get_toplevel_decoration "
+                     "failed; decorations stay compositor-side");
+        } else {
+            zxdg_toplevel_decoration_v1_add_listener(
+                pwindow->toplevel_decoration,
+                &g_toplevel_decoration_listener, pwindow);
+        }
+    }
+
     fdk_result r = fdk_wayland_register_window(conn, pwindow);
     if (!fdk_ok(r)) {
+        if (pwindow->toplevel_decoration != NULL) {
+            zxdg_toplevel_decoration_v1_destroy(
+                pwindow->toplevel_decoration);
+        }
         xdg_toplevel_destroy(pwindow->xdg_toplevel);
         xdg_surface_destroy(pwindow->xdg_surface);
         wl_surface_destroy(pwindow->surface);
@@ -711,6 +776,20 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         pwindow->buffer_attached = 0;
     }
     fdk_wayland_unregister_window(pwindow->conn, pwindow);
+    /* A frame callback still awaiting `done` when the window dies
+     * will never fire — reap its proxy (leak found by the sway
+     * headless test). */
+    if (pwindow->frame_cb != NULL) {
+        wl_callback_destroy(pwindow->frame_cb);
+        pwindow->frame_cb = NULL;
+    }
+    /* The decoration object (if any) must die before the toplevel it
+     * wraps — xdg-decoration objects are inert after the toplevel is
+     * gone, and destroying in the wrong order is a protocol error. */
+    if (pwindow->toplevel_decoration != NULL) {
+        zxdg_toplevel_decoration_v1_destroy(pwindow->toplevel_decoration);
+        pwindow->toplevel_decoration = NULL;
+    }
     xdg_toplevel_destroy(pwindow->xdg_toplevel);
     xdg_surface_destroy(pwindow->xdg_surface);
     wl_surface_destroy(pwindow->surface);
@@ -793,4 +872,165 @@ void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size) {
     xdg_toplevel_set_min_size(pwindow->xdg_toplevel, min_size.width, min_size.height);
     xdg_toplevel_set_max_size(pwindow->xdg_toplevel, max_size.width, max_size.height);
+}
+
+/* ---- Phase 8: window management (xdg-decoration + toplevel ops) ---- */
+
+/* Compare-and-flip + FDK_EVENT_WINDOW_STATE dispatch (no-op when the
+ * state didn't change). Called from xdg_toplevel_configure (the
+ * compositor's authoritative states) and set_minimized (the
+ * request-optimistic flip). */
+void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
+                                     int maximized, int minimized) {
+    if (pwindow->maximized == maximized && pwindow->minimized == minimized) {
+        return;
+    }
+    pwindow->maximized = maximized;
+    pwindow->minimized = minimized;
+    fdk_event_data event;
+    memset(&event, 0, sizeof event);
+    event.type = FDK_EVENT_WINDOW_STATE;
+    event.state.maximized = maximized;
+    event.state.minimized = minimized;
+    pwindow->conn->dispatch(pwindow, &event, pwindow->conn->dispatch_user_data);
+}
+
+/* zxdg_toplevel_decoration_v1::configure — the compositor's answer to
+ * our set_mode request. When it confirms CLIENT_SIDE we simply record
+ * it (the band fdk_window_set_decorated() already drew is the correct
+ * outcome). When it answers SERVER_SIDE against our CLIENT request,
+ * FDK must NOT draw a band over the compositor's decorations: emit
+ * FDK_EVENT_WINDOW_DECORATION{client_side=0}; the window layer tears
+ * its band down on receipt (see window.c's dispatch handling). */
+static void toplevel_decoration_configure(void *data,
+                                          struct zxdg_toplevel_decoration_v1 *deco,
+                                          uint32_t mode) {
+    (void)deco;
+    fdk_platform_window *pwindow = data;
+    int client_side = (mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE) ? 1 : 0;
+    if (pwindow->deco_client_side == client_side) {
+        pwindow->deco_client_side = client_side; /* first-time bookkeeping */
+        return;
+    }
+    pwindow->deco_client_side = client_side;
+    if (!client_side) {
+        fdk_event_data event;
+        memset(&event, 0, sizeof event);
+        event.type = FDK_EVENT_WINDOW_DECORATION;
+        event.decoration.client_side = 0;
+        pwindow->conn->dispatch(pwindow, &event,
+                                pwindow->conn->dispatch_user_data);
+    }
+}
+
+static const struct zxdg_toplevel_decoration_v1_listener
+    g_toplevel_decoration_listener = {
+    .configure = toplevel_decoration_configure,
+};
+
+fdk_result fdk_wayland_window_set_wm_decorations(fdk_platform_window *pwindow,
+                                                 bool on) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* The decoration object exists only when (a) the compositor
+     * advertised zxdg_decoration_manager_v1 and (b) it was created at
+     * window-create time, before the first buffer (a protocol
+     * requirement — see wayland_window_create). No object -> this
+     * compositor offers no protocol way to drop its decorations; the
+     * caller must NOT draw its own (that would stack two title bars). */
+    if (pwindow->toplevel_decoration == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    /* on = the compositor draws chrome -> SERVER_SIDE;
+     * off = FDK draws its own band  -> CLIENT_SIDE. The compositor's
+     * answer arrives asynchronously in toplevel_decoration_configure. */
+    zxdg_toplevel_decoration_v1_set_mode(
+        pwindow->toplevel_decoration,
+        on ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
+           : ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+    return FDK_OK;
+}
+
+fdk_result fdk_wayland_window_set_maximized(fdk_platform_window *pwindow,
+                                            bool maximized) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (maximized) {
+        xdg_toplevel_set_maximized(pwindow->xdg_toplevel);
+    } else {
+        xdg_toplevel_unset_maximized(pwindow->xdg_toplevel);
+    }
+    /* No optimistic flip: the compositor answers with a configure
+     * carrying MAXIMIZED in states (or not); update_state runs from
+     * xdg_toplevel_configure either way. */
+    return FDK_OK;
+}
+
+fdk_result fdk_wayland_window_set_minimized(fdk_platform_window *pwindow,
+                                            bool minimized) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (!minimized) {
+        /* xdg-shell has no unminimize request — compositors unminimize
+         * via activation. Tell the caller honestly instead of faking
+         * a restore that cannot work. */
+        return FDK_ERR_UNSUPPORTED;
+    }
+    xdg_toplevel_set_minimized(pwindow->xdg_toplevel);
+    /* Fire-and-forget request: no acknowledgement exists, so mark
+     * optimistic (cleared on the next activated configure). */
+    fdk_wayland_window_update_state(pwindow, pwindow->maximized, 1);
+    return FDK_OK;
+}
+
+/* xdg_toplevel resize edges — the protocol's own edge enum; FDK's
+ * compass values are a straight enum-map (same order). */
+static uint32_t toplevel_resize_edges(int edge) {
+    switch (edge) {
+    case 1: return XDG_TOPLEVEL_RESIZE_EDGE_TOP;
+    case 2: return XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT;
+    case 3: return XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+    case 4: return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT;
+    case 5: return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM;
+    case 6: return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT;
+    case 7: return XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
+    case 8: return XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT;
+    default: return XDG_TOPLEVEL_RESIZE_EDGE_NONE;
+    }
+}
+
+fdk_result fdk_wayland_window_begin_move(fdk_platform_window *pwindow,
+                                         fdk_i32 local_x, fdk_i32 local_y) {
+    (void)local_x; /* the compositor tracks the pointer itself; the
+                      protocol takes no coordinates, only the serial */
+    (void)local_y;
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pwindow->conn->pointer == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    xdg_toplevel_move(pwindow->xdg_toplevel, pwindow->conn->seat,
+                      pwindow->conn->last_button_serial);
+    return FDK_OK;
+}
+
+fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
+                                           int edge, fdk_i32 local_x,
+                                           fdk_i32 local_y) {
+    (void)local_x;
+    (void)local_y;
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pwindow->conn->pointer == NULL || edge <= 0) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    xdg_toplevel_resize(pwindow->xdg_toplevel, pwindow->conn->seat,
+                        pwindow->conn->last_button_serial,
+                        toplevel_resize_edges(edge));
+    return FDK_OK;
 }

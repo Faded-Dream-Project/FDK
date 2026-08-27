@@ -115,7 +115,8 @@ CORE_SRCS     := $(wildcard src/core/*.c)
 PLATFORM_X11_SRCS     := $(wildcard src/platform/x11/*.c)
 ifeq ($(BUILD_WAYLAND),1)
   PLATFORM_WAYLAND_SRCS := $(wildcard src/platform/wayland/*.c) \
-                           src/platform/wayland/generated/xdg-shell-protocol.c
+                           src/platform/wayland/generated/xdg-shell-protocol.c \
+                           src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c
 else
   # Stub providing fdk_platform_wayland_ops() returning NULL and
   # fdk_platform_wayland_display_present() returning 0, so
@@ -165,7 +166,7 @@ EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 # library object did.
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
-.PHONY: all release static shared test test-x11 examples install uninstall clean
+.PHONY: all release static shared test test-x11 test-wayland examples install uninstall clean
 
 all: static shared
 
@@ -235,6 +236,27 @@ test-x11: $(X11_TEST_BIN)
 		rm -f "/tmp/.X11-unix/X$$XVFB_NUM"; \
 		exit $$TEST_RESULT; \
 	fi
+
+# Wayland platform integration test — NOT part of plain `make test`.
+# Requires a RUNNING Wayland compositor reachable via $WAYLAND_DISPLAY
+# (see docs/testing.md for the weston headless recipe; the maintainer
+# rigs in the staging environment start one automatically). Without
+# it the test binary self-skips with [skip], it does not fail.
+WL_TEST_SRC := tests/test_wayland_integration.c
+WL_TEST_BIN := $(BUILD_DIR)/tests/test_wayland_integration
+
+test-wayland: $(WL_TEST_BIN)
+	@if [ -n "$$WAYLAND_DISPLAY" ]; then \
+		echo "== running Wayland integration test against WAYLAND_DISPLAY=$$WAYLAND_DISPLAY =="; \
+		"$(WL_TEST_BIN)" || exit 1; \
+	else \
+		echo "== no WAYLAND_DISPLAY set; the test binary will self-skip =="; \
+		"$(WL_TEST_BIN)"; \
+	fi
+
+$(WL_TEST_BIN): $(WL_TEST_SRC) $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
 $(X11_TEST_BIN): $(X11_TEST_SRC) $(STATIC_LIB)
 	@mkdir -p $(dir $@)

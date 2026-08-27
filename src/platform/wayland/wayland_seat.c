@@ -218,9 +218,13 @@ static void pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time
 static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial,
                             uint32_t time, uint32_t button, uint32_t state) {
     (void)pointer;
-    (void)serial;
     (void)time;
     fdk_platform_connection *conn = data;
+    /* Phase 8: remember the serial of the newest button event —
+     * xdg_toplevel.move/resize must cite the serial of the input
+     * event that triggered them (the compositor validates it; a stale
+     * serial silently no-ops the request). */
+    conn->last_button_serial = serial;
     if (conn->pointer_focus == NULL) {
         return;
     }

@@ -13,6 +13,7 @@
 #include "platform/platform_internal.h"
 
 #include "platform/wayland/generated/xdg-shell-client-protocol.h"
+#include "platform/wayland/generated/xdg-decoration-unstable-v1-client-protocol.h"
 
 #include <stddef.h>
 #include <wayland-client.h>
@@ -31,6 +32,19 @@ struct fdk_platform_connection {
     struct wl_shm *shm;
     struct wl_seat *seat;
     struct xdg_wm_base *wm_base;
+
+    /* OPTIONAL global (Phase 8): zxdg_decoration_manager_v1 — absent
+     * means the compositor offers no xdg-decoration protocol, and
+     * fdk_window_set_decorated() then honestly returns
+     * FDK_ERR_UNSUPPORTED rather than stacking FDK's band over the
+     * compositor's server-side decorations. */
+    struct zxdg_decoration_manager_v1 *decoration_manager;
+
+    /* Serial of the most recent pointer-button event (Phase 8):
+     * xdg_toplevel.move/resize require the serial of the triggering
+     * input event — the compositor validates it against its own
+     * event history, so a stale serial makes the request a no-op. */
+    uint32_t last_button_serial;
 
     /* Bound from the seat's capabilities (wayland_seat.c). May be
      * NULL if the seat genuinely has no keyboard/pointer — checked
@@ -141,11 +155,40 @@ struct fdk_platform_window {
     int frame_ack;        /* compositor acknowledged the last frame */
     fdk_i64 frame_commit_ms; /* monotonic ms of the last render commit */
 
+    /* The pending wl_surface.frame callback, destroyed when `done`
+     * arrives (frame_callback_done) OR at window destruction — a
+     * callback whose window dies first would otherwise leak its
+     * proxy (a real leak the sway-headless test caught: present ->
+     * destroy before the compositor answers). */
+    struct wl_callback *frame_cb;
+
     fdk_size last_size;
     fdk_size pending_size;   /* accumulated from configure until ack+commit */
     int configured;          /* nonzero once the first xdg_surface.configure
                                  has been acked — required before the first
                                  wl_surface.commit per xdg-shell protocol */
+
+    /* --- Phase 8: window-state + decoration bookkeeping ---
+     *
+     * maximized is derived from xdg_toplevel::configure's states
+     * array (the compositor's word, not our request); minimized is
+     * request-optimistic — the protocol has no minimized state in
+     * configure and no acknowledgement of set_minimized, so it is
+     * cleared on the next activated configure (compositors send
+     * activated when a window is un-minimized into focus). Flips
+     * dispatch FDK_EVENT_WINDOW_STATE.
+     *
+     * toplevel_decoration is the per-window xdg-decoration object,
+     * created on the first set_wm_decorations() call and alive until
+     * window destruction; deco_client_side caches the compositor's
+     * last confirmed mode (its configure event) — when it answers
+     * SERVER_SIDE against our CLIENT_SIDE request, FDK emits
+     * FDK_EVENT_WINDOW_DECORATION so the window layer drops its band
+     * instead of double-decorating. */
+    int maximized;
+    int minimized;
+    struct zxdg_toplevel_decoration_v1 *toplevel_decoration;
+    int deco_client_side;
 };
 
 /* Registry helpers, implemented in wayland_registry.c. */
@@ -180,6 +223,22 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size);
+
+/* Phase 8 window management (see platform_internal.h for the vtable
+ * contract of each): */
+fdk_result fdk_wayland_window_set_wm_decorations(fdk_platform_window *pwindow,
+                                                 bool on);
+fdk_result fdk_wayland_window_set_maximized(fdk_platform_window *pwindow,
+                                            bool maximized);
+fdk_result fdk_wayland_window_set_minimized(fdk_platform_window *pwindow,
+                                            bool minimized);
+fdk_result fdk_wayland_window_begin_move(fdk_platform_window *pwindow,
+                                         fdk_i32 local_x, fdk_i32 local_y);
+fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
+                                           int edge, fdk_i32 local_x,
+                                           fdk_i32 local_y);
+void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
+                                     int maximized, int minimized);
 
 /* Software rendering (fdk_surface machinery) — see the render_slots
  * comment in struct fdk_platform_window above for the recycling
