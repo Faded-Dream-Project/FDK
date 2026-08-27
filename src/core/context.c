@@ -228,6 +228,82 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     return FDK_OK;
 }
 
+int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
+    if (ctx == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx->ops == NULL || ctx->conn == NULL) {
+        /* Same "not initialized / already shut down" edge cases
+         * fdk_run() documents; reported instead of warned because the
+         * return value is available for it here. */
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+
+    int fd = ctx->ops->get_event_fd(ctx->conn);
+    if (fd < 0) {
+        FDK_ERROR("backend gave no event fd; cannot poll");
+        return FDK_ERR_PLATFORM_INIT;
+    }
+
+    /* Drain events already buffered CLIENT-side before waiting on the
+     * fd. This matters because client libraries may read socket data
+     * into an internal queue during ordinary calls outside this loop:
+     * Xlib, for one, reads whatever is available every time it flushes
+     * — and fdk_surface_present() flushes every frame. An event that
+     * arrived while such a call was reading has already LEFT the
+     * socket, so poll() on the connection fd will never report it,
+     * and without this pre-drain it would sit in the client queue
+     * forever. (Found live: a WM_DELETE_WINDOW sent mid-render was
+     * swallowed exactly this way; events landing during the poll()
+     * wait were fine, events landing during rendering were not.)
+     *
+     * Both backends' dispatch_pending are designed to be safely
+     * callable in this position: X11's drains Xlib's queue via
+     * XPending; Wayland's does its own non-blocking readability check
+     * (see wayland_dispatch.c). */
+    int buffered = ctx->ops->dispatch_pending(ctx->conn);
+    if (buffered < 0) {
+        FDK_ERROR("backend dispatch_pending failed (%d)", buffered);
+        return buffered;
+    }
+    if (buffered > 0) {
+        return buffered;
+    }
+
+    struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
+    int pr = poll(&pfd, 1, timeout_ms < 0 ? -1 : timeout_ms);
+    if (pr < 0) {
+        if (errno_is_eintr()) {
+            /* Signal arrived mid-poll; nothing dispatched, caller
+             * loops and re-checks its own exit conditions (a
+             * fdk_quit() from a signal handler is honored this way —
+             * same behavior fdk_run()'s loop has always had). */
+            return 0;
+        }
+        FDK_ERROR("poll() failed (errno=%d)", errno_value());
+        return FDK_ERR_UNKNOWN;
+    }
+
+    if (pfd.revents & (POLLERR | POLLNVAL)) {
+        FDK_ERROR("poll() reported fd error condition");
+        return FDK_ERR_PLATFORM_INIT;
+    }
+
+    if (pfd.revents & (POLLIN | POLLHUP)) {
+        int dispatched = ctx->ops->dispatch_pending(ctx->conn);
+        if (dispatched < 0) {
+            /* Backend returned a negative fdk_result cast to int —
+             * unrecoverable connection failure. Propagate it so the
+             * caller (fdk_run() or an application-owned loop) can
+             * treat the connection as dead. */
+            FDK_ERROR("backend dispatch_pending failed (%d)", dispatched);
+            return dispatched;
+        }
+        return dispatched;
+    }
+    return 0;
+}
+
 void fdk_run(fdk_context *ctx) {
     if (ctx == NULL) {
         return;
@@ -256,52 +332,26 @@ void fdk_run(fdk_context *ctx) {
     /* Exit condition (per fdk_core.h): stop when fdk_quit() was called
      * OR when there are no top-level windows left. The "no windows"
      * case returns immediately even on the first iteration — that's
-     * what test_run_returns_when_no_windows_open verifies. */
+     * what test_run_returns_when_no_windows_open verifies.
+     *
+     * The loop body IS fdk_pump_events(): fdk_run() is now a thin
+     * convenience wrapper around the pump primitive that applications
+     * rendering animation frames use directly (see fdk_core.h). */
     while (!ctx->quit_requested && ctx->window_count > 0) {
-        int fd = ctx->ops->get_event_fd(ctx->conn);
-        if (fd < 0) {
-            FDK_ERROR("backend gave no event fd; cannot poll");
+        int r = fdk_pump_events(ctx, -1); /* block until something is readable */
+        if (r < 0) {
+            /* Connection failure (or fd error) — treat the connection
+             * as dead and exit the loop, leaving cleanup to
+             * fdk_shutdown(). */
             break;
-        }
-
-        struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
-        int pr = poll(&pfd, 1, -1); /* block until something is readable */
-        if (pr < 0) {
-            if (errno_is_eintr()) {
-                /* EINTR is benign — a signal was caught mid-poll. Loop
-                 * back and re-check the exit condition (a fdk_quit()
-                 * called from a signal handler would be honored here). */
-                continue;
-            }
-            FDK_ERROR("poll() failed (errno=%d)", errno_value());
-            break;
-        }
-
-        if (pfd.revents & (POLLERR | POLLNVAL)) {
-            FDK_ERROR("poll() reported fd error condition");
-            break;
-        }
-
-        if (pfd.revents & (POLLIN | POLLHUP)) {
-            int dispatched = ctx->ops->dispatch_pending(ctx->conn);
-            if (dispatched < 0) {
-                /* Backend returned a negative fdk_result cast to int —
-                 * unrecoverable connection failure. Treat the
-                 * connection as dead and exit the loop, leaving
-                 * cleanup to fdk_shutdown(). */
-                FDK_ERROR("backend dispatch_pending failed (%d)",
-                          dispatched);
-                break;
-            }
         }
         /* POLLHUP (peer closed) doesn't necessarily mean an error for
          * our backends — X11 and Wayland both speak over a socket the
          * server owns, but a clean compositor shutdown is rare in
-         * practice. We still try one more dispatch_pending to let the
-         * backend surface any final events; the next poll() will
-         * return immediately with the same POLLHUP and we'll exit on
-         * the next iteration's dispatch returning a negative result,
-         * or just spin briefly until something errors out. */
+         * practice. We keep looping; the next poll() returns
+         * immediately with the same POLLHUP and dispatch eventually
+         * reports a negative result, which exits via the branch
+         * above. */
     }
 
     ctx->running = 0;

@@ -2,9 +2,10 @@
  * fdk_event.h — Faded Dream ToolKit event system
  *
  * FDK delivers events through per-window callbacks registered with
- * fdk_window_set_event_callback(), invoked synchronously during
- * fdk_run()'s dispatch of platform events. There is no separate
- * "pump events yourself" API in Phase 2 — fdk_run() owns the loop.
+ * fdk_window_set_event_callback(). They are invoked synchronously
+ * from fdk_run()'s loop, or from fdk_pump_events() in applications
+ * that drive their own event loop (the standard shape for rendered,
+ * animated applications — see fdk_core.h).
  *
  * All event structures here are backend-neutral: no XEvent, no
  * wl_* type ever appears in fdk_event or in a callback's arguments.
@@ -41,6 +42,18 @@ typedef enum fdk_event_type {
      * nonzero if the window is now focused. */
     FDK_EVENT_WINDOW_FOCUS = 3,
 
+    /* A previously-covered or newly-visible region of the window
+     * needs repainting (X11 Expose). Applications that render with
+     * fdk_surface (see fdk_surface.h) should re-present their surface
+     * in response — on X11 the window's content is NOT retained by
+     * the server when covered. `expose.area` is the region reported
+     * by the platform; repainting the whole surface is always
+     * correct and is what FDK's own examples do.
+     *
+     * The Wayland backend never emits this event: compositors retain
+     * the last committed buffer, so there is nothing to repaint. */
+    FDK_EVENT_WINDOW_EXPOSE = 4,
+
     /* A key was pressed or released. See fdk_key_event. */
     FDK_EVENT_KEY_DOWN = 10,
     FDK_EVENT_KEY_UP   = 11,
@@ -67,6 +80,12 @@ typedef struct fdk_configure_event {
 typedef struct fdk_focus_event {
     int focused; /* nonzero = gained focus, zero = lost focus */
 } fdk_focus_event;
+
+typedef struct fdk_expose_event {
+    /* Window-local region reported as needing repaint. Repainting
+     * more (e.g. the whole surface) is always safe. */
+    fdk_rect area;
+} fdk_expose_event;
 
 /* Physical key identity, independent of keyboard layout — use this
  * for shortcuts/bindings you want stable across layouts (e.g. "the W
@@ -134,6 +153,7 @@ typedef struct fdk_event_data {
     union {
         fdk_configure_event configure;
         fdk_focus_event focus;
+        fdk_expose_event expose;
         fdk_key_event key;
         fdk_pointer_event pointer;
         fdk_pointer_button_event pointer_button;

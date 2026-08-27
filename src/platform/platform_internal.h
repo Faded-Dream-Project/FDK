@@ -49,6 +49,23 @@ typedef void (*fdk_platform_dispatch_fn)(fdk_platform_window *pwindow,
  * fdk_init_options.backend / FDK_PLATFORM_AUTO detection and stores
  * a pointer to it in the context; every other internal call site goes
  * through ctx->platform_ops rather than caring which backend it is. */
+/* A platform framebuffer handed out by a backend's
+ * window_get_framebuffer op (the machinery behind fdk_surface —
+ * see include/fdk/fdk_surface.h). `stride` is in fdk_u32 PIXEL units
+ * (not bytes), >= width; rows start at pixels + (size_t)y * stride.
+ * The layout is XRGB8888 (R<<16|G<<8|B, top byte ignored) on both
+ * current backends. The pixels pointer's lifetime is governed by the
+ * backend: valid until the next get_framebuffer call on that window
+ * and — for Wayland, whose buffers are handed to the compositor at
+ * present — until window_present, after which a fresh acquisition
+ * must be made. */
+typedef struct fdk_platform_framebuffer {
+    fdk_u32 *pixels;
+    fdk_i32 width;
+    fdk_i32 height;
+    fdk_i32 stride; /* in fdk_u32 units */
+} fdk_platform_framebuffer;
+
 typedef struct fdk_platform_ops {
     /* Human-readable backend name for logging ("x11", "wayland"). */
     const char *name;
@@ -103,12 +120,28 @@ typedef struct fdk_platform_ops {
     void (*window_resize)(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
     void (*window_set_size_limits)(fdk_platform_window *pwindow,
                                     fdk_size min_size, fdk_size max_size);
+
+    /* --- Software rendering (first Phase 3 slice) ---
+     *
+     * Both ops are OPTIONAL: a backend that cannot provide a software
+     * framebuffer (e.g. a future GPU-only backend) leaves them NULL
+     * and the surface layer (src/render/surface.c) reports
+     * FDK_ERR_UNSUPPORTED to the application.
+     *
+     * window_get_framebuffer returns the window's current CPU-drawing
+     * buffer in *out_fb, (re)creating it if the window was resized
+     * since the last call. A present-less no-draw call is legal.
+     * window_present makes the current buffer visible on screen; with
+     * nothing acquired yet it is a documented no-op returning FDK_OK.
+     * See x11_surface.c and wayland_window.c for per-backend notes. */
+    fdk_result (*window_get_framebuffer)(fdk_platform_window *pwindow,
+                                          fdk_platform_framebuffer *out_fb);
+    fdk_result (*window_present)(fdk_platform_window *pwindow);
 } fdk_platform_ops;
 
 /* Backend entry points. Each returns NULL if that backend was not
- * compiled in (not expected currently — both are always compiled on
- * Linux per project requirements — but the check exists so a future
- * conditional build configuration has somewhere to hook in). */
+ * compiled in (Wayland in a build with FDK_DISABLE_WAYLAND=1 — see
+ * the Makefile's optional-Wayland logic and docs/build.md). */
 const fdk_platform_ops *fdk_platform_x11_ops(void);
 const fdk_platform_ops *fdk_platform_wayland_ops(void);
 

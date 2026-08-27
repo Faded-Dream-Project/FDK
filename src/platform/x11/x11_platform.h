@@ -45,6 +45,13 @@ struct fdk_platform_window {
     fdk_platform_connection *conn;
     Window xwindow;
     fdk_size last_size; /* most recent ConfigureNotify size */
+
+    /* Software-rendering state, owned by x11_surface.c: an XImage
+     * holding the application's pixels plus the GC used to blit it.
+     * NULL until the first fdk_surface acquisition. */
+    XImage *render_image;
+    GC render_gc;
+    fdk_size render_size; /* dimensions render_image was created at */
 };
 
 /* Implemented in x11_events.c, used by x11_dispatch.c. Not part of
@@ -87,5 +94,11 @@ void fdk_x11_window_set_title(fdk_platform_window *pwindow, const char *title);
 void fdk_x11_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,
                                      fdk_size min_size, fdk_size max_size);
+
+/* Software rendering (see x11_surface.c for the design notes). */
+fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
+                                           fdk_platform_framebuffer *out_fb);
+fdk_result fdk_x11_window_present(fdk_platform_window *pwindow);
+void fdk_x11_surface_cleanup(fdk_platform_window *pwindow);
 
 #endif /* FDK_X11_PLATFORM_H */

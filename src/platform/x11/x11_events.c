@@ -84,6 +84,22 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             return 1;
         }
 
+        case Expose:
+            /* Reported regions of the window lost their contents (it
+             * was covered/uncovered, or is being shown for the first
+             * time). fdk_event.h documents the contract: rendered
+             * applications re-present; others can ignore. X sends a
+             * series of Exposes for one damage event — each becomes
+             * its own FDK event; coalescing is left to applications
+             * (repainting the whole surface is what FDK's examples
+             * do, which makes the series harmless). */
+            out->type = FDK_EVENT_WINDOW_EXPOSE;
+            out->expose.area.x = xevent->xexpose.x;
+            out->expose.area.y = xevent->xexpose.y;
+            out->expose.area.width = xevent->xexpose.width;
+            out->expose.area.height = xevent->xexpose.height;
+            return 1;
+
         case FocusIn:
             out->type = FDK_EVENT_WINDOW_FOCUS;
             out->focus.focused = 1;

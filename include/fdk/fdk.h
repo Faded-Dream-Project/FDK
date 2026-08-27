@@ -18,11 +18,12 @@
 #include "fdk_core.h"
 #include "fdk_window.h"
 #include "fdk_event.h"
+#include "fdk_surface.h"
 
-/* Widget, layout, render, and theme public headers are added here as
- * their respective phases land (see docs/roadmap.md). Phase 2 (this
- * milestone) adds window lifecycle and the backend-neutral event
- * model on top of Phase 1's core lifecycle, types, error handling,
- * logging, and versioning. */
+/* Widget, layout, and theme public headers are added here as their
+ * respective phases land (see docs/roadmap.md). Phase 2 added window
+ * lifecycle and the backend-neutral event model; the first slice of
+ * Phase 3 (software rendering surfaces) added fdk_surface.h on top
+ * of them. */
 
 #endif /* FDK_H */

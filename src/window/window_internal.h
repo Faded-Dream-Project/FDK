@@ -25,6 +25,11 @@ struct fdk_window {
 
     fdk_event_callback_fn event_callback;
     void *event_callback_user_data;
+
+    /* Lazily created by fdk_window_get_surface() (src/render/surface.c),
+     * destroyed by fdk_window_destroy(). NULL until the application
+     * first asks to render into this window. */
+    struct fdk_surface *surface;
 };
 
 /* Called by the context's platform dispatch callback (see

@@ -93,7 +93,7 @@ REL_FLAGS   := -O2 -DNDEBUG
 
 CFLAGS  ?= $(STD) $(WARN) $(FEATURE) $(DEBUG_FLAGS)
 CPPFLAGS:= -Iinclude -Isrc
-LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS)
+LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm
 
 # Per-source-file extra flags: platform backends need their own
 # pkg-config include paths, and the Wayland backend additionally
@@ -124,7 +124,8 @@ else
   PLATFORM_WAYLAND_SRCS := src/platform/wayland_disabled.c
 endif
 WINDOW_SRCS   := $(wildcard src/window/*.c)
-LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS)
+RENDER_SRCS   := $(wildcard src/render/*.c)
+LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS)
 
 # Static and shared builds use separate object trees (obj/ vs obj-pic/)
 # since shared objects must be position-independent (-fPIC) and static

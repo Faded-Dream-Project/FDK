@@ -5,6 +5,7 @@
 #include "core/alloc_internal.h"
 #include "core/context_internal.h"
 #include "core/log_internal.h"
+#include "render/surface_internal.h"
 #include "window/window_internal.h"
 
 fdk_result fdk_window_create(fdk_context *ctx,
@@ -26,6 +27,7 @@ fdk_result fdk_window_create(fdk_context *ctx,
     window->ops = ctx->ops;
     window->event_callback = NULL;
     window->event_callback_user_data = NULL;
+    window->surface = NULL;
 
     fdk_result r = ctx->ops->window_create(ctx->conn, options, &window->pwindow);
     if (!fdk_ok(r)) {
@@ -67,6 +69,7 @@ void fdk_window_destroy(fdk_window *window) {
     if (window == NULL) {
         return;
     }
+    fdk_surface_detach_from_window(window);
     fdk_context_unregister_window(window->ctx, window);
     window->ops->window_destroy(window->pwindow);
     fdk_free(window);

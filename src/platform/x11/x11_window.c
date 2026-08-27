@@ -40,12 +40,16 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
 
     /* Select the input events FDK's event model in fdk_event.h can
      * translate. StructureNotifyMask gets us ConfigureNotify (resize).
-     * Not selecting VisibilityChangeMask/etc — those don't map to any
-     * event fdk_event.h defines yet. */
+     * ExposureMask gets us Expose → FDK_EVENT_WINDOW_EXPOSE so
+     * rendered content (fdk_surface) can repaint regions the X
+     * server no longer retains — see fdk_event.h. Not selecting
+     * VisibilityChangeMask/etc — those don't map to any event
+     * fdk_event.h defines yet. */
     XSelectInput(conn->display, xwindow,
-                 StructureNotifyMask | FocusChangeMask | KeyPressMask |
-                 KeyReleaseMask | PointerMotionMask | ButtonPressMask |
-                 ButtonReleaseMask | EnterWindowMask | LeaveWindowMask);
+                 StructureNotifyMask | ExposureMask | FocusChangeMask |
+                 KeyPressMask | KeyReleaseMask | PointerMotionMask |
+                 ButtonPressMask | ButtonReleaseMask | EnterWindowMask |
+                 LeaveWindowMask);
 
     /* Register for WM_DELETE_WINDOW so close requests arrive as an
      * event we can translate rather than killing the connection. */
@@ -69,6 +73,10 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->xwindow = xwindow;
     pwindow->last_size.width = width;
     pwindow->last_size.height = height;
+    pwindow->render_image = NULL;
+    pwindow->render_gc = NULL;
+    pwindow->render_size.width = 0;
+    pwindow->render_size.height = 0;
 
     fdk_result r = fdk_x11_register_window(conn, pwindow);
     if (!fdk_ok(r)) {
@@ -87,6 +95,7 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
     if (pwindow == NULL) {
         return;
     }
+    fdk_x11_surface_cleanup(pwindow);
     fdk_x11_unregister_window(pwindow->conn, pwindow);
     XDestroyWindow(pwindow->conn->display, pwindow->xwindow);
     /* XSync (not just XFlush) ensures the destroy request has been

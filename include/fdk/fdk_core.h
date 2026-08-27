@@ -67,8 +67,34 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options);
 /* Runs the event loop until fdk_quit() is called or the last top-level
  * window is closed (whichever comes first). Blocks the calling thread.
  * Safe to call fdk_run() again after it returns, as long as shutdown()
- * has not been called. */
+ * has not been called.
+ *
+ * Applications that render animation frames (see fdk_surface.h) should
+ * NOT use fdk_run() — it blocks indefinitely waiting for input between
+ * events, which leaves no place to draw and present the next frame.
+ * Drive the loop yourself with fdk_pump_events() instead. */
 void fdk_run(fdk_context *ctx);
+
+/* Waits for platform events for up to `timeout_ms` milliseconds, then
+ * dispatches whatever arrived (invoking per-window event callbacks).
+ * This is the building block applications use to own their event loop:
+ *
+ *     while (!done) {
+ *         fdk_pump_events(ctx, 15);          // wait up to 15 ms
+ *         // ... render frame, fdk_surface_present(surface) ...
+ *     }
+ *
+ * timeout_ms semantics: 0 = poll for pending events without blocking;
+ * negative = block indefinitely until something arrives. EINTR during
+ * the wait is absorbed and reported as "0 events dispatched".
+ *
+ * Returns the number of events dispatched (>= 0), or a negative
+ * fdk_result code on failure — FDK_ERR_INVALID_ARGUMENT,
+ * FDK_ERR_NOT_INITIALIZED (no platform connection), or the negative
+ * fdk_result the backend's dispatch reported for an unrecoverable
+ * connection failure (treat the connection as dead; fdk_run() stops
+ * its loop on the same condition). */
+int fdk_pump_events(fdk_context *ctx, int timeout_ms);
 
 /* Requests that the running fdk_run() event loop stop and return.
  * Safe to call from within an event callback. Has no effect if the

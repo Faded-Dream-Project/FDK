@@ -67,6 +67,8 @@ struct fdk_platform_connection {
     int last_dispatch_errno; /* set by wl_display_dispatch() failure */
 };
 
+#define FDK_WL_RENDER_SLOTS 4
+
 struct fdk_platform_window {
     fdk_platform_connection *conn;
     struct wl_surface *surface;
@@ -82,10 +84,39 @@ struct fdk_platform_window {
      * server-side mapping alive until the buffer itself is destroyed
      * — so only the buffer needs tracking here. The buffer is
      * destroyed from its wl_buffer::release listener, never reused:
-     * content never changes, a resize simply makes a new one. */
+     * content never changes, a resize simply makes a new one.
+     *
+     * Once an application renders via fdk_surface, this background
+     * path is bypassed (rendered_ever / render_pending below) and the
+     * committed render buffers take over visibility duty. */
     struct wl_buffer *buffer;   /* current background buffer, NULL when none */
     fdk_size buffer_size;       /* dimensions of `buffer` */
     int buffer_attached;        /* nonzero while `buffer` is committed to the surface */
+
+    /* --- Software rendering (fdk_surface machinery) ---
+     *
+     * One fresh wl_shm buffer per frame, tracked in a small fixed
+     * ring of in-flight slots until the compositor releases it
+     * (wl_buffer::release), at which point the release listener
+     * destroys the buffer and munmaps its pixels. This mirrors the
+     * background-buffer lifecycle verified against weston — the
+     * delta is only that the mapping stays alive for the application
+     * to draw into, and that several buffers can be in flight at
+     * once (one pending + those the compositor hasn't released yet).
+     * A conforming compositor releases each superseded buffer on the
+     * next commit, so 4 slots are ample; if a misbehaving compositor
+     * ever exhausts them, get_framebuffer reports
+     * FDK_ERR_SURFACE_CREATE rather than corrupting state.
+     * Double-buffering / frame-callback pacing is the next Phase 3
+     * step (see docs/roadmap.md). */
+    struct {
+        struct wl_buffer *buffer; /* NULL = slot free */
+        uint32_t *pixels;         /* mmap mapping backing `buffer` */
+        size_t length;            /* mapping size in bytes */
+        fdk_size size;            /* buffer dimensions */
+    } render_slots[FDK_WL_RENDER_SLOTS];
+    struct wl_buffer *render_pending; /* acquired but not yet presented */
+    int rendered_ever;                /* first render present() completed */
 
     fdk_size last_size;
     fdk_size pending_size;   /* accumulated from configure until ack+commit */
@@ -126,5 +157,11 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size);
+
+/* Software rendering (fdk_surface machinery) — see the render_slots
+ * comment in struct fdk_platform_window above for the lifecycle. */
+fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
+                                               fdk_platform_framebuffer *out_fb);
+fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow);
 
 #endif /* FDK_WAYLAND_PLATFORM_H */

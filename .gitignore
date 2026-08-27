@@ -16,7 +16,7 @@
 *.so.*
 
 # Core dumps
-core
+/core
 core.*
 
 # Local, machine-specific
