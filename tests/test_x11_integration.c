@@ -1254,6 +1254,196 @@ static void test_text_render_readback(void) {
            ink);
 }
 
+
+/* ---- Widget catalog (Phase 6) ---- */
+
+/* Builds a real catalog UI (Button + Toggle + ProgressBar inside a
+ * box) as the window's CONTENT, drives it with REAL X input
+ * (XSendEvent through the server), and verifies server-side that:
+ * the button press activated (progress fill grew), the toggle click
+ * flipped its state, and everything painted through the window glue.
+ * Skips honestly without a system font. */
+static int catalog_activations = 0;
+typedef struct {
+    fdk_widget *progress;
+} catalog_state;
+static void catalog_on_activate(fdk_widget *w, void *user) {
+    (void)w; /* the button; the PROGRESS comes in via user_data */
+    catalog_state *st = user;
+    fdk_progress_set_fraction(
+        st->progress, fdk_progress_get_fraction(st->progress) + 0.25f);
+    catalog_activations++;
+}
+
+static void test_widget_catalog_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    const char *font_path = NULL;
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        FILE *f = fopen(font_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            font_path = font_candidates[i];
+            break;
+        }
+    }
+    if (font_path == NULL) {
+        printf("[skip] X11 widget catalog GUI (no system font)\n");
+        return;
+    }
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK catalog test",
+                                 .width = 320, .height = 240 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, wcol(18, 20, 28));
+
+    fdk_widget *content = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_VERTICAL, &content)));
+    fdk_box_set_padding(content, 12);
+    fdk_box_set_spacing(content, 10);
+    fdk_window_set_content(win, content);
+
+    fdk_widget *btn = NULL;
+    assert(fdk_ok(fdk_button_create(content, font, "Click me", &btn)));
+    catalog_state cstate = { .progress = NULL };
+    fdk_button_set_on_activate(btn, catalog_on_activate, &cstate);
+    fdk_widget *tog = NULL;
+    assert(fdk_ok(fdk_toggle_create(content, font, "Dark mode", &tog)));
+    fdk_widget *prog = NULL;
+    assert(fdk_ok(fdk_progress_create(content, &prog)));
+    fdk_widget_set_natural_size(prog, 0, 12);
+    fdk_widget_set_expand(prog, true, false);
+    cstate.progress = prog;
+
+    fdk_window_layout(win);
+    (void)fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Progress starts empty: no accent pixels on its mid-line. */
+    fdk_rect pb = fdk_widget_get_bounds(prog);
+    int my = pb.y + pb.height / 2;
+    int accent0 = 0;
+    for (int x = pb.x; x < pb.x + pb.width; x++) {
+        unsigned long px = x11_readback_pixel(&rb_dpy, xid, x, my);
+        unsigned long b = px & 0xFFu;
+        unsigned long g = (px >> 8) & 0xFFu;
+        unsigned long r = (px >> 16) & 0xFFu;
+        if (b > 190 && g > 110 && r < 160) {
+            accent0++;
+        }
+    }
+    assert(accent0 == 0);
+    assert(catalog_activations == 0);
+    assert(!fdk_toggle_is_checked(tog));
+
+    /* REAL click on the button: motion + press + release through the
+     * X server, exactly as a user would. */
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    fdk_rect bb = fdk_widget_get_bounds(btn);
+    int cx = bb.x + bb.width / 2;
+    int cy = bb.y + bb.height / 2;
+    x11_send_pointer_event(send_dpy, xid, MotionNotify,
+                           PointerMotionMask, cx, cy, 0);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                           ButtonPressMask, cx, cy, Button1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, cx, cy, Button1);
+    (void)fdk_pump_events(ctx, 200);
+
+    assert(catalog_activations == 1);
+    assert(fdk_progress_get_fraction(prog) == 0.25f);
+
+    /* Repaint (app-driven, like production) and let the server see
+     * it before readback. */
+    (void)fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    /* And the growth is REAL pixels on the server: ~25% of the bar
+     * is now accent. */
+    int accent25 = 0;
+    for (int x = pb.x; x < pb.x + pb.width; x++) {
+        unsigned long px = x11_readback_pixel(&rb_dpy, xid, x, my);
+        unsigned long b = px & 0xFFu;
+        unsigned long g = (px >> 8) & 0xFFu;
+        unsigned long r = (px >> 16) & 0xFFu;
+        if (b > 190 && g > 110 && r < 160) {
+            accent25++;
+        }
+    }
+    assert(accent25 >= pb.width / 4 - 6 && accent25 <= pb.width / 4 + 6);
+
+    /* REAL click on the toggle: state flips. */
+    fdk_rect tb = fdk_widget_get_bounds(tog);
+    int tx = tb.x + 12;
+    int ty = tb.y + tb.height / 2;
+    x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                           ButtonPressMask, tx, ty, Button1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, tx, ty, Button1);
+    (void)fdk_pump_events(ctx, 200);
+    assert(fdk_toggle_is_checked(tog));
+
+    /* Button still activates on repeated clicks (three more to fill
+     * the bar to 100%). */
+    for (int i = 0; i < 3; i++) {
+        x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                               ButtonPressMask, cx, cy, Button1);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, cx, cy, Button1);
+        (void)fdk_pump_events(ctx, 100);
+    }
+    assert(catalog_activations == 4);
+    assert(fdk_progress_get_fraction(prog) == 1.0f);
+
+    (void)fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 200);
+    int accent100 = 0;
+    for (int x = pb.x; x < pb.x + pb.width; x++) {
+        unsigned long px = x11_readback_pixel(&rb_dpy, xid, x, my);
+        unsigned long b = px & 0xFFu;
+        unsigned long g = (px >> 8) & 0xFFu;
+        unsigned long r = (px >> 16) & 0xFFu;
+        if (b > 190 && g > 110 && r < 160) {
+            accent100++;
+        }
+    }
+    assert(accent100 >= pb.width - 8); /* full bar */
+
+    XCloseDisplay(send_dpy);
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 widget catalog GUI: real input drives button "
+           "activation, progress fill grows on-screen, toggle "
+           "flips\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -1276,6 +1466,7 @@ int main(void) {
     test_widget_root_follows_resize();
     test_widget_layout_reflow_on_resize();
     test_text_render_readback();
+    test_widget_catalog_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

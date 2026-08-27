@@ -84,6 +84,28 @@ ever adds light over the background (AA edges included), and nothing
 bleeds left of the pen or below the ink band. Skips honestly when no
 font exists.
 
+## Widget catalog tests (Phase 6)
+
+`tests/test_controls.c` (8 headless cases, ASan+UBSan, font-gated
+honest skip): label geometry (natural size == measured text,
+re-measure on set_text, ink confined to bounds), button interaction
+(click-in activates, release-out does NOT, Space/Enter, disabled
+ignores input, cross-type setters rejected), toggle + checkbox
+(click/Space/programmatic, on_change firing, knob visibly moving
+between states), radio groups (parent-scoped exclusivity through
+both programmatic and click paths, on_change ordering, no-op
+recheck), progress (clamps, exact accent fill widths at 0/50/100%),
+separator (1px rule exactly on its line), frame (title band reserves
+layout space, children stack below it, title ink paints, fontless
+frame = plain box), and argument safety (NULL args, cross-type
+confusion, no-op setters).
+
+The X11 suite adds `test_widget_catalog_gui`: a Button + Toggle +
+ProgressBar interface as the window's CONTENT, driven by REAL
+injected clicks (XSendEvent through the server) — the button's
+activation grows the progress bar with server-verified pixels at
+each step, and the toggle flips state.
+
 ## Layout tests (Phase 5)
 
 The layout engine is pure geometry over the widget hooks, so

@@ -216,6 +216,34 @@ Run `examples/05_text.c`: a 96px wordmark, a size ladder, colored
 runs chained by measured advances, an animated per-glyph wave line,
 and a live glyph-cache stats footer.
 
+And the core widget catalog — Phase 6's main event. Eight real
+widgets on the Phase 4 object model, sized by their measured text
+and driven by the same event routing as everything else:
+
+```c
+fdk_widget *btn = NULL;
+fdk_button_create(frame, font, "Apply", &btn);
+fdk_button_set_on_activate(btn, on_apply, NULL);   /* click OR Space */
+
+fdk_widget *opt = NULL;
+fdk_radio_create(frame, font, "Software (auto)", &opt);
+fdk_radio_set_checked(opt, true);  /* siblings in the parent uncheck */
+
+fdk_progress_set_fraction(bar, 0.75f);
+```
+
+Label, Button, Toggle, Checkbox, RadioButton (its group IS its
+parent widget), ProgressBar, Separator, and Frame — a titled
+container whose children arrange below the title band automatically.
+Controls activate on release-inside after a press (the implicit grab
+keeps the release even if the pointer left), answer Space/Enter when
+focused, and dim + go input-transparent when disabled.
+
+Run `examples/06_widgets.c`: a settings-style panel built entirely
+from the catalog — two frames of controls, a radio group, a button
+row, a progress bar, and a live status label that every control
+reports into.
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The
@@ -275,6 +303,14 @@ hold frame (real shaped glyphs, PIL-verified down to the colored
 runs and the stats footer):
 
 ![05_text hold frame: wordmark, size ladder, colored runs, wave, stats](docs/screenshots/text_frame_640x480.png)
+
+The widget catalog's proof — `06_widgets` in its deterministic hold
+frame: two frames (Profile / Renderer) with real title bands, a
+toggle, checkboxes, a checked radio (the accent dot), buttons, a
+full progress bar, and the status label — every element PIL-verified
+by the test rig:
+
+![06_widgets catalog hold frame](docs/screenshots/widgets_catalog_frame_520x430.png)
 
 ## Project principles
 

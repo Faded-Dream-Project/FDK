@@ -424,14 +424,34 @@ docs in `docs/text.md`):
   `examples/05_text.c` (wordmark, size ladder, measured-run chaining,
   per-glyph wave, live cache stats) with a captured proof frame
 
+**Shipped — core widget catalog** (`include/fdk/fdk_widgets.h`,
+`src/widget/controls.c` + `statics.c`): Label, Button, Toggle,
+Checkbox, RadioButton (group = parent widget), ProgressBar,
+Separator, and Frame (a titled vertical box — children arrange below
+the title band via a new `title_inset` in the box packing). All are
+widget subclasses on the Phase 4 vtable with measure hooks sizing
+them from measured text; interaction is press-then-release-inside
+(the Phase 4 implicit grab) plus Space/Enter on focus; disabled
+widgets are input-transparent and dimmed. Verified by 8 headless
+catalog cases, an X11 GUI case driving REAL clicks through the
+server, and `examples/06_widgets.c` (CATALOG DEMO PASS, 12 PIL
+checks, captured proof frame).
+
+**Fixed en route (real engine bug, found by the catalog's frames):**
+box packing used the box's own parent-relative position as its
+children's origin, double-offsetting every child of any box not at
+(0, 0) — invisible under the Phase 5 tests (all their boxes sat at
+the origin). Children are now packed in box space per the core's
+parent-relative contract, and every subclass constructor re-notifies
+layout after initializing its fields (the create-time notification
+measures a still-zeroed subclass). test_layout's margins/nested
+expectations recomputed to the contract.
+
 **Still to build (rest of Phase 6):**
-- Label, Button, Toggle, Checkbox, Radio, ProgressBar, Separator,
-  Frame/Panel — as internal subclasses of fdk_widget consuming
-  `fdk_text.h`, with focus visuals, keyboard activation
-  (Space/Enter), and disabled states
 - Widget-level text layout helpers: line breaking, ellipsize,
-  alignment — on top of the run-level API that just landed
+  alignment — on top of the run-level API that landed
 - Subpixel glyph positioning; bold/italic faces beyond file choice
+- Keyboard traversal polish (arrow keys within radio groups)
 
 Phase 3's original "src/text/ gap" is closed; remaining Phase 3
 rendering gaps (MIT-SHM, X11 double buffering, transforms, image

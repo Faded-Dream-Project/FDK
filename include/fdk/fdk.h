@@ -22,6 +22,7 @@
 #include "fdk_widget.h"
 #include "fdk_layout.h"
 #include "fdk_text.h"
+#include "fdk_widgets.h"
 
 /* Widget, layout, and theme public headers are added here as their
  * respective phases land (see docs/roadmap.md). Phase 2 added window
