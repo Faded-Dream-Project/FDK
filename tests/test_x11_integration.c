@@ -652,6 +652,421 @@ static void test_offscreen_blit_to_window(void) {
     printf("[ok] X11 offscreen blit to window (full + partial source)\n");
 }
 
+/* ---- Widget foundation (Phase 4) tests ----
+ *
+ * These exercise the full window-glue path against a live X server:
+ *
+ *   - fdk_window_get_root() + a widget tree, painted via
+ *     fdk_window_paint(), verified SERVER-SIDE (XGetImage over a
+ *     second connection): root/child/z-order/clipping pixels.
+ *
+ *   - REAL INPUT: XSendEvent(3X11) delivers genuine MotionNotify /
+ *     ButtonPress / ButtonRelease / KeyPress / FocusIn events through
+ *     the X server into the FDK window; the X11 backend translates
+ *     them, the window glue routes them into the widget tree, and the
+ *     widget callbacks verify hit-testing, local coordinates, the
+ *     implicit grab, Tab traversal, and the consumed-events contract.
+ *     Nothing here calls fdk_widget_tree_handle_event directly — the
+ *     input path is the same one a user's physical mouse takes.
+ *
+ * (XSendEvent events carry send_event=true; FDK's translator treats
+ * them exactly like hardware events — which is what makes this a
+ * REAL input-path test rather than a simulation.) */
+
+typedef struct {
+    int enter, leave, motion, down, up;
+    int key_down, focus_in, focus_out;
+    fdk_pointf last_local;
+    bool handle;
+} widget_recorder;
+
+static bool widget_record_event(fdk_widget *w, const fdk_widget_event *e,
+                                void *ud) {
+    (void)w;
+    widget_recorder *r = ud;
+    switch (e->type) {
+        case FDK_WIDGET_POINTER_ENTER: r->enter++; break;
+        case FDK_WIDGET_POINTER_LEAVE: r->leave++; break;
+        case FDK_WIDGET_POINTER_MOTION:
+            r->motion++;
+            r->last_local = e->position;
+            break;
+        case FDK_WIDGET_POINTER_DOWN:
+            r->down++;
+            r->last_local = e->pointer.position;
+            break;
+        case FDK_WIDGET_POINTER_UP:
+            r->up++;
+            r->last_local = e->pointer.position;
+            break;
+        case FDK_WIDGET_KEY_DOWN: r->key_down++; break;
+        case FDK_WIDGET_FOCUS_IN: r->focus_in++; break;
+        case FDK_WIDGET_FOCUS_OUT: r->focus_out++; break;
+        default: break;
+    }
+    return r->handle;
+}
+
+static fdk_color wcol(int r, int g, int b) {
+    return (fdk_color){ .r = (fdk_f32)r / 255.0f,
+                        .g = (fdk_f32)g / 255.0f,
+                        .b = (fdk_f32)b / 255.0f, .a = 1.0f };
+}
+
+static void test_widget_tree_paint_readback(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK widget paint test",
+                                 .width = 320, .height = 240 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    assert(fdk_widget_is_root(root));
+    fdk_widget_set_background(root, wcol(20, 20, 20));
+
+    /* Same shape as the headless z-order test: overlapping siblings,
+     * a child on its parent, and a child poking out of its parent's
+     * bottom edge (must be clipped). */
+    fdk_widget *red = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                     (fdk_rect){20, 20, 120, 100}, &red)));
+    fdk_widget_set_background(red, wcol(220, 50, 50));
+    fdk_widget *green = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                     (fdk_rect){80, 90, 160, 70}, &green)));
+    fdk_widget_set_background(green, wcol(50, 200, 50));
+    fdk_widget *blue = NULL;
+    assert(fdk_ok(fdk_widget_create(red, NULL,
+                                     (fdk_rect){30, 30, 40, 40}, &blue)));
+    fdk_widget_set_background(blue, wcol(60, 90, 230));
+    fdk_widget *poke = NULL;
+    assert(fdk_ok(fdk_widget_create(red, NULL,
+                                     (fdk_rect){2, 85, 40, 40}, &poke)));
+    fdk_widget_set_background(poke, wcol(250, 250, 60));
+
+    /* The window owns its root: destroying it directly must be
+     * refused (tree must survive). */
+    fdk_widget_destroy(root);
+    assert(fdk_widget_child_count(root) == 2);
+
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    assert(x11_readback_pixel(&rb_dpy, xid, 25, 25) == 0x00DC3232u);   /* red    */
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 120) == 0x0032C832u); /* green  */
+    assert(x11_readback_pixel(&rb_dpy, xid, 110, 60) == 0x00DC3232u);  /* red    */
+    assert(x11_readback_pixel(&rb_dpy, xid, 70, 70) == 0x003C5AE6u);   /* blue   */
+    assert(x11_readback_pixel(&rb_dpy, xid, 100, 100) == 0x0032C832u); /* green over red */
+    assert(x11_readback_pixel(&rb_dpy, xid, 30, 110) == 0x00FAFA3Cu);  /* poke   */
+    assert(x11_readback_pixel(&rb_dpy, xid, 30, 125) == 0x00141414u);  /* poke clipped:
+                                                                            root bg */
+    assert(x11_readback_pixel(&rb_dpy, xid, 10, 10) == 0x00141414u);   /* root bg */
+
+    /* Hiding a subtree removes it from the next paint (full damage). */
+    fdk_widget_set_visible(red, false);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    assert(x11_readback_pixel(&rb_dpy, xid, 25, 25) == 0x00141414u);  /* red gone */
+    assert(x11_readback_pixel(&rb_dpy, xid, 70, 70) == 0x00141414u);  /* child gone with it */
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 120) == 0x0032C832u); /* green stays */
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win); /* frees the whole tree — ASan verifies */
+    fdk_shutdown(ctx);
+    printf("[ok] X11 widget tree paints through the window glue "
+           "(server-side readback: z-order, clip, hide)\n");
+}
+
+/* Sends a synthetic-but-real X event into the FDK window through the
+ * X server (the server queues it for clients selecting the mask on
+ * the window — FDK's XSelectInput does). flush + a pump round makes
+ * delivery synchronous for the test. */
+static void x11_send_pointer_event(Display *dpy, unsigned long xid, int type,
+                                   int mask, int x, int y,
+                                   unsigned int button) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = type;
+    ev.xbutton.window = (Window)xid;
+    ev.xbutton.subwindow = None;
+    ev.xbutton.x = x;
+    ev.xbutton.y = y;
+    ev.xbutton.x_root = x;
+    ev.xbutton.y_root = y;
+    ev.xbutton.state = 0;
+    ev.xbutton.button = button;
+    ev.xbutton.same_screen = True;
+    Status s = XSendEvent(dpy, (Window)xid, False, (long)mask, &ev);
+    assert(s != 0);
+    XFlush(dpy);
+}
+
+static void x11_send_key_event(Display *dpy, unsigned long xid, int type,
+                               unsigned int keycode) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = type;
+    ev.xkey.window = (Window)xid;
+    ev.xkey.subwindow = None;
+    ev.xkey.x = 1;
+    ev.xkey.y = 1;
+    ev.xkey.x_root = 1;
+    ev.xkey.y_root = 1;
+    ev.xkey.state = 0;
+    ev.xkey.keycode = keycode;
+    ev.xkey.same_screen = True;
+    Status s = XSendEvent(dpy, (Window)xid, False,
+                          (long)(KeyPressMask | KeyReleaseMask), &ev);
+    assert(s != 0);
+    XFlush(dpy);
+}
+
+static void x11_send_focus_event(Display *dpy, unsigned long xid, int type) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = type;
+    ev.xfocus.window = (Window)xid;
+    ev.xfocus.mode = NotifyNormal;
+    ev.xfocus.detail = NotifyNonlinear;
+    Status s = XSendEvent(dpy, (Window)xid, False, (long)FocusChangeMask,
+                          &ev);
+    assert(s != 0);
+    XFlush(dpy);
+}
+
+typedef struct {
+    int window_pointer_events; /* what the APP callback still sees */
+    int window_key_events;
+    int window_focus_events;
+} window_event_counter;
+
+static void window_count_callback(fdk_window *window,
+                                  const fdk_event_data *event,
+                                  void *user_data) {
+    (void)window;
+    window_event_counter *c = user_data;
+    switch (event->type) {
+        case FDK_EVENT_POINTER_MOTION:
+        case FDK_EVENT_POINTER_BUTTON_DOWN:
+        case FDK_EVENT_POINTER_BUTTON_UP:
+            c->window_pointer_events++;
+            break;
+        case FDK_EVENT_KEY_DOWN:
+        case FDK_EVENT_KEY_UP:
+            c->window_key_events++;
+            break;
+        case FDK_EVENT_WINDOW_FOCUS:
+            c->window_focus_events++;
+            break;
+        default:
+            break;
+    }
+}
+
+static void test_widget_real_input_via_xsendevent(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK widget input test",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, wcol(24, 24, 28));
+
+    fdk_widget *a = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                     (fdk_rect){20, 20, 120, 60}, &a)));
+    fdk_widget_set_background(a, wcol(200, 60, 60));
+    fdk_widget_set_can_focus(a, true);
+    fdk_widget *b = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                     (fdk_rect){160, 20, 120, 60}, &b)));
+    fdk_widget_set_background(b, wcol(60, 60, 200));
+    fdk_widget_set_can_focus(b, true);
+
+    widget_recorder ra, rb;
+    memset(&ra, 0, sizeof(ra));
+    memset(&rb, 0, sizeof(rb));
+    fdk_widget_set_event_callback(a, widget_record_event, &ra);
+    fdk_widget_set_event_callback(b, widget_record_event, &rb);
+
+    window_event_counter wc;
+    memset(&wc, 0, sizeof(wc));
+    fdk_window_set_event_callback(win, window_count_callback, &wc);
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Drain the map/configure/expose noise the window generated on
+     * show, so the ONLY events processed below are the ones this test
+     * sends (map-related events can arrive arbitrarily late under
+     * Xvfb; they are harmless but would interleave with the exact
+     * counts asserted below). Bounded at ~2s by the alarm net. */
+    alarm(5);
+    for (int quiet = 0; quiet < 2;) {
+        int r = fdk_pump_events(ctx, 100);
+        assert(r >= 0);
+        quiet = (r == 0) ? quiet + 1 : 0;
+    }
+    alarm(0);
+
+    /* Motion into a: ENTER + MOTION with a-local coordinates. The
+     * event is unhandled by every widget, so the APP callback also
+     * sees the window-level motion (routing contract: widget-consumed
+     * events are the only ones held back). */
+    x11_send_pointer_event(send_dpy, xid, MotionNotify, PointerMotionMask,
+                           30, 30, 0);
+    (void)fdk_pump_events(ctx, 200);
+    assert(ra.enter == 1 && ra.motion == 1);
+    assert(ra.last_local.x == 10.0f && ra.last_local.y == 10.0f);
+    assert(fdk_widget_is_hovered(a));
+    assert(wc.window_pointer_events == 1);
+
+    /* Cross to b: a LEAVE, b ENTER+MOTION. */
+    x11_send_pointer_event(send_dpy, xid, MotionNotify, PointerMotionMask,
+                           170, 30, 0);
+    (void)fdk_pump_events(ctx, 200);
+    assert(ra.leave == 1);
+    assert(rb.enter == 1 && rb.motion == 1);
+    assert(rb.last_local.x == 10.0f && rb.last_local.y == 10.0f);
+    assert(wc.window_pointer_events == 2);
+
+    /* Press on a, move to b, release: implicit grab keeps all of it
+     * on a (release coords in a-local space, off-bounds is legal). */
+    x11_send_pointer_event(send_dpy, xid, ButtonPress, ButtonPressMask,
+                           30, 30, Button1);
+    (void)fdk_pump_events(ctx, 200);
+    assert(ra.down == 1);
+
+    x11_send_pointer_event(send_dpy, xid, MotionNotify, PointerMotionMask,
+                           170, 30, 0);
+    (void)fdk_pump_events(ctx, 200);
+    assert(ra.motion == 2 && rb.motion == 1); /* rb untouched: grab */
+    assert(ra.last_local.x == 150.0f && ra.last_local.y == 10.0f);
+
+    x11_send_pointer_event(send_dpy, xid, ButtonRelease, ButtonReleaseMask,
+                           170, 30, Button1);
+    (void)fdk_pump_events(ctx, 200);
+    assert(ra.up == 1 && rb.up == 0); /* release went to the grab */
+    assert(ra.last_local.x == 150.0f && ra.last_local.y == 10.0f);
+
+    /* Now a CONSUMES its events: the app callback stops seeing them.
+     * (The five unhandled events above — motions x3, press, release —
+     * all reached the app; the consumed one must not.) */
+    ra.handle = true;
+    x11_send_pointer_event(send_dpy, xid, MotionNotify, PointerMotionMask,
+                           30, 30, 0);
+    (void)fdk_pump_events(ctx, 200);
+    assert(ra.enter == 2 && ra.motion == 3);
+    assert(wc.window_pointer_events == 5); /* unchanged by the consumed one */
+
+    /* Keyboard: focus a programmatically, then a REAL Tab keypress
+     * (X keycode 23 == evdev scancode 15 == FDK_KEY_TAB) drives the
+     * built-in traversal to b — and is consumed (app sees no key).
+     * (a stops consuming first: the consume-contract check above set
+     * its handle flag.) */
+    ra.handle = false;
+    assert(fdk_widget_focus(a));
+    assert(ra.focus_in == 1);
+    x11_send_key_event(send_dpy, xid, KeyPress, 23);
+    (void)fdk_pump_events(ctx, 200);
+    assert(ra.key_down == 1);              /* Tab was DELIVERED to a   */
+    assert(ra.focus_out == 1 && rb.focus_in == 1);
+    assert(fdk_widget_tree_get_focused(root) == b);
+    assert(wc.window_key_events == 0);     /* ...and consumed by the tree */
+
+    /* Window focus events mirror into the focused widget (b) without
+     * being consumed — the app callback still sees them. */
+    x11_send_focus_event(send_dpy, xid, FocusIn);
+    (void)fdk_pump_events(ctx, 200);
+    assert(rb.focus_in == 2);
+    assert(wc.window_focus_events == 1);
+    x11_send_focus_event(send_dpy, xid, FocusOut);
+    (void)fdk_pump_events(ctx, 200);
+    assert(rb.focus_out == 1);
+    assert(wc.window_focus_events == 2);
+    assert(fdk_widget_tree_get_focused(root) == b); /* tree keeps focus */
+
+    /* Interaction changed hover/pressed state visuals: a repaint only
+     * touches what actually changed (partial damage over the wire). */
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    XCloseDisplay(send_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 real input via XSendEvent: hover, grab, consume "
+           "contract, Tab traversal, focus mirror\n");
+}
+
+static void test_widget_root_follows_resize(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK widget resize test",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    surface_capture cap = { .ctx = ctx, .configure_count = 0 };
+    fdk_window_set_event_callback(win, surface_event_callback, &cap);
+
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, wcol(30, 144, 255));
+
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_window_resize(win, 400, 300);
+    alarm(5);
+    while (cap.configure_count == 0) {
+        int r = fdk_pump_events(ctx, 200);
+        assert(r >= 0);
+    }
+    alarm(0);
+
+    /* The glue resized the root to the new client size and damaged
+     * everything; one paint covers the fresh framebuffer. */
+    fdk_rect rb = fdk_widget_get_bounds(root);
+    assert(rb.x == 0 && rb.y == 0 && rb.width == 400 && rb.height == 300);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rd_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    /* A pixel that only exists in the NEW geometry: must be the root
+     * widget's background (repainted by the widget path), not the X
+     * window's background pixel. */
+    assert(x11_readback_pixel(&rd_dpy, xid, 390, 290) == 0x001E90FFu);
+    assert(x11_readback_pixel(&rd_dpy, xid, 150, 100) == 0x001E90FFu);
+
+    XCloseDisplay(rd_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 widget root follows resize; fresh area painted by "
+           "the tree\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -669,6 +1084,9 @@ int main(void) {
     test_surface_damage_partial_present();
     test_surface_primitives_readback();
     test_offscreen_blit_to_window();
+    test_widget_tree_paint_readback();
+    test_widget_real_input_via_xsendevent();
+    test_widget_root_follows_resize();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

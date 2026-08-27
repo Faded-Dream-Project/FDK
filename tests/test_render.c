@@ -36,7 +36,7 @@ static fdk_u32 pack(int r, int g, int b) {
 }
 
 static fdk_color rgb(int r, int g, int b) {
-    fdk_color c = { .r = r / 255.0f, .g = g / 255.0f, .b = b / 255.0f,
+    fdk_color c = { .r = (fdk_f32)r / 255.0f, .g = (fdk_f32)g / 255.0f, .b = (fdk_f32)b / 255.0f,
                     .a = 1.0f };
     return c;
 }
