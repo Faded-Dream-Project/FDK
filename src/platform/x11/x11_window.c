@@ -85,6 +85,22 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->saved_y = 0;
     pwindow->saved_w = 0;
     pwindow->saved_h = 0;
+    /* WM_CLASS from the connection's app_id (fdk_init_options):
+     * res_class = the id itself, res_name = the id's last dot
+     * segment — the ICCCM convention (class groups instances). */
+    if (conn->app_id != NULL) {
+        XClassHint class_hint = { 0 };
+        class_hint.res_class = conn->app_id;
+        /* strrchr on a char* returns char* in C — no const to shed
+         * (XClassHint predates const, but the strings are mutable
+         * connection-owned storage). res_name = the id's last dot
+         * segment per the ICCCM instance/class convention. */
+        char *last_dot = strrchr(conn->app_id, '.');
+        class_hint.res_name =
+            last_dot != NULL ? last_dot + 1 : conn->app_id;
+        XSetClassHint(conn->display, pwindow->xwindow, &class_hint);
+    }
+
     pwindow->render_slots[0].image = NULL;
     pwindow->render_slots[1].image = NULL;
     pwindow->render_slots[0].malloc_data = NULL;

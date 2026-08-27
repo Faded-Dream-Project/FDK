@@ -20,6 +20,11 @@
 #include <xkbcommon/xkbcommon.h>
 
 struct fdk_platform_connection {
+    /* Application id (fdk_init_options.app_id), duplicated at
+     * connect; NULL when unset. Applied to every toplevel via
+     * xdg_toplevel.set_app_id — the compositor-side identity window
+     * rules (like sway's for_window) and taskbars match. */
+    char *app_id;
     struct wl_display *display;
     struct wl_registry *registry;
 
@@ -270,7 +275,7 @@ void fdk_wayland_teardown_seat(fdk_platform_connection *conn);
  * the way X11 has — see wayland_dispatch.c's doc comment for why).
  * Assembled into the fdk_platform_ops vtable in wayland_ops.c. */
 fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
-                                void *dispatch_user_data,
+                                void *dispatch_user_data, const char *app_id,
                                 fdk_platform_connection **out_conn);
 void fdk_wayland_disconnect(fdk_platform_connection *conn);
 int fdk_wayland_get_event_fd(fdk_platform_connection *conn);

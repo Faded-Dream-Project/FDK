@@ -11,6 +11,7 @@
 #include <poll.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* ---- small static helpers (forward-declared by being defined above
  * their use site; both are file-local to context.c) ---- */
@@ -133,7 +134,8 @@ static fdk_result select_and_connect(
          * src/platform/{x11,wayland}/ and is intentionally opaque to
          * the core layer — see docs/architecture.md's "no backend
          * leakage" rule). */
-        fdk_result r = ops->connect(context_dispatch_event, ctx, &conn);
+        fdk_result r = ops->connect(context_dispatch_event, ctx,
+                                    ctx->app_id, &conn);
         if (fdk_ok(r)) {
             *out_ops = ops;
             *out_conn = conn;
@@ -245,63 +247,111 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
         return FDK_ERR_PLATFORM_INIT;
     }
 
-    /* Drain events already buffered CLIENT-side before waiting on the
-     * fd. This matters because client libraries may read socket data
-     * into an internal queue during ordinary calls outside this loop:
-     * Xlib, for one, reads whatever is available every time it flushes
-     * — and fdk_surface_present() flushes every frame. An event that
-     * arrived while such a call was reading has already LEFT the
-     * socket, so poll() on the connection fd will never report it,
-     * and without this pre-drain it would sit in the client queue
-     * forever. (Found live: a WM_DELETE_WINDOW sent mid-render was
-     * swallowed exactly this way; events landing during the poll()
-     * wait were fine, events landing during rendering were not.)
+    /* The wait loop. "Wait up to timeout_ms for events" means
+     * APPLICATION events — the backends consume their own internal
+     * traffic inside dispatch_pending (X11's MIT-SHM completion
+     * notifications; Wayland's bookkeeping events) and report only
+     * what the application can observe. When such internal traffic
+     * is all that arrived, poll() has woken for nothing the caller
+     * cares about, so the loop goes back to waiting for the
+     * REMAINING time instead of returning early.
+     *
+     * Found live (Phase 5 completion, the 05_text demo): every
+     * XShmPutImage present makes the server send one ShmCompletion
+     * ~1-4ms later, so a draw-per-frame loop with pump(15ms) pacing
+     * was actually paced by its own completion events — 252fps
+     * instead of ~65fps, burning the demo's whole animation budget in
+     * a second. The timeout contract is now enforced against a
+     * monotonic deadline regardless of what wakes poll().
+     *
+     * The pre-drain on every iteration matters too: client libraries
+     * read socket data into an internal queue during ordinary calls
+     * outside this loop — Xlib, for one, reads whatever is available
+     * every time it flushes, and fdk_surface_present() flushes every
+     * frame. An event that arrived while such a call was reading has
+     * already LEFT the socket, so poll() on the connection fd will
+     * never report it, and without this drain it would sit in the
+     * client queue forever. (Found live: a WM_DELETE_WINDOW sent
+     * mid-render was swallowed exactly this way; events landing
+     * during the poll() wait were fine, events landing during
+     * rendering were not.)
      *
      * Both backends' dispatch_pending are designed to be safely
      * callable in this position: X11's drains Xlib's queue via
      * XPending; Wayland's does its own non-blocking readability check
      * (see wayland_dispatch.c). */
-    int buffered = ctx->ops->dispatch_pending(ctx->conn);
-    if (buffered < 0) {
-        FDK_ERROR("backend dispatch_pending failed (%d)", buffered);
-        return buffered;
-    }
-    if (buffered > 0) {
-        return buffered;
+    struct timespec deadline;
+    const bool finite = timeout_ms >= 0;
+    if (finite) {
+        clock_gettime(CLOCK_MONOTONIC, &deadline);
+        long long ns = (long long)deadline.tv_nsec +
+                       (long long)timeout_ms * 1000000LL;
+        deadline.tv_sec += (time_t)(ns / 1000000000LL);
+        deadline.tv_nsec = (long)(ns % 1000000000LL);
     }
 
-    struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
-    int pr = poll(&pfd, 1, timeout_ms < 0 ? -1 : timeout_ms);
-    if (pr < 0) {
-        if (errno_is_eintr()) {
-            /* Signal arrived mid-poll; nothing dispatched, caller
-             * loops and re-checks its own exit conditions (a
-             * fdk_quit() from a signal handler is honored this way —
-             * same behavior fdk_run()'s loop has always had). */
-            return 0;
+    for (;;) {
+        int buffered = ctx->ops->dispatch_pending(ctx->conn);
+        if (buffered < 0) {
+            FDK_ERROR("backend dispatch_pending failed (%d)", buffered);
+            return buffered;
         }
-        FDK_ERROR("poll() failed (errno=%d)", errno_value());
-        return FDK_ERR_UNKNOWN;
-    }
-
-    if (pfd.revents & (POLLERR | POLLNVAL)) {
-        FDK_ERROR("poll() reported fd error condition");
-        return FDK_ERR_PLATFORM_INIT;
-    }
-
-    if (pfd.revents & (POLLIN | POLLHUP)) {
-        int dispatched = ctx->ops->dispatch_pending(ctx->conn);
-        if (dispatched < 0) {
-            /* Backend returned a negative fdk_result cast to int —
-             * unrecoverable connection failure. Propagate it so the
-             * caller (fdk_run() or an application-owned loop) can
-             * treat the connection as dead. */
-            FDK_ERROR("backend dispatch_pending failed (%d)", dispatched);
-            return dispatched;
+        if (buffered > 0) {
+            return buffered;
         }
-        return dispatched;
+
+        int wait_ms = -1;
+        if (finite) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            long long rem_ns =
+                (long long)(deadline.tv_sec - now.tv_sec) * 1000000000LL +
+                (deadline.tv_nsec - now.tv_nsec);
+            if (rem_ns <= 0) {
+                return 0; /* timeout expired */
+            }
+            wait_ms = (int)((rem_ns + 999999LL) / 1000000LL); /* ceil */
+        }
+
+        struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
+        int pr = poll(&pfd, 1, wait_ms);
+        if (pr < 0) {
+            if (errno_is_eintr()) {
+                /* Signal arrived mid-poll; nothing dispatched, caller
+                 * loops and re-checks its own exit conditions (a
+                 * fdk_quit() from a signal handler is honored this way —
+                 * same behavior fdk_run()'s loop has always had). */
+                return 0;
+            }
+            FDK_ERROR("poll() failed (errno=%d)", errno_value());
+            return FDK_ERR_UNKNOWN;
+        }
+
+        if (pfd.revents & (POLLERR | POLLNVAL)) {
+            FDK_ERROR("poll() reported fd error condition");
+            return FDK_ERR_PLATFORM_INIT;
+        }
+
+        if ((pfd.revents & (POLLIN | POLLHUP)) != 0) {
+            int dispatched = ctx->ops->dispatch_pending(ctx->conn);
+            if (dispatched < 0) {
+                /* Backend returned a negative fdk_result cast to int —
+                 * unrecoverable connection failure. Propagate it so the
+                 * caller (fdk_run() or an application-owned loop) can
+                 * treat the connection as dead. */
+                FDK_ERROR("backend dispatch_pending failed (%d)", dispatched);
+                return dispatched;
+            }
+            if (dispatched > 0) {
+                return dispatched;
+            }
+            /* Only backend-internal traffic arrived — keep waiting
+             * the remaining timeout (loop head re-checks the
+             * deadline). */
+        }
+        /* Poll timeout or spurious wake: loop (the deadline check
+         * returns 0 once the budget is spent). */
     }
-    return 0;
 }
 
 void fdk_run(fdk_context *ctx) {

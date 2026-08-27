@@ -19,6 +19,11 @@
 #include <stddef.h>
 
 struct fdk_platform_connection {
+    /* Application id (fdk_init_options.app_id), duplicated at connect
+     * time; NULL when unset. Applied to every window as WM_CLASS (the
+     * X11 counterpart of Wayland's xdg_toplevel.set_app_id — window
+     * managers match it for rules and taskbar grouping). */
+    char *app_id;
     Display *display;
     int screen;
     Window root;
@@ -137,7 +142,7 @@ fdk_platform_window *fdk_x11_find_window(fdk_platform_connection *conn,
  * that cross-file wiring — none of these are called from outside
  * src/platform/x11/. */
 fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
-                            void *dispatch_user_data,
+                            void *dispatch_user_data, const char *app_id,
                             fdk_platform_connection **out_conn);
 void fdk_x11_disconnect(fdk_platform_connection *conn);
 int fdk_x11_get_event_fd(fdk_platform_connection *conn);

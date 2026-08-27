@@ -6,6 +6,7 @@
 
 #include <X11/Xutil.h> /* XDestroyImage macro, XCreateImage */
 #include <stdlib.h>
+#include <string.h>
 
 /* Software framebuffer for the X11 backend — the machinery behind
  * fdk_surface (include/fdk/fdk_surface.h) on this platform.
@@ -456,6 +457,60 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
      * what the server shows / is reading); the app draws the other
      * one next frame. */
     pwindow->render_back = 1 - slot;
+
+    /* Slot synchronization — the correctness requirement of
+     * damage-tracked DOUBLE buffering (found live by the layout
+     * demo's breathing meter): the surface layer's damage model
+     * assumes the drawing buffer matches the SCREEN outside the new
+     * damage. With alternating slots that only holds if each slot is
+     * brought up to date with what was just presented: without this
+     * copy, frame N+1's partial damage ships rects from a slot whose
+     * contents are from TWO presents ago — stale wherever frame N's
+     * damage overlapped, which the screen shows as flickering
+     * previous-century content (the layout demo alternated whole
+     * correct frames with storm-era leftovers). Copy the presented
+     * region front -> back so the slots differ only by future
+     * drawing. The copy is bounded by the shipped bytes (a whole-
+     * image present syncs the whole image — same traffic again, CPU
+     * memcpy between the slot buffers, no extra X requests). */
+    {
+        int back = 1 - slot;
+        XImage *src_img = pwindow->render_slots[slot].image;
+        XImage *dst_img = pwindow->render_slots[back].image;
+        if (src_img != NULL && dst_img != NULL &&
+            src_img->data != dst_img->data &&
+            src_img->width == dst_img->width &&
+            src_img->height == dst_img->height) {
+            if (whole) {
+                size_t row_bytes = (size_t)w * sizeof(fdk_u32);
+                for (int y = 0; y < h; y++) {
+                    memcpy(dst_img->data +
+                               (size_t)y * (size_t)dst_img->bytes_per_line,
+                           src_img->data +
+                               (size_t)y * (size_t)src_img->bytes_per_line,
+                           row_bytes);
+                }
+            } else {
+                for (int i = 0; i < live; i++) {
+                    int ry0 = (int)clamp_y0[i];
+                    int ry1 = (int)clamp_y1[i];
+                    size_t row_bytes =
+                        (size_t)(clamp_x1[i] - clamp_x0[i]) * sizeof(fdk_u32);
+                    for (int y = ry0; y < ry1; y++) {
+                        memcpy(dst_img->data +
+                                   (size_t)y *
+                                       (size_t)dst_img->bytes_per_line +
+                                   (size_t)clamp_x0[i] * sizeof(fdk_u32),
+                               src_img->data +
+                                   (size_t)y *
+                                       (size_t)src_img->bytes_per_line +
+                                   (size_t)clamp_x0[i] * sizeof(fdk_u32),
+                               row_bytes);
+                    }
+                }
+            }
+        }
+    }
     return FDK_OK;
 }
 

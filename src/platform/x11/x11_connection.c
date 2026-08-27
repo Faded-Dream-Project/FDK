@@ -8,10 +8,11 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
-                               void *dispatch_user_data,
+                               void *dispatch_user_data, const char *app_id,
                                fdk_platform_connection **out_conn) {
     Display *display = XOpenDisplay(NULL);
     if (display == NULL) {
@@ -33,6 +34,19 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->windows = NULL;
     conn->window_count = 0;
     conn->window_capacity = 0;
+    conn->app_id = NULL;
+
+    /* app_id (when set) rides along on the connection and becomes
+     * every window's WM_CLASS — the X11 identity mechanism window
+     * managers match for rules and grouping. */
+    if (app_id != NULL && app_id[0] != '\0') {
+        size_t len = strlen(app_id) + 1;
+        conn->app_id = malloc(len); /* Xlib-free storage; freed with
+                                     * free() at disconnect */
+        if (conn->app_id != NULL) {
+            memcpy(conn->app_id, app_id, len);
+        }
+    }
 
     /* MIT-SHM probe (Phase 3 completion): use the shared-memory fast
      * path for present() when the server supports the extension and
@@ -138,6 +152,9 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
         }
     }
     fdk_free(conn->windows);
+
+    free(conn->app_id);
+    conn->app_id = NULL;
 
     FDK_INFO("disconnecting");
     XCloseDisplay(conn->display);

@@ -94,7 +94,7 @@ static const struct xdg_wm_base_listener g_wm_base_listener = {
 };
 
 fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
-                                void *dispatch_user_data,
+                                void *dispatch_user_data, const char *app_id,
                                 fdk_platform_connection **out_conn) {
     struct wl_display *display = wl_display_connect(NULL);
     if (display == NULL) {
@@ -126,6 +126,14 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
     conn->pointer_y = 0.0;
     conn->dispatch = dispatch;
     conn->dispatch_user_data = dispatch_user_data;
+    conn->app_id = NULL;
+    if (app_id != NULL && app_id[0] != '\0') {
+        size_t len = strlen(app_id) + 1;
+        conn->app_id = fdk_alloc(len);
+        if (conn->app_id != NULL) {
+            memcpy(conn->app_id, app_id, len);
+        }
+    }
     conn->windows = NULL;
     conn->window_count = 0;
     conn->window_capacity = 0;
@@ -213,6 +221,9 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     if (conn->shm) wl_shm_destroy(conn->shm);
     if (conn->compositor) wl_compositor_destroy(conn->compositor);
     if (conn->registry) wl_registry_destroy(conn->registry);
+
+    fdk_free(conn->app_id);
+    conn->app_id = NULL;
 
     FDK_INFO("disconnecting");
     wl_display_disconnect(conn->display);

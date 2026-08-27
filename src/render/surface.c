@@ -142,6 +142,21 @@ fdk_result fdk__surface_acquire(fdk_surface *surface) {
     return FDK_OK;
 }
 
+void fdk__surface_drop_framebuffer(fdk_surface *surface) {
+    if (surface == NULL || surface->offscreen) {
+        return; /* offscreen pixels are permanent */
+    }
+    /* Keep damage bookkeeping as-is: the next acquire resets to full
+     * damage if the re-fetched framebuffer's size differs (see
+     * fdk__surface_acquire) and preserves it when the size is
+     * unchanged, in which case the pixels are still valid on both
+     * backends (X11 returns the same image; Wayland pre-fills fresh
+     * buffers with the visible frame). The clip re-derives from the
+     * re-acquired fb bounds — every drawing helper runs the acquire
+     * prologue first. */
+    surface->has_fb = 0;
+}
+
 fdk_result fdk_window_get_surface(fdk_window *window,
                                   fdk_surface **out_surface) {
     if (window == NULL || out_surface == NULL) {

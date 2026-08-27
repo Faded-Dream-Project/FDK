@@ -97,7 +97,7 @@ typedef struct fdk_platform_ops {
      * backend and used for all future event delivery on this
      * connection. */
     fdk_result (*connect)(fdk_platform_dispatch_fn dispatch,
-                           void *dispatch_user_data,
+                           void *dispatch_user_data, const char *app_id,
                            fdk_platform_connection **out_conn);
 
     /* Releases the connection and everything still open on it (any

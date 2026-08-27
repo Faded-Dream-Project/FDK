@@ -999,6 +999,14 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * application to handle FDK_EVENT_WINDOW_CONFIGURE itself just to
      * keep FDK's own bookkeeping in sync. */
     if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
+        /* A cached framebuffer acquired at the OLD size is stale now;
+         * drop it so the next acquire re-fetches at the new size
+         * (without this, a get_info between presents pins an
+         * old-size buffer and the window presents the old size
+         * forever — see fdk__surface_drop_framebuffer). */
+        if (window->surface != NULL) {
+            fdk__surface_drop_framebuffer(window->surface);
+        }
         window->last_size = event->configure.size;
         if (window->root != NULL) {
             /* The root tracks the window's client size; a resize is a

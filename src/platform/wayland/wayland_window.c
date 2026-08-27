@@ -963,6 +963,12 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     }
     xdg_toplevel_add_listener(pwindow->xdg_toplevel, &g_xdg_toplevel_listener, pwindow);
     xdg_toplevel_set_title(pwindow->xdg_toplevel, title);
+    /* The application id (fdk_init_options.app_id): the compositor
+     * identity window rules and taskbars match. Best-effort NULL —
+     * the protocol allows omitting it (compositors then fall back to
+     * the title). */
+    xdg_toplevel_set_app_id(pwindow->xdg_toplevel,
+                            conn->app_id != NULL ? conn->app_id : "fdk.app");
 
     /* xdg-decoration object creation must happen HERE, before any
      * buffer is ever attached: the protocol is explicit that a
@@ -1172,6 +1178,22 @@ void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_
         pwindow->last_size.width = width;
         pwindow->last_size.height = height;
         pwindow->pending_size = pwindow->last_size;
+        /* ...and notify the frontend the way a compositor configure
+         * would. Without this, nothing ever invalidates the widget
+         * tree (the tree's own damage tracking says "clean"; no
+         * compositor configure arrives because the compositor only
+         * reacts to a commit we never make) — the resize deadlocks:
+         * no repaint, no commit, no confirmation, the window stays
+         * at its old size forever. Found by the Phase 5 Wayland
+         * reflow test. The event is optimistic in the same sense
+         * resize itself is: a compositor that disagrees answers with
+         * a real configure that corrects the bookkeeping. */
+        fdk_event_data event;
+        memset(&event, 0, sizeof event);
+        event.type = FDK_EVENT_WINDOW_CONFIGURE;
+        event.configure.size = pwindow->last_size;
+        pwindow->conn->dispatch(pwindow, &event,
+                                pwindow->conn->dispatch_user_data);
         return;
     }
     if (pwindow->buffer_size.width == width && pwindow->buffer_size.height == height) {

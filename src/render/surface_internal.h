@@ -109,6 +109,19 @@ void fdk_surface_detach_from_window(fdk_window *window);
  * built from. */
 void fdk__surface_damage_add(fdk_surface *surface, fdk_rect rect);
 fdk_result fdk__surface_acquire(fdk_surface *surface);
+/* Drops a cached window-surface framebuffer (has_fb = 0) so the next
+ * acquire re-fetches at the backend's CURRENT size. Called when the
+ * window's client size changes (FDK_EVENT_WINDOW_CONFIGURE handling
+ * in window.c): an acquire made before the size change would
+ * otherwise keep serving a stale old-size framebuffer — the tree
+ * would paint clipped into it and present the OLD size forever
+ * (found by the Phase 5 Wayland reflow case; on X11 the same
+ * staleness was masked by test ordering). Offscreen surfaces are a
+ * no-op (their pixels are permanent). The damage model is left to
+ * the next acquire, which already resets to full damage on a size
+ * change and keeps accumulated damage when the size turns out to be
+ * unchanged. */
+void fdk__surface_drop_framebuffer(fdk_surface *surface);
 void fdk__surface_blend_coverage(fdk_surface *surface, int x, int y,
                                  fdk_color color, fdk_f32 coverage);
 
