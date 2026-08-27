@@ -45,7 +45,22 @@
  * hooks via fdk_box_class_def.) */
 
 static bool box_class_of(const fdk_widget *w) {
-    return w != NULL && w->klass == &fdk_box_class_def;
+    if (w == NULL || w->klass == NULL) {
+        return false;
+    }
+    /* Box-ness is DELEGATION, not exact class identity: any class
+     * that runs the box packing hooks IS a box for layout purposes.
+     * The catalog's Frame embeds fdk_box and delegates BOTH hooks —
+     * with an identity check here, a Frame's own children (radios
+     * added after the frame) never triggered the frame's relayout
+     * and never propagated upward; the frame kept its empty natural
+     * until some later sibling happened to relayout the parent
+     * (found live by the 07 demo: content [ key_frame [ radios ] ]
+     * left the radios at 0x0 forever). Subclasses that implement
+     * their OWN layout hooks are not boxes and own their relayout
+     * policy themselves, exactly as before. */
+    return w->klass->measure == fdk_box_measure_hook ||
+           w->klass->arrange == fdk_box_arrange_hook;
 }
 
 static fdk_box *box_of(fdk_widget *w) {
@@ -352,10 +367,16 @@ void fdk_box_set_orientation(fdk_widget *box, fdk_orientation orientation) {
     }
     b->orientation = orientation;
     box_layout(box);
+    /* The box's own natural changed: ancestors that sized it are
+     * stale (same propagation as child changes — see the notifier
+     * below). */
+    fdk_widget_child_layout_changed(box->parent);
 }
 
 fdk_orientation fdk_box_get_orientation(const fdk_widget *box) {
-    if (box == NULL || box->klass != &fdk_box_class_def) {
+    /* Same delegation rule as box_class_of: frames and future box
+     * subclasses answer their real orientation. */
+    if (box == NULL || !box_class_of(box)) {
         return (fdk_orientation)0;
     }
     const fdk_box *b = (const fdk_box *)box;
@@ -375,6 +396,7 @@ void fdk_box_set_spacing(fdk_widget *box, fdk_i32 spacing) {
     }
     b->spacing = spacing;
     box_layout(box);
+    fdk_widget_child_layout_changed(box->parent);
 }
 
 void fdk_box_set_padding(fdk_widget *box, fdk_i32 padding) {
@@ -390,6 +412,7 @@ void fdk_box_set_padding(fdk_widget *box, fdk_i32 padding) {
     }
     b->padding = padding;
     box_layout(box);
+    fdk_widget_child_layout_changed(box->parent);
 }
 
 void fdk_box_set_homogeneous(fdk_widget *box, bool homogeneous) {
@@ -399,6 +422,7 @@ void fdk_box_set_homogeneous(fdk_widget *box, bool homogeneous) {
     }
     b->homogeneous = homogeneous;
     box_layout(box);
+    fdk_widget_child_layout_changed(box->parent);
 }
 
 /* ---- widget-core notification hook ---- */
@@ -408,4 +432,26 @@ void fdk_widget_child_layout_changed(fdk_widget *parent) {
         return; /* non-containers have nothing to relayout */
     }
     box_layout(parent);
+
+    /* Propagate upward: this box's natural size may have changed
+     * (children added/removed/resized), which makes every ANCESTOR
+     * container's layout stale — an ancestor that sized this box
+     * before the change still holds the old natural. Found live by
+     * the 07 demo: content [ key_frame [ radios ] ] left key_frame
+     * at its empty-frame height forever, because nothing re-ran
+     * content's layout after the radios existed.
+     *
+     * The chain strictly climbs parent links and terminates at the
+     * first non-container (or the root); box_layout itself never
+     * calls back into this hook, so there is no cycle. Ancestor
+     * relayouts re-arrange their children through the arrange hook,
+     * which runs box_layout directly (not this notifier). Pure
+     * geometry all the way — no user code runs.
+     *
+     * Cost note: a child change deep in a nested UI now relayouts
+     * every container up to the root (each pass re-measures its
+     * children). Correct-first, per the project's no-premature-
+     * optimization principle; recorded on the roadmap for the
+     * layout-perf pass. */
+    fdk_widget_child_layout_changed(parent->parent);
 }

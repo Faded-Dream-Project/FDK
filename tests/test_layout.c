@@ -283,6 +283,65 @@ static void test_nested_boxes(void) {
            "recursive expand\n");
 }
 
+static void test_nested_child_change_propagation(void) {
+    /* Regression (found live by the 07 text-layout demo): a child
+     * change inside a NESTED container must relayout that container
+     * AND every ancestor that sized it — frames included (box-ness
+     * is hook delegation, not class identity). Before the fix,
+     * outer [ frame [ children-added-later ] ] left the frame at
+     * its empty natural forever. Fontless frame: no title band, so
+     * the numbers are font-independent. */
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 300, 200}, &root)));
+    fdk_widget *outer = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_VERTICAL, &outer)));
+    fdk_widget_arrange(outer, (fdk_rect){0, 0, 300, 200});
+
+    fdk_widget *frame = NULL;
+    assert(fdk_ok(fdk_frame_create(outer, NULL, "F", &frame)));
+    fdk_widget *footer = mk_child(outer, 0, 20);
+
+    /* Empty frame natural: padding 10 * 2, no title (no font). */
+    assert_bounds(frame, 0, 0, 300, 20, "empty frame");
+
+    /* Children added AFTER the frame was sized: the frame relayouts
+     * itself AND outer re-runs (frame natural 20 -> 98, footer
+     * moves down). */
+    fdk_widget *a = mk_child(frame, 120, 30);
+    fdk_widget *b = mk_child(frame, 120, 40);
+    assert_bounds(frame, 0, 0, 300, 98, "frame grew with children");
+    /* cross-axis default is FILL: children stretch to the frame's
+     * inner width (300 - 2*10) at their natural heights */
+    assert_bounds(a, 10, 10, 280, 30, "frame child a slotted");
+    assert_bounds(b, 10, 48, 280, 40, "frame child b slotted");
+    assert_bounds(footer, 0, 98, 300, 20, "footer pushed down");
+
+    /* Box setters now reach frames too (same delegation fix — they
+     * used to be silent no-ops on any box subclass). */
+    fdk_box_set_spacing(frame, 4);
+    assert_bounds(b, 10, 44, 280, 40, "frame spacing setter works");
+    fdk_box_set_padding(frame, 6);
+    assert_bounds(a, 6, 6, 288, 30, "frame padding setter works");
+
+    /* The same propagation through plain nested boxes: a child added
+     * to `inner` (below frame + footer) grows `inner` and re-runs
+     * outer's packing to slot it. The padding change above shrank
+     * the frame (98 -> 86) and the footer moved up — propagation at
+     * work; defaults spacing/padding are 0. */
+    fdk_widget *inner = NULL;
+    assert(fdk_ok(fdk_box_create(outer, FDK_VERTICAL, &inner)));
+    fdk_widget *c = mk_child(inner, 0, 25);
+    (void)c;
+    assert_bounds(footer, 0, 86, 300, 20, "footer reflowed up");
+    assert_bounds(inner, 0, 106, 300, 25, "inner slotted by outer");
+
+    fdk_widget_destroy(root);
+    printf("[ok] nested child-change propagation: frames relayout on "
+           "their own child changes, ancestors re-run, setters reach "
+           "subclasses\n");
+}
+
 static void test_layout_paints(void) {
     /* Layout + painting together: a laid-out tree must paint exactly
      * into the computed slots (geometry and pixels agree). */
@@ -371,6 +430,7 @@ int main(void) {
     test_box_homogeneous_distribution();
     test_dynamic_children_relayout();
     test_nested_boxes();
+    test_nested_child_change_propagation();
     test_layout_paints();
     test_argument_safety();
     printf("all headless layout tests passed\n");
