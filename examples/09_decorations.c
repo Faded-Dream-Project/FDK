@@ -1,18 +1,28 @@
 /* 09_decorations.c — the Phase 8 window decorations, live.
  *
  * One window running under FDK's OWN title bar: a themed band with
- * the window title and a working close button, the WM's chrome asked
- * away via _MOTIF_WM_HINTS, the content laid out below the band, and
- * the band draggable to move the whole window. The "Toggle
- * decorations" button flips between FDK-drawn and WM decorations at
- * runtime.
+ * the window title and minimize / maximize-restore / close buttons
+ * (vector glyphs — they render with or without fonts), the WM's
+ * chrome asked away (_MOTIF_WM_HINTS on X11, xdg-decoration on
+ * Wayland), the content laid out below the band, the band draggable
+ * to move the window, double-click on the band toggling maximize,
+ * and a 5px resize border around everything when FDK owns the
+ * chrome. The "Toggle decorations" button flips between FDK-drawn
+ * and platform decorations at runtime.
  *
  * For the test rig the demo prints:
  *   RIG: toggle <x> <y> <w> <h>  — the toggle button's bounds
  *   PHASE: on / PHASE: off       — after each toggle (and at start)
+ *   WLSTATE: max=<0/1> min=<0/1> — every window-state change
+ * With --wayland-auto the demo drives itself (no input devices
+ * needed — weston headless kiosk-shell has no seat): a timed cycle
+ * through decorate / maximize / unmaximize / minimize / undecorate,
+ * printing the same markers, ending on decorated+maximized so the
+ * screenshot shows the full package.
+ *
  * Escape or the close request ends it. The content font comes from
  * fdk_font_load_system_default() — the same probe the title bar
- * uses. Needs a system TrueType font.
+ * uses. Needs a system TrueType font (the band buttons never do).
  */
 
 #include "fdk/fdk.h"
@@ -31,11 +41,20 @@ static fdk_widget *progress = NULL;
 static fdk_widget *root = NULL;
 
 static void set_status(void) {
-    char buf[96];
-    snprintf(buf, sizeof buf,
-             app.window != NULL && fdk_window_get_decorated(app.window)
-                 ? "Decorations: ON - drag the band, x closes."
-                 : "Decorations: OFF - the WM owns the chrome.");
+    if (status == NULL || app.window == NULL) {
+        return; /* state events can precede widget creation */
+    }
+    char buf[128];
+    if (fdk_window_get_decorated(app.window)) {
+        snprintf(buf, sizeof buf,
+                 "Decorations: ON%s - drag/double-click the band, "
+                 "edges resize, buttons manage.",
+                 fdk_window_is_maximized(app.window) ? " (maximized)"
+                                                     : "");
+    } else {
+        snprintf(buf, sizeof buf,
+                 "Decorations: OFF - the platform owns the chrome.");
+    }
     (void)fdk_label_set_text(status, buf);
 }
 
@@ -75,10 +94,27 @@ static void window_event(fdk_window *window, const fdk_event_data *event,
         (event->type == FDK_EVENT_KEY_DOWN &&
          event->key.scancode == FDK_KEY_ESC)) {
         app.quit = true;
+    } else if (event->type == FDK_EVENT_WINDOW_STATE) {
+        printf("WLSTATE: max=%d min=%d\n",
+               fdk_window_is_maximized(window) ? 1 : 0,
+               fdk_window_is_minimized(window) ? 1 : 0);
+        fflush(stdout);
+        set_status();
+    } else if (event->type == FDK_EVENT_WINDOW_DECORATION) {
+        printf("WLDECO: compositor kept its own decorations\n");
+        fflush(stdout);
+        set_status();
     }
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    bool wayland_auto = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--wayland-auto") == 0) {
+            wayland_auto = true;
+        }
+    }
+
     font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
         fprintf(stderr, "09_decorations: no system TrueType font "
@@ -164,10 +200,61 @@ int main(void) {
     fflush(stdout);
 
     int frames = 0;
+    /* --wayland-auto: a self-driving cycle for compositors without
+     * input devices (weston headless kiosk-shell has no seat). Each
+     * step prints the same markers the input-driven rig reads. */
+    int auto_step = 0;
+    int auto_next = 0; /* frame at which the next step fires */
     while (!app.quit) {
         (void)fdk_pump_events(ctx, 15);
         if (app.quit) {
             break;
+        }
+        if (wayland_auto && frames >= auto_next) {
+            switch (auto_step) {
+            case 0:
+                printf("AUTO: maximize\n");
+                fflush(stdout);
+                (void)fdk_window_maximize(app.window);
+                auto_next = frames + 180;
+                break;
+            case 1:
+                printf("AUTO: unmaximize\n");
+                fflush(stdout);
+                (void)fdk_window_unmaximize(app.window);
+                auto_next = frames + 180;
+                break;
+            case 2:
+                printf("AUTO: minimize\n");
+                fflush(stdout);
+                (void)fdk_window_minimize(app.window);
+                auto_next = frames + 180;
+                break;
+            case 3:
+                printf("AUTO: undecorate\n");
+                fflush(stdout);
+                (void)fdk_window_set_decorated(app.window, false);
+                printf("PHASE: off\n");
+                fflush(stdout);
+                auto_next = frames + 180;
+                break;
+            case 4:
+                /* End visible + decorated + maximized: the screenshot
+                 * then shows the whole package. */
+                printf("AUTO: redecorate + maximize (final state)\n");
+                fflush(stdout);
+                (void)fdk_window_set_decorated(app.window, true);
+                printf("PHASE: on\n");
+                fflush(stdout);
+                (void)fdk_window_maximize(app.window);
+                auto_next = frames + 180;
+                break;
+            default:
+                auto_next = frames + 180; /* hold the final state */
+                break;
+            }
+            auto_step++;
+            set_status();
         }
         fdk_progress_set_fraction(progress,
                                   (fdk_f32)(frames % 200) / 199.0f);

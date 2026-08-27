@@ -29,6 +29,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h> /* XGetImage / XGetPixel / XDestroyImage */
+#include <X11/Xatom.h> /* XA_ATOM / XA_INTEGER (fake-WM property work) */
 
 #include <assert.h>
 #include <signal.h>
@@ -1755,6 +1756,24 @@ static void test_theme_switch_gui(void) {
  * close-request, dragging the band moves the window (verified via
  * XTranslateCoordinates), and the mode round-trips. */
 static int deco_close_requests = 0;
+static int deco_state_events = 0;
+
+/* Pumps until FDK's own view of the window size matches (the band's
+ * button rects and the resize zones are computed from it): the X
+ * server may have applied a resize before FDK processed the
+ * ConfigureNotify, and input aimed using the fresh geometry against
+ * FDK's stale view would miss. */
+static void deco_wait_size(fdk_context *ctx, fdk_window *win, int w,
+                           int h) {
+    for (int i = 0; i < 40; i++) {
+        fdk_size sz = { 0, 0 };
+        (void)fdk_window_get_size(win, &sz);
+        if (sz.width == w && sz.height == h) {
+            return;
+        }
+        (void)fdk_pump_events(ctx, 50);
+    }
+}
 
 static void deco_window_callback(fdk_window *window,
                                  const fdk_event_data *event,
@@ -1763,6 +1782,8 @@ static void deco_window_callback(fdk_window *window,
     (void)user_data;
     if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
         deco_close_requests++;
+    } else if (event->type == FDK_EVENT_WINDOW_STATE) {
+        deco_state_events++;
     }
 }
 
@@ -1835,19 +1856,21 @@ static void test_decorations_gui(void) {
     /* The WM has been asked to drop its chrome. */
     assert(motif_hints_present(rb_dpy, xid));
 
-    /* Drag the band: press at bar-local (100, 2), motion to
-     * (140, 22) -> the window moves by (+40, +20). */
+    /* Drag the band: press at bar-local (100, 10) — inside the band,
+     * clear of the 5px top resize zone that Phase 8's resize edges
+     * now own — motion to (140, 30) -> the window moves by
+     * (+40, +20). */
     x11_send_pointer_event(rb_dpy, xid, MotionNotify,
-                           PointerMotionMask, 100, 2, 0);
+                           PointerMotionMask, 100, 10, 0);
     (void)fdk_pump_events(ctx, 100);
     x11_send_pointer_event(rb_dpy, xid, ButtonPress, ButtonPressMask,
-                           100, 2, 1);
+                           100, 10, 1);
     (void)fdk_pump_events(ctx, 100);
     x11_send_pointer_event(rb_dpy, xid, MotionNotify,
-                           PointerMotionMask, 140, 22, 0);
+                           PointerMotionMask, 140, 30, 0);
     (void)fdk_pump_events(ctx, 100);
     x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
-                           ButtonReleaseMask, 140, 22, 1);
+                           ButtonReleaseMask, 140, 30, 1);
     (void)fdk_pump_events(ctx, 100);
     {
         Window child = 0;
@@ -1886,14 +1909,830 @@ static void test_decorations_gui(void) {
     (void)fdk_pump_events(ctx, 200);
     assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00292E42u);
 
+    /* ---- Phase 8 completion: band buttons + double-click ---- */
+    {
+        int states0 = deco_state_events;
+
+        /* The maximize button (w-52 .. w-30 = 268..290 for w=320):
+         * a real click on the band's vector glyph button maximizes
+         * the window (bare X: FDK itself moves+resizes to the full
+         * screen) and delivers a real state event. */
+        x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                               PointerMotionMask, 279, 14, 0);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                               ButtonPressMask, 279, 14, 1);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 279, 14, 1);
+        (void)fdk_pump_events(ctx, 200);
+        assert(fdk_window_is_maximized(win));
+        assert(deco_state_events == states0 + 1);
+        {
+            /* Server-side truth: the window now fills the screen. */
+            Window root_ret = 0, child = 0;
+            int px = 0, py = 0;
+            unsigned int bw = 0, depth = 0, w = 0, h = 0;
+            assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px,
+                                &py, &w, &h, &bw, &depth));
+            (void)child;
+            assert(px == 0 && py == 0);
+            assert((int)w == DisplayWidth(rb_dpy, DefaultScreen(rb_dpy)));
+            assert((int)h == DisplayHeight(rb_dpy, DefaultScreen(rb_dpy)));
+        }
+
+        /* Double-click the band (center, clear of buttons): toggles
+         * maximize back off; the window returns to the geometry it
+         * had before (the post-drag position + 320x240). */
+        deco_wait_size(ctx, win,
+                       DisplayWidth(rb_dpy, DefaultScreen(rb_dpy)),
+                       DisplayHeight(rb_dpy, DefaultScreen(rb_dpy)));
+        x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                               ButtonPressMask, 160, 14, 1);
+        (void)fdk_pump_events(ctx, 60);
+        x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 160, 14, 1);
+        (void)fdk_pump_events(ctx, 60);
+        x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                               ButtonPressMask, 160, 14, 1);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 160, 14, 1);
+        (void)fdk_pump_events(ctx, 200);
+        assert(!fdk_window_is_maximized(win));
+        assert(deco_state_events == states0 + 2);
+        {
+            Window root_ret = 0, child = 0;
+            int px = 0, py = 0;
+            unsigned int bw = 0, depth = 0, w = 0, h = 0;
+            assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px,
+                                &py, &w, &h, &bw, &depth));
+            (void)child;
+            assert(px == 40 && py == 20); /* pre-maximize origin */
+            assert(w == 320 && h == 240); /* pre-maximize size */
+        }
+
+        /* The minimize button (w-76 .. w-54 = 244..266): unmaps the
+         * window (bare X has no icon manager) + state event; restore
+         * maps it back. */
+        deco_wait_size(ctx, win, 320, 240); /* FDK saw the restore */
+        x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                               PointerMotionMask, 255, 14, 0);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                               ButtonPressMask, 255, 14, 1);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 255, 14, 1);
+        (void)fdk_pump_events(ctx, 200);
+        fprintf(stderr, "DECO diag: min_click -> is_min=%d events=%d "
+                "(want %d) rect=(%d,%d,%d,%d)\n",
+                fdk_window_is_minimized(win) ? 1 : 0, deco_state_events,
+                states0 + 3, win->deco_btn_min.x, win->deco_btn_min.y,
+                win->deco_btn_min.width, win->deco_btn_min.height);
+        assert(fdk_window_is_minimized(win));
+        assert(deco_state_events == states0 + 3);
+        {
+            XWindowAttributes wa;
+            assert(XGetWindowAttributes(rb_dpy, (Window)xid, &wa));
+            assert(wa.map_state == IsUnmapped);
+        }
+        assert(fdk_ok(fdk_window_restore(win)));
+        (void)fdk_pump_events(ctx, 200);
+        assert(!fdk_window_is_minimized(win));
+        assert(deco_state_events == states0 + 4);
+        {
+            XWindowAttributes wa;
+            assert(XGetWindowAttributes(rb_dpy, (Window)xid, &wa));
+            assert(wa.map_state == IsViewable);
+        }
+
+        /* ---- Per-theme title-bar height: switching to a theme with
+         * title_bar_height=40 grows the band (row 38 becomes band
+         * fill; content that was there moves down) and switches
+         * back cleanly. ---- */
+        assert(fdk_ok(fdk_window_paint(win)));
+        (void)fdk_pump_events(ctx, 200);
+        assert(x11_readback_pixel(&rb_dpy, xid, 160, 38) ==
+               0x003C78C8u); /* content at 38: below the 28px band */
+        fdk_theme *tall = fdk_theme_create_default();
+        assert(tall != NULL);
+        assert(fdk_ok(fdk_theme_set_metric(
+            tall, FDK_TM_TITLE_BAR_HEIGHT, 40)));
+        fdk_theme_set_default(tall);
+        assert(fdk_ok(fdk_window_paint(win)));
+        (void)fdk_pump_events(ctx, 200);
+        assert(x11_readback_pixel(&rb_dpy, xid, 160, 38) ==
+               0x00292E42u); /* band fill: the band now covers 0..39 */
+        assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) ==
+               0x00292E42u);
+        /* Content moved down: row 50 was content before (28px band),
+         * still content (below 40) — and the band's bottom rule moved
+         * from y=27 to y=39. */
+        assert(x11_readback_pixel(&rb_dpy, xid, 160, 39) ==
+               0x004D5470u); /* themed rule at the new band bottom */
+        fdk_theme_set_default(NULL); /* revert to built-in */
+        fdk_theme_destroy(tall);
+        assert(fdk_ok(fdk_window_paint(win)));
+        (void)fdk_pump_events(ctx, 200);
+        assert(x11_readback_pixel(&rb_dpy, xid, 160, 38) ==
+               0x003C78C8u); /* back to the 28px band */
+    }
+
     XCloseDisplay(rb_dpy);
     fdk_window_destroy(win);
     fdk_shutdown(ctx);
     printf("[ok] X11 FDK decorations: themed band, content below, "
            "MWM hints on/off, real close-request, drag moves the "
-           "window, round trip\n");
+           "window, max/min buttons + double-click maximize + themed "
+           "band height, round trip\n");
 }
 
+
+/* ---- Phase 8 completion: window state + resize edges + EWMH ---- */
+
+static int state_gui_events = 0;
+static int state_gui_last_max = -1;
+static int state_gui_last_min = -1;
+
+static void state_window_callback(fdk_window *window,
+                                  const fdk_event_data *event,
+                                  void *user_data) {
+    (void)window;
+    (void)user_data;
+    if (event->type == FDK_EVENT_WINDOW_STATE) {
+        state_gui_events++;
+        state_gui_last_max = event->state.maximized;
+        state_gui_last_min = event->state.minimized;
+    }
+}
+
+/* Bare X (no WM — exactly what Xvfb gives us): FDK itself performs
+ * the window management, so state changes are synchronous and the
+ * geometry is directly observable. */
+static void test_window_state_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK state test",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, state_window_callback, NULL);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Initial state: not maximized, not minimized. */
+    assert(!fdk_window_is_maximized(win));
+    assert(!fdk_window_is_minimized(win));
+
+    /* Maximize: FDK fills the screen, saves the geometry, and
+     * dispatches the state event synchronously. */
+    int ev0 = state_gui_events;
+    assert(fdk_ok(fdk_window_maximize(win)));
+    assert(fdk_window_is_maximized(win));
+    assert(state_gui_events == ev0 + 1);
+    assert(state_gui_last_max == 1 && state_gui_last_min == 0);
+    (void)fdk_pump_events(ctx, 200);
+    rb_dpy = XOpenDisplay(NULL);
+    assert(rb_dpy != NULL);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
+                            &w, &h, &bw, &depth));
+        assert(px == 0 && py == 0);
+        assert((int)w == DisplayWidth(rb_dpy, DefaultScreen(rb_dpy)));
+        assert((int)h == DisplayHeight(rb_dpy, DefaultScreen(rb_dpy)));
+    }
+
+    /* Idempotent request: no redundant event. */
+    assert(fdk_ok(fdk_window_maximize(win)));
+    assert(state_gui_events == ev0 + 1);
+
+    /* Unmaximize: back to the saved geometry + event. */
+    assert(fdk_ok(fdk_window_unmaximize(win)));
+    assert(!fdk_window_is_maximized(win));
+    assert(state_gui_events == ev0 + 2);
+    (void)fdk_pump_events(ctx, 200);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
+                            &w, &h, &bw, &depth));
+        assert(px == 0 && py == 0 && w == 300 && h == 200);
+    }
+
+    /* Minimize: unmap + event (no WM to manage icons). */
+    assert(fdk_ok(fdk_window_minimize(win)));
+    assert(fdk_window_is_minimized(win));
+    assert(state_gui_events == ev0 + 3);
+    assert(state_gui_last_max == 0 && state_gui_last_min == 1);
+    (void)fdk_pump_events(ctx, 200);
+    {
+        XWindowAttributes wa;
+        assert(XGetWindowAttributes(rb_dpy, (Window)xid, &wa));
+        assert(wa.map_state == IsUnmapped);
+    }
+
+    /* Restore: map + event. */
+    assert(fdk_ok(fdk_window_restore(win)));
+    assert(!fdk_window_is_minimized(win));
+    assert(state_gui_events == ev0 + 4);
+    (void)fdk_pump_events(ctx, 200);
+    {
+        XWindowAttributes wa;
+        assert(XGetWindowAttributes(rb_dpy, (Window)xid, &wa));
+        assert(wa.map_state == IsViewable);
+    }
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 window state (bare X): maximize fills the screen "
+           "and remembers geometry, unmaximize restores, minimize "
+           "unmaps, restore remaps, every flip delivers exactly one "
+           "FDK_EVENT_WINDOW_STATE\n");
+}
+
+/* FDK-drawn resize edges (the bare-X fallback path — no WM to hand
+ * the drag to): synthetic pointer drags on the zones resize the
+ * window through XMoveResizeWindow, clamped to the app's size limits;
+ * with edges off, presses in the same places reach content widgets.
+ */
+static int resize_gui_button_presses = 0;
+
+static bool resize_gui_button_cb(fdk_widget *w,
+                                 const fdk_widget_event *event,
+                                 void *user) {
+    (void)w;
+    (void)user;
+    if (event->type == FDK_WIDGET_POINTER_DOWN) {
+        resize_gui_button_presses++;
+        return true;
+    }
+    return false;
+}
+
+static void test_resize_edges_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK resize test",
+                                 .width = 200, .height = 100 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    /* A button spanning the whole window: any press that gets past
+     * the (disabled) resize zones lands on it. */
+    fdk_widget *content = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){0, 0, 10, 10},
+                                    &content)));
+    fdk_widget_set_background(content, (fdk_color){0.1f, 0.1f, 0.6f, 1.0f});
+    fdk_window_set_content(win, content);
+    fdk_widget_set_event_callback(content, resize_gui_button_cb, NULL);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Edges OFF by default (undecorated): a press in the corner zone
+     * reaches the content widget and resizes nothing. */
+    assert(!fdk_window_get_resizable(win));
+    resize_gui_button_presses = 0;
+    rb_dpy = XOpenDisplay(NULL);
+    assert(rb_dpy != NULL);
+    x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                           ButtonPressMask, 2, 50, 1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 2, 50, 1);
+    (void)fdk_pump_events(ctx, 100);
+    assert(resize_gui_button_presses == 1);
+
+    /* Turn the edges on; app limits: min 120x80, max 400x300. */
+    fdk_window_set_resizable(win, true);
+    assert(fdk_window_get_resizable(win));
+    fdk_window_set_size_limits(win, (fdk_size){120, 80},
+                               (fdk_size){400, 300});
+
+    /* SE corner drag (+30, +30): grows to 230x130, origin pinned. */
+    x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                           ButtonPressMask, 198, 98, 1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 228, 128, 0);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 228, 128, 1);
+    (void)fdk_pump_events(ctx, 200);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
+                            &w, &h, &bw, &depth));
+        assert(px == 0 && py == 0 && w == 230 && h == 130);
+    }
+
+    /* E edge drag (+40, 0) from the current 230x130: 270x130. */
+    x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                           ButtonPressMask, 228, 65, 1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 268, 65, 0);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 268, 65, 1);
+    (void)fdk_pump_events(ctx, 200);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
+                            &w, &h, &bw, &depth));
+        assert(px == 0 && py == 0 && w == 270 && h == 130);
+    }
+
+    /* N edge drag DOWNWARD (+0, +20) shrinks from the top: the
+     * origin moves down by 20 and the height drops by 20. */
+    x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                           ButtonPressMask, 135, 2, 1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 135, 22, 0);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 135, 22, 1);
+    (void)fdk_pump_events(ctx, 200);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
+                            &w, &h, &bw, &depth));
+        assert(px == 0 && py == 20 && w == 270 && h == 110);
+    }
+
+    /* Min clamp: SE-corner drag from (268,108) to (10,40) — a
+     * shrink of (-258,-68) against 270x110 — clamps at the app's
+     * 120x80 minimum with the origin pinned (SE drags never move it).
+     * The window is at (0,20) after the N-edge test, so the final
+     * geometry is exactly (0,20,120,80). */
+    x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                           ButtonPressMask, 268, 108, 1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 10, 40, 0);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 10, 40, 1);
+    (void)fdk_pump_events(ctx, 200);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
+                            &w, &h, &bw, &depth));
+        assert(px == 0 && py == 20 && w == 120 && h == 80);
+    }
+
+    /* Content presses still work in the middle (no zone there). */
+    resize_gui_button_presses = 0;
+    x11_send_pointer_event(rb_dpy, xid, ButtonPress,
+                           ButtonPressMask, 100, 50, 1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 100, 50, 1);
+    (void)fdk_pump_events(ctx, 100);
+    assert(resize_gui_button_presses == 1);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 resize edges (bare X): off by default (content "
+           "gets corner presses), SE/E/N drags resize exactly, "
+           "min-size clamps hold\n");
+}
+/* ---- The EWMH fake window manager ----
+ *
+ * Xvfb runs with NO window manager, which is exactly right for the
+ * bare-X fallback tests above — but it leaves the EWMH protocol
+ * paths (the ones a real desktop WM exercises) untestable... unless
+ * the test BECOMES the window manager. On a second X connection this
+ * fake WM:
+ *
+ *   - advertises _NET_SUPPORTED (so FDK's connect-time probe sees an
+ *     EWMH WM and enables the message paths),
+ *   - selects SubstructureRedirectMask|SubstructureNotifyMask on the
+ *     root (the defining privilege of a WM),
+ *   - answers _NET_WM_STATE client messages by rewriting the
+ *     window's _NET_WM_STATE property (what real WMs do; the
+ *     PropertyNotify is how FDK learns the state),
+ *   - simulates the WM side of maximize (move+resize to the full
+ *     screen on ADD, restore the remembered geometry on REMOVE),
+ *   - records _NET_WM_MOVERESIZE and WM_CHANGE_STATE requests for
+ *     field-by-field assertions.
+ *
+ * It installs AFTER the bare-X tests (each test creates a fresh
+ * context, so the probe re-runs per context) and uninstalls before
+ * the suite ends (root input deselected + _NET_SUPPORTED deleted) so
+ * nothing downstream sees a phantom WM.
+ */
+typedef struct {
+    Display *dpy;
+    Window root;
+    Atom net_supported;
+    Atom net_wm_state;
+    Atom net_wm_state_maximized_vert;
+    Atom net_wm_state_maximized_horiz;
+    Atom net_wm_moveresize;
+    Atom wm_change_state;
+    /* Last _NET_WM_STATE message fields. */
+    long mr_action, mr_a1, mr_a2, mr_a3;
+    int saw_net_wm_state;
+    /* Last _NET_WM_MOVERESIZE fields. */
+    long move_x, move_y, move_dir, move_button;
+    int saw_moveresize;
+    /* Last WM_CHANGE_STATE (iconify) state. */
+    long change_state;
+    int saw_change_state;
+    /* Saved pre-maximize geometry of the (single) managed window. */
+    int has_saved, saved_x, saved_y;
+    unsigned int saved_w, saved_h;
+} fake_wm;
+
+static void fake_wm_install(fake_wm *wm) {
+    memset(wm, 0, sizeof *wm);
+    wm->dpy = XOpenDisplay(NULL);
+    assert(wm->dpy != NULL);
+    wm->root = DefaultRootWindow(wm->dpy);
+    wm->net_supported = XInternAtom(wm->dpy, "_NET_SUPPORTED", False);
+    wm->net_wm_state = XInternAtom(wm->dpy, "_NET_WM_STATE", False);
+    wm->net_wm_state_maximized_vert =
+        XInternAtom(wm->dpy, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+    wm->net_wm_state_maximized_horiz =
+        XInternAtom(wm->dpy, "_NET_WM_STATE_MAXIMIZED_HORIZ", False);
+    wm->net_wm_moveresize =
+        XInternAtom(wm->dpy, "_NET_WM_MOVERESIZE", False);
+    wm->wm_change_state =
+        XInternAtom(wm->dpy, "WM_CHANGE_STATE", False);
+    wm->change_state = -1;
+
+    /* Advertise exactly what we implement: FDK keys its EWMH
+     * maximize path off both maximized atoms being listed. */
+    Atom supported[3];
+    supported[0] = wm->net_wm_state_maximized_vert;
+    supported[1] = wm->net_wm_state_maximized_horiz;
+    supported[2] = wm->net_wm_moveresize;
+    XChangeProperty(wm->dpy, wm->root, wm->net_supported, XA_ATOM, 32,
+                    PropModeReplace, (const unsigned char *)supported, 3);
+
+    /* Become the WM (only possible because nobody else is). */
+    XSelectInput(wm->dpy, wm->root,
+                 SubstructureRedirectMask | SubstructureNotifyMask);
+    XSync(wm->dpy, False);
+}
+
+static void fake_wm_uninstall(fake_wm *wm) {
+    XSelectInput(wm->dpy, wm->root, 0);
+    XDeleteProperty(wm->dpy, wm->root, wm->net_supported);
+    XSync(wm->dpy, False);
+    XCloseDisplay(wm->dpy);
+}
+
+/* Reads the window's current _NET_WM_STATE atom list and rewrites it
+ * with add/remove applied to the two maximized atoms. */
+static void fake_wm_apply_state(fake_wm *wm, Window w, long action,
+                                Atom a1, Atom a2) {
+    Atom cur[16];
+    unsigned long n = 0;
+    Atom type = None;
+    int fmt = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *prop = NULL;
+    if (XGetWindowProperty(wm->dpy, w, wm->net_wm_state, 0, 16, False,
+                           XA_ATOM, &type, &fmt, &n, &bytes_after,
+                           &prop) == Success && prop != NULL &&
+        type == XA_ATOM) {
+        for (unsigned long i = 0; i < n && i < 16; i++) {
+            cur[i] = ((Atom *)prop)[i];
+        }
+    }
+    if (prop != NULL) {
+        XFree(prop);
+    }
+    /* Apply add/remove for both atoms. */
+    for (int which = 0; which < 2; which++) {
+        Atom a = (which == 0) ? a1 : a2;
+        if (a == None) {
+            continue;
+        }
+        int found = -1;
+        for (unsigned long i = 0; i < n; i++) {
+            if (cur[i] == a) {
+                found = (int)i;
+                break;
+            }
+        }
+        if (action == 1 /* ADD */ && found < 0 && n < 16) {
+            cur[n++] = a;
+        } else if (action == 0 /* REMOVE */ && found >= 0) {
+            cur[found] = cur[n - 1];
+            n--;
+        }
+    }
+    if (n > 0) {
+        XChangeProperty(wm->dpy, w, wm->net_wm_state, XA_ATOM, 32,
+                        PropModeReplace,
+                        (const unsigned char *)cur, (int)n);
+    } else {
+        XDeleteProperty(wm->dpy, w, wm->net_wm_state);
+    }
+    /* The property rewrite generates the PropertyNotify FDK listens
+     * for. Now simulate the WM's own reaction: ADD maximized ->
+     * fullscreen the window (remembering geometry); REMOVE ->
+     * restore it. */
+    int maximized = 0;
+    for (unsigned long i = 0; i < n; i++) {
+        if (cur[i] == wm->net_wm_state_maximized_vert ||
+            cur[i] == wm->net_wm_state_maximized_horiz) {
+            maximized++;
+        }
+    }
+    maximized = (maximized == 2) ? 1 : 0;
+    if (maximized && !wm->has_saved) {
+        Window root_ret = 0;
+        int x = 0, y = 0;
+        unsigned int bw = 0, depth = 0;
+        assert(XGetGeometry(wm->dpy, w, &root_ret, &x, &y,
+                            &wm->saved_w, &wm->saved_h, &bw, &depth));
+        wm->saved_x = x;
+        wm->saved_y = y;
+        wm->has_saved = 1;
+        XMoveResizeWindow(wm->dpy, w, 0, 0,
+                          (unsigned int)DisplayWidth(
+                              wm->dpy, DefaultScreen(wm->dpy)),
+                          (unsigned int)DisplayHeight(
+                              wm->dpy, DefaultScreen(wm->dpy)));
+    } else if (!maximized && wm->has_saved) {
+        XMoveResizeWindow(wm->dpy, w, wm->saved_x, wm->saved_y,
+                          wm->saved_w, wm->saved_h);
+        wm->has_saved = 0;
+    }
+}
+
+/* Drains pending events; acts on the ones a WM cares about. */
+static void fake_wm_pump(fake_wm *wm) {
+    /* XSync FIRST: it flushes this connection and waits for the
+     * server, which by then has also processed every OTHER client's
+     * already-flushed requests (FDK's XSendEvent from the step the
+     * test just ran) — so anything we're waiting for is in our queue
+     * by the time XPending looks. Without it the pump races the
+     * server's SendEvent processing and flakily misses messages. */
+    XSync(wm->dpy, False);
+    while (XPending(wm->dpy) > 0) {
+        XEvent ev;
+        XNextEvent(wm->dpy, &ev);
+        if (ev.type != ClientMessage) {
+            continue;
+        }
+        (void)0; /* all ClientMessages below are classified by type */
+        if (ev.xclient.message_type == wm->net_wm_state) {
+            wm->mr_action = ev.xclient.data.l[0];
+            wm->mr_a1 = ev.xclient.data.l[1];
+            wm->mr_a2 = ev.xclient.data.l[2];
+            wm->mr_a3 = ev.xclient.data.l[3];
+            wm->saw_net_wm_state++;
+            fake_wm_apply_state(wm, ev.xclient.window,
+                                ev.xclient.data.l[0],
+                                (Atom)ev.xclient.data.l[1],
+                                (Atom)ev.xclient.data.l[2]);
+        } else if (ev.xclient.message_type == wm->net_wm_moveresize) {
+            wm->move_x = ev.xclient.data.l[0];
+            wm->move_y = ev.xclient.data.l[1];
+            wm->move_dir = ev.xclient.data.l[2];
+            wm->move_button = ev.xclient.data.l[3];
+            wm->saw_moveresize++;
+            /* A real WM runs the interactive drag with a pointer
+             * grab; simulating the full drag is unnecessary — the
+             * message fields are what this test asserts. Perform one
+             * representative move so the window visibly reacts. */
+            if (wm->move_dir == 8 /* MOVE */) {
+                XMoveWindow(wm->dpy, ev.xclient.window, 30, 10);
+            }
+        } else if (ev.xclient.message_type == wm->wm_change_state) {
+            wm->change_state = ev.xclient.data.l[0];
+            wm->saw_change_state++;
+            /* ICCCM: the WM maintains WM_STATE on the window; Iconic
+             * = 3, Normal = 1. FDK watches this property. */
+            long state[2] = { ev.xclient.data.l[0] == 3 ? 3L : 1L, 0L };
+            XChangeProperty(wm->dpy, ev.xclient.window,
+                            XInternAtom(wm->dpy, "WM_STATE", False),
+                            XA_INTEGER, 32, PropModeReplace,
+                            (const unsigned char *)state, 2);
+        }
+    }
+    XSync(wm->dpy, False);
+}
+
+/* Pumps until *counter reaches want (bounded); returns whether it
+ * did. The XSync-first pump is already deterministic for flushed
+ * requests; the bounded retry additionally absorbs scheduler jitter
+ * so the suite never flakes. */
+static bool fake_wm_wait(fake_wm *wm, int *counter, int want) {
+    for (int i = 0; i < 20 && *counter < want; i++) {
+        fake_wm_pump(wm);
+        if (*counter >= want) {
+            return true;
+        }
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 50 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+    }
+    return *counter >= want;
+}
+
+static int ewmh_state_events = 0;
+
+static void ewmh_window_callback(fdk_window *window,
+                                 const fdk_event_data *event,
+                                 void *user_data) {
+    (void)window;
+    (void)user_data;
+    if (event->type == FDK_EVENT_WINDOW_STATE) {
+        ewmh_state_events++;
+    }
+}
+
+static void test_ewmh_fake_wm(void) {
+    fake_wm wm;
+    fake_wm_install(&wm);
+
+    /* FDK connects AFTER the fake WM advertised itself: the
+     * connect-time _NET_SUPPORTED probe must discover it and enable
+     * the EWMH paths. */
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK ewmh test",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, ewmh_window_callback, NULL);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* ---- Maximize goes through _NET_WM_STATE, not through FDK's
+     * own move+resize: the fake WM performs it, FDK learns via the
+     * property, and exactly one state event fires. ---- */
+    int ev0 = ewmh_state_events;
+    wm.saw_net_wm_state = 0;
+    assert(fdk_ok(fdk_window_maximize(win)));
+    assert(fake_wm_wait(&wm, &wm.saw_net_wm_state, 1));
+    (void)fdk_pump_events(ctx, 300); /* FDK reads PropertyNotify */
+    assert(wm.saw_net_wm_state == 1);
+    assert(wm.mr_action == 1 /* _NET_WM_STATE_ADD */);
+    assert((Atom)wm.mr_a1 == wm.net_wm_state_maximized_vert);
+    assert((Atom)wm.mr_a2 == wm.net_wm_state_maximized_horiz);
+    assert(wm.mr_a3 == 1 /* source indication: application */);
+    assert(fdk_window_is_maximized(win));
+    assert(ewmh_state_events == ev0 + 1);
+    {
+        /* The WM (not FDK) resized the window to the full screen. */
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        Display *d = XOpenDisplay(NULL);
+        assert(d != NULL);
+        assert(XGetGeometry(d, (Window)xid, &root_ret, &px, &py, &w,
+                            &h, &bw, &depth));
+        XCloseDisplay(d);
+        assert(px == 0 && py == 0);
+        assert((int)w == DisplayWidth(wm.dpy, DefaultScreen(wm.dpy)));
+    }
+
+    /* ---- Unmaximize: REMOVE message, geometry restored, event. -- */
+    wm.saw_net_wm_state = 0;
+    assert(fdk_ok(fdk_window_unmaximize(win)));
+    assert(fake_wm_wait(&wm, &wm.saw_net_wm_state, 1));
+    (void)fdk_pump_events(ctx, 300);
+    assert(wm.saw_net_wm_state == 1);
+    assert(wm.mr_action == 0 /* _NET_WM_STATE_REMOVE */);
+    assert(!fdk_window_is_maximized(win));
+    assert(ewmh_state_events == ev0 + 2);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        Display *d = XOpenDisplay(NULL);
+        assert(d != NULL);
+        assert(XGetGeometry(d, (Window)xid, &root_ret, &px, &py, &w,
+                            &h, &bw, &depth));
+        XCloseDisplay(d);
+        assert(px == 0 && py == 0 && w == 300 && h == 200);
+    }
+
+    /* ---- Band drag under a WM: the press must hand the drag to the
+     * WM via _NET_WM_MOVERESIZE(MOVE) instead of FDK moving the
+     * window itself. (Needs the FDK band — decorate first.) ---- */
+    assert(fdk_ok(fdk_window_set_decorated(win, true)));
+    (void)fdk_pump_events(ctx, 100);
+    wm.saw_moveresize = 0;
+    x11_send_pointer_event(wm.dpy, xid, ButtonPress, ButtonPressMask,
+                           100, 10, 1);
+    (void)fdk_pump_events(ctx, 100);
+    /* The press point in root coordinates, measured BEFORE the fake
+     * WM's simulated reaction moves the window: FDK translated the
+     * point through the window's position at press time. */
+    Window child = 0;
+    int press_rx = 0, press_ry = 0;
+    assert(XTranslateCoordinates(wm.dpy, (Window)xid, wm.root,
+                                 100, 10, &press_rx, &press_ry, &child));
+    assert(fake_wm_wait(&wm, &wm.saw_moveresize, 1));
+    assert(wm.move_dir == 8 /* _NET_WM_MOVERESIZE_MOVE */);
+    assert(wm.move_button == 1 /* the initiating button */);
+    assert(wm.move_x == press_rx && wm.move_y == press_ry);
+    /* Release the (WM-grabbed, in reality) button so nothing sticks. */
+    x11_send_pointer_event(wm.dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 100, 10, 1);
+    (void)fdk_pump_events(ctx, 100);
+
+    /* ---- Resize edges under a WM: a corner press hands the drag to
+     * the WM via _NET_WM_MOVERESIZE with the right direction code. -- */
+    fdk_window_set_resizable(win, true);
+    wm.saw_moveresize = 0;
+    /* The window is 300x200 (restored by the fake WM's unmaximize);
+     * its SE corner zone is (295..299, 195..199). Wait for FDK to
+     * SEE the restored size — the resize zones are computed from
+     * FDK's view, not the server's. */
+    {
+        fdk_size sz = { 0, 0 };
+        for (int i = 0; i < 40; i++) {
+            (void)fdk_window_get_size(win, &sz);
+            if (sz.width == 300 && sz.height == 200) {
+                break;
+            }
+            (void)fdk_pump_events(ctx, 50);
+        }
+        assert(sz.width == 300 && sz.height == 200);
+    }
+    x11_send_pointer_event(wm.dpy, xid, ButtonPress, ButtonPressMask,
+                           298, 198, 1);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fake_wm_wait(&wm, &wm.saw_moveresize, 1));
+    assert(wm.move_dir == 4 /* SIZE_BOTTOMRIGHT, from FDK_WRES_SE */);
+    x11_send_pointer_event(wm.dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 298, 198, 1);
+    (void)fdk_pump_events(ctx, 100);
+
+    /* ---- Minimize under a WM: XIconifyWindow's WM_CHANGE_STATE
+     * message; the WM maintains WM_STATE and FDK tracks it via
+     * PropertyNotify. ---- */
+    wm.saw_change_state = 0;
+    assert(fdk_ok(fdk_window_minimize(win)));
+    assert(fake_wm_wait(&wm, &wm.saw_change_state, 1));
+    (void)fdk_pump_events(ctx, 300);
+    assert(wm.saw_change_state == 1);
+    assert(wm.change_state == 3 /* IconicState */);
+    assert(fdk_window_is_minimized(win));
+    /* (The state event here is the WM_STATE property flip; under a
+     * real WM the minimize flag tracks exactly this property.) */
+    assert(ewmh_state_events > ev0 + 2);
+
+    /* Restore maps the window back; the fake WM resets WM_STATE. */
+    assert(fdk_ok(fdk_window_restore(win)));
+    {
+        /* fdk_window_restore XMaps directly (WMs intercept maps);
+         * the fake WM then sees the map and would restore focus in a
+         * real session. The minimized flag cleared via the map path.
+         */
+        (void)fdk_pump_events(ctx, 300);
+    }
+    assert(!fdk_window_is_minimized(win));
+
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    fake_wm_uninstall(&wm);
+    printf("[ok] X11 EWMH (fake WM): _NET_WM_STATE add/remove with "
+           "exact atoms + source, property-driven state events, WM-"
+           "driven maximize geometry, band drag via "
+           "_NET_WM_MOVERESIZE(MOVE) at the right root coords, resize "
+           "corner with the right direction, WM_CHANGE_STATE "
+           "iconify\n");
+}
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -1920,6 +2759,9 @@ int main(void) {
     test_label_radio_arrow_gui();
     test_theme_switch_gui();
     test_decorations_gui();
+    test_window_state_gui();
+    test_resize_edges_gui();
+    test_ewmh_fake_wm();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
