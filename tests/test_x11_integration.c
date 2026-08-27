@@ -1145,6 +1145,115 @@ static void test_widget_layout_reflow_on_resize(void) {
            "expanding panel, zero app code)\n");
 }
 
+/* ---- Text rendering (Phase 6) ---- */
+
+/* Draws real shaped text into a mapped window and verifies, through
+ * the X server's own pixels, that glyph ink reached the screen inside
+ * the measured metrics box and nowhere else. Requires a system font;
+ * honestly skipped when the environment has none. */
+static void test_text_render_readback(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    const char *font_path = NULL;
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        FILE *f = fopen(font_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            font_path = font_candidates[i];
+            break;
+        }
+    }
+    if (font_path == NULL) {
+        printf("[skip] X11 text render readback (no system TrueType "
+               "font found for shaping)\n");
+        return;
+    }
+
+    fdk_font *font = fdk_font_load(font_path, 48);
+    assert(font != NULL);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK text test",
+                                 .width = 320, .height = 160 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+
+    fdk_color bg = { .r = 0.05f, .g = 0.05f, .b = 0.08f, .a = 1.0f };
+    fdk_surface_fill(surface, bg);
+    fdk_color fg = { .r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f };
+    const char *text = "FDK";
+    fdk_text_metrics m;
+    assert(fdk_ok(fdk_font_measure_utf8(font, text, 3, &m)));
+    int pen_x = 40, baseline = 90;
+    assert(fdk_ok(fdk_surface_draw_utf8(surface, font, text, 3, pen_x,
+                                        baseline, fg)));
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Scan a horizontal line through the middle of the ink box: at
+     * 48px, "FDK" strokes are several pixels thick, so a mid-height
+     * scan must cross white ink multiple times. */
+    int mid_y = baseline + m.ink_top / 2;
+    long ink = 0;   /* pixels touched by glyph coverage (incl. AA) */
+    long bright = 0; /* solid stroke interiors */
+    for (int x = pen_x; x < pen_x + m.advance_width; x++) {
+        unsigned long px = x11_readback_pixel(&rb_dpy, xid, x, mid_y);
+        if (px != 0x000D0D14u) { /* != packed bg (13,13,20) */
+            ink++;
+            unsigned long r = (px >> 16) & 0xFFu;
+            unsigned long g = (px >> 8) & 0xFFu;
+            unsigned long b = px & 0xFFu;
+            /* White-on-dark compositing can only ADD light: every
+             * channel at least as bright as the background. (AA edge
+             * pixels sit anywhere in between — hence the separate
+             * bright-core count below, not a per-pixel brightness
+             * demand.) */
+            assert(r >= 13 && g >= 13 && b >= 20);
+            if (r > 100 && g > 100 && b > 100) {
+                bright++;
+            }
+        }
+    }
+    assert(ink > 20);    /* real glyph coverage, not noise */
+    assert(bright > 10); /* solid stroke interiors at 48px */
+
+    /* Left of the pen: untouched background. */
+    for (int x = 0; x < pen_x - 2; x += 4) {
+        unsigned long px = x11_readback_pixel(&rb_dpy, xid, x, mid_y);
+        assert(px == 0x000D0D14u);
+    }
+    /* Below the ink box: untouched background. */
+    for (int x = pen_x; x < pen_x + m.advance_width; x += 4) {
+        unsigned long px =
+            x11_readback_pixel(&rb_dpy, xid, x, baseline + m.ink_bottom + 6);
+        assert(px == 0x000D0D14u);
+    }
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 text render + server-side glyph readback "
+           "(%ld ink px on mid-scan, ink boxed by metrics)\n",
+           ink);
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -1166,6 +1275,7 @@ int main(void) {
     test_widget_real_input_via_xsendevent();
     test_widget_root_follows_resize();
     test_widget_layout_reflow_on_resize();
+    test_text_render_readback();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

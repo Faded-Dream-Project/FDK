@@ -35,8 +35,14 @@ interfaces. Not excluded.
 
 | Dependency | Anticipated phase | Purpose | License (to verify at add-time) | Notes |
 |---|---|---|---|---|
-| A minimal font rasterizer (candidate: stb_truetype, single-file, public domain) | Phase 3 — Rendering / text | Glyph rasterization from TrueType/OpenType fonts | Public domain / MIT (verify at add-time) | Writing a TTF parser + rasterizer from scratch is out of scope; a small permissive single-header library is the preferred pattern |
-| fontconfig | Under consideration, Phase 3 | System font discovery | MIT | Not Red-Hat-origin software despite common GNOME association — same investigate-before-excluding principle as Xlib above; a bundled fallback font could substitute if this is skipped |
+| fontconfig | Under consideration (with the Phase 6 widget catalog) | System font discovery | MIT | Not Red-Hat-origin software despite common GNOME association — same investigate-before-excluding principle as Xlib above; a bundled fallback font could substitute if this is skipped |
+
+**Added in Phase 6 (first slice) — vendored source, not a system
+library:**
+
+| Dependency | Purpose | License | Build/Runtime | Optional | Replaceable |
+|---|---|---|---|---|---|
+| [stb_truetype](https://github.com/nothings/stb) v1.26 (vendored at `third_party/stb/`) | TrueType/OpenType parsing + anti-aliased glyph rasterization for the text layer (`src/text/`) | Dual MIT / public domain — both allow-listed; see `THIRD-PARTY-NOTICES.md` and `third_party/stb/README.md` (provenance + SHA-256 + update procedure) | Compiled in (one TU, `src/text/stb_truetype_impl.c`, with the aggressive warning set scoped off for that file and allocations routed through `fdk_alloc`); no pkg-config, no system library, no ABI surface | No | Yes in principle (harfbuzz+FreeType would be the heavyweight route) — but a from-scratch parser/rasterizer is explicitly out of scope per the original anticipation note, and stb is the established minimal choice (raylib et al.) |
 
 **Explicitly rejected:** Pango, Cairo, GLib, GObject, GIO — large
 desktop-stack dependencies FDK's minimalism goal excludes (Cairo/Pango

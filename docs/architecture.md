@@ -12,10 +12,14 @@ Widgets  (src/widget/)         — Phase 4 (foundation) landed;
       |                           core widget catalog Phase 6
 Layout   (src/layout/)         — Phase 5 (hooks already in the
       |                           widget API: measure/arrange)
+Text     (src/text/)           — Phase 6 first slice: fonts, UTF-8
+      |                           shaping, glyph cache, drawing
+      |                           (sits on the render layer)
 Rendering abstraction (src/render/) — Phase 3 (software surfaces,
       |                                framebuffer access,
       |                                damage-tracked present, clip
-      |                                stack, primitive set)
+      |                                stack, primitive set,
+      |                                alpha-mask glyph blit)
 Windowing (src/window/)        — Phase 2 (+ Phase 4 widget glue:
       |                           fdk_window_get_root/paint,
       |                           event routing into the tree)

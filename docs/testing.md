@@ -58,6 +58,32 @@ destroy-during-dispatch (self, ancestor, whole root — the deferred
 free exercised under ASan), measure/arrange hooks, and inter-tree
 isolation. 17 cases, all under ASan+UBSan.
 
+## Text tests (Phase 6)
+
+`tests/test_text.c` runs headless in plain `make test` (7 cases,
+ASan+UBSan) and needs no display — only a system TrueType font
+(DejaVu Sans / Noto Sans candidates; the whole suite honestly skips,
+[X11-suite style](#known-xvfb-flakiness-investigated-and-fixed), when
+the environment has none). Covered: font lifecycle and every failure
+mode (missing file, garbage bytes, directories, out-of-range sizes —
+including the sfnt container gate that keeps malformed fonts from
+becoming out-of-bounds reads inside stb_truetype), metrics sanity and
+2x scale proportionality, measurement (proportional vs monospace,
+ink bounds, whitespace, byte_len slicing, and the pinned
+round-of-sum vs sum-of-rounds behavior), draw/damage agreement (the
+damage box is exactly the measured ink band), cache-hit determinism
+(redraw is pixel-identical) and LRU eviction past 512 glyphs, clip
+stack honoring (ink outside the clip untouched, damage clipped to
+the visible span), and UTF-8 edge cases (invalid bytes to U+FFFD,
+truncated sequences, unmapped codepoints, embedded NUL).
+
+The X11 suite adds `test_text_render_readback`: 48px "FDK" drawn
+into a mapped window and verified through the X server's own pixels
+— ink on a mid-height scan is boxed by the measured metrics, only
+ever adds light over the background (AA edges included), and nothing
+bleeds left of the pen or below the ink band. Skips honestly when no
+font exists.
+
 ## Layout tests (Phase 5)
 
 The layout engine is pure geometry over the widget hooks, so

@@ -403,14 +403,40 @@ Still NOT done (next slices of Phase 5):
 - **Wayland-side reflow test** — same toolchain gap as Phase 4;
   the engine is backend-neutral and verified headless + on X11
 
-## Phase 6 — Core Widgets + Text Foundation
+## Phase 6 — Core Widgets + Text Foundation (first slice shipped; phase in progress)
 
+**Shipped — text foundation** (`include/fdk/fdk_text.h`, `src/text/`,
+docs in `docs/text.md`):
+- Font object per (file, pixel size): load with sfnt container
+  validation (magic, directory, table extents — stb assumes a trusted
+  font, so FDK gates it), TTC first-face support, hhea metrics
+- UTF-8 single-line shaping with pair kerning, strict-ish decode
+  (U+FFFD per bad byte), .notdef fallback, measure/draw agreement by
+  construction (one shared shaping walk)
+- Glyph cache: 512 entries, LRU eviction, hit/miss/eviction stats;
+  rasterization + parsing by vendored stb_truetype v1.26
+  (`third_party/stb/`, FDK's first third-party component — dual
+  MIT/public-domain, see `THIRD-PARTY-NOTICES.md`)
+- Rendering through `fdk_surface_blend_mask()` (the new internal
+  alpha-mask primitive): clip-stack honored, one damage rect per run
+  (ink union ∩ effective clip), integer source-over blending
+- Tests: 7 headless cases + X11 server-readback glyph verification;
+  `examples/05_text.c` (wordmark, size ladder, measured-run chaining,
+  per-glyph wave, live cache stats) with a captured proof frame
+
+**Still to build (rest of Phase 6):**
 - Label, Button, Toggle, Checkbox, Radio, ProgressBar, Separator,
-  Frame/Panel — as internal subclasses of fdk_widget, with focus
-  visuals, keyboard activation (Space/Enter), and disabled states
-- Text foundation moves here (or earlier if widget text demands it —
-  Phase 3's src/text/ gap): glyph rasterization + a Label that
-  actually draws text
+  Frame/Panel — as internal subclasses of fdk_widget consuming
+  `fdk_text.h`, with focus visuals, keyboard activation
+  (Space/Enter), and disabled states
+- Widget-level text layout helpers: line breaking, ellipsize,
+  alignment — on top of the run-level API that just landed
+- Subpixel glyph positioning; bold/italic faces beyond file choice
+
+Phase 3's original "src/text/ gap" is closed; remaining Phase 3
+rendering gaps (MIT-SHM, X11 double buffering, transforms, image
+decode, alpha blits, AA primitives, HiDPI) stay parked as recorded —
+none block the widget catalog.
 
 ## Phase 7 — Theme Engine
 

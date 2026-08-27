@@ -195,6 +195,27 @@ resize oscillation and a meter whose size request animates — every
 child reflowing live through configure -> relayout -> damage ->
 repaint.
 
+And text renders for real now — Phase 6's first slice. Load a
+TrueType font, measure a UTF-8 run (advance + ink bounds), and draw
+it kerned and anti-aliased onto any surface; measurement and drawing
+share one shaping walk, so what you measure is exactly where it
+paints. Glyphs rasterize once per font and live in an LRU cache;
+each run costs a single damage rectangle:
+
+```c
+fdk_font *font = fdk_font_load("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24);
+
+fdk_text_metrics m;
+fdk_font_measure_utf8(font, "Hello, FDK", 10, &m);   /* advance + ink box */
+
+fdk_surface_draw_utf8(surface, font, "Hello, FDK", 10,
+                      40, 120, (fdk_color){1, 1, 1, 1});  /* pen, baseline */
+```
+
+Run `examples/05_text.c`: a 96px wordmark, a size ladder, colored
+runs chained by measured advances, an animated per-glyph wave line,
+and a live glyph-cache stats footer.
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The
@@ -248,6 +269,12 @@ the bottom. Nothing in the example computes geometry by hand.
 ![04_layout at 660x480](docs/screenshots/layout_hold_660x480.png)
 
 ![04_layout at 500x380 — same code, reflowed](docs/screenshots/layout_hold_500x380.png)
+
+And the text foundation's proof — `05_text` in its deterministic
+hold frame (real shaped glyphs, PIL-verified down to the colored
+runs and the stats footer):
+
+![05_text hold frame: wordmark, size ladder, colored runs, wave, stats](docs/screenshots/text_frame_640x480.png)
 
 ## Project principles
 

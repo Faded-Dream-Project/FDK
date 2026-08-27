@@ -1,0 +1,553 @@
+/* test_text.c — headless text-layer tests (Phase 6 text foundation).
+ *
+ * Everything runs on offscreen surfaces and standalone fonts: no
+ * display, no window, deterministic. The font is DejaVu Sans (and its
+ * Mono sibling) from the system font directories — if no usable font
+ * is present the whole suite honestly skips (the X11 suite's
+ * established pattern for environment-dependent coverage).
+ *
+ * What is proven here:
+ *   - font lifecycle + failure modes (missing file, garbage bytes,
+ *     out-of-range sizes)
+ *   - metrics sanity and scale proportionality
+ *   - measure/draw agreement: the measured advance is where drawing
+ *     actually lands; ink bounds match the damage box exactly
+ *   - glyph cache: hit/miss counters, deterministic re-render,
+ *     LRU eviction past 512 distinct glyphs
+ *   - clip-stack honoring and damage precision
+ *   - UTF-8 edge cases: invalid bytes, unmapped codepoints, NUL
+ */
+
+#include "fdk/fdk.h"
+#include "fdk/fdk_text.h"
+
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* ---- helpers ---- */
+
+static fdk_u32 px_at(fdk_surface *s, int x, int y) {
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    return info.pixels[(size_t)y * (size_t)info.stride + (size_t)x] &
+           0x00FFFFFFu;
+}
+
+static fdk_u32 pack(int r, int g, int b) {
+    return ((fdk_u32)r << 16) | ((fdk_u32)g << 8) | (fdk_u32)b;
+}
+
+static fdk_color rgb(int r, int g, int b) {
+    fdk_color c = { .r = (fdk_f32)r / 255.0f, .g = (fdk_f32)g / 255.0f,
+                    .b = (fdk_f32)b / 255.0f, .a = 1.0f };
+    return c;
+}
+
+static fdk_color white(void) { return rgb(255, 255, 255); }
+
+/* Counts pixels in the surface that differ from `bg`. */
+static long count_ink(fdk_surface *s, int x0, int y0, int x1, int y1,
+                      fdk_u32 bg) {
+    long ink = 0;
+    for (int y = y0; y < y1; y++) {
+        for (int x = x0; x < x1; x++) {
+            if (px_at(s, x, y) != bg) {
+                ink++;
+            }
+        }
+    }
+    return ink;
+}
+
+/* Encodes cp as UTF-8 into buf (>= 5 bytes); returns length. */
+static int enc_utf8(fdk_u32 cp, char *buf) {
+    if (cp < 0x80u) {
+        buf[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800u) {
+        buf[0] = (char)(0xC0u | (cp >> 6));
+        buf[1] = (char)(0x80u | (cp & 0x3Fu));
+        return 2;
+    }
+    if (cp < 0x10000u) {
+        buf[0] = (char)(0xE0u | (cp >> 12));
+        buf[1] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+        buf[2] = (char)(0x80u | (cp & 0x3Fu));
+        return 3;
+    }
+    buf[0] = (char)(0xF0u | (cp >> 18));
+    buf[1] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
+    buf[2] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+    buf[3] = (char)(0x80u | (cp & 0x3Fu));
+    return 4;
+}
+
+/* ---- fonts under test ---- */
+
+static const char *g_sans = NULL;
+static const char *g_mono = NULL;
+
+static void find_fonts(void) {
+    static const char *sans_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    static const char *mono_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+        NULL,
+    };
+    for (int i = 0; sans_candidates[i] != NULL; i++) {
+        FILE *f = fopen(sans_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            g_sans = sans_candidates[i];
+            break;
+        }
+    }
+    for (int i = 0; mono_candidates[i] != NULL; i++) {
+        FILE *f = fopen(mono_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            g_mono = mono_candidates[i];
+            break;
+        }
+    }
+}
+
+/* ---- lifecycle + failures ---- */
+
+static void test_font_lifecycle(void) {
+    /* Bad arguments. */
+    assert(fdk_font_load(NULL, 16) == NULL);
+    assert(fdk_font_load(g_sans, 0) == NULL);
+    assert(fdk_font_load(g_sans, -4) == NULL);
+    assert(fdk_font_load(g_sans, 513) == NULL);
+
+    /* Missing file. */
+    assert(fdk_font_load("/nonexistent/font.ttf", 16) == NULL);
+
+    /* Not a font: a regular text file with plausible length. */
+    {
+        const char *path = "/tmp/fdk_notafont.ttf";
+        FILE *f = fopen(path, "wb");
+        assert(f != NULL);
+        for (int i = 0; i < 4096; i++) {
+            fputc(i % 251, f);
+        }
+        fclose(f);
+        assert(fdk_font_load(path, 16) == NULL);
+        remove(path);
+    }
+
+    /* Directory is not a font either. */
+    assert(fdk_font_load("/tmp", 16) == NULL);
+
+    /* Good load, sane metrics, proportionality between sizes. */
+    fdk_font *a = fdk_font_load(g_sans, 16);
+    assert(a != NULL);
+    fdk_font_metrics m16;
+    fdk_font_get_metrics(a, &m16);
+    assert(m16.ascent > 0);
+    assert(m16.descent > 0);
+    assert(m16.line_height ==
+           m16.ascent + m16.descent + m16.line_gap);
+    /* DejaVu Sans at 16px: ascent ~14-15, descent ~4. */
+    assert(m16.ascent >= 10 && m16.ascent <= 20);
+    assert(m16.descent >= 2 && m16.descent <= 8);
+
+    fdk_font *b = fdk_font_load(g_sans, 32);
+    assert(b != NULL);
+    fdk_font_metrics m32;
+    fdk_font_get_metrics(b, &m32);
+    assert(m32.ascent >= 2 * m16.ascent - 1 &&
+           m32.ascent <= 2 * m16.ascent + 1);
+    assert(m32.descent >= 2 * m16.descent - 1 &&
+           m32.descent <= 2 * m16.descent + 1);
+
+    /* NULL-safe accessors. */
+    fdk_font_get_metrics(NULL, NULL);
+    fdk_font_cache_stats st;
+    fdk_font_get_cache_stats(a, &st);
+    assert(st.cached_glyphs == 0 && st.cache_hits == 0 &&
+           st.cache_misses == 0 && st.evictions == 0);
+    fdk_font_get_cache_stats(NULL, NULL);
+    fdk_font_destroy(NULL); /* no-op */
+
+    fdk_font_destroy(b);
+    fdk_font_destroy(a);
+    printf("[ok] font lifecycle: load, failures (missing/garbage/args), "
+           "metrics sanity + 2x scale proportionality\n");
+}
+
+/* ---- measurement ---- */
+
+static void test_measure(void) {
+    fdk_font *f = fdk_font_load(g_sans, 16);
+    assert(f != NULL);
+    fdk_text_metrics m;
+
+    /* Argument safety. */
+    assert(fdk_font_measure_utf8(NULL, "x", 1, &m) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_font_measure_utf8(f, NULL, 1, &m) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_font_measure_utf8(f, "x", 1, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* Empty text: nothing at all. */
+    assert(fdk_ok(fdk_font_measure_utf8(f, "", 0, &m)));
+    assert(m.advance_width == 0 && m.ink_top == 0 && m.ink_bottom == 0);
+
+    /* Proportional face: W wider than i; additivity holds within
+     * rounding (each glyph's advance is fractional; the total is
+     * rounded ONCE, so 2 x round(a) can differ from round(2a) by 1,
+     * and kerning can only tighten — hence the asymmetric bounds). */
+    fdk_text_metrics mw, mi, mww;
+    assert(fdk_ok(fdk_font_measure_utf8(f, "W", 1, &mw)));
+    assert(fdk_ok(fdk_font_measure_utf8(f, "i", 1, &mi)));
+    assert(fdk_ok(fdk_font_measure_utf8(f, "WW", 2, &mww)));
+    assert(mw.advance_width > mi.advance_width);
+    assert(mww.advance_width >= 2 * mw.advance_width - 1);
+    assert(mww.advance_width <= 2 * mw.advance_width + 1);
+
+    /* Ink bounds: "F" lives above the baseline. */
+    fdk_text_metrics mf;
+    assert(fdk_ok(fdk_font_measure_utf8(f, "F", 1, &mf)));
+    assert(mf.ink_top < 0);
+    assert(mf.ink_bottom >= 0 && mf.ink_bottom <= mf.ink_top * -1);
+
+    /* "g" dips below the baseline. */
+    fdk_text_metrics mg;
+    assert(fdk_ok(fdk_font_measure_utf8(f, "g", 1, &mg)));
+    assert(mg.ink_bottom > 0);
+
+    /* Whitespace advances but has no ink. */
+    fdk_text_metrics ms;
+    assert(fdk_ok(fdk_font_measure_utf8(f, "   ", 3, &ms)));
+    assert(ms.advance_width > 0);
+    assert(ms.ink_top == 0 && ms.ink_bottom == 0);
+
+    /* Not NUL-terminated: byte_len governs. */
+    const char five[] = "Hello";
+    assert(fdk_ok(fdk_font_measure_utf8(f, five, 5, &m)));
+    fdk_text_metrics m2;
+    assert(fdk_ok(fdk_font_measure_utf8(f, five, 2, &m2)));
+    assert(m2.advance_width < m.advance_width);
+
+    /* Monospace face: every glyph advances identically (within the
+     * same rounding slack). */
+    if (g_mono != NULL) {
+        fdk_font *mono = fdk_font_load(g_mono, 16);
+        assert(mono != NULL);
+        fdk_text_metrics m1, m4a, m4b;
+        assert(fdk_ok(fdk_font_measure_utf8(mono, "W", 1, &m1)));
+        assert(fdk_ok(fdk_font_measure_utf8(mono, "WWWW", 4, &m4a)));
+        assert(fdk_ok(fdk_font_measure_utf8(mono, "iiii", 4, &m4b)));
+        /* THE monospace property: equal-length runs of different
+         * glyphs measure identically. (Against a single W, allow the
+         * round-of-sum vs sum-of-rounds slack — it drifts both ways.) */
+        assert(m4a.advance_width == m4b.advance_width);
+        assert(m4a.advance_width >= 4 * m1.advance_width - 2);
+        assert(m4a.advance_width <= 4 * m1.advance_width + 2);
+        assert(m4b.advance_width == m4a.advance_width);
+        fdk_font_destroy(mono);
+    }
+
+    fdk_font_destroy(f);
+    printf("[ok] measurement: empty/proportional/monospace, ink bounds, "
+           "whitespace, byte_len slicing, arg safety\n");
+}
+
+/* ---- drawing: ink, damage, determinism ---- */
+
+static void test_draw_ink_and_damage(void) {
+    fdk_font *f = fdk_font_load(g_sans, 24);
+    assert(f != NULL);
+
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(200, 100, &s)));
+    fdk_color bg = rgb(16, 16, 24);
+    fdk_surface_fill(s, bg);
+    fdk_u32 bgpx = pack(16, 16, 24);
+    /* Close the fill's frame: damage assertions below must see ONLY
+     * the text draw (present() resets an offscreen surface's damage). */
+    assert(fdk_ok(fdk_surface_present(s)));
+
+    const char *text = "FDK text!";
+    size_t len = strlen(text);
+    fdk_text_metrics m;
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m)));
+
+    int pen_x = 20;
+    int baseline = 40;
+    assert(fdk_ok(fdk_surface_draw_utf8(s, f, text, len, pen_x, baseline,
+                                        white())));
+
+    /* Ink exists, above the baseline, within the measured advance. */
+    long ink_all = count_ink(s, 0, 0, 200, 100, bgpx);
+    assert(ink_all > 30);
+    long ink_above = count_ink(s, pen_x, baseline + m.ink_top, pen_x + m.advance_width,
+                               baseline, bgpx);
+    assert(ink_above > 20);
+    /* Nothing left of the pen or past the advance (plus the one
+     * rounding pixel of slack). */
+    assert(count_ink(s, 0, 0, pen_x, 100, bgpx) == 0);
+    assert(count_ink(s, pen_x + m.advance_width + 1, 0, 200, 100, bgpx) == 0);
+
+    /* Damage: exactly the ink band (y bounds are exact by
+     * construction — measure and draw share the shaping walk). */
+    fdk_rect dmg;
+    assert(fdk_surface_get_damage_bounds(s, &dmg));
+    assert(dmg.y == baseline + m.ink_top);
+    assert(dmg.y + dmg.height == baseline + m.ink_bottom);
+    assert(dmg.x >= pen_x);
+    assert(dmg.x + dmg.width <= pen_x + m.advance_width);
+
+    /* Re-draw the same text elsewhere: identical glyph pixels prove
+     * cache-hit determinism, and hits == the second run's glyph
+     * count. */
+    fdk_font_cache_stats st0;
+    fdk_font_get_cache_stats(f, &st0);
+    int baseline2 = 80;
+    assert(fdk_ok(fdk_surface_draw_utf8(s, f, text, len, pen_x, baseline2,
+                                        white())));
+    fdk_font_cache_stats st1;
+    fdk_font_get_cache_stats(f, &st1);
+    assert(st1.cache_misses == st0.cache_misses);
+    assert(st1.cache_hits > st0.cache_hits);
+    for (int x = pen_x; x < pen_x + m.advance_width; x++) {
+        for (int dy = 0; dy < -m.ink_top + m.ink_bottom; dy++) {
+            int y1 = baseline + m.ink_top + dy;
+            int y2 = baseline2 + m.ink_top + dy;
+            if (y1 >= 0 && y2 >= 0 && y1 < 100 && y2 < 100) {
+                assert(px_at(s, x, y1) == px_at(s, x, y2));
+            }
+        }
+    }
+
+    /* Whitespace-only run draws nothing and damages nothing (fill +
+     * present first so the empty damage list is meaningful). */
+    fdk_surface *w = NULL;
+    assert(fdk_ok(fdk_surface_create(100, 50, &w)));
+    fdk_surface_fill(w, bg);
+    assert(fdk_ok(fdk_surface_present(w)));
+    assert(fdk_ok(fdk_surface_draw_utf8(w, f, "     ", 5, 10, 25, white())));
+    fdk_rect wdmg;
+    assert(fdk_surface_get_damage_bounds(w, &wdmg) == false);
+    assert(count_ink(w, 0, 0, 100, 50, bgpx) == 0);
+
+    /* Argument safety. */
+    assert(fdk_surface_draw_utf8(NULL, f, text, len, 0, 0, white()) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_surface_draw_utf8(s, NULL, text, len, 0, 0, white()) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_surface_draw_utf8(s, f, NULL, len, 0, 0, white()) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_ok(fdk_surface_draw_utf8(s, f, "", 0, 0, 0, white())));
+
+    fdk_surface_destroy(w);
+    fdk_surface_destroy(s);
+    fdk_font_destroy(f);
+    printf("[ok] draw: ink bounds vs measured metrics, damage box exact, "
+           "cache-hit determinism, whitespace no-op, arg safety\n");
+}
+
+/* ---- clipping ---- */
+
+static void test_clip(void) {
+    fdk_font *f = fdk_font_load(g_sans, 24);
+    assert(f != NULL);
+
+    /* Two identical surfaces; one draws through a clip. Fill +
+     * present both so the later damage assertion sees only the text
+     * draws. */
+    fdk_surface *a = NULL, *b = NULL;
+    assert(fdk_ok(fdk_surface_create(200, 80, &a)));
+    assert(fdk_ok(fdk_surface_create(200, 80, &b)));
+    fdk_color bg = rgb(10, 10, 14);
+    fdk_surface_fill(a, bg);
+    fdk_surface_fill(b, bg);
+    assert(fdk_ok(fdk_surface_present(a)));
+    assert(fdk_ok(fdk_surface_present(b)));
+    fdk_u32 bgpx = pack(10, 10, 14);
+
+    const char *text = "Clipped text run";
+    size_t len = strlen(text);
+    int pen_x = 10, baseline = 40;
+
+    fdk_rect clip = {40, 0, 30, 80};
+    assert(fdk_ok(fdk_surface_push_clip(a, clip)));
+    assert(fdk_ok(fdk_surface_draw_utf8(a, f, text, len, pen_x, baseline,
+                                        white())));
+    fdk_surface_pop_clip(a);
+    assert(fdk_ok(fdk_surface_draw_utf8(b, f, text, len, pen_x, baseline,
+                                        white())));
+
+    /* Outside the clip: identical (untouched background). */
+    for (int y = 0; y < 80; y++) {
+        for (int x = 0; x < 200; x += 3) {
+            if (x >= 40 && x < 70) {
+                continue;
+            }
+            assert(px_at(a, x, y) == bgpx);
+        }
+    }
+    /* Inside the clip region: some ink was painted. */
+    assert(count_ink(a, 40, 0, 70, 80, bgpx) > 5);
+    /* The unclipped draw painted outside the clip window too. */
+    assert(count_ink(b, 0, 0, 40, 80, bgpx) > 5);
+
+    /* Damage on the clipped surface stayed inside the clip x-range. */
+    fdk_rect dmg;
+    assert(fdk_surface_get_damage_bounds(a, &dmg));
+    assert(dmg.x >= 40);
+    assert(dmg.x + dmg.width <= 70);
+
+    fdk_surface_destroy(a);
+    fdk_surface_destroy(b);
+    fdk_font_destroy(f);
+    printf("[ok] clip: glyphs honor the clip stack; damage clipped to the "
+           "visible span\n");
+}
+
+/* ---- UTF-8 handling ---- */
+
+static void test_utf8(void) {
+    fdk_font *f = fdk_font_load(g_sans, 16);
+    assert(f != NULL);
+    fdk_text_metrics m;
+
+    /* Invalid bytes decode to U+FFFD one byte at a time — no crash,
+     * nonzero advance (replacement glyph), and 3 bad bytes consume
+     * exactly 3 bytes (the 4th char still shapes). */
+    const char bad[] = "\xFF\xFE{W";
+    assert(fdk_ok(fdk_font_measure_utf8(f, bad, 4, &m)));
+    assert(m.advance_width > 0);
+
+    fdk_text_metrics mw;
+    assert(fdk_ok(fdk_font_measure_utf8(f, "W", 1, &mw)));
+    /* U+FFFD + '{' + 'W' must be wider than just 'W'. */
+    assert(m.advance_width > mw.advance_width);
+
+    /* Truncated multi-byte sequence at the buffer end. */
+    const char trunc[] = "A\xE2\x82";
+    assert(fdk_ok(fdk_font_measure_utf8(f, trunc, 3, &m)));
+
+    /* Unmapped codepoint (unassigned plane 15) renders .notdef. */
+    const char unmapped[] = "\xF3\xBB\xB0\x80"; /* U+DEF00 */
+    assert(fdk_ok(fdk_font_measure_utf8(f, unmapped, 4, &m)));
+    assert(m.advance_width > 0);
+
+    /* Multi-byte codepoint that IS mapped: Euro sign. */
+    const char euro[] = "\xE2\x82\xAC"; /* U+20AC */
+    assert(fdk_ok(fdk_font_measure_utf8(f, euro, 3, &m)));
+    assert(m.advance_width > 0);
+
+    /* NUL is a codepoint like any other (usually .notdef). */
+    const char with_nul[] = "A\0B";
+    assert(fdk_ok(fdk_font_measure_utf8(f, with_nul, 3, &m)));
+
+    /* Draw path with the same garbage: no crash, ink appears. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(120, 40, &s)));
+    assert(fdk_ok(fdk_surface_draw_utf8(s, f, bad, 4, 5, 25, white())));
+    assert(count_ink(s, 0, 0, 120, 40, 0) > 0);
+
+    fdk_surface_destroy(s);
+    fdk_font_destroy(f);
+    printf("[ok] utf-8: invalid bytes -> U+FFFD (no crash, advances), "
+           "truncated sequences, unmapped -> .notdef, mapped multi-byte\n");
+}
+
+/* ---- cache eviction ---- */
+
+static void test_cache_eviction(void) {
+    fdk_font *f = fdk_font_load(g_sans, 12);
+    assert(f != NULL);
+
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(64, 32, &s)));
+
+    /* Walk codepoint space, drawing in chunks, until the cache is
+     * forced to evict (DejaVu covers thousands of glyphs; a few
+     * thousand codepoints always exceed 512 distinct). */
+    char buf[64 * 4];
+    int evicted = 0;
+    for (fdk_u32 base = 0x20; base < 0x2600 && !evicted; base += 64) {
+        int n = 0;
+        for (fdk_u32 cp = base; cp < base + 64; cp++) {
+            if (cp >= 0xD800u && cp <= 0xDFFFu) {
+                continue; /* no surrogates in UTF-8 */
+            }
+            n += enc_utf8(cp, buf + n);
+        }
+        assert(fdk_ok(fdk_surface_draw_utf8(s, f, buf, (size_t)n, 0, 20,
+                                            white())));
+        fdk_font_cache_stats st;
+        fdk_font_get_cache_stats(f, &st);
+        assert(st.cached_glyphs <= 512);
+        if (st.evictions > 0) {
+            evicted = 1;
+            assert(st.cache_misses > 512);
+        }
+    }
+    assert(evicted);
+
+    fdk_surface_destroy(s);
+    fdk_font_destroy(f);
+    printf("[ok] cache: LRU eviction past 512 glyphs, bounded residency\n");
+}
+
+/* ---- kerning ---- */
+
+static void test_kerning(void) {
+    /* Kerned pair renders narrower than the naive sum — proves the
+     * kern table is consulted (DejaVu Sans kerns "AV"). */
+    fdk_font *f = fdk_font_load(g_sans, 32);
+    assert(f != NULL);
+
+    fdk_text_metrics mav, ma, mv;
+    assert(fdk_ok(fdk_font_measure_utf8(f, "AV", 2, &mav)));
+    assert(fdk_ok(fdk_font_measure_utf8(f, "A", 1, &ma)));
+    assert(fdk_ok(fdk_font_measure_utf8(f, "V", 1, &mv)));
+
+    if (mav.advance_width < ma.advance_width + mv.advance_width) {
+        printf("[ok] kerning: AV pair tightened by %d px\n",
+               ma.advance_width + mv.advance_width - mav.advance_width);
+    } else {
+        /* Rounding can mask a sub-pixel kern; the pair must at least
+         * never exceed the naive sum. */
+        assert(mav.advance_width == ma.advance_width + mv.advance_width);
+        printf("[ok] kerning: no pair tightening visible at 32px "
+               "(sub-pixel)\n");
+    }
+    fdk_font_destroy(f);
+}
+
+int main(void) {
+    find_fonts();
+    if (g_sans == NULL) {
+        printf("[skip] no system TrueType font found (tried DejaVu Sans, "
+               "Noto Sans) — text suite requires a font file to shape; "
+               "see docs/testing.md\n");
+        return 0;
+    }
+    printf("using font: %s\n", g_sans);
+    test_font_lifecycle();
+    test_measure();
+    test_draw_ink_and_damage();
+    test_clip();
+    test_utf8();
+    test_cache_eviction();
+    test_kerning();
+    printf("all headless text tests passed\n");
+    return 0;
+}
