@@ -81,7 +81,9 @@ presentation, a clip stack, offscreen surfaces, and the blending
 primitive set — implemented on both backends via optional
 `fdk_platform_ops` entries (`window_get_framebuffer`, damage-taking
 `window_present`, and the `window_frame_ready` pacing query); see
-`docs/rendering.md` for the full design), and `src/widget/` (Phase
+`docs/rendering.md` for the full design), and `src/layout/` (Phase 5: the
+box layout engine — containers as widget subclasses over the
+measure/arrange hooks — plus the window content glue), and `src/widget/` (Phase
 4: the retained-mode widget foundation — hierarchy, state, focus,
 event routing with hover/grab/bubbling, invalidation, damage-driven
 z-order painting on the clip stack, the subclass vtable, and the

@@ -1067,6 +1067,84 @@ static void test_widget_root_follows_resize(void) {
            "the tree\n");
 }
 
+static void test_widget_layout_reflow_on_resize(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK layout reflow test",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    surface_capture cap = { .ctx = ctx, .configure_count = 0 };
+    fdk_window_set_event_callback(win, surface_event_callback, &cap);
+
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    /* A vertical box as the window's content: fixed header + an
+     * expanding panel. set_content arranges it immediately; every
+     * configure re-arranges it (the Phase 5 window integration). */
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget *vbox = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_VERTICAL, &vbox)));
+
+    fdk_widget *header = NULL;
+    assert(fdk_ok(fdk_widget_create(vbox, NULL,
+                                    (fdk_rect){0, 0, 0, 40}, &header)));
+    fdk_widget_set_natural_size(header, 0, 40);
+    fdk_widget_set_background(header, wcol(220, 160, 40));
+
+    fdk_widget *panel = NULL;
+    assert(fdk_ok(fdk_widget_create(vbox, NULL,
+                                    (fdk_rect){0, 0, 0, 50}, &panel)));
+    fdk_widget_set_expand(panel, false, true);
+    fdk_widget_set_background(panel, wcol(50, 120, 220));
+
+    fdk_window_set_content(win, vbox);
+
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    /* header band on top, panel filling the rest */
+    assert(x11_readback_pixel(&rb_dpy, xid, 150, 20) == 0x00DCA028u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 150, 100) == 0x003278DCu);
+
+    /* Resize: the content box must REFLOW (header still 40 tall, the
+     * expanding panel owns all the new space) with zero app code. */
+    fdk_window_resize(win, 400, 300);
+    alarm(5);
+    while (cap.configure_count == 0) {
+        int r = fdk_pump_events(ctx, 200);
+        assert(r >= 0);
+    }
+    alarm(0);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    /* header unchanged (40px), panel extends into the new geometry */
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 20) == 0x00DCA028u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 390, 290) == 0x003278DCu);
+    /* and the boundary is exactly where layout says (y=40) */
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 39) == 0x00DCA028u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 40) == 0x003278DCu);
+
+    /* destroying the content deactivates the association cleanly */
+    fdk_widget_destroy(panel);
+    fdk_window_layout(win); /* must notice panel is gone, not crash */
+    fdk_window_set_content(win, NULL);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 window content reflows on resize (box layout, "
+           "expanding panel, zero app code)\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -1087,6 +1165,7 @@ int main(void) {
     test_widget_tree_paint_readback();
     test_widget_real_input_via_xsendevent();
     test_widget_root_follows_resize();
+    test_widget_layout_reflow_on_resize();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

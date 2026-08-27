@@ -58,6 +58,24 @@ destroy-during-dispatch (self, ancestor, whole root — the deferred
 free exercised under ASan), measure/arrange hooks, and inter-tree
 isolation. 17 cases, all under ASan+UBSan.
 
+## Layout tests (Phase 5)
+
+The layout engine is pure geometry over the widget hooks, so
+`tests/test_layout.c` runs headless in plain `make test` (8 cases,
+ASan+UBSan): box measure math (naturals + spacing + padding +
+margins, homogeneous, orientation), arrangement math (packing,
+expansion absorbing the leftover, cross-axis align/expand), margins
+inside slots, dynamic relayout on child add/remove/hide/hint change,
+nested boxes, a pixel-agreement case (a laid-out tree paints exactly
+into its computed slots), and argument safety. The window integration
+(auto-reflow of the content widget on every configure) is the X11
+suite's job: `test_widget_layout_reflow_on_resize` resizes a live
+window and verifies SERVER-SIDE that the box reflowed — the fixed
+header stays 40px, the expanding panel owns the new space, and the
+boundary sits at the exact pixel layout computed. Destroying the
+content widget and calling fdk_window_layout() must deactivate the
+association cleanly rather than arranging a freed widget.
+
 ## What `make test-x11` actually verifies
 
 Real, observable behavior against a live X server (see

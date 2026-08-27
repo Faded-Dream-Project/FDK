@@ -358,14 +358,50 @@ Explicitly NOT done in Phase 4 (do not mistake for oversights):
   type (ABI policy) — internal pattern only, documented in
   `fdk_widget.h`.
 
-## Phase 5 — Layout Engine
+## Phase 5 — Layout Engine (first slice shipped; phase in progress)
 
-- Measurement (natural size via the measure hook), assignment (the
-  arrange hook), and the container negotiation over them:
-  horizontal/vertical boxes, grid, alignment, expansion, margins,
-  padding — built strictly on the Phase 4 hooks
-- Resize integration: root relayout on configure; damage-driven
-  repaint of exactly the changed geometry
+Implemented and tested in the FIRST slice (the box):
+- `fdk_layout` public API (`include/fdk/fdk_layout.h`): the BOX
+  container (horizontal/vertical) with spacing, padding, and
+  homogeneous mode, built strictly on the Phase 4 measure/arrange
+  hooks — a container is just a widget subclass whose hooks implement
+  a layout policy; nothing else in the object model changed
+- Per-child layout hints carried on the child: margins (per side),
+  expand (along + cross axis), align (FILL/START/CENTER/END for the
+  non-expanded cross axis) — all clamped, all relayouting the parent
+  container immediately
+- Natural size as a REQUEST: the default measure hook now reports the
+  widget's create-time bounds or `fdk_widget_set_natural_size` —
+  deliberately independent of the CURRENT bounds, so layout can never
+  destroy a child's size request (the classic request/allocate split;
+  this also fixed the first real layout-engine bug the tests caught:
+  relayout-on-child-add zeroing children before their first measure)
+- Along-axis distribution: naturals packed, expanding children split
+  the leftover (integer-safe via accumulated positions); homogeneous
+  gives equal shares. Cross axis: expand fills, else natural placed
+  per align, clamped to available space. Hidden children take no slot
+- Relayout triggers: the arrange hook (bounds assigned), child
+  add/remove/reparent, hint and natural-size changes — all through
+  one pure-geometry pass (no user code runs during layout)
+- Window integration: `fdk_window_set_content` — the window's content
+  widget auto-arranges to the root's full bounds on set and on EVERY
+  configure (weak reference: destroying the content just deactivates
+  the association, validated at each use)
+- Tests: 8 headless cases (`tests/test_layout.c` in `make test`:
+  measure math, arrangement math, margins-in-slots, homogeneous,
+  dynamic add/remove/hide/hint relayout, nested boxes, paint-into-
+  slots pixel agreement, argument safety) + the X11 GUI reflow case
+  (`make test-x11`: set_content, resize, server-side readback of the
+  reflowed boundary at exact pixels, destroyed-content deactivation)
+- `examples/04_layout.c`: box-built UI, breathing window + animated
+  size request, steady hold phases for the captured proof frames
+
+Still NOT done (next slices of Phase 5):
+- **Grid container** — the other classic; the box proves the pattern
+- **Min/max size constraints** on widgets (clamps at measure time)
+- **Baseline alignment** for the day text exists (Phase 6 dependency)
+- **Wayland-side reflow test** — same toolchain gap as Phase 4;
+  the engine is backend-neutral and verified headless + on X11
 
 ## Phase 6 — Core Widgets + Text Foundation
 

@@ -168,6 +168,33 @@ memory. Run `examples/03_widgets.c` for a live panel/button/meter UI
 with hover, press, focus-tint, and a quit button that destroys the
 window from inside its own release handler.
 
+Layout works today too — Phase 5's first slice. Boxes (horizontal or
+vertical) lay children out from per-child requests and hints —
+margins, expansion, cross-axis alignment — with the classic
+two-pass measure/arrange model, and the window's CONTENT widget
+reflows automatically on every resize:
+
+```c
+fdk_widget *content = NULL;
+fdk_box_create(root, FDK_VERTICAL, &content);
+fdk_box_set_padding(content, 12);
+fdk_box_set_spacing(content, 10);
+fdk_window_set_content(window, content);   /* auto-reflow on resize */
+
+fdk_widget *header = NULL;
+fdk_widget_create(content, NULL, (fdk_rect){0, 0, 0, 40}, &header);
+/* bounds are size REQUESTS now — layout assigns the real geometry */
+fdk_widget *main_area = NULL;
+fdk_widget_create(content, NULL, (fdk_rect){0, 0, 0, 50}, &main_area);
+fdk_widget_set_expand(main_area, false, true);   /* take the leftover */
+```
+
+Run `examples/04_layout.c`: an interface built entirely from boxes
+(nothing placed by hand), with the window itself breathing through a
+resize oscillation and a meter whose size request animates — every
+child reflowing live through configure -> relayout -> damage ->
+repaint.
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The
@@ -211,6 +238,16 @@ cleanly (exit 0, ~390 frames).
 ![03_widgets initial state](docs/screenshots/widgets_frame_initial.png)
 
 ![03_widgets after clicks + Tab: meter recolored and grown, focus moved](docs/screenshots/widgets_frame_interacted.png)
+
+And the layout engine's proof — `04_layout` held at two different
+window sizes (660x480 and 500x380), captured during its steady
+phases: the header dots stay anchored top-left, the expanding panel
+owns whatever space the window gives it, the footer stays pinned to
+the bottom. Nothing in the example computes geometry by hand.
+
+![04_layout at 660x480](docs/screenshots/layout_hold_660x480.png)
+
+![04_layout at 500x380 — same code, reflowed](docs/screenshots/layout_hold_500x380.png)
 
 ## Project principles
 
