@@ -125,6 +125,36 @@ raw pixel pointer, and an FDK block-letter logo drawn with the fill
 primitives — identically on X11 and Wayland. Windows that nobody
 renders into still show the plain platform background.
 
+### What it looks like
+
+These are real captured frames from the test rig — not mockups. The
+first two are the X11 backend (Xvfb display, `x11grab` capture): the
+demo window at 640x480, and again after a live resize to 800x600 —
+the framebuffer follows the resize and the ball/logo reposition into
+the new bounds. The dark area around each window is the bare Xvfb
+root window, kept in frame on purpose: it shows the window boundary
+is real.
+
+![X11 demo window at 640x480](docs/screenshots/x11_frame_640x480.png)
+
+![X11 demo window after a live resize to 800x600](docs/screenshots/x11_frame_800x600.png)
+
+The next two are the same example running under Wayland (weston 14,
+headless backend, compositor screenshot), captured 3.5 seconds apart.
+The gradient occupies the whole frame because the kiosk shell
+configures the surface fullscreen; the shifted colors between the two
+frames show the animation genuinely advancing frame by frame on the
+Wayland present path.
+
+![Wayland demo, first capture](docs/screenshots/wayland_frame_1.png)
+
+![Wayland demo, 3.5 s later — gradient advanced](docs/screenshots/wayland_frame_2.png)
+
+A 10-second screencast of the animated X11 session — including the
+live resize and a clean window close mid-render — is committed
+alongside the stills:
+[`docs/screenshots/fdk_render_x11.mp4`](docs/screenshots/fdk_render_x11.mp4).
+
 ## Project principles
 
 - **No GTK, no Qt, no wrapping either.** FDK implements its own
