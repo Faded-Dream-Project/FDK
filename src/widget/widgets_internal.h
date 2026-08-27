@@ -33,6 +33,10 @@ extern const fdk_widget_class fdk_progress_class_def;
 extern const fdk_widget_class fdk_separator_class_def;
 extern const fdk_widget_class fdk_frame_class_def;
 extern const fdk_widget_class fdk_scrollview_class_def;
+extern const fdk_widget_class fdk_toolbar_class_def;
+
+/* toolbar.c: relayout hook for the layout notifier (box.c). */
+void fdk__toolbar_layout_changed(fdk_widget *w);
 
 /* scroll.c: relayout hook the layout notifier (box.c) calls when a
  * scrollview's subtree changed (content added / natural size

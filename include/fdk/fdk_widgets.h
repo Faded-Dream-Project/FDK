@@ -450,6 +450,118 @@ void fdk_tree_set_on_selection_changed(fdk_widget *tree,
                                        fdk_tree_selection_fn fn,
                                        void *user_data);
 
+/* ---- Slider (Phase 9) ----
+ *
+ * A draggable value picker over [min, max]: press anywhere to jump
+ * the thumb there, drag with the implicit grab, step with arrows,
+ * page with PageUp/PageDown, ends with Home/End. Values quantize to
+ * `step` when one is set. Horizontal only in v1 (vertical parked). */
+
+typedef void (*fdk_slider_changed_fn)(fdk_widget *slider,
+                                      void *user_data);
+
+fdk_result fdk_slider_create(fdk_widget *parent, double min,
+                             double max, double value,
+                             fdk_widget **out_slider);
+void fdk_slider_set_range(fdk_widget *slider, double min, double max);
+void fdk_slider_set_step(fdk_widget *slider, double step);
+void fdk_slider_set_value(fdk_widget *slider, double value);
+double fdk_slider_get_value(fdk_widget *slider);
+void fdk_slider_set_on_changed(fdk_widget *slider,
+                               fdk_slider_changed_fn on_changed,
+                               void *user_data);
+
+/* ---- SpinButton (Phase 9) ----
+ *
+ * A numeric entry: an embedded Entry (full text editing, selection,
+ * clipboard) + up/down stepper chevrons. The value commits on Enter,
+ * stepper presses, and focus leaving; commits clamp to [min, max]
+ * and rewrite the buffer, so text and value never disagree. An
+ * unparsable buffer reads as the last committed value. Up/Down/Page
+ * keys step (the caret motion those keys would do is consumed). */
+
+typedef void (*fdk_spin_changed_fn)(fdk_widget *spin,
+                                    void *user_data);
+
+fdk_result fdk_spin_create(fdk_widget *parent, fdk_font *font,
+                           double min, double max, double value,
+                           fdk_widget **out_spin);
+void fdk_spin_set_range(fdk_widget *spin, double min, double max);
+void fdk_spin_set_step(fdk_widget *spin, double step);
+void fdk_spin_set_value(fdk_widget *spin, double value);
+double fdk_spin_get_value(fdk_widget *spin);
+/* The raw buffer (delegated to the embedded entry). */
+const char *fdk_spin_get_text(fdk_widget *spin);
+void fdk_spin_set_on_changed(fdk_widget *spin,
+                             fdk_spin_changed_fn on_changed,
+                             void *user_data);
+
+/* ---- Toolbar (Phase 9) ----
+ *
+ * A horizontal action bar: flat buttons and separators in a row.
+ * Buttons are stock catalog Buttons (click/hover/keyboard) — the
+ * toolbar contributes the bar chrome and the row arrangement.
+ * Overflow (wrap/chevron menu) is parked; narrower bars clip. */
+
+fdk_result fdk_toolbar_create(fdk_widget *parent, fdk_font *font,
+                              fdk_widget **out_toolbar);
+fdk_result fdk_toolbar_add_button(fdk_widget *toolbar,
+                                  const char *text,
+                                  fdk_button_activate_fn on_activate,
+                                  void *user_data,
+                                  fdk_widget **out_button);
+fdk_result fdk_toolbar_add_separator(fdk_widget *toolbar);
+
+/* ---- Notebook / TabView (Phase 9) ----
+ *
+ * A tab strip over a page area. Pages are ordinary widgets the
+ * notebook ADOPTS (append_page reparents; exactly one visible at a
+ * time — invisible pages are input-transparent and skipped by the
+ * paint walk). Tab clicks switch; the switch callback fires after
+ * the switch settles. Close buttons / tab reordering parked. */
+
+typedef void (*fdk_notebook_switch_fn)(fdk_widget *notebook,
+                                       size_t page, void *user_data);
+
+fdk_result fdk_notebook_create(fdk_widget *parent, fdk_font *font,
+                               fdk_widget **out_notebook);
+fdk_result fdk_notebook_append_page(fdk_widget *notebook,
+                                    fdk_widget *page,
+                                    const char *label);
+size_t fdk_notebook_page_count(fdk_widget *notebook);
+fdk_result fdk_notebook_set_current_page(fdk_widget *notebook,
+                                         size_t index);
+size_t fdk_notebook_get_current_page(fdk_widget *notebook);
+fdk_widget *fdk_notebook_get_page(fdk_widget *notebook,
+                                  size_t index);
+void fdk_notebook_set_on_switch(fdk_widget *notebook,
+                                fdk_notebook_switch_fn fn,
+                                void *user_data);
+
+/* ---- Canvas (Phase 9) ----
+ *
+ * An application-drawable widget: the paint callback receives the
+ * surface, the widget's absolute bounds, and the effective clip at
+ * paint time. Draw with the surface primitives; everything the
+ * paint machinery guarantees (bounds clipping, damage-driven
+ * repaints, idempotency) applies to the callback's drawing. The
+ * callback runs inside the paint walk: draw only — no tree
+ * mutation, no destroy, no re-entrant paints. */
+
+typedef void (*fdk_canvas_paint_fn)(fdk_widget *canvas,
+                                    fdk_surface *surface,
+                                    fdk_rect bounds, fdk_rect clip,
+                                    void *user_data);
+
+fdk_result fdk_canvas_create(fdk_widget *parent,
+                             fdk_canvas_paint_fn on_paint,
+                             void *user_data,
+                             fdk_widget **out_canvas);
+void fdk_canvas_set_paint_callback(fdk_widget *canvas,
+                                   fdk_canvas_paint_fn on_paint,
+                                   void *user_data);
+void fdk_canvas_invalidate(fdk_widget *canvas);
+
 #ifdef __cplusplus
 }
 #endif

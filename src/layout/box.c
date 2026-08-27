@@ -582,6 +582,10 @@ void fdk_widget_child_layout_changed(fdk_widget *parent) {
          * the CURRENT bounds (the content's natural size may have
          * changed what fits / where the clamped offsets land). */
         fdk__scrollview_layout_changed(parent);
+    } else if (parent->klass == &fdk_toolbar_class_def) {
+        /* Phase 9 Toolbar: a button/separator joined; re-run the
+         * row at the current bounds. */
+        fdk__toolbar_layout_changed(parent);
     } else if (notifier_grid_class_of(parent)) {
         /* Re-run the grid's arrangement at its CURRENT bounds — the
          * exact equivalent of box_layout for the track policy
