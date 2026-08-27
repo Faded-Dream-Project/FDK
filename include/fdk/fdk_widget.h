@@ -177,7 +177,8 @@ typedef struct fdk_widget_class {
     /* Measure hook (Phase 5 layout engine's entry point; the hook
      * contract is settled now so layout lands without touching the
      * object model). Write the widget's natural size to *out_size.
-     * NULL = natural size is the widget's current bounds size. */
+     * NULL = natural size is the widget's size request (create-time
+     * bounds / fdk_widget_set_natural_size). */
     void (*measure)(fdk_widget *widget, fdk_size *out_size);
 
     /* Arrange hook — the layout engine's assignment callback (Phase
@@ -398,9 +399,19 @@ bool fdk_widget_tree_handle_event(fdk_widget *any, const fdk_event_data *event);
 
 /* ---- Layout hooks (Phase 5 builds the engine on these) ---- */
 
-/* The widget's natural size: its measure hook's answer, or its
- * current bounds size when the class has none. */
+/* The widget's natural size: its measure hook's answer, or — with no
+ * hook — the widget's size REQUEST (its create-time bounds, or the
+ * last fdk_widget_set_natural_size), deliberately independent of the
+ * CURRENT bounds so a container's layout can never destroy a child's
+ * request (the classic request/allocate split). */
 void fdk_widget_measure(fdk_widget *widget, fdk_size *out_size);
+
+/* Sets the widget's size request (what the default measure hook
+ * reports to containers). Clamped to >= 0. Relayouts the parent
+ * container. Widgets whose class provides a measure hook ignore
+ * this (their hook computes the request). */
+void fdk_widget_set_natural_size(fdk_widget *widget, fdk_i32 width,
+                                 fdk_i32 height);
 
 /* Assigns the widget's bounds through its arrange hook (default:
  * plain set_bounds). The Phase 5 layout engine's single entry point
