@@ -1747,6 +1747,153 @@ static void test_theme_switch_gui(void) {
            "corner radius, separator thickness; round trip exact)\n");
 }
 
+
+/* Phase 8 decorations, end to end on a real window: the themed title
+ * band paints at the top (server-side readback), the content widget
+ * is laid out below it, _MOTIF_WM_HINTS is set while decorated and
+ * removed when not, the band's close button delivers a REAL
+ * close-request, dragging the band moves the window (verified via
+ * XTranslateCoordinates), and the mode round-trips. */
+static int deco_close_requests = 0;
+
+static void deco_window_callback(fdk_window *window,
+                                 const fdk_event_data *event,
+                                 void *user_data) {
+    (void)window;
+    (void)user_data;
+    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        deco_close_requests++;
+    }
+}
+
+static bool motif_hints_present(Display *dpy, unsigned long xid) {
+    Atom hints = XInternAtom(dpy, "_MOTIF_WM_HINTS", False);
+    Atom type = None;
+    int fmt = 0;
+    unsigned long n = 0, left = 0;
+    unsigned char *data = NULL;
+    if (XGetWindowProperty(dpy, (Window)xid, hints, 0, 5, False,
+                           AnyPropertyType, &type, &fmt, &n, &left,
+                           &data) != Success) {
+        return false;
+    }
+    bool present = (data != NULL);
+    XFree(data);
+    return present;
+}
+
+static void test_decorations_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK decorations test",
+                                 .width = 320, .height = 240 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, deco_window_callback, NULL);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, wcol(20, 20, 20));
+
+    /* Content: a plain widget with a distinctive fill, auto-arranged
+     * by the window glue. */
+    fdk_widget *content = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){0, 0, 10, 10},
+                                    &content)));
+    fdk_widget_set_background(content, wcol(60, 120, 200));
+    fdk_window_set_content(win, content);
+
+    /* Baseline: content fills the whole window. */
+    assert(fdk_window_get_decorated(win) == false);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    assert(x11_readback_pixel(&rb_dpy, xid, 10, 5) == 0x003C78C8u);
+    assert(!motif_hints_present(rb_dpy, xid));
+
+    /* Decorate: the band paints, content shifts below it. */
+    assert(fdk_ok(fdk_window_set_decorated(win, true)));
+    assert(fdk_window_get_decorated(win) == true);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    /* Band fill (v1 control bg) and its themed 1px bottom rule. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00292E42u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 27) == 0x004D5470u);
+    /* The close button (22x20 at x=292..314): fill at its left edge,
+     * vertically centered - clear of the radius-8 corners and of the
+     * centered glyph. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 295, 14) == 0x00292E42u);
+    /* Content now starts BELOW the 28px band. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 10, 50) == 0x003C78C8u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 10, 5) == 0x00292E42u);
+    /* The WM has been asked to drop its chrome. */
+    assert(motif_hints_present(rb_dpy, xid));
+
+    /* Drag the band: press at bar-local (100, 2), motion to
+     * (140, 22) -> the window moves by (+40, +20). */
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 100, 2, 0);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonPress, ButtonPressMask,
+                           100, 2, 1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 140, 22, 0);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 140, 22, 1);
+    (void)fdk_pump_events(ctx, 100);
+    {
+        Window child = 0;
+        int px = 0, py = 0;
+        assert(XTranslateCoordinates(rb_dpy, (Window)xid,
+                                     DefaultRootWindow(rb_dpy), 0, 0,
+                                     &px, &py, &child));
+        assert(px == 40 && py == 20);
+    }
+
+    /* The close button delivers a real close-request (the app
+     * callback counts it; nothing is destroyed here). */
+    assert(deco_close_requests == 0);
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 303, 14, 0);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonPress, ButtonPressMask,
+                           303, 14, 1);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 303, 14, 1);
+    (void)fdk_pump_events(ctx, 100);
+    assert(deco_close_requests == 1);
+
+    /* Undecorate: band gone, content back to full, hints removed. */
+    assert(fdk_ok(fdk_window_set_decorated(win, false)));
+    assert(fdk_window_get_decorated(win) == false);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x003C78C8u);
+    assert(!motif_hints_present(rb_dpy, xid));
+
+    /* Round trip back on. */
+    assert(fdk_ok(fdk_window_set_decorated(win, true)));
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00292E42u);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 FDK decorations: themed band, content below, "
+           "MWM hints on/off, real close-request, drag moves the "
+           "window, round trip\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -1772,6 +1919,7 @@ int main(void) {
     test_widget_catalog_gui();
     test_label_radio_arrow_gui();
     test_theme_switch_gui();
+    test_decorations_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

@@ -46,6 +46,27 @@ struct fdk_window {
      * configure. Validated (still in the tree?) at each use, so a
      * destroyed content just clears the association. */
     struct fdk_widget *content;
+
+    /* ---- Phase 8: FDK-drawn decorations ----
+     *
+     * deco_bar is a plain widget with a themed paint class (see
+     * window.c) carrying the title Label and the close Button; it is
+     * created by fdk_window_set_decorated(true) and destroyed by
+     * set_decorated(false) / window destruction. The content widget
+     * is arranged below the band while it exists. */
+    bool decorated;
+    struct fdk_widget *deco_bar;
+    struct fdk_widget *deco_title;
+    struct fdk_widget *deco_close;
+    fdk_font *deco_font;        /* effective (borrowed or owned)  */
+    fdk_font *deco_font_owned;  /* the system default we loaded   */
+    char *title;                /* owned copy (backend + deco sync) */
+
+    /* Title-band drag state (bar-local coordinates; see the drag
+     * handler in window.c for why the snap formulation converges). */
+    bool dragging;
+    fdk_pointf drag_anchor;
+    fdk_i32 drag_origin_x, drag_origin_y;
 };
 
 /* Called by the context's platform dispatch callback (see

@@ -88,6 +88,7 @@ typedef struct fdk_widget    fdk_widget;
 typedef struct fdk_surface   fdk_surface;    /* renderable drawing target */
 typedef struct fdk_theme     fdk_theme;
 typedef struct fdk_event     fdk_event;
+typedef struct fdk_font      fdk_font;       /* face at one pixel size    */
 typedef struct fdk_timer     fdk_timer;
 
 #ifdef __cplusplus

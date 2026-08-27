@@ -234,6 +234,52 @@ static long validate_sfnt(const unsigned char *data, size_t size) {
 
 /* ---- Font lifecycle ---- */
 
+/* ---- System default font ----
+ *
+ * FDK bundles no font (licensing posture). This probes the faces the
+ * examples/tests probe, in a fixed order, and caches the first hit.
+ * Single-threaded like the rest of FDK's object model. */
+
+static const char *const k_system_font_candidates[] = {
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+    NULL,
+};
+
+static const char *g_system_font_path; /* cached first hit */
+
+fdk_font *fdk_font_load_system_default(fdk_i32 pixel_size) {
+    if (pixel_size < 1 || pixel_size > 512) {
+        FDK_ERROR("fdk_font_load_system_default: size=%d (must be "
+                  "1..512)",
+                  pixel_size);
+        return NULL;
+    }
+    if (g_system_font_path == NULL) {
+        for (int i = 0; k_system_font_candidates[i] != NULL; i++) {
+            FILE *f = fopen(k_system_font_candidates[i], "rb");
+            if (f != NULL) {
+                fclose(f);
+                g_system_font_path = k_system_font_candidates[i];
+                break;
+            }
+        }
+        if (g_system_font_path == NULL) {
+            FDK_WARN("fdk_font_load_system_default: no system font "
+                     "found (probed DejaVu, Liberation, FreeSans, "
+                     "Noto) - FDK bundles none by design");
+            return NULL;
+        }
+    }
+    return fdk_font_load(g_system_font_path, pixel_size);
+}
+
 fdk_font *fdk_font_load(const char *path, fdk_i32 pixel_size) {
     if (path == NULL || pixel_size < 1 || pixel_size > 512) {
         FDK_ERROR("fdk_font_load: path=%s size=%d (size must be 1..512)",

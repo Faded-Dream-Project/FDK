@@ -91,6 +91,40 @@ fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
  * not FDK's. */
 void fdk_window_set_size_limits(fdk_window *window, fdk_size min_size, fdk_size max_size);
 
+/* ---- FDK-drawn decorations (Phase 8) ----
+ *
+ * decorated == true: FDK draws its own title bar INSIDE the client
+ * area — a themed band with the window title on the left and a close
+ * button on the right — and asks the backend to drop the window
+ * manager's own chrome (X11: _MOTIF_WM_HINTS). Dragging the band
+ * moves the window where the backend allows it (X11). The close
+ * button delivers a normal FDK_EVENT_WINDOW_CLOSE_REQUEST, so the
+ * application's close semantics are identical to the WM's.
+ *
+ * The title bar is a widget subtree under the window's root: it is
+ * themed like every catalog widget (fdk_theme_set_default repaints
+ * it), fdk_window_set_title keeps its text in sync, and the content
+ * widget (fdk_window_set_content) is laid out BELOW the band.
+ *
+ * Returns FDK_ERR_UNSUPPORTED when the backend cannot drop its own
+ * decorations (Wayland until xdg-decoration lands) — in that case
+ * nothing changes: drawing FDK's bar over the compositor's would
+ * give every window two title bars.
+ */
+fdk_result fdk_window_set_decorated(fdk_window *window, bool decorated);
+
+/* Whether FDK decorations are currently on. */
+bool fdk_window_get_decorated(const fdk_window *window);
+
+/* The title bar's font. NULL (the default) uses
+ * fdk_font_load_system_default() — FDK bundles no font, so a system
+ * with none renders a bar without title text (the close button and
+ * drag still work; a warning is logged once). The font is BORROWED:
+ * keep it alive until the window is destroyed or another font is
+ * set. */
+fdk_result fdk_window_set_decoration_font(fdk_window *window,
+                                          fdk_font *font);
+
 #ifdef __cplusplus
 }
 #endif

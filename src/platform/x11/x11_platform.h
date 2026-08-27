@@ -23,6 +23,7 @@ struct fdk_platform_connection {
     Atom wm_protocols;
     Atom net_wm_name;
     Atom utf8_string;
+    Atom motif_wm_hints; /* _MOTIF_WM_HINTS, Phase 8 decorations */
 
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
@@ -92,6 +93,12 @@ void fdk_x11_window_show(fdk_platform_window *pwindow);
 void fdk_x11_window_hide(fdk_platform_window *pwindow);
 void fdk_x11_window_set_title(fdk_platform_window *pwindow, const char *title);
 void fdk_x11_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
+fdk_result fdk_x11_window_set_wm_decorations(fdk_platform_window *pwindow,
+                                             bool on);
+fdk_result fdk_x11_window_get_position(fdk_platform_window *pwindow,
+                                       fdk_i32 *out_x, fdk_i32 *out_y);
+void fdk_x11_window_move_to(fdk_platform_window *pwindow, fdk_i32 x,
+                            fdk_i32 y);
 void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,
                                      fdk_size min_size, fdk_size max_size);
 

@@ -13,6 +13,9 @@ static const fdk_platform_ops g_x11_ops = {
     .window_set_title = fdk_x11_window_set_title,
     .window_resize = fdk_x11_window_resize,
     .window_set_size_limits = fdk_x11_window_set_size_limits,
+    .window_set_wm_decorations = fdk_x11_window_set_wm_decorations,
+    .window_get_position = fdk_x11_window_get_position,
+    .window_move_to = fdk_x11_window_move_to,
     .window_get_framebuffer = fdk_x11_window_get_framebuffer,
     .window_present = fdk_x11_window_present,
 };

@@ -153,6 +153,18 @@ X11_TEST_BIN := $(BUILD_DIR)/tests/test_x11_integration
 EXAMPLE_SRCS := $(wildcard examples/*.c)
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 
+# Header dependency tracking: -MMD -MP writes a .d beside each object
+# naming every header it included. Without this, editing a struct in
+# an internal header did NOT recompile the .c files that include it
+# (make only knows .c -> .o), producing stale objects writing struct
+# fields at pre-edit offsets - exactly the class of bug that bit the
+# Phase 8 session (a field added to x11_platform.h mid-struct; the
+# registry kept using the old offsets and ASan caught the corruption
+# on the first window creation). Tests and examples compile in one
+# step and depend on $(STATIC_LIB), so they rebuild whenever any
+# library object did.
+DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
+
 .PHONY: all release static shared test test-x11 examples install uninstall clean
 
 all: static shared
@@ -165,11 +177,11 @@ shared: $(SHARED_LIB)
 
 $(BUILD_DIR)/obj/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -MMD -MP -c $< -o $@
 
 $(BUILD_DIR)/obj-pic/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -fPIC -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -MMD -MP -fPIC -c $< -o $@
 
 $(STATIC_LIB): $(LIB_OBJS)
 	@mkdir -p $(dir $@)
@@ -252,3 +264,9 @@ uninstall:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+# Included LAST on purpose: -MMD dependency files each start with a
+# rule, and an -include before any real target would make the first
+# .d's object the default goal (make pitfall; hit during the Phase 8
+# session). After every target is defined, including them is inert.
+-include $(DEPS)

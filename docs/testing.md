@@ -202,6 +202,30 @@ The demo rig `scripts/run_theme_demo_x11.sh` drives `08_theme` with
 real clicks through three themes and PIL-verifies 13 properties
 including the pixel-exact round trip.
 
+## Decoration tests (Phase 8)
+
+The X11 suite's `test_decorations_gui` covers the whole slice
+server-side: the themed band's fill and border rule at the top of a
+real window, the close button's fill, the content widget arranged
+below the band, `_MOTIF_WM_HINTS` present while decorated and
+removed when not (read back with XGetWindowProperty), a REAL click
+on the band's close button delivering a genuine
+FDK_EVENT_WINDOW_CLOSE_REQUEST, a band drag (XSendEvent
+press/motion/release) moving the window to the exact expected
+position (XTranslateCoordinates verification), and the
+decorated/undecorated round trip.
+
+The demo rig `scripts/run_decorations_demo_x11.sh` drives
+`09_decorations` end-to-end: drag, toggle off, toggle on, close via
+the band button — 10 PIL checks including the band returning at the
+post-drag position and the on/off/on pixels being identical.
+
+A build-system bug this slice exposed and fixed: the Makefile had no
+header dependency tracking, so internal-header edits left stale
+objects (ASan caught the struct-offset corruption on first window
+creation). `-MMD -MP` dependency files are now generated and
+included; the suite is safe against incremental-header edits.
+
 ## What `make test-x11` actually verifies
 
 Real, observable behavior against a live X server (see

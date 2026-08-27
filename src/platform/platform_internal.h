@@ -137,6 +137,30 @@ typedef struct fdk_platform_ops {
     void (*window_set_size_limits)(fdk_platform_window *pwindow,
                                     fdk_size min_size, fdk_size max_size);
 
+    /* OPTIONAL (Phase 8 decorations): turn the window manager's /
+     * compositor's own decorations for this window on or off. X11
+     * implements this via _MOTIF_WM_HINTS (respected by all major
+     * WMs; harmless where ignored). Wayland leaves it NULL until
+     * xdg-decoration lands — callers treat NULL/UNAVAILABLE as "this
+     * backend cannot drop its chrome" and must NOT draw their own
+     * title bar over the compositor's. */
+    fdk_result (*window_set_wm_decorations)(fdk_platform_window *pwindow,
+                                            bool on);
+
+    /* OPTIONAL: the window's top-left position in root (screen)
+     * coordinates. NULL = the backend cannot know it (Wayland:
+     * clients are not told their position). */
+    fdk_result (*window_get_position)(fdk_platform_window *pwindow,
+                                      fdk_i32 *out_x, fdk_i32 *out_y);
+
+    /* OPTIONAL: move the window to root coordinates. NULL = the
+     * backend cannot (Wayland: only the compositor moves windows).
+     * Under a reparenting WM this moves the client window; WMs that
+     * reparent may or may not carry the frame along — v1 documents
+     * this as exact under bare/non-reparenting X servers. */
+    void (*window_move_to)(fdk_platform_window *pwindow,
+                           fdk_i32 x, fdk_i32 y);
+
     /* --- Software rendering ---
      *
      * Both render ops are OPTIONAL: a backend that cannot provide a

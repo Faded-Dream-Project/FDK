@@ -73,7 +73,7 @@ backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
   struct layout behind each opaque public type lives (e.g.
   `src/core/context_internal.h` defines `struct fdk_context`).
 
-## Current state (Phase 7 landed — theme engine)
+## Current state (Phase 8 first slice landed — decorations)
 
 Implemented: `src/core/` (context lifecycle, logging, error codes,
 allocation, versioning — Phase 1, plus the Phase 2 additions to
@@ -102,10 +102,17 @@ reentrancy machinery that makes destroy-from-callback safe; see
 `docs/roadmap.md`'s Phase 4 entry; the Phase 6 catalog — Label,
 Button, Toggle, Checkbox, Radio, ProgressBar, Separator, Frame —
 and the Phase 6 text foundation that backs their labels live here
-and in `src/text/`), and `src/theme/` (Phase 7: the theme API and
+and in `src/text/`), `src/theme/` (Phase 7: the theme API and
 the strict `.fdk` parser — the built-in default is the v1 palette
 exactly, and switching the default theme invalidates every live
-tree through the widget core's root registry). `fdk_init()` performs a real
+tree through the widget core's root registry), and the Phase 8
+decoration layer in `src/window/window.c` (an FDK-drawn themed title
+band under the window's root, WM chrome toggled through three new
+OPTIONAL platform ops — X11 implements them via _MOTIF_WM_HINTS,
+XTranslateCoordinates, and XMoveWindow; Wayland deliberately leaves
+them NULL and `fdk_window_set_decorated` fails with
+FDK_ERR_UNSUPPORTED there until xdg-decoration lands, because
+stacking FDK's bar over the compositor's would double-decorate). `fdk_init()` performs a real
 platform connection with backend auto-detection; `fdk_run()` is a
 real `poll()`-based event loop that exits on `fdk_quit()` or when
 the last top-level window closes; windows can be created, shown,

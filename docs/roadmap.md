@@ -554,13 +554,50 @@ it wants the Phase 5 grid/constraint work or a later layout pass.
   auto window-background application, theme file search paths,
   Wayland-side GUI verification (toolchain).
 
-## Phase 8 — Window Decorations
+## Phase 8 — Window Decorations — FIRST SLICE COMPLETE
 
-- FDK-owned title bars, close/maximize/minimize buttons, resize
-  handling, decoration theming, correct per-backend protocol usage
-  (Wayland xdg-decoration / compositor-specific fallback vs. X11
-  atoms/MWM hints — these are NOT identical and Phase 8 documents
-  the difference rather than assuming CSD parity)
+- `fdk_window_set_decorated(true/false)`: FDK draws its own title
+  band INSIDE the client area (a themed 28px widget: window title as
+  a catalog Label — default color = themed text — plus a close
+  Button) and asks the backend to drop the WM's chrome
+  (`fdk_window_set_decoration_font` picks the face; default is the
+  new `fdk_font_load_system_default()`, FDK still bundles no font).
+  The content widget (Phase 5) is laid out below the band on every
+  configure; `fdk_window_set_title` keeps the band label in sync
+  (the backend title is still set for taskbars).
+- X11: `_MOTIF_WM_HINTS` via three new OPTIONAL vtable ops
+  (`window_set_wm_decorations` / `window_get_position` /
+  `window_move_to`). Wayland leaves them NULL — `set_decorated`
+  returns FDK_ERR_UNSUPPORTED there rather than stacking FDK's bar
+  over the compositor's (xdg-decoration is the parked follow-up; the
+  two protocols are NOT identical and are documented as such in
+  platform_internal.h).
+- The band's close button synthesizes a REAL
+  FDK_EVENT_WINDOW_CLOSE_REQUEST through the normal dispatch path —
+  application close semantics are identical whether the WM or FDK's
+  button asked. Dragging the band moves the window (snap-formulated
+  in bar-local coordinates; converges because each move is flushed
+  before the next motion event is generated — exact under
+  bare/non-reparenting X servers; reparenting WMs may move only the
+  client, documented).
+- Build-system hardening found by this slice: the Makefile had NO
+  header dependency tracking, so editing a struct in an internal
+  header did not recompile includers — stale objects kept writing
+  pre-edit field offsets and ASan caught the corruption. Fixed with
+  `-MMD -MP` + `-include` (placed AFTER all targets: an earlier
+  include made the first .d's object the default goal — make pitfall,
+  documented in the Makefile).
+- Tests: X11 GUI case `test_decorations_gui` (server-side readback:
+  band fill + themed rule + close button, content below, MWM property
+  set/removed, REAL click on × delivering a real close-request, drag
+  moving the window to the exact (+40,+20), mode round trip) + demo
+  rig `scripts/run_decorations_demo_x11.sh` (10 PIL checks incl. the
+  band returning at the post-drag position and pixel-identical
+  on/off/on).
+- Remaining (parked, honest): maximize/minimize buttons (needs
+  _NET_WM_STATE work), resize edges, double-click title maximize,
+  Wayland xdg-decoration, per-theme title-bar metrics (band height is
+  a constant today).
 
 ## Phase 9 — Advanced Widgets
 

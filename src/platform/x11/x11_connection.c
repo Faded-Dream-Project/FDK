@@ -41,6 +41,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", False);
     conn->net_wm_name = XInternAtom(display, "_NET_WM_NAME", False);
     conn->utf8_string = XInternAtom(display, "UTF8_STRING", False);
+    conn->motif_wm_hints = XInternAtom(display, "_MOTIF_WM_HINTS", False);
 
     FDK_INFO("connected (screen %d, %dx%d root)", conn->screen,
              DisplayWidth(display, conn->screen),

@@ -145,6 +145,65 @@ void fdk_x11_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 
     XFlush(pwindow->conn->display);
 }
 
+/* _MOTIF_WM_HINTS (MwmHints): the ICCCM-adjacent mechanism every
+ * major X WM honors for turning server-side chrome off (and back
+ * on). layout: {flags, functions, decorations, input_mode, status},
+ * all CARD32. We only ever touch DECORATIONS. "On" deletes the
+ * property entirely so the WM returns to its default treatment. */
+#define X11_MWM_HINTS_DECORATIONS (1L << 1)
+
+fdk_result fdk_x11_window_set_wm_decorations(fdk_platform_window *pwindow,
+                                             bool on) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    Display *dpy = pwindow->conn->display;
+    if (on) {
+        XDeleteProperty(dpy, pwindow->xwindow,
+                        pwindow->conn->motif_wm_hints);
+    } else {
+        long hints[5] = {
+            X11_MWM_HINTS_DECORATIONS, /* flags: we set decorations */
+            0,                          /* functions: leave alone    */
+            0,                          /* decorations: NONE         */
+            0,                          /* input mode: unchanged     */
+            0,                          /* status                    */
+        };
+        XChangeProperty(dpy, pwindow->xwindow,
+                        pwindow->conn->motif_wm_hints,
+                        pwindow->conn->motif_wm_hints, 32, PropModeReplace,
+                        (const unsigned char *)hints, 5);
+    }
+    XFlush(dpy);
+    return FDK_OK;
+}
+
+fdk_result fdk_x11_window_get_position(fdk_platform_window *pwindow,
+                                       fdk_i32 *out_x, fdk_i32 *out_y) {
+    if (pwindow == NULL || out_x == NULL || out_y == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    Window child = 0;
+    int x = 0, y = 0;
+    if (!XTranslateCoordinates(pwindow->conn->display, pwindow->xwindow,
+                               pwindow->conn->root, 0, 0, &x, &y,
+                               &child)) {
+        return FDK_ERR_PLATFORM_INIT; /* same-display failure */
+    }
+    *out_x = x;
+    *out_y = y;
+    return FDK_OK;
+}
+
+void fdk_x11_window_move_to(fdk_platform_window *pwindow, fdk_i32 x,
+                            fdk_i32 y) {
+    if (pwindow == NULL) {
+        return;
+    }
+    XMoveWindow(pwindow->conn->display, pwindow->xwindow, x, y);
+    XFlush(pwindow->conn->display);
+}
+
 void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,
                                         fdk_size min_size, fdk_size max_size) {
     XSizeHints *hints = XAllocSizeHints();

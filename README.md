@@ -292,6 +292,24 @@ panel of catalog widgets cycling through three themes with real
 clicks, including the app-side pattern for tokens the engine does
 not force on anyone (window background, label accents).
 
+And FDK-drawn window decorations — the toolkit owns its title bar:
+
+```c
+fdk_window_set_decorated(window, true); /* themed band + close btn */
+```
+
+A 28px themed band inside the client area (window title, working
+close button that delivers a normal close-request — application
+semantics unchanged), the WM's own chrome asked away via
+`_MOTIF_WM_HINTS`, the content laid out below the band, and the band
+draggable to move the window. Everything themes at runtime like any
+widget. Wayland honestly returns `FDK_ERR_UNSUPPORTED` until
+xdg-decoration lands rather than stacking two title bars.
+
+Run `examples/09_decorations.c`: a decorated window you can drag by
+its band and close by its button, with a runtime toggle between
+FDK-drawn and WM decorations.
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The
@@ -375,6 +393,13 @@ The rig also verifies the round trip back to FDK Dark is
 pixel-exact.
 
 ![08_theme under three themes](docs/screenshots/theme_three_themes_1380x330.png)
+
+And the decorations' proof — `09_decorations` decorated (note the
+FDK band: title, × button, themed rule — at the post-drag position)
+vs. toggled back to WM decorations (band gone, content reflows to
+the full window):
+
+![09_decorations on/off](docs/screenshots/decorations_on_off_1050x360.png)
 
 ## Project principles
 

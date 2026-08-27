@@ -251,6 +251,21 @@ fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
                                    size_t *out_prefix_bytes,
                                    bool *out_fits);
 
+/* Loads a default UI font at `pixel_size` by probing the locations
+ * FDK's own examples and test suite probe (DejaVu Sans, Noto Sans,
+ * Liberation Sans, FreeSans — the common Linux desktop faces). The
+ * first readable file wins; the found path is cached, so repeated
+ * calls are cheap after the first hit. Returns NULL with an error
+ * log when no candidate exists — FDK deliberately bundles NO font
+ * (licensing posture, see docs/dependencies.md), so a stripped
+ * container has no default; applications that must render text
+ * should ship or require a font and load it by path.
+ *
+ * The window-decoration layer (fdk_window_set_decorated) uses this
+ * for its title text; applications may prefer their own face via
+ * fdk_font_load() — see fdk_window_set_decoration_font(). */
+fdk_font *fdk_font_load_system_default(fdk_i32 pixel_size);
+
 #ifdef __cplusplus
 }
 #endif
