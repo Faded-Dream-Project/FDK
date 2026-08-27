@@ -40,6 +40,24 @@ without this split, plain `make test` would fail in any headless
 environment (which is most CI). Splitting the suite is the actual fix,
 not faking a platform connection or skipping platform tests silently.
 
+## What `make test` covers beyond the platform tests
+
+The Phase 4 widget foundation is fully headless-testable by design
+(standalone roots + offscreen surfaces), so `tests/test_widget.c`
+runs in plain `make test` alongside the renderer suite: hierarchy
+and destroy cascades (subclass destroy hooks counted), reparent and
+z-order, effective visibility/enabled chains with input
+pass-through, painting (z-order, parent clipping, hidden subtrees),
+the partial-repaint PROOF (raw marker pixels outside the damage box
+survive a repaint; the surface's recorded damage bounds equal the
+invalidated widget's bounds), hover synthesis with local
+coordinates, the implicit grab, bubbling with per-level coordinate
+translation, focus lifecycle (drop on hide/disable, window
+blur/regain), Tab traversal (wrap, override, modifier guard),
+destroy-during-dispatch (self, ancestor, whole root — the deferred
+free exercised under ASan), measure/arrange hooks, and inter-tree
+isolation. 17 cases, all under ASan+UBSan.
+
 ## What `make test-x11` actually verifies
 
 Real, observable behavior against a live X server (see
@@ -88,6 +106,27 @@ Real, observable behavior against a live X server (see
   surface, blitted (full and partial source rects) onto a window
   surface, presented, and verified server-side — the cache/sprite
   pattern end to end.
+- **Widget tree painting** (Phase 4): a window root widget carrying
+  overlapping panels, a child on its parent, and a child poking out
+  of its parent's bounds, painted via `fdk_window_paint` and
+  verified server-side at exact pixel values (z-order, parent
+  clipping, hidden-subtree removal, and the refusal to destroy a
+  window-owned root).
+- **REAL widget input via XSendEvent** (Phase 4): genuine
+  MotionNotify / ButtonPress / ButtonRelease / KeyPress / FocusIn
+  events sent through the X server into the FDK window — the same
+  path physical input takes — verifying hover ENTER/LEAVE synthesis
+  with widget-local coordinates, the implicit pointer grab
+  (press→move→release all delivered to the press target, nothing to
+  the widget underneath), the consumed-events contract (the
+  application's window callback stops seeing events a widget
+  handles), built-in Tab traversal driven by a real keypress, and
+  window focus events mirrored into the focused widget.
+- **Widget root follows resize**: after a live resize the root
+  widget's bounds track the new client size and the fresh geometry
+  is painted by the TREE (not the platform background pixel),
+  verified server-side at a coordinate that only exists in the new
+  geometry.
 
 **Known, honest gap:** `WM_DELETE_WINDOW` (the close-request path,
 `FDK_EVENT_WINDOW_CLOSE_REQUEST`) is not exercised by `make test-x11`.
@@ -101,6 +140,12 @@ target — deferred rather than half-implemented; the underlying
 `WM_DELETE_WINDOW` registration and `ClientMessage` handling in
 `src/platform/x11/x11_connection.c` and `x11_dispatch.c` is real code,
 just not exercised by an automated test yet.
+
+(This is exactly the technique the Phase 4 widget input tests DO use
+for pointer/key/focus events — `XSendEvent` from a second connection —
+so the remaining close-request gap is purely about the ClientMessage
+shape a window manager produces, which is equally synthesizable when
+someone picks this up.)
 
 ## Wayland test coverage
 

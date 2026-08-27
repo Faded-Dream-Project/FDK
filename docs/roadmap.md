@@ -258,41 +258,147 @@ Still NOT done (next structural gaps, in rough order):
   dimensions in pixels, which is wrong under any non-1x scale factor
   and is Phase 3's next structural gap to close
 
-## Phase 4 — Widget Core
+## Phase 4 — Widget Foundation ✅ (this milestone)
 
-- Widget base type, parent/child hierarchy, event dispatch, focus,
-  sizing negotiation
-- Layout engine (`src/layout/`): horizontal/vertical/grid, min/natural/
-  preferred size, margins, padding, alignment, expansion
+The retained-mode widget object model everything later builds on.
+Implemented and tested:
 
-## Phase 5 — Initial Widgets
+- `fdk_widget` public API (`include/fdk/fdk_widget.h`): opaque
+  widget objects in parent/child trees; standalone roots work with
+  no window at all, which is what makes the whole layer provable
+  headless (`tests/test_widget.c`, 17 cases in `make test`)
+- Hierarchy: create/destroy (recursive), z-order (child order;
+  raise/lower), order-preserving reparent with cycle/root refusal,
+  child iteration, tree depth capped at 256
+- Geometry: parent-relative bounds, absolute (window) bounds
+  composed up the chain, `set_bounds` invalidating BOTH the old and
+  new regions
+- State: per-widget visible/enabled flags with effective (ANDed up
+  the chain) queries; hidden/disabled subtrees are input-TRANSPARENT
+  (hit-testing passes through to what is underneath); hiding or
+  disabling a focused/hovered widget cleanly drops focus/hover with
+  the proper OUT/LEAVE events delivered
+- Event routing (`fdk_widget_tree_handle_event` — the same entry
+  point the window glue uses): topmost-first hit-testing,
+  widget-local coordinates, ENTER/LEAVE synthesis from motion,
+  implicit pointer grab for press-to-release pairing (release
+  delivered even off-widget), bubbling to ancestors until handled,
+  scroll and key routing, per-widget event callbacks + a class
+  event hook that both always see the event (return value only
+  decides handled)
+- Focus: one focused widget per tree, eligibility (visible +
+  enabled + can-focus), FOCUS_IN/OUT delivery, focus drop on
+  hide/disable, window blur/regain mirrored into the focused widget
+  without consuming the window event, and built-in Tab / Shift+Tab
+  traversal (depth-first order, wrapping, overridable by handling
+  the key first, suppressed for modified Tabs)
+- Invalidation & painting: tree-global damage bounding box;
+  `fdk_widget_tree_paint` repaints in z-order constrained by the
+  Phase 3 clip stack (damage ∩ widget ∩ ancestors) — a partial
+  repaint is provable: raw marker pixels outside the damage box
+  SURVIVE a repaint (asserted headless); empty-damage paint is a
+  true no-op
+- Window glue (`fdk_window_get_root`, `fdk_window_paint`): lazily
+  created root kept in sync with every configure (resize = full
+  repaint), EXPOSE invalidates the tree, input events routed into
+  the tree BEFORE the application callback (widget-consumed events
+  never reach it — documented contract), and a pump loop of
+  `fdk_pump_events` + `fdk_window_paint` is a complete widget
+  application
+- Reentrancy (the part that makes the rest trustworthy): a callback
+  may destroy ITSELF, its ancestors, or the whole window/root — the
+  core unlinks immediately, defers the frees until the dispatch/
+  paint walk unwinds, and the window glue re-verifies registration
+  after every tree callback. Exercised headless (ASan-clean) and
+  live (the demo's quit button destroys the window from inside its
+  own release handler)
+- Subclassing vtable (`fdk_widget_class`: event/paint/measure/
+  arrange/destroy hooks) — the pattern FDK's own widget families use
+  (embed fdk_widget as first member via `src/widget/
+  widget_internal.h`); `measure`/`arrange` hook contracts are
+  settled now so the Phase 5 layout engine lands without touching
+  the object model. APPLICATION-level subclassing is not possible
+  yet (the public type is opaque per docs/abi-policy.md — apps use
+  callbacks, user data, and the base style setters); revisit at ABI
+  freeze
+- Base style seed: background fill + corner radius on the base
+  widget (the Phase 7 theme system replaces these fields)
+- Named scancodes (`FDK_KEY_TAB` etc.) in `fdk_event.h`; X11
+  EnterNotify/LeaveNotify now carry positions (was uninitialized)
+- Tests: 17 headless cases (`make test`, ASan+UBSan: lifecycle,
+  hierarchy, reparent, z-order/clip/hide painting, partial-repaint
+  proof, hover/grab/bubbling, focus lifecycle, Tab traversal,
+  destroy-during-dispatch, measure/arrange, tree isolation) plus 3
+  X11 GUI integration cases (`make test-x11`: tree painting verified
+  by server-side pixel readback; REAL input via XSendEvent — hover,
+  grab, consume contract, Tab, focus mirror; root-follows-resize
+  with the fresh area painted by the tree)
+- `examples/03_widgets.c`: interactive panel/button/meter UI — hover
+  highlight, pressed state, focus tint, live meter recolor + resize,
+  quit-button destroy-from-callback — driven by real injected input
+  in the test rig with pixel-verified before/after frames (see
+  README "What it looks like")
 
-- Window, Container, Box, Grid, Label, Button, Entry, Image, and
-  enough else to make the "Basic Window" / "Widgets" / "Layout
-  demonstration" examples real
+Explicitly NOT done in Phase 4 (do not mistake for oversights):
+- **No layout engine.** Geometry is set by hand; the `measure`/
+  `arrange` hooks exist and are tested but nothing drives them yet —
+  that IS Phase 5.
+- **No widget catalog.** Label/Button/Entry etc. are Phase 6; the
+  demo builds "buttons" from base widgets + callbacks precisely to
+  prove the foundation needs nothing more.
+- **No text rendering** — still Phase 3's remaining gap (src/text/);
+  the widget layer is deliberately text-free until then.
+- **No Wayland-side widget GUI test this slice** — the Wayland
+  toolchain (libwayland-dev) is absent in this environment, so the
+  widget layer was verified on X11 + headless only. The layer is
+  backend-neutral (it sits on fdk_surface/fdk_event), and the
+  Wayland GUI widget tests slot in when the toolchain is next
+  available — recorded as a gap, not assumed.
+- **Application-level subclassing** blocked on the opaque public
+  type (ABI policy) — internal pattern only, documented in
+  `fdk_widget.h`.
 
-## Phase 6 — Theme Engine
+## Phase 5 — Layout Engine
+
+- Measurement (natural size via the measure hook), assignment (the
+  arrange hook), and the container negotiation over them:
+  horizontal/vertical boxes, grid, alignment, expansion, margins,
+  padding — built strictly on the Phase 4 hooks
+- Resize integration: root relayout on configure; damage-driven
+  repaint of exactly the changed geometry
+
+## Phase 6 — Core Widgets + Text Foundation
+
+- Label, Button, Toggle, Checkbox, Radio, ProgressBar, Separator,
+  Frame/Panel — as internal subclasses of fdk_widget, with focus
+  visuals, keyboard activation (Space/Enter), and disabled states
+- Text foundation moves here (or earlier if widget text demands it —
+  Phase 3's src/text/ gap): glyph rasterization + a Label that
+  actually draws text
+
+## Phase 7 — Theme Engine
 
 - `.fdk` format: grammar spec (`docs/fdk-theme-format.md`, written
   when this phase starts), parser, validator, loader, theme API,
-  default theme
+  default theme replacing the Phase 4 base-style fields
 - Parser treated as security-sensitive from day one — see
   `docs/security.md`
 
-## Phase 7 — Window Decorations
+## Phase 8 — Window Decorations
 
 - FDK-owned title bars, close/maximize/minimize buttons, resize
   handling, decoration theming, correct per-backend protocol usage
   (Wayland xdg-decoration / compositor-specific fallback vs. X11
-  atoms/MWM hints — these are NOT identical and Phase 7 documents the
-  difference rather than assuming CSD parity)
+  atoms/MWM hints — these are NOT identical and Phase 8 documents
+  the difference rather than assuming CSD parity)
 
-## Phase 8 — Advanced Widgets
+## Phase 9 — Advanced Widgets
 
-- ScrollView, List, Tree, ComboBox, Menu, Toolbar, ProgressBar,
-  Slider, SpinButton, Notebook/TabView, Dialog, Canvas
+- ScrollView, List, Tree, ComboBox, Menu, Toolbar, Slider,
+  SpinButton, Notebook/TabView, Dialog, Canvas — plus text Entry
+  input (cursor, selection, clipboard architecture, IME groundwork)
 
-## Phase 9 — Accessibility / Internationalization
+## Phase 10 — Accessibility / Internationalization
 
 - Accessibility abstraction (roles, names, states, relationships,
   keyboard navigation) — implemented as far as practical without
@@ -301,9 +407,11 @@ Still NOT done (next structural gaps, in rough order):
 - i18n: locale-aware formatting, translation infrastructure,
   pluralization architecture
 
-## Phase 10 — Stabilization
+## Phase 11 — Stabilization
 
-- ABI freeze (`FDK_ABI_STABLE` → 1, see `docs/abi-policy.md`)
+- ABI freeze (`FDK_ABI_STABLE` → 1, see `docs/abi-policy.md`; this
+  is also where application-embeddable widget subclassing is
+  revisited)
 - API cleanup pass, performance profiling (not before this — see
   project principle against premature optimization), memory-safety
   audit, full documentation pass, packaging

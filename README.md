@@ -137,6 +137,37 @@ is additionally paced by the compositor's frame callbacks. Windows
 that nobody renders into still show the plain platform background.
 See `docs/rendering.md` for the full rendering design.
 
+And widgets work today too — Phase 4's foundation. Attach a tree to
+the window's root widget and FDK does the retained-mode work:
+hit-testing, hover and enter/leave synthesis, the implicit pointer
+grab, focus with built-in Tab traversal, event bubbling, and
+damage-driven repaints that clip to exactly what changed:
+
+```c
+fdk_widget *root = NULL;
+fdk_window_get_root(window, &root);
+
+fdk_widget *button = NULL;
+fdk_widget_create(root, NULL, (fdk_rect){20, 20, 120, 48}, &button);
+fdk_widget_set_background(button, panel_color);
+fdk_widget_set_corner_radius(button, 8);
+fdk_widget_set_can_focus(button, true);
+fdk_widget_set_event_callback(button, on_button_event, &state);
+
+while (!done) {
+    fdk_pump_events(ctx, 15);   /* input routed into the tree */
+    fdk_window_paint(window);   /* repaint damage only + present */
+}
+```
+
+A widget that handles an event consumes it — the window-level
+callback only sees what the tree didn't. Widgets can destroy
+themselves, their ancestors, or the whole window from inside an event
+callback; the core defers the frees so no dispatcher ever walks freed
+memory. Run `examples/03_widgets.c` for a live panel/button/meter UI
+with hover, press, focus-tint, and a quit button that destroys the
+window from inside its own release handler.
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The
@@ -166,6 +197,20 @@ A 10-second screencast of the animated X11 session — including the
 live resize and a clean window close mid-render — is committed
 alongside the stills:
 [`docs/screenshots/fdk_render_x11.mp4`](docs/screenshots/fdk_render_x11.mp4).
+
+The widget foundation has its own captured proof — two frames of
+`03_widgets` under Xvfb, driven by real injected input (XSendEvent
+through the X server): the initial state, and after two button
+clicks plus a Tab. Between the frames the meter recolored AND grew
+(a `set_bounds` layout change repainting only the affected region),
+and the "hue" button's color shifted because keyboard focus moved
+to it. The quit button ends the demo by destroying the window from
+inside its own pointer-release handler — and the process exits
+cleanly (exit 0, ~390 frames).
+
+![03_widgets initial state](docs/screenshots/widgets_frame_initial.png)
+
+![03_widgets after clicks + Tab: meter recolored and grown, focus moved](docs/screenshots/widgets_frame_interacted.png)
 
 ## Project principles
 

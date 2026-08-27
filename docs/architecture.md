@@ -8,15 +8,17 @@ the layers below it, and never upward:
 ```
 Application code
       |
-Widgets  (src/widget/)         — Phase 4-5, 8
-      |
-Layout   (src/layout/)         — Phase 4
-      |
-Rendering abstraction (src/render/) — Phase 3 (first slice: software
-      |                                surfaces, framebuffer access,
-      |                                whole-window present, basic fills)
-Windowing (src/window/)        — Phase 2, decorations in Phase 7
-      |
+Widgets  (src/widget/)         — Phase 4 (foundation) landed;
+      |                           core widget catalog Phase 6
+Layout   (src/layout/)         — Phase 5 (hooks already in the
+      |                           widget API: measure/arrange)
+Rendering abstraction (src/render/) — Phase 3 (software surfaces,
+      |                                framebuffer access,
+      |                                damage-tracked present, clip
+      |                                stack, primitive set)
+Windowing (src/window/)        — Phase 2 (+ Phase 4 widget glue:
+      |                           fdk_window_get_root/paint,
+      |                           event routing into the tree)
 Platform abstraction (src/platform/) — Phase 2
       |         \
    X11/XLibre   Wayland
@@ -60,7 +62,7 @@ backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
   struct layout behind each opaque public type lives (e.g.
   `src/core/context_internal.h` defines `struct fdk_context`).
 
-## Current state (Phase 3 begun — first rendering slice)
+## Current state (Phase 4 landed — widget foundation)
 
 Implemented: `src/core/` (context lifecycle, logging, error codes,
 allocation, versioning — Phase 1, plus the Phase 2 additions to
@@ -71,25 +73,56 @@ primitive rendered apps are built on) plus `src/platform/x11/`,
 `src/platform/wayland/` (optional — see `docs/build.md`'s "Optional
 Wayland build"), `src/platform/wayland_disabled.c` (the build-time
 stub used when Wayland dev headers aren't available), `src/window/`
-(Phase 2), and `src/render/` (Phase 3: the `fdk_surface` software
-renderer — pixel access, damage-tracked presentation, a clip stack,
-offscreen surfaces, and the blending primitive set — implemented on
-both backends via optional `fdk_platform_ops` entries
-(`window_get_framebuffer`, damage-taking `window_present`, and the
-`window_frame_ready` pacing query); see `docs/rendering.md` for the
-full design). `fdk_init()` performs a real platform connection
-with backend auto-detection; `fdk_run()` is a real `poll()`-based
-event loop that exits on `fdk_quit()` or when the last top-level
-window closes; windows can be created, shown, resized, and receive
-real translated input/configure/close events on both backends; and
-applications can now draw real pixels into a window's surface and
-present them — sending only what changed — on either backend (see
-`examples/02_software_render.c`).
-See `docs/roadmap.md`'s Phase 3 entry for the precise, honest list of
+(Phase 2, plus the Phase 4 widget glue: the window's lazily created
+root widget, configure/expose handling, and input routing through
+the tree before the application callback), `src/render/` (Phase 3:
+the `fdk_surface` software renderer — pixel access, damage-tracked
+presentation, a clip stack, offscreen surfaces, and the blending
+primitive set — implemented on both backends via optional
+`fdk_platform_ops` entries (`window_get_framebuffer`, damage-taking
+`window_present`, and the `window_frame_ready` pacing query); see
+`docs/rendering.md` for the full design), and `src/widget/` (Phase
+4: the retained-mode widget foundation — hierarchy, state, focus,
+event routing with hover/grab/bubbling, invalidation, damage-driven
+z-order painting on the clip stack, the subclass vtable, and the
+reentrancy machinery that makes destroy-from-callback safe; see
+`docs/roadmap.md`'s Phase 4 entry). `fdk_init()` performs a real
+platform connection with backend auto-detection; `fdk_run()` is a
+real `poll()`-based event loop that exits on `fdk_quit()` or when
+the last top-level window closes; windows can be created, shown,
+resized, and receive real translated input/configure/close events
+on both backends; applications can draw real pixels into a window's
+surface and present them — sending only what changed — on either
+backend (`examples/02_software_render.c`); and applications can now
+build widget trees that FDK itself hit-tests, focuses, repaints,
+and presents (`examples/03_widgets.c`).
+See `docs/roadmap.md`'s entries for the precise, honest lists of
 what is and isn't covered — in particular, transforms, image
 decoding, text, and the MIT-SHM fast path are still future work,
 while damage tracking, the clip stack, offscreen surfaces, the full
-crisp-primitive set, and Wayland frame-callback pacing are in and
-tested; Wayland still has no automated integration test, though the
-backend is verified end-to-end against a real headless Weston (see
-`docs/testing.md`).
+crisp-primitive set, Wayland frame-callback pacing, and the widget
+foundation are in and tested; Wayland still has no automated
+integration test, though the backend is verified end-to-end against
+a real headless Weston (see `docs/testing.md`), and the widget layer
+— backend-neutral by construction — is verified headless + on X11
+this slice (Wayland widget GUI tests pending the toolchain).
+
+### Widget layer specifics (Phase 4)
+
+The widget layer (`src/widget/`) sits strictly above windowing and
+rendering: it consumes `fdk_event_data` (translated input) and draws
+through `fdk_surface` primitives plus the clip stack, so it contains
+no backend code at all — which is why `tests/test_widget.c` can
+prove the entire layer with offscreen surfaces and no display. The
+window glue lives in `src/window/window.c` (not in `src/widget/`):
+the window owns its root widget, resizes it on configure, invalidates
+it on expose, routes input events through
+`fdk_widget_tree_handle_event` before the application's window
+callback (widget-consumed events don't re-deliver — documented in
+`fdk_widget.h`), and `fdk_window_paint` wraps tree-paint + present.
+
+One deliberate boundary: the public `fdk_widget` type is opaque, so
+the embed-fdk_widget-as-first-member subclassing pattern is internal
+to `src/` (via `widget_internal.h`); applications extend widgets via
+callbacks, user data, and the base style setters until the ABI
+freeze (see `docs/abi-policy.md`).
