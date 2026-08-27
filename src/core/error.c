@@ -26,6 +26,8 @@ const char *fdk_result_to_string(fdk_result result) {
         case FDK_ERR_IO:                 return "I/O error";
         case FDK_ERR_NOT_A_FILE:         return "not a file";
 
+        case FDK_ERR_FONT_LOAD:          return "font load failed (not a usable font)";
+
         default:                         return "unknown error";
     }
 }

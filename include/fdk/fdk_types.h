@@ -18,6 +18,10 @@ extern "C" {
 #endif
 
 /* ---- Fixed-width aliases used throughout the public API ---- */
+typedef uint8_t   fdk_u8;
+typedef int8_t    fdk_i8;
+typedef uint16_t  fdk_u16;
+typedef int16_t   fdk_i16;
 typedef int32_t   fdk_i32;
 typedef uint32_t  fdk_u32;
 typedef int64_t   fdk_i64;

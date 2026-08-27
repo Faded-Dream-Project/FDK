@@ -968,6 +968,77 @@ void fdk_surface_draw_rounded_rect(fdk_surface *surface, fdk_rect rect,
     }
 }
 
+/* Alpha-mask blit — the glyph compositing primitive (internal).
+ *
+ * Blends a 1-byte-per-pixel coverage mask (row stride `mask_stride`
+ * in BYTES) with a solid straight-alpha color, source-over, across
+ * `rect` on the surface. `rect` is both the destination rectangle and
+ * the mask's coordinate frame: mask pixel (0,0) lands at rect's
+ * top-left. The mask is sampled relative to the clipped span, so a
+ * partially clipped rect simply reads the matching sub-rectangle.
+ *
+ * Honors the clip stack (via the effective clip) exactly like every
+ * other primitive, but deliberately does NOT record damage: callers
+ * own damage bookkeeping so a text run can union its glyph ink boxes
+ * into a single damage rectangle instead of one per glyph (see
+ * src/text/text.c). The caller is responsible for invalidating the
+ * union of the rects it actually blended.
+ */
+void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
+                            const fdk_u8 *mask, fdk_i32 mask_stride,
+                            fdk_color color) {
+    if (surface == NULL || mask == NULL || rect.width <= 0 ||
+        rect.height <= 0 || mask_stride < rect.width) {
+        return;
+    }
+    if (!fdk_ok(surface_acquire(surface))) {
+        return;
+    }
+
+    int x0, y0, x1, y1;
+    if (!clip_rect(surface, rect, &x0, &y0, &x1, &y1)) {
+        return;
+    }
+
+    /* Integer source-over with a rounded blend, mirroring blend_pixel's
+     * float math at glyph speeds: precombine the color's alpha with
+     * each mask byte, then lerp the three channels. Fully transparent
+     * pixels skip the write entirely (the common case in sparse AA
+     * bitmaps — glyph interiors are the only dense part). */
+    fdk_f32 af = color.a < 0.0f ? 0.0f : (color.a > 1.0f ? 1.0f : color.a);
+    fdk_f32 rf = color.r < 0.0f ? 0.0f : (color.r > 1.0f ? 1.0f : color.r);
+    fdk_f32 gf = color.g < 0.0f ? 0.0f : (color.g > 1.0f ? 1.0f : color.g);
+    fdk_f32 bf = color.b < 0.0f ? 0.0f : (color.b > 1.0f ? 1.0f : color.b);
+    int ca = (int)(af * 255.0f + 0.5f);
+    int sr = (int)(rf * 255.0f + 0.5f);
+    int sg = (int)(gf * 255.0f + 0.5f);
+    int sb = (int)(bf * 255.0f + 0.5f);
+
+    for (int y = y0; y < y1; y++) {
+        const fdk_u8 *mrow =
+            mask + (size_t)(y - rect.y) * (size_t)mask_stride +
+            (size_t)(x0 - rect.x);
+        fdk_u32 *drow = surface->fb.pixels +
+                        (size_t)y * (size_t)surface->fb.stride +
+                        (size_t)x0;
+        int n = x1 - x0;
+        for (int i = 0; i < n; i++) {
+            int am = (ca * mrow[i] + 127) / 255;
+            if (am <= 0) {
+                continue;
+            }
+            fdk_u32 d = drow[i];
+            int dr = (int)((d >> 16) & 0xFFu);
+            int dg = (int)((d >> 8) & 0xFFu);
+            int db = (int)d & 0xFF;
+            int r = (sr * am + dr * (255 - am) + 127) / 255;
+            int g = (sg * am + dg * (255 - am) + 127) / 255;
+            int b = (sb * am + db * (255 - am) + 127) / 255;
+            drow[i] = ((fdk_u32)r << 16) | ((fdk_u32)g << 8) | (fdk_u32)b;
+        }
+    }
+}
+
 fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
                             fdk_surface *src, fdk_rect src_rect) {
     if (dst == NULL || src == NULL || src_rect.width <= 0 ||

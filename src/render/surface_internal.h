@@ -90,4 +90,14 @@ struct fdk_surface {
  * if any. Safe to call on a window whose surface was never created. */
 void fdk_surface_detach_from_window(fdk_window *window);
 
+/* Alpha-mask blit (internal) — composites a 1-byte-per-pixel coverage
+ * mask with a solid color, source-over, clip-stack-honoring, across
+ * `rect` (also the mask's coordinate frame; `mask_stride` in bytes).
+ * Does NOT record damage — callers own damage bookkeeping (the text
+ * layer unions a whole run's glyph boxes into one damage rect).
+ * Implemented in surface.c; used by src/text/text.c. */
+void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
+                            const fdk_u8 *mask, fdk_i32 mask_stride,
+                            fdk_color color);
+
 #endif /* FDK_SURFACE_INTERNAL_H */

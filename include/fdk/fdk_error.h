@@ -46,6 +46,9 @@ typedef enum fdk_result {
     /* I/O */
     FDK_ERR_IO                 = -400,
     FDK_ERR_NOT_A_FILE         = -401,
+
+    /* Text / fonts */
+    FDK_ERR_FONT_LOAD          = -500, /* not a usable TrueType/OpenType file */
 } fdk_result;
 
 /* Returns a short, static, human-readable, English description of a

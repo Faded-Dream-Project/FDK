@@ -105,7 +105,8 @@ LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm
 # for the full rationale. No other warning is suppressed anywhere in
 # the project.
 extra_flags = $(if $(findstring src/platform/x11/,$(1)),$(X11_CFLAGS)) \
-              $(if $(findstring src/platform/wayland/,$(1)),$(WAYLAND_CFLAGS) -Wno-cast-qual)
+              $(if $(findstring src/platform/wayland/,$(1)),$(WAYLAND_CFLAGS) -Wno-cast-qual) \
+              $(if $(findstring src/text/,$(1)),-Ithird_party/stb)
 
 # --- Sources ------------------------------------------------------------
 
@@ -127,7 +128,8 @@ WINDOW_SRCS   := $(wildcard src/window/*.c)
 RENDER_SRCS   := $(wildcard src/render/*.c)
 WIDGET_SRCS   := $(wildcard src/widget/*.c)
 LAYOUT_SRCS   := $(wildcard src/layout/*.c)
-LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS)
+TEXT_SRCS     := $(wildcard src/text/*.c)
+LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS)
 
 # Static and shared builds use separate object trees (obj/ vs obj-pic/)
 # since shared objects must be position-independent (-fPIC) and static
