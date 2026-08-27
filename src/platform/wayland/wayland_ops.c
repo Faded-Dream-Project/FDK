@@ -15,6 +15,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .window_set_size_limits = fdk_wayland_window_set_size_limits,
     .window_get_framebuffer = fdk_wayland_window_get_framebuffer,
     .window_present = fdk_wayland_window_present,
+    .window_frame_ready = fdk_wayland_window_frame_ready,
 };
 
 const fdk_platform_ops *fdk_platform_wayland_ops(void) {

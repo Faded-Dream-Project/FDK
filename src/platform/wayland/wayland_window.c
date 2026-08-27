@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define WAYLAND_DEFAULT_WIDTH  640
@@ -247,22 +248,32 @@ static fdk_result attach_background_buffer(fdk_platform_window *pwindow, fdk_siz
 
 /* ---- Software rendering (fdk_surface machinery) ----
  *
- * Lifecycle: window_get_framebuffer creates a fresh wl_shm buffer
- * (create_shm_buffer) and parks it in a free render slot as the
- * window's `render_pending`, handing the mapping to the application.
- * window_present attaches + damages + commits it, promotes it to the
- * surface's live buffer, and clears render_pending. The compositor
- * sends wl_buffer::release once it stops using a superseded buffer;
- * the listener below destroys the buffer and munmaps its pixels,
- * freeing the slot. Each buffer is written exactly once between
- * creation and commit, so a release can never race a client write
- * (the property that makes this first-slice design correct without
- * full double buffering). */
+ * Lifecycle (buffer-recycling design — see wayland_platform.h's
+ * render_slots comment for the full rationale):
+ *
+ *   acquire  -> reuse the pending buffer if the size still matches;
+ *               otherwise pick a RELEASED slot at the right size (or
+ *               an empty slot, creating a fresh buffer), pre-fill it
+ *               with a copy of the currently visible frame so pixels
+ *               outside the app's next damage region keep matching
+ *               the screen, and mark it `render_pending`.
+ *   present  -> attach + damage + commit the pending buffer; it
+ *               becomes the live buffer; request a frame callback.
+ *   release  -> the compositor is done with a buffer: its slot is
+ *               marked `released` (kept alive for reuse, NOT
+ *               destroyed).
+ *   destroy  -> all slots are destroyed unconditionally.
+ */
 
 static void render_buffer_release(void *data, struct wl_buffer *buffer) {
     fdk_platform_window *pwindow = data;
     for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
         if (pwindow->render_slots[i].buffer == buffer) {
+            /* Keep buffer + mapping alive for recycling; only flip
+             * the state. If it was the live buffer, the surface is
+             * now effectively un-backed (e.g. superseded or the
+             * surface was unmapped by fdk_window_hide()). */
+            pwindow->render_slots[i].released = 1;
             if (pwindow->render_pending == buffer) {
                 /* Defensive: a pending (never-attached) buffer should
                  * not be released; if a compositor does anyway, keep
@@ -270,19 +281,11 @@ static void render_buffer_release(void *data, struct wl_buffer *buffer) {
                 pwindow->render_pending = NULL;
             }
             if (pwindow->buffer == buffer) {
-                /* The live render buffer was superseded/unmapped. */
                 pwindow->buffer = NULL;
                 pwindow->buffer_attached = 0;
             }
-            wl_buffer_destroy(buffer);
-            munmap(pwindow->render_slots[i].pixels,
-                   pwindow->render_slots[i].length);
-            pwindow->render_slots[i].buffer = NULL;
-            pwindow->render_slots[i].pixels = NULL;
-            pwindow->render_slots[i].length = 0;
-            pwindow->render_slots[i].size.width = 0;
-            pwindow->render_slots[i].size.height = 0;
-            FDK_DEBUG("render buffer released by compositor");
+            FDK_DEBUG("render buffer released by compositor (slot kept "
+                      "for reuse)");
             return;
         }
     }
@@ -293,6 +296,64 @@ static void render_buffer_release(void *data, struct wl_buffer *buffer) {
 static const struct wl_buffer_listener g_render_buffer_listener = {
     .release = render_buffer_release,
 };
+
+/* Frame callback: the compositor finished presenting the last
+ * committed frame — the green light for the next one. Destroys the
+ * one-shot callback object (its only event has arrived). */
+static void frame_callback_done(void *data, struct wl_callback *callback,
+                                 uint32_t callback_data) {
+    (void)callback_data;
+    fdk_platform_window *pwindow = data;
+    pwindow->frame_ack = 1;
+    wl_callback_destroy(callback);
+    FDK_DEBUG("frame acknowledged by compositor");
+}
+
+static const struct wl_callback_listener g_frame_callback_listener = {
+    .done = frame_callback_done,
+};
+
+/* Monotonic milliseconds — only used for the pacing starvation
+ * guard, so absolute epoch correctness does not matter. */
+static fdk_i64 now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (fdk_i64)ts.tv_sec * 1000 + (fdk_i64)ts.tv_nsec / 1000000;
+}
+
+/* Copies the currently visible frame (the live buffer's mapping)
+ * into `slot`, when one exists at the same size. This is the
+ * correctness backbone of damage tracking on Wayland: the app's next
+ * frame then differs from the screen ONLY in the region it draws,
+ * which is exactly what the damage hints claim. A live buffer that
+ * is a background buffer has no client mapping (background buffers
+ * are filled and munmapped at attach) — but that case only occurs
+ * before the first render frame, which is always fully damaged
+ * anyway. */
+static void prefetch_visible_frame(fdk_platform_window *pwindow,
+                                    int slot) {
+    if (pwindow->buffer == NULL) {
+        return; /* nothing visible yet — first frame is full-damage */
+    }
+    for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+        if (pwindow->render_slots[i].buffer == pwindow->buffer &&
+            pwindow->render_slots[i].size.width ==
+                pwindow->render_slots[slot].size.width &&
+            pwindow->render_slots[i].size.height ==
+                pwindow->render_slots[slot].size.height &&
+            pwindow->render_slots[i].length ==
+                pwindow->render_slots[slot].length) {
+            memcpy(pwindow->render_slots[slot].pixels,
+                   pwindow->render_slots[i].pixels,
+                   pwindow->render_slots[slot].length);
+            return;
+        }
+    }
+    /* Live buffer has no reusable mapping (background buffer, or a
+     * different length): leave the slot zeroed — the surface layer
+     * resets damage to full on any size change, and the app's first
+     * frame at a given size is expected to cover everything. */
+}
 
 fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                                                fdk_platform_framebuffer *out_fb) {
@@ -328,18 +389,52 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                 pwindow->render_slots[i].length = 0;
                 pwindow->render_slots[i].size.width = 0;
                 pwindow->render_slots[i].size.height = 0;
+                pwindow->render_slots[i].released = 0;
                 pwindow->render_pending = NULL;
                 break;
             }
         }
     }
 
-    /* Find a free slot for the new buffer. */
+    /* Reap released slots at the wrong size — they can never serve a
+     * future acquisition and only eat capacity. */
+    for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+        if (pwindow->render_slots[i].buffer != NULL &&
+            pwindow->render_slots[i].released &&
+            pwindow->render_slots[i].buffer != pwindow->buffer &&
+            (pwindow->render_slots[i].size.width != size.width ||
+             pwindow->render_slots[i].size.height != size.height)) {
+            wl_buffer_destroy(pwindow->render_slots[i].buffer);
+            munmap(pwindow->render_slots[i].pixels,
+                   pwindow->render_slots[i].length);
+            pwindow->render_slots[i].buffer = NULL;
+            pwindow->render_slots[i].pixels = NULL;
+            pwindow->render_slots[i].length = 0;
+            pwindow->render_slots[i].size.width = 0;
+            pwindow->render_slots[i].size.height = 0;
+            pwindow->render_slots[i].released = 0;
+        }
+    }
+
+    /* Prefer recycling a released slot at the current size. */
     int slot = -1;
     for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
-        if (pwindow->render_slots[i].buffer == NULL) {
+        if (pwindow->render_slots[i].buffer != NULL &&
+            pwindow->render_slots[i].released &&
+            pwindow->render_slots[i].size.width == size.width &&
+            pwindow->render_slots[i].size.height == size.height) {
             slot = i;
             break;
+        }
+    }
+
+    if (slot < 0) {
+        /* Otherwise take an empty slot and create a buffer in it. */
+        for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+            if (pwindow->render_slots[i].buffer == NULL) {
+                slot = i;
+                break;
+            }
         }
     }
     if (slot < 0) {
@@ -354,40 +449,56 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
         return FDK_ERR_SURFACE_CREATE;
     }
 
-    struct wl_buffer *buffer = NULL;
-    uint32_t *pixels = NULL;
-    size_t length = 0;
-    fdk_result r = create_shm_buffer(pwindow->conn, size, &buffer, &pixels,
-                                     &length);
-    if (!fdk_ok(r)) {
-        return r;
+    if (pwindow->render_slots[slot].buffer == NULL) {
+        struct wl_buffer *buffer = NULL;
+        uint32_t *pixels = NULL;
+        size_t length = 0;
+        fdk_result r = create_shm_buffer(pwindow->conn, size, &buffer,
+                                         &pixels, &length);
+        if (!fdk_ok(r)) {
+            return r;
+        }
+        wl_buffer_add_listener(buffer, &g_render_buffer_listener, pwindow);
+        pwindow->render_slots[slot].buffer = buffer;
+        pwindow->render_slots[slot].pixels = pixels;
+        pwindow->render_slots[slot].length = length;
+        pwindow->render_slots[slot].size = size;
+        pwindow->render_slots[slot].released = 0;
     }
 
-    wl_buffer_add_listener(buffer, &g_render_buffer_listener, pwindow);
+    /* Pre-fill with the visible frame (see prefetch_visible_frame):
+     * the surface layer's damage model then holds exactly. */
+    prefetch_visible_frame(pwindow, slot);
 
-    pwindow->render_slots[slot].buffer = buffer;
-    pwindow->render_slots[slot].pixels = pixels;
-    pwindow->render_slots[slot].length = length;
-    pwindow->render_slots[slot].size = size;
-    pwindow->render_pending = buffer;
+    pwindow->render_pending = pwindow->render_slots[slot].buffer;
 
-    FDK_DEBUG("render framebuffer acquired (%dx%d, slot %d)", size.width,
-              size.height, slot);
+    FDK_DEBUG("render framebuffer acquired (%dx%d, slot %d, %s)",
+              size.width, size.height, slot,
+              pwindow->render_slots[slot].released ? "recycled" : "fresh");
 
-    out_fb->pixels = pixels;
+    out_fb->pixels = pwindow->render_slots[slot].pixels;
     out_fb->width = size.width;
     out_fb->height = size.height;
     out_fb->stride = size.width;
     return FDK_OK;
 }
 
-fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow) {
-    if (pwindow == NULL) {
+fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
+                                      const fdk_platform_damage *damage) {
+    if (pwindow == NULL || damage == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
 
     /* Documented no-op when nothing was ever acquired/drawn. */
     if (pwindow->render_pending == NULL) {
+        return FDK_OK;
+    }
+
+    /* Nothing changed — no attach, no damage, no commit, and the
+     * acquired buffer stays pending for the next frame (the
+     * damage-tracking contract; a no-op frame costs zero protocol
+     * traffic). */
+    if (!damage->full && damage->count == 0) {
         return FDK_OK;
     }
 
@@ -404,28 +515,81 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow) {
     for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
         if (pwindow->render_slots[i].buffer == pwindow->render_pending) {
             size = pwindow->render_slots[i].size;
+            pwindow->render_slots[i].released = 0; /* becomes live */
             break;
         }
     }
 
     wl_surface_attach(pwindow->surface, pwindow->render_pending, 0, 0);
-    /* Damage is mandatory — see attach_background_buffer(). */
-    wl_surface_damage(pwindow->surface, 0, 0, INT32_MAX, INT32_MAX);
+
+    /* Damage hints. full == 1 (or the defensive count == 0 with
+     * full == 0) uses the whole-surface idiom; otherwise each rect
+     * is clamped to the buffer and sent as its own hint — the
+     * compositor can then limit its own repaint to what actually
+     * changed. Compositors are allowed to ignore hints entirely,
+     * which is why get_framebuffer pre-fills buffers with the
+     * visible frame (see prefetch_visible_frame). */
+    if (damage->full || damage->count == 0) {
+        wl_surface_damage(pwindow->surface, 0, 0, INT32_MAX, INT32_MAX);
+    } else {
+        for (int i = 0; i < damage->count; i++) {
+            const fdk_rect *rc = &damage->rects[i];
+            long long x0 = rc->x, y0 = rc->y;
+            long long x1 = (long long)rc->x + rc->width;
+            long long y1 = (long long)rc->y + rc->height;
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > size.width) x1 = size.width;
+            if (y1 > size.height) y1 = size.height;
+            if (x1 > x0 && y1 > y0) {
+                wl_surface_damage(pwindow->surface, (int32_t)x0,
+                                  (int32_t)y0, (int32_t)(x1 - x0),
+                                  (int32_t)(y1 - y0));
+            }
+        }
+    }
     wl_surface_commit(pwindow->surface);
 
     pwindow->rendered_ever = 1;
 
+    /* Frame callback for pacing: fires when the compositor has
+     * presented this commit (see frame_callback_done). */
+    struct wl_callback *cb = wl_surface_frame(pwindow->surface);
+    if (cb != NULL) {
+        wl_callback_add_listener(cb, &g_frame_callback_listener, pwindow);
+    }
+    pwindow->frame_ack = 0;
+    pwindow->frame_commit_ms = now_ms();
+
     /* The pending buffer becomes the surface's live buffer; the
      * PREVIOUS live buffer (background or earlier render frame) gets
      * released by the compositor after this commit supersedes it,
-     * which destroys it via its own release listener. */
+     * which flips its slot to `released` for recycling. */
     pwindow->buffer = pwindow->render_pending;
     pwindow->buffer_size = size;
     pwindow->buffer_attached = 1;
     pwindow->render_pending = NULL;
 
-    FDK_DEBUG("render buffer presented (%dx%d)", size.width, size.height);
+    FDK_DEBUG("render buffer presented (%dx%d, %d damage rects)",
+              size.width, size.height,
+              damage->full ? -1 : damage->count);
     return FDK_OK;
+}
+
+int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow) {
+    if (pwindow == NULL) {
+        return 1;
+    }
+    if (pwindow->frame_ack) {
+        return 1;
+    }
+    if (!pwindow->rendered_ever) {
+        return 1; /* nothing presented yet — always allowed */
+    }
+    /* Starvation guard: hidden surfaces never get frame callbacks,
+     * and a wedged compositor must not wedge every FDK app. Pacing
+     * degrades to a floor rate instead of stopping. */
+    return (now_ms() - pwindow->frame_commit_ms) > FDK_WL_FRAME_GUARD_MS;
 }
 
 fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
@@ -457,12 +621,15 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->buffer_attached = 0;
     pwindow->render_pending = NULL;
     pwindow->rendered_ever = 0;
+    pwindow->frame_ack = 1;       /* nothing presented yet = ready */
+    pwindow->frame_commit_ms = 0;
     for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
         pwindow->render_slots[i].buffer = NULL;
         pwindow->render_slots[i].pixels = NULL;
         pwindow->render_slots[i].length = 0;
         pwindow->render_slots[i].size.width = 0;
         pwindow->render_slots[i].size.height = 0;
+        pwindow->render_slots[i].released = 0;
     }
 
     pwindow->surface = wl_compositor_create_surface(conn->compositor);
@@ -530,6 +697,7 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
             pwindow->render_slots[i].buffer = NULL;
             pwindow->render_slots[i].pixels = NULL;
             pwindow->render_slots[i].length = 0;
+            pwindow->render_slots[i].released = 0;
         }
     }
     pwindow->render_pending = NULL;

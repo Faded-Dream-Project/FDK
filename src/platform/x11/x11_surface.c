@@ -133,14 +133,22 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-fdk_result fdk_x11_window_present(fdk_platform_window *pwindow) {
-    if (pwindow == NULL) {
+fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
+                                 const fdk_platform_damage *damage) {
+    if (pwindow == NULL || damage == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
 
     /* Documented no-op when nothing was ever acquired/drawn (the
      * window simply keeps its background pixel contents). */
     if (pwindow->render_image == NULL) {
+        return FDK_OK;
+    }
+
+    /* Nothing changed since the last present — not even a request
+     * is sent (the damage-tracking contract; see
+     * platform_internal.h). */
+    if (!damage->full && damage->count == 0) {
         return FDK_OK;
     }
 
@@ -154,16 +162,67 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow) {
         }
     }
 
-    /* Whole-image blit; the server clips to the window automatically
-     * if it shrank between acquisition and present. Damage tracking
-     * (dirty rectangles) is deliberately absent in this first slice —
-     * every present redraws everything, which is correct and fast
-     * enough for the current workload. */
-    XPutImage(dpy, pwindow->xwindow, pwindow->render_gc,
-              pwindow->render_image,
-              0, 0, 0, 0,
-              (unsigned int)pwindow->render_size.width,
-              (unsigned int)pwindow->render_size.height);
+    /* Damage-driven blit: only the changed sub-rectangles of the
+     * XImage are copied into the request stream (each XPutImage is
+     * one request — a 64-rect damage region is still far cheaper
+     * than a full-frame blit for small updates). Two coarsenings
+     * keep request count sane (both are pure policy on this side of
+     * the ops seam; the surface layer's contract only demands that
+     * every damaged pixel reaches the screen):
+     *   - rects are clamped to the image (damage arrives unclamped);
+     *   - if the damaged area reaches 3/4 of the surface, one
+     *     whole-image put beats a burst of overlapping sub-puts. */
+    fdk_i32 w = pwindow->render_size.width;
+    fdk_i32 h = pwindow->render_size.height;
+
+    if (damage->full) {
+        XPutImage(dpy, pwindow->xwindow, pwindow->render_gc,
+                  pwindow->render_image,
+                  0, 0, 0, 0, (unsigned int)w, (unsigned int)h);
+    } else {
+        long long damaged_area = 0;
+        for (int i = 0; i < damage->count; i++) {
+            const fdk_rect *rc = &damage->rects[i];
+            long long x0 = rc->x, y0 = rc->y;
+            long long x1 = (long long)rc->x + rc->width;
+            long long y1 = (long long)rc->y + rc->height;
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > w) x1 = w;
+            if (y1 > h) y1 = h;
+            if (x1 > x0 && y1 > y0) {
+                damaged_area += (x1 - x0) * (y1 - y0);
+            }
+        }
+
+        if (damaged_area * 4 >= (long long)w * h * 3) {
+            /* >= 75% damaged: one whole-image request. */
+            XPutImage(dpy, pwindow->xwindow, pwindow->render_gc,
+                      pwindow->render_image,
+                      0, 0, 0, 0, (unsigned int)w, (unsigned int)h);
+        } else {
+            for (int i = 0; i < damage->count; i++) {
+                const fdk_rect *rc = &damage->rects[i];
+                long long x0 = rc->x, y0 = rc->y;
+                long long x1 = (long long)rc->x + rc->width;
+                long long y1 = (long long)rc->y + rc->height;
+                if (x0 < 0) x0 = 0;
+                if (y0 < 0) y0 = 0;
+                if (x1 > w) x1 = w;
+                if (y1 > h) y1 = h;
+                if (x1 > x0 && y1 > y0) {
+                    /* The image's origin maps to the window's origin,
+                     * so source and destination offsets coincide. */
+                    XPutImage(dpy, pwindow->xwindow, pwindow->render_gc,
+                              pwindow->render_image,
+                              (int)x0, (int)y0, (int)x0, (int)y0,
+                              (unsigned int)(x1 - x0),
+                              (unsigned int)(y1 - y0));
+                }
+            }
+        }
+    }
+
     XFlush(dpy);
     return FDK_OK;
 }

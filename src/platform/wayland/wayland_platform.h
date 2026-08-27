@@ -69,6 +69,12 @@ struct fdk_platform_connection {
 
 #define FDK_WL_RENDER_SLOTS 4
 
+/* Frame-pacing guard: if the compositor stays silent this long after
+ * a commit (ms), fdk_wayland_window_frame_ready() reports ready
+ * anyway. Hidden surfaces legitimately never receive frame
+ * callbacks; FDK's contract is to pace, never to starve. */
+#define FDK_WL_FRAME_GUARD_MS 250
+
 struct fdk_platform_window {
     fdk_platform_connection *conn;
     struct wl_surface *surface;
@@ -95,28 +101,45 @@ struct fdk_platform_window {
 
     /* --- Software rendering (fdk_surface machinery) ---
      *
-     * One fresh wl_shm buffer per frame, tracked in a small fixed
-     * ring of in-flight slots until the compositor releases it
-     * (wl_buffer::release), at which point the release listener
-     * destroys the buffer and munmaps its pixels. This mirrors the
-     * background-buffer lifecycle verified against weston — the
-     * delta is only that the mapping stays alive for the application
-     * to draw into, and that several buffers can be in flight at
-     * once (one pending + those the compositor hasn't released yet).
-     * A conforming compositor releases each superseded buffer on the
-     * next commit, so 4 slots are ample; if a misbehaving compositor
-     * ever exhausts them, get_framebuffer reports
-     * FDK_ERR_SURFACE_CREATE rather than corrupting state.
-     * Double-buffering / frame-callback pacing is the next Phase 3
-     * step (see docs/roadmap.md). */
+     * A small fixed pool of wl_shm buffers that are RECYCLED, not
+     * destroyed: once the compositor releases a buffer
+     * (wl_buffer::release), the buffer and its client-side mapping
+     * stay alive in its slot, marked `released`, ready for the next
+     * acquisition. This is what makes damage-tracked partial redraw
+     * CORRECT and not merely fast: a recycled (or freshly created)
+     * buffer is pre-filled with a copy of the currently visible
+     * frame before being handed to the application, so every pixel
+     * outside the newly drawn damage region matches the screen —
+     * required, because compositors are allowed to ignore damage
+     * hints and scan out the whole buffer. A buffer is only truly
+     * destroyed on window destruction or a size change.
+     *
+     * Slot states: buffer == NULL -> free. buffer != NULL &&
+     * buffer == render_pending -> acquired by the app, being drawn.
+     * buffer != NULL && buffer == the surface's live `buffer` ->
+     * currently committed/visible. Otherwise in flight (or released
+     * and awaiting reuse). */
     struct {
         struct wl_buffer *buffer; /* NULL = slot free */
         uint32_t *pixels;         /* mmap mapping backing `buffer` */
         size_t length;            /* mapping size in bytes */
         fdk_size size;            /* buffer dimensions */
+        int released;             /* compositor done -> reusable */
     } render_slots[FDK_WL_RENDER_SLOTS];
     struct wl_buffer *render_pending; /* acquired but not yet presented */
     int rendered_ever;                /* first render present() completed */
+
+    /* --- Frame pacing (wl_surface.frame) ---
+     *
+     * Every render present requests a frame callback after its
+     * commit; the callback (frame_callback_done below) sets
+     * frame_ack, which fdk_wayland_window_frame_ready() reports —
+     * together with the FDK_WL_FRAME_GUARD_MS starvation guard and
+     * the "never presented yet" case. Callbacks can only arrive
+     * while the application pumps events; that contract is
+     * documented in fdk_surface.h's frame-pacing section. */
+    int frame_ack;        /* compositor acknowledged the last frame */
+    fdk_i64 frame_commit_ms; /* monotonic ms of the last render commit */
 
     fdk_size last_size;
     fdk_size pending_size;   /* accumulated from configure until ack+commit */
@@ -159,9 +182,12 @@ void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size);
 
 /* Software rendering (fdk_surface machinery) — see the render_slots
- * comment in struct fdk_platform_window above for the lifecycle. */
+ * comment in struct fdk_platform_window above for the recycling
+ * lifecycle. */
 fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                                                fdk_platform_framebuffer *out_fb);
-fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow);
+fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
+                                      const fdk_platform_damage *damage);
+int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
 
 #endif /* FDK_WAYLAND_PLATFORM_H */

@@ -450,6 +450,208 @@ static void test_pump_events_nonblocking(void) {
     printf("[ok] fdk_pump_events timeout semantics + argument checks\n");
 }
 
+/* Damage tracking, end to end against the X server. The interesting
+ * part is the RAW-WRITE contract: a pixel written directly through
+ * info.pixels WITHOUT fdk_surface_invalidate() must NOT reach the
+ * server (present() is a documented no-op with empty damage — the
+ * server keeps the old pixel), and must reach it exactly once the
+ * application declares the damage. That makes the no-op skip
+ * observable, not just asserted. */
+static void test_surface_damage_partial_present(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK damage test",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+
+    /* Frame 1: full red. */
+    fdk_surface_fill(surface, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 100);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    assert(x11_readback_pixel(&rb_dpy, xid, 20, 20) == 0x00FF0000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 270, 150) == 0x00FF0000u);
+
+    /* Frame 2: a small blue rect — ONLY that region is damaged, so
+     * ONLY that sub-image may change on screen. The region outside
+     * must still show frame 1's red (which it can only do if the
+     * client-side XImage content outside the damage was preserved —
+     * the property that makes partial presents correct). */
+    fdk_surface_fill_rect(surface,
+                          (fdk_rect){ .x = 100, .y = 80, .width = 40,
+                                      .height = 30 },
+                          (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 100);
+
+    assert(x11_readback_pixel(&rb_dpy, xid, 120, 95) == 0x000000FFu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 20, 20) == 0x00FF0000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 270, 150) == 0x00FF0000u);
+
+    /* Raw write WITHOUT invalidate: present() must skip it entirely —
+     * the framebuffer holds white, the server keeps red. */
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    info.pixels[180 * info.stride + 200] = 0x00FFFFFFu; /* (200,180) */
+    assert(fdk_ok(fdk_surface_present(surface)));       /* no-op */
+    (void)fdk_pump_events(ctx, 100);
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 180) == 0x00FF0000u);
+
+    /* Declaring the damage makes it arrive. */
+    fdk_surface_invalidate(surface, (fdk_rect){ .x = 200, .y = 180,
+                                                .width = 1, .height = 1 });
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 100);
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 180) == 0x00FFFFFFu);
+
+    /* Empty-damage present after a pure re-acquire: still a no-op. */
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    assert(fdk_ok(fdk_surface_present(surface)));
+    assert(x11_readback_pixel(&rb_dpy, xid, 20, 20) == 0x00FF0000u);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 damage-tracked partial present (sub-image blits + "
+           "observable no-op skip)\n");
+}
+
+/* The new primitive set drawn to a real window and read back from
+ * the server: line, filled circle, circle outline, rounded rect. */
+static void test_surface_primitives_readback(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK primitives test",
+                                 .width = 400, .height = 300 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+    fdk_surface_fill(surface, (fdk_color){ 0, 0, 0, 1 });
+
+    /* Line across the top. */
+    fdk_surface_draw_line(surface, 10, 10, 100, 10,
+                          (fdk_color){ 1, 1, 1, 1 });
+    /* Filled green circle + white outline circle at the same center
+     * (outline drawn after fill so the ring wins on overlap). */
+    fdk_surface_fill_circle(surface, 200, 100, 40,
+                            (fdk_color){ 0, 1, 0, 1 });
+    fdk_surface_draw_circle(surface, 200, 100, 40,
+                            (fdk_color){ 1, 1, 1, 1 });
+    /* Rounded blue rect with a 15px radius. */
+    fdk_surface_fill_rounded_rect(surface,
+                                  (fdk_rect){ .x = 50, .y = 150,
+                                              .width = 80, .height = 60 },
+                                  15, (fdk_color){ 0, 0, 1, 1 });
+
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    assert(x11_readback_pixel(&rb_dpy, xid, 50, 10) == 0x00FFFFFFu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 50, 11) == 0x00000000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 9, 10) == 0x00000000u);
+
+    /* Circle: center is white (outline over fill at exact center is
+     * fill green — center is interior, not on the ring), +x cardinal
+     * is the white ring, just outside is black. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 100) == 0x0000FF00u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 240, 100) == 0x00FFFFFFu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 60) == 0x00FFFFFFu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 245, 100) == 0x00000000u);
+
+    /* Rounded rect: middle filled, bounding-box corner cut away,
+     * right edge filled at the bottom corner-center row. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 90, 180) == 0x000000FFu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 50, 150) == 0x00000000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 129, 194) == 0x000000FFu);
+
+    /* X11 has no frame-callback feedback: frame_ready is always true. */
+    assert(fdk_surface_frame_ready(surface));
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 primitives (line, circles, rounded rect) + "
+           "frame_ready\n");
+}
+
+/* Offscreen surface composed, blitted onto a window, presented, and
+ * verified server-side — the sprite/cache pattern end to end. */
+static void test_offscreen_blit_to_window(void) {
+    fdk_surface *sprite = NULL;
+    assert(fdk_ok(fdk_surface_create(60, 40, &sprite)));
+    fdk_surface_fill(sprite, (fdk_color){ 0, 1, 0, 1 });
+    fdk_surface_fill_rect(sprite,
+                          (fdk_rect){ .x = 10, .y = 10, .width = 20,
+                                      .height = 20 },
+                          (fdk_color){ 1, 0, 0, 1 });
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK blit test",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+    fdk_surface_fill(surface, (fdk_color){ 0, 0, 0, 1 });
+    assert(fdk_ok(fdk_surface_present(surface)));
+
+    assert(fdk_ok(fdk_surface_blit(surface, 40, 50, sprite,
+                                   (fdk_rect){ .x = 0, .y = 0,
+                                               .width = 60, .height = 40 })));
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    assert(x11_readback_pixel(&rb_dpy, xid, 40, 50) == 0x0000FF00u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 50, 60) == 0x00FF0000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 99, 89) == 0x0000FF00u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 39, 49) == 0x00000000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 100, 90) == 0x00000000u);
+
+    /* Partial-source blit: just the red square, placed elsewhere. */
+    assert(fdk_ok(fdk_surface_blit(surface, 200, 120, sprite,
+                                   (fdk_rect){ .x = 10, .y = 10,
+                                               .width = 20, .height = 20 })));
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 100);
+    assert(x11_readback_pixel(&rb_dpy, xid, 210, 130) == 0x00FF0000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 219, 139) == 0x00FF0000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 199, 129) == 0x00000000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 220, 140) == 0x00000000u);
+
+    XCloseDisplay(rb_dpy);
+    fdk_surface_destroy(sprite);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 offscreen blit to window (full + partial source)\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -464,6 +666,9 @@ int main(void) {
     test_pump_events_nonblocking();
     test_surface_render_readback();
     test_surface_follows_resize();
+    test_surface_damage_partial_present();
+    test_surface_primitives_readback();
+    test_offscreen_blit_to_window();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
