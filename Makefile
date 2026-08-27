@@ -106,7 +106,8 @@ LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm
 # the project.
 extra_flags = $(if $(findstring src/platform/x11/,$(1)),$(X11_CFLAGS)) \
               $(if $(findstring src/platform/wayland/,$(1)),$(WAYLAND_CFLAGS) -Wno-cast-qual) \
-              $(if $(findstring src/text/,$(1)),-Ithird_party/stb)
+              $(if $(findstring src/text/,$(1)),-Ithird_party/stb) \
+              $(if $(findstring src/widget/,$(1)),-Ithird_party/stb)
 
 # --- Sources ------------------------------------------------------------
 

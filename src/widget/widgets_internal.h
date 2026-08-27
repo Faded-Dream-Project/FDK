@@ -69,12 +69,27 @@ fdk_color fdk__pal_border(void);
 
 /* ---- shared instance structs ---- */
 
-/* Label. */
+/* Label. `lines` is the display cache: the text broken into the
+ * lines that fit `built_width` (NOWRAP: one full line; WRAP: the
+ * greedy word-wrap; ELLIPSIZE: one line capped by the ellipsis
+ * pass). Rebuilt on arrange (width changed) and lazily at paint when
+ * dirty — see statics.c. */
 typedef struct fdk_label {
     fdk_widget base;
     fdk_font *font;    /* borrowed */
     char *text;        /* owned, may be NULL */
     fdk_color color;   /* text color */
+    fdk_label_mode mode;    /* NOWRAP / WRAP / ELLIPSIZE        */
+    fdk_align align;        /* horizontal, FILL treated as START */
+    fdk_text_line *lines;   /* owned cache, may be NULL           */
+    size_t line_count;
+    size_t lines_cap;
+    fdk_i32 built_width;    /* width the cache was built for      */
+    bool lines_dirty;       /* text/mode changed since last build */
+    size_t ellipsis_prefix; /* ELLIPSIZE mode: fitting prefix bytes */
+    fdk_i32 ellipsis_x;     /* ELLIPSIZE mode: prefix advance (pen) */
+    fdk_i32 ellipsis_w;     /* ELLIPSIZE mode: the "..." run's advance */
+    bool ellipsized;        /* ELLIPSIZE mode: text did not fit   */
 } fdk_label;
 
 /* Button. */

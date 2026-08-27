@@ -1444,6 +1444,218 @@ static void test_widget_catalog_gui(void) {
            "flips\n");
 }
 
+/* ---- Label modes + radio arrow keys, real X11 input ---- */
+
+/* One-shot region capture: the whole rect in a single XGetImage.
+ * Counts pixels differing from bg (0x00RRGGBB, alpha dropped). */
+static int x11_count_ink_in_region(Display **out_dpy, unsigned long xid,
+                                   int x, int y, int w, int h,
+                                   unsigned long bg) {
+    if (w <= 0 || h <= 0) {
+        return 0;
+    }
+    if (*out_dpy == NULL) {
+        *out_dpy = XOpenDisplay(NULL);
+        assert(*out_dpy != NULL);
+    }
+    XImage *img = XGetImage(*out_dpy, (Drawable)xid, x, y,
+                            (unsigned int)w, (unsigned int)h,
+                            ~0UL, ZPixmap);
+    assert(img != NULL);
+    int ink = 0;
+    for (int yy = 0; yy < h; yy++) {
+        for (int xx = 0; xx < w; xx++) {
+            unsigned long px =
+                (unsigned long)XGetPixel(img, xx, yy) & 0x00FFFFFFu;
+            if (px != bg) {
+                ink++;
+            }
+        }
+    }
+    XDestroyImage(img);
+    return ink;
+}
+
+static int is_accent_px(unsigned long px) {
+    unsigned long b = px & 0xFFu;
+    unsigned long g = (px >> 8) & 0xFFu;
+    unsigned long r = (px >> 16) & 0xFFu;
+    return b > 190 && g > 110 && r < 160 && b > r;
+}
+
+static void test_label_radio_arrow_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    const char *font_path = NULL;
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        FILE *f = fopen(font_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            font_path = font_candidates[i];
+            break;
+        }
+    }
+    if (font_path == NULL) {
+        printf("[skip] X11 label/radio arrow GUI (no system font)\n");
+        return;
+    }
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+    fdk_font_metrics fm;
+    fdk_font_get_metrics(font, &fm);
+    fdk_i32 pitch = fm.ascent + fm.descent;
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK label + radio arrows",
+                                 .width = 380, .height = 360 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, wcol(18, 20, 28));
+    unsigned long bg = ((unsigned long)18 << 16) |
+                       ((unsigned long)20 << 8) | (unsigned long)28;
+
+    fdk_widget *content = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_VERTICAL, &content)));
+    fdk_box_set_padding(content, 12);
+    fdk_box_set_spacing(content, 10);
+    fdk_window_set_content(win, content);
+
+    fdk_widget *wrap = NULL;
+    assert(fdk_ok(fdk_label_create(
+        content, font,
+        "the quick brown fox jumps over the lazy dog while the lazy "
+        "dog dreams of quicker browner foxes",
+        &wrap)));
+    fdk_label_set_mode(wrap, FDK_LABEL_WRAP);
+    fdk_widget_set_natural_size(wrap, 240, 0);
+    fdk_widget_set_expand(wrap, true, true); /* width-follows and
+                                                * headroom for rewrap */
+
+    fdk_widget *ell = NULL;
+    assert(fdk_ok(fdk_label_create(
+        content, font,
+        "an ellipsized label whose text is far too long for this row",
+        &ell)));
+    fdk_label_set_mode(ell, FDK_LABEL_ELLIPSIZE);
+    fdk_widget_set_expand(ell, true, false);
+
+    fdk_widget *group = NULL;
+    assert(fdk_ok(fdk_box_create(content, FDK_VERTICAL, &group)));
+    fdk_widget *r1 = NULL, *r2 = NULL, *r3 = NULL;
+    assert(fdk_ok(fdk_radio_create(group, font, "Red", &r1)));
+    assert(fdk_ok(fdk_radio_create(group, font, "Green", &r2)));
+    assert(fdk_ok(fdk_radio_create(group, font, "Blue", &r3)));
+
+    fdk_window_layout(win);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    /* A) WRAP: multiple lines on screen — ink in each of the first
+     * two line bands, none right of the label's right edge. */
+    fdk_rect wb = fdk_widget_get_absolute_bounds(wrap);
+    size_t lines_before = fdk_label_get_line_count(wrap);
+    assert(lines_before >= 2);
+    for (size_t i = 0; i < 2; i++) {
+        int band_y = wb.y + (int)i * pitch + 2;
+        int ink = x11_count_ink_in_region(&rb_dpy, xid, wb.x, band_y,
+                                          wb.width, pitch - 4, bg);
+        assert(ink > 20); /* real glyphs, server-side */
+    }
+    assert(x11_count_ink_in_region(&rb_dpy, xid,
+                                   wb.x + wb.width + 2, wb.y, 4,
+                                   wb.height, bg) == 0);
+
+    /* B) ELLIPSIZE: one line, inked, truncated exactly at the edge —
+     * the column just past the label's right boundary is background. */
+    fdk_rect eb = fdk_widget_get_absolute_bounds(ell);
+    assert(fdk_label_get_line_count(ell) == 1);
+    assert(x11_count_ink_in_region(&rb_dpy, xid, eb.x, eb.y + 2,
+                                   eb.width - 4, pitch - 4, bg) > 20);
+    assert(x11_count_ink_in_region(&rb_dpy, xid,
+                                   eb.x + eb.width + 2, eb.y, 4,
+                                   pitch, bg) == 0);
+
+    /* C) Radio arrows with REAL key events: focus Red, press Down
+     * (X keycode 116 == scancode 108); Green selects + takes focus.
+     * Then Up (keycode 111) goes back. */
+    fdk_radio_set_checked(r1, true);
+    assert(fdk_widget_focus(r1));
+    fdk_rect r2b = fdk_widget_get_absolute_bounds(r2);
+    int dot_x = r2b.x + 8;
+    int dot_y = r2b.y + (r2b.height - 16) / 2 + 8;
+    assert(!is_accent_px(x11_readback_pixel(&rb_dpy, xid, dot_x,
+                                            dot_y)));
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    x11_send_key_event(send_dpy, xid, KeyPress, 116); /* Down */
+    (void)fdk_pump_events(ctx, 200);
+    assert(fdk_radio_is_checked(r2) && !fdk_radio_is_checked(r1));
+    assert(fdk_widget_tree_get_focused(root) == r2);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    assert(is_accent_px(x11_readback_pixel(&rb_dpy, xid, dot_x,
+                                           dot_y)));
+
+    x11_send_key_event(send_dpy, xid, KeyPress, 111); /* Up */
+    (void)fdk_pump_events(ctx, 200);
+    assert(fdk_radio_is_checked(r1) && fdk_widget_has_focus(r1));
+
+    /* D) Narrower window: the wrap label re-wraps TALLER — the band
+     * that was empty (first line past the old count) gains server-
+     * side ink, and the ellipsized label stays one clipped line. */
+    surface_capture cap = { .ctx = ctx, .configure_count = 0 };
+    fdk_window_set_event_callback(win, surface_event_callback, &cap);
+    fdk_window_resize(win, 250, 360);
+    alarm(5);
+    while (cap.configure_count == 0) {
+        int r = fdk_pump_events(ctx, 200);
+        assert(r >= 0);
+    }
+    alarm(0);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    wb = fdk_widget_get_absolute_bounds(wrap);
+    size_t lines_after = fdk_label_get_line_count(wrap);
+    assert(lines_after > lines_before);
+    int new_band_y = wb.y + (int)lines_before * pitch + 2;
+    assert(new_band_y + pitch < 360);
+    assert(x11_count_ink_in_region(&rb_dpy, xid, wb.x, new_band_y,
+                                   wb.width, pitch - 4, bg) > 20);
+
+    eb = fdk_widget_get_absolute_bounds(ell);
+    assert(fdk_label_get_line_count(ell) == 1);
+    assert(x11_count_ink_in_region(&rb_dpy, xid,
+                                   eb.x + eb.width + 2, eb.y, 4,
+                                   pitch, bg) == 0);
+
+    XCloseDisplay(send_dpy);
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 label modes + radio arrows GUI: wrapped bands "
+           "server-verified, ellipsis clipped at the edge, REAL arrow "
+           "keys select+focus, resize re-wraps\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -1467,6 +1679,7 @@ int main(void) {
     test_widget_layout_reflow_on_resize();
     test_text_render_readback();
     test_widget_catalog_gui();
+    test_label_radio_arrow_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

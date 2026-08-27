@@ -532,6 +532,298 @@ static void test_kerning(void) {
     fdk_font_destroy(f);
 }
 
+/* ---- line breaking ---- */
+
+/* Verifies one line's reported advance equals what measuring its
+ * bytes reports — the agreement-by-construction contract. */
+static void check_line_agrees(fdk_font *f, const char *text,
+                               const fdk_text_line *lines, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        fdk_text_metrics m;
+        assert(fdk_ok(fdk_font_measure_utf8(f, text + lines[i].byte_offset,
+                                             lines[i].byte_len, &m)));
+        assert(lines[i].advance_width == m.advance_width);
+    }
+}
+
+/* True when cp is a UTF-8 continuation byte (10xxxxxx). */
+static int is_cont(unsigned char c) { return (c & 0xC0u) == 0x80u; }
+
+static void test_break_lines(void) {
+    fdk_font *f = fdk_font_load(g_sans, 16);
+    assert(f != NULL);
+
+    /* 1. Basic greedy wrap: every line fits, every line's advance
+     * agrees with measure, no visible character is lost. */
+    const char *s = "alpha bravo charlie delta echo foxtrot";
+    size_t len = strlen(s);
+    fdk_text_metrics whole;
+    assert(fdk_ok(fdk_font_measure_utf8(f, s, len, &whole)));
+    fdk_i32 width = whole.advance_width / 3; /* ~2 words per line */
+    assert(width > 0);
+
+    size_t count = 0;
+    assert(fdk_ok(fdk_font_break_lines_utf8(f, s, len, width, NULL, 0,
+                                             &count, NULL)));
+    assert(count >= 2 && count <= 7);
+    fdk_text_line *lines = calloc(count, sizeof(*lines));
+    assert(lines != NULL);
+    size_t filled = 0;
+    bool trunc = true;
+    assert(fdk_ok(fdk_font_break_lines_utf8(f, s, len, width, lines,
+                                             count, &filled, &trunc)));
+    assert(filled == count && !trunc);
+    check_line_agrees(f, s, lines, filled);
+
+    size_t visible_src = 0, visible_out = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] != ' ') visible_src++;
+    }
+    for (size_t i = 0; i < filled; i++) {
+        assert(lines[i].advance_width <= width);
+        assert(lines[i].byte_offset + lines[i].byte_len <= len);
+        for (size_t b = 0; b < lines[i].byte_len; b++) {
+            if (s[lines[i].byte_offset + b] != ' ') visible_out++;
+        }
+    }
+    assert(visible_src == visible_out); /* nothing dropped */
+    free(lines);
+
+    /* 2. Hard newlines: one line each, "\n\n" keeps an empty line,
+     * "\r\n" counts as a single break. */
+    {
+        fdk_text_line l[4];
+        size_t n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "one\ntwo", 7, 100,
+                                                 l, 4, &n, NULL)));
+        assert(n == 2);
+        assert(l[0].byte_offset == 0 && l[0].byte_len == 3);
+        assert(l[1].byte_offset == 4 && l[1].byte_len == 3);
+
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "a\n\nb", 4, 100,
+                                                 l, 4, &n, NULL)));
+        assert(n == 3);
+        assert(l[0].byte_len == 1 && l[1].byte_len == 0 &&
+               l[2].byte_len == 1);
+
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "a\r\nb", 4, 100,
+                                                 l, 4, &n, NULL)));
+        assert(n == 2);
+        assert(l[0].byte_len == 1 && l[1].byte_offset == 3);
+    }
+
+    /* 3. Long word: mid-word breaks, every glyph preserved, lines
+     * still within width. */
+    {
+        char word[41];
+        memset(word, 'M', 40);
+        word[40] = '\0';
+        fdk_text_metrics mm;
+        assert(fdk_ok(fdk_font_measure_utf8(f, "M", 1, &mm)));
+        fdk_i32 w = mm.advance_width * 3; /* ~3 M's per line */
+        assert(w > 0);
+        fdk_text_line l[64];
+        size_t n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, word, 40, w, l, 64,
+                                                 &n, NULL)));
+        assert(n >= 10 && n <= 40);
+        size_t m_total = 0;
+        for (size_t i = 0; i < n; i++) {
+            m_total += l[i].byte_len;
+            if (l[i].byte_len > 1) {
+                assert(l[i].advance_width <= w);
+            }
+        }
+        assert(m_total == 40); /* every M accounted for */
+    }
+
+    /* 4. Trailing spaces trimmed; leading spaces of line 1 kept;
+     * trailing all-space tail emits no line. */
+    {
+        fdk_text_line l[4];
+        size_t n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "word   ", 7, 100,
+                                                 l, 4, &n, NULL)));
+        assert(n == 1 && l[0].byte_len == 4);
+        fdk_text_metrics mw;
+        assert(fdk_ok(fdk_font_measure_utf8(f, "word", 4, &mw)));
+        assert(l[0].advance_width == mw.advance_width);
+
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "   ", 3, 100, l, 4,
+                                                 &n, NULL)));
+        assert(n == 0); /* pure spaces: nothing visible */
+    }
+
+    /* 5. Truncation: max_lines caps output, flag set, prefix lines
+     * identical to the untruncated pass. */
+    {
+        size_t full_n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, s, len, width, NULL,
+                                                 0, &full_n, NULL)));
+        assert(full_n >= 3);
+        fdk_text_line *full = calloc(full_n, sizeof(*full));
+        assert(full != NULL);
+        size_t fn = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, s, len, width, full,
+                                                 full_n, &fn, NULL)));
+        assert(fn == full_n);
+
+        fdk_text_line head[2];
+        size_t hn = 0;
+        bool trunc_flag = false;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, s, len, width, head,
+                                                 2, &hn, &trunc_flag)));
+        assert(hn == 2 && trunc_flag);
+        assert(head[0].byte_offset == full[0].byte_offset &&
+               head[0].byte_len == full[0].byte_len &&
+               head[0].advance_width == full[0].advance_width);
+        assert(head[1].byte_len == full[1].byte_len);
+        free(full);
+    }
+
+    /* 6. Everything fits: one line, whole text, exact advance. */
+    {
+        fdk_text_metrics mt;
+        assert(fdk_ok(fdk_font_measure_utf8(f, "tiny", 4, &mt)));
+        fdk_text_line l[2];
+        size_t n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "tiny", 4,
+                                                 mt.advance_width, l, 2,
+                                                 &n, NULL)));
+        assert(n == 1 && l[0].byte_len == 4);
+        assert(l[0].advance_width == mt.advance_width);
+    }
+
+    /* 7. Argument safety + empties. */
+    {
+        size_t n = 9;
+        assert(fdk_font_break_lines_utf8(NULL, "x", 1, 1, NULL, 0, &n,
+                                         NULL) == FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_font_break_lines_utf8(f, NULL, 1, 1, NULL, 0, &n,
+                                         NULL) == FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_font_break_lines_utf8(f, "x", 1, 1, NULL, 0, NULL,
+                                         NULL) == FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_font_break_lines_utf8(f, "x", 1, 1, NULL, 2, &n,
+                                         NULL) == FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_font_break_lines_utf8(f, "x", 1, 0, NULL, 0, &n,
+                                         NULL) == FDK_ERR_INVALID_ARGUMENT);
+        n = 9;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "", 0, 100, NULL, 0,
+                                                 &n, NULL)));
+        assert(n == 0);
+    }
+
+    fdk_font_destroy(f);
+    printf("[ok] break_lines: greedy wrap fits/agrees, hard breaks, "
+           "mid-word, trimming, truncation flag, arg safety\n");
+}
+
+/* ---- ellipsis ---- */
+
+static void test_ellipsize(void) {
+    fdk_font *f = fdk_font_load(g_sans, 16);
+    assert(f != NULL);
+
+    const char *s = "The quick brown fox jumps over the lazy dog";
+    size_t len = strlen(s);
+    const char *ell = "\xE2\x80\xA6"; /* U+2026 */
+    fdk_text_metrics me, mw;
+    assert(fdk_ok(fdk_font_measure_utf8(f, ell, 3, &me)));
+    assert(me.advance_width > 0);
+    assert(fdk_ok(fdk_font_measure_utf8(f, s, len, &mw)));
+
+    /* 1. Wide enough: fits, prefix = everything. */
+    {
+        size_t prefix = 0;
+        bool fits = false;
+        assert(fdk_ok(fdk_font_ellipsize_utf8(f, s, len,
+                                               mw.advance_width + 5,
+                                               &prefix, &fits)));
+        assert(fits && prefix == len);
+    }
+
+    /* 2. Narrow: not fitting, prefix maximal, boundary-safe, with
+     * room for the ellipsis exactly. */
+    {
+        fdk_i32 width = mw.advance_width / 2;
+        size_t prefix = 0;
+        bool fits = true;
+        assert(fdk_ok(fdk_font_ellipsize_utf8(f, s, len, width, &prefix,
+                                               &fits)));
+        assert(!fits && prefix < len);
+        assert(prefix == 0 || !is_cont((unsigned char)s[prefix]));
+        fdk_text_metrics mp;
+        assert(fdk_ok(fdk_font_measure_utf8(f, s, prefix, &mp)));
+        assert(mp.advance_width + me.advance_width <= width);
+        /* Maximal: the next whole codepoint would not fit. */
+        size_t next = prefix;
+        if (next < len) {
+            next++; /* the codepoint's first byte */
+            while (next < len && is_cont((unsigned char)s[next])) {
+                next++; /* its continuation bytes */
+            }
+            fdk_text_metrics mn;
+            assert(fdk_ok(fdk_font_measure_utf8(f, s, next, &mn)));
+            assert(mn.advance_width + me.advance_width > width);
+        }
+        /* Prefix never ends on a space. */
+        assert(prefix == 0 || s[prefix - 1] != ' ');
+    }
+
+    /* 3. Room for (almost) everything: prefix excludes only the
+     * tail, and the trimmed-space rule holds mid-string. */
+    {
+        fdk_i32 width = mw.advance_width - me.advance_width - 1;
+        size_t prefix = 0;
+        bool fits = true;
+        assert(fdk_ok(fdk_font_ellipsize_utf8(f, s, len, width, &prefix,
+                                               &fits)));
+        assert(!fits && prefix > 0 && prefix < len);
+    }
+
+    /* 4. Degenerate widths: ellipsis alone wider than the budget. */
+    {
+        size_t prefix = 99;
+        bool fits = true;
+        assert(fdk_ok(fdk_font_ellipsize_utf8(f, s, len,
+                                               me.advance_width - 1,
+                                               &prefix, &fits)));
+        assert(!fits && prefix == 0);
+        prefix = 99;
+        assert(fdk_ok(fdk_font_ellipsize_utf8(f, s, len, 0, &prefix,
+                                               &fits)));
+        assert(!fits && prefix == 0);
+    }
+
+    /* 5. Empty text always fits; out_fits optional. */
+    {
+        size_t prefix = 5;
+        assert(fdk_ok(fdk_font_ellipsize_utf8(f, "", 0, 10, &prefix,
+                                               NULL)));
+        assert(prefix == 0);
+    }
+
+    /* 6. Argument safety. */
+    {
+        size_t prefix = 0;
+        assert(fdk_font_ellipsize_utf8(NULL, s, len, 10, &prefix,
+                                       NULL) == FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_font_ellipsize_utf8(f, NULL, len, 10, &prefix,
+                                       NULL) == FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_font_ellipsize_utf8(f, s, len, 10, NULL,
+                                       NULL) == FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_font_ellipsize_utf8(f, s, len, -1, &prefix,
+                                       NULL) == FDK_ERR_INVALID_ARGUMENT);
+    }
+
+    fdk_font_destroy(f);
+    printf("[ok] ellipsize: fits/no-fit/maximal prefix/boundary-safe/"
+           "degenerate/arg safety\n");
+}
+
 int main(void) {
     find_fonts();
     if (g_sans == NULL) {
@@ -548,6 +840,8 @@ int main(void) {
     test_utf8();
     test_cache_eviction();
     test_kerning();
+    test_break_lines();
+    test_ellipsize();
     printf("all headless text tests passed\n");
     return 0;
 }

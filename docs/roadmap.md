@@ -447,16 +447,62 @@ layout after initializing its fields (the create-time notification
 measures a still-zeroed subclass). test_layout's margins/nested
 expectations recomputed to the contract.
 
+**Shipped (completion slice — text layout + keyboard polish):**
+- `fdk_font_break_lines_utf8` / `fdk_text_line` (fdk_text.h): greedy
+  word-wrap over the SAME shaping walk as measure/draw — a line's
+  reported advance is by construction what its bytes paint at.
+  Hard `\n`/`\r\n` breaks, trailing-space trimming, mid-word breaks
+  for over-long words, count-only calls, max_lines truncation flag
+- `fdk_font_ellipsize_utf8`: maximal codepoint-boundary prefix that
+  fits beside a U+2026 ellipsis; the shared ellipsis constant lives
+  in one place so the measured and drawn glyph cannot drift
+- Label modes (fdk_widgets.h): `FDK_LABEL_NOWRAP / _WRAP /
+  _ELLIPSIZE` via `fdk_label_set_mode`, per-line alignment via
+  `fdk_label_set_alignment` (START/CENTER/END, FILL = START), and
+  `fdk_label_get_line_count`; the display cache rebuilds on arrange
+  (resize) and lazily at paint
+- Radio arrow-key traversal: Up/Left previous, Down/Right next,
+  wrapping, hidden/disabled members skipped, focus follows
+  selection, lone radios let the arrows bubble
+- Tests: +2 headless text cases (wrap/ellipsis contracts incl.
+  agreement-by-construction and maximality), +2 headless widget
+  cases (label modes with pixel verification, radio arrows), +1 X11
+  GUI case (server-readback of wrapped bands, edge-clipped
+  ellipsis, REAL XSendEvent arrow keys, resize re-wrap)
+  — 73 headless, 20 X11 + 1 honest skip
+- `examples/07_text_layout.c` + rig (TEXT LAYOUT DEMO PASS, 16 PIL
+  checks: wrap bands, edge clipping, three alignments, selection
+  dot moving between holds, live re-wrap after window narrowing)
+
+**Fixed en route (two more REAL Phase 5 engine bugs, found by the
+07 demo):**
+1. `box_class_of` used exact class identity, so the catalog's Frame
+   (a box subclass delegating both packing hooks) was NOT treated
+   as a box: its own children never triggered its relayout, and the
+   box setters (spacing/padding/homogeneous/orientation getters)
+   were silent no-ops on it. Box-ness is now HOOK DELEGATION — any
+   class running the box packing hooks relayouts like a box.
+2. A container's natural-size change never propagated to ANCESTOR
+   containers: `content [ frame [ radios ] ]` sized the frame
+   before the radios existed and nothing ever re-ran content's
+   layout — the radios stayed at 0x0 (demo 06 survived only because
+   its last content child happened to be created after every
+   frame's children). `fdk_widget_child_layout_changed` now
+   propagates up the parent chain (pure geometry, terminates at the
+   first non-container), and the box setters propagate too.
+   Regression test: test_layout's nested child-change propagation
+   case (fontless, exact numbers).
+
 **Still to build (rest of Phase 6):**
-- Widget-level text layout helpers: line breaking, ellipsize,
-  alignment — on top of the run-level API that landed
 - Subpixel glyph positioning; bold/italic faces beyond file choice
-- Keyboard traversal polish (arrow keys within radio groups)
 
 Phase 3's original "src/text/ gap" is closed; remaining Phase 3
 rendering gaps (MIT-SHM, X11 double buffering, transforms, image
 decode, alpha blits, AA primitives, HiDPI) stay parked as recorded —
-none block the widget catalog.
+none block the widget catalog. The wrap label's documented v1
+limitation (natural height measured at the natural width; no
+width-for-height layout) is recorded above and in fdk_widgets.h —
+it wants the Phase 5 grid/constraint work or a later layout pass.
 
 ## Phase 7 — Theme Engine
 

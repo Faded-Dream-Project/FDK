@@ -16,6 +16,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static fdk_font *g_font = NULL;
@@ -388,6 +389,276 @@ static void test_radio_group(void) {
            "and click, on_change ordering, no-op recheck\n");
 }
 
+/* ---- Label modes: wrap / ellipsize / alignment ---- */
+
+/* Ink extent (min/max x of non-background pixels) within a row band. */
+static void ink_extent_x(fdk_surface *s, int y0, int y1, int *out_min,
+                         int *out_max) {
+    *out_min = -1;
+    *out_max = -1;
+    for (int x = 0; x < 400; x++) {
+        for (int y = y0; y < y1; y++) {
+            if (px_at(s, x, y) != 0) {
+                if (*out_min < 0) {
+                    *out_min = x;
+                }
+                *out_max = x;
+                break;
+            }
+        }
+    }
+}
+
+static int ink_rows(fdk_surface *s, int y0, int y1) {
+    int rows = 0;
+    for (int y = y0; y < y1; y++) {
+        for (int x = 0; x < 400; x++) {
+            if (px_at(s, x, y) != 0) {
+                rows++;
+                break;
+            }
+        }
+    }
+    return rows;
+}
+
+static void test_label_modes(void) {
+    fdk_widget *root = fresh_root();
+    fdk_font_metrics fm;
+    fdk_font_get_metrics(g_font, &fm);
+    fdk_i32 pitch = fm.ascent + fm.descent;
+
+    const char *text = "the quick brown fox jumps over the lazy dog";
+
+    /* WRAP: natural height follows the wrap at the requested width. */
+    fdk_widget *w = NULL;
+    assert(fdk_ok(fdk_label_create(root, g_font, text, &w)));
+    fdk_label_set_mode(w, FDK_LABEL_WRAP);
+    fdk_widget_set_natural_size(w, 120, 0);
+    fdk_size nat;
+    fdk_widget_measure(w, &nat);
+    assert(nat.width == 120);
+    assert(nat.height >= 2 * pitch); /* wraps to several lines */
+    fdk_i32 lines_nat = nat.height / pitch;
+    assert(lines_nat * pitch == nat.height); /* integral line count */
+
+    fdk_widget_arrange(w, (fdk_rect){10, 10, 120, nat.height});
+    assert(fdk_label_get_line_count(w) == (size_t)lines_nat);
+
+    /* Narrower width -> more lines; wider -> one. */
+    fdk_widget_arrange(w, (fdk_rect){10, 10, 60, 400});
+    assert(fdk_label_get_line_count(w) > (size_t)lines_nat);
+    fdk_widget_arrange(w, (fdk_rect){10, 10, 400, 400});
+    assert(fdk_label_get_line_count(w) == 1);
+
+    /* Painted wrapped ink spans multiple line pitches and stays in
+     * the horizontal band. */
+    fdk_widget_arrange(w, (fdk_rect){10, 10, 120, 400});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(400, 300, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    int min_x = 0, max_x = 0;
+    ink_extent_x(s, 10, 10 + 6 * pitch, &min_x, &max_x);
+    assert(min_x >= 10 && min_x < 10 + 10); /* starts at the left edge */
+    assert(max_x < 10 + 120 + 4);           /* never past the width  */
+    int rows = ink_rows(s, 10, 10 + 6 * pitch);
+    assert(rows > pitch); /* ink across more than one line box */
+    fdk_surface_destroy(s);
+
+    /* ELLIPSIZE: full text when wide, truncated ink when narrow. */
+    fdk_text_metrics whole;
+    assert(fdk_ok(fdk_font_measure_utf8(g_font, text, strlen(text),
+                                        &whole)));
+    fdk_label_set_mode(w, FDK_LABEL_ELLIPSIZE);
+    fdk_size nat2;
+    fdk_widget_measure(w, &nat2);
+    assert(nat2.width == whole.advance_width); /* natural = FULL text */
+
+    /* wide: everything shows */
+    fdk_widget_arrange(w, (fdk_rect){10, 10, whole.advance_width + 4,
+                                     pitch});
+    assert(fdk_label_get_line_count(w) == 1);
+    s = NULL;
+    assert(fdk_ok(fdk_surface_create(400, 300, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    ink_extent_x(s, 10, 10 + pitch, &min_x, &max_x);
+    int full_ink_wide = max_x - min_x + 1;
+    fdk_surface_destroy(s);
+
+    /* narrow: ink strictly narrower, still one line, ellipsis drawn
+     * at the right end */
+    fdk_i32 narrow = whole.advance_width / 2;
+    fdk_widget_arrange(w, (fdk_rect){10, 10, narrow, pitch});
+    assert(fdk_label_get_line_count(w) == 1);
+    s = NULL;
+    assert(fdk_ok(fdk_surface_create(400, 300, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    ink_extent_x(s, 10, 10 + pitch, &min_x, &max_x);
+    assert(max_x < 10 + narrow);            /* clipped in width */
+    assert(max_x - min_x + 1 < full_ink_wide); /* truncated, not full */
+    assert(max_x > 10 + narrow - 40);       /* ink reaches the right
+                                               * region: the ellipsis */
+    fdk_surface_destroy(s);
+
+    /* Alignment: same text, three labels on three rows of equal
+     * width; START hugs the left edge, END the right, CENTER the
+     * middle. */
+    {
+        fdk_widget *l0 = NULL, *l1 = NULL, *l2 = NULL;
+        assert(fdk_ok(fdk_label_create(root, g_font, "align", &l0)));
+        assert(fdk_ok(fdk_label_create(root, g_font, "align", &l1)));
+        assert(fdk_ok(fdk_label_create(root, g_font, "align", &l2)));
+        fdk_label_set_alignment(l1, FDK_ALIGN_CENTER);
+        fdk_label_set_alignment(l2, FDK_ALIGN_END);
+        fdk_i32 y = 60;
+        fdk_widget_arrange(l0, (fdk_rect){20, y, 300, pitch});
+        fdk_widget_arrange(l1, (fdk_rect){20, y + 40, 300, pitch});
+        fdk_widget_arrange(l2, (fdk_rect){20, y + 80, 300, pitch});
+        assert(fdk_label_get_alignment(l0) == FDK_ALIGN_START);
+        assert(fdk_label_get_alignment(l1) == FDK_ALIGN_CENTER);
+        assert(fdk_label_get_alignment(l2) == FDK_ALIGN_END);
+
+        s = NULL;
+        assert(fdk_ok(fdk_surface_create(400, 300, &s)));
+        fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+        fdk_widget_tree_paint(root, s);
+        int mn0, mx0, mn1, mx1, mn2, mx2;
+        ink_extent_x(s, y, y + pitch, &mn0, &mx0);
+        ink_extent_x(s, y + 40, y + 40 + pitch, &mn1, &mx1);
+        ink_extent_x(s, y + 80, y + 80 + pitch, &mn2, &mx2);
+        assert(mn0 >= 20 && mn0 <= 24);      /* START: left edge */
+        assert(mn1 > mn0 + 40);              /* CENTER: pushed in */
+        assert(mx1 < 320 - 40);              /* CENTER: not at edge */
+        assert(mx2 >= 320 - 5 && mx2 <= 320); /* END: right edge */
+        /* CENTER is symmetric within a couple of pixels. */
+        int c0 = mn0 + mx0, c1 = mn1 + mx1, c2 = mn2 + mx2;
+        assert(c1 > c0 && c1 < c2);
+        assert(abs((c1 - (20 + 320)) ) < 6);
+        fdk_surface_destroy(s);
+    }
+
+    /* mode round trip; unknown value ignored; empty text = 0 lines */
+    assert(fdk_label_get_mode(w) == FDK_LABEL_ELLIPSIZE);
+    fdk_label_set_mode(w, (fdk_label_mode)99);
+    assert(fdk_label_get_mode(w) == FDK_LABEL_ELLIPSIZE);
+    assert(fdk_ok(fdk_label_set_text(w, NULL)));
+    assert(fdk_label_get_line_count(w) == 0);
+
+    fdk_widget_destroy(root);
+    printf("[ok] label modes: wrap line counts + ink spans, ellipsize "
+           "truncation + right-end ink, alignment edges, arg safety\n");
+}
+
+/* ---- Radio arrow-key traversal ---- */
+
+static int radio_arrow_events = 0;
+static void on_radio_arrow_change(fdk_widget *w, bool checked,
+                                  void *user) {
+    (void)w;
+    (void)user;
+    if (checked) {
+        radio_arrow_events++;
+    }
+}
+
+static int root_key_events = 0;
+static bool on_root_event(fdk_widget *w, const fdk_widget_event *ev,
+                          void *user) {
+    (void)w;
+    (void)user;
+    if (ev->type == FDK_WIDGET_KEY_DOWN) {
+        root_key_events++;
+    }
+    return false; /* observe, never consume */
+}
+
+static void key(fdk_widget *root, fdk_scancode sc) {
+    fdk_event_data e = ev_key(FDK_EVENT_KEY_DOWN, sc);
+    (void)fdk_widget_tree_handle_event(root, &e);
+}
+
+static void test_radio_arrows(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget_set_event_callback(root, on_root_event, NULL);
+
+    fdk_widget *box = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_VERTICAL, &box)));
+    fdk_widget *a = NULL, *b = NULL, *c = NULL;
+    assert(fdk_ok(fdk_radio_create(box, g_font, "One", &a)));
+    assert(fdk_ok(fdk_radio_create(box, g_font, "Two", &b)));
+    assert(fdk_ok(fdk_radio_create(box, g_font, "Three", &c)));
+    fdk_radio_set_on_change(a, on_radio_arrow_change, NULL);
+    fdk_radio_set_on_change(b, on_radio_arrow_change, NULL);
+    fdk_radio_set_on_change(c, on_radio_arrow_change, NULL);
+    fdk_widget_arrange(box, (fdk_rect){0, 0, 160, 200});
+
+    /* Down/Right advance and select, focus follows. */
+    fdk_radio_set_checked(a, true);
+    assert(fdk_widget_focus(a));
+    radio_arrow_events = 0;
+    key(root, FDK_KEY_DOWN);
+    assert(fdk_radio_is_checked(b) && !fdk_radio_is_checked(a));
+    assert(fdk_widget_has_focus(b));
+    assert(radio_arrow_events == 1); /* b checked (a's false not
+                                        * counted by the callback) */
+
+    key(root, FDK_KEY_RIGHT);
+    assert(fdk_radio_is_checked(c) && fdk_widget_has_focus(c));
+
+    /* Wrap-around at both ends. */
+    key(root, FDK_KEY_DOWN);
+    assert(fdk_radio_is_checked(a) && fdk_widget_has_focus(a));
+    key(root, FDK_KEY_UP);
+    assert(fdk_radio_is_checked(c) && fdk_widget_has_focus(c));
+    key(root, FDK_KEY_LEFT);
+    assert(fdk_radio_is_checked(b) && fdk_widget_has_focus(b));
+
+    /* Arrows on a checked radio re-selecting it: no change events
+     * (selection unchanged), focus still moves. */
+    radio_arrow_events = 0;
+    key(root, FDK_KEY_UP);
+    assert(fdk_radio_is_checked(a) && fdk_widget_has_focus(a));
+    assert(radio_arrow_events == 1); /* b false, a already-checked no-op */
+
+    /* Hidden member is skipped. */
+    fdk_widget_set_visible(b, false);
+    key(root, FDK_KEY_DOWN);
+    assert(fdk_radio_is_checked(c) && fdk_widget_has_focus(c));
+    key(root, FDK_KEY_UP);
+    assert(fdk_radio_is_checked(a) && fdk_widget_has_focus(a));
+    fdk_widget_set_visible(b, true);
+
+    /* Disabled member is skipped. */
+    fdk_widget_set_enabled(c, false);
+    key(root, FDK_KEY_DOWN);
+    assert(fdk_radio_is_checked(b) && fdk_widget_has_focus(b));
+    fdk_widget_set_enabled(c, true);
+
+    /* A group with a single member lets arrows bubble to the root's
+     * callback (the tree's unhandled-key observer). */
+    {
+        fdk_widget *lone_box = NULL;
+        assert(fdk_ok(fdk_box_create(root, FDK_VERTICAL, &lone_box)));
+        fdk_widget *lone = NULL;
+        assert(fdk_ok(fdk_radio_create(lone_box, g_font, "Lone",
+                                       &lone)));
+        fdk_widget_arrange(lone_box, (fdk_rect){200, 0, 150, 40});
+        assert(fdk_widget_focus(lone));
+        root_key_events = 0;
+        key(root, FDK_KEY_DOWN);
+        assert(root_key_events == 1); /* bubbled: nothing consumed it */
+        assert(fdk_radio_is_checked(lone) == false); /* no selection
+                                                        * change */
+    }
+
+    fdk_widget_destroy(root);
+    printf("[ok] radio arrows: Down/Right select+focus, wrap-around, "
+           "skip hidden/disabled, lone radio bubbles\n");
+}
+
 /* ---- ProgressBar ---- */
 
 static void test_progress(void) {
@@ -647,6 +918,8 @@ int main(void) {
     test_button();
     test_toggle_and_checkbox();
     test_radio_group();
+    test_label_modes();
+    test_radio_arrows();
     test_progress();
     test_separator();
     test_frame();

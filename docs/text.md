@@ -99,25 +99,64 @@ garbage files and truncated fonts (the test suite feeds both). It is
 not a full audit of table contents: load fonts from sources you
 trust.
 
+## Line layout: wrapping and ellipsis
+
+`fdk_font_break_lines_utf8` (src/text/layout.c) is the greedy
+word-wrapper. It rides the SAME per-glyph walk as measure and draw
+(decode -> kern -> advance), so a returned line's
+`advance_width` is by construction the width painting those bytes
+produces — there is no second rounding rule in the stack. Rules:
+breaks land after space runs (the space stays out of the next line),
+a word longer than the line breaks at glyph boundaries rather than
+overflowing, `'\n'` is a hard break (`"\r\n"` counts once, empty
+lines survive), trailing spaces are trimmed, and kerning never
+crosses a line boundary (every line is an independent run — exactly
+what `fdk_surface_draw_utf8` does with those bytes). Callers can
+count lines first (`max_lines = 0`) and then fill a right-sized
+array; a too-small array reports `out_truncated`.
+
+`fdk_font_ellipsize_utf8` finds the longest codepoint-boundary
+prefix whose advance leaves room for a U+2026 ellipsis, trailing
+spaces trimmed, with explicit degenerate behavior below the
+ellipsis's own width (prefix 0 — draw it and let the clip stack
+hide the overflow). The ellipsis run is defined once
+(`FDK_TEXT_ELLIPSIS_UTF8` in the text internals) so the pass that
+measures it and the Label paint hook that draws it cannot drift
+apart.
+
+Both passes warm the glyph cache like measurement does (documented
+const-laundering through the layer's single `fdk_text_font_mutable`
+point).
+
+The Label consumes all of it: `fdk_label_set_mode`
+(`NOWRAP`/`WRAP`/`ELLIPSIZE`), `fdk_label_set_alignment`
+(START/CENTER/END per line), and `fdk_label_get_line_count`, with
+the display cache rebuilt on arrange and lazily at paint — see
+`fdk_widgets.h` for the wrap label's documented v1 contract
+(natural height is measured at the natural width; there is no
+width-for-height layout yet).
+
 ## What's deliberately NOT here yet
 
 Recorded on the roadmap, in rough dependency order:
 
-- **Widget text integration** — Label/Button/etc. consume
-  `fdk_text.h` in Phase 6's next slice.
-- Line breaking and multi-line runs, ellipsize, alignment helpers.
 - Subpixel glyph positioning (cache keys on the fractional offset).
 - Bold/italic selection beyond loading the specific face file.
+- Width-for-height label layout (wrap labels re-flow at the
+  ALLOCATED width; their natural height still answers the natural
+  width — documented in fdk_widgets.h).
 - Bidi and complex scripts; fallback font chains.
 - Colored glyphs (emoji), SDF rendering, hinting.
 
 ## Testing
 
-`tests/test_text.c` (7 cases, ASan+UBSan): lifecycle and failure
+`tests/test_text.c` (9 cases, ASan+UBSan): lifecycle and failure
 modes, metrics sanity and 2× scale proportionality, measurement
 (including the rounding behavior above), draw/damage/ink-bounds
 agreement, cache-hit determinism and eviction, clip-stack honoring,
-and UTF-8 edge cases. `tests/test_x11_integration.c` adds a
+UTF-8 edge cases, greedy wrapping (fit/agreement/hard breaks/
+mid-word/truncation), and ellipsis (fits/no-fit/maximal/boundary/
+degenerate). `tests/test_x11_integration.c` adds a
 server-side readback case that verifies real glyph ink reached the X
 server's pixels inside the measured metrics box and nowhere else.
 Both suites honestly skip when the environment has no system font.

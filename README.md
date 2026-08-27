@@ -244,6 +244,27 @@ from the catalog — two frames of controls, a radio group, a button
 row, a progress bar, and a live status label that every control
 reports into.
 
+Text layout completes the picture — labels that wrap, truncate with
+an ellipsis exactly at their right edge, and align their lines:
+
+```c
+fdk_label_set_mode(body, FDK_LABEL_WRAP);      /* greedy word-wrap  */
+fdk_label_set_mode(path, FDK_LABEL_ELLIPSIZE); /* "..." at the edge */
+fdk_label_set_alignment(title, FDK_ALIGN_CENTER);
+
+fdk_font_break_lines_utf8(font, text, len, width, NULL, 0, &n, NULL);
+/* -> n lines, each measured by the same walk that paints it */
+```
+
+Radio groups own their arrow keys: Up/Left and Down/Right move the
+selection through the group (wrapping, skipping hidden/disabled
+members) with focus following — Space still toggles, Tab still
+traverses the whole tree.
+
+Run `examples/07_text_layout.c`: a wrapping paragraph that reflows
+taller when the window narrows, a truncated path line, the three
+alignments, and a keyboard-owned radio group.
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The
@@ -311,6 +332,13 @@ full progress bar, and the status label — every element PIL-verified
 by the test rig:
 
 ![06_widgets catalog hold frame](docs/screenshots/widgets_catalog_frame_520x430.png)
+
+Text layout's proof — `07_text_layout` at full width and after the
+rig narrows the window: the paragraph re-wraps from five lines to
+seven and the truncated line's ellipsis moves left with the edge.
+
+![07_text_layout hold frame](docs/screenshots/text_layout_frame_480x620.png)
+![07_text_layout after the resize](docs/screenshots/text_layout_reflow_340x620.png)
 
 ## Project principles
 

@@ -171,6 +171,86 @@ typedef struct fdk_font_cache_stats {
 void fdk_font_get_cache_stats(const fdk_font *font,
                               fdk_font_cache_stats *out);
 
+/* ---- Line layout: wrapping and ellipsis ---- */
+
+/* One output line of fdk_font_break_lines_utf8().
+ *
+ * byte_offset/byte_len select the line's bytes within the SOURCE
+ * string (the line never splits a codepoint); trailing spaces are
+ * trimmed, so byte_len may end before the whitespace that caused the
+ * break. advance_width is the line's rounded pen advance (kerning
+ * within the line included) — exactly what fdk_surface_draw_utf8()
+ * would paint for those bytes, so callers can align or center lines
+ * without a draw pass. A line of pure whitespace reports
+ * advance_width 0 (and byte_len 0); such lines exist only where the
+ * source had an explicit newline. */
+typedef struct fdk_text_line {
+    size_t byte_offset;
+    size_t byte_len;
+    fdk_i32 advance_width;
+} fdk_text_line;
+
+/* Greedy word-wrap: breaks utf8[0..byte_len) into lines that each fit
+ * max_width pixels.
+ *
+ * Rules (v1, left-to-right scripts only):
+ *   - Lines break after space runs (the space stays out of the next
+ *     line). A word longer than max_width breaks at glyph boundaries
+ *     rather than overflowing.
+ *   - '\n' is a hard line break; "\r\n" and a lone '\r' count as one.
+ *     Lines they create may be empty (byte_len 0).
+ *   - The FIRST line keeps the source's leading spaces; later lines
+ *     start at their first non-space byte. A trailing all-space run
+ *     produces no extra line.
+ *   - Each line is an independent run: kerning never crosses lines.
+ *
+ * out_lines receives at most max_lines entries (in text order). Pass
+ * max_lines = 0 with out_lines = NULL to COUNT first: *out_line_count
+ * then holds the total line count and nothing is stored. When the
+ * text needs more lines than max_lines, only the first max_lines are
+ * stored and *out_truncated is true (remaining visible text exists);
+ * with max_lines = 0, *out_truncated is always false (nothing was
+ * dropped — the count is complete).
+ *
+ * Returns FDK_ERR_INVALID_ARGUMENT for NULL font/utf8/out_line_count,
+ * out_lines == NULL with max_lines > 0, or max_width < 1. Empty text
+ * yields 0 lines and FDK_OK. out_truncated may be NULL.
+ */
+fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
+                                     const char *utf8, size_t byte_len,
+                                     fdk_i32 max_width,
+                                     fdk_text_line *out_lines,
+                                     size_t max_lines,
+                                     size_t *out_line_count,
+                                     bool *out_truncated);
+
+/* Fits utf8[0..byte_len) into max_width pixels, truncating with an
+ * ellipsis character (U+2026, HORIZONTAL ELLIPSIS) when it does not
+ * fit.
+ *
+ * When the whole text fits: *out_prefix_bytes = byte_len and
+ * *out_fits = true — draw the text as-is. Otherwise *out_fits is
+ * false and *out_prefix_bytes is the longest byte prefix (always a
+ * codepoint boundary, trailing spaces trimmed) such that
+ * round(prefix advance) + (ellipsis advance) <= max_width. The caller
+ * draws text[0..prefix) and then the ellipsis at
+ * x + round(prefix advance). Kerning between the prefix's last glyph
+ * and the ellipsis is deliberately not applied (the two runs are
+ * independent); for most faces it is zero.
+ *
+ * Degenerate widths: max_width == 0 (or below the ellipsis alone)
+ * yields prefix 0 — the caller draws just the ellipsis and lets the
+ * clip stack hide the overflow. max_width < 0 is an argument error.
+ *
+ * Returns FDK_ERR_INVALID_ARGUMENT for NULL font/utf8/
+ * out_prefix_bytes or negative max_width. out_fits may be NULL.
+ */
+fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
+                                   const char *utf8, size_t byte_len,
+                                   fdk_i32 max_width,
+                                   size_t *out_prefix_bytes,
+                                   bool *out_fits);
+
 #ifdef __cplusplus
 }
 #endif

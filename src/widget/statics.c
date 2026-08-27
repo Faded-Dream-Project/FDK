@@ -11,6 +11,11 @@
 
 #include "widgets_internal.h"
 
+/* The Label's ellipsis run shares the text layer's single definition
+ * (measured and drawn characters can never drift apart). Same
+ * layering pattern as the layout back-edge in widgets_internal.h. */
+#include "../text/text_internal.h"
+
 #include "core/alloc_internal.h"
 #include <stdio.h>
 #include "core/log_internal.h"
@@ -103,16 +108,184 @@ fdk_color fdk__pal_border(void) {
 
 /* ---- Label ---- */
 
+/* Display-cache plumbing: the label's text broken into the lines
+ * that fit its current width. Grown geometrically; freed at destroy.
+ * `built_width`/`lines_dirty` decide staleness — rebuild on arrange
+ * (resize) and lazily at paint (covers manual set_bounds callers
+ * that bypass fdk_widget_arrange). */
+static bool label_reserve(fdk_label *l, size_t needed) {
+    if (needed <= l->lines_cap) {
+        return true;
+    }
+    size_t cap = l->lines_cap > 0 ? l->lines_cap : 4;
+    while (cap < needed) {
+        cap *= 2;
+    }
+    fdk_text_line *grown =
+        fdk_realloc(l->lines, cap * sizeof(fdk_text_line));
+    if (grown == NULL) {
+        return false; /* keep the old cache; paint uses what's there */
+    }
+    l->lines = grown;
+    l->lines_cap = cap;
+    return true;
+}
+
+static void label_reset_cache(fdk_label *l) {
+    l->line_count = 0;
+    l->ellipsis_prefix = 0;
+    l->ellipsis_x = 0;
+    l->ellipsis_w = 0;
+    l->ellipsized = false;
+}
+
+/* Rebuilds the display cache for `width` pixels. Pure toolkit code:
+ * no callbacks run, allocation failures degrade to an empty cache
+ * (a paint that draws nothing rather than a crash). */
+static void label_rebuild(fdk_label *l, fdk_i32 width) {
+    label_reset_cache(l);
+    l->lines_dirty = false;
+    l->built_width = width;
+
+    if (l->font == NULL || l->text == NULL || l->text[0] == '\0') {
+        return; /* nothing to show: 0 lines */
+    }
+    size_t len = strlen(l->text);
+
+    if (l->mode == FDK_LABEL_ELLIPSIZE && width > 0) {
+        size_t prefix = len;
+        bool fits = true;
+        (void)fdk_font_ellipsize_utf8(l->font, l->text, len, width,
+                                      &prefix, &fits);
+        fdk_text_metrics pm;
+        fdk_i32 prefix_adv = 0;
+        if (prefix > 0 &&
+            fdk_ok(fdk_font_measure_utf8(l->font, l->text, prefix,
+                                         &pm))) {
+            prefix_adv = pm.advance_width;
+        }
+        fdk_text_metrics em;
+        fdk_i32 ell_w = 0;
+        if (!fits &&
+            fdk_ok(fdk_font_measure_utf8(l->font,
+                                         FDK_TEXT_ELLIPSIS_UTF8,
+                                         FDK_TEXT_ELLIPSIS_BYTES, &em))) {
+            ell_w = em.advance_width;
+        }
+        if (!label_reserve(l, 1)) {
+            return;
+        }
+        fdk_text_metrics whole;
+        fdk_i32 full_adv = 0;
+        if (fdk_ok(fdk_font_measure_utf8(l->font, l->text, len,
+                                         &whole))) {
+            full_adv = whole.advance_width;
+        }
+        l->lines[0].byte_offset = 0;
+        l->lines[0].byte_len = fits ? len : prefix;
+        l->lines[0].advance_width =
+            fits ? full_adv : prefix_adv + ell_w;
+        l->line_count = 1;
+        l->ellipsized = !fits;
+        l->ellipsis_prefix = prefix;
+        l->ellipsis_x = prefix_adv;
+        l->ellipsis_w = ell_w;
+        return;
+    }
+
+    if (l->mode == FDK_LABEL_WRAP && width > 0) {
+        size_t count = 0;
+        if (!fdk_ok(fdk_font_break_lines_utf8(l->font, l->text, len,
+                                              width, NULL, 0, &count,
+                                              NULL)) ||
+            count == 0 || !label_reserve(l, count)) {
+            return; /* error or nothing that fits: empty cache */
+        }
+        size_t filled = 0;
+        (void)fdk_font_break_lines_utf8(l->font, l->text, len, width,
+                                        l->lines, l->lines_cap, &filled,
+                                        NULL);
+        l->line_count = filled;
+        return;
+    }
+
+    /* NOWRAP — and the degenerate WRAP/ELLIPSIZE width-0 case: one
+     * full line; the label's bounds clip whatever overflows. */
+    fdk_text_metrics whole;
+    fdk_i32 adv = 0;
+    if (fdk_ok(fdk_font_measure_utf8(l->font, l->text, len, &whole))) {
+        adv = whole.advance_width;
+    }
+    if (!label_reserve(l, 1)) {
+        return;
+    }
+    l->lines[0].byte_offset = 0;
+    l->lines[0].byte_len = len;
+    l->lines[0].advance_width = adv;
+    l->line_count = 1;
+}
+
+/* Rebuilds when stale: dirty flag set by text/mode setters, or the
+ * width moved since the last build (resize without arrange — e.g. a
+ * direct set_bounds). */
+static void label_ensure(fdk_label *l, fdk_i32 width) {
+    if (l->lines_dirty || width != l->built_width) {
+        label_rebuild(l, width);
+    }
+}
+
 static void label_measure(fdk_widget *w, fdk_size *out) {
     fdk_label *l = label_of(w);
-    fdk__text_extent(l->font, l->text, &out->width, &out->height);
+    out->width = 0;
+    out->height = 0;
+    if (l->font == NULL || l->text == NULL || l->text[0] == '\0') {
+        return;
+    }
+    fdk_font_metrics fm;
+    fdk_font_get_metrics(l->font, &fm);
+    fdk_i32 pitch = fm.ascent + fm.descent;
+
+    if (l->mode != FDK_LABEL_WRAP) {
+        /* NOWRAP and ELLIPSIZE: the natural size is the full text —
+         * an ellipsized label shows everything it gets room for. */
+        fdk__text_extent(l->font, l->text, &out->width, &out->height);
+        return;
+    }
+
+    /* WRAP: width = the request when one is set, else the whole
+     * advance (one line, until something constrains the width).
+     * Height = lines at that width * pitch — computed with a local
+     * pass, not the paint cache (measure must stay side-effect
+     * free). v1 has no width-for-height layout; the header documents
+     * the narrower-than-request clipping contract. */
+    size_t len = strlen(l->text);
+    fdk_text_metrics whole;
+    fdk_i32 width = w->natural_w;
+    if (width <= 0 &&
+        fdk_ok(fdk_font_measure_utf8(l->font, l->text, len, &whole))) {
+        width = whole.advance_width;
+    }
+    out->width = width > 0 ? width : 0;
+    size_t count = 0;
+    if (width > 0) {
+        (void)fdk_font_break_lines_utf8(l->font, l->text, len, width,
+                                        NULL, 0, &count, NULL);
+    }
+    out->height = (fdk_i32)count * pitch;
+}
+
+static void label_arrange(fdk_widget *w, fdk_rect assigned) {
+    fdk_widget_set_bounds(w, assigned);
+    fdk_label *l = label_of(w);
+    label_ensure(l, assigned.width);
 }
 
 static void label_paint(fdk_widget *w, fdk_surface *surface,
                         fdk_rect bounds, fdk_rect clip) {
     (void)clip;
     fdk_label *l = label_of(w);
-    if (l->font == NULL || l->text == NULL) {
+    label_ensure(l, bounds.width);
+    if (l->line_count == 0 || l->font == NULL) {
         return;
     }
     fdk_color color = l->color.a > 0.0f ? l->color
@@ -120,12 +293,43 @@ static void label_paint(fdk_widget *w, fdk_surface *surface,
                                                       : fdk__pal_text_disabled());
     fdk_font_metrics fm;
     fdk_font_get_metrics(l->font, &fm);
-    fdk__draw_text(surface, l->font, l->text, color, bounds.x,
-                   bounds.y + fm.ascent);
+    fdk_i32 pitch = fm.ascent + fm.descent;
+
+    for (size_t i = 0; i < l->line_count; i++) {
+        const fdk_text_line *line = &l->lines[i];
+        fdk_i32 x = bounds.x;
+        if (l->align == FDK_ALIGN_CENTER || l->align == FDK_ALIGN_END) {
+            if (line->advance_width < bounds.width) {
+                fdk_i32 slack = bounds.width - line->advance_width;
+                x = bounds.x + (l->align == FDK_ALIGN_CENTER
+                                    ? slack / 2
+                                    : slack);
+            }
+        }
+        fdk_i32 baseline = bounds.y + (fdk_i32)i * pitch + fm.ascent;
+
+        if (line->byte_len > 0) {
+            (void)fdk_surface_draw_utf8(surface, l->font,
+                                        l->text + line->byte_offset,
+                                        line->byte_len, x, baseline,
+                                        color);
+        }
+        /* ELLIPSIZE: the ellipsis run lands exactly where the prefix
+         * pen stopped (same rounding as the layout pass). */
+        if (l->ellipsized && i == 0 && l->ellipsis_w > 0) {
+            (void)fdk_surface_draw_utf8(surface, l->font,
+                                        FDK_TEXT_ELLIPSIS_UTF8,
+                                        FDK_TEXT_ELLIPSIS_BYTES,
+                                        x + l->ellipsis_x, baseline,
+                                        color);
+        }
+    }
 }
 
 static void label_destroy(fdk_widget *w) {
-    fdk_free(label_of(w)->text);
+    fdk_label *l = label_of(w);
+    fdk_free(l->text);
+    fdk_free(l->lines);
 }
 
 const fdk_widget_class fdk_label_class_def = {
@@ -134,7 +338,7 @@ const fdk_widget_class fdk_label_class_def = {
     .handle_event = NULL,
     .paint = label_paint,
     .measure = label_measure,
-    .arrange = NULL,
+    .arrange = label_arrange,
     .destroy = label_destroy,
 };
 
@@ -153,6 +357,10 @@ fdk_result fdk_label_create(fdk_widget *parent, fdk_font *font,
     l->font = font;
     l->text = fdk__strdup(text);
     l->color = (fdk_color){0, 0, 0, 0}; /* -> palette default */
+    l->mode = FDK_LABEL_NOWRAP;
+    l->align = FDK_ALIGN_START;
+    l->built_width = -1; /* nothing built yet */
+    l->lines_dirty = true;
     if (text != NULL && l->text == NULL) {
         fdk_widget_destroy(w);
         return FDK_ERR_OUT_OF_MEMORY;
@@ -175,6 +383,7 @@ fdk_result fdk_label_set_text(fdk_widget *label, const char *text) {
     }
     fdk_free(l->text);
     l->text = copy;
+    l->lines_dirty = true;
     fdk_widget_invalidate(label);
     fdk_widget_child_layout_changed(label->parent);
     return FDK_OK;
@@ -193,6 +402,53 @@ const char *fdk_label_get_text(fdk_widget *label) {
         return NULL;
     }
     return label_of(label)->text;
+}
+
+void fdk_label_set_mode(fdk_widget *label, fdk_label_mode mode) {
+    if (label == NULL || label->klass != &fdk_label_class_def ||
+        (mode != FDK_LABEL_NOWRAP && mode != FDK_LABEL_WRAP &&
+         mode != FDK_LABEL_ELLIPSIZE)) {
+        return;
+    }
+    fdk_label *l = label_of(label);
+    if (l->mode == mode) {
+        return;
+    }
+    l->mode = mode;
+    l->lines_dirty = true;
+    fdk_widget_invalidate(label);
+    fdk_widget_child_layout_changed(label->parent);
+}
+
+fdk_label_mode fdk_label_get_mode(fdk_widget *label) {
+    if (label == NULL || label->klass != &fdk_label_class_def) {
+        return FDK_LABEL_NOWRAP;
+    }
+    return label_of(label)->mode;
+}
+
+void fdk_label_set_alignment(fdk_widget *label, fdk_align alignment) {
+    if (label == NULL || label->klass != &fdk_label_class_def) {
+        return;
+    }
+    label_of(label)->align = alignment;
+    fdk_widget_invalidate(label);
+}
+
+fdk_align fdk_label_get_alignment(fdk_widget *label) {
+    if (label == NULL || label->klass != &fdk_label_class_def) {
+        return FDK_ALIGN_START;
+    }
+    return label_of(label)->align;
+}
+
+size_t fdk_label_get_line_count(fdk_widget *label) {
+    if (label == NULL || label->klass != &fdk_label_class_def) {
+        return 0;
+    }
+    fdk_label *l = label_of(label);
+    label_ensure(l, label->bounds.width);
+    return l->line_count;
 }
 
 /* ---- ProgressBar ---- */

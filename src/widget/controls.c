@@ -610,8 +610,67 @@ static void radio_activate(fdk_widget *w) {
     radio_set_checked_impl(w, true);
 }
 
+/* Arrow-key traversal target within the radio's group (its parent):
+ * the previous (Up/Left) or next (Down/Right) sibling radio in child
+ * order, wrapping around. Skips non-radios and radios that could not
+ * take focus (hidden, disabled, or non-focusable) — selection never
+ * lands somewhere the keyboard cannot be. Returns NULL when the
+ * group has no other traversable member (a lone radio lets the
+ * arrows bubble to ancestors). */
+static fdk_widget *radio_arrow_target(fdk_widget *w, bool backward) {
+    fdk_widget *parent = w->parent;
+    if (parent == NULL || parent->child_count == 0) {
+        return NULL;
+    }
+    size_t count = parent->child_count;
+    size_t me = count;
+    for (size_t i = 0; i < count; i++) {
+        if (parent->children[i] == w) {
+            me = i;
+            break;
+        }
+    }
+    if (me == count) {
+        return NULL; /* not in its parent's list (should not happen) */
+    }
+    for (size_t step = 1; step <= count; step++) {
+        size_t idx = backward ? (me + count - step) % count
+                              : (me + step) % count;
+        fdk_widget *cand = parent->children[idx];
+        if (cand == w) {
+            break; /* wrapped all the way around: no other member */
+        }
+        if (cand->klass != &fdk_radio_class_def ||
+            !fdk_widget_is_effectively_visible(cand) ||
+            !fdk_widget_is_effectively_enabled(cand) ||
+            !fdk_widget_get_can_focus(cand)) {
+            continue;
+        }
+        return cand;
+    }
+    return NULL;
+}
+
 static bool radio_handle_event(fdk_widget *w,
                                const fdk_widget_event *ev) {
+    /* Arrow keys move selection within the group (and focus with
+     * it): Up/Left previous, Down/Right next, wrapping. Standard
+     * radio-group behavior — the arrows belong to the group, not the
+     * window, whenever the group has another member. */
+    if (ev->type == FDK_WIDGET_KEY_DOWN) {
+        fdk_scancode sc = ev->key.scancode;
+        if (sc == FDK_KEY_UP || sc == FDK_KEY_DOWN ||
+            sc == FDK_KEY_LEFT || sc == FDK_KEY_RIGHT) {
+            bool backward = (sc == FDK_KEY_UP || sc == FDK_KEY_LEFT);
+            fdk_widget *target = radio_arrow_target(w, backward);
+            if (target == NULL) {
+                return false; /* lone radio: arrows bubble */
+            }
+            fdk_widget_focus(target);
+            radio_set_checked_impl(target, true);
+            return true;
+        }
+    }
     return check_handle_event(w, ev, radio_activate);
 }
 

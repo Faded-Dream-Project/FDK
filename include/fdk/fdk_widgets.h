@@ -77,6 +77,53 @@ void fdk_label_set_color(fdk_widget *label, fdk_color color);
  * set_text/destroy). NULL when the label has no text. */
 const char *fdk_label_get_text(fdk_widget *label);
 
+/* How the label fits its text into the width it is allocated:
+ *
+ *   NOWRAP     one line, drawn from the left edge (the v1 behavior;
+ *              the default). Overlong text is clipped by the label's
+ *              bounds.
+ *   WRAP       greedy word-wrap (see fdk_font_break_lines_utf8 in
+ *              fdk_text.h) at the label's CURRENT width, rebuilt on
+ *              every resize. Natural width = the natural-size request
+ *              when one is set (fdk_widget_set_natural_size), else
+ *              the full unwrapped advance; natural height = the line
+ *              count at that width times the line pitch. v1 has no
+ *              width-for-height layout: when a container allocates
+ *              less width than requested, the label re-wraps taller
+ *              than its allocated height and the tail clips — give
+ *              wrap labels a width request and headroom.
+ *   ELLIPSIZE  one line truncated with "..." (U+2026) at the current
+ *              width (see fdk_font_ellipsize_utf8). Natural size is
+ *              the FULL text: an ellipsized label shows everything it
+ *              is given room for.
+ *
+ * Line pitch is the font's ascent + descent (line_gap is not added —
+ * the same extent every other catalog widget uses for one line of
+ * text). Multi-line labels are top-anchored. */
+typedef enum fdk_label_mode {
+    FDK_LABEL_NOWRAP = 0,
+    FDK_LABEL_WRAP = 1,
+    FDK_LABEL_ELLIPSIZE = 2,
+} fdk_label_mode;
+
+/* Sets the fitting mode. Re-measures (WRAP changes the natural
+ * height) and relayouts the parent container. Unknown enum values
+ * are ignored. */
+void fdk_label_set_mode(fdk_widget *label, fdk_label_mode mode);
+fdk_label_mode fdk_label_get_mode(fdk_widget *label);
+
+/* Horizontal alignment of each line within the label's width:
+ * START (default; FILL behaves as START), CENTER, END. Overlong
+ * lines still start at the left edge rather than spilling left. */
+void fdk_label_set_alignment(fdk_widget *label, fdk_align alignment);
+fdk_align fdk_label_get_alignment(fdk_widget *label);
+
+/* The number of display lines under the label's CURRENT mode and
+ * width (NOWRAP/ELLIPSIZE: 1 with text, else 0; WRAP: the wrapped
+ * count). Rebuilds the display cache lazily — valid immediately
+ * after arrange. */
+size_t fdk_label_get_line_count(fdk_widget *label);
+
 /* ---- Button ---- */
 
 /* Command button with centered text. Natural size = text + padding.
@@ -132,7 +179,12 @@ void fdk_checkbox_set_on_change(fdk_widget *checkbox,
 
 /* One-of-many selector. THE GROUP IS THE PARENT: every RadioButton
  * sharing a parent widget is one group; checking any member unchecks
- * the others. Focusable. */
+ * the others. Focusable.
+ *
+ * Keyboard: Up/Left move selection to the previous group member and
+ * Down/Right to the next (wrapping, skipping hidden/disabled
+ * members); focus follows selection. Space/Enter check the focused
+ * radio. A group with no other member lets the arrows bubble. */
 fdk_result fdk_radio_create(fdk_widget *parent, fdk_font *font,
                             const char *text, fdk_widget **out_radio);
 

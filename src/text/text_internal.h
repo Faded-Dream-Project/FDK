@@ -69,4 +69,29 @@ int fdk_text_utf8_next(const char *s, size_t len, size_t i,
  * (space, empty bitmaps) — such glyphs still advance the pen. */
 const fdk_glyph *fdk_text_glyph_for(fdk_font *font, fdk_u32 codepoint);
 
+/* The ellipsis run shared by the ellipsize pass (src/text/layout.c)
+ * and the Label paint hook (src/widget/statics.c): U+2026, HORIZONTAL
+ * ELLIPSIS. One definition so the measured and the drawn character
+ * can never drift apart. */
+#define FDK_TEXT_ELLIPSIS_UTF8 "\xE2\x80\xA6"
+#define FDK_TEXT_ELLIPSIS_BYTES 3
+
+/* One step of the shared left-to-right shaping walk (see text.c).
+ * Consumes the next codepoint at *io_i (never past len), applies pair
+ * kerning against *io_prev_g (pass -1 to start), advances the float
+ * pen, and reports the glyph plus the rounded pen position its left
+ * edge should be drawn at. Returns 0 at end of run, 1 on progress.
+ * The measure walk, the draw walk, AND the line/ellipsis layout pass
+ * (src/text/layout.c) share this — every width FDK ever reports or
+ * paints comes from the same arithmetic. */
+int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
+                        size_t *io_i, int *io_prev_g, fdk_f32 *io_pen,
+                        const fdk_glyph **out_glyph, fdk_i32 *out_pen_x);
+
+/* The text layer's SINGLE const-laundering point (measure warms the
+ * glyph cache, so const public signatures need mutable state; see
+ * text.c). The layout pass uses it too — no other const-casting
+ * exists in the text layer. */
+fdk_font *fdk_text_font_mutable(const fdk_font *font);
+
 #endif /* FDK_TEXT_INTERNAL_H */

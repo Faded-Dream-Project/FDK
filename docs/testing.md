@@ -60,7 +60,7 @@ isolation. 17 cases, all under ASan+UBSan.
 
 ## Text tests (Phase 6)
 
-`tests/test_text.c` runs headless in plain `make test` (7 cases,
+`tests/test_text.c` runs headless in plain `make test` (9 cases,
 ASan+UBSan) and needs no display — only a system TrueType font
 (DejaVu Sans / Noto Sans candidates; the whole suite honestly skips,
 [X11-suite style](#known-xvfb-flakiness-investigated-and-fixed), when
@@ -75,7 +75,16 @@ damage box is exactly the measured ink band), cache-hit determinism
 (redraw is pixel-identical) and LRU eviction past 512 glyphs, clip
 stack honoring (ink outside the clip untouched, damage clipped to
 the visible span), and UTF-8 edge cases (invalid bytes to U+FFFD,
-truncated sequences, unmapped codepoints, embedded NUL).
+truncated sequences, unmapped codepoints, embedded NUL), greedy line breaking (every
+line fits its width AND agrees exactly with measuring its bytes —
+the agreement-by-construction contract; hard \n/\r\n breaks with
+empty lines preserved; mid-word breaks for over-long words with
+every glyph accounted for; trailing-space trimming; count-then-fill
+two-pass calls; max_lines truncation flagging; argument safety), and
+ellipsis (fits whole, no-fit prefix maximal — the next codepoint
+provably overflows — codepoint-boundary and no-trailing-space
+guarantees, degenerate widths below the ellipsis itself, argument
+safety).
 
 The X11 suite adds `test_text_render_readback`: 48px "FDK" drawn
 into a mapped window and verified through the X server's own pixels
@@ -86,9 +95,19 @@ font exists.
 
 ## Widget catalog tests (Phase 6)
 
-`tests/test_controls.c` (8 headless cases, ASan+UBSan, font-gated
+`tests/test_controls.c` (10 headless cases, ASan+UBSan, font-gated
 honest skip): label geometry (natural size == measured text,
-re-measure on set_text, ink confined to bounds), button interaction
+re-measure on set_text, ink confined to bounds), label modes (WRAP
+natural height = line count at the requested width, narrower arrange
+grows the count and wider collapses to one, wrapped ink spans
+multiple line pitches inside the band; ELLIPSIZE natural = the FULL
+text, narrow arrange truncates with right-end ink and clips at the
+edge; START/CENTER/END alignment verified by ink extents at the
+left edge, symmetric middle, and right edge), radio arrow-key
+traversal (Down/Right select + focus the next member, Up/Left the
+previous, wrap-around both ends, hidden and disabled members
+skipped, a lone radio lets the arrows bubble to ancestors), button
+interaction
 (click-in activates, release-out does NOT, Space/Enter, disabled
 ignores input, cross-type setters rejected), toggle + checkbox
 (click/Space/programmatic, on_change firing, knob visibly moving
@@ -106,15 +125,30 @@ injected clicks (XSendEvent through the server) — the button's
 activation grows the progress bar with server-verified pixels at
 each step, and the toggle flips state.
 
+A second GUI case, `test_label_radio_arrow_gui`, drives the text
+layout: a WRAP label's first two line bands verified through the
+server's pixels (single-XGetImage region captures), nothing inked
+past the label's right edge, an ELLIPSIZE label's ink clipped
+exactly at its boundary, REAL arrow keypresses (keycode 116/111 =
+scancode 108/103) moving radio selection AND focus with the accent
+dot appearing server-side on the newly selected row, and a window
+resize whose re-wrapped paragraph puts ink into the band that was
+empty before — all through the same pump/paint loop production apps
+run.
+
 ## Layout tests (Phase 5)
 
 The layout engine is pure geometry over the widget hooks, so
-`tests/test_layout.c` runs headless in plain `make test` (8 cases,
+`tests/test_layout.c` runs headless in plain `make test` (9 cases,
 ASan+UBSan): box measure math (naturals + spacing + padding +
 margins, homogeneous, orientation), arrangement math (packing,
 expansion absorbing the leftover, cross-axis align/expand), margins
 inside slots, dynamic relayout on child add/remove/hide/hint change,
-nested boxes, a pixel-agreement case (a laid-out tree paints exactly
+nested child-change PROPAGATION (the regression case for the two
+engine bugs the 07 demo found: a Frame relayouts when ITS children
+change — box-ness by hook delegation — and ancestors re-run when a
+nested container's natural changes, with the box setters reaching
+subclasses), nested boxes, a pixel-agreement case (a laid-out tree paints exactly
 into its computed slots), and argument safety. The window integration
 (auto-reflow of the content widget on every configure) is the X11
 suite's job: `test_widget_layout_reflow_on_resize` resizes a live

@@ -354,9 +354,10 @@ void fdk_font_get_cache_stats(const fdk_font *font,
  * public header): the LRU clock and stats counters live inside the
  * font, so measurement needs mutable state behind a const public
  * signature. This union launder concentrates that one unavoidable
- * pointer-laundering into a single documented place — no other
- * const-casting exists in the text layer. */
-static fdk_font *font_mutable(const fdk_font *font) {
+ * pointer-laundering into a single documented place — shared with
+ * the layout pass (src/text/layout.c); no other const-casting
+ * exists in the text layer. */
+fdk_font *fdk_text_font_mutable(const fdk_font *font) {
     union {
         const fdk_font *in;
         fdk_font *out;
@@ -368,10 +369,13 @@ static fdk_font *font_mutable(const fdk_font *font) {
  * codepoint at *io_i, fetches its (cached) glyph, applies kerning
  * against *io_prev_g, and advances the float pen. Writes the glyph,
  * the rounded pen position it should be drawn at, and the new
- * previous-glyph id. Returns 0 when the walk is done. */
-static int shape_step(fdk_font *font, const char *utf8, size_t len,
-                      size_t *io_i, int *io_prev_g, fdk_f32 *io_pen,
-                      const fdk_glyph **out_glyph, fdk_i32 *out_pen_x) {
+ * previous-glyph id. Returns 0 when the walk is done.
+ *
+ * Shared by measure, draw, AND the line/ellipsis layout pass — see
+ * text_internal.h. */
+int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
+                        size_t *io_i, int *io_prev_g, fdk_f32 *io_pen,
+                        const fdk_glyph **out_glyph, fdk_i32 *out_pen_x) {
     if (*io_i >= len) {
         return 0;
     }
@@ -402,7 +406,7 @@ static int shape_step(fdk_font *font, const char *utf8, size_t len,
 fdk_result fdk_font_measure_utf8(const fdk_font *font,
                                  const char *utf8, size_t byte_len,
                                  fdk_text_metrics *out) {
-    fdk_font *f = font_mutable(font);
+    fdk_font *f = fdk_text_font_mutable(font);
     if (f == NULL || utf8 == NULL || out == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
@@ -418,8 +422,8 @@ fdk_result fdk_font_measure_utf8(const fdk_font *font,
     for (;;) {
         const fdk_glyph *glyph = NULL;
         fdk_i32 pen_x = 0;
-        if (!shape_step(f, utf8, byte_len, &i, &prev_g, &pen, &glyph,
-                        &pen_x)) {
+        if (!fdk_text_shape_step(f, utf8, byte_len, &i, &prev_g, &pen,
+                                 &glyph, &pen_x)) {
             break;
         }
         if (glyph->w > 0 && glyph->h > 0) {
@@ -487,8 +491,8 @@ fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
     for (;;) {
         const fdk_glyph *glyph = NULL;
         fdk_i32 gx = 0;
-        if (!shape_step(font, utf8, byte_len, &i, &prev_g, &pen, &glyph,
-                        &gx)) {
+        if (!fdk_text_shape_step(font, utf8, byte_len, &i, &prev_g, &pen,
+                                 &glyph, &gx)) {
             break;
         }
         if (glyph->bits == NULL || glyph->w <= 0 || glyph->h <= 0) {
