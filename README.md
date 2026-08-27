@@ -12,14 +12,18 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: Phase 2 — Platform Layer.** Core lifecycle, a real X11
-backend, and a real Wayland backend are implemented and tested.
-Applications can create windows, show them, resize them, and receive
+**Status: Phase 3 — Rendering (first slice).** Core lifecycle, real
+X11 and Wayland backends, and the first rendering slice are
+implemented and tested. Applications can create windows, receive
 real translated keyboard/pointer/configure/close events on both
-backends. There is no rendering, widget system, or window decoration
-system yet — see "What works today" below for exactly what that means
-in practice, and `docs/roadmap.md`'s Phase 2 entry for an honest,
-specific list of what is and isn't covered.
+backends, and — new in this milestone — draw real pixels into a
+window's software surface and present them on either backend
+(`fdk_surface`, see `examples/02_software_render.c`: an animated
+gradient, a bouncing ball, and a block-letter logo at ~60 fps, on
+X11 and Wayland alike). There is no widget system or window
+decoration system yet — see "What works today" below and
+`docs/roadmap.md`'s Phase 3 entry for an honest, specific list of
+what is and isn't covered.
 
 ## Requirements
 
@@ -97,11 +101,29 @@ version of this — it opens a real window, logs resize/keyboard events,
 and exits cleanly when closed. It needs a reachable X11 or Wayland
 display to run.
 
-There is no renderer yet (Phase 3), so a created window shows a solid
-platform background (white on both backends — X11's background pixel,
-or the Wayland backend's committed solid-color wl_shm buffer). The
-window, its events, and its lifecycle are all real; there's just
-nothing drawn inside it yet.
+Rendering works today too — the first Phase 3 slice. The window's
+`fdk_surface` gives you a CPU framebuffer (XRGB8888) that survives
+resizes, blending fill helpers, and a present call:
+
+```c
+fdk_surface *surface = NULL;
+fdk_window_get_surface(window, &surface);
+
+while (!done) {
+    fdk_pump_events(ctx, 15);              /* own the loop, ~60 fps */
+    fdk_surface_info info;
+    fdk_surface_get_info(surface, &info);  /* pixels + size + stride */
+    /* draw via helpers or info.pixels directly */
+    fdk_surface_fill_gradient_vertical(surface, full_rect, top, bottom);
+    fdk_surface_present(surface);
+}
+```
+
+Run `examples/02_software_render.c` to see this live: an animated
+color-cycling gradient, a bouncing antialiased ball drawn through the
+raw pixel pointer, and an FDK block-letter logo drawn with the fill
+primitives — identically on X11 and Wayland. Windows that nobody
+renders into still show the plain platform background.
 
 ## Project principles
 

@@ -12,8 +12,9 @@ Widgets  (src/widget/)         — Phase 4-5, 8
       |
 Layout   (src/layout/)         — Phase 4
       |
-Rendering abstraction (src/render/) — Phase 3
-      |
+Rendering abstraction (src/render/) — Phase 3 (first slice: software
+      |                                surfaces, framebuffer access,
+      |                                whole-window present, basic fills)
 Windowing (src/window/)        — Phase 2, decorations in Phase 7
       |
 Platform abstraction (src/platform/) — Phase 2
@@ -59,23 +60,31 @@ backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
   struct layout behind each opaque public type lives (e.g.
   `src/core/context_internal.h` defines `struct fdk_context`).
 
-## Current state (Phase 2 — Platform Layer)
+## Current state (Phase 3 begun — first rendering slice)
 
 Implemented: `src/core/` (context lifecycle, logging, error codes,
 allocation, versioning — Phase 1, plus the Phase 2 additions to
 `context.c` and `context_internal.h` that perform the real backend
-selection and the real poll()-based event loop) plus
-`src/platform/x11/`, `src/platform/wayland/` (optional — see
-`docs/build.md`'s "Optional Wayland build"), `src/platform/wayland_disabled.c`
-(the build-time stub used when Wayland dev headers aren't available),
-and `src/window/` (Phase 2). `fdk_init()` performs a real platform
-connection with backend auto-detection; `fdk_run()` is a real
-`poll()`-based event loop that exits on `fdk_quit()` or when the last
-top-level window closes; windows can be created, shown, resized, and
-receive real translated input/configure/close events on both backends.
-See `docs/roadmap.md`'s Phase 2 entry for the precise, honest list of
-what is and isn't covered — in particular, custom window decorations
-and rendering are NOT part of this phase (Phase 7 and Phase 3
-respectively), and Wayland has no automated integration test yet,
-though the backend is verified end-to-end against a real headless
-Weston (see `docs/testing.md`).
+selection and the real poll()-based event loop, and the Phase 3
+addition of `fdk_pump_events()` — the application-driven loop
+primitive rendered apps are built on) plus `src/platform/x11/`,
+`src/platform/wayland/` (optional — see `docs/build.md`'s "Optional
+Wayland build"), `src/platform/wayland_disabled.c` (the build-time
+stub used when Wayland dev headers aren't available), `src/window/`
+(Phase 2), and `src/render/` (first Phase 3 slice: the `fdk_surface`
+software framebuffer API — pixel access, present, and blending fill
+primitives — implemented on both backends via two new optional
+`fdk_platform_ops` entries, `window_get_framebuffer` and
+`window_present`). `fdk_init()` performs a real platform connection
+with backend auto-detection; `fdk_run()` is a real `poll()`-based
+event loop that exits on `fdk_quit()` or when the last top-level
+window closes; windows can be created, shown, resized, and receive
+real translated input/configure/close events on both backends; and
+applications can now draw real pixels into a window's surface and
+present them on either backend (see `examples/02_software_render.c`).
+See `docs/roadmap.md`'s Phase 3 entry for the precise, honest list of
+what is and isn't covered — in particular, this is deliberately a
+FIRST SLICE (no lines/transforms/text yet, no double buffering or
+frame pacing on Wayland, no MIT-SHM fast path on X11), and Wayland
+has no automated integration test yet, though the backend is verified
+end-to-end against a real headless Weston (see `docs/testing.md`).

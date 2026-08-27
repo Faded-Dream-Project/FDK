@@ -145,15 +145,69 @@ Explicitly NOT done in Phase 2 (do not mistake for oversights — see
   `context.c` has an obvious place to add a timer queue when needed,
   but adding one before anything needs it would be speculative.
 
-## Phase 3 — Rendering
+## Phase 3 — Rendering (first slice shipped; phase in progress)
 
-- Renderer abstraction behind `src/render/`, no widget code depends on
-  a specific backend renderer
-- Primitives: rects, rounded rects, lines, borders, fills, gradients,
-  clipping, transforms, images, alpha compositing, high-DPI scaling
-- Text integration begins here (`src/text/`) — font loading, glyph
-  rasterization; see `docs/dependencies.md` for the anticipated
-  minimal-rasterizer dependency
+Implemented and tested (the first slice — the foundation the rest of
+Phase 3 builds on):
+- `fdk_surface` public API (`include/fdk/fdk_surface.h`): a window's
+  software drawing target — framebuffer acquisition with live
+  resize-following (`fdk_surface_get_info`, XRGB8888 pixels + stride),
+  whole-window presentation (`fdk_surface_present`), and blending
+  source-over fill primitives (`fill`, `fill_rect`, `draw_rect`,
+  `fill_gradient_vertical`) operating on straight-alpha `fdk_color`
+- Two new optional `fdk_platform_ops` entries (`window_get_framebuffer`,
+  `window_present`) keep the render layer backend-agnostic; a backend
+  that can't provide a software framebuffer leaves them NULL and the
+  API reports `FDK_ERR_UNSUPPORTED` instead of pretending
+- X11 implementation (`src/platform/x11/x11_surface.c`): ZPixmap
+  `XImage` at the window's live size, `XPutImage` + flush on present;
+  standard 24-bit TrueColor layouts only (checked, `FDK_ERR_UNSUPPORTED`
+  otherwise — exotic visuals are refused, not mangled)
+- Wayland implementation (`src/platform/wayland/wayland_window.c`):
+  one fresh wl_shm XRGB8888 buffer per presented frame, tracked in a
+  fixed ring of in-flight slots until `wl_buffer::release`, reusing
+  the buffer lifecycle verified against weston in Phase 2; the old
+  solid-white background path still covers windows nobody renders
+  into, and is bypassed (no white flash) the moment an app presents
+- `fdk_pump_events()` (`fdk_core.h`): the application-owned event
+  loop primitive rendered apps are built on (fdk_run() blocks between
+  input events — nowhere to draw); `fdk_run()` is now a thin wrapper
+  over it. Includes the client-side-buffered-events drain fix found
+  live during the render demo (Xlib slurps socket data on every flush,
+  so events can be in Xlib's queue while poll() sees an empty socket)
+- `FDK_EVENT_WINDOW_EXPOSE` (`fdk_event.h`): X11 Expose translation
+  so rendered apps repaint covered regions; Wayland never needs it
+  (compositors retain the last committed buffer)
+- `02_software_render` example: animated gradient + bouncing
+  antialiased ball (raw pixel writes) + block-letter logo (fill
+  primitives), ~60 fps pump loop, ESC/close exit, verified end-to-end
+  on Xvfb (screenshots + H.264 capture + pixel checks) and on weston
+  headless (screenshots + pixel checks + WAYLAND_DEBUG protocol
+  counts: per-frame pool/buffer/attach/commit/release)
+- X11 renderer integration tests: server-side pixel readback via
+  XGetImage over a SECOND X connection (fill/rect/border/direct-write
+  all verified at exact packed-pixel values), and a resize test that
+  confirms the new framebuffer at the new geometry
+
+Explicitly NOT done in this first slice (do not mistake for
+oversights — each is the next step in `src/render/`):
+- **No dirty-rectangle tracking** — every present redraws the whole
+  window; fine at the current workload, wasteful beyond it
+- **No MIT-SHM fast path on X11** — XPutImage over a local socket is
+  a memcpy per frame; the shared-memory path slots invisibly inside
+  `x11_surface.c` when needed (and is required anyway for remote X)
+- **No double buffering / frame-callback pacing on Wayland** — one
+  buffer per present is allocation-heavy (~1 pool + buffer + fd per
+  frame); correctness over speed first, pacing next
+- **Primitive set is minimal** — no lines, rounded rects, clipping
+  stacks, transforms, images, or alpha-blitted blits yet; the
+  existing four fills are the building blocks, not the finish line
+- **Text integration** (`src/text/`) not started — the demo draws
+  block letters as rects precisely because there is no font path yet
+- **Single window scale handling** — buffer scale / fractional-scale
+  (HiDPI) protocols not wired up; surface dimensions equal window
+  dimensions in pixels, which is wrong under any non-1x scale factor
+  and is Phase 3's next structural gap to close
 
 ## Phase 4 — Widget Core
 

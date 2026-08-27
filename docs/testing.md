@@ -47,6 +47,19 @@ Real, observable behavior against a live X server (see
   test that proves the event loop, X11 event translation, and
   callback dispatch all work together, not just that individual
   pieces compile.
+- **`fdk_pump_events()` timeout semantics** (0 = non-blocking,
+  positive = bounded wait) and its argument-error contract
+- **Renderer pixel readback**: draw through `fdk_surface` (solid
+  fill, filled rect, 1px border, direct `info.pixels` write),
+  present, then read the window's contents back from the X SERVER
+  via `XGetImage` over a second, independent X connection — and
+  compare against the exact packed 0x00RRGGBB values. A blit that
+  drew nothing, misaligned, or swapped channels fails this.
+- **Renderer resize-follow**: resize mid-session, pump until the
+  `FDK_EVENT_WINDOW_CONFIGURE` arrives (exercising the documented
+  application loop shape), re-acquire the framebuffer — which must
+  now be the new geometry — render, and verify a pixel that only
+  exists in the NEW geometry reads back as the freshly drawn color.
 
 **Known, honest gap:** `WM_DELETE_WINDOW` (the close-request path,
 `FDK_EVENT_WINDOW_CLOSE_REQUEST`) is not exercised by `make test-x11`.
@@ -79,6 +92,38 @@ client. Verified in that setup:
   actually mapped and visible (solid white covering the output).
 - Clean shutdown path (window destroy, buffer destroy, disconnect)
   exercised when the compositor connection closes.
+
+The Phase 3 render path was verified in the same rig with the
+`02_software_render` example:
+
+- Per-frame protocol counts from `WAYLAND_DEBUG=1` over ~155 frames:
+  155 wl_shm pool creations, 155 buffer creations, 154 attaches,
+  155 commits, 152 releases — exactly the one-fresh-buffer-per-present
+  lifecycle `wayland_window.c` implements, with the compositor
+  releasing superseded buffers (no leaks, no slot exhaustion).
+- Two compositor screenshots ~3.5 s apart pixel-verify the ANIMATED
+  content is live: different gradient colors in each capture (the
+  palette cycled), 276+ distinct colors, and the white ball/logo
+  pixels present.
+- kiosk-shell's fullscreen `xdg_toplevel.configure(1024, 640)` was
+  received and the renderer followed it — the framebuffer resized and
+  the screenshots show the gradient covering the full output, not the
+  original 640x480 window.
+
+And a third real bug was found by exactly this testing, this time on
+the X11 side during the render demo:
+
+3. **Events buffered in Xlib's queue were invisible to poll()** —
+   Xlib reads socket data into its internal queue during ANY I/O,
+   including the `XFlush` at the end of every `fdk_surface_present()`.
+   An event (the demo's synthetic `WM_DELETE_WINDOW`, arriving while
+   the app was mid-render) could therefore already have left the
+   socket — and poll() on the connection fd never fires for it again.
+   Events that happened to land during the poll() wait worked; events
+   landing during rendering were swallowed forever. Fixed by
+   `fdk_pump_events()` draining client-side-buffered events before
+   waiting on the fd (both backends' dispatch_pending are safe to
+   call in that position by design).
 
 Two real bugs were found and fixed by exactly this testing, both of
 which would have reproduced on any compositor:
