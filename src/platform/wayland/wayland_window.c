@@ -216,6 +216,36 @@ static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
     pwindow->conn->dispatch(pwindow, &event, pwindow->conn->dispatch_user_data);
 }
 
+/* xdg_popup events (Phase 9): configure carries the final placement
+ * (the compositor may move it per the constraint adjustments —
+ * acknowledged through xdg_surface.ack_configure as usual);
+ * popup_done is the compositor's dismissal (click elsewhere, focus
+ * change) and becomes the window's close request. */
+static void xdg_popup_configure(void *data, struct xdg_popup *popup,
+                                int32_t x, int32_t y, int32_t width,
+                                int32_t height) {
+    (void)popup;
+    fdk_platform_window *pwindow = data;
+    pwindow->pending_size.width = width;
+    pwindow->pending_size.height = height;
+    FDK_DEBUG("xdg_popup configure at (%d, %d) %dx%d", x, y, width,
+              height);
+}
+
+static void xdg_popup_done(void *data, struct xdg_popup *popup) {
+    (void)popup;
+    fdk_platform_window *pwindow = data;
+    fdk_event_data event = { .type = FDK_EVENT_WINDOW_CLOSE_REQUEST };
+    pwindow->conn->dispatch(pwindow, &event,
+                            pwindow->conn->dispatch_user_data);
+}
+
+static const struct xdg_popup_listener g_xdg_popup_listener = {
+    .configure = xdg_popup_configure,
+    .popup_done = xdg_popup_done,
+    .repositioned = NULL,
+};
+
 static const struct xdg_toplevel_listener g_xdg_toplevel_listener = {
     .configure = xdg_toplevel_configure,
     .close = xdg_toplevel_close,
@@ -884,6 +914,7 @@ int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow) {
 
 fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
                                       const fdk_window_options *options,
+                                      fdk_platform_window *parent,
                                       fdk_platform_window **out_pwindow) {
     fdk_i32 width = WAYLAND_DEFAULT_WIDTH;
     fdk_i32 height = WAYLAND_DEFAULT_HEIGHT;
@@ -953,6 +984,66 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     }
     xdg_surface_add_listener(pwindow->xdg_surface, &g_xdg_surface_listener, pwindow);
 
+    int is_popup = (options != NULL && options->popup != 0);
+    pwindow->popup = is_popup;
+    pwindow->xdg_popup = NULL;
+
+    if (is_popup) {
+        /* Phase 9 popup: xdg_positioner anchored at the parent-
+         * relative point, xdg_popup on the PARENT's xdg_surface.
+         * The grab cites the newest input serial (compositors may
+         * refuse serial 0 — documented in fdk_window.h); popup_done
+         * (the compositor's dismissal) translates to a close request
+         * in the popup listener below. */
+        if (parent == NULL || parent->xdg_toplevel == NULL) {
+            FDK_ERROR("popup window needs a toplevel parent");
+            xdg_surface_destroy(pwindow->xdg_surface);
+            wl_surface_destroy(pwindow->surface);
+            fdk_free(pwindow);
+            return FDK_ERR_INVALID_ARGUMENT;
+        }
+        struct xdg_positioner *pos =
+            xdg_wm_base_create_positioner(conn->wm_base);
+        if (pos == NULL) {
+            FDK_ERROR("xdg_wm_base_create_positioner failed");
+            xdg_surface_destroy(pwindow->xdg_surface);
+            wl_surface_destroy(pwindow->surface);
+            fdk_free(pwindow);
+            return FDK_ERR_WINDOW_CREATE;
+        }
+        fdk_i32 px = (options != NULL) ? options->x : 0;
+        fdk_i32 py = (options != NULL) ? options->y : 0;
+        xdg_positioner_set_anchor_rect(pos, px, py, 1, 1);
+        xdg_positioner_set_size(pos, width, height);
+        xdg_positioner_set_anchor(
+            pos, XDG_POSITIONER_ANCHOR_BOTTOM_LEFT);
+        xdg_positioner_set_gravity(
+            pos, XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT);
+        xdg_positioner_set_constraint_adjustment(
+            pos, XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_X |
+                     XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_Y |
+                     XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y |
+                     XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_X |
+                     XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_Y);
+        pwindow->xdg_popup = xdg_surface_get_popup(
+            pwindow->xdg_surface, parent->xdg_surface, pos);
+        xdg_positioner_destroy(pos);
+        if (pwindow->xdg_popup == NULL) {
+            FDK_ERROR("xdg_surface_get_popup failed");
+            xdg_surface_destroy(pwindow->xdg_surface);
+            wl_surface_destroy(pwindow->surface);
+            fdk_free(pwindow);
+            return FDK_ERR_WINDOW_CREATE;
+        }
+        xdg_popup_add_listener(pwindow->xdg_popup,
+                               &g_xdg_popup_listener, pwindow);
+        xdg_popup_grab(pwindow->xdg_popup, conn->seat,
+                       conn->last_input_serial);
+        pwindow->xdg_toplevel = NULL;
+        /* Popups commit a buffer on show like any window; the
+         * configure handshake (xdg_surface.configure) drives the
+         * first commit, same as toplevels. */
+    } else {
     pwindow->xdg_toplevel = xdg_surface_get_toplevel(pwindow->xdg_surface);
     if (pwindow->xdg_toplevel == NULL) {
         FDK_ERROR("xdg_surface_get_toplevel failed");
@@ -969,6 +1060,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
      * the title). */
     xdg_toplevel_set_app_id(pwindow->xdg_toplevel,
                             conn->app_id != NULL ? conn->app_id : "fdk.app");
+    }
 
     /* xdg-decoration object creation must happen HERE, before any
      * buffer is ever attached: the protocol is explicit that a
@@ -1034,7 +1126,12 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
             zxdg_toplevel_decoration_v1_destroy(
                 pwindow->toplevel_decoration);
         }
-        xdg_toplevel_destroy(pwindow->xdg_toplevel);
+        if (pwindow->xdg_popup != NULL) {
+            xdg_popup_destroy(pwindow->xdg_popup);
+        }
+        if (pwindow->xdg_toplevel != NULL) {
+            xdg_toplevel_destroy(pwindow->xdg_toplevel);
+        }
         xdg_surface_destroy(pwindow->xdg_surface);
         wl_surface_destroy(pwindow->surface);
         fdk_free(pwindow);
@@ -1112,7 +1209,14 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         zxdg_toplevel_decoration_v1_destroy(pwindow->toplevel_decoration);
         pwindow->toplevel_decoration = NULL;
     }
-    xdg_toplevel_destroy(pwindow->xdg_toplevel);
+    if (pwindow->xdg_popup != NULL) {
+        xdg_popup_destroy(pwindow->xdg_popup);
+        pwindow->xdg_popup = NULL;
+    }
+    if (pwindow->xdg_toplevel != NULL) {
+        xdg_toplevel_destroy(pwindow->xdg_toplevel);
+        pwindow->xdg_toplevel = NULL;
+    }
     xdg_surface_destroy(pwindow->xdg_surface);
     wl_surface_destroy(pwindow->surface);
     fdk_free(pwindow);

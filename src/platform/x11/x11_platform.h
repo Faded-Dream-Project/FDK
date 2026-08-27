@@ -102,6 +102,13 @@ struct fdk_platform_window {
     Window xwindow;
     fdk_size last_size; /* most recent ConfigureNotify size */
 
+    /* Phase 9 popup state: override-redirect windows that grab the
+     * pointer (and keyboard) while shown; a click outside their
+     * bounds dismisses them (translated to a close request in
+     * x11_events.c, never delivered as a button event). */
+    int popup;
+    int grabbed;
+
     /* --- Phase 8 window-state bookkeeping ---
      *
      * maximized/minimized are the backend's view of the truth,
@@ -169,6 +176,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn);
 
 fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                                   const fdk_window_options *options,
+                                  fdk_platform_window *parent,
                                   fdk_platform_window **out_pwindow);
 void fdk_x11_window_destroy(fdk_platform_window *pwindow);
 void fdk_x11_window_show(fdk_platform_window *pwindow);
@@ -220,6 +228,12 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow);
  * x11_dispatch.c and from the acquire-side sync wait. */
 void fdk_x11_surface_shm_completion(fdk_platform_window *pwindow,
                                     unsigned long shmseg);
+
+/* Popup grabs (x11_window.c): called from window_show/hide when the
+ * window is a popup. Idempotent; failures log and continue (the
+ * popup still works, it just doesn't grab). */
+void fdk_x11_window_popup_grab(fdk_platform_window *pwindow);
+void fdk_x11_window_popup_ungrab(fdk_platform_window *pwindow);
 
 /* Clipboard (x11_clipboard.c). Called from x11_connection.c
  * (setup/teardown) and x11_dispatch.c (helper-window events, which

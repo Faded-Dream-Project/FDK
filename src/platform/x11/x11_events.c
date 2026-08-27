@@ -166,6 +166,20 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                 return 1;
             }
 
+            /* Popup dismissal (Phase 9): while a popup holds the
+             * grab, a press OUTSIDE its bounds (negative or past-edge
+             * coordinates — owner_events False reports everything
+             * against the grab window) is the universal "click away"
+             * gesture: it becomes a close request, never a button
+             * event inside the tree. */
+            if (pwindow->popup && xevent->type == ButtonPress &&
+                (xevent->xbutton.x < 0 ||
+                 xevent->xbutton.y < 0 ||
+                 xevent->xbutton.x >= (int)pwindow->last_size.width ||
+                 xevent->xbutton.y >= (int)pwindow->last_size.height)) {
+                out->type = FDK_EVENT_WINDOW_CLOSE_REQUEST;
+                return 1;
+            }
             out->type = (xevent->type == ButtonPress)
                 ? FDK_EVENT_POINTER_BUTTON_DOWN
                 : FDK_EVENT_POINTER_BUTTON_UP;

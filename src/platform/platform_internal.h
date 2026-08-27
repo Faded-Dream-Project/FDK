@@ -126,8 +126,13 @@ typedef struct fdk_platform_ops {
 
     /* --- Window operations --- */
 
+    /* Creates a window. `parent` is NULL for top-levels; for popup
+     * windows (options->popup, Phase 9) it is the parent platform
+     * window (X11: position reference for the override-redirect
+     * child; Wayland: the xdg_surface the xdg_popup attaches to). */
     fdk_result (*window_create)(fdk_platform_connection *conn,
                                  const fdk_window_options *options,
+                                 fdk_platform_window *parent,
                                  fdk_platform_window **out_pwindow);
     void (*window_destroy)(fdk_platform_window *pwindow);
     void (*window_show)(fdk_platform_window *pwindow);

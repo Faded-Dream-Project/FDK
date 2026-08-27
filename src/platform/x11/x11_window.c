@@ -15,24 +15,72 @@
 
 fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                                      const fdk_window_options *options,
+                                     fdk_platform_window *parent,
                                      fdk_platform_window **out_pwindow) {
     fdk_i32 width = X11_DEFAULT_WIDTH;
     fdk_i32 height = X11_DEFAULT_HEIGHT;
     const char *title = X11_DEFAULT_TITLE;
+    int popup = 0;
+    fdk_i32 pop_x = 0, pop_y = 0;
 
     if (options != NULL) {
         if (options->width > 0)  width = options->width;
         if (options->height > 0) height = options->height;
         if (options->title != NULL) title = options->title;
+        popup = options->popup;
+        pop_x = options->x;
+        pop_y = options->y;
     }
 
     unsigned long black = BlackPixel(conn->display, conn->screen);
     unsigned long white = WhitePixel(conn->display, conn->screen);
 
-    Window xwindow = XCreateSimpleWindow(
-        conn->display, conn->root,
-        0, 0, (unsigned int)width, (unsigned int)height,
-        0 /* border width */, black, white);
+    /* Popups (Phase 9): override-redirect children positioned at the
+     * parent's client-area origin + (x, y) in ROOT coordinates —
+     * override-redirect windows place directly, no WM frame math.
+     * Top-levels stay WM-managed at (0,0) as before. */
+    fdk_i32 win_x = 0, win_y = 0;
+    if (popup != 0) {
+        if (parent != NULL) {
+            Window child = None;
+            if (!XTranslateCoordinates(conn->display, parent->xwindow,
+                                       conn->root, 0, 0, &win_x, &win_y,
+                                       &child)) {
+                win_x = 0;
+                win_y = 0;
+            }
+        }
+        win_x += pop_x;
+        win_y += pop_y;
+    }
+
+    Window xwindow;
+    if (popup != 0) {
+        XSetWindowAttributes attrs;
+        memset(&attrs, 0, sizeof(attrs));
+        attrs.override_redirect = True;
+        attrs.border_pixel = black;
+        attrs.background_pixel = white;
+        attrs.event_mask = StructureNotifyMask | ExposureMask |
+                           FocusChangeMask | KeyPressMask |
+                           KeyReleaseMask | PointerMotionMask |
+                           ButtonPressMask | ButtonReleaseMask |
+                           EnterWindowMask | LeaveWindowMask |
+                           PropertyChangeMask;
+        xwindow = XCreateWindow(conn->display, conn->root,
+                                win_x, win_y, (unsigned int)width,
+                                (unsigned int)height, 0,
+                                CopyFromParent, InputOutput,
+                                CopyFromParent,
+                                CWOverrideRedirect | CWBorderPixel |
+                                    CWBackPixel | CWEventMask,
+                                &attrs);
+    } else {
+        xwindow = XCreateSimpleWindow(
+            conn->display, conn->root,
+            0, 0, (unsigned int)width, (unsigned int)height,
+            0 /* border width */, black, white);
+    }
 
     if (xwindow == 0) {
         FDK_ERROR("XCreateSimpleWindow failed");
@@ -76,6 +124,8 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
 
     pwindow->conn = conn;
     pwindow->xwindow = xwindow;
+    pwindow->popup = (popup != 0);
+    pwindow->grabbed = 0;
     pwindow->last_size.width = width;
     pwindow->last_size.height = height;
     pwindow->maximized = 0;
@@ -131,6 +181,9 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
     if (pwindow == NULL) {
         return;
     }
+    if (pwindow->popup) {
+        fdk_x11_window_popup_ungrab(pwindow);
+    }
     fdk_x11_surface_cleanup(pwindow);
     fdk_x11_unregister_window(pwindow->conn, pwindow);
     XDestroyWindow(pwindow->conn->display, pwindow->xwindow);
@@ -150,12 +203,61 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
     fdk_free(pwindow);
 }
 
+void fdk_x11_window_popup_grab(fdk_platform_window *pwindow) {
+    if (pwindow == NULL || !pwindow->popup || pwindow->grabbed) {
+        return;
+    }
+    Display *dpy = pwindow->conn->display;
+    /* The popup's grab: pointer events ANYWHERE on the screen route
+     * to our connection (owner_events False reports them against
+     * the grab window); clicks outside the popup's bounds become a
+     * dismissal in x11_events.c. The keyboard grab routes keys to
+     * the popup regardless of the WM's focus (menus need arrows). */
+    int pr = XGrabPointer(dpy, pwindow->xwindow, False,
+                          ButtonPressMask | ButtonReleaseMask |
+                              PointerMotionMask,
+                          GrabModeAsync, GrabModeAsync, None, None,
+                          CurrentTime);
+    int kr = XGrabKeyboard(dpy, pwindow->xwindow, False,
+                           GrabModeAsync, GrabModeAsync, CurrentTime);
+    if (pr != GrabSuccess || kr != GrabSuccess) {
+        FDK_WARN("popup grab: pointer=%d keyboard=%d (popup works, "
+                 "but outside clicks/keys may escape)",
+                 pr == GrabSuccess ? 1 : 0, kr == GrabSuccess ? 1 : 0);
+    }
+    pwindow->grabbed = 1;
+}
+
+void fdk_x11_window_popup_ungrab(fdk_platform_window *pwindow) {
+    if (pwindow == NULL || !pwindow->grabbed) {
+        return;
+    }
+    Display *dpy = pwindow->conn->display;
+    /* Release both grabs unconditionally — a successful grab of
+     * either kind must be undone even if the other failed. */
+    XUngrabKeyboard(dpy, CurrentTime);
+    XUngrabPointer(dpy, CurrentTime);
+    XFlush(dpy);
+    pwindow->grabbed = 0;
+}
+
 void fdk_x11_window_show(fdk_platform_window *pwindow) {
+    if (pwindow->popup) {
+        /* Map FIRST, then grab: grabbing before the window exists on
+         * screen fails outright under some servers. */
+        XMapWindow(pwindow->conn->display, pwindow->xwindow);
+        XFlush(pwindow->conn->display);
+        fdk_x11_window_popup_grab(pwindow);
+        return;
+    }
     XMapWindow(pwindow->conn->display, pwindow->xwindow);
     XFlush(pwindow->conn->display);
 }
 
 void fdk_x11_window_hide(fdk_platform_window *pwindow) {
+    if (pwindow->popup) {
+        fdk_x11_window_popup_ungrab(pwindow);
+    }
     XUnmapWindow(pwindow->conn->display, pwindow->xwindow);
     XFlush(pwindow->conn->display);
 }

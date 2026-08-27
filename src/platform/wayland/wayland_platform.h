@@ -165,6 +165,8 @@ struct fdk_platform_window {
     struct wl_surface *surface;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
+    int popup;                    /* Phase 9: xdg_popup window      */
+    struct xdg_popup *xdg_popup;  /* set when popup                */
 
     /* Solid background buffer — the Wayland equivalent of X11's
      * background pixel. Wayland compositors map nothing until a
@@ -331,6 +333,7 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn);
 
 fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
                                       const fdk_window_options *options,
+                                      fdk_platform_window *parent,
                                       fdk_platform_window **out_pwindow);
 void fdk_wayland_window_destroy(fdk_platform_window *pwindow);
 void fdk_wayland_window_show(fdk_platform_window *pwindow);

@@ -3550,6 +3550,120 @@ static void test_entry_gui(void) {
            "Backspace deletes (full widget<->clipboard round trip)\n");
 }
 
+
+static int close_requests = 0;
+static void popup_close_counter(fdk_window *w, const fdk_event_data *e,
+                                void *u) {
+    (void)w;
+    (void)u;
+    if (e->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        close_requests++;
+    }
+}
+
+/* ---- Popup windows (Phase 9) ----
+ *
+ * A real popup over a real toplevel: server-side pixel readback of
+ * the popup's fill, the outside-click dismissal (the grab redirects
+ * the click to our connection; x11_events.c turns out-of-bounds
+ * presses into close requests), and Escape dismissal. */
+static void test_popup_window(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK popup parent",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+
+    close_requests = 0;
+
+    fdk_window *pop = NULL;
+    assert(fdk_ok(fdk_window_create_popup(ctx, win, 40, 40, 120, 80,
+                                          &pop)));
+    /* Paint the popup a distinctive color via its root. */
+    fdk_widget *proot = NULL;
+    assert(fdk_ok(fdk_window_get_root(pop, &proot)));
+    fdk_widget_set_background(proot, (fdk_color){0.0f, 1.0f, 0.0f, 1.0f});
+    fdk_window_set_event_callback(pop, popup_close_counter, NULL);
+
+    fdk_window_show(pop);
+    (void)fdk_pump_events(ctx, 200);
+    assert(fdk_ok(fdk_window_paint(pop)));
+    (void)fdk_pump_events(ctx, 100);
+
+    /* Server-side readback: the popup's green fill at its center.
+     * The popup sits at parent-origin + (40,40); the parent window
+     * origin under bare Xvfb is (0,0)+size of nothing — read at the
+     * popup's center via the popup's own XID. */
+    Display *rb_dpy = NULL;
+    unsigned long pop_xid = fdk_window_xid(pop);
+    /* The parent's absolute origin: */
+    Window child_ret = None;
+    int px = 0, py = 0;
+    unsigned long parent_xid = fdk_window_xid(win);
+    rb_dpy = XOpenDisplay(NULL);
+    assert(rb_dpy != NULL);
+    assert(XTranslateCoordinates(rb_dpy, (Window)parent_xid,
+                                 DefaultRootWindow(rb_dpy), 0, 0, &px,
+                                 &py, &child_ret));
+    unsigned long px_color =
+        x11_readback_pixel(&rb_dpy, pop_xid, 60, 40) & 0xFFFFFF;
+    int green = ((px_color >> 8) & 0xFFu) > 200 &&
+                ((px_color >> 16) & 0xFFu) < 60 &&
+                (px_color & 0xFFu) < 60;
+    assert(green);
+    (void)px;
+    (void)py;
+    (void)child_ret;
+
+    /* Outside click: the parent's area (screen coords inside the
+     * PARENT but outside the popup) — the grab routes it to the
+     * popup's connection, x11_events sees out-of-bounds, the popup
+     * gets a close request. */
+    /* XSendEvent bypasses grabs — drive the dismissal path directly:
+     * a ButtonPress with out-of-bounds coordinates to the popup
+     * window (the exact shape a grabbed outside click produces). */
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = ButtonPress;
+    ev.xbutton.window = (Window)pop_xid;
+    ev.xbutton.x = -50; /* outside the popup: the dismissal shape */
+    ev.xbutton.y = -50;
+    ev.xbutton.button = 1;
+    ev.xbutton.same_screen = True;
+    assert(XSendEvent(rb_dpy, (Window)pop_xid, False,
+                      (long)(ButtonPressMask | ButtonReleaseMask), &ev));
+    XFlush(rb_dpy);
+    (void)fdk_pump_events(ctx, 200);
+    assert(close_requests == 1);
+    printf("[ok] popup: outside-click press delivers close request\n");
+
+    /* Escape: the popup's own key path. */
+    XEvent esc;
+    memset(&esc, 0, sizeof(esc));
+    esc.type = KeyPress;
+    esc.xkey.window = (Window)pop_xid;
+    esc.xkey.keycode = 9; /* Escape on the default map */
+    esc.xkey.same_screen = True;
+    assert(XSendEvent(rb_dpy, (Window)pop_xid, False,
+                      (long)(KeyPressMask | KeyReleaseMask), &esc));
+    XFlush(rb_dpy);
+    (void)fdk_pump_events(ctx, 200);
+    assert(close_requests == 2);
+    printf("[ok] popup: Escape delivers close request\n");
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(pop);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] popup window: pixel-verified fill, outside-click + "
+           "Escape dismissal, clean teardown\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -3585,6 +3699,7 @@ int main(void) {
     test_mitm_shm_and_double_buffer();
     test_clipboard();
     test_entry_gui();
+    test_popup_window();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

@@ -34,6 +34,15 @@ typedef struct fdk_window_options {
     const char *title;      /* copied internally; NULL = default title */
     fdk_i32 width;           /* <= 0 means "use default" (640) */
     fdk_i32 height;          /* <= 0 means "use default" (480) */
+    /* Phase 9 appended fields (zero-init = the top-level defaults):
+     * popup windows position at (x, y) relative to their PARENT
+     * window's client area, take no WM chrome, grab input until
+     * dismissed (click-outside / Escape deliver
+     * FDK_EVENT_WINDOW_CLOSE_REQUEST), and are created via
+     * fdk_window_create_popup(). */
+    int popup;               /* nonzero = popup window             */
+    fdk_i32 x;               /* parent-relative popup position     */
+    fdk_i32 y;
 } fdk_window_options;
 
 /* Creates a top-level window on `ctx`'s platform connection. Writes
@@ -50,6 +59,27 @@ typedef struct fdk_window_options {
 fdk_result fdk_window_create(fdk_context *ctx,
                               const fdk_window_options *options,
                               fdk_window **out_window);
+
+/* Phase 9: creates a POPUP window anchored at (x, y) relative to
+ * `parent`'s client area — the platform layer for menus, combo
+ * dropdowns, and transient panels. Popups take no WM/compositor
+ * chrome, grab input while shown (X11: server pointer+keyboard
+ * grab; Wayland: xdg_popup.grab), and deliver
+ * FDK_EVENT_WINDOW_CLOSE_REQUEST when dismissed by a click outside
+ * their bounds or the Escape key. Positioning beyond the screen is
+ * the backend's to clamp (Wayland positioner constraints; X11
+ * windows clip at the root). Popups must not outlive their parent
+ * (destroying the parent force-destroys popups it anchors).
+ *
+ * Wayland note: xdg_popup.grab must cite an input serial; before
+ * any input has arrived (serial 0) compositors may refuse the grab
+ * — the popup still shows, it just won't dismiss on outside clicks
+ * until then (documented, matching every toolkit's Wayland caveat
+ * list). */
+fdk_result fdk_window_create_popup(fdk_context *ctx, fdk_window *parent,
+                                   fdk_i32 x, fdk_i32 y, fdk_i32 width,
+                                   fdk_i32 height,
+                                   fdk_window **out_window);
 
 /* Maps the window (makes it visible). No-op if already shown. */
 void fdk_window_show(fdk_window *window);

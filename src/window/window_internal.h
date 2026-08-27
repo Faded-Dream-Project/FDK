@@ -73,6 +73,7 @@ bool fdk__window_is_double_click(fdk_i64 now_ms, fdk_i64 last_ms,
 struct fdk_window {
     fdk_context *ctx;                 /* owning context, not owned by us */
     const fdk_platform_ops *ops;      /* same as ctx's ops, cached for convenience */
+    bool is_popup;                    /* Phase 9: grabbed dismissal window */
     fdk_platform_window *pwindow;     /* backend-owned handle */
 
     fdk_size last_size;

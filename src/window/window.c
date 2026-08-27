@@ -610,9 +610,41 @@ static void window_arrange_deco(fdk_window *window) {
     }
 }
 
+static fdk_result window_create_full(fdk_context *ctx,
+                                     const fdk_window_options *options,
+                                     fdk_window *parent,
+                                     fdk_window **out_window);
+
 fdk_result fdk_window_create(fdk_context *ctx,
                               const fdk_window_options *options,
                               fdk_window **out_window) {
+    return window_create_full(ctx, options, NULL, out_window);
+}
+
+fdk_result fdk_window_create_popup(fdk_context *ctx, fdk_window *parent,
+                                   fdk_i32 x, fdk_i32 y, fdk_i32 width,
+                                   fdk_i32 height,
+                                   fdk_window **out_window) {
+    if (out_window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (parent == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT; /* popups need a parent */
+    }
+    fdk_window_options options;
+    memset(&options, 0, sizeof(options));
+    options.popup = 1;
+    options.x = x;
+    options.y = y;
+    options.width = width;
+    options.height = height;
+    return window_create_full(ctx, &options, parent, out_window);
+}
+
+static fdk_result window_create_full(fdk_context *ctx,
+                                     const fdk_window_options *options,
+                                     fdk_window *parent,
+                                     fdk_window **out_window) {
     if (ctx == NULL || out_window == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
@@ -665,6 +697,7 @@ fdk_result fdk_window_create(fdk_context *ctx,
     window->deco_btn_close = (fdk_rect){0, 0, 0, 0};
     window->deco_hover = 0;
     window->deco_pressed = 0;
+    window->is_popup = (options != NULL && options->popup != 0);
 
     if (options != NULL && options->title != NULL) {
         size_t n = strlen(options->title) + 1;
@@ -674,7 +707,9 @@ fdk_result fdk_window_create(fdk_context *ctx,
         }
     }
 
-    fdk_result r = ctx->ops->window_create(ctx->conn, options, &window->pwindow);
+    fdk_result r = ctx->ops->window_create(
+        ctx->conn, options,
+        (parent != NULL) ? parent->pwindow : NULL, &window->pwindow);
     if (!fdk_ok(r)) {
         fdk_free(window);
         return r;
@@ -1022,6 +1057,13 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
             /* Phase 5: the content widget reflows with the window. */
             fdk_window_layout(window);
         }
+    } else if (event->type == FDK_EVENT_KEY_DOWN &&
+               window->is_popup &&
+               event->key.scancode == FDK_KEY_ESC) {
+        /* Escape dismisses a popup — the universal dismissal key. It
+         * is consumed here so widgets never see it. */
+        fdk_event_data close = { .type = FDK_EVENT_WINDOW_CLOSE_REQUEST };
+        fdk_window_dispatch_event(window, &close);
     } else if (event->type == FDK_EVENT_WINDOW_EXPOSE) {
         if (window->root != NULL) {
             fdk_widget_invalidate_all(window->root);
