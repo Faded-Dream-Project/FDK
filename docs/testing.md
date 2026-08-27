@@ -139,7 +139,7 @@ run.
 ## Layout tests (Phase 5)
 
 The layout engine is pure geometry over the widget hooks, so
-`tests/test_layout.c` runs headless in plain `make test` (9 cases,
+`tests/test_layout.c` runs headless in plain `make test` (13 cases,
 ASan+UBSan): box measure math (naturals + spacing + padding +
 margins, homogeneous, orientation), arrangement math (packing,
 expansion absorbing the leftover, cross-axis align/expand), margins
@@ -149,14 +149,36 @@ engine bugs the 07 demo found: a Frame relayouts when ITS children
 change — box-ness by hook delegation — and ancestors re-run when a
 nested container's natural changes, with the box setters reaching
 subclasses), nested boxes, a pixel-agreement case (a laid-out tree paints exactly
-into its computed slots), and argument safety. The window integration
+into its computed slots), and argument safety — plus the completion
+slice's four: GRID measure/arrange (track naturals, spans
+distributing their deficit, growth on attach, expand tracks,
+homogeneous, hidden children, cell align), the grid NOTIFIER
+regression (attaching or changing a child re-packs without an
+explicit arrange — the delegation rule again), SIZE LIMITS (min/max
+clamped into every measure, max<min normalization, limits honored
+through a real container's negotiation, argument safety), and
+BASELINE (box cross-axis alignment against the group max, the
+bottom-edge fallback for widgets without one, and a Label's reported
+ascent). The window integration
 (auto-reflow of the content widget on every configure) is the X11
 suite's job: `test_widget_layout_reflow_on_resize` resizes a live
 window and verifies SERVER-SIDE that the box reflowed — the fixed
 header stays 40px, the expanding panel owns the new space, and the
 boundary sits at the exact pixel layout computed. Destroying the
 content widget and calling fdk_window_layout() must deactivate the
-association cleanly rather than arranging a freed widget.
+association cleanly rather than arranging a freed widget. The
+completion slice adds the X11 GRID GUI case (tracks, a min-width
+limit through a real container, expand column/row, a spanning cell,
+gaps, and reflow on live resize — all server-readback) and the X11
+BASELINE case (16px and 32px labels sharing one baseline row, their
+ink tops/bottoms verified at exact pixels).
+
+The Wayland side of the reflow contract runs in the sway rig (see
+the Wayland section below): a client-side resize through a FLOATING
+toplevel must re-arrange the tree and reach the screen — the case
+that found the two resize-path engine bugs recorded in the roadmap's
+Phase 5 entry (the synthesized-configure fix and the stale cached
+framebuffer drop).
 
 ## Theme tests (Phase 7)
 

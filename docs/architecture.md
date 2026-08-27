@@ -10,11 +10,14 @@ Application code
       |
 Widgets  (src/widget/)         — Phase 4 (foundation) landed;
       |                           core widget catalog Phase 6
-Layout   (src/layout/)         — Phase 5 (hooks already in the
+Layout   (src/layout/)         — Phase 5 complete: box + grid,
+      |                           per-child hints, size limits,
+      |                           baseline (hooks already in the
       |                           widget API: measure/arrange)
-Text     (src/text/)           — Phase 6 first slice: fonts, UTF-8
-      |                           shaping, glyph cache, drawing
-      |                           (sits on the render layer)
+Text     (src/text/)           — Phase 6 complete: fonts, UTF-8
+      |                           shaping, glyph cache, subpixel
+      |                           positioning, synthetic styles,
+      |                           drawing (sits on the render layer)
 Rendering abstraction (src/render/) — Phase 3 (software surfaces,
       |                                framebuffer access,
       |                                damage-tracked present, clip

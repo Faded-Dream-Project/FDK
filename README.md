@@ -4,7 +4,7 @@ FDK is a native C17 GUI toolkit being built for modern Linux desktops,
 targeting the practical role GTK and Qt currently serve for
 applications that choose to target it. Minimal dependencies, no
 GTK/Qt dependency, real X11 and Wayland backends, and its own `.fdk`
-theme format (coming in Phase 6). See `docs/roadmap.md` for the
+theme format (shipped in Phase 7). See `docs/roadmap.md` for the
 full project plan and current status.
 
 FDK is **distro-agnostic**: it should build and run on any modern
@@ -168,11 +168,16 @@ memory. Run `examples/03_widgets.c` for a live panel/button/meter UI
 with hover, press, focus-tint, and a quit button that destroys the
 window from inside its own release handler.
 
-Layout works today too — Phase 5's first slice. Boxes (horizontal or
+Layout works today too — Phase 5, complete. Boxes (horizontal or
 vertical) lay children out from per-child requests and hints —
-margins, expansion, cross-axis alignment — with the classic
-two-pass measure/arrange model, and the window's CONTENT widget
-reflows automatically on every resize:
+margins, expansion, cross-axis alignment, BASELINE alignment — and
+the GRID places children in (column, row) cells with spans, per-
+track expansion, and homogeneous mode; per-widget MIN/MAX size
+limits clamp every measure so any container negotiates within
+them. The classic two-pass measure/arrange model underneath it all,
+and the window's CONTENT widget reflows automatically on every
+resize — on X11 AND Wayland (a client-side resize re-arranges the
+tree and reaches the compositor's screen):
 
 ```c
 fdk_widget *content = NULL;
@@ -190,17 +195,24 @@ fdk_widget_set_expand(main_area, false, true);   /* take the leftover */
 ```
 
 Run `examples/04_layout.c`: an interface built entirely from boxes
-(nothing placed by hand), with the window itself breathing through a
-resize oscillation and a meter whose size request animates — every
-child reflowing live through configure -> relayout -> damage ->
-repaint.
+and a grid (nothing placed by hand), with the window itself
+breathing through a resize oscillation and a meter whose size
+request animates — every child reflowing live through configure ->
+relayout -> damage -> repaint. The grid's spanning cell and
+expanding last column absorb the window's growth while the other
+tracks and the gaps stay put.
 
-And text renders for real now — Phase 6's first slice. Load a
+And text renders for real now — Phase 6, complete. Load a
 TrueType font, measure a UTF-8 run (advance + ink bounds), and draw
-it kerned and anti-aliased onto any surface; measurement and drawing
-share one shaping walk, so what you measure is exactly where it
-paints. Glyphs rasterize once per font and live in an LRU cache;
-each run costs a single damage rectangle:
+it kerned and anti-aliased onto any surface with SUBPIXEL glyph
+positioning (four phase-keyed rasterizations per glyph — every glyph
+paints within 1/8 px of where the pen actually is); measurement and
+drawing share one shaping walk, so what you measure is exactly
+where it paints. Synthetic BOLD and ITALIC styles ride the font
+object (`fdk_font_set_style`) — stems widen and the advance grows
+with them, italic shears at the baseline without touching the
+advance. Glyphs rasterize once per (glyph, phase) and live in an
+LRU cache; each run costs a single damage rectangle:
 
 ```c
 fdk_font *font = fdk_font_load("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24);

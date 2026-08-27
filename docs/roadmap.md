@@ -418,7 +418,7 @@ Explicitly NOT done in Phase 4 (do not mistake for oversights):
   type (ABI policy) — internal pattern only, documented in
   `fdk_widget.h`.
 
-## Phase 5 — Layout Engine (first slice shipped; phase in progress)
+## Phase 5 — Layout Engine — COMPLETE
 
 Implemented and tested in the FIRST slice (the box):
 - `fdk_layout` public API (`include/fdk/fdk_layout.h`): the BOX
@@ -456,14 +456,81 @@ Implemented and tested in the FIRST slice (the box):
 - `examples/04_layout.c`: box-built UI, breathing window + animated
   size request, steady hold phases for the captured proof frames
 
-Still NOT done (next slices of Phase 5):
-- **Grid container** — the other classic; the box proves the pattern
-- **Min/max size constraints** on widgets (clamps at measure time)
-- **Baseline alignment** for the day text exists (Phase 6 dependency)
-- **Wayland-side reflow test** — same toolchain gap as Phase 4;
-  the engine is backend-neutral and verified headless + on X11
+Completion slice (grid, constraints, baseline, Wayland reflow):
+- **Grid container** (`src/layout/grid.c`, the Phase 5 API in
+  `fdk_layout.h`): children attach at (column, row) with colspan/
+  rowspan; the grid grows to contain any attachment. Track sizes are
+  the maximum natural of their children (a multi-span child
+  distributes any deficit it introduces equally over its span);
+  `fdk_grid_set_column_expand` / `_row_expand` mark tracks that share
+  the container's EXTRA space; homogeneous mode equalizes tracks per
+  axis; spacing/padding match the box's semantics. Same per-child
+  hints as the box (margins, align, expand), and the same
+  pure-geometry relayout triggers — attach, child-change
+  propagation, hint changes. Re-attaching moves the child.
+- **Min/max size constraints**: `fdk_widget_set_size_limits` clamps
+  into EVERY measure result (0 = unconstrained; max < min is
+  normalized, min wins), so any container — box, grid, or a future
+  one — negotiates within the limits without knowing about them.
+  Changing limits relayouts the parent immediately, like the other
+  hint setters.
+- **Baseline alignment**: `FDK_ALIGN_BASELINE` on the box's cross
+  axis (and grid cells' vertical align). Text-bearing widgets report
+  their baseline (`fdk_widget_get_baseline`; `fdk__widget_set_
+  baseline` is the internal setter controls use — the Label reports
+  its font's ascent); widgets without one use their BOTTOM edge, so
+  a mixed row still lines up. The container's baseline is the MAX of
+  its children's, the group offset per child from that max.
+- **Wayland-side reflow test**: the toolchain gap closed with the
+  Phase 8 sway rig — `test_wayland_integration.c` now drives a real
+  client-side resize through the compositor and verifies the
+  re-arranged tree in the framebuffer (expanding body stretches,
+  footer moves to the new bottom).
+- Tests: +4 headless layout cases (grid measure/arrange with spans,
+  growth, expand, homogeneous, hidden, cell align; grid notifier
+  regression; size limits through a real container; baseline with
+  bottom-edge fallback and label ascent) and +2 X11 GUI cases (grid
+  through window resize with server-side pixel readback of tracks/
+  gaps/limits; baseline alignment of 16px + 32px labels sharing one
+  baseline row) — and the Wayland reflow case above.
+- `examples/04_layout.c`: the demo's main panel now carries a 3x2
+  GRID with a two-column spanning cell and an expanding last column
+  (LAYOUT DEMO rig extended: fixed track widths, exact 8px gaps,
+  the span, and the expand column absorbing the window's growth are
+  all PIL-verified across the two hold phases).
 
-## Phase 6 — Core Widgets + Text Foundation (first slice shipped; phase in progress)
+Two REAL engine bugs the completion slice found and fixed (both
+caught by tests/demos that finally exercised the paths):
+1. **Wayland client-side resize deadlocked.** `fdk_window_resize()`
+   on a surface-rendered window recorded the new size platform-side
+   but never told the frontend: the widget tree's own damage
+   tracking said "clean", no compositor configure ever arrived
+   (the compositor only reacts to a commit), so nothing repainted,
+   nothing committed, and the window stayed at its old size forever.
+   The Wayland resize now synthesizes the FDK_EVENT_WINDOW_CONFIGURE
+   the frontend would have gotten from a compositor (optimistic in
+   the same sense the request itself is — a disagreeing compositor
+   corrects it with a real configure).
+2. **A framebuffer acquired between presents pinned the OLD size.**
+   The surface layer caches its acquired framebuffer until present;
+   a `get_info` between presents re-acquired at the pre-resize size,
+   and the post-resize paint then drew into that stale buffer
+   (clipped) and committed the OLD size — on BOTH backends; X11's
+   tests just never hit the ordering. CONFIGURE handling now drops
+   the cached framebuffer (`fdk__surface_drop_framebuffer`) so the
+   next acquire re-fetches at the current size.
+
+Also fixed en route (found by the 04/05 demo rigs while validating
+this slice): X11 double-buffer SLOT SYNCHRONIZATION — frame N+1's
+partial damage shipped rects from a slot whose contents were two
+presents old (the breathing meter flickered whole storm-era frames
+between correct ones); the presented region is now copied front ->
+back after every present. And `fdk_pump_events`' timeout contract
+is now enforced against a monotonic deadline — X11's per-present
+ShmCompletion events were waking the poll early, pacing a draw-
+per-frame loop at 252fps instead of the requested 15ms.
+
+## Phase 6 — Core Widgets + Text Foundation — COMPLETE
 
 **Shipped — text foundation** (`include/fdk/fdk_text.h`, `src/text/`,
 docs in `docs/text.md`):
@@ -553,8 +620,44 @@ expectations recomputed to the contract.
    Regression test: test_layout's nested child-change propagation
    case (fontless, exact numbers).
 
+**Completion slice (subpixel + synthetic styles):**
+- **Subpixel glyph positioning**: the shaping walk floors each
+  glyph's left edge and quantizes the fractional remainder (kerning
+  and fractional advances make it non-integral) into one of 4
+  phase-keyed rasterizations (`stbtt_GetGlyphBitmapSubpixel`), so
+  every glyph paints within 1/8 px of where the float pen actually
+  is; the measured total stays `round(final pen)` — v1 behavior
+  unchanged. The glyph cache keys (glyph, phase) pairs (capacity
+  2048 = the old 512 glyphs' worth of coverage); y stays integer
+  (lines sit on the baseline). Contracts pinned by tests:
+  measure/draw agreement survives fractional pens, redraws are
+  deterministic, a pen shift of exactly 1px translates the ink
+  pixel-exactly with ZERO new rasterizations (phase keys ignore the
+  integer part), and a repeated glyph fans out across phases (more
+  cache entries than codepoints).
+- **Synthetic bold/italic** (`fdk_font_set_style` / `get_style`):
+  SYNTHESIS, not face selection — BOLD dilates strokes by
+  pixel_size/24 px (min 1) and grows the advance by the same stem
+  (a bold run measures exactly as wide as it paints); ITALIC is an
+  oblique shear anchored at the baseline with the advance
+  deliberately unchanged (CSS font-synthesis semantics; the
+  overhang rides the damage model). A designed face file loaded
+  with `fdk_font_load` remains the better choice — the header docs
+  say so. Style changes flush the glyph cache (rasterizations bake
+  the style in); re-setting the same style is a documented no-op.
+  Contracts pinned by tests: argument safety, unknown-bit masking,
+  bold advance = regular + stem x inked glyphs (height untouched),
+  italic advance unchanged, combo = stem only, flush + idempotence,
+  draw agreement under style.
+- En route, the eviction test's cache bound was recomputed for the
+  new capacity (2048 (glyph, phase) entries) and the two stale
+  capacity mentions in `fdk_text.h` / `docs/text.md` updated.
+
 **Still to build (rest of Phase 6):**
 - Subpixel glyph positioning; bold/italic faces beyond file choice
+  — BOTH SHIPPED ABOVE; nothing remains. (Width-for-height layout
+  for wrap labels stays recorded as a v1 limitation below — it
+  wants a later layout pass, not more Phase 6 scope.)
 
 Phase 3's original "src/text/ gap" is closed (and Phase 3 itself is
 now COMPLETE — its completion slice landed after Phase 8, closing

@@ -42,10 +42,11 @@ UTF-8 bytes
    ▼
 codepoints ──stbtt_FindGlyphIndex──▶ glyph ids (0 = .notdef)
    │
-   │  per glyph: cache lookup (rasterize on miss)
+   │  per glyph: cache lookup (rasterize on miss, PER PHASE)
    ▼
-float pen advance + pair kerning ──▶ integer glyph placement
-   │                                    (each glyph at round(pen))
+float pen advance + pair kerning ──▶ SUBPIXEL glyph placement
+   │                                    (left edge at floor(pen),
+   │                                     fraction -> 4-phase raster)
    ▼
 fdk_surface_blend_mask()  ──▶ XRGB8888 framebuffer, clip-stack honored
    │
@@ -53,26 +54,58 @@ fdk_surface_blend_mask()  ──▶ XRGB8888 framebuffer, clip-stack honored
 one damage rect per run (ink union ∩ effective clip)
 ```
 
-- **Rounding**: each glyph is placed at `round(pen)` and the total
-  advance is rounded once at the end — so `2 × measure("W")` can
-  differ from `measure("WW")` by a pixel (round-of-sum vs
-  sum-of-rounds; it drifts both ways). The tests pin this behavior.
+- **Subpixel positioning**: each glyph's left edge is placed at
+  `floor(pen)` and the fractional remainder (kerning and fractional
+  advances make it non-integral) is quantized into one of 4 phases
+  (0, 1/4, 1/2, 3/4) baked into that phase's rasterization — every
+  glyph paints within 1/8 px of where the float pen actually is.
+  The total advance stays `round(final pen)`, exactly the v1
+  behavior, and y stays integer (lines sit on the baseline). A pen
+  shift of a whole pixel reuses the same phase keys — translated
+  ink, zero re-rasterization.
 - **Damage**: glyphs' ink boxes are unioned in 64-bit space and
   intersected with the renderer's live effective clip, so a
   100-glyph line costs one damage rect and a clipped run damages
   only the visible span. Runs with no ink (pure whitespace) add no
   damage.
 
+## Synthetic styles
+
+`fdk_font_set_style(font, FDK_FONT_STYLE_BOLD | FDK_FONT_STYLE_ITALIC)`
+synthesizes the two classic styles on whatever face the font object
+loaded — SYNTHESIS, not face selection. When a real bold or italic
+face FILE exists, `fdk_font_load()` of that file is the better
+choice; a designed face beats a synthesized one.
+
+- **BOLD** widens strokes by `pixel_size/24` px (min 1) via
+  horizontal dilation (max-window), and the advance grows by the
+  same stem — so a bold run measures exactly as wide as it paints.
+  The ink's height is untouched.
+- **ITALIC** is an oblique shear (~12 degrees) anchored at the
+  baseline: ascenders lean right, descenders left. The advance is
+  deliberately unchanged (CSS `font-synthesis` semantics) — the
+  slanted ink may overhang the next glyph's slot, which the damage
+  model already covers.
+
+Both passes run at raster time, so a style change flushes the glyph
+cache (every cached bitmap is now the wrong shape); the next
+measure/draw re-rasterizes on demand. Measurement always reflects
+the current style. Re-setting the same style is a no-op.
+
 ## Glyph cache
 
-Each font owns a cache of up to **512 rasterized glyphs**
-(fdk_alloc'd, ASan-tracked via the stb allocator hooks). Lookup is a
-linear scan of live entries — fine at 512 entries because
-rasterization and blending dominate; promotion to a hash table is a
-recorded optimization for when profiling justifies it. When the
-cache is full, the least-recently-used glyph is evicted. 512 keeps
-entire alphabets plus punctuation resident; eviction only matters
-for CJK-heavy runs (and then it is correct, just slower).
+Each font owns a cache of up to **2048 rasterized glyph
+entries** (fdk_alloc'd, ASan-tracked via the stb allocator hooks).
+Subpixel positioning keys each entry by *(glyph, subpixel phase)* —
+four phases per distinct glyph — so 2048 entries preserve the
+real-glyph coverage the original 512 gave at integer positioning.
+Lookup is a linear scan of live entries — fine at 2048 entries
+because rasterization and blending dominate; promotion to a hash
+table is a recorded optimization for when profiling justifies it.
+When the cache is full, the least-recently-used entry is evicted.
+That keeps entire alphabets plus punctuation resident across all
+phases; eviction only matters for CJK-heavy runs (and then it is
+correct, just slower).
 
 ## stb_truetype (vendored)
 
@@ -140,8 +173,10 @@ width-for-height layout yet).
 
 Recorded on the roadmap, in rough dependency order:
 
-- Subpixel glyph positioning (cache keys on the fractional offset).
-- Bold/italic selection beyond loading the specific face file.
+- ~~Subpixel glyph positioning~~ — SHIPPED (4-phase subpixel
+  rasterization above).
+- ~~Bold/italic selection beyond loading the specific face file~~ —
+  SHIPPED (synthesis above; designed-face files remain better).
 - Width-for-height label layout (wrap labels re-flow at the
   ALLOCATED width; their natural height still answers the natural
   width — documented in fdk_widgets.h).
@@ -150,13 +185,17 @@ Recorded on the roadmap, in rough dependency order:
 
 ## Testing
 
-`tests/test_text.c` (9 cases, ASan+UBSan): lifecycle and failure
+`tests/test_text.c` (11 cases, ASan+UBSan): lifecycle and failure
 modes, metrics sanity and 2× scale proportionality, measurement
 (including the rounding behavior above), draw/damage/ink-bounds
 agreement, cache-hit determinism and eviction, clip-stack honoring,
 UTF-8 edge cases, greedy wrapping (fit/agreement/hard breaks/
 mid-word/truncation), and ellipsis (fits/no-fit/maximal/boundary/
-degenerate). `tests/test_x11_integration.c` adds a
+degenerate) — plus the completion slice's two: synthetic styles
+(argument safety, masking, bold/italic advance contracts, cache
+flush + idempotence, draw agreement) and subpixel positioning
+(fractional-pen agreement, determinism, pen-shift invariance, phase
+fan-out). `tests/test_x11_integration.c` adds a
 server-side readback case that verifies real glyph ink reached the X
 server's pixels inside the measured metrics box and nowhere else.
 Both suites honestly skip when the environment has no system font.
