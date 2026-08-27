@@ -6,6 +6,7 @@
 #include "core/log_internal.h"
 
 #include <X11/Xutil.h>
+#include <X11/Xatom.h>
 #include <unistd.h>
 
 fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
@@ -42,6 +43,50 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->net_wm_name = XInternAtom(display, "_NET_WM_NAME", False);
     conn->utf8_string = XInternAtom(display, "UTF8_STRING", False);
     conn->motif_wm_hints = XInternAtom(display, "_MOTIF_WM_HINTS", False);
+    conn->net_wm_state = XInternAtom(display, "_NET_WM_STATE", False);
+    conn->net_wm_state_maximized_vert =
+        XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+    conn->net_wm_state_maximized_horiz =
+        XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_HORIZ", False);
+    conn->net_wm_moveresize = XInternAtom(display, "_NET_WM_MOVERESIZE", False);
+    conn->wm_state = XInternAtom(display, "WM_STATE", False);
+    conn->wm_change_state = XInternAtom(display, "WM_CHANGE_STATE", False);
+
+    /* Probe the WM's EWMH capabilities ONCE, from the root's
+     * _NET_SUPPORTED atom list — the EWMH-sanctioned capability
+     * discovery. No list (or an empty one) means no EWMH WM is
+     * running (bare X, Xvfb, or a pre-EWMH WM), which is exactly what
+     * the bare-X fallback paths in x11_window.c key off. */
+    {
+        Atom net_supported = XInternAtom(display, "_NET_SUPPORTED", False);
+        Atom type = None;
+        int format = 0;
+        unsigned long nitems = 0, bytes_after = 0;
+        unsigned char *prop = NULL;
+        if (XGetWindowProperty(display, conn->root, net_supported,
+                               0, 1024, False, XA_ATOM, &type, &format,
+                               &nitems, &bytes_after, &prop) == Success &&
+            type == XA_ATOM && format == 32 && nitems > 0) {
+            conn->ewmh_wm = 1;
+            Atom *atoms = (Atom *)prop;
+            int have_vert = 0, have_horiz = 0;
+            for (unsigned long i = 0; i < nitems; i++) {
+                if (atoms[i] == conn->net_wm_state_maximized_vert) {
+                    have_vert = 1;
+                }
+                if (atoms[i] == conn->net_wm_state_maximized_horiz) {
+                    have_horiz = 1;
+                }
+            }
+            conn->ewmh_state_ok = (have_vert && have_horiz) ? 1 : 0;
+        }
+        if (prop != NULL) {
+            XFree(prop);
+        }
+    }
+    FDK_INFO("EWMH window manager %s (maximize support: %s)",
+             conn->ewmh_wm ? "detected" : "not detected",
+             conn->ewmh_state_ok ? "yes" : "no");
 
     FDK_INFO("connected (screen %d, %dx%d root)", conn->screen,
              DisplayWidth(display, conn->screen),

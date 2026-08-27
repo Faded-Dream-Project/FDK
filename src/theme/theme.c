@@ -50,6 +50,7 @@ static fdk_theme g_builtin = {
     .metrics = {
         [FDK_TM_BUTTON_CORNER_RADIUS] = 8, /* was BTN_RADIUS */
         [FDK_TM_SEPARATOR_THICKNESS] = 1,
+        [FDK_TM_TITLE_BAR_HEIGHT] = 28, /* was DECO_TITLE_H */
     },
 };
 
@@ -214,6 +215,10 @@ fdk_result fdk_theme_set_metric(fdk_theme *theme, fdk_theme_metric metric,
     case FDK_TM_SEPARATOR_THICKNESS:
         lo = 1;
         hi = 8;
+        break;
+    case FDK_TM_TITLE_BAR_HEIGHT:
+        lo = 12;
+        hi = 64;
         break;
     default:
         return FDK_ERR_INVALID_ARGUMENT;

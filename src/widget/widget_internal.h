@@ -73,6 +73,17 @@ struct fdk_widget {
     fdk_widget_event_fn event_callback;
     void *event_callback_user_data;
 
+    /* Theme-change notification (internal; set via
+     * fdk__widget_set_theme_hook). Called on a fdk_theme_set_default()
+     * switch, on the same walk that invalidates every root, for every
+     * live widget that has a hook. Used by layout-affecting theme
+     * consumers — the FDK-drawn title band (its height is a theme
+     * metric) re-arranges its window here. Runs BEFORE the damage
+     * marking, so geometry a hook changes is covered by the same
+     * repaint. A hook may destroy widgets (including itself) — the
+     * walk is snapshot-based like every other tree walker. */
+    void (*theme_hook)(fdk_widget *widget);
+
     void *user_data;
     char *name;                      /* owned copy, NULL when unset      */
 
@@ -139,6 +150,11 @@ struct fdk_widget {
  * repaints on its next paint walk. Used by the theme engine on a
  * default-theme switch (src/theme/theme.c). */
 void fdk__widget_roots_invalidate_all(void);
+
+/* Internal theme-change notification (see struct fdk_widget's
+ * theme_hook field). NULL clears. Safe with NULL widget. */
+void fdk__widget_set_theme_hook(fdk_widget *widget,
+                                void (*hook)(fdk_widget *widget));
 
 /* The base widget class (what fdk_widget_create's klass == NULL gives
  * you, and what subclasses that don't override `paint` fall back to):

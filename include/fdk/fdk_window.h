@@ -11,11 +11,9 @@
  *
  * Phase 2 scope: creation, destruction, show/hide, title, size
  * (including min/max hints), close-request handling, and configure
- * (resize) notification. Custom window decorations (FDK-drawn title
- * bars) are NOT implemented yet — see docs/roadmap.md, Phase 7. What
- * you get today are whatever decorations the platform/compositor
- * draws (X11 window manager decorations, or Wayland xdg-decoration
- * server-side decorations where the compositor supports them).
+ * (resize) notification. Phase 8 adds FDK-drawn window decorations
+ * (see fdk_window_set_decorated) and window-state management
+ * (maximize / minimize / restore / interactive resize, below).
  */
 
 #ifndef FDK_WINDOW_H
@@ -88,8 +86,72 @@ fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
  * either struct to mean "no constraint" in that dimension. These are
  * hints handed to the platform (WM_NORMAL_HINTS on X11, xdg_toplevel
  * min/max on Wayland) — enforcement is the platform's responsibility,
- * not FDK's. */
+ * not FDK's — with one exception: FDK's own resize-edge drags (see
+ * fdk_window_set_resizable) also clamp to these limits, because on a
+ * bare X server there is no window manager to do it. */
 void fdk_window_set_size_limits(fdk_window *window, fdk_size min_size, fdk_size max_size);
+
+/* ---- Window state (Phase 8) ----
+ *
+ * All of these are REQUESTS — the platform may clamp, ignore, or
+ * adjust them, exactly like fdk_window_resize. FDK reports what
+ * actually happened through FDK_EVENT_WINDOW_STATE (see fdk_event.h);
+ * fdk_window_is_maximized()/is_minimized() read FDK's last-known
+ * state, not the request. */
+
+/* Asks for the window to fill the screen (EWMH _NET_WM_STATE
+ * maximized under a conforming X11 WM; xdg_toplevel.set_maximized on
+ * Wayland; on a bare X server FDK itself moves+resizes the window to
+ * the full screen, remembering the prior geometry for unmaximize).
+ * Returns FDK_ERR_UNSUPPORTED when the backend cannot maximize at
+ * all; FDK_OK means the request was sent/applied — watch
+ * FDK_EVENT_WINDOW_STATE for the confirmed state. */
+fdk_result fdk_window_maximize(fdk_window *window);
+
+/* Returns a maximized window to its remembered (or compositor-
+ * chosen) geometry. Same request/confirmation contract as
+ * fdk_window_maximize(). */
+fdk_result fdk_window_unmaximize(fdk_window *window);
+
+/* Asks for the window to be minimized/iconified. On X11 this is the
+ * ICCCM iconify request (any window manager honors it; without one,
+ * FDK unmaps the window itself). On Wayland this is
+ * xdg_toplevel.set_minimized — a fire-and-forget request: the
+ * protocol has no un-minimize request and no acknowledgement, so
+ * FDK marks the state optimistically and clears it when the
+ * compositor next reports the window activated. */
+fdk_result fdk_window_minimize(fdk_window *window);
+
+/* Restores a minimized window (un-iconifies it). Unsupported on
+ * Wayland (no protocol request exists — compositors unminimize via
+ * activation, e.g. a taskbar click); returns FDK_ERR_UNSUPPORTED
+ * there without changing anything. */
+fdk_result fdk_window_restore(fdk_window *window);
+
+/* FDK's last-known maximized/minimized state (from
+ * FDK_EVENT_WINDOW_STATE). Note this is state-as-reported, not
+ * request-as-sent — see the request/confirmation contract above. */
+bool fdk_window_is_maximized(const fdk_window *window);
+bool fdk_window_is_minimized(const fdk_window *window);
+
+/* ---- Interactive resize (Phase 8) ----
+ *
+ * When enabled, a border-wide zone around the window's edges and
+ * corners captures pointer drags and resizes the window — the CSD
+ * (client-side decorations) answer to "the WM frame is gone, so who
+ * draws the resize handles?". Drags are handed to the WM/compositor
+ * where the platform supports it (EWMH _NET_WM_MOVERESIZE on X11,
+ * xdg_toplevel.resize on Wayland); otherwise FDK drives the resize
+ * itself, clamping to fdk_window_set_size_limits.
+ *
+ * The zone overlays the outermost pixels of the window content —
+ * widgets living under it don't see presses there (the same
+ * trade-off every CSD toolkit makes). fdk_window_set_decorated(true)
+ * enables it automatically: a window with FDK's own title bar has no
+ * WM frame left to resize it. Call set_resizable(false) AFTER
+ * decorating for a fixed-size decorated window. */
+void fdk_window_set_resizable(fdk_window *window, bool resizable);
+bool fdk_window_get_resizable(const fdk_window *window);
 
 /* ---- FDK-drawn decorations (Phase 8) ----
  *

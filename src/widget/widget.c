@@ -599,6 +599,30 @@ static void root_registry_remove(fdk_widget *root) {
     root->root_next = NULL;
 }
 
+/* Runs every theme_hook in `w`'s subtree (including w), skipping
+ * widgets being destroyed. Snapshot-based like the tree's other
+ * walkers: a hook may destroy widgets (the walk re-validates each
+ * child before descending). */
+static void subtree_theme_notify(fdk_widget *w) {
+    if (w == NULL || (w->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    if (w->theme_hook != NULL) {
+        w->theme_hook(w);
+    }
+    if ((w->flags & FDK_WF_DESTROYING) != 0) {
+        return; /* the hook destroyed this very widget */
+    }
+    for (size_t i = 0; i < w->child_count; i++) {
+        /* child_append/destroy can shift the array mid-walk; re-check
+         * bounds every iteration (children only ever shrink during a
+         * notify walk — nothing creates widgets here). */
+        if (i < w->child_count) {
+            subtree_theme_notify(w->children[i]);
+        }
+    }
+}
+
 void fdk__widget_roots_invalidate_all(void) {
     /* Pre-capture the walk order: damage_union is pure bookkeeping,
      * but the theme switch that reached us may itself be running
@@ -628,12 +652,17 @@ void fdk__widget_roots_invalidate_all(void) {
     }
     if (snapshot != NULL) {
         for (size_t i = 0; i < n; i++) {
+            /* Layout-affecting theme consumers first (e.g. the title
+             * band's height metric), then the whole-root damage that
+             * covers whatever geometry they changed. */
+            subtree_theme_notify(snapshot[i]);
             damage_union(snapshot[i], snapshot[i]->bounds);
         }
         fdk_free(snapshot);
     } else {
         for (fdk_widget *r = g_roots; r != NULL; ) {
             fdk_widget *next = r->root_next;
+            subtree_theme_notify(r);
             damage_union(r, r->bounds);
             r = next;
         }
@@ -791,6 +820,14 @@ void fdk_widget_set_user_data(fdk_widget *widget, void *user_data) {
         return;
     }
     widget->user_data = user_data;
+}
+
+void fdk__widget_set_theme_hook(fdk_widget *widget,
+                                void (*hook)(fdk_widget *widget)) {
+    if (widget == NULL) {
+        return;
+    }
+    widget->theme_hook = hook;
 }
 
 void *fdk_widget_get_user_data(const fdk_widget *widget) {

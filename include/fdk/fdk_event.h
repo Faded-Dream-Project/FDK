@@ -54,6 +54,29 @@ typedef enum fdk_event_type {
      * the last committed buffer, so there is nothing to repaint. */
     FDK_EVENT_WINDOW_EXPOSE = 4,
 
+    /* The window's maximized/minimized state changed — because the
+     * application called fdk_window_maximize/unmaximize/minimize/
+     * restore, or because the platform reported a change (a window
+     * manager acting on its own, a taskbar un-minimize, an xdg-shell
+     * configure). `state.maximized` / `state.minimized` hold the NEW
+     * state as FDK knows it; compare against fdk_window_is_maximized()
+     * calls you made earlier, or just re-read the flags. Emitted only
+     * on actual changes. */
+    FDK_EVENT_WINDOW_STATE = 5,
+
+    /* The compositor overrode FDK's decoration request (Wayland
+     * xdg-decoration only): FDK asked to draw its own title band and
+     * the compositor answered SERVER-SIDE — drawing the band anyway
+     * would give the window two title bars, so FDK removes its own
+     * decorations before delivering this event. `decoration.
+     * client_side` is 0 in this case. When FDK's request is honored
+     * no event is sent (the band drawn by fdk_window_set_decorated
+     * already is the correct outcome). The X11 backend never emits
+     * this event: _MOTIF_WM_HINTS is honored or ignored, and a WM
+     * that ignores it still lets FDK draw its band without
+     * double-decorating. */
+    FDK_EVENT_WINDOW_DECORATION = 6,
+
     /* A key was pressed or released. See fdk_key_event. */
     FDK_EVENT_KEY_DOWN = 10,
     FDK_EVENT_KEY_UP   = 11,
@@ -86,6 +109,18 @@ typedef struct fdk_expose_event {
      * more (e.g. the whole surface) is always safe. */
     fdk_rect area;
 } fdk_expose_event;
+
+typedef struct fdk_state_event {
+    int maximized; /* nonzero = window is now maximized */
+    int minimized; /* nonzero = window is now minimized/iconic */
+} fdk_state_event;
+
+typedef struct fdk_decoration_event {
+    /* Nonzero while CLIENT-SIDE decorations apply (FDK or the app
+     * draws the title bar). Currently only ever delivered as 0 —
+     * see the FDK_EVENT_WINDOW_DECORATION comment above. */
+    int client_side;
+} fdk_decoration_event;
 
 /* Physical key identity, independent of keyboard layout — use this
  * for shortcuts/bindings you want stable across layouts (e.g. "the W
@@ -176,6 +211,8 @@ typedef struct fdk_event_data {
         fdk_configure_event configure;
         fdk_focus_event focus;
         fdk_expose_event expose;
+        fdk_state_event state;
+        fdk_decoration_event decoration;
         fdk_key_event key;
         fdk_pointer_event pointer;
         fdk_pointer_button_event pointer_button;

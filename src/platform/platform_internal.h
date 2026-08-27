@@ -161,6 +161,61 @@ typedef struct fdk_platform_ops {
     void (*window_move_to)(fdk_platform_window *pwindow,
                            fdk_i32 x, fdk_i32 y);
 
+    /* OPTIONAL: atomically move AND resize (the FDK-driven resize-edge
+     * path; a separate move+resize pair would tear on the wire under a
+     * real WM). NULL = the caller falls back to window_move_to +
+     * window_resize. */
+    void (*window_move_resize_to)(fdk_platform_window *pwindow,
+                                  fdk_i32 x, fdk_i32 y,
+                                  fdk_i32 width, fdk_i32 height);
+
+    /* ---- OPTIONAL window-state operations (Phase 8) ----
+     *
+     * All of these are REQUESTS; the platform may ignore them (see
+     * each op). State changes the platform acknowledges are reported
+     * back as FDK_EVENT_WINDOW_STATE through the normal dispatch path,
+     * never assumed from the request alone — except where a backend
+     * performs the action itself (the bare-X fallbacks below), where
+     * it dispatches the event directly. */
+
+    /* Request maximized/unmaximized. X11: _NET_WM_STATE message under
+     * an EWMH WM (state arrives via PropertyNotify); without a WM the
+     * backend maximizes itself (fullscreen move+resize, geometry
+     * saved for restore) and dispatches the state event. Wayland:
+     * xdg_toplevel.set_maximized/unset; state arrives via configure.
+     * NULL = backend cannot maximize at all. */
+    fdk_result (*window_set_maximized)(fdk_platform_window *pwindow,
+                                       bool maximized);
+
+    /* Request minimized (iconic)/restored. X11: XIconifyWindow (any
+     * WM) / XUnmapWindow + flag (bare X); restore is XMapWindow.
+     * State tracked via the WM_STATE property where a WM maintains
+     * it. Wayland: xdg_toplevel.set_minimized — the protocol gives NO
+     * acknowledgement (no unminimize request either; compositors
+     * unminimize via activation), so the backend reports the REQUEST
+     * optimistically and clears it on the next activated configure;
+     * window_set_minimized(false) returns FDK_ERR_UNSUPPORTED there.
+     * NULL = backend cannot minimize. */
+    fdk_result (*window_set_minimized)(fdk_platform_window *pwindow,
+                                       bool minimized);
+
+    /* OPTIONAL interactive-move/resize starters: hand the drag to the
+     * WM/compositor (EWMH _NET_WM_MOVERESIZE on X11, xdg_toplevel
+     * .move/.resize on Wayland), which then drives it with its own
+     * pointer grab — FDK sees only the resulting configures. The
+     * press point is window-local; backends translate as their
+     * protocol needs. `edge` is an fdk_window_resize_edge compass
+     * value (see window_internal.h; plain int here so this header
+     * needn't depend on it); only begin_resize uses it. Return
+     * FDK_OK when the platform took the drag, FDK_ERR_UNSUPPORTED
+     * (or NULL op) when the caller should run its own fallback drag
+     * via window_move_to/move_resize_to. */
+    fdk_result (*window_begin_move)(fdk_platform_window *pwindow,
+                                    fdk_i32 local_x, fdk_i32 local_y);
+    fdk_result (*window_begin_resize)(fdk_platform_window *pwindow,
+                                      int edge, fdk_i32 local_x,
+                                      fdk_i32 local_y);
+
     /* --- Software rendering ---
      *
      * Both render ops are OPTIONAL: a backend that cannot provide a

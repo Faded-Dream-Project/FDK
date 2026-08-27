@@ -95,13 +95,17 @@ typedef enum fdk_theme_token {
     FDK_TK_COUNT = 10
 } fdk_theme_token;
 
-/* Integer paint metrics. Paint-time values only — they never change a
- * widget's natural size. */
+/* Integer paint metrics. Most are paint-time values only (they never
+ * change a widget's natural size); the exceptions are layout metrics —
+ * currently FDK_TM_TITLE_BAR_HEIGHT, which sizes the FDK-drawn title
+ * band (a theme switch re-arranges decorated windows; see
+ * fdk_window_set_decorated). */
 typedef enum fdk_theme_metric {
     FDK_TM_BUTTON_CORNER_RADIUS = 0, /* Button fill/focus-ring corners, 0..32 */
     FDK_TM_SEPARATOR_THICKNESS = 1, /* Separator band thickness,    1..8  */
+    FDK_TM_TITLE_BAR_HEIGHT    = 2, /* FDK-drawn title band height, 12..64 */
 
-    FDK_TM_COUNT = 2
+    FDK_TM_COUNT = 3
 } fdk_theme_metric;
 
 /* ---- Lifecycle ---- */

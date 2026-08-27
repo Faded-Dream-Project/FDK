@@ -25,6 +25,23 @@ struct fdk_platform_connection {
     Atom utf8_string;
     Atom motif_wm_hints; /* _MOTIF_WM_HINTS, Phase 8 decorations */
 
+    /* Phase 8 window management: EWMH atoms + what the running WM
+     * actually supports, probed once at connect from the root's
+     * _NET_SUPPORTED list (see x11_connection.c). ewmh_wm != 0 means
+     * an EWMH-capable WM is running (the list exists and is
+     * non-empty); ewmh_state_ok additionally requires both
+     * _NET_WM_STATE_MAXIMIZED_{VERT,HORIZ} in it. The bare-X fallback
+     * paths (no WM: FDK moves/resizes/unmaps directly) key off
+     * ewmh_wm. */
+    Atom net_wm_state;
+    Atom net_wm_state_maximized_vert;
+    Atom net_wm_state_maximized_horiz;
+    Atom net_wm_moveresize;
+    Atom wm_state;         /* ICCCM WM_STATE (iconic/normal tracking) */
+    Atom wm_change_state;  /* ICCCM iconify request message type      */
+    int ewmh_wm;           /* nonzero: an EWMH WM is running          */
+    int ewmh_state_ok;     /* nonzero: it advertises _NET_WM_STATE    */
+
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
 
@@ -46,6 +63,20 @@ struct fdk_platform_window {
     fdk_platform_connection *conn;
     Window xwindow;
     fdk_size last_size; /* most recent ConfigureNotify size */
+
+    /* --- Phase 8 window-state bookkeeping ---
+     *
+     * maximized/minimized are the backend's view of the truth,
+     * updated by our own fallback actions, by PropertyNotify on
+     * _NET_WM_STATE / WM_STATE (a real WM talking back), or by the
+     * frontend's requests. Every actual FLIP dispatches
+     * FDK_EVENT_WINDOW_STATE through conn->dispatch — the frontend
+     * caches from that, never from the request. saved_* hold the
+     * pre-maximize geometry for the bare-X fallback's restore. */
+    int maximized;
+    int minimized;
+    int has_saved;
+    fdk_i32 saved_x, saved_y, saved_w, saved_h;
 
     /* Software-rendering state, owned by x11_surface.c: an XImage
      * holding the application's pixels plus the GC used to blit it.
@@ -99,6 +130,30 @@ fdk_result fdk_x11_window_get_position(fdk_platform_window *pwindow,
                                        fdk_i32 *out_x, fdk_i32 *out_y);
 void fdk_x11_window_move_to(fdk_platform_window *pwindow, fdk_i32 x,
                             fdk_i32 y);
+void fdk_x11_window_move_resize_to(fdk_platform_window *pwindow,
+                                   fdk_i32 x, fdk_i32 y,
+                                   fdk_i32 width, fdk_i32 height);
+fdk_result fdk_x11_window_set_maximized(fdk_platform_window *pwindow,
+                                        bool maximized);
+fdk_result fdk_x11_window_set_minimized(fdk_platform_window *pwindow,
+                                        bool minimized);
+fdk_result fdk_x11_window_begin_move(fdk_platform_window *pwindow,
+                                     fdk_i32 local_x, fdk_i32 local_y);
+fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
+                                       int edge, fdk_i32 local_x,
+                                       fdk_i32 local_y);
+
+/* Phase 8 state helpers (x11_window.c), shared with x11_events.c's
+ * PropertyNotify translation: */
+/* Compare-and-flip + FDK_EVENT_WINDOW_STATE dispatch (no-op when the
+ * state didn't change). */
+void fdk_x11_window_update_state(fdk_platform_window *pwindow,
+                                 int maximized, int minimized);
+/* Window's _NET_WM_STATE property -> maximized (both axes), 0 when
+ * absent/unreadable. */
+int fdk_x11_window_net_state_maximized(fdk_platform_window *pwindow);
+/* Window's WM_STATE property -> iconic flag, -1 when unreadable. */
+int fdk_x11_window_wm_state_iconic(fdk_platform_window *pwindow);
 void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,
                                      fdk_size min_size, fdk_size max_size);
 

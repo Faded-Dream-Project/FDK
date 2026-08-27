@@ -171,6 +171,34 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             out->pointer.position.y = (fdk_f32)xevent->xcrossing.y;
             return 1;
 
+        case PropertyNotify: {
+            /* How a real WM talks window-state back: it rewrites the
+             * _NET_WM_STATE (maximized) / WM_STATE (iconic) properties
+             * ON OUR WINDOW; each rewrite is a PropertyNotify. The
+             * state flip + event dispatch live in the shared compare-
+             * and-flip helper, so a property touch that changes
+             * nothing dispatches nothing. */
+            Atom atom = xevent->xproperty.atom;
+            if (atom == pwindow->conn->net_wm_state) {
+                fdk_x11_window_update_state(
+                    pwindow,
+                    fdk_x11_window_net_state_maximized(pwindow),
+                    pwindow->minimized);
+                return 0; /* the FDK state event (if any) was already
+                             dispatched by the helper */
+            }
+            if (atom == pwindow->conn->wm_state) {
+                int iconic = fdk_x11_window_wm_state_iconic(pwindow);
+                if (iconic >= 0) {
+                    fdk_x11_window_update_state(pwindow,
+                                                pwindow->maximized,
+                                                iconic);
+                }
+                return 0;
+            }
+            return 0; /* some other property we don't model */
+        }
+
         default:
             return 0;
     }
