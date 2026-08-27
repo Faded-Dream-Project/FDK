@@ -9,6 +9,7 @@
 
 #include "fdk/fdk.h"
 #include "fdk/fdk_layout.h"
+#include "widget/widget_internal.h" /* fdk__widget_set_baseline */
 
 #include <assert.h>
 #include <stdio.h>
@@ -48,6 +49,8 @@ static void test_box_measure(void) {
     fdk_widget *a = mk_child(box, 50, 30);
     fdk_widget *b = mk_child(box, 100, 20);
     fdk_widget *c = mk_child(box, 30, 40);
+    (void)b; /* measured through the box, never addressed again */
+    (void)c;
 
     /* horizontal: width = 50+100+30 + 2*spacing, height = max(30,20,40) */
     fdk_box_set_spacing(box, 10);
@@ -423,6 +426,314 @@ static void test_argument_safety(void) {
     printf("[ok] argument safety: non-box targets, clamps, invalid args\n");
 }
 
+
+/* ---- Phase 5 completion: grid, min/max constraints, baseline ---- */
+
+static void test_grid_measure_and_arrange(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL, (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+    fdk_widget *grid = NULL;
+    assert(fdk_ok(fdk_grid_create(root, 2, 2, &grid)));
+
+    /* Four children of differing natural sizes; one spanning two
+     * columns in a second grid exercises multi-span distribution. */
+    fdk_widget *a = mk_child(grid, 60, 30);   /* (0,0) */
+    fdk_widget *b = mk_child(grid, 90, 20);   /* (1,0) */
+    fdk_widget *c = mk_child(grid, 40, 50);   /* (0,1) */
+    fdk_widget *d = mk_child(grid, 70, 25);   /* (1,1) */
+    assert(fdk_ok(fdk_grid_attach(grid, a, 0, 0, 1, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, b, 1, 0, 1, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, c, 0, 1, 1, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, d, 1, 1, 1, 1)));
+
+    fdk_size nat;
+    fdk_widget_measure(grid, &nat);
+    /* cols: max(60,40)=60, max(90,70)=90; rows: max(30,20)=30,
+     * max(50,25)=50. No spacing/padding: 60+90 x 30+50. */
+    assert(nat.width == 150 && nat.height == 80);
+
+    /* Arrange at exactly natural, AWAY FROM THE ORIGIN: the classic
+     * cell packing, in GRID-RELATIVE coordinates (children at (0,0)
+     * inside the grid — the assigned (10,20) is the grid's position
+     * relative to ITS parent and must NOT offset the children; the
+     * Phase 6 box bug, pinned here so it can't come back). */
+    fdk_widget_arrange(grid, (fdk_rect){10, 20, 150, 80});
+    assert_bounds(a, 0, 0, 60, 30, "grid a (0,0) grid-relative");
+    assert_bounds(b, 60, 0, 90, 30, "grid b (1,0) fills its row height");
+    assert_bounds(c, 0, 30, 60, 50, "grid c (0,1)");
+    assert_bounds(d, 60, 30, 90, 50, "grid d (1,1)");
+
+    /* Extra space goes nowhere without expand flags: cells keep
+     * their sizes, content stays top-left. */
+    fdk_widget_arrange(grid, (fdk_rect){0, 0, 200, 100});
+    assert_bounds(a, 0, 0, 60, 30, "grid a with extra, no expand");
+    assert_bounds(b, 60, 0, 90, 30, "grid b with extra");
+
+    /* Expand column 1 and row 1: they share the +50/+20 extra. */
+    fdk_grid_set_column_expand(grid, 1, true);
+    fdk_grid_set_row_expand(grid, 1, true);
+    fdk_widget_arrange(grid, (fdk_rect){0, 0, 200, 100});
+    assert_bounds(a, 0, 0, 60, 30, "grid a: unexpanded tracks fixed");
+    assert_bounds(b, 60, 0, 140, 30, "grid b: expanded column grew by 50");
+    assert_bounds(c, 0, 30, 60, 70, "grid c: expanded row grew by 20");
+    assert_bounds(d, 60, 30, 140, 70, "grid d: both expanded");
+
+    /* Spacing + padding shift every track. */
+    fdk_grid_set_column_expand(grid, 1, false);
+    fdk_grid_set_row_expand(grid, 1, false);
+    fdk_grid_set_spacing(grid, 10);
+    fdk_grid_set_padding(grid, 5);
+    fdk_size nat2;
+    fdk_widget_measure(grid, &nat2);
+    /* 5+60+10+90+5 x 5+30+10+50+5 */
+    assert(nat2.width == 170 && nat2.height == 100);
+    fdk_widget_arrange(grid, (fdk_rect){0, 0, 170, 100});
+    assert_bounds(a, 5, 5, 60, 30, "grid a with padding+spacing");
+    assert_bounds(b, 75, 5, 90, 30, "grid b with padding+spacing");
+    assert_bounds(c, 5, 45, 60, 50, "grid c with padding+spacing");
+    assert_bounds(d, 75, 45, 90, 50, "grid d with padding+spacing");
+
+    fdk_widget_destroy(root);
+
+    /* ---- multi-span distribution + growth ---- */
+    root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL, (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+    grid = NULL;
+    assert(fdk_ok(fdk_grid_create(root, 0, 0, &grid))); /* grows on attach */
+    fdk_widget *wide = mk_child(grid, 130, 20);
+    fdk_widget *l = mk_child(grid, 40, 10);
+    fdk_widget *r = mk_child(grid, 60, 10);
+    assert(fdk_ok(fdk_grid_attach(grid, wide, 0, 0, 2, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, l, 0, 1, 1, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, r, 1, 1, 1, 1)));
+
+    fdk_size nat3;
+    fdk_widget_measure(grid, &nat3);
+    /* cols: 40 + 60 = 100 base; the spanning child wants 130 ->
+     * deficit 30 -> +15 each: cols 55, 75; rows 20 + 10. */
+    assert(nat3.width == 130 && nat3.height == 30);
+
+    fdk_widget_arrange(grid, (fdk_rect){0, 0, 130, 30});
+    assert_bounds(wide, 0, 0, 130, 20, "spanning child covers both cols");
+    assert_bounds(l, 0, 20, 55, 10, "left cell after deficit distribution");
+    assert_bounds(r, 55, 20, 75, 10, "right cell after deficit distribution");
+
+    /* Homogeneous: every column the widest, every row the tallest. */
+    fdk_grid_set_homogeneous(grid, true);
+    fdk_size nat4;
+    fdk_widget_measure(grid, &nat4);
+    assert(nat4.width == 150 && nat4.height == 40); /* 2x75 x 2x20 */
+    fdk_widget_destroy(root);
+
+    /* ---- hidden children take no track space ---- */
+    root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL, (fdk_rect){0, 0, 100, 100},
+                                    &root)));
+    grid = NULL;
+    assert(fdk_ok(fdk_grid_create(root, 1, 2, &grid)));
+    a = mk_child(grid, 50, 20);
+    b = mk_child(grid, 30, 20);
+    assert(fdk_ok(fdk_grid_attach(grid, a, 0, 0, 1, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, b, 1, 0, 1, 1)));
+    fdk_widget_set_visible(b, false);
+    fdk_size nat5;
+    fdk_widget_measure(grid, &nat5);
+    assert(nat5.width == 50 && nat5.height == 20);
+    fdk_widget_destroy(root);
+
+    /* ---- align inside a cell ---- */
+    root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL, (fdk_rect){0, 0, 100, 100},
+                                    &root)));
+    grid = NULL;
+    assert(fdk_ok(fdk_grid_create(root, 2, 2, &grid)));
+    /* a's cell is sized by its neighbors: wide (60) column 0 via the
+     * child below it, tall (50) row 0 via the child beside it. */
+    a = mk_child(grid, 30, 10);        /* (0,0): the align target */
+    fdk_widget *tall = mk_child(grid, 20, 50); /* (1,0): sizes row 0 */
+    fdk_widget *widecell = mk_child(grid, 60, 20); /* (0,1): sizes col 0 */
+    assert(fdk_ok(fdk_grid_attach(grid, a, 0, 0, 1, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, tall, 1, 0, 1, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, widecell, 0, 1, 1, 1)));
+    fdk_widget_set_align(a, FDK_ALIGN_START, FDK_ALIGN_CENTER);
+    fdk_widget_arrange(grid, (fdk_rect){0, 0, 80, 70});
+    assert_bounds(a, 0, 20, 30, 10, "cell child centered vertically");
+    fdk_widget_set_align(a, FDK_ALIGN_END, FDK_ALIGN_END);
+    fdk_widget_arrange(grid, (fdk_rect){0, 0, 80, 70});
+    assert_bounds(a, 30, 40, 30, 10, "cell child end/end");
+    fdk_widget_set_align(a, FDK_ALIGN_FILL, FDK_ALIGN_FILL);
+    fdk_widget_arrange(grid, (fdk_rect){0, 0, 80, 70});
+    assert_bounds(a, 0, 0, 60, 50, "cell child FILL fills the cell");
+    fdk_widget_destroy(root);
+
+    printf("[ok] grid: measure/arrange, spans, growth, expand, spacing, "
+           "homogeneous, hidden, cell align\n");
+}
+
+static void test_size_limits(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL, (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+    fdk_widget *w = mk_child(root, 50, 20);
+
+    /* Min clamps up. */
+    fdk_widget_set_size_limits(w, 80, 0, 0, 0);
+    fdk_size m;
+    fdk_widget_measure(w, &m);
+    assert(m.width == 80 && m.height == 20);
+
+    /* Max clamps down (and survives a later natural change). */
+    fdk_widget_set_size_limits(w, 0, 0, 40, 15);
+    fdk_widget_measure(w, &m);
+    assert(m.width == 40 && m.height == 15);
+    fdk_widget_set_natural_size(w, 200, 100);
+    fdk_widget_measure(w, &m);
+    assert(m.width == 40 && m.height == 15);
+
+    /* Contradictory min > max: min wins, normalized into max. */
+    fdk_widget_set_size_limits(w, 90, 30, 50, 0);
+    fdk_i32 gmin_w, gmin_h, gmax_w, gmax_h;
+    fdk_widget_get_size_limits(w, &gmin_w, &gmin_h, &gmax_w, &gmax_h);
+    assert(gmin_w == 90 && gmax_w == 90); /* max raised to min */
+    assert(gmin_h == 30 && gmax_h == 0);
+    fdk_widget_measure(w, &m);
+    assert(m.width == 90 && m.height >= 30);
+
+    /* Constraints flow through CONTAINERS: a box measures its
+     * clamped child. */
+    fdk_widget *box = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_HORIZONTAL, &box)));
+    fdk_widget *kid = mk_child(box, 50, 20);
+    fdk_widget_set_size_limits(kid, 120, 0, 0, 0);
+    fdk_size bm;
+    fdk_widget_measure(box, &bm);
+    assert(bm.width == 120 && bm.height == 20);
+
+    /* NULL args + negatives are safe. */
+    fdk_widget_set_size_limits(NULL, 0, 0, 0, 0);
+    fdk_widget_set_size_limits(w, -5, -5, -5, -5);
+    fdk_widget_get_size_limits(w, &gmin_w, &gmin_h, &gmax_w, &gmax_h);
+    assert(gmin_w == 0 && gmax_w == 0);
+    fdk_widget_get_size_limits(NULL, NULL, NULL, NULL, NULL);
+
+    fdk_widget_destroy(root);
+    printf("[ok] size limits: min/max clamps in every measure, "
+           "normalization, container flow, argument safety\n");
+}
+
+static void test_baseline_alignment(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL, (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+
+    /* Plain widgets carry no baseline: get_baseline is false. */
+    fdk_widget *plain = mk_child(root, 30, 10);
+    fdk_i32 b = 123;
+    assert(!fdk_widget_get_baseline(plain, &b));
+    assert(b == 0);
+
+    /* Synthesize text baselines via the internal setter (the Label
+     * sets the same field from its font ascent in production). */
+    fdk_widget *row = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_HORIZONTAL, &row)));
+    fdk_widget *t1 = mk_child(row, 40, 30);
+    fdk_widget *t2 = mk_child(row, 50, 16);
+    fdk_widget *t3 = mk_child(row, 30, 22); /* no baseline: bottom */
+    fdk__widget_set_baseline(t1, 24);
+    fdk__widget_set_baseline(t2, 12);
+    fdk__widget_set_baseline(t3, -1);
+    fdk_i32 got = 0;
+    assert(fdk_widget_get_baseline(t1, &got) && got == 24);
+
+    fdk_widget_set_align(t1, FDK_ALIGN_FILL, FDK_ALIGN_BASELINE);
+    fdk_widget_set_align(t2, FDK_ALIGN_FILL, FDK_ALIGN_BASELINE);
+    fdk_widget_set_align(t3, FDK_ALIGN_FILL, FDK_ALIGN_BASELINE);
+
+    /* Measure: baseline group extent. Deepest baseline = 24 (t1);
+     * t3 (no baseline) uses its bottom = 22. Group height =
+     * max(24-24+30, 24-12+16, 24-22+22) = max(30, 28, 24) = 30. */
+    fdk_size m;
+    fdk_widget_measure(row, &m);
+    assert(m.height == 30);
+
+    /* Arrange: every child's baseline (or bottom) lands on y=24. */
+    fdk_widget_arrange(row, (fdk_rect){0, 0, 200, 30});
+    assert_bounds(t1, 0, 0, 40, 30, "baseline t1 at top");
+    assert_bounds(t2, 40, 12, 50, 16, "baseline t2 hung from the row");
+    assert_bounds(t3, 90, 2, 30, 22, "baseline-less t3 bottom on the row");
+
+    /* Labels report their font's ascent as the baseline (a real
+     * font from the system, skipped honestly when none exists). */
+    fdk_font *font = fdk_font_load_system_default(16);
+    if (font != NULL) {
+        fdk_widget *lab = NULL;
+        assert(fdk_ok(fdk_label_create(root, font, "Ag", &lab)));
+        fdk_font_metrics fm;
+        fdk_font_get_metrics(font, &fm);
+        fdk_size lm;
+        fdk_widget_measure(lab, &lm); /* populates the baseline */
+        assert(lm.height == fm.ascent + fm.descent);
+        fdk_i32 lb = 0;
+        assert(fdk_widget_get_baseline(lab, &lb));
+        assert(lb == fm.ascent);
+        fdk_widget_destroy(lab);
+        fdk_font_destroy(font);
+    }
+
+    fdk_widget_destroy(root);
+    printf("[ok] baseline: box cross-axis alignment, group extent, "
+           "bottom-edge fallback, label ascent\n");
+}
+
+static void test_grid_notification_relayout(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL, (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+
+    /* The notification path, not the explicit arrange: a grid with
+     * established bounds whose children arrive (attach) and CHANGE
+     * (natural size) afterwards must re-pack itself with NO explicit
+     * fdk_widget_arrange call — the exact bug the grid shipped with
+     * (the notifier knew boxes only; grid children stayed wherever
+     * the last unrelated arrange left them). */
+    fdk_widget *grid = NULL;
+    assert(fdk_ok(fdk_grid_create(root, 2, 2, &grid)));
+    fdk_widget_arrange(grid, (fdk_rect){0, 0, 200, 100}); /* once */
+
+    fdk_widget *a = mk_child(grid, 60, 20);
+    fdk_widget *b = mk_child(grid, 40, 30);
+    /* Attach — nothing else: the notification must place them. */
+    assert(fdk_ok(fdk_grid_attach(grid, a, 0, 0, 1, 1)));
+    assert(fdk_ok(fdk_grid_attach(grid, b, 1, 0, 1, 1)));
+    assert_bounds(a, 0, 0, 60, 30, "attach placed a, cell-height FILL");
+    assert_bounds(b, 60, 0, 40, 30, "attach placed b (notification)");
+
+    /* A child's natural-size change must re-pack the grid AND
+     * propagate to the ancestor box (its natural grew). */
+    fdk_widget *outer = NULL;
+    assert(fdk_ok(fdk_box_create(NULL, FDK_VERTICAL, &outer)));
+    fdk_widget *grid2 = NULL;
+    assert(fdk_ok(fdk_grid_create(outer, 1, 1, &grid2)));
+    fdk_widget_arrange(outer, (fdk_rect){0, 0, 300, 200});
+    fdk_widget *c = mk_child(grid2, 50, 50);
+    assert(fdk_ok(fdk_grid_attach(grid2, c, 0, 0, 1, 1)));
+    fdk_size before;
+    fdk_widget_measure(outer, &before);
+    assert(before.height == 50);
+    fdk_widget_set_natural_size(c, 50, 90);
+    fdk_size after;
+    fdk_widget_measure(outer, &after);
+    assert(after.height == 90); /* grid re-measured, box saw the growth */
+    assert_bounds(c, 0, 0, 50, 90, "grid child re-arranged at its new size");
+
+    fdk_widget_destroy(outer);
+    fdk_widget_destroy(root);
+    printf("[ok] grid notification: attach + child-change re-pack without "
+           "explicit arrange (notifier grid-ness regression)\n");
+}
+
 int main(void) {
     test_box_measure();
     test_box_arrange_horizontal();
@@ -433,6 +744,10 @@ int main(void) {
     test_nested_child_change_propagation();
     test_layout_paints();
     test_argument_safety();
+    test_grid_measure_and_arrange();
+    test_grid_notification_relayout();
+    test_size_limits();
+    test_baseline_alignment();
     printf("all headless layout tests passed\n");
     return 0;
 }

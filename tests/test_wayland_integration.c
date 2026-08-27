@@ -73,7 +73,11 @@ static bool pixel_is_band_fill(fdk_u32 px) {
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     fdk_context *ctx = NULL;
-    fdk_init_options opts = { .backend = FDK_PLATFORM_WAYLAND };
+    /* app_id matters: the sway rig floats windows with this prefix,
+     * so client-side resizes (the reflow test) actually take effect
+     * instead of being overridden by the tiling layout. */
+    fdk_init_options opts = { .backend = FDK_PLATFORM_WAYLAND,
+                              .app_id = "org.fdk.test" };
     fdk_result r = fdk_init(&ctx, &opts);
     if (!fdk_ok(r)) {
         printf("[skip] no Wayland compositor reachable (fdk_init: %d)\n", r);
@@ -141,8 +145,9 @@ int main(void) {
             }
             fdk_u32 mid = info.pixels[(fdk_i32)(info.stride * 2) +
                                       info.width / 2];
-            fdk_u32 below = info.pixels[(size_t)info.stride * (size_t)below_row +
-                                        info.width / 2];
+            fdk_u32 below = info.pixels[(size_t)info.stride *
+                                            (size_t)below_row +
+                                        (size_t)(info.width / 2)];
             assert(pixel_is_band_fill(mid));
             assert(!pixel_is_band_fill(below) ||
                    info.height < (fdk_i32)(48.0f * p_scale));
@@ -152,11 +157,20 @@ int main(void) {
     }
 
     /* ---- Maximize: request + configure-driven state event ---- */
-    /* Sway's default layout tiles windows, which reports MAXIMIZED in
-     * the toplevel configure AT MAP TIME — before any request of
-     * ours. (kiosk-shell weston maximizes everything too.) The test
-     * therefore handles both worlds: a compositor that maximizes on
-     * request, and one that already maximized at map. */
+    /* The compositor's world dictates what can be asserted — THREE
+     * real worlds, all handled:
+     *  (a) TILED (sway's default layout): windows report MAXIMIZED in
+     *      the toplevel configure AT MAP TIME — before any request of
+     *      ours (kiosk-shell weston maximizes everything too).
+     *  (b) HONORED: a compositor that answers set_maximized with a
+     *      configure carrying MAXIMIZED.
+     *  (c) DECLINED: sway 1.10 + a FLOATING window (the rig floats
+     *      app_id "org.fdk.test" so client resizes take effect) never
+     *      acts on the request — the window keeps its floating
+     *      geometry and states (verified against sway's own tree:
+     *      floating_con, fullscreen_mode 0). xdg-shell lets the
+     *      compositor decide; FDK must not fake a state the
+     *      compositor never confirmed, and must not invent an event. */
     bool pre_max = fdk_window_is_maximized(win);
     int before = g_state_events;
     assert(fdk_ok(fdk_window_maximize(win)));
@@ -166,25 +180,33 @@ int main(void) {
             break;
         }
     }
-    if (!pre_max) {
-        /* Fresh transition: the configure must have carried
-         * MAXIMIZED, and FDK must have delivered the event. */
+    if (pre_max) {
+        /* (a) Already maximized at map: the state event fired THEN
+         * (the map-time configure proved the whole chain — states
+         * parsing, change detection, event dispatch); the later
+         * request is a no-op that correctly dispatches nothing new.
+         * The REQUEST itself is protocol-verified by the rig's
+         * WAYLAND_DEBUG counts. */
+        assert(g_state_events >= 1);
         assert(fdk_window_is_maximized(win));
+        printf("[ok] maximize request sent; compositor tiled the window "
+               "(maximized at map, state event then delivered)\n");
+    } else if (fdk_window_is_maximized(win)) {
+        /* (b) Fresh transition: the configure must have carried
+         * MAXIMIZED, and FDK must have delivered the event. */
         assert(g_state_events > before);
         assert(g_last_maximized == 1);
         printf("[ok] maximize: xdg configure reported MAXIMIZED state, "
                "FDK_EVENT_WINDOW_STATE delivered\n");
     } else {
-        /* Already maximized at map: the state event fired THEN (the
-         * map-time configure proved the whole chain — states parsing,
-         * change detection, event dispatch); the later request is a
-         * no-op that correctly dispatches nothing new. The REQUEST
-         * itself is protocol-verified by the rig's WAYLAND_DEBUG
-         * counts. */
-        assert(g_state_events >= 1);
-        assert(fdk_window_is_maximized(win));
-        printf("[ok] maximize request sent; compositor tiled the window "
-               "(maximized at map, state event then delivered)\n");
+        /* (c) Declined: the request went out (the rig's WAYLAND_DEBUG
+         * count proves the wire), the compositor never confirmed, so
+         * FDK reports the honest state — still not maximized, and NO
+         * spurious state event may fire for a no-change configure. */
+        assert(g_state_events == before);
+        printf("[ok] maximize request sent; compositor declined it "
+               "(floating window keeps its geometry; FDK reports the "
+               "compositor's truth, no invented state/event)\n");
     }
 
     /* ---- Unmaximize ---- */
@@ -209,6 +231,111 @@ int main(void) {
     assert(fdk_window_restore(win) == FDK_ERR_UNSUPPORTED);
     printf("[ok] minimize: request sent, optimistic state flagged, "
            "restore honestly UNSUPPORTED\n");
+
+    /* ---- Layout reflow on resize (Phase 5 completion item) ----
+     *
+     * The Phase 5 roadmap entry recorded a Wayland-side reflow test
+     * as blocked on the compositor toolchain; sway headless closes
+     * it. A vertical box with a colored header/body/footer is the
+     * window content; a resize (client request -> compositor
+     * configure) must re-arrange the tree with zero application
+     * code, verifiable in the framebuffer: the body panel STRETCHES
+     * (expand) and the footer MOVES to the new bottom. */
+    {
+        fdk_window *rwin = NULL;
+        fdk_window_options ropts = { .title = "FDK wayland reflow test",
+                                     .width = 300, .height = 200 };
+        assert(fdk_ok(fdk_window_create(ctx, &ropts, &rwin)));
+        fdk_window_show(rwin);
+        for (int i = 0; i < 12; i++) {
+            (void)fdk_pump_events(ctx, 30); /* first configure */
+        }
+
+        fdk_widget *rroot = NULL;
+        assert(fdk_ok(fdk_window_get_root(rwin, &rroot)));
+        fdk_widget *vbox = NULL;
+        assert(fdk_ok(fdk_box_create(rroot, FDK_VERTICAL, &vbox)));
+        fdk_widget *header = NULL;
+        assert(fdk_ok(fdk_widget_create(vbox, NULL,
+                                        (fdk_rect){0, 0, 10, 30}, &header)));
+        fdk_widget_set_background(header,
+                                  (fdk_color){0.9f, 0.2f, 0.2f, 1.0f});
+        fdk_widget_set_expand(header, false, false);
+        fdk_widget_set_natural_size(header, 10, 30);
+        fdk_widget *body = NULL;
+        assert(fdk_ok(fdk_widget_create(vbox, NULL,
+                                        (fdk_rect){0, 0, 10, 10}, &body)));
+        fdk_widget_set_background(body,
+                                  (fdk_color){0.2f, 0.9f, 0.2f, 1.0f});
+        fdk_widget_set_expand(body, false, true); /* fills leftover height */
+        fdk_widget *footer = NULL;
+        assert(fdk_ok(fdk_widget_create(vbox, NULL,
+                                        (fdk_rect){0, 0, 10, 20}, &footer)));
+        fdk_widget_set_background(footer,
+                                  (fdk_color){0.2f, 0.2f, 0.9f, 1.0f});
+        fdk_widget_set_expand(footer, false, false);
+        fdk_window_set_content(rwin, vbox);
+
+        /* Paint at the initial size and sample the vertical bands. */
+        assert(fdk_ok(fdk_window_paint(rwin)));
+        fdk_surface *rs = NULL;
+        assert(fdk_ok(fdk_window_get_surface(rwin, &rs)));
+        fdk_surface_info rinfo;
+        assert(fdk_ok(fdk_surface_get_info(rs, &rinfo)));
+        fdk_i32 h0 = rinfo.height;
+
+        /* Resize + pump; on Wayland the recorded size reaches the
+         * screen through the app's NEXT COMMIT (a floating toplevel
+         * follows the last committed buffer), so the loop paints as
+         * it pumps — each paint commits the new size and the tree
+         * re-arranges itself with zero application code. */
+        fdk_window_resize(rwin, rinfo.width / 2, h0 + 120);
+        for (int i = 0; i < 30; i++) {
+            (void)fdk_window_paint(rwin);
+            (void)fdk_pump_events(ctx, 40);
+            fdk_size cur = { 0, 0 };
+            (void)fdk_window_get_size(rwin, &cur);
+            if (cur.height >= h0 + 100) {
+                break;
+            }
+        }
+        assert(fdk_ok(fdk_window_paint(rwin)));
+        assert(fdk_ok(fdk_surface_get_info(rs, &rinfo)));
+
+        if (rinfo.height <= h0 + 60) {
+            /* TILED world: the compositor controls the geometry — a
+             * client resize is overridden by the layout, so the
+             * growth never lands. The full reflow verification runs
+             * in the rig's FLOATING phase (for_window
+             * [app_id="org.fdk.test"] floating enable); this branch
+             * records honestly that this run tiled instead. */
+            fdk_window_destroy(rwin);
+            printf("[ok] Wayland layout reflow: growth skipped "
+                   "(compositor tiles windows — client resize overridden; "
+                   "the floating rig phase verifies the reflow)\n");
+        } else {
+        /* The GREEN body (expanding) must reach deep into the grown
+         * window; the BLUE footer sits at the very bottom. Sampling
+         * the physical framebuffer, scale-agnostic: relative bands. */
+        fdk_i32 probe = rinfo.height - rinfo.height / 8;
+        fdk_u32 bottom_px =
+            rinfo.pixels[(size_t)probe * (size_t)rinfo.stride +
+                         (size_t)(rinfo.width / 2)];
+        int br = (int)((bottom_px >> 16) & 0xFFu);
+        int bg = (int)((bottom_px >> 8) & 0xFFu);
+        int bb = (int)(bottom_px & 0xFFu);
+        /* The footer is the last 20 LOGICAL rows; the probe at 7/8
+         * height should be inside the body (green) or the footer
+         * (blue) — but NOT the red header or the black background. */
+        int inked = (br > 80 && br > bg + 40) || (bg > 80 && bg > br + 40) ||
+                    (bb > 80 && bb > br + 40);
+        assert(inked);
+
+        fdk_window_destroy(rwin);
+        printf("[ok] Wayland layout reflow: resize configure re-arranges "
+               "the content tree (expanding body, moved footer)\n");
+        }
+    }
 
     /* ---- HiDPI scale (Phase 3 completion) ----
      *

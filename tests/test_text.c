@@ -13,9 +13,13 @@
  *   - measure/draw agreement: the measured advance is where drawing
  *     actually lands; ink bounds match the damage box exactly
  *   - glyph cache: hit/miss counters, deterministic re-render,
- *     LRU eviction past 512 distinct glyphs
+ *     LRU eviction past 2048 distinct (glyph, phase) entries
  *   - clip-stack honoring and damage precision
  *   - UTF-8 edge cases: invalid bytes, unmapped codepoints, NUL
+ *   - synthetic styles (Phase 6 completion): bold/italic argument
+ *     safety, advance contracts, cache flush + idempotence
+ *   - subpixel positioning (Phase 6 completion): agreement,
+ *     determinism, pen-shift invariance, phase fan-out
  */
 
 #include "fdk/fdk.h"
@@ -478,7 +482,8 @@ static void test_cache_eviction(void) {
 
     /* Walk codepoint space, drawing in chunks, until the cache is
      * forced to evict (DejaVu covers thousands of glyphs; a few
-     * thousand codepoints always exceed 512 distinct). */
+     * thousand codepoints always exceed the 2048-entry cache, which
+     * subpixel phases key per (glyph, phase) pair). */
     char buf[64 * 4];
     int evicted = 0;
     for (fdk_u32 base = 0x20; base < 0x2600 && !evicted; base += 64) {
@@ -493,17 +498,18 @@ static void test_cache_eviction(void) {
                                             white())));
         fdk_font_cache_stats st;
         fdk_font_get_cache_stats(f, &st);
-        assert(st.cached_glyphs <= 512);
+        assert(st.cached_glyphs <= 2048);
         if (st.evictions > 0) {
             evicted = 1;
-            assert(st.cache_misses > 512);
+            assert(st.cache_misses > 2048);
         }
     }
     assert(evicted);
 
     fdk_surface_destroy(s);
     fdk_font_destroy(f);
-    printf("[ok] cache: LRU eviction past 512 glyphs, bounded residency\n");
+    printf("[ok] cache: LRU eviction past 2048 (glyph, phase) entries, "
+           "bounded residency\n");
 }
 
 /* ---- kerning ---- */
@@ -824,6 +830,228 @@ static void test_ellipsize(void) {
            "degenerate/arg safety\n");
 }
 
+/* ---- synthetic styles (Phase 6 completion) ---- */
+
+static void test_font_style(void) {
+    /* Argument safety. */
+    assert(fdk_font_set_style(NULL, FDK_FONT_STYLE_BOLD) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_font_get_style(NULL) == 0u);
+
+    fdk_font *f = fdk_font_load(g_sans, 24);
+    assert(f != NULL);
+    assert(fdk_font_get_style(f) == 0u);
+
+    /* Unknown bits are masked away, not stored. */
+    assert(fdk_ok(fdk_font_set_style(f, 0xFFu)));
+    assert(fdk_font_get_style(f) ==
+           (FDK_FONT_STYLE_BOLD | FDK_FONT_STYLE_ITALIC));
+    assert(fdk_ok(fdk_font_set_style(f, 0u)));
+    assert(fdk_font_get_style(f) == 0u);
+
+    const char *text = "FDK text!"; /* 8 inked glyphs + 1 space */
+    size_t len = strlen(text);
+    fdk_text_metrics m_reg;
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m_reg)));
+
+    /* Synthetic bold: every INKED glyph's advance grows by the stem
+     * (pixel_size/24, min 1); the space has no bitmap so it does not
+     * grow. The total is exact — the stem is an integer, so the
+     * final rounding is unaffected. Ink HEIGHT is untouched (the
+     * pass only widens). */
+    int stem = 24 / 24;
+    assert(stem >= 1);
+    int inked = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] != ' ') {
+            inked++;
+        }
+    }
+    assert(fdk_ok(fdk_font_set_style(f, FDK_FONT_STYLE_BOLD)));
+    fdk_text_metrics m_bold;
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m_bold)));
+    assert(m_bold.advance_width == m_reg.advance_width + inked * stem);
+    assert(m_bold.ink_top == m_reg.ink_top);
+    assert(m_bold.ink_bottom == m_reg.ink_bottom);
+
+    /* Synthetic italic: the oblique shear reshapes ink but
+     * deliberately leaves every advance (and so the total) alone. */
+    assert(fdk_ok(fdk_font_set_style(f, FDK_FONT_STYLE_ITALIC)));
+    fdk_text_metrics m_ital;
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m_ital)));
+    assert(m_ital.advance_width == m_reg.advance_width);
+
+    /* Bold + italic combine: stem growth only (shear adds no
+     * advance). */
+    assert(fdk_ok(fdk_font_set_style(
+        f, FDK_FONT_STYLE_BOLD | FDK_FONT_STYLE_ITALIC)));
+    fdk_text_metrics m_both;
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m_both)));
+    assert(m_both.advance_width == m_bold.advance_width);
+
+    /* A style change flushes the cache (rasterizations bake the
+     * style in); setting the SAME style again is a no-op. */
+    assert(fdk_ok(fdk_font_set_style(f, 0u)));
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m_reg)));
+    fdk_font_cache_stats st_warm;
+    fdk_font_get_cache_stats(f, &st_warm);
+    assert(st_warm.cached_glyphs > 0);
+
+    assert(fdk_ok(fdk_font_set_style(f, FDK_FONT_STYLE_BOLD)));
+    fdk_font_cache_stats st_flushed;
+    fdk_font_get_cache_stats(f, &st_flushed);
+    assert(st_flushed.cached_glyphs == 0);
+
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m_bold)));
+    fdk_font_cache_stats st_misses;
+    fdk_font_get_cache_stats(f, &st_misses);
+    assert(st_misses.cached_glyphs > 0);
+    assert(fdk_ok(fdk_font_set_style(f, FDK_FONT_STYLE_BOLD)));
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m_bold)));
+    fdk_font_cache_stats st_idem;
+    fdk_font_get_cache_stats(f, &st_idem);
+    assert(st_idem.cache_misses == st_misses.cache_misses);
+    assert(st_idem.cached_glyphs > 0);
+
+    /* Draw agreement under style (bold is currently set): the ink
+     * stays inside the BOLD measured advance (+1 rounding px). */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(200, 100, &s)));
+    fdk_color bg = rgb(16, 16, 24);
+    fdk_surface_fill(s, bg);
+    fdk_u32 bgpx = pack(16, 16, 24);
+    assert(fdk_ok(fdk_surface_present(s)));
+    int pen_x = 20;
+    int baseline = 50;
+    assert(fdk_ok(fdk_surface_draw_utf8(s, f, text, len, pen_x, baseline,
+                                        white())));
+    assert(count_ink(s, 0, 0, pen_x, 100, bgpx) == 0);
+    assert(count_ink(s, pen_x + m_bold.advance_width + 1, 0, 200, 100,
+                     bgpx) == 0);
+    assert(count_ink(s, pen_x, 0, pen_x + m_bold.advance_width, 100,
+                     bgpx) > 30);
+
+    fdk_surface_destroy(s);
+    fdk_font_destroy(f);
+    printf("[ok] style: bold advance += stem/glyph (height untouched), "
+           "italic advance unchanged, combos, mask+flush+idempotence, "
+           "draw agreement\n");
+}
+
+/* ---- subpixel positioning (Phase 6 completion) ---- */
+
+static void test_subpixel_positioning(void) {
+    /* Kerned strings accumulate fractional pen positions; the walk
+     * floors each glyph's left edge and quantizes the fractional
+     * remainder into one of 4 phase-keyed rasterizations. */
+    fdk_font *f = fdk_font_load(g_sans, 16);
+    assert(f != NULL);
+
+    const char *text = "AVATAR Waveform";
+    size_t len = strlen(text);
+
+    /* Stable totals: the measured advance is the rounded float pen
+     * — repeating the measure must not drift. */
+    fdk_text_metrics m, m2;
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m)));
+    assert(fdk_ok(fdk_font_measure_utf8(f, text, len, &m2)));
+    assert(m.advance_width == m2.advance_width);
+
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(300, 100, &s)));
+    fdk_color bg = rgb(16, 16, 24);
+    fdk_surface_fill(s, bg);
+    fdk_u32 bgpx = pack(16, 16, 24);
+    assert(fdk_ok(fdk_surface_present(s)));
+    int pen_x = 15;
+    int baseline = 40;
+    assert(fdk_ok(fdk_surface_draw_utf8(s, f, text, len, pen_x, baseline,
+                                        white())));
+
+    /* (1) Measure/draw agreement survives fractional pens: ink
+     * stays inside the measured advance (+1 rounding px). */
+    assert(count_ink(s, 0, 0, pen_x, 100, bgpx) == 0);
+    assert(count_ink(s, pen_x + m.advance_width + 1, 0, 300, 100,
+                     bgpx) == 0);
+    assert(count_ink(s, pen_x, 0, pen_x + m.advance_width, 100, bgpx) >
+           30);
+
+    /* (2) Determinism: a second draw at another baseline is
+     * pixel-identical row for row and served from the cache (no new
+     * rasterizations — the phase keys hit). */
+    fdk_font_cache_stats st0;
+    fdk_font_get_cache_stats(f, &st0);
+    int baseline2 = 80;
+    assert(fdk_ok(fdk_surface_draw_utf8(s, f, text, len, pen_x, baseline2,
+                                        white())));
+    fdk_font_cache_stats st1;
+    fdk_font_get_cache_stats(f, &st1);
+    assert(st1.cache_misses == st0.cache_misses);
+    assert(st1.cache_hits > st0.cache_hits);
+    for (int x = pen_x; x < pen_x + m.advance_width; x++) {
+        for (int dy = 0; dy < -m.ink_top + m.ink_bottom; dy++) {
+            int y1 = baseline + m.ink_top + dy;
+            int y2 = baseline2 + m.ink_top + dy;
+            if (y1 >= 0 && y2 >= 0 && y1 < 100 && y2 < 100) {
+                assert(px_at(s, x, y1) == px_at(s, x, y2));
+            }
+        }
+    }
+
+    /* (3) Pen-shift invariance: drawing at pen+1 shifts every glyph
+     * by exactly one integer pixel — the fractional phase (and so
+     * the cache keys) must be UNCHANGED: zero new rasterizations,
+     * ink translated pixel-exactly. */
+    fdk_surface *s2 = NULL;
+    assert(fdk_ok(fdk_surface_create(300, 100, &s2)));
+    fdk_surface_fill(s2, bg);
+    assert(fdk_ok(fdk_surface_present(s2)));
+    fdk_font_cache_stats st2a;
+    fdk_font_get_cache_stats(f, &st2a);
+    assert(fdk_ok(fdk_surface_draw_utf8(s2, f, text, len, pen_x + 1,
+                                        baseline, white())));
+    fdk_font_cache_stats st2b;
+    fdk_font_get_cache_stats(f, &st2b);
+    assert(st2b.cache_misses == st2a.cache_misses);
+    for (int x = pen_x; x < pen_x + m.advance_width; x++) {
+        for (int dy = 0; dy < -m.ink_top + m.ink_bottom; dy++) {
+            int y = baseline + m.ink_top + dy;
+            if (y >= 0 && y < 100) {
+                assert(px_at(s, x, y) == px_at(s2, x + 1, y));
+            }
+        }
+    }
+    fdk_surface_destroy(s2);
+
+    /* (4) Phase fan-out: repeating ONE glyph accumulates its
+     * (typically fractional) advance, so consecutive copies land on
+     * different subpixel phases — more cache entries than distinct
+     * codepoints. Only asserted when the advance really is
+     * fractional at this size (10 rounded singles != the rounded
+     * run of ten is the observable proof of a fractional advance). */
+    fdk_font *f2 = fdk_font_load(g_sans, 16);
+    assert(f2 != NULL);
+    const char *ten = "AAAAAAAAAA";
+    fdk_text_metrics ma, mt;
+    assert(fdk_ok(fdk_font_measure_utf8(f2, "A", 1, &ma)));
+    assert(fdk_ok(fdk_font_measure_utf8(f2, ten, 10, &mt)));
+    fdk_font_cache_stats stf;
+    fdk_font_get_cache_stats(f2, &stf);
+    assert(stf.cached_glyphs >= 1);
+    assert(stf.cached_glyphs <= 2048); /* documented public bound */
+    if (mt.advance_width != 10 * ma.advance_width) {
+        assert(stf.cached_glyphs > 1); /* phases actually fan out */
+        assert(stf.cached_glyphs <= 4); /* at most 4 phases per glyph */
+    }
+    fdk_font_destroy(f2);
+
+    fdk_surface_destroy(s);
+    fdk_font_destroy(f);
+    printf("[ok] subpixel: kerned fractional pens keep measure/draw "
+           "agreement, deterministic redraws, pen-shift invariance "
+           "(no re-rasterization), phase fan-out\n");
+}
+
 int main(void) {
     find_fonts();
     if (g_sans == NULL) {
@@ -842,6 +1070,8 @@ int main(void) {
     test_kerning();
     test_break_lines();
     test_ellipsize();
+    test_font_style();
+    test_subpixel_positioning();
     printf("all headless text tests passed\n");
     return 0;
 }

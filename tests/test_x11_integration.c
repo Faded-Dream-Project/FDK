@@ -1146,6 +1146,205 @@ static void test_widget_layout_reflow_on_resize(void) {
            "expanding panel, zero app code)\n");
 }
 
+/* ---- Phase 5 completion: grid + size limits + baseline ---- */
+
+/* Grid tracks, size limits, expand columns, and reflow-on-resize —
+ * the grid's GUI-parity case for the box reflow test above. Track
+ * math (padding 10, spacing 10, green min-width 140):
+ *   col0 = 120 (red), col1 = 140 (green, min-clamped from 80)
+ *   row0 = 60 (red/green), row1 = 50 (blue)
+ *   natural = 290 x 140; window 360x240 -> col0 +70, row0 +100. */
+static void test_grid_layout_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK grid layout test",
+                                 .width = 360, .height = 240 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    surface_capture cap = { .ctx = ctx, .configure_count = 0 };
+    fdk_window_set_event_callback(win, surface_event_callback, &cap);
+
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget *grid = NULL;
+    assert(fdk_ok(fdk_grid_create(root, 2, 2, &grid)));
+    fdk_grid_set_spacing(grid, 10);
+    fdk_grid_set_padding(grid, 10);
+    fdk_grid_set_column_expand(grid, 0, true);
+    fdk_grid_set_row_expand(grid, 0, true);
+
+    fdk_widget *red = NULL;
+    assert(fdk_ok(fdk_widget_create(grid, NULL,
+                                    (fdk_rect){0, 0, 120, 60}, &red)));
+    fdk_widget_set_natural_size(red, 120, 60);
+    fdk_widget_set_background(red, wcol(220, 50, 50));
+    assert(fdk_ok(fdk_grid_attach(grid, red, 0, 0, 1, 1)));
+
+    fdk_widget *green = NULL;
+    assert(fdk_ok(fdk_widget_create(grid, NULL,
+                                    (fdk_rect){0, 0, 80, 60}, &green)));
+    fdk_widget_set_natural_size(green, 80, 60);
+    /* Min-width forces the measure up: col1 negotiates 140, not 80 —
+     * the size-limit clamp flowing through a REAL container. */
+    fdk_widget_set_size_limits(green, 140, 0, 0, 0);
+    fdk_widget_set_background(green, wcol(50, 180, 80));
+    assert(fdk_ok(fdk_grid_attach(grid, green, 1, 0, 1, 1)));
+
+    fdk_widget *blue = NULL;
+    assert(fdk_ok(fdk_widget_create(grid, NULL,
+                                    (fdk_rect){0, 0, 100, 50}, &blue)));
+    fdk_widget_set_natural_size(blue, 100, 50);
+    fdk_widget_set_background(blue, wcol(60, 100, 220));
+    assert(fdk_ok(fdk_grid_attach(grid, blue, 0, 1, 2, 1))); /* spans */
+
+    fdk_window_set_content(win, grid);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    /* 360x240: col0 [10,200) gap col1 [210,350); row0 [10,170) gap
+     * row1 [180,230). */
+    assert(x11_readback_pixel(&rb_dpy, xid, 100, 50) == 0x00DC3232u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 300, 50) == 0x0032B450u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 205) == 0x003C64DCu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 205, 50) == 0x00000000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 100, 175) == 0x00000000u);
+
+    /* Resize to 460x300: extra +100 wide -> col0 290 (x [10,300)),
+     * +160 tall -> row0 220 (y [10,230)); green moved right, the
+     * spanning blue moved down — with zero app code. */
+    fdk_window_resize(win, 460, 300);
+    alarm(5);
+    while (cap.configure_count == 0) {
+        int r = fdk_pump_events(ctx, 200);
+        assert(r >= 0);
+    }
+    alarm(0);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    assert(x11_readback_pixel(&rb_dpy, xid, 150, 50) == 0x00DC3232u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 400, 100) == 0x0032B450u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 200, 260) == 0x003C64DCu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 305, 100) == 0x00000000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 150, 235) == 0x00000000u);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 grid layout: tracks, min-width limit through a "
+           "real container, expand column/row, span, gaps, reflow on "
+           "resize\n");
+}
+
+/* Baseline alignment at the PIXEL level: two labels at very different
+ * sizes share one baseline row, so the small label's ink starts
+ * distinctly LOWER while both inks hang down to (nearly) the same
+ * row. Requires a system font; honestly skipped without one. */
+static void test_baseline_alignment_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    const char *font_path = NULL;
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        FILE *f = fopen(font_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            font_path = font_candidates[i];
+            break;
+        }
+    }
+    if (font_path == NULL) {
+        printf("[skip] X11 baseline alignment GUI (no system TrueType "
+               "font found)\n");
+        return;
+    }
+    fdk_font *small = fdk_font_load(font_path, 16);
+    fdk_font *big = fdk_font_load(font_path, 32);
+    assert(small != NULL && big != NULL);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK baseline test",
+                                 .width = 320, .height = 120 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget *hbox = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_HORIZONTAL, &hbox)));
+    fdk_box_set_padding(hbox, 20);
+
+    fdk_widget *lab_small = NULL;
+    assert(fdk_ok(fdk_label_create(hbox, small, "Ag", &lab_small)));
+    fdk_widget *lab_big = NULL;
+    assert(fdk_ok(fdk_label_create(hbox, big, "Ag", &lab_big)));
+    fdk_widget_set_align(lab_small, FDK_ALIGN_FILL, FDK_ALIGN_BASELINE);
+    fdk_widget_set_align(lab_big, FDK_ALIGN_FILL, FDK_ALIGN_BASELINE);
+    fdk_window_set_content(win, hbox);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    /* Ink-band scan per label: find the topmost/bottommost bright
+     * row inside each label's arranged x-range. */
+    fdk_rect rs = fdk_widget_get_bounds(lab_small);
+    fdk_rect rb = fdk_widget_get_bounds(lab_big);
+    Display *d = NULL;
+    unsigned long xid = fdk_window_xid(win);
+    int a_top = -1, a_bot = -1, b_top = -1, b_bot = -1;
+    for (int y = 0; y < 120; y++) {
+        for (int x = rs.x; x < rs.x + rs.width && x < 320; x++) {
+            unsigned long px = x11_readback_pixel(&d, xid, x, y);
+            if (((px >> 16) & 0xFFu) > 100 && ((px >> 8) & 0xFFu) > 100) {
+                if (a_top < 0) a_top = y;
+                a_bot = y;
+                break;
+            }
+        }
+        for (int x = rb.x; x < rb.x + rb.width && x < 320; x++) {
+            unsigned long px = x11_readback_pixel(&d, xid, x, y);
+            if (((px >> 16) & 0xFFu) > 100 && ((px >> 8) & 0xFFu) > 100) {
+                if (b_top < 0) b_top = y;
+                b_bot = y;
+                break;
+            }
+        }
+    }
+    assert(a_top >= 0 && b_top >= 0); /* both inks found */
+    /* Shared baseline: the small label starts clearly lower (top
+     * differs by the ascent gap ~14px for DejaVu 16 vs 32) — under
+     * TOP alignment the tops would be equal. */
+    assert(a_top - b_top > 8);
+    /* Both inks hang from the same row: bottoms within the descent
+     * scale difference (a couple of pixels at these sizes). */
+    assert(b_bot - a_bot < 8 && b_bot >= a_bot);
+
+    XCloseDisplay(d);
+    fdk_window_destroy(win);
+    fdk_font_destroy(small);
+    fdk_font_destroy(big);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 baseline alignment GUI: 16px and 32px labels share "
+           "one baseline row (ink tops %d vs %d, bottoms %d vs %d)\n",
+           a_top, b_top, a_bot, b_bot);
+}
+
 /* ---- Text rendering (Phase 6) ---- */
 
 /* Draws real shaped text into a mapped window and verifies, through
@@ -2867,6 +3066,8 @@ int main(void) {
     test_widget_real_input_via_xsendevent();
     test_widget_root_follows_resize();
     test_widget_layout_reflow_on_resize();
+    test_grid_layout_gui();
+    test_baseline_alignment_gui();
     test_text_render_readback();
     test_widget_catalog_gui();
     test_label_radio_arrow_gui();
