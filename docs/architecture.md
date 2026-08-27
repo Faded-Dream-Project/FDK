@@ -73,7 +73,7 @@ backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
   struct layout behind each opaque public type lives (e.g.
   `src/core/context_internal.h` defines `struct fdk_context`).
 
-## Current state (Phase 8 first slice landed — decorations)
+## Current state (Phase 8 complete — decorations & window management)
 
 Implemented: `src/core/` (context lifecycle, logging, error codes,
 allocation, versioning — Phase 1, plus the Phase 2 additions to
@@ -106,13 +106,22 @@ and in `src/text/`), `src/theme/` (Phase 7: the theme API and
 the strict `.fdk` parser — the built-in default is the v1 palette
 exactly, and switching the default theme invalidates every live
 tree through the widget core's root registry), and the Phase 8
-decoration layer in `src/window/window.c` (an FDK-drawn themed title
-band under the window's root, WM chrome toggled through three new
-OPTIONAL platform ops — X11 implements them via _MOTIF_WM_HINTS,
-XTranslateCoordinates, and XMoveWindow; Wayland deliberately leaves
-them NULL and `fdk_window_set_decorated` fails with
-FDK_ERR_UNSUPPORTED there until xdg-decoration lands, because
-stacking FDK's bar over the compositor's would double-decorate). `fdk_init()` performs a real
+decoration + window-management layer in `src/window/window.c` (an
+FDK-drawn themed title band under the window's root with
+vector-glyph minimize/maximize-restore/close buttons, double-click
+maximize, and FDK-drawn resize edges, over a set of new OPTIONAL
+platform ops: `window_set_wm_decorations` — X11 _MOTIF_WM_HINTS,
+Wayland xdg-decoration set_mode; `window_set_maximized` /
+`window_set_minimized` — EWMH _NET_WM_STATE messages + PropertyNotify
+tracking on X11 (with honest bare-X fallbacks where FDK is its own
+WM), xdg_toplevel requests on Wayland; `window_begin_move` /
+`window_begin_resize` — _NET_WM_MOVERESIZE / xdg_toplevel.move/
+resize, handing interactive drags to the WM/compositor where the
+platform supports it; `window_move_resize_to` for FDK-driven atomic
+resize drags. FDK_EVENT_WINDOW_STATE / FDK_EVENT_WINDOW_DECORATION
+report platform truth, never request optimism — see
+platform_internal.h, which documents the EWMH vs xdg-decoration vs
+bare-X differences instead of assuming them away). `fdk_init()` performs a real
 platform connection with backend auto-detection; `fdk_run()` is a
 real `poll()`-based event loop that exits on `fdk_quit()` or when
 the last top-level window closes; windows can be created, shown,
@@ -127,11 +136,12 @@ what is and isn't covered — in particular, transforms, image
 decoding, text, and the MIT-SHM fast path are still future work,
 while damage tracking, the clip stack, offscreen surfaces, the full
 crisp-primitive set, Wayland frame-callback pacing, and the widget
-foundation are in and tested; Wayland still has no automated
-integration test, though the backend is verified end-to-end against
-a real headless Weston (see `docs/testing.md`), and the widget layer
-— backend-neutral by construction — is verified headless + on X11
-this slice (Wayland widget GUI tests pending the toolchain).
+foundation are in and tested; the widget layer — backend-neutral by
+construction — is verified headless + on X11, and the Wayland
+backend has a real integration test against sway headless
+(xdg-decoration negotiation included — see `docs/testing.md`; the
+weston 14 in Debian ships no xdg-decoration, which is why the
+verification compositor is sway).
 
 ### Widget layer specifics (Phase 4)
 

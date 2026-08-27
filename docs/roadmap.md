@@ -554,50 +554,161 @@ it wants the Phase 5 grid/constraint work or a later layout pass.
   auto window-background application, theme file search paths,
   Wayland-side GUI verification (toolchain).
 
-## Phase 8 — Window Decorations — FIRST SLICE COMPLETE
+## Phase 8 — Window Decorations & Window Management — COMPLETE
+
+Everything this phase's roadmap line promised, on BOTH backends,
+honest about the places the platforms genuinely differ (the EWMH vs
+xdg-decoration vs bare-X triangle is documented in
+platform_internal.h, not assumed away).
+
+### FDK-drawn decorations (first slice, carried forward and extended)
 
 - `fdk_window_set_decorated(true/false)`: FDK draws its own title
-  band INSIDE the client area (a themed 28px widget: window title as
-  a catalog Label — default color = themed text — plus a close
-  Button) and asks the backend to drop the WM's chrome
-  (`fdk_window_set_decoration_font` picks the face; default is the
-  new `fdk_font_load_system_default()`, FDK still bundles no font).
-  The content widget (Phase 5) is laid out below the band on every
-  configure; `fdk_window_set_title` keeps the band label in sync
-  (the backend title is still set for taskbars).
-- X11: `_MOTIF_WM_HINTS` via three new OPTIONAL vtable ops
-  (`window_set_wm_decorations` / `window_get_position` /
-  `window_move_to`). Wayland leaves them NULL — `set_decorated`
-  returns FDK_ERR_UNSUPPORTED there rather than stacking FDK's bar
-  over the compositor's (xdg-decoration is the parked follow-up; the
-  two protocols are NOT identical and are documented as such in
-  platform_internal.h).
-- The band's close button synthesizes a REAL
-  FDK_EVENT_WINDOW_CLOSE_REQUEST through the normal dispatch path —
-  application close semantics are identical whether the WM or FDK's
-  button asked. Dragging the band moves the window (snap-formulated
-  in bar-local coordinates; converges because each move is flushed
-  before the next motion event is generated — exact under
-  bare/non-reparenting X servers; reparenting WMs may move only the
-  client, documented).
-- Build-system hardening found by this slice: the Makefile had NO
-  header dependency tracking, so editing a struct in an internal
-  header did not recompile includers — stale objects kept writing
-  pre-edit field offsets and ASan caught the corruption. Fixed with
-  `-MMD -MP` + `-include` (placed AFTER all targets: an earlier
-  include made the first .d's object the default goal — make pitfall,
-  documented in the Makefile).
-- Tests: X11 GUI case `test_decorations_gui` (server-side readback:
-  band fill + themed rule + close button, content below, MWM property
-  set/removed, REAL click on × delivering a real close-request, drag
-  moving the window to the exact (+40,+20), mode round trip) + demo
-  rig `scripts/run_decorations_demo_x11.sh` (10 PIL checks incl. the
-  band returning at the post-drag position and pixel-identical
-  on/off/on).
-- Remaining (parked, honest): maximize/minimize buttons (needs
-  _NET_WM_STATE work), resize edges, double-click title maximize,
-  Wayland xdg-decoration, per-theme title-bar metrics (band height is
-  a constant today).
+  band INSIDE the client area (a themed band: the window title as a
+  catalog Label — default color = themed text — plus three
+  window-management buttons) and asks the backend to drop the
+  platform's chrome (`fdk_window_set_decoration_font` picks the face;
+  default is `fdk_font_load_system_default()`, FDK still bundles no
+  font). The content widget (Phase 5) is laid out below the band on
+  every configure; `fdk_window_set_title` keeps the band label in
+  sync (the backend title is still set for taskbars).
+- The band's three buttons — minimize, maximize/restore, close — are
+  drawn as VECTOR GLYPHS (lines/rects in the band's paint hook), NOT
+  font text: a fontless system loses only the title text, never the
+  window buttons, and the glyphs scale with the button, not the font.
+  Hit-testing + hover/press highlight (the same themed control
+  tokens the catalog Button uses) live in the band's event callback.
+- The band's height is the THEME metric `title_bar_height` (12..64,
+  default 28): a layout metric, not just paint — switching themes
+  re-arranges decorated windows through the widget core's new
+  theme-notify walk (an internal per-widget hook; the public
+  fdk_widget_class is untouched).
+- The close button synthesizes a REAL FDK_EVENT_WINDOW_CLOSE_REQUEST
+  through the normal dispatch path — application close semantics are
+  identical whether the WM or FDK's button asked.
+- Build-system hardening found by the first slice: the Makefile had
+  NO header dependency tracking — fixed with `-MMD -MP` + `-include`
+  (placed AFTER all targets; an earlier include made the first .d's
+  object the default goal — make pitfall, documented in the
+  Makefile).
+
+### Window state (maximize / minimize / restore)
+
+- Public API: `fdk_window_maximize` / `fdk_window_unmaximize` /
+  `fdk_window_minimize` / `fdk_window_restore` /
+  `fdk_window_is_maximized` / `fdk_window_is_minimized` — all
+  requests, with the truth reported back through the new
+  FDK_EVENT_WINDOW_STATE (caches mirroring last_size's contract).
+- Double-clicking the band toggles maximize (400ms / 5px slop — the
+  math is a pure function, unit-tested headless).
+- X11, three worlds keyed off a connect-time _NET_SUPPORTED probe:
+  an EWMH WM gets _NET_WM_STATE add/remove client messages (source
+  indication: application) and reports back by rewriting the
+  window's _NET_WM_STATE property, which FDK watches
+  (PropertyChangeMask) — a WM that ignores a request produces no
+  event and is_maximized keeps telling the truth; minimize is the
+  ICCCM XIconifyWindow request tracked via the WM_STATE property.
+  Under BARE X (no WM — Xvfb, kiosks) FDK performs the actions
+  itself: move+resize to the full screen with the geometry saved for
+  restore, unmap/map for minimize/restore, state events dispatched
+  directly.
+- Wayland: xdg_toplevel.set_maximized/unset with the state derived
+  from configure's states[] array; set_minimized is fire-and-forget
+  (the protocol has no acknowledgement and no unminimize request —
+  FDK marks optimistically, clears on the next activated configure,
+  and fdk_window_restore honestly returns FDK_ERR_UNSUPPORTED).
+
+### Interactive move & resize
+
+- Band drag: preferred path hands the drag to the WM/compositor —
+  _NET_WM_MOVERESIZE(MOVE) on X11-with-EWMH (fixes the first slice's
+  documented "reparenting WMs move only the client" caveat), xdg_
+  toplevel.move on Wayland (the backend tracks the last button
+  serial for the request) — falling back to the first slice's
+  snap-formulated move under bare X.
+- Resize edges: `fdk_window_set_resizable` (auto-ON while
+  decorated — owning the chrome means owning resize): a 5px
+  border/corner zone (pure-function classification, headless-tested)
+  captures drags — handed to the WM/compositor where available
+  (_NET_WM_MOVERESIZE direction codes / xdg_toplevel.resize edges),
+  or driven by FDK itself under bare X through a new atomic
+  `window_move_resize_to` op, clamped to the app's
+  fdk_window_set_size_limits (on a bare X server there is no WM to
+  enforce hints) with sane internal floors.
+
+### Wayland xdg-decoration
+
+- The protocol is generated from wayland-protocols (checked into
+  src/platform/wayland/generated/ like xdg-shell) and bound as an
+  OPTIONAL global: no zxdg_decoration_manager_v1 -> set_decorated
+  honestly fails FDK_ERR_UNSUPPORTED rather than double-decorating.
+- The per-window decoration object is created at WINDOW-CREATE time,
+  before the first buffer — a protocol requirement the first
+  implementation got wrong and sway caught live ("xdg_toplevel_
+  decoration must not have a buffer at creation"). set_mode
+  (CLIENT/SERVER) then rides the normal set_decorated flow, and a
+  compositor that forces SERVER_SIDE against our request arrives as
+  the new FDK_EVENT_WINDOW_DECORATION — FDK tears its own band down
+  before the app sees the event, so a window can never end up with
+  two title bars.
+
+### Tests (every layer, every backend)
+
+- Headless `tests/test_window_logic.c` (36 checks): edge
+  classification (all 8 zones, corners, degenerate windows,
+  out-of-bounds), the edge-drag solver (all edges/corners, min/max
+  clamps with opposite-edge anchoring), double-click boundaries.
+- X11 GUI: `test_window_state_gui` (bare-X maximize/unmaximize/
+  minimize/restore with server-side geometry + exactly-one-event
+  semantics), `test_resize_edges_gui` (edges off by default —
+  content gets corner presses; SE/E/N drags resize exactly; min
+  clamps hold), the extended `test_decorations_gui` (maximize +
+  minimize band buttons through real synthetic input, double-click
+  maximize/restore, themed band-height switch re-flowing content
+  with pixel proof), and `test_ewmh_fake_wm` — the test BECOMES an
+  EWMH window manager on a second X connection (advertises
+  _NET_SUPPORTED, takes SubstructureRedirect on root, answers
+  _NET_WM_STATE by rewriting the property like a real WM) and
+  verifies the message paths field-by-field: add/remove actions,
+  both maximized atoms, source indication, MOVE direction at the
+  exact root coordinates, SIZE_BOTTOMRIGHT from the SE corner, and
+  WM_CHANGE_STATE iconify — plus the PropertyNotify-driven state
+  events on FDK's side.
+- Wayland `tests/test_wayland_integration.c` + `make test-wayland`:
+  runs against a REAL compositor. Debian's weston 14 ships no
+  xdg-decoration implementation in ANY shell, so the verification
+  compositor is sway 1.10 headless (wlroots 0.18, pixman) — which
+  advertises zxdg_decoration_manager_v1, honors client-side mode
+  requests, and reports tiled windows as maximized at map time (the
+  test asserts the reaction matches whichever world the compositor
+  picks, honestly handling both). Verified: client-side decoration
+  confirmed + band pixel-verified in-frame, maximize state events
+  from configure states[], minimize request + optimistic flag,
+  restore honestly unsupported, clean teardown under ASan — the
+  leak-free teardown caught two real bugs on its first runs (the
+  decoration-object protocol-order error above, and a leaked
+  wl_surface.frame callback proxy when a window is destroyed before
+  the compositor answers — both fixed in the backend).
+- Demo rigs: `scripts/run_decorations_demo_x11.sh` now drives the
+  full interactive surface with REAL input — band drag, decoration
+  toggle on/off/on, maximize button, band double-click restore, SE
+  resize-corner drag (460x300 -> 500x330), close via the band — 16
+  PIL checks; `scripts/run_wayland_tests.sh` (staging env) runs the
+  sway integration test + a self-driving demo cycle with WAYLAND_
+  DEBUG protocol counting (set_mode x3, decoration configure, set_
+  maximized/unset/set_minimized) — WAYLAND RIG PASS.
+- Full-suite verification: 0 warnings debug AND release (Wayland
+  enabled); headless 84/84; X11 25/25 (was 22); all 8 demo rigs
+  PASS (03-09 + the Wayland rig).
+
+Remaining (parked, honest — none of these are Phase 8 scope): the
+weston 14 in Debian has no xdg-decoration (sway is the verification
+compositor; a weston-side run needs a weston build with it); resize
+cursor shapes (needs a cursor API — Phase 10 territory); per-app
+max-size enforcement under EWMH WMs is the WM's job (FDK clamps its
+own drags); drag-a-maximized-window-to-restore (the Windows-style
+gesture) is not implemented — dragging a maximized band is a no-op,
+documented.
 
 ## Phase 9 — Advanced Widgets
 

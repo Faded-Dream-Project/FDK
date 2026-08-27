@@ -202,29 +202,90 @@ The demo rig `scripts/run_theme_demo_x11.sh` drives `08_theme` with
 real clicks through three themes and PIL-verifies 13 properties
 including the pixel-exact round trip.
 
-## Decoration tests (Phase 8)
+## Decoration & window-management tests (Phase 8)
 
-The X11 suite's `test_decorations_gui` covers the whole slice
-server-side: the themed band's fill and border rule at the top of a
-real window, the close button's fill, the content widget arranged
-below the band, `_MOTIF_WM_HINTS` present while decorated and
-removed when not (read back with XGetWindowProperty), a REAL click
-on the band's close button delivering a genuine
-FDK_EVENT_WINDOW_CLOSE_REQUEST, a band drag (XSendEvent
-press/motion/release) moving the window to the exact expected
-position (XTranslateCoordinates verification), and the
-decorated/undecorated round trip.
+Three layers, deliberately:
 
-The demo rig `scripts/run_decorations_demo_x11.sh` drives
-`09_decorations` end-to-end: drag, toggle off, toggle on, close via
-the band button — 10 PIL checks including the band returning at the
-post-drag position and the on/off/on pixels being identical.
+**Pure math, headless** (`tests/test_window_logic.c`, runs in plain
+`make test`): the resize-edge zone classifier (all eight zones,
+corner precedence, degenerate narrower-than-2*border windows,
+out-of-bounds points), the edge-drag geometry solver (every edge and
+corner, min/max clamping with opposite-edge anchoring — a clamped
+W-drag must not drag the right edge along), and the double-click
+window/slop boundaries. These are pure functions in window.c
+precisely so they can be proven with no display at all.
 
-A build-system bug this slice exposed and fixed: the Makefile had no
-header dependency tracking, so internal-header edits left stale
-objects (ASan caught the struct-offset corruption on first window
-creation). `-MMD -MP` dependency files are now generated and
-included; the suite is safe against incremental-header edits.
+**X11 GUI** (in `make test-x11`): `test_decorations_gui` covers the
+band server-side — themed fill and rule, content below, MWM hints
+on/off, a REAL click on the close button delivering a genuine
+close-request, band drag to the exact position, the on/off round
+trip — and now also the maximize and minimize band buttons through
+real synthetic input (server-verified geometry: the screen fill and
+the remembered restore origin; the unmap/map transitions), band
+double-click maximize/restore, and the themed `title_bar_height`
+metric re-flowing the window live with pixel proof.
+`test_window_state_gui` proves the bare-X fallback world: FDK as its
+own WM (maximize saves geometry and fills the screen; unmaximize
+restores exactly; minimize unmaps; restore remaps; every flip
+delivers exactly one FDK_EVENT_WINDOW_STATE). `test_resize_edges_gui`
+proves the FDK-driven resize drags: zones off by default (content
+widgets receive corner presses), SE/E/N drags resizing exactly, and
+the app's size limits clamping the drag.
+
+**The fake window manager** (`test_ewmh_fake_wm`): under Xvfb there
+is no WM, which is exactly right for the fallback tests — but the
+EWMH paths a real desktop exercises would go untested. So the test
+BECOMES a window manager on a second X connection: it advertises
+_NET_SUPPORTED (so FDK's connect-time probe enables the message
+paths), takes SubstructureRedirectMask on the root, and answers
+_NET_WM_STATE client messages by rewriting the window's
+_NET_WM_STATE property — what real WMs do; the PropertyNotify is how
+FDK learns state. It also maximizes/restores the window like a WM
+would (so FDK's configure-driven reflow is exercised), simulates a
+_NET_WM_MOVERESIZE move, and maintains WM_STATE for iconification.
+The test asserts the messages field-by-field: add/remove actions,
+both maximized atoms, the source indication, the MOVE direction at
+the exact translated root coordinates, SIZE_BOTTOMRIGHT from the SE
+corner press, and IconicState from the iconify request. It installs
+after the bare-X tests and uninstalls before the suite ends so
+nothing downstream sees a phantom WM.
+
+**Wayland** (`make test-wayland` + `tests/test_wayland_integration.c`):
+runs against a REAL compositor reachable via $WAYLAND_DISPLAY (the
+binary self-skips without one, so plain CI never fails on it). The
+verification compositor is sway 1.10 headless (wlroots pixman
+renderer): Debian's weston 14 ships NO xdg-decoration implementation
+in any shell, and its desktop-shell additionally can't run from a
+non-root prefix. sway advertises the protocol, honors client-side
+mode requests, and reports tiled windows as maximized at map time —
+the test asserts the correct REACTION to whichever world the
+compositor picks (client-side confirmed: the band is pixel-verified
+in-frame; server-side forced: FDK drops its band and delivers
+FDK_EVENT_WINDOW_DECORATION) rather than one specific answer. Also
+verified: configure-states[]-driven FDK_EVENT_WINDOW_STATE, the
+minimize request's optimistic flag with restore honestly
+FDK_ERR_UNSUPPORTED (xdg-shell has no unminimize request), and — via
+the maintainer rig's WAYLAND_DEBUG counting — the exact protocol
+requests (set_mode x3 across an on/off/on cycle, decoration
+configure, set_maximized/unset_maximized/set_minimized). Two real
+backend bugs were caught on its first runs and fixed: the
+xdg-decoration object must be created before the surface's first
+buffer (sway enforces it), and a wl_surface.frame callback whose
+window dies before `done` leaked its proxy (LeakSanitizer).
+
+**Demo rig**: `scripts/run_decorations_demo_x11.sh` drives
+`09_decorations` end-to-end with real input — band drag, decoration
+toggle off/on, the band's MAXIMIZE button, a band double-click
+restore, an SE resize-corner drag (460x300 -> 500x330), and close
+via the band button — 16 PIL checks including the band returning at
+the post-drag position and pixel-identical on/off/on.
+
+A build-system bug the first Phase 8 slice exposed and fixed: the
+Makefile had no header dependency tracking, so internal-header edits
+left stale objects (ASan caught the struct-offset corruption on
+first window creation). `-MMD -MP` dependency files are now
+generated and included; the suite is safe against incremental-header
+edits.
 
 ## What `make test-x11` actually verifies
 

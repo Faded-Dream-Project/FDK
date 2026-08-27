@@ -292,23 +292,35 @@ panel of catalog widgets cycling through three themes with real
 clicks, including the app-side pattern for tokens the engine does
 not force on anyone (window background, label accents).
 
-And FDK-drawn window decorations — the toolkit owns its title bar:
+And FDK-drawn window decorations plus full window management — the
+toolkit owns its title bar:
 
 ```c
-fdk_window_set_decorated(window, true); /* themed band + close btn */
+fdk_window_set_decorated(window, true);  /* themed band + buttons  */
+fdk_window_maximize(window);             /* request; state events */
 ```
 
-A 28px themed band inside the client area (window title, working
-close button that delivers a normal close-request — application
-semantics unchanged), the WM's own chrome asked away via
-`_MOTIF_WM_HINTS`, the content laid out below the band, and the band
-draggable to move the window. Everything themes at runtime like any
-widget. Wayland honestly returns `FDK_ERR_UNSUPPORTED` until
-xdg-decoration lands rather than stacking two title bars.
+A themed band inside the client area (height is the
+`title_bar_height` theme metric) with the window title and three
+vector-glyph buttons — minimize, maximize/restore, close — that
+render with or without fonts. The close button delivers a normal
+close-request (application semantics unchanged); double-clicking the
+band toggles maximize; a 5px edge/corner zone resizes the window
+(since the WM frame is gone, FDK provides the handles). The
+platform's own chrome is asked away — `_MOTIF_WM_HINTS` on X11,
+xdg-decoration on Wayland — and where the platform has a protocol
+for it, drags and state changes are HANDED to the WM/compositor
+(EWMH `_NET_WM_STATE` / `_NET_WM_MOVERESIZE`, `xdg_toplevel`
+requests); under bare X (no WM) FDK performs them itself. State
+truth arrives as `FDK_EVENT_WINDOW_STATE`, never request optimism;
+on Wayland a compositor that insists on its own decorations comes
+back as `FDK_EVENT_WINDOW_DECORATION` and FDK drops its band before
+you see the event — a window can never end up with two title bars.
 
 Run `examples/09_decorations.c`: a decorated window you can drag by
-its band and close by its button, with a runtime toggle between
-FDK-drawn and WM decorations.
+its band, double-click to maximize, resize by its edges, manage by
+its buttons, and close by its button — with a runtime toggle between
+FDK-drawn and platform decorations.
 
 ### What it looks like
 
@@ -395,11 +407,19 @@ pixel-exact.
 ![08_theme under three themes](docs/screenshots/theme_three_themes_1380x330.png)
 
 And the decorations' proof — `09_decorations` decorated (note the
-FDK band: title, × button, themed rule — at the post-drag position)
-vs. toggled back to WM decorations (band gone, content reflows to
-the full window):
+FDK band: title, the three management buttons, themed rule — at the
+post-drag position) vs. toggled back to WM decorations (band gone,
+content reflows to the full window):
 
 ![09_decorations on/off](docs/screenshots/decorations_on_off_1050x360.png)
+
+The Phase 8 completion, driven by real input in the test rig:
+decorated and dragged; then MAXIMIZED via the band's own maximize
+button (fills the screen); then restored by double-clicking the band
+and GROWN 460x300 -> 500x330 by dragging the bottom-right resize
+corner FDK draws:
+
+![09_decorations window management](docs/screenshots/decorations_management_1636x340.png)
 
 ## Project principles
 

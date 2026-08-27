@@ -117,9 +117,19 @@ should be justified in the commit that does it.
 The single exception is the Wayland backend's own translation units,
 which get `-Wno-cast-qual` applied via `extra_flags` only when their
 source path is under `src/platform/wayland/`. The reason is
-`wayland-scanner`'s generated `xdg-shell-client-protocol.h` and
+`wayland-scanner`'s generated protocol headers (xdg-shell and the
+Phase 8 xdg-decoration-unstable-v1) and
 `libwayland-client`'s own listener-registration inlines
 (`wl_proxy_add_listener`'s `(void (**)(void))` cast) trigger that
 warning upstream, in code FDK does not own or control. No other
 warning is suppressed anywhere in the project, and no source file
 outside `src/platform/wayland/` receives any `-Wno-...` flag.
+
+The scanner output lives in
+`src/platform/wayland/generated/` and is CHECKED IN (both protocols
+are stable enough that regenerating per build buys nothing and costs
+a build-time wayland-scanner dependency). Regenerating, if ever
+needed:
+
+    wayland-scanner client-header < xdg-decoration-unstable-v1.xml         > src/platform/wayland/generated/xdg-decoration-unstable-v1-client-protocol.h
+    wayland-scanner private-code < xdg-decoration-unstable-v1.xml         > src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c

@@ -114,14 +114,20 @@ All optional; each inherits from the built-in default theme when absent.
 
 ## Metrics
 
-| Key                    | Range  | Default | Paints                          |
+| Key                    | Range  | Default | Paints / lays out               |
 |------------------------|--------|---------|---------------------------------|
 | `button_corner_radius` | 0–32   | 8       | Button fill + focus-ring corner radius |
 | `separator_thickness`  | 1–8    | 1       | Separator band thickness        |
+| `title_bar_height`     | 12–64  | 28      | FDK-drawn title band height     |
 
 All optional; each inherits from the built-in default theme when absent.
-Metrics are paint-time values only — they do not change any widget's
-natural size (a separator's size request remains the application's).
+Most metrics are paint-time values only — they do not change any
+widget's natural size (a separator's size request remains the
+application's). `title_bar_height` is the exception, deliberately:
+it is a LAYOUT metric — switching the default theme re-arranges
+every decorated window (the band grows/shrinks and the content
+widget reflows below it), then repaints. It only affects windows
+using FDK's own decorations (`fdk_window_set_decorated`).
 
 ## Error semantics
 
