@@ -158,6 +158,50 @@ boundary sits at the exact pixel layout computed. Destroying the
 content widget and calling fdk_window_layout() must deactivate the
 association cleanly rather than arranging a freed widget.
 
+## Theme tests (Phase 7)
+
+`tests/test_theme.c` runs headless under ASan+UBSan and pins:
+
+- **The no-regression pin**: the built-in default theme equals the
+  Phase 6 v1 palette component for component (all 9 consumed colors
+  plus the 2 metrics that replaced `BTN_RADIUS` and the 1px rule).
+  If this ever fails, "never touching themes" changed pixels.
+- **Programmatic themes**: create/set/get, every validation rule
+  (bad tokens/metrics/ranges/NULL, rename caps), and that editing a
+  theme never installs it.
+- **Parsing**: a complete file (all keys, string escapes, both hex
+  forms), partial files (inheritance), and the whitespace
+  tolerances (comments, blank lines, CRLF, lone CR, UTF-8 BOM,
+  tabs, no trailing newline, spaced brackets).
+- **The adversarial matrix from `docs/security.md`**: 40+ malformed
+  inputs — unknown keys/sections, duplicates, bad hex, wrong value
+  types, out-of-range metrics, leading zeros, over-long integers/
+  strings/lines, control chars, unterminated strings, bad escapes,
+  embedded NULs (with explicit lengths, so NUL can't truncate),
+  wrong versions, oversized inputs — each asserting the exact
+  `fdk_result` code. This matrix caught two real parser bugs before
+  they shipped.
+- **File loading**: valid/missing/zero-byte/bad-version files, NULL
+  paths (a zero-byte file is rejected, not silently defaulted).
+- **Live switching**: a standalone tree with a button and separator
+  painted to an offscreen surface before/after
+  `fdk_theme_set_default()` — fill and band pixels change to the new
+  theme, the separator thickness metric paints a 3px band on the
+  same center line, same-pointer switches add no damage, and
+  destroying the current theme reverts to the built-in safely.
+- **Registry hygiene**: 8 roots created and destroyed in scrambled
+  order with switches before/during/after.
+
+The X11 suite adds `test_theme_switch_gui`: a real window whose
+button fill, corner radius (rounded vs square corners, verified at
+the corner pixel), and separator band (1px vs 3px) are read back
+server-side across two switches, with the round trip back to the
+built-in theme pixel-exact.
+
+The demo rig `scripts/run_theme_demo_x11.sh` drives `08_theme` with
+real clicks through three themes and PIL-verifies 13 properties
+including the pixel-exact round trip.
+
 ## What `make test-x11` actually verifies
 
 Real, observable behavior against a live X server (see

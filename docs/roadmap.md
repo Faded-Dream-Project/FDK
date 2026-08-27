@@ -504,13 +504,55 @@ limitation (natural height measured at the natural width; no
 width-for-height layout) is recorded above and in fdk_widgets.h —
 it wants the Phase 5 grid/constraint work or a later layout pass.
 
-## Phase 7 — Theme Engine
+## Phase 7 — Theme Engine — COMPLETE (first slice)
 
-- `.fdk` format: grammar spec (`docs/fdk-theme-format.md`, written
-  when this phase starts), parser, validator, loader, theme API,
-  default theme replacing the Phase 4 base-style fields
-- Parser treated as security-sensitive from day one — see
-  `docs/security.md`
+- `.fdk` format: grammar spec written first (`docs/fdk-theme-format.md`),
+  then the parser (`src/theme/parse.c`) — strict (unknown anything is an
+  error with a line number), bounded (1 MiB input, 1024-byte lines,
+  128-byte strings), partial-by-design (missing tokens inherit the
+  built-in defaults; unknown keys are errors so typos fail loudly),
+  zero partial results. The security rules it is written to, and why,
+  are `docs/security.md` (new).
+- Theme API (`include/fdk/fdk_theme.h`): `fdk_theme` objects with 10
+  color tokens + 2 paint metrics, built-in default theme = the Phase 6
+  v1 palette byte-for-byte (the no-regression pin: never touching
+  themes changes no pixels), programmatic themes, `fdk_theme_parse`
+  (memory) / `fdk_theme_load` (file) with exact `fdk_result` codes
+  (the error enum's reserved -300/-301/-302 theme codes finally used).
+- Runtime switching: `fdk_theme_set_default()` swaps the current theme
+  and invalidates every live widget tree — window-owned AND standalone
+  — via a new root registry in the widget core (roots can't be
+  reparented, so membership changes only at create/destroy). Paint
+  hooks resolve tokens at paint time, so there is no cached color to
+  flush; same-pointer switch is a no-op; destroying the current theme
+  reverts to the built-in first.
+- Catalog integration: the 9 `fdk__pal_*` accessors became theme
+  lookups (the seam stayed), the Button's corner radius and the
+  Separator's band thickness became themed metrics (`BTN_RADIUS` died).
+  Deliberately NOT themed in v1: toggle/checkbox/radio shapes (they
+  derive from height/geometry, not a corner radius) and the window
+  background pixel (backends keep their Phase 2 behavior; the
+  `window_background` token is opt-in for apps — demo 08 shows the
+  pattern).
+- Tests: `tests/test_theme.c` — 8 headless groups under ASan+UBSan
+  (v1 pin, programmatic rules, full/partial parse, the full
+  adversarial matrix from docs/security.md: 40+ malformed inputs each
+  asserting its exact code, file loading incl. zero-byte rejection,
+  live-tree switch repaint with pixel proof, root-registry churn) +
+  1 X11 GUI case (real window, server-side readback across a switch:
+  colors, corner radius, separator thickness, exact round trip).
+  The matrix caught two real parser bugs before they shipped
+  (section-header dedup colliding with the first key's bit; and the
+  spec's own headerless example was illegal under the first grammar —
+  fixed by the implicit leading [theme] section).
+- `examples/08_theme.c` + `examples/data/{daylight,matrix}.fdk`: live
+  theme cycling via real clicks (rig
+  `scripts/run_theme_demo_x11.sh`, 13 PIL checks incl. pixel-exact
+  round trip). Proof: `docs/screenshots/theme_three_themes_1380x330.png`.
+- Remaining (parked, recorded honestly): per-widget-class token
+  sections in the format, spacing/padding scale, more metrics,
+  auto window-background application, theme file search paths,
+  Wayland-side GUI verification (toolchain).
 
 ## Phase 8 — Window Decorations
 

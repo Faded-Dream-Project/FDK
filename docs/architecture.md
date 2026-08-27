@@ -34,9 +34,16 @@ used by multiple layers rather than sitting in the stack themselves:
 - **Core** (`src/core/`) — init/shutdown lifecycle, logging, error
   handling, memory allocation. Everything depends on this; it depends
   on nothing else in FDK. (Phase 1 — this is what currently exists.)
-- **Theme** (`src/theme/`) — the `.fdk` format parser/loader and theme
-  API. Consumed by rendering and widgets, doesn't depend on either.
-  (Phase 6)
+- **Theme** (`src/theme/`) — the theme API and the `.fdk`
+  parser/loader (Phase 7). The built-in default theme is the Phase 6
+  v1 palette exactly; the widget catalog resolves its 9 color
+  accessors and 2 paint metrics against the current default theme at
+  paint time. Contains FDK's one deliberately documented internal
+  cycle: widget paint hooks call up into the theme module for
+  tokens, and `fdk_theme_set_default()` calls back into the widget
+  core's root registry to invalidate every live tree (both
+  directions are internal .c-level calls; no header gymnastics, and
+  the cycle is confined to these two functions).
 - **Input** (`src/input/`) — unified keyboard/mouse/touch event
   structures, independent of X11/Wayland specifics. Sits between
   platform and widgets. (Phase 2, extended through later phases)
@@ -66,7 +73,7 @@ backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
   struct layout behind each opaque public type lives (e.g.
   `src/core/context_internal.h` defines `struct fdk_context`).
 
-## Current state (Phase 4 landed — widget foundation)
+## Current state (Phase 7 landed — theme engine)
 
 Implemented: `src/core/` (context lifecycle, logging, error codes,
 allocation, versioning — Phase 1, plus the Phase 2 additions to
@@ -85,14 +92,20 @@ presentation, a clip stack, offscreen surfaces, and the blending
 primitive set — implemented on both backends via optional
 `fdk_platform_ops` entries (`window_get_framebuffer`, damage-taking
 `window_present`, and the `window_frame_ready` pacing query); see
-`docs/rendering.md` for the full design), and `src/layout/` (Phase 5: the
+`docs/rendering.md` for the full design), `src/layout/` (Phase 5: the
 box layout engine — containers as widget subclasses over the
-measure/arrange hooks — plus the window content glue), and `src/widget/` (Phase
+measure/arrange hooks — plus the window content glue), `src/widget/` (Phase
 4: the retained-mode widget foundation — hierarchy, state, focus,
 event routing with hover/grab/bubbling, invalidation, damage-driven
 z-order painting on the clip stack, the subclass vtable, and the
 reentrancy machinery that makes destroy-from-callback safe; see
-`docs/roadmap.md`'s Phase 4 entry). `fdk_init()` performs a real
+`docs/roadmap.md`'s Phase 4 entry; the Phase 6 catalog — Label,
+Button, Toggle, Checkbox, Radio, ProgressBar, Separator, Frame —
+and the Phase 6 text foundation that backs their labels live here
+and in `src/text/`), and `src/theme/` (Phase 7: the theme API and
+the strict `.fdk` parser — the built-in default is the v1 palette
+exactly, and switching the default theme invalidates every live
+tree through the widget core's root registry). `fdk_init()` performs a real
 platform connection with backend auto-detection; `fdk_run()` is a
 real `poll()`-based event loop that exits on `fdk_quit()` or when
 the last top-level window closes; windows can be created, shown,

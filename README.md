@@ -265,6 +265,33 @@ Run `examples/07_text_layout.c`: a wrapping paragraph that reflows
 taller when the window narrows, a truncated path line, the three
 alignments, and a keyboard-owned radio group.
 
+And the theme engine — the whole toolkit restyles at runtime, from
+data:
+
+```c
+fdk_theme *t = fdk_theme_load("my-theme.fdk", NULL); /* strict .fdk */
+fdk_theme_set_default(t);   /* every live window repaints, themed  */
+```
+
+Ten color tokens (text, control surfaces with hover/pressed/
+disabled states, accent, track, border) and two paint metrics
+(button corner radius, separator thickness) resolve at paint time,
+so a theme switch is one call — no cached colors, no tree walk by
+the app. The built-in default theme is the Phase 6 palette exactly:
+never touching themes changes no pixels. Themes parse from memory or
+disk with a strict, bounded, fail-closed grammar
+(`docs/fdk-theme-format.md`; the security rules behind it are
+`docs/security.md`) — unknown keys, duplicates, and malformed values
+are errors with line numbers, never half-themed UI. Missing tokens
+inherit the built-in defaults, so a three-line theme is a real
+theme.
+
+Run `examples/08_theme.c` (from the repository root — it loads
+`examples/data/daylight.fdk` and `examples/data/matrix.fdk`): one
+panel of catalog widgets cycling through three themes with real
+clicks, including the app-side pattern for tokens the engine does
+not force on anyone (window background, label accents).
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The
@@ -339,6 +366,15 @@ seven and the truncated line's ellipsis moves left with the edge.
 
 ![07_text_layout hold frame](docs/screenshots/text_layout_frame_480x620.png)
 ![07_text_layout after the resize](docs/screenshots/text_layout_reflow_340x620.png)
+
+And the theme engine's proof — `08_theme` held under each of its
+three themes (built-in FDK Dark, Daylight from a complete `.fdk`
+file, Matrix from a deliberately partial one): same widgets, same
+layout, same code; only the default theme differs between captures.
+The rig also verifies the round trip back to FDK Dark is
+pixel-exact.
+
+![08_theme under three themes](docs/screenshots/theme_three_themes_1380x330.png)
 
 ## Project principles
 
