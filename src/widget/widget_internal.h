@@ -27,6 +27,7 @@
 #ifndef FDK_WIDGET_INTERNAL_H
 #define FDK_WIDGET_INTERNAL_H
 
+#include "fdk/fdk_layout.h"
 #include "fdk/fdk_widget.h"
 
 #include <stdbool.h>
@@ -80,6 +81,19 @@ struct fdk_widget {
     fdk_color background;            /* a == 0 -> no background          */
     fdk_i32 corner_radius;
 
+    /* Per-child layout hints (Phase 5) — carried BY the child for
+     * whatever container holds it. See fdk_layout.h. */
+    fdk_i32 margin_left, margin_top, margin_right, margin_bottom;
+    bool expand_h, expand_v;
+    fdk_align align_h, align_v;
+
+    /* The widget's natural (requested) size: its create-time bounds,
+    * adjustable via fdk_widget_set_natural_size. This is what the
+    * default measure hook reports — deliberately NOT the current
+    * (allocated) bounds, so a container's layout can never destroy
+    * the child's size request (the classic request/allocate split). */
+    fdk_i32 natural_w, natural_h;
+
     /* ---- ROOT-ONLY fields (parent == NULL) ---- */
 
     /* Keyboard focus target. Mirrored by FDK_WF_FOCUSED on the widget. */
@@ -125,5 +139,11 @@ void fdk_widget_root_resized(fdk_widget *root, fdk_size new_size);
 /* Run deferred destroys if the last dispatch/paint unwound. Called by
  * fdk_widget_tree_handle_event / _paint on exit. */
 void fdk_widget_root_flush_deferred(fdk_widget *root);
+
+/* Notifies the layout engine that `parent`'s child set (or a child's
+ * layout hints) changed — called by the widget core from create /
+ * destroy / the hint setters. Implemented in src/layout/box.c;
+ * containers relayout, non-containers ignore it. Safe with NULL. */
+void fdk_widget_child_layout_changed(fdk_widget *parent);
 
 #endif /* FDK_WIDGET_INTERNAL_H */

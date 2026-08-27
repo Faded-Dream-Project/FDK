@@ -39,6 +39,13 @@ struct fdk_window {
      * tree before the application callback, and fdk_window_paint()
      * repaints+ presents the tree. */
     struct fdk_widget *root;
+
+    /* The window's content widget (fdk_window_set_content, Phase 5
+     * layout): weak reference — must be a descendant of root while
+     * set. Auto-arranged to the root's full bounds on every
+     * configure. Validated (still in the tree?) at each use, so a
+     * destroyed content just clears the association. */
+    struct fdk_widget *content;
 };
 
 /* Called by the context's platform dispatch callback (see

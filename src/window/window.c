@@ -30,6 +30,7 @@ fdk_result fdk_window_create(fdk_context *ctx,
     window->event_callback_user_data = NULL;
     window->surface = NULL;
     window->root = NULL;
+    window->content = NULL;
 
     fdk_result r = ctx->ops->window_create(ctx->conn, options, &window->pwindow);
     if (!fdk_ok(r)) {
@@ -135,6 +136,10 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
              * full repaint on both backends (fresh framebuffer). */
             fdk_widget_root_resized(window->root, event->configure.size);
         }
+        if (window->content != NULL) {
+            /* Phase 5: the content widget reflows with the window. */
+            fdk_window_layout(window);
+        }
     } else if (event->type == FDK_EVENT_WINDOW_EXPOSE) {
         if (window->root != NULL) {
             fdk_widget_invalidate_all(window->root);
@@ -209,4 +214,48 @@ fdk_result fdk_window_paint(fdk_window *window) {
                         * with it, nothing to present */
     }
     return fdk_surface_present(surface);
+}
+
+/* Is `widget` still a live descendant of `root`? (The content
+ * pointer is weak: a destroyed content must silently deactivate.) */
+static bool widget_in_tree(fdk_widget *root, fdk_widget *widget) {
+    for (fdk_widget *cur = widget; cur != NULL; cur = cur->parent) {
+        if (cur == root) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void fdk_window_set_content(fdk_window *window, fdk_widget *content) {
+    if (window == NULL) {
+        return;
+    }
+    if (content != NULL) {
+        fdk_widget *root = NULL;
+        if (!fdk_ok(fdk_window_get_root(window, &root)) ||
+            !widget_in_tree(root, content)) {
+            FDK_WARN("set_content: widget is not in the window's tree");
+            return;
+        }
+    }
+    window->content = content;
+    if (content != NULL) {
+        fdk_window_layout(window);
+    }
+}
+
+void fdk_window_layout(fdk_window *window) {
+    if (window == NULL || window->content == NULL ||
+        window->root == NULL) {
+        return;
+    }
+    if (!widget_in_tree(window->root, window->content)) {
+        /* The content widget was destroyed or reparented away —
+         * deactivate the association rather than arrange a stray. */
+        window->content = NULL;
+        return;
+    }
+    fdk_rect full = fdk_widget_get_bounds(window->root);
+    fdk_widget_arrange(window->content, full);
 }

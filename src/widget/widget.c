@@ -601,6 +601,10 @@ fdk_result fdk_widget_create(fdk_widget *parent,
         bounds.height = 0;
     }
     w->bounds = bounds;
+    w->natural_w = bounds.width;
+    w->natural_h = bounds.height;
+    w->align_h = FDK_ALIGN_FILL;
+    w->align_v = FDK_ALIGN_FILL;
     w->flags = FDK_WF_VISIBLE | FDK_WF_ENABLED;
 
     if (parent != NULL) {
@@ -614,6 +618,9 @@ fdk_result fdk_widget_create(fdk_widget *parent,
     /* A freshly created widget has never painted — damage it so the
      * next tree paint actually draws it. */
     damage_union(find_root(w), absolute_bounds(w));
+
+    /* Containers (e.g. boxes) relayout around the new child. */
+    fdk_widget_child_layout_changed(parent);
 
     *out_widget = w;
     return FDK_OK;
@@ -640,8 +647,11 @@ void fdk_widget_destroy(fdk_widget *widget) {
     /* Unlink BEFORE any callback can run: no handler may observe the
      * dying widget as part of the tree. */
     if (widget->parent != NULL) {
-        child_remove(widget->parent, widget);
+        fdk_widget *old_parent = widget->parent;
+        child_remove(old_parent, widget);
         widget->parent = NULL;
+        /* The container the child left relayouts around the gap. */
+        fdk_widget_child_layout_changed(old_parent);
     }
 
     /* The guard spans the bookkeeping deliveries: their callbacks may
@@ -792,12 +802,13 @@ fdk_result fdk_widget_reparent(fdk_widget *widget, fdk_widget *new_parent) {
     /* Damage the old region while the chain is intact. */
     damage_union(old_root, absolute_bounds(widget));
 
-    child_remove(widget->parent, widget);
+    fdk_widget *old_parent = widget->parent;
+    child_remove(old_parent, widget);
     fdk_result r = child_append(new_parent, widget);
     if (!fdk_ok(r)) {
         /* Attach failed (OOM): re-attach to the old parent rather than
          * leaking an orphaned subtree. */
-        if (!fdk_ok(child_append(widget->parent, widget))) {
+        if (!fdk_ok(child_append(old_parent, widget))) {
             FDK_ERROR("reparent rollback failed — subtree orphaned");
             widget->parent = NULL;
         }
@@ -809,6 +820,10 @@ fdk_result fdk_widget_reparent(fdk_widget *widget, fdk_widget *new_parent) {
      * are pure bookkeeping until the guards open, and after them a
      * handler may have destroyed parts of either tree. */
     damage_union(new_root, absolute_bounds(widget));
+
+    /* Both containers' layouts changed shape. */
+    fdk_widget_child_layout_changed(old_parent);
+    fdk_widget_child_layout_changed(new_parent);
 
     /* Cross-tree move: the old root's focus/hover/grab may point into
      * the moved subtree; drop them there (with events), the new root
@@ -1432,8 +1447,10 @@ void fdk_widget_measure(fdk_widget *widget, fdk_size *out_size) {
     if (widget->klass->measure != NULL) {
         widget->klass->measure(widget, out_size);
     } else {
-        *out_size = (fdk_size){widget->bounds.width,
-                               widget->bounds.height};
+        /* Default natural size = the widget's size REQUEST (create
+         * bounds / set_natural_size), NOT its current bounds: layout
+         * assigns bounds, and the request must survive that. */
+        *out_size = (fdk_size){widget->natural_w, widget->natural_h};
     }
 }
 
@@ -1467,6 +1484,80 @@ void fdk_widget_set_corner_radius(fdk_widget *widget, fdk_i32 radius) {
     }
     widget->corner_radius = radius;
     fdk_widget_invalidate(widget);
+}
+
+/* ---- per-child layout hints (fdk_layout.h API; the state lives on
+ * the widget, the containers consuming it live in src/layout/) ---- */
+
+static void clamp_zero(fdk_i32 *v) {
+    if (*v < 0) {
+        *v = 0;
+    }
+}
+
+void fdk_widget_set_margin(fdk_widget *widget, fdk_i32 left, fdk_i32 top,
+                           fdk_i32 right, fdk_i32 bottom) {
+    if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    clamp_zero(&left);
+    clamp_zero(&top);
+    clamp_zero(&right);
+    clamp_zero(&bottom);
+    if (widget->margin_left == left && widget->margin_top == top &&
+        widget->margin_right == right && widget->margin_bottom == bottom) {
+        return;
+    }
+    widget->margin_left = left;
+    widget->margin_top = top;
+    widget->margin_right = right;
+    widget->margin_bottom = bottom;
+    fdk_widget_child_layout_changed(widget->parent);
+}
+
+void fdk_widget_set_expand(fdk_widget *widget, bool horizontal,
+                           bool vertical) {
+    if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    if (widget->expand_h == horizontal && widget->expand_v == vertical) {
+        return;
+    }
+    widget->expand_h = horizontal;
+    widget->expand_v = vertical;
+    fdk_widget_child_layout_changed(widget->parent);
+}
+
+void fdk_widget_set_align(fdk_widget *widget, fdk_align horizontal,
+                          fdk_align vertical) {
+    if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    if (widget->align_h == horizontal && widget->align_v == vertical) {
+        return;
+    }
+    widget->align_h = horizontal;
+    widget->align_v = vertical;
+    fdk_widget_child_layout_changed(widget->parent);
+}
+
+void fdk_widget_set_natural_size(fdk_widget *widget, fdk_i32 width,
+                                 fdk_i32 height) {
+    if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    if (width < 0) {
+        width = 0;
+    }
+    if (height < 0) {
+        height = 0;
+    }
+    if (widget->natural_w == width && widget->natural_h == height) {
+        return;
+    }
+    widget->natural_w = width;
+    widget->natural_h = height;
+    fdk_widget_child_layout_changed(widget->parent);
 }
 
 /* ---- root bookkeeping for the window glue ---- */
