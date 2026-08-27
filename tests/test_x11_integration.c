@@ -1656,6 +1656,97 @@ static void test_label_radio_arrow_gui(void) {
            "keys select+focus, resize re-wraps\n");
 }
 
+
+/* Phase 7 theme engine, end to end on a real window: the v1 palette
+ * paints by default; fdk_theme_set_default() re-damages the tree so
+ * the next window paint shows the new colors AND the new metrics
+ * (square vs rounded button corners, 1px vs 3px separator band);
+ * switching back restores the v1 pixels exactly. */
+static void test_theme_switch_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK theme switch test",
+                                 .width = 320, .height = 240 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, wcol(20, 20, 20));
+
+    /* A fontless button (fill only) and a separator - the two catalog
+     * widgets that consume themed colors + themed metrics. */
+    fdk_widget *btn = NULL;
+    assert(fdk_ok(fdk_button_create(root, NULL, NULL, &btn)));
+    fdk_widget_set_bounds(btn, (fdk_rect){20, 20, 120, 30});
+    fdk_widget *sep = NULL;
+    assert(fdk_ok(fdk_separator_create(root, FDK_HORIZONTAL, &sep)));
+    fdk_widget_set_bounds(sep, (fdk_rect){20, 70, 120, 10});
+
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    /* v1 defaults: control fill 0.16/0.18/0.26 -> 0x292E42; border
+     * 0.30/0.33/0.44 -> 0x4D5470; radius 8 cuts the corner pixel;
+     * 1px rule at y = 70 + 10/2 = 75. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00292E42u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00141414u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x004D5470u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 74) == 0x00141414u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 76) == 0x00141414u);
+
+    /* A contrasting theme from the .fdk grammar: light fill, square
+     * corners, 3px separator band. */
+    static const char light_fdk[] =
+        "name = \"Light GUI\"\n"
+        "[colors]\n"
+        "control_background = #E8E8E8\n"
+        "control_border = #777777\n"
+        "[metrics]\n"
+        "button_corner_radius = 0\n"
+        "separator_thickness = 3\n";
+    fdk_result r = FDK_ERR_UNKNOWN;
+    fdk_theme *light = fdk_theme_parse(light_fdk, sizeof light_fdk - 1,
+                                       &r);
+    assert(light != NULL && r == FDK_OK);
+
+    fdk_theme_set_default(light);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00E8E8E8u);
+    /* radius 0: the corner pixel IS the fill now. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00E8E8E8u);
+    /* thickness 3: band centered on the same line, 74..76. */
+    for (int y = 74; y <= 76; y++) {
+        assert(x11_readback_pixel(&rb_dpy, xid, 80, y) == 0x00777777u);
+    }
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 73) == 0x00141414u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 77) == 0x00141414u);
+
+    /* Back to the built-in: the v1 pixels return exactly. */
+    fdk_theme_set_default(NULL);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00292E42u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00141414u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x004D5470u);
+
+    fdk_theme_destroy(light);
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 theme switch repaints a live window (colors, "
+           "corner radius, separator thickness; round trip exact)\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -1680,6 +1771,7 @@ int main(void) {
     test_text_render_readback();
     test_widget_catalog_gui();
     test_label_radio_arrow_gui();
+    test_theme_switch_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
