@@ -565,6 +565,81 @@ static fdk_widget *hit_test(fdk_widget *root, fdk_pointf pos) {
 
 /* ---- lifecycle ---- */
 
+/* ---- Root registry ----
+ *
+ * Every live root (window-owned or standalone) is linked into one
+ * global doubly-linked list. The theme engine walks it on a
+ * default-theme switch to damage every tree (see
+ * fdk__widget_roots_invalidate_all below). Roots can never be
+ * reparented into a tree, so membership changes only here: create
+ * (parent == NULL) links in, destroy unlinks at entry — before the
+ * deferred-free machinery, so a root pending teardown is already
+ * invisible to the walk. */
+static fdk_widget *g_roots;
+
+static void root_registry_add(fdk_widget *root) {
+    root->root_prev = NULL;
+    root->root_next = g_roots;
+    if (g_roots != NULL) {
+        g_roots->root_prev = root;
+    }
+    g_roots = root;
+}
+
+static void root_registry_remove(fdk_widget *root) {
+    if (root->root_prev != NULL) {
+        root->root_prev->root_next = root->root_next;
+    } else if (g_roots == root) {
+        g_roots = root->root_next;
+    }
+    if (root->root_next != NULL) {
+        root->root_next->root_prev = root->root_prev;
+    }
+    root->root_prev = NULL;
+    root->root_next = NULL;
+}
+
+void fdk__widget_roots_invalidate_all(void) {
+    /* Pre-capture the walk order: damage_union is pure bookkeeping,
+     * but the theme switch that reached us may itself be running
+     * inside a widget callback — and any handler in this process
+     * could destroy a root. Walking a captured list is the same
+     * discipline the tree walkers use (see the top-of-file comment).
+     * The worst case is damaging a just-destroyed root's old bounds:
+     * unlinking happens at destroy ENTRY, so this is exactly as
+     * stale-proof as the tree's own walks. */
+    size_t count = 0;
+    for (fdk_widget *r = g_roots; r != NULL; r = r->root_next) {
+        count++;
+    }
+    if (count == 0) {
+        return;
+    }
+    /* Bounded allocation: one pointer per live root. On OOM, damage
+     * the roots one by one as we walk (no snapshot) — still correct,
+     * just re-entrant into whatever destroy does mid-walk. */
+    fdk_widget **snapshot = fdk_alloc(count * sizeof *snapshot);
+    size_t n = 0;
+    for (fdk_widget *r = g_roots; r != NULL && n < count; r = r->root_next) {
+        if (snapshot != NULL) {
+            snapshot[n] = r;
+        }
+        n++;
+    }
+    if (snapshot != NULL) {
+        for (size_t i = 0; i < n; i++) {
+            damage_union(snapshot[i], snapshot[i]->bounds);
+        }
+        fdk_free(snapshot);
+    } else {
+        for (fdk_widget *r = g_roots; r != NULL; ) {
+            fdk_widget *next = r->root_next;
+            damage_union(r, r->bounds);
+            r = next;
+        }
+    }
+}
+
 fdk_result fdk_widget_create(fdk_widget *parent,
                              const fdk_widget_class *klass,
                              fdk_rect bounds,
@@ -613,6 +688,8 @@ fdk_result fdk_widget_create(fdk_widget *parent,
             fdk_free(w);
             return r;
         }
+    } else {
+        root_registry_add(w); /* roots join the global registry */
     }
 
     /* A freshly created widget has never painted — damage it so the
@@ -638,6 +715,14 @@ void fdk_widget_destroy(fdk_widget *widget) {
 
     fdk_widget *root = find_root(widget);
     widget->flags |= FDK_WF_DESTROYING;
+
+    /* Leave the root registry at entry, before anything can defer: a
+     * root pending teardown must already be invisible to the theme
+     * engine's invalidate-all walk. (Non-roots are never registered —
+     * the later `widget->parent = NULL` below does not affect it.) */
+    if (widget->parent == NULL) {
+        root_registry_remove(widget);
+    }
 
     /* Damage the region BEFORE unlinking — the absolute bounds need
      * the intact parent chain, and whatever was under this widget

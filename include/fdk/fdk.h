@@ -23,6 +23,7 @@
 #include "fdk_layout.h"
 #include "fdk_text.h"
 #include "fdk_widgets.h"
+#include "fdk_theme.h"
 
 /* Widget, layout, and theme public headers are added here as their
  * respective phases land (see docs/roadmap.md). Phase 2 added window
@@ -31,7 +32,8 @@
  * retained-mode widget foundation); Phase 5 added fdk_layout.h (the
  * box layout engine + window content integration); Phase 6 added
  * fdk_text.h (fonts, UTF-8 text measurement and rendering via the
- * vendored stb_truetype). Theme and further layout containers
- * follow. */
+ * vendored stb_truetype) and the widget catalog; Phase 7 added
+ * fdk_theme.h (themes: the built-in default, .fdk parsing, runtime
+ * switching). Further layout containers follow. */
 
 #endif /* FDK_H */

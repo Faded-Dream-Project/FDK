@@ -1,0 +1,23 @@
+# daylight.fdk — the light example theme for demo 08.
+# Complete on purpose: every token overridden (a theme may also
+# override just a few and inherit the rest — see docs/fdk-theme-format.md).
+
+version = 1
+name    = "Daylight"
+author  = "FDK examples"
+
+[colors]
+window_background          = #F4F5F7
+text                       = #1B1F27
+text_disabled              = #9AA0AB
+control_background         = #FFFFFF
+control_background_hover   = #E8EBF0
+control_background_pressed = #D6DAE2
+control_background_disabled= #ECECEC
+control_border             = #C4C9D2
+accent                     = #2563EB
+track                      = #E1E4EA
+
+[metrics]
+button_corner_radius = 6
+separator_thickness  = 1

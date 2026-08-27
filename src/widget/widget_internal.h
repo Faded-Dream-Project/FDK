@@ -124,7 +124,21 @@ struct fdk_widget {
     fdk_widget **deferred_destroy;
     size_t deferred_count;
     size_t deferred_capacity;
+
+    /* Root registry linkage (root-only, maintained by widget.c): a
+     * doubly-linked list of every live root — window-owned and
+     * standalone — so the theme engine can invalidate them all on a
+     * fdk_theme_set_default() without knowing about windows. Roots
+     * can never be reparented into a tree, so membership only changes
+     * at create and destroy. NULL-terminated at both ends. */
+    fdk_widget *root_prev;
+    fdk_widget *root_next;
 };
+
+/* Marks every live root's full bounds damaged, so each tree fully
+ * repaints on its next paint walk. Used by the theme engine on a
+ * default-theme switch (src/theme/theme.c). */
+void fdk__widget_roots_invalidate_all(void);
 
 /* The base widget class (what fdk_widget_create's klass == NULL gives
  * you, and what subclasses that don't override `paint` fall back to):

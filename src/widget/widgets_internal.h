@@ -55,7 +55,11 @@ void fdk__draw_text(fdk_surface *surface, fdk_font *font,
 fdk_i32 fdk__center_baseline(const fdk_font *font, fdk_i32 top,
                              fdk_i32 avail_h);
 
-/* ---- v1 palette (replaced by the Phase 7 theme engine) ---- */
+/* ---- themed palette accessors (Phase 7) ----
+ *
+ * Resolved against the current default theme at PAINT time (see
+ * statics.c) - fdk_theme_set_default() needs no cache flush. */
+
 
 fdk_color fdk__pal_text(void);
 fdk_color fdk__pal_text_disabled(void);

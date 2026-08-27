@@ -15,6 +15,7 @@
  * (measured and drawn characters can never drift apart). Same
  * layering pattern as the layout back-edge in widgets_internal.h. */
 #include "../text/text_internal.h"
+#include "../theme/theme_internal.h"
 
 #include "core/alloc_internal.h"
 #include <stdio.h>
@@ -76,34 +77,40 @@ fdk_i32 fdk__center_baseline(const fdk_font *font, fdk_i32 top,
     return top + pad / 2 + fm.ascent;
 }
 
-/* ---- v1 palette ---- */
+/* ---- themed palette accessors (Phase 7) ----
+ *
+ * The Phase 6 v1 palette became the Phase 7 built-in default theme,
+ * byte-for-byte (src/theme/theme.c). These accessors stay the
+ * catalog's single color seam: each resolves against the CURRENT
+ * default theme at paint time, so fdk_theme_set_default() repaints
+ * the world with no cached colors to flush. */
 
 fdk_color fdk__pal_text(void) {
-    return (fdk_color){0.92f, 0.93f, 0.96f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_TEXT);
 }
 fdk_color fdk__pal_text_disabled(void) {
-    return (fdk_color){0.45f, 0.47f, 0.52f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_TEXT_DISABLED);
 }
 fdk_color fdk__pal_control(void) {
-    return (fdk_color){0.16f, 0.18f, 0.26f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
 }
 fdk_color fdk__pal_control_hover(void) {
-    return (fdk_color){0.22f, 0.25f, 0.36f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_HOVER);
 }
 fdk_color fdk__pal_control_pressed(void) {
-    return (fdk_color){0.28f, 0.32f, 0.46f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_PRESSED);
 }
 fdk_color fdk__pal_control_disabled(void) {
-    return (fdk_color){0.12f, 0.13f, 0.18f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_DISABLED);
 }
 fdk_color fdk__pal_accent(void) {
-    return (fdk_color){0.35f, 0.65f, 0.95f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_ACCENT);
 }
 fdk_color fdk__pal_track(void) {
-    return (fdk_color){0.10f, 0.12f, 0.17f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_TRACK);
 }
 fdk_color fdk__pal_border(void) {
-    return (fdk_color){0.30f, 0.33f, 0.44f, 1.0f};
+    return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BORDER);
 }
 
 /* ---- Label ---- */
@@ -540,15 +547,27 @@ static void separator_paint(fdk_widget *w, fdk_surface *surface,
     fdk_separator *sep = separator_of(w);
     fdk_color c = ((w->flags & FDK_WF_ENABLED) != 0) ? fdk__pal_border()
                              : fdk__pal_control_disabled();
+
+    /* Themed band thickness (default 1 = the v1 rule exactly: same
+     * center line, draw_rect/fill_rect agree at 1px). Paint-time only
+     * - the size request is the application's (docs/fdk-theme-format
+     * .md). */
+    fdk_i32 t = fdk_theme_get_metric(NULL, FDK_TM_SEPARATOR_THICKNESS);
     if (sep->orientation == FDK_HORIZONTAL) {
-        fdk_i32 y = bounds.y + bounds.height / 2;
-        fdk_surface_draw_rect(surface,
-                              (fdk_rect){bounds.x, y, bounds.width, 1},
+        if (t > bounds.height) {
+            t = bounds.height;
+        }
+        fdk_i32 y = bounds.y + bounds.height / 2 - (t - 1) / 2;
+        fdk_surface_fill_rect(surface,
+                              (fdk_rect){bounds.x, y, bounds.width, t},
                               c);
     } else {
-        fdk_i32 x = bounds.x + bounds.width / 2;
-        fdk_surface_draw_rect(surface,
-                              (fdk_rect){x, bounds.y, 1, bounds.height},
+        if (t > bounds.width) {
+            t = bounds.width;
+        }
+        fdk_i32 x = bounds.x + bounds.width / 2 - (t - 1) / 2;
+        fdk_surface_fill_rect(surface,
+                              (fdk_rect){x, bounds.y, t, bounds.height},
                               c);
     }
 }

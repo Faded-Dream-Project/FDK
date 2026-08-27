@@ -19,6 +19,7 @@
 #define FDK_LOG_TAG "widgets"
 
 #include "widgets_internal.h"
+#include "../theme/theme_internal.h"
 
 #include "core/alloc_internal.h"
 #include <stdio.h>
@@ -28,7 +29,8 @@
 /* Button text padding (over the measured text extent). */
 #define BTN_PAD_X 16
 #define BTN_PAD_Y 8
-#define BTN_RADIUS 8
+/* BTN_RADIUS moved to the theme: FDK_TM_BUTTON_CORNER_RADIUS,
+ * built-in default 8 (Phase 7). */
 #define BTN_FOCUS_INSET 2
 
 /* Toggle: track 34x18, knob 12, gap 8 before optional label. */
@@ -91,7 +93,11 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
     } else {
         fill = fdk__pal_control();
     }
-    fdk_surface_fill_rounded_rect(surface, bounds, BTN_RADIUS, fill);
+    /* Themed corner radius (default 8 = the v1 BTN_RADIUS exactly).
+     * Radius 0 = square corners - the renderer's rounded-rect treats
+     * that as a plain fill. */
+    fdk_i32 radius = fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
+    fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
 
     /* Focus ring: a second rounded outline just inside the fill. */
     if ((w->flags & FDK_WF_FOCUSED) != 0) {
@@ -100,9 +106,11 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
                          bounds.width - BTN_FOCUS_INSET * 2,
                          bounds.height - BTN_FOCUS_INSET * 2};
         if (ring.width > 0 && ring.height > 0) {
-            fdk_surface_draw_rounded_rect(
-                surface, ring, BTN_RADIUS - BTN_FOCUS_INSET,
-                fdk__pal_accent());
+            fdk_i32 ring_r = radius > BTN_FOCUS_INSET
+                                 ? radius - BTN_FOCUS_INSET
+                                 : 0;
+            fdk_surface_draw_rounded_rect(surface, ring, ring_r,
+                                          fdk__pal_accent());
         }
     }
 
