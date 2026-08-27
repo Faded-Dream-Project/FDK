@@ -1985,11 +1985,6 @@ static void test_decorations_gui(void) {
         x11_send_pointer_event(rb_dpy, xid, ButtonRelease,
                                ButtonReleaseMask, 255, 14, 1);
         (void)fdk_pump_events(ctx, 200);
-        fprintf(stderr, "DECO diag: min_click -> is_min=%d events=%d "
-                "(want %d) rect=(%d,%d,%d,%d)\n",
-                fdk_window_is_minimized(win) ? 1 : 0, deco_state_events,
-                states0 + 3, win->deco_btn_min.x, win->deco_btn_min.y,
-                win->deco_btn_min.width, win->deco_btn_min.height);
         assert(fdk_window_is_minimized(win));
         assert(deco_state_events == states0 + 3);
         {

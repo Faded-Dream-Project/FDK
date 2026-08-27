@@ -44,7 +44,6 @@ static void window_callback(fdk_window *window, const fdk_event_data *event,
     (void)user;
     switch (event->type) {
     case FDK_EVENT_WINDOW_STATE:
-        fprintf(stderr, "TRACE: state event max=%d min=%d\n", event->state.maximized, event->state.minimized);
         g_state_events++;
         g_last_maximized = event->state.maximized;
         g_last_minimized = event->state.minimized;
