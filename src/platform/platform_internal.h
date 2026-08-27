@@ -66,6 +66,22 @@ typedef struct fdk_platform_framebuffer {
     fdk_i32 stride; /* in fdk_u32 units */
 } fdk_platform_framebuffer;
 
+/* Damage region handed to window_present (the machinery behind
+ * fdk_surface_present's partial-redraw contract — see
+ * include/fdk/fdk_surface.h, "Damage tracking"). Rects are in
+ * surface-local pixel coordinates, half-open [x, x+w) x [y, y+h),
+ * NOT clamped to the framebuffer (backends clamp — they know the
+ * real bounds). `full` set means "the whole surface changed" and
+ * supersedes the rect list; count == 0 with full == 0 means
+ * "nothing changed" (present should no-op). The struct is
+ * value-copied / read-only from the backend's perspective. */
+#define FDK_PLATFORM_DAMAGE_RECTS 64
+typedef struct fdk_platform_damage {
+    fdk_rect rects[FDK_PLATFORM_DAMAGE_RECTS];
+    int count; /* valid rects, <= FDK_PLATFORM_DAMAGE_RECTS */
+    int full;  /* 1 = whole surface damaged */
+} fdk_platform_damage;
+
 typedef struct fdk_platform_ops {
     /* Human-readable backend name for logging ("x11", "wayland"). */
     const char *name;
@@ -121,22 +137,41 @@ typedef struct fdk_platform_ops {
     void (*window_set_size_limits)(fdk_platform_window *pwindow,
                                     fdk_size min_size, fdk_size max_size);
 
-    /* --- Software rendering (first Phase 3 slice) ---
+    /* --- Software rendering ---
      *
-     * Both ops are OPTIONAL: a backend that cannot provide a software
-     * framebuffer (e.g. a future GPU-only backend) leaves them NULL
-     * and the surface layer (src/render/surface.c) reports
+     * Both render ops are OPTIONAL: a backend that cannot provide a
+     * software framebuffer (e.g. a future GPU-only backend) leaves
+     * them NULL and the surface layer (src/render/surface.c) reports
      * FDK_ERR_UNSUPPORTED to the application.
      *
      * window_get_framebuffer returns the window's current CPU-drawing
      * buffer in *out_fb, (re)creating it if the window was resized
      * since the last call. A present-less no-draw call is legal.
-     * window_present makes the current buffer visible on screen; with
-     * nothing acquired yet it is a documented no-op returning FDK_OK.
-     * See x11_surface.c and wayland_window.c for per-backend notes. */
+     *
+     * window_present makes the damaged parts of the current buffer
+     * visible on screen. `damage` is never NULL and follows the
+     * fdk_platform_damage contract above: full=1 -> whole surface;
+     * count==0 -> nothing changed (backends treat it as a successful
+     * no-op); otherwise exactly the listed rects changed (backends
+     * may coarsen granularity but must not present garbage outside
+     * the damage as new content — a fresh buffer must therefore
+     * carry valid content outside damage, e.g. by copying the
+     * previous frame into it, because compositors are allowed to
+     * ignore damage hints entirely). With no buffer ever acquired it
+     * is a documented no-op returning FDK_OK. See x11_surface.c and
+     * wayland_window.c for per-backend notes. */
     fdk_result (*window_get_framebuffer)(fdk_platform_window *pwindow,
                                           fdk_platform_framebuffer *out_fb);
-    fdk_result (*window_present)(fdk_platform_window *pwindow);
+    fdk_result (*window_present)(fdk_platform_window *pwindow,
+                                 const fdk_platform_damage *damage);
+
+    /* OPTIONAL frame-pacing query behind
+     * fdk_surface_frame_ready(): returns nonzero when the next frame
+     * may be drawn/presented now (compositor acknowledged the last
+     * frame, or no pacing applies). NULL means "always ready" (X11,
+     * and any backend without display-driven frame feedback). Must
+     * never block and never busy-wait — it is a state query. */
+    int (*window_frame_ready)(fdk_platform_window *pwindow);
 } fdk_platform_ops;
 
 /* Backend entry points. Each returns NULL if that backend was not
