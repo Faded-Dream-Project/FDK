@@ -78,6 +78,65 @@ static void child_natural(fdk_widget *child, fdk_size *out) {
                   child->margin_bottom;
 }
 
+/* ---- Baseline alignment (Phase 5 completion) -------------------------- */
+
+/* A visible child's baseline offset within its slot: margin_top plus
+ * the widget's own text baseline, or its bottom edge when it has
+ * none. Only meaningful for VERTICAL placement (the horizontal
+ * box's cross axis, or any container aligning text rows). */
+static fdk_i32 child_baseline_offset(fdk_widget *child, fdk_size nat) {
+    fdk_i32 b;
+    if (fdk_widget_get_baseline(child, &b)) {
+        return child->margin_top + b;
+    }
+    return child->margin_top + (nat.height - child->margin_top -
+                                child->margin_bottom);
+}
+
+/* The cross extent a baseline-aligned group needs: the shared
+ * baseline row sits at the DEEPEST child baseline; the group is as
+ * tall as the deepest (baseline_row - child_baseline + child
+ * height). Returns the plain max when no child asks for BASELINE. */
+static fdk_i32 box_cross_extent(fdk_widget *w, bool horiz, fdk_size *naturals,
+                                size_t n, fdk_i32 max_child_cross) {
+    if (!horiz) {
+        return max_child_cross; /* baselines are a vertical concept */
+    }
+    fdk_i32 baseline_row = 0;
+    bool any = false;
+    for (size_t i = 0; i < n; i++) {
+        fdk_widget *child = w->children[i];
+        if (naturals[i].width < 0 || child->align_v != FDK_ALIGN_BASELINE) {
+            continue;
+        }
+        any = true;
+        fdk_i32 b = child_baseline_offset(child, naturals[i]);
+        if (b > baseline_row) {
+            baseline_row = b;
+        }
+    }
+    if (!any) {
+        return max_child_cross;
+    }
+    fdk_i32 extent = 0;
+    for (size_t i = 0; i < n; i++) {
+        fdk_widget *child = w->children[i];
+        if (naturals[i].width < 0) {
+            continue;
+        }
+        if (child->align_v == FDK_ALIGN_BASELINE) {
+            fdk_i32 top = baseline_row - child_baseline_offset(child, naturals[i]);
+            fdk_i32 bottom = top + naturals[i].height;
+            if (bottom > extent) {
+                extent = bottom;
+            }
+        } else if (naturals[i].height > extent) {
+            extent = naturals[i].height;
+        }
+    }
+    return extent > max_child_cross ? extent : max_child_cross;
+}
+
 void fdk_box_measure_hook(fdk_widget *w, fdk_size *out) {
     fdk_box *box = box_of(w);
     fdk_i32 along = box->padding * 2;
@@ -117,7 +176,40 @@ void fdk_box_measure_hook(fdk_widget *w, fdk_size *out) {
                              : 0);
     }
     along += box->title_inset; /* Frame's title band, vertical only */
+
+    /* Cross extent: the plain max, or the baseline-aware group extent
+     * when any child asks for BASELINE alignment (needs the naturals
+     * array — built here the same way box_layout's pass 1 does). */
     fdk_i32 cross = box->padding * 2 + max_child_cross;
+    bool any_baseline = false;
+    for (size_t i = 0; i < w->child_count; i++) {
+        fdk_widget *child = w->children[i];
+        if ((child->flags & FDK_WF_VISIBLE) != 0 &&
+            (child->flags & FDK_WF_DESTROYING) == 0 &&
+            box->orientation == FDK_HORIZONTAL &&
+            child->align_v == FDK_ALIGN_BASELINE) {
+            any_baseline = true;
+            break;
+        }
+    }
+    if (any_baseline) {
+        fdk_size *nats = fdk_alloc_array(w->child_count, sizeof(fdk_size));
+        if (nats != NULL) {
+            for (size_t i = 0; i < w->child_count; i++) {
+                nats[i] = (fdk_size){-1, -1};
+                fdk_widget *child = w->children[i];
+                if ((child->flags & FDK_WF_VISIBLE) == 0 ||
+                    (child->flags & FDK_WF_DESTROYING) != 0) {
+                    continue;
+                }
+                child_natural(child, &nats[i]);
+            }
+            cross = box->padding * 2 +
+                    box_cross_extent(w, true, nats, w->child_count,
+                                     max_child_cross);
+            fdk_free(nats);
+        }
+    }
     if (box->orientation == FDK_HORIZONTAL) {
         *out = (fdk_size){along, cross};
     } else {
@@ -229,6 +321,25 @@ static void box_layout(fdk_widget *w) {
         extra_each = leftover / (fdk_i32)expanders;
     }
 
+    /* Baseline row (Phase 5 completion): the shared line the
+     * BASELINE-aligned children hang from (horizontal boxes only —
+     * a baseline is a vertical concept; vertical boxes treat
+     * BASELINE as START). */
+    fdk_i32 baseline_row = 0;
+    if (horiz) {
+        for (size_t i = 0; i < n; i++) {
+            fdk_widget *child = w->children[i];
+            if (naturals[i].width < 0 ||
+                child->align_v != FDK_ALIGN_BASELINE) {
+                continue;
+            }
+            fdk_i32 b = child_baseline_offset(child, naturals[i]);
+            if (b > baseline_row) {
+                baseline_row = b;
+            }
+        }
+    }
+
     /* Pass 3: position. `pos` accumulates actual slot extents, so
      * integer rounding is absorbed at each boundary — no drift. */
     fdk_i32 pos = 0;
@@ -262,6 +373,26 @@ static void box_layout(fdk_widget *w) {
                 break;
             case FDK_ALIGN_CENTER:
                 cross_pos = (content_cross - cross_size) / 2;
+                break;
+            case FDK_ALIGN_BASELINE:
+                /* Hang from the shared baseline row: the child's top
+                 * sits baseline_row above its own baseline. Clamped
+                 * to the content area (a too-deep baseline group
+                 * degrades to START rather than drawing above the
+                 * box). */
+                if (horiz) {
+                    fdk_i32 b = child_baseline_offset(child, naturals[i]);
+                    cross_pos = baseline_row - b;
+                    if (cross_pos < 0) {
+                        cross_pos = 0;
+                    }
+                    if (cross_pos > content_cross - cross_size &&
+                        content_cross - cross_size >= 0) {
+                        cross_pos = content_cross - cross_size;
+                    }
+                } else {
+                    cross_pos = 0; /* vertical box: reads as START */
+                }
                 break;
             default: /* START, and FILL's base position */
                 cross_pos = 0;
@@ -427,25 +558,50 @@ void fdk_box_set_homogeneous(fdk_widget *box, bool homogeneous) {
 
 /* ---- widget-core notification hook ---- */
 
+/* Grid-ness for the notifier: same DELEGATION rule as box_class_of —
+ * any class running the grid hooks is a grid for layout purposes.
+ * (grid.c has its own static copy for its setters; the notifier here
+ * needs it because it lives in this file.) */
+static bool notifier_grid_class_of(const fdk_widget *w) {
+    if (w == NULL || w->klass == NULL) {
+        return false;
+    }
+    return w->klass->measure == fdk_grid_measure_hook ||
+           w->klass->arrange == fdk_grid_arrange_hook;
+}
+
 void fdk_widget_child_layout_changed(fdk_widget *parent) {
-    if (parent == NULL || !box_class_of(parent)) {
+    if (parent == NULL) {
+        return;
+    }
+    if (box_class_of(parent)) {
+        box_layout(parent);
+    } else if (notifier_grid_class_of(parent)) {
+        /* Re-run the grid's arrangement at its CURRENT bounds — the
+         * exact equivalent of box_layout for the track policy
+         * (measure fills the track cache, arrange consumes it). */
+        fdk_grid_arrange_hook(parent, parent->bounds);
+    } else {
         return; /* non-containers have nothing to relayout */
     }
-    box_layout(parent);
 
-    /* Propagate upward: this box's natural size may have changed
-     * (children added/removed/resized), which makes every ANCESTOR
-     * container's layout stale — an ancestor that sized this box
-     * before the change still holds the old natural. Found live by
-     * the 07 demo: content [ key_frame [ radios ] ] left key_frame
-     * at its empty-frame height forever, because nothing re-ran
-     * content's layout after the radios existed.
+    /* Propagate upward: this container's natural size may have
+     * changed (children added/removed/resized), which makes every
+     * ANCESTOR container's layout stale — an ancestor that sized
+     * this container before the change still holds the old natural.
+     * Found live by the 07 demo: content [ key_frame [ radios ] ]
+     * left key_frame at its empty-frame height forever, because
+     * nothing re-ran content's layout after the radios existed.
+     * (The grid needed the same fix: before the notifier learned
+     * grid-ness, an attach or a child's natural-size change never
+     * re-ran ANY layout — grid children stayed wherever the last
+     * unrelated arrange happened to leave them.)
      *
      * The chain strictly climbs parent links and terminates at the
-     * first non-container (or the root); box_layout itself never
-     * calls back into this hook, so there is no cycle. Ancestor
+     * first non-container (or the root); the layout passes never
+     * call back into this hook, so there is no cycle. Ancestor
      * relayouts re-arrange their children through the arrange hook,
-     * which runs box_layout directly (not this notifier). Pure
+     * which runs the packing directly (not this notifier). Pure
      * geometry all the way — no user code runs.
      *
      * Cost note: a child change deep in a nested UI now relayouts

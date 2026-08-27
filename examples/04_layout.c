@@ -6,6 +6,12 @@
  * fdk_widget_create bounds are only size REQUESTS here, nothing is
  * placed by hand.
  *
+ * Phase 5 completion adds the GRID: inside the main panel, below the
+ * breathing meter, a 3x2 grid with a two-column SPAN cell and an
+ * expanding last column — resize the window and watch ONLY that
+ * column absorb the width while the others keep their tracks (and
+ * the gaps stay exactly `spacing` pixels).
+ *
  * The demo also animates two things layout responds to:
  *   - the meter's size REQUEST (fdk_widget_set_natural_size) breathes
  *     inside the expanding panel — the box re-arranges it live
@@ -125,6 +131,39 @@ int main(void) {
     fdk_widget_set_background(meter, col(80, 210, 130));
     fdk_widget_set_corner_radius(meter, 8);
 
+    /* the GRID (Phase 5 completion): 3 columns x 2 rows, spacing 8.
+     * Track naturals come from the cells' create bounds: col widths
+     * 90 / 120 / 70, row heights 40. The bottom-left cell SPANS two
+     * columns; the LAST column is expand-marked, so it — and only it
+     * — absorbs the window's width changes (watch it breathe with
+     * the window while the other tracks and the gaps stay put). */
+    fdk_widget *cells = NULL;
+    (void)fdk_grid_create(main_box, 2, 3, &cells);
+    fdk_grid_set_spacing(cells, 8);
+    fdk_grid_set_column_expand(cells, 2, true);
+    fdk_widget *gc[5];
+    const int gc_rgb[5][3] = {
+        {70, 130, 230},  /* (0,0) blue — track 0 */
+        {235, 170, 70}, /* (1,0) amber — track 1 */
+        {160, 100, 230},/* (2,0) violet — the EXPANDING track */
+        {70, 190, 200}, /* (0,1)+(1,1) teal, SPANNING tracks 0+1 */
+        {230, 110, 170},/* (2,1) pink — expanding track, row 1 */
+    };
+    (void)fdk_widget_create(cells, NULL, (fdk_rect){0, 0, 90, 40}, &gc[0]);
+    (void)fdk_widget_create(cells, NULL, (fdk_rect){0, 0, 120, 40}, &gc[1]);
+    (void)fdk_widget_create(cells, NULL, (fdk_rect){0, 0, 70, 40}, &gc[2]);
+    (void)fdk_widget_create(cells, NULL, (fdk_rect){0, 0, 90, 40}, &gc[3]);
+    (void)fdk_widget_create(cells, NULL, (fdk_rect){0, 0, 70, 40}, &gc[4]);
+    for (int i = 0; i < 5; i++) {
+        fdk_widget_set_background(gc[i], col(gc_rgb[i][0], gc_rgb[i][1],
+                                             gc_rgb[i][2]));
+    }
+    (void)fdk_grid_attach(cells, gc[0], 0, 0, 1, 1);
+    (void)fdk_grid_attach(cells, gc[1], 1, 0, 1, 1);
+    (void)fdk_grid_attach(cells, gc[2], 2, 0, 1, 1);
+    (void)fdk_grid_attach(cells, gc[3], 0, 1, 2, 1); /* colspan 2 */
+    (void)fdk_grid_attach(cells, gc[4], 2, 1, 1, 1);
+
     /* footer: fixed strip */
     fdk_widget *footer = NULL;
     (void)fdk_widget_create(content, NULL, (fdk_rect){0, 0, 0, 18}, &footer);
@@ -156,10 +195,12 @@ int main(void) {
             h = 400 + (int)(70.0 * sin(t * 0.63));
             meter_h = 60 + (int)(90.0 * (0.5 + 0.5 * sin(t * 1.7)));
         } else {
-            /* steady: fixed size, gentle meter breathing only */
+            /* steady: fixed size, gentle meter breathing only (the
+             * range is tight so the grid below always fits in the
+             * smaller hold too) */
             w = (phase == 1) ? 660 : 500;
             h = (phase == 1) ? 480 : 380;
-            meter_h = 100 + (int)(40.0 * sin((double)frames / 20.0));
+            meter_h = 90 + (int)(20.0 * sin((double)frames / 20.0));
         }
         fdk_window_resize(app.window, w, h);
         fdk_widget_set_natural_size(meter, 0, meter_h);

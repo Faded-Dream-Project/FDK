@@ -13,10 +13,20 @@
 
 #include "stb_truetype.h"
 
-/* Glyph cache capacity. 512 keeps a full Latin alphabet (upper+lower),
- * digits, punctuation, and then some permanently resident; runs that
- * touch more distinct glyphs evict least-recently-used entries. */
-#define FDK_TEXT_GLYPH_CACHE_MAX 512
+/* Glyph cache capacity. Subpixel positioning (below) keys each
+ * (glyph, phase) pair separately, so four entries exist per distinct
+ * glyph: 2048 keeps the same real-glyph coverage 512 gave at integer
+ * positioning (a full Latin alphabet, digits, punctuation, and then
+ * some permanently resident); runs that touch more distinct
+ * (glyph,phase) pairs evict least-recently-used entries. */
+#define FDK_TEXT_GLYPH_CACHE_MAX 2048
+
+/* Subpixel positioning phases per axis (x only — y stays integer;
+ * text lines sit on the baseline). Four phases (0, 1/4, 1/2, 3/4)
+ * is the classic grayscale-subpixel granularity: the error is at
+ * most 1/8 px, invisible next to the 1 px error integer positioning
+ * makes. */
+#define FDK_TEXT_SUBPIXEL_PHASES 4
 
 /* A rasterized glyph, cached. `xoff`/`yoff` are stb's bitmap-box
  * offsets: where the bitmap's top-left sits relative to the pen
@@ -27,7 +37,7 @@
  * per pixel, stride == w); NULL when the glyph has no ink (space,
  * combining marks with empty bitmaps) — such glyphs still advance. */
 typedef struct fdk_glyph {
-    int glyph_index;      /* stb glyph id (cache key) */
+    int key;              /* cache key: glyph_index * PHASES + phase */
     fdk_i32 w, h;
     fdk_i32 xoff, yoff;
     fdk_f32 advance;
@@ -40,13 +50,17 @@ struct fdk_font {
     stbtt_fontinfo info;
     fdk_f32 scale;              /* font units -> pixels (pixel size) */
     fdk_i32 pixel_size;
+    unsigned style;             /* fdk_font_style flags (synthetic) */
 
     fdk_font_metrics metrics;
 
     /* Glyph cache: fixed-capacity open-addressing-free linear table
      * with LRU eviction. Lookup is a linear scan over live entries —
-     * fine at 512 entries for a software renderer (rasterization and
-     * blending dominate); promoted to a hash when profiling says so. */
+     * fine at 2048 entries for a software renderer (rasterization and
+     * blending dominate); promoted to a hash when profiling says so.
+     * Entries are keyed (glyph, subpixel phase); the synthetic style
+     * is baked in at raster time and a style change flushes the
+     * whole cache (fdk_text_flush_cache). */
     fdk_glyph glyphs[FDK_TEXT_GLYPH_CACHE_MAX];
     int glyph_count;            /* live entries in [0, glyph_count) */
     fdk_u64 clock;              /* monotonically bumped per use */
@@ -79,14 +93,22 @@ const fdk_glyph *fdk_text_glyph_for(fdk_font *font, fdk_u32 codepoint);
 /* One step of the shared left-to-right shaping walk (see text.c).
  * Consumes the next codepoint at *io_i (never past len), applies pair
  * kerning against *io_prev_g (pass -1 to start), advances the float
- * pen, and reports the glyph plus the rounded pen position its left
- * edge should be drawn at. Returns 0 at end of run, 1 on progress.
- * The measure walk, the draw walk, AND the line/ellipsis layout pass
- * (src/text/layout.c) share this — every width FDK ever reports or
- * paints comes from the same arithmetic. */
+ * pen, and reports the glyph plus the FLOOR pen position its left
+ * edge is drawn at (the subpixel phase is baked into the returned
+ * glyph's rasterization — the caller never sees it). Returns 0 at
+ * end of run, 1 on progress. The measure walk, the draw walk, AND
+ * the line/ellipsis layout pass (src/text/layout.c) share this —
+ * every width FDK ever reports or paints comes from the same
+ * arithmetic. */
 int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
                         size_t *io_i, int *io_prev_g, fdk_f32 *io_pen,
                         const fdk_glyph **out_glyph, fdk_i32 *out_pen_x);
+
+/* Drops every cached (glyph, phase) rasterization — used when the
+ * font's synthetic style changes (the style is baked in at raster
+ * time; see fdk_font_set_style). The next walk re-rasterizes on
+ * demand. */
+void fdk_text_flush_cache(fdk_font *font);
 
 /* The text layer's SINGLE const-laundering point (measure warms the
  * glyph cache, so const public signatures need mutable state; see

@@ -40,7 +40,9 @@ static const fdk_glyph *shape_at(fdk_font *f, const char *utf8,
     fdk_u32 cp = 0;
     (void)fdk_text_utf8_next(utf8, len, i, &cp);
     const fdk_glyph *glyph = fdk_text_glyph_for(f, cp);
-    int g = glyph->glyph_index;
+    /* The cache key packs (glyph index, subpixel phase); kerning
+     * wants the raw glyph id, so unpack it the same way text.c does. */
+    int g = glyph->key / FDK_TEXT_SUBPIXEL_PHASES;
 
     if (*io_prev_g >= 0) {
         int kern = stbtt_GetGlyphKernAdvance(&f->info, *io_prev_g, g);

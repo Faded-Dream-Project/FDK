@@ -84,6 +84,42 @@ typedef struct fdk_font fdk_font;
  */
 fdk_font *fdk_font_load(const char *path, fdk_i32 pixel_size);
 
+/* ---- Synthetic styles (Phase 6 completion) ----
+ *
+ * SYNTHESIS, not face selection: these flags widen (bold) or slant
+ * (italic) whatever face the font object loaded. When a real bold or
+ * italic face FILE exists, loading it with fdk_font_load() is the
+ * better choice — a designed face beats a synthesized one. The flags
+ * exist for the (common) case where only the regular file is
+ * available.
+ *
+ *   BOLD   — stem dilation: strokes widen by pixel_size/24 px (min
+ *            1), and the advance grows by the same amount, so text
+ *            measures as wide as it paints.
+ *   ITALIC — oblique shear: ink slants ~12 degrees, anchored at the
+ *            baseline (ascenders lean right, descenders left). The
+ *            advance is deliberately unchanged (CSS font-synthesis
+ *            semantics): the slanted ink may overhang the next
+ *            glyph's slot, which the damage model already covers.
+ *
+ * Changing the style flushes the glyph cache (rasterizations bake
+ * the style in); the next measure/draw re-rasterizes on demand.
+ * Measurement always reflects the current style — a bold run
+ * measures wider than the same run regular. */
+
+typedef enum fdk_font_style {
+    FDK_FONT_STYLE_NORMAL = 0,
+    FDK_FONT_STYLE_BOLD = 1u << 0,
+    FDK_FONT_STYLE_ITALIC = 1u << 1,
+} fdk_font_style;
+
+/* Sets/clears style flags (OR of fdk_font_style values; unknown bits
+ * are ignored). FDK_ERR_INVALID_ARGUMENT only for a NULL font. */
+fdk_result fdk_font_set_style(fdk_font *font, unsigned style_flags);
+
+/* The font's current style flags (0 = normal). NULL reads as 0. */
+unsigned fdk_font_get_style(const fdk_font *font);
+
 /* Destroys a font and its glyph cache. NULL is a safe no-op. */
 void fdk_font_destroy(fdk_font *font);
 
@@ -158,9 +194,11 @@ fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
 /* ---- Glyph cache introspection ---- */
 
 /* Glyph-cache counters since font load. cached_glyphs is the current
- * number of rasterized glyphs held (bounded; least-recently-used
- * glyphs are evicted past the bound, which is currently 512 — large
- * enough for entire alphabets plus punctuation to stay resident). */
+ * number of rasterized entries held (bounded; least-recently-used
+ * entries are evicted past the bound, which is currently 2048 —
+ * entries are keyed (glyph, subpixel phase), so this is 512 distinct
+ * glyphs' worth of coverage; large enough for entire alphabets plus
+ * punctuation to stay resident). */
 typedef struct fdk_font_cache_stats {
     fdk_i32 cached_glyphs;
     fdk_i32 cache_hits;

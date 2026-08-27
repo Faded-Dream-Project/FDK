@@ -212,7 +212,12 @@ int main(void) {
         if (frames == 24 * 8) {
             printf("HOLD_A\n");
             fflush(stdout);
-        } else if (frames >= 24 * 11) {
+        } else if (frames >= 24 * 14) {
+            /* HOLD_A lasts ~2.2s of steady frames — enough margin
+             * for the test rig's marker poll + settle + capture
+             * (found live: a 72-frame hold left the rig's grab only
+             * ~0.24s before exit, one slow ffmpeg startup from
+             * grabbing a dead screen). */
             app.quit = true;
         }
     }

@@ -38,4 +38,12 @@ void fdk_box_arrange_hook(fdk_widget *w, fdk_rect assigned);
 
 extern const struct fdk_widget_class fdk_box_class_def;
 
+/* The grid container (Phase 5 completion, src/layout/grid.c). Same
+ * subclass pattern: state embedded in the widget allocation, policy
+ * in the measure/arrange hooks. */
+void fdk_grid_measure_hook(fdk_widget *w, fdk_size *out);
+void fdk_grid_arrange_hook(fdk_widget *w, fdk_rect assigned);
+
+extern const struct fdk_widget_class fdk_grid_class_def;
+
 #endif /* FDK_LAYOUT_INTERNAL_H */

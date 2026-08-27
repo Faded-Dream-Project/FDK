@@ -709,6 +709,16 @@ fdk_result fdk_widget_create(fdk_widget *parent,
     w->natural_h = bounds.height;
     w->align_h = FDK_ALIGN_FILL;
     w->align_v = FDK_ALIGN_FILL;
+    w->min_w = 0;
+    w->min_h = 0;
+    w->max_w = 0;
+    w->max_h = 0;
+    w->baseline = -1;
+    w->grid_col = 0;
+    w->grid_row = 0;
+    w->grid_colspan = 1;
+    w->grid_rowspan = 1;
+    w->grid_attached = false;
     w->flags = FDK_WF_VISIBLE | FDK_WF_ENABLED;
 
     if (parent != NULL) {
@@ -820,6 +830,13 @@ void fdk_widget_set_user_data(fdk_widget *widget, void *user_data) {
         return;
     }
     widget->user_data = user_data;
+}
+
+void fdk__widget_set_baseline(fdk_widget *widget, fdk_i32 y) {
+    if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    widget->baseline = y < 0 ? -1 : y;
 }
 
 void fdk__widget_set_theme_hook(fdk_widget *widget,
@@ -1574,6 +1591,84 @@ void fdk_widget_measure(fdk_widget *widget, fdk_size *out_size) {
          * assigns bounds, and the request must survive that. */
         *out_size = (fdk_size){widget->natural_w, widget->natural_h};
     }
+
+    /* Min/max constraints (Phase 5 completion): clamped into EVERY
+     * measure result, so any container's negotiation respects them —
+     * 0 means unconstrained in that dimension. Applied after the
+     * hook (never before): the hook's value is the request being
+     * clamped, not a hint about the clamps themselves. */
+    if (widget->min_w > 0 && out_size->width < widget->min_w) {
+        out_size->width = widget->min_w;
+    }
+    if (widget->min_h > 0 && out_size->height < widget->min_h) {
+        out_size->height = widget->min_h;
+    }
+    if (widget->max_w > 0 && out_size->width > widget->max_w) {
+        out_size->width = widget->max_w;
+    }
+    if (widget->max_h > 0 && out_size->height > widget->max_h) {
+        out_size->height = widget->max_h;
+    }
+}
+
+void fdk_widget_set_size_limits(fdk_widget *widget, fdk_i32 min_w,
+                                fdk_i32 min_h, fdk_i32 max_w, fdk_i32 max_h) {
+    if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    /* Normalize: negatives read as 0 (unconstrained); a max below its
+     * min is a contradiction — min wins, clamped into the max. */
+    if (min_w < 0) min_w = 0;
+    if (min_h < 0) min_h = 0;
+    if (max_w < 0) max_w = 0;
+    if (max_h < 0) max_h = 0;
+    if (max_w > 0 && max_w < min_w) max_w = min_w;
+    if (max_h > 0 && max_h < min_h) max_h = min_h;
+    if (widget->min_w == min_w && widget->min_h == min_h &&
+        widget->max_w == max_w && widget->max_h == max_h) {
+        return; /* unchanged — no relayout storm */
+    }
+    widget->min_w = min_w;
+    widget->min_h = min_h;
+    widget->max_w = max_w;
+    widget->max_h = max_h;
+    /* The widget's measured size may have changed -> every ancestor
+     * container must re-run its layout (same path as the other
+     * hint setters). */
+    fdk_widget_child_layout_changed(widget);
+}
+
+void fdk_widget_get_size_limits(const fdk_widget *widget, fdk_i32 *out_min_w,
+                                fdk_i32 *out_min_h, fdk_i32 *out_max_w,
+                                fdk_i32 *out_max_h) {
+    fdk_i32 sink = 0;
+    if (out_min_w == NULL) out_min_w = &sink;
+    if (out_min_h == NULL) out_min_h = &sink;
+    if (out_max_w == NULL) out_max_w = &sink;
+    if (out_max_h == NULL) out_max_h = &sink;
+    if (widget == NULL) {
+        *out_min_w = 0;
+        *out_min_h = 0;
+        *out_max_w = 0;
+        *out_max_h = 0;
+        return;
+    }
+    *out_min_w = widget->min_w;
+    *out_min_h = widget->min_h;
+    *out_max_w = widget->max_w;
+    *out_max_h = widget->max_h;
+}
+
+bool fdk_widget_get_baseline(const fdk_widget *widget, fdk_i32 *out_y) {
+    if (out_y == NULL) {
+        return false;
+    }
+    if (widget == NULL || widget->baseline < 0) {
+        *out_y = 0;
+        return false;
+    }
+    *out_y = widget->baseline;
+    return true;
 }
 
 void fdk_widget_arrange(fdk_widget *widget, fdk_rect assigned) {

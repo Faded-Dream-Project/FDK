@@ -5,14 +5,19 @@
  * Pipeline: UTF-8 bytes -> codepoints (strict-ish RFC 3629 decode,
  * U+FFFD for invalid bytes) -> glyph indices (stbtt, .notdef when
  * unmapped) -> per-glyph metrics from the LRU cache (rasterized on
- * first use) -> float pen advance with pair kerning -> integer glyph
- * placement -> alpha-mask blend through fdk_surface_blend_mask().
+ * first use, PER SUBPIXEL PHASE — the fractional part of the pen is
+ * quantized to 1/4 px and baked into the rasterization, so glyphs
+ * land where the float pen actually is instead of snapping to whole
+ * pixels) -> float pen advance with pair kerning -> floor(pen) glyph
+ * placement -> synthetic style pass (bold stem dilation, oblique
+ * shear — Phase 6 completion) -> alpha-mask blend through
+ * fdk_surface_blend_mask().
  *
  * measure and draw share the exact same shaping walk, so
  * fdk_font_measure_utf8()'s advance_width is by construction where
  * fdk_surface_draw_utf8()'s pen ends up: same decode, same kerning,
- * same rounding rule (each glyph is placed at round(pen), the total
- * is round(final pen)).
+ * same rounding rule (the total is round(final pen); each glyph
+ * paints at floor(pen) + its phase rasterization).
  *
  * Damage model: a run's ink boxes are unioned into ONE rect (already
  * intersected with the current clip), invalidated once after the
@@ -28,6 +33,7 @@
 #include "core/log_internal.h"
 #include "render/surface_internal.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -96,12 +102,113 @@ int fdk_text_utf8_next(const char *s, size_t len, size_t i,
 
 /* ---- Glyph cache ---- */
 
-/* Finds the cache slot for a glyph index, rasterizing on miss and
- * evicting LRU when full. Returns the entry (never NULL). */
-static fdk_glyph *glyph_slot(fdk_font *font, int glyph_index) {
+/* ---- synthetic style passes (Phase 6 completion) ------------------
+ *
+ * Applied to the freshly rasterized alpha bitmap before it enters the
+ * cache; measure/draw agreement is automatic because both read the
+ * same cached entry. Both passes are honest SYNTHESIS: they widen or
+ * slant whatever face was loaded rather than selecting a real bold or
+ * italic face (which remains the better choice when the file exists —
+ * see fdk_font_set_style's docs). */
+
+/* Synthetic bold: horizontal dilation with a max window — every
+ * destination pixel takes the darkest source pixel of the
+ * `stem`-wide window ending at it. Strokes widen by stem px; the
+ * advance grows by the same stem so text measures as wide as it
+ * paints. stem = pixel_size/24 (min 1): 1 px at text sizes, 2 px at
+ * 48+, matching how face designers scale stem contrast. */
+static fdk_u8 *synthesize_bold(fdk_u8 *bits, int w, int h, int stem,
+                               int *out_w) {
+    if (bits == NULL || w <= 0 || h <= 0 || stem <= 0) {
+        *out_w = w;
+        return bits;
+    }
+    int nw = w + stem;
+    fdk_u8 *out = fdk_alloc_array((size_t)nw * (size_t)h, 1);
+    if (out == NULL) { /* OOM: keep the unbolded glyph */
+        *out_w = w;
+        return bits;
+    }
+    for (int y = 0; y < h; y++) {
+        const fdk_u8 *src = bits + (size_t)y * (size_t)w;
+        fdk_u8 *dst = out + (size_t)y * (size_t)nw;
+        for (int x = 0; x < nw; x++) {
+            fdk_u8 best = 0;
+            for (int k = 0; k < stem; k++) {
+                int sx = x - k;
+                if (sx >= 0 && sx < w && src[sx] > best) {
+                    best = src[sx];
+                }
+            }
+            dst[x] = best;
+        }
+    }
+    fdk_free(bits);
+    *out_w = nw;
+    return out;
+}
+
+/* Synthetic italic: oblique shear anchored at the BASELINE. Row y
+ * (0 = bitmap top) shifts right by shear*(baseline_row - y): ascender
+ * rows lean right, descender rows lean left of their upright
+ * position, exactly what a slanted face does. The advance is
+ * deliberately UNCHANGED (CSS font-synthesis semantics: the oblique
+ * ink may overhang the next glyph's slot; the damage rect covers the
+ * real ink, so the overhang paints correctly). */
+#define FDK_TEXT_OBLIQUE_SHEAR 0.21f /* ~12 degrees, the classic slant */
+
+static fdk_u8 *synthesize_italic(fdk_u8 *bits, int w, int h,
+                                 fdk_i32 yoff, int *out_w,
+                                 fdk_i32 *out_xoff) {
+    if (bits == NULL || w <= 0 || h <= 0) {
+        *out_w = w;
+        return bits;
+    }
+    /* The baseline's row inside the bitmap: yoff <= 0 means the top
+     * sits -yoff rows above the baseline, so the baseline is row
+     * -yoff. Degenerate (yoff > 0, glyph fully below baseline, e.g.
+     * descender-only marks): anchor at the bitmap top — the shear
+     * still slants, just from a different pivot. */
+    int base_row = yoff < 0 ? -yoff : 0;
+    if (base_row > h - 1) {
+        base_row = h - 1;
+    }
+    int max_shift = 0; /* rightward shift of the topmost row */
+    int min_shift = 0; /* leftward shift of the bottom row */
+    for (int y = 0; y < h; y++) {
+        int s = (int)((FDK_TEXT_OBLIQUE_SHEAR * (fdk_f32)(base_row - y)) +
+                      0.5f);
+        if (s > max_shift) max_shift = s;
+        if (s < min_shift) min_shift = s;
+    }
+    int nw = w + max_shift - min_shift; /* max_shift >= 0, min_shift <= 0 */
+    fdk_u8 *out = fdk_alloc_array((size_t)nw * (size_t)h, 1);
+    if (out == NULL) {
+        *out_w = w;
+        return bits;
+    }
+    for (int y = 0; y < h; y++) {
+        int s = (int)((FDK_TEXT_OBLIQUE_SHEAR * (fdk_f32)(base_row - y)) +
+                      0.5f);
+        const fdk_u8 *src = bits + (size_t)y * (size_t)w;
+        fdk_u8 *dst = out + (size_t)y * (size_t)nw + (size_t)(s - min_shift);
+        for (int x = 0; x < w; x++) {
+            dst[x] = src[x];
+        }
+    }
+    fdk_free(bits);
+    *out_w = nw;
+    *out_xoff = yoff - (fdk_i32)(-min_shift); /* widen left by -min_shift */
+    return out;
+}
+
+/* Finds the cache slot for a (glyph, subpixel phase) key, rasterizing
+ * on miss and evicting LRU when full. Returns the entry (never
+ * NULL). `key` = glyph_index * FDK_TEXT_SUBPIXEL_PHASES + phase. */
+static fdk_glyph *glyph_slot(fdk_font *font, int key) {
     /* Hit? */
     for (int i = 0; i < font->glyph_count; i++) {
-        if (font->glyphs[i].glyph_index == glyph_index) {
+        if (font->glyphs[i].key == key) {
             font->clock++;
             font->glyphs[i].last_used = font->clock;
             font->stats.cache_hits++;
@@ -128,23 +235,46 @@ static fdk_glyph *glyph_slot(fdk_font *font, int glyph_index) {
         font->stats.evictions++;
     }
 
-    /* Rasterize with stb at the font's baked-in scale. Integer
-     * subpixel offset (frac = 0) — v1 places glyphs at rounded pen
-     * positions. */
+    int glyph_index = key / FDK_TEXT_SUBPIXEL_PHASES;
+    int phase = key % FDK_TEXT_SUBPIXEL_PHASES;
+
+    /* Rasterize with stb at the font's baked-in scale, shifted by the
+     * subpixel phase (Phase 6 completion): the bitmap lands where the
+     * float pen actually is (within 1/8 px) instead of snapping to
+     * whole pixels. The returned xoff already includes the shift, so
+     * callers keep placing at pen_x + xoff with pen_x = floor(pen). */
     int w = 0, h = 0;
     fdk_i32 xoff = 0, yoff = 0;
-    fdk_u8 *bits = stbtt_GetGlyphBitmap(&font->info, 0, font->scale,
-                                        glyph_index, &w, &h, &xoff,
-                                        &yoff);
+    fdk_u8 *bits = stbtt_GetGlyphBitmapSubpixel(
+        &font->info, 0, font->scale, (fdk_f32)phase * 0.25f, 0.0f,
+        glyph_index, &w, &h, &xoff, &yoff);
     int advance_raw = 0;
     stbtt_GetGlyphHMetrics(&font->info, glyph_index, &advance_raw, NULL);
+    fdk_f32 advance = (fdk_f32)advance_raw * font->scale;
 
-    slot->glyph_index = glyph_index;
+    /* Synthetic styles — applied to the bitmap and (for bold) the
+     * advance, before the entry is cached, so measure and draw agree
+     * by construction. */
+    if (bits != NULL && w > 0 && h > 0) {
+        if ((font->style & FDK_FONT_STYLE_BOLD) != 0) {
+            int stem = font->pixel_size / 24;
+            if (stem < 1) {
+                stem = 1;
+            }
+            bits = synthesize_bold(bits, w, h, stem, &w);
+            advance += (fdk_f32)stem;
+        }
+        if ((font->style & FDK_FONT_STYLE_ITALIC) != 0) {
+            bits = synthesize_italic(bits, w, h, yoff, &w, &xoff);
+        }
+    }
+
+    slot->key = key;
     slot->w = w;
     slot->h = h;
     slot->xoff = xoff;
     slot->yoff = yoff;
-    slot->advance = (fdk_f32)advance_raw * font->scale;
+    slot->advance = advance;
     slot->bits = bits; /* stb malloc'd (routed to fdk_alloc); may be NULL */
     font->clock++;
     slot->last_used = font->clock;
@@ -153,15 +283,29 @@ static fdk_glyph *glyph_slot(fdk_font *font, int glyph_index) {
     return slot;
 }
 
+void fdk_text_flush_cache(fdk_font *font) {
+    if (font == NULL) {
+        return;
+    }
+    for (int i = 0; i < font->glyph_count; i++) {
+        fdk_free(font->glyphs[i].bits);
+        font->glyphs[i].bits = NULL;
+    }
+    font->glyph_count = 0;
+    font->stats.cached_glyphs = 0;
+}
+
 const fdk_glyph *fdk_text_glyph_for(fdk_font *font, fdk_u32 codepoint) {
     if (font == NULL) {
         return NULL;
     }
     /* FindGlyphIndex returns 0 for unmapped codepoints — and glyph 0
      * IS .notdef (the font's missing-glyph box, or an empty glyph),
-     * so the fallback is free and its metrics stay valid. */
+     * so the fallback is free and its metrics stay valid. Phase 0 —
+     * metrics-only callers (ascent probes, cache warmers) don't care
+     * which phase the bitmap carries. */
     int g = stbtt_FindGlyphIndex(&font->info, (int)codepoint);
-    return glyph_slot(font, g);
+    return glyph_slot(font, g * FDK_TEXT_SUBPIXEL_PHASES);
 }
 
 /* ---- Font container validation ---- */
@@ -253,6 +397,28 @@ static const char *const k_system_font_candidates[] = {
 };
 
 static const char *g_system_font_path; /* cached first hit */
+
+fdk_result fdk_font_set_style(fdk_font *font, unsigned style_flags) {
+    if (font == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    unsigned masked = style_flags &
+                      (FDK_FONT_STYLE_BOLD | FDK_FONT_STYLE_ITALIC);
+    if (masked == font->style) {
+        return FDK_OK; /* idempotent — no cache churn */
+    }
+    font->style = masked;
+    /* Rasterizations bake the style in (stem dilation widens the
+     * bitmap AND the advance; the oblique shear reshapes the bitmap),
+     * so every cached entry is now the wrong shape: drop them all and
+     * let the next walk re-rasterize on demand. */
+    fdk_text_flush_cache(font);
+    return FDK_OK;
+}
+
+unsigned fdk_font_get_style(const fdk_font *font) {
+    return font == NULL ? 0u : font->style;
+}
 
 fdk_font *fdk_font_load_system_default(fdk_i32 pixel_size) {
     if (pixel_size < 1 || pixel_size > 512) {
@@ -437,7 +603,22 @@ int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
         }
     }
 
-    const fdk_glyph *glyph = glyph_slot(font, g);
+    /* Subpixel placement (Phase 6 completion): the glyph's left edge
+     * is the pen's FLOOR; the fractional remainder (kerning makes it
+     * non-integral) is quantized into one of 4 phases and baked into
+     * that phase's rasterization. Total advance stays
+     * round(final pen) — unchanged from v1 — while each glyph paints
+     * within 1/8 px of where the float pen actually is. */
+    fdk_f32 left = *io_pen; /* kerning already applied */
+    fdk_i32 gx = (fdk_i32)floorf(left); /* floor: kerning can dip < 0 */
+    fdk_f32 frac = left - (fdk_f32)gx;
+    int phase = (int)(frac * (fdk_f32)FDK_TEXT_SUBPIXEL_PHASES);
+    if (phase >= FDK_TEXT_SUBPIXEL_PHASES) { /* float edge safety */
+        phase = FDK_TEXT_SUBPIXEL_PHASES - 1;
+    }
+
+    const fdk_glyph *glyph =
+        glyph_slot(font, g * FDK_TEXT_SUBPIXEL_PHASES + phase);
     *io_pen += glyph->advance;
     *io_i += (size_t)consumed;
     *io_prev_g = g;
@@ -445,7 +626,7 @@ int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
     /* Placement x is where the pen was BEFORE this glyph's advance —
      * the left edge of its slot (kerning already applied). */
     *out_glyph = glyph;
-    *out_pen_x = (fdk_i32)(*io_pen - glyph->advance + 0.5f);
+    *out_pen_x = gx;
     return 1;
 }
 

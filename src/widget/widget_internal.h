@@ -98,6 +98,27 @@ struct fdk_widget {
     bool expand_h, expand_v;
     fdk_align align_h, align_v;
 
+    /* Min/max size constraints (Phase 5 completion): clamped into
+     * every measure result (fdk_widget_measure). 0 = unconstrained
+     * in that dimension. */
+    fdk_i32 min_w, min_h, max_w, max_h;
+
+    /* Grid placement (Phase 5 completion), carried BY the child like
+     * the other container hints: valid only while grid_attached and
+     * the parent is a grid (fdk_grid_attach sets both together, the
+     * grid reads them while iterating its children). Storing
+     * placement on the child — rather than a side table on the
+     * container — means child destruction needs no unlink hook. */
+    fdk_i32 grid_col, grid_row, grid_colspan, grid_rowspan;
+    bool grid_attached;
+
+    /* Baseline (Phase 5 completion): the y offset (from the widget's
+     * top) of its text baseline, or -1 when the widget has no text
+     * and no meaningful baseline (containers fall back to the bottom
+     * edge for baseline alignment). Set by text-bearing widgets at
+     * measure time via fdk__widget_set_baseline. */
+    fdk_i32 baseline;
+
     /* The widget's natural (requested) size: its create-time bounds,
     * adjustable via fdk_widget_set_natural_size. This is what the
     * default measure hook reports — deliberately NOT the current
@@ -155,6 +176,11 @@ void fdk__widget_roots_invalidate_all(void);
  * theme_hook field). NULL clears. Safe with NULL widget. */
 void fdk__widget_set_theme_hook(fdk_widget *widget,
                                 void (*hook)(fdk_widget *widget));
+
+/* Internal baseline setter for text-bearing widgets (Phase 5
+ * completion): y offset of the text baseline from the widget's top,
+ * or -1 for "none". Measured by the public fdk_widget_get_baseline. */
+void fdk__widget_set_baseline(fdk_widget *widget, fdk_i32 y);
 
 /* The base widget class (what fdk_widget_create's klass == NULL gives
  * you, and what subclasses that don't override `paint` fall back to):

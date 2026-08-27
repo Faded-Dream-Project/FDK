@@ -9,8 +9,11 @@
  * needs to know what its parent is; layout is pure geometry
  * negotiation downward.
  *
- * First slice: the BOX — a linear container (horizontal or vertical)
- * with spacing, padding, and per-child layout hints:
+ * The BOX is a linear container (horizontal or vertical) with
+ * spacing, padding, and per-child layout hints; the GRID (Phase 5
+ * completion) is the two-dimensional counterpart. Shared per-child
+ * hints (margins, expand, align incl. BASELINE, min/max size
+ * limits) apply to both:
  *
  *   - margins (per side, outside the child's bounds)
  *   - expand (share leftover space along the box's axis; fill the
@@ -52,10 +55,16 @@ typedef enum fdk_orientation {
  * ignored); the others keep the child's natural cross size and
  * position it inside the available cross space. */
 typedef enum fdk_align {
-    FDK_ALIGN_FILL   = 0,
-    FDK_ALIGN_START  = 1,
-    FDK_ALIGN_CENTER = 2,
-    FDK_ALIGN_END    = 3,
+    FDK_ALIGN_FILL     = 0,
+    FDK_ALIGN_START    = 1,
+    FDK_ALIGN_CENTER   = 2,
+    FDK_ALIGN_END      = 3,
+    /* Phase 5 completion: align text baselines (boxes' cross axis,
+     * grid cells' vertical axis). Children report their text baseline
+     * (fdk_widget_get_baseline); children WITHOUT one use their
+     * BOTTOM edge as the baseline. Only meaningful for the vertical
+     * align hint. */
+    FDK_ALIGN_BASELINE = 4,
 } fdk_align;
 
 /* ---- Box container ----
@@ -105,6 +114,77 @@ void fdk_widget_set_expand(fdk_widget *widget, bool horizontal,
 /* Cross-axis placement when the child does not expand into it. */
 void fdk_widget_set_align(fdk_widget *widget, fdk_align horizontal,
                           fdk_align vertical);
+
+/* ---- Grid container (Phase 5 completion) ----
+ *
+ * A two-dimensional container: children occupy (col, row) cells, may
+ * span multiple cells, and honor the same per-child hints (margins,
+ * align within the cell, expand). Column widths / row heights are the
+ * maximum natural size of the children in them (multi-span children
+ * distribute any deficit they introduce equally over their span);
+ * `fdk_grid_set_column_expand` / `fdk_grid_set_row_expand` mark
+ * columns/rows that share the container's EXTRA space when arranged
+ * larger than its natural size (window content, expanding parents).
+ * Homogeneous mode sizes every column (row) to the largest one.
+ *
+ *     fdk_widget *grid;
+ *     fdk_grid_create(root, 2, 2, &grid);   // rows, columns
+ *     fdk_widget *a = fdk_widget_create(grid, NULL, (fdk_rect){0}, &a);
+ *     fdk_grid_attach(grid, a, 0, 0, 1, 1); // col, row, colspan, rowspan
+ *
+ * The grid grows automatically when attach addresses a cell beyond
+ * the current dimensions. */
+
+fdk_result fdk_grid_create(fdk_widget *parent, fdk_i32 rows, fdk_i32 columns,
+                           fdk_widget **out_grid);
+
+/* Places `child` (which must be a direct child of the grid — the
+ * usual pattern creates it with the grid as parent) at (column, row),
+ * spanning `colspan` columns and `rowspan` rows (both clamped to >=
+ * 1). The grid grows to contain the attachment. Re-attaching a child
+ * moves it. */
+fdk_result fdk_grid_attach(fdk_widget *grid, fdk_widget *child, fdk_i32 column,
+                           fdk_i32 row, fdk_i32 colspan, fdk_i32 rowspan);
+
+/* Uniform gap between columns/rows (>= 0). */
+void fdk_grid_set_spacing(fdk_widget *grid, fdk_i32 spacing);
+
+/* Uniform inset on all four sides (>= 0), like the box's. */
+void fdk_grid_set_padding(fdk_widget *grid, fdk_i32 padding);
+
+/* Homogeneous mode: all columns share the widest column's width and
+ * all rows the tallest row's height (per-axis natural maxima). */
+void fdk_grid_set_homogeneous(fdk_widget *grid, bool homogeneous);
+
+/* Marks a column / row as sharing the container's extra along-axis
+ * space when arranged larger than natural. Off by default. */
+void fdk_grid_set_column_expand(fdk_widget *grid, fdk_i32 column, bool expand);
+void fdk_grid_set_row_expand(fdk_widget *grid, fdk_i32 row, bool expand);
+
+/* ---- Min/max size constraints (Phase 5 completion) ----
+ *
+ * Clamped into the widget's every MEASURE result (see
+ * fdk_widget_measure), so every container — box, grid, whatever
+ * arranges next — negotiates within the limits without knowing about
+ * them. 0 in a dimension means unconstrained. A max below its min is
+ * normalized (min wins). Changing limits relayouts the parent
+ * container immediately, like the other hint setters. */
+
+void fdk_widget_set_size_limits(fdk_widget *widget, fdk_i32 min_width,
+                                fdk_i32 min_height, fdk_i32 max_width,
+                                fdk_i32 max_height);
+void fdk_widget_get_size_limits(const fdk_widget *widget, fdk_i32 *out_min_w,
+                                fdk_i32 *out_min_h, fdk_i32 *out_max_w,
+                                fdk_i32 *out_max_h);
+
+/* ---- Baseline (Phase 5 completion) ----
+ *
+ * Text-bearing widgets report the y offset of their text baseline
+ * from their top; fdk_widget_get_baseline returns false for widgets
+ * without one (their bottom edge is used as the baseline when a
+ * container aligns FDK_ALIGN_BASELINE). */
+
+bool fdk_widget_get_baseline(const fdk_widget *widget, fdk_i32 *out_y);
 
 /* ---- Window content integration ----
  *

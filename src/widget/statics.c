@@ -246,11 +246,16 @@ static void label_measure(fdk_widget *w, fdk_size *out) {
     out->width = 0;
     out->height = 0;
     if (l->font == NULL || l->text == NULL || l->text[0] == '\0') {
+        fdk__widget_set_baseline(w, -1); /* no text, no baseline */
         return;
     }
     fdk_font_metrics fm;
     fdk_font_get_metrics(l->font, &fm);
     fdk_i32 pitch = fm.ascent + fm.descent;
+    /* Baseline (Phase 5 completion): the label's text baseline is its
+     * font's ascent from the top — what FDK_ALIGN_BASELINE aligns
+     * rows of labels on. */
+    fdk__widget_set_baseline(w, fm.ascent);
 
     if (l->mode != FDK_LABEL_WRAP) {
         /* NOWRAP and ELLIPSIZE: the natural size is the full text —
