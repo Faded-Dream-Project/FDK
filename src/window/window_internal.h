@@ -185,4 +185,11 @@ struct fdk_window {
  * back to the fdk_window* that owns it. Not part of the public API. */
 void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event);
 
+/* Resolves the opaque root-owner pointer the widget layer hands out
+ * (fdk__widget_window_owner, set on window-owned roots) back to the
+ * owning context — the Phase 9 back-edge behind widget-side clipboard
+ * access (Entry's Ctrl+X/C/V). NULL for a non-fdk_window owner (never
+ * happens today; defensive contract). */
+fdk_context *fdk__window_context(void *window_owner);
+
 #endif /* FDK_WINDOW_INTERNAL_H */

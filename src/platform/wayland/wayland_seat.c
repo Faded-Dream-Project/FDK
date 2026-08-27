@@ -99,9 +99,12 @@ static fdk_u32 xkb_modifiers_to_fdk(struct xkb_state *state) {
 static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t serial,
                           uint32_t time, uint32_t key, uint32_t state) {
     (void)keyboard;
-    (void)serial;
     (void)time;
     fdk_platform_connection *conn = data;
+    /* Phase 9: like pointer_button below, keys cite serials the
+     * compositor validates — wl_data_device.set_selection may cite
+     * the newest of either. */
+    conn->last_input_serial = serial;
 
     if (conn->keyboard_focus == NULL || conn->xkb_state == NULL) {
         return; /* no focused window or no keymap yet; nothing to report */
@@ -225,6 +228,7 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
      * event that triggered them (the compositor validates it; a stale
      * serial silently no-ops the request). */
     conn->last_button_serial = serial;
+    conn->last_input_serial = serial;
     if (conn->pointer_focus == NULL) {
         return;
     }
@@ -314,6 +318,13 @@ static const struct wl_pointer_listener g_pointer_listener = {
 
 static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t capabilities) {
     fdk_platform_connection *conn = data;
+
+    /* Phase 9: the seat exists (maybe with zero capabilities — a
+     * headless compositor's seat often has neither keyboard nor
+     * pointer), which is all wl_data_device needs. Creating the data
+     * device here rather than in the registry handler keeps the
+     * ordering simple (manager may bind before or after the seat). */
+    fdk_wayland_clipboard_device_ready(conn);
 
     if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && conn->keyboard == NULL) {
         conn->keyboard = wl_seat_get_keyboard(seat);

@@ -720,6 +720,7 @@ void fdk_window_destroy(fdk_window *window) {
          * (subclass destroy hooks run, deferred destroys settle).
          * The decoration band is a subtree of the root and dies with
          * it. */
+        window->root->window_owner = NULL;
         window->root->flags &= ~FDK_WF_WINDOW_ROOT;
         fdk_widget_destroy(window->root);
         window->root = NULL;
@@ -1093,6 +1094,11 @@ fdk_result fdk_window_get_root(fdk_window *window, fdk_widget **out_root) {
             return r;
         }
         window->root->flags |= FDK_WF_WINDOW_ROOT;
+        /* Opaque back-edge for Phase 9: widgets (e.g. Entry's clipboard
+         * integration) resolve their owning window's context via
+         * fdk__widget_window_owner() + fdk__window_context(). The
+         * widget layer never dereferences this. */
+        window->root->window_owner = window;
         FDK_DEBUG("window root widget created (%dx%d)", bounds.width,
                   bounds.height);
     }
@@ -1359,4 +1365,9 @@ void fdk_window_layout(fdk_window *window) {
         }
     }
     fdk_widget_arrange(window->content, full);
+}
+
+fdk_context *fdk__window_context(void *window_owner) {
+    return (window_owner != NULL) ? ((fdk_window *)window_owner)->ctx
+                                  : NULL;
 }

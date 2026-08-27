@@ -126,6 +126,14 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
              conn->ewmh_wm ? "detected" : "not detected",
              conn->ewmh_state_ok ? "yes" : "no");
 
+    /* Clipboard helper + atoms (Phase 9). Failure is not fatal — the
+     * clipboard ops simply report FDK_ERR_PLATFORM / NULL. */
+    conn->clip_helper = None;
+    conn->clip_owned_text = NULL;
+    if (fdk_ok(fdk_x11_clipboard_init(conn))) {
+        FDK_DEBUG("clipboard helper window ready (Phase 9)");
+    }
+
     FDK_INFO("connected (screen %d, %dx%d root)", conn->screen,
              DisplayWidth(display, conn->screen),
              DisplayHeight(display, conn->screen));
@@ -152,6 +160,8 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
         }
     }
     fdk_free(conn->windows);
+
+    fdk_x11_clipboard_shutdown(conn);
 
     free(conn->app_id);
     conn->app_id = NULL;

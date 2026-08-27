@@ -46,6 +46,22 @@ static fdk_u32 x11_lookup_codepoint(XKeyEvent *xkey) {
     }
     buf[len] = '\0';
 
+    /* Ctrl+letter (Phase 9): XLookupString reports the CONTROL
+     * character (^X = 0x18) for these, but the codepoint contract is
+     * "what the key produces" and every shortcut reader (Entry's
+     * Ctrl+X/C/V/A) wants the LETTER — text entry ignores
+     * ctrl-combos anyway (FDK's Entry refuses control codepoints as
+     * inserts). The Wayland backend already reports the letter via
+     * xkb_state_key_get_one_sym; this makes the backends agree. */
+    if ((xkey->state & ControlMask) != 0 &&
+        keysym >= 0x61 && keysym <= 0x7A) { /* XK_a..XK_z */
+        return (fdk_u32)keysym;
+    }
+    if ((xkey->state & ControlMask) != 0 &&
+        keysym >= 0x41 && keysym <= 0x5A) { /* XK_A..XK_Z */
+        return (fdk_u32)keysym;
+    }
+
     /* XLookupString gives us Latin-1/local-encoding bytes, not
      * necessarily UTF-8 codepoints, for non-ASCII input; a fully
      * correct general Unicode result requires XmbLookupString with a

@@ -64,6 +64,25 @@ struct fdk_platform_connection {
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
 
+    /* --- Clipboard (Phase 9, ICCCM CLIPBOARD selection) ---
+     *
+     * clip_helper is a never-mapped InputOnly window that acts as
+     * FDK's selection owner/requestor. Selection traffic is not tied
+     * to any visible window (a context may own the clipboard with
+     * zero windows open), so the connection owns a private helper —
+     * the same design every ICCCM-faithful toolkit uses. The atoms
+     * below are interned once at connect. clip_owned_text is the
+     * copy FDK serves while it owns CLIPBOARD; SelectionClear
+     * (another client took over) frees it. */
+    Window clip_helper;
+    Atom atom_clipboard;      /* CLIPBOARD                            */
+    Atom atom_targets;        /* TARGETS                              */
+    Atom atom_incr;           /* INCR (recognized only — refused)     */
+    Atom atom_text;           /* TEXT (legacy compound text alias)    */
+    Atom atom_text_plain;     /* text/plain;charset=utf-8             */
+    Atom atom_fdk_selection;  /* private property for convert replies */
+    char *clip_owned_text;    /* fdk_alloc'd, NULL when not owner     */
+
     /* Simple open-addressed lookup from X11 Window ID -> our
      * fdk_platform_window*, so dispatch_pending() can find the right
      * window for an incoming XEvent (which only carries the raw X ID
@@ -201,5 +220,20 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow);
  * x11_dispatch.c and from the acquire-side sync wait. */
 void fdk_x11_surface_shm_completion(fdk_platform_window *pwindow,
                                     unsigned long shmseg);
+
+/* Clipboard (x11_clipboard.c). Called from x11_connection.c
+ * (setup/teardown) and x11_dispatch.c (helper-window events, which
+ * must be routed there BEFORE the window-table lookup — the helper is
+ * deliberately not in the table). */
+fdk_result fdk_x11_clipboard_init(fdk_platform_connection *conn);
+void fdk_x11_clipboard_shutdown(fdk_platform_connection *conn);
+/* Returns 1 when the raw XEvent belonged to the clipboard helper and
+ * was consumed (SelectionRequest / SelectionClear / stray
+ * SelectionNotify), 0 when it is someone else's event. */
+int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
+                                   const XEvent *xevent);
+fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
+                                      const char *text);
+char *fdk_x11_clipboard_get_text(fdk_platform_connection *conn);
 
 #endif /* FDK_X11_PLATFORM_H */

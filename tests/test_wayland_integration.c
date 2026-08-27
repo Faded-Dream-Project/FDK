@@ -31,6 +31,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h> /* free() for clipboard strings */
 #include <string.h>
 
 static int g_state_events = 0;
@@ -402,6 +403,43 @@ int main(void) {
                "(=logical x scale), content paints proportionally\n",
                (double)scale_now, logical.width, logical.height,
                hinfo2.width, hinfo2.height);
+    }
+
+    /* ---- Clipboard (Phase 9) ----
+     *
+     * What the protocol honestly allows us to verify against a
+     * headless compositor:
+     *  - SET + GET round trip on our own selection (compositors
+     *    never send a client its own selection back, so FDK serves
+     *    from its tracked copy — this is the real production path
+     *    for "did my own copy survive").
+     *  - GET with no text selection -> NULL (the data-device
+     *    listener machinery correctly reports emptiness).
+     *  Cross-client transfers cannot be driven here: set_selection
+     *    must cite an input serial, and the headless seat generates
+     *    no input events (documented in fdk_clipboard.h). That path
+     *    is exercised structurally (protocol objects + requests in
+     *    the WAYLAND_DEBUG trace of the rig) and by the X11 suite's
+     *    cross-process equivalents. */
+    {
+        assert(fdk_ok(fdk_clipboard_set_text(ctx, "wayland phase 9")));
+        char *text = fdk_clipboard_get_text(ctx);
+        assert(text != NULL && strcmp(text, "wayland phase 9") == 0);
+        printf("[ok] clipboard: set + get round trip on own selection\n");
+
+        assert(fdk_ok(fdk_clipboard_set_text(ctx, "replaced")));
+        char *text2 = fdk_clipboard_get_text(ctx);
+        assert(text2 != NULL && strcmp(text2, "replaced") == 0);
+        printf("[ok] clipboard: replace semantics\n");
+        /* text/text2 leak is intentional-free below via explicit free;
+         * there is no public fdk_free, and the docs bless free(). */
+        free(text);
+        free(text2);
+
+        /* Empty text reads as NULL. */
+        assert(fdk_ok(fdk_clipboard_set_text(ctx, "")));
+        assert(fdk_clipboard_get_text(ctx) == NULL);
+        printf("[ok] clipboard: empty own-selection reads as NULL\n");
     }
 
     fdk_window_destroy(win);

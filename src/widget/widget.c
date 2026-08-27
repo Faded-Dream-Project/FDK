@@ -1789,3 +1789,8 @@ void fdk_widget_root_resized(fdk_widget *root, fdk_size new_size) {
      * backends (content undefined) — everything repaints. */
     fdk_widget_invalidate_all(root);
 }
+
+void *fdk__widget_window_owner(fdk_widget *any) {
+    fdk_widget *root = (any != NULL) ? find_root(any) : NULL;
+    return (root != NULL) ? root->window_owner : NULL;
+}

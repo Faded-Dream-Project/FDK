@@ -78,6 +78,45 @@ struct fdk_platform_connection {
      * event history, so a stale serial makes the request a no-op. */
     uint32_t last_button_serial;
 
+    /* Serial of the most recent input event of ANY kind (button or
+     * key — Phase 9): wl_data_device.set_selection must cite one,
+     * like move/resize. 0 until real input has arrived; compositors
+     * are permitted to ignore set_selection with serial 0 (documented
+     * in fdk_clipboard.h). */
+    uint32_t last_input_serial;
+
+    /* --- Clipboard (Phase 9, wl_data_device) --------------------
+     *
+     * data_device_manager is an OPTIONAL global: without it the
+     * clipboard ops report UNSUPPORTED. data_device is created from
+     * the manager + seat once the seat's capabilities arrive (it is
+     * legal to get_data_device on a seat regardless of caps). */
+    struct wl_data_device_manager *data_device_manager;
+    struct wl_data_device *data_device;
+
+    /* Our side of ownership: a live data source plus the text it
+     * serves (send may be called once per requestor, so the text
+     * stays for the source's lifetime). cancelled destroys both. */
+    struct wl_data_source *clip_source;
+    char *clip_owned_text;
+
+    /* The compositor's current selection, as seen by us: the latest
+     * wl_data_device::data_offer that a ::selection event named.
+     * NULL = no selection (or we own it — compositors do not send a
+     * client its own selection). has_text_mime is set by the offer's
+     * ::offer events (text/plain;charset=utf-8 or bare text/plain).
+     *
+     * pending_offer is the offer currently streaming its MIME list
+     * (announced by ::data_offer, not yet named by ::selection — it
+     * might turn out to be a drag-and-drop offer instead, which is
+     * exactly why the MIME flags live on the pending slot rather
+     * than on the connection: a non-text DnD offer must never leak
+     * its flags into the selection slot). */
+    struct wl_data_offer *selection_offer;
+    int selection_offer_has_text;
+    struct wl_data_offer *pending_offer;
+    int pending_offer_has_text;
+
     /* Bound from the seat's capabilities (wayland_seat.c). May be
      * NULL if the seat genuinely has no keyboard/pointer — checked
      * before use, never assumed present. */
@@ -269,6 +308,15 @@ void fdk_wayland_unregister_window(fdk_platform_connection *conn,
  * once compositor/shm/seat/wm_base are all bound (wayland_registry.c). */
 void fdk_wayland_bind_seat_listeners(fdk_platform_connection *conn);
 void fdk_wayland_teardown_seat(fdk_platform_connection *conn);
+
+/* Clipboard (wayland_clipboard.c). device_ready is idempotent: it
+ * creates the wl_data_device once BOTH the manager global and the
+ * seat exist (whichever binds second triggers it). */
+void fdk_wayland_clipboard_device_ready(fdk_platform_connection *conn);
+void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn);
+fdk_result fdk_wayland_clipboard_set_text(fdk_platform_connection *conn,
+                                           const char *text);
+char *fdk_wayland_clipboard_get_text(fdk_platform_connection *conn);
 
 /* Declared here, defined across wayland_connection.c, wayland_window.c
  * dispatch is wl_display_dispatch() itself (no separate translate step

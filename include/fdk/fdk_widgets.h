@@ -233,6 +233,75 @@ fdk_result fdk_frame_create(fdk_widget *parent, fdk_font *font,
 
 fdk_result fdk_frame_set_title(fdk_widget *frame, const char *title);
 
+/* ---- Entry (Phase 9) ----
+ *
+ * Single-line UTF-8 text input: caret (always on a codepoint
+ * boundary), selection with shift+arrows / drag / double-click
+ * (word) / triple-click (all), clipboard cut/copy/paste via
+ * Ctrl+X/C/V (through the owning window's context — see
+ * fdk_clipboard.h), word-wise motion with Ctrl+Left/Right, and
+ * horizontal scrolling that keeps the caret visible.
+ *
+ * IME GROUNDWORK: fdk_entry_set_preedit renders a composition string
+ * inline at the caret with an underline while a real input-method
+ * layer composes. The preedit is display-only: it never enters the
+ * buffer until the IME commits (the application then inserts the
+ * committed text like any other input).
+ *
+ * The v1 pointer event carries no modifier state, so shift-click
+ * selection EXTENSION is not expressible (shift+arrows and drag do
+ * the extending); noted here so it reads as scope, not a bug.
+ *
+ * Max text length: 64 KiB (bounded input, docs/security.md); longer
+ * inserts are refused with FDK_ERR_INVALID_ARGUMENT and a warning.
+ */
+
+/* Notified after every buffer mutation (typed/deleted/pasted text,
+ * fdk_entry_set_text). Programmatic reads see the new text already. */
+typedef void (*fdk_entry_changed_fn)(fdk_widget *entry, void *user_data);
+
+/* Enter pressed. */
+typedef void (*fdk_entry_activate_fn)(fdk_widget *entry, void *user_data);
+
+fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
+                            const char *text, fdk_widget **out_entry);
+
+/* Current text (toolkit-owned, UTF-8, never NULL; "" when empty).
+ * Valid until the next mutation or destroy. */
+const char *fdk_entry_get_text(fdk_widget *entry);
+
+/* Replaces the whole buffer. Resets caret+selection to the end and
+ * fires on_changed. NULL is treated as "". */
+fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text);
+
+/* Caret position as a BYTE offset into the text. set refuses
+ * off-boundary offsets (FDK_ERR_INVALID_ARGUMENT) rather than
+ * silently snapping. */
+size_t fdk_entry_get_cursor(fdk_widget *entry);
+fdk_result fdk_entry_set_cursor(fdk_widget *entry, size_t byte_offset);
+
+/* Selection as [anchor, caret) byte offsets. anchor == caret means
+ * no selection. Either endpoint may be the earlier one — the range
+ * is the span between them. select_range refuses off-boundary
+ * offsets; select_all is the whole buffer. */
+fdk_result fdk_entry_get_selection(fdk_widget *entry, size_t *anchor,
+                                   size_t *caret);
+fdk_result fdk_entry_select_range(fdk_widget *entry, size_t anchor,
+                                  size_t caret);
+void fdk_entry_select_all(fdk_widget *entry);
+
+/* IME groundwork: display `preedit` inline at the caret, underlined;
+ * NULL or "" clears it. Does not touch the buffer or the selection
+ * and fires no callbacks. */
+fdk_result fdk_entry_set_preedit(fdk_widget *entry, const char *preedit);
+
+void fdk_entry_set_on_changed(fdk_widget *entry,
+                              fdk_entry_changed_fn on_changed,
+                              void *user_data);
+void fdk_entry_set_on_activate(fdk_widget *entry,
+                               fdk_entry_activate_fn on_activate,
+                               void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

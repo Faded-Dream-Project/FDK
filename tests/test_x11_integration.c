@@ -38,6 +38,12 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <poll.h>
+
+/* fdk_free for clipboard strings (it is internal: the public API
+ * documents free() as equally correct, but the test uses the same
+ * allocator the library used, under ASan). */
+#include "core/alloc_internal.h"
 
 static void alarm_handler(int sig) {
     (void)sig;
@@ -827,6 +833,28 @@ static void x11_send_key_event(Display *dpy, unsigned long xid, int type,
     Status s = XSendEvent(dpy, (Window)xid, False,
                           (long)(KeyPressMask | KeyReleaseMask), &ev);
     assert(s != 0);
+    XFlush(dpy);
+}
+
+
+/* KeyPress with ControlMask set (Ctrl+letter combos, Phase 9's
+ * entry shortcuts). */
+static void x11_send_key_event_ctrl(Display *dpy, unsigned long xid,
+                                     unsigned int keycode) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = KeyPress;
+    ev.xkey.window = (Window)xid;
+    ev.xkey.keycode = keycode;
+    ev.xkey.state = ControlMask;
+    ev.xkey.same_screen = True;
+    Status st = XSendEvent(dpy, (Window)xid, False,
+                           (long)(KeyPressMask | KeyReleaseMask), &ev);
+    assert(st != 0);
+    ev.type = KeyRelease;
+    st = XSendEvent(dpy, (Window)xid, False,
+                    (long)(KeyPressMask | KeyReleaseMask), &ev);
+    assert(st != 0);
     XFlush(dpy);
 }
 
@@ -2569,7 +2597,17 @@ typedef struct {
 
 static void fake_wm_install(fake_wm *wm) {
     memset(wm, 0, sizeof *wm);
-    wm->dpy = XOpenDisplay(NULL);
+    /* Bounded retry for the documented Xvfb XOpenDisplay race (same
+     * reason as init_with_retry / the clipboard children — the raw
+     * Xlib connections churn more as the suite grows). */
+    for (int attempt = 0; attempt < 10; attempt++) {
+        wm->dpy = XOpenDisplay(NULL);
+        if (wm->dpy != NULL) {
+            break;
+        }
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 50 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+    }
     assert(wm->dpy != NULL);
     wm->root = DefaultRootWindow(wm->dpy);
     wm->net_supported = XInternAtom(wm->dpy, "_NET_SUPPORTED", False);
@@ -3044,6 +3082,474 @@ static void test_mitm_shm_and_double_buffer(void) {
            "buffers; un-presented drawing never reaches the server\n");
 }
 
+/* =====================================================================
+ * Clipboard (Phase 9)
+ * =====================================================================
+ *
+ * The real protocol is exercised with FORKED foreign clients speaking
+ * raw Xlib — the same trick the fake-WM test uses, applied to the
+ * ICCCM selection machinery. Three directions are verified:
+ *   1. FDK round trip (own ownership, served from the local copy);
+ *   2. a foreign OWNER serves FDK's get_text (ConvertSelection ->
+ *      SelectionRequest to the child -> SelectionNotify back);
+ *   3. FDK SERVES a foreign REQUESTOR (the child converts and reads
+ *      the property FDK wrote), including the TARGETS negotiation;
+ * plus the SelectionClear handoff when the foreign client takes
+ * ownership away from FDK.
+ *
+ * Children use _exit() only (no atexit, no ASan leak reporting, no
+ * stdio flush) and inherit nothing but COW memory. They talk to the
+ * parent over a socketpair: "R" = ready, "P" = verified, anything
+ * else / early hangup = failure with a distinct exit code. */
+
+#include <sys/socket.h>
+#include <sys/wait.h>
+
+static void clip_child_serve_requests(Display *dpy, Window w, Atom clip,
+                                      Atom utf8, Atom targets,
+                                      const char *text) {
+    (void)w;
+    (void)clip;
+    while (XPending(dpy) > 0) {
+        XEvent ev;
+        XNextEvent(dpy, &ev);
+        if (ev.type == SelectionRequest) {
+            XSelectionRequestEvent *req = &ev.xselectionrequest;
+            Atom prop = req->property != None ? req->property : req->target;
+            if (req->target == targets) {
+                Atom list[1] = { utf8 };
+                XChangeProperty(dpy, req->requestor, prop, XA_ATOM, 32,
+                                PropModeReplace,
+                                (const unsigned char *)list, 1);
+            } else if (req->target == utf8) {
+                XChangeProperty(dpy, req->requestor, prop, utf8, 8,
+                                PropModeReplace,
+                                (const unsigned char *)text,
+                                (int)strlen(text));
+            } else {
+                prop = None;
+            }
+            XSelectionEvent reply;
+            memset(&reply, 0, sizeof(reply));
+            reply.type = SelectionNotify;
+            reply.display = dpy;
+            reply.requestor = req->requestor;
+            reply.selection = req->selection;
+            reply.target = req->target;
+            reply.property = prop;
+            reply.time = req->time;
+            XSendEvent(dpy, req->requestor, False, 0, (XEvent *)&reply);
+            XFlush(dpy);
+        }
+    }
+}
+
+/* The documented Xvfb race (see init_with_retry above) applies to the
+ * forked children's raw XOpenDisplay too — same bounded retry. */
+static Display *clip_child_open_display(void) {
+    for (int attempt = 0; attempt < 10; attempt++) {
+        Display *dpy = XOpenDisplay(NULL);
+        if (dpy != NULL) {
+            return dpy;
+        }
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 50 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+    }
+    return NULL;
+}
+
+/* Foreign clipboard owner: takes CLIPBOARD ownership for `text`,
+ * serves requests until the parent hangs up. Exits 0 on hangup. */
+static void clip_foreign_owner_main(int sock, const char *text) {
+    alarm(0);
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(10);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom clip = XInternAtom(dpy, "CLIPBOARD", False);
+    Atom utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+    Atom targets = XInternAtom(dpy, "TARGETS", False);
+    XSetSelectionOwner(dpy, clip, w, CurrentTime);
+    if (XGetSelectionOwner(dpy, clip) != w) {
+        _exit(11);
+    }
+    XFlush(dpy);
+    (void)!write(sock, "R", 1);
+
+    for (;;) {
+        struct pollfd pfds[2];
+        pfds[0].fd = ConnectionNumber(dpy);
+        pfds[0].events = POLLIN;
+        pfds[0].revents = 0;
+        pfds[1].fd = sock;
+        pfds[1].events = POLLIN;
+        pfds[1].revents = 0;
+        int r = poll(pfds, 2, 3000);
+        if (r < 0) {
+            _exit(12);
+        }
+        if (pfds[1].revents != 0) {
+            char c;
+            if (recv(sock, &c, 1, 0) <= 0) {
+                _exit(0); /* parent hung up: done */
+            }
+            _exit(0); /* any parent message means stop */
+        }
+        clip_child_serve_requests(dpy, w, clip, utf8, targets, text);
+    }
+}
+
+/* Foreign clipboard requestor: converts TARGETS then UTF8_STRING from
+ * the current owner (FDK, in the test) and verifies the text.
+ * Exits 0 + "P" on success, distinct codes otherwise. */
+static void clip_foreign_requestor_main(int sock, const char *want) {
+    alarm(0);
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(20);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom clip = XInternAtom(dpy, "CLIPBOARD", False);
+    Atom utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+    Atom targets = XInternAtom(dpy, "TARGETS", False);
+    Atom prop = XInternAtom(dpy, "_FDK_TEST_PROP", False);
+
+    /* Pass 1: TARGETS must list UTF8_STRING. */
+    XConvertSelection(dpy, clip, targets, prop, w, CurrentTime);
+    XFlush(dpy);
+    int saw_targets_notify = 0;
+    int utf8_advertised = 0;
+    for (;;) {
+        XEvent ev;
+        if (XPending(dpy) == 0) {
+            struct pollfd pfd = { ConnectionNumber(dpy), POLLIN, 0 };
+            if (poll(&pfd, 1, 3000) <= 0) {
+                _exit(21); /* no TARGETS answer */
+            }
+            continue;
+        }
+        XNextEvent(dpy, &ev);
+        if (ev.type != SelectionNotify ||
+            ev.xselection.selection != clip) {
+            continue;
+        }
+        saw_targets_notify = 1;
+        if (ev.xselection.property == None) {
+            _exit(22);
+        }
+        Atom type = None;
+        int fmt = 0;
+        unsigned long n = 0, left = 0;
+        unsigned char *data = NULL;
+        if (XGetWindowProperty(dpy, w, prop, 0, 64, True, XA_ATOM,
+                               &type, &fmt, &n, &left, &data) != Success) {
+            _exit(23);
+        }
+        if (type == XA_ATOM && fmt == 32 && data != NULL) {
+            Atom *atoms = (Atom *)data;
+            for (unsigned long i = 0; i < n; i++) {
+                if (atoms[i] == utf8) {
+                    utf8_advertised = 1;
+                }
+            }
+        }
+        if (data != NULL) {
+            XFree(data);
+        }
+        break;
+    }
+    if (!saw_targets_notify || !utf8_advertised) {
+        fprintf(stderr, "[clip child] pass1 fail: notify=%d advertised=%d "
+                "utf8_atom=%lu\n",
+                saw_targets_notify, utf8_advertised, (unsigned long)utf8);
+        /* Re-read without delete for a dump. */
+        Atom t2 = None; int f2 = 0; unsigned long n2 = 0, l2 = 0;
+        unsigned char *d2 = NULL;
+        (void)XGetWindowProperty(dpy, w, prop, 0, 64, False, AnyPropertyType,
+                                 &t2, &f2, &n2, &l2, &d2);
+        fprintf(stderr, "[clip child] reread: type=%lu fmt=%d n=%lu data=%p\n",
+                (unsigned long)t2, f2, n2, (void *)d2);
+        if (d2 != NULL && f2 == 32) {
+            Atom *a2 = (Atom *)d2;
+            for (unsigned long k = 0; k < n2 && k < 8; k++) {
+                char *nm = XGetAtomName(dpy, a2[k]);
+                fprintf(stderr, "[clip child]   atom[%lu]=%lu (%s)\n", k,
+                        (unsigned long)a2[k], nm ? nm : "?");
+                if (nm) XFree(nm);
+            }
+        }
+        _exit(24);
+    }
+
+    /* Pass 2: the UTF8_STRING payload itself. */
+    XConvertSelection(dpy, clip, utf8, prop, w, CurrentTime);
+    XFlush(dpy);
+    for (;;) {
+        XEvent ev;
+        if (XPending(dpy) == 0) {
+            struct pollfd pfd = { ConnectionNumber(dpy), POLLIN, 0 };
+            if (poll(&pfd, 1, 3000) <= 0) {
+                _exit(25); /* no text answer */
+            }
+            continue;
+        }
+        XNextEvent(dpy, &ev);
+        if (ev.type != SelectionNotify ||
+            ev.xselection.selection != clip) {
+            continue;
+        }
+        if (ev.xselection.property == None) {
+            _exit(26);
+        }
+        Atom type = None;
+        int fmt = 0;
+        unsigned long n = 0, left = 0;
+        unsigned char *data = NULL;
+        if (XGetWindowProperty(dpy, w, prop, 0, 1024, True,
+                               AnyPropertyType, &type, &fmt, &n, &left,
+                               &data) != Success) {
+            _exit(27);
+        }
+        int ok = (type == utf8 && fmt == 8 && data != NULL &&
+                  n == strlen(want) &&
+                  memcmp(data, want, n) == 0);
+        if (data != NULL) {
+            XFree(data);
+        }
+        if (!ok) {
+            fprintf(stderr, "[clip child] pass2 mismatch\n");
+            _exit(28);
+        }
+        (void)!write(sock, "P", 1);
+        _exit(0);
+    }
+}
+
+/* Spawns a clipboard child role and returns its pid + socket. */
+static pid_t clip_spawn(void (*fn)(int, const char *), const char *arg,
+                        int *out_sock) {
+    int sv[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
+        perror("socketpair");
+        return -1;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        close(sv[0]);
+        close(sv[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        close(sv[0]);
+        fn(sv[1], arg);
+        _exit(99); /* fn never returns */
+    }
+    close(sv[1]);
+    *out_sock = sv[0];
+    return pid;
+}
+
+static void test_clipboard(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* --- 1. Own-ownership round trip --- */
+    assert(fdk_ok(fdk_clipboard_set_text(ctx, "FDK phase 9 clipboard")));
+    char *text = fdk_clipboard_get_text(ctx);
+    assert(text != NULL && strcmp(text, "FDK phase 9 clipboard") == 0);
+    fdk_free(text);
+
+    /* Replace semantics: the second set wins wholesale. */
+    assert(fdk_ok(fdk_clipboard_set_text(ctx, "second")));
+    text = fdk_clipboard_get_text(ctx);
+    assert(text != NULL && strcmp(text, "second") == 0);
+    fdk_free(text);
+
+    /* Empty clipboard text reads as NULL (documented contract). */
+    assert(fdk_ok(fdk_clipboard_set_text(ctx, "")));
+    assert(fdk_clipboard_get_text(ctx) == NULL);
+    printf("[ok] clipboard: FDK round trip, replace semantics, "
+           "empty-as-NULL\n");
+
+    /* --- 2. Foreign owner serves FDK's get (the child must stay
+     * alive while FDK reads, so the handshake is manual: wait for
+     * "R", read the clipboard, then hang up + reap) --- */
+    {
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_foreign_owner_main,
+                               "_FDK_FOREIGN_TEXT_", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+        alarm(0);
+        /* FDK's own "" from part 1 is replaced by the child's
+         * ownership; the local fast path must NOT serve. */
+        char *foreign = fdk_clipboard_get_text(ctx);
+        assert(foreign != NULL &&
+               strcmp(foreign, "_FDK_FOREIGN_TEXT_") == 0);
+        fdk_free(foreign);
+        close(sock); /* child exits on hangup */
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] clipboard: foreign owner serves FDK get_text "
+               "(real SelectionRequest/Notify through the server)\n");
+    }
+
+    /* --- 3. FDK serves a foreign requestor (+ TARGETS) --- */
+    {
+        assert(fdk_ok(fdk_clipboard_set_text(ctx, "served by FDK")));
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_foreign_requestor_main,
+                               "served by FDK", &sock);
+        assert(pid > 0);
+        /* FDK must pump to see (and answer) the child's requests:
+         * fdk_pump_events drives dispatch_pending, which routes
+         * helper-window events into the clipboard module. */
+        alarm(5);
+        char c = 0;
+        for (int i = 0; i < 40; i++) {
+            (void)fdk_pump_events(ctx, 50);
+            ssize_t n = recv(sock, &c, 1, MSG_DONTWAIT);
+            if (n == 1) {
+                break;
+            }
+        }
+        alarm(0);
+        if (c != 'P') {
+            /* Diagnostics: the child's exit code names the failing
+             * stage (see clip_foreign_requestor_main). */
+            int st = 0;
+            (void)waitpid(pid, &st, 0);
+            fprintf(stderr, "clipboard requestor child failed: "
+                    "exit=%d sig=%d msg=%d\n",
+                    WIFEXITED(st) ? WEXITSTATUS(st) : -1,
+                    WIFSIGNALED(st) ? WTERMSIG(st) : 0, (int)c);
+            assert(0);
+        }
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] clipboard: FDK serves foreign requestor "
+               "(TARGETS advertises UTF8_STRING; UTF8 payload exact)\n");
+    }
+
+    /* --- 4. SelectionClear: losing ownership drops the local copy --- */
+    {
+        assert(fdk_ok(fdk_clipboard_set_text(ctx, "mine, briefly")));
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_foreign_owner_main,
+                               "_FDK_SECOND_OWNER_", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+        alarm(0);
+        /* Pump: the X server delivered SelectionClear to FDK's helper
+         * when the child took over. dispatch_pending must process it
+         * (freeing our copy) — observable as the NEXT get reading the
+         * child's text instead of ours. */
+        (void)fdk_pump_events(ctx, 200);
+        char *text2 = fdk_clipboard_get_text(ctx);
+        assert(text2 != NULL && strcmp(text2, "_FDK_SECOND_OWNER_") == 0);
+        fdk_free(text2);
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] clipboard: SelectionClear processed — ownership "
+               "loss drops the served copy\n");
+    }
+
+    fdk_shutdown(ctx);
+}
+
+/* ---- Entry widget under real X11 input (Phase 9) ----
+ *
+ * Real KeyPress events through XSendEvent (server-side keycode ->
+ * XLookupString -> codepoint translation), driving a REAL window's
+ * Entry: typing, ctrl-combos, and the full clipboard ROUND TRIP
+ * (Ctrl+A select, Ctrl+X cut, Ctrl+V paste) against the real X
+ * clipboard — the cross-module path the headless suite cannot
+ * exercise (widget -> window owner -> context -> x11_clipboard).
+ *
+ * PC keycodes (Xvfb default map): h=43 e=26 l=46 o=32, a=38,
+ * x=53, c=54, v=55, Control_L=37. */
+static void test_entry_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_font *font = fdk_font_load_system_default(16);
+    assert(font != NULL);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK entry test",
+                                 .width = 300, .height = 120 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget *entry = NULL;
+    assert(fdk_ok(fdk_entry_create(root, font, "", &entry)));
+    fdk_rect r = { 20, 20, 240, 36 };
+    fdk_widget_set_bounds(entry, r);
+    assert(fdk_widget_focus(entry));
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Type "hello". */
+    static const int hello_keys[5] = { 43, 26, 46, 46, 32 };
+    for (int i = 0; i < 5; i++) {
+        x11_send_key_event(send_dpy, xid, KeyPress, (unsigned)hello_keys[i]);
+        x11_send_key_event(send_dpy, xid, KeyRelease, (unsigned)hello_keys[i]);
+        (void)fdk_pump_events(ctx, 50);
+    }
+    (void)fdk_pump_events(ctx, 100);
+    assert(strcmp(fdk_entry_get_text(entry), "hello") == 0);
+    assert(fdk_entry_get_cursor(entry) == 5);
+
+    /* Ctrl+A (select all), Ctrl+X (cut): text moves to the REAL X
+     * clipboard. */
+    x11_send_key_event_ctrl(send_dpy, xid, 38); /* a */
+    x11_send_key_event_ctrl(send_dpy, xid, 53); /* x */
+    (void)fdk_pump_events(ctx, 100);
+    assert(strcmp(fdk_entry_get_text(entry), "") == 0);
+    char *clip = fdk_clipboard_get_text(ctx);
+    assert(clip != NULL && strcmp(clip, "hello") == 0);
+    fdk_free(clip);
+    printf("[ok] entry: real keys type; Ctrl+A/X cut to the real X "
+           "clipboard\n");
+
+    /* Ctrl+V (paste): the clipboard text comes back into the entry
+     * through wl_/x11_clipboard's get path. */
+    x11_send_key_event_ctrl(send_dpy, xid, 55); /* v */
+    (void)fdk_pump_events(ctx, 100);
+    assert(strcmp(fdk_entry_get_text(entry), "hello") == 0);
+
+    /* Backspace deletes the last glyph through the same real path. */
+    x11_send_key_event(send_dpy, xid, KeyPress, 22); /* Backspace */
+    (void)fdk_pump_events(ctx, 100);
+    assert(strcmp(fdk_entry_get_text(entry), "hell") == 0);
+
+    XCloseDisplay(send_dpy);
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] entry: Ctrl+V pastes back from the real clipboard; "
+           "Backspace deletes (full widget<->clipboard round trip)\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -3076,6 +3582,9 @@ int main(void) {
     test_window_state_gui();
     test_resize_edges_gui();
     test_ewmh_fake_wm();
+    test_mitm_shm_and_double_buffer();
+    test_clipboard();
+    test_entry_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

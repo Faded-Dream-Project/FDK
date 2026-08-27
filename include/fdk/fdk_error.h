@@ -33,6 +33,9 @@ typedef enum fdk_result {
     FDK_ERR_PLATFORM_INIT      = -100,
     FDK_ERR_NO_DISPLAY         = -101, /* no X11/Wayland connection available */
     FDK_ERR_WINDOW_CREATE      = -102,
+    FDK_ERR_PLATFORM           = -103, /* platform refused at runtime (Phase 9:
+                                           e.g. X11 selection ownership
+                                           did not take effect) */
 
     /* Rendering */
     FDK_ERR_RENDER_INIT        = -200,

@@ -24,6 +24,7 @@
 #include "fdk_text.h"
 #include "fdk_widgets.h"
 #include "fdk_theme.h"
+#include "fdk_clipboard.h"
 
 /* Widget, layout, and theme public headers are added here as their
  * respective phases land (see docs/roadmap.md). Phase 2 added window
@@ -34,6 +35,8 @@
  * fdk_text.h (fonts, UTF-8 text measurement and rendering via the
  * vendored stb_truetype) and the widget catalog; Phase 7 added
  * fdk_theme.h (themes: the built-in default, .fdk parsing, runtime
- * switching). Further layout containers follow. */
+ * switching); Phase 9 adds fdk_clipboard.h (text clipboard over the
+ * ICCCM CLIPBOARD selection / wl_data_device). Further layout
+ * containers follow. */
 
 #endif /* FDK_H */

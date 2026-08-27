@@ -263,6 +263,29 @@ typedef struct fdk_platform_ops {
      * preferred scale. */
     fdk_result (*window_get_scale)(fdk_platform_window *pwindow,
                                    fdk_f32 *out_scale);
+
+    /* ---- OPTIONAL clipboard operations (Phase 9) ----
+     *
+     * Context-wide (not per-window) text clipboard behind
+     * include/fdk/fdk_clipboard.h. NULL = the backend has no
+     * clipboard support; the frontend reports FDK_ERR_UNSUPPORTED /
+     * NULL with a warning rather than failing silently.
+     *
+     * clipboard_set_text makes the backend the clipboard owner and
+     * keeps a copy to serve later requests (X11 SelectionRequest /
+     * Wayland wl_data_source.send). `text` is NUL-terminated and
+     * never NULL; the backend copies it. Replaces any previous
+     * content.
+     *
+     * clipboard_get_text returns a freshly allocated NUL-terminated
+     * UTF-8 string owned by the caller (fdk_free), or NULL when the
+     * clipboard is empty/unreadable. Implementations must be
+     * synchronous from the caller's perspective and internally
+     * bounded (X11's convert-and-wait may not hang on a stuck
+     * owner) and must not re-enter dispatch re-entrantly. */
+    fdk_result (*clipboard_set_text)(fdk_platform_connection *conn,
+                                     const char *text);
+    char *(*clipboard_get_text)(fdk_platform_connection *conn);
 } fdk_platform_ops;
 
 /* Backend entry points. Each returns NULL if that backend was not

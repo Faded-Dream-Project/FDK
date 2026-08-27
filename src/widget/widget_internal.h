@@ -165,6 +165,14 @@ struct fdk_widget {
      * at create and destroy. NULL-terminated at both ends. */
     fdk_widget *root_prev;
     fdk_widget *root_next;
+
+    /* Root-only, set by the window glue (src/window/window.c): the
+     * owning fdk_window as an OPAQUE pointer. The widget layer never
+     * dereferences it — Phase 9's sanctioned back-edge is resolved by
+     * the window module (fdk__window_context in window_internal.h),
+     * the same one-way-opaque discipline the theme engine's root
+     * registry uses. NULL on standalone roots. */
+    void *window_owner;
 };
 
 /* Marks every live root's full bounds damaged, so each tree fully
@@ -191,6 +199,12 @@ const fdk_widget_class *fdk_widget_base_class(void);
 /* Root bookkeeping, called by the window glue (src/window/window.c):
  * resize the root (and damage everything) when a configure arrives. */
 void fdk_widget_root_resized(fdk_widget *root, fdk_size new_size);
+
+/* Root-only opaque owner (the fdk_window that owns the root, set by
+ * the window glue; NULL for standalone roots). Walks to `any`'s root
+ * first — safe for any widget in any tree, returns NULL for
+ * detached/standalone trees. */
+void *fdk__widget_window_owner(fdk_widget *any);
 
 /* Run deferred destroys if the last dispatch/paint unwound. Called by
  * fdk_widget_tree_handle_event / _paint on exit. */

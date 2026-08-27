@@ -31,6 +31,17 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->decoration_manager =
             wl_registry_bind(registry, name,
                              &zxdg_decoration_manager_v1_interface, 1);
+    } else if (strcmp(interface, wl_data_device_manager_interface.name) == 0) {
+        /* OPTIONAL global (Phase 9): wl_data_device_manager is the
+         * clipboard (and drag-and-drop) factory. Absent -> the
+         * clipboard ops honestly report FDK_ERR_UNSUPPORTED instead
+         * of faking a local-only clipboard. Version 3 is enough for
+         * selections (drag-and-drop's data_source actions arrive with
+         * v3 and are ignored — FDK does no DnD). */
+        conn->data_device_manager =
+            wl_registry_bind(registry, name,
+                             &wl_data_device_manager_interface, 3);
+        fdk_wayland_clipboard_device_ready(conn);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         /* HiDPI (Phase 3 completion): bind every output at the
          * highest version both sides support, capped at 3 — v2 adds
@@ -204,6 +215,8 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
         }
     }
     fdk_free(conn->windows);
+
+    fdk_wayland_clipboard_teardown(conn);
 
     fdk_wayland_teardown_seat(conn);
 

@@ -29,6 +29,14 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
+        /* Clipboard helper traffic (Phase 9): selection requests we
+         * must serve, ownership losses, stray notifies. Routed BEFORE
+         * the window-table lookup — the helper is intentionally not
+         * in that table (it is not an application window). */
+        if (fdk_x11_clipboard_handle_event(conn, &xevent)) {
+            continue;
+        }
+
         Window xwindow = xevent.xany.window;
         fdk_platform_window *pwindow = fdk_x11_find_window(conn, xwindow);
         if (pwindow == NULL) {
