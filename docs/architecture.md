@@ -101,7 +101,28 @@ runs before the first xdg configure is DEFERRED and committed by
 the backend at configure time — the deferred-first-frame contract
 that keeps the application's show -> paint -> pump order mapping
 windows on every compositor, regression-tested in
-`tests/test_wayland_integration.c`), `src/layout/` (Phase 5: the
+`tests/test_wayland_integration.c`); on X11 the anti-flicker
+background LIFECYCLE (1.1.4, found live on a compositing desktop):
+top-levels are created with a white background pixel + NorthWest
+bit gravity, and the FIRST framebuffer acquisition flips the
+background to None — a window the app never renders into shows its
+background (the documented 01_hello_world contract, matching
+Wayland's committed solid-color buffer), while a rendered window is
+never server-cleared again, and every resize step retains its old
+pixels anchored top-left (the combination that removed the
+white-flash-during-resize; a background clear is a full frame of
+background between the WM's resize and the client's repaint).
+The window layer closes the remaining gap itself:
+`fdk_window_dispatch_event`'s tail repaints+ presents SYNCHRONOUSLY
+when a configure/state-flip/first-expose damaged the tree — the
+frame the compositor would otherwise composite between the resize
+and the application's next loop pass is exactly where the flash
+lived — and the same tail revalidates hover/cursor from the real
+pointer position (see the pointer-affordance pair below). This
+does not take over application paint pacing: only damage FDK's own
+geometry acceptance caused goes out synchronously; everything the
+application changes still waits for its own loop, exactly as
+before), `src/layout/` (Phase 5: the
 box layout engine — containers as widget subclasses over the
 measure/arrange hooks — plus the window content glue), `src/widget/` (Phase
 4: the retained-mode widget foundation — hierarchy, state, focus,
@@ -137,7 +158,24 @@ starts; and the window layer cancels the widget tree's implicit
 grab at the same handover, because the WM consumes the button
 release and the tree's press-to-release pairing would stay broken
 — see fdk__widget_tree_cancel_grab); `window_move_resize_to` for
-FDK-driven atomic resize drags. FDK_EVENT_WINDOW_STATE /
+FDK-driven atomic resize drags. The 1.1.4 pointer-affordance pair
+completes the set: `window_query_pointer` (X11 XQueryPointer
+window-local + bounds check; Wayland's seat cache — pointer_focus +
+the last surface-local position) lets the window layer RE-DERIVE
+hover after geometry changes, because a window that moves/resizes
+under a STATIONARY pointer generates no motion event — the maximize
+button flies right, the pointer stays put, and a highlight computed
+against the old geometry sticks forever without the revalidation
+(query the real pointer, route it as if a motion/leave had arrived;
+the application's event callback never sees these synthesized
+positions). `window_set_cursor` (X11: lazily created XCreateFontCursor
+glyphs from the server's built-in cursor font — core protocol, no
+libXcursor — cached per connection and freed at disconnect; Wayland:
+deliberately absent, honestly documented, because proper shaping
+needs a cursor theme over wl_shm and per-enter set_cursor) maps the
+same compass vocabulary as begin_resize to directional cursors, so
+FDK's edge zones advertise "this edge drags" BEFORE any button is
+held — the affordance a WM frame's borders give for free. FDK_EVENT_WINDOW_STATE /
 FDK_EVENT_WINDOW_DECORATION report platform truth, never request
 optimism — see platform_internal.h, which documents the EWMH vs
 xdg-decoration vs bare-X differences instead of assuming them away),

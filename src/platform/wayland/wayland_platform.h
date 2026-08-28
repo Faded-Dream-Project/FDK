@@ -356,6 +356,13 @@ fdk_result fdk_wayland_window_begin_move(fdk_platform_window *pwindow,
 fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
                                            int edge, fdk_i32 local_x,
                                            fdk_i32 local_y);
+/* The optional pointer-introspection op (1.1.4): the seat's cached
+ * pointer_focus + surface-local position, valid whenever this window
+ * holds pointer focus. Cursor SHAPING (window_set_cursor) is
+ * deliberately absent on Wayland for now — see the implementation
+ * comment in wayland_window.c. */
+int fdk_wayland_window_query_pointer(fdk_platform_window *pwindow,
+                                     fdk_i32 *out_x, fdk_i32 *out_y);
 void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
                                      int maximized, int minimized);
 

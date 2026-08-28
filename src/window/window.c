@@ -44,6 +44,15 @@
 
 static void window_arrange_deco(fdk_window *window);
 
+/* Cursor shaping + hover revalidation (1.1.4) — defined above the
+ * interactive-resize section, forward-declared here because
+ * fdk_window_set_resizable and fdk_window_set_decorated (both earlier
+ * in the file) also reset the cursor when the edge zones change. */
+static void window_update_cursor(fdk_window *window, fdk_i32 x,
+                                 fdk_i32 y);
+static void window_reset_cursor(fdk_window *window);
+static void window_revalidate_pointer(fdk_window *window);
+
 /* Internal size floors for the FDK-driven resize drag when the app
  * set no explicit limits via fdk_window_set_size_limits: a decorated
  * window must keep at least band + 8px of content; any window keeps
@@ -714,6 +723,7 @@ static fdk_result window_create_full(fdk_context *ctx,
     window->deco_btn_close = (fdk_rect){0, 0, 0, 0};
     window->deco_hover = 0;
     window->deco_pressed = 0;
+    window->cursor_edge = FDK_WRES_NONE;
     window->is_popup = (options != NULL && options->popup != 0);
 
     if (options != NULL && options->title != NULL) {
@@ -960,6 +970,9 @@ void fdk_window_set_resizable(fdk_window *window, bool resizable) {
     if (!resizable) {
         /* A drag in flight when edges turn off must stop cleanly. */
         window->resize_edge = FDK_WRES_NONE;
+        /* And the edge cursor must not outlive the edges it
+         * advertises. */
+        window_reset_cursor(window);
     }
 }
 
@@ -1001,6 +1014,101 @@ static void window_apply_resize(fdk_window *window, fdk_i32 x, fdk_i32 y) {
     }
 }
 
+/* ---- Cursor shaping + hover revalidation (1.1.4) ----
+ *
+ * Two affordances a WM frame gives for free that FDK's chrome must
+ * provide itself when it owns the window: the cursor that says
+ * "this edge drags" BEFORE any button is held, and hover state that
+ * survives the window's own geometry changes. */
+
+/* Applies the cursor shape for a window-local position: over an edge
+ * zone (same hit-test the press path uses) the directional resize
+ * cursor; anywhere else the default arrow. No-op when the backend
+ * cannot shape cursors or the shape has not changed (the platform op
+ * only ever sees transitions). */
+static void window_update_cursor(fdk_window *window, fdk_i32 x,
+                                 fdk_i32 y) {
+    if (window->ops->window_set_cursor == NULL) {
+        return;
+    }
+    fdk_window_resize_edge edge = FDK_WRES_NONE;
+    if (window->resizable) {
+        edge = fdk__window_resize_edge_at(
+            window->last_size.width, window->last_size.height, x, y,
+            DECO_RESIZE_BORDER);
+    }
+    if ((int)edge == window->cursor_edge) {
+        return;
+    }
+    window->cursor_edge = (int)edge;
+    window->ops->window_set_cursor(window->pwindow, (int)edge);
+}
+
+/* Restores the default arrow unconditionally (pointer left the
+ * window, or the edge zones disappeared). */
+static void window_reset_cursor(fdk_window *window) {
+    if (window->ops->window_set_cursor == NULL ||
+        window->cursor_edge == FDK_WRES_NONE) {
+        return;
+    }
+    window->cursor_edge = FDK_WRES_NONE;
+    window->ops->window_set_cursor(window->pwindow, (int)FDK_WRES_NONE);
+}
+
+/* Hover/cursor revalidation after a geometry change: when the window
+ * moves/resizes under a STATIONARY pointer (maximize is the classic
+ * case — the maximize button flies right as the window grows), the
+ * platform generates no motion event, so every hover state computed
+ * against the OLD geometry sticks (a highlight that never clears).
+ * Query the REAL pointer position and route it exactly as if a
+ * motion/leave had arrived: the tree re-hits, the band re-evaluates
+ * its buttons, the cursor re-finds its edge.
+ *
+ * Routed through the internal seams only — the application's event
+ * callback never sees these synthesized positions (it has nothing to
+ * learn from a motion it did not cause). */
+static void window_revalidate_pointer(fdk_window *window) {
+    if (window->ops->window_query_pointer == NULL) {
+        return; /* backend cannot answer; hover waits for the next
+                   real motion (the pre-1.1.4 behavior) */
+    }
+    fdk_i32 x = 0;
+    fdk_i32 y = 0;
+    if (window->ops->window_query_pointer(window->pwindow, &x, &y)) {
+        window_update_cursor(window, x, y);
+        if (window->root != NULL) {
+            fdk_event_data motion;
+            memset(&motion, 0, sizeof motion);
+            motion.type = FDK_EVENT_POINTER_MOTION;
+            motion.pointer.position.x = (fdk_f32)x;
+            motion.pointer.position.y = (fdk_f32)y;
+            (void)fdk_widget_tree_handle_event(window->root, &motion);
+        }
+        return;
+    }
+    /* Pointer is not over the window anymore (the classic unmaximize:
+     * the window shrank away from under it): everything hover-shaped
+     * goes neutral — the band buttons, the tree's hovered widget, the
+     * cursor. The tree's leave routing delivers the LEAVE events its
+     * widgets expect; the position fields are meaningless on a
+     * synthetic leave and documented as such. */
+    if (window->deco_hover != 0) {
+        window->deco_hover = 0;
+        if (window->deco_bar != NULL) {
+            fdk_widget_invalidate(window->deco_bar);
+        }
+    }
+    window_reset_cursor(window);
+    if (window->root != NULL) {
+        fdk_event_data leave;
+        memset(&leave, 0, sizeof leave);
+        leave.type = FDK_EVENT_POINTER_LEAVE;
+        leave.pointer.position.x = -1.0f;
+        leave.pointer.position.y = -1.0f;
+        (void)fdk_widget_tree_handle_event(window->root, &leave);
+    }
+}
+
 /* Returns true when the window-level layer consumed the pointer
  * event (an edge-zone press or an in-flight resize drag): the widget
  * tree must not see it. */
@@ -1008,6 +1116,19 @@ static bool window_handle_resize_event(fdk_window *window,
                                        const fdk_event_data *event) {
     if (!window->resizable) {
         return false;
+    }
+
+    /* Cursor affordance: hovering an edge zone (or entering the
+     * window through one) shows the directional resize cursor BEFORE
+     * any button is held — the same affordance a WM frame's borders
+     * give for free. Skipped mid-drag: the shape the hover set is
+     * still correct while the drag runs, and a WM-driven drag has the
+     * pointer grabbed anyway. */
+    if (window->resize_edge == FDK_WRES_NONE &&
+        (event->type == FDK_EVENT_POINTER_MOTION ||
+         event->type == FDK_EVENT_POINTER_ENTER)) {
+        window_update_cursor(window, (fdk_i32)event->pointer.position.x,
+                             (fdk_i32)event->pointer.position.y);
     }
 
     if (window->resize_edge != FDK_WRES_NONE) {
@@ -1021,6 +1142,12 @@ static bool window_handle_resize_event(fdk_window *window,
             return true;
         case FDK_EVENT_POINTER_BUTTON_UP:
             window->resize_edge = FDK_WRES_NONE;
+            /* Re-anchor the cursor to where the drag ENDED: the edge
+             * zones moved with every drag step, so the pre-press
+             * shape may no longer match what is under the pointer. */
+            window_update_cursor(
+                window, (fdk_i32)event->pointer_button.position.x,
+                (fdk_i32)event->pointer_button.position.y);
             return true;
         default:
             return true; /* swallow everything else mid-drag */
@@ -1092,7 +1219,17 @@ void fdk_window_set_event_callback(fdk_window *window,
 void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) {
     /* Keep fdk_window_get_size() authoritative without requiring the
      * application to handle FDK_EVENT_WINDOW_CONFIGURE itself just to
-     * keep FDK's own bookkeeping in sync. */
+     * keep FDK's own bookkeeping in sync.
+     *
+     * The 1.1.4 fallout flags (geo_changed / state_flipped /
+     * first_expose) mark the events that change what SHOULD be under
+     * the pointer or on the screen without generating any further
+     * input events of their own; the dispatch tail below uses them
+     * for hover revalidation and the synchronous resize repaint. */
+    bool geo_changed = false;
+    bool state_flipped = false;
+    bool first_expose = false;
+
     if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
         /* A cached framebuffer acquired at the OLD size is stale now;
          * drop it so the next acquire re-fetches at the new size
@@ -1116,6 +1253,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
             /* Phase 5: the content widget reflows with the window. */
             fdk_window_layout(window);
         }
+        geo_changed = true;
     } else if (event->type == FDK_EVENT_KEY_DOWN &&
                window->is_popup &&
                event->key.scancode == FDK_KEY_ESC) {
@@ -1139,7 +1277,31 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
     } else if (event->type == FDK_EVENT_WINDOW_EXPOSE) {
         if (window->root != NULL) {
             fdk_widget_invalidate_all(window->root);
+            /* First map, before anything was ever presented: the
+             * window's pixels are still the creation-time background
+             * (white — or undefined memory once the app has acquired
+             * a framebuffer, whose acquisition flips the background
+             * to None; see x11_surface.c). Paint NOW so the first
+             * frame the compositor/WM shows carries content instead.
+             * Later exposes (unocclusion and friends) keep the app's
+             * pacing: they arrive in bursts whose coalescing belongs
+             * to the paint loop, and the window already has a frame
+             * on screen. */
+            first_expose = (fdk__window_ever_presented(window) == 0);
         }
+    } else if (event->type == FDK_EVENT_POINTER_LEAVE) {
+        /* The pointer left the window: the tree's routing below
+         * clears ITS hovered widget, but the band-button hover and
+         * the resize-edge cursor are window-layer state that nothing
+         * else clears — without this they stuck until the next
+         * enter (a highlighted button that "forgot" it was left). */
+        if (window->deco_hover != 0) {
+            window->deco_hover = 0;
+            if (window->deco_bar != NULL) {
+                fdk_widget_invalidate(window->deco_bar);
+            }
+        }
+        window_reset_cursor(window);
     } else if (event->type == FDK_EVENT_WINDOW_STATE) {
         /* Cache the reported state (the flags are FDK's truth, not
          * the request) and repaint — the maximize button's glyph
@@ -1152,6 +1314,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
              was_min != window->minimized) &&
             window->root != NULL) {
             fdk_widget_invalidate_all(window->root);
+            state_flipped = (was_max != window->maximized);
         }
     } else if (event->type == FDK_EVENT_WINDOW_DECORATION) {
         /* Wayland xdg-decoration override: the compositor insisted on
@@ -1201,6 +1364,50 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * Re-verify registration before the auto-paint tail touches it. */
     if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
         return; /* destroyed by the event callback */
+    }
+
+    /* ---- 1.1.4: geometry-change fallout ----
+     *
+     * Two things must happen within THIS dispatch, before the
+     * application's event-loop pacing gets a say:
+     *
+     * 1. HOVER REVALIDATION. The geometry changed under a possibly
+     *    stationary pointer: hover state computed against the old
+     *    geometry would stick (the maximize-button highlight that
+     *    never clears — found live on a real Cinnamon desktop).
+     *
+     * 2. THE SYNCHRONOUS RESIZE REPAINT. The platform already
+     *    resized the window before this event was sent (the WM/com-
+     *    positor owns the geometry). On X11 the newly exposed strips
+     *    read as whatever the server's window memory held — back-
+     *    ground None means nothing clears them — and the OLD bits
+     *    are only anchored top-left (NorthWest bit gravity). Every
+     *    compositor frame landing between the resize and the app's
+     *    next paint pass showed that transitional content as a
+     *    fast visual flicker during interactive resizes (the white
+     *    flash when the background was still a white pixel).
+     *    Repainting inside the dispatch closes the gap to sub-frame.
+     *    On Wayland this is exactly the sanctioned ack-then-commit
+     *    flow (the deferred-first-frame machinery commits at
+     *    configure time the same way).
+     *
+     * This does NOT take over the application's paint pacing:
+     * animation damage, hover highlights, everything else the app
+     * itself changes still waits for its own loop, exactly as
+     * before. Only content whose invalidation FDK itself caused by
+     * accepting a new geometry goes out here. */
+    if (geo_changed || state_flipped || first_expose) {
+        window_revalidate_pointer(window);
+        if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
+            return; /* a revalidation-routed handler destroyed it */
+        }
+        if (window->root != NULL &&
+            fdk_widget_tree_has_damage(window->root)) {
+            (void)fdk_window_paint(window);
+            if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
+                return; /* destroyed mid-paint (paint hook) */
+            }
+        }
     }
 
     /* Toolkit-owned windows (menu popups, dialogs — see
@@ -1431,6 +1638,11 @@ fdk_result fdk_window_set_decorated(fdk_window *window, bool decorated) {
         }
         fdk_window_layout(window);
         fdk_widget_invalidate_all(window->root);
+        /* The band just appeared (possibly under the pointer, if this
+         * ran at runtime): re-derive hover + cursor from where the
+         * pointer actually is. */
+        window_reset_cursor(window);
+        window_revalidate_pointer(window);
         FDK_DEBUG("FDK decorations enabled (WM chrome dropped)");
     } else {
         window->decorated = false;
@@ -1452,6 +1664,10 @@ fdk_result fdk_window_set_decorated(fdk_window *window, bool decorated) {
         if (!window->resizable_explicit) {
             window->resizable = false;
         }
+        /* The edge cursor is chrome: gone with the edges (unless the
+         * app kept them — revalidation re-derives it either way). */
+        window_reset_cursor(window);
+        window_revalidate_pointer(window);
         if (window->root != NULL) {
             fdk_window_layout(window);
             fdk_widget_invalidate_all(window->root);
@@ -1561,4 +1777,12 @@ int fdk__window_ever_presented(const fdk_window *window) {
         return -1;
     }
     return window->ops->window_ever_presented(window->pwindow);
+}
+
+int fdk__window_deco_hover(const fdk_window *window) {
+    return (window != NULL) ? window->deco_hover : 0;
+}
+
+int fdk__window_cursor_edge(const fdk_window *window) {
+    return (window != NULL) ? window->cursor_edge : FDK_WRES_NONE;
 }

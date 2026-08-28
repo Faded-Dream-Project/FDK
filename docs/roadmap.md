@@ -1915,3 +1915,85 @@ Battery: clean rebuild debug + release (Wayland on, 0 warnings),
 headless suite, X11 integration suite (incl. both new guards), the
 Wayland suite + decorations-demo rig on sway, and the openbox
 real-WM rig — ALL PASS, twice consecutively.
+
+### 1.1.4 — the resize flash, the stuck highlight, the missing cursor (the second Cinnamon report) — COMPLETE
+
+User report, same real Cinnamon X11 desktop: "the window flashes
+like it becomes white then shows it again changing fast while
+resizing [...] one visual bug is that the highlight stays on the
+maximize minimize button [...] and the mouse doesn't change icon
+to show that the window can be resized — it only changes when I
+hold click on the side of the window."
+
+Three symptoms, one per layer, all reproduced empirically before
+fixing:
+
+1. **The white flash during interactive resize.** The X11
+   top-level was created with a white background PIXEL and the
+   default ForgetGravity: every resize step made the server CLEAR
+   the whole window to white, and the client only repaints after
+   the configure event travels back through its event loop — so
+   each step of a drag showed a full frame of background. Fix in
+   two halves: (a) NorthWest bit gravity at creation, with the
+   background flipping from the white pixel to None at the FIRST
+   framebuffer acquisition (a never-rendered window keeps its
+   documented white — the 01_hello_world contract, matching
+   Wayland's committed solid-color buffer — while a rendered
+   window is never server-cleared again and every resize retains
+   its old pixels anchored top-left); and (b) a SYNCHRONOUS
+   damage-gated repaint in fdk_window_dispatch_event's tail for
+   configure/state-flip/first-expose events, closing the gap
+   between the WM's resize and the application's next loop pass —
+   the exact frame where the flash lived. Application paint
+   pacing is untouched: only damage FDK's own geometry acceptance
+   caused goes out synchronously.
+
+2. **The stuck maximize/minimize highlight.** Maximizing grows
+   the window under a STATIONARY pointer: the button flies right,
+   no motion event ever arrives (the pointer did not move), and
+   the hover highlight computed against the old geometry sticks
+   forever. New optional platform op `window_query_pointer`
+   (XQueryPointer window-local + bounds check on X11; the seat's
+   pointer-focus cache on Wayland) + a dispatch-tail
+   revalidation: query the real pointer, route it through the
+   tree and the cursor logic exactly as if a motion/leave had
+   arrived (the application's event callback never sees these
+   synthesized positions). Pointer-leave now also clears the
+   band-button hover and the resize cursor — window-layer state
+   nothing else was clearing.
+
+3. **The missing resize cursor.** FDK never shaped a cursor at
+   all — the cursor the user saw while holding a button was the
+   WM's own during _NET_WM_MOVERESIZE. New optional platform op
+   `window_set_cursor`, reusing the resize-edge compass: hovering
+   an edge zone (same hit-test the press path uses) shows the
+   directional resize cursor BEFORE any button is held, restoring
+   the default on interior/leave/edges-off. X11 implements it
+   with lazily-created XCreateFontCursor glyphs from the server's
+   built-in cursor font (core protocol, no libXcursor), cached
+   per connection and freed at disconnect; Wayland honestly has
+   no implementation yet (proper shaping needs a cursor theme
+   over wl_shm + per-enter set_cursor — tracked as future work),
+   so the compositor default applies there.
+
+Verified with a new class of test: a mid-storm pixel probe
+(scripts/resize_flash_probe.c) that samples the window during a
+90-step XTEST resize drag under openbox — the fixed build reads a
+worst per-sample white ratio of 0.000 across 1.82M pixels, while a
+git-worktree build of the PRE-FIX commit reproduces the user's
+flash at ratio 1.000 (the control run proving the probe works).
+Three in-suite regressions: server-side resize retention
+(bit-gravity + pixel readback before the configure is pumped),
+hover revalidation under a stationary pointer with the REAL
+pointer warped onto the moving button, and the cursor-affordance
+compass through a new internal seam. Wayland gets the same
+dispatch-tail behaviors for free where its protocols allow (the
+configure-time synchronous repaint is exactly the sanctioned
+ack-then-commit flow; hover revalidation reads the seat cache).
+
+Battery: clean rebuild debug + release (Wayland on, 0 warnings),
+headless suite, X11 integration suite (incl. the three new
+regressions), Wayland integration suite + decorations-demo rig on
+sway, X11 + Wayland example rigs, the openbox real-WM rig (all six
+1.1.3 checks still green), and the resize-flash probe with its
+pre-fix control — ALL PASS.

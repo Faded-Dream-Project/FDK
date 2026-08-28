@@ -66,6 +66,19 @@ struct fdk_platform_connection {
     int shm_ok;
     int shm_event_base;
 
+    /* --- Resize cursors (1.1.4) ---
+     *
+     * Directional resize cursors, lazily created from the server's
+     * built-in cursor font (XCreateFontCursor — core protocol, no
+     * libXcursor dependency) and indexed by the
+     * fdk_window_resize_edge compass value 1..8. Entry None = not
+     * created yet (None is 0, and fdk_alloc does not zero — the
+     * connect path initializes the array explicitly). Freed at
+     * disconnect (fdk_x11_cursor_shutdown). The window-level shape
+     * state (which cursor is currently defined on which window)
+     * lives in the X server per window and dies with the window. */
+    Cursor resize_cursors[9];
+
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
 
@@ -156,6 +169,12 @@ struct fdk_platform_window {
     int presented_ever;     /* a present reached the server (the
                                window_ever_presented op — diagnostic/
                                regression seam, see platform_internal.h) */
+    int background_dropped; /* 1 once the app first acquired the
+                               framebuffer: the creation-time white
+                               background pixel was replaced by
+                               background None (the server never
+                               clears again — the resize-flash fix;
+                               see x11_window.c) */
 };
 
 /* Implemented in x11_events.c, used by x11_dispatch.c. Not part of
@@ -215,6 +234,18 @@ fdk_result fdk_x11_window_begin_move(fdk_platform_window *pwindow,
 fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
                                        int edge, fdk_i32 local_x,
                                        fdk_i32 local_y);
+
+/* Pointer introspection + cursor shaping (1.1.4; the optional ops
+ * behind the same-named platform_internal.h entries).
+ * fdk_x11_window_query_pointer returns nonzero only when the pointer
+ * is inside the window's current bounds. fdk_x11_window_set_cursor
+ * takes an fdk_window_resize_edge compass value (0 = default arrow;
+ * out-of-range is ignored). fdk_x11_cursor_shutdown frees the
+ * connection's cached font cursors — called from disconnect. */
+int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
+                                 fdk_i32 *out_x, fdk_i32 *out_y);
+void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge);
+void fdk_x11_cursor_shutdown(fdk_platform_connection *conn);
 
 /* Phase 8 state helpers (x11_window.c), shared with x11_events.c's
  * PropertyNotify translation: */

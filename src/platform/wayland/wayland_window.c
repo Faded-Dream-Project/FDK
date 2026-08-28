@@ -1604,3 +1604,28 @@ fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
                         toplevel_resize_edges(edge));
     return FDK_OK;
 }
+
+/* The optional pointer-introspection op (1.1.4): Wayland has no
+ * query-the-server equivalent of XQueryPointer, but the seat's
+ * listener state is the same truth — wl_pointer::enter/motion maintain
+ * pointer_focus + surface-local pointer_x/y, and a compositor keeps
+ * sending motion/leave events when surfaces move under the pointer,
+ * so the cache is never stale while the pointer is over this surface.
+ * Returns nonzero only when THIS window currently holds pointer
+ * focus. (Cursor SHAPING has no Wayland counterpart here yet: doing
+ * it properly needs a cursor theme via wl_shm + per-enter
+ * wl_pointer.set_cursor, tracked in the roadmap — the compositor's
+ * default cursor applies meanwhile, honestly.) */
+int fdk_wayland_window_query_pointer(fdk_platform_window *pwindow,
+                                     fdk_i32 *out_x, fdk_i32 *out_y) {
+    if (pwindow == NULL || out_x == NULL || out_y == NULL) {
+        return 0;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    if (conn->pointer == NULL || conn->pointer_focus != pwindow) {
+        return 0;
+    }
+    *out_x = (fdk_i32)conn->pointer_x;
+    *out_y = (fdk_i32)conn->pointer_y;
+    return 1;
+}

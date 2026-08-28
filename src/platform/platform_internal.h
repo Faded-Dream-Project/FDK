@@ -221,6 +221,38 @@ typedef struct fdk_platform_ops {
                                       int edge, fdk_i32 local_x,
                                       fdk_i32 local_y);
 
+    /* --- OPTIONAL pointer introspection + cursor shaping (1.1.4) ---
+     *
+     * Both exist for the same class of bug: FDK's chrome has to
+     * REACT to pointer position at moments the platform generates no
+     * event for, and to ADVERTISE affordances a WM frame's borders
+     * give for free.
+     *
+     * window_query_pointer writes the pointer's current position in
+     * WINDOW-LOCAL coordinates to out_x/out_y and returns nonzero
+     * when the pointer is inside this window's bounds right now. The
+     * window layer calls it after geometry changes (configure,
+     * window-state flips): when a window moves/resizes under a
+     * STATIONARY pointer the platform delivers no motion event, so
+     * hover state computed against the OLD geometry sticks (the
+     * classic highlight-that-never-clears on a maximize button).
+     * NULL = unsupported; revalidation is skipped, nothing else
+     * changes.
+     *
+     * window_set_cursor selects the cursor shape shown over this
+     * window. `edge` is 0 (default arrow) or an
+     * fdk_window_resize_edge compass value (plain int here so this
+     * header needn't depend on window_internal.h): FDK's resize-edge
+     * zones use it to show the directional resize cursor BEFORE any
+     * button is held — the affordance users expect from a resizable
+     * window. Called only on shape transitions (the window layer
+     * caches the applied shape). NULL = the backend cannot shape
+     * cursors; the platform default applies (documented per-backend —
+     * honest unsupported, no lying fallback). */
+    int (*window_query_pointer)(fdk_platform_window *pwindow,
+                                fdk_i32 *out_x, fdk_i32 *out_y);
+    void (*window_set_cursor)(fdk_platform_window *pwindow, int edge);
+
     /* --- Software rendering ---
      *
      * Both render ops are OPTIONAL: a backend that cannot provide a

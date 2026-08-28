@@ -313,6 +313,51 @@ rig — the first CONTENT click after a WM-driven drag still
 activates the widget it hit-tests (the stale-grab check). This rig
 found and verified the fixes for all three 1.1.3 bugs.
 
+**The resize-flash probe (1.1.4)**: the second Cinnamon report —
+"the window flashes white while resizing" — is a TIMING bug: the
+flash exists only for the frames between the WM's resize and the
+client's repaint, so it cannot be asserted by the request/response
+tests above. `scripts/resize_flash_probe.c` samples the window's
+pixels mid-storm instead: it drives a 90-step XTEST resize drag on
+the decorations example under openbox and grabs the window's
+top-left 200x100 region right after EVERY motion step (the region
+stays inside the window for the whole SE-corner drag — race-free
+grabs), counting near-white pixels per sample. The pass bar is a
+worst per-sample white ratio under 0.5 (dark-themed content is a
+few percent text ink; the bug's background clear was ~1.0). The
+rig (`scripts/verify_resize_flash.sh`) runs the probe twice: once
+against the current build (must read clean) and once against a
+git-worktree build of the PRE-FIX commit (must reproduce the
+flash) — a control run that proves the probe can actually see the
+bug it exists to guard. Fixed build: worst ratio 0.000 across
+1.82M sampled pixels; pre-fix control: 1.000.
+
+Three new in-suite regressions accompany it (in
+`test_x11_integration.c`): `test_resize_retains_pixels` pins the
+anti-flicker contract server-side — the window's bit gravity is
+NorthWest, and a server-side resize leaves the painted region's
+pixels intact when read back BEFORE FDK processes the configure
+(no pump in between: the old background-pixel window read white
+here); `test_hover_revalidation_on_geometry_change` reproduces the
+stuck maximize-button highlight with the REAL pointer (XWarpPointer
+onto the button — warping, not XSendEvent, because the
+revalidation must find the true pointer position — then a
+server-side window GROWTH under the stationary pointer; hover must
+re-derive to nothing, follow the button to its new position, and
+clear entirely when a shrink moves the window out from under the
+pointer); and `test_resize_cursor_affordance` asserts the cursor
+compass state through the `fdk__window_cursor_edge` seam (the X
+cursor itself is not queryable without XFixes, which this
+environment lacks — the seam asserts the shape logic: E and SE
+edge-zone hovers, interior/leave/edges-off all restoring the
+default). One XTEST-adjacent lesson: `XWarpPointer` is the way to
+place the REAL pointer for query-pointer-dependent tests;
+XSendEvent synthesizes delivery without moving anything, and an
+XEvent compound literal must set `.type` INSIDE the member
+initializer (`.type = X, .xconfigure = {...}` zeroes the type
+field — the xconfigure initializer runs last and its own unlisted
+`type` member overwrites the outer one).
+
 **Wayland** (`make test-wayland` + `tests/test_wayland_integration.c`):
 runs against a REAL compositor reachable via $WAYLAND_DISPLAY (the
 binary self-skips without one, so plain CI never fails on it). The

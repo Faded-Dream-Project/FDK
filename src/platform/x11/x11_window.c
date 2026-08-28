@@ -7,6 +7,7 @@
 
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include <X11/cursorfont.h> /* XC_* cursor glyph indices (1.1.4) */
 #include <string.h>
 
 #define X11_DEFAULT_WIDTH  640
@@ -76,14 +77,54 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                                     CWBackPixel | CWEventMask,
                                 &attrs);
     } else {
-        xwindow = XCreateSimpleWindow(
-            conn->display, conn->root,
-            0, 0, (unsigned int)width, (unsigned int)height,
-            0 /* border width */, black, white);
+        /* Top-level (WM-managed): white background PIXEL + NorthWest
+         * bit gravity at creation; the background becomes None at the
+         * first framebuffer acquisition (x11_surface.c). Together that
+         * is the fix for the white-flash-on-resize found on real
+         * compositing desktops (Cinnamon), without breaking the
+         * documented never-painted-window contract:
+         *
+         * A window the app never renders into (01_hello_world, the
+         * "no renderer yet" example) shows its background pixel —
+         * white on both backends, same as Wayland's committed
+         * solid-color buffer (attach_background_buffer). The moment
+         * an app acquires the framebuffer it owns every pixel, and
+         * the background flips to None: the server never CLEARS
+         * again. A background clear on each resize step is precisely
+         * the flash — the client only repaints after the configure
+         * travels back through its event loop, so an interactive
+         * resize showed a full frame of background per step (fast
+         * white flashing over dark content).
+         *
+         * NorthWest bit gravity makes every resize RETAIN the
+         * existing pixels anchored top-left instead of discarding
+         * them (the default ForgetGravity treats the whole window as
+         * newly exposed): retained content plus the synchronous
+         * configure-time repaint (window.c's dispatch tail) means the
+         * window goes straight from old-size content to new-size
+         * content with nothing visible in between.
+         *
+         * Popups keep a background pixel always: they never resize,
+         * so they have no resize-flash to fix, and a menu that maps
+         * before its first paint should read as a blank menu, not as
+         * undefined server memory. */
+        XSetWindowAttributes attrs;
+        memset(&attrs, 0, sizeof(attrs));
+        attrs.background_pixel = white; /* until the app paints */
+        attrs.bit_gravity = NorthWestGravity; /* retain bits top-left */
+        attrs.border_pixel = black;
+        xwindow = XCreateWindow(conn->display, conn->root,
+                                win_x, win_y, (unsigned int)width,
+                                (unsigned int)height, 0,
+                                CopyFromParent, InputOutput,
+                                CopyFromParent,
+                                CWBackPixel | CWBitGravity |
+                                    CWBorderPixel,
+                                &attrs);
     }
 
     if (xwindow == 0) {
-        FDK_ERROR("XCreateSimpleWindow failed");
+        FDK_ERROR("XCreateWindow failed");
         return FDK_ERR_WINDOW_CREATE;
     }
 
@@ -131,6 +172,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->maximized = 0;
     pwindow->minimized = 0;
     pwindow->presented_ever = 0;
+    pwindow->background_dropped = 0;
     pwindow->has_saved = 0;
     pwindow->saved_x = 0;
     pwindow->saved_y = 0;
@@ -773,4 +815,82 @@ fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
     send_root_message(pwindow, pwindow->conn->net_wm_moveresize,
                       rx, ry, dir, 1);
     return FDK_OK;
+}
+
+/* ---- Pointer introspection + cursor shaping (1.1.4) ---- */
+
+int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
+                                 fdk_i32 *out_x, fdk_i32 *out_y) {
+    if (pwindow == NULL || out_x == NULL || out_y == NULL) {
+        return 0;
+    }
+    Window root_ret = None, child_ret = None;
+    int root_x = 0, root_y = 0, win_x = 0, win_y = 0;
+    unsigned int mask = 0;
+    /* XQueryPointer against OUR window returns the pointer position
+     * already translated to window-local coordinates (win_x/win_y),
+     * including positions OUTSIDE the window while crossing to it —
+     * the bounds check below is what makes the "inside" answer
+     * honest. Returns False when the pointer is on a different
+     * screen, which is simply "not over this window". */
+    if (!XQueryPointer(pwindow->conn->display, pwindow->xwindow,
+                       &root_ret, &child_ret, &root_x, &root_y,
+                       &win_x, &win_y, &mask)) {
+        return 0;
+    }
+    *out_x = win_x;
+    *out_y = win_y;
+    return win_x >= 0 && win_y >= 0 &&
+           win_x < (int)pwindow->last_size.width &&
+           win_y < (int)pwindow->last_size.height;
+}
+
+/* Glyph indices in the server's built-in cursor font for each
+ * fdk_window_resize_edge compass value (index 0 is unused — 0 means
+ * "default arrow"). Corners get corner cursors, edges get arrows. */
+static const unsigned int resize_cursor_glyphs[9] = {
+    0,                          /* FDK_WRES_NONE — default */
+    XC_top_side,                /* N  */
+    XC_top_right_corner,        /* NE */
+    XC_right_side,              /* E  */
+    XC_bottom_right_corner,     /* SE */
+    XC_bottom_side,             /* S  */
+    XC_bottom_left_corner,      /* SW */
+    XC_left_side,               /* W  */
+    XC_top_left_corner,         /* NW */
+};
+
+void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
+    if (pwindow == NULL || edge < 0 || edge > 8) {
+        return;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    Cursor cursor = None;
+    if (edge != 0) {
+        if (conn->resize_cursors[edge] == None) {
+            /* XCreateFontCursor reads the "cursor" font every X
+             * server ships in core — no libXcursor, no theme lookup.
+             * Failure leaves None, and defining cursor None below
+             * then simply keeps the default arrow: honest
+             * degradation, not a lying shape. */
+            conn->resize_cursors[edge] = XCreateFontCursor(
+                conn->display, resize_cursor_glyphs[edge]);
+        }
+        cursor = conn->resize_cursors[edge];
+    }
+    /* Cursor None (edge 0 or creation failure) reverts the window to
+     * its parent's cursor — the standard arrow on any desktop. */
+    XDefineCursor(conn->display, pwindow->xwindow, cursor);
+}
+
+void fdk_x11_cursor_shutdown(fdk_platform_connection *conn) {
+    if (conn == NULL) {
+        return;
+    }
+    for (int i = 0; i < 9; i++) {
+        if (conn->resize_cursors[i] != None) {
+            XFreeCursor(conn->display, conn->resize_cursors[i]);
+            conn->resize_cursors[i] = None;
+        }
+    }
 }

@@ -212,6 +212,14 @@ struct fdk_window {
      * with the rects above, for hover/pressed themed fills. */
     int deco_hover;   /* 0 none, 1 min, 2 max, 3 close */
     int deco_pressed; /* 0 none, 1 min, 2 max, 3 close */
+
+    /* Cursor shape currently applied through window_set_cursor —
+     * an fdk_window_resize_edge compass value (NONE = default
+     * arrow). Cached so the platform op only sees TRANSITIONS.
+     * Re-synchronized from the real pointer position whenever the
+     * window's geometry changes (see window_revalidate_pointer) and
+     * reset when the edge zones disappear. */
+    int cursor_edge;
 };
 
 /* Called by the context's platform dispatch callback (see
@@ -244,6 +252,24 @@ void fdk__window_set_auto_paint(fdk_window *window, bool auto_paint);
  * on this — the Wayland platform header is deliberately invisible
  * outside src/platform/wayland/, so this is the sanctioned seam. */
 int fdk__window_ever_presented(const fdk_window *window);
+
+/* Diagnostic / regression seams (1.1.4), same rationale as
+ * fdk__window_ever_presented: the hover-revalidation and cursor-
+ * shaping logic lives in the dispatch path where an external test
+ * cannot observe it any other way.
+ *
+ * fdk__window_deco_hover returns the band-button hover state
+ * (0 none, 1 min, 2 max, 3 close) — the stuck-highlight regression
+ * (maximize moves the buttons away from a stationary pointer; no
+ * motion event ever arrives) asserts on it going back to 0 after a
+ * geometry change.
+ *
+ * fdk__window_cursor_edge returns the cursor compass value last
+ * applied to the platform (0 = default). The resize-cursor
+ * regression asserts edge-zone hovers set it and leaves/interior
+ * motion clear it. */
+int fdk__window_deco_hover(const fdk_window *window);
+int fdk__window_cursor_edge(const fdk_window *window);
 
 /* Destroy notification for borrowed-window holders (the menu
  * session): called at the very top of fdk_window_destroy, with the

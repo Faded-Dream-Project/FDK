@@ -2547,6 +2547,242 @@ static void test_resize_edges_gui(void) {
            "gets corner presses), SE/E/N drags resize exactly, "
            "min-size clamps hold\n");
 }
+
+/* ---- 1.1.4: resize-flash, hover-revalidation, cursor regressions ----
+ *
+ * The three symptoms reported from a real Cinnamon desktop: windows
+ * flashing white during interactive resizes, the maximize/minimize
+ * button keeping its hover highlight after the window geometry
+ * changed under a stationary pointer, and the resize cursor only
+ * appearing while a button was held (that one being the WM's own
+ * cursor during _NET_WM_MOVERESIZE — FDK never shaped one itself).
+ */
+
+/* The anti-flash contract, server-side: once a window PAINTS, a
+ * resize must RETAIN its pixels (NorthWest bit gravity at creation +
+ * background flipped to None at the first framebuffer acquisition —
+ * the old white-pixel background cleared the window on every resize
+ * step, which composited as fast white flashing). Painted dark red,
+ * resized by the SERVER (no pump — FDK must not get a chance to
+ * repaint), the retained region must still read dark red; with the
+ * old background-pixel window it read white. */
+static void test_resize_retains_pixels(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK retention test",
+                                 .width = 200, .height = 150 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+    fdk_color red = { .r = 0.7f, .g = 0.05f, .b = 0.05f, .a = 1.0f };
+    fdk_surface_fill(surface, red);
+    assert(fdk_ok(fdk_surface_present(surface)));
+    (void)fdk_pump_events(ctx, 100);
+
+    Display *rb_dpy = XOpenDisplay(NULL);
+    assert(rb_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* The bit-gravity half of the contract, directly: */
+    XWindowAttributes attrs;
+    assert(XGetWindowAttributes(rb_dpy, (Window)xid, &attrs) != 0);
+    assert(attrs.bit_gravity == NorthWestGravity);
+
+    /* The retention half, behaviorally: server-side resize, readback
+     * BEFORE FDK ever sees the configure. */
+    XResizeWindow(rb_dpy, (Window)xid, 320, 240);
+    XSync(rb_dpy, False);
+    unsigned long px = x11_readback_pixel(&rb_dpy, xid, 40, 40);
+    assert(px == 0x00B30D0Du); /* the painted red, retained (fill
+                                  rounds 0.7/0.05 to B3/0D) */
+
+    /* And the window still repaints correctly once the configure is
+     * pumped (the synchronous resize repaint path): */
+    (void)fdk_pump_events(ctx, 200);
+    fdk_size now = { 0, 0 };
+    assert(fdk_ok(fdk_window_get_size(win, &now)));
+    assert(now.width == 320 && now.height == 240);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 resize retention: NorthWest bit gravity + "
+           "background none (old-size pixels survive a server-side "
+           "resize; no white clear)\n");
+}
+
+/* The stuck-highlight regression: hover the maximize button, then
+ * grow the window under the STATIONARY pointer (the maximize move,
+ * minus the actual maximize) — the button flies right, no motion
+ * event ever arrives, and only the dispatch-time revalidation (query
+ * the real pointer, re-route it as motion) clears the hover. */
+static void test_hover_revalidation_on_geometry_change(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK hover reval test",
+                                 .width = 240, .height = 160 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    assert(fdk_ok(fdk_window_set_decorated(win, true)));
+    fdk_window_show(win);
+    /* Drain the map/configure/expose noise (map-related events can
+     * arrive arbitrarily late under Xvfb and would race the asserts
+     * below with an unsolicited size change). */
+    (void)fdk_pump_events(ctx, 300);
+    (void)fdk_pump_events(ctx, 300);
+
+    Display *rb_dpy = XOpenDisplay(NULL);
+    assert(rb_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Warp the REAL pointer onto the maximize button (warping, not
+     * XSendEvent: the revalidation later must find the true pointer
+     * there — XSendEvent fakes events without moving the pointer). */
+    fdk_rect max = win->deco_btn_max;
+    assert(max.width > 0 && max.height > 0);
+    int mx = max.x + max.width / 2;
+    int my = max.y + max.height / 2;
+    XWarpPointer(rb_dpy, None, (Window)xid, 0, 0, 0, 0, mx, my);
+    XFlush(rb_dpy);
+    (void)fdk_pump_events(ctx, 200);
+    assert(fdk__window_deco_hover(win) == 2); /* hovered: maximize */
+
+    /* Grow the window server-side, exactly like a WM maximizing it.
+     * The button rects re-arrange to the NEW right edge; the pointer
+     * never moves. Without revalidation this hover sticks forever. */
+    XResizeWindow(rb_dpy, (Window)xid, 700, 400);
+    XSync(rb_dpy, False);
+    (void)fdk_pump_events(ctx, 300);
+    assert(win->last_size.width == 700);
+    assert(fdk__window_deco_hover(win) == 0); /* re-derived: gone */
+
+    /* The pointer is still inside (the window grew around it): hover
+     * must re-derive, not just clear — warp to where the button NOW
+     * is and confirm hover follows. */
+    max = win->deco_btn_max;
+    mx = max.x + max.width / 2;
+    my = max.y + max.height / 2;
+    XWarpPointer(rb_dpy, None, (Window)xid, 0, 0, 0, 0, mx, my);
+    XFlush(rb_dpy);
+    (void)fdk_pump_events(ctx, 200);
+    assert(fdk__window_deco_hover(win) == 2);
+
+    /* Shrink the window away from under the pointer: the pointer is
+     * now OUTSIDE, so the revalidation must deliver the clearing
+     * path (hover zero, cursor default). */
+    XResizeWindow(rb_dpy, (Window)xid, 100, 60);
+    XSync(rb_dpy, False);
+    (void)fdk_pump_events(ctx, 300);
+    assert(win->last_size.width == 100);
+    assert(fdk__window_deco_hover(win) == 0);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 hover revalidation: geometry change under a "
+           "stationary pointer re-derives hover (maximize button "
+           "highlight clears; outside-shrink clears)\n");
+}
+
+/* The resize-cursor affordance: hovering an edge zone sets the
+ * directional cursor BEFORE any button is held; interior motion and
+ * window leave restore the default. Observable through the
+ * fdk__window_cursor_edge seam (the X cursor itself is not queryable
+ * without XFixes, which this environment lacks). */
+static void test_resize_cursor_affordance(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK cursor test",
+                                 .width = 240, .height = 160 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    assert(fdk_ok(fdk_window_set_decorated(win, true)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = XOpenDisplay(NULL);
+    assert(rb_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Interior motion: default arrow. */
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 120, 80, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_edge(win) == 0);
+
+    /* East edge: the right-side resize cursor. */
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 238, 80, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_edge(win) == FDK_WRES_E);
+
+    /* SE corner: the corner cursor (transitions exercise the cache). */
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 238, 158, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_edge(win) == FDK_WRES_SE);
+
+    /* Back inside: default again. */
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 120, 80, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_edge(win) == 0);
+
+    /* Edge again, then LEAVE the window: the cursor must reset even
+     * though the last motion was over a zone (this is also the
+     * band-hover reset path — hover dies with the pointer). */
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 238, 80, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_edge(win) == FDK_WRES_E);
+    {
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = LeaveNotify;
+        ev.xcrossing.window = (Window)xid;
+        ev.xcrossing.x = 250;
+        ev.xcrossing.y = 80;
+        ev.xcrossing.mode = NotifyNormal;
+        ev.xcrossing.detail = NotifyNonlinear;
+        Status s = XSendEvent(rb_dpy, (Window)xid, False,
+                              (long)LeaveWindowMask, &ev);
+        assert(s != 0);
+        XFlush(rb_dpy);
+    }
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_edge(win) == 0);
+
+    /* Turning the edges off resets the cursor too (chrome does not
+     * outlive the edges that advertise it). */
+    x11_send_pointer_event(rb_dpy, xid, MotionNotify,
+                           PointerMotionMask, 238, 80, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_edge(win) == FDK_WRES_E);
+    fdk_window_set_resizable(win, false);
+    assert(fdk__window_cursor_edge(win) == 0);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 resize cursor: edge-zone hovers shape the "
+           "directional cursor (E, SE), interior/leave/edges-off "
+           "restore the default\n");
+}
 /* ---- The EWMH fake window manager ----
  *
  * Xvfb runs with NO window manager, which is exactly right for the
@@ -4366,6 +4602,9 @@ int main(void) {
     test_decorations_gui();
     test_window_state_gui();
     test_resize_edges_gui();
+    test_resize_retains_pixels();
+    test_hover_revalidation_on_geometry_change();
+    test_resize_cursor_affordance();
     test_ewmh_atom_spelling();
     test_ewmh_fake_wm();
     test_mitm_shm_and_double_buffer();

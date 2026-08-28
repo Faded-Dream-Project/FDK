@@ -35,6 +35,11 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->window_count = 0;
     conn->window_capacity = 0;
     conn->app_id = NULL;
+    /* fdk_alloc does not zero — None is 0 but be explicit anyway:
+     * no font cursor exists until window_set_cursor first needs one. */
+    for (int i = 0; i < 9; i++) {
+        conn->resize_cursors[i] = None;
+    }
 
     /* app_id (when set) rides along on the connection and becomes
      * every window's WM_CLASS — the X11 identity mechanism window
@@ -171,6 +176,8 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
     fdk_free(conn->windows);
 
     fdk_x11_clipboard_shutdown(conn);
+
+    fdk_x11_cursor_shutdown(conn);
 
     free(conn->app_id);
     conn->app_id = NULL;

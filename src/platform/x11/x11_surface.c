@@ -266,6 +266,18 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
 
     fdk_platform_connection *conn = pwindow->conn;
 
+    /* The app takes ownership of the window's pixels at its first
+     * framebuffer acquisition: replace the creation-time white
+     * background pixel with background None so the server never
+     * CLEARS the window again (every clear was a resize-step flash;
+     * see the window-creation comment in x11_window.c). Current
+     * pixels are untouched — a never-presented window keeps showing
+     * whatever the background drew until the first present. */
+    if (!pwindow->background_dropped) {
+        XSetWindowBackgroundPixmap(conn->display, pwindow->xwindow, None);
+        pwindow->background_dropped = 1;
+    }
+
     /* The live window size (kept current by ConfigureNotify
      * translation in x11_events.c). Defensively clamp degenerate
      * sizes to 1 rather than handing Xlib a zero-dimension image. */

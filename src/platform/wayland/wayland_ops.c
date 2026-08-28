@@ -18,6 +18,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .window_set_minimized = fdk_wayland_window_set_minimized,
     .window_begin_move = fdk_wayland_window_begin_move,
     .window_begin_resize = fdk_wayland_window_begin_resize,
+    .window_query_pointer = fdk_wayland_window_query_pointer,
     .window_get_framebuffer = fdk_wayland_window_get_framebuffer,
     .window_present = fdk_wayland_window_present,
     .window_frame_ready = fdk_wayland_window_frame_ready,
