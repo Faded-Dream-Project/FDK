@@ -246,7 +246,9 @@ fdk_result fdk_date_from_days(fdk_i64 days, fdk_date *out);
  * numbering). A bad date returns -1. */
 fdk_i32 fdk_date_weekday(const fdk_date *date);
 
+/* Proleptic Gregorian leap rule (400-year cycles). */
 bool fdk_date_is_leap_year(fdk_i32 year);
+/* 28..31 (leap-aware February); 0 on a bad month. */
 fdk_i32 fdk_date_days_in_month(fdk_i32 year, fdk_i32 month);
 
 /* ---- Date / time formatting ---- */
@@ -319,8 +321,10 @@ typedef struct fdk_plural_operands {
     fdk_u64 t;
 } fdk_plural_operands;
 
+/* Exact integer operands (v = w = f = t = 0). */
 void fdk_plural_operands_from_int(fdk_i64 value,
                                   fdk_plural_operands *out);
+/* Operands from the 9-decimal rendering (see docs/i18n.md). */
 fdk_result fdk_plural_operands_from_double(fdk_f64 value,
                                            fdk_plural_operands *out);
 
@@ -362,6 +366,7 @@ fdk_result fdk_catalog_parse(const void *data, size_t size,
  * file, FDK_ERR_IO on open/seek/read failures). */
 fdk_result fdk_catalog_load(const char *path, fdk_catalog **out);
 
+/* Destroys the catalog and every string it owns. */
 void fdk_catalog_destroy(fdk_catalog *catalog);
 
 /* Lookup. Returns the stored translation for (msgctxt, ) msgid, or
@@ -372,7 +377,9 @@ const char *fdk_catalog_get(const fdk_catalog *catalog, const char *msgid);
 const char *fdk_catalog_get_in_context(const fdk_catalog *catalog,
                                        const char *msgctxt,
                                        const char *msgid);
+/* Presence test (no context form: contexts use get_in_context). */
 bool fdk_catalog_has(const fdk_catalog *catalog, const char *msgid);
+/* Entries parsed (all contexts). */
 size_t fdk_catalog_entry_count(const fdk_catalog *catalog);
 
 /* Plural lookup: computes `loc`'s plural category for the count and

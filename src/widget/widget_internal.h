@@ -58,6 +58,12 @@
  * owning window is the only legitimate destroyer). */
 #define FDK_WF_WINDOW_ROOT 0x40u
 
+/* Layout batching (Phase 11): the container is pending a batched
+ * relayout — set by the layout notifier's marking mode, cleared by
+ * the flush. Lives on the widget so a mark is one OR and a climb is
+ * one TEST, with no side table to keep coherent. */
+#define FDK_WF_LAYOUT_DIRTY 0x80u
+
 struct fdk_widget {
     const fdk_widget_class *klass;   /* never NULL (base class at minimum) */
     fdk_widget *parent;              /* NULL for roots                    */
@@ -227,10 +233,21 @@ void *fdk__widget_window_owner(fdk_widget *any);
  * fdk_widget_tree_handle_event / _paint on exit. */
 void fdk_widget_root_flush_deferred(fdk_widget *root);
 
+/* The root registry's head (widget.c): the layout batch flush walks
+ * every live root's tree in overflow mode. NULL when no roots exist.
+ * Iterate with root->root_next. */
+fdk_widget *fdk__widget_roots_head(void);
+
 /* Notifies the layout engine that `parent`'s child set (or a child's
  * layout hints) changed — called by the widget core from create /
  * destroy / the hint setters. Implemented in src/layout/box.c;
  * containers relayout, non-containers ignore it. Safe with NULL. */
 void fdk_widget_child_layout_changed(fdk_widget *parent);
+
+/* Layout batching (box.c): drop `widget` from the pending-batch set
+ * — called by the widget core when a widget is unlinked for
+ * destruction, and per-widget in teardown, so a batched flush can
+ * never reach freed memory. */
+void fdk__layout_batch_forget(fdk_widget *widget);
 
 #endif /* FDK_WIDGET_INTERNAL_H */

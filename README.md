@@ -12,8 +12,7 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: Phase 10 — Accessibility/i18n COMPLETE; Phase 11
-(Stabilization) is next.**
+**Status: 1.0.0 — all eleven roadmap phases COMPLETE, ABI frozen.**
 Core lifecycle, real X11 and Wayland backends, the rendering layer
 (damage-tracked software renderer with images, alpha compositing,
 transforms, and antialiasing), the widget foundation with layout
@@ -29,9 +28,17 @@ engine: explicit-locale formatting (numbers with Western/Indian/
 Swiss/Arabic grouping, currency, percent), an exact proleptic-
 Gregorian calendar with pattern-driven date/time formatting in 15
 languages, CLDR plural rules for 33 languages, and strict, bounded
-`.fmo` translation catalogs with context and plural support. See
-"What works today" below and `docs/roadmap.md` for an honest,
-specific list of what is and isn't covered.
+`.fmo` translation catalogs with context and plural support — and
+the Phase 11 stabilization pass: layout batching (515x faster bulk
+tree construction), the performance baseline harness, the ABI audit
+with compile-time size assertions and the subclassing decision,
+the memory-safety audit, pkg-config packaging, and the 1.0.0 ABI
+freeze (`FDK_ABI_STABLE` = 1). See "What works today" below and
+`docs/roadmap.md` for an honest, specific list of what is and isn't
+covered.
+
+After `make install`, link applications with
+`cc myapp.c $(pkg-config --cflags --libs fdk)`.
 
 ## Requirements
 

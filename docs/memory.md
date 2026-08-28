@@ -63,3 +63,49 @@ is intentional and should stay on for all development and CI —
 shipped artifact. Every test in `tests/` is expected to pass clean
 under ASan+UBSan with zero leaks; a test that "passes" but leaks or
 hits UB is a bug, not a pass.
+
+## The Phase 11 memory-safety audit
+
+The stabilization pass audited the whole tree against the following
+criteria, with the results recorded here so the audit is reproducible
+rather than a vibe:
+
+1. **No raw malloc/free outside `src/core/alloc.c`.** Verified by
+   grep: every allocation site goes through `fdk_alloc`/
+   `fdk_alloc_array`/`fdk_realloc`/`fdk_free` (the checked,
+   zero-initializing, overflow-guarded wrappers).
+2. **Every allocation path has a matching free on EVERY exit.**
+   Verified by the parsers' no-partial-results discipline (theme,
+   catalog: destroy-the-working-object on any error) and by the
+   widget teardown walk (subclass destroy hook, then children,
+   then arrays, then a11y strings, then relation edges, then the
+   widget itself). The deferred-destroy machinery keeps frees off
+   the dispatch/paint stacks.
+3. **No unchecked multiplication before allocation.**
+   `fdk_alloc_array` guards `count * size` overflow centrally; the
+   remaining hand-rolled grows in widget/list/tree/menu code were
+   audited for the same shape (capacity doubling on `size_t`, with
+   the count check before the multiply).
+4. **Dangling-pointer classes are structurally prevented**: widget
+   destroy unlinks before any callback can observe it; a11y
+   relations are removed from BOTH ends at destroy (no dangling
+   relation targets); layout-batch dirty entries are forgotten at
+   destroy (no flush into freed memory); window destroy tears down
+   the root with the ownership marker dropped first.
+5. **Every test binary runs under ASan+UBSan with leak detection**
+   (the default build), including the GUI suites against a real X
+   server. The Phase 10/11 sessions' new suites (a11y, i18n, layout
+   batching) all run leak-clean; the leaks they DID find during
+   development (a dangling subscription recorder, an Entry CHAR-run
+   NULL deref) were fixed, not suppressed.
+6. **Bounded inputs everywhere a parser touches memory**: theme and
+   catalog files (1 MiB / line / string / entry caps), Entry's text
+   buffer (64 KiB), the a11y subscriber and relation tables (16
+   each), the layout dirty list (4096 + wholesale fallback). No
+   attacker-sized allocation scales with input size without a cap.
+
+Known accepted sharp edges (documented, not hidden): FDK's object
+model is explicitly NOT thread-safe (docs/threading.md — use one
+thread, or full externally-synchronized handoff); passing a
+destroyed widget pointer is ordinary C undefined behavior like a
+double free, exactly as documented in fdk_widget.h.

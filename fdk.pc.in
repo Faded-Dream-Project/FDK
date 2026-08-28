@@ -1,0 +1,21 @@
+# fdk.pc.in — pkg-config template for FDK
+#
+# Processed by the Makefile into build/fdk.pc at install time; the
+# version comes from include/fdk/fdk_version.h (never a second
+# hand-edited copy) and the dependency list from the same
+# pkg-config results the build itself resolved.
+
+prefix=@PREFIX@
+libdir=@LIBDIR@
+includedir=@INCDIR@
+
+Name: fdk
+Description: Faded Dream ToolKit — C11 native GUI toolkit for Wayland and X11
+Version: @VERSION@
+URL: https://github.com/FemBoyGamerTechGuy/FDK
+Cflags: -I${includedir}
+Libs: -L${libdir} -lfdk
+# The .so already carries these; static linking resolves them through
+# Requires.private. Applications themselves need none of them.
+Requires.private: @PC_REQUIRES@
+Libs.private: @PC_LIBS@ -lm

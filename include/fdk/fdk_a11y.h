@@ -199,6 +199,7 @@ typedef void (*fdk_a11y_notify_fn)(const fdk_a11y_event *event,
  * FDK_ERR_LIMIT. */
 fdk_result fdk_a11y_subscribe(fdk_widget *scope, fdk_a11y_notify_fn fn,
                               void *user_data);
+/* Removes a subscription; FDK_ERR_NOT_FOUND when absent. */
 fdk_result fdk_a11y_unsubscribe(fdk_widget *scope, fdk_a11y_notify_fn fn,
                                 void *user_data);
 #define FDK_A11Y_MAX_SUBSCRIBERS 16
@@ -357,6 +358,7 @@ fdk_result fdk_a11y_virtual_describe(const fdk_widget *container,
 fdk_a11y_action_set fdk_a11y_virtual_actions(const fdk_widget *container,
                                              size_t index);
 
+/* Performs an action on a virtual child (same contract as perform). */
 fdk_result fdk_a11y_virtual_perform(fdk_widget *container, size_t index,
                                     fdk_a11y_action action, double value);
 
@@ -396,6 +398,7 @@ fdk_result fdk_a11y_text_at_offset(const fdk_widget *widget,
  * fdk_entry_set_cursor / fdk_entry_select_range. These are the
  * screen-reader "move the caret" / automation selection APIs. */
 fdk_result fdk_a11y_text_set_caret(fdk_widget *widget, size_t offset);
+/* Sets the selection through the editor's own semantics. */
 fdk_result fdk_a11y_text_set_selection(fdk_widget *widget, size_t anchor,
                                        size_t caret);
 
@@ -431,6 +434,7 @@ typedef enum fdk_a11y_relation_type {
 
 #define FDK_A11Y_MAX_RELATIONS 16
 
+/* Adds the edge AND its inverse (see the symmetry note above). */
 fdk_result fdk_a11y_add_relation(fdk_widget *from,
                                  fdk_a11y_relation_type type,
                                  fdk_widget *to);
@@ -443,6 +447,7 @@ fdk_result fdk_a11y_remove_relation(fdk_widget *from,
 /* Enumerate `from`'s edges of `type` in insertion order. */
 size_t fdk_a11y_relation_count(const fdk_widget *from,
                                fdk_a11y_relation_type type);
+/* The index-th target of that relation type. */
 fdk_result fdk_a11y_relation_at(const fdk_widget *from,
                                 fdk_a11y_relation_type type,
                                 size_t index, fdk_widget **out_to);

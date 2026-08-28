@@ -601,3 +601,15 @@ UndefinedBehaviorSanitizer by default (see `docs/build.md` — this is
 the standard debug-build configuration, not a special test-only flag).
 A test that "passes" but leaks memory or trips UB is a failure, not a
 pass, per `docs/memory.md`.
+
+## Performance baseline (not a test)
+
+`make bench` builds and runs `tests/bench.c` against release objects
+(no sanitizers — they would distort timings by multiples) and prints
+one ops/s + ns/op line per benchmark: tree construction (eager and
+layout-batched), layout sweeps, full vs damage-tracked repaints, text
+measurement and line-breaking, event dispatch, theme switching, and
+the i18n formatters. It is deliberately NOT part of `make test`:
+performance numbers are machine-dependent. The reference baseline and
+the findings it produced (including the 515x layout-batching win)
+live in `docs/performance.md`.

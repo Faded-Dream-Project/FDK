@@ -78,6 +78,7 @@ typedef enum fdk_align {
 fdk_result fdk_box_create(fdk_widget *parent, fdk_orientation orientation,
                           fdk_widget **out_box);
 
+/* Re-runs the layout in the new direction. */
 void fdk_box_set_orientation(fdk_widget *box, fdk_orientation orientation);
 fdk_orientation fdk_box_get_orientation(const fdk_widget *box);
 
@@ -159,6 +160,7 @@ void fdk_grid_set_homogeneous(fdk_widget *grid, bool homogeneous);
 /* Marks a column / row as sharing the container's extra along-axis
  * space when arranged larger than natural. Off by default. */
 void fdk_grid_set_column_expand(fdk_widget *grid, fdk_i32 column, bool expand);
+/* Row expand flag (columns have the column twin). */
 void fdk_grid_set_row_expand(fdk_widget *grid, fdk_i32 row, bool expand);
 
 /* ---- Min/max size constraints (Phase 5 completion) ----
@@ -208,6 +210,36 @@ void fdk_window_set_content(fdk_window *window, fdk_widget *content);
  * set_content) can call it for their own top container; for
  * set_content users it happens automatically. */
 void fdk_window_layout(fdk_window *window);
+
+/* ---- Layout batching (performance) ------------------------------------
+ *
+ * Building a large tree widget-by-widget is quadratic-ish without
+ * help: every create relayouts the parent AND every ancestor
+ * container (the eager contract that keeps geometry correct right
+ * after each mutation — the property every other FDK API and test
+ * relies on). For bulk construction, wrap the build in a batch:
+ *
+ *     fdk_layout_begin_batch();
+ *     build_my_dialog(root);       // hundreds of creates/sets
+ *     fdk_layout_end_batch();      // ONE relayout per dirty chain
+ *
+ * Inside a batch, layout invalidations MARK the affected containers
+ * instead of relayouting them; end_batch relayouts each marked
+ * chain's topmost container once (its arrange cascade refreshes
+ * every descendant below it). The final geometry is identical to
+ * the eager path — the bench suite pins this — only the
+ * intermediate work disappears. Batches nest (only the outermost
+ * end flushes); an unbalanced end is a harmless no-op; widgets
+ * destroyed inside a batch are removed from the pending set, so
+ * batches may span widget lifetimes.
+ *
+ * Reading geometry INSIDE a batch sees pre-batch values (nothing
+ * has relayouted yet) — batch around bulk construction, not around
+ * interaction with the results. */
+
+void fdk_layout_begin_batch(void);
+/* Ends a batch: flushes pending layout (outermost only). */
+void fdk_layout_end_batch(void);
 
 #ifdef __cplusplus
 }

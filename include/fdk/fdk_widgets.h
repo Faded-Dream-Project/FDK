@@ -131,6 +131,7 @@ size_t fdk_label_get_line_count(fdk_widget *label);
 fdk_result fdk_button_create(fdk_widget *parent, fdk_font *font,
                              const char *text, fdk_widget **out_button);
 
+/* Replaces the label (copied; re-measures). */
 fdk_result fdk_button_set_text(fdk_widget *button, const char *text);
 
 /* Fires when the button activates: pointer release inside the widget
@@ -139,6 +140,7 @@ fdk_result fdk_button_set_text(fdk_widget *button, const char *text);
  * apply (destroying the button in the callback is safe). */
 typedef void (*fdk_button_activate_fn)(fdk_widget *button,
                                        void *user_data);
+/* Sets the activation callback (see the typedef above). */
 void fdk_button_set_on_activate(fdk_widget *button,
                                 fdk_button_activate_fn on_activate,
                                 void *user_data);
@@ -153,6 +155,7 @@ fdk_result fdk_toggle_create(fdk_widget *parent, fdk_font *font,
 /* Sets the checked state (clamped to exactly true/false). Programmatic
  * changes fire on_change too. Repaints. */
 void fdk_toggle_set_checked(fdk_widget *toggle, bool checked);
+/* The current checked state. */
 bool fdk_toggle_is_checked(fdk_widget *toggle);
 
 typedef void (*fdk_toggle_change_fn)(fdk_widget *toggle, bool checked,
@@ -167,10 +170,13 @@ void fdk_toggle_set_on_change(fdk_widget *toggle,
 fdk_result fdk_checkbox_create(fdk_widget *parent, fdk_font *font,
                                const char *text,
                                fdk_widget **out_checkbox);
+/* Same setter contract as Toggle. */
 void fdk_checkbox_set_checked(fdk_widget *checkbox, bool checked);
+/* The current checked state. */
 bool fdk_checkbox_is_checked(fdk_widget *checkbox);
 typedef void (*fdk_checkbox_change_fn)(fdk_widget *checkbox,
                                        bool checked, void *user_data);
+/* Same callback contract as Toggle. */
 void fdk_checkbox_set_on_change(fdk_widget *checkbox,
                                 fdk_checkbox_change_fn on_change,
                                 void *user_data);
@@ -193,10 +199,12 @@ fdk_result fdk_radio_create(fdk_widget *parent, fdk_font *font,
  * an already-checked radio is a no-op. Unchecking a radio directly
  * is allowed (leaves the group with no selection). */
 void fdk_radio_set_checked(fdk_widget *radio, bool checked);
+/* The current checked state. */
 bool fdk_radio_is_checked(fdk_widget *radio);
 
 typedef void (*fdk_radio_change_fn)(fdk_widget *radio, bool checked,
                                     void *user_data);
+/* Same callback contract as Toggle. */
 void fdk_radio_set_on_change(fdk_widget *radio,
                              fdk_radio_change_fn on_change,
                              void *user_data);
@@ -211,6 +219,7 @@ fdk_result fdk_progress_create(fdk_widget *parent,
 
 /* Sets the fraction, clamped to [0, 1]. Repaints. */
 void fdk_progress_set_fraction(fdk_widget *progress, fdk_f32 fraction);
+/* The current fraction, as last set (already clamped). */
 fdk_f32 fdk_progress_get_fraction(fdk_widget *progress);
 
 /* ---- Separator ---- */
@@ -231,6 +240,7 @@ fdk_result fdk_separator_create(fdk_widget *parent,
 fdk_result fdk_frame_create(fdk_widget *parent, fdk_font *font,
                             const char *title, fdk_widget **out_frame);
 
+/* Replaces the title (copied; NULL clears). Re-measures. */
 fdk_result fdk_frame_set_title(fdk_widget *frame, const char *title);
 
 /* ---- Entry (Phase 9) ----
@@ -262,6 +272,7 @@ typedef void (*fdk_entry_changed_fn)(fdk_widget *entry, void *user_data);
 /* Enter pressed. */
 typedef void (*fdk_entry_activate_fn)(fdk_widget *entry, void *user_data);
 
+/* Creates the entry with initial text (copied; NULL = empty). */
 fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
                             const char *text, fdk_widget **out_entry);
 
@@ -277,6 +288,7 @@ fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text);
  * off-boundary offsets (FDK_ERR_INVALID_ARGUMENT) rather than
  * silently snapping. */
 size_t fdk_entry_get_cursor(fdk_widget *entry);
+/* Moves the caret (collapsing the selection). */
 fdk_result fdk_entry_set_cursor(fdk_widget *entry, size_t byte_offset);
 
 /* Selection as [anchor, caret) byte offsets. anchor == caret means
@@ -285,8 +297,10 @@ fdk_result fdk_entry_set_cursor(fdk_widget *entry, size_t byte_offset);
  * offsets; select_all is the whole buffer. */
 fdk_result fdk_entry_get_selection(fdk_widget *entry, size_t *anchor,
                                    size_t *caret);
+/* Sets the selection (and the caret to its far end). */
 fdk_result fdk_entry_select_range(fdk_widget *entry, size_t anchor,
                                   size_t caret);
+/* Selects the whole buffer. */
 void fdk_entry_select_all(fdk_widget *entry);
 
 /* IME groundwork: display `preedit` inline at the caret, underlined;
@@ -301,12 +315,14 @@ fdk_result fdk_entry_set_preedit(fdk_widget *entry, const char *preedit);
  * fdk_entry_get_text and the accessibility value interface (masking
  * there is a bridge decision, not the toolkit's). */
 void fdk_entry_set_password(fdk_widget *entry, bool password);
+/* Whether password (bullet) rendering is on. */
 bool fdk_entry_is_password(fdk_widget *entry);
 
 /* READ-ONLY: selection and copy keep working (the reader contract);
  * typing, Backspace/Delete, cut, and paste are consumed and ignored.
  * Programmatic fdk_entry_set_text still works. */
 void fdk_entry_set_read_only(fdk_widget *entry, bool read_only);
+/* Whether typing is refused (selection + copy still work). */
 bool fdk_entry_is_read_only(fdk_widget *entry);
 
 /* EDITABLE CAP in bytes (0 = the 64 KiB hard limit). Typing, paste,
@@ -314,11 +330,14 @@ bool fdk_entry_is_read_only(fdk_widget *entry);
  * reading are unaffected. Shrinking below the current length does
  * NOT truncate the existing text — the cap applies to growth. */
 void fdk_entry_set_max_length(fdk_widget *entry, size_t max_bytes);
+/* The byte cap (0 = unlimited). */
 size_t fdk_entry_get_max_length(fdk_widget *entry);
 
+/* Buffer-mutation callback (see the typedef above). */
 void fdk_entry_set_on_changed(fdk_widget *entry,
                               fdk_entry_changed_fn on_changed,
                               void *user_data);
+/* Enter-press callback. */
 void fdk_entry_set_on_activate(fdk_widget *entry,
                                fdk_entry_activate_fn on_activate,
                                void *user_data);
@@ -354,8 +373,10 @@ fdk_result fdk_scrollview_set_content(fdk_widget *scrollview,
  * both axes. get returns the clamped truth. */
 fdk_result fdk_scrollview_scroll_to(fdk_widget *scrollview, fdk_i32 x,
                                     fdk_i32 y);
+/* Relative scroll, clamped like scroll_to. */
 void fdk_scrollview_scroll_by(fdk_widget *scrollview, fdk_i32 dx,
                               fdk_i32 dy);
+/* The clamped current offsets. */
 fdk_result fdk_scrollview_get_scroll_offset(fdk_widget *scrollview,
                                             fdk_i32 *out_x,
                                             fdk_i32 *out_y);
@@ -386,9 +407,11 @@ typedef enum fdk_list_selection_mode {
 typedef void (*fdk_list_selection_fn)(fdk_widget *list,
                                       void *user_data);
 
+/* SINGLE selection by default. */
 fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
                            fdk_widget **out_list);
 
+/* Switches modes; clears the selection. */
 void fdk_list_set_selection_mode(fdk_widget *list,
                                  fdk_list_selection_mode mode);
 
@@ -396,12 +419,17 @@ void fdk_list_set_selection_mode(fdk_widget *list,
  * non-NULL. Row text is copied. */
 fdk_result fdk_list_append(fdk_widget *list, const char *text,
                            size_t *out_index);
+/* Inserts before `index` (== count appends). */
 fdk_result fdk_list_insert(fdk_widget *list, size_t index,
                            const char *text);
+/* Removes the row; later rows shift down. */
 fdk_result fdk_list_remove(fdk_widget *list, size_t index);
+/* Removes every row. */
 void fdk_list_clear(fdk_widget *list);
+/* The number of rows. */
 size_t fdk_list_row_count(fdk_widget *list);
 const char *fdk_list_row_text(fdk_widget *list, size_t row);
+/* Replaces the row text (copied). */
 fdk_result fdk_list_set_row_text(fdk_widget *list, size_t row,
                                  const char *text);
 
@@ -409,12 +437,17 @@ fdk_result fdk_list_set_row_text(fdk_widget *list, size_t row,
  * current mode: cleared-then-one, honoring MULTIPLE's additive
  * contract). */
 fdk_i64 fdk_list_get_selected(fdk_widget *list);
+/* Whether the row is selected. */
 bool fdk_list_is_selected(fdk_widget *list, size_t row);
+/* How many rows are selected. */
 size_t fdk_list_selected_count(fdk_widget *list);
+/* The position-th selected row, in row order. */
 fdk_result fdk_list_selected_at(fdk_widget *list, size_t position,
                                 size_t *out_row);
+/* Programmatic select per the current mode. */
 fdk_result fdk_list_select(fdk_widget *list, size_t row);
 
+/* Fires once per settled change. */
 void fdk_list_set_on_selection_changed(fdk_widget *list,
                                        fdk_list_selection_fn fn,
                                        void *user_data);
@@ -441,6 +474,7 @@ typedef size_t fdk_tree_node;
 typedef void (*fdk_tree_selection_fn)(fdk_widget *tree,
                                       void *user_data);
 
+/* Creates an empty tree. */
 fdk_result fdk_tree_create(fdk_widget *parent, fdk_font *font,
                            fdk_widget **out_tree);
 
@@ -450,6 +484,7 @@ fdk_result fdk_tree_create(fdk_widget *parent, fdk_font *font,
 fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
                              const char *text,
                              fdk_tree_node *out_node);
+/* Replaces the node text (copied). */
 fdk_result fdk_tree_node_set_text(fdk_widget *tree,
                                   fdk_tree_node node,
                                   const char *text);
@@ -459,15 +494,20 @@ const char *fdk_tree_node_text(fdk_widget *tree, fdk_tree_node node);
  * FDK_ERR_INVALID_ARGUMENT). */
 fdk_result fdk_tree_node_expand(fdk_widget *tree, fdk_tree_node node,
                                 bool expanded);
+/* Expansion state (leaves report false). */
 bool fdk_tree_node_is_expanded(fdk_widget *tree,
                                fdk_tree_node node);
+/* Direct children of the node. */
 size_t fdk_tree_node_child_count(fdk_widget *tree,
                                  fdk_tree_node node);
 
 fdk_tree_node fdk_tree_get_selected(fdk_widget *tree);
+/* Selects the node (NODE_NONE clears). */
 fdk_result fdk_tree_select(fdk_widget *tree, fdk_tree_node node);
+/* Rows a walk would visit right now. */
 size_t fdk_tree_visible_count(fdk_widget *tree);
 
+/* Fires on selection changes. */
 void fdk_tree_set_on_selection_changed(fdk_widget *tree,
                                        fdk_tree_selection_fn fn,
                                        void *user_data);
@@ -482,13 +522,19 @@ void fdk_tree_set_on_selection_changed(fdk_widget *tree,
 typedef void (*fdk_slider_changed_fn)(fdk_widget *slider,
                                       void *user_data);
 
+/* Creates the slider over [min, max] at value. */
 fdk_result fdk_slider_create(fdk_widget *parent, double min,
                              double max, double value,
                              fdk_widget **out_slider);
+/* Re-ranges; the value clamps into the new interval. */
 void fdk_slider_set_range(fdk_widget *slider, double min, double max);
+/* Quantizes value changes (0 = continuous, the default). */
 void fdk_slider_set_step(fdk_widget *slider, double step);
+/* Sets (clamped, quantized); fires on_changed. */
 void fdk_slider_set_value(fdk_widget *slider, double value);
+/* The current value. */
 double fdk_slider_get_value(fdk_widget *slider);
+/* Fires on every value change. */
 void fdk_slider_set_on_changed(fdk_widget *slider,
                                fdk_slider_changed_fn on_changed,
                                void *user_data);
@@ -505,15 +551,21 @@ void fdk_slider_set_on_changed(fdk_widget *slider,
 typedef void (*fdk_spin_changed_fn)(fdk_widget *spin,
                                     void *user_data);
 
+/* Creates the spin over [min, max] at value. */
 fdk_result fdk_spin_create(fdk_widget *parent, fdk_font *font,
                            double min, double max, double value,
                            fdk_widget **out_spin);
+/* Re-ranges; the value clamps into the new interval. */
 void fdk_spin_set_range(fdk_widget *spin, double min, double max);
+/* Stepper/keyboard step (default 1). */
 void fdk_spin_set_step(fdk_widget *spin, double step);
+/* Commits (clamped); rewrites the buffer. */
 void fdk_spin_set_value(fdk_widget *spin, double value);
+/* The last committed value. */
 double fdk_spin_get_value(fdk_widget *spin);
 /* The raw buffer (delegated to the embedded entry). */
 const char *fdk_spin_get_text(fdk_widget *spin);
+/* Fires on every commit. */
 void fdk_spin_set_on_changed(fdk_widget *spin,
                              fdk_spin_changed_fn on_changed,
                              void *user_data);
@@ -527,11 +579,13 @@ void fdk_spin_set_on_changed(fdk_widget *spin,
 
 fdk_result fdk_toolbar_create(fdk_widget *parent, fdk_font *font,
                               fdk_widget **out_toolbar);
+/* Appends a flat button; out_button may be NULL. */
 fdk_result fdk_toolbar_add_button(fdk_widget *toolbar,
                                   const char *text,
                                   fdk_button_activate_fn on_activate,
                                   void *user_data,
                                   fdk_widget **out_button);
+/* Appends a separator. */
 fdk_result fdk_toolbar_add_separator(fdk_widget *toolbar);
 
 /* ---- Notebook / TabView (Phase 9) ----
@@ -545,17 +599,23 @@ fdk_result fdk_toolbar_add_separator(fdk_widget *toolbar);
 typedef void (*fdk_notebook_switch_fn)(fdk_widget *notebook,
                                        size_t page, void *user_data);
 
+/* Creates an empty notebook. */
 fdk_result fdk_notebook_create(fdk_widget *parent, fdk_font *font,
                                fdk_widget **out_notebook);
+/* Adopts the page (reparented); first page becomes current. */
 fdk_result fdk_notebook_append_page(fdk_widget *notebook,
                                     fdk_widget *page,
                                     const char *label);
+/* The number of pages. */
 size_t fdk_notebook_page_count(fdk_widget *notebook);
+/* Switches (clamped, no-op when unchanged). */
 fdk_result fdk_notebook_set_current_page(fdk_widget *notebook,
                                          size_t index);
+/* The current page index (0 when empty). */
 size_t fdk_notebook_get_current_page(fdk_widget *notebook);
 fdk_widget *fdk_notebook_get_page(fdk_widget *notebook,
                                   size_t index);
+/* Fires after a switch settles. */
 void fdk_notebook_set_on_switch(fdk_widget *notebook,
                                 fdk_notebook_switch_fn fn,
                                 void *user_data);
@@ -575,13 +635,16 @@ typedef void (*fdk_canvas_paint_fn)(fdk_widget *canvas,
                                     fdk_rect bounds, fdk_rect clip,
                                     void *user_data);
 
+/* Creates the canvas with its paint callback (may be NULL). */
 fdk_result fdk_canvas_create(fdk_widget *parent,
                              fdk_canvas_paint_fn on_paint,
                              void *user_data,
                              fdk_widget **out_canvas);
+/* Replaces the callback (NULL = blank). */
 void fdk_canvas_set_paint_callback(fdk_widget *canvas,
                                    fdk_canvas_paint_fn on_paint,
                                    void *user_data);
+/* Requests a repaint of the whole canvas. */
 void fdk_canvas_invalidate(fdk_widget *canvas);
 
 /* ---- Menu (Phase 9) ----
@@ -644,24 +707,36 @@ typedef enum fdk_menu_item_type {
 typedef void (*fdk_menu_activate_fn)(fdk_menu_item *item,
                                      void *user_data);
 
+/* Creates an empty menu model (no widget yet). */
 fdk_result fdk_menu_create(fdk_font *font, fdk_menu **out_menu);
+/* Destroys the model (after any bar using it). */
 void fdk_menu_destroy(fdk_menu *menu);
+/* The number of rows (separators included). */
 size_t fdk_menu_item_count(fdk_menu *menu);
 
+/* Appends a normal item. */
 fdk_result fdk_menu_append(fdk_menu *menu, const char *text,
                            fdk_menu_item **out_item);
+/* Appends a separator row. */
 fdk_result fdk_menu_append_separator(fdk_menu *menu);
+/* Appends a check item at the given state. */
 fdk_result fdk_menu_append_check(fdk_menu *menu, const char *text,
                                  bool checked, fdk_menu_item **out_item);
+/* Appends a radio item at the given state. */
 fdk_result fdk_menu_append_radio(fdk_menu *menu, const char *text,
                                  bool checked, fdk_menu_item **out_item);
 
+/* Replaces the label (copied; NULL clears). */
 fdk_result fdk_menu_item_set_text(fdk_menu_item *item, const char *text);
 const char *fdk_menu_item_text(fdk_menu_item *item);
 fdk_menu_item_type fdk_menu_item_get_type(fdk_menu_item *item);
+/* Disabled items dim and refuse activation. */
 void fdk_menu_item_set_enabled(fdk_menu_item *item, bool enabled);
+/* The item's enabled flag. */
 bool fdk_menu_item_is_enabled(fdk_menu_item *item);
+/* Sets the check/radio state (no-op on other kinds). */
 void fdk_menu_item_set_checked(fdk_menu_item *item, bool checked);
+/* The current state (false on other kinds). */
 bool fdk_menu_item_is_checked(fdk_menu_item *item);
 /* Display-only shortcut label, drawn right-aligned. NULL clears. */
 fdk_result fdk_menu_item_set_shortcut(fdk_menu_item *item,
@@ -696,9 +771,12 @@ void fdk_menu_set_on_activate(fdk_menu *menu,
 
 fdk_result fdk_menu_bar_create(fdk_widget *parent, fdk_font *font,
                                fdk_widget **out_bar);
+/* Appends a title bound to `menu` (borrowed). */
 fdk_result fdk_menu_bar_append(fdk_widget *bar, const char *title,
                                fdk_menu *menu);
+/* The number of titles. */
 size_t fdk_menu_bar_count(fdk_widget *bar);
+/* Removes the title (closing its open menu first). */
 fdk_result fdk_menu_bar_remove(fdk_widget *bar, size_t index);
 /* Closes any open chain (as if Escape-dismissed from the top). */
 void fdk_menu_bar_close(fdk_widget *bar);
@@ -736,24 +814,32 @@ fdk_result fdk_menu_popup_at(fdk_menu *menu, fdk_widget *anchor,
 typedef void (*fdk_combo_changed_fn)(fdk_widget *combo, size_t index,
                                      void *user_data);
 
+/* Creates an empty, non-editable combo. */
 fdk_result fdk_combo_create(fdk_widget *parent, fdk_font *font,
                             fdk_widget **out_combo);
 
+/* Appends an option (copied). */
 fdk_result fdk_combo_append(fdk_widget *combo, const char *text,
                             size_t *out_index);
+/* Removes the option; active adjusts (removing it clears). */
 fdk_result fdk_combo_remove(fdk_widget *combo, size_t index);
+/* Removes every option. */
 void fdk_combo_clear(fdk_widget *combo);
+/* The number of options. */
 size_t fdk_combo_count(fdk_widget *combo);
 const char *fdk_combo_text(fdk_widget *combo, size_t index);
 
+/* The active index (-1 = none). */
 fdk_i64 fdk_combo_get_active(fdk_widget *combo); /* -1 = none */
 /* -1 clears the active row (no on_changed for a no-op). */
 fdk_result fdk_combo_set_active(fdk_widget *combo, fdk_i64 index);
 /* The active row's text, or the Entry buffer when editable/custom;
  * never NULL; valid until the next change. */
 const char *fdk_combo_active_text(fdk_widget *combo);
+/* Editable combos embed a text Entry. */
 void fdk_combo_set_editable(fdk_widget *combo, bool editable);
 
+/* Fires when the active option changes. */
 void fdk_combo_set_on_changed(fdk_widget *combo,
                               fdk_combo_changed_fn on_changed,
                               void *user_data);

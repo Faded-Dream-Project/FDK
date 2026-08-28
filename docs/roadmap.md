@@ -1436,11 +1436,120 @@ same way the X11/Wayland backends sit under the widget layer.
   still show M/d/y). The ENGINE takes all of these as data
   additions; nothing structural is missing.
 
-## Phase 11 — Stabilization
+## Phase 11 — Stabilization — COMPLETE
 
-- ABI freeze (`FDK_ABI_STABLE` → 1, see `docs/abi-policy.md`; this
-  is also where application-embeddable widget subclassing is
-  revisited)
-- API cleanup pass, performance profiling (not before this — see
-  project principle against premature optimization), memory-safety
-  audit, full documentation pass, packaging
+The roadmap line promised five things: the ABI freeze
+(`FDK_ABI_STABLE` → 1, with the application-embeddable-subclassing
+question revisited), an API cleanup pass, performance profiling
+(deliberately last — the project principle against premature
+optimization), a memory-safety audit, a full documentation pass, and
+packaging. All five landed; FDK is 1.0.0.
+
+### The ABI freeze
+
+- **The audit** classified every struct in every public header
+  (docs/abi-policy.md's table): opaque objects (layouts never
+  exposed), frozen VALUE types (geometry, color, events, metrics,
+  dates, locales — FDK's GdkRectangle/QRect tier), append-only
+  INPUT structs (init/window/dialog/number options), the one
+  caller-allocated RESULT struct (fdk_a11y_info — future additions
+  get accessors, never fields), and the append-only VTABLES
+  (widget class, a11y class).
+- **Compile-time enforcement**: `src/core/abi_check.c` pins every
+  frozen struct's size with `_Static_assert` — an accidental field
+  edit now fails FDK's own build instead of detonating in someone's
+  application. (The assertions earned their keep immediately: the
+  first draft's guessed sizes failed the build, and the file was
+  corrected against the REAL measured values.)
+- **`FDK_ABI_STABLE` is 1; the version is 1.0.0.**
+- **The subclassing decision** (recorded in full in abi-policy.md):
+  the widget-class VTABLE stays public (it documents the hook
+  contracts), the `struct fdk_widget` LAYOUT stays internal —
+  exposing it would freeze the object model forever (the GTK
+  lesson). The 1.0 extension surface is class hooks + user_data,
+  event callbacks, Canvas, and composition; if real applications
+  hit the wall, the 2.0 answer is an allocation-callback pattern,
+  not layout exposure.
+
+### Performance profiling (the findings)
+
+`tests/bench.c` + `make bench` (release objects — the sanitizer
+build distorts numbers by multiples) measure the hot paths at
+realistic workloads; `docs/performance.md` is the recorded baseline.
+Two real findings, one fixed:
+
+- **Quadratic tree construction — FIXED**: every child mutation
+  relayouted the parent AND propagated to every ancestor, so
+  building a nested UI widget-by-widget cost O(n²)-ish — 558 ms for
+  a 475-widget tree. The fix is `fdk_layout_begin_batch()` /
+  `fdk_layout_end_batch()` (public, fdk_layout.h): inside a batch,
+  invalidations mark containers dirty (bit sets) instead of
+  relayouting; the flush relayouts each dirty chain's topmost
+  container once, whose arrange cascade refreshes every descendant.
+  Outside a batch the behavior is byte-identical to the eager path —
+  the ENTIRE existing test suite pins that, plus new tests proving
+  batched == eager geometry, nested batches, unbalanced-end
+  tolerance, and mid-batch destroy safety (destroyed widgets are
+  forgotten from the pending set). **515x** on the fixture (558 ms →
+  1.1 ms per tree).
+- **paint-full is memory-bandwidth, not bookkeeping**: 12 ms/frame
+  for a full 475-widget repaint is dominated by overdraw (~38 MB of
+  pixel traffic at 800x600), which is what the fill primitives
+  cost, not an algorithm bug. Steady-state damage repaints are 46 µs
+  (260x cheaper). An occlusion cull is recorded in
+  docs/performance.md as the honest frontier — to be built IF a
+  profile of a real app ever shows full repaints dominating.
+- Everything else measured healthy: 77 ns event dispatch, 23 ns
+  plural rules, 1.2 µs whole-tree theme invalidation, 10 µs
+  paragraph measurement.
+
+### API cleanup pass
+
+- 298 public functions scanned: every one now carries a doc comment
+  (the trivial accessors gained one-liners naming their contracts;
+  the non-trivial ones were already documented).
+- Zero TODO/FIXME/XXX markers across src/ and include/.
+- Naming is uniformly `fdk_<noun>_<verb>`; every public header is in
+  the fdk.h umbrella; no backend type leaks into any public header
+  (the Phase 2 invariant, re-verified).
+
+### Memory-safety audit
+
+Documented in docs/memory.md as six reproducible criteria: raw
+allocators confined to src/core/alloc.c; every allocation path has
+its free on EVERY exit (parsers destroy working objects on error;
+widget teardown is a complete ordered walk); no unchecked
+multiplication before allocation (fdk_alloc_array guards centrally;
+the hand-rolled grows were audited for the same shape);
+dangling-pointer classes are structurally prevented (unlink-before-
+callbacks, two-sided relation removal, layout-batch forgetting,
+window-root teardown ordering); every test binary runs ASan+UBSan
+with leak detection; every parser-facing buffer is bounded. The
+audit's known sharp edges (single-threaded object model; a destroyed
+pointer is ordinary C UB) are documented, not hidden.
+
+### Documentation pass + packaging
+
+- docs/: abi-policy (classification + decision), performance
+  (baseline + findings), memory (audit), build (bench + pkg-config
+  linking), testing (bench), i18n + catalog format (Phase 10) —
+  alongside the existing architecture/rendering/text/threading/
+  security/testing/build/dependencies/licensing set.
+- Packaging: `fdk.pc.in` → `build/fdk.pc` generated at install time
+  from `fdk_version.h` (the version can never drift from the
+  headers) with the platform deps the build itself resolved as
+  Requires.private; `make install` places headers, both libraries,
+  and the .pc; `make bench` documented; `make uninstall` removes
+  all three.
+- **Full battery at freeze: headless 415+ checks, X11 integration
+  suite PASS, release build 0 warnings, bench baseline recorded.**
+
+### Remaining (parked, recorded honestly)
+
+- The occlusion cull (see above) — data-driven future work, not
+  owed by this phase.
+- The AT-SPI2 bridge (Phase 10's deliberate out-of-toolkit seam) —
+  unchanged.
+- Distribution packaging (deb/rpm/APK recipes) — the Makefile
+  install + pkg-config are the toolkit's packaging surface;
+  distro-specific recipes are downstream work, not library work.

@@ -31,7 +31,10 @@ make test-x11   # build and run the X11 integration test suite
                 # (uses $DISPLAY if set, otherwise auto-starts/stops a
                 # throwaway Xvfb — requires Xvfb to be installed)
 make examples   # build example programs, linked against libfdk.a
-make install    # install headers + both libraries (PREFIX=/usr/local by default)
+make bench      # build and run the performance baseline harness
+                # (release objects, no sanitizers; see docs/performance.md)
+make install    # install headers + both libraries + fdk.pc
+                # (PREFIX=/usr/local by default)
 make uninstall  # remove what `install` put there
 make clean      # remove build/ entirely
 ```
@@ -42,6 +45,26 @@ Override variables on the command line, e.g.:
 make release PREFIX=/usr
 make CC=clang
 ```
+
+### Linking an application
+
+After `make install`, applications find FDK through pkg-config:
+
+```sh
+cc myapp.c $(pkg-config --cflags --libs fdk) -o myapp
+```
+
+The installed `fdk.pc` carries the platform dependencies the build
+resolved (X11, and Wayland/xkbcommon when enabled) as
+`Requires.private` — the shared library needs nothing extra from the
+app, and static linking pulls the transitive set in automatically.
+The version in `fdk.pc` is generated from `include/fdk/fdk_version.h`
+at install time, so it can never drift from the headers.
+
+For building against the tree without installing, compile with
+`-Iinclude` and link `build/libfdk.a` (plus `-lX11 -lXext -lm`, and
+the Wayland libs when built with Wayland enabled) — the same flags
+the Makefile computes.
 
 ## Optional Wayland build
 

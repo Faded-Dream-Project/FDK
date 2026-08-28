@@ -734,7 +734,127 @@ static void test_grid_notification_relayout(void) {
            "explicit arrange (notifier grid-ness regression)\n");
 }
 
+
+/* ---- layout batching (Phase 11) ----
+ *
+ * The batch contract: identical FINAL geometry to the eager path,
+ * one flush per dirty chain, and safety across destroys. */
+
+/* Collects the tree's geometry into a flat digest: bounds in
+ * depth-first order. Two trees built identically must produce the
+ * same digest whether layout ran eagerly or batched. */
+static void geometry_digest(fdk_widget *w, unsigned long *acc) {
+    fdk_rect b = fdk_widget_get_bounds(w);
+    *acc = *acc * 1315423911ul + (unsigned long)b.x;
+    *acc = *acc * 31ul + (unsigned long)b.y;
+    *acc = *acc * 31ul + (unsigned long)b.width;
+    *acc = *acc * 31ul + (unsigned long)b.height;
+    for (size_t i = 0; i < fdk_widget_child_count(w); i++) {
+        geometry_digest(fdk_widget_child_at(w, i), acc);
+    }
+}
+
+/* Builds the standard batching-fixture tree on `root`: nested
+ * boxes with fixed-size children (deterministic geometry). */
+static void build_fixture(fdk_widget *root) {
+    for (int i = 0; i < 4; i++) {
+        fdk_widget *row = NULL;
+        assert(fdk_ok(fdk_box_create(root, FDK_HORIZONTAL, &row)));
+        fdk_widget_set_expand(row, true, false);
+        for (int k = 0; k < 3; k++) {
+            (void)mk_child(row, 40 + k * 10, 20 + k);
+        }
+        fdk_widget *col = NULL;
+        assert(fdk_ok(fdk_box_create(root, FDK_VERTICAL, &col)));
+        (void)mk_child(col, 25, 15);
+        (void)mk_child(col, 30, 10);
+    }
+}
+
+static void test_layout_batch_equivalence(void) {
+    /* Eager reference. */
+    fdk_widget *eager = NULL;
+    assert(fdk_ok(fdk_box_create(NULL, FDK_VERTICAL, &eager)));
+    build_fixture(eager);
+    fdk_widget_arrange(eager, (fdk_rect){0, 0, 400, 300});
+    unsigned long digest_eager = 7;
+    geometry_digest(eager, &digest_eager);
+
+    /* Batched build: creates mark instead of relayouting. */
+    fdk_widget *batched = NULL;
+    fdk_layout_begin_batch();
+    assert(fdk_ok(fdk_box_create(NULL, FDK_VERTICAL, &batched)));
+    build_fixture(batched);
+    /* Geometry is intentionally NOT yet final inside the batch. */
+    fdk_layout_end_batch();
+    fdk_widget_arrange(batched, (fdk_rect){0, 0, 400, 300});
+    unsigned long digest_batched = 7;
+    geometry_digest(batched, &digest_batched);
+    assert(digest_eager == digest_batched);
+
+    /* A SECOND mutation round inside a batch after a flush: marks
+     * accumulate again and the next flush catches them. */
+    fdk_layout_begin_batch();
+    fdk_widget *extra = mk_child(batched, 50, 50);
+    fdk_widget_set_natural_size(extra, 60, 60);
+    fdk_layout_end_batch();
+    fdk_widget_arrange(batched, (fdk_rect){0, 0, 400, 300});
+    /* The eager twin with the same mutation: */
+    fdk_widget *extra2 = mk_child(eager, 50, 50);
+    fdk_widget_set_natural_size(extra2, 60, 60);
+    fdk_widget_arrange(eager, (fdk_rect){0, 0, 400, 300});
+    digest_eager = 7;
+    digest_batched = 7;
+    geometry_digest(eager, &digest_eager);
+    geometry_digest(batched, &digest_batched);
+    assert(digest_eager == digest_batched);
+
+    /* Nested batches: only the outermost flushes. */
+    fdk_layout_begin_batch();
+    fdk_layout_begin_batch();
+    fdk_widget *n1 = mk_child(batched, 10, 10);
+    (void)n1;
+    fdk_layout_end_batch(); /* inner: no flush yet */
+    fdk_layout_end_batch(); /* outer: flush */
+    fdk_layout_end_batch(); /* unbalanced: harmless no-op */
+    fdk_widget_arrange(batched, (fdk_rect){0, 0, 400, 300});
+
+    fdk_widget_destroy(eager);
+    fdk_widget_destroy(batched);
+    printf("[ok] layout batch: batched == eager geometry; nesting; "
+           "unbalanced end\n");
+}
+
+static void test_layout_batch_destroy_safety(void) {
+    /* Destroying widgets mid-batch must never leave the pending set
+     * with a dangling entry (the flush would relayout freed
+     * memory). */
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_box_create(NULL, FDK_VERTICAL, &root)));
+    fdk_layout_begin_batch();
+    build_fixture(root);
+    /* Destroy a whole nested subtree that carries pending marks. */
+    fdk_widget *victim = fdk_widget_child_at(root, 2);
+    fdk_widget_destroy(victim);
+    /* More mutations after the destroy. */
+    (void)mk_child(root, 35, 25);
+    fdk_layout_end_batch();
+    fdk_widget_arrange(root, (fdk_rect){0, 0, 400, 300});
+
+    /* The tree is consistent: every remaining child of root still
+     * has sane (non-degenerate) bounds after the flush. */
+    for (size_t i = 0; i < fdk_widget_child_count(root); i++) {
+        fdk_widget *c = fdk_widget_child_at(root, i);
+        fdk_rect b = fdk_widget_get_bounds(c);
+        assert(b.width > 0 || b.height > 0);
+    }
+    fdk_widget_destroy(root);
+    printf("[ok] layout batch: mid-batch destroy is flush-safe\n");
+}
+
 int main(void) {
+    test_layout_batch_equivalence();
+    test_layout_batch_destroy_safety();
     test_box_measure();
     test_box_arrange_horizontal();
     test_box_arrange_vertical_margins();

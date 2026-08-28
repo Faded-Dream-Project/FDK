@@ -331,6 +331,7 @@ static void teardown_free(fdk_widget *w) {
         child->flags |= FDK_WF_DESTROYING;
         teardown_free(child);
     }
+    fdk__layout_batch_forget(w); /* pending batch entries die here */
     fdk_free(w->children);
     fdk_free(w->name);
     fdk_free(w->a11y_name);
@@ -610,6 +611,10 @@ static fdk_widget *hit_test(fdk_widget *root, fdk_pointf pos) {
  * invisible to the walk. */
 static fdk_widget *g_roots;
 
+fdk_widget *fdk__widget_roots_head(void) {
+    return g_roots;
+}
+
 static void root_registry_add(fdk_widget *root) {
     root->root_prev = NULL;
     root->root_next = g_roots;
@@ -790,6 +795,12 @@ void fdk_widget_destroy(fdk_widget *widget) {
 
     fdk_widget *root = find_root(widget);
     widget->flags |= FDK_WF_DESTROYING;
+    /* Layout batching: a dying widget must never receive a batched
+     * flush (the notifier would relayout a detached subtree —
+     * harmless — but a DEFERRED free makes the entry dangle — not
+     * harmless). Forget it from the pending set now; children are
+     * forgotten individually in teardown_free. */
+    fdk__layout_batch_forget(widget);
 
     /* Leave the root registry at entry, before anything can defer: a
      * root pending teardown must already be invisible to the theme

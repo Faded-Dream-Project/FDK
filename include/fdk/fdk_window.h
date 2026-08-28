@@ -188,6 +188,7 @@ fdk_result fdk_window_restore(fdk_window *window);
  * FDK_EVENT_WINDOW_STATE). Note this is state-as-reported, not
  * request-as-sent — see the request/confirmation contract above. */
 bool fdk_window_is_maximized(const fdk_window *window);
+/* FDK's last-known minimized state. */
 bool fdk_window_is_minimized(const fdk_window *window);
 
 /* ---- Interactive resize (Phase 8) ----
@@ -207,6 +208,7 @@ bool fdk_window_is_minimized(const fdk_window *window);
  * WM frame left to resize it. Call set_resizable(false) AFTER
  * decorating for a fixed-size decorated window. */
 void fdk_window_set_resizable(fdk_window *window, bool resizable);
+/* Whether FDK resize edges are enabled. */
 bool fdk_window_get_resizable(const fdk_window *window);
 
 /* ---- FDK-drawn decorations (Phase 8) ----

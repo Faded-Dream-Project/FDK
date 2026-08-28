@@ -35,6 +35,10 @@ AR       ?= ar
 PREFIX   ?= /usr/local
 LIBDIR   ?= $(PREFIX)/lib
 INCDIR   ?= $(PREFIX)/include
+# Version for the pkg-config file and the shared-library SONAME;
+# kept in one place, mirroring include/fdk/fdk_version.h (the header
+# is the source of truth — a mismatch is a release-blocker).
+FDK_PC_VERSION := $(shell sed -n 's/^#define FDK_VERSION_STRING "\(.*\)"/\1/p' include/fdk/fdk_version.h)
 
 STD      := -std=c17
 WARN     := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
@@ -98,6 +102,12 @@ CFLAGS  ?= $(STD) $(WARN) $(FEATURE) $(DEBUG_FLAGS)
 CPPFLAGS:= -Iinclude -Isrc
 LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm
 
+# pkg-config exposure (fdk.pc): private deps are the ones the .so
+# already links (apps need nothing); Requires.private lets static
+# linking pull them in transitively.
+PC_REQUIRES := $(if $(FDK_HAS_WAYLAND),wayland-client xkbcommon,) x11
+PC_LIBS :=
+
 # Per-source-file extra flags: platform backends need their own
 # pkg-config include paths, and the Wayland backend additionally
 # disables -Wcast-qual (only for its own translation units) because
@@ -152,7 +162,7 @@ LIB_OBJS_PIC  := $(patsubst src/%.c,$(BUILD_DIR)/obj-pic/%.o,$(LIB_SRCS))
 STATIC_LIB := $(BUILD_DIR)/libfdk.a
 SHARED_LIB := $(BUILD_DIR)/libfdk.so
 
-TEST_SRCS := $(filter-out tests/test_x11_integration.c tests/test_wayland_integration.c,$(wildcard tests/*.c))
+TEST_SRCS := $(filter-out tests/test_x11_integration.c tests/test_wayland_integration.c tests/bench.c,$(wildcard tests/*.c))
 TEST_BINS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%,$(TEST_SRCS))
 
 X11_TEST_SRC := tests/test_x11_integration.c
@@ -173,7 +183,7 @@ EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 # library object did.
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
-.PHONY: all release static shared test test-x11 test-wayland examples install uninstall clean
+.PHONY: all release static shared test test-x11 test-wayland bench examples install uninstall clean
 
 all: static shared
 
@@ -279,17 +289,56 @@ $(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB)
 
 # --- Install ------------------------------------------------------------
 
-install: all
+# Performance baseline harness (Phase 11): NOT part of `make test`
+# (machine-dependent numbers); builds and runs a timing report.
+# Bench builds against a dedicated RELEASE object tree
+# (build/obj-rel + build/libfdk-rel.a): the default build is
+# ASan+UBSan-instrumented, and sanitizer overhead would distort the
+# numbers by multiples. The release flags match `make release`.
+REL_LIB := $(BUILD_DIR)/libfdk-rel.a
+
+$(BUILD_DIR)/obj-rel/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(STD) $(WARN) $(FEATURE) $(REL_FLAGS) \
+	    $(WAYLAND_DEFS) $(call extra_flags,$<) -MMD -MP -c $< -o $@
+
+$(REL_LIB): $(patsubst src/%.c,$(BUILD_DIR)/obj-rel/%.o,$(LIB_SRCS))
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+$(BUILD_DIR)/bench: tests/bench.c $(REL_LIB)
+	$(CC) $(STD) $(WARN) $(FEATURE) $(REL_FLAGS) -Iinclude -Isrc \
+	    tests/bench.c -o $@ $(REL_LIB) $(LDFLAGS)
+
+bench: $(BUILD_DIR)/bench
+	$(BUILD_DIR)/bench
+
+# pkg-config file: generated from fdk.pc.in so the version comes
+# from fdk_version.h, never from a second hand-edited copy.
+$(BUILD_DIR)/fdk.pc: fdk.pc.in include/fdk/fdk_version.h Makefile
+	@mkdir -p $(BUILD_DIR)
+	@sed -e 's|@PREFIX@|$(PREFIX)|g' \
+	     -e 's|@LIBDIR@|$(LIBDIR)|g' \
+	     -e 's|@INCDIR@|$(INCDIR)|g' \
+	     -e 's|@VERSION@|$(FDK_PC_VERSION)|g' \
+	     -e 's|@PC_REQUIRES@|$(PC_REQUIRES)|g' \
+	     -e 's|@PC_LIBS@|$(PC_LIBS)|g' fdk.pc.in > $@
+
+install: all $(BUILD_DIR)/fdk.pc
 	install -d $(DESTDIR)$(INCDIR)/fdk
 	install -m 644 include/fdk/*.h $(DESTDIR)$(INCDIR)/fdk/
 	install -d $(DESTDIR)$(LIBDIR)
 	install -m 644 $(STATIC_LIB) $(DESTDIR)$(LIBDIR)/
 	install -m 755 $(SHARED_LIB) $(DESTDIR)$(LIBDIR)/
+	install -d $(DESTDIR)$(LIBDIR)/pkgconfig
+	install -m 644 $(BUILD_DIR)/fdk.pc \
+	               $(DESTDIR)$(LIBDIR)/pkgconfig/fdk.pc
 
 uninstall:
 	rm -rf $(DESTDIR)$(INCDIR)/fdk
 	rm -f $(DESTDIR)$(LIBDIR)/libfdk.a
 	rm -f $(DESTDIR)$(LIBDIR)/libfdk.so
+	rm -f $(DESTDIR)$(LIBDIR)/pkgconfig/fdk.pc
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -282,6 +282,7 @@ fdk_widget *fdk_widget_child_at(const fdk_widget *widget, size_t index);
  * bottom-most position. No-op for roots. Invalidates the widget's
  * region so both the uncovered and covering areas repaint. */
 void fdk_widget_raise(fdk_widget *widget);
+/* The bottom-of-z-order counterpart of raise. */
 void fdk_widget_lower(fdk_widget *widget);
 
 /* Moves `widget` (with its subtree) from its current parent to the
@@ -292,6 +293,7 @@ void fdk_widget_lower(fdk_widget *widget);
  * Invalidates both the old and new absolute regions. */
 fdk_result fdk_widget_reparent(fdk_widget *widget, fdk_widget *new_parent);
 
+/* True when the widget has no parent. */
 bool fdk_widget_is_root(const fdk_widget *widget);
 
 /* ---- Geometry ---- */
@@ -313,10 +315,12 @@ fdk_rect fdk_widget_get_absolute_bounds(const fdk_widget *widget);
 /* ---- Visibility / enabled / focusability ---- */
 
 void fdk_widget_set_visible(fdk_widget *widget, bool visible);
+/* The widget's own visibility flag (see is_effectively_visible). */
 bool fdk_widget_get_visible(const fdk_widget *widget);       /* own flag   */
 bool fdk_widget_is_effectively_visible(const fdk_widget *);  /* AND chain  */
 
 void fdk_widget_set_enabled(fdk_widget *widget, bool enabled);
+/* The widget's own enabled flag (see is_effectively_enabled). */
 bool fdk_widget_get_enabled(const fdk_widget *widget);       /* own flag   */
 bool fdk_widget_is_effectively_enabled(const fdk_widget *);  /* AND chain  */
 
@@ -325,6 +329,7 @@ bool fdk_widget_is_effectively_enabled(const fdk_widget *);  /* AND chain  */
  * events — hit-testing only ever lands on visible+enabled widgets. */
 
 void fdk_widget_set_can_focus(fdk_widget *widget, bool can_focus);
+/* Whether the widget is focusable at all. */
 bool fdk_widget_get_can_focus(const fdk_widget *widget);
 
 /* ---- Pointer / keyboard state queries ---- */
@@ -438,6 +443,7 @@ void fdk_widget_arrange(fdk_widget *widget, fdk_rect assigned);
  * exist now so trees render recognizably without any subclassing. */
 
 void fdk_widget_set_background(fdk_widget *widget, fdk_color color);
+/* Rounded-corner radius for the background fill (0 = square). */
 void fdk_widget_set_corner_radius(fdk_widget *widget, fdk_i32 radius);
 
 /* ---- Window integration ---- */

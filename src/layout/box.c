@@ -571,8 +571,198 @@ static bool notifier_grid_class_of(const fdk_widget *w) {
            w->klass->arrange == fdk_grid_arrange_hook;
 }
 
+/* ---- Layout batching (Phase 11 perf pass) -----------------------------
+ *
+ * PROBLEM (found by the Phase 11 bench): every child change
+ * relayouts the parent AND propagates upward, so each ancestor
+ * re-runs its full subtree layout. Building a nested UI widget by
+ * widget is therefore quadratic-ish in tree size — the bench
+ * measured ~555 ms for a 475-widget nested-box tree, ~1.2 ms per
+ * widget added.
+ *
+ * FIX, contract-preserving: fdk_layout_begin_batch() switches the
+ * notifier to MARKING mode — a change marks the parent and every
+ * ancestor container LAYOUT_DIRTY (bit sets, no geometry work) —
+ * and fdk_layout_end_batch() relayouts each dirty chain's TOPMOST
+ * container once; its arrange cascade re-lays-out every descendant,
+ * which is why skipping dirtied descendants is not an optimization
+ * but the correctness argument. Outside a batch the behavior is
+ * byte-identical to before: tests and apps that read geometry right
+ * after a mutation keep working. Batches nest by depth; only the
+ * outermost end flushes. A destroyed widget is forgotten from the
+ * pending set at destroy time (fdk__layout_batch_forget), so a
+ * batch may span widget lifetimes safely.
+ *
+ * The dirty list is process-global (all roots): layout has no root
+ * affinity, and a batch crossing trees is as legal as one inside a
+ * tree. The list is bounded at 4096 entries; overflow switches
+ * end_batch to a wholesale tree-walk flush driven by the bits alone
+ * (the bits are always complete; only the list is capped). */
+
+static int g_batch_depth = 0;
+static fdk_widget **g_dirty = NULL;
+static size_t g_dirty_count = 0;
+static size_t g_dirty_cap = 0;
+static bool g_dirty_overflow = false;
+#define LAYOUT_DIRTY_MAX 4096u
+
+/* Is this widget a container the notifier relayouts? (One predicate,
+ * shared by mark and flush — mirrors the dispatch below.) */
+static bool layout_container_of(fdk_widget *w) {
+    return w != NULL &&
+           (box_class_of(w) ||
+            w->klass == &fdk_scrollview_class_def ||
+            w->klass == &fdk_toolbar_class_def ||
+            notifier_grid_class_of(w));
+}
+
+static void batch_mark(fdk_widget *w) {
+    for (fdk_widget *p = w; p != NULL; p = p->parent) {
+        if (!layout_container_of(p)) {
+            continue; /* skip non-containers up the chain */
+        }
+        if ((p->flags & FDK_WF_LAYOUT_DIRTY) != 0) {
+            return; /* the chain above is already marked */
+        }
+        p->flags |= FDK_WF_LAYOUT_DIRTY;
+        if (g_dirty_count < LAYOUT_DIRTY_MAX) {
+            if (g_dirty_count == g_dirty_cap) {
+                size_t cap = (g_dirty_cap == 0) ? 32
+                                                : g_dirty_cap * 2;
+                fdk_widget **grown =
+                    fdk_realloc(g_dirty, cap * sizeof(*grown));
+                if (grown == NULL) {
+                    /* OOM: the BIT is set (the truth); the wholesale
+                     * flush below walks bits, so correctness holds
+                     * without the list entry. */
+                    g_dirty_overflow = true;
+                    return;
+                }
+                g_dirty = grown;
+                g_dirty_cap = cap;
+            }
+            g_dirty[g_dirty_count++] = p;
+        } else {
+            g_dirty_overflow = true;
+        }
+        /* Keep climbing: the bits above still matter even past the
+         * list cap. */
+    }
+}
+
+/* Wholesale flush of one root's subtree: flush the topmost dirty
+ * container on each path; clear every dirty bit (the ones below a
+ * flushed container are covered by its cascade). Returns true if
+ * anything was flushed. */
+static bool batch_flush_tree(fdk_widget *w, bool covered_above) {
+    bool flushed = false;
+    if ((w->flags & FDK_WF_LAYOUT_DIRTY) != 0) {
+        if (!covered_above) {
+            fdk_widget_child_layout_changed(w);
+            flushed = true;
+        }
+        w->flags &= ~FDK_WF_LAYOUT_DIRTY;
+        covered_above = true; /* this subtree is fresh now */
+    }
+    for (size_t i = 0; i < w->child_count; i++) {
+        flushed |= batch_flush_tree(w->children[i], covered_above);
+    }
+    return flushed;
+}
+
+void fdk_layout_begin_batch(void) {
+    g_batch_depth++;
+}
+
+void fdk_layout_end_batch(void) {
+    if (g_batch_depth == 0) {
+        return; /* unbalanced end: harmless no-op */
+    }
+    g_batch_depth--;
+    if (g_batch_depth > 0) {
+        return; /* inner batch: the outer one flushes */
+    }
+
+    if (g_dirty_overflow) {
+        /* Bits beyond the list: walk every root's tree. Repeat until
+         * stable: a flush's upward propagation can dirty nothing
+         * new (layout passes never mutate the tree), so one pass
+         * suffices — but the loop is cheap insurance and makes the
+         * invariant obvious. */
+        for (bool any = true; any;) {
+            any = false;
+            for (fdk_widget *r = fdk__widget_roots_head(); r != NULL;
+                 r = r->root_next) {
+                any |= batch_flush_tree(r, false);
+            }
+        }
+    } else {
+        /* Normal mode: flush each dirty chain's topmost container.
+         * A dirty widget with a dirty ANCESTOR is covered by that
+         * ancestor's cascade — clear its bit and skip. List order
+         * is arbitrary, so "topmost" is decided per entry by
+         * climbing the dirty bits. */
+        for (size_t i = 0; i < g_dirty_count; i++) {
+            fdk_widget *w = g_dirty[i];
+            if (w == NULL || (w->flags & FDK_WF_LAYOUT_DIRTY) == 0) {
+                continue; /* forgotten or already flushed */
+            }
+            fdk_widget *top = w;
+            for (fdk_widget *p = w->parent; p != NULL;
+                 p = p->parent) {
+                if ((p->flags & FDK_WF_LAYOUT_DIRTY) != 0) {
+                    top = p;
+                }
+            }
+            /* Clear the bits of every dirty entry inside top's
+             * subtree-window (top's cascade covers them): cheaply,
+             * clear top's own bit, flush, and let later entries
+             * discover their bits already... they are NOT cleared
+             * by the cascade — so clear them here by re-climbing:
+             * entries below top whose topmost-dirty is top itself. */
+            top->flags &= ~FDK_WF_LAYOUT_DIRTY;
+            fdk_widget_child_layout_changed(top);
+            /* Now sweep the remaining list for entries whose dirty
+             * chain topped out at top (their ancestors are clean,
+             * their bit still set): they were covered — clear. */
+            for (size_t j = i + 1; j < g_dirty_count; j++) {
+                fdk_widget *d = g_dirty[j];
+                if (d == NULL ||
+                    (d->flags & FDK_WF_LAYOUT_DIRTY) == 0) {
+                    continue;
+                }
+                for (fdk_widget *p = d->parent; p != NULL;
+                     p = p->parent) {
+                    if (p == top) {
+                        d->flags &= ~FDK_WF_LAYOUT_DIRTY;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    g_dirty_count = 0;
+    g_dirty_overflow = false;
+    /* Capacity retained for the next batch. */
+}
+
+void fdk__layout_batch_forget(fdk_widget *w) {
+    /* Called from the widget core the moment a widget is unlinked
+     * for destruction: its pending dirty entry must never flush. */
+    for (size_t i = 0; i < g_dirty_count; i++) {
+        if (g_dirty[i] == w) {
+            g_dirty[i] = NULL; /* NULL is skipped by the flush */
+            return;
+        }
+    }
+}
+
 void fdk_widget_child_layout_changed(fdk_widget *parent) {
     if (parent == NULL) {
+        return;
+    }
+    if (g_batch_depth > 0 && layout_container_of(parent)) {
+        batch_mark(parent);
         return;
     }
     if (box_class_of(parent)) {

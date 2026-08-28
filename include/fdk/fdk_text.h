@@ -135,6 +135,7 @@ typedef struct fdk_font_metrics {
     fdk_i32 line_height; /* ascent + descent + line_gap */
 } fdk_font_metrics;
 
+/* Ascent/descent/line-gap in pixels (see the struct above). */
 void fdk_font_get_metrics(const fdk_font *font, fdk_font_metrics *out);
 
 /* ---- Measurement ---- */
@@ -206,6 +207,7 @@ typedef struct fdk_font_cache_stats {
     fdk_i32 evictions;
 } fdk_font_cache_stats;
 
+/* Glyph-cache counters (diagnostics). */
 void fdk_font_get_cache_stats(const fdk_font *font,
                               fdk_font_cache_stats *out);
 
