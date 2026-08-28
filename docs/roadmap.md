@@ -1553,3 +1553,59 @@ pointer is ordinary C UB) are documented, not hidden.
 - Distribution packaging (deb/rpm/APK recipes) — the Makefile
   install + pkg-config are the toolkit's packaging surface;
   distro-specific recipes are downstream work, not library work.
+
+## Post-1.0 maintenance
+
+### 1.0.1 — system font discovery rework (the Arch bug) — COMPLETE
+
+User report: the demos requiring DejaVu or Noto fonts claimed no
+font was installed on Arch Linux with `noto-fonts` installed. Root
+cause: the system-default probe — and every demo's private copy of
+the same list — hardcoded exact filenames like
+`NotoSans-Regular.ttf`, while Arch's noto-fonts ships variable
+fonts named `NotoSans[wdth,wght].ttf`; fontconfig, `~/.fonts`, and
+the XDG font directories were never consulted at all.
+
+The fix (`src/text/fontscan.c`) is the discovery chain GTK and QT
+use on Linux, minus their build-time dependency — fontconfig is
+dlopen'd at RUN TIME (resolving the long-standing "anticipated
+dependencies" entry: nothing linked, vendored, or distributed):
+
+1. `$FDK_FONT_FILE` — explicit user override
+2. `$FDK_FONT_DIRS` — user-prioritized directories, scanned first
+3. fontconfig — the user's own font policy (`sans-serif`), walked
+   past CFF/corrupt candidates, honoring `FC_INDEX`
+4. the known exact-path list (Debian/Ubuntu/Arch layouts)
+5. a ranked recursive scan of the standard font roots, including
+   per-user ones
+
+Variable fonts count as their default (regular) instance — stb
+rasterizes the default master, verified end-to-end. A candidate
+that passes the tag-level gate but fails the loader's full
+container validation (truncated repacks — this staging container
+ships exactly such a "variable" Noto whose directory claims 17 MB
+inside a 5 MB file) is remembered and the next-best candidate
+takes the slot, so one broken font cannot break text everywhere.
+
+- New public API: `fdk_font_get_file_path()` (append-only, per the
+  ABI freeze policy; the opaque `fdk_font` grew an internal field).
+- New env knobs: `FDK_FONT_FILE`, `FDK_FONT_DIRS` (documented in
+  `fdk_text.h`, `docs/text.md`, README).
+- Demos 05/06/07/08 dropped their private broken probe lists and
+  use `fdk_font_load_system_default()`; the failure notice now
+  names the escape hatches instead of suggesting only two font
+  packages.
+- Tests: a 10-scenario discovery group in `tests/test_text.c`
+  (override precedence, invalid-override fall-through, fontconfig
+  end-to-end via a private `fonts.conf`, the Arch bracket-name
+  scan, nested-dir scan, regular-beats-bold ranking,
+  corrupt-candidate rejection, cache consistency, accessor edges,
+  argument guard) — plus two Xvfb demo simulations (a valid
+  variable font in Arch naming; a corrupt font with fall-through
+  to the next stage).
+- LeakSanitizer is scoped off fontconfig's process-lifetime init
+  allocations inside `fontscan.c` — FDK must not `FcFini` state a
+  host application may share; the rationale is documented at the
+  code.
+- Battery: full headless suite, X11 integration suite, release
+  build 0 warnings, bench baseline — all green.

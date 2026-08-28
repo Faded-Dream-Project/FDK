@@ -41,14 +41,6 @@ static fdk_widget *next_btn = NULL;
 static fdk_theme *themes[THEME_COUNT];
 static int current_theme = 0;
 
-static const char *FONT_CANDIDATES[] = {
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-    NULL,
-};
-
 static const char *THEME_FILES[] = {
     NULL, /* index 0: the built-in theme */
     "examples/data/daylight.fdk",
@@ -99,25 +91,16 @@ static void window_event(fdk_window *window, const fdk_event_data *event,
 }
 
 int main(void) {
-    const char *font_path = NULL;
-    for (int i = 0; FONT_CANDIDATES[i] != NULL; i++) {
-        FILE *f = fopen(FONT_CANDIDATES[i], "rb");
-        if (f != NULL) {
-            fclose(f);
-            font_path = FONT_CANDIDATES[i];
-            break;
-        }
-    }
-    if (font_path == NULL) {
-        fprintf(stderr, "08_theme: no system TrueType font found — "
-                        "this demo needs one\n");
-        return 1;
-    }
-    font16 = fdk_font_load(font_path, 16);
+    font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
-        fprintf(stderr, "08_theme: font load failed\n");
+        fprintf(stderr, "08_theme: no system TrueType font found — "
+                        "this demo needs one. Install a face like "
+                        "DejaVu Sans or Noto Sans, or point "
+                        "FDK_FONT_FILE at a .ttf/.ttc\n");
         return 1;
     }
+    printf("08_theme: using font %s\n",
+           fdk_font_get_file_path(font16));
 
     /* Themes 1 and 2 come from .fdk files — the same parser a
      * downloaded theme would go through. */

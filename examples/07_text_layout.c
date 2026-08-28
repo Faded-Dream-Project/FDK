@@ -33,14 +33,6 @@ static fdk_color col(int r, int g, int b) {
                         .b = (fdk_f32)b / 255.0f, .a = 1.0f };
 }
 
-static const char *FONT_CANDIDATES[] = {
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-    NULL,
-};
-
 static void set_status(fdk_widget *status, const char *text) {
     (void)fdk_label_set_text(status, text);
 }
@@ -57,25 +49,16 @@ static void window_event(fdk_window *window, const fdk_event_data *event,
 }
 
 int main(void) {
-    const char *font_path = NULL;
-    for (int i = 0; FONT_CANDIDATES[i] != NULL; i++) {
-        FILE *f = fopen(FONT_CANDIDATES[i], "rb");
-        if (f != NULL) {
-            fclose(f);
-            font_path = FONT_CANDIDATES[i];
-            break;
-        }
-    }
-    if (font_path == NULL) {
-        fprintf(stderr, "07_text_layout: no system TrueType font found "
-                        "— this demo needs one\n");
-        return 1;
-    }
-    font16 = fdk_font_load(font_path, 16);
+    font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
-        fprintf(stderr, "07_text_layout: font load failed\n");
+        fprintf(stderr, "07_text_layout: no system TrueType font "
+                        "found — this demo needs one. Install a face "
+                        "like DejaVu Sans or Noto Sans, or point "
+                        "FDK_FONT_FILE at a .ttf/.ttc\n");
         return 1;
     }
+    printf("07_text_layout: using font %s\n",
+           fdk_font_get_file_path(font16));
 
     fdk_context *ctx = NULL;
     if (!fdk_ok(fdk_init(&ctx, NULL))) {

@@ -51,6 +51,9 @@ struct fdk_font {
     fdk_f32 scale;              /* font units -> pixels (pixel size) */
     fdk_i32 pixel_size;
     unsigned style;             /* fdk_font_style flags (synthetic) */
+    char *source_path;          /* fdk_alloc'd copy of the load path
+                                   (fdk_font_get_file_path); NULL is
+                                   non-fatal — see text.c */
 
     fdk_font_metrics metrics;
 
@@ -115,5 +118,41 @@ void fdk_text_flush_cache(fdk_font *font);
  * text.c). The layout pass uses it too — no other const-casting
  * exists in the text layer. */
 fdk_font *fdk_text_font_mutable(const fdk_font *font);
+
+/* ---- System font discovery (src/text/fontscan.c) ---- */
+
+/* Resolves the system default UI font through the documented
+ * priority chain: $FDK_FONT_FILE, $FDK_FONT_DIRS scan, fontconfig
+ * (dlopen'd at run time), the known-path list, then a ranked scan of
+ * the standard font directories. On success *out_path points at a
+ * cached string (do not free) and *out_face receives the collection
+ * face index fontconfig chose (0 otherwise). The cache is valid until
+ * the next resolution — normally the process lifetime, but a failed
+ * full load rejects the winner and forces a re-probe (see
+ * fdk_text_font_discovery_reject), so copy the string if it must
+ * outlive the call. Returns false when no usable font exists (already
+ * logged with an actionable message). */
+bool fdk_text_resolve_system_font(const char **out_path,
+                                  long *out_face);
+
+/* Loader shared by fdk_font_load() (face 0) and the system-default
+ * resolver (fontconfig's FC_INDEX): `face_index` selects a face
+ * inside a TrueType Collection. */
+fdk_font *fdk_text_font_load_face(const char *path, long face_index,
+                                  fdk_i32 pixel_size);
+
+/* Clears the cached system-font resolution so the next
+ * fdk_text_resolve_system_font() call re-probes. TEST SUITE ONLY —
+ * exists because fontconfig state (and the environment) can change
+ * between scenarios within one test process. Not part of the public
+ * API; never declared in an installed header. */
+void fdk_text_font_discovery_reset_for_tests(void);
+
+/* Records that the candidate at `path` failed the loader's full
+ * container validation and forces re-resolution, so the next-best
+ * candidate wins instead of the discovery result poisoning every
+ * subsequent call. Used by fdk_font_load_system_default()'s retry
+ * loop. */
+void fdk_text_font_discovery_reject(const char *path);
 
 #endif /* FDK_TEXT_INTERNAL_H */

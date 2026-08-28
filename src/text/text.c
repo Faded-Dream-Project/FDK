@@ -322,9 +322,13 @@ static fdk_u32 be16(const unsigned char *p) {
 /* Validates the sfnt container enough that stbtt's table lookups
  * stay within the buffer: magic, table directory inside the file,
  * and every table record's [offset, offset+length) inside the file.
- * Returns the face offset to parse (0 for plain sfnt, the first
+ * Returns the face offset to parse (0 for plain sfnt, the requested
  * face's offset for a TrueType Collection), or -1 when the data is
  * not a trustworthy TrueType-flavored font.
+ *
+ * `face_index` selects a face inside a 'ttcf' collection; it must be
+ * 0 for plain sfnt files. Fontconfig reports the face it matched as
+ * FC_INDEX, and the system-default resolver forwards it here.
  *
  * Why this exists: stb_truetype deliberately does no range checking
  * (see its header and third_party/stb/README.md) — it assumes a
@@ -333,25 +337,35 @@ static fdk_u32 be16(const unsigned char *p) {
  * reads inside stb. It is not a full security audit of table
  * CONTENTS: fonts should still come from sources the application
  * trusts, as fdk_text.h documents. */
-static long validate_sfnt(const unsigned char *data, size_t size) {
-    if (data == NULL || size < 12) {
+static long validate_sfnt_face(const unsigned char *data, size_t size,
+                               long face_index) {
+    if (data == NULL || size < 12 || face_index < 0) {
         return -1;
     }
 
     long face = 0;
     fdk_u32 tag = be32(data);
     if (tag == 0x74746366u) { /* 'ttcf' — collection */
-        if (size < 20) {
-            return -1; /* header + at least one face offset */
+        if (size < 16) {
+            return -1; /* header incl. numFonts */
         }
-        fdk_u32 first = be32(data + 12); /* face 0's offset */
-        if (first < 12 || (size_t)first + 12 > size) {
+        fdk_u32 num_faces = be32(data + 8);
+        if (num_faces == 0 || (fdk_u32)face_index >= num_faces) {
             return -1;
         }
-        face = (long)first;
-        data += first;
-        size -= (size_t)first;
+        if ((size_t)face_index > (size - 16) / 4) {
+            return -1; /* the offset slot itself must be in-file */
+        }
+        fdk_u32 off = be32(data + 12 + 4 * face_index);
+        if (off < 12 || (size_t)off + 12 > size) {
+            return -1;
+        }
+        face = (long)off;
+        data += off;
+        size -= (size_t)off;
         tag = be32(data);
+    } else if (face_index != 0) {
+        return -1; /* single-face file, only face 0 exists */
     }
 
     /* Only TrueType-flavored sfnt (glyf outlines). CFF-flavored
@@ -380,23 +394,12 @@ static long validate_sfnt(const unsigned char *data, size_t size) {
 
 /* ---- System default font ----
  *
- * FDK bundles no font (licensing posture). This probes the faces the
- * examples/tests probe, in a fixed order, and caches the first hit.
- * Single-threaded like the rest of FDK's object model. */
-
-static const char *const k_system_font_candidates[] = {
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-    "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-    NULL,
-};
-
-static const char *g_system_font_path; /* cached first hit */
+ * FDK bundles no font (licensing posture). Discovery lives in
+ * fontscan.c: $FDK_FONT_FILE / $FDK_FONT_DIRS overrides, fontconfig
+ * at run time, then the known-path list and a ranked scan of the
+ * standard font directories. This side only consumes the resolved
+ * (path, face) pair. Single-threaded like the rest of FDK's object
+ * model. */
 
 fdk_result fdk_font_set_style(fdk_font *font, unsigned style_flags) {
     if (font == NULL) {
@@ -427,26 +430,62 @@ fdk_font *fdk_font_load_system_default(fdk_i32 pixel_size) {
                   pixel_size);
         return NULL;
     }
-    if (g_system_font_path == NULL) {
-        for (int i = 0; k_system_font_candidates[i] != NULL; i++) {
-            FILE *f = fopen(k_system_font_candidates[i], "rb");
-            if (f != NULL) {
-                fclose(f);
-                g_system_font_path = k_system_font_candidates[i];
-                break;
-            }
+    /* A discovered candidate can pass the tag-level gate yet fail
+     * the loader's full container validation (truncated repacks,
+     * corrupt files). Reject it and re-resolve so the next-best
+     * candidate gets the slot; the reject memory makes the loop
+     * converge, and the bound keeps a pathological environment
+     * from spinning it. Each failure is already ERROR-logged by the
+     * loader with its reason. */
+    for (int attempt = 0; attempt < 4; attempt++) {
+        const char *path = NULL;
+        long face = 0;
+        if (!fdk_text_resolve_system_font(&path, &face)) {
+            return NULL; /* fontscan.c logged the actionable warn */
         }
-        if (g_system_font_path == NULL) {
-            FDK_WARN("fdk_font_load_system_default: no system font "
-                     "found (probed DejaVu, Liberation, FreeSans, "
-                     "Noto) - FDK bundles none by design");
-            return NULL;
+        fdk_font *font = fdk_text_font_load_face(path, face, pixel_size);
+        if (font != NULL) {
+            return font;
         }
+        fdk_text_font_discovery_reject(path);
     }
-    return fdk_font_load(g_system_font_path, pixel_size);
+    FDK_WARN("fdk_font_load_system_default: no loadable system font — "
+             "every discovered candidate failed validation");
+    return NULL;
+}
+
+const char *fdk_font_get_file_path(const fdk_font *font) {
+    if (font == NULL || font->source_path == NULL) {
+        return NULL;
+    }
+    return font->source_path;
 }
 
 fdk_font *fdk_font_load(const char *path, fdk_i32 pixel_size) {
+    return fdk_text_font_load_face(path, 0, pixel_size);
+}
+
+/* fdk_alloc'd copy of the load path, kept for fdk_font_get_file_path().
+ * NULL on allocation failure is non-fatal: the font still loads, the
+ * accessor just answers NULL. */
+static char *text_strdup_path(const char *s) {
+    size_t n = strlen(s);
+    if (n == SIZE_MAX) {
+        return NULL;
+    }
+    char *d = fdk_alloc(n + 1);
+    if (d != NULL) {
+        memcpy(d, s, n + 1);
+    }
+    return d;
+}
+
+/* Shared loader: `face_index` selects a face inside a TrueType
+ * Collection (0 for plain sfnt files). The public fdk_font_load()
+ * wraps it with 0; the system-default resolver passes the face
+ * fontconfig chose. */
+fdk_font *fdk_text_font_load_face(const char *path, long face_index,
+                                  fdk_i32 pixel_size) {
     if (path == NULL || pixel_size < 1 || pixel_size > 512) {
         FDK_ERROR("fdk_font_load: path=%s size=%d (size must be 1..512)",
                   path == NULL ? "(null)" : path, pixel_size);
@@ -491,8 +530,9 @@ fdk_font *fdk_font_load(const char *path, fdk_i32 pixel_size) {
     }
     memset(font, 0, sizeof(*font));
 
-    /* Container gate BEFORE stb sees the bytes (see validate_sfnt). */
-    long face_offset = validate_sfnt(data, size);
+    /* Container gate BEFORE stb sees the bytes (see
+     * validate_sfnt_face). */
+    long face_offset = validate_sfnt_face(data, size, face_index);
     if (face_offset < 0) {
         FDK_ERROR("fdk_font_load: %s is not a usable TrueType font "
                   "(container validation failed)",
@@ -513,6 +553,7 @@ fdk_font *fdk_font_load(const char *path, fdk_i32 pixel_size) {
     font->file_data = data;
     font->pixel_size = pixel_size;
     font->scale = stbtt_ScaleForPixelHeight(&font->info, (float)pixel_size);
+    font->source_path = text_strdup_path(path);
 
     int ascent = 0, descent = 0, line_gap = 0;
     stbtt_GetFontVMetrics(&font->info, &ascent, &descent, &line_gap);
@@ -542,6 +583,7 @@ void fdk_font_destroy(fdk_font *font) {
         fdk_free(font->glyphs[i].bits);
     }
     fdk_free(font->file_data);
+    fdk_free(font->source_path);
     fdk_free(font);
 }
 

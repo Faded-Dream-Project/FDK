@@ -13,8 +13,10 @@
  * HOLD state (rig-friendly: screenshots race animated frames).
  * Escape or the close request ends it.
  *
- * Needs a system TrueType font (DejaVu Sans / Noto Sans); the demo
- * exits with a notice if the environment has none.
+ * Needs a system TrueType font; discovery is fdk_font_load_system
+ * _default()'s job (fontconfig, $FDK_FONT_FILE / $FDK_FONT_DIRS,
+ * then a ranked font-directory scan), and the demo exits with a
+ * notice if the environment has none.
  */
 
 #include "fdk/fdk.h"
@@ -31,25 +33,6 @@ static struct {
 static fdk_color col(int r, int g, int b) {
     return (fdk_color){ .r = (fdk_f32)r / 255.0f, .g = (fdk_f32)g / 255.0f,
                         .b = (fdk_f32)b / 255.0f, .a = 1.0f };
-}
-
-static const char *FONT_CANDIDATES[] = {
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-    NULL,
-};
-
-static const char *find_font(void) {
-    for (int i = 0; FONT_CANDIDATES[i] != NULL; i++) {
-        FILE *f = fopen(FONT_CANDIDATES[i], "rb");
-        if (f != NULL) {
-            fclose(f);
-            return FONT_CANDIDATES[i];
-        }
-    }
-    return NULL;
 }
 
 static void window_event(fdk_window *window, const fdk_event_data *event,
@@ -100,20 +83,20 @@ static void draw_wave(fdk_surface *s, fdk_font *f, const char *text,
 }
 
 int main(void) {
-    const char *font_path = find_font();
-    if (font_path == NULL) {
+    fdk_font *f16 = fdk_font_load_system_default(16);
+    if (f16 == NULL) {
         fprintf(stderr,
-                "05_text: no system TrueType font found (tried DejaVu "
-                "Sans, Noto Sans) — this demo needs one to shape\n");
+                "05_text: no system TrueType font found — this demo "
+                "needs one to shape. Install a face like DejaVu Sans "
+                "or Noto Sans, or point FDK_FONT_FILE at a .ttf/.ttc\n");
         return 1;
     }
-    printf("05_text: using font %s\n", font_path);
+    printf("05_text: using font %s\n", fdk_font_get_file_path(f16));
 
-    fdk_font *f12 = fdk_font_load(font_path, 12);
-    fdk_font *f16 = fdk_font_load(font_path, 16);
-    fdk_font *f24 = fdk_font_load(font_path, 24);
-    fdk_font *f48 = fdk_font_load(font_path, 48);
-    fdk_font *f96 = fdk_font_load(font_path, 96);
+    fdk_font *f12 = fdk_font_load(fdk_font_get_file_path(f16), 12);
+    fdk_font *f24 = fdk_font_load(fdk_font_get_file_path(f16), 24);
+    fdk_font *f48 = fdk_font_load(fdk_font_get_file_path(f16), 48);
+    fdk_font *f96 = fdk_font_load(fdk_font_get_file_path(f16), 96);
     if (f96 == NULL || f48 == NULL || f24 == NULL || f16 == NULL ||
         f12 == NULL) {
         fprintf(stderr, "05_text: font load failed\n");

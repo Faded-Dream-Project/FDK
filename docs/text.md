@@ -34,6 +34,56 @@ missing from the font render as the font's `.notdef` glyph, and
 invalid UTF-8 decodes to U+FFFD one bad byte at a time, never reading
 past `byte_len`.
 
+## System font discovery (1.0.1)
+
+`fdk_font_load_system_default(pixel_size)` picks a UI font without
+the application naming a file. FDK bundles no font (licensing
+posture), so discovery follows the same chain GTK and QT use on
+Linux, minus their hard build-time dependency — fontconfig is
+loaded at RUN TIME with `dlopen`, so a build needs nothing new and a
+stripped container without it simply falls through:
+
+1. **`$FDK_FONT_FILE`** — explicit user override: one font file
+   path. An invalid override logs a warning and falls through
+   rather than bricking text.
+2. **`$FDK_FONT_DIRS`** — `:`-separated directories scanned first
+   (recursive, filename-ranked — see below).
+3. **fontconfig** — the generic `sans-serif` family under the
+   user's own fontconfig policy (per-user fonts, distro aliases,
+   the works). The best-match list is walked past candidates FDK
+   cannot rasterize (CFF/`OTTO` outlines) and past files that fail
+   the container validation, honoring the collection face index
+   (`FC_INDEX`) fontconfig reports.
+4. **Known exact paths** — the historical candidate list (DejaVu,
+   Liberation, FreeSans, Noto) covering the common
+   Debian/Ubuntu/Arch layouts deterministically.
+5. **Standard roots scan** — a ranked recursive scan of
+   `/usr/share/fonts`, `/usr/local/share/fonts`,
+   `$XDG_DATA_HOME/fonts` (default `~/.local/share/fonts`), and
+   `~/.fonts`.
+
+The scanner ranks filenames: the known Latin UI families (DejaVu
+Sans, Noto Sans, Liberation Sans, FreeSans, Cantarell, Adwaita
+Sans, Ubuntu Sans) first, then Noto Sans SC / legacy Ubuntu, CJK
+faces last; within a family the regular/default instance wins over
+bold/light/condensed variants (FDK synthesizes those styles
+itself). Bracket-named variable fonts such as Arch's
+`NotoSans[wdth,wght].ttf` count as the regular instance — stb
+rasterizes the default master — which is exactly the case the old
+hardcoded list missed.
+
+A candidate that passes the tag-level gate but fails the loader's
+full container validation (truncated repacks, corrupt files) is
+remembered and the next-best candidate takes the slot, so one
+broken font on a system cannot break text everywhere.
+
+Which file won is introspectable: `fdk_font_get_file_path(font)`
+returns the path any font was loaded from — the answer to "which
+face did FDK actually pick", the same question QFontInfo and
+pango answer for QT and GTK applications. The resolution (hit or
+miss) is cached for the process lifetime, so repeated calls are
+cheap after the first.
+
 ## Pipeline
 
 ```

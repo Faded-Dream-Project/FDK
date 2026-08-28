@@ -35,7 +35,24 @@ interfaces. Not excluded.
 
 | Dependency | Anticipated phase | Purpose | License (to verify at add-time) | Notes |
 |---|---|---|---|---|
-| fontconfig | Under consideration (with the Phase 6 widget catalog) | System font discovery | MIT | Not Red-Hat-origin software despite common GNOME association — same investigate-before-excluding principle as Xlib above; a bundled fallback font could substitute if this is skipped |
+| (none currently) | | | | fontconfig was the long-standing entry here; resolved in 1.0.1 — see the runtime table below |
+
+**Added in 1.0.1 — runtime-only, never linked, never a build
+requirement:**
+
+| Dependency | Purpose | License | Build/Runtime | Optional | Replaceable |
+|---|---|---|---|---|---|
+| fontconfig (system `libfontconfig.so.1`) | System font discovery for `fdk_font_load_system_default()` — the user's own font policy (per-user fonts, distro aliases, `sans-serif` resolution) | MIT-style | RUN TIME ONLY, via `dlopen` in `src/text/fontscan.c` (resolves 11 symbols, treats any miss as "absent"); no pkg-config, no header, no link flag — a build without fontconfig anywhere is unchanged, and a stripped container falls through to the directory scanner | Yes — absent fontconfig, discovery degrades to the known-path list plus a ranked scan of the standard font roots | Yes — the dlopen shim is one file; the resolver stages before/after it are independent |
+
+The earlier "under consideration" note feared a build-time
+license/dependency knot; runtime dlopen dissolves it (nothing is
+linked, vendored, or distributed). FDK never calls `FcFini` — the
+host application may itself be using fontconfig, and tearing down
+shared global state from inside a toolkit is exactly the kind of
+side effect FDK forbids itself (GTK and QT keep it initialized for
+the process lifetime too). stb_truetype stays the rasterizer; the
+bundled-fallback-font substitute discussed in that note remains
+unnecessary.
 
 **Added in Phase 6 (first slice) — vendored source, not a system
 library:**

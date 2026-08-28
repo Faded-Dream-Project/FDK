@@ -20,15 +20,23 @@
  *     safety, advance contracts, cache flush + idempotence
  *   - subpixel positioning (Phase 6 completion): agreement,
  *     determinism, pen-shift invariance, phase fan-out
+ *   - system font discovery (post-1.0.1): $FDK_FONT_FILE override
+ *     precedence and invalid-override fall-through, fontconfig
+ *     end-to-end, the Arch variable-font filename scan, nested-dir
+ *     scan, regular-beats-bold ranking, cache consistency
  */
 
 #include "fdk/fdk.h"
 #include "fdk/fdk_text.h"
 
+#include "text/text_internal.h" /* fdk_text_font_discovery_reset_for_tests */
+
 #include <assert.h>
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /* ---- helpers ---- */
 
@@ -99,6 +107,8 @@ static void find_fonts(void) {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         NULL,
     };
@@ -106,6 +116,8 @@ static void find_fonts(void) {
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/DejaVuSansMono.ttf",
         NULL,
     };
     for (int i = 0; sans_candidates[i] != NULL; i++) {
@@ -1052,6 +1064,309 @@ static void test_subpixel_positioning(void) {
            "(no re-rasterization), phase fan-out\n");
 }
 
+/* ---- system font discovery (post-1.0.1 rework) ----
+ *
+ * fdk_font_load_system_default() resolves through: $FDK_FONT_FILE,
+ * $FDK_FONT_DIRS scan, fontconfig (dlopen'd), the known-path list,
+ * then a ranked scan of the standard font roots. These scenarios pin
+ * each stage against the exact regressions the rework fixed — most
+ * visibly Arch Linux, whose noto-fonts ships "NotoSans[wdth,wght]
+ * .ttf" variable fonts the old hardcoded list could never match.
+ *
+ * Scenario order matters: the fontconfig end-to-end check must be
+ * the first thing in this process that initializes fontconfig
+ * (fontconfig reads $FONTCONFIG_FILE once, at init), so it runs
+ * before the fall-through scenario. Every scenario scrubs the
+ * environment and resets the cached resolution first. */
+
+static int tt_copy_file(const char *dst, const char *src) {
+    FILE *in = fopen(src, "rb");
+    if (in == NULL) {
+        return -1;
+    }
+    FILE *out = fopen(dst, "wb");
+    if (out == NULL) {
+        fclose(in);
+        return -1;
+    }
+    char buf[4096];
+    size_t n;
+    int rc = 0;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) {
+            rc = -1;
+            break;
+        }
+    }
+    if (fclose(out) != 0) {
+        rc = -1;
+    }
+    fclose(in);
+    return rc;
+}
+
+static int tt_write_text(const char *path, const char *text) {
+    FILE *out = fopen(path, "wb");
+    if (out == NULL) {
+        return -1;
+    }
+    int rc = fputs(text, out) == EOF ? -1 : 0;
+    if (fclose(out) != 0) {
+        rc = -1;
+    }
+    return rc;
+}
+
+static void tt_scrub_env(void) {
+    unsetenv("FDK_FONT_FILE");
+    unsetenv("FDK_FONT_DIRS");
+    unsetenv("FONTCONFIG_FILE");
+    fdk_text_font_discovery_reset_for_tests();
+}
+
+static void test_system_font_discovery(void) {
+    /* (1) $FDK_FONT_FILE wins outright and loads the same face a
+     * direct fdk_font_load() of the same file produces. */
+    char odir[] = "/tmp/fdk-disc-override-XXXXXX";
+    assert(mkdtemp(odir) != NULL);
+    char probe[256];
+    int n = snprintf(probe, sizeof(probe), "%s/ProbeFace.ttf", odir);
+    assert(n > 0 && (size_t)n < sizeof(probe));
+    assert(tt_copy_file(probe, g_sans) == 0);
+
+    tt_scrub_env();
+    setenv("FDK_FONT_FILE", probe, 1);
+    fdk_font *f = fdk_font_load_system_default(16);
+    assert(f != NULL);
+    assert(fdk_font_get_file_path(f) != NULL);
+    assert(strcmp(fdk_font_get_file_path(f), probe) == 0);
+    fdk_font *direct = fdk_font_load(probe, 16);
+    assert(direct != NULL);
+    fdk_font_metrics mo, md;
+    fdk_font_get_metrics(f, &mo);
+    fdk_font_get_metrics(direct, &md);
+    assert(mo.ascent == md.ascent && mo.descent == md.descent &&
+           mo.line_height == md.line_height);
+    fdk_font_destroy(direct);
+    fdk_font_destroy(f);
+    tt_scrub_env();
+    remove(probe);
+    remove(odir);
+
+    /* (2) fontconfig end-to-end: a config whose ONLY directory holds
+     * one probe copy, aliased onto the generic sans-serif. If FDK
+     * resolved through fontconfig the answer must be the temp copy —
+     * no other stage could ever produce that path. Gated on the same
+     * dlopen FDK would perform; without fontconfig this scenario
+     * proves nothing and skips honestly. */
+    void *fc = dlopen("libfontconfig.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (fc == NULL) {
+        printf("[skip] fontconfig not loadable — skipping the "
+               "fontconfig e2e scenario\n");
+    } else {
+        char fdir[] = "/tmp/fdk-disc-fc-XXXXXX";
+        assert(mkdtemp(fdir) != NULL);
+        char fcache[256], fcopy[256], fconf[256];
+        n = snprintf(fcache, sizeof(fcache), "%s/cache", fdir);
+        assert(n > 0 && (size_t)n < sizeof(fcache));
+        n = snprintf(fcopy, sizeof(fcopy), "%s/FcProbeFace.ttf", fdir);
+        assert(n > 0 && (size_t)n < sizeof(fcopy));
+        n = snprintf(fconf, sizeof(fconf), "%s/fonts.conf", fdir);
+        assert(n > 0 && (size_t)n < sizeof(fconf));
+        assert(mkdir(fcache, 0700) == 0);
+        assert(tt_copy_file(fcopy, g_sans) == 0);
+        char conf[1024];
+        n = snprintf(conf, sizeof(conf),
+                     "<?xml version=\"1.0\"?>\n"
+                     "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
+                     "<fontconfig>\n"
+                     "  <dir>%s</dir>\n"
+                     "  <cachedir>%s</cachedir>\n"
+                     "  <alias>\n"
+                     "    <family>sans-serif</family>\n"
+                     "    <prefer>\n"
+                     "      <family>DejaVu Sans</family>\n"
+                     "      <family>Noto Sans</family>\n"
+                     "      <family>Liberation Sans</family>\n"
+                     "    </prefer>\n"
+                     "  </alias>\n"
+                     "</fontconfig>\n",
+                     fdir, fcache);
+        assert(n > 0 && (size_t)n < sizeof(conf));
+        assert(tt_write_text(fconf, conf) == 0);
+
+        tt_scrub_env();
+        setenv("FONTCONFIG_FILE", fconf, 1);
+        f = fdk_font_load_system_default(16);
+        assert(f != NULL);
+        assert(fdk_font_get_file_path(f) != NULL);
+        assert(strcmp(fdk_font_get_file_path(f), fcopy) == 0);
+        fdk_font_destroy(f);
+        tt_scrub_env();
+
+        /* Best-effort cleanup; fontconfig may leave cache files in
+         * the cachedir, which remove() on a non-empty dir reports
+         * and we deliberately ignore. */
+        remove(fcopy);
+        remove(fconf);
+        remove(fcache);
+        remove(fdir);
+    }
+
+    /* (3) An INVALID override warns and falls through: the known-path
+     * stage still finds the suite's own probe file (every find_fonts
+     * candidate is reachable by a later stage in every environment
+     * where this suite runs at all). */
+    tt_scrub_env();
+    setenv("FDK_FONT_FILE", "/nonexistent/fdk-probe.ttf", 1);
+    f = fdk_font_load_system_default(16);
+    assert(f != NULL);
+    assert(strcmp(fdk_font_get_file_path(f), "/nonexistent/fdk-probe.ttf") != 0);
+    fdk_font_destroy(f);
+    tt_scrub_env();
+
+    /* (4) The Arch regression: variable-font bracket filenames
+     * ("NotoSans[wdth,wght].ttf") — the exact naming the old
+     * hardcoded list could never match. */
+    char adir[] = "/tmp/fdk-disc-arch-XXXXXX";
+    assert(mkdtemp(adir) != NULL);
+    char afont[256];
+    n = snprintf(afont, sizeof(afont), "%s/NotoSans[wdth,wght].ttf", adir);
+    assert(n > 0 && (size_t)n < sizeof(afont));
+    assert(tt_copy_file(afont, g_sans) == 0);
+    tt_scrub_env();
+    setenv("FDK_FONT_DIRS", adir, 1);
+    f = fdk_font_load_system_default(16);
+    assert(f != NULL);
+    assert(fdk_font_get_file_path(f) != NULL);
+    assert(strcmp(fdk_font_get_file_path(f), afont) == 0);
+    fdk_font_destroy(f);
+    tt_scrub_env();
+    remove(afont);
+    remove(adir);
+
+    /* (5) The scanner descends into subdirectories (distros nest:
+     * Fedora's dejavu-sans-fonts/, Debian's truetype/dejavu/). */
+    char ndir[] = "/tmp/fdk-disc-nested-XXXXXX";
+    assert(mkdtemp(ndir) != NULL);
+    char nsub[256], nfont[256];
+    n = snprintf(nsub, sizeof(nsub), "%s/nested", ndir);
+    assert(n > 0 && (size_t)n < sizeof(nsub));
+    n = snprintf(nfont, sizeof(nfont), "%s/LiberationSans-Regular.ttf",
+                 nsub);
+    assert(n > 0 && (size_t)n < sizeof(nfont));
+    assert(mkdir(nsub, 0700) == 0);
+    assert(tt_copy_file(nfont, g_sans) == 0);
+    tt_scrub_env();
+    setenv("FDK_FONT_DIRS", ndir, 1);
+    f = fdk_font_load_system_default(16);
+    assert(f != NULL);
+    assert(fdk_font_get_file_path(f) != NULL);
+    assert(strcmp(fdk_font_get_file_path(f), nfont) == 0);
+    fdk_font_destroy(f);
+    tt_scrub_env();
+    remove(nfont);
+    remove(nsub);
+    remove(ndir);
+
+    /* (6) Ranking: the regular face beats a bold face of the same
+     * family — FDK synthesizes bold itself, so the regular file is
+     * the right default. */
+    char bdir[] = "/tmp/fdk-disc-rank-XXXXXX";
+    assert(mkdtemp(bdir) != NULL);
+    char bold[256], reg[256];
+    n = snprintf(bold, sizeof(bold), "%s/DejaVuSans-Bold.ttf", bdir);
+    assert(n > 0 && (size_t)n < sizeof(bold));
+    n = snprintf(reg, sizeof(reg), "%s/DejaVuSans.ttf", bdir);
+    assert(n > 0 && (size_t)n < sizeof(reg));
+    assert(tt_copy_file(bold, g_sans) == 0);
+    assert(tt_copy_file(reg, g_sans) == 0);
+    tt_scrub_env();
+    setenv("FDK_FONT_DIRS", bdir, 1);
+    f = fdk_font_load_system_default(16);
+    assert(f != NULL);
+    assert(fdk_font_get_file_path(f) != NULL);
+    assert(strcmp(fdk_font_get_file_path(f), reg) == 0);
+    fdk_font_destroy(f);
+    tt_scrub_env();
+    remove(bold);
+    remove(reg);
+    remove(bdir);
+
+    /* (7) Resilience: a candidate that passes the tag-level gate but
+     * fails the loader's full container validation (here: a truncated
+     * font copy deliberately ranked FIRST by the scanner's tie-break)
+     * must be rejected and the next-best candidate loaded — the
+     * failure mode of corrupt/truncated repacked fonts. */
+    char rdir[] = "/tmp/fdk-disc-resil-XXXXXX";
+    assert(mkdtemp(rdir) != NULL);
+    char rbad[256], rgood[256];
+    n = snprintf(rbad, sizeof(rbad), "%s/DejaVuSans.ttf", rdir);
+    assert(n > 0 && (size_t)n < sizeof(rbad));
+    n = snprintf(rgood, sizeof(rgood), "%s/NotoSans-Regular.ttf", rdir);
+    assert(n > 0 && (size_t)n < sizeof(rgood));
+    {
+        /* Truncated copy: the sfnt magic is in the first 12 bytes so
+         * the tag-level gate passes, but the table extents run past
+         * the truncation point so full validation fails. */
+        FILE *in = fopen(g_sans, "rb");
+        assert(in != NULL);
+        char head[100 * 1024];
+        size_t got = fread(head, 1, sizeof(head), in);
+        fclose(in);
+        assert(got == sizeof(head)); /* DejaVu Sans is larger */
+        FILE *out = fopen(rbad, "wb");
+        assert(out != NULL);
+        assert(fwrite(head, 1, got, out) == got);
+        fclose(out);
+    }
+    assert(tt_copy_file(rgood, g_sans) == 0);
+    tt_scrub_env();
+    setenv("FDK_FONT_DIRS", rdir, 1);
+    f = fdk_font_load_system_default(16);
+    assert(f != NULL);
+    assert(fdk_font_get_file_path(f) != NULL);
+    assert(strcmp(fdk_font_get_file_path(f), rgood) == 0);
+    fdk_font_destroy(f);
+    tt_scrub_env();
+    remove(rbad);
+    remove(rgood);
+    remove(rdir);
+
+    /* (8) Plain default resolution and cache consistency: two loads
+     * agree on the same file, metrics are sane. */
+    fdk_font *fa = fdk_font_load_system_default(16);
+    assert(fa != NULL);
+    fdk_font *fb = fdk_font_load_system_default(16);
+    assert(fb != NULL);
+    assert(fdk_font_get_file_path(fa) != NULL);
+    assert(strcmp(fdk_font_get_file_path(fa),
+                  fdk_font_get_file_path(fb)) == 0);
+    fdk_font_metrics mm;
+    fdk_font_get_metrics(fa, &mm);
+    assert(mm.ascent > 0 && mm.line_height > 0);
+    fdk_font_destroy(fa);
+    fdk_font_destroy(fb);
+
+    /* (9) Accessor edges: NULL font answers NULL; a directly loaded
+     * font reports exactly the path it was given. */
+    assert(fdk_font_get_file_path(NULL) == NULL);
+    f = fdk_font_load(g_sans, 12);
+    assert(f != NULL);
+    assert(strcmp(fdk_font_get_file_path(f), g_sans) == 0);
+    fdk_font_destroy(f);
+
+    /* (10) The argument guard is unchanged. */
+    assert(fdk_font_load_system_default(0) == NULL);
+    assert(fdk_font_load_system_default(513) == NULL);
+
+    tt_scrub_env();
+    printf("[ok] system font discovery: FDK_FONT_FILE override + "
+           "invalid fall-through, fontconfig e2e, Arch variable-font "
+           "scan, nested-dir scan, regular-beats-bold ranking, "
+           "corrupt-candidate rejection, cache consistency\n");
+}
+
 int main(void) {
     find_fonts();
     if (g_sans == NULL) {
@@ -1072,6 +1387,7 @@ int main(void) {
     test_ellipsize();
     test_font_style();
     test_subpixel_positioning();
+    test_system_font_discovery();
     printf("all headless text tests passed\n");
     return 0;
 }

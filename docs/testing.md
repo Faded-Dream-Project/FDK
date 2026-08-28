@@ -62,7 +62,7 @@ isolation. 17 cases, all under ASan+UBSan.
 
 ## Text tests (Phase 6)
 
-`tests/test_text.c` runs headless in plain `make test` (9 cases,
+`tests/test_text.c` runs headless in plain `make test` (10 cases,
 ASan+UBSan) and needs no display — only a system TrueType font
 (DejaVu Sans / Noto Sans candidates; the whole suite honestly skips,
 [X11-suite style](#known-xvfb-flakiness-investigated-and-fixed), when
@@ -70,7 +70,11 @@ the environment has none). Covered: font lifecycle and every failure
 mode (missing file, garbage bytes, directories, out-of-range sizes —
 including the sfnt container gate that keeps malformed fonts from
 becoming out-of-bounds reads inside stb_truetype), metrics sanity and
-2x scale proportionality, measurement (proportional vs monospace,
+2x scale proportionality, the system font discovery chain
+(`fdk_font_load_system_default`'s env overrides, fontconfig
+discovery driven end-to-end through a private `fonts.conf`, the
+Arch variable-font filename scan, corrupt-candidate rejection, and
+cache consistency), measurement (proportional vs monospace,
 ink bounds, whitespace, byte_len slicing, and the pinned
 round-of-sum vs sum-of-rounds behavior), draw/damage agreement (the
 damage box is exactly the measured ink band), cache-hit determinism

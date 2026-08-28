@@ -84,6 +84,16 @@ typedef struct fdk_font fdk_font;
  */
 fdk_font *fdk_font_load(const char *path, fdk_i32 pixel_size);
 
+/* Returns the file path this font was loaded from (the exact string
+ * passed to fdk_font_load(), or the resolved system path for a font
+ * from fdk_font_load_system_default()). The string is owned by the
+ * font and valid until fdk_font_destroy(); NULL for a NULL font or
+ * when the copy could not be allocated (the font itself still
+ * loads). Applications debugging "which face did FDK actually pick"
+ * answer it with this — the same introspection QFontInfo and
+ * pango_font_description give GTK/QT applications. */
+const char *fdk_font_get_file_path(const fdk_font *font);
+
 /* ---- Synthetic styles (Phase 6 completion) ----
  *
  * SYNTHESIS, not face selection: these flags widen (bold) or slant
@@ -291,15 +301,37 @@ fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
                                    size_t *out_prefix_bytes,
                                    bool *out_fits);
 
-/* Loads a default UI font at `pixel_size` by probing the locations
- * FDK's own examples and test suite probe (DejaVu Sans, Noto Sans,
- * Liberation Sans, FreeSans — the common Linux desktop faces). The
- * first readable file wins; the found path is cached, so repeated
- * calls are cheap after the first hit. Returns NULL with an error
- * log when no candidate exists — FDK deliberately bundles NO font
- * (licensing posture, see docs/dependencies.md), so a stripped
- * container has no default; applications that must render text
- * should ship or require a font and load it by path.
+/* Loads a default UI font at `pixel_size`, discovering one on the
+ * system. FDK bundles NO font (licensing posture, see
+ * docs/dependencies.md); discovery follows the same chain GTK and QT
+ * use on Linux, minus their hard build-time dependency:
+ *
+ *   1. $FDK_FONT_FILE  — explicit override: one font file path
+ *   2. $FDK_FONT_DIRS  — ':'-separated directories scanned first
+ *                        (ranked filename scan, recursive)
+ *   3. fontconfig      — the system font policy (generic sans-serif
+ *                        under the user's own configuration), loaded
+ *                        at RUN TIME via dlopen: no build-time or
+ *                        link-time dependency; absent fontconfig
+ *                        falls through cleanly
+ *   4. known paths     — the historical exact-path candidates
+ *                        (DejaVu, Liberation, FreeSans, Noto)
+ *   5. font scan       — ranked recursive scan of /usr/share/fonts,
+ *                        /usr/local/share/fonts,
+ *                        $XDG_DATA_HOME/fonts (default
+ *                        ~/.local/share/fonts), and ~/.fonts
+ *
+ * Only TrueType-flavored faces (glyf outlines, including variable
+ * fonts at their default instance) are accepted — the bundled
+ * rasterizer cannot draw CFF ('OTTO') outlines. The resolved path
+ * (or the miss) is cached for the process lifetime; repeated calls
+ * are cheap after the first. Which file won is visible via
+ * fdk_font_get_file_path().
+ *
+ * Returns NULL with an error log when nothing usable exists — a
+ * stripped container has no default; applications that must render
+ * text should ship or require a font, point FDK_FONT_FILE at one, or
+ * load it by path.
  *
  * The window-decoration layer (fdk_window_set_decorated) uses this
  * for its title text; applications may prefer their own face via

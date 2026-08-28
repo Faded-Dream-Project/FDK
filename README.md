@@ -12,7 +12,15 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: 1.0.0 — all eleven roadmap phases COMPLETE, ABI frozen.**
+**Status: 1.0.1 — all eleven roadmap phases COMPLETE, ABI frozen.**
+
+**Fonts:** FDK bundles no font (licensing posture). The demos and
+`fdk_font_load_system_default()` discover a system UI font through
+fontconfig (loaded at run time — no build or link dependency), the
+standard font directories, or `$FDK_FONT_FILE` / `$FDK_FONT_DIRS`
+overrides; see `docs/text.md`. Any distro layout works, including
+Arch's variable-font `NotoSans[wdth,wght].ttf` naming.
+
 Core lifecycle, real X11 and Wayland backends, the rendering layer
 (damage-tracked software renderer with images, alpha compositing,
 transforms, and antialiasing), the widget foundation with layout
@@ -227,7 +235,13 @@ advance. Glyphs rasterize once per (glyph, phase) and live in an
 LRU cache; each run costs a single damage rectangle:
 
 ```c
+/* Explicit path — full control when you ship your own face: */
 fdk_font *font = fdk_font_load("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24);
+
+/* Or discover the system default (fontconfig, font dirs, or
+ * $FDK_FONT_FILE override — see docs/text.md): */
+fdk_font *ui = fdk_font_load_system_default(24);
+printf("picked %s\n", fdk_font_get_file_path(ui));
 
 fdk_text_metrics m;
 fdk_font_measure_utf8(font, "Hello, FDK", 10, &m);   /* advance + ink box */

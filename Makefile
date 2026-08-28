@@ -100,13 +100,19 @@ REL_FLAGS   := -O2 -DNDEBUG
 
 CFLAGS  ?= $(STD) $(WARN) $(FEATURE) $(DEBUG_FLAGS)
 CPPFLAGS:= -Iinclude -Isrc
-LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm
+# -ldl: the text layer dlopen()s fontconfig at run time (optional
+# system font discovery, see src/text/fontscan.c). No-op stub on
+# glibc >= 2.34 where dlopen lives in libc; required for static
+# linking on older glibc.
+LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl
 
 # pkg-config exposure (fdk.pc): private deps are the ones the .so
 # already links (apps need nothing); Requires.private lets static
 # linking pull them in transitively.
 PC_REQUIRES := $(if $(FDK_HAS_WAYLAND),wayland-client xkbcommon,) x11
-PC_LIBS :=
+# -ldl for static linking (see LDFLAGS above); -lm is appended by
+# fdk.pc.in itself.
+PC_LIBS := -ldl
 
 # Per-source-file extra flags: platform backends need their own
 # pkg-config include paths, and the Wayland backend additionally
@@ -209,6 +215,11 @@ $(SHARED_LIB): $(LIB_OBJS_PIC)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fPIC -shared -o $@ $^ $(LDFLAGS)
 
+# Tests may include src/ internal headers (precedent: window_internal.h,
+# widget_internal.h, ...) and some of those embed third-party headers
+# (text_internal.h embeds stb_truetype.h), so the stb include path is
+# on the test compile lines too.
+
 # --- Tests ----------------------------------------------------------------
 
 test: $(TEST_BINS)
@@ -221,7 +232,7 @@ test: $(TEST_BINS)
 
 $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
 # X11 platform integration test — NOT part of plain `make test` (see
 # docs/testing.md's headless-by-default policy). Requires a reachable
@@ -273,11 +284,11 @@ test-wayland: $(WL_TEST_BIN)
 
 $(WL_TEST_BIN): $(WL_TEST_SRC) $(STATIC_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
 $(X11_TEST_BIN): $(X11_TEST_SRC) $(STATIC_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
 # --- Examples ---------------------------------------------------------
 
