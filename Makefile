@@ -138,7 +138,8 @@ WIDGET_SRCS   := $(wildcard src/widget/*.c)
 LAYOUT_SRCS   := $(wildcard src/layout/*.c)
 TEXT_SRCS     := $(wildcard src/text/*.c)
 THEME_SRCS    := $(wildcard src/theme/*.c)
-LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS) $(THEME_SRCS)
+I18N_SRCS     := $(wildcard src/i18n/*.c)
+LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS) $(THEME_SRCS) $(I18N_SRCS)
 
 # Static and shared builds use separate object trees (obj/ vs obj-pic/)
 # since shared objects must be position-independent (-fPIC) and static

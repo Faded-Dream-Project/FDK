@@ -47,6 +47,10 @@ typedef enum fdk_result {
     FDK_ERR_THEME_PARSE        = -300,
     FDK_ERR_THEME_IO           = -301,
     FDK_ERR_THEME_VERSION      = -302, /* .fdk file version unsupported */
+    FDK_ERR_CATALOG_PARSE      = -303, /* message-catalog syntax error
+                                           (line number logged; the
+                                           i18n counterpart of
+                                           FDK_ERR_THEME_PARSE) */
 
     /* I/O */
     FDK_ERR_IO                 = -400,

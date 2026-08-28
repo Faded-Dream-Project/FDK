@@ -32,6 +32,16 @@ later theme versions, whatever comes) follows the same rules.
    a crash. Unknown keys are errors, not forward-compatibility
    homework.
 
+   The Phase 10 message-catalog parser (`fdk_catalog_parse` /
+   `fdk_catalog_load`, grammar in `docs/fdk-catalog-format.md`)
+   follows the same rules with its own bounds: 1 MiB input, 1024-byte
+   lines, 1024-byte strings, 8192 entries, UTF-8 validation
+   (overlongs, surrogates, and raw control bytes rejected), and the
+   four-escape-only string sublanguage (`\"` `\\` `\n` `\t` —
+   no second language to interpret). The i18n formatters themselves
+   add no parsing surface at all: they are pure computation over the
+   caller's buffer with hard magnitude limits (see `docs/i18n.md`).
+
 2. **Bounded input.** `fdk_theme_parse()` refuses inputs over 1 MiB
    and `fdk_theme_load()` refuses files over 1 MiB before reading them
    (`fseek`/`ftell` first, allocate second — never `fread` into an

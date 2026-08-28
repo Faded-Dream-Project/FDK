@@ -12,7 +12,8 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: Phase 10 — Accessibility/i18n (first slice: the a11y core).**
+**Status: Phase 10 — Accessibility/i18n (a11y core + the full i18n
+engine).**
 Core lifecycle, real X11 and Wayland backends, the rendering layer
 (damage-tracked software renderer with images, alpha compositing,
 transforms, and antialiasing), the widget foundation with layout
@@ -22,10 +23,15 @@ positioning), the core widget catalog, the theme engine
 full window management, the advanced widget phase — clipboard, text
 Entry (now with password/read-only/max-length modes), ScrollView,
 List, Tree, Slider, SpinButton, Toolbar, Notebook, Canvas, Menu,
-ComboBox, and modal dialogs — and the accessibility core (describe /
-notify / perform over the widget tree itself). See "What works
-today" below and `docs/roadmap.md` for an honest, specific list of
-what is and isn't covered.
+ComboBox, and modal dialogs — the accessibility core (describe /
+notify / perform over the widget tree itself), and the complete i18n
+engine: explicit-locale formatting (numbers with Western/Indian/
+Swiss/Arabic grouping, currency, percent), an exact proleptic-
+Gregorian calendar with pattern-driven date/time formatting in 15
+languages, CLDR plural rules for 33 languages, and strict, bounded
+`.fmo` translation catalogs with context and plural support. See
+"What works today" below and `docs/roadmap.md` for an honest,
+specific list of what is and isn't covered.
 
 ## Requirements
 
@@ -440,6 +446,56 @@ working), and max length. The platform bridge — a future AT-SPI2
 peer — is a CONSUMER of this API, the same way the X11 and
 Wayland backends sit under the widget layer; `docs/roadmap.md`'s
 Phase 10 entry records exactly what is and isn't there.
+
+### Internationalization — Phase 10, second half
+
+One design rule: FDK never calls `setlocale()` and never reads the
+environment — every function takes its locale as an explicit value,
+so one process can format for a different locale per call, and every
+result is deterministic under test:
+
+```c
+fdk_locale de, hi, ar, ja, ru, pl;
+fdk_locale_parse("de", &de);        /* BCP-47 AND "de_DE.UTF-8" work */
+fdk_locale_parse("hi", &hi);
+fdk_locale_parse("ar", &ar);
+fdk_locale_parse("ja", &ja);
+fdk_locale_parse("ru", &ru);
+fdk_locale_parse("pl", &pl);
+
+char buf[96];
+fdk_format_int(buf, sizeof buf, &de, 1234567, NULL);   /* 1.234.567  */
+fdk_format_int(buf, sizeof buf, &hi, 12345678, NULL);  /* 1,23,45,678 */
+fdk_format_int(buf, sizeof buf, &ar, 1234567, NULL);   /* ١٬٢٣٤٬٥٦٧  */
+
+fdk_format_currency(buf, sizeof buf, &de, 1234.5, "EUR"); /* 1.234,50 € */
+fdk_format_date(buf, sizeof buf, &ja, &(fdk_date){2025, 12, 25},
+                FDK_DATE_LONG);                          /* 2025年12月25日 */
+
+/* CLDR plurals — 33 languages, every rule shape: */
+fdk_plural_category_int(&de, 1);   /* FDK_PLURAL_ONE   */
+fdk_plural_category_int(&ru, 21);  /* ONE (Russian 21 is singular!) */
+fdk_plural_category_int(&pl, 21);  /* MANY (Polish 21 is NOT)      */
+
+/* Translation catalogs: strict, bounded .fmo files (the theme
+ * parser's discipline — unknown anything is a line-numbered error),
+ * with contexts and category-named plural forms: */
+fdk_catalog *cat = NULL;
+fdk_catalog_load("src/de.fmo", &cat);
+const char *tmpl = fdk_translate_plural(cat, &de, "%d file",
+                                        "%d files", n);
+snprintf(buf, sizeof buf, tmpl, n);   /* the app formats; FDK
+                                       * never interprets strings */
+```
+
+The calendar is the proleptic Gregorian year 1..9999 on exact
+civil-day integer math (no time_t, no leap-year folklore), the
+month/weekday names ship for 15 languages — inflected FORMAT forms
+where the language requires them ("25 декабря", not "декабрь") —
+and number formatting covers Western, Indian (1,23,45,678), Swiss
+(1'234'567), and Arabic-Indic grouping with their separators and
+digits. `docs/i18n.md` records the whole design and the honest
+deviations from full CLDR data.
 
 ### What it looks like
 

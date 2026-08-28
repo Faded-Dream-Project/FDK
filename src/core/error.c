@@ -23,6 +23,7 @@ const char *fdk_result_to_string(fdk_result result) {
         case FDK_ERR_THEME_PARSE:        return "theme parse error";
         case FDK_ERR_THEME_IO:           return "theme I/O error";
         case FDK_ERR_THEME_VERSION:      return "unsupported theme version";
+        case FDK_ERR_CATALOG_PARSE:      return "catalog parse error";
 
         case FDK_ERR_IO:                 return "I/O error";
         case FDK_ERR_NOT_A_FILE:         return "not a file";
