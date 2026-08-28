@@ -848,6 +848,9 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
             }
         }
     }
+    /* Release-wait budget, classified below (full vs churn); the
+     * wrong-size reaper after the wait cites the same number. */
+    int wait_budget = FDK_WL_RELEASE_WAIT_MS;
     if (slot < 0) {
         /* 1.1.6: every slot is busy — WAIT, don't drop the frame.
          *
@@ -863,20 +866,65 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
          * So: flush our committed requests (the compositor cannot
          * release what it has not received), then dispatch whatever
          * release events already arrived, then poll the display fd
-         * for up to FDK_WL_RELEASE_WAIT_MS in 10ms steps. Releases
-         * ride the dedicated release_queue, so this wait ONLY ever
-         * runs wl_buffer listeners — safe even though acquisition
-         * can be reached from inside a listener (the dispatch tail's
-         * synchronous repaint). */
-        fdk_i64 wait_deadline = now_ms() + FDK_WL_RELEASE_WAIT_MS;
+         * for the wait budget in 10ms steps. Releases ride the
+         * dedicated release_queue, so this wait ONLY ever runs
+         * wl_buffer listeners — safe even though acquisition can be
+         * reached from inside a listener (the dispatch tail's
+         * synchronous repaint).
+         *
+         * 1.1.7: the budget is classified, not flat. The 1.1.6 wait
+         * exited ONLY on a release at the CURRENT size — during an
+         * interactive resize every busy slot is at a WRONG size (each
+         * configure step changes the target), so no release could
+         * ever match and the full 100ms burned per frame before the
+         * wrong-size reaper below fired anyway: ~10fps resizing with
+         * an idle CPU (the "still laggy when resize / CPU not being
+         * fully used" live report). Now: pure hoarding (every busy
+         * slot at the current size) keeps the full 1.1.6 budget — a
+         * release there is recyclable and worth waiting for — while
+         * churn (any busy slot at a wrong size) gets ONE bounded
+         * poll slice, because every exit from a churn wait ends in
+         * the reaper or a fresh allocation regardless. Any release
+         * is progress in here: right-size recycles, wrong-size is
+         * reaped on the spot and its slot reused. */
+        int churn = 0;
+        for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+            if (pwindow->render_slots[i].buffer != NULL &&
+                !pwindow->render_slots[i].released &&
+                (pwindow->render_slots[i].size.width != size.width ||
+                 pwindow->render_slots[i].size.height != size.height)) {
+                churn = 1;
+                break;
+            }
+        }
+        wait_budget = churn ? FDK_WL_CHURN_WAIT_MS
+                             : FDK_WL_RELEASE_WAIT_MS;
+        fdk_i64 wait_deadline = now_ms() + wait_budget;
         while (slot < 0 && now_ms() < wait_deadline) {
             (void)wl_display_flush(pwindow->conn->display);
             (void)fdk_wayland_release_queue_dispatch(pwindow->conn);
             for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
                 if (pwindow->render_slots[i].buffer != NULL &&
                     pwindow->render_slots[i].released &&
-                    pwindow->render_slots[i].size.width == size.width &&
-                    pwindow->render_slots[i].size.height == size.height) {
+                    pwindow->render_slots[i].buffer != pwindow->buffer) {
+                    if (pwindow->render_slots[i].size.width == size.width &&
+                        pwindow->render_slots[i].size.height == size.height) {
+                        slot = i; /* a release we can recycle */
+                        break;
+                    }
+                    /* A release at the wrong size: progress, not a
+                     * miss — reap it now and reuse the slot (the
+                     * top-of-function reaper cannot run inside this
+                     * loop). */
+                    wl_buffer_destroy(pwindow->render_slots[i].buffer);
+                    munmap(pwindow->render_slots[i].pixels,
+                           pwindow->render_slots[i].length);
+                    pwindow->render_slots[i].buffer = NULL;
+                    pwindow->render_slots[i].pixels = NULL;
+                    pwindow->render_slots[i].length = 0;
+                    pwindow->render_slots[i].size.width = 0;
+                    pwindow->render_slots[i].size.height = 0;
+                    pwindow->render_slots[i].released = 0;
                     slot = i;
                     break;
                 }
@@ -934,7 +982,11 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
          * with wrong-size slots the compositor has not released yet,
          * and refusing there stalled the whole maximize cycle on
          * slow compositors (the 1.1.5 live report's burst of 40+
-         * refusals during maximize toggling). */
+         * refusals during maximize toggling). Since 1.1.7 the churn
+         * budget reaches this reaper after ONE poll slice instead of
+         * the full release wait — the wait could never satisfy a
+         * current-size recycle while every busy slot is wrong-size
+         * anyway. */
         for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
             if (pwindow->render_slots[i].buffer != NULL &&
                 pwindow->render_slots[i].buffer != pwindow->buffer &&
@@ -951,8 +1003,8 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                 pwindow->render_slots[i].released = 0;
                 slot = i;
                 FDK_DEBUG("reaped an unreleased wrong-size render slot "
-                          "after %dms release wait (interactive resize)",
-                          FDK_WL_RELEASE_WAIT_MS);
+                          "after a %dms release wait (interactive resize)",
+                          wait_budget);
                 break;
             }
         }

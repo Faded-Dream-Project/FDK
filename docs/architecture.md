@@ -104,12 +104,21 @@ windows on every compositor. Wayland buffer LIFECYCLE (1.1.6):
 every wl_buffer rides a dedicated wl_event_queue, so
 wl_buffer::release can be dispatched alone (never re-entrantly
 running input/configure listeners); when every render slot is in
-flight the acquisition path WAITS up to FDK_WL_RELEASE_WAIT_MS for
-a release (flush -> dispatch the release queue -> bounded
-prepare/poll/read), then reaps an unreleased WRONG-SIZE slot as
-the resize-churn escape (each buffer owns its memfd pool —
+flight the acquisition path WAITS for a release with a CLASSIFIED
+budget (1.1.7): pure hoarding (every busy slot at the current
+size — a release there is recyclable) waits up to
+FDK_WL_RELEASE_WAIT_MS, while CHURN (any busy slot at a wrong
+size — the interactive-resize state) waits only one poll slice
+(FDK_WL_CHURN_WAIT_MS) before reaping, because the 1.1.6 wait
+exited only on a CURRENT-size release that a wrong-size pool can
+never produce and burned its full budget per resize frame
+(~10fps resizing with an idle CPU — the third Cinnamon Wayland
+report). Inside the wait ANY release is progress: right-size
+recycles, wrong-size is reaped on the spot and the slot reused;
+after the budget an unreleased WRONG-SIZE slot is reaped as the
+resize-churn escape (each buffer owns its memfd pool —
 destroying a committed wl_shm buffer is legal), and only then
-refuses, rate-limited to one WARN per 2s episode.
+does the path refuse, rate-limited to one WARN per 2s episode.
 `window_frame_ready`'s starvation guard additionally requires POOL
 CAPACITY: a hidden surface still paces at the guard floor, but
 "ready" with zero available buffers was the pacing lie that slow
@@ -188,7 +197,17 @@ own XGrabPointer gets AlreadyGrabbed otherwise and the drag never
 starts; and the window layer cancels the widget tree's implicit
 grab at the same handover, because the WM consumes the button
 release and the tree's press-to-release pairing would stay broken
-— see fdk__widget_tree_cancel_grab); `window_move_resize_to` for
+— see fdk__widget_tree_cancel_grab). The press filter's ORDER
+matters as much as the ops (1.1.7, the third Cinnamon Wayland
+report): the compositor-driven begin_resize is tried FIRST — it
+needs no origin knowledge, the WM owns the geometry from the
+serial onward — while the origin gate (origin-moving edges need
+window_get_position) guards ONLY the FDK-driven fallback it was
+built for. 1.1.6 ran the gate first, and since the Wayland ops
+table has no window_get_position at all, every origin-moving
+edge (N/NE/NW/W/SW) fell through the filter into the deco
+band's move path: a titlebar-edge press MOVED the window while
+the cursor promised a resize; `window_move_resize_to` for
 FDK-driven atomic resize drags. The 1.1.4 pointer-affordance pair
 completes the set: `window_query_pointer` (X11 XQueryPointer
 window-local + bounds check; Wayland's seat cache — pointer_focus +
@@ -213,7 +232,13 @@ compositor's own arrow — honest degradation, never a hidden
 cursor) maps the same compass vocabulary as begin_resize to
 directional cursors, so FDK's edge zones advertise "this edge
 drags" BEFORE any button is held — the affordance a WM frame's
-borders give for free. The ENTER event carries its surface-local
+borders give for free. The cursor path applies the SAME
+capability predicate as the press filter
+(window_edge_needs_origin, shared by both): a backend that can
+neither hand the drag off (no begin_resize) nor compute its own
+origin (no window_get_position) must not advertise its
+origin-moving edges — the cursor may never promise what a press
+cannot deliver. The ENTER event carries its surface-local
 position on both backends (the Wayland seat handler forgot it
 until 1.1.6 — every entry armed the NW cursor and seeded hover at
 the top-left corner until the first motion). FDK_EVENT_WINDOW_STATE /

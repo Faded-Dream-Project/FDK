@@ -164,6 +164,16 @@ static void wayland_menu_item_cb(fdk_menu_item *item, void *user) {
     (*(int *)user)++;
 }
 
+/* Monotonic-wall elapsed time for the churn-bound probe: measures
+ * how long a resize-churn acquisition takes inside the synchronous
+ * configure repaint (must be ONE poll slice, not the full release
+ * wait). */
+static long monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 /* The opener wiring: statics because the callback has no closure
  * state (stock Button signature). */
 static fdk_menu *g_wayland_menu = NULL;
@@ -827,6 +837,10 @@ int main(void) {
      * compositor. */
     {
         fdk_window *pw = NULL;
+        /* app_id is context-level (org.fdk.test, see fdk_init above)
+         * — the sway rig floats every suite window, so the client
+         * resize below takes effect like every real decorations
+         * user's would. */
         fdk_window_options popts = { .title = "FDK pacing",
                                      .width = 400, .height = 300 };
         assert(fdk_ok(fdk_window_create(ctx, &popts, &pw)));
@@ -883,6 +897,68 @@ int main(void) {
         printf("[ok] wayland pacing: pumping recovers readiness "
                "(release + frame callback credited)\n");
 
+        /* 1.1.7: the RESIZE-CHURN path. Re-exhaust the pool at the
+         * current size with unflushed presents, then move the window
+         * to a NEW size and repaint: every busy slot is now at the
+         * wrong size, so the 1.1.6 wait — which exits only on a
+         * CURRENT-size release — could never be satisfied on a
+         * compositor that holds its buffers past the wait window; it
+         * burned the full 100ms budget per frame before the
+         * wrong-size reaper fired anyway: ~10fps interactive
+         * resizing with an idle CPU (the live report: "still laggy
+         * when resize, the CPU is not being fully used"). The
+         * classified churn budget reaches progress after ONE poll
+         * slice instead.
+         *
+         * HONEST LIMITATION (same class as the 1.1.6 pacing note):
+         * sway releases buffers within a frame, crediting the pool
+         * before the acquisition wait even starts — so on THIS
+         * compositor pre-fix and post-fix converge to a few ms and
+         * the wall-clock bound below is a generous ceiling/tripwire,
+         * not the discriminator. The 100ms-vs-10ms difference only
+         * bites on compositors slower than the release window
+         * (Muffin under load was the live report; the user's re-test
+         * is that control). What IS asserted functionally here: the
+         * churn acquisition completes without a refusal episode, and
+         * the window settles presenting at the new size. */
+        for (int i = 0; i < 4; i++) {
+            fdk_widget_set_background(
+                proot, (i & 1) ? (fdk_color){0.2f, 0.9f, 0.2f, 1.0f}
+                               : (fdk_color){0.2f, 0.2f, 0.9f, 1.0f});
+            (void)fdk_window_paint(pw);
+        }
+        long churn_t0 = monotonic_ms();
+        /* resize() records the new size and synthesizes the frontend
+         * configure — whose dispatch tail repaints synchronously at
+         * the new size, straight into the exhausted wrong-size pool.
+         * All of that happens inside this call, so the elapsed time
+         * IS the acquisition cost. */
+        fdk_window_resize(pw, 380, 320);
+        long churn_ms = monotonic_ms() - churn_t0;
+        assert(churn_ms < 90); /* ceiling tripwire: post-fix is one
+                                  poll slice + alloc; a full
+                                  FDK_WL_RELEASE_WAIT_MS stall means
+                                  the churn budget regressed */
+        printf("[ok] wayland pacing: resize-churn acquisition bounded "
+               "(%ldms) and frame landed at the new size\n",
+               churn_ms);
+        pump_and_paint(ctx, pw, 400); /* settle at the new size */
+        fdk_size psize;
+        assert(fdk_ok(fdk_window_get_size(pw, &psize)));
+        if (psize.width == 380 && psize.height == 320) {
+            printf("[ok] wayland pacing: window settled presenting at "
+                   "the churned size (380x320, no refusal episode)\n");
+        } else {
+            /* Compositor-owned geometry (kiosk-shell configures every
+             * window fullscreen): fdk_window_resize honestly refused,
+             * the churned acquisition was the kiosk configure's own
+             * synchronous repaint — the same honest skip the reflow
+             * test takes here. */
+            printf("[ok] wayland pacing: churn bounded under "
+                   "compositor-owned geometry (client resize refused, "
+                   "size stays %dx%d)\n", psize.width, psize.height);
+        }
+
         fdk_window_destroy(pw);
     }
 
@@ -929,6 +1005,31 @@ int main(void) {
         assert(fdk__window_cursor_edge(cw) == 0 /* FDK_WRES_NONE */);
         printf("[ok] wayland cursor: interior motion restored the "
                "default shape\n");
+
+        /* 1.1.7: a TOP-EDGE press must RESIZE, not move. The cursor
+         * has promised N here since 1.1.6, but the press filter's
+         * origin gate ran BEFORE the compositor-driven begin_resize,
+         * and Wayland's ops table has no window_get_position — so
+         * every origin-moving edge (N/NE/NW/W/SW) dead-ended out of
+         * the filter, the press fell through to the deco band, and
+         * the band MOVED the window (the live report: "it grabs it
+         * even tho the cursor to resize shows"). The press is now
+         * consumed by xdg_toplevel.resize; the rig's WAYLAND_DEBUG
+         * assertions pin the protocol half (a resize request, zero
+         * move requests anywhere in this suite run). Window sits at
+         * (100,60) CSD: output (150,63) is window-local (50,3) —
+         * the N edge, inside the band's rows. */
+        wayland_inject("move 150 63");
+        pump_and_paint(ctx, cw, 300);
+        assert(fdk__window_cursor_edge(cw) == 1 /* FDK_WRES_N */);
+        printf("[ok] wayland cursor: top edge over the band armed "
+               "the N resize cursor\n");
+        wayland_inject("tap 1"); /* press: the resize handover;
+                                     release 30ms later ends it — no
+                                     motion in between, size stays */
+        pump_and_paint(ctx, cw, 400);
+        printf("[ok] wayland resize: top-edge press handed to the "
+               "compositor (xdg_toplevel.resize, rig-verified)\n");
 
         fdk_window_destroy(cw);
         wayland_injector_stop();

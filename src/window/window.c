@@ -85,6 +85,19 @@ bool fdk__window_is_double_click(fdk_i64 now_ms, fdk_i64 last_ms,
     return true;
 }
 
+/* Edges whose FDK-driven drag moves the window ORIGIN (every edge
+ * touching the top or left side). The compositor-driven path
+ * (begin_resize) never needs the origin — the WM owns the geometry —
+ * so this only gates the FDK fallback and the cursor affordance.
+ * Shared by both so the cursor can never promise what a press
+ * cannot deliver (the 1.1.7 top-edge report: cursor said resize,
+ * press delivered a move). */
+static bool window_edge_needs_origin(fdk_window_resize_edge edge) {
+    return edge == FDK_WRES_W || edge == FDK_WRES_NW ||
+           edge == FDK_WRES_SW || edge == FDK_WRES_N ||
+           edge == FDK_WRES_NE;
+}
+
 fdk_window_resize_edge fdk__window_resize_edge_at(fdk_i32 width,
                                                   fdk_i32 height,
                                                   fdk_i32 x, fdk_i32 y,
@@ -1036,6 +1049,19 @@ static void window_update_cursor(fdk_window *window, fdk_i32 x,
         edge = fdk__window_resize_edge_at(
             window->last_size.width, window->last_size.height, x, y,
             DECO_RESIZE_BORDER);
+        /* The affordance must match the press filter exactly: never
+         * show a resize cursor for an edge this backend cannot drag.
+         * With a compositor-driven begin_resize every edge works; a
+         * backend with neither begin_resize nor window_get_position
+         * must not advertise its origin-moving edges (the 1.1.7 live
+         * report: Wayland showed top-edge resize cursors while the
+         * press fell through to the band and MOVED the window). */
+        if (edge != FDK_WRES_NONE &&
+            window->ops->window_begin_resize == NULL &&
+            window_edge_needs_origin(edge) &&
+            window->ops->window_get_position == NULL) {
+            edge = FDK_WRES_NONE;
+        }
     }
     if ((int)edge == window->cursor_edge) {
         return;
@@ -1166,25 +1192,34 @@ static bool window_handle_resize_event(fdk_window *window,
     if (edge == FDK_WRES_NONE) {
         return false;
     }
-    /* Edges that move the window origin need to KNOW the origin; on a
-     * backend without window_get_position only the bottom/right edges
-     * can resize. */
-    bool needs_origin = (edge == FDK_WRES_W || edge == FDK_WRES_NW ||
-                         edge == FDK_WRES_SW || edge == FDK_WRES_N ||
-                         edge == FDK_WRES_NE);
-    if (needs_origin && window->ops->window_get_position == NULL) {
-        return false;
-    }
-    /* Preferred: hand the drag to the WM/compositor. */
+    /* Preferred: hand the drag to the WM/compositor — FIRST, because
+     * the compositor-driven path needs NO origin knowledge at all:
+     * xdg_toplevel.resize / _NET_WM_MOVERESIZE carry an edge and a
+     * serial, and the WM owns every pixel of the geometry from
+     * there. 1.1.7 live report: this used to run AFTER the origin
+     * gate below, so on Wayland — whose ops table has no
+     * window_get_position at all — every origin-moving edge (N, NE,
+     * NW, W, SW) bailed out of the resize filter and the press fell
+     * through to the deco band, which MOVED the window while the
+     * cursor had just promised a resize ("it grabs it even tho the
+     * cursor to resize shows") — the top edge over the titlebar was
+     * the reported case; the left edge was equally dead. */
     if (window->ops->window_begin_resize != NULL &&
         fdk_ok(window->ops->window_begin_resize(window->pwindow,
                                                 (int)edge, x, y))) {
         return true; /* WM drives; we see only configures */
     }
-    /* FDK-driven fallback (bare X). The window's real origin is
-     * needed even for edges that never MOVE it: the solver outputs
-     * the unchanged origin back, and move_resize_to must not "move"
-     * the window to a fabricated (0,0). */
+    /* FDK-driven fallback (bare X11 without a WM). Edges that move
+     * the window origin need to KNOW the origin — on a backend
+     * without window_get_position only the bottom/right edges can
+     * resize. The origin is fetched even for edges that never MOVE
+     * the window: the solver outputs the unchanged origin back, and
+     * move_resize_to must not "move" the window to a fabricated
+     * (0,0). */
+    bool needs_origin = window_edge_needs_origin(edge);
+    if (needs_origin && window->ops->window_get_position == NULL) {
+        return false;
+    }
     if (window->ops->window_get_position != NULL &&
         !fdk_ok(window->ops->window_get_position(
             window->pwindow, &window->resize_orig_x,

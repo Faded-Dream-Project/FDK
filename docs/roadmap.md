@@ -2207,3 +2207,81 @@ examples rig PASS (8/8 pixel-verified via grim, restored to the
 prefix). The openbox real-WM rigs were not rerun: openbox was
 lost to the environment reset and no X11-side line changed — the
 in-suite X11 regressions (which ran green) pin that surface.
+
+### 1.1.7 — the resize-churn stall + the titlebar edge that moved instead of resizing (the third Cinnamon Wayland report) — COMPLETE
+
+The 1.1.6 re-test from the same Muffin (Cinnamon experimental
+Wayland) session: the WARN storm and the missing cursor are gone,
+but (1) interactive resizing is "still laggy", (2) "the CPU is
+not being fully used when resizing" — the loop idles while the
+window stutters — and (3) a NEW affordance lie: pressing the top
+edge over the titlebar, where the 1.1.6 cursor correctly shows
+the N-resize shape, GRABS the window and starts a MOVE ("it grabs
+it even tho the cursor to resize shows").
+
+Root cause (1)+(2): the 1.1.6 release wait exits ONLY on a
+release at the CURRENT size — during an interactive resize every
+busy slot holds a buffer at a WRONG size (each configure step
+changes the target), so no release can ever match the exit
+condition: the wait burns its full 100ms budget per frame in
+10ms poll slices and THEN the wrong-size reaper fires anyway.
+~10fps during resize with the CPU asleep in poll — both live
+symptoms, one cause. Fix (wayland_window.c): the budget is now
+CLASSIFIED before waiting. Pure hoarding (every busy slot at the
+current size — a release there is recyclable and worth the full
+FDK_WL_RELEASE_WAIT_MS) keeps the 1.1.6 contract; churn (any busy
+slot at a wrong size) gets ONE bounded poll slice
+(FDK_WL_CHURN_WAIT_MS = 10ms) before the reaper, because every
+exit from a churn wait ends in a reaper or a fresh allocation
+regardless. Inside the wait, ANY release is now progress: a
+right-size release recycles, a wrong-size release is reaped on
+the spot and its slot reused (previously ignored until the
+deadline — the wait outlived its own usefulness).
+
+Root cause (3): an ordering bug in the shared press filter
+(window.c, present since the 1.1.3 interactive work but only
+REACHABLE on Wayland since 1.1.6 gave the backend a resize
+cursor to lie with). The filter ran the FDK-fallback's origin
+gate ("origin-moving edges need window_get_position") BEFORE
+trying the compositor-driven begin_resize — and the Wayland ops
+table has no window_get_position at all, so every origin-moving
+edge (N, NE, NW, W, SW — the top edge over the band and the
+whole left edge) dead-ended out of the resize filter. The press
+fell through to the deco band, whose own handler starts a MOVE.
+X11 was never bitten because both ops exist there. Fix:
+begin_resize is tried FIRST (it needs no origin — xdg_toplevel
+.resize / _NET_WM_MOVERESIZE carry an edge and a serial, and the
+compositor owns the geometry from there); the origin gate now
+guards only the FDK-driven fallback it was designed for. The
+cursor affordance got the matching predicate
+(window_edge_needs_origin, shared by press and cursor paths): a
+backend that can neither hand off nor compute origins no longer
+ADVERTISES its origin-moving edges — the cursor can never again
+promise what a press cannot deliver.
+
+Verified: the sway rig's suite grew a top-edge press regression
+(inject a real tap at the N edge over the band; the rig's
+WAYLAND_DEBUG assertions require >=1 xdg_toplevel.resize and
+ZERO xdg_toplevel.move in the suite trace) and a resize-churn
+block (exhaust the pool at size A, resize to size B inside the
+measured call: the acquisition must complete under a generous
+ceiling and the window must settle — or honestly skip under
+compositor-owned geometry, kiosk-shell's fullscreen). The pre-fix
+control (worktree at eacc8c9 + the new probes) demonstrates the
+bug exactly: move=1, resize=0 on the injected top-edge press.
+Honest limitation, documented in testing.md: sway releases
+buffers within a frame, so the pool is credited BEFORE the
+acquisition wait starts — pre-fix and post-fix converge to a few
+ms on that compositor and the churn wall-clock assert is a
+ceiling tripwire, not the discriminator; the 100ms-vs-10ms
+difference only bites on compositors slower than the release
+window (Muffin under load; the user's re-test is that control).
+Battery on the final tree: clean rebuilds debug + release
+(Wayland on, 0 warnings both), headless suite, X11 integration
+suite (the press reorder is shared code — green), sway rig PASS
+(set_cursor=3 now: edge + default + top edge; resize=1, move=0,
+refusals=0), weston manager-less rig PASS, sway examples rig
+PASS 8/8, openbox real-WM rig ALL 6 PASS (reinstalled after the
+reset — "edge resize" and "drag" pin the X11 side of the
+reorder), resize-flash rig PASS (pre-fix control still
+reproduces), X11 examples rig PASS.

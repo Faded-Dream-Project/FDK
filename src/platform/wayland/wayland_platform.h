@@ -203,6 +203,19 @@ struct fdk_platform_connection {
  * dropped ones. */
 #define FDK_WL_RELEASE_WAIT_MS 100
 
+/* Interactive-resize churn bound (1.1.7): when every busy slot holds
+ * a buffer at the WRONG size (the interactive-resize state — every
+ * configure step changes the target), waiting for a release at the
+ * CURRENT size is provably futile: no release can ever match, so the
+ * 1.1.6 full wait burned FDK_WL_RELEASE_WAIT_MS of idle polling per
+ * frame before the wrong-size reaper fired anyway (~10fps resizing
+ * with an idle CPU — the 1.1.7 live report: "still laggy when
+ * resize, the CPU is not being fully used"). The churn budget is one
+ * bounded poll slice: fast compositors still get the chance to
+ * release (recycle or reap-after-release, no in-flight destroy at
+ * all); slow ones get the reaper almost immediately. */
+#define FDK_WL_CHURN_WAIT_MS 10
+
 /* How long a refusal may re-warn at full volume (the log-spam guard:
  * one WARN per stall episode, DEBUG for the rest). */
 #define FDK_WL_REFUSE_WARN_INTERVAL_MS 2000

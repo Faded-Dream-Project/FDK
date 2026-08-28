@@ -881,3 +881,44 @@ build/obj; running `make release` and then a rig (which builds
 debug) mixes flags-silently and fails at link or run with no
 obvious cause ("FAIL: build", suite exit 2). `make clean` between
 battery phases is mandatory, not cosmetic.
+
+**1.1.7 — the churn budget is provably right but not sway-visible.**
+The resize-churn regression (exhaust the pool at size A, resize to
+size B inside a measured call) pins that the churned acquisition
+completes under a ceiling and the window settles — but the
+100ms-vs-10ms difference between the 1.1.6 and 1.1.7 budgets
+cannot be discriminated on sway: a probe trace of the PRE-FIX
+build shows sway releasing superseded wrong-size buffers within
+the resize call itself, crediting the pool before the acquisition
+wait starts (the wrong-size reaper then takes an empty slot with
+no wait at all — both budgets converge to single-digit ms). The
+defect only bites on compositors that hold buffers past the
+release window (Muffin under load — the live report). The suite's
+wall-clock assert is therefore a ceiling tripwire against a
+catastrophic reintroduction, NOT the discriminator; the live
+re-test on the reported machine is the control, exactly like the
+1.1.6 WARN-storm limitation above. Under kiosk-shell weston the
+same block takes the honest compositor-owned skip (fullscreen
+refuses the client resize; the churn then rides the kiosk
+configure's own synchronous repaint).
+
+**1.1.7 — the top-edge press is protocol-asserted, both ways.**
+The titlebar-edge regression injects a REAL tap at the N edge
+over the deco band and the rig asserts >=1 xdg_toplevel.resize and
+ZERO xdg_toplevel.move in the suite's WAYLAND_DEBUG trace. The
+zero-move check needs a manual grep (the rig helpers assert
+minimums only) and depends on the tap being the suite's ONLY
+interactive handover — any new suite section that legitimately
+drags the band must move its assertions to a scoped trace. The
+pre-fix control (eacc8c9 worktree + the new probes) demonstrates
+the bug exactly: move=1, resize=0.
+
+**The .pc-clobber trap generalizes beyond re-extraction.** Any
+script that extracts debs into the prefix (the wayland toolchain
+rebuild AND install_openbox_rig.sh alike) overwrites the pkg-config
+prefix rewrites; a rig that builds after an openbox install fails
+with "wayland-client.h: No such file or directory" or "Package
+wayland-client was not found" while manual builds worked minutes
+earlier. Re-run the sed prefix fix after EVERY deb-extracting
+script, then verify with `pkg-config --cflags wayland-client`
+pointing at the prefix before blaming the rig.
