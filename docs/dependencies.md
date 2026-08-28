@@ -66,6 +66,29 @@ desktop-stack dependencies FDK's minimalism goal excludes (Cairo/Pango
 are typically paired with GLib, which pulls in a much larger
 dependency surface than FDK wants). See `docs/licensing-policy.md`.
 
+## The no-bus policy (1.1.0, permanent)
+
+**FDK never links, dlopens, spawns, or requires D-Bus — or any
+daemon, bus, or activation infrastructure of the Freedesktop/Red Hat
+desktop stack — for any functionality of the toolkit itself.** Where
+GTK and Qt delegate to bus services, FDK implements the job
+in-process and publishes the seam for the application to wire:
+
+| The bus "job" elsewhere | FDK's in-process answer |
+|---|---|
+| Screen reader access (AT-SPI2 over D-Bus: registry daemon + session bus + bridge process) | The embedded narrator (`fdk_a11y_set_speaker` + `fdk_a11y_narrator_start`, 1.1.0): an ordinary subscriber of the public a11y notifications that composes utterances in-process and speaks through an application-wired sink — a TTS engine, a braille device, a subtitle bar, a log. No registry, no bus, no bridge process; verified headless. An application that wants to drive an external assistive technology uses the same public seam (`fdk_a11y_describe` / subscribe / perform) — the bridging becomes the application's choice, never the toolkit's requirement. |
+| Portal dialogs, notifications, session inhibitors, `org.freedesktop.appearance` settings, StatusNotifierItem tray icons | Not implemented as bus calls, and they will not be: X11/Wayland-protocol-native paths (EWMH, XSettings-when-present-as-plain-X-properties, the XEmbed tray, `zwp_text_input`) or in-toolkit widgets (FDK's own dialogs) are the routes FDK takes. Any future feature follows the same rule — if it would need a bus, it gets implemented in-process or not shipped. |
+
+The audit trail: zero D-Bus references in `src/` and `include/`
+(the two comments that once named "a future AT-SPI2 bridge" as an
+expected consumer were corrected in 1.1.0 when the bridge idea was
+replaced by the in-process narrator); the link line is
+`-lX11 -lXext -lwayland-client -lxkbcommon -lm -ldl` and nothing
+else; `libatspi`/`libdbus` appear nowhere in the build. The
+1.0.1-era fontconfig note above is the same policy applied to
+discovery — runtime-optional with a full in-toolkit fallback chain,
+never a requirement.
+
 ## Policy reminders
 
 - Every dependency added must update this table in the same change

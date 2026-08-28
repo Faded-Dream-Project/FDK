@@ -9,11 +9,11 @@
 #define FDK_VERSION_H
 
 #define FDK_VERSION_MAJOR 1
-#define FDK_VERSION_MINOR 0
-#define FDK_VERSION_PATCH 1
+#define FDK_VERSION_MINOR 1
+#define FDK_VERSION_PATCH 0
 
 /* "0.1.0" style string, generated from the numeric components. */
-#define FDK_VERSION_STRING "1.0.1"
+#define FDK_VERSION_STRING "1.1.0"
 
 /* Encode major/minor/patch into a single comparable integer:
  * (major * 1000000) + (minor * 1000) + patch */

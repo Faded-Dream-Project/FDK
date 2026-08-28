@@ -483,6 +483,11 @@ fdk_result fdk_spin_create(fdk_widget *parent, fdk_font *font,
     fdk_widget_set_event_callback(s->entry, spin_entry_watch, s);
     /* The entry is right-adjacent to the steppers (arrange sizes
      * it); typing lands in it, focus follows. */
+    /* Focusable like every control of its family (the slider, the
+     * entry, the buttons set this too) — a SpinButton users cannot
+     * Tab to is not keyboard-operable. Found by the narrator tests:
+     * focus() on a spin was a silent no-op. */
+    fdk_widget_set_can_focus(w, true);
     fdk_widget_child_layout_changed(w->parent);
     *out_spin = w;
     return FDK_OK;

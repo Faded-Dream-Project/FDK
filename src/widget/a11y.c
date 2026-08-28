@@ -5,9 +5,10 @@
  * perform() drives widgets through their own public semantics.
  *
  * Layer position: strictly widget-layer, backend-neutral, verified
- * headless. The platform bridge (a future AT-SPI2 bridge, a screen
- * reader, a test driver) is a CONSUMER of this API — see the header
- * for the design rationale.
+ * headless. The consumers are the embedded narrator (see
+ * a11y_narrator.c — in-process, per the no-bus policy) and
+ * application-side test/automation drivers; every one of them is a
+ * CONSUMER of this API — see the header for the design rationale.
  */
 
 #include "fdk/fdk_a11y.h"

@@ -10,16 +10,19 @@
  * well).
  *
  * There is deliberately NO platform dependency here: no AT-SPI, no
- * D-Bus. This header is the toolkit-side abstraction a platform
- * bridge (a future AT-SPI2 bridge process, an embedded screen
- * reader, a test driver) sits ON TOP of — exactly how the widget
- * layer is backend-neutral and the X11/Wayland backends sit under
- * it. The bridge seam is the query + notification + action API
- * below; nothing in it requires a display, so the whole layer is
- * verifiable headless.
+ * D-Bus — the no-bus policy (docs/dependencies.md) is permanent.
+ * This header is the toolkit-side abstraction its CONSUMERS sit on
+ * top of — exactly how the widget layer is backend-neutral and the
+ * X11/Wayland backends sit under it. The consumers FDK itself
+ * ships are the embedded narrator (the screen reader core at the
+ * bottom of this header — in-process, no registry, no bus) and the
+ * headless test/automation drivers; an application-side bridge to
+ * any external assistive technology is the application's to wire,
+ * through the same public seam. Nothing here requires a display,
+ * so the whole layer is verifiable headless.
  *
  * Roles and states follow the WAI-ARIA / ATK naming where a
- * concept exists there, so a future bridge maps 1:1.
+ * concept exists there, so consumers map 1:1.
  *
  * See docs/roadmap.md's Phase 10 entry for scope and the honest
  * list of what is NOT here yet.
@@ -456,6 +459,100 @@ fdk_result fdk_a11y_relation_at(const fdk_widget *from,
 bool fdk_a11y_has_relation(const fdk_widget *from,
                            fdk_a11y_relation_type type,
                            const fdk_widget *to);
+
+/* ---- The narrator: FDK's embedded screen reader core (1.1.0) --------
+ *
+ * GTK and Qt reach screen readers through AT-SPI2 over D-Bus: a
+ * registry daemon, a session bus, a bridge process. FDK's no-bus
+ * policy (docs/dependencies.md) instead OWNS the job in-process:
+ * the narrator is an ordinary subscriber of the notifications
+ * above, composes utterances from live fdk_a11y_describe()
+ * snapshots, and speaks them through a SINK the application wires —
+ * a TTS engine, a braille device, a subtitle bar, a log. FDK
+ * links, loads, and requires none of those; the sink contract is
+ * one function pointer.
+ *
+ * While started (and a sink attached) the engine narrates:
+ *   - focus moves       -> the newly focused widget, fully described
+ *                          ("Save, button")
+ *   - toggle changes    -> CHECKED/PRESSED/SELECTED/EXPANDED on the
+ *                          focused widget, at the new value
+ *                          ("Accept, check box, checked")
+ *   - value changes     -> non-editable values (sliders, progress,
+ *                          spins, scroll fractions) on the focused
+ *                          widget, compact ("Volume, 64%"). Typing
+ *                          is deliberately not narrated per
+ *                          keystroke.
+ *
+ * The sink runs on the thread (and in the call stack) that mutated
+ * the tree; it may query the tree but must not destroy widgets,
+ * like every other FDK event callback. Utterances are valid only
+ * for the duration of the call — copy if the sink defers.
+ *
+ * One narrator per process (the object model is single-threaded
+ * anyway); starting it takes one of the FDK_A11Y_MAX_SUBSCRIBERS
+ * subscription slots. */
+
+/* Forward declaration of the i18n catalog (opaque; see fdk_i18n.h).
+ * Legal alongside the same typedef there — both name struct
+ * fdk_catalog. */
+typedef struct fdk_catalog fdk_catalog;
+
+/* Where utterances go. typedef'd here; see the narrator section
+ * above for the contract. */
+typedef void (*fdk_a11y_speak_fn)(const char *utterance,
+                                  void *user_data);
+
+/* Installs the utterance sink used by the engine and
+ * fdk_a11y_announce(). Passing NULL detaches it AND stops the
+ * engine (a narrator with nowhere to speak holds no subscriber
+ * slot). Detaching does not affect a catalog set with
+ * fdk_a11y_narrator_set_catalog. */
+void fdk_a11y_set_speaker(fdk_a11y_speak_fn fn, void *user_data);
+
+/* Localizes the narrator's glue words — role names ("button",
+ * "slider"), state words ("checked", "disabled"), — through the
+ * i18n engine when a catalog is wired; English (the msgid, gettext
+ * convention) otherwise. The exact msgid set is every string
+ * fdk_a11y_role_name() can return plus: "checked", "pressed",
+ * "selected", "expanded", "read only", "required", "invalid",
+ * "modal", "busy", "disabled". NULL (the default) means English.
+ * The catalog is borrowed, never destroyed by the narrator. */
+void fdk_a11y_narrator_set_catalog(const fdk_catalog *catalog);
+
+/* Starts automatic narration (focus/toggle/value events above).
+ * Requires a sink: FDK_ERR_INVALID_ARGUMENT when none is attached.
+ * FDK_ERR_LIMIT when all FDK_A11Y_MAX_SUBSCRIBERS slots are taken.
+ * Idempotent. */
+fdk_result fdk_a11y_narrator_start(void);
+
+/* Stops automatic narration (idempotent). Forced announcements via
+ * fdk_a11y_announce() still reach an attached sink. */
+void fdk_a11y_narrator_stop(void);
+
+/* True while the engine is narrating automatically. */
+bool fdk_a11y_narrator_active(void);
+
+/* Speaks a status message through the attached sink regardless of
+ * the engine state ("File saved"). No-op when no sink is attached
+ * or the text is NULL/empty. The text is NOT copied — the same
+ * duration-of-the-call contract as engine utterances. */
+void fdk_a11y_announce(const char *text);
+
+/* Composes what the narrator would say for `widget` into buf:
+ * the accessible name, the localized role name, the spoken state
+ * words, and the rendered value — "Volume, slider, 64%". This is
+ * the engine's own composition path, published so an application
+ * can preview, caption, or log announcements without a sink.
+ *
+ * snprintf semantics: returns the length the FULL announcement
+ * would have had; a too-small cap truncates (the copy in buf is
+ * always NUL-terminated), so sizing buf as ret + 1 fits exactly.
+ * Returns 0 on invalid arguments (NULL widget/buf, zero cap) or
+ * when the widget cannot be described (dying or in teardown);
+ * buf is left an empty string in every case where buf is valid. */
+size_t fdk_a11y_compose_announcement(const fdk_widget *widget, char *buf,
+                                     size_t cap);
 
 #ifdef __cplusplus
 }

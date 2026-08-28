@@ -12,7 +12,7 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: 1.0.1 — all eleven roadmap phases COMPLETE, ABI frozen.**
+**Status: 1.1.0 — all eleven roadmap phases COMPLETE, ABI frozen; the no-bus policy + embedded narrator landed.**
 
 **Fonts:** FDK bundles no font (licensing posture). The demos and
 `fdk_font_load_system_default()` discover a system UI font through
@@ -31,7 +31,11 @@ full window management, the advanced widget phase — clipboard, text
 Entry (now with password/read-only/max-length modes), ScrollView,
 List, Tree, Slider, SpinButton, Toolbar, Notebook, Canvas, Menu,
 ComboBox, and modal dialogs — the accessibility core (describe /
-notify / perform over the widget tree itself), and the complete i18n
+notify / perform over the widget tree itself), the embedded narrator
+— FDK's in-process screen reader core: no D-Bus, no registry, no
+bridge process, just an application-wired sink that receives the
+narrated focus/toggle/value utterances (the no-bus policy,
+`docs/dependencies.md`) — and the complete i18n
 engine: explicit-locale formatting (numbers with Western/Indian/
 Swiss/Arabic grouping, currency, percent), an exact proleptic-
 Gregorian calendar with pattern-driven date/time formatting in 15
@@ -463,10 +467,15 @@ system, and action drivers for the whole interactive catalog. The
 Entry also gained the three modes the roadmap had promised:
 password (one bullet per cluster — the caret, selection, and
 hit-testing never change), read-only (selection + copy keep
-working), and max length. The platform bridge — a future AT-SPI2
-peer — is a CONSUMER of this API, the same way the X11 and
-Wayland backends sit under the widget layer; `docs/roadmap.md`'s
-Phase 10 entry records exactly what is and isn't there.
+working), and max length. Since 1.1.0 the toolkit also ships its
+own consumer: the embedded narrator — FDK's screen reader core
+(`fdk_a11y_set_speaker` + `fdk_a11y_narrator_start`), which
+narrates focus moves, toggles, and value changes through an
+application-wired sink with no registry, no bus, and no bridge
+process (the no-bus policy, `docs/dependencies.md`). An external
+assistive-technology bridge, if an application wants one, is a
+CONSUMER of the same public API; `docs/roadmap.md`'s Phase 10 entry
+records exactly what is and isn't there.
 
 ### Internationalization — Phase 10, second half
 

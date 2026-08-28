@@ -163,10 +163,14 @@ slice: the accessibility core — the a11y tree IS the widget tree;
 value, `fdk_a11y_subscribe` delivers children/state/name/bounds/
 value change notifications with the widget core's mutation points
 firing them, and `fdk_a11y_perform` drives widgets through their own
-public semantics — the seam a future AT-SPI2 bridge or a test driver
-sits on; class-level descriptors ride a new `.a11y` field on the
-widget class vtable, and every catalog widget plus window roots
-describe themselves).
+public semantics — the seam the embedded narrator (1.1.0) and test
+drivers sit on; class-level descriptors ride a new `.a11y` field on
+the widget class vtable, and every catalog widget plus window roots
+describe themselves). `src/widget/a11y_narrator.c` (1.1.0: the
+embedded screen reader core — the no-bus policy made real; an
+ordinary subscriber that composes utterances from live describe()
+snapshots and speaks through an application-wired sink, so screen
+reader access needs no registry, no bus, and no bridge process).
 `fdk_init()` performs a real
 platform connection with backend auto-detection; `fdk_run()` is a
 real `poll()`-based event loop that exits on `fdk_quit()` or when
@@ -180,8 +184,10 @@ and presents (`examples/03_widgets.c`).
 See `docs/roadmap.md`'s entries for the precise, honest lists of
 what is and isn't covered — in particular i18n (the whole second
 half of Phase 10), per-item a11y nodes for painted-row containers
-(menu items, notebook tabs), the AT-SPI2 bridge itself, and IME
-protocols are recorded as not-yet (each with its reason), while the
+(menu items, notebook tabs), and IME
+protocols are recorded as not-yet (each with its reason; external
+assistive-technology bridging is an application-side consumer of
+the public seam per the no-bus policy, not toolkit work), while the
 renderer (damage tracking, clip stack, offscreen surfaces, images,
 transforms, AA, MIT-SHM, HiDPI), the text stack (subpixel
 positioning), the widget foundation + layout engine + catalog +

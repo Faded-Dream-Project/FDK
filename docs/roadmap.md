@@ -1415,10 +1415,11 @@ same way the X11/Wayland backends sit under the widget layer.
 - **The AT-SPI2 bridge process itself**: the seam exists (query +
   notification + action + text + relations); the bridge (D-Bus
   peer, object-path tree, cache protocol) stays OUT of the
-  toolkit by the phase's own definition — it is a consumer of
-  this API, like the X11/Wayland backends sit under the widget
-  layer. Not a gap in the phase's promise; recorded so nobody
-  hunts for it in the source tree.
+  toolkit — SUPERSEDED at 1.1.0 by the no-bus policy
+  (`docs/dependencies.md`): the in-process embedded narrator is
+  FDK's screen reader answer, and external bridging is an
+  application-side consumer of this API, never toolkit work.
+  Recorded so nobody hunts for it in the source tree.
 - **Label visual-line runs**: a WRAP label reports its whole text
   as one LINE run; per-visual-line runs need the paint-time
   display cache exposed to the a11y layer. (Entry is single-line,
@@ -1548,8 +1549,10 @@ pointer is ordinary C UB) are documented, not hidden.
 
 - The occlusion cull (see above) — data-driven future work, not
   owed by this phase.
-- The AT-SPI2 bridge (Phase 10's deliberate out-of-toolkit seam) —
-  unchanged.
+- The AT-SPI2 bridge — REJECTED at 1.1.0 by the no-bus policy
+  (`docs/dependencies.md`): the embedded narrator is the
+  in-process answer; external bridging is application-side work
+  on the public seam.
 - Distribution packaging (deb/rpm/APK recipes) — the Makefile
   install + pkg-config are the toolkit's packaging surface;
   distro-specific recipes are downstream work, not library work.
@@ -1609,3 +1612,75 @@ takes the slot, so one broken font cannot break text everywhere.
   code.
 - Battery: full headless suite, X11 integration suite, release
   build 0 warnings, bench baseline — all green.
+
+### 1.1.0 — the no-bus policy + the embedded narrator — COMPLETE
+
+Directive: FDK must never rely on D-Bus or any Red Hat/Freedesktop
+daemon infrastructure; wherever the desktop bus ecosystem would do
+a job for other toolkits, FDK does the job itself, in-process.
+
+**The policy** (`docs/dependencies.md`, "The no-bus policy"):
+FDK never links, dlopens, spawns, or requires D-Bus — or any
+daemon/bus/activation service — for any toolkit functionality. The
+audit: zero D-Bus references in `src/` + `include/`; link line is
+`-lX11 -lXext -lwayland-client -lxkbcommon -lm -ldl`; libatspi and
+libdbus appear nowhere. The parked "future AT-SPI2 bridge" notes in
+this file were rewritten — the bridge is not future work, it is
+rejected work, superseded by the in-process answer below.
+
+**The implementation — `src/widget/a11y_narrator.c`, the embedded
+screen reader core** (the consumer Phase 10's design always named,
+now shipped):
+
+- `fdk_a11y_set_speaker(fn, user)` — the utterance sink: whatever
+  the application wires (TTS, braille, a subtitle bar, a log); FDK
+  itself links, loads, and requires none of it. Detaching (NULL)
+  parks the engine — a narrator with nowhere to speak holds no
+  subscriber slot.
+- `fdk_a11y_narrator_start/stop/active` — the engine: an ordinary
+  global-scope subscriber of the public a11y notifications (one of
+  the 16 slots; FDK_ERR_LIMIT surfaces honestly when they are
+  full). While started it narrates focus moves (the gaining side
+  only — "Save, button"), CHECKED/PRESSED/SELECTED/EXPANDED
+  toggles on the focused widget at the new value, and VALUE
+  changes of focused non-editable controls compactly
+  ("Volume, 64"). The deliberate silences: focus-out, unfocused
+  background churn, and per-keystroke typing (editable text value
+  floods would drown everything else — the same trade-off real
+  screen readers make with echo modes).
+- `fdk_a11y_announce(text)` — forced status utterances
+  ("File saved") through the sink regardless of engine state.
+- `fdk_a11y_compose_announcement(widget, buf, cap)` — the engine's
+  own composition path, published: name, role, spoken states
+  (checked/pressed/selected/expanded/read-only/required/invalid/
+  modal/busy/disabled), and rendered value, snprintf semantics.
+- `fdk_a11y_narrator_set_catalog(cat)` — the glue words localize
+  through FDK's own i18n engine (gettext-convention msgids: the
+  role names plus the state words — the exact set is in the
+  header); English when no catalog is wired.
+
+Reentrancy: utterances are heap-composed BEFORE the sink runs, so
+the sink never sees borrowed widget state and follows the standard
+FDK callback contract (may query, must not destroy).
+
+- **Widget bug found by the narrator tests and fixed**: the
+  SpinButton never set FDK_WF_CAN_FOCUS — every other control of
+  its family (slider, entry, buttons, toggles) does — so focus()
+  on a spin was a silent no-op and the widget was unreachable by
+  Tab. Fixed in `fdk_spin_create`.
+- Demo: `examples/12_narrator.c` — the no-bus screen reader live:
+  a scripted tour narrates focus, a toggle, a value change, and a
+  forced announcement to a subtitle label + stdout, then the
+  engine keeps narrating interactively (Xvfb-verified; screenshot
+  in `docs/screenshots/narrator_demo_460x400.png`).
+- Tests: `tests/test_narrator.c` — 46 checks: the composer (names,
+  overrides, every spoken state, value renderings, truncation +
+  snprintf retry semantics, invalid args), the announce path, the
+  engine e2e (focus narration both ends, refocus no-op, toggle at
+  new value, unfocused-churn silence, stop/start/park lifecycle,
+  typing silence, spin/slider value narration), localization
+  through a parsed catalog, and the FDK_ERR_LIMIT slot-exhaustion
+  with recovery.
+- Battery: clean rebuild 0 warnings, full headless suite, X11
+  integration suite, release 0 warnings, bench baseline, DESTDIR
+  install (pc reports 1.1.0).

@@ -494,6 +494,37 @@ the name, and REAL key events typed through the X server arrive
 in the Entry's value interface — the exact snapshot a bridge
 would poll.
 
+## Narrator tests (1.1.0)
+
+**Headless** (`tests/test_narrator.c`, 46 checks in plain
+`make test`, ASan+UBSan): the embedded screen reader core is
+display-independent for the same reason the a11y layer is — it is
+"just" a subscriber. Covered: the composer matrix (named/unnamed
+widgets, accessible-name overrides, every spoken state word —
+checked/pressed/selected are covered via checked; disabled,
+read-only — value renderings for slider/progress/entry, the
+snprintf truncation + size-and-retry semantics, and the invalid
+argument guards), the forced-announce path (NULL/empty no-ops,
+sinkless no-crash), the engine e2e (start-requires-sink,
+focus-move narration with focus-out silence, refocus no-op,
+toggles narrated at the new value, unfocused background churn
+silent, the stop/start/park lifecycle with announce surviving
+stop, typing NOT narrated, focused slider/spin value narration),
+localization through a real parsed catalog (role + state words
+translated, untranslated msgids passing through, NULL =
+English), and the FDK_A11Y_MAX_SUBSCRIBERS slot exhaustion →
+FDK_ERR_LIMIT with recovery. The suite also guards the
+documentation contract that a fully destroyed pointer is UB (the
+dying-widget refusal protects mid-teardown callbacks only) —
+noted in-source rather than tested-with-UB.
+
+**X11 GUI**: `examples/12_narrator.c` doubles as the live proof —
+run under Xvfb with `FDK_DEMO_FRAMES`, its stdout must contain
+the full narration sequence (forced announcement, four focus
+utterances, the toggle and value utterances in order) and it must
+exit cleanly; the screenshot battery captures the subtitle bar
+mid-tour.
+
 ## Wayland test coverage
 
 `make test-wayland` builds and runs
