@@ -109,6 +109,12 @@ struct fdk_platform_window {
     int popup;
     int grabbed;
 
+    /* Phase 9 completion: modal-dialog grab state (a TOPLEVEL
+     * holding pointer+keyboard grabs so no other window receives
+     * input until it closes; outside presses are ignored, not
+     * dismissals — see window_set_modal in x11_window.c). */
+    int modal_grab;
+
     /* --- Phase 8 window-state bookkeeping ---
      *
      * maximized/minimized are the backend's view of the truth,
@@ -234,6 +240,16 @@ void fdk_x11_surface_shm_completion(fdk_platform_window *pwindow,
  * popup still works, it just doesn't grab). */
 void fdk_x11_window_popup_grab(fdk_platform_window *pwindow);
 void fdk_x11_window_popup_ungrab(fdk_platform_window *pwindow);
+
+/* Re-asserts a popup's grab after a nested popup's grab replaced it
+ * (menu submenu dismissal — grabs do not stack). */
+void fdk_x11_window_popup_regrab(fdk_platform_window *pwindow);
+
+/* Modal-dialog grab on a toplevel (Phase 9 completion): while set,
+ * no other window on the connection receives input; outside
+ * presses are ignored, not dismissals. */
+fdk_result fdk_x11_window_set_modal(fdk_platform_window *pwindow,
+                                    bool modal);
 
 /* Clipboard (x11_clipboard.c). Called from x11_connection.c
  * (setup/teardown) and x11_dispatch.c (helper-window events, which

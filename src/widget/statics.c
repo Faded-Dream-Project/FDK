@@ -37,8 +37,15 @@ char *fdk__strdup(const char *s) {
 
 void fdk__text_extent(const fdk_font *font, const char *text,
                       fdk_i32 *out_w, fdk_i32 *out_h) {
-    *out_w = 0;
-    *out_h = 0;
+    /* Either output may be NULL (queries that need only one of the
+     * two — NULL-tolerant since Phase 9's menu code queries widths
+     * alone heavily). */
+    if (out_w != NULL) {
+        *out_w = 0;
+    }
+    if (out_h != NULL) {
+        *out_h = 0;
+    }
     if (font == NULL || text == NULL || text[0] == '\0') {
         return;
     }
@@ -46,9 +53,13 @@ void fdk__text_extent(const fdk_font *font, const char *text,
     fdk_font_get_metrics(font, &fm);
     fdk_text_metrics tm;
     if (fdk_ok(fdk_font_measure_utf8(font, text, strlen(text), &tm))) {
-        *out_w = tm.advance_width;
+        if (out_w != NULL) {
+            *out_w = tm.advance_width;
+        }
     }
-    *out_h = fm.ascent + fm.descent;
+    if (out_h != NULL) {
+        *out_h = fm.ascent + fm.descent;
+    }
 }
 
 void fdk__draw_text(fdk_surface *surface, fdk_font *font,

@@ -28,8 +28,10 @@ yourself). If not, it starts a throwaway Xvfb automatically, runs
 against it, and tears it down afterward — no manual setup needed even
 in a bare CI container, as long as `Xvfb` is installed.
 
-There is currently no `make test-wayland` — see "Wayland test
-coverage" below for why, honestly.
+There is a `make test-wayland` — the integration binary self-skips
+when `$WAYLAND_DISPLAY` is unset, so plain CI never fails on it;
+point it at a live compositor (the rig starts sway headless) and it
+runs the real suite. See "Wayland test coverage" below.
 
 ## Why the split
 
@@ -398,77 +400,134 @@ so the remaining close-request gap is purely about the ClientMessage
 shape a window manager produces, which is equally synthesizable when
 someone picks this up.)
 
+## Advanced widget tests (Phase 9)
+
+**Headless** (plain `make test`, ASan+UBSan): `test_clipboard.c`
+exercises the core dispatch and the mock-backend contract (set/get
+round trip, replace semantics, NULL on empty); `test_entry.c` the
+whole editing model as pure logic (cluster-safe cursor clamping,
+selection algebra, cut/copy/paste against the mock, password/
+max-length/read-only, preedit); `test_scroll.c` the scrollview math
+(offsets, clamping, auto-hide thresholds); `test_list.c` and
+`test_tree.c` the selection semantics as table-driven cases
+(the full modifier grammar, moving key cursors, stable handles,
+expander behavior); `test_menu.c` the model CRUD + measure math +
+view activation state machine (click/keyboard/check/radio/disable,
+bar hit-testing); `test_combo.c` the model + editable custom-text
+state machine; `test_controls.c` the slider/spin/toolbar/notebook/
+canvas logic.
+
+**X11 GUI** (in `make test-x11`): the clipboard suite makes the
+test itself a SECOND X client and performs the real selection
+handshake through the server — both directions, TARGETS
+negotiation, refusal when not owner, loss-of-ownership release.
+`test_entry_gui` drives real key events into a focused Entry
+(typing, Shift-selection, Ctrl+V from the real clipboard,
+Backspace). `test_popup_window` pixel-verifies a popup window's
+fill plus both dismissal paths (outside-click press, Escape).
+`test_menu_gui` is the full popup lifecycle through real input:
+bar click maps the popup, the popup AUTO-PAINTS (server-side
+pixel proof), keyboard Down+Enter activates + closes, check items
+flip state + fire callbacks + close, hover opens the submenu
+chain (nested popups), Escape peels one level per press, and the
+chain closes cleanly. `test_combo_gui` runs the dropdown
+lifecycle (click opens the auto-painted list, picking a row sets
+active + fires on_changed + closes, Escape dismisses without
+changing the selection). `test_dialog_gui` proves modality is
+REAL: the dialog's pointer+keyboard grab is held server-side
+(the test's own foreign grab is REFUSED while the dialog lives
+and succeeds after), Enter answers OK, Escape answers Cancel,
+buttons answer through real clicks, and early destroy answers
+Cancel via the destroy-notify path.
+
+**Wayland** (`make test-wayland` under the sway rig): the menu
+popup test is the deepest integration in the suite — the rig
+drives sway's seat cursor to absolute coordinates so a REAL
+button event (and its valid input serial) reaches the client
+through the compositor; the menu button click, the popup maps,
+an item is clicked FOR REAL, the chain closes, and outside-click
+dismissal works. The dialog test verifies mapping + auto-paint +
+early-destroy-answers-Cancel + clean ASan teardown. (Modality is
+deliberately not asserted on Wayland — no toplevel-grab protocol
+exists; dialogs there are non-modal, documented.)
+
+**Demo rig**: `scripts/run_advanced_demo_x11.sh` drives
+`examples/11_advanced` with real clicks (the same XSendEvent
+discipline), PIL-verifying five frames — File menu popup, combo
+dropdown, modal dialog, nested submenu, chain dismissed (the
+last one structurally: the driver's XQueryTree assertion that
+the root's child count returned to baseline proves every popup
+window left the server) — plus all the demo's phase markers.
+
 ## Wayland test coverage
 
-There is no automated `make test-wayland` yet (see the gap note
-below), but the Wayland backend **has been integration-tested against
-a real compositor**: Weston 14 running with its headless backend and
-pixman renderer, driven end-to-end with the hello-world example as a
-client. Verified in that setup:
+`make test-wayland` builds and runs
+`tests/test_wayland_integration.c` against whatever compositor
+`$WAYLAND_DISPLAY` reaches (the binary self-skips without one, so
+plain `make test`-style CI never fails on it). The verification
+compositor for the maintained rig (`scripts/run_wayland_suite.sh`)
+is sway 1.10 headless — wlroots pixman renderer, `WLR_BACKENDS=
+headless`, a config that floats FDK's windows at a known position
+so client-side resizes take effect. Debian's weston 14 ships no
+xdg-decoration implementation in any shell and its desktop-shell
+cannot run from a non-root prefix, which is why sway won (the
+Phase 3-era runs used weston's kiosk shell; the compositor was
+switched when Phase 8 needed xdg-decoration).
 
-- `fdk_init()` connects, binds wl_compositor/wl_shm/xdg_wm_base, and
-  reports the backend honestly (including the no-seat warning).
-- The xdg-shell handshake completes: initial empty commit, configure
-  received and acked, then the solid background buffer is created,
-  attached (with full-surface damage), and committed.
-- `WAYLAND_DEBUG=1` protocol traces confirm the exact request order
-  above, and a compositor screenshot pixel-verifies the window is
-  actually mapped and visible (solid white covering the output).
-- Clean shutdown path (window destroy, buffer destroy, disconnect)
-  exercised when the compositor connection closes.
+The suite currently verifies, all against the live compositor and
+all under ASan+UBSan with leak checking:
 
-The Phase 3 render path was verified in the same rig with the
-`02_software_render` example:
+- Connection + registry + seat binding; the xdg-shell handshake
+  with the empty first commit, configure, ack, buffer attach,
+  damage, and commit in the protocol-correct order
+  (WAYLAND_DEBUG traces were used to develop it; the rig still
+  counts requests where order matters).
+- Client-side decorations end to end (pixel-verified themed band),
+  maximize/unmaximize state events from configure's states[],
+  minimize request + optimistic flag, honest FDK_ERR_UNSUPPORTED
+  restore (xdg-shell has no unminimize request).
+- Layout reflow through a compositor-driven resize; HiDPI scale
+  handling (logical vs physical geometry).
+- Clipboard set/get round trip on FDK's own selection.
+- Menu popups THROUGH the compositor: the rig drives sway's seat
+  cursor to absolute coordinates so the click is a real button
+  event with a valid input serial — the popup maps under
+  xdg_popup.grab, an item is activated for real, the chain
+  closes, and outside-click dismissal works.
+- Dialogs: mapped, auto-painted, early destroy answers Cancel,
+  clean teardown.
+- Clean shutdown (window destroy, buffer release, disconnect)
+  with zero leaks — the leak-free teardown is itself a tested
+  assertion, and it caught two real backend bugs on its first
+  runs (the xdg-decoration object ordering, and a leaked
+  wl_surface.frame callback proxy when a window died before
+  `done` arrived).
 
-- Per-frame protocol counts from `WAYLAND_DEBUG=1` over ~155 frames:
-  155 wl_shm pool creations, 155 buffer creations, 154 attaches,
-  155 commits, 152 releases — exactly the one-fresh-buffer-per-present
-  lifecycle `wayland_window.c` implements, with the compositor
-  releasing superseded buffers (no leaks, no slot exhaustion).
-- Two compositor screenshots ~3.5 s apart pixel-verify the ANIMATED
-  content is live: different gradient colors in each capture (the
-  palette cycled), 276+ distinct colors, and the white ball/logo
-  pixels present.
-- kiosk-shell's fullscreen `xdg_toplevel.configure(1024, 640)` was
-  received and the renderer followed it — the framebuffer resized and
-  the screenshots show the gradient covering the full output, not the
-  original 640x480 window.
+Three real bugs were found and fixed by Wayland-side testing
+during Phase 3, all of which would have reproduced on any
+compositor — kept here because they shaped the discipline the
+current code follows:
 
-And a third real bug was found by exactly this testing, this time on
-the X11 side during the render demo:
-
-3. **Events buffered in Xlib's queue were invisible to poll()** —
-   Xlib reads socket data into its internal queue during ANY I/O,
-   including the `XFlush` at the end of every `fdk_surface_present()`.
-   An event (the demo's synthetic `WM_DELETE_WINDOW`, arriving while
-   the app was mid-render) could therefore already have left the
-   socket — and poll() on the connection fd never fires for it again.
-   Events that happened to land during the poll() wait worked; events
-   landing during rendering were swallowed forever. Fixed by
-   `fdk_pump_events()` draining client-side-buffered events before
-   waiting on the fd (both backends' dispatch_pending are safe to
-   call in that position by design).
-
-Two real bugs were found and fixed by exactly this testing, both of
-which would have reproduced on any compositor:
-
-1. **Missing `wl_surface.damage`** — compositors schedule repaints
-   from the damage region; a committed-but-undamaged surface is never
-   drawn (the buffer latches, the window stays invisible).
+1. **Missing `wl_surface.damage`** — compositors schedule
+   repaints from the damage region; a committed-but-undamaged
+   surface is never drawn (the buffer latches, the window stays
+   invisible).
 2. **Missing output flush after listener callbacks** — requests
-   queued by event handlers sat in libwayland's output buffer while
-   the poll() loop blocked, deadlocking the handshake until an
-   unrelated event (e.g. a compositor ping) happened to wake it.
+   queued by event handlers sat in libwayland's output buffer
+   while the poll() loop blocked, deadlocking the handshake until
+   an unrelated event happened to wake it.
+3. **Xlib-side sibling (found by the X11 render demo)** — events
+   buffered in Xlib's internal queue are invisible to poll();
+   `fdk_pump_events()` now drains client-side-buffered events
+   before waiting on the fd.
 
-The remaining gap: this is not yet wired into `make test-wayland`
-because the test environment assembled a fully user-space Weston
-(extracted distribution packages with no root access, path relocation
-via `WESTON_MODULE_MAP`, `--shell=kiosk-shell` to avoid
-desktop-shell's helper clients, `--use-pixman` for real software
-rendering) — reproducible, but too environment-specific to hard-code
-into the Makefile honestly. The X11 backend remains the coverage bar;
-Wayland is verified to a manual-but-real integration level, one step
-short of automated CI.
+The remaining honest gap: the maintained rig starts the compositor
+itself but lives OUTSIDE the Makefile (`scripts/run_wayland_
+suite.sh`), because it depends on a user-space sway/wlroots
+toolchain extracted without root access — reproducible, but too
+environment-specific to hard-code. `make test-wayland` against a
+system compositor is the automation seam; the rig is the
+verification.
 
 ## Known Xvfb flakiness (investigated and fixed)
 

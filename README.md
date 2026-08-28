@@ -12,21 +12,19 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: Phase 3 — Rendering (second slice).** Core lifecycle, real
-X11 and Wayland backends, and the rendering layer are implemented
-and tested. Applications can create windows, receive real translated
-keyboard/pointer/configure/close events on both backends, and draw
-real pixels into a window's software surface and present them on
-either backend (`fdk_surface`, see `examples/02_software_render.c`:
-an animated gradient, a bouncing ball, and a block-letter logo —
-full-frame animation AND damage-tracked partial redraws at 1-2% of
-the window per frame, paced by the compositor on Wayland). The
-primitive set covers fills, rects, gradients, lines, circles,
-rounded rects, clip stacks, offscreen surfaces, and surface-to-
-surface blits (`docs/rendering.md`). There is no widget system or
-window decoration system yet — see "What works today" below and
-`docs/roadmap.md`'s Phase 3 entry for an honest, specific list of
-what is and isn't covered.
+**Status: Phase 9 — Advanced Widgets (complete).** Core lifecycle,
+real X11 and Wayland backends, the rendering layer (damage-tracked
+software renderer with images, alpha compositing, transforms, and
+antialiasing), the widget foundation with layout (box + grid), the
+text stack (TrueType shaping with subpixel positioning), the core
+widget catalog, the theme engine (runtime-switchable `.fdk` files),
+FDK-drawn window decorations with full window management, and the
+advanced widget phase — clipboard, text Entry, ScrollView, List,
+Tree, Slider, SpinButton, Toolbar, Notebook, Canvas, Menu (bar +
+dropdowns + submenus + context menus), ComboBox (non-editable and
+editable), and modal dialogs — are implemented and tested. See
+"What works today" below and `docs/roadmap.md` for an honest,
+specific list of what is and isn't covered.
 
 ## Requirements
 
@@ -349,6 +347,60 @@ memory path on a double buffer; on a scaled Wayland output the widget
 layer composites through the logical intermediate while raw pixels
 stay physical.
 
+### The advanced widget phase — Phase 9, complete
+
+Everything a real application needs for input and structure: a
+clipboard architecture (real ICCCM selection ownership on X11,
+`wl_data_device` on Wayland), a text Entry (cluster-safe cursor,
+selection with the full modifier grammar, cut/copy/paste, password
+mode, IME preedit groundwork), ScrollView with overlay scrollbars,
+List and Tree with multi-select, Slider, SpinButton, Toolbar,
+Notebook, Canvas — and the popup machinery that ties them together:
+
+```c
+fdk_menu *file = NULL;
+fdk_menu_create(font, &file);
+fdk_menu_item *it = NULL;
+fdk_menu_append(file, "Open", &it);
+fdk_menu_item_set_on_activate(it, on_open, NULL);
+fdk_menu_append_check(file, "Show toolbar", true, NULL);
+
+fdk_widget *bar = NULL;
+fdk_menu_bar_create(window_content, font, &bar);
+fdk_menu_bar_append(bar, "File", file);   /* bar + dropdowns + submenus */
+```
+
+Menus, submenus, and combo dropdowns are TOOLKIT-OWNED popup windows:
+`fdk_window_create_popup` on the window layer (override-redirect +
+input grabs on X11, `xdg_popup` with positioners on Wayland) with a
+parent-relative position, a grab at show, and a close request on the
+outside press — the widget layer creates them, auto-paints them, and
+dismisses them. The app loop pumps events and paints ITS windows
+only. Dialogs ride the same machinery: `fdk_dialog_show_message` is
+non-blocking by design (nothing in FDK blocks the event loop), modal
+on X11 through a real server-side pointer+keyboard grab (the test
+suite verifies the grab by REFUSING a foreign grab while the dialog
+lives), and honestly non-modal on Wayland where no toplevel-grab
+protocol exists.
+
+```c
+fdk_dialog_options opts = {
+    .title = "Discard changes?",
+    .text  = "The file has unsaved changes.",
+    .buttons = FDK_DIALOG_OK_CANCEL,
+    .modal = true,   /* X11: server-side input grab; Wayland: ignored */
+};
+fdk_dialog_show_message(ctx, &opts, on_answer, NULL);
+/* Enter answers OK, Escape answers Cancel, buttons answer themselves,
+ * early destroy answers Cancel — exactly one on_response, always. */
+```
+
+Run `examples/11_advanced.c`: every Phase 9 control in one window —
+a menu bar with submenus and a real message dialog, a toolbar, a
+notebook of pages (controls, a list, a tree, a canvas), combos, a
+status label narrating everything. The popups open, grab, and
+dismiss themselves while the demo only pumps events.
+
 ### What it looks like
 
 These are real captured frames from the test rig — not mockups. The
@@ -447,6 +499,17 @@ and GROWN 460x300 -> 500x330 by dragging the bottom-right resize
 corner FDK draws:
 
 ![09_decorations window management](docs/screenshots/decorations_management_1636x340.png)
+
+The Phase 9 completion, same rig, same discipline — `11_advanced`
+driven by real clicks through the X server: (1) the File menu open
+below its bar title — a toolkit-owned popup the demo never paints
+itself; (2) a ComboBox dropdown; (3) the modal message dialog (its
+own toplevel, grabbing input server-side); (4) a nested submenu
+chain, each level its own popup. Escape peels the chain one level
+per press; the rig's XQueryTree assertion proves every popup window
+left the X server when the chain closed:
+
+![11_advanced popups through real input](docs/screenshots/advanced_widgets_2600x578.png)
 
 ## Project principles
 

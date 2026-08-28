@@ -124,6 +124,14 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
     pwindow->configured = 1;
 
     if (pwindow->pending_size.width > 0 && pwindow->pending_size.height > 0) {
+        if (pwindow->last_size.width != pwindow->pending_size.width ||
+            pwindow->last_size.height != pwindow->pending_size.height) {
+            /* A real resize: a fractional viewport's source rectangle
+             * is size-derived, so it must re-apply before the next
+             * commit (integer scales derive nothing and re-apply as a
+             * cheap no-op of the same requests). */
+            pwindow->scale_applied = 0;
+        }
         pwindow->last_size = pwindow->pending_size;
     }
 
@@ -584,27 +592,54 @@ static void apply_window_scale(fdk_platform_window *pwindow) {
     if (pwindow->scale_applied || pwindow->surface == NULL) {
         return;
     }
+    fdk_platform_connection *conn = pwindow->conn;
 
     int integer = (pwindow->scale_x120 % 120) == 0;
-    if (integer || pwindow->viewport == NULL) {
+    if (integer || conn->viewporter == NULL) {
         int k = pwindow->scale_x120 / 120;
         if (k < 1) {
             k = 1;
         }
         if (pwindow->viewport != NULL) {
+            /* A stale fractional viewport from a previous scale —
+             * viewport state supersedes buffer scale, so it must go
+             * before set_buffer_scale means anything. The fractional
+             * LISTENER object stays: preferred_scale events keep
+             * arriving (a later fractional switch re-creates the
+             * viewport lazily below). */
             wp_viewport_destroy(pwindow->viewport);
             pwindow->viewport = NULL;
-            /* The fractional object wraps the viewport mechanism;
-             * without one the compositor stops sending preferred_scale
-             * for this window, so the output-derived path resumes. */
-            if (pwindow->fractional != NULL) {
-                wp_fractional_scale_v1_destroy(pwindow->fractional);
-                pwindow->fractional = NULL;
-            }
         }
         wl_surface_set_buffer_scale(pwindow->surface, k);
         pwindow->buffer_scale = k;
     } else {
+        /* Fractional factor: the viewport is created HERE, never at
+         * window-create — an unconfigured viewport (empty source/
+         * destination) means "never display this surface" per the
+         * viewporter protocol, and the first commit carrying one
+         * kept sway from EVER mapping the window (found live: FDK
+         * windows were absent from sway's tree while a control
+         * client mapped fine; the suite's self-consistent checks —
+         * own-framebuffer pixels + protocol counts — never saw it).
+         * Creating it in the same batch as its configuration means
+         * a viewport is never seen empty. */
+        if (pwindow->viewport == NULL) {
+            pwindow->viewport =
+                wp_viewporter_get_viewport(conn->viewporter,
+                                           pwindow->surface);
+            if (pwindow->viewport == NULL) {
+                FDK_WARN("wp_viewporter_get_viewport failed; falling "
+                         "back to integer scale");
+                int k = pwindow->scale_x120 / 120;
+                if (k < 1) {
+                    k = 1;
+                }
+                wl_surface_set_buffer_scale(pwindow->surface, k);
+                pwindow->buffer_scale = k;
+                pwindow->scale_applied = 1;
+                return;
+            }
+        }
         wl_surface_set_buffer_scale(pwindow->surface, 1);
         pwindow->buffer_scale = 1;
         fdk_i32 lw = pwindow->last_size.width;
@@ -994,9 +1029,20 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
          * The grab cites the newest input serial (compositors may
          * refuse serial 0 — documented in fdk_window.h); popup_done
          * (the compositor's dismissal) translates to a close request
-         * in the popup listener below. */
-        if (parent == NULL || parent->xdg_toplevel == NULL) {
-            FDK_ERROR("popup window needs a toplevel parent");
+         * in the popup listener below.
+         *
+         * Phase 9 completion — NESTED popups (menu submenus): the
+         * parent may be another popup's xdg_surface, exactly as the
+         * protocol prescribes ("the parent of a grabbing popup must
+         * either be an xdg_toplevel surface or another xdg_popup
+         * with an explicit grab"). The grab auto-returns to the
+         * parent when the topmost popup is destroyed, so no re-grab
+         * request exists here (unlike X11). Nested popups MUST be
+         * destroyed topmost-first — the window layer's popup-family
+         * sweep guarantees that order. */
+        if (parent == NULL || (parent->xdg_toplevel == NULL &&
+                               parent->xdg_popup == NULL)) {
+            FDK_ERROR("popup window needs a toplevel or popup parent");
             xdg_surface_destroy(pwindow->xdg_surface);
             wl_surface_destroy(pwindow->surface);
             fdk_free(pwindow);
@@ -1070,8 +1116,14 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
      * then be called at any time — fdk_window_set_decorated() does
      * that part. Created only when the compositor advertised the
      * manager global; absent global = set_decorated honestly
-     * reports FDK_ERR_UNSUPPORTED later. */
-    if (conn->decoration_manager != NULL) {
+     * reports FDK_ERR_UNSUPPORTED later.
+     *
+     * TOPLEVELS ONLY: popups have no xdg_toplevel (passing the NULL
+     * here marshals an error that poisons the whole connection —
+     * every later flush fails with EINVAL; found live against sway
+     * by the Phase 9 menu tests, the first real popup user). */
+    if (conn->decoration_manager != NULL &&
+        pwindow->xdg_toplevel != NULL) {
         pwindow->toplevel_decoration =
             zxdg_decoration_manager_v1_get_toplevel_decoration(
                 conn->decoration_manager, pwindow->xdg_toplevel);
@@ -1085,24 +1137,17 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
         }
     }
 
-    /* HiDPI (Phase 3 completion): the fractional-scale objects are
-     * created at WINDOW-CREATE time, like the decoration object —
-     * surface state objects with no buffer-ordering constraint, but
-     * binding them here means the compositor's preferred_scale event
-     * (which arrives around the first configure) is never missed.
-     * Viewporter without the fractional manager is still bound per
-     * window: the viewport is the mechanism that carries a fractional
-     * source rectangle. Both are NULL-safe absent globals: integer
-     * buffer scale alone then, honestly. */
-    if (conn->viewporter != NULL) {
-        pwindow->viewport = wp_viewporter_get_viewport(conn->viewporter,
-                                                       pwindow->surface);
-        if (pwindow->viewport == NULL) {
-            FDK_WARN("wp_viewporter_get_viewport failed; integer scale "
-                     "only for this window");
-        }
-    }
-    if (conn->fractional_manager != NULL && pwindow->viewport != NULL) {
+    /* HiDPI (Phase 3 completion): the fractional-scale LISTENER is
+     * created at WINDOW-CREATE time — surface state with no
+     * buffer-ordering constraint, and binding early means the
+     * compositor's preferred_scale event (which arrives around the
+     * first configure) is never missed. The VIEWPORT itself is NOT
+     * created here (see apply_window_scale): an unconfigured
+     * viewport means "never display" in the viewporter protocol,
+     * and the first commit carrying one kept compositors from ever
+     * mapping the window. It is born lazily, configured in the same
+     * commit batch as its first use. */
+    if (conn->fractional_manager != NULL) {
         pwindow->fractional = wp_fractional_scale_manager_v1_get_fractional_scale(
             conn->fractional_manager, pwindow->surface);
         if (pwindow->fractional == NULL) {
@@ -1110,8 +1155,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
                      "for this window");
         } else {
             wp_fractional_scale_v1_add_listener(
-                pwindow->fractional, &g_fractional_scale_listener, pwindow);
-        }
+                pwindow->fractional, &g_fractional_scale_listener, pwindow);        }
     }
 
     fdk_result r = fdk_wayland_register_window(conn, pwindow);

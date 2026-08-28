@@ -562,6 +562,180 @@ void fdk_canvas_set_paint_callback(fdk_widget *canvas,
                                    void *user_data);
 void fdk_canvas_invalidate(fdk_widget *canvas);
 
+/* ---- Menu (Phase 9) ----
+ *
+ * A menu MODEL (fdk_menu: an item list, no presentation) plus the
+ * two presentations built on it: a MenuBar widget (dropdowns under
+ * clickable titles) and context menus (fdk_menu_popup_at pops any
+ * menu at a widget-relative position). ComboBox dropdowns ride the
+ * same machinery.
+ *
+ * The model is APPLICATION-OWNED: create it, attach submenus
+ * (fdk_menu_item_set_submenu borrows — the submenu is not owned),
+ * hand it to a MenuBar or pop it, and destroy it with
+ * fdk_menu_destroy when you are done (after destroying the bar).
+ * Items are stable handles for the menu's lifetime.
+ *
+ * Presentation contract: popup windows are TOOLKIT-OWNED — created,
+ * painted (auto-paint on every event's damage), grabbed, and
+ * destroyed by FDK. The application's loop only pumps events; it
+ * never learns these windows exist. Dismissal is universal: click
+ * outside, Escape (one level per press in a submenu chain), or
+ * activating an item closes the chain.
+ *
+ * Items: NORMAL activates and closes; SEPARATOR is a rule; CHECK
+ * toggles its checked state (vector-glyph checkmark) and closes;
+ * RADIO checks itself and unchecks the OTHER radios of the same
+ * menu (all radios in one menu are one group) and closes. Disabled
+ * items highlight nothing and swallow their clicks.
+ *
+ * Keyboard (delivered to the open menu via the popup's input grab):
+ * Up/Down/Home/End move the cursor skipping separators and disabled
+ * rows, Enter/Space activate, Right opens the cursor row's submenu
+ * (or walks to the next bar menu at the top level), Left closes the
+ * current submenu (or walks to the previous bar menu), Escape
+ * closes one level. The bar itself, when focused, walks titles with
+ * Left/Right and opens with Down/Enter.
+ *
+ * `shortcut` strings are DISPLAY-ONLY metadata ("Ctrl+S" drawn
+ * right-aligned): binding the actual keys is the application's
+ * business — FDK's menu layer never intercepts global keys.
+ *
+ * Honest v1 limits, documented rather than faked: menus do not
+ * scroll (a menu taller than the screen clips at the screen edge);
+ * hover-to-switch bar titles only reacts where the platform's popup
+ * grab reports out-of-bounds motion (X11: yes; Wayland: compositor
+ * dependent); mnemonics/accelerators-in-bar are not implemented. */
+
+typedef struct fdk_menu fdk_menu;
+typedef struct fdk_menu_item fdk_menu_item;
+
+typedef enum fdk_menu_item_type {
+    FDK_MENU_ITEM_NORMAL = 0,
+    FDK_MENU_ITEM_SEPARATOR = 1,
+    FDK_MENU_ITEM_CHECK = 2,
+    FDK_MENU_ITEM_RADIO = 3,
+} fdk_menu_item_type;
+
+/* Fires when the item activates (click or keyboard). Runs AFTER the
+ * popup chain has closed and any check/radio state has flipped. */
+typedef void (*fdk_menu_activate_fn)(fdk_menu_item *item,
+                                     void *user_data);
+
+fdk_result fdk_menu_create(fdk_font *font, fdk_menu **out_menu);
+void fdk_menu_destroy(fdk_menu *menu);
+size_t fdk_menu_item_count(fdk_menu *menu);
+
+fdk_result fdk_menu_append(fdk_menu *menu, const char *text,
+                           fdk_menu_item **out_item);
+fdk_result fdk_menu_append_separator(fdk_menu *menu);
+fdk_result fdk_menu_append_check(fdk_menu *menu, const char *text,
+                                 bool checked, fdk_menu_item **out_item);
+fdk_result fdk_menu_append_radio(fdk_menu *menu, const char *text,
+                                 bool checked, fdk_menu_item **out_item);
+
+fdk_result fdk_menu_item_set_text(fdk_menu_item *item, const char *text);
+const char *fdk_menu_item_text(fdk_menu_item *item);
+fdk_menu_item_type fdk_menu_item_get_type(fdk_menu_item *item);
+void fdk_menu_item_set_enabled(fdk_menu_item *item, bool enabled);
+bool fdk_menu_item_is_enabled(fdk_menu_item *item);
+void fdk_menu_item_set_checked(fdk_menu_item *item, bool checked);
+bool fdk_menu_item_is_checked(fdk_menu_item *item);
+/* Display-only shortcut label, drawn right-aligned. NULL clears. */
+fdk_result fdk_menu_item_set_shortcut(fdk_menu_item *item,
+                                      const char *shortcut);
+
+/* Attaches `submenu` (borrowed — not owned, not destroyed with the
+ * item), replacing any previous one. The submenu opens on hover /
+ * Right / click of this item. Only NORMAL items take submenus. */
+fdk_result fdk_menu_item_set_submenu(fdk_menu_item *item,
+                                     fdk_menu *submenu);
+
+/* Per-item activation callback (fires for this item only). */
+void fdk_menu_item_set_on_activate(fdk_menu_item *item,
+                                   fdk_menu_activate_fn on_activate,
+                                   void *user_data);
+/* Menu-wide fallback: fires for any item without its own callback. */
+void fdk_menu_set_on_activate(fdk_menu *menu,
+                              fdk_menu_activate_fn on_activate,
+                              void *user_data);
+
+/* ---- MenuBar ----
+ *
+ * A horizontal bar of menu titles. Clicking (or focusing and
+ * pressing Down/Enter on) a title opens its menu below it as a
+ * toolkit-owned popup chain. The bar is a widget: it lays its
+ * titles out, paints its chrome, and follows the theme
+ * (menu_item_height metric, like every menu row).
+ *
+ * Menus are BORROWED: destroying a menu still attached to a live
+ * bar is a use-after-free — destroy menus after the bar (the
+ * conventional order). */
+
+fdk_result fdk_menu_bar_create(fdk_widget *parent, fdk_font *font,
+                               fdk_widget **out_bar);
+fdk_result fdk_menu_bar_append(fdk_widget *bar, const char *title,
+                               fdk_menu *menu);
+size_t fdk_menu_bar_count(fdk_widget *bar);
+fdk_result fdk_menu_bar_remove(fdk_widget *bar, size_t index);
+/* Closes any open chain (as if Escape-dismissed from the top). */
+void fdk_menu_bar_close(fdk_widget *bar);
+
+/* ---- Context menu ----
+ *
+ * Pops `menu` at (x, y) relative to `anchor`'s top-left (the widget
+ * must live in a window's tree — standalone trees have no window to
+ * anchor a popup to). Dismissal and keyboard behavior as above.
+ * The menu stays yours: destroy it whenever the popup is closed
+ * (activating an item closes it synchronously, so after the
+ * on_activate callback returns, destroying the menu is safe). */
+fdk_result fdk_menu_popup_at(fdk_menu *menu, fdk_widget *anchor,
+                             fdk_i32 x, fdk_i32 y);
+
+/* ---- ComboBox (Phase 9) ----
+ *
+ * A one-of-many selector: a button-like field showing the active
+ * row plus a dropdown chevron; clicking opens the item list as a
+ * toolkit-owned popup (same machinery, dismissal, and auto-paint
+ * as menus). Choosing a row makes it active and fires on_changed.
+ *
+ * Editable mode swaps the field for an embedded Entry (full text
+ * editing, selection, clipboard): typing makes the state "custom"
+ * (active index cleared, on_changed fires with FDK_COMBO_NONE),
+ * and picking from the list rewrites the buffer. The dropdown
+ * button (chevron) stays interactive either way. Entry completion
+ * (filtering the list while typing) is parked honestly.
+ *
+ * The dropdown list sizes its rows like menu rows (theme
+ * menu_item_height metric) and is at least as wide as the combo. */
+
+#define FDK_COMBO_NONE ((size_t)-1)
+
+typedef void (*fdk_combo_changed_fn)(fdk_widget *combo, size_t index,
+                                     void *user_data);
+
+fdk_result fdk_combo_create(fdk_widget *parent, fdk_font *font,
+                            fdk_widget **out_combo);
+
+fdk_result fdk_combo_append(fdk_widget *combo, const char *text,
+                            size_t *out_index);
+fdk_result fdk_combo_remove(fdk_widget *combo, size_t index);
+void fdk_combo_clear(fdk_widget *combo);
+size_t fdk_combo_count(fdk_widget *combo);
+const char *fdk_combo_text(fdk_widget *combo, size_t index);
+
+fdk_i64 fdk_combo_get_active(fdk_widget *combo); /* -1 = none */
+/* -1 clears the active row (no on_changed for a no-op). */
+fdk_result fdk_combo_set_active(fdk_widget *combo, fdk_i64 index);
+/* The active row's text, or the Entry buffer when editable/custom;
+ * never NULL; valid until the next change. */
+const char *fdk_combo_active_text(fdk_widget *combo);
+void fdk_combo_set_editable(fdk_widget *combo, bool editable);
+
+void fdk_combo_set_on_changed(fdk_widget *combo,
+                              fdk_combo_changed_fn on_changed,
+                              void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

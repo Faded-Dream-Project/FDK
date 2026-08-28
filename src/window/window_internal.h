@@ -76,6 +76,39 @@ struct fdk_window {
     bool is_popup;                    /* Phase 9: grabbed dismissal window */
     fdk_platform_window *pwindow;     /* backend-owned handle */
 
+    /* ---- Phase 9 completion: toolkit-window integration ----
+     *
+     * auto_paint: set on windows the TOOLKIT keeps alive and updated
+     * on its own (menu/combo popup windows, dialogs). When set,
+     * fdk_window_dispatch_event repaints+ presents the window's tree
+     * whenever damage is pending after an event is fully routed —
+     * so hover highlights, selection flips, and the initial EXPOSE
+     * all reach the screen without the application ever learning
+     * these windows exist. The application's OWN windows are never
+     * auto-painted (their loop, their pacing). */
+    bool auto_paint;
+
+    /* Internal destroy notification: called at the very top of
+     * fdk_window_destroy, while the window is still whole. The
+     * menu-session machinery uses it to drop popup references before
+     * the memory goes away (any destroy path — the app, the parent's
+     * popup-child sweep, fdk_shutdown's force destroy). */
+    void (*destroy_notify)(fdk_window *window, void *user);
+    void *destroy_notify_user;
+
+    /* Popup family (Phase 9 completion): popups are anchored to the
+     * fdk_window whose client area their (x, y) positions against.
+     * Destroying a parent sweeps its popup children first — the
+     * documented "popups must not outlive their parent" contract,
+     * which until now only held because the X server happened to
+     * destroy the underlying X windows (leaving the FDK wrappers
+     * dangling in the registry). Doubly-linked list per parent;
+     * a popup's own popups hang off IT, so the sweep recurses. */
+    struct fdk_window *popup_parent;
+    struct fdk_window *popup_first;
+    struct fdk_window *popup_prev;
+    struct fdk_window *popup_next;
+
     fdk_size last_size;
 
     fdk_event_callback_fn event_callback;
@@ -192,5 +225,35 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event);
  * access (Entry's Ctrl+X/C/V). NULL for a non-fdk_window owner (never
  * happens today; defensive contract). */
 fdk_context *fdk__window_context(void *window_owner);
+
+/* Resolves the same opaque root-owner pointer to the owning WINDOW
+ * itself — the menu/combo popup machinery anchors its popup windows
+ * to the window a widget lives in. Same defensive NULL contract.
+ * (Menu code includes this header; the widget layer proper never
+ * dereferences the pointer, keeping the one-way-opaque discipline.) */
+fdk_window *fdk__window_of_owner(void *window_owner);
+
+/* Toolkit-window integration (Phase 9 completion): marks a window the
+ * toolkit owns (menu popup, dialog) so dispatch auto-paints it. */
+void fdk__window_set_auto_paint(fdk_window *window, bool auto_paint);
+
+/* Destroy notification for borrowed-window holders (the menu
+ * session): called at the very top of fdk_window_destroy, with the
+ * window still whole. The callback must NOT destroy `window`. */
+void fdk__window_set_destroy_notify(fdk_window *window,
+                                    void (*notify)(fdk_window *, void *),
+                                    void *user);
+
+/* Re-asserts a popup's input grab (after a popup above it closed).
+ * Backend-optional; no-op when unsupported. */
+void fdk__window_regrab(fdk_window *window);
+
+/* Modal grab for dialogs (Phase 9): the X11 backend takes pointer +
+ * keyboard grabs on the dialog so events cannot reach other windows
+ * (the modal contract); Wayland has no toplevel-grab protocol, so the
+ * op is absent/unsupported there and dialogs stay non-modal
+ * (documented honestly). Returns FDK_ERR_UNSUPPORTED when the backend
+ * cannot (NULL op maps to the same). */
+fdk_result fdk__window_set_modal(fdk_window *window, bool modal);
 
 #endif /* FDK_WINDOW_INTERNAL_H */

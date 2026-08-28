@@ -665,6 +665,13 @@ static fdk_result window_create_full(fdk_context *ctx,
     window->paint_intermediate = NULL;
     window->root = NULL;
     window->content = NULL;
+    window->auto_paint = false;
+    window->destroy_notify = NULL;
+    window->destroy_notify_user = NULL;
+    window->popup_parent = NULL;
+    window->popup_first = NULL;
+    window->popup_prev = NULL;
+    window->popup_next = NULL;
     window->decorated = false;
     window->deco_bar = NULL;
     window->deco_title = NULL;
@@ -725,6 +732,19 @@ static fdk_result window_create_full(fdk_context *ctx,
         return r;
     }
 
+    /* Popup family bookkeeping: a popup links itself onto its anchor
+     * parent's child list, so the parent's destroy sweeps it (the
+     * documented "popups must not outlive their parent" contract). */
+    if (window->is_popup && parent != NULL) {
+        window->popup_parent = parent;
+        window->popup_prev = NULL;
+        window->popup_next = parent->popup_first;
+        if (parent->popup_first != NULL) {
+            parent->popup_first->popup_prev = window;
+        }
+        parent->popup_first = window;
+    }
+
     FDK_DEBUG("window created");
 
     *out_window = window;
@@ -748,6 +768,30 @@ void fdk_window_hide(fdk_window *window) {
 void fdk_window_destroy(fdk_window *window) {
     if (window == NULL) {
         return;
+    }
+    /* Toolkit destroy-notify FIRST, while the window is still whole:
+     * holders of borrowed references (the menu session's popups)
+     * must drop them before any teardown happens. The notify may
+     * NOT destroy this window again (it is already dying). */
+    if (window->destroy_notify != NULL) {
+        window->destroy_notify(window, window->destroy_notify_user);
+    }
+    /* Popups must not outlive their parent (fdk_window.h): sweep
+     * them first, deepest-first via recursion (each popup's own
+     * sweep runs inside its destroy). */
+    while (window->popup_first != NULL) {
+        fdk_window_destroy(window->popup_first);
+    }
+    /* Unlink from OUR popup parent (if we are somebody's popup). */
+    if (window->popup_parent != NULL) {
+        if (window->popup_prev != NULL) {
+            window->popup_prev->popup_next = window->popup_next;
+        } else {
+            window->popup_parent->popup_first = window->popup_next;
+        }
+        if (window->popup_next != NULL) {
+            window->popup_next->popup_prev = window->popup_prev;
+        }
     }
     if (window->root != NULL) {
         /* The window owns its root; drop the ownership marker so the
@@ -1061,9 +1105,22 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
                window->is_popup &&
                event->key.scancode == FDK_KEY_ESC) {
         /* Escape dismisses a popup — the universal dismissal key. It
-         * is consumed here so widgets never see it. */
+         * is consumed here so widgets never see it.
+         *
+         * The recursive dispatch runs the popup's close handlers,
+         * and a menu session CLOSES ITS CHAIN on that close request
+         * — destroying THIS window before the recursion returns. The
+         * first real destroyer found a use-after-free here (the
+         * outer frame kept reading the freed window); cache the
+         * identity and bail out if we died. */
+        fdk_context *esc_ctx = window->ctx;
+        fdk_platform_window *esc_pwindow = window->pwindow;
         fdk_event_data close = { .type = FDK_EVENT_WINDOW_CLOSE_REQUEST };
         fdk_window_dispatch_event(window, &close);
+        if (fdk_context_find_window_by_pwindow(esc_ctx, esc_pwindow) !=
+            window) {
+            return; /* destroyed by the close handling */
+        }
     } else if (event->type == FDK_EVENT_WINDOW_EXPOSE) {
         if (window->root != NULL) {
             fdk_widget_invalidate_all(window->root);
@@ -1121,6 +1178,27 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
 
     if (!handled_by_tree && window->event_callback != NULL) {
         window->event_callback(window, event, window->event_callback_user_data);
+    }
+
+    /* The application's (or a toolkit session's) window callback is
+     * allowed to destroy the window — the same contract the widget
+     * handlers get (the menu popup callback closes its chain here).
+     * Re-verify registration before the auto-paint tail touches it. */
+    if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
+        return; /* destroyed by the event callback */
+    }
+
+    /* Toolkit-owned windows (menu popups, dialogs — see
+     * fdk__window_set_auto_paint) keep themselves on screen without
+     * the application's help: after an event is fully routed, any
+     * pending damage is repainted and presented here. The initial
+     * paint rides the EXPOSE every backend dispatches on first map;
+     * hover/selection changes ride the events that caused them. The
+     * application's own windows never take this path — their loop,
+     * their pacing. */
+    if (window->auto_paint && window->root != NULL &&
+        fdk_widget_tree_has_damage(window->root)) {
+        (void)fdk_window_paint(window);
     }
 }
 
@@ -1412,4 +1490,48 @@ void fdk_window_layout(fdk_window *window) {
 fdk_context *fdk__window_context(void *window_owner) {
     return (window_owner != NULL) ? ((fdk_window *)window_owner)->ctx
                                   : NULL;
+}
+
+fdk_window *fdk__window_of_owner(void *window_owner) {
+    return (fdk_window *)window_owner;
+}
+
+void fdk__window_set_auto_paint(fdk_window *window, bool auto_paint) {
+    if (window != NULL) {
+        window->auto_paint = auto_paint;
+    }
+}
+
+void fdk__window_set_destroy_notify(fdk_window *window,
+                                    void (*notify)(fdk_window *, void *),
+                                    void *user) {
+    if (window != NULL) {
+        window->destroy_notify = notify;
+        window->destroy_notify_user = user;
+    }
+}
+
+void fdk__window_regrab(fdk_window *window) {
+    /* Re-asserts a popup's input grab after a popup ABOVE it in the
+     * chain was dismissed: X server/compositor grabs do not stack, so
+     * the parent's grab did not come back on its own (the menu
+     * session calls this when a submenu closes but the parent menu
+     * stays open). No-op when the backend has no such op (non-popup
+     * windows, Wayland popups without a usable serial). */
+    if (window == NULL || !window->is_popup) {
+        return;
+    }
+    if (window->ops->window_popup_regrab != NULL) {
+        window->ops->window_popup_regrab(window->pwindow);
+    }
+}
+
+fdk_result fdk__window_set_modal(fdk_window *window, bool modal) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->window_set_modal == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->window_set_modal(window->pwindow, modal);
 }

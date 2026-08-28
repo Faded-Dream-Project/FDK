@@ -3664,6 +3664,553 @@ static void test_popup_window(void) {
            "Escape dismissal, clean teardown\n");
 }
 
+
+/* ---- Menus, ComboBox, Dialogs (Phase 9 completion) ----
+ *
+ * The popup-chain machinery driven through REAL X events: the bar
+ * opens a toolkit-owned popup (an override-redirect child — found
+ * via XQueryTree), auto-paint keeps it on screen without the test
+ * ever painting it (server-side pixel proof), items activate through
+ * synthetic clicks/keys, submenus nest as popup-of-popup children,
+ * Escape peels one level, and the modal dialog's server-side grab is
+ * verified by ANOTHER client's grab failing while FDK holds it. */
+
+#include "widget/menu_internal.h"
+
+static int menu_open_hits = 0;
+static int menu_toolbar_hits = 0;
+
+static void menu_open_cb(fdk_menu_item *item, void *user) {
+    (void)item;
+    (void)user;
+    menu_open_hits++;
+}
+
+static void menu_toolbar_cb(fdk_menu_item *item, void *user) {
+    (void)item;
+    (void)user;
+    menu_toolbar_hits++;
+}
+
+/* Children of an X window (override-redirect popups included). */
+static int x11_child_windows(Display *dpy, Window xid,
+                             Window *out, int max) {
+    Window root, parent;
+    Window *children = NULL;
+    unsigned int n = 0;
+    if (!XQueryTree(dpy, xid, &root, &parent, &children, &n)) {
+        return -1;
+    }
+    int count = 0;
+    for (unsigned int i = 0; i < n && count < max; i++) {
+        out[count++] = children[i];
+    }
+    if (children != NULL) {
+        XFree(children);
+    }
+    return count;
+}
+
+/* The child present in `now` but not `before` (0 when none). */
+static Window x11_new_child(Window *before, int n_before, Window *now,
+                            int n_now) {
+    for (int i = 0; i < n_now; i++) {
+        bool found = false;
+        for (int j = 0; j < n_before; j++) {
+            if (now[i] == before[j]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return now[i];
+        }
+    }
+    return 0;
+}
+
+static void x11_click(Display *dpy, Window xid, int x, int y) {
+    x11_send_pointer_event(dpy, xid, ButtonPress, ButtonPressMask, x, y, 1);
+    x11_send_pointer_event(dpy, xid, ButtonRelease, ButtonReleaseMask, x, y, 1);
+}
+
+static void x11_move(Display *dpy, Window xid, int x, int y) {
+    x11_send_pointer_event(dpy, xid, MotionNotify, PointerMotionMask, x, y, 0);
+}
+
+static void test_menu_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        NULL,
+    };
+    const char *font_path = NULL;
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        FILE *f = fopen(font_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            font_path = font_candidates[i];
+            break;
+        }
+    }
+    if (font_path == NULL) {
+        printf("[skip] X11 menu GUI (no system TrueType font found)\n");
+        return;
+    }
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK menu test",
+                                 .width = 400, .height = 300 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+
+    /* File: Open / sep / Toolbar(check) / Quit-disabled
+     * Edit: Recent > (a.txt, b.txt) — the submenu case. */
+    fdk_menu *file = NULL, *edit = NULL, *recent = NULL;
+    assert(fdk_ok(fdk_menu_create(font, &file)));
+    assert(fdk_ok(fdk_menu_create(font, &edit)));
+    assert(fdk_ok(fdk_menu_create(font, &recent)));
+    fdk_menu_item *mi_open = NULL, *mi_toolbar = NULL, *mi_quit = NULL,
+                  *mi_recent = NULL, *mi_a = NULL;
+    assert(fdk_ok(fdk_menu_append(file, "Open", &mi_open)));
+    assert(fdk_ok(fdk_menu_append_separator(file)));
+    assert(fdk_ok(fdk_menu_append_check(file, "Toolbar", false,
+                                        &mi_toolbar)));
+    assert(fdk_ok(fdk_menu_append(file, "Quit", &mi_quit)));
+    fdk_menu_item_set_enabled(mi_quit, false);
+    fdk_menu_item_set_on_activate(mi_open, menu_open_cb, NULL);
+    fdk_menu_item_set_on_activate(mi_toolbar, menu_toolbar_cb, NULL);
+    assert(fdk_ok(fdk_menu_append(edit, "Copy", NULL)));
+    assert(fdk_ok(fdk_menu_append(edit, "Recent", &mi_recent)));
+    assert(fdk_ok(fdk_menu_item_set_submenu(mi_recent, recent)));
+    assert(fdk_ok(fdk_menu_append(recent, "a.txt", &mi_a)));
+    assert(fdk_ok(fdk_menu_append(recent, "b.txt", NULL)));
+
+    fdk_widget *bar = NULL;
+    assert(fdk_ok(fdk_menu_bar_create(root, font, &bar)));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "File", file)));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "Edit", edit)));
+    fdk_i32 row_h = fdk__menu_row_height(file);
+    fdk_widget_arrange(bar, (fdk_rect){0, 0, 400, row_h});
+
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 150);
+    fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 100);
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Window xid = (Window)fdk_window_xid(win);
+    /* X11 popups are override-redirect children OF THE ROOT (placed
+     * in root coordinates — see x11_window.c), so chain tracking
+     * diffs the ROOT's child list. */
+    Window root_scr = DefaultRootWindow(send);
+
+    Window before[16], now[16];
+    int n_before = x11_child_windows(send, root_scr, before, 16);
+    assert(n_before >= 0);
+
+    /* --- open the File menu by clicking its title --- */
+    menu_open_hits = 0;
+    x11_click(send, xid, 20, row_h / 2);
+    (void)fdk_pump_events(ctx, 200);
+
+    int n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    Window popup = x11_new_child(before, n_before, now, n_now);
+    assert(popup != 0);
+    printf("[ok] menu: clicking the bar title maps the popup\n");
+
+    /* Auto-paint: the popup's surface color, server-side, without
+     * the test ever calling fdk_window_paint on it. */
+    Display *rb = NULL;
+    unsigned long px = x11_readback_pixel(&rb, (unsigned long)popup, 6, 6);
+    fdk_color ctl = fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
+    int cr = (int)((px >> 16) & 0xFFu);
+    int cg = (int)((px >> 8) & 0xFFu);
+    int cb = (int)(px & 0xFFu);
+    assert(cr == (int)(ctl.r * 255.0f + 0.5f) &&
+           cg == (int)(ctl.g * 255.0f + 0.5f) &&
+           cb == (int)(ctl.b * 255.0f + 0.5f));
+    printf("[ok] menu: popup AUTO-PAINTED (server-side pixel proof)\n");
+
+    /* Keyboard: Down lands on Open, Enter activates it. */
+    x11_send_key_event(send, popup, KeyPress, 116); /* Down */
+    x11_send_key_event(send, popup, KeyRelease, 116);
+    x11_send_key_event(send, popup, KeyPress, 36); /* Enter (scancode 28) */
+    x11_send_key_event(send, popup, KeyRelease, 36);
+    (void)fdk_pump_events(ctx, 200);
+    assert(menu_open_hits == 1);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before); /* chain closed after activation */
+    printf("[ok] menu: keyboard Down+Enter activates + closes\n");
+
+    /* --- Escape dismissal --- */
+    x11_click(send, xid, 20, row_h / 2);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    popup = x11_new_child(before, n_before, now, n_now);
+    x11_send_key_event(send, popup, KeyPress, 9); /* Escape */
+    x11_send_key_event(send, popup, KeyRelease, 9);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] menu: Escape dismisses the chain\n");
+
+    /* --- check item through a real click --- */
+    x11_click(send, xid, 20, row_h / 2);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    popup = x11_new_child(before, n_before, now, n_now);
+    assert(popup != 0);
+    /* Row 2 = "Toolbar" (row 0, a 9px separator, then row 2). */
+    x11_click(send, popup, 30, row_h + 9 + row_h / 2);
+    (void)fdk_pump_events(ctx, 200);
+    assert(menu_toolbar_hits == 1);
+    assert(fdk_menu_item_is_checked(mi_toolbar));
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] menu: click activates the check item (state + "
+           "callback + close)\n");
+
+    /* --- submenu: hover opens a popup-of-popup --- */
+    x11_click(send, xid, 70, row_h / 2); /* Edit title */
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    Window edit_pop = x11_new_child(before, n_before, now, n_now);
+    assert(edit_pop != 0);
+    /* Hover the "Recent" row (row 1 of the Edit menu): the submenu
+     * maps as ANOTHER root child (X11 nests by placement, not by
+     * window parentage; the FDK layer tracks the chain). */
+    x11_move(send, edit_pop, 30, row_h + row_h / 2);
+    (void)fdk_pump_events(ctx, 250);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 2);
+    Window sub = 0;
+    for (int i = 0; i < n_now; i++) {
+        if (now[i] != edit_pop && now[i] != xid) {
+            bool old = false;
+            for (int j = 0; j < n_before; j++) {
+                if (before[j] == now[i]) {
+                    old = true;
+                    break;
+                }
+            }
+            if (!old) {
+                sub = now[i];
+            }
+        }
+    }
+    assert(sub != 0);
+    printf("[ok] menu: hover opens the SUBMENU (nested chain)\n");
+
+    /* Escape on the submenu closes ONLY it. */
+    x11_send_key_event(send, sub, KeyPress, 9);
+    x11_send_key_event(send, sub, KeyRelease, 9);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1); /* parent menu still open */
+    printf("[ok] menu: Escape peels one submenu level (parent stays)\n");
+
+    /* Close the rest; the bar's toggle click also works. */
+    x11_click(send, xid, 70, row_h / 2);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+
+    /* Destroying the bar with a chain open is safe (close via
+     * fdk_menu_bar_close first exercises the public path). */
+    x11_click(send, xid, 20, row_h / 2);
+    (void)fdk_pump_events(ctx, 200);
+    fdk_menu_bar_close(bar);
+    (void)fdk_pump_events(ctx, 150);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+
+    XCloseDisplay(rb);
+    XCloseDisplay(send);
+    fdk_window_destroy(win);
+    fdk_menu_destroy(file);
+    fdk_menu_destroy(edit);
+    fdk_menu_destroy(recent);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] menu GUI: bar click, auto-paint, keyboard, check "
+           "item, submenu nesting, level-wise Escape, close, clean "
+           "teardown\n");
+}
+
+static int combo_changed_hits = 0;
+static fdk_i64 combo_changed_index = -2;
+
+static void combo_changed_cb(fdk_widget *combo, size_t index,
+                             void *user) {
+    (void)combo;
+    (void)user;
+    combo_changed_hits++;
+    combo_changed_index = (index == FDK_COMBO_NONE) ? -1 : (fdk_i64)index;
+}
+
+static void test_combo_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        NULL,
+    };
+    const char *font_path = font_candidates[0];
+    FILE *f = fopen(font_path, "rb");
+    if (f == NULL) {
+        printf("[skip] X11 combo GUI (no system TrueType font found)\n");
+        return;
+    }
+    fclose(f);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK combo test",
+                                 .width = 360, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+
+    fdk_widget *combo = NULL;
+    assert(fdk_ok(fdk_combo_create(root, font, &combo)));
+    assert(fdk_ok(fdk_combo_append(combo, "Red", NULL)));
+    assert(fdk_ok(fdk_combo_append(combo, "Green", NULL)));
+    assert(fdk_ok(fdk_combo_append(combo, "Blue", NULL)));
+    fdk_combo_set_on_changed(combo, combo_changed_cb, NULL);
+    fdk_i32 row_h = fdk__menu_row_height(NULL);
+    fdk_size nat = {0, 0};
+    fdk_widget_measure(combo, &nat);
+    fdk_widget_arrange(combo, (fdk_rect){10, 10, 220, nat.height});
+
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 150);
+    fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 100);
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Window xid = (Window)fdk_window_xid(win);
+    Window root_scr = DefaultRootWindow(send);
+    Window before[16], now[16];
+    int n_before = x11_child_windows(send, root_scr, before, 16);
+
+    /* Click the field: the dropdown maps (a root child — override
+     * redirect, placed at the combo). */
+    combo_changed_hits = 0;
+    x11_click(send, xid, 40, 10 + nat.height / 2);
+    (void)fdk_pump_events(ctx, 200);
+    int n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    Window pop = x11_new_child(before, n_before, now, n_now);
+    assert(pop != 0);
+
+    /* The dropdown is auto-painted (menu surface color). */
+    Display *rb = NULL;
+    unsigned long px = x11_readback_pixel(&rb, (unsigned long)pop, 6, 6);
+    fdk_color ctl = fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
+    assert((int)((px >> 16) & 0xFFu) == (int)(ctl.r * 255.0f + 0.5f) &&
+           (int)((px >> 8) & 0xFFu) == (int)(ctl.g * 255.0f + 0.5f) &&
+           (int)(px & 0xFFu) == (int)(ctl.b * 255.0f + 0.5f));
+    printf("[ok] combo: click opens the auto-painted dropdown\n");
+
+    /* Pick "Green" (row 1). */
+    x11_click(send, pop, 30, row_h + row_h / 2);
+    (void)fdk_pump_events(ctx, 200);
+    assert(combo_changed_hits == 1 && combo_changed_index == 1);
+    assert(fdk_combo_get_active(combo) == 1);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] combo: picking a row sets active + fires on_changed + "
+           "closes\n");
+
+    /* Reopen + Escape: dismissed with no change. */
+    combo_changed_hits = 0;
+    x11_click(send, xid, 40, 10 + nat.height / 2);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    pop = x11_new_child(before, n_before, now, n_now);
+    assert(pop != 0);
+    x11_send_key_event(send, pop, KeyPress, 9);
+    x11_send_key_event(send, pop, KeyRelease, 9);
+    (void)fdk_pump_events(ctx, 200);
+    assert(combo_changed_hits == 0);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] combo: Escape dismisses without changing the "
+           "selection\n");
+
+    XCloseDisplay(rb);
+    XCloseDisplay(send);
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] combo GUI: dropdown lifecycle through real input\n");
+}
+
+static int dialog_responses = 0;
+static fdk_dialog_response dialog_last = (fdk_dialog_response)-99;
+
+static void dialog_resp_cb(fdk_dialog_response response, void *user) {
+    (void)user;
+    dialog_responses++;
+    dialog_last = response;
+}
+
+static void test_dialog_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *parent = NULL;
+    fdk_window_options popts = { .title = "FDK dialog parent",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &popts, &parent)));
+    fdk_window_show(parent);
+    (void)fdk_pump_events(ctx, 150);
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Window root_win = DefaultRootWindow(send);
+
+    /* The test's own grab-probe window (modal-grab verification),
+     * created BEFORE the baseline so it never pollutes the diffs. */
+    Window probe = XCreateSimpleWindow(send, root_win, 0, 0, 10, 10, 0,
+                                       0, 0);
+    XSelectInput(send, probe, StructureNotifyMask);
+    XMapWindow(send, probe);
+    XFlush(send);
+
+    Window before[16], now[16];
+    int n_before = x11_child_windows(send, root_win, before, 16);
+
+    /* 1) Modal OK/Cancel: Enter answers OK (initial focus). */
+    dialog_responses = 0;
+    fdk_dialog_options dopts = {
+        .title = "Confirm",
+        .text = "Save your changes before quitting?",
+        .buttons = FDK_DIALOG_BUTTONS_OK_CANCEL,
+        .modal = true,
+    };
+    fdk_window *dlg = NULL;
+    assert(fdk_ok(fdk_dialog_show_message(ctx, &dopts, dialog_resp_cb,
+                                          NULL, &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+
+    int n_now = x11_child_windows(send, root_win, now, 16);
+    assert(n_now > n_before);
+    Window dlg_xid = x11_new_child(before, n_before, now, n_now);
+    assert(dlg_xid != 0);
+    printf("[ok] dialog: mapped as a real toplevel\n");
+
+    /* MODAL GRAB, verified server-side: while FDK holds the grab,
+     * ANOTHER client's pointer grab must fail with AlreadyGrabbed. */
+    int grab_rc = XGrabPointer(send, probe, False, ButtonPressMask,
+                               GrabModeAsync, GrabModeAsync, None, None,
+                               CurrentTime);
+    assert(grab_rc == AlreadyGrabbed);
+    XUngrabPointer(send, CurrentTime);
+    XFlush(send);
+    printf("[ok] dialog: modal grab held server-side (foreign grab "
+           "refused)\n");
+
+    /* Enter -> the focused OK button -> response OK + self-destruct. */
+    Window dlg_children[4];
+    int n_dlg = x11_child_windows(send, dlg_xid, dlg_children, 4);
+    (void)n_dlg; /* reparenting details are the WM's business (none
+                    under bare Xvfb, but the assert above is about
+                    the toplevel itself) */
+    x11_send_key_event(send, dlg_xid, KeyPress, 36); /* Enter */
+    x11_send_key_event(send, dlg_xid, KeyRelease, 36);
+    (void)fdk_pump_events(ctx, 250);
+    assert(dialog_responses == 1 && dialog_last == FDK_DIALOG_OK);
+    n_now = x11_child_windows(send, root_win, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] dialog: Enter answers OK; self-destroys\n");
+
+    /* The grab is gone after the dialog died. */
+    grab_rc = XGrabPointer(send, probe, False, ButtonPressMask,
+                           GrabModeAsync, GrabModeAsync, None, None,
+                           CurrentTime);
+    assert(grab_rc == GrabSuccess);
+    XUngrabPointer(send, CurrentTime);
+    XFlush(send);
+    printf("[ok] dialog: modal grab released on destroy\n");
+
+    /* 2) Escape answers Cancel. */
+    dialog_responses = 0;
+    dopts.modal = false;
+    dopts.title = "Escape me";
+    assert(fdk_ok(fdk_dialog_show_message(ctx, &dopts, dialog_resp_cb,
+                                          NULL, NULL)));
+    (void)fdk_pump_events(ctx, 250);
+    n_now = x11_child_windows(send, root_win, now, 16);
+    assert(n_now == n_before + 1);
+    dlg_xid = x11_new_child(before, n_before, now, n_now);
+    x11_send_key_event(send, dlg_xid, KeyPress, 9); /* Escape */
+    x11_send_key_event(send, dlg_xid, KeyRelease, 9);
+    (void)fdk_pump_events(ctx, 250);
+    assert(dialog_responses == 1 && dialog_last == FDK_DIALOG_CANCEL);
+    printf("[ok] dialog: Escape answers Cancel\n");
+
+    /* 3) A button CLICK through real input (find the button via the
+     * widget tree — child 1 of the body, child 0 of the root). */
+    dialog_responses = 0;
+    dopts.title = "Click me";
+    assert(fdk_ok(fdk_dialog_show_message(ctx, &dopts, dialog_resp_cb,
+                                          NULL, &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    n_now = x11_child_windows(send, root_win, now, 16);
+    assert(n_now == n_before + 1);
+    dlg_xid = x11_new_child(before, n_before, now, n_now);
+    assert(dlg_xid != 0);
+    fdk_widget *dlg_root = NULL;
+    assert(fdk_ok(fdk_window_get_root(dlg, &dlg_root)));
+    fdk_widget *body = fdk_widget_child_at(dlg_root, 0);
+    assert(body != NULL);
+    fdk_widget *ok_btn = fdk_widget_child_at(body, 1); /* label, OK, Cancel */
+    assert(ok_btn != NULL);
+    fdk_rect okr = fdk_widget_get_absolute_bounds(ok_btn);
+    x11_click(send, dlg_xid, okr.x + okr.width / 2, okr.y + okr.height / 2);
+    (void)fdk_pump_events(ctx, 250);
+    assert(dialog_responses == 1 && dialog_last == FDK_DIALOG_OK);
+    printf("[ok] dialog: button click through real input\n");
+
+    /* 4) Early destroy answers the negative response. */
+    dialog_responses = 0;
+    dopts.title = "Kill me";
+    assert(fdk_ok(fdk_dialog_show_message(ctx, &dopts, dialog_resp_cb,
+                                          NULL, &dlg)));
+    (void)fdk_pump_events(ctx, 200);
+    fdk_window_destroy(dlg);
+    (void)fdk_pump_events(ctx, 150);
+    assert(dialog_responses == 1 && dialog_last == FDK_DIALOG_CANCEL);
+    printf("[ok] dialog: early destroy answers Cancel via the "
+           "destroy-notify\n");
+
+    XDestroyWindow(send, probe);
+    XCloseDisplay(send);
+    fdk_window_destroy(parent);
+    fdk_shutdown(ctx);
+    printf("[ok] dialog GUI: modal grab, Enter/Escape/click responses, "
+           "early destroy, clean teardown\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -3700,6 +4247,9 @@ int main(void) {
     test_clipboard();
     test_entry_gui();
     test_popup_window();
+    test_menu_gui();
+    test_combo_gui();
+    test_dialog_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

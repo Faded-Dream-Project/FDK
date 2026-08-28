@@ -105,8 +105,9 @@ typedef enum fdk_theme_metric {
     FDK_TM_SEPARATOR_THICKNESS = 1, /* Separator band thickness,    1..8  */
     FDK_TM_TITLE_BAR_HEIGHT    = 2, /* FDK-drawn title band height, 12..64 */
     FDK_TM_SCROLLBAR_WIDTH     = 3, /* ScrollView bar thickness,    6..24  */
+    FDK_TM_MENU_ITEM_HEIGHT    = 4, /* Menu bar/row minimum height, 16..48 */
 
-    FDK_TM_COUNT = 4
+    FDK_TM_COUNT = 5
 } fdk_theme_metric;
 
 /* ---- Lifecycle ---- */

@@ -76,7 +76,7 @@ backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
   struct layout behind each opaque public type lives (e.g.
   `src/core/context_internal.h` defines `struct fdk_context`).
 
-## Current state (Phase 8 complete — decorations & window management)
+## Current state (Phase 9 complete — advanced widgets)
 
 Implemented: `src/core/` (context lifecycle, logging, error codes,
 allocation, versioning — Phase 1, plus the Phase 2 additions to
@@ -124,7 +124,40 @@ platform supports it; `window_move_resize_to` for FDK-driven atomic
 resize drags. FDK_EVENT_WINDOW_STATE / FDK_EVENT_WINDOW_DECORATION
 report platform truth, never request optimism — see
 platform_internal.h, which documents the EWMH vs xdg-decoration vs
-bare-X differences instead of assuming them away). `fdk_init()` performs a real
+bare-X differences instead of assuming them away), `src/core/
+clipboard.c` + the backends' clipboard implementations (Phase 9:
+`fdk_clipboard_set_text`/`fdk_clipboard_get_text` over one
+OPTIONAL platform-op pair — ICCCM CLIPBOARD ownership with a
+helper window and a bounded non-re-entrant SelectionNotify wait on
+X11, wl_data_device/wl_data_source on Wayland), and the Phase 9
+popup + advanced-widget layers: `fdk_window_create_popup` in
+`src/window/window.c` (parent-relative popup windows stacked in a
+family chain — destroying the parent force-destroys the chain
+deepest-first — over two more OPTIONAL platform ops:
+`window_popup_regrab`, re-asserting a popup's grab after a popup
+stacked above it closes because server/compositor grabs do not
+stack, and `window_set_modal`, taking a pointer+keyboard grab on a
+TOPLEVEL for modal dialogs on X11 — Wayland has no toplevel-grab
+protocol, so dialogs there are honestly non-modal; popups grab at
+show: override-redirect + XGrabPointer/XGrabKeyboard on X11,
+xdg_positioner + xdg_popup + grab citing the last input serial on
+Wayland, with outside-press and Escape delivered as
+FDK_EVENT_WINDOW_CLOSE_REQUEST), and the advanced widget catalog
+in `src/widget/` (Entry — cluster-safe cursor, selection algebra,
+real clipboard integration, IME preedit groundwork; ScrollView +
+overlay Scrollbars; List and Tree with the full modifier grammar
+over the pointer-event modifiers bitmask; Slider, SpinButton,
+Toolbar, Notebook, Canvas; the three-layer Menu system — model /
+view / bar — with nested submenu chains riding the popup layer;
+ComboBox in non-editable and editable modes, its dropdown being
+the menu view machinery; and the modal message dialog over
+`fdk_dialog_show_message`, non-blocking by design). Popups and
+dialogs are TOOLKIT-OWNED windows: the window layer's
+owned-window path paints them itself instead of invoking the
+application's window callback — the widget→window back-edge that
+lets a widget open its own toplevel from inside an event handler.
+See `docs/roadmap.md`'s Phase 9 entry for the full inventory.
+`fdk_init()` performs a real
 platform connection with backend auto-detection; `fdk_run()` is a
 real `poll()`-based event loop that exits on `fdk_quit()` or when
 the last top-level window closes; windows can be created, shown,
@@ -135,15 +168,19 @@ backend (`examples/02_software_render.c`); and applications can now
 build widget trees that FDK itself hit-tests, focuses, repaints,
 and presents (`examples/03_widgets.c`).
 See `docs/roadmap.md`'s entries for the precise, honest lists of
-what is and isn't covered — in particular, transforms, image
-decoding, text, and the MIT-SHM fast path are still future work,
-while damage tracking, the clip stack, offscreen surfaces, the full
-crisp-primitive set, Wayland frame-callback pacing, and the widget
-foundation are in and tested; the widget layer — backend-neutral by
-construction — is verified headless + on X11, and the Wayland
-backend has a real integration test against sway headless
-(xdg-decoration negotiation included — see `docs/testing.md`; the
-weston 14 in Debian ships no xdg-decoration, which is why the
+what is and isn't covered — in particular IME protocols, menu
+mnemonic accelerators, X11 INCR clipboard transfers, and Wayland
+dialog modality are recorded as not-yet (each with its reason),
+while the renderer (damage tracking, clip stack, offscreen
+surfaces, images, transforms, AA, MIT-SHM, HiDPI), the text stack
+(subpixel positioning), the widget foundation + layout engine +
+catalog + theme engine, decorations + window management, and the
+Phase 9 advanced widgets are in and tested; the widget layer —
+backend-neutral by construction — is verified headless + on X11,
+and the Wayland backend has real integration tests against sway
+headless (xdg-decoration negotiation, menu popups through the
+compositor's real seat, dialogs included — see `docs/testing.md`;
+the weston 14 in Debian ships no xdg-decoration, which is why the
 verification compositor is sway).
 
 ### Widget layer specifics (Phase 4)

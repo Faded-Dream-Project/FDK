@@ -184,6 +184,13 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
     if (pwindow->popup) {
         fdk_x11_window_popup_ungrab(pwindow);
     }
+    if (pwindow->modal_grab) {
+        /* An active modal grab would outlive the dying grab window —
+         * release it explicitly (dialog destruction ends modality). */
+        XUngrabKeyboard(pwindow->conn->display, CurrentTime);
+        XUngrabPointer(pwindow->conn->display, CurrentTime);
+        pwindow->modal_grab = 0;
+    }
     fdk_x11_surface_cleanup(pwindow);
     fdk_x11_unregister_window(pwindow->conn, pwindow);
     XDestroyWindow(pwindow->conn->display, pwindow->xwindow);
@@ -239,6 +246,67 @@ void fdk_x11_window_popup_ungrab(fdk_platform_window *pwindow) {
     XUngrabPointer(dpy, CurrentTime);
     XFlush(dpy);
     pwindow->grabbed = 0;
+}
+
+void fdk_x11_window_popup_regrab(fdk_platform_window *pwindow) {
+    if (pwindow == NULL || !pwindow->popup || !pwindow->grabbed) {
+        return;
+    }
+    /* Same grabs as popup_grab, re-issued on THIS window: a nested
+     * popup's grab replaced ours, and closing the child did not give
+     * it back (grabs do not stack) — the menu machinery calls this
+     * when a submenu closes but the parent menu stays open. */
+    Display *dpy = pwindow->conn->display;
+    int pr = XGrabPointer(dpy, pwindow->xwindow, False,
+                          ButtonPressMask | ButtonReleaseMask |
+                              PointerMotionMask,
+                          GrabModeAsync, GrabModeAsync, None, None,
+                          CurrentTime);
+    int kr = XGrabKeyboard(dpy, pwindow->xwindow, False,
+                           GrabModeAsync, GrabModeAsync, CurrentTime);
+    if (pr != GrabSuccess || kr != GrabSuccess) {
+        FDK_WARN("popup regrab: pointer=%d keyboard=%d",
+                 pr == GrabSuccess ? 1 : 0, kr == GrabSuccess ? 1 : 0);
+    }
+}
+
+fdk_result fdk_x11_window_set_modal(fdk_platform_window *pwindow,
+                                    bool modal) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    Display *dpy = pwindow->conn->display;
+    if (modal && !pwindow->modal_grab) {
+        /* The modal grab: identical X calls to the popup grab, but on
+         * a NORMAL toplevel and without any dismissal semantics —
+         * out-of-bounds presses on a non-popup window are ordinary
+         * events that hit-test nothing and are ignored, which is
+         * exactly "input waits for the dialog". The keyboard grab
+         * also bypasses whatever focus the WM had, so the dialog's
+         * focused widget keeps keys even before the WM re-focuses. */
+        int pr = XGrabPointer(dpy, pwindow->xwindow, False,
+                              ButtonPressMask | ButtonReleaseMask |
+                                  PointerMotionMask,
+                              GrabModeAsync, GrabModeAsync, None, None,
+                              CurrentTime);
+        int kr = XGrabKeyboard(dpy, pwindow->xwindow, False,
+                               GrabModeAsync, GrabModeAsync,
+                               CurrentTime);
+        if (pr != GrabSuccess || kr != GrabSuccess) {
+            FDK_WARN("modal grab: pointer=%d keyboard=%d (dialog "
+                     "stays up, but other windows may take input)",
+                     pr == GrabSuccess ? 1 : 0,
+                     kr == GrabSuccess ? 1 : 0);
+            return FDK_ERR_PLATFORM;
+        }
+        pwindow->modal_grab = 1;
+    } else if (!modal && pwindow->modal_grab) {
+        XUngrabKeyboard(dpy, CurrentTime);
+        XUngrabPointer(dpy, CurrentTime);
+        XFlush(dpy);
+        pwindow->modal_grab = 0;
+    }
+    return FDK_OK;
 }
 
 void fdk_x11_window_show(fdk_platform_window *pwindow) {

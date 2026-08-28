@@ -291,6 +291,31 @@ typedef struct fdk_platform_ops {
     fdk_result (*clipboard_set_text)(fdk_platform_connection *conn,
                                      const char *text);
     char *(*clipboard_get_text)(fdk_platform_connection *conn);
+
+    /* ---- OPTIONAL popup/dialog grab operations (Phase 9
+     * completion — the menu machinery) ----
+     *
+     * window_popup_regrab re-asserts an existing popup's input grab
+     * after a popup stacked ABOVE it closed: server/compositor grabs
+     * do not stack (a nested popup's grab replaces its parent's, and
+     * closing the child does not restore the parent's). Called only
+     * on popup windows that grabbed at show. NULL = the backend
+     * cannot re-grab (keyboard nav after submenu dismissal then
+     * degrades to the pre-grab focus, documented).
+     *
+     * window_set_modal takes (modal=true) or releases (false) a
+     * POINTER+KEYBOARD grab on a TOPLEVEL window for modal dialogs:
+     * while grabbed, no other window on the connection receives
+     * input. Unlike popup grabs, presses outside the window are NOT
+     * dismissals — they arrive as ordinary out-of-bounds events and
+     * are ignored (the modal contract is "input waits for the
+     * dialog", not "click away closes it"). NULL or
+     * FDK_ERR_UNSUPPORTED = the backend cannot do modal grabs
+     * (Wayland: no toplevel-grab protocol exists — dialogs there
+     * are non-modal, documented honestly). */
+    void (*window_popup_regrab)(fdk_platform_window *pwindow);
+    fdk_result (*window_set_modal)(fdk_platform_window *pwindow,
+                                   bool modal);
 } fdk_platform_ops;
 
 /* Backend entry points. Each returns NULL if that backend was not

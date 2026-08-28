@@ -25,6 +25,8 @@ static const fdk_platform_ops g_x11_ops = {
     .window_present = fdk_x11_window_present,
     .clipboard_set_text = fdk_x11_clipboard_set_text,
     .clipboard_get_text = fdk_x11_clipboard_get_text,
+    .window_popup_regrab = fdk_x11_window_popup_regrab,
+    .window_set_modal = fdk_x11_window_set_modal,
 };
 
 const fdk_platform_ops *fdk_platform_x11_ops(void) {

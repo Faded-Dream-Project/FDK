@@ -296,6 +296,7 @@ static const key_entry k_metric_keys[] = {
     {"separator_thickness", FDK_TM_SEPARATOR_THICKNESS},
     {"title_bar_height", FDK_TM_TITLE_BAR_HEIGHT},
     {"scrollbar_width", FDK_TM_SCROLLBAR_WIDTH},
+    {"menu_item_height", FDK_TM_MENU_ITEM_HEIGHT},
 };
 
 static const struct {
@@ -305,6 +306,7 @@ static const struct {
     [FDK_TM_SEPARATOR_THICKNESS] = {1, 8},
     [FDK_TM_TITLE_BAR_HEIGHT] = {12, 64},
     [FDK_TM_SCROLLBAR_WIDTH] = {6, 24},
+    [FDK_TM_MENU_ITEM_HEIGHT] = {16, 48},
 };
 
 /* Key-table lookup against a key segment (exact bytes). */

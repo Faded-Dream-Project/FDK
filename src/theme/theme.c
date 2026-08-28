@@ -52,6 +52,7 @@ static fdk_theme g_builtin = {
         [FDK_TM_SEPARATOR_THICKNESS] = 1,
         [FDK_TM_TITLE_BAR_HEIGHT] = 28, /* was DECO_TITLE_H */
         [FDK_TM_SCROLLBAR_WIDTH] = 12,
+        [FDK_TM_MENU_ITEM_HEIGHT] = 26,
     },
 };
 
@@ -224,6 +225,10 @@ fdk_result fdk_theme_set_metric(fdk_theme *theme, fdk_theme_metric metric,
     case FDK_TM_SCROLLBAR_WIDTH:
         lo = 6;
         hi = 24;
+        break;
+    case FDK_TM_MENU_ITEM_HEIGHT:
+        lo = 16;
+        hi = 48;
         break;
     default:
         return FDK_ERR_INVALID_ARGUMENT;

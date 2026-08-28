@@ -86,6 +86,14 @@ static void keyboard_leave(void *data, struct wl_keyboard *keyboard, uint32_t se
 
 static fdk_u32 xkb_modifiers_to_fdk(struct xkb_state *state) {
     fdk_u32 mods = 0;
+    /* A POINTER-ONLY seat has no keyboard, no keymap, and therefore
+     * no xkb_state (it is created when the keymap arrives). Reading
+     * modifiers on such a seat crashed here (found live by the
+     * virtual-pointer rig — the first pointer event on a keyboard-
+     * less seat). No state = no modifiers held, honestly. */
+    if (state == NULL) {
+        return 0;
+    }
     if (xkb_state_mod_name_is_active(state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE) > 0)
         mods |= FDK_MOD_SHIFT;
     if (xkb_state_mod_name_is_active(state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0)
@@ -173,8 +181,12 @@ static const struct wl_keyboard_listener g_keyboard_listener = {
 static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
                            struct wl_surface *surface, wl_fixed_t sx, wl_fixed_t sy) {
     (void)pointer;
-    (void)serial;
     fdk_platform_connection *conn = data;
+    /* Enter serials are valid user-action serials (the compositor
+     * minted them for real pointer movement): hover-opened popup
+     * menus grab with the newest of these (button/key serials also
+     * refresh last_input_serial — see pointer_button/keyboard_key). */
+    conn->last_input_serial = serial;
 
     for (size_t i = 0; i < conn->window_count; i++) {
         if (conn->windows[i]->surface == surface) {
@@ -194,6 +206,9 @@ static void pointer_leave(void *data, struct wl_pointer *pointer, uint32_t seria
     (void)serial;
     (void)surface;
     fdk_platform_connection *conn = data;
+
+    /* Leaving a surface is also a serial-bearing user action. */
+    conn->last_input_serial = serial;
 
     if (conn->pointer_focus != NULL) {
         fdk_event_data event = { .type = FDK_EVENT_POINTER_LEAVE };

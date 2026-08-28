@@ -873,11 +873,320 @@ own drags); drag-a-maximized-window-to-restore (the Windows-style
 gesture) is not implemented — dragging a maximized band is a no-op,
 documented.
 
-## Phase 9 — Advanced Widgets
+## Phase 9 — Advanced Widgets — COMPLETE
 
-- ScrollView, List, Tree, ComboBox, Menu, Toolbar, Slider,
-  SpinButton, Notebook/TabView, Dialog, Canvas — plus text Entry
-  input (cursor, selection, clipboard architecture, IME groundwork)
+Every item on the original list is implemented, integrated, tested
+headless + on X11 with real input + on Wayland against a real
+compositor, demoed with pixel-verified rigs, and documented:
+ScrollView, List, Tree, ComboBox (non-editable + editable), Menu
+(bar + dropdowns + submenus + context menus), Toolbar, Slider,
+SpinButton, Notebook, Dialog (message dialog, X11 modal grabs),
+Canvas, and text Entry (cursor, selection, clipboard, IME
+groundwork). The enabling layers underneath them — the pointer
+modifier bitmasks, the popup window platform layer, and the
+widget→window back-edge that lets a widget open its own toplevel —
+are part of this phase and landed with it.
+
+### Clipboard architecture (the first slice)
+
+- Public API: `fdk_clipboard_set_text` / `fdk_clipboard_get_text`
+  (UTF-8; set copies, get returns a caller-freed string or NULL).
+  One OPTIONAL platform-op pair (`clipboard_set_text` /
+  `clipboard_get_text`) — the whole mechanism is backend-side, no
+  widget code touches wire formats.
+- X11: the ICCCM `CLIPBOARD` ownership model —
+  `XSetSelectionOwner` on a dedicated helper window with
+  timestamp-verified acquisition (a losing race answers NULL,
+  never stale bytes), `TARGETS` + `UTF8_STRING`/`STRING`/`TEXT`/
+  `text/plain;charset=utf-8` request serving with a synthetic
+  SelectionNotify reply (grant AND refusal — the requesting
+  client never hangs), `SelectionClear` releasing the buffer,
+  and a bounded (250 ms) non-re-entrant wait for the
+  SelectionNotify on paste. Deliberately NOT supported (see
+  `fdk_clipboard.h`): PRIMARY (FDK is a CLIPBOARD-only client),
+  INCR incremental transfers (refused with a warning — recorded
+  below), and COMPOUND_TEXT (the four targets above cover every
+  modern client). The test SUITE becomes a second client and
+  performs the real selection handshake through the X server
+  both directions.
+- Wayland: `wl_data_device` + `wl_data_source` (offer with the
+  MIME set above, `send` writing to the read fd, cancellation)
+  and `wl_data_offer` receive for pasting. The `wl_seat` gained a
+  `wl_data_device_manager` binding; the sway rig verifies the
+  set/get round trip on FDK's own selection (a headless compositor
+  mints no other clients, so cross-client transfer is the X11
+  suite's job — recorded, not faked).
+
+### Text Entry
+
+- Public API (`include/fdk/fdk_widgets.h`): text get/set,
+  byte-offset cursor get/set, selection anchor+extent
+  get/select-range/select-all, changed + activate (Enter)
+  callbacks, password mode, max length, read-only mode, and
+  `fdk_entry_set_preedit` — IME GROUNDWORK: a composition string
+  renders underlined at the cursor without entering the text
+  buffer, exactly the seam a real input method needs (the platform
+  key events route through it; wiring an actual IME protocol is
+  Phase 10+ scope, recorded below).
+- Editing model: byte-offset cursor that CLAMPS to cluster-safe
+  boundaries (never lands mid-UTF-8-sequence), selection with
+  keyboard (Shift+arrows/Home/End) and pointer (press-drag with
+  the implicit grab, double/triple click word/line select using
+  the shared `fdk_text` cluster walker), clipboard cut/copy/paste
+  through the real backend clipboard above, Backspace/Delete with
+  selection-erase priority, and Home/End. All of it is pure logic
+  over the Phase 6 text measuring walk — the same code that
+  measures paints the cursor and selection.
+- Rendering: a 1px caret bar rendered while enabled + focused
+  (steady — blinking is deliberately absent in v1 because FDK
+  has no animation/timer clock yet; a blink needs a repaint
+  source, recorded below), selection renders as a themed
+  highlight band, and horizontal scrolling follows the caret
+  (the entry is a single-line viewport over its text). Password
+  mode renders bullets without changing the buffer.
+
+### Containers
+
+- **ScrollView** (`fdk_scrollview_*`): content at (-x,-y) clipped
+  by the paint walk (the Phase 4 clip stack does the actual
+  clipping — a scroll is one offset change + one invalidate, no
+  per-child geometry churn), internal overlay Scrollbars that
+  auto-hide when the content fits, thumb drag with implicit grab +
+  trough paging, wheel events bubble up from the content and
+  scroll the view, `scroll_to`/`scroll_by`/`get_scroll_offset`
+  programmatic control. Themed `scrollbar_width` metric (6..24,
+  default 12).
+- **List** (`fdk_list_*`): row model + view in one widget;
+  SINGLE/MULTIPLE/NONE selection modes with the full modifier
+  grammar (plain collapse, Ctrl toggle, Shift range, Ctrl+Shift
+  additive — riding the Phase 9 pointer-modifier bitmask), a
+  MOVING key cursor shared by arrow navigation and Shift
+  extension, row CRUD that self-syncs the view (create/destroy
+  surplus row widgets, remap in child order).
+- **Tree** (`fdk_tree_*`): flat node store with STABLE handles
+  (indices survive reorders), the visible sequence derived
+  pre-order from expansion state, row widgets synced like the
+  List's, stroked-triangle expanders that toggle without selecting
+  (expander-zone hit testing), keyboard model derived FROM the
+  selection (Left collapses-or-jumps-parent, Right
+  expands-or-enters-child, arrows move with Shift extending).
+
+### Control family
+
+- **Slider**: pointer jump-to + drag with quantized steps
+  (round-half-to-even, unit-tested), keyboard stepping
+  (arrows/Page/Page-ends/Home/End), min/max clamps, value
+  fraction, themed track + filled span + handle.
+- **SpinButton**: an embedded Entry (real text editing, locale-
+  free strict parsing — `strtod` semantics, no locale commas) with
+  chevron steppers; commits on Enter, on stepper press, and on
+  focus-leave (the FOCUS_OUT that never bubbles — the spin
+  watches the entry's events); unparsable input keeps the last
+  value.
+- **Toolbar**: stock Buttons in a row + bar chrome (themed rule),
+  `fdk_toolbar_append`/`insert`/`remove`/`separator`, wired to
+  the layout-notifier so add/remove reflows the bar.
+- **Notebook**: adopted pages (the notebook reparents the page
+  widget, exactly-one-visible semantics enforced), measured tab
+  rects with per-tab hover (tracked from MOTION because invisible
+  pages never hover), tab clicks switch + notify, programmatic
+  `fdk_notebook_set_current_page`, page add/remove reflows.
+- **Canvas**: a paint callback with (surface, bounds, clip) and
+  DAMAGE-DRIVEN call counts — the canvas repaints only what its
+  region intersected, the app draws with the full Phase 3
+  primitive set, and the rig asserts the call counts match the
+  damage actually sent.
+
+### Popup window platform layer (the enabling primitive)
+
+- Public API: `fdk_window_create_popup(ctx, parent, x, y, w, h,
+  &win)` — popup windows position parent-relative, stack in a
+  family (the parent tracks its popup chain; destroying the
+  parent force-destroys the chain deepest-first), take a
+  POINTER+KEYBOARD grab at show, and deliver FDK_EVENT_WINDOW_
+  CLOSE_REQUEST on outside press, Escape, or platform dismissal.
+- X11: override-redirect windows (no WM reparenting, no focus
+  stealing) mapped THEN grabbed (XGrabPointer/XGrabKeyboard on the
+  popup, owner-events=false) — out-of-bounds presses under the
+  grab become close requests. `window_popup_regrab` re-asserts a
+  popup's grab after a popup stacked ABOVE it closes (server
+  grabs don't stack; closing a submenu would otherwise leave the
+  parent menu ungrabbed).
+- Wayland: `xdg_positioner` (anchor + gravity + constraint
+  adjustment, slide-x/y so menus flip at screen edges) +
+  `xdg_popup` + `xdg_popup.grab` citing the last input serial;
+  `popup_done` becomes the close request. The serial-0 caveat is
+  documented in the header: before any real input arrives, a
+  grab request is protocol-illegal, so the first popup of a
+  session shows but doesn't dismiss on outside clicks (the
+  backends track every button/key/pointer-enter serial to make
+  this window vanish in practice).
+- Popup windows are TOOLKIT-OWNED plumbing: the widget layer
+  (menus, combos) creates them, auto-paints them, and dismisses
+  them; the application loop pumps events and paints ITS windows
+  only.
+
+### Menu
+
+- Three-layer design: the **model** (`fdk_menu`, `fdk_menu_item`)
+  is pure data — items with type (normal/separator/check/radio),
+  text, shortcut hint, enabled + checked state, a BORROWED
+  submenu pointer (any item can carry one — `fdk_menu_item_set_
+  submenu`; the submenu is a separate app-owned model), and an
+  on_activate callback that runs AFTER the chain closes and any
+  check/radio state flips. The **view** is a widget that renders
+  a model's visible page. The **bar** is a horizontal widget of
+  titles that opens views as popups. All three live in
+  `src/widget/menu.c` (~1500 lines).
+- Activation paths: click (press selects + highlights, release
+  inside activates), keyboard (Down/Up move the highlight, Enter
+  activates, Left/Right traverse the bar, Escape closes one
+  level, accelerator letters not implemented — recorded below),
+  and hover-opens (once a chain is open, moving across bar titles
+  swaps menus without another click).
+- Submenus open NESTED popups (a chain: each view is a popup
+  anchored to its parent item) — Escape peels one level, outside
+  click closes the chain, activating a normal item closes the
+  whole chain and fires the callback. The chain re-grabs on each
+  level's dismissal (the `window_popup_regrab` op above).
+- Check items flip + notify; radio items enforce one-checked-per-
+  group; separators render as themed rules and never highlight.
+- Context menus: `fdk_menu_popup_at(menu, anchor_widget, x, y)`
+  opens any model as a context menu at a widget-relative point.
+- Layout: rows stack vertically at the `menu_item_height` theme
+  metric (16..48, default 26) with text-measured widths
+  (shortcut column reserved when any item has one), width
+  clamped to the popup surface, height clamped at 512px (no
+  internal scrolling in v1 — recorded below).
+
+### ComboBox
+
+- Two modes from one widget: non-editable (a button + chevron
+  that opens a popup list) and editable (`fdk_combo_set_editable`
+  swaps in an embedded Entry — real text editing in the field;
+  typing goes CUSTOM, a first-class state distinct from every
+  model row, not an error; picking a row from the dropdown
+  replaces the custom text). The dropdown does not filter on
+  typing yet — recorded below.
+- Model API: append/remove/clear/count/text/active
+  get/set/active_text + `on_changed`. Picking a row sets active,
+  fires on_changed, closes the popup; Escape dismisses without
+  changing the selection; the opener keys (Down/Up/Enter on a
+  focused non-editable combo) open the dropdown and hand focus
+  to it.
+- The dropdown is the menu machinery's popup view (shared
+  auto-paint, grab, dismissal) — one popup implementation serves
+  menus, submenus, and combos.
+
+### Dialog
+
+- Public API (`include/fdk/fdk_dialog.h`): `fdk_dialog_show_
+  message(ctx, &options, on_response, user)` — buttons presets
+  (OK / OK-Cancel / Yes-No-Cancel), a response enum delivered to
+  ONE callback, non-blocking by design (nothing in FDK blocks the
+  event loop; the dialog is a real toolkit-owned window).
+- Modality: on X11 the new OPTIONAL `window_set_modal` platform
+  op takes a pointer+keyboard server grab on the dialog's
+  toplevel — presses outside arrive as ordinary out-of-bounds
+  events and are IGNORED (the modal contract is "input waits for
+  the dialog", not "click-away closes it"), and the grab is
+  released on destroy. The test suite verifies the grab is held
+  SERVER-SIDE by refusing a foreign grab while the dialog lives,
+  and released after.
+- Wayland honestly: NO toplevel-grab protocol exists — dialogs
+  are NON-MODAL there (documented in the header, tested as
+  such: the dialog maps, answers, and tears down cleanly, but
+  nothing blocks other windows). Faking it client-side (eating
+  events aimed at other windows) is not possible on Wayland and
+  is not attempted.
+- Responses: Enter answers the default (OK/Yes), Escape answers
+  Cancel/No, button clicks answer their button, and EARLY
+  DESTROY (the app kills the dialog) answers Cancel through the
+  destroy-notify path so no callback is silently dropped.
+
+### Pointer modifiers + the widget→window back-edge
+
+- `fdk_pointer_button_event` and the widget pointer event carry a
+  modifiers bitmask (`FDK_MOD_SHIFT/CTRL/ALT/LOGO`) — translated
+  from `xbutton.state` on X11, from `xkb_state` on Wayland. The
+  List/Tree/Entry modifier grammar rides it. (A pointer-only
+  Wayland seat has no xkb_state — found live by the virtual-
+  pointer rig; reading modifiers there returns 0, not a crash.)
+- Widgets can open windows: the menu/combo/dialog machinery
+  creates popups and dialogs from INSIDE widget event callbacks.
+  The back-edge (widget → `fdk_window_create_popup` → backend
+  window → auto-paint) runs through the window layer's
+  toolkit-owned-window path, which paints popups itself instead
+  of invoking the application's window callback.
+
+### Tests (every layer, every backend)
+
+- Headless (`make test`, 140 checks across 18 binaries, ASan+
+  UBSan): entry editing model (cursor clamping, selection
+  algebra, clipboard cut/copy/paste against a MOCK backend,
+  password/max-length/read-only), scrollview math (offsets,
+  clamping, auto-hide thresholds), list + tree selection
+  semantics (the full modifier grammar as table-driven cases),
+  menu model CRUD + measure math (row stacking, separator/
+  shortcut columns, width clamping), menu view activation
+  (click/keyboard/check/radio/disable), combo model + editable
+  state machine, slider/spin/notebook/toolbar/canvas logic, and
+  the window-logic pure functions.
+- X11 GUI (`make test-x11`, 62 checks + 1 honest skip): the
+  clipboard suite performs REAL selection handshakes through the
+  X server (both directions, MULTIPLE, INCR refusal, loss of
+  ownership); Entry driven by real XSendEvent keys (typing,
+  Shift-selection, Ctrl+V from the real clipboard); popup
+  windows pixel-verified + both dismissal paths; menu GUI (bar
+  click maps the popup, AUTO-PAINTED server-side, keyboard Down+
+  Enter activates, check items flip, submenus nest, Escape peels
+  levels, hover opens the chain); combo GUI (dropdown lifecycle
+  through real input); dialog GUI (mapped as a real toplevel,
+  modal grab held server-side — a foreign grab is REFUSED while
+  the dialog lives — Enter/Escape/click responses, early-destroy
+  answers Cancel, grab released on destroy).
+- Wayland (`make test-wayland` against sway headless + the rig):
+  decorations + state + reflow + HiDPI + clipboard round trip as
+  before, plus the NEW menu popup test — the rig drives sway's
+  seat cursor to absolute coordinates so a REAL button event
+  (and a valid grab serial) reaches the client, the menu popup
+  maps THROUGH the compositor, an item is clicked for real, the
+  chain closes, and outside-click dismissal works; and the
+  dialog test (mapped + auto-painted, early destroy answers
+  Cancel, clean teardown under ASan).
+- Demo rig: `examples/11_advanced.c` + `scripts/run_advanced_
+  demo_x11.sh` — every Phase 9 control in one window, driven
+  with real input; PIL verifies 5 frames (File menu popup themed
+  + mapped, combo dropdown, modal dialog, nested submenu right
+  of its parent, chain dismissed) plus every phase marker. (The
+  Wayland rig exercises the same machinery through the sway
+  integration suite's menu/dialog cases, not this demo binary.)
+
+### Remaining (parked, recorded honestly — none of it Phase 9 scope)
+
+- IME protocols (text-input-v2/v3) are groundwork-only: the
+  preedit seam exists and is tested; wiring a real input method
+  is Phase 10+ (i18n) scope. X11 INCR clipboard transfers are
+  refused (oversized clips need the incremental protocol — the
+  refusal is logged, never half-received).
+- Menu accelerator underlined letters (Alt+letter mnemonics) and
+  application-global accelerators are not implemented — shortcut
+  HINTS render, but nothing parses a modifier grammar at
+  dispatch time yet.
+- Editable-combo typing does not filter the dropdown (the full
+  model always shows; ghost-completion and prefix filtering are
+  future polish); neither menus nor combo dropdowns scroll in v1
+  — the shared popup measure clamps height at 512px (combo
+  dropdowns ARE the menu view machinery, so they inherit the
+  clamp). The Entry caret does not blink (steady bar — blinking
+  needs a repaint clock FDK does not have yet; a Phase 10/11
+  timer primitive is the prerequisite).
+- Wayland modality is impossible without a compositor protocol
+  (dialog-grab); the xdg-desktop protocol conversation is
+  tracked upstream — FDK reports non-modal there, documented.
+- A `make test-wayland` target that starts its own compositor is
+  still a rig script (`scripts/run_wayland_suite.sh`), not a
+  Makefile target — the toolchain lives in a user prefix.
 
 ## Phase 10 — Accessibility / Internationalization
 

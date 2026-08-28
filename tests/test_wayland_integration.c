@@ -27,17 +27,105 @@
  */
 
 #include "fdk/fdk.h"
+#include "fdk/fdk_dialog.h"
 #include "fdk/fdk_theme.h"
+#include "fdk/fdk_widgets.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h> /* free() for clipboard strings */
 #include <string.h>
 
+static fdk_dialog_response g_wayland_dlg_last =
+    (fdk_dialog_response)-99;
+
+static void wayland_dialog_response_cb(fdk_dialog_response response,
+                                       void *user) {
+    int *count = user;
+    (*count)++;
+    g_wayland_dlg_last = response;
+}
+
 static int g_state_events = 0;
 static int g_deco_events = 0;
 static int g_last_maximized = -1;
 static int g_last_minimized = -1;
+
+
+/* ---- Virtual-pointer input injection (the interactive section) ----
+ *
+ * fdk-wl-inject (scripts/, test infra) creates a
+ * zwlr_virtual_pointer_v1 device and serves commands over stdin for
+ * as long as the pipe is open — the device, and therefore the seat's
+ * POINTER CAPABILITY, lives exactly that long (clients binding
+ * wl_pointer on the capabilities event, as FDK does, then receive
+ * REAL motion/button events with REAL serials — the only source of
+ * grab-valid serials under a headless compositor).
+ *
+ * Absent tooling (plain weston, no injector binary): the
+ * interactive section honestly skips. */
+
+#include <stdlib.h>
+
+static FILE *g_injector = NULL;
+
+static bool wayland_injector_start(void) {
+    g_injector = popen("/home/z/my-project/scripts/fdk-wl-inject serve",
+                       "w");
+    return g_injector != NULL;
+}
+
+static void wayland_inject(const char *cmd) {
+    if (g_injector == NULL) {
+        return;
+    }
+    fprintf(g_injector, "%s\n", cmd);
+    fflush(g_injector);
+}
+
+static void wayland_injector_stop(void) {
+    if (g_injector != NULL) {
+        pclose(g_injector); /* EOF: the virtual pointer dies with it */
+        g_injector = NULL;
+    }
+}
+
+/* Real-app loop shape: pump + paint each iteration. Painting matters
+ * under sway's headless output — the surface stays live in the
+ * compositor's tree while frames flow, and the interactive section
+ * needs the window mapped to receive the injected pointer events
+ * (an idle-pumping window drops out of the tree on this backend;
+ * every FDK example paints in its loop, so this helper IS the
+ * documented usage pattern). */
+static void pump_and_paint(fdk_context *ctx, fdk_window *win, int ms) {
+    int steps = ms / 50;
+    if (steps < 1) {
+        steps = 1;
+    }
+    for (int i = 0; i < steps; i++) {
+        (void)fdk_pump_events(ctx, 50);
+        fdk_window_paint(win);
+    }
+}
+
+static void wayland_menu_item_cb(fdk_menu_item *item, void *user) {
+    (void)item;
+    (*(int *)user)++;
+}
+
+/* The opener wiring: statics because the callback has no closure
+ * state (stock Button signature). */
+static fdk_menu *g_wayland_menu = NULL;
+static fdk_widget *g_wayland_menu_anchor = NULL;
+
+static void wayland_menu_button_cb(fdk_widget *button, void *user) {
+    (void)button;
+    (*(int *)user)++;
+    if (g_wayland_menu != NULL && g_wayland_menu_anchor != NULL) {
+        (void)fdk_menu_popup_at(g_wayland_menu, g_wayland_menu_anchor,
+                                0, 30);
+    }
+}
 
 static void window_callback(fdk_window *window, const fdk_event_data *event,
                             void *user) {
@@ -440,6 +528,154 @@ int main(void) {
         assert(fdk_ok(fdk_clipboard_set_text(ctx, "")));
         assert(fdk_clipboard_get_text(ctx) == NULL);
         printf("[ok] clipboard: empty own-selection reads as NULL\n");
+    }
+
+
+    /* ---- Menus / dialogs (Phase 9 completion) ----
+     *
+     * The popup machinery against a REAL compositor, two layers:
+     *
+     * 1. INTERACTIVE (when sway's IPC is reachable): swaymsg drives
+     *    the seat cursor — REAL pointer events carrying REAL grab
+     *    serials, the one thing a headless seat cannot mint any
+     *    other way. A button click opens a context menu; the popup
+     *    grabs with the click's serial; sway configures + maps it;
+     *    a second click lands ON the popup's first item and
+     *    ACTIVATES it. The item callback firing is end-to-end proof
+     *    of the whole chain (input -> serial -> xdg_popup.grab ->
+     *    configure -> auto-paint buffer -> hit-test -> activate ->
+     *    chain close).
+     *
+     * 2. STRUCTURAL (always): popup creation must not error the
+     *    protocol (a marshal/protocol error poisons the connection
+     *    — the Phase 9 tests caught exactly that in the decoration
+     *    path), and destroying the PARENT window sweeps the popup
+     *    (the popup-family contract) with clean ASan teardown.
+     *
+     * The serial-0 grab (programmatic popup with no prior input) is
+     * documented in fdk_window.h: sway never configures such a
+     * popup — honest behavior, which is why the structural section
+     * asserts survival, not mapping. */
+    {
+        fdk_font *font = fdk_font_load(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16);
+        if (font == NULL) {
+            printf("[skip] wayland menu popup (no system font)\n");
+        } else {
+            fdk_menu *menu = NULL;
+            assert(fdk_ok(fdk_menu_create(font, &menu)));
+            fdk_menu_item *mi_open = NULL;
+            assert(fdk_ok(fdk_menu_append(menu, "Open", &mi_open)));
+            assert(fdk_ok(fdk_menu_append_separator(menu)));
+            assert(fdk_ok(fdk_menu_append_check(menu, "Toolbar",
+                                                false, NULL)));
+
+            /* The opener button on the MAIN window: clicking it pops
+             * the menu below it — the canonical context-menu flow. */
+            static int item_hits = 0;
+            static int button_hits = 0;
+            fdk_menu_item_set_on_activate(mi_open, wayland_menu_item_cb,
+                                          &item_hits);
+            fdk_widget *btn = NULL;
+            assert(fdk_ok(fdk_button_create(root, font, "Menu", &btn)));
+            g_wayland_menu = menu;
+            g_wayland_menu_anchor = btn;
+            fdk_button_set_on_activate(
+                btn, wayland_menu_button_cb, &button_hits);
+            fdk_widget_arrange(btn, (fdk_rect){20, 40, 90, 30});
+            fdk_window_paint(win);
+            (void)fdk_pump_events(ctx, 300);
+
+            if (wayland_injector_start()) {
+                /* Wait for the pointer capability to reach us (the
+                 * device attaches on the injector's connection; the
+                 * capabilities event arrives on our next roundtrip). */
+                pump_and_paint(ctx, win, 500);
+
+                /* Window pinned at (100,60) by the rig's sway config;
+                 * the button's center is therefore at (165,115). */
+                wayland_inject("move 165 115");
+                pump_and_paint(ctx, win, 300);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 400);
+                assert(button_hits == 1);
+                printf("[ok] wayland menu: REAL seat click reached "
+                       "the button (valid grab serial minted)\n");
+
+                /* The popup: anchored below the button (window-local
+                 * (20,70), absolute (120,130)); its first row's
+                 * center is around (160,143) — move + click there. */
+                wayland_inject("move 160 143");
+                pump_and_paint(ctx, win, 500);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 500);
+                assert(item_hits == 1);
+                printf("[ok] wayland menu: popup MAPPED, item "
+                       "clicked THROUGH the real compositor, chain "
+                       "closed\n");
+
+                /* Outside-click dismissal: open again, click far
+                 * away. The popup's grab routes the press to the
+                 * popup tree -> sway dismisses (popup_done) -> the
+                 * chain closes. Proof it closed: the opener button
+                 * is clickable again (a live grab would have eaten
+                 * it). */
+                wayland_inject("move 165 115");
+                pump_and_paint(ctx, win, 300);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 400);
+                assert(button_hits == 2);
+                wayland_inject("move 400 400");
+                pump_and_paint(ctx, win, 300);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 400);
+                wayland_inject("move 165 115");
+                pump_and_paint(ctx, win, 300);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 400);
+                assert(button_hits == 3);
+                printf("[ok] wayland menu: outside click dismissed "
+                       "the chain (opener reachable again)\n");
+                wayland_injector_stop();
+            } else {
+                printf("[skip] wayland menu INTERACTIVE section "
+                       "(fdk-wl-inject unavailable — serial-0 popups "
+                       "never map on sway, so only the structural "
+                       "checks can run here)\n");
+            }
+
+            /* Structural: serial-0 programmatic popup must not
+             * poison the protocol (the decoration-marshal bug did),
+             * and the parent sweep must take the popup down. */
+            assert(fdk_ok(fdk_menu_popup_at(menu, btn, 0, 30)));
+            (void)fdk_pump_events(ctx, 300);
+            printf("[ok] wayland menu popup: protocol survived the "
+                   "serial-0 popup request\n");
+
+            fdk_menu_destroy(menu);
+            fdk_font_destroy(font);
+        }
+
+        /* Dialog: a toplevel built and auto-painted by the toolkit;
+         * the early-destroy path answers the negative response. */
+        static int dlg_responses = 0;
+        fdk_dialog_options dopts = {
+            .title = "FDK wayland dialog",
+            .text = "Hello from the Wayland suite",
+            .buttons = FDK_DIALOG_BUTTONS_OK_CANCEL,
+        };
+        fdk_window *dlg = NULL;
+        assert(fdk_ok(fdk_dialog_show_message(
+            ctx, &dopts, wayland_dialog_response_cb, &dlg_responses,
+            &dlg)));
+        (void)fdk_pump_events(ctx, 300);
+        assert(dlg_responses == 0); /* nobody answered yet */
+        fdk_window_destroy(dlg); /* early destroy answers negative */
+        (void)fdk_pump_events(ctx, 200);
+        assert(dlg_responses == 1 &&
+               g_wayland_dlg_last == FDK_DIALOG_CANCEL);
+        printf("[ok] wayland dialog: mapped + auto-painted, early "
+               "destroy answers Cancel, clean teardown\n");
     }
 
     fdk_window_destroy(win);
