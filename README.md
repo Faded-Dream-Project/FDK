@@ -12,7 +12,7 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: 1.1.0 — all eleven roadmap phases COMPLETE, ABI frozen; the no-bus policy + embedded narrator landed.**
+**Status: 1.1.1 — all eleven roadmap phases COMPLETE, ABI frozen; the no-bus policy + embedded narrator landed; the Wayland deferred-first-frame fix and the consolidated example suite.**
 
 **Fonts:** FDK bundles no font (licensing posture). The demos and
 `fdk_font_load_system_default()` discover a system UI font through
