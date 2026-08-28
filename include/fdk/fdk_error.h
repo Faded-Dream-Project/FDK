@@ -28,6 +28,8 @@ typedef enum fdk_result {
     FDK_ERR_ALREADY_INITIALIZED= -5,
     FDK_ERR_UNSUPPORTED        = -6,   /* valid request, backend can't do it */
     FDK_ERR_NOT_FOUND          = -7,
+    FDK_ERR_LIMIT              = -8,    /* a bounded resource is full
+                                           (e.g. a11y subscriber slots) */
 
     /* Platform / windowing */
     FDK_ERR_PLATFORM_INIT      = -100,

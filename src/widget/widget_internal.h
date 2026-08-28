@@ -87,6 +87,12 @@ struct fdk_widget {
     void *user_data;
     char *name;                      /* owned copy, NULL when unset      */
 
+    /* Accessibility overrides (Phase 10): when set, these beat the
+     * class descriptor's computed name/description in
+     * fdk_a11y_describe(). Owned copies, NULL when unset. */
+    char *a11y_name;
+    char *a11y_description;
+
     /* Base style (Phase 4 theme seed): background fill + corner
      * radius used by the default paint hook. */
     fdk_color background;            /* a == 0 -> no background          */

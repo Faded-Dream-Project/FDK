@@ -294,6 +294,28 @@ void fdk_entry_select_all(fdk_widget *entry);
  * and fires no callbacks. */
 fdk_result fdk_entry_set_preedit(fdk_widget *entry, const char *preedit);
 
+/* PASSWORD MODE: renders one bullet per cluster instead of the text.
+ * The buffer, the caret, the selection, and the hit-testing all keep
+ * working in the same byte/cluster space — only the rendering (and
+ * its geometry) changes. The text is still readable through
+ * fdk_entry_get_text and the accessibility value interface (masking
+ * there is a bridge decision, not the toolkit's). */
+void fdk_entry_set_password(fdk_widget *entry, bool password);
+bool fdk_entry_is_password(fdk_widget *entry);
+
+/* READ-ONLY: selection and copy keep working (the reader contract);
+ * typing, Backspace/Delete, cut, and paste are consumed and ignored.
+ * Programmatic fdk_entry_set_text still works. */
+void fdk_entry_set_read_only(fdk_widget *entry, bool read_only);
+bool fdk_entry_is_read_only(fdk_widget *entry);
+
+/* EDITABLE CAP in bytes (0 = the 64 KiB hard limit). Typing, paste,
+ * and fdk_entry_set_text all refuse to exceed it; selection and
+ * reading are unaffected. Shrinking below the current length does
+ * NOT truncate the existing text — the cap applies to growth. */
+void fdk_entry_set_max_length(fdk_widget *entry, size_t max_bytes);
+size_t fdk_entry_get_max_length(fdk_widget *entry);
+
 void fdk_entry_set_on_changed(fdk_widget *entry,
                               fdk_entry_changed_fn on_changed,
                               void *user_data);

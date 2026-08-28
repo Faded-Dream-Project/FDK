@@ -355,6 +355,22 @@ static void label_destroy(fdk_widget *w) {
     fdk_free(l->lines);
 }
 
+/* ---- a11y ---- */
+
+static void label_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_label *l = (const fdk_label *)(const void *)w;
+    if (l->text != NULL) {
+        out->name = fdk__strdup(l->text);
+    }
+}
+
+static const fdk_a11y_class label_a11y = {
+    .role = FDK_A11Y_ROLE_LABEL,
+    .describe = label_a11y_describe,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_label_class_def = {
     .size = sizeof(fdk_label),
     .name = "label",
@@ -363,6 +379,7 @@ const fdk_widget_class fdk_label_class_def = {
     .measure = label_measure,
     .arrange = label_arrange,
     .destroy = label_destroy,
+    .a11y = &label_a11y,
 };
 
 fdk_result fdk_label_create(fdk_widget *parent, fdk_font *font,
@@ -409,6 +426,8 @@ fdk_result fdk_label_set_text(fdk_widget *label, const char *text) {
     l->lines_dirty = true;
     fdk_widget_invalidate(label);
     fdk_widget_child_layout_changed(label->parent);
+    /* A11y: the label's text IS its accessible name. */
+    fdk__a11y_notify(label, FDK_A11Y_NAME_CHANGED, 0);
     return FDK_OK;
 }
 
@@ -505,6 +524,25 @@ static void progress_paint(fdk_widget *w, fdk_surface *surface,
                                   fdk__pal_accent());
 }
 
+/* ---- a11y ---- */
+
+static void progress_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    out->has_value = true;
+    out->value_min = 0.0;
+    out->value_max = 1.0;
+    out->value_current =
+        (double)((const fdk_progress *)(const void *)w)->fraction;
+    out->value_text = fdk__a11y_valuef("%.0f%%",
+                                       out->value_current * 100.0);
+}
+
+static const fdk_a11y_class progress_a11y = {
+    .role = FDK_A11Y_ROLE_PROGRESS_BAR,
+    .describe = progress_a11y_describe,
+    .actions = NULL, /* an indicator, not a control */
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_progress_class_def = {
     .size = sizeof(fdk_progress),
     .name = "progress",
@@ -513,6 +551,7 @@ const fdk_widget_class fdk_progress_class_def = {
     .measure = NULL, /* natural size = the size request */
     .arrange = NULL,
     .destroy = NULL,
+    .a11y = &progress_a11y,
 };
 
 fdk_result fdk_progress_create(fdk_widget *parent,
@@ -546,6 +585,8 @@ void fdk_progress_set_fraction(fdk_widget *progress, fdk_f32 fraction) {
     }
     p->fraction = fraction;
     fdk_widget_invalidate(progress);
+    /* A11y: the fraction IS the value interface. */
+    fdk__a11y_notify(progress, FDK_A11Y_VALUE_CHANGED, 0);
 }
 
 fdk_f32 fdk_progress_get_fraction(fdk_widget *progress) {
@@ -588,6 +629,13 @@ static void separator_paint(fdk_widget *w, fdk_surface *surface,
     }
 }
 
+static const fdk_a11y_class separator_a11y = {
+    .role = FDK_A11Y_ROLE_SEPARATOR,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_separator_class_def = {
     .size = sizeof(fdk_separator),
     .name = "separator",
@@ -596,6 +644,7 @@ const fdk_widget_class fdk_separator_class_def = {
     .measure = NULL,
     .arrange = NULL,
     .destroy = NULL,
+    .a11y = &separator_a11y,
 };
 
 fdk_result fdk_separator_create(fdk_widget *parent,
@@ -663,6 +712,22 @@ static void frame_destroy(fdk_widget *w) {
     fdk_free(frame_of(w)->title);
 }
 
+/* ---- a11y ---- */
+
+static void frame_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_frame *f = (const fdk_frame *)(const void *)w;
+    if (f->title != NULL) {
+        out->name = fdk__strdup(f->title);
+    }
+}
+
+static const fdk_a11y_class frame_a11y = {
+    .role = FDK_A11Y_ROLE_GROUP, /* a labeled container */
+    .describe = frame_a11y_describe,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_frame_class_def = {
     .size = sizeof(fdk_frame),
     .name = "frame",
@@ -674,6 +739,7 @@ const fdk_widget_class fdk_frame_class_def = {
     .measure = fdk_box_measure_hook,
     .arrange = fdk_box_arrange_hook,
     .destroy = frame_destroy,
+    .a11y = &frame_a11y,
 };
 
 fdk_result fdk_frame_create(fdk_widget *parent, fdk_font *font,
@@ -716,5 +782,7 @@ fdk_result fdk_frame_set_title(fdk_widget *frame, const char *title) {
     fdk_free(f->title);
     f->title = copy;
     fdk_widget_invalidate(frame);
+    /* A11y: the title IS the group's accessible name. */
+    fdk__a11y_notify(frame, FDK_A11Y_NAME_CHANGED, 0);
     return FDK_OK;
 }

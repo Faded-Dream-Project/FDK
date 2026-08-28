@@ -54,6 +54,13 @@ static void canvas_measure(fdk_widget *w, fdk_size *out) {
     out->height = CANVAS_MIN;
 }
 
+static const fdk_a11y_class canvas_a11y = {
+    .role = FDK_A11Y_ROLE_CANVAS,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_canvas_class_def = {
     .size = sizeof(fdk_canvas),
     .name = "canvas",
@@ -62,6 +69,7 @@ const fdk_widget_class fdk_canvas_class_def = {
     .measure = canvas_measure,
     .arrange = NULL,
     .destroy = NULL,
+    .a11y = &canvas_a11y,
 };
 
 fdk_result fdk_canvas_create(fdk_widget *parent,

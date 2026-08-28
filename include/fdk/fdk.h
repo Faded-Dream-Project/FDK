@@ -26,6 +26,7 @@
 #include "fdk_theme.h"
 #include "fdk_clipboard.h"
 #include "fdk_dialog.h"
+#include "fdk_a11y.h"
 
 /* Widget, layout, and theme public headers are added here as their
  * respective phases land (see docs/roadmap.md). Phase 2 added window

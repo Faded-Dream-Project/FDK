@@ -57,6 +57,7 @@ typedef struct fdk_dialog {
     void *on_response_user;
     fdk_dialog_response negative;    /* Escape / WM-close answer  */
     fdk_dialog_response affirmative; /* initial focus / Enter     */
+    bool modal;               /* a11y state + X11 grab request      */
     struct dialog_button_ctx {
         struct fdk_dialog *d;
         fdk_dialog_response response;
@@ -80,6 +81,16 @@ static fdk_dialog_body *body_of(fdk_widget *w) {
 
 static fdk_dialog *dialog_of_body(fdk_widget *w) {
     return (w != NULL) ? body_of(w)->dialog : NULL;
+}
+
+static void dialog_body_a11y_describe(const fdk_widget *w,
+                                      fdk_a11y_info *out) {
+    const fdk_dialog *d =
+        (w != NULL) ? ((const fdk_dialog_body *)(const void *)w)->dialog
+                    : NULL;
+    if (d != NULL && d->modal) {
+        out->states |= FDK_A11Y_MODAL;
+    }
 }
 
 /* ---- response path ---- */
@@ -202,6 +213,16 @@ static void dialog_body_destroy(fdk_widget *w) {
     fdk_free(d);
 }
 
+static const fdk_a11y_class dialog_body_a11y = {
+    .role = FDK_A11Y_ROLE_DIALOG,
+    /* name: the dialog title (set as the accessible-name override
+     * at creation, so it is overridable by the app); MODAL state
+     * computed from the dialog's options. */
+    .describe = dialog_body_a11y_describe,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 static const fdk_widget_class fdk_dialog_body_class = {
     .size = sizeof(fdk_dialog_body),
     .name = "dialog-body",
@@ -210,6 +231,7 @@ static const fdk_widget_class fdk_dialog_body_class = {
     .measure = NULL,
     .arrange = dialog_body_arrange,
     .destroy = dialog_body_destroy,
+    .a11y = &dialog_body_a11y,
 };
 
 /* ---- button activation ---- */
@@ -390,6 +412,7 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
         return r;
     }
     d->window = win;
+    d->modal = modal;
     fdk__window_set_auto_paint(win, true);
     fdk__window_set_destroy_notify(win, dialog_destroyed, d);
     fdk_window_set_event_callback(win, dialog_window_event, d);
@@ -407,6 +430,8 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
     }
     body_of(body)->dialog = d;
     d->body = body;
+    /* A11y: the dialog's title is its accessible name. */
+    fdk_widget_set_accessible_name(body, title);
     fdk_widget_set_background(
         body, fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
 

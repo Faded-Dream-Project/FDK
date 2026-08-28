@@ -181,6 +181,43 @@ static void button_destroy(fdk_widget *w) {
     fdk_free(button_of(w)->text);
 }
 
+/* ---- a11y ---- */
+
+static void button_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_button *b = (const fdk_button *)(const void *)w;
+    if (b->text != NULL) {
+        out->name = fdk__strdup(b->text);
+    }
+}
+
+static bool button_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                                double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    fdk_button *b = button_of(w);
+    if (b->on_activate == NULL) {
+        return false;
+    }
+    /* Exactly the Space/Enter path. The callback may destroy w. */
+    b->on_activate(w, b->on_activate_data);
+    return true;
+}
+
+static fdk_a11y_action_set button_a11y_actions(const fdk_widget *w) {
+    return (((const fdk_button *)(const void *)w)->on_activate != NULL)
+               ? (fdk_a11y_action_set)FDK_A11Y_ACTION_ACTIVATE
+               : 0;
+}
+
+static const fdk_a11y_class button_a11y = {
+    .role = FDK_A11Y_ROLE_BUTTON,
+    .describe = button_a11y_describe,
+    .actions = button_a11y_actions, /* ACTIVATE only with a callback */
+    .perform = button_a11y_perform,
+};
+
 const fdk_widget_class fdk_button_class_def = {
     .size = sizeof(fdk_button),
     .name = "button",
@@ -189,6 +226,7 @@ const fdk_widget_class fdk_button_class_def = {
     .measure = button_measure,
     .arrange = NULL,
     .destroy = button_destroy,
+    .a11y = &button_a11y,
 };
 
 fdk_result fdk_button_create(fdk_widget *parent, fdk_font *font,
@@ -229,6 +267,8 @@ fdk_result fdk_button_set_text(fdk_widget *button, const char *text) {
     b->text = copy;
     fdk_widget_invalidate(button);
     fdk_widget_child_layout_changed(button->parent);
+    /* A11y: the label IS the accessible name. */
+    fdk__a11y_notify(button, FDK_A11Y_NAME_CHANGED, 0);
     return FDK_OK;
 }
 
@@ -328,6 +368,33 @@ static void check_destroy(fdk_widget *w) {
     fdk_free(check_of(w)->text);
 }
 
+/* Shared a11y for the check family: name = text, CHECKED/PRESSED
+ * from the state, ACTIVATE = the same toggle the keyboard drives. */
+static void check_a11y_describe(const fdk_widget *w, fdk_a11y_info *out,
+                                 fdk_a11y_state_flag checked_flag) {
+    const fdk_check_widget *c = (const fdk_check_widget *)(const void *)w;
+    if (c->text != NULL) {
+        out->name = fdk__strdup(c->text);
+    }
+    if (c->checked) {
+        out->states |= checked_flag;
+    }
+}
+
+static bool check_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                               double value,
+                               void (*activate)(fdk_widget *)) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    if ((w->flags & FDK_WF_ENABLED) == 0) {
+        return false;
+    }
+    activate(w); /* may run user callbacks; w may be destroyed */
+    return true;
+}
+
 /* Shared set_checked for toggle/checkbox (no group semantics). */
 static void simple_set_checked(fdk_widget *w, bool checked) {
     fdk_check_widget *c = check_of(w);
@@ -336,6 +403,9 @@ static void simple_set_checked(fdk_widget *w, bool checked) {
     }
     c->checked = checked;
     fdk_widget_invalidate(w);
+    /* A11y: the checked state flipped, before the user callback
+     * (which may destroy w). */
+    fdk__a11y_notify(w, FDK_A11Y_STATE_CHANGED, FDK_A11Y_CHECKED);
     check_fire_change(w, c);
 }
 
@@ -383,6 +453,27 @@ static bool toggle_handle_event(fdk_widget *w,
     return check_handle_event(w, ev, toggle_activate);
 }
 
+static void toggle_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    check_a11y_describe(w, out, FDK_A11Y_PRESSED);
+}
+
+static bool toggle_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                                double value) {
+    return check_a11y_perform(w, action, value, toggle_activate);
+}
+
+static fdk_a11y_action_set check_a11y_actions(const fdk_widget *w) {
+    (void)w;
+    return (fdk_a11y_action_set)FDK_A11Y_ACTION_ACTIVATE;
+}
+
+static const fdk_a11y_class toggle_a11y = {
+    .role = FDK_A11Y_ROLE_TOGGLE_BUTTON,
+    .describe = toggle_a11y_describe,
+    .actions = check_a11y_actions,
+    .perform = toggle_a11y_perform,
+};
+
 const fdk_widget_class fdk_toggle_class_def = {
     .size = sizeof(fdk_check_widget),
     .name = "toggle",
@@ -391,6 +482,7 @@ const fdk_widget_class fdk_toggle_class_def = {
     .measure = check_measure,
     .arrange = NULL,
     .destroy = check_destroy,
+    .a11y = &toggle_a11y,
 };
 
 fdk_result fdk_toggle_create(fdk_widget *parent, fdk_font *font,
@@ -483,6 +575,22 @@ static bool checkbox_handle_event(fdk_widget *w,
     return check_handle_event(w, ev, checkbox_activate);
 }
 
+static void checkbox_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    check_a11y_describe(w, out, FDK_A11Y_CHECKED);
+}
+
+static bool checkbox_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                                  double value) {
+    return check_a11y_perform(w, action, value, checkbox_activate);
+}
+
+static const fdk_a11y_class checkbox_a11y = {
+    .role = FDK_A11Y_ROLE_CHECK_BOX,
+    .describe = checkbox_a11y_describe,
+    .actions = check_a11y_actions,
+    .perform = checkbox_a11y_perform,
+};
+
 const fdk_widget_class fdk_checkbox_class_def = {
     .size = sizeof(fdk_check_widget),
     .name = "checkbox",
@@ -491,6 +599,7 @@ const fdk_widget_class fdk_checkbox_class_def = {
     .measure = check_measure,
     .arrange = NULL,
     .destroy = check_destroy,
+    .a11y = &checkbox_a11y,
 };
 
 fdk_result fdk_checkbox_create(fdk_widget *parent, fdk_font *font,
@@ -593,6 +702,9 @@ static void radio_uncheck_siblings(fdk_widget *radio) {
         if (sc->checked) {
             sc->checked = false;
             fdk_widget_invalidate(sib);
+            /* A11y: the sibling's checked state flipped to false. */
+            fdk__a11y_notify(sib, FDK_A11Y_STATE_CHANGED,
+                             FDK_A11Y_CHECKED);
             if (sc->on_change != NULL) {
                 sc->on_change(sib, false, sc->on_change_data);
             }
@@ -606,10 +718,13 @@ static void radio_set_checked_impl(fdk_widget *w, bool checked) {
         radio_uncheck_siblings(w);
         c->checked = true;
         fdk_widget_invalidate(w);
+        /* A11y: this radio + the unchecked siblings all flipped. */
+        fdk__a11y_notify(w, FDK_A11Y_STATE_CHANGED, FDK_A11Y_CHECKED);
         check_fire_change(w, c);
     } else if (!checked && c->checked) {
         c->checked = false;
         fdk_widget_invalidate(w);
+        fdk__a11y_notify(w, FDK_A11Y_STATE_CHANGED, FDK_A11Y_CHECKED);
         check_fire_change(w, c);
     }
 }
@@ -682,6 +797,22 @@ static bool radio_handle_event(fdk_widget *w,
     return check_handle_event(w, ev, radio_activate);
 }
 
+static void radio_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    check_a11y_describe(w, out, FDK_A11Y_CHECKED);
+}
+
+static bool radio_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                               double value) {
+    return check_a11y_perform(w, action, value, radio_activate);
+}
+
+static const fdk_a11y_class radio_a11y = {
+    .role = FDK_A11Y_ROLE_RADIO_BUTTON,
+    .describe = radio_a11y_describe,
+    .actions = check_a11y_actions,
+    .perform = radio_a11y_perform,
+};
+
 const fdk_widget_class fdk_radio_class_def = {
     .size = sizeof(fdk_check_widget),
     .name = "radio",
@@ -690,6 +821,7 @@ const fdk_widget_class fdk_radio_class_def = {
     .measure = check_measure,
     .arrange = NULL,
     .destroy = check_destroy,
+    .a11y = &radio_a11y,
 };
 
 fdk_result fdk_radio_create(fdk_widget *parent, fdk_font *font,

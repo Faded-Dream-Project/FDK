@@ -4072,6 +4072,80 @@ static void dialog_resp_cb(fdk_dialog_response response, void *user) {
     dialog_last = response;
 }
 
+/* The a11y layer against a REAL window: the window root announces
+ * the WINDOW role, its accessible name follows the title (and a
+ * set_title updates it), bounds match the live window size, and a
+ * REAL key event typed into an Entry arrives through the a11y value
+ * interface — the same snapshot a bridge would poll. */
+static void test_a11y_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_font *font = fdk_font_load_system_default(16);
+    assert(font != NULL);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK a11y test",
+                                 .width = 320, .height = 140 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+
+    fdk_a11y_info info;
+    assert(fdk_ok(fdk_a11y_describe(root, &info)));
+    assert(info.role == FDK_A11Y_ROLE_WINDOW);
+    assert(info.name != NULL && strcmp(info.name, "FDK a11y test") == 0);
+    assert(info.bounds.width == 320 && info.bounds.height == 140);
+    assert((info.states & FDK_A11Y_VISIBLE) != 0 &&
+           (info.states & FDK_A11Y_SHOWING) != 0);
+    fdk_a11y_info_free(&info);
+    printf("[ok] a11y: window root role/name/bounds/visible\n");
+
+    /* Title changes propagate to the accessible name. */
+    fdk_window_set_title(win, "Renamed");
+    assert(fdk_ok(fdk_a11y_describe(root, &info)));
+    assert(info.name != NULL && strcmp(info.name, "Renamed") == 0);
+    fdk_a11y_info_free(&info);
+    printf("[ok] a11y: set_title updates the root name\n");
+
+    /* A widget in the tree + REAL typed input read back through the
+     * value interface. */
+    fdk_widget *entry = NULL;
+    assert(fdk_ok(fdk_entry_create(root, font, "", &entry)));
+    fdk_rect r = { 20, 20, 200, 32 };
+    fdk_widget_set_bounds(entry, r);
+    assert(fdk_widget_focus(entry));
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+    /* Type "hi" (Xvfb default map: h=43, i=31). */
+    static const int keys[2] = { 43, 31 };
+    for (int i = 0; i < 2; i++) {
+        x11_send_key_event(send_dpy, xid, KeyPress, (unsigned)keys[i]);
+        x11_send_key_event(send_dpy, xid, KeyRelease, (unsigned)keys[i]);
+        (void)fdk_pump_events(ctx, 30);
+    }
+    XCloseDisplay(send_dpy);
+
+    assert(fdk_ok(fdk_a11y_describe(entry, &info)));
+    assert(info.role == FDK_A11Y_ROLE_ENTRY);
+    assert((info.states & FDK_A11Y_EDITABLE) != 0);
+    assert((info.states & FDK_A11Y_FOCUSED) != 0);
+    assert(info.value_text != NULL && strcmp(info.value_text, "hi") == 0);
+    fdk_a11y_info_free(&info);
+    printf("[ok] a11y: real typed input visible through the value "
+           "interface\n");
+
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] a11y GUI: describe/notify layer against a live window\n");
+}
+
 static void test_dialog_gui(void) {
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
@@ -4250,6 +4324,7 @@ int main(void) {
     test_menu_gui();
     test_combo_gui();
     test_dialog_gui();
+    test_a11y_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

@@ -40,6 +40,8 @@
 #include "core/log_internal.h"
 
 #include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 
 #define SCROLL_WHEEL_STEP 48
 #define SCROLL_KEY_STEP 32
@@ -461,6 +463,56 @@ static const fdk_widget_class fdk_scrollbar_class_def = {
     .destroy = NULL,
 };
 
+/* ---- a11y ---- */
+
+/* The scroll position is the value interface (0..scroll_max), with
+ * SET_VALUE mapping to scroll_to in CONTENT coordinates — the same
+ * numbers scroll_to takes. The internal bars expose the same value
+ * as their owning scrollview (they ARE its scrolling). */
+static void scrollview_a11y_describe(const fdk_widget *w,
+                                     fdk_a11y_info *out) {
+    const fdk_scrollview *sv = (const fdk_scrollview *)(const void *)w;
+    fdk_i32 cw = 0, ch = 0, vw = 0, vh = 0;
+    /* Measuring walks measure hooks whose signature is non-const
+     * (hooks may cache) — the describe contract ("no mutation") is
+     * honored by construction; the cast just bridges the const
+     * system's inability to say so. */
+    fdk_widget *mut = (fdk_widget *)(void *)(uintptr_t)w;
+    content_extent(scroll_of(mut), &cw, &ch);
+    fdk__scrollview_viewport(mut, &vw, &vh);
+    out->has_value = true;
+    out->value_min = 0.0;
+    out->value_max = (double)((ch > vh) ? ch - vh : 0);
+    out->value_current = (double)sv->scroll_y;
+    char buf[48];
+    (void)snprintf(buf, sizeof(buf), "%d, %d", (int)sv->scroll_x,
+                   (int)sv->scroll_y);
+    out->value_text = fdk__strdup(buf);
+    (void)cw;
+}
+
+static fdk_a11y_action_set scrollview_a11y_actions(const fdk_widget *w) {
+    (void)w;
+    return FDK_A11Y_ACTION_SET_VALUE;
+}
+
+static bool scrollview_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                                    double value) {
+    if (action != FDK_A11Y_ACTION_SET_VALUE) {
+        return false;
+    }
+    fdk_scrollview *sv = scroll_of(w);
+    return fdk_ok(fdk_scrollview_scroll_to(w, sv->scroll_x,
+                                           (fdk_i32)(value + 0.5)));
+}
+
+static const fdk_a11y_class scrollview_a11y = {
+    .role = FDK_A11Y_ROLE_SCROLL_AREA,
+    .describe = scrollview_a11y_describe,
+    .actions = scrollview_a11y_actions,
+    .perform = scrollview_a11y_perform,
+};
+
 const fdk_widget_class fdk_scrollview_class_def = {
     .size = sizeof(fdk_scrollview),
     .name = "scrollview",
@@ -469,6 +521,7 @@ const fdk_widget_class fdk_scrollview_class_def = {
     .measure = scrollview_measure,
     .arrange = scrollview_arrange,
     .destroy = NULL,
+    .a11y = &scrollview_a11y,
 };
 
 /* ---- public API ---- */
@@ -564,12 +617,17 @@ fdk_result fdk_scrollview_scroll_to(fdk_widget *scrollview, fdk_i32 x,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_scrollview *sv = scroll_of(scrollview);
+    fdk_i32 ox = sv->scroll_x, oy = sv->scroll_y;
     sv->scroll_x = x;
     sv->scroll_y = y;
     bool clamped = scroll_clamp(sv);
     scrollview_layout(scrollview);
     fdk_widget_invalidate(scrollview);
     (void)clamped; /* the GET reflects the clamped truth */
+    if (sv->scroll_x != ox || sv->scroll_y != oy) {
+        /* A11y: the scroll position (the value interface) moved. */
+        fdk__a11y_notify(scrollview, FDK_A11Y_VALUE_CHANGED, 0);
+    }
     return FDK_OK;
 }
 

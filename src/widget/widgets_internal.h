@@ -15,6 +15,7 @@
 #ifndef FDK_WIDGETS_INTERNAL_H
 #define FDK_WIDGETS_INTERNAL_H
 
+#include "fdk/fdk_a11y.h"
 #include "fdk/fdk_widgets.h"
 
 #include "widget_internal.h"
@@ -52,6 +53,19 @@ void fdk__scrollview_viewport(fdk_widget *w, fdk_i32 *out_w,
 
 /* fdk_alloc'd copy of s (NULL -> NULL). The catalog's owned text. */
 char *fdk__strdup(const char *s);
+
+/* widget.c: the window-root class (base widget + WINDOW a11y role) —
+ * window.c creates window-owned roots with it. */
+const fdk_widget_class *fdk__widget_window_root_class(void);
+
+/* a11y core (src/widget/a11y.c): fire a change notification for a
+ * widget mutation (children/state/name/bounds/value). Catalog
+ * setters call this AFTER the mutation is fully applied. Safe from
+ * inside event callbacks (snapshot walk). */
+void fdk__a11y_notify(fdk_widget *widget, fdk_a11y_event_kind kind,
+                      fdk_a11y_state_flag state_flag);
+/* printf-render an owned value-text string (NULL on failure). */
+char *fdk__a11y_valuef(const char *fmt, double v);
 
 /* The text's advance width and line extent (ascent + descent) in px,
  * or {0,0} when font or text is missing. Line extent (not ink) is

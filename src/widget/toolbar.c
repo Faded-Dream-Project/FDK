@@ -103,6 +103,13 @@ static void toolbar_paint(fdk_widget *w, fdk_surface *surface,
     fdk_surface_fill_rect(surface, rule, border);
 }
 
+static const fdk_a11y_class toolbar_a11y = {
+    .role = FDK_A11Y_ROLE_TOOLBAR,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_toolbar_class_def = {
     .size = sizeof(fdk_toolbar),
     .name = "toolbar",
@@ -111,6 +118,7 @@ const fdk_widget_class fdk_toolbar_class_def = {
     .measure = toolbar_measure,
     .arrange = toolbar_arrange,
     .destroy = NULL,
+    .a11y = &toolbar_a11y,
 };
 
 /* ---- public API ---- */

@@ -1,6 +1,7 @@
 #define FDK_LOG_TAG "widget"
 
 #include "widget/widget_internal.h"
+#include "widgets_internal.h" /* fdk__a11y_notify */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -235,6 +236,31 @@ static const fdk_widget_class fdk_widget_base_class_def = {
     .destroy = NULL,
 };
 
+/* Window-owned roots use this class: the base widget + the WINDOW
+ * accessibility role, so the a11y tree's roots announce themselves.
+ * Standalone (test) roots keep the plain base class. */
+static const fdk_a11y_class window_root_a11y = {
+    .role = FDK_A11Y_ROLE_WINDOW,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
+static const fdk_widget_class window_root_class_def = {
+    .size = sizeof(fdk_widget),
+    .name = "window-root",
+    .handle_event = NULL,
+    .paint = base_paint,
+    .measure = NULL,
+    .arrange = NULL,
+    .destroy = NULL,
+    .a11y = &window_root_a11y,
+};
+
+const fdk_widget_class *fdk__widget_window_root_class(void) {
+    return &window_root_class_def;
+}
+
 const fdk_widget_class *fdk_widget_base_class(void) {
     return &fdk_widget_base_class_def;
 }
@@ -307,6 +333,8 @@ static void teardown_free(fdk_widget *w) {
     }
     fdk_free(w->children);
     fdk_free(w->name);
+    fdk_free(w->a11y_name);
+    fdk_free(w->a11y_description);
     fdk_free(w);
 }
 
@@ -738,6 +766,9 @@ fdk_result fdk_widget_create(fdk_widget *parent,
     /* Containers (e.g. boxes) relayout around the new child. */
     fdk_widget_child_layout_changed(parent);
 
+    /* A11y: the subtree gained a node. */
+    fdk__a11y_notify(parent, FDK_A11Y_CHILDREN_CHANGED, 0);
+
     *out_widget = w;
     return FDK_OK;
 }
@@ -776,6 +807,10 @@ void fdk_widget_destroy(fdk_widget *widget) {
         widget->parent = NULL;
         /* The container the child left relayouts around the gap. */
         fdk_widget_child_layout_changed(old_parent);
+        /* A11y: children changed — the subject is already detached,
+         * so only scope-NULL (global) subscribers receive this one
+         * (subtree scopes cannot contain a detached widget). */
+        fdk__a11y_notify(old_parent, FDK_A11Y_CHILDREN_CHANGED, 0);
     }
 
     /* The guard spans the bookkeeping deliveries: their callbacks may
@@ -964,6 +999,12 @@ fdk_result fdk_widget_reparent(fdk_widget *widget, fdk_widget *new_parent) {
     fdk_widget_child_layout_changed(old_parent);
     fdk_widget_child_layout_changed(new_parent);
 
+    /* A11y: both ends of the move. */
+    if (old_parent != NULL) {
+        fdk__a11y_notify(old_parent, FDK_A11Y_CHILDREN_CHANGED, 0);
+    }
+    fdk__a11y_notify(new_parent, FDK_A11Y_CHILDREN_CHANGED, 0);
+
     /* Cross-tree move: the old root's focus/hover/grab may point into
      * the moved subtree; drop them there (with events), the new root
      * starts clean. */
@@ -1009,6 +1050,9 @@ void fdk_widget_set_bounds(fdk_widget *widget, fdk_rect bounds) {
     damage_union(root, absolute_bounds(widget)); /* old region */
     widget->bounds = bounds;
     damage_union(root, absolute_bounds(widget)); /* new region */
+    /* A11y: geometry moved/resized. Fired after the mutation, before
+     * anything can run user code that might destroy the widget. */
+    fdk__a11y_notify(widget, FDK_A11Y_BOUNDS_CHANGED, 0);
 }
 
 fdk_rect fdk_widget_get_absolute_bounds(const fdk_widget *widget) {
@@ -1038,6 +1082,10 @@ void fdk_widget_set_visible(fdk_widget *widget, bool visible) {
      * handler may destroy arbitrary parts of the tree — including
      * this widget's ancestors — so nothing may be touched after. */
     fdk_widget_invalidate(widget);
+    /* A11y: visibility flipped. VISIBLE is the own flag; SHOWING is
+     * computed at describe time, so this one notification covers the
+     * whole visible-subtree change for observers. */
+    fdk__a11y_notify(widget, FDK_A11Y_STATE_CHANGED, FDK_A11Y_VISIBLE);
     fdk_widget *root = find_root(widget);
     if (!visible && root != NULL) {
         guard_enter(root);
@@ -1069,6 +1117,9 @@ void fdk_widget_set_enabled(fdk_widget *widget, bool enabled) {
     } else {
         widget->flags &= ~FDK_WF_ENABLED;
     }
+    /* A11y: enabled-ness flipped (before the event deliveries below,
+     * which may destroy tree parts). */
+    fdk__a11y_notify(widget, FDK_A11Y_STATE_CHANGED, FDK_A11Y_ENABLED);
     fdk_widget *root = find_root(widget);
     if (!enabled && root != NULL) {
         /* Focus/hover/grab drops may deliver events whose handlers
@@ -1155,6 +1206,13 @@ bool fdk_widget_focus(fdk_widget *widget) {
         (void)deliver_single(root, old, &ev);
     }
     widget->flags |= FDK_WF_FOCUSED;
+    /* A11y: both ends of the focus move (after the flag flips, in
+     * callback-safe positions — the guards are open but the walk is
+     * snapshot-based). */
+    if (old != NULL && (old->flags & FDK_WF_DESTROYING) == 0) {
+        fdk__a11y_notify(old, FDK_A11Y_STATE_CHANGED, FDK_A11Y_FOCUSED);
+    }
+    fdk__a11y_notify(widget, FDK_A11Y_STATE_CHANGED, FDK_A11Y_FOCUSED);
     ev.type = FDK_WIDGET_FOCUS_IN;
     (void)deliver_single(root, widget, &ev);
     guard_leave(root);

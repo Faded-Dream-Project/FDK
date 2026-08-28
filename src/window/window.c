@@ -10,6 +10,7 @@
 #include "render/surface_internal.h"
 #include "theme/theme_internal.h"
 #include "widget/widget_internal.h"
+#include "widget/widgets_internal.h" /* window-root class, a11y name */
 #include "window/window_internal.h"
 
 #include <string.h>
@@ -842,6 +843,11 @@ void fdk_window_set_title(fdk_window *window, const char *title) {
     if (window->decorated && window->deco_title != NULL) {
         (void)fdk_label_set_text(window->deco_title, window->title);
     }
+    /* A11y: the root's accessible name follows the title (the root
+     * may not exist yet — set_title runs before get_root sometimes). */
+    if (window->root != NULL) {
+        fdk_widget_set_accessible_name(window->root, window->title);
+    }
 }
 
 void fdk_window_resize(fdk_window *window, fdk_i32 width, fdk_i32 height) {
@@ -1209,7 +1215,9 @@ fdk_result fdk_window_get_root(fdk_window *window, fdk_widget **out_root) {
     if (window->root == NULL) {
         fdk_rect bounds = {0, 0, window->last_size.width,
                            window->last_size.height};
-        fdk_result r = fdk_widget_create(NULL, NULL, bounds, &window->root);
+        fdk_result r = fdk_widget_create(NULL,
+                                         fdk__widget_window_root_class(),
+                                         bounds, &window->root);
         if (!fdk_ok(r)) {
             return r;
         }
@@ -1219,6 +1227,8 @@ fdk_result fdk_window_get_root(fdk_window *window, fdk_widget **out_root) {
          * fdk__widget_window_owner() + fdk__window_context(). The
          * widget layer never dereferences this. */
         window->root->window_owner = window;
+        /* A11y: the window's title is the root's accessible name. */
+        fdk_widget_set_accessible_name(window->root, window->title);
         FDK_DEBUG("window root widget created (%dx%d)", bounds.width,
                   bounds.height);
     }

@@ -190,6 +190,17 @@ typedef struct fdk_widget_class {
      * Called once, immediately before the widget's memory is freed.
      * NULL = nothing extra. */
     void (*destroy)(fdk_widget *widget);
+
+    /* Accessibility class descriptor (Phase 10): role + dynamic
+     * describe/action hooks for fdk_a11y_describe / fdk_a11y_perform.
+     * Opaque here (defined in fdk_a11y.h — which includes this
+     * header, so it cannot be included back). NULL = the widget is
+     * an unknown-role generic. App-defined subclasses may point this
+     * at their own static descriptor. Appended per the pre-1.0
+     * safe-append ABI policy; designated initializers everywhere
+     * mean existing class definitions compile unchanged (field
+     * defaults to NULL). */
+    const struct fdk_a11y_class *a11y;
 } fdk_widget_class;
 
 /* ---- Lifecycle ---- */

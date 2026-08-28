@@ -227,6 +227,48 @@ static void nb_destroy(fdk_widget *w) {
     fdk_free(nb->pages);
 }
 
+/* ---- a11y ---- */
+/* v1: the notebook is ONE widget with painted tabs, so the a11y tree
+ * exposes the notebook as the tab list with the CURRENT page as its
+ * value interface (SET_VALUE switches pages — the same code path tab
+ * clicks take). Per-tab child nodes need per-tab WIDGETS; recorded in
+ * the roadmap's Phase 10 parked list. */
+static void nb_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_notebook *nb = (const fdk_notebook *)(const void *)w;
+    if (nb->count > 0 && nb->current < nb->count &&
+        nb->pages[nb->current].label != NULL) {
+        out->name = fdk__strdup(nb->pages[nb->current].label);
+    }
+    out->has_value = true;
+    out->value_min = 0.0;
+    out->value_max = (double)((nb->count > 0) ? nb->count - 1 : 0);
+    out->value_current = (double)nb->current;
+}
+
+static fdk_a11y_action_set nb_a11y_actions(const fdk_widget *w) {
+    const fdk_notebook *nb = (const fdk_notebook *)(const void *)w;
+    return (nb->count > 1) ? (fdk_a11y_action_set)FDK_A11Y_ACTION_SET_VALUE
+                           : 0;
+}
+
+static bool nb_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                            double value) {
+    if (action != FDK_A11Y_ACTION_SET_VALUE) {
+        return false;
+    }
+    if (value < 0.0) {
+        value = 0.0;
+    }
+    return fdk_ok(fdk_notebook_set_current_page(w, (size_t)(value + 0.5)));
+}
+
+static const fdk_a11y_class nb_a11y = {
+    .role = FDK_A11Y_ROLE_TAB_LIST,
+    .describe = nb_a11y_describe,
+    .actions = nb_a11y_actions,
+    .perform = nb_a11y_perform,
+};
+
 const fdk_widget_class fdk_notebook_class_def = {
     .size = sizeof(fdk_notebook),
     .name = "notebook",
@@ -235,6 +277,7 @@ const fdk_widget_class fdk_notebook_class_def = {
     .measure = nb_measure,
     .arrange = nb_arrange,
     .destroy = nb_destroy,
+    .a11y = &nb_a11y,
 };
 
 /* ---- public API ---- */

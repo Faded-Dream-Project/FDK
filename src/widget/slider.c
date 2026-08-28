@@ -91,6 +91,9 @@ static void slider_set_value(fdk_slider *s, double v, bool fire) {
     if (nv != s->value || (v != s->value && nv == s->value)) {
         s->value = nv;
         fdk_widget_invalidate(&s->base);
+        /* A11y: the value interface moved (before the user callback,
+         * which may destroy the widget). */
+        fdk__a11y_notify(&s->base, FDK_A11Y_VALUE_CHANGED, 0);
         if (fire && s->on_changed != NULL) {
             s->on_changed(&s->base, s->on_changed_data);
         }
@@ -240,6 +243,53 @@ static void slider_measure(fdk_widget *w, fdk_size *out) {
     out->height = SLIDER_MIN_H;
 }
 
+/* ---- a11y ---- */
+
+static void slider_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_slider *s = (const fdk_slider *)(const void *)w;
+    out->has_value = true;
+    out->value_min = s->min;
+    out->value_max = s->max;
+    out->value_current = s->value;
+    out->value_text = fdk__a11y_valuef("%g", s->value);
+}
+
+static fdk_a11y_action_set slider_a11y_actions(const fdk_widget *w) {
+    (void)w;
+    return FDK_A11Y_ACTION_INCREMENT | FDK_A11Y_ACTION_DECREMENT |
+           FDK_A11Y_ACTION_SET_VALUE;
+}
+
+static bool slider_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                                double value) {
+    fdk_slider *s = slider_of(w);
+    /* The same quantized path the keyboard takes. */
+    double step = (s->step > 0.0) ? s->step : slider_span(s) / 100.0;
+    if (step <= 0.0) {
+        step = 1.0;
+    }
+    switch (action) {
+    case FDK_A11Y_ACTION_INCREMENT:
+        slider_set_value(s, s->value + step, true);
+        return true;
+    case FDK_A11Y_ACTION_DECREMENT:
+        slider_set_value(s, s->value - step, true);
+        return true;
+    case FDK_A11Y_ACTION_SET_VALUE:
+        slider_set_value(s, value, true);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static const fdk_a11y_class slider_a11y = {
+    .role = FDK_A11Y_ROLE_SLIDER,
+    .describe = slider_a11y_describe,
+    .actions = slider_a11y_actions,
+    .perform = slider_a11y_perform,
+};
+
 const fdk_widget_class fdk_slider_class_def = {
     .size = sizeof(fdk_slider),
     .name = "slider",
@@ -248,6 +298,7 @@ const fdk_widget_class fdk_slider_class_def = {
     .measure = slider_measure,
     .arrange = NULL,
     .destroy = NULL,
+    .a11y = &slider_a11y,
 };
 
 /* ---- public API ---- */

@@ -259,6 +259,22 @@ static void tree_rebuild_visible(fdk_tree *t) {
 
 /* ---- selection ---- */
 
+/* A11y helper: the row widget currently displaying `node`, or NULL
+ * when the node is hidden (collapsed ancestor). Notifications fire
+ * on rows because the a11y tree walks the WIDGET tree; a hidden
+ * node simply has no a11y presence until it becomes visible. */
+static void tree_notify_row_for_node(fdk_tree *t, size_t node,
+                                      fdk_a11y_event_kind kind,
+                                      fdk_a11y_state_flag flag) {
+    for (size_t i = 0; i < t->row_count; i++) {
+        if (t->row_widgets[i] != NULL &&
+            t->row_widgets[i]->node == node) {
+            fdk__a11y_notify(&t->row_widgets[i]->base, kind, flag);
+            return;
+        }
+    }
+}
+
 static void tree_fire_changed(fdk_tree *t) {
     if (t->on_selection_changed != NULL) {
         t->on_selection_changed(&t->base, t->on_selection_data);
@@ -269,6 +285,10 @@ static void tree_clear_selection(fdk_tree *t) {
     for (size_t i = 0; i < t->count; i++) {
         if (t->nodes[i].selected) {
             t->nodes[i].selected = false;
+            /* A11y: fire on the row currently SHOWING this node
+             * (invisible nodes have no row to announce them). */
+            tree_notify_row_for_node(t, i, FDK_A11Y_STATE_CHANGED,
+                                     FDK_A11Y_SELECTED);
         }
     }
     fdk_widget_invalidate_all(&t->base);
@@ -298,6 +318,8 @@ fdk_result fdk_tree_select(fdk_widget *tree, fdk_tree_node node) {
     tree_clear_selection(t);
     if (node != FDK_TREE_NODE_NONE) {
         t->nodes[node].selected = true;
+        tree_notify_row_for_node(t, node, FDK_A11Y_STATE_CHANGED,
+                                 FDK_A11Y_SELECTED);
     }
     tree_fire_changed(t);
     return FDK_OK;
@@ -420,6 +442,90 @@ static void row_destroy(fdk_widget *w) {
     (void)w; /* nothing owned per-row (text lives in the model) */
 }
 
+/* ---- a11y ---- */
+
+/* row -> rows -> scrollview -> tree */
+static fdk_widget *tree_of_row(const fdk_widget *row) {
+    fdk_widget *cur = (row != NULL) ? row->parent : NULL;
+    while (cur != NULL && cur->klass != &fdk_tree_class_def) {
+        cur = cur->parent;
+    }
+    return cur;
+}
+
+static void tree_row_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    fdk_widget *tree_w = tree_of_row(w);
+    if (tree_w == NULL) {
+        return;
+    }
+    const fdk_tree *t = (const fdk_tree *)(const void *)tree_w;
+    const fdk_tree_row *row = (const fdk_tree_row *)(const void *)w;
+    if (row->node < t->count) {
+        const fdk_tree_node_rec *n = &t->nodes[row->node];
+        if (n->text != NULL) {
+            out->name = fdk__strdup(n->text);
+        }
+        if (n->selected) {
+            out->states |= FDK_A11Y_SELECTED;
+        }
+        if (n->is_parent) {
+            if (n->expanded) {
+                out->states |= FDK_A11Y_EXPANDED;
+            }
+        }
+    }
+}
+
+static fdk_a11y_action_set tree_row_a11y_actions(const fdk_widget *w) {
+    fdk_widget *tree_w = tree_of_row(w);
+    if (tree_w == NULL) {
+        return 0;
+    }
+    const fdk_tree *t = (const fdk_tree *)(const void *)tree_w;
+    const fdk_tree_row *row = (const fdk_tree_row *)(const void *)w;
+    if (row->node >= t->count || !t->nodes[row->node].is_parent) {
+        return (fdk_a11y_action_set)FDK_A11Y_ACTION_ACTIVATE;
+    }
+    return FDK_A11Y_ACTION_ACTIVATE | FDK_A11Y_ACTION_EXPAND |
+           FDK_A11Y_ACTION_COLLAPSE;
+}
+
+static bool tree_row_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                                  double value) {
+    (void)value;
+    fdk_widget *tree_w = tree_of_row(w);
+    if (tree_w == NULL) {
+        return false;
+    }
+    fdk_tree *t = tree_of(tree_w);
+    fdk_tree_row *row = trow_of(w);
+    if (row->node >= t->count) {
+        return false;
+    }
+    switch (action) {
+    case FDK_A11Y_ACTION_ACTIVATE:
+        return fdk_ok(fdk_tree_select(tree_w, row->node));
+    case FDK_A11Y_ACTION_EXPAND:
+    case FDK_A11Y_ACTION_COLLAPSE: {
+        bool want = (action == FDK_A11Y_ACTION_EXPAND);
+        if (!t->nodes[row->node].is_parent ||
+            t->nodes[row->node].expanded == want) {
+            return false;
+        }
+        return fdk_ok(fdk_tree_node_expand(tree_w, row->node, want));
+    }
+    default:
+        return false;
+    }
+}
+
+static const fdk_a11y_class tree_row_a11y = {
+    .role = FDK_A11Y_ROLE_TREE_ITEM,
+    .describe = tree_row_a11y_describe,
+    .actions = tree_row_a11y_actions,
+    .perform = tree_row_a11y_perform,
+};
+
 static const fdk_widget_class fdk_tree_row_class_def = {
     .size = sizeof(fdk_tree_row),
     .name = "tree-row",
@@ -428,6 +534,7 @@ static const fdk_widget_class fdk_tree_row_class_def = {
     .measure = NULL,
     .arrange = NULL,
     .destroy = row_destroy,
+    .a11y = &tree_row_a11y,
 };
 
 /* ---- tree-level keyboard ---- */
@@ -592,6 +699,13 @@ static void tree_destroy(fdk_widget *w) {
     fdk_free(t->row_widgets);
 }
 
+static const fdk_a11y_class tree_a11y = {
+    .role = FDK_A11Y_ROLE_TREE,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_tree_class_def = {
     .size = sizeof(fdk_tree),
     .name = "tree",
@@ -600,6 +714,7 @@ const fdk_widget_class fdk_tree_class_def = {
     .measure = tree_measure,
     .arrange = tree_arrange,
     .destroy = tree_destroy,
+    .a11y = &tree_a11y,
 };
 
 /* ---- public API ---- */
@@ -727,6 +842,9 @@ fdk_result fdk_tree_node_expand(fdk_widget *tree, fdk_tree_node node,
     }
     if (t->nodes[node].expanded != expanded) {
         t->nodes[node].expanded = expanded;
+        /* A11y: fire BEFORE the relayout remaps rows to nodes. */
+        tree_notify_row_for_node(t, node, FDK_A11Y_STATE_CHANGED,
+                                 FDK_A11Y_EXPANDED);
         tree_relayout(t);
     }
     return FDK_OK;

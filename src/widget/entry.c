@@ -61,6 +61,9 @@ typedef struct fdk_entry {
     fdk_i64 last_click_ms;
     fdk_f32 last_click_x, last_click_y;
     int click_count;       /* 1 = single, 2 = double, 3+ = triple   */
+    bool password;         /* render bullets, not glyphs            */
+    bool read_only;        /* selection + copy yes, edits no        */
+    size_t max_len;        /* editable cap in bytes; 0 = 64 KiB     */
 } fdk_entry;
 
 static fdk_entry *entry_of(fdk_widget *w) {
@@ -172,6 +175,48 @@ static fdk_i32 text_width_to(fdk_font *font, const char *s, size_t len,
     return (fdk_i32)(x + 0.5f);
 }
 
+/* ---- password mode geometry ----
+ *
+ * Bullets advance by ONE glyph per CLUSTER: the buffer, the caret,
+ * the selection, and the hit-testing all keep working in byte/
+ * cluster space — only the rendering (and its geometry) changes. */
+
+#define ENTRY_BULLET_UTF8 "\xE2\x80\xA2" /* U+2022 BULLET */
+
+static fdk_i32 bullet_advance(const fdk_entry *e) {
+    if (e->font != NULL) {
+        fdk_i32 w = 0, h = 0;
+        fdk__text_extent(e->font, ENTRY_BULLET_UTF8, &w, &h);
+        if (w > 0) {
+            return w;
+        }
+    }
+    return 6; /* fontless fallback bullet width */
+}
+
+/* Clusters in [0, offset). */
+static size_t cluster_count(const fdk_entry *e, size_t offset) {
+    size_t n = 0, i = 0;
+    while (i < offset) {
+        fdk_u32 cp = 0;
+        int step = fdk_text_utf8_next(e->text, e->len, i, &cp);
+        if (step <= 0) {
+            break;
+        }
+        i += (size_t)step;
+        n++;
+    }
+    return n;
+}
+
+/* Password-aware width of [0, offset). */
+static fdk_i32 entry_width_to(const fdk_entry *e, size_t offset) {
+    if (!e->password) {
+        return text_width_to(e->font, e->text, e->len, offset);
+    }
+    return (fdk_i32)cluster_count(e, offset) * bullet_advance(e);
+}
+
 /* Hit-test: the boundary whose advance is closest to local x. */
 static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
     if (e->font == NULL || e->len == 0) {
@@ -183,11 +228,13 @@ static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
     }
     fdk_f32 acc = 0.0f;
     size_t at = 0;
+    fdk_f32 bullet_adv = e->password ? (fdk_f32)bullet_advance(e) : 0.0f;
     while (at < e->len) {
         fdk_u32 cp = 0;
         int n = fdk_text_utf8_next(e->text, e->len, at, &cp);
-        const fdk_glyph *g = fdk_text_glyph_for(e->font, cp);
-        fdk_f32 next_acc = acc + g->advance;
+        const fdk_glyph *g = e->password ? NULL
+                                         : fdk_text_glyph_for(e->font, cp);
+        fdk_f32 next_acc = acc + (e->password ? bullet_adv : g->advance);
         if (x < acc + (next_acc - acc) * 0.5f) {
             return at; /* closer to this boundary than the next */
         }
@@ -209,7 +256,7 @@ static void entry_scroll_to_caret(fdk_entry *e) {
         e->x_offset = 0;
         return;
     }
-    fdk_i32 caret_x = text_width_to(e->font, e->text, e->len, e->caret);
+    fdk_i32 caret_x = entry_width_to(e, e->caret);
     fdk_i32 preedit_w = 0;
     if (e->preedit_len > 0 && e->font != NULL) {
         fdk_i32 pw = 0, ph = 0;
@@ -275,8 +322,9 @@ static fdk_result entry_splice(fdk_entry *e, size_t from, size_t to,
         insert_len = 0;
     }
     size_t new_len = e->len - (to - from) + insert_len;
-    if (new_len > ENTRY_MAX_TEXT) {
-        FDK_WARN("entry: 64 KiB text limit reached; insert refused");
+    size_t cap = (e->max_len > 0) ? e->max_len : ENTRY_MAX_TEXT;
+    if (new_len > cap) {
+        FDK_WARN("entry: %zu-byte limit reached; insert refused", cap);
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_result r = entry_ensure_cap(e, new_len + 1);
@@ -295,6 +343,8 @@ static fdk_result entry_splice(fdk_entry *e, size_t from, size_t to,
     entry_scroll_to_caret(e);
     fdk_widget_invalidate(&e->base);
     fdk_widget_child_layout_changed(e->base.parent);
+    /* A11y: the text (the entry's value interface) changed. */
+    fdk__a11y_notify(&e->base, FDK_A11Y_VALUE_CHANGED, 0);
     if (e->on_changed != NULL) {
         e->on_changed(&e->base, e->on_changed_data);
     }
@@ -497,17 +547,20 @@ static bool entry_handle_event(fdk_widget *w,
         bool shift = (mods & FDK_MOD_SHIFT) != 0;
         bool ctrl = (mods & FDK_MOD_CTRL) != 0;
 
-        /* Clipboard shortcuts. */
+        /* Clipboard shortcuts. Read-only entries keep COPY and
+         * SELECT-ALL (the reader contract) and drop the mutators. */
         if (ctrl && !shift) {
             if (key->codepoint == 'c' || key->codepoint == 'C') {
                 entry_clipboard_copy(e);
                 return true;
             }
-            if (key->codepoint == 'x' || key->codepoint == 'X') {
+            if (!e->read_only &&
+                (key->codepoint == 'x' || key->codepoint == 'X')) {
                 entry_clipboard_cut(e);
                 return true;
             }
-            if (key->codepoint == 'v' || key->codepoint == 'V') {
+            if (!e->read_only &&
+                (key->codepoint == 'v' || key->codepoint == 'V')) {
                 entry_clipboard_paste(e);
                 return true;
             }
@@ -546,6 +599,9 @@ static bool entry_handle_event(fdk_widget *w,
             entry_move_caret(e, e->len, shift);
             return true;
         case FDK_KEY_BACKSPACE:
+            if (e->read_only) {
+                return true; /* consumed, not edited */
+            }
             if (entry_has_selection(e)) {
                 entry_delete_selection(e);
             } else if (e->caret > 0) {
@@ -554,6 +610,9 @@ static bool entry_handle_event(fdk_widget *w,
             }
             return true;
         case FDK_KEY_DELETE:
+            if (e->read_only) {
+                return true; /* consumed, not edited */
+            }
             if (entry_has_selection(e)) {
                 entry_delete_selection(e);
             } else if (e->caret < e->len) {
@@ -579,7 +638,7 @@ static bool entry_handle_event(fdk_widget *w,
 
         /* Textual insert: any codepoint the platform resolved,
          * excluding control characters (they are not text). */
-        if (key->codepoint >= 0x20u && !ctrl) {
+        if (key->codepoint >= 0x20u && !ctrl && !e->read_only) {
             char buf[4];
             fdk_u32 cp = key->codepoint;
             size_t n = 0;
@@ -660,10 +719,8 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
 
     /* Selection highlight behind the selected segment. */
     if (has_sel) {
-        fdk_i32 sel_x = text_x + text_width_to(e->font, e->text, e->len,
-                                               lo);
-        fdk_i32 sel_w = text_width_to(e->font, e->text, e->len, hi) -
-                        text_width_to(e->font, e->text, e->len, lo);
+        fdk_i32 sel_x = text_x + entry_width_to(e, lo);
+        fdk_i32 sel_w = entry_width_to(e, hi) - entry_width_to(e, lo);
         fdk_rect sel = {sel_x, bounds.y + 2, sel_w,
                         bounds.height - 4};
         if (sel_w > 0 && sel.height > 0) {
@@ -675,11 +732,33 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         }
     }
 
+    /* Password mode: one bullet per CLUSTER, the same three-segment
+     * geometry (the widths above are already bullet-aware — the
+     * buffer, caret, selection, and hit-testing never change). */
+    if (e->password && e->len > 0) {
+        fdk_i32 bw = bullet_advance(e);
+        fdk_i32 w_lo = entry_width_to(e, lo);
+        fdk_i32 w_hi = entry_width_to(e, hi);
+        size_t n_lo = cluster_count(e, lo);
+        size_t n_hi = cluster_count(e, hi);
+        size_t n_all = cluster_count(e, e->len);
+        for (size_t i = 0; i < n_lo; i++) {
+            fdk__draw_text(surface, e->font, ENTRY_BULLET_UTF8, text_col,
+                           text_x + (fdk_i32)i * bw, baseline);
+        }
+        for (size_t i = 0; i < n_hi - n_lo; i++) {
+            fdk__draw_text(surface, e->font, ENTRY_BULLET_UTF8, text_col,
+                           text_x + w_lo + (fdk_i32)i * bw, baseline);
+        }
+        for (size_t i = 0; i < n_all - n_hi; i++) {
+            fdk__draw_text(surface, e->font, ENTRY_BULLET_UTF8, text_col,
+                           text_x + w_hi + (fdk_i32)i * bw, baseline);
+        }
+    } else if (e->len > 0) {
     /* Text in three segments — [0,lo) [lo,hi) [hi,len) — drawn by
      * temporarily NUL-terminating at each boundary. The selected
      * middle keeps the plain text color: the accent highlight rect
      * already says "selected" (no inverted text in the v1 theme). */
-    if (e->len > 0) {
         char saved_lo = e->text[lo];
         char saved_hi = e->text[hi];
         fdk_i32 w_lo = text_width_to(e->font, e->text, e->len, lo);
@@ -698,8 +777,7 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
 
     /* Preedit (IME groundwork): rendered AT the caret, underlined,
      * with the visual caret parked at its end while active. */
-    fdk_i32 caret_x = text_x + text_width_to(e->font, e->text, e->len,
-                                             e->caret);
+    fdk_i32 caret_x = text_x + entry_width_to(e, e->caret);
     if (e->preedit_len > 0) {
         fdk_i32 pw = 0, ph = 0;
         fdk__text_extent(e->font, e->preedit, &pw, &ph);
@@ -730,7 +808,13 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
 static void entry_measure(fdk_widget *w, fdk_size *out) {
     fdk_entry *e = entry_of(w);
     fdk_i32 tw = 0, th = 0;
-    fdk__text_extent(e->font, e->text, &tw, &th);
+    if (e->password) {
+        /* Bullet-run width: the font's line height, bullet advances. */
+        fdk__text_extent(e->font, ENTRY_BULLET_UTF8, &tw, &th);
+        tw = (fdk_i32)cluster_count(e, e->len) * (tw > 0 ? tw : 6);
+    } else {
+        fdk__text_extent(e->font, e->text, &tw, &th);
+    }
     out->width = tw + ENTRY_PAD_X * 2;
     out->height = th + ENTRY_PAD_X; /* tighter vertically */
     if (out->width < ENTRY_MIN_W) {
@@ -747,6 +831,32 @@ static void entry_destroy(fdk_widget *w) {
     fdk_free(e->preedit);
 }
 
+/* ---- a11y ---- */
+
+static void entry_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_entry *e = (const fdk_entry *)(const void *)w;
+    if (e->read_only) {
+        out->states |= FDK_A11Y_READ_ONLY;
+    } else {
+        out->states |= FDK_A11Y_EDITABLE;
+    }
+    /* The text is the value interface (value_text); password fields
+     * expose it too — masking is a BRIDGE decision (screen readers
+     * must be able to echo what the user types), not the toolkit's. */
+    out->has_value = true;
+    out->value_min = 0.0;
+    out->value_max = (double)e->len;
+    out->value_current = (double)e->len;
+    out->value_text = fdk__strdup(e->text);
+}
+
+static const fdk_a11y_class entry_a11y = {
+    .role = FDK_A11Y_ROLE_ENTRY,
+    .describe = entry_a11y_describe,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 static const fdk_widget_class fdk_entry_class_def = {
     .size = sizeof(fdk_entry),
     .name = "entry",
@@ -755,6 +865,7 @@ static const fdk_widget_class fdk_entry_class_def = {
     .measure = entry_measure,
     .arrange = NULL,
     .destroy = entry_destroy,
+    .a11y = &entry_a11y,
 };
 
 /* ---- public API ---- */
@@ -807,7 +918,8 @@ fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text) {
     fdk_entry *e = entry_of(entry);
     const char *set = (text != NULL) ? text : "";
     size_t len = strlen(set);
-    if (len > ENTRY_MAX_TEXT) {
+    size_t cap = (e->max_len > 0) ? e->max_len : ENTRY_MAX_TEXT;
+    if (len > cap) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_result r = entry_ensure_cap(e, len + 1);
@@ -821,6 +933,8 @@ fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text) {
     entry_scroll_to_caret(e);
     fdk_widget_invalidate(entry);
     fdk_widget_child_layout_changed(entry->parent);
+    /* A11y: the text (the entry's value interface) changed. */
+    fdk__a11y_notify(entry, FDK_A11Y_VALUE_CHANGED, 0);
     if (e->on_changed != NULL) {
         e->on_changed(entry, e->on_changed_data);
     }
@@ -930,4 +1044,68 @@ void fdk_entry_set_on_activate(fdk_widget *entry,
     fdk_entry *e = entry_of(entry);
     e->on_activate = on_activate;
     e->on_activate_data = user_data;
+}
+
+/* ---- password / read-only / max-length ---- */
+
+void fdk_entry_set_password(fdk_widget *entry, bool password) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return;
+    }
+    fdk_entry *e = entry_of(entry);
+    if (e->password == password) {
+        return;
+    }
+    e->password = password;
+    /* Geometry may change (bullets advance differently than the
+     * glyphs): re-measure and re-anchor the scroll. */
+    entry_scroll_to_caret(e);
+    fdk_widget_invalidate(entry);
+    fdk_widget_child_layout_changed(entry->parent);
+}
+
+bool fdk_entry_is_password(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return false;
+    }
+    return entry_of(entry)->password;
+}
+
+void fdk_entry_set_read_only(fdk_widget *entry, bool read_only) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return;
+    }
+    fdk_entry *e = entry_of(entry);
+    if (e->read_only == read_only) {
+        return;
+    }
+    e->read_only = read_only;
+    /* A11y: the editable/read-only state flipped. */
+    fdk__a11y_notify(entry, FDK_A11Y_STATE_CHANGED, FDK_A11Y_READ_ONLY);
+    fdk_widget_invalidate(entry);
+}
+
+bool fdk_entry_is_read_only(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return false;
+    }
+    return entry_of(entry)->read_only;
+}
+
+void fdk_entry_set_max_length(fdk_widget *entry, size_t max_bytes) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return;
+    }
+    if (max_bytes > ENTRY_MAX_TEXT) {
+        max_bytes = ENTRY_MAX_TEXT;
+    }
+    entry_of(entry)->max_len = max_bytes;
+}
+
+size_t fdk_entry_get_max_length(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return 0;
+    }
+    fdk_entry *e = entry_of(entry);
+    return (e->max_len > 0) ? e->max_len : ENTRY_MAX_TEXT;
 }

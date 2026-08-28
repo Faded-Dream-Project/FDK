@@ -139,6 +139,9 @@ static void list_set_row(fdk_list *l, size_t index, bool selected) {
     if (row->selected != selected) {
         row->selected = selected;
         fdk_widget_invalidate(&row->base);
+        /* A11y: the row's selected state flipped. */
+        fdk__a11y_notify(&row->base, FDK_A11Y_STATE_CHANGED,
+                         FDK_A11Y_SELECTED);
     }
 }
 
@@ -355,6 +358,61 @@ static void row_destroy(fdk_widget *w) {
     fdk_free(row->text);
 }
 
+/* ---- a11y ---- */
+
+static void list_row_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_list_row *row = (const fdk_list_row *)(const void *)w;
+    if (row->text != NULL) {
+        out->name = fdk__strdup(row->text);
+    }
+    if (row->selected) {
+        out->states |= FDK_A11Y_SELECTED;
+    }
+}
+
+static fdk_list *list_of_row(const fdk_widget *row) {
+    /* rows -> content box -> scrollview -> list */
+    fdk_widget *cur = row->parent;
+    while (cur != NULL && cur->klass != &fdk_list_class_def) {
+        cur = cur->parent;
+    }
+    return (cur != NULL) ? list_of(cur) : NULL;
+}
+
+static bool list_row_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                                  double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    /* Plain-click semantics through the same code path. */
+    fdk_list *l = list_of_row(w);
+    if (l == NULL || l->mode == FDK_LIST_SELECTION_NONE) {
+        return false;
+    }
+    for (size_t i = 0; i < l->count; i++) {
+        if (l->row_widgets[i] == (fdk_list_row *)(void *)w) {
+            list_row_clicked(l, i, 0);
+            return true;
+        }
+    }
+    return false;
+}
+
+static fdk_a11y_action_set list_row_a11y_actions(const fdk_widget *w) {
+    fdk_list *l = list_of_row(w);
+    return (l != NULL && l->mode != FDK_LIST_SELECTION_NONE)
+               ? (fdk_a11y_action_set)FDK_A11Y_ACTION_ACTIVATE
+               : 0;
+}
+
+static const fdk_a11y_class list_row_a11y = {
+    .role = FDK_A11Y_ROLE_LIST_ITEM,
+    .describe = list_row_a11y_describe,
+    .actions = list_row_a11y_actions,
+    .perform = list_row_a11y_perform,
+};
+
 static const fdk_widget_class fdk_list_row_class_def = {
     .size = sizeof(fdk_list_row),
     .name = "list-row",
@@ -363,6 +421,7 @@ static const fdk_widget_class fdk_list_row_class_def = {
     .measure = NULL,
     .arrange = NULL,
     .destroy = row_destroy,
+    .a11y = &list_row_a11y,
 };
 
 /* ---- list-level events (keyboard) ---- */
@@ -485,6 +544,20 @@ static void list_arrange(fdk_widget *w, fdk_rect assigned) {
     }
 }
 
+static void list_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_list *l = (const fdk_list *)(const void *)w;
+    if (l->mode == FDK_LIST_SELECTION_MULTIPLE) {
+        out->states |= FDK_A11Y_MULTI_SELECTABLE;
+    }
+}
+
+static const fdk_a11y_class list_a11y = {
+    .role = FDK_A11Y_ROLE_LIST,
+    .describe = list_a11y_describe,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_list_class_def = {
     .size = sizeof(fdk_list),
     .name = "list",
@@ -494,6 +567,7 @@ const fdk_widget_class fdk_list_class_def = {
     .arrange = list_arrange,
     .destroy = list_destroy, /* the row POINTER array; the rows
                                 themselves die with the subtree */
+    .a11y = &list_a11y,
 };
 
 /* ---- public API ---- */

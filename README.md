@@ -12,19 +12,20 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: Phase 9 — Advanced Widgets (complete).** Core lifecycle,
-real X11 and Wayland backends, the rendering layer (damage-tracked
-software renderer with images, alpha compositing, transforms, and
-antialiasing), the widget foundation with layout (box + grid), the
-text stack (TrueType shaping with subpixel positioning), the core
-widget catalog, the theme engine (runtime-switchable `.fdk` files),
-FDK-drawn window decorations with full window management, and the
-advanced widget phase — clipboard, text Entry, ScrollView, List,
-Tree, Slider, SpinButton, Toolbar, Notebook, Canvas, Menu (bar +
-dropdowns + submenus + context menus), ComboBox (non-editable and
-editable), and modal dialogs — are implemented and tested. See
-"What works today" below and `docs/roadmap.md` for an honest,
-specific list of what is and isn't covered.
+**Status: Phase 10 — Accessibility/i18n (first slice: the a11y core).**
+Core lifecycle, real X11 and Wayland backends, the rendering layer
+(damage-tracked software renderer with images, alpha compositing,
+transforms, and antialiasing), the widget foundation with layout
+(box + grid), the text stack (TrueType shaping with subpixel
+positioning), the core widget catalog, the theme engine
+(runtime-switchable `.fdk` files), FDK-drawn window decorations with
+full window management, the advanced widget phase — clipboard, text
+Entry (now with password/read-only/max-length modes), ScrollView,
+List, Tree, Slider, SpinButton, Toolbar, Notebook, Canvas, Menu,
+ComboBox, and modal dialogs — and the accessibility core (describe /
+notify / perform over the widget tree itself). See "What works
+today" below and `docs/roadmap.md` for an honest, specific list of
+what is and isn't covered.
 
 ## Requirements
 
@@ -400,6 +401,45 @@ a menu bar with submenus and a real message dialog, a toolbar, a
 notebook of pages (controls, a list, a tree, a canvas), combos, a
 status label narrating everything. The popups open, grab, and
 dismiss themselves while the demo only pumps events.
+
+### The accessibility core — Phase 10, first slice
+
+The accessibility tree IS the widget tree — no parallel object
+model, no daemon, nothing that can drift out of sync with what is
+on screen. Every widget can be described, observed, and DRIVEN
+without a display, which makes the layer testable headless and
+gives FDK the automation seam GTK and Qt had to bolt on later:
+
+```c
+fdk_a11y_info info;
+fdk_a11y_describe(slider, &info);
+/* info.role == FDK_A11Y_ROLE_SLIDER
+ * info.value_current / value_min / value_max, info.value_text
+ * info.states: ENABLED | VISIBLE | SHOWING | FOCUSABLE ... */
+
+fdk_a11y_subscribe(NULL, on_a11y_event, NULL);   /* global scope */
+/* ... every children/state/name/bounds/value change, forever */
+
+fdk_a11y_perform(slider, FDK_A11Y_ACTION_SET_VALUE, 55.0);
+/* programmatic driving through the widget's own semantics — the
+ * same code path the keyboard takes. Screen readers' "click" and
+ * the test suite's assertions share this API. */
+```
+
+Thirty-four roles (WAI-ARIA/ATK naming), a 17-flag state set
+(SHOWING walks ancestors — a hidden container hides its subtree),
+a value interface (sliders, progress, spins, scrolls, entries,
+notebooks, combos), per-widget accessible-name overrides over
+class-computed names (a Label's text, a window's title), change
+notifications with the same reentrancy discipline as the event
+system, and action drivers for the whole interactive catalog. The
+Entry also gained the three modes the roadmap had promised:
+password (one bullet per cluster — the caret, selection, and
+hit-testing never change), read-only (selection + copy keep
+working), and max length. The platform bridge — a future AT-SPI2
+peer — is a CONSUMER of this API, the same way the X11 and
+Wayland backends sit under the widget layer; `docs/roadmap.md`'s
+Phase 10 entry records exactly what is and isn't there.
 
 ### What it looks like
 

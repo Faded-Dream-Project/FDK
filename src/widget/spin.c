@@ -143,6 +143,8 @@ static void spin_commit(fdk_spin *s, bool fire) {
         spin_format(v, buf, sizeof(buf));
         (void)fdk_entry_set_text(s->entry, buf);
         fdk_widget_invalidate(&s->base);
+        /* A11y: the committed value moved. */
+        fdk__a11y_notify(&s->base, FDK_A11Y_VALUE_CHANGED, 0);
     }
     if (fire && s->on_changed != NULL) {
         s->on_changed(&s->base, s->on_changed_data);
@@ -158,6 +160,8 @@ static void spin_step(fdk_spin *s, double delta) {
         spin_format(v, buf, sizeof(buf));
         (void)fdk_entry_set_text(s->entry, buf);
         fdk_widget_invalidate(&s->base);
+        /* A11y: the stepped value moved. */
+        fdk__a11y_notify(&s->base, FDK_A11Y_VALUE_CHANGED, 0);
         if (s->on_changed != NULL) {
             s->on_changed(&s->base, s->on_changed_data);
         }
@@ -331,6 +335,50 @@ static void spin_destroy(fdk_widget *w) {
     (void)w; /* the entry is a child and dies with the subtree */
 }
 
+/* ---- a11y ---- */
+
+static void spin_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_spin *s = (const fdk_spin *)(const void *)w;
+    out->has_value = true;
+    out->value_min = s->min;
+    out->value_max = s->max;
+    out->value_current = s->value;
+    char buf[64];
+    spin_format(s->value, buf, sizeof(buf));
+    out->value_text = fdk__strdup(buf);
+}
+
+static fdk_a11y_action_set spin_a11y_actions(const fdk_widget *w) {
+    (void)w;
+    return FDK_A11Y_ACTION_INCREMENT | FDK_A11Y_ACTION_DECREMENT |
+           FDK_A11Y_ACTION_SET_VALUE;
+}
+
+static bool spin_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                              double value) {
+    fdk_spin *s = spin_of(w);
+    switch (action) {
+    case FDK_A11Y_ACTION_INCREMENT:
+        spin_step(s, s->step);
+        return true;
+    case FDK_A11Y_ACTION_DECREMENT:
+        spin_step(s, -s->step);
+        return true;
+    case FDK_A11Y_ACTION_SET_VALUE:
+        fdk_spin_set_value(w, value);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static const fdk_a11y_class spin_a11y = {
+    .role = FDK_A11Y_ROLE_SPIN_BUTTON,
+    .describe = spin_a11y_describe,
+    .actions = spin_a11y_actions,
+    .perform = spin_a11y_perform,
+};
+
 const fdk_widget_class fdk_spin_class_def = {
     .size = sizeof(fdk_spin),
     .name = "spinbutton",
@@ -339,6 +387,7 @@ const fdk_widget_class fdk_spin_class_def = {
     .measure = spin_measure,
     .arrange = spin_arrange,
     .destroy = spin_destroy,
+    .a11y = &spin_a11y,
 };
 
 /* ---- public API ---- */

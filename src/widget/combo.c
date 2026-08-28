@@ -65,7 +65,7 @@ static void combo_fire_changed(fdk_combo *c, fdk_i64 index) {
     }
 }
 
-static const char *combo_row_text(fdk_combo *c, fdk_i64 index) {
+static const char *combo_row_text(const fdk_combo *c, fdk_i64 index) {
     if (c == NULL || index < 0 || (size_t)index >= c->count) {
         return NULL;
     }
@@ -279,6 +279,56 @@ static void combo_destroy(fdk_widget *w) {
      * captures is guarded by the class check in the callbacks. */
 }
 
+static void combo_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_combo *c = (const fdk_combo *)(const void *)w;
+    /* Name: the active row's text (or the custom/entry text). */
+    const char *name = combo_row_text(c, c->active);
+    if (name != NULL) {
+        out->name = fdk__strdup(name);
+    } else if (c->editable && c->entry != NULL) {
+        const char *t = fdk_entry_get_text(c->entry);
+        if (t != NULL && t[0] != '\0') {
+            out->name = fdk__strdup(t);
+        }
+    }
+    if (c->dropdown_open) {
+        out->states |= FDK_A11Y_HAS_POPUP | FDK_A11Y_EXPANDED;
+    } else {
+        out->states |= FDK_A11Y_HAS_POPUP;
+    }
+    out->has_value = true;
+    out->value_min = -1.0;
+    out->value_max = (double)((c->count > 0) ? (fdk_i64)c->count - 1 : -1);
+    out->value_current = (double)c->active;
+}
+
+static fdk_a11y_action_set combo_a11y_actions(const fdk_widget *w) {
+    (void)w;
+    return FDK_A11Y_ACTION_ACTIVATE | FDK_A11Y_ACTION_SET_VALUE;
+}
+
+static bool combo_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                               double value) {
+    switch (action) {
+    case FDK_A11Y_ACTION_ACTIVATE:
+        /* Open/close the dropdown — the same path the field click
+         * takes. */
+        combo_open_dropdown(w);
+        return true;
+    case FDK_A11Y_ACTION_SET_VALUE:
+        return fdk_ok(fdk_combo_set_active(w, (fdk_i64)value));
+    default:
+        return false;
+    }
+}
+
+static const fdk_a11y_class combo_a11y = {
+    .role = FDK_A11Y_ROLE_COMBO_BOX,
+    .describe = combo_a11y_describe,
+    .actions = combo_a11y_actions,
+    .perform = combo_a11y_perform,
+};
+
 const fdk_widget_class fdk_combo_class_def = {
     .size = sizeof(fdk_combo),
     .name = "combo",
@@ -287,6 +337,7 @@ const fdk_widget_class fdk_combo_class_def = {
     .measure = combo_measure,
     .arrange = combo_arrange,
     .destroy = combo_destroy,
+    .a11y = &combo_a11y,
 };
 
 /* Per-instance event callback (set at create): the class hook is

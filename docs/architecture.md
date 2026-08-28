@@ -76,7 +76,7 @@ backend-agnostic types in `fdk_types.h` and the future `fdk_input.h`/
   struct layout behind each opaque public type lives (e.g.
   `src/core/context_internal.h` defines `struct fdk_context`).
 
-## Current state (Phase 9 complete — advanced widgets)
+## Current state (Phase 10 first slice — the accessibility core)
 
 Implemented: `src/core/` (context lifecycle, logging, error codes,
 allocation, versioning — Phase 1, plus the Phase 2 additions to
@@ -157,6 +157,16 @@ owned-window path paints them itself instead of invoking the
 application's window callback — the widget→window back-edge that
 lets a widget open its own toplevel from inside an event handler.
 See `docs/roadmap.md`'s Phase 9 entry for the full inventory.
+`src/widget/a11y.c` + `include/fdk/fdk_a11y.h` (Phase 10 first
+slice: the accessibility core — the a11y tree IS the widget tree;
+`fdk_a11y_describe` snapshots role/name/description/states/bounds/
+value, `fdk_a11y_subscribe` delivers children/state/name/bounds/
+value change notifications with the widget core's mutation points
+firing them, and `fdk_a11y_perform` drives widgets through their own
+public semantics — the seam a future AT-SPI2 bridge or a test driver
+sits on; class-level descriptors ride a new `.a11y` field on the
+widget class vtable, and every catalog widget plus window roots
+describe themselves).
 `fdk_init()` performs a real
 platform connection with backend auto-detection; `fdk_run()` is a
 real `poll()`-based event loop that exits on `fdk_quit()` or when
@@ -168,14 +178,15 @@ backend (`examples/02_software_render.c`); and applications can now
 build widget trees that FDK itself hit-tests, focuses, repaints,
 and presents (`examples/03_widgets.c`).
 See `docs/roadmap.md`'s entries for the precise, honest lists of
-what is and isn't covered — in particular IME protocols, menu
-mnemonic accelerators, X11 INCR clipboard transfers, and Wayland
-dialog modality are recorded as not-yet (each with its reason),
-while the renderer (damage tracking, clip stack, offscreen
-surfaces, images, transforms, AA, MIT-SHM, HiDPI), the text stack
-(subpixel positioning), the widget foundation + layout engine +
-catalog + theme engine, decorations + window management, and the
-Phase 9 advanced widgets are in and tested; the widget layer —
+what is and isn't covered — in particular i18n (the whole second
+half of Phase 10), per-item a11y nodes for painted-row containers
+(menu items, notebook tabs), the AT-SPI2 bridge itself, and IME
+protocols are recorded as not-yet (each with its reason), while the
+renderer (damage tracking, clip stack, offscreen surfaces, images,
+transforms, AA, MIT-SHM, HiDPI), the text stack (subpixel
+positioning), the widget foundation + layout engine + catalog +
+theme engine, decorations + window management, the Phase 9 advanced
+widgets, and the a11y core are in and tested; the widget layer —
 backend-neutral by construction — is verified headless + on X11,
 and the Wayland backend has real integration tests against sway
 headless (xdg-decoration negotiation, menu popups through the

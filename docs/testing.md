@@ -459,6 +459,37 @@ last one structurally: the driver's XQueryTree assertion that
 the root's child count returned to baseline proves every popup
 window left the server) — plus all the demo's phase markers.
 
+## Accessibility tests (Phase 10, first slice)
+
+**Headless** (`tests/test_a11y.c`, 97 checks in plain `make test`,
+ASan+UBSan): the whole layer is display-independent because it IS
+the widget layer. Covered: the describe matrix over the full
+catalog (roles, computed names, core + semantic states, value
+interfaces with their rendered texts), accessible-name/description
+overrides and their precedence over computed names,
+SHOWING-vs-VISIBLE with hidden ancestors, the notification
+matrix (children-changed on create/destroy, bounds, visible,
+enabled, focus moves notifying BOTH ends, name changes from label
+text edits, value changes, radio-group sibling unchecks), the
+subscriber discipline (subtree scope filtering, duplicate
+subscribes as no-ops, the 16-slot limit, unsubscribe +
+NOT_FOUND), and the ACTION drivers verified against real widget
+state — button ACTIVATE fires the callback, checkbox ACTIVATE
+toggles, slider SET_VALUE quantizes and fires on_changed, tree
+EXPAND/COLLAPSE/ACTIVATE flip the model, list-row ACTIVATE
+selects, notebook/combo/scrollview SET_VALUE switch/scroll. The
+Entry's new modes are exercised here too (password, read-only
+with the reader contract, max-length refusal semantics, and the
+VALUE_CHANGED notifications).
+
+**X11 GUI** (in `make test-x11`): `test_a11y_gui` runs the layer
+against a LIVE window — the window root announces the WINDOW role
+with the window's title as its accessible name and bounds
+matching the window size, `fdk_window_set_title` propagates to
+the name, and REAL key events typed through the X server arrive
+in the Entry's value interface — the exact snapshot a bridge
+would poll.
+
 ## Wayland test coverage
 
 `make test-wayland` builds and runs

@@ -1188,7 +1188,8 @@ are part of this phase and landed with it.
   still a rig script (`scripts/run_wayland_suite.sh`), not a
   Makefile target — the toolchain lives in a user prefix.
 
-## Phase 10 — Accessibility / Internationalization
+## Phase 10 — Accessibility / Internationalization — FIRST SLICE
+### (the accessibility core)
 
 - Accessibility abstraction (roles, names, states, relationships,
   keyboard navigation) — implemented as far as practical without
@@ -1196,6 +1197,128 @@ are part of this phase and landed with it.
   documented rather than faked
 - i18n: locale-aware formatting, translation infrastructure,
   pluralization architecture
+
+### What landed (the a11y core, `include/fdk/fdk_a11y.h`)
+
+- **The design**: the accessibility tree IS the widget tree. There
+  is no parallel object model and no daemon — a bridge (a future
+  AT-SPI2 bridge process, an embedded screen reader, a test
+  driver) enumerates the SAME tree apps build, via the public
+  walker (`fdk_widget_parent`/`child_at`) + `fdk_a11y_describe`,
+  observes it through subscriptions, and drives it through
+  actions. This is deliberately the GTK/Qt architectural
+  difference: their a11y trees are bridge-side projections with
+  cache-coherency bugs; FDK's is the tree itself, so it can never
+  disagree with what is on screen. And because the widget layer is
+  backend-neutral, the whole a11y layer is verifiable headless.
+- **Describe**: `fdk_a11y_describe(widget, &info)` snapshots a
+  widget — role (34 WAI-ARIA/ATK-named roles), accessible name
+  (per-widget override > class-computed: a Label's text, a
+  Button's label, a Frame's title, a window's title), description,
+  states (17-bit set; the core computes ENABLED/VISIBLE/SHOWING/
+  FOCUSABLE/FOCUSED — SHOWING walks ancestors so a hidden
+  container hides its subtree — the class contributes CHECKED/
+  SELECTED/EXPANDED/EDITABLE/READ_ONLY/MULTI_SELECTABLE/
+  HAS_POPUP/MODAL/...), root-absolute bounds, and a VALUE
+  interface (current/min/max + rendered text: sliders, progress,
+  spins, scrolls, entries, notebooks, combos).
+- **Notifications**: `fdk_a11y_subscribe(scope, fn, user)` —
+  subtree-scoped or global (NULL = everything, the bridge
+  pattern); bounded at 16 subscriptions (FDK_ERR_LIMIT beyond);
+  events for CHILDREN/STATE/NAME/DESCRIPTION/BOUNDS/VALUE
+  changes, fired by the widget core at every mutation point
+  (create/destroy/reparent, set_bounds, show/hide, enable/
+  disable, focus moves — both ends — label/title/text/value
+  setters) AFTER the mutation, with the snapshot-walk discipline
+  that makes callback-time tree mutation safe. Detached-widget
+  events (destroy) reach global subscribers only — subtree scopes
+  cannot contain a detached widget; documented in the header.
+- **Actions**: `fdk_a11y_perform(widget, action, value)` —
+  programmatic driving through each widget's OWN public semantics
+  (not input synthesis): ACTIVATE (buttons fire their callbacks,
+  checkboxes toggle, list rows select, tree nodes select,
+  combos open), FOCUS (universal over focusable widgets),
+  INCREMENT/DECREMENT/SET_VALUE (sliders, spins), EXPAND/
+  COLLAPSE (tree items). `fdk_a11y_actions_of` queries what a
+  widget supports RIGHT NOW (a button without a callback
+  advertises nothing; a collapsed tree item cannot COLLAPSE).
+  This API is also the UI-automation seam: the test suite drives
+  widgets with it.
+- **Class descriptors**: `fdk_a11y_class` (role + describe/
+  actions/perform hooks) attached to the widget class vtable's
+  new `.a11y` field (safe append per the pre-1.0 ABI policy —
+  every class def uses designated initializers). App-defined
+  subclasses can point it at their own static descriptor.
+- **Catalog wiring — every widget describes itself**: Label,
+  Button, Toggle, Checkbox, Radio, ProgressBar (value 0..1 +
+  "75%" text), Separator, Frame (GROUP + title), Entry (EDITABLE/
+  READ_ONLY states, text as value), ScrollView (scroll position
+  as value + SET_VALUE), List (MULTI_SELECTABLE; rows are real
+  widgets: LIST_ITEM role + name + SELECTED + ACTIVATE), Tree
+  (rows: TREE_ITEM + EXPANDED + ACTIVATE/EXPAND/COLLAPSE), Slider
+  (value + SET_VALUE/INCREMENT/DECREMENT), SpinButton (same),
+  Toolbar, Notebook (TAB_LIST + current page as value +
+  SET_VALUE), Canvas, ComboBox (HAS_POPUP/EXPANDED + active index
+  as value + SET_VALUE/ACTIVATE), MenuBar/MenuView (container
+  roles), Dialog (DIALOG + MODAL state, title as name), and
+  window roots (WINDOW role, the window's title as the accessible
+  name — window.c creates roots with the new window-root class;
+  `fdk_window_set_title` updates the name).
+- **Bonus, forced by honesty**: the Phase 9 roadmap claimed Entry
+  password mode, read-only mode, and max length — code review
+  during this slice found they were never implemented. They now
+  are: `fdk_entry_set_password` (one bullet per CLUSTER — buffer,
+  caret, selection, hit-testing all keep working in byte/cluster
+  space; only rendering changes), `fdk_entry_set_read_only`
+  (selection + copy keep working — the reader contract; typing,
+  cut, paste, Backspace/Delete consumed and ignored), and
+  `fdk_entry_set_max_length` (cap in bytes, applies to growth
+  only; typing, paste, and set_text all refuse to exceed it).
+- **Error code**: FDK_ERR_LIMIT (-8, "resource limit reached") —
+  generic, for bounded-resource refusals (first user: the a11y
+  subscriber cap).
+- **Tests**: `tests/test_a11y.c` — 97 headless checks under ASan+
+  UBSan: the full catalog describe matrix (roles, names, states,
+  values), override precedence, SHOWING-vs-VISIBLE with hidden
+  ancestors, the notification matrix (children/bounds/state/
+  name/value, focus both ends, radio sibling unchecks), the
+  subscriber discipline (scope filtering, duplicates, limit,
+  unsubscribe/NOT_FOUND), and the ACTION drivers verified against
+  real widget state (button callbacks fire, slider SET_VALUE
+  quantizes, tree EXPAND/COLLAPSE flip model state, notebook/
+  combo/scrollview SET_VALUE). Plus one X11 GUI case: a live
+  window's root (WINDOW role, title as name, bounds == window
+  size, set_title propagates) and REAL typed input read back
+  through the Entry's value interface.
+
+### Remaining (parked, recorded honestly — this is a FIRST slice)
+
+- **Per-item a11y nodes for painted-row containers**: menu items,
+  menu-bar titles, and combo dropdown rows are PAINTED, not
+  widgets — the tree walker cannot see them. The follow-up is a
+  virtual-children API (an a11y-only enumeration of rendered
+  items with stable ids and computed bounds — the ATK/IA2
+  pattern for rendered content). Notebook tabs likewise (v1
+  exposes the notebook itself with the current page as its value
+  interface).
+- **The AT-SPI2 bridge itself**: the seam exists (query +
+  notification + action); the bridge process (D-Bus peer,
+  object-path tree, cache protocol) is deliberately OUT of the
+  toolkit until the core stabilizes — it is a consumer of this
+  API, exactly like the X11/Wayland backends sit under the widget
+  layer.
+- **Text interfaces** (character/word/line granularity, caret
+  offsets in the a11y snapshot) — the Entry exposes its text as
+  value_text; a proper text interface (offsets, attribute runs)
+  needs the painted-row virtual machinery above.
+- **Relationships** (labelled-by, described-by, controller-for):
+  the roadmap bullet says "relationships" — v1 has parent/child
+  (inherent in the tree) and popup/submenu chains (real windows);
+  explicit cross-references between UNRELATED widgets are not
+  modeled yet.
+- **i18n entirely**: locale-aware formatting, translation
+  infrastructure, pluralization architecture — nothing landed
+  yet; the whole second half of Phase 10 remains.
 
 ## Phase 11 — Stabilization
 

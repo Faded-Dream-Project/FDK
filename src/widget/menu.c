@@ -478,6 +478,19 @@ static fdk_menu_view *view_of(fdk_widget *w) {
     return (fdk_menu_view *)(void *)w;
 }
 
+/* ---- a11y ---- */
+/* v1: menu items are PAINTED ROWS, not widgets — the a11y tree
+ * exposes the menu itself (role MENU); per-item virtual nodes are
+ * the documented Phase 10 follow-up (see roadmap). Item ACTIVATE
+ * is still drivable through fdk_menu_item's own callbacks and the
+ * session keyboard paths. */
+static const fdk_a11y_class menu_view_a11y = {
+    .role = FDK_A11Y_ROLE_MENU,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_menu_view_class_def = {
     .size = sizeof(fdk_menu_view),
     .name = "menu-view",
@@ -486,6 +499,7 @@ const fdk_widget_class fdk_menu_view_class_def = {
     .measure = fdk__menu_view_measure,
     .arrange = NULL,
     .destroy = NULL,
+    .a11y = &menu_view_a11y,
 };
 
 void fdk__menu_view_measure(fdk_widget *w, fdk_size *out) {
@@ -1340,6 +1354,13 @@ static void bar_destroy(fdk_widget *w) {
     b->count = 0;
 }
 
+static const fdk_a11y_class menu_bar_a11y = {
+    .role = FDK_A11Y_ROLE_MENU_BAR,
+    .describe = NULL,
+    .actions = NULL,
+    .perform = NULL,
+};
+
 const fdk_widget_class fdk_menu_bar_class_def = {
     .size = sizeof(fdk_menu_bar),
     .name = "menu-bar",
@@ -1348,6 +1369,7 @@ const fdk_widget_class fdk_menu_bar_class_def = {
     .measure = bar_measure,
     .arrange = bar_arrange,
     .destroy = bar_destroy,
+    .a11y = &menu_bar_a11y,
 };
 
 /* Internal helpers shared with the session (menu_internal.h). */
