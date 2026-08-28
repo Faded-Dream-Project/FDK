@@ -18,12 +18,17 @@
  *    end of the pipeline is verified separately by the screenshot
  *    rig with PIL).
  *
- *  - The decoration outcome is compositor policy: kiosk-shell may
- *    confirm CLIENT_SIDE (band stays, drawn by FDK) or force
- *    SERVER_SIDE (FDK must drop its band + emit
- *    FDK_EVENT_WINDOW_DECORATION). BOTH are real, correct outcomes;
- *    the test asserts the reaction matches the answer, not one
- *    specific answer.
+ *  - The decoration outcome is compositor policy: compositors that
+ *    advertise xdg-decoration may confirm CLIENT_SIDE (band stays,
+ *    drawn by FDK) or force SERVER_SIDE (FDK must drop its band +
+ *    emit FDK_EVENT_WINDOW_DECORATION) — both real, correct
+ *    outcomes, asserted by reaction rather than by one specific
+ *    answer. Compositors WITHOUT the protocol (kiosk-shell weston
+ *    here, Muffin's experimental Wayland session on real desktops)
+ *    never draw chrome at all — client-side is the xdg-shell
+ *    default, so the band must simply come up (1.1.5: it used to
+ *    return FDK_ERR_UNSUPPORTED, which killed the decorations demo
+ *    before it ever mapped a window).
  */
 
 #include "fdk/fdk.h"
@@ -262,51 +267,53 @@ int main(void) {
     assert(fdk_ok(fdk_window_get_size(win, &size)));
     assert(size.width > 0 && size.height > 0);
 
-    /* ---- Decorations: request client-side, accept either answer ---- */
+    /* ---- Decorations: the band must come up on ANY compositor ----
+     * (1.1.5) A compositor without zxdg_decoration_manager_v1 never
+     * draws chrome itself — client-side is the xdg-shell default —
+     * so set_decorated(true) must succeed everywhere: kiosk-shell
+     * here, Muffin/Cinnamon Wayland on a real desktop, tiling WMs.
+     * Before the fix this branch returned FDK_ERR_UNSUPPORTED and
+     * the decorations demo exited before it ever mapped a window. */
     r = fdk_window_set_decorated(win, true);
-    if (r == FDK_ERR_UNSUPPORTED) {
-        printf("[ok] decorations honestly UNSUPPORTED (compositor lacks "
-               "xdg-decoration; no double-decorating)\n");
-    } else {
-        assert(fdk_ok(r));
-        assert(fdk_window_get_decorated(win));
-        (void)fdk_pump_events(ctx, 400);
+    assert(fdk_ok(r));
+    assert(fdk_window_get_decorated(win));
+    (void)fdk_pump_events(ctx, 400);
 
-        if (g_deco_events > 0 && !fdk_window_get_decorated(win)) {
-            /* Compositor forced SERVER_SIDE and FDK tore its band down —
-             * the no-double-decoration contract. */
-            printf("[ok] compositor forced server-side decorations; FDK "
-                   "dropped its band (decoration event delivered)\n");
-        } else {
-            /* CLIENT_SIDE confirmed (or not yet contradicted): the band
-             * is drawn INSIDE our framebuffer — verify at the pixel
-             * level what we render. */
-            assert(fdk_ok(fdk_window_paint(win)));
-            fdk_surface *surface = NULL;
-            assert(fdk_ok(fdk_window_get_surface(win, &surface)));
-            fdk_surface_info info;
-            assert(fdk_ok(fdk_surface_get_info(surface, &info)));
-            /* Band probes in PHYSICAL rows: the band is 28 LOGICAL
-             * rows tall (title_bar_height metric), so the below-band
-             * probe must clear it at any scale — 40 logical rows up,
-             * converted through the live scale. */
-            fdk_f32 p_scale = 1.0f;
-            (void)fdk_window_get_scale(win, &p_scale);
-            fdk_i32 below_row = (fdk_i32)(40.0f * p_scale);
-            if (below_row >= info.height) {
-                below_row = info.height - 1;
-            }
-            fdk_u32 mid = info.pixels[(fdk_i32)(info.stride * 2) +
-                                      info.width / 2];
-            fdk_u32 below = info.pixels[(size_t)info.stride *
-                                            (size_t)below_row +
-                                        (size_t)(info.width / 2)];
-            assert(pixel_is_band_fill(mid));
-            assert(!pixel_is_band_fill(below) ||
-                   info.height < (fdk_i32)(48.0f * p_scale));
-            printf("[ok] client-side decorations confirmed: themed band "
-                   "rendered in-frame (pixel-verified), content below\n");
+    if (g_deco_events > 0 && !fdk_window_get_decorated(win)) {
+        /* Compositor forced SERVER_SIDE and FDK tore its band down —
+         * the no-double-decoration contract. */
+        printf("[ok] compositor forced server-side decorations; FDK "
+               "dropped its band (decoration event delivered)\n");
+    } else {
+        /* CLIENT_SIDE confirmed, or no decoration protocol at all
+         * (the band just IS the chrome): the band is drawn INSIDE
+         * our framebuffer — verify at the pixel level what we
+         * render. */
+        assert(fdk_ok(fdk_window_paint(win)));
+        fdk_surface *surface = NULL;
+        assert(fdk_ok(fdk_window_get_surface(win, &surface)));
+        fdk_surface_info info;
+        assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+        /* Band probes in PHYSICAL rows: the band is 28 LOGICAL
+         * rows tall (title_bar_height metric), so the below-band
+         * probe must clear it at any scale — 40 logical rows up,
+         * converted through the live scale. */
+        fdk_f32 p_scale = 1.0f;
+        (void)fdk_window_get_scale(win, &p_scale);
+        fdk_i32 below_row = (fdk_i32)(40.0f * p_scale);
+        if (below_row >= info.height) {
+            below_row = info.height - 1;
         }
+        fdk_u32 mid = info.pixels[(fdk_i32)(info.stride * 2) +
+                                  info.width / 2];
+        fdk_u32 below = info.pixels[(size_t)info.stride *
+                                        (size_t)below_row +
+                                    (size_t)(info.width / 2)];
+        assert(pixel_is_band_fill(mid));
+        assert(!pixel_is_band_fill(below) ||
+               info.height < (fdk_i32)(48.0f * p_scale));
+        printf("[ok] client-side decorations active: themed band "
+               "rendered in-frame (pixel-verified), content below\n");
     }
 
     /* ---- Maximize: request + configure-driven state event ---- */
@@ -456,15 +463,19 @@ int main(void) {
         assert(fdk_ok(fdk_surface_get_info(rs, &rinfo)));
 
         if (rinfo.height <= h0 + 60) {
-            /* TILED world: the compositor controls the geometry — a
-             * client resize is overridden by the layout, so the
-             * growth never lands. The full reflow verification runs
-             * in the rig's FLOATING phase (for_window
-             * [app_id="org.fdk.test"] floating enable); this branch
-             * records honestly that this run tiled instead. */
+            /* COMPOSITOR-OWNED geometry: either the compositor tiles
+             * windows (a client resize is overridden by the layout,
+             * so the growth never lands) or it configured the window
+             * fullscreen/maximized — under which FDK (1.1.5) REFUSES
+             * the resize outright, because committing a non-
+             * configured size under those states is a protocol error
+             * on strict compositors (weston kills the connection).
+             * The full reflow verification runs in the rig's FLOATING
+             * phase; this branch records honestly that this run's
+             * geometry was compositor-owned. */
             fdk_window_destroy(rwin);
             printf("[ok] Wayland layout reflow: growth skipped "
-                   "(compositor tiles windows — client resize overridden; "
+                   "(compositor-owned geometry — tiled or fullscreen; "
                    "the floating rig phase verifies the reflow)\n");
         } else {
         /* The GREEN body (expanding) must reach deep into the grown
@@ -572,9 +583,20 @@ int main(void) {
      *    no input events (documented in fdk_clipboard.h). That path
      *    is exercised structurally (protocol objects + requests in
      *    the WAYLAND_DEBUG trace of the rig) and by the X11 suite's
-     *    cross-process equivalents. */
+     *    cross-process equivalents.
+     *
+     * Seat-less compositors honestly skip: weston kiosk-shell
+     * advertises wl_data_device_manager but has NO wl_seat, so no
+     * data device can exist (found live when the 1.1.5 manager-less
+     * rig started running this suite under kiosk-shell; the sway rig
+     * has a seat and runs the full assertions). */
     {
-        assert(fdk_ok(fdk_clipboard_set_text(ctx, "wayland phase 9")));
+        fdk_result cr = fdk_clipboard_set_text(ctx, "wayland phase 9");
+        if (cr == FDK_ERR_UNSUPPORTED) {
+            printf("[skip] clipboard: no wl_data_device here "
+                   "(seat-less compositor — kiosk-shell weston)\n");
+        } else {
+        assert(fdk_ok(cr));
         char *text = fdk_clipboard_get_text(ctx);
         assert(text != NULL && strcmp(text, "wayland phase 9") == 0);
         printf("[ok] clipboard: set + get round trip on own selection\n");
@@ -592,6 +614,7 @@ int main(void) {
         assert(fdk_ok(fdk_clipboard_set_text(ctx, "")));
         assert(fdk_clipboard_get_text(ctx) == NULL);
         printf("[ok] clipboard: empty own-selection reads as NULL\n");
+        }
     }
 
 

@@ -100,7 +100,13 @@ primitive set — implemented on both backends via optional
 runs before the first xdg configure is DEFERRED and committed by
 the backend at configure time — the deferred-first-frame contract
 that keeps the application's show -> paint -> pump order mapping
-windows on every compositor, regression-tested in
+windows on every compositor, and the first configure EMITS
+FDK_EVENT_WINDOW_CONFIGURE whenever it proposes a size different
+from the creation size, because resize-at-map compositors
+(kiosk-shell fullscreen, tiling WMs) state their size exactly there
+and a suppressed event left the window layer laying out at the
+creation size inside a full-compositor buffer (1.1.5, found live
+under weston kiosk-shell), regression-tested in
 `tests/test_wayland_integration.c`); on X11 the anti-flicker
 background LIFECYCLE (1.1.4, found live on a compositing desktop):
 top-levels are created with a white background pixel + NorthWest
@@ -141,14 +147,25 @@ FDK-drawn themed title band under the window's root with
 vector-glyph minimize/maximize-restore/close buttons, double-click
 maximize, and FDK-drawn resize edges, over a set of new OPTIONAL
 platform ops: `window_set_wm_decorations` — X11 _MOTIF_WM_HINTS,
-Wayland xdg-decoration set_mode; `window_set_maximized` /
+Wayland xdg-decoration set_mode, or (1.1.5) plain success without
+the protocol for the client-side direction: a compositor that
+doesn't advertise zxdg_decoration_manager_v1 never draws chrome
+itself — client-side is the xdg-shell default — so FDK's band is
+the only chrome that can exist and nothing can stack; only the
+platform-chrome direction honestly reports FDK_ERR_UNSUPPORTED
+then; `window_set_maximized` /
 `window_set_minimized` — EWMH _NET_WM_STATE messages + PropertyNotify
 tracking on X11 (with honest bare-X fallbacks where FDK is its own
 WM; the fallback never runs under a detected WM, because it
 optimistically dispatches the state flip as if FDK's own action were
 the outcome — a lie under a WM that clamps or reinterprets the
 geometry request, and the source of the 1.1.3 maximized-state
-desync), xdg_toplevel requests on Wayland; `window_begin_move` /
+desync), xdg_toplevel requests on Wayland (1.1.5 gates client-driven
+`fdk_window_resize` while the configure states say MAXIMIZED or
+FULLSCREEN — compositor-owned geometry must be committed exactly as
+configured or strict compositors kill the connection; the FULLSCREEN
+flag is internal-only, purely the resize gate, until a public
+fullscreen API exists); `window_begin_move` /
 `window_begin_resize` — _NET_WM_MOVERESIZE / xdg_toplevel.move/
 resize, handing interactive drags to the WM/compositor where the
 platform supports it (the X11 implementation releases the press's

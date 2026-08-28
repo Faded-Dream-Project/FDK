@@ -25,9 +25,12 @@ static void registry_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
         conn->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
     } else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0) {
-        /* OPTIONAL global (Phase 8): its absence is not an error —
-         * fdk_window_set_decorated() reports FDK_ERR_UNSUPPORTED
-         * then, rather than double-decorating. */
+        /* OPTIONAL global (Phase 8): its absence is not an error and
+         * costs nothing client-side — a compositor without this
+         * protocol never draws chrome itself (client-side is the
+         * xdg-shell default), so FDK's own band still comes up; only
+         * the platform-chrome direction (set_decorated(false))
+         * reports FDK_ERR_UNSUPPORTED then. */
         conn->decoration_manager =
             wl_registry_bind(registry, name,
                              &zxdg_decoration_manager_v1_interface, 1);

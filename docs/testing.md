@@ -620,6 +620,22 @@ cannot run from a non-root prefix, which is why sway won (the
 Phase 3-era runs used weston's kiosk shell; the compositor was
 switched when Phase 8 needed xdg-decoration).
 
+Since 1.1.5 that weston "limitation" is a second, deliberate
+verification world: `scripts/run_wayland_deco_weston.sh` runs the
+SAME suite plus the decorations demo against weston kiosk-shell
+headless — a real compositor that advertises no
+zxdg_decoration_manager_v1, i.e. the exact Muffin/Cinnamon-Wayland
+condition of the third user report. The suite's decorations
+section hard-asserts set_decorated(true) succeeds there (CSD is
+the xdg-shell default; the old code returned UNSUPPORTED and the
+demo exited before mapping a window), the demo must run its full
+auto cycle with ZERO xdg-decoration traffic in the WAYLAND_DEBUG
+trace, and a control build of the pre-fix commit under the same
+weston must reproduce the user's exact failure line. Seat-less
+kiosk-shell also exercises the honest-skip paths: the clipboard
+section (a data_device_manager global exists but no wl_seat, so no
+data device can) and the interactive menu section.
+
 The suite currently verifies, all against the live compositor and
 all under ASan+UBSan with leak checking:
 
@@ -628,7 +644,11 @@ all under ASan+UBSan with leak checking:
   damage, and commit in the protocol-correct order
   (WAYLAND_DEBUG traces were used to develop it; the rig still
   counts requests where order matters).
-- Client-side decorations end to end (pixel-verified themed band),
+- Client-side decorations end to end (pixel-verified themed band)
+  on BOTH worlds — sway (xdg-decoration negotiated: set_mode
+  CLIENT_SIDE, and the forced-SERVER teardown contract if the
+  compositor ever insists) and weston kiosk-shell (no protocol at
+  all: the band is the only chrome that can exist),
   maximize/unmaximize state events from configure's states[],
   minimize request + optimistic flag, honest FDK_ERR_UNSUPPORTED
   restore (xdg-shell has no unminimize request).
@@ -709,31 +729,60 @@ This section stays in the docs as a record of what was found and why,
 not just what the fix was — useful if similar flakiness ever
 resurfaces in a different environment.
 
-## Known environment quirk: fontconfig cold-cache leak (not an FDK bug)
+## The fontconfig 320 B exit "leak" (RESOLVED in 1.1.5 — was an FDK LSan-scoping bug)
 
-Observed once (2026-08-28, fresh container): `make test-x11` failed
-at exit with `AddressSanitizer: 320 byte(s) leaked in 3 allocation(s)`
-— every stack frame inside `libfontconfig.so.1` (the dlopen'd,
-run-time-only font-discovery dependency; see `docs/dependencies.md`).
-All test cases had already passed; the report came from ASan's
-exit-time leak scan.
+History: both suites intermittently failed ASan at exit with 320 B
+leaked entirely inside libfontconfig.so. The Task-22 investigation
+attributed it to cache temperature (failed-then-passed on identical
+trees; the cold/warm pattern was real) and waved it off as
+third-party noise. The 1.1.5 sway-rig work made it persistent and
+therefore investigable, and a minimal probe (three
+`fdk_font_load_system_default` calls, no display, no compositor)
+reproduced it deterministically — no compositor involved at all.
 
-Root cause: fontconfig's FIRST scan on a machine with a cold cache
-(`/var/cache/fontconfig` absent or stale — always the case in a
-fresh container) builds and retains internal configuration
-structures it never frees. ASan sees those allocations through its
-interceptors and reports them at process exit. The very next run
-(warm cache) takes a different path and leaks nothing. Verified
-directly: the failing run and a passing run of the IDENTICAL tree
-differed only in cache temperature; stashing the diff and re-running
-HEAD passed too, then restoring the diff and re-running also passed
-(the cache had been warmed in between).
+Root cause: fontscan.c's `__lsan_disable`/`__lsan_enable` bracket
+covered only `FcInit()`, while the design comment (and the actual
+allocations) cover the FIRST FcConfigSubstitute /
+FcDefaultSubstitute / FcFontSort walk too: that chain builds
+fontconfig's process-lifetime pools in malloc'd memory — but ONLY
+when the on-disk fontconfig cache is cold; a warm cache serves the
+structures mmapped and allocates nothing. That is the entire
+cold/warm nondeterminism, finally explained. FDK must not FcFini
+those pools away (host apps may share fontconfig — GTK/Qt keep it
+mapped too), so the bracket now covers the whole discovery call,
+matching the comment's stated intent.
 
-So: a one-time fontconfig cold-cache leak report from
-`make test-x11` in a fresh environment is expected noise, not a
-regression signal. Re-run once; if the leak persists on the warm
-cache, THEN it's real and needs investigating (FDK's own allocations
-would show FDK frames in the stacks, not just fontconfig ones).
+Standing rule unchanged: a fontconfig-framed leak report in an
+FDK-free stack (no FDK frames anywhere) remains noise; but an
+FDK-path leak that persists across warm runs is REAL until proven
+otherwise — this one was.
+
+Original Task-22 observation (kept for the record): `make test-x11`
+failed at exit with `AddressSanitizer: 320 byte(s) leaked in 3
+allocation(s)` — every stack frame inside `libfontconfig.so.1`. All
+test cases had already passed; the report came from ASan's exit-time
+leak scan. The failing run and a passing run of the IDENTICAL tree
+differed only in cache temperature, which is why it was filed as
+environment noise at the time — the 1.1.5 investigation (above)
+found the deterministic mechanism underneath the pattern and the
+FDK-side fix. The "re-run once, then investigate" protocol stands,
+with the amendment that PERSISTENCE (not stack framing alone)
+decides what is real.
+
+## The weston kiosk-shell proxy "leak" (RESOLVED in 1.1.5 — was collateral of a protocol-error kill)
+
+Running the Wayland suite against weston kiosk-shell tripped
+LeakSanitizer on one 96-byte wl_proxy inside libwayland-client —
+zero FDK frames, absent under sway. Root cause found by tracing the
+suite's full protocol traffic: kiosk-shell configures every window
+FULLSCREEN, and the suite's client-driven resize committed a buffer
+larger than the configured state — a protocol error weston enforces
+by killing the connection. Everything after the kill "passed"
+vacuously on the dead connection, and the never-delivered teardown
+left the proxy behind at exit. The resize gate (roadmap 1.1.5 item
+4) keeps the connection alive; the suite now runs leak-clean under
+weston with LeakSanitizer fully enabled — no ASAN_OPTIONS
+carve-outs anywhere in the rigs.
 
 ## Sanitizers
 

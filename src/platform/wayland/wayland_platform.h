@@ -280,6 +280,16 @@ struct fdk_platform_window {
      * activated when a window is un-minimized into focus). Flips
      * dispatch FDK_EVENT_WINDOW_STATE.
      *
+     * fullscreen (1.1.5) is likewise derived from the states array,
+     * but is NOT public API — FDK exposes no fullscreen request yet —
+     * it exists purely as the resize gate: while the toplevel is
+     * maximized or fullscreen the compositor owns the geometry, and
+     * xdg-shell requires the client to commit the configured size.
+     * Committing anything else is a protocol error on strict
+     * compositors (weston kills the connection: "xdg_surface
+     * geometry is larger than the configured fullscreen state"),
+     * so fdk_wayland_window_resize refuses while either is set.
+     *
      * toplevel_decoration is the per-window xdg-decoration object,
      * created on the first set_wm_decorations() call and alive until
      * window destruction; deco_client_side caches the compositor's
@@ -289,6 +299,7 @@ struct fdk_platform_window {
      * instead of double-decorating. */
     int maximized;
     int minimized;
+    int fullscreen;
     struct zxdg_toplevel_decoration_v1 *toplevel_decoration;
     int deco_client_side;
 };

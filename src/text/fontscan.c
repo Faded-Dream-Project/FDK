@@ -314,15 +314,23 @@ static bool fs_try_fontconfig(char **out_path, long *out_face) {
     }
 
     /* See the LeakSanitizer note above: everything fontconfig
-     * allocates in here is process-lifetime state by design. */
+     * allocates in here is process-lifetime state by design — and
+     * the bracket must cover the WALK, not just FcInit: the first
+     * FcConfigSubstitute/FcDefaultSubstitute/FcFontSort chain is
+     * what builds those pools whenever fontconfig's on-disk cache
+     * is cold (with a warm cache the structures come back mmapped
+     * and nothing is malloc'd — which is why the leak looked like
+     * nondeterministic "cache temperature" noise in earlier
+     * investigations). Scoping only FcInit left the walk's pools
+     * in the exit report; found live as a persistent 320 B
+     * fontconfig leak failing both integration suites' ASan runs
+     * (1.1.5). */
     fs_lsan_off();
     bool found = false;
     if (g_fc.FcInit()) {
-        fs_lsan_on();
         found = fs_fontconfig_walk(out_path, out_face);
-    } else {
-        fs_lsan_on();
     }
+    fs_lsan_on();
     return found;
 }
 

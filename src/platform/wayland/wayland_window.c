@@ -129,6 +129,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
     int was_configured = pwindow->configured;
     pwindow->configured = 1;
 
+    int size_changed = 0;
     if (pwindow->pending_size.width > 0 && pwindow->pending_size.height > 0) {
         if (pwindow->last_size.width != pwindow->pending_size.width ||
             pwindow->last_size.height != pwindow->pending_size.height) {
@@ -137,6 +138,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
              * commit (integer scales derive nothing and re-apply as a
              * cheap no-op of the same requests). */
             pwindow->scale_applied = 0;
+            size_changed = 1;
         }
         pwindow->last_size = pwindow->pending_size;
     }
@@ -225,11 +227,17 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
     }
 
     /* The very first configure is required before the first
-     * wl_surface_commit() (see fdk_wayland_window_show()) — don't
-     * emit a redundant FDK_EVENT_WINDOW_CONFIGURE for it if no real
-     * size was proposed; the application already knows its requested
-     * creation size. */
-    if (was_configured) {
+     * wl_surface_commit() (see fdk_wayland_window_show()) — but only
+     * a first configure that KEPT our size may stay silent (the app
+     * already knows its requested creation size). A first configure
+     * that CHANGED the size must emit FDK_EVENT_WINDOW_CONFIGURE
+     * like any later one: resize-at-map compositors (kiosk-shell
+     * fullscreen, tiling WMs) propose their size right there, and
+     * the window layer must learn it or it keeps laying out at the
+     * creation size inside a full-compositor buffer — found live by
+     * the 1.1.5 manager-less rig: 320x240 of UI islanded in the
+     * top-left of a 1024x640 framebuffer, rest zero-black. */
+    if (was_configured || size_changed) {
         fdk_event_data event = { .type = FDK_EVENT_WINDOW_CONFIGURE };
         event.configure.size = pwindow->last_size;
         pwindow->conn->dispatch(pwindow, &event, pwindow->conn->dispatch_user_data);
@@ -259,17 +267,25 @@ static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
      * window state. MAXIMIZED is tracked directly; ACTIVATED is what
      * clears the (request-optimistic) minimized flag — the protocol
      * has no minimized state and no unminimize request, but
-     * compositors report activated when a window is brought back. */
-    int maximized = 0, activated = 0;
+     * compositors report activated when a window is brought back.
+     * FULLSCREEN (1.1.5) is tracked as the resize gate only — kiosk
+     * shells and fullscreen windows get their geometry from the
+     * compositor, and a client buffer at any other size is a
+     * protocol error there. */
+    int maximized = 0, activated = 0, fullscreen = 0;
     uint32_t *state;
     wl_array_for_each(state, states) {
         if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED) {
             maximized = 1;
         }
+        if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN) {
+            fullscreen = 1;
+        }
         if (*state == XDG_TOPLEVEL_STATE_ACTIVATED) {
             activated = 1;
         }
     }
+    pwindow->fullscreen = fullscreen;
     int minimized = pwindow->minimized;
     if (activated && minimized) {
         minimized = 0;
@@ -1160,8 +1176,17 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
         }
         xdg_popup_add_listener(pwindow->xdg_popup,
                                &g_xdg_popup_listener, pwindow);
-        xdg_popup_grab(pwindow->xdg_popup, conn->seat,
-                       conn->last_input_serial);
+        /* Grab needs a REAL seat with a REAL input serial — a popup
+         * without a grab is still valid protocol (compositors may
+         * dismiss it on focus loss instead). On a seat-less
+         * compositor (kiosk-shell weston) the grab would marshal a
+         * NULL object: libwayland logs an argument error and drops
+         * the whole request (1.1.5, seen live in the manager-less
+         * rig's stderr); skip it cleanly instead. */
+        if (conn->seat != NULL) {
+            xdg_popup_grab(pwindow->xdg_popup, conn->seat,
+                           conn->last_input_serial);
+        }
         pwindow->xdg_toplevel = NULL;
         /* Popups commit a buffer on show like any window; the
          * configure handshake (xdg_surface.configure) drives the
@@ -1192,8 +1217,9 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
      * decoration must not have a buffer at creation"). set_mode may
      * then be called at any time — fdk_window_set_decorated() does
      * that part. Created only when the compositor advertised the
-     * manager global; absent global = set_decorated honestly
-     * reports FDK_ERR_UNSUPPORTED later.
+     * manager global; with the global absent there is simply no
+     * server-side chrome to negotiate away — client-side is the
+     * xdg-shell default (set_wm_decorations splits the semantics).
      *
      * TOPLEVELS ONLY: popups have no xdg_toplevel (passing the NULL
      * here marshals an error that poisons the whole connection —
@@ -1386,6 +1412,23 @@ void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_
         FDK_WARN("fdk_window_resize() ignored non-positive size %dx%d", width, height);
         return;
     }
+    /* Compositor-owned geometry (1.1.5): while the toplevel is
+     * maximized or fullscreen — kiosk-shell weston configures EVERY
+     * window fullscreen — xdg-shell requires the client to commit
+     * the CONFIGURED size. A client-driven buffer at another size
+     * is a protocol error on strict compositors: weston kills the
+     * whole connection ("xdg_surface geometry (512 x 760) is larger
+     * than the configured fullscreen state (1024 x 640)" — found
+     * live by the 1.1.5 manager-less rig; the suite kept "passing"
+     * on the dead connection afterwards). Refuse honestly and keep
+     * the compositor's size; a resize after restore works normally. */
+    if (pwindow->maximized || pwindow->fullscreen) {
+        FDK_WARN("fdk_window_resize() refused while the window is %s "
+                 "(the compositor owns the geometry; resize after "
+                 "restoring)",
+                 pwindow->fullscreen ? "fullscreen" : "maximized");
+        return;
+    }
     if (!pwindow->configured || !pwindow->buffer_attached) {
         /* No committed buffer yet — just remember the intended size;
         it becomes the size of the first buffer at first configure. */
@@ -1506,11 +1549,23 @@ fdk_result fdk_wayland_window_set_wm_decorations(fdk_platform_window *pwindow,
     /* The decoration object exists only when (a) the compositor
      * advertised zxdg_decoration_manager_v1 and (b) it was created at
      * window-create time, before the first buffer (a protocol
-     * requirement — see wayland_window_create). No object -> this
-     * compositor offers no protocol way to drop its decorations; the
-     * caller must NOT draw its own (that would stack two title bars). */
+     * requirement — see wayland_window_create). No object splits by
+     * direction:
+     *  - on=false (FDK draws its own band): a compositor that does
+     *    NOT advertise zxdg_decoration_manager_v1 never draws chrome
+     *    itself — client-side is the xdg-shell default — so FDK's
+     *    band is the only chrome that will ever exist. Succeed
+     *    without a protocol request; there is nothing to stack on.
+     *    (weston kiosk-shell, Muffin's experimental Wayland session,
+     *    and most tiling WMs are exactly this.)
+     *  - on=true (compositor chrome wanted): genuinely unsupported —
+     *    there is no protocol way to ask for server-side decorations,
+     *    and the window layer must keep FDK's band so the window
+     *    stays usable (the old blanket UNSUPPORTED here used to kill
+     *    set_decorated(true) too, which made the decorations demo
+     *    exit before it ever mapped a window on such compositors). */
     if (pwindow->toplevel_decoration == NULL) {
-        return FDK_ERR_UNSUPPORTED;
+        return on ? FDK_ERR_UNSUPPORTED : FDK_OK;
     }
     /* on = the compositor draws chrome -> SERVER_SIDE;
      * off = FDK draws its own band  -> CLIENT_SIDE. The compositor's

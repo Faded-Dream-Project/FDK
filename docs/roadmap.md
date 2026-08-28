@@ -1997,3 +1997,109 @@ regressions), Wayland integration suite + decorations-demo rig on
 sway, X11 + Wayland example rigs, the openbox real-WM rig (all six
 1.1.3 checks still green), and the resize-flash probe with its
 pre-fix control — ALL PASS.
+
+### 1.1.5 — decorations on compositors without xdg-decoration (the Cinnamon Wayland report) — COMPLETE
+
+User report, third from the same real desktop — this time Cinnamon's
+experimental Wayland session: the FDK backend initializes cleanly
+(connected, compositor/shm/xdg_wm_base bound), then the demo prints
+`06_decorations: set_decorated failed (unsupported)` and the window
+never appears — "it instantly crashes", the user suspected the
+experimental session itself. The compositor was blameless: Muffin's
+Wayland session does not advertise zxdg_decoration_manager_v1, and
+FDK's Wayland `window_set_wm_decorations` treated a missing
+decoration object as blanket FDK_ERR_UNSUPPORTED — in BOTH
+directions. The reasoning inverted the protocol: a compositor that
+does not advertise xdg-decoration never draws chrome itself
+(client-side is the xdg-shell default), so asking to draw FDK's own
+band cannot stack two title bars — it is the ONLY chrome that can
+exist. The failure then hit the demo's fatal path (exit before the
+window ever maps), which reads as an instant crash.
+
+1. **Manager-less client-side decorations.** set_wm_decorations
+   now splits by direction: on=false (FDK draws its band) succeeds
+   without a protocol request when the manager is absent — weston
+   kiosk-shell, Muffin's Wayland session, most tiling WMs are
+   exactly this; on=true (compositor chrome wanted) still honestly
+   reports FDK_ERR_UNSUPPORTED, because no protocol way to ask
+   exists. The window layer's teardown path already ignored that
+   direction's result, so the demo's full toggle cycle now runs on
+   such compositors: undecorate leaves a plain chromeless window,
+   redecorate brings the band back.
+
+2. **First-configure size proposals were silently dropped** — found
+   by the new rig, not by the user: the backend suppressed
+   FDK_EVENT_WINDOW_CONFIGURE for the very first configure ("the
+   app already knows its creation size"), but resize-at-map
+   compositors (kiosk-shell fullscreen, tiling WMs) propose their
+   size exactly there. The platform layer's size updated while the
+   window layer kept laying out at the creation size — 320x240 of
+   UI islanded in the top-left of a 1024x640 framebuffer, the rest
+   zero-black. The first configure now emits the event whenever it
+   actually changed the size; a first configure that kept the size
+   stays silent as before.
+
+3. **Suite hardening exposed by running under a second compositor.**
+   The Wayland integration suite's decorations section replaced its
+   honest-UNSUPPORTED skip with a hard assertion (set_decorated
+   must succeed on EVERY compositor) plus pixel verification of the
+   band; the clipboard section gained a seat-less honest skip
+   (kiosk-shell weston advertises wl_data_device_manager but has no
+   wl_seat, so no data device can exist — sway's seat still runs
+   the full assertions).
+
+4. **Client resizes under compositor-owned geometry were a
+   protocol error.** The weston rig's suite run died mid-way with
+   `xdg_wm_base error: xdg_surface geometry (512 x 760) is larger
+   than the configured fullscreen state (1024 x 640)` — and every
+   check after the kill "passed" vacuously on the dead connection
+   (plus a phantom proxy leak at exit). Kiosk-shell weston
+   configures EVERY window fullscreen; FDK only tracked MAXIMIZED
+   and ACTIVATED from the states array, so a client-driven
+   fdk_window_resize committed a non-configured buffer — legal for
+   a floating or tiled surface, fatal under fullscreen/maximized
+   where xdg-shell requires the configured size. FDK now tracks
+   FULLSCREEN from configure states and refuses the resize with a
+   warning while either state is set (public API gains no
+   fullscreen concept yet — the flag exists purely as the gate).
+   Parked refinement: binding xdg_wm_base >= 4 and parsing the
+   TILED_* states would let client resizes through under tiling
+   WMs, which the spec explicitly permits for tiled surfaces. The
+   seat-less xdg_popup.grab marshal error (NULL seat marshalled a
+   NULL object — libwayland logs and drops the request) is now
+   guarded: no seat, no grab — a popup without a grab is valid
+   protocol.
+
+5. **The fontconfig "cache temperature" leak was FDK's own LSan
+   bracket, not the weather.** Both suites intermittently failed
+   ASan at exit with 320 B leaked entirely inside libfontconfig —
+   previously waved off as cold-cache noise (Task 22) because it
+   failed-then-passed on identical trees. A minimal probe (three
+   font loads, no display, no compositor) reproduced it
+   deterministically: fontscan's __lsan_disable/__lsan_enable
+   bracket covered only FcInit, while the design comment — and the
+   actual allocations — cover the first
+   FcConfigSubstitute/FcDefaultSubstitute/FcFontSort walk, which
+   builds fontconfig's process-lifetime pools in malloc'd memory
+   exactly when the on-disk cache is cold (a warm cache serves the
+   structures mmapped, allocating nothing — the nondeterminism
+   explained). The bracket now covers the whole discovery call,
+   matching the documented intent; the fontconfig quirk note in
+   testing.md is rewritten to the resolved truth.
+
+Verified with a new rig class: weston 14 kiosk-shell headless — a
+REAL compositor that ships no xdg-decoration (the exact Muffin
+condition) — runs the integration suite, the decorations demo's
+full auto cycle under WAYLAND_DEBUG (zero zxdg_decoration traffic,
+zero set_decorated failures, configures + commits counted), and a
+screenshot of the final decorated state (fullscreen band,
+pixel-checked). The control run (a git-worktree build of pre-fix
+9eed9a2 under the same weston) reproduces the user's exact line and
+instant exit — the probe sees the bug it guards. Battery: clean
+rebuild debug + release (Wayland on, 0 warnings), headless suite,
+X11 integration suite (leak-clean, LSan fully on), Wayland
+integration suite + full rig on sway (manager-present, protocol
+negotiation unchanged: 3 set_mode requests in the auto cycle), the
+weston manager-less rig + pre-fix control — now with LeakSanitizer
+fully enabled on BOTH compositors — and the openbox real-WM rig
+(all six checks green) — ALL PASS.
