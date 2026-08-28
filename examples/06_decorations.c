@@ -1,4 +1,4 @@
-/* 09_decorations.c — the Phase 8 window decorations, live.
+/* 06_decorations.c — the Phase 8 window decorations, live.
  *
  * One window running under FDK's OWN title bar: a themed band with
  * the window title and minimize / maximize-restore / close buttons
@@ -28,6 +28,7 @@
 #include "fdk/fdk.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -118,7 +119,7 @@ int main(int argc, char **argv) {
 
     font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
-        fprintf(stderr, "09_decorations: no system TrueType font "
+        fprintf(stderr, "06_decorations: no system TrueType font "
                         "found - this demo needs one\n");
         return 1;
     }
@@ -130,7 +131,7 @@ int main(int argc, char **argv) {
     }
 
     fdk_window_options wopts = {
-        .title = "FDK 09 - decorations",
+        .title = "FDK 06 - decorations",
         .width = 460,
         .height = 300,
     };
@@ -184,7 +185,7 @@ int main(int argc, char **argv) {
      * FDK band already in place. */
     fdk_result r = fdk_window_set_decorated(app.window, true);
     if (!fdk_ok(r)) {
-        fprintf(stderr, "09_decorations: set_decorated failed (%s)\n",
+        fprintf(stderr, "06_decorations: set_decorated failed (%s)\n",
                 fdk_result_to_string(r));
         return 1;
     }
@@ -265,19 +266,29 @@ int main(int argc, char **argv) {
             auto_step++;
             set_status();
         }
-        fdk_progress_set_fraction(progress,
-                                  (fdk_f32)(frames % 200) / 199.0f);
+        /* One startup sweep of the meter, then it holds (the rig can
+         * keep it sweeping with FDK_DEMO_ANIMATE=1). */
+        const char *anim = getenv("FDK_DEMO_ANIMATE");
+        const bool keep_sweeping =
+            (anim != NULL && anim[0] != '\0' && strcmp(anim, "0") != 0) ||
+            wayland_auto;
+        if (frames < 400 || keep_sweeping) {
+            fdk_progress_set_fraction(progress,
+                                      (fdk_f32)(frames % 200) / 199.0f);
+        }
 
         fdk_surface *surface = NULL;
         if (fdk_ok(fdk_window_get_surface(app.window, &surface)) &&
             !fdk_surface_frame_ready(surface)) {
             continue;
         }
-        (void)fdk_window_paint(app.window);
+        if (fdk_widget_tree_has_damage(root)) {
+            (void)fdk_window_paint(app.window);
+        }
         frames++;
     }
 
-    printf("09_decorations: exited cleanly after %d frames\n", frames);
+    printf("06_decorations: exited cleanly after %d frames\n", frames);
     fdk_font_destroy(font16);
     if (app.window != NULL) {
         fdk_window_destroy(app.window);

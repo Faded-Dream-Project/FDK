@@ -148,6 +148,9 @@ struct fdk_platform_window {
     int render_back;        /* slot index the app draws into          */
     GC render_gc;
     fdk_size render_size;   /* dimensions both slots were created at  */
+    int presented_ever;     /* a present reached the server (the
+                               window_ever_presented op — diagnostic/
+                               regression seam, see platform_internal.h) */
 };
 
 /* Implemented in x11_events.c, used by x11_dispatch.c. Not part of
@@ -227,6 +230,10 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
                                            fdk_platform_framebuffer *out_fb);
 fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                   const fdk_platform_damage *damage);
+
+/* The window_ever_presented ops entry (diagnostic seam — see
+ * platform_internal.h). */
+int fdk_x11_window_ever_presented(fdk_platform_window *pwindow);
 void fdk_x11_surface_cleanup(fdk_platform_window *pwindow);
 
 /* Clears the in-flight flag of the slot owning `shmseg` on this

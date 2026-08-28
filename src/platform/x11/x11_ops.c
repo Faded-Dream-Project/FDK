@@ -23,6 +23,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_begin_resize = fdk_x11_window_begin_resize,
     .window_get_framebuffer = fdk_x11_window_get_framebuffer,
     .window_present = fdk_x11_window_present,
+    .window_ever_presented = fdk_x11_window_ever_presented,
     .clipboard_set_text = fdk_x11_clipboard_set_text,
     .clipboard_get_text = fdk_x11_clipboard_get_text,
     .window_popup_regrab = fdk_x11_window_popup_regrab,

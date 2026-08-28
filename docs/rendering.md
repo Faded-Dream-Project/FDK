@@ -58,7 +58,7 @@ at a NEW size has undefined content, so the damage region resets to
 "everything" — the application's next frame after a resize must
 repaint the whole surface. (`FDK_EVENT_WINDOW_CONFIGURE` / resize
 detection: apps typically set a `needs_full_redraw` flag, exactly as
-`examples/02_software_render.c` does.)
+`examples/02_rendering.c` does.)
 
 ## Damage tracking internals
 
@@ -91,7 +91,7 @@ the hints would display it. FDK guarantees this by construction
   what the damage hints claim, whether or not the compositor honors
   them.
 
-Measured effect (weston 14 headless, `02_software_render`): ~1 shm
+Measured effect (weston 14 headless, `02_rendering` (the merged rendering demo)): ~1 shm
 pool per frame before recycling; 3 pools for 173 commits after —
 buffers are created at startup and on resize, nothing per frame.
 

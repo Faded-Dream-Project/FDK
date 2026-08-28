@@ -152,14 +152,17 @@ while (!done) {
 }
 ```
 
-Run `examples/02_software_render.c` to see this live: two phases —
-an animated full-frame color-cycling gradient, then a frozen
-background where only a bouncing ball updates, at 1-2% of the
+Run `examples/02_rendering.c` to see this live: a gradient-and-
+logo primitives panel where a bouncing ball updates at 1-2% of the
 window's damage per frame (the console prints the live damage
-statistics). Identical code on X11 and Wayland; on Wayland the loop
-is additionally paced by the compositor's frame callbacks. Windows
-that nobody renders into still show the plain platform background.
-See `docs/rendering.md` for the full rendering design.
+statistics), plus image decoding, transforms, antialiased shapes,
+and alpha compositing panels — all software, all damage-tracked.
+Identical code on X11 and Wayland; on Wayland the loop is
+additionally paced by the compositor's frame callbacks. The ball
+animates for a short intro and then freezes — an idle FDK app costs
+zero presents. Windows that nobody renders into still show the
+plain platform background. See `docs/rendering.md` for the full
+rendering design.
 
 And widgets work today too — Phase 4's foundation. Attach a tree to
 the window's root widget and FDK does the retained-mode work:
@@ -188,9 +191,9 @@ A widget that handles an event consumes it — the window-level
 callback only sees what the tree didn't. Widgets can destroy
 themselves, their ancestors, or the whole window from inside an event
 callback; the core defers the frees so no dispatcher ever walks freed
-memory. Run `examples/03_widgets.c` for a live panel/button/meter UI
-with hover, press, focus-tint, and a quit button that destroys the
-window from inside its own release handler.
+memory. Run `examples/04_widgets.c` for a live catalog of real
+controls with hover, press, focus-tint, and a quit button — every
+interaction state the foundation routes.
 
 Layout works today too — Phase 5, complete. Boxes (horizontal or
 vertical) lay children out from per-child requests and hints —
@@ -218,13 +221,13 @@ fdk_widget_create(content, NULL, (fdk_rect){0, 0, 0, 50}, &main_area);
 fdk_widget_set_expand(main_area, false, true);   /* take the leftover */
 ```
 
-Run `examples/04_layout.c`: an interface built entirely from boxes
-and a grid (nothing placed by hand), with the window itself
-breathing through a resize oscillation and a meter whose size
-request animates — every child reflowing live through configure ->
-relayout -> damage -> repaint. The grid's spanning cell and
-expanding last column absorb the window's growth while the other
-tracks and the gaps stay put.
+Run `examples/04_widgets.c` and look at the "Layout — grid" frame:
+a 3-column grid with a two-column spanning cell and an expanding
+last column — resize the window and watch ONLY that column absorb
+the width while the other tracks and the gaps stay exactly
+`spacing` pixels. The whole panel is built from boxes and the grid;
+nothing is placed by hand, and every child reflows live through
+configure -> relayout -> damage -> repaint.
 
 And text renders for real now — Phase 6, complete. Load a
 TrueType font, measure a UTF-8 run (advance + ink bounds), and draw
@@ -254,9 +257,10 @@ fdk_surface_draw_utf8(surface, font, "Hello, FDK", 10,
                       40, 120, (fdk_color){1, 1, 1, 1});  /* pen, baseline */
 ```
 
-Run `examples/05_text.c`: a 96px wordmark, a size ladder, colored
-runs chained by measured advances, an animated per-glyph wave line,
-and a live glyph-cache stats footer.
+Run `examples/03_text.c`'s canvas half: a 96px wordmark, a size
+ladder, colored runs chained by measured advances, a per-glyph
+wave line, and a live glyph-cache stats footer — all drawn straight
+through `fdk_surface_draw_utf8`.
 
 And the core widget catalog — Phase 6's main event. Eight real
 widgets on the Phase 4 object model, sized by their measured text
@@ -281,10 +285,10 @@ Controls activate on release-inside after a press (the implicit grab
 keeps the release even if the pointer left), answer Space/Enter when
 focused, and dim + go input-transparent when disabled.
 
-Run `examples/06_widgets.c`: a settings-style panel built entirely
-from the catalog — two frames of controls, a radio group, a button
-row, a progress bar, and a live status label that every control
-reports into.
+Run `examples/04_widgets.c`: a settings-style panel built entirely
+from the catalog — frames of controls, a radio group, a grid, a
+button row, a progress bar, and a live status label that every
+control reports into.
 
 Text layout completes the picture — labels that wrap, truncate with
 an ellipsis exactly at their right edge, and align their lines:
@@ -303,9 +307,10 @@ selection through the group (wrapping, skipping hidden/disabled
 members) with focus following — Space still toggles, Tab still
 traverses the whole tree.
 
-Run `examples/07_text_layout.c`: a wrapping paragraph that reflows
-taller when the window narrows, a truncated path line, the three
-alignments, and a keyboard-owned radio group.
+Run `examples/03_text.c`'s widget half: a wrapping paragraph that
+reflows taller when the window narrows, a truncated path line, the
+three alignments, and a keyboard-owned radio group — one window
+with the raw-rendering gallery above it.
 
 And the theme engine — the whole toolkit restyles at runtime, from
 data:
@@ -328,7 +333,7 @@ are errors with line numbers, never half-themed UI. Missing tokens
 inherit the built-in defaults, so a three-line theme is a real
 theme.
 
-Run `examples/08_theme.c` (from the repository root — it loads
+Run `examples/05_theme.c` (from the repository root — it loads
 `examples/data/daylight.fdk` and `examples/data/matrix.fdk`): one
 panel of catalog widgets cycling through three themes with real
 clicks, including the app-side pattern for tokens the engine does
@@ -359,7 +364,7 @@ on Wayland a compositor that insists on its own decorations comes
 back as `FDK_EVENT_WINDOW_DECORATION` and FDK drops its band before
 you see the event — a window can never end up with two title bars.
 
-Run `examples/09_decorations.c`: a decorated window you can drag by
+Run `examples/06_decorations.c`: a decorated window you can drag by
 its band, double-click to maximize, resize by its edges, manage by
 its buttons, and close by its button — with a runtime toggle between
 FDK-drawn and platform decorations.
@@ -367,7 +372,7 @@ FDK-drawn and platform decorations.
 ### Images, alpha compositing, transforms, antialiasing (Phase 3
 ### completion)
 
-Run `examples/10_images.c`: four panels — a PNG decoded from disk and
+Run `examples/02_rendering.c`: four panels — a PNG decoded from disk and
 composited with per-pixel alpha (the file's 50%-transparent band
 actually blends over the panel background), the same image through
 the transform pipeline (exact 2x integer block scaling, a slowly
@@ -427,7 +432,7 @@ fdk_dialog_show_message(ctx, &opts, on_answer, NULL);
  * early destroy answers Cancel — exactly one on_response, always. */
 ```
 
-Run `examples/11_advanced.c`: every Phase 9 control in one window —
+Run `examples/07_advanced.c`: every Phase 9 control in one window —
 a menu bar with submenus and a real message dialog, a toolbar, a
 notebook of pages (controls, a list, a tree, a canvas), combos, a
 status label narrating everything. The popups open, grab, and
@@ -475,7 +480,11 @@ application-wired sink with no registry, no bus, and no bridge
 process (the no-bus policy, `docs/dependencies.md`). An external
 assistive-technology bridge, if an application wants one, is a
 CONSUMER of the same public API; `docs/roadmap.md`'s Phase 10 entry
-records exactly what is and isn't there.
+records exactly what is and isn't there. Run
+`examples/08_narrator.c` to watch it live: a scripted tour walks
+focus through a form while the narrator speaks each move through a
+subtitle bar, then keeps narrating your own keyboard and pointer
+interaction until you close the window.
 
 ### Internationalization — Phase 10, second half
 
@@ -529,6 +538,29 @@ deviations from full CLDR data.
 
 ### What it looks like
 
+Since 1.1.1 the whole example suite runs on both backends under the
+test rigs, and the captures below are real compositor output from
+sway (headless, wlr-screencopy) — every example launched in the same
+show -> paint -> pump order a real application uses, screenshot-
+verified, then closed through the real close path. (This rig exists
+because 1.1.0 shipped a Wayland bug where exactly that ordering
+never mapped a window — see the platform notes in
+`docs/architecture.md`.)
+
+![02_rendering on Wayland](docs/screenshots/suite_wayland_02_rendering.png)
+
+![03_text on Wayland](docs/screenshots/suite_wayland_03_text.png)
+
+![04_widgets on Wayland](docs/screenshots/suite_wayland_04_widgets.png)
+
+![07_advanced on Wayland](docs/screenshots/suite_wayland_07_advanced.png)
+
+The earlier per-feature proofs below were captured with the same
+discipline while each subsystem landed (Xvfb + `x11grab`, or the
+weston/sway compositor screenshot paths; some show example names
+from before the suite was consolidated to eight programs — the
+feature proofs are unchanged):
+
 These are real captured frames from the test rig — not mockups. The
 first two are the X11 backend (Xvfb display, `x11grab` capture): the
 demo window at 640x480, and again after a live resize to 800x600 —
@@ -557,37 +589,40 @@ live resize and a clean window close mid-render — is committed
 alongside the stills:
 [`docs/screenshots/fdk_render_x11.mp4`](docs/screenshots/fdk_render_x11.mp4).
 
-The widget foundation has its own captured proof — two frames of
-`03_widgets` under Xvfb, driven by real injected input (XSendEvent
-through the X server): the initial state, and after two button
-clicks plus a Tab. Between the frames the meter recolored AND grew
-(a `set_bounds` layout change repainting only the affected region),
-and the "hue" button's color shifted because keyboard focus moved
-to it. The quit button ends the demo by destroying the window from
-inside its own pointer-release handler — and the process exits
+The widget foundation has its own captured proof — two frames of the
+Phase 4 foundation demo (since folded into the widget catalog,
+`examples/04_widgets.c`) under Xvfb, driven by real injected input
+(XSendEvent through the X server): the initial state, and after two
+button clicks plus a Tab. Between the frames the meter recolored AND
+grew (a `set_bounds` layout change repainting only the affected
+region), and the "hue" button's color shifted because keyboard focus
+moved to it. The quit button ends the demo by destroying the window
+from inside its own pointer-release handler — and the process exits
 cleanly (exit 0, ~390 frames).
 
 ![03_widgets initial state](docs/screenshots/widgets_frame_initial.png)
 
 ![03_widgets after clicks + Tab: meter recolored and grown, focus moved](docs/screenshots/widgets_frame_interacted.png)
 
-And the layout engine's proof — `04_layout` held at two different
-window sizes (660x480 and 500x380), captured during its steady
-phases: the header dots stay anchored top-left, the expanding panel
-owns whatever space the window gives it, the footer stays pinned to
-the bottom. Nothing in the example computes geometry by hand.
+And the layout engine's proof — the layout demo (its grid now lives
+in the "Layout — grid" frame of `examples/04_widgets.c`) held at two
+different window sizes (660x480 and 500x380), captured during its
+steady phases: the header dots stay anchored top-left, the expanding
+panel owns whatever space the window gives it, the footer stays
+pinned to the bottom. Nothing in the example computes geometry by
+hand.
 
 ![04_layout at 660x480](docs/screenshots/layout_hold_660x480.png)
 
 ![04_layout at 500x380 — same code, reflowed](docs/screenshots/layout_hold_500x380.png)
 
-And the text foundation's proof — `05_text` in its deterministic
-hold frame (real shaped glyphs, PIL-verified down to the colored
-runs and the stats footer):
+And the text foundation's proof — the raw-rendering half of
+`03_text` in its deterministic hold frame (real shaped glyphs,
+PIL-verified down to the colored runs and the stats footer):
 
 ![05_text hold frame: wordmark, size ladder, colored runs, wave, stats](docs/screenshots/text_frame_640x480.png)
 
-The widget catalog's proof — `06_widgets` in its deterministic hold
+The widget catalog's proof — `04_widgets` in its deterministic hold
 frame: two frames (Profile / Renderer) with real title bands, a
 toggle, checkboxes, a checked radio (the accent dot), buttons, a
 full progress bar, and the status label — every element PIL-verified
@@ -595,14 +630,15 @@ by the test rig:
 
 ![06_widgets catalog hold frame](docs/screenshots/widgets_catalog_frame_520x430.png)
 
-Text layout's proof — `07_text_layout` at full width and after the
-rig narrows the window: the paragraph re-wraps from five lines to
-seven and the truncated line's ellipsis moves left with the edge.
+Text layout's proof — the label-mode half of `03_text` at full width
+and after the rig narrows the window: the paragraph re-wraps from
+five lines to seven and the truncated line's ellipsis moves left
+with the edge.
 
 ![07_text_layout hold frame](docs/screenshots/text_layout_frame_480x620.png)
 ![07_text_layout after the resize](docs/screenshots/text_layout_reflow_340x620.png)
 
-And the theme engine's proof — `08_theme` held under each of its
+And the theme engine's proof — `05_theme` held under each of its
 three themes (built-in FDK Dark, Daylight from a complete `.fdk`
 file, Matrix from a deliberately partial one): same widgets, same
 layout, same code; only the default theme differs between captures.
@@ -611,7 +647,7 @@ pixel-exact.
 
 ![08_theme under three themes](docs/screenshots/theme_three_themes_1380x330.png)
 
-And the decorations' proof — `09_decorations` decorated (note the
+And the decorations' proof — `06_decorations` decorated (note the
 FDK band: title, the three management buttons, themed rule — at the
 post-drag position) vs. toggled back to WM decorations (band gone,
 content reflows to the full window):
@@ -626,7 +662,7 @@ corner FDK draws:
 
 ![09_decorations window management](docs/screenshots/decorations_management_1636x340.png)
 
-The Phase 9 completion, same rig, same discipline — `11_advanced`
+The Phase 9 completion, same rig, same discipline — `07_advanced`
 driven by real clicks through the X server: (1) the File menu open
 below its bar title — a toolkit-owned popup the demo never paints
 itself; (2) a ComboBox dropdown; (3) the modal message dialog (its

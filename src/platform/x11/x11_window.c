@@ -130,6 +130,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->last_size.height = height;
     pwindow->maximized = 0;
     pwindow->minimized = 0;
+    pwindow->presented_ever = 0;
     pwindow->has_saved = 0;
     pwindow->saved_x = 0;
     pwindow->saved_y = 0;

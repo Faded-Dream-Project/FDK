@@ -31,10 +31,17 @@
 #include "fdk/fdk_theme.h"
 #include "fdk/fdk_widgets.h"
 
+/* Internal seam (same discipline as test_x11_integration.c): the
+ * deferred-first-frame regression below asserts backend commit state
+ * through the sanctioned ops wrapper — the Wayland platform header
+ * itself never leaves src/platform/wayland/. */
+#include "window/window_internal.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h> /* free() for clipboard strings */
 #include <string.h>
+#include <unistd.h> /* access() — the injector-availability probe */
 
 static fdk_dialog_response g_wayland_dlg_last =
     (fdk_dialog_response)-99;
@@ -70,6 +77,14 @@ static int g_last_minimized = -1;
 static FILE *g_injector = NULL;
 
 static bool wayland_injector_start(void) {
+    /* popen() hands back a perfectly valid stream even when the
+     * command does not exist (sh: not found) — the first write then
+     * dies with SIGPIPE and takes the whole test with it, breaking
+     * the "absent tooling honestly skips" contract this section is
+     * built on. Verify the binary is actually executable first. */
+    if (access("/home/z/my-project/scripts/fdk-wl-inject", X_OK) != 0) {
+        return false;
+    }
     g_injector = popen("/home/z/my-project/scripts/fdk-wl-inject serve",
                        "w");
     return g_injector != NULL;
@@ -171,6 +186,55 @@ int main(void) {
     if (!fdk_ok(r)) {
         printf("[skip] no Wayland compositor reachable (fdk_init: %d)\n", r);
         return 0;
+    }
+
+    /* ---- The deferred-first-frame regression (found live in 1.1.0:
+     * every example painted before the first configure and never
+     * mapped) ----
+     *
+     * Exact application ordering: create, show, PAINT, only then
+     * enter the pump loop. The paint happens before the first
+     * xdg configure has been read, so the backend must defer the
+     * commit — and must land it by itself the moment the configure
+     * is acked. Before the fix this test hangs below: the surface
+     * layer had consumed the damage, every later present was a
+     * no-op, and rendered_ever never became true. */
+    {
+        fdk_window *dw = NULL;
+        fdk_window_options dwopts = { .title = "FDK deferred frame",
+                                      .width = 300, .height = 200 };
+        assert(fdk_ok(fdk_window_create(ctx, &dwopts, &dw)));
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dw, &droot)));
+        fdk_widget_set_background(droot,
+                                  (fdk_color){0.2f, 0.4f, 0.9f, 1.0f});
+        fdk_window_show(dw);
+        fdk_window_paint(dw); /* BEFORE any pump — the deferred path */
+        assert(fdk__window_ever_presented(dw) == 0);
+
+        for (int i = 0; i < 40; i++) {
+            (void)fdk_pump_events(ctx, 50);
+            if (fdk__window_ever_presented(dw) != 0) {
+                break; /* committed at the configure itself */
+            }
+        }
+        if (fdk__window_ever_presented(dw) == 0) {
+            /* Configure proposed a different size: the EXPOSE branch
+             * re-drove the tree, and the application's NEXT paint
+             * (still the documented loop shape) presents at the real
+             * size. One more round must land it. */
+            fdk_window_paint(dw);
+            for (int i = 0; i < 8; i++) {
+                (void)fdk_pump_events(ctx, 50);
+                if (fdk__window_ever_presented(dw) != 0) {
+                    break;
+                }
+            }
+        }
+        assert(fdk__window_ever_presented(dw) == 1);
+        printf("[ok] deferred first frame: present-before-configure "
+               "maps the window (no idle-wedge)\n");
+        fdk_window_destroy(dw);
     }
 
     fdk_window *win = NULL;

@@ -178,7 +178,7 @@ Implemented and tested in the FIRST slice (the foundation):
 - `FDK_EVENT_WINDOW_EXPOSE` (`fdk_event.h`): X11 Expose translation
   so rendered apps repaint covered regions; Wayland never needs it
   (compositors retain the last committed buffer)
-- `02_software_render` example: animated gradient + bouncing
+- `02_rendering` example (merged rendering demo): animated gradient + bouncing
   antialiased ball (raw pixel writes) + block-letter logo (fill
   primitives), ~60 fps pump loop, ESC/close exit, verified end-to-end
   on Xvfb (screenshots + H.264 capture + pixel checks) and on weston
@@ -204,7 +204,7 @@ backends):
   pixel WITHOUT invalidating and proving the server never receives
   it (see test_x11_integration.c). Raw-pointer writers declare
   damage with `fdk_surface_invalidate()`. Bounded bookkeeping: 64
-  rects, overflow degrades to full damage. `02_software_render`
+  rects, overflow degrades to full damage. The rendering demo
   phase 2 runs at 1-2% of window damage per frame.
 - **Wayland buffer recycling + prefetch**: released wl_shm buffers
   stay alive in their slots and are reused; every acquired buffer is
@@ -1684,3 +1684,100 @@ FDK callback contract (may query, must not destroy).
 - Battery: clean rebuild 0 warnings, full headless suite, X11
   integration suite, release 0 warnings, bench baseline, DESTDIR
   install (pc reports 1.1.0).
+
+### 1.1.1 — the deferred first frame + the example-suite consolidation — COMPLETE
+
+User report (tested on a real Wayland desktop): "03_widgets is
+broken, 11_advanced doesn't open on Wayland, some other ones are
+laggy, and there are too many demos — combine and remove the
+useless ones."
+
+**The deferred-first-frame bug (every widget example was affected,
+not just the two named).** Root cause chain: an FDK application's
+documented loop shape is create -> show -> paint -> pump. The paint
+before the first pump runs before the first xdg configure has been
+read, so the Wayland backend correctly DEFERS the commit
+(xdg-shell forbids committing content before ack_configure) — but
+the surface layer had already consumed the frame's damage, and the
+widget tree had cleared its damage flag. Every later present was a
+true no-op: the pending buffer was never committed, the window
+never mapped, and the application sat invisible forever. The X11
+backend never showed this (no configure handshake; the first
+present works immediately), and the Wayland test suite pumped
+before its first paint, so the deferral path was never exercised
+by a test — the exact ordering every example ships with.
+
+The fix (`wayland_window.c`): the commit the deferred present was
+waiting for now happens inside `xdg_surface_configure`, the moment
+the configure is acked — the present's commit tail was refactored
+into `commit_render_pending()` and is called there when the pending
+buffer still matches the configured size; when the configure
+proposes a different size, the backend dispatches
+`FDK_EVENT_WINDOW_EXPOSE` instead (the same re-drive the X11
+backend's ExposureMask provides on first map) and the application's
+next paint presents at the real size.
+
+- Regression test: the Wayland integration suite now opens a window
+  in the exact application order (show, paint BEFORE any pump) and
+  asserts the commit landed — through a new optional platform op,
+  `window_ever_presented` (exposed internally as
+  `fdk__window_ever_presented()`; NULL = unknown). The op is the
+  sanctioned seam: `wayland_platform.h` never leaves
+  `src/platform/wayland/`, so the test asserts through the ops
+  vtable instead of the backend struct. Implemented on both
+  backends (X11: a presented_ever flag set at the first put).
+- Also fixed in the same suite: `wayland_injector_start()` used
+  `popen()`, which returns a valid stream even when the injector
+  binary does not exist — the first write then died with SIGPIPE
+  and took the whole test with it, breaking the "absent tooling
+  honestly skips" contract. Now an `access(X_OK)` probe gates it.
+
+**The lag.** The demos that DID map on Wayland were the animated
+ones, and three of them presented a full frame per compositor
+callback forever: the images demo redrew every panel at 60 fps with
+a rotating blit; the theme and decorations demos swept their
+progress meters forever; the layout demo oscillated the WINDOW SIZE
+every frame (a resize storm — new buffers, full damage, compositor
+relayout per frame). The consolidated demos below are
+damage-gated: animations run for a short intro and then freeze, and
+an idle FDK app presents NOTHING (the damage-tracking no-op path,
+finally exercised by the examples themselves). `FDK_DEMO_ANIMATE=1`
+keeps any animation running for rigs; `FDK_DEMO_FRAMES=N` bounds
+the loop for automation.
+
+**The consolidation: 12 example programs -> 8**, merges instead of
+deletions:
+
+- `01_hello_world` — unchanged.
+- `02_rendering` — was `02_software_render` + `10_images`: the
+  damage-demo ball, gradient, and logo panel beside the image,
+  transform, and AA panels.
+- `03_text` — was `05_text` + `07_text_layout`: the raw-rendering
+  gallery as a Canvas widget above the label-mode frames (one
+  window, both layers of the text stack).
+- `04_widgets` — was `06_widgets` + `04_layout`'s grid (a new
+  "Layout — grid" frame with the spanning cell and expanding
+  column; the oscillation is gone — resizing the window by hand is
+  the demo now). `03_widgets` (the Phase 4 base-class demo) is
+  folded in spirit: everything it showed is exercised by the
+  catalog.
+- `05_theme` — was `08_theme`.
+- `06_decorations` — was `09_decorations`.
+- `07_advanced` — was `11_advanced` (now maps on Wayland — the fix
+  above).
+- `08_narrator` — was `12_narrator`; also fixed a real bug found by
+  the rig: the demo registered NO window event callback and wired
+  no Quit handler, so the window-close button and ESC did nothing
+  and the app ran forever.
+
+**Verification** (both new rigs live in the maintainer's staging
+scripts, not the repo): every example launched on sway 1.10 headless
+(wlroots pixman, floating windows, wlr-screencopy captures via
+grim) and on Xvfb (ffmpeg x11grab, closed through the real
+WM_DELETE_WINDOW helper) — screenshots pixel-verified per example
+(window geometry by background-color bbox, gradient variety, logo,
+text glyphs, grid cells, themed content), every app exiting cleanly
+through the real close path. Full battery: clean rebuild 0 warnings
+(debug, Wayland enabled), headless suite, X11 integration suite,
+Wayland integration suite on sway (including the new regression),
+both example rigs PASS.

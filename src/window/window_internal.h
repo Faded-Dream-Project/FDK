@@ -237,6 +237,14 @@ fdk_window *fdk__window_of_owner(void *window_owner);
  * toolkit owns (menu popup, dialog) so dispatch auto-paints it. */
 void fdk__window_set_auto_paint(fdk_window *window, bool auto_paint);
 
+/* Diagnostic / regression seam: 1 once a frame has actually reached
+ * the screen on the window's backend, 0 before that, -1 when the
+ * backend does not report it (the optional window_ever_presented op
+ * is NULL). The deferred-first-frame Wayland regression test lives
+ * on this — the Wayland platform header is deliberately invisible
+ * outside src/platform/wayland/, so this is the sanctioned seam. */
+int fdk__window_ever_presented(const fdk_window *window);
+
 /* Destroy notification for borrowed-window holders (the menu
  * session): called at the very top of fdk_window_destroy, with the
  * window still whole. The callback must NOT destroy `window`. */

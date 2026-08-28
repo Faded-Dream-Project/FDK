@@ -111,6 +111,12 @@ static void toplevel_decoration_configure(void *data,
 static const struct zxdg_toplevel_decoration_v1_listener
     g_toplevel_decoration_listener;
 
+/* Defined below (render-buffer path): commits an acquired render
+ * buffer. The deferred-first-frame block in xdg_surface_configure()
+ * needs it before its definition point. */
+static fdk_result commit_render_pending(fdk_platform_window *pwindow,
+                                        const fdk_platform_damage *damage);
+
 static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
                                    uint32_t serial) {
     fdk_platform_window *pwindow = data;
@@ -162,6 +168,60 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
                                  : pwindow->last_size.height,
                              pwindow->scale_x120),
                      });
+    }
+
+    /* The deferred first frame (found live, 1.1.0): an application
+     * that paints BEFORE the first configure — exactly what every
+     * FDK example does (show, paint, then enter the pump loop) — had
+     * its first present deferred above (xdg-shell forbids committing
+     * content before ack_configure) with the damage already consumed
+     * by the surface layer. With the tree clean and the surface's
+     * damage empty, every later present was a no-op: the pending
+     * buffer was NEVER committed and the window never mapped — the
+     * app sat invisible forever. The commit the deferred present was
+     * waiting for happens HERE, now that ack_configure has been sent:
+     *
+     *   - pending buffer still at the configured size -> commit it
+     *     as-is (full damage; the content the app painted is valid)
+     *   - configure proposed a different size -> the stale pending
+     *     is dropped at the next acquisition; dispatch EXPOSE so the
+     *     tree re-invalidates and the app's next paint redraws and
+     *     presents at the real size (same re-drive the X11 backend's
+     *     ExposureMask provides on first map) */
+    if (pwindow->render_pending != NULL && !pwindow->rendered_ever) {
+        fdk_size want = {
+            .width = physical_dim(pwindow->last_size.width < 1
+                                      ? 1
+                                      : pwindow->last_size.width,
+                                  pwindow->scale_x120),
+            .height = physical_dim(pwindow->last_size.height < 1
+                                       ? 1
+                                       : pwindow->last_size.height,
+                                   pwindow->scale_x120),
+        };
+        fdk_size have = { .width = 0, .height = 0 };
+        for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+            if (pwindow->render_slots[i].buffer ==
+                pwindow->render_pending) {
+                have = pwindow->render_slots[i].size;
+                break;
+            }
+        }
+        if (have.width == want.width && have.height == want.height) {
+            fdk_platform_damage full;
+            memset(&full, 0, sizeof(full));
+            full.full = 1;
+            (void)commit_render_pending(pwindow, &full);
+            FDK_DEBUG("deferred first frame committed at configure");
+        } else {
+            fdk_event_data event;
+            memset(&event, 0, sizeof(event));
+            event.type = FDK_EVENT_WINDOW_EXPOSE;
+            pwindow->conn->dispatch(pwindow, &event,
+                                    pwindow->conn->dispatch_user_data);
+            FDK_DEBUG("configure resized past the deferred frame; "
+                      "EXPOSE re-drives the first paint");
+        }
     }
 
     /* The very first configure is required before the first
@@ -807,34 +867,13 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
-                                      const fdk_platform_damage *damage) {
-    if (pwindow == NULL || damage == NULL) {
-        return FDK_ERR_INVALID_ARGUMENT;
-    }
-
-    /* Documented no-op when nothing was ever acquired/drawn. */
-    if (pwindow->render_pending == NULL) {
-        return FDK_OK;
-    }
-
-    /* Nothing changed — no attach, no damage, no commit, and the
-     * acquired buffer stays pending for the next frame (the
-     * damage-tracking contract; a no-op frame costs zero protocol
-     * traffic). */
-    if (!damage->full && damage->count == 0) {
-        return FDK_OK;
-    }
-
-    if (!pwindow->configured) {
-        /* xdg-shell forbids the first real commit before
-         * ack_configure; the buffer stays pending and the
-         * application's next present (after the configure event has
-         * been pumped and acked) succeeds instead. */
-        FDK_DEBUG("present deferred until first xdg configure");
-        return FDK_OK;
-    }
-
+/* Commits the acquired render_pending buffer: attach, damage hints,
+ * commit, frame-callback registration, live-buffer bookkeeping.
+ * Shared by fdk_wayland_window_present() and the deferred-first-frame
+ * path in xdg_surface_configure() (which commits the buffer a present
+ * deferred BEFORE the first configure was ever able to). */
+static fdk_result commit_render_pending(fdk_platform_window *pwindow,
+                                        const fdk_platform_damage *damage) {
     fdk_size size = { .width = 0, .height = 0 };
     for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
         if (pwindow->render_slots[i].buffer == pwindow->render_pending) {
@@ -931,6 +970,40 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
+fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
+                                      const fdk_platform_damage *damage) {
+    if (pwindow == NULL || damage == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Documented no-op when nothing was ever acquired/drawn. */
+    if (pwindow->render_pending == NULL) {
+        return FDK_OK;
+    }
+
+    /* Nothing changed — no attach, no damage, no commit, and the
+     * acquired buffer stays pending for the next frame (the
+     * damage-tracking contract; a no-op frame costs zero protocol
+     * traffic). */
+    if (!damage->full && damage->count == 0) {
+        return FDK_OK;
+    }
+
+    if (!pwindow->configured) {
+        /* xdg-shell forbids the first real commit before
+         * ack_configure; the buffer stays pending and is committed
+         * by xdg_surface_configure() the moment the first configure
+         * is acked (see the deferred-first-frame block there — the
+         * surface layer has already consumed this frame's damage, so
+         * waiting for "the application's next present" would wait
+         * forever: with the tree clean it would be a no-op). */
+        FDK_DEBUG("present deferred until first xdg configure");
+        return FDK_OK;
+    }
+
+    return commit_render_pending(pwindow, damage);
+}
+
 int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow) {
     if (pwindow == NULL) {
         return 1;
@@ -945,6 +1018,10 @@ int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow) {
      * and a wedged compositor must not wedge every FDK app. Pacing
      * degrades to a floor rate instead of stopping. */
     return (now_ms() - pwindow->frame_commit_ms) > FDK_WL_FRAME_GUARD_MS;
+}
+
+int fdk_wayland_window_ever_presented(fdk_platform_window *pwindow) {
+    return pwindow != NULL && pwindow->rendered_ever != 0;
 }
 
 fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,

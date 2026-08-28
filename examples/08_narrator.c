@@ -1,4 +1,4 @@
-/* 12_narrator.c — the embedded screen reader, live (1.1.0).
+/* 08_narrator.c — the embedded screen reader, live (1.1.0).
  *
  * GTK and Qt narrate through AT-SPI2 over D-Bus: a registry daemon,
  * a session bus, a bridge process. This demo is FDK's answer: the
@@ -36,6 +36,23 @@ static struct {
     bool quit;
 } app;
 
+static void window_event(fdk_window *window, const fdk_event_data *event,
+                         void *user_data) {
+    (void)window;
+    (void)user_data;
+    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST ||
+        (event->type == FDK_EVENT_KEY_DOWN &&
+         event->key.scancode == FDK_KEY_ESC)) {
+        app.quit = true;
+    }
+}
+
+static void on_quit_clicked(fdk_widget *w, void *user) {
+    (void)w;
+    (void)user;
+    app.quit = true;
+}
+
 /* The visual sink: the subtitle bar + a stdout line. Runs inside
  * focus()/set-value call stacks — label text updates are ordinary
  * tree mutations, safe from any callback position (the a11y notify
@@ -58,7 +75,7 @@ static fdk_color col(int r, int g, int b) {
 int main(void) {
     fdk_context *ctx = NULL;
     if (!fdk_ok(fdk_init(&ctx, NULL))) {
-        fprintf(stderr, "12_narrator: init failed\n");
+        fprintf(stderr, "08_narrator: init failed\n");
         return 1;
     }
     app.ctx = ctx;
@@ -66,7 +83,7 @@ int main(void) {
     fdk_font *font = fdk_font_load_system_default(16);
     if (font == NULL) {
         fprintf(stderr,
-                "12_narrator: no system font found — set FDK_FONT_FILE "
+                "08_narrator: no system font found — set FDK_FONT_FILE "
                 "or FDK_FONT_DIRS (see docs/text.md)\n");
         fdk_shutdown(ctx);
         return 1;
@@ -78,7 +95,7 @@ int main(void) {
     opts.width = 460;
     opts.height = 400;
     if (!fdk_ok(fdk_window_create(ctx, &opts, &app.window))) {
-        fprintf(stderr, "12_narrator: window failed (no display?)\n");
+        fprintf(stderr, "08_narrator: window failed (no display?)\n");
         fdk_font_destroy(font);
         fdk_shutdown(ctx);
         return 1;
@@ -121,6 +138,7 @@ int main(void) {
 
     fdk_widget *quit = NULL;
     (void)fdk_button_create(root, font, "Quit", &quit);
+    fdk_button_set_on_activate(quit, on_quit_clicked, NULL);
     fdk_widget_set_bounds(quit, (fdk_rect){150, 190, 120, 36});
 
     /* The subtitle bar: the sink's visual half. */
@@ -131,7 +149,7 @@ int main(void) {
     /* The narrator: sink in, engine on. */
     fdk_a11y_set_speaker(speak, NULL);
     if (!fdk_ok(fdk_a11y_narrator_start())) {
-        fprintf(stderr, "12_narrator: engine failed to start\n");
+        fprintf(stderr, "08_narrator: engine failed to start\n");
         fdk_window_destroy(app.window);
         fdk_font_destroy(font);
         fdk_shutdown(ctx);
@@ -139,6 +157,7 @@ int main(void) {
     }
     fdk_a11y_announce("Narration on");
 
+    fdk_window_set_event_callback(app.window, window_event, NULL);
     fdk_window_show(app.window);
     (void)fdk_window_paint(app.window);
 
@@ -167,7 +186,12 @@ int main(void) {
             !fdk_surface_frame_ready(surface)) {
             continue;
         }
-        (void)fdk_window_paint(app.window);
+        /* Damage-gated: the scripted tour's label updates (and every
+         * interactive focus/toggle/value change) invalidate the tree;
+         * an idle narrator presents nothing. */
+        if (fdk_widget_tree_has_damage(root)) {
+            (void)fdk_window_paint(app.window);
+        }
         frames++;
 
         /* Tour driver: each action follows its focus, the way a
@@ -208,7 +232,7 @@ int main(void) {
         }
     }
 
-    printf("12_narrator: exited cleanly after %d frames, %d tour steps\n",
+    printf("08_narrator: exited cleanly after %d frames, %d tour steps\n",
            frames, tour_done);
 
     fdk_a11y_set_speaker(NULL, NULL); /* parks the engine */

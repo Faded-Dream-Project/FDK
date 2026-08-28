@@ -362,7 +362,6 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
     if (pwindow == NULL || damage == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-
     /* Documented no-op when nothing was ever acquired/drawn (the
      * window simply keeps its background pixel contents). */
     if (pwindow->render_slots[0].image == NULL) {
@@ -453,6 +452,11 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
 
     XFlush(conn->display);
 
+    /* The pixels are on their way to the server — for the
+     * window_ever_presented diagnostic op this counts as presented
+     * (X11 has no map-time handshake that could defer it). */
+    pwindow->presented_ever = 1;
+
     /* Swap: the presented slot becomes front (its contents are now
      * what the server shows / is reading); the app draws the other
      * one next frame. */
@@ -536,4 +540,8 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow) {
         XFreeGC(pwindow->conn->display, pwindow->render_gc);
         pwindow->render_gc = NULL;
     }
+}
+
+int fdk_x11_window_ever_presented(fdk_platform_window *pwindow) {
+    return pwindow != NULL && pwindow->presented_ever != 0;
 }

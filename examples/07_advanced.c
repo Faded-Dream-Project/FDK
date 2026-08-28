@@ -1,4 +1,4 @@
-/* 11_advanced.c — the Phase 9 advanced widget set, live.
+/* 07_advanced.c — the Phase 9 advanced widget set, live.
  *
  * Every Phase 9 control in one window:
  *   - a MenuBar: File (Open / separator / Toolbar check / Quit),
@@ -30,7 +30,9 @@
  *   PHASE: quit                   — the Quit item / close request
  *
  * Escape or the close request ends it (the Quit menu item too).
- * Fonts come from fdk_font_load_system_default().
+ * Fonts come from fdk_font_load_system_default(). Set
+ * FDK_DEMO_FRAMES=N to exit after N pump iterations instead (the
+ * automation knob the test rigs use).
  */
 
 #include "fdk/fdk.h"
@@ -453,11 +455,21 @@ int main(void) {
     fdk_window_show(app.window);
     fdk_window_paint(app.window);
 
-    /* The loop: pump + paint THIS window; the menu/combo popups and
-     * dialogs paint themselves. */
+    /* The loop: pump + (damage-gated) paint THIS window; the
+     * menu/combo popups and dialogs paint themselves. An idle app
+     * presents nothing at all. */
+    const char *limit_s = getenv("FDK_DEMO_FRAMES");
+    const int frame_limit = (limit_s != NULL) ? atoi(limit_s) : 0;
+    int frames = 0;
     while (!app.quit) {
         (void)fdk_pump_events(app.ctx, 15);
-        fdk_window_paint(app.window);
+        if (fdk_widget_tree_has_damage(root)) {
+            fdk_window_paint(app.window);
+        }
+        frames++;
+        if (frame_limit > 0 && frames >= frame_limit) {
+            break;
+        }
     }
 
     printf("PHASE: exit\n");

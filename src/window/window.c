@@ -1545,3 +1545,11 @@ fdk_result fdk__window_set_modal(fdk_window *window, bool modal) {
     }
     return window->ops->window_set_modal(window->pwindow, modal);
 }
+
+int fdk__window_ever_presented(const fdk_window *window) {
+    if (window == NULL || window->ops == NULL ||
+        window->ops->window_ever_presented == NULL) {
+        return -1;
+    }
+    return window->ops->window_ever_presented(window->pwindow);
+}

@@ -94,8 +94,14 @@ the `fdk_surface` software renderer — pixel access, damage-tracked
 presentation, a clip stack, offscreen surfaces, and the blending
 primitive set — implemented on both backends via optional
 `fdk_platform_ops` entries (`window_get_framebuffer`, damage-taking
-`window_present`, and the `window_frame_ready` pacing query); see
-`docs/rendering.md` for the full design), `src/layout/` (Phase 5: the
+`window_present`, the `window_frame_ready` pacing query, and the
+`window_ever_presented` diagnostic seam); see
+`docs/rendering.md` for the full design; on Wayland a present that
+runs before the first xdg configure is DEFERRED and committed by
+the backend at configure time — the deferred-first-frame contract
+that keeps the application's show -> paint -> pump order mapping
+windows on every compositor, regression-tested in
+`tests/test_wayland_integration.c`), `src/layout/` (Phase 5: the
 box layout engine — containers as widget subclasses over the
 measure/arrange hooks — plus the window content glue), `src/widget/` (Phase
 4: the retained-mode widget foundation — hierarchy, state, focus,

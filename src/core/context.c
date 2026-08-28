@@ -256,7 +256,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
      * cares about, so the loop goes back to waiting for the
      * REMAINING time instead of returning early.
      *
-     * Found live (Phase 5 completion, the 05_text demo): every
+     * Found live (Phase 5 completion, the text demo, now examples/03_text.c): every
      * XShmPutImage present makes the server send one ShmCompletion
      * ~1-4ms later, so a draw-per-frame loop with pump(15ms) pacing
      * was actually paced by its own completion events — 252fps

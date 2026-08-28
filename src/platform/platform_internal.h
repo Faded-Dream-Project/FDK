@@ -257,6 +257,17 @@ typedef struct fdk_platform_ops {
      * never block and never busy-wait — it is a state query. */
     int (*window_frame_ready)(fdk_platform_window *pwindow);
 
+    /* OPTIONAL first-commit query, test/diagnostic seam behind the
+     * internal fdk__window_ever_presented(): returns nonzero once a
+     * frame has actually reached the screen (a real commit on
+     * Wayland, an XPutImage on X11), 0 before that. NULL means
+     * "unknown" (-1 to the caller). Exists because Wayland's
+     * configure handshake can leave an app's first present DEFERRED
+     * (see the deferred-first-frame handling in wayland_window.c) —
+     * the regression test for that path needs an honest, observable
+     * answer to "is this window actually on screen yet". */
+    int (*window_ever_presented)(fdk_platform_window *pwindow);
+
     /* OPTIONAL HiDPI scale query behind fdk_window_get_scale()
      * (Phase 3 completion): writes the window's current scale factor
      * (1.0 = one buffer pixel per logical unit) to *out_scale.

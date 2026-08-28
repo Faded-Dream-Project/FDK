@@ -226,7 +226,7 @@ the corner pixel), and separator band (1px vs 3px) are read back
 server-side across two switches, with the round trip back to the
 built-in theme pixel-exact.
 
-The demo rig `scripts/run_theme_demo_x11.sh` drives `08_theme` with
+The demo rig `scripts/run_theme_demo_x11.sh` drives `05_theme` with
 real clicks through three themes and PIL-verifies 13 properties
 including the pixel-exact round trip.
 
@@ -302,7 +302,7 @@ buffer (sway enforces it), and a wl_surface.frame callback whose
 window dies before `done` leaked its proxy (LeakSanitizer).
 
 **Demo rig**: `scripts/run_decorations_demo_x11.sh` drives
-`09_decorations` end-to-end with real input — band drag, decoration
+`06_decorations` end-to-end with real input — band drag, decoration
 toggle off/on, the band's MAXIMIZE button, a band double-click
 restore, an SE resize-corner drag (460x300 -> 500x330), and close
 via the band button — 16 PIL checks including the band returning at

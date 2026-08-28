@@ -376,4 +376,9 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
                                       const fdk_platform_damage *damage);
 int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
 
+/* The window_ever_presented ops entry: nonzero once a render buffer
+ * has actually been COMMITTED to the compositor (the deferred-first-
+ * frame regression observable — see wayland_window.c). */
+int fdk_wayland_window_ever_presented(fdk_platform_window *pwindow);
+
 #endif /* FDK_WAYLAND_PLATFORM_H */

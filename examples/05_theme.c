@@ -1,4 +1,4 @@
-/* 08_theme.c — the Phase 7 theme engine, live.
+/* 05_theme.c — the Phase 7 theme engine, live.
  *
  * One panel of catalog widgets under three themes: the built-in
  * "FDK Dark" (the exact Phase 6 v1 palette), plus "Daylight" and
@@ -22,6 +22,7 @@
 #include "fdk/fdk.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static struct {
@@ -93,13 +94,13 @@ static void window_event(fdk_window *window, const fdk_event_data *event,
 int main(void) {
     font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
-        fprintf(stderr, "08_theme: no system TrueType font found — "
+        fprintf(stderr, "05_theme: no system TrueType font found — "
                         "this demo needs one. Install a face like "
                         "DejaVu Sans or Noto Sans, or point "
                         "FDK_FONT_FILE at a .ttf/.ttc\n");
         return 1;
     }
-    printf("08_theme: using font %s\n",
+    printf("05_theme: using font %s\n",
            fdk_font_get_file_path(font16));
 
     /* Themes 1 and 2 come from .fdk files — the same parser a
@@ -108,7 +109,7 @@ int main(void) {
         fdk_result r = FDK_ERR_UNKNOWN;
         themes[i] = fdk_theme_load(THEME_FILES[i], &r);
         if (themes[i] == NULL) {
-            fprintf(stderr, "08_theme: cannot load %s (%s) — run from "
+            fprintf(stderr, "05_theme: cannot load %s (%s) — run from "
                             "the repository root\n",
                     THEME_FILES[i], fdk_result_to_string(r));
             return 1;
@@ -125,7 +126,7 @@ int main(void) {
     }
 
     fdk_window_options wopts = {
-        .title = "FDK 08 — theme engine",
+        .title = "FDK 05 — theme engine",
         .width = 460,
         .height = 330,
     };
@@ -185,6 +186,12 @@ int main(void) {
     print_rig_rect("next", next_btn);
     print_rig_rect("quit", quit_btn);
 
+    const char *anim = getenv("FDK_DEMO_ANIMATE");
+    const bool animate =
+        anim != NULL && anim[0] != '\0' && strcmp(anim, "0") != 0;
+    const char *limit_s = getenv("FDK_DEMO_FRAMES");
+    const int frame_limit = (limit_s != NULL) ? atoi(limit_s) : 0;
+
     int frames = 0;
     while (!app.quit) {
         (void)fdk_pump_events(ctx, 15);
@@ -192,21 +199,30 @@ int main(void) {
             break;
         }
 
-        /* The meter sweeps forever: every theme is seen mid-motion,
-         * and the loop proves themed painting is not a one-shot. */
-        fdk_progress_set_fraction(progress,
-                                  (fdk_f32)(frames % 200) / 199.0f);
+        /* One startup sweep (every theme is seen mid-motion), then
+         * the meter holds — an idle app presents nothing. The rig can
+         * keep it sweeping with FDK_DEMO_ANIMATE=1. */
+        if (frames < 400 || animate) {
+            fdk_progress_set_fraction(progress,
+                                      (fdk_f32)(frames % 200) / 199.0f);
+        }
 
         fdk_surface *surface = NULL;
         if (fdk_ok(fdk_window_get_surface(app.window, &surface)) &&
             !fdk_surface_frame_ready(surface)) {
             continue;
         }
-        (void)fdk_window_paint(app.window);
+        if (fdk_widget_tree_has_damage(root)) {
+            (void)fdk_window_paint(app.window);
+        }
         frames++;
+
+        if (frame_limit > 0 && frames >= frame_limit) {
+            break;
+        }
     }
 
-    printf("08_theme: exited cleanly after %d frames\n", frames);
+    printf("05_theme: exited cleanly after %d frames\n", frames);
     fdk_font_destroy(font16);
     if (app.window != NULL) {
         fdk_window_destroy(app.window);
