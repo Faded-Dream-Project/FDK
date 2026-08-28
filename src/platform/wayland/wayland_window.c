@@ -14,6 +14,7 @@
 #include <sys/mman.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -94,6 +95,16 @@ static fdk_result create_shm_buffer(fdk_platform_connection *conn,
         munmap(pixels, length);
         FDK_WARN("wl_shm_pool_create_buffer failed");
         return FDK_ERR_OUT_OF_MEMORY;
+    }
+
+    /* 1.1.6: wl_buffer events ride the connection's DEDICATED queue,
+     * so the slot-exhaustion wait (get_framebuffer below) can block
+     * on wl_buffer::release alone — dispatching that queue never runs
+     * unrelated listeners re-entrantly, which is what makes the
+     * bounded wait safe to call from inside a listener-driven paint
+     * (the dispatch-tail synchronous repaint). */
+    if (conn->release_queue != NULL) {
+        wl_proxy_set_queue((struct wl_proxy *)buffer, conn->release_queue);
     }
 
     *out_buffer = buffer;
@@ -838,14 +849,136 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
         }
     }
     if (slot < 0) {
-        /* Every slot holds a buffer the compositor has not released
-         * yet. A conforming compositor releases each superseded
-         * buffer at the next commit, so four in flight means it is
-         * hoarding them; refusing (loudly) is safer than reusing a
-         * buffer the compositor may still be scanning out. */
-        FDK_WARN("all %d render buffers in flight (compositor not "
-                 "releasing?) — refusing new acquisition",
-                 FDK_WL_RENDER_SLOTS);
+        /* 1.1.6: every slot is busy — WAIT, don't drop the frame.
+         *
+         * The pre-1.1.6 behavior (refuse immediately, loudly) was
+         * built on the assumption that a compositor holding all four
+         * buffers for long is misbehaving. The live report that
+         * broke it: Muffin's experimental Wayland session on older
+         * hardware — perfectly allowed to take >250ms per present
+         * under load — turned every guard-expired repaint attempt
+         * into a refusal, ~70 per interaction burst, and the dropped
+         * frames read as "Wayland feels slower than X11".
+         *
+         * So: flush our committed requests (the compositor cannot
+         * release what it has not received), then dispatch whatever
+         * release events already arrived, then poll the display fd
+         * for up to FDK_WL_RELEASE_WAIT_MS in 10ms steps. Releases
+         * ride the dedicated release_queue, so this wait ONLY ever
+         * runs wl_buffer listeners — safe even though acquisition
+         * can be reached from inside a listener (the dispatch tail's
+         * synchronous repaint). */
+        fdk_i64 wait_deadline = now_ms() + FDK_WL_RELEASE_WAIT_MS;
+        while (slot < 0 && now_ms() < wait_deadline) {
+            (void)wl_display_flush(pwindow->conn->display);
+            (void)fdk_wayland_release_queue_dispatch(pwindow->conn);
+            for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+                if (pwindow->render_slots[i].buffer != NULL &&
+                    pwindow->render_slots[i].released &&
+                    pwindow->render_slots[i].size.width == size.width &&
+                    pwindow->render_slots[i].size.height == size.height) {
+                    slot = i;
+                    break;
+                }
+            }
+            if (slot >= 0) {
+                break;
+            }
+            /* Nothing buffered — READ from the display fd, bounded.
+             * The prepare_read/poll/read_events dance is the same
+             * libwayland idiom wayland_dispatch.c uses (and Mesa's
+             * swapchain waits): read_events routes every event to its
+             * target queue, then the release-queue dispatch above
+             * credits only wl_buffer listeners — a configure read
+             * here stays buffered for the main loop, un-run. Safe to
+             * nest inside a listener: single-threaded, and the outer
+             * dispatch_pending holds no read marker while listeners
+             * execute. */
+            int remaining = (int)(wait_deadline - now_ms());
+            if (remaining > 10) {
+                remaining = 10;
+            }
+            if (wl_display_prepare_read(pwindow->conn->display) == 0) {
+                struct pollfd pfd = {
+                    .fd = wl_display_get_fd(pwindow->conn->display),
+                    .events = POLLIN,
+                };
+                int pr = poll(&pfd, 1, remaining);
+                if (pr > 0 && (pfd.revents & POLLIN)) {
+                    if (wl_display_read_events(pwindow->conn->display) < 0) {
+                        break; /* connection error: stop waiting (the
+                                    read marker is consumed even on
+                                    failure — do NOT cancel_read) */
+                    }
+                    (void)fdk_wayland_release_queue_dispatch(pwindow->conn);
+                } else {
+                    wl_display_cancel_read(pwindow->conn->display);
+                }
+            } else {
+                /* Events already queued somewhere: dispatch_pending
+                 * above will have consumed ours next iteration; do
+                 * not spin the CPU waiting for the compositor. */
+                usleep(1000);
+            }
+        }
+    }
+
+    if (slot < 0) {
+        /* Still nothing at the right size. LAST RESORT before
+         * refusing: reap an unreleased slot at the WRONG size. Each
+         * buffer owns its memfd pool, and destroying a wl_shm
+         * wl_buffer after commit is legal — the compositor keeps its
+         * server-side mapping — so this only costs the churn of a
+         * fresh allocation. Interactive resizes need exactly this:
+         * every configure step changes the size, so the pool fills
+         * with wrong-size slots the compositor has not released yet,
+         * and refusing there stalled the whole maximize cycle on
+         * slow compositors (the 1.1.5 live report's burst of 40+
+         * refusals during maximize toggling). */
+        for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+            if (pwindow->render_slots[i].buffer != NULL &&
+                pwindow->render_slots[i].buffer != pwindow->buffer &&
+                (pwindow->render_slots[i].size.width != size.width ||
+                 pwindow->render_slots[i].size.height != size.height)) {
+                wl_buffer_destroy(pwindow->render_slots[i].buffer);
+                munmap(pwindow->render_slots[i].pixels,
+                       pwindow->render_slots[i].length);
+                pwindow->render_slots[i].buffer = NULL;
+                pwindow->render_slots[i].pixels = NULL;
+                pwindow->render_slots[i].length = 0;
+                pwindow->render_slots[i].size.width = 0;
+                pwindow->render_slots[i].size.height = 0;
+                pwindow->render_slots[i].released = 0;
+                slot = i;
+                FDK_DEBUG("reaped an unreleased wrong-size render slot "
+                          "after %dms release wait (interactive resize)",
+                          FDK_WL_RELEASE_WAIT_MS);
+                break;
+            }
+        }
+    }
+
+    if (slot < 0) {
+        /* Genuine refusal: every slot holds a buffer at the CURRENT
+         * size the compositor has not released — it is hoarding
+         * frames it asked for. Rate-limit the warning (one per stall
+         * episode; the 1.1.5 live report counted ~80 identical lines
+         * in a single session) and hand the caller an honest error;
+         * the damage stays set and the frame goes out on the next
+         * successful acquisition. */
+        fdk_i64 now = now_ms();
+        if (pwindow->last_refuse_warn_ms == 0 ||
+            now - pwindow->last_refuse_warn_ms >
+                FDK_WL_REFUSE_WARN_INTERVAL_MS) {
+            pwindow->last_refuse_warn_ms = now;
+            FDK_WARN("all %d render buffers in flight after a %dms "
+                     "release wait — compositor not releasing; "
+                     "deferring this frame",
+                     FDK_WL_RENDER_SLOTS, FDK_WL_RELEASE_WAIT_MS);
+        } else {
+            FDK_DEBUG("render acquisition still refused (rate-limited "
+                      "repeat of the episode's WARN)");
+        }
         return FDK_ERR_SURFACE_CREATE;
     }
 
@@ -1030,6 +1163,28 @@ int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow) {
     if (!pwindow->rendered_ever) {
         return 1; /* nothing presented yet — always allowed */
     }
+    /* 1.1.6 capacity gate: the starvation guard below exists so a
+     * hidden surface (compositor never sends frame callbacks) does
+     * not starve. But "ready" while every render slot is in flight
+     * is a LIE the pre-1.1.6 code told ~70 times per interaction on
+     * Muffin's experimental Wayland session: the guard expired, the
+     * app painted, acquisition refused, the frame dropped, repeat
+     * every loop pass. Gating on capacity means the app's paint
+     * loop waits (its prerogative) instead of spinning through
+     * refusals — while hidden surfaces still pass the guard and get
+     * their one honest frame when a slot frees (the wrong-size
+     * reaper in get_framebuffer guarantees progress on resizes). */
+    int capacity = 0;
+    for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+        if (pwindow->render_slots[i].buffer == NULL ||
+            pwindow->render_slots[i].released) {
+            capacity = 1;
+            break;
+        }
+    }
+    if (!capacity) {
+        return 0;
+    }
     /* Starvation guard: hidden surfaces never get frame callbacks,
      * and a wedged compositor must not wedge every FDK app. Pacing
      * degrades to a floor rate instead of stopping. */
@@ -1074,6 +1229,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->buffer_attached = 0;
     pwindow->render_pending = NULL;
     pwindow->rendered_ever = 0;
+    pwindow->last_refuse_warn_ms = 0;
     pwindow->scale_x120 = 120;    /* 1x until an output says otherwise */
     pwindow->buffer_scale = 1;
     pwindow->scale_applied = 0;   /* applied on the first commit      */

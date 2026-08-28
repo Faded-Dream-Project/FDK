@@ -194,6 +194,14 @@ static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t seria
             conn->pointer_x = wl_fixed_to_double(sx);
             conn->pointer_y = wl_fixed_to_double(sy);
             fdk_event_data event = { .type = FDK_EVENT_POINTER_ENTER };
+            /* 1.1.6: the enter must carry its surface-local position —
+             * the window layer hit-tests ENTER through the resize-edge
+             * compass (the cursor affordance) and the widget tree
+             * seeds hover from it; a (0,0)-positioned enter armed the
+             * NW resize cursor and mis-hovered on every entry (the
+             * X11 backend has always set these fields). */
+            event.pointer.position.x = (fdk_f32)conn->pointer_x;
+            event.pointer.position.y = (fdk_f32)conn->pointer_y;
             conn->dispatch(conn->windows[i], &event, conn->dispatch_user_data);
             return;
         }

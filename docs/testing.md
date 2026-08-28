@@ -803,3 +803,81 @@ the i18n formatters. It is deliberately NOT part of `make test`:
 performance numbers are machine-dependent. The reference baseline and
 the findings it produced (including the 515x layout-batching win)
 live in `docs/performance.md`.
+
+## The Wayland rigs' 1.1.6 hardening (buffer pacing + cursors)
+
+The second Cinnamon-Wayland report (see roadmap 1.1.6) forced three
+test-infrastructure rebuilds and found two latent bugs — recorded
+here because every piece of them will bite again otherwise.
+
+**The injector is back, with a handshake.** `fdk-wl-inject` (the
+zwlr_virtual_pointer_v1 client that mints REAL input serials under a
+headless compositor) was lost to a session reset and recreated from
+the suite's documented command protocol (`move x y` / `down b` /
+`up b` / `tap b`). Two design changes over the original: (1) the
+output extent is DISCOVERED from the first wl_output's mode event
+instead of assumed — the headless output is 1280x720, not 800, and
+the wrong constant scaled every injected Y by 0.9 (a pointer sent to
+(165,115) arrived at (165,103.5); the trace's enter coordinate
+(65,43.496) against the window's known geometry pinned it in one
+look); (2) a READY-FILE handshake — the injector writes the path in
+$FDK_WL_INJECT_READY once the virtual pointer exists, and the suite
+polls that file before trusting the pipe. Without the handshake,
+running the suite under a compositor that lacks the wlr protocol
+(kiosk-shell weston) died on SIGPIPE at the first command write —
+an "absent tooling honestly skips" contract that was only ever
+checked per-machine, not per-compositor.
+
+**The sway rig's floating rule is load-bearing.** The suite's
+interactive coordinates all assume the window sits at (100,60) —
+which requires `for_window [app_id="org.fdk.test"] floating enable,
+move position 100 px 60 px` in the rig's sway config. That line was
+lost in the same reset as the injector; since the injector was also
+gone, every interactive section silently [skip]ped and nothing
+noticed. Two lessons: the [skip] greps must be READ (a rig that
+passes on all-skips proves nothing), and `position 100 60` is not a
+sway command — `move position 100 px 60 px` is; the invalid form
+parses without error and places the window at sway's centered
+default. Placement is verifiable directly: run any client with the
+rule's app_id and ask `swaymsg -t get_tree` where it actually is
+(scripts/probe_placement.sh does this; note a window WITHOUT CSD
+gets sway's titlebar and sits 25px lower than placed — probe with a
+decorated client).
+
+**A latent suite UAF the new coverage detonated.** The menu section
+destroyed its font while the opener button borrowing that font still
+lived in the main window's tree; no test repainted that tree
+afterwards, so it survived every battery — until the new pacing
+section created a second window, sway reconfigured the first, and
+the dispatch tail's synchronous repaint painted a Button through a
+freed font under ASan. Borrowed resources must outlive their
+borrowers; the section now destroys the button before the font.
+
+**What the pacing regressions can and cannot pin.** The suite can
+deterministically build a full pool (back-to-back damaged presents
+with zero pumping — the commits sit unflushed in libwayland's output
+buffer, so the compositor cannot have released anything) and assert
+frame_ready stays honest, and that an acquisition against that pool
+waits and lands. What it CANNOT do against a healthy compositor is
+reproduce the user's guard-time WARN storm: sway releases within a
+frame, so the 100ms wait always recovers — the storm needs a
+compositor slower than the wait window (Muffin's experimental
+session under load). The rig therefore asserts ZERO "buffers in
+flight" WARN lines across suite and demo (the regression tripwire),
+and the live re-test on the reported machine is the real control.
+
+**Cursor evidence is protocol-level.** The window-layer seam
+(fdk__window_cursor_edge) proves the compass armed; the actual
+wire proof is the suite's WAYLAND_DEBUG stderr (captured separately
+from stdout since 1.1.6) grepped for wl_pointer.set_cursor —
+requests that can only exist if the theme loader found a real
+cursor file, parsed it, and uploaded it. Debian's Adwaita and
+"default" (Inherits=Adwaita) themes are present on the test image;
+the pre-fix control build fails exactly this check (and the
+set_app_id one) — the probes see the features they guard.
+
+**The recurring object-collision trap.** Debug and release share
+build/obj; running `make release` and then a rig (which builds
+debug) mixes flags-silently and fails at link or run with no
+obvious cause ("FAIL: build", suite exit 2). `make clean` between
+battery phases is mandatory, not cosmetic.

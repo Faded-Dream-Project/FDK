@@ -100,7 +100,21 @@ primitive set — implemented on both backends via optional
 runs before the first xdg configure is DEFERRED and committed by
 the backend at configure time — the deferred-first-frame contract
 that keeps the application's show -> paint -> pump order mapping
-windows on every compositor, and the first configure EMITS
+windows on every compositor. Wayland buffer LIFECYCLE (1.1.6):
+every wl_buffer rides a dedicated wl_event_queue, so
+wl_buffer::release can be dispatched alone (never re-entrantly
+running input/configure listeners); when every render slot is in
+flight the acquisition path WAITS up to FDK_WL_RELEASE_WAIT_MS for
+a release (flush -> dispatch the release queue -> bounded
+prepare/poll/read), then reaps an unreleased WRONG-SIZE slot as
+the resize-churn escape (each buffer owns its memfd pool —
+destroying a committed wl_shm buffer is legal), and only then
+refuses, rate-limited to one WARN per 2s episode.
+`window_frame_ready`'s starvation guard additionally requires POOL
+CAPACITY: a hidden surface still paces at the guard floor, but
+"ready" with zero available buffers was the pacing lie that slow
+compositors (Muffin's experimental Wayland session) turned into
+frame-dropping WARN storms. The first configure EMITS
 FDK_EVENT_WINDOW_CONFIGURE whenever it proposes a size different
 from the creation size, because resize-at-map compositors
 (kiosk-shell fullscreen, tiling WMs) state their size exactly there
@@ -187,12 +201,22 @@ against the old geometry sticks forever without the revalidation
 the application's event callback never sees these synthesized
 positions). `window_set_cursor` (X11: lazily created XCreateFontCursor
 glyphs from the server's built-in cursor font — core protocol, no
-libXcursor — cached per connection and freed at disconnect; Wayland:
-deliberately absent, honestly documented, because proper shaping
-needs a cursor theme over wl_shm and per-enter set_cursor) maps the
-same compass vocabulary as begin_resize to directional cursors, so
-FDK's edge zones advertise "this edge drags" BEFORE any button is
-held — the affordance a WM frame's borders give for free. FDK_EVENT_WINDOW_STATE /
+libXcursor — cached per connection and freed at disconnect; Wayland
+since 1.1.6: a hand-rolled XCursor THEME loader in
+src/platform/wayland/wayland_cursor.c — $XCURSOR_PATH or the
+libxcursor search roots walked through index.theme `Inherits=`
+chains to the "default" theme, closest-size image, ARGB upload
+over wl_shm, one cached cursor surface per connection,
+wl_pointer.set_cursor citing the live input serial; no libxcursor
+dependency, and a machine with no cursor theme anywhere keeps the
+compositor's own arrow — honest degradation, never a hidden
+cursor) maps the same compass vocabulary as begin_resize to
+directional cursors, so FDK's edge zones advertise "this edge
+drags" BEFORE any button is held — the affordance a WM frame's
+borders give for free. The ENTER event carries its surface-local
+position on both backends (the Wayland seat handler forgot it
+until 1.1.6 — every entry armed the NW cursor and seeded hover at
+the top-left corner until the first motion). FDK_EVENT_WINDOW_STATE /
 FDK_EVENT_WINDOW_DECORATION report platform truth, never request
 optimism — see platform_internal.h, which documents the EWMH vs
 xdg-decoration vs bare-X differences instead of assuming them away),

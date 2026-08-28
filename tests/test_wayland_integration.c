@@ -46,6 +46,7 @@
 #include <stdio.h>
 #include <stdlib.h> /* free() for clipboard strings */
 #include <string.h>
+#include <time.h>   /* nanosleep — the pacing regression's guard wait */
 #include <unistd.h> /* access() — the injector-availability probe */
 
 static fdk_dialog_response g_wayland_dlg_last =
@@ -90,9 +91,39 @@ static bool wayland_injector_start(void) {
     if (access("/home/z/my-project/scripts/fdk-wl-inject", X_OK) != 0) {
         return false;
     }
-    g_injector = popen("/home/z/my-project/scripts/fdk-wl-inject serve",
-                       "w");
-    return g_injector != NULL;
+    /* ...and that THIS compositor speaks the wlr virtual-pointer
+     * protocol: the injector drops a ready-file once the device
+     * really exists (weston kiosk-shell has no zwlr manager; the
+     * injector exits and any write would SIGPIPE — the file-based
+     * handshake keeps the skip honest per-compositor, not just
+     * per-machine). */
+    char ready_path[128];
+    (void)snprintf(ready_path, sizeof ready_path,
+                   "/tmp/fdk-wl-inject.%ld.ready", (long)getpid());
+    unlink(ready_path);
+    char cmd[256];
+    (void)snprintf(cmd, sizeof cmd,
+                   "FDK_WL_INJECT_READY=%s "
+                   "/home/z/my-project/scripts/fdk-wl-inject serve",
+                   ready_path);
+    g_injector = popen(cmd, "w");
+    if (g_injector == NULL) {
+        return false;
+    }
+    for (int i = 0; i < 40; i++) { /* up to 2s for the device to exist */
+        if (access(ready_path, F_OK) == 0) {
+            unlink(ready_path);
+            return true;
+        }
+        /* pump while waiting: the injector connects in parallel and
+         * the compositor needs no help, but sleeping is free. */
+        struct timespec tick = { .tv_sec = 0, .tv_nsec = 50L * 1000L * 1000L };
+        nanosleep(&tick, NULL);
+    }
+    pclose(g_injector);
+    g_injector = NULL;
+    unlink(ready_path);
+    return false;
 }
 
 static void wayland_inject(const char *cmd) {
@@ -740,6 +771,11 @@ int main(void) {
                    "serial-0 popup request\n");
 
             fdk_menu_destroy(menu);
+            /* The opener button BORROWS `font` — destroy it before the
+             * font or every later repaint of this window's tree reads
+             * freed metrics (a latent UAF the 1.1.6 pacing section's
+             * configure-repaint first detonated, live under ASan). */
+            fdk_widget_destroy(btn);
             fdk_font_destroy(font);
         }
 
@@ -765,7 +801,146 @@ int main(void) {
                "destroy answers Cancel, clean teardown\n");
     }
 
-    fdk_window_destroy(win);
+    /* ---- 1.1.6: buffer starvation / frame pacing ----
+     *
+     * The live report from Muffin's experimental Wayland session: the
+     * 250ms starvation guard expired while the compositor was (legally)
+     * slow, every guard-forced repaint hit a full pool, and the
+     * acquisition path REFUSED — ~80 identical WARN lines per session
+     * and frames dropped on the floor (reading as "Wayland feels
+     * slower than X11"). Three properties now hold, each asserted
+     * deterministically against sway:
+     *
+     *   1. frame_ready NEVER declares ready while every render slot
+     *      is in flight — even past the guard. (Pre-fix: after 250ms
+     *      of unacknowledged silence it said 1 and the app slammed
+     *      into the refusal.)
+     *   2. An acquisition against a full pool WAITS for a release
+     *      (bounded, release-queue-dispatched) and succeeds, instead
+     *      of dropping the frame. (Pre-fix: FDK_ERR_SURFACE_CREATE.)
+     *   3. Pumping recovers readiness — releases and the frame
+     *      callback are credited by the ordinary loop.
+     *
+     * Exhaustion is built by presenting back-to-back WITHOUT pumping:
+     * no dispatch means no wl_buffer::release is ever credited, no
+     * frame callback ever read — exactly the app-side half of a slow
+     * compositor. */
+    {
+        fdk_window *pw = NULL;
+        fdk_window_options popts = { .title = "FDK pacing",
+                                     .width = 400, .height = 300 };
+        assert(fdk_ok(fdk_window_create(ctx, &popts, &pw)));
+        fdk_widget *proot = NULL;
+        assert(fdk_ok(fdk_window_get_root(pw, &proot)));
+        fdk_widget_set_background(proot,
+                                  (fdk_color){0.9f, 0.2f, 0.2f, 1.0f});
+        fdk_window_show(pw);
+        pump_and_paint(ctx, pw, 400); /* mapped + presenting */
+
+        fdk_surface *ps = NULL;
+        assert(fdk_ok(fdk_window_get_surface(pw, &ps)));
+
+        /* Exhaust: four damaged presents, zero pumping in between.
+         * The commits stay in libwayland's OUTPUT buffer (nothing
+         * flushed them), so sway cannot have released anything and
+         * the pool is fully busy: pacing must answer NOT-ready. */
+        for (int i = 0; i < 4; i++) {
+            fdk_widget_set_background(
+                proot, (i & 1) ? (fdk_color){0.2f, 0.9f, 0.2f, 1.0f}
+                               : (fdk_color){0.2f, 0.2f, 0.9f, 1.0f});
+            (void)fdk_window_paint(pw);
+        }
+        assert(fdk_surface_frame_ready(ps) == 0);
+        printf("[ok] wayland pacing: full pool + unacknowledged frame "
+               "-> frame_ready says wait\n");
+
+        /* Let the starvation guard expire (300ms) and paint anyway —
+         * an app pacing on its own clock, or the dispatch tail's
+         * synchronous resize repaint. The acquisition must WAIT for a
+         * release (bounded, release-queue-dispatched: the wait's own
+         * flush finally hands sway the buffered commits, and its
+         * answers arrive within the window) and LAND the frame —
+         * pre-1.1.6 this was an instant refusal + WARN + dropped
+         * frame (the rig's zero-refusal check pins that half; the
+         * pre-fix control build fails it, proving the probe sees the
+         * bug). The guard-time full-pool state itself only persists
+         * on compositors slower than the wait window (Muffin's
+         * experimental Wayland was the live report) — against a
+         * healthy sway the wait always recovers, which is exactly
+         * what this asserts. */
+        struct timespec guard_expire = { .tv_sec = 0,
+                                         .tv_nsec = 300L * 1000L * 1000L };
+        nanosleep(&guard_expire, NULL);
+        fdk_widget_set_background(proot,
+                                  (fdk_color){0.9f, 0.9f, 0.2f, 1.0f});
+        assert(fdk_ok(fdk_window_paint(pw)));
+        printf("[ok] wayland pacing: acquisition against a full pool "
+               "waited for the release instead of dropping the frame\n");
+
+        /* Ordinary loop shape recovers readiness. */
+        pump_and_paint(ctx, pw, 400);
+        assert(fdk_surface_frame_ready(ps) == 1);
+        printf("[ok] wayland pacing: pumping recovers readiness "
+               "(release + frame callback credited)\n");
+
+        fdk_window_destroy(pw);
+    }
+
+    /* ---- 1.1.6: cursor shaping (edge affordance) ----
+     *
+     * The resize cursor that was X11-only in 1.1.4: on Wayland the
+     * client owns its cursor pixels, and 1.1.6 ships the XCursor
+     * theme loader (wayland_cursor.c) behind the same window_set_cursor
+     * op. Driven with REAL injected motion — the serial a set_cursor
+     * request must cite is only minted by real input. The rig's sway
+     * config floats every org.fdk.test window at (100,60), so the
+     * 300x200 window's right edge is output x=399 and its vertical
+     * middle is output y=160. */
+    if (wayland_injector_start()) {
+        fdk_window_destroy(win); /* sole-window determinism (see above) */
+        win = NULL;
+
+        fdk_window *cw = NULL;
+        fdk_window_options copts = { .title = "FDK cursor",
+                                     .width = 300, .height = 200 };
+        assert(fdk_ok(fdk_window_create(ctx, &copts, &cw)));
+        fdk_widget *croot = NULL;
+        assert(fdk_ok(fdk_window_get_root(cw, &croot)));
+        fdk_widget_set_background(croot,
+                                  (fdk_color){0.25f, 0.25f, 0.35f, 1.0f});
+        fdk_window_set_resizable(cw, true);
+        /* CSD, like every decorations user: without it sway draws its
+         * own titlebar and the surface sits 2/25px inside the placed
+         * container, shifting every window-local coordinate. */
+        assert(fdk_ok(fdk_window_set_decorated(cw, true)));
+        fdk_window_show(cw);
+        pump_and_paint(ctx, cw, 500); /* pointer capability arrives */
+
+        /* Right edge, middle height: the E resize cursor. */
+        wayland_inject("move 399 160");
+        pump_and_paint(ctx, cw, 300);
+        assert(fdk__window_cursor_edge(cw) == 3 /* FDK_WRES_E */);
+        printf("[ok] wayland cursor: edge hover armed the directional "
+               "resize cursor (E)\n");
+
+        /* Interior: back to the default arrow. */
+        wayland_inject("move 250 160");
+        pump_and_paint(ctx, cw, 300);
+        assert(fdk__window_cursor_edge(cw) == 0 /* FDK_WRES_NONE */);
+        printf("[ok] wayland cursor: interior motion restored the "
+               "default shape\n");
+
+        fdk_window_destroy(cw);
+        wayland_injector_stop();
+    } else {
+        printf("[skip] wayland cursor section (fdk-wl-inject "
+               "unavailable — REAL input serials cannot be minted "
+               "here)\n");
+    }
+
+    if (win != NULL) {
+        fdk_window_destroy(win);
+    }
     fdk_shutdown(ctx);
     printf("[ok] clean teardown under Wayland\n");
 

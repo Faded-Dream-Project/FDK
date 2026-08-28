@@ -2103,3 +2103,107 @@ negotiation unchanged: 3 set_mode requests in the auto cycle), the
 weston manager-less rig + pre-fix control — now with LeakSanitizer
 fully enabled on BOTH compositors — and the openbox real-WM rig
 (all six checks green) — ALL PASS.
+
+### 1.1.6 — Wayland buffer starvation + the missing resize cursor (the second Cinnamon Wayland report) — COMPLETE
+
+The follow-up report from the same Muffin (Cinnamon experimental
+Wayland) session as 1.1.5, with a full log: the demo now survives
+and works, but (1) `[WARN] all 4 render buffers in flight
+(compositor not releasing?) — refusing new acquisition` fired ~80
+times per session in bursts, (2) the UI "feels slower than X11" on
+the same old laptop, and (3) the edge-hover resize cursor that
+1.1.4 gave X11 was simply absent on Wayland.
+
+Root cause (1)+(2): a protocol-legal slow compositor. Muffin is
+allowed to take >250ms per present under load; when it did, the
+frame-pacing starvation guard (FDK_WL_FRAME_GUARD_MS) declared the
+window "ready", the app painted, acquisition found all four render
+slots unreleased and REFUSED — dropping the frame and WARNing,
+once per loop pass (~15ms), for the whole burst. Maximize toggling
+amplified it: every configure step changes the buffer size, and
+the pool's wrong-size slots could not be reaped while unreleased,
+so resizes exhausted the pool even faster. Slow frames + dropped
+frames = "slower than X11".
+
+The fix, in four parts (wayland_window.c / wayland_dispatch.c):
+  - A DEDICATED wl_event_queue for every wl_buffer's events
+    (wl_proxy_set_queue at creation). wl_buffer::release is often
+    the only event the render path needs; on its own queue it can
+    be dispatched without running unrelated listeners — which is
+    what makes the next two parts safe from inside a listener
+    (the dispatch tail's synchronous resize repaint).
+  - WAIT, DON'T REFUSE: a full pool now blocks up to
+    FDK_WL_RELEASE_WAIT_MS (100ms) in 10ms steps — flush, dispatch
+    buffered releases, prepare_read/poll/read_events, repeat —
+    before even considering a refusal. The pre-fix behavior on the
+    user's machine (drop + WARN per pass) becomes "delay one frame
+    and land it".
+  - WRONG-SIZE REAP AS LAST RESORT: after the wait, an unreleased
+    slot at a different size is destroyed and its slot reused
+    (each buffer owns its memfd pool; destroying a committed wl_shm
+    buffer is legal — the compositor keeps its mapping). Interactive
+    resize churn can no longer wedge the pool.
+  - frame_ready()'s starvation guard now also requires POOL
+    CAPACITY: "ready" while every slot is in flight was the pacing
+    lie that walked the app into the refusals. The WARN itself is
+    rate-limited to once per 2s episode.
+
+Fix (3): the resize cursor is now real on Wayland —
+src/platform/wayland/wayland_cursor.c implements window_set_cursor
+with a hand-rolled XCursor theme loader (no libxcursor, mirroring
+the X11 backend's cursor-font choice): $XCURSOR_PATH or the
+libxcursor search roots, Inherit chains via index.theme
+("Inherits=" — the key has an s), the "default" theme fallback,
+closest-size image pick, ARGB upload over wl_shm, one cached
+cursor surface per connection, wl_pointer.set_cursor citing the
+live input serial. The container format was verified byte-by-byte
+against Debian's Adwaita files: all fields LITTLE-endian (magic is
+the literal bytes "Xcur"), version is NOT validated (Adwaita
+writes 65536, xcursorgen writes 1), and the image chunk header
+counts 9 CARD32s (header=36; pixels begin at chunk+header — proven
+contiguous by Adwaita's own TOC arithmetic). A machine without any
+cursor theme degrades honestly to the compositor's default arrow
+(one DEBUG line per miss).
+
+Two more fixes the new cursor test forced out:
+  - pointer_enter (wayland_seat.c) dispatched FDK_EVENT_POINTER_
+    ENTER with its position fields unset (0,0) — the window layer
+    hit-tests ENTER through the resize compass, so every Wayland
+    entry armed the NW cursor and seeded hover at the top-left
+    corner until the first motion. The X11 backend had always set
+    these; Wayland now does too.
+  - fdk_init_options.app_id unset left every Wayland toplevel at
+    the generic "fdk.app" (the user's log showed app_id=(none) in
+    core's line and the placeholder on the wire). connect() now
+    derives the id from /proc/self/cmdline's first token (argv[0]
+    basename): demos identify as "06_decorations" in taskbars and
+    compositor window rules.
+
+Verified: the sway rig grew three pacing assertions (full pool +
+unacknowledged frame -> frame_ready says wait; acquisition against
+a full pool waits and lands; pumping recovers) and a cursor section
+driven by the REBUILT virtual-pointer injector (the original was
+lost to a session reset; the recreation adds a ready-file
+handshake so compositors without zwlr_virtual_pointer — kiosk-
+shell weston — honestly skip instead of SIGPIPEing the suite, and
+discovers the output extent from wl_output instead of assuming
+1280x800 — the headless output is 1280x720, and the 0.9 Y-scaling
+of that wrong constant was traced through an 11.5px popup miss).
+Protocol evidence is asserted in the suite's WAYLAND_DEBUG trace
+(>=2 wl_pointer.set_cursor with real serials) and the demo's
+(xdg_toplevel.set_app_id "06_decorations"; zero "buffers in
+flight" WARN lines anywhere). The pre-fix control (worktree at
+e0e2630) fails exactly the app_id and set_cursor checks — the
+probes see the features. The rig also restored its lost sway
+for_window floating rule (interactive coordinates assumed it since
+the injector died) and fixed a latent suite UAF (the menu section
+destroyed its font while the opener button borrowing it still
+lived — the pacing section's configure-repaint detonated it under
+ASan). Battery: clean rebuilds debug + release (Wayland on,
+0 warnings), headless suite, X11 integration suite (green; no X11
+code touched this milestone), Wayland integration suite + sway
+rig PASS (5 new [ok]s), weston manager-less rig PASS, sway
+examples rig PASS (8/8 pixel-verified via grim, restored to the
+prefix). The openbox real-WM rigs were not rerun: openbox was
+lost to the environment reset and no X11-side line changed — the
+in-suite X11 regressions (which ran green) pin that surface.

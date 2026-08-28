@@ -30,6 +30,28 @@ static int flush_output(fdk_platform_connection *conn) {
     return 0;
 }
 
+/* Drains the dedicated wl_buffer release queue (1.1.6): every
+ * wl_buffer created by create_shm_buffer() has its proxy assigned to
+ * conn->release_queue, so this dispatches ONLY wl_buffer::release
+ * listeners — never input/configure/frame listeners — which is what
+ * makes it safe to call from inside any listener (the slot-
+ * exhaustion wait in wayland_window.c relies on that). Events for
+ * other queues that were already READ stay buffered for their own
+ * dispatchers; this call never runs them. */
+int fdk_wayland_release_queue_dispatch(fdk_platform_connection *conn) {
+    if (conn == NULL || conn->release_queue == NULL) {
+        return 0;
+    }
+    int dispatched = wl_display_dispatch_queue_pending(conn->display,
+                                                       conn->release_queue);
+    if (dispatched < 0) {
+        FDK_ERROR("wl_display_dispatch_queue_pending(release) failed "
+                  "(errno=%d)", errno);
+        return -1;
+    }
+    return dispatched;
+}
+
 /* Unlike X11 (x11_dispatch.c), Wayland's client library already does
  * event translation FOR us at the wl_*_listener callback level — each
  * listener function above (wayland_seat.c, wayland_window.c) calls
@@ -46,7 +68,12 @@ static int flush_output(fdk_platform_connection *conn) {
  * blocking read and would be wrong to call after our own poll() —
  * that risks a second, redundant blocking read). See
  * https://wayland.freedesktop.org/docs/html/apb.html for the pattern
- * this mirrors. */
+ * this mirrors.
+ *
+ * After every dispatch, the dedicated release queue is drained too:
+ * buffer releases are the render path's fuel, and leaving them
+ * queued behind the default queue would starve get_framebuffer()
+ * even though the bytes arrived (1.1.6). */
 int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
     /* wl_display_prepare_read() fails (nonzero) if events are already
      * queued from a previous read — in that case just dispatch those
@@ -59,6 +86,7 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
             FDK_ERROR("wl_display_dispatch_pending failed (errno=%d)", errno);
             return (int)FDK_ERR_PLATFORM_INIT;
         }
+        (void)fdk_wayland_release_queue_dispatch(conn);
         return flush_output(conn) < 0 ? (int)FDK_ERR_PLATFORM_INIT : dispatched;
     }
 
@@ -95,5 +123,6 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
         FDK_ERROR("wl_display_dispatch_pending failed (errno=%d)", errno);
         return (int)FDK_ERR_PLATFORM_INIT;
     }
+    (void)fdk_wayland_release_queue_dispatch(conn);
     return flush_output(conn) < 0 ? (int)FDK_ERR_PLATFORM_INIT : dispatched;
 }

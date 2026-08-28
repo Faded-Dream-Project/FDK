@@ -23,10 +23,24 @@ struct fdk_platform_connection {
     /* Application id (fdk_init_options.app_id), duplicated at
      * connect; NULL when unset. Applied to every toplevel via
      * xdg_toplevel.set_app_id — the compositor-side identity window
-     * rules (like sway's for_window) and taskbars match. */
+     * rules (like sway's for_window) and taskbars match. When the
+     * application passed none, connect() derives one from
+     * /proc/self/cmdline's first token (argv[0] basename) so demos
+     * still identify honestly instead of "fdk.app"-alike. */
     char *app_id;
     struct wl_display *display;
     struct wl_registry *registry;
+
+    /* Dedicated event queue for wl_buffer events (1.1.6). Every
+     * wl_buffer created through create_shm_buffer() is moved here
+     * via wl_proxy_set_queue, so wl_buffer::release — often the ONLY
+     * event the render path needs to make progress — can be
+     * dispatched on its own (wl_display_dispatch_queue_pending)
+     * without running unrelated listeners re-entrantly. The main
+     * loop drains it after every default-queue dispatch
+     * (wayland_dispatch.c); the slot-exhaustion wait in
+     * wayland_window.c blocks on it with a bounded poll. */
+    struct wl_event_queue *release_queue;
 
     /* Globals discovered during the initial registry roundtrip
      * (see wayland_registry.c). All required for Phase 2's
@@ -139,6 +153,32 @@ struct fdk_platform_connection {
     fdk_platform_window *keyboard_focus;
     double pointer_x, pointer_y; /* last known position, surface-local */
 
+    /* --- Cursor shaping (1.1.6, wayland_cursor.c) -----------------
+     *
+     * Wayland clients own their cursor pixels: wl_pointer::enter must
+     * be answered with wl_pointer.set_cursor(serial, surface, hx, hy)
+     * where surface carries the cursor image as an ordinary wl_shm
+     * buffer. FDK loads those images from the system's XCursor theme
+     * files by hand (libxcursor is NOT a dependency — same
+     * distro-agnostic choice as the X11 backend's cursor-font
+     * glyphs). One shared cursor surface per connection; a small
+     * cache maps each loaded shape (cursor NAME + nominal size) to
+     * its uploaded wl_buffer + hotspot. theme_state: 0 = untouched,
+     * 1 = a theme file was found, -1 = themes were searched and none
+     * was usable (every later shape request then degrades honestly
+     * with a single DEBUG line — the compositor's default arrow
+     * stays, which is exactly the pre-1.1.6 behavior). */
+    struct wl_surface *cursor_surface;
+    struct {
+        char *name;              /* cursor name, e.g. "left_ptr"    */
+        int size;                /* nominal size the image was picked at */
+        struct wl_buffer *buffer;
+        int hotspot_x, hotspot_y;
+    } *cursor_cache;
+    size_t cursor_cache_count;
+    size_t cursor_cache_capacity;
+    int cursor_theme_state;
+
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
 
@@ -153,6 +193,19 @@ struct fdk_platform_connection {
 };
 
 #define FDK_WL_RENDER_SLOTS 4
+
+/* Bounded release wait (1.1.6): when every render slot is in flight
+ * and the application still wants a framebuffer, FDK waits this long
+ * (dispatching the dedicated release queue) for the compositor to
+ * release a buffer before considering reaping or refusing. Slow
+ * compositors (Muffin's experimental Wayland session on older
+ * hardware was the live report) then see delayed frames instead of
+ * dropped ones. */
+#define FDK_WL_RELEASE_WAIT_MS 100
+
+/* How long a refusal may re-warn at full volume (the log-spam guard:
+ * one WARN per stall episode, DEBUG for the rest). */
+#define FDK_WL_REFUSE_WARN_INTERVAL_MS 2000
 
 /* Frame-pacing guard: if the compositor stays silent this long after
  * a commit (ms), fdk_wayland_window_frame_ready() reports ready
@@ -256,6 +309,11 @@ struct fdk_platform_window {
      * documented in fdk_surface.h's frame-pacing section. */
     int frame_ack;        /* compositor acknowledged the last frame */
     fdk_i64 frame_commit_ms; /* monotonic ms of the last render commit */
+
+    /* Last time (monotonic ms) the slot-exhaustion path refused an
+     * acquisition at WARN volume — see FDK_WL_REFUSE_WARN_INTERVAL_MS
+     * (the 1.1.6 log-spam guard; 0 = never). */
+    fdk_i64 last_refuse_warn_ms;
 
     /* The pending wl_surface.frame callback, destroyed when `done`
      * arrives (frame_callback_done) OR at window destruction — a
@@ -369,11 +427,24 @@ fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
                                            fdk_i32 local_y);
 /* The optional pointer-introspection op (1.1.4): the seat's cached
  * pointer_focus + surface-local position, valid whenever this window
- * holds pointer focus. Cursor SHAPING (window_set_cursor) is
- * deliberately absent on Wayland for now — see the implementation
- * comment in wayland_window.c. */
+ * holds pointer focus. Cursor SHAPING (window_set_cursor, 1.1.6) is
+ * implemented in wayland_cursor.c — XCursor theme images uploaded
+ * over wl_shm, attached to a shared cursor surface. */
 int fdk_wayland_window_query_pointer(fdk_platform_window *pwindow,
                                      fdk_i32 *out_x, fdk_i32 *out_y);
+void fdk_wayland_window_set_cursor(fdk_platform_window *pwindow, int edge);
+
+/* Cursor machinery teardown (wayland_cursor.c): destroys the cursor
+ * surface, every cached shape buffer, and the cache itself. Called
+ * from fdk_wayland_disconnect(). */
+void fdk_wayland_cursor_teardown(fdk_platform_connection *conn);
+
+/* Drains the dedicated wl_buffer release queue (wayland_dispatch.c
+ * helper, also safe to call from inside a listener — it only ever
+ * runs wl_buffer listeners). Returns the number of events dispatched,
+ * or -1 on a connection error. */
+int fdk_wayland_release_queue_dispatch(fdk_platform_connection *conn);
+
 void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
                                      int maximized, int minimized);
 

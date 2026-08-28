@@ -8,8 +8,10 @@
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
 
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void registry_global(void *data, struct wl_registry *registry,
                              uint32_t name, const char *interface, uint32_t version) {
@@ -140,6 +142,11 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
     conn->pointer_y = 0.0;
     conn->dispatch = dispatch;
     conn->dispatch_user_data = dispatch_user_data;
+    conn->cursor_surface = NULL;
+    conn->cursor_cache = NULL;
+    conn->cursor_cache_count = 0;
+    conn->cursor_cache_capacity = 0;
+    conn->cursor_theme_state = 0;
     conn->app_id = NULL;
     if (app_id != NULL && app_id[0] != '\0') {
         size_t len = strlen(app_id) + 1;
@@ -148,15 +155,58 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
             memcpy(conn->app_id, app_id, len);
         }
     }
+    if (conn->app_id == NULL) {
+        /* 1.1.6: no app-provided identity — derive one from
+         * /proc/self/cmdline's first token (argv[0]), basename only.
+         * Demos then show up in taskbars/compositor rules as
+         * "06_decorations" instead of the generic "fdk.app"; the
+         * core log line stays honest (it reports the OPTION, which
+         * was unset). Linux-only, best-effort: unreadable /proc or a
+         * weird argv[0] just keeps the generic fallback. */
+        char argv0[256];
+        ssize_t n = -1;
+        int fd = open("/proc/self/cmdline", O_RDONLY);
+        if (fd >= 0) {
+            n = read(fd, argv0, sizeof argv0 - 1);
+            close(fd);
+        }
+        if (n > 0) {
+            argv0[n] = '\0'; /* first token is NUL-terminated in the file */
+            const char *base = strrchr(argv0, '/');
+            base = (base != NULL) ? base + 1 : argv0;
+            if (base[0] != '\0') {
+                size_t len = strlen(base) + 1;
+                conn->app_id = fdk_alloc(len);
+                if (conn->app_id != NULL) {
+                    memcpy(conn->app_id, base, len);
+                    FDK_DEBUG("app_id derived from argv[0]: %s", conn->app_id);
+                }
+            }
+        }
+    }
     conn->windows = NULL;
     conn->window_count = 0;
     conn->window_capacity = 0;
     conn->last_dispatch_errno = 0;
 
+    /* Dedicated wl_buffer event queue (1.1.6) — created before the
+     * first wl_buffer can exist (windows come later), so
+     * create_shm_buffer's wl_proxy_set_queue never sees NULL. */
+    conn->release_queue = wl_display_create_queue(display);
+    if (conn->release_queue == NULL) {
+        FDK_ERROR("wl_display_create_queue failed");
+        wl_display_disconnect(display);
+        fdk_free(conn->app_id);
+        fdk_free(conn);
+        return FDK_ERR_PLATFORM_INIT;
+    }
+
     conn->registry = wl_display_get_registry(display);
     if (conn->registry == NULL) {
         FDK_ERROR("wl_display_get_registry failed");
+        wl_event_queue_destroy(conn->release_queue);
         wl_display_disconnect(display);
+        fdk_free(conn->app_id);
         fdk_free(conn);
         return FDK_ERR_PLATFORM_INIT;
     }
@@ -169,7 +219,9 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
      * NULL immediately after this function returns. */
     if (wl_display_roundtrip(display) < 0) {
         FDK_ERROR("initial registry roundtrip failed");
+        wl_event_queue_destroy(conn->release_queue);
         wl_display_disconnect(display);
+        fdk_free(conn->app_id);
         fdk_free(conn);
         return FDK_ERR_PLATFORM_INIT;
     }
@@ -182,7 +234,9 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
         if (conn->shm) wl_shm_destroy(conn->shm);
         if (conn->compositor) wl_compositor_destroy(conn->compositor);
         wl_registry_destroy(conn->registry);
+        wl_event_queue_destroy(conn->release_queue);
         wl_display_disconnect(display);
+        fdk_free(conn->app_id);
         fdk_free(conn);
         return FDK_ERR_PLATFORM_INIT;
     }
@@ -223,6 +277,8 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
 
     fdk_wayland_teardown_seat(conn);
 
+    fdk_wayland_cursor_teardown(conn);
+
     if (conn->decoration_manager) {
         zxdg_decoration_manager_v1_destroy(conn->decoration_manager);
     }
@@ -240,6 +296,14 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
 
     fdk_free(conn->app_id);
     conn->app_id = NULL;
+
+    /* After every wl_buffer is gone its event queue can die too
+     * (libwayland requires the queue to outlive proxies assigned to
+     * it — windows were force-destroyed above). */
+    if (conn->release_queue != NULL) {
+        wl_event_queue_destroy(conn->release_queue);
+        conn->release_queue = NULL;
+    }
 
     FDK_INFO("disconnecting");
     wl_display_disconnect(conn->display);
