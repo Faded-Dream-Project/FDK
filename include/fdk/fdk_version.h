@@ -8,12 +8,30 @@
 #ifndef FDK_VERSION_H
 #define FDK_VERSION_H
 
-#define FDK_VERSION_MAJOR 1
-#define FDK_VERSION_MINOR 1
+/*
+ * THE PUBLIC VERSION IS 0.0.1 — ON PURPOSE (docs/versioning.md).
+ *
+ * The number is a project joke: "this absurdly capable toolkit is
+ * still called 0.0.1." It is NOT an alpha marker, NOT a stability
+ * claim, and NOT a maturity signal, and it does not license any
+ * lowering of engineering standards. Internal engineering
+ * milestones (the Phase numbers and the 1.x labels used in
+ * docs/roadmap.md) are a different axis entirely: they track work,
+ * never the public version.
+ *
+ * Do not bump these macros because functionality accumulated, a
+ * phase completed, a competitor's version is higher, or semver
+ * expectations say so. A bump is an explicit project-owner
+ * decision, recorded in docs/versioning.md first. The test suite
+ * pins this value (tests/test_core.c) so accidental bumps fail
+ * the build instead of shipping quietly.
+ */
+#define FDK_VERSION_MAJOR 0
+#define FDK_VERSION_MINOR 0
 #define FDK_VERSION_PATCH 1
 
-/* "0.1.0" style string, generated from the numeric components. */
-#define FDK_VERSION_STRING "1.1.1"
+/* "0.0.1" style string, generated from the numeric components. */
+#define FDK_VERSION_STRING "0.0.1"
 
 /* Encode major/minor/patch into a single comparable integer:
  * (major * 1000000) + (minor * 1000) + patch */
@@ -24,8 +42,10 @@
     FDK_VERSION_ENCODE(FDK_VERSION_MAJOR, FDK_VERSION_MINOR, FDK_VERSION_PATCH)
 
 /*
- * FDK's ABI is stable as of 1.0.0 (the Phase 11 stabilization pass):
- * public structs are classified and size-pinned (docs/abi-policy.md),
+ * FDK's ABI is stable as of the Phase 11 stabilization pass (the
+ * "1.0.0" of docs/roadmap.md — an internal engineering milestone,
+ * NOT the public version, which stays 0.0.1 by policy): public
+ * structs are classified and size-pinned (docs/abi-policy.md),
  * enums are append-only, input structs append-only, and the object
  * layouts stay opaque. See docs/abi-policy.md for the full rules and
  * the subclassing decision.

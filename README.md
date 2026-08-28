@@ -12,7 +12,7 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: 1.1.1 — all eleven roadmap phases COMPLETE, ABI frozen; the no-bus policy + embedded narrator landed; the Wayland deferred-first-frame fix and the consolidated example suite.**
+**Status: 0.0.1 — mature development release: all eleven roadmap phases complete, ABI frozen; real X11 + Wayland backends; the no-bus policy and embedded narrator; the consolidated, dual-backend-verified example suite.** The version number is a deliberate joke and nothing else — see `docs/versioning.md`.
 
 **Fonts:** FDK bundles no font (licensing posture). The demos and
 `fdk_font_load_system_default()` discover a system UI font through
@@ -44,10 +44,11 @@ languages, CLDR plural rules for 33 languages, and strict, bounded
 the Phase 11 stabilization pass: layout batching (515x faster bulk
 tree construction), the performance baseline harness, the ABI audit
 with compile-time size assertions and the subclassing decision,
-the memory-safety audit, pkg-config packaging, and the 1.0.0 ABI
-freeze (`FDK_ABI_STABLE` = 1). See "What works today" below and
-`docs/roadmap.md` for an honest, specific list of what is and isn't
-covered.
+the memory-safety audit, pkg-config packaging, and the "1.0.0"
+milestone ABI freeze (`FDK_ABI_STABLE` = 1; the public version is
+0.0.1 by policy — `docs/versioning.md`). See "What works today"
+below and `docs/roadmap.md` for an honest, specific list of what is
+and isn't covered.
 
 After `make install`, link applications with
 `cc myapp.c $(pkg-config --cflags --libs fdk)`.
@@ -538,14 +539,15 @@ deviations from full CLDR data.
 
 ### What it looks like
 
-Since 1.1.1 the whole example suite runs on both backends under the
-test rigs, and the captures below are real compositor output from
-sway (headless, wlr-screencopy) — every example launched in the same
+Since the Wayland deferred-first-frame fix (milestone 1.1.1) the
+whole example suite runs on both backends under the test rigs, and
+the captures below are real compositor output from sway (headless,
+wlr-screencopy) — every example launched in the same
 show -> paint -> pump order a real application uses, screenshot-
-verified, then closed through the real close path. (This rig exists
-because 1.1.0 shipped a Wayland bug where exactly that ordering
-never mapped a window — see the platform notes in
-`docs/architecture.md`.)
+verified, then closed through the real close path. (This rig
+exists because an earlier state (milestone 1.1.0) shipped a
+Wayland bug where exactly that ordering never mapped a window —
+see the platform notes in `docs/architecture.md`.)
 
 ![02_rendering on Wayland](docs/screenshots/suite_wayland_02_rendering.png)
 
@@ -703,7 +705,8 @@ left the X server when the chain closed:
 | `docs/testing.md` | The two-tier test suite, what each covers, and known environment quirks |
 | `docs/memory.md` | Ownership model, allocation policy |
 | `docs/threading.md` | UI-thread affinity, worker-thread rules |
-| `docs/abi-policy.md` | Current (pre-1.0) ABI stance and the post-1.0 policy |
+| `docs/abi-policy.md` | The ABI freeze, struct classification, and the subclassing decision |
+| `docs/versioning.md` | The public version policy: why FDK is and stays `0.0.1`, and what that number does (and does not) mean |
 | `docs/dependencies.md` | Every current and anticipated dependency, with justification |
 | `docs/licensing-policy.md` | What licenses are/aren't allowed in, and the audit procedure |
 

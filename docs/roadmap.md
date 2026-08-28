@@ -1,5 +1,13 @@
 # FDK Development Roadmap
 
+**Versioning convention:** every version-like label in this file
+(Phase numbers, and the `1.0.0` / `1.1.x` milestone labels) is an
+**internal engineering milestone** — a history marker for when work
+landed. None of them is the public version. The public version of
+FDK is `0.0.1` by deliberate policy and stays there for the
+foreseeable future; see `docs/versioning.md` before touching
+`include/fdk/fdk_version.h`.
+
 Work proceeds in phases. Each phase should compile, pass its tests,
 and leave the tree in a working state before the next begins — no
 phase depends on a later phase's code existing yet, though later
@@ -1781,3 +1789,59 @@ through the real close path. Full battery: clean rebuild 0 warnings
 (debug, Wayland enabled), headless suite, X11 integration suite,
 Wayland integration suite on sway (including the new regression),
 both example rigs PASS.
+
+### 1.1.2 — the public version reset to 0.0.1 (the versioning policy) — COMPLETE
+
+**Project decision (owner override):** FDK's public version is
+`0.0.1`, deliberately, for the foreseeable future. The number is a
+joke ("this absurdly capable toolkit is still called 0.0.1"); the
+engineering standard it reports is not. Internal milestones — the
+Phase numbers and the `1.0.0` … `1.1.1` labels in this file — are
+engineering history, never the public version. Nothing about the
+number licenses lower standards, and nothing about the engineering
+raises the number. Full policy: `docs/versioning.md` (new).
+
+What leaked and was reset: the tree had been reporting the internal
+milestone labels as the public version (`fdk_version.h` said 1.1.1,
+`fdk.pc` derived 1.1.1, the README status line said 1.1.1) — a
+bookkeeping mistake, not a promotion decision. Changes:
+
+- `include/fdk/fdk_version.h`: `FDK_VERSION_*` = 0.0.1, with the
+  policy comment inline (the single source of truth — the Makefile's
+  `FDK_PC_VERSION` sed and every banner derive from it; no other
+  copy exists to drift).
+- `tests/test_core.c::test_version`: the public version is now
+  PINNED — asserts `0.0.1` / `FDK_VERSION_ENCODE(0,0,1)` directly,
+  so an accidental bump fails the suite instead of shipping.
+- `docs/versioning.md` (new): the policy — decoupling rules, what
+  0.0.1 does NOT mean, milestone-vs-version mapping, single source
+  of truth, bump procedure (owner decision recorded in the doc
+  first, then the pin).
+- `docs/abi-policy.md`: ABI status re-keyed from semver to
+  milestones ("the 0.x series is over" / "major-version-bump event"
+  / "pre-1.0" language removed — under the policy the public version
+  *looks* like 0.x forever, so ABI status can never be read off the
+  number; `FDK_ABI_STABLE` + the Phase 11 freeze are the contract).
+- `docs/performance.md`: benchmark provenance line re-labeled
+  (measured at the Phase 11 stabilization state; public version
+  0.0.1).
+- README: status line rewritten for 0.0.1 with an accurate maturity
+  description + pointer to the policy; milestone references in prose
+  re-worded so they cannot read as public-version claims; this
+  roadmap got the versioning convention note at the top.
+- Standing rule recorded for future work (also applies beyond
+  versioning): do NOT chase GTK/Qt feature parity blindly — use the
+  survey to find problems a serious toolkit must solve, prioritize
+  by technical value to FDK, never to fill a comparison table; and
+  do NOT optimize for adoption/ecosystem size over technical
+  quality.
+
+Battery: clean rebuild (debug + release, Wayland on — 0 warnings in
+both), full headless suite (version pin passes), X11 integration
+suite, fdk.pc reports 0.0.1. One environment quirk chased and
+documented during the battery: a one-time fontconfig cold-cache
+ASan leak report on the first `make test-x11` in a fresh container
+(leak entirely inside `libfontconfig.so`, cache-temperature
+nondeterminism, not an FDK bug) — recorded in
+`docs/testing.md`'s environment-quirks section with the
+verification method.

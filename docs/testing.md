@@ -629,6 +629,32 @@ This section stays in the docs as a record of what was found and why,
 not just what the fix was — useful if similar flakiness ever
 resurfaces in a different environment.
 
+## Known environment quirk: fontconfig cold-cache leak (not an FDK bug)
+
+Observed once (2026-08-28, fresh container): `make test-x11` failed
+at exit with `AddressSanitizer: 320 byte(s) leaked in 3 allocation(s)`
+— every stack frame inside `libfontconfig.so.1` (the dlopen'd,
+run-time-only font-discovery dependency; see `docs/dependencies.md`).
+All test cases had already passed; the report came from ASan's
+exit-time leak scan.
+
+Root cause: fontconfig's FIRST scan on a machine with a cold cache
+(`/var/cache/fontconfig` absent or stale — always the case in a
+fresh container) builds and retains internal configuration
+structures it never frees. ASan sees those allocations through its
+interceptors and reports them at process exit. The very next run
+(warm cache) takes a different path and leaks nothing. Verified
+directly: the failing run and a passing run of the IDENTICAL tree
+differed only in cache temperature; stashing the diff and re-running
+HEAD passed too, then restoring the diff and re-running also passed
+(the cache had been warmed in between).
+
+So: a one-time fontconfig cold-cache leak report from
+`make test-x11` in a fresh environment is expected noise, not a
+regression signal. Re-run once; if the leak persists on the warm
+cache, THEN it's real and needs investigating (FDK's own allocations
+would show FDK frames in the stacks, not just fontconfig ones).
+
 ## Sanitizers
 
 Every test binary (both suites) is built with AddressSanitizer +

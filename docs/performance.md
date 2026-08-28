@@ -14,7 +14,9 @@ touching these paths.
 ## Baseline (reference container, 2026-08-28)
 
 Tree fixture: nested H/V boxes, 475 widgets, labels with real text,
-800x600. `FDK 1.0.0`, system DejaVuSans @16px, GCC -O2.
+800x600. Measured at the Phase 11 stabilization state (public
+version 0.0.1 — the number is policy, not maturity; see
+`docs/versioning.md`), system DejaVuSans @16px, GCC -O2.
 
 | Benchmark | Result | Notes |
 |---|---|---|
