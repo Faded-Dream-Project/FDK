@@ -67,6 +67,11 @@ void fdk__a11y_notify(fdk_widget *widget, fdk_a11y_event_kind kind,
 /* printf-render an owned value-text string (NULL on failure). */
 char *fdk__a11y_valuef(const char *fmt, double v);
 
+/* a11y (widget.c teardown): drop every relation edge that touched a
+ * destroyed widget — its own list AND the inverse copies stored on
+ * the targets — so dangling relation targets cannot exist. */
+void fdk__a11y_relations_destroyed(fdk_widget *widget);
+
 /* The text's advance width and line extent (ascent + descent) in px,
  * or {0,0} when font or text is missing. Line extent (not ink) is
  * what layout wants: two labels with different glyphs align. */

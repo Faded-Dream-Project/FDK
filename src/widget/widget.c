@@ -335,6 +335,11 @@ static void teardown_free(fdk_widget *w) {
     fdk_free(w->name);
     fdk_free(w->a11y_name);
     fdk_free(w->a11y_description);
+    /* A11y: drop every relation edge that touched this widget —
+     * ours, and the inverse copies stored on the targets — so no
+     * dangling relation target can outlive the widget. (The list is
+     * NULL for the overwhelming majority of widgets; one branch.) */
+    fdk__a11y_relations_destroyed(w);
     fdk_free(w);
 }
 

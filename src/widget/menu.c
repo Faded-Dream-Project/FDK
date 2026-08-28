@@ -479,16 +479,104 @@ static fdk_menu_view *view_of(fdk_widget *w) {
 }
 
 /* ---- a11y ---- */
-/* v1: menu items are PAINTED ROWS, not widgets — the a11y tree
- * exposes the menu itself (role MENU); per-item virtual nodes are
- * the documented Phase 10 follow-up (see roadmap). Item ACTIVATE
- * is still drivable through fdk_menu_item's own callbacks and the
- * session keyboard paths. */
+/* Menu items are PAINTED ROWS, not widgets — the a11y tree exposes
+ * the menu itself (role MENU) plus one VIRTUAL CHILD per row through
+ * the class's virtual_* hooks (fdk_a11y_virtual_count/describe/
+ * actions/perform). A bridge walks the menu view, then its virtual
+ * children: role MENU_ITEM / CHECK_MENU_ITEM / RADIO_MENU_ITEM /
+ * SEPARATOR, the item's text as the name, CHECKED for checked items,
+ * ENABLED per the item's own flag, and ACTIVATE drives the exact
+ * code path a pointer release drives (view_activate). Separators
+ * have no name and no actions — they exist so the row indices a
+ * bridge reports match what a sighted user counts. */
+
+static fdk_i32 view_row_top(const fdk_menu_view *v, int row);
+static void view_activate(fdk_menu_view *v, int row);
+
+static size_t menu_view_virtual_count(const fdk_widget *w) {
+    const fdk_menu_view *v = (const fdk_menu_view *)(const void *)w;
+    return (v->model != NULL) ? v->model->count : 0;
+}
+
+static void menu_view_virtual_describe(const fdk_widget *w, size_t index,
+                                       fdk_a11y_info *out) {
+    const fdk_menu_view *v = (const fdk_menu_view *)(const void *)w;
+    const fdk_menu *m = v->model;
+    const fdk_menu_item *it = m->items[index];
+    switch (it->kind) {
+    case FDK_MIK_CHECK:
+        out->role = FDK_A11Y_ROLE_CHECK_MENU_ITEM;
+        break;
+    case FDK_MIK_RADIO:
+        out->role = FDK_A11Y_ROLE_RADIO_MENU_ITEM;
+        break;
+    case FDK_MIK_SEPARATOR:
+        out->role = FDK_A11Y_ROLE_SEPARATOR;
+        break;
+    case FDK_MIK_NORMAL:
+    default:
+        out->role = FDK_A11Y_ROLE_MENU_ITEM;
+        break;
+    }
+    if (it->text != NULL) {
+        out->name = fdk__strdup(it->text);
+    }
+    if (it->shortcut != NULL) {
+        out->description = fdk__strdup(it->shortcut);
+    }
+    out->states = FDK_A11Y_VISIBLE | FDK_A11Y_SHOWING;
+    if (it->enabled) {
+        out->states |= FDK_A11Y_ENABLED;
+    }
+    if (it->checked) {
+        out->states |= FDK_A11Y_CHECKED;
+    }
+    if (it->submenu != NULL) {
+        out->states |= FDK_A11Y_HAS_POPUP;
+    }
+    /* Bounds: the row's rect in the view's root-absolute space. */
+    fdk_i32 rh = fdk__menu_row_height(m);
+    fdk_i32 top = view_row_top(v, (int)index);
+    fdk_i32 hh = (it->kind == FDK_MIK_SEPARATOR) ? MENU_SEP_H : rh;
+    fdk_rect abs = fdk_widget_get_absolute_bounds(w);
+    out->bounds = (fdk_rect){abs.x, abs.y + top, abs.width, hh};
+}
+
+static fdk_a11y_action_set menu_view_virtual_actions(
+    const fdk_widget *w, size_t index) {
+    const fdk_menu_view *v = (const fdk_menu_view *)(const void *)w;
+    const fdk_menu_item *it = v->model->items[index];
+    if (it->kind == FDK_MIK_SEPARATOR || !it->enabled) {
+        return 0;
+    }
+    return FDK_A11Y_ACTION_ACTIVATE;
+}
+
+static bool menu_view_virtual_perform(fdk_widget *w, size_t index,
+                                      fdk_a11y_action action,
+                                      double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    fdk_menu_view *v = (fdk_menu_view *)(void *)w;
+    const fdk_menu_item *it = v->model->items[index];
+    if (it->kind == FDK_MIK_SEPARATOR || !it->enabled) {
+        return false;
+    }
+    view_activate(v, (int)index);
+    return true;
+}
+
 static const fdk_a11y_class menu_view_a11y = {
     .role = FDK_A11Y_ROLE_MENU,
     .describe = NULL,
     .actions = NULL,
     .perform = NULL,
+    .virtual_count = menu_view_virtual_count,
+    .virtual_describe = menu_view_virtual_describe,
+    .virtual_actions = menu_view_virtual_actions,
+    .virtual_perform = menu_view_virtual_perform,
 };
 
 const fdk_widget_class fdk_menu_view_class_def = {
@@ -548,7 +636,7 @@ int fdk__menu_row_at(fdk_widget *w, fdk_f32 y) {
 }
 
 /* Internal: row i's top edge. */
-static fdk_i32 view_row_top(fdk_menu_view *v, int row) {
+static fdk_i32 view_row_top(const fdk_menu_view *v, int row) {
     fdk_i32 rh = fdk__menu_row_height(v->model);
     fdk_i32 yy = 0;
     for (int i = 0; i < row && (size_t)i < v->model->count; i++) {
@@ -1354,11 +1442,82 @@ static void bar_destroy(fdk_widget *w) {
     b->count = 0;
 }
 
+/* ---- a11y: bar titles as virtual children ----
+ *
+ * Each title is a virtual child with role MENU, the title text as
+ * its name, HAS_POPUP + EXPANDED-while-open, and ACTIVATE that
+ * replays the exact POINTER_DOWN semantics (toggle the open menu,
+ * switch to another while a chain is open, or open fresh). */
+
+static size_t bar_virtual_count(const fdk_widget *w) {
+    const fdk_menu_bar *b = (const fdk_menu_bar *)(const void *)w;
+    return b->count;
+}
+
+static void bar_virtual_describe(const fdk_widget *w, size_t index,
+                                 fdk_a11y_info *out) {
+    const fdk_menu_bar *b = (const fdk_menu_bar *)(const void *)w;
+    out->role = FDK_A11Y_ROLE_MENU;
+    if (b->titles[index].title != NULL) {
+        out->name = fdk__strdup(b->titles[index].title);
+    }
+    out->states = FDK_A11Y_VISIBLE | FDK_A11Y_SHOWING |
+                  FDK_A11Y_ENABLED | FDK_A11Y_HAS_POPUP;
+    if (b->session != NULL && b->session->active &&
+        b->open_index == (int)index) {
+        out->states |= FDK_A11Y_EXPANDED;
+    }
+    fdk_rect abs = fdk_widget_get_absolute_bounds(w);
+    fdk_rect tr = b->titles[index].rect;
+    out->bounds = (fdk_rect){abs.x + tr.x, abs.y + tr.y, tr.width,
+                             tr.height};
+}
+
+static fdk_a11y_action_set bar_virtual_actions(const fdk_widget *w,
+                                               size_t index) {
+    const fdk_menu_bar *b = (const fdk_menu_bar *)(const void *)w;
+    const fdk_menu *m = b->titles[index].menu;
+    return (m != NULL && m->count > 0) ? FDK_A11Y_ACTION_ACTIVATE : 0;
+}
+
+static bool bar_virtual_perform(fdk_widget *w, size_t index,
+                                fdk_a11y_action action, double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    fdk_menu_bar *b = bar_of(w);
+    const fdk_menu *m = b->titles[index].menu;
+    if (m == NULL || m->count == 0) {
+        return false;
+    }
+    int hit = (int)index;
+    if (b->session != NULL && b->session->active &&
+        b->open_index == hit) {
+        fdk_menu_session *s = b->session;
+        session_close_above(s, 0);
+    } else if (b->session != NULL && b->session->active) {
+        session_switch_bar(b->session, (hit > b->open_index) ? 1 : -1);
+    } else {
+        fdk_menu_session *s = session_new(w);
+        if (!fdk__menu_bar_open_index(w, s, hit)) {
+            s->active = false;
+            s->bar = NULL;
+            return false;
+        }
+    }
+    return true;
+}
+
 static const fdk_a11y_class menu_bar_a11y = {
     .role = FDK_A11Y_ROLE_MENU_BAR,
     .describe = NULL,
     .actions = NULL,
     .perform = NULL,
+    .virtual_count = bar_virtual_count,
+    .virtual_describe = bar_virtual_describe,
+    .virtual_actions = bar_virtual_actions,
+    .virtual_perform = bar_virtual_perform,
 };
 
 const fdk_widget_class fdk_menu_bar_class_def = {
@@ -1615,6 +1774,8 @@ fdk_result fdk_menu_bar_append(fdk_widget *bar, const char *title,
     b->count++;
     bar_layout(bar);
     fdk_widget_invalidate(bar);
+    /* Virtual children (the bar titles) changed. */
+    fdk__a11y_notify(bar, FDK_A11Y_CHILDREN_CHANGED, 0);
     return FDK_OK;
 }
 
@@ -1640,6 +1801,8 @@ fdk_result fdk_menu_bar_remove(fdk_widget *bar, size_t index) {
     }
     bar_layout(bar);
     fdk_widget_invalidate(bar);
+    /* Virtual children (the bar titles) changed. */
+    fdk__a11y_notify(bar, FDK_A11Y_CHILDREN_CHANGED, 0);
     return FDK_OK;
 }
 

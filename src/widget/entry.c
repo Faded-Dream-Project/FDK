@@ -850,11 +850,122 @@ static void entry_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
     out->value_text = fdk__strdup(e->text);
 }
 
+/* ---- a11y text interface ---- */
+
+static size_t entry_text_length(const fdk_widget *w) {
+    const fdk_entry *e = (const fdk_entry *)(const void *)w;
+    return e->len;
+}
+
+static size_t entry_text_caret(const fdk_widget *w) {
+    const fdk_entry *e = (const fdk_entry *)(const void *)w;
+    return e->caret;
+}
+
+static bool entry_text_selection(const fdk_widget *w, size_t *anchor,
+                                 size_t *caret) {
+    const fdk_entry *e = (const fdk_entry *)(const void *)w;
+    if (e->anchor == e->caret) {
+        return false;
+    }
+    if (anchor != NULL) {
+        *anchor = e->anchor;
+    }
+    if (caret != NULL) {
+        *caret = e->caret;
+    }
+    return true;
+}
+
+static bool entry_text_at(const fdk_widget *w, size_t offset,
+                          fdk_a11y_text_granularity granularity,
+                          char *buf, size_t cap, size_t *out_start,
+                          size_t *out_end) {
+    const fdk_entry *e = (const fdk_entry *)(const void *)w;
+    if (buf == NULL || cap == 0) {
+        return false;
+    }
+    buf[0] = '\0';
+    if (e->len == 0) {
+        if (out_start != NULL) {
+            *out_start = 0;
+        }
+        if (out_end != NULL) {
+            *out_end = 0;
+        }
+        return true; /* empty text: an empty run at 0 */
+    }
+
+    size_t start = 0;
+    size_t end = e->len;
+    if (offset > e->len) {
+        offset = e->len;
+    }
+    offset = snap_boundary(e->text, e->len, offset);
+
+    switch (granularity) {
+    case FDK_A11Y_TEXT_CHAR: {
+        /* The single codepoint at (or just before) the offset. */
+        if (offset == e->len) {
+            offset = utf8_prev(e->text, e->len);
+        }
+        fdk_u32 cp = 0;
+        int n = fdk_text_utf8_next(e->text, e->len, offset, &cp);
+        (void)cp;
+        start = offset;
+        end = (n > 0) ? offset + (size_t)n : offset + 1;
+        break;
+    }
+    case FDK_A11Y_TEXT_WORD: {
+        /* Whitespace-delimited words, the same definition the
+         * double-click selection uses (word_range). */
+        if (offset == e->len) {
+            offset = utf8_prev(e->text, e->len);
+        }
+        word_range(e->text, e->len, offset, &start, &end);
+        break;
+    }
+    case FDK_A11Y_TEXT_LINE:
+    default:
+        /* Entry is single-line: the run is the whole text. */
+        break;
+    }
+
+    if (out_start != NULL) {
+        *out_start = start;
+    }
+    if (out_end != NULL) {
+        *out_end = end;
+    }
+    size_t n = end - start;
+    if (n > cap - 1) {
+        n = cap - 1; /* truncated display; the range is still full */
+    }
+    memcpy(buf, e->text + start, n);
+    buf[n] = '\0';
+    return true;
+}
+
+static bool entry_text_set_caret(fdk_widget *w, size_t offset) {
+    return fdk_ok(fdk_entry_set_cursor(w, offset));
+}
+
+static bool entry_text_set_selection(fdk_widget *w, size_t anchor,
+                                     size_t caret) {
+    return fdk_ok(fdk_entry_select_range(w, anchor, caret));
+}
+
 static const fdk_a11y_class entry_a11y = {
     .role = FDK_A11Y_ROLE_ENTRY,
     .describe = entry_a11y_describe,
     .actions = NULL,
     .perform = NULL,
+    .text_length = entry_text_length,
+    .text_caret = entry_text_caret,
+    .text_selection = entry_text_selection,
+    .text_at = entry_text_at,
+    .text_set_caret = entry_text_set_caret,
+    .text_set_selection = entry_text_set_selection,
 };
 
 static const fdk_widget_class fdk_entry_class_def = {

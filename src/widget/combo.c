@@ -322,11 +322,64 @@ static bool combo_a11y_perform(fdk_widget *w, fdk_a11y_action action,
     }
 }
 
+/* ---- a11y: dropdown options as virtual children ----
+ *
+ * The options exist even while the dropdown is closed (they are the
+ * combo's model); SELECTED marks the active row; ACTIVATE selects —
+ * the same path fdk_combo_set_active takes. Bounds are the combo's
+ * row rect (the popup's own geometry lives in the popup's tree and
+ * is only meaningful while open, so the closed-state bounds are the
+ * combo field itself — a bridge positions its highlight on the
+ * popup view's virtual rows while the popup is open). */
+
+static size_t combo_virtual_count(const fdk_widget *w) {
+    const fdk_combo *c = (const fdk_combo *)(const void *)w;
+    return c->count;
+}
+
+static void combo_virtual_describe(const fdk_widget *w, size_t index,
+                                   fdk_a11y_info *out) {
+    const fdk_combo *c = (const fdk_combo *)(const void *)w;
+    out->role = FDK_A11Y_ROLE_OPTION;
+    const char *text = combo_row_text(c, (fdk_i64)index);
+    if (text != NULL) {
+        out->name = fdk__strdup(text);
+    }
+    out->states = FDK_A11Y_VISIBLE | FDK_A11Y_ENABLED;
+    if ((fdk_i64)index == c->active) {
+        out->states |= FDK_A11Y_SELECTED;
+    }
+    if (c->dropdown_open) {
+        out->states |= FDK_A11Y_SHOWING;
+    }
+    out->bounds = fdk_widget_get_absolute_bounds(w);
+}
+
+static fdk_a11y_action_set combo_virtual_actions(const fdk_widget *w,
+                                                 size_t index) {
+    (void)w;
+    (void)index;
+    return FDK_A11Y_ACTION_ACTIVATE;
+}
+
+static bool combo_virtual_perform(fdk_widget *w, size_t index,
+                                  fdk_a11y_action action, double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    return fdk_ok(fdk_combo_set_active(w, (fdk_i64)index));
+}
+
 static const fdk_a11y_class combo_a11y = {
     .role = FDK_A11Y_ROLE_COMBO_BOX,
     .describe = combo_a11y_describe,
     .actions = combo_a11y_actions,
     .perform = combo_a11y_perform,
+    .virtual_count = combo_virtual_count,
+    .virtual_describe = combo_virtual_describe,
+    .virtual_actions = combo_virtual_actions,
+    .virtual_perform = combo_virtual_perform,
 };
 
 const fdk_widget_class fdk_combo_class_def = {
@@ -492,6 +545,8 @@ fdk_result fdk_combo_append(fdk_widget *combo, const char *text,
         *out_index = c->count - 1;
     }
     fdk_widget_invalidate(combo);
+    /* Virtual children (the options) changed. */
+    fdk__a11y_notify(combo, FDK_A11Y_CHILDREN_CHANGED, 0);
     return FDK_OK;
 }
 
@@ -520,6 +575,8 @@ fdk_result fdk_combo_remove(fdk_widget *combo, size_t index) {
         c->active--;
     }
     fdk_widget_invalidate(combo);
+    /* Virtual children (the options) changed. */
+    fdk__a11y_notify(combo, FDK_A11Y_CHILDREN_CHANGED, 0);
     return FDK_OK;
 }
 

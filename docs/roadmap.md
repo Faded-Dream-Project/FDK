@@ -1188,15 +1188,20 @@ are part of this phase and landed with it.
   still a rig script (`scripts/run_wayland_suite.sh`), not a
   Makefile target — the toolchain lives in a user prefix.
 
-## Phase 10 — Accessibility / Internationalization — FIRST SLICE
-### (the accessibility core)
+## Phase 10 — Accessibility / Internationalization — COMPLETE
 
-- Accessibility abstraction (roles, names, states, relationships,
-  keyboard navigation) — implemented as far as practical without
-  requiring a specific platform AT-SPI-equivalent dependency; gaps
-  documented rather than faked
-- i18n: locale-aware formatting, translation infrastructure,
-  pluralization architecture
+The roadmap line promised four things — an accessibility abstraction
+(roles, names, states, relationships, keyboard navigation)
+implemented as far as practical WITHOUT requiring a platform
+AT-SPI-equivalent dependency, gaps documented rather than faked; and
+the three i18n pillars (locale-aware formatting, translation
+infrastructure, pluralization architecture). All four landed, tested
+headless + X11, with exactly one deliberate gap: the AT-SPI2 BRIDGE
+process itself, which the phase's own wording scopes out ("without
+requiring a specific platform AT-SPI-equivalent dependency") — the
+seam it would consume (query + notification + action + text +
+relations) is the API below, and the bridge is a consumer of it the
+same way the X11/Wayland backends sit under the widget layer.
 
 ### What landed (the a11y core, `include/fdk/fdk_a11y.h`)
 
@@ -1291,34 +1296,145 @@ are part of this phase and landed with it.
   size, set_title propagates) and REAL typed input read back
   through the Entry's value interface.
 
-### Remaining (parked, recorded honestly — this is a FIRST slice)
+### What landed second (the completion, two commits)
 
-- **Per-item a11y nodes for painted-row containers**: menu items,
-  menu-bar titles, and combo dropdown rows are PAINTED, not
-  widgets — the tree walker cannot see them. The follow-up is a
-  virtual-children API (an a11y-only enumeration of rendered
-  items with stable ids and computed bounds — the ATK/IA2
-  pattern for rendered content). Notebook tabs likewise (v1
-  exposes the notebook itself with the current page as its value
-  interface).
-- **The AT-SPI2 bridge itself**: the seam exists (query +
-  notification + action); the bridge process (D-Bus peer,
-  object-path tree, cache protocol) is deliberately OUT of the
-  toolkit until the core stabilizes — it is a consumer of this
-  API, exactly like the X11/Wayland backends sit under the widget
-  layer.
-- **Text interfaces** (character/word/line granularity, caret
-  offsets in the a11y snapshot) — the Entry exposes its text as
-  value_text; a proper text interface (offsets, attribute runs)
-  needs the painted-row virtual machinery above.
-- **Relationships** (labelled-by, described-by, controller-for):
-  the roadmap bullet says "relationships" — v1 has parent/child
-  (inherent in the tree) and popup/submenu chains (real windows);
-  explicit cross-references between UNRELATED widgets are not
-  modeled yet.
-- **i18n entirely**: locale-aware formatting, translation
-  infrastructure, pluralization architecture — nothing landed
-  yet; the whole second half of Phase 10 remains.
+- **Virtual children — painted rows are addressable** (the ATK/IA2
+  pattern for rendered content): containers that DRAW their rows
+  enumerate them through the a11y class's new virtual_* hooks with
+  the same describe/actions/perform shape real widgets get.
+  `fdk_a11y_virtual_count/describe/actions/perform` are the public
+  queries; the container fires CHILDREN_CHANGED when its virtual
+  set changes (combo row mutations, notebook page appends, menubar
+  title add/remove). Wired: MenuView rows (MENU_ITEM /
+  CHECK_MENU_ITEM / RADIO_MENU_ITEM / SEPARATOR, item text as the
+  name, CHECKED, per-item ENABLED, ACTIVATE driving the exact
+  pointer-release path; bounds computed from the row layout),
+  MenuBar titles (MENU role, HAS_POPUP + EXPANDED-while-open,
+  ACTIVATE replaying the full click semantics: toggle the open
+  menu, switch while a chain is open, or open fresh — honestly
+  failing headless where there is no window to anchor a popup),
+  ComboBox options (OPTION role, SELECTED on the active row,
+  ACTIVATE = fdk_combo_set_active's path), Notebook tabs (TAB
+  role, SELECTED on the current page, ACTIVATE = switch, strip
+  geometry bounds). Menu MODEL item mutations while a popup is
+  open do not fire per-view notifications (the model has no view
+  list; views are transient popup content a bridge enumerates
+  fresh) — the one documented notification gap.
+- **Text interfaces** (the ATK Text shape): char/word/line
+  granularity over the standard operand of BYTE offsets, with
+  caret and selection. Entry implements it fully — reads AND
+  mutators (set caret / set selection through the same public
+  semantics the keyboard uses, off-boundary offsets refused);
+  word runs use the exact double-click word_range; char runs are
+  UTF-8 cluster-aware. Label implements it read-only (a Label
+  wraps at PAINT time, so v1 reports the whole text as one line —
+  visual line runs need the display cache, parked below).
+  SpinButton delegates to its embedded Entry. `fdk_a11y_text_
+  length/caret/selection/at_offset/set_caret/set_selection` +
+  `fdk_a11y_has_text_interface` are the public API.
+- **Relationships**: labelled-by / label-for, described-by /
+  description-for, controlled-by / controller-for — stored as
+  symmetric directed edges (adding one direction inserts the
+  inverse; removing either removes both), bounded at 16 edges per
+  widget (FDK_ERR_LIMIT beyond), self-relations refused,
+  duplicates no-ops, RELATIONS_CHANGED notifications on both ends,
+  and teardown removes every edge that touched a destroyed widget
+  so dangling relation targets cannot exist. The classic use — a
+  Label naming an Entry — is one call: fdk_a11y_add_relation(
+  label, FDK_A11Y_RELATION_LABEL_FOR, entry).
+- **The entire i18n engine** (commit "i18n: Phase 10 second
+  half"): explicit-locale formatting — FDK never calls setlocale
+  and never reads the environment, so one process can format per
+  window/widget/call and every result is deterministic under test.
+  fdk_locale is a fixed-size VALUE parsed from BCP-47 AND POSIX
+  tags (de-CH, de_CH.UTF-8, C.UTF-8, en_US@euro) resolving by
+  longest match against a curated CLDR rules table (en-IN Indian
+  grouping, de-CH apostrophes, pt-PT vs pt plural split; unknown
+  tags format like root, never a guess). Numbers: exact int64
+  (INT64_MIN included), doubles via two-stage C-locale
+  conversion + separator/grouping/digit rewrite (Western, Indian
+  1,23,45,678, Swiss 1'234'567, Arabic-Indic ١٬٢٣٤٬٥٦٧ with
+  U+066B/6C), half-even rounding, honest magnitude limits.
+  Currency: ISO-4217 table (0/2/3 decimals, position per the
+  currency's home convention — a documented simplification vs
+  CLDR's per-pair data). Percent with per-locale placement. The
+  calendar is the proleptic Gregorian 1..9999 on exact civil-day
+  integer math (no time_t, no tm), with pattern-driven date/time
+  formatting (CLDR-subset mini-language, quoted literals, 12/24h
+  with forced overrides, CJK period-first ordering: 오후 3:30) and
+  month/weekday names for 15 languages — FORMAT (inflected) forms
+  where the language requires them ("25 декабря", not "декабрь";
+  "25 grudnia", not "grudzień"). Pluralization: the six CLDR
+  categories on the standard operand set (n/i/v/w/f/t), 33
+  languages covering every rule shape, fraction-category
+  differences honored (ru/pl fractions → other, cs/sk/lt → many,
+  fr 1.5 → one, ar 3.5 → other; Polish "one" is exactly 1 while
+  Russian covers 21 — the classic confusion pair, both correct).
+  Translation catalogs: the strict, bounded .fmo format
+  (docs/fdk-catalog-format.md — the theme parser's discipline:
+  line-numbered errors, no partial results, UTF-8 validation) with
+  binary-search lookup, message contexts, category-named plural
+  forms, and translate/translate_plural falling back to the
+  English source rule. New FDK_ERR_CATALOG_PARSE (-303).
+
+### Tests (the completion adds to the first slice's 97 checks)
+
+- tests/test_a11y.c: virtual children for menu views (roles,
+  names, CHECKED, separator discipline, ACTIVATE firing the real
+  activation + check toggle, out-of-range/wrong-action
+  rejections), menubar titles (HAS_POPUP, honest headless ACTIVATE
+  failure), combo options (SELECTED tracking through ACTIVATE),
+  notebook tabs (SELECTED, strip bounds, current-page ACTIVATE);
+  the text interface (char/word/line runs with exact ranges,
+  truncation-with-full-range, caret/selection round trips through
+  the public entry API, read-only Label, delegated Spin, no-text
+  Button, UTF-8 cluster runs, mid-sequence caret refusal);
+  relationships (symmetric add/remove, inverse queries,
+  duplicates, multi-edge enumeration, self-relation refusal,
+  notifications on both ends, destroy cleanup, the 16-edge
+  FDK_ERR_LIMIT cap).
+- tests/test_i18n.c (new, 14 groups): locale parse/normalize/
+  round-trip/reject matrix, territory override resolution,
+  int/double/currency/percent pins across en/de/fr/hi/ar/de-CH/
+  en-IN/ja (grouping, digits, separators, half-even ties, INT64_
+  MIN, limits, option plumbing), calendar anchors (epoch, known
+  weekdays, leap years, full-range round trips at 3033 samples,
+  validation), date/time styles per language (ISO, localized
+  names, г. suffix, genitive months, 12/24h forcing, CJK periods,
+  midnight/noon), plural operands (v/w/f/t exactness incl. the
+  double trailing-zero rule) and the per-language category matrix
+  (every shape: en/fr/ru/pl/cs/ar/lv/lt/hr/ja), catalog parse +
+  contexts + plural selection + fallbacks + 21 adversarial
+  rejections with no-partial-result checks + file IO paths.
+- Full battery: headless 413 checks (was 237 at the phase's
+  start); X11 integration suite PASS (incl. the live-window a11y
+  cases); 0 warnings debug AND release both configs.
+
+### Remaining (parked, recorded honestly)
+
+- **The AT-SPI2 bridge process itself**: the seam exists (query +
+  notification + action + text + relations); the bridge (D-Bus
+  peer, object-path tree, cache protocol) stays OUT of the
+  toolkit by the phase's own definition — it is a consumer of
+  this API, like the X11/Wayland backends sit under the widget
+  layer. Not a gap in the phase's promise; recorded so nobody
+  hunts for it in the source tree.
+- **Label visual-line runs**: a WRAP label reports its whole text
+  as one LINE run; per-visual-line runs need the paint-time
+  display cache exposed to the a11y layer. (Entry is single-line,
+  so its LINE run is exact.)
+- **Menu model mutations while a popup is open** fire no
+  per-view CHILDREN_CHANGED (models have no view list; views are
+  transient popup content). Enumerating a view's virtual children
+  is always fresh, so a bridge re-query never lies — only the
+  push notification is missing.
+- **i18n data breadth, beyond the engine**: names for 15
+  languages (not 200+), CLDR's per-(locale,currency) symbol
+  positions collapsed to per-currency, ar digit-system
+  territories not differentiated (ar-MA-style Latin-digit
+  exceptions), per-territory date-pattern variants (en-GB would
+  still show M/d/y). The ENGINE takes all of these as data
+  additions; nothing structural is missing.
 
 ## Phase 11 — Stabilization
 

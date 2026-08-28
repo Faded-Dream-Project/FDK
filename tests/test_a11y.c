@@ -8,6 +8,8 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_a11y.h"
 
+#include "widget/menu_internal.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -671,6 +673,9 @@ static void test_entry_modes(void) {
     (void)fdk_entry_set_text(entry, "abc");
     CHECK(rec_has(&rec, FDK_A11Y_VALUE_CHANGED, entry, 0),
           "entry text change fires VALUE_CHANGED");
+    /* Unsubscribe: the recorder is stack storage, and later tests
+     * fire notifications too. */
+    fdk_a11y_unsubscribe(NULL, record_event, &rec);
 
     fdk_widget_destroy(root);
 }
@@ -689,6 +694,522 @@ static void test_role_names(void) {
           "role name never NULL");
 }
 
+
+static void menu_count_activate(fdk_menu_item *item, void *user) {
+    (void)item;
+    int *n = user;
+    (*n)++;
+}
+
+/* ---- virtual children (Phase 10 completion) ---- */
+
+static void test_virtual_menu_view(void) {
+    /* A menu model bound to a standalone view: each painted row is a
+     * virtual child with role/name/states, and ACTIVATE drives the
+     * same activation path (fires the item's callback). */
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){0, 0, 400, 300},
+                                   &root)),
+          "menu-view virtual: root created");
+    fdk_menu *model = NULL;
+    CHECK(fdk_ok(fdk_menu_create(g_font, &model)),
+          "menu-view virtual: model created");
+    fdk_menu_item *it_normal = NULL;
+    fdk_menu_item *it_check = NULL;
+    CHECK(fdk_ok(fdk_menu_append(model, "Save", &it_normal)),
+          "menu-view virtual: normal item");
+    CHECK(fdk_ok(fdk_menu_append_separator(model)),
+          "menu-view virtual: separator");
+    CHECK(fdk_ok(fdk_menu_append_check(model, "Auto-save", true,
+                                        &it_check)),
+          "menu-view virtual: check item");
+
+    fdk_i32 w = 0, h = 0;
+    fdk__menu_measure(model, 0, &w, &h);
+    fdk_widget *view = NULL;
+    CHECK(fdk_ok(fdk_widget_create(root, &fdk_menu_view_class_def,
+                                   (fdk_rect){10, 20, w, h}, &view)),
+          "menu-view virtual: view created");
+    CHECK(fdk_ok(fdk__menu_view_bind(view, model)),
+          "menu-view virtual: model bound");
+
+    CHECK(fdk_a11y_virtual_count(view) == 3,
+          "menu-view virtual: count = 3 rows");
+
+    fdk_a11y_info info;
+    CHECK(fdk_ok(fdk_a11y_virtual_describe(view, 0, &info)),
+          "menu-view virtual: describe row 0");
+    CHECK(info.role == FDK_A11Y_ROLE_MENU_ITEM, "row 0 role MENU_ITEM");
+    CHECK(info.name != NULL && strcmp(info.name, "Save") == 0,
+          "row 0 name");
+    CHECK((info.states & FDK_A11Y_ENABLED) != 0, "row 0 enabled");
+    CHECK(info.bounds.y == 20, "row 0 bounds are view-absolute");
+    fdk_a11y_info_free(&info);
+
+    CHECK(fdk_ok(fdk_a11y_virtual_describe(view, 1, &info)),
+          "menu-view virtual: describe separator");
+    CHECK(info.role == FDK_A11Y_ROLE_SEPARATOR, "separator role");
+    CHECK(info.name == NULL, "separator has no name");
+    CHECK(fdk_a11y_virtual_actions(view, 1) == 0,
+          "separator has no actions");
+    fdk_a11y_info_free(&info);
+
+    CHECK(fdk_ok(fdk_a11y_virtual_describe(view, 2, &info)),
+          "menu-view virtual: describe check item");
+    CHECK(info.role == FDK_A11Y_ROLE_CHECK_MENU_ITEM,
+          "check item role");
+    CHECK((info.states & FDK_A11Y_CHECKED) != 0,
+          "check item is CHECKED");
+    fdk_a11y_info_free(&info);
+
+    CHECK(fdk_a11y_virtual_actions(view, 0) == FDK_A11Y_ACTION_ACTIVATE,
+          "row 0 advertises ACTIVATE");
+
+    /* ACTIVATE drives the real path: the callback fires and the
+     * check item toggles. */
+    static int fired = 0;
+    /* Menu-wide activation callback counts the fires. */
+    fdk_menu_set_on_activate(model, menu_count_activate, &fired);
+    CHECK(fdk_ok(fdk_a11y_virtual_perform(view, 0,
+                                          FDK_A11Y_ACTION_ACTIVATE,
+                                          0.0)),
+          "menu-view virtual: ACTIVATE row 0");
+    CHECK(fired == 1, "menu-view virtual: activation fired once");
+    CHECK(fdk_ok(fdk_a11y_virtual_perform(view, 2,
+                                          FDK_A11Y_ACTION_ACTIVATE,
+                                          0.0)),
+          "menu-view virtual: ACTIVATE check row");
+    CHECK(!fdk_menu_item_is_checked(it_check),
+          "menu-view virtual: check toggled off by ACTIVATE");
+
+    /* Out-of-range and wrong-action discipline. */
+    CHECK(fdk_a11y_virtual_describe(view, 3, &info) ==
+              FDK_ERR_INVALID_ARGUMENT,
+          "menu-view virtual: out-of-range describe rejected");
+    CHECK(fdk_a11y_virtual_perform(view, 0, FDK_A11Y_ACTION_FOCUS,
+                                   0.0) == FDK_ERR_UNSUPPORTED,
+          "menu-view virtual: non-ACTIVATE rejected");
+
+    fdk_widget_destroy(root);
+    fdk_menu_destroy(model);
+}
+
+static void test_virtual_menu_bar(void) {
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){0, 0, 400, 300},
+                                   &root)),
+          "menubar virtual: root created");
+    fdk_widget *bar = NULL;
+    CHECK(fdk_ok(fdk_menu_bar_create(root, g_font, &bar)),
+          "menubar virtual: bar created");
+    fdk_menu *file_menu = NULL;
+    fdk_menu *edit_menu = NULL;
+    CHECK(fdk_ok(fdk_menu_create(g_font, &file_menu)),
+          "menubar virtual: file model");
+    CHECK(fdk_ok(fdk_menu_append(file_menu, "New", NULL)),
+          "menubar virtual: file item");
+    CHECK(fdk_ok(fdk_menu_create(g_font, &edit_menu)),
+          "menubar virtual: edit model");
+    CHECK(fdk_ok(fdk_menu_append(edit_menu, "Undo", NULL)),
+          "menubar virtual: edit item");
+    CHECK(fdk_ok(fdk_menu_bar_append(bar, "File", file_menu)),
+          "menubar virtual: File appended");
+    CHECK(fdk_ok(fdk_menu_bar_append(bar, "Edit", edit_menu)),
+          "menubar virtual: Edit appended");
+
+    CHECK(fdk_a11y_virtual_count(bar) == 2,
+          "menubar virtual: count = 2 titles");
+
+    fdk_a11y_info info;
+    CHECK(fdk_ok(fdk_a11y_virtual_describe(bar, 0, &info)),
+          "menubar virtual: describe File");
+    CHECK(info.role == FDK_A11Y_ROLE_MENU, "title role MENU");
+    CHECK(info.name != NULL && strcmp(info.name, "File") == 0,
+          "title name");
+    CHECK((info.states & FDK_A11Y_HAS_POPUP) != 0,
+          "title HAS_POPUP");
+    CHECK((info.states & FDK_A11Y_EXPANDED) == 0,
+          "title not EXPANDED while closed");
+    CHECK(info.bounds.width > 0, "title bounds exist");
+    fdk_a11y_info_free(&info);
+
+    CHECK(fdk_a11y_virtual_actions(bar, 0) == FDK_A11Y_ACTION_ACTIVATE,
+          "title advertises ACTIVATE");
+    /* Headless (no window owner): ACTIVATE cannot open a popup, so
+     * perform honestly fails — the documented standalone behavior.
+     */
+    CHECK(fdk_a11y_virtual_perform(bar, 0, FDK_A11Y_ACTION_ACTIVATE,
+                                   0.0) == FDK_ERR_UNSUPPORTED,
+          "menubar virtual: headless ACTIVATE honestly fails");
+
+    fdk_widget_destroy(root);
+    fdk_menu_destroy(file_menu);
+    fdk_menu_destroy(edit_menu);
+}
+
+static void test_virtual_combo_and_notebook(void) {
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){0, 0, 400, 300},
+                                   &root)),
+          "combo/notebook virtual: root created");
+
+    fdk_widget *combo = NULL;
+    CHECK(fdk_ok(fdk_combo_create(root, g_font, &combo)),
+          "combo virtual: created");
+    CHECK(fdk_ok(fdk_combo_append(combo, "Red", NULL)),
+          "combo virtual: Red");
+    CHECK(fdk_ok(fdk_combo_append(combo, "Green", NULL)),
+          "combo virtual: Green");
+    CHECK(fdk_ok(fdk_combo_append(combo, "Blue", NULL)),
+          "combo virtual: Blue");
+
+    CHECK(fdk_a11y_virtual_count(combo) == 3,
+          "combo virtual: count = 3 options");
+    fdk_a11y_info info;
+    CHECK(fdk_ok(fdk_a11y_virtual_describe(combo, 1, &info)),
+          "combo virtual: describe Green");
+    CHECK(info.role == FDK_A11Y_ROLE_OPTION, "option role OPTION");
+    CHECK(info.name != NULL && strcmp(info.name, "Green") == 0,
+          "option name");
+    CHECK((info.states & FDK_A11Y_SELECTED) == 0,
+          "Green not selected yet");
+    fdk_a11y_info_free(&info);
+
+    CHECK(fdk_ok(fdk_a11y_virtual_perform(combo, 1,
+                                          FDK_A11Y_ACTION_ACTIVATE,
+                                          0.0)),
+          "combo virtual: ACTIVATE Green");
+    CHECK(fdk_combo_get_active(combo) == 1, "combo virtual: active is 1");
+    CHECK(fdk_ok(fdk_a11y_virtual_describe(combo, 1, &info)),
+          "combo virtual: describe Green again");
+    CHECK((info.states & FDK_A11Y_SELECTED) != 0,
+          "Green now SELECTED");
+    fdk_a11y_info_free(&info);
+
+    fdk_widget *nb = NULL;
+    CHECK(fdk_ok(fdk_notebook_create(root, g_font, &nb)),
+          "notebook virtual: created");
+    fdk_widget *p1 = NULL;
+    fdk_widget *p2 = NULL;
+    CHECK(fdk_ok(fdk_widget_create(nb, NULL, (fdk_rect){0, 0, 0, 0},
+                                   &p1)),
+          "notebook virtual: page 1");
+    CHECK(fdk_ok(fdk_notebook_append_page(nb, p1, "First")),
+          "notebook virtual: page 1 appended");
+    CHECK(fdk_ok(fdk_widget_create(nb, NULL, (fdk_rect){0, 0, 0, 0},
+                                   &p2)),
+          "notebook virtual: page 2");
+    CHECK(fdk_ok(fdk_notebook_append_page(nb, p2, "Second")),
+          "notebook virtual: page 2 appended");
+
+    CHECK(fdk_a11y_virtual_count(nb) == 2,
+          "notebook virtual: count = 2 tabs");
+    CHECK(fdk_ok(fdk_a11y_virtual_describe(nb, 0, &info)),
+          "notebook virtual: describe tab 0");
+    CHECK(info.role == FDK_A11Y_ROLE_TAB, "tab role TAB");
+    CHECK(info.name != NULL && strcmp(info.name, "First") == 0,
+          "tab name");
+    CHECK((info.states & FDK_A11Y_SELECTED) != 0,
+          "tab 0 SELECTED (current)");
+    CHECK(info.bounds.x == 0 && info.bounds.y == 0 &&
+              info.bounds.height == 30,
+          "tab 0 bounds (strip geometry)");
+    fdk_a11y_info_free(&info);
+
+    CHECK(fdk_a11y_virtual_actions(nb, 1) == FDK_A11Y_ACTION_ACTIVATE,
+          "tab 1 advertises ACTIVATE (not current)");
+    CHECK(fdk_a11y_virtual_actions(nb, 0) == 0,
+          "tab 0 (current) has no ACTIVATE");
+    CHECK(fdk_ok(fdk_a11y_virtual_perform(nb, 1,
+                                          FDK_A11Y_ACTION_ACTIVATE,
+                                          0.0)),
+          "notebook virtual: ACTIVATE tab 1");
+    CHECK(fdk_notebook_get_current_page(nb) == 1,
+          "notebook virtual: current page is 1");
+
+    fdk_widget_destroy(root);
+}
+
+/* ---- text interface (Phase 10 completion) ---- */
+
+static void test_text_interface(void) {
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){0, 0, 400, 300},
+                                   &root)),
+          "text: root created");
+
+    fdk_widget *entry = NULL;
+    CHECK(fdk_ok(fdk_entry_create(root, g_font,
+                                  "hello brave world", &entry)),
+          "text: entry created");
+    CHECK(fdk_a11y_has_text_interface(entry), "entry has text iface");
+    CHECK(fdk_a11y_text_length(entry) == 17, "entry text length");
+
+    char buf[64];
+    size_t start = 0, end = 0;
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(entry, 0, FDK_A11Y_TEXT_CHAR,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "text: char at 0");
+    CHECK(strcmp(buf, "h") == 0 && start == 0 && end == 1,
+          "text: char run h");
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(entry, 6, FDK_A11Y_TEXT_WORD,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "text: word at 6");
+    CHECK(strcmp(buf, "brave") == 0 && start == 6 && end == 11,
+          "text: word run brave");
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(entry, 2, FDK_A11Y_TEXT_LINE,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "text: line at 2");
+    CHECK(start == 0 && end == 17, "text: line run is whole text");
+
+    /* Truncation: small buffer still reports the full range. */
+    char tiny[4];
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(entry, 0, FDK_A11Y_TEXT_LINE,
+                                         tiny, sizeof(tiny), &start,
+                                         &end)),
+          "text: line with tiny buffer");
+    CHECK(strcmp(tiny, "hel") == 0 && start == 0 && end == 17,
+          "text: truncated text, full range");
+
+    /* Caret + selection through the a11y seam (same offsets the
+     * public entry API reports). */
+    CHECK(fdk_a11y_text_caret(entry) == 17, "text: caret at end");
+    CHECK(fdk_ok(fdk_a11y_text_set_caret(entry, 6)),
+          "text: set caret to 6");
+    CHECK(fdk_entry_get_cursor(entry) == 6,
+          "text: entry cursor matches");
+    CHECK(fdk_ok(fdk_a11y_text_set_selection(entry, 0, 5)),
+          "text: set selection [0,5)");
+    size_t anchor = 0, caret = 0;
+    CHECK(fdk_a11y_text_selection(entry, &anchor, &caret),
+          "text: selection reported");
+    CHECK(anchor == 0 && caret == 5, "text: selection range");
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(entry, 3, FDK_A11Y_TEXT_WORD,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "text: word at 3");
+    CHECK(strcmp(buf, "hello") == 0 && start == 0 && end == 5,
+          "text: word run hello");
+
+    CHECK(fdk_a11y_text_set_caret(entry, 3) == FDK_OK,
+          "text: caret on a boundary ok");
+    CHECK(fdk_a11y_text_set_caret(entry, 18) ==
+              FDK_ERR_INVALID_ARGUMENT,
+          "text: past-end caret refused");
+
+    /* Label: read-only text interface. */
+    fdk_widget *label = NULL;
+    CHECK(fdk_ok(fdk_label_create(root, g_font,
+                                  "a couple of words", &label)),
+          "text: label created");
+    CHECK(fdk_a11y_has_text_interface(label),
+          "label has text iface");
+    CHECK(fdk_a11y_text_length(label) == 17, "label text length");
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(label, 0, FDK_A11Y_TEXT_WORD,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "text: label word at 0");
+    CHECK(strcmp(buf, "a") == 0 && start == 0 && end == 1,
+          "text: label word run a");
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(label, 2, FDK_A11Y_TEXT_WORD,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "text: label word at 2");
+    CHECK(strcmp(buf, "couple") == 0 && start == 2 && end == 8,
+          "text: label word run couple");
+    CHECK(fdk_a11y_text_set_caret(label, 1) == FDK_ERR_UNSUPPORTED,
+          "text: label caret set unsupported");
+
+    /* Spin: delegates to its embedded entry. */
+    fdk_widget *spin = NULL;
+    CHECK(fdk_ok(fdk_spin_create(root, g_font, 0, 100, 42, &spin)),
+          "text: spin created");
+    CHECK(fdk_a11y_has_text_interface(spin),
+          "spin has text iface (delegated)");
+    CHECK(fdk_a11y_text_length(spin) == 2, "spin text is '42'");
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(spin, 0, FDK_A11Y_TEXT_LINE,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "text: spin line");
+    CHECK(strcmp(buf, "42") == 0, "text: spin reads 42");
+
+    /* A button has no text interface. */
+    fdk_widget *button = NULL;
+    CHECK(fdk_ok(fdk_button_create(root, g_font, "Go", &button)),
+          "text: button created");
+    CHECK(!fdk_a11y_has_text_interface(button),
+          "button has no text iface");
+    CHECK(fdk_a11y_text_at_offset(button, 0, FDK_A11Y_TEXT_CHAR, buf,
+                                  sizeof(buf), &start, &end) ==
+              FDK_ERR_UNSUPPORTED,
+          "button text query unsupported");
+
+    fdk_widget_destroy(root);
+}
+
+/* UTF-8 aware char/word runs. */
+static void test_text_interface_utf8(void) {
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){0, 0, 400, 300},
+                                   &root)),
+          "utf8 text: root created");
+    fdk_widget *entry = NULL;
+    /* "héllo wörld" — é (2 bytes), ö (2 bytes). */
+    CHECK(fdk_ok(fdk_entry_create(root, g_font, "h\xc3\xa9llo w\xc3\xb6rld",
+                                  &entry)),
+          "utf8 text: entry created");
+    char buf[64];
+    size_t start = 0, end = 0;
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(entry, 1, FDK_A11Y_TEXT_CHAR,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "utf8 text: char at 1");
+    CHECK(start == 1 && end == 3 && strcmp(buf, "\xc3\xa9") == 0,
+          "utf8 text: é is one char run");
+    CHECK(fdk_ok(fdk_a11y_text_at_offset(entry, 7, FDK_A11Y_TEXT_WORD,
+                                         buf, sizeof(buf), &start,
+                                         &end)),
+          "utf8 text: word at 7");
+    CHECK(start == 7 && end == 13,
+          "utf8 text: wörld word run (byte range)");
+    fdk_widget_destroy(root);
+}
+
+/* ---- relationships (Phase 10 completion) ---- */
+
+static void test_relationships(void) {
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){0, 0, 400, 300},
+                                   &root)),
+          "relations: root created");
+    fdk_widget *label = NULL;
+    fdk_widget *entry = NULL;
+    fdk_widget *other = NULL;
+    CHECK(fdk_ok(fdk_label_create(root, g_font, "Username", &label)),
+          "relations: label created");
+    CHECK(fdk_ok(fdk_entry_create(root, g_font, "", &entry)),
+          "relations: entry created");
+    CHECK(fdk_ok(fdk_button_create(root, g_font, "Go", &other)),
+          "relations: other created");
+
+    /* Symmetric add: LABEL_FOR implies LABELLED_BY on the target. */
+    CHECK(fdk_ok(fdk_a11y_add_relation(label,
+                                       FDK_A11Y_RELATION_LABEL_FOR,
+                                       entry)),
+          "relations: add LABEL_FOR");
+    CHECK(fdk_a11y_has_relation(label, FDK_A11Y_RELATION_LABEL_FOR,
+                                entry),
+          "relations: label has LABEL_FOR");
+    CHECK(fdk_a11y_has_relation(entry, FDK_A11Y_RELATION_LABELLED_BY,
+                                label),
+          "relations: entry has inverse LABELLED_BY");
+    CHECK(fdk_a11y_relation_count(entry,
+                                  FDK_A11Y_RELATION_LABELLED_BY) == 1,
+          "relations: count from the target side");
+    fdk_widget *target = NULL;
+    CHECK(fdk_ok(fdk_a11y_relation_at(entry,
+                                      FDK_A11Y_RELATION_LABELLED_BY, 0,
+                                      &target)),
+          "relations: enumerate target");
+    CHECK(target == label, "relations: target is the label");
+
+    /* Duplicate is a no-op. */
+    CHECK(fdk_ok(fdk_a11y_add_relation(label,
+                                       FDK_A11Y_RELATION_LABEL_FOR,
+                                       entry)),
+          "relations: duplicate add is OK");
+    CHECK(fdk_a11y_relation_count(label,
+                                  FDK_A11Y_RELATION_LABEL_FOR) == 1,
+          "relations: still one edge");
+
+    /* Multiple edges of the same type. */
+    CHECK(fdk_ok(fdk_a11y_add_relation(other,
+                                       FDK_A11Y_RELATION_LABEL_FOR,
+                                       entry)),
+          "relations: second label");
+    CHECK(fdk_a11y_relation_count(entry,
+                                  FDK_A11Y_RELATION_LABELLED_BY) == 2,
+          "relations: two labels now");
+
+    /* Invalid: self-relation, NULLs. */
+    CHECK(fdk_a11y_add_relation(entry,
+                                FDK_A11Y_RELATION_LABEL_FOR,
+                                entry) == FDK_ERR_INVALID_ARGUMENT,
+          "relations: self-relation refused");
+    CHECK(fdk_a11y_add_relation(NULL,
+                                FDK_A11Y_RELATION_LABEL_FOR,
+                                entry) == FDK_ERR_INVALID_ARGUMENT,
+          "relations: NULL from refused");
+
+    /* Notifications fire on both ends. */
+    recorder rec = {0};
+    CHECK(fdk_ok(fdk_a11y_subscribe(NULL, record_event, &rec)),
+          "relations: subscribed");
+    CHECK(fdk_ok(fdk_a11y_remove_relation(other,
+                                          FDK_A11Y_RELATION_LABEL_FOR,
+                                          entry)),
+          "relations: remove second label");
+    CHECK(rec_has(&rec, FDK_A11Y_RELATIONS_CHANGED, other, 0),
+          "relations: removal notified the from-side");
+    CHECK(rec_has(&rec, FDK_A11Y_RELATIONS_CHANGED, entry, 0),
+          "relations: removal notified the to-side");
+    CHECK(fdk_a11y_remove_relation(other,
+                                   FDK_A11Y_RELATION_LABEL_FOR,
+                                   entry) == FDK_ERR_NOT_FOUND,
+          "relations: removing an absent edge fails");
+    CHECK(fdk_ok(fdk_a11y_unsubscribe(NULL, record_event, &rec)),
+          "relations: unsubscribed");
+
+    /* Destroy cleanup: killing the label drops the entry's edge. */
+    fdk_widget_destroy(label);
+    CHECK(fdk_a11y_relation_count(entry,
+                                  FDK_A11Y_RELATION_LABELLED_BY) == 0,
+          "relations: destroy removed the inverse edge");
+
+    fdk_widget_destroy(root);
+}
+
+/* Relation cap: FDK_A11Y_MAX_RELATIONS per widget. */
+static void test_relations_limit(void) {
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){0, 0, 800, 600},
+                                   &root)),
+          "relations limit: root created");
+    fdk_widget *hub = NULL;
+    CHECK(fdk_ok(fdk_button_create(root, g_font, "hub", &hub)),
+          "relations limit: hub created");
+    fdk_widget *spokes[FDK_A11Y_MAX_RELATIONS + 2] = {0};
+    fdk_result last = FDK_OK;
+    for (int i = 0; i < FDK_A11Y_MAX_RELATIONS + 2; i++) {
+        CHECK(fdk_ok(fdk_button_create(root, g_font, "s", &spokes[i])),
+              "relations limit: spoke created");
+        last = fdk_a11y_add_relation(hub,
+                                     FDK_A11Y_RELATION_CONTROLLED_BY,
+                                     spokes[i]);
+        if (i < FDK_A11Y_MAX_RELATIONS) {
+            if (!fdk_ok(last)) {
+                CHECK(false, "relations limit: edge within budget");
+            }
+        }
+    }
+    CHECK(last == FDK_ERR_LIMIT,
+          "relations limit: 17th edge refused with FDK_ERR_LIMIT");
+    CHECK(fdk_a11y_relation_count(hub,
+                                  FDK_A11Y_RELATION_CONTROLLED_BY) ==
+              FDK_A11Y_MAX_RELATIONS,
+          "relations limit: exactly 16 stored");
+    fdk_widget_destroy(root);
+}
 int main(void) {
     load_font();
     test_role_names();
@@ -697,6 +1218,13 @@ int main(void) {
     test_notifications();
     test_actions();
     test_entry_modes();
+    test_virtual_menu_view();
+    test_virtual_menu_bar();
+    test_virtual_combo_and_notebook();
+    test_text_interface();
+    test_text_interface_utf8();
+    test_relationships();
+    test_relations_limit();
     if (g_font != NULL) {
         fdk_font_destroy(g_font);
     }

@@ -372,11 +372,71 @@ static bool spin_a11y_perform(fdk_widget *w, fdk_a11y_action action,
     }
 }
 
+/* ---- a11y text interface (delegated to the embedded Entry) ---- */
+
+static size_t spin_text_length(const fdk_widget *w) {
+    const fdk_spin *s = (const fdk_spin *)(const void *)w;
+    return (s->entry != NULL) ? fdk_a11y_text_length(s->entry) : 0;
+}
+
+static size_t spin_text_caret(const fdk_widget *w) {
+    const fdk_spin *s = (const fdk_spin *)(const void *)w;
+    return (s->entry != NULL) ? fdk_a11y_text_caret(s->entry) : 0;
+}
+
+static bool spin_text_selection(const fdk_widget *w, size_t *anchor,
+                                size_t *caret) {
+    const fdk_spin *s = (const fdk_spin *)(const void *)w;
+    return s->entry != NULL &&
+           fdk_a11y_text_selection(s->entry, anchor, caret);
+}
+
+static bool spin_text_at(const fdk_widget *w, size_t offset,
+                         fdk_a11y_text_granularity granularity,
+                         char *buf, size_t cap, size_t *out_start,
+                         size_t *out_end) {
+    const fdk_spin *s = (const fdk_spin *)(const void *)w;
+    if (s->entry == NULL) {
+        return false;
+    }
+    size_t start = 0;
+    size_t end = 0;
+    fdk_result r = fdk_a11y_text_at_offset(s->entry, offset,
+                                           granularity, buf, cap,
+                                           &start, &end);
+    if (out_start != NULL) {
+        *out_start = start;
+    }
+    if (out_end != NULL) {
+        *out_end = end;
+    }
+    return fdk_ok(r);
+}
+
+static bool spin_text_set_caret(fdk_widget *w, size_t offset) {
+    fdk_spin *s = spin_of(w);
+    return s->entry != NULL &&
+           fdk_ok(fdk_a11y_text_set_caret(s->entry, offset));
+}
+
+static bool spin_text_set_selection(fdk_widget *w, size_t anchor,
+                                    size_t caret) {
+    fdk_spin *s = spin_of(w);
+    return s->entry != NULL &&
+           fdk_ok(fdk_a11y_text_set_selection(s->entry, anchor, caret));
+}
+
 static const fdk_a11y_class spin_a11y = {
     .role = FDK_A11Y_ROLE_SPIN_BUTTON,
     .describe = spin_a11y_describe,
     .actions = spin_a11y_actions,
     .perform = spin_a11y_perform,
+    .text_length = spin_text_length,
+    .text_caret = spin_text_caret,
+    .text_selection = spin_text_selection,
+    .text_at = spin_text_at,
+    .text_set_caret = spin_text_set_caret,
+    .text_set_selection = spin_text_set_selection,
 };
 
 const fdk_widget_class fdk_spin_class_def = {

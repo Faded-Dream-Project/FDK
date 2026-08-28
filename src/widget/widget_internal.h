@@ -89,9 +89,20 @@ struct fdk_widget {
 
     /* Accessibility overrides (Phase 10): when set, these beat the
      * class descriptor's computed name/description in
-     * fdk_a11y_describe(). Owned copies, NULL when unset. */
+     * fdk_a11y_describe(). Owned copies, NULL when unset; freed by
+     * teardown. */
     char *a11y_name;
     char *a11y_description;
+
+    /* A11y: explicit relation edges (LABELLED_BY, CONTROLLER_FOR, ...)
+     * stored as (type, target) pairs; NULL when the widget has none.
+     * Owned by src/widget/a11y.c (struct fdk_a11y_edge — opaque here,
+     * forward-declared); torn down with the widget, removing the
+     * inverse edges from every target so dangling references cannot
+     * exist. */
+    struct fdk_a11y_edge *a11y_relations;
+    size_t a11y_relation_count;
+    size_t a11y_relation_cap;
 
     /* Base style (Phase 4 theme seed): background fill + corner
      * radius used by the default paint hook. */

@@ -12,8 +12,8 @@ Linux distribution where its genuinely unavoidable system interfaces
 (X11 protocol, Wayland protocol, POSIX) are available. It is not
 designed around any specific distribution.
 
-**Status: Phase 10 — Accessibility/i18n (a11y core + the full i18n
-engine).**
+**Status: Phase 10 — Accessibility/i18n COMPLETE; Phase 11
+(Stabilization) is next.**
 Core lifecycle, real X11 and Wayland backends, the rendering layer
 (damage-tracked software renderer with images, alpha compositing,
 transforms, and antialiasing), the widget foundation with layout

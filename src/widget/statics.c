@@ -364,11 +364,132 @@ static void label_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
     }
 }
 
+/* ---- a11y text interface (read-only) ----
+ *
+ * A Label's text is not editable: length and at-offset queries work,
+ * caret/selection report nothing. The "word" and "line" granularities
+ * use the same whitespace-run definition as the Entry. */
+
+static size_t label_text_length(const fdk_widget *w) {
+    const fdk_label *l = (const fdk_label *)(const void *)w;
+    return (l->text != NULL) ? strlen(l->text) : 0;
+}
+
+/* Whitespace-delimited word boundaries around byte offset i (the
+ * Entry's word_range twin, local because it is static there). */
+static void label_word_range(const char *s, size_t len, size_t i,
+                             size_t *out_start, size_t *out_end) {
+    if (len == 0 || i >= len) {
+        *out_start = len;
+        *out_end = len;
+        return;
+    }
+    bool in_ws = (s[i] == ' ' || s[i] == '\t');
+    size_t start = i;
+    while (start > 0 &&
+           ((s[start - 1] == ' ' || s[start - 1] == '\t') == in_ws)) {
+        start--;
+    }
+    size_t end = i;
+    while (end < len && ((s[end] == ' ' || s[end] == '\t') == in_ws)) {
+        end++;
+    }
+    *out_start = start;
+    *out_end = end;
+}
+
+static size_t label_utf8_prev(const char *s, size_t i) {
+    size_t p = i - 1;
+    while (p > 0 && ((s[p] & 0xC0) == 0x80)) {
+        p--;
+    }
+    return p;
+}
+
+static bool label_text_at(const fdk_widget *w, size_t offset,
+                          fdk_a11y_text_granularity granularity,
+                          char *buf, size_t cap, size_t *out_start,
+                          size_t *out_end) {
+    const fdk_label *l = (const fdk_label *)(const void *)w;
+    if (buf == NULL || cap == 0) {
+        return false;
+    }
+    buf[0] = '\0';
+    const char *text = (l->text != NULL) ? l->text : "";
+    size_t len = strlen(text);
+    if (len == 0) {
+        if (out_start != NULL) {
+            *out_start = 0;
+        }
+        if (out_end != NULL) {
+            *out_end = 0;
+        }
+        return true;
+    }
+    if (offset > len) {
+        offset = len;
+    }
+
+    size_t start = 0;
+    size_t end = len;
+    switch (granularity) {
+    case FDK_A11Y_TEXT_CHAR: {
+        /* Snap to a codepoint boundary (labels have no caret, so
+         * mid-cluster offsets just round down). */
+        while (offset < len && ((text[offset] & 0xC0) == 0x80)) {
+            offset++;
+        }
+        if (offset >= len) {
+            offset = label_utf8_prev(text, len);
+        }
+        start = offset;
+        end = offset + 1;
+        while (end < len && ((text[end] & 0xC0) == 0x80)) {
+            end++;
+        }
+        break;
+    }
+    case FDK_A11Y_TEXT_WORD: {
+        if (offset == len) {
+            offset = len - 1;
+        }
+        label_word_range(text, len, offset, &start, &end);
+        break;
+    }
+    case FDK_A11Y_TEXT_LINE:
+    default:
+        /* A Label may wrap at paint time, but v1 reports the whole
+         * text as one line (visual line runs need the display cache
+         * rebuilt; documented in the roadmap). */
+        break;
+    }
+
+    if (out_start != NULL) {
+        *out_start = start;
+    }
+    if (out_end != NULL) {
+        *out_end = end;
+    }
+    size_t n = end - start;
+    if (n > cap - 1) {
+        n = cap - 1;
+    }
+    memcpy(buf, text + start, n);
+    buf[n] = '\0';
+    return true;
+}
+
 static const fdk_a11y_class label_a11y = {
     .role = FDK_A11Y_ROLE_LABEL,
     .describe = label_a11y_describe,
     .actions = NULL,
     .perform = NULL,
+    .text_length = label_text_length,
+    .text_caret = NULL,
+    .text_selection = NULL,
+    .text_at = label_text_at,
+    .text_set_caret = NULL,
+    .text_set_selection = NULL,
 };
 
 const fdk_widget_class fdk_label_class_def = {

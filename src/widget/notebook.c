@@ -59,7 +59,7 @@ extern const fdk_widget_class fdk_notebook_class_def;
 
 /* ---- geometry ---- */
 
-static fdk_i32 nb_tab_width(fdk_notebook *nb, size_t i) {
+static fdk_i32 nb_tab_width(const fdk_notebook *nb, size_t i) {
     fdk_i32 tw = 0, th = 0;
     fdk__text_extent(nb->font, nb->pages[i].label, &tw, &th);
     return tw + NB_TAB_PAD_X * 2;
@@ -228,11 +228,11 @@ static void nb_destroy(fdk_widget *w) {
 }
 
 /* ---- a11y ---- */
-/* v1: the notebook is ONE widget with painted tabs, so the a11y tree
- * exposes the notebook as the tab list with the CURRENT page as its
- * value interface (SET_VALUE switches pages — the same code path tab
- * clicks take). Per-tab child nodes need per-tab WIDGETS; recorded in
- * the roadmap's Phase 10 parked list. */
+/* The notebook is ONE widget with painted tabs: the a11y tree exposes
+ * the notebook as the tab list with the CURRENT page as its value
+ * interface (SET_VALUE switches pages — the same code path tab clicks
+ * take) AND one VIRTUAL CHILD per tab (role TAB, the page label as
+ * its name, SELECTED on the current page, ACTIVATE = switch). */
 static void nb_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
     const fdk_notebook *nb = (const fdk_notebook *)(const void *)w;
     if (nb->count > 0 && nb->current < nb->count &&
@@ -262,11 +262,63 @@ static bool nb_a11y_perform(fdk_widget *w, fdk_a11y_action action,
     return fdk_ok(fdk_notebook_set_current_page(w, (size_t)(value + 0.5)));
 }
 
+/* ---- a11y: tabs as virtual children ---- */
+
+static fdk_i32 nb_tab_width(const fdk_notebook *nb, size_t i);
+
+static size_t nb_virtual_count(const fdk_widget *w) {
+    const fdk_notebook *nb = (const fdk_notebook *)(const void *)w;
+    return nb->count;
+}
+
+static void nb_virtual_describe(const fdk_widget *w, size_t index,
+                                fdk_a11y_info *out) {
+    const fdk_notebook *nb = (const fdk_notebook *)(const void *)w;
+    out->role = FDK_A11Y_ROLE_TAB;
+    if (nb->pages[index].label != NULL) {
+        out->name = fdk__strdup(nb->pages[index].label);
+    }
+    out->states = FDK_A11Y_VISIBLE | FDK_A11Y_SHOWING |
+                  FDK_A11Y_ENABLED;
+    if (index == nb->current) {
+        out->states |= FDK_A11Y_SELECTED;
+    }
+    /* Bounds: the tab's strip rect in the notebook's root-absolute
+     * space (the strip layout nb_relayout computes). */
+    fdk_rect abs = fdk_widget_get_absolute_bounds(w);
+    fdk_i32 x = 0;
+    for (size_t i = 0; i < index; i++) {
+        x += nb_tab_width(nb, i) + NB_TAB_GAP;
+    }
+    out->bounds = (fdk_rect){abs.x + x, abs.y,
+                             nb_tab_width(nb, index), NB_TAB_H};
+}
+
+static fdk_a11y_action_set nb_virtual_actions(const fdk_widget *w,
+                                              size_t index) {
+    const fdk_notebook *nb = (const fdk_notebook *)(const void *)w;
+    return (index != nb->current) ? (fdk_a11y_action_set)FDK_A11Y_ACTION_ACTIVATE
+                                  : 0;
+}
+
+static bool nb_virtual_perform(fdk_widget *w, size_t index,
+                               fdk_a11y_action action, double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    return fdk_ok(fdk_notebook_set_current_page(w, index));
+}
+
 static const fdk_a11y_class nb_a11y = {
     .role = FDK_A11Y_ROLE_TAB_LIST,
     .describe = nb_a11y_describe,
     .actions = nb_a11y_actions,
     .perform = nb_a11y_perform,
+    .virtual_count = nb_virtual_count,
+    .virtual_describe = nb_virtual_describe,
+    .virtual_actions = nb_virtual_actions,
+    .virtual_perform = nb_virtual_perform,
 };
 
 const fdk_widget_class fdk_notebook_class_def = {
@@ -336,6 +388,9 @@ fdk_result fdk_notebook_append_page(fdk_widget *notebook,
     }
     nb_sync_pages(nb);
     fdk_widget_invalidate(notebook);
+    /* Virtual children (the tabs) changed — the page widget itself
+     * already fired its own CHILDREN_CHANGED through reparent. */
+    fdk__a11y_notify(notebook, FDK_A11Y_CHILDREN_CHANGED, 0);
     return FDK_OK;
 }
 
