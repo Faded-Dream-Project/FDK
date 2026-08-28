@@ -203,6 +203,20 @@ struct fdk_widget {
  * default-theme switch (src/theme/theme.c). */
 void fdk__widget_roots_invalidate_all(void);
 
+/* Cancels the tree's implicit pointer grab WITHOUT delivering a
+ * release (src/window/window.c calls this when a band press hands
+ * the drag to the window manager / compositor via
+ * _NET_WM_MOVERESIZE or xdg_toplevel_move: the WM takes the pointer
+ * grab and the button release is consumed by the WM's grab, so the
+ * tree would otherwise stay in implicit-grab state forever — its
+ * press-to-release pairing broken, hover frozen, and every later
+ * press misrouted to the stale grab target instead of its real hit
+ * target). Widgets that need to clean up their own pressed state
+ * should not hand their grabs to the WM; the decoration band (the
+ * only in-tree widget that does) keeps no per-press state on that
+ * path. Safe with NULL. */
+void fdk__widget_tree_cancel_grab(fdk_widget *any);
+
 /* Internal theme-change notification (see struct fdk_widget's
  * theme_hook field). NULL clears. Safe with NULL widget. */
 void fdk__widget_set_theme_hook(fdk_widget *widget,

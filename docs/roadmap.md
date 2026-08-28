@@ -1845,3 +1845,73 @@ ASan leak report on the first `make test-x11` in a fresh container
 nondeterminism, not an FDK bug) — recorded in
 `docs/testing.md`'s environment-quirks section with the
 verification method.
+
+### 1.1.3 — the real-window-manager fixes (the Cinnamon report) — COMPLETE
+
+User report, tested on a real Cinnamon X11 desktop: "can't drag the
+window from the [FDK] bar [on the decorations example], can't resize
+it, and the [maximize] button only resets to unmaximized while the
+window stays maximized — but the rest works."
+
+All three symptoms traced to the EWMH paths never having run under a
+REAL window manager before: the test rigs use bare Xvfb (no WM) and
+a fake WM that answers messages but never grabs the pointer, and the
+Wayland rig uses sway. Three bugs, each reproduced empirically under
+Xvfb + openbox 3.6.1 with real XTEST-driven input before fixing:
+
+1. **The atom typo (maximize/unmaximize desync).** FDK interned
+   `_NET_WM_STATE_MAXIMIZED_HORIZ`; the EWMH spec atom is
+   `_NET_WM_STATE_MAXIMIZED_HORZ`. XInternAtom with
+   only-if-exists=False silently CREATES the misspelled atom, so the
+   connect-time _NET_SUPPORTED probe never matched it — every real
+   WM looked "maximize-incapable" (`ewmh_state_ok` = 0) and
+   `set_maximized` fell through to the bare-X fallback. That
+   fallback `XMoveResizeWindow`s to the full screen under a WM that
+   owns the window, then optimistically dispatches the state flip —
+   while Metacity-family WMs clamp restore requests for windows they
+   consider maximized: the window stays maximized while FDK's flag
+   (and the title-bar button glyph) report unmaximized. The exact
+   user symptom. Fixes: the spelling (x11_connection.c), plus
+   `set_maximized` now takes the _NET_WM_STATE client-message
+   request whenever an EWMH WM is detected (a WM without the atoms
+   honestly ignores it — no lying fallback under a WM; the bare-X
+   path only runs when there is truly no WM).
+
+2. **The implicit pointer grab blocked the WM's drag (drag/resize
+   dead).** The button press that starts a band drag leaves the X
+   server's implicit pointer grab held by the window; a WM that
+   drives interactive moves with its own XGrabPointer (openbox,
+   Metacity-family, most others) gets AlreadyGrabbed and its move
+   op sees no events — the message is sent, accepted, and nothing
+   moves. `begin_move`/`begin_resize` now XUngrabPointer before
+   sending _NET_WM_MOVERESIZE. Verified under openbox: without the
+   ungrab the window never follows the drag; with it the window
+   tracks the pointer exactly.
+
+3. **The stale widget-tree grab after a WM-driven drag.** The WM's
+   grab consumes the button release that would end the widget
+   tree's implicit grab, so `root->grab` stayed set to the
+   decoration band forever: press-to-release pairing broken, hover
+   frozen, and every later press misrouted to the band — a content
+   click would start a spurious window move instead of activating
+   the widget. New internal seam `fdk__widget_tree_cancel_grab()`
+   (widget.c), called by the window layer at the WM handover (both
+   backends — Wayland compositors eat the release the same way).
+
+Why the tests missed all three: the fake-WM test interned the same
+misspelled atom as the library (a self-confirming test — it verified
+FDK against a copy of FDK's own bug), and a fake WM that never grabs
+the pointer cannot exhibit bugs 2 and 3 by construction. New guards:
+`test_ewmh_atom_spelling` (XInternAtom only-if-exists through a
+second connection is the oracle — a misspelled name returns None),
+the fake WM's atoms spelled per the spec independently, and a
+real-WM rig (openbox + Xvfb + direct XTEST input — xdotool's motion
+is silently ignored by this environment's Xvfb; its queries work,
+which made debugging input delivery its own adventure) verifying
+probe/drag/maximize/unmaximize/edge-resize/post-drag-content-click
+end to end. Rig: scripts/verify_wm_deco.sh in the staging area.
+
+Battery: clean rebuild debug + release (Wayland on, 0 warnings),
+headless suite, X11 integration suite (incl. both new guards), the
+Wayland suite + decorations-demo rig on sway, and the openbox
+real-WM rig — ALL PASS, twice consecutively.

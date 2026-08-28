@@ -576,9 +576,30 @@ fdk_result fdk_x11_window_set_maximized(fdk_platform_window *pwindow,
     }
 
     Display *dpy = pwindow->conn->display;
-    if (pwindow->conn->ewmh_wm && pwindow->conn->ewmh_state_ok) {
-        /* _NET_WM_STATE add/remove of the two maximized atoms in one
-         * message; data.l[3] = 1 (source indication: application). */
+    if (pwindow->conn->ewmh_wm) {
+        /* An EWMH WM is running: ALWAYS the client-message request,
+         * never the direct geometry stomp below. Two reasons:
+         *
+         * 1. It's the sanctioned path — the WM owns maximization,
+         *    rewrites _NET_WM_STATE, and the PropertyNotify keeps
+         *    FDK's flag honest (a WM that refuses changes nothing,
+         *    and fdk_window_is_maximized() keeps telling the truth).
+         *
+         * 2. The direct XMoveResizeWindow fallback was written for
+         *    BARE X and LIES under a real WM: it optimistically
+         *    dispatches the state flip as if FDK's own action were
+         *    the outcome, but a WM may clamp or reinterpret the
+         *    request (Metacity-family WMs treat a request for exactly
+         *    the monitor size as maximization, then REFUSE the
+         *    restore request while they consider the window
+         *    maximized). Result: the window stays maximized while
+         *    FDK's flag — and the title-bar button glyph driven by
+         *    it — flip back (the 1.1.3 user report).
+         *
+         * A WM that doesn't advertise the two maximized atoms in
+         * _NET_SUPPORTED simply ignores the message; the honest
+         * outcome is "still not maximized", which the property
+         * read agrees with. */
         send_root_message(pwindow, pwindow->conn->net_wm_state,
                           want ? 1L /* _NET_WM_STATE_ADD */
                                : 0L /* _NET_WM_STATE_REMOVE */,
@@ -704,6 +725,20 @@ fdk_result fdk_x11_window_begin_move(fdk_platform_window *pwindow,
                                &rx, &ry, &child)) {
         return FDK_ERR_PLATFORM_INIT;
     }
+    /* Release the implicit pointer grab created by the button press
+     * BEFORE handing the drag to the WM. The press that triggered
+     * this call left the server's pointer actively grabbed by THIS
+     * window (the X protocol's implicit grab: it ends at button
+     * release). A WM that drives the interactive move with its own
+     * XGrabPointer (openbox, Metacity-family, most others) gets
+     * AlreadyGrabbed while our implicit grab is held — its move op
+     * never sees a single motion event, and the window does not
+     * move even though the message was sent and accepted (verified
+     * empirically under openbox: with the ungrab the window follows
+     * the drag exactly; without it, nothing moves). Releasing our
+     * grab costs nothing — we were about to hand the drag over and
+     * stop wanting pointer events for it anyway. */
+    XUngrabPointer(pwindow->conn->display, CurrentTime);
     /* data.l = {x_root, y_root, direction(_NET_WM_MOVERESIZE_MOVE=8),
      * button, source indication(1=application)}. The WM takes the
      * pointer grab from here; we see only the resulting configures. */
@@ -732,6 +767,9 @@ fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
                                &rx, &ry, &child)) {
         return FDK_ERR_PLATFORM_INIT;
     }
+    /* Same implicit-grab release as begin_move: the WM's interactive
+     * resize needs to take the pointer grab our press is holding. */
+    XUngrabPointer(pwindow->conn->display, CurrentTime);
     send_root_message(pwindow, pwindow->conn->net_wm_moveresize,
                       rx, ry, dir, 1);
     return FDK_OK;

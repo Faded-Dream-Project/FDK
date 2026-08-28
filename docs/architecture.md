@@ -123,16 +123,26 @@ platform ops: `window_set_wm_decorations` — X11 _MOTIF_WM_HINTS,
 Wayland xdg-decoration set_mode; `window_set_maximized` /
 `window_set_minimized` — EWMH _NET_WM_STATE messages + PropertyNotify
 tracking on X11 (with honest bare-X fallbacks where FDK is its own
-WM), xdg_toplevel requests on Wayland; `window_begin_move` /
+WM; the fallback never runs under a detected WM, because it
+optimistically dispatches the state flip as if FDK's own action were
+the outcome — a lie under a WM that clamps or reinterprets the
+geometry request, and the source of the 1.1.3 maximized-state
+desync), xdg_toplevel requests on Wayland; `window_begin_move` /
 `window_begin_resize` — _NET_WM_MOVERESIZE / xdg_toplevel.move/
 resize, handing interactive drags to the WM/compositor where the
-platform supports it; `window_move_resize_to` for FDK-driven atomic
-resize drags. FDK_EVENT_WINDOW_STATE / FDK_EVENT_WINDOW_DECORATION
-report platform truth, never request optimism — see
-platform_internal.h, which documents the EWMH vs xdg-decoration vs
-bare-X differences instead of assuming them away), `src/core/
-clipboard.c` + the backends' clipboard implementations (Phase 9:
-`fdk_clipboard_set_text`/`fdk_clipboard_get_text` over one
+platform supports it (the X11 implementation releases the press's
+implicit pointer grab BEFORE sending _NET_WM_MOVERESIZE — the WM's
+own XGrabPointer gets AlreadyGrabbed otherwise and the drag never
+starts; and the window layer cancels the widget tree's implicit
+grab at the same handover, because the WM consumes the button
+release and the tree's press-to-release pairing would stay broken
+— see fdk__widget_tree_cancel_grab); `window_move_resize_to` for
+FDK-driven atomic resize drags. FDK_EVENT_WINDOW_STATE /
+FDK_EVENT_WINDOW_DECORATION report platform truth, never request
+optimism — see platform_internal.h, which documents the EWMH vs
+xdg-decoration vs bare-X differences instead of assuming them away),
+`src/core/clipboard.c` + the backends' clipboard implementations
+(Phase 9: `fdk_clipboard_set_text`/`fdk_clipboard_get_text` over one
 OPTIONAL platform-op pair — ICCCM CLIPBOARD ownership with a
 helper window and a bounded non-re-entrant SelectionNotify wait on
 X11, wl_data_device/wl_data_source on Wayland), and the Phase 9

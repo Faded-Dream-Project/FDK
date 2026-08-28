@@ -2614,8 +2614,16 @@ static void fake_wm_install(fake_wm *wm) {
     wm->net_wm_state = XInternAtom(wm->dpy, "_NET_WM_STATE", False);
     wm->net_wm_state_maximized_vert =
         XInternAtom(wm->dpy, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+    /* SPEC spelling (...HORZ, not ...HORIZ). The 1.1.3 lesson: this
+     * fake WM once interned the same misspelling FDK's connection
+     * code had, so the test verified the library against a copy of
+     * its own bug and the typo shipped — under real WMs the probe
+     * never matched, maximize silently degraded to the bare-X
+     * fallback, and the maximized state desynced from the WM. The
+     * atoms below are now the EWMH spec strings, so any spelling
+     * drift in FDK fails this test instead of echoing it. */
     wm->net_wm_state_maximized_horiz =
-        XInternAtom(wm->dpy, "_NET_WM_STATE_MAXIMIZED_HORIZ", False);
+        XInternAtom(wm->dpy, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
     wm->net_wm_moveresize =
         XInternAtom(wm->dpy, "_NET_WM_MOVERESIZE", False);
     wm->wm_change_state =
@@ -2805,6 +2813,48 @@ static void ewmh_window_callback(fdk_window *window,
     if (event->type == FDK_EVENT_WINDOW_STATE) {
         ewmh_state_events++;
     }
+}
+
+static void test_ewmh_atom_spelling(void) {
+    /* The 1.1.3 regression, pinned directly: FDK interned
+     * _NET_WM_STATE_MAXIMIZED_HORIZ where the EWMH spec atom is
+     * ..._HORZ. XInternAtom(only_if_exists=True) is the oracle — it
+     * succeeds ONLY when the exact spec string was already interned
+     * (by FDK's connect, since nothing else runs here) and returns
+     * None for any misspelling. Checking through a SECOND connection
+     * makes it independent of ordering and of anything FDK caches
+     * client-side: atoms are server-global truth. */
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK atom spelling",
+                                 .width = 100, .height = 80 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    Display *d = XOpenDisplay(NULL);
+    assert(d != NULL);
+    Atom spec_vert =
+        XInternAtom(d, "_NET_WM_STATE_MAXIMIZED_VERT", True);
+    Atom spec_horiz =
+        XInternAtom(d, "_NET_WM_STATE_MAXIMIZED_HORZ", True);
+    /* The library's own interned atoms, through the internal
+     * verification seam (same one fdk_window_xid uses): they must BE
+     * the spec atoms, atom-for-atom, on the server. */
+    Atom fdk_vert = win->pwindow->conn->net_wm_state_maximized_vert;
+    Atom fdk_horiz = win->pwindow->conn->net_wm_state_maximized_horiz;
+    XCloseDisplay(d);
+
+    assert(spec_vert != None);
+    assert(spec_horiz != None);
+    assert(fdk_vert == spec_vert);
+    assert(fdk_horiz == spec_horiz);
+
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 EWMH atom spelling: library atoms are the spec "
+           "atoms (HORZ, not HORIZ) server-globally\n");
 }
 
 static void test_ewmh_fake_wm(void) {
@@ -4316,6 +4366,7 @@ int main(void) {
     test_decorations_gui();
     test_window_state_gui();
     test_resize_edges_gui();
+    test_ewmh_atom_spelling();
     test_ewmh_fake_wm();
     test_mitm_shm_and_double_buffer();
     test_clipboard();

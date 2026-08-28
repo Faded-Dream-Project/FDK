@@ -37,10 +37,15 @@ struct fdk_platform_connection {
      * actually supports, probed once at connect from the root's
      * _NET_SUPPORTED list (see x11_connection.c). ewmh_wm != 0 means
      * an EWMH-capable WM is running (the list exists and is
-     * non-empty); ewmh_state_ok additionally requires both
-     * _NET_WM_STATE_MAXIMIZED_{VERT,HORIZ} in it. The bare-X fallback
-     * paths (no WM: FDK moves/resizes/unmaps directly) key off
-     * ewmh_wm. */
+     * non-empty); the bare-X fallback paths (no WM: FDK
+     * moves/resizes/unmaps directly) key off ewmh_wm.
+     * ewmh_state_ok additionally records that the WM advertises both
+     * _NET_WM_STATE_MAXIMIZED_{VERT,HORZ} — INFORMATIONAL (the probe
+     * log line): maximize requests go through the _NET_WM_STATE
+     * client message whenever ewmh_wm is set regardless, because a
+     * WM without the atoms simply ignores the message, while the
+     * direct-geometry fallback would lie about the outcome (see
+     * fdk_x11_window_set_maximized). */
     Atom net_wm_state;
     Atom net_wm_state_maximized_vert;
     Atom net_wm_state_maximized_horiz;

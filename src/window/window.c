@@ -462,6 +462,15 @@ static bool deco_bar_event(fdk_widget *w, const fdk_widget_event *ev,
             if (window->ops->window_begin_move != NULL &&
                 fdk_ok(window->ops->window_begin_move(
                     window->pwindow, x, y))) {
+                /* The WM/compositor now owns the drag AND the pointer
+                 * grab — the button release that would normally end
+                 * the tree's implicit grab goes to the WM's grab and
+                 * never arrives here. Cancel the tree's grab now or
+                 * it stays stale forever (press-to-release pairing
+                 * broken, hover frozen, and the NEXT press misrouted
+                 * to this band instead of its real hit target — a
+                 * content click would start a spurious window move). */
+                fdk__widget_tree_cancel_grab(w);
                 return true; /* WM/compositor drives from here */
             }
             if (window->ops->window_get_position == NULL ||

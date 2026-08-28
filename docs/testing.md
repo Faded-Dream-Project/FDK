@@ -278,6 +278,41 @@ corner press, and IconicState from the iconify request. It installs
 after the bare-X tests and uninstalls before the suite ends so
 nothing downstream sees a phantom WM.
 
+**The self-confirming-test lesson (1.1.3)**: the fake WM above once
+interned its "maximized" atoms with the same misspelling the
+library had (`_NET_WM_STATE_MAXIMIZED_HORIZ` — the EWMH spec atom
+is `..._HORZ`), so the test verified FDK against a copy of FDK's
+own bug. The typo shipped: under real WMs the capability probe
+never matched, maximize silently degraded to the bare-X fallback,
+and the maximized state desynced from the WM (a user report from
+Cinnamon, reproduced and fixed in milestone 1.1.3). Two guards now
+exist. `test_ewmh_atom_spelling` checks the library's interned
+atoms against the SPEC strings through a second X connection
+(XInternAtom with only-if-exists is the oracle: it returns None for
+any name nobody interned, so a misspelling cannot hide); and the
+fake WM's atoms are spelled per the spec independently, so any
+drift in the library fails the field-by-field message assertions
+instead of echoing them.
+
+**The real-WM rig (openbox, maintainer staging scripts)**: the
+fake WM verifies the PROTOCOL EXCHANGE, but two bugs of a different
+kind only manifest with a WM that actually takes over the
+interaction — the fake WM never grabs the pointer, so it cannot see
+them. The rig runs Xvfb + openbox 3.6.1 (user-space prefix, no dbus)
+and drives the decorations example with REAL input through the
+XTEST extension (direct XTestFakeMotionEvent/ButtonEvent calls —
+NOT xdotool, whose motion is silently ignored by this environment's
+Xvfb while its queries work, which cost an hour of phantom
+"broken input" debugging): it verifies the EWMH probe detects the
+WM, a band drag MOVES the window (openbox clamps to the workspace,
+so the rig drags away from screen edges first), the maximize
+button fills the screen with both _NET_WM_STATE atoms set and the
+state event delivered, unmaximize restores the geometry, an edge
+resize grows the window, and — the regression that motivated the
+rig — the first CONTENT click after a WM-driven drag still
+activates the widget it hit-tests (the stale-grab check). This rig
+found and verified the fixes for all three 1.1.3 bugs.
+
 **Wayland** (`make test-wayland` + `tests/test_wayland_integration.c`):
 runs against a REAL compositor reachable via $WAYLAND_DISPLAY (the
 binary self-skips without one, so plain CI never fails on it). The

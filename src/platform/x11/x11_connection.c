@@ -84,8 +84,17 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->net_wm_state = XInternAtom(display, "_NET_WM_STATE", False);
     conn->net_wm_state_maximized_vert =
         XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+    /* NOTE the spelling: the EWMH spec atom is ..._HORZ (not
+     * ..._HORIZ). A misspelled name here does NOT fail loudly —
+     * XInternAtom with only-if-exists=False CREATES a fresh atom
+     * nobody else uses, so the _NET_SUPPORTED probe below never
+     * matches it, every WM looks "maximize-incapable", and the
+     * maximize path silently degrades to the bare-X fallback under
+     * real window managers (exactly the 1.1.3 bug: window maximized
+     * by the WM, FDK's flag disagreeing). tests/test_x11_integration.c
+     * pins the spec spelling against this. */
     conn->net_wm_state_maximized_horiz =
-        XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_HORIZ", False);
+        XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
     conn->net_wm_moveresize = XInternAtom(display, "_NET_WM_MOVERESIZE", False);
     conn->wm_state = XInternAtom(display, "WM_STATE", False);
     conn->wm_change_state = XInternAtom(display, "WM_CHANGE_STATE", False);

@@ -661,6 +661,22 @@ static void subtree_theme_notify(fdk_widget *w) {
     }
 }
 
+void fdk__widget_tree_cancel_grab(fdk_widget *any) {
+    /* Called from the decoration-band press path (window.c) at the
+     * moment the drag is handed to the WM/compositor. The tree is
+     * mid-dispatch of that very BUTTON_DOWN (route_event set
+     * root->grab BEFORE dispatching to the band handler), so this
+     * runs under an active guard — clear the grab directly; the
+     * guard's deferred flush at guard_leave handles anything a
+     * handler destroyed in between. No release is synthesized: the
+     * release belongs to the WM's grab now and will never arrive. */
+    fdk_widget *root = find_root(any);
+    if (root == NULL) {
+        return;
+    }
+    root->grab = NULL;
+}
+
 void fdk__widget_roots_invalidate_all(void) {
     /* Pre-capture the walk order: damage_union is pure bookkeeping,
      * but the theme switch that reached us may itself be running
