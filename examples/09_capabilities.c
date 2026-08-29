@@ -1,37 +1,54 @@
-/* 09_capabilities.c — the real-world capability showcase (1.2.0).
+/* 09_capabilities.c — the real-world capability showcase (1.2.1).
  *
  * One application that answers "what can FDK do with the desktop?"
- * in four sections, because that is the honest way to validate the
- * platform seams this milestone added:
+ * in five sections, because that is the honest way to validate the
+ * platform seams:
  *
- *   CLIPBOARD   an Entry wired to Copy / Cut / Paste / Clear buttons
- *               (the Entry's stock Ctrl+X/C/V work too) and a
- *               "last operation" line narrating every action. Paste
- *               from a REAL other application to test interop.
+ *   CLIPBOARD    an Entry wired to Copy / Cut / Paste / Clear (the
+ *                Entry's stock Ctrl+X/C/V work too), a "Read
+ *                clipboard" button that pulls whatever ANOTHER app
+ *                left there into a preview line (length + first
+ *                bytes, escaped), and "Set greeting" which plants a
+ *                timestamped string for other apps to paste — the
+ *                interop story in both directions.
  *
- *   DROP TARGET a big panel that highlights while a drag hovers it
- *               and reports the last drop: type (text / N files /
- *               folder), names and paths, or the text contents.
- *               Drop things from your file manager or editor.
+ *   TEXT INPUT   a big box you simply TYPE IN (the live typing
+ *                playground): every keystroke updates a status line
+ *                with bytes / caret / selection, read straight from
+ *                the public Entry APIs; Password and Read-only
+ *                toggles flip the box's modes live; Enter reports
+ *                the commit.
  *
- *   DIALOGS     [Select File] [Select Files] [Select Folder]
- *               [Select Folders] open the FDK file dialog; the
- *               outcome line distinguishes accepted (with every
- *               path listed — multi-selection is never silently
- *               discarded), cancelled, and error.
+ *   DROP TARGET  a panel that highlights while a drag hovers it and
+ *                reports the last drop: type (text / N files /
+ *                folder), names and paths, or the text contents.
+ *                Drop things from your file manager or editor.
  *
- *   DRAG SOURCE a "drag me" panel: press and drag from it into any
- *               other application — text into an editor, or the two
- *               files it advertises into a file manager. The status
- *               line reports how the drag ended.
+ *   DIALOGS      [Select File] [Select Files] [Select Folder]
+ *                [Select Folders] open the FDK file dialog; the
+ *                outcome line distinguishes accepted (every path
+ *                listed — multi-selection is never silently
+ *                discarded), cancelled, and error. [Ask Yes/No]
+ *                shows a message dialog and reports the answer.
+ *
+ *   DRAG SOURCE  a "drag me" panel: press and drag from it into any
+ *                other application — text into an editor, or the two
+ *                files it advertises into a file manager. The status
+ *                line reports how the drag ended.
+ *
+ * The window repaints when its tree has damage (the 1.2.0 build
+ * forgot, which read as "dead between interactions"), and its root
+ * background is the toolkit default (1.2.1) — status lines now
+ * CLEAR their old text before drawing the new.
  *
  * For the GUI test rigs the demo prints:
- *   RIG: drop-panel <x> <y> <w> <h>      — where to drop
- *   RIG: drag-panel <x> <y> <w> <h>      — where to press-drag from
- *   RIG: btn-copy|btn-paste|btn-file|... <x> <y> <w> <h>
- *   PHASE: clip <op> <n>                 — copy/cut/paste results
+ *   RIG: drop-panel|drag-panel|btn-copy|btn-paste|btn-clipread|
+ *        btn-clipset|btn-file|btn-files|btn-folder|btn-folders|
+ *        btn-ask|entry-typing <x> <y> <w> <h>
+ *   PHASE: clip <op> <n>                 — copy/cut/paste/read/set
+ *   PHASE: type <bytes> <caret>          — every typing-box change
  *   PHASE: drop <text|files|folder> <n>  — decoded drops
- *   PHASE: dialog <accepted|cancelled|error> <count>
+ *   PHASE: dialog <accepted|cancelled|error|yes|no> <count>
  *   PHASE: drag <succeeded|cancelled|failed>
  *
  * Close the window or press ESC to exit; FDK_DEMO_FRAMES=N exits
@@ -49,6 +66,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 /* ---- app state ---- */
 
@@ -56,21 +74,32 @@ static struct {
     fdk_context *ctx;
     fdk_window *window;
     fdk_font *font;
+    fdk_widget *root;
     bool quit;
     int frames_left;
     /* clipboard section */
     fdk_widget *entry;
+    fdk_widget *clip_btns[6]; /* Copy Cut Paste Clear | Read Set */
     fdk_widget *clip_status;
+    fdk_widget *clip_preview;
+    /* typing section */
+    fdk_widget *typing;
+    fdk_widget *toggle_password, *toggle_readonly;
+    fdk_widget *typing_status;
+    fdk_widget *typing_commit;
     /* drop section */
-    fdk_widget *drop_panel;   /* the highlight target (a Frame) */
-    fdk_rect drop_rect;       /* panel bounds in WINDOW coords   */
+    fdk_widget *drop_panel;
+    fdk_rect drop_rect;
     fdk_widget *drop_status;
     /* dialog section */
+    fdk_widget *dlg_btns[5]; /* File Files Folder Folders | Ask */
     fdk_widget *dialog_status;
     /* drag section */
     fdk_widget *drag_panel;
     fdk_rect drag_rect;
     fdk_widget *drag_status;
+    /* headings */
+    fdk_widget *h_clip, *h_type, *h_drop, *h_dlg, *h_drag;
 } app;
 
 /* ------------------------------------------------------------------ */
@@ -86,9 +115,6 @@ static void set_status(fdk_widget *label, const char *fmt, ...) {
     (void)fdk_label_set_text(label, buf);
 }
 
-/* Announces a widget's absolute bounds for the rigs: walks it up to
- * window coordinates the same way the widget layer lays children
- * out (parents carry absolute bounds). */
 static void rig_announce(const char *name, fdk_widget *w) {
     if (w == NULL) {
         return;
@@ -102,7 +128,6 @@ static void rig_announce(const char *name, fdk_widget *w) {
 /* clipboard section                                                   */
 /* ------------------------------------------------------------------ */
 
-/* Entry selection extent via the public get_selection API. */
 static void entry_selection(size_t *lo, size_t *hi) {
     *lo = *hi = 0;
     size_t anchor = 0, caret = 0;
@@ -150,7 +175,6 @@ static void clip_cut_clicked(fdk_widget *w, void *user) {
         if (fdk_ok(r)) {
             fdk_entry_select_range(app.entry, lo, lo);
             fdk_entry_set_cursor(app.entry, lo);
-            /* delete the selected bytes: re-set the text around them */
             char *kept = malloc(strlen(text) + 1);
             if (kept != NULL) {
                 memcpy(kept, text, lo);
@@ -212,6 +236,108 @@ static void clip_clear_clicked(fdk_widget *w, void *user) {
     fflush(stdout);
 }
 
+/* Pulls whatever another application left on the clipboard into the
+ * preview line: length + the first bytes, newlines escaped. */
+static void clip_read_clicked(fdk_widget *w, void *user) {
+    (void)w; (void)user;
+    char *text = fdk_clipboard_get_text(app.ctx);
+    if (text == NULL) {
+        set_status(app.clip_preview, "(unreadable or empty)");
+        set_status(app.clip_status, "Read: nothing to read");
+        printf("PHASE: clip read 0\n");
+        fflush(stdout);
+        return;
+    }
+    size_t len = strlen(text);
+    char shown[120];
+    size_t o = 0;
+    for (size_t i = 0; i < len && o + 5 < sizeof(shown); i++) {
+        if (text[i] == '\n') {
+            o += (size_t)snprintf(shown + o, sizeof(shown) - o, "\\n");
+        } else if (text[i] == '\r') {
+            o += (size_t)snprintf(shown + o, sizeof(shown) - o, "\\r");
+        } else if (text[i] == '\t') {
+            o += (size_t)snprintf(shown + o, sizeof(shown) - o, "\\t");
+        } else {
+            shown[o++] = text[i];
+        }
+    }
+    shown[o] = '\0';
+    set_status(app.clip_preview, "\"%s%s\"", shown,
+               len > 100 ? "..." : "");
+    set_status(app.clip_status, "Read %zu characters from the clipboard",
+               len);
+    printf("PHASE: clip read %zu\n", len);
+    fflush(stdout);
+    free(text);
+}
+
+/* Plants a timestamped string FOR other apps — paste it somewhere
+ * else to see the seam work in that direction. */
+static void clip_set_clicked(fdk_widget *w, void *user) {
+    (void)w; (void)user;
+    char buf[128];
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    localtime_r(&now, &tm_buf);
+    strftime(buf, sizeof(buf), "Hello from FDK at %H:%M:%S!", &tm_buf);
+    fdk_result r = fdk_clipboard_set_text(app.ctx, buf);
+    if (fdk_ok(r)) {
+        set_status(app.clip_status, "Set: \"%s\" — paste it elsewhere",
+                   buf);
+        printf("PHASE: clip set %zu\n", strlen(buf));
+    } else {
+        set_status(app.clip_status, "Set failed (%s)",
+                   fdk_result_to_string(r));
+        printf("PHASE: clip set-failed\n");
+    }
+    fflush(stdout);
+}
+
+/* ------------------------------------------------------------------ */
+/* text input section (the typing playground)                          */
+/* ------------------------------------------------------------------ */
+
+static void typing_report(void) {
+    const char *text = fdk_entry_get_text(app.typing);
+    size_t bytes = (text != NULL) ? strlen(text) : 0;
+    size_t caret = fdk_entry_get_cursor(app.typing);
+    size_t anchor = 0, caret2 = 0;
+    size_t lo = 0, hi = 0;
+    if (fdk_ok(fdk_entry_get_selection(app.typing, &anchor, &caret2))) {
+        lo = anchor <= caret2 ? anchor : caret2;
+        hi = anchor <= caret2 ? caret2 : anchor;
+    }
+    set_status(app.typing_status,
+               "%zu bytes · caret @ %zu · selection %zu..%zu%s",
+               bytes, caret, lo, hi, lo != hi ? "" : " (none)");
+    printf("PHASE: type %zu %zu\n", bytes, caret);
+    fflush(stdout);
+}
+
+static void typing_changed(fdk_widget *entry, void *user) {
+    (void)entry; (void)user;
+    typing_report();
+}
+
+static void typing_activated(fdk_widget *entry, void *user) {
+    (void)entry; (void)user;
+    const char *text = fdk_entry_get_text(app.typing);
+    set_status(app.typing_commit, "Committed: \"%s\"",
+               (text != NULL && text[0]) ? text : "(empty)");
+}
+
+static void password_toggled(fdk_widget *w, bool checked, void *user) {
+    (void)w; (void)user;
+    fdk_entry_set_password(app.typing, checked);
+    typing_report();
+}
+
+static void readonly_toggled(fdk_widget *w, bool checked, void *user) {
+    (void)w; (void)user;
+    fdk_entry_set_read_only(app.typing, checked);
+}
+
 /* ------------------------------------------------------------------ */
 /* drop target section                                                 */
 /* ------------------------------------------------------------------ */
@@ -220,7 +346,6 @@ static void report_drop(const fdk_event_data *ev) {
     const fdk_drag_event *d = &ev->drag;
     char summary[512];
     if (d->uris != NULL && d->uri_count > 0) {
-        /* Classify honestly: folders vs files via stat, per entry. */
         size_t files = 0, folders = 0;
         for (size_t i = 0; i < d->uri_count; i++) {
             struct stat st;
@@ -233,10 +358,8 @@ static void report_drop(const fdk_event_data *ev) {
         const char *kind = (folders > 0 && files == 0) ? "folder" : "files";
         set_status(app.drop_status, "Last drop: %s (%zu folder(s), "
                                     "%zu file(s)) — first: %s",
-                   kind, folders, files,
-                   d->uris[0]);
-        snprintf(summary, sizeof(summary), "%s %zu", kind,
-                 d->uri_count);
+                   kind, folders, files, d->uris[0]);
+        snprintf(summary, sizeof(summary), "%s %zu", kind, d->uri_count);
         (void)fdk_label_set_text(app.drop_panel, summary);
     } else if (d->text != NULL) {
         set_status(app.drop_status, "Last drop: text \"%s\"", d->text);
@@ -271,7 +394,6 @@ static void file_dialog_done(const fdk_file_dialog_result *result,
     const char *verb = kind_verb(kind);
     switch (result->outcome) {
     case FDK_FILE_DIALOG_ACCEPTED:
-        /* List EVERY path — the multi contract: nothing discarded. */
         {
             char buf[512];
             int off = snprintf(buf, sizeof(buf), "Selected (%s): ",
@@ -332,13 +454,37 @@ static void dlg_folders_clicked(fdk_widget *w, void *user) {
     open_dialog(FDK_FILE_DIALOG_OPEN_FOLDERS);
 }
 
+static void ask_done(fdk_dialog_response response, void *user) {
+    (void)user;
+    const char *answer = (response == FDK_DIALOG_YES)   ? "yes"
+                         : (response == FDK_DIALOG_NO)  ? "no"
+                                                        : "dismissed";
+    set_status(app.dialog_status, "You answered: %s", answer);
+    printf("PHASE: dialog %s 0\n",
+           response == FDK_DIALOG_YES    ? "yes"
+           : response == FDK_DIALOG_NO   ? "no"
+                                         : "cancelled");
+    fflush(stdout);
+}
+
+static void ask_clicked(fdk_widget *w, void *user) {
+    (void)w; (void)user;
+    fdk_dialog_options opts = {0};
+    opts.title = "Question";
+    opts.text = "Does the message dialog answer honestly?";
+    opts.buttons = FDK_DIALOG_BUTTONS_YES_NO;
+    fdk_result r = fdk_dialog_show_message(app.ctx, &opts, ask_done,
+                                           NULL, NULL);
+    if (!fdk_ok(r)) {
+        set_status(app.dialog_status, "Message dialog failed (%s)",
+                   fdk_result_to_string(r));
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* drag source section                                                 */
 /* ------------------------------------------------------------------ */
 
-/* The payload the drag panel offers: a short text plus two REAL
- * files (this example's own source lives beside the binary; the
- * Makefile copies nothing, so resolve defensively). */
 static void drag_payload_files(char *a, size_t a_cap, char *b,
                                size_t b_cap) {
     snprintf(a, a_cap, "%s", "/etc/hostname");
@@ -366,6 +512,8 @@ static bool in_drop_panel(fdk_f32 x, fdk_f32 y) {
            y < app.drop_rect.y + app.drop_rect.height;
 }
 
+static void relayout(void); /* defined in the layout section below */
+
 static void window_event(fdk_window *window, const fdk_event_data *event,
                          void *user) {
     (void)window; (void)user;
@@ -373,6 +521,10 @@ static void window_event(fdk_window *window, const fdk_event_data *event,
         (event->type == FDK_EVENT_KEY_DOWN &&
          event->key.scancode == FDK_KEY_ESC)) {
         app.quit = true;
+        return;
+    }
+    if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
+        relayout(); /* re-flow every section to the new size */
         return;
     }
     if (event->type >= FDK_EVENT_DRAG_ENTER &&
@@ -443,12 +595,89 @@ static bool drag_panel_event(fdk_widget *w, const fdk_widget_event *ev,
 }
 
 /* ------------------------------------------------------------------ */
-/* layout                                                              */
+/* layout (resize-aware; every widget is placed from window size)      */
 /* ------------------------------------------------------------------ */
 
-/* The full layout lives in main() below — the sections are placed
- * once (fixed default window size) and the RIG lines are printed
- * after the first configure. */
+/* Places a measured button row left-to-right from x. */
+static void lay_button_row(fdk_widget **btns, size_t n, fdk_i32 x,
+                           fdk_i32 y, fdk_i32 h) {
+    for (size_t i = 0; i < n; i++) {
+        fdk_size m = {0, 0};
+        fdk_widget_measure(btns[i], &m);
+        fdk_widget_set_bounds(btns[i], (fdk_rect){x, y, m.width, h});
+        x += m.width + 8;
+    }
+}
+
+static void relayout(void) {
+    fdk_size ws;
+    (void)fdk_window_get_size(app.window, &ws);
+    fdk_i32 x = 12;
+    fdk_i32 w = ws.width - 24;
+    if (w < 320) {
+        w = 320;
+    }
+    fdk_i32 y = 10;
+
+    /* CLIPBOARD */
+    fdk_widget_set_bounds(app.h_clip, (fdk_rect){x, y, w, 20});
+    y += 24;
+    fdk_widget_set_bounds(app.entry, (fdk_rect){x, y, w, 32});
+    y += 40;
+    lay_button_row(app.clip_btns, 6, x, y, 28);
+    y += 34;
+    fdk_widget_set_bounds(app.clip_status, (fdk_rect){x, y, w, 20});
+    y += 22;
+    fdk_widget_set_bounds(app.clip_preview, (fdk_rect){x, y, w, 20});
+    y += 30;
+
+    /* TEXT INPUT */
+    fdk_widget_set_bounds(app.h_type, (fdk_rect){x, y, w, 20});
+    y += 24;
+    fdk_widget_set_bounds(app.typing, (fdk_rect){x, y, w, 36});
+    y += 44;
+    fdk_i32 tx = x;
+    fdk_size tm = {0, 0};
+    fdk_widget_measure(app.toggle_password, &tm);
+    fdk_widget_set_bounds(app.toggle_password,
+                          (fdk_rect){tx, y, tm.width, 28});
+    tx += tm.width + 8;
+    fdk_widget_measure(app.toggle_readonly, &tm);
+    fdk_widget_set_bounds(app.toggle_readonly,
+                          (fdk_rect){tx, y, tm.width, 28});
+    y += 34;
+    fdk_widget_set_bounds(app.typing_status, (fdk_rect){x, y, w, 20});
+    y += 22;
+    fdk_widget_set_bounds(app.typing_commit, (fdk_rect){x, y, w, 20});
+    y += 30;
+
+    /* DROP TARGET */
+    fdk_widget_set_bounds(app.h_drop, (fdk_rect){x, y, w, 20});
+    y += 24;
+    app.drop_rect = (fdk_rect){x, y, w, 84};
+    fdk_widget_set_bounds(app.drop_panel, app.drop_rect);
+    y += 90;
+    fdk_widget_set_bounds(app.drop_status, (fdk_rect){x, y, w, 20});
+    y += 30;
+
+    /* DIALOGS */
+    fdk_widget_set_bounds(app.h_dlg, (fdk_rect){x, y, w, 20});
+    y += 24;
+    lay_button_row(app.dlg_btns, 5, x, y, 28);
+    y += 34;
+    fdk_widget_set_bounds(app.dialog_status, (fdk_rect){x, y, w, 20});
+    y += 30;
+
+    /* DRAG SOURCE */
+    fdk_widget_set_bounds(app.h_drag, (fdk_rect){x, y, w, 20});
+    y += 24;
+    app.drag_rect = (fdk_rect){x, y, w, 52};
+    fdk_widget_set_bounds(app.drag_panel, app.drag_rect);
+    y += 58;
+    fdk_widget_set_bounds(app.drag_status, (fdk_rect){x, y, w, 20});
+}
+
+/* ------------------------------------------------------------------ */
 
 int main(void) {
     memset(&app, 0, sizeof(app));
@@ -468,8 +697,8 @@ int main(void) {
 
     fdk_window_options wopts = {
         .title = "FDK Capabilities",
-        .width = 640,
-        .height = 660,
+        .width = 660,
+        .height = 780,
     };
     if (!fdk_ok(fdk_window_create(app.ctx, &wopts, &app.window))) {
         fdk_font_destroy(app.font);
@@ -481,126 +710,130 @@ int main(void) {
                                 FDK_DRAG_FORMAT_TEXT |
                                     FDK_DRAG_FORMAT_URI_LIST);
 
-    fdk_widget *root = NULL;
-    (void)fdk_window_get_root(app.window, &root);
+    (void)fdk_window_get_root(app.window, &app.root);
+    fdk_color panel =
+        fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
 
-    fdk_i32 y = 10;
-    fdk_i32 x = 12;
-
-    /* ---- clipboard section ---- */
-    fdk_widget *h1 = NULL;
-    (void)fdk_label_create(root, app.font, "CLIPBOARD", &h1);
-    fdk_widget_set_bounds(h1, (fdk_rect){x, y, 300, 20});
-    y += 24;
-    (void)fdk_entry_create(root, app.font, NULL, &app.entry);
-    fdk_widget_set_bounds(app.entry, (fdk_rect){x, y, 480, 32});
+    /* ---- CLIPBOARD ---- */
+    (void)fdk_label_create(app.root, app.font, "CLIPBOARD", &app.h_clip);
+    (void)fdk_entry_create(app.root, app.font, NULL, &app.entry);
     (void)fdk_entry_set_text(app.entry, "select some of this text");
     fdk_entry_select_range(app.entry, 0, 9);
-    y += 40;
 
-    fdk_widget *buttons[4] = {0};
-    (void)fdk_button_create(root, app.font, "Copy", &buttons[0]);
-    (void)fdk_button_create(root, app.font, "Cut", &buttons[1]);
-    (void)fdk_button_create(root, app.font, "Paste", &buttons[2]);
-    (void)fdk_button_create(root, app.font, "Clear", &buttons[3]);
-    fdk_button_set_on_activate(buttons[0], clip_copy_clicked, NULL);
-    fdk_button_set_on_activate(buttons[1], clip_cut_clicked, NULL);
-    fdk_button_set_on_activate(buttons[2], clip_paste_clicked, NULL);
-    fdk_button_set_on_activate(buttons[3], clip_clear_clicked, NULL);
-    fdk_i32 bx = x;
-    for (int i = 0; i < 4; i++) {
-        fdk_size n = {0, 0};
-        fdk_widget_measure(buttons[i], &n);
-        fdk_widget_set_bounds(buttons[i],
-                              (fdk_rect){bx, y, n.width, 28});
-        bx += n.width + 8;
-    }
-    y += 34;
-    (void)fdk_label_create(root, app.font, "Last operation: -",
+    (void)fdk_button_create(app.root, app.font, "Copy", &app.clip_btns[0]);
+    (void)fdk_button_create(app.root, app.font, "Cut", &app.clip_btns[1]);
+    (void)fdk_button_create(app.root, app.font, "Paste",
+                            &app.clip_btns[2]);
+    (void)fdk_button_create(app.root, app.font, "Clear",
+                            &app.clip_btns[3]);
+    (void)fdk_button_create(app.root, app.font, "Read clipboard",
+                            &app.clip_btns[4]);
+    (void)fdk_button_create(app.root, app.font, "Set greeting",
+                            &app.clip_btns[5]);
+    fdk_button_set_on_activate(app.clip_btns[0], clip_copy_clicked, NULL);
+    fdk_button_set_on_activate(app.clip_btns[1], clip_cut_clicked, NULL);
+    fdk_button_set_on_activate(app.clip_btns[2], clip_paste_clicked, NULL);
+    fdk_button_set_on_activate(app.clip_btns[3], clip_clear_clicked, NULL);
+    fdk_button_set_on_activate(app.clip_btns[4], clip_read_clicked, NULL);
+    fdk_button_set_on_activate(app.clip_btns[5], clip_set_clicked, NULL);
+
+    (void)fdk_label_create(app.root, app.font, "Last operation: -",
                            &app.clip_status);
-    fdk_widget_set_bounds(app.clip_status, (fdk_rect){x, y, 600, 20});
-    y += 30;
+    (void)fdk_label_create(app.root, app.font, "Clipboard: (never read)",
+                           &app.clip_preview);
+    fdk_label_set_mode(app.clip_preview, FDK_LABEL_ELLIPSIZE);
 
-    /* ---- drop target section ---- */
-    fdk_widget *h2 = NULL;
-    (void)fdk_label_create(root, app.font, "DROP TARGET", &h2);
-    fdk_widget_set_bounds(h2, (fdk_rect){x, y, 300, 20});
-    y += 24;
-    (void)fdk_label_create(root, app.font, "DROP FILES OR TEXT HERE",
-                           &app.drop_panel);
-    app.drop_rect = (fdk_rect){x, y, 600, 90};
-    fdk_widget_set_bounds(app.drop_panel, app.drop_rect);
-    fdk_widget_set_background(
-        app.drop_panel,
-        fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
-    y += 96;
-    (void)fdk_label_create(root, app.font, "Last drop: -",
+    /* ---- TEXT INPUT (the typing playground) ---- */
+    (void)fdk_label_create(app.root, app.font, "TEXT INPUT", &app.h_type);
+    (void)fdk_entry_create(app.root, app.font, NULL, &app.typing);
+    fdk_entry_set_on_changed(app.typing, typing_changed, NULL);
+    fdk_entry_set_on_activate(app.typing, typing_activated, NULL);
+    (void)fdk_toggle_create(app.root, app.font, "Password",
+                            &app.toggle_password);
+    fdk_toggle_set_on_change(app.toggle_password, password_toggled, NULL);
+    (void)fdk_toggle_create(app.root, app.font, "Read-only",
+                            &app.toggle_readonly);
+    fdk_toggle_set_on_change(app.toggle_readonly, readonly_toggled, NULL);
+    (void)fdk_label_create(app.root, app.font, "0 bytes · caret @ 0",
+                           &app.typing_status);
+    (void)fdk_label_create(app.root, app.font,
+                           "Committed: (press Enter inside the box)",
+                           &app.typing_commit);
+
+    /* ---- DROP TARGET ---- */
+    (void)fdk_label_create(app.root, app.font, "DROP TARGET", &app.h_drop);
+    (void)fdk_label_create(app.root, app.font,
+                           "DROP FILES OR TEXT HERE", &app.drop_panel);
+    fdk_widget_set_background(app.drop_panel, panel);
+    fdk_label_set_alignment(app.drop_panel, FDK_ALIGN_CENTER);
+    (void)fdk_label_create(app.root, app.font, "Last drop: -",
                            &app.drop_status);
-    fdk_widget_set_bounds(app.drop_status, (fdk_rect){x, y, 610, 20});
-    y += 30;
 
-    /* ---- dialogs section ---- */
-    fdk_widget *h3 = NULL;
-    (void)fdk_label_create(root, app.font, "FILE SELECTION", &h3);
-    fdk_widget_set_bounds(h3, (fdk_rect){x, y, 300, 20});
-    y += 24;
-    fdk_widget *db[4] = {0};
-    (void)fdk_button_create(root, app.font, "Select File", &db[0]);
-    (void)fdk_button_create(root, app.font, "Select Files", &db[1]);
-    (void)fdk_button_create(root, app.font, "Select Folder", &db[2]);
-    (void)fdk_button_create(root, app.font, "Select Folders", &db[3]);
-    fdk_button_set_on_activate(db[0], dlg_file_clicked, NULL);
-    fdk_button_set_on_activate(db[1], dlg_files_clicked, NULL);
-    fdk_button_set_on_activate(db[2], dlg_folder_clicked, NULL);
-    fdk_button_set_on_activate(db[3], dlg_folders_clicked, NULL);
-    bx = x;
-    for (int i = 0; i < 4; i++) {
-        fdk_size n = {0, 0};
-        fdk_widget_measure(db[i], &n);
-        fdk_widget_set_bounds(db[i], (fdk_rect){bx, y, n.width, 28});
-        bx += n.width + 8;
-    }
-    y += 34;
-    (void)fdk_label_create(root, app.font, "Outcome: -",
+    /* ---- DIALOGS ---- */
+    (void)fdk_label_create(app.root, app.font, "FILE SELECTION",
+                           &app.h_dlg);
+    (void)fdk_button_create(app.root, app.font, "Select File",
+                            &app.dlg_btns[0]);
+    (void)fdk_button_create(app.root, app.font, "Select Files",
+                            &app.dlg_btns[1]);
+    (void)fdk_button_create(app.root, app.font, "Select Folder",
+                            &app.dlg_btns[2]);
+    (void)fdk_button_create(app.root, app.font, "Select Folders",
+                            &app.dlg_btns[3]);
+    (void)fdk_button_create(app.root, app.font, "Ask Yes/No",
+                            &app.dlg_btns[4]);
+    fdk_button_set_on_activate(app.dlg_btns[0], dlg_file_clicked, NULL);
+    fdk_button_set_on_activate(app.dlg_btns[1], dlg_files_clicked, NULL);
+    fdk_button_set_on_activate(app.dlg_btns[2], dlg_folder_clicked, NULL);
+    fdk_button_set_on_activate(app.dlg_btns[3], dlg_folders_clicked, NULL);
+    fdk_button_set_on_activate(app.dlg_btns[4], ask_clicked, NULL);
+    (void)fdk_label_create(app.root, app.font, "Outcome: -",
                            &app.dialog_status);
-    fdk_widget_set_bounds(app.dialog_status,
-                          (fdk_rect){x, y, 610, 20});
-    y += 30;
+    fdk_label_set_mode(app.dialog_status, FDK_LABEL_ELLIPSIZE);
 
-    /* ---- drag source section ---- */
-    fdk_widget *h4 = NULL;
-    (void)fdk_label_create(root, app.font, "DRAG SOURCE", &h4);
-    fdk_widget_set_bounds(h4, (fdk_rect){x, y, 300, 20});
-    y += 24;
-    (void)fdk_label_create(root, app.font,
+    /* ---- DRAG SOURCE ---- */
+    (void)fdk_label_create(app.root, app.font, "DRAG SOURCE", &app.h_drag);
+    (void)fdk_label_create(app.root, app.font,
                            "press and drag from here -> another app",
                            &app.drag_panel);
-    app.drag_rect = (fdk_rect){x, y, 600, 56};
-    fdk_widget_set_bounds(app.drag_panel, app.drag_rect);
-    fdk_widget_set_event_callback(app.drag_panel, drag_panel_event,
-                                  NULL);
-    y += 62;
-    (void)fdk_label_create(root, app.font, "Last drag: -",
+    fdk_widget_set_background(app.drag_panel, panel);
+    fdk_label_set_alignment(app.drag_panel, FDK_ALIGN_CENTER);
+    fdk_widget_set_event_callback(app.drag_panel, drag_panel_event, NULL);
+    (void)fdk_label_create(app.root, app.font, "Last drag: -",
                            &app.drag_status);
-    fdk_widget_set_bounds(app.drag_status, (fdk_rect){x, y, 610, 20});
 
+    relayout();
     fdk_window_show(app.window);
 
     /* Announce interactive geometry for the rigs. */
     rig_announce("drop-panel", app.drop_panel);
     rig_announce("drag-panel", app.drag_panel);
-    rig_announce("btn-copy", buttons[0]);
-    rig_announce("btn-paste", buttons[2]);
-    rig_announce("btn-file", db[0]);
-    rig_announce("btn-files", db[1]);
-    rig_announce("btn-folder", db[2]);
-    rig_announce("btn-folders", db[3]);
+    rig_announce("entry-typing", app.typing);
+    rig_announce("clip-status", app.clip_status);
+    rig_announce("typing-status", app.typing_status);
+    rig_announce("btn-copy", app.clip_btns[0]);
+    rig_announce("btn-paste", app.clip_btns[2]);
+    rig_announce("btn-clipread", app.clip_btns[4]);
+    rig_announce("btn-clipset", app.clip_btns[5]);
+    rig_announce("btn-file", app.dlg_btns[0]);
+    rig_announce("btn-files", app.dlg_btns[1]);
+    rig_announce("btn-folder", app.dlg_btns[2]);
+    rig_announce("btn-folders", app.dlg_btns[3]);
+    rig_announce("btn-ask", app.dlg_btns[4]);
 
     const char *frames = getenv("FDK_DEMO_FRAMES");
     app.frames_left = frames != NULL ? atoi(frames) : -1;
 
     while (!app.quit) {
         (void)fdk_pump_events(app.ctx, 15);
+        /* The 1.2.0 build never painted here — every interaction's
+         * damage waited for a resize to reach the screen (and the
+         * resize-time repaint stamped new text over old, the ghosting
+         * report). Paint the tree whenever it has damage: the
+         * documented app pattern, same as 04_widgets.c. */
+        if (fdk_widget_tree_has_damage(app.root)) {
+            (void)fdk_window_paint(app.window);
+        }
         if (app.frames_left > 0 && --app.frames_left == 0) {
             break;
         }

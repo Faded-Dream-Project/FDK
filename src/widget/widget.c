@@ -1782,6 +1782,11 @@ void fdk_widget_set_background(fdk_widget *widget, fdk_color color) {
     if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0) {
         return;
     }
+    /* An explicit background is an OVERRIDE: from here on the widget
+     * (window roots included) owns this color outright — theme
+     * switches no longer re-default it (1.2.1; see the root default
+     * in fdk_window_get_root). */
+    widget->flags &= ~(unsigned)FDK_WF_ROOT_BG_DEFAULT;
     widget->background = color;
     fdk_widget_invalidate(widget);
 }

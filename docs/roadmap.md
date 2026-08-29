@@ -2446,3 +2446,124 @@ dnd interop section), weston manager-less rig PASS, openbox
 real-WM rig ALL PASS, resize-flash rig PASS (pre-fix control
 still reproduces), X11 examples rig 10/10, sway examples rig
 10/10 (both new apps pixel-captured).
+
+### 1.2.1 — the stale-paint class fix, the prompt dialog, and the file manager that earns the name
+
+The sixth user report was two findings in one breath. First, a
+rendering class: on Wayland "the old text doesn't get removed" —
+file names stamped over old file names after navigation,
+selection bands stacked on selection bands, status lines
+overprinting their previous sentence. Second, a product judgment:
+the 1.2.0 file manager was "too simple to be the default", and
+the capabilities app lacked the one thing a typing-capable
+toolkit owes a demo — a box you type into.
+
+ROOT CAUSE (the rendering class, and why it looked Wayland-only):
+every window root painted NOTHING unless the app set its own
+background, and the stock text surfaces (Labels, List rows) are
+deliberately transparent — they paint glyphs over whatever the
+retained framebuffer already holds. Both backends are retained-
+buffer damage models (X11: synced front/back XImage slots;
+Wayland: prefetch-visible-frame buffer recycling), so "whatever
+the buffer held" is the previous frame: a damaged region redraws
+new text over old pixels. Examples 03/04/08 had dodged the trap
+by setting their own root background; 09/10 exposed it. It was
+never Wayland-specific — it was reachable on both backends
+everywhere a root went unfilled (the report landed on Wayland
+because that is where the user lives).
+
+The fix, in layers:
+
+  - ROOT DEFAULT BACKGROUND: fdk_window_get_root fills the root
+    with the theme's window-background token; any damaged region
+    is freshly cleared before its widgets draw. An explicit
+    fdk_widget_set_background on the root is an override that
+    survives theme switches (FDK_WF_ROOT_BG_DEFAULT cleared
+    there); otherwise the root's theme hook re-reads the token on
+    every default-theme switch, same contract as the palette.
+  - PRE-FIRST-FRAME COLOR: both backends' creation-time fill (X11
+    background pixel, Wayland's committed background buffer) is
+    the themed window background instead of white — the frame
+    before the first paint and the first painted frame now agree
+    (no white→dark flash at map).
+  - THE EXAMPLES' MISSING PAINT: 09/10 never called
+    fdk_window_paint in their loops — after the initial frame
+    they only updated on resizes (and the resize-time repaint is
+    where the accumulated damage overprinted). Both now paint
+    when the tree has damage, the documented app pattern
+    (04_widgets.c).
+
+The new core API — fdk_dialog_show_prompt (fdk_dialog.h): the
+message dialog's text-input twin. One question, one Entry
+(initially focused, prefilled value starts SELECTED so typing
+replaces it), OK/Cancel, Enter-in-the-entry answers OK,
+Escape answers CANCEL (an Entry with an active selection
+collapses it first, then a second Escape bubbles — the stock
+Entry no longer eats a no-op Escape). The answer contract is
+explicit like the file dialog's: OK carries the text (valid only
+during the callback), everything else carries NULL.
+
+The file manager, rewritten as FDK Files (10_file_manager.c):
+
+  - toolbar: Back / Forward (real history stacks, capped) / Up /
+    Refresh / New Folder / Rename / Delete / Hidden
+  - location bar: an EDITABLE Entry — type any path, Enter goes
+    (~ expands, stat-verified, honest error otherwise)
+  - filter box: re-filters the listing as you type
+  - sorting: Name / Size / Modified combo + Ascending/Descending
+    toggle; directories always group first
+  - listing columns: Name + Size + Modified (ellipsized names,
+    human sizes, local dates); multiple selection with the full
+    click/ctrl/shift/keyboard set; double-click or Enter enters
+    a folder, opens a file through xdg-open when present
+    (honest status when not)
+  - file ops: New Folder and Rename through the PROMPT dialog;
+    Delete confirms with YES/NO then unlinks files and removes
+    EMPTY directories — recursive delete is deliberately absent
+  - status bar: items (+hidden count), selection count and total
+    size, filesystem free space (statvfs), sort state
+  - keyboard: Backspace=Up, F5=Refresh, Ctrl+H=Hidden,
+    Alt+Left/Right=history, Escape=quit
+
+Two app bugs the rigs caught before they could ship: fdk_list_
+clear fires the selection callback per removed row MID-RELOAD
+while the app's parallel arrays are half-swapped (a loading guard
+now brackets every reload), and the store was qsort-indexed for
+display while the lookups used display rows against readdir
+order — the store is now PERMUTED into sorted order so display
+row == store index everywhere.
+
+The capabilities app (09_capabilities.c) gained the TEXT INPUT
+section — a big box you simply type into, with a live line
+(bytes / caret / selection from the public Entry APIs), a
+committed line on Enter, and Password / Read-only mode toggles —
+plus a fuller clipboard section (Read clipboard pulls foreign
+content into a preview line; Set greeting plants a timestamped
+string for other apps) and an Ask Yes/No message-dialog demo.
+The window reflows on resize now.
+
+Verification (rigs under scripts/, captures under download/):
+
+  - sway headless + wlr-virtual-pointer (verify_fm_wayland.sh):
+    A) navigate into a smaller directory — 0 stale ink pixels
+    below the new listing; B1) the selection band renders (~7k
+    band pixels); B2) moving the selection leaves 133 text-AA
+    pixels where ~6.6k band pixels were; C) a status label's
+    long text fully clears before the short one (0 stale px
+    right of the new text, 1.5k while the long text is up).
+    ALL PASS.
+  - Xvfb + openbox + xdotool, keyboard included
+    (verify_fm_x11.sh): navigation, selection, New Folder typed
+    through the prompt, Rename through the prompt, Delete via
+    Enter-on-Yes, filter-as-you-type, location-bar navigation,
+    F5/Alt+Left shortcuts — every step console-asserted AND
+    verified on disk (folder created, renamed, gone). The typing
+    playground's live line and pixels verified. ALL PASS.
+  - headless suite + both integration suites: all green on the
+    dual-backend build (0 warnings).
+
+Honest gaps: Wayland keyboard injection in the rigs (no virtual
+keyboard protocol in the sway rig — typing verified on X11
+only); xdg-open coverage depends on the host; the listing is
+single-column text (no icon view, no renaming in place); delete
+is non-recursive on purpose.

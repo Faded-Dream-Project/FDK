@@ -9,6 +9,7 @@
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
+#include "theme/theme_internal.h"
 
 #include <stdint.h>
 #include <sys/mman.h>
@@ -23,13 +24,23 @@
 #define WAYLAND_DEFAULT_HEIGHT 480
 #define WAYLAND_DEFAULT_TITLE  "FDK Application"
 
-/* Background pixel: pure white, matching the X11 backend's window
- * background (see x11_window.c's XCreateSimpleWindow call) so both
- * backends present the same Phase 2 appearance — a real, visible,
- * event-capable window with no renderer yet. Written as an
- * XRGB8888 pixel: memory layout on little-endian is [B,G,R,X], and
- * 0xFFFFFFFF sets every byte. */
-#define WAYLAND_BG_PIXEL 0xFFFFFFFFu
+/* Background pixel (1.2.1): the theme's window-background token —
+ * the same fill the root default background paints on the first
+ * rendered frame (fdk_window_get_root), so the pre-first-frame
+ * window and the first painted frame agree instead of flashing
+ * white→dark. Matches the X11 backend's themed creation-time
+ * background pixel (x11_window.c). Written as an XRGB8888 pixel:
+ * little-endian memory layout is [B,G,R,X], i.e. R<<16 | G<<8 | B. */
+static uint32_t wayland_theme_window_pixel(void) {
+    fdk_color c = fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+    uint32_t r = (uint32_t)(c.r * 255.0f + 0.5f);
+    uint32_t g = (uint32_t)(c.g * 255.0f + 0.5f);
+    uint32_t b = (uint32_t)(c.b * 255.0f + 0.5f);
+    if (r > 255u) r = 255u;
+    if (g > 255u) g = 255u;
+    if (b > 255u) b = 255u;
+    return (r << 16) | (g << 8) | b;
+}
 
 /* Defined below — needed by xdg_surface_configure() above it. */
 static fdk_result attach_background_buffer(fdk_platform_window *pwindow, fdk_size size);
@@ -448,7 +459,7 @@ static fdk_result attach_background_buffer(fdk_platform_window *pwindow, fdk_siz
         return r;
     }
 
-    uint32_t pixel = WAYLAND_BG_PIXEL;
+    uint32_t pixel = wayland_theme_window_pixel();
     for (size_t i = 0; i < length / 4u; i++) {
         pixels[i] = pixel;
     }

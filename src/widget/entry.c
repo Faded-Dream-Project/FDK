@@ -629,9 +629,16 @@ static bool entry_handle_event(fdk_widget *w,
             }
             return true;
         case FDK_KEY_ESC:
-            /* Collapse the selection (classic cancel behavior). */
-            entry_set_selection(e, e->caret, e->caret);
-            return true;
+            /* Collapse the selection (classic cancel behavior). With
+             * nothing selected there is nothing to collapse: bubble
+             * the Escape instead of eating it — a prompt dialog's
+             * Cancel rides the window layer's Escape handling, and a
+             * lone Entry swallowing it would wedge that (1.2.1). */
+            if (e->anchor != e->caret) {
+                entry_set_selection(e, e->caret, e->caret);
+                return true;
+            }
+            break;
         default:
             break;
         }

@@ -103,6 +103,48 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
                                    void *user_data,
                                    fdk_window **out_window);
 
+/* ---- Prompt (text input) dialogs (1.2.1) ----
+ *
+ * The message dialog's twin for the other half of the ask-the-user
+ * job: one question, one text box, OK / Cancel. Built from the same
+ * stock catalog (wrapping Label, an Entry, a button row) with the
+ * same lifecycle: toolkit-owned window, auto-painted, exactly one
+ * callback, self-destroying afterwards.
+ *
+ * The Entry takes the initial focus — type immediately; Enter in the
+ * Entry answers OK (the stock Entry activation), Escape answers
+ * CANCEL (an Entry with an active selection collapses it first, then
+ * a second Escape bubbles), Tab walks Entry -> OK -> Cancel. The
+ * initial value, when given, starts SELECTED so typing replaces it —
+ * the rename-everywhere convention.
+ *
+ * The text contract mirrors the file dialog's explicitness: OK hands
+ * `text` pointing at the (possibly empty, possibly edited) answer,
+ * valid only during the callback; every other response hands NULL.
+ * Never "empty string means maybe cancel". */
+
+typedef struct fdk_prompt_dialog_options {
+    const char *title;    /* copied; NULL = "Input"               */
+    const char *text;     /* the prompt/question; NULL = ""       */
+    const char *value;    /* initial Entry contents; NULL = empty */
+    bool modal;           /* X11 input grab, like message dialogs */
+    fdk_font *font;       /* borrowed; NULL = system default      */
+    fdk_window *parent;   /* borrowed; anchors stacking where the
+                              backend supports it                 */
+} fdk_prompt_dialog_options;
+
+/* `text` is FDK-owned and only valid during the call — copy what you
+ * need. Destroying other widgets/windows from here is safe (same
+ * reentrancy rules as every dialog callback). */
+typedef void (*fdk_prompt_dialog_fn)(fdk_dialog_response response,
+                                     const char *text, void *user_data);
+
+fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
+                                  const fdk_prompt_dialog_options *options,
+                                  fdk_prompt_dialog_fn on_response,
+                                  void *user_data,
+                                  fdk_window **out_window);
+
 /* ---- File / folder selection dialogs (1.2.0) ----
  *
  * FDK is a self-contained toolkit — there is no portal, no GTK, no

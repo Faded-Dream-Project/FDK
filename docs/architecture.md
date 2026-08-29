@@ -131,8 +131,12 @@ and a suppressed event left the window layer laying out at the
 creation size inside a full-compositor buffer (1.1.5, found live
 under weston kiosk-shell), regression-tested in
 `tests/test_wayland_integration.c`); on X11 the anti-flicker
-background LIFECYCLE (1.1.4, found live on a compositing desktop):
-top-levels are created with a white background pixel + NorthWest
+background LIFECYCLE (1.1.4, found live on a compositing desktop;
+re-tinted 1.2.1): top-levels are created with a background pixel
+set to the theme's window-background token (the same fill the
+root default background paints on the first rendered frame —
+before 1.2.1 this was white, and the pre-first-paint frame
+flashed white→dark) + NorthWest
 bit gravity, and the FIRST framebuffer acquisition flips the
 background to None — a window the app never renders into shows its
 background (the documented 01_hello_world contract, matching
@@ -141,6 +145,17 @@ never server-cleared again, and every resize step retains its old
 pixels anchored top-left (the combination that removed the
 white-flash-during-resize; a background clear is a full frame of
 background between the WM's resize and the client's repaint).
+The 1.2.1 ROOT DEFAULT BACKGROUND is the other half of that story:
+`fdk_window_get_root` fills every window root with the theme's
+window-background token (an explicit `fdk_widget_set_background`
+on the root still wins and survives theme switches — the default
+re-reads the token on every default-theme switch through the
+root's theme hook). Before the default, transparent stock text
+surfaces (Labels, List rows) painted over whatever the retained
+framebuffer held — the PREVIOUS frame — so a label rewrite or a
+re-listed directory stamped new text over old on both backends
+(the live 1.2.0 report: “the old text doesn't get removed”, file
+names over file names, selection bands over selection bands).
 The window layer closes the remaining gap itself:
 `fdk_window_dispatch_event`'s tail repaints+ presents SYNCHRONOUSLY
 when a configure/state-flip/first-expose damaged the tree — the

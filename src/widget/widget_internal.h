@@ -64,6 +64,16 @@
  * one TEST, with no side table to keep coherent. */
 #define FDK_WF_LAYOUT_DIRTY 0x80u
 
+/* Window roots only: the background currently set is the TOOLKIT
+ * DEFAULT (the theme's window-background token, applied at root
+ * creation). Cleared the moment anyone calls
+ * fdk_widget_set_background() on the root — an application's explicit
+ * choice always wins and then survives theme switches. While the bit
+ * is set, the root's theme hook re-reads the token on every
+ * fdk_theme_set_default() switch (1.2.1: the stale-paint fix — see
+ * fdk_window_get_root). */
+#define FDK_WF_ROOT_BG_DEFAULT 0x100u
+
 struct fdk_widget {
     const fdk_widget_class *klass;   /* never NULL (base class at minimum) */
     fdk_widget *parent;              /* NULL for roots                    */

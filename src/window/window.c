@@ -44,6 +44,10 @@
 
 static void window_arrange_deco(fdk_window *window);
 
+/* 1.2.1: re-reads the root's DEFAULT window background on a theme
+ * switch (defined beside fdk_window_get_root, its only setter). */
+static void window_root_theme_changed(fdk_widget *root);
+
 /* Cursor shaping + hover revalidation (1.1.4) — defined above the
  * interactive-resize section, forward-declared here because
  * fdk_window_set_resizable and fdk_window_set_decorated (both earlier
@@ -1473,6 +1477,35 @@ fdk_result fdk_window_get_root(fdk_window *window, fdk_widget **out_root) {
             return r;
         }
         window->root->flags |= FDK_WF_WINDOW_ROOT;
+        /* 1.2.1 — the window-background DEFAULT.
+         *
+         * Before this, a window root painted NOTHING unless the
+         * application set a background itself, and every stock text
+         * surface (Labels, List rows) paints TRANSPARENTLY over
+         * whatever the framebuffer already held. Under the retained-
+         * buffer damage model both backends use (X11's synced back
+         * slot, Wayland's prefetch-visible-frame slots), "whatever the
+         * buffer held" is the PREVIOUS FRAME — so changing a label's
+         * text, re-listing a directory, or moving a list selection
+         * drew the new glyphs straight over the old ones (the live
+         * 1.2.0 report: "the old text doesn't get removed", file
+         * names stacking on file names, selection bands on selection
+         * bands). Examples 03/04/08 had dodged this by setting their
+         * own root background; 09/10 exposed the trap.
+         *
+         * The fix is the default every real toolkit ships: the root
+         * fills with the theme's window-background token, so any
+         * damaged region is freshly cleared before its widgets draw.
+         * An application's explicit fdk_widget_set_background() on the
+         * root still wins and survives theme switches (the default
+         * flag is cleared there); otherwise the hook below re-reads
+         * the token on every default-theme switch, same as the
+         * palette the widgets resolve at paint time. */
+        window->root->background =
+            fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+        window->root->flags |= FDK_WF_ROOT_BG_DEFAULT;
+        fdk__widget_set_theme_hook(window->root,
+                                   window_root_theme_changed);
         /* Opaque back-edge for Phase 9: widgets (e.g. Entry's clipboard
          * integration) resolve their owning window's context via
          * fdk__widget_window_owner() + fdk__window_context(). The
@@ -1485,6 +1518,20 @@ fdk_result fdk_window_get_root(fdk_window *window, fdk_widget **out_root) {
     }
     *out_root = window->root;
     return FDK_OK;
+}
+
+/* Theme hook for the root default background (1.2.1): re-reads the
+ * window-background token on a default-theme switch unless the
+ * application overrode it (FDK_WF_ROOT_BG_DEFAULT cleared by
+ * fdk_widget_set_background). The invalidating walk that CALLS this
+ * hook damages the whole root afterwards, so the new color reaches
+ * the screen on the app's next paint — the same contract the palette
+ * consumers already ride. */
+static void window_root_theme_changed(fdk_widget *root) {
+    if ((root->flags & FDK_WF_ROOT_BG_DEFAULT) != 0) {
+        root->background = fdk_theme_get_color(NULL,
+                                               FDK_TK_WINDOW_BACKGROUND);
+    }
 }
 
 fdk_result fdk_window_paint(fdk_window *window) {

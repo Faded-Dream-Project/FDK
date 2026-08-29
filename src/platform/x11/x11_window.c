@@ -4,11 +4,29 @@
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
+#include "theme/theme_internal.h"
 
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <X11/cursorfont.h> /* XC_* cursor glyph indices (1.1.4) */
 #include <string.h>
+
+/* The creation-time window fill (1.2.1): the theme's window-
+ * background token instead of WhitePixel, so the frame a compositor
+ * shows before the app's first paint matches the FIRST PAINTED frame
+ * (the root default background, fdk_window_get_root) instead of
+ * flashing white→dark. Same channel packing the renderer assumes
+ * everywhere (R<<16 | G<<8 | B — the visual FDK requires). */
+static unsigned long x11_theme_window_pixel(void) {
+    fdk_color c = fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+    unsigned long r = (unsigned long)(c.r * 255.0f + 0.5f);
+    unsigned long g = (unsigned long)(c.g * 255.0f + 0.5f);
+    unsigned long b = (unsigned long)(c.b * 255.0f + 0.5f);
+    if (r > 255u) r = 255u;
+    if (g > 255u) g = 255u;
+    if (b > 255u) b = 255u;
+    return (r << 16) | (g << 8) | b;
+}
 
 #define X11_DEFAULT_WIDTH  640
 #define X11_DEFAULT_HEIGHT 480
@@ -34,7 +52,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     }
 
     unsigned long black = BlackPixel(conn->display, conn->screen);
-    unsigned long white = WhitePixel(conn->display, conn->screen);
+    unsigned long bg_pixel = x11_theme_window_pixel();
 
     /* Popups (Phase 9): override-redirect children positioned at the
      * parent's client-area origin + (x, y) in ROOT coordinates —
@@ -61,7 +79,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
         memset(&attrs, 0, sizeof(attrs));
         attrs.override_redirect = True;
         attrs.border_pixel = black;
-        attrs.background_pixel = white;
+        attrs.background_pixel = bg_pixel;
         attrs.event_mask = StructureNotifyMask | ExposureMask |
                            FocusChangeMask | KeyPressMask |
                            KeyReleaseMask | PointerMotionMask |
@@ -86,8 +104,9 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
          *
          * A window the app never renders into (01_hello_world, the
          * "no renderer yet" example) shows its background pixel —
-         * white on both backends, same as Wayland's committed
-         * solid-color buffer (attach_background_buffer). The moment
+         * the themed window fill on both backends, same as Wayland's
+         * committed solid-color buffer (attach_background_buffer).
+         * The moment
          * an app acquires the framebuffer it owns every pixel, and
          * the background flips to None: the server never CLEARS
          * again. A background clear on each resize step is precisely
@@ -110,7 +129,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
          * undefined server memory. */
         XSetWindowAttributes attrs;
         memset(&attrs, 0, sizeof(attrs));
-        attrs.background_pixel = white; /* until the app paints */
+        attrs.background_pixel = bg_pixel; /* until the app paints */
         attrs.bit_gravity = NorthWestGravity; /* retain bits top-left */
         attrs.border_pixel = black;
         xwindow = XCreateWindow(conn->display, conn->root,
