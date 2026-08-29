@@ -94,6 +94,22 @@ typedef enum fdk_event_type {
 
     /* Scroll/wheel input. See fdk_scroll_event. */
     FDK_EVENT_POINTER_SCROLL = 25,
+
+    /* ---- Drag and drop (1.2.0) ----
+     *
+     * Delivered to the window the pointer is over during a drag, to
+     * windows that registered acceptance via fdk_window_set_drop_formats
+     * (fdk_dnd.h). ENTER/MOTION/LEAVE carry only position + the
+     * offered format mask; DROP additionally carries the transferred
+     * data, valid ONLY for the duration of the callback (FDK frees
+     * it after). The widget tree does not consume drag events —
+     * they always reach the application's window callback, which
+     * hit-tests its own widgets (v1 DnD is window-level; widget-
+     * level drop targets are future work, documented honestly). */
+    FDK_EVENT_DRAG_ENTER = 30,
+    FDK_EVENT_DRAG_MOTION = 31,
+    FDK_EVENT_DRAG_LEAVE = 32,
+    FDK_EVENT_DRAG_DROP  = 33,
 } fdk_event_type;
 
 typedef struct fdk_configure_event {
@@ -204,6 +220,27 @@ typedef struct fdk_scroll_event {
     fdk_f32 delta_y;
 } fdk_scroll_event;
 
+/* Drag-and-drop payload. `offered_formats` is the OR of every
+ * fdk_drag_format the SOURCE offers (fdk_dnd.h); `accepted_formats`
+ * is its intersection with the formats this window registered —
+ * FDK only dispatches ENTER/MOTION/LEAVE/DROP at all when the
+ * intersection is nonzero, so a drop the window cannot read is
+ * never delivered (the drag visually passes over the window
+ * instead). On DROP exactly one of the data pointers is non-NULL
+ * for each accepted format bit (text for TEXT, uris for URI_LIST),
+ * and both are invalid the moment the callback returns. URIs
+ * arrive as POSIX paths when the source offered file:// URIs
+ * (percent-decoding applied); non-file URIs pass through as-is. */
+typedef struct fdk_drag_event {
+    int offered_formats;    /* fdk_drag_format OR-mask from the source */
+    int accepted_formats;   /* intersection with this window's mask    */
+    fdk_u32 modifiers;      /* keyboard modifiers held right now       */
+    fdk_pointf position;    /* window-local, like every pointer event  */
+    const char *text;       /* DROP only; NULL unless TEXT accepted    */
+    char **uris;            /* DROP only; NULL unless URI_LIST accepted*/
+    size_t uri_count;       /* entries in uris                         */
+} fdk_drag_event;
+
 /* Tagged union of all event payloads. `type` says which member of the
  * anonymous union is valid. This whole struct is only ever handed to
  * you by-value inside a callback invocation — FDK does not expose
@@ -222,6 +259,7 @@ typedef struct fdk_event_data {
         fdk_pointer_event pointer;
         fdk_pointer_button_event pointer_button;
         fdk_scroll_event scroll;
+        fdk_drag_event drag;
     };
 } fdk_event_data;
 

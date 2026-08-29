@@ -452,6 +452,21 @@ void fdk_list_set_on_selection_changed(fdk_widget *list,
                                        fdk_list_selection_fn fn,
                                        void *user_data);
 
+/* ---- Row activation (1.2.0) ----
+ *
+ * The "open this" gesture: double-click on a row, or Enter on the
+ * keyboard cursor's row, fires the callback once with that row's
+ * index. Selection changes still flow through on_selection_changed
+ * exactly as before — activation is an additional, higher-level
+ * signal (the file manager enters a directory on it; a file dialog
+ * accepts on it). */
+typedef void (*fdk_list_row_activate_fn)(fdk_widget *list, size_t row,
+                                         void *user_data);
+
+void fdk_list_set_on_row_activate(fdk_widget *list,
+                                  fdk_list_row_activate_fn fn,
+                                  void *user_data);
+
 /* ---- Tree (Phase 9) ----
  *
  * A hierarchical expandable tree on the ScrollView: nodes hold text,

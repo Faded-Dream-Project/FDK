@@ -30,10 +30,12 @@
 
 #include "widgets_internal.h"
 #include "../theme/theme_internal.h"
+#include "../window/window_internal.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
 
+#include <time.h>
 #include <string.h>
 
 #define LIST_ROW_PAD_Y 5
@@ -58,6 +60,17 @@ typedef struct fdk_list {
     size_t key_cursor;   /* the keyboard's moving end (shift+arrows) */
     fdk_list_selection_fn on_selection_changed;
     void *on_selection_data;
+    /* ---- Row activation (1.2.0) ----
+     *
+     * Double-click and Enter both fire on_row_activate — the
+     * "open this" gesture file managers and file dialogs are built
+     * on. The click tracking uses the shared double-click predicate
+     * (same window, same slop policy as the title bar). */
+    fdk_list_row_activate_fn on_row_activate;
+    void *on_row_activate_data;
+    fdk_i64 last_click_ms;   /* last left-press, for dbl detection */
+    size_t last_click_row;   /* the row that press selected        */
+    bool have_last_click;
 } fdk_list;
 
 static fdk_list *list_of(fdk_widget *w) {
@@ -127,6 +140,18 @@ static void list_relayout(fdk_list *l) {
 static void list_fire_changed(fdk_list *l) {
     if (l->on_selection_changed != NULL) {
         l->on_selection_changed(&l->base, l->on_selection_data);
+    }
+}
+
+static fdk_i64 list_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (fdk_i64)ts.tv_sec * 1000 + (fdk_i64)ts.tv_nsec / 1000000;
+}
+
+static void list_fire_activated(fdk_list *l, size_t row) {
+    if (l->on_row_activate != NULL) {
+        l->on_row_activate(&l->base, row, l->on_row_activate_data);
     }
 }
 
@@ -342,6 +367,23 @@ static bool row_handle_event(fdk_widget *w,
         for (size_t i = 0; i < l->count; i++) {
             if (&l->row_widgets[i]->base == w) {
                 list_row_clicked(l, i, ev->pointer.modifiers);
+                /* Double-click = activation (1.2.0). Same row, same
+                 * press semantics as the title bar's dblclick window
+                 * (fdk__window_is_double_click; dx/dy are 0 because
+                 * the SECOND click is on the same row widget — the
+                 * row IS the slop region here). */
+                fdk_i64 now = list_now_ms();
+                if (l->have_last_click && l->last_click_row == i &&
+                    fdk__window_is_double_click(now, l->last_click_ms,
+                                                0, 0)) {
+                    l->have_last_click = false; /* a triple click
+                                                   re-arms from zero */
+                    list_fire_activated(l, i);
+                } else {
+                    l->have_last_click = true;
+                    l->last_click_row = i;
+                    l->last_click_ms = now;
+                }
                 return true;
             }
         }
@@ -433,6 +475,15 @@ static bool list_handle_event(fdk_widget *w,
         (w->flags & FDK_WF_FOCUSED) == 0 ||
         l->mode == FDK_LIST_SELECTION_NONE ||
         l->count == 0) {
+        return false;
+    }
+    /* Enter activates the keyboard cursor's row (1.2.0) — the
+     * keyboard's "open this", same callback as the double-click. */
+    if (ev->key.scancode == FDK_KEY_ENTER) {
+        if (l->key_cursor != (size_t)-1 && l->key_cursor < l->count) {
+            list_fire_activated(l, l->key_cursor);
+            return true;
+        }
         return false;
     }
     bool shift = (ev->key.modifiers & FDK_MOD_SHIFT) != 0;
@@ -771,4 +822,15 @@ void fdk_list_set_on_selection_changed(fdk_widget *list,
     fdk_list *l = list_of(list);
     l->on_selection_changed = fn;
     l->on_selection_data = user_data;
+}
+
+void fdk_list_set_on_row_activate(fdk_widget *list,
+                                  fdk_list_row_activate_fn fn,
+                                  void *user_data) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return;
+    }
+    fdk_list *l = list_of(list);
+    l->on_row_activate = fn;
+    l->on_row_activate_data = user_data;
 }

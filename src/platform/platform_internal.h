@@ -15,6 +15,7 @@
 #define FDK_PLATFORM_INTERNAL_H
 
 #include "fdk/fdk_core.h"
+#include "fdk/fdk_dnd.h"
 #include "fdk/fdk_error.h"
 #include "fdk/fdk_event.h"
 #include "fdk/fdk_types.h"
@@ -359,6 +360,41 @@ typedef struct fdk_platform_ops {
     void (*window_popup_regrab)(fdk_platform_window *pwindow);
     fdk_result (*window_set_modal)(fdk_platform_window *pwindow,
                                    bool modal);
+
+    /* ---- OPTIONAL drag-and-drop operations (1.2.0) ----
+     *
+     * Behind include/fdk/fdk_dnd.h. Formats are the public
+     * fdk_drag_format OR-mask (plain int here so this header needn't
+     * depend on fdk_dnd.h).
+     *
+     * window_set_drop_formats registers what this window accepts.
+     * The backend stores the mask on its platform window and uses it
+     * during protocol negotiation: X11 replies accept/reject in its
+     * XDndStatus (the dragging client's cursor feedback follows it);
+     * Wayland drives wl_data_offer set_actions with it. Drag events
+     * are dispatched through the normal dispatch fn (the window
+     * layer's routing delivers them to the app callback; the widget
+     * tree ignores them) — FDK_EVENT_DRAG_ENTER/MOTION/LEAVE with
+     * position + offered/accepted masks, and FDK_EVENT_DRAG_DROP with
+     * the decoded payload (POSIX paths for file URIs, UTF-8 text),
+     * which the backend allocates and frees after the dispatch
+     * returns. NULL = backend cannot receive drops (headless).
+     *
+     * drag_begin starts a source drag from this window offering
+     * `formats` with `text` / the `uri_count` paths in `uris` (all
+     * copied by the backend before returning). `on_done` fires
+     * exactly once, from inside a later dispatch, with an
+     * fdk_drag_status value as int. The drag runs INSIDE the normal
+     * event dispatch — no nested loop, no blocking; pointer events
+     * while the drag is active belong to it. NULL = backend cannot
+     * start drags (the frontend reports FDK_ERR_UNSUPPORTED). */
+    void (*window_set_drop_formats)(fdk_platform_window *pwindow,
+                                    int formats);
+    fdk_result (*drag_begin)(fdk_platform_window *origin, int formats,
+                             const char *text,
+                             const char *const *uris, size_t uri_count,
+                             void (*on_done)(int status, void *user),
+                             void *user);
 } fdk_platform_ops;
 
 /* Backend entry points. Each returns NULL if that backend was not
@@ -372,5 +408,35 @@ const fdk_platform_ops *fdk_platform_wayland_ops(void);
  * here; the actual connection attempt in wayland_ops->connect() is
  * what proves reachability), otherwise X11. */
 int fdk_platform_wayland_display_present(void);
+
+/* ---- text/uri-list codec (shared by both backends + tests) ----
+ *
+ * The XDND and Wayland worlds exchange files as RFC-2483
+ * text/uri-list: one URI per line, CRLF-tolerant, comment lines
+ * ('#') skipped. FDK's public contract hands applications POSIX
+ * paths, so the decode side converts file:// URIs (percent-decoded)
+ * to paths and leaves other URIs verbatim; the encode side does the
+ * reverse (escaping, absolute-path normalization). The
+ * implementation lives in src/window/dnd_uri.c (backend-agnostic
+ * pure C, unit-tested in tests/test_dnd_logic.c) but is declared
+ * HERE at the seam so both backends link one implementation and
+ * cannot drift. */
+
+/* Parses a text/uri-list payload into a freshly allocated argv-style
+ * array (entries fdk_alloc'd, the array too). Returns FDK_OK; on
+ * empty/garbage input *out_list is NULL and *out_count 0. Always
+ * sets both outs. */
+fdk_result fdk__dnd_parse_uri_list(const char *payload, size_t len,
+                                   char ***out_list, size_t *out_count);
+
+/* Frees a parse result (the array and its entries). */
+void fdk__dnd_free_uri_list(char **list, size_t count);
+
+/* Builds a text/uri-list payload from POSIX paths / URIs: entries
+ * with a scheme pass through, anything else is treated as a path
+ * (realpath-normalized when resolvable) and file://-encoded with
+ * escaping. Returns an fdk_alloc'd NUL-terminated CRLF-joined
+ * payload, or NULL. */
+char *fdk__dnd_build_uri_list(const char *const *uris, size_t count);
 
 #endif /* FDK_PLATFORM_INTERNAL_H */

@@ -27,6 +27,8 @@ static const fdk_platform_ops g_wayland_ops = {
     .window_get_scale = fdk_wayland_window_get_scale,
     .clipboard_set_text = fdk_wayland_clipboard_set_text,
     .clipboard_get_text = fdk_wayland_clipboard_get_text,
+    .window_set_drop_formats = fdk_wayland_window_set_drop_formats,
+    .drag_begin = fdk_wayland_drag_begin,
 };
 
 const fdk_platform_ops *fdk_platform_wayland_ops(void) {

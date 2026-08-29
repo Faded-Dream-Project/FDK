@@ -149,6 +149,15 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
      * event we can translate rather than killing the connection. */
     XSetWMProtocols(conn->display, xwindow, &conn->wm_delete_window, 1);
 
+    /* XDND awareness (1.2.0): without the XdndAware property no
+     * dragging client ever begins a drag over this window. */
+    {
+        Atom xdnd_version = 5;
+        XChangeProperty(conn->display, xwindow, conn->atom_xdnd_aware,
+                        XA_ATOM, 32, PropModeReplace,
+                        (const unsigned char *)&xdnd_version, 1);
+    }
+
     XStoreName(conn->display, xwindow, title);
     /* Also set _NET_WM_NAME/UTF8_STRING for correct non-ASCII title
      * rendering under EWMH-compliant window managers; XStoreName above
@@ -167,6 +176,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->xwindow = xwindow;
     pwindow->popup = (popup != 0);
     pwindow->grabbed = 0;
+    pwindow->drop_formats = 0; /* fdk_window_set_drop_formats fills it */
     pwindow->last_size.width = width;
     pwindow->last_size.height = height;
     pwindow->maximized = 0;

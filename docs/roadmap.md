@@ -2285,3 +2285,164 @@ PASS 8/8, openbox real-WM rig ALL 6 PASS (reinstalled after the
 reset — "edge resize" and "drag" pin the X11 side of the
 reorder), resize-flash rig PASS (pre-fix control still
 reproduces), X11 examples rig PASS.
+
+### 1.2.0 — real-world capability validation: clipboard showcase, drag and drop, file dialogs, the file manager
+
+The directive from the fifth user report was a pivot, not a fix:
+stop polishing the (working) resize/drag subsystems and prove the
+toolkit can do REAL desktop work — clipboard, drag and drop, file
+and folder selection — through real GUI applications, tested
+against real external applications, on both backends. Do not
+invent success: every capability ships with what was actually
+verified and how.
+
+What already existed (Phase 9): the text clipboard on both
+backends (ICCCM CLIPBOARD / wl_data_device set_selection), the
+message dialog, and the full widget catalog including Entry with
+selection + Ctrl+X/C/V. What 1.2.0 added:
+
+  - DRAG AND DROP, both directions, both backends
+    (fdk_dnd.h + src/window/dnd.c + src/window/dnd_uri.c +
+    x11_dnd.c + wayland_dnd.c). Receiving: a window registers
+    FDK_DRAG_FORMAT_TEXT / URI_LIST; FDK negotiates (XDND v5
+    Enter/Position/Status/Leave/Drop/Finished on X11;
+    wl_data_device offers + set_actions + accept + finish on
+    Wayland), decodes file:// URI lists to POSIX paths through
+    ONE shared codec (dnd_uri.c — parse, percent-decode, build,
+    escape; headless-pinned in test_dnd_logic.c), and delivers
+    DRAG_ENTER/MOTION/LEAVE/DROP to the window callback with the
+    payload valid for the callback's duration. Sending:
+    fdk_drag_begin starts a drag from inside a press handler
+    (X11: pointer grab + tree-walk target tracking inside the
+    ordinary dispatch — no nested loop; Wayland: start_drag with
+    the press serial, NULL icon) and reports SUCCEEDED/CANCELLED
+    exactly once. Two real bugs ASan/tests caught on the way: the
+    *len++ pointer-increment in the uri builder, and the FOLDER
+    dialog kinds descending on Open instead of accepting.
+
+  - FILE / FOLDER DIALOGS (fdk_dialog.h + file_dialog.c). FDK
+    has no portal to defer to, so the dialog is a real FDK window
+    — Up / hidden-toggle / path bar / scrolling list / Open +
+    Cancel / status — browsing with real opendir/readdir scans
+    (dirs first, alphabetical, hidden behind the toggle; the scan
+    is the headless seam in widgets_internal.h). The result
+    model is explicit: ACCEPTED with paths[] (count preserved —
+    multi-selection never silently discarded), CANCELLED, ERROR;
+    folder kinds stat()-verify every path IS a directory at
+    accept time (a listing is a snapshot; the filesystem is not).
+    File kinds descend into a lone selected directory (the
+    standard affordance); folder kinds treat Open as SELECT.
+
+  - LIST ROW ACTIVATION (list.c): double-click and Enter fire
+    on_row_activate — the "open this" gesture both new apps are
+    built on; the dblclick uses the shared window predicate
+    (400ms/slop policy), and a slow re-click asserts it does NOT
+    re-fire.
+
+  - THE TWO REAL APPLICATIONS:
+    examples/09_capabilities.c — one app answering "what can FDK
+    do with the desktop?": a clipboard section (entry + copy/
+    cut/paste/clear + narrated last operation), a drop target
+    panel that highlights during drags and reports the drop
+    (text or files-with-paths, folders classified by stat), four
+    file-dialog buttons with visible accepted/cancelled/error
+    outcomes, and a drag-source panel that drags text + two real
+    files into other applications. RIG:/PHASE: lines throughout.
+    examples/10_file_manager.c — a small but real file manager:
+    places list, Up/Refresh/Hidden toolbar, ellipsized path bar,
+    multiple-selection file list (click, ctrl+click, shift+
+    click, shift+arrows), double-click/Enter navigation, and a
+    status bar that always reports the selection (one item with
+    its full path, "Selected N items", or the folder's path).
+    Deliberately NOT a file manager suite: no previews, search,
+    or file operations — the "can FDK build a credible browsing
+    app" proof the directive asked for.
+
+  - EXAMPLES CONSOLIDATION AUDIT (the directive's demand, and
+    its honest outcome): all eight prior examples each teach a
+    distinct layer (first-contact, renderer, text stack, layout
+    + basic catalog, theming, decorations + CSD, advanced
+    popup-owning widgets, accessibility) and every one is
+    pixel-verified by the examples rigs — none demonstrates
+    "essentially the same thing" as another, none is a toy
+    animation pile (the renderer/text demos freeze when idle and
+    exist to teach damage tracking), so nothing was merged or
+    removed. The two NEW examples are the consolidated
+    capability apps the directive asked for (no clipboard_test/
+    clipboard_test2/file_test sprawl — one capabilities app, one
+    file manager), and the count went 8 -> 10 with breadth, not
+    redundancy.
+
+INTEROP, how it was actually verified (the directive: real
+external applications, not FDK-to-FDK):
+
+  - X11, external -> FDK: scripts/xdnd_source.c — a RAW-Xlib
+    client (no FDK) performing a complete XDND drag into the FDK
+    window; the suite asserts the FDK side decoded 2 files to
+    POSIX paths and the source saw Status accept=1 + Finished
+    success=1.
+  - X11, FDK -> external: scripts/xdnd_sink.c — a plain mapped
+    Xlib window speaking XDND; the suite drives a REAL pointer
+    drag (XTEST, human-paced steps) from an FDK press through
+    fdk_drag_begin into the sink; the sink prints BOTH decoded
+    payloads (uri-list + text) and FDK reports SUCCEEDED.
+  - Wayland, external -> FDK: scripts/wl_dnd_source.c — a raw
+    libwayland client (generated xdg-shell protocol object, zero
+    FDK linkage) that starts a wl_data_device drag on a real
+    injected press; the sway rig drags from its surface onto the
+    FDK window and asserts ENTER + DROP + 2 decoded paths + the
+    source's ::send + receive->finish->destroy in FDK's trace.
+  - Wayland, FDK -> external: NOT covered by an external-client
+    rig this milestone (the source op is exercised end-to-end by
+    the codec/suite and the X11 interop pins the shared payload
+    shape); documented as the honest gap it is.
+
+Honest capability matrix (what ships, no more):
+
+  clipboard        text only, both backends (Phase 9 + entry
+                   integration); no PRIMARY, no INCR, no images
+  dnd receive      text + uri-list -> POSIX paths, both backends,
+                   window-level targets (widget-level = future)
+  dnd send         text + uri-list, COPY action only, both
+                   backends; X11 verified against a real external
+                   client, Wayland against the shared codec + a
+                   wlroots quirk below
+  dnd wayland      wlroots 0.18 ends the SOURCE side with
+                   ::cancelled after a clean post-drop
+                   receive->finish->destroy (drop + payload are
+                   correct; the result signal is the quirk) —
+                   suite-asserted both-ways-end, documented
+  file dialogs     open file / files / folder / folders; the
+                   four kinds share one honest result model;
+                   no SAVE dialog (parked — nothing fake)
+  file manager     browse/select/multi/navigate/keyboard/scroll;
+                   no previews/search/operations (deliberate)
+
+Rig lessons that cost an hour each, recorded: a blocking fgets
+on a child that goes silent mid-handshake starves the pump (all
+child drains are non-blocking now); the XTEST driver's startup
+self-check MOVED THE POINTER, thrashing drag targets (self-check
+is opt-in via FDK_XTEST_SELFCHECK=1); sway grants the seat's
+pointer capability only when the virtual pointer produces its
+FIRST event (a priming motion after injector start is part of
+the DnD section now); a fresh client connecting after the
+virtual pointer exists still sees caps=0 (spawn order: client
+first, injector second — get_pointer before any capability is a
+protocol error); wlroots delivers ::drop only when the offer
+also got the legacy accept(mime) — set_actions alone negotiates
+the action but leaves the source unaccepted and a release then
+cancels; XDND's Finished must set the success bit (v2+) or the
+dragging app reads the drop as failed.
+
+Battery on the final tree: clean rebuilds debug + release
+(Wayland on, 0 warnings), headless suite (two new test files:
+dnd logic — codec round trips, hostile input containment,
+argument safety; file-dialog logic — scan filtering/ordering,
+unreadable dirs, ownership), X11 integration suite (four new
+GUI sections: list activation, file dialog accept/cancel/
+folder-button, dnd receiver external files+text, dnd source
+real-pointer external sink), sway rig PASS (incl. the Wayland
+dnd interop section), weston manager-less rig PASS, openbox
+real-WM rig ALL PASS, resize-flash rig PASS (pre-fix control
+still reproduces), X11 examples rig 10/10, sway examples rig
+10/10 (both new apps pixel-captured).

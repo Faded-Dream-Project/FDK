@@ -148,6 +148,15 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
         FDK_DEBUG("clipboard helper window ready (Phase 9)");
     }
 
+    /* XDND atoms + idle state (1.2.0); cannot fail in practice
+     * (interning only), and a failure leaves the DnD ops inert
+     * rather than broken — same tolerance as the clipboard. */
+    (void)fdk_x11_dnd_init(conn);
+    conn->xdnd.source = None;
+    conn->xdnd.dest_window = None;
+    conn->xdnd.hover = NULL;
+    conn->xdnd.offered = 0;
+
     FDK_INFO("connected (screen %d, %dx%d root)", conn->screen,
              DisplayWidth(display, conn->screen),
              DisplayHeight(display, conn->screen));
@@ -176,6 +185,8 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
     fdk_free(conn->windows);
 
     fdk_x11_clipboard_shutdown(conn);
+
+    fdk_x11_dnd_shutdown(conn);
 
     fdk_x11_cursor_shutdown(conn);
 

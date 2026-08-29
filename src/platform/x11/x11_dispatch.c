@@ -11,6 +11,16 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
         XEvent xevent;
         XNextEvent(conn->display, &xevent);
 
+        /* A drag WE started owns pointer events while active (the
+         * XDND source state machine — target tracking, Enter/Leave/
+         * Position emission, the drop handshake). Routed before
+         * everything else: the grab directs the events at us, not
+         * at whatever window is visually under the pointer. */
+        if (fdk_x11_dnd_source_handle_event(conn, &xevent)) {
+            processed++;
+            continue;
+        }
+
         /* ShmCompletion (MIT-SHM): the server finished reading a
          * shared pixel segment — clear that slot's in-flight flag so
          * the next acquisition can hand it out again. Routed BEFORE
@@ -32,7 +42,23 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
         /* Clipboard helper traffic (Phase 9): selection requests we
          * must serve, ownership losses, stray notifies. Routed BEFORE
          * the window-table lookup — the helper is intentionally not
-         * in that table (it is not an application window). */
+         * in that table (it is not an application window).
+         *
+         * 1.2.0: XDndStatus / XDndFinished replies to a drag WE
+         * started arrive on the same helper (it is our XDND source
+         * identity), and SelectionRequests naming the XDND selection
+         * must reach the DnD serving path BEFORE the clipboard's
+         * (which only stocks the CLIPBOARD selection's payload). */
+        if (fdk_x11_dnd_source_handle_helper_message(conn, &xevent)) {
+            processed++;
+            continue;
+        }
+        if (xevent.type == SelectionRequest &&
+            fdk_x11_dnd_serve_selection(
+                conn, &xevent.xselectionrequest)) {
+            processed++;
+            continue;
+        }
         if (fdk_x11_clipboard_handle_event(conn, &xevent)) {
             continue;
         }
@@ -61,12 +87,24 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
+        /* XDND receiver traffic (1.2.0): the Enter/Position/Leave/
+         * Drop handshake for drags arriving at THIS window, from any
+         * external client (or another FDK process). */
+        if (fdk_x11_dnd_handle_client_message(conn, &xevent)) {
+            processed++;
+            continue;
+        }
+
         fdk_event_data event;
         if (fdk_x11_translate_event(pwindow, &xevent, &event)) {
             conn->dispatch(pwindow, &event, conn->dispatch_user_data);
             processed++;
         }
     }
+
+    /* The XDND source's Finished watchdog (retires a target that
+     * died mid-handshake after the drop was sent). */
+    fdk_x11_dnd_source_tick(conn);
 
     return processed;
 }

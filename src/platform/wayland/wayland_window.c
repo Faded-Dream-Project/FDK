@@ -1322,6 +1322,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
 
     int is_popup = (options != NULL && options->popup != 0);
     pwindow->popup = is_popup;
+    pwindow->drop_formats = 0; /* fdk_window_set_drop_formats fills it */
     pwindow->xdg_popup = NULL;
 
     if (is_popup) {

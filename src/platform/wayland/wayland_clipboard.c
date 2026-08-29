@@ -28,9 +28,11 @@
  * end, and a bounded poll() read collects the bytes without further
  * protocol traffic.
  *
- * Honest limitations (mirrored in fdk_clipboard.h): no DnD, no
- * source actions, text only, and set_selection before any input
- * event carries serial 0 which compositors may ignore.
+ * Honest limitations (mirrored in fdk_clipboard.h): no source
+ * actions, text only, and set_selection before any input event
+ * carries serial 0 which compositors may ignore. Drag-and-drop
+ * lives in wayland_dnd.c; the device listener below routes the
+ * drag events there.
  */
 
 #include "platform/wayland/wayland_platform.h"
@@ -57,6 +59,11 @@ static void offer_offer(void *data, struct wl_data_offer *offer,
     if (strcmp(mime_type, "text/plain;charset=utf-8") == 0 ||
         strcmp(mime_type, "text/plain") == 0) {
         conn->pending_offer_has_text = 1;
+    }
+    if (strcmp(mime_type, "text/uri-list") == 0) {
+        /* 1.2.0: drag offers (and clipboard managers) may carry
+         * files; the DnD enter path reads this flag. */
+        conn->pending_offer_has_uris = 1;
     }
 }
 
@@ -94,6 +101,7 @@ static void device_data_offer(void *data, struct wl_data_device *device,
     }
     conn->pending_offer = offer;
     conn->pending_offer_has_text = 0;
+    conn->pending_offer_has_uris = 0;
     wl_data_offer_add_listener(offer, &g_offer_listener, conn);
 }
 
@@ -134,23 +142,30 @@ static void device_selection(void *data, struct wl_data_device *device,
     }
 }
 
-/* The rest of wl_data_device is drag-and-drop; required no-ops. */
+/* The DnD half of the device protocol — routed to wayland_dnd.c
+ * (1.2.0), which owns acceptance (set_actions), the drag events,
+ * and the drop transfer. These thin forwarders exist so the device
+ * listener stays assembled in this file next to the selection
+ * handling it shares state with. */
 static void device_enter(void *data, struct wl_data_device *device,
                          uint32_t serial, struct wl_surface *surface,
                          wl_fixed_t x, wl_fixed_t y,
                          struct wl_data_offer *offer) {
-    (void)data; (void)device; (void)serial; (void)surface;
-    (void)x; (void)y; (void)offer;
+    (void)device;
+    fdk_wayland_dnd_device_enter(data, serial, surface, x, y, offer);
 }
 static void device_leave(void *data, struct wl_data_device *device) {
-    (void)data; (void)device;
+    (void)device;
+    fdk_wayland_dnd_device_leave(data);
 }
 static void device_motion(void *data, struct wl_data_device *device,
                           uint32_t time, wl_fixed_t x, wl_fixed_t y) {
-    (void)data; (void)device; (void)time; (void)x; (void)y;
+    (void)device;
+    fdk_wayland_dnd_device_motion(data, time, x, y);
 }
 static void device_drop(void *data, struct wl_data_device *device) {
-    (void)data; (void)device;
+    (void)device;
+    fdk_wayland_dnd_device_drop(data);
 }
 
 static const struct wl_data_device_listener g_device_listener = {
@@ -251,6 +266,9 @@ void fdk_wayland_clipboard_device_ready(fdk_platform_connection *conn) {
 }
 
 void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn) {
+    /* An in-flight drag of ours is cancelled first (it reports its
+     * on_done, matching every other teardown path). */
+    fdk_wayland_dnd_teardown(conn);
     if (conn->clip_source != NULL) {
         wl_data_source_destroy(conn->clip_source);
         conn->clip_source = NULL;
@@ -263,6 +281,7 @@ void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn) {
     }
     conn->pending_offer = NULL;
     conn->pending_offer_has_text = 0;
+    conn->pending_offer_has_uris = 0;
     if (conn->selection_offer != NULL) {
         wl_data_offer_destroy(conn->selection_offer);
         conn->selection_offer = NULL;

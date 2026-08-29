@@ -196,4 +196,28 @@ static inline fdk_frame *frame_of(fdk_widget *w) {
     return (fdk_frame *)w;
 }
 
+/* ---- File dialog scan seam (1.2.0, file_dialog.c) ----
+ *
+ * The directory scan/sort is pure logic the headless suite pins
+ * (tests/test_file_dialog_logic.c) without a display: hidden-file
+ * filtering, dirs-only filtering, dirs-first ordering, the entry
+ * cap, and the ownership contract of the entries array. */
+typedef struct fdk_fd_entry {
+    char *name;   /* owned, basename only */
+    bool dir;
+    bool hidden;
+} fdk_fd_entry;
+
+typedef struct fdk_fd_entries {
+    fdk_fd_entry *v;
+    size_t count;
+} fdk_fd_entries;
+
+/* Scans `dir` (opendir/readdir + stat fallback for DT_UNKNOWN).
+ * Returns 0 on success (empty listing included), -1 when the
+ * directory cannot be opened. Fully owned by the caller. */
+int fdk__file_dialog_scan(const char *dir, bool dirs_only,
+                          bool show_hidden, fdk_fd_entries *out);
+void fdk__file_dialog_entries_free(fdk_fd_entries *entries);
+
 #endif /* FDK_WIDGETS_INTERNAL_H */

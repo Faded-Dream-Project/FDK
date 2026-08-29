@@ -101,6 +101,47 @@ struct fdk_platform_connection {
     Atom atom_fdk_selection;  /* private property for convert replies */
     char *clip_owned_text;    /* fdk_alloc'd, NULL when not owner     */
 
+    /* --- Drag and drop (1.2.0, XDND) — x11_dnd.c ---
+     *
+     * Receiver state: the XDND handshake runs on client messages
+     * to our windows (XdndEnter/Position/Leave/Drop), routed from
+     * x11_dispatch.c BEFORE translation. `xdnd` is the incoming
+     * drag's context; `xdnd_source` is OUR outgoing drag (pointer
+     * grab with owner_events, target tracking by tree walk). The
+     * clip_helper doubles as the XDND source identity (selection
+     * owner + the window Status/Finished replies arrive on). */
+    Atom atom_xdnd_aware;
+    Atom atom_xdnd_enter;
+    Atom atom_xdnd_position;
+    Atom atom_xdnd_status;
+    Atom atom_xdnd_leave;
+    Atom atom_xdnd_drop;
+    Atom atom_xdnd_finished;
+    Atom atom_xdnd_action_copy;
+    Atom atom_xdnd_type_list;
+    Atom atom_xdnd_selection;
+    Atom atom_text_uri_list;
+    struct {
+        Window source;        /* XDndEnter's source window, None idle  */
+        Window dest_window;   /* window the last Status named         */
+        fdk_platform_window *hover; /* window entered (LEAVE book-keeping) */
+        int version;          /* negotiated min(peer, 5)              */
+        int offered;          /* FDK_DRAG_FORMAT mask of the type list */
+    } xdnd;
+    struct {
+        int active;
+        int version;
+        int formats;
+        char *text;           /* owned; TEXT payload, NULL if absent   */
+        char *uri_payload;    /* owned; text/uri-list wire payload     */
+        Window target;        /* current candidate, None when over none */
+        int target_accepts;   /* last XDndStatus accept bit           */
+        int drop_pending;     /* Drop sent; awaiting XDndFinished      */
+        uint64_t drop_sent_ms;
+        void (*on_done)(int status, void *user);
+        void *on_done_user;
+    } xdnd_source;
+
     /* Simple open-addressed lookup from X11 Window ID -> our
      * fdk_platform_window*, so dispatch_pending() can find the right
      * window for an incoming XEvent (which only carries the raw X ID
@@ -126,6 +167,12 @@ struct fdk_platform_window {
      * x11_events.c, never delivered as a button event). */
     int popup;
     int grabbed;
+
+    /* 1.2.0 DnD: the formats this window accepts as a drop target
+     * (mirror of the fdk_window's public mask, kept live by the
+     * window_set_drop_formats op — the XDND accept/reject reply in
+     * every Status message reads THIS copy). */
+    int drop_formats;
 
     /* Phase 9 completion: modal-dialog grab state (a TOPLEVEL
      * holding pointer+keyboard grabs so no other window receives
@@ -308,5 +355,39 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
 fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
                                       const char *text);
 char *fdk_x11_clipboard_get_text(fdk_platform_connection *conn);
+
+/* Drag and drop (x11_dnd.c). init/shutdown: connection lifetime
+ * (called from x11_connection.c next to the clipboard's).
+ * window_init: stamps XdndAware on a new window (x11_window.c calls
+ * it from window_create). handle_client_message: the RECEIVER's
+ * XDndEnter/Position/Leave/Drop (x11_dispatch.c routes client
+ * messages here after the WM_PROTOCOLS check). source_handle_event:
+ * the SOURCE's pointer/keyboard interception while a drag we began
+ * is active (dispatch_pending calls it FIRST). source_handle_
+ * helper_message: XDndStatus/XDndFinished arriving on the helper.
+ * source_tick: the Finished watchdog (dispatch loop tail).
+ * serve_selection: SelectionRequests naming the XdndSelection (the
+ * dispatch routes them to the DnD serving before the clipboard's
+ * generic path, which would otherwise refuse them). The two ops
+ * entries behind platform_internal.h close the set. */
+fdk_result fdk_x11_dnd_init(fdk_platform_connection *conn);
+void fdk_x11_dnd_shutdown(fdk_platform_connection *conn);
+void fdk_x11_dnd_window_init(fdk_platform_window *pwindow);
+int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
+                                      const XEvent *xevent);
+int fdk_x11_dnd_source_handle_event(fdk_platform_connection *conn,
+                                     XEvent *xevent);
+int fdk_x11_dnd_source_handle_helper_message(
+    fdk_platform_connection *conn, const XEvent *xevent);
+void fdk_x11_dnd_source_tick(fdk_platform_connection *conn);
+int fdk_x11_dnd_serve_selection(fdk_platform_connection *conn,
+                                const XSelectionRequestEvent *req);
+void fdk_x11_dnd_source_finish(fdk_platform_connection *conn, int status);
+void fdk_x11_window_set_drop_formats(fdk_platform_window *pwindow,
+                                     int formats);
+fdk_result fdk_x11_drag_begin(fdk_platform_window *origin, int formats,
+                              const char *text,
+                              const char *const *uris, size_t uri_count,
+                              void (*on_done)(int, void *), void *user);
 
 #endif /* FDK_X11_PLATFORM_H */

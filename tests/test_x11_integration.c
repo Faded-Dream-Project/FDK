@@ -36,6 +36,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include <poll.h>
@@ -4571,6 +4575,641 @@ static void test_dialog_gui(void) {
            "early destroy, clean teardown\n");
 }
 
+/* ---- 1.2.0: list row activation ---------------------------------- */
+
+static struct {
+    int activations;
+    size_t last_row;
+} list_act;
+
+static void list_row_activated(fdk_widget *list, size_t row, void *user) {
+    (void)list; (void)user;
+    list_act.activations++;
+    list_act.last_row = row;
+}
+
+static void test_list_activation_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_font *font = fdk_font_load_system_default(16);
+    assert(font != NULL);
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "list act", .width = 240,
+                                 .height = 160 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, font, &list)));
+    /* Bounds BEFORE the rows: the list syncs its internal scrollview
+     * on every append (list_relayout), so bounds set after the rows
+     * leave the internals at the old size — set_bounds does not run
+     * arrange hooks (the probe_dblclick lesson). */
+    fdk_widget_set_bounds(list, (fdk_rect){ 10, 10, 200, 120 });
+    fdk_list_append(list, "alpha", NULL);
+    fdk_list_append(list, "beta", NULL);
+    fdk_list_append(list, "gamma", NULL);
+    fdk_list_set_on_row_activate(list, list_row_activated, NULL);
+    /* list bounds: the rows live inside the scrollview's content
+     * box (which also holds two scrollbar widgets); rather than
+     * guessing the internal child order, walk to leaf widgets — the
+     * rows are the tree's leaves, in row order. */
+    fdk_widget *row1 = NULL;
+    {
+        fdk_widget *leaves[8] = {0};
+        int nleaves = 0;
+        /* Iterative BFS over children; leaves (no children) in order. */
+        fdk_widget *queue[64] = { list };
+        int head = 0, tail = 1;
+        while (head < tail && nleaves < 8) {
+            fdk_widget *cur = queue[head++];
+            size_t cn = fdk_widget_child_count(cur);
+            if (cn == 0) {
+                leaves[nleaves++] = cur;
+            } else {
+                for (size_t i = 0; i < cn && tail < 64; i++) {
+                    queue[tail++] = fdk_widget_child_at(cur, i);
+                }
+            }
+        }
+        /* The first leaves are the scrollbars (empty rows container
+         * possible pre-layout); find the leaves that sit under the
+         * rows container: they have no children AND their text is
+         * non-NULL. Row 1 is the second ROW leaf: filter by checking
+         * the ancestor two levels up is the same for all rows. */
+        fdk_widget *rows_leaves[8] = {0};
+        int nrows_leaves = 0;
+        fdk_widget *rows_parent = NULL;
+        for (int i = 0; i < nleaves; i++) {
+            fdk_widget *p = leaves[i]->parent;
+            if (p == NULL) {
+                continue;
+            }
+            if (rows_parent == NULL || p == rows_parent) {
+                /* heuristics: rows' parent chain depth 3 from list */
+                fdk_widget *gp = p->parent;
+                if (gp != NULL && gp->parent == list) {
+                    rows_parent = p;
+                    rows_leaves[nrows_leaves++] = leaves[i];
+                }
+            }
+        }
+        assert(nrows_leaves >= 3);
+        row1 = rows_leaves[1];
+    }
+    assert(row1 != NULL);
+    fdk_rect r1 = fdk_widget_get_bounds(row1);
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    memset(&list_act, 0, sizeof(list_act));
+    /* A double-click on row 1 (two fast press/release pairs). Row
+     * bounds are in the scroll content's space; the window-space
+     * click adds the list's origin (10, 10). */
+    fdk_i32 click_x = 10 + r1.x + 30;
+    fdk_i32 click_y = 10 + r1.y + r1.height / 2;
+    for (int i = 0; i < 2; i++) {
+        x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                               ButtonPressMask | ButtonReleaseMask,
+                               click_x, click_y, 1);
+        (void)fdk_pump_events(ctx, 60);
+        x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                               ButtonPressMask | ButtonReleaseMask,
+                               click_x, click_y, 1);
+        (void)fdk_pump_events(ctx, 60);
+    }
+    assert(list_act.activations == 1);
+    assert(list_act.last_row == 1);
+
+    /* Enter activates the keyboard cursor's row (row 2 after one
+     * Down from row 1's selection). */
+    assert(fdk_widget_focus(list));
+    x11_send_key_event(send_dpy, xid, KeyPress, 116); /* Down */
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_key_event(send_dpy, xid, KeyPress, 36); /* Enter (keycode 36 = scancode 28) */
+    (void)fdk_pump_events(ctx, 100);
+    assert(list_act.activations == 2);
+    assert(list_act.last_row == 2);
+
+    /* Slow double-click (two clicks far apart in time) must NOT
+     * re-fire: the second click below lands after the dblclick
+     * window (400ms) — enforced by sleeping past it. */
+    struct timespec ts = { 0, 450 * 1000 * 1000 };
+    nanosleep(&ts, NULL);
+    memset(&list_act, 0, sizeof(list_act));
+    x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                           ButtonPressMask | ButtonReleaseMask,
+                           click_x, click_y, 1);
+    (void)fdk_pump_events(ctx, 60);
+    x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                           ButtonPressMask | ButtonReleaseMask,
+                           click_x, click_y, 1);
+    (void)fdk_pump_events(ctx, 60);
+    assert(list_act.activations == 0); /* plain click: select only */
+
+    XCloseDisplay(send_dpy);
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] list activation: double-click + Enter fire, slow "
+           "re-click does not\n");
+}
+
+/* ---- 1.2.0: file dialogs ------------------------------------------ */
+
+static struct {
+    fdk_file_dialog_outcome outcome;
+    char paths[4][512];
+    size_t count;
+} fd_result;
+
+static void file_dialog_done(const fdk_file_dialog_result *result,
+                             void *user) {
+    (void)user;
+    memset(&fd_result, 0, sizeof(fd_result));
+    fd_result.outcome = result->outcome;
+    fd_result.count = result->count;
+    for (size_t i = 0; i < result->count && i < 4; i++) {
+        snprintf(fd_result.paths[i], sizeof(fd_result.paths[i]), "%s",
+                 result->paths[i]);
+    }
+}
+
+/* Builds a scratch dir with one subdir + one file; returns the dir
+ * (caller frees) and fills the expected file path. */
+static char *make_dialog_scratch(char *file_out, size_t file_cap) {
+    static char tmpl[] = "/tmp/fdk-fdlg-XXXXXX";
+    char *d = mkdtemp(tmpl);
+    assert(d != NULL);
+    static char buf[600];
+    snprintf(buf, sizeof(buf), "%s/sub", d);
+    assert(mkdir(buf, 0755) == 0);
+    snprintf(buf, sizeof(buf), "%s/note.txt", d);
+    FILE *f = fopen(buf, "w");
+    assert(f != NULL);
+    fputs("hi", f);
+    fclose(f);
+    snprintf(file_out, file_cap, "%s/note.txt", d);
+    return strdup(d);
+}
+
+static void drop_dialog_scratch(const char *dir) {
+    char buf[600];
+    snprintf(buf, sizeof(buf), "%s/note.txt", dir);
+    unlink(buf);
+    snprintf(buf, sizeof(buf), "%s/sub", dir);
+    rmdir(buf);
+    rmdir(dir);
+    free((void *)dir);
+}
+
+static void test_file_dialog_gui(void) {
+    char want_file[512];
+    char *dir = make_dialog_scratch(want_file, sizeof(want_file));
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+
+    /* --- 1. OPEN_FILE, driven by keyboard: Down Down Enter picks
+     * note.txt (rows: sub/, note.txt) and accepts on activation. */
+    fdk_file_dialog_options o1 = {0};
+    o1.kind = FDK_FILE_DIALOG_OPEN_FILE;
+    o1.start_dir = dir;
+    fdk_window *dlg = NULL;
+    assert(fdk_ok(fdk_dialog_open_file(ctx, &o1, file_dialog_done, NULL,
+                                       &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    unsigned long dxid = fdk_window_xid(dlg);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 116); /* Down -> sub/ */
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 116); /* Down -> note */
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 36); /* Enter -> accept on activation */
+    (void)fdk_pump_events(ctx, 250);
+    assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
+    assert(fd_result.count == 1);
+    assert(strcmp(fd_result.paths[0], want_file) == 0);
+    printf("[ok] file dialog: OPEN_FILE keyboard accept -> %s\n",
+           want_file);
+
+    /* --- 2. CANCELLED via Escape. */
+    fdk_file_dialog_options o2 = {0};
+    o2.kind = FDK_FILE_DIALOG_OPEN_FILE;
+    o2.start_dir = dir;
+    assert(fdk_ok(fdk_dialog_open_file(ctx, &o2, file_dialog_done, NULL,
+                                       &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    dxid = fdk_window_xid(dlg);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Escape (keycode 9 = scancode 1) */
+    (void)fdk_pump_events(ctx, 250);
+    assert(fd_result.outcome == FDK_FILE_DIALOG_CANCELLED);
+    assert(fd_result.count == 0);
+    printf("[ok] file dialog: Escape answers CANCELLED (count 0)\n");
+
+    /* --- 3. OPEN_FOLDER via the accept BUTTON (the click path):
+     * body child order is fixed by creation — [up, hidden, path,
+     * list, status, accept, cancel]; accept is index 5. */
+    fdk_file_dialog_options o3 = {0};
+    o3.kind = FDK_FILE_DIALOG_OPEN_FOLDER;
+    o3.start_dir = dir;
+    assert(fdk_ok(fdk_dialog_open_file(ctx, &o3, file_dialog_done, NULL,
+                                       &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    {
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+        fdk_widget *body = fdk_widget_child_at(droot, 0);
+        assert(body != NULL);
+        fdk_widget *accept = fdk_widget_child_at(body, 5);
+        assert(accept != NULL);
+        fdk_rect ab = fdk_widget_get_bounds(accept);
+        /* The list holds one row (sub/): select it first. */
+        dxid = fdk_window_xid(dlg);
+        x11_send_key_event(send_dpy, dxid, KeyPress, 116); /* Down */
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(send_dpy, dxid, ButtonPress,
+                               ButtonPressMask | ButtonReleaseMask,
+                               ab.x + 8, ab.y + ab.height / 2, 1);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(send_dpy, dxid, ButtonRelease,
+                               ButtonPressMask | ButtonReleaseMask,
+                               ab.x + 8, ab.y + ab.height / 2, 1);
+        (void)fdk_pump_events(ctx, 250);
+    }
+    assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
+    assert(fd_result.count == 1);
+    /* Folders are verified directories by stat at accept time. */
+    {
+        struct stat st;
+        assert(stat(fd_result.paths[0], &st) == 0 && S_ISDIR(st.st_mode));
+    }
+    printf("[ok] file dialog: OPEN_FOLDER button accept -> %s "
+           "(stat-verified directory)\n", fd_result.paths[0]);
+
+    XCloseDisplay(send_dpy);
+    fdk_shutdown(ctx); /* any dialog window left dies here safely */
+    drop_dialog_scratch(dir);
+    printf("[ok] file dialog GUI: accept/cancel paths, folder kind "
+           "returns a real directory\n");
+}
+
+/* ---- 1.2.0: drag and drop ---------------------------------------- */
+
+static struct {
+    int enters, motions, leaves, drops;
+    char last_text[256];
+    char uris[4][512];
+    size_t uri_count;
+} dnd_rx;
+
+static void dnd_count_window_event(fdk_window *w, const fdk_event_data *ev,
+                                   void *user) {
+    (void)w; (void)user;
+    if (ev->type < FDK_EVENT_DRAG_ENTER || ev->type > FDK_EVENT_DRAG_DROP) {
+        return;
+    }
+    switch (ev->type) {
+    case FDK_EVENT_DRAG_ENTER: dnd_rx.enters++; break;
+    case FDK_EVENT_DRAG_MOTION: dnd_rx.motions++; break;
+    case FDK_EVENT_DRAG_LEAVE: dnd_rx.leaves++; break;
+    case FDK_EVENT_DRAG_DROP:
+        dnd_rx.drops++;
+        if (ev->drag.text != NULL) {
+            snprintf(dnd_rx.last_text, sizeof(dnd_rx.last_text), "%s",
+                     ev->drag.text);
+        }
+        for (size_t i = 0; i < ev->drag.uri_count && i < 4; i++) {
+            snprintf(dnd_rx.uris[i], sizeof(dnd_rx.uris[i]), "%s",
+                     ev->drag.uris[i]);
+        }
+        dnd_rx.uri_count = ev->drag.uri_count;
+        break;
+    default: break;
+    }
+}
+
+/* Pumps while the xdnd_source child runs (bounded). Returns the
+ * child's exit status, or -1 on timeout. */
+static int pump_wait_child(fdk_context *ctx, pid_t pid, int timeout_ms) {
+    int spins = timeout_ms / 50;
+    for (int i = 0; i < spins; i++) {
+        (void)fdk_pump_events(ctx, 50);
+        int status = 0;
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) {
+            return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        }
+    }
+    return -1;
+}
+
+/* Pumps FDK while draining a popen child's stdout NON-BLOCKINGLY
+ * (the child goes silent mid-handshake; a blocking read would starve
+ * the pump). Returns the child's exit code, or -1 on timeout. */
+static int pump_child_while_draining(fdk_context *ctx, FILE *child,
+                                     int timeout_s) {
+    int fd = fileno(child);
+    fcntl(fd, F_SETFL, O_NONBLOCK);
+    char buf[4096];
+    size_t used = 0;
+    int spins = timeout_s * 20;
+    int eof = 0;
+    for (int i = 0; i < spins && !eof; i++) {
+        (void)fdk_pump_events(ctx, 50);
+        char chunk[512];
+        ssize_t n;
+        while ((n = read(fd, chunk, sizeof(chunk))) >= 0) {
+            if (n == 0) {
+                eof = 1; /* child closed its stdout: done */
+                break;
+            }
+            size_t take = (size_t)n;
+            if (used + take >= sizeof(buf)) {
+                take = sizeof(buf) - 1 - used;
+            }
+            memcpy(buf + used, chunk, take);
+            used += take;
+        }
+    }
+    buf[used] = '\0';
+    /* print-through for the rig logs */
+    fputs(buf, stdout);
+    fflush(stdout);
+    return pclose(child);
+}
+
+static void test_dnd_receiver_gui(void) {
+    const char *src_bin = getenv("FDK_XDND_SOURCE_BIN");
+    if (src_bin == NULL) {
+        src_bin = "/home/z/my-project/scripts/xdnd_source";
+    }
+    if (access(src_bin, X_OK) != 0) {
+        printf("[skip] dnd receiver: %s not built (external interop "
+               "rig builds it)\n", src_bin);
+        return;
+    }
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "dnd target",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, dnd_count_window_event, NULL);
+    fdk_window_set_drop_formats(win, FDK_DRAG_FORMAT_TEXT |
+                                         FDK_DRAG_FORMAT_URI_LIST);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 250);
+
+    Display *probe = XOpenDisplay(NULL);
+    assert(probe != NULL);
+    unsigned long xid = fdk_window_xid(win);
+    /* Root coords of a point inside our window (the window may be at
+     * (0,0) under bare Xvfb, but asking the server is the truth). */
+    int lx = 0, ly = 0;
+    Window junk = None;
+    XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
+                          80, 60, &lx, &ly, &junk);
+    char cmd[512];
+
+    /* --- files drop --- */
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d files", src_bin, xid, lx,
+             ly);
+    FILE *child = popen(cmd, "r");
+    assert(child != NULL);
+    /* Drain the child NON-BLOCKINGLY while FDK pumps: the child goes
+     * silent while waiting for FDK's XDndStatus, and a blocking fgets
+     * would starve the pump (the probe_dndrx lesson — the handshake
+     * needs BOTH sides live). */
+    alarm(8);
+    int rc = pump_child_while_draining(ctx, child, 8);
+    alarm(0);
+    assert(rc == 0);
+    assert(dnd_rx.enters >= 1);
+    assert(dnd_rx.drops == 1);
+    assert(dnd_rx.uri_count == 2);
+    assert(strcmp(dnd_rx.uris[0], "/etc/hostname") == 0);
+    assert(strcmp(dnd_rx.uris[1], "/etc/os-release") == 0);
+    printf("[ok] dnd receiver: external raw-Xlib source dropped 2 "
+           "files, decoded to POSIX paths\n");
+
+    /* --- text drop --- */
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d text", src_bin, xid, lx,
+             ly);
+    child = popen(cmd, "r");
+    assert(child != NULL);
+    alarm(8);
+    rc = pump_child_while_draining(ctx, child, 8);
+    alarm(0);
+    assert(rc == 0);
+    assert(dnd_rx.drops == 1);
+    assert(strcmp(dnd_rx.last_text, "Hello from an external client") == 0);
+    printf("[ok] dnd receiver: external text drop decoded as UTF-8\n");
+
+    XCloseDisplay(probe);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+}
+
+/* Source side: FDK drags into a raw-Xlib sink window, driven by the
+ * REAL pointer through XTEST. */
+static struct {
+    bool armed;
+    bool drag_started_ok;
+    bool reported;
+    fdk_drag_status status;
+} dnd_tx;
+
+static void dnd_tx_done(fdk_drag_status status, void *user);
+
+static void dnd_tx_window_event(fdk_window *w, const fdk_event_data *ev,
+                                void *user) {
+    (void)user;
+    if (ev->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        dnd_tx.armed = true;
+    } else if (ev->type == FDK_EVENT_POINTER_MOTION && dnd_tx.armed) {
+        dnd_tx.armed = false;
+        const char *uris[2] = { "/etc/hostname", "/etc/os-release" };
+        fdk_result r = fdk_drag_begin(
+            w, FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST,
+            "FDK to the outside", uris, 2, dnd_tx_done, NULL);
+        dnd_tx.drag_started_ok = fdk_ok(r);
+    }
+}
+
+static void dnd_tx_done(fdk_drag_status status, void *user) {
+    (void)user;
+    dnd_tx.status = status;
+    dnd_tx.reported = true;
+}
+
+static void test_dnd_source_gui(void) {
+    const char *sink_bin = getenv("FDK_XDND_SINK_BIN");
+    if (sink_bin == NULL) {
+        sink_bin = "/home/z/my-project/scripts/xdnd_sink";
+    }
+    const char *xtest = getenv("FDK_XTEST_BIN");
+    if (xtest == NULL) {
+        xtest = "/tmp/xtest_driver";
+    }
+    if (access(sink_bin, X_OK) != 0 || access(xtest, X_OK) != 0) {
+        printf("[skip] dnd source: %s or %s not built (interop rig)\n",
+               sink_bin, xtest);
+        return;
+    }
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "dnd source",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, dnd_tx_window_event, NULL);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 250);
+
+    /* The sink window, placed away from ours, stdout piped. */
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "%s 420 20 280 180", sink_bin);
+    FILE *sink = popen(cmd, "r");
+    assert(sink != NULL);
+    /* Non-blocking drain helper via fd. */
+    int sink_fd = fileno(sink);
+    fcntl(sink_fd, F_SETFL, O_NONBLOCK);
+
+    char line[512];
+    char sink_out[4096] = {0};
+    unsigned long sink_xid = 0;
+    alarm(6);
+    for (;;) {
+        while (read(sink_fd, line, sizeof(line)) > 0) {
+            strncat(sink_out, line,
+                    sizeof(sink_out) - strlen(sink_out) - 1);
+            if (sscanf(line, "SINK: ready 0x%lx", &sink_xid) == 1) {
+                /* fallthrough */
+            }
+        }
+        (void)fdk_pump_events(ctx, 50);
+        if (sink_xid != 0) {
+            break;
+        }
+    }
+    alarm(0);
+    assert(sink_xid != 0);
+
+    unsigned long xid = fdk_window_xid(win);
+    Display *probe = XOpenDisplay(NULL);
+    assert(probe != NULL);
+    int wx = 0, wy = 0, sx = 0, sy = 0;
+    Window junk = None;
+    XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
+                          60, 40, &wx, &wy, &junk);
+    XCloseDisplay(probe);
+    sx = 420 + 100; /* inside the sink rect we placed */
+    sy = 20 + 60;
+
+    char drive[512];
+    const char *libprefix = getenv("FDK_XLIB_PREFIX");
+    if (libprefix == NULL) {
+        libprefix = "/home/z/apt/prefix/usr/lib/x86_64-linux-gnu";
+    }
+    memset(&dnd_tx, 0, sizeof(dnd_tx));
+    alarm(15);
+    /* Human-paced drag: ONE pointer step per driver invocation, with
+     * real pump time between steps — a real application's loop pumps
+     * continuously, and the XDND handshake needs FDK to see the
+     * target's Status BEFORE the release (a single driver call doing
+     * move-move-move-release starves it; the probe lesson). The
+     * xtest_driver binary may link shared X libs from the local
+     * extraction prefix — put it on the loader path. */
+    const int steps[][2] = {
+        { wx, wy },        /* over our window */
+        { wx + 40, wy + 30 },
+        { sx - 60, sy },   /* approach the sink */
+        { sx - 20, sy },
+        { sx, sy },        /* center of the sink */
+    };
+    char one[300];
+    snprintf(one, sizeof(one), "LD_LIBRARY_PATH=%s", libprefix);
+    setenv("LD_LIBRARY_PATH", libprefix, 1);
+
+    (void)system("clear"); /* no-op formatting for logs */
+    snprintf(drive, sizeof(drive), "\"%s\" 0x%lx m:%d,%d w:60 d", xtest,
+             xid, steps[0][0], steps[0][1]);
+    (void)system(drive);
+    (void)fdk_pump_events(ctx, 300);
+    for (int i = 1; i < 5; i++) {
+        snprintf(drive, sizeof(drive), "\"%s\" 0x%lx m:%d,%d", xtest, xid,
+                 steps[i][0], steps[i][1]);
+        (void)system(drive);
+        /* Pump while the sink answers Status. */
+        for (int p = 0; p < 4; p++) {
+            (void)fdk_pump_events(ctx, 60);
+            while (read(sink_fd, line, sizeof(line)) > 0) {
+                strncat(sink_out, line,
+                        sizeof(sink_out) - strlen(sink_out) - 1);
+            }
+        }
+    }
+    snprintf(drive, sizeof(drive), "\"%s\" 0x%lx u", xtest, xid);
+    (void)system(drive);
+    /* Let the handshake finish: FDK drop -> sink convert+Finished.
+     * Everything the sink says is ACCUMULATED (earlier drains already
+     * consumed the pipe — a print-only drain loses the payloads to
+     * stdout buffering on abort). */
+    int done_spins = 0;
+    while (done_spins++ < 120) {
+        (void)fdk_pump_events(ctx, 50);
+        while (read(sink_fd, line, sizeof(line)) > 0) {
+            strncat(sink_out, line,
+                    sizeof(sink_out) - strlen(sink_out) - 1);
+        }
+        if (dnd_tx.reported &&
+            strstr(sink_out, "payload uri") != NULL &&
+            strstr(sink_out, "payload text") != NULL) {
+            break;
+        }
+    }
+    alarm(0);
+    /* Print-through for rig logs (flushed explicitly). */
+    fputs(sink_out, stdout);
+    fflush(stdout);
+    assert(dnd_tx.drag_started_ok);
+    assert(dnd_tx.status == FDK_DRAG_SUCCEEDED);
+
+    /* The sink must have decoded BOTH payloads (uri list + text). */
+    assert(strstr(sink_out, "payload uri") != NULL);
+    assert(strstr(sink_out, "file:///etc/hostname") != NULL);
+    assert(strstr(sink_out, "payload text") != NULL);
+    assert(strstr(sink_out, "FDK to the outside") != NULL);
+    printf("[ok] dnd source: FDK drag into a raw-Xlib window: "
+           "SUCCEEDED, both payloads received by the external app\n");
+
+    /* Retire the sink (it runs until SIGTERM), then reap, then tear
+     * down our own side. */
+    (void)system("pkill -x xdnd_sink 2>/dev/null || true");
+    (void)pclose(sink);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -4615,6 +5254,10 @@ int main(void) {
     test_combo_gui();
     test_dialog_gui();
     test_a11y_gui();
+    test_list_activation_gui();
+    test_file_dialog_gui();
+    test_dnd_receiver_gui();
+    test_dnd_source_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

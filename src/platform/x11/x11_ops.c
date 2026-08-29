@@ -30,6 +30,8 @@ static const fdk_platform_ops g_x11_ops = {
     .clipboard_get_text = fdk_x11_clipboard_get_text,
     .window_popup_regrab = fdk_x11_window_popup_regrab,
     .window_set_modal = fdk_x11_window_set_modal,
+    .window_set_drop_formats = fdk_x11_window_set_drop_formats,
+    .drag_begin = fdk_x11_drag_begin,
 };
 
 const fdk_platform_ops *fdk_platform_x11_ops(void) {

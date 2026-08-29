@@ -26,6 +26,7 @@
 #include "fdk_theme.h"
 #include "fdk_clipboard.h"
 #include "fdk_dialog.h"
+#include "fdk_dnd.h"
 #include "fdk_a11y.h"
 #include "fdk_i18n.h"
 

@@ -130,6 +130,29 @@ struct fdk_platform_connection {
     int selection_offer_has_text;
     struct wl_data_offer *pending_offer;
     int pending_offer_has_text;
+    int pending_offer_has_uris; /* 1.2.0: text/uri-list in the pending
+                                   offer — drag offers carry it */
+
+    /* --- Drag and drop (1.2.0, wayland_dnd.c) ---
+     *
+     * Receiver: the drag the data_device currently tracks (enter/
+     * motion/leave/drop in the device listener; wayland_clipboard.c
+     * routes them here). drag_hover NULL when the drag is not over
+     * an FDK window or was not accepted (set_actions answered only
+     * on a format intersection). Source: OUR outgoing drag (the
+     * wl_data_source handed to start_drag; its listener reports
+     * send / finished / cancelled). */
+    struct wl_data_offer *drag_offer;
+    fdk_platform_window *drag_hover;
+    int drag_offered;    /* FDK_DRAG_FORMAT mask the offer carries */
+    int drag_accepted;   /* the intersection we answered with      */
+    double drag_x, drag_y;
+    struct wl_data_source *drag_source;
+    char *drag_text;           /* owned; TEXT payload for ::send     */
+    char *drag_uri_payload;    /* owned; uri-list payload for ::send */
+    int drag_drop_performed;
+    void (*drag_on_done)(int status, void *user);
+    void *drag_on_done_user;
 
     /* Bound from the seat's capabilities (wayland_seat.c). May be
      * NULL if the seat genuinely has no keyboard/pointer — checked
@@ -233,6 +256,7 @@ struct fdk_platform_window {
     struct xdg_toplevel *xdg_toplevel;
     int popup;                    /* Phase 9: xdg_popup window      */
     struct xdg_popup *xdg_popup;  /* set when popup                */
+    int drop_formats;             /* 1.2.0 DnD: accepted drop formats */
 
     /* Solid background buffer — the Wayland equivalent of X11's
      * background pixel. Wayland compositors map nothing until a
@@ -398,6 +422,27 @@ void fdk_wayland_teardown_seat(fdk_platform_connection *conn);
  * seat exist (whichever binds second triggers it). */
 void fdk_wayland_clipboard_device_ready(fdk_platform_connection *conn);
 void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn);
+
+/* Drag and drop (wayland_dnd.c): the data_device drag events the
+ * device listener in wayland_clipboard.c routes here, the teardown
+ * (cancels an in-flight drag of ours), and the two ops entries. */
+void fdk_wayland_dnd_device_enter(fdk_platform_connection *conn,
+                                  uint32_t serial,
+                                  struct wl_surface *surface,
+                                  wl_fixed_t x, wl_fixed_t y,
+                                  struct wl_data_offer *offer);
+void fdk_wayland_dnd_device_motion(fdk_platform_connection *conn,
+                                   uint32_t time, wl_fixed_t x,
+                                   wl_fixed_t y);
+void fdk_wayland_dnd_device_leave(fdk_platform_connection *conn);
+void fdk_wayland_dnd_device_drop(fdk_platform_connection *conn);
+void fdk_wayland_dnd_teardown(fdk_platform_connection *conn);
+void fdk_wayland_window_set_drop_formats(fdk_platform_window *pwindow,
+                                         int formats);
+fdk_result fdk_wayland_drag_begin(fdk_platform_window *origin, int formats,
+                                  const char *text,
+                                  const char *const *uris, size_t uri_count,
+                                  void (*on_done)(int, void *), void *user);
 fdk_result fdk_wayland_clipboard_set_text(fdk_platform_connection *conn,
                                            const char *text);
 char *fdk_wayland_clipboard_get_text(fdk_platform_connection *conn);

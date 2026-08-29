@@ -47,6 +47,7 @@
 #include <stdlib.h> /* free() for clipboard strings */
 #include <string.h>
 #include <time.h>   /* nanosleep — the pacing regression's guard wait */
+#include <fcntl.h>
 #include <unistd.h> /* access() — the injector-availability probe */
 
 static fdk_dialog_response g_wayland_dlg_last =
@@ -218,6 +219,40 @@ static bool pixel_is_band_fill(fdk_u32 px) {
     fdk_u32 b = (fdk_u32)(c.b * 255.0f + 0.5f);
     return ((px >> 16) & 0xFFu) == r && ((px >> 8) & 0xFFu) == g &&
            (px & 0xFFu) == b;
+}
+
+/* ---- 1.2.0 DnD receive accounting (the drop-target section) ---- */
+static struct {
+    int enters, motions, leaves, drops;
+    char uris[2][512];
+    size_t uri_count;
+    char text[256];
+} wl_dnd_rx;
+
+static void wl_dnd_rx_event(fdk_window *w, const fdk_event_data *ev,
+                            void *user) {
+    (void)w; (void)user;
+    if (ev->type < FDK_EVENT_DRAG_ENTER || ev->type > FDK_EVENT_DRAG_DROP) {
+        return;
+    }
+    switch (ev->type) {
+    case FDK_EVENT_DRAG_ENTER: wl_dnd_rx.enters++; break;
+    case FDK_EVENT_DRAG_MOTION: wl_dnd_rx.motions++; break;
+    case FDK_EVENT_DRAG_LEAVE: wl_dnd_rx.leaves++; break;
+    case FDK_EVENT_DRAG_DROP:
+        wl_dnd_rx.drops++;
+        for (size_t i = 0; i < ev->drag.uri_count && i < 2; i++) {
+            snprintf(wl_dnd_rx.uris[i], sizeof(wl_dnd_rx.uris[i]), "%s",
+                     ev->drag.uris[i]);
+        }
+        wl_dnd_rx.uri_count = ev->drag.uri_count;
+        if (ev->drag.text != NULL) {
+            snprintf(wl_dnd_rx.text, sizeof(wl_dnd_rx.text), "%s",
+                     ev->drag.text);
+        }
+        break;
+    default: break;
+    }
 }
 
 int main(void) {
@@ -717,15 +752,18 @@ int main(void) {
             if (wayland_injector_start()) {
                 /* Wait for the pointer capability to reach us (the
                  * device attaches on the injector's connection; the
-                 * capabilities event arrives on our next roundtrip). */
-                pump_and_paint(ctx, win, 500);
+                 * capabilities event arrives on our next roundtrip).
+                 * Generous: under load the compositor's window
+                 * placement can lag the injector by a good second,
+                 * and the click below lands blind without this. */
+                pump_and_paint(ctx, win, 1500);
 
                 /* Window pinned at (100,60) by the rig's sway config;
                  * the button's center is therefore at (165,115). */
                 wayland_inject("move 165 115");
-                pump_and_paint(ctx, win, 300);
+                pump_and_paint(ctx, win, 500);
                 wayland_inject("tap 1");
-                pump_and_paint(ctx, win, 400);
+                pump_and_paint(ctx, win, 600);
                 assert(button_hits == 1);
                 printf("[ok] wayland menu: REAL seat click reached "
                        "the button (valid grab serial minted)\n");
@@ -1037,6 +1075,157 @@ int main(void) {
         printf("[skip] wayland cursor section (fdk-wl-inject "
                "unavailable — REAL input serials cannot be minted "
                "here)\n");
+    }
+
+    /* ---- 1.2.0: drag and drop (external raw-libwayland source) ----
+     *
+     * The interop rig: scripts/wl_dnd_source is a REAL external
+     * client (plain libwayland + the generated xdg-shell protocol,
+     * zero FDK code) that starts a wl_data_device drag when the
+     * injected pointer presses and moves on ITS surface. The rig's
+     * sway config floats it at (100,380); our drop-target window
+     * floats at (100,60) (CSD, so the surface is exactly there).
+     * The REAL pointer then drags from its surface onto ours and
+     * releases: FDK must answer the drag offer with set_actions,
+     * receive the drop, decode the uri-list to POSIX paths, and
+     * finish the offer. The X11 suite pins the same protocol shape
+     * against raw-Xlib clients; this is the Wayland half. */
+    {
+        const char *src_bin = getenv("FDK_WL_DND_SOURCE_BIN");
+        if (src_bin == NULL) {
+            src_bin = "/home/z/my-project/scripts/wl_dnd_source";
+        }
+        if (access("/home/z/my-project/scripts/fdk-wl-inject", X_OK) == 0 &&
+            access(src_bin, X_OK) == 0) {
+            /* ORDER MATTERS (the sway lesson): a client connecting
+             * AFTER the virtual pointer exists gets caps=0 in its
+             * initial capabilities event (and get_pointer before any
+             * capability is a protocol error) — the pointer
+             * capability only ever arrives as a mid-connection
+             * UPDATE when the device is created. So: spawn the
+             * external source FIRST (it dispatches, waiting for a
+             * pointer), THEN start the injector — its virtual
+             * pointer's creation is the update that arms the
+             * source's listener. */
+            fdk_window *dw = NULL;
+            fdk_window_options dopts = { .title = "FDK drop target",
+                                         .width = 300, .height = 200 };
+            assert(fdk_ok(fdk_window_create(ctx, &dopts, &dw)));
+            fdk_window_set_drop_formats(
+                dw, FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST);
+            fdk_widget *droot = NULL;
+            assert(fdk_ok(fdk_window_get_root(dw, &droot)));
+            fdk_widget_set_background(droot,
+                                      (fdk_color){0.15f, 0.35f, 0.2f, 1.0f});
+            /* CSD so the surface sits exactly at the container's
+             * (100,60) — no sway titlebar offset. */
+            assert(fdk_ok(fdk_window_set_decorated(dw, true)));
+            fdk_window_show(dw);
+            pump_and_paint(ctx, dw, 400);
+            fdk_window_set_event_callback(dw, wl_dnd_rx_event, NULL);
+
+            /* Spawn the source; give it a moment to connect (caps=0,
+             * it waits), then create the virtual pointer. */
+            char cmd[512];
+            snprintf(cmd, sizeof(cmd), "%s both", src_bin);
+            FILE *src = popen(cmd, "r");
+            assert(src != NULL);
+            int src_fd = fileno(src);
+            fcntl(src_fd, F_SETFL, O_NONBLOCK);
+            char line[512];
+            char src_out[4096] = {0};
+            for (int i = 0; i < 8; i++) {
+                pump_and_paint(ctx, dw, 100);
+            }
+            if (!wayland_injector_start()) {
+                (void)pclose(src);
+                fdk_window_destroy(dw);
+                printf("[skip] wayland dnd section (virtual pointer "
+                       "unavailable on this compositor)\n");
+            } else {
+            /* PRIME the virtual pointer: sway grants the seat's
+             * pointer capability only when the device produces its
+             * FIRST event (the injector#1 trace shows caps(1)
+             * arriving exactly at the first motion_absolute, 1.5s
+             * after create_virtual_pointer). Without a priming
+             * motion the source waits for a pointer that never
+             * materializes. */
+            wayland_inject("move 640 360");
+            int ready = 0;
+            for (int i = 0; i < 40 && !ready; i++) {
+                pump_and_paint(ctx, dw, 100);
+                ssize_t n;
+                while ((n = read(src_fd, line, sizeof(line) - 1)) > 0) {
+                    line[n] = '\0';
+                    strncat(src_out, line,
+                            sizeof(src_out) - strlen(src_out) - 1);
+                }
+                if (strstr(src_out, "WL-SRC: ready") != NULL) {
+                    ready = 1;
+                }
+            }
+            assert(ready);
+
+            memset(&wl_dnd_rx, 0, sizeof(wl_dnd_rx));
+            /* The drag: press on the source surface (center of its
+             * (100,380,300x200) rect), move (it starts the drag on
+             * press+motion), drag up onto our window, release. */
+            wayland_inject("move 250 480");
+            pump_and_paint(ctx, dw, 250);
+            wayland_inject("down 1");
+            pump_and_paint(ctx, dw, 200);
+            wayland_inject("move 260 470");
+            pump_and_paint(ctx, dw, 250);
+            wayland_inject("move 200 300");
+            pump_and_paint(ctx, dw, 250);
+            wayland_inject("move 250 160"); /* over our surface */
+            pump_and_paint(ctx, dw, 300);
+            wayland_inject("up 1");
+            /* Let the drop transfer + finish flow. */
+            for (int i = 0; i < 30; i++) {
+                pump_and_paint(ctx, dw, 100);
+                ssize_t n;
+                while ((n = read(src_fd, line, sizeof(line) - 1)) > 0) {
+                    line[n] = '\0';
+                    strncat(src_out, line,
+                            sizeof(src_out) - strlen(src_out) - 1);
+                }
+                if (strstr(src_out, "WL-SRC: finished") != NULL ||
+                    strstr(src_out, "WL-SRC: cancelled") != NULL) {
+                    break;
+                }
+            }
+            fputs(src_out, stdout);
+            fflush(stdout);
+
+            assert(wl_dnd_rx.enters >= 1);
+            assert(wl_dnd_rx.drops == 1);
+            assert(wl_dnd_rx.uri_count == 2);
+            assert(strcmp(wl_dnd_rx.uris[0], "/etc/hostname") == 0);
+            assert(strstr(src_out, "WL-SRC: send text/uri-list") != NULL);
+            /* HONEST LIMITATION (wlroots 0.18): the drop is delivered,
+             * the payload served, and FDK's protocol tail is clean
+             * (receive -> finish -> destroy, protocol-trace verified
+             * by this rig) — but this wlroots sends the SOURCE the
+             * ::cancelled end signal instead of ::dnd_finished after
+             * the post-drop finish. Both count as "the drag ended";
+             * the source-side result model cannot be pinned harder
+             * against this compositor (the X11 suite pins XDND's
+             * full handshake against raw-Xlib clients instead). */
+            assert(strstr(src_out, "WL-SRC: finished") != NULL ||
+                   strstr(src_out, "WL-SRC: cancelled") != NULL);
+            printf("[ok] wayland dnd: external raw-libwayland source "
+                   "dropped 2 files, decoded to POSIX paths, offer "
+                   "receive+finish+destroy protocol-clean\n");
+
+            (void)pclose(src);
+            fdk_window_destroy(dw);
+            wayland_injector_stop();
+            }
+        } else {
+            printf("[skip] wayland dnd section (fdk-wl-inject or "
+                   "wl_dnd_source unavailable)\n");
+        }
     }
 
     if (win != NULL) {

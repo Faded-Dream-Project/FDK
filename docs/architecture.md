@@ -339,3 +339,54 @@ the embed-fdk_widget-as-first-member subclassing pattern is internal
 to `src/` (via `widget_internal.h`); applications extend widgets via
 callbacks, user data, and the base style setters until the ABI
 freeze (see `docs/abi-policy.md`).
+
+## Drag and drop (1.2.0)
+
+The public contract lives in include/fdk/fdk_dnd.h; the seam
+additions are `window_set_drop_formats` and `drag_begin` (see
+platform_internal.h's comments for the negotiation each backend
+owns). Two architectural decisions worth their weight:
+
+  - ONE uri-list codec (src/window/dnd_uri.c), declared at the
+    platform seam, used by BOTH backends — XDND and wl_data_device
+    speak the same RFC-2483 wire format, and a per-backend decoder
+    is how they drift. Decode policy: file:// (any empty or
+    localhost authority) -> percent-decoded POSIX path; other
+    schemes verbatim. Encode policy: scheme-bearing entries pass
+    through; paths are realpath-normalized then escaped.
+  - The source drag lives INSIDE the ordinary dispatch — X11 takes
+    a pointer grab with owner_events and runs target tracking on
+    real MotionNotify events routed through
+    fdk_x11_dnd_source_handle_event FIRST in dispatch_pending; no
+    nested loop, no blocking (docs/threading.md's rule). Wayland
+    hands the whole drag to the compositor (start_drag, NULL icon)
+    and merely serves ::send from the stored payload.
+
+Receiving is window-level in v1: the app hit-tests its own
+widgets from the callback (09_capabilities' drop panel is the
+pattern). Widget-level drop targets are the honest future work,
+not a fake we ship.
+
+wlroots note (0.18, sway 1.10): a drag offer must receive BOTH
+set_actions (action negotiation) AND the legacy accept(mime)
+(source->accepted) — without the accept, a release over an
+accepting window CANCELS the drag instead of dropping. And after
+the post-drop receive->finish->destroy, this wlroots signals the
+source with ::cancelled rather than ::dnd_finished; the payload
+path is unaffected and the suite pins the protocol tail.
+
+## File dialogs (1.2.0)
+
+fdk_dialog_open_file builds a toolkit-owned window from the stock
+catalog (the message-dialog lifecycle in dialog.c, generalized):
+the body's arrange hook lays out toolbar/path/list/status/buttons,
+the List carries SINGLE or MULTIPLE selection per kind (FOLDER
+kinds list directories only), row activation (double-click/Enter)
+descends directories and accepts files, and the accept path
+realpath()s + stat()s every selected entry against the kind's
+contract — the listing is a snapshot, the filesystem is not. The
+result model (fdk_file_dialog_result) is explicit:
+ACCEPTED/count/paths, CANCELLED, ERROR — an empty-string return
+app can't misread. The scan (fdk__file_dialog_scan) is the
+headless seam in widgets_internal.h: dirs-first alphabetical
+ordering, hidden filtering, entry cap, full ownership.

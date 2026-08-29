@@ -11,6 +11,7 @@
 #define FDK_WINDOW_INTERNAL_H
 
 #include "fdk/fdk_core.h"
+#include "fdk/fdk_dnd.h"
 #include "fdk/fdk_event.h"
 #include "fdk/fdk_window.h"
 
@@ -113,6 +114,15 @@ struct fdk_window {
 
     fdk_event_callback_fn event_callback;
     void *event_callback_user_data;
+
+    /* ---- Drag and drop (1.2.0) ----
+     *
+     * The formats this window accepts as a DROP TARGET (0 = none;
+     * fdk_window_set_drop_formats). Kept here so the public query is
+     * authoritative even on backends without receive support; the
+     * backend's copy (kept on its platform window via the ops
+     * window_set_drop_formats) is what drives protocol negotiation. */
+    int drop_formats;
 
     /* Lazily created by fdk_window_get_surface() (src/render/surface.c),
      * destroyed by fdk_window_destroy(). NULL until the application
@@ -289,5 +299,21 @@ void fdk__window_regrab(fdk_window *window);
  * (documented honestly). Returns FDK_ERR_UNSUPPORTED when the backend
  * cannot (NULL op maps to the same). */
 fdk_result fdk__window_set_modal(fdk_window *window, bool modal);
+
+/* ---- Drag and drop (1.2.0) ----
+ *
+ * The backend-side completion closure: fdk_drag_begin (src/window/
+ * dnd.c) allocates one and hands it to the backend's drag_begin op as
+ * the (on_done, user) pair; the backend fires it exactly once with
+ * the FDK_DRAG_* status, and it fronts the application callback. */
+typedef struct fdk_drag_closure {
+    void (*on_done)(fdk_drag_status status, void *user);
+    void *user;
+} fdk_drag_closure;
+
+/* The backend-facing adapter (signature matches the ops table's
+ * plain int callback): unpacks the closure, fires the app callback,
+ * frees the closure. */
+void fdk__drag_report_done(int status, void *user);
 
 #endif /* FDK_WINDOW_INTERNAL_H */

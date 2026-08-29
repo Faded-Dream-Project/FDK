@@ -922,3 +922,70 @@ wayland-client was not found" while manual builds worked minutes
 earlier. Re-run the sed prefix fix after EVERY deb-extracting
 script, then verify with `pkg-config --cflags wayland-client`
 pointing at the prefix before blaming the rig.
+
+## 1.2.0 — capability validation rigs
+
+The headless suite grew two files: test_dnd_logic.c (the uri codec
+both backends share — CR/LF tolerance, comments, percent-decoding,
+malformed-escape containment, non-file schemes verbatim, empty and
+hostile payloads, round trips, and the public API's argument
+safety) and test_file_dialog_logic.c (the scan seam — hidden and
+dirs-only filtering, dirs-first ordering, no ./.. rows, unreadable
+dirs fail closed, entries ownership, result_free tolerance).
+
+The GUI/interop layer is where 1.2.0's real coverage lives, all
+against REAL external applications (no FDK-to-FDK):
+
+  - scripts/xdnd_source.c — raw-Xlib XDND SOURCE (an external app
+    dragging INTO FDK). Full handshake; exit 0 only on Finished
+    success=1. The X11 suite spawns it against a registered window
+    and asserts the decoded drops (files -> POSIX paths, text).
+  - scripts/xdnd_sink.c — raw-Xlib XDND TARGET (an external window
+    FDK drags INTO). The suite drives a REAL pointer via XTEST
+    (scripts/xtest_driver.c) with HUMAN-PACED steps and pumps
+    between (one driver call per step), asserts FDK's drag
+    reported SUCCEEDED, and that the sink decoded BOTH payloads.
+  - scripts/wl_dnd_source.c — raw-libwayland drag source for the
+    sway rig (generated xdg-shell protocol object, zero FDK
+    linkage); started on a real injected press+motion, dragged
+    onto the FDK window, release -> drop.
+
+Lessons (each cost an hour; all now encoded in the rigs):
+
+  1. NON-BLOCKING CHILD DRAINS ONLY. A blocking fgets on a child
+     that goes silent mid-handshake (xdnd_source waiting for the
+     Status FDK hasn't sent because nothing pumps) starves the
+     pump and deadlocks the protocol. Every drain in the suites
+     is fcntl-O_NONBLOCK + poll-pump loops now.
+  2. The XTEST driver's startup self-check MOVED THE POINTER
+     (11,22), thrashing drag targets between invocations; it is
+     opt-in via FDK_XTEST_SELFCHECK=1.
+  3. sway grants the seat's POINTER capability only when the
+     virtual pointer produces its FIRST event — after injector
+     start, inject a priming motion before waiting on anything
+     pointer-dependent.
+  4. A fresh client connecting AFTER the virtual pointer exists
+     still sees capabilities(0), and wl_seat.get_pointer before
+     any capability ever existed is a protocol error — spawn
+     order in the rig: client first (it dispatches, waiting),
+     injector second (its device creation is the caps update).
+  5. wlroots delivers ::drop only when the drag offer received
+     the legacy accept(mime) as well as set_actions — set_actions
+     alone leaves source->accepted unset and a release CANCELS.
+  6. XDND's Finished reply must set the success bit (protocol
+     v2+); without it the dragging client correctly reads failure.
+  7. The sway rig sleeps 1.5s after the socket appears: sway's
+     seat/output initialize after the socket file, and the first
+     injected click races the first window's placement otherwise
+     (the flake that masqueraded as a config regression).
+  8. stdout is lost on abort (buffers unflushed) — interop
+     assertions read from ACCUMULATED child output, never from
+     print-through drains.
+
+Honest gaps, stated: no external-client rig for FDK->external
+drags on Wayland this milestone (the shared payload codec is
+pinned by both headless tests and the X11 interop; the Wayland
+source op is protocol-exercised via wl_dnd_source's peer role);
+wlroots 0.18 ends the drag source with ::cancelled after a clean
+receive->finish->destroy tail (payload unaffected; suite asserts
+either end signal, rig verifies the tail in WAYLAND_DEBUG).
