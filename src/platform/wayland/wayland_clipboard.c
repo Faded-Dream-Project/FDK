@@ -132,14 +132,19 @@ static void device_selection(void *data, struct wl_data_device *device,
     conn->selection_offer = offer;
     conn->selection_offer_has_text = has_text;
 
-    /* An incoming foreign selection implies ours (if any) was
-     * replaced — mirror the X11 SelectionClear cleanup. */
-    if (conn->clip_source != NULL) {
-        wl_data_source_destroy(conn->clip_source);
-        conn->clip_source = NULL;
-        fdk_free(conn->clip_owned_text);
-        conn->clip_owned_text = NULL;
-    }
+    /* 1.2.4: this event does NOT mean our own source was replaced.
+     * wlroots 0.18 echoes the freshly-set selection back to the
+     * keyboard-focused client — the setter itself — so destroying
+     * our source here self-destructed EVERY set under sway/wlroots
+     * (the cross-process interop rig caught it: readers always saw
+     * selection(nil) because the source died the instant it was
+     * registered; sway's debug log showed no rejection at all — the
+     * request was honored and then un-done client-side). Replacement
+     * has its own protocol signal, wl_data_source::cancelled, which
+     * source_cancelled below already handles (and now also drops the
+     * stale offer). Ownership remains clip_source != NULL, and
+     * get_text's own-selection fast path serves locally without ever
+     * touching the echoed offer. */
 }
 
 /* The DnD half of the device protocol — routed to wayland_dnd.c
@@ -215,13 +220,23 @@ static void source_send(void *data, struct wl_data_source *source,
 static void source_cancelled(void *data, struct wl_data_source *source) {
     fdk_platform_connection *conn = data;
     /* The compositor replaced our selection (or shut down). The
-     * source is inert from here — destroy it and drop the text. */
+     * source is inert from here — destroy it and drop the text.
+     * 1.2.4: also drop the selection offer — if it wrapped OUR source
+     * (wlroots echoes the freshly-set selection back to the focused
+     * setter), it just died with the source; a later get_text must
+     * not touch it. The next selection event stores the new owner's
+     * offer. */
     wl_data_source_destroy(source);
     if (conn->clip_source == source) {
         conn->clip_source = NULL;
     }
     fdk_free(conn->clip_owned_text);
     conn->clip_owned_text = NULL;
+    if (conn->selection_offer != NULL) {
+        wl_data_offer_destroy(conn->selection_offer);
+        conn->selection_offer = NULL;
+        conn->selection_offer_has_text = 0;
+    }
 }
 
 /* DnD-only source events: no-ops for the same reason as above. */

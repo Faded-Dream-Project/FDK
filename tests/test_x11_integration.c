@@ -3631,9 +3631,82 @@ static void clip_foreign_owner_main(int sock, const char *text) {
     }
 }
 
-/* Foreign clipboard requestor: converts TARGETS then UTF8_STRING from
- * the current owner (FDK, in the test) and verifies the text.
- * Exits 0 + "P" on success, distinct codes otherwise. */
+/* The xterm-class owner: serves XA_STRING ONLY (Latin-1 bytes, no
+ * UTF8_STRING). `text` arrives as raw bytes with the exact length
+ * (Latin-1 payloads can contain 0x00-looking... they cannot contain
+ * NUL by clipboard contract, but strlen on high-bit bytes is fine).
+ * This is the client FDK's XA_STRING fallback path exists for. */
+static void clip_latin1_owner_main(int sock, const char *text) {
+    alarm(0);
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(10);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom clip = XInternAtom(dpy, "CLIPBOARD", False);
+    Atom targets = XInternAtom(dpy, "TARGETS", False);
+    XSetSelectionOwner(dpy, clip, w, CurrentTime);
+    if (XGetSelectionOwner(dpy, clip) != w) {
+        _exit(11);
+    }
+    XFlush(dpy);
+    (void)!write(sock, "R", 1);
+    size_t len = strlen(text);
+
+    for (;;) {
+        struct pollfd pfds[2];
+        pfds[0].fd = ConnectionNumber(dpy);
+        pfds[0].events = POLLIN;
+        pfds[0].revents = 0;
+        pfds[1].fd = sock;
+        pfds[1].events = POLLIN;
+        pfds[1].revents = 0;
+        int r = poll(pfds, 2, 3000);
+        if (r < 0) {
+            _exit(12);
+        }
+        if (pfds[1].revents != 0) {
+            char c;
+            if (recv(sock, &c, 1, 0) <= 0) {
+                _exit(0);
+            }
+            _exit(0);
+        }
+        while (XPending(dpy) > 0) {
+            XEvent ev;
+            XNextEvent(dpy, &ev);
+            if (ev.type != SelectionRequest) {
+                continue;
+            }
+            XSelectionRequestEvent *req = &ev.xselectionrequest;
+            Atom prop = req->property != None ? req->property : req->target;
+            if (req->target == targets) {
+                Atom list[1] = { XA_STRING };
+                XChangeProperty(dpy, req->requestor, prop, XA_ATOM, 32,
+                                PropModeReplace,
+                                (const unsigned char *)list, 1);
+            } else if (req->target == XA_STRING) {
+                XChangeProperty(dpy, req->requestor, prop, XA_STRING, 8,
+                                PropModeReplace,
+                                (const unsigned char *)text, (int)len);
+            } else {
+                prop = None; /* UTF8_STRING and everything else: refused */
+            }
+            XSelectionEvent reply;
+            memset(&reply, 0, sizeof(reply));
+            reply.type = SelectionNotify;
+            reply.display = dpy;
+            reply.requestor = req->requestor;
+            reply.selection = req->selection;
+            reply.target = req->target;
+            reply.property = prop;
+            reply.time = req->time;
+            XSendEvent(dpy, req->requestor, False, 0, (XEvent *)&reply);
+            XFlush(dpy);
+        }
+    }
+}
 static void clip_foreign_requestor_main(int sock, const char *want) {
     alarm(0);
     Display *dpy = clip_child_open_display();
@@ -3752,6 +3825,65 @@ static void clip_foreign_requestor_main(int sock, const char *want) {
         if (!ok) {
             fprintf(stderr, "[clip child] pass2 mismatch\n");
             _exit(28);
+        }
+        (void)!write(sock, "P", 1);
+        _exit(0);
+    }
+}
+
+/* Latin-1 requestor (the ancient-client read path): converts
+ * XA_STRING from the current owner (FDK) and verifies the exact
+ * Latin-1 bytes — pinning latin1_from_utf8's mapping (2-byte
+ * sequences within Latin-1 pass through, everything else '?').
+ * Exits 0 + "P" on success, distinct codes otherwise. */
+static void clip_latin1_requestor_main(int sock, const char *want) {
+    alarm(0);
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(30);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom clip = XInternAtom(dpy, "CLIPBOARD", False);
+    Atom prop = XInternAtom(dpy, "_FDK_TEST_PROP", False);
+    XConvertSelection(dpy, clip, XA_STRING, prop, w, CurrentTime);
+    XFlush(dpy);
+    for (;;) {
+        XEvent ev;
+        if (XPending(dpy) == 0) {
+            struct pollfd pfd = { ConnectionNumber(dpy), POLLIN, 0 };
+            if (poll(&pfd, 1, 3000) <= 0) {
+                _exit(31); /* no answer */
+            }
+            continue;
+        }
+        XNextEvent(dpy, &ev);
+        if (ev.type != SelectionNotify ||
+            ev.xselection.selection != clip) {
+            continue;
+        }
+        if (ev.xselection.property == None) {
+            _exit(32); /* FDK refused XA_STRING */
+        }
+        Atom type = None;
+        int fmt = 0;
+        unsigned long n = 0, left = 0;
+        unsigned char *data = NULL;
+        if (XGetWindowProperty(dpy, w, prop, 0, 1024, True,
+                               AnyPropertyType, &type, &fmt, &n, &left,
+                               &data) != Success) {
+            _exit(33);
+        }
+        int ok = (type == XA_STRING && fmt == 8 && data != NULL &&
+                  n == strlen(want) && memcmp(data, want, n) == 0);
+        if (data != NULL) {
+            XFree(data);
+        }
+        if (!ok) {
+            fprintf(stderr, "[clip latin1 child] mismatch: type=%lu "
+                    "fmt=%d n=%lu want_len=%zu\n",
+                    (unsigned long)type, fmt, n, strlen(want));
+            _exit(34);
         }
         (void)!write(sock, "P", 1);
         _exit(0);
@@ -3896,6 +4028,91 @@ static void test_clipboard(void) {
                WEXITSTATUS(status) == 0);
         printf("[ok] clipboard: SelectionClear processed — ownership "
                "loss drops the served copy\n");
+    }
+
+    /* --- 5. The xterm-class owner: XA_STRING ONLY (Latin-1). FDK's
+     * UTF8_STRING convert is refused (property None) and the XA_STRING
+     * fallback must deliver the WIDENED text: 0xE9 -> 0xC3 0xA9. --- */
+    {
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_latin1_owner_main,
+                               "caf\xe9 du qu\xe9" "bec", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+        alarm(0);
+        char *latin = fdk_clipboard_get_text(ctx);
+        assert(latin != NULL &&
+               strcmp(latin, "caf\xc3\xa9 du qu\xc3\xa9" "bec") == 0);
+        fdk_free(latin);
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] clipboard: Latin-1-only owner served through the "
+               "XA_STRING fallback (widened to UTF-8)\n");
+    }
+
+    /* --- 6. FDK serves a LATIN-1 requestor: UTF-8 set, XA_STRING
+     * converted — é -> 0xE9, ö -> 0xF6, and the em-dash (not in
+     * Latin-1) honestly becomes '?'. --- */
+    {
+        assert(fdk_ok(fdk_clipboard_set_text(
+            ctx, "h\xc3\xa9llo w\xc3\xb6rld \xe2\x80\x94 ok")));
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_latin1_requestor_main,
+                               "h\xe9llo w\xf6rld ? ok", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        for (int i = 0; i < 40; i++) {
+            (void)fdk_pump_events(ctx, 50);
+            ssize_t n = recv(sock, &c, 1, MSG_DONTWAIT);
+            if (n == 1) {
+                break;
+            }
+        }
+        alarm(0);
+        if (c != 'P') {
+            int st = 0;
+            (void)waitpid(pid, &st, 0);
+            fprintf(stderr, "clipboard latin1 requestor child failed: "
+                            "exit=%d sig=%d msg=%d\n",
+                    WIFEXITED(st) ? WEXITSTATUS(st) : -1,
+                    WIFSIGNALED(st) ? WTERMSIG(st) : 0, (int)c);
+            assert(0);
+        }
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] clipboard: FDK serves a Latin-1 requestor "
+               "(XA_STRING bytes exact; unencodable -> '?')\n");
+    }
+
+    /* --- 7. Non-ASCII UTF-8 through the WHOLE interop path: a
+     * foreign owner serves multi-byte UTF-8; FDK must read the exact
+     * bytes back (the ASCII-only tests above never proved it). --- */
+    {
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_foreign_owner_main,
+                               "\xc3\x9c" "bercaf\xc3\xa9 \xe2\x9c\x93", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+        alarm(0);
+        char *utf8 = fdk_clipboard_get_text(ctx);
+        assert(utf8 != NULL &&
+               strcmp(utf8, "\xc3\x9c" "bercaf\xc3\xa9 \xe2\x9c\x93") == 0);
+        fdk_free(utf8);
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] clipboard: multi-byte UTF-8 from a foreign owner "
+               "round-trips exactly\n");
     }
 
     fdk_shutdown(ctx);

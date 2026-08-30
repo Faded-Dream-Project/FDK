@@ -2732,3 +2732,71 @@ hidden. The Xvfb examples rig passes 8/8 (the list_paint change
 regresses nothing). Wayland build compiles with the restored
 apt-prefix toolchain; live Wayland verification runs in this
 milestone's battery alongside the clipboard interop work.
+
+### 1.2.4 — the clipboard actually interops (two Wayland bugs, the X11 Latin-1 legs, and the injector reborn)
+
+The standing release-quality clipboard audit: real cross-process
+interop on BOTH backends, driven exactly like the desktop does it.
+
+THE WAYLAND FINDINGS (both real bugs, both found by building the
+interop rig rather than reading the code again):
+
+1. The clipboard was dead until the first pump. Connect did ONE
+   roundtrip (globals + binds) and returned with the seat's
+   name/capabilities events still queued — so the wl_data_device
+   (created on seat arrival) did not exist yet, and a set/get
+   immediately after fdk_init answered FDK_ERR_UNSUPPORTED. The
+   set-selection-before-any-input limitation was documented; THIS
+   was a different, undocumented one: even WITH input, the first
+   clipboard call before a pump lost. Fix: the standard
+   two-roundtrip startup (roundtrip 1 collects globals, roundtrip 2
+   collects the binds' replies — capabilities, and with them the
+   data device, keyboard/pointer proxies).
+
+2. Every clipboard set under wlroots self-destructed instantly.
+   wlroots 0.18 echoes the freshly-set selection back to the
+   KEYBOARD-FOCUSED client — the setter itself — and FDK's
+   device_selection treated ANY incoming selection as "ours was
+   replaced", destroying the source it had just registered. The
+   compositor then saw the source die and cleared the global
+   selection: readers always got selection(nil). sway's debug log
+   showed no rejection — the request was honored and then un-done
+   client-side. Fix: replacement has its own protocol signal
+   (wl_data_source::cancelled); device_selection no longer touches
+   our source, and source_cancelled now also drops the (possibly
+   echo-wrapped) selection offer.
+
+The rig that caught it: two independent FDK processes through sway
+1.10 headless, with the REAL input prerequisites — a rebuilt
+fdk-wl-inject (the zwlr_virtual_pointer_v1 + zwp_virtual_keyboard_v1
+client, lost to session resets and recreated from the suite's
+documented contract; the keyboard half matters because sway CLEARS
+keyboard focus when the seat has no keyboard, and wlroots pushes
+selections only to the keyboard-focused client — a windowless
+reader never sees one). The setter sets from a real button event
+(the Ctrl+C shape: set_selection with the press's serial); the
+reader maps a window and is tapped into focus (the wl-paste trick).
+Three directions verified: set/read, replacement set/read, and
+multi-byte UTF-8 ("h\xc3\xa9llo w\xc3\xb6rld" crosses the pipe
+exactly).
+
+THE X11 ADDITIONS: the suite's foreign-owner/foreign-requestor child
+processes grew the Latin-1 legs the ICCCM paths existed for — an
+xterm-class owner that serves XA_STRING ONLY (FDK's fallback convert
+widens 0xE9 to UTF-8), and a Latin-1 requestor reading FDK's
+XA_STRING rendition (\xC3\xA9 -> 0xE9, and the em-dash honestly
+'?'), plus a multi-byte UTF-8 round trip through the whole interop
+path. 84 [ok] total.
+
+BONUS (the injector's return): the Wayland suite's interactive
+sections — menu clicks through the real compositor, the cursor
+edge tests, the resize handover — had been silently [skip]ping for
+want of the injector binary. All run and pass again (27 [ok] under
+the interop rig's compositor; the DnD section still needs its own
+drag-source helper, an honest skip).
+
+Honest note: FDK's set_text still carries serial 0 before any input
+event (compositors may ignore it — documented in fdk_clipboard.h);
+the rig mints real serials exactly as a real desktop would. The
+one-clipboard-per-context, text-only, no-PRIMARY scope notes all
+stand.
