@@ -4958,8 +4958,9 @@ static void test_file_dialog_gui(void) {
     printf("[ok] file dialog: Escape answers CANCELLED (count 0)\n");
 
     /* --- 3. OPEN_FOLDER via the accept BUTTON (the click path):
-     * body child order is fixed by creation — [up, hidden, path,
-     * list, status, accept, cancel]; accept is index 5. */
+     * body child order is fixed by creation — 1.2.3: [up, home,
+     * hidden, combo, path, places, list, status, accept, cancel];
+     * accept is index 8. */
     fdk_file_dialog_options o3 = {0};
     o3.kind = FDK_FILE_DIALOG_OPEN_FOLDER;
     o3.start_dir = dir;
@@ -4971,7 +4972,7 @@ static void test_file_dialog_gui(void) {
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
         fdk_widget *body = fdk_widget_child_at(droot, 0);
         assert(body != NULL);
-        fdk_widget *accept = fdk_widget_child_at(body, 5);
+        fdk_widget *accept = fdk_widget_child_at(body, 8);
         assert(accept != NULL);
         fdk_rect ab = fdk_widget_get_bounds(accept);
         /* The list holds one row (sub/): select it first. */
@@ -4996,6 +4997,159 @@ static void test_file_dialog_gui(void) {
     }
     printf("[ok] file dialog: OPEN_FOLDER button accept -> %s "
            "(stat-verified directory)\n", fd_result.paths[0]);
+
+    /* --- 4. SAVE, fresh name, keyboard only: the Name row holds the
+     * initial focus; Enter in it is the Save activation. No file
+     * exists -> no confirmation -> straight ACCEPT, and the promised
+     * path does NOT exist (save-as contract). */
+    fdk_file_dialog_options o4 = {0};
+    o4.kind = FDK_FILE_DIALOG_SAVE_FILE;
+    o4.start_dir = dir;
+    o4.start_name = "fresh.txt";
+    assert(fdk_ok(fdk_dialog_save_file(ctx, &o4, file_dialog_done, NULL,
+                                       &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    dxid = fdk_window_xid(dlg);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 36); /* Enter = Save */
+    (void)fdk_pump_events(ctx, 250);
+    assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
+    assert(fd_result.count == 1);
+    {
+        char want[600];
+        snprintf(want, sizeof(want), "%s/fresh.txt", dir);
+        assert(strcmp(fd_result.paths[0], want) == 0);
+        struct stat st;
+        assert(stat(want, &st) != 0); /* not created — the app writes */
+    }
+    printf("[ok] file dialog: SAVE fresh name Enter-accepts the "
+           "non-existing target\n");
+
+    /* --- 5. SAVE onto the EXISTING note.txt: Enter raises the
+     * nested overwrite ask (a second root window); Escape there
+     * declines -> the file dialog is STILL UP (no callback fired),
+     * and a following Escape cancels it. */
+    fdk_file_dialog_options o5 = {0};
+    o5.kind = FDK_FILE_DIALOG_SAVE_FILE;
+    o5.start_dir = dir;
+    o5.start_name = "note.txt";
+    assert(fdk_ok(fdk_dialog_save_file(ctx, &o5, file_dialog_done, NULL,
+                                       &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    dxid = fdk_window_xid(dlg);
+    /* Snapshot root children, press Enter, snapshot again: the new
+     * child is the overwrite confirmation. */
+    Window root = DefaultRootWindow(send_dpy);
+    Window dummy_root, dummy_parent;
+    Window *pre = NULL, *post = NULL;
+    unsigned int npre = 0, npost = 0;
+    XQueryTree(send_dpy, root, &dummy_root, &dummy_parent, &pre,
+               &npre);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 36); /* Enter = Save */
+    (void)fdk_pump_events(ctx, 300);
+    XQueryTree(send_dpy, root, &dummy_root, &dummy_parent, &post,
+               &npost);
+    Window confirm_xid = None;
+    for (unsigned int i = 0; i < npost; i++) {
+        bool known = false;
+        for (unsigned int j = 0; j < npre; j++) {
+            if (post[i] == pre[j]) {
+                known = true;
+                break;
+            }
+        }
+        if (!known && post[i] != dxid) {
+            confirm_xid = post[i];
+        }
+    }
+    if (pre != NULL) {
+        XFree(pre);
+    }
+    if (post != NULL) {
+        XFree(post);
+    }
+    assert(confirm_xid != None);
+    x11_send_key_event(send_dpy, confirm_xid, KeyPress, 9); /* Esc = No */
+    (void)fdk_pump_events(ctx, 300);
+    /* Still up: the sentinel flips ONLY when a callback fires. */
+    fd_result.outcome = FDK_FILE_DIALOG_ERROR; /* sentinel */
+    /* The Name row started with start_name SELECTED (the
+     * rename-everywhere convention): the first Escape collapses
+     * that selection (Entry contract), the second bubbles to the
+     * window layer and cancels. */
+    x11_send_key_event(send_dpy, dxid, KeyPress, 9);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Esc: cancel */
+    (void)fdk_pump_events(ctx, 250);
+    assert(fd_result.outcome == FDK_FILE_DIALOG_CANCELLED);
+    printf("[ok] file dialog: overwrite ask declined -> dialog stays "
+           "up, then cancels\n");
+
+    /* --- 6. SAVE onto note.txt again; Enter answers YES in the
+     * nested ask -> ACCEPTED with the existing file's path. */
+    fdk_file_dialog_options o6 = {0};
+    o6.kind = FDK_FILE_DIALOG_SAVE_FILE;
+    o6.start_dir = dir;
+    o6.start_name = "note.txt";
+    assert(fdk_ok(fdk_dialog_save_file(ctx, &o6, file_dialog_done, NULL,
+                                       &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    dxid = fdk_window_xid(dlg);
+    pre = NULL;
+    npre = 0;
+    XQueryTree(send_dpy, root, &dummy_root, &dummy_parent, &pre,
+               &npre);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 36); /* Enter = Save */
+    (void)fdk_pump_events(ctx, 300);
+    post = NULL;
+    npost = 0;
+    XQueryTree(send_dpy, root, &dummy_root, &dummy_parent, &post,
+               &npost);
+    confirm_xid = None;
+    for (unsigned int i = 0; i < npost; i++) {
+        bool known = false;
+        for (unsigned int j = 0; j < npre; j++) {
+            if (post[i] == pre[j]) {
+                known = true;
+                break;
+            }
+        }
+        if (!known && post[i] != dxid) {
+            confirm_xid = post[i];
+        }
+    }
+    if (pre != NULL) {
+        XFree(pre);
+    }
+    if (post != NULL) {
+        XFree(post);
+    }
+    assert(confirm_xid != None);
+    x11_send_key_event(send_dpy, confirm_xid, KeyPress, 36); /* Enter=Yes */
+    (void)fdk_pump_events(ctx, 300);
+    assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
+    assert(fd_result.count == 1);
+    assert(strcmp(fd_result.paths[0], want_file) == 0);
+    printf("[ok] file dialog: overwrite ask confirmed -> ACCEPTED "
+           "with the existing path\n");
+
+    /* --- 7. SAVE with an EMPTY name: Enter validates (status line
+     * complaint), the dialog STAYS UP — an invalid save never
+     * answers. Escape then cancels. */
+    fdk_file_dialog_options o7 = {0};
+    o7.kind = FDK_FILE_DIALOG_SAVE_FILE;
+    o7.start_dir = dir;
+    assert(fdk_ok(fdk_dialog_save_file(ctx, &o7, file_dialog_done, NULL,
+                                       &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    dxid = fdk_window_xid(dlg);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 36); /* Enter */
+    (void)fdk_pump_events(ctx, 250);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Esc */
+    (void)fdk_pump_events(ctx, 250);
+    assert(fd_result.outcome == FDK_FILE_DIALOG_CANCELLED);
+    assert(fd_result.count == 0);
+    printf("[ok] file dialog: empty SAVE name never answers "
+           "(validation keeps the dialog up)\n");
 
     XCloseDisplay(send_dpy);
     fdk_shutdown(ctx); /* any dialog window left dies here safely */

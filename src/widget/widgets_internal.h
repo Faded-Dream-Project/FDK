@@ -201,7 +201,9 @@ static inline fdk_frame *frame_of(fdk_widget *w) {
  * The directory scan/sort is pure logic the headless suite pins
  * (tests/test_file_dialog_logic.c) without a display: hidden-file
  * filtering, dirs-only filtering, dirs-first ordering, the entry
- * cap, and the ownership contract of the entries array. */
+ * cap, and the ownership contract of the entries array. The 1.2.3
+ * additions (glob matching, filesystem discovery, path helpers)
+ * live under the same seam for the same reason. */
 typedef struct fdk_fd_entry {
     char *name;   /* owned, basename only */
     bool dir;
@@ -213,11 +215,58 @@ typedef struct fdk_fd_entries {
     size_t count;
 } fdk_fd_entries;
 
+/* Splits a ";"-separated filter string into an owned array of owned
+ * pattern strings (empty entries skipped). Returns the count; *out
+ * is NULL when the input is NULL/empty (count 0 — no filtering). */
+size_t fdk__file_dialog_parse_filters(const char *filters, char ***out);
+void fdk__file_dialog_free_filters(char **patterns, size_t count);
+
+/* Case-insensitive glob match ('*' = any run, '?' = one char, else
+ * literal — byte-wise, locale-independent). */
+bool fdk__file_dialog_glob_match(const char *pattern, const char *name);
+
 /* Scans `dir` (opendir/readdir + stat fallback for DT_UNKNOWN).
  * Returns 0 on success (empty listing included), -1 when the
- * directory cannot be opened. Fully owned by the caller. */
+ * directory cannot be opened. Fully owned by the caller. `patterns`
+ * (count > 0) filters FILES case-insensitively; directories are
+ * never filtered. */
 int fdk__file_dialog_scan(const char *dir, bool dirs_only,
-                          bool show_hidden, fdk_fd_entries *out);
+                          bool show_hidden,
+                          char **patterns, size_t pattern_count,
+                          fdk_fd_entries *out);
 void fdk__file_dialog_entries_free(fdk_fd_entries *entries);
+
+/* ---- Filesystem discovery seam (1.2.3, file_dialog.c) ----
+ *
+ * The places sidebar's data source: pure POSIX (getenv + stat +
+ * /proc/self/mounts + one-level scans of /media and /mnt) — no udev,
+ * no D-Bus, per the toolkit's no-bus policy. Every place returned
+ * is stat()-verified to be an existing directory at discovery time
+ * and is deduplicated by canonical path. Returns 0 with *out/count
+ * set (count >= 1 always: $HOME or / survives), -1 on OOM. */
+typedef struct fdk_fs_place {
+    char *label;  /* owned; short display name ("Home", "boot")   */
+    char *path;   /* owned; absolute, canonical-ish, existing dir */
+} fdk_fs_place;
+
+int fdk__fs_discover_places(fdk_fs_place **out, size_t *count);
+void fdk__fs_places_free(fdk_fs_place *places, size_t count);
+
+/* Bounded, allocated path join (a/b with exactly one '/'; a == "/"
+ * does not double the slash). NULL on OOM. Caller frees (fdk_free). */
+char *fdk__path_join(const char *dir, const char *name);
+
+/* Trims trailing slashes (but keeps the root "/"); returns an owned
+ * copy or NULL on OOM/empty input. */
+char *fdk__path_normalize_dir(const char *dir);
+
+/* SAVE name validation, shared with the headless tests: 0 = valid,
+ * 1 = empty, 2 = contains '/', 3 = "." or "..", 4 = longer than 255
+ * bytes (NAME_MAX-safe), 5 = whitespace-only. */
+int fdk__save_name_validate(const char *name);
+
+/* "~" and "~/" expansion against $HOME. Returns an owned copy of
+ * `path` when no expansion applies (NULL on OOM). */
+char *fdk__path_expand_tilde(const char *path);
 
 #endif /* FDK_WIDGETS_INTERNAL_H */

@@ -403,13 +403,13 @@ the post-drop receive->finish->destroy, this wlroots signals the
 source with ::cancelled rather than ::dnd_finished; the payload
 path is unaffected and the suite pins the protocol tail.
 
-## File dialogs (1.2.0)
+## File dialogs (1.2.0; 1.2.3 the release-quality browser)
 
 fdk_dialog_open_file builds a toolkit-owned window from the stock
 catalog (the message-dialog lifecycle in dialog.c, generalized):
-the body's arrange hook lays out toolbar/path/list/status/buttons,
-the List carries SINGLE or MULTIPLE selection per kind (FOLDER
-kinds list directories only), row activation (double-click/Enter)
+the body's arrange hook lays out toolbar/path/places/list/name/
+status/buttons, the List carries SINGLE or MULTIPLE selection per
+kind (FOLDER kinds list directories only), row activation (double-click/Enter)
 descends directories and accepts files, and the accept path
 realpath()s + stat()s every selected entry against the kind's
 contract — the listing is a snapshot, the filesystem is not. The
@@ -418,3 +418,35 @@ ACCEPTED/count/paths, CANCELLED, ERROR — an empty-string return
 app can't misread. The scan (fdk__file_dialog_scan) is the
 headless seam in widgets_internal.h: dirs-first alphabetical
 ordering, hidden filtering, entry cap, full ownership.
+
+1.2.3 grew it into the native-desktop shape. SAVE_FILE (the
+dedicated entry point fdk_dialog_save_file) adds the Name row:
+seeded from start_name, filled by clicking a listed file, with
+total validation (non-empty, no '/', not "."/"..", <= 255 bytes,
+parent still existing) and an explicit overwrite confirmation —
+a nested message dialog on the same context, whose Yes accepts
+and whose No returns to the dialog; on X11 the file dialog
+re-takes its modal grab after the ask closes (grants are
+re-established, never assumed). The accepted path canonicalizes
+the parent and keeps the leaf as typed. The Places sidebar is
+fed by fdk__fs_discover_places: pure POSIX discovery ($HOME,
+conventional XDG dirs, /, whitelisted real-filesystem mounts
+from /proc/self/mounts, one level of /media and /mnt), every
+place stat()-verified and deduplicated by canonical path — no
+udev, no D-Bus. Name filters (options.filters, ";"-separated
+globs) live in the toolbar combo: one row per pattern plus "All
+files", case-insensitive matching (the GTK convention),
+directories never filtered. The path bar is an Entry: Enter
+browses (absolute, ~-expanded, or relative to the current
+folder); a failed browse probes first and never abandons the
+working directory.
+
+The List itself carries a 1.2.3 fix with architecture weight:
+fdk_widget_set_bounds() is pure geometry and does not run
+arrange hooks, and the List only synced its internal scrollview
+in the append path — a list positioned by hand (every dialog,
+many applications) after its last append kept a stale/0x0
+scrollview and the paint walk (which skips empty children)
+never reached a single row. list_paint now lazily syncs the
+scrollview before the subtree is walked; one compare when
+already in sync.

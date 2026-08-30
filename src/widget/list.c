@@ -595,6 +595,38 @@ static void list_arrange(fdk_widget *w, fdk_rect assigned) {
     }
 }
 
+/* The lazy-sync half of the scrollview bookkeeping. fdk_widget_
+ * set_bounds() is pure geometry — it does NOT run arrange hooks —
+ * and both FDK's own dialogs and ordinary applications position
+ * lists by hand with it. The append path (list_relayout) syncs the
+ * internal scrollview to the list's then-current bounds, so a list
+ * sized AFTER its last append (or appended-to while still 0x0)
+ * kept a 0x0/stale scrollview: the paint walk skips empty children,
+ * so every row stayed invisible forever — found live by the 1.2.3
+ * dialog rig (places sidebar). Syncing here, in the paint hook
+ * that runs before the subtree is walked, heals any staleness with
+ * one compare; the set_bounds inside damages the region, which
+ * merely schedules one more (identical) frame — it converges. */
+static void list_paint(fdk_widget *w, fdk_surface *surface,
+                       fdk_rect bounds, fdk_rect clip) {
+    (void)surface;
+    (void)bounds;
+    (void)clip;
+    fdk_list *l = list_of(w);
+    if (l->scroll == NULL || w->bounds.width <= 0 ||
+        w->bounds.height <= 0) {
+        return;
+    }
+    if (l->scroll->bounds.x == 0 && l->scroll->bounds.y == 0 &&
+        l->scroll->bounds.width == w->bounds.width &&
+        l->scroll->bounds.height == w->bounds.height) {
+        return; /* in sync */
+    }
+    fdk_rect inner = { 0, 0, w->bounds.width, w->bounds.height };
+    fdk_widget_set_bounds(l->scroll, inner);
+    fdk_widget_child_layout_changed(l->scroll);
+}
+
 static void list_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
     const fdk_list *l = (const fdk_list *)(const void *)w;
     if (l->mode == FDK_LIST_SELECTION_MULTIPLE) {
@@ -613,7 +645,7 @@ const fdk_widget_class fdk_list_class_def = {
     .size = sizeof(fdk_list),
     .name = "list",
     .handle_event = list_handle_event,
-    .paint = NULL,
+    .paint = list_paint,
     .measure = list_measure,
     .arrange = list_arrange,
     .destroy = list_destroy, /* the row POINTER array; the rows

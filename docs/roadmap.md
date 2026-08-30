@@ -2655,3 +2655,80 @@ window layer + context pump, compiles in the X11-only build, and
 the Wayland configure path was code-reviewed against the
 ack-then-commit contract (the 1.1.5/1.1.6/1.1.7 fixes). The
 Wayland suites + rigs must run once the toolchain is back.
+
+### 1.2.3 — the file dialog earns "release quality" (SAVE, places, filters, path bar — and the List that never painted)
+
+The standing release-quality audit for the file manager family.
+The 1.2.0 dialog could open files and folders; a desktop toolkit's
+dialog does more, and every piece below is real, tested logic:
+
+- SAVE_FILE (fdk_dialog_save_file, or kind=SAVE): a Name row
+  seeded from start_name (selected, rename-convention), filled by
+  single-clicking a listed file, Enter/Save to accept. Validation
+  is honest and total: non-empty, no '/', not "."/"..", <= 255
+  bytes, whitespace-only refused, the parent directory still
+  existing — every failure is a status-line message, never a
+  silent wrong answer. An existing REGULAR target gets a nested
+  Yes/No overwrite ask (a toolkit-owned message dialog on the
+  same context; declining returns to the dialog — it does not
+  cancel); a directory target is refused; so are fifos/sockets.
+  The accepted path canonicalizes the parent (realpath) and keeps
+  the leaf exactly as typed — no extension guessing. On X11 the
+  ask takes the modal grab and the file dialog RE-TAKES it when
+  declined (the grab is re-established, not assumed).
+- Filesystem discovery, the Places sidebar: pure POSIX (getenv +
+  stat + /proc/self/mounts + one level of /media and /mnt) — no
+  udev, no D-Bus, per the no-bus policy. $HOME, conventional XDG
+  dirs when they exist, /, real-filesystem mounts (whitelisted
+  types; pseudo filesystems are noise), media/mnt entries;
+  stat()-verified at discovery, deduplicated by canonical path,
+  capped. fdk__fs_discover_places is the headless seam.
+- Name filters (options.filters, ";"-separated globs): one combo
+  row per pattern plus "All files", first pattern active; '*'
+  and '?' with case-insensitive matching (the GTK convention);
+  directories are never filtered (navigation must always work).
+  fdk__file_dialog_glob_match is the seam.
+- The path bar became an Entry: type a location, Enter browses —
+  absolute, "~"-expanded, or relative to the current folder;
+  failed browses never abandon the working directory (the target
+  is probed first; the reason lands in the status line).
+- Boundary hardening: every path is built with fdk__path_join
+  (allocated, untruncated) instead of fixed 4096 buffers; browse
+  normalizes trailing slashes; Up works on a copy; the accept
+  path re-stats everything (listings are snapshots).
+
+THE BIG ONE — found by the 1.2.3 dialog rig, fixed in the
+toolkit: the List widget never painted when it was sized AFTER
+its last append (or appended-to while still 0x0).
+fdk_widget_set_bounds() is pure geometry — it does not run
+arrange hooks — and the List only synced its internal scrollview
+inside the append path. A hand-positioned list kept a 0x0/stale
+scrollview; the paint walk skips empty children, so every row
+stayed invisible forever. FDK's own 1.2.0 dialog worked only by
+accident of ordering (its reload appended rows after set_content
+sized the list). Fix: a list_paint hook lazily syncs the
+scrollview before the subtree is walked (one compare when in
+sync; the heal damages the region, which schedules one more
+identical frame and converges).
+
+Verification: headless logic suite (glob matching incl.
+case-insensitivity and '?' semantics, filter parsing incl.
+whitespace trimming and empty fragments, filtered scans incl.
+"dirs never filtered", discovery invariants incl. stat-existence
++ dedup + HOME-first + cap, path helpers incl. ~ expansion and
+root-join, save-name validation incl. the 255-byte boundary) —
+all green, leak-clean. X11 integration: 8 dialog GUI tests
+(keyboard OPEN accept, Escape cancel, OPEN_FOLDER button accept
+stat-verified, SAVE fresh-name Enter-accept with the not-created
+contract, overwrite ask DECLINED leaves the dialog up then
+cancels, overwrite ask CONFIRMED accepts the existing path,
+empty-name Enter never answers) — 81 [ok] total, plus the
+pre-existing storm/grid checks unchanged. A pixel-scan rig
+(row-band ink counts through a second X connection) verifies the
+new layout paints: toolbar, path bar, places rows, filtered file
+rows, name row, buttons — the filtered listing shows exactly
+subdir/ + main.c under "*.c;*.h;Makefile", readme.txt correctly
+hidden. The Xvfb examples rig passes 8/8 (the list_paint change
+regresses nothing). Wayland build compiles with the restored
+apt-prefix toolchain; live Wayland verification runs in this
+milestone's battery alongside the clipboard interop work.

@@ -175,7 +175,17 @@ typedef enum fdk_file_dialog_kind {
     FDK_FILE_DIALOG_OPEN_FILES  = 1, /* one or more existing files    */
     FDK_FILE_DIALOG_OPEN_FOLDER = 2, /* one existing directory        */
     FDK_FILE_DIALOG_OPEN_FOLDERS= 3, /* one or more existing dirs     */
+    FDK_FILE_DIALOG_SAVE_FILE   = 4, /* one target path to WRITE      */
 } fdk_file_dialog_kind;
+
+/* SAVE_FILE (1.2.3) differs from the OPEN kinds on one axis,
+ * honestly: paths[0] is where the application SHOULD write — the
+ * file may not exist yet (the usual save-as case), so no existence
+ * is promised, only that the PARENT directory existed and was a
+ * directory at accept time. When the target existed as a regular
+ * file, the user answered an explicit overwrite confirmation first
+ * (a nested Yes/No message dialog — declining it returns to the
+ * dialog; it does not cancel). */
 
 /* How the interaction concluded. */
 typedef enum fdk_file_dialog_outcome {
@@ -193,6 +203,13 @@ typedef struct fdk_file_dialog_result {
 /* Releases a result's paths and the array itself. NULL is legal. */
 void fdk_file_dialog_result_free(fdk_file_dialog_result *result);
 
+/* Name filters (1.2.3): a ";"-separated list of glob patterns, e.g.
+ * "*.png;*.jpg;*.jpeg". Matching is case-insensitive (the GTK file
+ * chooser convention: *.png matches photo.PNG), '*' matches any run
+ * of characters, '?' one character, everything else is literal.
+ * Directories are never filtered (you can always navigate). The
+ * dialog offers the patterns in order plus an "All files" row; the
+ * FIRST pattern is initially active. NULL/empty = no filter. */
 typedef struct fdk_file_dialog_options {
     const char *title;     /* copied; NULL = kind-appropriate default */
     const char *start_dir; /* copied; NULL = current working dir      */
@@ -202,6 +219,10 @@ typedef struct fdk_file_dialog_options {
                               toggle (the dialog can flip it)         */
     fdk_window *parent;    /* borrowed; anchors stacking where the
                               backend supports it                     */
+    const char *start_name;/* SAVE: initial contents of the name row,
+                              copied; NULL = empty. Ignored by the
+                              OPEN kinds.                            */
+    const char *filters;   /* copied glob list, see above; NULL = all */
 } fdk_file_dialog_options;
 
 /* Called once, from inside event dispatch, when the dialog closes.
@@ -225,6 +246,35 @@ typedef void (*fdk_file_dialog_done_fn)(
  * status line.
  */
 fdk_result fdk_dialog_open_file(fdk_context *ctx,
+                                const fdk_file_dialog_options *options,
+                                fdk_file_dialog_done_fn on_done,
+                                void *user_data,
+                                fdk_window **out_window);
+
+/* ---- Save dialog (1.2.3) ----
+ *
+ * fdk_dialog_save_file is the dedicated save-as entry point: it is
+ * fdk_dialog_open_file with the kind forced to SAVE_FILE (any kind
+ * in `options` is ignored). The window it shows is the same browser
+ * — places sidebar, path bar, filters — plus a Name row:
+ *
+ *   - the row starts as options->start_name; activating a listed
+ *     file puts ITS name in the row (so "save over that one" is two
+ *     clicks); activating a directory descends, as everywhere else.
+ *   - Save validates the name honestly: non-empty, no '/', not
+ *     "." or "..", at most 255 bytes, and the current directory
+ *     must still exist — every failure is a status-line message,
+ *     the dialog stays up (never a silent wrong answer).
+ *   - an existing REGULAR target gets an overwrite confirmation
+ *     (nested Yes/No message dialog); a directory target is refused
+ *     ("a folder with that name exists"); anything else (fifo,
+ *     socket, device) is refused as not a regular file.
+ *   - the accepted path is <current directory>/<name> with the
+ *     directory canonicalized (realpath) but the name kept EXACTLY
+ *     as typed — no extension guessing, no symlink resolution on
+ *     the leaf: what the user typed is what the app gets.
+ */
+fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 const fdk_file_dialog_options *options,
                                 fdk_file_dialog_done_fn on_done,
                                 void *user_data,
