@@ -230,6 +230,28 @@ struct fdk_window {
      * window's geometry changes (see window_revalidate_pointer) and
      * reset when the edge zones disappear. */
     int cursor_edge;
+
+    /* ---- 1.2.2: batched geometry repaint ----
+     *
+     * Set by the dispatch tail when an event changed what should be
+     * under the pointer or on the screen (configure / state flip /
+     * first expose). The pointer revalidation + synchronous repaint
+     * it used to run INLINE (per event!) instead run once per EVENT
+     * BATCH, at flush time — see fdk__window_flush_geo_repaints.
+     *
+     * Why: an interactive resize queues one ConfigureNotify (plus
+     * Exposes) per drag step. Repainting inline made each queued
+     * event cost a FULL window repaint + a framebuffer reallocation
+     * + a round trip (pointer query / SHM completion wait) — the
+     * backlog drained at ~15 events/s while the WM kept queueing,
+     * wedging the main thread at 100% CPU on one core with input
+     * (title-bar buttons) stuck behind the backlog: the window
+     * stopped updating, the buttons stopped working, the CPU never
+     * idled. Batching paints the FINAL size of each batch once.
+     *
+     * The flag is window-scoped, not event-scoped: any geo-changing
+     * event in the batch marks it; the flush is idempotent. */
+    bool geo_repaint_pending;
 };
 
 /* Called by the context's platform dispatch callback (see
@@ -287,6 +309,16 @@ int fdk__window_cursor_edge(const fdk_window *window);
 void fdk__window_set_destroy_notify(fdk_window *window,
                                     void (*notify)(fdk_window *, void *),
                                     void *user);
+/* ---- 1.2.2: batched geometry repaint (see the flag above) ----
+ *
+ * Runs, once per EVENT BATCH (from the pump, after the backend's
+ * dispatch_pending drained the queue), the pointer revalidation +
+ * synchronous repaint that geometry-changing events used to perform
+ * inline per event. Paints each flagged window ONCE, at the batch's
+ * FINAL size. Called by fdk_pump_events()/fdk_run(); safe to call
+ * with nothing flagged (no-op). Destroy-safe: a paint hook or the
+ * pointer revalidation may destroy windows mid-flush. */
+void fdk__window_flush_geo_repaints(fdk_context *ctx);
 
 /* Re-asserts a popup's input grab (after a popup above it closed).
  * Backend-optional; no-op when unsupported. */

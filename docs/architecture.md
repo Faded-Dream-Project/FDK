@@ -156,17 +156,30 @@ framebuffer held — the PREVIOUS frame — so a label rewrite or a
 re-listed directory stamped new text over old on both backends
 (the live 1.2.0 report: “the old text doesn't get removed”, file
 names over file names, selection bands over selection bands).
-The window layer closes the remaining gap itself:
-`fdk_window_dispatch_event`'s tail repaints+ presents SYNCHRONOUSLY
-when a configure/state-flip/first-expose damaged the tree — the
-frame the compositor would otherwise composite between the resize
-and the application's next loop pass is exactly where the flash
-lived — and the same tail revalidates hover/cursor from the real
-pointer position (see the pointer-affordance pair below). This
-does not take over application paint pacing: only damage FDK's own
-geometry acceptance caused goes out synchronously; everything the
-application changes still waits for its own loop, exactly as
-before), `src/layout/` (Phase 5: the
+The window layer closes the remaining gap itself: a
+configure/state-flip/first-expose event sets the window's
+`geo_repaint_pending` flag, and the pump's batch-end flush
+(`fdk__window_flush_geo_repaints`, called from
+`fdk_pump_events`/`fdk_run` the moment the backend's
+dispatch_pending drains the queue) repaints+ presents
+SYNCHRONOUSLY WITHIN THE SAME PUMP CALL — the frame the
+compositor would otherwise composite between the resize and the
+application's next loop pass is exactly where the flash lived —
+and revalidates hover/cursor from the real pointer position (see
+the pointer-affordance pair below). Batched, not per-event: an
+interactive resize queues one ConfigureNotify per drag step, and
+repainting inline per QUEUED event (full repaint + framebuffer
+reallocation + round trips, each at a stale size) drained the
+backlog slower than the WM filled it — the 1.2.2 wedge: one core
+pegged forever, the window stuck at a stale size, input queued
+behind the backlog. One repaint per batch at the batch's final
+size closes both the flash (a lone configure still paints within
+its own pump call) and the wedge (300 queued configures coalesce
+into one repaint — the in-suite storm regression pins exactly
+that). This does not take over application paint pacing: only
+damage FDK's own geometry acceptance caused goes out in the
+flush; everything the application changes still waits for its
+own loop, exactly as before), `src/layout/` (Phase 5: the
 box layout engine — containers as widget subclasses over the
 measure/arrange hooks — plus the window content glue), `src/widget/` (Phase
 4: the retained-mode widget foundation — hierarchy, state, focus,

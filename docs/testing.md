@@ -414,6 +414,19 @@ Real, observable behavior against a live X server (see
   test that proves the event loop, X11 event translation, and
   callback dispatch all work together, not just that individual
   pieces compile.
+- **Resize-storm backlog drain** (1.2.2): 300 `XResizeWindow` calls
+  from a SECOND X connection — exactly what a WM produces during an
+  interactive drag, all queued server-side before one pump — must
+  drain to the final size within a bounded alarm, the batched
+  geometry repaint must land (fresh pixels read back through a
+  separate connection at the final size's far corner, a region that
+  only exists once a framebuffer at that size was painted), and a
+  NEW resize after the storm must still process in one pump. The
+  last check is liveness — the pre-1.2.2 wedge never returned to the
+  caller at all (one core pegged forever inside a single
+  `dispatch_pending`, input queued behind the backlog: "it doesn't
+  update anymore and the title bar buttons stop working"). Post-fix
+  the whole 300-configure storm coalesces into ONE pump call.
 - **`fdk_pump_events()` timeout semantics** (0 = non-blocking,
   positive = bounded wait) and its argument-error contract
 - **Renderer pixel readback**: draw through `fdk_surface` (solid

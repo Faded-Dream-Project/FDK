@@ -1405,48 +1405,36 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         return; /* destroyed by the event callback */
     }
 
-    /* ---- 1.1.4: geometry-change fallout ----
+    /* ---- 1.1.4→1.2.2: geometry-change fallout ----
      *
-     * Two things must happen within THIS dispatch, before the
-     * application's event-loop pacing gets a say:
+     * Events that change what SHOULD be under the pointer or on the
+     * screen (configure / state flip / first expose) mark the window
+     * for a BATCHED revalidation + repaint instead of performing it
+     * inline here. The flush (fdk__window_flush_geo_repaints) runs
+     * from the pump the moment this event batch is fully drained.
      *
-     * 1. HOVER REVALIDATION. The geometry changed under a possibly
-     *    stationary pointer: hover state computed against the old
-     *    geometry would stick (the maximize-button highlight that
-     *    never clears — found live on a real Cinnamon desktop).
+     * Same-batch rationale (found live, 1.2.2): an interactive resize
+     * queues one ConfigureNotify per drag step, each carrying an
+     * Expose; repainting inline meant a FULL repaint + framebuffer
+     * reallocation + pointer-query round trip PER QUEUED EVENT. The
+     * drain rate (~15 events/s under the load) fell below the WM's
+     * queueing rate, so the main thread spun at 100% on one core
+     * walking a growing backlog of stale sizes — the window stopped
+     * updating, title-bar clicks sat behind the backlog, and the CPU
+     * never idled ("doesn't update anymore, one core pegged non
+     * stop"). Deferring to the batch end paints the FINAL size once.
      *
-     * 2. THE SYNCHRONOUS RESIZE REPAINT. The platform already
-     *    resized the window before this event was sent (the WM/com-
-     *    positor owns the geometry). On X11 the newly exposed strips
-     *    read as whatever the server's window memory held — back-
-     *    ground None means nothing clears them — and the OLD bits
-     *    are only anchored top-left (NorthWest bit gravity). Every
-     *    compositor frame landing between the resize and the app's
-     *    next paint pass showed that transitional content as a
-     *    fast visual flicker during interactive resizes (the white
-     *    flash when the background was still a white pixel).
-     *    Repainting inside the dispatch closes the gap to sub-frame.
-     *    On Wayland this is exactly the sanctioned ack-then-commit
-     *    flow (the deferred-first-frame machinery commits at
-     *    configure time the same way).
-     *
-     * This does NOT take over the application's paint pacing:
-     * animation damage, hover highlights, everything else the app
-     * itself changes still waits for its own loop, exactly as
-     * before. Only content whose invalidation FDK itself caused by
-     * accepting a new geometry goes out here. */
+     * The geo bookkeeping itself (stale framebuffer drop, root
+     * resize, band arrange, content reflow) still runs inline — it is
+     * cheap, idempotent per event, and keeps fdk_window_get_size()
+     * authoritative mid-batch. Only the expensive tail defers, and it
+     * defers by microseconds: the pump flushes before it returns to
+     * the application, so a lone configure still repaints within its
+     * own pump call — the 1.1.4 synchronous-repaint contract (close
+     * the resize-to-paint gap to sub-frame) is preserved, just once
+     * per batch instead of once per queued event. */
     if (geo_changed || state_flipped || first_expose) {
-        window_revalidate_pointer(window);
-        if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
-            return; /* a revalidation-routed handler destroyed it */
-        }
-        if (window->root != NULL &&
-            fdk_widget_tree_has_damage(window->root)) {
-            (void)fdk_window_paint(window);
-            if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
-                return; /* destroyed mid-paint (paint hook) */
-            }
-        }
+        window->geo_repaint_pending = true;
     }
 
     /* Toolkit-owned windows (menu popups, dialogs — see
@@ -1609,9 +1597,63 @@ fdk_result fdk_window_paint(fdk_window *window) {
     fdk_widget_tree_paint(window->root, surface);
     if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
         return FDK_OK; /* window destroyed mid-paint; the tree went
-                        * with it, nothing to present */
+                        * with it, nothing left to present */
     }
     return fdk_surface_present(surface);
+}
+
+void fdk__window_flush_geo_repaints(fdk_context *ctx) {
+    if (ctx == NULL) {
+        return;
+    }
+
+    /* One pass over the window list, one repaint per flagged window.
+     * The 1.1.4 fallout tail (hover revalidation + the synchronous
+     * geometry repaint), lifted out of per-event dispatch and run at
+     * batch end — see window_internal.h's flag comment for the resize
+     * backlog this closes.
+     *
+     * Destroy-safety mirrors the dispatch tail: revalidation routes
+     * synthesized pointer events through the tree, and a paint hook
+     * may run application code (destroy the window, destroy ANOTHER
+     * window, create popups). Every step re-verifies registration by
+     * identity, and the index only advances when the slot still
+     * holds the window it held on entry — a removal reshuffles the
+     * tail into the current slot, and that window must still get its
+     * own turn. A window created mid-flush appends past the count
+     * observed on entry; the loop condition re-reads window_count,
+     * so new tail windows are visited too (their flag is clear —
+     * nothing dispatches events inside a flush). */
+    size_t i = 0;
+    while (i < ctx->window_count) {
+        fdk_window *window = ctx->windows[i];
+        if (window == NULL || !window->geo_repaint_pending) {
+            i++;
+            continue;
+        }
+
+        /* Clear BEFORE the work: anything the revalidation routing
+         * or a paint hook re-flags lands in the NEXT flush (the
+         * pump's next turn), never a nested repaint loop. */
+        window->geo_repaint_pending = false;
+        fdk_platform_window *pwindow = window->pwindow;
+
+        window_revalidate_pointer(window);
+        if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
+            continue; /* destroyed by revalidation routing; the slot
+                         now holds the next window — visit it */
+        }
+
+        if (window->root != NULL &&
+            fdk_widget_tree_has_damage(window->root)) {
+            (void)fdk_window_paint(window);
+            if (fdk_context_find_window_by_pwindow(ctx, pwindow) !=
+                window) {
+                continue; /* destroyed mid-paint (paint hook) */
+            }
+        }
+        i++;
+    }
 }
 
 /* Is `widget` still a live descendant of `root`? (The content

@@ -297,6 +297,11 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             return buffered;
         }
         if (buffered > 0) {
+            /* 1.2.2: the batch is drained — paint any geometry the
+             * batch changed, ONCE per window at the batch's final
+             * size (see window_internal.h; the resize backlog that
+             * wedged the main thread at 100% CPU pre-1.2.2). */
+            fdk__window_flush_geo_repaints(ctx);
             return buffered;
         }
 
@@ -343,6 +348,10 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
                 return dispatched;
             }
             if (dispatched > 0) {
+                /* 1.2.2: same batch-end flush as the loop head — the
+                 * poll-visible batch just drained, paint its geometry
+                 * fallout once before reporting the events up. */
+                fdk__window_flush_geo_repaints(ctx);
                 return dispatched;
             }
             /* Only backend-internal traffic arrived — keep waiting
@@ -378,6 +387,11 @@ void fdk_run(fdk_context *ctx) {
      * through the normal dispatch path. X11's XOpenDisplay doesn't
      * pre-queue anything to drain, so this is a near no-op for X11.) */
     (void)ctx->ops->dispatch_pending(ctx->conn);
+    /* 1.2.2: the initial drain can carry a configure (Wayland's
+     * first xdg configure lands here on resize-at-map compositors —
+     * the 1.1.5 first-configure size fix); its repaint belongs to
+     * the same batch. */
+    fdk__window_flush_geo_repaints(ctx);
 
     /* Exit condition (per fdk_core.h): stop when fdk_quit() was called
      * OR when there are no top-level windows left. The "no windows"

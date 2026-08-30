@@ -2567,3 +2567,91 @@ keyboard protocol in the sway rig — typing verified on X11
 only); xdg-open coverage depends on the host; the listing is
 single-column text (no icon view, no renaming in place); delete
 is non-recursive on purpose.
+
+### 1.2.2 — the resize backlog wedge (the first X11 report: "after multiple resizes it doesn't update anymore and the cpu goes insane on one core non stop")
+
+The seventh user report, X11 this time ("no idea if its the same
+thing wayland"): expanding the window sometimes "takes a long
+time to update and the cpu goes insane, only one core gets fully
+utilized", and after several resizes "it doesn't update the
+window anymore and the cpu goes insane on one core non stop and
+the title bar buttons stop working".
+
+ROOT CAUSE (found live with a signal-sample profiler on an
+instrumented build under Xvfb + a 480-resize storm driver): an
+interactive resize queues one ConfigureNotify per drag step
+(plus an Expose each) server-side before the application pumps
+once — several hundred events for a multi-second drag. The 1.1.4
+synchronous resize repaint ran INLINE in the dispatch tail of
+EVERY one of them: a full-window widget repaint + a framebuffer
+pair reallocation (shmget/XShmAttach per step) + an XSync round
+trip for the in-flight slot + an XQueryPointer round trip for
+hover revalidation — per queued event, at stale sizes. The drain
+rate (~15 events/s under that load) fell below the WM's queueing
+rate; the `while (XPending)` loop walked a backlog that never
+shortened, at 100% of one core. Every symptom maps directly: the
+window "doesn't update" (it paints stale sizes), the CPU "goes
+insane non stop" (the backlog walk), the "title bar buttons stop
+working" (their clicks are queued BEHIND the backlog). The
+profiler stacks pinned it: blend_pixel <- fill_rect <- base_paint
+<- tree paint <- fdk_window_paint <- dispatch tail, 30/30
+samples, dispatch_pending itself entered ~0 times/s — the loop
+was inside ONE dispatch call the whole time.
+
+FIX (the shared window layer, both backends): the geometry
+fallout tail (hover revalidation + synchronous repaint) is now
+BATCHED. Configure/state-flip/first-expose events set a window
+flag (`geo_repaint_pending`); the geo bookkeeping itself (stale
+framebuffer drop, root resize, band arrange, content reflow)
+still runs inline — cheap, idempotent, keeps get_size()
+authoritative mid-batch. `fdk__window_flush_geo_repaints()` runs
+from the pump the moment the backend's dispatch_pending drains
+the queue (both drain sites + fdk_run's initial drain): one
+revalidate + one repaint per flagged window per BATCH, at the
+batch's FINAL size. A lone configure still repaints within its
+own pump call — the 1.1.4 sub-frame gap contract is preserved,
+just once per batch instead of once per queued event. Wayland's
+protocol flow is untouched (ack_configure stays inline in the
+backend; the commit moves by microseconds, still the same
+event-loop turn).
+
+VERIFIED (all on the final tree):
+- The 480-resize storm (the repro driver: XResizeWindow from a
+  second connection at 2ms/step): pre-fix 88-100% of one core
+  burning forever after the storm with the loop wedged inside
+  one dispatch; post-fix 0.00s CPU one second after storm end,
+  clean exit on WM_DELETE_WINDOW. The 1800-resize variant: 26%
+  of one core DURING the storm (the legitimate ~60fps live
+  repaint), 0.00s after.
+- Visual: after a 1200-resize storm the window is pixel-identical
+  to the pre-storm reference frame (repainted correctly at the
+  final size); the file manager example storms to 1200 resizes
+  with 0.06s CPU over the next 3s, no wedge.
+- NEW IN-SUITE REGRESSION (test_x11_integration.c,
+  test_resize_storm_backlog_drains): 300 configures queued from a
+  second X connection must drain with the final size reached,
+  fresh pixels at the final size's far corner (readback through a
+  separate connection), and a NEW resize after the storm still
+  processed in one pump — liveness, the wedge's exact symptom.
+  Post-fix it drains in ONE pump call (300 configures
+  coalesced); pre-fix the same loop could not finish in any
+  plausible budget.
+- test_grid_layout_gui's four gap-pixel assertions were stale
+  against 1.2.1's root default background (expected raw server
+  black; the gap has shown the themed window-background
+  0x121721 since 1.2.1) — they now read the token through
+  fdk_theme_get_color. Found because this session actually ran
+  the suite; a pre-existing failure on 1.2.1, not a regression.
+- Headless suite (debug, ASan/LSan, zero leaks) and the full X11
+  integration suite (77 [ok]s) green; the Xvfb examples rig
+  passes 8/8 pixel-verified (its 01 check now expects the 1.2.1
+  themed background pixel instead of pre-1.2.1 white).
+
+Honest gaps: the Wayland side could not be live-tested this
+session (the sandbox lost its libwayland toolchain and
+compositors to an environment reset, and the apt network is
+unavailable to rebuild them) — the change lives in the shared
+window layer + context pump, compiles in the X11-only build, and
+the Wayland configure path was code-reviewed against the
+ack-then-commit contract (the 1.1.5/1.1.6/1.1.7 fixes). The
+Wayland suites + rigs must run once the toolchain is back.

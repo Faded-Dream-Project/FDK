@@ -275,6 +275,24 @@ static void test_close_request_delivered(void) {
  * our helpers round-to-nearest on write, so equality on the packed
  * 0x00RRGGBB value is exact. */
 
+
+/* The themed window-background pixel the 1.2.1 root default background
+ * paints (and the X11 creation-time background pixel matches): the
+ * default theme's FDK_TK_WINDOW_BACKGROUND token, channel-packed the
+ * renderer's way (R<<16|G<<8|B). Grid gaps show the ROOT's fill, not
+ * the pre-1.2.1 raw server black — the stale == 0x00000000u gap
+ * assertions this replaces failed live against 0x121721. */
+static unsigned long theme_window_bg_pixel(void) {
+    fdk_color c = fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+    unsigned long r = (unsigned long)(c.r * 255.0f + 0.5f);
+    unsigned long g = (unsigned long)(c.g * 255.0f + 0.5f);
+    unsigned long b = (unsigned long)(c.b * 255.0f + 0.5f);
+    if (r > 255u) r = 255u;
+    if (g > 255u) g = 255u;
+    if (b > 255u) b = 255u;
+    return (r << 16) | (g << 8) | b;
+}
+
 /* Reads one pixel of the FDK window via the X server, through a
  * SEPARATE X connection from FDK's (so the readback cannot be
  * satisfied from any FDK-side cache). Helper-owned display, opened
@@ -313,6 +331,124 @@ static void surface_event_callback(fdk_window *window,
 static unsigned long fdk_window_xid(fdk_window *win) {
     return (unsigned long)win->pwindow->xwindow;
 }
+
+static fdk_color wcol(int r, int g, int b);
+
+/* ---- 1.2.2 regression: the resize-storm wedge ----
+ *
+ * An interactive resize queues one ConfigureNotify per drag step
+ * (plus Exposes) before the application pumps once — several hundred
+ * events for a multi-second drag. Before the batched geometry
+ * repaint, the dispatch tail repainted INLINE per event, so draining
+ * such a backlog cost one FULL window repaint + framebuffer
+ * reallocation + pointer-query round trip PER QUEUED EVENT: the drain
+ * rate fell below the WM's queueing rate and the main thread wedged
+ * at 100% CPU on one core with the window stuck at a stale size and
+ * input (title-bar buttons) queued behind the backlog — the user
+ * report this test pins ("after multiple resizes it doesn't update
+ * anymore and the cpu goes insane on one core non stop").
+ *
+ * The storm is driven from a SECOND X connection — exactly what a WM
+ * dragging the frame does — so the whole backlog is queued server-
+ * side before the first pump. Then three healthy behaviors must hold:
+ *   1. the backlog drains (pump reaches the final size) within a
+ *      bounded alarm — the pre-fix wedge took ~minutes here;
+ *   2. the batched repaint lands: fresh pixels at the FINAL size's
+ *      far corner (only exists if a repaint at that size happened);
+ *   3. liveness: a NEW resize after the storm still processes in one
+ *      pump (the wedge never returned to the caller at all). */
+static void test_resize_storm_backlog_drains(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK resize storm test",
+                                 .width = 400, .height = 300 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    surface_capture cap = { .ctx = ctx, .configure_count = 0 };
+    fdk_window_set_event_callback(win, surface_event_callback, &cap);
+
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    /* A full-bleed colored tree so the repaint's pixels are
+     * attributable: root background + a content box that reflows to
+     * every configure. */
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, wcol(20, 20, 20));
+    fdk_widget *content = NULL;
+    assert(fdk_ok(fdk_box_create(root, FDK_VERTICAL, &content)));
+    fdk_widget_set_expand(content, true, true);
+    fdk_widget_set_background(content, wcol(60, 200, 120));
+    fdk_window_set_content(win, content);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    /* The storm: 300 resizes, all queued before one pump. */
+    Display *storm_dpy = XOpenDisplay(NULL);
+    assert(storm_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+    int expect_w = 0, expect_h = 0;
+    for (int i = 1; i <= 300; i++) {
+        expect_w = 400 + i;     /* 401 .. 700 */
+        expect_h = 300 + i / 2; /* 300 .. 450 */
+        XResizeWindow(storm_dpy, xid, (unsigned)expect_w,
+                      (unsigned)expect_h);
+    }
+    XFlush(storm_dpy);
+
+    /* 1. Drain: bounded by alarm — the alarm handler's 5s note is a
+     * floor; this test needs its own larger budget for a slow debug
+     * build's legitimate 300-event drain (still well under a second
+     * post-fix; pre-fix it exceeded any plausible timeout). */
+    alarm(15);
+    int pumps = 0;
+    while (cap.last_size.width != expect_w ||
+           cap.last_size.height != expect_h) {
+        int r = fdk_pump_events(ctx, 500);
+        assert(r >= 0);
+        pumps++;
+        assert(pumps < 60); /* 30s hard bound — no infinite wedge */
+    }
+    alarm(0);
+    /* The whole storm must coalesce: hundreds of queued configures,
+     * but only a handful of pump iterations (one per poll wake). */
+    printf("[ok] storm backlog drained in %d pump call(s), "
+           "%d configure(s) coalesced\n", pumps, cap.configure_count);
+
+    /* 2. The batched repaint landed at the FINAL size: the far corner
+     * only exists once a framebuffer at 700x450 was painted. */
+    Display *rb_dpy = NULL;
+    assert(x11_readback_pixel(&rb_dpy, xid, expect_w - 8,
+                              expect_h - 8) == 0x003CC878u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 8, 8) == 0x003CC878u);
+    XCloseDisplay(rb_dpy);
+
+    /* 3. Liveness: a NEW event after the storm processes promptly. */
+    XResizeWindow(storm_dpy, xid, 444, 333);
+    XFlush(storm_dpy);
+    alarm(5);
+    while (cap.last_size.width != 444 ||
+           cap.last_size.height != 333) {
+        int r = fdk_pump_events(ctx, 500);
+        assert(r >= 0);
+    }
+    alarm(0);
+    /* ...and its repaint landed too. */
+    rb_dpy = NULL;
+    assert(x11_readback_pixel(&rb_dpy, xid, 436, 325) == 0x003CC878u);
+    XCloseDisplay(rb_dpy);
+
+    XCloseDisplay(storm_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] resize storm: backlog drains, final size painted, "
+           "event loop stays live\n");
+}
+
 
 static void test_surface_render_readback(void) {
     fdk_context *ctx = NULL;
@@ -1246,8 +1382,10 @@ static void test_grid_layout_gui(void) {
     assert(x11_readback_pixel(&rb_dpy, xid, 100, 50) == 0x00DC3232u);
     assert(x11_readback_pixel(&rb_dpy, xid, 300, 50) == 0x0032B450u);
     assert(x11_readback_pixel(&rb_dpy, xid, 200, 205) == 0x003C64DCu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 205, 50) == 0x00000000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 100, 175) == 0x00000000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 205, 50) ==
+           theme_window_bg_pixel());
+    assert(x11_readback_pixel(&rb_dpy, xid, 100, 175) ==
+           theme_window_bg_pixel());
 
     /* Resize to 460x300: extra +100 wide -> col0 290 (x [10,300)),
      * +160 tall -> row0 220 (y [10,230)); green moved right, the
@@ -1265,8 +1403,10 @@ static void test_grid_layout_gui(void) {
     assert(x11_readback_pixel(&rb_dpy, xid, 150, 50) == 0x00DC3232u);
     assert(x11_readback_pixel(&rb_dpy, xid, 400, 100) == 0x0032B450u);
     assert(x11_readback_pixel(&rb_dpy, xid, 200, 260) == 0x003C64DCu);
-    assert(x11_readback_pixel(&rb_dpy, xid, 305, 100) == 0x00000000u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 150, 235) == 0x00000000u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 305, 100) ==
+           theme_window_bg_pixel());
+    assert(x11_readback_pixel(&rb_dpy, xid, 150, 235) ==
+           theme_window_bg_pixel());
 
     XCloseDisplay(rb_dpy);
     fdk_window_destroy(win);
@@ -5220,6 +5360,7 @@ int main(void) {
     test_window_create_show_destroy();
     test_window_set_title();
     test_resize_delivers_configure_event();
+    test_resize_storm_backlog_drains();
     test_close_request_delivered();
     test_pump_events_nonblocking();
     test_surface_render_readback();
