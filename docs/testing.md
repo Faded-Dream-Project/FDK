@@ -1002,3 +1002,44 @@ source op is protocol-exercised via wl_dnd_source's peer role);
 wlroots 0.18 ends the drag source with ::cancelled after a clean
 receive->finish->destroy tail (payload unaffected; suite asserts
 either end signal, rig verifies the tail in WAYLAND_DEBUG).
+
+## 1.2.5 — the query-pointer contract test, and the rigs that were caught lying
+
+The Wayland suite gained the load-bearing regression for the
+unified cursor hit-test (see roadmap 1.2.5): after REAL injected
+input hovers the maximize button, a client-side shrink under the
+stationary pointer, and the window_query_pointer op is interrogated
+BEFORE any pump — the client resize path updates last_size
+synchronously while the seat cache still holds the pre-resize
+position, so the stale state is deterministic without any
+compositor round-trip. The seam assert fails on the pre-fix body
+(verified by running the suite against the reverted code), and the
+observable half — hover and cursor cleared by the leave synthesis
+after the flush — follows. This mirrors the X11 suite's
+hover-revalidation test, which drives the same scenario with
+XWarpPointer + server-side resizes.
+
+Two rig-integrity lessons from this milestone, both recorded
+because they produced GREEN OUTPUT FROM BROKEN RUNS:
+
+1. A rig that does not BUILD its subject can verify stale
+   artifacts. The sway example rig assumed build/examples existed;
+   the clipboard-interop rig make-cleans between runs; the next
+   sway rig run then "passed" 8/8 against the previous session's
+   PNGs. The rig now builds the examples first, and the captures
+   are deleted before each run.
+2. A compositor-config rule other rigs depend on must live IN the
+   rig that needs it. The Wayland test rig's sway config had lost
+   the floating pin (org.fdk.test windows at (100,60)) that every
+   injected coordinate is computed from — under tiling the clicks
+   missed and the suite failed at the first injected button press.
+   The rule is restored with a comment stating it is load-bearing.
+
+The sway restore path for the recurring sandbox wipe is now a
+durable script (scripts/rebuild_sway_rig.sh): apt-cache recursive
+closure resolution, skipping packages the system already provides
+(extracting libc6 into the prefix would break the binaries), sway
++ libwlroots + grim (grim is NOT in sway's dependency closure — a
+rig without it happily verifies stale captures) into
+/home/z/apt/prefix, .pc prefix fixes, and a headless startup
+verification.

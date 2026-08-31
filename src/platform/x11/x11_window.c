@@ -861,7 +861,15 @@ int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
      * including positions OUTSIDE the window while crossing to it —
      * the bounds check below is what makes the "inside" answer
      * honest. Returns False when the pointer is on a different
-     * screen, which is simply "not over this window". */
+     * screen, which is simply "not over this window".
+     *
+     * UNIFIED CONTRACT (1.2.5, same words as the Wayland side):
+     * nonzero only when the pointer is within the window's CURRENT
+     * geometry — last_size is the most recent ConfigureNotify size,
+     * in the same window-local space win_x/win_y come in. The
+     * Wayland query op runs the identical check against its last
+     * acked size, so window_revalidate_pointer's motion-vs-leave
+     * decision behaves the same on both backends. */
     if (!XQueryPointer(pwindow->conn->display, pwindow->xwindow,
                        &root_ret, &child_ret, &root_x, &root_y,
                        &win_x, &win_y, &mask)) {

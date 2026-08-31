@@ -1,53 +1,56 @@
 /*
  * 01_hello_world.c — the smallest possible FDK program that opens a
- * real window.
+ * real window, now via the shared example helper (see
+ * example_window.h): fdk_example_init() connects to a real X11 or
+ * Wayland display, fdk_example_open() builds the standard example
+ * window (in-window header, content box, status line), and
+ * fdk_example_run() pumps until quit.
  *
- * Requires a reachable X11 or Wayland display to run (fdk_init()
- * genuinely connects to one as of Phase 2 — see docs/roadmap.md).
- * There is no renderer yet (Phase 3), so the window appears as a
- * solid platform background — white on both backends: X11 windows
- * get the background pixel set at creation, and the Wayland backend
- * commits a solid-color wl_shm buffer for the same effect (see
- * attach_background_buffer() in
- * src/platform/wayland/wayland_window.c). The window still
- * genuinely exists, receives real events, and responds to being
- * closed or resized — that's what this example demonstrates.
+ * The demo still teaches the event contract: ex->on_event is the
+ * helper's observe-only hook — window resizes and key presses are
+ * logged to stdout and mirrored into the status line, while the
+ * HELPER owns the quit semantics (close request and Escape both end
+ * the loop; teardown happens in fdk_example_close() in the documented
+ * order: window, then context).
  *
- * Close the window (title bar close button, or Alt+F4/equivalent) to
- * exit; the example demonstrates the documented pattern of NOT
- * auto-destroying on FDK_EVENT_WINDOW_CLOSE_REQUEST (see fdk_event.h)
- * — it logs the request and then destroys the window itself.
+ * The blocking fdk_run() variant (one call, no per-frame control) is
+ * documented in fdk_core.h; the examples use the pump loop because
+ * they need the per-pass paint slot.
  *
  * Build: make examples
  * Run:   ./build/examples/01_hello_world
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 
 #include <stdio.h>
 
-static void on_event(fdk_window *window, const fdk_event_data *event, void *user_data) {
-    fdk_context *ctx = user_data;
+static void on_event(fdk_window *window, const fdk_event_data *event,
+                     void *user) {
+    fdk_example *ex = user;
+    (void)window;
 
     switch (event->type) {
         case FDK_EVENT_WINDOW_CLOSE_REQUEST:
             printf("close requested, shutting down\n");
-            fdk_window_destroy(window);
-            fdk_quit(ctx);
             break;
 
         case FDK_EVENT_WINDOW_CONFIGURE:
             printf("resized to %dx%d\n", event->configure.size.width,
                    event->configure.size.height);
+            fdk_example_set_status(ex, "resized — the toolkit root "
+                                       "tracks the new size");
             break;
 
         case FDK_EVENT_KEY_DOWN:
             if (event->key.codepoint != 0) {
                 printf("key pressed: '%c' (scancode %u)\n",
                        (char)event->key.codepoint, event->key.scancode);
+                fdk_example_set_status(ex, "key pressed — try Escape");
             } else {
                 printf("key pressed: scancode %u (no printable codepoint)\n",
                        event->key.scancode);
+                fdk_example_set_status(ex, "key pressed — try Escape");
             }
             break;
 
@@ -60,32 +63,22 @@ int main(void) {
     printf("Faded Dream ToolKit %s\n", fdk_get_version_string());
 
     fdk_context *ctx = NULL;
-    fdk_result r = fdk_init(&ctx, NULL);
-    if (!fdk_ok(r)) {
-        fprintf(stderr, "fdk_init failed: %s\n", fdk_result_to_string(r));
-        fprintf(stderr, "(this example needs a real X11 or Wayland display to run)\n");
+    if (!fdk_example_init(&ctx, "01")) {
         return 1;
     }
 
-    fdk_window *window = NULL;
-    fdk_window_options opts = {
-        .title = "FDK Hello World",
-        .width = 640,
-        .height = 480,
-    };
-    r = fdk_window_create(ctx, &opts, &window);
-    if (!fdk_ok(r)) {
-        fprintf(stderr, "fdk_window_create failed: %s\n", fdk_result_to_string(r));
+    fdk_example ex;
+    if (!fdk_example_open(&ex, ctx, "01", "hello world", 640, 480)) {
         fdk_shutdown(ctx);
         return 1;
     }
+    ex.on_event = on_event;
+    ex.on_event_user = &ex;
 
-    fdk_window_set_event_callback(window, on_event, ctx);
-    fdk_window_show(window);
+    fdk_example_set_status(&ex, "window shown — close it or press Esc");
+    printf("window shown — close it or press Esc to exit\n");
 
-    printf("window shown — close it to exit\n");
-    fdk_run(ctx);
-
-    fdk_shutdown(ctx);
+    fdk_example_run(&ex);
+    fdk_example_close(&ex);
     return 0;
 }

@@ -1886,11 +1886,27 @@ fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
  * pointer_focus + surface-local pointer_x/y, and a compositor keeps
  * sending motion/leave events when surfaces move under the pointer,
  * so the cache is never stale while the pointer is over this surface.
- * Returns nonzero only when THIS window currently holds pointer
- * focus. (Cursor SHAPING has no Wayland counterpart here yet: doing
- * it properly needs a cursor theme via wl_shm + per-enter
- * wl_pointer.set_cursor, tracked in the roadmap — the compositor's
- * default cursor applies meanwhile, honestly.) */
+ *
+ * UNIFIED CONTRACT (1.2.5, same words as the X11 side): nonzero
+ * only when the pointer is within the window's CURRENT geometry —
+ * the bounds check runs against last_size, the last acked+committed
+ * size, in the same logical surface space wl_pointer delivers. The
+ * check matters exactly when the window shrank under a stationary
+ * pointer (the unmaximize case window_revalidate_pointer exists
+ * for): until the compositor's own leave arrives, the seat cache
+ * still holds pointer_focus with coordinates that are now OUTSIDE
+ * the surface — reporting "inside" there would route the
+ * revalidation as a synthetic MOTION with out-of-bounds coordinates
+ * instead of the honest LEAVE the X11 backend delivers, and every
+ * consumer would have to tolerate out-of-bounds motion just for
+ * this backend. With the check, both backends answer the question
+ * "is the pointer inside the window's current geometry?" the same
+ * way, and the leave synthesis (hover clear, cursor reset) is
+ * backend-independent.
+ *
+ * (Cursor SHAPING: the XCursor-theme loader lives in
+ * wayland_cursor.c since 1.1.6, behind the same window_set_cursor
+ * op the X11 cursor-font glyphs use.) */
 int fdk_wayland_window_query_pointer(fdk_platform_window *pwindow,
                                      fdk_i32 *out_x, fdk_i32 *out_y) {
     if (pwindow == NULL || out_x == NULL || out_y == NULL) {
@@ -1902,5 +1918,7 @@ int fdk_wayland_window_query_pointer(fdk_platform_window *pwindow,
     }
     *out_x = (fdk_i32)conn->pointer_x;
     *out_y = (fdk_i32)conn->pointer_y;
-    return 1;
+    return *out_x >= 0 && *out_y >= 0 &&
+           *out_x < (fdk_i32)pwindow->last_size.width &&
+           *out_y < (fdk_i32)pwindow->last_size.height;
 }

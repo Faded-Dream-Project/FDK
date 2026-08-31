@@ -24,16 +24,11 @@
  * notice otherwise).
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static struct {
-    fdk_window *window;
-    bool quit;
-} app;
 
 static fdk_font *font16 = NULL;
 static fdk_widget *status = NULL;
@@ -46,6 +41,7 @@ static fdk_color col(int r, int g, int b) {
 }
 
 static void set_status(const char *text) {
+    /* Writes the helper's status line (assigned after open). */
     (void)fdk_label_set_text(status, text);
 }
 
@@ -78,17 +74,6 @@ static void on_any_change(fdk_widget *w, bool checked, void *user) {
     set_status(buf);
 }
 
-static void window_event(fdk_window *window, const fdk_event_data *event,
-                         void *user_data) {
-    (void)window;
-    (void)user_data;
-    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST ||
-        (event->type == FDK_EVENT_KEY_DOWN &&
-         event->key.scancode == FDK_KEY_ESC)) {
-        app.quit = true;
-    }
-}
-
 int main(void) {
     font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
@@ -102,32 +87,19 @@ int main(void) {
            fdk_font_get_file_path(font16));
 
     fdk_context *ctx = NULL;
-    if (!fdk_ok(fdk_init(&ctx, NULL))) {
-        fprintf(stderr, "fdk_init failed (no display?)\n");
+    if (!fdk_example_init(&ctx, "04")) {
         return 1;
     }
 
-    fdk_window_options wopts = {
-        .title = "FDK 04 — widgets",
-        .width = 560,
-        .height = 620,
-    };
-    if (!fdk_ok(fdk_window_create(ctx, &wopts, &app.window))) {
-        fprintf(stderr, "fdk_window_create failed\n");
+    fdk_example ex;
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 685)) {
         fdk_shutdown(ctx);
         return 1;
     }
-    fdk_window_set_event_callback(app.window, window_event, NULL);
-
-    fdk_widget *root = NULL;
-    (void)fdk_window_get_root(app.window, &root);
-    fdk_widget_set_background(root, col(18, 20, 28));
-
-    fdk_widget *content = NULL;
-    (void)fdk_box_create(root, FDK_VERTICAL, &content);
-    fdk_box_set_padding(content, 14);
+    fdk_widget *content = ex.content;
     fdk_box_set_spacing(content, 12);
-    fdk_window_set_content(app.window, content);
+    fdk_widget_set_background(ex.root, col(18, 20, 28));
+    (void)fdk_window_paint(ex.window); /* repaint under the new bg */
 
     /* --- frame: profile options --- */
     fdk_widget *profile = NULL;
@@ -219,66 +191,34 @@ int main(void) {
     fdk_widget_set_natural_size(progress, 0, 14);
     fdk_widget_set_expand(progress, true, false);
 
-    status = NULL;
-    (void)fdk_label_create(content, font16, "Nothing applied yet.",
-                           &status);
-    fdk_label_set_color(status, col(150, 158, 178));
-
-    fdk_window_show(app.window);
-    (void)fdk_window_paint(app.window);
+    /* The demo's status line IS the helper's (bottom of the frame). */
+    status = ex.status;
 
     const char *anim = getenv("FDK_DEMO_ANIMATE");
     const bool animate =
         anim != NULL && anim[0] != '\0' && strcmp(anim, "0") != 0;
-    const char *limit_s = getenv("FDK_DEMO_FRAMES");
-    const int frame_limit = (limit_s != NULL) ? atoi(limit_s) : 0;
 
-    int frames = 0;
-    while (!app.quit) {
-        (void)fdk_pump_events(ctx, 15);
-        if (app.quit) {
-            break;
-        }
-
+    while (fdk_example_pump(&ex)) {
         /* One startup sweep so a screenshot shows the bar mid-fill;
          * then it holds (an idle app presents nothing). */
-        if (frames < 120) {
+        if (ex.frames < 120) {
             fdk_progress_set_fraction(
-                progress, (fdk_f32)frames / 120.0f);
-            if (frames == 0) {
-                set_status("Sweeping...");
+                progress, (fdk_f32)ex.frames / 120.0f);
+            if (ex.frames == 0) {
+                fdk_example_set_status(&ex, "Sweeping...");
             }
-        } else if (frames == 120) {
+        } else if (ex.frames == 120) {
             if (!animate) {
                 apply_count = 4;
-                set_status("Applied 4 times.");
+                fdk_example_set_status(&ex, "Applied 4 times.");
             }
         } else if (animate) {
             fdk_progress_set_fraction(
-                progress, (fdk_f32)(frames % 200) / 199.0f);
-        }
-
-        fdk_surface *surface = NULL;
-        if (fdk_ok(fdk_window_get_surface(app.window, &surface)) &&
-            !fdk_surface_frame_ready(surface)) {
-            continue;
-        }
-        if (fdk_widget_tree_has_damage(root)) {
-            (void)fdk_window_paint(app.window);
-        }
-        frames++;
-
-        if (frame_limit > 0 && frames >= frame_limit) {
-            break;
+                progress, (fdk_f32)(ex.frames % 200) / 199.0f);
         }
     }
 
-    printf("04_widgets: exited cleanly after %d frames\n", frames);
     fdk_font_destroy(font16);
-    if (app.window != NULL) {
-        fdk_window_destroy(app.window);
-        app.window = NULL;
-    }
-    fdk_shutdown(ctx);
+    fdk_example_close(&ex);
     return 0;
 }

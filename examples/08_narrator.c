@@ -4,9 +4,10 @@
  * a session bus, a bridge process. This demo is FDK's answer: the
  * narrator runs IN-PROCESS, subscribes to the same a11y
  * notifications any consumer sees, and speaks through a sink the
- * application wires — here, a subtitle label at the bottom of the
- * window plus a stdout line. No bus, no daemon, no TTS dependency;
- * a real app would point the same sink at its speech engine.
+ * application wires — here, the helper's status line (via
+ * fdk_example_set_status) plus a stdout line. No bus, no daemon,
+ * no TTS dependency; a real app would point the same sink at its
+ * speech engine.
  *
  * What you should see (and read on stdout):
  *   - a scripted tour walks focus through the form; each move is
@@ -18,52 +19,41 @@
  *     the form, click the checkbox, drag the slider — every focus
  *     move, toggle, and value change is spoken
  *
- * Escape or the window's close button ends the demo. Set
- * FDK_DEMO_FRAMES=N to exit after N frames instead (the automation
- * knob the screenshot battery uses).
+ * The window comes from the shared example helper (see
+ * example_window.h): the standard header/status chrome, quit on
+ * close/Escape, damage-gated frame-paced pump. The narrator is
+ * parked (speaker NULL) before the helper's teardown order runs.
+ *
+ * Set FDK_DEMO_FRAMES=N to exit after N frames instead (the
+ * automation knob the screenshot battery uses).
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 #include "fdk/fdk_a11y.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static struct {
-    fdk_window *window;
-    fdk_context *ctx;
-    bool quit;
-} app;
-
-static void window_event(fdk_window *window, const fdk_event_data *event,
-                         void *user_data) {
-    (void)window;
-    (void)user_data;
-    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST ||
-        (event->type == FDK_EVENT_KEY_DOWN &&
-         event->key.scancode == FDK_KEY_ESC)) {
-        app.quit = true;
-    }
-}
+static fdk_example *g_ex = NULL;
 
 static void on_quit_clicked(fdk_widget *w, void *user) {
     (void)w;
     (void)user;
-    app.quit = true;
+    if (g_ex != NULL) {
+        g_ex->quit = true;
+    }
 }
 
-/* The visual sink: the subtitle bar + a stdout line. Runs inside
- * focus()/set-value call stacks — label text updates are ordinary
- * tree mutations, safe from any callback position (the a11y notify
- * walk is snapshot-based). */
-static fdk_widget *subtitle = NULL;
-
+/* The visual sink: the helper's status line + a stdout line. Runs
+ * inside focus()/set-value call stacks — label text updates are
+ * ordinary tree mutations, safe from any callback position (the
+ * a11y notify walk is snapshot-based). */
 static void speak(const char *utterance, void *user) {
-    (void)user;
+    fdk_example *ex = user;
     printf("narrator: %s\n", utterance);
-    if (subtitle != NULL) {
-        (void)fdk_label_set_text(subtitle, utterance);
+    if (ex != NULL) {
+        fdk_example_set_status(ex, utterance);
     }
 }
 
@@ -74,11 +64,9 @@ static fdk_color col(int r, int g, int b) {
 
 int main(void) {
     fdk_context *ctx = NULL;
-    if (!fdk_ok(fdk_init(&ctx, NULL))) {
-        fprintf(stderr, "08_narrator: init failed\n");
+    if (!fdk_example_init(&ctx, "08")) {
         return 1;
     }
-    app.ctx = ctx;
 
     fdk_font *font = fdk_font_load_system_default(16);
     if (font == NULL) {
@@ -89,116 +77,79 @@ int main(void) {
         return 1;
     }
 
-    fdk_window_options opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.title = "FDK — the embedded narrator";
-    opts.width = 460;
-    opts.height = 400;
-    if (!fdk_ok(fdk_window_create(ctx, &opts, &app.window))) {
-        fprintf(stderr, "08_narrator: window failed (no display?)\n");
+    fdk_example ex;
+    if (!fdk_example_open(&ex, ctx, "08", "narrator", 460, 430)) {
         fdk_font_destroy(font);
         fdk_shutdown(ctx);
         return 1;
     }
-    fdk_widget *root = NULL;
-    (void)fdk_window_get_root(app.window, &root);
-    fdk_widget_set_background(root, col(24, 26, 35));
+    g_ex = &ex;
+    fdk_widget_set_background(ex.root, col(24, 26, 35));
+    fdk_widget *content = ex.content;
 
-    /* The form: a heading, a checkbox, a slider, a spin, buttons. */
+    /* The form: a heading, a checkbox, a slider, a spin, buttons —
+     * all inside the helper's content box, so Tab order follows
+     * creation order (the tour's "each action follows its focus"). */
     fdk_widget *title = NULL;
-    (void)fdk_label_create(root, font, "Screen reader, no bus", &title);
-    fdk_widget_set_bounds(title, (fdk_rect){16, 12, 428, 28});
+    (void)fdk_label_create(content, font, "Screen reader, no bus", &title);
     fdk_label_set_color(title, col(235, 238, 245));
 
     fdk_widget *hint = NULL;
     (void)fdk_label_create(
-        root, font,
+        content, font,
         "Tab / click / drag — every focus and value change is spoken",
         &hint);
-    fdk_widget_set_bounds(hint, (fdk_rect){16, 40, 428, 20});
     fdk_label_set_color(hint, col(130, 139, 160));
 
+    fdk_widget *row1 = NULL;
+    (void)fdk_box_create(content, FDK_HORIZONTAL, &row1);
+    fdk_box_set_spacing(row1, 12);
     fdk_widget *bold = NULL;
-    (void)fdk_checkbox_create(root, font, "Bold", &bold);
-    fdk_widget_set_bounds(bold, (fdk_rect){20, 80, 160, 30});
-
+    (void)fdk_checkbox_create(row1, font, "Bold", &bold);
     fdk_widget *volume = NULL;
-    (void)fdk_slider_create(root, 0.0, 100.0, 30.0, &volume);
-    fdk_widget_set_bounds(volume, (fdk_rect){200, 82, 240, 26});
+    (void)fdk_slider_create(row1, 0.0, 100.0, 30.0, &volume);
+    fdk_widget_set_expand(volume, true, false);
     fdk_widget_set_accessible_name(volume, "Volume");
 
+    fdk_widget *row2 = NULL;
+    (void)fdk_box_create(content, FDK_HORIZONTAL, &row2);
+    fdk_box_set_spacing(row2, 12);
     fdk_widget *size = NULL;
-    (void)fdk_spin_create(root, font, 6.0, 72.0, 12.0, &size);
-    fdk_widget_set_bounds(size, (fdk_rect){20, 130, 160, 30});
+    (void)fdk_spin_create(row2, font, 6.0, 72.0, 12.0, &size);
     fdk_widget_set_accessible_name(size, "Font size");
-
     fdk_widget *ok = NULL;
-    (void)fdk_button_create(root, font, "Apply", &ok);
-    fdk_widget_set_bounds(ok, (fdk_rect){20, 190, 120, 36});
-
+    (void)fdk_button_create(row2, font, "Apply", &ok);
     fdk_widget *quit = NULL;
-    (void)fdk_button_create(root, font, "Quit", &quit);
+    (void)fdk_button_create(row2, font, "Quit", &quit);
     fdk_button_set_on_activate(quit, on_quit_clicked, NULL);
-    fdk_widget_set_bounds(quit, (fdk_rect){150, 190, 120, 36});
 
-    /* The subtitle bar: the sink's visual half. */
-    (void)fdk_label_create(root, font, "narration: (idle)", &subtitle);
-    fdk_widget_set_bounds(subtitle, (fdk_rect){12, 350, 436, 34});
-    fdk_label_set_color(subtitle, col(120, 220, 160));
+    fdk_example_set_status(&ex, "narration: (idle)");
 
-    /* The narrator: sink in, engine on. */
-    fdk_a11y_set_speaker(speak, NULL);
+    /* The narrator: sink in, engine on. The sink receives &ex so
+     * every utterance lands in the helper's status line. */
+    fdk_a11y_set_speaker(speak, &ex);
     if (!fdk_ok(fdk_a11y_narrator_start())) {
         fprintf(stderr, "08_narrator: engine failed to start\n");
-        fdk_window_destroy(app.window);
+        fdk_example_close(&ex);
         fdk_font_destroy(font);
-        fdk_shutdown(ctx);
         return 1;
     }
     fdk_a11y_announce("Narration on");
 
-    fdk_window_set_event_callback(app.window, window_event, NULL);
-    fdk_window_show(app.window);
-    (void)fdk_window_paint(app.window);
-
     /* The scripted tour: one scripted action every 24 frames
      * (~360 ms at the 15 ms pump). Then the demo goes interactive
      * until quit / close / the frame budget. */
-    long frame_cap = -1;
-    const char *cap_env = getenv("FDK_DEMO_FRAMES");
-    if (cap_env != NULL) {
-        frame_cap = atol(cap_env);
-    }
-
     const int TOUR_PERIOD = 24;
     const int TOUR_STEPS = 7; /* focus+toggle, focus+value, 2 focuses,
                               * and the closing announcement */
     int tour_done = 0;
 
-    int frames = 0;
-    while (!app.quit) {
-        (void)fdk_pump_events(ctx, 15);
-        if (app.quit || app.window == NULL) {
-            break;
-        }
-        fdk_surface *surface = NULL;
-        if (fdk_ok(fdk_window_get_surface(app.window, &surface)) &&
-            !fdk_surface_frame_ready(surface)) {
-            continue;
-        }
-        /* Damage-gated: the scripted tour's label updates (and every
-         * interactive focus/toggle/value change) invalidate the tree;
-         * an idle narrator presents nothing. */
-        if (fdk_widget_tree_has_damage(root)) {
-            (void)fdk_window_paint(app.window);
-        }
-        frames++;
-
+    while (fdk_example_pump(&ex)) {
         /* Tour driver: each action follows its focus, the way a
          * keyboard user drives the form — that is what the engine
          * narrates (toggle and value changes announce on the
          * FOCUSED widget). */
-        if (tour_done < TOUR_STEPS && frames % TOUR_PERIOD == 0) {
+        if (tour_done < TOUR_STEPS && ex.frames % TOUR_PERIOD == 0) {
             switch (tour_done) {
             case 0:
                 fdk_widget_focus(bold);
@@ -226,21 +177,13 @@ int main(void) {
             }
             tour_done++;
         }
-
-        if (frame_cap >= 0 && frames >= frame_cap) {
-            break;
-        }
     }
 
-    printf("08_narrator: exited cleanly after %d frames, %d tour steps\n",
-           frames, tour_done);
+    printf("08_narrator: %d tour steps\n", tour_done);
 
-    fdk_a11y_set_speaker(NULL, NULL); /* parks the engine */
-    if (app.window != NULL) {
-        fdk_window_destroy(app.window);
-        app.window = NULL;
-    }
+    /* Park the engine BEFORE the helper tears the window down. */
+    fdk_a11y_set_speaker(NULL, NULL);
     fdk_font_destroy(font);
-    fdk_shutdown(ctx);
+    fdk_example_close(&ex);
     return 0;
 }

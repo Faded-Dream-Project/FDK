@@ -23,9 +23,14 @@
  * Escape or the close request ends it. The content font comes from
  * fdk_font_load_system_default() — the same probe the title bar
  * uses. Needs a system TrueType font (the band buttons never do).
+ *
+ * INIT-tier helper user (see example_window.h): the demo owns its
+ * window because the FDK decoration band IS the titlebar — a helper
+ * header would duplicate it. The helper still provides the uniform
+ * app_id (org.fdk.example06).
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -125,8 +130,7 @@ int main(int argc, char **argv) {
     }
 
     fdk_context *ctx = NULL;
-    if (!fdk_ok(fdk_init(&ctx, NULL))) {
-        fprintf(stderr, "fdk_init failed (no display?)\n");
+    if (!fdk_example_init(&ctx, "06")) {
         return 1;
     }
 

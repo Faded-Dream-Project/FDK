@@ -31,9 +31,14 @@
  *
  * Works identically on X11 and Wayland — no backend type appears
  * anywhere in this file. Close the window or press ESC to exit.
+ *
+ * INIT-tier helper user (see example_window.h): the demo owns its
+ * window and loop because its subject IS the raw surface — a helper
+ * content box would fight the direct framebuffer writes. The helper
+ * still provides the uniform app_id (org.fdk.example02).
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -431,12 +436,10 @@ int main(int argc, char **argv) {
     }
 
     fdk_context *ctx = NULL;
-    fdk_result r = fdk_init(&ctx, NULL);
-    if (!fdk_ok(r)) {
-        fprintf(stderr, "fdk_init failed: %s\n", fdk_result_to_string(r));
-        fprintf(stderr, "(this example needs a real X11 or Wayland display)\n");
+    if (!fdk_example_init(&ctx, "02")) {
         return 1;
     }
+    fdk_result r = FDK_OK;
 
     app_state app = { 0 };
     app.ctx = ctx;

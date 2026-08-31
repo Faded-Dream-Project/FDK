@@ -29,17 +29,12 @@
  * ESC to exit.
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static struct {
-    fdk_window *window;
-    bool quit;
-} app;
 
 static fdk_font *f12 = NULL;
 static fdk_font *f16 = NULL;
@@ -52,17 +47,6 @@ static double g_wave_t = 0.0;
 static fdk_color col(int r, int g, int b) {
     return (fdk_color){ .r = (fdk_f32)r / 255.0f, .g = (fdk_f32)g / 255.0f,
                         .b = (fdk_f32)b / 255.0f, .a = 1.0f };
-}
-
-static void window_event(fdk_window *window, const fdk_event_data *event,
-                         void *user_data) {
-    (void)window;
-    (void)user_data;
-    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST ||
-        (event->type == FDK_EVENT_KEY_DOWN &&
-         event->key.scancode == FDK_KEY_ESC)) {
-        app.quit = true;
-    }
 }
 
 /* ---- the canvas: raw text rendering (no widgets involved) ---- */
@@ -186,32 +170,19 @@ int main(void) {
     }
 
     fdk_context *ctx = NULL;
-    if (!fdk_ok(fdk_init(&ctx, NULL))) {
-        fprintf(stderr, "fdk_init failed (no display?)\n");
+    if (!fdk_example_init(&ctx, "03")) {
         return 1;
     }
 
-    fdk_window_options wopts = {
-        .title = "FDK 03 — text",
-        .width = 640,
-        .height = 700,
-    };
-    if (!fdk_ok(fdk_window_create(ctx, &wopts, &app.window))) {
-        fprintf(stderr, "fdk_window_create failed\n");
+    fdk_example ex;
+    if (!fdk_example_open(&ex, ctx, "03", "text", 640, 765)) {
         fdk_shutdown(ctx);
         return 1;
     }
-    fdk_window_set_event_callback(app.window, window_event, NULL);
-
-    fdk_widget *root = NULL;
-    (void)fdk_window_get_root(app.window, &root);
-    fdk_widget_set_background(root, col(18, 20, 28));
-
-    fdk_widget *content = NULL;
-    (void)fdk_box_create(root, FDK_VERTICAL, &content);
-    fdk_box_set_padding(content, 14);
+    fdk_widget *content = ex.content;
     fdk_box_set_spacing(content, 12);
-    fdk_window_set_content(app.window, content);
+    fdk_widget_set_background(ex.root, col(18, 20, 28));
+    (void)fdk_window_paint(ex.window); /* repaint under the new bg */
 
     /* --- canvas: the raw-rendering gallery (fixed height) --- */
     fdk_widget *canvas = NULL;
@@ -281,47 +252,22 @@ int main(void) {
     fdk_radio_set_checked(r3, true);
     set_status(status, "Selection: South — arrow keys move it");
 
-    fdk_window_show(app.window);
-    (void)fdk_window_paint(app.window);
+    fdk_example_set_status(&ex, "shaped by day, wrapped by night — "
+                                   "narrow me");
 
-    const char *limit_s = getenv("FDK_DEMO_FRAMES");
-    const int frame_limit = (limit_s != NULL) ? atoi(limit_s) : 0;
-    int frames = 0;
-    while (!app.quit) {
-        (void)fdk_pump_events(ctx, 15);
-        if (app.quit) {
-            break;
-        }
-
+    while (fdk_example_pump(&ex)) {
         if (animate) {
             /* The rig's animated mode: the wave undulates — the whole
              * canvas repaints per frame (its damage), nothing else. */
-            g_wave_t = (double)frames / 24.0 * 3.0;
+            g_wave_t = (double)ex.frames / 24.0 * 3.0;
             fdk_canvas_invalidate(canvas);
-        }
-
-        /* Damage-gated painting: an idle text demo presents nothing. */
-        fdk_surface *surface = NULL;
-        if (fdk_ok(fdk_window_get_surface(app.window, &surface)) &&
-            !fdk_surface_frame_ready(surface)) {
-            continue;
-        }
-        if (fdk_widget_tree_has_damage(root)) {
-            (void)fdk_window_paint(app.window);
-        }
-        frames++;
-
-        if (frame_limit > 0 && frames >= frame_limit) {
-            break;
         }
     }
 
-    printf("03_text: exited cleanly after %d frames\n", frames);
-    fdk_window_destroy(app.window);
     fdk_font_destroy(f96);
     fdk_font_destroy(f24);
     fdk_font_destroy(f16);
     fdk_font_destroy(f12);
-    fdk_shutdown(ctx);
+    fdk_example_close(&ex);
     return 0;
 }

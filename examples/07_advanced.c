@@ -33,9 +33,14 @@
  * Fonts come from fdk_font_load_system_default(). Set
  * FDK_DEMO_FRAMES=N to exit after N pump iterations instead (the
  * automation knob the test rigs use).
+ *
+ * INIT-tier helper user (see example_window.h): the demo owns its
+ * manual-bounds layout (popups, menus, dialogs live in window
+ * coordinates). The helper still provides the uniform app_id
+ * (org.fdk.example07).
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 #include "fdk/fdk_dialog.h"
 
 #include <assert.h>
@@ -294,10 +299,7 @@ static void build_menus(fdk_widget *parent) {
 
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
-    fdk_init_options opts = { .app_id = "org.fdk.advanced" };
-    fdk_result r = fdk_init(&app.ctx, &opts);
-    if (!fdk_ok(r)) {
-        fprintf(stderr, "fdk_init failed: %d\n", r);
+    if (!fdk_example_init(&app.ctx, "07")) {
         return 1;
     }
 
@@ -310,7 +312,7 @@ int main(void) {
         .width = 720,
         .height = 520,
     };
-    r = fdk_window_create(app.ctx, &wopts, &app.window);
+    fdk_result r = fdk_window_create(app.ctx, &wopts, &app.window);
     if (!fdk_ok(r)) {
         fprintf(stderr, "fdk_window_create failed: %d\n", r);
         fdk_shutdown(app.ctx);

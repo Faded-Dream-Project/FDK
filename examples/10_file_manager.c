@@ -51,11 +51,15 @@
  * fdk_font_load_system_default(). The window background is the
  * TOOLKIT default (the theme's window-background token — 1.2.1);
  * panels that need to read as panels set their own.
+ *
+ * INIT-tier helper user (see example_window.h): the demo owns its
+ * manual-bounds three-pane layout. The helper still provides the
+ * uniform app_id (org.fdk.example10).
  */
 
 #define _DEFAULT_SOURCE
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 #include "fdk/fdk_dialog.h"
 
 #include <dirent.h>
@@ -1041,10 +1045,7 @@ int main(void) {
     /* xdg-open children must not become zombies (no wait loop). */
     signal(SIGCHLD, SIG_IGN);
 
-    fdk_init_options init = {0};
-    init.app_id = "10_file_manager";
-    if (!fdk_ok(fdk_init(&app.ctx, &init))) {
-        fprintf(stderr, "10_file_manager: no display — see docs\n");
+    if (!fdk_example_init(&app.ctx, "10")) {
         return 1;
     }
     app.font = fdk_font_load_system_default(14);

@@ -1070,6 +1070,70 @@ int main(void) {
                "compositor (xdg_toplevel.resize, rig-verified)\n");
 
         fdk_window_destroy(cw);
+
+        /* ---- 1.2.5: query_pointer hit-testing unification ----
+         *
+         * The contract the X11 side always ran: "inside" means
+         * inside the CURRENT geometry. The Wayland op used to answer
+         * from pointer_focus alone, so a window that SHRANK under a
+         * stationary pointer reported inside with cached coordinates
+         * OUTSIDE the new size — window_revalidate_pointer then
+         * routed a synthetic out-of-bounds MOTION where the X11
+         * backend delivers the honest LEAVE. The client resize path
+         * makes the stale-cache state deterministic: last_size is
+         * client-set at request time, while the seat cache still
+         * holds the pre-resize position (no compositor round-trip
+         * needed to observe it). */
+        {
+            fdk_window *qw = NULL;
+            fdk_window_options qopts = { .title = "FDK query contract",
+                                         .width = 300, .height = 200 };
+            assert(fdk_ok(fdk_window_create(ctx, &qopts, &qw)));
+            fdk_widget *qroot = NULL;
+            assert(fdk_ok(fdk_window_get_root(qw, &qroot)));
+            fdk_widget_set_background(qroot,
+                                      (fdk_color){0.25f, 0.25f, 0.35f, 1.0f});
+            fdk_window_set_resizable(qw, true);
+            assert(fdk_ok(fdk_window_set_decorated(qw, true)));
+            fdk_window_show(qw);
+            pump_and_paint(ctx, qw, 500);
+
+            /* Hover the maximize button (the rig floats org.fdk.test
+             * windows at (100,60); output = window-local + that). */
+            fdk_rect qmax = qw->deco_btn_max;
+            assert(qmax.width > 0 && qmax.height > 0);
+            char move[64];
+            snprintf(move, sizeof move, "move %d %d",
+                     100 + qmax.x + qmax.width / 2,
+                     60 + qmax.y + qmax.height / 2);
+            wayland_inject(move);
+            pump_and_paint(ctx, qw, 300);
+            assert(fdk__window_deco_hover(qw) == 2);
+
+            /* Shrink under the stationary pointer, then interrogate
+             * the op BEFORE any pump: pointer_focus still points
+             * here with pre-resize coordinates; last_size is already
+             * 120x100. The unified contract must answer OUTSIDE. */
+            fdk_window_resize(qw, 120, 100);
+            assert(qw->ops->window_query_pointer != NULL);
+            fdk_i32 qx = -999, qy = -999;
+            assert(qw->ops->window_query_pointer(qw->pwindow, &qx,
+                                                 &qy) == 0);
+            printf("[ok] wayland query: shrunken geometry reports the "
+                   "pointer as outside (the unified hit-test "
+                   "contract, same as X11)\n");
+
+            /* The observable half: the revalidation flush delivers
+             * the clearing path — hover and cursor neutral. */
+            pump_and_paint(ctx, qw, 400);
+            assert(fdk__window_deco_hover(qw) == 0);
+            assert(fdk__window_cursor_edge(qw) == 0);
+            printf("[ok] wayland query: hover and cursor cleared "
+                   "after the out-of-bounds shrink (leave "
+                   "synthesis)\n");
+
+            fdk_window_destroy(qw);
+        }
         wayland_injector_stop();
     } else {
         printf("[skip] wayland cursor section (fdk-wl-inject "

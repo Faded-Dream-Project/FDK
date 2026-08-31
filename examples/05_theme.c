@@ -19,16 +19,11 @@
  * and runs from the repository root (the theme files are relative).
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static struct {
-    fdk_window *window;
-    bool quit;
-} app;
 
 static fdk_font *font16 = NULL;
 static fdk_widget *title = NULL;
@@ -36,6 +31,7 @@ static fdk_widget *status = NULL;
 static fdk_widget *progress = NULL;
 static fdk_widget *root = NULL;
 static fdk_widget *next_btn = NULL;
+static fdk_example *g_ex = NULL;
 
 /* The cycle: built-in, then two parsed files. */
 #define THEME_COUNT 3
@@ -50,11 +46,20 @@ static const char *THEME_FILES[] = {
 
 /* Applies the app's own themed styling on top of the engine's
  * repaint: root surface color and title accent come from tokens of
- * the theme that is CURRENT now. */
+ * the theme that is CURRENT now — and the example header (the
+ * helper's chrome) re-themes with it, the documented app-side
+ * re-theme pattern extended to every label the window owns. */
 static void apply_app_theming(void) {
     fdk_widget_set_background(
         root, fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
     fdk_label_set_color(title, fdk_theme_get_color(NULL, FDK_TK_ACCENT));
+    if (g_ex != NULL) {
+        fdk_label_set_color(g_ex->header_label,
+                            fdk_theme_get_color(NULL, FDK_TK_TEXT));
+        fdk_label_set_color(
+            g_ex->header_hint,
+            fdk_theme_get_color(NULL, FDK_TK_TEXT_DISABLED));
+    }
     (void)fdk_label_set_text(status, fdk_theme_name(NULL));
     printf("PHASE: %s\n", fdk_theme_name(NULL));
     fflush(stdout);
@@ -71,24 +76,15 @@ static void on_next_theme(fdk_widget *w, void *user) {
 static void on_quit(fdk_widget *w, void *user) {
     (void)w;
     (void)user;
-    app.quit = true;
+    if (g_ex != NULL) {
+        g_ex->quit = true;
+    }
 }
 
 static void print_rig_rect(const char *what, fdk_widget *w) {
     fdk_rect b = fdk_widget_get_absolute_bounds(w);
     printf("RIG: %s %d %d %d %d\n", what, b.x, b.y, b.width, b.height);
     fflush(stdout);
-}
-
-static void window_event(fdk_window *window, const fdk_event_data *event,
-                         void *user_data) {
-    (void)window;
-    (void)user_data;
-    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST ||
-        (event->type == FDK_EVENT_KEY_DOWN &&
-         event->key.scancode == FDK_KEY_ESC)) {
-        app.quit = true;
-    }
 }
 
 int main(void) {
@@ -120,36 +116,24 @@ int main(void) {
     themes[0] = NULL; /* the built-in is installed via set_default(NULL) */
 
     fdk_context *ctx = NULL;
-    if (!fdk_ok(fdk_init(&ctx, NULL))) {
-        fprintf(stderr, "fdk_init failed (no display?)\n");
+    if (!fdk_example_init(&ctx, "05")) {
         return 1;
     }
 
-    fdk_window_options wopts = {
-        .title = "FDK 05 — theme engine",
-        .width = 460,
-        .height = 330,
-    };
-    if (!fdk_ok(fdk_window_create(ctx, &wopts, &app.window))) {
-        fprintf(stderr, "fdk_window_create failed\n");
+    fdk_example ex;
+    if (!fdk_example_open(&ex, ctx, "05", "theme engine", 460, 395)) {
         fdk_shutdown(ctx);
         return 1;
     }
-    fdk_window_set_event_callback(app.window, window_event, NULL);
-
-    (void)fdk_window_get_root(app.window, &root);
-
-    fdk_widget *content = NULL;
-    (void)fdk_box_create(root, FDK_VERTICAL, &content);
-    fdk_box_set_padding(content, 14);
-    fdk_box_set_spacing(content, 10);
-    fdk_window_set_content(app.window, content);
+    g_ex = &ex;
+    root = ex.root;
+    fdk_widget *content = ex.content;
 
     title = NULL;
     (void)fdk_label_create(content, font16, "Theme engine", &title);
 
-    status = NULL;
-    (void)fdk_label_create(content, font16, "", &status);
+    /* The demo's status line IS the helper's (bottom of the frame). */
+    status = ex.status;
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 
@@ -178,10 +162,9 @@ int main(void) {
     fdk_widget_set_natural_size(progress, 0, 14);
     fdk_widget_set_expand(progress, true, false);
 
-    fdk_window_show(app.window);
+    /* fdk_example_open already showed + painted the frame; the
+     * theming pass re-styles it and the first pump repaints. */
     apply_app_theming();
-    (void)fdk_window_paint(app.window);
-
     /* Report button geometry to the rig AFTER the first layout. */
     print_rig_rect("next", next_btn);
     print_rig_rect("quit", quit_btn);
@@ -189,48 +172,23 @@ int main(void) {
     const char *anim = getenv("FDK_DEMO_ANIMATE");
     const bool animate =
         anim != NULL && anim[0] != '\0' && strcmp(anim, "0") != 0;
-    const char *limit_s = getenv("FDK_DEMO_FRAMES");
-    const int frame_limit = (limit_s != NULL) ? atoi(limit_s) : 0;
 
-    int frames = 0;
-    while (!app.quit) {
-        (void)fdk_pump_events(ctx, 15);
-        if (app.quit) {
-            break;
-        }
-
+    while (fdk_example_pump(&ex)) {
         /* One startup sweep (every theme is seen mid-motion), then
          * the meter holds — an idle app presents nothing. The rig can
          * keep it sweeping with FDK_DEMO_ANIMATE=1. */
-        if (frames < 400 || animate) {
+        if (ex.frames < 400 || animate) {
             fdk_progress_set_fraction(progress,
-                                      (fdk_f32)(frames % 200) / 199.0f);
-        }
-
-        fdk_surface *surface = NULL;
-        if (fdk_ok(fdk_window_get_surface(app.window, &surface)) &&
-            !fdk_surface_frame_ready(surface)) {
-            continue;
-        }
-        if (fdk_widget_tree_has_damage(root)) {
-            (void)fdk_window_paint(app.window);
-        }
-        frames++;
-
-        if (frame_limit > 0 && frames >= frame_limit) {
-            break;
+                                      (fdk_f32)(ex.frames % 200) / 199.0f);
         }
     }
 
-    printf("05_theme: exited cleanly after %d frames\n", frames);
+    /* Owned resources go first (nothing paints after the loop);
+     * fdk_example_close handles window → helper font → context. */
     fdk_font_destroy(font16);
-    if (app.window != NULL) {
-        fdk_window_destroy(app.window);
-        app.window = NULL;
-    }
     for (int i = 1; i < THEME_COUNT; i++) {
         fdk_theme_destroy(themes[i]);
     }
-    fdk_shutdown(ctx);
+    fdk_example_close(&ex);
     return 0;
 }

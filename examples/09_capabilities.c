@@ -54,9 +54,14 @@
  * Close the window or press ESC to exit; FDK_DEMO_FRAMES=N exits
  * after N pump iterations (the automation knob every rig uses).
  * Fonts come from fdk_font_load_system_default().
+ *
+ * INIT-tier helper user (see example_window.h): the demo owns its
+ * manual-bounds playground (the drop targets and drag panels live
+ * at fixed window coordinates). The helper still provides the
+ * uniform app_id (org.fdk.example09).
  */
 
-#include "fdk/fdk.h"
+#include "example_window.h"
 #include "fdk/fdk_dialog.h"
 #include "fdk/fdk_dnd.h"
 
@@ -682,10 +687,7 @@ static void relayout(void) {
 int main(void) {
     memset(&app, 0, sizeof(app));
 
-    fdk_init_options init = {0};
-    init.app_id = "09_capabilities";
-    if (!fdk_ok(fdk_init(&app.ctx, &init))) {
-        fprintf(stderr, "09_capabilities: no display — see docs\n");
+    if (!fdk_example_init(&app.ctx, "09")) {
         return 1;
     }
     app.font = fdk_font_load_system_default(15);

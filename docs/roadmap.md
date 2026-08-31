@@ -2800,3 +2800,92 @@ event (compositors may ignore it — documented in fdk_clipboard.h);
 the rig mints real serials exactly as a real desktop would. The
 one-clipboard-per-context, text-only, no-PRIMARY scope notes all
 stand.
+
+### 1.2.5 — the shared example-window helper, the unified cursor hit-test, and the ten-example rigs
+
+Two standing release-quality items landed here: the example-suite
+helper (the "every demo hand-rolls its own window" debt) and the
+query_pointer hit-test unification (the last X11/Wayland contract
+divergence in the cursor/hover revalidation path). Plus the rigs
+grew teeth: both example suites now run all TEN demos.
+
+THE EXAMPLE HELPER (examples/example_window.h, header-only):
+
+Every demo used to hand-roll the same boilerplate — fdk_init with
+or without an app_id, a window titled however it felt that day, its
+own close/Escape handling, its own pump loop. Ten programs, ten
+spellings. The helper makes the suite uniform: fdk_example_init
+(app_id "org.fdk.exampleNN" — taskbars and rig rules can address
+each demo), fdk_example_open (the standard window: "FDK NN — name"
+title, an in-window HEADER — name left, "Esc — quit" hint right,
+hairline below, so the label survives in every screenshot even when
+the WM titlebar is cropped — plus a content box and a status line),
+fdk_example_pump (ONE loop pass: events, then a damage-gated,
+frame-paced paint), fdk_example_run, fdk_example_close (window,
+then the helper's font, then the context — and the "exited cleanly"
+line the rigs grep). Quit semantics live in ONE place (WM close +
+Escape flip ex->quit); demos needing window-level events chain
+through the observe-only ex->on_event hook.
+
+Two integration tiers, both real: FULL (open + content in
+ex->content) for the box-layout demos — 01, 03, 04, 05, 08, the
+narrator rebuilt as a box form whose narration sink IS the helper's
+status line; INIT (init only, the demo owns its window) for the
+demos whose subject IS the chrome or the raw framebuffer — 02 (a
+widget frame would fight the direct surface writes), 06 (the FDK
+band is the titlebar), 07/09/10 (manual-bounds playgrounds). The
+09/10 app_ids normalized to the org.fdk.exampleNN scheme.
+
+THE UNIFIED HIT-TEST (the last cursor-contract divergence):
+
+window_revalidate_pointer (the 1.1.4 hover/cursor revalidation
+after a geometry change) asks each backend one question: "is the
+pointer inside the window's CURRENT geometry?" The X11 op always
+answered with the bounds check (XQueryPointer's window-local
+coordinates vs the last ConfigureNotify size). The Wayland op
+answered from the seat's pointer_focus ALONE — so a window that
+SHRANK under a stationary pointer (the unmaximize case the
+revalidation exists for) kept answering "inside" with cached
+coordinates outside the new size, and the revalidation routed a
+synthetic out-of-bounds MOTION where the X11 backend delivers the
+honest LEAVE. Fix: the Wayland op runs the identical check against
+its last acked size — same coordinate space wl_pointer delivers,
+both integer- and fractional-scale projection paths. Both comments
+now state the contract in the same words ("nonzero only when the
+pointer is within the window's current geometry").
+
+The regression is load-bearing (proven against the pre-fix body):
+the client resize path updates last_size synchronously while the
+seat cache still holds the pre-resize position, so the suite
+interrogates the op BEFORE any compositor round-trip — the stale
+state is deterministic, the seam assert fails on the old code, and
+the observable half (hover + cursor cleared by the leave
+synthesis) follows after the flush.
+
+THE RIGS GREW TEETH (and were caught lying twice):
+
+- Both example rigs now run all TEN demos (09/10 were never in
+  either; the X11 rig's dark-content check covers them, and the
+  sway rig pixel-verifies their mapped windows).
+- The sway examples rig BUILDS the examples first: it once
+  verified a whole suite against stale PNGs after the clip-interop
+  rig make-cleaned the tree in between (the Task-24 lesson,
+  repeated).
+- The Wayland test rig's sway config lost the floating pin
+  ("org.fdk.test windows at (100,60)") the injector-driven
+  coordinates are computed from — under tiling every click missed
+  and the suite failed at the first injected button press.
+  Restored, with a comment stating why it is load-bearing.
+- grim (the capture half of every sway rig) is NOT part of sway's
+  dependency closure: it silently vanished with the prefix, and
+  the rig "passed" against the previous session's captures. The
+  sway-restore script (rebuild_sway_rig.sh — the durable recovery
+  path for the recurring /home/z/apt wipe) now fetches it too, and
+  verifies sway actually starts headless.
+
+Verification battery on the final tree: headless suite green;
+X11 integration suite green; Xvfb example rig 10/10 pixel-verified
++ clean exits; Wayland integration suite 27 [ok] under sway
+(including the new query-contract test, both halves); clipboard
+interop rig three-directions green; sway example rig 10/10
+pixel-verified on FRESH captures; release config zero warnings.
