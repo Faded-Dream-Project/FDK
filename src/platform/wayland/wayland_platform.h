@@ -82,6 +82,7 @@ struct fdk_platform_connection {
     struct {
         struct wl_output *output;
         int scale; /* wl_output::scale, or 0 once the global is gone */
+        uint32_t name; /* registry global name (retirement key) */
     } *outputs;
     size_t output_count;
     size_t output_capacity;
@@ -401,10 +402,14 @@ struct fdk_platform_window {
 
 /* Registry helpers, implemented in wayland_registry.c. */
 /* HiDPI output tracking (wayland_registry.c). track_output binds
- * listener state for a freshly bound wl_output; destroy_outputs
- * releases everything at disconnect. */
+ * listener state for a freshly bound wl_output (name = its registry
+ * global, the retirement key); forget_output retires a record whose
+ * global went away (scale 0 = "gone", proxy released);
+ * destroy_outputs releases everything at disconnect. */
 void fdk_wayland_track_output(fdk_platform_connection *conn,
-                              struct wl_output *output);
+                              struct wl_output *output, uint32_t name);
+void fdk_wayland_forget_output(fdk_platform_connection *conn,
+                               uint32_t name);
 void fdk_wayland_destroy_outputs(fdk_platform_connection *conn);
 
 fdk_result fdk_wayland_register_window(fdk_platform_connection *conn,

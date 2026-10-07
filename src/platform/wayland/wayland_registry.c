@@ -115,7 +115,7 @@ static const struct wl_output_listener g_output_listener = {
 };
 
 void fdk_wayland_track_output(fdk_platform_connection *conn,
-                              struct wl_output *output) {
+                              struct wl_output *output, uint32_t name) {
     if (conn->output_count == conn->output_capacity) {
         size_t cap = conn->output_capacity == 0 ? 4 : conn->output_capacity * 2;
         /* fdk_reallocarray-style growth with overflow check. */
@@ -133,8 +133,27 @@ void fdk_wayland_track_output(fdk_platform_connection *conn,
     }
     conn->outputs[conn->output_count].output = output;
     conn->outputs[conn->output_count].scale = 1; /* until the scale event */
+    conn->outputs[conn->output_count].name = name;
     conn->output_count++;
     wl_output_add_listener(output, &g_output_listener, conn);
+}
+
+/* Retires the record whose registry global went away (1.3.1): the
+ * scale walk already treats 0 as "gone"; releasing the proxy now is
+ * the honest bookkeeping (the global — and therefore the object —
+ * no longer exists server-side). */
+void fdk_wayland_forget_output(fdk_platform_connection *conn,
+                               uint32_t name) {
+    for (size_t i = 0; i < conn->output_count; i++) {
+        if (conn->outputs[i].name == name) {
+            if (conn->outputs[i].output != NULL) {
+                wl_output_destroy(conn->outputs[i].output);
+                conn->outputs[i].output = NULL;
+            }
+            conn->outputs[i].scale = 0; /* gone: the max-scale skip */
+            return;
+        }
+    }
 }
 
 /* Releases every tracked output (disconnect path). */

@@ -16,16 +16,26 @@
 static void registry_global(void *data, struct wl_registry *registry,
                              uint32_t name, const char *interface, uint32_t version) {
     fdk_platform_connection *conn = data;
-    (void)version;
+    /* Bind-version discipline (1.3.1): bind at min(wanted,
+     * advertised). Requesting a version HIGHER than the compositor
+     * advertised is a client protocol error that KILLS the
+     * connection — v1 hardcoded its wanted versions, which worked
+     * on the rigs it was tested against (sway/weston advertise
+     * plenty) and would have died on any older compositor. */
+    uint32_t v = version;
 
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
-        conn->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
+        if (v > 4) v = 4;
+        conn->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, v);
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
-        conn->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
+        if (v > 1) v = 1;
+        conn->shm = wl_registry_bind(registry, name, &wl_shm_interface, v);
     } else if (strcmp(interface, wl_seat_interface.name) == 0) {
-        conn->seat = wl_registry_bind(registry, name, &wl_seat_interface, 5);
+        if (v > 5) v = 5;
+        conn->seat = wl_registry_bind(registry, name, &wl_seat_interface, v);
     } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
-        conn->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
+        if (v > 1) v = 1;
+        conn->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, v);
     } else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0) {
         /* OPTIONAL global (Phase 8): its absence is not an error and
          * costs nothing client-side — a compositor without this
@@ -33,9 +43,10 @@ static void registry_global(void *data, struct wl_registry *registry,
          * xdg-shell default), so FDK's own band still comes up; only
          * the platform-chrome direction (set_decorated(false))
          * reports FDK_ERR_UNSUPPORTED then. */
+        uint32_t dv = version < 1 ? version : 1;
         conn->decoration_manager =
             wl_registry_bind(registry, name,
-                             &zxdg_decoration_manager_v1_interface, 1);
+                             &zxdg_decoration_manager_v1_interface, dv);
     } else if (strcmp(interface, wl_data_device_manager_interface.name) == 0) {
         /* OPTIONAL global (Phase 9): wl_data_device_manager is the
          * clipboard (and drag-and-drop) factory. Absent -> the
@@ -45,31 +56,36 @@ static void registry_global(void *data, struct wl_registry *registry,
          * v3 and are ignored — FDK does no DnD). */
         conn->data_device_manager =
             wl_registry_bind(registry, name,
-                             &wl_data_device_manager_interface, 3);
+                             &wl_data_device_manager_interface,
+                             version < 3 ? version : 3);
         fdk_wayland_clipboard_device_ready(conn);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         /* HiDPI (Phase 3 completion): bind every output at the
          * highest version both sides support, capped at 3 — v2 adds
          * the scale + done events (the minimum FDK needs), v3 only
-         * adds name/description strings FDK has no use for. */
-        uint32_t v = version < 2 ? version : (version > 3 ? 3 : version);
+         * adds name/description strings FDK has no use for. The
+         * registry NAME rides along so global_remove can retire the
+         * right record (1.3.1). */
+        uint32_t ov = version < 2 ? version : (version > 3 ? 3 : version);
         struct wl_output *output =
-            wl_registry_bind(registry, name, &wl_output_interface, v);
+            wl_registry_bind(registry, name, &wl_output_interface, ov);
         if (output != NULL) {
-            fdk_wayland_track_output(conn, output);
+            fdk_wayland_track_output(conn, output, name);
         }
     } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
         /* OPTIONAL (HiDPI): the source-rectangle mechanism fractional
          * scaling rides on. Absent -> integer buffer scale only. */
+        uint32_t vv = version < 1 ? version : 1;
         conn->viewporter =
-            wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
+            wl_registry_bind(registry, name, &wp_viewporter_interface, vv);
     } else if (strcmp(interface,
                       wp_fractional_scale_manager_v1_interface.name) == 0) {
         /* OPTIONAL (HiDPI): per-window preferred scale in 120ths.
          * Absent -> integer buffer scale only. */
+        uint32_t fv = version < 1 ? version : 1;
         conn->fractional_manager =
             wl_registry_bind(registry, name,
-                             &wp_fractional_scale_manager_v1_interface, 1);
+                             &wp_fractional_scale_manager_v1_interface, fv);
     }
     /* Other globals (wl_data_device_manager, etc.) are
      * intentionally not bound — out of current scope, see
@@ -79,16 +95,17 @@ static void registry_global(void *data, struct wl_registry *registry,
 
 static void registry_global_remove(void *data, struct wl_registry *registry,
                                     uint32_t name) {
-    (void)data;
     (void)registry;
-    (void)name;
-    /* Global removal (e.g. a seat unplugged) isn't handled in Phase
-     * 2 — logged if it ever matters in practice, not silently eaten,
-     * but not acted on. Acting on it correctly means detaching any
-     * windows/input state bound to that global, which is a real
-     * feature to design, not a one-line fix; deferred honestly rather
-     * than half-implemented. */
-    FDK_WARN("registry global %u removed (not handled in Phase 2)", name);
+    fdk_platform_connection *conn = data;
+    /* Output hot-unplug (1.3.1): retire the matching record — scale
+     * 0 = "gone", exactly what the max-scale walk already skips (the
+     * contract wayland_platform.h always documented but never
+     * implemented). A seat/global going away mid-session is logged
+     * honestly: correctly detaching live input state bound to a dead
+     * global is a real feature, not a one-line fix, and no compositor
+     * a sane person runs removes a seat out from under its clients. */
+    fdk_wayland_forget_output(conn, name);
+    FDK_WARN("registry global %u removed", name);
 }
 
 static const struct wl_registry_listener g_registry_listener = {
