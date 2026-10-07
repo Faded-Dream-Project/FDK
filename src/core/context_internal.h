@@ -49,6 +49,33 @@ struct fdk_context {
     fdk_window **windows;
     size_t window_count;
     size_t window_capacity;
+
+    /* Timers (1.3.1): pointer array so public fdk_timer* handles stay
+     * stable across growth. See fdk_core.h for the contract. */
+    fdk_timer **timers;
+    size_t timer_count;
+    size_t timer_capacity;
+    /* The timer whose callback is on the stack RIGHT NOW (NULL when
+     * none): fdk_timer_remove on THIS handle only deactivates — the
+     * fire loop performs the unlink+free after the callback returns,
+     * so a self-removing callback cannot free the record the loop is
+     * still about to touch. Saved/restored around each callback so
+     * nested pumps nest cleanly. */
+    fdk_timer *timer_firing;
+};
+
+/* The timer record itself. `active` is the removal flag: the fire
+ * loop snapshots the pointer array, but re-checks active before
+ * every callback (a prior callback may have removed a later timer)
+ * — the same discipline the a11y registry snapshot uses. */
+struct fdk_timer {
+    fdk_context *ctx;
+    fdk_u32 interval_ms;
+    bool repeating;
+    bool active;
+    fdk_timer_fn fn;
+    void *user_data;
+    long long deadline_ms; /* CLOCK_MONOTONIC, same clock as the pump */
 };
 
 /* Called by fdk_window_create() (src/window/window.c) after a window is

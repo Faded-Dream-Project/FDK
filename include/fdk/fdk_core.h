@@ -88,13 +88,80 @@ void fdk_run(fdk_context *ctx);
  * negative = block indefinitely until something arrives. EINTR during
  * the wait is absorbed and reported as "0 events dispatched".
  *
- * Returns the number of events dispatched (>= 0), or a negative
- * fdk_result code on failure — FDK_ERR_INVALID_ARGUMENT,
+ * Due timers fire inside this call (after the event drain, in
+ * deadline order); their count adds to the return value, so the
+ * canonical `pump; paint;` loop repaints timer-driven changes (caret
+ * blinks, animations) without any extra plumbing. The wait itself is
+ * capped at the next timer deadline: an indefinite timeout_ms (-1)
+ * with live timers still wakes up to fire them.
+ *
+ * Returns the number of events dispatched plus timers fired (>= 0),
+ * or a negative fdk_result code on failure — FDK_ERR_INVALID_ARGUMENT,
  * FDK_ERR_NOT_INITIALIZED (no platform connection), or the negative
  * fdk_result the backend's dispatch reported for an unrecoverable
  * connection failure (treat the connection as dead; fdk_run() stops
  * its loop on the same condition). */
 int fdk_pump_events(fdk_context *ctx, int timeout_ms);
+
+/* ---- Timers (1.3.1) ----
+ *
+ * The event loop's clock: callbacks fired between event batches, in
+ * deadline order, on the UI thread, from fdk_pump_events() (and
+ * therefore fdk_run()). Timers are what "repaint every 16ms",
+ * "blink the caret every 530ms", "poll the sensor every second",
+ * and "dismiss the toast after 4s" all look like — one primitive
+ * instead of four hand-rolled pump-loop shapes.
+ *
+ * Clock: CLOCK_MONOTONIC, like the pump's own timeout budget. A
+ * timer may fire LATE (the loop was busy, the caller's timeout
+ * quantum rounded up) but never early. Repeating timers re-arm from
+ * the FIRING time (now + interval), not the scheduled deadline — a
+ * missed beat is skipped, never caught up in a burst.
+ *
+ * Reentrancy: a callback may add timers, remove any timer (including
+ * itself — removal inside its own callback is safe), call fdk_quit(),
+ * destroy windows and widgets. Removal is synchronous: a removed
+ * timer never fires again, even if it was already due. Timers added
+ * from inside a firing callback are first considered on the NEXT
+ * pump call (a 0ms timer added in a callback fires as soon as the
+ * caller pumps again — use that for "run this after the current
+ * batch settles" deferrals).
+ *
+ * Detached trees (no window) have no context and no timers; timers
+ * belong to the fdk_context, and the widget-internal consumers
+ * (caret blink, indeterminate progress) resolve their window's
+ * context the same way the Entry resolves the clipboard.
+ */
+
+typedef struct fdk_timer fdk_timer;
+
+/* Timer callback. `timer` is the firing timer (reset/remove are both
+ * legal inside); `user_data` is what fdk_timer_add received. */
+typedef void (*fdk_timer_fn)(fdk_timer *timer, void *user_data);
+
+/* Adds a timer to `ctx` that will fire after `interval_ms`
+ * milliseconds. `repeating` = false: fires ONCE, then removes and
+ * FREES itself — the handle is dangling from that moment, exactly
+ * like any other freed C pointer: do not pass it to any timer
+ * function afterwards. `repeating` = true: fires every interval_ms
+ * until removed. interval_ms 0 is legal (fires on every pump call;
+ * the deferred-callback idiom above). Returns NULL on invalid
+ * arguments or allocation failure. */
+fdk_timer *fdk_timer_add(fdk_context *ctx, fdk_u32 interval_ms,
+                         bool repeating, fdk_timer_fn fn,
+                         void *user_data);
+
+/* Removes the timer immediately (no further firings, including a
+ * firing already due this pump call) and frees it — the handle is
+ * dangling afterwards. Legal from inside the timer's own callback
+ * (the free is deferred until the callback returns). NULL is a safe
+ * no-op. */
+void fdk_timer_remove(fdk_timer *timer);
+
+/* Re-arms a timer: the next firing is interval_ms from NOW (and for
+ * repeating timers, the cadence continues from there). Legal on both
+ * live and one-shot-pending timers; a no-op on dead/NULL handles. */
+void fdk_timer_reset(fdk_timer *timer, fdk_u32 interval_ms);
 
 /* Requests that the running fdk_run() event loop stop and return.
  * Safe to call from within an event callback. Has no effect if the

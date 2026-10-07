@@ -160,7 +160,15 @@ typedef struct fdk_check_widget {
 /* ProgressBar. */
 typedef struct fdk_progress {
     fdk_widget base;
-    fdk_f32 fraction; /* [0,1] */
+    fdk_f32 fraction; /* [0,1], determinate mode only */
+    /* Indeterminate mode (1.3.1): an animated block sweeping the
+     * track, driven by the timer queue ("busy" — work is happening
+     * with no known fraction). NULL timer when detached from any
+     * window: the block parks at phase 0 (headless tests see a
+     * static block, never an animation). */
+    bool indeterminate;
+    fdk_timer *pulse_timer;
+    fdk_f32 pulse_phase; /* block origin, [0, 1 + PROGRESS_BLOCK) */
 } fdk_progress;
 
 /* Separator. */

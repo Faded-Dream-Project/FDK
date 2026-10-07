@@ -39,6 +39,11 @@
 #define ENTRY_MAX_TEXT (64u * 1024u) /* bounded input (security.md) */
 #define ENTRY_DBLCLICK_MS 400
 #define ENTRY_DBLCLICK_SLOP 4
+/* Caret blink cadence (1.3.1, timers): GTK's 530ms, the desktop
+ * convention — two full blinks per second reads as "alive" without
+ * distracting. The phase RESETS on every caret move/edit (the same
+ * restart-on-activity rule GTK applies). */
+#define ENTRY_BLINK_MS 530
 
 typedef struct fdk_entry {
     fdk_widget base;
@@ -64,10 +69,63 @@ typedef struct fdk_entry {
     bool password;         /* render bullets, not glyphs            */
     bool read_only;        /* selection + copy yes, edits no        */
     size_t max_len;        /* editable cap in bytes; 0 = 64 KiB     */
+    /* Caret blink (1.3.1): NULL when unfocused or detached from any
+     * window (a detached tree has no context — the caret stays solid
+     * there, which is exactly why the headless tests never see it
+     * blink). */
+    fdk_timer *blink_timer;
+    bool caret_on;
 } fdk_entry;
 
 static fdk_entry *entry_of(fdk_widget *w) {
     return (fdk_entry *)(void *)w;
+}
+
+/* ---- caret blink (1.3.1) ---- */
+
+static void entry_blink_tick(fdk_timer *timer, void *user) {
+    (void)timer;
+    fdk_entry *e = user;
+    e->caret_on = !e->caret_on;
+    fdk_widget_invalidate(&e->base);
+}
+
+/* Starts the blink when the entry gains focus; detached trees (no
+ * window -> no context) keep the solid caret — the headless-test
+ * contract stays pixel-stable. */
+static void entry_blink_start(fdk_entry *e) {
+    if (e->blink_timer != NULL) {
+        return;
+    }
+    fdk_context *ctx =
+        fdk__window_context(fdk__widget_window_owner(&e->base));
+    if (ctx == NULL) {
+        return;
+    }
+    e->blink_timer =
+        fdk_timer_add(ctx, ENTRY_BLINK_MS, true, entry_blink_tick, e);
+    e->caret_on = true;
+}
+
+static void entry_blink_stop(fdk_entry *e) {
+    if (e->blink_timer != NULL) {
+        fdk_timer_remove(e->blink_timer);
+        e->blink_timer = NULL;
+    }
+    e->caret_on = true; /* refocus shows the caret immediately */
+}
+
+/* Activity restart: every caret move / edit / focus event puts the
+ * phase back to "visible" and re-arms the timer — the GTK rule. */
+static void entry_blink_restart(fdk_entry *e) {
+    if (e->blink_timer == NULL) {
+        return;
+    }
+    if (!e->caret_on) {
+        e->caret_on = true;
+        fdk_widget_invalidate(&e->base);
+    }
+    fdk_timer_reset(e->blink_timer, ENTRY_BLINK_MS);
 }
 
 /* ---- UTF-8 boundary helpers (stepping shares text.c's decoder) ---- */
@@ -245,8 +303,10 @@ static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
 }
 
 /* Scroll so the caret (or the preedit end, when active) is visible;
- * called after every caret move / edit / resize. */
+ * called after every caret move / edit / resize — which makes it the
+ * single chokepoint for the blink phase restart as well. */
 static void entry_scroll_to_caret(fdk_entry *e) {
+    entry_blink_restart(e);
     fdk_i32 w = e->base.bounds.width;
     if (w <= 0) {
         return;
@@ -670,13 +730,18 @@ static bool entry_handle_event(fdk_widget *w,
         }
         return false;
     }
+    case FDK_WIDGET_FOCUS_IN:
+        entry_blink_start(entry_of(w));
+        return false; /* focus events keep bubbling (containers may
+                         * track the chain for their own borders) */
+    case FDK_WIDGET_FOCUS_OUT:
+        entry_blink_stop(entry_of(w));
+        return false;
     default:
         break;
     }
     return false;
 }
-
-/* ---- paint ---- */
 
 static void entry_paint(fdk_widget *w, fdk_surface *surface,
                         fdk_rect bounds, fdk_rect clip) {
@@ -800,9 +865,12 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         caret_x += pw;
     }
 
-    /* Caret: 1px vertical bar, drawn only when enabled and focused. */
+    /* Caret: 1px vertical bar, drawn only when enabled and focused
+     * (and not in the blink's dark phase — unfocused/detached entries
+     * have no timer and caret_on stays true, preserving the v1 look
+     * everywhere the blink machinery cannot run). */
     if ((w->flags & FDK_WF_ENABLED) != 0 &&
-        (w->flags & FDK_WF_FOCUSED) != 0) {
+        (w->flags & FDK_WF_FOCUSED) != 0 && e->caret_on) {
         fdk_rect bar = {caret_x, bounds.y + 3, 1, bounds.height - 6};
         if (bar.height > 0) {
             fdk_surface_fill_rect(surface, bar, text_col);
@@ -834,6 +902,7 @@ static void entry_measure(fdk_widget *w, fdk_size *out) {
 
 static void entry_destroy(fdk_widget *w) {
     fdk_entry *e = entry_of(w);
+    entry_blink_stop(e);
     fdk_free(e->text);
     fdk_free(e->preedit);
 }
@@ -1001,6 +1070,8 @@ fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
     }
     fdk_entry *e = entry_of(w);
     e->font = font;
+    e->blink_timer = NULL;
+    e->caret_on = true;
     const char *init = (text != NULL) ? text : "";
     size_t len = strlen(init);
     if (len > ENTRY_MAX_TEXT) {

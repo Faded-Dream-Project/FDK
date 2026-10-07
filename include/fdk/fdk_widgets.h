@@ -228,6 +228,17 @@ fdk_result fdk_progress_create(fdk_widget *parent,
 void fdk_progress_set_fraction(fdk_widget *progress, fdk_f32 fraction);
 /* The current fraction, as last set (already clamped). */
 fdk_f32 fdk_progress_get_fraction(fdk_widget *progress);
+/* Indeterminate ("busy") mode (1.3.1): an accent block sweeps the
+ * track on the timer clock (~1.9s per traversal) — the visual answer
+ * to "work is happening, no fraction exists". Entering it clears the
+ * fraction; any set_fraction leaves it (a known fraction beats
+ * busy). The animation needs a window's event loop; detached trees
+ * show a static block. The a11y value interface reports "busy"
+ * instead of a number while active. */
+void fdk_progress_set_indeterminate(fdk_widget *progress,
+                                    bool indeterminate);
+/* Whether busy mode is active. */
+bool fdk_progress_is_indeterminate(fdk_widget *progress);
 
 /* ---- Separator ---- */
 

@@ -20,6 +20,7 @@
 #include "core/alloc_internal.h"
 #include <stdio.h>
 #include "core/log_internal.h"
+#include "../window/window_internal.h" /* timer-driven progress pulse */
 
 /* ---- shared helpers ---- */
 
@@ -640,11 +641,28 @@ size_t fdk_label_get_line_count(fdk_widget *label) {
 /* Natural track height (the create-time request when the app gives
  * no explicit bounds; layout stretches widths via expand). */
 #define PROGRESS_TRACK_H 12
+/* Indeterminate mode: the sweeping block's width, as a fraction of
+ * the track; the sweep cadence, in ms per timer tick and phase step
+ * per tick (a full traversal every ~1.9s — the same visual tempo
+ * GTK's activity mode reads as). */
+#define PROGRESS_BLOCK 0.25f
+#define PROGRESS_PULSE_MS 40
+#define PROGRESS_PULSE_STEP 0.013f
 
 static void progress_measure(fdk_widget *w, fdk_size *out) {
     (void)w;
     out->width = 0;                  /* meaningless without a slot */
     out->height = PROGRESS_TRACK_H; /* the visible track extent    */
+}
+
+static void progress_pulse_tick(fdk_timer *timer, void *user) {
+    (void)timer;
+    fdk_progress *p = user;
+    p->pulse_phase += PROGRESS_PULSE_STEP;
+    if (p->pulse_phase >= 1.0f + PROGRESS_BLOCK) {
+        p->pulse_phase = 0.0f;
+    }
+    fdk_widget_invalidate(&p->base);
 }
 
 static void progress_paint(fdk_widget *w, fdk_surface *surface,
@@ -661,6 +679,36 @@ static void progress_paint(fdk_widget *w, fdk_surface *surface,
     fdk_surface_fill_rounded_rect(surface, bounds, r,
                                   ((w->flags & FDK_WF_ENABLED) != 0) ? fdk__pal_track()
                                              : fdk__pal_control_disabled());
+    if (p->indeterminate) {
+        /* The sweeping block: phase in [0, 1 + BLOCK), so the block
+         * enters from the left, traverses, and exits right before
+         * wrapping — the classic activity-mode read. */
+        fdk_f32 bw_f = PROGRESS_BLOCK * (fdk_f32)bounds.width;
+        fdk_i32 bw = (fdk_i32)(bw_f + 0.5f);
+        if (bw < 2) {
+            bw = 2;
+        }
+        fdk_f32 span = (fdk_f32)bounds.width + (fdk_f32)bw;
+        fdk_i32 x = (fdk_i32)(p->pulse_phase * span - (fdk_f32)bw + 0.5f);
+        fdk_i32 bx0 = bounds.x + x;
+        if (bx0 < bounds.x) {
+            bx0 = bounds.x; /* clip the entering block */
+        }
+        fdk_i32 bx1 = bounds.x + x + bw;
+        if (bx1 > bounds.x + bounds.width) {
+            bx1 = bounds.x + bounds.width; /* and the exiting one */
+        }
+        if (bx1 > bx0) {
+            fdk_rect block = {bx0, bounds.y, bx1 - bx0, bounds.height};
+            fdk_i32 br = r;
+            if (br > (bx1 - bx0) / 2) {
+                br = (bx1 - bx0) / 2;
+            }
+            fdk_surface_fill_rounded_rect(surface, block, br,
+                                          fdk__pal_accent());
+        }
+        return;
+    }
     fdk_i32 fill_w =
         (fdk_i32)((fdk_f32)bounds.width * p->fraction + 0.5f);
     if (fill_w > bounds.width) {
@@ -693,13 +741,28 @@ static void progress_paint(fdk_widget *w, fdk_surface *surface,
 /* ---- a11y ---- */
 
 static void progress_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_progress *p = (const fdk_progress *)(const void *)w;
+    if (p->indeterminate) {
+        /* Busy: no fraction exists to report — say THAT instead of
+         * lying with a number. */
+        out->has_value = false;
+        out->value_text = fdk__strdup("busy");
+        return;
+    }
     out->has_value = true;
     out->value_min = 0.0;
     out->value_max = 1.0;
-    out->value_current =
-        (double)((const fdk_progress *)(const void *)w)->fraction;
+    out->value_current = (double)p->fraction;
     out->value_text = fdk__a11y_valuef("%.0f%%",
                                        out->value_current * 100.0);
+}
+
+static void progress_destroy(fdk_widget *w) {
+    fdk_progress *p = progress_of(w);
+    if (p->pulse_timer != NULL) {
+        fdk_timer_remove(p->pulse_timer);
+        p->pulse_timer = NULL;
+    }
 }
 
 static const fdk_a11y_class progress_a11y = {
@@ -716,7 +779,7 @@ const fdk_widget_class fdk_progress_class_def = {
     .paint = progress_paint,
     .measure = progress_measure,
     .arrange = NULL,
-    .destroy = NULL,
+    .destroy = progress_destroy,
     .a11y = &progress_a11y,
 };
 
@@ -733,6 +796,9 @@ fdk_result fdk_progress_create(fdk_widget *parent,
     }
     fdk_progress *p = progress_of(w);
     p->fraction = 0.0f;
+    p->indeterminate = false;
+    p->pulse_timer = NULL;
+    p->pulse_phase = 0.0f;
     *out_progress = w;
     return FDK_OK;
 }
@@ -747,6 +813,12 @@ void fdk_progress_set_fraction(fdk_widget *progress, fdk_f32 fraction) {
         fraction = 1.0f;
     }
     fdk_progress *p = progress_of(progress);
+    if (p->indeterminate) {
+        /* A fraction implies knowledge: set_fraction leaves activity
+         * mode (the GTK contract — the app learned how far along it
+         * is). */
+        fdk_progress_set_indeterminate(progress, false);
+    }
     if (p->fraction == fraction) {
         return;
     }
@@ -761,6 +833,48 @@ fdk_f32 fdk_progress_get_fraction(fdk_widget *progress) {
         return 0.0f;
     }
     return progress_of(progress)->fraction;
+}
+
+void fdk_progress_set_indeterminate(fdk_widget *progress,
+                                    bool indeterminate) {
+    if (progress == NULL || progress->klass != &fdk_progress_class_def) {
+        return;
+    }
+    fdk_progress *p = progress_of(progress);
+    if (p->indeterminate == indeterminate) {
+        return;
+    }
+    p->indeterminate = indeterminate;
+    if (indeterminate) {
+        p->fraction = 0.0f;
+        p->pulse_phase = 0.0f;
+        /* Detached trees have no context — the block parks at phase
+         * 0 (a static block, honest about being busy without the
+         * animation the headless world has no clock for). */
+        fdk_context *ctx =
+            fdk__window_context(fdk__widget_window_owner(&p->base));
+        if (ctx != NULL && p->pulse_timer == NULL) {
+            p->pulse_timer = fdk_timer_add(ctx, PROGRESS_PULSE_MS, true,
+                                           progress_pulse_tick, p);
+        }
+        /* A11y: busy state — the value interface stops claiming a
+         * fraction it does not have. */
+        fdk__a11y_notify(progress, FDK_A11Y_STATE_CHANGED, 0);
+    } else {
+        if (p->pulse_timer != NULL) {
+            fdk_timer_remove(p->pulse_timer);
+            p->pulse_timer = NULL;
+        }
+        fdk__a11y_notify(progress, FDK_A11Y_STATE_CHANGED, 0);
+    }
+    fdk_widget_invalidate(progress);
+}
+
+bool fdk_progress_is_indeterminate(fdk_widget *progress) {
+    if (progress == NULL || progress->klass != &fdk_progress_class_def) {
+        return false;
+    }
+    return progress_of(progress)->indeterminate;
 }
 
 /* ---- Separator ---- */

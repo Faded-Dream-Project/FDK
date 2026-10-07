@@ -36,6 +36,178 @@ static char *dup_string(const char *s) {
     return copy;
 }
 
+/* ---- timers (1.3.1) ----------------------------------------------------
+ *
+ * One queue on the context, fired from the pump between event
+ * batches (deadline order, LATE allowed / never early). See
+ * fdk_core.h for the public contract. */
+
+static long long timers_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000LL +
+           (long long)ts.tv_nsec / 1000000LL;
+}
+
+fdk_timer *fdk_timer_add(fdk_context *ctx, fdk_u32 interval_ms,
+                         bool repeating, fdk_timer_fn fn,
+                         void *user_data) {
+    if (ctx == NULL || fn == NULL) {
+        return NULL;
+    }
+    if (ctx->timer_count == ctx->timer_capacity) {
+        size_t cap = (ctx->timer_capacity == 0) ? 8
+                                                : ctx->timer_capacity * 2;
+        if (cap < ctx->timer_capacity ||
+            cap > SIZE_MAX / sizeof(fdk_timer *)) {
+            return NULL; /* refuse absurd growth */
+        }
+        fdk_timer **grown =
+            fdk_realloc(ctx->timers, cap * sizeof(*grown));
+        if (grown == NULL) {
+            return NULL;
+        }
+        ctx->timers = grown;
+        ctx->timer_capacity = cap;
+    }
+    fdk_timer *t = fdk_alloc(sizeof(*t));
+    if (t == NULL) {
+        return NULL;
+    }
+    t->ctx = ctx;
+    t->interval_ms = interval_ms;
+    t->repeating = repeating;
+    t->active = true;
+    t->fn = fn;
+    t->user_data = user_data;
+    t->deadline_ms = timers_now_ms() + (long long)interval_ms;
+    ctx->timers[ctx->timer_count++] = t;
+    return t;
+}
+
+/* Unlinks a dead timer from the queue and frees it. Only called
+ * when the record is NOT the currently-firing one (whose free the
+ * fire loop defers — see the struct comment). */
+static void timer_unlink_free(fdk_context *ctx, fdk_timer *t) {
+    for (size_t i = 0; i < ctx->timer_count; i++) {
+        if (ctx->timers[i] == t) {
+            ctx->timers[i] = ctx->timers[--ctx->timer_count];
+            break;
+        }
+    }
+    fdk_free(t);
+}
+
+void fdk_timer_remove(fdk_timer *timer) {
+    if (timer == NULL || !timer->active) {
+        return;
+    }
+    timer->active = false; /* never fires again, even if already due */
+    fdk_context *ctx = timer->ctx;
+    if (ctx->timer_firing == timer) {
+        /* Its own callback is removing it: the fire loop frees the
+         * record after the callback returns (touching it here would
+         * free the very record that loop still holds). */
+        return;
+    }
+    timer_unlink_free(ctx, timer);
+}
+
+void fdk_timer_reset(fdk_timer *timer, fdk_u32 interval_ms) {
+    if (timer == NULL || !timer->active) {
+        return;
+    }
+    timer->interval_ms = interval_ms;
+    timer->deadline_ms = timers_now_ms() + (long long)interval_ms;
+}
+
+/* Earliest live deadline; false when no live timers exist. */
+static bool timers_next_deadline(fdk_context *ctx,
+                                 long long *out_deadline_ms) {
+    bool any = false;
+    long long best = 0;
+    for (size_t i = 0; i < ctx->timer_count; i++) {
+        fdk_timer *t = ctx->timers[i];
+        if (!any || t->deadline_ms < best) {
+            best = t->deadline_ms;
+            any = true;
+        }
+    }
+    if (any && out_deadline_ms != NULL) {
+        *out_deadline_ms = best;
+    }
+    return any;
+}
+
+/* Fires every due timer (deadline order), returns how many fired.
+ * Snapshot + re-check discipline: a callback may remove later timers
+ * (skipped), add timers (considered next pump — the documented
+ * deferral idiom), or quit the loop. Repeating timers re-arm from
+ * the FIRING time (missed beats are skipped, never caught up). */
+static int timers_fire_due(fdk_context *ctx) {
+    if (ctx->timer_count == 0) {
+        return 0;
+    }
+    long long now = timers_now_ms();
+    /* Collect the due set (indices move under removals, so snapshot
+     * the pointers themselves). */
+    fdk_timer **due = NULL;
+    size_t due_n = 0;
+    for (size_t i = 0; i < ctx->timer_count; i++) {
+        if (ctx->timers[i]->deadline_ms <= now) {
+            due_n++;
+        }
+    }
+    if (due_n == 0) {
+        return 0;
+    }
+    due = fdk_alloc_array(due_n, sizeof(*due));
+    if (due == NULL) {
+        return 0; /* OOM: skip this round — timers fire next pump */
+    }
+    size_t k = 0;
+    for (size_t i = 0; i < ctx->timer_count; i++) {
+        if (ctx->timers[i]->deadline_ms <= now) {
+            due[k++] = ctx->timers[i];
+        }
+    }
+    /* Deadline order (stable enough: ties fire in add order). */
+    for (size_t i = 1; i < due_n; i++) {
+        fdk_timer *key = due[i];
+        size_t j = i;
+        while (j > 0 && due[j - 1]->deadline_ms > key->deadline_ms) {
+            due[j] = due[j - 1];
+            j--;
+        }
+        due[j] = key;
+    }
+    int fired = 0;
+    for (size_t i = 0; i < due_n; i++) {
+        fdk_timer *t = due[i];
+        if (!t->active || t->ctx != ctx) {
+            continue; /* removed (or cross-context: impossible) */
+        }
+        if (t->repeating) {
+            t->deadline_ms = now + (long long)t->interval_ms;
+        } else {
+            t->active = false; /* one-shot: dead from here on */
+        }
+        fdk_timer *prev_firing = ctx->timer_firing;
+        ctx->timer_firing = t;
+        t->fn(t, t->user_data);
+        ctx->timer_firing = prev_firing;
+        fired++;
+        if (!t->active) {
+            /* One-shot death or a removal from inside the callback:
+             * the record is still allocated (remove deferred the free
+             * to exactly here). */
+            timer_unlink_free(ctx, t);
+        }
+    }
+    fdk_free(due);
+    return fired;
+}
+
 /* ---- dispatch glue ----
  * This is the function handed to a backend's connect() (see
  * fdk_platform_ops in platform_internal.h). When the backend has
@@ -182,6 +354,10 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->windows = NULL;
     ctx->window_count = 0;
     ctx->window_capacity = 0;
+    ctx->timers = NULL;
+    ctx->timer_count = 0;
+    ctx->timer_capacity = 0;
+    ctx->timer_firing = NULL;
 
     fdk_platform_backend requested = FDK_PLATFORM_AUTO;
     if (options != NULL) {
@@ -296,6 +472,15 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             FDK_ERROR("backend dispatch_pending failed (%d)", buffered);
             return buffered;
         }
+        /* Due timers fire between batches (deadline order). A fired
+         * timer counts toward the return value so the canonical
+         * `pump; paint;` loop repaints timer-driven damage (caret
+         * blinks, animation frames) with zero extra plumbing. */
+        int fired = timers_fire_due(ctx);
+        if (fired > 0) {
+            fdk__window_flush_geo_repaints(ctx);
+            return fired;
+        }
         if (buffered > 0) {
             /* 1.2.2: the batch is drained — paint any geometry the
              * batch changed, ONCE per window at the batch's final
@@ -316,6 +501,26 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
                 return 0; /* timeout expired */
             }
             wait_ms = (int)((rem_ns + 999999LL) / 1000000LL); /* ceil */
+        }
+        /* Timers cap the wait: never sleep past the next deadline
+         * (an indefinite timeout with live timers still wakes up to
+         * fire them). */
+        {
+            long long next_deadline = 0;
+            if (timers_next_deadline(ctx, &next_deadline)) {
+                long long now_ms = 0;
+                struct timespec nowts;
+                clock_gettime(CLOCK_MONOTONIC, &nowts);
+                now_ms = (long long)nowts.tv_sec * 1000LL +
+                         (long long)nowts.tv_nsec / 1000000LL;
+                long long to_next = next_deadline - now_ms;
+                if (to_next < 0) {
+                    to_next = 0; /* already due: fire next loop head */
+                }
+                if (wait_ms < 0 || to_next < (long long)wait_ms) {
+                    wait_ms = (int)to_next;
+                }
+            }
         }
 
         struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
@@ -354,9 +559,10 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
                 fdk__window_flush_geo_repaints(ctx);
                 return dispatched;
             }
-            /* Only backend-internal traffic arrived — keep waiting
-             * the remaining timeout (loop head re-checks the
-             * deadline). */
+            /* Only backend-internal traffic arrived — timers due in
+             * the meantime fire at the loop head; keep waiting the
+             * remaining timeout (the deadline check returns 0 once
+             * the budget is spent). */
         }
         /* Poll timeout or spurious wake: loop (the deadline check
          * returns 0 once the budget is spent). */
@@ -450,6 +656,16 @@ void fdk_shutdown(fdk_context *ctx) {
     if (ctx->ops != NULL && ctx->conn != NULL) {
         ctx->ops->disconnect(ctx->conn);
     }
+    /* Leaked timers are freed WITHOUT firing (shutdown is teardown,
+    * not delivery — the same policy the leaked-window sweep uses). */
+    while (ctx->timer_count > 0) {
+        FDK_WARN("shutdown with %zu timer(s) still live — freeing",
+                 ctx->timer_count);
+        fdk_timer *t = ctx->timers[ctx->timer_count - 1];
+        t->active = false;
+        timer_unlink_free(ctx, t);
+    }
+    fdk_free(ctx->timers);
     fdk_free(ctx->windows);
     fdk_free(ctx->app_id);
     fdk_free(ctx);

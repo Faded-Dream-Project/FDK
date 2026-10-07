@@ -75,6 +75,17 @@ struct fdk_platform_connection {
     int detectable_repeat;
     unsigned char key_down[32];
 
+    /* X Input Method (1.3.1): the connection-wide XIM created at
+     * connect (XOpenIM) when the locale supports it; every window
+     * gets an XIC (input context) so Xutf8LookupString can resolve
+     * full-Unicode text from the user's ACTUAL keyboard layout —
+     * v1's XLookupString path produced Latin-1-at-best and ASCII
+     * in practice (non-ASCII codepoints came through as 0: é/ä/中
+     * were untypable on X11). NULL XIM = the ASCII fallback keeps
+     * running (the v1 behavior, for servers/locales without IM
+     * support). */
+    XIM xim;
+
     /* --- MIT-SHM (Phase 3 completion) ---
      *
      * Probed once at connect. shm_ok: the server supports the shared
@@ -180,6 +191,11 @@ struct fdk_platform_window {
     fdk_platform_connection *conn;
     Window xwindow;
     fdk_size last_size; /* most recent ConfigureNotify size */
+    /* Per-window X Input Context (1.3.1): created at window create
+     * when the connection has an XIM; Xutf8LookupString resolves
+     * full-Unicode text through it. NULL = ASCII fallback. Destroyed
+     * (and focus-unset) with the window. */
+    XIC xic;
 
     /* Phase 9 popup state: override-redirect windows that grab the
      * pointer (and keyboard) while shown; a click outside their

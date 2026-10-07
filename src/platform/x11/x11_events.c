@@ -35,20 +35,35 @@ static fdk_scancode x11_keycode_to_scancode(unsigned int keycode) {
 }
 
 /* Resolves the Unicode codepoint an XKeyEvent produces given its
- * current modifier state, using Xlib's own layout-aware lookup
- * (XLookupString) rather than a hand-rolled keysym table — this
- * respects the user's actual configured keyboard layout. Returns 0
- * for keys with no textual result (arrows, F-keys, bare modifiers). */
-static fdk_u32 x11_lookup_codepoint(XKeyEvent *xkey) {
-    char buf[8];
+ * current modifier state. With a per-window input context (1.3.1)
+ * this is Xutf8LookupString — layout-aware, full Unicode (the user's
+ * ACTUAL keyboard, é/ä/中 included); without one it falls back to
+ * XLookupString, which resolves ASCII reliably and approximates the
+ * rest of Latin-1. Returns 0 for keys with no textual result
+ * (arrows, F-keys, bare modifiers). */
+static fdk_u32 x11_lookup_codepoint(fdk_platform_window *pwindow,
+                                    XKeyEvent *xkey) {
+    char buf[16];
     KeySym keysym = NoSymbol;
-    int len = XLookupString(xkey, buf, (int)sizeof(buf) - 1, &keysym, NULL);
+    int len = 0;
+    if (pwindow != NULL && pwindow->xic != NULL) {
+        Status status = 0;
+        len = Xutf8LookupString(pwindow->xic, xkey, buf,
+                                (int)sizeof(buf) - 1, &keysym, &status);
+        if (status == XBufferOverflow) {
+            len = 0; /* a single key event cannot overflow 15 UTF-8
+                      * bytes honestly; treat as no text */
+        }
+    } else {
+        len = XLookupString(xkey, buf, (int)sizeof(buf) - 1, &keysym,
+                            NULL);
+    }
     if (len <= 0) {
         return 0;
     }
     buf[len] = '\0';
 
-    /* Ctrl+letter (Phase 9): XLookupString reports the CONTROL
+    /* Ctrl+letter (Phase 9): the lookup reports the CONTROL
      * character (^X = 0x18) for these, but the codepoint contract is
      * "what the key produces" and every shortcut reader (Entry's
      * Ctrl+X/C/V/A) wants the LETTER — text entry ignores
@@ -64,17 +79,34 @@ static fdk_u32 x11_lookup_codepoint(XKeyEvent *xkey) {
         return (fdk_u32)keysym;
     }
 
-    /* XLookupString gives us Latin-1/local-encoding bytes, not
-     * necessarily UTF-8 codepoints, for non-ASCII input; a fully
-     * correct general Unicode result requires XmbLookupString with a
-     * per-window XIC (input context) and X Input Method setup. That
-     * is deliberately out of scope for Phase 2 — see
-     * docs/platform-input.md's documented limitation — and ASCII
-     * (which covers the common case and all of FDK's own tests) is
-     * unaffected by the gap. */
-    unsigned char c = (unsigned char)buf[0];
-    if (c < 0x80) {
-        return (fdk_u32)c;
+    /* Decode UTF-8 (Xutf8) or Latin-1 (XLookupString fallback) to a
+     * codepoint. */
+    {
+        unsigned char c0 = (unsigned char)buf[0];
+        if (c0 < 0x80) {
+            return (fdk_u32)c0;
+        }
+        if ((c0 & 0xE0u) == 0xC0u && len >= 2) {
+            return (fdk_u32)(((c0 & 0x1Fu) << 6) |
+                             ((unsigned char)buf[1] & 0x3Fu));
+        }
+        if ((c0 & 0xF0u) == 0xE0u && len >= 3) {
+            return (fdk_u32)(((c0 & 0x0Fu) << 12) |
+                             (((unsigned char)buf[1] & 0x3Fu) << 6) |
+                             ((unsigned char)buf[2] & 0x3Fu));
+        }
+        if ((c0 & 0xF8u) == 0xF0u && len >= 4) {
+            return (fdk_u32)(((c0 & 0x07u) << 18) |
+                             (((unsigned char)buf[1] & 0x3Fu) << 12) |
+                             (((unsigned char)buf[2] & 0x3Fu) << 6) |
+                             ((unsigned char)buf[3] & 0x3Fu));
+        }
+        /* XLookupString's Latin-1 single byte (the no-XIC fallback):
+         * the honest best answer that path can give. */
+        if (len == 1 && c0 >= 0x80 &&
+            (pwindow == NULL || pwindow->xic == NULL)) {
+            return (fdk_u32)c0;
+        }
     }
     return 0;
 }
@@ -119,13 +151,19 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             return 1;
 
         case FocusIn:
-            out->type = FDK_EVENT_WINDOW_FOCUS;
-            out->focus.focused = 1;
-            return 1;
-
         case FocusOut:
             out->type = FDK_EVENT_WINDOW_FOCUS;
-            out->focus.focused = 0;
+            out->focus.focused = (xevent->type == FocusIn);
+            /* Keep the input context's focus in step (XIM discipline):
+             * composition state resets on blur exactly like the
+             * widget layer's FOCUS_OUT semantics. */
+            if (pwindow != NULL && pwindow->xic != NULL) {
+                if (xevent->type == FocusIn) {
+                    XSetICFocus(pwindow->xic);
+                } else {
+                    XUnsetICFocus(pwindow->xic);
+                }
+            }
             return 1;
 
         case KeyPress:
@@ -159,7 +197,7 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                 }
             }
             out->key.codepoint = (xevent->type == KeyPress)
-                ? x11_lookup_codepoint(&xevent->xkey)
+                ? x11_lookup_codepoint(pwindow, &xevent->xkey)
                 : 0; /* KeyRelease codepoint lookup is meaningless */
             return 1;
         }

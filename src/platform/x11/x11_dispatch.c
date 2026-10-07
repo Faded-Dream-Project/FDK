@@ -47,6 +47,15 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
         XEvent xevent;
         XNextEvent(conn->display, &xevent);
 
+        /* IM filtering (1.3.1): Xlib requires EVERY event to pass
+         * through XFilterEvent before normal processing when an input
+         * method is active — the IM may consume composition traffic
+         * (and dead-key sequences) entirely. Filtered events produce
+         * no FDK event. */
+        if (conn->xim != NULL && XFilterEvent(&xevent, None)) {
+            continue;
+        }
+
         /* A drag WE started owns pointer events while active (the
          * XDND source state machine — target tracking, Enter/Leave/
          * Position emission, the drop handshake). Routed before

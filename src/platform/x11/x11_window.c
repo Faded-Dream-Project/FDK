@@ -236,8 +236,31 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->render_size.width = 0;
     pwindow->render_size.height = 0;
 
+    /* Input context (1.3.1): one XIC per window when the connection
+     * has an XIM — this is what makes Xutf8LookupString resolve the
+     * user's actual layout, non-ASCII included. The rootless style
+     * (PreeditNothing|StatusNothing) keeps composition out of FDK's
+     * geometry (no preedit window to place); the preedit SEAM for
+     * real IMEs remains the Entry's set_preedit API. */
+    pwindow->xic = NULL;
+    if (conn->xim != NULL) {
+        pwindow->xic = XCreateIC(conn->xim,
+                                 XNInputStyle, XIMPreeditNothing |
+                                                   XIMStatusNothing,
+                                 XNClientWindow, pwindow->xwindow,
+                                 XNFocusWindow, pwindow->xwindow,
+                                 NULL);
+        if (pwindow->xic == NULL) {
+            FDK_WARN("XCreateIC failed — window falls back to ASCII "
+                     "text entry");
+        }
+    }
+
     fdk_result r = fdk_x11_register_window(conn, pwindow);
     if (!fdk_ok(r)) {
+        if (pwindow->xic != NULL) {
+            XDestroyIC(pwindow->xic);
+        }
         XDestroyWindow(conn->display, xwindow);
         fdk_free(pwindow);
         return r;
@@ -262,6 +285,10 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
         fdk_x11_unregister_window(pwindow->conn, pwindow);
         fdk_free(pwindow);
         return;
+    }
+    if (pwindow->xic != NULL) {
+        XDestroyIC(pwindow->xic);
+        pwindow->xic = NULL;
     }
     if (pwindow->popup) {
         fdk_x11_window_popup_ungrab(pwindow);

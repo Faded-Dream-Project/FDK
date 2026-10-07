@@ -8,10 +8,12 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <X11/XKBlib.h>
+#include <X11/Xlocale.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <setjmp.h>
+#include <locale.h>
 
 /* ---- Display-death discipline (1.3.0) ---------------------------------
  *
@@ -103,6 +105,30 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
         } else {
             FDK_DEBUG("XKB detectable auto-repeat unavailable — "
                       "is_repeat stays 0 (indistinguishable pairs)");
+        }
+    }
+
+    /* X Input Method (1.3.1): bring up the connection-wide XIM so
+     * per-window XICs can resolve full-Unicode text input. Only the
+     * CTYPE locale is touched, and only when it is still the "C"
+     * default (an application that set its own locale keeps it);
+     * Xutf8LookupString needs a UTF-8 locale to decode non-ASCII. A
+     * failed XOpenIM (no IM support on the server) is not an error —
+     * the ASCII fallback path keeps running. */
+    conn->xim = NULL;
+    {
+        const char *cur = setlocale(LC_CTYPE, NULL);
+        if (cur == NULL || strcmp(cur, "C") == 0) {
+            (void)setlocale(LC_CTYPE, "");
+        }
+        XSetLocaleModifiers("");
+        conn->xim = XOpenIM(display, NULL, NULL, NULL);
+        if (conn->xim != NULL) {
+            FDK_INFO("X input method opened — full-Unicode text entry "
+                     "via Xutf8LookupString");
+        } else {
+            FDK_INFO("X input method unavailable — ASCII text-entry "
+                     "fallback (non-ASCII input will not resolve)");
         }
     }
     /* fdk_alloc does not zero — None is 0 but be explicit anyway:
@@ -271,6 +297,10 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
         g_io_conn = NULL;
         fdk_free(conn);
         return;
+    }
+    if (conn->xim != NULL) {
+        XCloseIM(conn->xim);
+        conn->xim = NULL;
     }
     FDK_INFO("disconnecting");
     XCloseDisplay(conn->display);

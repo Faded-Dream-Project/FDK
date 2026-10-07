@@ -5721,6 +5721,140 @@ static void test_dnd_source_gui(void) {
     fdk_shutdown(ctx);
 }
 
+
+/* ---- timers (1.3.1) -----------------------------------------------------
+ *
+ * The event loop's clock, exercised through the real pump against the
+ * real backend: one-shot death, repeating cadence, removal (including
+ * self-removal from inside the callback — the deferred-free path),
+ * reset re-arming, add-from-callback deferral to the NEXT pump, and
+ * quit-from-timer ending fdk_run.
+ */
+static int timer_cb_count;
+static void timer_count_cb(fdk_timer *t, void *user) {
+    (void)t;
+    (void)user;
+    timer_cb_count++;
+}
+
+static fdk_timer *timer_self_remove_target;
+static void timer_self_remove_cb(fdk_timer *t, void *user) {
+    (void)user;
+    timer_cb_count++;
+    fdk_timer_remove(t); /* legal: deferred free, no UAF */
+    timer_self_remove_target = t;
+}
+
+static fdk_timer *timer_added_from_cb = NULL;
+static void timer_adder_cb(fdk_timer *t, void *user) {
+    (void)t;
+    (void)user;
+    /* Add a one-shot from inside a firing callback: documented to be
+     * considered on the NEXT pump call. */
+    timer_added_from_cb =
+        fdk_timer_add((fdk_context *)user, 0, false, timer_count_cb, NULL);
+    timer_cb_count++;
+}
+
+static int timer_quit_ctx_dead;
+static void timer_quit_cb(fdk_timer *t, void *user) {
+    (void)t;
+    fdk_quit((fdk_context *)user);
+    timer_quit_ctx_dead = 1;
+    timer_cb_count++;
+}
+
+static void test_timers(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* --- one-shot: fires once, the handle dies --- */
+    timer_cb_count = 0;
+    fdk_timer *oneshot = fdk_timer_add(ctx, 0, false, timer_count_cb, NULL);
+    assert(oneshot != NULL);
+    int r = fdk_pump_events(ctx, 50);
+    assert(r >= 1);            /* the firing counts toward the return */
+    assert(timer_cb_count == 1);
+    r = fdk_pump_events(ctx, 50);
+    assert(timer_cb_count == 1); /* never twice */
+    /* The one-shot's handle is FREED after firing (the documented C
+     * convention): touching it would be use-after-free, so the test
+     * simply never does. NULL stays the safe no-op. */
+    fdk_timer_remove(NULL);
+    fdk_timer_reset(NULL, 5);
+
+    /* --- repeating: fires several times across pumps --- */
+    timer_cb_count = 0;
+    fdk_timer *rep = fdk_timer_add(ctx, 10, true, timer_count_cb, NULL);
+    assert(rep != NULL);
+    for (int i = 0; i < 6; i++) {
+        (void)fdk_pump_events(ctx, 40);
+    }
+    assert(timer_cb_count >= 3); /* 10ms cadence over 6x40ms pumps */
+    fdk_timer_remove(rep);
+    int settled = timer_cb_count;
+    for (int i = 0; i < 3; i++) {
+        (void)fdk_pump_events(ctx, 40);
+    }
+    assert(timer_cb_count == settled); /* removal stops firing */
+
+    /* --- reset: re-arms from now --- */
+    timer_cb_count = 0;
+    fdk_timer *rst = fdk_timer_add(ctx, 200, true, timer_count_cb, NULL);
+    (void)fdk_pump_events(ctx, 30);
+    assert(timer_cb_count == 0); /* not due yet */
+    fdk_timer_reset(rst, 0);     /* due immediately now */
+    (void)fdk_pump_events(ctx, 30);
+    assert(timer_cb_count == 1);
+    fdk_timer_remove(rst);
+
+    /* --- self-removal from inside the callback (deferred free) --- */
+    timer_cb_count = 0;
+    timer_self_remove_target = NULL;
+    fdk_timer *selfrm = fdk_timer_add(ctx, 0, true, timer_self_remove_cb, NULL);
+    (void)selfrm; /* owned by the queue; the callback self-removes */
+    (void)fdk_pump_events(ctx, 30);
+    assert(timer_cb_count == 1);
+    assert(timer_self_remove_target != NULL); /* the callback ran */
+    for (int i = 0; i < 3; i++) {
+        (void)fdk_pump_events(ctx, 30);
+    }
+    assert(timer_cb_count == 1); /* removed inside its own callback */
+
+    /* --- add-from-callback defers to the NEXT pump --- */
+    timer_cb_count = 0;
+    timer_added_from_cb = NULL;
+    fdk_timer *adder = fdk_timer_add(ctx, 0, false, timer_adder_cb, ctx);
+    (void)adder; /* one-shot: fires and frees itself */
+    (void)fdk_pump_events(ctx, 30);
+    assert(timer_cb_count == 1); /* adder fired; child NOT yet */
+    assert(timer_added_from_cb != NULL);
+    (void)fdk_pump_events(ctx, 30);
+    assert(timer_cb_count == 2); /* child fired on the next pump */
+
+    /* --- quit from a timer callback ends fdk_run --- */
+    timer_cb_count = 0;
+    timer_quit_ctx_dead = 0;
+    fdk_window_options wopts = { .title = "timer quit", .width = 80,
+                                 .height = 60 };
+    fdk_window *quit_win = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &quit_win)));
+    fdk_window_show(quit_win);
+    (void)fdk_timer_add(ctx, 60, false, timer_quit_cb, ctx);
+    fdk_run(ctx); /* blocks (indefinite pump) until the timer quits */
+    assert(timer_quit_ctx_dead == 1);
+    fdk_window_destroy(quit_win);
+
+    /* --- argument checks --- */
+    assert(fdk_timer_add(NULL, 10, true, timer_count_cb, NULL) == NULL);
+    assert(fdk_timer_add(ctx, 10, true, NULL, NULL) == NULL);
+
+    fdk_shutdown(ctx);
+    printf("[ok] timers: one-shot death, repeating cadence, remove/reset, "
+           "self-removal, add-from-callback deferral, quit-from-timer\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -5734,6 +5868,7 @@ int main(void) {
     test_resize_storm_backlog_drains();
     test_close_request_delivered();
     test_pump_events_nonblocking();
+    test_timers();
     test_surface_render_readback();
     test_mitm_shm_and_double_buffer();
     test_surface_follows_resize();
