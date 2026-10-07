@@ -82,6 +82,10 @@ struct fdk_menu_item {
     fdk_menu_activate_fn on_activate; /* per-item */
     void *on_activate_user;
     fdk_menu *submenu; /* borrowed */
+    fdk_menu *owner;  /* the menu that appended us — set once
+                      * at creation, never changed; lets the radio
+                      * group rule run from the DIRECT setter
+                      * (1.3.0), matching fdk_radio_set_checked. */
 };
 
 struct fdk_menu {
@@ -132,6 +136,10 @@ static fdk_menu_item *menu_new_item(fdk_menu *menu, const char *text,
                                     fdk_menu_item_kind kind) {
     if (menu->count == menu->cap) {
         size_t ncap = menu->cap * 2 + 4;
+        if (ncap < menu->cap || /* wrapped */
+            ncap > SIZE_MAX / sizeof(fdk_menu_item *)) {
+            return NULL; /* refuse absurd growth */
+        }
         fdk_menu_item **ni =
             fdk_realloc(menu->items, ncap * sizeof(fdk_menu_item *));
         if (ni == NULL) {
@@ -156,6 +164,7 @@ static fdk_menu_item *menu_new_item(fdk_menu *menu, const char *text,
     it->on_activate = NULL;
     it->on_activate_user = NULL;
     it->submenu = NULL;
+    it->owner = menu;
     menu->items[menu->count++] = it;
     return it;
 }
@@ -275,14 +284,21 @@ void fdk_menu_item_set_checked(fdk_menu_item *item, bool checked) {
     }
     if (item->kind == FDK_MIK_RADIO && checked) {
         /* All radios of the same menu are one group: checking one
-         * unchecks its radio siblings. Finding the owning menu from
-         * an item pointer is not possible (items do not point back),
-         * so the group semantics live in the activation path below,
-         * which has the model at hand. For the DIRECT setter, a
-         * radio can only be unchecked (leaving no selection) or
-         * checked without knowing siblings — so the setter checks
-         * the item itself and the activation path maintains the
-         * group. This mirrors fdk_radio_set_checked's allowance. */
+         * unchecks its radio siblings — the same rule the activation
+         * path enforces, now reachable from the DIRECT setter via
+         * the item's owner back-pointer (1.3.0; before, the setter
+         * could produce two checked radios in one group, a state the
+         * keyboard/activation paths never create). */
+        if (item->owner != NULL) {
+            fdk_menu *m = item->owner;
+            for (size_t i = 0; i < m->count; i++) {
+                fdk_menu_item *sib = m->items[i];
+                if (sib != item && sib->kind == FDK_MIK_RADIO &&
+                    sib->checked) {
+                    sib->checked = false;
+                }
+            }
+        }
         item->checked = true;
     } else if (item->kind == FDK_MIK_CHECK || item->kind == FDK_MIK_RADIO) {
         item->checked = checked;

@@ -72,6 +72,13 @@ typedef struct fdk_dialog {
     } *button_ctxs;          /* referenced by the buttons         */
     size_t button_ctx_count;
     bool responded;
+    /* Set right before fdk_window_show: a dialog that fails
+     * CONSTRUCTION (the fail: paths destroy the window before it
+     * was ever visible) must not deliver a destroy-notify answer —
+     * the caller already got the error result, and the v1
+     * double-signal (error return AND on_response(NEGATIVE)) made
+     * both sides lie (1.3.0). */
+    bool surfaced;
 } fdk_dialog;
 
 /* The body widget: a plain background fill whose subclass storage
@@ -159,8 +166,8 @@ static void dialog_window_event(fdk_window *window,
 static void dialog_destroyed(fdk_window *window, void *user) {
     (void)window;
     fdk_dialog *d = user;
-    if (d->responded) {
-        return;
+    if (d->responded || !d->surfaced) {
+        return; /* already answered, or never shown: nothing to say */
     }
     d->responded = true;
     if (d->on_prompt != NULL) {
@@ -383,6 +390,7 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
     d->button_ctxs = NULL;
     d->button_ctx_count = 0;
     d->responded = false;
+    d->surfaced = false;
 
     /* Font: borrowed, or the system default we load and own. */
     if (d->font == NULL) {
@@ -508,6 +516,7 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
      * through the body's arrange hook. */
     fdk_window_set_content(win, body);
 
+    d->surfaced = true; /* construction succeeded: answers are honest */
     fdk_window_show(win);
     if (modal) {
         (void)fdk__window_set_modal(win, true);
@@ -589,6 +598,7 @@ fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
     d->button_ctxs = NULL;
     d->button_ctx_count = 0;
     d->responded = false;
+    d->surfaced = false;
 
     if (d->font == NULL) {
         d->font_owned = fdk_font_load_system_default(DLG_FONT_PX);
@@ -725,6 +735,7 @@ fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
 
     fdk_window_set_content(win, body);
 
+    d->surfaced = true; /* construction succeeded: answers are honest */
     fdk_window_show(win);
     if (modal) {
         (void)fdk__window_set_modal(win, true);

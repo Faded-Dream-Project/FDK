@@ -121,21 +121,17 @@ void fdk_surface_draw_line_aa(fdk_surface *surface,
     }
 
     /* Damage: the line's bbox (2px minor-axis thick for the bracket
-     * pixels). */
+     * pixels). The bbox is just the enclosing box — width spans x,
+     * height spans y, regardless of which axis is major (v1's steep
+     * branch had the two transposed, under-covering the y extent of
+     * steep lines under partial redraw — found by the 1.3.0 audit). */
     int dxall = (x1 - x0) < 0 ? -(x1 - x0) : (x1 - x0);
     int dyall = (y1 - y0) < 0 ? -(y1 - y0) : (y1 - y0);
     fdk_rect bbox;
-    if (steep) {
-        bbox.x = (x0 < x1 ? x0 : x1) - 1;
-        bbox.y = (y0 < y1 ? y0 : y1) - 1;
-        bbox.width = dyall + 3;
-        bbox.height = dxall + 3;
-    } else {
-        bbox.x = (x0 < x1 ? x0 : x1) - 1;
-        bbox.y = (y0 < y1 ? y0 : y1) - 1;
-        bbox.width = dxall + 3;
-        bbox.height = dyall + 3;
-    }
+    bbox.x = (x0 < x1 ? x0 : x1) - 1;
+    bbox.y = (y0 < y1 ? y0 : y1) - 1;
+    bbox.width = dxall + 3;
+    bbox.height = dyall + 3;
     fdk__surface_damage_add(surface, bbox);
 }
 

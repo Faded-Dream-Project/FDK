@@ -54,6 +54,26 @@ struct fdk_platform_connection {
     Atom wm_change_state;  /* ICCCM iconify request message type      */
     int ewmh_wm;           /* nonzero: an EWMH WM is running          */
     int ewmh_state_ok;     /* nonzero: it advertises _NET_WM_STATE    */
+    /* Display death (1.3.0): set by the XIO error handler the moment
+     * the connection to the X server is lost. Every teardown path
+     * checks it and skips server requests (they cannot succeed and —
+     * worse — each one risks re-entering Xlib's fatal IO path, whose
+     * default behavior is exit(1), killing the process mid-teardown
+     * with no application say). dispatch_pending reports it as a
+     * negative result so fdk_run()/pump loops exit cleanly. */
+    int display_dead;
+
+    /* Key-repeat discipline (1.3.0): XkbSetDetectableAutoRepeat(True)
+     * is requested at connect — when the server accepts, KeyRelease
+     * events are REAL releases only (repeats arrive as additional
+     * KeyPresses). key_down[] is the 256-bit keycode bitmap the
+     * KeyPress translator consults: a press of an already-down key
+     * IS the repeat. Servers without the extension keep X's legacy
+     * fake release+press pairs, which are INDISTINGUISHABLE from
+     * real typing — every event then reports is_repeat 0, the honest
+     * answer (and the same answer v1 always gave). */
+    int detectable_repeat;
+    unsigned char key_down[32];
 
     /* --- MIT-SHM (Phase 3 completion) ---
      *
@@ -228,6 +248,19 @@ struct fdk_platform_window {
  * the fdk_platform_ops interface — internal to this backend only. */
 int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                              fdk_event_data *out);
+
+/* X modifier-mask (event state / XQueryPointer state) to
+ * fdk_key_modifier bits. x11_events.c; the DnD layer uses it for
+ * drag.modifiers. */
+fdk_u32 fdk__x11_translate_modifiers(unsigned int x_state);
+
+/* Display-death guard (x11_connection.c owns the storage; see the
+ * discipline comment there). dispatch_pending arms the jump so a
+ * fatal IO error longjmps back to its frame instead of Xlib's
+ * exit(1). */
+#include <setjmp.h>
+extern sigjmp_buf fdk__x11_io_jmp;
+extern volatile int fdk__x11_io_armed;
 
 /* Window registry, implemented in x11_window.c, used by
  * x11_connection.c (to clean up on disconnect) and x11_dispatch.c (to

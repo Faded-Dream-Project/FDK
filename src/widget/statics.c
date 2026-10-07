@@ -311,9 +311,14 @@ static void label_paint(fdk_widget *w, fdk_surface *surface,
     if (l->line_count == 0 || l->font == NULL) {
         return;
     }
-    fdk_color color = l->color.a > 0.0f ? l->color
-                                        : (((w->flags & FDK_WF_ENABLED) != 0) ? fdk__pal_text()
-                                                      : fdk__pal_text_disabled());
+    fdk_color color;
+    if (l->color_set) {
+        color = l->color; /* an explicit color wins, even transparent */
+    } else if ((w->flags & FDK_WF_ENABLED) != 0) {
+        color = fdk__pal_text();
+    } else {
+        color = fdk__pal_text_disabled();
+    }
     fdk_font_metrics fm;
     fdk_font_get_metrics(l->font, &fm);
     fdk_i32 pitch = fm.ascent + fm.descent;
@@ -517,7 +522,8 @@ fdk_result fdk_label_create(fdk_widget *parent, fdk_font *font,
     fdk_label *l = label_of(w);
     l->font = font;
     l->text = fdk__strdup(text);
-    l->color = (fdk_color){0, 0, 0, 0}; /* -> palette default */
+    l->color = (fdk_color){0, 0, 0, 0};
+    l->color_set = false; /* -> palette default at paint time */
     l->mode = FDK_LABEL_NOWRAP;
     l->align = FDK_ALIGN_START;
     l->built_width = -1; /* nothing built yet */
@@ -556,8 +562,23 @@ void fdk_label_set_color(fdk_widget *label, fdk_color color) {
     if (label == NULL || label->klass != &fdk_label_class_def) {
         return;
     }
-    label_of(label)->color = color;
+    fdk_label *l = label_of(label);
+    l->color = color;
+    l->color_set = true; /* explicit color, even a transparent one */
     fdk_widget_invalidate(label);
+}
+
+/* The label's text color (the theme's text color when never set —
+ * 1.3.0 getter symmetry with set_color). */
+fdk_color fdk_label_get_color(fdk_widget *label) {
+    if (label == NULL || label->klass != &fdk_label_class_def) {
+        return fdk__pal_text();
+    }
+    fdk_label *l = label_of(label);
+    if (l->color_set) {
+        return l->color;
+    }
+    return fdk__pal_text();
 }
 
 const char *fdk_label_get_text(fdk_widget *label) {
@@ -616,7 +637,15 @@ size_t fdk_label_get_line_count(fdk_widget *label) {
 
 /* ---- ProgressBar ---- */
 
-#define PROGRESS_MIN_TRACK_H 4
+/* Natural track height (the create-time request when the app gives
+ * no explicit bounds; layout stretches widths via expand). */
+#define PROGRESS_TRACK_H 12
+
+static void progress_measure(fdk_widget *w, fdk_size *out) {
+    (void)w;
+    out->width = 0;                  /* meaningless without a slot */
+    out->height = PROGRESS_TRACK_H; /* the visible track extent    */
+}
 
 static void progress_paint(fdk_widget *w, fdk_surface *surface,
                            fdk_rect bounds, fdk_rect clip) {
@@ -637,12 +666,28 @@ static void progress_paint(fdk_widget *w, fdk_surface *surface,
     if (fill_w > bounds.width) {
         fill_w = bounds.width;
     }
-    if (fill_w < PROGRESS_MIN_TRACK_H) {
-        return; /* nothing filled yet (or 0) */
+    if (fill_w < 0) {
+        fill_w = 0;
+    }
+    /* A tiny nonzero fraction must still be VISIBLE: without this a
+     * 200-px track shows nothing until 2% — "the bar starts empty"
+     * reads as "the bar is broken". Two device pixels is the smallest
+     * sliver the rounded fill can render honestly. */
+    if (p->fraction > 0.0f && fill_w < 2) {
+        fill_w = 2;
+        if (fill_w > bounds.width) {
+            fill_w = bounds.width;
+        }
+    }
+    if (fill_w <= 0) {
+        return; /* fraction 0 (or a zero-width track): track only */
     }
     fdk_rect fill = {bounds.x, bounds.y, fill_w, bounds.height};
-    fdk_surface_fill_rounded_rect(surface, fill, r < fill_w ? r : fill_w,
-                                  fdk__pal_accent());
+    fdk_i32 fill_r = r;
+    if (fill_r > fill_w / 2) {
+        fill_r = fill_w / 2;
+    }
+    fdk_surface_fill_rounded_rect(surface, fill, fill_r, fdk__pal_accent());
 }
 
 /* ---- a11y ---- */
@@ -669,7 +714,7 @@ const fdk_widget_class fdk_progress_class_def = {
     .name = "progress",
     .handle_event = NULL,
     .paint = progress_paint,
-    .measure = NULL, /* natural size = the size request */
+    .measure = progress_measure,
     .arrange = NULL,
     .destroy = NULL,
     .a11y = &progress_a11y,
@@ -686,7 +731,8 @@ fdk_result fdk_progress_create(fdk_widget *parent,
     if (!fdk_ok(r)) {
         return r;
     }
-    progress_of(w)->fraction = 0.0f;
+    fdk_progress *p = progress_of(w);
+    p->fraction = 0.0f;
     *out_progress = w;
     return FDK_OK;
 }
@@ -906,4 +952,14 @@ fdk_result fdk_frame_set_title(fdk_widget *frame, const char *title) {
     /* A11y: the title IS the group's accessible name. */
     fdk__a11y_notify(frame, FDK_A11Y_NAME_CHANGED, 0);
     return FDK_OK;
+}
+
+/* The frame's current title (toolkit-owned; valid until the next
+ * set_title/destroy). NULL when the frame has no title (1.3.0
+ * getter symmetry with set_title). */
+const char *fdk_frame_get_title(fdk_widget *frame) {
+    if (frame == NULL || frame->klass != &fdk_frame_class_def) {
+        return NULL;
+    }
+    return frame_of(frame)->title;
 }

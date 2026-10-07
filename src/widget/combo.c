@@ -43,6 +43,7 @@ typedef struct fdk_combo {
     bool entry_suppress;    /* programmatic buffer writes       */
     bool dropdown_open;
     fdk_menu *dropdown_model; /* temporary model while open     */
+    struct combo_guard *dropdown_guard; /* dropdown lifetime guard  */
     fdk_combo_changed_fn on_changed;
     void *on_changed_user;
     bool hovering;
@@ -83,38 +84,54 @@ static const char *combo_display_text(fdk_combo *c) {
 
 /* ---- dropdown (the menu machinery) ---- */
 
+/* The combo pointer the dropdown callbacks capture cannot be raw:
+ * destroying the combo while its dropdown is open frees the widget
+ * (immediately outside dispatch, at the deferred flush inside it —
+ * either way the class destroy hook below runs BEFORE the memory is
+ * freed), and the popup chain outlives it until dismissal or window
+ * death. The guard turns that ordering into the whole safety story:
+ * combo_destroy NULLs guard->combo, and every callback treats NULL
+ * as "the combo is gone — model cleanup only". The guard itself is
+ * freed by the closed hook (which fires on every end path); a combo
+ * destroyed while open merely abandons it until then. */
+typedef struct combo_guard {
+    fdk_widget *combo;      /* NULL once the combo is destroyed */
+} combo_guard;
+
 typedef struct combo_item_ctx {
-    fdk_widget *combo;
+    combo_guard *guard;     /* shared with the dropdown ctx       */
     size_t index;
 } combo_item_ctx;
 
 typedef struct combo_dropdown_ctx {
-    fdk_widget *combo;      /* class-checked at every use          */
+    combo_guard *guard;     /* NULL->combo checked at every use   */
     fdk_menu *model;        /* freed here                          */
     combo_item_ctx *items;  /* per-item closures array, freed here */
 } combo_dropdown_ctx;
 
 /* The closed hook: fired on EVERY end path (activation — after the
  * item callback returned — dismissal, popup death). Frees the
- * temporary model and the item closures. */
+ * temporary model, the item closures, and the guard. */
 static void combo_dropdown_closed(void *user) {
     combo_dropdown_ctx *ctx = user;
-    fdk_widget *w = ctx->combo;
+    fdk_widget *w = ctx->guard->combo;
     if (w != NULL && w->klass == &fdk_combo_class_def) {
         fdk_combo *c = combo_of(w);
         c->dropdown_open = false;
         c->dropdown_model = NULL;
+        c->dropdown_guard = NULL;
         fdk_widget_invalidate(w);
     }
     fdk_menu_destroy(ctx->model);
     fdk_free(ctx->items);
+    fdk_free(ctx->guard);
     fdk_free(ctx);
 }
 
 static void combo_item_activated(fdk_menu_item *item, void *user) {
     (void)item;
     combo_item_ctx *ictx = user;
-    fdk_widget *w = ictx->combo;
+    fdk_widget *w = ictx->guard->combo;
     if (w == NULL || w->klass != &fdk_combo_class_def) {
         return;
     }
@@ -150,19 +167,22 @@ static void combo_open_dropdown(fdk_widget *w) {
     }
     combo_dropdown_ctx *ctx = fdk_alloc(sizeof(combo_dropdown_ctx));
     combo_item_ctx *items = fdk_alloc_array(c->count, sizeof(*items));
-    if (ctx == NULL || items == NULL) {
+    combo_guard *guard = fdk_alloc(sizeof(*guard));
+    if (ctx == NULL || items == NULL || guard == NULL) {
         fdk_free(ctx);
         fdk_free(items);
+        fdk_free(guard);
         fdk_menu_destroy(model);
         return;
     }
-    ctx->combo = w;
+    guard->combo = w;
+    ctx->guard = guard;
     ctx->model = model;
     ctx->items = items;
 
     bool ok = true;
     for (size_t i = 0; i < c->count; i++) {
-        items[i].combo = w;
+        items[i].guard = guard;
         items[i].index = i;
         fdk_menu_item *it = NULL;
         if (!fdk_ok(fdk_menu_append(model, c->rows[i], &it)) ||
@@ -180,11 +200,13 @@ static void combo_open_dropdown(fdk_widget *w) {
         if (fdk_ok(r)) {
             c->dropdown_open = true;
             c->dropdown_model = model;
+            c->dropdown_guard = guard;
             fdk_widget_invalidate(w);
             return;
         }
     }
     fdk_free(items);
+    fdk_free(guard);
     fdk_free(ctx);
     fdk_menu_destroy(model);
 }
@@ -202,7 +224,19 @@ static void combo_measure(fdk_widget *w, fdk_size *out) {
         }
     }
     out->width = max_w + COMBO_PAD_X * 2 + COMBO_CHEVRON;
-    out->height = fdk__menu_row_height(NULL);
+    /* The field is exactly as tall as its dropdown's rows: the themed
+     * metric, but never shorter than the combo's own font line + 8
+     * (the same formula fdk__menu_row_height applies to the model we
+     * create with this font). */
+    fdk_i32 h = fdk__menu_row_height(NULL);
+    if (c->font != NULL) {
+        fdk_i32 lh = 0;
+        fdk__text_extent(c->font, "Ag", NULL, &lh);
+        if (lh + 8 > h) {
+            h = lh + 8;
+        }
+    }
+    out->height = h;
 }
 
 static void combo_arrange(fdk_widget *w, fdk_rect assigned) {
@@ -273,10 +307,17 @@ static void combo_destroy(fdk_widget *w) {
     fdk_free(c->rows);
     c->rows = NULL;
     c->count = 0;
-    /* An open dropdown outlives us harmlessly: its temporary model
-     * is freed by the closed hook (fired when the popups die with
-     * the parent window or the chain ends); the combo pointer it
-     * captures is guarded by the class check in the callbacks. */
+    /* An open dropdown outlives us safely: this hook runs before our
+     * memory is freed (immediately, or at the deferred flush — either
+     * way klass->destroy precedes the free), so NULLing the guard's
+     * combo pointer here makes every later dropdown callback (item
+     * activation, the closed hook) skip widget access and free only
+     * the temporary model. The popup itself is dismissed by the next
+     * event (its grab covers the screen) or dies with the window. */
+    if (c->dropdown_guard != NULL) {
+        c->dropdown_guard->combo = NULL;
+        c->dropdown_guard = NULL;
+    }
 }
 
 static void combo_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
@@ -405,7 +446,7 @@ static bool combo_event(fdk_widget *w, const fdk_widget_event *ev,
             c->hovering = true;
             fdk_widget_invalidate(w);
         }
-        return true;
+        return false; /* motion bubbles, matching the controls */
     case FDK_WIDGET_POINTER_LEAVE:
         if (c->hovering) {
             c->hovering = false;
@@ -498,6 +539,7 @@ fdk_result fdk_combo_create(fdk_widget *parent, fdk_font *font,
     c->entry_suppress = false;
     c->dropdown_open = false;
     c->dropdown_model = NULL;
+    c->dropdown_guard = NULL;
     c->on_changed = NULL;
     c->on_changed_user = NULL;
     c->hovering = false;
@@ -511,7 +553,14 @@ fdk_result fdk_combo_create(fdk_widget *parent, fdk_font *font,
 
 static fdk_result combo_row_insert(fdk_combo *c, size_t index,
                                    const char *text) {
+    if (index > c->count) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
     if (c->count == c->cap) {
+        if (c->cap > SIZE_MAX / 2 - 4 ||
+            c->count + 4 > SIZE_MAX / sizeof(char *)) {
+            return FDK_ERR_OUT_OF_MEMORY; /* refuse absurd growth */
+        }
         size_t ncap = c->cap * 2 + 4;
         char **nr = fdk_realloc(c->rows, ncap * sizeof(char *));
         if (nr == NULL) {

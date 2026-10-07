@@ -22,6 +22,7 @@
 #include "core/log_internal.h"
 
 #include <stddef.h>
+#include <math.h>
 
 #define SLIDER_TRACK_H 6
 #define SLIDER_THUMB_W 14
@@ -328,8 +329,17 @@ fdk_result fdk_slider_create(fdk_widget *parent, double min,
 }
 
 void fdk_slider_set_range(fdk_widget *slider, double min, double max) {
-    if (slider == NULL || slider->klass != &fdk_slider_class_def ||
-        max < min) {
+    if (slider == NULL || slider->klass != &fdk_slider_class_def) {
+        return;
+    }
+    if (max < min || isnan(min) || isnan(max)) {
+        /* create() refuses this input with FDK_ERR_INVALID_ARGUMENT;
+         * the setter is void by convention, so it WARNs instead of
+         * silently swallowing (a silent ignore here made
+         * debugging "why didn't my range change" needlessly hard).
+         * NaN is refused outright — it would poison every clamp. */
+        FDK_WARN("fdk_slider_set_range: invalid range [%g, %g] ignored",
+                 min, max);
         return;
     }
     fdk_slider *s = slider_of(slider);

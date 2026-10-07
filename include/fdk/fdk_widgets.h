@@ -70,8 +70,12 @@ fdk_result fdk_label_create(fdk_widget *parent, fdk_font *font,
  * container. NULL or "" clears the text. */
 fdk_result fdk_label_set_text(fdk_widget *label, const char *text);
 
-/* Text color (default: the palette's text color). */
+/* Text color (default: the palette's text color — get_color
+ * reports the same resolution). */
 void fdk_label_set_color(fdk_widget *label, fdk_color color);
+/* The effective text color: the explicit one when set, else the
+ * theme's text color (the paint-time resolution, reported). */
+fdk_color fdk_label_get_color(fdk_widget *label);
 
 /* The label's current text (toolkit-owned copy; valid until the next
  * set_text/destroy). NULL when the label has no text. */
@@ -133,6 +137,9 @@ fdk_result fdk_button_create(fdk_widget *parent, fdk_font *font,
 
 /* Replaces the label (copied; re-measures). */
 fdk_result fdk_button_set_text(fdk_widget *button, const char *text);
+/* The button's current label (toolkit-owned copy; valid until the
+ * next set_text/destroy; NULL when it has no text). */
+const char *fdk_button_get_text(fdk_widget *button);
 
 /* Fires when the button activates: pointer release inside the widget
  * after a press on it, or Space/Enter while focused. May fire from
@@ -158,10 +165,10 @@ void fdk_toggle_set_checked(fdk_widget *toggle, bool checked);
 /* The current checked state. */
 bool fdk_toggle_is_checked(fdk_widget *toggle);
 
-typedef void (*fdk_toggle_change_fn)(fdk_widget *toggle, bool checked,
+typedef void (*fdk_toggle_changed_fn)(fdk_widget *toggle, bool checked,
                                      void *user_data);
-void fdk_toggle_set_on_change(fdk_widget *toggle,
-                              fdk_toggle_change_fn on_change,
+void fdk_toggle_set_on_changed(fdk_widget *toggle,
+                              fdk_toggle_changed_fn on_change,
                               void *user_data);
 
 /* ---- Checkbox ---- */
@@ -174,11 +181,11 @@ fdk_result fdk_checkbox_create(fdk_widget *parent, fdk_font *font,
 void fdk_checkbox_set_checked(fdk_widget *checkbox, bool checked);
 /* The current checked state. */
 bool fdk_checkbox_is_checked(fdk_widget *checkbox);
-typedef void (*fdk_checkbox_change_fn)(fdk_widget *checkbox,
+typedef void (*fdk_checkbox_changed_fn)(fdk_widget *checkbox,
                                        bool checked, void *user_data);
 /* Same callback contract as Toggle. */
-void fdk_checkbox_set_on_change(fdk_widget *checkbox,
-                                fdk_checkbox_change_fn on_change,
+void fdk_checkbox_set_on_changed(fdk_widget *checkbox,
+                                fdk_checkbox_changed_fn on_change,
                                 void *user_data);
 
 /* ---- RadioButton ---- */
@@ -202,11 +209,11 @@ void fdk_radio_set_checked(fdk_widget *radio, bool checked);
 /* The current checked state. */
 bool fdk_radio_is_checked(fdk_widget *radio);
 
-typedef void (*fdk_radio_change_fn)(fdk_widget *radio, bool checked,
+typedef void (*fdk_radio_changed_fn)(fdk_widget *radio, bool checked,
                                     void *user_data);
 /* Same callback contract as Toggle. */
-void fdk_radio_set_on_change(fdk_widget *radio,
-                             fdk_radio_change_fn on_change,
+void fdk_radio_set_on_changed(fdk_widget *radio,
+                             fdk_radio_changed_fn on_change,
                              void *user_data);
 
 /* ---- ProgressBar ---- */
@@ -242,6 +249,9 @@ fdk_result fdk_frame_create(fdk_widget *parent, fdk_font *font,
 
 /* Replaces the title (copied; NULL clears). Re-measures. */
 fdk_result fdk_frame_set_title(fdk_widget *frame, const char *title);
+/* The frame's current title (toolkit-owned; valid until the next
+ * set_title/destroy; NULL when there is none). */
+const char *fdk_frame_get_title(fdk_widget *frame);
 
 /* ---- Entry (Phase 9) ----
  *
@@ -446,11 +456,33 @@ fdk_result fdk_list_selected_at(fdk_widget *list, size_t position,
                                 size_t *out_row);
 /* Programmatic select per the current mode. */
 fdk_result fdk_list_select(fdk_widget *list, size_t row);
+/* Clears every selected row (any mode). Fires on_selection_changed
+ * once when anything was actually selected — the List's counterpart
+ * of fdk_tree_select(FDK_TREE_NODE_NONE) / fdk_combo_set_active(-1). */
+void fdk_list_clear_selection(fdk_widget *list);
 
 /* Fires once per settled change. */
 void fdk_list_set_on_selection_changed(fdk_widget *list,
                                        fdk_list_selection_fn fn,
                                        void *user_data);
+
+/* ---- Bulk-mutation batching (1.3.0) ----
+ *
+ * Between begin_batch and end_batch, row mutations (append / insert /
+ * remove / clear / set_row_text) skip their per-mutation O(N)
+ * relayout and their selection-changed fire. end_batch performs ONE
+ * relayout at the batch's final state and fires on_selection_changed
+ * at most once (only when the selection actually changed during the
+ * batch). Filling a list of N rows inside a batch is O(N); without
+ * one, every append re-places the whole list (O(N^2) for a fill —
+ * measurable at directory-listing sizes). Batches nest
+ * (depth-counted); the outermost end_batch settles. Unbalanced
+ * end_batch calls are ignored. Queries (row_count, selected_count,
+ * row_text, ...) stay valid at every point; only GEOMETRY settles
+ * late — do not hit-test or paint a list mid-batch (a synchronous
+ * fill never does). */
+void fdk_list_begin_batch(fdk_widget *list);
+void fdk_list_end_batch(fdk_widget *list);
 
 /* ---- Row activation (1.2.0) ----
  *
@@ -478,9 +510,13 @@ void fdk_list_set_on_row_activate(fdk_widget *list,
  * Right expands-or-enters-first-child, Home/End/PageUp/PageDown as
  * in List.
  *
- * Node handles (fdk_tree_node) are stable for the tree's lifetime:
- * they index the internal node store, which only ever grows.
- * FDK_TREE_NODE_NONE means "no node" (root parent, no selection).
+ * Node handles (fdk_tree_node) index the internal node store, which
+ * NEVER reuses an index: handles stay stable while their nodes are
+ * alive, and a removed node's handle simply becomes invalid (every
+ * OTHER handle keeps pointing at the same node). fdk_tree_clear is
+ * the one exception — it resets the whole store, invalidating every
+ * handle at once. FDK_TREE_NODE_NONE means "no node" (root parent,
+ * no selection).
  */
 
 typedef size_t fdk_tree_node;
@@ -507,6 +543,18 @@ const char *fdk_tree_node_text(fdk_widget *tree, fdk_tree_node node);
 
 /* Expand/collapse (parents only; leaves return
  * FDK_ERR_INVALID_ARGUMENT). */
+/* Removes the node AND its whole subtree (the FDK container rule:
+ * removing a parent takes its children). The node's handle — and
+ * every handle into the removed subtree — becomes invalid; all other
+ * handles stay stable (the store never reuses indices). Removing the
+ * selected node (or its ancestor) clears the selection and fires
+ * on_selection_changed once. */
+fdk_result fdk_tree_node_remove(fdk_widget *tree, fdk_tree_node node);
+/* Removes every node and RESETS the store: every handle from before
+ * the clear is invalid (the empty tree hands out fresh indices from
+ * zero again). Fires on_selection_changed once when something was
+ * selected. */
+void fdk_tree_clear(fdk_widget *tree);
 fdk_result fdk_tree_node_expand(fdk_widget *tree, fdk_tree_node node,
                                 bool expanded);
 /* Expansion state (leaves report false). */
@@ -609,7 +657,9 @@ fdk_result fdk_toolbar_add_separator(fdk_widget *toolbar);
  * notebook ADOPTS (append_page reparents; exactly one visible at a
  * time — invisible pages are input-transparent and skipped by the
  * paint walk). Tab clicks switch; the switch callback fires after
- * the switch settles. Close buttons / tab reordering parked. */
+ * the switch settles. Pages can be removed (remove_page destroys the
+ * page widget — the notebook owns what it adopts, like every FDK
+ * container). Close-button chrome / drag reordering parked. */
 
 typedef void (*fdk_notebook_switch_fn)(fdk_widget *notebook,
                                        size_t page, void *user_data);
@@ -630,6 +680,21 @@ fdk_result fdk_notebook_set_current_page(fdk_widget *notebook,
 size_t fdk_notebook_get_current_page(fdk_widget *notebook);
 fdk_widget *fdk_notebook_get_page(fdk_widget *notebook,
                                   size_t index);
+/* The page's tab label (toolkit-owned; valid until the page is
+ * removed or the notebook destroyed). NULL on a bad index. */
+const char *fdk_notebook_page_label(fdk_widget *notebook,
+                                    size_t index);
+/* Removes the page at `index` — the tab disappears and the PAGE
+ * WIDGET IS DESTROYED (the notebook owns its pages: append_page
+ * reparented them in, and removal is the standard FDK
+ * parent-owns-children teardown, like fdk_list_remove). Removing the
+ * current page switches to the page that shifted into its slot (the
+ * next page, or the last when removing the tail) and fires
+ * on_switch; removing an earlier page keeps the current page shown.
+ * An empty notebook afterwards is legal (page_count 0,
+ * get_current_page 0). */
+fdk_result fdk_notebook_remove_page(fdk_widget *notebook,
+                                    size_t index);
 /* Fires after a switch settles. */
 void fdk_notebook_set_on_switch(fdk_widget *notebook,
                                 fdk_notebook_switch_fn fn,

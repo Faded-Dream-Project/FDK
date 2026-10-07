@@ -752,10 +752,10 @@ int main(void) {
     fdk_entry_set_on_activate(app.typing, typing_activated, NULL);
     (void)fdk_toggle_create(app.root, app.font, "Password",
                             &app.toggle_password);
-    fdk_toggle_set_on_change(app.toggle_password, password_toggled, NULL);
+    fdk_toggle_set_on_changed(app.toggle_password, password_toggled, NULL);
     (void)fdk_toggle_create(app.root, app.font, "Read-only",
                             &app.toggle_readonly);
-    fdk_toggle_set_on_change(app.toggle_readonly, readonly_toggled, NULL);
+    fdk_toggle_set_on_changed(app.toggle_readonly, readonly_toggled, NULL);
     (void)fdk_label_create(app.root, app.font, "0 bytes · caret @ 0",
                            &app.typing_status);
     (void)fdk_label_create(app.root, app.font,

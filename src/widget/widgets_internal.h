@@ -116,7 +116,10 @@ typedef struct fdk_label {
     fdk_widget base;
     fdk_font *font;    /* borrowed */
     char *text;        /* owned, may be NULL */
-    fdk_color color;   /* text color */
+    fdk_color color;   /* text color                          */
+    bool color_set;    /* false: resolve the theme's text color
+                       * at paint time (the default) — the getter
+                       * reports the SAME resolution (1.3.0)      */
     fdk_label_mode mode;    /* NOWRAP / WRAP / ELLIPSIZE        */
     fdk_align align;        /* horizontal, FILL treated as START */
     fdk_text_line *lines;   /* owned cache, may be NULL           */

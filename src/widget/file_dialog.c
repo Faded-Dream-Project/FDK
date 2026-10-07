@@ -700,6 +700,12 @@ typedef struct fdk_file_dialog {
     void *on_done_user;
     fdk_file_dialog_result pending; /* built during accept         */
     bool answered;
+    /* Construction-succeeded marker (1.3.0): the fail: paths destroy
+     * the window BEFORE it was ever shown; without this flag the
+     * destroy-notify answered the app with CANCELLED while the
+     * constructor simultaneously returned an error — the
+     * double-signal every caller had to defensively ignore. */
+    bool surfaced;
     bool was_modal;          /* re-grab after the overwrite ask    */
     bool tearing_down;       /* body destroy in progress           */
     fdk_window *confirm_win; /* nested overwrite dialog while up   */
@@ -794,8 +800,12 @@ static char **fdlg_active_patterns(fdk_file_dialog *d, size_t *count) {
 
 /* Rebuilds the file list rows from d->entries (the list widget is
  * cleared and re-appended; the selection resets — a snapshot list
- * cannot keep stale selections alive). */
+ * cannot keep stale selections alive). The whole rebuild runs in ONE
+ * list batch: a directory with 8192 entries is 8192 appends that
+ * settle in a single relayout instead of re-placing the list per
+ * append (the O(N^2) shape the 1.3.0 audit measured). */
 static void fdlg_fill_list(fdk_file_dialog *d) {
+    fdk_list_begin_batch(d->list);
     fdk_list_clear(d->list);
     for (size_t i = 0; i < d->entries.count; i++) {
         char row[512];
@@ -806,6 +816,7 @@ static void fdlg_fill_list(fdk_file_dialog *d) {
         }
         (void)fdk_list_append(d->list, row, NULL);
     }
+    fdk_list_end_batch(d->list);
 }
 
 /* Syncs the path bar to d->dir — unless the user is mid-typing in
@@ -1367,8 +1378,8 @@ static void fdlg_window_event(fdk_window *window,
 static void fdlg_destroyed(fdk_window *window, void *user) {
     (void)window;
     fdk_file_dialog *d = user;
-    if (d->answered) {
-        return;
+    if (d->answered || !d->surfaced) {
+        return; /* already answered, or failed construction: silent */
     }
     d->answered = true;
     if (d->on_done != NULL) {
@@ -1726,7 +1737,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     if (d->show_hidden) {
         fdk_toggle_set_checked(d->hidden_toggle, true);
     }
-    fdk_toggle_set_on_change(d->hidden_toggle, fdlg_hidden_toggled, d);
+    fdk_toggle_set_on_changed(d->hidden_toggle, fdlg_hidden_toggled, d);
 
     /* Filter combo: one row per pattern + "All files"; the first
      * pattern starts active when filters were given. */
@@ -1823,6 +1834,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     fdk_window_set_content(win, body);
     fdlg_reload(d);
 
+    d->surfaced = true; /* construction succeeded: answers are honest */
     fdk_window_show(win);
     if (modal) {
         (void)fdk__window_set_modal(win, true);

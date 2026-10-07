@@ -720,6 +720,36 @@ void fdk_surface_fill_rect(fdk_surface *surface, fdk_rect rect,
     if (!clip_and_damage(surface, rect, &x0, &y0, &x1, &y1)) {
         return;
     }
+    /* Opaque fast path (1.3.0): a fully-opaque fill replaces the
+     * destination outright — one packed write per pixel, no float
+     * blend math. This is THE hot path of the widget layer (every
+     * control background, every track, every panel is an opaque
+     * fill_rect); the v1 float-per-pixel loop cost ~15 ops/pixel
+     * for what is a memcpy-shaped operation. A row-word memset via
+     * a small unrolled loop keeps the code portable and obvious. */
+    if (color.a >= 1.0f) {
+        fdk_u32 px =
+            (surface->format == FDK_SURFACE_FORMAT_ARGB8888)
+                ? pack_opaque_argb(color)
+                : pack_color(color);
+        for (int y = y0; y < y1; y++) {
+            fdk_u32 *row = surface->fb.pixels +
+                           (size_t)y * (size_t)surface->fb.stride;
+            size_t n = (size_t)(x1 - x0);
+            fdk_u32 *dst = row + (size_t)x0;
+            size_t i = 0;
+            for (; i + 4 <= n; i += 4) {
+                dst[i] = px;
+                dst[i + 1] = px;
+                dst[i + 2] = px;
+                dst[i + 3] = px;
+            }
+            for (; i < n; i++) {
+                dst[i] = px;
+            }
+        }
+        return;
+    }
     for (int y = y0; y < y1; y++) {
         for (int x = x0; x < x1; x++) {
             blend_pixel(surface, x, y, color);
@@ -736,6 +766,20 @@ void fdk_surface_draw_rect(fdk_surface *surface, fdk_rect rect,
         return;
     }
 
+    /* Degenerate heights: top and bottom edges COINCIDE — drawing
+     * both would double-blend the same row (a visible artifact with
+     * translucent colors, and exactly what the no-double-blend rule
+     * below exists to prevent). A 1-px-high rect is one row; a 1-px
+     * WIDE rect similarly has its two vertical edges on one column.
+     */
+    if (rect.height == 1) {
+        fdk_surface_fill_rect(surface,
+                              (fdk_rect){ .x = rect.x, .y = rect.y,
+                                          .width = rect.width,
+                                          .height = 1 },
+                              color);
+        return; /* the row IS the whole outline */
+    }
     /* Top and bottom edges (full width). */
     fdk_surface_fill_rect(surface,
                           (fdk_rect){ .x = rect.x, .y = rect.y,
@@ -746,6 +790,15 @@ void fdk_surface_draw_rect(fdk_surface *surface, fdk_rect rect,
                                       .y = rect.y + rect.height - 1,
                                       .width = rect.width, .height = 1 },
                           color);
+    if (rect.width == 1) {
+        /* One column, strictly between the two rows already drawn. */
+        fdk_surface_fill_rect(surface,
+                              (fdk_rect){ .x = rect.x, .y = rect.y + 1,
+                                          .width = 1,
+                                          .height = rect.height - 2 },
+                              color);
+        return;
+    }
     /* Left and right edges — strictly BETWEEN the horizontal ones so
      * no corner pixel is blended twice (with translucent colors a
      * double blend is a visible artifact, not a style choice). */
@@ -996,6 +1049,18 @@ void fdk_surface_fill_rounded_rect(fdk_surface *surface, fdk_rect rect,
     fdk_i32 cyt = rect.y + r;
     fdk_i32 cyb = rect.y + rect.height - 1 - r;
 
+    /* Opaque fast path (1.3.0): with a fully-opaque color the blend
+     * is the identity — write the packed pixel directly (the same
+     * optimization fill_rect got; buttons and every rounded control
+     * background ride this path on every paint). */
+    const bool opaque = (color.a >= 1.0f);
+    fdk_u32 opaque_px = 0;
+    if (opaque) {
+        opaque_px = (surface->format == FDK_SURFACE_FORMAT_ARGB8888)
+                        ? pack_opaque_argb(color)
+                        : pack_color(color);
+    }
+
     for (fdk_i32 y = rect.y; y < rect.y + rect.height; y++) {
         fdk_i32 half = r; /* middle rows: full width */
         if (y < cyt) {
@@ -1005,8 +1070,21 @@ void fdk_surface_fill_rounded_rect(fdk_surface *surface, fdk_rect rect,
             fdk_i32 dy = y - cyb;
             half = isqrt_round((fdk_i64)r * r - (fdk_i64)dy * dy);
         }
-        for (fdk_i32 x = cxl - half; x <= cxr + half; x++) {
-            blend_pixel(surface, x, y, color);
+        fdk_i32 sx = cxl - half;
+        fdk_i32 ex = cxr + half;
+        if (opaque) {
+            fdk_u32 *row = surface->fb.pixels +
+                           (size_t)y * (size_t)surface->fb.stride;
+            for (fdk_i32 x = sx; x <= ex; x++) {
+                if (x >= surface->clip_x0 && x < surface->clip_x1 &&
+                    y >= surface->clip_y0 && y < surface->clip_y1) {
+                    row[x] = opaque_px;
+                }
+            }
+        } else {
+            for (fdk_i32 x = sx; x <= ex; x++) {
+                blend_pixel(surface, x, y, color);
+            }
         }
     }
 }

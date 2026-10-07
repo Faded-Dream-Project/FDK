@@ -1614,6 +1614,16 @@ void fdk_wayland_window_hide(fdk_platform_window *pwindow) {
 }
 
 void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *title) {
+    /* Popups have no xdg_toplevel (their role object is xdg_popup) —
+     * marshaling a toplevel request on the NULL proxy is a crash in
+     * the generated inline (wl_proxy_get_version(NULL)). A popup's
+     * "title" has no protocol meaning anyway: quietly ignore, the
+     * same answer X11 gives override-redirect windows. (1.3.0: the
+     * v1 code NULL-deref'd here — six public entry points shared
+     * the bug, found by the production audit.) */
+    if (pwindow == NULL || pwindow->xdg_toplevel == NULL) {
+        return;
+    }
     xdg_toplevel_set_title(pwindow->xdg_toplevel, title != NULL ? title : "");
 }
 
@@ -1703,6 +1713,10 @@ void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_
 
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size) {
+    /* Popups: no toplevel to constrain (see set_title). */
+    if (pwindow == NULL || pwindow->xdg_toplevel == NULL) {
+        return;
+    }
     xdg_toplevel_set_min_size(pwindow->xdg_toplevel, min_size.width, min_size.height);
     xdg_toplevel_set_max_size(pwindow->xdg_toplevel, max_size.width, max_size.height);
 }
@@ -1802,6 +1816,11 @@ fdk_result fdk_wayland_window_set_maximized(fdk_platform_window *pwindow,
     if (pwindow == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
+    /* Popups: no toplevel (see set_title) — refuse honestly rather
+     * than dereferencing the NULL role object. */
+    if (pwindow->xdg_toplevel == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
     if (maximized) {
         xdg_toplevel_set_maximized(pwindow->xdg_toplevel);
     } else {
@@ -1822,6 +1841,10 @@ fdk_result fdk_wayland_window_set_minimized(fdk_platform_window *pwindow,
         /* xdg-shell has no unminimize request — compositors unminimize
          * via activation. Tell the caller honestly instead of faking
          * a restore that cannot work. */
+        return FDK_ERR_UNSUPPORTED;
+    }
+    /* Popups: no toplevel (see set_title). */
+    if (pwindow->xdg_toplevel == NULL) {
         return FDK_ERR_UNSUPPORTED;
     }
     xdg_toplevel_set_minimized(pwindow->xdg_toplevel);
@@ -1855,6 +1878,9 @@ fdk_result fdk_wayland_window_begin_move(fdk_platform_window *pwindow,
     if (pwindow == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
+    if (pwindow->xdg_toplevel == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* popups: no toplevel (set_title) */
+    }
     if (pwindow->conn->pointer == NULL) {
         return FDK_ERR_UNSUPPORTED;
     }
@@ -1870,6 +1896,9 @@ fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
     (void)local_y;
     if (pwindow == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pwindow->xdg_toplevel == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* popups: no toplevel (set_title) */
     }
     if (pwindow->conn->pointer == NULL || edge <= 0) {
         return FDK_ERR_UNSUPPORTED;

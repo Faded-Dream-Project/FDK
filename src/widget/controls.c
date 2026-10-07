@@ -23,6 +23,7 @@
 
 #include "core/alloc_internal.h"
 #include <stdio.h>
+#include <stdint.h>
 
 /* ---- shared geometry ---- */
 
@@ -64,14 +65,21 @@ static void button_measure(fdk_widget *w, fdk_size *out) {
     fdk__text_extent(b->font, b->text, &tw, &th);
     out->width = tw + BTN_PAD_X * 2;
     out->height = th + BTN_PAD_Y * 2;
-    if (out->height < th + BTN_PAD_Y * 2) {
-        out->height = th + BTN_PAD_Y * 2; /* no-shrink guard */
-    }
     if (out->width < 24) {
         out->width = 24; /* tiny hit area even with no text */
     }
     if (out->height < 16) {
         out->height = 16;
+    }
+    /* Hostile font metrics (a face declaring a giant ascent) could in
+     * principle push tw/th past the fdk_i32 budget; the measure
+     * contract only promises sane fonts, but saturate rather than
+     * wrap — a wrapped negative would poison layout. */
+    if (out->width < 0) {
+        out->width = INT32_MAX;
+    }
+    if (out->height < 0) {
+        out->height = INT32_MAX;
     }
 }
 
@@ -270,6 +278,17 @@ fdk_result fdk_button_set_text(fdk_widget *button, const char *text) {
     /* A11y: the label IS the accessible name. */
     fdk__a11y_notify(button, FDK_A11Y_NAME_CHANGED, 0);
     return FDK_OK;
+}
+
+/* The button's current label (toolkit-owned copy; valid until the
+ * next set_text/destroy). NULL when the button has no text — the
+ * same convention as fdk_label_get_text (1.3.0: every text-bearing
+ * widget now has its getter). */
+const char *fdk_button_get_text(fdk_widget *button) {
+    if (button == NULL || button->klass != &fdk_button_class_def) {
+        return NULL;
+    }
+    return button_of(button)->text;
 }
 
 void fdk_button_set_on_activate(fdk_widget *button,
@@ -523,8 +542,8 @@ bool fdk_toggle_is_checked(fdk_widget *toggle) {
     return check_of(toggle)->checked;
 }
 
-void fdk_toggle_set_on_change(fdk_widget *toggle,
-                              fdk_toggle_change_fn on_change,
+void fdk_toggle_set_on_changed(fdk_widget *toggle,
+                              fdk_toggle_changed_fn on_change,
                               void *user_data) {
     if (toggle == NULL || toggle->klass != &fdk_toggle_class_def) {
         return;
@@ -641,8 +660,8 @@ bool fdk_checkbox_is_checked(fdk_widget *checkbox) {
     return check_of(checkbox)->checked;
 }
 
-void fdk_checkbox_set_on_change(fdk_widget *checkbox,
-                                fdk_checkbox_change_fn on_change,
+void fdk_checkbox_set_on_changed(fdk_widget *checkbox,
+                                fdk_checkbox_changed_fn on_change,
                                 void *user_data) {
     if (checkbox == NULL || checkbox->klass != &fdk_checkbox_class_def) {
         return;
@@ -687,15 +706,44 @@ static void radio_paint(fdk_widget *w, fdk_surface *surface,
 
 /* Group rule: the radio's PARENT widget is its group. Checking one
  * unchecks every sibling radio (silently if they have no callback;
- * their on_change fires with false otherwise). */
+ * their on_change fires with false otherwise).
+ *
+ * Reentrancy: sibling on_change callbacks run OUTSIDE event dispatch
+ * here — a callback may legally destroy radios (including ones later
+ * in the loop), reparent them out of the group, or append new
+ * children. The sweep is therefore snapshot + watch based: the child
+ * list is copied once, every snapshot entry is watched, and an entry
+ * is only touched when its watch still reports it alive AND it is
+ * still parented to the same group (a reparented radio left the
+ * group by definition). A destroyed parent frees the whole snapshot —
+ * every watch reads dead, nothing is dereferenced. */
 static void radio_uncheck_siblings(fdk_widget *radio) {
     fdk_widget *parent = radio->parent;
-    if (parent == NULL) {
+    if (parent == NULL || parent->child_count == 0) {
         return;
     }
-    for (size_t i = 0; i < parent->child_count; i++) {
-        fdk_widget *sib = parent->children[i];
-        if (sib == radio || sib->klass != &fdk_radio_class_def) {
+    size_t n = parent->child_count;
+    fdk_widget **snap = fdk_alloc(n * sizeof *snap);
+    fdk_widget_watch *watches =
+        fdk_alloc_array(n, sizeof *watches);
+    if (snap == NULL || watches == NULL) {
+        /* OOM: skip the sweep. The group rule is momentarily
+         * unenforced (two checked radios) — a visual inconsistency,
+         * never a memory-safety hazard; the next check self-heals. */
+        fdk_free(snap);
+        fdk_free(watches);
+        return;
+    }
+    memcpy(snap, parent->children, n * sizeof *snap);
+    for (size_t i = 0; i < n; i++) {
+        fdk__widget_watch(&watches[i], snap[i]);
+    }
+    for (size_t i = 0; i < n; i++) {
+        fdk_widget *sib = watches[i].target; /* NULL = died mid-sweep */
+        if (sib == NULL || sib == radio || sib->parent != parent) {
+            continue;
+        }
+        if (sib->klass != &fdk_radio_class_def) {
             continue;
         }
         fdk_check_widget *sc = check_of(sib);
@@ -710,17 +758,31 @@ static void radio_uncheck_siblings(fdk_widget *radio) {
             }
         }
     }
+    for (size_t i = 0; i < n; i++) {
+        fdk__widget_unwatch(&watches[i]);
+    }
+    fdk_free(snap);
+    fdk_free(watches);
 }
 
 static void radio_set_checked_impl(fdk_widget *w, bool checked) {
     fdk_check_widget *c = check_of(w);
     if (checked && !c->checked) {
-        radio_uncheck_siblings(w);
+        /* State BEFORE callbacks, and a watch across them: a sibling's
+         * on_change may destroy THIS radio (legal outside dispatch,
+         * where destroy frees immediately) — the watch keeps the
+         * post-callback fire from touching freed memory. */
         c->checked = true;
         fdk_widget_invalidate(w);
         /* A11y: this radio + the unchecked siblings all flipped. */
         fdk__a11y_notify(w, FDK_A11Y_STATE_CHANGED, FDK_A11Y_CHECKED);
-        check_fire_change(w, c);
+        fdk_widget_watch watch;
+        fdk__widget_watch(&watch, w);
+        radio_uncheck_siblings(w);
+        if (fdk__watch_alive(&watch)) {
+            check_fire_change(w, c);
+        }
+        fdk__widget_unwatch(&watch);
     } else if (!checked && c->checked) {
         c->checked = false;
         fdk_widget_invalidate(w);
@@ -862,8 +924,8 @@ bool fdk_radio_is_checked(fdk_widget *radio) {
     return check_of(radio)->checked;
 }
 
-void fdk_radio_set_on_change(fdk_widget *radio,
-                             fdk_radio_change_fn on_change,
+void fdk_radio_set_on_changed(fdk_widget *radio,
+                             fdk_radio_changed_fn on_change,
                              void *user_data) {
     if (radio == NULL || radio->klass != &fdk_radio_class_def) {
         return;

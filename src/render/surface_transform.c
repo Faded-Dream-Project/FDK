@@ -292,12 +292,30 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
                                             .height = src->fb.height });
     }
 
-    /* Integer scale-up: nearest neighbor over the scaled bbox (exact
-     * pixels, no filtering, no float compositing — reads source
-     * pixels and copies them). */
-    if (matrix_is_int_scale_up(m) && dst->format != FDK_SURFACE_FORMAT_ARGB8888 &&
-        src->format != FDK_SURFACE_FORMAT_ARGB8888) {
+    /* Integer scale-up: nearest neighbor over the scaled bbox —
+     * exact pixels, no filtering. Format-aware (1.3.0):
+     *
+     *   - XRGB source (any dst): raw copy, forced opaque into ARGB
+     *     destinations (the rule blit_blend applies).
+     *   - ARGB -> ARGB: raw copy — the exact alpha rides through,
+     *     which is what NN means for a straight-alpha surface.
+     *
+     *     (Both were excluded in v1, so decoded-image scale-ups
+     *     blurred bilinearly — contradicting the header's
+     *     "scaling up never blurs" promise.)
+     *
+     *   - ARGB -> XRGB: NN SAMPLING with source-over COMPOSITING per
+     *     pixel (a raw copy would splat translucent pixels' color
+     *     channels without blending them onto the background —
+     *     visibly wrong for any sprite with alpha). Nearest sampling
+     *     keeps the crisp edges; composite_over keeps the honest
+     *     color math. */
+    if (matrix_is_int_scale_up(m)) {
         int s = (int)m.m00;
+        bool src_has_alpha =
+            (src->format == FDK_SURFACE_FORMAT_ARGB8888);
+        bool dst_has_alpha =
+            (dst->format == FDK_SURFACE_FORMAT_ARGB8888);
         long long dx0 = (long long)m.tx;
         long long dy0 = (long long)m.ty;
         long long dx1 = dx0 + (long long)src->fb.width * s;
@@ -310,14 +328,35 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
         long long cy0 = dy0 < dst->clip_y0 ? dst->clip_y0 : dy0;
         long long cx1 = dx1 > dst->clip_x1 ? dst->clip_x1 : dx1;
         long long cy1 = dy1 > dst->clip_y1 ? dst->clip_y1 : dy1;
-        for (long long y = cy0; y < cy1; y++) {
-            long long sy = (y - dy0) / s;
-            fdk_u32 *drow =
-                dst->fb.pixels + (size_t)y * (size_t)dst->fb.stride;
-            const fdk_u32 *srow =
-                src->fb.pixels + (size_t)sy * (size_t)src->fb.stride;
-            for (long long x = cx0; x < cx1; x++) {
-                drow[x] = srow[(x - dx0) / s];
+        if (src_has_alpha && !dst_has_alpha) {
+            /* NN sample + composite (see above). */
+            for (long long y = cy0; y < cy1; y++) {
+                long long sy = (y - dy0) / s;
+                for (long long x = cx0; x < cx1; x++) {
+                    long long sx = (x - dx0) / s;
+                    fdk_u32 spix =
+                        src->fb.pixels[(size_t)sy *
+                                           (size_t)src->fb.stride +
+                                       (size_t)sx];
+                    float sa = (float)((spix >> 24) & 0xFFu) / 255.0f;
+                    float sr = (float)((spix >> 16) & 0xFFu) / 255.0f;
+                    float sg = (float)((spix >> 8) & 0xFFu) / 255.0f;
+                    float sb = (float)(spix & 0xFFu) / 255.0f;
+                    composite_over(dst, (int)x, (int)y, sr, sg, sb, sa);
+                }
+            }
+        } else {
+            const fdk_u32 force_opaque =
+                (!src_has_alpha && dst_has_alpha) ? 0xFF000000u : 0u;
+            for (long long y = cy0; y < cy1; y++) {
+                long long sy = (y - dy0) / s;
+                fdk_u32 *drow =
+                    dst->fb.pixels + (size_t)y * (size_t)dst->fb.stride;
+                const fdk_u32 *srow =
+                    src->fb.pixels + (size_t)sy * (size_t)src->fb.stride;
+                for (long long x = cx0; x < cx1; x++) {
+                    drow[x] = srow[(x - dx0) / s] | force_opaque;
+                }
             }
         }
         fdk__surface_damage_add(dst, (fdk_rect){ .x = (fdk_i32)cx0, .y = (fdk_i32)cy0,

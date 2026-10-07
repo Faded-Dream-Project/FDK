@@ -58,6 +58,7 @@ typedef struct fdk_list {
     size_t capacity;
     size_t anchor;       /* shift-click anchor row               */
     size_t key_cursor;   /* the keyboard's moving end (shift+arrows) */
+    size_t selected_count; /* O(1) selection queries + batch diffing */
     fdk_list_selection_fn on_selection_changed;
     void *on_selection_data;
     /* ---- Row activation (1.2.0) ----
@@ -71,6 +72,22 @@ typedef struct fdk_list {
     fdk_i64 last_click_ms;   /* last left-press, for dbl detection */
     size_t last_click_row;   /* the row that press selected        */
     bool have_last_click;
+    /* ---- Bulk-mutation batching (1.3.0) ----
+     *
+     * Between begin_batch/end_batch, row mutations skip the
+     * per-mutation O(N) relayout and the selection-changed fire —
+     * end_batch runs ONE relayout and (if the selection actually
+     * changed) fires ONCE. Bulk loads (a directory fill, a test
+     * fixture) become O(N) instead of O(N^2). Depth-counted, so
+     * nesting is safe; anything mutated without a batch keeps the
+     * exact per-op settle semantics v1 shipped. */
+    int batch_depth;
+    bool batch_dirty;        /* a mutation awaits the batch relayout */
+    size_t batch_sel_at_start; /* selected_count when the batch opened */
+    /* Widest row's content width, cached so appends can place just
+     * the new row (the common bulk-fill shape) instead of re-placing
+     * the whole list. 80 = the v1 minimum content width. */
+    fdk_i32 content_width;
 } fdk_list;
 
 static fdk_list *list_of(fdk_widget *w) {
@@ -97,13 +114,13 @@ static fdk_i32 list_row_height(const fdk_list *l) {
 
 /* Re-places every row inside the rows container + refreshes the
  * container's natural size (so the scrollview's bars/clamps follow).
- * Called after any mutation. */
+ * Called after any non-batched mutation (and once at end_batch). */
 static void list_relayout(fdk_list *l) {
     if (l->rows == NULL) {
         return;
     }
     fdk_i32 rh = list_row_height(l);
-    fdk_i32 w = 0;
+    fdk_i32 w = 80;
     /* Width: the widest row's text (min 80) — rows stretch to it. */
     for (size_t i = 0; i < l->count; i++) {
         fdk_i32 tw = 0, th = 0;
@@ -112,9 +129,7 @@ static void list_relayout(fdk_list *l) {
             w = tw + LIST_ROW_PAD_X * 2;
         }
     }
-    if (w < 80) {
-        w = 80;
-    }
+    l->content_width = w;
     for (size_t i = 0; i < l->count; i++) {
         fdk_rect r = { 0, (fdk_i32)(i * (size_t)rh), w, rh };
         fdk_widget_set_bounds(&l->row_widgets[i]->base, r);
@@ -126,6 +141,44 @@ static void list_relayout(fdk_list *l) {
      * fdk_widget_set_bounds() path (set_bounds does not run arrange
      * hooks — fdk_widget_arrange is the layout engine's entry, and
      * applications positioning a list by hand use set_bounds). */
+    if (l->scroll != NULL && l->base.bounds.width > 0 &&
+        l->base.bounds.height > 0) {
+        fdk_rect inner = { 0, 0, l->base.bounds.width,
+                           l->base.bounds.height };
+        fdk_widget_set_bounds(l->scroll, inner);
+    }
+    fdk_widget_child_layout_changed(l->rows->parent);
+}
+
+/* The append fast path: place ONLY the new row. O(1) when the new
+ * row is not wider than every row before it (the common bulk-fill
+ * shape — filenames, log lines); a widening append re-places the
+ * list once (widths stretch). The batched fill path never even gets
+ * here (end_batch runs the single full relayout). */
+static void list_place_appended(fdk_list *l) {
+    if (l->rows == NULL || l->count == 0) {
+        return;
+    }
+    fdk_i32 rh = list_row_height(l);
+    fdk_list_row *row = l->row_widgets[l->count - 1];
+    fdk_i32 tw = 0;
+    fdk__text_extent(l->font, row->text, &tw, NULL);
+    fdk_i32 want = tw + LIST_ROW_PAD_X * 2;
+    if (want > l->content_width) {
+        l->content_width = want;
+        /* Widths stretch for every row: re-place the list. */
+        for (size_t i = 0; i < l->count; i++) {
+            fdk_rect r = { 0, (fdk_i32)(i * (size_t)rh),
+                           l->content_width, rh };
+            fdk_widget_set_bounds(&l->row_widgets[i]->base, r);
+        }
+    } else {
+        fdk_rect r = { 0, (fdk_i32)((l->count - 1) * (size_t)rh),
+                       l->content_width, rh };
+        fdk_widget_set_bounds(&row->base, r);
+    }
+    fdk_widget_set_natural_size(l->rows, l->content_width,
+                                (fdk_i32)(l->count * (size_t)rh));
     if (l->scroll != NULL && l->base.bounds.width > 0 &&
         l->base.bounds.height > 0) {
         fdk_rect inner = { 0, 0, l->base.bounds.width,
@@ -163,6 +216,11 @@ static void list_set_row(fdk_list *l, size_t index, bool selected) {
     fdk_list_row *row = l->row_widgets[index];
     if (row->selected != selected) {
         row->selected = selected;
+        if (selected) {
+            l->selected_count++;
+        } else {
+            l->selected_count--;
+        }
         fdk_widget_invalidate(&row->base);
         /* A11y: the row's selected state flipped. */
         fdk__a11y_notify(&row->base, FDK_A11Y_STATE_CHANGED,
@@ -170,24 +228,31 @@ static void list_set_row(fdk_list *l, size_t index, bool selected) {
     }
 }
 
+/* Clears every selected row. Reentrancy-safe: an a11y subscriber
+ * may destroy the LIST mid-sweep (notifications run app code), so
+ * the loop re-checks the watch every iteration. */
 static void list_clear_selection(fdk_list *l) {
+    if (l->selected_count == 0) {
+        return;
+    }
+    fdk_widget_watch watch;
+    fdk__widget_watch(&watch, &l->base);
     for (size_t i = 0; i < l->count; i++) {
+        if (!fdk__watch_alive(&watch)) {
+            break;
+        }
         list_set_row(l, i, false);
     }
+    fdk__widget_unwatch(&watch);
 }
 
 size_t fdk_list_selected_count(fdk_widget *list) {
     if (list == NULL || list->klass != &fdk_list_class_def) {
         return 0;
     }
-    fdk_list *l = list_of(list);
-    size_t n = 0;
-    for (size_t i = 0; i < l->count; i++) {
-        if (l->row_widgets[i]->selected) {
-            n++;
-        }
-    }
-    return n;
+    /* Maintained incrementally by list_set_row — O(1), and the
+     * honest count even mid-batch. */
+    return list_of(list)->selected_count;
 }
 
 fdk_result fdk_list_selected_at(fdk_widget *list, size_t position,
@@ -670,6 +735,11 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
     l->font = font;
     l->mode = FDK_LIST_SELECTION_SINGLE;
     l->key_cursor = (size_t)-1; /* cold start: Down selects row 0 */
+    l->selected_count = 0;
+    l->batch_depth = 0;
+    l->batch_dirty = false;
+    l->batch_sel_at_start = 0;
+    l->content_width = 80; /* the v1 minimum, until a row widens it */
     fdk_widget_set_can_focus(w, true);
 
     /* Internals: scrollview child -> rows container. */
@@ -709,6 +779,10 @@ static fdk_result list_grow(fdk_list *l) {
         return FDK_OK;
     }
     size_t cap = (l->capacity == 0) ? 8 : l->capacity * 2;
+    if (cap < l->capacity || /* wrapped */
+        cap > SIZE_MAX / sizeof(fdk_list_row *)) {
+        return FDK_ERR_OUT_OF_MEMORY; /* refuse absurd growth */
+    }
     fdk_list_row **grown =
         fdk_realloc(l->row_widgets, cap * sizeof(*grown));
     if (grown == NULL) {
@@ -745,7 +819,15 @@ static fdk_result list_insert_internal(fdk_list *l, size_t index,
             (l->count - index) * sizeof(*l->row_widgets));
     l->row_widgets[index] = row;
     l->count++;
-    list_relayout(l);
+    if (l->batch_depth > 0) {
+        l->batch_dirty = true;
+        return FDK_OK; /* one relayout at end_batch */
+    }
+    if (index == l->count - 1) {
+        list_place_appended(l); /* the O(1) common case */
+    } else {
+        list_relayout(l); /* interior insert shifts every later row */
+    }
     return FDK_OK;
 }
 
@@ -779,14 +861,25 @@ fdk_result fdk_list_remove(fdk_widget *list, size_t index) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_widget *row_w = &l->row_widgets[index]->base;
+    bool was_selected = l->row_widgets[index]->selected;
     /* Remove from the array first so relayout doesn't see a row that
      * is mid-destruction. */
     memmove(&l->row_widgets[index], &l->row_widgets[index + 1],
             (l->count - index - 1) * sizeof(*l->row_widgets));
     l->count--;
+    if (was_selected) {
+        /* The destroy below fires no a11y state change for the row
+         * (CHILDREN_CHANGED on the container covers it); keep the
+         * incremental count honest by hand. */
+        l->selected_count--;
+    }
     fdk_widget_destroy(row_w);
     if (l->anchor >= l->count && l->count > 0) {
         l->anchor = l->count - 1;
+    }
+    if (l->batch_depth > 0) {
+        l->batch_dirty = true;
+        return FDK_OK; /* relayout + one fire at end_batch */
     }
     list_relayout(l);
     list_fire_changed(l);
@@ -798,13 +891,28 @@ void fdk_list_clear(fdk_widget *list) {
         return;
     }
     fdk_list *l = list_of(list);
-    while (l->count > 0) {
-        fdk_result r = fdk_list_remove(list, l->count - 1);
-        if (!fdk_ok(r)) {
-            break;
-        }
+    bool had_selected = (l->selected_count != 0);
+    /* One pass: destroy every row, then reset. The v1 loop removed
+     * from the tail one row at a time — an O(N^2) relayout and an
+     * N+1 selection-changed callback storm for one user-visible
+     * change; both were wrong, not just slow. */
+    for (size_t i = 0; i < l->count; i++) {
+        fdk_widget_destroy(&l->row_widgets[i]->base);
     }
-    list_fire_changed(l);
+    l->count = 0;
+    l->selected_count = 0;
+    l->anchor = 0;
+    l->key_cursor = (size_t)-1;
+    l->have_last_click = false;
+    l->content_width = 80;
+    if (l->batch_depth > 0) {
+        l->batch_dirty = true;
+        return; /* relayout + one fire at end_batch */
+    }
+    list_relayout(l);
+    if (had_selected) {
+        list_fire_changed(l);
+    }
 }
 
 size_t fdk_list_row_count(fdk_widget *list) {
@@ -840,6 +948,10 @@ fdk_result fdk_list_set_row_text(fdk_widget *list, size_t row,
     }
     fdk_free(l->row_widgets[row]->text);
     l->row_widgets[row]->text = copy;
+    if (l->batch_depth > 0) {
+        l->batch_dirty = true;
+        return FDK_OK;
+    }
     list_relayout(l);
     fdk_widget_invalidate(&l->row_widgets[row]->base);
     return FDK_OK;
@@ -865,4 +977,57 @@ void fdk_list_set_on_row_activate(fdk_widget *list,
     fdk_list *l = list_of(list);
     l->on_row_activate = fn;
     l->on_row_activate_data = user_data;
+}
+
+/* ---- Bulk-mutation batching (1.3.0) ---- */
+
+void fdk_list_begin_batch(fdk_widget *list) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return;
+    }
+    fdk_list *l = list_of(list);
+    if (l->batch_depth == 0) {
+        l->batch_dirty = false;
+        l->batch_sel_at_start = l->selected_count;
+    }
+    l->batch_depth++;
+}
+
+void fdk_list_end_batch(fdk_widget *list) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return;
+    }
+    fdk_list *l = list_of(list);
+    if (l->batch_depth == 0) {
+        return; /* unbalanced: ignore, matching the quiet setter style */
+    }
+    l->batch_depth--;
+    if (l->batch_depth > 0) {
+        return; /* the outermost batch settles */
+    }
+    if (l->batch_dirty) {
+        l->batch_dirty = false;
+        list_relayout(l);
+        /* Virtual children (the rows) changed for a11y consumers. */
+        fdk__a11y_notify(&l->base, FDK_A11Y_CHILDREN_CHANGED, 0);
+    }
+    if (l->selected_count != l->batch_sel_at_start) {
+        list_fire_changed(l); /* exactly ONE fire for the whole batch */
+    }
+}
+
+/* The selection-clear the siblings have had since v1 (tree: select
+ * NODE_NONE; combo: set_active -1). Clears every selected row in
+ * any mode, firing on_selection_changed once when anything was
+ * actually selected. */
+void fdk_list_clear_selection(fdk_widget *list) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return;
+    }
+    fdk_list *l = list_of(list);
+    if (l->selected_count == 0) {
+        return;
+    }
+    list_clear_selection(l);
+    list_fire_changed(l);
 }

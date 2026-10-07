@@ -8,8 +8,10 @@
 #include <X11/Xutil.h>
 
 /* Translates an XKeyEvent's state field (the modifier mask X reports
- * on THIS event, not a separate query) into fdk_key_modifier bits. */
-static fdk_u32 translate_modifiers(unsigned int x_state) {
+ * on THIS event, not a separate query) into fdk_key_modifier bits.
+ * Shared with the DnD layer (XQueryPointer's state field uses the
+ * same mask encoding) — hence non-static (1.3.0). */
+fdk_u32 fdk__x11_translate_modifiers(unsigned int x_state) {
     fdk_u32 mods = 0;
     if (x_state & ShiftMask)   mods |= FDK_MOD_SHIFT;
     if (x_state & ControlMask) mods |= FDK_MOD_CTRL;
@@ -130,11 +132,32 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
         case KeyRelease: {
             out->type = (xevent->type == KeyPress) ? FDK_EVENT_KEY_DOWN : FDK_EVENT_KEY_UP;
             out->key.scancode = x11_keycode_to_scancode(xevent->xkey.keycode);
-            out->key.modifiers = translate_modifiers(xevent->xkey.state);
-            out->key.is_repeat = 0; /* X11 auto-repeat detection needs
-                                        XkbSetDetectableAutoRepeat, set
-                                        once at connection time — see
-                                        x11_connection.c */
+            out->key.modifiers = fdk__x11_translate_modifiers(xevent->xkey.state);
+            /* Repeat detection (1.3.0): with XKB detectable
+             * auto-repeat (requested at connect), a KeyPress of an
+             * already-down keycode IS the repeat — track the 256-bit
+             * down bitmap. v1 hardcoded 0 while a comment claimed
+             * the enabling call existed somewhere else. */
+            {
+                unsigned int kc = xevent->xkey.keycode;
+                unsigned int byte = kc >> 3;
+                unsigned int bit = kc & 7;
+                if (byte < 32) {
+                    if (xevent->type == KeyPress) {
+                        out->key.is_repeat =
+                            (pwindow->conn->key_down[byte] &
+                             (unsigned char)(1u << bit)) != 0 ? 1 : 0;
+                        pwindow->conn->key_down[byte] |=
+                            (unsigned char)(1u << bit);
+                    } else {
+                        pwindow->conn->key_down[byte] &=
+                            (unsigned char)~(1u << bit);
+                        out->key.is_repeat = 0;
+                    }
+                } else {
+                    out->key.is_repeat = 0;
+                }
+            }
             out->key.codepoint = (xevent->type == KeyPress)
                 ? x11_lookup_codepoint(&xevent->xkey)
                 : 0; /* KeyRelease codepoint lookup is meaningless */
@@ -187,7 +210,7 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             out->pointer_button.position.y = (fdk_f32)xevent->xbutton.y;
             out->pointer_button.button = xevent->xbutton.button;
             out->pointer_button.modifiers =
-                translate_modifiers(xevent->xbutton.state);
+                fdk__x11_translate_modifiers(xevent->xbutton.state);
             return 1;
         }
 

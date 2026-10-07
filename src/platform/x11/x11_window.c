@@ -253,6 +253,16 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
     if (pwindow == NULL) {
         return;
     }
+    if (pwindow->conn->display_dead) {
+        /* The server is gone: every X request below is impossible
+         * (and risks re-entering Xlib's fatal IO path). Unregister
+         * and free only — the XIDs vanish with the connection. The
+         * pixel buffers leak here, a bounded one-time cost during
+         * process teardown on a dead display (1.3.0). */
+        fdk_x11_unregister_window(pwindow->conn, pwindow);
+        fdk_free(pwindow);
+        return;
+    }
     if (pwindow->popup) {
         fdk_x11_window_popup_ungrab(pwindow);
     }
@@ -922,6 +932,13 @@ void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
 
 void fdk_x11_cursor_shutdown(fdk_platform_connection *conn) {
     if (conn == NULL) {
+        return;
+    }
+    if (conn->display_dead) {
+        /* Server gone: the cursors died with the connection. */
+        for (int i = 0; i < 9; i++) {
+            conn->resize_cursors[i] = None;
+        }
         return;
     }
     for (int i = 0; i < 9; i++) {

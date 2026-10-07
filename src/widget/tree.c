@@ -43,6 +43,9 @@ typedef struct fdk_tree_node_rec {
     bool expanded;
     bool selected;
     bool is_parent;    /* has at least one child         */
+    bool dead;         /* removed: tombstone keeps every
+                       * OTHER handle stable (the store
+                       * never reuses an index)          */
 } fdk_tree_node_rec;
 
 typedef struct fdk_tree_row {
@@ -179,7 +182,8 @@ static void tree_rebuild_visible(fdk_tree *t) {
     size_t n = 0;
     size_t cap = 0;
     for (size_t i = 0; i < t->count; i++) {
-        if (t->nodes[i].parent == FDK_TREE_NODE_NONE) {
+        if (t->nodes[i].parent == FDK_TREE_NODE_NONE &&
+            !t->nodes[i].dead) {
             walk_visible(t, i, &vis, &n, &cap);
         }
     }
@@ -300,7 +304,7 @@ fdk_tree_node fdk_tree_get_selected(fdk_widget *tree) {
     }
     fdk_tree *t = tree_of(tree);
     for (size_t i = 0; i < t->count; i++) {
-        if (t->nodes[i].selected) {
+        if (!t->nodes[i].dead && t->nodes[i].selected) {
             return i;
         }
     }
@@ -312,7 +316,8 @@ fdk_result fdk_tree_select(fdk_widget *tree, fdk_tree_node node) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_tree *t = tree_of(tree);
-    if (node != FDK_TREE_NODE_NONE && node >= t->count) {
+    if (node != FDK_TREE_NODE_NONE &&
+        (node >= t->count || t->nodes[node].dead)) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     tree_clear_selection(t);
@@ -759,8 +764,9 @@ fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_tree *t = tree_of(tree);
-    if (parent != FDK_TREE_NODE_NONE && parent >= t->count) {
-        return FDK_ERR_INVALID_ARGUMENT;
+    if (parent != FDK_TREE_NODE_NONE &&
+        (parent >= t->count || t->nodes[parent].dead)) {
+        return FDK_ERR_INVALID_ARGUMENT; /* removed nodes are gone */
     }
     fdk_result r = tree_grow(t);
     if (!fdk_ok(r)) {
@@ -779,6 +785,7 @@ fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
         .expanded = false,
         .selected = false,
         .is_parent = false,
+        .dead = false,
     };
     t->count++;
     if (parent != FDK_TREE_NODE_NONE) {
@@ -801,13 +808,105 @@ fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
     return FDK_OK;
 }
 
+/* ---- node removal (1.3.0) ----
+ *
+ * Handles are indices into the node store, and the store NEVER
+ * reuses an index — removal TOMBSTONES the record (dead = true,
+ * text freed, links left in place) so every OTHER live handle in the
+ * application's hands stays stable, which was always the contract.
+ * The sibling chain is unlinked so walks never enter the dead
+ * subtree; the root scan and child counts skip dead records
+ * defensively as well. */
+
+/* Kills a subtree: tombstones every record (freeing texts), reports
+ * whether anything in it was selected. Links are NOT torn down —
+ * dead links are simply never followed. */
+static bool tree_kill_subtree(fdk_tree *t, size_t node) {
+    bool had_selection = t->nodes[node].selected;
+    fdk_free(t->nodes[node].text);
+    t->nodes[node].text = NULL;
+    t->nodes[node].dead = true;
+    t->nodes[node].selected = false;
+    for (size_t c = t->nodes[node].first_child;
+         c != FDK_TREE_NODE_NONE; c = t->nodes[c].next_sibling) {
+        if (tree_kill_subtree(t, c)) {
+            had_selection = true;
+        }
+    }
+    return had_selection;
+}
+
+fdk_result fdk_tree_node_remove(fdk_widget *tree, fdk_tree_node node) {
+    if (tree == NULL || tree->klass != &fdk_tree_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_tree *t = tree_of(tree);
+    if (node >= t->count || t->nodes[node].dead) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* Unlink from the parent's sibling chain (dead links are never
+     * followed, but unlinking keeps is_parent truthful). */
+    size_t parent = t->nodes[node].parent;
+    if (parent != FDK_TREE_NODE_NONE) {
+        if (t->nodes[parent].first_child == node) {
+            t->nodes[parent].first_child = t->nodes[node].next_sibling;
+        } else {
+            size_t c = t->nodes[parent].first_child;
+            while (c != FDK_TREE_NODE_NONE &&
+                   t->nodes[c].next_sibling != node) {
+                c = t->nodes[c].next_sibling;
+            }
+            if (c != FDK_TREE_NODE_NONE) {
+                t->nodes[c].next_sibling = t->nodes[node].next_sibling;
+            }
+        }
+        if (t->nodes[parent].first_child == FDK_TREE_NODE_NONE) {
+            t->nodes[parent].is_parent = false;
+        }
+    }
+    bool had_selection = tree_kill_subtree(t, node);
+    tree_relayout(t);
+    /* Virtual children (the visible rows) changed for a11y. */
+    fdk__a11y_notify(&t->base, FDK_A11Y_CHILDREN_CHANGED, 0);
+    if (had_selection) {
+        /* The selection died with its node: clear, fire once. */
+        tree_fire_changed(t);
+    }
+    return FDK_OK;
+}
+
+/* Removes every node. Unlike node_remove (tombstones, handles of
+ * the survivors stay stable), clear RESETS the store — every handle
+ * from before the clear is invalid, which is the only honest
+ * contract for "the whole model is gone". */
+void fdk_tree_clear(fdk_widget *tree) {
+    if (tree == NULL || tree->klass != &fdk_tree_class_def) {
+        return;
+    }
+    fdk_tree *t = tree_of(tree);
+    bool had_selection = false;
+    for (size_t i = 0; i < t->count; i++) {
+        if (t->nodes[i].selected) {
+            had_selection = true;
+        }
+        fdk_free(t->nodes[i].text);
+    }
+    t->count = 0;
+    t->anchor = 0;
+    tree_relayout(t);
+    fdk__a11y_notify(&t->base, FDK_A11Y_CHILDREN_CHANGED, 0);
+    if (had_selection) {
+        tree_fire_changed(t);
+    }
+}
+
 fdk_result fdk_tree_node_set_text(fdk_widget *tree, fdk_tree_node node,
                                   const char *text) {
     if (tree == NULL || tree->klass != &fdk_tree_class_def) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_tree *t = tree_of(tree);
-    if (node >= t->count) {
+    if (node >= t->count || t->nodes[node].dead) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     char *copy = fdk__strdup(text != NULL ? text : "");
@@ -825,7 +924,7 @@ const char *fdk_tree_node_text(fdk_widget *tree, fdk_tree_node node) {
         return NULL;
     }
     fdk_tree *t = tree_of(tree);
-    if (node >= t->count) {
+    if (node >= t->count || t->nodes[node].dead) {
         return NULL;
     }
     return t->nodes[node].text;
@@ -837,7 +936,8 @@ fdk_result fdk_tree_node_expand(fdk_widget *tree, fdk_tree_node node,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_tree *t = tree_of(tree);
-    if (node >= t->count || !t->nodes[node].is_parent) {
+    if (node >= t->count || !t->nodes[node].is_parent ||
+        t->nodes[node].dead) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     if (t->nodes[node].expanded != expanded) {
@@ -866,6 +966,10 @@ size_t fdk_tree_node_child_count(fdk_widget *tree, fdk_tree_node node) {
         return 0;
     }
     fdk_tree *t = tree_of(tree);
+    if (node != FDK_TREE_NODE_NONE &&
+        (node >= t->count || t->nodes[node].dead)) {
+        return 0;
+    }
     size_t parent = (node == FDK_TREE_NODE_NONE) ? FDK_TREE_NODE_NONE
                                                  : node;
     size_t n = 0;
@@ -873,13 +977,16 @@ size_t fdk_tree_node_child_count(fdk_widget *tree, fdk_tree_node node) {
              ? FDK_TREE_NODE_NONE
              : t->nodes[parent].first_child;
          c != FDK_TREE_NODE_NONE; c = t->nodes[c].next_sibling) {
-        n++;
+        if (!t->nodes[c].dead) {
+            n++;
+        }
     }
     if (parent == FDK_TREE_NODE_NONE) {
         /* Root-level count. */
         n = 0;
         for (size_t i = 0; i < t->count; i++) {
-            if (t->nodes[i].parent == FDK_TREE_NODE_NONE) {
+            if (t->nodes[i].parent == FDK_TREE_NODE_NONE &&
+                !t->nodes[i].dead) {
                 n++;
             }
         }

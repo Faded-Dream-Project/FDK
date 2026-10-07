@@ -7,9 +7,54 @@
 
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include <X11/XKBlib.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <setjmp.h>
+
+/* ---- Display-death discipline (1.3.0) ---------------------------------
+ *
+ * Xlib's default XIO error handler calls exit(1): a lost X server
+ * (logout, WM crash, ssh -X disconnect) killed the process with no
+ * application say. The core loop already HAS the right contract —
+ * a negative dispatch_pending result propagates out of the pump and
+ * ends fdk_run cleanly — but Xlib never let us get there.
+ *
+ * The handler below fixes that in two tiers:
+ *
+ *      1. While dispatch_pending is draining (fdk__x11_io_armed),
+ *      a fatal IO error longjmps back to its frame — the display is
+ *      dead, the interrupted Xlib call will never be resumed, and
+ *      FDK is single-threaded UI-only (no XInitThreads, so Xlib's
+ *      locking macros are no-ops — no lock is left held).
+ *      dispatch_pending then reports the negative result the pump
+ *      propagates.
+ *
+ *   2. Outside the guarded region (an X call in application-driven
+ *      present()/set_title/... code), the handler flags the
+ *      connection and RETURNS — and Xlib's exit(1) after the
+ *      handler runs is documented, unavoidable process death: the
+ *      flag at least keeps every later teardown path from piling
+ *      more X requests onto a dead socket if control somehow
+ *      resumes.
+ */
+static fdk_platform_connection *g_io_conn = NULL;
+sigjmp_buf fdk__x11_io_jmp;
+volatile int fdk__x11_io_armed = 0;
+
+static int x11_io_error_handler(Display *display) {
+    (void)display;
+    FDK_ERROR("X server connection lost (fatal IO error)");
+    if (g_io_conn != NULL) {
+        g_io_conn->display_dead = 1;
+    }
+    if (fdk__x11_io_armed) {
+        fdk__x11_io_armed = 0;
+        siglongjmp(fdk__x11_io_jmp, 1);
+    }
+    return 0; /* unreachable when armed; lets Xlib exit when not */
+}
 
 fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
                                void *dispatch_user_data, const char *app_id,
@@ -35,6 +80,31 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->window_count = 0;
     conn->window_capacity = 0;
     conn->app_id = NULL;
+    conn->display_dead = 0;
+    conn->detectable_repeat = 0;
+    memset(conn->key_down, 0, sizeof conn->key_down);
+    g_io_conn = conn;
+    (void)XSetIOErrorHandler(x11_io_error_handler);
+
+    /* Key-repeat discipline (1.3.0): ask the XKB extension for
+     * DETECTABLE auto-repeat — real KeyReleases only, repeats as
+     * plain KeyPresses — the same request GTK issues at startup.
+     * The event translator's key-down bitmap turns those into
+     * is_repeat. Without the extension the honest degradation is
+     * is_repeat 0 everywhere (X's fake release+press pairs are
+     * indistinguishable from fast typing; v1 shipped exactly that). */
+    {
+        Bool supported = False;
+        if (XkbSetDetectableAutoRepeat(display, True, &supported) &&
+            supported) {
+            conn->detectable_repeat = 1;
+            FDK_DEBUG("XKB detectable auto-repeat active — key events "
+                      "report is_repeat");
+        } else {
+            FDK_DEBUG("XKB detectable auto-repeat unavailable — "
+                      "is_repeat stays 0 (indistinguishable pairs)");
+        }
+    }
     /* fdk_alloc does not zero — None is 0 but be explicit anyway:
      * no font cursor exists until window_set_cursor first needs one. */
     for (int i = 0; i < 9; i++) {
@@ -193,8 +263,18 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
     free(conn->app_id);
     conn->app_id = NULL;
 
+    if (conn->display_dead) {
+        /* The server is gone: XCloseDisplay would walk straight back
+         * into the fatal IO path. The socket dies with the process
+         * or the close-on-exit — leak the Display handle honestly. */
+        FDK_INFO("disconnecting (display already dead)");
+        g_io_conn = NULL;
+        fdk_free(conn);
+        return;
+    }
     FDK_INFO("disconnecting");
     XCloseDisplay(conn->display);
+    g_io_conn = NULL;
     fdk_free(conn);
 }
 

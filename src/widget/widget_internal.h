@@ -159,6 +159,14 @@ struct fdk_widget {
     * the child's size request (the classic request/allocate split). */
     fdk_i32 natural_w, natural_h;
 
+    /* Reentrancy watch tokens (see fdk__widget_watch below): stack
+     * variables that must learn when THIS widget dies. NULL when
+     * nobody is watching — the overwhelmingly common case, so the
+     * array is allocated lazily and stays tiny. */
+    struct fdk_widget_watch **watches;
+    size_t watch_count;
+    size_t watch_capacity;
+
     /* ---- ROOT-ONLY fields (parent == NULL) ---- */
 
     /* Keyboard focus target. Mirrored by FDK_WF_FOCUSED on the widget. */
@@ -242,6 +250,39 @@ void fdk__widget_set_baseline(fdk_widget *widget, fdk_i32 y);
  * paints the background fill, no event handling, natural size = the
  * current bounds. Exposed here for the window glue and tests. */
 const fdk_widget_class *fdk_widget_base_class(void);
+
+/* ---- Reentrancy watch tokens (the programmatic-callback guard) ----
+ *
+ * Inside event dispatch and paint walks, fdk_widget_destroy() defers
+ * the free (see the struct fields above) and every tree walker is
+ * snapshot-based — callbacks may destroy anything there. But
+ * PROGRAMMATIC mutation paths (set_checked, set_row_text, list
+ * fills...) also fire application callbacks OUTSIDE any dispatch,
+ * where destroy frees immediately: a callback that destroys the
+ * widget being mutated — or one of its siblings, mid-loop — must not
+ * leave the caller touching freed memory.
+ *
+ * The watch token is the toolkit-wide answer: a stack-allocated
+ * handle whose ->target is NULLed by teardown_free() the moment the
+ * watched widget's destruction begins (before any free), exactly the
+ * weak-ref discipline GTK applies to signal emissions. Usage:
+ *
+ *     fdk_widget_watch watch;
+ *     fdk__widget_watch(&watch, w);
+ *     fire_app_callback(...);
+ *     if (fdk__watch_alive(&watch)) { touch(w); }
+ *     fdk__widget_unwatch(&watch);   // always, also when dead
+ *
+ * Watching a NULL or destroying widget yields a dead token (safe
+ * even under OOM: registration failure degrades to "dead", skipping
+ * post-callback work rather than touching possibly-freed memory). */
+typedef struct fdk_widget_watch {
+    fdk_widget *target;   /* NULL once the target died / unwatched */
+} fdk_widget_watch;
+
+void fdk__widget_watch(fdk_widget_watch *watch, fdk_widget *target);
+void fdk__widget_unwatch(fdk_widget_watch *watch);
+#define fdk__watch_alive(w) ((w) != NULL && (w)->target != NULL)
 
 /* Root bookkeeping, called by the window glue (src/window/window.c):
  * resize the root (and damage everything) when a configure arrives. */

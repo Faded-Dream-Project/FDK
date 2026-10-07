@@ -1088,7 +1088,7 @@ int main(void) {
     (void)fdk_button_create(root, app.font, "Delete", &app.btn_delete);
     fdk_button_set_on_activate(app.btn_delete, delete_clicked, NULL);
     (void)fdk_toggle_create(root, app.font, "Hidden", &app.btn_hidden);
-    fdk_toggle_set_on_change(app.btn_hidden, hidden_toggled, NULL);
+    fdk_toggle_set_on_changed(app.btn_hidden, hidden_toggled, NULL);
 
     /* Toolbar row 2. */
     (void)fdk_entry_create(root, app.font, NULL, &app.entry_path);
@@ -1104,7 +1104,7 @@ int main(void) {
     fdk_combo_set_on_changed(app.combo_sort, sort_changed, NULL);
     (void)fdk_toggle_create(root, app.font, "Descending",
                             &app.toggle_desc);
-    fdk_toggle_set_on_change(app.toggle_desc, desc_toggled, NULL);
+    fdk_toggle_set_on_changed(app.toggle_desc, desc_toggled, NULL);
 
     /* Columns hint + body. */
     (void)fdk_label_create(root, app.font,

@@ -237,7 +237,7 @@ static void test_toggle_and_checkbox(void) {
 
     fdk_widget *tog = NULL;
     assert(fdk_ok(fdk_toggle_create(root, g_font, "Dark mode", &tog)));
-    fdk_toggle_set_on_change(tog, on_toggle_change, NULL);
+    fdk_toggle_set_on_changed(tog, on_toggle_change, NULL);
     fdk_size tog_nat;
     fdk_widget_measure(tog, &tog_nat);
     if (tog_nat.height < 18) {
@@ -342,8 +342,8 @@ static void test_radio_group(void) {
     assert(fdk_ok(fdk_radio_create(box, g_font, "One", &a)));
     assert(fdk_ok(fdk_radio_create(box, g_font, "Two", &b)));
     assert(fdk_ok(fdk_radio_create(box, g_font, "Three", &c)));
-    fdk_radio_set_on_change(a, on_radio_change, NULL);
-    fdk_radio_set_on_change(b, on_radio_change, NULL);
+    fdk_radio_set_on_changed(a, on_radio_change, NULL);
+    fdk_radio_set_on_changed(b, on_radio_change, NULL);
 
     fdk_widget *inner = NULL;
     assert(fdk_ok(fdk_widget_create(root, NULL,
@@ -590,9 +590,9 @@ static void test_radio_arrows(void) {
     assert(fdk_ok(fdk_radio_create(box, g_font, "One", &a)));
     assert(fdk_ok(fdk_radio_create(box, g_font, "Two", &b)));
     assert(fdk_ok(fdk_radio_create(box, g_font, "Three", &c)));
-    fdk_radio_set_on_change(a, on_radio_arrow_change, NULL);
-    fdk_radio_set_on_change(b, on_radio_arrow_change, NULL);
-    fdk_radio_set_on_change(c, on_radio_arrow_change, NULL);
+    fdk_radio_set_on_changed(a, on_radio_arrow_change, NULL);
+    fdk_radio_set_on_changed(b, on_radio_arrow_change, NULL);
+    fdk_radio_set_on_changed(c, on_radio_arrow_change, NULL);
     fdk_widget_arrange(box, (fdk_rect){0, 0, 160, 200});
 
     /* Down/Right advance and select, focus follows. */
@@ -869,7 +869,7 @@ static void test_argument_safety(void) {
     fdk_button_set_on_activate(NULL, NULL, NULL);
     fdk_toggle_set_checked(NULL, true);
     assert(fdk_toggle_is_checked(NULL) == false);
-    fdk_toggle_set_on_change(NULL, NULL, NULL);
+    fdk_toggle_set_on_changed(NULL, NULL, NULL);
     fdk_checkbox_set_checked(NULL, true);
     assert(fdk_checkbox_is_checked(NULL) == false);
     fdk_radio_set_checked(NULL, true);

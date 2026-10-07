@@ -262,10 +262,26 @@ fdk_result fdk_a11y_unsubscribe(fdk_widget *scope, fdk_a11y_notify_fn fn,
 
 /* Snapshot discipline: a callback may unsubscribe (or subscribe)
  * mid-notification, and may destroy widgets other than the subject.
- * We walk a copy of the registry and re-check liveness per call. */
+ * We walk a copy of the registry and re-check liveness per call.
+ *
+ * Fast path: with ZERO active subscribers the notification is a pure
+ * no-op — no registry memcpy, nothing. This matters because layout
+ * and paint paths notify constantly (a List fill fires one per row
+ * arrange); an unconditional 16-entry struct copy per notification
+ * turned a directory fill into gigabytes of memcpy traffic. */
 void fdk__a11y_notify(fdk_widget *widget, fdk_a11y_event_kind kind,
                       fdk_a11y_state_flag state_flag) {
     if (widget == NULL) {
+        return;
+    }
+    bool any = false;
+    for (size_t i = 0; i < FDK_A11Y_MAX_SUBSCRIBERS; i++) {
+        if (g_subs[i].active) {
+            any = true;
+            break;
+        }
+    }
+    if (!any) {
         return;
     }
     a11y_sub snapshot[FDK_A11Y_MAX_SUBSCRIBERS];
@@ -274,7 +290,18 @@ void fdk__a11y_notify(fdk_widget *widget, fdk_a11y_event_kind kind,
     ev.kind = kind;
     ev.widget = widget;
     ev.state_flag = state_flag;
+    /* Watch the subject: a subscriber callback may destroy it, and
+     * delivering later subscribers a DANGLING ev.widget (which they
+     * may pass straight back into fdk_a11y_describe) is a
+     * use-after-free, not a courtesy. Once the subject dies the
+     * remaining deliveries are dropped — the change they would
+     * announce no longer has an object. */
+    fdk_widget_watch subject;
+    fdk__widget_watch(&subject, widget);
     for (size_t i = 0; i < FDK_A11Y_MAX_SUBSCRIBERS; i++) {
+        if (!fdk__watch_alive(&subject)) {
+            break; /* the subject is gone: stop announcing it */
+        }
         if (!snapshot[i].active) {
             continue;
         }
@@ -290,11 +317,10 @@ void fdk__a11y_notify(fdk_widget *widget, fdk_a11y_event_kind kind,
         }
         snapshot[i].fn(&ev, snapshot[i].user);
         /* The subject may have been destroyed by that callback —
-         * later subscribers still get the event (the registry
-         * snapshot is plain data), which matches the "always runs"
-         * rule for the class/user event callbacks: an announcement
-         * of a change that just happened is never wrong. */
+         * the watch above detects it and drops the remaining
+         * deliveries instead of handing out a dangling pointer. */
     }
+    fdk__widget_unwatch(&subject);
 }
 
 /* ---- actions ---------------------------------------------------------- */

@@ -158,8 +158,8 @@ static fdk_u8 *synthesize_bold(fdk_u8 *bits, int w, int h, int stem,
 #define FDK_TEXT_OBLIQUE_SHEAR 0.21f /* ~12 degrees, the classic slant */
 
 static fdk_u8 *synthesize_italic(fdk_u8 *bits, int w, int h,
-                                 fdk_i32 yoff, int *out_w,
-                                 fdk_i32 *out_xoff) {
+                                 fdk_i32 yoff, fdk_i32 xoff,
+                                 int *out_w, fdk_i32 *out_xoff) {
     if (bits == NULL || w <= 0 || h <= 0) {
         *out_w = w;
         return bits;
@@ -198,7 +198,14 @@ static fdk_u8 *synthesize_italic(fdk_u8 *bits, int w, int h,
     }
     fdk_free(bits);
     *out_w = nw;
-    *out_xoff = yoff - (fdk_i32)(-min_shift); /* widen left by -min_shift */
+    /* The new bitmap's column 0 holds what was originally at
+     * xoff + min_shift (the leftmost sheared extent — min_shift <= 0
+     * widens LEFT of the glyph's left bearing). This is the
+     * horizontal bearing; the vertical offset (yoff) is untouched by
+     * the shear. v1 computed it from yoff — an axis mixup that
+     * shoved ascender-heavy glyphs ~17 px left at 24 px (found by
+     * the 1.3.0 audit; only advances were ever tested). */
+    *out_xoff = xoff + min_shift;
     return out;
 }
 
@@ -265,7 +272,7 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key) {
             advance += (fdk_f32)stem;
         }
         if ((font->style & FDK_FONT_STYLE_ITALIC) != 0) {
-            bits = synthesize_italic(bits, w, h, yoff, &w, &xoff);
+            bits = synthesize_italic(bits, w, h, yoff, xoff, &w, &xoff);
         }
     }
 

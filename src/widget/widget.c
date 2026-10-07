@@ -321,6 +321,18 @@ static fdk_result deferred_append(fdk_widget *root, fdk_widget *w) {
  * fdk_widget_destroy() from any hook is a no-op rather than a double
  * free. */
 static void teardown_free(fdk_widget *w) {
+    /* Invalidate every watch token first: from here on, the widget
+     * is dead to any programmatic path holding a watch on it, no
+     * matter what the subclass destroy hook or the frees below do. */
+    if (w->watches != NULL) {
+        for (size_t i = 0; i < w->watch_count; i++) {
+            w->watches[i]->target = NULL;
+        }
+        fdk_free(w->watches);
+        w->watches = NULL;
+        w->watch_count = 0;
+        w->watch_capacity = 0;
+    }
     if (w->klass->destroy != NULL) {
         w->klass->destroy(w);
     }
@@ -342,6 +354,47 @@ static void teardown_free(fdk_widget *w) {
      * NULL for the overwhelming majority of widgets; one branch.) */
     fdk__a11y_relations_destroyed(w);
     fdk_free(w);
+}
+
+/* ---- Reentrancy watch tokens ----
+ *
+ * See widget_internal.h for the contract. Registration appends the
+ * stack token to the TARGET's array (swap-removed on unwatch);
+ * teardown_free NULLs every token before running any hook. */
+void fdk__widget_watch(fdk_widget_watch *watch, fdk_widget *target) {
+    if (watch == NULL) {
+        return;
+    }
+    watch->target = NULL;
+    if (target == NULL || (target->flags & FDK_WF_DESTROYING) != 0) {
+        return; /* dead on arrival */
+    }
+    if (target->watch_count == target->watch_capacity) {
+        size_t ncap = target->watch_capacity * 2 + 2;
+        fdk_widget_watch **grown = fdk_realloc(
+            target->watches, ncap * sizeof(*grown));
+        if (grown == NULL) {
+            return; /* OOM degrades to dead: see the header contract */
+        }
+        target->watches = grown;
+        target->watch_capacity = ncap;
+    }
+    target->watches[target->watch_count++] = watch;
+    watch->target = target;
+}
+
+void fdk__widget_unwatch(fdk_widget_watch *watch) {
+    if (watch == NULL || watch->target == NULL) {
+        return;
+    }
+    fdk_widget *target = watch->target;
+    for (size_t i = 0; i < target->watch_count; i++) {
+        if (target->watches[i] == watch) {
+            target->watches[i] = target->watches[--target->watch_count];
+            break;
+        }
+    }
+    watch->target = NULL;
 }
 
 void fdk_widget_root_flush_deferred(fdk_widget *root) {

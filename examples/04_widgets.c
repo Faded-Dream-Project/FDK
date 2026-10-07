@@ -107,15 +107,15 @@ int main(void) {
     fdk_widget_set_background(profile, col(26, 29, 40));
     fdk_widget *pub = NULL;
     (void)fdk_toggle_create(profile, font16, "Public profile", &pub);
-    fdk_toggle_set_on_change(pub, on_any_change, (void *)"Public profile");
+    fdk_toggle_set_on_changed(pub, on_any_change, (void *)"Public profile");
     fdk_widget *mail = NULL;
     (void)fdk_checkbox_create(profile, font16, "Show email address",
                               &mail);
-    fdk_checkbox_set_on_change(mail, on_any_change,
+    fdk_checkbox_set_on_changed(mail, on_any_change,
                                (void *)"Show email");
     fdk_widget *news = NULL;
     (void)fdk_checkbox_create(profile, font16, "Newsletter", &news);
-    fdk_checkbox_set_on_change(news, on_any_change,
+    fdk_checkbox_set_on_changed(news, on_any_change,
                                (void *)"Newsletter");
 
     /* --- frame: rendering mode (radio group = frame's children) --- */
@@ -127,10 +127,10 @@ int main(void) {
     (void)fdk_radio_create(render, font16, "Software (Wayland)", &r2);
     (void)fdk_radio_create(render, font16, "Software (auto)", &r3);
     fdk_radio_set_checked(r3, true);
-    fdk_radio_set_on_change(r1, on_any_change, (void *)"Renderer: X11");
-    fdk_radio_set_on_change(r2, on_any_change,
+    fdk_radio_set_on_changed(r1, on_any_change, (void *)"Renderer: X11");
+    fdk_radio_set_on_changed(r2, on_any_change,
                             (void *)"Renderer: Wayland");
-    fdk_radio_set_on_change(r3, on_any_change, (void *)"Renderer: auto");
+    fdk_radio_set_on_changed(r3, on_any_change, (void *)"Renderer: auto");
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 

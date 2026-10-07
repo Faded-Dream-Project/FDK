@@ -50,8 +50,12 @@ typedef enum fdk_event_type {
      * by the platform; repainting the whole surface is always
      * correct and is what FDK's own examples do.
      *
-     * The Wayland backend never emits this event: compositors retain
-     * the last committed buffer, so there is nothing to repaint. */
+     * The Wayland backend emits this event in exactly ONE case: a
+     * configure arriving with a new size after the deferred first
+     * frame committed (compositors retain the last committed buffer,
+     * so ordinary exposure never needs a repaint — but a buffer
+     * committed at the pre-configure size would present stretched,
+     * so the resize path re-drives the first paint through EXPOSE). */
     FDK_EVENT_WINDOW_EXPOSE = 4,
 
     /* The window's maximized/minimized state changed — because the

@@ -65,36 +65,14 @@ static fdk_i32 nb_tab_width(const fdk_notebook *nb, size_t i) {
     return tw + NB_TAB_PAD_X * 2;
 }
 
-static void nb_relayout(fdk_notebook *nb) {
-    fdk_i32 w = nb->base.bounds.width;
-    fdk_i32 h = nb->base.bounds.height;
-    if (w <= 0 || h <= 0) {
-        return;
-    }
-    fdk_i32 x = 0;
-    for (size_t i = 0; i < nb->count; i++) {
-        fdk_rect tr = { x, 0, nb_tab_width(nb, i), NB_TAB_H };
-        fdk_widget_set_bounds(nb->pages[i].widget, tr);
-        x += tr.width + NB_TAB_GAP;
-    }
-}
-
-/* The tab rects are the PAGE WIDGETS' own bounds (a page widget IS
- * its tab while inactive; the page CONTENT is drawn by the page's
- * paint hook into the same widget). Simpler and more honest than
- * separate tab widgets: one widget per page, one paint hook that
- * switches on visibility.
- *
- * ...which means a page's paint hook must know whether it is being
- * drawn as a TAB (inactive, small rect at the top) or as a PAGE
- * (active, the area below the strip). That is an awkward contract
- * for applications.
- *
- * INSTEAD: the notebook draws the TABS ITSELF in its paint hook
- * (hit-testing via pointer events against the computed tab rects),
- * and the page widgets are plain application widgets laid out in the
- * page area with visibility switched. The page widgets' bounds are
- * the page area, not the tabs. */
+/* The notebook draws the TABS ITSELF in its paint hook (hit-testing
+ * via pointer events against the computed tab rects), and the page
+ * widgets are plain application widgets laid out in the page area
+ * with visibility switched. The page widgets' bounds are the page
+ * area, not the tabs: only the CURRENT page ever gets bounds
+ * (nb_sync_pages); inactive pages are invisible and keep whatever
+ * bounds they had — they are input-transparent and skipped by the
+ * paint walk until they become current. */
 
 /* Tab index at widget-local (x, y), -1 outside the strip. */
 static int nb_tab_at(fdk_notebook *nb, fdk_f32 x, fdk_f32 y) {
@@ -215,7 +193,6 @@ static void nb_measure(fdk_widget *w, fdk_size *out) {
 
 static void nb_arrange(fdk_widget *w, fdk_rect assigned) {
     fdk_widget_set_bounds(w, assigned);
-    nb_relayout(nb_of(w));
     nb_sync_pages(nb_of(w));
 }
 
@@ -363,6 +340,10 @@ fdk_result fdk_notebook_append_page(fdk_widget *notebook,
     fdk_notebook *nb = nb_of(notebook);
     if (nb->count == nb->capacity) {
         size_t cap = (nb->capacity == 0) ? 4 : nb->capacity * 2;
+        if (cap < nb->capacity ||
+            cap > SIZE_MAX / sizeof(*nb->pages)) {
+            return FDK_ERR_OUT_OF_MEMORY; /* refuse absurd growth */
+        }
         fdk_notebook_page *grown =
             fdk_realloc(nb->pages, cap * sizeof(*grown));
         if (grown == NULL) {
@@ -438,6 +419,62 @@ fdk_widget *fdk_notebook_get_page(fdk_widget *notebook, size_t index) {
         return NULL;
     }
     return nb->pages[index].widget;
+}
+
+const char *fdk_notebook_page_label(fdk_widget *notebook, size_t index) {
+    if (notebook == NULL || notebook->klass != &fdk_notebook_class_def) {
+        return NULL;
+    }
+    fdk_notebook *nb = nb_of(notebook);
+    if (index >= nb->count) {
+        return NULL;
+    }
+    return nb->pages[index].label;
+}
+
+fdk_result fdk_notebook_remove_page(fdk_widget *notebook, size_t index) {
+    if (notebook == NULL || notebook->klass != &fdk_notebook_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_notebook *nb = nb_of(notebook);
+    if (index >= nb->count) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_widget *page = nb->pages[index].widget;
+    bool was_current = (index == nb->current);
+    fdk_free(nb->pages[index].label);
+    memmove(&nb->pages[index], &nb->pages[index + 1],
+            (nb->count - index - 1) * sizeof(*nb->pages));
+    nb->count--;
+    /* Which page shows afterwards: removing the current page shows
+     * the page that shifted into its slot (index, clamped); removing
+     * an earlier page keeps showing the same page (its index
+     * shifted down). */
+    if (nb->count == 0) {
+        nb->current = 0;
+    } else if (was_current) {
+        nb->current = (index < nb->count) ? index : nb->count - 1;
+    } else if (index < nb->current) {
+        nb->current--;
+    }
+    if (nb->hover_tab >= (int)nb->count) {
+        nb->hover_tab = -1;
+    }
+    /* The notebook owns its pages (append_page reparented them in —
+     * the standard FDK parent-owns-children model): removing a page
+     * destroys the widget, exactly like fdk_list_remove and
+     * fdk_scrollview_set_content's replacement. */
+    fdk_widget_destroy(page);
+    nb_sync_pages(nb);
+    fdk_widget_invalidate(notebook);
+    fdk__a11y_notify(notebook, FDK_A11Y_CHILDREN_CHANGED, 0);
+    if (was_current && nb->on_switch != NULL && nb->count > 0) {
+        fdk_widget_watch watch;
+        fdk__widget_watch(&watch, notebook);
+        nb->on_switch(notebook, nb->current, nb->on_switch_data);
+        fdk__widget_unwatch(&watch);
+    }
+    return FDK_OK;
 }
 
 void fdk_notebook_set_on_switch(fdk_widget *notebook,

@@ -755,6 +755,8 @@ static fdk_result window_create_full(fdk_context *ctx,
         ctx->conn, options,
         (parent != NULL) ? parent->pwindow : NULL, &window->pwindow);
     if (!fdk_ok(r)) {
+        fdk_free(window->title); /* v1 leaked the strdup'd title on
+                                  * both create-failure paths */
         fdk_free(window);
         return r;
     }
@@ -765,6 +767,7 @@ static fdk_result window_create_full(fdk_context *ctx,
     r = fdk_context_register_window(ctx, window);
     if (!fdk_ok(r)) {
         ctx->ops->window_destroy(window->pwindow);
+        fdk_free(window->title);
         fdk_free(window);
         return r;
     }

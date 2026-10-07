@@ -160,7 +160,8 @@ static void xdnd_send_status(fdk_platform_connection *conn, Window source,
 
 static void xdnd_dispatch_drag(fdk_platform_window *pwindow,
                                fdk_event_type type, fdk_f32 x, fdk_f32 y,
-                               int offered, int accepted) {
+                               int offered, int accepted,
+                               fdk_u32 modifiers) {
     fdk_event_data ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = type;
@@ -168,6 +169,13 @@ static void xdnd_dispatch_drag(fdk_platform_window *pwindow,
     ev.drag.accepted_formats = accepted;
     ev.drag.position.x = x;
     ev.drag.position.y = y;
+    /* The event struct has documented this field since v1 ("the
+     * keyboard modifiers held right now"); v1 never populated it —
+     * every drag event delivered 0. The truth differs per side: the
+     * TARGET learns the server-side state from the same
+     * XQueryPointer round-trip it already makes; the SOURCE has the
+     * grab, so its own motion events carry it. */
+    ev.drag.modifiers = modifiers;
     pwindow->conn->dispatch(pwindow, &ev,
                             pwindow->conn->dispatch_user_data);
 }
@@ -229,14 +237,31 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
         pwindow != NULL && conn->xdnd.source != None) {
         /* Root coordinates from the message; window-local from the
          * server (the honest translation — what a reparenting WM
-         * reports, not arithmetic against a cached origin). */
-        int rx = (int)((msg->data.l[2] >> 16) & 0xFFFF);
-        int ry = (int)(msg->data.l[2] & 0xFFFF);
+         * reports, not arithmetic against a cached origin). The
+         * XDND halves are SIGNED 16-bit: a monitor left of / above
+         * the primary has negative root coordinates, and the v1
+         * unsigned decode reported drags ~65500 px off on exactly
+         * those layouts (1.3.0). */
+        int rx = (fdk_i16)((msg->data.l[2] >> 16) & 0xFFFF);
+        int ry = (fdk_i16)(msg->data.l[2] & 0xFFFF);
         int lx = 0, ly = 0;
         Window child = None;
         XTranslateCoordinates(conn->display, conn->root,
                               pwindow->xwindow, rx, ry, &lx, &ly,
                               &child);
+        /* The server-side modifier truth for drag.modifiers — same
+         * round-trip family XTranslateCoordinates already pays. */
+        fdk_u32 drag_mods = 0;
+        {
+            Window rret = None, cret = None;
+            int rx_now = 0, ry_now = 0;
+            unsigned int state = 0;
+            if (XQueryPointer(conn->display, pwindow->xwindow, &rret,
+                              &cret, &rx_now, &ry_now, &lx, &ly,
+                              &state)) {
+                drag_mods = fdk__x11_translate_modifiers(state);
+            }
+        }
         int accepted =
             conn->xdnd.offered & pwindow->drop_formats;
         conn->xdnd.dest_window = pwindow->xwindow;
@@ -249,7 +274,7 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
                 conn->xdnd.hover = NULL;
                 xdnd_dispatch_drag(pwindow, FDK_EVENT_DRAG_LEAVE,
                                    (fdk_f32)lx, (fdk_f32)ly,
-                                   conn->xdnd.offered, 0);
+                                   conn->xdnd.offered, 0, drag_mods);
             }
             return 1;
         }
@@ -261,16 +286,16 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
                  * the honest synthetic leave. */
                 xdnd_dispatch_drag(conn->xdnd.hover,
                                    FDK_EVENT_DRAG_LEAVE, 0, 0,
-                                   conn->xdnd.offered, 0);
+                                   conn->xdnd.offered, 0, drag_mods);
             }
             conn->xdnd.hover = pwindow;
             xdnd_dispatch_drag(pwindow, FDK_EVENT_DRAG_ENTER,
                                (fdk_f32)lx, (fdk_f32)ly,
-                               conn->xdnd.offered, accepted);
+                               conn->xdnd.offered, accepted, drag_mods);
         } else {
             xdnd_dispatch_drag(pwindow, FDK_EVENT_DRAG_MOTION,
                                (fdk_f32)lx, (fdk_f32)ly,
-                               conn->xdnd.offered, accepted);
+                               conn->xdnd.offered, accepted, drag_mods);
         }
         return 1;
     }
@@ -278,7 +303,7 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
     if (msg->message_type == conn->atom_xdnd_leave && pwindow != NULL) {
         if (conn->xdnd.hover == pwindow) {
             xdnd_dispatch_drag(pwindow, FDK_EVENT_DRAG_LEAVE, 0, 0,
-                               conn->xdnd.offered, 0);
+                               conn->xdnd.offered, 0, 0);
         }
         conn->xdnd.source = None;
         conn->xdnd.hover = NULL;
@@ -454,6 +479,17 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
     ev.drag.text = text;
     ev.drag.uris = uris;
     ev.drag.uri_count = uri_count;
+    /* Drop-time modifiers: the same server query the position path
+     * used, one last time. */
+    {
+        Window rret = None, cret = None;
+        int rxn = 0, ryn = 0, wx = 0, wy = 0;
+        unsigned int state = 0;
+        if (XQueryPointer(conn->display, pwindow->xwindow, &rret, &cret,
+                          &rxn, &ryn, &wx, &wy, &state)) {
+            ev.drag.modifiers = fdk__x11_translate_modifiers(state);
+        }
+    }
     conn->dispatch(pwindow, &ev, conn->dispatch_user_data);
 
     fdk__dnd_free_uri_list(uris, uri_count);
@@ -474,13 +510,16 @@ void fdk_x11_dnd_source_finish(fdk_platform_connection *conn, int status) {
         return;
     }
     conn->xdnd_source.active = 0;
-    XUngrabPointer(conn->display, CurrentTime);
-    XFlush(conn->display);
-    if (conn->xdnd_source.target != None) {
-        xdnd_send(conn, conn->xdnd_source.target, conn->atom_xdnd_leave,
-                  (long)conn->clip_helper, 0, 0, 0, 0);
-        conn->xdnd_source.target = None;
+    if (!conn->display_dead) {
+        XUngrabPointer(conn->display, CurrentTime);
+        XFlush(conn->display);
+        if (conn->xdnd_source.target != None) {
+            xdnd_send(conn, conn->xdnd_source.target,
+                      conn->atom_xdnd_leave,
+                      (long)conn->clip_helper, 0, 0, 0, 0);
+        }
     }
+    conn->xdnd_source.target = None;
     void (*on_done)(int, void *) = conn->xdnd_source.on_done;
     void *user = conn->xdnd_source.on_done_user;
     conn->xdnd_source.on_done = NULL;
@@ -556,9 +595,14 @@ static void xdnd_source_send_enter(fdk_platform_connection *conn,
 
 static void xdnd_source_position(fdk_platform_connection *conn, int rx,
                                  int ry, unsigned long time) {
+    /* XDND packs two SIGNED 16-bit root coordinates into one long
+     * (see the decode side): sign-truncate both halves so a monitor
+     * at negative root coordinates survives the round trip. */
+    unsigned long packed =
+        ((unsigned long)(fdk_u16)(fdk_i16)rx) << 16;
+    packed |= (unsigned long)(fdk_u16)(fdk_i16)ry;
     xdnd_send(conn, conn->xdnd_source.target, conn->atom_xdnd_position,
-              (long)conn->clip_helper, 0,
-              (long)((rx << 16) | (ry & 0xFFFF)),
+              (long)conn->clip_helper, 0, (long)packed,
               (long)time, (long)conn->atom_xdnd_action_copy);
 }
 
@@ -627,7 +671,11 @@ int fdk_x11_dnd_source_handle_event(fdk_platform_connection *conn,
     }
 
     if (xevent->type == KeyPress &&
-        xevent->xkey.keycode == 9 /* ESC keycode: evdev 1 + 8 */) {
+        xevent->xkey.keycode == (unsigned)(FDK_KEY_ESC + 8)) {
+        /* ESC cancels the drag — keycode = evdev scancode + 8 (the
+         * X11 convention both backends document). v1 hardcoded 9,
+         * which happened to be right but read like a magic number
+         * that no refactor could verify. */
         fdk_x11_dnd_source_finish(conn, FDK_DRAG_CANCELLED);
         return 1;
     }

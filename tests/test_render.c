@@ -906,8 +906,16 @@ static void test_transformed_alpha(void) {
     assert(fdk_ok(fdk_surface_blit_transformed(dst, fdk_matrix_scale(2.0f),
                                                src)));
     /* Interior pixel: exactly the 50% blue-over-white blend
-     * (127 = 255 * (1 - 128/255), the honest sa=128 arithmetic). */
+     * (127 = 255 * (1 - 128/255), the honest sa=128 arithmetic).
+     * 1.3.0: integer scale-ups now take the NEAREST-neighbor path
+     * (with per-pixel source-over compositing for ARGB-over-XRGB) —
+     * the interior math is identical, and the edge below stays
+     * CRISP instead of the bilinear half-blend v1 produced. */
     assert(is_color(dst, 4, 4, pack(127, 127, 255)));
+    /* Crisp edge: dest x=1 samples source x=0 — fully transparent,
+     * stays background (the bilinear path blended a half-tint
+     * here). */
+    assert(is_color(dst, 1, 4, pack(255, 255, 255)));
     /* Corner pixel (0,0): outside the blue square, fully transparent
      * source — stays background. */
     assert(is_color(dst, 0, 0, pack(255, 255, 255)));

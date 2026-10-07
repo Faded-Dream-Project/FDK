@@ -29,6 +29,7 @@
 #include "core/log_internal.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -494,8 +495,15 @@ fdk_result fdk_spin_create(fdk_widget *parent, fdk_font *font,
 }
 
 void fdk_spin_set_range(fdk_widget *spin, double min, double max) {
-    if (spin == NULL || spin->klass != &fdk_spin_class_def ||
-        max < min) {
+    if (spin == NULL || spin->klass != &fdk_spin_class_def) {
+        return;
+    }
+    if (max < min || isnan(min) || isnan(max)) {
+        /* create() refuses this with FDK_ERR_INVALID_ARGUMENT; the
+         * setter is void by convention, so it WARNs (the same
+         * discipline fdk_slider_set_range applies — see there). */
+        FDK_WARN("fdk_spin_set_range: invalid range [%g, %g] ignored",
+                 min, max);
         return;
     }
     fdk_spin *s = spin_of(spin);

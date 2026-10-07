@@ -5,6 +5,42 @@
 #include "core/log_internal.h"
 
 int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
+    if (conn == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (conn->display_dead) {
+        /* Dead connection: report the fatal negative result the
+         * pump/fdk_run contract consumes (fdk_run exits its loop,
+         * the application tears down normally — the 1.3.0 fix for
+         * "X server death used to exit(1) the process via Xlib's
+         * default IO handler"). */
+        return FDK_ERR_NO_DISPLAY;
+    }
+    /* Arm the IO-error longjmp (see x11_connection.c): any Xlib
+     * call below hitting a lost connection unwinds HERE instead of
+     * exiting the process. */
+    if (sigsetjmp(fdk__x11_io_jmp, 1) != 0) {
+        fdk__x11_io_armed = 0;
+        return FDK_ERR_NO_DISPLAY;
+    }
+    fdk__x11_io_armed = 1;
+    if (conn->display_dead) {
+        /* Dead connection: report the fatal negative result the
+         * pump/fdk_run contract consumes (fdk_run exits its loop,
+         * the application tears down normally — the 1.3.0 fix for
+         * "X server death used to exit(1) the process via Xlib's
+         * default IO handler"). */
+        return FDK_ERR_NO_DISPLAY;
+    }
+    /* Arm the IO-error longjmp (see x11_connection.c): any Xlib
+     * call below hitting a lost connection unwinds HERE instead of
+     * exiting the process. */
+    if (sigsetjmp(fdk__x11_io_jmp, 1) != 0) {
+        fdk__x11_io_armed = 0;
+        return FDK_ERR_NO_DISPLAY;
+    }
+    fdk__x11_io_armed = 1;
+
     int processed = 0;
 
     while (XPending(conn->display) > 0) {
@@ -106,5 +142,6 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
      * died mid-handshake after the drop was sent). */
     fdk_x11_dnd_source_tick(conn);
 
+    fdk__x11_io_armed = 0;
     return processed;
 }

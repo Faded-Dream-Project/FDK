@@ -73,6 +73,14 @@ fdk_result fdk_x11_clipboard_init(fdk_platform_connection *conn) {
 }
 
 void fdk_x11_clipboard_shutdown(fdk_platform_connection *conn) {
+    if (conn->display_dead) {
+        /* Server gone: ownership died with the connection — free the
+         * local copy and leave the XIDs to the dead socket. */
+        conn->clip_helper = None;
+        fdk_free(conn->clip_owned_text);
+        conn->clip_owned_text = NULL;
+        return;
+    }
     if (conn->clip_helper != None) {
         /* Relinquish ownership (if any) before destroying the helper,
          * so the server-side owner field never points at a dead
