@@ -3513,3 +3513,124 @@ X11 integration 108 [ok] exit 0; Wayland interop rig PASS
 examples 10/10 with clean exits and the prefs round trip; sway
 examples 10/10; both tooltip rigs PASS; compositor-death rig PASS;
 release config zero warnings; debug-remnant scan clean.
+
+### 1.3.8 — the animation layer (easing + the animator + smooth scroll)
+
+The LAST standing-audit item. A toolkit that renders, themes,
+localizes, and persists but moves everything by teleport is
+half-polished; the audit's priority order puts visual polish last,
+but "things that MOVE should move like physical objects" is also a
+USABILITY property — smooth scrolling is how a reader keeps their
+place. The design goal was the smallest engine that covers real
+apps: an easing library (pure math, no state) plus ONE animator —
+"drive a number from 0 to 1 over a duration, call me per frame,
+tell me when it's over" — with repetition, loops, and delays left
+as application policy (re-arm in done; the engine does not know
+what a timeline is).
+
+THE EASING LIBRARY: eleven curves — linear, smoothstep (the
+recommended default), the quad and cubic in/out/in-out families,
+sine in-out, expo out, and back_out (the ~10% overshoot that makes
+reveals feel alive). Every monotone curve maps [0,1] onto [0,1]
+with e(0)=0 and e(1)=1 EXACTLY (the landing is a contract, not a
+limit — expo-out's raw formula only reaches ~0.999), inputs clamp,
+and unknown kinds degenerate to linear (a math function never
+fails, it degenerates). The boundary-identity test caught a real
+inverted-formula bug on the curve's first day: the draft expo-out
+returned ~0.999 at t=0 and 0 at t=1.
+
+THE ENGINE: one process-wide active list, one shared ~16 ms
+repeating timer (created when the first animation starts, removed
+when the last ends — an idle toolkit costs nothing; one timer for
+every animation also means every invalidation lands before the
+app's next paint, coalesced damage rather than interleaved paints).
+The pump is the single owner of frame delivery, reaping, and
+release; production drives it from the ticker the timer queue
+fires, and the headless suite drives the SAME pump with synthetic
+times on a pinned test clock — cadence, easing, completion,
+cancel-inside-tick, and destroy-detach all run identically under
+both drivers.
+
+THE HANDLE-LIFETIME SAGA (the real design work of this milestone):
+the first draft freed animations at completion — and ASan caught
+the public header's own promise being violated
+("a handle past its animation is a query object, not a dangling
+pointer": fdk_animation_running() on a completed handle read freed
+memory, from the pump's own walk and from every reasonable
+read-after-done pattern). The working design is ZOMBIE GRACE: a
+completed/canceled/detached animation is unlinked but stays
+allocated for ~64 pumps (~1 s of display cadence) — running()
+reports false, widget() answers, cancel() is a no-op — and is
+reaped at pump exit when the grace passes or its widget died
+(nobody queries for a dead widget's animation). When the LAST
+widget root is destroyed the engine DRAINS (no callbacks,
+everything freed): no widget exists, no animation can ever run
+again, and process exit stays ASan-clean — which the
+compositor-death rig checks. The header documents the whole
+contract, including "handles are dead after the last root".
+
+SMOOTH SCROLLING (the flagship integration): input gestures (wheel,
+keyboard) ease to their target over 140 ms cubic-out; every
+programmatic path — scroll_to/scroll_by, the a11y SET_VALUE
+interface, scrollbar thumb drags — stays INSTANT (the programmatic
+contract is "this position, now", and finger tracking must never
+lag the finger). Fast notches ACCUMULATE into the pending target
+(six quick notches are one 6-notch glide; computing from the stale
+live offset would replay the same 1-notch flight six times — the
+fast-wheel bug the suite's own assertion caught live, twice: first
+as retarget-from-live, then as the fix's regression), each flight
+re-clamps against CURRENT extents (content can resize mid-flight),
+and mid-flight retargeting starts from where the eye actually is.
+
+THE TWO PRODUCTION BUGS the milestone's work flushed out of
+PRE-EXISTING code: (1) scrollview_layout positioned the content
+with set_bounds, which never runs the content's arrange hook — a
+BOX as scrollview content laid out its children exactly never
+(example 11's 40-row list rendered zero rows; every prior test used
+plain-widget content, so nothing had ever caught it — the fix
+routes through fdk_widget_arrange, and a regression test pins box
+rows positioned + slots stable under scrolling). (2) A TOOLTIP
+still shown at shutdown use-after-freed: the fdk_shutdown sweep
+destroyed the popup, g_tip.win dangled, and the owner teardown's
+hover-drop destroyed it a second time — reachable only by exiting
+with a tip on screen, which example 11's plain Xvfb run does
+every time (pointer at (0,0) over the header arms the 500 ms
+delay). The fix is the borrowed-reference contract window.c has
+documented all along: a destroy-notify on the popup clears the
+module state whichever hand destroys it.
+
+EXAMPLE 11 (animation): a seven-lane EASING RACE — one colored
+block per curve, one 2.2 s flight per lane, every tick setting the
+block's x from the eased progress (fdk_widget_animate + set_bounds
++ the damage tracker; no custom rendering) — plus a 40-row
+smooth-scrolling list whose Down 5 / Up 5 buttons COMPOSE the
+animator with programmatic scrolling (the app-level pattern: the
+public scroll_to is instant by design, so a button that wants the
+wheel's feel drives exactly what the wheel path drives). The rig
+checks are phase-independent (every block is always inside its
+lane's travel band, at every point of every cycle), and the X11
+rig doubles as the tooltip-open-at-exit regression without trying.
+
+TESTS: tests/test_animation.c (9 groups — the easing table with
+boundary identities/monotonicity/clamping/back_out's overshoot,
+lifecycle with exact mid-flight values, duration 0, cancel
+semantics, tick-cancels-itself with the walk keeping later
+siblings, chained restarts with the never-re-entrant rule, destroy
+mid-flight with outsiders surviving, argument safety, concurrent
+flights on one pump); test_scroll.c's input group rewritten around
+the synthetic clock (exact eased mid-flight value at half a flight,
+accumulation, programmatic snap cancels) + the container-content
+regression group; the X11 integration suite gains the REAL-ticker
+animation group (cadence over fdk_pump_events, mid-flight e, done
+exactly once, idle stop, cancel) and the smooth-wheel-scroll group
+over REAL X11 button events (mid-flight sample, three-notch
+accumulation, exact target). One test-design lesson recorded in
+testing.md: ONE pump call fires the ticker ONCE (a pump is a single
+poll cycle — it wakes at the timer deadline, fires the due set,
+returns; fdk_run loops it, discrete pumps do not), so settle loops
+must out-count the flight's tick budget, not its milliseconds.
+
+Battery on the final tree: headless all-pass (498 [ok] groups);
+X11 integration 109 [ok] exit 0; interop rig PASS; X11 examples
+11/11 with clean exits; sway examples 11/11; both tooltip rigs
+PASS; compositor-death rig PASS; release zero warnings.

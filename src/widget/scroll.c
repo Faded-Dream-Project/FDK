@@ -34,6 +34,7 @@
  */
 
 #include "widgets_internal.h"
+#include "fdk/fdk_animation.h"
 #include "../theme/theme_internal.h"
 
 #include "core/alloc_internal.h"
@@ -46,6 +47,14 @@
 #define SCROLL_WHEEL_STEP 48
 #define SCROLL_KEY_STEP 32
 #define SCROLL_MIN_THUMB 24
+/* Smooth-scroll flight (1.3.8): the input-gesture path (wheel,
+ * keyboard) eases to the target over this many ms; the public
+ * scroll_to/scroll_by and every value-interface path (a11y
+ * SET_VALUE, scrollbar thumb drags) stay INSTANT — the programmatic
+ * contract is "this position, now", and finger tracking must never
+ * lag the finger. Cubic-out: fast start, soft landing — the classic
+ * scroll feel. */
+#define SCROLL_FLIGHT_MS 140
 
 /* Page step: 90% of the viewport (the overlap gives context). */
 static fdk_i32 page_step(fdk_i32 viewport) {
@@ -59,6 +68,14 @@ typedef struct fdk_scrollview {
     fdk_widget *hbar;
     fdk_i32 scroll_x;      /* >= 0, clamped to content-viewport     */
     fdk_i32 scroll_y;
+    /* The in-flight smooth scroll (NULL when idle). Owned by the
+     * animation engine's lifetime rules: released by completion,
+     * cancel, or the widget teardown sweep without any callback
+     * (so this pointer may dangle briefly DURING teardown — nothing
+     * reads it after the sweep, which runs before the free). */
+    fdk_animation *flight;
+    fdk_i32 flight_from_x, flight_from_y;
+    fdk_i32 flight_target_x, flight_target_y;
 } fdk_scrollview;
 
 typedef struct fdk_scrollbar {
@@ -178,10 +195,15 @@ static void scrollview_layout(fdk_widget *w) {
 
     scroll_clamp(sv);
 
-    /* Content: natural size, offset by the scroll position. */
+    /* Content: natural size, offset by the scroll position. ARRANGE,
+     * not set_bounds: the content may be a container (a box of rows
+     * is the obvious one), and only the arrange hook lays its
+     * children out — set_bounds moved the box but left every child
+     * at its creation bounds, so a box content rendered nothing
+     * (found live by example 11's 40-row list: zero rows painted). */
     if (sv->content != NULL) {
         fdk_rect cb = { -sv->scroll_x, -sv->scroll_y, cw, ch };
-        fdk_widget_set_bounds(sv->content, cb);
+        fdk_widget_arrange(sv->content, cb);
     }
 
     /* Bars along the edges; invisible when the axis fits. RAISED to
@@ -222,6 +244,78 @@ static void scrollview_arrange(fdk_widget *w, fdk_rect assigned) {
     scrollview_layout(w);
 }
 
+/* ---- the smooth-scroll flight (1.3.8) -----------------------------------
+ * Input gestures ease to their target; everything programmatic
+ * snaps. The flight interpolates BOTH axes from the live position
+ * (a wheel tick mid-flight retargets from where the eye actually
+ * is — accumulated gestures keep their momentum) and re-clamps
+ * every frame against the CURRENT extents, because the content can
+ * resize mid-flight (rows removed, filter applied) and yesterday's
+ * target may exceed today's reach. */
+
+static void flight_apply(fdk_widget *w, double e) {
+    fdk_scrollview *sv = scroll_of(w);
+    fdk_i32 vx = 0, cx = 0, mx = 0;
+    fdk_i32 vy = 0, cy = 0, my = 0;
+    axis_extents(sv, true, &vx, &cx, &mx);
+    axis_extents(sv, false, &vy, &cy, &my);
+    fdk_i32 nx = sv->flight_from_x + (fdk_i32)(
+        (double)(sv->flight_target_x - sv->flight_from_x) * e);
+    fdk_i32 ny = sv->flight_from_y + (fdk_i32)(
+        (double)(sv->flight_target_y - sv->flight_from_y) * e);
+    if (nx < 0) nx = 0;
+    if (ny < 0) ny = 0;
+    if (nx > mx) nx = mx;
+    if (ny > my) ny = my;
+    if (nx != sv->scroll_x || ny != sv->scroll_y) {
+        sv->scroll_x = nx;
+        sv->scroll_y = ny;
+        scrollview_layout(w);
+        /* The engine invalidates w after the tick returns; the
+         * layout call above only re-positions the content child. */
+    }
+}
+
+static void flight_tick(fdk_animation *anim, double e, void *user) {
+    (void)anim;
+    flight_apply((fdk_widget *)user, e);
+}
+
+static void flight_done(fdk_animation *anim, bool finished, void *user) {
+    (void)finished; /* cancel-vs-complete only matters to callers */
+    fdk_scrollview *sv = scroll_of((fdk_widget *)user);
+    if (sv->flight == anim) {
+        sv->flight = NULL;
+    }
+    /* Natural completion leaves the offset at the eased target (the
+     * last tick ran at e = 1 exactly); a cancel leaves it wherever
+     * the caller wanted — programmatic scroll_to sets it right
+     * after, retargeting sets it from the live value. */
+}
+
+/* Eases the offset to (tx, ty) over SCROLL_FLIGHT_MS. The public
+ * entry for the input-gesture paths. */
+static void scroll_flight_to(fdk_widget *w, fdk_i32 tx, fdk_i32 ty) {
+    fdk_scrollview *sv = scroll_of(w);
+    if (sv->flight != NULL) {
+        /* Retarget: cancel fires flight_done (clears the pointer,
+         * the offset stays at the live interpolated value), then
+         * the new flight starts from THAT — where the eye is. */
+        fdk_animation_cancel(sv->flight);
+        sv->flight = NULL;
+    }
+    if (tx == sv->scroll_x && ty == sv->scroll_y) {
+        return; /* nothing to move (also the at-edge case) */
+    }
+    sv->flight_from_x = sv->scroll_x;
+    sv->flight_from_y = sv->scroll_y;
+    sv->flight_target_x = tx;
+    sv->flight_target_y = ty;
+    sv->flight = fdk_widget_animate(w, SCROLL_FLIGHT_MS,
+                                    FDK_EASE_CUBIC_OUT, flight_tick,
+                                    flight_done, w);
+}
+
 static bool scrollview_handle_event(fdk_widget *w,
                                     const fdk_widget_event *ev) {
     fdk_scrollview *sv = scroll_of(w);
@@ -233,8 +327,21 @@ static bool scrollview_handle_event(fdk_widget *w,
         fdk_i32 vy = 0, cy = 0, my = 0;
         axis_extents(sv, true, &vx, &cx, &mx);
         axis_extents(sv, false, &vy, &cy, &my);
-        fdk_i32 nx = sv->scroll_x - dx;
-        fdk_i32 ny = sv->scroll_y - dy;
+        /* Gesture accumulation: a notch while a flight is airborne
+         * adds to the PENDING target, not to the stale live offset
+         * (six fast notches = one 6-notch glide, the classic wheel
+         * feel; computing from the live offset would restart the
+         * same 1-notch flight six times). The flight itself still
+         * starts from where the eye is — scroll_flight_to's from is
+         * the live position. */
+        fdk_i32 base_x = sv->scroll_x;
+        fdk_i32 base_y = sv->scroll_y;
+        if (sv->flight != NULL) {
+            base_x = sv->flight_target_x;
+            base_y = sv->flight_target_y;
+        }
+        fdk_i32 nx = base_x - dx;
+        fdk_i32 ny = base_y - dy;
         if (nx < 0) {
             nx = 0;
         }
@@ -247,12 +354,7 @@ static bool scrollview_handle_event(fdk_widget *w,
         if (ny > my) {
             ny = my;
         }
-        if (nx != sv->scroll_x || ny != sv->scroll_y) {
-            sv->scroll_x = nx;
-            sv->scroll_y = ny;
-            scrollview_layout(w);
-            fdk_widget_invalidate(w);
-        }
+        scroll_flight_to(w, nx, ny);
         return true; /* the scroll is consumed either way */
     }
     case FDK_WIDGET_KEY_DOWN: {
@@ -264,8 +366,14 @@ static bool scrollview_handle_event(fdk_widget *w,
         axis_extents(sv, true, &vx, &cx, &mx);
         axis_extents(sv, false, &vy, &cy, &my);
         fdk_i32 page_y = page_step(vy);
+        /* Same accumulation rule as the wheel: keys held down (or
+         * pressed fast) ride the pending target. */
         fdk_i32 nx = sv->scroll_x;
         fdk_i32 ny = sv->scroll_y;
+        if (sv->flight != NULL) {
+            nx = sv->flight_target_x;
+            ny = sv->flight_target_y;
+        }
         switch (ev->key.scancode) {
         case FDK_KEY_LEFT: nx -= SCROLL_KEY_STEP; break;
         case FDK_KEY_RIGHT: nx += SCROLL_KEY_STEP; break;
@@ -281,13 +389,7 @@ static bool scrollview_handle_event(fdk_widget *w,
         if (ny < 0) ny = 0;
         if (nx > mx) nx = mx;
         if (ny > my) ny = my;
-        if (nx != sv->scroll_x || ny != sv->scroll_y) {
-            sv->scroll_x = nx;
-            sv->scroll_y = ny;
-            scrollview_layout(w);
-            fdk_widget_invalidate(w);
-            return true;
-        }
+        scroll_flight_to(w, nx, ny);
         return true; /* consumed even when clamped to the edge */
     }
     default:
@@ -617,6 +719,13 @@ fdk_result fdk_scrollview_scroll_to(fdk_widget *scrollview, fdk_i32 x,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_scrollview *sv = scroll_of(scrollview);
+    /* The programmatic truth-setting path: snaps instantly and
+     * cancels any in-flight gesture animation (flight_done clears
+     * the pointer; the offset is overwritten right below). */
+    if (sv->flight != NULL) {
+        fdk_animation_cancel(sv->flight);
+        sv->flight = NULL;
+    }
     fdk_i32 ox = sv->scroll_x, oy = sv->scroll_y;
     sv->scroll_x = x;
     sv->scroll_y = y;

@@ -1225,3 +1225,57 @@ dismissal test recorded in Phase 9, reapplied for keys); and a
 menu bar with no bounds paints nothing while its KEYBOARD paths
 still work (the mnemonic scan walks by widget class) — a
 window-visibility assertion needs the bounds set first.
+
+## 1.3.8 — testing an animation engine on two clocks
+
+The animation engine has exactly one pump; production drives it
+from the shared ~16 ms ticker (a repeating timer the pump's timer
+queue fires), and the headless suite drives the SAME pump with
+synthetic times. The seam is a pinned test clock: while the
+override is set, `fdk_widget_animate()` stamps its start from it,
+so the suite's chosen pump times and the engine's elapsed-time
+arithmetic share one clock — no display, no sleeps, and the exact
+production code path (cadence, easing application, completion,
+cancel-inside-tick, destroy-detach) runs under both drivers. The
+discipline is the 1.3.5 test-seam rule restated: production never
+calls the seam; tests never need the platform.
+
+Three lessons from this milestone's test loop:
+
+1. **Pump counts, not milliseconds.** ONE `fdk_pump_events` call
+   fires the ticker ONCE — a pump is a single poll cycle (it wakes
+   at the timer deadline, fires the due set, and returns; `fdk_run`
+   loops it, discrete pumps do not). A settle loop that pumps six
+   times delivers six ticks, not "240 ms of animation": a 140 ms
+   flight at 16 ms cadence needs ~9 ticks, and the first draft's
+   6-pump settle left it at t = 0.8 with the offset one pixel
+   short. Settle loops must OUT-COUNT the flight's tick budget.
+
+2. **Assert the engine's timing-free invariants, not its phase.**
+   Example 11's rig checks are deliberately phase-independent:
+   every racing block is always somewhere inside its lane's travel
+   band, at every point of every cycle, so "colored pixels in the
+   band" holds no matter when the capture lands. A check that
+   depends on WHICH frame the capture caught is a flake with extra
+   steps.
+
+3. **Handle-lifetime tests must exercise the query-after-done
+   pattern.** The first engine freed animations at completion and
+   the suite's own read-after-done assertion caught the
+   use-after-free that the header's contract had promised away —
+   which is the argument for writing the assertion BEFORE believing
+   the implementation ("a handle past its animation is a query
+   object" is now pinned by tests, backed by the zombie-grace
+   design).
+
+The X11 integration suite gained the REAL-ticker group (cadence
+over `fdk_pump_events`, mid-flight eased value, done exactly once,
+idle stop, cancel over the real pump) and the smooth-wheel-scroll
+group over REAL button events — mid-flight sample between 0 and the
+notch target, three fast notches accumulating to 3x (the stale-
+offset bug would land 1x), and the exact settled target. The X11
+example rig's 11_animation run doubles as the tooltip-open-at-exit
+regression: Xvfb has no WM, the window lands at (0,0), the pointer
+sits on the header, the 500 ms delay fires, and the app is closed
+with the tip on screen — exactly the shutdown path whose
+use-after-free the run found.

@@ -321,6 +321,11 @@ static fdk_result deferred_append(fdk_widget *root, fdk_widget *w) {
  * fdk_widget_destroy() from any hook is a no-op rather than a double
  * free. */
 static void teardown_free(fdk_widget *w) {
+    /* Animations first (1.3.8): every animation inside this subtree
+     * dies here, before any pointer the engine could touch — the
+     * parent chains it walks are still intact, and no animator
+     * callback ever runs against a widget mid-funeral. */
+    fdk__animation_detach_subtree(w);
     /* Invalidate every watch token first: from here on, the widget
      * is dead to any programmatic path holding a watch on it, no
      * matter what the subclass destroy hook or the frees below do. */
@@ -432,6 +437,11 @@ void fdk_widget_root_flush_deferred(fdk_widget *root) {
             /* Free the root itself. Its list was already detached
              * above; nothing touches root's fields after this. */
             teardown_free(root);
+            if (fdk__widget_roots_head() == NULL) {
+                /* The last root finished its DEFERRED teardown: same
+                 * shutdown rule as the immediate path above. */
+                fdk__animation_drain_all();
+            }
             return;
         }
     }
@@ -945,6 +955,16 @@ void fdk_widget_destroy(fdk_widget *widget) {
         guard_leave(root);
         teardown_free(widget); /* widget may BE the root: nothing
                                 * touches it after this line */
+        if (widget == root && fdk__widget_roots_head() == NULL) {
+            /* The last root's teardown just completed: no widget
+             * exists anywhere, so the animation engine drains (no
+             * callbacks, everything freed — the shutdown rule
+             * fdk_animation.h documents: handles are dead once the
+             * last root is gone). This is what keeps process exit
+             * ASan-clean when an app destroys its windows (the
+             * compositor-death rig checks exactly that). */
+            fdk__animation_drain_all();
+        }
     }
 }
 

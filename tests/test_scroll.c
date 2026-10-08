@@ -197,7 +197,30 @@ static void test_paint_clipping(void) {
 
 /* ---- wheel + keyboard ---- */
 
+/* The animation clock (1.3.8): wheel/keyboard gestures now EASE to
+ * their target over 140 ms instead of teleporting. The suite pins
+ * the engine to a synthetic clock (start stamps and pump reads all
+ * come from it) and settles flights by advancing far past their
+ * duration — the final-position semantics every older assertion
+ * pinned are unchanged, and the new mid-flight checks use chosen
+ * pump times. */
+static long long g_anim_time = 0;
+
+static void settle(void) {
+    g_anim_time += 1000; /* any flight started <= now is done */
+    fdk__animation_set_test_clock(g_anim_time);
+    fdk__animation_pump(g_anim_time);
+}
+
+static void pump_at(long long t) {
+    g_anim_time = t;
+    fdk__animation_set_test_clock(t);
+    fdk__animation_pump(t);
+}
+
 static void test_input(void) {
+    g_anim_time = 0;
+    fdk__animation_set_test_clock(0);
     fdk_widget *root = fresh_root();
     fdk_widget *sv = NULL;
     assert(fdk_ok(fdk_scrollview_create(root, &sv)));
@@ -209,63 +232,162 @@ static void test_input(void) {
 
     fdk_i32 sx = -1, sy = -1;
 
-    /* Wheel down over the middle of the viewport: 48px. */
+    /* Wheel down over the middle of the viewport: eases to 48.
+     * Nothing moves on the event itself (the first tick is the next
+     * frame); at exactly half the 140 ms flight cubic-out is
+     * 1 - (1 - 0.5)^3 = 0.875, so 48 * 0.875 = 42. */
     fdk_event_data wheel = ev_scroll(100, 75, 0, -1);
     assert(fdk_widget_tree_handle_event(root, &wheel));
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sy == 0);
+    pump_at(70);
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sy == 42);
+    settle();
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
     assert(sy == 48);
 
-    /* Wheel up twice: back to 0 (clamped, not negative). */
-    wheel = ev_scroll(100, 75, 0, 1);
-    assert(fdk_widget_tree_handle_event(root, &wheel));
-    assert(fdk_widget_tree_handle_event(root, &wheel));
-    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 0);
-
-    /* The wheel event over a CHILD bubbles up: scroll while the
-     * pointer is over the content's colored area. */
+    /* Gesture accumulation: a second notch while the first flight
+     * is airborne adds to the PENDING target — from the 48 rest
+     * position two fast notches are ONE glide of 96 more, landing
+     * on 144 (the alternative, retargeting from the stale live
+     * offset, would replay the same 1-notch flight twice — the
+     * fast-wheel bug found live by this very assertion). */
     wheel = ev_scroll(100, 75, 0, -1);
     assert(fdk_widget_tree_handle_event(root, &wheel));
+    wheel = ev_scroll(100, 75, 0, -1);
+    assert(fdk_widget_tree_handle_event(root, &wheel));
+    settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 48);
+    assert(sy == 144);
+
+    /* The programmatic path snaps INSTANTLY, mid-flight: scroll_to
+     * cancels the gesture animation and sets the truth now (no
+     * settle() before the assertion), and the canceled flight stays
+     * dead afterwards. */
+    wheel = ev_scroll(100, 75, 0, -1);
+    assert(fdk_widget_tree_handle_event(root, &wheel));
+    assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 300)));
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sy == 300);
+    settle();
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sy == 300);
+
+    /* The wheel event over a CHILD bubbles up: scroll while the
+     * pointer is over the content's colored area (48 up, clamped
+     * back to 252 = 300 - 48). */
+    wheel = ev_scroll(100, 75, 0, 1);
+    assert(fdk_widget_tree_handle_event(root, &wheel));
+    settle();
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sy == 252);
+
+    /* Wheel up five more notches: 252 - 5*48 = 12, then a sixth
+     * clamps to 0 (not negative) — the clamp rule unchanged. */
+    for (int i = 0; i < 6; i++) {
+        wheel = ev_scroll(100, 75, 0, 1);
+        assert(fdk_widget_tree_handle_event(root, &wheel));
+    }
+    settle();
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sy == 0);
 
     /* Keyboard: unfocused scrollview ignores arrows (they belong to
      * the content's focusables). */
     fdk_event_data key = ev_key(FDK_KEY_DOWN);
     assert(!fdk_widget_tree_handle_event(root, &key));
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 48);
+    assert(sy == 0);
 
-    /* Focused: arrows (32), PageDown (90% of viewport), Home/End. */
+    /* Focused: arrows (32), PageDown (90% of viewport), Home/End —
+     * every gesture settles before its assertion (same numbers the
+     * pre-animation suite pinned; only the arrival is eased now). */
     fdk_widget_set_can_focus(sv, true);
     assert(fdk_widget_focus(sv));
     assert(fdk_widget_tree_handle_event(root, &key));
+    settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 80);
+    assert(sy == 32);
 
     fdk_event_data pgdn = ev_key(FDK_KEY_PAGE_DOWN);
     assert(fdk_widget_tree_handle_event(root, &pgdn));
+    settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
     /* viewport height = 150 - 12 (hbar) = 138; page = (138/10)*9 =
      * 117 (integer math, both in the engine and here). */
-    assert(sy == 80 + 117);
+    assert(sy == 32 + 117);
 
     fdk_event_data end = ev_key(FDK_KEY_END);
     assert(fdk_widget_tree_handle_event(root, &end));
+    settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
     assert(sy == 1200 - 138);
 
     fdk_event_data home = ev_key(FDK_KEY_HOME);
     assert(fdk_widget_tree_handle_event(root, &home));
+    settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
     assert(sy == 0);
 
     fdk_widget_destroy(root);
     printf("[ok] scrollview: wheel (incl. bubbling from content), "
-           "keyboard gating on focus, arrows/page/home/end\n");
+           "keyboard gating on focus, arrows/page/home/end — now "
+           "eased: exact mid-flight value, fast-notches accumulate "
+           "into the pending target, programmatic snap cancels\n");
 }
 
 /* ---- scrollbar interaction ---- */
+
+/* ---- container content (the 1.3.8 regression) ----------------------------
+ * A BOX as scrollview content must LAY OUT ITS CHILDREN: the old
+ * code positioned the content with set_bounds, which never runs the
+ * content's arrange hook — a box of rows rendered nothing at all
+ * (found live by example 11's 40-row list: zero rows painted). The
+ * arrange path also has to hold when SCROLLING re-positions the
+ * content: the box moves, the children keep their in-box slots. */
+static void test_container_content(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *sv = NULL;
+    assert(fdk_ok(fdk_scrollview_create(root, &sv)));
+    fdk_widget_set_bounds(sv, (fdk_rect){0, 0, 200, 150});
+
+    fdk_widget *rows = NULL;
+    assert(fdk_ok(fdk_box_create(sv, FDK_VERTICAL, &rows)));
+    fdk_widget *kids[10];
+    for (int i = 0; i < 10; i++) {
+        assert(fdk_ok(fdk_widget_create(rows, NULL,
+                                        (fdk_rect){0, 0, 120, 25},
+                                        &kids[i])));
+    }
+    assert(fdk_ok(fdk_scrollview_set_content(sv, rows)));
+    /* A scroll positions the content and must lay the box's
+     * children out (scroll_to runs the internal layout). */
+    assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 0)));
+
+    fdk_rect rb = fdk_widget_get_bounds(rows);
+    assert(rb.width == 120 && rb.height == 10 * 25);
+    assert(rb.x == 0 && rb.y == 0);
+    for (int i = 0; i < 10; i++) {
+        fdk_rect kb = fdk_widget_get_bounds(kids[i]);
+        assert(kb.y == i * 25);       /* the box laid them out     */
+        assert(kb.height == 25);
+    }
+
+    /* Scrolling moves the BOX; the children keep their slots. */
+    assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 100)));
+    rb = fdk_widget_get_bounds(rows);
+    assert(rb.y == -100);
+    for (int i = 0; i < 10; i++) {
+        fdk_rect kb = fdk_widget_get_bounds(kids[i]);
+        assert(kb.y == i * 25);       /* unchanged in-box position */
+    }
+
+    fdk_widget_destroy(root);
+    printf("[ok] scrollview: container CONTENT lays out its children "
+           "(box rows positioned, slots stable under scrolling — the "
+           "1.3.8 set_bounds-vs-arrange regression)\n");
+}
 
 static void test_scrollbar(void) {
     fdk_widget *root = fresh_root();
@@ -456,6 +578,7 @@ int main(void) {
     test_basics();
     test_paint_clipping();
     test_input();
+    test_container_content();
     test_scrollbar();
     test_adoption();
     test_hit_testing();

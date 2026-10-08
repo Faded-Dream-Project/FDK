@@ -24,6 +24,8 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
+#include "widget/widget_internal.h" /* animation test seam (1.3.8) */
+
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -278,9 +280,15 @@ static void test_scrolling(void) {
     wheel.scroll.position.x = 50;
     wheel.scroll.position.y = 80;
     wheel.scroll.delta_y = -1;
+    /* The internal scrollview eases to the accumulated target
+     * (1.3.8): pin the engine's synthetic clock and settle the
+     * burst before the click below. */
+    fdk__animation_set_test_clock(0);
     for (int i = 0; i < 40; i++) {
         (void)fdk_widget_tree_handle_event(root, &wheel);
     }
+    fdk__animation_pump(100000);
+    fdk__animation_set_test_clock(-1);
     /* Click near the bottom of the viewport: with scroll clamped
      * near the end (content 40x26=1040, viewport ~138), viewport
      * y=120 maps to content y~1022 — inside the LAST row (the

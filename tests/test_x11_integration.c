@@ -6338,6 +6338,182 @@ static unsigned long find_tooltip_child(Display *dpy, unsigned long owner) {
     return found;
 }
 
+/* ---- animation (1.3.8) ---------------------------------------------------
+ *
+ * The headless suite drives the engine's pump on a synthetic clock;
+ * this test drives it the way production does: through the shared
+ * ~16 ms ticker that the timer queue fires inside fdk_pump_events.
+ * Real elapsed time, real tick cadence, real completion — plus the
+ * smooth-scroll flight over REAL X11 wheel events (Button5 pressed
+ * over the viewport, translated by the platform layer to a scroll),
+ * sampled mid-flight and verified at the target. */
+
+static int anim_ticks;
+static int anim_done_true;
+static int anim_done_false;
+static double anim_last_e;
+
+static void anim_tick_cb(fdk_animation *a, double e, void *user) {
+    (void)a;
+    (void)user;
+    anim_ticks++;
+    anim_last_e = e;
+}
+
+static void anim_done_cb(fdk_animation *a, bool finished, void *user) {
+    (void)a;
+    (void)user;
+    if (finished) {
+        anim_done_true++;
+    } else {
+        anim_done_false++;
+    }
+}
+
+static void test_animation_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window_options wopts = { .title = "anim", .width = 240,
+                                 .height = 180 };
+    fdk_window *win = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    fdk_widget *root = NULL;
+    (void)fdk_window_get_root(win, &root);
+    fdk_widget *mover = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){10, 10, 60, 40},
+                                    &mover)));
+
+    /* --- the real ticker: cadence, mid-flight sample, completion --- */
+    anim_ticks = 0;
+    anim_done_true = 0;
+    anim_done_false = 0;
+    anim_last_e = -1.0;
+    fdk_animation *a = fdk_widget_animate(mover, 120,
+                                          FDK_EASE_CUBIC_OUT,
+                                          anim_tick_cb, anim_done_cb,
+                                          NULL);
+    assert(a != NULL);
+    assert(fdk_animation_running(a));
+    assert(fdk_animation_widget(a) == mover);
+
+    /* ~90 ms of pumping: mid-flight. The ticker must have delivered
+     * multiple frames (16 ms cadence), and the eased value is
+     * strictly inside (0, 1). */
+    for (int i = 0; i < 3; i++) {
+        (void)fdk_pump_events(ctx, 30);
+    }
+    assert(anim_ticks >= 2);
+    assert(anim_last_e > 0.0 && anim_last_e < 1.0);
+
+    /* +180 ms: completed, done(true) exactly once, the handle is a
+     * queryable zombie (the grace window), and the idle engine's
+     * ticker has stopped ticking. */
+    for (int i = 0; i < 6; i++) {
+        (void)fdk_pump_events(ctx, 30);
+    }
+    assert(anim_done_true == 1);
+    assert(anim_done_false == 0);
+    assert(!fdk_animation_running(a));
+    int settled = anim_ticks;
+    for (int i = 0; i < 4; i++) {
+        (void)fdk_pump_events(ctx, 30);
+    }
+    assert(anim_ticks == settled);
+
+    /* --- cancel over the real pump --- */
+    anim_ticks = 0;
+    anim_done_true = 0;
+    anim_done_false = 0;
+    fdk_animation *c = fdk_widget_animate(mover, 400,
+                                          FDK_EASE_LINEAR,
+                                          anim_tick_cb, anim_done_cb,
+                                          NULL);
+    (void)fdk_pump_events(ctx, 30);
+    assert(anim_ticks >= 1);
+    fdk_animation_cancel(c);
+    assert(anim_done_false == 1);
+    int after_cancel = anim_ticks;
+    for (int i = 0; i < 4; i++) {
+        (void)fdk_pump_events(ctx, 30);
+    }
+    assert(anim_ticks == after_cancel);
+    assert(anim_done_false == 1);
+
+    fdk_window_destroy(win);
+
+    /* --- smooth scroll over real X11 wheel events --- */
+    fdk_window_options sopts = { .title = "smooth", .width = 240,
+                                 .height = 200 };
+    fdk_window *swin = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, &sopts, &swin)));
+    fdk_window_show(swin);
+    fdk_widget *sroot = NULL;
+    (void)fdk_window_get_root(swin, &sroot);
+    fdk_widget *sv = NULL;
+    assert(fdk_ok(fdk_scrollview_create(sroot, &sv)));
+    fdk_widget_set_bounds(sv, (fdk_rect){0, 0, 200, 180});
+    fdk_widget *content = NULL;
+    assert(fdk_ok(fdk_widget_create(sv, NULL,
+                                    (fdk_rect){0, 0, 400, 2000},
+                                    &content)));
+    assert(fdk_ok(fdk_scrollview_set_content(sv, content)));
+
+    unsigned long xid = fdk_window_xid(swin);
+    Display *dpy = XOpenDisplay(NULL);
+    assert(dpy != NULL);
+
+    fdk_i32 off = -1;
+    fdk_i32 dummy_x = -1;
+    /* One wheel-down notch over the viewport: the flight targets 48
+     * and NOTHING moves on the event itself. */
+    x11_send_pointer_event(dpy, xid, ButtonPress,
+                           ButtonPressMask, 100, 90, 5);
+    (void)fdk_pump_events(ctx, 5);
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
+    assert(off == 0);
+    /* ~35 ms in: mid-flight, strictly between 0 and 48 (cubic-out
+     * covers ~60% by then — generous bounds for scheduler jitter). */
+    (void)fdk_pump_events(ctx, 35);
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
+    assert(off > 0 && off < 48);
+    /* Settled: exactly the notch's target. NOTE the pump-count
+     * arithmetic: ONE fdk_pump_events call fires the ticker ONCE
+     * (a pump is a single poll cycle — it wakes at the timer
+     * deadline, fires the due set, and returns; fdk_run loops it,
+     * discrete pumps do not). A 140 ms flight at 16 ms cadence
+     * needs ~9 ticks, so the settle loop must out-count it. */
+    for (int i = 0; i < 14; i++) {
+        (void)fdk_pump_events(ctx, 20);
+    }
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
+    assert(off == 48);
+
+    /* A burst of three fast notches ACCUMULATES: 48 + 144 = 192 (the
+     * pending-target rule; the stale-offset rule would land 96). */
+    for (int i = 0; i < 3; i++) {
+        x11_send_pointer_event(dpy, xid, ButtonPress,
+                               ButtonPressMask, 100, 90, 5);
+        (void)fdk_pump_events(ctx, 5);
+    }
+    for (int i = 0; i < 14; i++) {
+        (void)fdk_pump_events(ctx, 20);
+    }
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
+    assert(off == 48 + 3 * 48);
+
+    XCloseDisplay(dpy);
+    fdk_window_destroy(swin);
+    fdk_shutdown(ctx);
+    printf("[ok] animation: the real 16 ms ticker (cadence, mid-flight "
+           "e, done-once, idle stop, cancel) + smooth wheel scroll "
+           "over real X11 buttons (mid-flight sample, accumulation, "
+           "exact target)\n");
+}
+
 static void test_tooltip_gui(void) {
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
@@ -6470,6 +6646,7 @@ int main(void) {
     test_close_request_delivered();
     test_pump_events_nonblocking();
     test_timers();
+    test_animation_gui();
     test_tooltip_gui();
     test_surface_render_readback();
     test_mitm_shm_and_double_buffer();

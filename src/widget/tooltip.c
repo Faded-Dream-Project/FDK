@@ -86,13 +86,15 @@ static void tip_cancel_pending(void) {
     g_tip.pending_target = NULL;
 }
 
-/* Destroys the shown popup (if any). Safe unconditionally. */
-static void tip_dismiss(void) {
-    if (g_tip.win != NULL) {
-        fdk_window *win = g_tip.win;
-        g_tip.win = NULL;
-        fdk_window_destroy(win);
-    }
+/* The shared cleanup for "the shown tip is gone": everything the
+ * module owns except the popup window itself. Called from BOTH
+ * death paths — our own tip_dismiss and the destroy-notify (the
+ * popup may die by ANOTHER hand: the fdk_shutdown window sweep
+ * tears down a tooltip still shown at exit, and the owner's
+ * teardown hover-drop would then destroy it a second time through
+ * g_tip.win — the use-after-free example 11's shutdown found; the
+ * notify is the borrowed-reference contract window.c documents). */
+static void tip_clear_shown_state(void) {
     if (g_tip.font != NULL) {
         fdk_font_destroy(g_tip.font);
         g_tip.font = NULL;
@@ -100,6 +102,28 @@ static void tip_dismiss(void) {
     fdk_free(g_tip.text);
     g_tip.text = NULL;
     g_tip.shown_target = NULL;
+}
+
+/* Destroy-notify on the popup window: clears the module state when
+ * the popup dies by any hand other than tip_dismiss. */
+static void tip_popup_died(fdk_window *win, void *user) {
+    (void)user;
+    if (g_tip.win != win) {
+        return; /* already dismissed by our own hand */
+    }
+    g_tip.win = NULL;
+    tip_clear_shown_state();
+}
+
+/* Destroys the shown popup (if any). Safe unconditionally. */
+static void tip_dismiss(void) {
+    if (g_tip.win != NULL) {
+        fdk_window *win = g_tip.win;
+        g_tip.win = NULL; /* FIRST: the popup's own destroy-notify
+                           * must see it gone (no double cleanup) */
+        fdk_window_destroy(win);
+    }
+    tip_clear_shown_state();
 }
 
 /* Wraps `text` at the tip width, writing the line array (caller
@@ -288,6 +312,9 @@ static void tip_delay_elapsed(fdk_timer *timer, void *user) {
     g_tip.font = font;
     g_tip.win = pop;
     g_tip.shown_target = target;
+    /* The popup can die by another hand (the shutdown sweep); the
+     * notify keeps g_tip.win from dangling into a second destroy. */
+    fdk__window_set_destroy_notify(pop, tip_popup_died, NULL);
     /* Map LAST, the menu machinery's discipline: everything the
      * first frame needs (canvas, bounds, module state) is in place
      * before the window becomes viewable, so the first present is

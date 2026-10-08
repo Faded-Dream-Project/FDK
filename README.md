@@ -56,10 +56,16 @@ shortcuts and menu accelerators, Alt-letter menu mnemonics,
 tooltips over real platform popup surfaces, the undo/redo stack
 (with the Entry's built-in coalescing history), the timer queue
 (caret blink, indeterminate progress, Wayland client-driven key
-repeat), full-Unicode XIM text entry on X11, and application
+repeat), full-Unicode XIM text entry on X11, application
 preferences — a strict, human-editable, atomically-saved settings
 store (`fdk_prefs`, `docs/fdk-prefs-format.md`) whose corrupt-file
-posture is fail-soft: defaults, one warning, the app keeps running.
+posture is fail-soft: defaults, one warning, the app keeps running —
+and the animation layer (`fdk_animation`): an eleven-curve easing
+library and a one-ticker animator ("drive a number from 0 to 1,
+call me per frame") with exact handle-lifetime guarantees, plus
+smooth wheel/keyboard scrolling in every ScrollView (fast notches
+accumulate into one glide; every programmatic scroll stays
+instant).
 
 See "What works today"
 below and `docs/roadmap.md` for an honest, specific list of what is

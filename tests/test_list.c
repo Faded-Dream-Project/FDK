@@ -17,6 +17,8 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
+#include "widget/widget_internal.h" /* animation test seam (1.3.8) */
+
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -322,10 +324,16 @@ static void test_scrolling(void) {
     (void)fdk_widget_tree_handle_event(root, &wheel);
     /* The internal scrollview did the work; observable: clicking a
      * row that is only reachable SCROLLED hits that row. */
-    /* Scroll to the bottom via End-ish: many wheel notches. */
+    /* Scroll to the bottom via End-ish: many wheel notches. The
+     * internal scrollview EASES to the accumulated target (1.3.8),
+     * so the burst settles before the click: pin the engine's
+     * synthetic clock, pump far past any flight. */
+    fdk__animation_set_test_clock(0);
     for (int i = 0; i < 40; i++) {
         (void)fdk_widget_tree_handle_event(root, &wheel);
     }
+    fdk__animation_pump(100000);
+    fdk__animation_set_test_clock(-1);
     /* Row 59 is now at the bottom; its content y =
      * 59*26 + 13 - scroll. Click near the bottom of the viewport. */
     click(root, 50, 148, 0);

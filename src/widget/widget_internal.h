@@ -332,4 +332,31 @@ void fdk_widget_child_layout_changed(fdk_widget *parent);
  * never reach freed memory. */
 void fdk__layout_batch_forget(fdk_widget *widget);
 
+/* ---- animation engine (animation.c) ------------------------------------
+ * Internal seams. Production drives the pump through the shared
+ * ~16 ms ticker (animation.c); the headless suite drives it with
+ * synthetic times. The destroy sweep is called from teardown_free
+ * BEFORE the subtree is freed (parent chains still intact). */
+
+/* Runs every active animation whose time has arrived at `now_ms`
+ * (monotonic milliseconds): tick callbacks, invalidation,
+ * completion, the release of dead handles. Safe on an empty list
+ * (a NULL check). */
+void fdk__animation_pump(long long now_ms);
+
+/* Drops every animation attached inside `w`'s subtree, without
+ * running any callback (the use-after-free guard). */
+void fdk__animation_detach_subtree(fdk_widget *w);
+
+/* Test seam: pins the engine clock (fdk_widget_animate stamps its
+ * start from it; -1 restores the real monotonic clock). Production
+ * never calls this. */
+void fdk__animation_set_test_clock(long long fixed_now_ms);
+
+/* Frees every animation (active and zombie) without callbacks.
+ * Runs automatically when the last widget root is destroyed (the
+ * engine can never run again); the test suites may also call it
+ * defensively between groups. */
+void fdk__animation_drain_all(void);
+
 #endif /* FDK_WIDGET_INTERNAL_H */
