@@ -264,6 +264,30 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
         event.configure.size = pwindow->last_size;
         pwindow->conn->dispatch(pwindow, &event, pwindow->conn->dispatch_user_data);
     }
+
+    /* 1.3.2 — first-map EXPOSE: X11 parity for toolkit-owned popups.
+     *
+     * The X server sends Expose when a window maps, and THAT event is
+     * what drives the auto-paint of menu/combo/tooltip popups whose
+     * content damage has no input event of its own. Wayland has no
+     * map event: the first xdg_surface.configure is the equivalent
+     * moment. Without this dispatch, an input-TRANSPARENT popup (a
+     * tooltip — the empty input region means it will NEVER receive
+     * pointer events) stayed on its committed background buffer
+     * forever: the canvas damage sat unpainted behind a dark box
+     * (found live in the sway tooltip rig). Menus dodged the bug by
+     * accident — their grab funnels a stream of pointer events into
+     * the popup, and every dispatch tail re-ran the auto-paint. App
+     * toplevels are unaffected either way: they render from their
+     * own loop, and an EXPOSE they may additionally receive is the
+     * documented contract fdk_event.h already describes. */
+    if (!was_configured) {
+        fdk_event_data event;
+        memset(&event, 0, sizeof(event));
+        event.type = FDK_EVENT_WINDOW_EXPOSE;
+        pwindow->conn->dispatch(pwindow, &event,
+                                pwindow->conn->dispatch_user_data);
+    }
 }
 
 static const struct xdg_surface_listener g_xdg_surface_listener = {
@@ -419,6 +443,18 @@ static void background_buffer_release(void *data, struct wl_buffer *buffer) {
         pwindow->buffer = NULL;
         pwindow->buffer_attached = 0;
     }
+    /* 1.3.2: leave the pending set — the entry dies with the proxy
+     * right below, and the window may already be gone (the zombie
+     * path dispatched a queued release after window destroy). */
+    for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
+        if (pwindow->bg_pending[i] == buffer) {
+            /* NOTE: unreachable once window destroy reaped the set —
+             * it destroyed the proxies, and libwayland drops events
+             * for destroyed objects. Mid-session releases land here. */
+            pwindow->bg_pending[i] = NULL;
+            break;
+        }
+    }
     wl_buffer_destroy(buffer);
     FDK_DEBUG("background buffer released by compositor");
 }
@@ -478,6 +514,42 @@ static fdk_result attach_background_buffer(fdk_platform_window *pwindow, fdk_siz
     pwindow->buffer = buffer;
     pwindow->buffer_size = size;
     pwindow->buffer_attached = 1;
+    /* 1.3.2: track this buffer in the compositor-held set. A
+     * REPLACED buffer stays tracked until its own wl_buffer::release
+     * destroys it (the listener removes the entry) — destroying it
+     * here instead raced the listener into a double destroy (found
+     * live under ASan: the queued release still dispatched). */
+    {
+        int slot = -1;
+        int oldest = -1;
+        for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
+            if (pwindow->bg_pending[i] == NULL && slot < 0) {
+                slot = i;
+            }
+            if (pwindow->bg_pending[i] != NULL) {
+                oldest = i; /* last non-empty = oldest (append order) */
+            }
+        }
+        if (slot < 0) {
+            /* Configure storm beyond the cap: destroy the oldest
+             * pending proxy — its late release event is dropped by
+             * libwayland's destroyed-object handling. */
+            if (oldest >= 0) {
+                FDK_WARN("wayland: background-buffer pending set "
+                         "overflow; destroying the oldest unreleased "
+                         "buffer");
+                wl_buffer_destroy(pwindow->bg_pending[oldest]);
+                if (pwindow->buffer == pwindow->bg_pending[oldest]) {
+                    pwindow->buffer = NULL;
+                    pwindow->buffer_attached = 0;
+                }
+                slot = oldest;
+            } else {
+                slot = 0; /* unreachable: cap > 0 */
+            }
+        }
+        pwindow->bg_pending[slot] = buffer;
+    }
 
     FDK_DEBUG("background buffer %dx%d attached", size.width, size.height);
     return FDK_OK;
@@ -1290,6 +1362,9 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->buffer_size.width = 0;
     pwindow->buffer_size.height = 0;
     pwindow->buffer_attached = 0;
+    for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
+        pwindow->bg_pending[i] = NULL; /* 1.3.2: fdk_alloc not zeroed */
+    }
     pwindow->render_pending = NULL;
     pwindow->rendered_ever = 0;
     pwindow->last_refuse_warn_ms = 0;
@@ -1333,6 +1408,8 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
 
     int is_popup = (options != NULL && options->popup != 0);
     pwindow->popup = is_popup;
+    pwindow->input_transparent =
+        (options != NULL && options->input_transparent != 0);
     pwindow->drop_formats = 0; /* fdk_window_set_drop_formats fills it */
     pwindow->xdg_popup = NULL;
 
@@ -1402,10 +1479,34 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
          * compositor (kiosk-shell weston) the grab would marshal a
          * NULL object: libwayland logs an argument error and drops
          * the whole request (1.1.5, seen live in the manager-less
-         * rig's stderr); skip it cleanly instead. */
-        if (conn->seat != NULL) {
+         * rig's stderr); skip it cleanly instead.
+         *
+         * Input-TRANSPARENT popups (tooltips) skip the grab on
+         * principle, not for want of a seat: a grabbed popup owns
+         * the keyboard and dismisses on outside input — the exact
+         * opposite of a hint that must never disturb the app it
+         * explains. Their empty input region (below) makes the
+         * compositor route pointer events to whatever is under
+         * them. */
+        if (conn->seat != NULL && !pwindow->input_transparent) {
             xdg_popup_grab(pwindow->xdg_popup, conn->seat,
                            conn->last_input_serial);
+        }
+        if (pwindow->input_transparent) {
+            /* Click-through from the FIRST frame: input regions are
+             * double-buffered surface state applied at the next
+             * commit — this create path precedes any commit, so the
+             * popup maps click-through. The region object may be
+             * destroyed immediately (the surface keeps its own
+             * reference). */
+            if (conn->compositor != NULL) {
+                struct wl_region *empty =
+                    wl_compositor_create_region(conn->compositor);
+                if (empty != NULL) {
+                    wl_surface_set_input_region(pwindow->surface, empty);
+                    wl_region_destroy(empty);
+                } /* OOM on a 4-byte object: skip, degrade honestly */
+            }
         }
         pwindow->xdg_toplevel = NULL;
         /* Popups commit a buffer on show like any window; the
@@ -1553,10 +1654,29 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
     pwindow->entered_count = 0;
     pwindow->entered_capacity = 0;
 
-    /* If a background buffer is still attached here (it usually was
-     * already released and destroyed by its release listener), drop
-     * our reference before tearing down the surface. */
+    /* 1.3.2: reap every background buffer the compositor may still
+     * hold — the current one (`buffer`, unless the render slots
+     * above already consumed it) AND any replaced-but-unreleased
+     * ones. Their proxies die here; any release event still queued
+     * client-side for them is dropped by libwayland's
+     * destroyed-object handling, so the release listener can never
+     * run against this (about-to-be-freed) window. This closes the
+     * use-after-free the clipboard interop rig hit when popup
+     * content began presenting over the background fill. */
+    for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
+        if (pwindow->bg_pending[i] != NULL) {
+            if (pwindow->buffer == pwindow->bg_pending[i]) {
+                pwindow->buffer = NULL;
+                pwindow->buffer_attached = 0;
+            }
+            wl_buffer_destroy(pwindow->bg_pending[i]);
+            pwindow->bg_pending[i] = NULL;
+        }
+    }
     if (pwindow->buffer != NULL) {
+        /* A non-background survivor (should not happen: render
+         * buffers were consumed above) — still drop it rather than
+         * leak the proxy. */
         wl_buffer_destroy(pwindow->buffer);
         pwindow->buffer = NULL;
         pwindow->buffer_attached = 0;

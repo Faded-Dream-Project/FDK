@@ -92,7 +92,23 @@ typedef enum fdk_theme_token {
     FDK_TK_ACCENT                    = 8, /* checked, progress, focus*/
     FDK_TK_TRACK                     = 9, /* progress/toggle track   */
 
-    FDK_TK_COUNT = 10
+    /* 1.3.2 append — the vocabulary the production audit found
+     * missing. Tooltips (the new popup layer); explicit selection
+     * colors (v1 hardcoded accent-with-0.45-alpha at every call
+     * site — a translucent accent is now a first-class token light
+     * themes can set opaque); the focus ring color; the three
+     * semantic states real applications reach for. */
+    FDK_TK_TOOLTIP_BACKGROUND        = 10,/* tooltip popup fill       */
+    FDK_TK_TOOLTIP_TEXT              = 11,/* tooltip label            */
+    FDK_TK_TOOLTIP_BORDER            = 12,/* tooltip popup edge       */
+    FDK_TK_SELECTION_BACKGROUND      = 13,/* selected text/rows/entries*/
+    FDK_TK_SELECTION_TEXT            = 14,/* text ON a selection      */
+    FDK_TK_FOCUS_RING                = 15,/* keyboard-focus indicator */
+    FDK_TK_SUCCESS                   = 16,/* positive/validated       */
+    FDK_TK_WARNING                   = 17,/* caution                  */
+    FDK_TK_DANGER                    = 18,/* destructive/error        */
+
+    FDK_TK_COUNT = 19
 } fdk_theme_token;
 
 /* Integer paint metrics. Most are paint-time values only (they never
@@ -106,8 +122,9 @@ typedef enum fdk_theme_metric {
     FDK_TM_TITLE_BAR_HEIGHT    = 2, /* FDK-drawn title band height, 12..64 */
     FDK_TM_SCROLLBAR_WIDTH     = 3, /* ScrollView bar thickness,    6..24  */
     FDK_TM_MENU_ITEM_HEIGHT    = 4, /* Menu bar/row minimum height, 16..48 */
+    FDK_TM_TOOLTIP_CORNER_RADIUS = 5, /* Tooltip box radius,         0..16 */
 
-    FDK_TM_COUNT = 5
+    FDK_TM_COUNT = 6
 } fdk_theme_metric;
 
 /* ---- Lifecycle ---- */

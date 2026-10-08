@@ -15,6 +15,10 @@
  *   Buttons         — "Apply" grows the progress bar and rewrites
  *                     the status label; "Reset" clears everything;
  *                     every control reports into the status line
+ *   Tooltips         — rest the pointer on any control for ~half a
+ *                     second: a themed, click-through hint pops up
+ *                     near it (Apply's is long enough to wrap); any
+ *                     press, key, or hover-away dismisses it
  *
  * The progress bar sweeps once on startup (so a screenshot shows it
  * mid-fill) and then holds; Tab moves focus through the controls.
@@ -108,15 +112,20 @@ int main(void) {
     fdk_widget *pub = NULL;
     (void)fdk_toggle_create(profile, font16, "Public profile", &pub);
     fdk_toggle_set_on_changed(pub, on_any_change, (void *)"Public profile");
+    (void)fdk_widget_set_tooltip(pub, "Anyone can view your profile page");
     fdk_widget *mail = NULL;
     (void)fdk_checkbox_create(profile, font16, "Show email address",
                               &mail);
     fdk_checkbox_set_on_changed(mail, on_any_change,
                                (void *)"Show email");
+    (void)fdk_widget_set_tooltip(
+        mail, "Your email appears on your public profile");
     fdk_widget *news = NULL;
     (void)fdk_checkbox_create(profile, font16, "Newsletter", &news);
     fdk_checkbox_set_on_changed(news, on_any_change,
                                (void *)"Newsletter");
+    (void)fdk_widget_set_tooltip(
+        news, "One digest email per week — no marketing");
 
     /* --- frame: rendering mode (radio group = frame's children) --- */
     fdk_widget *render = NULL;
@@ -131,6 +140,10 @@ int main(void) {
     fdk_radio_set_on_changed(r2, on_any_change,
                             (void *)"Renderer: Wayland");
     fdk_radio_set_on_changed(r3, on_any_change, (void *)"Renderer: auto");
+    (void)fdk_widget_set_tooltip(r1, "Draw with plain X11 put-image");
+    (void)fdk_widget_set_tooltip(r2, "Draw through the Wayland stack");
+    (void)fdk_widget_set_tooltip(
+        r3, "Pick the backend from the session environment");
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 
@@ -179,9 +192,16 @@ int main(void) {
     fdk_widget *apply = NULL;
     (void)fdk_button_create(row, font16, "Apply", &apply);
     fdk_button_set_on_activate(apply, on_apply, NULL);
+    (void)fdk_widget_set_tooltip(
+        apply,
+        "Apply the current settings and advance the progress bar by "
+        "one quarter — a long hint like this one wraps at a readable "
+        "width instead of stretching across the window");
     fdk_widget *reset = NULL;
     (void)fdk_button_create(row, font16, "Reset", &reset);
     fdk_button_set_on_activate(reset, on_reset, NULL);
+    (void)fdk_widget_set_tooltip(
+        reset, "Clear the progress bar and the apply counter");
     fdk_widget *filler = NULL;
     (void)fdk_widget_create(row, NULL, (fdk_rect){0, 0, 0, 1}, &filler);
     fdk_widget_set_expand(filler, true, false);
@@ -190,6 +210,8 @@ int main(void) {
     (void)fdk_progress_create(content, &progress);
     fdk_widget_set_natural_size(progress, 0, 14);
     fdk_widget_set_expand(progress, true, false);
+    (void)fdk_widget_set_tooltip(
+        progress, "How much of the startup sweep has completed");
 
     /* The demo's status line IS the helper's (bottom of the frame). */
     status = ex.status;

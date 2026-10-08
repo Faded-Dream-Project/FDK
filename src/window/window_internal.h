@@ -277,6 +277,17 @@ fdk_window *fdk__window_of_owner(void *window_owner);
  * toolkit owns (menu popup, dialog) so dispatch auto-paints it. */
 void fdk__window_set_auto_paint(fdk_window *window, bool auto_paint);
 
+/* Popup creation with the passive flag (1.3.2): input_transparent
+ * popups (tooltips) take an empty input region and never grab — the
+ * create-time contract both backends answer (see
+ * platform_internal.h). The public fdk_window_create_popup() is the
+ * interactive (grabbing) variant. */
+fdk_result fdk__window_create_popup_ex(fdk_context *ctx, fdk_window *parent,
+                                       fdk_i32 x, fdk_i32 y, fdk_i32 width,
+                                       fdk_i32 height,
+                                       bool input_transparent,
+                                       fdk_window **out_window);
+
 /* Diagnostic / regression seam: 1 once a frame has actually reached
  * the screen on the window's backend, 0 before that, -1 when the
  * backend does not report it (the optional window_ever_presented op

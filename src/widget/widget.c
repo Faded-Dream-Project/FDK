@@ -346,6 +346,7 @@ static void teardown_free(fdk_widget *w) {
     fdk__layout_batch_forget(w); /* pending batch entries die here */
     fdk_free(w->children);
     fdk_free(w->name);
+    fdk_free(w->tooltip);
     fdk_free(w->a11y_name);
     fdk_free(w->a11y_description);
     /* A11y: drop every relation edge that touched this widget —
@@ -569,6 +570,10 @@ static void drop_hover_inside(fdk_widget *root, fdk_widget *subtree) {
         old->flags &= ~FDK_WF_HOVERED;
         (void)deliver_single(root, old, &ev);
     }
+    /* Tooltips: a destroyed hovered widget cancels its pending delay
+     * and dismisses its shown box BEFORE the memory goes away (the
+     * pending timer would otherwise deref it 500ms later). */
+    fdk__tooltip_hover_changed(root, old, NULL);
 }
 
 static void drop_grab_inside(fdk_widget *root, fdk_widget *subtree) {
@@ -586,14 +591,15 @@ static bool set_hovered(fdk_widget *root, fdk_widget *hit) {
     }
     bool handled = false;
 
+    fdk_widget *old_hover = root->hovered;
+
     if (root->hovered != NULL && (root->hovered->flags & FDK_WF_DESTROYING) == 0) {
         fdk_widget_event ev;
         memset(&ev, 0, sizeof(ev));
         ev.type = FDK_WIDGET_POINTER_LEAVE;
-        fdk_widget *old = root->hovered;
         root->hovered = NULL;
-        old->flags &= ~FDK_WF_HOVERED;
-        if (deliver_single(root, old, &ev)) {
+        old_hover->flags &= ~FDK_WF_HOVERED;
+        if (deliver_single(root, old_hover, &ev)) {
             handled = true;
         }
     }
@@ -608,6 +614,13 @@ static bool set_hovered(fdk_widget *root, fdk_widget *hit) {
             handled = true;
         }
     }
+
+    /* Tooltips (1.3.2): the hover transition is the module's single
+     * trigger — every path that moves the pointer between widgets
+     * funnels through here. Runs AFTER the events settle so a
+     * callback that destroyed the new target is caught by the
+     * DESTROYING check inside the module. */
+    fdk__tooltip_hover_changed(root, old_hover, hit);
     return handled;
 }
 
@@ -995,6 +1008,30 @@ const char *fdk_widget_get_name(const fdk_widget *widget) {
         return widget->name;
     }
     return widget->klass->name;
+}
+
+fdk_result fdk_widget_set_tooltip(fdk_widget *widget, const char *text) {
+    if (widget == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_free(widget->tooltip);
+    widget->tooltip = NULL;
+    if (text != NULL && text[0] != '\0') {
+        size_t len = strlen(text) + 1;
+        widget->tooltip = fdk_alloc(len);
+        if (widget->tooltip == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        memcpy(widget->tooltip, text, len);
+    }
+    return FDK_OK;
+}
+
+const char *fdk_widget_get_tooltip(const fdk_widget *widget) {
+    if (widget == NULL) {
+        return NULL;
+    }
+    return widget->tooltip;
 }
 
 /* ---- hierarchy ---- */
@@ -1615,6 +1652,7 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
 
         case FDK_EVENT_POINTER_BUTTON_DOWN: {
             fdk_pointf pos = event->pointer_button.position;
+            fdk__tooltip_hide(); /* any press dismisses instantly */
             fdk_widget *target =
                 (root->grab != NULL &&
                  (root->grab->flags & FDK_WF_DESTROYING) == 0)
@@ -1684,7 +1722,9 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
                 return false;
             }
             old->flags &= ~FDK_WF_HOVERED;
-            return deliver_single(root, old, &ev);
+            bool lv = deliver_single(root, old, &ev);
+            fdk__tooltip_hover_changed(root, old, NULL);
+            return lv;
         }
 
         case FDK_EVENT_KEY_DOWN:
@@ -1692,6 +1732,9 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
             /* focused may be NULL (nothing focused): dispatch_key
              * still runs, so a Tab can focus the first focusable
              * widget from a cold start. */
+            if (event->type == FDK_EVENT_KEY_DOWN) {
+                fdk__tooltip_hide(); /* any key dismisses instantly */
+            }
             return dispatch_key(root, root->focused, &event->key,
                                 event->type == FDK_EVENT_KEY_DOWN);
         }

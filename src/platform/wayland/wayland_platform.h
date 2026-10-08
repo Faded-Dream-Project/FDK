@@ -31,6 +31,17 @@ struct fdk_platform_connection {
     struct wl_display *display;
     struct wl_registry *registry;
 
+    /* 1.3.2 — dead-connection circuit breaker (the Wayland
+     * counterpart of X11's display_dead): set the first time a
+     * flush/read/dispatch fails terminally (EPIPE = the compositor
+     * is gone). dispatch_pending() then returns FDK_ERR_NO_DISPLAY
+     * immediately, ONCE-logged — without this, a dead compositor
+     * meant an ERROR line and a failed syscall per pump call, at
+     * full loop speed, forever (found live in the rigs: two runaway
+     * example apps wrote 4.5 GB and 2.6 GB of duplicate error lines
+     * to their console logs). */
+    int display_dead;
+
     /* Dedicated event queue for wl_buffer events (1.1.6). Every
      * wl_buffer created through create_shm_buffer() is moved here
      * via wl_proxy_set_queue, so wl_buffer::release — often the ONLY
@@ -257,6 +268,13 @@ struct fdk_platform_window {
     struct xdg_toplevel *xdg_toplevel;
     int popup;                    /* Phase 9: xdg_popup window      */
     struct xdg_popup *xdg_popup;  /* set when popup                */
+    /* Input-transparent popup (1.3.2, tooltips): set at CREATE from
+     * fdk_window_options.input_transparent — empty input region on
+     * the surface before the first commit, and NO xdg_popup.grab:
+     * the hint is click-through and never takes keyboard ownership
+     * from the owner (the create-time contract, see
+     * platform_internal.h). */
+    int input_transparent;        /* 1.3.2: passive (tooltip) popup */
     int drop_formats;             /* 1.2.0 DnD: accepted drop formats */
 
     /* Solid background buffer — the Wayland equivalent of X11's
@@ -276,6 +294,21 @@ struct fdk_platform_window {
     struct wl_buffer *buffer;   /* current background buffer, NULL when none */
     fdk_size buffer_size;       /* dimensions of `buffer` */
     int buffer_attached;        /* nonzero while `buffer` is committed to the surface */
+    /* 1.3.2 — every background buffer the COMPOSITOR may still hold:
+     * the current one (== `buffer` above, pre-render) plus any
+     * REPLACED ones whose wl_buffer::release has not arrived yet.
+     * The release listener removes its own entry (and destroys the
+     * proxy); window destroy reaps whatever remains. Without this
+     * set, a replaced-but-unreleased background buffer was orphaned
+     * at window destroy with its listener still holding this window
+     * pointer — the queued release then dispatched after the free
+     * was a use-after-free (found live by the clipboard interop rig
+     * once the first-configure EXPOSE began presenting popup content
+     * over the background fill). The cap bounds a pathological
+     * configure storm; overflow destroys the oldest entry
+     * (libwayland drops that object's late events — zombie proxies). */
+#define FDK_WL_BG_SLOTS 8
+    struct wl_buffer *bg_pending[FDK_WL_BG_SLOTS];
 
     /* --- Software rendering (fdk_surface machinery) ---
      *

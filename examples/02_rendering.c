@@ -514,7 +514,9 @@ int main(int argc, char **argv) {
     int full_frames = 0, partial_frames = 0;
 
     while (!app.quit) {
-        (void)fdk_pump_events(ctx, FRAME_PUMP_MS);
+        if (fdk_pump_events(ctx, FRAME_PUMP_MS) < 0) {
+            break; /* platform connection lost — leave the loop */
+        }
         if (app.quit) {
             break;
         }

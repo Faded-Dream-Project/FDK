@@ -216,7 +216,9 @@ int main(int argc, char **argv) {
      * clock budget flaky. Two seconds of real time per phase. */
     double auto_next_ms = 0.0;
     while (!app.quit) {
-        (void)fdk_pump_events(ctx, 15);
+        if (fdk_pump_events(ctx, 15) < 0) {
+            break; /* platform connection lost — leave the loop */
+        }
         if (app.quit) {
             break;
         }

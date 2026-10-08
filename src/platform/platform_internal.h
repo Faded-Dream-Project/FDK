@@ -361,6 +361,20 @@ typedef struct fdk_platform_ops {
     fdk_result (*window_set_modal)(fdk_platform_window *pwindow,
                                    bool modal);
 
+    /* Input-transparent popups (1.3.2, tooltips) are a CREATE-TIME
+     * contract carried by fdk_window_options.input_transparent, not
+     * a post-create op: Wayland's xdg_popup.grab must be decided
+     * when the role object is built, and X11's grab lives in show —
+     * one flag answered by both. The platform layer must then:
+     *   (a) apply an EMPTY input region (X11: XShape input region,
+     *       if probed; Wayland: wl_region before the first commit) so
+     *       pointer events fall through to whatever is underneath;
+     *   (b) NEVER take the popup grab — grabbing would contradict
+     *       click-through and (X11) steal the app's keyboard while
+     *       the hint is up.
+     * Backends without the input-region primitive degrade honestly:
+     * the popup swallows clicks that land on it (logged). */
+
     /* ---- OPTIONAL drag-and-drop operations (1.2.0) ----
      *
      * Behind include/fdk/fdk_dnd.h. Formats are the public

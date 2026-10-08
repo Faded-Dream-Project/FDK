@@ -9,6 +9,12 @@
 
 #include <errno.h>
 #include <poll.h>
+
+/* Widget-layer tooltip module (src/widget/tooltip.c): the shutdown
+ * sweep calls it after the windows are gone. Declared here rather
+ * than including the widget internals from the core layer (the
+ * one-way layering discipline: core never includes widget headers). */
+void fdk__tooltip_shutdown(void);
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -656,6 +662,10 @@ void fdk_shutdown(fdk_context *ctx) {
     if (ctx->ops != NULL && ctx->conn != NULL) {
         ctx->ops->disconnect(ctx->conn);
     }
+    /* Tooltip module state (its popup died with the window sweep;
+     * this clears the font/text copies). */
+    fdk__tooltip_shutdown();
+
     /* Leaked timers are freed WITHOUT firing (shutdown is teardown,
     * not delivery — the same policy the leaked-window sweep uses). */
     while (ctx->timer_count > 0) {

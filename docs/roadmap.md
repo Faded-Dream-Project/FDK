@@ -2889,3 +2889,148 @@ X11 integration suite green; Xvfb example rig 10/10 pixel-verified
 (including the new query-contract test, both halves); clipboard
 interop rig three-directions green; sway example rig 10/10
 pixel-verified on FRESH captures; release config zero warnings.
+
+### 1.3.0 — the production-audit bug sweep (committed; entry written late, with 1.3.2)
+
+The four-subsystem production audit's critical findings, fixed in one
+pass (full detail in the commit message, kept authoritative):
+lifetime & reentrancy (the fdk__widget_watch weak-ref facility for
+programmatic destroy paths; combo-dropdown, radio-sweep, a11y-notify
+UAFs; the dialog construction double-signal), platform correctness
+(Wayland popup NULL-toplevel marshaling; the X11 XIO death handler —
+a lost server now exits fdk_run cleanly instead of Xlib's exit(1);
+detectable key repeat; XDND signed coordinates), render/text fixes
+(AA bbox axes, synthetic-italic axis mixup, degenerate draw_rect,
+format-aware scale-up fast paths, opaque-fill fast paths), the widget
+layer's list/tree/notebook mutability work (O(1) appends, batch
+fills, tombstoned tree removal), and the pre-1.0 API consistency
+renames (on_change -> on_changed; new getters; overflow guards).
+
+### 1.3.1 — the timer queue, caret blink, indeterminate progress, XIM text entry (committed; entry written late, with 1.3.2)
+
+fdk_timer_add/remove/reset on the context, CLOCK_MONOTONIC, fired
+from the pump between batches in deadline order with full reentrancy
+discipline (the X11 suite carries the regression group). Entry carets
+blink at the GTK cadence; progressbars gained indeterminate activity
+mode (a11y says "busy", not a lying number); X11 text entry went
+full-Unicode via connection-wide XIM + per-window XIC +
+Xutf8LookupString — v1 returned codepoint 0 for every non-ASCII
+keypress. Wayland registry version clamping (bind at
+min(wanted, advertised) — v1's hardcoded versions were a client
+protocol error on stricter compositors) and output hot-unplug
+retirement landed in the same push.
+
+### 1.3.2 — tooltips, and the four latent bugs they flushed out
+
+THE FEATURE. fdk_widget_set_tooltip/get_tooltip (text copied, NULL
+or "" clears): the pointer rests on a widget for ~500ms and the
+toolkit shows a themed, input-TRANSPARENT popup near its lower edge —
+rounded (tooltip_corner_radius), tooltip_background fill +
+tooltip_border edge + wrapped tooltip_text label (new theme tokens,
+plus the selection/focus-ring/success/warning/danger vocabulary the
+production audit found missing — translucent selection and the
+semantic trio are now first-class, settable opaque in light themes).
+Any press, key, or hover change dismisses it; a new hover re-arms the
+delay. One tooltip at a time, process-wide; the shown text is the
+MODULE's copy so the target may die while shown; target pointers are
+compared by address, flag-guarded on use. Detached trees store but
+never show (documented). Example 04 demonstrates it on every control
+(Apply's hint wraps).
+
+THE INTERRUPTION RECOVERY (the tree arrived mid-WIP): the popup was
+never mapped — fdk_window_show was the one line the interrupted
+session never wrote; and the first test draft sampled "the middle of
+the box", which is where the LABEL is — the fill-only lanes are y=3
+and y=h-3 by geometry, and the glyph band proves the label painted.
+
+BUG 1 — THE POPUP GRAB. Every X11 popup mapped, then GRABBED pointer
+and keyboard: right for menus, catastrophic for a hint. The keyboard
+grab stole the app's keys while the tooltip was up; worse,
+XGrabPointer activation makes the server emit a LeaveNotify against
+the window the REAL pointer sits in — the owner, during a hover —
+which the event layer faithfully translates into the hover-out that
+dismissed the tooltip the same instant it mapped. (The X11 suite
+never saw it: its small 320x240 window sits away from the Xvfb
+pointer.) Fix: input transparency is a CREATE-TIME contract —
+fdk_window_options.input_transparent (the append-only input struct)
+flows through fdk__window_create_popup_ex; X11 applies the empty
+XShape input region at create and never grabs; Wayland skips
+xdg_popup.grab and sets the empty wl_region before the first commit.
+Grabbing an input-transparent window is a contradiction, and both
+backends now answer one flag at one decision point (Wayland's grab
+MUST be decided at role creation — a post-create op could never
+express it).
+
+BUG 2 — WAYLAND POPUPS NEVER PAINTED WITHOUT INPUT. The tooltip
+mapped, configured, committed its background buffer — and stayed a
+dark box: the canvas damage sat unpainted forever. X11 always sent
+Expose on map, and THAT event drives the auto-paint of toolkit-owned
+popups; Wayland has no map event, and the first xdg_surface.configure
+is the equivalent moment — nothing dispatched it. Menus had dodged
+the bug by accident: their grab funnels a stream of pointer events
+into the popup, and every dispatch tail re-ran the auto-paint. Fix:
+the first configure now dispatches FDK_EVENT_WINDOW_EXPOSE (app
+toplevels render from their own loop; the extra EXPOSE is the
+documented contract).
+
+BUG 3 — THE MENU MODEL DESTROY UAF. With quiescent popups finally
+painting, the Wayland suite's serial-0 popup test detonated under
+ASan: fdk_menu_destroy freed rows the still-mapped popup's view
+painted. Borrowers were swept: destroying a model now closes every
+session level showing it (topmost-first, the GTK-shaped contract),
+and every menu bar listing it is detached through a registry
+(bars register at append, detach at remove/destroy) — the
+remove-then-destroy ordering test_menu always exercised was the
+dangling case.
+
+BUG 4 — THE ORPHANED BACKGROUND BUFFER. The same suite pass surfaced
+the render-present path's old flaw: presenting over the background
+fill re-pointed pwindow->buffer and ORPHANED the still-committed,
+not-yet-released background buffer — its release listener held the
+window pointer, and a queued wl_buffer::release dispatched after the
+window died was a use-after-free. (Replacing it at attach instead
+raced the listener into a double destroy — found live, twice.) Fix:
+the window tracks every compositor-held background buffer in a small
+pending set; the release listener removes its own entry, window
+destroy reaps the rest (libwayland drops those objects' late events).
+
+BUG 5 — THE DEAD-COMPOSITOR FLOOD. Killing the rig's compositor left
+the app pumping a dead socket at full speed, two ERROR lines per
+pass, forever — two runaway rigs wrote 4.5 GB and 2.6 GB of duplicate
+errors and FILLED THE SANDBOX DISK. X11 got its XIO death handler in
+1.3.0; Wayland now has the same circuit breaker: the first terminal
+flush/read/dispatch failure marks the connection dead (one log line,
+named cause), and every later pump returns FDK_ERR_NO_DISPLAY with
+zero logging and zero syscalls. fdk_run exits its loop; the example
+helper and all five INIT-tier example loops now treat a fatal pump
+result as loop-over (the app exits in 0.3s with a 1 KB log — the
+regression rig pins exactly that).
+
+RIGS. The tooltip is live-GUI-verified on both backends: hover via
+injected input, the themed box pixel-found in what the compositor
+actually shows, label glyphs proven, hover-away dismissal (X11:
+XSendEvent MotionNotify + ffmpeg x11grab; Wayland: the injector's
+virtual pointer + grim, target-finding robust to sway's frame pacing
+by clustering accent pixels — the startup sweep never settles under
+pixman). The compositor-death rig kills ONLY the compositor and
+demands a prompt, quiet, clean exit. The clipboard interop rig's sway
+config gained the wl-dnd-source floating pin (the lost-pin class,
+third occurrence — its suite section hung on a tiled drag source),
+and its suite section is timeout-bounded. The injector's ready
+handshake now roundtrips the output extent (a race that silently
+mis-mapped every injected coordinate) and reports it. The popup
+visibility question itself was settled with a probe: plain menu-style
+popups DO render in grim captures — the probe's red widget simply
+never painted (Bug 2's class), and the 07 menu capture shows a real
+menu's chrome.
+
+Verification battery on the final tree: headless suite 23/23
+leak-clean; X11 integration suite 88 [ok] (the tooltip GUI test:
+server-window found, themed fill above AND below the glyph band,
+label painted, press + hover-out dismissal); Xvfb example rig 10/10
+pixel-verified with clean exits; X11 tooltip rig PASS; Wayland suite
+28 [ok] under sway; sway example rig 10/10 pixel-verified on fresh
+grim captures; Wayland tooltip rig PASS; compositor-death rig PASS
+(0.3s exit, 1 KB log); clipboard interop rig PASS (three directions
++ the full suite under the same compositor); release config zero
+warnings.

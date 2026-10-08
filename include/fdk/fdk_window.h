@@ -43,6 +43,16 @@ typedef struct fdk_window_options {
     int popup;               /* nonzero = popup window             */
     fdk_i32 x;               /* parent-relative popup position     */
     fdk_i32 y;
+    /* 1.3.2 appended: INPUT-TRANSPARENT popup (tooltips). Zero-init
+     * (and every pre-1.3.2 caller) keeps the interactive-popup
+     * contract. Nonzero with popup: the window takes an EMPTY input
+     * region — pointer events fall through to whatever is underneath
+     * — and never grabs pointer or keyboard: a passive hint window
+     * the toolkit shows and dismisses on its own (fdk_widget_
+     * set_tooltip). Currently set only through the toolkit's own
+     * popup paths; applications building custom passive popups may
+     * set it too. */
+    int input_transparent;   /* nonzero = click-through popup       */
 } fdk_window_options;
 
 /* Creates a top-level window on `ctx`'s platform connection. Writes

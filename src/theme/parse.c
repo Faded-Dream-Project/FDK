@@ -289,6 +289,15 @@ static const key_entry k_color_keys[] = {
     {"control_border", FDK_TK_CONTROL_BORDER},
     {"accent", FDK_TK_ACCENT},
     {"track", FDK_TK_TRACK},
+    {"tooltip_background", FDK_TK_TOOLTIP_BACKGROUND},
+    {"tooltip_text", FDK_TK_TOOLTIP_TEXT},
+    {"tooltip_border", FDK_TK_TOOLTIP_BORDER},
+    {"selection_background", FDK_TK_SELECTION_BACKGROUND},
+    {"selection_text", FDK_TK_SELECTION_TEXT},
+    {"focus_ring", FDK_TK_FOCUS_RING},
+    {"success", FDK_TK_SUCCESS},
+    {"warning", FDK_TK_WARNING},
+    {"danger", FDK_TK_DANGER},
 };
 
 static const key_entry k_metric_keys[] = {
@@ -297,6 +306,7 @@ static const key_entry k_metric_keys[] = {
     {"title_bar_height", FDK_TM_TITLE_BAR_HEIGHT},
     {"scrollbar_width", FDK_TM_SCROLLBAR_WIDTH},
     {"menu_item_height", FDK_TM_MENU_ITEM_HEIGHT},
+    {"tooltip_corner_radius", FDK_TM_TOOLTIP_CORNER_RADIUS},
 };
 
 static const struct {
@@ -307,6 +317,7 @@ static const struct {
     [FDK_TM_TITLE_BAR_HEIGHT] = {12, 64},
     [FDK_TM_SCROLLBAR_WIDTH] = {6, 24},
     [FDK_TM_MENU_ITEM_HEIGHT] = {16, 48},
+    [FDK_TM_TOOLTIP_CORNER_RADIUS] = {0, 16},
 };
 
 /* Key-table lookup against a key segment (exact bytes). */

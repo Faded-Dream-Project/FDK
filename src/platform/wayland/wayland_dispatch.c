@@ -22,10 +22,25 @@
  * EAGAIN (socket send buffer full) is not an error here: the request
  * is still queued and will go out on the next flush; large transfers
  * just need the compositor to drain first. */
+/* Marks the connection dead (once) and returns the fatal result the
+ * pump/fdk_run contract consumes — the same shape X11's IO-error
+ * longjmp produces. Callers pass the failing syscall's errno for the
+ * one-time log. */
+static int connection_dead(fdk_platform_connection *conn, const char *what,
+                           int err) {
+    if (!conn->display_dead) {
+        conn->display_dead = 1;
+        FDK_ERROR("%s failed (errno=%d) — the Wayland connection is "
+                  "dead (compositor gone?); subsequent pumps return "
+                  "FDK_ERR_NO_DISPLAY without further logging",
+                  what, err);
+    }
+    return (int)FDK_ERR_NO_DISPLAY;
+}
+
 static int flush_output(fdk_platform_connection *conn) {
     if (wl_display_flush(conn->display) < 0 && errno != EAGAIN) {
-        FDK_ERROR("wl_display_flush failed (errno=%d)", errno);
-        return (int)FDK_ERR_PLATFORM_INIT;
+        return connection_dead(conn, "wl_display_flush", errno);
     }
     return 0;
 }
@@ -75,6 +90,14 @@ int fdk_wayland_release_queue_dispatch(fdk_platform_connection *conn) {
  * queued behind the default queue would starve get_framebuffer()
  * even though the bytes arrived (1.1.6). */
 int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
+    /* Dead connection (1.3.2): the circuit breaker — one fatal
+     * result per pump call, zero repeated logging, zero syscalls
+     * against a socket the compositor stopped owning. fdk_run()
+     * exits its loop on this; application-owned loops learn the
+     * connection is gone from the same return value. */
+    if (conn->display_dead) {
+        return (int)FDK_ERR_NO_DISPLAY;
+    }
     /* wl_display_prepare_read() fails (nonzero) if events are already
      * queued from a previous read — in that case just dispatch those
      * first, matching x11_dispatch_pending()'s "drain what's already
@@ -83,17 +106,16 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
     if (wl_display_prepare_read(conn->display) != 0) {
         int dispatched = wl_display_dispatch_pending(conn->display);
         if (dispatched < 0) {
-            FDK_ERROR("wl_display_dispatch_pending failed (errno=%d)", errno);
-            return (int)FDK_ERR_PLATFORM_INIT;
+            return connection_dead(conn, "wl_display_dispatch_pending",
+                                   errno);
         }
         (void)fdk_wayland_release_queue_dispatch(conn);
-        return flush_output(conn) < 0 ? (int)FDK_ERR_PLATFORM_INIT : dispatched;
+        return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY : dispatched;
     }
 
     if (wl_display_flush(conn->display) < 0 && errno != EAGAIN) {
         wl_display_cancel_read(conn->display);
-        FDK_ERROR("wl_display_flush failed (errno=%d)", errno);
-        return (int)FDK_ERR_PLATFORM_INIT;
+        return connection_dead(conn, "wl_display_flush", errno);
     }
 
     /* Non-blocking check that the fd actually has data before
@@ -114,15 +136,13 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
     }
 
     if (wl_display_read_events(conn->display) < 0) {
-        FDK_ERROR("wl_display_read_events failed (errno=%d)", errno);
-        return (int)FDK_ERR_PLATFORM_INIT;
+        return connection_dead(conn, "wl_display_read_events", errno);
     }
 
     int dispatched = wl_display_dispatch_pending(conn->display);
     if (dispatched < 0) {
-        FDK_ERROR("wl_display_dispatch_pending failed (errno=%d)", errno);
-        return (int)FDK_ERR_PLATFORM_INIT;
+        return connection_dead(conn, "wl_display_dispatch_pending", errno);
     }
     (void)fdk_wayland_release_queue_dispatch(conn);
-    return flush_output(conn) < 0 ? (int)FDK_ERR_PLATFORM_INIT : dispatched;
+    return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY : dispatched;
 }

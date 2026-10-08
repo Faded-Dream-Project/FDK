@@ -109,6 +109,15 @@ permitted and stored verbatim.
 | `control_border`           | Separators, frame rules, outlines                   |
 | `accent`                   | Checked state, progress fill, focus ring            |
 | `track`                    | Progress bar / toggle track                         |
+| `tooltip_background`       | Tooltip popup fill (1.3.2)                          |
+| `tooltip_text`             | Tooltip label                                       |
+| `tooltip_border`           | Tooltip popup edge                                  |
+| `selection_background`     | Selected text/rows/entries (1.3.2; default is a translucent accent — light themes can set it opaque) |
+| `selection_text`           | Text ON a selection                                 |
+| `focus_ring`               | Keyboard-focus indicator                            |
+| `success`                  | Positive/validated semantic state                   |
+| `warning`                  | Caution semantic state                              |
+| `danger`                   | Destructive/error semantic state                    |
 
 All optional; each inherits from the built-in default theme when absent.
 
@@ -118,6 +127,7 @@ All optional; each inherits from the built-in default theme when absent.
 |------------------------|--------|---------|---------------------------------|
 | `button_corner_radius` | 0–32   | 8       | Button fill + focus-ring corner radius |
 | `separator_thickness`  | 1–8    | 1       | Separator band thickness        |
+| `tooltip_corner_radius` | 0–16  | 6       | Tooltip box corner radius (1.3.2) |
 | `title_bar_height`     | 12–64  | 28      | FDK-drawn title band height     |
 
 All optional; each inherits from the built-in default theme when absent.

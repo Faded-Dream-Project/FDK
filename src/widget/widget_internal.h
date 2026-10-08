@@ -103,6 +103,11 @@ struct fdk_widget {
     void *user_data;
     char *name;                      /* owned copy, NULL when unset      */
 
+    /* Tooltip text (1.3.2): owned copy, NULL when unset; shown by
+     * the tooltip module (tooltip.c) when the pointer rests on this
+     * widget. Freed by teardown like name. */
+    char *tooltip;
+
     /* Accessibility overrides (Phase 10): when set, these beat the
      * class descriptor's computed name/description in
      * fdk_a11y_describe(). Owned copies, NULL when unset; freed by
@@ -283,6 +288,18 @@ typedef struct fdk_widget_watch {
 void fdk__widget_watch(fdk_widget_watch *watch, fdk_widget *target);
 void fdk__widget_unwatch(fdk_widget_watch *watch);
 #define fdk__watch_alive(w) ((w) != NULL && (w)->target != NULL)
+
+/* ---- Tooltip layer (tooltip.c; driven by the hooks below) ---- */
+
+/* Called by widget.c on every hover transition (including the
+ * destroy-time hover clear and the window-level LEAVE path). Both
+ * pointers may be NULL; they are compared by address only. */
+void fdk__tooltip_hover_changed(fdk_widget *root, fdk_widget *old_hit,
+                                fdk_widget *new_hit);
+/* Called by widget.c on any pointer/key press: instant dismissal. */
+void fdk__tooltip_hide(void);
+/* Called by fdk_shutdown() after the window sweep. */
+void fdk__tooltip_shutdown(void);
 
 /* Root bookkeeping, called by the window glue (src/window/window.c):
  * resize the root (and damage everything) when a configure arrives. */

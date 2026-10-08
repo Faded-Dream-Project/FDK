@@ -46,6 +46,20 @@ static fdk_theme g_builtin = {
         [FDK_TK_CONTROL_BORDER] = {0.30f, 0.33f, 0.44f, 1.0f},
         [FDK_TK_ACCENT] = {0.35f, 0.65f, 0.95f, 1.0f},
         [FDK_TK_TRACK] = {0.10f, 0.12f, 0.17f, 1.0f},
+        /* 1.3.2: elevated surface for tooltips (one step above
+         * control_background, with its own high-contrast text), a
+         * translucent selection riding the accent family, the focus
+         * ring as accent, and the semantic trio calibrated to read
+         * against the dark background. */
+        [FDK_TK_TOOLTIP_BACKGROUND] = {0.95f, 0.96f, 0.99f, 1.0f},
+        [FDK_TK_TOOLTIP_TEXT] = {0.11f, 0.13f, 0.19f, 1.0f},
+        [FDK_TK_TOOLTIP_BORDER] = {0.70f, 0.73f, 0.82f, 1.0f},
+        [FDK_TK_SELECTION_BACKGROUND] = {0.35f, 0.65f, 0.95f, 0.45f},
+        [FDK_TK_SELECTION_TEXT] = {0.95f, 0.96f, 0.99f, 1.0f},
+        [FDK_TK_FOCUS_RING] = {0.35f, 0.65f, 0.95f, 0.90f},
+        [FDK_TK_SUCCESS] = {0.36f, 0.73f, 0.42f, 1.0f},
+        [FDK_TK_WARNING] = {0.90f, 0.68f, 0.25f, 1.0f},
+        [FDK_TK_DANGER] = {0.91f, 0.35f, 0.36f, 1.0f},
     },
     .metrics = {
         [FDK_TM_BUTTON_CORNER_RADIUS] = 8, /* was BTN_RADIUS */
@@ -53,6 +67,7 @@ static fdk_theme g_builtin = {
         [FDK_TM_TITLE_BAR_HEIGHT] = 28, /* was DECO_TITLE_H */
         [FDK_TM_SCROLLBAR_WIDTH] = 12,
         [FDK_TM_MENU_ITEM_HEIGHT] = 26,
+        [FDK_TM_TOOLTIP_CORNER_RADIUS] = 6,
     },
 };
 
@@ -229,6 +244,10 @@ fdk_result fdk_theme_set_metric(fdk_theme *theme, fdk_theme_metric metric,
     case FDK_TM_MENU_ITEM_HEIGHT:
         lo = 16;
         hi = 48;
+        break;
+    case FDK_TM_TOOLTIP_CORNER_RADIUS:
+        lo = 0;
+        hi = 16;
         break;
     default:
         return FDK_ERR_INVALID_ARGUMENT;

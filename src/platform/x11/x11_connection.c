@@ -9,6 +9,7 @@
 #include <X11/Xatom.h>
 #include <X11/XKBlib.h>
 #include <X11/Xlocale.h>
+#include <X11/extensions/shape.h> /* XShape input regions (1.3.2) */
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -129,6 +130,19 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
         } else {
             FDK_INFO("X input method unavailable — ASCII text-entry "
                      "fallback (non-ASCII input will not resolve)");
+        }
+    }
+
+    /* XSHAPE probe (1.3.2): the empty-input-region primitive behind
+     * click-through tooltips. */
+    {
+        int dummy = 0;
+        if (XShapeQueryExtension(display, &dummy, &dummy)) {
+            conn->shape_ok = 1;
+        } else {
+            conn->shape_ok = 0;
+            FDK_INFO("XSHAPE unavailable — tooltip popups will not be "
+                     "click-through");
         }
     }
     /* fdk_alloc does not zero — None is 0 but be explicit anyway:

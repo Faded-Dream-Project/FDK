@@ -827,7 +827,9 @@ int main(void) {
     app.frames_left = frames != NULL ? atoi(frames) : -1;
 
     while (!app.quit) {
-        (void)fdk_pump_events(app.ctx, 15);
+        if (fdk_pump_events(app.ctx, 15) < 0) {
+            break; /* platform connection lost — leave the loop */
+        }
         /* The 1.2.0 build never painted here — every interaction's
          * damage waited for a resize to reach the screen (and the
          * resize-time repaint stamped new text over old, the ghosting

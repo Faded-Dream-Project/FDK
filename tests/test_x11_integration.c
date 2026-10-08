@@ -5855,6 +5855,158 @@ static void test_timers(void) {
            "self-removal, add-from-callback deferral, quit-from-timer\n");
 }
 
+
+/* ---- tooltips (1.3.2) ----------------------------------------------------
+ *
+ * Real hover in, delay elapses (the pump's timer clock), and the
+ * toolkit-owned popup lands on the SERVER: found by window-tree
+ * query (override-redirect child that is not the owner), pixel-
+ * verified through a second connection (the themed fill), then
+ * dismissed by a press and by a hover-out — with the owner's own
+ * pixels untouched underneath the whole time.
+ */
+static unsigned long find_tooltip_child(Display *dpy, unsigned long owner) {
+    unsigned long root = DefaultRootWindow(dpy);
+    Window r, parent, *kids = NULL;
+    unsigned int n = 0;
+    unsigned long found = 0;
+    if (XQueryTree(dpy, root, &r, &parent, &kids, &n) == 0) {
+        return 0;
+    }
+    for (unsigned int i = 0; i < n; i++) {
+        Window k = kids[i];
+        if ((unsigned long)k == owner) {
+            continue;
+        }
+        XWindowAttributes wa;
+        if (XGetWindowAttributes(dpy, k, &wa) == 0) {
+            continue;
+        }
+        if (wa.override_redirect && wa.class == InputOutput &&
+            wa.width >= 20 && wa.height >= 10) {
+            found = (unsigned long)k; /* the tooltip popup */
+            break;
+        }
+    }
+    XFree(kids);
+    return found;
+}
+
+static void test_tooltip_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK tooltip test",
+                                 .width = 320, .height = 240 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, wcol(24, 24, 28));
+
+    fdk_widget *btn = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){40, 40, 120, 40}, &btn)));
+    fdk_widget_set_background(btn, wcol(200, 60, 60));
+    assert(fdk_ok(fdk_widget_set_tooltip(btn, "The hint text")));
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Quiet the show noise. */
+    alarm(8);
+    for (int quiet = 0; quiet < 2;) {
+        int r = fdk_pump_events(ctx, 100);
+        assert(r >= 0);
+        quiet = (r == 0) ? quiet + 1 : 0;
+    }
+
+    /* No tooltip yet (nothing hovered). */
+    assert(find_tooltip_child(send_dpy, xid) == 0);
+
+    /* Hover onto the button: the delay arms. */
+    x11_send_pointer_event(send_dpy, xid, MotionNotify, PointerMotionMask,
+                           100, 60, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(find_tooltip_child(send_dpy, xid) == 0); /* still pending */
+
+    /* The 500ms delay elapses through the pump's timer clock. */
+    for (int i = 0; i < 7; i++) {
+        (void)fdk_pump_events(ctx, 100);
+    }
+    unsigned long tip = find_tooltip_child(send_dpy, xid);
+    assert(tip != 0); /* the popup exists on the server */
+
+    /* Pixel truth. The box is small (a one-line tip is ~82x24), so
+     * where is safe to sample is settled by GEOMETRY, not by "the
+     * middle": the wrapped label occupies the vertical middle band
+     * (text top = pad_y, pitch = box_h - 2*pad_y), the 1px border
+     * ring + rounded corners own the outermost band. The fill-only
+     * lanes are y=3 (above the glyphs, inside the corner radius) and
+     * y=h-3 (below them). Sampled mid-width, away from both. */
+    {
+        XWindowAttributes wa;
+        assert(XGetWindowAttributes(send_dpy, (Window)tip, &wa) != 0);
+        assert(wa.width >= 24 && wa.height >= 12);
+        Display *rb_dpy = NULL;
+        unsigned long top = x11_readback_pixel(&rb_dpy, tip,
+                                               wa.width / 2, 3);
+        unsigned long bot = x11_readback_pixel(&rb_dpy, tip,
+                                               wa.width / 2,
+                                               (int)wa.height - 3);
+        /* 0.95,0.96,0.99 with the renderer's rounding -> 0xF2F5FC */
+        assert(top == 0xF2F5FCu);
+        assert(bot == 0xF2F5FCu);
+        /* And the label REALLY painted: some pixel in the glyph band
+         * differs from the fill (glyphs + their antialiasing). */
+        bool glyph = false;
+        for (int yy = (int)wa.height / 2 - 3;
+             !glyph && yy <= (int)wa.height / 2 + 3; yy++) {
+            for (int xx = 4; !glyph && xx <= (int)wa.width - 4; xx += 2) {
+                if (x11_readback_pixel(&rb_dpy, tip, xx, yy) !=
+                    0xF2F5FCu) {
+                    glyph = true;
+                }
+            }
+        }
+        assert(glyph);
+        XCloseDisplay(rb_dpy);
+    }
+
+    /* A press dismisses instantly. */
+    x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                           ButtonPressMask, 100, 60, 1);
+    (void)fdk_pump_events(ctx, 100);
+    assert(find_tooltip_child(send_dpy, xid) == 0);
+    x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                           ButtonReleaseMask, 100, 60, 1);
+    (void)fdk_pump_events(ctx, 100);
+
+    /* Hover again, let it show, then hover OUT: dismissed. */
+    x11_send_pointer_event(send_dpy, xid, MotionNotify, PointerMotionMask,
+                           100, 60, 0);
+    for (int i = 0; i < 7; i++) {
+        (void)fdk_pump_events(ctx, 100);
+    }
+    assert(find_tooltip_child(send_dpy, xid) != 0);
+    x11_send_pointer_event(send_dpy, xid, MotionNotify, PointerMotionMask,
+                           10, 220, 0); /* onto the bare background */
+    (void)fdk_pump_events(ctx, 150);
+    assert(find_tooltip_child(send_dpy, xid) == 0);
+
+    alarm(0);
+    XCloseDisplay(send_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] tooltips: hover-delay popup (server-window verified, "
+           "themed pixel truth), press + hover-out dismissal\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -5869,6 +6021,7 @@ int main(void) {
     test_close_request_delivered();
     test_pump_events_nonblocking();
     test_timers();
+    test_tooltip_gui();
     test_surface_render_readback();
     test_mitm_shm_and_double_buffer();
     test_surface_follows_resize();

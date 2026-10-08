@@ -86,6 +86,12 @@ struct fdk_platform_connection {
      * support). */
     XIM xim;
 
+    /* XSHAPE (1.3.2): probed at connect; the empty-input-region
+     * primitive tooltips need (click-through popups). 0 = extension
+     * unavailable (tooltip popups then swallow clicks that land on
+     * them — the honest degradation, logged when it happens). */
+    int shape_ok;
+
     /* --- MIT-SHM (Phase 3 completion) ---
      *
      * Probed once at connect. shm_ok: the server supports the shared
@@ -202,6 +208,12 @@ struct fdk_platform_window {
      * bounds dismisses them (translated to a close request in
      * x11_events.c, never delivered as a button event). */
     int popup;
+    /* Input-transparent popup (1.3.2, tooltips): set at CREATE from
+     * fdk_window_options.input_transparent — empty XShape input
+     * region applied at create, popup grab never taken (see
+     * fdk_x11_window_show), so the hint is click-through and never
+     * steals keyboard focus from the app that owns it. */
+    int input_transparent;
     int grabbed;
 
     /* 1.2.0 DnD: the formats this window accepts as a drop target

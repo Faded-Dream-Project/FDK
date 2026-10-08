@@ -464,7 +464,9 @@ int main(void) {
     const int frame_limit = (limit_s != NULL) ? atoi(limit_s) : 0;
     int frames = 0;
     while (!app.quit) {
-        (void)fdk_pump_events(app.ctx, 15);
+        if (fdk_pump_events(app.ctx, 15) < 0) {
+            break; /* platform connection lost — leave the loop */
+        }
         if (fdk_widget_tree_has_damage(root)) {
             fdk_window_paint(app.window);
         }

@@ -661,6 +661,16 @@ fdk_result fdk_window_create_popup(fdk_context *ctx, fdk_window *parent,
                                    fdk_i32 x, fdk_i32 y, fdk_i32 width,
                                    fdk_i32 height,
                                    fdk_window **out_window) {
+    /* Interactive popups (menus, combos): the grab contract. */
+    return fdk__window_create_popup_ex(ctx, parent, x, y, width, height,
+                                       false, out_window);
+}
+
+fdk_result fdk__window_create_popup_ex(fdk_context *ctx, fdk_window *parent,
+                                       fdk_i32 x, fdk_i32 y, fdk_i32 width,
+                                       fdk_i32 height,
+                                       bool input_transparent,
+                                       fdk_window **out_window) {
     if (out_window == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
@@ -670,6 +680,7 @@ fdk_result fdk_window_create_popup(fdk_context *ctx, fdk_window *parent,
     fdk_window_options options;
     memset(&options, 0, sizeof(options));
     options.popup = 1;
+    options.input_transparent = input_transparent ? 1 : 0;
     options.x = x;
     options.y = y;
     options.width = width;

@@ -95,6 +95,18 @@ struct fdk_menu {
     size_t cap;
     fdk_menu_activate_fn on_activate; /* menu-wide fallback */
     void *on_activate_user;
+    /* 1.3.2 — bars currently listing this model (fdk_menu_bar_append
+     * registers; bar_destroy detaches; fdk_menu_destroy removes the
+     * listing). Sessions are swept globally at destroy instead (the
+     * session table is file-static). Without this registry a model
+     * destroyed while a bar listed it left the bar's borrowed
+     * pointer dangling for the NEXT title click (and any popup
+     * showing it painting freed rows — the dormant half surfaced
+     * when the Wayland first-configure EXPOSE began painting
+     * quiescent popups). */
+    struct fdk_menu_bar **bars;
+    size_t bar_count;
+    size_t bar_cap;
 };
 
 fdk_result fdk_menu_create(fdk_font *font, fdk_menu **out_menu) {
@@ -111,14 +123,35 @@ fdk_result fdk_menu_create(fdk_font *font, fdk_menu **out_menu) {
     m->cap = 0;
     m->on_activate = NULL;
     m->on_activate_user = NULL;
+    m->bars = NULL;
+    m->bar_count = 0;
+    m->bar_cap = 0;
     *out_menu = m;
     return FDK_OK;
 }
+
+/* Defined after the bar type (the sweep touches bar internals). */
+static void menu_detach_bars(fdk_menu *menu);
+/* Defined after the session machinery (sweeps active sessions). */
+static void menu_close_sessions_showing(fdk_menu *menu);
 
 void fdk_menu_destroy(fdk_menu *menu) {
     if (menu == NULL) {
         return;
     }
+    /* 1.3.2 — close everything still showing this model BEFORE the
+     * memory goes: every active session level whose chain entry
+     * borrowed it (popup windows die topmost-first inside the close,
+     * taking their views with them), then every menu bar listing it
+     * (the title is removed from the bar; the bar relayouts). This
+     * is the GTK-shaped contract: destroying a model closes its
+     * menus. The pre-1.3.2 code freed the rows and left the popups
+     * painting freed memory the moment anything drove a paint (the
+     * Wayland first-configure EXPOSE detonated it under ASan; X11's
+     * map-Expose always could have). */
+    menu_close_sessions_showing(menu);
+    menu_detach_bars(menu);
+
     for (size_t i = 0; i < menu->count; i++) {
         fdk_free(menu->items[i]->text);
         fdk_free(menu->items[i]->shortcut);
@@ -780,6 +813,25 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
 static void session_open_submenu(fdk_menu_session *s, fdk_menu_view *parent,
                                  int row);
 static void session_close_above(fdk_menu_session *s, int level);
+
+/* 1.3.2: close every active session level whose chain borrowed this
+ * model (fdk_menu_destroy's first sweep — popups showing the model
+ * die topmost-first, taking their views with them, while the model
+ * is still whole). */
+static void menu_close_sessions_showing(fdk_menu *menu) {
+    for (int si = 0; si < FDK_MENU_MAX_SESSIONS; si++) {
+        fdk_menu_session *s = &g_sessions[si];
+        if (!s->active) {
+            continue;
+        }
+        for (int lvl = 0; lvl < (int)s->depth; lvl++) {
+            if (s->chain[lvl].model == menu) {
+                session_close_above(s, lvl);
+                break;
+            }
+        }
+    }
+}
 static void session_switch_bar(fdk_menu_session *s, int dir);
 static void session_bar_hover(fdk_menu_session *s, fdk_i32 x, fdk_i32 y);
 
@@ -1379,6 +1431,7 @@ static fdk_menu_bar *bar_of(fdk_widget *w) {
     return (fdk_menu_bar *)(void *)w;
 }
 
+
 extern const fdk_widget_class fdk_menu_bar_class_def;
 
 static void bar_layout(fdk_widget *w) {
@@ -1397,6 +1450,72 @@ static void bar_layout(fdk_widget *w) {
         x += b->titles[i].rect.width;
     }
 }
+/* 1.3.2: remove this model's listing from every registered bar —
+ * called by fdk_menu_destroy while the model is still whole. The
+ * bar drops the title, relayouts, and repaints; the model's registry
+ * entry is cleared by the caller's free of menu->bars. */
+static void menu_detach_bars(fdk_menu *menu) {
+    for (size_t bi = 0; bi < menu->bar_count; bi++) {
+        fdk_menu_bar *b = menu->bars[bi];
+        if (b == NULL) {
+            continue;
+        }
+        size_t w = 0;
+        for (size_t t = 0; t < b->count; t++) {
+            if (b->titles[t].menu == menu) {
+                fdk_free(b->titles[t].title);
+                continue; /* drop the listing */
+            }
+            b->titles[w++] = b->titles[t];
+        }
+        b->count = w;
+        bar_layout(&b->base); /* re-slot the remaining titles */
+        fdk_widget_invalidate(&b->base);
+    }
+    fdk_free(menu->bars);
+    menu->bars = NULL;
+    menu->bar_count = 0;
+    menu->bar_cap = 0;
+}
+
+/* 1.3.2: register a bar on the model it lists (fdk_menu_bar_append).
+ * Returns false only on allocation failure — the append then fails
+ * rather than leaving an unregistered dangling listing behind. */
+static bool menu_attach_bar(fdk_menu *menu, fdk_menu_bar *bar) {
+    for (size_t i = 0; i < menu->bar_count; i++) {
+        if (menu->bars[i] == bar) {
+            return true; /* already registered (multiple titles) */
+        }
+    }
+    if (menu->bar_count == menu->bar_cap) {
+        size_t ncap = menu->bar_cap * 2 + 2;
+        if (ncap < menu->bar_cap ||
+            ncap > SIZE_MAX / sizeof(fdk_menu_bar *)) {
+            return false;
+        }
+        fdk_menu_bar **nb =
+            fdk_realloc(menu->bars, ncap * sizeof(fdk_menu_bar *));
+        if (nb == NULL) {
+            return false;
+        }
+        menu->bars = nb;
+        menu->bar_cap = ncap;
+    }
+    menu->bars[menu->bar_count++] = bar;
+    return true;
+}
+
+/* 1.3.2: drop one bar from the model's registry (bar_destroy). */
+static void menu_unattach_bar(fdk_menu *menu, fdk_menu_bar *bar) {
+    for (size_t i = 0; i < menu->bar_count; i++) {
+        if (menu->bars[i] == bar) {
+            menu->bars[i] = menu->bars[menu->bar_count - 1];
+            menu->bar_count--;
+            return;
+        }
+    }
+}
+
 
 static void bar_measure(fdk_widget *w, fdk_size *out) {
     (void)w;
@@ -1451,6 +1570,11 @@ static void bar_destroy(fdk_widget *w) {
         session_close_above(s, 0);
     }
     for (size_t i = 0; i < b->count; i++) {
+        /* 1.3.2: detach from the model's registry so a later
+         * fdk_menu_destroy does not sweep a freed bar. */
+        if (b->titles[i].menu != NULL) {
+            menu_unattach_bar(b->titles[i].menu, b);
+        }
         fdk_free(b->titles[i].title);
     }
     fdk_free(b->titles);
@@ -1780,8 +1904,17 @@ fdk_result fdk_menu_bar_append(fdk_widget *bar, const char *title,
         b->titles = nt;
         b->cap = ncap;
     }
+    /* 1.3.2: register the bar on the model FIRST — if this fails
+     * the listing is refused rather than left unregistered (an
+     * unregistered listing would dangle at model destroy). */
+    if (menu != NULL && !menu_attach_bar(menu, b)) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
     char *copy = fdk__strdup(title);
     if (copy == NULL) {
+        if (menu != NULL) {
+            menu_unattach_bar(menu, b);
+        }
         return FDK_ERR_OUT_OF_MEMORY;
     }
     b->titles[b->count].title = copy;
@@ -1807,6 +1940,13 @@ fdk_result fdk_menu_bar_remove(fdk_widget *bar, size_t index) {
     if (b->session != NULL && b->session->active &&
         (int)index == b->open_index) {
         session_close_above(b->session, 0);
+    }
+    /* 1.3.2: detach the dropped listing from the model's registry —
+     * the model must not sweep this bar at destroy for a title it no
+     * longer carries (found live by test_menu's remove-then-destroy
+     * ordering under ASan). */
+    if (b->titles[index].menu != NULL) {
+        menu_unattach_bar(b->titles[index].menu, b);
     }
     fdk_free(b->titles[index].title);
     memmove(&b->titles[index], &b->titles[index + 1],

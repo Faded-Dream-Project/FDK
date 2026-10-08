@@ -9,6 +9,7 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <X11/cursorfont.h> /* XC_* cursor glyph indices (1.1.4) */
+#include <X11/extensions/shape.h> /* XShape input regions (1.3.2) */
 #include <string.h>
 
 /* The creation-time window fill (1.2.1): the theme's window-
@@ -40,6 +41,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     fdk_i32 height = X11_DEFAULT_HEIGHT;
     const char *title = X11_DEFAULT_TITLE;
     int popup = 0;
+    int input_transparent = 0;
     fdk_i32 pop_x = 0, pop_y = 0;
 
     if (options != NULL) {
@@ -47,6 +49,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
         if (options->height > 0) height = options->height;
         if (options->title != NULL) title = options->title;
         popup = options->popup;
+        input_transparent = options->input_transparent;
         pop_x = options->x;
         pop_y = options->y;
     }
@@ -194,7 +197,18 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->conn = conn;
     pwindow->xwindow = xwindow;
     pwindow->popup = (popup != 0);
+    pwindow->input_transparent = (input_transparent != 0);
     pwindow->grabbed = 0;
+    /* Input-transparent popups (1.3.2, tooltips): the EMPTY XShape
+     * input region at CREATE time — the window is unmapped here, so
+     * the very first mapping is already click-through. Servers
+     * without XSHAPE degrade honestly (the popup then swallows the
+     * clicks that land on it; logged at connect). */
+    if (pwindow->input_transparent && conn->shape_ok) {
+        XShapeCombineRectangles(conn->display, xwindow, ShapeInput,
+                                0, 0, NULL, 0, ShapeSet, YXBanded);
+    }
+
     pwindow->drop_formats = 0; /* fdk_window_set_drop_formats fills it */
     pwindow->last_size.width = width;
     pwindow->last_size.height = height;
@@ -420,11 +434,22 @@ fdk_result fdk_x11_window_set_modal(fdk_platform_window *pwindow,
 
 void fdk_x11_window_show(fdk_platform_window *pwindow) {
     if (pwindow->popup) {
-        /* Map FIRST, then grab: grabbing before the window exists on
-         * screen fails outright under some servers. */
+        /* Input-TRANSPARENT popups (tooltips) never grab: a grab
+         * would contradict the click-through contract — and worse,
+         * XGrabPointer activation makes the server emit a
+         * LeaveNotify against the window the real pointer is in
+         * (usually the owner), which FDK faithfully translates into
+         * a hover-out that dismisses the tooltip the instant it
+         * maps. A keyboard grab would also steal the app's keys for
+         * as long as the hint is up. Menus keep the grab: they ARE
+         * an input context. */
         XMapWindow(pwindow->conn->display, pwindow->xwindow);
         XFlush(pwindow->conn->display);
-        fdk_x11_window_popup_grab(pwindow);
+        if (!pwindow->input_transparent) {
+            /* Map FIRST, then grab: grabbing before the window
+             * exists on screen fails outright under some servers. */
+            fdk_x11_window_popup_grab(pwindow);
+        }
         return;
     }
     XMapWindow(pwindow->conn->display, pwindow->xwindow);

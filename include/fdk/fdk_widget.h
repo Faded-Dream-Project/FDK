@@ -268,6 +268,21 @@ void *fdk_widget_get_user_data(const fdk_widget *widget);
 void fdk_widget_set_name(fdk_widget *widget, const char *name);
 const char *fdk_widget_get_name(const fdk_widget *widget);
 
+/* ---- Tooltips (1.3.2) ---- */
+
+/* The hint shown after the pointer rests on the widget for ~500ms:
+ * a toolkit-owned, input-TRANSPARENT popup near the widget's lower
+ * edge, wrapped at ~360px, themed (tooltip_* tokens). Any pointer
+ * press, key press, or pointer LEAVE dismisses it instantly; a new
+ * hover re-arms the delay. The text is copied (UTF-8); NULL or ""
+ * clears it. Tooltips need the tree to live in a window (the popup
+ * is parented there) — detached trees store the text but never show
+ * it. Returns FDK_ERR_OUT_OF_MEMORY if the copy fails. */
+fdk_result fdk_widget_set_tooltip(fdk_widget *widget, const char *text);
+/* The widget's tooltip text (toolkit-owned copy; NULL when unset);
+ * valid until the next set or destroy. */
+const char *fdk_widget_get_tooltip(const fdk_widget *widget);
+
 /* ---- Hierarchy ---- */
 
 fdk_widget *fdk_widget_parent(const fdk_widget *widget);

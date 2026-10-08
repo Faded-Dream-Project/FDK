@@ -1043,3 +1043,53 @@ closure resolution, skipping packages the system already provides
 rig without it happily verifies stale captures) into
 /home/z/apt/prefix, .pc prefix fixes, and a headless startup
 verification.
+
+## 1.3.2 — the tooltip rigs, the compositor-death rig, and the EXPOSE
+lesson
+
+The tooltip feature added two live-GUI rigs and one resilience rig,
+and the debugging that got them green is itself part of the record:
+
+- **verify_tooltip_x11.sh** — example 04 on a bare Xvfb, the pointer
+  "rested" on the settled progress bar via the helper's new
+  `hover x y` command (the same XSendEvent MotionNotify shape the
+  X11 suite uses), ffmpeg x11grab before/during/after, and pixel
+  truth: the themed box's light fill, glyph pixels inside it, and
+  hover-away dismissal. The first draft sampled "the center of the
+  box" — which is where the LABEL is; the fill-only lanes (y=3,
+  y=h-3) are settled by geometry, not by "the middle".
+- **verify_tooltip_wayland.sh** — the same scenario against real
+  sway: the injector's virtual pointer (FIFO-driven, ready-file
+  handshake), grim captures, cluster-based hover targeting (under
+  pixman the startup sweep never settles in six seconds, so the
+  rig targets the largest ACCENT cluster — the checked radio's dot
+  or the partially-filled bar, both tooltip-bearing). This rig is
+  what refused to pass until the first-configure EXPOSE fix landed.
+- **verify_compositor_death.sh** — kills ONLY the compositor under a
+  running example and demands a prompt, quiet, clean exit (the
+  dead-connection circuit breaker's regression). Before the breaker
+  this exact scenario filled the sandbox disk twice (4.5 GB and
+  2.6 GB of duplicate ERROR lines, two ERRORs per pump call at full
+  loop speed).
+
+The EXPOSE lesson (recorded because it explains a whole CLASS of
+"works on X11, dead on Wayland" results): X11 sends Expose when a
+window maps, and that event is what drives the auto-paint of
+toolkit-owned popups. Wayland has no map event — the first
+xdg_surface.configure is the equivalent moment, and it now
+dispatches EXPOSE. Anything toolkit-owned that expects to paint
+without ever receiving input depends on this; menus had only ever
+worked because their GRAB funnels pointer events into the popup
+(the dispatch tail re-ran the auto-paint for them).
+
+Rig infrastructure notes: the injector's ready handshake now
+roundtrips the output extent BEFORE writing the ready file (a race
+that silently mis-mapped every injected coordinate through a stale
+extent — the file now contains the extent it learned, and the rigs
+log it); a rig that spawns the injector must drive it through a FIFO
+the rig holds open (a backgrounded process inherits an EOF'd stdin
+and exits before the first command); and the clipboard-interop rig's
+sway config carries the org.fdk.wl-dnd-source floating pin for its
+suite section — the third occurrence of the lost-pin class (a
+tiled drag source makes the DnD test wait forever), so its suite
+section is also timeout-bounded now.

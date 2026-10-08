@@ -231,7 +231,17 @@ FDK_EXAMPLE_FN static bool fdk_example_pump(fdk_example *ex) {
     if (ex->quit) {
         return false;
     }
-    (void)fdk_pump_events(ex->ctx, 15);
+    int pumped = fdk_pump_events(ex->ctx, 15);
+    if (pumped < 0) {
+        /* Fatal platform result (the 1.3.2 dead-connection contract:
+         * X11's XIO death, Wayland's EPIPE breaker). A demo that
+         * kept looping on a dead connection would spin at full speed
+         * — exit the loop and let the close path tear down. */
+        ex->quit = true;
+        fprintf(stderr, "FDK example: platform connection lost — "
+                        "exiting the loop\n");
+        return false;
+    }
     if (ex->quit) {
         return false;
     }

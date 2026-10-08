@@ -1159,7 +1159,9 @@ int main(void) {
     app.frames_left = frames != NULL ? atoi(frames) : -1;
 
     while (!app.quit) {
-        (void)fdk_pump_events(app.ctx, 15);
+        if (fdk_pump_events(app.ctx, 15) < 0) {
+            break; /* platform connection lost — leave the loop */
+        }
         /* The 1.2.0 build never painted here: after the first frame
          * the window only updated on resizes, and the damage that
          * HAD accumulated repainted as new text stamped straight
