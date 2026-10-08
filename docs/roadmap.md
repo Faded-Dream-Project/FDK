@@ -3327,3 +3327,57 @@ reapplied).
 Docs: platform-input.md's Wayland repeat paragraph rewritten from
 the honest gap to the implemented contract (both backends now reach
 widgets with identical is_repeat semantics).
+
+### 1.3.6 — mnemonics (the underlined-letter Alt navigation)
+
+The honest-limits block in fdk_widgets.h named the last menu gap:
+"mnemonics (the underlined-letter Alt+letter menu navigation) are
+not implemented." Since 1.3.3 the accelerator half existed — Ctrl+S
+strings were real — but the OTHER keyboard school, the one that
+makes a menu bar fully drivable without the mouse, was absent. It
+is now the documented contract instead of the documented gap.
+
+THE GRAMMAR: label text may carry "&X" markers — the next character
+(the full codepoint, multibyte included) becomes the mnemonic:
+rendered underlined, and reachable as Alt+X. "&&" collapses to a
+literal '&' ("Fish && Chips" needs one); a dangling '&' is literal;
+the FIRST marker in a label wins (one letter per label —
+deterministic, and what GTK/Qt do); matching folds ASCII case.
+Parsing happens once at the three text-setting sites (item append,
+item retitle, bar title append) — the stored text is the DISPLAY
+string, and mn_start/mn_end name the underlined codepoint's byte
+range, which is all the paint needs: two prefix measurements
+(fdk_font_measure_utf8 is length-limited by design) place a 1 px
+underline under exactly that glyph, at baseline+2, in the text
+color (disabled items get the disabled color, like their glyphs).
+No new theme tokens — an underline is text-colored, not chrome.
+
+THE KEYBOARD, three routes: (1) Alt+letter with no chain open —
+the window dispatch gains a branch after the accelerator scan (an
+explicit accelerator beats a same-key title mnemonic; dispatch
+order is the documented precedence) that opens the first bar title
+whose mnemonic matches, the keyboard twin of clicking it; (2) a
+letter while a menu is open — the view's KEY_DOWN scans its own
+model and ACTIVATES the first enabled match (submenus open, same
+as Enter; Ctrl/Super-modified keys are the accelerators' namespace
+and never match); (3) Alt+letter that misses the open menu but
+names ANOTHER bar title — the popup chain holds the keyboard grab,
+so the window-level branch never sees it; the VIEW routes the jump
+(close the chain, open the target — the classic
+move-between-titles-while-open). Jump-to-title is a close-then-open
+(session_switch_bar steps ±1; a mnemonic names its title directly).
+
+TESTS: headless (test_menu.c) pins the parser table — strip,
+first-marker-wins, &&, dangling, case folding, retitle re-parse,
+the query API. The X11 integration suite drives the whole machine
+with REAL Alt+letter and letter keys through a real window and a
+real grabbed popup chain: Alt+F maps the File popup (root-child
+diff), 's' activates &Save and closes the chain, Alt+E opens Edit,
+Alt+F jumps Edit->File while open, 'o' activates &Open from the
+jumped-to menu — and the underline itself is proven by server-side
+pixel readback against an IDENTICAL marker-less bar (same text,
+same layout): the mnemonic bar reads exactly 17 more ink pixels in
+the title band, the F and E underline runs and nothing else.
+Example 07's menus now carry mnemonics throughout (F/E/H titles,
+items, and a Cu&t to show the not-first-letter case); the display
+text is unchanged, so every rig coordinate still holds.

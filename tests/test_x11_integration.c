@@ -977,6 +977,27 @@ static void x11_send_key_event(Display *dpy, unsigned long xid, int type,
 }
 
 
+/* KeyPress with Mod1Mask set (Alt+letter — the mnemonic combos,
+ * 1.3.6). Same shape as the ctrl variant. */
+static void x11_send_key_event_alt(Display *dpy, unsigned long xid,
+                                    unsigned int keycode) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = KeyPress;
+    ev.xkey.window = (Window)xid;
+    ev.xkey.keycode = keycode;
+    ev.xkey.state = Mod1Mask;
+    ev.xkey.same_screen = True;
+    Status st = XSendEvent(dpy, (Window)xid, False,
+                           (long)(KeyPressMask | KeyReleaseMask), &ev);
+    assert(st != 0);
+    ev.type = KeyRelease;
+    st = XSendEvent(dpy, (Window)xid, False,
+                    (long)(KeyPressMask | KeyReleaseMask), &ev);
+    assert(st != 0);
+    XFlush(dpy);
+}
+
 /* KeyPress with ControlMask set (Ctrl+letter combos, Phase 9's
  * entry shortcuts). */
 static void x11_send_key_event_ctrl(Display *dpy, unsigned long xid,
@@ -6433,6 +6454,7 @@ static void test_tooltip_gui(void) {
 }
 
 static void test_window_shortcuts_and_accelerators_gui(void);
+static void test_menu_mnemonics_gui(void);
 
 int main(void) {
     signal(SIGALRM, alarm_handler);
@@ -6488,9 +6510,246 @@ int main(void) {
     test_dnd_receiver_gui();
     test_dnd_source_gui();
     test_window_shortcuts_and_accelerators_gui();
+    test_menu_mnemonics_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
+}
+
+/* ---- 1.3.6: menu mnemonics (e2e) ----
+ *
+ * REAL Alt+letter keys through XSendEvent into a REAL window with a
+ * REAL menu bar: Alt+F opens the File title's menu (the keyboard
+ * twin of clicking it), a plain letter activates the matching item
+ * while the menu is open, Alt+E jumps from the open File menu to
+ * the Edit title, and the underline itself is verified server-side
+ * (pixel readback: the row under the F in the BAR differs from the
+ * same row in a marker-less bar — the underline is a real 1 px run,
+ * not a no-op in the paint path). */
+static int mn_gui_hits = 0;
+static void on_mn_menu(fdk_menu_item *item, void *user) {
+    (void)item;
+    (void)user;
+    mn_gui_hits++;
+}
+
+static void test_menu_mnemonics_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK mnemonics test",
+                                 .width = 420, .height = 260 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+
+    fdk_font *font = NULL;
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        font = fdk_font_load(font_candidates[i], 16);
+        if (font != NULL) {
+            break;
+        }
+    }
+    if (font == NULL) {
+        printf("[skip] X11 mnemonics GUI (no system TrueType font)\n");
+        fdk_window_destroy(win);
+        fdk_shutdown(ctx);
+        return;
+    }
+
+    /* Bar with mnemonic titles; items with mnemonics + one without. */
+    fdk_widget *bar = NULL;
+    assert(fdk_ok(fdk_menu_bar_create(root, font, &bar)));
+    fdk_rect bar_bounds = {0, 0, 420, 28};
+    fdk_widget_set_bounds(bar, bar_bounds);
+    fdk_menu *fm = NULL;
+    assert(fdk_ok(fdk_menu_create(font, &fm)));
+    fdk_menu_item *open_it = NULL;
+    fdk_menu_item *save_it = NULL;
+    fdk_menu_item *plain_it = NULL;
+    assert(fdk_ok(fdk_menu_append(fm, "&Open", &open_it)));
+    assert(fdk_ok(fdk_menu_append(fm, "&Save", &save_it)));
+    assert(fdk_ok(fdk_menu_append(fm, "Plain", &plain_it)));
+    fdk_menu *em = NULL;
+    assert(fdk_ok(fdk_menu_create(font, &em)));
+    fdk_menu_item *copy_it = NULL;
+    assert(fdk_ok(fdk_menu_append(em, "&Copy", &copy_it)));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "&File", fm)));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "&Edit", em)));
+    mn_gui_hits = 0;
+    fdk_menu_set_on_activate(fm, on_mn_menu, NULL);
+    fdk_menu_set_on_activate(em, on_mn_menu, NULL);
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Window xid = (Window)fdk_window_xid(win);
+    Window root_scr = DefaultRootWindow(send);
+    Window before[16], now[16];
+    int n_before = x11_child_windows(send, root_scr, before, 16);
+    assert(n_before >= 0);
+
+    /* --- 1. Alt+F opens the File menu (popup appears) --- */
+    x11_send_key_event_alt(send, xid, 41); /* F */
+    (void)fdk_pump_events(ctx, 200);
+    int n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    Window popup = x11_new_child(before, n_before, now, n_now);
+    assert(popup != 0);
+    printf("[ok] mnemonics: Alt+F opens the File menu (popup mapped)\n");
+
+    /* --- 2. Plain 's' with the menu open activates &Save. The
+     * key goes to the POPUP (XSendEvent bypasses the grab, so the
+     * toplevel never sees it while the chain is up — the exact
+     * shape a grabbed real keypress produces is a delivery TO the
+     * popup's window). --- */
+    assert(mn_gui_hits == 0);
+    x11_send_key_event(send, (unsigned long)popup, KeyPress, 39); /* s */
+    x11_send_key_event(send, (unsigned long)popup, KeyRelease, 39);
+    (void)fdk_pump_events(ctx, 200);
+    assert(mn_gui_hits == 1);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before); /* activation closed the chain */
+    printf("[ok] mnemonics: letter 's' activates &Save and closes "
+           "the chain\n");
+
+    /* --- 3. Alt+E (no menu open) opens Edit; then Alt+F jumps
+     * Edit->File while the chain is open (the VIEW routes it — the
+     * popup chain holds the keyboard grab, so the window-level
+     * branch never sees the key) --- */
+    x11_send_key_event_alt(send, xid, 26); /* E */
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    Window edit_popup = x11_new_child(before, n_before, now, n_now);
+    assert(edit_popup != 0);
+    printf("[ok] mnemonics: Alt+E opens the Edit menu\n");
+    /* Jump to File while Edit is open: ONE popup stays up (the old
+     * chain closes, the new one opens) — the key rides the EDIT
+     * popup's grab. */
+    x11_send_key_event_alt(send, (unsigned long)edit_popup, 41); /* F */
+    (void)fdk_pump_events(ctx, 250);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    Window file_popup = x11_new_child(before, n_before, now, n_now);
+    assert(file_popup != 0);
+    /* And a plain letter in the JUMPED-TO File menu activates its
+     * item: 'o' fires &Open. */
+    x11_send_key_event(send, (unsigned long)file_popup, KeyPress,
+                       32); /* o */
+    x11_send_key_event(send, (unsigned long)file_popup, KeyRelease,
+                       32);
+    (void)fdk_pump_events(ctx, 200);
+    assert(mn_gui_hits == 2);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] mnemonics: Alt+F jumps Edit->File while open; 'o' "
+           "activates &Open from the jumped-to menu\n");
+
+    /* --- 4. The underline is REAL paint: read THIS window's bar
+     * band now (before any second window exists — under bare Xvfb
+     * sibling windows stack at the same origin and would occlude
+     * the readback), then rebuild the identical bar WITHOUT the
+     * marker in a fresh window and read it the same way. The
+     * underlined bar must have strictly more ink (the underline run
+     * sits in the band on top of the text's). --- */
+    {
+        /* Deterministic frame: paint explicitly, then pump for the
+         * present (the interaction pumps above already did, but the
+         * readback must not depend on that history). */
+        assert(fdk_ok(fdk_window_paint(win)));
+        (void)fdk_pump_events(ctx, 200);
+        Display *rb = NULL;
+        fdk_color track = fdk_theme_get_color(NULL, FDK_TK_TRACK);
+        int count1 = 0;
+        for (int y = 2; y < 24; y++) {
+            for (int x = 4; x < 120; x++) {
+                unsigned long p1 = x11_readback_pixel(&rb, xid, x, y);
+                int b1 = (int)((p1 >> 16) & 0xFFu);
+                int g1 = (int)((p1 >> 8) & 0xFFu);
+                if (abs(b1 - (int)(track.r * 255)) > 24 ||
+                    abs(g1 - (int)(track.g * 255)) > 24) {
+                    count1++;
+                }
+            }
+        }
+        XCloseDisplay(rb);
+        assert(count1 > 0); /* the bar's own text paints */
+
+        /* The control: same bar, marker-less title, fresh window. */
+        fdk_window *win2 = NULL;
+        fdk_window_options w2 = { .title = "FDK mnemonics control",
+                                  .width = 420, .height = 260 };
+        assert(fdk_ok(fdk_window_create(ctx, &w2, &win2)));
+        fdk_window_show(win2);
+        (void)fdk_pump_events(ctx, 150);
+        fdk_widget *root2 = NULL;
+        assert(fdk_ok(fdk_window_get_root(win2, &root2)));
+        fdk_widget *bar2 = NULL;
+        assert(fdk_ok(fdk_menu_bar_create(root2, font, &bar2)));
+        fdk_rect bar2_bounds = {0, 0, 420, 28};
+        fdk_widget_set_bounds(bar2, bar2_bounds);
+        fdk_menu *cm = NULL;
+        assert(fdk_ok(fdk_menu_create(font, &cm)));
+        fdk_menu_item *ci = NULL;
+        assert(fdk_ok(fdk_menu_append(cm, "Plain", &ci)));
+        assert(fdk_ok(fdk_menu_bar_append(bar2, "File", cm)));
+        /* Identical second title, marker-less: the two bars differ
+         * ONLY by the underline (same text, same layout). */
+        fdk_menu *cm2 = NULL;
+        assert(fdk_ok(fdk_menu_create(font, &cm2)));
+        fdk_menu_item *ci2 = NULL;
+        assert(fdk_ok(fdk_menu_append(cm2, "Plain2", &ci2)));
+        assert(fdk_ok(fdk_menu_bar_append(bar2, "Edit", cm2)));
+        assert(fdk_ok(fdk_window_paint(win2)));
+        (void)fdk_pump_events(ctx, 300);
+
+        Display *rb2 = NULL;
+        unsigned long x2 = (unsigned long)fdk_window_xid(win2);
+        int count2 = 0;
+        for (int y = 2; y < 24; y++) {
+            for (int x = 4; x < 120; x++) {
+                unsigned long p2 = x11_readback_pixel(&rb2, x2, x, y);
+                int b2v = (int)((p2 >> 16) & 0xFFu);
+                int g2 = (int)((p2 >> 8) & 0xFFu);
+                if (abs(b2v - (int)(track.r * 255)) > 24 ||
+                    abs(g2 - (int)(track.g * 255)) > 24) {
+                    count2++;
+                }
+            }
+        }
+        XCloseDisplay(rb2);
+        /* Both bars paint the same "File" text; the underline adds
+         * its run — count1 must exceed count2 by the underline's
+         * own pixel count (a few px). */
+        assert(count1 > count2);
+        printf("[ok] mnemonics: the underline paints (server-side "
+               "pixel diff: %d vs %d ink pixels in the title band)\n",
+               count1, count2);
+        fdk_window_destroy(win2);
+        fdk_menu_destroy(cm);
+        fdk_menu_destroy(cm2);
+    }
+
+    XCloseDisplay(send);
+    fdk_window_destroy(win);
+    fdk_menu_destroy(fm);
+    fdk_menu_destroy(em);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] mnemonics: full Alt+letter navigation over real X11 "
+           "input\n");
 }
 
 /* ---- 1.3.3: application shortcuts + menu accelerators (e2e) ----

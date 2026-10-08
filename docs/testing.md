@@ -1199,3 +1199,29 @@ the test window must still cover delay + N periods with margin
 (40x50 ms for a 200 ms delay at 50 Hz lands at 37 repeats —
 asserted 20..70, so neither a missing wakeup cap nor a missing
 delay can slip through).
+
+## 1.3.6 — the pixel-diff discipline for paint-level features
+
+The mnemonic underline needed proof it PAINTS, not just that the
+code path runs. The first attempt at that proof was wrong twice,
+and both wrongs are worth naming: reading two sibling windows side
+by side under bare Xvfb is OCCLUSION-confounded (windows stack at
+the same origin; XGetImage on an obscured region reads whatever is
+on top), and the control window was not IDENTICAL to the subject
+(one title vs two — the pixel delta included the second title's
+text, not just the underline). The final shape: read the subject's
+band first (no second window exists yet), build the control with
+byte-identical labels minus the markers, paint both EXPLICITLY
+(fdk_window_paint — never depend on interaction-pump history), and
+assert a DELTA (278 vs 261 ink pixels = exactly the two 1 px
+underline runs). A paint-level pixel assertion is only as good as
+its control: same text, same layout, same frame discipline,
+differing by exactly the feature under test.
+
+Also pinned this milestone: XSendEvent bypasses the X11 grab, so
+keys meant for an open popup chain must be sent TO the popup's
+window (the toplevel never sees them — the same lesson the popup
+dismissal test recorded in Phase 9, reapplied for keys); and a
+menu bar with no bounds paints nothing while its KEYBOARD paths
+still work (the mnemonic scan walks by widget class) — a
+window-visibility assertion needs the bounds set first.

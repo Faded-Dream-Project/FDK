@@ -1546,6 +1546,23 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
                     window) {
                     return; /* destroyed by the menu callback */
                 }
+            } else if ((event->key.modifiers & FDK_MOD_ALT) != 0 &&
+                       (event->key.modifiers &
+                        (FDK_MOD_CTRL | FDK_MOD_SUPER)) == 0 &&
+                       event->key.codepoint != 0 &&
+                       fdk__menu_bar_mnemonic_open(window->root,
+                                                   &event->key)) {
+                /* 1.3.6 — Alt+letter opens the matching bar title
+                 * (the keyboard twin of clicking it). Runs after the
+                 * accelerator scan: an explicit accelerator beats a
+                 * same-key title mnemonic. The open may destroy the
+                 * window (a popup-driven reflow); re-verify. */
+                handled_by_accel = true;
+                if (fdk_context_find_window_by_pwindow(accel_ctx,
+                                                       accel_pwindow) !=
+                    window) {
+                    return;
+                }
             }
         }
     }

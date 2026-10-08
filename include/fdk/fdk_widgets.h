@@ -821,12 +821,24 @@ void fdk_canvas_invalidate(fdk_widget *canvas);
  * fdk_window_add_shortcut alongside. Application shortcuts run
  * BEFORE bar accelerators when both match (see fdk_window.h).
  *
+ * Mnemonics (1.3.6): label text may carry "&X" markers — the next
+ * character becomes the item's (or bar title's) underlined mnemonic
+ * letter. Alt+X opens the matching bar title; with a menu open, X
+ * alone (or Alt+X) activates the matching item — first
+ * enabled match wins, deterministically. "&&" renders a literal
+ * '&'; a dangling '&' is literal; the first marker in a label wins.
+ * Matching is case-insensitive on the letter. Explicit
+ * accelerators beat a same-key title mnemonic (dispatch order).
+ * fdk_menu_item_text() returns the DISPLAY string (markers
+ * stripped); fdk_menu_item_get_mnemonic() queries the letter.
+ *
  * Honest v1 limits, documented rather than faked: menus do not
  * scroll (a menu taller than the screen clips at the screen edge);
  * hover-to-switch bar titles only reacts where the platform's popup
  * grab reports out-of-bounds motion (X11: yes; Wayland: compositor
- * dependent); mnemonics (the underlined-letter Alt+letter menu
- * navigation) are not implemented. */
+ * dependent); duplicate mnemonic letters within one menu do not
+ * cycle (the first enabled match activates — the app owns
+ * uniqueness). */
 
 typedef struct fdk_menu fdk_menu;
 typedef struct fdk_menu_item fdk_menu_item;
@@ -865,6 +877,10 @@ fdk_result fdk_menu_append_radio(fdk_menu *menu, const char *text,
 /* Replaces the label (copied; NULL clears). */
 fdk_result fdk_menu_item_set_text(fdk_menu_item *item, const char *text);
 const char *fdk_menu_item_text(fdk_menu_item *item);
+
+/* The item's mnemonic letter (lowercased), 0 when the label carries
+ * no "&X" marker. Set through the label at append/set_text time. */
+fdk_u32 fdk_menu_item_get_mnemonic(fdk_menu_item *item);
 fdk_menu_item_type fdk_menu_item_get_type(fdk_menu_item *item);
 /* Disabled items dim and refuse activation. */
 void fdk_menu_item_set_enabled(fdk_menu_item *item, bool enabled);

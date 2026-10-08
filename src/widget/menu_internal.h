@@ -111,4 +111,16 @@ bool fdk__menu_bar_accel_hit(fdk_widget *root, const fdk_key_event *key,
  * them, but the guard is defense in depth). */
 void fdk__menu_item_accel_activate(fdk_menu_item *item);
 
+/* ---- mnemonics (1.3.6; menu.c) ----
+ *
+ * The window's KEY_DOWN dispatch calls this when it sees Alt+letter
+ * (exactly Alt — no Ctrl/Super; those belong to accelerators) and no
+ * accelerator matched: it opens the first bar title whose mnemonic
+ * matches, the keyboard twin of clicking the title (a chain already
+ * open on that bar jumps to the title instead). Returns true when a
+ * title opened (the event is consumed). The scan is live like
+ * accel_hit's — no registration, no staleness. */
+bool fdk__menu_bar_mnemonic_open(fdk_widget *root,
+                                 const fdk_key_event *key);
+
 #endif /* FDK_MENU_INTERNAL_H */

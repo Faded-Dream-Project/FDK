@@ -268,24 +268,24 @@ static void build_menus(fdk_widget *parent) {
     assert(fdk_ok(fdk_menu_create(font15, &recent_menu)));
 
     fdk_menu_item *it = NULL;
-    assert(fdk_ok(fdk_menu_append(file_menu, "Open", &it)));
+    assert(fdk_ok(fdk_menu_append(file_menu, "&Open", &it)));
     fdk_menu_item_set_on_activate(it, item_cb, NULL);
     fdk_menu_item_set_shortcut(it, "Ctrl+O");
     assert(fdk_ok(fdk_menu_append_separator(file_menu)));
-    assert(fdk_ok(fdk_menu_append_check(file_menu, "Toolbar", true,
+    assert(fdk_ok(fdk_menu_append_check(file_menu, "&Toolbar", true,
                                         &it)));
     fdk_menu_item_set_on_activate(it, toolbar_check_cb, NULL);
     assert(fdk_ok(fdk_menu_append_separator(file_menu)));
-    assert(fdk_ok(fdk_menu_append(file_menu, "Quit", &it)));
+    assert(fdk_ok(fdk_menu_append(file_menu, "&Quit", &it)));
     fdk_menu_item_set_on_activate(it, quit_cb, NULL);
     fdk_menu_item_set_shortcut(it, "Ctrl+Q");
 
-    assert(fdk_ok(fdk_menu_append(edit_menu, "Copy", &it)));
+    assert(fdk_ok(fdk_menu_append(edit_menu, "&Copy", &it)));
     fdk_menu_item_set_on_activate(it, item_cb, NULL);
     fdk_menu_item_set_shortcut(it, "Ctrl+C");
-    assert(fdk_ok(fdk_menu_append(edit_menu, "Cut", &it)));
+    assert(fdk_ok(fdk_menu_append(edit_menu, "Cu&t", &it)));
     fdk_menu_item_set_on_activate(it, item_cb, NULL);
-    assert(fdk_ok(fdk_menu_append(edit_menu, "Paste", &it)));
+    assert(fdk_ok(fdk_menu_append(edit_menu, "&Paste", &it)));
     fdk_menu_item_set_on_activate(it, item_cb, NULL);
     fdk_menu_item_set_shortcut(it, "Ctrl+V");
     assert(fdk_ok(fdk_menu_append_separator(edit_menu)));
@@ -296,7 +296,7 @@ static void build_menus(fdk_widget *parent) {
                                         true, &it)));
     fdk_menu_item_set_on_activate(it, item_cb, NULL);
     assert(fdk_ok(fdk_menu_append_separator(edit_menu)));
-    assert(fdk_ok(fdk_menu_append(edit_menu, "Recent", &it)));
+    assert(fdk_ok(fdk_menu_append(edit_menu, "R&ecent", &it)));
     assert(fdk_ok(fdk_menu_item_set_submenu(it, recent_menu)));
     fdk_menu_item *rec = NULL;
     assert(fdk_ok(fdk_menu_append(recent_menu, "phase9.txt", &rec)));
@@ -304,15 +304,15 @@ static void build_menus(fdk_widget *parent) {
     assert(fdk_ok(fdk_menu_append(recent_menu, "roadmap.md", &rec)));
     fdk_menu_item_set_on_activate(rec, item_cb, NULL);
 
-    assert(fdk_ok(fdk_menu_append(help_menu, "About", &it)));
+    assert(fdk_ok(fdk_menu_append(help_menu, "&About", &it)));
     fdk_menu_item_set_on_activate(it, about_dialog_cb, NULL);
 
     fdk_widget *bar = NULL;
     assert(fdk_ok(fdk_menu_bar_create(parent, font15, &bar)));
     g_bar = bar;
-    assert(fdk_ok(fdk_menu_bar_append(bar, "File", file_menu)));
-    assert(fdk_ok(fdk_menu_bar_append(bar, "Edit", edit_menu)));
-    assert(fdk_ok(fdk_menu_bar_append(bar, "Help", help_menu)));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "&File", file_menu)));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "&Edit", edit_menu)));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "&Help", help_menu)));
 
     /* Title centers for the rig (the bar lays titles from x=6, each
      * padded 10px). */

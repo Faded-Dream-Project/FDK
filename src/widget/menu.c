@@ -82,8 +82,16 @@ typedef enum fdk_menu_item_kind {
 } fdk_menu_item_kind;
 
 struct fdk_menu_item {
-    char *text;       /* owned; NULL for separators          */
+    char *text;       /* owned; NULL for separators; mnemonic
+                      * markers ("&F") already stripped      */
     char *shortcut;   /* owned display-only label            */
+    /* 1.3.6 — the mnemonic (underlined-letter Alt+letter
+     * navigation): the lowercased marker letter (0 = none) and its
+     * byte range in `text` (start inclusive, end exclusive — the
+     * underline's x-extent is measured over exactly this span). */
+    fdk_u32 mnemonic;
+    size_t mn_start;
+    size_t mn_end;
     fdk_menu_item_kind kind;
     bool enabled;
     bool checked;
@@ -173,6 +181,148 @@ size_t fdk_menu_item_count(fdk_menu *menu) {
     return (menu != NULL) ? menu->count : 0;
 }
 
+/* Minimal UTF-8 decode for the mnemonic letter (the length was
+ * derived from the lead byte just above; malformed tail bytes
+ * decode to replacement-ish values that simply never match a key —
+ * harmless). */
+static fdk_u32 mn_decode(const char *p, size_t len) {
+    const unsigned char *u = (const unsigned char *)p;
+    if (len >= 1 && (u[0] & 0x80u) == 0u) {
+        return (fdk_u32)u[0];
+    }
+    if (len >= 2 && (u[0] & 0xE0u) == 0xC0u) {
+        return ((fdk_u32)(u[0] & 0x1Fu) << 6) | (fdk_u32)(u[1] & 0x3Fu);
+    }
+    if (len >= 3 && (u[0] & 0xF0u) == 0xE0u) {
+        return ((fdk_u32)(u[0] & 0x0Fu) << 12) |
+               ((fdk_u32)(u[1] & 0x3Fu) << 6) | (fdk_u32)(u[2] & 0x3Fu);
+    }
+    if (len >= 4 && (u[0] & 0xF8u) == 0xF0u) {
+        return ((fdk_u32)(u[0] & 0x07u) << 18) |
+               ((fdk_u32)(u[1] & 0x3Fu) << 12) |
+               ((fdk_u32)(u[2] & 0x3Fu) << 6) | (fdk_u32)(u[3] & 0x3Fu);
+    }
+    return (fdk_u32)u[0];
+}
+
+/* ---- 1.3.6: mnemonic parsing ----------------------------------------
+ *
+ * Labels may carry "&X" markers: the NEXT character (a full UTF-8
+ * codepoint) becomes the item's mnemonic — rendered underlined, and
+ * reachable as Alt+X (bar titles: opens the menu; open menus: the
+ * letter alone or with Alt activates the item). "&&" collapses to a
+ * literal '&' (a menu called "Fish && Chips" needs one). The stored
+ * text is the DISPLAY string (markers stripped); mn_start/mn_end
+ * name the underlined codepoint's byte range inside it. Case folds
+ * to lowercase — mnemonics are case-insensitive by convention.
+ *
+ * The first marker wins; later ones stay literal (a label can only
+ * point at one letter — deterministic, documented, and what GTK/Qt
+ * do). A '&' at the very end (dangling) is literal too: parsing must
+ * never reject or alter a label the app considers valid. */
+static char *mn_strip(const char *in, fdk_u32 *out_letter,
+                      size_t *out_start, size_t *out_end) {
+    *out_letter = 0;
+    *out_start = 0;
+    *out_end = 0;
+    if (in == NULL) {
+        return NULL;
+    }
+    size_t len = strlen(in);
+    char *out = fdk_alloc(len + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    size_t r = 0; /* read cursor */
+    size_t w = 0; /* write cursor */
+    bool taken = false;
+    while (r < len) {
+        if (in[r] == '&' && !taken && r + 1 < len) {
+            if (in[r + 1] == '&') {
+                out[w++] = '&';
+                r += 2;
+                continue;
+            }
+            /* The mnemonic codepoint starts at r+1. Measure its
+             * UTF-8 length the same way the text layer does. */
+            size_t clen = 1;
+            unsigned char c0 = (unsigned char)in[r + 1];
+            if ((c0 & 0xE0u) == 0xC0u) {
+                clen = 2;
+            } else if ((c0 & 0xF0u) == 0xE0u) {
+                clen = 3;
+            } else if ((c0 & 0xF8u) == 0xF0u) {
+                clen = 4;
+            }
+            if (r + 1 + clen > len) {
+                clen = 1; /* truncated sequence: literal fallback */
+            }
+            *out_start = w;
+            *out_end = w + clen;
+            memcpy(out + w, in + r + 1, clen);
+            /* Lowercase ASCII for the case-insensitive match; the
+             * underline still renders the ORIGINAL codepoint. */
+            fdk_u32 cp = mn_decode(in + r + 1, clen);
+            if (cp >= 'A' && cp <= 'Z') {
+                cp += 32u;
+            }
+            *out_letter = cp;
+            w += clen;
+            r += 1 + clen;
+            taken = true;
+            continue;
+        }
+        out[w++] = in[r++];
+    }
+    out[w] = '\0';
+    return out;
+}
+
+/* Forward declarations: the view's mnemonic Alt-fallback routes to
+ * the bar machinery, which is defined further down this file (the
+ * view code precedes the bar section). */
+typedef struct fdk_menu_bar fdk_menu_bar;
+static fdk_menu_bar *bar_of(fdk_widget *w);
+
+/* Case-insensitive mnemonic/key match (both sides lowercased ASCII;
+ * non-ASCII compares exact — the document-level rule). */
+static bool mn_key_matches(const fdk_key_event *key, fdk_u32 mnemonic) {
+    if (mnemonic == 0 || key == NULL || key->codepoint == 0) {
+        return false;
+    }
+    fdk_u32 cp = key->codepoint;
+    if (cp >= 'A' && cp <= 'Z') {
+        cp += 32u;
+    }
+    return cp == mnemonic;
+}
+
+/* Draws the mnemonic underline under text drawn at (x, baseline):
+ * the span [mn_start, mn_end) measured as two prefix advances. */
+static void mn_paint_underline(fdk_surface *s, const fdk_font *font,
+                               const char *text, fdk_u32 mnemonic,
+                               size_t mn_start, size_t mn_end,
+                               fdk_i32 x, fdk_i32 baseline, fdk_color col) {
+    if (mnemonic == 0 || font == NULL || text == NULL) {
+        return;
+    }
+    fdk_text_metrics a = {0, 0, 0};
+    fdk_text_metrics b = {0, 0, 0};
+    if (!fdk_ok(fdk_font_measure_utf8(font, text, mn_start, &a)) ||
+        !fdk_ok(fdk_font_measure_utf8(font, text, mn_end, &b))) {
+        return;
+    }
+    fdk_i32 uw = b.advance_width - a.advance_width;
+    if (uw <= 0) {
+        return;
+    }
+    /* Two pixels under the baseline reads as an underline at FDK's
+     * typical menu sizes (14-16 px fonts); one pixel can vanish
+     * against the row's background on low-contrast themes. */
+    fdk_rect u = {x + a.advance_width, baseline + 2, uw, 1};
+    fdk_surface_fill_rect(s, u, col);
+}
+
 static fdk_menu_item *menu_new_item(fdk_menu *menu, const char *text,
                                     fdk_menu_item_kind kind) {
     if (menu->count == menu->cap) {
@@ -193,7 +343,15 @@ static fdk_menu_item *menu_new_item(fdk_menu *menu, const char *text,
     if (it == NULL) {
         return NULL;
     }
-    it->text = (text != NULL) ? fdk__strdup(text) : NULL;
+    it->mnemonic = 0;
+    it->mn_start = 0;
+    it->mn_end = 0;
+    if (text != NULL) {
+        it->text = mn_strip(text, &it->mnemonic, &it->mn_start,
+                            &it->mn_end);
+    } else {
+        it->text = NULL;
+    }
     if (text != NULL && it->text == NULL) {
         fdk_free(it);
         return NULL;
@@ -279,13 +437,23 @@ fdk_result fdk_menu_item_set_text(fdk_menu_item *item, const char *text) {
     if (item == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    char *copy = (text != NULL) ? fdk__strdup(text) : NULL;
+    fdk_u32 letter = 0;
+    size_t ms = 0, me = 0;
+    char *copy = (text != NULL) ? mn_strip(text, &letter, &ms, &me)
+                                : NULL;
     if (text != NULL && copy == NULL) {
         return FDK_ERR_OUT_OF_MEMORY;
     }
     fdk_free(item->text);
     item->text = copy;
+    item->mnemonic = letter;
+    item->mn_start = ms;
+    item->mn_end = me;
     return FDK_OK;
+}
+
+fdk_u32 fdk_menu_item_get_mnemonic(fdk_menu_item *item) {
+    return (item_arg(item) != NULL) ? item_arg(item)->mnemonic : 0;
 }
 
 const char *fdk_menu_item_text(fdk_menu_item *item) {
@@ -571,6 +739,11 @@ typedef struct fdk_menu_view {
     int open_row;      /* row whose submenu is open, -1 none      */
 } fdk_menu_view;
 
+/* The view's Alt-fallback routes Alt+letter naming ANOTHER bar
+ * title while a chain is open (defined after the bar section). */
+static bool mn_view_alt_bar_fallback(fdk_menu_view *v,
+                                     const fdk_key_event *key);
+
 static fdk_menu_view *view_of(fdk_widget *w) {
     return (fdk_menu_view *)(void *)w;
 }
@@ -841,6 +1014,9 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
                 fdk__center_baseline(v->model->font, yy, rh);
             fdk__draw_text(surface, v->model->font, it->text, col,
                            text_x, baseline);
+            mn_paint_underline(surface, v->model->font, it->text,
+                               it->mnemonic, it->mn_start, it->mn_end,
+                               text_x, baseline, col);
             if (it->shortcut != NULL) {
                 fdk_i32 sw = 0;
                 fdk__text_extent(v->model->font, it->shortcut, &sw, NULL);
@@ -1052,6 +1228,46 @@ bool fdk__menu_view_handle_event(fdk_widget *w,
                 }
             }
             return true;
+        }
+        /* 1.3.6 — mnemonics: a letter press (plain, or with Alt —
+         * the classic both work; Ctrl/Super belong to accelerators)
+         * activates the FIRST enabled item in THIS menu whose
+         * mnemonic matches. First-match-wins is deterministic and
+         * documented; duplicate letters in one menu are the app's
+         * ambiguity to fix. Submenu items open their submenu, same
+         * as Enter. */
+        {
+            fdk_u32 mods = ev->key.modifiers &
+                           (FDK_MOD_CTRL | FDK_MOD_ALT | FDK_MOD_SHIFT |
+                            FDK_MOD_SUPER);
+            if ((mods & (FDK_MOD_CTRL | FDK_MOD_SUPER)) == 0 &&
+                ev->key.codepoint != 0) {
+                for (size_t mi = 0; mi < v->model->count; mi++) {
+                    fdk_menu_item *it = v->model->items[mi];
+                    if (it->kind == FDK_MIK_SEPARATOR || !it->enabled) {
+                        continue;
+                    }
+                    if (mn_key_matches(&ev->key, it->mnemonic)) {
+                        if (it->submenu != NULL && it->submenu->count > 0 &&
+                            v->session != NULL) {
+                            session_open_submenu(v->session, v, (int)mi);
+                        } else {
+                            view_activate(v, (int)mi);
+                        }
+                        return true;
+                    }
+                }
+                /* Alt+letter that misses THIS menu may name another
+                 * bar title — the classic jump-between-titles-while-
+                 * open. The popup chain holds the keyboard grab, so
+                 * the window-level mnemonic branch never sees the
+                 * key; the VIEW is the only place to route it. */
+                if ((mods & FDK_MOD_ALT) != 0 && v->session != NULL &&
+                    v->session->bar != NULL &&
+                    mn_view_alt_bar_fallback(v, &ev->key)) {
+                    return true;
+                }
+            }
         }
         if (key == FDK_KEY_RIGHT) {
             if (v->key_row >= 0) {
@@ -1456,9 +1672,13 @@ fdk_result fdk_menu_popup_at(fdk_menu *menu, fdk_widget *anchor,
  * ===================================================================== */
 
 typedef struct fdk_menu_bar_title {
-    char *title;    /* owned */
+    char *title;    /* owned; mnemonic markers stripped (1.3.6) */
     fdk_menu *menu; /* borrowed */
     fdk_rect rect;  /* bar-local layout slot */
+    /* 1.3.6 — Alt+letter opens this title's menu. */
+    fdk_u32 mnemonic;
+    size_t mn_start;
+    size_t mn_end;
 } fdk_menu_bar_title;
 
 typedef struct fdk_menu_bar {
@@ -1603,8 +1823,13 @@ static void bar_paint(fdk_widget *w, fdk_surface *surface, fdk_rect bounds,
         fdk__text_extent(b->font, b->titles[i].title, &tw, NULL);
         fdk_i32 baseline =
             fdk__center_baseline(b->font, bounds.y, bounds.height);
+        fdk_i32 tx = r.x + (r.width - tw) / 2;
         fdk__draw_text(surface, b->font, b->titles[i].title,
-                       fdk__pal_text(), r.x + (r.width - tw) / 2, baseline);
+                       fdk__pal_text(), tx, baseline);
+        mn_paint_underline(surface, b->font, b->titles[i].title,
+                           b->titles[i].mnemonic, b->titles[i].mn_start,
+                           b->titles[i].mn_end, tx, baseline,
+                           fdk__pal_text());
     }
 }
 
@@ -1958,7 +2183,9 @@ fdk_result fdk_menu_bar_append(fdk_widget *bar, const char *title,
     if (menu != NULL && !menu_attach_bar(menu, b)) {
         return FDK_ERR_OUT_OF_MEMORY;
     }
-    char *copy = fdk__strdup(title);
+    fdk_u32 letter = 0;
+    size_t ms = 0, me = 0;
+    char *copy = mn_strip(title, &letter, &ms, &me);
     if (copy == NULL) {
         if (menu != NULL) {
             menu_unattach_bar(menu, b);
@@ -1968,6 +2195,9 @@ fdk_result fdk_menu_bar_append(fdk_widget *bar, const char *title,
     b->titles[b->count].title = copy;
     b->titles[b->count].menu = menu;
     b->titles[b->count].rect = (fdk_rect){0, 0, 0, 0};
+    b->titles[b->count].mnemonic = letter;
+    b->titles[b->count].mn_start = ms;
+    b->titles[b->count].mn_end = me;
     b->count++;
     bar_layout(bar);
     fdk_widget_invalidate(bar);
@@ -2088,6 +2318,91 @@ static bool accel_scan_widget(fdk_widget *w, const fdk_key_event *key,
         }
     }
     return false;
+}
+
+/* 1.3.6 — Alt+letter with no chain open: open the first bar title
+ * whose mnemonic matches (the keyboard twin of clicking the title).
+ * Walks like the accelerator scan (tree order, first bar wins);
+ * runs no user code; the open itself is the only thing that can
+ * fail. The caller gates on the modifier state (exactly Alt, no
+ * Ctrl/Super) and the popup-exemption. */
+/* Opens bar title `t` — closing any chain already up on that bar
+ * first (a mnemonic names its title directly; switch_bar steps ±1).
+ * The close is the same path the open-title toggle takes. Returns
+ * false only when the session/open allocation failed. */
+static bool mn_bar_jump(fdk_widget *bar_w, int t) {
+    fdk_menu_bar *b = bar_of(bar_w);
+    if (b->session != NULL && b->session->active) {
+        fdk_menu_session *s = b->session;
+        b->session = NULL;
+        session_close_above(s, 0);
+    }
+    fdk_menu_session *s = session_new(bar_w);
+    if (s == NULL) {
+        return false;
+    }
+    if (!fdk__menu_bar_open_index(bar_w, s, t)) {
+        s->active = false;
+        s->bar = NULL;
+        return false;
+    }
+    return true;
+}
+
+/* The view's Alt-fallback body (defined here, after the bar
+ * section, because it reads bar fields): the popup chain holds the
+ * keyboard grab, so an Alt+letter naming ANOTHER title can only be
+ * routed from the open view. Own title is skipped (already up). */
+static bool mn_view_alt_bar_fallback(struct fdk_menu_view *v,
+                                     const fdk_key_event *key) {
+    fdk_widget *bar_w = v->session->bar;
+    fdk_menu_bar *b = bar_of(bar_w);
+    for (size_t t = 0; t < b->count; t++) {
+        if (b->titles[t].menu == NULL ||
+            b->titles[t].menu->count == 0 ||
+            b->titles[t].menu == v->model) {
+            continue; /* own title: already showing it */
+        }
+        if (mn_key_matches(key, b->titles[t].mnemonic)) {
+            (void)mn_bar_jump(bar_w, (int)t);
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool mn_open_scan(fdk_widget *w, const fdk_key_event *key,
+                         int depth) {
+    if (w == NULL || depth > MENU_ACCEL_MAX_DEPTH ||
+        (w->flags & FDK_WF_DESTROYING) != 0) {
+        return false;
+    }
+    if (w->klass == &fdk_menu_bar_class_def) {
+        fdk_menu_bar *b = bar_of(w);
+        for (size_t t = 0; t < b->count; t++) {
+            if (b->titles[t].menu == NULL ||
+                b->titles[t].menu->count == 0) {
+                continue; /* nothing to open: not a mnemonic target */
+            }
+            if (mn_key_matches(key, b->titles[t].mnemonic)) {
+                return mn_bar_jump(w, (int)t);
+            }
+        }
+    }
+    for (size_t c = 0; c < w->child_count; c++) {
+        if (mn_open_scan(w->children[c], key, depth + 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool fdk__menu_bar_mnemonic_open(fdk_widget *root,
+                                 const fdk_key_event *key) {
+    if (root == NULL || key == NULL) {
+        return false;
+    }
+    return mn_open_scan(root, key, 0);
 }
 
 bool fdk__menu_bar_accel_hit(fdk_widget *root, const fdk_key_event *key,
