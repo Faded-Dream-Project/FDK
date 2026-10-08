@@ -112,6 +112,23 @@ struct fdk_platform_connection {
      * in fdk_clipboard.h). */
     uint32_t last_input_serial;
 
+    /* --- Key repeat (1.3.5, wl_keyboard::repeat_info) -----------
+     *
+     * Wayland repeat is CLIENT-driven: the protocol hands us the
+     * rate/delay and never re-sends the press. One key repeats at a
+     * time — the LATEST press re-arms (the GTK rule); its release,
+     * keyboard_leave, or a 0 rate disarms. repeat_deadline_ms is
+     * monotonic-clock milliseconds; dispatch_pending fires ONE due
+     * repeat per call (the pump's next_wakeup_ms cap keeps the loop
+     * coming back at period speed, and a slow pump resyncs instead
+     * of bursting). rate 0 (the protocol's "repeat disabled") is a
+     * supported state, not an error. */
+    int repeat_armed;
+    uint32_t repeat_key;
+    uint32_t repeat_rate_hz;
+    int32_t repeat_delay_ms;
+    long long repeat_deadline_ms;
+
     /* --- Clipboard (Phase 9, wl_data_device) --------------------
      *
      * data_device_manager is an OPTIONAL global: without it the
@@ -475,6 +492,18 @@ void fdk_wayland_unregister_window(fdk_platform_connection *conn,
  * once compositor/shm/seat/wm_base are all bound (wayland_registry.c). */
 void fdk_wayland_bind_seat_listeners(fdk_platform_connection *conn);
 void fdk_wayland_teardown_seat(fdk_platform_connection *conn);
+
+/* Key repeat (1.3.5, wayland_seat.c): fires one due repeat (returns
+ * the count), called at every dispatch_pending exit; and the ops:
+ * the pump's wakeup cap + the test seams (see platform_internal.h). */
+int fdk_wayland_key_repeat_fire(fdk_platform_connection *conn);
+int fdk_wayland_next_wakeup_ms(fdk_platform_connection *conn,
+                               long long *out_ms_until);
+int fdk_wayland_test_key(fdk_platform_connection *conn, uint32_t key,
+                         int pressed);
+void fdk_wayland_test_repeat_info(fdk_platform_connection *conn,
+                                  int32_t rate, int32_t delay);
+int fdk_wayland_test_default_keymap(fdk_platform_connection *conn);
 
 /* Clipboard (wayland_clipboard.c). device_ready is idempotent: it
  * creates the wl_data_device once BOTH the manager global and the

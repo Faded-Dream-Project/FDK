@@ -61,12 +61,21 @@ Wayland derives from xkbcommon's depressed-modifier set.
   keycode; `x11_events.c` tracks a 256-bit per-keycode down-set and
   marks those presses `is_repeat = 1`. Widgets that follow
   hold-to-repeat (Entry's Backspace runs, window shortcuts) work.
-- **Wayland**: `wl_keyboard::repeat_info` gives rate/delay, but
-  repeat itself is CLIENT-driven — the protocol never re-sends the
-  press. FDK does not run the repeat timer yet, so
-  `is_repeat` is always 0 and holding a key fires once (honest
-  limitation; the 1.3.1 timer queue is the natural host for it when
-  it lands).
+- **Wayland** (1.3.5): `wl_keyboard::repeat_info` gives rate/delay
+  and repeat is CLIENT-driven — the protocol never re-sends the
+  press. FDK runs it: presses arm a deadline (now + delay), the
+  pump's `next_wakeup_ms` cap (the platform timer analogue of the
+  core timer queue's deadline cap) keeps the loop waking at period
+  speed, and `dispatch_pending` fires the overdue repeats — up to
+  8 per call with a resync past that, the X11 shape (the server
+  queues repeats at cadence, so a slowly-pumping app reads them in
+  batches and the delivered COUNT is preserved rather than the rate
+  silently halving). One key repeats at a time — the latest press
+  re-arms; its release, keyboard focus loss, or a 0 rate disarms;
+  each repeat re-reads the live xkb state so modifiers held or
+  released mid-hold shape the repeated codepoint exactly like the
+  X11 server's repeats. `is_repeat` reaches widgets identically on
+  both backends now.
 
 ## The shortcut layer (1.3.3)
 

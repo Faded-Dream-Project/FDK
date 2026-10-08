@@ -110,7 +110,11 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
                                    errno);
         }
         (void)fdk_wayland_release_queue_dispatch(conn);
-        return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY : dispatched;
+        /* Key repeat (1.3.5) fires AFTER the real events: a queued
+         * RELEASE of the held key must win over a synthetic repeat. */
+        int repeats = fdk_wayland_key_repeat_fire(conn);
+        return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY
+                                      : dispatched + repeats;
     }
 
     if (wl_display_flush(conn->display) < 0 && errno != EAGAIN) {
@@ -132,7 +136,15 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
     int poll_result = poll(&pfd, 1, 0); /* timeout 0: check, don't wait */
     if (poll_result <= 0) {
         wl_display_cancel_read(conn->display);
-        return 0;
+        /* No real events — but a due key repeat still fires (the
+         * idle-hold case: nothing arrives from the compositor while
+         * a key is held). The dispatch may have marshalled requests
+         * (a widget consuming the key), so flush before returning. */
+        int repeats = fdk_wayland_key_repeat_fire(conn);
+        if (repeats == 0) {
+            return 0;
+        }
+        return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY : repeats;
     }
 
     if (wl_display_read_events(conn->display) < 0) {
@@ -144,5 +156,7 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
         return connection_dead(conn, "wl_display_dispatch_pending", errno);
     }
     (void)fdk_wayland_release_queue_dispatch(conn);
-    return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY : dispatched;
+    int repeats = fdk_wayland_key_repeat_fire(conn);
+    return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY
+                                  : dispatched + repeats;
 }

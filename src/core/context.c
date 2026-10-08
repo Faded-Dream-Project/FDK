@@ -528,6 +528,23 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
                 }
             }
         }
+        /* Platform-deadline cap (1.3.5, Wayland's client-driven key
+         * repeat): the backend may hold its own timer the core queue
+         * knows nothing about; never sleep past it either — an
+         * indefinite fdk_run() with no core timers still wakes to
+         * fire platform deadlines. Backends without self-timed state
+         * leave the op NULL and pay nothing. */
+        if (ctx->ops->next_wakeup_ms != NULL) {
+            long long plat_ms = 0;
+            if (ctx->ops->next_wakeup_ms(ctx->conn, &plat_ms)) {
+                if (plat_ms < 0) {
+                    plat_ms = 0; /* already due: fire next loop head */
+                }
+                if (wait_ms < 0 || plat_ms < (long long)wait_ms) {
+                    wait_ms = (int)plat_ms;
+                }
+            }
+        }
 
         struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
         int pr = poll(&pfd, 1, wait_ms);

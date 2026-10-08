@@ -6,9 +6,35 @@
 
 #include <sys/mman.h>
 #include <unistd.h>
+#include <stdlib.h> /* free() — the keymap seam's string */
 #include <string.h>
+#include <time.h>
 
 /* ---- Keyboard ---- */
+
+/* THE keymap application, shared by the listener and the 1.3.5 test
+ * seam: compile the XKB text and swap the live state. */
+static void keyboard_keymap_apply_str(fdk_platform_connection *conn,
+                                      const char *map_str) {
+    struct xkb_keymap *new_keymap = xkb_keymap_new_from_string(
+        conn->xkb_context, map_str, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (new_keymap == NULL) {
+        FDK_ERROR("xkb_keymap_new_from_string failed");
+        return;
+    }
+
+    struct xkb_state *new_state = xkb_state_new(new_keymap);
+    if (new_state == NULL) {
+        FDK_ERROR("xkb_state_new failed");
+        xkb_keymap_unref(new_keymap);
+        return;
+    }
+
+    if (conn->xkb_state) xkb_state_unref(conn->xkb_state);
+    if (conn->xkb_keymap) xkb_keymap_unref(conn->xkb_keymap);
+    conn->xkb_keymap = new_keymap;
+    conn->xkb_state = new_state;
+}
 
 static void keyboard_keymap(void *data, struct wl_keyboard *keyboard,
                              uint32_t format, int32_t fd, uint32_t size) {
@@ -28,27 +54,9 @@ static void keyboard_keymap(void *data, struct wl_keyboard *keyboard,
         return;
     }
 
-    struct xkb_keymap *new_keymap = xkb_keymap_new_from_string(
-        conn->xkb_context, map_str, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    keyboard_keymap_apply_str(conn, map_str);
     munmap(map_str, size);
     close(fd);
-
-    if (new_keymap == NULL) {
-        FDK_ERROR("xkb_keymap_new_from_string failed");
-        return;
-    }
-
-    struct xkb_state *new_state = xkb_state_new(new_keymap);
-    if (new_state == NULL) {
-        FDK_ERROR("xkb_state_new failed");
-        xkb_keymap_unref(new_keymap);
-        return;
-    }
-
-    if (conn->xkb_state) xkb_state_unref(conn->xkb_state);
-    if (conn->xkb_keymap) xkb_keymap_unref(conn->xkb_keymap);
-    conn->xkb_keymap = new_keymap;
-    conn->xkb_state = new_state;
 }
 
 static void keyboard_enter(void *data, struct wl_keyboard *keyboard, uint32_t serial,
@@ -75,6 +83,12 @@ static void keyboard_leave(void *data, struct wl_keyboard *keyboard, uint32_t se
     (void)serial;
     (void)surface;
     fdk_platform_connection *conn = data;
+
+    /* 1.3.5: focus loss disarms the repeat — an unfocused window
+     * receives no repeats (and no repeats fire into a window that
+     * is being torn down mid-hold). Re-pressing after refocus re-arms
+     * on the real press. */
+    conn->repeat_armed = 0;
 
     if (conn->keyboard_focus != NULL) {
         fdk_event_data event = { .type = FDK_EVENT_WINDOW_FOCUS };
@@ -105,21 +119,54 @@ static fdk_u32 xkb_modifiers_to_fdk(struct xkb_state *state) {
     return mods;
 }
 
-static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t serial,
-                          uint32_t time, uint32_t key, uint32_t state) {
-    (void)keyboard;
-    (void)time;
-    fdk_platform_connection *conn = data;
+/* Monotonic milliseconds — the same clock the core timer queue
+ * uses, so repeat deadlines and timer deadlines age identically. */
+static long long seat_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000LL +
+           (long long)ts.tv_nsec / 1000000LL;
+}
+
+/* THE key event body, shared by the wl_keyboard listener and the
+ * 1.3.5 test seam (sway headless cannot deliver wl_keyboard.key —
+ * the seat never adopts a virtual keyboard's keymap). Returns 1 when
+ * the event was delivered to a focused window, 0 when the
+ * seat/keymap/focus configuration made it a no-op (the suite's skip
+ * signal).
+ *
+ * 1.3.5: presses ARM the client-driven repeat (rate > 0), re-arming
+ * on every press — one key repeats at a time, the LATEST press wins
+ * (the GTK rule); the armed key's release disarms. Arming happens
+ * even for undelivered presses (the physical key is down; a later
+ * focus gain will repeat it — keyboard_leave below is what disarms
+ * on unfocus). */
+static int seat_key_event(fdk_platform_connection *conn, uint32_t serial,
+                          uint32_t key, uint32_t state) {
     /* Phase 9: like pointer_button below, keys cite serials the
      * compositor validates — wl_data_device.set_selection may cite
      * the newest of either. */
     conn->last_input_serial = serial;
 
+    if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        if (conn->repeat_rate_hz > 0) {
+            conn->repeat_armed = 1;
+            conn->repeat_key = key;
+            conn->repeat_deadline_ms =
+                seat_now_ms() + (long long)conn->repeat_delay_ms;
+        } else {
+            conn->repeat_armed = 0; /* rate 0: the protocol disabled it */
+        }
+    } else if (conn->repeat_armed && conn->repeat_key == key) {
+        conn->repeat_armed = 0;
+    }
+
     if (conn->keyboard_focus == NULL || conn->xkb_state == NULL) {
-        return; /* no focused window or no keymap yet; nothing to report */
+        return 0; /* no focused window or no keymap yet; nothing to report */
     }
 
     fdk_event_data event;
+    memset(&event, 0, sizeof(event));
     event.type = (state == WL_KEYBOARD_KEY_STATE_PRESSED) ? FDK_EVENT_KEY_DOWN : FDK_EVENT_KEY_UP;
     /* wl_keyboard reports evdev keycodes directly — no +8 offset the
      * way X11 needs (see x11_events.c's x11_keycode_to_scancode
@@ -128,10 +175,9 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t seri
      * via different arithmetic. */
     event.key.scancode = key;
     event.key.modifiers = xkb_modifiers_to_fdk(conn->xkb_state);
-    event.key.is_repeat = 0; /* Wayland key-repeat is a client-driven
-                                 timer off wl_keyboard::repeat_info,
-                                 not implemented in Phase 2 — see
-                                 docs/platform-input.md */
+    event.key.is_repeat = 0; /* real presses are never repeats; the
+                                client-driven ones come from
+                                fdk_wayland_key_repeat_fire */
 
     if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         xkb_keysym_t keysym = xkb_state_key_get_one_sym(conn->xkb_state, key + 8);
@@ -142,6 +188,123 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t seri
     }
 
     conn->dispatch(conn->keyboard_focus, &event, conn->dispatch_user_data);
+    return 1;
+}
+
+static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t serial,
+                          uint32_t time, uint32_t key, uint32_t state) {
+    (void)keyboard;
+    (void)time;
+    (void)seat_key_event(data, serial, key, state);
+}
+
+/* ---- key repeat (1.3.5) ----
+ *
+ * Fires every overdue repeat, up to a small cap per call — the X11
+ * shape: the server queues repeats at cadence and an app pumping
+ * slowly reads them in BATCHES, so the delivered COUNT is preserved
+ * regardless of pump granularity (a 50 Hz hold under pump(80) sees
+ * bursts of ~4, not a silently halved rate). The cap (8) bounds a
+ * stall's catch-up burst; anything still overdue after it RESYNCS —
+ * a window that was frozen for seconds must not deliver a key
+ * storm. Each repeat re-reads the CURRENT xkb state — modifiers
+ * held or released mid-hold shape the repeated codepoint exactly
+ * as the X11 server's repeats do. */
+int fdk_wayland_key_repeat_fire(fdk_platform_connection *conn) {
+    if (!conn->repeat_armed || conn->keyboard_focus == NULL ||
+        conn->xkb_state == NULL) {
+        return 0;
+    }
+    long long now = seat_now_ms();
+    if (now < conn->repeat_deadline_ms) {
+        return 0;
+    }
+    long long period =
+        (conn->repeat_rate_hz > 0)
+            ? 1000LL / (long long)conn->repeat_rate_hz
+            : 0;
+    if (period < 1) {
+        period = 1; /* rate 1 Hz => 1000 ms; never a 0 period spin */
+    }
+
+    int fired = 0;
+    while (conn->repeat_deadline_ms <= now && fired < 8) {
+        fdk_event_data event;
+        memset(&event, 0, sizeof(event));
+        event.type = FDK_EVENT_KEY_DOWN;
+        event.key.scancode = conn->repeat_key;
+        event.key.modifiers = xkb_modifiers_to_fdk(conn->xkb_state);
+        event.key.is_repeat = 1;
+        xkb_keysym_t keysym = xkb_state_key_get_one_sym(
+            conn->xkb_state, conn->repeat_key + 8);
+        event.key.codepoint = xkb_keysym_to_utf32(keysym);
+
+        conn->dispatch(conn->keyboard_focus, &event,
+                       conn->dispatch_user_data);
+        conn->repeat_deadline_ms += period;
+        fired++;
+    }
+    if (conn->repeat_deadline_ms <= now) {
+        /* Still overdue after the cap: the pump was stalled long
+         * enough that honest catch-up would be a storm — resync. */
+        conn->repeat_deadline_ms = now + period;
+    }
+    return fired;
+}
+
+/* The pump's wakeup cap (see platform_internal.h): never sleep past
+ * the next repeat deadline. */
+int fdk_wayland_next_wakeup_ms(fdk_platform_connection *conn,
+                               long long *out_ms_until) {
+    if (!conn->repeat_armed) {
+        return 0;
+    }
+    *out_ms_until = conn->repeat_deadline_ms - seat_now_ms();
+    return 1;
+}
+
+static void keyboard_repeat_info_store(fdk_platform_connection *conn,
+                                        int32_t rate, int32_t delay);
+
+/* Test seams (1.3.5) — the REAL listener bodies; see
+ * platform_internal.h for why they exist. */
+int fdk_wayland_test_key(fdk_platform_connection *conn, uint32_t key,
+                         int pressed) {
+    return seat_key_event(conn, conn->last_input_serial, key,
+                          pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+                                  : WL_KEYBOARD_KEY_STATE_RELEASED);
+}
+
+void fdk_wayland_test_repeat_info(fdk_platform_connection *conn,
+                                  int32_t rate, int32_t delay) {
+    keyboard_repeat_info_store(conn, rate, delay);
+}
+
+/* Test seam: install the standard default keymap (rules evdev,
+ * model pc105, layout us — what a compositor with a REAL keyboard
+ * sends every client). sway headless's wlr virtual keyboard grants
+ * the seat KEYBOARD capability but serves clients an EMPTY keymap
+ * (size 0 — no keyboard device carries one), which leaves
+ * xkb_state NULL and the key listener bodies unreachable. The seam
+ * compiles the default through the same apply path the protocol
+ * event takes. Returns 1 when a live xkb_state exists afterwards. */
+int fdk_wayland_test_default_keymap(fdk_platform_connection *conn) {
+    if (conn->xkb_context == NULL) {
+        return 0;
+    }
+    struct xkb_rule_names names = {0}; /* all defaults */
+    struct xkb_keymap *km = xkb_keymap_new_from_names(
+        conn->xkb_context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (km == NULL) {
+        return 0;
+    }
+    char *text = xkb_keymap_get_as_string(km, XKB_KEYMAP_FORMAT_TEXT_V1);
+    if (text != NULL) {
+        keyboard_keymap_apply_str(conn, text);
+        free(text);
+    }
+    xkb_keymap_unref(km);
+    return conn->xkb_state != NULL ? 1 : 0;
 }
 
 static void keyboard_modifiers(void *data, struct wl_keyboard *keyboard, uint32_t serial,
@@ -157,14 +320,25 @@ static void keyboard_modifiers(void *data, struct wl_keyboard *keyboard, uint32_
                            0, 0, group);
 }
 
+/* THE repeat_info body, shared by the listener and the test seam.
+ * rate is keys per second (0 = the protocol's "repeat disabled"),
+ * delay the initial wait in milliseconds. Negative values are
+ * protocol violations; they clamp to the disabled/zero state rather
+ * than arming nonsense. Compositors re-send this when the user
+ * changes their keyboard settings — the live values always win. */
+static void keyboard_repeat_info_store(fdk_platform_connection *conn,
+                                        int32_t rate, int32_t delay) {
+    conn->repeat_rate_hz = (rate > 0) ? (uint32_t)rate : 0;
+    conn->repeat_delay_ms = (delay > 0) ? delay : 0;
+    if (conn->repeat_rate_hz == 0) {
+        conn->repeat_armed = 0; /* newly disabled: stop mid-hold too */
+    }
+}
+
 static void keyboard_repeat_info(void *data, struct wl_keyboard *keyboard,
                                   int32_t rate, int32_t delay) {
-    (void)data;
     (void)keyboard;
-    (void)rate;
-    (void)delay;
-    /* See keyboard_key()'s is_repeat comment — repeat timer not
-     * implemented in Phase 2, so this info isn't acted on yet. */
+    keyboard_repeat_info_store(data, rate, delay);
 }
 
 static const struct wl_keyboard_listener g_keyboard_listener = {

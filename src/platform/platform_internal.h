@@ -125,6 +125,46 @@ typedef struct fdk_platform_ops {
      * see fdk_run()'s handling in src/core/context.c). */
     int (*dispatch_pending)(fdk_platform_connection *conn);
 
+    /* OPTIONAL (1.3.5): the backend's own next timer deadline, in
+     * monotonic milliseconds from NOW — the one piece of timing the
+     * core timer queue cannot know about (Wayland's client-driven
+     * key repeat). Returns 1 with *out_ms_until set when a deadline
+     * exists (values <= 0 mean "due now"), 0 when the backend holds
+     * no pending timing of its own. The pump caps its poll() wait
+     * with this exactly like timers_next_deadline(), so an
+     * indefinite fdk_run() still wakes to fire platform deadlines.
+     * Backends without self-timed state (X11: repeat is
+     * server-side) leave it NULL. */
+    int (*next_wakeup_ms)(fdk_platform_connection *conn,
+                          long long *out_ms_until);
+
+    /* ---- OPTIONAL test seams (1.3.5) ----
+     *
+     * Production code NEVER calls these. sway headless cannot
+     * deliver wl_keyboard.key to clients at all (the seat never
+     * adopts a virtual keyboard's keymap — protocol-traced in
+     * 1.3.3), which leaves the Wayland keyboard listener bodies
+     * unreachable from the integration rig. These two hooks run
+     * those REAL listener bodies (key press/release with the full
+     * key-repeat arm/disarm discipline, and repeat_info rate/delay
+     * updates) against the live connection, so the suite can drive
+     * the state machine end-to-end without a hardware keyboard.
+     * test_key returns 1 when the event was deliverable (keyboard
+     * focus + keymap present), 0 when the seat-less/compositor
+     * configuration makes it a no-op — the suite's skip signal.
+     * Only the Wayland backend implements them; X11 covers key
+     * delivery with XSendEvent against a real display. */
+    int (*test_key)(fdk_platform_connection *conn, uint32_t key,
+                    int pressed);
+    void (*test_repeat_info)(fdk_platform_connection *conn,
+                             int32_t rate, int32_t delay);
+    /* Installs the standard default keymap through the same apply
+     * path the wl_keyboard::keymap event takes — the empty keymap
+     * sway headless's virtual keyboard serves leaves xkb_state NULL
+     * and the listener bodies unreachable. Returns 1 when a live
+     * xkb_state exists afterwards (the suite's go signal). */
+    int (*test_default_keymap)(fdk_platform_connection *conn);
+
     /* --- Window operations --- */
 
     /* Creates a window. `parent` is NULL for top-levels; for popup

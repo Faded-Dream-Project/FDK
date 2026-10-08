@@ -1168,3 +1168,34 @@ BEFORE spawning the reader (a set that never happened is a serial
 problem, not a read problem), and treats the no-device WARN as a
 clean skip so the same rig runs on protocol-less compositors
 without weakening sway's assertions.
+
+## 1.3.5 — testing a timer without a keyboard
+
+The key-repeat test could not be driven the way the X11 suite
+drives its key paths (XSendEvent): sway headless cannot deliver
+wl_keyboard.key AT ALL, and this session's protocol traces found
+two more layers under that — the wlr virtual keyboard gives the
+seat KEYBOARD capability but serves clients an EMPTY keymap
+(size 0 -> xkb_state stays NULL -> the listener bodies are
+unreachable even if a key arrived), and loading a keymap onto the
+virtual keyboard kills the device outright (capabilities 3 -> 2 ->
+0). The lesson generalized: when the platform's input path is
+unreachable from the rig, drive the REAL listener bodies through
+a test seam at the platform layer — not a mock of them, the
+actual functions, against the actual live connection. The seams
+(test_key / test_repeat_info / test_default_keymap in the ops
+table, production code never calls them) cost three lines in
+wayland_ops.c and buy the entire keyboard state machine as
+testable surface.
+
+Two timing lessons, both pinned by assertions that would catch
+their regressions: sway/pixman headless takes ~1.5-2 s from window
+map to wl_keyboard.enter (the tooltip rig's slow-frame lesson,
+reapplied — a focus probe must outlast it or the test silently
+skips what it meant to test), and a repeat-rate test's pump budget
+must be derived from the DELIVERY model: each pump call fires its
+due batch and returns, so the count survives pump granularity but
+the test window must still cover delay + N periods with margin
+(40x50 ms for a 200 ms delay at 50 Hz lands at 37 repeats —
+asserted 20..70, so neither a missing wakeup cap nor a missing
+delay can slip through).

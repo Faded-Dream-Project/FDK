@@ -3267,3 +3267,63 @@ obj-pic entry. The death rig is the only rig that exercises an
 example's return-from-main under leak checking (every other rig
 kills its apps, which never runs exit handlers), which is exactly
 why it was the one that caught this.
+
+### 1.3.5 — Wayland key repeat (the last honest input gap)
+
+docs/platform-input.md carried this line since 1.3.3: "FDK does not
+run the repeat timer yet, so is_repeat is always 0 and holding a
+key fires once." On X11 the server does repeat for free; on Wayland
+the protocol hands the client rate/delay via
+wl_keyboard::repeat_info and never re-sends the press — client
+repeat is the toolkit's job. It is now done, and the honest-gap
+paragraph became the implementation contract.
+
+THE MECHANICS. Presses arm a deadline (now + delay, monotonic ms —
+the same clock the core timer queue uses); the release of the armed
+key, keyboard focus loss, or a rate of 0 (the protocol's
+repeat-disabled state, honored mid-hold too) disarms; the LATEST
+press re-arms (one key repeats at a time — the GTK rule).
+dispatch_pending fires the overdue repeats at every exit — after
+the real events, so a queued RELEASE of the held key always wins
+over a synthetic repeat — and each repeat re-reads the live xkb
+state: modifiers held or released mid-hold shape the repeated
+codepoint exactly like the X11 server's repeats do.
+
+TWO DESIGN DECISIONS worth their ink. First, the pump had to LEARN
+about the platform's deadline: the core timer queue caps the poll()
+wait with timers_next_deadline, but a Wayland repeat deadline lives
+in the platform layer the queue cannot see — an indefinite
+fdk_run() with no core timers would sleep through every repeat. The
+new optional op next_wakeup_ms(conn, &ms_until) is the platform's
+timer-deadline analogue, consulted by the pump exactly like the
+core cap (NULL on X11, which keeps its server-side repeat). Second,
+the fire loop delivers ALL overdue repeats per call, capped at 8
+with a resync past that — the X11 shape: the server queues repeats
+at cadence and a slowly-pumping app reads them in batches, so the
+delivered COUNT is preserved rather than the rate silently halving
+(a 50 Hz hold under pump(80) sees bursts of ~4). A window frozen
+for seconds resyncs instead of storming.
+
+THE TEST SEAM DISCOVERY. End-to-end repeat testing hit the same
+wall 1.3.3 documented: sway headless cannot deliver wl_keyboard.key
+to clients at all — and this session's protocol traces deepened
+the finding: the wlr virtual keyboard grants the seat KEYBOARD
+capability but serves clients an EMPTY keymap (size 0, which leaves
+xkb_state NULL and the key listener bodies unreachable), and
+loading a keymap onto the virtual keyboard KILLS the device
+(capabilities collapse 3 -> 2 -> 0). The fix is three test-seam ops
+(production code never calls them): test_key /
+test_repeat_info drive the REAL listener bodies against the live
+connection, and test_default_keymap installs the standard default
+keymap (what a compositor with a real keyboard sends) through the
+same apply path the protocol event takes. The suite then pins the
+whole machine through the REAL pump: 50 Hz after the 200 ms delay
+(37 repeats, first at exactly 200 ms), release disarm, rate-0
+disabled — with the focus probe honest enough to skip on compositors
+without a usable seat (and patient enough to outlast sway/pixman's
+~1.8 s map-to-focus latency, the tooltip rig's slow-frame lesson
+reapplied).
+
+Docs: platform-input.md's Wayland repeat paragraph rewritten from
+the honest gap to the implemented contract (both backends now reach
+widgets with identical is_repeat semantics).

@@ -41,6 +41,10 @@
  * through the sanctioned ops wrapper — the Wayland platform header
  * itself never leaves src/platform/wayland/. */
 #include "window/window_internal.h"
+/* 1.3.5: the key-repeat section drives the platform's keyboard
+ * listener state machine through the ops test seams (see
+ * platform_internal.h) — same internal-seam discipline. */
+#include "core/context_internal.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -52,6 +56,35 @@
 
 static fdk_dialog_response g_wayland_dlg_last =
     (fdk_dialog_response)-99;
+
+/* 1.3.5 key-repeat counters (the repeat section's window callback). */
+static int g_rep_downs = 0;
+static int g_rep_repeats = 0;
+static long long g_rep_first_ms = 0;
+static long long g_rep_press_ms = 0;
+
+static long long rep_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000LL +
+           (long long)ts.tv_nsec / 1000000LL;
+}
+
+static void rep_window_cb(fdk_window *w, const fdk_event_data *ev,
+                          void *user) {
+    (void)w;
+    (void)user;
+    if (ev->type == FDK_EVENT_KEY_DOWN) {
+        if (ev->key.is_repeat) {
+            g_rep_repeats++;
+            if (g_rep_first_ms == 0) {
+                g_rep_first_ms = rep_now_ms();
+            }
+        } else {
+            g_rep_downs++;
+        }
+    }
+}
 
 static void wayland_dialog_response_cb(fdk_dialog_response response,
                                        void *user) {
@@ -755,6 +788,158 @@ int main(void) {
             assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "")));
             assert(fdk_clipboard_get_primary_text(ctx) == NULL);
             printf("[ok] primary: empty own-selection reads as NULL\n");
+        }
+    }
+
+    /* ---- Key repeat (1.3.5) ----
+     *
+     * Wayland repeat is CLIENT-driven off wl_keyboard::repeat_info —
+     * this is the machinery the X11 backend gets from the server for
+     * free. sway headless cannot deliver wl_keyboard.key at all (the
+     * seat never adopts a virtual keyboard's keymap — protocol-traced
+     * in 1.3.3), so the suite drives the REAL listener bodies through
+     * the ops test seams: press arms (after the delay), the pump's
+     * next_wakeup cap keeps the loop waking at period speed,
+     * dispatch_pending fires the repeats, the release disarms, and
+     * rate 0 is the protocol's disabled state. The timings assert
+     * generously (a shared headless box jitters) but tightly enough
+     * that a missing wakeup cap (repeats only firing on unrelated
+     * events) or a missing delay (immediate burst) both fail. */
+    {
+        if (ctx->ops->test_key == NULL) {
+            printf("[skip] key repeat: library built without the "
+                   "Wayland test seams\n");
+        } else {
+            fdk_window *rw = NULL;
+            fdk_window_options rwopts = { .title = "FDK key repeat",
+                                          .width = 300, .height = 150 };
+            assert(fdk_ok(fdk_window_create(ctx, &rwopts, &rw)));
+            fdk__window_set_auto_paint(rw, true);
+            fdk_window_set_event_callback(rw, rep_window_cb, NULL);
+            fdk_window_show(rw);
+            for (int i = 0; i < 10; i++) {
+                (void)fdk_pump_events(ctx, 50);
+            }
+
+            /* Focus probe FIRST: sway headless DOES auto-focus a
+             * freshly mapped floating window when the seat has
+             * keyboard capability (the probe rig proved the enter
+             * arrives ~1s after map) — but only when the seat has
+             * input devices at all. The wlr virtual devices come from
+             * whatever injector is alive (the interop rig keeps one
+             * for its whole run; a bare run has none and the seat
+             * reports capabilities(0)). Starting ANOTHER injector
+             * here is the fallback, not the first move: a second
+             * virtual keyboard on the seat churns the keyboard
+             * device (sway re-evaluates focus), which can cost the
+             * focus the window already had. */
+            /* sway headless's virtual keyboard grants the seat
+             * KEYBOARD capability but serves clients an EMPTY
+             * keymap (size 0), leaving xkb_state NULL — install the
+             * standard default (what a compositor with a real
+             * keyboard sends) through the seam first. */
+            if (!ctx->ops->test_default_keymap(ctx->conn)) {
+                printf("[skip] key repeat: no keymap installable "
+                       "(no xkb context?)\n");
+                fdk_window_destroy(rw);
+            } else {
+            int delivered = 0;
+            /* sway/pixman headless takes ~1.5-2 s from map to
+             * wl_keyboard.enter (the same slow frame pacing the
+             * tooltip rig documented) — the probe must outlast it. */
+            for (int i = 0; i < 35 && delivered == 0; i++) {
+                (void)fdk_pump_events(ctx, 100);
+                delivered = ctx->ops->test_key(ctx->conn, 30, 1);
+                if (delivered) {
+                    ctx->ops->test_key(ctx->conn, 30, 0); /* release the
+                                                            probe press */
+                }
+            }
+            if (delivered == 0 && wayland_injector_start()) {
+                /* The tap fallback (same discipline as the menu
+                 * section: a real click with a real serial). The
+                 * window floats at (100,60) per the rig configs;
+                 * 300x150 -> center (250,135). */
+                wayland_inject("move 250 135");
+                pump_and_paint(ctx, rw, 400);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, rw, 1200);
+                delivered = ctx->ops->test_key(ctx->conn, 30, 1);
+                if (delivered == 0) {
+                    ctx->ops->test_key(ctx->conn, 30, 0);
+                }
+            }
+
+            g_rep_downs = 0;
+            g_rep_repeats = 0;
+            g_rep_first_ms = 0;
+
+            /* 50 Hz, 200 ms delay — fast enough to be decisive in
+             * a second, slow enough to be distinguishable from a
+             * busy-spin. */
+            ctx->ops->test_repeat_info(ctx->conn, 50, 200);
+            g_rep_press_ms = rep_now_ms();
+            if (delivered) {
+                /* the press that starts the held key */
+                delivered = ctx->ops->test_key(ctx->conn, 30, 1);
+            }
+            if (delivered == 0) {
+                printf("[skip] key repeat: no keyboard focus/keymap "
+                       "on this compositor (seat-less kiosk-shell, or "
+                       "no injector to tap-focus under headless "
+                       "sway?)\n");
+                ctx->ops->test_key(ctx->conn, 30, 0);
+            } else {
+                assert(g_rep_downs == 1);
+                assert(g_rep_repeats == 0); /* the delay has not passed */
+
+                /* Pump ~2 s in pump-sized chunks: repeats must arrive
+                 * WITHOUT any compositor event to wake the loop (the
+                 * next_wakeup cap is exactly what is under test).
+                 * 40x50 ms outlasts the 200 ms delay with a wide
+                 * margin — each pump call fires its due batch and
+                 * returns, so the count is pump-granularity-proof
+                 * (the catch-up design preserves it). */
+                for (int i = 0; i < 40; i++) {
+                    (void)fdk_pump_events(ctx, 50);
+                }
+                assert(g_rep_repeats >= 20);
+                assert(g_rep_repeats <= 70);
+                long long first_after =
+                    g_rep_first_ms - g_rep_press_ms;
+                assert(first_after >= 150);
+                assert(first_after <= 600);
+                printf("[ok] key repeat: 50 Hz after a 200 ms delay "
+                       "(%d repeats, first at %lld ms)\n",
+                       g_rep_repeats, first_after);
+
+                /* Release disarms. */
+                ctx->ops->test_key(ctx->conn, 30, 0);
+                int held = g_rep_repeats;
+                for (int i = 0; i < 5; i++) {
+                    (void)fdk_pump_events(ctx, 60);
+                }
+                assert(g_rep_repeats == held);
+                printf("[ok] key repeat: release disarms (no repeats "
+                       "after keyup)\n");
+
+                /* rate 0 is the protocol's repeat-disabled state. */
+                ctx->ops->test_repeat_info(ctx->conn, 0, 200);
+                ctx->ops->test_key(ctx->conn, 30, 1);
+                held = g_rep_repeats;
+                for (int i = 0; i < 5; i++) {
+                    (void)fdk_pump_events(ctx, 60);
+                }
+                assert(g_rep_repeats == held);
+                ctx->ops->test_key(ctx->conn, 30, 0);
+                printf("[ok] key repeat: rate 0 disables (the "
+                       "protocol contract)\n");
+            }
+            if (g_injector != NULL) {
+                wayland_injector_stop();
+            }
+            fdk_window_destroy(rw);
+            }
         }
     }
 
