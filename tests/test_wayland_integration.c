@@ -713,6 +713,51 @@ int main(void) {
         }
     }
 
+    /* ---- PRIMARY selection (1.3.4) ----
+     *
+     * The classic Unix "current selection" buffer over
+     * wp_primary_selection_unstable_v1: own-source round trip +
+     * replace + empty-as-NULL, and INDEPENDENCE from the CLIPBOARD.
+     * Compositors without the protocol (weston) honestly report
+     * FDK_ERR_UNSUPPORTED — that's the skip below, not a failure.
+     * Cross-client primary transfers ride the interop rig
+     * (run_wayland_clip_interop.sh's primary direction): same
+     * serial discipline as the clipboard, same focus push. */
+    {
+        fdk_result pr = fdk_clipboard_set_primary_text(ctx, "wayland primary");
+        if (pr == FDK_ERR_UNSUPPORTED) {
+            printf("[skip] primary: compositor without the "
+                   "primary-selection protocol\n");
+        } else {
+            assert(fdk_ok(pr));
+            char *text = fdk_clipboard_get_primary_text(ctx);
+            assert(text != NULL && strcmp(text, "wayland primary") == 0);
+            printf("[ok] primary: set + get round trip on own selection\n");
+
+            assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "re-owned")));
+            char *text2 = fdk_clipboard_get_primary_text(ctx);
+            assert(text2 != NULL && strcmp(text2, "re-owned") == 0);
+            free(text);
+            free(text2);
+            printf("[ok] primary: replace semantics\n");
+
+            /* Independence: the two selections never cross. */
+            assert(fdk_ok(fdk_clipboard_set_text(ctx, "the clipboard")));
+            assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "the primary")));
+            char *c = fdk_clipboard_get_text(ctx);
+            char *p = fdk_clipboard_get_primary_text(ctx);
+            assert(c != NULL && strcmp(c, "the clipboard") == 0);
+            assert(p != NULL && strcmp(p, "the primary") == 0);
+            free(c);
+            free(p);
+            printf("[ok] primary: CLIPBOARD and PRIMARY stay independent\n");
+
+            assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "")));
+            assert(fdk_clipboard_get_primary_text(ctx) == NULL);
+            printf("[ok] primary: empty own-selection reads as NULL\n");
+        }
+    }
+
 
     /* ---- Menus / dialogs (Phase 9 completion) ----
      *

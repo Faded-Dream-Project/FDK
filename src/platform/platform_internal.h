@@ -336,6 +336,31 @@ typedef struct fdk_platform_ops {
                                      const char *text);
     char *(*clipboard_get_text)(fdk_platform_connection *conn);
 
+    /* ---- OPTIONAL PRIMARY selection operations (1.3.4) ----
+     *
+     * The classic Unix "current selection" buffer distinct from the
+     * copy/paste CLIPBOARD: text becomes PRIMARY by being SELECTED
+     * (the toolkit owns it automatically when an Entry selection
+     * changes), and middle-click pastes it. Semantics per backend:
+     *
+     *   X11: the ICCCM XA_PRIMARY selection — real ownership,
+     *   serving, and reading through the same machinery as
+     *   CLIPBOARD. Sets are BEST-EFFORT (no verification
+     *   round-trip: the classic model re-owns on every selection
+     *   change).
+     *
+     *   Wayland: the wp_primary_selection_unstable_v1 protocol
+     *   where the compositor offers it (sway and wlroots compositors
+     *   do); compositors without it leave the op NULL ->
+     *   FDK_ERR_UNSUPPORTED / NULL.
+     *
+     * clipboard_set_primary_text follows clipboard_set_text's copy
+     * and replacement semantics. clipboard_get_primary_text follows
+     * clipboard_get_text's ownership and NULL-when-empty semantics. */
+    fdk_result (*clipboard_set_primary_text)(
+        fdk_platform_connection *conn, const char *text);
+    char *(*clipboard_get_primary_text)(fdk_platform_connection *conn);
+
     /* ---- OPTIONAL popup/dialog grab operations (Phase 9
      * completion — the menu machinery) ----
      *

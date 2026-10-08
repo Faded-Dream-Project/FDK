@@ -156,3 +156,42 @@ needed:
 
     wayland-scanner client-header < xdg-decoration-unstable-v1.xml         > src/platform/wayland/generated/xdg-decoration-unstable-v1-client-protocol.h
     wayland-scanner private-code < xdg-decoration-unstable-v1.xml         > src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c
+
+## Why debug and release share object *paths* but never objects (the config stamp)
+
+The same class of bug as the obj/obj-pic split above, found live in
+1.3.4: `make release && make` used to produce a silently MIXED
+binary. The old `release:` target was a target-specific
+`CFLAGS := ... -O2 -DNDEBUG` override over the same `build/obj/`
+paths — and make's up-to-date check compares timestamps only, so the
+release objects (freshly written, newer than every source) looked
+"up to date" to the next plain `make`, which then linked them into
+binaries compiled with `-fsanitize=address`. The observable was
+subtle and nasty: LeakSanitizer reported fontconfig's
+process-lifetime allocations as leaks in the compositor-death rig
+(not because anything leaked — because the `__lsan_disable` bracket
+in `src/text/fontscan.c` compiles to NOTHING without the sanitizer,
+so the release objects never marked those allocations as ignored),
+and LSan's exit path (`_exit(23)` on report) also swallowed the
+example's buffered "exited cleanly" line, failing the rig on a
+build-state artifact.
+
+The fix is the configuration stamp: `make release` re-invokes make
+with `FDK_CONFIG=release`, every object depends on
+`build/.config-<mode>`, and the stamp rule rewrites itself (making
+it newer than every object, forcing a full rebuild) only when the
+configuration actually changed. Same-config builds keep normal
+incremental behavior — the stamp rule runs on every invocation but
+is a no-op unless the mode name differs, so its mtime only moves on
+a real switch. The stamps live under `build/` and vanish with
+`make clean`.
+
+Two practical consequences worth knowing: switching configurations
+costs one full rebuild (correct, not a regression — the alternative
+is linking the wrong objects), and "the binary in `build/` is
+whatever I last asked for" is now actually true. If you need both
+configurations side by side, build one, copy the artifact out, and
+build the other; the project deliberately has one active
+configuration per tree rather than two build directories, because
+every rig script addresses `build/tests/...` and `build/examples/...`
+by path.

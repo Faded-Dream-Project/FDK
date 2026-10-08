@@ -3150,3 +3150,120 @@ bar, Entry undo/redo over real key events, and the Ctrl+Q
 destroy-mid-dispatch survival). Examples: 07's menu shortcuts are
 live now and F1 opens About via the app-registered half;
 09's typing playground narrates undo/redo availability live.
+
+### 1.3.4 — the PRIMARY selection (the classic Unix selection buffer)
+
+The 1.3.3 audit's shortlist named it: FDK's clipboard was
+CLIPBOARD-only, on both backends — the PRIMARY selection (the
+"whatever is selected" buffer that middle-click pastes, the
+second half of the Unix text-transfer model since roughly 1988)
+simply did not exist. X11 served the real XA_PRIMARY machinery for
+it; Wayland clients lost the feature entirely until
+wp_primary_selection_unstable_v1 (which the wlroots family ships
+and GNOME/Weston skip). Both halves shipped here, plus the widget
+integration that makes it feel like Unix.
+
+ONE MACHINERY, TWO SELECTIONS (X11). The ICCCM paths for CLIPBOARD
+and PRIMARY are structurally identical — own on the helper window,
+serve SelectionRequests, lose on SelectionClear, convert-with-
+fallback on read — so x11_clipboard.c gained a three-field
+descriptor (atom, owned-text slot, log name) and every function
+took it as a parameter. The two differ in exactly ONE behavior
+each, both documented where they live: PRIMARY sets are FIRE-AND-
+FORGET (no XGetSelectionOwner verification round-trip — the
+classic model re-owns on every selection change, and a round-trip
+per drag-motion would be absurd; CLIPBOARD keeps its verified set
+contract), and the SelectionClear handler resolves the queued-
+clear-vs-reacquire race by asking the server who owns it NOW —
+for whichever selection the clear names, so a PRIMARY loss can
+never free the CLIPBOARD copy and vice versa (pinned by the
+isolation test). Unknown-selection requests on the shared helper
+are refused per the ICCCM (property None), which also future-
+proofs the discriminator.
+
+THE WAYLAND HALF mirrors the data-device clipboard shape for shape
+— manager global (OPTIONAL, bound at v1; absent compositors leave
+the device NULL and the ops honestly return FDK_ERR_UNSUPPORTED
+rather than faking a local buffer), device from manager + seat
+(the convergence hook now creates BOTH devices independently — a
+compositor may offer one protocol without the other), source with
+the same two text offers, offer with the same MIME flag
+discipline, the same pipe receive, the same single-use-offer
+teardown. The 1.2.4 echo lesson is baked in from the start: the
+::selection handler never touches our source (wlroots echoes the
+freshly-set selection back to the keyboard-focused setter), and
+::cancelled is the only replacement signal, epoch-checked before
+freeing. The protocol's own fine print — the offer is "valid until
+the client loses keyboard focus" — means a NULL selection event is
+ROUTINE here (not an emptied selection), and the handler documents
+it.
+
+THE WIDGET LAYER is where the classic model actually lives.
+entry_set_selection — THE selection mutation every caller routes
+through — now syncs PRIMARY on every real endpoint change:
+non-empty selection pushes the selected text (best-effort, no
+round-trip, exactly the xterm/GTK behavior of re-owning at pointer
+rate during drags); a collapse AFTER a push empties it; a collapse
+from never-pushed does NOTHING. That last rule is the politeness
+contract: an FDK app whose entries start empty must not steal the
+user's xterm PRIMARY at startup — ownership is taken by SELECTION
+GESTURES, not by existing (the entry tracks primary_pushed to know
+which side of the line it is on; headless/standalone trees never
+set it). Two deliberate omissions, both documented in the header
+and both the xterm property: edits and pastes do NOT re-sync
+(splice collapses the selection as a side effect — PRIMARY
+surviving a paste is what makes repeated middle-click pastes
+work), and middle-click paste is a pure INSERT at the click
+position (the existing selection is not replaced — xterm
+semantics, not GTK's replace-on-overlap school). The paste itself
+reads BEFORE moving the caret: if this entry owns PRIMARY, its own
+collapse-in-entry_set_selection would empty the buffer before the
+read — classic self-paste (select, middle-click elsewhere in the
+same field) depends on the ordering, which the test pins. Read-only
+entries refuse the paste (the reader contract); disabled entries
+never touch the buffer at all.
+
+TESTS, at every layer the feature has. Headless: the
+argument-safety guards (test_clipboard.c grew the PRIMARY twins).
+X11 integration: two full groups — the selection-level six (round
+trip, replace, empty-as-NULL, CLIPBOARD/PRIMARY independence, a
+foreign XA_PRIMARY owner serving FDK's get through the real
+SelectionRequest/Notify path, FDK serving a foreign PRIMARY
+requestor, SelectionClear isolation with the CLIPBOARD copy
+surviving, multi-byte UTF-8 round trips) and the entry-level seven
+(typing without a selection never grabs PRIMARY — the politeness
+contract against a live foreign owner; Ctrl+A auto-owns; middle-
+click self-paste; middle-click pasting a FRESH foreign owner's
+text cross-process; collapse empties; read-only refuses; all over
+REAL XSendEvent keys and buttons through a real window). Wayland:
+the suite's PRIMARY section (own-selection round trip, replace,
+independence, empty-as-NULL, with an honest UNSUPPORTED skip for
+protocol-less compositors) and the interop rig's two PRIMARY
+directions — pholder taps (mints the serial), sets primary; the
+preader maps, gets re-focused (wlroots pushes the primary to the
+newly keyboard-focused client), reads through the pipe: real
+cross-process wp_primary_selection both ways, ASCII and non-ASCII.
+09's typing playground narrates live whether the selection owns
+PRIMARY.
+
+THE BUILD BUG THE RIG FLUSHED OUT. The compositor-death rig failed
+on the final tree with a 320-byte "fontconfig leak" — which was not
+a leak at all, but the build system lying: the old `release:` target
+was a target-specific CFLAGS override over the SAME build/obj paths,
+and make compares only timestamps. `make release` followed by a
+plain `make` linked freshly-built release objects (no sanitizers, no
+LSan bracket in fontscan.c — which compiles to nothing without
+-fsanitize) into ASan-linked binaries; LeakSanitizer then reported
+fontconfig's process-lifetime allocations as leaks, and its _exit(23)
+exit path swallowed the example's buffered "exited cleanly" line.
+The same object-mixing class as the obj/obj-pic split documented
+since bring-up, one directory over. The fix: `make release` now
+re-invokes make with FDK_CONFIG=release, every object depends on a
+build/.config-<mode> stamp, and the stamp rewrites itself (forcing a
+full rebuild) only when the configuration actually changed —
+same-config builds stay incremental, and docs/build.md carries the
+full story in the same "reason, not just mechanism" style as the
+obj-pic entry. The death rig is the only rig that exercises an
+example's return-from-main under leak checking (every other rig
+kills its apps, which never runs exit handlers), which is exactly
+why it was the one that caught this.

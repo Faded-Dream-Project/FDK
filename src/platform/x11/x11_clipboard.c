@@ -1,14 +1,23 @@
 #define FDK_LOG_TAG "x11"
 
 /*
- * x11_clipboard.c — ICCCM CLIPBOARD selection support (Phase 9)
+ * x11_clipboard.c — ICCCM CLIPBOARD + PRIMARY selections (Phase 9;
+ * 1.3.4 adds PRIMARY)
  *
- * The design follows the ICCCM selection model exactly:
+ * The design follows the ICCCM selection model exactly, and the SAME
+ * machinery serves BOTH selections through a tiny descriptor —
+ * CLIPBOARD (the explicit copy/paste buffer) and PRIMARY (the
+ * classic Unix "whatever is selected" buffer that middle-click
+ * pastes). They differ in exactly one thing each: the atom, and
+ * which owned-text slot holds the copy.
  *
- *   - OWNERSHIP: fdk_x11_clipboard_set_text() calls XSetSelectionOwner
- *     on the connection-private clip_helper window. FDK keeps the
- *     text (clip_owned_text) and serves it to ANY client that asks,
- *     for as long as it owns the selection.
+ *   - OWNERSHIP: set_text() calls XSetSelectionOwner on the
+ *     connection-private clip_helper window. FDK keeps the text and
+ *     serves it to ANY client that asks, for as long as it owns the
+ *     selection. CLIPBOARD sets verify ownership took effect (the
+ *     documented best-effort contract); PRIMARY sets are fire-and-
+ *     forget — the classic model re-owns on every selection change,
+ *     and a verification round-trip per drag-motion would be absurd.
  *
  *   - SERVING: SelectionRequest events arrive on the helper (the
  *     requestor names its own window + property; we must answer with
@@ -17,7 +26,7 @@
  *     target gets the bytes. Refused targets get property = None.
  *
  *   - LOSING: SelectionClear arrives when another client takes
- *     ownership; FDK frees its copy and stops serving.
+ *     ownership; FDK frees the matching copy and stops serving.
  *
  *   - READING: get_text() asks the current owner to convert into a
  *     private property on the helper (XConvertSelection), then waits
@@ -28,9 +37,9 @@
  *     untouched for the normal dispatch loop. poll() on the
  *     connection fd provides the bounded wait.
  *
- * Not supported, deliberately (see fdk_clipboard.h): PRIMARY,
- * INCR incremental transfers (refused with a warning — local
- * transfers are atomic and always fit), COMPOUND_TEXT (we serve
+ * Not supported, deliberately (see fdk_clipboard.h): INCR
+ * incremental transfers (refused with a warning — local transfers
+ * are atomic and always fit), COMPOUND_TEXT (we serve
  * UTF8_STRING/TEXT/STRING, which every modern client accepts).
  */
 
@@ -47,6 +56,25 @@
 #include <time.h>
 
 #define FDK_CLIP_WAIT_MS 250
+
+/* ---- the selection descriptor (one machinery, two selections) ---- */
+
+typedef struct {
+    Atom atom;         /* the selection this descriptor addresses */
+    char **owned;      /* points at the connection's owned-text slot */
+    const char *name;  /* log vocabulary */
+} sel_desc;
+
+static sel_desc sel_of_clipboard(fdk_platform_connection *conn) {
+    sel_desc d = {conn->atom_clipboard, &conn->clip_owned_text,
+                  "clipboard"};
+    return d;
+}
+
+static sel_desc sel_of_primary(fdk_platform_connection *conn) {
+    sel_desc d = {XA_PRIMARY, &conn->primary_owned_text, "primary"};
+    return d;
+}
 
 /* ---- ownership ---- */
 
@@ -69,16 +97,19 @@ fdk_result fdk_x11_clipboard_init(fdk_platform_connection *conn) {
     conn->atom_fdk_selection =
         XInternAtom(conn->display, "_FDK_SELECTION", False);
     conn->clip_owned_text = NULL;
+    conn->primary_owned_text = NULL;
     return FDK_OK;
 }
 
 void fdk_x11_clipboard_shutdown(fdk_platform_connection *conn) {
     if (conn->display_dead) {
         /* Server gone: ownership died with the connection — free the
-         * local copy and leave the XIDs to the dead socket. */
+         * local copies and leave the XIDs to the dead socket. */
         conn->clip_helper = None;
         fdk_free(conn->clip_owned_text);
         conn->clip_owned_text = NULL;
+        fdk_free(conn->primary_owned_text);
+        conn->primary_owned_text = NULL;
         return;
     }
     if (conn->clip_helper != None) {
@@ -91,15 +122,28 @@ void fdk_x11_clipboard_shutdown(fdk_platform_connection *conn) {
             XSetSelectionOwner(conn->display, conn->atom_clipboard, None,
                                CurrentTime);
         }
+        if (XGetSelectionOwner(conn->display, XA_PRIMARY) ==
+            conn->clip_helper) {
+            XSetSelectionOwner(conn->display, XA_PRIMARY, None,
+                               CurrentTime);
+        }
         XDestroyWindow(conn->display, conn->clip_helper);
         conn->clip_helper = None;
     }
     fdk_free(conn->clip_owned_text);
     conn->clip_owned_text = NULL;
+    fdk_free(conn->primary_owned_text);
+    conn->primary_owned_text = NULL;
 }
 
-fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
-                                      const char *text) {
+/* One ownership+store, parameterized over the selection. verify:
+ * CLIPBOARD checks the server actually moved ownership (the public
+ * set's documented contract); PRIMARY skips the round-trip — the
+ * classic model re-owns per selection change and a verification per
+ * drag-motion would be absurd. */
+static fdk_result selection_set_text(fdk_platform_connection *conn,
+                                     sel_desc sel, const char *text,
+                                     bool verify) {
     if (text == NULL) {
         text = "";
     }
@@ -115,18 +159,28 @@ fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
      * requests with older timestamps as stale. (The replace-ownership
      * race this window technically allows is the same one every
      * toolkit accepts for clipboard sets.) */
-    XSetSelectionOwner(conn->display, conn->atom_clipboard,
-                       conn->clip_helper, CurrentTime);
-    if (XGetSelectionOwner(conn->display, conn->atom_clipboard) !=
-        conn->clip_helper) {
+    XSetSelectionOwner(conn->display, sel.atom, conn->clip_helper,
+                       CurrentTime);
+    if (verify && XGetSelectionOwner(conn->display, sel.atom) !=
+                         conn->clip_helper) {
         fdk_free(copy);
-        FDK_WARN("clipboard: XSetSelectionOwner did not take effect");
+        FDK_WARN("%s: XSetSelectionOwner did not take effect", sel.name);
         return FDK_ERR_PLATFORM;
     }
-    fdk_free(conn->clip_owned_text);
-    conn->clip_owned_text = copy;
+    fdk_free(*sel.owned);
+    *sel.owned = copy;
     XFlush(conn->display);
     return FDK_OK;
+}
+
+fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
+                                      const char *text) {
+    return selection_set_text(conn, sel_of_clipboard(conn), text, true);
+}
+
+fdk_result fdk_x11_clipboard_set_primary_text(
+    fdk_platform_connection *conn, const char *text) {
+    return selection_set_text(conn, sel_of_primary(conn), text, false);
 }
 
 /* ---- serving (SelectionRequest / SelectionClear) ---- */
@@ -185,19 +239,20 @@ static char *latin1_from_utf8(const char *utf8, size_t *out_len) {
     return out;
 }
 
-static void serve_text(fdk_platform_connection *conn, Window requestor,
-                       Atom property, Atom target) {
-    if (conn->clip_owned_text == NULL) {
+static void serve_text(fdk_platform_connection *conn, sel_desc sel,
+                       Window requestor, Atom property, Atom target) {
+    const char *owned = *sel.owned;
+    if (owned == NULL) {
         return; /* property left unset -> refusal */
     }
     if (target == conn->utf8_string || target == conn->atom_text_plain) {
         XChangeProperty(conn->display, requestor, property, target, 8,
                         PropModeReplace,
-                        (const unsigned char *)conn->clip_owned_text,
-                        (int)strlen(conn->clip_owned_text));
+                        (const unsigned char *)owned,
+                        (int)strlen(owned));
     } else { /* XA_STRING or TEXT: Latin-1 */
         size_t len = 0;
-        char *latin = latin1_from_utf8(conn->clip_owned_text, &len);
+        char *latin = latin1_from_utf8(owned, &len);
         if (latin == NULL) {
             return;
         }
@@ -218,12 +273,26 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
     if (xevent->type == SelectionRequest) {
         const XSelectionRequestEvent *req = &xevent->xselectionrequest;
         Atom property = req->property != None ? req->property : req->target;
+        /* Which selection is being asked of us? Both selections share
+         * the helper window, so the ATOM is the discriminator. */
+        sel_desc sel;
+        if (req->selection == XA_PRIMARY) {
+            sel = sel_of_primary(conn);
+        } else if (req->selection == conn->atom_clipboard) {
+            sel = sel_of_clipboard(conn);
+        } else {
+            sel.atom = req->selection; /* never owned; refuse politely */
+            sel.owned = NULL;
+            sel.name = "selection";
+            property = None;
+        }
 
-        if (conn->clip_owned_text == NULL) {
+        if (sel.owned == NULL || *sel.owned == NULL) {
             /* Not the owner anymore (a stale request raced our
-             * SelectionClear): refuse per the ICCCM — the reply must
-             * name property None, so the requestor does not mistake
-             * an unwritten property for content. */
+             * SelectionClear), or an unknown selection: refuse per the
+             * ICCCM — the reply must name property None, so the
+             * requestor does not mistake an unwritten property for
+             * content. */
             property = None;
         } else if (req->target == conn->atom_targets) {
             serve_targets(conn, req->requestor, property);
@@ -231,7 +300,7 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
                    req->target == conn->atom_text_plain ||
                    req->target == conn->atom_text ||
                    req->target == XA_STRING) {
-            serve_text(conn, req->requestor, property, req->target);
+            serve_text(conn, sel, req->requestor, property, req->target);
         } else {
             property = None; /* unknown target: explicit refusal */
         }
@@ -251,23 +320,30 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
         return 1;
     }
     if (xevent->type == SelectionClear) {
+        /* Ownership is server truth, not event-order truth: a
+         * SelectionClear that was QUEUED before we re-acquired the
+         * selection (e.g. the previous owner died, then we called
+         * set_text, then the queue drained) must not drop the copy of
+         * the NEW ownership epoch. Asking the server who owns it NOW
+         * resolves the race the ICCCM way — for whichever selection
+         * the clear names. */
         if (xevent->xselectionclear.selection == conn->atom_clipboard) {
-            /* Ownership is server truth, not event-order truth: a
-             * SelectionClear that was QUEUED before we re-acquired
-             * the selection (e.g. the previous owner died, then we
-             * called set_text, then the queue drained) must not drop
-             * the copy of the NEW ownership epoch. Asking the server
-             * who owns it NOW resolves the race the ICCCM way. */
             if (XGetSelectionOwner(conn->display, conn->atom_clipboard) !=
                 conn->clip_helper) {
                 fdk_free(conn->clip_owned_text);
                 conn->clip_owned_text = NULL;
             }
+        } else if (xevent->xselectionclear.selection == XA_PRIMARY) {
+            if (XGetSelectionOwner(conn->display, XA_PRIMARY) !=
+                conn->clip_helper) {
+                fdk_free(conn->primary_owned_text);
+                conn->primary_owned_text = NULL;
+            }
         }
         return 1;
     }
     if (xevent->type == SelectionNotify) {
-        /* Our own convert (from get_text) is consumed by that
+        /* Our own converts (from get_text) are consumed by that
          * function's wait loop; anything arriving here is a stray
          * (e.g. delivered after a timeout). Swallow it so it never
          * leaks into the normal dispatch path. */
@@ -285,11 +361,11 @@ static uint64_t now_ms(void) {
 }
 
 /* Waits up to FDK_CLIP_WAIT_MS for the SelectionNotify answering our
- * convert. Non-matching events are left in Xlib's queue untouched
- * (XCheckTypedWindowEvent removes only the match), so no event is
- * ever dispatched re-entrantly or lost. Returns 1 with *out_notify
- * filled on success, 0 on timeout. */
-static int wait_selection_notify(fdk_platform_connection *conn,
+ * convert of `sel`. Non-matching events are left in Xlib's queue
+ * untouched (XCheckTypedWindowEvent removes only the match), so no
+ * event is ever dispatched re-entrantly or lost. Returns 1 with
+ * *out_notify filled on success, 0 on timeout. */
+static int wait_selection_notify(fdk_platform_connection *conn, sel_desc sel,
                                  XEvent *out_notify) {
     uint64_t deadline = now_ms() + FDK_CLIP_WAIT_MS;
     XFlush(conn->display);
@@ -297,13 +373,14 @@ static int wait_selection_notify(fdk_platform_connection *conn,
         XEvent ev;
         if (XCheckTypedWindowEvent(conn->display, conn->clip_helper,
                                    SelectionNotify, &ev)) {
-            if (ev.xselection.selection == conn->atom_clipboard) {
+            if (ev.xselection.selection == sel.atom) {
                 *out_notify = ev;
                 return 1;
             }
-            /* Notification for a selection we never convert (can't
-             * happen today; kept for correctness if PRIMARY ever
-             * lands): keep waiting on the remaining budget. */
+            /* Notification for the OTHER selection (we now convert
+             * both): keep waiting on the remaining budget — 1.3.4
+             * closed the "can't happen today" gap this comment used
+             * to guard. */
             continue;
         }
         uint64_t now = now_ms();
@@ -362,15 +439,16 @@ static char *utf8_from_property(Atom type, const unsigned char *data,
     return out;
 }
 
-/* One convert attempt for `target`. Returns the UTF-8 text (fdk_alloc)
- * or NULL (refused / timeout / oversized). */
-static char *convert_selection(fdk_platform_connection *conn, Atom target) {
-    XConvertSelection(conn->display, conn->atom_clipboard, target,
+/* One convert attempt for `target` against `sel`. Returns the UTF-8
+ * text (fdk_alloc) or NULL (refused / timeout / oversized). */
+static char *convert_selection(fdk_platform_connection *conn, sel_desc sel,
+                                Atom target) {
+    XConvertSelection(conn->display, sel.atom, target,
                       conn->atom_fdk_selection, conn->clip_helper,
                       CurrentTime);
     XEvent notify;
-    if (!wait_selection_notify(conn, &notify)) {
-        FDK_WARN("clipboard: owner did not answer within %d ms",
+    if (!wait_selection_notify(conn, sel, &notify)) {
+        FDK_WARN("%s: owner did not answer within %d ms", sel.name,
                  FDK_CLIP_WAIT_MS);
         return NULL;
     }
@@ -392,8 +470,8 @@ static char *convert_selection(fdk_platform_connection *conn, Atom target) {
          * (XGetWindowProperty with delete=True already consumed the
          * INCR property and its 0-length read is what the protocol
          * expects for a refusal.) */
-        FDK_WARN("clipboard: INCR transfer offered — refusing "
-                 "(oversized clipboard, not supported in v1)");
+        FDK_WARN("%s: INCR transfer offered — refusing "
+                 "(oversized selection, not supported in v1)", sel.name);
         if (data != NULL) {
             XFree(data);
         }
@@ -410,32 +488,42 @@ static char *convert_selection(fdk_platform_connection *conn, Atom target) {
     return out;
 }
 
-char *fdk_x11_clipboard_get_text(fdk_platform_connection *conn) {
-    /* Fast path: we are the owner — the server never round-trips a
-     * selection to its own owner, so serve locally (this is also what
-     * makes the no-other-client case work under bare Xvfb). */
-    if (XGetSelectionOwner(conn->display, conn->atom_clipboard) ==
+/* Shared reader: fast path (we own it — the server never round-trips
+ * a selection to its own owner, which is also what makes the
+ * no-other-client case work under bare Xvfb), the empty case, then
+ * convert UTF-8 first with a Latin-1 STRING fallback for ancient
+ * owners. Anything else (COMPOUND_TEXT owners) is refused by the
+ * owner itself and reads as NULL. */
+static char *selection_get_text(fdk_platform_connection *conn,
+                                sel_desc sel) {
+    if (XGetSelectionOwner(conn->display, sel.atom) ==
         conn->clip_helper) {
-        if (conn->clip_owned_text == NULL || conn->clip_owned_text[0] == '\0') {
+        const char *owned = *sel.owned;
+        if (owned == NULL || owned[0] == '\0') {
             return NULL;
         }
-        size_t len = strlen(conn->clip_owned_text);
+        size_t len = strlen(owned);
         char *copy = fdk_alloc(len + 1);
         if (copy != NULL) {
-            memcpy(copy, conn->clip_owned_text, len + 1);
+            memcpy(copy, owned, len + 1);
         }
         return copy;
     }
-    if (XGetSelectionOwner(conn->display, conn->atom_clipboard) == None) {
-        return NULL; /* nobody owns the clipboard: it is empty */
+    if (XGetSelectionOwner(conn->display, sel.atom) == None) {
+        return NULL; /* nobody owns it: it is empty */
     }
 
-    /* Ask for UTF-8 first; fall back to Latin-1 STRING for ancient
-     * owners. Anything else (COMPOUND_TEXT owners) is refused by the
-     * owner itself and reads as NULL. */
-    char *text = convert_selection(conn, conn->utf8_string);
+    char *text = convert_selection(conn, sel, conn->utf8_string);
     if (text == NULL) {
-        text = convert_selection(conn, XA_STRING);
+        text = convert_selection(conn, sel, XA_STRING);
     }
     return text;
+}
+
+char *fdk_x11_clipboard_get_text(fdk_platform_connection *conn) {
+    return selection_get_text(conn, sel_of_clipboard(conn));
+}
+
+char *fdk_x11_clipboard_get_primary_text(fdk_platform_connection *conn) {
+    return selection_get_text(conn, sel_of_primary(conn));
 }

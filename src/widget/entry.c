@@ -95,6 +95,17 @@ typedef struct fdk_entry {
     fdk_undo_stack *undo;
     bool undo_applying;
     bool undo_group_pending;
+    /* ---- PRIMARY selection (1.3.4) ----
+     *
+     * True while THIS entry believes it last pushed a non-empty
+     * text to the PRIMARY selection (the classic Unix "current
+     * selection" buffer). The flag drives the polite-ownership rule:
+     * collapsing an empty selection never GRABS PRIMARY (an FDK app
+     * with entries must not steal the user's xterm selection at
+     * startup), but a collapse after a real push empties it (the
+     * classic observable: middle-click pastes nothing). Headless /
+     * standalone trees never set it — no context, no pushes. */
+    bool primary_pushed;
 } fdk_entry;
 
 static fdk_entry *entry_of(fdk_widget *w) {
@@ -832,6 +843,81 @@ static void entry_clipboard_paste(fdk_entry *e) {
     (void)r; /* oversized paste is refused with a warning; fine */
 }
 
+/* ---- PRIMARY selection (1.3.4) ---- */
+
+/* The classic Unix "current selection" buffer, distinct from the
+ * copy/paste CLIPBOARD: text becomes PRIMARY by being SELECTED, and
+ * the middle button pastes it. Called from entry_set_selection (THE
+ * selection mutation) whenever the endpoints actually changed.
+ *
+ * Politeness rules, in order:
+ *   - disabled entries never touch it;
+ *   - an entry that never pushed (empty selection all along, or a
+ *     standalone headless tree) never GRABS ownership — an FDK app
+ *     must not steal the user's xterm selection at startup;
+ *   - a collapse AFTER a push empties the buffer (one set; the
+ *     classic observable is that middle-click then pastes nothing);
+ *   - edits and pastes do NOT re-sync (splice collapses the
+ *     selection as a side effect, and PRIMARY surviving a paste is
+ *     what makes repeated middle-click pastes work — the xterm
+ *     property).
+ *
+ * Sets are best-effort by the platform contract (no round-trip):
+ * drag-selects fire this at pointer rate, which is exactly the
+ * classic model — every real selection change re-owns. */
+static void entry_primary_sync(fdk_entry *e) {
+    if ((e->base.flags & FDK_WF_ENABLED) == 0) {
+        return; /* disabled entries do not touch the selection buffer */
+    }
+    bool selected = e->caret != e->anchor;
+    if (!selected && !e->primary_pushed) {
+        return; /* empty and never owned: nothing to do, nothing grabbed */
+    }
+    fdk_context *ctx =
+        fdk__window_context(fdk__widget_window_owner(&e->base));
+    if (ctx == NULL) {
+        return; /* standalone tree: no platform connection to talk to */
+    }
+    if (!selected) {
+        (void)fdk_clipboard_set_primary_text(ctx, "");
+        e->primary_pushed = false;
+        return;
+    }
+    size_t lo = (e->anchor < e->caret) ? e->anchor : e->caret;
+    size_t hi = (e->anchor < e->caret) ? e->caret : e->anchor;
+    char saved = e->text[hi];
+    e->text[hi] = '\0';
+    fdk_result r = fdk_clipboard_set_primary_text(ctx, e->text + lo);
+    e->text[hi] = saved;
+    e->primary_pushed = fdk_ok(r);
+}
+
+/* Middle-click: paste PRIMARY at the click position (classic Unix).
+ * Pure INSERT at the point — the existing selection is not replaced
+ * (xterm semantics; GTK's replace-on-overlap is a different school).
+ * Read-first ordering matters: if THIS entry owns PRIMARY, collapsing
+ * its selection in entry_set_selection would empty the buffer before
+ * the read — classic self-paste (select, middle-click elsewhere in
+ * the same field) depends on reading before that. */
+static void entry_primary_paste(fdk_entry *e, fdk_f32 x) {
+    if (e->read_only) {
+        return; /* the reader contract: mutators refuse when read-only */
+    }
+    fdk_context *ctx =
+        fdk__window_context(fdk__widget_window_owner(&e->base));
+    if (ctx == NULL) {
+        return;
+    }
+    char *primary = fdk_clipboard_get_primary_text(ctx);
+    size_t hit = offset_at_x(e, x);
+    if (primary == NULL) {
+        entry_set_selection(e, hit, hit); /* plain caret move */
+        return;
+    }
+    (void)entry_splice(e, hit, hit, primary, strlen(primary));
+    fdk_free(primary);
+}
+
 /* ---- selection helpers ---- */
 
 static void entry_delete_selection(fdk_entry *e) {
@@ -871,7 +957,12 @@ static fdk_i64 now_ms(void) {
  * visible, and invalidates when EITHER endpoint moved. All callers
  * route through here so programmatic selection changes (select_all,
  * select_range) can never silently skip a repaint — the exact bug
- * the entry paint tests caught in the first cut. */
+ * the entry paint tests caught in the first cut.
+ *
+ * 1.3.4: this is also THE PRIMARY-selection sync point — the classic
+ * Unix model is "the selection owns PRIMARY", so every real change
+ * re-owns it (best-effort, no round-trip: drag-selects fire this at
+ * pointer rate). See entry_primary_sync for the politeness rules. */
 static void entry_set_selection(fdk_entry *e, size_t anchor, size_t caret) {
     size_t old_caret = e->caret;
     size_t old_anchor = e->anchor;
@@ -880,6 +971,7 @@ static void entry_set_selection(fdk_entry *e, size_t anchor, size_t caret) {
     entry_scroll_to_caret(e);
     if (e->caret != old_caret || e->anchor != old_anchor) {
         fdk_widget_invalidate(&e->base);
+        entry_primary_sync(e);
     }
 }
 
@@ -918,6 +1010,16 @@ static bool entry_handle_event(fdk_widget *w,
     case FDK_WIDGET_POINTER_DOWN: {
         if ((w->flags & FDK_WF_ENABLED) == 0) {
             return false;
+        }
+        if (ev->pointer.button == FDK_POINTER_BUTTON_MIDDLE) {
+            /* Classic Unix middle-click: PRIMARY pastes at the click.
+             * Deliberately outside the click-count machinery — a
+             * middle press is not a selection gesture. */
+            if (!fdk_widget_has_focus(w)) {
+                (void)fdk_widget_focus(w);
+            }
+            entry_primary_paste(e, ev->pointer.position.x);
+            return true;
         }
         if (!fdk_widget_has_focus(w)) {
             (void)fdk_widget_focus(w);

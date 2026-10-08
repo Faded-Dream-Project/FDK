@@ -6,7 +6,10 @@
 #define FDK_LOG_TAG "wayland"
 
 /*
- * wayland_clipboard.c — wl_data_device clipboard (Phase 9)
+ * wayland_clipboard.c — wl_data_device clipboard (Phase 9); the
+ * wp_primary_selection_unstable_v1 PRIMARY selection joined it in
+ * 1.3.4 (the half Wayland clients traditionally lost — the classic
+ * Unix "whatever is selected" buffer that middle-click pastes)
  *
  * Set: wl_data_source offered as "text/plain;charset=utf-8" (the
  * canonical Wayland text clipboard MIME) and published with
@@ -27,6 +30,15 @@
  * pipe: wl_data_offer.receive asks the owner to write into our write
  * end, and a bounded poll() read collects the bytes without further
  * protocol traffic.
+ *
+ * PRIMARY (1.3.4) mirrors every shape above one protocol over — the
+ * zwp_* twins of device/source/offer with the same MIME discipline,
+ * the same pipe transfer, the same own-source fast path — with two
+ * differences worth naming: the manager global is OPTIONAL (absent
+ * compositors get honest FDK_ERR_UNSUPPORTED, not a fake buffer),
+ * and the ::selection event's own fine print ("the data_offer is
+ * valid until ... the client loses keyboard focus") means a NULL
+ * offer on focus loss is ROUTINE here, not an emptied selection.
  *
  * Honest limitations (mirrored in fdk_clipboard.h): no source
  * actions, text only, and set_selection before any input event
@@ -260,24 +272,170 @@ static const struct wl_data_source_listener g_source_listener = {
     .action = source_action,
 };
 
+/* ---- PRIMARY selection (1.3.4, wp_primary_selection_unstable_v1) ----
+ *
+ * The zwp_* twins of the three listeners above, with the shapes
+ * learned in 1.2.4 already baked in: ::selection NEVER destroys our
+ * source (wlroots echoes the freshly-set selection back to the
+ * keyboard-focused setter — the exact trap that self-destructed
+ * every clipboard set under sway until ::cancelled was recognized
+ * as the only real replacement signal); cancelled is checked against
+ * the epoch slot before freeing anything. */
+
+static void primary_offer_offer(void *data,
+                                struct zwp_primary_selection_offer_v1 *offer,
+                                const char *mime_type) {
+    fdk_platform_connection *conn = data;
+    (void)offer;
+    if (strcmp(mime_type, "text/plain;charset=utf-8") == 0 ||
+        strcmp(mime_type, "text/plain") == 0) {
+        conn->primary_pending_offer_has_text = 1;
+    }
+}
+
+static const struct zwp_primary_selection_offer_v1_listener
+    g_primary_offer_listener = {
+        .offer = primary_offer_offer,
+};
+
+static void primary_device_data_offer(
+    void *data, struct zwp_primary_selection_device_v1 *device,
+    struct zwp_primary_selection_offer_v1 *offer) {
+    (void)device;
+    fdk_platform_connection *conn = data;
+    if (conn->primary_pending_offer != NULL &&
+        conn->primary_pending_offer != conn->primary_selection_offer) {
+        zwp_primary_selection_offer_v1_destroy(
+            conn->primary_pending_offer);
+    }
+    conn->primary_pending_offer = offer;
+    conn->primary_pending_offer_has_text = 0;
+    zwp_primary_selection_offer_v1_add_listener(
+        offer, &g_primary_offer_listener, conn);
+}
+
+static void primary_device_selection(
+    void *data, struct zwp_primary_selection_device_v1 *device,
+    struct zwp_primary_selection_offer_v1 *id) {
+    (void)device;
+    fdk_platform_connection *conn = data;
+    if (conn->primary_selection_offer != NULL) {
+        zwp_primary_selection_offer_v1_destroy(
+            conn->primary_selection_offer);
+    }
+    if (id == NULL) {
+        /* Emptied — or the routine NULL the protocol's fine print
+         * promises on keyboard-focus loss. Either way: no primary
+         * text to read. Our own source (if any) is NOT touched:
+         * ownership lives until ::cancelled says otherwise. */
+        conn->primary_selection_offer = NULL;
+        conn->primary_selection_offer_has_text = 0;
+        return;
+    }
+    int has_text = 0;
+    if (conn->primary_pending_offer == id) {
+        has_text = conn->primary_pending_offer_has_text;
+        conn->primary_pending_offer = NULL;
+        conn->primary_pending_offer_has_text = 0;
+    }
+    conn->primary_selection_offer = id;
+    conn->primary_selection_offer_has_text = has_text;
+}
+
+static const struct zwp_primary_selection_device_v1_listener
+    g_primary_device_listener = {
+        .data_offer = primary_device_data_offer,
+        .selection = primary_device_selection,
+};
+
+static void primary_source_send(
+    void *data, struct zwp_primary_selection_source_v1 *source,
+    const char *mime_type, int32_t fd) {
+    (void)source;
+    fdk_platform_connection *conn = data;
+    if (strcmp(mime_type, "text/plain;charset=utf-8") != 0 &&
+        strcmp(mime_type, "text/plain") != 0) {
+        close(fd);
+        return;
+    }
+    const char *text = (conn->primary_owned_text != NULL)
+        ? conn->primary_owned_text
+        : "";
+    size_t len = strlen(text);
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(fd, text + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break; /* requestor vanished mid-transfer: not our error */
+        }
+        off += (size_t)n;
+    }
+    close(fd);
+}
+
+static void primary_source_cancelled(
+    void *data, struct zwp_primary_selection_source_v1 *source) {
+    fdk_platform_connection *conn = data;
+    /* Another client took the primary (or the compositor is done
+     * with it). Epoch check before freeing: a replaced source's
+     * cancelled must not drop a NEWER set's text. */
+    zwp_primary_selection_source_v1_destroy(source);
+    if (conn->primary_source == source) {
+        conn->primary_source = NULL;
+        fdk_free(conn->primary_owned_text);
+        conn->primary_owned_text = NULL;
+    }
+}
+
+static const struct zwp_primary_selection_source_v1_listener
+    g_primary_source_listener = {
+        .send = primary_source_send,
+        .cancelled = primary_source_cancelled,
+};
+
 /* ---- lifecycle wiring ---- */
 
 void fdk_wayland_clipboard_device_ready(fdk_platform_connection *conn) {
     if (conn->data_device != NULL ||
         conn->data_device_manager == NULL || conn->seat == NULL) {
-        return; /* already up, or still missing a prerequisite */
+        /* fall through to the primary half below — the two devices
+         * converge independently (a compositor may offer PRIMARY
+         * without wl_data_device_manager or vice versa) */
+    } else {
+        conn->data_device =
+            wl_data_device_manager_get_data_device(conn->data_device_manager,
+                                                    conn->seat);
+        if (conn->data_device == NULL) {
+            FDK_WARN("clipboard: get_data_device failed");
+        } else {
+            wl_data_device_add_listener(conn->data_device,
+                                        &g_device_listener, conn);
+            /* The compositor sends the CURRENT selection to a fresh
+             * data device; the roundtrip in the caller's initial sync
+             * (or the next dispatch) delivers it into
+             * conn->selection_offer. */
+        }
     }
-    conn->data_device =
-        wl_data_device_manager_get_data_device(conn->data_device_manager,
-                                                conn->seat);
-    if (conn->data_device == NULL) {
-        FDK_WARN("clipboard: get_data_device failed");
-        return;
+    /* PRIMARY device (1.3.4): same convergence rule — manager
+     * global + seat. Absent manager (compositor without the
+     * protocol) leaves primary_device NULL and the primary ops
+     * report UNSUPPORTED; that is a supported configuration, not
+     * an error worth a log line. */
+    if (conn->primary_device == NULL &&
+        conn->primary_manager != NULL && conn->seat != NULL) {
+        conn->primary_device =
+            zwp_primary_selection_device_manager_v1_get_device(
+                conn->primary_manager, conn->seat);
+        if (conn->primary_device == NULL) {
+            FDK_WARN("clipboard: primary get_device failed");
+        } else {
+            zwp_primary_selection_device_v1_add_listener(
+                conn->primary_device, &g_primary_device_listener, conn);
+        }
     }
-    wl_data_device_add_listener(conn->data_device, &g_device_listener, conn);
-    /* The compositor sends the CURRENT selection to a fresh data
-     * device; the roundtrip in the caller's initial sync (or the next
-     * dispatch) delivers it into conn->selection_offer. */
 }
 
 void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn) {
@@ -309,6 +467,36 @@ void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn) {
     if (conn->data_device_manager != NULL) {
         wl_data_device_manager_destroy(conn->data_device_manager);
         conn->data_device_manager = NULL;
+    }
+    /* PRIMARY half (1.3.4): same teardown discipline — sources and
+     * text first, then offers, then the device, then the manager. */
+    if (conn->primary_source != NULL) {
+        zwp_primary_selection_source_v1_destroy(conn->primary_source);
+        conn->primary_source = NULL;
+    }
+    fdk_free(conn->primary_owned_text);
+    conn->primary_owned_text = NULL;
+    if (conn->primary_pending_offer != NULL &&
+        conn->primary_pending_offer != conn->primary_selection_offer) {
+        zwp_primary_selection_offer_v1_destroy(
+            conn->primary_pending_offer);
+    }
+    conn->primary_pending_offer = NULL;
+    conn->primary_pending_offer_has_text = 0;
+    if (conn->primary_selection_offer != NULL) {
+        zwp_primary_selection_offer_v1_destroy(
+            conn->primary_selection_offer);
+        conn->primary_selection_offer = NULL;
+    }
+    conn->primary_selection_offer_has_text = 0;
+    if (conn->primary_device != NULL) {
+        zwp_primary_selection_device_v1_destroy(conn->primary_device);
+        conn->primary_device = NULL;
+    }
+    if (conn->primary_manager != NULL) {
+        zwp_primary_selection_device_manager_v1_destroy(
+            conn->primary_manager);
+        conn->primary_manager = NULL;
     }
 }
 
@@ -355,16 +543,24 @@ fdk_result fdk_wayland_clipboard_set_text(fdk_platform_connection *conn,
     return FDK_OK;
 }
 
-/* Bounded read of the offer's text: receive into a pipe, then poll +
- * read until EOF or deadline. Returns an fdk_alloc'd string or NULL. */
-static char *read_offer_text(fdk_platform_connection *conn) {
+/* Bounded read of an offer's text: receive into a pipe, then poll +
+ * read until EOF or deadline. Returns an fdk_alloc'd string or NULL.
+ * `primary` selects which protocol's receive request to send (the
+ * transfer mechanics are otherwise identical). */
+static char *read_offer_text(fdk_platform_connection *conn, bool primary) {
     int fds[2];
     if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) {
         FDK_WARN("clipboard: pipe2 failed (%s)", strerror(errno));
         return NULL;
     }
-    wl_data_offer_receive(conn->selection_offer,
-                          "text/plain;charset=utf-8", fds[1]);
+    if (primary) {
+        zwp_primary_selection_offer_v1_receive(
+            conn->primary_selection_offer,
+            "text/plain;charset=utf-8", fds[1]);
+    } else {
+        wl_data_offer_receive(conn->selection_offer,
+                              "text/plain;charset=utf-8", fds[1]);
+    }
     /* Give the request a chance to reach the compositor and the
      * owner's write to start before we poll. */
     wl_display_flush(conn->display);
@@ -471,7 +667,7 @@ char *fdk_wayland_clipboard_get_text(fdk_platform_connection *conn) {
             return NULL; /* genuinely no text selection */
         }
     }
-    char *text = read_offer_text(conn);
+    char *text = read_offer_text(conn, false);
 
     /* The offer is single-use per receive in spirit (the spec allows
      * one transfer per offer); drop it so a later get_text forces a
@@ -479,5 +675,101 @@ char *fdk_wayland_clipboard_get_text(fdk_platform_connection *conn) {
     wl_data_offer_destroy(conn->selection_offer);
     conn->selection_offer = NULL;
     conn->selection_offer_has_text = 0;
+    return text;
+}
+
+/* ---- the two PRIMARY ops (1.3.4) ---- */
+
+fdk_result fdk_wayland_clipboard_set_primary_text(
+    fdk_platform_connection *conn, const char *text) {
+    if (conn->primary_device == NULL) {
+        /* No manager global (compositor without the protocol) or no
+         * seat yet — either way the honest answer, same as the
+         * clipboard's. */
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (text == NULL) {
+        text = "";
+    }
+    size_t len = strlen(text);
+    char *copy = fdk_alloc(len + 1);
+    if (copy == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(copy, text, len + 1);
+
+    struct zwp_primary_selection_source_v1 *source =
+        zwp_primary_selection_device_manager_v1_create_source(
+            conn->primary_manager);
+    if (source == NULL) {
+        fdk_free(copy);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    zwp_primary_selection_source_v1_add_listener(
+        source, &g_primary_source_listener, conn);
+    zwp_primary_selection_source_v1_offer(
+        source, "text/plain;charset=utf-8");
+    zwp_primary_selection_source_v1_offer(source, "text/plain");
+
+    /* Replace any source of ours still outstanding (destroying the
+     * proxy retires it without a cancelled — same discipline as the
+     * clipboard set). */
+    if (conn->primary_source != NULL) {
+        zwp_primary_selection_source_v1_destroy(conn->primary_source);
+    }
+    conn->primary_source = source;
+    fdk_free(conn->primary_owned_text);
+    conn->primary_owned_text = copy;
+
+    /* Same serial contract as the clipboard set: the newest input
+     * event's; serial 0 before any input may be ignored. */
+    zwp_primary_selection_device_v1_set_selection(
+        conn->primary_device, source, conn->last_input_serial);
+    wl_display_flush(conn->display);
+    return FDK_OK;
+}
+
+char *fdk_wayland_clipboard_get_primary_text(
+    fdk_platform_connection *conn) {
+    if (conn->primary_device == NULL) {
+        FDK_WARN("clipboard: no primary-selection device on this "
+                 "compositor");
+        return NULL;
+    }
+    /* We own it: serve from the local copy (compositors do not send
+     * a client its own selection — and wlroots ECHOES the fresh one
+     * back, so the offer slot is not authoritative while we own). */
+    if (conn->primary_source != NULL) {
+        if (conn->primary_owned_text == NULL ||
+            conn->primary_owned_text[0] == '\0') {
+            return NULL;
+        }
+        size_t len = strlen(conn->primary_owned_text);
+        char *copy = fdk_alloc(len + 1);
+        if (copy != NULL) {
+            memcpy(copy, conn->primary_owned_text, len + 1);
+        }
+        return copy;
+    }
+    if (conn->primary_selection_offer == NULL ||
+        !conn->primary_selection_offer_has_text) {
+        /* Catch up on primary events we may not have dispatched yet
+         * — ONE roundtrip, same eventual-consistency contract as the
+         * clipboard read. */
+        if (wl_display_roundtrip(conn->display) < 0) {
+            return NULL;
+        }
+        if (conn->primary_selection_offer == NULL ||
+            !conn->primary_selection_offer_has_text) {
+            return NULL; /* genuinely no text primary selection */
+        }
+    }
+    char *text = read_offer_text(conn, true);
+
+    /* Single-use per receive in spirit — same as the clipboard
+     * offer. A later get forces a fresh look. */
+    zwp_primary_selection_offer_v1_destroy(conn->primary_selection_offer);
+    conn->primary_selection_offer = NULL;
+    conn->primary_selection_offer_has_text = 0;
     return text;
 }

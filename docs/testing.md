@@ -1129,3 +1129,42 @@ headless typing tests expressed the user-level behavior ("hold
 Delete over 'abcd', one undo step restores all") and let the
 geometry be the implementation's problem; that is the right shape
 for widget-behavior tests generally.
+
+## 1.3.4 — the PRIMARY selection coverage map
+
+The PRIMARY work followed the same layer-per-test discipline, and
+one test-design mistake is worth recording because it is easy to
+repeat:
+
+**Ownership is a moving target — re-arm it between assertions.**
+The entry-primary group's foreign-paste check originally assumed
+the foreign owner still held PRIMARY by the time the middle-click
+ran. It did not: the entry's own Ctrl+A had taken PRIMARY from it
+three assertions earlier (which is exactly what the auto-ownership
+test PROVED two lines above — the test contradicted itself).
+Selection ownership tests must treat every ownership transfer as
+consumed by the assertion that observed it; the fix was spawning a
+FRESH owner child right before the foreign-paste check. The same
+discipline applies to the interop rig: each direction gets its own
+holder process.
+
+Also pinned by this milestone: the politeness contract (typing
+into a selection-less entry while a foreign owner holds PRIMARY
+must leave that owner serving — an app that steals PRIMARY at
+startup is a bug users feel in their xterm, and the test catches
+it by construction, not by reading internal state); the
+read-before-collapse ordering for middle-click self-paste (the
+entry reads PRIMARY, then collapses its own selection — reversing
+those two lines makes self-paste paste nothing, and the X11 test
+asserts the pasted TEXT, so the ordering cannot regress silently);
+and SelectionClear isolation both ways (losing PRIMARY must not
+free the CLIPBOARD copy and vice versa — one shared helper window
+makes cross-talk the natural failure mode, and the isolation test
+is what keeps the descriptor honest).
+
+The Wayland side kept the 1.2.4 lesson in the test plan itself:
+the interop rig greps the pholder's log for the primary-set line
+BEFORE spawning the reader (a set that never happened is a serial
+problem, not a read problem), and treats the no-device WARN as a
+clean skip so the same rig runs on protocol-less compositors
+without weakening sway's assertions.

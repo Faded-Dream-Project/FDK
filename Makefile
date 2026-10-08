@@ -98,7 +98,22 @@ BUILD_DIR   := build
 DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1 -fsanitize=address,undefined
 REL_FLAGS   := -O2 -DNDEBUG
 
-CFLAGS  ?= $(STD) $(WARN) $(FEATURE) $(DEBUG_FLAGS)
+# Build configuration (debug by default; `make release` re-invokes
+# make with FDK_CONFIG=release). The two configs MUST NOT share
+# objects: they differ in -O level, NDEBUG, and the sanitizers, and
+# make compares only timestamps — objects left over from the other
+# config are always "up to date" and get silently linked in. That
+# exact mixing (release objects inside an ASan-linked binary) is
+# what made the compositor-death rig report fontconfig's
+# process-lifetime allocations as leaks in 1.3.4: the LSan bracket
+# in fontscan.c compiles to NOTHING without -fsanitize. The config
+# stamp below forces a full rebuild whenever the configuration
+# changes, and is a no-op (one stat) when it hasn't.
+FDK_CONFIG  ?= debug
+CONFIG_FLAGS := $(if $(filter release,$(FDK_CONFIG)),$(REL_FLAGS),$(DEBUG_FLAGS))
+CONFIG_STAMP := $(BUILD_DIR)/.config-$(FDK_CONFIG)
+
+CFLAGS  ?= $(STD) $(WARN) $(FEATURE) $(CONFIG_FLAGS)
 CPPFLAGS:= -Iinclude -Isrc
 # -ldl: the text layer dlopen()s fontconfig at run time (optional
 # system font discovery, see src/text/fontscan.c). No-op stub on
@@ -138,7 +153,8 @@ ifeq ($(BUILD_WAYLAND),1)
                            src/platform/wayland/generated/xdg-shell-protocol.c \
                            src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c \
                            src/platform/wayland/generated/viewporter-protocol.c \
-                           src/platform/wayland/generated/fractional-scale-v1-protocol.c
+                           src/platform/wayland/generated/fractional-scale-v1-protocol.c \
+                           src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c
 else
   # Stub providing fdk_platform_wayland_ops() returning NULL and
   # fdk_platform_wayland_display_present() returning 0, so
@@ -193,17 +209,39 @@ DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
 all: static shared
 
-release: CFLAGS := $(STD) $(WARN) $(FEATURE) $(REL_FLAGS)
-release: all
+# `make release` re-invokes make with FDK_CONFIG=release: every
+# object then rebuilds against the release flags through the config
+# stamp (see the FDK_CONFIG block above), and build/libfdk.a is the
+# release artifact. A plain target-specific CFLAGS override here
+# (the old design) shared build/obj between the configs and let
+# timestamp-only up-to-date checks silently link release objects
+# into later debug builds (and vice versa).
+release:
+	$(MAKE) FDK_CONFIG=release all
 
 static: $(STATIC_LIB)
 shared: $(SHARED_LIB)
 
-$(BUILD_DIR)/obj/%.o: src/%.c
+# The stamp rule always RUNS (FORCE) but only rewrites itself when
+# the configuration actually changed — so same-config builds stay
+# incremental (the stamp keeps its old mtime), while a config switch
+# produces a fresh, newer stamp that rebuilds every object.
+$(CONFIG_STAMP): FORCE
+	@mkdir -p $(BUILD_DIR)
+	@cur=`cat $@ 2>/dev/null || echo none`; \
+	if [ x"$$cur" != x"$(FDK_CONFIG)" ]; then \
+		rm -f $(BUILD_DIR)/.config-*; \
+		printf '%s\n' '$(FDK_CONFIG)' > $@; \
+	fi
+
+.PHONY: FORCE
+FORCE:
+
+$(BUILD_DIR)/obj/%.o: src/%.c $(CONFIG_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -MMD -MP -c $< -o $@
 
-$(BUILD_DIR)/obj-pic/%.o: src/%.c
+$(BUILD_DIR)/obj-pic/%.o: src/%.c $(CONFIG_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -MMD -MP -fPIC -c $< -o $@
 

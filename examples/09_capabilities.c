@@ -315,14 +315,17 @@ static void typing_report(void) {
     }
     /* 1.3.3: the undo history rides along — Ctrl+Z / Ctrl+Y are
      * live in the entry (typing runs coalesce; deletes reselect on
-     * undo). */
+     * undo). 1.3.4: any selection owns the PRIMARY buffer (the
+     * classic Unix model) — middle-click pastes it at the click. */
     size_t undo = fdk_entry_can_undo(app.typing) ? 1u : 0u;
     size_t redo = fdk_entry_can_redo(app.typing) ? 1u : 0u;
+    size_t primary = (lo != hi) ? 1u : 0u;
     set_status(app.typing_status,
                "%zu bytes · caret @ %zu · selection %zu..%zu%s · "
-               "undo %s · redo %s",
+               "primary %s · undo %s · redo %s",
                bytes, caret, lo, hi, lo != hi ? "" : " (none)",
-               undo ? "yes" : "-", redo ? "yes" : "-");
+               primary ? "owned" : "-", undo ? "yes" : "-",
+               redo ? "yes" : "-");
     printf("PHASE: type %zu %zu\n", bytes, caret);
     fflush(stdout);
 }

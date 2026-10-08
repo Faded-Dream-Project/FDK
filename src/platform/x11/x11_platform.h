@@ -119,16 +119,19 @@ struct fdk_platform_connection {
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
 
-    /* --- Clipboard (Phase 9, ICCCM CLIPBOARD selection) ---
+    /* --- Clipboard (Phase 9, ICCCM CLIPBOARD selection; 1.3.4 adds
+     * PRIMARY) ---
      *
      * clip_helper is a never-mapped InputOnly window that acts as
-     * FDK's selection owner/requestor. Selection traffic is not tied
-     * to any visible window (a context may own the clipboard with
-     * zero windows open), so the connection owns a private helper —
-     * the same design every ICCCM-faithful toolkit uses. The atoms
-     * below are interned once at connect. clip_owned_text is the
-     * copy FDK serves while it owns CLIPBOARD; SelectionClear
-     * (another client took over) frees it. */
+     * FDK's selection owner/requestor for BOTH selections. Selection
+     * traffic is not tied to any visible window (a context may own
+     * the clipboard with zero windows open), so the connection owns
+     * a private helper — the same design every ICCCM-faithful
+     * toolkit uses. The atoms below are interned once at connect
+     * (XA_PRIMARY is a protocol-constant atom — never interned).
+     * clip_owned_text / primary_owned_text are the copies FDK serves
+     * while it owns each selection; SelectionClear (another client
+     * took over) frees the matching one. */
     Window clip_helper;
     Atom atom_clipboard;      /* CLIPBOARD                            */
     Atom atom_targets;        /* TARGETS                              */
@@ -137,6 +140,8 @@ struct fdk_platform_connection {
     Atom atom_text_plain;     /* text/plain;charset=utf-8             */
     Atom atom_fdk_selection;  /* private property for convert replies */
     char *clip_owned_text;    /* fdk_alloc'd, NULL when not owner     */
+    char *primary_owned_text; /* fdk_alloc'd, NULL when not PRIMARY's
+                               * owner (1.3.4; XA_PRIMARY)             */
 
     /* --- Drag and drop (1.2.0, XDND) — x11_dnd.c ---
      *
@@ -416,6 +421,13 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
 fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
                                       const char *text);
 char *fdk_x11_clipboard_get_text(fdk_platform_connection *conn);
+/* 1.3.4: the PRIMARY selection (XA_PRIMARY) over the same helper
+ * window and the same ICCCM machinery. set is BEST-EFFORT (no
+ * ownership-verification round-trip — the classic model re-owns per
+ * selection change). */
+fdk_result fdk_x11_clipboard_set_primary_text(
+    fdk_platform_connection *conn, const char *text);
+char *fdk_x11_clipboard_get_primary_text(fdk_platform_connection *conn);
 
 /* Drag and drop (x11_dnd.c). init/shutdown: connection lifetime
  * (called from x11_connection.c next to the clipboard's).

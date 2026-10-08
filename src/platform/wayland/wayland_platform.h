@@ -14,6 +14,7 @@
 
 #include "platform/wayland/generated/xdg-shell-client-protocol.h"
 #include "platform/wayland/generated/xdg-decoration-unstable-v1-client-protocol.h"
+#include "platform/wayland/generated/primary-selection-unstable-v1-client-protocol.h"
 
 #include <stddef.h>
 #include <wayland-client.h>
@@ -119,6 +120,26 @@ struct fdk_platform_connection {
      * legal to get_data_device on a seat regardless of caps). */
     struct wl_data_device_manager *data_device_manager;
     struct wl_data_device *data_device;
+
+    /* --- PRIMARY selection (1.3.4, wp_primary_selection_unstable_v1)
+     * ---
+     *
+     * A parallel little protocol to the data-device clipboard above
+     * (same shapes, different interfaces): manager global -> device
+     * for our seat -> source when WE own it, offer when another
+     * client does. The manager is an OPTIONAL global — compositors
+     * without the protocol (GNOME's Mutter carried it only late,
+     * Weston never) leave these NULL and the primary ops honestly
+     * report FDK_ERR_UNSUPPORTED instead of faking a local buffer.
+     * The wlroots family (sway, labwc, river, ...) all offer it. */
+    struct zwp_primary_selection_device_manager_v1 *primary_manager;
+    struct zwp_primary_selection_device_v1 *primary_device;
+    struct zwp_primary_selection_source_v1 *primary_source;
+    char *primary_owned_text;
+    struct zwp_primary_selection_offer_v1 *primary_selection_offer;
+    int primary_selection_offer_has_text;
+    struct zwp_primary_selection_offer_v1 *primary_pending_offer;
+    int primary_pending_offer_has_text;
 
     /* Our side of ownership: a live data source plus the text it
      * serves (send may be called once per requestor, so the text
@@ -484,6 +505,15 @@ fdk_result fdk_wayland_drag_begin(fdk_platform_window *origin, int formats,
 fdk_result fdk_wayland_clipboard_set_text(fdk_platform_connection *conn,
                                            const char *text);
 char *fdk_wayland_clipboard_get_text(fdk_platform_connection *conn);
+
+/* PRIMARY selection (1.3.4): the wp_primary_selection_unstable_v1
+ * twins of the two clipboard ops. set is BEST-EFFORT by the public
+ * contract (mirror of the X11 side: no verification, the classic
+ * model re-owns per selection change). */
+fdk_result fdk_wayland_clipboard_set_primary_text(
+    fdk_platform_connection *conn, const char *text);
+char *fdk_wayland_clipboard_get_primary_text(
+    fdk_platform_connection *conn);
 
 /* Declared here, defined across wayland_connection.c, wayland_window.c
  * dispatch is wl_display_dispatch() itself (no separate translate step

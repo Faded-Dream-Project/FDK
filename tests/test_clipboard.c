@@ -38,6 +38,36 @@ int main(void) {
     }
     checks++;
 
+    /* ---- PRIMARY selection (1.3.4): the same argument-safety
+     * contract. Protocol-shaped coverage (round trips, foreign
+     * owners, middle-click paste) lives in the X11/Wayland
+     * integration suites; the headless layer pins the guards. ---- */
+
+    if (fdk_clipboard_set_primary_text(NULL, "x") !=
+        FDK_ERR_INVALID_ARGUMENT) {
+        fprintf(stderr,
+                "FAIL: primary set with NULL ctx must be "
+                "INVALID_ARGUMENT\n");
+        return 1;
+    }
+    checks++;
+
+    if (fdk_clipboard_get_primary_text(NULL) != NULL) {
+        fprintf(stderr,
+                "FAIL: primary get with NULL ctx must return NULL\n");
+        return 1;
+    }
+    checks++;
+
+    if (fdk_clipboard_set_primary_text(NULL, NULL) !=
+        FDK_ERR_INVALID_ARGUMENT) {
+        fprintf(stderr,
+                "FAIL: primary set(NULL, NULL) must be "
+                "INVALID_ARGUMENT\n");
+        return 1;
+    }
+    checks++;
+
     printf("[ok] clipboard argument safety (%d checks)\n", checks);
     return 0;
 }

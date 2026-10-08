@@ -4,6 +4,7 @@
 
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
+#include "generated/primary-selection-unstable-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -58,6 +59,22 @@ static void registry_global(void *data, struct wl_registry *registry,
             wl_registry_bind(registry, name,
                              &wl_data_device_manager_interface,
                              version < 3 ? version : 3);
+        fdk_wayland_clipboard_device_ready(conn);
+    } else if (strcmp(interface,
+                      zwp_primary_selection_device_manager_v1_interface.name) == 0) {
+        /* OPTIONAL global (1.3.4): the PRIMARY selection protocol —
+         * the classic Unix "whatever is selected" buffer, the one
+         * middle-click pastes. The wlroots family (sway, labwc,
+         * river) offers it; compositors that don't leave it NULL and
+         * the primary ops report FDK_ERR_UNSUPPORTED instead of
+         * faking a local-only buffer. Version 1 is the whole
+         * protocol. The device itself materializes once the SEAT
+         * also exists (clipboard_device_ready creates both). */
+        uint32_t pv = version < 1 ? version : 1;
+        conn->primary_manager =
+            wl_registry_bind(registry, name,
+                             &zwp_primary_selection_device_manager_v1_interface,
+                             pv);
         fdk_wayland_clipboard_device_ready(conn);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         /* HiDPI (Phase 3 completion): bind every output at the

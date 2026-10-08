@@ -40,3 +40,35 @@ char *fdk_clipboard_get_text(fdk_context *ctx) {
     }
     return ctx->ops->clipboard_get_text(ctx->conn);
 }
+
+/* ---- PRIMARY selection (1.3.4) ---- */
+
+fdk_result fdk_clipboard_set_primary_text(fdk_context *ctx,
+                                          const char *text) {
+    if (ctx == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx->conn == NULL || ctx->ops == NULL) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+    if (ctx->ops->clipboard_set_primary_text == NULL) {
+        FDK_WARN("clipboard: backend \"%s\" has no PRIMARY selection "
+                 "support",
+                 ctx->ops->name);
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return ctx->ops->clipboard_set_primary_text(ctx->conn, text);
+}
+
+char *fdk_clipboard_get_primary_text(fdk_context *ctx) {
+    if (ctx == NULL || ctx->conn == NULL || ctx->ops == NULL ||
+        ctx->ops->clipboard_get_primary_text == NULL) {
+        if (ctx != NULL && ctx->conn != NULL && ctx->ops != NULL) {
+            FDK_WARN("clipboard: backend \"%s\" has no PRIMARY selection "
+                     "support",
+                     ctx->ops->name);
+        }
+        return NULL;
+    }
+    return ctx->ops->clipboard_get_primary_text(ctx->conn);
+}

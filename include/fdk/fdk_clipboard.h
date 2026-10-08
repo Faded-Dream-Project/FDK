@@ -27,9 +27,14 @@
  *
  * Scope notes (documented rather than faked):
  *   - UTF-8 text only. No image/URI formats in v1.
- *   - X11: the PRIMARY selection and INCR (incremental, >~1 MiB)
- *     transfers are not supported; oversized reads fail with a
- *     warning instead of hanging.
+ *   - INCR (incremental, >~1 MiB) transfers are not supported;
+ *     oversized reads fail with a warning instead of hanging.
+ *   - PRIMARY is a FIRST-CLASS citizen since 1.3.4 (see the primary
+ *     API below): X11 serves/reads the real ICCCM XA_PRIMARY
+ *     selection, Wayland uses wp_primary_selection_unstable_v1 where
+ *     the compositor offers it, and Entry widgets own PRIMARY
+ *     automatically whenever their selection is non-empty (the
+ *     classic Unix model), with middle-click pasting it.
  *   - Wayland: no wl_data_source "ask" actions, no drag-and-drop.
  *   - The clipboard is not versioned; "set" replaces wholesale.
  */
@@ -77,6 +82,37 @@ fdk_result fdk_clipboard_set_text(fdk_context *ctx, const char *text);
  * client's SelectionNotify stay queued — FDK never dispatches them
  * re-entrantly from inside this call. */
 char *fdk_clipboard_get_text(fdk_context *ctx);
+
+/* ---- PRIMARY selection (1.3.4) ----
+ *
+ * The classic Unix "current selection" buffer, distinct from the
+ * copy/paste CLIPBOARD above: text becomes PRIMARY by being
+ * SELECTED, and the middle button pastes it. FDK's Entry widgets
+ * wire both halves automatically — a non-empty selection owns
+ * PRIMARY (best-effort, no round-trip), and a middle press pastes
+ * PRIMARY at the click. These functions expose the same buffer to
+ * application code (custom text views, status lines, tests).
+ *
+ * Set semantics mirror fdk_clipboard_set_text (copy, wholesale
+ * replace) with ONE difference: the call is BEST-EFFORT by design —
+ * FDK_ERR_PLATFORM is not returned for a failed ownership grab
+ * (the classic model re-owns on every selection change; failing
+ * loudly there would be noise). Reads mirror fdk_clipboard_get_text
+ * (freshly allocated UTF-8 or NULL when empty/unreadable).
+ *
+ * Backend support: X11 always (the real XA_PRIMARY machinery);
+ * Wayland wherever the compositor offers the primary-selection
+ * protocol (sway and wlroots compositors do); FDK_ERR_UNSUPPORTED /
+ * NULL otherwise.
+ *
+ * On Wayland, the compositor pushes the current primary as offer
+ * events during dispatch; a get right after another client selected
+ * text may need one pump to observe it — the same eventual-
+ * consistency the CLIPBOARD read documents.
+ */
+fdk_result fdk_clipboard_set_primary_text(fdk_context *ctx,
+                                          const char *text);
+char *fdk_clipboard_get_primary_text(fdk_context *ctx);
 
 #ifdef __cplusplus
 }

@@ -4118,6 +4118,446 @@ static void test_clipboard(void) {
     fdk_shutdown(ctx);
 }
 
+/* ---- PRIMARY selection (1.3.4) ----
+ *
+ * The classic Unix "current selection" buffer (XA_PRIMARY): the same
+ * ICCCM machinery as CLIPBOARD, a different atom, and total
+ * independence between the two. The child roles below are the
+ * PRIMARY twins of the clipboard ones above. */
+
+/* Foreign PRIMARY owner: takes XA_PRIMARY for `text`, serves UTF8
+ * requests until hangup. Exits 0. */
+static void primary_foreign_owner_main(int sock, const char *text) {
+    alarm(0);
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(10);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+    XSetSelectionOwner(dpy, XA_PRIMARY, w, CurrentTime);
+    if (XGetSelectionOwner(dpy, XA_PRIMARY) != w) {
+        _exit(11);
+    }
+    XFlush(dpy);
+    (void)!write(sock, "R", 1);
+
+    for (;;) {
+        struct pollfd pfds[2];
+        pfds[0].fd = ConnectionNumber(dpy);
+        pfds[0].events = POLLIN;
+        pfds[0].revents = 0;
+        pfds[1].fd = sock;
+        pfds[1].events = POLLIN;
+        pfds[1].revents = 0;
+        int r = poll(pfds, 2, 3000);
+        if (r < 0) {
+            _exit(12);
+        }
+        if (pfds[1].revents != 0) {
+            char c;
+            if (recv(sock, &c, 1, 0) <= 0) {
+                _exit(0);
+            }
+            _exit(0);
+        }
+        while (XPending(dpy) > 0) {
+            XEvent ev;
+            XNextEvent(dpy, &ev);
+            if (ev.type != SelectionRequest ||
+                ev.xselectionrequest.selection != XA_PRIMARY) {
+                continue;
+            }
+            const XSelectionRequestEvent *req = &ev.xselectionrequest;
+            XEvent reply;
+            memset(&reply, 0, sizeof(reply));
+            reply.type = SelectionNotify;
+            reply.xselection.requestor = req->requestor;
+            reply.xselection.selection = req->selection;
+            reply.xselection.target = req->target;
+            reply.xselection.time = req->time;
+            if (req->target == utf8) {
+                XChangeProperty(dpy, req->requestor, req->property,
+                                utf8, 8, PropModeReplace,
+                                (const unsigned char *)text,
+                                (int)strlen(text));
+                reply.xselection.property = req->property;
+            } else {
+                reply.xselection.property = None;
+            }
+            XSendEvent(dpy, req->requestor, False, 0, &reply);
+            XFlush(dpy);
+        }
+    }
+}
+
+/* Foreign PRIMARY requestor: converts FDK's XA_PRIMARY as UTF8_STRING
+ * and verifies the payload matches `want`. Handshake 'P' on success
+ * (via the socket), then exits 0; failure exit codes name the stage. */
+static void primary_requestor_main(int sock, const char *want) {
+    alarm(0);
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(20);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+    Atom prop = XInternAtom(dpy, "_FDK_TEST_PROP", False);
+    XConvertSelection(dpy, XA_PRIMARY, utf8, prop, w, CurrentTime);
+    XFlush(dpy);
+    for (;;) {
+        XEvent ev;
+        if (XPending(dpy) == 0) {
+            struct pollfd pfd = { ConnectionNumber(dpy), POLLIN, 0 };
+            if (poll(&pfd, 1, 3000) <= 0) {
+                _exit(21); /* no answer */
+            }
+            continue;
+        }
+        XNextEvent(dpy, &ev);
+        if (ev.type != SelectionNotify ||
+            ev.xselection.selection != XA_PRIMARY) {
+            continue;
+        }
+        if (ev.xselection.property == None) {
+            _exit(22); /* refused */
+        }
+        Atom type = None;
+        int fmt = 0;
+        unsigned long n = 0, left = 0;
+        unsigned char *data = NULL;
+        if (XGetWindowProperty(dpy, w, prop, 0, 1 << 20, True, utf8,
+                               &type, &fmt, &n, &left, &data) != Success) {
+            _exit(23);
+        }
+        int ok = (type == utf8 && fmt == 8 && data != NULL &&
+                  n == strlen(want) &&
+                  memcmp(data, want, n) == 0);
+        if (data != NULL) {
+            XFree(data);
+        }
+        if (!ok) {
+            _exit(24);
+        }
+        (void)!write(sock, "P", 1);
+        _exit(0);
+    }
+}
+
+static void test_clipboard_primary(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* --- 1. Own-ownership round trip + replace + empty-as-NULL --- */
+    assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "primary text")));
+    char *text = fdk_clipboard_get_primary_text(ctx);
+    assert(text != NULL && strcmp(text, "primary text") == 0);
+    fdk_free(text);
+
+    assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "re-prioritized")));
+    text = fdk_clipboard_get_primary_text(ctx);
+    assert(text != NULL && strcmp(text, "re-prioritized") == 0);
+    fdk_free(text);
+
+    assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "")));
+    assert(fdk_clipboard_get_primary_text(ctx) == NULL);
+    printf("[ok] primary: FDK round trip, replace semantics, "
+           "empty-as-NULL\n");
+
+    /* --- 2. Independence: CLIPBOARD and PRIMARY never cross --- */
+    assert(fdk_ok(fdk_clipboard_set_text(ctx, "clip-A")));
+    assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "prim-B")));
+    char *c1 = fdk_clipboard_get_text(ctx);
+    char *p1 = fdk_clipboard_get_primary_text(ctx);
+    assert(c1 != NULL && strcmp(c1, "clip-A") == 0);
+    assert(p1 != NULL && strcmp(p1, "prim-B") == 0);
+    fdk_free(c1);
+    fdk_free(p1);
+    printf("[ok] primary: CLIPBOARD and PRIMARY stay independent\n");
+
+    /* --- 3. Foreign PRIMARY owner serves FDK's get (the real
+     * XA_PRIMARY convert through the server) --- */
+    {
+        int sock = -1;
+        pid_t pid = clip_spawn(primary_foreign_owner_main,
+                               "_FDK_PRIMARY_TEXT_", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+        alarm(0);
+        char *foreign = fdk_clipboard_get_primary_text(ctx);
+        assert(foreign != NULL &&
+               strcmp(foreign, "_FDK_PRIMARY_TEXT_") == 0);
+        fdk_free(foreign);
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] primary: foreign owner serves FDK get_primary_text "
+               "(real XA_PRIMARY SelectionRequest/Notify)\n");
+    }
+
+    /* --- 4. FDK serves a foreign PRIMARY requestor --- */
+    {
+        assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "served as primary")));
+        int sock = -1;
+        pid_t pid = clip_spawn(primary_requestor_main,
+                               "served as primary", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        for (int i = 0; i < 40; i++) {
+            (void)fdk_pump_events(ctx, 50);
+            ssize_t n = recv(sock, &c, 1, MSG_DONTWAIT);
+            if (n == 1) {
+                break;
+            }
+        }
+        alarm(0);
+        if (c != 'P') {
+            int st = 0;
+            (void)waitpid(pid, &st, 0);
+            fprintf(stderr, "primary requestor child failed: "
+                    "exit=%d sig=%d msg=%d\n",
+                    WIFEXITED(st) ? WEXITSTATUS(st) : -1,
+                    WIFSIGNALED(st) ? WTERMSIG(st) : 0, (int)c);
+            assert(0);
+        }
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] primary: FDK serves a foreign PRIMARY requestor "
+               "(UTF8 payload exact)\n");
+    }
+
+    /* --- 5. SelectionClear isolation: losing PRIMARY drops only the
+     * PRIMARY copy; the CLIPBOARD copy keeps serving --- */
+    {
+        assert(fdk_ok(fdk_clipboard_set_text(ctx, "clip survives")));
+        assert(fdk_ok(fdk_clipboard_set_primary_text(ctx, "prim dies")));
+        int sock = -1;
+        pid_t pid = clip_spawn(primary_foreign_owner_main,
+                               "_FDK_PRIM_TAKEOVER_", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+        alarm(0);
+        (void)fdk_pump_events(ctx, 200);
+        /* PRIMARY now reads the foreign owner's text... */
+        char *prim = fdk_clipboard_get_primary_text(ctx);
+        assert(prim != NULL && strcmp(prim, "_FDK_PRIM_TAKEOVER_") == 0);
+        fdk_free(prim);
+        /* ...while CLIPBOARD still serves OUR text (the SelectionClear
+         * for XA_PRIMARY must not free the CLIPBOARD copy). */
+        char *clip = fdk_clipboard_get_text(ctx);
+        assert(clip != NULL && strcmp(clip, "clip survives") == 0);
+        fdk_free(clip);
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] primary: SelectionClear isolation — PRIMARY loss "
+               "never touches the CLIPBOARD copy\n");
+    }
+
+    /* --- 6. Multi-byte UTF-8 through the PRIMARY interop path --- */
+    {
+        int sock = -1;
+        pid_t pid = clip_spawn(primary_foreign_owner_main,
+                               "pr\xc3\xa9" "mier \xe2\x9c\x93", &sock);
+        assert(pid > 0);
+        alarm(5);
+        char c = 0;
+        assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+        alarm(0);
+        char *utf8 = fdk_clipboard_get_primary_text(ctx);
+        assert(utf8 != NULL &&
+               strcmp(utf8, "pr\xc3\xa9" "mier \xe2\x9c\x93") == 0);
+        fdk_free(utf8);
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] primary: multi-byte UTF-8 from a foreign owner "
+               "round-trips exactly\n");
+    }
+
+    fdk_shutdown(ctx);
+}
+
+/* The Entry widget's PRIMARY integration under real X11 input: the
+ * classic Unix model end-to-end. Selections OWN primary (auto, from
+ * real Ctrl+A / drag gestures), middle-click PASTES it at the click,
+ * the politeness contract holds (no ownership grab from an empty
+ * selection), and self-paste (select, middle-click the same field)
+ * works — the read-before-collapse ordering. */
+static void test_entry_primary(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_font *font = fdk_font_load_system_default(16);
+    assert(font != NULL);
+
+    /* Politeness first: a foreign client owns PRIMARY with known
+     * text; creating + typing into an entry with NO selection must
+     * never steal it. */
+    int sock = -1;
+    pid_t owner_pid = clip_spawn(primary_foreign_owner_main,
+                                 "_FOREIGN_STAYS_", &sock);
+    assert(owner_pid > 0);
+    alarm(5);
+    char c = 0;
+    assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+    alarm(0);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK entry primary test",
+                                 .width = 300, .height = 140 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget *entry = NULL;
+    assert(fdk_ok(fdk_entry_create(root, font, "", &entry)));
+    fdk_rect r = { 20, 20, 240, 36 };
+    fdk_widget_set_bounds(entry, r);
+    assert(fdk_widget_focus(entry));
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Type "abcd" (real keys; no selection ever exists). */
+    static const int abcd_keys[4] = { 38, 56, 54, 40 }; /* a b c d */
+    for (int i = 0; i < 4; i++) {
+        x11_send_key_event(send_dpy, xid, KeyPress,
+                           (unsigned)abcd_keys[i]);
+        x11_send_key_event(send_dpy, xid, KeyRelease,
+                           (unsigned)abcd_keys[i]);
+        (void)fdk_pump_events(ctx, 50);
+    }
+    (void)fdk_pump_events(ctx, 100);
+    assert(strcmp(fdk_entry_get_text(entry), "abcd") == 0);
+
+    /* The foreign owner still owns PRIMARY (we never grabbed). */
+    char *still = fdk_clipboard_get_primary_text(ctx);
+    assert(still != NULL && strcmp(still, "_FOREIGN_STAYS_") == 0);
+    fdk_free(still);
+    printf("[ok] entry-primary: typing without a selection never "
+           "grabs PRIMARY (politeness)\n");
+
+    /* Ctrl+A: the selection owns PRIMARY — the classic model. */
+    x11_send_key_event_ctrl(send_dpy, xid, 38); /* a */
+    (void)fdk_pump_events(ctx, 100);
+    char *primary = fdk_clipboard_get_primary_text(ctx);
+    assert(primary != NULL && strcmp(primary, "abcd") == 0);
+    fdk_free(primary);
+    printf("[ok] entry-primary: Ctrl+A select-all auto-owns PRIMARY "
+           "(the classic Unix model)\n");
+
+    /* Middle-click PASTE AT THE CLICK: entry-local x=230 is past the
+     * text, so PRIMARY ("abcd", ours) inserts at the end. Self-paste
+     * — the read-before-collapse ordering is what makes this work. */
+    x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                           (long)(ButtonPressMask | ButtonReleaseMask),
+                           20 + 230, 20 + 18, 2);
+    x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                           (long)(ButtonPressMask | ButtonReleaseMask),
+                           20 + 230, 20 + 18, 2);
+    (void)fdk_pump_events(ctx, 100);
+    assert(strcmp(fdk_entry_get_text(entry), "abcdabcd") == 0);
+    assert(fdk_entry_get_cursor(entry) == 8);
+    printf("[ok] entry-primary: middle-click pastes PRIMARY at the "
+           "click point (self-paste works)\n");
+
+    /* Foreign PRIMARY pastes: our Ctrl+A took PRIMARY from the first
+     * owner, so a FRESH foreign owner re-arms it (ownership transfer
+     * live, cross-process); then middle-click at entry-local x=0
+     * inserts its text at the very start. */
+    {
+        int sock2 = -1;
+        pid_t owner2 = clip_spawn(primary_foreign_owner_main,
+                                  "_FOREIGN2_", &sock2);
+        assert(owner2 > 0);
+        alarm(5);
+        char c2 = 0;
+        assert(recv(sock2, &c2, 1, 0) == 1 && c2 == 'R');
+        alarm(0);
+        /* The takeover is real: a get must serve the new owner. */
+        char *fp = fdk_clipboard_get_primary_text(ctx);
+        assert(fp != NULL && strcmp(fp, "_FOREIGN2_") == 0);
+        fdk_free(fp);
+
+        x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                               (long)(ButtonPressMask | ButtonReleaseMask),
+                               20 + 0, 20 + 18, 2);
+        x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                               (long)(ButtonPressMask | ButtonReleaseMask),
+                               20 + 0, 20 + 18, 2);
+        (void)fdk_pump_events(ctx, 200);
+        assert(strcmp(fdk_entry_get_text(entry),
+                      "_FOREIGN2_abcdabcd") == 0);
+        close(sock2);
+        int status = 0;
+        assert(waitpid(owner2, &status, 0) == owner2 &&
+               WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        printf("[ok] entry-primary: middle-click pastes a FOREIGN "
+               "owner's PRIMARY (cross-client, real XA_PRIMARY)\n");
+    }
+
+    /* Left-click collapse (after our pushes): PRIMARY empties — the
+     * classic observable is that a following middle-click pastes
+     * nothing. Note the foreign owner still holds ownership server-
+     * side from the last section: our collapse push re-grabbed it
+     * with "", so reads are NULL but the OWNER is us now. */
+    x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                           (long)(ButtonPressMask | ButtonReleaseMask),
+                           20 + 120, 20 + 18, 1);
+    x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                           (long)(ButtonPressMask | ButtonReleaseMask),
+                           20 + 120, 20 + 18, 1);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk_clipboard_get_primary_text(ctx) == NULL);
+    printf("[ok] entry-primary: selection collapse empties PRIMARY "
+           "(after a push; middle-click now pastes nothing)\n");
+
+    /* Read-only refuses the middle-click paste (the reader
+     * contract: selection + copy yes, mutation no). */
+    fdk_entry_set_read_only(entry, true);
+    size_t before = strlen(fdk_entry_get_text(entry));
+    x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                           (long)(ButtonPressMask | ButtonReleaseMask),
+                           20 + 100, 20 + 18, 2);
+    x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                           (long)(ButtonPressMask | ButtonReleaseMask),
+                           20 + 100, 20 + 18, 2);
+    (void)fdk_pump_events(ctx, 100);
+    assert(strlen(fdk_entry_get_text(entry)) == before);
+    printf("[ok] entry-primary: read-only entries refuse the "
+           "middle-click paste\n");
+
+    XCloseDisplay(send_dpy);
+    close(sock); /* release the foreign owner */
+    {
+        int status = 0;
+        assert(waitpid(owner_pid, &status, 0) == owner_pid &&
+               WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    }
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] entry-primary: full classic-Unix integration over "
+           "real X11 input\n");
+}
+
 /* ---- Entry widget under real X11 input (Phase 9) ----
  *
  * Real KeyPress events through XSendEvent (server-side keycode ->
@@ -5410,21 +5850,6 @@ static void dnd_count_window_event(fdk_window *w, const fdk_event_data *ev,
     }
 }
 
-/* Pumps while the xdnd_source child runs (bounded). Returns the
- * child's exit status, or -1 on timeout. */
-static int pump_wait_child(fdk_context *ctx, pid_t pid, int timeout_ms) {
-    int spins = timeout_ms / 50;
-    for (int i = 0; i < spins; i++) {
-        (void)fdk_pump_events(ctx, 50);
-        int status = 0;
-        pid_t r = waitpid(pid, &status, WNOHANG);
-        if (r == pid) {
-            return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-        }
-    }
-    return -1;
-}
-
 /* Pumps FDK while draining a popen child's stdout NON-BLOCKINGLY
  * (the child goes silent mid-handshake; a blocking read would starve
  * the pump). Returns the child's exit code, or -1 on timeout. */
@@ -6050,6 +6475,8 @@ int main(void) {
     test_ewmh_fake_wm();
     test_mitm_shm_and_double_buffer();
     test_clipboard();
+    test_clipboard_primary();
+    test_entry_primary();
     test_entry_gui();
     test_popup_window();
     test_menu_gui();
