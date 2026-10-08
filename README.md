@@ -46,7 +46,22 @@ tree construction), the performance baseline harness, the ABI audit
 with compile-time size assertions and the subclassing decision,
 the memory-safety audit, pkg-config packaging, and the "1.0.0"
 milestone ABI freeze (`FDK_ABI_STABLE` = 1; the public version is
-0.0.1 by policy — `docs/versioning.md`). See "What works today"
+0.0.1 by policy — `docs/versioning.md`).
+
+The application platform layered on top: the full clipboard (both
+X11 selections — CLIPBOARD and the classic Unix PRIMARY middle-click
+buffer — plus cross-process Wayland data-device and
+primary-selection protocols), drag and drop, file dialogs, keyboard
+shortcuts and menu accelerators, Alt-letter menu mnemonics,
+tooltips over real platform popup surfaces, the undo/redo stack
+(with the Entry's built-in coalescing history), the timer queue
+(caret blink, indeterminate progress, Wayland client-driven key
+repeat), full-Unicode XIM text entry on X11, and application
+preferences — a strict, human-editable, atomically-saved settings
+store (`fdk_prefs`, `docs/fdk-prefs-format.md`) whose corrupt-file
+posture is fail-soft: defaults, one warning, the app keeps running.
+
+See "What works today"
 below and `docs/roadmap.md` for an honest, specific list of what is
 and isn't covered.
 
@@ -709,6 +724,9 @@ left the X server when the chain closed:
 | `docs/versioning.md` | The public version policy: why FDK is and stays `0.0.1`, and what that number does (and does not) mean |
 | `docs/dependencies.md` | Every current and anticipated dependency, with justification |
 | `docs/licensing-policy.md` | What licenses are/aren't allowed in, and the audit procedure |
+| `docs/fdk-theme-format.md` | The `.fdk` theme file grammar |
+| `docs/fdk-catalog-format.md` | The `.fmo` translation-catalog grammar |
+| `docs/fdk-prefs-format.md` | The `.prefs` application-settings grammar and resilience rules |
 
 ## License
 

@@ -178,9 +178,17 @@ build-state artifact.
 
 The fix is the configuration stamp: `make release` re-invokes make
 with `FDK_CONFIG=release`, every object depends on
-`build/.config-<mode>`, and the stamp rule rewrites itself (making
-it newer than every object, forcing a full rebuild) only when the
-configuration actually changed. Same-config builds keep normal
+`build/.config-<mode>-wl<0|1>`, and the stamp rule rewrites itself
+(making it newer than every object, forcing a full rebuild) only
+when the configuration actually changed. The key carries BOTH axes
+that change object contents — debug/release and Wayland on/off —
+because the second axis is environment-derived (pkg-config
+visibility of libwayland-dev/libxkbcommon-dev) and can flip without
+any source change; a rig or environment reset that hides the
+toolchain would otherwise leave the enabled-backend objects "up to
+date" inside a build that no longer contains them (the 1.3.7 find:
+sway-rig apps linked against the disabled stub ignored a valid
+`WAYLAND_DISPLAY`). Same-config builds keep normal
 incremental behavior — the stamp rule runs on every invocation but
 is a no-op unless the mode name differs, so its mtime only moves on
 a real switch. The stamps live under `build/` and vanish with
@@ -195,3 +203,24 @@ build the other; the project deliberately has one active
 configuration per tree rather than two build directories, because
 every rig script addresses `build/tests/...` and `build/examples/...`
 by path.
+
+## Why the static archive is removed before re-archiving
+
+The third member of the same bug family, found live in 1.3.7:
+`ar rcs` REPLACES the members it is handed but never DROPS members
+that fell out of the list. When a build configuration switch removes
+objects (the Wayland toolchain disappearing from the environment
+flips `BUILD_WAYLAND` to 0, and `wayland_*.o` leaves `LIB_OBJS`),
+the stale objects stay inside `libfdk.a` next to the fresh
+`wayland_disabled.o` — and every subsequent link resolves symbols
+from a backend the current build no longer contains, against
+libraries that may not even be installed anymore. The link fails
+far from the cause (an `undefined reference to wl_proxy_get_version`
+from `wayland_seat.o` nobody asked for).
+
+The fix: the `$(STATIC_LIB)` rule does `rm -f $@` before
+`$(AR) rcs`, so the archive is always exactly the current member
+list. Together with the config stamp above, this closes the whole
+family: objects can no longer outlive the configuration that
+produced them, whether through shared paths (1.3.4) or through
+archive accumulation (1.3.7).

@@ -61,6 +61,7 @@
 
 #include "example_window.h"
 #include "fdk/fdk_dialog.h"
+#include "fdk/fdk_prefs.h"
 
 #include <dirent.h>
 #include <signal.h>
@@ -113,6 +114,7 @@ static struct {
     bool sort_desc;
     history_t back;
     history_t fwd;
+    fdk_prefs *prefs;      /* 1.3.7: view state + geometry across runs */
     /* widgets */
     fdk_widget *places;
     fdk_widget *btn_back, *btn_fwd, *btn_up, *btn_refresh;
@@ -1055,11 +1057,40 @@ int main(void) {
         return 1;
     }
 
+    /* Application preferences (1.3.7): the window geometry, the
+     * view toggles, the sort mode, and the last browsed directory
+     * survive restarts. A corrupt file fails soft — defaults, the
+     * app runs — so this can never block startup. The rigs point
+     * FDK_PREFS_FILE at a scratch path to stay hermetic. */
     fdk_window_options wopts = {
         .title = "FDK Files",
         .width = 880,
         .height = 540,
     };
+    if (fdk_ok(fdk_prefs_open("fdk-files", &app.prefs))) {
+        long w = fdk_prefs_get_int(app.prefs, "win.width", 880);
+        long h = fdk_prefs_get_int(app.prefs, "win.height", 540);
+        if (w >= 640 && w <= 1600) {
+            wopts.width = (fdk_i32)w;
+        }
+        if (h >= 400 && h <= 1200) {
+            wopts.height = (fdk_i32)h;
+        }
+        long sort = fdk_prefs_get_int(app.prefs, "ui.sort", 0);
+        app.sort_mode = (sort >= 0 && sort <= SORT_MTIME)
+                            ? (int)sort
+                            : SORT_NAME;
+        app.sort_desc =
+            fdk_prefs_get_bool(app.prefs, "ui.descending", false);
+        app.show_hidden =
+            fdk_prefs_get_bool(app.prefs, "ui.hidden", false);
+        printf("PREFS: source=%d geometry=%dx%d sort=%d desc=%d "
+               "hidden=%d\n",
+               (int)fdk_prefs_source(app.prefs), wopts.width,
+               wopts.height, app.sort_mode, (int)app.sort_desc,
+               (int)app.show_hidden);
+    }
+
     if (!fdk_ok(fdk_window_create(app.ctx, &wopts, &app.window))) {
         fdk_font_destroy(app.font);
         fdk_shutdown(app.ctx);
@@ -1088,6 +1119,13 @@ int main(void) {
     (void)fdk_button_create(root, app.font, "Delete", &app.btn_delete);
     fdk_button_set_on_activate(app.btn_delete, delete_clicked, NULL);
     (void)fdk_toggle_create(root, app.font, "Hidden", &app.btn_hidden);
+    /* Persisted view state applies BEFORE the callback exists:
+     * set_checked fires the change handler, and hidden_toggled
+     * reloads the listing — silent initialization, exactly one
+     * load_dir() at startup (the rigs count console lines). */
+    if (app.show_hidden) {
+        fdk_toggle_set_checked(app.btn_hidden, true);
+    }
     fdk_toggle_set_on_changed(app.btn_hidden, hidden_toggled, NULL);
 
     /* Toolbar row 2. */
@@ -1100,10 +1138,14 @@ int main(void) {
     (void)fdk_combo_append(app.combo_sort, "Name", NULL);
     (void)fdk_combo_append(app.combo_sort, "Size", NULL);
     (void)fdk_combo_append(app.combo_sort, "Modified", NULL);
-    (void)fdk_combo_set_active(app.combo_sort, 0);
+    /* Same silent-init rule as the Hidden toggle above. */
+    (void)fdk_combo_set_active(app.combo_sort, app.sort_mode);
     fdk_combo_set_on_changed(app.combo_sort, sort_changed, NULL);
     (void)fdk_toggle_create(root, app.font, "Descending",
                             &app.toggle_desc);
+    if (app.sort_desc) {
+        fdk_toggle_set_checked(app.toggle_desc, true);
+    }
     fdk_toggle_set_on_changed(app.toggle_desc, desc_toggled, NULL);
 
     /* Columns hint + body. */
@@ -1135,6 +1177,20 @@ int main(void) {
     const char *home = getenv("HOME");
     snprintf(app.dir, sizeof(app.dir), "%s",
              (home != NULL && home[0]) ? home : "/");
+    /* The last browsed directory, restored only if it still EXISTS
+     * (a settings file must never resurrect a deleted path — the
+     * existence check is the app's policy, the store just keeps
+     * the string). */
+    if (app.prefs != NULL) {
+        const char *last =
+            fdk_prefs_get(app.prefs, "nav.last_dir", NULL);
+        if (last != NULL && last[0] == '/') {
+            struct stat st;
+            if (stat(last, &st) == 0 && S_ISDIR(st.st_mode)) {
+                snprintf(app.dir, sizeof(app.dir), "%s", last);
+            }
+        }
+    }
     relayout();
     load_dir();
     fdk_window_show(app.window);
@@ -1178,6 +1234,33 @@ int main(void) {
 
     printf("PHASE: quit\n");
     fflush(stdout);
+
+    /* Persist the session: geometry, view state, last directory.
+     * This is the whole integration — open at the top, save at the
+     * bottom, typed get/set in between. */
+    if (app.prefs != NULL) {
+        fdk_size wsz = {0, 0};
+        (void)fdk_window_get_size(app.window, &wsz);
+        if (wsz.width > 0 && wsz.height > 0) {
+            (void)fdk_prefs_set_int(app.prefs, "win.width",
+                                    wsz.width);
+            (void)fdk_prefs_set_int(app.prefs, "win.height",
+                                    wsz.height);
+        }
+        (void)fdk_prefs_set_int(app.prefs, "ui.sort", app.sort_mode);
+        (void)fdk_prefs_set_bool(app.prefs, "ui.descending",
+                                 app.sort_desc);
+        (void)fdk_prefs_set_bool(app.prefs, "ui.hidden",
+                                 app.show_hidden);
+        (void)fdk_prefs_set(app.prefs, "nav.last_dir", app.dir);
+        fdk_result sr = fdk_prefs_save(app.prefs);
+        printf("PREFS: %s (%zu keys)\n",
+               fdk_ok(sr) ? "saved" : "save failed",
+               fdk_prefs_count(app.prefs));
+        fdk_prefs_destroy(app.prefs);
+        app.prefs = NULL;
+    }
+
     list_free();
     fdk_font_destroy(app.font);
     fdk_shutdown(app.ctx);

@@ -3381,3 +3381,135 @@ the title band, the F and E underline runs and nothing else.
 Example 07's menus now carry mnemonics throughout (F/E/H titles,
 items, and a Cu&t to show the not-first-letter case); the display
 text is unchanged, so every rig coordinate still holds.
+
+### 1.3.7 — application preferences (the settings half of a serious app)
+
+The audit's standing list had two items left: this and the
+animation layer. A GUI toolkit that can render, theme, localize,
+and persist nothing is a demo; settings persistence is the
+difference between "it works" and "I use it daily". The design
+goal was the smallest API that covers the whole policy surface —
+open, typed get/set with defaults, save — with everything else
+(name spacing, save cadence, which keys exist) owned by the
+application.
+
+THE STORE: one ordered array of (key, value, file_value) rows —
+section.name keys, one dot, 1..64 chars per half, case-sensitive,
+8192-key / 256-byte-value / 1 MiB-file bounds. No hash table:
+settings files are tens of keys, and linear lookup at that size
+beats a hash's cache behavior (and is infinitely easier to keep
+correct — the same reasoning as the theme parser's token table).
+file_value is the exact bytes the file carried; it is what makes
+save()'s dirty flag EXACT rather than monotonic (more below).
+
+THE FORMAT: FDK's third strict line-based dialect
+(docs/fdk-prefs-format.md is the normative reference — after the
+.fdk theme grammar and the .fmo catalog grammar). [section]
+headers, name = value lines, # and // comments, blank lines, LF or
+CRLF, UTF-8 values with a well-formedness walk, duplicate keys are
+load errors carrying a line number, whitespace around the '=' is
+separator (a name is [A-Za-z0-9_-], so a space run before '=' can
+only be that — `width = 880`, `width= 880`, and `width  =880` are
+the same line; the writer's canonical form is `name = value`).
+
+THE ONE FAMILY DIVERGENCE — failure posture. Themes fail loud (a
+half-themed UI is worse than no theme); a preferences file fails
+SOFT: fdk_prefs_open turns a rejected file into an EMPTY store
+with one warning naming the offending line, every getter serves
+its default, the app runs like a first launch, and the next save()
+rewrites the file cleanly. The grammar is exactly as strict as the
+theme parser's — what changes is what the caller sees when it
+fires. Both rules are right for their own kind of file, and the
+header comment says so in exactly those words.
+
+THE EXACT DIRTY FLAG (the real bug this milestone's tests caught):
+the first implementation set a monotonic dirty=1 on every set — so
+"set away, set back to the file's own value, save" still rewrote
+the disk, contradicting the documented "save() on an unchanged
+store touches no disk". The fix recomputes dirty at every mutation
+(any row whose value differs from its file_value, any row not in
+the file, or the removal tombstone — a REMOVED row is gone, no
+row-walk can see it, so a sticky bit that only save() clears
+carries removals). The test proves it with INODE IDENTITY: rename
+always mints a new inode, so "unchanged save left the inode alone"
+is disk-level proof the write was skipped (mtime alone is too
+coarse on tmpfs).
+
+Also in the same family: the warn-once contract — an unparsable
+present value (a hand-edited `width = narrows`) reads as the
+DEFAULT, never an error, and logs exactly ONE debug line on first
+read (7 unparsable keys read 15+ times = exactly 7 lines, pinned
+by a captured log sink) — a getter on a render-loop path must not
+spam.
+
+THE WRITE: temp file in the same directory, fsync, rename — atomic
+on POSIX; a crash mid-save can leave .tmpXXXXXX residue but never
+a truncated prefs file. Comments in a loaded file do not survive a
+save (values do; hand-added comments do not — preserving comments
+requires a document editor, not a settings store). CRLF input is
+normalized to LF on rewrite. A fresh store that never set anything
+never creates a file at all (no empty-config litter).
+
+THE INTEGRATION: example 10 (the file manager) is the flagship
+customer — window geometry (clamped 640..1600 x 400..1200, so a
+stale file cannot summon an unusable window), sort mode,
+descending, show-hidden, and the last browsed directory, restored
+only if the directory still exists (a settings file must never
+resurrect a deleted path). Persisted widget state applies BEFORE
+the change callbacks are registered — set_checked fires the
+handler, and hidden_toggled reloads the listing; silent
+initialization keeps exactly one load_dir() at startup. The whole
+integration is ~40 lines: open at the top, typed get/set between,
+save at quit. The X11 rig exercises the full round trip for real
+(WM-close -> graceful quit -> saved file -> human-readable output
+verified); both example rigs point FDK_PREFS_FILE at a scratch
+path so rigs stay hermetic and deterministic.
+
+TESTS: tests/test_prefs.c, 12 groups — argument safety on every
+entry point; the key grammar (programmatic 64/65-char bounds —
+hand-counted literals lie, found live); path resolution
+(override > XDG > HOME > honest memory-only, save() returns
+FDK_ERR_UNSUPPORTED instead of inventing a location); the parser
+acceptance surface; an 18-file rejection matrix (key before
+section, duplicates including across section repeats, bad names,
+control characters, truncated UTF-8, over-long lines/names/values,
+the 1 MiB bound — each rejected file yields an empty store and
+defaults, the app survives); exact strtol/strtod/bool-table
+semantics; the golden save-bytes compare; the bit-for-bit
+set/save/reopen round trip; the inode-proven dirty exactness; the
+8192-key bound with removal freeing budget; CRLF normalization;
+and the corrupt-file recovery rewrite end-to-end.
+
+THE BUILD BUGS THE BATTERY FLUSHED (this milestone's second
+lesson): a sandbox environment reset wiped the Wayland toolchain
+prefix, and three real bugs surfaced in sequence. (1) `ar rcs`
+REPLACES members but never DROPS ones that left the list — the
+stale wayland_*.o stayed inside libfdk.a beside the fresh
+wayland_disabled.o, and the link resolved symbols from a backend
+the build no longer contained. Fix: the archive is rm'd before
+re-archiving; it is always exactly the current member list.
+(2) The 1.3.4 config stamp tracked only the debug/release axis —
+the Wayland on/off axis is ENVIRONMENT-derived (pkg-config
+visibility), so a rig running make with a different
+PKG_CONFIG_PATH flipped the backend silently, stale objects stayed
+"up to date" by timestamp, and the sway rigs then launched X11-only
+binaries that ignored a perfectly valid WAYLAND_DISPLAY and fell
+through to a dead X11. Fix: the stamp key carries both axes
+(.config-debug-wl1), so any flip forces one full rebuild — the
+correct-but-slow trade the 1.3.4 entry already documents for config
+switches. (3) The X11 example rig assumed the binaries existed and
+PASSED VACUOUSLY against yesterday's PNGs when a make clean had
+emptied build/examples — the exact Task-24/36 failure mode the
+sway rig was hardened against, never applied to the X11 rig. Fix:
+the rig builds first and clears stale captures, and it exposes the
+Wayland toolchain prefix when present so the whole battery stays
+in ONE configuration instead of flip-rebuilding between rigs.
+Both lessons are documented in docs/build.md (the archive and
+stamp entries) and in the rig scripts themselves.
+
+Battery on the final tree: headless all-pass (488 [ok] groups);
+X11 integration 108 [ok] exit 0; Wayland interop rig PASS
+(clipboard + PRIMARY + key repeat under one real sway); X11
+examples 10/10 with clean exits and the prefs round trip; sway
+examples 10/10; both tooltip rigs PASS; compositor-death rig PASS;
+release config zero warnings; debug-remnant scan clean.

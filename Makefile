@@ -111,7 +111,18 @@ REL_FLAGS   := -O2 -DNDEBUG
 # changes, and is a no-op (one stat) when it hasn't.
 FDK_CONFIG  ?= debug
 CONFIG_FLAGS := $(if $(filter release,$(FDK_CONFIG)),$(REL_FLAGS),$(DEBUG_FLAGS))
-CONFIG_STAMP := $(BUILD_DIR)/.config-$(FDK_CONFIG)
+# The stamp key carries BOTH axes that change what an object file
+# contains: debug/release AND Wayland on/off. The Wayland axis is
+# environment-derived (pkg-config visibility), which makes it the
+# dangerous one — an environment reset or a rig running make with a
+# different PKG_CONFIG_PATH flips BUILD_WAYLAND without touching any
+# source file, and without the stamp the stale objects/archive from
+# the other configuration remain "up to date" by timestamp (found
+# live in 1.3.7: the sway examples rig linked apps built against the
+# Wayland-disabled stub, which then ignored a perfectly valid
+# WAYLAND_DISPLAY and fell through to a dead X11). Both axes live in
+# ONE stamp name so a flip of either forces one full rebuild.
+CONFIG_STAMP := $(BUILD_DIR)/.config-$(FDK_CONFIG)-wl$(BUILD_WAYLAND)
 
 CFLAGS  ?= $(STD) $(WARN) $(FEATURE) $(CONFIG_FLAGS)
 CPPFLAGS:= -Iinclude -Isrc
@@ -229,9 +240,9 @@ shared: $(SHARED_LIB)
 $(CONFIG_STAMP): FORCE
 	@mkdir -p $(BUILD_DIR)
 	@cur=`cat $@ 2>/dev/null || echo none`; \
-	if [ x"$$cur" != x"$(FDK_CONFIG)" ]; then \
+	if [ x"$$cur" != x"$(FDK_CONFIG)-wl$(BUILD_WAYLAND)" ]; then \
 		rm -f $(BUILD_DIR)/.config-*; \
-		printf '%s\n' '$(FDK_CONFIG)' > $@; \
+		printf '%s\n' '$(FDK_CONFIG)-wl$(BUILD_WAYLAND)' > $@; \
 	fi
 
 .PHONY: FORCE
@@ -245,8 +256,19 @@ $(BUILD_DIR)/obj-pic/%.o: src/%.c $(CONFIG_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(call extra_flags,$<) -MMD -MP -fPIC -c $< -o $@
 
+# `rm -f` before archiving: `ar rcs` REPLACES the named members but
+# never drops members that fell out of the list — a config switch
+# (Wayland on->off) left the stale wayland_*.o inside libfdk.a next
+# to the new wayland_disabled.o, and every link after that pulled
+# symbols from a backend the build no longer contains (found live in
+# 1.3.7 after an environment reset wiped the Wayland toolchain: the
+# link failed on wayland_seat.o's wl_proxy_get_version against a
+# system libwayland with no dev files). Same bug class as the 1.3.4
+# obj/obj-pic mixing one directory over; the archive is now always
+# exactly the current member list.
 $(STATIC_LIB): $(LIB_OBJS)
 	@mkdir -p $(dir $@)
+	@rm -f $@
 	$(AR) rcs $@ $^
 
 $(SHARED_LIB): $(LIB_OBJS_PIC)
