@@ -43,6 +43,7 @@
 #include "../window/window_internal.h"
 
 #include "core/alloc_internal.h"
+#include "core/shortcut_internal.h"
 #include "core/log_internal.h"
 
 #include <string.h>
@@ -58,6 +59,13 @@
 #define MENU_MIN_W 48      /* never narrower than this           */
 #define MENU_MAX_H 512     /* clamp: no scrolling in v1 (docs)   */
 #define MENU_FONT_PAD 8    /* row height = font extent + this   */
+
+/* Depth bound for every recursive model walk (submenu recursion in
+ * the 1.3.3 accelerator scan and the cycle check in
+ * fdk_menu_item_set_submenu). set_submenu refuses cycles outright;
+ * the bound is defense-in-depth so a hand-corrupted model can never
+ * hang a walk. */
+#define MENU_ACCEL_MAX_DEPTH 16
 
 #define BAR_PAD_X 10       /* menubar title padding              */
 #define BAR_LEFT 6         /* menubar leading inset              */
@@ -284,6 +292,10 @@ const char *fdk_menu_item_text(fdk_menu_item *item) {
     return (item_arg(item) != NULL) ? item->text : NULL;
 }
 
+const char *fdk_menu_item_get_shortcut(fdk_menu_item *item) {
+    return (item_arg(item) != NULL) ? item->shortcut : NULL;
+}
+
 fdk_menu_item_type fdk_menu_item_get_type(fdk_menu_item *item) {
     if (item_arg(item) == NULL) {
         return FDK_MENU_ITEM_NORMAL;
@@ -357,14 +369,50 @@ fdk_result fdk_menu_item_set_shortcut(fdk_menu_item *item,
     return FDK_OK;
 }
 
+/* 1.3.3: is `target` reachable from `from` via item->submenu links?
+ * Bounded depth — this walks developer-built models, and the refusal
+ * below is what actually keeps the graph acyclic; the bound only
+ * guarantees this walk terminates even on a pre-existing cycle. */
+static bool menu_reaches(const fdk_menu *from, const fdk_menu *target,
+                         int depth) {
+    if (from == NULL || depth > MENU_ACCEL_MAX_DEPTH) {
+        return false;
+    }
+    if (from == target) {
+        return true;
+    }
+    for (size_t i = 0; i < from->count; i++) {
+        if (menu_reaches(from->items[i]->submenu, target, depth + 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 fdk_result fdk_menu_item_set_submenu(fdk_menu_item *item,
                                      fdk_menu *submenu) {
     item = item_arg(item);
     if (item == NULL || item->kind != FDK_MIK_NORMAL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
+    /* 1.3.3 — cycle refusal: wiring a submenu that already reaches
+     * this item's own menu would build an infinite menu tree. Every
+     * walker of that tree (the session's chain-open recursion, the
+     * accelerator scan, a11y tree walkers) would hang or balloon;
+     * refusing at the setter turns the class into a loud developer
+     * error instead. NULL always clears (no cycle possible). */
+    if (submenu != NULL && item->owner != NULL &&
+        menu_reaches(submenu, item->owner, 0)) {
+        FDK_WARN("menu: set_submenu refused — would create a cycle");
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
     item->submenu = submenu;
     return FDK_OK;
+}
+
+fdk_menu *fdk_menu_item_get_submenu(fdk_menu_item *item) {
+    item = item_arg(item);
+    return (item != NULL) ? item->submenu : NULL;
 }
 
 void fdk_menu_item_set_on_activate(fdk_menu_item *item,
@@ -1970,4 +2018,112 @@ void fdk_menu_bar_close(fdk_widget *bar) {
     if (b->session != NULL && b->session->active) {
         session_close_above(b->session, 0);
     }
+}
+
+/* =====================================================================
+ * 1.3.3 — menu accelerators
+ *
+ * The window's KEY_DOWN dispatch calls fdk__menu_bar_accel_hit with
+ * its root; the scan below is the whole feature. It is LIVE by
+ * design: no registration, no cache, no invalidation protocol to
+ * forget. A menu appended, retitled, destroyed, or re-shortcut
+ * between keypresses is found (or not) exactly as the tree stands
+ * at the moment of the press. The walk runs zero user code, so no
+ * widget or model can die mid-scan; activation runs afterwards and
+ * may destroy anything — the caller treats the returned item as
+ * borrowed-instantly-consumed.
+ *
+ * Scan order is tree order (children in z-order), and within a bar,
+ * title order, and within a menu, row order, recursing into
+ * submenus. The first matching ENABLED item wins — deterministic
+ * and documented. Disabled items do not fire (their rows swallow
+ * clicks in the popup too).
+ * ===================================================================== */
+
+static bool accel_scan_model(const fdk_menu *m, const fdk_key_event *key,
+                             int depth, fdk_menu_item **out_item) {
+    if (m == NULL || depth > MENU_ACCEL_MAX_DEPTH) {
+        return false;
+    }
+    for (size_t i = 0; i < m->count; i++) {
+        fdk_menu_item *it = m->items[i];
+        if (it->kind == FDK_MIK_SEPARATOR || !it->enabled) {
+            continue;
+        }
+        if (it->shortcut != NULL) {
+            fdk_u32 mods = 0;
+            fdk_scancode code = 0;
+            if (fdk_ok(fdk_shortcut_parse(it->shortcut, &mods, &code)) &&
+                fdk__shortcut_matches(mods, code, key)) {
+                *out_item = it;
+                return true;
+            }
+        }
+        if (it->submenu != NULL &&
+            accel_scan_model(it->submenu, key, depth + 1, out_item)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool accel_scan_widget(fdk_widget *w, const fdk_key_event *key,
+                              int depth, fdk_menu_item **out_item) {
+    if (w == NULL || depth > MENU_ACCEL_MAX_DEPTH ||
+        (w->flags & FDK_WF_DESTROYING) != 0) {
+        return false;
+    }
+    if (w->klass == &fdk_menu_bar_class_def) {
+        fdk_menu_bar *b = bar_of(w);
+        for (size_t t = 0; t < b->count; t++) {
+            if (accel_scan_model(b->titles[t].menu, key, 0, out_item)) {
+                return true;
+            }
+        }
+    }
+    /* Descend in z-order (children array order — index 0 first). */
+    for (size_t c = 0; c < w->child_count; c++) {
+        if (accel_scan_widget(w->children[c], key, depth + 1, out_item)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool fdk__menu_bar_accel_hit(fdk_widget *root, const fdk_key_event *key,
+                             fdk_menu_item **out_item) {
+    if (out_item == NULL) {
+        return false;
+    }
+    *out_item = NULL;
+    if (root == NULL || key == NULL) {
+        return false;
+    }
+    return accel_scan_widget(root, key, 0, out_item);
+}
+
+void fdk__menu_item_accel_activate(fdk_menu_item *item) {
+    item = item_arg(item);
+    if (item == NULL || !item->enabled ||
+        item->kind == FDK_MIK_SEPARATOR) {
+        return;
+    }
+    fdk_menu *m = item->owner;
+    /* The session-less twin of view_activate's state flips: identical
+     * check/radio semantics (radios uncheck their whole menu group),
+     * identical callback order (per-item then model fallback). The
+     * view machinery needs no repaint here — nothing is on screen;
+     * if the model drives any on-screen state, the application's
+     * callback invalidates it. After menu_fire returns, `item` and
+     * `m` may be freed — nothing below touches them. */
+    if (item->kind == FDK_MIK_CHECK) {
+        item->checked = !item->checked;
+    } else if (item->kind == FDK_MIK_RADIO && !item->checked) {
+        for (size_t i = 0; i < m->count; i++) {
+            if (m->items[i]->kind == FDK_MIK_RADIO) {
+                m->items[i]->checked = (m->items[i] == item);
+            }
+        }
+    }
+    menu_fire(m, item);
 }

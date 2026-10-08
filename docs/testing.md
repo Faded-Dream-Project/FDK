@@ -1093,3 +1093,39 @@ sway config carries the org.fdk.wl-dnd-source floating pin for its
 suite section — the third occurrence of the lost-pin class (a
 tiled drag source makes the DnD test wait forever), so its suite
 section is also timeout-bounded now.
+
+## 1.3.3 — the shortcut/undo test loop that paid for itself
+
+The 1.3.3 work ran the tests BEFORE the feature was trusted, and
+the loop caught five real bugs in implementation order — each one
+documented where the fix landed. Two lessons worth keeping:
+
+**Pin the grammar table-first.** test_shortcut.c's valid-spec table
+(75 entries covering every key name and modifier combination)
+found the QWERTY/alphabetical letters-table inversion on its FIRST
+run: "Ctrl+S" parsed to physical L. A parser is exactly the kind of
+code where the author's mental model and the code can disagree
+silently — a full table, written from the SPEC (evdev codes
+independently re-derived), is the cheapest detector there is.
+Round-tripping format() through parse() (272 pairs) then caught F10
+("f:" — '1'+9 is ':') without any new mental effort. When adding
+grammar surface, extend the table in the same commit.
+
+**The X11 quit test is a UAF detector, not a nicety.** Registering
+a Ctrl+Q shortcut whose callback destroys its own window found a
+use-after-free the headless suites could never see: the new
+dispatch block read window->ctx for the identity re-check AFTER
+the callback freed the window. The pattern to copy: the destroy-
+mid-callback contract must be exercised with REAL dispatch
+(fdk_window_dispatch_event through a real pump), because the
+destroy re-check ordering is only observable when the free actually
+happens under ASan. The suite's accelerator group now always ends
+with the destroy case.
+
+Also pinned: Entry's undo coalescing had its DELETE-key geometry
+backwards (the caret stays PUT while text flows left — each delete
+takes the same [from, from+1) slot — not an advancing range). The
+headless typing tests expressed the user-level behavior ("hold
+Delete over 'abcd', one undo step restores all") and let the
+geometry be the implementation's problem; that is the right shape
+for widget-behavior tests generally.

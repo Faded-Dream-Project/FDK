@@ -85,4 +85,30 @@ bool fdk__menu_bar_popup_anchor(fdk_widget *bar, fdk_i32 *out_x,
                                 fdk_i32 *out_y);
 int fdk__menu_bar_hit(fdk_widget *bar, fdk_i32 x, fdk_i32 y);
 
+/* ---- menu accelerators (1.3.3; menu.c) ----
+ *
+ * The window's KEY_DOWN dispatch calls fdk__menu_bar_accel_hit to
+ * find the item whose shortcut label matches the live key, then
+ * fdk__menu_item_accel_activate to fire it without opening a menu.
+ *
+ * The scan is LIVE: it walks the tree (every fdk_menu_bar_class_def
+ * widget) and the bars' models (recursing into submenus) on each
+ * keypress, parsing each item's shortcut string then and there. No
+ * registration, no cache, no staleness — a menu appended, retitled,
+ * destroyed, or re-shortcut between keypresses is simply found (or
+ * not) exactly as the tree stands. The walk runs no user code, so
+ * no widget can die mid-scan; activation may destroy anything, and
+ * the caller must not touch the returned item afterwards.
+ *
+ * `root` may be NULL (window without a tree — no accelerators). */
+bool fdk__menu_bar_accel_hit(fdk_widget *root, const fdk_key_event *key,
+                             fdk_menu_item **out_item);
+
+/* Session-less activation — the accelerator twin of view_activate:
+ * flips check/radio state identically and fires the same callbacks
+ * (per-item, then the model fallback), but no popup chain exists to
+ * close. Disabled items refuse (the caller must not have matched
+ * them, but the guard is defense in depth). */
+void fdk__menu_item_accel_activate(fdk_menu_item *item);
+
 #endif /* FDK_MENU_INTERNAL_H */

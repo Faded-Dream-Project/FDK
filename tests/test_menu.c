@@ -450,6 +450,8 @@ static void test_menu_bar_headless(void) {
            "close no-op, painted chrome\n");
 }
 
+static void test_menu_accelerators(void);
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -475,8 +477,235 @@ int main(void) {
     test_view_interaction();
     test_view_paint();
     test_menu_bar_headless();
+    test_menu_accelerators();
 
     fdk_font_destroy(g_font);
     printf("all menu tests passed\n");
     return 0;
+}
+
+/* ---- menu accelerators (1.3.3) ---------------------------------------
+ *
+ * Headless coverage of the scan + the session-less activation:
+ * the scan starts at a tree ROOT (exactly what the window dispatch
+ * hands it), walks bars and submenus, parses shortcut labels live,
+ * and returns the first ENABLED match. Real-key end-to-end (window
+ * dispatch ordering vs the widget tree) is test_x11_integration's
+ * accelerator group.
+ * --------------------------------------------------------------------- */
+
+static fdk_event_data accel_key(fdk_scancode sc, fdk_u32 mods) {
+    fdk_event_data e;
+    memset(&e, 0, sizeof(e));
+    e.type = FDK_EVENT_KEY_DOWN;
+    e.key.scancode = sc;
+    e.key.modifiers = mods;
+    return e;
+}
+
+static int g_accel_hits = 0;
+static fdk_menu_item *g_accel_last = NULL;
+
+static void on_accel(fdk_menu_item *item, void *user) {
+    (void)user;
+    g_accel_hits++;
+    g_accel_last = item;
+}
+
+static void test_menu_accelerators(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *bar = NULL;
+    assert(fdk_ok(fdk_menu_bar_create(root, g_font, &bar)));
+
+    fdk_menu *fm = NULL, *sub = NULL, *em = NULL;
+    assert(fdk_ok(fdk_menu_create(g_font, &fm)));
+    assert(fdk_ok(fdk_menu_create(g_font, &sub)));
+    assert(fdk_ok(fdk_menu_create(g_font, &em)));
+
+    fdk_menu_item *save = NULL, *quit = NULL, *deep = NULL,
+                  *dis_item = NULL;
+    assert(fdk_ok(fdk_menu_append(fm, "New", NULL)));
+    assert(fdk_ok(fdk_menu_append(fm, "Save", &save)));
+    assert(fdk_ok(fdk_menu_append(fm, "Export...", NULL)));
+    fdk_menu_item *export_item = NULL;
+    /* grab the Export item for the submenu wiring */
+    (void)export_item;
+    assert(fdk_ok(fdk_menu_append_separator(fm)));
+    assert(fdk_ok(fdk_menu_append(fm, "Quit", &quit)));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(save, "Ctrl+S")));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(quit, "Ctrl+Q")));
+
+    /* Submenu hung under Save: deep accelerators must be found
+     * through the recursion. */
+    assert(fdk_ok(fdk_menu_append(sub, "As Template", &deep)));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(deep, "Ctrl+Shift+S")));
+    assert(fdk_ok(fdk_menu_item_set_submenu(save, sub)));
+
+    /* Edit menu: a check item + a DISABLED item with a shortcut. */
+    fdk_menu_item *check = NULL;
+    assert(fdk_ok(fdk_menu_append_check(em, "Toolbar", false, &check)));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(check, "Ctrl+T")));
+    assert(fdk_ok(fdk_menu_append(em, "Broken", &dis_item)));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(dis_item, "Ctrl+B")));
+    fdk_menu_item_set_enabled(dis_item, false);
+
+    assert(fdk_ok(fdk_menu_bar_append(bar, "File", fm)));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "Edit", em)));
+
+    /* ---- the scan ---- */
+    fdk_menu_item *hit = NULL;
+
+    /* Ctrl+S finds Save (top-level item). */
+    fdk_event_data k = accel_key(31, FDK_MOD_CTRL);
+    assert(fdk__menu_bar_accel_hit(root, &k.key, &hit) && hit == save);
+
+    /* Ctrl+Shift+S finds the SUBMENU item through the recursion
+     * (scancode 31 = S, the Shift modifier distinguishing it from
+     * Save's plain Ctrl+S — exact-modifier matching). */
+    k = accel_key(31, FDK_MOD_CTRL | FDK_MOD_SHIFT);
+    assert(fdk__menu_bar_accel_hit(root, &k.key, &hit) && hit == deep);
+
+    /* Ctrl+Q finds Quit (after the separator — separators are
+     * skipped by the scan). */
+    k = accel_key(16, FDK_MOD_CTRL);
+    assert(fdk__menu_bar_accel_hit(root, &k.key, &hit) && hit == quit);
+
+    /* Ctrl+T finds the check item in the SECOND bar menu. */
+    k = accel_key(20, FDK_MOD_CTRL);
+    assert(fdk__menu_bar_accel_hit(root, &k.key, &hit) && hit == check);
+
+    /* Disabled items never hit. */
+    k = accel_key(48, FDK_MOD_CTRL);
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, &hit));
+
+    /* Modifier exactness: bare S, Shift+S, Alt+S all miss. */
+    k = accel_key(31, 0);
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, &hit));
+    k = accel_key(31, FDK_MOD_SHIFT);
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, &hit));
+    k = accel_key(31, FDK_MOD_CTRL | FDK_MOD_ALT);
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, &hit));
+
+    /* A different physical key misses. */
+    k = accel_key(30, FDK_MOD_CTRL);
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, &hit));
+
+    /* NULL discipline. */
+    assert(!fdk__menu_bar_accel_hit(NULL, &k.key, &hit));
+    assert(!fdk__menu_bar_accel_hit(root, NULL, &hit));
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, NULL));
+
+    /* ---- liveness: the scan reflects the tree at PRESS time ---- */
+    /* A menu appended AFTER the first scans is found immediately. */
+    fdk_menu *gm = NULL;
+    fdk_menu_item *g_item = NULL;
+    assert(fdk_ok(fdk_menu_create(g_font, &gm)));
+    assert(fdk_ok(fdk_menu_append(gm, "Grid", &g_item)));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(g_item, "Ctrl+G")));
+    assert(fdk_ok(fdk_menu_bar_append(bar, "View", gm)));
+    k = accel_key(34, FDK_MOD_CTRL);
+    assert(fdk__menu_bar_accel_hit(root, &k.key, &hit) && hit == g_item);
+
+    /* Removing the title removes the accelerators with it. */
+    assert(fdk_ok(fdk_menu_bar_remove(bar, 2))); /* View */
+    k = accel_key(34, FDK_MOD_CTRL);
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, &hit));
+    /* The model is intact — the same shortcut on a re-attached
+     * model hits again. */
+    assert(fdk_ok(fdk_menu_bar_append(bar, "View", gm)));
+    k = accel_key(34, FDK_MOD_CTRL);
+    assert(fdk__menu_bar_accel_hit(root, &k.key, &hit) && hit == g_item);
+
+    /* A shortcut CHANGED on the item takes effect on the next
+     * keypress (nothing is cached). */
+    assert(fdk_ok(fdk_menu_item_set_shortcut(g_item, "Ctrl+H")));
+    k = accel_key(34, FDK_MOD_CTRL); /* old binding gone */
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, &hit));
+    k = accel_key(35, FDK_MOD_CTRL); /* new binding live */
+    assert(fdk__menu_bar_accel_hit(root, &k.key, &hit) && hit == g_item);
+
+    /* A garbled shortcut label never matches (parse fails loud at
+     * registration; the scan skips it silently). */
+    assert(fdk_ok(fdk_menu_item_set_shortcut(g_item, "Ctrl+")));
+    k = accel_key(35, FDK_MOD_CTRL);
+    assert(!fdk__menu_bar_accel_hit(root, &k.key, &hit));
+
+    /* ---- the session-less activation ---- */
+    g_accel_hits = 0;
+    g_accel_last = NULL;
+    assert(fdk_ok(fdk_menu_item_set_shortcut(g_item, "Ctrl+G")));
+    fdk_menu_set_on_activate(gm, on_accel, NULL);
+
+    /* NORMAL item: callback fires (menu-wide fallback). */
+    fdk__menu_item_accel_activate(g_item);
+    assert(g_accel_hits == 1 && g_accel_last == g_item);
+
+    /* CHECK item: state flips, THEN the callback runs. */
+    g_accel_hits = 0;
+    fdk_menu_set_on_activate(em, on_accel, NULL);
+    fdk__menu_item_accel_activate(check);
+    assert(g_accel_hits == 1);
+    assert(fdk_menu_item_is_checked(check));
+
+    /* RADIO semantics: activating one radio unchecks the others in
+     * the SAME menu (session-less twin of view_activate's rule). */
+    fdk_menu *rm = NULL;
+    fdk_menu_item *r1 = NULL, *r2 = NULL;
+    assert(fdk_ok(fdk_menu_create(g_font, &rm)));
+    assert(fdk_ok(fdk_menu_append_radio(rm, "One", true, &r1)));
+    assert(fdk_ok(fdk_menu_append_radio(rm, "Two", false, &r2)));
+    g_accel_hits = 0;
+    fdk_menu_set_on_activate(rm, on_accel, NULL);
+    fdk__menu_item_accel_activate(r2);
+    assert(g_accel_hits == 1);
+    assert(!fdk_menu_item_is_checked(r1));
+    assert(fdk_menu_item_is_checked(r2));
+
+    /* Disabled items refuse even a direct activation call. */
+    g_accel_hits = 0;
+    fdk_menu_set_on_activate(em, on_accel, NULL);
+    fdk__menu_item_accel_activate(dis_item);
+    assert(g_accel_hits == 0);
+
+    /* NULL discipline. */
+    fdk__menu_item_accel_activate(NULL);
+
+    /* ---- cycle refusal (set_submenu) ---- */
+    fdk_menu *a = NULL, *b = NULL;
+    assert(fdk_ok(fdk_menu_create(g_font, &a)));
+    assert(fdk_ok(fdk_menu_create(g_font, &b)));
+    fdk_menu_item *a_open = NULL;
+    assert(fdk_ok(fdk_menu_append(a, "Open", &a_open)));
+    assert(fdk_ok(fdk_menu_item_set_submenu(a_open, b)));
+    /* b -> a would close the loop: refused. */
+    fdk_menu_item *b_open = NULL;
+    assert(fdk_ok(fdk_menu_append(b, "Nested", &b_open)));
+    assert(fdk_menu_item_set_submenu(b_open, a) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    /* Deeper cycle: b -> sub -> a with a->submenu b still refused. */
+    assert(fdk_menu_item_set_submenu(b_open, sub) == FDK_OK);
+    assert(fdk_menu_item_set_submenu(deep, a) == FDK_ERR_INVALID_ARGUMENT);
+    /* NULL always clears. */
+    assert(fdk_ok(fdk_menu_item_set_submenu(b_open, NULL)));
+    /* The getters round-trip. */
+    assert(fdk_menu_item_get_submenu(a_open) == b);
+    assert(fdk_menu_item_get_submenu(b_open) == NULL);
+    assert(strcmp(fdk_menu_item_get_shortcut(save), "Ctrl+S") == 0);
+    assert(fdk_menu_item_get_shortcut(a_open) == NULL);
+    fdk_menu_destroy(a);
+    fdk_menu_destroy(b);
+
+    /* Teardown (bars before models, the conventional order; the
+     * 1.3.2 registry makes model-first safe too, but conventional
+     * is the documented contract). */
+    fdk_widget_destroy(root);
+    fdk_menu_destroy(fm);
+    fdk_menu_destroy(sub);
+    fdk_menu_destroy(em);
+    fdk_menu_destroy(gm);
+    fdk_menu_destroy(rm);
+    printf("[ok] menu accelerators: live scan (top-level, submenus, "
+           "second bar menu), disabled/missing/exact-modifier misses, "
+           "liveness across append/remove/re-shortcut, session-less "
+           "activation (check/radio/disabled), cycle refusal\n");
 }

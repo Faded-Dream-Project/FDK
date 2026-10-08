@@ -528,6 +528,12 @@ static void test_scroll(void) {
            "hold, paint round-trips)\n");
 }
 
+/* Forward declarations for the 1.3.3 undo group (defined after
+ * main to keep the original file's flow; declared here so main can
+ * call them). */
+static void test_undo_redo(void);
+static void on_changed_count(fdk_widget *w, void *user);
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -557,8 +563,194 @@ int main(void) {
     test_cap();
     test_paint();
     test_scroll();
+    test_undo_redo();
 
     fdk_font_destroy(g_font);
     printf("all entry tests passed\n");
     return 0;
+}
+
+/* ---- undo / redo (1.3.3) -----------------------------------------------
+ *
+ * All through the REAL event path: FDK_WIDGET_KEY_DOWN on the tree
+ * with proper scancode/codepoint/modifier shapes — the same events
+ * the platforms deliver — plus the public API for the programmatic
+ * calls. Coalescing rules are pinned exactly (see entry.c's contract
+ * block for the wording these cases encode).
+ * ---------------------------------------------------------------------- */
+
+/* Ctrl-combo key event shaped like the platforms deliver them. */
+static void ctrl_key(fdk_widget *root, fdk_u32 cp, fdk_u32 extra_mods) {
+    fdk_event_data e = ev_key_cp(0, cp, FDK_MOD_CTRL | extra_mods);
+    (void)fdk_widget_tree_handle_event(root, &e);
+}
+
+static void test_undo_redo(void) {
+    /* Argument discipline first. */
+    assert(!fdk_entry_can_undo(NULL));
+    assert(fdk_entry_undo(NULL) == FDK_ERR_INVALID_ARGUMENT);
+    fdk_widget *root = fresh_root();
+    fdk_widget *entry = NULL;
+    assert(fdk_ok(fdk_entry_create(root, g_font, "", &entry)));
+    assert(fdk_widget_focus(entry)); /* keys route to the focus */
+    assert(!fdk_entry_can_undo(entry)); /* nothing recorded yet */
+    assert(fdk_entry_undo(entry) == FDK_ERR_INVALID_STATE);
+
+    /* -- typing coalesces: "abc" is ONE undo step -- */
+    type(root, 'a');
+    type(root, 'b');
+    type(root, 'c');
+    assert(strcmp(fdk_entry_get_text(entry), "abc") == 0);
+    assert(fdk_entry_can_undo(entry));
+    assert(fdk_entry_undo(entry) == FDK_OK);
+    assert(strcmp(fdk_entry_get_text(entry), "") == 0); /* all three */
+    assert(!fdk_entry_can_undo(entry));
+    assert(fdk_entry_can_redo(entry));
+    assert(fdk_entry_redo(entry) == FDK_OK);
+    assert(strcmp(fdk_entry_get_text(entry), "abc") == 0);
+
+    /* -- caret rides along: undo of a mid-string insert restores the
+     * pre-edit caret position -- */
+    /* caret is at 3 (end). Move to 1, type "X" -> "aXbc". */
+    press(root, FDK_KEY_LEFT, 0);
+    press(root, FDK_KEY_LEFT, 0);
+    type(root, 'X');
+    assert(strcmp(fdk_entry_get_text(entry), "aXbc") == 0);
+    assert(fdk_entry_get_cursor(entry) == 2);
+    (void)fdk_entry_undo(entry);
+    assert(strcmp(fdk_entry_get_text(entry), "abc") == 0);
+    assert(fdk_entry_get_cursor(entry) == 1); /* the pre-edit caret */
+
+    /* -- frontier rule: typing elsewhere does NOT merge -- */
+    /* Fresh entry: "ab", arrow-left (frontier breaks), "9". */
+    fdk_widget_destroy(root);
+    root = fresh_root();
+    assert(fdk_ok(fdk_entry_create(root, g_font, "", &entry)));
+    assert(fdk_widget_focus(entry));
+    type(root, 'a');
+    type(root, 'b');
+    press(root, FDK_KEY_LEFT, 0);
+    type(root, '9');
+    assert(strcmp(fdk_entry_get_text(entry), "a9b") == 0);
+    (void)fdk_entry_undo(entry);
+    assert(strcmp(fdk_entry_get_text(entry), "ab") == 0); /* only "9" */
+    (void)fdk_entry_undo(entry);
+    assert(strcmp(fdk_entry_get_text(entry), "") == 0); /* the "ab" run */
+
+    /* -- backspace runs coalesce; undo reselects the restored text -- */
+    fdk_widget_destroy(root);
+    root = fresh_root();
+    assert(fdk_ok(fdk_entry_create(root, g_font, "wxyz", &entry)));
+    assert(fdk_widget_focus(entry));
+    press(root, FDK_KEY_BACKSPACE, 0);
+    press(root, FDK_KEY_BACKSPACE, 0);
+    press(root, FDK_KEY_BACKSPACE, 0);
+    assert(strcmp(fdk_entry_get_text(entry), "w") == 0);
+    (void)fdk_entry_undo(entry);
+    assert(strcmp(fdk_entry_get_text(entry), "wxyz") == 0);
+    size_t anchor = 0, caret = 0;
+    assert(fdk_ok(fdk_entry_get_selection(entry, &anchor, &caret)));
+    assert(anchor == 1 && caret == 4); /* "xyz" reselected (GTK rule) */
+
+    /* -- delete-key runs coalesce forward -- */
+    fdk_widget_destroy(root);
+    root = fresh_root();
+    assert(fdk_ok(fdk_entry_create(root, g_font, "abcd", &entry)));
+    assert(fdk_widget_focus(entry));
+    press(root, FDK_KEY_HOME, 0);
+    press(root, FDK_KEY_DELETE, 0);
+    press(root, FDK_KEY_DELETE, 0);
+    assert(strcmp(fdk_entry_get_text(entry), "cd") == 0);
+    (void)fdk_entry_undo(entry);
+    assert(strcmp(fdk_entry_get_text(entry), "abcd") == 0);
+    assert(fdk_ok(fdk_entry_get_selection(entry, &anchor, &caret)));
+    assert(anchor == 0 && caret == 2); /* "ab" reselected */
+
+    /* -- a replace (select + type) is ATOMIC; later typing must not
+     * merge into it -- */
+    fdk_widget_destroy(root);
+    root = fresh_root();
+    assert(fdk_ok(fdk_entry_create(root, g_font, "hello", &entry)));
+    assert(fdk_widget_focus(entry));
+    press(root, FDK_KEY_HOME, 0);
+    press(root, FDK_KEY_RIGHT, FDK_MOD_SHIFT); /* select "h" */
+    press(root, FDK_KEY_RIGHT, FDK_MOD_SHIFT); /* select "he" */
+    type(root, 'H'); /* replaces "he" */
+    type(root, 'I'); /* continues typing AFTER the replace */
+    assert(strcmp(fdk_entry_get_text(entry), "HIllo") == 0);
+    (void)fdk_entry_undo(entry);
+    assert(strcmp(fdk_entry_get_text(entry), "Hllo") == 0); /* only "I" */
+    (void)fdk_entry_undo(entry);
+    assert(strcmp(fdk_entry_get_text(entry), "hello") == 0); /* the replace */
+
+    /* -- interleave: undo, undo, redo, redo round-trips text -- */
+    fdk_widget_destroy(root);
+    root = fresh_root();
+    assert(fdk_ok(fdk_entry_create(root, g_font, "", &entry)));
+    assert(fdk_widget_focus(entry));
+    type(root, '1');
+    type(root, '2');
+    press(root, FDK_KEY_BACKSPACE, 0); /* "1" (backspace breaks run) */
+    type(root, '3'); /* "13" — new frontier after the delete */
+    assert(strcmp(fdk_entry_get_text(entry), "13") == 0);
+    (void)fdk_entry_undo(entry); /* -> "1" */
+    (void)fdk_entry_undo(entry); /* -> "12" (restores "2", selected) */
+    assert(strcmp(fdk_entry_get_text(entry), "12") == 0);
+    (void)fdk_entry_redo(entry); /* -> "1" */
+    assert(strcmp(fdk_entry_get_text(entry), "1") == 0);
+    (void)fdk_entry_redo(entry); /* -> "13" */
+    assert(strcmp(fdk_entry_get_text(entry), "13") == 0);
+    assert(!fdk_entry_can_redo(entry));
+
+    /* -- the KEYBOARD bindings: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z -- */
+    ctrl_key(root, 'z', 0);
+    assert(strcmp(fdk_entry_get_text(entry), "1") == 0);
+    ctrl_key(root, 'y', 0);
+    assert(strcmp(fdk_entry_get_text(entry), "13") == 0);
+    ctrl_key(root, 'z', 0);
+    ctrl_key(root, 'Z', FDK_MOD_SHIFT); /* Ctrl+Shift+Z = redo */
+    assert(strcmp(fdk_entry_get_text(entry), "13") == 0);
+    /* A redo past the ceiling is a quiet no-op. */
+    ctrl_key(root, 'y', 0);
+    assert(strcmp(fdk_entry_get_text(entry), "13") == 0);
+
+    /* -- set_text clears the history (the documented mode-change) -- */
+    assert(fdk_ok(fdk_entry_set_text(entry, "reset")));
+    assert(!fdk_entry_can_undo(entry));
+    assert(!fdk_entry_can_redo(entry));
+    assert(fdk_entry_undo(entry) == FDK_ERR_INVALID_STATE);
+
+    /* -- read-only refuses everything undoable -- */
+    fdk_entry_set_read_only(entry, true);
+    assert(!fdk_entry_can_undo(entry));
+    assert(fdk_entry_undo(entry) == FDK_ERR_INVALID_STATE);
+    fdk_entry_set_read_only(entry, false);
+    /* Read-only never RECORDED, so still nothing after re-enable. */
+    assert(!fdk_entry_can_undo(entry));
+
+    /* -- undo fires on_changed like any edit -- */
+    int changed = 0;
+    fdk_widget_destroy(root);
+    root = fresh_root();
+    assert(fdk_ok(fdk_entry_create(root, g_font, "", &entry)));
+    assert(fdk_widget_focus(entry));
+    fdk_entry_set_on_changed(entry, on_changed_count, &changed);
+    changed = 0;
+    type(root, 'q');
+    assert(changed == 1);
+    (void)fdk_entry_undo(entry);
+    assert(changed == 2); /* the undo application notified too */
+    assert(strcmp(fdk_entry_get_text(entry), "") == 0);
+
+    fdk_widget_destroy(root);
+    printf("[ok] entry undo/redo: coalescing (typing/backspace/delete "
+           "runs), frontier rule, atomic replaces, reselect-on-restore, "
+           "caret restore, keyboard bindings, set_text clears, "
+           "read-only refuses, on_changed parity\n");
+}
+
+/* 1.3.3 undo test's own changed counter (int *user). */
+static void on_changed_count(fdk_widget *w, void *user) {
+    (void)w;
+    (*(int *)user)++;
 }

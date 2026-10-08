@@ -313,9 +313,16 @@ static void typing_report(void) {
         lo = anchor <= caret2 ? anchor : caret2;
         hi = anchor <= caret2 ? caret2 : anchor;
     }
+    /* 1.3.3: the undo history rides along — Ctrl+Z / Ctrl+Y are
+     * live in the entry (typing runs coalesce; deletes reselect on
+     * undo). */
+    size_t undo = fdk_entry_can_undo(app.typing) ? 1u : 0u;
+    size_t redo = fdk_entry_can_redo(app.typing) ? 1u : 0u;
     set_status(app.typing_status,
-               "%zu bytes · caret @ %zu · selection %zu..%zu%s",
-               bytes, caret, lo, hi, lo != hi ? "" : " (none)");
+               "%zu bytes · caret @ %zu · selection %zu..%zu%s · "
+               "undo %s · redo %s",
+               bytes, caret, lo, hi, lo != hi ? "" : " (none)",
+               undo ? "yes" : "-", redo ? "yes" : "-");
     printf("PHASE: type %zu %zu\n", bytes, caret);
     fflush(stdout);
 }

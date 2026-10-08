@@ -17,6 +17,7 @@
 #define FDK_EVENT_H
 
 #include "fdk_types.h"
+#include "fdk_error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -196,6 +197,48 @@ typedef enum fdk_key_modifier {
     FDK_MOD_ALT   = 1 << 2,
     FDK_MOD_SUPER = 1 << 3, /* "Windows"/"Command"/"Meta" key */
 } fdk_key_modifier;
+
+/* ---- Shortcut specifications (1.3.3) --------------------------------
+ *
+ * A shortcut spec is a human string — "Ctrl+S", "ctrl+shift+z",
+ * "F5", "Alt+F4" — parsed into the (modifier bitmask, scancode) pair
+ * a key event carries. Grammar and semantics:
+ *
+ *   spec    := key | modifier { "+" modifier } { "+" key }
+ *   modifier:= ctrl|control|shift|alt|super|meta (case-insensitive;
+ *             surrounding spaces are tolerated)
+ *   key     := A-Z | 0-9 | F1-F12 | tab enter return esc escape space
+ *             backspace delete del insert ins home end pageup pgup
+ *             pagedown pgdn left right up down plus minus comma
+ *             period dot slash
+ *
+ * A spec binds the PHYSICAL key (the scancode, layout-stable — "the
+ * S position"), per the fdk_scancode contract above. Garbage
+ * (empty string, bare modifier, "Ctrl+", "Ctrl+Ctrl+S", two key
+ * segments, unknown names) is FDK_ERR_INVALID_ARGUMENT — parse
+ * failures are loud, never guesses.
+ *
+ * Where specs are CONSUMED: fdk_window_add_shortcut() registers
+ * application shortcuts on a window, and menu items' shortcut
+ * labels (fdk_menu_item_set_shortcut) act as live accelerators for
+ * as long as the menu hangs under that window's menu bar. Both
+ * match with exact modifier equality: "Ctrl+S" does not fire while
+ * Shift is also held, and fires on auto-repeat presses too (hold
+ * the key, the handler repeats — same rule the Entry widget's own
+ * keys follow).
+ */
+fdk_result fdk_shortcut_parse(const char *spec, fdk_u32 *out_modifiers,
+                              fdk_scancode *out_key);
+
+/* Canonical composition helpers: the lowercase spec a parser round-
+ * trips a (modifiers, scancode) pair back to. NULL when the pair has
+ * no name in the grammar (an unmapped scancode). Useful for conflict
+ * diagnostics ("Ctrl+S is already bound") and for serializing a
+ * binding table. Writes at most FDK_SHORTCUT_SPEC_MAX bytes incl.
+ * the NUL. */
+#define FDK_SHORTCUT_SPEC_MAX 32
+bool fdk_shortcut_format(fdk_u32 modifiers, fdk_scancode key,
+                         char *out_spec, size_t spec_max);
 
 typedef struct fdk_pointer_event {
     fdk_pointf position; /* window-relative coordinates */

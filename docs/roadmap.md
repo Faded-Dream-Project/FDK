@@ -3034,3 +3034,119 @@ grim captures; Wayland tooltip rig PASS; compositor-death rig PASS
 (0.3s exit, 1 KB log); clipboard interop rig PASS (three directions
 + the full suite under the same compositor); release config zero
 warnings.
+
+### 1.3.3 — keyboard shortcuts, menu accelerators, and undo/redo
+
+The audit's next finding: the menu contract block said
+"mnemonics/accelerators-in-bar are not implemented" and menu
+shortcut strings were display-only metadata — and undo/redo had no
+subsystem at all, despite both being named in the standing
+"completely complete FDK" instruction. Both shipped together
+because they compose (Entry's Ctrl+Z is a widget-level binding that
+the window-shortcut layer must NOT shadow; that precedence is the
+integration point).
+
+THE SHORTCUT LAYER. fdk_shortcut_parse (fdk_event.h) turns a human
+string ("Ctrl+Shift+S", "F5", "Alt+F4", "ctrl+ z" —
+case-insensitive, whitespace-tolerant) into the (modifier mask,
+scancode) pair a key event carries; fdk_shortcut_format is its
+exact inverse (conflict diagnostics, binding serialization).
+Consumers, in dispatch order per KEY_DOWN: the per-window
+application table (fdk_window_add_shortcut/remove_shortcut —
+first-registered-wins, ids never reused, the callback may destroy
+the window), then a LIVE scan of the window's menu bars —
+fdk__menu_bar_accel_hit walks the tree per keypress, recursing into
+submenus, parsing each item's shortcut string then and there. No
+registration, no cache, no invalidation protocol to forget: a menu
+appended, retitled, destroyed, or re-shortcut between keypresses is
+found exactly as the tree stands. Menu items' shortcut labels
+( fdk_menu_item_set_shortcut) became REAL accelerators by this —
+the doc block that disclaimed them now describes the live scan, and
+honest limits moved to what remains (context-menu items have no
+persistent presence, so their strings stay display-only;
+mnemonics — the underlined Alt+letter navigation — are still not
+implemented). set_submenu now REFUSES cycles (a submenu that
+reaches back to its own menu would hang every model walker; the
+setter is where it stops, loud).
+
+THE LAYOUT RULE, settled and documented: a spec binds the PHYSICAL
+key (scancode — "the S position"), per fdk_event.h's evdev
+contract; the Entry's built-in editing keys (Ctrl+C/V/X/A/Z/Y)
+match the PRINTED glyph (codepoint) — the native text-editing
+rule. Same key on QWERTY; can differ on AZERTY/Dvorak. Both
+intentional per layer; both documented where they live (the new
+docs/platform-input.md — a file four source comments had referenced
+since Phase 2 WITHOUT existing; writing it was this milestone's
+hidden-incompleteness find, and it also records the honest
+Wayland key-repeat gap: wl_keyboard::repeat_info exists but FDK
+runs no repeat timer there yet, while X11 detects server repeat
+via its per-keycode down-set).
+
+THE UNDO STACK. A generic core service (fdk_undo.h): ops are three
+closures over one user pointer (undo/redo/destroy), push drops the
+redo tail (linear history), an optional depth limit (default 256)
+trims the OLDEST op, every destroy fires exactly once across all
+exit paths (trim, tail drop, clear, stack destroy), reentrant
+push/undo/redo/clear from inside a closure is refused with the new
+FDK_ERR_INVALID_STATE, and undo/redo on an empty stack is a QUIET
+no-op (the blind-Ctrl+Z contract — the programmatic API reports
+honestly instead). fdk_undo_stack_top/redo_top expose the next op
+each side would apply — the seam Entry's coalescing runs through,
+and the natural foundation for a future "Undo Typing" menu label.
+
+THE ENTRY INTEGRATION. Every mutation routes through entry_splice,
+which is now also the recorder: it captures the replaced range and
+the pre-edit caret/selection BEFORE the text moves (all-or-nothing
+— a half-recorded op would make undo restore wrong text, so an
+allocation failure drops the record and warns; the edit itself
+never fails for history's sake). Coalescing, stated exactly (and
+pinned by tests): consecutive single-codepoint inserts at the
+advancing typing frontier merge; consecutive single-codepoint
+deletions merge in BOTH geometries (backspace's caret-walks-left
+runs, and the Delete key's stationary-caret runs where each delete
+takes the same slot the previous one left — the second geometry
+was found by the tests and the first implementation had it wrong);
+pastes, cuts, selection-deletes, and replaces are atomic. Typing
+over a selection is ONE undo step (the delete and the insert of the
+same keystroke compose via the gesture flag + the internal
+fdk__undo_stack_replace_top) — matching GTK/Qt gesture steps, not
+internal splice order. Undo restores the pre-edit caret/selection
+(a restored deletion arrives SELECTED); redo re-applies with the
+caret after the re-inserted text; both fire on_changed/a11y like
+any edit. fdk_entry_set_text clears the history (mode change, not
+an edit). Keys: Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z — printed-glyph
+matching like every Entry editing binding.
+
+THE FIVE BUGS THE TESTS FLUSHED OUT (before a single line of
+production code ran green): the parser's letters table was built in
+QWERTY-POSITION order but indexed alphabetically (every letter
+bound the wrong physical key — "Ctrl+S" parsed to the L position);
+"S+" was silently accepted (the tokenizer swallowed the dangling
+separator — fixed with an explicit dangled-flag); F10 formatted as
+"f:" ('1'+9 = ':'); entry_redo_apply spliced over the op's OLD-text
+extent instead of the restored-text extent (redo was a silent
+no-op); and the X11 quit test caught a use-after-free in the new
+dispatch block — the identity re-check read window->ctx AFTER a
+shortcut callback destroyed the window (the exact class the
+tree-routing block below it had already learned to guard; the
+accelerator block now caches the identity pair before any callback
+runs).
+
+TESTS: test_shortcut.c (75 valid specs across the whole grammar,
+27 malformed refusals, 272 format round-trips, matcher semantics);
+test_undo.c (walks, tail-drop, oldest-trim with destroy-once
+accounting, reentrancy refusals, quiet no-ops, inspection API,
+NULL-closure walk stops); test_entry.c's undo group (coalescing in
+all three geometries, frontier rule, atomic replaces and the
+gesture grouping, reselect-on-restore, caret restore, keyboard
+bindings, set_text clears, read-only refuses, on_changed parity);
+test_menu.c's accelerator group (live scan liveness across
+append/remove/re-shortcut, disabled refusals, session-less
+activation with check/radio semantics, cycle refusal); and the X11
+integration suite's accelerator group (REAL keys: table-consumes-
+before-tree, exact modifiers, unclaimed keys fall through to the
+app callback, app-table-wins over the bar scan, removal re-arms the
+bar, Entry undo/redo over real key events, and the Ctrl+Q
+destroy-mid-dispatch survival). Examples: 07's menu shortcuts are
+live now and F1 opens About via the app-registered half;
+09's typing playground narrates undo/redo availability live.

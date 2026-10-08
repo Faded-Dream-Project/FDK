@@ -255,6 +255,26 @@ static void wl_dnd_rx_event(fdk_window *w, const fdk_event_data *ev,
     }
 }
 
+/* ---- 1.3.3 accelerator section callbacks ---- */
+
+static void wl_accel_app_shortcut(fdk_window *window, void *user) {
+    (void)window;
+    (*(int *)user)++;
+}
+
+static void wl_accel_menu_cb(fdk_menu_item *item, void *user) {
+    (void)item;
+    (*(int *)user)++;
+}
+
+static void wl_accel_window_cb(fdk_window *window,
+                               const fdk_event_data *event, void *user) {
+    (void)window;
+    if (event->type == FDK_EVENT_KEY_DOWN) {
+        (*(int *)user)++;
+    }
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     fdk_context *ctx = NULL;
@@ -1290,6 +1310,133 @@ int main(void) {
             printf("[skip] wayland dnd section (fdk-wl-inject or "
                    "wl_dnd_source unavailable)\n");
         }
+    }
+
+    /* ---- 1.3.3: shortcuts + menu accelerators through the REAL
+     * window dispatch ----
+     *
+     * sway headless cannot deliver wl_keyboard.key to clients at all
+     * (the seat never adopts a virtual keyboard's keymap —
+     * protocol-traced, see scripts/verify_chooser_wayland.sh), so
+     * the backend's 3-line evdev copy is reviewed code and REAL key
+     * delivery is covered on the X11 side. What this section pins
+     * is the dispatch CHAIN itself on the Wayland-built library:
+     * window shortcut table -> live menu-bar accelerator scan ->
+     * widget tree -> app callback, exactly as fdk_window_dispatch_
+     * event orders them, driven through the same internal seam the
+     * rest of this suite uses. */
+    {
+        fdk_window *aw = NULL;
+        fdk_window_options awopts = { .title = "FDK accelerators",
+                                      .width = 320, .height = 200 };
+        assert(fdk_ok(fdk_window_create(ctx, &awopts, &aw)));
+        fdk_widget *aroot = NULL;
+        assert(fdk_ok(fdk_window_get_root(aw, &aroot)));
+        fdk_font *afont = fdk_font_load_system_default(15);
+
+        fdk_widget *abar = NULL;
+        fdk_menu *am = NULL;
+        fdk_menu_item *asave = NULL;
+        assert(fdk_ok(fdk_menu_create(afont, &am)));
+        assert(fdk_ok(fdk_menu_append(am, "Save", &asave)));
+        assert(fdk_ok(fdk_menu_item_set_shortcut(asave, "Ctrl+S")));
+        if (afont != NULL) {
+            assert(fdk_ok(fdk_menu_bar_create(aroot, afont, &abar)));
+        }
+        /* The bar needs the font; fontless systems still get the
+         * application-shortcut half. */
+        if (abar != NULL) {
+            assert(fdk_ok(fdk_menu_bar_append(abar, "File", am)));
+        }
+
+        fdk_widget *aentry = NULL;
+        assert(fdk_ok(fdk_entry_create(aroot, afont, "", &aentry)));
+        assert(fdk_widget_focus(aentry));
+
+        int app_shortcut_hits = 0;
+        int menu_hits = 0;
+        int app_keys = 0;
+        fdk_window_add_shortcut(aw, "Ctrl+L",
+                                wl_accel_app_shortcut, &app_shortcut_hits);
+        if (abar != NULL) {
+            fdk_menu_set_on_activate(am, wl_accel_menu_cb, &menu_hits);
+        }
+        fdk_window_set_event_callback(aw, wl_accel_window_cb, &app_keys);
+
+        fdk_event_data k;
+        memset(&k, 0, sizeof(k));
+        k.type = FDK_EVENT_KEY_DOWN;
+
+        /* Ctrl+L: the app table consumes it (entry never sees the
+         * key, the app callback never sees the key). */
+        k.key.scancode = 38; /* L */
+        k.key.modifiers = FDK_MOD_CTRL;
+        fdk_window_dispatch_event(aw, &k);
+        assert(app_shortcut_hits == 1);
+        assert(strcmp(fdk_entry_get_text(aentry), "") == 0);
+        assert(app_keys == 0);
+
+        /* Plain "l" (no mods): nobody claims it; the ENTRY eats it
+         * as text (the tree layer is alive under the table). */
+        k.key.modifiers = 0;
+        k.key.codepoint = 'l';
+        fdk_window_dispatch_event(aw, &k);
+        assert(strcmp(fdk_entry_get_text(aentry), "l") == 0);
+        assert(app_keys == 0); /* consumed by the Entry */
+
+        /* Ctrl+S: the live bar scan fires Save (no popup opened,
+         * state machine intact), the app sees no key. */
+        if (abar != NULL) {
+            k.key.scancode = 31; /* S */
+            k.key.modifiers = FDK_MOD_CTRL;
+            k.key.codepoint = 0;
+            fdk_window_dispatch_event(aw, &k);
+            assert(menu_hits == 1);
+            assert(app_keys == 0);
+            /* Removing the bar's listing kills the accelerator on
+             * the very next press (the scan is live). */
+            assert(fdk_ok(fdk_menu_bar_remove(abar, 0)));
+            fdk_window_dispatch_event(aw, &k);
+            assert(menu_hits == 1);
+            /* Nobody wants it now; the entry refuses ctrl-modified
+             * text, so it falls through to the app callback. */
+            assert(app_keys == 1);
+        }
+
+        /* Entry undo through the same dispatch: type "ab", Ctrl+Z,
+         * Ctrl+Y — restoration on the Wayland build. Note "l", "a",
+         * "b" share one contiguous typing frontier, so ALL THREE
+         * coalesce into a single undo step (the documented rule). */
+        k.key.modifiers = 0;
+        k.key.codepoint = 'a';
+        k.key.scancode = 30;
+        fdk_window_dispatch_event(aw, &k);
+        k.key.codepoint = 'b';
+        k.key.scancode = 48;
+        fdk_window_dispatch_event(aw, &k);
+        assert(strcmp(fdk_entry_get_text(aentry), "lab") == 0);
+        k.key.modifiers = FDK_MOD_CTRL;
+        k.key.scancode = 44; /* Z */
+        k.key.codepoint = 'z';
+        fdk_window_dispatch_event(aw, &k);
+        assert(strcmp(fdk_entry_get_text(aentry), "") == 0);
+        k.key.scancode = 21; /* Y */
+        k.key.codepoint = 'y';
+        fdk_window_dispatch_event(aw, &k);
+        assert(strcmp(fdk_entry_get_text(aentry), "lab") == 0);
+
+        if (abar != NULL) {
+            fdk_menu_destroy(am);
+        }
+        fdk_window_destroy(aw);
+        if (afont != NULL) {
+            fdk_font_destroy(afont);
+        }
+        printf("[ok] wayland accelerators: dispatch chain (table -> "
+               "live bar scan -> tree -> app callback), live removal, "
+               "entry undo/redo — driven through fdk_window_dispatch_"
+               "event (sway headless cannot route wl_keyboard.key; "
+               "real-key e2e is the X11 suite's)\n");
     }
 
     if (win != NULL) {

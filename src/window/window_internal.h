@@ -252,6 +252,20 @@ struct fdk_window {
      * The flag is window-scoped, not event-scoped: any geo-changing
      * event in the batch marks it; the flush is idempotent. */
     bool geo_repaint_pending;
+
+    /* ---- 1.3.3: application shortcut table ----
+     *
+     * fdk_window_add_shortcut registrations: (id, parsed pair,
+     * callback, user). Tested BEFORE the widget tree on every
+     * KEY_DOWN (accelerator precedence — see fdk_window.h's contract
+     * block); the first registration whose pair matches exactly
+     * consumes the event. Ids grow monotonically and are never
+     * reused, so a stale id from an old registration can only ever
+     * be a quiet no-op in remove. The array dies with the window. */
+    struct fdk_window_shortcut *shortcuts;
+    size_t shortcut_count;
+    size_t shortcut_cap;
+    int shortcut_next_id;
 };
 
 /* Called by the context's platform dispatch callback (see

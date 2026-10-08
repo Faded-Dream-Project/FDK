@@ -113,6 +113,30 @@ static void about_dialog_cb(fdk_menu_item *item, void *user) {
     (void)fdk_dialog_show_message(app.ctx, &opts, NULL, NULL, NULL);
 }
 
+/* 1.3.3 — an APPLICATION shortcut (fdk_window_add_shortcut): F1 is
+ * the universal help key. The menu items' Ctrl+O/C/Q/V strings are
+ * live accelerators on their own (the window's key dispatch scans
+ * the bar); this one shows the app-registered half of the feature —
+ * it fires wherever focus sits, even inside the editable combo. */
+static void help_shortcut(fdk_window *window, void *user) {
+    (void)window;
+    (void)user;
+    printf("PHASE: shortcut F1\n");
+    fflush(stdout);
+    set_status("F1: the app-registered shortcut (works from any "
+               "focus)");
+    fdk_dialog_options opts = {
+        .title = "About FDK",
+        .text = "Faded Dream ToolKit - Phase 9 advanced widgets "
+                "demo.\n\nYou pressed F1 — an application shortcut "
+                "registered with fdk_window_add_shortcut. The menu "
+                "items' Ctrl+O/Quit labels are live accelerators "
+                "too.",
+        .buttons = FDK_DIALOG_BUTTONS_OK,
+    };
+    (void)fdk_dialog_show_message(app.ctx, &opts, NULL, NULL, NULL);
+}
+
 /* ---- dialog responses ---- */
 
 static void dialog_response(fdk_dialog_response response, void *user) {
@@ -321,6 +345,9 @@ int main(void) {
     fdk_window_set_event_callback(app.window, window_event, NULL);
     fdk_widget *root = NULL;
     assert(fdk_ok(fdk_window_get_root(app.window, &root)));
+    /* F1 -> About (the help-key convention). */
+    assert(fdk_window_add_shortcut(app.window, "F1",
+                                   help_shortcut, NULL) >= 1);
 
     /* The vertical layout: menubar (fixed height), toolbar (fixed),
      * notebook (expands), status (fixed). Simple manual bounds —

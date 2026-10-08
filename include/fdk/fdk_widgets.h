@@ -354,6 +354,38 @@ void fdk_entry_set_max_length(fdk_widget *entry, size_t max_bytes);
 /* The byte cap (0 = unlimited). */
 size_t fdk_entry_get_max_length(fdk_widget *entry);
 
+/* ---- UNDO / REDO (1.3.3) ----
+ *
+ * Every user edit — typed characters, Backspace/Delete runs, cut,
+ * paste, selection-deletes — is recorded onto an undo history the
+ * entry owns (an fdk_undo_stack; the first edit allocates it). The
+ * built-in keys are Ctrl+Z (undo), Ctrl+Shift+Z and Ctrl+Y (redo),
+ * matched on the PRINTED key like every Entry editing binding (see
+ * fdk_shortcut_parse for the physical-key contrast).
+ *
+ * Coalescing, stated exactly (also in entry.c's contract block):
+ * consecutive single-codepoint inserts at the advancing typing
+ * frontier merge into one undo step; consecutive single-codepoint
+ * deletions that extend one range contiguously (hold Backspace, or
+ * hold Delete) merge too. Pastes, cuts, selection-deletes, and
+ * multi-codepoint edits are atomic steps. No time component — the
+ * rule is deterministic.
+ *
+ * Undo restores the text AND the pre-edit caret/selection (a
+ * restored deletion arrives SELECTED, the GTK behavior). Redo
+ * re-applies with the caret after the re-inserted text. Both fire
+ * on_changed / a11y notifications like any edit.
+ *
+ * fdk_entry_set_text CLEARS the history (a programmatic overwrite
+ * is a mode change, not an edit — the documented rule). Read-only
+ * entries report can_undo/can_redo == false and refuse undo/redo.
+ * FDK_ERR_INVALID_STATE from the programmatic calls means exactly
+ * that (nothing recorded yet). */
+bool fdk_entry_can_undo(fdk_widget *entry);
+bool fdk_entry_can_redo(fdk_widget *entry);
+fdk_result fdk_entry_undo(fdk_widget *entry);
+fdk_result fdk_entry_redo(fdk_widget *entry);
+
 /* Buffer-mutation callback (see the typedef above). */
 void fdk_entry_set_on_changed(fdk_widget *entry,
                               fdk_entry_changed_fn on_changed,
@@ -773,15 +805,28 @@ void fdk_canvas_invalidate(fdk_widget *canvas);
  * closes one level. The bar itself, when focused, walks titles with
  * Left/Right and opens with Down/Enter.
  *
- * `shortcut` strings are DISPLAY-ONLY metadata ("Ctrl+S" drawn
- * right-aligned): binding the actual keys is the application's
- * business — FDK's menu layer never intercepts global keys.
+ * ACCELERATORS (1.3.3): an item's `shortcut` string ("Ctrl+S" —
+ * see fdk_shortcut_parse's grammar) is not just the right-aligned
+ * label: for as long as the item's menu hangs under a window's
+ * MENU BAR, the binding is LIVE. The window's KEY_DOWN dispatch
+ * scans its tree's bars (and their submenus, recursively) on every
+ * keypress and activates a matching ENABLED item exactly as if it
+ * had been clicked — check/radio state flips, callbacks fire, no
+ * menu opens. The scan is live: appending, retitling, re-shortcut
+ * or destroying a menu takes effect on the very next keypress,
+ * because nothing is cached. Items of CONTEXT menus (popped via
+ * fdk_menu_popup_at) have no persistent presence in a window tree
+ * and therefore no global accelerator — their shortcut strings are
+ * display-only, and applications wanting both register
+ * fdk_window_add_shortcut alongside. Application shortcuts run
+ * BEFORE bar accelerators when both match (see fdk_window.h).
  *
  * Honest v1 limits, documented rather than faked: menus do not
  * scroll (a menu taller than the screen clips at the screen edge);
  * hover-to-switch bar titles only reacts where the platform's popup
  * grab reports out-of-bounds motion (X11: yes; Wayland: compositor
- * dependent); mnemonics/accelerators-in-bar are not implemented. */
+ * dependent); mnemonics (the underlined-letter Alt+letter menu
+ * navigation) are not implemented. */
 
 typedef struct fdk_menu fdk_menu;
 typedef struct fdk_menu_item fdk_menu_item;
@@ -829,15 +874,26 @@ bool fdk_menu_item_is_enabled(fdk_menu_item *item);
 void fdk_menu_item_set_checked(fdk_menu_item *item, bool checked);
 /* The current state (false on other kinds). */
 bool fdk_menu_item_is_checked(fdk_menu_item *item);
-/* Display-only shortcut label, drawn right-aligned. NULL clears. */
+/* The item's shortcut spec — the string last set (NULL when none).
+ * While the menu hangs under a window's menu bar this is a LIVE
+ * ACCELERATOR (see the contract block above); the label is drawn
+ * right-aligned in the row. Grammar: fdk_shortcut_parse. */
 fdk_result fdk_menu_item_set_shortcut(fdk_menu_item *item,
                                       const char *shortcut);
+/* The current shortcut spec (NULL when none). */
+const char *fdk_menu_item_get_shortcut(fdk_menu_item *item);
 
 /* Attaches `submenu` (borrowed — not owned, not destroyed with the
  * item), replacing any previous one. The submenu opens on hover /
- * Right / click of this item. Only NORMAL items take submenus. */
+ * Right / click of this item. Only NORMAL items take submenus.
+ * Refuses with FDK_ERR_INVALID_ARGUMENT when the wiring would
+ * create a CYCLE (the submenu already reaches this item's own menu
+ * by any chain of submenus) — an infinite menu tree would hang
+ * every model walker, so the setter is where it stops. */
 fdk_result fdk_menu_item_set_submenu(fdk_menu_item *item,
                                      fdk_menu *submenu);
+/* The item's current submenu (NULL when none). */
+fdk_menu *fdk_menu_item_get_submenu(fdk_menu_item *item);
 
 /* Per-item activation callback (fires for this item only). */
 void fdk_menu_item_set_on_activate(fdk_menu_item *item,

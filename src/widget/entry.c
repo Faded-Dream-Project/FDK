@@ -27,9 +27,11 @@
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
+#include "core/undo_internal.h"
 #include "window/window_internal.h"
 
 #include "fdk/fdk_clipboard.h"
+#include "fdk/fdk_undo.h"
 
 #include <time.h>
 
@@ -75,6 +77,24 @@ typedef struct fdk_entry {
      * blink). */
     fdk_timer *blink_timer;
     bool caret_on;
+    /* ---- Undo history (1.3.3) ----
+     *
+     * Lazily created on the FIRST recorded edit (display-only and
+     * read-only entries never allocate one). undo_applying guards
+     * entry_splice's recorder while an op's undo/redo closure is
+     * re-driving the splice — those applications must fire
+     * on_changed/a11y/repaint like any edit, but must not record.
+     *
+     * undo_group_pending marks "a selection-delete just happened and
+     * the gesture it belonged to may not be finished": the typing
+     * path deletes the selection and then inserts, and those two
+     * splices must land on the stack as ONE replace op. The flag is
+     * set by entry_delete_selection and consumed (read-and-clear)
+     * by the very next record — a keystroke boundary or any other
+     * record in between expires it naturally. */
+    fdk_undo_stack *undo;
+    bool undo_applying;
+    bool undo_group_pending;
 } fdk_entry;
 
 static fdk_entry *entry_of(fdk_widget *w) {
@@ -370,9 +390,307 @@ static fdk_result entry_ensure_cap(fdk_entry *e, size_t need) {
     return FDK_OK;
 }
 
+/* ---- undo history (1.3.3) ---------------------------------------------
+ *
+ * Every mutation routes through entry_splice, so the recorder lives
+ * there and sees one uniform op shape: "range [from,to) was
+ * replaced by `inserted`". Pre-edit caret/selection ride along so
+ * undo restores exactly where the user was.
+ *
+ * COALESCING — the typing rule, stated precisely: a new op merges
+ * into the top of the stack when both are TYPED ops (single
+ * codepoint each — pastes, cuts, selection-deletes, and replacements
+ * are atomic and never merge) and:
+ *
+ *   insert+insert: the new insert lands exactly at the end of the
+ *                  top op's inserted text (the advancing frontier).
+ *                  Type "ab", arrow around, resume typing elsewhere
+ *                  -> different frontier -> separate undo steps.
+ *   backspace run: the new delete's range ends exactly where the
+ *                  top op's range begins (contiguous backward).
+ *   delete run:    the new delete's range begins exactly where the
+ *                  top op's range ended (contiguous forward).
+ *
+ * No time component: the rule is deterministic and testable. Undoing
+ * a coalesced op removes the whole run in one step, which is the
+ * native feel on every platform.
+ *
+ * APPLICATION: undo re-splices the old text and restores the saved
+ * caret/anchor (a restored deletion reselects the restored text —
+ * the GTK behavior, ready to re-delete or copy); redo re-splices
+ * the new text (caret lands after it, as any edit does). Both route
+ * through entry_splice with undo_applying set, so on_changed, a11y,
+ * and repaints fire identically to user edits.
+ */
+
+typedef struct entry_undo_op {
+    fdk_entry *e;             /* the entry this op belongs to */
+    size_t from, to;          /* the range that was replaced */
+    char *removed;            /* owned; old text (NULL = deleted nothing) */
+    char *inserted;           /* owned; new text (NULL = inserted nothing) */
+    size_t caret_before;      /* pre-edit selection, restored on undo */
+    size_t anchor_before;
+    bool typed;               /* single-codepoint user keystroke (coalescible) */
+} entry_undo_op;
+
+/* Defined below (after the undo machinery): the mutation primitive
+ * every edit — and every undo/redo application — routes through. */
+static fdk_result entry_splice(fdk_entry *e, size_t from, size_t to,
+                               const char *insert, size_t insert_len);
+/* Also below: THE selection setter the undo paths restore through. */
+static void entry_set_selection(fdk_entry *e, size_t anchor, size_t caret);
+
+static void entry_undo_destroy(void *user) {
+    entry_undo_op *op = user;
+    fdk_free(op->removed);
+    fdk_free(op->inserted);
+    fdk_free(op);
+}
+
+/* Pure-edit application core: splice without recording. Returns the
+ * splice result; the caller fixes up the selection afterwards. */
+static fdk_result entry_apply_op(fdk_entry *e, size_t from, size_t to,
+                                 const char *insert, size_t insert_len) {
+    e->undo_applying = true;
+    fdk_result r = entry_splice(e, from, to, insert, insert_len);
+    e->undo_applying = false;
+    return r;
+}
+
+static void entry_undo_apply(void *user) {
+    entry_undo_op *op = user;
+    fdk_entry *e = op->e;
+    size_t ins_len = (op->inserted != NULL) ? strlen(op->inserted) : 0;
+    size_t rem_len = (op->removed != NULL) ? strlen(op->removed) : 0;
+    (void)entry_apply_op(e, op->from, op->from + ins_len, op->removed,
+                         rem_len);
+    if (rem_len > 0) {
+        /* A restored deletion reselects its text (GTK behavior). */
+        entry_set_selection(e, op->from, op->from + rem_len);
+    } else {
+        entry_set_selection(e, op->caret_before, op->anchor_before);
+    }
+    entry_blink_restart(e);
+}
+
+static void entry_redo_apply(void *user) {
+    entry_undo_op *op = user;
+    fdk_entry *e = op->e;
+    size_t ins_len = (op->inserted != NULL) ? strlen(op->inserted) : 0;
+    size_t rem_len = (op->removed != NULL) ? strlen(op->removed) : 0;
+    /* Symmetric with entry_undo_apply: at redo time the current text
+     * holds the RESTORED (removed) text over [from, from+rem_len) —
+     * the redo replaces exactly that with the inserted text. (For a
+     * pure insert rem_len is 0: the insert lands at `from`.) */
+    (void)entry_apply_op(e, op->from, op->from + rem_len,
+                         op->inserted, ins_len);
+    entry_blink_restart(e);
+}
+
+/* Is `s[0..n)` exactly one UTF-8 codepoint? (the "typed" test) */
+static bool utf8_single_cp(const char *s, size_t n) {
+    if (s == NULL || n == 0) {
+        return false;
+    }
+    fdk_u32 cp = 0;
+    int step = fdk_text_utf8_next(s, n, 0, &cp);
+    return step > 0 && (size_t)step == n;
+}
+
+/* Pushes (or coalesces into) the stack. `removed_copy` and
+ * `insert_copy` are already-owned exact copies; on any allocation
+ * failure the op is simply not recorded (the edit itself succeeded —
+ * a degraded history beats a failed keystroke; a warning logs it). */
+static void entry_undo_record(fdk_entry *e, size_t from, size_t to,
+                              char *removed_copy, char *insert_copy,
+                              size_t caret_before, size_t anchor_before) {
+    if (e->undo == NULL) {
+        if (!fdk_ok(fdk_undo_stack_create(0, &e->undo))) {
+            e->undo = NULL;
+            fdk_free(removed_copy);
+            fdk_free(insert_copy);
+            FDK_WARN("entry: undo stack unavailable; edits are not "
+                     "recorded");
+            return;
+        }
+    }
+    bool typed = utf8_single_cp(insert_copy,
+                                (insert_copy != NULL)
+                                    ? strlen(insert_copy) : 0) &&
+                 removed_copy == NULL;
+    /* A single-codepoint DELETE is also a typed op (backspace/delete
+     * runs coalesce); typed inserts have no removed text by
+     * construction, and typed deletes have no inserted text. */
+    if (insert_copy == NULL && removed_copy != NULL) {
+        typed = utf8_single_cp(removed_copy, strlen(removed_copy));
+    }
+
+    /* ---- gesture grouping: select-then-type is ONE replace op ----
+     *
+     * entry_delete_selection set undo_group_pending after recording
+     * the selection's delete; if THIS record is the insert of that
+     * same keystroke (a pure insert landing exactly at the deleted
+     * slot), the two ops compose into a single replace — the undo
+     * step then matches the user's gesture (GTK/Qt behavior).
+     * Read-and-clear: any other record shape expires the pending. */
+    bool group = e->undo_group_pending;
+    e->undo_group_pending = false;
+    if (group && insert_copy != NULL && removed_copy == NULL &&
+        fdk_undo_stack_can_undo(e->undo)) {
+        const fdk_undo_op *gtop = NULL;
+        if (fdk_ok(fdk_undo_stack_top(e->undo, &gtop)) && gtop != NULL) {
+            entry_undo_op *gop = gtop->user_data;
+            if (gop != NULL && gop->inserted == NULL &&
+                gop->removed != NULL && from == gop->from) {
+                entry_undo_op *merged = fdk_alloc(sizeof(*merged));
+                if (merged != NULL) {
+                    merged->e = e;
+                    merged->from = gop->from;
+                    merged->to = gop->to;
+                    merged->removed = gop->removed; /* steal below */
+                    merged->inserted = insert_copy;
+                    merged->caret_before = gop->caret_before;
+                    merged->anchor_before = gop->anchor_before;
+                    merged->typed = false; /* a replace is atomic */
+                    gop->removed = NULL;   /* stolen by `merged` */
+                    fdk_undo_op uop = {
+                        .user_data = merged,
+                        .undo = entry_undo_apply,
+                        .redo = entry_redo_apply,
+                        .destroy = entry_undo_destroy,
+                    };
+                    if (fdk_ok(fdk__undo_stack_replace_top(e->undo,
+                                                           &uop))) {
+                        return; /* gesture composed */
+                    }
+                    /* Replace refused (should not happen outside
+                     * reentrancy): give the strings back and fall
+                     * through to a normal push of the insert. */
+                    gop->removed = merged->removed;
+                    fdk_free(merged);
+                }
+            }
+        }
+    }
+
+    if (fdk_undo_stack_can_undo(e->undo)) {
+        /* Peek at the top op to try coalescing — the sanctioned
+         * inspection API (fdk_undo_stack_top) hands back the exact
+         * op struct the application pushed; the type is ours. */
+        const fdk_undo_op *top = NULL;
+        if (fdk_ok(fdk_undo_stack_top(e->undo, &top)) && top != NULL) {
+            entry_undo_op *top_op = top->user_data;
+            if (top_op != NULL && typed && top_op->typed) {
+                size_t top_ins = (top_op->inserted != NULL)
+                                     ? strlen(top_op->inserted) : 0;
+                size_t top_rem = (top_op->removed != NULL)
+                                     ? strlen(top_op->removed) : 0;
+                bool merged = false;
+                if (insert_copy != NULL && top_op->inserted != NULL &&
+                    removed_copy == NULL &&
+                    from == top_op->from + top_ins) {
+                    /* typing run: append to the top's inserted text */
+                    size_t a = top_ins;
+                    size_t b = strlen(insert_copy);
+                    char *grown =
+                        fdk_realloc(top_op->inserted, a + b + 1);
+                    if (grown != NULL) {
+                        memcpy(grown + a, insert_copy, b + 1);
+                        top_op->inserted = grown;
+                        merged = true;
+                    }
+                } else if (removed_copy != NULL && insert_copy == NULL &&
+                           top_op->removed != NULL &&
+                           top_op->inserted == NULL) {
+                    /* Pure-delete runs. Two geometries extend a run:
+                     *
+                     * BACKSPACE (caret moves LEFT with each delete):
+                     *   new.to == top.from — prepend the new text,
+                     *   from moves back. "wxyz": z, y, x merge to
+                     *   [1,4) "xyz".
+                     *
+                     * DELETE KEY (caret stays PUT, text flows left):
+                     *   new.from == top.from — append; each delete
+                     *   took the same slot the previous one left.
+                     *   "abcd" + Del Del: a, b merge to [0,2) "ab".
+                     *
+                     *   The advancing-caret variant (new.from ==
+                     *   top.to, successive selection deletes) is the
+                     *   same append geometry. */
+                    if (to == top_op->from) {
+                        /* backspace run: prepend (extends backward) */
+                        size_t b = strlen(removed_copy);
+                        size_t a = top_rem;
+                        char *grown =
+                            fdk_realloc(top_op->removed, a + b + 1);
+                        if (grown != NULL) {
+                            memmove(grown + b, grown, a + 1);
+                            memcpy(grown, removed_copy, b);
+                            top_op->removed = grown;
+                            top_op->from = from;
+                            merged = true;
+                        }
+                    } else if (from == top_op->from ||
+                               from == top_op->to) {
+                        /* delete-key run: append (extends forward) */
+                        size_t a = top_rem;
+                        size_t b = strlen(removed_copy);
+                        char *grown =
+                            fdk_realloc(top_op->removed, a + b + 1);
+                        if (grown != NULL) {
+                            memcpy(grown + a, removed_copy, b + 1);
+                            top_op->removed = grown;
+                            top_op->to = top_op->to + b;
+                            merged = true;
+                        }
+                    }
+                }
+                if (merged) {
+                    fdk_free(removed_copy);
+                    fdk_free(insert_copy);
+                    return;
+                }
+            }
+        }
+    }
+    entry_undo_op *op = fdk_alloc(sizeof(*op));
+    if (op == NULL) {
+        fdk_free(removed_copy);
+        fdk_free(insert_copy);
+        FDK_WARN("entry: undo op not recorded (out of memory)");
+        return;
+    }
+    op->e = e;
+    op->from = from;
+    op->to = to;
+    op->removed = removed_copy;
+    op->inserted = insert_copy;
+    op->caret_before = caret_before;
+    op->anchor_before = anchor_before;
+    op->typed = typed;
+    fdk_undo_op uop = {
+        .user_data = op,
+        .undo = entry_undo_apply,
+        .redo = entry_redo_apply,
+        .destroy = entry_undo_destroy,
+    };
+    if (!fdk_ok(fdk_undo_stack_push(e->undo, &uop))) {
+        entry_undo_destroy(op);
+        FDK_WARN("entry: undo op not recorded (push refused)");
+    }
+}
+
 /* Replace [from, to) with insert (insert_len bytes, may be NULL/0).
  * Maintains every invariant and fires on_changed. Returns FDK_ERR_*,
- * leaves the entry untouched on failure. */
+ * leaves the entry untouched on failure.
+ *
+ * 1.3.3: this is the single mutation primitive, so it is also the
+ * undo recorder. Applications driven by an op's undo/redo closure
+ * set undo_applying (see entry_apply_op) and skip the recording.
+ * Copies for the record are taken BEFORE the text moves; if the
+ * copy allocation fails the edit still succeeds (degraded history,
+ * logged) — a keystroke must never fail because the history could
+ * not be paid for. */
 static fdk_result entry_splice(fdk_entry *e, size_t from, size_t to,
                                const char *insert, size_t insert_len) {
     if (from > to || to > e->len) {
@@ -391,6 +709,27 @@ static fdk_result entry_splice(fdk_entry *e, size_t from, size_t to,
     if (!fdk_ok(r)) {
         return r;
     }
+    /* ---- undo capture (pre-mutation state) ---- */
+    char *removed_copy = NULL;
+    char *insert_copy = NULL;
+    size_t caret_before = e->caret;
+    size_t anchor_before = e->anchor;
+    if (!e->undo_applying) {
+        if (to > from) {
+            removed_copy = fdk_alloc(to - from + 1);
+            if (removed_copy != NULL) {
+                memcpy(removed_copy, e->text + from, to - from);
+                removed_copy[to - from] = '\0';
+            }
+        }
+        if (insert_len > 0) {
+            insert_copy = fdk_alloc(insert_len + 1);
+            if (insert_copy != NULL) {
+                memcpy(insert_copy, insert, insert_len);
+                insert_copy[insert_len] = '\0';
+            }
+        }
+    }
     /* Move the tail first (memmove handles overlap), then the insert. */
     memmove(e->text + from + insert_len, e->text + to, e->len - to);
     if (insert_len > 0) {
@@ -407,6 +746,30 @@ static fdk_result entry_splice(fdk_entry *e, size_t from, size_t to,
     fdk__a11y_notify(&e->base, FDK_A11Y_VALUE_CHANGED, 0);
     if (e->on_changed != NULL) {
         e->on_changed(&e->base, e->on_changed_data);
+    }
+    /* ---- undo record (post-success; skipped while applying) ----
+     *
+     * All-or-nothing: if either needed copy failed allocation, the
+     * whole record is dropped — recording a half-op (an insert
+     * without its removed text) would make undo restore WRONG text.
+     * The edit itself stands; the warning says the history lost a
+     * step. */
+    if (!e->undo_applying) {
+        bool need_removed = (to > from);
+        bool need_insert = (insert_len > 0);
+        bool removed_ok = !need_removed || removed_copy != NULL;
+        bool insert_ok = !need_insert || insert_copy != NULL;
+        if ((need_removed || need_insert) && removed_ok && insert_ok) {
+            entry_undo_record(e, from, to, removed_copy, insert_copy,
+                              caret_before, anchor_before);
+        } else {
+            if (need_removed || need_insert) {
+                FDK_WARN("entry: edit not recorded (history copy "
+                         "failed)");
+            }
+            fdk_free(removed_copy);
+            fdk_free(insert_copy);
+        }
     }
     return FDK_OK;
 }
@@ -477,7 +840,18 @@ static void entry_delete_selection(fdk_entry *e) {
     }
     size_t lo = (e->anchor < e->caret) ? e->anchor : e->caret;
     size_t hi = (e->anchor < e->caret) ? e->caret : e->anchor;
-    (void)entry_splice(e, lo, hi, NULL, 0);
+    /* 1.3.3 gesture grouping: typing over a selection runs this
+     * delete and then an insert in the SAME keystroke — the user
+     * performed ONE "replace" and undo must step it as one. The
+     * flag is set AFTER the delete's own record (the delete record
+     * must not consume it), and read-and-cleared by the NEXT record:
+     * only an insert landing exactly at the deleted slot composes;
+     * anything else — a keystroke boundary, a caret move, another
+     * delete — expires it. */
+    fdk_result r = entry_splice(e, lo, hi, NULL, 0);
+    if (fdk_ok(r)) {
+        e->undo_group_pending = true;
+    }
 }
 
 static bool entry_has_selection(const fdk_entry *e) {
@@ -628,6 +1002,25 @@ static bool entry_handle_event(fdk_widget *w,
                 entry_set_selection(e, 0, e->len);
                 return true;
             }
+        }
+
+        /* Undo/redo (1.3.3): Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y
+         * redo — the two spellings every desktop ships. Read-only
+         * entries refuse (the mutator contract above) and BUBBLE the
+         * key: a dialog's Escape handling must not be shadowed. */
+        if (ctrl && !e->read_only &&
+            (key->codepoint == 'z' || key->codepoint == 'Z')) {
+            if (shift) {
+                (void)fdk_entry_redo(w);
+            } else {
+                (void)fdk_entry_undo(w);
+            }
+            return true;
+        }
+        if (ctrl && !shift && !e->read_only &&
+            (key->codepoint == 'y' || key->codepoint == 'Y')) {
+            (void)fdk_entry_redo(w);
+            return true;
         }
 
         switch (key->scancode) {
@@ -903,6 +1296,10 @@ static void entry_measure(fdk_widget *w, fdk_size *out) {
 static void entry_destroy(fdk_widget *w) {
     fdk_entry *e = entry_of(w);
     entry_blink_stop(e);
+    /* The undo stack owns the op structs (with their text copies);
+     * destroying it runs every op's destroy — nothing dangles. */
+    fdk_undo_stack_destroy(e->undo);
+    e->undo = NULL;
     fdk_free(e->text);
     fdk_free(e->preedit);
 }
@@ -1072,6 +1469,8 @@ fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
     e->font = font;
     e->blink_timer = NULL;
     e->caret_on = true;
+    e->undo = NULL;       /* lazy: first recorded edit allocates it */
+    e->undo_applying = false;
     const char *init = (text != NULL) ? text : "";
     size_t len = strlen(init);
     if (len > ENTRY_MAX_TEXT) {
@@ -1119,6 +1518,14 @@ fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text) {
     e->len = len;
     e->caret = len;
     e->anchor = len;
+    /* 1.3.3: a programmatic overwrite is a mode change, not an edit —
+     * the old text's history cannot meaningfully undo INTO it (the
+     * ops' byte offsets reference a buffer that no longer exists),
+     * so the history is cleared. set_text stays the "reset the
+     * field" API; typed/spliced edits stay the undoable ones. */
+    if (e->undo != NULL) {
+        (void)fdk_undo_stack_clear(e->undo);
+    }
     entry_scroll_to_caret(e);
     fdk_widget_invalidate(entry);
     fdk_widget_child_layout_changed(entry->parent);
@@ -1297,4 +1704,51 @@ size_t fdk_entry_get_max_length(fdk_widget *entry) {
     }
     fdk_entry *e = entry_of(entry);
     return (e->max_len > 0) ? e->max_len : ENTRY_MAX_TEXT;
+}
+
+/* ---- undo/redo (1.3.3 public API) ---- */
+
+bool fdk_entry_can_undo(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return false;
+    }
+    fdk_entry *e = entry_of(entry);
+    return !e->read_only && e->undo != NULL &&
+           fdk_undo_stack_can_undo(e->undo);
+}
+
+bool fdk_entry_can_redo(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return false;
+    }
+    fdk_entry *e = entry_of(entry);
+    return !e->read_only && e->undo != NULL &&
+           fdk_undo_stack_can_redo(e->undo);
+}
+
+fdk_result fdk_entry_undo(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_entry *e = entry_of(entry);
+    /* Programmatic calls report honestly: INVALID_STATE when there
+     * is nothing to undo (the KEYBOARD binding is the blind no-op
+     * consumer — it never looks). */
+    if (e->read_only || e->undo == NULL ||
+        !fdk_undo_stack_can_undo(e->undo)) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    return fdk_undo_stack_undo(e->undo);
+}
+
+fdk_result fdk_entry_redo(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_entry *e = entry_of(entry);
+    if (e->read_only || e->undo == NULL ||
+        !fdk_undo_stack_can_redo(e->undo)) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    return fdk_undo_stack_redo(e->undo);
 }

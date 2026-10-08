@@ -255,6 +255,46 @@ bool fdk_window_get_decorated(const fdk_window *window);
 fdk_result fdk_window_set_decoration_font(fdk_window *window,
                                           fdk_font *font);
 
+/* ---- Application shortcuts (1.3.3) -----------------------------------
+ *
+ * A per-window table of key bindings the application registers and
+ * the toolkit dispatches. On every KEY_DOWN (including auto-repeat
+ * presses) the window tests its table BEFORE the widget tree sees
+ * the key — accelerator semantics: Ctrl+S fires Save whether focus
+ * sits in an Entry, on a button, or nowhere. A match consumes the
+ * event: the tree and the application's window callback never see
+ * it. That precedence is also the documented footgun — do not
+ * register editing keys the focused widget should own (Ctrl+C/V/X/
+ * Z/A): the table would shadow the Entry's built-ins. Menu bar
+ * accelerators (fdk_menu_item_set_shortcut) run AFTER this table.
+ *
+ * Specs are parsed by fdk_shortcut_parse (see fdk_event.h for the
+ * grammar); "Ctrl+S" binds the physical S position, layout-stable.
+ * Two registrations may use the same spec — the FIRST registered
+ * fires (registration order wins, like every FDK dispatch table).
+ *
+ * The callback runs in the window's dispatch context: it may destroy
+ * the window (the classic Ctrl+Q quit), open dialogs, mutate the
+ * tree — the same contract any event handler gets.
+ *
+ * Shortcut ids: fdk_window_add_shortcut returns a small integer >= 1
+ * (0 = registration failed; the spec did not parse). Remove with
+ * fdk_window_remove_shortcut. The table dies with the window.
+ */
+typedef void (*fdk_shortcut_fn)(fdk_window *window, void *user_data);
+
+/* Registers `spec` ("Ctrl+S", "F5", ...). Returns the shortcut id
+ * (>= 1), or 0 when the window is NULL or the spec does not parse
+ * (FDK_ERR_INVALID_ARGUMENT is also returned through the public
+ * error API for diagnostics). */
+int fdk_window_add_shortcut(fdk_window *window, const char *spec,
+                            fdk_shortcut_fn on_press, void *user_data);
+/* Removes a registration (id from add_shortcut). Unknown ids are a
+ * quiet no-op — removal code runs in arbitrary teardown orders. */
+void fdk_window_remove_shortcut(fdk_window *window, int id);
+/* The number of live registrations (diagnostics / conflict UIs). */
+size_t fdk_window_shortcut_count(const fdk_window *window);
+
 #ifdef __cplusplus
 }
 #endif

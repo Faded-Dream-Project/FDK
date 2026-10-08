@@ -13,8 +13,51 @@
 #include "widget/widgets_internal.h" /* window-root class, a11y name */
 #include "window/window_internal.h"
 
+#include "core/shortcut_internal.h"
+#include "widget/menu_internal.h"
+
 #include <string.h>
 #include <time.h>
+
+/* ---- 1.3.3: the application shortcut table ----
+ *
+ * One row per fdk_window_add_shortcut registration. The struct is
+ * window.c-private (window_internal.h only carries the array
+ * pointers); nothing outside this file ever reads a row. */
+
+typedef struct fdk_window_shortcut {
+    int id;                 /* >= 1, monotonically growing, never reused */
+    fdk_u32 modifiers;      /* parsed spec: exact-match FDK_MOD_* bits */
+    fdk_scancode key;       /* parsed spec: physical key (evdev space) */
+    fdk_shortcut_fn on_press;
+    void *user_data;
+} fdk_window_shortcut;
+
+/* Fires the FIRST registration matching the key (registration order
+ * wins). Returns true when one fired — the event is then consumed.
+ *
+ * The matched row is COPIED before the callback runs: the callback
+ * may call fdk_window_remove_shortcut (or add more, or destroy the
+ * window), any of which may realloc or free the table mid-call. The
+ * copy also means the loop never advances after firing — first
+ * match wins, once. */
+static bool window_shortcut_dispatch(fdk_window *window,
+                                     const fdk_key_event *key) {
+    for (size_t i = 0; i < window->shortcut_count; i++) {
+        const fdk_window_shortcut *row = &window->shortcuts[i];
+        if (!fdk__shortcut_matches(row->modifiers, row->key, key)) {
+            continue;
+        }
+        fdk_shortcut_fn fn = row->on_press;
+        void *user = row->user_data;
+        if (fn != NULL) {
+            fn(window, user);
+        }
+        return true;
+    }
+    return false;
+}
+
 
 /* ---- Phase 8: FDK-drawn decorations + window management ----
  *
@@ -753,6 +796,10 @@ static fdk_result window_create_full(fdk_context *ctx,
     window->deco_pressed = 0;
     window->cursor_edge = FDK_WRES_NONE;
     window->is_popup = (options != NULL && options->popup != 0);
+    window->shortcuts = NULL;
+    window->shortcut_count = 0;
+    window->shortcut_cap = 0;
+    window->shortcut_next_id = 1;
 
     if (options != NULL && options->title != NULL) {
         size_t n = strlen(options->title) + 1;
@@ -868,6 +915,10 @@ void fdk_window_destroy(fdk_window *window) {
     fdk_surface_detach_from_window(window);
     fdk_surface_destroy(window->paint_intermediate);
     window->paint_intermediate = NULL;
+    fdk_free(window->shortcuts);
+    window->shortcuts = NULL;
+    window->shortcut_count = 0;
+    window->shortcut_cap = 0;
     fdk_context_unregister_window(window->ctx, window);
     window->ops->window_destroy(window->pwindow);
     fdk_free(window);
@@ -1269,6 +1320,71 @@ void fdk_window_set_event_callback(fdk_window *window,
     window->event_callback_user_data = user_data;
 }
 
+/* ---- 1.3.3: application shortcuts (public API) ---- */
+
+int fdk_window_add_shortcut(fdk_window *window, const char *spec,
+                            fdk_shortcut_fn on_press, void *user_data) {
+    if (window == NULL || spec == NULL) {
+        return 0;
+    }
+    fdk_u32 mods = 0;
+    fdk_scancode key = 0;
+    fdk_result r = fdk_shortcut_parse(spec, &mods, &key);
+    if (!fdk_ok(r)) {
+        /* Loud in the log (the string is a developer error, not user
+         * input), quiet in the return (0: no id was minted). */
+        FDK_WARN("window: shortcut spec \"%s\" did not parse", spec);
+        return 0;
+    }
+    if (window->shortcut_count == window->shortcut_cap) {
+        size_t ncap = window->shortcut_cap * 2 + 4;
+        if (ncap < window->shortcut_cap ||
+            ncap > SIZE_MAX / sizeof(fdk_window_shortcut)) {
+            return 0;
+        }
+        fdk_window_shortcut *rows =
+            fdk_realloc(window->shortcuts,
+                        ncap * sizeof(fdk_window_shortcut));
+        if (rows == NULL) {
+            return 0;
+        }
+        window->shortcuts = rows;
+        window->shortcut_cap = ncap;
+    }
+    int id = window->shortcut_next_id++;
+    fdk_window_shortcut *row = &window->shortcuts[window->shortcut_count++];
+    row->id = id;
+    row->modifiers = mods;
+    row->key = key;
+    row->on_press = on_press;
+    row->user_data = user_data;
+    return id;
+}
+
+void fdk_window_remove_shortcut(fdk_window *window, int id) {
+    if (window == NULL || id <= 0) {
+        return;
+    }
+    for (size_t i = 0; i < window->shortcut_count; i++) {
+        if (window->shortcuts[i].id == id) {
+            /* Swap-remove; order among the SURVIVORS is preserved
+             * (stable relative order keeps "first registered fires"
+             * meaningful across removals). */
+            for (size_t j = i + 1; j < window->shortcut_count; j++) {
+                window->shortcuts[j - 1] = window->shortcuts[j];
+            }
+            window->shortcut_count--;
+            return;
+        }
+    }
+    /* Unknown id: quiet no-op — teardown orders are arbitrary. */
+}
+
+size_t fdk_window_shortcut_count(const fdk_window *window) {
+    return (window != NULL) ? window->shortcut_count : 0;
+}
+
+
 void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) {
     /* Keep fdk_window_get_size() authoritative without requiring the
      * application to handle FDK_EVENT_WINDOW_CONFIGURE itself just to
@@ -1385,6 +1501,55 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         return;
     }
 
+    /* ---- 1.3.3: keyboard accelerators, before the tree ----
+     *
+     * Application shortcuts (fdk_window_add_shortcut) and menu-bar
+     * accelerators run BEFORE the widget tree sees a KEY_DOWN —
+     * accelerator semantics: Ctrl+S fires Save wherever focus sits,
+     * including an Entry that would otherwise swallow Ctrl+S itself
+     * (the documented precedence; see fdk_window.h). Popups are
+     * exempt: their own trees hold the grab (menu sessions own
+     * their keys — Up/Down/Enter/Esc — and never reach a window
+     * table that could steal them). Auto-repeat presses match like
+     * initial ones (hold-to-repeat, the same rule Entry follows).
+     *
+     * Both handlers may destroy the window (Ctrl+Q, a menu callback
+     * that closes the app) — the identity pair is cached BEFORE the
+     * callback runs (touching window->anything after a destroy-callback
+     * is the classic use-after-free; the tree-routing block below
+     * learned this the hard way). A consumed event skips the tree
+     * and the application callback but still falls through to the
+     * shared tail below (auto-paint, geo flags) — a shortcut that
+     * invalidates something toolkit-owned must still see it painted.
+     */
+    bool handled_by_accel = false;
+    if (event->type == FDK_EVENT_KEY_DOWN && !window->is_popup) {
+        fdk_context *accel_ctx = window->ctx;
+        fdk_platform_window *accel_pwindow = window->pwindow;
+        if (window_shortcut_dispatch(window, &event->key)) {
+            handled_by_accel = true;
+            if (fdk_context_find_window_by_pwindow(accel_ctx,
+                                                   accel_pwindow) !=
+                window) {
+                return; /* destroyed by the shortcut callback */
+            }
+        } else if (window->root != NULL) {
+            /* The scan runs no user code, so the window cannot die
+             * mid-scan; only the ACTIVATION may destroy it. */
+            fdk_menu_item *accel_item = NULL;
+            if (fdk__menu_bar_accel_hit(window->root, &event->key,
+                                        &accel_item)) {
+                handled_by_accel = true;
+                fdk__menu_item_accel_activate(accel_item);
+                if (fdk_context_find_window_by_pwindow(accel_ctx,
+                                                       accel_pwindow) !=
+                    window) {
+                    return; /* destroyed by the menu callback */
+                }
+            }
+        }
+    }
+
     /* Widget trees get first claim on input events (pointer, keys,
      * window focus). Events a widget handles are consumed here and
      * never reach the application's window callback — that is the
@@ -1407,7 +1572,8 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         return; /* destroyed by a widget handler: nothing left to do */
     }
 
-    if (!handled_by_tree && window->event_callback != NULL) {
+    if (!handled_by_tree && !handled_by_accel &&
+        window->event_callback != NULL) {
         window->event_callback(window, event, window->event_callback_user_data);
     }
 

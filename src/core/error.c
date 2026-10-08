@@ -12,6 +12,7 @@ const char *fdk_result_to_string(fdk_result result) {
         case FDK_ERR_UNSUPPORTED:        return "unsupported";
         case FDK_ERR_NOT_FOUND:          return "not found";
         case FDK_ERR_LIMIT:              return "resource limit reached";
+        case FDK_ERR_INVALID_STATE:      return "invalid state for this call";
 
         case FDK_ERR_PLATFORM_INIT:      return "platform initialization failed";
         case FDK_ERR_NO_DISPLAY:         return "no display connection available";

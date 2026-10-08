@@ -6007,6 +6007,8 @@ static void test_tooltip_gui(void) {
            "themed pixel truth), press + hover-out dismissal\n");
 }
 
+static void test_window_shortcuts_and_accelerators_gui(void);
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -6058,7 +6060,271 @@ int main(void) {
     test_file_dialog_gui();
     test_dnd_receiver_gui();
     test_dnd_source_gui();
+    test_window_shortcuts_and_accelerators_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
+}
+
+/* ---- 1.3.3: application shortcuts + menu accelerators (e2e) ----
+ *
+ * REAL keys through XSendEvent into a REAL window with a REAL menu
+ * bar and a focused Entry — the full dispatch chain: window shortcut
+ * table first, then the live menu-bar accelerator scan, then the
+ * widget tree, then the app callback. Each precedence layer is
+ * asserted by who saw (or did not see) the key. */
+
+typedef struct {
+    int shortcut_hits;
+    int menu_hits;
+    int app_key_events;
+    int entry_changed;
+} accel_counters;
+
+static void on_accel_shortcut(fdk_window *window, void *user) {
+    (void)window;
+    ((accel_counters *)user)->shortcut_hits++;
+}
+
+static void on_accel_menu(fdk_menu_item *item, void *user) {
+    (void)item;
+    ((accel_counters *)user)->menu_hits++;
+}
+
+static void on_accel_window_cb(fdk_window *window,
+                               const fdk_event_data *event,
+                               void *user) {
+    (void)window;
+    if (event->type == FDK_EVENT_KEY_DOWN) {
+        ((accel_counters *)user)->app_key_events++;
+    }
+}
+
+static void on_accel_entry_changed(fdk_widget *entry, void *user) {
+    (void)entry;
+    ((accel_counters *)user)->entry_changed++;
+}
+
+/* The Ctrl+Q pattern: the shortcut callback destroys its own window
+ * mid-dispatch (the dispatch path's destroy re-check must hold). */
+typedef struct {
+    int *hits;
+} quit_shortcut_ctx;
+
+static void on_quit_shortcut(fdk_window *window, void *user) {
+    quit_shortcut_ctx *q = user;
+    (*q->hits)++;
+    fdk_window_destroy(window);
+}
+
+/* Key with arbitrary modifier state, Press + Release. keycode is the
+ * X keycode (evdev scancode + 8, exactly what both backends
+ * derive from). */
+static void x11_send_key_state(Display *dpy, unsigned long xid,
+                               unsigned int keycode,
+                               unsigned int state) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = KeyPress;
+    ev.xkey.window = (Window)xid;
+    ev.xkey.keycode = keycode;
+    ev.xkey.state = state;
+    ev.xkey.same_screen = True;
+    Status st = XSendEvent(dpy, (Window)xid, False,
+                           (long)(KeyPressMask | KeyReleaseMask), &ev);
+    assert(st != 0);
+    ev.type = KeyRelease;
+    st = XSendEvent(dpy, (Window)xid, False,
+                    (long)(KeyPressMask | KeyReleaseMask), &ev);
+    assert(st != 0);
+    XFlush(dpy);
+}
+
+static void test_window_shortcuts_and_accelerators_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK accelerators test",
+                                 .width = 360, .height = 260 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    fdk_font *font = NULL;
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        font = fdk_font_load(font_candidates[i], 16);
+        if (font != NULL) {
+            break;
+        }
+    }
+    if (font == NULL) {
+        printf("[skip] X11 accelerators GUI (no system TrueType font "
+               "found)\n");
+        fdk_window_destroy(win);
+        fdk_shutdown(ctx);
+        return;
+    }
+
+    /* A menu bar with accelerators at every nesting level. */
+    fdk_widget *bar = NULL;
+    assert(fdk_ok(fdk_menu_bar_create(root, font, &bar)));
+    fdk_menu *fm = NULL;
+    assert(fdk_ok(fdk_menu_create(font, &fm)));
+    fdk_menu_item *save_it = NULL;
+    fdk_menu_item *toggle_it = NULL;
+    fdk_menu_item *dis_it = NULL;
+    assert(fdk_ok(fdk_menu_append(fm, "Save", &save_it)));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(save_it, "Ctrl+S")));
+    assert(fdk_ok(fdk_menu_append_check(fm, "Toolbar", false,
+                                        &toggle_it)));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(toggle_it, "Ctrl+T")));
+    assert(fdk_ok(fdk_menu_append(fm, "Disabled", &dis_it)));
+    assert(fdk_ok(fdk_menu_item_set_shortcut(dis_it, "Ctrl+B")));
+    fdk_menu_item_set_enabled(dis_it, false);
+    assert(fdk_ok(fdk_menu_bar_append(bar, "File", fm)));
+
+    /* A focused Entry: the widget-tree layer of the precedence
+     * chain, and the undo integration. */
+    fdk_widget *entry = NULL;
+    assert(fdk_ok(fdk_entry_create(root, font, "", &entry)));
+    assert(fdk_widget_focus(entry));
+
+    accel_counters c;
+    memset(&c, 0, sizeof(c));
+    fdk_menu_set_on_activate(fm, on_accel_menu, &c);
+    fdk_entry_set_on_changed(entry, on_accel_entry_changed, &c);
+    fdk_window_set_event_callback(win, on_accel_window_cb, &c);
+
+    /* An application shortcut, registered AFTER the bar exists (the
+     * live scan does not care). */
+    int id_l = fdk_window_add_shortcut(win, "Ctrl+L",
+                                       on_accel_shortcut, &c);
+    assert(id_l >= 1);
+    /* Garbage specs are loud-but-safe: 0, no crash. */
+    assert(fdk_window_add_shortcut(win, "Ctrl+", on_accel_shortcut,
+                                   &c) == 0);
+    assert(fdk_window_shortcut_count(win) == 1);
+    /* The unknown-id removal is a quiet no-op. */
+    fdk_window_remove_shortcut(win, 999);
+    assert(fdk_window_shortcut_count(win) == 1);
+
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    alarm(10);
+    for (int quiet = 0; quiet < 2;) {
+        int r = fdk_pump_events(ctx, 100);
+        assert(r >= 0);
+        quiet = (r == 0) ? quiet + 1 : 0;
+    }
+    alarm(0);
+
+    /* X keycode = evdev + 8: A=38, B=56, L=46, S=39, T=28, Z=52,
+     * Y=29, G=42, H=43. */
+
+    /* 1. The window shortcut fires and is CONSUMED: the Entry never
+     * sees the key (its text would not change) and the app callback
+     * sees no KEY_DOWN. */
+    x11_send_key_state(send_dpy, xid, 46, ControlMask); /* Ctrl+L */
+    (void)fdk_pump_events(ctx, 200);
+    assert(c.shortcut_hits == 1);
+    assert(c.app_key_events == 0);
+    assert(strcmp(fdk_entry_get_text(entry), "") == 0);
+    /* Exact modifiers: Ctrl+Shift+L is NOT Ctrl+L — no second hit.
+     * Nobody claims it (the Entry refuses ctrl-modified inserts),
+     * so it FALLS THROUGH to the app callback — the documented
+     * routing contract for unclaimed keys. */
+    x11_send_key_state(send_dpy, xid, 46, ControlMask | ShiftMask);
+    (void)fdk_pump_events(ctx, 200);
+    assert(c.shortcut_hits == 1); /* no second hit */
+    assert(c.app_key_events == 1); /* the unclaimed key arrived */
+
+    /* 2. The menu accelerator fires without opening anything: the
+     * check state flips, the callback runs, nothing is consumed by
+     * a popup (none exists), the app sees no NEW key. */
+    x11_send_key_state(send_dpy, xid, 28, ControlMask); /* Ctrl+T */
+    (void)fdk_pump_events(ctx, 200);
+    assert(c.menu_hits == 1);
+    assert(fdk_menu_item_is_checked(toggle_it));
+    assert(c.app_key_events == 1); /* unchanged: accelerator consumed */
+
+    /* 3. DISABLED menu items do not fire — and nobody else wants
+     * Ctrl+B, so it falls through to the app callback. */
+    x11_send_key_state(send_dpy, xid, 56, ControlMask); /* Ctrl+B */
+    (void)fdk_pump_events(ctx, 200);
+    assert(c.menu_hits == 1);
+    assert(c.app_key_events == 2);
+
+    /* 4. APPLICATION TABLE WINS over the bar scan: register Ctrl+S
+     * (Save's binding) on the window — the app shortcut fires, the
+     * menu item's callback must NOT. */
+    int id_s = fdk_window_add_shortcut(win, "Ctrl+S",
+                                       on_accel_shortcut, &c);
+    assert(id_s >= 1);
+    x11_send_key_state(send_dpy, xid, 39, ControlMask); /* Ctrl+S */
+    (void)fdk_pump_events(ctx, 200);
+    assert(c.shortcut_hits == 2);
+    assert(c.menu_hits == 1); /* Save did not fire */
+    fdk_window_remove_shortcut(win, id_s);
+    assert(fdk_window_shortcut_count(win) == 1);
+    /* With the app shortcut REMOVED, the menu accelerator takes the
+     * binding back — the live scan sees the table's absence. */
+    x11_send_key_state(send_dpy, xid, 39, ControlMask); /* Ctrl+S */
+    (void)fdk_pump_events(ctx, 200);
+    assert(c.shortcut_hits == 2);
+    assert(c.menu_hits == 2); /* Save fired this time */
+
+    /* 5. The tree still gets keys nobody claims: type "ab" into the
+     * focused Entry through real key events, then undo/redo with the
+     * real Ctrl+Z / Ctrl+Y. */
+    x11_send_key_state(send_dpy, xid, 38, 0); /* a */
+    x11_send_key_state(send_dpy, xid, 56, 0); /* b */
+    (void)fdk_pump_events(ctx, 200);
+    assert(strcmp(fdk_entry_get_text(entry), "ab") == 0);
+    assert(fdk_entry_can_undo(entry));
+    x11_send_key_state(send_dpy, xid, 52, ControlMask); /* Ctrl+Z */
+    (void)fdk_pump_events(ctx, 200);
+    assert(strcmp(fdk_entry_get_text(entry), "") == 0); /* one step */
+    x11_send_key_state(send_dpy, xid, 29, ControlMask); /* Ctrl+Y */
+    (void)fdk_pump_events(ctx, 200);
+    assert(strcmp(fdk_entry_get_text(entry), "ab") == 0);
+    assert(c.entry_changed == 4); /* type a, type b, undo, redo */
+
+    /* 6. The shortcut callback may DESTROY the window (the classic
+     * Ctrl+Q quit) — dispatch must survive its own callback killing
+     * the window mid-keystroke. The tree and the bar die WITH the
+     * window (the menus are borrowed and outlive it). */
+    {
+        int qhits = 0;
+        quit_shortcut_ctx qctx = { .hits = &qhits };
+        int id_q = fdk_window_add_shortcut(win, "Ctrl+Q",
+                                           on_quit_shortcut, &qctx);
+        assert(id_q >= 1);
+        x11_send_key_state(send_dpy, xid, 24, ControlMask); /* Q */
+        (void)fdk_pump_events(ctx, 200);
+        assert(qhits == 1);
+        /* The window (and its root + bar) is gone; the context is
+         * still alive and pumpable. */
+    }
+    fdk_menu_destroy(fm);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    XCloseDisplay(send_dpy);
+    printf("[ok] window shortcuts + menu accelerators (GUI): table "
+           "consumes before tree, exact modifiers, disabled items "
+           "fall through, app-table-wins over bar scan, removal "
+           "re-arms the bar, entry undo/redo over real keys\n");
 }

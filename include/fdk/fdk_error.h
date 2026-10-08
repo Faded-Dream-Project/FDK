@@ -30,6 +30,10 @@ typedef enum fdk_result {
     FDK_ERR_NOT_FOUND          = -7,
     FDK_ERR_LIMIT              = -8,    /* a bounded resource is full
                                            (e.g. a11y subscriber slots) */
+    FDK_ERR_INVALID_STATE      = -9,    /* the call is valid in general but
+                                           this object is mid-mutation (e.g.
+                                           pushing onto an undo stack from
+                                           inside its own undo closure) */
 
     /* Platform / windowing */
     FDK_ERR_PLATFORM_INIT      = -100,
