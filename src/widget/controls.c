@@ -34,6 +34,10 @@
  * built-in default 8 (Phase 7). The focus-ring inset/width moved to
  * the theme too: FDK_TM_FOCUS_RING_WIDTH, built-in default 2 (1.4.0). */
 
+/* The hover fade flight (1.4.1): 120 ms of quad-out — hover is a
+ * whisper, not a wave. */
+#define HOVER_FADE_MS 120
+
 /* Toggle: track 34x18, knob 12, gap 8 before optional label. */
 #define TOGGLE_TRACK_W 34
 #define TOGGLE_TRACK_H 18
@@ -47,6 +51,49 @@
 /* Radio: 16x16 circle (r=8), inner dot r=4, gap 8. */
 #define RADIO_EXTENT 16
 #define RADIO_GAP 8
+
+/* ---- 1.4.1: the hover fade (shared by Button + check family) ---- */
+
+/* Linear channel blend, clamped — the paint-time hover ladder. */
+static fdk_color blend_colors(fdk_color a, fdk_color b, fdk_f32 t) {
+    if (t < 0.0f) {
+        t = 0.0f;
+    } else if (t > 1.0f) {
+        t = 1.0f;
+    }
+    return (fdk_color){a.r + (b.r - a.r) * t,
+                       a.g + (b.g - a.g) * t,
+                       a.b + (b.b - a.b) * t,
+                       a.a + (b.a - a.a) * t};
+}
+
+static void hover_fade_tick(fdk_animation *anim, double eased,
+                            void *user) {
+    (void)anim;
+    fdk_hover_fade *f = user;
+    f->t = f->from + (f->target - f->from) * (fdk_f32)eased;
+    /* The animator invalidates the attached widget after this
+     * returns — no manual invalidate needed (and none wanted:
+     * this tick owns nothing but the blend). */
+}
+
+/* Arms (or retargets) the fade toward 1 (entering) / 0 (leaving).
+ * Cancels any running flight first — departing from the CURRENT
+ * blend, never teleporting. */
+static void hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
+                           bool entering) {
+    if (f->anim != NULL) {
+        fdk_animation_cancel(f->anim);
+        f->anim = NULL;
+    }
+    f->target = entering ? 1.0f : 0.0f;
+    if (f->t == f->target) {
+        return; /* already there; nothing to fly */
+    }
+    f->from = f->t;
+    f->anim = fdk_widget_animate(w, HOVER_FADE_MS, FDK_EASE_QUAD_OUT,
+                                 hover_fade_tick, NULL, f);
+}
 
 /* The check-family's shared indicator extent along X (drawn at the
  * left edge) and the gap that follows it. */
@@ -91,46 +138,55 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
         return;
     }
 
-    /* The active-state ladder, per role (1.4.0). NORMAL rides the
-     * control family as v1 did; SUGGESTED is accent-filled with the
-     * accent's own hover/pressed states and accent-text label;
-     * DESTRUCTIVE is danger-filled, its hover/pressed derived by an
-     * inline shade (no token pair — the family is one color wide). */
+    /* The active-state ladder, per role (1.4.0; 1.4.1 fades the
+     * HOVER rungs). NORMAL rides the control family as v1 did;
+     * SUGGESTED is accent-filled with the accent's own hover/
+     * pressed states and accent-text label; DESTRUCTIVE is
+     * danger-filled, its hover/pressed derived by an inline shade
+     * (no token pair — the family is one color wide); LINK is the
+     * flat hyperlink — no fill, link-colored text, an underline
+     * that fades in under the pointer (persistent when checked —
+     * the "visited/active" read). Pressed/checked still snap: the
+     * fade is a hover whisper, not input lag. */
     const bool disabled = (w->flags & FDK_WF_ENABLED) == 0;
     const bool active = b->pressed || b->checked;
+    const fdk_f32 ht = b->fade.t; /* the hover blend */
     fdk_color fill;
     fdk_color label_col;
     switch (b->role) {
+    case FDK_BUTTON_ROLE_LINK:
+        fill = (fdk_color){0.0f, 0.0f, 0.0f, 0.0f}; /* flat: no fill */
+        label_col = disabled ? fdk__pal_text_disabled() : fdk__pal_link();
+        break;
     case FDK_BUTTON_ROLE_SUGGESTED:
-        fill = disabled   ? fdk__pal_control_disabled()
-             : active     ? fdk__pal_accent_pressed()
-             : b->hovering ? fdk__pal_accent_hover()
-                          : fdk__pal_accent();
+        fill = disabled ? fdk__pal_control_disabled()
+                : active   ? fdk__pal_accent_pressed()
+                : blend_colors(fdk__pal_accent(), fdk__pal_accent_hover(),
+                               ht);
         label_col = disabled ? fdk__pal_text_disabled()
-                             : fdk__pal_accent_text();
+                              : fdk__pal_accent_text();
         break;
     case FDK_BUTTON_ROLE_DESTRUCTIVE: {
         fdk_color danger = fdk_theme_get_color(NULL, FDK_TK_DANGER);
+        fdk_color hover = {danger.r * 0.90f, danger.g * 0.90f,
+                           danger.b * 0.90f, danger.a};
         if (disabled) {
             fill = fdk__pal_control_disabled();
         } else if (active) {
             fill = (fdk_color){danger.r * 0.78f, danger.g * 0.78f,
                                danger.b * 0.78f, danger.a};
-        } else if (b->hovering) {
-            fill = (fdk_color){danger.r * 0.90f, danger.g * 0.90f,
-                               danger.b * 0.90f, danger.a};
         } else {
-            fill = danger;
+            fill = blend_colors(danger, hover, ht);
         }
         label_col = disabled ? fdk__pal_text_disabled()
-                             : fdk__pal_accent_text();
+                              : fdk__pal_accent_text();
         break;
     }
     default:
-        fill = disabled   ? fdk__pal_control_disabled()
-             : active     ? fdk__pal_control_pressed()
-             : b->hovering ? fdk__pal_control_hover()
-                          : fdk__pal_control();
+        fill = disabled ? fdk__pal_control_disabled()
+                : active ? fdk__pal_control_pressed()
+                : blend_colors(fdk__pal_control(), fdk__pal_control_hover(),
+                               ht);
         label_col = disabled ? fdk__pal_text_disabled() : fdk__pal_text();
         break;
     }
@@ -138,11 +194,14 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
      * Radius 0 = square corners - the renderer's rounded-rect treats
      * that as a plain fill. */
     fdk_i32 radius = fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
-    fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
+    if (fill.a > 0.0f) {
+        fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
+    }
 
     /* Focus ring: a themed-color, themed-width rounded outline just
      * inside the fill (1.4.0: FOCUS_RING token + FOCUS_RING_WIDTH
-     * metric, replacing the hardcoded accent hairline). */
+     * metric, replacing the hardcoded accent hairline). LINK draws
+     * it too — a flat button is still a keyboard citizen. */
     if ((w->flags & FDK_WF_FOCUSED) != 0 && !disabled) {
         fdk_i32 fw = fdk_theme_get_metric(NULL, FDK_TM_FOCUS_RING_WIDTH);
         fdk_rect ring = {bounds.x + fw, bounds.y + fw,
@@ -167,6 +226,19 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
                                                 bounds.height);
         fdk__draw_text(surface, b->font, b->text, label_col,
                        text_x, baseline);
+        /* LINK underline: under the whole text run, fading in with
+         * the hover blend (or persistent when checked — the active
+         * link read). Same baseline+2 rule as the mnemonics. */
+        if (b->role == FDK_BUTTON_ROLE_LINK && !disabled) {
+            fdk_f32 u = b->checked ? 1.0f : ht;
+            if (u > 0.01f) {
+                fdk_color lc = fdk__pal_link();
+                fdk_color ul = {lc.r, lc.g, lc.b, lc.a * u};
+                fdk_surface_fill_rect(
+                    surface,
+                    (fdk_rect){text_x, baseline + 2, tw, 1}, ul);
+            }
+        }
     }
 }
 
@@ -204,10 +276,12 @@ static bool button_handle_event(fdk_widget *w,
         return false;
     case FDK_WIDGET_POINTER_ENTER:
         b->hovering = true;
+        hover_fade_arm(w, &b->fade, true);
         fdk_widget_invalidate(w);
         return false;
     case FDK_WIDGET_POINTER_LEAVE:
         b->hovering = false;
+        hover_fade_arm(w, &b->fade, false);
         fdk_widget_invalidate(w);
         return false;
     default:
@@ -342,6 +416,7 @@ void fdk_button_set_role(fdk_widget *button, fdk_button_role role) {
     case FDK_BUTTON_ROLE_NORMAL:
     case FDK_BUTTON_ROLE_SUGGESTED:
     case FDK_BUTTON_ROLE_DESTRUCTIVE:
+    case FDK_BUTTON_ROLE_LINK:
         break;
     default:
         return; /* unknown values ignored (documented) */
@@ -423,10 +498,12 @@ static bool check_handle_event(fdk_widget *w,
         return false;
     case FDK_WIDGET_POINTER_ENTER:
         c->hovering = true;
+        hover_fade_arm(w, &c->fade, true);
         fdk_widget_invalidate(w);
         return false;
     case FDK_WIDGET_POINTER_LEAVE:
         c->hovering = false;
+        hover_fade_arm(w, &c->fade, false);
         fdk_widget_invalidate(w);
         return false;
     default:
@@ -647,9 +724,9 @@ static void checkbox_paint(fdk_widget *w, fdk_surface *surface,
     fdk_color fill = (w->flags & FDK_WF_ENABLED) == 0
                          ? fdk__pal_control_disabled()
                          : (c->checked ? fdk__pal_accent()
-                                       : (c->hovering
-                                              ? fdk__pal_control_hover()
-                                              : fdk__pal_control()));
+                                       : blend_colors(fdk__pal_control(),
+                                                      fdk__pal_control_hover(),
+                                                      c->fade.t));
     fdk_surface_fill_rounded_rect(surface, box, 4, fill);
 
     if (c->checked) {

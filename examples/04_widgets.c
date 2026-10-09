@@ -7,6 +7,10 @@
  *
  *   Profile frame   — a Toggle and two Checkboxes
  *   Renderer frame  — a radio group (the frame's children)
+ *   Session frame   — the 1.4.1 furniture: an Expander whose door
+ *                     reveals advanced options, and a Paned whose
+ *                     divider DRAGS (and answers the arrows when
+ *                     focused — Tab to it)
  *   Layout frame    — a 3-column x 2-row grid with a two-column
  *                     SPAN cell and an expanding last column:
  *                     resize the window and watch ONLY that column
@@ -14,7 +18,11 @@
  *                     the gaps stay exactly `spacing` pixels
  *   Buttons         — "Apply" grows the progress bar and rewrites
  *                     the status label; "Reset" clears everything;
- *                     every control reports into the status line
+ *                     a LINK-styled "Docs" button and a busy
+ *                     SPINNER ride the same row (the spinner scans
+ *                     for the duration of the startup sweep, then
+ *                     parks); every control reports into the
+ *                     status line
  *   Tooltips         — rest the pointer on any control for ~half a
  *                     second: a themed, click-through hint pops up
  *                     near it (Apply's is long enough to wrap); any
@@ -78,6 +86,12 @@ static void on_any_change(fdk_widget *w, bool checked, void *user) {
     set_status(buf);
 }
 
+static void on_docs(fdk_widget *w, void *user) {
+    (void)w;
+    (void)user;
+    set_status("The documentation would open in a viewer.");
+}
+
 int main(void) {
     font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
@@ -96,7 +110,7 @@ int main(void) {
     }
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 745)) {
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 895)) {
         fdk_shutdown(ctx);
         return 1;
     }
@@ -149,6 +163,51 @@ int main(void) {
     (void)fdk_widget_set_tooltip(r2, "Draw through the Wayland stack");
     (void)fdk_widget_set_tooltip(
         r3, "Pick the backend from the session environment");
+
+    (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
+
+    /* --- frame: session (the 1.4.1 interactive furniture) ---
+     *
+     * The Expander's door reveals the "advanced" options (click the
+     * header, or Tab to it and press Space; the chevron rotates as
+     * the door flies). The Paned below it splits two work areas:
+     * drag the divider, or focus the paned (Tab) and step it with
+     * the arrows — Home/End jump to the walls. */
+    fdk_widget *session = NULL;
+    (void)fdk_frame_create(content, font16, "Session", &session);
+    fdk_widget_set_background(session, col(26, 29, 40));
+    fdk_widget *adv = NULL;
+    (void)fdk_expander_create(session, font16, "Advanced settings", &adv);
+    (void)fdk_widget_set_tooltip(
+        adv, "The expander reveals its content with an animated door — "
+             "click the header or press Space while focused");
+    fdk_widget *preload = NULL;
+    (void)fdk_checkbox_create(adv, font16, "Preload file metadata",
+                              &preload);
+    fdk_checkbox_set_on_changed(preload, on_any_change,
+                               (void *)"Preload metadata");
+    fdk_widget *cache = NULL;
+    (void)fdk_entry_create(adv, font16, "", &cache);
+    fdk_entry_set_placeholder(cache, "Custom cache path…");
+
+    fdk_widget *split = NULL;
+    (void)fdk_paned_create(session, FDK_HORIZONTAL, &split);
+    fdk_widget_set_natural_size(split, 0, 62);
+    fdk_widget_set_expand(split, true, false);
+    fdk_widget *pane_a = NULL;
+    (void)fdk_widget_create(split, NULL, (fdk_rect){0, 0, 210, 62},
+                            &pane_a);
+    fdk_widget_set_background(pane_a, col(46, 93, 163));
+    fdk_widget_set_corner_radius(pane_a, 6);
+    fdk_widget *pane_b = NULL;
+    (void)fdk_widget_create(split, NULL, (fdk_rect){0, 0, 210, 62},
+                            &pane_b);
+    fdk_widget_set_background(pane_b, col(28, 62, 110));
+    fdk_widget_set_corner_radius(pane_b, 6);
+    (void)fdk_widget_set_tooltip(
+        split, "Drag the divider between the panes — or focus the "
+               "splitter and use the arrow keys (Home/End for the "
+               "walls)");
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 
@@ -226,6 +285,23 @@ int main(void) {
     fdk_widget *filler = NULL;
     (void)fdk_widget_create(row, NULL, (fdk_rect){0, 0, 0, 1}, &filler);
     fdk_widget_set_expand(filler, true, false);
+    /* 1.4.1: the LINK-styled button (flat, link-colored, the
+     * underline fades in under the pointer) and the busy SPINNER
+     * (scanning for the duration of the startup sweep — then it
+     * parks, which is what a screenshot shows). */
+    fdk_widget *docs = NULL;
+    (void)fdk_button_create(row, font16, "Docs", &docs);
+    fdk_button_set_role(docs, FDK_BUTTON_ROLE_LINK);
+    fdk_button_set_on_activate(docs, on_docs, NULL);
+    (void)fdk_widget_set_tooltip(
+        docs, "A link-styled button — flat, link-colored, the "
+              "underline fades in under the pointer");
+    fdk_widget *spinner = NULL;
+    (void)fdk_spinner_create(row, &spinner);
+    fdk_spinner_start(spinner);
+    (void)fdk_widget_set_tooltip(
+        spinner, "A busy indicator — the arc rotates while work is "
+                 "happening with no known fraction");
 
     /* --- progress + status --- */
     (void)fdk_progress_create(content, &progress);
@@ -243,7 +319,9 @@ int main(void) {
 
     while (fdk_example_pump(&ex)) {
         /* One startup sweep so a screenshot shows the bar mid-fill;
-         * then it holds (an idle app presents nothing). */
+         * then it holds (an idle app presents nothing). The spinner
+         * scans for the same duration, then parks (the "door" on
+         * the 1.4.1 furniture stays as the user left it). */
         if (ex.frames < 120) {
             fdk_progress_set_fraction(
                 progress, (fdk_f32)ex.frames / 120.0f);
@@ -251,6 +329,7 @@ int main(void) {
                 fdk_example_set_status(&ex, "Sweeping...");
             }
         } else if (ex.frames == 120) {
+            fdk_spinner_stop(spinner);
             if (!animate) {
                 apply_count = 4;
                 fdk_example_set_status(&ex, "Applied 4 times.");

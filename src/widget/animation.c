@@ -342,9 +342,21 @@ void fdk__animation_pump(long long now_ms) {
         }
     }
 
-    /* The ticker sleeps only when there is nothing running AND
-     * nothing left to reap. */
-    if (g_list == NULL && g_zombies == NULL) {
+    /* The ticker sleeps when nothing is RUNNING. Zombies are inert
+     * memory — they need no ticks, only eventual reaping, which the
+     * app's own next pump performs (a live loop pumps continuously,
+     * so the documented "~1 s of animation traffic" handle grace is
+     * unchanged in practice; a quiet app simply keeps its zombie a
+     * little longer — never shorter). Keeping the ticker alive
+     * through the grace would leave a 16 ms repeating timer firing
+     * ~64 times after the last animation ends, and every fire wakes
+     * the app's pump at the timer deadline — a 50 ms pump budget
+     * becomes ~16 ms of wall clock. Found live in 1.4.1: the hover
+     * fade (the first animation the Wayland suite ever ran) armed
+     * the ticker, and the pacing test's "400 ms" of pumping shrank
+     * to ~128 ms — not enough for the compositor's frame callbacks
+     * to come back. */
+    if (g_list == NULL) {
         ticker_stop();
     }
 }

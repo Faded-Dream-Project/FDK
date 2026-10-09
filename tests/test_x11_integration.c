@@ -6753,6 +6753,7 @@ static void test_tooltip_gui(void) {
 
 static void test_window_shortcuts_and_accelerators_gui(void);
 static void test_menu_mnemonics_gui(void);
+static void test_modern_widgets_gui(void);
 
 int main(void) {
     signal(SIGALRM, alarm_handler);
@@ -6810,6 +6811,7 @@ int main(void) {
     test_dnd_source_gui();
     test_window_shortcuts_and_accelerators_gui();
     test_menu_mnemonics_gui();
+    test_modern_widgets_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
@@ -7312,4 +7314,345 @@ static void test_window_shortcuts_and_accelerators_gui(void) {
            "consumes before tree, exact modifiers, disabled items "
            "fall through, app-table-wins over bar scan, removal "
            "re-arms the bar, entry undo/redo over real keys\n");
+}
+
+/* ---- 1.4.1: the modern furniture (e2e) ----------------------------------
+ *
+ * Four surfaces, each proven through the REAL window: the Paned's
+ * divider drag moves REAL pane fills (server-side pixel truth), the
+ * Expander's door opens over the real ticker (partial content
+ * mid-flight, full content settled), the LINK button's underline
+ * fades in under a real MotionNotify, and the Spinner's comet
+ * actually ROTATES (two server snapshots differ in the arc's
+ * neighborhood). Requires a system font for the text-bearing
+ * surfaces; honestly skipped without one. */
+static void test_modern_widgets_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    const char *font_path = NULL;
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        FILE *f = fopen(font_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            font_path = font_candidates[i];
+            break;
+        }
+    }
+    if (font_path == NULL) {
+        printf("[skip] X11 modern-widgets GUI (no system TrueType font "
+               "found)\n");
+        return;
+    }
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* === 1. Paned: drag + arrows move real pane fills === */
+    {
+        fdk_window_options wopts = { .title = "paned", .width = 300,
+                                     .height = 220 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *p = NULL;
+        assert(fdk_ok(fdk_paned_create(root, FDK_HORIZONTAL, &p)));
+        fdk_widget_set_bounds(p, (fdk_rect){0, 0, 300, 220});
+        fdk_widget *c1 = NULL;
+        assert(fdk_ok(fdk_widget_create(p, NULL,
+                                        (fdk_rect){0, 0, 90, 100},
+                                        &c1)));
+        fdk_widget *c2 = NULL;
+        assert(fdk_ok(fdk_widget_create(p, NULL,
+                                        (fdk_rect){0, 0, 80, 100},
+                                        &c2)));
+        fdk_widget_set_background(c1, wcol(200, 70, 70));
+        fdk_widget_set_background(c2, wcol(70, 120, 220));
+        for (int i = 0; i < 6; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* Auto split at the first pane's natural: red fill left,
+         * blue fill right, at the server. (App windows pace their
+         * own paints: every readback point below explicitly paints
+         * pending damage first — the pump alone never presents.) */
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 40, 110) ==
+               0x00C84646u);
+        assert(x11_readback_pixel(&dpy, xid, 250, 110) ==
+               0x004678DCu);
+
+        /* Real drag: press inside the band [90, 96), move, release. */
+        x11_send_pointer_event(dpy, xid, ButtonPress,
+                               ButtonPressMask, 93, 110, 1);
+        (void)fdk_pump_events(ctx, 10);
+        x11_send_pointer_event(dpy, xid, MotionNotify,
+                               PointerMotionMask, 170, 110, 0);
+        (void)fdk_pump_events(ctx, 10);
+        x11_send_pointer_event(dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 170, 110, 1);
+        for (int i = 0; i < 4; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+        /* Position 170 - 3 = 167: red now reaches x=150. */
+        assert(fdk_paned_get_position(p) == 167);
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 150, 110) ==
+               0x00C84646u);
+        assert(x11_readback_pixel(&dpy, xid, 250, 110) ==
+               0x004678DCu);
+
+        /* Keyboard: Right twice steps +16 (167 -> 183). */
+        assert(fdk_widget_focus(p));
+        x11_send_key_event(dpy, xid, KeyPress, 114);
+        (void)fdk_pump_events(ctx, 10);
+        x11_send_key_event(dpy, xid, KeyRelease, 114);
+        (void)fdk_pump_events(ctx, 10);
+        x11_send_key_event(dpy, xid, KeyPress, 114);
+        (void)fdk_pump_events(ctx, 10);
+        x11_send_key_event(dpy, xid, KeyRelease, 114);
+        for (int i = 0; i < 4; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+        assert(fdk_paned_get_position(p) == 183);
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 175, 110) ==
+               0x00C84646u);
+
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    /* === 2. Expander: the door opens over the real ticker === */
+    {
+        fdk_window_options wopts = { .title = "expander",
+                                     .width = 260, .height = 240 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *e = NULL;
+        assert(fdk_ok(fdk_expander_create(root, font, "Details", &e)));
+        fdk_widget *content = NULL;
+        assert(fdk_ok(fdk_widget_create(e, NULL,
+                                        (fdk_rect){0, 0, 200, 100},
+                                        &content)));
+        fdk_widget_set_background(content, wcol(60, 200, 120));
+        fdk_widget_arrange(e, (fdk_rect){10, 10, 240, 134});
+        for (int i = 0; i < 6; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* Collapsed: the content zone is the root's background. */
+        unsigned long bg = theme_window_bg_pixel();
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 120, 60) == bg);
+
+        /* Real click on the header band opens the door. Pump timing
+         * is nominal, not wall-clock (a pump with pending events
+         * returns early), so every timing assertion below is a
+         * bounded WAIT-UNTIL-STATE, never a fixed pump count. */
+        x11_send_pointer_event(dpy, xid, ButtonPress,
+                               ButtonPressMask, 60, 22, 1);
+        (void)fdk_pump_events(ctx, 10);
+        x11_send_pointer_event(dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 60, 22, 1);
+        /* Mid-flight: the door has started opening (height past the
+         * header) and the content's top strip is on screen — the
+         * door opens downward from under the header. */
+        int opened = 0;
+        for (int i = 0; i < 20 && !opened; i++) {
+            (void)fdk_pump_events(ctx, 30);
+            assert(fdk_ok(fdk_window_paint(win)));
+            opened = x11_readback_pixel(&dpy, xid, 120, 45) ==
+                     0x003CC878u;
+        }
+        assert(opened); /* the top strip greened                 */
+        fdk_size mid;
+        fdk_widget_measure(e, &mid);
+        assert(mid.height > 24); /* past the header: door ajar    */
+        /* Settled: the full content height is green. */
+        int full = 0;
+        for (int i = 0; i < 20 && !full; i++) {
+            (void)fdk_pump_events(ctx, 30);
+            fdk_size now;
+            fdk_widget_measure(e, &now);
+            full = (now.height == 124); /* header 24 + content 100 */
+            if (full) {
+                assert(fdk_ok(fdk_window_paint(win)));
+                full = x11_readback_pixel(&dpy, xid, 120, 100) ==
+                       0x003CC878u;
+            }
+        }
+        assert(full);
+
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    /* === 3. LINK button: the underline fades in under the pointer === */
+    {
+        fdk_window_options wopts = { .title = "link", .width = 300,
+                                     .height = 100 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *b = NULL;
+        assert(fdk_ok(fdk_button_create(root, font, "Docs", &b)));
+        fdk_button_set_role(b, FDK_BUTTON_ROLE_LINK);
+        fdk_widget_arrange(b, (fdk_rect){20, 20, 120, 34});
+        for (int i = 0; i < 6; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* The underline's geometry, computed the way the painter
+         * does (public APIs only). */
+        fdk_text_metrics tm;
+        assert(fdk_ok(fdk_font_measure_utf8(font, "Docs", 4, &tm)));
+        fdk_font_metrics fm;
+        fdk_font_get_metrics(font, &fm);
+        fdk_i32 line_h = fm.ascent + fm.descent;
+        fdk_i32 text_x = 20 + (120 - tm.advance_width) / 2;
+        fdk_i32 baseline = 20 + (34 - line_h) / 2 + fm.ascent;
+        fdk_color lc = fdk_theme_get_color(NULL, FDK_TK_LINK);
+        unsigned long link_px = ((unsigned long)(lc.r * 255.0f + 0.5f)
+                                 << 16) |
+                                ((unsigned long)(lc.g * 255.0f + 0.5f)
+                                 << 8) |
+                                (unsigned long)(lc.b * 255.0f + 0.5f);
+
+        /* Resting: no underline (the row under the text is bg). */
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, text_x + 2, baseline + 2) ==
+               theme_window_bg_pixel());
+
+        /* Real MotionNotify onto the button; the 120 ms fade runs on
+         * the real ticker. Settled, the underline is EXACTLY the
+         * link color (a mid-flight blend would be partway between
+         * bg and link on the blue channel — the wait-until loop
+         * makes the outcome deterministic regardless of pump
+         * pacing). */
+        x11_send_pointer_event(dpy, xid, MotionNotify,
+                               PointerMotionMask, 80, 37, 0);
+        int underlined = 0;
+        for (int i = 0; i < 30 && !underlined; i++) {
+            (void)fdk_pump_events(ctx, 30);
+            assert(fdk_ok(fdk_window_paint(win)));
+            underlined = x11_readback_pixel(&dpy, xid, text_x + 2,
+                                            baseline + 2) == link_px;
+        }
+        assert(underlined);
+
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    /* === 4. Spinner: the comet rotates (two-snapshot diff) === */
+    {
+        fdk_window_options wopts = { .title = "spinner", .width = 90,
+                                     .height = 90 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *sp = NULL;
+        assert(fdk_ok(fdk_spinner_create(root, &sp)));
+        fdk_widget_arrange(sp, (fdk_rect){20, 20, 40, 40});
+        fdk_spinner_start(sp);
+        for (int i = 0; i < 8; i++) {
+            (void)fdk_pump_events(ctx, 25);
+        }
+        assert(fdk_spinner_is_spinning(sp));
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* The comet rotates: two snapshots of the spinner's box,
+         * some pump time apart, differ in the arc's neighborhood
+         * (an idle or static arc would be identical). Each snapshot
+         * first paints the pending damage (the timer's per-tick
+         * invalidations) — the pump never presents. Bounded
+         * wait-until: at 10 degrees per 40 ms tick, any two covered
+         * ticks move the arc visibly; the loop tolerates early-
+         * returning pumps. */
+        unsigned long a[40 * 40];
+        assert(fdk_ok(fdk_window_paint(win)));
+        XImage *img = XGetImage(dpy, (Drawable)xid, 20, 20, 40, 40,
+                                ~0UL, ZPixmap);
+        assert(img != NULL);
+        for (int y = 0; y < 40; y++) {
+            for (int x = 0; x < 40; x++) {
+                a[y * 40 + x] = (unsigned long)XGetPixel(img, x, y);
+            }
+        }
+        XDestroyImage(img);
+        int diff = 0;
+        for (int round = 0; round < 6 && diff <= 3; round++) {
+            for (int i = 0; i < 5; i++) {
+                (void)fdk_pump_events(ctx, 30);
+            }
+            assert(fdk_ok(fdk_window_paint(win)));
+            img = XGetImage(dpy, (Drawable)xid, 20, 20, 40, 40, ~0UL,
+                            ZPixmap);
+            assert(img != NULL);
+            diff = 0;
+            for (int y = 0; y < 40; y++) {
+                for (int x = 0; x < 40; x++) {
+                    if ((unsigned long)XGetPixel(img, x, y) !=
+                        a[y * 40 + x]) {
+                        diff++;
+                    }
+                }
+            }
+            XDestroyImage(img);
+        }
+        assert(diff > 3); /* the arc moved, not a repaint artifact */
+
+        /* The busy state reads through the a11y face too. */
+        fdk_a11y_info info;
+        assert(fdk_ok(fdk_a11y_describe(sp, &info)));
+        assert((info.states & FDK_A11Y_BUSY) != 0);
+        fdk_a11y_info_free(&info);
+
+        fdk_spinner_stop(sp);
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] modern widgets: paned drag/arrows move real fills, "
+           "expander door opens over the ticker (partial then full), "
+           "link underline fades in under MotionNotify, spinner comet "
+           "rotates (snapshot diff)\n");
 }

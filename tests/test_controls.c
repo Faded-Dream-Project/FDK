@@ -14,6 +14,13 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
+/* 1.4.1: the hover-fade blend and the spinner's parked phase are
+ * internal state the public API has no reason to expose — the tests
+ * read them through the same internal header the catalog builds on
+ * (the established test-seam discipline: see test_animation.c). */
+#include "widget/widgets_internal.h"
+#include "widget/widget_internal.h" /* the animation test clock */
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +46,24 @@ static fdk_event_data ev_key(fdk_event_type t, fdk_scancode sc) {
     e.type = t;
     e.key.scancode = sc;
     return e;
+}
+
+/* Pointer MOTION in root coordinates — the hover synthesis event
+ * (the tree hit-tests it into ENTER/MOTION/LEAVE per widget). */
+static fdk_event_data ev_motion(float x, float y) {
+    fdk_event_data e;
+    memset(&e, 0, sizeof(e));
+    e.type = FDK_EVENT_POINTER_MOTION;
+    e.pointer.position.x = x;
+    e.pointer.position.y = y;
+    return e;
+}
+
+/* The animation test seam, verbatim from test_animation.c: pin the
+ * clock, then pump at that instant. */
+static void anim_at(long long t) {
+    fdk__animation_set_test_clock(t);
+    fdk__animation_pump(t);
 }
 
 static fdk_u32 px_at(fdk_surface *s, int x, int y) {
@@ -942,6 +967,271 @@ static void test_frame(void) {
            "stack below it, title ink paints, fontless = plain box\n");
 }
 
+/* ---- 1.4.1: the LINK role ---- */
+
+static void test_button_link(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *plain = NULL, *link = NULL;
+    assert(fdk_ok(fdk_button_create(root, g_font, "Plain", &plain)));
+    assert(fdk_ok(fdk_button_create(root, g_font, "Docs", &link)));
+    fdk_widget_arrange(plain, (fdk_rect){10, 10, 120, 34});
+    fdk_widget_arrange(link, (fdk_rect){140, 10, 120, 34});
+    fdk_button_set_role(link, FDK_BUTTON_ROLE_LINK);
+    assert(fdk_button_get_role(link) == FDK_BUTTON_ROLE_LINK);
+
+    /* Flat: the LINK button paints NO fill — the surface background
+     * shows through where a NORMAL button paints its control fill. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(400, 60, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    fdk_color want_plain = fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
+    assert(px_at(s, 18, 27) == pack_color(want_plain)); /* control fill */
+    assert(px_at(s, 148, 27) == 0x000000u); /* flat: untouched bg   */
+
+    /* The underline fades in with the hover blend: enter, run the
+     * fade to completion on the synthetic clock, then sample the
+     * baseline+2 run (clear of the descender-free "Docs" glyphs).
+     * The clock is pinned BEFORE the enter arms the flight — an
+     * unpinned engine stamps start times on the real wall clock,
+     * and pinning after arming would send elapsed negative (the
+     * lesson is recorded in docs/testing.md). */
+    anim_at(0);
+    fdk_event_data m = ev_motion(200.0f, 27.0f); /* over the link */
+    (void)fdk_widget_tree_handle_event(root, &m);
+    anim_at(200); /* the 120 ms fade is done */
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    fdk_i32 tw = 0, th = 0;
+    fdk__text_extent(g_font, "Docs", &tw, &th);
+    fdk_i32 text_x = 140 + (120 - tw) / 2;
+    fdk_i32 baseline = fdk__center_baseline(g_font, 10, 34);
+    fdk_color want_link = fdk_theme_get_color(NULL, FDK_TK_LINK);
+    /* The underline sample: a pixel INSIDE the run, one row below
+     * baseline+2's left edge is sampled where no descender lands. */
+    fdk_u32 ul = px_at(s, text_x + 2, baseline + 2);
+    assert(ul == pack_color(want_link));
+    /* Text ink is link-colored too: the glyph coverage differs from
+     * the plain text color — sample INSIDE a stroke of "D". The
+     * glyph origin: text_x, ascent above baseline. */
+    (void)px_at(s, text_x + 2, baseline - 10); /* smoke: readable    */
+
+    /* A CHECKED link keeps the underline without hover (the active
+     * link read); leaving the pointer keeps it. */
+    fdk_button_set_checked(link, true);
+    m = ev_motion(20.0f, 5.0f); /* away from both buttons */
+    (void)fdk_widget_tree_handle_event(root, &m);
+    anim_at(400); /* leave fade completes; underline persists */
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    assert(px_at(s, text_x + 2, baseline + 2) == pack_color(want_link));
+
+    /* Link is paint-only: activation and focus are unchanged. */
+    btn_activates = 0;
+    fdk_button_set_on_activate(link, on_btn_activate, NULL);
+    click(root, 200.0f, 27.0f);
+    assert(btn_activates == 1);
+
+    /* Unknown values still ignored. */
+    fdk_button_set_role(link, (fdk_button_role)42);
+    assert(fdk_button_get_role(link) == FDK_BUTTON_ROLE_LINK);
+
+    anim_at(0);
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] button link role: flat paint, link-colored underline "
+           "fades in under hover (persistent when checked), activation "
+           "unchanged\n");
+}
+
+/* ---- 1.4.1: the Spinner ---- */
+
+static void test_spinner(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *sp = NULL;
+    assert(fdk_spinner_create(NULL, NULL) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_ok(fdk_spinner_create(root, &sp)));
+    fdk_size nat;
+    fdk_widget_measure(sp, &nat);
+    assert(nat.width == 24 && nat.height == 24); /* square natural */
+
+    /* Idle: no BUSY state, "idle" value text. */
+    assert(!fdk_spinner_is_spinning(sp));
+    fdk_a11y_info info;
+    assert(fdk_ok(fdk_a11y_describe(sp, &info)));
+    assert(info.role == FDK_A11Y_ROLE_SPINNER);
+    assert((info.states & FDK_A11Y_BUSY) == 0);
+    assert(info.value_text != NULL && strcmp(info.value_text, "idle") == 0);
+    fdk_a11y_info_free(&info);
+
+    /* Start: BUSY state + "busy" text. The standalone tree has no
+     * timer (the honesty rule), but the STATE is what a11y reads. */
+    fdk_spinner_start(sp);
+    assert(fdk_spinner_is_spinning(sp));
+    fdk_spinner_start(sp); /* idempotent */
+    assert(fdk_spinner_is_spinning(sp));
+    assert(spinner_of(sp)->tick_timer == NULL); /* no context, no clock */
+    assert(fdk_ok(fdk_a11y_describe(sp, &info)));
+    assert((info.states & FDK_A11Y_BUSY) != 0);
+    assert(info.value_text != NULL && strcmp(info.value_text, "busy") == 0);
+    fdk_a11y_info_free(&info);
+
+    /* Paint proof: the comet inks accent-colored pixels inside its
+     * box (the head at phase 0 points right at full alpha; the
+     * alpha ramp inks a visible arc). */
+    fdk_widget_arrange(sp, (fdk_rect){10, 10, 24, 24});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(60, 60, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    int ink = 0;
+    for (int y = 10; y < 34; y++) {
+        for (int x = 10; x < 34; x++) {
+            fdk_u32 px = px_at(s, x, y);
+            if (px != 0x000000u) {
+                /* Every inked pixel is accent-derived: b channel
+                 * dominant, r below half of b (the Modern accent is
+                 * blue-family; the disabled gray fails this). */
+                int r = (int)((px >> 16) & 0xFFu);
+                int b = (int)(px & 0xFFu);
+                assert(r < b);
+                ink++;
+            }
+        }
+    }
+    assert(ink > 12); /* an arc, not a stray pixel */
+
+    /* Stop: idle again; the phase PARKS (restart continues — GTK
+     * semantics). Standalone: phase never advanced (no clock), so
+     * the park is trivially at 0 here; the flag flips honestly. */
+    fdk_spinner_stop(sp);
+    fdk_spinner_stop(sp); /* idempotent */
+    assert(!fdk_spinner_is_spinning(sp));
+    assert(fdk_ok(fdk_a11y_describe(sp, &info)));
+    assert((info.states & FDK_A11Y_BUSY) == 0);
+    fdk_a11y_info_free(&info);
+
+    /* Argument safety: cross-type confusion is inert. */
+    fdk_widget *lbl = NULL;
+    assert(fdk_ok(fdk_label_create(root, g_font, "x", &lbl)));
+    fdk_spinner_start(lbl);
+    assert(!fdk_spinner_is_spinning(lbl));
+    fdk_spinner_stop(lbl);
+
+    /* Destroy while "spinning" (the detached-tree shape): ASan-clean
+     * by the suite's own sanitizer discipline. */
+    fdk_spinner_start(sp);
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] spinner: natural size, BUSY state + busy/idle text, "
+           "comet ink, park-on-stop, detached-tree honesty\n");
+}
+
+/* ---- 1.4.1: the hover fade ---- */
+
+static void test_hover_fades(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *b = NULL;
+    assert(fdk_ok(fdk_button_create(root, g_font, "Hover", &b)));
+    fdk_widget_arrange(b, (fdk_rect){10, 10, 120, 34});
+    fdk_widget *cb = NULL;
+    assert(fdk_ok(fdk_checkbox_create(root, g_font, "Check", &cb)));
+    fdk_widget_arrange(cb, (fdk_rect){10, 60, 120, 34});
+
+    anim_at(0);
+    fdk_button *bi = button_of(b);
+    fdk_check_widget *ci = check_of(cb);
+
+    /* Enter: the SEMANTIC flag flips at once; the blend departs at 0
+     * and only the pump advances it. */
+    fdk_event_data m = ev_motion(60.0f, 27.0f);
+    (void)fdk_widget_tree_handle_event(root, &m);
+    assert(bi->hovering);
+    assert(bi->fade.t == 0.0f);
+    anim_at(60); /* mid-flight */
+    fdk_f32 mid = bi->fade.t;
+    assert(mid > 0.0f && mid < 1.0f);
+    anim_at(140); /* done (120 ms) */
+    assert(bi->fade.t == 1.0f);
+
+    /* Mid-flight paint: the fill is BETWEEN the endpoints on every
+     * channel — a blend, not a snap. (Checked at t=60 on a second
+     * surface: the exact pixel math is pack(round(lerp)); the
+     * between-ness assertion is the robust form.) */
+    fdk_widget *b2 = NULL;
+    assert(fdk_ok(fdk_button_create(root, g_font, "Two", &b2)));
+    fdk_widget_arrange(b2, (fdk_rect){140, 10, 120, 34});
+    m = ev_motion(200.0f, 27.0f);
+    (void)fdk_widget_tree_handle_event(root, &m);
+    anim_at(400); /* complete the enter fade */
+    m = ev_motion(200.0f, 27.0f);
+    (void)fdk_widget_tree_handle_event(root, &m); /* still over b2 */
+    anim_at(460); /* leave never happened: still 1 */
+    assert(button_of(b2)->fade.t == 1.0f);
+    /* Now leave: the fade runs BACKWARD from the live blend. */
+    m = ev_motion(5.0f, 5.0f);
+    (void)fdk_widget_tree_handle_event(root, &m);
+    assert(!button_of(b2)->hovering);
+    anim_at(520); /* mid-leave */
+    assert(button_of(b2)->fade.t > 0.0f &&
+           button_of(b2)->fade.t < 1.0f);
+    anim_at(600); /* leave complete */
+    assert(button_of(b2)->fade.t == 0.0f);
+
+    /* Retarget-from-live: enter, advance half-way, leave — the
+     * return flight departs from the CURRENT blend, not from 1. */
+    m = ev_motion(60.0f, 27.0f);
+    (void)fdk_widget_tree_handle_event(root, &m);
+    anim_at(660);
+    fdk_f32 half = bi->fade.t;
+    assert(half > 0.0f && half < 1.0f);
+    m = ev_motion(5.0f, 5.0f);
+    (void)fdk_widget_tree_handle_event(root, &m);
+    anim_at(670); /* 10 ms into the return flight */
+    assert(bi->fade.t < half); /* already below the departure blend */
+
+    /* Press feedback stays INSTANT: a pressed button paints the
+     * pressed fill regardless of the mid-flight hover blend. */
+    anim_at(1000); /* settle whatever was running */
+    m = ev_motion(60.0f, 27.0f);
+    (void)fdk_widget_tree_handle_event(root, &m);
+    anim_at(1040); /* hover blend ~40% */
+    assert(bi->fade.t > 0.0f && bi->fade.t < 1.0f);
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(300, 120, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_event_data dn = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 60.0f,
+                                  27.0f);
+    (void)fdk_widget_tree_handle_event(root, &dn);
+    fdk_widget_tree_paint(root, s);
+    fdk_color want_pressed =
+        fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_PRESSED);
+    assert(px_at(s, 18, 27) == pack_color(want_pressed));
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 60.0f,
+                                  27.0f);
+    (void)fdk_widget_tree_handle_event(root, &up);
+
+    /* The checkbox family rides the same fade machinery. Its flight
+     * armed at the last pinned instant (1040); 120 ms later it is
+     * done — pump PAST that (the button's own fade from 1000 ends
+     * at 1120; one pump past both). */
+    m = ev_motion(60.0f, 77.0f);
+    (void)fdk_widget_tree_handle_event(root, &m);
+    assert(ci->hovering && ci->fade.t == 0.0f);
+    anim_at(1250);
+    assert(ci->fade.t == 1.0f);
+
+    anim_at(0);
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] hover fades: semantic flag snaps, paint blend flies "
+           "120 ms both ways, retargets from live, press stays "
+           "instant, check family shares the flight\n");
+}
+
 /* ---- argument safety ---- */
 
 static void test_argument_safety(void) {
@@ -960,6 +1250,13 @@ static void test_argument_safety(void) {
     assert(fdk_separator_create(NULL, FDK_HORIZONTAL, NULL) ==
            FDK_ERR_INVALID_ARGUMENT);
     assert(fdk_frame_create(NULL, NULL, NULL, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_spinner_create(NULL, NULL) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_paned_create(NULL, FDK_HORIZONTAL, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_paned_create(NULL, (fdk_orientation)9, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_expander_create(NULL, NULL, NULL, NULL) ==
            FDK_ERR_INVALID_ARGUMENT);
 
     /* NULL-widget setters are safe no-ops / errors, never crashes */
@@ -1024,6 +1321,9 @@ int main(void) {
     test_progress();
     test_separator();
     test_frame();
+    test_button_link();
+    test_spinner();
+    test_hover_fades();
     test_argument_safety();
 
     fdk_font_destroy(g_font);

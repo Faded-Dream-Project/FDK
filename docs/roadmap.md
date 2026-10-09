@@ -3793,3 +3793,193 @@ Battery on the final tree: headless all-pass; X11 integration all
 sway example rigs 11/11; both tooltip rigs PASS; compositor-death
 rig PASS; verify-exports green (the new APIs ride the generated
 map); release zero warnings; debug-remnant and secret scans clean.
+
+### 1.4.1 — the interactive furniture (the GTK/Qt parity batch)
+
+The second milestone of the "perfect toolkit" directive, answering
+the 1.4.0 ledger's first follow-up set: the four surfaces every
+real application reaches for that FDK lacked, plus the polish pass
+that makes the existing catalog feel alive.
+
+THE WIDGETS. Spinner (GtkSpinner / Qt's busy indicator): a rotating
+comet arc — 24 antialiased line segments around a circle with an
+alpha ramp fading toward the tail — riding the timer queue exactly
+like the indeterminate progress bar (same 40 ms tempo discipline,
+same detached-tree honesty: no context, no clock, the arc parks at
+its phase; restart continues rather than resetting, the GTK
+semantics). Paned (GtkPaned / QSplitter): first child pane 1,
+second child pane 2, and the class-level max_children=2 — a new
+append-only fdk_widget_class field (the a11y-field precedent, same
+safe-append ABI policy) that makes fdk_widget_create REFUSE a third
+child loudly instead of silently orphaning it in the layout. The
+divider drags through the implicit grab (press in the 6-px band,
+motion retargets with the grab offset, release parks), steps by
+8 px on the axis-matched arrows when focused (wrong-axis arrows
+bubble; Home/End hit the walls), and paints a hot accent pill +
+grip dots while hovered. Position semantics follow GTK: unset
+splits by the children's naturals (pane 1 shrink-wrapped, pane 2
+the rest), set pins an absolute offset clamped so the divider stays
+visible, and EITHER pane may be squeezed to zero. Expander
+(GtkExpander): a disclosure chevron (the same vector language as
+the breadcrumb and combo glyphs — it ROTATES from ">" to "v" with
+the door) plus a header row that toggles on click or Space/Enter;
+the reveal is a 160 ms cubic-out flight on the 1.3.8 animator
+whose door SELF-CROPS: the expander's own bounds track
+header + reveal*content every tick, so the clip stack does the
+cropping without any parent cooperation (a plain-parented,
+hand-positioned expander still animates — the case that flushed
+the design out).
+
+THE POLISH. The LINK button role consumes the theme's reserved
+FDK_TK_LINK token (finally painted, not just parsed): flat — no
+fill, ever — link-colored text, an underline that fades in under
+the pointer and stays when checked (the active-link read), the
+regular focus ring. The hover fade: buttons and the whole check
+family now BLEND their hover fills over a 120 ms quad-out flight
+(the fdk_hover_fade state shared by both families) — the semantic
+hover flag still flips instantly, pressed/checked states still
+snap (input feedback is not a whisper), and every retarget departs
+from the CURRENT blend (the animator's compose rule, applied at
+the widget layer).
+
+THE FILE PICKER. List rows grew symbolic vector glyphs
+(fdk_list_row_set_icon: folder / home / drive / page, drawn in the
+neutral ink, 16 px + 6 gap, accounted in every width computation
+including the O(1) append fast path and the batch settle) — and
+the file dialog's places sidebar wears them: the house for $HOME,
+the drive slab for the root and real mounts, the folder for XDG
+user dirs. The modern picker's sidebar finally reads like one.
+
+FIVE REAL BUGS the milestone's own tests flushed out: (1) the
+layout notifier had no paned/expander entries — a child added to
+either would never relayout (the box/scrollview/toolbar/grid list
+grew by two, with the paned re-measuring its panes and the
+expander re-placing its content); (2) the expander's content slot
+was measured through the child's VISIBILITY — a collapsed door
+starved its own content slot to zero height, so the first
+expansion opened onto an empty layout (the content natural is now
+visibility-independent: the expander owns that flag as bookkeeping,
+not app intent); (3) the reveal initially relied on the parent's
+re-layout for its visual crop — a plain-parented expander popped
+its content in at full height instead of opening a door (the
+self-crop above, landed per-tick AND at set_expanded-before-the-
+child-turns-visible, plus bidirectional: a crop that only shrank
+could never reopen); (4) the core's synthesized ENTER/LEAVE events
+carry no position — the paned's band-hover initially read them and
+never hovered (band tracking moved to MOTION, which always follows
+its own ENTER with real coordinates); (5) the 1.3.8 animation
+ticker kept firing through the zombies' grace — a 16 ms repeating
+timer for ~64 pumps after the last animation ended, waking every
+pump at its deadline, so a "50 ms" pump covered ~16 ms of wall
+clock. Invisible until this milestone because nothing in the
+Wayland suite had ever run an animation; the hover fade (the
+first) armed the ticker and the pacing test's 400 ms of pumping
+shrank to ~128 ms — not enough for the compositor's frame
+callbacks. The ticker now sleeps the moment nothing is RUNNING:
+zombies are inert memory, reaped by whatever pump comes next (a
+live loop pumps continuously, so the documented ~1 s handle grace
+is unchanged in practice).
+
+TESTS: test_controls gains three groups (link role — flat paint,
+underline fade with the parked-clock lesson, checked persistence,
+activation unchanged; spinner — natural size, BUSY state with
+busy/idle value text, comet ink, park-on-stop, detached honesty;
+hover fades — the semantic flag snaps while the blend flies both
+ways, retarget-from-live, press stays instant, the check family
+rides the same machinery); tests/test_containers.c is new (paned
+auto/pin/clamp/squeeze/unset, drag with grab offset and wall
+clamps, out-of-band press bubbles, hot/resting divider ink, axis-
+matched keyboard, a11y value; expander layout + interaction with
+the reveal clock, retarget, mid-flight destroy; row icons with
+width accounting and batch settle); the X11 suite gains the
+modern-widgets e2e — a real divider drag moving real pane fills,
+the door opening over the real ticker, the underline fading in
+under a real MotionNotify, and the spinner's rotation proven by a
+two-snapshot server diff. The timing-sensitive assertions are all
+bounded wait-until-state loops, never fixed pump counts (a pump
+with pending events returns early — its timeout is a ceiling, not
+a duration; the lesson is in docs/testing.md).
+
+Example 04 gained the Session frame (the expander, the paned) and
+the Docs link button + the scanning spinner in the button row; both
+example rigs grew a pane-fill pixel check, and their screens grew
+to fit the taller catalog window (1024x1024 X11, 1280x1024 sway
+headless — every rig check is bbox-relative, so the resize is
+inert to the existing checks).
+
+Battery on the final tree: headless all-pass; X11 integration all
+[ok] exit 0 (the +1 modern-widgets group), three consecutive clean
+runs; interop rig PASS; X11 examples 11/11 with clean exits (the
+new pane check green); sway examples 11/11; both tooltip rigs
+PASS; compositor-death rig PASS; verify-exports 465 symbols
+(448 + the 17 new APIs) in debug AND release; release zero
+warnings; debug-remnant and secret scans clean.
+
+---
+
+## The GTK/Qt feature-parity ledger
+
+The standing directive ("every small feature that is in GTK and Qt
+must be in FDK too") needs a ledger, not a vibe — one place that
+names every feature family in GTK4/Qt6's widget layer and FDK's
+status against it, so each milestone consumes the top of the list
+and the gaps can never hide. Status values: SHIPPED (named
+milestone above), NEXT (the 1.4.2 candidate list), LATER (real but
+not next), OUT (deliberately out of scope, with the reason — FDK's
+no-D-Bus / no-bus policy is the usual one).
+
+Widgets & containers: Button/Toggle/Check/Radio SHIPPED; Entry
+(preedit, undo, clipboard) SHIPPED; Label modes SHIPPED; Spinner
+SHIPPED (1.4.1); LinkButton SHIPPED (1.4.1 role); Paned SHIPPED
+(1.4.1); Expander SHIPPED (1.4.1); Notebook SHIPPED; Frame SHIPPED;
+Separator SHIPPED; ProgressBar (determinate + busy) SHIPPED;
+ScrollView (bars, smooth wheel) SHIPPED; List (multi-select,
+rubber-band, icons) SHIPPED (icons 1.4.1); Tree SHIPPED; Menu/
+MenuBar/ContextMenu (accelerators, mnemonics) SHIPPED; Combo
+(editable) SHIPPED; Slider SHIPPED; SpinButton SHIPPED; Toolbar
+SHIPPED; Tooltip SHIPPED; FileDialog (OPEN/SAVE, places, filters,
+breadcrumbs, Ctrl+L) SHIPPED; Statusbar NEXT (trivial: an HBox +
+label API, the a11y role already exists); SearchEntry LATER (an
+Entry preset: the magnifier glyph + clear button); Revealer LATER
+(the expander's flight generalized to any child pair); Stack/
+StackSwitcher LATER (notebook sibling: page stack + pill switcher);
+LevelBar LATER (progress sibling with thresholds); Scale marks
+LATER (slider ticks + labels); DropDown-menu-button LATER (button +
+popup menu hybrid); IconView/GridView OUT-for-now (needs a canvas-
+based item layout; the List covers the row case); DrawingArea ==
+Canvas SHIPPED; GLArea OUT (no OpenGL backend in scope — the
+software renderer is the product); Assistant/wizard OUT (dialog
+composition, app-level); FontChooser LATER (needs the font scan
+surface exposed as a picker); ColorChooser LATER (HSV wheel on the
+canvas); AboutDialog LATER (labels + link buttons in a dialog).
+
+Input & interaction: XIM full-Unicode entry SHIPPED (1.3.1);
+Wayland key repeat SHIPPED (1.3.5); PRIMARY selection SHIPPED
+(1.3.4); clipboard formats (text/URI) SHIPPED; DnD both directions
+SHIPPED; mnemonics SHIPPED (1.3.6); accelerators SHIPPED (1.3.3);
+focus traversal SHIPPED; double-click/triple-click SHIPPED;
+shift-click range select SHIPPED; hover fades SHIPPED (1.4.1);
+scroll wheel + smooth
+SHIPPED (1.3.8); touch/gestures OUT (no touch input backend in
+scope — the pointer model is the contract); IME completion (preedit
+is display-only) OUT-for-now (needs a real IME protocol surface).
+
+Infrastructure: theme files + tokens/metrics SHIPPED (28 colors,
+10 metrics); animation/easing SHIPPED (1.3.8); a11y (tree,
+narrator, actions) SHIPPED; i18n (catalog, plurals, dates)
+SHIPPED; undo/redo SHIPPED (1.3.3); preferences SHIPPED (1.3.7);
+export surface SHIPPED (1.3.9); HiDPI LATER (the render layer is
+integer-scaled; fractional scale needs backend work); CSS-like
+styling OUT (the .fdk theme format is the customization surface —
+deliberate, per the no-CSS-engine stance); icon theme loading OUT
+(vector glyphs + app-provided surfaces are the icon story, per the
+no-icon-cache stance); printing OUT (no print backend in scope);
+ accessibility bus bridges OUT (the in-process narrator is the
+policy, per no-D-Bus).
+
+The NEXT list (1.4.2 candidates, in rough value order): Statusbar;
+SearchEntry; Revealer; Stack + StackSwitcher; tree-view row icons
+(the list's glyph seam extended); hover fades on the menu/combo
+rows (the 1.4.1 machinery extended); the list's drag-select rubber
+band (multi-select by sweep — the one interaction gap the List
+still has); LevelBar; slider marks.

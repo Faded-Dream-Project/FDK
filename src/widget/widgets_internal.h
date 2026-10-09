@@ -17,6 +17,8 @@
 
 #include "fdk/fdk_a11y.h"
 #include "fdk/fdk_widgets.h"
+#include "fdk/fdk_animation.h" /* 1.4.1: the Expander's reveal anim */
+#include "fdk/fdk_core.h"      /* 1.4.1: fdk_timer (the Spinner)    */
 
 #include "widget_internal.h"
 #include "../layout/layout_internal.h"
@@ -35,9 +37,18 @@ extern const fdk_widget_class fdk_separator_class_def;
 extern const fdk_widget_class fdk_frame_class_def;
 extern const fdk_widget_class fdk_scrollview_class_def;
 extern const fdk_widget_class fdk_toolbar_class_def;
+extern const fdk_widget_class fdk_spinner_class_def;   /* 1.4.1 */
+extern const fdk_widget_class fdk_paned_class_def;     /* 1.4.1 */
+extern const fdk_widget_class fdk_expander_class_def;  /* 1.4.1 */
 
 /* toolbar.c: relayout hook for the layout notifier (box.c). */
 void fdk__toolbar_layout_changed(fdk_widget *w);
+
+/* paned.c / expander.c: the same relayout hooks for the 1.4.1
+ * containers — the notifier (box.c) calls them when a child is
+ * added to (or re-measured inside) one of these. */
+void fdk__paned_layout_changed(fdk_widget *w);
+void fdk__expander_layout_changed(fdk_widget *w);
 
 /* scroll.c: relayout hook the layout notifier (box.c) calls when a
  * scrollview's subtree changed (content added / natural size
@@ -145,6 +156,20 @@ typedef struct fdk_label {
     bool ellipsized;        /* ELLIPSIZE mode: text did not fit   */
 } fdk_label;
 
+/* The shared hover-fade state (1.4.1): the visual blend a control
+ * paints with while the pointer's enter/leave transition animates
+ * (the SEMANTIC hover flag flips immediately; only the paint
+ * blends — press feedback stays instant by design). One flight
+ * at a time per widget: arming cancels the running fade and
+ * departs from the CURRENT blend (retarget-from-live, the
+ * animator's own compose rule). */
+typedef struct fdk_hover_fade {
+    fdk_f32 t;              /* current blend, 0..1                    */
+    fdk_f32 from;           /* the flight's departure blend           */
+    fdk_f32 target;         /* 0 (resting) or 1 (hovered)             */
+    fdk_animation *anim;    /* the running fade, or NULL              */
+} fdk_hover_fade;
+
 /* Button. */
 typedef struct fdk_button {
     fdk_widget base;
@@ -156,6 +181,7 @@ typedef struct fdk_button {
     bool hovering;
     fdk_button_role role; /* 1.4.0 paint role (default NORMAL) */
     bool checked;      /* 1.4.0 toggle-button state */
+    fdk_hover_fade fade; /* 1.4.1: hover paint blend */
 } fdk_button;
 
 /* Shared shape of Toggle / Checkbox / Radio: an indicator box/circle/
@@ -167,6 +193,7 @@ typedef struct fdk_check_widget {
     bool checked;
     bool pressed;      /* visual state only */
     bool hovering;
+    fdk_hover_fade fade; /* 1.4.1: hover paint blend */
     void (*on_change)(fdk_widget *w, bool checked, void *user);
     void *on_change_data;
 } fdk_check_widget;
@@ -200,6 +227,56 @@ typedef struct fdk_frame {
     char *title;       /* owned, may be NULL */
 } fdk_frame;
 
+/* Spinner (1.4.1, spinner.c): the busy indicator. Phase in RADIANS
+ * [0, 2*pi), advanced by the repeating tick while spinning; the arc
+ * parks at the last phase when stopped (GTK semantics — restart
+ * continues, it does not reset). NULL timer when not spinning or
+ * detached (no context): the arc paints statically at the parked
+ * phase. */
+typedef struct fdk_spinner {
+    fdk_widget base;
+    bool spinning;
+    fdk_timer *tick_timer;
+    fdk_f32 phase;        /* radians, the arc head's angle */
+} fdk_spinner;
+
+/* Paned (1.4.1, paned.c): the two-pane splitter. `position` is the
+ * divider's offset from the pane-1 edge in paned-local px;
+ * `position_set` false = auto split (natural sizes, leftover even).
+ * `dragging` rides the implicit grab from a press inside the divider
+ * band; `grab_offset` is pointer-to-divider-origin at grab (the
+ * drag retargets, it never teleports under the pointer). */
+typedef struct fdk_paned {
+    fdk_widget base;
+    fdk_orientation orientation;
+    bool position_set;
+    fdk_i32 position;
+    bool dragging;
+    fdk_i32 grab_offset;
+    bool div_hovering;   /* divider band under the pointer          */
+} fdk_paned;
+
+/* Expander (1.4.1, expander.c): the disclosure section. Header =
+ * triangle + label; the ONE child is the content. `reveal` is the
+ * animated 0..1 blend of the content's extent (0 = collapsed); the
+ * child is FDK_WF_VISIBLE-off while fully collapsed so it is
+ * input-transparent and skipped by paints. `anim` is the running
+ * reveal animation (NULL when idle); standalone trees snap (no
+ * clock to tick). */
+typedef struct fdk_expander {
+    fdk_widget base;
+    fdk_font *font;      /* borrowed */
+    char *label;         /* owned, may be NULL */
+    bool expanded;
+    bool hovering;       /* header band under pointer               */
+    bool pressed;        /* header press visual                     */
+    fdk_f32 reveal;      /* 0..1 content extent blend               */
+    fdk_f32 reveal_from; /* the flight's departure blend            */
+    fdk_animation *anim; /* running reveal animation or NULL        */
+    void (*on_changed)(fdk_widget *w, bool expanded, void *user);
+    void *on_changed_data;
+} fdk_expander;
+
 /* Downcasts — single-allocation subclasses, base first (see
  * fdk_widget.h's subclassing contract). */
 static inline fdk_label *label_of(fdk_widget *w) {
@@ -219,6 +296,15 @@ static inline fdk_separator *separator_of(fdk_widget *w) {
 }
 static inline fdk_frame *frame_of(fdk_widget *w) {
     return (fdk_frame *)w;
+}
+static inline fdk_spinner *spinner_of(fdk_widget *w) {
+    return (fdk_spinner *)w;
+}
+static inline fdk_paned *paned_of(fdk_widget *w) {
+    return (fdk_paned *)w;
+}
+static inline fdk_expander *expander_of(fdk_widget *w) {
+    return (fdk_expander *)w;
 }
 
 /* ---- File dialog scan seam (1.2.0, file_dialog.c) ----

@@ -812,6 +812,20 @@ fdk_result fdk_widget_create(fdk_widget *parent,
     if (parent != NULL && (parent->flags & FDK_WF_DESTROYING) != 0) {
         return FDK_ERR_INVALID_ARGUMENT; /* attaching to a dying subtree */
     }
+    if (parent != NULL && parent->klass != NULL &&
+        parent->klass->max_children != 0 &&
+        parent->child_count >= parent->klass->max_children) {
+        /* Fixed-slot container (Paned's two panes, Expander's one
+         * content child) at capacity: the class's layout contract
+         * names every child slot, so an extra child is a usage error,
+         * not a silent zero-sized layout. (1.4.1) */
+        FDK_WARN("widget class \"%s\" accepts at most %zu children; "
+                 "refusing create",
+                 (parent->klass->name != NULL) ? parent->klass->name
+                                               : "(unnamed)",
+                 parent->klass->max_children);
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
     if (parent != NULL && widget_depth(parent) + 1 > FDK_WIDGET_MAX_DEPTH) {
         FDK_WARN("widget tree deeper than %d levels; refusing create",
                  FDK_WIDGET_MAX_DEPTH);

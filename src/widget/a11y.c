@@ -59,6 +59,9 @@ static const struct {
     {FDK_A11Y_ROLE_SEPARATOR, "separator"},
     {FDK_A11Y_ROLE_CANVAS, "canvas"},
     {FDK_A11Y_ROLE_STATUS_BAR, "status bar"},
+    {FDK_A11Y_ROLE_SPINNER, "spinner"},
+    {FDK_A11Y_ROLE_SPLIT_PANE, "split pane"},
+    {FDK_A11Y_ROLE_EXPANDER, "expander"},
 };
 
 const char *fdk_a11y_role_name(fdk_a11y_role role) {

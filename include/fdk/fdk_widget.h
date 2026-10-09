@@ -201,6 +201,15 @@ typedef struct fdk_widget_class {
      * mean existing class definitions compile unchanged (field
      * defaults to NULL). */
     const struct fdk_a11y_class *a11y;
+
+    /* Child capacity cap (1.4.1): 0 = unlimited (the default every
+     * existing class relies on); N > 0 = fdk_widget_create(parent,
+     * ...) is refused with FDK_ERR_INVALID_ARGUMENT once the parent
+     * already has N children. For fixed-slot containers (Paned's two
+     * panes, Expander's one content child) whose layout contract
+     * would be silently broken by an extra child. Appended per the
+     * same safe-append policy as a11y above. */
+    size_t max_children;
 } fdk_widget_class;
 
 /* ---- Lifecycle ---- */

@@ -162,6 +162,11 @@ typedef enum fdk_button_role {
     FDK_BUTTON_ROLE_NORMAL = 0,
     FDK_BUTTON_ROLE_SUGGESTED = 1,
     FDK_BUTTON_ROLE_DESTRUCTIVE = 2,
+    /* 1.4.1 append — the link-styled button (GTK LinkButton / Qt
+     * flat link): no fill, link-colored text (the FDK_TK_LINK token),
+     * an underline while hovered, the regular focus ring. Paint-only,
+     * like every role. */
+    FDK_BUTTON_ROLE_LINK = 3,
 } fdk_button_role;
 
 /* Sets the role (repaints; unknown enum values are ignored). */
@@ -585,6 +590,30 @@ typedef void (*fdk_list_row_activate_fn)(fdk_widget *list, size_t row,
 void fdk_list_set_on_row_activate(fdk_widget *list,
                                   fdk_list_row_activate_fn fn,
                                   void *user_data);
+
+/* ---- Row icons (1.4.1) ----
+ *
+ * A row may carry a small vector glyph (drawn by the toolkit —
+ * the same font-independent stroke language as the disclosure
+ * chevrons and title-bar glyphs) before its text: the symbolic
+ * folder/home/drive/file set file sidebars are built from. Icons
+ * are paint-only: they widen the row's content measurement by
+ * 22 px (16 glyph + 6 gap) and are skipped (no shift) when NONE. */
+typedef enum fdk_row_icon {
+    FDK_ROW_ICON_NONE = 0,
+    FDK_ROW_ICON_FOLDER,  /* the places-sidebar classic            */
+    FDK_ROW_ICON_HOME,    /* house + door                          */
+    FDK_ROW_ICON_DRIVE,   /* rounded slab + activity LED           */
+    FDK_ROW_ICON_FILE,    /* page with folded corner               */
+} fdk_row_icon;
+
+/* Sets/clears the row's icon (unknown enum values are ignored as
+ * NONE). Re-measures the row. Out-of-range rows are
+ * FDK_ERR_INVALID_ARGUMENT. */
+fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
+                                 fdk_row_icon icon);
+/* The row's icon (NONE for non-lists / out-of-range rows). */
+fdk_row_icon fdk_list_row_get_icon(fdk_widget *list, size_t row);
 
 /* ---- Tree (Phase 9) ----
  *
@@ -1050,6 +1079,110 @@ void fdk_combo_set_editable(fdk_widget *combo, bool editable);
 void fdk_combo_set_on_changed(fdk_widget *combo,
                               fdk_combo_changed_fn on_changed,
                               void *user_data);
+
+/* ---- Spinner (1.4.1) ----
+ *
+ * A busy indicator (GTK's GtkSpinner, Qt's busy QProgressBar): a
+ * continuously rotating arc that says "work is happening, no
+ * fraction exists" WITHOUT occupying a bar's width. Natural size
+ * 24x24 (it is square; layout stretches it like any widget, and
+ * the arc scales with the bounds).
+ *
+ * start()/stop() drive the rotation on the timer clock (~1.2 s per
+ * turn) exactly like the indeterminate ProgressBar: the animation
+ * needs a window's event loop, so a detached/standalone tree shows
+ * a static arc (honest about being busy without the rotation the
+ * headless world has no clock for). The a11y value interface
+ * reports "busy"/"idle" and the BUSY state flag while spinning.
+ * Not focusable, not interactive — an indicator, not a control. */
+fdk_result fdk_spinner_create(fdk_widget *parent,
+                              fdk_widget **out_spinner);
+/* Starts the rotation (idempotent). */
+void fdk_spinner_start(fdk_widget *spinner);
+/* Stops it; the arc parks where it stopped (GTK semantics — the
+ * phase is not reset, restarting continues from the parked angle). */
+void fdk_spinner_stop(fdk_widget *spinner);
+/* Whether the rotation is active. */
+bool fdk_spinner_is_spinning(fdk_widget *spinner);
+
+/* ---- Paned (1.4.1) ----
+ *
+ * The two-pane splitter (GTK's GtkPaned, Qt's QSplitter): a
+ * container whose FIRST child fills pane 1 and SECOND child fills
+ * pane 2, separated by a draggable divider. Further children are
+ * refused (FDK_ERR_INVALID_ARGUMENT from fdk_widget_create) — the
+ * paned IS the layout.
+ *
+ * POSITION semantics. Unset (the default, and after
+ * fdk_paned_unset_position): each pane gets its child's natural
+ * size, the leftover is split evenly (a shrink-wrapped start that
+ * fills the slot). set_position(x) pins the divider x pixels from
+ * the pane-1 edge, clamped so the divider itself stays visible
+ * ([0, extent - divider]); EITHER pane may be squeezed to zero —
+ * GTK-style freedom (give a child a minimum via its own natural
+ * size and app-side policy). Dragging and arrow keys move a pinned
+ * position. The position is in paned-local pixels and
+ * survives resizes proportionally ONLY through re-clamping — the
+ * offset is absolute, not a ratio (GTK parity).
+ *
+ * The divider is keyboard-operable when the paned is focused:
+ * Left/Up step toward pane 1, Right/Down toward pane 2 (8 px),
+ * Home/End jump to the extremes. The a11y interface: SPLIT_PANE
+ * role; the value interface reports the divider offset in pixels. */
+
+/* The divider's visual width (also the drag band's extent). */
+#define FDK_PANED_DIVIDER 6
+
+fdk_result fdk_paned_create(fdk_widget *parent,
+                            fdk_orientation orientation,
+                            fdk_widget **out_paned);
+/* Pins the divider at `position` px from the pane-1 edge (clamped
+ * to [0, extent - FDK_PANED_DIVIDER] along the orientation).
+ * Re-arranges and repaints. A negative position is refused with
+ * FDK_ERR_INVALID_ARGUMENT — use unset_position for "auto". */
+fdk_result fdk_paned_set_position(fdk_widget *paned, fdk_i32 position);
+/* The current divider offset (0 when unset — see
+ * fdk_paned_position_is_set to distinguish). */
+fdk_i32 fdk_paned_get_position(fdk_widget *paned);
+/* Whether a position is pinned (false = auto). */
+bool fdk_paned_position_is_set(fdk_widget *paned);
+/* Returns to the auto split (natural sizes + even leftover). */
+void fdk_paned_unset_position(fdk_widget *paned);
+
+/* ---- Expander (1.4.1) ----
+ *
+ * The disclosure section (GTK's GtkExpander, Qt's collapsible
+ * group): a header row (rotating disclosure triangle + label) that
+ * reveals or collapses its FIRST child. Further children are
+ * refused like Paned's. The reveal is ANIMATED (the 1.3.8 animator,
+ * ~160 ms) when a window clock is running; standalone trees toggle
+ * instantly — the same headless-honesty rule as every animation.
+ *
+ * Activation: click anywhere on the header, or Space/Enter while
+ * focused (the header is the focusable; the content child keeps
+ * its own focusability). The a11y interface: EXPANDER role + the
+ * EXPANDED state, name = the label. */
+
+fdk_result fdk_expander_create(fdk_widget *parent, fdk_font *font,
+                               const char *label,
+                               fdk_widget **out_expander);
+/* Replaces the label (copied; NULL clears). Re-measures. */
+fdk_result fdk_expander_set_label(fdk_widget *expander,
+                                  const char *label);
+/* The current label (toolkit-owned; NULL when none). */
+const char *fdk_expander_get_label(fdk_widget *expander);
+/* Expands/collapses (animated reveal when a clock exists; fires
+ * on_expanded after the state flips). */
+void fdk_expander_set_expanded(fdk_widget *expander, bool expanded);
+/* The current state. */
+bool fdk_expander_is_expanded(fdk_widget *expander);
+
+typedef void (*fdk_expander_changed_fn)(fdk_widget *expander,
+                                        bool expanded, void *user_data);
+/* Fires after every state change (user toggle or programmatic). */
+void fdk_expander_set_on_changed(fdk_widget *expander,
+                                 fdk_expander_changed_fn on_changed,
+                                 void *user_data);
 
 #ifdef __cplusplus
 }

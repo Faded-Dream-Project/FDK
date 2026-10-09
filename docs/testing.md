@@ -1314,3 +1314,65 @@ diff, not the count.
 Both configurations run the check: the debug archive carries
 ASan `__odr_asan.*` aliases the release archive does not, and the
 exported surface must be identical (441) either way.
+
+## 1.4.1 — four timing lessons from one widget batch
+
+The interactive-furniture milestone (spinner, paned, expander,
+hover fades) spent more debugging time on WHEN than on WHAT. Four
+lessons, all now encoded in the tests that caught them:
+
+**Pin the animation clock BEFORE arming.** The hover-fade test
+armed its flight, then pinned the synthetic clock to zero — and
+the flight never moved: the engine stamps `start_ms` at ARM TIME
+from the CURRENT clock, which was the real wall clock, so pinning
+afterwards made every `elapsed` hugely negative (clamped to zero
+forever). The rule: `fdk__animation_set_test_clock(t)` (plus a
+pump) must precede the event or API call that starts the
+animation. Same class of bug as the 1.3.8 lesson "settle loops
+out-count the TICK budget, not the milliseconds" — the clock is
+fixture state, set it before the system under test touches it.
+
+**Synthesized ENTER/LEAVE carry no position; MOTION does.** The
+core's hover transitions (`set_hovered`) deliver ENTER/LEAVE with
+a zeroed event — only MOTION carries real coordinates, and every
+ENTER is immediately followed by the MOTION that caused it. A
+widget that needs to know WHERE the pointer entered (the paned's
+divider band) must track on MOTION and treat LEAVE as a blanket
+clear. The paned's first draft read ENTER's phantom (0,0) and the
+hot divider state never engaged.
+
+**An app window's pump never presents.** X11 pixel readbacks
+against a plain application window go stale after widget changes
+because `fdk_pump_events` only drains and damages — presenting is
+the application's pacing (auto-paint windows — menus, tooltips —
+present on their own; app windows do not). Every readback point
+in the modern-widgets e2e explicitly calls `fdk_window_paint` (or
+loops pump-then-paint) first. The initial EXPOSE paint is the one
+exception that makes an unpainted window look suspiciously alive.
+
+**A pump's timeout is a ceiling, not a duration.** Eight 30 ms
+pumps covered only ~114 ms of wall clock in one failing run: a
+pump with pending events returns as soon as they drain, so
+"N pumps of X ms" bounds the wait from above only. Timing-
+dependent assertions must be bounded WAIT-UNTIL-STATE loops
+(pump, paint, check, repeat with a hard iteration cap) — the
+outcome is deterministic, the elapsed time is not. This is also
+why the mid-flight assertion style changed: assert the DOOR
+STARTED (height past the header, top strip greened) rather than
+"exactly half open at t".
+
+**One animation changes every later pump's arithmetic.** The
+hover fade was the first animation the Wayland integration suite
+had ever run — and its pacing test failed on the NEXT page: the
+ticker's zombie-grace kept a 16 ms repeating timer alive ~64 pumps
+after the fade completed, and each fire woke the pump at its
+deadline, shrinking a nominal 400 ms of pumping to ~128 ms. The
+bisect path is worth remembering: reverting one suspect FILE
+(controls.c) flipped the suite green before any single line was
+implicated — file-level bisection is cheap (one rebuild) and
+decisive when the failure is cross-module. The fix belongs to the
+ENGINE (the ticker sleeps when nothing runs; zombies are reaped
+by whatever pump comes next), not to the test — but any suite
+whose timing assumptions predate the animation layer should
+re-audit its pump arithmetic the first time an animation runs in
+it.

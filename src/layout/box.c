@@ -776,6 +776,15 @@ void fdk_widget_child_layout_changed(fdk_widget *parent) {
         /* Phase 9 Toolbar: a button/separator joined; re-run the
          * row at the current bounds. */
         fdk__toolbar_layout_changed(parent);
+    } else if (parent->klass == &fdk_paned_class_def) {
+        /* 1.4.1 Paned: a pane joined or re-measured — re-split at
+         * the current bounds (the applied position re-measures the
+         * children, so naturals are honored mid-flight). */
+        fdk__paned_layout_changed(parent);
+    } else if (parent->klass == &fdk_expander_class_def) {
+        /* 1.4.1 Expander: the content child joined or re-measured —
+         * re-measure and re-place it below the fixed header. */
+        fdk__expander_layout_changed(parent);
     } else if (notifier_grid_class_of(parent)) {
         /* Re-run the grid's arrangement at its CURRENT bounds — the
          * exact equivalent of box_layout for the track policy

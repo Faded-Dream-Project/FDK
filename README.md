@@ -300,17 +300,24 @@ fdk_radio_set_checked(opt, true);  /* siblings in the parent uncheck */
 fdk_progress_set_fraction(bar, 0.75f);
 ```
 
-Label, Button, Toggle, Checkbox, RadioButton (its group IS its
-parent widget), ProgressBar, Separator, and Frame — a titled
-container whose children arrange below the title band automatically.
-Controls activate on release-inside after a press (the implicit grab
-keeps the release even if the pointer left), answer Space/Enter when
-focused, and dim + go input-transparent when disabled.
+Label, Button (with the 1.4.0 role vocabulary — normal/suggested/
+destructive/link — and toggle-button state), Toggle, Checkbox,
+RadioButton (its group IS its parent widget), ProgressBar (determinate
+or busy), Separator, Frame — a titled container whose children arrange
+below the title band automatically — plus the 1.4.1 furniture:
+Spinner (the rotating busy comet), Paned (the two-pane splitter whose
+divider drags and answers the arrow keys), and Expander (the animated
+disclosure door). Controls activate on release-inside after a press
+(the implicit grab keeps the release even if the pointer left),
+answer Space/Enter when focused, dim + go input-transparent when
+disabled, and fade their hover fills over 120 ms (press feedback
+still snaps).
 
 Run `examples/04_widgets.c`: a settings-style panel built entirely
-from the catalog — frames of controls, a radio group, a grid, a
-button row, a progress bar, and a live status label that every
-control reports into.
+from the catalog — frames of controls, a radio group, a session
+frame with an expander and a draggable splitter, a grid, a button
+row with a link button and a busy spinner, a progress bar, and a
+live status label that every control reports into.
 
 Text layout completes the picture — labels that wrap, truncate with
 an ellipsis exactly at their right edge, and align their lines:

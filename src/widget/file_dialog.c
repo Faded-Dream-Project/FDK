@@ -448,6 +448,24 @@ void fdk__file_dialog_entries_free(fdk_fd_entries *entries) {
  * — pseudo filesystems (proc, sysfs, tmpfs, cgroup, overlay,
  * squashfs, ...) are noise a file dialog should not show. */
 
+/* The place's symbolic glyph (1.4.1): the house for HOME, the drive
+ * slab for the root and real-filesystem mounts, the folder for
+ * user directories. Label-based for Home (the one place whose path
+ * is $HOME, whatever that is), path-based for the rest. */
+static fdk_row_icon fdlg_place_icon(const char *path, const char *label) {
+    if (label != NULL && strcmp(label, "Home") == 0) {
+        return FDK_ROW_ICON_HOME;
+    }
+    if (path != NULL && strcmp(path, "/") == 0) {
+        return FDK_ROW_ICON_DRIVE;
+    }
+    if (path != NULL && (strncmp(path, "/media/", 7) == 0 ||
+                         strncmp(path, "/mnt/", 5) == 0)) {
+        return FDK_ROW_ICON_DRIVE;
+    }
+    return FDK_ROW_ICON_FOLDER;
+}
+
 static bool fd_fs_is_real(const char *fstype) {
     static const char *const real_fs[] = {
         "ext2", "ext3", "ext4", "btrfs",  "xfs",  "f2fs", "vfat",
@@ -2285,6 +2303,12 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     for (size_t i = 0; i < d->place_count; i++) {
         (void)fdk_list_append(d->places_list, d->places[i].label,
                               NULL);
+        /* 1.4.1: the symbolic place glyphs — Home gets the house,
+         * the root and real mounts get the drive slab, everything
+         * else (XDG user dirs) the folder. */
+        (void)fdk_list_row_set_icon(
+            d->places_list, i,
+            fdlg_place_icon(d->places[i].path, d->places[i].label));
     }
 
     /* The file list. */

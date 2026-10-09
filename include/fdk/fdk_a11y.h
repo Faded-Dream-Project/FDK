@@ -84,6 +84,13 @@ typedef enum fdk_a11y_role {
     FDK_A11Y_ROLE_SEPARATOR = 40,
     FDK_A11Y_ROLE_CANVAS = 41,   /* custom-drawn region              */
     FDK_A11Y_ROLE_STATUS_BAR = 42,
+
+    /* 1.4.1 append — the interactive furniture. Same append-only
+     * policy as the token enum: new values at the end, never
+     * renumbered. */
+    FDK_A11Y_ROLE_SPINNER = 43,  /* busy indicator (GtkSpinner)      */
+    FDK_A11Y_ROLE_SPLIT_PANE = 44, /* Paned: two resizable panes     */
+    FDK_A11Y_ROLE_EXPANDER = 45, /* disclosure section header         */
 } fdk_a11y_role;
 
 /* Stable, human-readable name ("button", "check menu item"). Never

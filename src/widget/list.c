@@ -41,10 +41,83 @@
 #define LIST_ROW_PAD_Y 5
 #define LIST_ROW_PAD_X 10
 
+/* Row icon geometry (1.4.1): a 16-px glyph box, 6-px gap to the
+ * text — the sidebar-symbolic set. */
+#define LIST_ICON 16
+#define LIST_ICON_GAP 6
+
+/* ---- 1.4.1: the symbolic row glyphs ----------------------------
+ *
+ * Font-independent vector strokes in the same language as the
+ * title-bar and disclosure glyphs: neutral foreground ink, no
+ * fills that would fight theme changes (the folder's tab keeps a
+ * soft control fill so it reads at 16 px without a fill-rate-heavy
+ * interior). */
+
+static fdk_i32 row_icon_advance(fdk_row_icon icon) {
+    return (icon == FDK_ROW_ICON_NONE) ? 0
+                                        : LIST_ICON + LIST_ICON_GAP;
+}
+
+static void row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
+                           fdk_i32 x, fdk_i32 cy, bool disabled) {
+    /* (x, cy) = the glyph box's top-left corner; the box is
+     * LIST_ICON square. Ink: text color (disabled dims). */
+    fdk_color ink = disabled ? fdk__pal_text_disabled() : fdk__pal_text();
+    fdk_color soft = disabled ? fdk__pal_control_disabled()
+                              : fdk__pal_control();
+    switch (icon) {
+    case FDK_ROW_ICON_FOLDER: {
+        /* Tabbed folder: the tab spans the top-left, the body below
+         * — outline + soft fill, rounded 2. */
+        fdk_rect body = {x + 1, cy + 4, 14, 10};
+        fdk_surface_fill_rounded_rect(surface, body, 2, soft);
+        fdk_surface_draw_rounded_rect(surface, body, 2, ink);
+        fdk_rect tab = {x + 1, cy + 2, 6, 2};
+        fdk_surface_fill_rect(surface, tab, ink);
+        break;
+    }
+    case FDK_ROW_ICON_HOME: {
+        /* House: roof strokes + door. */
+        fdk_surface_draw_line_aa(surface, x + 1, cy + 7, x + 8, cy + 2,
+                                 ink);
+        fdk_surface_draw_line_aa(surface, x + 8, cy + 2, x + 15, cy + 7,
+                                 ink);
+        fdk_rect wall = {x + 3, cy + 7, 10, 7};
+        fdk_surface_draw_rect(surface, wall, ink);
+        fdk_rect door = {x + 7, cy + 10, 2, 4};
+        fdk_surface_fill_rect(surface, door, ink);
+        break;
+    }
+    case FDK_ROW_ICON_DRIVE: {
+        /* Slab: rounded outline + soft fill + the activity LED. */
+        fdk_rect slab = {x + 2, cy + 4, 12, 8};
+        fdk_surface_fill_rounded_rect(surface, slab, 3, soft);
+        fdk_surface_draw_rounded_rect(surface, slab, 3, ink);
+        fdk_surface_fill_circle(surface, x + 11, cy + 8, 1, ink);
+        break;
+    }
+    case FDK_ROW_ICON_FILE: {
+        /* Page: outline with a folded top-right corner. */
+        fdk_rect page = {x + 3, cy + 2, 10, 12};
+        fdk_surface_draw_rect(surface, page, ink);
+        /* The fold: a diagonal + the corner notch. */
+        fdk_surface_draw_line_aa(surface, x + 9, cy + 2, x + 13, cy + 6,
+                                 ink);
+        fdk_surface_fill_rect(surface,
+                              (fdk_rect){x + 10, cy + 3, 3, 3}, soft);
+        break;
+    }
+    default:
+        break; /* NONE: the caller did not reserve the box */
+    }
+}
+
 typedef struct fdk_list_row {
     fdk_widget base;
     char *text;   /* owned */
     bool selected;
+    fdk_row_icon icon; /* 1.4.1: the vector glyph before the text */
 } fdk_list_row;
 
 typedef struct fdk_list {
@@ -130,10 +203,12 @@ static void list_relayout(fdk_list *l) {
     }
     fdk_i32 rh = list_row_height(l);
     fdk_i32 w = 80;
-    /* Width: the widest row's text (min 80) — rows stretch to it. */
+    /* Width: the widest row's text (min 80) — rows stretch to it.
+     * Iconed rows account for the glyph box + gap (1.4.1). */
     for (size_t i = 0; i < l->count; i++) {
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
+        tw += row_icon_advance(l->row_widgets[i]->icon);
         if (tw + LIST_ROW_PAD_X * 2 > w) {
             w = tw + LIST_ROW_PAD_X * 2;
         }
@@ -172,7 +247,8 @@ static void list_place_appended(fdk_list *l) {
     fdk_list_row *row = l->row_widgets[l->count - 1];
     fdk_i32 tw = 0;
     fdk__text_extent(l->font, row->text, &tw, NULL);
-    fdk_i32 want = tw + LIST_ROW_PAD_X * 2;
+    fdk_i32 want = tw + LIST_ROW_PAD_X * 2 +
+                   row_icon_advance(row->icon);
     if (want > l->content_width) {
         l->content_width = want;
         /* Widths stretch for every row: re-place the list. */
@@ -418,8 +494,20 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     fdk__text_extent(font, row->text, &tw, &th);
     fdk_i32 baseline = fdk__center_baseline(font, bounds.y,
                                             bounds.height);
+    fdk_i32 text_x = bounds.x + LIST_ROW_PAD_X;
+    /* The symbolic glyph before the text (1.4.1): vertically
+     * centered in its own 16-px box. */
+    if (row->icon != FDK_ROW_ICON_NONE) {
+        fdk_i32 gy = bounds.y + (bounds.height - LIST_ICON) / 2;
+        if (gy < bounds.y) {
+            gy = bounds.y;
+        }
+        row_icon_paint(surface, row->icon, text_x, gy,
+                       (w->flags & FDK_WF_ENABLED) == 0);
+        text_x += LIST_ICON + LIST_ICON_GAP;
+    }
     fdk__draw_text(surface, font, row->text, fdk__pal_text(),
-                   bounds.x + LIST_ROW_PAD_X, baseline);
+                   text_x, baseline);
 }
 
 static bool row_handle_event(fdk_widget *w,
@@ -641,12 +729,14 @@ static void list_destroy(fdk_widget *w) {
 
 static void list_measure(fdk_widget *w, fdk_size *out) {
     fdk_list *l = list_of(w);
-    /* Natural: up to 8 rows tall, wide enough for the widest row. */
+    /* Natural: up to 8 rows tall, wide enough for the widest row
+     * (icons account for their glyph box + gap, 1.4.1). */
     fdk_i32 rh = list_row_height(l);
     fdk_i32 width = 80;
     for (size_t i = 0; i < l->count; i++) {
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
+        tw += row_icon_advance(l->row_widgets[i]->icon);
         if (tw + LIST_ROW_PAD_X * 2 > width) {
             width = tw + LIST_ROW_PAD_X * 2;
         }
@@ -976,6 +1066,55 @@ fdk_result fdk_list_set_row_text(fdk_widget *list, size_t row,
     list_relayout(l);
     fdk_widget_invalidate(&l->row_widgets[row]->base);
     return FDK_OK;
+}
+
+/* ---- Row icons (1.4.1) ---- */
+
+fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
+                                 fdk_row_icon icon) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list *l = list_of(list);
+    if (row >= l->count) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    switch (icon) {
+    case FDK_ROW_ICON_NONE:
+    case FDK_ROW_ICON_FOLDER:
+    case FDK_ROW_ICON_HOME:
+    case FDK_ROW_ICON_DRIVE:
+    case FDK_ROW_ICON_FILE:
+        break;
+    default:
+        icon = FDK_ROW_ICON_NONE; /* unknown values read as NONE */
+        break;
+    }
+    fdk_list_row *r = l->row_widgets[row];
+    if (r->icon == icon) {
+        return FDK_OK;
+    }
+    r->icon = icon;
+    if (l->batch_depth > 0) {
+        l->batch_dirty = true;
+        return FDK_OK;
+    }
+    /* The glyph changes the row's content width — the same settle
+     * path a text change takes. */
+    list_relayout(l);
+    fdk_widget_invalidate(&r->base);
+    return FDK_OK;
+}
+
+fdk_row_icon fdk_list_row_get_icon(fdk_widget *list, size_t row) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return FDK_ROW_ICON_NONE;
+    }
+    fdk_list *l = list_of(list);
+    if (row >= l->count) {
+        return FDK_ROW_ICON_NONE;
+    }
+    return l->row_widgets[row]->icon;
 }
 
 void fdk_list_set_on_selection_changed(fdk_widget *list,
