@@ -1290,6 +1290,203 @@ static void test_argument_safety(void) {
            "no-op setters\n");
 }
 
+/* ---- Statusbar (1.4.2) ---- */
+
+static void test_statusbar(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *sb = NULL;
+    assert(fdk_ok(fdk_statusbar_create(root, g_font, &sb)));
+    assert(fdk_statusbar_get_text(sb) == NULL); /* the empty stack   */
+
+    /* Contexts: stable ids, minted sequentially, invalid refused. */
+    fdk_u32 ctx_a = fdk_statusbar_get_context_id(sb, "cursor");
+    fdk_u32 ctx_b = fdk_statusbar_get_context_id(sb, "hints");
+    fdk_u32 ctx_a2 = fdk_statusbar_get_context_id(sb, "cursor");
+    assert(ctx_a != 0 && ctx_b != 0 && ctx_a != ctx_b);
+    assert(ctx_a2 == ctx_a); /* stable                             */
+    assert(fdk_statusbar_get_context_id(sb, NULL) == 0);
+    assert(fdk_statusbar_get_context_id(sb, "") == 0);
+
+    /* The message stack: push returns handles, the top paints. */
+    fdk_u32 m1 = fdk_statusbar_push(sb, ctx_a, "Ln 1, Col 1");
+    fdk_u32 m2 = fdk_statusbar_push(sb, ctx_b, "Sorting…");
+    fdk_u32 m3 = fdk_statusbar_push(sb, ctx_a, "Ln 42, Col 7");
+    assert(m1 != 0 && m2 != 0 && m3 != 0);
+    assert(m1 != m2 && m2 != m3);
+    assert(strcmp(fdk_statusbar_get_text(sb), "Ln 42, Col 7") == 0);
+    /* Invalid pushes refuse (bad context, NULL text). */
+    assert(fdk_statusbar_push(sb, 0, "x") == 0);
+    assert(fdk_statusbar_push(sb, ctx_a, NULL) == 0);
+    assert(fdk_statusbar_push(sb, 999u, "x") == 0);
+
+    /* pop is LIFO per context: ctx_a pops ITS topmost, not the
+     * global top — ctx_b's message survives below it. */
+    fdk_statusbar_pop(sb, ctx_a);
+    assert(strcmp(fdk_statusbar_get_text(sb), "Sorting…") == 0);
+    fdk_statusbar_pop(sb, ctx_a); /* m1 now */
+    assert(strcmp(fdk_statusbar_get_text(sb), "Sorting…") == 0);
+    fdk_statusbar_pop(sb, ctx_a); /* empty context: silent no-op    */
+    assert(strcmp(fdk_statusbar_get_text(sb), "Sorting…") == 0);
+    fdk_statusbar_pop(sb, ctx_b);
+    assert(fdk_statusbar_get_text(sb) == NULL);
+
+    /* remove(ctx, id): the exact message, wherever it sits. */
+    fdk_u32 k1 = fdk_statusbar_push(sb, ctx_a, "Loading…");
+    fdk_u32 k2 = fdk_statusbar_push(sb, ctx_b, "3 files");
+    fdk_u32 k3 = fdk_statusbar_push(sb, ctx_a, "Done");
+    assert(strcmp(fdk_statusbar_get_text(sb), "Done") == 0);
+    fdk_statusbar_remove(sb, ctx_a, k1); /* the BOTTOM message      */
+    assert(strcmp(fdk_statusbar_get_text(sb), "Done") == 0);
+    fdk_statusbar_remove(sb, ctx_a, k3); /* the top                 */
+    assert(strcmp(fdk_statusbar_get_text(sb), "3 files") == 0);
+    fdk_statusbar_remove(sb, ctx_b, k1); /* wrong context: no-op    */
+    assert(strcmp(fdk_statusbar_get_text(sb), "3 files") == 0);
+    fdk_statusbar_remove(sb, ctx_b, k2);
+    assert(fdk_statusbar_get_text(sb) == NULL);
+
+    /* a11y: STATUS_BAR role, name = the top message. */
+    (void)fdk_statusbar_push(sb, ctx_a, "Ready");
+    fdk_a11y_info info;
+    assert(fdk_ok(fdk_a11y_describe(sb, &info)));
+    assert(info.role == FDK_A11Y_ROLE_STATUS_BAR);
+    assert(info.name != NULL && strcmp(info.name, "Ready") == 0);
+    fdk_a11y_info_free(&info);
+
+    /* Paint: the top message's ink lands (pixel-diff against the
+     * message-less bar). */
+    fdk_size nat;
+    fdk_widget_measure(sb, &nat);
+    assert(nat.height >= 24);
+    fdk_widget_arrange(sb, (fdk_rect){0, 0, 200, nat.height});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(200, nat.height, &s)));
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s);
+    fdk_u32 with_text = px_at(s, 12, nat.height / 2);
+    fdk_statusbar_pop(sb, ctx_a); /* empty again                   */
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s);
+    fdk_u32 bare = px_at(s, 12, nat.height / 2);
+    assert(with_text != bare);
+    fdk_surface_destroy(s);
+
+    /* Argument safety. */
+    assert(fdk_statusbar_create(NULL, NULL, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_statusbar_get_context_id(NULL, "x") == 0);
+    assert(fdk_statusbar_push(NULL, 1, "x") == 0);
+    fdk_statusbar_pop(NULL, 1);
+    fdk_statusbar_remove(NULL, 1, 1);
+    assert(fdk_statusbar_get_text(NULL) == NULL);
+
+    fdk_widget_destroy(root);
+    printf("[ok] statusbar: stable context ids, LIFO-per-context pop, "
+           "exact remove, top-of-stack display + a11y name, pixel "
+           "diff, argument safety\n");
+}
+
+/* ---- LevelBar (1.4.2) ---- */
+
+static void test_levelbar(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *lb = NULL;
+    assert(fdk_ok(fdk_levelbar_create(root, 0.0, 10.0, &lb)));
+    assert(fdk_levelbar_get_value(lb) == 0.0);
+    assert(fdk_levelbar_get_mode(lb) == FDK_LEVELBAR_DISCRETE);
+    assert(fdk_levelbar_get_segments(lb) == 5);
+
+    /* Values clamp into the range. */
+    fdk_levelbar_set_value(lb, 7.5);
+    assert(fdk_levelbar_get_value(lb) == 7.5);
+    fdk_levelbar_set_value(lb, 99.0);
+    assert(fdk_levelbar_get_value(lb) == 10.0);
+    fdk_levelbar_set_value(lb, -5.0);
+    assert(fdk_levelbar_get_value(lb) == 0.0);
+
+    /* Range + invalid range refused. */
+    fdk_levelbar_set_range(lb, 0.0, 4.0);
+    assert(fdk_levelbar_get_value(lb) == 0.0);
+    fdk_levelbar_set_value(lb, 2.0);
+    fdk_levelbar_set_range(lb, 5.0, 1.0); /* refused               */
+    assert(fdk_levelbar_get_value(lb) == 2.0);
+
+    /* Segments: bounds enforced ([2, 32]). */
+    fdk_levelbar_set_segments(lb, 1); /* refused: stays 5          */
+    assert(fdk_levelbar_get_segments(lb) == 5);
+    fdk_levelbar_set_segments(lb, 7);
+    assert(fdk_levelbar_get_segments(lb) == 7);
+    fdk_levelbar_set_segments(lb, 100); /* refused: stays 7        */
+    assert(fdk_levelbar_get_segments(lb) == 7);
+
+    /* Mode round-trip + the natural sizes differ. */
+    fdk_size nat_d;
+    fdk_widget_measure(lb, &nat_d);
+    fdk_levelbar_set_mode(lb, FDK_LEVELBAR_CONTINUOUS);
+    assert(fdk_levelbar_get_mode(lb) == FDK_LEVELBAR_CONTINUOUS);
+    fdk_size nat_c;
+    fdk_widget_measure(lb, &nat_c);
+    assert(nat_c.width == 40); /* the continuous minimum            */
+    assert(nat_d.width == 7 * 10 + 6 * 6); /* 7 blocks + 6 gaps     */
+    fdk_levelbar_set_mode(lb, (fdk_levelbar_mode)9); /* refused    */
+    assert(fdk_levelbar_get_mode(lb) == FDK_LEVELBAR_CONTINUOUS);
+
+    /* Discrete paint: the boundary rule. At 0 no block is lit; at
+     * max EVERY block is lit (a full bar reads full). The sample
+     * point: each block's center. */
+    fdk_levelbar_set_mode(lb, FDK_LEVELBAR_DISCRETE);
+    fdk_levelbar_set_value(lb, 0.0);
+    fdk_i32 h = nat_d.height;
+    fdk_widget_arrange(lb, (fdk_rect){0, 0, nat_d.width, h});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(nat_d.width, h, &s)));
+    fdk_color track = fdk_theme_get_color(NULL, FDK_TK_TRACK);
+    fdk_color accent = fdk_theme_get_color(NULL, FDK_TK_ACCENT);
+    fdk_color winbg =
+        fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+    fdk_widget_set_background(root, winbg);
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s);
+    /* Block i's center (blocks are centered vertically; 10 wide). */
+    fdk_i32 cy = h / 2;
+    assert(px_at(s, 5, cy) == pack_color(track));   /* block 0 off  */
+    assert(px_at(s, 5 + 16, cy) == pack_color(track)); /* block 1   */
+    fdk_levelbar_set_value(lb, 10.0);
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s);
+    assert(px_at(s, 5, cy) == pack_color(accent));  /* block 0 on   */
+    assert(px_at(s, 5 + 16 * 6, cy) == pack_color(accent)); /* last */
+
+    /* a11y: LEVEL_BAR role, the value interface, no actions. */
+    fdk_a11y_info info;
+    assert(fdk_ok(fdk_a11y_describe(lb, &info)));
+    assert(info.role == FDK_A11Y_ROLE_LEVEL_BAR);
+    assert(info.has_value);
+    assert(info.value_min == 0.0 && info.value_max == 4.0);
+    assert(info.value_current == 4.0); /* clamped by the range      */
+    assert(info.value_text != NULL);
+    fdk_a11y_info_free(&info);
+
+    /* Argument safety. */
+    assert(fdk_levelbar_create(NULL, 0, 1, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_levelbar_create(root, 1.0, 0.0, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    fdk_levelbar_set_value(NULL, 1.0);
+    assert(fdk_levelbar_get_value(NULL) == 0.0);
+    fdk_levelbar_set_range(NULL, 0, 1);
+    fdk_levelbar_set_mode(NULL, FDK_LEVELBAR_CONTINUOUS);
+    fdk_levelbar_set_segments(NULL, 5);
+    assert(fdk_levelbar_get_segments(NULL) == 0);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] levelbar: clamped values, refused bad range/mode/"
+           "segments, discrete boundary rule (empty vs full, pixels), "
+           "continuous natural, a11y meter interface\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -1324,6 +1521,8 @@ int main(void) {
     test_button_link();
     test_spinner();
     test_hover_fades();
+    test_statusbar();
+    test_levelbar();
     test_argument_safety();
 
     fdk_font_destroy(g_font);

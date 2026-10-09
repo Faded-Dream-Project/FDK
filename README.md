@@ -313,11 +313,29 @@ answer Space/Enter when focused, dim + go input-transparent when
 disabled, and fade their hover fills over 120 ms (press feedback
 still snaps).
 
+The 1.4.2 app furniture rounds out the structure every real
+application reaches for: Stack (named pages, exactly one visible)
+with its StackSwitcher (the accent pill row — bound loosely enough
+that either widget can die first), Revealer (the animated drawer
+that slides from any edge), Statusbar (GTK's context-scoped
+message stack: push returns a handle, pop is LIFO per context),
+SearchEntry (the magnifier preset with a clear button and the
+Esc-clears ladder), and LevelBar (the battery-style meter). The
+existing family grew too: the List gained rubber-band sweep
+selection and row icons, the Tree row icons that survive
+collapses, the Slider labeled tick marks, and the menu/combo rows
+fade their hover pills like the buttons do.
+
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session
 frame with an expander and a draggable splitter, a grid, a button
 row with a link button and a busy spinner, a progress bar, and a
-live status label that every control reports into.
+live status label that every control reports into. Then
+`examples/12_settings.c`: the whole 1.4.2 furniture composed into
+one working settings app — search field, pill-switched stack,
+statusbar, marked slider, level meters, spinning sync, a
+multi-select storage list with icons and the rubber band, and a
+slide-up advanced drawer.
 
 Text layout completes the picture — labels that wrap, truncate with
 an ellipsis exactly at their right edge, and align their lines:

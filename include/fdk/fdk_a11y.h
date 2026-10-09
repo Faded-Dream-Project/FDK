@@ -91,6 +91,9 @@ typedef enum fdk_a11y_role {
     FDK_A11Y_ROLE_SPINNER = 43,  /* busy indicator (GtkSpinner)      */
     FDK_A11Y_ROLE_SPLIT_PANE = 44, /* Paned: two resizable panes     */
     FDK_A11Y_ROLE_EXPANDER = 45, /* disclosure section header         */
+
+    /* 1.4.2 append — the app furniture. */
+    FDK_A11Y_ROLE_LEVEL_BAR = 46, /* segmented value readout (meter)  */
 } fdk_a11y_role;
 
 /* Stable, human-readable name ("button", "check menu item"). Never

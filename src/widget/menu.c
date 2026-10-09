@@ -737,6 +737,13 @@ typedef struct fdk_menu_view {
     int highlight;     /* pointer-hover row, -1 none              */
     int key_row;       /* keyboard cursor, -1 none                */
     int open_row;      /* row whose submenu is open, -1 none      */
+    /* 1.4.2: per-row hover blends — the pill fades in/out on the
+     * same 120-ms machinery the buttons ride (the SEMANTIC
+     * highlight flips instantly; keyboard cursor rows and open
+     * submenu-parent rows still snap — state, not whisper). NULL
+     * before the first paint binds the model's row count. */
+    fdk_hover_fade *fades;
+    size_t fade_count;
 } fdk_menu_view;
 
 /* The view's Alt-fallback routes Alt+letter naming ANOTHER bar
@@ -746,6 +753,70 @@ static bool mn_view_alt_bar_fallback(fdk_menu_view *v,
 
 static fdk_menu_view *view_of(fdk_widget *w) {
     return (fdk_menu_view *)(void *)w;
+}
+
+/* ---- 1.4.2: the row-pill hover fades ----
+ *
+ * The pill fades through the shared hover-fade machinery (statics.c):
+ * the SEMANTIC highlight still flips instantly (submenu opening,
+ * keyboard handoffs — state changes snap), only the PAINT blends.
+ * The array is sized to the bound model lazily at first use; a
+ * running tick's user pointer points into it, so every resize
+ * cancels the flights FIRST. */
+
+static void view_drop_fades(fdk_menu_view *v) {
+    for (size_t i = 0; i < v->fade_count; i++) {
+        if (v->fades != NULL && v->fades[i].anim != NULL) {
+            fdk_animation_cancel(v->fades[i].anim);
+            v->fades[i].anim = NULL;
+        }
+    }
+    fdk_free(v->fades);
+    v->fades = NULL;
+    v->fade_count = 0;
+}
+
+static void view_ensure_fades(fdk_menu_view *v) {
+    if (v->model == NULL) {
+        return;
+    }
+    if (v->fades != NULL && v->fade_count == v->model->count) {
+        return;
+    }
+    view_drop_fades(v);
+    if (v->model->count == 0) {
+        return;
+    }
+    v->fades = fdk_alloc_array(v->model->count, sizeof(*v->fades));
+    if (v->fades != NULL) {
+        v->fade_count = v->model->count;
+    }
+}
+
+/* Sets the hover row with the fade arming (the ONLY path that
+ * moves `highlight` once fades exist). */
+static void view_set_highlight(fdk_menu_view *v, int row) {
+    if (row == v->highlight) {
+        return;
+    }
+    if (v->model != NULL) {
+        view_ensure_fades(v);
+        if (v->fades != NULL) {
+            if (v->highlight >= 0 &&
+                (size_t)v->highlight < v->fade_count) {
+                fdk__hover_fade_arm(&v->base, &v->fades[v->highlight],
+                                    false);
+            }
+            if (row >= 0 && (size_t)row < v->fade_count) {
+                fdk__hover_fade_arm(&v->base, &v->fades[row], true);
+            }
+        }
+    }
+    v->highlight = row;
+}
+
+static void view_destroy(fdk_widget *w) {
+    view_drop_fades(view_of(w));
 }
 
 /* ---- a11y ---- */
@@ -856,7 +927,7 @@ const fdk_widget_class fdk_menu_view_class_def = {
     .paint = fdk__menu_view_paint,
     .measure = fdk__menu_view_measure,
     .arrange = NULL,
-    .destroy = NULL,
+    .destroy = view_destroy,
     .a11y = &menu_view_a11y,
 };
 
@@ -881,6 +952,7 @@ fdk_result fdk__menu_view_bind(fdk_widget *w, fdk_menu *model) {
     v->highlight = -1;
     v->key_row = -1;
     v->open_row = -1;
+    view_drop_fades(v); /* the row count may differ (rebind) */
     fdk_widget_invalidate(w);
     return FDK_OK;
 }
@@ -979,18 +1051,31 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
             /* The submenu-parent row stays lit while its child is
              * open — the selection fill so it reads "active", not
              * merely hovered (1.4.0: the token replaces the hardcoded
-             * accent-alpha). */
+             * accent-alpha). State, not whisper: it snaps. */
             fdk_surface_fill_rect(surface, row, fdk__pal_selection());
         } else if (lit) {
             /* 1.4.0: the hover state is an inset rounded PILL, not a
              * full-width band — the modern menu-row look. The inset
-             * keeps the pill inside the popup's rounded corners. */
-            fdk_rect pill = {bounds.x + 3, yy + 1,
-                             bounds.width - 6, rh - 2};
-            if (pill.width > 0 && pill.height > 0) {
-                fdk_i32 pill_r = menu_r > 3 ? menu_r - 3 : 2;
-                fdk_surface_fill_rounded_rect(surface, pill, pill_r,
-                                              fdk__pal_row_hover());
+             * keeps the pill inside the popup's rounded corners.
+             * 1.4.2: the POINTER-hover pill fades (120 ms, the
+             * shared machinery); the keyboard cursor's row snaps —
+             * input and navigation state are answers, not whispers. */
+            fdk_f32 t = 1.0f;
+            if ((int)i == v->highlight && (int)i != v->key_row &&
+                v->fades != NULL && i < v->fade_count) {
+                t = v->fades[i].t;
+            }
+            if (t > 0.0f) {
+                fdk_rect pill = {bounds.x + 3, yy + 1,
+                                 bounds.width - 6, rh - 2};
+                if (pill.width > 0 && pill.height > 0) {
+                    fdk_i32 pill_r = menu_r > 3 ? menu_r - 3 : 2;
+                    fdk_color base = fdk__pal_row_hover();
+                    fdk_color fill = {base.r, base.g, base.b,
+                                      base.a * t};
+                    fdk_surface_fill_rounded_rect(surface, pill, pill_r,
+                                                  fill);
+                }
             }
         }
 
@@ -1157,7 +1242,7 @@ bool fdk__menu_view_handle_event(fdk_widget *w,
         if (row == v->highlight) {
             return true;
         }
-        v->highlight = row;
+        view_set_highlight(v, row);
         /* Hovering a different row closes any submenu this view
          * opened (the classic menu behavior). */
         if (v->session != NULL && v->open_row != -1 && row != v->open_row) {
@@ -1202,7 +1287,7 @@ bool fdk__menu_view_handle_event(fdk_widget *w,
         return true; /* consumed: no click-through to anything under */
     case FDK_WIDGET_POINTER_LEAVE:
         if (v->highlight != -1) {
-            v->highlight = -1;
+            view_set_highlight(v, -1);
             fdk_widget_invalidate(w);
         }
         return false;
@@ -1215,7 +1300,7 @@ bool fdk__menu_view_handle_event(fdk_widget *w,
                 v, from, (key == FDK_KEY_DOWN) ? 1 : -1);
             v->key_row = next;
             if (v->highlight != -1 && v->highlight != next) {
-                v->highlight = -1;
+                view_set_highlight(v, -1);
             }
             fdk_widget_invalidate(w);
             return true;

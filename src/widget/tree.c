@@ -46,6 +46,9 @@ typedef struct fdk_tree_node_rec {
     bool dead;         /* removed: tombstone keeps every
                        * OTHER handle stable (the store
                        * never reuses an index)          */
+    fdk_row_icon icon; /* 1.4.2: the glyph before the text
+                       * (rides the MODEL, so it survives
+                       * collapses and re-expansions)    */
 } fdk_tree_node_rec;
 
 typedef struct fdk_tree_row {
@@ -112,7 +115,8 @@ static void tree_relayout(fdk_tree *t) {
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(t->font, n->text, &tw, &th);
         fdk_i32 need = tw + TREE_INDENT * (depth + 1) +
-                       TREE_EXPANDER + 8;
+                       TREE_EXPANDER + 8 +
+                       fdk__row_icon_advance(n->icon);
         if (need > w) {
             w = need;
         }
@@ -392,7 +396,20 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     }
     fdk_i32 baseline = fdk__center_baseline(t->font, bounds.y,
                                             bounds.height);
-    fdk__draw_text(surface, t->font, n->text, fdk__pal_text(), x,
+    /* The symbolic glyph (1.4.2): the List's language, between the
+     * expander zone and the text, vertically centered in its 16-px
+     * box. */
+    fdk_i32 text_x = x;
+    if (n->icon != FDK_ROW_ICON_NONE) {
+        fdk_i32 gy = bounds.y + (bounds.height - 16) / 2;
+        if (gy < bounds.y) {
+            gy = bounds.y;
+        }
+        fdk__row_icon_paint(surface, n->icon, text_x, gy,
+                             (w->flags & FDK_WF_ENABLED) == 0);
+        text_x += fdk__row_icon_advance(n->icon);
+    }
+    fdk__draw_text(surface, t->font, n->text, fdk__pal_text(), text_x,
                    baseline);
 }
 
@@ -671,7 +688,8 @@ static void tree_measure(fdk_widget *w, fdk_size *out) {
         }
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(t->font, n->text, &tw, &th);
-        fdk_i32 need = tw + TREE_INDENT * (depth + 1) + TREE_EXPANDER + 8;
+        fdk_i32 need = tw + TREE_INDENT * (depth + 1) + TREE_EXPANDER +
+                       8 + fdk__row_icon_advance(n->icon);
         if (need > width) {
             width = need;
         }
@@ -784,6 +802,7 @@ fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
         .selected = false,
         .is_parent = false,
         .dead = false,
+        .icon = FDK_ROW_ICON_NONE,
     };
     t->count++;
     if (parent != FDK_TREE_NODE_NONE) {
@@ -804,6 +823,51 @@ fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
         *out_node = idx;
     }
     return FDK_OK;
+}
+
+/* ---- node icons (1.4.2) ---- */
+
+fdk_result fdk_tree_node_set_icon(fdk_widget *tree,
+                                  fdk_tree_node node, fdk_row_icon icon) {
+    if (tree == NULL || tree->klass != &fdk_tree_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_tree *t = tree_of(tree);
+    if (node == FDK_TREE_NODE_NONE || node >= t->count ||
+        t->nodes[node].dead) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    switch (icon) {
+    case FDK_ROW_ICON_NONE:
+    case FDK_ROW_ICON_FOLDER:
+    case FDK_ROW_ICON_HOME:
+    case FDK_ROW_ICON_DRIVE:
+    case FDK_ROW_ICON_FILE:
+        break;
+    default:
+        return FDK_ERR_INVALID_ARGUMENT; /* unknown values refused, */
+    }                                      /* not coerced            */
+    if (t->nodes[node].icon == icon) {
+        return FDK_OK;
+    }
+    t->nodes[node].icon = icon;
+    /* The row's width accounting changed: re-layout (the batched
+     * fill path folds this into one settle when the app batches). */
+    tree_relayout(t);
+    return FDK_OK;
+}
+
+fdk_row_icon fdk_tree_node_get_icon(fdk_widget *tree,
+                                    fdk_tree_node node) {
+    if (tree == NULL || tree->klass != &fdk_tree_class_def) {
+        return FDK_ROW_ICON_NONE;
+    }
+    fdk_tree *t = tree_of(tree);
+    if (node == FDK_TREE_NODE_NONE || node >= t->count ||
+        t->nodes[node].dead) {
+        return FDK_ROW_ICON_NONE;
+    }
+    return t->nodes[node].icon;
 }
 
 /* ---- node removal (1.3.0) ----

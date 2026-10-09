@@ -46,6 +46,18 @@ static void click(fdk_widget *root, float x, float y, fdk_u32 mods) {
     (void)fdk_widget_tree_handle_event(root, &up);
 }
 
+/* Pointer MOTION (the widget-level synthesis path uses the plain
+ * pointer member; the union overlays the button member's position,
+ * but writing it directly is the honest spelling). */
+static fdk_event_data ev_motion_evt(float x, float y) {
+    fdk_event_data e;
+    memset(&e, 0, sizeof(e));
+    e.type = FDK_EVENT_POINTER_MOTION;
+    e.pointer.position.x = x;
+    e.pointer.position.y = y;
+    return e;
+}
+
 static fdk_event_data ev_key(fdk_scancode sc, fdk_u32 mods) {
     fdk_event_data e;
     memset(&e, 0, sizeof(e));
@@ -404,6 +416,116 @@ static void test_paint(void) {
            "(pixel-diff verified)\n");
 }
 
+/* ---- the rubber-band sweep (1.4.2) ---- */
+
+static int g_band_changes;
+
+static void on_band_changed(fdk_widget *w, void *user) {
+    (void)w;
+    (void)user;
+    g_band_changes++;
+}
+
+static void test_rubber_band(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &list)));
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    fdk_list_set_on_selection_changed(list, on_band_changed, NULL);
+    g_band_changes = 0;
+    /* Six 30-px rows = 180 px of content in a 260-px field: 80 px of
+     * empty space below the rows (the band's natural habitat). */
+    for (int i = 0; i < 6; i++) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "row %d", i);
+        assert(fdk_ok(fdk_list_append(list, buf, NULL)));
+    }
+    fdk_widget_set_bounds(list, (fdk_rect){10, 10, 200, 260});
+
+    /* A plain sweep from the empty space up over the rows: rows
+     * 2..5 end up selected (the band covers local y [80, 200]). */
+    fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    100.0f, 210.0f, 0);
+    fdk_event_data move = ev_motion_evt(150.0f, 90.0f);
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 150.0f,
+                                  90.0f, 0);
+    assert(fdk_widget_tree_handle_event(root, &down)); /* the grab  */
+    assert(fdk_list_selected_count(list) == 0);  /* zero-extent band */
+    assert(g_band_changes == 1);                 /* the press fired */
+    /* Live selection DURING the sweep (before the release). */
+    (void)fdk_widget_tree_handle_event(root, &move);
+    assert(fdk_list_selected_count(list) == 4);
+    assert(fdk_list_is_selected(list, 2));
+    assert(fdk_list_is_selected(list, 5));
+    assert(!fdk_list_is_selected(list, 1));
+    assert(!fdk_list_is_selected(list, 0));
+    assert(g_band_changes == 1); /* motions never spam the callback */
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(g_band_changes == 2); /* the release is the gesture's end */
+    assert(fdk_list_selected_count(list) == 4); /* selection persists */
+
+    /* The band RECT paints during the gesture and is gone after:
+     * sample inside the swept empty space (root y=205, x=135 — the
+     * band's interior, clear of the bottom edge and of every row).
+     * The root needs a background so the tint has something to be
+     * repainted AWAY to (a standalone root paints nothing). */
+    fdk_widget_set_background(root,
+                              (fdk_color){0.1f, 0.1f, 0.1f, 1.0f});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(240, 300, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    fdk_u32 after_release = px_at(s, 135, 205);
+    fdk_event_data down2 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     100.0f, 210.0f, 0);
+    fdk_event_data move2 = ev_motion_evt(150.0f, 90.0f);
+    (void)fdk_widget_tree_handle_event(root, &down2);
+    (void)fdk_widget_tree_handle_event(root, &move2);
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    fdk_u32 mid_gesture = px_at(s, 135, 205);
+    assert(mid_gesture != after_release); /* the tint               */
+    fdk_event_data up2 = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 150.0f,
+                                   90.0f, 0);
+    (void)fdk_widget_tree_handle_event(root, &up2);
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    assert(px_at(s, 135, 205) == after_release); /* gone            */
+
+    /* A ctrl sweep UNIONS over the pre-band selection. */
+    assert(fdk_ok(fdk_list_select(list, 0)));
+    g_band_changes = 0;
+    fdk_event_data down3 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     100.0f, 210.0f, FDK_MOD_CTRL);
+    fdk_event_data move3 = ev_motion_evt(150.0f, 90.0f);
+    fdk_event_data up3 = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 150.0f,
+                                   90.0f, FDK_MOD_CTRL);
+    (void)fdk_widget_tree_handle_event(root, &down3);
+    (void)fdk_widget_tree_handle_event(root, &move3);
+    (void)fdk_widget_tree_handle_event(root, &up3);
+    assert(fdk_list_selected_count(list) == 5); /* row 0 + rows 2..5 */
+    assert(fdk_list_is_selected(list, 0));
+
+    /* An empty-space CLICK (no motion) clears a plain selection. */
+    g_band_changes = 0;
+    click(root, 100.0f, 230.0f, 0);
+    assert(fdk_list_selected_count(list) == 0);
+    assert(g_band_changes == 2); /* press + release, one gesture    */
+
+    /* SINGLE mode refuses the band: the press is not consumed. */
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_SINGLE);
+    fdk_event_data down4 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     100.0f, 210.0f, 0);
+    assert(!fdk_widget_tree_handle_event(root, &down4));
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] list: rubber band — live sweep selection, plain "
+           "replace vs ctrl union, band tint paints mid-gesture only, "
+           "empty-space click clears, one callback pair per gesture, "
+           "SINGLE refuses\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -431,6 +553,7 @@ int main(void) {
     test_keyboard();
     test_scrolling();
     test_paint();
+    test_rubber_band();
 
     fdk_font_destroy(g_font);
     printf("all list tests passed\n");

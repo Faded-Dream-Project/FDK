@@ -303,6 +303,72 @@ static void test_scrolling(void) {
            "after wheeling\n");
 }
 
+/* ---- row icons (1.4.2) ---- */
+
+static void test_row_icons(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *tree = NULL;
+    assert(fdk_ok(fdk_tree_create(root, g_font, &tree)));
+
+    fdk_tree_node a = FDK_TREE_NODE_NONE;
+    fdk_tree_node b = FDK_TREE_NODE_NONE;
+    assert(fdk_ok(fdk_tree_node_add(tree, FDK_TREE_NODE_NONE,
+                                    "root node", &a)));
+    assert(fdk_ok(fdk_tree_node_add(tree, FDK_TREE_NODE_NONE,
+                                    "root node", &b)));
+
+    /* Default NONE; round-trip; unknown values refused (not coerced
+     * — the setter is fdk_result, unlike the List's 1.4.1 getter). */
+    assert(fdk_tree_node_get_icon(tree, a) == FDK_ROW_ICON_NONE);
+    assert(fdk_tree_node_set_icon(tree, a, FDK_ROW_ICON_FOLDER) ==
+           FDK_OK);
+    assert(fdk_tree_node_get_icon(tree, a) == FDK_ROW_ICON_FOLDER);
+    assert(fdk_tree_node_set_icon(tree, a, (fdk_row_icon)99) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_tree_node_get_icon(tree, a) == FDK_ROW_ICON_FOLDER);
+    /* Bad handles refused. */
+    assert(fdk_tree_node_set_icon(tree, FDK_TREE_NODE_NONE,
+                                  FDK_ROW_ICON_HOME) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_tree_node_get_icon(tree, FDK_TREE_NODE_NONE) ==
+           FDK_ROW_ICON_NONE);
+    assert(fdk_tree_node_set_icon(NULL, a, FDK_ROW_ICON_HOME) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* Width accounting: the icon's 22 px widen the natural width
+     * (measured from a fully icon-less baseline). */
+    assert(fdk_tree_node_set_icon(tree, a, FDK_ROW_ICON_NONE) ==
+           FDK_OK);
+    fdk_size nat_plain;
+    fdk_widget_measure(tree, &nat_plain);
+    assert(fdk_tree_node_set_icon(tree, b, FDK_ROW_ICON_DRIVE) ==
+           FDK_OK);
+    fdk_size nat_icon;
+    fdk_widget_measure(tree, &nat_icon);
+    assert(nat_icon.width == nat_plain.width + 22);
+    /* Back to NONE: the width returns. */
+    assert(fdk_tree_node_set_icon(tree, b, FDK_ROW_ICON_NONE) ==
+           FDK_OK);
+    fdk_widget_measure(tree, &nat_plain);
+    assert(nat_plain.width == nat_icon.width - 22);
+
+    /* The icon rides the MODEL node: it survives collapse and
+     * re-expansion (a child's icon outlives its hidden spell). */
+    fdk_tree_node child = FDK_TREE_NODE_NONE;
+    assert(fdk_ok(fdk_tree_node_add(tree, a, "a-1", &child)));
+    assert(fdk_tree_node_set_icon(tree, child, FDK_ROW_ICON_HOME) ==
+           FDK_OK);
+    assert(fdk_tree_node_expand(tree, a, false) == FDK_OK);
+    assert(fdk_tree_node_get_icon(tree, child) == FDK_ROW_ICON_HOME);
+    assert(fdk_tree_node_expand(tree, a, true) == FDK_OK);
+    assert(fdk_tree_node_get_icon(tree, child) == FDK_ROW_ICON_HOME);
+
+    fdk_widget_destroy(root);
+    printf("[ok] tree: row icons — NONE default, round-trip + refused "
+           "unknown values, 22-px width accounting, icons survive "
+           "collapse/re-expansion\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -328,6 +394,7 @@ int main(void) {
     test_clicks();
     test_keyboard();
     test_scrolling();
+    test_row_icons();
 
     fdk_font_destroy(g_font);
     printf("all tree tests passed\n");

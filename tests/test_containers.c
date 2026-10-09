@@ -563,6 +563,376 @@ static void test_row_icons(void) {
            "NONE, 22-px width accounting, glyph ink, batch settle\n");
 }
 
+/* ---- Stack (1.4.2) ---- */
+
+static int g_stack_changes;
+static size_t g_stack_last_index;
+static const char *g_stack_last_name;
+
+static void on_stack_change(fdk_widget *stack, size_t index,
+                            const char *name, void *user) {
+    (void)stack;
+    (void)user;
+    g_stack_changes++;
+    g_stack_last_index = index;
+    g_stack_last_name = name;
+}
+
+static void test_stack(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *st = NULL;
+    assert(fdk_ok(fdk_stack_create(root, &st)));
+    fdk_stack_set_on_changed(st, on_stack_change, NULL);
+    g_stack_changes = 0;
+
+    /* Empty stack: the 40x40 floor. */
+    fdk_size nat;
+    fdk_widget_measure(st, &nat);
+    assert(nat.width == 40 && nat.height == 40);
+
+    /* Pages: named keys, titles, adoption. */
+    fdk_widget *pg1 = plain_child(st, 120, 80);
+    fdk_widget *pg2 = plain_child(st, 200, 60);
+    fdk_widget *pg3 = plain_child(st, 100, 150);
+    assert(fdk_stack_add(st, pg1, "general", "General") == FDK_OK);
+    assert(fdk_stack_add(st, pg2, "appearance", NULL) == FDK_OK);
+    assert(fdk_stack_add(st, pg3, "about", "About") == FDK_OK);
+    assert(fdk_stack_page_count(st) == 3);
+    assert(fdk_stack_get_child_by_name(st, "appearance") == pg2);
+    assert(fdk_stack_get_child_by_name(st, "nope") == NULL);
+    assert(strcmp(fdk_stack_page_name(st, 1), "appearance") == 0);
+    /* NULL title falls back to the name. */
+    assert(strcmp(fdk_stack_page_title(st, 1), "appearance") == 0);
+    assert(strcmp(fdk_stack_page_title(st, 0), "General") == 0);
+
+    /* Duplicate and NULL names refused. */
+    assert(fdk_stack_add(st, plain_child(st, 5, 5), "general", NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_stack_add(st, plain_child(st, 5, 5), NULL, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* First page visible; the others invisible; current by name. */
+    assert((pg1->flags & FDK_WF_VISIBLE) != 0);
+    assert((pg2->flags & FDK_WF_VISIBLE) == 0);
+    assert(strcmp(fdk_stack_get_visible_name(st), "general") == 0);
+    assert(fdk_stack_get_visible_child(st) == pg1);
+
+    /* The natural size is the MAX over pages. */
+    fdk_widget_measure(st, &nat);
+    assert(nat.width == 200 && nat.height == 150);
+
+    /* Arrange: the current page owns the full bounds (LOCAL slot
+     * coordinates — parent-relative, like every arrange). */
+    fdk_widget_arrange(st, (fdk_rect){10, 10, 300, 200});
+    assert(pg1->bounds.x == 0 && pg1->bounds.y == 0);
+    assert(pg1->bounds.width == 300 && pg1->bounds.height == 200);
+
+    /* Switch by name: visibility flips, callback fires once. */
+    assert(fdk_stack_set_visible_name(st, "about") == FDK_OK);
+    assert(g_stack_changes == 1 && g_stack_last_index == 2 &&
+           strcmp(g_stack_last_name, "about") == 0);
+    assert((pg1->flags & FDK_WF_VISIBLE) == 0);
+    assert((pg3->flags & FDK_WF_VISIBLE) != 0);
+    assert(pg3->bounds.width == 300 && pg3->bounds.height == 200);
+    /* Switching to the current page: no callback. */
+    assert(fdk_stack_set_visible_name(st, "about") == FDK_OK);
+    assert(g_stack_changes == 1);
+    assert(fdk_stack_set_visible_name(st, "nope") == FDK_ERR_NOT_FOUND);
+    /* Switch by widget. */
+    assert(fdk_stack_set_visible_child(st, pg2) == FDK_OK);
+    assert(g_stack_changes == 2 && g_stack_last_index == 1);
+    assert(fdk_stack_set_visible_child(st, root) == FDK_ERR_NOT_FOUND);
+
+    /* Titles are mutable; NULL restores the fallback. */
+    assert(fdk_stack_set_page_title(st, 1, "Look & Feel") == FDK_OK);
+    assert(strcmp(fdk_stack_page_title(st, 1), "Look & Feel") == 0);
+    assert(fdk_stack_set_page_title(st, 1, NULL) == FDK_OK);
+    assert(strcmp(fdk_stack_page_title(st, 1), "appearance") == 0);
+    assert(fdk_stack_set_page_title(st, 9, "x") == FDK_ERR_INVALID_ARGUMENT);
+
+    /* a11y: PANEL role, name = the current page's title. */
+    fdk_a11y_info info;
+    assert(fdk_ok(fdk_a11y_describe(st, &info)));
+    assert(info.role == FDK_A11Y_ROLE_PANEL);
+    assert(info.name != NULL && strcmp(info.name, "appearance") == 0);
+    fdk_a11y_info_free(&info);
+
+    /* The survivor rule (the notebook's): removing the current page
+     * shows the page that shifted into its slot; removing an earlier
+     * page keeps showing the same page. */
+    g_stack_changes = 0;
+    assert(fdk_stack_remove_page(st, 1) == FDK_OK); /* current, of 3 */
+    assert(fdk_stack_page_count(st) == 2);
+    assert(fdk_stack_get_visible_child(st) == pg3); /* shifted in    */
+    assert(g_stack_changes == 1 && g_stack_last_index == 1);
+    assert(fdk_stack_remove_page(st, 0) == FDK_OK); /* earlier page  */
+    assert(fdk_stack_get_visible_child(st) == pg3); /* same page     */
+    assert(fdk_stack_remove_page(st, 5) == FDK_ERR_INVALID_ARGUMENT);
+
+    /* BOX pages — the regression example 12 found live: a page that
+     * is itself a container must not send the notifier climbing
+     * back into the stack (the sync uses the page's ARRANGE hook
+     * now, plain set_bounds semantics, no cycle). A plain-page test
+     * can never catch this: plain widgets never dispatch. */
+    {
+        fdk_widget *st2 = NULL;
+        assert(fdk_ok(fdk_stack_create(root, &st2)));
+        fdk_widget *bp = NULL;
+        assert(fdk_ok(fdk_box_create(st2, FDK_VERTICAL, &bp)));
+        fdk_widget *inner = NULL;
+        assert(fdk_ok(fdk_label_create(bp, g_font, "nested", &inner)));
+        assert(fdk_ok(fdk_stack_add(st2, bp, "box", "Box")));
+        fdk_widget_arrange(st2, (fdk_rect){0, 0, 200, 100});
+        assert(inner->bounds.width == 200); /* the box page packed   */
+        /* Switching away and back re-arranges without recursion. */
+        fdk_widget *bp2 = NULL;
+        assert(fdk_ok(fdk_box_create(st2, FDK_VERTICAL, &bp2)));
+        assert(fdk_ok(fdk_stack_add(st2, bp2, "box2", "Box2")));
+        assert(fdk_ok(fdk_stack_set_visible_name(st2, "box2")));
+        assert(fdk_ok(fdk_stack_set_visible_name(st2, "box")));
+        assert((bp->flags & FDK_WF_VISIBLE) != 0);
+    }
+
+    fdk_widget_destroy(root);
+    printf("[ok] stack: named pages, unique keys, title fallback + "
+           "mutation, visibility switching with one callback per "
+           "change, max-natural measure, the survivor rule, BOX "
+           "pages without notifier recursion\n");
+}
+
+/* ---- Revealer (1.4.2) ---- */
+
+static int g_reveal_events;
+static bool g_reveal_last;
+
+static void on_reveal(fdk_widget *rv, bool revealed, void *user) {
+    (void)rv;
+    (void)user;
+    g_reveal_events++;
+    g_reveal_last = revealed;
+}
+
+static void test_revealer(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *rv = NULL;
+    assert(fdk_ok(fdk_revealer_create(root, &rv)));
+    fdk_revealer_set_on_revealed(rv, on_reveal, NULL);
+    g_reveal_events = 0;
+
+    /* Hidden: 0x0 natural, the child invisible; second child refused. */
+    fdk_widget *content = plain_child(rv, 200, 120);
+    fdk_size nat;
+    fdk_widget_measure(rv, &nat);
+    assert(nat.width == 0 && nat.height == 0);
+    assert((content->flags & FDK_WF_VISIBLE) == 0);
+    fdk_widget *extra = NULL;
+    assert(fdk_widget_create(rv, NULL, (fdk_rect){0, 0, 10, 10}, &extra) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* Defaults + the API's getters. */
+    assert(fdk_revealer_get_transition(rv) == FDK_REVEAL_SLIDE_DOWN);
+    assert(fdk_revealer_get_transition_duration(rv) == 160);
+    assert(!fdk_revealer_get_reveal_child(rv));
+    assert(!fdk_revealer_get_child_revealed(rv));
+
+    /* The default flight (SLIDE_DOWN, 160 ms cubic-out) on the test
+     * clock — the expander's discipline verbatim. */
+    fdk_widget_arrange(rv, (fdk_rect){10, 10, 260, 120});
+    anim_at(0);
+    fdk_revealer_set_reveal_child(rv, true);
+    assert((content->flags & FDK_WF_VISIBLE) != 0);
+    anim_at(80); /* mid-flight */
+    fdk_widget_measure(rv, &nat);
+    assert(nat.width == 200);
+    assert(nat.height > 0 && nat.height < 120);
+    assert(!fdk_revealer_get_child_revealed(rv));
+    anim_at(200); /* landed */
+    fdk_widget_measure(rv, &nat);
+    assert(nat.width == 200 && nat.height == 120);
+    assert(fdk_revealer_get_child_revealed(rv));
+    assert(g_reveal_events == 1 && g_reveal_last);
+
+    /* The child is arranged at its FULL natural (the reveal is a
+     * clip, never a squeeze) — LOCAL slot coordinates. */
+    assert(content->bounds.x == 0 && content->bounds.y == 0);
+    assert(content->bounds.width == 260 && content->bounds.height == 120);
+
+    /* Collapse: the return flight; hidden at rest. */
+    fdk_revealer_set_reveal_child(rv, false);
+    anim_at(400);
+    fdk_widget_measure(rv, &nat);
+    assert(nat.width == 0 && nat.height == 0);
+    assert((content->flags & FDK_WF_VISIBLE) == 0);
+    assert(g_reveal_events == 2 && !g_reveal_last);
+
+    /* Retarget-from-live: depart from the CURRENT blend. */
+    fdk_revealer_set_reveal_child(rv, true);
+    anim_at(480);
+    fdk_widget_measure(rv, &nat);
+    fdk_i32 half_h = nat.height;
+    assert(half_h > 0 && half_h < 120);
+    fdk_revealer_set_reveal_child(rv, false);
+    anim_at(490);
+    fdk_widget_measure(rv, &nat);
+    assert(nat.height < half_h);
+    anim_at(700); /* land the return flight before what follows */
+
+    /* SLIDE_UP anchoring on a plain parent: the door's BOTTOM edge
+     * stays put while it opens (the origin rises). Hand-place the
+     * full-open rect — bottom edge at y = 220. */
+    anim_at(700);
+    fdk_revealer_set_transition(rv, FDK_REVEAL_SLIDE_UP);
+    fdk_widget_arrange(rv, (fdk_rect){10, 100, 200, 120});
+    fdk_revealer_set_reveal_child(rv, true);
+    anim_at(710); /* a crack open */
+    assert(rv->bounds.height > 0 && rv->bounds.height < 120);
+    assert(rv->bounds.y > 100 && rv->bounds.y < 220);
+    assert(rv->bounds.y + rv->bounds.height == 220); /* bottom fixed */
+    anim_at(900); /* landed */
+    assert(rv->bounds.y == 100 && rv->bounds.height == 120);
+    assert(fdk_revealer_get_child_revealed(rv));
+
+    /* NONE: instant landing, no flight (the snap fires the callback
+     * synchronously — the duration-0 contract). */
+    anim_at(1000);
+    fdk_revealer_set_transition(rv, FDK_REVEAL_NONE);
+    assert(fdk_revealer_get_transition(rv) == FDK_REVEAL_NONE);
+    g_reveal_events = 0;
+    fdk_revealer_set_reveal_child(rv, false);
+    assert(g_reveal_events == 1 && !g_reveal_last);
+    assert(!fdk_revealer_get_child_revealed(rv));
+    fdk_widget_measure(rv, &nat);
+    assert(nat.width == 0 && nat.height == 0);
+    fdk_revealer_set_reveal_child(rv, true);
+    assert(g_reveal_events == 2 && g_reveal_last);
+    assert(fdk_revealer_get_child_revealed(rv));
+    fdk_widget_measure(rv, &nat);
+    assert(nat.width == 200 && nat.height == 120);
+
+    /* The duration-0 snap behaves the same on a sliding door. */
+    fdk_revealer_set_transition_duration(rv, 0);
+    assert(fdk_revealer_get_transition_duration(rv) == 0);
+    fdk_revealer_set_reveal_child(rv, false);
+    assert(!fdk_revealer_get_child_revealed(rv));
+
+    /* Duration bounds: > 10000 refused. */
+    fdk_revealer_set_transition_duration(rv, 99999u);
+    assert(fdk_revealer_get_transition_duration(rv) == 0);
+
+    anim_at(0);
+    fdk_widget_destroy(root);
+    printf("[ok] revealer: 0x0 hidden natural, the 160-ms door on the "
+           "test clock, full-natural child slots, SLIDE_UP bottom "
+           "anchoring, NONE + duration-0 snaps, retargets from live\n");
+}
+
+/* ---- StackSwitcher (1.4.2) ---- */
+
+static void test_stackswitcher(void) {
+    fdk_widget *root = fresh_root();
+    /* A standalone root paints nothing by default; give it the
+     * theme's window surface so the INACTIVE pill's transparency
+     * reads as the window background (what an app window shows). */
+    fdk_widget_set_background(
+        root, fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
+
+    fdk_widget *st = NULL;
+    assert(fdk_ok(fdk_stack_create(root, &st)));
+    fdk_widget *pg1 = plain_child(st, 100, 80);
+    fdk_widget *pg2 = plain_child(st, 100, 80);
+    assert(fdk_stack_add(st, pg1, "one", "First") == FDK_OK);
+    assert(fdk_stack_add(st, pg2, "two", "Second") == FDK_OK);
+
+    fdk_widget *sw = NULL;
+    assert(fdk_ok(fdk_stackswitcher_create(root, g_font, &sw)));
+    assert(fdk_stackswitcher_get_stack(sw) == NULL); /* unbound     */
+    /* A non-stack is refused; NULL stays unbound. */
+    fdk_stackswitcher_set_stack(sw, root);
+    assert(fdk_stackswitcher_get_stack(sw) == NULL);
+
+    /* Binding: the pill cache builds (visible through measure). */
+    fdk_stackswitcher_set_stack(sw, st);
+    assert(fdk_stackswitcher_get_stack(sw) == st);
+    fdk_size nat;
+    fdk_widget_measure(sw, &nat);
+    assert(nat.width > 40); /* two titled pills + gap              */
+    assert(nat.height == 30);
+    fdk_widget_arrange(sw, (fdk_rect){0, 0, nat.width, 30});
+    fdk_widget_arrange(st, (fdk_rect){0, 40, 200, 80});
+
+    /* Paint: the ACTIVE pill carries the accent fill (page 0). */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(400, 140, &s)));
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s);
+    fdk_color accent = fdk_theme_get_color(NULL, FDK_TK_ACCENT);
+    /* Pill 0 spans [0, w0); sample at its center. */
+    fdk_i32 tw = 0, th = 0;
+    fdk__text_extent(g_font, "First", &tw, &th);
+    fdk_i32 w0 = tw + 28;
+    fdk_u32 p0 = px_at(s, w0 / 2, 3); /* y=3: clear of the text */
+    assert(p0 == pack_color(accent)); /* the active pill            */
+    /* Pill 1 (inactive) is flat: the window background. */
+    fdk__text_extent(g_font, "Second", &tw, &th);
+    fdk_i32 w1 = tw + 28;
+    fdk_u32 p1 = px_at(s, w0 + 4 + w1 / 2, 3);
+    fdk_color winbg =
+        fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+    assert(p1 == pack_color(winbg));
+
+    /* a11y: TAB_LIST with one virtual TAB per pill; ACTIVATE
+     * switches; SELECTED rides the active page. */
+    fdk_a11y_info info;
+    assert(fdk_ok(fdk_a11y_describe(sw, &info)));
+    assert(info.role == FDK_A11Y_ROLE_TAB_LIST);
+    fdk_a11y_info_free(&info);
+    assert(fdk_ok(fdk_a11y_virtual_describe(sw, 1, &info)));
+    assert(info.role == FDK_A11Y_ROLE_TAB);
+    assert(info.name != NULL && strcmp(info.name, "Second") == 0);
+    assert((info.states & FDK_A11Y_SELECTED) == 0);
+    fdk_a11y_info_free(&info);
+    assert(fdk_ok(fdk_a11y_virtual_perform(sw, 1,
+                                           FDK_A11Y_ACTION_ACTIVATE,
+                                           0.0)));
+    assert(fdk_stack_get_visible_child(st) == pg2);
+    assert(fdk_ok(fdk_a11y_virtual_describe(sw, 1, &info)));
+    assert((info.states & FDK_A11Y_SELECTED) != 0);
+    fdk_a11y_info_free(&info);
+
+    /* Clicking a pill switches (the cached-name path). */
+    click(root, (float)(w0 + 4 + w1 / 2), 15.0f);
+    assert(fdk_stack_get_visible_child(st) == pg2);
+    /* Stack death by another hand: the switcher unbinds cleanly. */
+    fdk_widget_destroy(st);
+    assert(fdk_stackswitcher_get_stack(sw) == NULL);
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s); /* paints the empty row, no UAF */
+    fdk_size nat2;
+    fdk_widget_measure(sw, &nat2);
+    assert(nat2.width == 40); /* SWITCHER_MIN_W, no pills           */
+
+    /* Rebind after a mutation: the cache rebuilds at paint/measure. */
+    fdk_widget *st2 = NULL;
+    assert(fdk_ok(fdk_stack_create(root, &st2)));
+    assert(fdk_stack_add(st2, plain_child(st2, 10, 10), "x",
+                         "About FDK") == FDK_OK);
+    fdk_stackswitcher_set_stack(sw, st2);
+    fdk_widget_measure(sw, &nat2);
+    assert(nat2.width > 40); /* one real pill rebuilt                */
+
+    /* NULL unbinds. */
+    fdk_stackswitcher_set_stack(sw, NULL);
+    assert(fdk_stackswitcher_get_stack(sw) == NULL);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] stackswitcher: binding + pill cache rebuild, accent "
+           "active pill + flat inactive (pixels), TAB virtuals with "
+           "ACTIVATE/SELECTED, click switching, stack-death unbind\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -590,6 +960,9 @@ int main(void) {
     test_expander_layout();
     test_expander_interaction();
     test_row_icons();
+    test_stack();
+    test_revealer();
+    test_stackswitcher();
 
     fdk_font_destroy(g_font);
     printf("all container tests passed\n");

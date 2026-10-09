@@ -42,76 +42,11 @@
 #define LIST_ROW_PAD_X 10
 
 /* Row icon geometry (1.4.1): a 16-px glyph box, 6-px gap to the
- * text — the sidebar-symbolic set. */
+ * text — the sidebar-symbolic set. The glyph PAINTERS themselves
+ * moved to statics.c in 1.4.2 (fdk__row_icon_advance /
+ * fdk__row_icon_paint) so the Tree wears the same language. */
 #define LIST_ICON 16
 #define LIST_ICON_GAP 6
-
-/* ---- 1.4.1: the symbolic row glyphs ----------------------------
- *
- * Font-independent vector strokes in the same language as the
- * title-bar and disclosure glyphs: neutral foreground ink, no
- * fills that would fight theme changes (the folder's tab keeps a
- * soft control fill so it reads at 16 px without a fill-rate-heavy
- * interior). */
-
-static fdk_i32 row_icon_advance(fdk_row_icon icon) {
-    return (icon == FDK_ROW_ICON_NONE) ? 0
-                                        : LIST_ICON + LIST_ICON_GAP;
-}
-
-static void row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
-                           fdk_i32 x, fdk_i32 cy, bool disabled) {
-    /* (x, cy) = the glyph box's top-left corner; the box is
-     * LIST_ICON square. Ink: text color (disabled dims). */
-    fdk_color ink = disabled ? fdk__pal_text_disabled() : fdk__pal_text();
-    fdk_color soft = disabled ? fdk__pal_control_disabled()
-                              : fdk__pal_control();
-    switch (icon) {
-    case FDK_ROW_ICON_FOLDER: {
-        /* Tabbed folder: the tab spans the top-left, the body below
-         * — outline + soft fill, rounded 2. */
-        fdk_rect body = {x + 1, cy + 4, 14, 10};
-        fdk_surface_fill_rounded_rect(surface, body, 2, soft);
-        fdk_surface_draw_rounded_rect(surface, body, 2, ink);
-        fdk_rect tab = {x + 1, cy + 2, 6, 2};
-        fdk_surface_fill_rect(surface, tab, ink);
-        break;
-    }
-    case FDK_ROW_ICON_HOME: {
-        /* House: roof strokes + door. */
-        fdk_surface_draw_line_aa(surface, x + 1, cy + 7, x + 8, cy + 2,
-                                 ink);
-        fdk_surface_draw_line_aa(surface, x + 8, cy + 2, x + 15, cy + 7,
-                                 ink);
-        fdk_rect wall = {x + 3, cy + 7, 10, 7};
-        fdk_surface_draw_rect(surface, wall, ink);
-        fdk_rect door = {x + 7, cy + 10, 2, 4};
-        fdk_surface_fill_rect(surface, door, ink);
-        break;
-    }
-    case FDK_ROW_ICON_DRIVE: {
-        /* Slab: rounded outline + soft fill + the activity LED. */
-        fdk_rect slab = {x + 2, cy + 4, 12, 8};
-        fdk_surface_fill_rounded_rect(surface, slab, 3, soft);
-        fdk_surface_draw_rounded_rect(surface, slab, 3, ink);
-        fdk_surface_fill_circle(surface, x + 11, cy + 8, 1, ink);
-        break;
-    }
-    case FDK_ROW_ICON_FILE: {
-        /* Page: outline with a folded top-right corner. */
-        fdk_rect page = {x + 3, cy + 2, 10, 12};
-        fdk_surface_draw_rect(surface, page, ink);
-        /* The fold: a diagonal + the corner notch. */
-        fdk_surface_draw_line_aa(surface, x + 9, cy + 2, x + 13, cy + 6,
-                                 ink);
-        fdk_surface_fill_rect(surface,
-                              (fdk_rect){x + 10, cy + 3, 3, 3}, soft);
-        break;
-    }
-    default:
-        break; /* NONE: the caller did not reserve the box */
-    }
-}
 
 typedef struct fdk_list_row {
     fdk_widget base;
@@ -161,6 +96,24 @@ typedef struct fdk_list {
      * the new row (the common bulk-fill shape) instead of re-placing
      * the whole list. 80 = the v1 minimum content width. */
     fdk_i32 content_width;
+    /* ---- Rubber-band drag-select (1.4.2) ----
+     *
+     * A press on the list's EMPTY space (below the rows / outside
+     * the content) starts a sweep-selection band: the rect between
+     * the press and the pointer selects every row it intersects,
+     * LIVE, recomputed per motion. Plain sweeps REPLACE the
+     * selection (an empty-space click clears it — correct list
+     * behavior on its own); Ctrl-sweeps UNION over the pre-band
+     * selection (the `band_base` snapshot, taken at press). The
+     * on_changed callback fires at press and release, not per
+     * motion — sweeps are one gesture. MULTIPLE mode only: SINGLE
+     * and NONE have no multi-selection to sweep. */
+    bool banding;
+    bool band_ctrl;      /* the union modifier was held at press     */
+    fdk_f32 band_x, band_y;      /* the anchor, list-local           */
+    fdk_f32 band_now_x, band_now_y; /* the pointer, list-local      */
+    bool *band_base;     /* pre-band snapshot (ctrl) or NULL         */
+    size_t band_base_cap;
 } fdk_list;
 
 static fdk_list *list_of(fdk_widget *w) {
@@ -208,7 +161,7 @@ static void list_relayout(fdk_list *l) {
     for (size_t i = 0; i < l->count; i++) {
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
-        tw += row_icon_advance(l->row_widgets[i]->icon);
+        tw += fdk__row_icon_advance(l->row_widgets[i]->icon);
         if (tw + LIST_ROW_PAD_X * 2 > w) {
             w = tw + LIST_ROW_PAD_X * 2;
         }
@@ -248,7 +201,7 @@ static void list_place_appended(fdk_list *l) {
     fdk_i32 tw = 0;
     fdk__text_extent(l->font, row->text, &tw, NULL);
     fdk_i32 want = tw + LIST_ROW_PAD_X * 2 +
-                   row_icon_advance(row->icon);
+                   fdk__row_icon_advance(row->icon);
     if (want > l->content_width) {
         l->content_width = want;
         /* Widths stretch for every row: re-place the list. */
@@ -502,7 +455,7 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
         if (gy < bounds.y) {
             gy = bounds.y;
         }
-        row_icon_paint(surface, row->icon, text_x, gy,
+        fdk__row_icon_paint(surface, row->icon, text_x, gy,
                        (w->flags & FDK_WF_ENABLED) == 0);
         text_x += LIST_ICON + LIST_ICON_GAP;
     }
@@ -628,11 +581,80 @@ static const fdk_widget_class fdk_list_row_class_def = {
     .a11y = &list_row_a11y,
 };
 
-/* ---- list-level events (keyboard) ---- */
+/* ---- list-level events (keyboard + the 1.4.2 rubber band) ---- */
+
+static void list_apply_band(fdk_list *l);
 
 static bool list_handle_event(fdk_widget *w,
                               const fdk_widget_event *ev) {
     fdk_list *l = list_of(w);
+
+    /* ---- the rubber-band sweep (1.4.2) ----
+     *
+     * A left press reaching the LIST itself is by construction on
+     * EMPTY space (rows consume their own presses; the scrollview
+     * does not consume presses) — the classic band start. MULTIPLE
+     * mode only; the implicit grab (press returned true) delivers
+     * the motions and the release to the list alone. */
+    switch (ev->type) {
+    case FDK_WIDGET_POINTER_DOWN: {
+        if (ev->pointer.button != FDK_POINTER_BUTTON_LEFT ||
+            l->mode != FDK_LIST_SELECTION_MULTIPLE ||
+            (w->flags & FDK_WF_ENABLED) == 0) {
+            return false;
+        }
+        l->banding = true;
+        l->band_ctrl = (ev->pointer.modifiers & FDK_MOD_CTRL) != 0;
+        l->band_x = l->band_now_x = ev->pointer.position.x;
+        l->band_y = l->band_now_y = ev->pointer.position.y;
+        /* Ctrl-union snapshot: the selection as the sweep found it. */
+        if (l->band_ctrl && l->count > 0) {
+            bool *snap = fdk_alloc_array(l->count, sizeof(bool));
+            if (snap != NULL) {
+                for (size_t i = 0; i < l->count; i++) {
+                    snap[i] = l->row_widgets[i]->selected;
+                }
+                l->band_base = snap;
+                l->band_base_cap = l->count;
+            }
+        } else {
+            fdk_free(l->band_base);
+            l->band_base = NULL;
+            l->band_base_cap = 0;
+        }
+        /* A zero-extent band selects nothing: the plain sweep clears
+         * (an empty-space click deselecting — correct on its own);
+         * the ctrl sweep keeps the snapshot. */
+        list_apply_band(l);
+        list_fire_changed(l);
+        return true;
+    }
+    case FDK_WIDGET_POINTER_MOTION:
+        if (!l->banding) {
+            return false;
+        }
+        l->band_now_x = ev->position.x;
+        l->band_now_y = ev->position.y;
+        list_apply_band(l);
+        return true;
+    case FDK_WIDGET_POINTER_UP:
+        if (!l->banding) {
+            return false;
+        }
+        l->banding = false;
+        fdk_free(l->band_base);
+        l->band_base = NULL;
+        l->band_base_cap = 0;
+        /* The band rect disappears with the gesture: repaint. */
+        fdk_widget_invalidate(w);
+        /* The sweep is ONE gesture: the callback fires here (and it
+         * fired at the press — motions never spam it). */
+        list_fire_changed(l);
+        return true;
+    default:
+        break;
+    }
+
     if (ev->type != FDK_WIDGET_KEY_DOWN ||
         (w->flags & FDK_WF_FOCUSED) == 0 ||
         l->mode == FDK_LIST_SELECTION_NONE ||
@@ -725,6 +747,10 @@ static void list_destroy(fdk_widget *w) {
     l->row_widgets = NULL;
     l->count = 0;
     l->capacity = 0;
+    fdk_free(l->band_base); /* a band interrupted by destruction */
+    l->band_base = NULL;
+    l->band_base_cap = 0;
+    l->banding = false;
 }
 
 static void list_measure(fdk_widget *w, fdk_size *out) {
@@ -736,7 +762,7 @@ static void list_measure(fdk_widget *w, fdk_size *out) {
     for (size_t i = 0; i < l->count; i++) {
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
-        tw += row_icon_advance(l->row_widgets[i]->icon);
+        tw += fdk__row_icon_advance(l->row_widgets[i]->icon);
         if (tw + LIST_ROW_PAD_X * 2 > width) {
             width = tw + LIST_ROW_PAD_X * 2;
         }
@@ -759,6 +785,45 @@ static void list_arrange(fdk_widget *w, fdk_rect assigned) {
     }
 }
 
+/* Applies the band's live selection: every row intersecting the
+ * band's content-space extent (viewport y + scroll offset), unioned
+ * with the pre-band snapshot when Ctrl armed the sweep. Rows flip
+ * through list_set_row so the a11y notifications ride the same
+ * path shift-range clicks take. */
+static void list_apply_band(fdk_list *l) {
+    if (l->count == 0) {
+        return;
+    }
+    fdk_i32 rh = list_row_height(l);
+    fdk_i32 off_y = 0;
+    if (l->scroll != NULL) {
+        fdk_i32 ox = 0;
+        fdk_scrollview_get_scroll_offset(l->scroll, &ox, &off_y);
+    }
+    fdk_f32 y1 = (l->band_y < l->band_now_y) ? l->band_y
+                                              : l->band_now_y;
+    fdk_f32 y2 = (l->band_y < l->band_now_y) ? l->band_now_y
+                                              : l->band_y;
+    fdk_i64 lo = (fdk_i64)(y1 + (fdk_f32)off_y) - 1; /* widen one px */
+    fdk_i64 hi = (fdk_i64)(y2 + (fdk_f32)off_y) + 1;
+    /* Row indices intersecting [lo, hi]: floor/ceil on the rh grid. */
+    fdk_i64 r_lo = lo / rh;
+    if (r_lo < 0) {
+        r_lo = 0;
+    }
+    fdk_i64 r_hi = (hi + rh - 1) / rh; /* exclusive */
+    if (r_hi > (fdk_i64)l->count) {
+        r_hi = (fdk_i64)l->count;
+    }
+    for (size_t i = 0; i < l->count; i++) {
+        bool want = ((fdk_i64)i >= r_lo && (fdk_i64)i < r_hi) ||
+                    (l->band_ctrl && l->band_base != NULL &&
+                     i < l->band_base_cap && l->band_base[i]);
+        list_set_row(l, i, want);
+    }
+    fdk_widget_invalidate(&l->base);
+}
+
 /* The lazy-sync half of the scrollview bookkeeping. fdk_widget_
  * set_bounds() is pure geometry — it does NOT run arrange hooks —
  * and both FDK's own dialogs and ordinary applications position
@@ -770,13 +835,59 @@ static void list_arrange(fdk_widget *w, fdk_rect assigned) {
  * dialog rig (places sidebar). Syncing here, in the paint hook
  * that runs before the subtree is walked, heals any staleness with
  * one compare; the set_bounds inside damages the region, which
- * merely schedules one more (identical) frame — it converges. */
+ * merely schedules one more (identical) frame — it converges.
+ *
+ * 1.4.2: the rubber band draws FIRST (under the rows — the accent
+ * tint + border; selection fills land over it). */
 static void list_paint(fdk_widget *w, fdk_surface *surface,
                        fdk_rect bounds, fdk_rect clip) {
-    (void)surface;
-    (void)bounds;
     (void)clip;
     fdk_list *l = list_of(w);
+    /* The rubber band (1.4.2), painted UNDER the rows (the list's
+     * paint runs before its scrollview subtree): selection fills
+     * draw over the tint, which reads exactly as GTK's translucent
+     * band does once row selections land in it. Accent-derived:
+     * a soft fill + a firmer border. */
+    if (l->banding) {
+        fdk_f32 x1 = (l->band_x < l->band_now_x) ? l->band_x
+                                                  : l->band_now_x;
+        fdk_f32 x2 = (l->band_x < l->band_now_x) ? l->band_now_x
+                                                  : l->band_x;
+        fdk_f32 y1 = (l->band_y < l->band_now_y) ? l->band_y
+                                                  : l->band_now_y;
+        fdk_f32 y2 = (l->band_y < l->band_now_y) ? l->band_now_y
+                                                  : l->band_y;
+        fdk_i32 bx1 = (fdk_i32)x1 + bounds.x;
+        fdk_i32 by1 = (fdk_i32)y1 + bounds.y;
+        fdk_i32 bx2 = (fdk_i32)x2 + bounds.x;
+        fdk_i32 by2 = (fdk_i32)y2 + bounds.y;
+        /* Clamp to the bounds (the grab delivers out-of-widget
+         * coordinates while the pointer is dragged past the edge). */
+        if (bx1 < bounds.x) {
+            bx1 = bounds.x;
+        }
+        if (by1 < bounds.y) {
+            by1 = bounds.y;
+        }
+        if (bx2 > bounds.x + bounds.width) {
+            bx2 = bounds.x + bounds.width;
+        }
+        if (by2 > bounds.y + bounds.height) {
+            by2 = bounds.y + bounds.height;
+        }
+        fdk_i32 bw = bx2 - bx1;
+        fdk_i32 bh = by2 - by1;
+        if (bw > 0 && bh > 0) {
+            fdk_color accent = fdk__pal_accent();
+            fdk_rect band = {bx1, by1, bw, bh};
+            fdk_color tint = {accent.r, accent.g, accent.b,
+                              accent.a * 0.16f};
+            fdk_color edge = {accent.r, accent.g, accent.b,
+                              accent.a * 0.55f};
+            fdk_surface_fill_rect(surface, band, tint);
+            fdk_surface_draw_rect(surface, band, edge);
+        }
+    }
     if (l->scroll == NULL || w->bounds.width <= 0 ||
         w->bounds.height <= 0) {
         return;
@@ -839,6 +950,12 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
     l->batch_dirty = false;
     l->batch_sel_at_start = 0;
     l->content_width = 80; /* the v1 minimum, until a row widens it */
+    l->banding = false;
+    l->band_ctrl = false;
+    l->band_x = l->band_y = 0.0f;
+    l->band_now_x = l->band_now_y = 0.0f;
+    l->band_base = NULL;
+    l->band_base_cap = 0;
     fdk_widget_set_can_focus(w, true);
 
     /* Internals: scrollview child -> rows container. */

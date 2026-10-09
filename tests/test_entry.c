@@ -615,6 +615,7 @@ static void test_scroll(void) {
  * main to keep the original file's flow; declared here so main can
  * call them). */
 static void test_undo_redo(void);
+static void test_search_entry(void);
 static void on_changed_count(fdk_widget *w, void *user);
 
 int main(void) {
@@ -648,6 +649,7 @@ int main(void) {
     test_placeholder();
     test_scroll();
     test_undo_redo();
+    test_search_entry();
 
     fdk_font_destroy(g_font);
     printf("all entry tests passed\n");
@@ -837,4 +839,154 @@ static void test_undo_redo(void) {
 static void on_changed_count(fdk_widget *w, void *user) {
     (void)w;
     (*(int *)user)++;
+}
+
+/* ---- the search preset (1.4.2) ---- */
+
+static void test_search_entry(void) {
+    fdk_widget *root = fresh_root();
+
+    /* The preset: a regular Entry with the mode on. */
+    fdk_widget *se = NULL;
+    assert(fdk_ok(fdk_search_entry_create(root, g_font, &se)));
+    assert(fdk_entry_is_search(se));
+    fdk_widget *plain = NULL;
+    assert(fdk_ok(fdk_entry_create(root, g_font, "", &plain)));
+    assert(!fdk_entry_is_search(plain));
+    assert(fdk_entry_is_search(NULL) == false);
+    assert(fdk_search_entry_create(NULL, g_font, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* The natural width carries the glyph zone: an EMPTY search
+     * entry is PAD(8) + glyph(22) + PAD(8) = 38 (above the 32
+     * floor, so no clamp); an empty plain entry sits AT the floor.
+     * With text, the right side additionally reserves the clear
+     * zone (verified below by the hit-testing). */
+    fdk_size nat_se, nat_pl;
+    fdk_widget_measure(se, &nat_se);
+    fdk_widget_measure(plain, &nat_pl);
+    assert(nat_pl.width == 32); /* the empty minimum, clamped      */
+    assert(nat_se.width == 38); /* 8 + 22 glyph + 8, no clear zone */
+    assert(nat_se.height == nat_pl.height);
+    /* Arrange at a KNOWN 24-px field (an empty entry's natural
+     * height collapses to the 16 floor; the pixel geometry below is
+     * calibrated for 24). */
+    fdk_widget_arrange(se, (fdk_rect){0, 0, 300, 24});
+    fdk_widget_arrange(plain, (fdk_rect){0, 60, 300, 24});
+
+    /* A click in the glyph zone focuses the entry and puts the
+     * caret at 0 — the text origin moved, not the hit math. */
+    fdk_event_data click0 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                      10.0f, 5.0f);
+    fdk_event_data up0 = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                   10.0f, 5.0f);
+    (void)fdk_widget_tree_handle_event(root, &click0); /* focus    */
+    (void)fdk_widget_tree_handle_event(root, &up0);
+    type(root, 'a');
+    type(root, 'b');
+    type(root, 'c');
+    assert(fdk_entry_get_cursor(se) == 3);
+    /* Second click in the glyph zone, displaced past the double-
+     * click slop (a same-position pair would word-select instead). */
+    fdk_event_data click1 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                      24.0f, 5.0f);
+    fdk_event_data up1 = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                   24.0f, 5.0f);
+    (void)fdk_widget_tree_handle_event(root, &click1); /* glyph zone */
+    (void)fdk_widget_tree_handle_event(root, &up1);
+    assert(fdk_entry_get_cursor(se) == 0);
+
+    /* The clear button: a press in the reserved right zone empties
+     * the field through the honest edit path — on_changed fires and
+     * UNDO restores (it is a real edit, not a magic reset). */
+    int fired = 0;
+    fdk_entry_set_on_changed(se, on_changed_count, &fired);
+    fired = 0;
+    fdk_event_data clear = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     290.0f, 5.0f);
+    fdk_event_data clear_up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                        290.0f, 5.0f);
+    (void)fdk_widget_tree_handle_event(root, &clear);
+    (void)fdk_widget_tree_handle_event(root, &clear_up);
+    assert(strcmp(fdk_entry_get_text(se), "") == 0);
+    assert(fired == 1);
+    assert(fdk_ok(fdk_entry_undo(se)));
+    assert(strcmp(fdk_entry_get_text(se), "abc") == 0);
+
+    /* Empty field: the clear zone does not exist (a right-edge
+     * press is a caret-at-end click, not a clear). */
+    assert(fdk_ok(fdk_entry_set_text(se, "")));
+    fdk_event_data edge = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    292.0f, 5.0f);
+    fdk_event_data edge_up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                       292.0f, 5.0f);
+    (void)fdk_widget_tree_handle_event(root, &edge);
+    (void)fdk_widget_tree_handle_event(root, &edge_up);
+    assert(strcmp(fdk_entry_get_text(se), "") == 0); /* no clear    */
+
+    /* The Esc ladder: FIRST Escape clears (consumed); a second
+     * bubbles (nothing to collapse, nothing to clear). */
+    type(root, 'x');
+    type(root, 'y');
+    press(root, FDK_KEY_ESC, 0);
+    assert(strcmp(fdk_entry_get_text(se), "") == 0);
+    fdk_event_data esc2 = ev_key_cp(FDK_KEY_ESC, 0, 0);
+    assert(fdk_widget_tree_handle_event(root, &esc2) == false);
+
+    /* Esc with a SELECTION still collapses first (the classic rule
+     * holds when there is nothing to clear? no — clear wins: text
+     * exists, the search ladder runs FIRST). */
+    type(root, 'p');
+    type(root, 'q');
+    fdk_entry_select_all(se);
+    press(root, FDK_KEY_ESC, 0);
+    assert(strcmp(fdk_entry_get_text(se), "") == 0);
+
+    /* Read-only search entries do not clear on Esc (the reader
+     * contract): the key bubbles after the selection collapse. */
+    fdk_entry_set_read_only(se, true);
+    assert(fdk_ok(fdk_entry_set_text(se, "fixed")));
+    fdk_entry_select_all(se);
+    fdk_event_data esc3 = ev_key_cp(FDK_KEY_ESC, 0, 0);
+    /* Selection collapse consumes it. */
+    assert(fdk_widget_tree_handle_event(root, &esc3) == true);
+    assert(strcmp(fdk_entry_get_text(se), "fixed") == 0);
+    fdk_event_data esc4 = ev_key_cp(FDK_KEY_ESC, 0, 0);
+    assert(fdk_widget_tree_handle_event(root, &esc4) == false);
+    fdk_entry_set_read_only(se, false);
+
+    /* Paint: the magnifier glyph inks the left zone (any pixel in
+     * the glyph box differs from the plain entry's same zone); the
+     * clear X appears only with text (region scan-diff — AA strokes
+     * make single-pixel samples fragile). */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(320, 120, &s)));
+    fdk_widget_set_background(root, (fdk_color){0.1f, 0.1f, 0.1f, 1.0f});
+    assert(fdk_ok(fdk_entry_set_text(se, "")));
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s);
+    bool glyph_differs = false;
+    for (int y = 4; y < 20 && !glyph_differs; y++) {
+        for (int x = 6; x < 22; x++) {
+            if (px_at(s, x, y) != px_at(s, x, 60 + y)) {
+                glyph_differs = true;
+                break;
+            }
+        }
+    }
+    assert(glyph_differs); /* the magnifier inks the zone           */
+    /* With text, the X crosses the zone's center; empty, the zone
+     * holds only the entry's own field fill. */
+    fdk_u32 no_x_mid = px_at(s, 284, 12);
+    type(root, 'z');
+    fdk_widget_invalidate_all(root);
+    fdk_widget_tree_paint(root, s);
+    fdk_u32 with_x_mid = px_at(s, 284, 12);
+    assert(with_x_mid != no_x_mid); /* the X stroke crossed it      */
+    fdk_surface_destroy(s);
+
+    fdk_widget_destroy(root);
+    printf("[ok] entry search preset: glyph-zone insets + hit-testing, "
+           "the clear button (undoable, only with text), the Esc "
+           "ladder, magnifier/X pixel proofs\n");
 }

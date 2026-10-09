@@ -6754,6 +6754,7 @@ static void test_tooltip_gui(void) {
 static void test_window_shortcuts_and_accelerators_gui(void);
 static void test_menu_mnemonics_gui(void);
 static void test_modern_widgets_gui(void);
+static void test_app_furniture_gui(void);
 
 int main(void) {
     signal(SIGALRM, alarm_handler);
@@ -6812,6 +6813,7 @@ int main(void) {
     test_window_shortcuts_and_accelerators_gui();
     test_menu_mnemonics_gui();
     test_modern_widgets_gui();
+    test_app_furniture_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
@@ -7655,4 +7657,393 @@ static void test_modern_widgets_gui(void) {
            "expander door opens over the ticker (partial then full), "
            "link underline fades in under MotionNotify, spinner comet "
            "rotates (snapshot diff)\n");
+}
+
+/* ==== 1.4.2: the app furniture — stack/switcher, revealer, ======
+ * statusbar, search entry, rubber band, all against the real
+ * server (clicks and keys through XSendEvent, pixels through the
+ * readback seam, the animation clock REAL — bounded wait-until
+ * loops, never fixed pump counts).                       ====== */
+
+static void test_app_furniture_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        NULL,
+    };
+    const char *font_path = NULL;
+    for (int i = 0; font_candidates[i] != NULL; i++) {
+        FILE *f = fopen(font_candidates[i], "rb");
+        if (f != NULL) {
+            fclose(f);
+            font_path = font_candidates[i];
+            break;
+        }
+    }
+    if (font_path == NULL) {
+        printf("[skip] X11 app-furniture GUI (no system TrueType font "
+               "found)\n");
+        return;
+    }
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* Bounded wait-until helper: pumps until `cond` or the budget
+     * dies (the pump's timeout is a ceiling, not a duration). */
+    #define FURNITURE_WAIT(cond)                                    \
+        do {                                                        \
+            int tries_ = 40;                                        \
+            while (!(cond) && tries_-- > 0) {                       \
+                (void)fdk_pump_events(ctx, 25);                     \
+            }                                                       \
+            assert(cond);                                           \
+        } while (0)
+
+    /* === 1. Stack + StackSwitcher: a real pill click switches the
+     * page (the pill's rect comes from the a11y virtual bounds —
+     * the same geometry a bridge would drive). === */
+    {
+        fdk_window_options wopts = { .title = "stack", .width = 300,
+                                     .height = 260 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *stack = NULL;
+        assert(fdk_ok(fdk_stack_create(root, &stack)));
+        fdk_widget *pg1 = NULL, *pg2 = NULL;
+        (void)fdk_widget_create(stack, NULL, (fdk_rect){0, 0, 10, 10},
+                                &pg1);
+        (void)fdk_widget_create(stack, NULL, (fdk_rect){0, 0, 10, 10},
+                                &pg2);
+        fdk_widget_set_background(pg1, wcol(200, 70, 70));
+        fdk_widget_set_background(pg2, wcol(70, 120, 220));
+        (void)fdk_stack_add(stack, pg1, "alpha", "Alpha");
+        (void)fdk_stack_add(stack, pg2, "beta", "Beta");
+        /* ARRANGE (not set_bounds): the pages sync to the bounds —
+         * set_bounds is pure geometry and bypasses the hook (the
+         * 1.2.3 lesson, now true of the stack too). */
+        fdk_widget_arrange(stack, (fdk_rect){0, 40, 300, 220});
+
+        fdk_widget *sw = NULL;
+        assert(fdk_ok(fdk_stackswitcher_create(root, font, &sw)));
+        fdk_stackswitcher_set_stack(sw, stack);
+        fdk_widget_set_bounds(sw, (fdk_rect){10, 4, 280, 30});
+        fdk_size sw_nat;
+        fdk_widget_measure(sw, &sw_nat); /* builds the pill cache    */
+        for (int i = 0; i < 4; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* Page 1 (red) is current. */
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 150, 150) ==
+               0x00C84646u);
+
+        /* The pill 2 rect, then a REAL click at its center. */
+        fdk_a11y_info pinfo;
+        assert(fdk_ok(fdk_a11y_virtual_describe(sw, 1, &pinfo)));
+        fdk_i32 cx = pinfo.bounds.x + pinfo.bounds.width / 2;
+        fdk_i32 cy = pinfo.bounds.y + pinfo.bounds.height / 2;
+        fdk_a11y_info_free(&pinfo);
+        assert(cx > 10 && cy < 40);
+        x11_send_pointer_event(dpy, xid, ButtonPress,
+                               ButtonPressMask, cx, cy, 1);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_pointer_event(dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, cx, cy, 1);
+        FURNITURE_WAIT(fdk_stack_get_visible_child(stack) == pg2);
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 150, 150) ==
+               0x004678DCu);
+
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    /* === 2. Revealer: the SLIDE_UP door opens over the REAL ticker
+     * (bounded wait until fully revealed), then closes. === */
+    {
+        fdk_window_options wopts = { .title = "revealer", .width = 240,
+                                     .height = 220 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *rv = NULL;
+        assert(fdk_ok(fdk_revealer_create(root, &rv)));
+        fdk_revealer_set_transition(rv, FDK_REVEAL_SLIDE_UP);
+        fdk_widget *drawer = NULL;
+        (void)fdk_widget_create(rv, NULL, (fdk_rect){0, 0, 200, 120},
+                                &drawer);
+        fdk_widget_set_background(drawer, wcol(70, 160, 90));
+        /* Hand-place the full-open rect (bottom edge y=180) through
+         * ARRANGE — the child slot follows the hook. */
+        fdk_widget_arrange(rv, (fdk_rect){10, 60, 200, 120});
+        for (int i = 0; i < 4; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* Hidden: the drawer's room shows the window background. */
+        assert(fdk_ok(fdk_window_paint(win)));
+        fdk_color winbg =
+            fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+        unsigned long bg_pack =
+            ((unsigned long)(winbg.r * 255.0f + 0.5f) << 16) |
+            ((unsigned long)(winbg.g * 255.0f + 0.5f) << 8) |
+            (unsigned long)(winbg.b * 255.0f + 0.5f);
+        assert(x11_readback_pixel(&dpy, xid, 100, 120) == bg_pack);
+
+        fdk_revealer_set_reveal_child(rv, true);
+        FURNITURE_WAIT(fdk_revealer_get_child_revealed(rv));
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 100, 120) ==
+               0x0046A05Au); /* wcol(70,160,90): the drawer's green */
+
+        /* Close: bounded wait until fully hidden, then the room is
+         * the window background again. */
+        fdk_revealer_set_reveal_child(rv, false);
+        /* child-revealed flips false the moment the blend leaves 1
+         * (GTK semantics) — the honest closing wait polls the
+         * COLLAPSED natural (0x0), the flight's true end. */
+        {
+            fdk_size rn;
+            int tries_ = 40;
+            fdk_widget_measure(rv, &rn);
+            /* Wait on BOTH axes: the main axis rounds to 0 a tick
+             * before the blend lands (0.48 px floors to 0 while the
+             * cross axis still reports the child's width). */
+            while ((rn.height != 0 || rn.width != 0) && tries_-- > 0) {
+                (void)fdk_pump_events(ctx, 25);
+                fdk_widget_measure(rv, &rn);
+            }
+            assert(rn.height == 0 && rn.width == 0);
+        }
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 100, 120) == bg_pack);
+
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    /* === 3. Statusbar: the context stack over the real server —
+     * the a11y name follows the TOP message; the top rule paints. */
+    {
+        fdk_window_options wopts = { .title = "status", .width = 280,
+                                     .height = 160 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *sb = NULL;
+        assert(fdk_ok(fdk_statusbar_create(root, font, &sb)));
+        fdk_size nat;
+        fdk_widget_measure(sb, &nat);
+        fdk_widget_set_bounds(sb, (fdk_rect){0, 160 - nat.height, 280,
+                                             nat.height});
+        fdk_u32 hint = fdk_statusbar_get_context_id(sb, "hint");
+        fdk_u32 act = fdk_statusbar_get_context_id(sb, "action");
+        (void)fdk_statusbar_push(sb, hint, "Ready");
+        (void)fdk_statusbar_push(sb, act, "Working…");
+        for (int i = 0; i < 4; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* The a11y name is the TOP message. */
+        fdk_a11y_info sinfo;
+        assert(fdk_ok(fdk_a11y_describe(sb, &sinfo)));
+        assert(sinfo.name != NULL &&
+               strcmp(sinfo.name, "Working…") == 0);
+        fdk_a11y_info_free(&sinfo);
+
+        /* The top rule paints: row 0 of the bar is the ENTRY_BORDER
+         * color, the row below it the SIDEBAR fill. */
+        fdk_color rule = fdk_theme_get_color(NULL, FDK_TK_ENTRY_BORDER);
+        fdk_color zone = fdk_theme_get_color(NULL, FDK_TK_SIDEBAR_BACKGROUND);
+        unsigned long rule_pack =
+            ((unsigned long)(rule.r * 255.0f + 0.5f) << 16) |
+            ((unsigned long)(rule.g * 255.0f + 0.5f) << 8) |
+            (unsigned long)(rule.b * 255.0f + 0.5f);
+        unsigned long zone_pack =
+            ((unsigned long)(zone.r * 255.0f + 0.5f) << 16) |
+            ((unsigned long)(zone.g * 255.0f + 0.5f) << 8) |
+            (unsigned long)(zone.b * 255.0f + 0.5f);
+        fdk_i32 top = 160 - nat.height;
+        assert(fdk_ok(fdk_window_paint(win)));
+        assert(x11_readback_pixel(&dpy, xid, 140, top) == rule_pack);
+        assert(x11_readback_pixel(&dpy, xid, 140, top + 2) ==
+               zone_pack);
+
+        /* pop(act): the hint message surfaces. */
+        fdk_statusbar_pop(sb, act);
+        (void)fdk_pump_events(ctx, 15);
+        assert(fdk_ok(fdk_a11y_describe(sb, &sinfo)));
+        assert(sinfo.name != NULL && strcmp(sinfo.name, "Ready") == 0);
+        fdk_a11y_info_free(&sinfo);
+
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    /* === 4. SearchEntry: real typing (XIM codepoints), the clear
+     * button, and the Esc ladder — over the server. === */
+    {
+        fdk_window_options wopts = { .title = "search", .width = 300,
+                                     .height = 120 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *se = NULL;
+        assert(fdk_ok(fdk_search_entry_create(root, font, &se)));
+        fdk_widget_set_bounds(se, (fdk_rect){10, 20, 280, 32});
+        for (int i = 0; i < 4; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* Click into the field (focus), then type 'a' 'b' (US
+         * keycodes 38, 56 — the platform resolves the codepoints). */
+        x11_send_pointer_event(dpy, xid, ButtonPress,
+                               ButtonPressMask, 40, 36, 1);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_pointer_event(dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 40, 36, 1);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_key_event(dpy, xid, KeyPress, 38);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_key_event(dpy, xid, KeyRelease, 38);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_key_event(dpy, xid, KeyPress, 56);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_key_event(dpy, xid, KeyRelease, 56);
+        FURNITURE_WAIT(strcmp(fdk_entry_get_text(se), "ab") == 0);
+
+        /* The clear X paints in the reserved right zone. */
+        assert(fdk_ok(fdk_window_paint(win)));
+        fdk_color entry_fill =
+            fdk_theme_get_color(NULL, FDK_TK_ENTRY_BACKGROUND);
+        unsigned long fill_pack =
+            ((unsigned long)(entry_fill.r * 255.0f + 0.5f) << 16) |
+            ((unsigned long)(entry_fill.g * 255.0f + 0.5f) << 8) |
+            (unsigned long)(entry_fill.b * 255.0f + 0.5f);
+        /* The X crosses at the zone's center: bx = 10+280-22-2 =
+         * 266, by = 20+8 = 28 -> the crossing lands at (274, 36). */
+        assert(x11_readback_pixel(&dpy, xid, 274, 36) !=
+               fill_pack); /* the X's ink over the fill             */
+
+        /* A REAL press in the clear zone empties the field. */
+        x11_send_pointer_event(dpy, xid, ButtonPress,
+                               ButtonPressMask, 284, 36, 1);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_pointer_event(dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 284, 36, 1);
+        FURNITURE_WAIT(fdk_entry_get_text(se)[0] == '\0');
+
+        /* The Esc ladder: type 'x' (keycode 53), Escape clears it
+         * (keycode 9); a second Escape bubbles (nothing to do). */
+        x11_send_key_event(dpy, xid, KeyPress, 53);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_key_event(dpy, xid, KeyRelease, 53);
+        FURNITURE_WAIT(strcmp(fdk_entry_get_text(se), "x") == 0);
+        x11_send_key_event(dpy, xid, KeyPress, 9);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_key_event(dpy, xid, KeyRelease, 9);
+        FURNITURE_WAIT(fdk_entry_get_text(se)[0] == '\0');
+
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    /* === 5. The list's rubber band: a real press-drag-release on
+     * the empty space sweeps a multi-selection live. === */
+    {
+        fdk_window_options wopts = { .title = "band", .width = 300,
+                                     .height = 260 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+
+        fdk_widget *list = NULL;
+        assert(fdk_ok(fdk_list_create(root, font, &list)));
+        fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+        for (int i = 0; i < 6; i++) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "row %d", i);
+            (void)fdk_list_append(list, buf, NULL);
+        }
+        fdk_widget_set_bounds(list, (fdk_rect){10, 10, 280, 240});
+        for (int i = 0; i < 4; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+
+        unsigned long xid = fdk_window_xid(win);
+        Display *dpy = XOpenDisplay(NULL);
+        assert(dpy != NULL);
+
+        /* Press at (150, 210) — empty space below the six 30-px
+         * rows (rows end at y=190 local + 10 = 200 root) — drag to
+         * (200, 60), release. The sweep covers local y [50, 200]:
+         * rows 1..5 selected (row 0 starts at 0..30 — the -1/+1
+         * band widening touches row 1 at 30, not row 0). */
+        x11_send_pointer_event(dpy, xid, ButtonPress,
+                               ButtonPressMask, 150, 210, 1);
+        (void)fdk_pump_events(ctx, 15);
+        x11_send_pointer_event(dpy, xid, MotionNotify,
+                               PointerMotionMask, 200, 60, 0);
+        (void)fdk_pump_events(ctx, 15);
+        /* LIVE mid-gesture state (before the release). */
+        assert(fdk_list_selected_count(list) == 5);
+        assert(!fdk_list_is_selected(list, 0));
+        assert(fdk_list_is_selected(list, 5));
+        x11_send_pointer_event(dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, 200, 60, 1);
+        for (int i = 0; i < 3; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+        assert(fdk_list_selected_count(list) == 5); /* persists */
+
+        XCloseDisplay(dpy);
+        fdk_window_destroy(win);
+    }
+
+    #undef FURNITURE_WAIT
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] app furniture: stack pill click switches pages "
+           "(server pixels), revealer SLIDE_UP door over the real "
+           "ticker (open + close, bounded waits), statusbar context "
+           "stack + rule pixels, search entry real typing + clear "
+           "press + Esc ladder, rubber-band sweep selects live\n");
 }

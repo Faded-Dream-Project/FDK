@@ -35,7 +35,8 @@
  * the theme too: FDK_TM_FOCUS_RING_WIDTH, built-in default 2 (1.4.0). */
 
 /* The hover fade flight (1.4.1): 120 ms of quad-out — hover is a
- * whisper, not a wave. */
+ * whisper, not a wave. Shared by Button, the check family (1.4.1),
+ * the StackSwitcher's pills and the menu/combo rows (1.4.2). */
 #define HOVER_FADE_MS 120
 
 /* Toggle: track 34x18, knob 12, gap 8 before optional label. */
@@ -67,33 +68,11 @@ static fdk_color blend_colors(fdk_color a, fdk_color b, fdk_f32 t) {
                        a.a + (b.a - a.a) * t};
 }
 
-static void hover_fade_tick(fdk_animation *anim, double eased,
-                            void *user) {
-    (void)anim;
-    fdk_hover_fade *f = user;
-    f->t = f->from + (f->target - f->from) * (fdk_f32)eased;
-    /* The animator invalidates the attached widget after this
-     * returns — no manual invalidate needed (and none wanted:
-     * this tick owns nothing but the blend). */
-}
-
-/* Arms (or retargets) the fade toward 1 (entering) / 0 (leaving).
- * Cancels any running flight first — departing from the CURRENT
- * blend, never teleporting. */
-static void hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
-                           bool entering) {
-    if (f->anim != NULL) {
-        fdk_animation_cancel(f->anim);
-        f->anim = NULL;
-    }
-    f->target = entering ? 1.0f : 0.0f;
-    if (f->t == f->target) {
-        return; /* already there; nothing to fly */
-    }
-    f->from = f->t;
-    f->anim = fdk_widget_animate(w, HOVER_FADE_MS, FDK_EASE_QUAD_OUT,
-                                 hover_fade_tick, NULL, f);
-}
+/* Arms (or retargets) the fade toward 1 (entering) / 0 (leaving) —
+ * the shared machinery in statics.c (1.4.2 promoted it so the
+ * switcher pills and menu rows ride what the buttons ride): cancels
+ * any running flight first, departing from the CURRENT blend,
+ * never teleporting. */
 
 /* The check-family's shared indicator extent along X (drawn at the
  * left edge) and the gap that follows it. */
@@ -276,12 +255,12 @@ static bool button_handle_event(fdk_widget *w,
         return false;
     case FDK_WIDGET_POINTER_ENTER:
         b->hovering = true;
-        hover_fade_arm(w, &b->fade, true);
+        fdk__hover_fade_arm(w, &b->fade, true);
         fdk_widget_invalidate(w);
         return false;
     case FDK_WIDGET_POINTER_LEAVE:
         b->hovering = false;
-        hover_fade_arm(w, &b->fade, false);
+        fdk__hover_fade_arm(w, &b->fade, false);
         fdk_widget_invalidate(w);
         return false;
     default:
@@ -498,12 +477,12 @@ static bool check_handle_event(fdk_widget *w,
         return false;
     case FDK_WIDGET_POINTER_ENTER:
         c->hovering = true;
-        hover_fade_arm(w, &c->fade, true);
+        fdk__hover_fade_arm(w, &c->fade, true);
         fdk_widget_invalidate(w);
         return false;
     case FDK_WIDGET_POINTER_LEAVE:
         c->hovering = false;
-        hover_fade_arm(w, &c->fade, false);
+        fdk__hover_fade_arm(w, &c->fade, false);
         fdk_widget_invalidate(w);
         return false;
     default:

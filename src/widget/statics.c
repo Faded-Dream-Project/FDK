@@ -164,6 +164,115 @@ fdk_color fdk__pal_row_hover(void) {
     return fdk_theme_get_color(NULL, FDK_TK_ROW_HOVER);
 }
 
+/* ---- 1.4.1: the shared symbolic row glyphs ----------------------
+ *
+ * Promoted from list.c's statics in 1.4.2 so the Tree wears the same
+ * vector language. Font-independent strokes in the same idiom as the
+ * title-bar and disclosure glyphs: neutral foreground ink, no fills
+ * that would fight theme changes (the folder's tab keeps a soft
+ * control fill so it reads at 16 px without a fill-rate-heavy
+ * interior). Geometry: a 16-px glyph box, 6-px gap to the text —
+ * the sidebar-symbolic set. */
+
+#define LIST_ICON 16
+#define LIST_ICON_GAP 6
+
+fdk_i32 fdk__row_icon_advance(fdk_row_icon icon) {
+    return (icon == FDK_ROW_ICON_NONE) ? 0
+                                        : LIST_ICON + LIST_ICON_GAP;
+}
+
+void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
+                         fdk_i32 x, fdk_i32 cy, bool disabled) {
+    /* (x, cy) = the glyph box's top-left corner; the box is
+     * LIST_ICON square. Ink: text color (disabled dims). */
+    fdk_color ink = disabled ? fdk__pal_text_disabled() : fdk__pal_text();
+    fdk_color soft = disabled ? fdk__pal_control_disabled()
+                              : fdk__pal_control();
+    switch (icon) {
+    case FDK_ROW_ICON_FOLDER: {
+        /* Tabbed folder: the tab spans the top-left, the body below
+         * — outline + soft fill, rounded 2. */
+        fdk_rect body = {x + 1, cy + 4, 14, 10};
+        fdk_surface_fill_rounded_rect(surface, body, 2, soft);
+        fdk_surface_draw_rounded_rect(surface, body, 2, ink);
+        fdk_rect tab = {x + 1, cy + 2, 6, 2};
+        fdk_surface_fill_rect(surface, tab, ink);
+        break;
+    }
+    case FDK_ROW_ICON_HOME: {
+        /* House: roof strokes + door. */
+        fdk_surface_draw_line_aa(surface, x + 1, cy + 7, x + 8, cy + 2,
+                                 ink);
+        fdk_surface_draw_line_aa(surface, x + 8, cy + 2, x + 15, cy + 7,
+                                 ink);
+        fdk_rect wall = {x + 3, cy + 7, 10, 7};
+        fdk_surface_draw_rect(surface, wall, ink);
+        fdk_rect door = {x + 7, cy + 10, 2, 4};
+        fdk_surface_fill_rect(surface, door, ink);
+        break;
+    }
+    case FDK_ROW_ICON_DRIVE: {
+        /* Slab: rounded outline + soft fill + the activity LED. */
+        fdk_rect slab = {x + 2, cy + 4, 12, 8};
+        fdk_surface_fill_rounded_rect(surface, slab, 3, soft);
+        fdk_surface_draw_rounded_rect(surface, slab, 3, ink);
+        fdk_surface_fill_circle(surface, x + 11, cy + 8, 1, ink);
+        break;
+    }
+    case FDK_ROW_ICON_FILE: {
+        /* Page: outline with a folded top-right corner. */
+        fdk_rect page = {x + 3, cy + 2, 10, 12};
+        fdk_surface_draw_rect(surface, page, ink);
+        /* The fold: a diagonal + the corner notch. */
+        fdk_surface_draw_line_aa(surface, x + 9, cy + 2, x + 13, cy + 6,
+                                 ink);
+        fdk_surface_fill_rect(surface,
+                              (fdk_rect){x + 10, cy + 3, 3, 3}, soft);
+        break;
+    }
+    default:
+        break; /* NONE: the caller did not reserve the box */
+    }
+}
+
+/* ---- 1.4.2: the shared hover-fade flight (promoted from
+ * controls.c) ------------------------------------------------------
+ *
+ * The 1.4.1 Button/check-family machinery, shared verbatim by the
+ * StackSwitcher's pills and the menu rows: 120 ms of quad-out, one
+ * flight at a time per fade state, retarget-from-live (the
+ * animator's compose rule). The SEMANTIC hover flag still flips
+ * instantly wherever the consumer keeps one — only the PAINT
+ * blends. */
+
+#define HOVER_FADE_MS 120
+
+static void fdk__hover_fade_tick(fdk_animation *anim, double eased,
+                                 void *user) {
+    (void)anim;
+    fdk_hover_fade *f = user;
+    f->t = f->from + (f->target - f->from) * (fdk_f32)eased;
+    /* The animator invalidates the attached widget after this
+     * returns — no manual invalidate needed (and none wanted:
+     * this tick owns nothing but the blend). */
+}
+
+void fdk__hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
+                         bool entering) {
+    if (f->anim != NULL) {
+        fdk_animation_cancel(f->anim);
+        f->anim = NULL;
+    }
+    f->target = entering ? 1.0f : 0.0f;
+    if (f->t == f->target) {
+        return; /* already there; nothing to fly */
+    }
+    f->from = f->t;
+    f->anim = fdk_widget_animate(w, HOVER_FADE_MS, FDK_EASE_QUAD_OUT,
+                                 fdk__hover_fade_tick, NULL, f);
+}
+
 /* ---- Label ---- */
 
 /* Display-cache plumbing: the label's text broken into the lines

@@ -3917,6 +3917,130 @@ warnings; debug-remnant and secret scans clean.
 
 ---
 
+### 1.4.2 — the app furniture (the parity ledger's NEXT list, emptied)
+
+The third milestone of the "perfect toolkit" directive: the ledger's
+entire 1.4.2 candidate list shipped in one pass — the surfaces a
+real application is made of, plus the interaction completeness
+polish.
+
+THE WIDGETS. Statusbar (GtkStatusbar): the context-scoped message
+stack — get_context_id mints stable ids, push returns message
+handles, pop is LIFO PER CONTEXT (others' messages survive under
+yours), remove(ctx, id) takes back exactly what it gave; the bar
+paints the top of the stack on the quiet-zone surface with a 1-px
+top rule, and the a11y name follows the top message. Stack +
+StackSwitcher (GtkStack + its pill row): named pages with unique
+keys (duplicates refused), exactly one visible, the notebook's
+adoption + survivor rules verbatim, the natural size the MAX over
+pages so flips never resize the window; the switcher is the modern
+face of the tab strip — accent-filled active pill (a checked
+semantic: it snaps), hover-faded inactive pills, the notebook's
+TAB_LIST virtual-children a11y split, and a LOOSELY COUPLED
+binding (a persistent reentrancy watch on the stack — a stack
+destroyed by another hand cleanly unbinds; the switcher never
+occupies the stack's single on_changed slot, it reconciles at
+paint time). Revealer (GtkRevealer): the expander's flight
+generalized to any child — the door SELF-CROPS with the
+direction's anchored edge (DOWN/RIGHT keep the origin, UP/LEFT
+keep the far edge so a toast pinned to a bottom edge rises in
+place), the child stays at its full natural (the reveal is a
+clip, never a squeeze), NONE and duration-0 snap, on_revealed
+fires at the landing. CROSSFADE deliberately absent — the paint
+walk is a clip-stack compositor, not an alpha scene graph; an
+honest slide beats a half-faked fade. LevelBar (GtkLevelBar): the
+value readout as discrete blocks (the boundary rule: a full bar
+reads full — the lit count clamps at both ends) or one continuous
+run; a METER, not a control — the new LEVEL_BAR a11y role with
+the value interface. SearchEntry: the Entry preset — magnifier
+glyph in a reserved left zone, a clear button that exists only
+while there is text (pressing it empties the field through the
+honest splice path: undo records, on_changed fires), and the
+search Esc ladder (the FIRST Escape clears, the next bubbles so
+a dialog's Cancel still works); hit-testing, scrolling, and
+paint all route through the same inset pair so the caret and the
+glyph never fight.
+
+THE EXTENSIONS. Tree row icons: the List's 1.4.1 symbolic glyphs
+promoted to shared helpers (statics.c) and extended to the Tree —
+the icon rides the MODEL node, so it survives collapses and
+re-expansions, and the width accounting covers relayout AND the
+tree's own measure (found live: the measure was missed first).
+Slider marks (gtk_scale_add_mark): ticks below the trough at the
+mark's thumb-center position, labels in the lazy system default
+font (the tooltip's precedent; a fontless system degrades to bare
+ticks), the natural height growing by exactly one label line.
+Menu/combo hover fades: the 1.4.1 hover-fade machinery promoted to
+statics.c and ridden by the MENU VIEW's rows — the pointer-hover
+pill blends in/out over 120 ms while the keyboard cursor's row and
+the open submenu-parent row still snap (input state is an answer,
+not a whisper); the combo dropdown IS the menu view, so it rides
+the same fades for free. The List's rubber band: a press on the
+list's EMPTY space starts a sweep — the rect between press and
+pointer selects every row it intersects, LIVE, recomputed per
+motion; plain sweeps replace (an empty-space click deselects —
+correct on its own), Ctrl-sweeps union over a pre-band snapshot;
+the on_changed callback fires at press and release, never per
+motion (a sweep is ONE gesture); the band paints as an accent tint
++ border UNDER the rows (selection fills land over it — the paint
+walk paints parents before children, and that is the honest
+compositing a clip-stack renderer gives).
+
+TWO BEHAVIOR LESSONS the milestone's tests flushed out: (1) the
+revealer's child must show from the FIRST CRACK of the door
+OPENING — the visibility rule is reveal > 0 OR the target (the
+expander's rule; a first draft that read only the blend left the
+child invisible until the first tick, i.e. one full frame of
+door-with-nothing-in-it); (2) the main axis of a reveal rounds to
+zero a tick before the blend lands (0.48 px floors to 0 while the
+cross axis still reports full width) — closing waits must poll
+BOTH axes, and child-revealed (GTK's "not fully revealed"
+semantics) goes false the moment the blend leaves 1.0, not at
+rest.
+
+TESTS: test_containers gains the Stack group (unique keys, title
+fallback + mutation, one callback per change, max-natural, the
+survivor rule), the Revealer group (0x0 hidden natural, the
+160-ms door on the synthetic clock, SLIDE_UP bottom anchoring,
+NONE + duration-0 snaps, retarget-from-live), and the Stack-
+Switcher group (accent active pill + flat inactive by pixel, TAB
+virtuals, click switching, stack-death unbind); test_controls
+gains Statusbar (the LIFO-per-context pop proof, exact remove,
+a11y name, pixel diff) and LevelBar (clamps, refused bad inputs,
+the discrete boundary rule by pixel, the meter interface);
+test_entry gains the search preset (the 38-vs-32 natural-width
+proof, glyph-zone hit-testing, the undoable clear, the Esc
+ladder, magnifier/X pixel proofs); test_list gains the rubber
+band (live sweep, replace-vs-union, the tint paints mid-gesture
+only, one callback pair per gesture, SINGLE refuses); test_tree
+gains row icons; test_widgets2 gains slider marks; the menu
+paint test learned to pump the animator (the pill now fades, so
+the pixel diff lands after the flight — pin the clock BEFORE the
+arming event); the X11 suite gains the app-furniture e2e — a
+real pill click switching real page fills at the server, the
+SLIDE_UP door opening and closing over the real ticker with
+bounded wait-until-state loops (NEVER fixed pump counts), the
+statusbar's rule pixels + context stack, real XIM typing into
+the search entry + a real clear press + the Esc ladder, and a
+real sweep-drag selecting live.
+
+Example 12_settings: the app-furniture showcase — search field,
+pill switcher over a three-page Stack (General / Appearance /
+Storage), the statusbar with hint + action contexts pushed by
+every interaction, the marked font-size slider, the sync LevelBar
++ Spinner, the Storage list with row icons and the rubber band,
+and a link-button-flipped SLIDE_UP revealer drawer. Both example
+rigs grew the 12th run + an active-pill accent check.
+
+Battery on the final tree: headless all-pass (519 [ok]); X11
+integration all [ok] exit 0, three consecutive clean runs; the
+interop rig, both tooltip rigs, and the compositor-death rig
+PASS; X11 and sway example rigs 12/12; verify-exports green in
+both configs; release zero warnings; debug-remnant and secret
+scans clean.
+
+---
+
 ## The GTK/Qt feature-parity ledger
 
 The standing directive ("every small feature that is in GTK and Qt
@@ -3934,17 +4058,15 @@ SHIPPED (1.4.1); LinkButton SHIPPED (1.4.1 role); Paned SHIPPED
 (1.4.1); Expander SHIPPED (1.4.1); Notebook SHIPPED; Frame SHIPPED;
 Separator SHIPPED; ProgressBar (determinate + busy) SHIPPED;
 ScrollView (bars, smooth wheel) SHIPPED; List (multi-select,
-rubber-band, icons) SHIPPED (icons 1.4.1); Tree SHIPPED; Menu/
+rubber-band, icons) SHIPPED (icons 1.4.1, rubber band 1.4.2); Tree SHIPPED (row icons 1.4.2); Menu/
 MenuBar/ContextMenu (accelerators, mnemonics) SHIPPED; Combo
 (editable) SHIPPED; Slider SHIPPED; SpinButton SHIPPED; Toolbar
 SHIPPED; Tooltip SHIPPED; FileDialog (OPEN/SAVE, places, filters,
-breadcrumbs, Ctrl+L) SHIPPED; Statusbar NEXT (trivial: an HBox +
-label API, the a11y role already exists); SearchEntry LATER (an
-Entry preset: the magnifier glyph + clear button); Revealer LATER
-(the expander's flight generalized to any child pair); Stack/
-StackSwitcher LATER (notebook sibling: page stack + pill switcher);
-LevelBar LATER (progress sibling with thresholds); Scale marks
-LATER (slider ticks + labels); DropDown-menu-button LATER (button +
+breadcrumbs, Ctrl+L) SHIPPED; Statusbar SHIPPED (1.4.2); SearchEntry SHIPPED (1.4.2
+preset); Revealer SHIPPED (1.4.2); Stack/StackSwitcher SHIPPED
+(1.4.2);
+LevelBar SHIPPED (1.4.2); Scale marks
+SHIPPED (1.4.2 — slider ticks + labels); DropDown-menu-button LATER (button +
 popup menu hybrid); IconView/GridView OUT-for-now (needs a canvas-
 based item layout; the List covers the row case); DrawingArea ==
 Canvas SHIPPED; GLArea OUT (no OpenGL backend in scope — the
@@ -3958,7 +4080,8 @@ Wayland key repeat SHIPPED (1.3.5); PRIMARY selection SHIPPED
 (1.3.4); clipboard formats (text/URI) SHIPPED; DnD both directions
 SHIPPED; mnemonics SHIPPED (1.3.6); accelerators SHIPPED (1.3.3);
 focus traversal SHIPPED; double-click/triple-click SHIPPED;
-shift-click range select SHIPPED; hover fades SHIPPED (1.4.1);
+shift-click range select SHIPPED; hover fades SHIPPED (1.4.1 buttons; 1.4.2 menu/combo rows and
+switcher pills);
 scroll wheel + smooth
 SHIPPED (1.3.8); touch/gestures OUT (no touch input backend in
 scope — the pointer model is the contract); IME completion (preedit
@@ -3977,9 +4100,12 @@ no-icon-cache stance); printing OUT (no print backend in scope);
  accessibility bus bridges OUT (the in-process narrator is the
 policy, per no-D-Bus).
 
-The NEXT list (1.4.2 candidates, in rough value order): Statusbar;
-SearchEntry; Revealer; Stack + StackSwitcher; tree-view row icons
-(the list's glyph seam extended); hover fades on the menu/combo
-rows (the 1.4.1 machinery extended); the list's drag-select rubber
-band (multi-select by sweep — the one interaction gap the List
-still has); LevelBar; slider marks.
+The NEXT list (1.4.3 candidates, in rough value order): DropDown-
+menu-button (button + popup menu hybrid); FontChooser (needs the
+font scan surface exposed as a picker); ColorChooser (HSV wheel on
+the canvas); AboutDialog (labels + link buttons in a dialog);
+vertical Slider (the documented parked remainder); revealer
+CROSSFADE (needs a compositor-level alpha decision — see the 1.4.2
+entry); SearchEntry's debounced search-changed (parked by policy);
+rubber-band auto-scroll (the sweep does not chase the viewport
+edge); tree rubber-band (the List's sweep extended).

@@ -16,6 +16,9 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
+#include "widget/widget_internal.h" /* 1.4.2: the animation test
+                                       * clock — the hover pill fades */
+
 #include "widget/menu_internal.h"
 
 #include <assert.h>
@@ -373,10 +376,19 @@ static void test_view_paint(void) {
            mg == (int)(ctl.g * 255.0f + 0.5f) &&
            mb == (int)(ctl.b * 255.0f + 0.5f));
 
-    /* Hover highlight: motion over the row changes its pixels. */
+    /* Hover highlight: motion over the row changes its pixels.
+     * 1.4.2: the pill FADES in (120 ms quad-out on the shared
+     * machinery), so the change lands after the flight — pin the
+     * synthetic clock BEFORE the arming motion (animate stamps its
+     * start from it), then pump past the duration: the 1.4.1
+     * hover-fade tests' discipline. */
     fdk_u32 before = px_at(s, w / 2, rh / 2);
+    fdk__animation_set_test_clock(1000);
     (void)send_motion(root, (float)(w / 2), (float)(rh / 2));
     assert(fdk_widget_tree_has_damage(root));
+    fdk__animation_pump(1000);              /* the arming instant */
+    fdk__animation_set_test_clock(1000 + 200);
+    fdk__animation_pump(1000 + 200);        /* past the flight */
     fdk_widget_tree_paint(root, s);
     fdk_u32 after = px_at(s, w / 2, rh / 2);
     assert(before != after); /* hover fill differs from plain */
@@ -385,6 +397,7 @@ static void test_view_paint(void) {
     fdk_u32 again = px_at(s, w / 2, rh / 2);
     fdk_widget_tree_paint(root, s);
     assert(again == px_at(s, w / 2, rh / 2));
+    fdk__animation_set_test_clock(-1); /* restore the real clock */
 
     fdk_surface_destroy(s);
     fdk_widget_destroy(root);

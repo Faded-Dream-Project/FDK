@@ -1184,6 +1184,258 @@ void fdk_expander_set_on_changed(fdk_widget *expander,
                                  fdk_expander_changed_fn on_changed,
                                  void *user_data);
 
+/* ---- Statusbar (1.4.2) ----
+ *
+ * GTK's GtkStatusbar: the bottom-edge strip for transient
+ * application state. The API is the classic STACK WITH CONTEXTS:
+ * get_context_id mints a stable id per context string (per
+ * statusbar); push(ctx, text) stacks a message and returns its
+ * message handle; the bar paints the TOP of the stack. pop(ctx)
+ * removes the topmost message OF THAT CONTEXT (LIFO per context —
+ * others' messages survive); remove(ctx, id) removes one exact
+ * message wherever it sits (the "take that back" that stays
+ * precise when other contexts pushed in between).
+ *
+ * An indicator: no focus, no events, no children. The a11y face is
+ * the STATUS_BAR role with the current message as the name. */
+
+fdk_result fdk_statusbar_create(fdk_widget *parent, fdk_font *font,
+                                fdk_widget **out_statusbar);
+/* Mints (or returns) the context id for `context`. 0 on invalid
+ * input (NULL/empty) or OOM — push/remove refuse that id. Ids are
+ * stable per statusbar instance, sequential from 1. */
+fdk_u32 fdk_statusbar_get_context_id(fdk_widget *statusbar,
+                                     const char *context);
+/* Stacks `text` under `context_id`; returns the message handle (0
+ * on refusal — bad id, NULL text, OOM). The top of the stack
+ * paints. */
+fdk_u32 fdk_statusbar_push(fdk_widget *statusbar, fdk_u32 context_id,
+                           const char *text);
+/* Removes the topmost message of `context_id` (a no-op when that
+ * context has nothing stacked — GTK parity). */
+void fdk_statusbar_pop(fdk_widget *statusbar, fdk_u32 context_id);
+/* Removes the exact message `message_id` under `context_id`
+ * wherever it sits in the stack. */
+void fdk_statusbar_remove(fdk_widget *statusbar, fdk_u32 context_id,
+                          fdk_u32 message_id);
+/* The current (top-of-stack) message, NULL when the stack is
+ * empty. Toolkit-owned. */
+const char *fdk_statusbar_get_text(fdk_widget *statusbar);
+
+/* ---- SearchEntry (1.4.2) ----
+ *
+ * GTK's GtkSearchEntry as an Entry PRESET: fdk_search_entry_create
+ * returns a regular Entry (every Entry API applies) with the search
+ * mode on — a magnifier glyph before the text, a clear button that
+ * appears only when there is text to clear, and the search Esc
+ * ladder: the FIRST Escape clears the text (consumed); a further
+ * Escape bubbles to the window (a dialog's Cancel still works).
+ * The on_changed callback fires per keystroke as usual — the
+ * GtkSearchEntry-style debounced "search-changed" is deliberately
+ * parked (apps debounce at the source; the toolkit guessing a
+ * delay has never aged well). */
+
+fdk_result fdk_search_entry_create(fdk_widget *parent, fdk_font *font,
+                                   fdk_widget **out_entry);
+/* Whether the entry carries the search preset. */
+bool fdk_entry_is_search(fdk_widget *entry);
+
+/* ---- LevelBar (1.4.2) ----
+ *
+ * GTK's GtkLevelBar / the battery-and-volume meter: a value in
+ * [min, max] as a row of discrete blocks (DISCRETE, the default — 5
+ * segments) or one continuous bar (CONTINUOUS). A READOUT, not a
+ * control: no focus, no events — the value arrives via
+ * fdk_levelbar_set_value from the app's own state. The a11y face is
+ * the LEVEL_BAR role with the value interface (a meter). */
+
+typedef enum fdk_levelbar_mode {
+    FDK_LEVELBAR_DISCRETE = 0,    /* N blocks, lit below the value   */
+    FDK_LEVELBAR_CONTINUOUS = 1,  /* one accent run over the track   */
+} fdk_levelbar_mode;
+
+fdk_result fdk_levelbar_create(fdk_widget *parent, double min,
+                               double max, fdk_widget **out_levelbar);
+void fdk_levelbar_set_value(fdk_widget *levelbar, double value);
+double fdk_levelbar_get_value(fdk_widget *levelbar);
+/* max < min is refused (create documents it with
+ * FDK_ERR_INVALID_ARGUMENT; the setter is void and warns). */
+void fdk_levelbar_set_range(fdk_widget *levelbar, double min,
+                            double max);
+void fdk_levelbar_set_mode(fdk_widget *levelbar,
+                           fdk_levelbar_mode mode);
+fdk_levelbar_mode fdk_levelbar_get_mode(fdk_widget *levelbar);
+/* DISCRETE mode only: the block count (default 5; values outside
+ * [2, 32] are refused). */
+void fdk_levelbar_set_segments(fdk_widget *levelbar, size_t segments);
+size_t fdk_levelbar_get_segments(fdk_widget *levelbar);
+
+/* ---- Revealer (1.4.2) ----
+ *
+ * GTK's GtkRevealer: shows/hides its ONE child (a second child is
+ * refused) with a sliding animation instead of a pop. The
+ * Expander's mechanics generalized: the door SELF-CROPS (the
+ * revealer's own bounds track the reveal, so the clip stack does
+ * the cropping with no parent cooperation), the child stays at its
+ * FULL natural size (the reveal is a clip, never a squeeze), and a
+ * fully hidden child is invisible exactly as if it were not there
+ * (which is also the revealer's measured size: 0x0).
+ *
+ * Transitions: SLIDE_DOWN (default), SLIDE_UP, SLIDE_LEFT,
+ * SLIDE_RIGHT, NONE (instant). DOWN/RIGHT anchor the origin;
+ * UP/LEFT anchor the far edge (a toast pinned to a window's bottom
+ * rises in place). Under a packing container the parent re-asserts
+ * the slot origin per tick, so box-parented revealers grow into
+ * their slot regardless of direction — the edge anchoring is what
+ * plain-parented, hand-positioned revealers get. CROSSFADE is
+ * deliberately absent (the paint walk is a clip-stack compositor,
+ * not an alpha scene graph — an honest slide, not a half-faked
+ * fade).
+ *
+ * The flight is ~160 ms cubic-out (settable) on the 1.3.8
+ * animator; standalone trees snap (the headless-honesty rule).
+ * on_revealed fires when the flight LANDS (either direction) —
+ * the natural point for chained teardown. */
+
+typedef enum fdk_revealer_transition {
+    FDK_REVEAL_NONE = 0,
+    FDK_REVEAL_SLIDE_DOWN = 1,
+    FDK_REVEAL_SLIDE_UP = 2,
+    FDK_REVEAL_SLIDE_LEFT = 3,
+    FDK_REVEAL_SLIDE_RIGHT = 4,
+} fdk_revealer_transition;
+
+fdk_result fdk_revealer_create(fdk_widget *parent,
+                               fdk_widget **out_revealer);
+/* The target state (animated when a window clock exists). */
+void fdk_revealer_set_reveal_child(fdk_widget *revealer, bool reveal);
+/* The TARGET (what was last requested). */
+bool fdk_revealer_get_reveal_child(fdk_widget *revealer);
+/* Where the flight actually is: true only once the child is fully
+ * revealed (GTK's child-revealed distinction — chains that tear
+ * down on "fully hidden" read THIS). */
+bool fdk_revealer_get_child_revealed(fdk_widget *revealer);
+/* Refused mid-flight (the blend's axis would change under the
+ * running tick); NONE lands instantly. */
+void fdk_revealer_set_transition(fdk_widget *revealer,
+                                 fdk_revealer_transition transition);
+fdk_revealer_transition fdk_revealer_get_transition(
+    fdk_widget *revealer);
+/* Flight duration in ms (default 160; 0 = snap; > 10000 refused). */
+void fdk_revealer_set_transition_duration(fdk_widget *revealer,
+                                          fdk_u32 duration_ms);
+fdk_u32 fdk_revealer_get_transition_duration(fdk_widget *revealer);
+
+typedef void (*fdk_revealer_revealed_fn)(fdk_widget *revealer,
+                                         bool revealed, void *user_data);
+/* Fires when the flight lands (either direction; also on the
+ * duration-0 snap). */
+void fdk_revealer_set_on_revealed(fdk_widget *revealer,
+                                  fdk_revealer_revealed_fn on_revealed,
+                                  void *user_data);
+
+/* ---- Stack + StackSwitcher (1.4.2) ----
+ *
+ * GTK's GtkStack: NAMED pages, exactly one visible — the structure
+ * settings dialogs and master-detail panes are built on. add()
+ * reparents the page in (the parent-owns-children model; remove
+ * DESTROYS the page, like the notebook's). Names are unique keys
+ * (duplicate/NULL refused); titles are display strings the
+ * StackSwitcher reads. Page switches are instant by v1 policy (no
+ * crossfade — the revealer's honesty note covers why). The natural
+ * size is the MAX over pages (floored 40x40), so flips never
+ * resize the window.
+ *
+ * The StackSwitcher is the switching surface: a row of rounded
+ * pills bound to the stack's pages — active pill accent-filled
+ * (a checked semantic, it snaps), inactive pills hover-faded. The
+ * binding is loosely coupled: a stack destroyed by another hand
+ * cleanly unbinds the switcher (it never dereferences a dangling
+ * pointer), and the switcher does NOT occupy the stack's
+ * on_changed slot (it reconciles at paint time).
+ *
+ * The a11y split: the Stack is a PANEL named by the current page;
+ * the Switcher is the TAB_LIST with one virtual TAB per pill
+ * (ACTIVATE switches — the notebook's pattern). */
+
+fdk_result fdk_stack_create(fdk_widget *parent,
+                            fdk_widget **out_stack);
+/* Reparents `child` in as a new page. `name` is the unique key
+ * (duplicate or NULL/empty refused); `title` (NULL falls back to
+ * the name) is the display string. The first page becomes
+ * visible. */
+fdk_result fdk_stack_add(fdk_widget *stack, fdk_widget *child,
+                         const char *name, const char *title);
+size_t fdk_stack_page_count(fdk_widget *stack);
+fdk_widget *fdk_stack_get_page(fdk_widget *stack, size_t index);
+fdk_widget *fdk_stack_get_child_by_name(fdk_widget *stack,
+                                        const char *name);
+const char *fdk_stack_page_name(fdk_widget *stack, size_t index);
+const char *fdk_stack_page_title(fdk_widget *stack, size_t index);
+/* NULL/empty title restores the name fallback. */
+fdk_result fdk_stack_set_page_title(fdk_widget *stack, size_t index,
+                                    const char *title);
+/* Switch by key; FDK_ERR_NOT_FOUND when no page carries `name`. */
+fdk_result fdk_stack_set_visible_name(fdk_widget *stack,
+                                      const char *name);
+/* Switch by page widget; NOT_FOUND when it is not a page. */
+fdk_result fdk_stack_set_visible_child(fdk_widget *stack,
+                                       fdk_widget *child);
+const char *fdk_stack_get_visible_name(fdk_widget *stack);
+fdk_widget *fdk_stack_get_visible_child(fdk_widget *stack);
+/* Removes (and destroys) the page. The survivor rule is the
+ * notebook's: removing the current page shows the page that
+ * shifted into its slot; removing an earlier page keeps showing
+ * the same page. */
+fdk_result fdk_stack_remove_page(fdk_widget *stack, size_t index);
+
+typedef void (*fdk_stack_changed_fn)(fdk_widget *stack, size_t index,
+                                     const char *name, void *user_data);
+/* Fires after every visible-page change (user or programmatic,
+ * including the survivor switch after removing the current page). */
+void fdk_stack_set_on_changed(fdk_widget *stack,
+                              fdk_stack_changed_fn on_changed,
+                              void *user_data);
+
+fdk_result fdk_stackswitcher_create(fdk_widget *parent,
+                                    fdk_font *font,
+                                    fdk_widget **out_switcher);
+/* Binds the switcher to `stack` (NULL unbinds; a non-stack widget
+ * is refused). The switcher re-reads pages, titles, and the active
+ * pill at every paint — mutations need no notification. */
+void fdk_stackswitcher_set_stack(fdk_widget *switcher,
+                                 fdk_widget *stack);
+/* The bound stack, or NULL once unbound/destroyed. */
+fdk_widget *fdk_stackswitcher_get_stack(fdk_widget *switcher);
+
+/* ---- Tree row icons (1.4.2) ----
+ *
+ * The List's 1.4.1 symbolic glyphs, extended to the Tree: a
+ * 16-px vector glyph before the node's text (folder / home / drive
+ * / page), accounted in the tree's width computation. The icon
+ * rides the MODEL NODE (not the row widget), so it survives
+ * collapses and re-expansions. */
+
+fdk_result fdk_tree_node_set_icon(fdk_widget *tree,
+                                  fdk_tree_node node, fdk_row_icon icon);
+fdk_row_icon fdk_tree_node_get_icon(fdk_widget *tree,
+                                    fdk_tree_node node);
+
+/* ---- Slider marks (1.4.2) ----
+ *
+ * GTK's gtk_scale_add_mark: tick marks (and optional labels) under
+ * the trough. add_mark registers a mark at `value` (clamped into
+ * the range; label NULL = tick only). Marks widen the slider's
+ * natural HEIGHT by one label line when any mark carries a label
+ * (the track centers in the remaining extent); labels center under
+ * their ticks and clip at the widget's bounds (no wrap). clear_marks
+ * drops them all. */
+
+fdk_result fdk_slider_add_mark(fdk_widget *slider, double value,
+                               const char *label);
+void fdk_slider_clear_marks(fdk_widget *slider);
+size_t fdk_slider_mark_count(fdk_widget *slider);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1376,3 +1376,48 @@ by whatever pump comes next), not to the test — but any suite
 whose timing assumptions predate the animation layer should
 re-audit its pump arithmetic the first time an animation runs in
 it.
+
+## 1.4.2 — five more lessons from the app furniture
+
+**Pin the clock BEFORE the arming event.** The menu paint test
+asserted a pixel diff right after a hover motion; 1.4.2 made the
+pill fade, so the diff lands only after the flight. The fix looks
+like "pin + pump past the duration" — but the seam pins the clock
+that `fdk_widget_animate` stamps its START from, so pinning after
+the event stamps the start from the REAL clock and the synthetic
+pumps never catch up. Order matters: `set_test_clock(T)` → the
+event → `pump(T)` → `pump(T + duration)`.
+
+**Wait on BOTH axes of a reveal.** The revealer's main axis rounds
+to zero a full tick before the blend lands (120 px * 0.004 + 0.5
+floors to 0 while the blend is still positive, and the cross axis
+still reports the child's full width). A closing wait that polls
+only the height exits one tick early — the child is still visible
+and the "hidden" pixel check fails on stale ink. Poll height AND
+width; both are zero only at the true landing. Relatedly,
+`fdk_revealer_get_child_revealed` follows GTK semantics — false
+from the moment the blend leaves 1.0, not only at rest — so it is
+the wrong predicate for "the closing flight finished".
+
+**Arrange, don't set_bounds, anything with children.** The X11
+stack test placed the stack with `fdk_widget_set_bounds` and the
+pages kept their 0x0 slots — set_bounds is pure geometry and
+bypasses the arrange hook (the 1.2.3 list lesson, now true of
+every container whose hook syncs children: stack, revealer). The
+telltale is a pixel-perfect widget tree that paints nothing.
+
+**Standalone roots paint nothing — give them a background before
+pixel-diffing transparency.** The switcher's inactive pill is
+transparent, so its pixels show whatever is UNDER it; a standalone
+test root has no background, and the surface's initial black shows
+instead. Two tests grew `fdk_widget_set_background(root, ...)` for
+exactly this: without it, "the pill is flat" reads as "the pill is
+black", and repaint-based diffs (the band tint going away) never
+converge because nothing repaints the region.
+
+**Compute hit targets from the a11y geometry, not by hand.** The
+X11 e2e clicks a switcher pill at its center — the rect comes from
+`fdk_a11y_virtual_describe`, the same numbers a bridge would drive.
+Hand-computed pixel offsets (the X of the search entry's clear
+button at "width - 14") were wrong by 4 px in this very milestone;
+the geometry the toolkit PUBLISHES is the geometry to use.

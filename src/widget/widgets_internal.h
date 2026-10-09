@@ -40,6 +40,11 @@ extern const fdk_widget_class fdk_toolbar_class_def;
 extern const fdk_widget_class fdk_spinner_class_def;   /* 1.4.1 */
 extern const fdk_widget_class fdk_paned_class_def;     /* 1.4.1 */
 extern const fdk_widget_class fdk_expander_class_def;  /* 1.4.1 */
+extern const fdk_widget_class fdk_statusbar_class_def; /* 1.4.2 */
+extern const fdk_widget_class fdk_levelbar_class_def; /* 1.4.2 */
+extern const fdk_widget_class fdk_revealer_class_def; /* 1.4.2 */
+extern const fdk_widget_class fdk_stack_class_def;     /* 1.4.2 */
+extern const fdk_widget_class fdk_stackswitcher_class_def; /* 1.4.2 */
 
 /* toolbar.c: relayout hook for the layout notifier (box.c). */
 void fdk__toolbar_layout_changed(fdk_widget *w);
@@ -49,6 +54,11 @@ void fdk__toolbar_layout_changed(fdk_widget *w);
  * added to (or re-measured inside) one of these. */
 void fdk__paned_layout_changed(fdk_widget *w);
 void fdk__expander_layout_changed(fdk_widget *w);
+
+/* revealer.c / stack.c (1.4.2): the same relayout hooks for the
+ * reveal container and the page stack. */
+void fdk__revealer_layout_changed(fdk_widget *w);
+void fdk__stack_layout_changed(fdk_widget *w);
 
 /* scroll.c: relayout hook the layout notifier (box.c) calls when a
  * scrollview's subtree changed (content added / natural size
@@ -128,6 +138,19 @@ fdk_color fdk__pal_entry(void);
 fdk_color fdk__pal_entry_border(void);
 fdk_color fdk__pal_row_hover(void);
 
+/* ---- 1.4.1: the shared symbolic row glyphs (statics.c) ----------
+ *
+ * Font-independent vector strokes shared by the List (1.4.1) and
+ * the Tree (1.4.2): a 16-px glyph box, 6-px gap to the text. */
+
+/* The glyph box + gap a row must reserve for `icon` (0 for NONE). */
+fdk_i32 fdk__row_icon_advance(fdk_row_icon icon);
+
+/* Paints the glyph with its box's top-left at (x, cy) — the SAME
+ * (x, cy) convention as the list's 1.4.1 call sites. */
+void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
+                         fdk_i32 x, fdk_i32 cy, bool disabled);
+
 /* ---- shared instance structs ---- */
 
 /* Label. `lines` is the display cache: the text broken into the
@@ -169,6 +192,13 @@ typedef struct fdk_hover_fade {
     fdk_f32 target;         /* 0 (resting) or 1 (hovered)             */
     fdk_animation *anim;    /* the running fade, or NULL              */
 } fdk_hover_fade;
+
+/* statics.c: arms (or retargets) a shared hover fade toward 1
+ * (entering) / 0 (leaving) — the 1.4.1 Button/check machinery,
+ * shared by the StackSwitcher's pills and the menu rows since
+ * 1.4.2. Cancels the running flight first (retarget-from-live). */
+void fdk__hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
+                         bool entering);
 
 /* Button. */
 typedef struct fdk_button {
@@ -277,6 +307,93 @@ typedef struct fdk_expander {
     void *on_changed_data;
 } fdk_expander;
 
+/* Statusbar (1.4.2, statusbar.c): the context-scoped message bar.
+ * `msgs` is the global message stack in GTK order — the TOP of the
+ * stack is what paints, pop(context) removes the topmost message OF
+ * THAT context, remove(context, id) removes one by handle. Each
+ * entry owns its text; `next_id` mints message handles (0 reserved:
+ * "no such message"). */
+typedef struct fdk_statusbar_msg {
+    fdk_u32 context;
+    fdk_u32 id;
+    char *text;         /* owned */
+} fdk_statusbar_msg;
+
+typedef struct fdk_statusbar {
+    fdk_widget base;
+    fdk_font *font;         /* borrowed */
+    fdk_statusbar_msg *msgs;
+    size_t count;
+    size_t capacity;
+    fdk_u32 next_id;
+} fdk_statusbar;
+
+/* LevelBar (1.4.2, levelbar.c): the segmented value readout. */
+typedef struct fdk_levelbar {
+    fdk_widget base;
+    double min;
+    double max;
+    double value;
+    fdk_levelbar_mode mode;   /* DISCRETE (default) / CONTINUOUS */
+    size_t segments;          /* DISCRETE mode's block count */
+} fdk_levelbar;
+
+/* Revealer (1.4.2, revealer.c): the expander's flight generalized
+ * to any child. `reveal` is the animated 0..1 blend of the child's
+ * extent along the transition axis; the child is FDK_WF_VISIBLE-off
+ * at exactly 0. `anim` is the running flight (NULL when idle);
+ * standalone trees snap (no clock to tick). */
+typedef struct fdk_revealer {
+    fdk_widget base;
+    fdk_revealer_transition transition;
+    fdk_u32 duration_ms;      /* the flight's duration (default 160) */
+    bool revealed;            /* the TARGET state */
+    fdk_f32 reveal;           /* current blend, 0..1 */
+    fdk_f32 reveal_from;      /* the flight's departure blend */
+    fdk_animation *anim;      /* running flight or NULL */
+    void (*on_revealed)(fdk_widget *w, bool revealed, void *user);
+    void *on_revealed_data;
+} fdk_revealer;
+
+/* Stack (1.4.2, stack.c): named pages, exactly one visible. Pages
+ * are reparented in (the notebook's adoption model); `current` is
+ * the shown page index. */
+typedef struct fdk_stack_page {
+    fdk_widget *widget;   /* owned via the tree */
+    char *name;           /* owned; page's unique key */
+    char *title;          /* owned; the switcher's pill label */
+} fdk_stack_page;
+
+typedef struct fdk_stack {
+    fdk_widget base;
+    fdk_stack_page *pages;
+    size_t count;
+    size_t capacity;
+    size_t current;       /* index of the shown page */
+    void (*on_changed)(fdk_widget *stack, size_t index,
+                       const char *name, void *user);
+    void *on_changed_data;
+} fdk_stack;
+
+/* StackSwitcher (1.4.2, stackswitcher.c): the pill row bound to a
+ * stack. `stack_watch` is a persistent reentrancy watch on the
+ * bound stack: paint/arrange re-check it, so a stack destroyed by
+ * another hand cleanly unbinds (the switcher paints its empty row,
+ * it never dereferences a dangling pointer). `hover_pill` rides
+ * MOTION like the notebook's hover_tab; pill blends fade on the
+ * 1.4.1 hover-fade machinery. */
+typedef struct fdk_stackswitcher {
+    fdk_widget base;
+    fdk_font *font;         /* borrowed */
+    fdk_widget *stack;      /* borrowed, NULL when unbound */
+    fdk_widget_watch stack_watch;
+    int hover_pill;         /* -1 when none */
+    fdk_hover_fade *fades;  /* per-pill paint blend (fade_count) */
+    size_t fade_count;      /* fades array length (cached count) */
+    char **titles;          /* owned pill titles, fade_count long  */
+    char **names;           /* owned page keys, fade_count long    */
+} fdk_stackswitcher;
+
 /* Downcasts — single-allocation subclasses, base first (see
  * fdk_widget.h's subclassing contract). */
 static inline fdk_label *label_of(fdk_widget *w) {
@@ -305,6 +422,21 @@ static inline fdk_paned *paned_of(fdk_widget *w) {
 }
 static inline fdk_expander *expander_of(fdk_widget *w) {
     return (fdk_expander *)w;
+}
+static inline fdk_statusbar *statusbar_of(fdk_widget *w) {
+    return (fdk_statusbar *)w;
+}
+static inline fdk_levelbar *levelbar_of(fdk_widget *w) {
+    return (fdk_levelbar *)w;
+}
+static inline fdk_revealer *revealer_of(fdk_widget *w) {
+    return (fdk_revealer *)w;
+}
+static inline fdk_stack *stack_of(fdk_widget *w) {
+    return (fdk_stack *)w;
+}
+static inline fdk_stackswitcher *switcher_of(fdk_widget *w) {
+    return (fdk_stackswitcher *)w;
 }
 
 /* ---- File dialog scan seam (1.2.0, file_dialog.c) ----

@@ -145,6 +145,73 @@ static void test_slider(void) {
            "keyboard stepping, programmatic set\n");
 }
 
+/* ---- slider marks (1.4.2) ---- */
+
+static void test_slider_marks(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *sl = NULL;
+    assert(fdk_slider_create(root, 0.0, 100.0, 0.0, &sl) == FDK_OK);
+
+    /* Empty by default; marks clamp into the range; labels copy. */
+    assert(fdk_slider_mark_count(sl) == 0);
+    assert(fdk_slider_add_mark(sl, -20.0, NULL) == FDK_OK);  /* -> 0  */
+    assert(fdk_slider_add_mark(sl, 250.0, "max") == FDK_OK); /* -> 100 */
+    assert(fdk_slider_add_mark(sl, 50.0, "mid") == FDK_OK);
+    assert(fdk_slider_mark_count(sl) == 3);
+    assert(fdk_slider_add_mark(NULL, 1.0, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_slider_mark_count(NULL) == 0);
+
+    /* The natural height grows by one label line when a mark carries
+     * a label (the lazy system font loads in the test environment —
+     * DejaVu is present, so this is the labeled path, not the
+     * degraded one). */
+    fdk_size nat_plain, nat_labeled;
+    fdk_widget_measure(sl, &nat_labeled);
+    assert(nat_labeled.height > 24); /* 24 + line + 2              */
+    fdk_slider_clear_marks(sl);
+    fdk_widget_measure(sl, &nat_plain);
+    assert(nat_plain.height == 24);
+    assert(fdk_slider_mark_count(sl) == 0);
+    /* Ticks only (no labels): the height stays the plain 24. */
+    assert(fdk_slider_add_mark(sl, 0.0, NULL) == FDK_OK);
+    assert(fdk_slider_add_mark(sl, 100.0, NULL) == FDK_OK);
+    fdk_widget_measure(sl, &nat_plain);
+    assert(nat_plain.height == 24);
+    fdk_slider_clear_marks(sl);
+    fdk_slider_clear_marks(sl); /* idempotent */
+    fdk_slider_clear_marks(NULL);
+
+    /* Paint: ticks stroke below the trough at the mark positions
+     * (0 and max are the thumb-center extremes: x = 7 and 193 for a
+     * 200-wide slider). */
+    assert(fdk_slider_add_mark(sl, 0.0, NULL) == FDK_OK);
+    assert(fdk_slider_add_mark(sl, 100.0, NULL) == FDK_OK);
+    fdk_widget_set_bounds(sl, (fdk_rect){0, 0, 200, 24});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(200, 24, &s)));
+    fdk_color winbg =
+        fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
+    fdk_widget_set_background(root, winbg);
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    /* The track band sits at the vertical center (cy=12): the tick
+     * strokes run below it. Sample the 0-mark tick column. */
+    bool tick_found = false;
+    for (int y = 15; y < 24 && !tick_found; y++) {
+        if (px_at(s, 7, y) != px_at(s, 40, y)) {
+            tick_found = true; /* tick ink at x=7, none at x=40     */
+        }
+    }
+    assert(tick_found);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] slider marks: clamped values, count/clear, "
+           "labeled height growth (plain 24 with bare ticks), tick "
+           "ink below the trough\n");
+}
+
 /* ---- SpinButton ---- */
 
 static int g_spin_changes = 0;
@@ -452,6 +519,7 @@ int main(void) {
     }
 
     test_slider();
+    test_slider_marks();
     test_spin();
     test_toolbar();
     test_notebook();

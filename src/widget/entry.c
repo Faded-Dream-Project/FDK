@@ -41,6 +41,12 @@
 #define ENTRY_MAX_TEXT (64u * 1024u) /* bounded input (security.md) */
 #define ENTRY_DBLCLICK_MS 400
 #define ENTRY_DBLCLICK_SLOP 4
+/* 1.4.2 search preset: the magnifier's glyph zone before the text
+ * and the clear button's zone after it (16-px glyph box + 6-px gap,
+ * the symbolic-row-icon geometry). */
+#define ENTRY_SEARCH_GLYPH 16
+#define ENTRY_SEARCH_GLYPH_GAP 6
+#define ENTRY_SEARCH_CLEAR (ENTRY_SEARCH_GLYPH + ENTRY_SEARCH_GLYPH_GAP)
 /* Caret blink cadence (1.3.1, timers): GTK's 530ms, the desktop
  * convention — two full blinks per second reads as "alive" without
  * distracting. The phase RESETS on every caret move/edit (the same
@@ -107,6 +113,15 @@ typedef struct fdk_entry {
      * classic observable: middle-click pastes nothing). Headless /
      * standalone trees never set it — no context, no pushes. */
     bool primary_pushed;
+    /* ---- Search preset (1.4.2) ----
+     *
+     * The GtkSearchEntry face on a regular Entry: a magnifier glyph
+     * before the text, a clear button (hover-pill + X) that exists
+     * only while there is text, and the search Esc ladder (first
+     * Escape clears, the next bubbles). Every other Entry API —
+     * selection, undo, clipboard, preedit — applies unchanged. */
+    bool search_mode;
+    bool clear_hover;    /* the clear zone under the pointer */
 } fdk_entry;
 
 static fdk_entry *entry_of(fdk_widget *w) {
@@ -244,6 +259,31 @@ static void word_range(const char *s, size_t len, size_t i,
 
 /* ---- geometry ---- */
 
+/* ---- search preset geometry (1.4.2) ----
+ *
+ * The text origin's inset (the magnifier zone) and the right
+ * reserve (the clear button, present only while text exists — the
+ * view width grows the moment the button does, which is exactly
+ * when the user can see it). Hit-testing, scrolling, and paint all
+ * route through these two, so the caret and the glyph never fight. */
+static fdk_i32 entry_text_inset(const fdk_entry *e) {
+    return ENTRY_PAD_X +
+           (e->search_mode
+                ? ENTRY_SEARCH_GLYPH + ENTRY_SEARCH_GLYPH_GAP
+                : 0);
+}
+
+static fdk_i32 entry_right_inset(const fdk_entry *e) {
+    return ENTRY_PAD_X +
+           ((e->search_mode && e->len > 0) ? ENTRY_SEARCH_CLEAR : 0);
+}
+
+/* The clear zone's x extent in widget-local coordinates (the box
+ * + its gap; empty when the button does not exist). */
+static fdk_i32 entry_clear_zone_w(const fdk_entry *e) {
+    return (e->search_mode && e->len > 0) ? ENTRY_SEARCH_CLEAR : 0;
+}
+
 /* Cumulative advance width (px) of s[0..i) — an O(n) walk through
  * the glyph cache; n is bounded by the entry cap. Glyph advances
  * are subpixel floats; the entry rounds the SUM once (integer
@@ -312,7 +352,8 @@ static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
     if (e->font == NULL || e->len == 0) {
         return 0;
     }
-    fdk_f32 x = local_x - (fdk_f32)ENTRY_PAD_X + (fdk_f32)e->x_offset;
+    fdk_f32 x = local_x - (fdk_f32)entry_text_inset(e) +
+                (fdk_f32)e->x_offset;
     if (x <= 0.0f) {
         return 0;
     }
@@ -343,7 +384,7 @@ static void entry_scroll_to_caret(fdk_entry *e) {
     if (w <= 0) {
         return;
     }
-    fdk_i32 view = w - ENTRY_PAD_X * 2;
+    fdk_i32 view = w - entry_text_inset(e) - entry_right_inset(e);
     if (view <= 0) {
         e->x_offset = 0;
         return;
@@ -1012,6 +1053,22 @@ static bool entry_handle_event(fdk_widget *w,
         if ((w->flags & FDK_WF_ENABLED) == 0) {
             return false;
         }
+        /* 1.4.2 — the search preset's clear button: a press in the
+         * reserved right zone empties the field through the honest
+         * edit path (undo records, on_changed fires). It is NOT a
+         * caret gesture: the click-count machinery never sees it. */
+        if (e->search_mode && e->len > 0 && !e->read_only &&
+            ev->pointer.button == FDK_POINTER_BUTTON_LEFT &&
+            ev->pointer.position.x >
+                (fdk_f32)(e->base.bounds.width -
+                          entry_clear_zone_w(e))) {
+            if (!fdk_widget_has_focus(w)) {
+                (void)fdk_widget_focus(w);
+            }
+            e->clear_hover = false;
+            (void)entry_splice(e, 0, e->len, NULL, 0);
+            return true;
+        }
         if (ev->pointer.button == FDK_POINTER_BUTTON_MIDDLE) {
             /* Classic Unix middle-click: PRIMARY pastes at the click.
              * Deliberately outside the click-count machinery — a
@@ -1069,6 +1126,19 @@ static bool entry_handle_event(fdk_widget *w,
             size_t hit = offset_at_x(e, ev->position.x);
             entry_move_caret(e, hit, true);
             return true;
+        }
+        /* 1.4.2 — the clear button's hover pill (MOTION carries real
+         * coordinates; synthesized ENTER/LEAVE do not — the paned's
+         * 1.4.1 lesson). */
+        if (e->search_mode) {
+            bool in_clear =
+                e->len > 0 &&
+                ev->position.x > (fdk_f32)(e->base.bounds.width -
+                                           entry_clear_zone_w(e));
+            if (in_clear != e->clear_hover) {
+                e->clear_hover = in_clear;
+                fdk_widget_invalidate(w);
+            }
         }
         return false;
     }
@@ -1185,6 +1255,16 @@ static bool entry_handle_event(fdk_widget *w,
             }
             return true;
         case FDK_KEY_ESC:
+            /* The search preset's Esc ladder (1.4.2): with text on
+             * board, the FIRST Escape clears it (GtkSearchEntry
+             * semantics — consumed); an empty search field falls
+             * through to the selection-collapse rule below, and a
+             * quiescent one bubbles so a dialog's Cancel still
+             * works. */
+            if (e->search_mode && e->len > 0 && !e->read_only) {
+                (void)entry_splice(e, 0, e->len, NULL, 0);
+                return true;
+            }
             /* Collapse the selection (classic cancel behavior). With
              * nothing selected there is nothing to collapse: bubble
              * the Escape instead of eating it — a prompt dialog's
@@ -1291,7 +1371,24 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         : fdk__pal_text();
     fdk_i32 baseline = fdk__center_baseline(e->font, bounds.y,
                                             bounds.height);
-    fdk_i32 text_x = bounds.x + ENTRY_PAD_X - e->x_offset;
+    fdk_i32 text_x = bounds.x + entry_text_inset(e) - e->x_offset;
+
+    /* 1.4.2 — the magnifier glyph in the reserved left zone: a
+     * stroked lens + handle in the neutral ink (the symbolic-glyph
+     * discipline: no fills that fight theme changes). */
+    if (e->search_mode) {
+        fdk_i32 gx = bounds.x + ENTRY_PAD_X - 2;
+        fdk_i32 gy = bounds.y + (bounds.height - ENTRY_SEARCH_GLYPH) / 2;
+        if (gy < bounds.y) {
+            gy = bounds.y;
+        }
+        fdk_color ink = ((w->flags & FDK_WF_ENABLED) == 0)
+            ? fdk__pal_text_disabled()
+            : fdk__pal_text();
+        fdk_surface_draw_circle_aa(surface, gx + 6, gy + 7, 4, ink);
+        fdk_surface_draw_line_aa(surface, gx + 9, gy + 10, gx + 13,
+                                 gy + 14, ink);
+    }
 
     size_t lo = (e->anchor < e->caret) ? e->anchor : e->caret;
     size_t hi = (e->anchor < e->caret) ? e->caret : e->anchor;
@@ -1393,6 +1490,32 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
             fdk_surface_fill_rect(surface, bar, text_col);
         }
     }
+
+    /* 1.4.2 — the clear button in the reserved right zone (exists
+     * only while there is text): a soft hover pill + the X stroke.
+     * The pill is the ONLY hover feedback (no fade — the button
+     * appearing with the first character is feedback enough). */
+    if (entry_clear_zone_w(e) > 0) {
+        fdk_i32 zone = entry_clear_zone_w(e);
+        fdk_i32 bx = bounds.x + bounds.width - zone - 2;
+        fdk_i32 by = bounds.y + (bounds.height - ENTRY_SEARCH_GLYPH) / 2;
+        if (by < bounds.y) {
+            by = bounds.y;
+        }
+        if (e->clear_hover && (w->flags & FDK_WF_ENABLED) != 0) {
+            fdk_rect pill = {bx - 2, by - 1, ENTRY_SEARCH_GLYPH + 4,
+                             ENTRY_SEARCH_GLYPH + 2};
+            fdk_surface_fill_rounded_rect(surface, pill, 8,
+                                          fdk__pal_row_hover());
+        }
+        fdk_color ink = ((w->flags & FDK_WF_ENABLED) == 0)
+            ? fdk__pal_text_disabled()
+            : fdk__pal_text();
+        fdk_surface_draw_line_aa(surface, bx + 4, by + 4, bx + 12,
+                                 by + 12, ink);
+        fdk_surface_draw_line_aa(surface, bx + 12, by + 4, bx + 4,
+                                 by + 12, ink);
+    }
 }
 
 /* ---- measure / destroy ---- */
@@ -1407,7 +1530,7 @@ static void entry_measure(fdk_widget *w, fdk_size *out) {
     } else {
         fdk__text_extent(e->font, e->text, &tw, &th);
     }
-    out->width = tw + ENTRY_PAD_X * 2;
+    out->width = tw + entry_text_inset(e) + entry_right_inset(e);
     out->height = th + ENTRY_PAD_X; /* tighter vertically */
     if (out->width < ENTRY_MIN_W) {
         out->width = ENTRY_MIN_W;
@@ -1596,6 +1719,8 @@ fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
     e->caret_on = true;
     e->undo = NULL;       /* lazy: first recorded edit allocates it */
     e->undo_applying = false;
+    e->search_mode = false; /* the plain entry (1.4.2 preset below) */
+    e->clear_hover = false;
     const char *init = (text != NULL) ? text : "";
     size_t len = strlen(init);
     if (len > ENTRY_MAX_TEXT) {
@@ -1622,6 +1747,27 @@ const char *fdk_entry_get_text(fdk_widget *entry) {
         return NULL;
     }
     return entry_of(entry)->text;
+}
+
+/* ---- search preset (1.4.2) ---- */
+
+fdk_result fdk_search_entry_create(fdk_widget *parent, fdk_font *font,
+                                   fdk_widget **out_entry) {
+    fdk_result r = fdk_entry_create(parent, font, "", out_entry);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    entry_of(*out_entry)->search_mode = true;
+    fdk_widget_invalidate(*out_entry);
+    fdk_widget_child_layout_changed((*out_entry)->parent);
+    return FDK_OK;
+}
+
+bool fdk_entry_is_search(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return false;
+    }
+    return entry_of(entry)->search_mode;
 }
 
 fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text) {
