@@ -3634,3 +3634,66 @@ Battery on the final tree: headless all-pass (498 [ok] groups);
 X11 integration 109 [ok] exit 0; interop rig PASS; X11 examples
 11/11 with clean exits; sway examples 11/11; both tooltip rigs
 PASS; compositor-death rig PASS; release zero warnings.
+
+### 1.3.9 — the shared-library export surface (the first final-audit sweep)
+
+With the standing audit's known-open list empty after 1.3.8, the
+multi-round final audit begins — fresh full-project sweeps hunting
+for anything the milestone track overlooked. First sweep: the API
+surface, read from the artifact rather than the source.
+
+THE FINDING: the shared library exported every global it linked —
+787 symbols in the debug build against 441 public API functions.
+The surplus was backend internals (fdk_x11_*/fdk_wayland_*),
+cross-module seams (fdk__*), the vendored stb symbols
+(stbi_*/stbtt_*), the wayland-scanner interface structs, and
+ASan's __odr_asan.* aliases. Beyond surface noise that is an
+INTERPOSITION hazard: an app that vendors its own stb_image gets
+FDK's internal stbi_* calls bound to the app's copy (or vice
+versa) by the dynamic linker — two stb versions silently mixed
+across a DSO boundary.
+
+THE FIX: the .so now links with a build-time GENERATED version
+script (build/libfdk.exports.map — never committed). The export
+list is the intersection of (names declared in include/fdk/*.h)
+and (globals the static archive defines); both sides regenerate
+from source on every build, so the exported surface cannot drift
+from the headers the way a committed list would. Intersection,
+not union: header mentions that are not linkable symbols (the
+typedefs fdk_a11y_action_set, fdk_plural_category, fdk_surface;
+the static-inline helper fdk_ok) drop out on the archive side;
+internal archive globals drop out on the header side. 445 header
+mentions resolve to exactly 441 exported symbols. The
+belt-and-braces verify-exports target (nm -D on the LINKED .so:
+every export fdk_-prefixed; every non-exported fdk_* archive
+global provably absent from the public headers, so the
+generator's wrapped-declaration blind spot cannot hide) runs green
+in BOTH configs — the debug archive's ASan aliases must not
+change the answer.
+
+THE SEAM CLEANUP the sweep flushed out: the i18n plural rule
+functions were the one internal family with bare linkage names
+(plural_ru_uk, plural_pl, ...) — everything else internal already
+carried the fdk__ prefix or a backend prefix. They are
+fdk__plural_* now, so the internal namespace is uniform and the
+export check's fdk_/fdk__ split is total.
+
+THE SESSION'S OWN LESSONS, recorded because they cost real time:
+(1) the WIP's Makefile block carried two unterminated @echo
+strings — make died at the map rule and silently left the
+PREVIOUS .so in place, exporting all 787 symbols to anything that
+trusted "the .so exists" (verify-exports reads the actual dynamic
+symbol table precisely so it cannot be fooled by staleness); (2)
+the tab-normalization rake patch scripts exist to avoid — editing
+a Makefile through tools that convert tabs to spaces breaks every
+recipe line ("missing separator" reported at the FIRST recipe,
+nowhere near the edit) — stepped on again, recovered by restoring
+the pristine Makefile and re-applying the block through the
+patcher with its own quote fix.
+
+Battery on the final tree: headless all-pass (498 [ok] groups);
+X11 integration 109 [ok] exit 0; interop rig PASS; X11 examples
+11/11 with clean exits; sway examples 11/11; both tooltip rigs
+PASS; compositor-death rig PASS; verify-exports 441 symbols in
+debug AND release; release zero warnings; debug-remnant and
+secret scans clean.

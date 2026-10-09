@@ -43,15 +43,15 @@ typedef fdk_plural_category (*fdk_plural_rule_fn)(
  *
  * Named by the rule shape they implement, not by language (many
  * languages share a shape). */
-fdk_plural_category plural_one_i1v0(const fdk_plural_operands *op);
-fdk_plural_category plural_one_i01(const fdk_plural_operands *op);
-fdk_plural_category plural_ru_uk(const fdk_plural_operands *op);
-fdk_plural_category plural_pl(const fdk_plural_operands *op);
-fdk_plural_category plural_cs_sk(const fdk_plural_operands *op);
-fdk_plural_category plural_hr_sr_bs(const fdk_plural_operands *op);
-fdk_plural_category plural_lt(const fdk_plural_operands *op);
-fdk_plural_category plural_lv(const fdk_plural_operands *op);
-fdk_plural_category plural_ar(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_one_i1v0(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_one_i01(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_ru_uk(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_pl(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_cs_sk(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_hr_sr_bs(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_lt(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_lv(const fdk_plural_operands *op);
+fdk_plural_category fdk__plural_ar(const fdk_plural_operands *op);
 
 /* ---- one locale-rules row ---- */
 

@@ -39,7 +39,7 @@
 
 /* ---- rule functions (one per CLDR rule shape) ---- */
 
-fdk_plural_category plural_one_i1v0(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_one_i1v0(const fdk_plural_operands *op) {
     /* en & co: one when i = 1 and v = 0 ("1", not "1.0") */
     if (op->i == 1 && op->v == 0) {
         return FDK_PLURAL_ONE;
@@ -47,7 +47,7 @@ fdk_plural_category plural_one_i1v0(const fdk_plural_operands *op) {
     return FDK_PLURAL_OTHER;
 }
 
-fdk_plural_category plural_one_i01(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_one_i01(const fdk_plural_operands *op) {
     /* fr, pt: one for i = 0 or 1 — INCLUDING 0.5 and 1.5 (CLDR's
      * rule keys on the integer part only; French really does treat
      * "1,5 file" as the singular category). */
@@ -57,7 +57,7 @@ fdk_plural_category plural_one_i01(const fdk_plural_operands *op) {
     return FDK_PLURAL_OTHER;
 }
 
-fdk_plural_category plural_ru_uk(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_ru_uk(const fdk_plural_operands *op) {
     /* Russian / Ukrainian: one/few/many over integers, other for
      * fractions. 21/31/... are ONE here (unlike Polish). */
     if (op->v != 0) {
@@ -74,7 +74,7 @@ fdk_plural_category plural_ru_uk(const fdk_plural_operands *op) {
     return FDK_PLURAL_MANY; /* 0, 5..20, 25..30, 11..14, 100... */
 }
 
-fdk_plural_category plural_pl(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_pl(const fdk_plural_operands *op) {
     /* Polish: one is EXACTLY 1 (21 is many, unlike Russian);
      * fractions are other. */
     if (op->v != 0) {
@@ -91,7 +91,7 @@ fdk_plural_category plural_pl(const fdk_plural_operands *op) {
     return FDK_PLURAL_MANY; /* 0, 5..20, 21, 25..., 11..14, 100... */
 }
 
-fdk_plural_category plural_cs_sk(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_cs_sk(const fdk_plural_operands *op) {
     /* Czech / Slovak: many IS the fraction category; 0 and 5+ are
      * other. */
     if (op->i == 1 && op->v == 0) {
@@ -106,7 +106,7 @@ fdk_plural_category plural_cs_sk(const fdk_plural_operands *op) {
     return FDK_PLURAL_OTHER;
 }
 
-fdk_plural_category plural_hr_sr_bs(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_hr_sr_bs(const fdk_plural_operands *op) {
     /* Croatian / Serbian / Bosnian: one/few over integers, other for
      * everything else (fractions included). */
     if (op->v == 0) {
@@ -122,7 +122,7 @@ fdk_plural_category plural_hr_sr_bs(const fdk_plural_operands *op) {
     return FDK_PLURAL_OTHER;
 }
 
-fdk_plural_category plural_lt(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_lt(const fdk_plural_operands *op) {
     /* Lithuanian: many IS the fraction category (f != 0), checked
      * FIRST because the integer rules also match i=1 of "1.5". */
     if (op->f != 0) {
@@ -139,7 +139,7 @@ fdk_plural_category plural_lt(const fdk_plural_operands *op) {
     return FDK_PLURAL_OTHER; /* 0, 10..19, 20, 30, ... */
 }
 
-fdk_plural_category plural_lv(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_lv(const fdk_plural_operands *op) {
     /* Latvian: zero/one over integers; fractions are other (0.5 is
      * NOT zero even though its integer part is 0). */
     if (op->f != 0) {
@@ -156,7 +156,7 @@ fdk_plural_category plural_lv(const fdk_plural_operands *op) {
     return FDK_PLURAL_OTHER;
 }
 
-fdk_plural_category plural_ar(const fdk_plural_operands *op) {
+fdk_plural_category fdk__plural_ar(const fdk_plural_operands *op) {
     /* Arabic: the full six. Zero/one/two are exact n matches
      * (0.0 counts as zero even written "0.0"); any other fraction
      * is other; the 3..10 / 11..99 rules read i's last two digits. */

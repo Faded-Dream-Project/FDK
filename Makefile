@@ -195,6 +195,33 @@ LIB_OBJS_PIC  := $(patsubst src/%.c,$(BUILD_DIR)/obj-pic/%.o,$(LIB_SRCS))
 STATIC_LIB := $(BUILD_DIR)/libfdk.a
 SHARED_LIB := $(BUILD_DIR)/libfdk.so
 
+# Shared-library export map (1.3.9). The .so must export EXACTLY the
+# public API (include/fdk) — nothing else. Without a version script it
+# exports every global in the archive: backend internals (fdk_x11_*,
+# fdk_wayland_*), cross-module seams (fdk__*), the vendored stb symbols
+# (stbi_*/stbtt_*), the wayland-scanner interface structs — ~230 symbols
+# an application has no business resolving. Beyond surface noise that
+# is an interposition hazard: with default visibility, an app that
+# vendors its own stb_image gets FDK's internal stbi_* calls bound to
+# the app's copy (or vice versa) by the dynamic linker — silently
+# mixing two stb versions across a DSO boundary.
+#
+# The map is GENERATED at build time, never committed: the export list
+# is the intersection of (symbols declared in include/fdk/*.h) and
+# (symbols the static archive actually defines). Intersection, not
+# union: header mentions that are not linkable symbols (typedefs like
+# fdk_a11y_action_set, static-inline helpers like fdk_ok) drop out on
+# the archive side; archive globals that are internal (fdk__plural_*,
+# fdk_x11_*, *_class_def, ...) drop out on the header side. Both sides
+# regenerate from source on every build, so the exported surface can
+# never drift from the headers the way a committed list would.
+#
+# Header style constraint this depends on: a public function's name
+# and its opening paren must sit on ONE line in include/fdk/*.h (the
+# generator greps the `fdk_name(` token; return types and parameter
+# lists may wrap freely). Every header already follows this.
+EXPORT_MAP := $(BUILD_DIR)/libfdk.exports.map
+
 TEST_SRCS := $(filter-out tests/test_x11_integration.c tests/test_wayland_integration.c tests/bench.c,$(wildcard tests/*.c))
 TEST_BINS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%,$(TEST_SRCS))
 
@@ -216,7 +243,7 @@ EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 # library object did.
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
-.PHONY: all release static shared test test-x11 test-wayland bench examples install uninstall clean
+.PHONY: all release static shared test test-x11 test-wayland bench examples install uninstall clean verify-exports
 
 all: static shared
 
@@ -271,9 +298,57 @@ $(STATIC_LIB): $(LIB_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
 
-$(SHARED_LIB): $(LIB_OBJS_PIC)
+$(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -fPIC -shared -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) -fPIC -shared -Wl,--version-script=$(EXPORT_MAP) -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
+
+# Generates the export map: intersection of header-declared names and
+# archive-defined globals (see the EXPORT_MAP block above). Depends on
+# the static archive so `make shared` after any code change regenerates
+# it; depends on the headers so adding/removing a public function does
+# too. nm/sed/sort/uniq/tr are binutils+coreutils — no build-time
+# dependency beyond what the build already uses.
+$(EXPORT_MAP): $(STATIC_LIB) $(wildcard include/fdk/*.h) Makefile
+	@echo "== generating $(EXPORT_MAP) (public API only; internals stay local) =="
+	@printf '{\n  global:\n' > $@
+	@{ nm --defined-only $(STATIC_LIB) \
+	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' | sort -u; \
+	   grep -hoE '\bfdk_[a-z0-9_]+[[:space:]]*\(' include/fdk/*.h \
+	           | tr -d ' (' | sort -u; } \
+	  | sort | uniq -d | sed 's/^/    /; s/$$/;/' >> $@
+	@printf '  local:\n    *;\n};\n' >> $@
+
+# Belt-and-braces check for the one blind spot the map generator has
+# (a declaration whose name/paren wrapped across lines would be missed
+# by the grep): every fdk_* global in the archive that is NOT exported
+# must NOT be mentioned in include/fdk at all. If it is, it is public
+# but unexported — a real bug, fail loudly. Internal symbols
+# (fdk__prefixed, fdk_x11_*/fdk_wayland_*, *_class_def, ...) pass
+# because they never appear in the public headers. Run in the battery
+# alongside the builds (docs/testing.md).
+verify-exports: $(SHARED_LIB)
+	@echo "== verifying the shared library's exported surface =="
+	@exports=$$(nm -D --defined-only $(SHARED_LIB) \
+	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' | sort -u); \
+	echo "exported symbols: $$(printf '%s\n' "$$exports" | wc -l)"; \
+	bad=$$(printf '%s\n' "$$exports" | grep -v '^fdk_' || true); \
+	if [ -n "$$bad" ]; then \
+	        echo "FAIL: non-public exports leaked into the .so:"; \
+	        printf '%s\n' "$$bad"; exit 1; \
+	fi; \
+	missing=0; \
+	for s in $$(nm --defined-only $(STATIC_LIB) \
+	           | awk '$$2 ~ /^[TDBRW]$$/ { print $$3 }' \
+	           | grep '^fdk_' | grep -v '^fdk__' || true); do \
+	        if ! printf '%s\n' "$$exports" | grep -qx "$$s"; then \
+	                if grep -rqw --include='*.h' "$$s" include/fdk/; then \
+	                        echo "FAIL: $$s is declared in include/fdk but NOT exported"; \
+	                        missing=1; \
+	                fi; \
+	        fi; \
+	done; \
+	[ $$missing -eq 0 ] || exit 1; \
+	echo "EXPORT VERIFICATION OK: the .so exports exactly the public API"
 
 # Tests may include src/ internal headers (precedent: window_internal.h,
 # widget_internal.h, ...) and some of those embed third-party headers

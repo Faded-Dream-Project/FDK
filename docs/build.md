@@ -224,3 +224,47 @@ list. Together with the config stamp above, this closes the whole
 family: objects can no longer outlive the configuration that
 produced them, whether through shared paths (1.3.4) or through
 archive accumulation (1.3.7).
+
+## Why the shared library links with a generated version script
+
+Without a version script, a shared library exports every global
+object linked into it. FDK's `.so` linked that way through 1.3.8:
+787 symbols under the debug build, of which 441 are the public
+API — the rest was backend internals (`fdk_x11_*`,
+`fdk_wayland_*`), cross-module seams (`fdk__*`), the vendored stb
+symbols (`stbi_*`/`stbtt_*`), the wayland-scanner interface
+structs, and ASan's `__odr_asan.*` instrumentation aliases.
+Surface noise is the smaller problem: it is an INTERPOSITION
+hazard. An application that vendors its own stb_image gets FDK's
+internal `stbi_*` calls bound to the app's copy (or vice versa) by
+the dynamic linker — two stb versions silently mixed across a DSO
+boundary.
+
+The `.so` therefore links with
+`-Wl,--version-script=$(BUILD_DIR)/libfdk.exports.map`, and the
+map is GENERATED at build time, never committed. The export list
+is the INTERSECTION of two sets that each regenerate from source
+on every build: the names declared in `include/fdk/*.h` (the
+generator greps the `fdk_name(` token, so a public function's
+name and its opening paren must sit on ONE line — return types
+and parameter lists may wrap freely; every header already follows
+this) and the globals the static archive actually defines (`nm`
+over `libfdk.a`). Intersection, not union: header mentions that
+are not linkable symbols (typedefs like `fdk_plural_category`,
+static-inline helpers like `fdk_ok`) drop out on the archive
+side; archive globals that are internal drop out on the header
+side. Because both sides come from source, the exported surface
+cannot drift from the headers the way a committed hand-edited
+list would.
+
+`make verify-exports` is the belt-and-braces check that the
+generator's one blind spot cannot hide: it reads the ACTUAL
+dynamic symbol table of the linked `.so` (not the map file),
+requires every export to be `fdk_`-prefixed, and walks every
+`fdk_*` archive global that is NOT exported to assert it is not
+mentioned in `include/fdk` at all — a declaration the grep missed
+(say, a name and paren wrapped across lines) is
+public-but-unexported, a real bug, and the check fails loudly.
+Run it alongside the builds in both configurations: the archive
+differs per config (ASan instrumentation symbols exist only in
+debug), but the exported surface must not.

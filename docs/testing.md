@@ -1279,3 +1279,38 @@ regression: Xvfb has no WM, the window lands at (0,0), the pointer
 sits on the header, the 500 ms delay fires, and the app is closed
 with the tip on screen — exactly the shutdown path whose
 use-after-free the run found.
+
+## 1.3.9 — verify-exports: a battery member that checks the BINARY
+
+The export-surface check (`make verify-exports`, new in 1.3.9) is
+a different kind of battery member: it asserts properties of the
+LINKED ARTIFACT, not of the source. Two lessons from bringing it
+up:
+
+**A stale artifact passes every source-level check.** The first
+attempt at the map link died inside make on an unterminated
+`@echo` string — and the tree was left with the PREVIOUS `.so`
+still on disk, exporting all 787 symbols. Nothing that compiles
+code or reads the Makefile can notice that; only reading the
+`.so`'s own dynamic symbol table does. This is the 1.2.5
+stale-PNG rig lesson (verify the artifact you BUILT, not the
+artifact that happens to be present) restated for the build
+itself, which is why verify-exports greps `nm -D` output instead
+of trusting the map file it just generated.
+
+**The delta between "mentioned in headers" and "exported" must be
+explainable by name.** 445 `fdk_` mentions in `include/fdk`
+resolve to 441 exported symbols; the four drop-outs are exactly
+the non-symbol mentions — the typedefs `fdk_a11y_action_set`,
+`fdk_plural_category`, `fdk_surface` and the static-inline helper
+`fdk_ok`. An unexplainable name in that delta is either a
+declaration the one-line grep missed (the belt-and-braces loop
+catches it at verify time) or an internal symbol leaking into
+public prose (the intersection would silently EXPORT it — audited
+once by diffing the exported list against the pre-change audit
+list, zero surprises). The surface audit's ground truth is the
+diff, not the count.
+
+Both configurations run the check: the debug archive carries
+ASan `__odr_asan.*` aliases the release archive does not, and the
+exported surface must be identical (441) either way.
