@@ -4091,8 +4091,11 @@ Infrastructure: theme files + tokens/metrics SHIPPED (28 colors,
 10 metrics); animation/easing SHIPPED (1.3.8); a11y (tree,
 narrator, actions) SHIPPED; i18n (catalog, plurals, dates)
 SHIPPED; undo/redo SHIPPED (1.3.3); preferences SHIPPED (1.3.7);
-export surface SHIPPED (1.3.9); HiDPI LATER (the render layer is
-integer-scaled; fractional scale needs backend work); CSS-like
+export surface SHIPPED (1.3.9); HiDPI: Wayland SHIPPED (Phase 3
+completion — fractional-scale-v1 + viewporter + fdk_window_get_scale;
+the 2026-10-10 root-file audit caught this entry lagging the tree),
+X11 LATER (RandR/Xft.dpi detection — get_scale honestly returns 1.0);
+CSS-like
 styling OUT (the .fdk theme format is the customization surface —
 deliberate, per the no-CSS-engine stance); icon theme loading OUT
 (vector glyphs + app-provided surfaces are the icon story, per the
