@@ -21,6 +21,12 @@
  * degrades labels to bare ticks — honest, not a blank. Marks widen
  * the natural height by one label line; the track centers in the
  * remaining extent so a marked slider keeps its thumb geometry.
+ *
+ * 1.4.3 — the parked vertical remainder, shipped: FDK_SLIDER_VERTICAL
+ * rotates the whole geometry (min at the BOTTOM, max at the top);
+ * marks tick to the LEFT of the trough with right-aligned labels,
+ * and labeled marks widen the natural WIDTH by one label line. The
+ * event mapping is unchanged (Up/Right raise, Down/Left lower).
  */
 
 #include "widgets_internal.h"
@@ -60,6 +66,7 @@ typedef struct fdk_slider {
     size_t mark_cap;
     fdk_font *label_font;     /* 1.4.2: lazy system default          */
     bool label_font_failed;   /* one honest attempt, then ticks only */
+    fdk_slider_orientation orientation; /* 1.4.3 */
 } fdk_slider;
 
 static fdk_slider *slider_of(fdk_widget *w) {
@@ -122,17 +129,27 @@ static fdk_font *slider_label_font(fdk_slider *s) {
     return s->label_font;
 }
 
-/* Thumb x (widget-local). */
-static fdk_i32 slider_thumb_x(const fdk_slider *s) {
-    fdk_i32 w = s->base.bounds.width;
-    fdk_i32 inner = w - SLIDER_THUMB_W;
-    if (inner <= 0) {
+/* Thumb position along the value axis (widget-local): the leading
+ * edge coordinate the paint centers on — x for horizontal, y for
+ * vertical (min at the BOTTOM, so the fraction runs from the
+ * bottom up). */
+static fdk_i32 slider_thumb_pos(const fdk_slider *s) {
+    fdk_i32 extent = (s->orientation == FDK_SLIDER_VERTICAL)
+        ? s->base.bounds.height - SLIDER_THUMB_H
+        : s->base.bounds.width - SLIDER_THUMB_W;
+    if (extent <= 0) {
         return 0;
     }
     double frac = (slider_span(s) > 0.0)
         ? (s->value - s->min) / slider_span(s)
         : 0.0;
-    return (fdk_i32)(frac * (double)inner + 0.5);
+    fdk_i32 pos = (fdk_i32)(frac * (double)extent + 0.5);
+    if (s->orientation == FDK_SLIDER_VERTICAL) {
+        /* Bottom-up: the value axis grows upward; the thumb's y runs
+         * from the widget's bottom. */
+        pos = extent - pos;
+    }
+    return pos;
 }
 
 static void slider_set_value(fdk_slider *s, double v, bool fire) {
@@ -158,53 +175,96 @@ static void slider_paint(fdk_widget *w, fdk_surface *surface,
     if (bounds.width <= 0 || bounds.height <= 0) {
         return;
     }
-    /* 1.4.2: with labeled marks the track zone is the bounds minus
-     * the label line (+2 breathing room); the thumb/track geometry
-     * is UNCHANGED (it centers in the zone). */
-    fdk_i32 zone_h = bounds.height;
+    const bool vert = (s->orientation == FDK_SLIDER_VERTICAL);
+    /* The track zone: the bounds minus the label band — horizontal
+     * gives up its bottom line, vertical its left column (the exact
+     * mirror). The thumb/track geometry centers in what remains. */
+    fdk_i32 zone_cross = vert ? bounds.width : bounds.height;
     fdk_font *lfont = NULL;
     if (s->mark_count > 0 && slider_has_labeled_mark(s)) {
         lfont = slider_label_font(s);
         if (lfont != NULL) {
             fdk_i32 lw = 0, lh = 0;
             fdk__text_extent(lfont, "Ag", &lw, &lh);
-            zone_h = bounds.height - lh - 2;
-            if (zone_h < SLIDER_MIN_H / 2) {
-                zone_h = bounds.height / 2; /* squeezed: keep the
-                                              * track honest */
+            zone_cross -= lh + 2;
+            if (zone_cross < SLIDER_MIN_H / 2) {
+                zone_cross = vert ? bounds.width / 2
+                                  : bounds.height / 2; /* squeezed:
+                                          keep the track honest */
             }
         }
     }
-    fdk_i32 cy = bounds.y + zone_h / 2;
-    /* Track. */
-    fdk_rect track = { bounds.x + SLIDER_THUMB_W / 2,
-                       cy - SLIDER_TRACK_H / 2,
-                       bounds.width - SLIDER_THUMB_W, SLIDER_TRACK_H };
-    if (track.width > 0) {
+    fdk_i32 c_cross = zone_cross / 2; /* center across the value axis */
+    /* Track rect, rotated. */
+    fdk_rect track;
+    if (vert) {
+        /* The vertical track spans between the thumb end-centers; the
+         * +TRACK_H keeps the rounded caps inside. */
+        track = (fdk_rect){
+            bounds.x + c_cross - SLIDER_TRACK_H / 2,
+            bounds.y + SLIDER_THUMB_H / 2 - SLIDER_TRACK_H / 2,
+            SLIDER_TRACK_H,
+            bounds.height - SLIDER_THUMB_H + SLIDER_TRACK_H};
+        if (track.height < SLIDER_TRACK_H) {
+            track.height = SLIDER_TRACK_H;
+        }
+    } else {
+        track = (fdk_rect){ bounds.x + SLIDER_THUMB_W / 2,
+                            bounds.y + c_cross - SLIDER_TRACK_H / 2,
+                            bounds.width - SLIDER_THUMB_W,
+                            SLIDER_TRACK_H };
+    }
+    if (vert) {
+        if (track.height > 0) {
+            fdk_surface_fill_rounded_rect(surface, track,
+                                          SLIDER_TRACK_H / 2,
+                                          fdk__pal_track());
+        }
+    } else if (track.width > 0) {
         fdk_surface_fill_rounded_rect(surface, track, SLIDER_TRACK_H / 2,
                                       fdk__pal_track());
     }
-    /* Filled run from the minimum to the thumb. */
-    fdk_i32 tx = slider_thumb_x(s);
-    fdk_rect fill = { track.x, track.y,
-                      (tx + SLIDER_THUMB_W / 2) - track.x, track.height };
-    if (fill.width > 0) {
-        fdk_surface_fill_rounded_rect(surface, fill, SLIDER_TRACK_H / 2,
-                                      fdk__pal_accent());
+    /* Filled run from the minimum to the thumb: horizontal runs
+     * left-to-right; vertical runs BOTTOM-up (min sits at the
+     * bottom). */
+    fdk_i32 tpos = slider_thumb_pos(s);
+    if (vert) {
+        fdk_i32 thumb_center_y = bounds.y + tpos + SLIDER_THUMB_H / 2;
+        fdk_i32 bottom = track.y + track.height;
+        fdk_i32 top = thumb_center_y;
+        if (top > bottom) {
+            fdk_i32 tmp = top;
+            top = bottom;
+            bottom = tmp;
+        }
+        fdk_rect fill = {track.x, top, track.width, bottom - top};
+        if (fill.height > 0) {
+            fdk_surface_fill_rounded_rect(surface, fill,
+                                          SLIDER_TRACK_H / 2,
+                                          fdk__pal_accent());
+        }
+    } else {
+        fdk_rect fill = {track.x, track.y,
+                         (tpos + SLIDER_THUMB_W / 2) - track.x,
+                         track.height};
+        if (fill.width > 0) {
+            fdk_surface_fill_rounded_rect(surface, fill,
+                                          SLIDER_TRACK_H / 2,
+                                          fdk__pal_accent());
+        }
     }
-    /* 1.4.2 — the marks: ticks at each mark's thumb-center position
-     * (a 1-px stroke below the trough), labels centered under their
-     * ticks in the lazy system font. Labels clip at the widget's
-     * bounds (no wrap, no ellipsis — the marks must not change the
-     * slider's natural WIDTH). */
-    if (s->mark_count > 0 && track.width > 0) {
+    /* 1.4.2 — the marks (1.4.3: rotated). Horizontal: ticks at each
+     * mark's thumb-center position (a 1-px stroke below the trough),
+     * labels centered under their ticks. Vertical: ticks stroke to
+     * the LEFT of the trough, labels right-aligned against the tick.
+     * Labels clip at the widget's bounds (no wrap, no ellipsis — the
+     * marks must not change the slider's natural cross extent). */
+    if (s->mark_count > 0) {
         fdk_color tick_col = ((w->flags & FDK_WF_ENABLED) == 0)
             ? fdk__pal_control_disabled()
             : fdk__pal_border();
-        fdk_i32 label_baseline = 0;
-        if (lfont != NULL) {
-            label_baseline = bounds.y + bounds.height - 2;
-        }
+        fdk_i32 axis_len = vert ? (bounds.height - SLIDER_THUMB_H)
+                                : (bounds.width - SLIDER_THUMB_W);
         for (size_t i = 0; i < s->mark_count; i++) {
             double frac = (slider_span(s) > 0.0)
                 ? (s->marks[i].value - s->min) / slider_span(s)
@@ -214,32 +274,66 @@ static void slider_paint(fdk_widget *w, fdk_surface *surface,
             } else if (frac > 1.0) {
                 frac = 1.0;
             }
-            fdk_i32 mx = track.x +
-                (fdk_i32)(frac * (double)track.width + 0.5);
-            fdk_surface_draw_line(surface, mx, track.y + track.height + 1,
-                                  mx, track.y + track.height +
-                                  SLIDER_TICK_H, tick_col);
-            if (lfont != NULL && s->marks[i].label != NULL) {
-                fdk_i32 lw = 0, lh = 0;
-                fdk__text_extent(lfont, s->marks[i].label, &lw, &lh);
-                fdk_i32 lx = mx - lw / 2;
-                if (lx < bounds.x) {
-                    lx = bounds.x; /* left-edge label clamp */
+            fdk_i32 along = (fdk_i32)(frac * (double)axis_len + 0.5);
+            if (vert) {
+                along = axis_len - along; /* bottom-up */
+                fdk_i32 my = bounds.y + along + SLIDER_THUMB_H / 2;
+                fdk_i32 x0 = track.x - 1;
+                fdk_i32 x1 = x0 - SLIDER_TICK_H;
+                fdk_surface_draw_line(surface, x0, my, x1, my,
+                                      tick_col);
+                if (lfont != NULL && s->marks[i].label != NULL) {
+                    fdk_i32 lw = 0, lh = 0;
+                    fdk__text_extent(lfont, s->marks[i].label, &lw,
+                                     &lh);
+                    fdk_i32 lx = x1 - 2 - lw;
+                    if (lx < bounds.x) {
+                        lx = bounds.x; /* left-edge label clamp */
+                    }
+                    fdk_i32 baseline = my + lh / 2;
+                    fdk__draw_text(surface, lfont, s->marks[i].label,
+                                   tick_col, lx, baseline);
                 }
-                fdk__draw_text(surface, lfont, s->marks[i].label,
-                               tick_col, lx, label_baseline);
+            } else {
+                fdk_i32 mx = track.x +
+                    (fdk_i32)(frac * (double)track.width + 0.5);
+                fdk_surface_draw_line(surface, mx,
+                                      track.y + track.height + 1,
+                                      mx, track.y + track.height +
+                                      SLIDER_TICK_H, tick_col);
+                if (lfont != NULL && s->marks[i].label != NULL) {
+                    fdk_i32 lw = 0, lh = 0;
+                    fdk__text_extent(lfont, s->marks[i].label, &lw,
+                                     &lh);
+                    fdk_i32 lx = mx - lw / 2;
+                    if (lx < bounds.x) {
+                        lx = bounds.x; /* left-edge label clamp */
+                    }
+                    fdk_i32 label_baseline = bounds.y + bounds.height
+                                             - 2;
+                    fdk__draw_text(surface, lfont, s->marks[i].label,
+                                   tick_col, lx, label_baseline);
+                }
             }
         }
     }
-    /* Thumb. */
+    /* Thumb (rotated). */
     fdk_color thumb_col = ((w->flags & FDK_WF_ENABLED) == 0)
         ? fdk__pal_control_disabled()
         : (s->dragging ? fdk__pal_control_pressed()
                        : ((w->flags & FDK_WF_HOVERED) != 0
                               ? fdk__pal_control_hover()
                               : fdk__pal_control()));
-    fdk_rect thumb = { bounds.x + tx, cy - SLIDER_THUMB_H / 2,
-                       SLIDER_THUMB_W, SLIDER_THUMB_H };
+    fdk_rect thumb;
+    if (vert) {
+        thumb = (fdk_rect){bounds.x + c_cross - SLIDER_THUMB_W / 2,
+                           bounds.y + tpos, SLIDER_THUMB_W,
+                           SLIDER_THUMB_H};
+    } else {
+        thumb = (fdk_rect){bounds.x + tpos,
+                           bounds.y + c_cross - SLIDER_THUMB_H / 2,
+                           SLIDER_THUMB_W, SLIDER_THUMB_H};
+    }
     fdk_surface_fill_rounded_rect(surface, thumb, SLIDER_THUMB_W / 2,
                                   thumb_col);
     if ((w->flags & FDK_WF_FOCUSED) != 0) {
@@ -253,8 +347,26 @@ static void slider_paint(fdk_widget *w, fdk_surface *surface,
     }
 }
 
-/* local x -> value (thumb centered under the pointer). */
-static double slider_value_at(fdk_slider *s, fdk_f32 local_x) {
+/* local coordinate -> value (thumb centered under the pointer,
+ * rotated). */
+static double slider_value_at(fdk_slider *s, fdk_f32 local_x,
+                              fdk_f32 local_y) {
+    if (s->orientation == FDK_SLIDER_VERTICAL) {
+        fdk_i32 inner = s->base.bounds.height - SLIDER_THUMB_H;
+        if (inner <= 0) {
+            return s->min;
+        }
+        double frac = ((double)local_y - SLIDER_THUMB_H / 2.0) /
+                      (double)inner;
+        frac = 1.0 - frac; /* bottom-up */
+        if (frac < 0.0) {
+            frac = 0.0;
+        }
+        if (frac > 1.0) {
+            frac = 1.0;
+        }
+        return s->min + frac * slider_span(s);
+    }
     fdk_i32 inner = s->base.bounds.width - SLIDER_THUMB_W;
     if (inner <= 0) {
         return s->min;
@@ -279,13 +391,16 @@ static bool slider_handle_event(fdk_widget *w,
             (void)fdk_widget_focus(w);
         }
         s->dragging = true;
-        slider_set_value(s, slider_value_at(s, ev->pointer.position.x),
+        slider_set_value(s,
+                         slider_value_at(s, ev->pointer.position.x,
+                                         ev->pointer.position.y),
                          true);
         fdk_widget_invalidate(w);
         return true;
     case FDK_WIDGET_POINTER_MOTION:
         if (s->dragging) {
-            slider_set_value(s, slider_value_at(s, ev->position.x),
+            slider_set_value(s, slider_value_at(s, ev->position.x,
+                                                ev->position.y),
                              true);
             return true;
         }
@@ -344,16 +459,25 @@ static bool slider_handle_event(fdk_widget *w,
 
 static void slider_measure(fdk_widget *w, fdk_size *out) {
     fdk_slider *s = slider_of(w);
-    out->width = SLIDER_MIN_W;
-    out->height = SLIDER_MIN_H;
-    /* Labeled marks widen the height by one label line — but only
-     * when the label font can exist (a fontless system degrades to
-     * ticks, and the height must match what paint actually draws). */
+    if (s->orientation == FDK_SLIDER_VERTICAL) {
+        out->width = SLIDER_MIN_H;  /* the cross extents swap */
+        out->height = SLIDER_MIN_W;
+    } else {
+        out->width = SLIDER_MIN_W;
+        out->height = SLIDER_MIN_H;
+    }
+    /* Labeled marks widen the cross extent by one label line — but
+     * only when the label font can exist (a fontless system degrades
+     * to ticks, and the size must match what paint actually draws). */
     if (s->mark_count > 0 && slider_has_labeled_mark(s) &&
         slider_label_font(s) != NULL) {
         fdk_i32 lw = 0, lh = 0;
         fdk__text_extent(s->label_font, "Ag", &lw, &lh);
-        out->height += lh + 2;
+        if (s->orientation == FDK_SLIDER_VERTICAL) {
+            out->width += lh + 2;
+        } else {
+            out->height += lh + 2;
+        }
     }
 }
 
@@ -453,6 +577,7 @@ fdk_result fdk_slider_create(fdk_widget *parent, double min,
     s->mark_cap = 0;
     s->label_font = NULL;
     s->label_font_failed = false;
+    s->orientation = FDK_SLIDER_HORIZONTAL;
     fdk_widget_set_can_focus(w, true);
     slider_set_value(s, value, false);
     fdk_widget_child_layout_changed(w->parent);
@@ -584,4 +709,34 @@ size_t fdk_slider_mark_count(fdk_widget *slider) {
         return 0;
     }
     return slider_of(slider)->mark_count;
+}
+
+/* ---- orientation (1.4.3) ---- */
+
+void fdk_slider_set_orientation(fdk_widget *slider,
+                                fdk_slider_orientation orientation) {
+    if (slider == NULL || slider->klass != &fdk_slider_class_def) {
+        return;
+    }
+    if (orientation != FDK_SLIDER_HORIZONTAL &&
+        orientation != FDK_SLIDER_VERTICAL) {
+        FDK_WARN("fdk_slider_set_orientation: invalid value %d ignored",
+                 (int)orientation);
+        return;
+    }
+    fdk_slider *s = slider_of(slider);
+    if (s->orientation == orientation) {
+        return;
+    }
+    s->orientation = orientation;
+    /* The natural extents swap: relayout everything above us. */
+    fdk_widget_invalidate(slider);
+    fdk_widget_child_layout_changed(slider->parent);
+}
+
+fdk_slider_orientation fdk_slider_get_orientation(fdk_widget *slider) {
+    if (slider == NULL || slider->klass != &fdk_slider_class_def) {
+        return FDK_SLIDER_HORIZONTAL;
+    }
+    return slider_of(slider)->orientation;
 }

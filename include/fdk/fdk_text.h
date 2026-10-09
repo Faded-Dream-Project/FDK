@@ -338,6 +338,47 @@ fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
  * fdk_font_load() — see fdk_window_set_decoration_font(). */
 fdk_font *fdk_font_load_system_default(fdk_i32 pixel_size);
 
+/* ---- Face loading with a collection index (1.4.3) ----
+ *
+ * fdk_font_load's twin for TrueType COLLECTIONS (.ttc): loads face
+ * `face_index` (0-based) from the file. face_index 0 on a plain
+ * .ttf is exactly fdk_font_load. An out-of-range face index on a
+ * collection returns NULL with an error log; plain .ttf accepts only
+ * 0. */
+fdk_font *fdk_font_load_face(const char *path, fdk_i32 face_index,
+                             fdk_i32 pixel_size);
+
+/* ---- System font enumeration (1.4.3) ----
+ *
+ * The font-scan surface exposed: every LOADABLE face under the
+ * discovery chain's user-prioritized and standard roots
+ * ($FDK_FONT_DIRS first, then /usr/share/fonts,
+ * /usr/local/share/fonts, $XDG_DATA_HOME/fonts, ~/.fonts), one
+ * entry per FACE (a .ttc contributes one entry per face inside it).
+ *
+ * Only TrueType-flavored faces are reported — the rasterizer's
+ * honest limit, the same gate fdk_font_load_system_default applies;
+ * CFF ('OTTO') files are skipped silently. Family and style come
+ * from the face's own 'name' table (IDs 16/1 and 17/2, falling back
+ * to the typographic pair 1/2), decoded from UTF-16BE or Mac Roman
+ * into UTF-8. A face with a broken name table is skipped (a
+ * nameless entry helps nobody).
+ *
+ * The result is sorted by family, then style, then path. Entries
+ * are owned by the caller: release with fdk_font_info_list_free.
+ * The scan is not cached — it walks the filesystem every call (a
+ * chooser calls it once per dialog). */
+typedef struct fdk_font_info {
+    char *family;      /* owned UTF-8, never NULL               */
+    char *style;       /* owned UTF-8, never NULL ("Regular")   */
+    char *path;        /* owned absolute POSIX path             */
+    fdk_i32 face_index;/* 0-based face in a .ttc                */
+} fdk_font_info;
+
+fdk_result fdk_font_enumerate(fdk_font_info **out_infos,
+                              size_t *out_count);
+void fdk_font_info_list_free(fdk_font_info *infos, size_t count);
+
 #ifdef __cplusplus
 }
 #endif

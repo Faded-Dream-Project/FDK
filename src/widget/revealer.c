@@ -22,9 +22,12 @@
  * self-crop's edge anchoring is what plain-parented, hand-positioned
  * revealers get (the expander's documented contract, generalized).
  *
- * CROSSFADE is deliberately absent: the software renderer's paint
- * walk composites to a flat surface with a clip stack, not an alpha
- * scene graph — an honest slide, not a half-faked fade.
+ * CROSSFADE arrived in 1.4.3 — the honest way: the paint-group
+ * machinery (widget.c) renders the revealer's subtree into a cached
+ * ARGB offscreen and composites it once with a global-alpha
+ * source-over blit, so the fade is per-pixel REAL, the door keeps
+ * the child's full geometry (a fade is opacity, not size), and at
+ * rest (reveal 0 or 1) the plain walk runs at zero cost.
  *
  * The flight rides the 1.3.8 animator (~160 ms cubic-out by
  * default, settable); standalone trees snap — the headless-honesty
@@ -57,6 +60,13 @@ static bool revealer_is_vertical(fdk_revealer_transition t) {
     return t == FDK_REVEAL_SLIDE_DOWN || t == FDK_REVEAL_SLIDE_UP;
 }
 
+/* CROSSFADE: the door is the child's full extent whenever anything
+ * is showing (the fade never sizes — the geometry endpoint rule
+ * collapses to "hidden or full"). */
+static bool revealer_is_crossfade(fdk_revealer_transition t) {
+    return t == FDK_REVEAL_CROSSFADE;
+}
+
 /* The child's natural size (0x0 when there is none) — visibility-
  * INDEPENDENT, the expander's rule: the revealer owns that flag. */
 static void revealer_child_natural(const fdk_revealer *rv,
@@ -80,10 +90,16 @@ static void revealer_measure(fdk_widget *w, fdk_size *out) {
     /* The endpoint rule: fully hidden = 0x0; the cross axis keeps
      * the child's full extent from the first crack of the door (the
      * expander's cross rule — a half-open door is full-width, a
-     * shut one takes no room at all). */
+     * shut one takes no room at all). CROSSFADE keeps BOTH axes full
+     * from the first crack (opacity, not size). */
     if (rv->reveal <= 0.0f) {
         out->width = 0;
         out->height = 0;
+        return;
+    }
+    if (revealer_is_crossfade(rv->transition)) {
+        out->width = cn.width;
+        out->height = cn.height;
         return;
     }
     if (revealer_is_vertical(rv->transition)) {
@@ -110,7 +126,10 @@ static void revealer_place_child(fdk_revealer *rv) {
     fdk_size cn;
     revealer_child_natural(rv, &cn);
     fdk_rect slot = {0, 0, cn.width, cn.height};
-    if (revealer_is_vertical(rv->transition)) {
+    if (revealer_is_crossfade(rv->transition)) {
+        slot.width = rv->base.bounds.width;
+        slot.height = rv->base.bounds.height;
+    } else if (revealer_is_vertical(rv->transition)) {
         slot.width = rv->base.bounds.width;
         if (rv->transition == FDK_REVEAL_SLIDE_UP) {
             slot.y = rv->base.bounds.height - cn.height;
@@ -128,11 +147,37 @@ static void revealer_place_child(fdk_revealer *rv) {
  * widget's own bounds. DOWN/RIGHT keep the origin; UP/LEFT keep the
  * far edge — the door's origin moves as it opens. Runs at every
  * transition boundary: set_reveal_child (BEFORE the child can paint
- * uncropped), each tick, and done. */
+ * uncropped), each tick, and done. CROSSFADE instead drives the
+ * paint-group opacity (full door while anything shows) — the alpha
+ * IS the transition. */
 static void revealer_self_crop(fdk_revealer *rv) {
+    if (revealer_is_crossfade(rv->transition)) {
+        /* The door is the child's full extent from the first crack;
+         * the reveal IS the subtree's paint alpha. At rest (0 or 1)
+         * the group disengages — the setter is the same call. */
+        fdk_size cn;
+        revealer_child_natural(rv, &cn);
+        if (rv->reveal > 0.0f &&
+            (rv->base.bounds.width != cn.width ||
+             rv->base.bounds.height != cn.height)) {
+            fdk_widget_set_bounds(&rv->base,
+                                  (fdk_rect){rv->base.bounds.x,
+                                             rv->base.bounds.y,
+                                             cn.width, cn.height});
+        }
+        fdk__widget_set_paint_alpha(&rv->base, rv->reveal);
+        revealer_place_child(rv);
+        return;
+    }
     fdk_size cn;
     revealer_child_natural(rv, &cn);
     fdk_rect door = rv->base.bounds;
+    /* Arrived from a crossfade (set_transition at rest): the paint
+     * alpha has no business here — clear it so the geometry rule is
+     * the whole story again. Free at rest for every slide tick. */
+    if (rv->base.paint_alpha != 1.0f) {
+        fdk__widget_set_paint_alpha(&rv->base, 1.0f);
+    }
     if (revealer_is_vertical(rv->transition)) {
         fdk_i32 want = (fdk_i32)((fdk_f32)cn.height * rv->reveal + 0.5f);
         if (want < 0) {
@@ -381,6 +426,7 @@ void fdk_revealer_set_transition(fdk_widget *revealer,
     case FDK_REVEAL_SLIDE_UP:
     case FDK_REVEAL_SLIDE_LEFT:
     case FDK_REVEAL_SLIDE_RIGHT:
+    case FDK_REVEAL_CROSSFADE:
         break;
     default:
         return;
@@ -400,6 +446,10 @@ void fdk_revealer_set_transition(fdk_widget *revealer,
         /* NONE means instant: land wherever the target says. */
         rv->reveal = rv->revealed ? 1.0f : 0.0f;
     }
+    /* At rest the self-crop pass resets BOTH the door and (for a
+     * crossfade) the paint alpha — leaving a slide's sized door for
+     * a crossfade re-opens it to full, leaving a crossfade's alpha
+     * for a slide clears it to the geometry rule. */
     revealer_self_crop(rv);
     revealer_apply_child_visibility(rv);
     fdk_widget_invalidate(revealer);

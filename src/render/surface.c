@@ -1319,6 +1319,129 @@ fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
     return FDK_OK;
 }
 
+fdk_result fdk__surface_blit_alpha(fdk_surface *dst, fdk_i32 dst_x,
+                                   fdk_i32 dst_y, fdk_surface *src,
+                                   fdk_f32 alpha) {
+    if (dst == NULL || src == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (src->format != FDK_SURFACE_FORMAT_ARGB8888) {
+        /* The group atom composites a rendered group (ARGB offscreen);
+         * an XRGB source has no per-pixel alpha to scale. */
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (!(alpha > 0.0f)) {
+        return FDK_OK; /* fully transparent: nothing to write */
+    }
+    if (alpha > 1.0f) {
+        alpha = 1.0f;
+    }
+
+    fdk_result r = surface_acquire(dst);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    r = surface_acquire(src);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+
+    /* Two-sided clip (source bounds, destination effective clip) —
+     * the same discipline as blit_blend, whole-surface source. */
+    long long sx0 = 0;
+    long long sy0 = 0;
+    long long sx1 = src->fb.width;
+    long long sy1 = src->fb.height;
+    long long dx0 = dst_x;
+    long long dy0 = dst_y;
+    long long dx1 = dx0 + sx1;
+    long long dy1 = dy0 + sy1;
+
+    if (dx1 <= dst->clip_x0 || dy1 <= dst->clip_y0 ||
+        dx0 >= dst->clip_x1 || dy0 >= dst->clip_y1) {
+        return FDK_OK;
+    }
+    if (dx0 < dst->clip_x0) {
+        sx0 += dst->clip_x0 - dx0;
+        dx0 = dst->clip_x0;
+    }
+    if (dy0 < dst->clip_y0) {
+        sy0 += dst->clip_y0 - dy0;
+        dy0 = dst->clip_y0;
+    }
+    if (dx1 > dst->clip_x1) {
+        dx1 = dst->clip_x1;
+    }
+    if (dy1 > dst->clip_y1) {
+        dy1 = dst->clip_y1;
+    }
+    if (dx0 >= dx1 || dy0 >= dy1) {
+        return FDK_OK;
+    }
+
+    int dst_argb = (dst->format == FDK_SURFACE_FORMAT_ARGB8888);
+    /* alpha scaled to 0..255 with the same rounding every per-pixel
+     * blend in this file applies. */
+    int ga = (int)(alpha * 255.0f + 0.5f);
+    if (ga > 255) {
+        ga = 255;
+    }
+
+    for (long long row = 0; row < dy1 - dy0; row++) {
+        const fdk_u32 *srow =
+            src->fb.pixels +
+            (size_t)(sy0 + row) * (size_t)src->fb.stride + (size_t)sx0;
+        fdk_u32 *drow =
+            dst->fb.pixels +
+            (size_t)(dy0 + row) * (size_t)dst->fb.stride + (size_t)dx0;
+        long long n = dx1 - dx0;
+        for (long long i = 0; i < n; i++) {
+            fdk_u32 s = srow[i];
+            int sa = (int)((s >> 24) & 0xFFu);
+            if (sa <= 0) {
+                continue;
+            }
+            sa = (sa * ga + 127) / 255;
+            if (sa <= 0) {
+                continue;
+            }
+            fdk_u32 d = drow[i];
+            int sr = (int)((s >> 16) & 0xFFu);
+            int sg = (int)((s >> 8) & 0xFFu);
+            int sb = (int)s & 0xFF;
+            int dr = (int)((d >> 16) & 0xFFu);
+            int dg = (int)((d >> 8) & 0xFFu);
+            int db = (int)d & 0xFF;
+            int inv = 255 - sa;
+            fdk_u32 out;
+            if (dst_argb) {
+                int da = (int)((d >> 24) & 0xFFu);
+                int oa = sa + (da * inv + 127) / 255;
+                if (oa <= 0) {
+                    continue;
+                }
+                int rr = (sr * sa * 255 + dr * da * inv) / (255 * oa);
+                int gg = (sg * sa * 255 + dg * da * inv) / (255 * oa);
+                int bb = (sb * sa * 255 + db * da * inv) / (255 * oa);
+                out = ((fdk_u32)oa << 24) | ((fdk_u32)rr << 16) |
+                      ((fdk_u32)gg << 8) | (fdk_u32)bb;
+            } else {
+                int rr = (sr * sa + dr * inv + 127) / 255;
+                int gg = (sg * sa + dg * inv + 127) / 255;
+                int bb = (sb * sa + db * inv + 127) / 255;
+                out = ((fdk_u32)rr << 16) | ((fdk_u32)gg << 8) |
+                      (fdk_u32)bb;
+            }
+            drow[i] = out;
+        }
+    }
+
+    fdk__surface_damage_add(dst, (fdk_rect){(fdk_i32)dx0, (fdk_i32)dy0,
+                                            (fdk_i32)(dx1 - dx0),
+                                            (fdk_i32)(dy1 - dy0)});
+    return FDK_OK;
+}
+
 fdk_result fdk_surface_blit_blend(fdk_surface *dst, fdk_i32 dst_x,
                                   fdk_i32 dst_y, fdk_surface *src,
                                   fdk_rect src_rect) {

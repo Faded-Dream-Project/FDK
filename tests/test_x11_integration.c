@@ -6755,6 +6755,7 @@ static void test_window_shortcuts_and_accelerators_gui(void);
 static void test_menu_mnemonics_gui(void);
 static void test_modern_widgets_gui(void);
 static void test_app_furniture_gui(void);
+static void test_choosers_gui(void);
 
 int main(void) {
     signal(SIGALRM, alarm_handler);
@@ -6814,6 +6815,7 @@ int main(void) {
     test_menu_mnemonics_gui();
     test_modern_widgets_gui();
     test_app_furniture_gui();
+    test_choosers_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;
@@ -8046,4 +8048,485 @@ static void test_app_furniture_gui(void) {
            "ticker (open + close, bounded waits), statusbar context "
            "stack + rule pixels, search entry real typing + clear "
            "press + Esc ladder, rubber-band sweep selects live\n");
+}
+
+/* ---- 1.4.3: the chooser batch (e2e) --------------------------------
+ *
+ * The window-requiring half of the 1.4.3 features, through REAL
+ * input where input is the point: the MenuButton's popup chain
+ * (click opens, item activates, the app-owned model survives), the
+ * search debounce's REAL timer (rapid edits collapse to one fire
+ * after the deadline), the rubber band's edge-chasing auto-scroll
+ * (a held sweep at the viewport edge scrolls and extends the
+ * selection), and the three dialogs (About's link row + close, the
+ * FontChooser's populated list + OK result, the ColorChooser's
+ * per-pixel hue ring + OK result). */
+static int mb_hits = 0;
+static void mb_item_cb(fdk_menu_item *item, void *user) {
+    (void)item;
+    (void)user;
+    mb_hits++;
+}
+
+static int search_timer_fires = 0;
+static char search_timer_last[64] = {0};
+static void search_timer_cb(fdk_widget *entry, const char *text,
+                            void *user) {
+    (void)entry;
+    (void)user;
+    search_timer_fires++;
+    snprintf(search_timer_last, sizeof(search_timer_last), "%s",
+             text ? text : "");
+}
+
+static int about_closes = 0;
+static fdk_dialog_response about_last = (fdk_dialog_response)-99;
+static void about_resp_cb(fdk_dialog_response r, void *user) {
+    (void)user;
+    about_closes++;
+    about_last = r;
+}
+static int about_website_hits = 0;
+static void about_site_cb(const char *url, void *user) {
+    (void)user;
+    about_website_hits++;
+    assert(url != NULL && strcmp(url, "https://fdk.example") == 0);
+}
+
+static int font_done_hits = 0;
+static fdk_font_dialog_result font_last;
+static void font_done_cb(const fdk_font_dialog_result *result,
+                         void *user) {
+    (void)user;
+    font_done_hits++;
+    /* The strings are FDK-owned and valid only DURING the callback
+     * — the test copies what it needs (the documented contract). */
+    free(font_last.family);
+    free(font_last.style);
+    free(font_last.path);
+    font_last.outcome = result->outcome;
+    font_last.face_index = result->face_index;
+    font_last.size = result->size;
+    font_last.family = strdup(result->family ? result->family : "");
+    font_last.style = strdup(result->style ? result->style : "");
+    font_last.path = strdup(result->path ? result->path : "");
+}
+
+static int color_done_hits = 0;
+static fdk_color_dialog_result color_last;
+static void color_done_cb(const fdk_color_dialog_result *result,
+                          void *user) {
+    (void)user;
+    color_done_hits++;
+    color_last = *result;
+}
+
+static void test_choosers_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        NULL,
+    };
+    const char *font_path = font_candidates[0];
+    FILE *ff = fopen(font_path, "rb");
+    if (ff == NULL) {
+        printf("[skip] X11 choosers GUI (no system TrueType font "
+               "found)\n");
+        return;
+    }
+    fclose(ff);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    #define CHOOSER_WAIT(cond)                                       \
+        do {                                                         \
+            int tries_ = 60;                                         \
+            while (!(cond) && tries_-- > 0) {                        \
+                (void)fdk_pump_events(ctx, 25);                      \
+            }                                                        \
+            assert(cond);                                            \
+        } while (0)
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Window root_scr = DefaultRootWindow(send);
+
+    /* === 1. The MenuButton's popup chain through real input. === */
+    {
+        fdk_window_options wopts = { .title = "menubutton",
+                                     .width = 300, .height = 120 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *mb = NULL;
+        assert(fdk_ok(fdk_menu_button_create(root, font, "Options",
+                                             &mb)));
+        fdk_menu *model = NULL;
+        assert(fdk_ok(fdk_menu_create(font, &model)));
+        fdk_menu_item *it = NULL;
+        assert(fdk_ok(fdk_menu_append(model, "Do it", &it)));
+        fdk_menu_item_set_on_activate(it, mb_item_cb, NULL);
+        assert(fdk_ok(fdk_menu_button_set_menu(mb, model)));
+        fdk_size nat;
+        fdk_widget_measure(mb, &nat);
+        fdk_widget_arrange(mb, (fdk_rect){10, 10, nat.width,
+                                          nat.height});
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 150);
+
+        Window xid = (Window)fdk_window_xid(win);
+        Window before[16], now[16];
+        int n_before =
+            x11_child_windows(send, root_scr, before, 16);
+
+        /* Click: the popup maps, the button reports open + paints
+         * pressed (a11y EXPANDED). */
+        mb_hits = 0;
+        x11_click(send, xid, 10 + nat.width / 2,
+                  10 + nat.height / 2);
+        (void)fdk_pump_events(ctx, 200);
+        assert(fdk_menu_button_is_open(mb));
+        int n_now = x11_child_windows(send, root_scr, now, 16);
+        assert(n_now == n_before + 1);
+        Window pop = x11_new_child(before, n_before, now, n_now);
+        assert(pop != 0);
+        fdk_a11y_info minfo;
+        assert(fdk_ok(fdk_a11y_describe(mb, &minfo)));
+        assert((minfo.states & FDK_A11Y_EXPANDED) != 0);
+        fdk_a11y_info_free(&minfo);
+        printf("[ok] menu button: click opens the popup, EXPANDED "
+               "state live\n");
+
+        /* Activate the item: the model's callback fires, the chain
+         * closes, the model SURVIVES (it is the app's). */
+        fdk_i32 row_h = fdk__menu_row_height(NULL);
+        x11_click(send, pop, 30, row_h / 2);
+        (void)fdk_pump_events(ctx, 200);
+        assert(mb_hits == 1);
+        assert(!fdk_menu_button_is_open(mb));
+        n_now = x11_child_windows(send, root_scr, now, 16);
+        assert(n_now == n_before);
+        assert(strcmp(fdk_menu_item_text(it), "Do it") == 0);
+        printf("[ok] menu button: item activates, chain closes, the "
+               "app-owned model survives\n");
+
+        /* Refused model swap while open is covered headless; here:
+         * reopen + an OUTSIDE press dismisses. XSendEvent bypasses
+         * the popup's grab, so the dismissal is driven the way the
+         * popup suite does it: an out-of-bounds ButtonPress sent to
+         * the POPUP (the exact shape a grabbed outside click
+         * produces — x11_events turns it into a close request). */
+        x11_click(send, xid, 10 + nat.width / 2,
+                  10 + nat.height / 2);
+        (void)fdk_pump_events(ctx, 200);
+        assert(fdk_menu_button_is_open(mb));
+        n_now = x11_child_windows(send, root_scr, now, 16);
+        pop = x11_new_child(before, n_before, now, n_now);
+        assert(pop != 0);
+        {
+            XEvent ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.type = ButtonPress;
+            ev.xbutton.window = pop;
+            ev.xbutton.x = -50; /* outside: the dismissal shape */
+            ev.xbutton.y = -50;
+            ev.xbutton.button = 1;
+            ev.xbutton.same_screen = True;
+            assert(XSendEvent(send, pop, False,
+                              (long)(ButtonPressMask |
+                                     ButtonReleaseMask),
+                              &ev));
+            XFlush(send);
+        }
+        (void)fdk_pump_events(ctx, 200);
+        assert(!fdk_menu_button_is_open(mb));
+        assert(mb_hits == 1);
+        printf("[ok] menu button: outside press dismisses\n");
+
+        fdk_window_destroy(win);
+        fdk_menu_destroy(model);
+    }
+
+    /* === 2. The search debounce under a REAL window clock. === */
+    {
+        fdk_window_options wopts = { .title = "search",
+                                     .width = 300, .height = 100 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *entry = NULL;
+        assert(fdk_ok(fdk_search_entry_create(root, font, &entry)));
+        fdk_search_entry_set_on_search(entry, search_timer_cb, NULL);
+        fdk_search_entry_set_debounce(entry, 120);
+        fdk_widget_arrange(entry, (fdk_rect){10, 10, 280, 40});
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 150);
+
+        /* Rapid edits: each arms/re-arms the ONE timer; nothing
+         * fires before the deadline. */
+        search_timer_fires = 0;
+        (void)fdk_entry_set_text(entry, "f");
+        (void)fdk_entry_set_text(entry, "fo");
+        (void)fdk_entry_set_text(entry, "foo");
+        assert(fdk_search_entry_has_pending(entry));
+        (void)fdk_pump_events(ctx, 60);
+        assert(search_timer_fires == 0); /* before the deadline */
+        CHOOSER_WAIT(search_timer_fires == 1);
+        assert(strcmp(search_timer_last, "foo") == 0);
+        assert(!fdk_search_entry_has_pending(entry));
+        printf("[ok] search debounce: rapid edits collapse to ONE "
+               "post-deadline fire\n");
+
+        /* A fresh edit re-arms after a fire. */
+        (void)fdk_entry_set_text(entry, "food");
+        assert(fdk_search_entry_has_pending(entry));
+        CHOOSER_WAIT(search_timer_fires == 2);
+        assert(strcmp(search_timer_last, "food") == 0);
+
+        fdk_window_destroy(win);
+    }
+
+    /* === 3. The rubber band's edge-chasing auto-scroll. === */
+    {
+        fdk_window_options wopts = { .title = "autoscroll",
+                                     .width = 420, .height = 220 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *list = NULL;
+        assert(fdk_ok(fdk_list_create(root, font, &list)));
+        fdk_list_set_selection_mode(list,
+                                    FDK_LIST_SELECTION_MULTIPLE);
+        for (int i = 0; i < 40; i++) {
+            char row[16];
+            snprintf(row, sizeof(row), "row %d", i);
+            (void)fdk_list_append(list, row, NULL);
+        }
+        fdk_list_set_on_selection_changed(list, NULL, NULL);
+        /* Fixed arrangement: the list fills the window; rows are
+         * far NARROWER than the viewport, so the press lands on
+         * empty LIST space beside them (the classic band start). */
+        fdk_widget_arrange(list, (fdk_rect){0, 0, 420, 220});
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 150);
+
+        Window xid = (Window)fdk_window_xid(win);
+        /* list -> scrollview -> rows: the scrollview is the list's
+         * first child (the same topology every List has). */
+        fdk_widget *scroll = fdk_widget_child_at(list, 0);
+        assert(scroll != NULL);
+        fdk_i32 off0 = 0, oy0 = 0;
+        fdk_scrollview_get_scroll_offset(scroll, &off0, &oy0);
+        assert(oy0 == 0);
+
+        /* A HELD press at the bottom edge, on empty space to the
+         * right of the rows (x=400): the band starts, the
+         * auto-scroll timer arms, and a PUMP LOOP drives the ticks
+         * (each pump fires the due timers once — the ticker's own
+         * cadence, ~25ms a tick). */
+        x11_send_pointer_event(send, xid, ButtonPress,
+                               ButtonPressMask, 400, 205, 1);
+        for (int i = 0; i < 48; i++) {
+            (void)fdk_pump_events(ctx, 25);
+        }
+        fdk_i32 off1 = 0, oy1 = 0;
+        fdk_scrollview_get_scroll_offset(scroll, &off1, &oy1);
+        assert(oy1 > oy0 + 100); /* many ticks' worth of chasing */
+        /* The selection extended under the stationary pointer: rows
+         * that were OFF-SCREEN when the sweep began are selected. */
+        size_t selected = fdk_list_selected_count(list);
+        assert(selected > 12); /* far beyond one viewport's rows */
+        /* Release: the sweep ends, the selection stays. */
+        x11_send_pointer_event(send, xid, ButtonRelease,
+                               ButtonReleaseMask, 400, 205, 1);
+        (void)fdk_pump_events(ctx, 150);
+        assert(fdk_list_selected_count(list) == selected);
+        printf("[ok] band auto-scroll: held edge sweep scrolled %dpx "
+               "and selected %zu rows\n", oy1, selected);
+
+        fdk_window_destroy(win);
+    }
+
+    /* === 4. The About dialog: the link row fires, close answers. === */
+    {
+        about_closes = 0;
+        about_website_hits = 0;
+        fdk_about_dialog_options aopts = {
+            .program_name = "FDK Test Suite",
+            .version = "1.4.3",
+            .comments = "The about dialog's identity card, through "
+                        "real input.",
+            .copyright = "(c) the FDK authors",
+            .website = "https://fdk.example",
+            .license = "MIT",
+        };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_dialog_show_about(ctx, &aopts,
+                                            about_resp_cb,
+                                            about_site_cb, NULL,
+                                            &win)));
+        (void)fdk_pump_events(ctx, 250);
+
+        /* The link row: click the website button (the LINK role) —
+         * the URL callback fires and the dialog STAYS OPEN. */
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *body = fdk_widget_child_at(root, 0);
+        assert(body != NULL);
+        /* Find the link button among the body's children by role. */
+        fdk_widget *link = NULL;
+        size_t n = fdk_widget_child_count(body);
+        for (size_t i = 0; i < n; i++) {
+            fdk_a11y_info ai;
+            if (fdk_ok(fdk_a11y_describe(fdk_widget_child_at(body, i),
+                                         &ai))) {
+                if (ai.role == FDK_A11Y_ROLE_BUTTON &&
+                    ai.name != NULL &&
+                    strcmp(ai.name, "https://fdk.example") == 0) {
+                    link = fdk_widget_child_at(body, i);
+                }
+                fdk_a11y_info_free(&ai);
+                if (link != NULL) {
+                    break;
+                }
+            }
+        }
+        assert(link != NULL);
+        fdk_rect lb = fdk_widget_get_absolute_bounds(link);
+        Window xid = (Window)fdk_window_xid(win);
+        x11_click(send, xid, lb.x + lb.width / 2, lb.y + lb.height / 2);
+        (void)fdk_pump_events(ctx, 200);
+        assert(about_website_hits == 1);
+        assert(about_closes == 0); /* the link is not a close */
+        printf("[ok] about: the website link fires, dialog stays "
+               "open\n");
+
+        /* Close: the CLOSE response, once, self-destroying. */
+        x11_send_key_event(send, (Window)fdk_window_xid(win),
+                           KeyPress, 9); /* Escape */
+        x11_send_key_event(send, (Window)fdk_window_xid(win),
+                           KeyRelease, 9);
+        CHOOSER_WAIT(about_closes == 1);
+        assert(about_last == FDK_DIALOG_CLOSE);
+        printf("[ok] about: Escape answers CLOSE once\n");
+    }
+
+    /* === 5. The FontChooser: populated list, live preview, OK. === */
+    {
+        font_done_hits = 0;
+        fdk_font_dialog_options fopts = { .initial_size = 14 };
+        fdk_window *win = NULL;
+        fdk_result fr = fdk_dialog_choose_font(ctx, &fopts,
+                                               font_done_cb, NULL,
+                                               &win);
+        if (!fdk_ok(fr)) {
+            printf("[skip] font chooser GUI (enumeration empty)\n");
+        } else {
+            (void)fdk_pump_events(ctx, 300);
+            /* The list is populated: child 0 of the body (the List
+             * is self-scrolling — no wrapper). */
+            fdk_widget *root = NULL;
+            (void)fdk_window_get_root(win, &root);
+            fdk_widget *body = fdk_widget_child_at(root, 0);
+            assert(body != NULL);
+            fdk_widget *list = fdk_widget_child_at(body, 0);
+            assert(list != NULL);
+            size_t rows = fdk_list_row_count(list);
+            assert(rows > 0);
+            /* Click OK (the second-to-last child of the body). */
+            size_t n = fdk_widget_child_count(body);
+            fdk_widget *ok = fdk_widget_child_at(body, n - 2);
+            assert(ok != NULL);
+            fdk_rect ob = fdk_widget_get_absolute_bounds(ok);
+            Window xid = (Window)fdk_window_xid(win);
+            x11_click(send, xid, ob.x + ob.width / 2,
+                      ob.y + ob.height / 2);
+            CHOOSER_WAIT(font_done_hits == 1);
+            assert(font_last.outcome == FDK_FONT_DIALOG_ACCEPTED);
+            assert(font_last.family != NULL &&
+                   font_last.path != NULL);
+            assert(font_last.size == 14);
+            /* The result's path loads at the result's size (from the
+             * TEST'S copy — the dialog's own strings are gone). */
+            fdk_font *loaded = fdk_font_load_face(font_last.path,
+                                                  font_last.face_index,
+                                                  font_last.size);
+            assert(loaded != NULL);
+            fdk_font_destroy(loaded);
+            free(font_last.family);
+            free(font_last.style);
+            free(font_last.path);
+            font_last.family = font_last.style = font_last.path = NULL;
+            printf("[ok] font chooser: %zu faces listed, OK hands a "
+                   "loadable result\n", rows);
+        }
+    }
+
+    /* === 6. The ColorChooser: the hue ring's pixels + OK. === */
+    {
+        color_done_hits = 0;
+        fdk_color initial = {0.25f, 0.5f, 0.75f, 1.0f};
+        fdk_color_dialog_options copts = { .initial = initial };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_dialog_choose_color(ctx, &copts,
+                                              color_done_cb, NULL,
+                                              &win)));
+        (void)fdk_pump_events(ctx, 300);
+        Window xid = (Window)fdk_window_xid(win);
+
+        /* The ring's hue at angle 0 (pointing RIGHT) is RED; at 120
+         * degrees (upper-left on this atan2-up wheel) it is GREEN.
+         * Sample the ring's right and upper-left mid-radius points —
+         * readback proofs of the per-pixel rasterization. */
+        Display *rb = NULL;
+        int cx = 20 + 108; /* pad + wheel center  */
+        int cy = 20 + 108;
+        int mr = (82 + 104) / 2; /* mid-ring radius */
+        unsigned long right_px =
+            x11_readback_pixel(&rb, xid, cx + mr, cy);
+        assert(((right_px >> 16) & 0xFFu) > 200);  /* red side  */
+        assert(((right_px >> 8) & 0xFFu) < 80);
+        int gx = (int)(cx - mr * 0.5 + 0.5);
+        int gy = (int)(cy - mr * 0.866 + 0.5);
+        unsigned long green_px = x11_readback_pixel(&rb, xid, gx, gy);
+        assert(((green_px >> 8) & 0xFFu) > 140);   /* green side */
+        assert(((green_px >> 16) & 0xFFu) < 110);
+        if (rb != NULL) {
+            XCloseDisplay(rb);
+        }
+        printf("[ok] color chooser: the ring rasterizes real hues "
+               "(right red, upper-left green)\n");
+
+        /* OK without touching the wheel: ACCEPTED with the initial
+         * color (the honest no-interaction answer). */
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *body = fdk_widget_child_at(root, 0);
+        size_t n = fdk_widget_child_count(body);
+        fdk_widget *ok = fdk_widget_child_at(body, n - 2);
+        fdk_rect ob = fdk_widget_get_absolute_bounds(ok);
+        x11_click(send, xid, ob.x + ob.width / 2, ob.y + ob.height / 2);
+        CHOOSER_WAIT(color_done_hits == 1);
+        assert(color_last.outcome == FDK_COLOR_DIALOG_ACCEPTED);
+        fdk_color got = color_last.color;
+        assert(got.r > 0.2f && got.r < 0.3f);
+        assert(got.g > 0.45f && got.g < 0.55f);
+        assert(got.b > 0.7f && got.b < 0.8f);
+        printf("[ok] color chooser: OK hands the untouched initial "
+               "color\n");
+    }
+
+    XCloseDisplay(send);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] choosers GUI: the 1.4.3 window batch end-to-end\n");
+    #undef CHOOSER_WAIT
 }

@@ -326,9 +326,27 @@ selection and row icons, the Tree row icons that survive
 collapses, the Slider labeled tick marks, and the menu/combo rows
 fade their hover pills like the buttons do.
 
+The 1.4.3 chooser batch finishes the dialog surfaces: the
+MenuButton (a button that pops up an attached, app-owned menu
+model — the hamburger), the vertical Slider orientation, the
+SearchEntry's debounced search-changed (one fire after the last
+edit), the Revealer's CROSSFADE (a real per-pixel fade through the
+new paint-group engine — a per-widget subtree opacity that
+composites through a cached ARGB offscreen), the rubber band that
+auto-scrolls when the sweep chases the viewport edge (in the Tree
+too, which gained the List's whole multi-selection model), and the
+dialog trio: About (logo, website link row, scrolling license),
+the FontChooser (every loadable system face, live preview at the
+chosen size), and the ColorChooser (an HSV wheel rasterized
+per-pixel on the canvas — drag the ring for hue, the triangle for
+saturation and value, type a #rrggbb, compare against the initial
+swatch).
+
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session
-frame with an expander and a draggable splitter, a grid, a button
+frame with an expander and a draggable splitter, the 1.4.3 row
+(a menu button, a vertical marked slider, a crossfade toggle with
+its fading panel, and the three chooser buttons), a grid, a button
 row with a link button and a busy spinner, a progress bar, and a
 live status label that every control reports into. Then
 `examples/12_settings.c`: the whole 1.4.2 furniture composed into

@@ -122,6 +122,18 @@ typedef struct fdk_entry {
      * selection, undo, clipboard, preedit — applies unchanged. */
     bool search_mode;
     bool clear_hover;    /* the clear zone under the pointer */
+    /* ---- Search debounce (1.4.3) ----
+     *
+     * The debounced twin of on_changed (GTK's search-changed): fires
+     * `search_ms` after the LAST edit (set_text included — the clear
+     * button's sweep ends once). Detached trees have no context, so
+     * the timer cannot exist there and the callback fires immediately
+     * (the animation layer's headless-honesty rule, applied to a
+     * timer). */
+    fdk_search_changed_fn on_search;
+    void *on_search_data;
+    fdk_timer *search_timer;
+    fdk_u32 search_ms;   /* 0 = immediate; default 250 */
 } fdk_entry;
 
 static fdk_entry *entry_of(fdk_widget *w) {
@@ -173,6 +185,68 @@ static void entry_blink_restart(fdk_entry *e) {
         fdk_widget_invalidate(&e->base);
     }
     fdk_timer_reset(e->blink_timer, ENTRY_BLINK_MS);
+}
+
+/* ---- search debounce (1.4.3) ----
+ *
+ * Both on_changed fire sites call this after firing the regular
+ * callback: a search entry with a search callback re-arms the timer
+ * on every edit; the last edit's timer is the one that fires. */
+
+static void entry_search_fire(fdk_timer *timer, void *user) {
+    (void)timer;
+    fdk_entry *e = user;
+    /* The timer handle is one-shot-in-practice: clearing it here
+     * keeps destroy/mode changes from racing a fire mid-dispatch
+     * (fdk_timer_remove on an already-fired timer is legal, and a
+     * NULL check is cheaper than reasoning about the queue). */
+    e->search_timer = NULL;
+    if (e->on_search != NULL) {
+        e->on_search(&e->base, e->text, e->on_search_data);
+    }
+}
+
+/* Arms (or re-arms) the debounce; fires immediately when no timer
+ * can exist — debounce 0, or a tree without a context. */
+static void entry_search_arm(fdk_entry *e) {
+    if (e->on_search == NULL) {
+        return; /* nothing armed when nobody listens */
+    }
+    if (e->search_ms == 0) {
+        if (e->search_timer != NULL) {
+            fdk_timer_remove(e->search_timer);
+            e->search_timer = NULL;
+        }
+        e->on_search(&e->base, e->text, e->on_search_data);
+        return;
+    }
+    if (e->search_timer != NULL) {
+        fdk_timer_reset(e->search_timer, e->search_ms);
+        return;
+    }
+    fdk_context *ctx =
+        fdk__window_context(fdk__widget_window_owner(&e->base));
+    if (ctx == NULL) {
+        /* Detached: timers cannot exist — the headless-honesty rule
+         * (animations snap; so does this debounce). */
+        e->on_search(&e->base, e->text, e->on_search_data);
+        return;
+    }
+    e->search_timer = fdk_timer_add(ctx, e->search_ms, false,
+                                     entry_search_fire, e);
+    if (e->search_timer == NULL) {
+        /* Timer allocation failed: degrade to immediate rather than
+         * dropping the event — a late search-changed beats a missing
+         * one. */
+        e->on_search(&e->base, e->text, e->on_search_data);
+    }
+}
+
+static void entry_search_disarm(fdk_entry *e) {
+    if (e->search_timer != NULL) {
+        fdk_timer_remove(e->search_timer);
+        e->search_timer = NULL;
+    }
 }
 
 /* ---- UTF-8 boundary helpers (stepping shares text.c's decoder) ---- */
@@ -799,6 +873,9 @@ static fdk_result entry_splice(fdk_entry *e, size_t from, size_t to,
     fdk__a11y_notify(&e->base, FDK_A11Y_VALUE_CHANGED, 0);
     if (e->on_changed != NULL) {
         e->on_changed(&e->base, e->on_changed_data);
+    }
+    if (e->search_mode) {
+        entry_search_arm(e);
     }
     /* ---- undo record (post-success; skipped while applying) ----
      *
@@ -1543,6 +1620,7 @@ static void entry_measure(fdk_widget *w, fdk_size *out) {
 static void entry_destroy(fdk_widget *w) {
     fdk_entry *e = entry_of(w);
     entry_blink_stop(e);
+    entry_search_disarm(e);
     /* The undo stack owns the op structs (with their text copies);
      * destroying it runs every op's destroy — nothing dangles. */
     fdk_undo_stack_destroy(e->undo);
@@ -1721,6 +1799,10 @@ fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
     e->undo_applying = false;
     e->search_mode = false; /* the plain entry (1.4.2 preset below) */
     e->clear_hover = false;
+    e->on_search = NULL;      /* 1.4.3 debounce */
+    e->on_search_data = NULL;
+    e->search_timer = NULL;
+    e->search_ms = 250;       /* GTK's search-changed default */
     const char *init = (text != NULL) ? text : "";
     size_t len = strlen(init);
     if (len > ENTRY_MAX_TEXT) {
@@ -1770,6 +1852,46 @@ bool fdk_entry_is_search(fdk_widget *entry) {
     return entry_of(entry)->search_mode;
 }
 
+/* ---- search debounce API (1.4.3) ---- */
+
+void fdk_search_entry_set_on_search(fdk_widget *entry,
+                                    fdk_search_changed_fn on_search,
+                                    void *user_data) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def ||
+        !entry_of(entry)->search_mode) {
+        return;
+    }
+    fdk_entry *e = entry_of(entry);
+    /* Swapping the listener cancels any pending fire (the old
+     * callback's debounce is not the new one's business). */
+    entry_search_disarm(e);
+    e->on_search = on_search;
+    e->on_search_data = user_data;
+}
+
+void fdk_search_entry_set_debounce(fdk_widget *entry,
+                                    fdk_u32 debounce_ms) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def ||
+        !entry_of(entry)->search_mode) {
+        return;
+    }
+    fdk_entry *e = entry_of(entry);
+    e->search_ms = debounce_ms;
+    /* A pending timer keeps its ORIGINAL deadline semantics under
+     * the new interval would be neither 250 nor the new value —
+     * re-arm cleanly instead. */
+    if (e->search_timer != NULL) {
+        fdk_timer_reset(e->search_timer, debounce_ms);
+    }
+}
+
+bool fdk_search_entry_has_pending(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return false;
+    }
+    return entry_of(entry)->search_timer != NULL;
+}
+
 fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text) {
     if (entry == NULL || entry->klass != &fdk_entry_class_def) {
         return FDK_ERR_INVALID_ARGUMENT;
@@ -1804,6 +1926,9 @@ fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text) {
     fdk__a11y_notify(entry, FDK_A11Y_VALUE_CHANGED, 0);
     if (e->on_changed != NULL) {
         e->on_changed(entry, e->on_changed_data);
+    }
+    if (e->search_mode) {
+        entry_search_arm(e);
     }
     return FDK_OK;
 }

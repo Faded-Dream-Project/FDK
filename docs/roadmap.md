@@ -4039,6 +4039,129 @@ PASS; X11 and sway example rigs 12/12; verify-exports green in
 both configs; release zero warnings; debug-remnant and secret
 scans clean.
 
+### 1.4.3 — the chooser batch (the ledger's NEXT list, emptied again)
+
+The fourth milestone of the "perfect toolkit" directive, and the
+one the parity ledger had been pointing at since 1.4.1: the
+picker surfaces an application's dialogs are made of, plus the
+compositor-level alpha decision the 1.4.2 revealer entry
+deferred.
+
+THE PAINT GROUP (the structural one). The render layer gained
+fdk__surface_blit_alpha — a whole-surface source-over composite
+with a global alpha multiplier, clip-stack-honoring like every
+drawing helper — and the widget layer gained the paint GROUP: a
+per-widget subtree opacity (fdk__widget_set_paint_alpha) that
+renders the widget's whole subtree into a cached ARGB offscreen
+at alpha 1.0 and composites it ONCE. The offscreen resizes on
+demand and frees at teardown; at rest (alpha 1.0) the plain walk
+runs at zero cost. Nested groups composite naturally (the flag
+lifts for the inner render); an OOM allocation degrades to the
+un-faded plain walk rather than a missing child. This is the
+"compositor-level alpha decision": opacity as an engine, not a
+per-widget trick.
+
+CROSSFADE, honestly. FDK_REVEAL_CROSSFADE rides the paint group:
+the door keeps the child's FULL geometry at every reveal value (a
+fade is opacity, not size — the measure collapses to hidden-or-
+full), the reveal IS the subtree's paint alpha, and at rest the
+group disengages. The 1.4.2 entry said "an honest slide beats a
+half-faked fade"; 1.4.3 ships the fade that is not half-faked —
+per-pixel real, server-verified by the pixel readbacks at
+mid-flight (a blend strictly between the endpoints), landed, and
+hidden.
+
+THE MENUBUTTON. GtkMenuButton's role: a button-shaped widget
+that pops up an ATTACHED model — the model stays the app's
+(borrowed for the popup only, reusable after the chain closes,
+untouched by the button's own destruction: the combo's guard
+pattern with nothing to free). The arrow is the combo's chevron
+language (four directions, default DOWN); while the chain is open
+the button paints pressed and reports the a11y EXPANDED state
+under the new MENU_BUTTON role; Enter/Space/Down open through
+the button contract; a model swap while open is refused (the
+chain's model is fixed at open time).
+
+THE VERTICAL SLIDER. The documented parked remainder, shipped:
+the trough runs bottom-to-top (min at the BOTTOM, max at the
+top — the audio-volume convention), thumb, fill run, and
+value-at all rotate; marks tick to the LEFT of the trough with
+right-aligned labels, and labeled marks widen the natural WIDTH
+(the exact mirror of the horizontal's height growth). Up/Right
+raise and Down/Left lower, unchanged.
+
+THE SEARCH DEBOUNCE. The search preset's debounced twin of
+on_changed (GtkSearchEntry's search-changed): a one-shot timer
+re-armed by every edit (set_text included — the clear button's
+sweep ends once), default 250 ms, settable, has_pending
+observable. Detached trees snap to immediate — the same
+headless-honesty rule the animation layer obeys — and a timer
+allocation failure degrades to immediate rather than dropping
+the event.
+
+THE BAND THAT CHASES THE VIEWPORT. The List's sweep gained
+auto-scroll: while the pointer rests in the 16-px edge zone, a
+40-ms repeating timer scrolls 24 px toward it, and the SELECTION
+EXTENDS because the anchor is glued to the CONTENT it was
+pressed on (content-space at press) while the moving edge rides
+the current offset — the sweep grows as the view chases, exactly
+GTK's semantics, including the anchor sliding off the top of the
+screen as the band grows down. The same engine, the same
+constants, and the same anchor rule extend to the TREE.
+
+THE TREE'S MULTI-SELECT. The parked "design problem" is a design
+now: fdk_tree_selection_mode mirrors the List's model exactly —
+plain replaces, ctrl toggles, shift ranges the VISIBLE sequence
+from the anchor, ctrl+shift ranges without clearing; the rubber
+band sweeps empty tree space (ctrl = union over the pre-band
+snapshot, taken over ALL nodes so collapsed selections survive);
+shift+arrows extend; get_selected_nodes hands the model's
+selection back in index order; mode switches collapse to the
+classic single read rather than lying with a stale multi-set.
+
+THE DIALOG TRIO (choosers.c, the dialog.c lifecycle contract —
+toolkit-owned window, auto-painted, one callback, self-
+destroying). About: logo (decoded image, omitted honestly on
+failure), name in a larger re-loaded face, version, wrap
+comments, copyright, a LINK-styled website row whose activation
+fires a callback with the URL (FDK never execs anything), and a
+scrolling license block. FontChooser: fdk_font_enumerate's list
+(one row per LOADABLE face — the rasterizer's honest gate, CFF
+skipped), a size spinner (6..96), and a live preview label that
+reloads the face through the new fdk_font_load_face at every
+change; the result's strings are valid during the callback only
+(the file dialog's explicitness contract). ColorChooser: the HSV
+wheel ON THE CANVAS — a hue ring with an inscribed saturation/
+value triangle rasterized PER-PIXEL in the paint callback
+(direct framebuffer writes, the clip honored by hand), drag
+hit-testing on both regions (the barycentric inverse for S/V),
+marker dots, a #rrggbb entry, and current/initial swatches.
+
+THE FONT ENUMERATION SURFACE. fdk_font_enumerate walks
+$FDK_FONT_DIRS + the standard roots (fontscan's stage order,
+unranked — a picker wants everything, not a winner), parses each
+face's 'name' table (typographic pair 16/17, legacy 1/2; UTF-16BE
+and Mac Roman), and returns one fdk_font_info per face, sorted by
+family/style/path; fdk_font_load_face is the collection-indexed
+twin of fdk_font_load. 74 faces enumerate on the reference
+container; every one loads.
+
+Tests: the headless choosers suite (7 groups — the vertical
+slider's rotated geometry and value-at, the debounce's snap-fire
+and listener swap, the menu button's arrow sizing/borrowed
+model/a11y, the paint group's 50%/25% blend readbacks, the
+crossfade's full-size door at mid-flight blend, the tree's whole
+click/sweep/mode matrix, and the enumeration's sorted-loadable-
+free round trip) plus the X11 GUI group (the popup chain through
+real input including the out-of-bounds dismissal shape, the REAL
+debounce timer coalescing rapid edits into one fire, the held
+edge sweep scrolling 552 px and selecting 20 rows, the About
+link row firing without closing, 74 faces listed with a loadable
+OK result, and the ring's per-pixel hue readbacks — right red,
+upper-left green). Battery on the final tree: headless all-pass;
+X11 integration all [ok] exit 0; verify-exports 531 symbols in
+debug AND release; release zero warnings.
+
 ---
 
 ## The GTK/Qt feature-parity ledger
@@ -4058,22 +4181,24 @@ SHIPPED (1.4.1); LinkButton SHIPPED (1.4.1 role); Paned SHIPPED
 (1.4.1); Expander SHIPPED (1.4.1); Notebook SHIPPED; Frame SHIPPED;
 Separator SHIPPED; ProgressBar (determinate + busy) SHIPPED;
 ScrollView (bars, smooth wheel) SHIPPED; List (multi-select,
-rubber-band, icons) SHIPPED (icons 1.4.1, rubber band 1.4.2); Tree SHIPPED (row icons 1.4.2); Menu/
+rubber-band, icons) SHIPPED (icons 1.4.1, rubber band 1.4.2); Tree SHIPPED (row icons 1.4.2; multi-select + rubber band 1.4.3); Menu/
 MenuBar/ContextMenu (accelerators, mnemonics) SHIPPED; Combo
 (editable) SHIPPED; Slider SHIPPED; SpinButton SHIPPED; Toolbar
 SHIPPED; Tooltip SHIPPED; FileDialog (OPEN/SAVE, places, filters,
 breadcrumbs, Ctrl+L) SHIPPED; Statusbar SHIPPED (1.4.2); SearchEntry SHIPPED (1.4.2
-preset); Revealer SHIPPED (1.4.2); Stack/StackSwitcher SHIPPED
+preset; debounced search-changed 1.4.3); Revealer SHIPPED (1.4.2;
+CROSSFADE 1.4.3); Stack/StackSwitcher SHIPPED
 (1.4.2);
 LevelBar SHIPPED (1.4.2); Scale marks
-SHIPPED (1.4.2 — slider ticks + labels); DropDown-menu-button LATER (button +
-popup menu hybrid); IconView/GridView OUT-for-now (needs a canvas-
+SHIPPED (1.4.2 — slider ticks + labels; vertical orientation 1.4.3); DropDown-menu-button
+SHIPPED (1.4.3 — the MenuButton); IconView/GridView OUT-for-now (needs a canvas-
 based item layout; the List covers the row case); DrawingArea ==
 Canvas SHIPPED; GLArea OUT (no OpenGL backend in scope — the
 software renderer is the product); Assistant/wizard OUT (dialog
-composition, app-level); FontChooser LATER (needs the font scan
-surface exposed as a picker); ColorChooser LATER (HSV wheel on the
-canvas); AboutDialog LATER (labels + link buttons in a dialog).
+composition, app-level); FontChooser SHIPPED (1.4.3 — fdk_font_enumerate +
+the picker dialog); ColorChooser SHIPPED (1.4.3 — the HSV wheel on
+the canvas); AboutDialog SHIPPED (1.4.3 — labels + link buttons in
+a dialog).
 
 Input & interaction: XIM full-Unicode entry SHIPPED (1.3.1);
 Wayland key repeat SHIPPED (1.3.5); PRIMARY selection SHIPPED
@@ -4083,7 +4208,8 @@ focus traversal SHIPPED; double-click/triple-click SHIPPED;
 shift-click range select SHIPPED; hover fades SHIPPED (1.4.1 buttons; 1.4.2 menu/combo rows and
 switcher pills);
 scroll wheel + smooth
-SHIPPED (1.3.8); touch/gestures OUT (no touch input backend in
+SHIPPED (1.3.8); rubber-band auto-scroll SHIPPED (1.4.3 — List
+and Tree); touch/gestures OUT (no touch input backend in
 scope — the pointer model is the contract); IME completion (preedit
 is display-only) OUT-for-now (needs a real IME protocol surface).
 
@@ -4103,12 +4229,10 @@ no-icon-cache stance); printing OUT (no print backend in scope);
  accessibility bus bridges OUT (the in-process narrator is the
 policy, per no-D-Bus).
 
-The NEXT list (1.4.3 candidates, in rough value order): DropDown-
-menu-button (button + popup menu hybrid); FontChooser (needs the
-font scan surface exposed as a picker); ColorChooser (HSV wheel on
-the canvas); AboutDialog (labels + link buttons in a dialog);
-vertical Slider (the documented parked remainder); revealer
-CROSSFADE (needs a compositor-level alpha decision — see the 1.4.2
-entry); SearchEntry's debounced search-changed (parked by policy);
-rubber-band auto-scroll (the sweep does not chase the viewport
-edge); tree rubber-band (the List's sweep extended).
+The NEXT list (1.4.4 candidates, in rough value order): widget
+TOOLTIPS styled per theme (today's tooltip carries no theme hook);
+the notebook's TAB REORDERING (drag a tab to a new slot); a shared
+COLOR-WELL swatch BUTTON (opens the 1.4.3 chooser from any
+toolbar); the file dialog's RECENT places (the XDG recent-files
+surface); SCROLLBAR overlay mode (thin, fades when idle); and the
+entry's ICON SLOTS (leading/trailing, the 1.4.2 glyph language).

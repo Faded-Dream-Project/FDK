@@ -1303,6 +1303,14 @@ typedef enum fdk_revealer_transition {
     FDK_REVEAL_SLIDE_UP = 2,
     FDK_REVEAL_SLIDE_LEFT = 3,
     FDK_REVEAL_SLIDE_RIGHT = 4,
+    /* 1.4.3 — the deferred compositor-level alpha decision, shipped
+     * via the paint-group machinery: the door keeps the child's FULL
+     * geometry at every reveal value (no crop — a fade is opacity,
+     * not size), and the revealer's subtree composites through a
+     * cached ARGB offscreen with a global-alpha source-over blit.
+     * A REAL per-pixel fade, not a half-faked one; at rest (reveal
+     * 0 or 1) the group is bypassed and the plain walk runs free. */
+    FDK_REVEAL_CROSSFADE = 5,
 } fdk_revealer_transition;
 
 fdk_result fdk_revealer_create(fdk_widget *parent,
@@ -1435,6 +1443,125 @@ fdk_result fdk_slider_add_mark(fdk_widget *slider, double value,
                                const char *label);
 void fdk_slider_clear_marks(fdk_widget *slider);
 size_t fdk_slider_mark_count(fdk_widget *slider);
+
+/* ---- Slider orientation (1.4.3) ----
+ *
+ * The parked vertical remainder, shipped: a vertical slider runs
+ * its trough down the widget's height (min at the BOTTOM, max at
+ * the top — the audio-volume convention), thumb, fill run, and
+ * value-at all rotate accordingly. Up/Right raise, Down/Left lower
+ * (unchanged). Marks rotate too: ticks stroke to the LEFT of the
+ * trough with their labels right-aligned against the tick; labeled
+ * marks widen the natural WIDTH by one label line (the mirror of
+ * the horizontal's height growth). Switching orientation keeps the
+ * value and re-measures. */
+
+typedef enum fdk_slider_orientation {
+    FDK_SLIDER_HORIZONTAL = 0,  /* the default since Phase 9 */
+    FDK_SLIDER_VERTICAL  = 1,
+} fdk_slider_orientation;
+
+void fdk_slider_set_orientation(fdk_widget *slider,
+                                fdk_slider_orientation orientation);
+fdk_slider_orientation fdk_slider_get_orientation(fdk_widget *slider);
+
+/* ---- SearchEntry debounce (1.4.3) ----
+ *
+ * The search preset's debounced twin of on_changed: the
+ * search-changed callback fires once, `ms` milliseconds (default
+ * 250) after the LAST edit — fast typists stop re-filtering on
+ * every keystroke. The clear button and the Esc ladder's text
+ * clear re-arm the same debounce (the sweep ends exactly once).
+ * set_debounce(0) = fire immediately on the edit; the pending
+ * timer is re-armed by every edit while one is outstanding.
+ * Detached trees (no window) have no timers — the callback snaps
+ * to immediate, the same honesty rule animations follow. */
+
+typedef void (*fdk_search_changed_fn)(fdk_widget *entry,
+                                      const char *text,
+                                      void *user_data);
+
+void fdk_search_entry_set_on_search(fdk_widget *entry,
+                                    fdk_search_changed_fn on_search,
+                                    void *user_data);
+void fdk_search_entry_set_debounce(fdk_widget *entry,
+                                    fdk_u32 debounce_ms);
+bool fdk_search_entry_has_pending(fdk_widget *entry);
+
+/* ---- MenuButton (1.4.3) ----
+ *
+ * GtkMenuButton's role: a button-shaped widget that pops up an
+ * ATTACHED menu model when clicked (the hamburger, the "options"
+ * split-button, the toolbar overflow). The model stays YOURS —
+ * borrowed for the popup only, still valid (and reusable) after
+ * the chain closes; destroy it whenever the button is closed. A
+ * NULL model makes the button inert (it still paints, presses,
+ * and reports EXPANDED=false).
+ *
+ * The popup anchors at the button's bottom-left, at least as wide
+ * as the button, with the same dismissal/keyboard/auto-paint
+ * machinery as every popup chain. The optional vector arrow
+ * (default: DOWN when a model is set) rides the label's right side
+ * — the GtkMenuButton chevron language. Keyboard: Enter/Space open
+ * (the Button contract); Escape/dismissal behave like any popup.
+ *
+ * While the chain is open the button paints pressed and reports
+ * the a11y EXPANDED state; the menu machinery delivers everything
+ * else (item activation is the MODEL's callbacks' business — the
+ * button never sees it). */
+
+typedef enum fdk_menu_button_arrow {
+    FDK_MENU_BUTTON_ARROW_NONE = 0,  /* label only                       */
+    FDK_MENU_BUTTON_ARROW_DOWN = 1,  /* the default                      */
+    FDK_MENU_BUTTON_ARROW_UP   = 2,
+    FDK_MENU_BUTTON_ARROW_LEFT = 3,
+    FDK_MENU_BUTTON_ARROW_RIGHT = 4,
+} fdk_menu_button_arrow;
+
+fdk_result fdk_menu_button_create(fdk_widget *parent, fdk_font *font,
+                                  const char *label,
+                                  fdk_widget **out_button);
+/* The attached model (borrowed; NULL = inert). Setting a model
+ * while a popup chain is open is refused (the chain's model is
+ * fixed at open time). */
+fdk_result fdk_menu_button_set_menu(fdk_widget *button,
+                                    fdk_menu *model);
+fdk_menu *fdk_menu_button_get_menu(fdk_widget *button);
+void fdk_menu_button_set_arrow(fdk_widget *button,
+                               fdk_menu_button_arrow arrow);
+/* True while this button's popup chain is open. */
+bool fdk_menu_button_is_open(fdk_widget *button);
+
+/* ---- Tree selection mode (1.4.3) ----
+ *
+ * The parked multi-select tree, shipped — mirroring the List's
+ * model exactly: MULTIPLE clicks select, ctrl+click toggles one
+ * node, shift+click ranges the VISIBLE sequence from the anchor,
+ * ctrl+shift ranges without clearing. The rubber band extends to
+ * the tree: a left press on empty tree space sweeps a band over
+ * the visible rows (ctrl = union), auto-scrolling when the sweep
+ * chases the viewport edge like the List's. on_selection_changed
+ * fires on the sweep's press and release (one gesture), and on
+ * every click/keyboard move as before. SINGLE keeps the classic
+ * behavior (a ctrl/shift click in SINGLE behaves like a plain
+ * click); NONE ignores selection input entirely. */
+
+typedef enum fdk_tree_selection_mode {
+    FDK_TREE_SELECTION_SINGLE   = 0, /* the default since Phase 9 */
+    FDK_TREE_SELECTION_NONE     = 1,
+    FDK_TREE_SELECTION_MULTIPLE = 2,
+} fdk_tree_selection_mode;
+
+void fdk_tree_set_selection_mode(fdk_widget *tree,
+                                 fdk_tree_selection_mode mode);
+fdk_tree_selection_mode fdk_tree_get_selection_mode(fdk_widget *tree);
+/* Every currently-selected node (VISIBLE or collapsed-under —
+ * the model holds the state, the walk only shows it). The caller
+ * provides the array; the return is the count written (capped at
+ * max_nodes). Order: model index order. */
+size_t fdk_tree_get_selected_nodes(fdk_widget *tree,
+                                   fdk_tree_node *out_nodes,
+                                   size_t max_nodes);
 
 #ifdef __cplusplus
 }

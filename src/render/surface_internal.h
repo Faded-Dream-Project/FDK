@@ -135,4 +135,19 @@ void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
                             const fdk_u8 *mask, fdk_i32 mask_stride,
                             fdk_color color);
 
+/* Global-alpha blit (1.4.3) — source-over compositing of a WHOLE
+ * source surface at (dst_x, dst_y) with every source pixel's alpha
+ * scaled by `alpha` (0..1): the paint-group atom the widget layer
+ * renders crossfades with. `src` must be ARGB8888 (straight alpha)
+ * — an offscreen group surface; the destination may be either
+ * format (XRGB destinations get the same opaque-result arithmetic
+ * as blit_blend). Clips against the destination's effective clip
+ * like every drawing helper; records the blitted destination rect
+ * as damage (the group content itself is the caller's damage
+ * business — the widget layer invalidates the group's bounds when
+ * it arms/disarms). Implemented in surface.c. */
+fdk_result fdk__surface_blit_alpha(fdk_surface *dst, fdk_i32 dst_x,
+                                   fdk_i32 dst_y, fdk_surface *src,
+                                   fdk_f32 alpha);
+
 #endif /* FDK_SURFACE_INTERNAL_H */

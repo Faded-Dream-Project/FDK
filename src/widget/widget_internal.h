@@ -164,6 +164,21 @@ struct fdk_widget {
     * the child's size request (the classic request/allocate split). */
     fdk_i32 natural_w, natural_h;
 
+    /* ---- Paint group (1.4.3) ----------------------------------
+     *
+     * A per-widget subtree OPACITY: while paint_alpha < 1.0, the
+     * paint walk renders this widget's whole subtree (its paint
+     * hook + children, recursively) into the cached ARGB offscreen
+     * `group_surface` (resized on demand, freed at teardown) and
+     * composites it ONCE with a global-alpha source-over blit — the
+     * compositor-level alpha decision the 1.4.2 revealer entry
+     * deferred. The offscreen render runs at alpha 1.0 (the flag
+     * lifts for the duration), so nested groups composite
+     * naturally. 1.0 (the permanent default) is the plain walk —
+     * zero cost, zero allocation, nothing to free. */
+    fdk_f32 paint_alpha;         /* [0,1]; 1.0 = no group           */
+    fdk_surface *group_surface;  /* cached ARGB offscreen, or NULL  */
+
     /* Reentrancy watch tokens (see fdk__widget_watch below): stack
      * variables that must learn when THIS widget dies. NULL when
      * nobody is watching — the overwhelmingly common case, so the
@@ -249,6 +264,13 @@ void fdk__widget_set_theme_hook(fdk_widget *widget,
  * completion): y offset of the text baseline from the widget's top,
  * or -1 for "none". Measured by the public fdk_widget_get_baseline. */
 void fdk__widget_set_baseline(fdk_widget *widget, fdk_i32 y);
+
+/* Internal paint-group opacity (1.4.3): while alpha < 1.0 the paint
+ * walk renders the widget's subtree into a cached offscreen and
+ * composites once with a global-alpha blit (see struct fdk_widget's
+ * paint_alpha field). Clamps to [0,1]; invalidates on every real
+ * change so the transition repaints. Safe with NULL widget. */
+void fdk__widget_set_paint_alpha(fdk_widget *widget, fdk_f32 alpha);
 
 /* The base widget class (what fdk_widget_create's klass == NULL gives
  * you, and what subclasses that don't override `paint` fall back to):

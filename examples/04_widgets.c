@@ -11,6 +11,13 @@
  *                     reveals advanced options, and a Paned whose
  *                     divider DRAGS (and answers the arrows when
  *                     focused — Tab to it)
+ *   1.4.3 frame     — the chooser batch's furniture: a MenuButton
+ *                     whose attached model pops up (the app keeps
+ *                     owning the model), a VERTICAL slider with
+ *                     marks, a CROSSFADE revealer (a real per-pixel
+ *                     fade — the paint-group engine), and the three
+ *                     DIALOG buttons (About / Font / Color), each
+ *                     opening the toolkit-owned dialog
  *   Layout frame    — a 3-column x 2-row grid with a two-column
  *                     SPAN cell and an expanding last column:
  *                     resize the window and watch ONLY that column
@@ -92,6 +99,66 @@ static void on_docs(fdk_widget *w, void *user) {
     set_status("The documentation would open in a viewer.");
 }
 
+/* ---- 1.4.3: the chooser-batch callbacks ---- */
+
+static fdk_context *g_ctx = NULL; /* the dialogs' context */
+static fdk_widget *g_fade_revealer = NULL; /* the crossfade door  */
+static fdk_menu *g_menu = NULL;           /* the menu button's model */
+
+static void on_menu_item(fdk_menu_item *item, void *user) {
+    (void)user;
+    char buf[96];
+    snprintf(buf, sizeof(buf), "Menu: %s.",
+             fdk_menu_item_text(item));
+    set_status(buf);
+}
+
+static void on_fade_toggle(fdk_widget *w, bool checked, void *user) {
+    (void)w;
+    (void)user;
+    /* The crossfade's flight: a REAL per-pixel fade through the
+     * paint-group engine (not a slide — the door keeps its size). */
+    if (g_fade_revealer != NULL) {
+        fdk_revealer_set_reveal_child(g_fade_revealer, checked);
+    }
+    set_status(checked ? "Crossfaded in." : "Crossfaded out.");
+}
+
+static void on_about(fdk_widget *w, void *user) {
+    (void)w;
+    (void)user;
+    fdk_about_dialog_options opts = {
+        .program_name = "FDK Widget Catalog",
+        .version = "Milestone 1.4.3",
+        .comments = "The About dialog: an identity card built from the "
+                    "stock catalog — logo, name, version, comments, "
+                    "copyright, a website row, and a scrolling license.",
+        .copyright = "(c) the FDK authors",
+        .website = "https://fdk.example",
+        .license = "Permission is hereby granted, free of charge, to "
+                   "any person obtaining a copy of this software...",
+    };
+    (void)fdk_dialog_show_about(g_ctx, &opts, NULL, NULL, NULL, NULL);
+    set_status("The About dialog opened.");
+}
+
+static void on_font_chooser(fdk_widget *w, void *user) {
+    (void)w;
+    (void)user;
+    (void)fdk_dialog_choose_font(g_ctx, NULL, NULL, NULL, NULL);
+    set_status("The font chooser opened.");
+}
+
+static void on_color_chooser(fdk_widget *w, void *user) {
+    (void)w;
+    (void)user;
+    fdk_color_dialog_options opts = {
+        .initial = {0.25f, 0.5f, 0.75f, 1.0f},
+    };
+    (void)fdk_dialog_choose_color(g_ctx, &opts, NULL, NULL, NULL);
+    set_status("The color chooser opened.");
+}
+
 int main(void) {
     font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
@@ -108,9 +175,10 @@ int main(void) {
     if (!fdk_example_init(&ctx, "04")) {
         return 1;
     }
+    g_ctx = ctx;
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 895)) {
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 1105)) {
         fdk_shutdown(ctx);
         return 1;
     }
@@ -208,6 +276,92 @@ int main(void) {
         split, "Drag the divider between the panes — or focus the "
                "splitter and use the arrow keys (Home/End for the "
                "walls)");
+
+    (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
+
+    /* --- frame: the 1.4.3 furniture (the chooser batch) ---
+     *
+     * A MenuButton with an ATTACHED model (the model stays the
+     * demo's — reusable, app-owned); a VERTICAL slider with marks
+     * (min at the BOTTOM, ticks to the left); and a CROSSFADE
+     * revealer whose door fades per-pixel through the paint-group
+     * engine. The three dialog buttons open the toolkit-owned
+     * choosers. */
+    {
+        fdk_widget *f143 = NULL;
+        (void)fdk_frame_create(content, font16, "1.4.3 — choosers",
+                               &f143);
+        fdk_widget_set_background(f143, col(26, 29, 40));
+
+        fdk_widget *frow = NULL;
+        (void)fdk_box_create(f143, FDK_HORIZONTAL, &frow);
+        fdk_box_set_spacing(frow, 14);
+
+        /* The menu button + its model. */
+        fdk_menu *menu = NULL;
+        (void)fdk_menu_create(font16, &menu);
+        fdk_menu_item *mi = NULL;
+        (void)fdk_menu_append(menu, "Refresh", &mi);
+        fdk_menu_item_set_on_activate(mi, on_menu_item, NULL);
+        (void)fdk_menu_append(menu, "Revert changes", &mi);
+        fdk_menu_item_set_on_activate(mi, on_menu_item, NULL);
+        (void)fdk_menu_append_separator(menu);
+        (void)fdk_menu_append(menu, "Preferences…", &mi);
+        fdk_menu_item_set_on_activate(mi, on_menu_item, NULL);
+        g_menu = menu;
+        fdk_widget *mbtn = NULL;
+        (void)fdk_menu_button_create(frow, font16, "Actions", &mbtn);
+        (void)fdk_menu_button_set_menu(mbtn, menu);
+        (void)fdk_widget_set_tooltip(
+            mbtn, "A menu button: click to pop the attached model up "
+                  "(the app keeps owning it — the arrow tracks the "
+                  "chain)");
+
+        /* The vertical slider with marks. */
+        fdk_widget *vsl = NULL;
+        (void)fdk_slider_create(frow, 0.0, 100.0, 65.0, &vsl);
+        fdk_slider_set_orientation(vsl, FDK_SLIDER_VERTICAL);
+        fdk_widget_set_natural_size(vsl, 0, 96);
+        (void)fdk_slider_add_mark(vsl, 0.0, "0");
+        (void)fdk_slider_add_mark(vsl, 100.0, "100");
+        (void)fdk_widget_set_tooltip(
+            vsl, "The vertical slider: min at the bottom, ticks and "
+                 "labels to the left of the trough");
+
+        /* The crossfade revealer + its toggle. */
+        fdk_widget *cfcol = NULL;
+        (void)fdk_box_create(frow, FDK_VERTICAL, &cfcol);
+        fdk_box_set_spacing(cfcol, 8);
+        fdk_widget *fade_t = NULL;
+        (void)fdk_toggle_create(cfcol, font16, "Crossfade", &fade_t);
+        fdk_toggle_set_on_changed(fade_t, on_fade_toggle, NULL);
+        fdk_widget *fade_rv = NULL;
+        (void)fdk_revealer_create(cfcol, &fade_rv);
+        fdk_revealer_set_transition(fade_rv, FDK_REVEAL_CROSSFADE);
+        fdk_widget *fade_panel = NULL;
+        (void)fdk_widget_create(fade_rv, NULL, (fdk_rect){0, 0, 170, 46},
+                                &fade_panel);
+        fdk_widget_set_background(fade_panel, col(70, 130, 230));
+        fdk_widget_set_corner_radius(fade_panel, 6);
+        (void)fdk_widget_set_tooltip(
+            fade_rv, "The crossfade revealer: a real per-pixel fade "
+                     "(the paint-group engine) — the door keeps its "
+                     "size while the content blends in");
+        /* Wire the toggle to the revealer's target. */
+        g_fade_revealer = fade_rv;
+        fdk_toggle_set_on_changed(fade_t, on_fade_toggle, NULL);
+
+        /* The three chooser dialogs. */
+        fdk_widget *about_b = NULL;
+        (void)fdk_button_create(frow, font16, "About…", &about_b);
+        fdk_button_set_on_activate(about_b, on_about, NULL);
+        fdk_widget *font_b = NULL;
+        (void)fdk_button_create(frow, font16, "Font…", &font_b);
+        fdk_button_set_on_activate(font_b, on_font_chooser, NULL);
+        fdk_widget *color_b = NULL;
+        (void)fdk_button_create(frow, font16, "Color…", &color_b);
+        fdk_button_set_on_activate(color_b, on_color_chooser, NULL);
+    }
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 
@@ -341,6 +495,7 @@ int main(void) {
     }
 
     fdk_font_destroy(font16);
+    fdk_menu_destroy(g_menu);
     fdk_example_close(&ex);
     return 0;
 }

@@ -112,8 +112,26 @@ typedef struct fdk_list {
     bool band_ctrl;      /* the union modifier was held at press     */
     fdk_f32 band_x, band_y;      /* the anchor, list-local           */
     fdk_f32 band_now_x, band_now_y; /* the pointer, list-local      */
+    fdk_f32 band_anchor_cy; /* the anchor's CONTENT-space y (1.4.3:
+                              * captured at press, glued to the content
+                              * — the auto-scroll extension rule: the
+                              * moving edge rides the offset, the anchor
+                              * does not, so the sweep GROWS as the view
+                              * chases the pointer)                  */
     bool *band_base;     /* pre-band snapshot (ctrl) or NULL         */
     size_t band_base_cap;
+    /* ---- Band auto-scroll (1.4.3) ----
+     *
+     * When the sweep's pointer leaves the viewport's visible band,
+     * a repeating timer scrolls the scrollview toward it. The band
+     * coordinates are VIEWPORT-space (apply_band adds the scroll
+     * offset when mapping rows), so a stationary pointer needs NO
+     * coordinate updates while the content slides under it — the
+     * selection simply extends as the offset grows, which is exactly
+     * how GTK's sweep chases the viewport edge. Disarmed at the
+     * release, on destruction, and when the pointer re-enters the
+     * visible band. */
+    fdk_timer *band_scroll_timer;
 } fdk_list;
 
 static fdk_list *list_of(fdk_widget *w) {
@@ -584,6 +602,105 @@ static const fdk_widget_class fdk_list_row_class_def = {
 /* ---- list-level events (keyboard + the 1.4.2 rubber band) ---- */
 
 static void list_apply_band(fdk_list *l);
+static void list_band_scroll_disarm(fdk_list *l);
+
+/* The band auto-scroll constants (1.4.3): tick rate, step, and the
+ * edge zone that arms it. */
+#define LIST_BAND_SCROLL_MS 40
+#define LIST_BAND_SCROLL_STEP 24
+#define LIST_BAND_EDGE 16
+
+/* The repeating tick: scrolls one step toward the pointer's side of
+ * the viewport and re-applies the selection. The band's coords are
+ * viewport-space — the pointer resting at the edge needs no update;
+ * the growing scroll offset does the extending. Disarms itself when
+ * the scroll has nowhere further to go. */
+static void list_band_scroll_tick(fdk_timer *timer, void *user) {
+    (void)timer;
+    fdk_list *l = user;
+    if (!l->banding || l->scroll == NULL) {
+        l->band_scroll_timer = NULL;
+        return;
+    }
+    fdk_i32 off_x = 0, off_y = 0;
+    fdk_scrollview_get_scroll_offset(l->scroll, &off_x, &off_y);
+    (void)off_x;
+    fdk_i32 vw = 0, vh = 0;
+    fdk__scrollview_viewport(l->scroll, &vw, &vh);
+    (void)vw;
+    /* The pointer's viewport-space y decides the direction. */
+    fdk_i32 dy = 0;
+    if (l->band_now_y < (fdk_f32)LIST_BAND_EDGE) {
+        dy = -LIST_BAND_SCROLL_STEP;
+    } else if (l->band_now_y > (fdk_f32)(vh - LIST_BAND_EDGE)) {
+        dy = LIST_BAND_SCROLL_STEP;
+    }
+    if (dy == 0) {
+        list_band_scroll_disarm(l);
+        return;
+    }
+    fdk_i32 want = off_y + dy;
+    if (want < 0) {
+        want = 0;
+    }
+    /* The scrollview clamps to its own max; read back the truth so
+     * the band never claims a scroll that did not happen. */
+    (void)fdk_scrollview_scroll_to(l->scroll, 0, want);
+    fdk_i32 new_off_x = 0, new_off_y = 0;
+    fdk_scrollview_get_scroll_offset(l->scroll, &new_off_x, &new_off_y);
+    (void)new_off_x;
+    if (new_off_y == off_y) {
+        /* Clamped at the end: nowhere further — stop chasing. */
+        list_band_scroll_disarm(l);
+        return;
+    }
+    /* Viewport-space band + a bigger offset = a wider selection
+     * sweep; the band rect itself never moves on screen. */
+    list_apply_band(l);
+    fdk_widget_invalidate(&l->base);
+}
+
+/* Arms (once) the auto-scroll timer; a tree without a context (no
+ * window) cannot arm it — the band then stays put, honestly. */
+static void list_band_scroll_arm(fdk_list *l) {
+    if (l->band_scroll_timer != NULL || l->scroll == NULL) {
+        return;
+    }
+    fdk_context *ctx =
+        fdk__window_context(fdk__widget_window_owner(&l->base));
+    if (ctx == NULL) {
+        return;
+    }
+    l->band_scroll_timer =
+        fdk_timer_add(ctx, LIST_BAND_SCROLL_MS, true,
+                      list_band_scroll_tick, l);
+}
+
+static void list_band_scroll_disarm(fdk_list *l) {
+    if (l->band_scroll_timer != NULL) {
+        fdk_timer_remove(l->band_scroll_timer);
+        l->band_scroll_timer = NULL;
+    }
+}
+
+/* Re-evaluates the auto-scroll after every motion: arm while the
+ * pointer rests outside the visible band, disarm when it comes back
+ * inside. The band's own coordinates need no bookkeeping — they are
+ * viewport-space already. */
+static void list_band_scroll_track(fdk_list *l) {
+    if (l->scroll == NULL) {
+        return;
+    }
+    fdk_i32 vw = 0, vh = 0;
+    fdk__scrollview_viewport(l->scroll, &vw, &vh);
+    (void)vw;
+    if (l->band_now_y < (fdk_f32)LIST_BAND_EDGE ||
+        l->band_now_y > (fdk_f32)(vh - LIST_BAND_EDGE)) {
+        list_band_scroll_arm(l);
+    } else {
+        list_band_scroll_disarm(l);
+    }
+}
 
 static bool list_handle_event(fdk_widget *w,
                               const fdk_widget_event *ev) {
@@ -607,6 +724,16 @@ static bool list_handle_event(fdk_widget *w,
         l->band_ctrl = (ev->pointer.modifiers & FDK_MOD_CTRL) != 0;
         l->band_x = l->band_now_x = ev->pointer.position.x;
         l->band_y = l->band_now_y = ev->pointer.position.y;
+        /* The anchor is glued to the CONTENT it was pressed on: the
+         * auto-scroll rule (the sweep grows as the view moves; the
+         * anchor row stays the anchor). */
+        {
+            fdk_i32 ox = 0, oy = 0;
+            if (l->scroll != NULL) {
+                fdk_scrollview_get_scroll_offset(l->scroll, &ox, &oy);
+            }
+            l->band_anchor_cy = l->band_y + (fdk_f32)oy;
+        }
         /* Ctrl-union snapshot: the selection as the sweep found it. */
         if (l->band_ctrl && l->count > 0) {
             bool *snap = fdk_alloc_array(l->count, sizeof(bool));
@@ -624,8 +751,11 @@ static bool list_handle_event(fdk_widget *w,
         }
         /* A zero-extent band selects nothing: the plain sweep clears
          * (an empty-space click deselecting — correct on its own);
-         * the ctrl sweep keeps the snapshot. */
+         * the ctrl sweep keeps the snapshot. A press that STARTS at
+         * the edge chases immediately (the motion path's rule,
+         * applied at the gesture's birth). */
         list_apply_band(l);
+        list_band_scroll_track(l);
         list_fire_changed(l);
         return true;
     }
@@ -636,12 +766,14 @@ static bool list_handle_event(fdk_widget *w,
         l->band_now_x = ev->position.x;
         l->band_now_y = ev->position.y;
         list_apply_band(l);
+        list_band_scroll_track(l);
         return true;
     case FDK_WIDGET_POINTER_UP:
         if (!l->banding) {
             return false;
         }
         l->banding = false;
+        list_band_scroll_disarm(l);
         fdk_free(l->band_base);
         l->band_base = NULL;
         l->band_base_cap = 0;
@@ -743,6 +875,7 @@ static bool list_handle_event(fdk_widget *w,
 
 static void list_destroy(fdk_widget *w) {
     fdk_list *l = list_of(w);
+    list_band_scroll_disarm(l);
     fdk_free(l->row_widgets);
     l->row_widgets = NULL;
     l->count = 0;
@@ -800,12 +933,16 @@ static void list_apply_band(fdk_list *l) {
         fdk_i32 ox = 0;
         fdk_scrollview_get_scroll_offset(l->scroll, &ox, &off_y);
     }
-    fdk_f32 y1 = (l->band_y < l->band_now_y) ? l->band_y
-                                              : l->band_now_y;
-    fdk_f32 y2 = (l->band_y < l->band_now_y) ? l->band_now_y
-                                              : l->band_y;
-    fdk_i64 lo = (fdk_i64)(y1 + (fdk_f32)off_y) - 1; /* widen one px */
-    fdk_i64 hi = (fdk_i64)(y2 + (fdk_f32)off_y) + 1;
+    /* The ANCHOR is content-space (captured at press); the moving
+     * edge is the viewport-space pointer + the CURRENT offset —
+     * under auto-scroll the sweep grows, the anchor never moves. */
+    fdk_f32 now_cy = l->band_now_y + (fdk_f32)off_y;
+    fdk_f32 y1 = (l->band_anchor_cy < now_cy) ? l->band_anchor_cy
+                                               : now_cy;
+    fdk_f32 y2 = (l->band_anchor_cy < now_cy) ? now_cy
+                                               : l->band_anchor_cy;
+    fdk_i64 lo = (fdk_i64)y1 - 1; /* widen one px */
+    fdk_i64 hi = (fdk_i64)y2 + 1;
     /* Row indices intersecting [lo, hi]: floor/ceil on the rh grid. */
     fdk_i64 r_lo = lo / rh;
     if (r_lo < 0) {
@@ -853,10 +990,19 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
                                                   : l->band_now_x;
         fdk_f32 x2 = (l->band_x < l->band_now_x) ? l->band_now_x
                                                   : l->band_x;
-        fdk_f32 y1 = (l->band_y < l->band_now_y) ? l->band_y
-                                                  : l->band_now_y;
-        fdk_f32 y2 = (l->band_y < l->band_now_y) ? l->band_now_y
-                                                  : l->band_y;
+        /* The anchor's on-screen y tracks the CONTENT it is glued
+         * to (auto-scroll slides it off the top as the sweep grows
+         * downward); the moving edge is where the pointer is. */
+        fdk_i32 ay_off = 0;
+        if (l->scroll != NULL) {
+            fdk_i32 axo = 0;
+            fdk_scrollview_get_scroll_offset(l->scroll, &axo, &ay_off);
+        }
+        fdk_f32 anchor_vy = l->band_anchor_cy - (fdk_f32)ay_off;
+        fdk_f32 y1 = (anchor_vy < l->band_now_y) ? anchor_vy
+                                                 : l->band_now_y;
+        fdk_f32 y2 = (anchor_vy < l->band_now_y) ? l->band_now_y
+                                                 : anchor_vy;
         fdk_i32 bx1 = (fdk_i32)x1 + bounds.x;
         fdk_i32 by1 = (fdk_i32)y1 + bounds.y;
         fdk_i32 bx2 = (fdk_i32)x2 + bounds.x;

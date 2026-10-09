@@ -9,38 +9,56 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at commit `f835007` (milestone 1.4.2), by a
-full in-depth code review — every claim below was re-verified against
-the tree, not copied from docs.
+Last audited: 2026-10-10, at milestone **1.4.3** (the chooser
+batch), by a full in-depth code review — every claim below was
+re-verified against the tree, not copied from docs.
 
 ## Current state (verified this audit)
 
-- **HEAD:** `f835007` = milestone **1.4.2** (81 commits total; clean tree)
+- **HEAD:** milestone **1.4.3** (the chooser batch: MenuButton,
+  vertical slider, search debounce, paint group + crossfade, band
+  auto-scroll, tree multi-select, About/Font/Color dialogs, font
+  enumeration)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **512 exported symbols**, `make verify-exports` OK in
+- **Public API:** **531 exported symbols**, `make verify-exports` OK in
   debug AND release
-- **Tests:** headless suite all-pass; X11 integration suite all-pass
-  (real Xvfb, real input); 30 test files (~28k lines)
-- **Scale:** ~48k lines of C in `src/` (+ generated Wayland protocols),
-  22 public headers, 12 examples
+- **Tests:** headless suite all-pass (incl. the 1.4.3 choosers
+  suite); X11 integration suite all-pass (real Xvfb, real input,
+  incl. the chooser GUI group); 31 test files
+- **Scale:** ~52k lines of C in `src/` (+ generated Wayland
+  protocols), 22 public headers, 12 examples
 
 ## Implemented — DO NOT re-add any of these
 
 ### Widget catalog (all SHIPPED, class names from `src/widget/*.c`)
 
 button, toggle, checkbox, radio, label, entry, progress (determinate +
-busy), separator, frame, notebook, list (multi-select, rubber-band,
-row icons), tree (row icons ride the model), scrollview + scrollbar
-(smooth wheel), menu / menu-bar / context menu (accelerators +
-mnemonics), combo (editable), slider (marks/ticks + labels), spinbutton,
+busy), separator, frame, notebook, list (multi-select, rubber-band +
+auto-scroll, row icons), tree (row icons; multi-select + rubber band
++ auto-scroll), scrollview + scrollbar (smooth wheel), menu /
+menu-bar / context menu (accelerators + mnemonics), combo (editable),
+slider (marks/ticks + labels; vertical orientation), spinbutton,
 toolbar, tooltip, spinner, link-button (role on button), paned,
-expander, statusbar, stack + stackswitcher, revealer (slide modes),
-levelbar, canvas (drawing area), search entry (preset),
-dialog (+ modal run), **file dialog** (OPEN/SAVE, places sidebar,
-filters, breadcrumb path bar, Ctrl+L location entry — modernized
-1.4.0), path-bar composite, window decorations (server-side deco bar).
+expander, statusbar, stack + stackswitcher, revealer (slide modes;
+crossfade via the paint group), levelbar, canvas (drawing area),
+search entry (preset; debounced search-changed), **menu button**
+(attached-popup hybrid — the hamburger), dialog (+ modal run),
+**file dialog** (OPEN/SAVE, places sidebar, filters, breadcrumb path
+bar, Ctrl+L location entry — modernized 1.4.0), path-bar composite,
+window decorations (server-side deco bar).
+
+### Dialogs & pickers (SHIPPED 1.4.3 — choosers.c)
+
+- **AboutDialog** — logo/name/version/comments/copyright, LINK
+  website row (activating fires a callback with the URL — FDK never
+  execs anything), scrolling license block
+- **FontChooser** — face list from `fdk_font_enumerate`, size
+  spinner (6..96), live preview reloading via `fdk_font_load_face`
+- **ColorChooser** — the HSV wheel on the canvas: per-pixel hue ring
+  + saturation/value triangle (barycentric), drag hit-testing on
+  both regions, marker dots, #rrggbb entry, current/initial swatches
 
 ### Platform / input (SHIPPED)
 
@@ -64,7 +82,12 @@ filters, breadcrumb path bar, Ctrl+L location entry — modernized
   text, hover fades (1.4.1/1.4.2)
 - Animation: easing library (**11 functions**), animator, smooth
   scroll, menu/combo fades, revealer slides, expander door
-- Accessibility: a11y tree (**38 roles**), narrator, announcements,
+- **Paint group (1.4.3): per-widget subtree opacity** — the ARGB
+  offscreen + global-alpha source-over blit engine (the crossfade
+  rides it; nested groups composite naturally)
+- **Font surface (1.4.3): `fdk_font_enumerate`** (name-table parse,
+  TTC faces, family/style/path sorted) + **`fdk_font_load_face`**
+- Accessibility: a11y tree (**41 roles**), narrator, announcements,
   per-widget value interfaces
 - i18n: catalog, plurals, dates, locale
 - Undo/redo: generic undo stack + entry integration
@@ -77,17 +100,15 @@ filters, breadcrumb path bar, Ctrl+L location entry — modernized
 
 ## What's left (the authoritative backlog)
 
-### NEXT — milestone 1.4.3 (from the parity ledger, value order)
+### NEXT — milestone 1.4.4 (from the parity ledger, value order)
 
-1. **DropDown** — button + popup menu hybrid (GtkDropDown-style)
-2. **FontChooser** — expose the font-scan surface as a picker dialog
-3. **ColorChooser** — HSV wheel on the canvas
-4. **AboutDialog** — labels + link buttons in a dialog
-5. **Vertical slider** — the documented parked remainder
-6. **Revealer crossfade** — needs a compositor-level alpha decision
-7. **SearchEntry debounce** — debounced search-changed signal
-8. **Rubber-band auto-scroll** — the sweep must chase the viewport edge
-9. **Tree rubber-band** — extend the List's sweep to the tree
+1. **Themed tooltips** — the tooltip carries no theme hook today
+2. **Notebook tab reordering** — drag a tab to a new slot
+3. **Color-well swatch button** — opens the 1.4.3 chooser from any
+   toolbar
+4. **File dialog recents** — the XDG recent-files surface
+5. **Scrollbar overlay mode** — thin, fades when idle
+6. **Entry icon slots** — leading/trailing (the 1.4.2 glyph language)
 
 ### LATER (real, not next)
 
@@ -109,7 +130,7 @@ source /home/z/my-project/scripts/fdk-env.sh && cd $FDK_ROOT
 make                 # debug build, ASan+UBSan
 make test            # headless suite
 make test-x11        # X11 integration (auto-Xvfb)
-make release && make verify-exports   # 512 symbols, both configs
+make release && make verify-exports   # 531 symbols, both configs
 ```
 
 Full battery (before each milestone commit): interop rig, X11 + sway

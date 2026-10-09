@@ -280,6 +280,145 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 void *user_data,
                                 fdk_window **out_window);
 
+/* ---- About dialog (1.4.3) ----
+ *
+ * The application's identity card, built from the stock catalog:
+ * program name, version line, wrap-text comments, copyright, and
+ * (optionally) a logo decoded from an image file. The website row
+ * is a LINK-styled button — FDK never launches a browser (nothing
+ * in the toolkit ever forks or execs); activating it fires
+ * on_website with the URL so the application decides what "open"
+ * means. The license text, when given, renders in a scrolling wrap
+ * label capped at ~9 lines of dialog height.
+ *
+ * Same lifecycle as every dialog: toolkit-owned window, auto-
+ * painted, self-destroying. The response callback is OPTIONAL
+ * (NULL = fire-and-forget; the close button's answer is always
+ * CLOSE). */
+
+typedef struct fdk_about_dialog_options {
+    const char *program_name;  /* copied; NULL = "About"          */
+    const char *version;       /* copied; NULL = omitted line     */
+    const char *comments;      /* copied; NULL = omitted block    */
+    const char *copyright;     /* copied; NULL = omitted line     */
+    const char *website;       /* copied; NULL = no website row   */
+    const char *license;       /* copied; NULL = omitted block    */
+    const char *logo_path;     /* copied; an image file (PNG/JPEG/
+                                  BMP/...) the dialog decodes; NULL
+                                  = no logo. Decoding failure logs
+                                  and omits the logo (the dialog
+                                  still works).                   */
+    bool modal;                /* X11 input grab, like messages   */
+    fdk_window *parent;        /* borrowed; anchors stacking where
+                                  the backend supports it          */
+} fdk_about_dialog_options;
+
+/* Fired when the website link button is activated. `url` is the
+ * options' website string, valid during the call. May be NULL (the
+ * button is display-only then). */
+typedef void (*fdk_about_website_fn)(const char *url, void *user_data);
+
+fdk_result fdk_dialog_show_about(fdk_context *ctx,
+                                 const fdk_about_dialog_options *options,
+                                 fdk_dialog_response_fn on_response,
+                                 fdk_about_website_fn on_website,
+                                 void *user_data,
+                                 fdk_window **out_window);
+
+/* ---- Font chooser dialog (1.4.3) ----
+ *
+ * The font-scan surface as a picker: a scrolling family/style list
+ * (one row per loadable system face, from fdk_font_enumerate), a
+ * size spinner (6..96), and a live preview label rendering the
+ * sample text in the selected face at the selected size (the
+ * preview reloads the face by path+index on every change). OK
+ * hands the choice; Cancel/Escape/dismissal hands the negative.
+ *
+ * The result contract is the file dialog's explicitness: outcome
+ * ACCEPTED means the fields are valid; CANCELLED means they are
+ * untouched/NULL. The returned strings are FDK-owned and valid only
+ * during the callback — copy what you need. The application turns
+ * the answer into a font with fdk_font_load_face(result->path,
+ * result->face_index, result->size). */
+
+typedef enum fdk_font_dialog_outcome {
+    FDK_FONT_DIALOG_CANCELLED = -1,
+    FDK_FONT_DIALOG_ACCEPTED  = 0,
+} fdk_font_dialog_outcome;
+
+typedef struct fdk_font_dialog_result {
+    fdk_font_dialog_outcome outcome;
+    char *family;    /* FDK-owned, valid during the callback    */
+    char *style;     /* ditto                                   */
+    char *path;      /* ditto                                   */
+    fdk_i32 face_index;
+    fdk_i32 size;    /* pixel size (6..96)                      */
+} fdk_font_dialog_result;
+
+typedef struct fdk_font_dialog_options {
+    const char *title;      /* copied; NULL = "Select Font"       */
+    const char *sample;     /* copied preview text; NULL = the
+                               quick-brown-fox default            */
+    const char *initial_family; /* copied; selected when it matches
+                                   an enumerated face (style
+                                   matches first if given)        */
+    const char *initial_style;
+    fdk_i32 initial_size;   /* clamped 6..96; 0 = 12              */
+    bool modal;             /* X11 input grab                      */
+    fdk_window *parent;     /* borrowed; anchors stacking         */
+} fdk_font_dialog_options;
+
+typedef void (*fdk_font_dialog_fn)(const fdk_font_dialog_result *result,
+                                   void *user_data);
+
+fdk_result fdk_dialog_choose_font(fdk_context *ctx,
+                                  const fdk_font_dialog_options *options,
+                                  fdk_font_dialog_fn on_done,
+                                  void *user_data,
+                                  fdk_window **out_window);
+
+/* ---- Color chooser dialog (1.4.3) ----
+ *
+ * The HSV wheel on the canvas: a hue ring with an inscribed
+ * saturation/value triangle (the classic Qt geometry), rasterized
+ * per-pixel in software — no approximation by primitives. Dragging
+ * the ring sets hue; dragging inside the triangle sets S/V; the
+ * marker dots track both. A hex entry accepts #rrggbb (Enter
+ * applies), the swatch stack shows current and initial, and
+ * OK/Cancel close. Everything recomputes live while dragging.
+ *
+ * The result is explicit like every dialog: ACCEPTED carries the
+ * chosen fdk_color; CANCELLED carries the initial color unchanged
+ * (fields are always filled — a color dialog's "no answer" is still
+ * a color, and the outcome field says which). */
+
+typedef enum fdk_color_dialog_outcome {
+    FDK_COLOR_DIALOG_CANCELLED = -1,
+    FDK_COLOR_DIALOG_ACCEPTED  = 0,
+} fdk_color_dialog_outcome;
+
+typedef struct fdk_color_dialog_result {
+    fdk_color_dialog_outcome outcome;
+    fdk_color color;    /* ACCEPTED: the choice; CANCELLED: initial */
+} fdk_color_dialog_result;
+
+typedef struct fdk_color_dialog_options {
+    const char *title;   /* copied; NULL = "Select Color"           */
+    fdk_color initial;   /* the starting color (a == 0 also black)  */
+    bool show_hex;       /* include the #rrggbb entry row           */
+    bool modal;          /* X11 input grab                          */
+    fdk_window *parent;  /* borrowed; anchors stacking             */
+} fdk_color_dialog_options;
+
+typedef void (*fdk_color_dialog_fn)(
+    const fdk_color_dialog_result *result, void *user_data);
+
+fdk_result fdk_dialog_choose_color(fdk_context *ctx,
+                                   const fdk_color_dialog_options *options,
+                                   fdk_color_dialog_fn on_done,
+                                   void *user_data,
+                                   fdk_window **out_window);
+
 #ifdef __cplusplus
 }
 #endif

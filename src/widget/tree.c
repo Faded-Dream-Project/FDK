@@ -21,10 +21,18 @@
  * Keyboard: Up/Down walk VISIBLE nodes; Left collapses a parent or
  * jumps to its parent; Right expands a parent or enters its first
  * child; Home/End/PageUp/PageDown behave like List.
+ *
+ * 1.4.3 — the parked multi-select tree, shipped: the List's exact
+ * model (fdk_tree_selection_mode), ctrl/shift/ctrl+shift click
+ * semantics over the VISIBLE sequence, and the rubber band with
+ * ctrl-union sweeps over empty tree space, auto-scrolling when the
+ * sweep chases the viewport edge — everything the List does, in the
+ * tree's visible-row space.
  */
 
 #include "widgets_internal.h"
 #include "../theme/theme_internal.h"
+#include "../window/window_internal.h" /* timer lifecycle via context */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -70,6 +78,19 @@ typedef struct fdk_tree {
     size_t anchor;         /* keyboard/selection position (visible idx) */
     fdk_tree_selection_fn on_selection_changed;
     void *on_selection_data;
+    /* ---- 1.4.3: multi-selection + the rubber band ---- */
+    fdk_tree_selection_mode mode;   /* default SINGLE                */
+    bool banding;
+    bool band_ctrl;      /* the union modifier at press           */
+    fdk_f32 band_x, band_y;         /* anchor, tree(viewport)-local  */
+    fdk_f32 band_now_x, band_now_y; /* pointer, tree(viewport)-local */
+    fdk_f32 band_anchor_cy; /* the anchor's CONTENT-space y — the
+                              * List's auto-scroll rule (the anchor
+                              * glues to the content; the sweep grows
+                              * as the view chases the pointer)      */
+    bool *band_base;     /* pre-band snapshot over ALL nodes (ctrl) */
+    size_t band_base_cap;
+    fdk_timer *band_scroll_timer;  /* edge-chasing auto-scroll      */
 } fdk_tree;
 
 static fdk_tree *tree_of(fdk_widget *w) {
@@ -289,6 +310,76 @@ static void tree_fire_changed(fdk_tree *t) {
     }
 }
 
+static void tree_clear_selection(fdk_tree *t);
+
+/* Sets one node's selected flag with the a11y notification riding
+ * the same path every selection change takes. */
+static void tree_set_node_selected(fdk_tree *t, size_t node, bool on) {
+    if (node >= t->count || t->nodes[node].dead ||
+        t->nodes[node].selected == on) {
+        return;
+    }
+    t->nodes[node].selected = on;
+    tree_notify_row_for_node(t, node, FDK_A11Y_STATE_CHANGED,
+                             FDK_A11Y_SELECTED);
+}
+
+/* Selects the VISIBLE rows [lo, hi] (slot indices), replacing or
+ * unioning with the current selection. */
+static void tree_select_visible_range(fdk_tree *t, size_t lo,
+                                       size_t hi, bool keep_others) {
+    if (!keep_others) {
+        tree_clear_selection(t);
+    }
+    if (lo > hi) {
+        size_t tmp = lo;
+        lo = hi;
+        hi = tmp;
+    }
+    if (hi >= t->row_count) {
+        hi = t->row_count - 1;
+    }
+    for (size_t i = lo; i <= hi && i < t->row_count; i++) {
+        tree_set_node_selected(t, t->row_widgets[i]->node, true);
+    }
+    fdk_widget_invalidate_all(&t->base);
+}
+
+/* Click semantics over the VISIBLE sequence — the List's exact
+ * model: plain replaces; ctrl toggles one; shift ranges from the
+ * anchor; ctrl+shift ranges without clearing. SINGLE keeps the
+ * classic behavior (modifiers read as a plain click). */
+static void tree_row_clicked(fdk_tree *t, size_t vis_index,
+                              fdk_u32 mods) {
+    if (t->mode == FDK_TREE_SELECTION_NONE) {
+        return;
+    }
+    size_t node = t->row_widgets[vis_index]->node;
+    if (t->mode == FDK_TREE_SELECTION_SINGLE) {
+        t->anchor = vis_index;
+        (void)fdk_tree_select(&t->base, node);
+        return;
+    }
+    bool ctrl = (mods & FDK_MOD_CTRL) != 0;
+    bool shift = (mods & FDK_MOD_SHIFT) != 0;
+    if (ctrl && shift) {
+        tree_select_visible_range(t, t->anchor, vis_index, true);
+        /* Anchor unchanged (ctrl keeps it). */
+    } else if (shift) {
+        tree_select_visible_range(t, t->anchor, vis_index, false);
+    } else if (ctrl) {
+        tree_set_node_selected(t, node, !t->nodes[node].selected);
+        t->anchor = vis_index;
+        fdk_widget_invalidate_all(&t->base);
+    } else {
+        tree_clear_selection(t);
+        tree_set_node_selected(t, node, true);
+        t->anchor = vis_index;
+        fdk_widget_invalidate_all(&t->base);
+    }
+    tree_fire_changed(t);
+}
+
 static void tree_clear_selection(fdk_tree *t) {
     for (size_t i = 0; i < t->count; i++) {
         if (t->nodes[i].selected) {
@@ -447,11 +538,11 @@ static bool row_handle_event(fdk_widget *w,
             return true;
         }
     }
-    (void)fdk_tree_select(tree_w, row->node);
-    /* Track the selected VISIBLE row for keyboard walking. */
+    /* 1.4.3: the multi-select click semantics (SINGLE reads every
+     * modifier as a plain click — the classic behavior). */
     for (size_t i = 0; i < t->row_count; i++) {
         if (t->row_widgets[i]->node == row->node) {
-            t->anchor = i;
+            tree_row_clicked(t, i, ev->pointer.modifiers);
             break;
         }
     }
@@ -557,11 +648,215 @@ static const fdk_widget_class fdk_tree_row_class_def = {
     .a11y = &tree_row_a11y,
 };
 
-/* ---- tree-level keyboard ---- */
+/* ---- tree-level events: keyboard + the 1.4.3 rubber band ---- */
+
+/* Applies the band's live selection: every VISIBLE row whose
+ * content-space extent intersects the band (viewport y + scroll
+ * offset), unioned with the pre-band snapshot when Ctrl armed the
+ * sweep — the List's exact mapping over the visible sequence. */
+static void tree_apply_band(fdk_tree *t) {
+    if (t->row_count == 0) {
+        return;
+    }
+    fdk_i32 rh = tree_row_height(t);
+    fdk_i32 off_y = 0;
+    if (t->scroll != NULL) {
+        fdk_i32 ox = 0;
+        fdk_scrollview_get_scroll_offset(t->scroll, &ox, &off_y);
+    }
+    /* The ANCHOR is content-space; the moving edge rides the
+     * CURRENT offset — the List's auto-scroll extension rule. */
+    fdk_f32 now_cy = t->band_now_y + (fdk_f32)off_y;
+    fdk_f32 y1 = (t->band_anchor_cy < now_cy) ? t->band_anchor_cy
+                                               : now_cy;
+    fdk_f32 y2 = (t->band_anchor_cy < now_cy) ? now_cy
+                                               : t->band_anchor_cy;
+    fdk_i64 lo = (fdk_i64)y1 - 1;
+    fdk_i64 hi = (fdk_i64)y2 + 1;
+    fdk_i64 r_lo = lo / rh;
+    if (r_lo < 0) {
+        r_lo = 0;
+    }
+    fdk_i64 r_hi = (hi + rh - 1) / rh; /* exclusive */
+    if (r_hi > (fdk_i64)t->row_count) {
+        r_hi = (fdk_i64)t->row_count;
+    }
+    bool changed = false;
+    for (size_t i = 0; i < t->row_count; i++) {
+        bool want = ((fdk_i64)i >= r_lo && (fdk_i64)i < r_hi) ||
+                    (t->band_ctrl && t->band_base != NULL &&
+                     t->row_widgets[i]->node < t->band_base_cap &&
+                     t->band_base[t->row_widgets[i]->node]);
+        size_t node = t->row_widgets[i]->node;
+        if (t->nodes[node].selected != want) {
+            tree_set_node_selected(t, node, want);
+            changed = true;
+        }
+    }
+    if (changed) {
+        fdk_widget_invalidate_all(&t->base);
+    }
+}
+
+/* The band auto-scroll constants — the List's values, shared by
+ * policy (the same feel everywhere). */
+#define TREE_BAND_SCROLL_MS 40
+#define TREE_BAND_SCROLL_STEP 24
+#define TREE_BAND_EDGE 16
+
+static void tree_band_scroll_disarm(fdk_tree *t) {
+    if (t->band_scroll_timer != NULL) {
+        fdk_timer_remove(t->band_scroll_timer);
+        t->band_scroll_timer = NULL;
+    }
+}
+
+static void tree_band_scroll_tick(fdk_timer *timer, void *user) {
+    (void)timer;
+    fdk_tree *t = user;
+    if (!t->banding || t->scroll == NULL) {
+        t->band_scroll_timer = NULL;
+        return;
+    }
+    fdk_i32 off_x = 0, off_y = 0;
+    fdk_scrollview_get_scroll_offset(t->scroll, &off_x, &off_y);
+    (void)off_x;
+    fdk_i32 vw = 0, vh = 0;
+    fdk__scrollview_viewport(t->scroll, &vw, &vh);
+    (void)vw;
+    fdk_i32 dy = 0;
+    if (t->band_now_y < (fdk_f32)TREE_BAND_EDGE) {
+        dy = -TREE_BAND_SCROLL_STEP;
+    } else if (t->band_now_y > (fdk_f32)(vh - TREE_BAND_EDGE)) {
+        dy = TREE_BAND_SCROLL_STEP;
+    }
+    if (dy == 0) {
+        tree_band_scroll_disarm(t);
+        return;
+    }
+    fdk_i32 want = off_y + dy;
+    if (want < 0) {
+        want = 0;
+    }
+    (void)fdk_scrollview_scroll_to(t->scroll, 0, want);
+    fdk_i32 new_off_y = 0;
+    fdk_scrollview_get_scroll_offset(t->scroll, &off_x, &new_off_y);
+    if (new_off_y == off_y) {
+        tree_band_scroll_disarm(t);
+        return;
+    }
+    tree_apply_band(t);
+    fdk_widget_invalidate(&t->base);
+}
+
+static void tree_band_scroll_track(fdk_tree *t) {
+    if (t->scroll == NULL) {
+        return;
+    }
+    fdk_i32 vw = 0, vh = 0;
+    fdk__scrollview_viewport(t->scroll, &vw, &vh);
+    (void)vw;
+    bool outside = t->band_now_y < (fdk_f32)TREE_BAND_EDGE ||
+                   t->band_now_y > (fdk_f32)(vh - TREE_BAND_EDGE);
+    if (!outside) {
+        tree_band_scroll_disarm(t);
+        return;
+    }
+    if (t->band_scroll_timer == NULL) {
+        fdk_context *ctx =
+            fdk__window_context(fdk__widget_window_owner(&t->base));
+        if (ctx != NULL) {
+            t->band_scroll_timer =
+                fdk_timer_add(ctx, TREE_BAND_SCROLL_MS, true,
+                              tree_band_scroll_tick, t);
+        }
+    }
+}
 
 static bool tree_handle_event(fdk_widget *w,
                               const fdk_widget_event *ev) {
     fdk_tree *t = tree_of(w);
+
+    /* ---- the rubber-band sweep (1.4.3) ----
+     *
+     * A left press reaching the TREE itself is on EMPTY space (rows
+     * consume their own presses; the scrollview does not consume
+     * presses) — the classic band start. MULTIPLE mode only; the
+     * implicit grab (press returned true) delivers the motions and
+     * the release to the tree alone. Ctrl arms a union sweep. */
+    switch (ev->type) {
+    case FDK_WIDGET_POINTER_DOWN: {
+        if (ev->pointer.button != FDK_POINTER_BUTTON_LEFT ||
+            t->mode != FDK_TREE_SELECTION_MULTIPLE ||
+            (w->flags & FDK_WF_ENABLED) == 0) {
+            return false;
+        }
+        t->banding = true;
+        t->band_ctrl = (ev->pointer.modifiers & FDK_MOD_CTRL) != 0;
+        t->band_x = t->band_now_x = ev->pointer.position.x;
+        t->band_y = t->band_now_y = ev->pointer.position.y;
+        /* The anchor glues to the CONTENT (the List's rule): the
+         * sweep grows under auto-scroll, the anchor row stays. */
+        {
+            fdk_i32 ox = 0, oy = 0;
+            if (t->scroll != NULL) {
+                fdk_scrollview_get_scroll_offset(t->scroll, &ox, &oy);
+            }
+            t->band_anchor_cy = t->band_y + (fdk_f32)oy;
+        }
+        /* Ctrl-union snapshot: the selection as the sweep found it
+         * (over ALL nodes — collapsed ones too; the model holds the
+         * state, the walk only shows it). */
+        if (t->band_ctrl && t->count > 0) {
+            bool *snap = fdk_alloc_array(t->count, sizeof(bool));
+            if (snap != NULL) {
+                for (size_t i = 0; i < t->count; i++) {
+                    snap[i] = t->nodes[i].selected;
+                }
+                t->band_base = snap;
+                t->band_base_cap = t->count;
+            }
+        } else {
+            fdk_free(t->band_base);
+            t->band_base = NULL;
+            t->band_base_cap = 0;
+        }
+        /* A zero-extent band selects nothing: the plain sweep clears
+         * (an empty-space click deselecting); the ctrl sweep keeps.
+         * A press that STARTS at the edge chases immediately (the
+         * motion path's rule, at the gesture's birth — the List's). */
+        tree_apply_band(t);
+        tree_band_scroll_track(t);
+        tree_fire_changed(t);
+        return true;
+    }
+    case FDK_WIDGET_POINTER_MOTION:
+        if (!t->banding) {
+            return false;
+        }
+        t->band_now_x = ev->position.x;
+        t->band_now_y = ev->position.y;
+        tree_apply_band(t);
+        tree_band_scroll_track(t);
+        return true;
+    case FDK_WIDGET_POINTER_UP:
+        if (!t->banding) {
+            return false;
+        }
+        t->banding = false;
+        tree_band_scroll_disarm(t);
+        fdk_free(t->band_base);
+        t->band_base = NULL;
+        t->band_base_cap = 0;
+        /* The band rect disappears with the gesture: repaint. */
+        fdk_widget_invalidate(w);
+        /* One gesture: the callback fires here (and at the press). */
+        tree_fire_changed(t);
+        return true;
+    default:
+        break;
+    }
+
     if (ev->type != FDK_WIDGET_KEY_DOWN ||
         (w->flags & FDK_WF_FOCUSED) == 0 || t->row_count == 0) {
         return false;
@@ -667,8 +962,18 @@ static bool tree_handle_event(fdk_widget *w,
     }
     if (next != cur || sel == FDK_TREE_NODE_NONE) {
         if (next >= 0) {
-            t->anchor = (size_t)next;
-            (void)fdk_tree_select(w, t->row_widgets[next]->node);
+            /* 1.4.3: shift extends the range from the anchor in
+             * MULTIPLE mode (the keyboard twin of shift-click); plain
+             * keys take the classic single-select walk. */
+            bool shift = (ev->key.modifiers & FDK_MOD_SHIFT) != 0;
+            if (t->mode == FDK_TREE_SELECTION_MULTIPLE && shift) {
+                tree_select_visible_range(t, t->anchor, (size_t)next,
+                                          false);
+                tree_fire_changed(t);
+            } else {
+                t->anchor = (size_t)next;
+                (void)fdk_tree_select(w, t->row_widgets[next]->node);
+            }
         }
     }
     return true;
@@ -711,8 +1016,68 @@ static void tree_arrange(fdk_widget *w, fdk_rect assigned) {
     }
 }
 
+/* The tree's own paint: the rubber band under the rows (the tree's
+ * paint runs before its scrollview subtree, so selection fills land
+ * over the tint — the List's exact layering, accent-derived). */
+static void tree_paint(fdk_widget *w, fdk_surface *surface,
+                       fdk_rect bounds, fdk_rect clip) {
+    (void)clip;
+    fdk_tree *t = tree_of(w);
+    if (!t->banding || bounds.width <= 0 || bounds.height <= 0) {
+        return;
+    }
+    fdk_f32 x1 = (t->band_x < t->band_now_x) ? t->band_x
+                                              : t->band_now_x;
+    fdk_f32 x2 = (t->band_x < t->band_now_x) ? t->band_now_x
+                                              : t->band_x;
+    /* The anchor's on-screen y tracks the CONTENT it is glued to
+     * (the List's rule); the moving edge is the pointer. */
+    fdk_i32 ay_off = 0;
+    if (t->scroll != NULL) {
+        fdk_i32 axo = 0;
+        fdk_scrollview_get_scroll_offset(t->scroll, &axo, &ay_off);
+    }
+    fdk_f32 anchor_vy = t->band_anchor_cy - (fdk_f32)ay_off;
+    fdk_f32 y1 = (anchor_vy < t->band_now_y) ? anchor_vy
+                                              : t->band_now_y;
+    fdk_f32 y2 = (anchor_vy < t->band_now_y) ? t->band_now_y
+                                              : anchor_vy;
+    fdk_i32 bx1 = (fdk_i32)x1 + bounds.x;
+    fdk_i32 by1 = (fdk_i32)y1 + bounds.y;
+    fdk_i32 bx2 = (fdk_i32)x2 + bounds.x;
+    fdk_i32 by2 = (fdk_i32)y2 + bounds.y;
+    /* Clamp the edges to the bounds (the grab delivers out-of-widget
+     * coordinates while the pointer is dragged past the edge) — the
+     * List's exact clamping. */
+    if (bx1 < bounds.x) {
+        bx1 = bounds.x;
+    }
+    if (by1 < bounds.y) {
+        by1 = bounds.y;
+    }
+    if (bx2 > bounds.x + bounds.width) {
+        bx2 = bounds.x + bounds.width;
+    }
+    if (by2 > bounds.y + bounds.height) {
+        by2 = bounds.y + bounds.height;
+    }
+    fdk_i32 bw = bx2 - bx1;
+    fdk_i32 bh = by2 - by1;
+    if (bw <= 0 || bh <= 0) {
+        return;
+    }
+    fdk_color accent = fdk__pal_accent();
+    fdk_color fill = {accent.r, accent.g, accent.b, accent.a * 0.18f};
+    fdk_color edge = {accent.r, accent.g, accent.b, accent.a * 0.55f};
+    fdk_rect band = {bx1, by1, bw, bh};
+    fdk_surface_fill_rect(surface, band, fill);
+    fdk_surface_draw_rect(surface, band, edge);
+}
+
 static void tree_destroy(fdk_widget *w) {
     fdk_tree *t = tree_of(w);
+    tree_band_scroll_disarm(t);
+    fdk_free(t->band_base); /* a band interrupted by destruction */
     for (size_t i = 0; i < t->count; i++) {
         fdk_free(t->nodes[i].text);
     }
@@ -731,7 +1096,7 @@ const fdk_widget_class fdk_tree_class_def = {
     .size = sizeof(fdk_tree),
     .name = "tree",
     .handle_event = tree_handle_event,
-    .paint = NULL,
+    .paint = tree_paint,
     .measure = tree_measure,
     .arrange = tree_arrange,
     .destroy = tree_destroy,
@@ -1072,4 +1437,66 @@ void fdk_tree_set_on_selection_changed(fdk_widget *tree,
     fdk_tree *t = tree_of(tree);
     t->on_selection_changed = fn;
     t->on_selection_data = user_data;
+}
+
+/* ---- selection mode + multi-selection API (1.4.3) ---- */
+
+void fdk_tree_set_selection_mode(fdk_widget *tree,
+                                 fdk_tree_selection_mode mode) {
+    if (tree == NULL || tree->klass != &fdk_tree_class_def) {
+        return;
+    }
+    switch (mode) {
+    case FDK_TREE_SELECTION_SINGLE:
+    case FDK_TREE_SELECTION_NONE:
+    case FDK_TREE_SELECTION_MULTIPLE:
+        break;
+    default:
+        return; /* unknown values ignored (documented) */
+    }
+    fdk_tree *t = tree_of(tree);
+    if (t->mode == mode) {
+        return;
+    }
+    /* Switching modes resets the selection to whatever SINGLE would
+     * show of it: the first selected node, or none. A stale
+     * multi-selection under a SINGLE tree is a lie waiting to be
+     * read. */
+    fdk_tree_node keep = (mode == FDK_TREE_SELECTION_NONE)
+        ? FDK_TREE_NODE_NONE
+        : fdk_tree_get_selected(tree);
+    tree_clear_selection(t);
+    if (keep != FDK_TREE_NODE_NONE) {
+        t->nodes[keep].selected = true;
+        tree_notify_row_for_node(t, keep, FDK_A11Y_STATE_CHANGED,
+                                 FDK_A11Y_SELECTED);
+    }
+    t->mode = mode;
+    fdk_widget_invalidate(tree);
+}
+
+fdk_tree_selection_mode fdk_tree_get_selection_mode(fdk_widget *tree) {
+    if (tree == NULL || tree->klass != &fdk_tree_class_def) {
+        return FDK_TREE_SELECTION_SINGLE;
+    }
+    return tree_of(tree)->mode;
+}
+
+size_t fdk_tree_get_selected_nodes(fdk_widget *tree,
+                                   fdk_tree_node *out_nodes,
+                                   size_t max_nodes) {
+    if (tree == NULL || tree->klass != &fdk_tree_class_def) {
+        return 0;
+    }
+    fdk_tree *t = tree_of(tree);
+    size_t written = 0;
+    for (size_t i = 0; i < t->count && written < max_nodes; i++) {
+        if (!t->nodes[i].dead && t->nodes[i].selected) {
+            if (out_nodes != NULL) {
+                out_nodes[written] = i;
+            }
+            written++;
+        }
+    }
+    return written;
 }

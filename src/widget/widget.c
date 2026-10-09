@@ -2,6 +2,7 @@
 
 #include "widget/widget_internal.h"
 #include "widgets_internal.h" /* fdk__a11y_notify */
+#include "../render/surface_internal.h" /* fdk__surface_blit_alpha (1.4.3) */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -354,6 +355,14 @@ static void teardown_free(fdk_widget *w) {
     fdk_free(w->tooltip);
     fdk_free(w->a11y_name);
     fdk_free(w->a11y_description);
+    /* The paint group's offscreen (1.4.3): after the subclass hook,
+     * with the tree walk off the stack — nothing else references it
+     * (the paint path only ever touches it while this subtree is
+     * being painted, and this free runs outside that). */
+    if (w->group_surface != NULL) {
+        fdk_surface_destroy(w->group_surface);
+        w->group_surface = NULL;
+    }
     /* A11y: drop every relation edge that touched this widget —
      * ours, and the inverse copies stored on the targets — so no
      * dangling relation target can outlive the widget. (The list is
@@ -851,6 +860,8 @@ fdk_result fdk_widget_create(fdk_widget *parent,
     w->bounds = bounds;
     w->natural_w = bounds.width;
     w->natural_h = bounds.height;
+    w->paint_alpha = 1.0f;  /* 1.4.3: no group until asked */
+    w->group_surface = NULL;
     w->align_h = FDK_ALIGN_FILL;
     w->align_v = FDK_ALIGN_FILL;
     w->min_w = 0;
@@ -1495,6 +1506,86 @@ bool fdk_widget_tree_has_damage(fdk_widget *any) {
     return root != NULL && root->has_damage;
 }
 
+/* ---- paint group (1.4.3) ----------------------------------------------
+ *
+ * Renders w's whole subtree (paint hook + children) into the cached
+ * ARGB offscreen at alpha 1.0, then composites it onto `surface`
+ * with one global-alpha source-over blit. Called by paint_rec when
+ * paint_alpha < 1.0 — the compositor-level alpha decision. Returns
+ * false when the offscreen could not be created (OOM): the alpha is
+ * lifted to 1.0 and paint_rec falls through to the plain path — a
+ * visible unfaded child beats a missing one. */
+static void paint_rec(fdk_widget *w, fdk_surface *surface,
+                      fdk_f32 origin_x, fdk_f32 origin_y,
+                      fdk_rect damage);
+
+static bool paint_group(fdk_widget *w, fdk_surface *surface,
+                         fdk_rect abs) {
+    /* Resize (or first-create) the offscreen. Zero-sized groups have
+     * nothing to render — the caller's early-outs already caught
+     * this in practice; stay safe anyway. */
+    if (abs.width <= 0 || abs.height <= 0) {
+        return true; /* nothing to composite: "done" */
+    }
+    fdk_surface *group = w->group_surface;
+    if (group != NULL) {
+        fdk_surface_info gi;
+        if (!fdk_ok(fdk_surface_get_info(group, &gi)) ||
+            gi.width != abs.width || gi.height != abs.height) {
+            fdk_surface_destroy(group);
+            w->group_surface = NULL;
+            group = NULL;
+        }
+    }
+    if (group == NULL) {
+        if (!fdk_ok(fdk_surface_create_format(
+                abs.width, abs.height,
+                FDK_SURFACE_FORMAT_ARGB8888, &w->group_surface))) {
+            /* Allocation failed: degrade honestly — lift the alpha
+             * and let paint_rec fall through to the plain path (a
+             * visible unfaded child beats a missing one). Later
+             * paints retry the allocation. */
+            w->paint_alpha = 1.0f;
+            return false;
+        }
+        group = w->group_surface;
+    }
+
+    /* Clear to fully transparent (raw writes: fill_rect composites,
+     * so a "transparent fill" would be a no-op). */
+    {
+        fdk_surface_info gi;
+        if (fdk_ok(fdk_surface_get_info(group, &gi)) &&
+            gi.pixels != NULL) {
+            for (fdk_i32 y = 0; y < gi.height; y++) {
+                memset(gi.pixels + (size_t)y * (size_t)gi.stride, 0,
+                       (size_t)gi.width * sizeof(fdk_u32));
+            }
+        }
+    }
+
+    /* Render the subtree at alpha 1.0, origin-translated so the
+     * group's top-left is (0,0). The flag LIFTS for the duration —
+     * that is the recursion guard, and it makes nested groups
+     * composite naturally (an inner group renders into this one). */
+    fdk_f32 saved = w->paint_alpha;
+    w->paint_alpha = 1.0f;
+    fdk_rect full = {0, 0, abs.width, abs.height};
+    if (fdk_ok(fdk_surface_push_clip(group, full))) {
+        paint_rec(w, group, (fdk_f32)-abs.x, (fdk_f32)-abs.y, full);
+        fdk_surface_pop_clip(group);
+    } else {
+        paint_rec(w, group, (fdk_f32)-abs.x, (fdk_f32)-abs.y, full);
+    }
+    w->paint_alpha = saved;
+
+    /* The single composite. blit_alpha honors the destination's
+     * clip stack — the parent-bounds and damage clips still apply. */
+    (void)fdk__surface_blit_alpha(surface, abs.x, abs.y, group,
+                                  saved);
+    return true;
+}
+
 static void paint_rec(fdk_widget *w, fdk_surface *surface,
                       fdk_f32 origin_x, fdk_f32 origin_y, fdk_rect damage) {
     if ((w->flags & FDK_WF_VISIBLE) == 0) {
@@ -1508,6 +1599,17 @@ static void paint_rec(fdk_widget *w, fdk_surface *surface,
     };
     if (rect_empty(abs) || !rects_intersect(abs, damage)) {
         return;
+    }
+
+    /* 1.4.3 — the paint group: an opacity below 1.0 renders this
+     * whole subtree into the cached offscreen and composites once.
+     * (Placed after the empty/damage early-outs: an invisible group
+     * costs nothing. A failed offscreen lifts the alpha and falls
+     * through to the plain path.) */
+    if (w->paint_alpha < 1.0f) {
+        if (paint_group(w, surface, abs)) {
+            return;
+        }
     }
 
     /* Constrain this widget (and its children) to its own bounds on
@@ -1545,6 +1647,22 @@ static void paint_rec(fdk_widget *w, fdk_surface *surface,
             paint_rec(w->children[i], surface, child_x, child_y, damage);
         }
     }
+}
+
+void fdk__widget_set_paint_alpha(fdk_widget *widget, fdk_f32 alpha) {
+    if (widget == NULL) {
+        return;
+    }
+    if (!(alpha >= 0.0f)) {
+        alpha = 0.0f; /* NaN and negatives clamp to fully hidden */
+    } else if (alpha > 1.0f) {
+        alpha = 1.0f;
+    }
+    if (widget->paint_alpha == alpha) {
+        return;
+    }
+    widget->paint_alpha = alpha;
+    fdk_widget_invalidate(widget);
 }
 
 void fdk_widget_tree_paint(fdk_widget *any, fdk_surface *surface) {

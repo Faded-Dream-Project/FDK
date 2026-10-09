@@ -1421,3 +1421,48 @@ X11 e2e clicks a switcher pill at its center — the rect comes from
 Hand-computed pixel offsets (the X of the search entry's clear
 button at "width - 14") were wrong by 4 px in this very milestone;
 the geometry the toolkit PUBLISHES is the geometry to use.
+
+## 1.4.3 — five lessons from the chooser batch
+
+**Press-to-press is not a click.** The tree's multi-select test
+clicked twice without a release between: the implicit grab routes
+the SECOND press to the last grabbed widget (the dispatcher's
+grab check runs before hit-testing), so the ctrl-click toggled
+the FIRST row off instead of the fourth on. Every synthetic
+click in the new suite is a full press+release pair — and any
+test that means "another click" must release first.
+
+**A stale binary lies confidently.** One `make >/dev/null 2>&1`
+swallowed a compile error and re-ran the PREVIOUS binary, which
+failed an assertion at the OLD line number while the source had
+moved on. The tell: the reported line pointed at a different
+assert than the one being fixed. Compile and run in separate,
+checked steps — or never redirect the build's stderr to /dev/null
+when iterating on tests.
+
+**The pump is a tick, not a timeline.** A single
+`fdk_pump_events(ctx, 400)` fires the DUE timers once — a
+repeating timer gets ONE tick per pump, because the poll wakes at
+the next deadline, fires, and returns. The auto-scroll test
+needed 24 ticks: that is a LOOP of pumps (one per tick), not one
+long pump. The same applies to any timer-driven feature verified
+under a real window clock.
+
+**The anchor decides what auto-scroll means.** The band's
+original viewport-space coordinates made a stationary edge-hold
+scroll the view while BOTH band edges rode the offset — the
+selection stayed one row wide. GTK's semantics need the anchor
+GLUED TO THE CONTENT (captured content-space at press) while only
+the moving edge rides the current offset: then the sweep grows as
+the view chases. The lesson generalizes: when a gesture
+coordinates two spaces (viewport and content), decide for EACH
+edge which space owns it, at capture time.
+
+**XSendEvent bypasses grabs — drive the dismissal shape.** An
+outside click meant to dismiss a popup never reaches it if sent
+to the parent (the popup's active grab would have rerouted a REAL
+click, but XSendEvent delivers where you point it). The popup
+suite's answer is the established recipe: send an out-of-bounds
+ButtonPress directly TO the popup — the exact shape the grab
+produces, which x11_events turns into the close request. The
+MenuButton's dismissal test reuses it verbatim.

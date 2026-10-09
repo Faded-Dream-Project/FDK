@@ -472,6 +472,14 @@ fdk_font *fdk_font_load(const char *path, fdk_i32 pixel_size) {
     return fdk_text_font_load_face(path, 0, pixel_size);
 }
 
+fdk_font *fdk_font_load_face(const char *path, fdk_i32 face_index,
+                             fdk_i32 pixel_size) {
+    if (path == NULL || face_index < 0) {
+        return NULL;
+    }
+    return fdk_text_font_load_face(path, (long)face_index, pixel_size);
+}
+
 /* fdk_alloc'd copy of the load path, kept for fdk_font_get_file_path().
  * NULL on allocation failure is non-fatal: the font still loads, the
  * accessor just answers NULL. */

@@ -94,6 +94,13 @@ typedef enum fdk_a11y_role {
 
     /* 1.4.2 append — the app furniture. */
     FDK_A11Y_ROLE_LEVEL_BAR = 46, /* segmented value readout (meter)  */
+
+    /* 1.4.3 append — the chooser furniture. */
+    FDK_A11Y_ROLE_MENU_BUTTON = 47, /* pops an attached menu (the
+                                      * hamburger; EXPANDED tracks the
+                                      * chain)                          */
+    FDK_A11Y_ROLE_COLOR_CHOOSER = 48, /* HSV wheel + hex field         */
+    FDK_A11Y_ROLE_FONT_CHOOSER = 49,  /* family list + size + preview  */
 } fdk_a11y_role;
 
 /* Stable, human-readable name ("button", "check menu item"). Never
