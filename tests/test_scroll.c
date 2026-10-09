@@ -23,6 +23,7 @@
 #include "fdk/fdk_widgets.h"
 
 #include "widget/widget_internal.h" /* fdk_widget internals: ->parent */
+#include "widget/widgets_internal.h" /* fdk__scrollview_viewport    */
 
 #include <assert.h>
 #include <stdio.h>
@@ -574,6 +575,154 @@ static void test_hit_testing(void) {
            "offset (scrolled-in button receives the click)\n");
 }
 
+/* ---- overlay bar mode (1.4.4) ---- */
+
+static fdk_u32 pack_rgb(float r, float g, float b) {
+    fdk_u32 ru = (fdk_u32)(r * 255.0f + 0.5f);
+    fdk_u32 gu = (fdk_u32)(g * 255.0f + 0.5f);
+    fdk_u32 bu = (fdk_u32)(b * 255.0f + 0.5f);
+    return (ru << 16) | (gu << 8) | bu;
+}
+
+static void test_overlay_bars(void) {
+    /* Mode API: default CLASSIC, get/set round trip, idempotent,
+     * argument safety. */
+    fdk_widget *root = fresh_root();
+    fdk_widget *sv = NULL;
+    assert(fdk_ok(fdk_scrollview_create(root, &sv)));
+    assert(fdk_scrollview_get_bar_mode(sv) == FDK_SCROLL_BARS_CLASSIC);
+    assert(fdk_scrollview_set_bar_mode(sv, FDK_SCROLL_BARS_OVERLAY) ==
+           FDK_OK);
+    assert(fdk_scrollview_get_bar_mode(sv) == FDK_SCROLL_BARS_OVERLAY);
+    assert(fdk_scrollview_set_bar_mode(sv, FDK_SCROLL_BARS_OVERLAY) ==
+           FDK_OK); /* idempotent */
+    assert(fdk_scrollview_set_bar_mode(NULL,
+                                       FDK_SCROLL_BARS_OVERLAY) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_scrollview_get_bar_mode(NULL) == FDK_SCROLL_BARS_CLASSIC);
+    fdk_widget *plain = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){0, 0, 5, 5}, &plain)));
+    assert(fdk_scrollview_set_bar_mode(plain,
+                                       FDK_SCROLL_BARS_OVERLAY) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    fdk_widget_destroy(plain);
+    fdk_widget_destroy(root);
+
+    /* Geometry: the overlay viewport is the FULL bounds (the classic
+     * mode reserves strips); the overlay bar sits at the edge with
+     * the overlay metric's thickness. Content taller + wider than
+     * the view so BOTH bars exist. */
+    root = fresh_root();
+    assert(fdk_ok(fdk_scrollview_create(root, &sv)));
+    fdk_widget *content = make_content(sv, 400, 500,
+                                       (fdk_color){0.2f, 0.6f, 0.9f, 1});
+    assert(fdk_ok(fdk_scrollview_set_content(sv, content)));
+    fdk_widget_arrange(sv, (fdk_rect){0, 0, 200, 150});
+
+    /* CLASSIC baseline: viewport loses both strips. */
+    fdk_i32 vw = 0, vh = 0;
+    fdk__scrollview_viewport(sv, &vw, &vh);
+    assert(vw == 200 - 12 && vh == 150 - 12); /* metric default 12 */
+
+    /* OVERLAY: viewport is the full bounds. */
+    assert(fdk_scrollview_set_bar_mode(sv, FDK_SCROLL_BARS_OVERLAY) ==
+           FDK_OK);
+    fdk__scrollview_viewport(sv, &vw, &vh);
+    assert(vw == 200 && vh == 150);
+
+    /* The bars: internal children "scrollbar" — found by class name
+     * through the tree (they are the only two). Overlay thickness
+     * defaults to 6; the vertical bar runs the FULL height at the
+     * right edge, the horizontal bar loses the corner 6px. */
+    fdk_widget *bars[2] = {NULL, NULL};
+    int nbars = 0;
+    fdk_widget *sv_child = NULL;
+    for (size_t i = 0; i < root->child_count; i++) {
+        if (root->children[i]->klass->name != NULL &&
+            strcmp(root->children[i]->klass->name, "scrollview") == 0) {
+            sv_child = root->children[i];
+        }
+    }
+    assert(sv_child == sv);
+    for (size_t i = 0; i < sv->child_count && nbars < 2; i++) {
+        if (sv->children[i]->klass->name != NULL &&
+            strcmp(sv->children[i]->klass->name, "scrollbar") == 0) {
+            bars[nbars++] = sv->children[i];
+        }
+    }
+    assert(nbars == 2);
+    /* Detached tree (no window -> no idle clock): the honesty rule —
+     * overlay bars stay VISIBLE while their axes overflow. */
+    for (int i = 0; i < 2; i++) {
+        assert(fdk_widget_get_visible(bars[i]));
+    }
+    fdk_rect vb = fdk_widget_get_bounds(bars[0]);
+    fdk_rect hb = fdk_widget_get_bounds(bars[1]);
+    /* bars[0] is the vertical bar (created first), bars[1] the
+     * horizontal one. */
+    assert(vb.x == 200 - 6 && vb.width == 6);
+    assert(vb.y == 0 && vb.height == 150); /* full height: no strip */
+    assert(hb.y == 150 - 6 && hb.height == 6);
+    assert(hb.x == 0 && hb.width == 200 - 6); /* corner conceded */
+
+    /* Overlay paint: no trough — the content shows through the bar
+     * strip wherever the thumb is not. The thumb occupies the top of
+     * the vbar (view 150, content 500 -> 45px); sample far below it. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(220, 170, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    fdk_u32 strip = px_at(s, 197, 100);
+    assert(strip == pack_rgb(0.2f, 0.6f, 0.9f));
+    fdk_surface_destroy(s);
+
+    /* Wheel still scrolls (and wakes the bar — visible stays true
+     * in a detached tree). The flight settles through the synthetic
+     * animation clock, like every gesture test here. */
+    g_anim_time = 0;
+    fdk__animation_set_test_clock(0);
+    fdk_event_data wheel = ev_scroll(100, 75, 0.0f, -1.0f);
+    (void)fdk_widget_tree_handle_event(root, &wheel);
+    settle();
+    fdk_i32 ox = 0, oy = 0;
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &ox, &oy)));
+    assert(oy == 48); /* one notch, clamped far from the edges */
+    assert(ox == 0);
+    assert(fdk_widget_get_visible(bars[0]));
+
+    /* Mode switch back: strips reserved again, offsets re-clamped. */
+    assert(fdk_scrollview_set_bar_mode(sv, FDK_SCROLL_BARS_CLASSIC) ==
+           FDK_OK);
+    fdk__scrollview_viewport(sv, &vw, &vh);
+    assert(vw == 200 - 12 && vh == 150 - 12);
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &ox, &oy)));
+    assert(oy == 48); /* unchanged: still in range */
+
+    /* A fitting axis has no bar in either mode. */
+    fdk_widget_destroy(root);
+    root = fresh_root();
+    assert(fdk_ok(fdk_scrollview_create(root, &sv)));
+    content = make_content(sv, 100, 100, (fdk_color){1, 1, 1, 1});
+    assert(fdk_ok(fdk_scrollview_set_content(sv, content)));
+    fdk_widget_arrange(sv, (fdk_rect){0, 0, 200, 150});
+    assert(fdk_scrollview_set_bar_mode(sv, FDK_SCROLL_BARS_OVERLAY) ==
+           FDK_OK);
+    for (size_t i = 0; i < sv->child_count; i++) {
+        if (sv->children[i]->klass->name != NULL &&
+            strcmp(sv->children[i]->klass->name, "scrollbar") == 0) {
+            assert(!fdk_widget_get_visible(sv->children[i]));
+        }
+    }
+
+    fdk_widget_destroy(root);
+    printf("[ok] overlay bars: mode API, full-bounds viewport, "
+           "6-px edge bars (full-height vertical, corner-conceding "
+           "horizontal), content showing through the strip, detached-"
+           "tree honesty (no idle clock -> visible), wheel + mode "
+           "round-trip, no phantom bars on fitting axes\n");
+}
+
 int main(void) {
     test_basics();
     test_paint_clipping();
@@ -582,6 +731,7 @@ int main(void) {
     test_scrollbar();
     test_adoption();
     test_hit_testing();
+    test_overlay_bars();
     printf("all scrollview tests passed\n");
     return 0;
 }

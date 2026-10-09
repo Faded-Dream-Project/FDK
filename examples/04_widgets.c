@@ -11,6 +11,9 @@
  *                     reveals advanced options, and a Paned whose
  *                     divider DRAGS (and answers the arrows when
  *                     focused — Tab to it)
+ *   1.4.4 frame     — the modern batch: a REORDERABLE notebook, a
+ *                      color-well button, an icon-slot entry, an
+ *                      overlay-scrollbar list
  *   1.4.3 frame     — the chooser batch's furniture: a MenuButton
  *                     whose attached model pops up (the app keeps
  *                     owning the model), a VERTICAL slider with
@@ -99,6 +102,39 @@ static void on_docs(fdk_widget *w, void *user) {
     set_status("The documentation would open in a viewer.");
 }
 
+/* ---- 1.4.4: the modern-batch callbacks ---- */
+
+static void on_page_reordered(fdk_widget *notebook, size_t from,
+                              size_t to, void *user) {
+    (void)notebook;
+    (void)user;
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+             "Tab moved from slot %zu to %zu (the page kept showing).",
+             from, to);
+    set_status(buf);
+}
+
+static fdk_widget *g_well_label = NULL;
+static void on_well_color(fdk_widget *button, fdk_color color,
+                          void *user) {
+    (void)button;
+    (void)user;
+    if (g_well_label != NULL) {
+        fdk_widget_set_background(g_well_label, color);
+    }
+    set_status("Color well: the chooser's pick, live.");
+}
+
+static void on_path_icon(fdk_widget *entry, fdk_entry_slot slot,
+                         void *user) {
+    (void)entry;
+    (void)user;
+    (void)slot;
+    set_status("The folder glyph is decorative — presses fall "
+               "through to the caret.");
+}
+
 /* ---- 1.4.3: the chooser-batch callbacks ---- */
 
 static fdk_context *g_ctx = NULL; /* the dialogs' context */
@@ -178,7 +214,7 @@ int main(void) {
     g_ctx = ctx;
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 1105)) {
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 1330)) {
         fdk_shutdown(ctx);
         return 1;
     }
@@ -361,6 +397,107 @@ int main(void) {
         fdk_widget *color_b = NULL;
         (void)fdk_button_create(frow, font16, "Color…", &color_b);
         fdk_button_set_on_activate(color_b, on_color_chooser, NULL);
+    }
+
+    (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
+
+    /* --- frame: the 1.4.4 furniture (the modern batch) ---
+     *
+     * A REORDERABLE notebook (drag any tab — the page keeps
+     * showing while its tab moves); a COLOR-WELL button whose
+     * chooser pick repaints a live swatch label; an entry with the
+     * FOLDER leading glyph and the CLEAR trailing button; and an
+     * overlay-scrollbar list (thin transient thumbs that fade when
+     * idle — wheel it and watch the bar breathe). */
+    {
+        fdk_widget *f144 = NULL;
+        (void)fdk_frame_create(content, font16, "1.4.4 — modern batch",
+                               &f144);
+        fdk_widget_set_background(f144, col(26, 29, 40));
+
+        fdk_widget *mrow = NULL;
+        (void)fdk_box_create(f144, FDK_HORIZONTAL, &mrow);
+        fdk_box_set_spacing(mrow, 16);
+
+        /* The reorderable notebook: three colored pages. */
+        fdk_widget *nb = NULL;
+        (void)fdk_notebook_create(mrow, font16, &nb);
+        fdk_widget_set_natural_size(nb, 300, 150);
+        fdk_notebook_set_on_page_reordered(nb, on_page_reordered, NULL);
+        static const char *nb_labels[3] = {"Alpha", "Beta", "Gamma"};
+        static const fdk_color nb_cols[3] = {
+            {0.30f, 0.45f, 0.75f, 1.0f},
+            {0.35f, 0.65f, 0.45f, 1.0f},
+            {0.70f, 0.50f, 0.75f, 1.0f},
+        };
+        for (int i = 0; i < 3; i++) {
+            fdk_widget *page = NULL;
+            (void)fdk_widget_create(nb, NULL, (fdk_rect){0, 0, 10, 10},
+                                    &page);
+            fdk_widget_set_background(page, nb_cols[i]);
+            (void)fdk_notebook_append_page(nb, page, nb_labels[i]);
+        }
+        (void)fdk_widget_set_tooltip(
+            nb, "Drag a tab to reorder it — the strip swaps live "
+                "and the shown page never changes");
+
+        /* The color well + its live swatch. */
+        fdk_widget *wcol = NULL;
+        (void)fdk_box_create(mrow, FDK_VERTICAL, &wcol);
+        fdk_box_set_spacing(wcol, 10);
+        fdk_widget *well = NULL;
+        (void)fdk_color_button_create(
+            wcol, (fdk_color){0.95f, 0.62f, 0.25f, 1.0f}, &well);
+        fdk_color_button_set_title(well, "Pick the accent");
+        fdk_color_button_set_on_color_set(well, on_well_color, NULL);
+        (void)fdk_widget_set_tooltip(
+            well, "The color well: opens the HSV chooser; the pick "
+                  "repaints the swatch below (alpha shows its "
+                  "checkerboard)");
+        fdk_widget *well_label = NULL;
+        (void)fdk_widget_create(wcol, NULL, (fdk_rect){0, 0, 90, 26},
+                                &well_label);
+        fdk_widget_set_background(well_label,
+                                  (fdk_color){0.95f, 0.62f, 0.25f, 1.0f});
+        fdk_widget_set_corner_radius(well_label, 6);
+        g_well_label = well_label;
+
+        /* The icon-slot entry: a path field. */
+        fdk_widget *pentry = NULL;
+        (void)fdk_entry_create(wcol, font16, "/home/dev/notes.txt",
+                               &pentry);
+        (void)fdk_entry_set_icon(pentry, FDK_ENTRY_SLOT_LEADING,
+                                 FDK_ENTRY_ICON_FOLDER);
+        (void)fdk_entry_set_icon(pentry, FDK_ENTRY_SLOT_TRAILING,
+                                 FDK_ENTRY_ICON_CLEAR);
+        (void)fdk_entry_set_on_icon_press(pentry, FDK_ENTRY_SLOT_LEADING,
+                                          on_path_icon, NULL);
+        fdk_widget_set_natural_size(pentry, 220, 0);
+        (void)fdk_widget_set_tooltip(
+            pentry, "Icon slots: the folder glyph leads, the X "
+                    "clears (undoably) — geometry, hover pill and "
+                    "presses included");
+
+        /* The overlay-scrollbar view: a plain ScrollView over a
+         * tall label column (the public path — no internals). */
+        fdk_widget *osv = NULL;
+        (void)fdk_scrollview_create(mrow, &osv);
+        fdk_widget_set_natural_size(osv, 190, 150);
+        fdk_widget *ocol = NULL;
+        (void)fdk_box_create(osv, FDK_VERTICAL, &ocol);
+        fdk_box_set_spacing(ocol, 4);
+        for (int i = 1; i <= 24; i++) {
+            char text[32];
+            snprintf(text, sizeof(text), "Overlay row %d", i);
+            fdk_widget *lab = NULL;
+            (void)fdk_label_create(ocol, font16, text, &lab);
+        }
+        (void)fdk_scrollview_set_content(osv, ocol);
+        (void)fdk_scrollview_set_bar_mode(osv,
+                                          FDK_SCROLL_BARS_OVERLAY);
+        (void)fdk_widget_set_tooltip(
+            osv, "Overlay scrollbars: thin thumbs that fade when "
+                 "idle and return on scroll — wheel me");
     }
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);

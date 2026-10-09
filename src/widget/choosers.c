@@ -1742,3 +1742,385 @@ fail:
     fdk_window_destroy(win);
     return r;
 }
+
+/* ===================================================================
+ * Color button (1.4.4) — the color-well swatch
+ * =================================================================== */
+
+#define CB_W 44
+#define CB_H 30
+#define CB_INSET 5      /* the well's frame inside the button face  */
+#define CB_CHECKER 6    /* the alpha checkerboard's cell size       */
+
+typedef struct fdk_colorbutton {
+    fdk_widget base;
+    fdk_color color;         /* the well's current color             */
+    char *title;             /* owned; the chooser's title (or NULL) */
+    bool pressed;            /* pointer down inside                  */
+    bool hovering;           /* semantic hover flag                  */
+    fdk_hover_fade fade;     /* the 1.4.1 hover paint blend          */
+    fdk_color_button_fn on_set;
+    void *on_set_data;
+    /* The live chooser's token (NULL when none is up): the dialog's
+     * done callback and the button's destroy hook share it, so a
+     * button destroyed while its chooser is open can never dangle
+     * into the callback. */
+    struct fdk_cb_pending *pending;
+} fdk_colorbutton;
+
+/* The heap token bridging the chooser's done callback and a button
+ * that may die before the chooser answers. Freed exactly once, by
+ * whichever of the two fires last. */
+typedef struct fdk_cb_pending {
+    fdk_widget *button;  /* NULLed by the button's destroy hook */
+} fdk_cb_pending;
+
+static fdk_colorbutton *cbtn_of(fdk_widget *w) {
+    return (fdk_colorbutton *)(void *)w;
+}
+
+extern const fdk_widget_class fdk_colorbutton_class_def;
+
+/* The core acceptance path (the dialog's done callback after the
+ * token check, and the headless test seam). */
+static void cbtn_apply_result(fdk_widget *w,
+                              const fdk_color_dialog_result *res) {
+    fdk_colorbutton *cb = cbtn_of(w);
+    if (res == NULL || res->outcome != FDK_COLOR_DIALOG_ACCEPTED) {
+        return; /* CANCELLED: the well keeps its color */
+    }
+    cb->color = res->color;
+    fdk_widget_invalidate(w);
+    fdk__a11y_notify(w, FDK_A11Y_VALUE_CHANGED, 0);
+    if (cb->on_set != NULL) {
+        /* The app callback may destroy the button (or anything
+         * else) — nothing is touched after it returns. */
+        cb->on_set(w, res->color, cb->on_set_data);
+    }
+}
+
+static void cbtn_dialog_done(const fdk_color_dialog_result *res,
+                             void *user) {
+    fdk_cb_pending *tok = user;
+    fdk_widget *w = tok->button;
+    if (w != NULL && (w->flags & FDK_WF_DESTROYING) == 0) {
+        cbtn_of(w)->pending = NULL; /* before the app callback */
+        cbtn_apply_result(w, res);
+    }
+    fdk_free(tok);
+}
+
+static void cbtn_open_chooser(fdk_widget *w) {
+    fdk_colorbutton *cb = cbtn_of(w);
+    if (cb->pending != NULL) {
+        return; /* one chooser at a time */
+    }
+    fdk_context *ctx =
+        fdk__window_context(fdk__widget_window_owner(w));
+    if (ctx == NULL) {
+        return; /* detached tree: documented no-op */
+    }
+    fdk_cb_pending *tok = fdk_alloc(sizeof(*tok));
+    if (tok == NULL) {
+        return; /* OOM: no chooser this press (honest) */
+    }
+    tok->button = w;
+    fdk_color_dialog_options opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.title = cb->title;
+    opts.initial = cb->color;
+    opts.show_hex = true;
+    opts.modal = true;
+    opts.parent = fdk__window_of_owner(fdk__widget_window_owner(w));
+    fdk_result r = fdk_dialog_choose_color(ctx, &opts, cbtn_dialog_done,
+                                           tok, NULL);
+    if (!fdk_ok(r)) {
+        fdk_free(tok);
+        return;
+    }
+    cb->pending = tok;
+}
+
+static bool cbtn_handle_event(fdk_widget *w,
+                              const fdk_widget_event *ev) {
+    fdk_colorbutton *cb = cbtn_of(w);
+    switch (ev->type) {
+    case FDK_WIDGET_POINTER_DOWN:
+        if ((w->flags & FDK_WF_ENABLED) == 0 ||
+            ev->pointer.button != FDK_POINTER_BUTTON_LEFT) {
+            return false;
+        }
+        if (!fdk_widget_has_focus(w)) {
+            (void)fdk_widget_focus(w);
+        }
+        cb->pressed = true;
+        fdk_widget_invalidate(w);
+        return true;
+    case FDK_WIDGET_POINTER_UP:
+        if (cb->pressed) {
+            cb->pressed = false;
+            fdk_widget_invalidate(w);
+            /* The classic press-inside-release-inside rule. */
+            cbtn_open_chooser(w);
+        }
+        return true;
+    case FDK_WIDGET_KEY_DOWN:
+        if ((w->flags & FDK_WF_ENABLED) != 0 &&
+            (ev->key.scancode == FDK_KEY_SPACE ||
+             ev->key.scancode == FDK_KEY_ENTER)) {
+            cbtn_open_chooser(w);
+            return true;
+        }
+        return false;
+    case FDK_WIDGET_POINTER_ENTER:
+        cb->hovering = true;
+        fdk__hover_fade_arm(w, &cb->fade, true);
+        fdk_widget_invalidate(w);
+        return false;
+    case FDK_WIDGET_POINTER_LEAVE:
+        cb->hovering = false;
+        fdk__hover_fade_arm(w, &cb->fade, false);
+        fdk_widget_invalidate(w);
+        return false;
+    default:
+        return false;
+    }
+}
+
+/* The checkerboard under translucent colors: the classic two-tone
+ * proof-of-alpha board, in fixed neutrals (it represents the ALPHA
+ * channel, not a theme surface). */
+static void cbtn_paint_checker(fdk_surface *surface, fdk_rect well) {
+    fdk_color a = {0.92f, 0.92f, 0.92f, 1.0f};
+    fdk_color b = {0.78f, 0.78f, 0.78f, 1.0f};
+    fdk_surface_fill_rect(surface, well, a);
+    for (fdk_i32 row = 0; row * CB_CHECKER < well.height; row++) {
+        fdk_i32 y = row * CB_CHECKER;
+        fdk_i32 h = CB_CHECKER;
+        if (y + h > well.height) {
+            h = well.height - y;
+        }
+        for (fdk_i32 col = (row % 2); col * CB_CHECKER < well.width;
+             col += 2) {
+            fdk_i32 x = col * CB_CHECKER;
+            fdk_i32 cw = CB_CHECKER;
+            if (x + cw > well.width) {
+                cw = well.width - x;
+            }
+            fdk_rect cell = {well.x + x, well.y + y, cw, h};
+            if (cell.width > 0 && cell.height > 0) {
+                fdk_surface_fill_rect(surface, cell, b);
+            }
+        }
+    }
+}
+
+static void cbtn_paint(fdk_widget *w, fdk_surface *surface,
+                       fdk_rect bounds, fdk_rect clip) {
+    (void)clip;
+    fdk_colorbutton *cb = cbtn_of(w);
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        return;
+    }
+    /* The button face: control family, the hover blend riding the
+     * 1.4.1 machinery, pressed snapping (presses never fade). */
+    fdk_color face = fdk__pal_control();
+    if (cb->fade.t > 0.0f) {
+        fdk_color hover = fdk__pal_control_hover();
+        face.r = face.r + (hover.r - face.r) * cb->fade.t;
+        face.g = face.g + (hover.g - face.g) * cb->fade.t;
+        face.b = face.b + (hover.b - face.b) * cb->fade.t;
+        face.a = face.a + (hover.a - face.a) * cb->fade.t;
+    }
+    if (cb->pressed) {
+        face = fdk__pal_control_pressed();
+    }
+    if ((w->flags & FDK_WF_ENABLED) == 0) {
+        face = fdk__pal_control_disabled();
+    }
+    fdk_i32 radius =
+        fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
+    fdk_surface_fill_rounded_rect(surface, bounds, radius, face);
+    if ((w->flags & FDK_WF_ENABLED) != 0) {
+        fdk_surface_draw_rounded_rect(surface, bounds, radius,
+                                      fdk__pal_border());
+    }
+
+    /* The well: the checkerboard (the alpha proof) under the color.
+     * A fully transparent color shows the board alone. */
+    fdk_rect well = {bounds.x + CB_INSET, bounds.y + CB_INSET,
+                     bounds.width - CB_INSET * 2,
+                     bounds.height - CB_INSET * 2};
+    if (well.width <= 0 || well.height <= 0) {
+        return;
+    }
+    cbtn_paint_checker(surface, well);
+    if (cb->color.a > 0.0f) {
+        fdk_color c = cb->color;
+        if ((w->flags & FDK_WF_ENABLED) == 0) {
+            /* Dimmed well: the color desaturates toward the face. */
+            c.r = c.r * 0.5f + face.r * 0.5f;
+            c.g = c.g * 0.5f + face.g * 0.5f;
+            c.b = c.b * 0.5f + face.b * 0.5f;
+        }
+        fdk_surface_fill_rounded_rect(surface, well, 3, c);
+    }
+    fdk_surface_draw_rounded_rect(surface, well, 3, fdk__pal_border());
+}
+
+static void cbtn_measure(fdk_widget *w, fdk_size *out) {
+    (void)w;
+    out->width = CB_W;
+    out->height = CB_H;
+}
+
+static void cbtn_destroy(fdk_widget *w) {
+    fdk_colorbutton *cb = cbtn_of(w);
+    fdk_free(cb->title);
+    cb->title = NULL;
+    if (cb->pending != NULL) {
+        /* The chooser is still up: the token survives until its done
+         * callback frees it, but it must stop pointing here. */
+        cb->pending->button = NULL;
+        cb->pending = NULL;
+    }
+}
+
+/* ---- a11y: a BUTTON whose value is the color ---- */
+
+static void cbtn_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
+    const fdk_colorbutton *cb = (const fdk_colorbutton *)(const void *)w;
+    fdk_color c = cb->color;
+    fdk_u32 r = (fdk_u32)(c.r * 255.0f + 0.5f);
+    fdk_u32 g = (fdk_u32)(c.g * 255.0f + 0.5f);
+    fdk_u32 b = (fdk_u32)(c.b * 255.0f + 0.5f);
+    if (r > 255u) r = 255u;
+    if (g > 255u) g = 255u;
+    if (b > 255u) b = 255u;
+    char buf[16];
+    (void)snprintf(buf, sizeof(buf), "#%02x%02x%02x",
+                   (unsigned)r, (unsigned)g, (unsigned)b);
+    out->value_text = fdk__strdup(buf);
+    out->has_value = true;
+    out->value_min = 0.0;
+    out->value_max = 0.0;
+    out->value_current = 0.0;
+}
+
+static fdk_a11y_action_set cbtn_a11y_actions(const fdk_widget *w) {
+    (void)w;
+    return (fdk_a11y_action_set)FDK_A11Y_ACTION_ACTIVATE;
+}
+
+static bool cbtn_a11y_perform(fdk_widget *w, fdk_a11y_action action,
+                              double value) {
+    (void)value;
+    if (action != FDK_A11Y_ACTION_ACTIVATE) {
+        return false;
+    }
+    cbtn_open_chooser(w);
+    return true;
+}
+
+static const fdk_a11y_class cbtn_a11y = {
+    .role = FDK_A11Y_ROLE_BUTTON,
+    .describe = cbtn_a11y_describe,
+    .actions = cbtn_a11y_actions,
+    .perform = cbtn_a11y_perform,
+};
+
+const fdk_widget_class fdk_colorbutton_class_def = {
+    .size = sizeof(fdk_colorbutton),
+    .name = "colorbutton",
+    .handle_event = cbtn_handle_event,
+    .paint = cbtn_paint,
+    .measure = cbtn_measure,
+    .arrange = NULL,
+    .destroy = cbtn_destroy,
+    .a11y = &cbtn_a11y,
+};
+
+/* ---- public API ---- */
+
+fdk_result fdk_color_button_create(fdk_widget *parent, fdk_color color,
+                                  fdk_widget **out_button) {
+    if (out_button == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_widget *w = NULL;
+    fdk_result r = fdk_widget_create(parent, &fdk_colorbutton_class_def,
+                                     (fdk_rect){0, 0, CB_W, CB_H}, &w);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fdk_colorbutton *cb = cbtn_of(w);
+    if (color.a < 0.0f) {
+        color.a = 0.0f;
+    }
+    cb->color = color;
+    fdk_widget_set_can_focus(w, true);
+    fdk_widget_child_layout_changed(w->parent);
+    *out_button = w;
+    return FDK_OK;
+}
+
+fdk_color fdk_color_button_get_color(fdk_widget *button) {
+    if (button == NULL || button->klass != &fdk_colorbutton_class_def) {
+        return (fdk_color){0, 0, 0, 0};
+    }
+    return cbtn_of(button)->color;
+}
+
+fdk_result fdk_color_button_set_color(fdk_widget *button, fdk_color color) {
+    if (button == NULL || button->klass != &fdk_colorbutton_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_colorbutton *cb = cbtn_of(button);
+    if (color.a < 0.0f) {
+        color.a = 0.0f;
+    }
+    if (cb->color.r == color.r && cb->color.g == color.g &&
+        cb->color.b == color.b && cb->color.a == color.a) {
+        return FDK_OK; /* idempotent */
+    }
+    cb->color = color;
+    fdk_widget_invalidate(button);
+    fdk__a11y_notify(button, FDK_A11Y_VALUE_CHANGED, 0);
+    return FDK_OK;
+}
+
+fdk_result fdk_color_button_set_title(fdk_widget *button, const char *title) {
+    if (button == NULL || button->klass != &fdk_colorbutton_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_colorbutton *cb = cbtn_of(button);
+    char *copy = (title != NULL) ? fdk__strdup(title) : NULL;
+    if (title != NULL && copy == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    fdk_free(cb->title);
+    cb->title = copy;
+    return FDK_OK;
+}
+
+void fdk_color_button_set_on_color_set(fdk_widget *button,
+                                       fdk_color_button_fn fn,
+                                       void *user_data) {
+    if (button == NULL || button->klass != &fdk_colorbutton_class_def) {
+        return;
+    }
+    fdk_colorbutton *cb = cbtn_of(button);
+    cb->on_set = fn;
+    cb->on_set_data = user_data;
+}
+
+/* Internal test seam (widgets_internal.h): drives the acceptance
+ * path exactly as the dialog's done callback would (the token hop
+ * is the only difference, and the X11 GUI group covers that half). */
+void fdk__colorbutton_apply_result(fdk_widget *button,
+                                   const fdk_color_dialog_result *res) {
+    if (button == NULL || button->klass != &fdk_colorbutton_class_def) {
+        return;
+    }
+    cbtn_apply_result(button, res);
+}

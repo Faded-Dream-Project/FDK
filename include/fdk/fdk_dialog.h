@@ -223,6 +223,14 @@ typedef struct fdk_file_dialog_options {
                               copied; NULL = empty. Ignored by the
                               OPEN kinds.                            */
     const char *filters;   /* copied glob list, see above; NULL = all */
+    bool hide_recents;     /* 1.4.4: true = no "Recent" place in the
+                              sidebar AND no recording of accepted
+                              paths into the XDG recently-used file
+                              (the shared ~/.local/share/
+                              recently-used.xbel every desktop app
+                              converges on — see the section below).
+                              Zero (the default) shows the place and
+                              records acceptances. Ignored by SAVE. */
 } fdk_file_dialog_options;
 
 /* Called once, from inside event dispatch, when the dialog closes.
@@ -279,6 +287,25 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 fdk_file_dialog_done_fn on_done,
                                 void *user_data,
                                 fdk_window **out_window);
+
+/* ---- Recent files (1.4.4) ----------------------------------------
+ *
+ * The OPEN dialog's sidebar leads with a "Recent" place: the XDG
+ * recently-used list ($XDG_DATA_HOME/recently-used.xbel, falling
+ * back to $HOME/.local/share/recently-used.xbel — the same file
+ * every desktop's file choosers share). Rows are the recent FILES
+ * (newest first, the page glyph); activating one accepts it
+ * directly when it still exists, descends when it is a directory,
+ * and honestly reports + drops the row when it has vanished.
+ * Breadcrumbs read "Recently Used"; Ctrl+L still escapes to a
+ * typed location, and any navigation (place, Up, Home, crumb)
+ * leaves the recents view for the browsed directory.
+ *
+ * Recording is the other half of the XDG contract: when a dialog
+ * ACCEPTS, every accepted path is moved to the front of the xbel
+ * with fresh timestamps (the write is a TEXT SPLICE — other apps'
+ * metadata survives byte-for-byte — and atomic: tmp + rename).
+ * options->hide_recents opts out of both halves. */
 
 /* ---- About dialog (1.4.3) ----
  *
@@ -418,6 +445,46 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
                                    fdk_color_dialog_fn on_done,
                                    void *user_data,
                                    fdk_window **out_window);
+
+/* ---- Color button (1.4.4) ----
+ *
+ * The color-well swatch button (GTK's GtkColorButton / Qt's
+ * QColorButton): a small button whose face is the current color,
+ * with an alpha checkerboard underneath translucent picks. Pressing
+ * it opens the 1.4.3 color chooser dialog (modal where the backend
+ * can grab) seeded with the current color; ACCEPTED writes the new
+ * color into the button and fires on_color_set — CANCELLED changes
+ * nothing. The chooser is anchored to the button's window where the
+ * backend supports it.
+ *
+ * The button needs a live window to open a dialog from: in detached
+ * trees a press is a documented no-op (no context to show a window
+ * on). The button never launches anything itself — the website-link
+ * rule of the About dialog applies: FDK execs nothing.
+ *
+ * The swatch is honest about alpha: colors with a < 1 paint over
+ * the classic two-tone checkerboard; a == 0 shows the board alone
+ * ("transparent"). get/set_color move plain fdk_color values. */
+
+typedef void (*fdk_color_button_fn)(fdk_widget *button, fdk_color color,
+                                    void *user_data);
+
+/* Creates the button showing `color` (copied into the button; the
+ * caller's struct is not retained). */
+fdk_result fdk_color_button_create(fdk_widget *parent, fdk_color color,
+                                  fdk_widget **out_button);
+/* The current color. */
+fdk_color fdk_color_button_get_color(fdk_widget *button);
+/* Sets the color programmatically (repaints; does NOT fire
+ * on_color_set — that callback belongs to user gestures, exactly
+ * like fdk_button's checked setter stays silent). */
+fdk_result fdk_color_button_set_color(fdk_widget *button, fdk_color color);
+/* The chooser's title (copied; NULL restores "Select Color"). */
+fdk_result fdk_color_button_set_title(fdk_widget *button, const char *title);
+/* Fires after a chooser ACCEPT settles the new color. */
+void fdk_color_button_set_on_color_set(fdk_widget *button,
+                                       fdk_color_button_fn fn,
+                                       void *user_data);
 
 #ifdef __cplusplus
 }

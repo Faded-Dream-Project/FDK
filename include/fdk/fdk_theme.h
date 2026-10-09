@@ -153,8 +153,12 @@ typedef enum fdk_theme_metric {
     FDK_TM_MENU_CORNER_RADIUS   = 7, /* Menu/combo popup corners,   0..16 */
     FDK_TM_LIST_ROW_HEIGHT      = 8, /* List row height,            16..48 */
     FDK_TM_FOCUS_RING_WIDTH     = 9, /* Focus ring stroke,          1..4  */
+    /* 1.4.4: the overlay scrollbar's thickness — the CLASSIC bar
+     * keeps FDK_TM_SCROLLBAR_WIDTH; the overlay bar is deliberately
+     * thinner (the modern transient indicator). */
+    FDK_TM_SCROLLBAR_OVERLAY_WIDTH = 10, /* Overlay bar thickness, 4..12 */
 
-    FDK_TM_COUNT = 10
+    FDK_TM_COUNT = 11
 } fdk_theme_metric;
 
 /* ---- Lifecycle ---- */

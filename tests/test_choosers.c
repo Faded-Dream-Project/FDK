@@ -604,6 +604,137 @@ static void test_font_enumerate(void) {
  * main
  * =================================================================== */
 
+/* ---- Color button (1.4.4) ---- */
+
+static void test_color_button(void); /* defined below (this file's
+                                       * post-main definition style) */
+
+static int g_color_sets = 0;
+static fdk_color g_last_color = {0, 0, 0, 0};
+static void on_color_set(fdk_widget *button, fdk_color color,
+                         void *user) {
+    (void)button;
+    (void)user;
+    g_color_sets++;
+    g_last_color = color;
+}
+
+static void test_color_button(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *cb = NULL;
+    fdk_color red = {0.85f, 0.15f, 0.15f, 1.0f};
+    assert(fdk_color_button_create(root, red, &cb) == FDK_OK);
+    assert(fdk_color_button_create(NULL, red, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* get/set + idempotence; set does NOT fire the gesture
+     * callback (the checked-setter discipline). */
+    fdk_color got = fdk_color_button_get_color(cb);
+    assert(got.r == red.r && got.g == red.g && got.b == red.b &&
+           got.a == red.a);
+    assert(fdk_color_button_get_color(NULL).a == 0.0f);
+    fdk_color blue = {0.15f, 0.35f, 0.90f, 1.0f};
+    g_color_sets = 0;
+    fdk_color_button_set_on_color_set(cb, on_color_set, NULL);
+    assert(fdk_color_button_set_color(cb, blue) == FDK_OK);
+    got = fdk_color_button_get_color(cb);
+    assert(got.b > 0.8f);
+    assert(g_color_sets == 0);
+    assert(fdk_color_button_set_color(cb, blue) == FDK_OK); /* idem */
+    assert(fdk_color_button_set_color(NULL, blue) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    fdk_color_button_set_on_color_set(NULL, on_color_set, NULL);
+
+    /* Title (the chooser's window title). */
+    assert(fdk_color_button_set_title(cb, "Pick a tint") == FDK_OK);
+    assert(fdk_color_button_set_title(cb, NULL) == FDK_OK);
+
+    /* Natural size + focusability. */
+    fdk_size nat = {0, 0};
+    fdk_widget_measure(cb, &nat);
+    assert(nat.width == 44 && nat.height == 30);
+    assert(fdk_widget_get_can_focus(cb));
+
+    /* Paint: the well center is the color (over the checkerboard);
+     * an alpha=0 color shows the checkerboard alone (two-tone
+     * pixels within a 6-px cell); the opaque blue center is solid. */
+    fdk_widget_arrange(cb, (fdk_rect){10, 10, 44, 30});
+    fdk_surface *s = NULL;
+    paint_root(root, &s);
+    fdk_u32 mid = px_at(s, 32, 25); /* the well's center            */
+    fdk_u32 expect_blue =
+        ((fdk_u32)(0.15f * 255.0f + 0.5f) << 16) |
+        ((fdk_u32)(0.35f * 255.0f + 0.5f) << 8) |
+        (fdk_u32)(0.90f * 255.0f + 0.5f);
+    assert(mid == expect_blue);
+
+    /* Alpha honesty: a translucent color shows the checkerboard
+     * THROUGH it (the well's two-tone pattern under the tint). */
+    assert(fdk_color_button_set_color(
+               cb, (fdk_color){1.0f, 1.0f, 1.0f, 0.5f}) == FDK_OK);
+    fdk_widget_invalidate(cb);
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    /* The well spans (15..49, 15..39): sample a 6-px checkerboard
+     * cell pair — one light, one dark, both tinted toward white. */
+    fdk_u32 c1 = px_at(s, 20, 20);
+    fdk_u32 c2 = px_at(s, 27, 21);
+    assert(c1 != c2); /* the two board tones differ                */
+
+    /* The acceptance seam: an ACCEPTED chooser result writes the
+     * color and fires the callback; CANCELLED changes nothing. */
+    g_color_sets = 0;
+    fdk_color_dialog_result acc = {
+        .outcome = FDK_COLOR_DIALOG_ACCEPTED,
+        .color = {0.2f, 0.7f, 0.3f, 1.0f},
+    };
+    fdk__colorbutton_apply_result(cb, &acc);
+    got = fdk_color_button_get_color(cb);
+    assert(got.g > 0.6f && got.r < 0.3f);
+    assert(g_color_sets == 1 && g_last_color.g > 0.6f);
+    fdk_color_dialog_result can = {
+        .outcome = FDK_COLOR_DIALOG_CANCELLED,
+        .color = {0, 0, 0, 1},
+    };
+    fdk__colorbutton_apply_result(cb, &can);
+    got = fdk_color_button_get_color(cb);
+    assert(got.g > 0.6f); /* untouched */
+    assert(g_color_sets == 1);
+    fdk__colorbutton_apply_result(NULL, &acc); /* argument safety   */
+
+    /* The a11y contract: a BUTTON whose value text is the hex. */
+    fdk_a11y_info info;
+    memset(&info, 0, sizeof(info));
+    assert(fdk_a11y_describe(cb, &info) == FDK_OK);
+    assert(info.value_text != NULL);
+    assert(info.value_text[0] == '#');
+    assert(strlen(info.value_text) == 7);
+    fdk_a11y_info_free(&info);
+    assert(fdk_a11y_actions_of(cb) & FDK_A11Y_ACTION_ACTIVATE);
+
+    /* Presses in a DETACHED tree are a documented no-op (no
+     * context to show a window on) — the button survives, state
+     * intact, and the press is still consumed. */
+    g_color_sets = 0;
+    fdk_event_data down =
+        ev_button_at(FDK_EVENT_POINTER_BUTTON_DOWN, 30.0f, 25.0f, 0);
+    fdk_event_data up =
+        ev_button_at(FDK_EVENT_POINTER_BUTTON_UP, 30.0f, 25.0f, 0);
+    assert(fdk_widget_tree_handle_event(root, &down) == true);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(g_color_sets == 0);
+    /* Keyboard: Space opens (also a no-op detached) + consumes. */
+    fdk_event_data sp = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_SPACE);
+    assert(fdk_widget_tree_handle_event(root, &sp) == true);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] color button: create/get/set (silent setter), "
+           "title, 44x30 natural, opaque + checkerboard-under-alpha "
+           "pixel proofs, ACCEPTED/CANCELLED seam, hex value text + "
+           "ACTIVATE action, detached no-op presses\n");
+}
+
 int main(void) {
     g_font = fdk_font_load_system_default(14);
     if (g_font == NULL) {
@@ -618,6 +749,7 @@ int main(void) {
     test_revealer_crossfade();
     test_tree_multi_select();
     test_font_enumerate();
+    test_color_button();
 
     if (g_font != NULL) {
         fdk_font_destroy(g_font);

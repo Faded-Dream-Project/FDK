@@ -74,12 +74,19 @@ typedef struct fdk_list {
      * Double-click and Enter both fire on_row_activate — the
      * "open this" gesture file managers and file dialogs are built
      * on. The click tracking uses the shared double-click predicate
-     * (same window, same slop policy as the title bar). */
+     * (same window, same slop policy as the title bar).
+     *
+     * 1.4.4: SINGLE-CLICK activation mode (GtkListBox's
+     * activate_on_single_click / GtkTreeView's setuptools): the
+     * places-sidebar rhythm — one click navigates. The double-click
+     * branch goes quiet in this mode (the first press already
+     * fired; a doubled click must not fire twice). */
     fdk_list_row_activate_fn on_row_activate;
     void *on_row_activate_data;
     fdk_i64 last_click_ms;   /* last left-press, for dbl detection */
     size_t last_click_row;   /* the row that press selected        */
     bool have_last_click;
+    bool single_activate;    /* 1.4.4: press fires activation      */
     /* ---- Bulk-mutation batching (1.3.0) ----
      *
      * Between begin_batch/end_batch, row mutations skip the
@@ -506,16 +513,25 @@ static bool row_handle_event(fdk_widget *w,
                  * the SECOND click is on the same row widget — the
                  * row IS the slop region here). */
                 fdk_i64 now = list_now_ms();
-                if (l->have_last_click && l->last_click_row == i &&
+                bool is_double =
+                    l->have_last_click && l->last_click_row == i &&
                     fdk__window_is_double_click(now, l->last_click_ms,
-                                                0, 0)) {
+                                                0, 0);
+                if (is_double) {
                     l->have_last_click = false; /* a triple click
                                                    re-arms from zero */
-                    list_fire_activated(l, i);
+                    if (!l->single_activate) {
+                        list_fire_activated(l, i);
+                    }
                 } else {
                     l->have_last_click = true;
                     l->last_click_row = i;
                     l->last_click_ms = now;
+                    if (l->single_activate) {
+                        /* The sidebar rhythm (1.4.4): ONE click
+                         * navigates. */
+                        list_fire_activated(l, i);
+                    }
                 }
                 return true;
             }
@@ -1400,6 +1416,21 @@ void fdk_list_set_on_row_activate(fdk_widget *list,
     fdk_list *l = list_of(list);
     l->on_row_activate = fn;
     l->on_row_activate_data = user_data;
+}
+
+void fdk_list_set_activate_on_single_click(fdk_widget *list,
+                                           bool single) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return;
+    }
+    list_of(list)->single_activate = single;
+}
+
+bool fdk_list_get_activate_on_single_click(fdk_widget *list) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return false;
+    }
+    return list_of(list)->single_activate;
 }
 
 /* ---- Bulk-mutation batching (1.3.0) ---- */

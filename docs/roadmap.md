@@ -4164,6 +4164,136 @@ debug AND release; release zero warnings.
 
 ---
 
+### 1.4.4 — the modern batch (the ledger's NEXT list, emptied again)
+
+The fifth milestone of the directive, and an audit milestone in
+two senses: the anti-duplication PROGRESS.md contract caught the
+ledger's own stale entry before any work was wasted on it, and
+the new headless groups caught two library bugs the tree had been
+carrying quietly.
+
+THE AUDIT FIRST. The ledger's top 1.4.4 candidate claimed the
+tooltip "carries no theme hook today" — the in-depth check the
+root ledger mandates (grep before you build) found the 1.3.2
+tooltip fully themed since birth: FDK_TK_TOOLTIP_BACKGROUND/
+TEXT/BORDER plus FDK_TM_TOOLTIP_CORNER_RADIUS, parseable from
+.fdK files, consumed at paint, pinned by test_theme. The entry
+was struck as already-shipped, and the milestone shipped the
+remaining five candidates instead. The lesson is now the
+ledger's own first rule: the ledger itself can go stale, and the
+tree is always the truth.
+
+TAB REORDERING. The notebook's parked remainder, shipped: press a
+tab (it switches pages, the existing behavior), move past 4 px
+and the tab FOLLOWS THE POINTER — the strip's other tabs swap
+LIVE as the dragged tab's center crosses their slot midpoints,
+the model order changing during the drag, the dragged tab staying
+glued to the pointer by the swap-time offset correction. The
+shown page never changes (the current page is tracked by POINTER
+IDENTITY and re-indexed after every swap); release settles the
+tab into its slot and fires on_page_reordered exactly once.
+fdk_notebook_reorder_page is the programmatic twin (GTK's
+reorder_child, position clamped), fdk_notebook_page_index the
+lookup. The drag test caught a real bug on its first run: the
+tab was clamped to its STARTING slot's range BEFORE the swap
+ladder, freezing it there — the clamp now runs AFTER the swaps
+(a pointer far outside pins the tab to the wall its swaps
+reached).
+
+THE COLOR-WELL BUTTON. GtkColorButton's face: a small button
+whose well is the current color over an ALPHA CHECKERBOARD (two
+fixed neutrals — the board represents the alpha channel, not a
+theme surface; a translucent pick shows through it, a == 0 shows
+it alone). Press opens the 1.4.3 chooser (modal where the backend
+can grab, anchored to the button's window, seeded with the
+current color); ACCEPTED writes the color and fires on_color_set,
+CANCELLED changes nothing. A heap TOKEN bridges the chooser's
+done callback and a button that may be destroyed while its
+chooser is up — the token is NULLed by the button's destroy hook
+and freed by whichever of the two fires last, so the callback can
+never dangle. a11y: a BUTTON whose value text is the #rrggbb hex,
+ACTIVATE opens (the narrator reads the color).
+
+FILE-DIALOG RECENTS. The XDG recently-used surface, both halves
+of the contract. The engine is a text-level XBEL scanner in the
+theme/prefs parser discipline (no XML library, no bus): bookmark
+elements found by tag, hrefs percent-decoded (file:// and bare
+paths, UTF-8 through), modified stamps converted through a
+civil-days epoch algorithm (no timegm dependency), deduped
+newest-wins, mtime-descending. The sort is a STABLE insertion
+sort — document order breaks ties, because two entries stamped
+within the same second (a fast double-touch) scrambled under
+qsort; the file's own order is the desktop's recency consensus.
+Garbage is refused (no <xbel open tag, no parse). Writing is a
+TEXT SPLICE: the fresh bookmark element lands right after the
+<xbel> open tag, any same-href bookmark is cut whole, other apps'
+metadata survives byte-for-byte, the count caps at 128, the data
+directory is created best-effort, and the write is atomic
+(tmp + rename). In the dialog: a Recent place leads the sidebar
+(OPEN kinds, the new clock glyph on the row-icon set), one click
+navigates there now (see the LIST change below), rows are the
+remembered files (newest first, the page glyph), activation
+descends directories, accepts files directly, and honestly drops
+rows whose files have vanished. Accept records: every ACCEPTED
+path is touched to the front — hide_recents opts out of both
+halves.
+
+OVERLAY SCROLLBARS. fdk_scrollview_set_bar_mode: CLASSIC (the
+historic layout-owned strips) or OVERLAY — the viewport becomes
+the FULL bounds, the bars shrink to the new
+scrollbar_overlay_width metric (4..12, default 6), paint only
+their thumb (no trough — the content is the background), and
+BREATHE: after ~800 ms of idleness a bar fades out over ~300 ms
+through the 1.4.3 paint-group engine and becomes input-
+transparent; any scroll on its axis, the pointer approaching its
+strip (a MOTION the scrollview sees bubbling from the content), a
+hover, or a thumb drag pops it back at full opacity with the
+clock re-armed. Programmatic scrolls flash it too — the bar is
+the position PROOF. Detached trees keep their bars (no context,
+no idle clock — the headless-honesty rule, one more time), which
+is exactly what keeps the pixel suite stable. The corner is
+honest: the vertical bar runs the full height, the horizontal
+bar concedes the corner 6 px so the two thumbs never stack.
+
+ENTRY ICON SLOTS. The 1.4.2 search preset's zones promoted to a
+public, symmetric API: fdk_entry_set_icon on either slot with
+the vector glyph language (the SEARCH lens, the CLEAR X, and the
+four symbolic row glyphs — FOLDER/HOME/DRIVE/FILE at the same
+16-px box the List and Tree wear), a custom painter for anything
+else, per-slot sensitivity (dimmed + non-interactive), hover
+pills, and press callbacks. The CLEAR icon carries the search
+preset's honest semantics everywhere: press = the UNDOABLE splice
+through the reader-contract guards, zone exists only while there
+is text; decorative slots fall through to caret placement while
+interactive ones consume. The search preset is now BUILT on the
+slots (leading SEARCH, trailing CLEAR) with geometry identical to
+1.4.2 — the 38-px empty natural and the clear-zone hit math are
+pinned by the same tests, unchanged.
+
+THE LIST'S SINGLE CLICK. Writing the recents test exposed a wart
+older than the milestone: FDK's places sidebar needed a DOUBLE
+click to navigate, where every GTK file chooser navigates on one.
+The List gained activate-on-single-click
+(fdk_list_set_activate_on_single_click, GtkListBox's switch): a
+press fires on_row_activate at once, and the double-click branch
+goes quiet in this mode (the first press already fired; a doubled
+click must not fire twice). The file dialog's PLACES list enables
+it; file rows keep the classic double-click/Enter gesture.
+
+Battery on the final tree: debug and release builds green (zero
+warnings); headless suite all-pass (533 groups); X11 integration
+suite all-pass including the new modern-batch group (a real tab
+drag through press/motion/release, real icon presses, the overlay
+fade/wake cycle timed against the real window clock with
+server-side pixel proofs, the color button's full loop — click,
+chooser maps, OK settles, callback fires — and the recents round
+trip with the xbel verified re-sorted); verify-exports 549
+symbols in BOTH configs; the interop, X11-examples, sway-examples,
+tooltip, and compositor-death rigs all PASS; debug-remnant and
+secret scans clean.
+
+---
+
 ## The GTK/Qt feature-parity ledger
 
 The standing directive ("every small feature that is in GTK and Qt
@@ -4176,16 +4306,22 @@ not next), OUT (deliberately out of scope, with the reason — FDK's
 no-D-Bus / no-bus policy is the usual one).
 
 Widgets & containers: Button/Toggle/Check/Radio SHIPPED; Entry
-(preedit, undo, clipboard) SHIPPED; Label modes SHIPPED; Spinner
+(preedit, undo, clipboard) SHIPPED (icon slots — prefix/suffix
+glyphs, custom painters, press callbacks — 1.4.4); Label modes SHIPPED; Spinner
 SHIPPED (1.4.1); LinkButton SHIPPED (1.4.1 role); Paned SHIPPED
-(1.4.1); Expander SHIPPED (1.4.1); Notebook SHIPPED; Frame SHIPPED;
+(1.4.1); Expander SHIPPED (1.4.1); Notebook SHIPPED (tab
+reordering 1.4.4 — drag or fdk_notebook_reorder_page); Frame SHIPPED;
 Separator SHIPPED; ProgressBar (determinate + busy) SHIPPED;
-ScrollView (bars, smooth wheel) SHIPPED; List (multi-select,
-rubber-band, icons) SHIPPED (icons 1.4.1, rubber band 1.4.2); Tree SHIPPED (row icons 1.4.2; multi-select + rubber band 1.4.3); Menu/
+ScrollView (bars, smooth wheel) SHIPPED
+(overlay bar mode 1.4.4 — thin transient thumbs that fade when
+idle); List (multi-select, rubber-band, icons) SHIPPED (icons
+1.4.1, rubber band 1.4.2, activate-on-single-click 1.4.4); Tree SHIPPED (row icons 1.4.2; multi-select + rubber band 1.4.3); Menu/
 MenuBar/ContextMenu (accelerators, mnemonics) SHIPPED; Combo
 (editable) SHIPPED; Slider SHIPPED; SpinButton SHIPPED; Toolbar
 SHIPPED; Tooltip SHIPPED; FileDialog (OPEN/SAVE, places, filters,
-breadcrumbs, Ctrl+L) SHIPPED; Statusbar SHIPPED (1.4.2); SearchEntry SHIPPED (1.4.2
+breadcrumbs, Ctrl+L) SHIPPED (XDG recents place + accept-time
+recording 1.4.4); ColorButton SHIPPED (1.4.4 — the color-well
+swatch, opens the chooser); Statusbar SHIPPED (1.4.2); SearchEntry SHIPPED (1.4.2
 preset; debounced search-changed 1.4.3); Revealer SHIPPED (1.4.2;
 CROSSFADE 1.4.3); Stack/StackSwitcher SHIPPED
 (1.4.2);
@@ -4229,10 +4365,15 @@ no-icon-cache stance); printing OUT (no print backend in scope);
  accessibility bus bridges OUT (the in-process narrator is the
 policy, per no-D-Bus).
 
-The NEXT list (1.4.4 candidates, in rough value order): widget
-TOOLTIPS styled per theme (today's tooltip carries no theme hook);
-the notebook's TAB REORDERING (drag a tab to a new slot); a shared
-COLOR-WELL swatch BUTTON (opens the 1.4.3 chooser from any
-toolbar); the file dialog's RECENT places (the XDG recent-files
-surface); SCROLLBAR overlay mode (thin, fades when idle); and the
-entry's ICON SLOTS (leading/trailing, the 1.4.2 glyph language).
+The 1.4.4 list shipped in full (the tooltip entry was the
+ledger's own stale claim — the 1.3.2 tooltip was already fully
+themed; the root PROGRESS.md audit caught it before any duplicate
+work).
+
+The NEXT list (1.4.5 candidates, in rough value order): X11
+HiDPI (RandR/Xft.dpi detection — the last "honestly reports 1.0"
+confession); ICONVIEW / GRIDVIEW (the canvas-based item grid the
+ledger parked as OUT-for-now — the biggest remaining widget gap,
+and the LATER list's own head); and the IME completion surface
+(preedit is display-only today — needs a real IME protocol
+surface, likely staying LATER).

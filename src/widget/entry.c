@@ -41,12 +41,11 @@
 #define ENTRY_MAX_TEXT (64u * 1024u) /* bounded input (security.md) */
 #define ENTRY_DBLCLICK_MS 400
 #define ENTRY_DBLCLICK_SLOP 4
-/* 1.4.2 search preset: the magnifier's glyph zone before the text
- * and the clear button's zone after it (16-px glyph box + 6-px gap,
- * the symbolic-row-icon geometry). */
+/* 1.4.2 search preset geometry (superseded 1.4.4 by entry_zone_w,
+ * kept only as the shared glyph-box constants): a 16-px glyph box
+ * + 6-px gap, the symbolic-row-icon geometry. */
 #define ENTRY_SEARCH_GLYPH 16
 #define ENTRY_SEARCH_GLYPH_GAP 6
-#define ENTRY_SEARCH_CLEAR (ENTRY_SEARCH_GLYPH + ENTRY_SEARCH_GLYPH_GAP)
 /* Caret blink cadence (1.3.1, timers): GTK's 530ms, the desktop
  * convention — two full blinks per second reads as "alive" without
  * distracting. The phase RESETS on every caret move/edit (the same
@@ -113,15 +112,29 @@ typedef struct fdk_entry {
      * classic observable: middle-click pastes nothing). Headless /
      * standalone trees never set it — no context, no pushes. */
     bool primary_pushed;
-    /* ---- Search preset (1.4.2) ----
+    /* ---- Search preset (1.4.2) + icon slots (1.4.4) ----
      *
-     * The GtkSearchEntry face on a regular Entry: a magnifier glyph
-     * before the text, a clear button (hover-pill + X) that exists
-     * only while there is text, and the search Esc ladder (first
-     * Escape clears, the next bubbles). Every other Entry API —
-     * selection, undo, clipboard, preedit — applies unchanged. */
+     * The GtkSearchEntry face is now BUILT on the generic slots
+     * (leading SEARCH + trailing CLEAR): search_mode keeps only the
+     * preset-specific behavior — the Esc ladder (first Escape
+     * clears, the next bubbles) and the debounce below. The slots
+     * carry the geometry, the glyphs, the hover pills, and the
+     * presses. */
     bool search_mode;
-    bool clear_hover;    /* the clear zone under the pointer */
+    /* ---- Icon slots (1.4.4) ----
+     *
+     * Per-slot: the built-in glyph, an optional custom painter that
+     * replaces it, the sensitivity flag (dimmed + non-interactive),
+     * the hover flag (the soft pill), and the press callback. The
+     * CLEAR glyph keeps its 1.4.2 semantics: zone exists only while
+     * there is text, press = the honest splice. */
+    fdk_entry_icon icon[2];
+    fdk_entry_icon_paint_fn icon_paint[2];
+    void *icon_paint_data[2];
+    bool icon_sensitive[2];
+    bool icon_hover[2];
+    fdk_entry_icon_fn on_icon[2];
+    void *on_icon_data[2];
     /* ---- Search debounce (1.4.3) ----
      *
      * The debounced twin of on_changed (GTK's search-changed): fires
@@ -333,30 +346,69 @@ static void word_range(const char *s, size_t len, size_t i,
 
 /* ---- geometry ---- */
 
-/* ---- search preset geometry (1.4.2) ----
+/* ---- icon slot geometry (1.4.4; the 1.4.2 search zones generalized) ----
  *
- * The text origin's inset (the magnifier zone) and the right
- * reserve (the clear button, present only while text exists — the
- * view width grows the moment the button does, which is exactly
- * when the user can see it). Hit-testing, scrolling, and paint all
- * route through these two, so the caret and the glyph never fight. */
+ * One zone per side: the glyph box (16 px) + its gap (6 px),
+ * reserved only while the slot carries something. The TRAILING
+ * CLEAR glyph keeps the search preset's existence rule — its
+ * zone appears with the first character and leaves with the last
+ * (the view width grows the moment the button becomes useful).
+ * Hit-testing, scrolling, and paint all route through the same
+ * pair, so the caret and the glyph never fight. */
+static fdk_i32 entry_zone_w(const fdk_entry *e, fdk_entry_slot slot) {
+    if (e->icon_paint[slot] == NULL &&
+        e->icon[slot] == FDK_ENTRY_ICON_NONE) {
+        return 0;
+    }
+    if (slot == FDK_ENTRY_SLOT_TRAILING &&
+        e->icon[slot] == FDK_ENTRY_ICON_CLEAR &&
+        e->icon_paint[slot] == NULL && e->len == 0) {
+        return 0;
+    }
+    return ENTRY_SEARCH_GLYPH + ENTRY_SEARCH_GLYPH_GAP;
+}
+
 static fdk_i32 entry_text_inset(const fdk_entry *e) {
-    return ENTRY_PAD_X +
-           (e->search_mode
-                ? ENTRY_SEARCH_GLYPH + ENTRY_SEARCH_GLYPH_GAP
-                : 0);
+    return ENTRY_PAD_X + entry_zone_w(e, FDK_ENTRY_SLOT_LEADING);
 }
 
 static fdk_i32 entry_right_inset(const fdk_entry *e) {
-    return ENTRY_PAD_X +
-           ((e->search_mode && e->len > 0) ? ENTRY_SEARCH_CLEAR : 0);
+    return ENTRY_PAD_X + entry_zone_w(e, FDK_ENTRY_SLOT_TRAILING);
 }
 
-/* The clear zone's x extent in widget-local coordinates (the box
- * + its gap; empty when the button does not exist). */
-static fdk_i32 entry_clear_zone_w(const fdk_entry *e) {
-    return (e->search_mode && e->len > 0) ? ENTRY_SEARCH_CLEAR : 0;
+/* The slot whose zone contains local x (-1 when none / decorative).
+ * The leading zone spans the inset (padding + glyph box + gap); the
+ * trailing zone mirrors the 1.4.2 clear-zone math (the glyph box +
+ * its gap off the right edge, padding excluded). */
+static int entry_slot_at(const fdk_entry *e, fdk_f32 x) {
+    if (entry_zone_w(e, FDK_ENTRY_SLOT_LEADING) > 0 &&
+        x < (fdk_f32)entry_text_inset(e)) {
+        return (int)FDK_ENTRY_SLOT_LEADING;
+    }
+    fdk_i32 tz = entry_zone_w(e, FDK_ENTRY_SLOT_TRAILING);
+    if (tz > 0 && x > (fdk_f32)(e->base.bounds.width - tz)) {
+        return (int)FDK_ENTRY_SLOT_TRAILING;
+    }
+    return -1;
 }
+
+/* A slot serves its presses when it is sensitive AND either carries
+ * a callback or is the trailing CLEAR with something to clear (its
+ * clear action is built in — the 1.4.2 contract generalized).
+ * Decorative slots fall through to the caret machinery. */
+static bool entry_slot_interactive(const fdk_entry *e, int slot) {
+    if (slot < 0 || !e->icon_sensitive[slot]) {
+        return false;
+    }
+    if (e->on_icon[slot] != NULL) {
+        return true;
+    }
+    return slot == (int)FDK_ENTRY_SLOT_TRAILING &&
+           e->icon[slot] == FDK_ENTRY_ICON_CLEAR &&
+           e->len > 0 && !e->read_only;
+}
+
+/* ---- geometry ---- */
 
 /* Cumulative advance width (px) of s[0..i) — an O(n) walk through
  * the glyph cache; n is bounded by the entry cap. Glyph advances
@@ -1130,21 +1182,30 @@ static bool entry_handle_event(fdk_widget *w,
         if ((w->flags & FDK_WF_ENABLED) == 0) {
             return false;
         }
-        /* 1.4.2 — the search preset's clear button: a press in the
-         * reserved right zone empties the field through the honest
-         * edit path (undo records, on_changed fires). It is NOT a
-         * caret gesture: the click-count machinery never sees it. */
-        if (e->search_mode && e->len > 0 && !e->read_only &&
-            ev->pointer.button == FDK_POINTER_BUTTON_LEFT &&
-            ev->pointer.position.x >
-                (fdk_f32)(e->base.bounds.width -
-                          entry_clear_zone_w(e))) {
-            if (!fdk_widget_has_focus(w)) {
-                (void)fdk_widget_focus(w);
+        /* 1.4.4 — the icon slots: a press inside a reserved zone
+         * serves the slot, not the caret. CLEAR carries its 1.4.2
+         * semantics everywhere (the honest, undoable splice — the
+         * click-count machinery never sees a consumed press); any
+         * interactive slot fires its callback AFTER the built-in
+         * action. Decorative zones fall through. */
+        if (ev->pointer.button == FDK_POINTER_BUTTON_LEFT) {
+            int slot = entry_slot_at(e, ev->pointer.position.x);
+            if (entry_slot_interactive(e, slot)) {
+                if (!fdk_widget_has_focus(w)) {
+                    (void)fdk_widget_focus(w);
+                }
+                e->icon_hover[slot] = false;
+                if (slot == (int)FDK_ENTRY_SLOT_TRAILING &&
+                    e->icon[slot] == FDK_ENTRY_ICON_CLEAR &&
+                    e->len > 0 && !e->read_only) {
+                    (void)entry_splice(e, 0, e->len, NULL, 0);
+                }
+                if (e->on_icon[slot] != NULL) {
+                    e->on_icon[slot](&e->base, (fdk_entry_slot)slot,
+                                     e->on_icon_data[slot]);
+                }
+                return true;
             }
-            e->clear_hover = false;
-            (void)entry_splice(e, 0, e->len, NULL, 0);
-            return true;
         }
         if (ev->pointer.button == FDK_POINTER_BUTTON_MIDDLE) {
             /* Classic Unix middle-click: PRIMARY pastes at the click.
@@ -1204,16 +1265,22 @@ static bool entry_handle_event(fdk_widget *w,
             entry_move_caret(e, hit, true);
             return true;
         }
-        /* 1.4.2 — the clear button's hover pill (MOTION carries real
+        /* 1.4.4 — the slots' hover pills (MOTION carries real
          * coordinates; synthesized ENTER/LEAVE do not — the paned's
-         * 1.4.1 lesson). */
-        if (e->search_mode) {
-            bool in_clear =
-                e->len > 0 &&
-                ev->position.x > (fdk_f32)(e->base.bounds.width -
-                                           entry_clear_zone_w(e));
-            if (in_clear != e->clear_hover) {
-                e->clear_hover = in_clear;
+         * 1.4.1 lesson). One walk serves both slots. */
+        {
+            int hslot = entry_slot_at(e, ev->position.x);
+            bool any = false;
+            for (int s = 0; s < 2; s++) {
+                bool want = (hslot == s) &&
+                            entry_slot_interactive(e, s) &&
+                            (w->flags & FDK_WF_ENABLED) != 0;
+                if (want != e->icon_hover[s]) {
+                    e->icon_hover[s] = want;
+                    any = true;
+                }
+            }
+            if (any) {
                 fdk_widget_invalidate(w);
             }
         }
@@ -1396,6 +1463,80 @@ static bool entry_handle_event(fdk_widget *w,
     return false;
 }
 
+/* ---- icon slot paint (1.4.4) ---------------------------------------
+ *
+ * The slot's glyph box origin (widget-local top-left, vertically
+ * centered like the 1.4.2 glyphs were) and the shared painter: the
+ * hover pill behind interactive slots, then the glyph — the custom
+ * painter when one owns the slot, else the built-in vector language
+ * (SEARCH's lens, CLEAR's X, and the four symbolic row glyphs at the
+ * same 16-px box the List and Tree use). */
+
+static void entry_slot_box(const fdk_entry *e, fdk_entry_slot slot,
+                           fdk_rect bounds, fdk_i32 *x, fdk_i32 *y) {
+    if (slot == FDK_ENTRY_SLOT_LEADING) {
+        *x = bounds.x + ENTRY_PAD_X - 2;
+    } else {
+        *x = bounds.x + bounds.width - entry_zone_w(e, slot) - 2;
+    }
+    *y = bounds.y + (bounds.height - ENTRY_SEARCH_GLYPH) / 2;
+    if (*y < bounds.y) {
+        *y = bounds.y;
+    }
+}
+
+static void entry_paint_slot(fdk_entry *e, fdk_widget *w,
+                             fdk_surface *surface, fdk_rect bounds,
+                             fdk_entry_slot slot) {
+    if (entry_zone_w(e, slot) == 0) {
+        return; /* nothing reserved on this side */
+    }
+    int s = (int)slot;
+    fdk_i32 gx = 0, gy = 0;
+    entry_slot_box(e, slot, bounds, &gx, &gy);
+    bool enabled = ((w->flags & FDK_WF_ENABLED) != 0) &&
+                   e->icon_sensitive[s];
+    if (e->icon_hover[s] && enabled) {
+        fdk_rect pill = {gx - 2, gy - 1, ENTRY_SEARCH_GLYPH + 4,
+                         ENTRY_SEARCH_GLYPH + 2};
+        fdk_surface_fill_rounded_rect(surface, pill, 8,
+                                      fdk__pal_row_hover());
+    }
+    if (e->icon_paint[s] != NULL) {
+        e->icon_paint[s](&e->base, surface, gx, gy, ENTRY_SEARCH_GLYPH,
+                         enabled, e->icon_paint_data[s]);
+        return;
+    }
+    fdk_color ink = enabled ? fdk__pal_text() : fdk__pal_text_disabled();
+    switch (e->icon[s]) {
+    case FDK_ENTRY_ICON_SEARCH:
+        /* The stroked lens + handle (the symbolic-glyph discipline:
+         * no fills that fight theme changes). */
+        fdk_surface_draw_circle_aa(surface, gx + 6, gy + 7, 4, ink);
+        fdk_surface_draw_line_aa(surface, gx + 9, gy + 10, gx + 13,
+                                 gy + 14, ink);
+        break;
+    case FDK_ENTRY_ICON_CLEAR:
+        fdk_surface_draw_line_aa(surface, gx + 4, gy + 4, gx + 12,
+                                 gy + 12, ink);
+        fdk_surface_draw_line_aa(surface, gx + 12, gy + 4, gx + 4,
+                                 gy + 12, ink);
+        break;
+    case FDK_ENTRY_ICON_FOLDER:
+    case FDK_ENTRY_ICON_HOME:
+    case FDK_ENTRY_ICON_DRIVE:
+    case FDK_ENTRY_ICON_FILE: {
+        fdk_row_icon ri = (fdk_row_icon)(
+            (int)e->icon[s] - (int)FDK_ENTRY_ICON_FOLDER +
+            (int)FDK_ROW_ICON_FOLDER);
+        fdk__row_icon_paint(surface, ri, gx, gy, !enabled);
+        break;
+    }
+    default:
+        break; /* NONE with no painter never reaches here (zone 0) */
+    }
+}
+
 static void entry_paint(fdk_widget *w, fdk_surface *surface,
                         fdk_rect bounds, fdk_rect clip) {
     (void)clip;
@@ -1440,7 +1581,13 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
     }
 
     if (e->font == NULL) {
-        return; /* textless (matches Label's no-font degradation) */
+        /* Textless (matches Label's no-font degradation) — but the
+         * icon slots are vector glyphs, not text: they still paint. */
+        entry_paint_slot(e, w, surface, bounds,
+                         FDK_ENTRY_SLOT_LEADING);
+        entry_paint_slot(e, w, surface, bounds,
+                         FDK_ENTRY_SLOT_TRAILING);
+        return;
     }
 
     fdk_color text_col = ((w->flags & FDK_WF_ENABLED) == 0)
@@ -1449,23 +1596,6 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
     fdk_i32 baseline = fdk__center_baseline(e->font, bounds.y,
                                             bounds.height);
     fdk_i32 text_x = bounds.x + entry_text_inset(e) - e->x_offset;
-
-    /* 1.4.2 — the magnifier glyph in the reserved left zone: a
-     * stroked lens + handle in the neutral ink (the symbolic-glyph
-     * discipline: no fills that fight theme changes). */
-    if (e->search_mode) {
-        fdk_i32 gx = bounds.x + ENTRY_PAD_X - 2;
-        fdk_i32 gy = bounds.y + (bounds.height - ENTRY_SEARCH_GLYPH) / 2;
-        if (gy < bounds.y) {
-            gy = bounds.y;
-        }
-        fdk_color ink = ((w->flags & FDK_WF_ENABLED) == 0)
-            ? fdk__pal_text_disabled()
-            : fdk__pal_text();
-        fdk_surface_draw_circle_aa(surface, gx + 6, gy + 7, 4, ink);
-        fdk_surface_draw_line_aa(surface, gx + 9, gy + 10, gx + 13,
-                                 gy + 14, ink);
-    }
 
     size_t lo = (e->anchor < e->caret) ? e->anchor : e->caret;
     size_t hi = (e->anchor < e->caret) ? e->caret : e->anchor;
@@ -1568,31 +1698,12 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         }
     }
 
-    /* 1.4.2 — the clear button in the reserved right zone (exists
-     * only while there is text): a soft hover pill + the X stroke.
-     * The pill is the ONLY hover feedback (no fade — the button
-     * appearing with the first character is feedback enough). */
-    if (entry_clear_zone_w(e) > 0) {
-        fdk_i32 zone = entry_clear_zone_w(e);
-        fdk_i32 bx = bounds.x + bounds.width - zone - 2;
-        fdk_i32 by = bounds.y + (bounds.height - ENTRY_SEARCH_GLYPH) / 2;
-        if (by < bounds.y) {
-            by = bounds.y;
-        }
-        if (e->clear_hover && (w->flags & FDK_WF_ENABLED) != 0) {
-            fdk_rect pill = {bx - 2, by - 1, ENTRY_SEARCH_GLYPH + 4,
-                             ENTRY_SEARCH_GLYPH + 2};
-            fdk_surface_fill_rounded_rect(surface, pill, 8,
-                                          fdk__pal_row_hover());
-        }
-        fdk_color ink = ((w->flags & FDK_WF_ENABLED) == 0)
-            ? fdk__pal_text_disabled()
-            : fdk__pal_text();
-        fdk_surface_draw_line_aa(surface, bx + 4, by + 4, bx + 12,
-                                 by + 12, ink);
-        fdk_surface_draw_line_aa(surface, bx + 12, by + 4, bx + 4,
-                                 by + 12, ink);
-    }
+    /* 1.4.4 — both icon slots, painted over the field fill and the
+     * text (the zones are reserved: nothing overlaps). The glyphs
+     * are font-independent vector strokes, so they paint even when
+     * the entry has no font for its text. */
+    entry_paint_slot(e, w, surface, bounds, FDK_ENTRY_SLOT_LEADING);
+    entry_paint_slot(e, w, surface, bounds, FDK_ENTRY_SLOT_TRAILING);
 }
 
 /* ---- measure / destroy ---- */
@@ -1798,7 +1909,22 @@ fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
     e->undo = NULL;       /* lazy: first recorded edit allocates it */
     e->undo_applying = false;
     e->search_mode = false; /* the plain entry (1.4.2 preset below) */
-    e->clear_hover = false;
+    /* 1.4.4 icon slots: bare defaults (the widget zero-allocates,
+    * but the semantic fields stay explicit like the rest above). */
+    e->icon[0] = FDK_ENTRY_ICON_NONE;
+    e->icon[1] = FDK_ENTRY_ICON_NONE;
+    e->icon_paint[0] = NULL;
+    e->icon_paint[1] = NULL;
+    e->icon_paint_data[0] = NULL;
+    e->icon_paint_data[1] = NULL;
+    e->icon_sensitive[0] = true;
+    e->icon_sensitive[1] = true;
+    e->icon_hover[0] = false;
+    e->icon_hover[1] = false;
+    e->on_icon[0] = NULL;
+    e->on_icon[1] = NULL;
+    e->on_icon_data[0] = NULL;
+    e->on_icon_data[1] = NULL;
     e->on_search = NULL;      /* 1.4.3 debounce */
     e->on_search_data = NULL;
     e->search_timer = NULL;
@@ -1839,7 +1965,13 @@ fdk_result fdk_search_entry_create(fdk_widget *parent, fdk_font *font,
     if (!fdk_ok(r)) {
         return r;
     }
-    entry_of(*out_entry)->search_mode = true;
+    /* The preset IS the slots now (1.4.4): leading SEARCH glyph,
+     * trailing CLEAR with its text-conditional zone. search_mode
+     * itself only carries the Esc ladder and the debounce. */
+    fdk_entry *e = entry_of(*out_entry);
+    e->search_mode = true;
+    e->icon[FDK_ENTRY_SLOT_LEADING] = FDK_ENTRY_ICON_SEARCH;
+    e->icon[FDK_ENTRY_SLOT_TRAILING] = FDK_ENTRY_ICON_CLEAR;
     fdk_widget_invalidate(*out_entry);
     fdk_widget_child_layout_changed((*out_entry)->parent);
     return FDK_OK;
@@ -2186,4 +2318,94 @@ fdk_result fdk_entry_redo(fdk_widget *entry) {
         return FDK_ERR_INVALID_STATE;
     }
     return fdk_undo_stack_redo(e->undo);
+}
+
+/* ---- icon slots (1.4.4 public API) ---- */
+
+/* The zone changed (or may have): relayout the container (the
+ * natural size moved) and repaint. */
+static void entry_slots_changed(fdk_widget *w) {
+    fdk_widget_invalidate(w);
+    fdk_widget_child_layout_changed(w->parent);
+}
+
+fdk_result fdk_entry_set_icon(fdk_widget *entry, fdk_entry_slot slot,
+                              fdk_entry_icon icon) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def ||
+        (slot != FDK_ENTRY_SLOT_LEADING &&
+         slot != FDK_ENTRY_SLOT_TRAILING) ||
+        icon < FDK_ENTRY_ICON_NONE || icon > FDK_ENTRY_ICON_FILE) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_entry *e = entry_of(entry);
+    if (e->icon[slot] == icon) {
+        return FDK_OK; /* idempotent */
+    }
+    e->icon[slot] = icon;
+    entry_slots_changed(entry);
+    return FDK_OK;
+}
+
+fdk_entry_icon fdk_entry_get_icon(fdk_widget *entry, fdk_entry_slot slot) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def ||
+        (slot != FDK_ENTRY_SLOT_LEADING &&
+         slot != FDK_ENTRY_SLOT_TRAILING)) {
+        return FDK_ENTRY_ICON_NONE;
+    }
+    return entry_of(entry)->icon[slot];
+}
+
+fdk_result fdk_entry_set_icon_paint(fdk_widget *entry,
+                                    fdk_entry_slot slot,
+                                    fdk_entry_icon_paint_fn fn,
+                                    void *user_data) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def ||
+        (slot != FDK_ENTRY_SLOT_LEADING &&
+         slot != FDK_ENTRY_SLOT_TRAILING)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_entry *e = entry_of(entry);
+    e->icon_paint[slot] = fn;
+    e->icon_paint_data[slot] = user_data;
+    entry_slots_changed(entry);
+    return FDK_OK;
+}
+
+fdk_result fdk_entry_set_icon_sensitive(fdk_widget *entry,
+                                        fdk_entry_slot slot,
+                                        bool sensitive) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def ||
+        (slot != FDK_ENTRY_SLOT_LEADING &&
+         slot != FDK_ENTRY_SLOT_TRAILING)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_entry *e = entry_of(entry);
+    if (e->icon_sensitive[slot] == sensitive) {
+        return FDK_OK;
+    }
+    e->icon_sensitive[slot] = sensitive;
+    fdk_widget_invalidate(entry);
+    return FDK_OK;
+}
+
+bool fdk_entry_icon_is_sensitive(fdk_widget *entry, fdk_entry_slot slot) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def ||
+        (slot != FDK_ENTRY_SLOT_LEADING &&
+         slot != FDK_ENTRY_SLOT_TRAILING)) {
+        return false;
+    }
+    return entry_of(entry)->icon_sensitive[slot];
+}
+
+void fdk_entry_set_on_icon_press(fdk_widget *entry,
+                                 fdk_entry_slot slot,
+                                 fdk_entry_icon_fn fn, void *user_data) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def ||
+        (slot != FDK_ENTRY_SLOT_LEADING &&
+         slot != FDK_ENTRY_SLOT_TRAILING)) {
+        return;
+    }
+    fdk_entry *e = entry_of(entry);
+    e->on_icon[slot] = fn;
+    e->on_icon_data[slot] = user_data;
 }

@@ -36,6 +36,7 @@
 #include "widgets_internal.h"
 #include "fdk/fdk_animation.h"
 #include "../theme/theme_internal.h"
+#include "../window/window_internal.h" /* fdk__window_context (idle clock) */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -47,6 +48,13 @@
 #define SCROLL_WHEEL_STEP 48
 #define SCROLL_KEY_STEP 32
 #define SCROLL_MIN_THUMB 24
+/* Overlay-mode rhythm (1.4.4): a bar holds ~800 ms after the last
+ * activity on its axis, then fades over ~300 ms (quad-out — a
+ * departure is softer than an arrival). Activity = any scroll on
+ * the axis, the pointer approaching the strip, a hover, or a drag;
+ * every touch of it re-arms the clock. */
+#define BAR_IDLE_MS 800
+#define BAR_FADE_MS 300
 /* Smooth-scroll flight (1.3.8): the input-gesture path (wheel,
  * keyboard) eases to the target over this many ms; the public
  * scroll_to/scroll_by and every value-interface path (a11y
@@ -76,6 +84,9 @@ typedef struct fdk_scrollview {
     fdk_animation *flight;
     fdk_i32 flight_from_x, flight_from_y;
     fdk_i32 flight_target_x, flight_target_y;
+    /* 1.4.4: CLASSIC (layout-owned strips) or OVERLAY (transient
+     * thumbs that fade when idle — see fdk_scrollview_set_bar_mode). */
+    fdk_scroll_bar_mode mode;
 } fdk_scrollview;
 
 typedef struct fdk_scrollbar {
@@ -84,6 +95,17 @@ typedef struct fdk_scrollbar {
     bool horizontal;
     bool dragging;         /* thumb drag in progress                */
     fdk_f32 grab_offset;   /* pointer-to-thumb-top delta at grab    */
+    /* ---- overlay fade state (1.4.4) ----
+     *
+     * alpha rides the 1.4.3 paint-group engine (set_paint_alpha on
+     * the BAR: its subtree blits at the blend). 1.0 at rest = the
+     * plain walk, zero cost. `idle` is the one-shot countdown timer
+     * (needs a window context — detached trees never arm it, and
+     * their bars stay visible: the headless-honesty rule); `fade` is
+     * the running alpha flight. */
+    fdk_f32 alpha;
+    fdk_animation *fade;
+    fdk_timer *idle;
 } fdk_scrollbar;
 
 static fdk_scrollview *scroll_of(fdk_widget *w) {
@@ -100,6 +122,17 @@ static const fdk_widget_class fdk_scrollbar_class_def;
 
 static fdk_i32 bar_width(void) {
     return fdk_theme_get_metric(NULL, FDK_TM_SCROLLBAR_WIDTH);
+}
+
+/* The overlay bar's own (thinner) metric. */
+static fdk_i32 overlay_bar_width(void) {
+    return fdk_theme_get_metric(NULL, FDK_TM_SCROLLBAR_OVERLAY_WIDTH);
+}
+
+/* The bar thickness in the scrollview's CURRENT mode. */
+static fdk_i32 bar_thickness(const fdk_scrollview *sv) {
+    return (sv->mode == FDK_SCROLL_BARS_OVERLAY) ? overlay_bar_width()
+                                                  : bar_width();
 }
 
 /* Content natural size (0x0 when there is no content). */
@@ -126,14 +159,21 @@ static void axis_extents(fdk_scrollview *sv, bool horizontal,
     fdk_i32 h = sv->base.bounds.height;
     /* The space the OTHER axis' bar steals (visible only when that
      * axis overflows — evaluated on the content's natural extents,
-     * which is what bar visibility is decided from). */
+     * which is what bar visibility is decided from). Overlay bars
+     * steal NOTHING: the viewport is the full bounds, the bars are
+     * transient guests over the content (1.4.4). */
     fdk_i32 other_bar = 0;
+    if (sv->mode == FDK_SCROLL_BARS_CLASSIC) {
+        if (horizontal) {
+            other_bar = (ch > h && h > 0) ? bar_width() : 0;
+        } else {
+            other_bar = (cw > w && w > 0) ? bar_width() : 0;
+        }
+    }
     if (horizontal) {
-        other_bar = (ch > h && h > 0) ? bar_width() : 0;
         *out_view = (w - other_bar > 0) ? w - other_bar : 0;
         *out_content = cw;
     } else {
-        other_bar = (cw > w && w > 0) ? bar_width() : 0;
         *out_view = (h - other_bar > 0) ? h - other_bar : 0;
         *out_content = ch;
     }
@@ -167,6 +207,134 @@ static bool scroll_clamp(fdk_scrollview *sv) {
     return changed;
 }
 
+/* ---- overlay fade machinery (1.4.4) --------------------------------
+ *
+ * A bar's VISIBILITY is two-ANDed facts: the axis overflows (the
+ * structural need, decided by the layout) and the bar is AWAKE —
+ * alpha above zero, an idle countdown running, a fade in flight,
+ * hovered, or dragged. A fully faded bar is input-transparent (the
+ * Phase 4 visible-flag semantics), so it stops stealing presses on
+ * its strip until something wakes it. Detached trees have no
+ * context to arm a timer with: their bars never fade (the honesty
+ * rule), which also keeps the headless suite pixel-stable. */
+
+/* The bar's awake test (structural need is the caller's). */
+static bool bar_awake(const fdk_scrollbar *b) {
+    return b->alpha > 0.0f || b->idle != NULL || b->fade != NULL ||
+           b->dragging ||
+           ((b->base.flags & FDK_WF_HOVERED) != 0);
+}
+
+/* Re-derives one bar's visibility from its structural need (the
+ * axis overflows and the content exists) and its awake state. */
+static void bar_recheck_visible(fdk_widget *bar_w) {
+    if (bar_w == NULL) {
+        return;
+    }
+    fdk_scrollbar *b = bar_of(bar_w);
+    fdk_i32 view = 0, content = 0, max = 0;
+    axis_extents(b->owner, b->horizontal, &view, &content, &max);
+    bool need = content > 0 && max > 0;
+    bool show = need &&
+                (b->owner->mode == FDK_SCROLL_BARS_CLASSIC ||
+                 bar_awake(b));
+    fdk_widget_set_visible(bar_w, show);
+}
+
+static void bar_idle_elapsed(fdk_timer *timer, void *user);
+
+/* Wakes one axis' bar: full opacity NOW (a re-appearance reads as
+ * instant — fades are for departures), the idle clock re-armed.
+ * Refuses axes with nothing to scroll (no phantom bars). */
+static void bar_activity(fdk_scrollview *sv, bool horizontal) {
+    if (sv->mode != FDK_SCROLL_BARS_OVERLAY) {
+        return;
+    }
+    fdk_widget *bar_w = horizontal ? sv->hbar : sv->vbar;
+    if (bar_w == NULL) {
+        return;
+    }
+    fdk_i32 view = 0, content = 0, max = 0;
+    axis_extents(sv, horizontal, &view, &content, &max);
+    if (content <= 0 || max <= 0) {
+        return; /* nothing to indicate */
+    }
+    fdk_scrollbar *b = bar_of(bar_w);
+    if (b->fade != NULL) {
+        fdk_animation_cancel(b->fade);
+        b->fade = NULL;
+    }
+    if (b->alpha < 1.0f) {
+        b->alpha = 1.0f;
+        fdk__widget_set_paint_alpha(bar_w, 1.0f);
+    }
+    fdk_widget_set_visible(bar_w, true);
+    if (b->idle != NULL) {
+        fdk_timer_reset(b->idle, BAR_IDLE_MS);
+    } else {
+        fdk_context *ctx = fdk__window_context(
+            fdk__widget_window_owner(&sv->base));
+        if (ctx != NULL) {
+            b->idle = fdk_timer_add(ctx, BAR_IDLE_MS, false,
+                                    bar_idle_elapsed, bar_w);
+        }
+        /* No context (detached tree): no clock, no fade — the bar
+         * just stays visible. The headless-honesty rule. */
+    }
+    fdk_widget_invalidate(bar_w);
+}
+
+/* The fade-out flight's tick: alpha slides 1 -> 0 with the eased
+ * blend; the paint group does the compositing. */
+static void bar_fade_tick(fdk_animation *anim, double e, void *user) {
+    (void)anim;
+    fdk_widget *bar_w = user;
+    fdk_scrollbar *b = bar_of(bar_w);
+    b->alpha = (fdk_f32)(1.0 - e);
+    if (b->alpha < 0.0f) {
+        b->alpha = 0.0f;
+    }
+    fdk__widget_set_paint_alpha(bar_w, b->alpha);
+}
+
+static void bar_fade_done(fdk_animation *anim, bool finished,
+                          void *user) {
+    fdk_widget *bar_w = user;
+    fdk_scrollbar *b = bar_of(bar_w);
+    if (b->fade == anim) {
+        b->fade = NULL;
+    }
+    if (finished) {
+        /* Fully faded: the bar goes input-transparent until the next
+         * activity wakes it. (A cancel means activity beat the fade
+         * out — bar_activity already restored the alpha.) */
+        b->alpha = 0.0f;
+        fdk__widget_set_paint_alpha(bar_w, 0.0f);
+        bar_recheck_visible(bar_w);
+    }
+}
+
+/* The idle countdown expired: fade out UNLESS the pointer is on the
+ * bar or a thumb drag is riding (then the clock just re-arms). */
+static void bar_idle_elapsed(fdk_timer *timer, void *user) {
+    (void)timer;
+    fdk_widget *bar_w = user;
+    fdk_scrollbar *b = bar_of(bar_w);
+    b->idle = NULL;
+    if (b->dragging || (bar_w->flags & FDK_WF_HOVERED) != 0 ||
+        b->fade != NULL) {
+        bar_activity(b->owner, b->horizontal);
+        return;
+    }
+    if (b->fade == NULL) {
+        b->fade = fdk_widget_animate(bar_w, BAR_FADE_MS,
+                                     FDK_EASE_QUAD_OUT, bar_fade_tick,
+                                     bar_fade_done, bar_w);
+        /* Animation-engine OOM (or a detached clock): no fade — the
+         * bar simply stays. Honest degradation, no phantom vanish. */
+    }
+}
+
 /* (Re)arranges content + bars at the scrollview's CURRENT bounds —
  * the measure/arrange hooks, the layout notifier, and every scroll
  * all funnel through here. */
@@ -182,10 +350,19 @@ static void scrollview_layout(fdk_widget *w) {
     content_extent(sv, &cw, &ch);
     bool need_v = (ch > h_);
     bool need_h = (cw > w_);
-    /* Both-overflow corner: both bars show; the content's viewport
-     * loses both strips (the classic L shape). */
-    fdk_i32 vw = (w_ - ((need_v) ? bar_width() : 0));
-    fdk_i32 vh = (h_ - ((need_h) ? bar_width() : 0));
+    fdk_i32 th = bar_thickness(sv);
+    /* Both-overflow corner: CLASSIC loses both strips (the L shape);
+    * OVERLAY keeps the full viewport — the vertical bar runs the
+    * full height and the horizontal bar shortens by the thickness
+    * so the two thumbs never stack on the corner pixel. */
+    fdk_i32 vw, vh;
+    if (sv->mode == FDK_SCROLL_BARS_CLASSIC) {
+        vw = w_ - ((need_v) ? bar_width() : 0);
+        vh = h_ - ((need_h) ? bar_width() : 0);
+    } else {
+        vw = w_;
+        vh = h_;
+    }
     if (vw < 0) {
         vw = 0;
     }
@@ -206,20 +383,34 @@ static void scrollview_layout(fdk_widget *w) {
         fdk_widget_arrange(sv->content, cb);
     }
 
-    /* Bars along the edges; invisible when the axis fits. RAISED to
-     * the top of the z-order every layout: adopted content is
-     * reparented in (appended last = top-most), and an overlay bar
-     * under the content would lose every hit-test on its strip. */
+    /* Bars along the edges. RAISED to the top of the z-order every
+     * layout: adopted content is reparented in (appended last =
+     * top-most), and an overlay bar under the content would lose
+     * every hit-test on its strip. In overlay mode a fully faded
+     * bar drops out of visibility here (input-transparent until the
+     * next activity wakes it). */
     if (sv->vbar != NULL) {
-        fdk_rect vb = { w_ - bar_width(), 0, bar_width(), vh };
+        fdk_rect vb = { w_ - th, 0, th, (sv->mode == FDK_SCROLL_BARS_OVERLAY)
+                                           ? h_ : vh };
         fdk_widget_set_bounds(sv->vbar, vb);
-        fdk_widget_set_visible(sv->vbar, need_v && ch > 0);
+        if (sv->mode == FDK_SCROLL_BARS_CLASSIC) {
+            fdk_widget_set_visible(sv->vbar, need_v && ch > 0);
+        } else {
+            bar_recheck_visible(sv->vbar);
+        }
         fdk_widget_raise(sv->vbar);
     }
     if (sv->hbar != NULL) {
-        fdk_rect hb = { 0, h_ - bar_width(), vw, bar_width() };
+        fdk_i32 hw = (sv->mode == FDK_SCROLL_BARS_OVERLAY && need_v)
+                         ? w_ - th
+                         : vw;
+        fdk_rect hb = { 0, h_ - th, hw, th };
         fdk_widget_set_bounds(sv->hbar, hb);
-        fdk_widget_set_visible(sv->hbar, need_h && cw > 0);
+        if (sv->mode == FDK_SCROLL_BARS_CLASSIC) {
+            fdk_widget_set_visible(sv->hbar, need_h && cw > 0);
+        } else {
+            bar_recheck_visible(sv->hbar);
+        }
         fdk_widget_raise(sv->hbar);
     }
 }
@@ -327,6 +518,13 @@ static bool scrollview_handle_event(fdk_widget *w,
         fdk_i32 vy = 0, cy = 0, my = 0;
         axis_extents(sv, true, &vx, &cx, &mx);
         axis_extents(sv, false, &vy, &cy, &my);
+        /* Overlay bars: the scrolled axes wake. */
+        if (dx != 0) {
+            bar_activity(sv, true);
+        }
+        if (dy != 0) {
+            bar_activity(sv, false);
+        }
         /* Gesture accumulation: a notch while a flight is airborne
          * adds to the PENDING target, not to the stale live offset
          * (six fast notches = one 6-notch glide, the classic wheel
@@ -356,6 +554,23 @@ static bool scrollview_handle_event(fdk_widget *w,
         }
         scroll_flight_to(w, nx, ny);
         return true; /* the scroll is consumed either way */
+    }
+    case FDK_WIDGET_POINTER_MOTION: {
+        /* Overlay approach detection: the pointer nearing an edge
+         * strip wakes that axis' bar BEFORE any scroll happens — a
+         * faded bar is input-transparent, so this MOTION (which
+         * bubbles from the content under the strip) is the only
+         * revival signal a resting overlay bar has. */
+        if (sv->mode == FDK_SCROLL_BARS_OVERLAY) {
+            fdk_i32 th = overlay_bar_width();
+            if (ev->position.x > (fdk_f32)(w->bounds.width - th)) {
+                bar_activity(sv, false); /* the right edge: vertical */
+            }
+            if (ev->position.y > (fdk_f32)(w->bounds.height - th)) {
+                bar_activity(sv, true); /* the bottom edge: horizontal */
+            }
+        }
+        return false; /* motion keeps bubbling */
     }
     case FDK_WIDGET_KEY_DOWN: {
         if ((w->flags & FDK_WF_FOCUSED) == 0) {
@@ -389,6 +604,10 @@ static bool scrollview_handle_event(fdk_widget *w,
         if (ny < 0) ny = 0;
         if (nx > mx) nx = mx;
         if (ny > my) ny = my;
+        /* Overlay bars: the key-scrolled axes wake (both bars when
+         * Home/End fire — the position proof the bar exists for). */
+        bar_activity(sv, ny != sv->scroll_y);
+        bar_activity(sv, nx != sv->scroll_x);
         scroll_flight_to(w, nx, ny);
         return true; /* consumed even when clamped to the edge */
     }
@@ -434,7 +653,36 @@ static void scrollbar_paint(fdk_widget *w, fdk_surface *surface,
                             fdk_rect bounds, fdk_rect clip) {
     (void)clip;
     fdk_scrollbar *b = bar_of(w);
+    fdk_scrollview *sv = b->owner;
     if (bounds.width <= 0 || bounds.height <= 0) {
+        return;
+    }
+    fdk_i32 pos = 0, len = 0;
+    bar_thumb(b, &pos, &len);
+    if (sv->mode == FDK_SCROLL_BARS_OVERLAY) {
+        /* Overlay: the THUMB only — no trough, the content is the
+         * background the bar rides on. A hairline inset keeps the
+         * rounded ends clear of the viewport edge. */
+        fdk_color thumb_col = fdk__pal_control();
+        if ((w->flags & FDK_WF_HOVERED) != 0) {
+            thumb_col = fdk__pal_control_hover();
+        }
+        if (b->dragging) {
+            thumb_col = fdk__pal_control_pressed();
+        }
+        fdk_i32 inner = bounds.width - 2;
+        if (inner < 1) {
+            inner = 1;
+        }
+        fdk_rect tr;
+        if (b->horizontal) {
+            tr = (fdk_rect){bounds.x + pos, bounds.y + 1, len, inner};
+        } else {
+            tr = (fdk_rect){bounds.x + 1, bounds.y + pos, inner, len};
+        }
+        if (tr.width > 0 && tr.height > 0) {
+            fdk_surface_fill_rounded_rect(surface, tr, 3, thumb_col);
+        }
         return;
     }
     /* Trough: the track token. */
@@ -448,8 +696,6 @@ static void scrollbar_paint(fdk_widget *w, fdk_surface *surface,
     if (b->dragging) {
         thumb_col = fdk__pal_control_pressed();
     }
-    fdk_i32 pos = 0, len = 0;
-    bar_thumb(b, &pos, &len);
     fdk_i32 pad = 2;
     fdk_i32 inner = bar_width() - pad * 2;
     if (inner < 1) {
@@ -472,6 +718,9 @@ static bool scrollbar_handle_event(fdk_widget *w,
     fdk_scrollview *sv = b->owner;
     switch (ev->type) {
     case FDK_WIDGET_POINTER_DOWN: {
+        /* Any press on the bar is activity: the overlay bar holds
+         * while the interaction rides. */
+        bar_activity(sv, b->horizontal);
         fdk_i32 view = 0, content = 0, max = 0;
         axis_extents(sv, b->horizontal, &view, &content, &max);
         fdk_i32 scroll = b->horizontal ? sv->scroll_x : sv->scroll_y;
@@ -507,8 +756,12 @@ static bool scrollbar_handle_event(fdk_widget *w,
     }
     case FDK_WIDGET_POINTER_MOTION: {
         if (!b->dragging) {
+            /* A hover on the strip is activity too (the pointer
+             * arrived — hold the bar). */
+            bar_activity(sv, b->horizontal);
             return false;
         }
+        bar_activity(sv, b->horizontal); /* keep it awake while dragging */
         fdk_i32 view = 0, content = 0, max = 0;
         axis_extents(sv, b->horizontal, &view, &content, &max);
         fdk_i32 trough = b->horizontal ? w->bounds.width : w->bounds.height;
@@ -546,6 +799,7 @@ static bool scrollbar_handle_event(fdk_widget *w,
     case FDK_WIDGET_POINTER_UP:
         if (b->dragging) {
             b->dragging = false;
+            bar_activity(sv, b->horizontal); /* re-arm the hold */
             fdk_widget_invalidate(w);
         }
         return true;
@@ -555,6 +809,16 @@ static bool scrollbar_handle_event(fdk_widget *w,
     return false;
 }
 
+/* Teardown: the idle timer must not outlive the bar it points at
+ * (the animation engine's destroy sweep already reaps the fade). */
+static void scrollbar_destroy(fdk_widget *w) {
+    fdk_scrollbar *b = bar_of(w);
+    if (b->idle != NULL) {
+        fdk_timer_remove(b->idle);
+        b->idle = NULL;
+    }
+}
+
 static const fdk_widget_class fdk_scrollbar_class_def = {
     .size = sizeof(fdk_scrollbar),
     .name = "scrollbar",
@@ -562,7 +826,7 @@ static const fdk_widget_class fdk_scrollbar_class_def = {
     .paint = scrollbar_paint,
     .measure = NULL,
     .arrange = NULL,
-    .destroy = NULL,
+    .destroy = scrollbar_destroy,
 };
 
 /* ---- a11y ---- */
@@ -649,6 +913,7 @@ fdk_result fdk_scrollview_create(fdk_widget *parent,
         sv->vbar = bar;
         bar_of(bar)->owner = sv;
         bar_of(bar)->horizontal = false;
+        bar_of(bar)->alpha = 1.0f; /* awake until a clock says otherwise */
         fdk_widget_set_visible(bar, false);
     }
     bar = NULL;
@@ -657,6 +922,7 @@ fdk_result fdk_scrollview_create(fdk_widget *parent,
         sv->hbar = bar;
         bar_of(bar)->owner = sv;
         bar_of(bar)->horizontal = true;
+        bar_of(bar)->alpha = 1.0f;
         fdk_widget_set_visible(bar, false);
     }
     fdk_widget_child_layout_changed(w->parent);
@@ -734,6 +1000,10 @@ fdk_result fdk_scrollview_scroll_to(fdk_widget *scrollview, fdk_i32 x,
     fdk_widget_invalidate(scrollview);
     (void)clamped; /* the GET reflects the clamped truth */
     if (sv->scroll_x != ox || sv->scroll_y != oy) {
+        /* Overlay bars flash on programmatic scrolls too — the bar
+         * is the position PROOF, and a moved position is activity. */
+        bar_activity(sv, sv->scroll_x != ox);
+        bar_activity(sv, sv->scroll_y != oy);
         /* A11y: the scroll position (the value interface) moved. */
         fdk__a11y_notify(scrollview, FDK_A11Y_VALUE_CHANGED, 0);
     }
@@ -770,6 +1040,63 @@ fdk_result fdk_scrollview_get_scroll_offset(fdk_widget *scrollview,
  * arrangement at the CURRENT bounds. */
 void fdk__scrollview_layout_changed(fdk_widget *w) {
     scrollview_layout(w);
+}
+
+/* ---- bar-mode public API (1.4.4) ---- */
+
+/* Settles one bar's overlay state after a mode switch: fades and
+ * clocks gone, alpha restored. */
+static void bar_reset_overlay_state(fdk_widget *bar_w, bool overlay) {
+    if (bar_w == NULL) {
+        return;
+    }
+    fdk_scrollbar *b = bar_of(bar_w);
+    if (b->fade != NULL) {
+        fdk_animation_cancel(b->fade);
+        b->fade = NULL;
+    }
+    if (b->idle != NULL) {
+        fdk_timer_remove(b->idle);
+        b->idle = NULL;
+    }
+    b->alpha = 1.0f;
+    fdk__widget_set_paint_alpha(bar_w, 1.0f);
+    if (overlay) {
+        /* Entering overlay: the bars make their debut and hold —
+         * bar_activity arms the clock (a no-op in detached trees,
+         * where they simply stay visible). */
+        bar_activity(b->owner, b->horizontal);
+    }
+}
+
+fdk_result fdk_scrollview_set_bar_mode(fdk_widget *scrollview,
+                                       fdk_scroll_bar_mode mode) {
+    if (scrollview == NULL ||
+        scrollview->klass != &fdk_scrollview_class_def ||
+        (mode != FDK_SCROLL_BARS_CLASSIC &&
+         mode != FDK_SCROLL_BARS_OVERLAY)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_scrollview *sv = scroll_of(scrollview);
+    if (sv->mode == mode) {
+        return FDK_OK; /* idempotent */
+    }
+    sv->mode = mode;
+    bar_reset_overlay_state(sv->vbar, mode == FDK_SCROLL_BARS_OVERLAY);
+    bar_reset_overlay_state(sv->hbar, mode == FDK_SCROLL_BARS_OVERLAY);
+    /* The viewport just changed size (classic reserved strips, or
+     * stopped doing so): re-arrange and re-clamp at the new truth. */
+    scrollview_layout(scrollview);
+    fdk_widget_invalidate(scrollview);
+    return FDK_OK;
+}
+
+fdk_scroll_bar_mode fdk_scrollview_get_bar_mode(fdk_widget *scrollview) {
+    if (scrollview == NULL ||
+        scrollview->klass != &fdk_scrollview_class_def) {
+        return FDK_SCROLL_BARS_CLASSIC;
+    }
+    return scroll_of(scrollview)->mode;
 }
 
 /* Internal: the scroll area's viewport size (bounds minus visible

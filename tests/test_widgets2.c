@@ -43,6 +43,15 @@ static fdk_event_data ev_key(fdk_scancode sc) {
     return e;
 }
 
+static fdk_event_data ev_motion(float x, float y) {
+    fdk_event_data e;
+    memset(&e, 0, sizeof(e));
+    e.type = FDK_EVENT_POINTER_MOTION;
+    e.pointer.position.x = x;
+    e.pointer.position.y = y;
+    return e;
+}
+
 static fdk_widget *fresh_root(void) {
     fdk_widget *root = NULL;
     assert(fdk_ok(fdk_widget_create(NULL, NULL,
@@ -426,6 +435,165 @@ static void test_notebook(void) {
            "counts, pixel-verified pages\n");
 }
 
+/* ---- Notebook tab reordering (1.4.4) ---- */
+
+static int g_reorders = 0;
+static size_t g_reorder_from = 0, g_reorder_to = 0;
+static void on_page_reordered(fdk_widget *nb, size_t from, size_t to,
+                              void *user) {
+    (void)nb;
+    (void)user;
+    g_reorders++;
+    g_reorder_from = from;
+    g_reorder_to = to;
+}
+
+static void test_notebook_reorder(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *nb = NULL;
+    assert(fdk_notebook_create(root, g_font, &nb) == FDK_OK);
+    fdk_widget_set_bounds(nb, (fdk_rect){0, 0, 400, 200});
+
+    fdk_widget *p[3] = {NULL, NULL, NULL};
+    const char *labels[3] = {"Red", "Green", "Blue"};
+    for (int i = 0; i < 3; i++) {
+        assert(fdk_ok(fdk_widget_create(root, NULL,
+                                        (fdk_rect){0, 0, 10, 10},
+                                        &p[i])));
+        fdk_widget_set_background(
+            p[i], (fdk_color){(i == 0) ? 1.0f : 0.0f,
+                              (i == 1) ? 1.0f : 0.0f,
+                              (i == 2) ? 1.0f : 0.0f, 1.0f});
+        assert(fdk_notebook_append_page(nb, p[i], labels[i]) == FDK_OK);
+    }
+    g_reorders = 0;
+    fdk_notebook_set_on_page_reordered(nb, on_page_reordered, NULL);
+
+    /* Programmatic reorder: index identity arithmetic. */
+    assert(fdk_notebook_page_index(nb, p[1]) == 1);
+    assert(fdk_notebook_reorder_page(nb, 1, 2) == FDK_OK); /* [R,B,G] */
+    assert(fdk_notebook_get_page(nb, 0) == p[0]);
+    assert(fdk_notebook_get_page(nb, 1) == p[2]);
+    assert(fdk_notebook_get_page(nb, 2) == p[1]);
+    assert(fdk_notebook_page_index(nb, p[1]) == 2);
+    assert(g_reorders == 1 && g_reorder_from == 1 && g_reorder_to == 2);
+    /* The current page (page 0) keeps showing; no switch callback. */
+    assert(fdk_notebook_get_current_page(nb) == 0);
+    assert(fdk_widget_get_visible(p[0]));
+    /* Back again, then the clamp: 0 -> 99 means 0 -> 2. */
+    assert(fdk_notebook_reorder_page(nb, 2, 1) == FDK_OK); /* [R,G,B] */
+    assert(fdk_notebook_get_page(nb, 1) == p[1]);
+    assert(fdk_notebook_reorder_page(nb, 0, 99) == FDK_OK); /* [G,B,R] */
+    assert(fdk_notebook_get_page(nb, 0) == p[1]);
+    assert(fdk_notebook_get_page(nb, 1) == p[2]);
+    assert(fdk_notebook_get_page(nb, 2) == p[0]);
+    /* The current page (Red) tracked to slot 2 by identity. */
+    assert(fdk_notebook_get_current_page(nb) == 2);
+    assert(fdk_widget_get_visible(p[0]));
+    /* Restore, then no-op + bad index. */
+    assert(fdk_notebook_reorder_page(nb, 2, 0) == FDK_OK); /* [R,G,B] */
+    assert(fdk_notebook_get_page(nb, 0) == p[0]);
+    assert(fdk_notebook_get_page(nb, 1) == p[1]);
+    assert(fdk_notebook_get_page(nb, 2) == p[2]);
+    assert(fdk_notebook_get_current_page(nb) == 0);
+    assert(fdk_notebook_reorder_page(nb, 0, 0) == FDK_OK);
+    assert(fdk_notebook_reorder_page(nb, 9, 0) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(g_reorders == 4);
+    /* page_index sentinel: a foreign widget. */
+    fdk_widget *stray = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){0, 0, 5, 5}, &stray)));
+    assert(fdk_notebook_page_index(nb, stray) == 3);
+    fdk_widget_destroy(stray);
+
+    /* DRAG: press the Green tab, drag right past the Blue tab's
+     * midpoint, release. Tab rects: x0=0; tab w = text + 28; gap 2.
+     * The Green tab's slot math is driven by measured text widths. */
+    fdk_i32 th = 0;
+    fdk_i32 tw[3] = {0, 0, 0};
+    for (int i = 0; i < 3; i++) {
+        fdk__text_extent(g_font, labels[i], &tw[i], &th);
+        tw[i] += 28; /* NB_TAB_PAD_X * 2 */
+    }
+    fdk_i32 x_green = tw[0] + 2;
+    fdk_i32 green_center0 = x_green + tw[1] / 2;
+    fdk_i32 x_blue = x_green + tw[1] + 2;
+    fdk_i32 blue_mid = x_blue + tw[2] / 2;
+
+    /* Below-slop motion never promotes; the click stays a switch. */
+    fdk_event_data down =
+        ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                  (float)green_center0, 15.0f);
+    fdk_event_data jiggle = ev_motion((float)green_center0 + 2.0f,
+                                      15.0f);
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                  (float)green_center0 + 2.0f, 15.0f);
+    (void)fdk_widget_tree_handle_event(root, &down);
+    (void)fdk_widget_tree_handle_event(root, &jiggle);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(fdk_notebook_get_page(nb, 1) == p[1]); /* nothing moved */
+    assert(g_reorders == 4); /* no drag callback fired */
+
+    g_reorders = 0;
+    g_switches = 0;
+    /* The real drag: press Green's center, sweep to Blue's midpoint
+     * plus a little, release. */
+    down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                     (float)green_center0, 15.0f);
+    fdk_event_data move = ev_motion((float)blue_mid + 20.0f, 15.0f);
+    up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                   (float)blue_mid + 20.0f, 15.0f);
+    (void)fdk_widget_tree_handle_event(root, &down);
+    (void)fdk_widget_tree_handle_event(root, &move);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    /* Green landed in slot 2, Blue slid to slot 1. */
+    assert(fdk_notebook_get_page(nb, 2) == p[1]);
+    assert(fdk_notebook_get_page(nb, 1) == p[2]);
+    assert(fdk_notebook_get_page(nb, 0) == p[0]);
+    assert(g_reorders == 1 && g_reorder_from == 1 && g_reorder_to == 2);
+    /* The press switched pages (to Green — the jiggle click did it,
+     * this drag's press was already on the current page), and the
+     * REORDER never switches: current is Green, now at slot 2. */
+    assert(g_switches == 0);
+    assert(fdk_notebook_get_current_page(nb) == 2);
+    assert(fdk_widget_get_visible(p[1]));
+
+    /* Drag it back left: press the (now) slot-2 Green tab and sweep
+     * left past slot 1's midpoint. */
+    g_reorders = 0;
+    fdk_i32 x_green2 = tw[0] + 2 + tw[2] + 2;
+    fdk_i32 green_center2 = x_green2 + tw[1] / 2;
+    fdk_i32 blue_mid_now = tw[0] + 2 + tw[2] / 2;
+    down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                     (float)green_center2, 15.0f);
+    move = ev_motion((float)blue_mid_now - 20.0f, 15.0f);
+    up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                   (float)blue_mid_now - 20.0f, 15.0f);
+    (void)fdk_widget_tree_handle_event(root, &down);
+    (void)fdk_widget_tree_handle_event(root, &move);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(fdk_notebook_get_page(nb, 1) == p[1]);
+    assert(fdk_notebook_get_page(nb, 2) == p[2]);
+    assert(g_reorders == 1 && g_reorder_from == 2 && g_reorder_to == 1);
+
+    /* The a11y tab list re-describes from the new order: virtual
+     * child 1 is Green again, and its bounds sit in slot 1. */
+    assert(fdk_a11y_virtual_count(nb) == 3);
+    fdk_a11y_info info;
+    memset(&info, 0, sizeof(info));
+    assert(fdk_a11y_virtual_describe(nb, 1, &info) == FDK_OK);
+    assert(info.name != NULL && strcmp(info.name, "Green") == 0);
+    assert(info.bounds.x == tw[0] + 2);
+    fdk_a11y_info_free(&info);
+
+    fdk_widget_destroy(root);
+    printf("[ok] notebook reorder: programmatic moves + clamps, "
+           "slop-guarded drag promotion, live swaps both directions, "
+           "identity-kept current page, reorder callback, a11y "
+           "re-description\n");
+}
+
 /* ---- Canvas ---- */
 
 static int g_canvas_paint_calls = 0;
@@ -523,6 +691,7 @@ int main(void) {
     test_spin();
     test_toolbar();
     test_notebook();
+    test_notebook_reorder();
     test_canvas();
 
     fdk_font_destroy(g_font);

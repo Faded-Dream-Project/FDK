@@ -17,6 +17,7 @@
 
 #include "fdk/fdk_a11y.h"
 #include "fdk/fdk_widgets.h"
+#include "fdk/fdk_dialog.h" /* 1.4.4: the colorbutton test seam    */
 #include "fdk/fdk_animation.h" /* 1.4.1: the Expander's reveal anim */
 #include "fdk/fdk_core.h"      /* 1.4.1: fdk_timer (the Spinner)    */
 
@@ -511,5 +512,44 @@ int fdk__save_name_validate(const char *name);
 /* "~" and "~/" expansion against $HOME. Returns an owned copy of
  * `path` when no expansion applies (NULL on OOM). */
 char *fdk__path_expand_tilde(const char *path);
+
+/* ---- Recents seam (1.4.4, file_dialog.c) ---------------------------
+ *
+ * The XDG recently-used.xbel surface as pure logic the headless
+ * suite pins (tests/test_file_dialog_logic.c): a text-level XBEL
+ * scanner (no XML library — the theme/prefs parser discipline) and
+ * a text-splice writer. Timestamps convert via a civil-days epoch
+ * algorithm (no timegm dependency). */
+typedef struct fdk_fd_recent {
+    char *path;    /* owned; decoded absolute filesystem path */
+    fdk_i64 mtime; /* seconds since epoch (the modified attr)   */
+} fdk_fd_recent;
+
+/* Writes the recents file's path into buf (the $XDG_DATA_HOME /
+ * $HOME/.local/share resolution). False when no home exists. */
+bool fdk__recent_file(char *buf, size_t n);
+
+/* Parses the xbel at `xbel` into owned entries: decoded paths,
+ * mtime-descending, deduped (newest wins), capped at 128 entries.
+ * 0 on success (an empty list included), -1 when unreadable or
+ * unparseable (out cleared either way). */
+int fdk__recent_load(const char *xbel, fdk_fd_recent **out,
+                     size_t *count);
+void fdk__recent_free(fdk_fd_recent *v, size_t count);
+
+/* Moves `path` to the front of the xbel at `xbel` with fresh
+ * added/modified/visited stamps (percent-encoded file:// URI),
+ * removing any existing bookmark with the same href, capping the
+ * entry count at 128, creating the file (and its data directory,
+ * best-effort) when missing, and writing ATOMICALLY (tmp +
+ * rename). 0 on success, -1 on failure (nothing written). */
+int fdk__recent_touch(const char *xbel, const char *path);
+
+/* ColorButton test seam (choosers.c, 1.4.4): drives the acceptance
+ * path exactly as the chooser dialog's done callback would — the
+ * token hop between the dialog and a possibly-destroyed button is
+ * the only difference, and the X11 GUI group covers that half. */
+void fdk__colorbutton_apply_result(fdk_widget *button,
+                                   const fdk_color_dialog_result *res);
 
 #endif /* FDK_WIDGETS_INTERNAL_H */

@@ -9,25 +9,29 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.3** (the chooser
+Last audited: 2026-10-10, at milestone **1.4.4** (the modern
 batch), by a full in-depth code review — every claim below was
-re-verified against the tree, not copied from docs.
+re-verified against the tree, not copied from docs. THE AUDIT'S
+OWN FIRST CATCH: the ledger's "themed tooltips" candidate was
+stale (the 1.3.2 tooltip has been fully themed since birth —
+tokens, parser, Modern retune, tests); the tree is always the
+truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.3** (the chooser batch: MenuButton,
-  vertical slider, search debounce, paint group + crossfade, band
-  auto-scroll, tree multi-select, About/Font/Color dialogs, font
-  enumeration)
+- **HEAD:** milestone **1.4.4** (the modern batch: notebook tab
+  reordering, the color-well button, file-dialog XDG recents,
+  overlay scrollbars, entry icon slots, List activate-on-single-
+  click)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **531 exported symbols**, `make verify-exports` OK in
+- **Public API:** **549 exported symbols**, `make verify-exports` OK in
   debug AND release
-- **Tests:** headless suite all-pass (incl. the 1.4.3 choosers
-  suite); X11 integration suite all-pass (real Xvfb, real input,
-  incl. the chooser GUI group); 31 test files
-- **Scale:** ~52k lines of C in `src/` (+ generated Wayland
+- **Tests:** headless suite all-pass (533 groups, incl. the 1.4.4
+  additions); X11 integration suite all-pass (real Xvfb, real
+  input, incl. the modern-batch GUI group); 31 test files
+- **Scale:** ~54k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
 ## Implemented — DO NOT re-add any of these
@@ -43,11 +47,18 @@ slider (marks/ticks + labels; vertical orientation), spinbutton,
 toolbar, tooltip, spinner, link-button (role on button), paned,
 expander, statusbar, stack + stackswitcher, revealer (slide modes;
 crossfade via the paint group), levelbar, canvas (drawing area),
-search entry (preset; debounced search-changed), **menu button**
+search entry (preset; debounced search-changed; BUILT on the
+entry's icon slots since 1.4.4), **menu button**
 (attached-popup hybrid — the hamburger), dialog (+ modal run),
 **file dialog** (OPEN/SAVE, places sidebar, filters, breadcrumb path
-bar, Ctrl+L location entry — modernized 1.4.0), path-bar composite,
-window decorations (server-side deco bar).
+bar, Ctrl+L location entry — modernized 1.4.0; XDG recently-used
+place + accept-time recording since 1.4.4), **color button** (the
+color-well swatch that opens the ColorChooser — 1.4.4; alpha
+checkerboard, heap-token lifetime guard), path-bar composite,
+window decorations (server-side deco bar). Entry icon slots
+(leading/trailing glyphs + custom painters + press callbacks,
+1.4.4). List activate-on-single-click (1.4.4 — the places
+sidebar rhythm).
 
 ### Dialogs & pickers (SHIPPED 1.4.3 — choosers.c)
 
@@ -76,7 +87,7 @@ window decorations (server-side deco bar).
 
 ### Infrastructure (SHIPPED)
 
-- Theme engine: `.fdk` format, **28 color tokens + 10 metrics**
+- Theme engine: `.fdk` format, **28 color tokens + 11 metrics**
   (`FDK_TK_*` / `FDK_TM_*`), runtime switching, Modern + legacy
   recipes; button roles (suggested/destructive/link), placeholder
   text, hover fades (1.4.1/1.4.2)
@@ -100,20 +111,17 @@ window decorations (server-side deco bar).
 
 ## What's left (the authoritative backlog)
 
-### NEXT — milestone 1.4.4 (from the parity ledger, value order)
+### NEXT — milestone 1.4.5 (from the parity ledger, value order)
 
-1. **Themed tooltips** — the tooltip carries no theme hook today
-2. **Notebook tab reordering** — drag a tab to a new slot
-3. **Color-well swatch button** — opens the 1.4.3 chooser from any
-   toolbar
-4. **File dialog recents** — the XDG recent-files surface
-5. **Scrollbar overlay mode** — thin, fades when idle
-6. **Entry icon slots** — leading/trailing (the 1.4.2 glyph language)
+1. **X11 HiDPI** — RandR/Xft.dpi detection (the last "honestly
+   reports 1.0" confession; the Wayland side is done)
+2. **IconView / GridView** — the canvas-based item grid (the
+   biggest remaining widget gap)
+3. **IME completion surface** — likely staying LATER (needs a real
+   IME protocol surface)
 
 ### LATER (real, not next)
 
-- HiDPI on **X11** (RandR/Xft.dpi detection; Wayland side done)
-- IconView / GridView (canvas-based item layout)
 - IME completion surface (preedit is display-only today)
 
 ### OUT (deliberate policy — do not chase)

@@ -33,6 +33,8 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
+#include "widget/widgets_internal.h" /* fdk__text_extent (width math) */
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -616,6 +618,7 @@ static void test_scroll(void) {
  * call them). */
 static void test_undo_redo(void);
 static void test_search_entry(void);
+static void test_icon_slots(void);
 static void on_changed_count(fdk_widget *w, void *user);
 
 int main(void) {
@@ -650,6 +653,7 @@ int main(void) {
     test_scroll();
     test_undo_redo();
     test_search_entry();
+    test_icon_slots();
 
     fdk_font_destroy(g_font);
     printf("all entry tests passed\n");
@@ -989,4 +993,168 @@ static void test_search_entry(void) {
     printf("[ok] entry search preset: glyph-zone insets + hit-testing, "
            "the clear button (undoable, only with text), the Esc "
            "ladder, magnifier/X pixel proofs\n");
+}
+
+/* ---- icon slots (1.4.4) ---- */
+
+static int g_icon_presses = 0;
+static fdk_entry_slot g_icon_slot = (fdk_entry_slot)-1;
+static void on_icon_press(fdk_widget *entry, fdk_entry_slot slot,
+                          void *user) {
+    (void)entry;
+    (void)user;
+    g_icon_presses++;
+    g_icon_slot = slot;
+}
+
+static int g_icon_paints = 0;
+static bool g_icon_paint_enabled = false;
+static fdk_i32 g_icon_paint_box = 0;
+static fdk_i32 g_icon_paint_x = 0;
+static fdk_i32 g_icon_paint_y = 0;
+static void icon_paint_cb(fdk_widget *entry, fdk_surface *surface,
+                          fdk_i32 x, fdk_i32 y, fdk_i32 box,
+                          bool enabled, void *user) {
+    (void)entry;
+    (void)surface;
+    (void)user;
+    g_icon_paints++;
+    g_icon_paint_enabled = enabled;
+    g_icon_paint_box = box;
+    g_icon_paint_x = x;
+    g_icon_paint_y = y;
+}
+
+static void test_icon_slots(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *e = NULL;
+    assert(fdk_ok(fdk_entry_create(root, g_font, "", &e)));
+
+    /* Defaults + set/get round trips on both slots. */
+    assert(fdk_entry_get_icon(e, FDK_ENTRY_SLOT_LEADING) ==
+           FDK_ENTRY_ICON_NONE);
+    assert(fdk_entry_get_icon(e, FDK_ENTRY_SLOT_TRAILING) ==
+           FDK_ENTRY_ICON_NONE);
+    assert(fdk_entry_set_icon(e, FDK_ENTRY_SLOT_LEADING,
+                              FDK_ENTRY_ICON_FOLDER) == FDK_OK);
+    assert(fdk_entry_set_icon(e, FDK_ENTRY_SLOT_TRAILING,
+                              FDK_ENTRY_ICON_CLEAR) == FDK_OK);
+    assert(fdk_entry_get_icon(e, FDK_ENTRY_SLOT_LEADING) ==
+           FDK_ENTRY_ICON_FOLDER);
+    assert(fdk_entry_set_icon(e, (fdk_entry_slot)7,
+                              FDK_ENTRY_ICON_SEARCH) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_entry_set_icon(NULL, FDK_ENTRY_SLOT_LEADING,
+                              FDK_ENTRY_ICON_SEARCH) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_entry_get_icon(NULL, FDK_ENTRY_SLOT_LEADING) ==
+           FDK_ENTRY_ICON_NONE);
+
+    /* Width accounting: a leading icon adds 22 to the natural (the
+     * empty plain entry sits at the 32 floor; FOLDER + CLEAR-empty
+     * = 32 + 22 — CLEAR reserves nothing while the field is empty,
+     * the 1.4.2 rule generalized). With text, the trailing zone
+     * appears too. */
+    fdk_size nat = {0, 0};
+    fdk_widget_measure(e, &nat);
+    assert(nat.width == 38); /* 8 pad + 22 glyph + 8 pad: no floor  */
+    (void)fdk_entry_set_text(e, "abcd");
+    fdk_widget_measure(e, &nat);
+    fdk_i32 tw_abcd = 0, th = 0;
+    fdk__text_extent(g_font, "abcd", &tw_abcd, &th);
+    assert(nat.width == tw_abcd + 22 /* leading */ +
+                              22 /* trailing (text exists) */ + 16 /* pads */);
+
+    /* CLEAR semantics on a plain entry: press in the trailing zone
+     * empties the field UNDOABLY and fires the callback after. */
+    fdk_widget_arrange(e, (fdk_rect){0, 0, 300, 24});
+    g_icon_presses = 0;
+    fdk_entry_set_on_icon_press(e, FDK_ENTRY_SLOT_TRAILING,
+                                on_icon_press, NULL);
+    fdk_event_data clr = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                   290.0f, 5.0f);
+    fdk_event_data clr_up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                      290.0f, 5.0f);
+    assert(fdk_widget_tree_handle_event(root, &clr) == true);
+    (void)fdk_widget_tree_handle_event(root, &clr_up);
+    assert(strcmp(fdk_entry_get_text(e), "") == 0);
+    assert(g_icon_presses == 1 &&
+           g_icon_slot == FDK_ENTRY_SLOT_TRAILING);
+    assert(fdk_ok(fdk_entry_undo(e)));
+    assert(strcmp(fdk_entry_get_text(e), "abcd") == 0);
+
+    /* Insensitive CLEAR: no splice, no callback (decorative). */
+    assert(fdk_entry_set_icon_sensitive(e, FDK_ENTRY_SLOT_TRAILING,
+                                        false) == FDK_OK);
+    assert(fdk_entry_icon_is_sensitive(e, FDK_ENTRY_SLOT_TRAILING) ==
+           false);
+    g_icon_presses = 0;
+    (void)fdk_widget_tree_handle_event(root, &clr);
+    (void)fdk_widget_tree_handle_event(root, &clr_up);
+    assert(strcmp(fdk_entry_get_text(e), "abcd") == 0);
+    assert(g_icon_presses == 0);
+    assert(fdk_entry_set_icon_sensitive(e, FDK_ENTRY_SLOT_TRAILING,
+                                        true) == FDK_OK);
+
+    /* A decorative leading icon falls through to caret placement
+     * (no callback set): the press moves the caret, not an icon. */
+    fdk_event_data lead = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    10.0f, 5.0f);
+    fdk_event_data lead_up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                       10.0f, 5.0f);
+    (void)fdk_widget_tree_handle_event(root, &lead);
+    (void)fdk_widget_tree_handle_event(root, &lead_up);
+    assert(fdk_entry_get_cursor(e) == 0);
+    /* With a callback: consumed, fired, caret untouched at 0. */
+    fdk_entry_set_on_icon_press(e, FDK_ENTRY_SLOT_LEADING,
+                                on_icon_press, NULL);
+    type(root, 'x'); /* caret to 1 */
+    assert(fdk_entry_get_cursor(e) == 1);
+    g_icon_presses = 0;
+    assert(fdk_widget_tree_handle_event(root, &lead) == true);
+    (void)fdk_widget_tree_handle_event(root, &lead_up);
+    assert(g_icon_presses == 1 &&
+           g_icon_slot == FDK_ENTRY_SLOT_LEADING);
+    assert(fdk_entry_get_cursor(e) == 1); /* untouched             */
+
+    /* Custom painter: replaces the built-in glyph (called at paint
+     * with the box geometry), NULL reverts to the built-in. */
+    g_icon_paints = 0;
+    assert(fdk_entry_set_icon_paint(e, FDK_ENTRY_SLOT_LEADING,
+                                    icon_paint_cb, NULL) == FDK_OK);
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(320, 64, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    assert(g_icon_paints == 1); /* leading only; trailing is built-in */
+    assert(g_icon_paint_box == 16);
+    assert(g_icon_paint_x == 8 - 2); /* PAD_X - 2 like the search   */
+    assert(g_icon_paint_enabled == true);
+    g_icon_paints = 0;
+    assert(fdk_entry_set_icon_paint(e, FDK_ENTRY_SLOT_LEADING, NULL,
+                                    NULL) == FDK_OK);
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    assert(g_icon_paints == 0);
+    fdk_surface_destroy(s);
+
+    /* The search preset is BUILT on the slots (regression: the
+     * preset's glyphs ARE the generic slots now). */
+    fdk_widget *se = NULL;
+    assert(fdk_ok(fdk_search_entry_create(root, g_font, &se)));
+    assert(fdk_entry_get_icon(se, FDK_ENTRY_SLOT_LEADING) ==
+           FDK_ENTRY_ICON_SEARCH);
+    assert(fdk_entry_get_icon(se, FDK_ENTRY_SLOT_TRAILING) ==
+           FDK_ENTRY_ICON_CLEAR);
+    fdk_size snat = {0, 0};
+    fdk_widget_measure(se, &snat);
+    assert(snat.width == 38); /* 8 + 22 + 8, the 1.4.2 number      */
+
+    fdk_widget_destroy(root);
+    printf("[ok] entry icon slots: set/get + width accounting (the "
+           "38/54 arithmetic), CLEAR's undoable splice + callback "
+           "order, insensitive-CLEAR decorativity, decorative "
+           "fall-through vs consumed interactive press, custom "
+           "painter box contract + revert, the preset rides the "
+           "slots\n");
 }

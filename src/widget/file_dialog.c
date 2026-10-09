@@ -33,7 +33,9 @@
  * /proc/self/mounts, and one level of /media and /mnt — no udev,
  * no D-Bus, per the toolkit's no-bus policy. Every place is
  * stat()-verified to exist at discovery time and deduplicated by
- * canonical path.
+ * canonical path. Leading the sidebar (since 1.4.4): the Recent
+ * place — the XDG recently-used surface (see the recents engine
+ * above), shown in the OPEN kinds unless options.hide_recents.
  *
  * The scan is a real opendir/readdir pass (directories first, then
  * alphabetical; hidden entries behind the toggle). Name filters
@@ -87,6 +89,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #define FD_PAD 12          /* outer padding                        */
@@ -688,6 +691,664 @@ void fdk__fs_places_free(fdk_fs_place *places, size_t count) {
     fdk_free(places);
 }
 
+/* ---- recents engine (1.4.4): the XDG recently-used.xbel surface ---
+ *
+ * The shared "recently used" list every desktop converges on:
+ * $XDG_DATA_HOME/recently-used.xbel (falling back to
+ * $HOME/.local/share/recently-used.xbel), XBEL's <bookmark
+ * href="file://..."> entries. Pure text-level scanning — the same
+ * discipline as the theme/prefs parsers: no XML library, no bus, no
+ * daemon. A bookmark element is found by its opening tag, its href
+ * and modified attributes read as quoted spans, the URI
+ * percent-decoded into a filesystem path (entity escapes are NOT
+ * decoded — real-world hrefs percent-encode, and half-decoding
+ * would lie). Timestamps are ISO 8601 converted through the
+ * civil-days epoch algorithm (no timegm dependency).
+ *
+ * Writing is a TEXT SPLICE, not a re-serialization: the fresh
+ * bookmark element is inserted right after the <xbel> open tag and
+ * any existing bookmark with the same href is cut whole — every
+ * other app's metadata survives byte-for-byte. The write is atomic
+ * (tmp + rename, the prefs rule).
+ */
+
+#define FD_RECENT_MAX 128          /* entry cap (parse AND write)     */
+#define FD_RECENT_READ_CAP (1024u * 1024u) /* 1 MiB parse ceiling    */
+
+static fdk_i64 recent_days_from_civil(fdk_i64 y, fdk_i32 m, fdk_i32 d) {
+    y -= (m <= 2);
+    fdk_i64 era = (y >= 0 ? y : y - 399) / 400;
+    fdk_i64 yoe = y - era * 400;
+    fdk_i64 doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    fdk_i64 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+static void recent_civil_from_days(fdk_i64 z, fdk_i32 *y, fdk_i32 *m,
+                                   fdk_i32 *d) {
+    z += 719468;
+    fdk_i64 era = (z >= 0 ? z : z - 146096) / 146097;
+    fdk_i64 doe = z - era * 146097;
+    fdk_i64 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    fdk_i64 yy = yoe + era * 400;
+    fdk_i64 doy2 = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    fdk_i64 mp = (5 * doy2 + 2) / 153;
+    fdk_i64 dd = doy2 - (153 * mp + 2) / 5 + 1;
+    fdk_i64 mm = mp + (mp < 10 ? 3 : -9);
+    yy += (mm <= 2);
+    *y = (fdk_i32)yy;
+    *m = (fdk_i32)mm;
+    *d = (fdk_i32)dd;
+}
+
+static bool recent_digits(const char *s, size_t len, size_t *at,
+                          int count, int *out) {
+    if (*at + (size_t)count > len) {
+        return false;
+    }
+    int v = 0;
+    for (int i = 0; i < count; i++) {
+        if (s[*at + (size_t)i] < '0' || s[*at + (size_t)i] > '9') {
+            return false;
+        }
+        v = v * 10 + (s[*at + (size_t)i] - '0');
+    }
+    *at += (size_t)count;
+    *out = v;
+    return true;
+}
+
+/* "YYYY-MM-DDTHH:MM:SS[.frac][Z|+HH:MM|-HH:MM]" -> epoch seconds
+ * (0 when the shape is not parseable — "unknown time"). */
+static fdk_i64 recent_parse_iso8601(const char *s, size_t len) {
+    size_t at = 0;
+    int y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0;
+    if (!recent_digits(s, len, &at, 4, &y)) {
+        return 0;
+    }
+    if (at >= len || s[at] != '-') {
+        return 0;
+    }
+    at++;
+    if (!recent_digits(s, len, &at, 2, &mo)) {
+        return 0;
+    }
+    if (at >= len || s[at] != '-') {
+        return 0;
+    }
+    at++;
+    if (!recent_digits(s, len, &at, 2, &d)) {
+        return 0;
+    }
+    if (at >= len || (s[at] != 'T' && s[at] != ' ')) {
+        return 0;
+    }
+    at++;
+    if (!recent_digits(s, len, &at, 2, &h)) {
+        return 0;
+    }
+    if (at >= len || s[at] != ':') {
+        return 0;
+    }
+    at++;
+    if (!recent_digits(s, len, &at, 2, &mi)) {
+        return 0;
+    }
+    if (at >= len || s[at] != ':') {
+        return 0;
+    }
+    at++;
+    if (!recent_digits(s, len, &at, 2, &sec)) {
+        return 0;
+    }
+    if (at < len && s[at] == '.') { /* fractional seconds: skipped */
+        at++;
+        while (at < len && s[at] >= '0' && s[at] <= '9') {
+            at++;
+        }
+    }
+    fdk_i64 off = 0;
+    if (at < len && (s[at] == '+' || s[at] == '-')) {
+        int sign = (s[at] == '-') ? -1 : 1;
+        at++;
+        int oh = 0, om = 0;
+        if (!recent_digits(s, len, &at, 2, &oh)) {
+            return 0;
+        }
+        if (at < len && s[at] == ':') {
+            at++;
+        }
+        (void)recent_digits(s, len, &at, 2, &om);
+        off = (fdk_i64)sign * ((fdk_i64)oh * 3600 + (fdk_i64)om * 60);
+    }
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) {
+        return 0;
+    }
+    return recent_days_from_civil(y, mo, d) * 86400 +
+           (fdk_i64)h * 3600 + (fdk_i64)mi * 60 + (fdk_i64)sec - off;
+}
+
+static int recent_hex_val(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+/* Decodes a file:// URI (or a bare absolute path) into an owned
+ * filesystem path. NULL when not local / not absolute / OOM. */
+static char *recent_uri_to_path(const char *uri, size_t len) {
+    if (len >= 7 && memcmp(uri, "file://", 7) == 0) {
+        uri += 7;
+        len -= 7;
+        if (len >= 10 && memcmp(uri, "localhost", 9) == 0 &&
+            uri[9] == '/') {
+            uri += 9;
+            len -= 9;
+        }
+    } else if (len == 0 || uri[0] != '/') {
+        return NULL; /* not a local absolute path */
+    }
+    char *out = fdk_alloc(len + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    size_t o = 0, i = 0;
+    while (i < len) {
+        if (uri[i] == '%' && i + 2 < len &&
+            recent_hex_val(uri[i + 1]) >= 0 &&
+            recent_hex_val(uri[i + 2]) >= 0) {
+            out[o++] = (char)(recent_hex_val(uri[i + 1]) * 16 +
+                              recent_hex_val(uri[i + 2]));
+            i += 3;
+        } else {
+            out[o++] = uri[i++];
+        }
+    }
+    out[o] = '\0';
+    if (o == 0 || out[0] != '/') {
+        fdk_free(out);
+        return NULL;
+    }
+    return out;
+}
+
+/* Extracts a quoted attribute's value span from tag text
+ * [tag, tag + tag_len). False when absent. */
+static bool recent_tag_attr(const char *tag, size_t tag_len,
+                            const char *name, size_t *out_at,
+                            size_t *out_len) {
+    size_t nlen = strlen(name);
+    for (size_t i = 0; i + 1 < tag_len; i++) {
+        if (tag[i] != ' ' && tag[i] != '\t' && tag[i] != '\n' &&
+            tag[i] != '\r') {
+            continue;
+        }
+        size_t j = i + 1;
+        while (j < tag_len && (tag[j] == ' ' || tag[j] == '\t' ||
+                               tag[j] == '\n' || tag[j] == '\r')) {
+            j++;
+        }
+        if (j + nlen + 1 < tag_len &&
+            memcmp(tag + j, name, nlen) == 0 && tag[j + nlen] == '=') {
+            size_t v = j + nlen + 1;
+            if (v < tag_len && tag[v] == '"') {
+                v++;
+                size_t e = v;
+                while (e < tag_len && tag[e] != '"') {
+                    e++;
+                }
+                if (e < tag_len) {
+                    *out_at = v;
+                    *out_len = e - v;
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+/* Reads a whole (bounded) file. NULL when missing/oversized/OOM. */
+static char *recent_read_file(const char *path, size_t cap,
+                              size_t *out_len) {
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        return NULL;
+    }
+    char *buf = NULL;
+    size_t len = 0;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        long sz = ftell(f);
+        if (sz > 0 && (size_t)sz <= cap) {
+            rewind(f);
+            buf = fdk_alloc((size_t)sz + 1);
+            if (buf != NULL && fread(buf, 1, (size_t)sz, f) ==
+                                          (size_t)sz) {
+                len = (size_t)sz;
+                buf[len] = '\0';
+            } else {
+                fdk_free(buf);
+                buf = NULL;
+            }
+        }
+    }
+    fclose(f);
+    *out_len = len;
+    return buf;
+}
+
+/* STABLE insertion sort by mtime descending: document order breaks
+ * ties (the file's own order is the desktop's recency consensus —
+ * several apps write newest-first, and two entries stamped within
+ * the same second must not scramble). n <= 128, so O(n^2) is
+ * nothing; qsort is not stable and got this wrong live. */
+static void recent_sort_desc(fdk_fd_recent *v, size_t n) {
+    for (size_t i = 1; i < n; i++) {
+        fdk_fd_recent key = v[i];
+        size_t j = i;
+        while (j > 0 && v[j - 1].mtime < key.mtime) {
+            v[j] = v[j - 1];
+            j--;
+        }
+        v[j] = key;
+    }
+}
+
+bool fdk__recent_file(char *buf, size_t n) {
+    const char *data = getenv("XDG_DATA_HOME");
+    if (data != NULL && data[0] == '/') {
+        int w = snprintf(buf, n, "%s/recently-used.xbel", data);
+        return w > 0 && (size_t)w < n;
+    }
+    const char *home = getenv("HOME");
+    if (home == NULL || home[0] != '/') {
+        return false;
+    }
+    int w = snprintf(buf, n, "%s/.local/share/recently-used.xbel",
+                     home);
+    return w > 0 && (size_t)w < n;
+}
+
+int fdk__recent_load(const char *xbel, fdk_fd_recent **out,
+                     size_t *count) {
+    *out = NULL;
+    *count = 0;
+    size_t len = 0;
+    char *text = recent_read_file(xbel, FD_RECENT_READ_CAP, &len);
+    if (text == NULL) {
+        return -1;
+    }
+    /* It must BE an xbel: no <xbel open tag means the file is not
+     * ours to interpret (refuse garbage instead of reporting an
+     * empty recency list). */
+    bool has_xbel = false;
+    for (size_t i = 0; i + 5 <= len; i++) {
+        if (memcmp(text + i, "<xbel", 5) == 0) {
+            has_xbel = true;
+            break;
+        }
+    }
+    if (!has_xbel) {
+        fdk_free(text);
+        return -1;
+    }
+    fdk_fd_recent *v = NULL;
+    size_t n = 0, cap = 0;
+    size_t i = 0;
+    while (i + 9 < len) {
+        if (memcmp(text + i, "<bookmark", 9) != 0 ||
+            (text[i + 9] != ' ' && text[i + 9] != '\t' &&
+             text[i + 9] != '\n' && text[i + 9] != '\r')) {
+            i++;
+            continue;
+        }
+        size_t tag_start = i;
+        i += 9;
+        size_t tag_end = i;
+        while (tag_end < len && text[tag_end] != '>') {
+            tag_end++;
+        }
+        if (tag_end >= len) {
+            break; /* truncated tag: stop honestly */
+        }
+        /* The element's full span: self-closing, or up to and
+         * including </bookmark>. */
+        size_t span_end;
+        if (tag_end > tag_start && text[tag_end - 1] == '/') {
+            span_end = tag_end + 1;
+        } else {
+            size_t close = tag_end;
+            while (close + 11 <= len &&
+                   memcmp(text + close, "</bookmark>", 11) != 0) {
+                close++;
+            }
+            span_end = (close + 11 <= len) ? close + 11 : len;
+        }
+        size_t href_at = 0, href_len = 0;
+        if (recent_tag_attr(text + tag_start, tag_end - tag_start,
+                            "href", &href_at, &href_len)) {
+            char *path = recent_uri_to_path(text + tag_start + href_at,
+                                            href_len);
+            if (path != NULL) {
+                fdk_i64 mt = 0;
+                size_t mod_at = 0, mod_len = 0;
+                if (recent_tag_attr(text + tag_start,
+                                    tag_end - tag_start, "modified",
+                                    &mod_at, &mod_len)) {
+                    mt = recent_parse_iso8601(
+                        text + tag_start + mod_at, mod_len);
+                }
+                /* Dedupe by path, the newest stamp winning. */
+                size_t found = n;
+                for (size_t k = 0; k < n; k++) {
+                    if (v[k].path != NULL &&
+                        strcmp(v[k].path, path) == 0) {
+                        found = k;
+                        break;
+                    }
+                }
+                if (found < n) {
+                    if (mt >= v[found].mtime) {
+                        fdk_free(v[found].path);
+                        v[found].path = path;
+                        v[found].mtime = mt;
+                    } else {
+                        fdk_free(path);
+                    }
+                } else if (n < FD_RECENT_MAX) {
+                    if (n == cap) {
+                        size_t grown = (cap == 0) ? 16 : cap * 2;
+                        fdk_fd_recent *nv =
+                            fdk_realloc(v, grown * sizeof(*nv));
+                        if (nv == NULL) {
+                            fdk_free(path);
+                            fdk_free(text);
+                            fdk__recent_free(v, n);
+                            return -1;
+                        }
+                        v = nv;
+                        cap = grown;
+                    }
+                    v[n].path = path;
+                    v[n].mtime = mt;
+                    n++;
+                } else {
+                    fdk_free(path); /* over the cap: dropped */
+                }
+            }
+        }
+        i = span_end;
+    }
+    fdk_free(text);
+    recent_sort_desc(v, n);
+    *out = v;
+    *count = n;
+    return 0;
+}
+
+void fdk__recent_free(fdk_fd_recent *v, size_t count) {
+    if (v == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        fdk_free(v[i].path);
+    }
+    fdk_free(v);
+}
+
+/* Epoch seconds now (recents are wall-clock by spec). */
+static fdk_i64 recent_now(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+        return 0;
+    }
+    return (fdk_i64)ts.tv_sec;
+}
+
+static void recent_format_iso8601(fdk_i64 t, char *buf, size_t n) {
+    fdk_i64 days = t / 86400;
+    fdk_i64 secs = t % 86400;
+    if (secs < 0) {
+        secs += 86400;
+        days -= 1;
+    }
+    fdk_i32 y = 0, mo = 0, d = 0;
+    recent_civil_from_days(days, &y, &mo, &d);
+    (void)snprintf(buf, n, "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                   (int)y, (int)mo, (int)d, (int)(secs / 3600),
+                   (int)((secs / 60) % 60), (int)(secs % 60));
+}
+
+/* Percent-encodes `path` into a file:// URI (the unreserved set
+ * plus '/' stays literal; UTF-8 bytes encode per byte). */
+static bool recent_path_to_uri(const char *path, char *buf, size_t n) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t o = 0;
+    if (7 >= n) {
+        return false;
+    }
+    memcpy(buf, "file://", 7);
+    o = 7;
+    for (const unsigned char *p = (const void *)path; *p != 0; p++) {
+        unsigned char c = *p;
+        bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') || c == '/' || c == '-' ||
+                    c == '_' || c == '.' || c == '~';
+        if (safe) {
+            if (o + 1 >= n) {
+                return false;
+            }
+            buf[o++] = (char)c;
+        } else {
+            if (o + 3 >= n) {
+                return false;
+            }
+            buf[o++] = '%';
+            buf[o++] = hex[c >> 4];
+            buf[o++] = hex[c & 15];
+        }
+    }
+    buf[o] = '\0';
+    return true;
+}
+
+/* Best-effort component-wise mkdir of the dir part of `path`
+ * (EEXIST and missing-parent are tolerated quietly). */
+static void recent_mkdir_p(const char *path) {
+    char tmp[FD_PATH_BUF];
+    size_t len = strlen(path);
+    if (len == 0 || len >= sizeof(tmp)) {
+        return;
+    }
+    memcpy(tmp, path, len + 1);
+    for (char *p = tmp + 1; *p != '\0'; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            (void)mkdir(tmp, 0700);
+            *p = '/';
+        }
+    }
+}
+
+static bool recent_write_atomic(const char *path, const char *data,
+                                size_t len) {
+    char tmp[FD_PATH_BUF + 8];
+    int w = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    if (w <= 0 || (size_t)w >= sizeof(tmp)) {
+        return false;
+    }
+    FILE *f = fopen(tmp, "wb");
+    if (f == NULL) {
+        return false;
+    }
+    bool ok = (fwrite(data, 1, len, f) == len);
+    if (fclose(f) != 0) {
+        ok = false;
+    }
+    if (!ok) {
+        (void)remove(tmp);
+        return false;
+    }
+    if (rename(tmp, path) != 0) {
+        (void)remove(tmp);
+        return false;
+    }
+    return true;
+}
+
+int fdk__recent_touch(const char *xbel, const char *path) {
+    if (xbel == NULL || path == NULL || path[0] != '/') {
+        return -1;
+    }
+    char uri[FD_PATH_BUF * 3];
+    if (!recent_path_to_uri(path, uri, sizeof(uri))) {
+        return -1;
+    }
+    char stamp[40];
+    recent_format_iso8601(recent_now(), stamp, sizeof(stamp));
+
+    /* Element text for the touched bookmark (self-closing: no info
+     * block — other apps attach their own when they next touch). */
+    char elem[FD_PATH_BUF * 3 + 128];
+    int ew = snprintf(elem, sizeof(elem),
+                      "  <bookmark href=\"%s\" added=\"%s\" "
+                      "modified=\"%s\" visited=\"%s\"/>\n",
+                      uri, stamp, stamp, stamp);
+    if (ew <= 0 || (size_t)ew >= sizeof(elem)) {
+        return -1;
+    }
+    size_t elem_len = (size_t)ew;
+
+    size_t old_len = 0;
+    char *old = recent_read_file(xbel, FD_RECENT_READ_CAP, &old_len);
+
+    /* Fresh file: the minimal skeleton. */
+    static const char skeleton[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<xbel version=\"1.0\">\n";
+    static const char tail[] = "</xbel>\n";
+
+    /* Assemble: [prefix][element][kept old body minus same-href
+     * bookmarks, capped][tail when fresh]. */
+    size_t total = 0;
+    char *out = NULL;
+    if (old == NULL) {
+        total = sizeof(skeleton) - 1 + elem_len + sizeof(tail) - 1;
+        out = fdk_alloc(total + 1);
+        if (out == NULL) {
+            return -1;
+        }
+        memcpy(out, skeleton, sizeof(skeleton) - 1);
+        memcpy(out + sizeof(skeleton) - 1, elem, elem_len);
+        memcpy(out + sizeof(skeleton) - 1 + elem_len, tail,
+               sizeof(tail) - 1);
+        out[total] = '\0';
+    } else {
+        /* Insertion point: after the <xbel ...> open tag. */
+        size_t insert_at = 0;
+        for (size_t i = 0; i + 5 <= old_len; i++) {
+            if (memcmp(old + i, "<xbel", 5) == 0) {
+                size_t e = i + 5;
+                while (e < old_len && old[e] != '>') {
+                    e++;
+                }
+                insert_at = (e < old_len) ? e + 1 : old_len;
+                break;
+            }
+        }
+        if (insert_at == 0) {
+            fdk_free(old);
+            return -1; /* not an xbel: refuse to mangle it */
+        }
+        /* Walk the old body's bookmark spans, keeping those whose
+         * href is NOT the touched path; cap the kept count. */
+        size_t keep_budget = FD_RECENT_MAX - 1;
+        /* Worst case: prefix + element + whole body + tail slack. */
+        size_t cap_needed = insert_at + elem_len +
+                            (old_len - insert_at) + sizeof(tail);
+        out = fdk_alloc(cap_needed + 1);
+        if (out == NULL) {
+            fdk_free(old);
+            return -1;
+        }
+        memcpy(out, old, insert_at);
+        total = insert_at;
+        memcpy(out + total, elem, elem_len);
+        total += elem_len;
+        size_t i = insert_at;
+        while (i < old_len && keep_budget > 0) {
+            if (i + 9 < old_len && memcmp(old + i, "<bookmark", 9) == 0 &&
+                (old[i + 9] == ' ' || old[i + 9] == '\t' ||
+                 old[i + 9] == '\n' || old[i + 9] == '\r')) {
+                size_t tag_end = i + 9;
+                while (tag_end < old_len && old[tag_end] != '>') {
+                    tag_end++;
+                }
+                size_t span_end;
+                if (tag_end < old_len && old[tag_end - 1] == '/') {
+                    span_end = tag_end + 1;
+                } else {
+                    size_t close = tag_end;
+                    while (close + 11 <= old_len &&
+                           memcmp(old + close, "</bookmark>", 11) != 0) {
+                        close++;
+                    }
+                    span_end = (close + 11 <= old_len) ? close + 11
+                                                       : old_len;
+                }
+                size_t href_at = 0, href_len = 0;
+                bool drop = false;
+                if (recent_tag_attr(old + i, tag_end - i, "href",
+                                    &href_at, &href_len)) {
+                    char *hp = recent_uri_to_path(old + i + href_at,
+                                                  href_len);
+                    if (hp != NULL) {
+                        drop = (strcmp(hp, path) == 0);
+                        fdk_free(hp);
+                    }
+                }
+                if (!drop) {
+                    size_t span = span_end - i;
+                    memcpy(out + total, old + i, span);
+                    total += span;
+                    keep_budget--;
+                }
+                i = span_end;
+            } else {
+                out[total++] = old[i++];
+            }
+        }
+        /* Anything past the budget (and the tail we own) is cut:
+         * write our own tail so the file stays well-formed. */
+        fdk_free(old);
+        memcpy(out + total, tail, sizeof(tail) - 1);
+        total += sizeof(tail) - 1;
+        out[total] = '\0';
+    }
+
+    /* The data directory may not exist yet (fresh $XDG_DATA_HOME). */
+    char dir[FD_PATH_BUF];
+    size_t xl = strlen(xbel);
+    if (xl < sizeof(dir)) {
+        memcpy(dir, xbel, xl + 1);
+        char *slash = strrchr(dir, '/');
+        if (slash != NULL && slash != dir) {
+            *slash = '\0';
+            recent_mkdir_p(dir);
+        }
+    }
+    bool ok = recent_write_atomic(xbel, out, total);
+    fdk_free(out);
+    return ok ? 0 : -1;
+}
+
 /* ---- the dialog ---- */
 
 typedef struct fdk_file_dialog {
@@ -719,6 +1380,18 @@ typedef struct fdk_file_dialog {
     size_t pattern_count;
     size_t active_filter;        /* index into patterns,
                                     pattern_count = "All files"    */
+    /* ---- recents (1.4.4) ----
+     *
+     * recent_mode: the file list shows the XDG recently-used rows
+     * instead of a directory listing (d->entries is untouched and
+     * stale — every entries-based path must check the mode first).
+     * The array survives LEAVING the mode (recent_mode flips false,
+     * the data stays until the next show or teardown) because
+     * browsing INTO a recent directory rides a pointer into it. */
+    bool recent_mode;
+    fdk_fd_recent *recents;      /* owned; the recent rows         */
+    size_t recent_count;
+    bool hide_recents;           /* options: place + recording off */
     fdk_file_dialog_done_fn on_done;
     void *on_done_user;
     fdk_file_dialog_result pending; /* built during accept         */
@@ -834,6 +1507,20 @@ static char **fdlg_active_patterns(fdk_file_dialog *d, size_t *count) {
 static void fdlg_fill_list(fdk_file_dialog *d) {
     fdk_list_begin_batch(d->list);
     fdk_list_clear(d->list);
+    if (d->recent_mode) {
+        /* Recents view (1.4.4): one row per recent FILE — the
+         * basename with the page glyph (the full path is what
+         * activation resolves, not what the row shows). */
+        for (size_t i = 0; i < d->recent_count; i++) {
+            const char *p = d->recents[i].path;
+            const char *base = strrchr(p, '/');
+            base = (base != NULL) ? base + 1 : p;
+            (void)fdk_list_append(d->list, base, NULL);
+            (void)fdk_list_row_set_icon(d->list, i, FDK_ROW_ICON_FILE);
+        }
+        fdk_list_end_batch(d->list);
+        return;
+    }
     for (size_t i = 0; i < d->entries.count; i++) {
         char row[512];
         if (d->entries.v[i].dir) {
@@ -844,6 +1531,52 @@ static void fdlg_fill_list(fdk_file_dialog *d) {
         (void)fdk_list_append(d->list, row, NULL);
     }
     fdk_list_end_batch(d->list);
+}
+
+/* ---- recents view (1.4.4) ---------------------------------------- */
+
+/* The Recent place exists in the OPEN kinds only (a SAVE target is
+ * a place you are going, not a place you have been). */
+static bool fdlg_recents_on(const fdk_file_dialog *d) {
+    return !d->hide_recents && !fdlg_kind_save(d->kind);
+}
+
+/* Leaves the recents view (any navigation does). The data stays —
+ * see the struct comment for the aliasing reason. */
+static void fdlg_leave_recents(fdk_file_dialog *d) {
+    d->recent_mode = false;
+}
+
+static void fdlg_sync_path_bar(fdk_file_dialog *d); /* below (1.4.0) */
+
+/* Enters the recents view: reload from the XDG file, rebuild the
+ * rows, and say what happened in the status line. */
+static void fdlg_show_recents(fdk_file_dialog *d) {
+    char xbel[FD_PATH_BUF];
+    if (!fdk__recent_file(xbel, sizeof(xbel))) {
+        fdlg_set_status(d, "No recent files (no home directory)");
+        return;
+    }
+    fdk_fd_recent *v = NULL;
+    size_t n = 0;
+    if (fdk__recent_load(xbel, &v, &n) != 0) {
+        v = NULL;
+        n = 0;
+    }
+    fdk__recent_free(d->recents, d->recent_count);
+    d->recents = v;
+    d->recent_count = n;
+    d->recent_mode = true;
+    fdlg_fill_list(d);
+    fdlg_sync_path_bar(d);
+    char status[96];
+    if (n == 0) {
+        snprintf(status, sizeof(status), "No recent files");
+    } else {
+        snprintf(status, sizeof(status), "%zu recent file%s", n,
+                 n == 1 ? "" : "s");
+    }
+    fdlg_set_status(d, status);
 }
 
 /* ---- the breadcrumb path bar (1.4.0) ----
@@ -1205,6 +1938,14 @@ static bool pbar_handle_event(fdk_widget *w,
                     : pb->first_visible + (size_t)v -
                           (pb->first_visible > 0 ? 1 : 0);
                 if (seg < pb->seg_count) {
+                    /* The recents pseudo-root is display-only — the
+                     * view is not a directory a crumb can navigate
+                     * back to (1.4.4). */
+                    if (pb->dialog->recent_mode &&
+                        strcmp(pb->seg_path[seg],
+                               "Recently Used") == 0) {
+                        return true;
+                    }
                     fdlg_browse(pb->dialog, pb->seg_path[seg]);
                 }
             }
@@ -1255,7 +1996,12 @@ static void fdlg_sync_path_bar(fdk_file_dialog *d) {
         (void)fdk_entry_set_text(d->path_entry, d->dir);
     }
     if (d->path_bar != NULL) {
-        pbar_set_path(pbar_of(d->path_bar), d->dir);
+        /* The recents view is one non-navigable pseudo-root crumb
+         * ("Recently Used" has no '/', so the bar renders it as the
+         * current segment; the click guard in the bar's handler
+         * makes it inert). */
+        pbar_set_path(pbar_of(d->path_bar),
+                      d->recent_mode ? "Recently Used" : d->dir);
     }
 }
 
@@ -1292,8 +2038,14 @@ static void fdlg_set_location_mode(fdk_file_dialog *d, bool on) {
 /* Re-scans the CURRENT directory (hidden toggle flips, filter
  * changes). On failure the previous listing stays (stale but
  * harmless) and the status line says why — the working directory
- * is never abandoned by a reload. */
+ * is never abandoned by a reload. In the recents view a reload
+ * re-reads the XDG file (the toggles have no recents semantics —
+ * GTK parity: the view is a flat list). */
 static void fdlg_reload(fdk_file_dialog *d) {
+    if (d->recent_mode) {
+        fdlg_show_recents(d);
+        return;
+    }
     size_t np = 0;
     char **pats = fdlg_active_patterns(d, &np);
     fdk_fd_entries fresh;
@@ -1316,8 +2068,11 @@ static void fdlg_reload(fdk_file_dialog *d) {
 
 /* Navigates to `dir`. The target is probed FIRST: only a directory
  * that actually opens replaces d->dir — a failed browse leaves the
- * dialog browsing where it was, with the reason in the status. */
+ * dialog browsing where it was, with the reason in the status.
+ * Any browse leaves the recents view (the mode flips here, in the
+ * ONE chokepoint every navigation funnels through). */
 static void fdlg_browse(fdk_file_dialog *d, const char *dir) {
+    fdlg_leave_recents(d);
     char *norm = fdk__path_normalize_dir(dir);
     if (norm == NULL) {
         fdlg_set_status(d, "Cannot open that path");
@@ -1383,6 +2138,19 @@ static void fdlg_respond(fdk_file_dialog *d,
         return;
     }
     d->answered = true;
+    /* 1.4.4 — the recents contract's record half: every ACCEPTED
+     * path moves to the front of the XDG file (unless the app opted
+     * out). BEFORE the callback: the strings are ours until the
+     * body teardown, and the callback may destroy anything. */
+    if (result->outcome == FDK_FILE_DIALOG_ACCEPTED &&
+        !d->hide_recents && result->count > 0) {
+        char xbel[FD_PATH_BUF];
+        if (fdk__recent_file(xbel, sizeof(xbel))) {
+            for (size_t i = 0; i < result->count; i++) {
+                (void)fdk__recent_touch(xbel, result->paths[i]);
+            }
+        }
+    }
     if (d->on_done != NULL) {
         d->on_done(result, d->on_done_user);
     }
@@ -1414,6 +2182,88 @@ static void fdlg_try_accept(fdk_file_dialog *d) {
     }
     if (fdlg_kind_save(d->kind)) {
         fdlg_save_accept(d);
+        return;
+    }
+    /* Recents view (1.4.4): the paths are already absolute — the
+     * validation is stat + the kind's file/folder contract + the
+     * lone-directory descend rule, same shape as the browse case. */
+    if (d->recent_mode) {
+        size_t sel_count = fdk_list_selected_count(d->list);
+        if (sel_count == 0) {
+            fdlg_set_status(d, "Nothing selected");
+            return;
+        }
+        size_t *rows = fdk_alloc_array(sel_count, sizeof(size_t));
+        if (rows == NULL) {
+            return;
+        }
+        size_t n = 0;
+        for (size_t p = 0; p < sel_count; p++) {
+            size_t row = 0;
+            if (fdk_list_selected_at(d->list, p, &row) == FDK_OK &&
+                row < d->recent_count) {
+                rows[n++] = row;
+            }
+        }
+        struct stat rst;
+        if (n == 1 && stat(d->recents[rows[0]].path, &rst) == 0 &&
+            S_ISDIR(rst.st_mode) && !fdlg_kind_folders(d->kind)) {
+            /* A lone selected directory descends (the browse rule). */
+            char *path = fdk__strdup(d->recents[rows[0]].path);
+            fdk_free(rows);
+            if (path != NULL) {
+                fdlg_browse(d, path);
+                fdk_free(path);
+            }
+            return;
+        }
+        size_t take = fdlg_kind_multi(d->kind) ? n : (n > 0 ? 1 : 0);
+        char **paths = fdk_alloc_array(take, sizeof(char *));
+        if (paths == NULL) {
+            fdk_free(rows);
+            return;
+        }
+        size_t filled = 0;
+        for (size_t i = 0; i < take; i++) {
+            const char *p = d->recents[rows[i]].path;
+            struct stat st;
+            if (stat(p, &st) != 0) {
+                fdlg_set_status(d, "That file no longer exists");
+                goto recents_fail;
+            }
+            bool ok = fdlg_kind_folders(d->kind)
+                          ? S_ISDIR(st.st_mode)
+                          : S_ISREG(st.st_mode);
+            if (!ok) {
+                fdlg_set_status(d, fdlg_kind_folders(d->kind)
+                                       ? "Not a folder"
+                                       : "Not a regular file");
+                goto recents_fail;
+            }
+            paths[filled] = fdk__strdup(p);
+            if (paths[filled] == NULL) {
+                goto recents_fail;
+            }
+            filled++;
+            continue;
+        recents_fail:
+            for (size_t k = 0; k < filled; k++) {
+                fdk_free(paths[k]);
+            }
+            fdk_free(paths);
+            fdk_free(rows);
+            return;
+        }
+        fdk_free(rows);
+        fdk_file_dialog_result r = {
+            .outcome = FDK_FILE_DIALOG_ACCEPTED,
+            .paths = paths,
+            .count = filled,
+        };
+        d->pending.paths = paths;
+        d->pending.count = filled;
+        d->pending.outcome = FDK_FILE_DIALOG_ACCEPTED;
+        fdlg_respond(d, &r);
         return;
     }
     size_t sel_count = fdk_list_selected_count(d->list);
@@ -1761,6 +2611,14 @@ static void fdlg_place_activated(fdk_widget *list, size_t row,
                                  void *user) {
     (void)list;
     fdk_file_dialog *d = user;
+    /* The Recent place rides index 0 when it exists (1.4.4). */
+    if (fdlg_recents_on(d)) {
+        if (row == 0) {
+            fdlg_show_recents(d);
+            return;
+        }
+        row--; /* the places shifted under the Recent place */
+    }
     if (row >= d->place_count) {
         return;
     }
@@ -1769,11 +2627,13 @@ static void fdlg_place_activated(fdk_widget *list, size_t row,
 
 /* Single-click selection in SAVE mode: picking a file copies its
  * name into the Name row (the native "save over that one" flow);
- * picking a directory does not (Open means navigate there). */
+ * picking a directory does not (Open means navigate there). The
+ * recents view never runs this (SAVE has no recents). */
 static void fdlg_selection_changed(fdk_widget *list, void *user) {
     (void)list;
     fdk_file_dialog *d = user;
-    if (!fdlg_kind_save(d->kind) || d->name_entry == NULL) {
+    if (d->recent_mode ||
+        !fdlg_kind_save(d->kind) || d->name_entry == NULL) {
         return;
     }
     fdk_i64 sel = fdk_list_get_selected(d->list);
@@ -1786,6 +2646,37 @@ static void fdlg_selection_changed(fdk_widget *list, void *user) {
 static void fdlg_row_activated(fdk_widget *list, size_t row, void *user) {
     (void)list;
     fdk_file_dialog *d = user;
+    /* Recents view (1.4.4): activation resolves the remembered
+     * path against the CURRENT filesystem — gone files are
+     * honestly dropped from the view, directories descend, files
+     * accept directly (the recents affordance). */
+    if (d->recent_mode) {
+        if (row >= d->recent_count) {
+            return;
+        }
+        const char *p = d->recents[row].path;
+        struct stat st;
+        if (stat(p, &st) != 0) {
+            fdlg_set_status(d, "That file no longer exists");
+            fdk_free(d->recents[row].path);
+            memmove(&d->recents[row], &d->recents[row + 1],
+                    (d->recent_count - row - 1) *
+                        sizeof(*d->recents));
+            d->recent_count--;
+            fdlg_fill_list(d);
+            return;
+        }
+        if (S_ISDIR(st.st_mode)) {
+            fdlg_browse(d, p); /* leaves the recents view */
+            return;
+        }
+        if (fdlg_kind_folders(d->kind)) {
+            fdlg_set_status(d, "Not a folder");
+            return;
+        }
+        fdlg_accept_path(d, p);
+        return;
+    }
     if (row >= d->entries.count) {
         return;
     }
@@ -2035,6 +2926,9 @@ static void fdlg_body_destroy(fdk_widget *w) {
     fdk__fs_places_free(d->places, d->place_count);
     d->places = NULL;
     d->place_count = 0;
+    fdk__recent_free(d->recents, d->recent_count);
+    d->recents = NULL;
+    d->recent_count = 0;
     fdk__file_dialog_free_filters(d->patterns, d->pattern_count);
     d->patterns = NULL;
     d->pattern_count = 0;
@@ -2132,6 +3026,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     d->ctx = ctx;
     d->kind = kind;
     d->show_hidden = (options != NULL) && options->show_hidden;
+    d->hide_recents = (options != NULL) && options->hide_recents;
     d->on_done = on_done;
     d->on_done_user = user_data;
     d->was_modal = modal;
@@ -2300,6 +3195,16 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
                                 FDK_LIST_SELECTION_SINGLE);
     fdk_list_set_on_row_activate(d->places_list,
                                  fdlg_place_activated, d);
+    /* 1.4.4: places navigate on a SINGLE click (the GTK sidebar
+     * rhythm — double-clicking a place was a wart the Recent place
+     * made obvious). File rows keep the classic double-click. */
+    fdk_list_set_activate_on_single_click(d->places_list, true);
+    /* The Recent place leads the sidebar (1.4.4) — OPEN kinds only. */
+    if (fdlg_recents_on(d)) {
+        (void)fdk_list_append(d->places_list, "Recent", NULL);
+        (void)fdk_list_row_set_icon(d->places_list, 0,
+                                    FDK_ROW_ICON_RECENT);
+    }
     for (size_t i = 0; i < d->place_count; i++) {
         (void)fdk_list_append(d->places_list, d->places[i].label,
                               NULL);
@@ -2307,7 +3212,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
          * the root and real mounts get the drive slab, everything
          * else (XDG user dirs) the folder. */
         (void)fdk_list_row_set_icon(
-            d->places_list, i,
+            d->places_list, i + (fdlg_recents_on(d) ? 1 : 0),
             fdlg_place_icon(d->places[i].path, d->places[i].label));
     }
 

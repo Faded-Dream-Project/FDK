@@ -438,10 +438,98 @@ void fdk_entry_set_on_activate(fdk_widget *entry,
                                fdk_entry_activate_fn on_activate,
                                void *user_data);
 
+/* ---- Entry icon slots (1.4.4) -------------------------------------
+ *
+ * The Entry's generalized prefix/suffix surface — the 1.4.2 search
+ * preset's magnifier and clear zones promoted to a public, symmetric
+ * API. Each slot (LEADING = before the text, TRAILING = after it)
+ * reserves a 16-px glyph box + 6-px gap when an icon is set: the
+ * entry's natural width, hit-testing, text scrolling, and paint all
+ * route through the same two zone widths, exactly like the search
+ * preset did (the caret and the glyph never fight).
+ *
+ * Built-in glyphs are the toolkit's vector language (strokes in the
+ * theme's text ink — no bitmaps, no icon theme): the SEARCH lens,
+ * the CLEAR X, and the four symbolic row glyphs (FOLDER/HOME/DRIVE/
+ * FILE — see fdk_row_icon; a path-style entry wears FOLDER well).
+ * A custom paint callback replaces the built-in glyph entirely: it
+ * receives the box's top-left and the 16-px extent, and may draw
+ * anything (including loaded images via the surface API).
+ *
+ * Interaction: a left press inside a slot fires the slot's
+ * on_icon_press callback. The CLEAR icon is SPECIAL — it carries the
+ * search preset's honest clear semantics everywhere it appears: a
+ * press empties the field through the UNDOABLE splice path (records
+ * undo, fires on_changed) unless the entry is read-only or the slot
+ * was marked insensitive, and its zone EXISTS ONLY WHILE THE FIELD
+ * HAS TEXT (the button appears with the first character — the 1.4.2
+ * rule, now every entry's rule). A leading icon that is decorative
+ * (no callback) lets presses fall through to caret placement; an
+ * interactive slot (callback set, or CLEAR) consumes its presses.
+ * Hover shows the soft pill behind interactive, sensitive slots.
+ *
+ * The search PRESET is now built on the slots (leading SEARCH,
+ * trailing CLEAR) — its Esc-ladder and debounced search-changed stay
+ * preset-specific behavior, geometry identical to 1.4.2. */
+
+typedef enum fdk_entry_icon {
+    FDK_ENTRY_ICON_NONE = 0,  /* no icon: the slot reserves nothing  */
+    FDK_ENTRY_ICON_SEARCH,    /* the stroked lens + handle           */
+    FDK_ENTRY_ICON_CLEAR,     /* the X; press = undoable clear       */
+    FDK_ENTRY_ICON_FOLDER,    /* the symbolic row-glyph family       */
+    FDK_ENTRY_ICON_HOME,
+    FDK_ENTRY_ICON_DRIVE,
+    FDK_ENTRY_ICON_FILE,
+} fdk_entry_icon;
+
+typedef enum fdk_entry_slot {
+    FDK_ENTRY_SLOT_LEADING  = 0, /* before the text (the prefix)     */
+    FDK_ENTRY_SLOT_TRAILING = 1, /* after the text (the suffix)      */
+} fdk_entry_slot;
+
+/* Slot press callback. Fires for CLEAR after the clear itself. */
+typedef void (*fdk_entry_icon_fn)(fdk_widget *entry,
+                                  fdk_entry_slot slot, void *user_data);
+
+/* Custom glyph painter: draw within the box whose top-left is (x, y)
+ * and whose extent is `box` (16) px. `enabled` folds together the
+ * entry's enabled flag and the slot's sensitivity (dim your ink). */
+typedef void (*fdk_entry_icon_paint_fn)(fdk_widget *entry,
+                                        fdk_surface *surface,
+                                        fdk_i32 x, fdk_i32 y,
+                                        fdk_i32 box, bool enabled,
+                                        void *user_data);
+
+/* Sets the slot's built-in glyph (NONE clears it — a custom painter
+ * set for the slot also clears back to the built-in when it is
+ * replaced by passing fn == NULL). Relayouts the parent container:
+ * the entry's natural size changes with the zone. */
+fdk_result fdk_entry_set_icon(fdk_widget *entry, fdk_entry_slot slot,
+                              fdk_entry_icon icon);
+/* The slot's current built-in glyph (NONE when a custom painter owns
+ * the slot). */
+fdk_entry_icon fdk_entry_get_icon(fdk_widget *entry, fdk_entry_slot slot);
+/* Replaces the slot's glyph with a custom painter (NULL reverts to
+ * the built-in glyph set by fdk_entry_set_icon). */
+fdk_result fdk_entry_set_icon_paint(fdk_widget *entry,
+                                    fdk_entry_slot slot,
+                                    fdk_entry_icon_paint_fn fn,
+                                    void *user_data);
+/* Dims the slot's glyph and disables its interaction (a decorative
+ * state: the CLEAR icon stops clearing, presses stop firing). */
+fdk_result fdk_entry_set_icon_sensitive(fdk_widget *entry,
+                                        fdk_entry_slot slot,
+                                        bool sensitive);
+bool fdk_entry_icon_is_sensitive(fdk_widget *entry, fdk_entry_slot slot);
+/* The slot's press callback. */
+void fdk_entry_set_on_icon_press(fdk_widget *entry,
+                                 fdk_entry_slot slot,
+                                 fdk_entry_icon_fn fn, void *user_data);
+
 /* ---- ScrollView (Phase 9) ----
  *
  * A scrolling container: exactly one content child, clipped to the
- * viewport, with overlay scrollbars that appear only when their axis
+ * viewport, with edge scrollbars that appear only when their axis
  * overflows. Scroll with the wheel anywhere over the content, by
  * dragging the scrollbar thumbs, by clicking a trough (page), or —
  * when the scrollview itself is focused (opt in with
@@ -458,6 +546,37 @@ void fdk_entry_set_on_activate(fdk_widget *entry,
 
 fdk_result fdk_scrollview_create(fdk_widget *parent,
                                  fdk_widget **out_scrollview);
+
+/* ---- Bar modes (1.4.4) -------------------------------------------
+ *
+ * CLASSIC (the default, the historic behavior): the bars are
+ * LAYOUT-OWNED — an overflowing axis reserves its strip, the
+ * viewport shrinks by every visible bar, and the bars are always
+ * fully opaque and interactive (trough paging included).
+ *
+ * OVERLAY: the bars are TRANSIENT GUESTS — the viewport is the FULL
+ * bounds (nothing is reserved; the content renders underneath),
+ * the bars are thinner (themed metric scrollbar_overlay_width,
+ * 4..12, default 6) and paint only their thumb over the content.
+ * After ~800 ms of idleness a bar fades out (~300 ms, the 1.4.3
+ * paint-group engine doing the blending) and becomes input-
+ * transparent; any scrolling on its axis, the pointer approaching
+ * its strip, a hover, or a thumb drag pops it back at full opacity
+ * with the idle clock re-armed. Standalone/detached trees keep the
+ * bars visible (no window context -> no idle clock — the animation
+ * layer's headless-honesty rule, one more time).
+ *
+ * Switching modes re-arranges immediately (the viewport changes in
+ * overlay) and re-clamps the scroll offsets. */
+
+typedef enum fdk_scroll_bar_mode {
+    FDK_SCROLL_BARS_CLASSIC = 0, /* edge strips, layout-owned       */
+    FDK_SCROLL_BARS_OVERLAY,    /* thin, transient, fades when idle */
+} fdk_scroll_bar_mode;
+
+fdk_result fdk_scrollview_set_bar_mode(fdk_widget *scrollview,
+                                       fdk_scroll_bar_mode mode);
+fdk_scroll_bar_mode fdk_scrollview_get_bar_mode(fdk_widget *scrollview);
 
 /* Adopts `content` as the scrollable child (reparented, replacing
  * and destroying any previous content). NULL clears (and destroys)
@@ -591,6 +710,19 @@ void fdk_list_set_on_row_activate(fdk_widget *list,
                                   fdk_list_row_activate_fn fn,
                                   void *user_data);
 
+/* ---- Single-click activation (1.4.4) --------------------------------
+ *
+ * The sidebar rhythm: when enabled, a single left PRESS on a row
+ * fires on_row_activate at once (GtkListBox's
+ * activate-on-single-click) — one click navigates a places sidebar.
+ * The double-click branch stays quiet in this mode (the first
+ * press already fired; a doubled click must not fire twice). Off
+ * by default: file rows keep the classic double-click/Enter
+ * gesture. */
+void fdk_list_set_activate_on_single_click(fdk_widget *list,
+                                           bool single);
+bool fdk_list_get_activate_on_single_click(fdk_widget *list);
+
 /* ---- Row icons (1.4.1) ----
  *
  * A row may carry a small vector glyph (drawn by the toolkit —
@@ -605,6 +737,7 @@ typedef enum fdk_row_icon {
     FDK_ROW_ICON_HOME,    /* house + door                          */
     FDK_ROW_ICON_DRIVE,   /* rounded slab + activity LED           */
     FDK_ROW_ICON_FILE,    /* page with folded corner               */
+    FDK_ROW_ICON_RECENT,  /* clock face (1.4.4: the recents place) */
 } fdk_row_icon;
 
 /* Sets/clears the row's icon (unknown enum values are ignored as
@@ -775,10 +908,18 @@ fdk_result fdk_toolbar_add_separator(fdk_widget *toolbar);
  * paint walk). Tab clicks switch; the switch callback fires after
  * the switch settles. Pages can be removed (remove_page destroys the
  * page widget — the notebook owns what it adopts, like every FDK
- * container). Close-button chrome / drag reordering parked. */
+ * container). Tab DRAG REORDERING ships since 1.4.4 (see
+ * fdk_notebook_reorder_page); close-button chrome stays parked. */
 
 typedef void (*fdk_notebook_switch_fn)(fdk_widget *notebook,
                                        size_t page, void *user_data);
+
+/* Fired once after a DRAG settles (or a programmatic reorder_page)
+ * with the page's ORIGINAL and FINAL slot indices. Not fired for a
+ * press that never crossed the drag threshold. */
+typedef void (*fdk_notebook_reorder_fn)(fdk_widget *notebook,
+                                        size_t from_index,
+                                        size_t to_index, void *user_data);
 
 /* Creates an empty notebook. */
 fdk_result fdk_notebook_create(fdk_widget *parent, fdk_font *font,
@@ -815,6 +956,35 @@ fdk_result fdk_notebook_remove_page(fdk_widget *notebook,
 void fdk_notebook_set_on_switch(fdk_widget *notebook,
                                 fdk_notebook_switch_fn fn,
                                 void *user_data);
+
+/* ---- Tab reordering (1.4.4) --------------------------------------
+ *
+ * Tabs reorder by drag: press a tab (it switches pages, the existing
+ * behavior), move past ~4 px and the tab FOLLOWS THE POINTER — the
+ * strip's other tabs swap LIVE as the dragged tab's center crosses
+ * their midpoints (the model order changes during the drag; the
+ * dragged tab stays glued to the pointer by the swap-time offset
+ * correction). Releasing settles the tab into its final slot; the
+ * shown PAGE never changes (the current page keeps its identity —
+ * only its index moves with it). The drag stays inside the strip: a
+ * pointer far outside clamps to the strip's ends (tab tearing is
+ * deliberately not a thing — pages are adopted children).
+ *
+ * The programmatic twin of the gesture: move the page at `index` to
+ * `new_index` (new_index clamps to the page count; a no-op returns
+ * OK). The current page stays CURRENT (the identity rule above),
+ * the switch callback does NOT fire, the reorder callback does, and
+ * the a11y tab list re-describes from the new order. */
+fdk_result fdk_notebook_reorder_page(fdk_widget *notebook,
+                                     size_t index, size_t new_index);
+/* The page's current slot (the page-count when absent/foreign). */
+size_t fdk_notebook_page_index(fdk_widget *notebook,
+                               const fdk_widget *page);
+/* Fired after a drag settles or a programmatic reorder (from/to are
+ * the ORIGINAL and FINAL slot indices of the moved page). */
+void fdk_notebook_set_on_page_reordered(fdk_widget *notebook,
+                                        fdk_notebook_reorder_fn fn,
+                                        void *user_data);
 
 /* ---- Canvas (Phase 9) ----
  *

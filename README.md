@@ -342,11 +342,29 @@ per-pixel on the canvas — drag the ring for hue, the triangle for
 saturation and value, type a #rrggbb, compare against the initial
 swatch).
 
+The 1.4.4 modern batch completes the interaction furniture: the
+Notebook's tabs REORDER by drag (the strip swaps live under the
+pointer, the shown page never changes), the ColorButton (a
+color-well swatch over an alpha checkerboard that opens the
+ColorChooser and reports the pick), the file dialog's Recent place
+(the shared XDG recently-used.xbel — one click lists what every
+desktop app remembers, accepting a row records it back, foreign
+apps' metadata survives byte-for-byte), overlay scrollbars (thin
+transient thumbs over the full-viewport content that fade when
+idle and return on scroll — themed `scrollbar_overlay_width`), and
+the Entry's icon slots (leading/trailing vector glyphs, custom
+painters, per-slot sensitivity and press callbacks — the search
+preset is now built on them), plus the List's
+activate-on-single-click for the places-sidebar rhythm.
+
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session
 frame with an expander and a draggable splitter, the 1.4.3 row
 (a menu button, a vertical marked slider, a crossfade toggle with
-its fading panel, and the three chooser buttons), a grid, a button
+its fading panel, and the three chooser buttons), the 1.4.4 row
+(a reorderable three-tab notebook, the color well with its live
+swatch, a path entry with folder and clear icons, and an
+overlay-scrollbar column you can wheel), a grid, a button
 row with a link button and a busy spinner, a progress bar, and a
 live status label that every control reports into. Then
 `examples/12_settings.c`: the whole 1.4.2 furniture composed into

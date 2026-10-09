@@ -389,6 +389,202 @@ static void test_result_free(void) {
     CHECK(r.paths == NULL && r.count == 0, "result_free resets");
 }
 
+/* ---- recents engine (1.4.4) ---- */
+
+/* Writes `text` to `path` (truncate). */
+static void put_file(const char *path, const char *text) {
+    FILE *f = fopen(path, "w");
+    if (f != NULL) {
+        fputs(text, f);
+        fclose(f);
+    }
+}
+
+static void test_recents_parse(void) {
+    /* A representative xbel: newest-first stamps, a percent-encoded
+     * href with UTF-8 + spaces, a non-local URI skipped, a duplicate
+     * href (the newest wins), and an out-of-order stamp proving the
+     * mtime sort. */
+    char path[512];
+    snprintf(path, sizeof(path), "%s/recently-used.xbel", g_dir);
+    put_file(path,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<xbel version=\"1.0\">\n"
+        "  <bookmark href=\"file:///tmp/old.txt\" "
+            "modified=\"2020-01-02T03:04:05Z\"/>\n"
+        "  <bookmark href=\"file:///tmp/fdk%20docs/notes%20%C3%A9.txt\" "
+            "modified=\"2026-10-09T12:00:00Z\"/>\n"
+        "  <bookmark href=\"http://example.com/page\" "
+            "modified=\"2026-10-09T13:00:00Z\"/>\n"
+        "  <bookmark href=\"file:///tmp/old.txt\" "
+            "modified=\"2026-10-09T14:00:00Z\"/>\n"
+        "  <bookmark href=\"file:///tmp/abs-bare\" "
+            "modified=\"2026-10-08T10:00:00Z\"/>\n"
+        "</xbel>\n");
+
+    fdk_fd_recent *v = NULL;
+    size_t n = 0;
+    CHECK(fdk__recent_load(path, &v, &n) == 0, "recents: load ok");
+    CHECK(n == 3, "recents: 3 local entries (dup merged, http skipped)");
+    if (n == 3) {
+        /* Sorted desc by mtime: old.txt (14:00), bare (Oct 8 10:00),
+         * notes é.txt (Oct 9 12:00)... wait — 2026-10-09 12:00 is
+         * NEWER than 2026-10-08 10:00. Order: old(10-09 14:00),
+         * notes(10-09 12:00), bare(10-08 10:00). */
+        CHECK(strcmp(v[0].path, "/tmp/old.txt") == 0,
+              "recents: newest-first head");
+        CHECK(v[0].mtime > 1760000000LL, "recents: 2026 stamp epoch");
+        CHECK(strcmp(v[1].path,
+                     "/tmp/fdk docs/notes \xC3\xA9.txt") == 0,
+              "recents: percent + UTF-8 decode");
+        CHECK(strcmp(v[2].path, "/tmp/abs-bare") == 0,
+              "recents: bare path accepted");
+    }
+    fdk__recent_free(v, n);
+
+    /* Missing file: -1, empty out. */
+    v = (fdk_fd_recent *)1;
+    n = 7;
+    CHECK(fdk__recent_load("/no/such/recently-used.xbel", &v, &n) == -1,
+          "recents: missing file fails");
+    CHECK(v == NULL && n == 0, "recents: failed load clears out");
+
+    /* Not-an-xbel garbage: refused. */
+    put_file(path, "definitely not xml\n");
+    CHECK(fdk__recent_load(path, &v, &n) == -1,
+          "recents: non-xbel refused");
+    printf("[ok] recents parse: dedupe-newest, http skipped, "
+           "percent+UTF-8 href decode, bare paths, mtime-desc sort, "
+           "missing/garbage refused\n");
+}
+
+static void test_recents_touch(void) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/recently-used.xbel", g_dir);
+
+    /* Fresh creation: touch a path with spaces, parse it back. */
+    unlink(path);
+    CHECK(fdk__recent_touch(path, "/tmp/my docs/report v2.txt") == 0,
+          "recents: fresh touch ok");
+    fdk_fd_recent *v = NULL;
+    size_t n = 0;
+    CHECK(fdk__recent_load(path, &v, &n) == 0 && n == 1,
+          "recents: fresh file parses to 1");
+    if (n == 1) {
+        CHECK(strcmp(v[0].path, "/tmp/my docs/report v2.txt") == 0,
+              "recents: URI round-trip (spaces + spaces back)");
+        CHECK(v[0].mtime > 1760000000LL, "recents: fresh stamp is now");
+    }
+    fdk__recent_free(v, n);
+
+    /* Second touch: moves to front, no duplicate. */
+    CHECK(fdk__recent_touch(path, "/tmp/second.txt") == 0,
+          "recents: second touch ok");
+    CHECK(fdk__recent_load(path, &v, &n) == 0 && n == 2,
+          "recents: two entries after second touch");
+    if (n == 2) {
+        CHECK(strcmp(v[0].path, "/tmp/second.txt") == 0,
+              "recents: touched lands first");
+        CHECK(strcmp(v[1].path, "/tmp/my docs/report v2.txt") == 0,
+              "recents: previous entry survives");
+    }
+    fdk__recent_free(v, n);
+
+    /* Re-touch the OLDER entry: it moves to the front, no dup. */
+    CHECK(fdk__recent_touch(path, "/tmp/my docs/report v2.txt") == 0,
+          "recents: re-touch ok");
+    CHECK(fdk__recent_load(path, &v, &n) == 0 && n == 2,
+          "recents: still two entries (dedupe)");
+    if (n == 2) {
+        CHECK(strcmp(v[0].path, "/tmp/my docs/report v2.txt") == 0,
+              "recents: re-touched head");
+    }
+    fdk__recent_free(v, n);
+
+    /* Foreign metadata survives byte-for-byte: a bookmark with an
+     * info block stays intact except when ITSELF re-touched. */
+    put_file(path,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<xbel version=\"1.0\">\n"
+        "  <bookmark href=\"file:///tmp/foreign.txt\" "
+            "added=\"2024-01-01T00:00:00Z\">\n"
+        "    <info>\n"
+        "      <metadata owner=\"gtk-3.0\">\n"
+        "        <bookmark:applications>\n"
+        "        </bookmark:applications>\n"
+        "      </metadata>\n"
+        "    </info>\n"
+        "  </bookmark>\n"
+        "</xbel>\n");
+    CHECK(fdk__recent_touch(path, "/tmp/mine.txt") == 0,
+          "recents: touch alongside foreign metadata");
+    char buf[4096];
+    FILE *f = fopen(path, "r");
+    CHECK(f != NULL, "recents: file readable after touch");
+    if (f != NULL) {
+        size_t got = fread(buf, 1, sizeof(buf) - 1, f);
+        buf[got] = '\0';
+        fclose(f);
+        CHECK(strstr(buf, "owner=\"gtk-3.0\"") != NULL,
+              "recents: foreign metadata preserved");
+        CHECK(strstr(buf, "/tmp/mine.txt") != NULL,
+              "recents: mine present");
+        CHECK(strstr(buf, "/tmp/mine.txt") < strstr(buf, "foreign.txt"),
+              "recents: mine inserted before the older entry");
+    }
+    /* Re-touching the FOREIGN entry removes it whole (no dup) but
+     * the metadata of OTHERS stays. */
+    CHECK(fdk__recent_touch(path, "/tmp/mine.txt") == 0,
+          "recents: touch again");
+    CHECK(fdk__recent_load(path, &v, &n) == 0 && n == 2,
+          "recents: foreign + mine, no dupes");
+    fdk__recent_free(v, n);
+
+    /* Argument safety. */
+    CHECK(fdk__recent_touch(path, "relative.txt") == -1,
+          "recents: relative path refused");
+    CHECK(fdk__recent_touch(NULL, "/tmp/x") == -1,
+          "recents: NULL xbel refused");
+
+    unlink(path);
+    printf("[ok] recents touch: fresh-file creation (data dir "
+           "included), move-to-front, re-touch dedupe, URI "
+           "round-trip, foreign metadata preserved byte-for-byte, "
+           "relative paths refused\n");
+}
+
+static void test_recents_file_resolution(void) {
+    /* XDG_DATA_HOME wins when absolute; otherwise HOME/.local/share;
+     * no HOME -> false. */
+    char buf[512];
+    const char *saved_xdg = getenv("XDG_DATA_HOME");
+    const char *saved_home = getenv("HOME");
+    setenv("XDG_DATA_HOME", "/xdg-data", 1);
+    CHECK(fdk__recent_file(buf, sizeof(buf)),
+          "recents: XDG path resolves");
+    CHECK(strcmp(buf, "/xdg-data/recently-used.xbel") == 0,
+          "recents: XDG path exact");
+    unsetenv("XDG_DATA_HOME");
+    setenv("HOME", "/home/tester", 1);
+    CHECK(fdk__recent_file(buf, sizeof(buf)),
+          "recents: HOME fallback resolves");
+    CHECK(strcmp(buf, "/home/tester/.local/share/recently-used.xbel") ==
+              0,
+          "recents: HOME fallback exact");
+    unsetenv("HOME");
+    CHECK(!fdk__recent_file(buf, sizeof(buf)),
+          "recents: no home -> false");
+    /* Restore. */
+    if (saved_xdg != NULL) {
+        setenv("XDG_DATA_HOME", saved_xdg, 1);
+    }
+    if (saved_home != NULL) {
+        setenv("HOME", saved_home, 1);
+    }
+    printf("[ok] recents path: XDG_DATA_HOME first, HOME/.local/share "
+           "fallback, no-home false\n");
+}
+
 int main(void) {
     make_scratch();
     test_scan_defaults();
@@ -402,6 +598,9 @@ int main(void) {
     test_path_helpers();
     test_save_name_validation();
     test_result_free();
+    test_recents_parse();
+    test_recents_touch();
+    test_recents_file_resolution();
     rm_scratch();
 
     if (failures != 0) {

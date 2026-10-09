@@ -231,6 +231,16 @@ void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
                               (fdk_rect){x + 10, cy + 3, 3, 3}, soft);
         break;
     }
+    case FDK_ROW_ICON_RECENT: {
+        /* Clock (1.4.4, the recents place): a circled face with the
+         * hands at ten-past-ten — the classic recents glyph. */
+        fdk_surface_draw_circle_aa(surface, x + 8, cy + 8, 6, ink);
+        fdk_surface_draw_line_aa(surface, x + 8, cy + 8, x + 8, cy + 3,
+                                 ink);
+        fdk_surface_draw_line_aa(surface, x + 8, cy + 8, x + 12, cy + 10,
+                                 ink);
+        break;
+    }
     default:
         break; /* NONE: the caller did not reserve the box */
     }

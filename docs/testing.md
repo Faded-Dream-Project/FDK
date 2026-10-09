@@ -1466,3 +1466,63 @@ suite's answer is the established recipe: send an out-of-bounds
 ButtonPress directly TO the popup — the exact shape the grab
 produces, which x11_events turns into the close request. The
 MenuButton's dismissal test reuses it verbatim.
+
+## 1.4.4 — six lessons from the modern batch
+
+**The ledger itself can be stale — grep the tree first, always.**
+The parity ledger's top 1.4.4 candidate ("themed tooltips — the
+tooltip carries no theme hook today") was wrong: the 1.3.2
+tooltip has been fully themed since birth (tokens, parser
+entries, Modern retune, pinned by test_theme). The PROGRESS.md
+contract's check-before-build rule caught it in five minutes;
+implementing it would have wasted a milestone slot on duplicate
+work. The tree is the truth over every summary — including this
+file's.
+
+**Clamp AFTER the swap ladder, not before.** The notebook's drag
+first clamped the tab to its STARTING slot's travel range, then
+ran the midpoint swaps — so a tab pressed in the middle could
+never reach the far slots (the clamp forbade the very swaps the
+pointer asked for), and the first run of the drag test failed
+with the model untouched. Order matters when a clamp's range
+depends on state the later steps mutate: run the pointer-driven
+transitions first, clamp the settled result.
+
+**A stable sort is not optional for recency lists.** The recents
+parser sorted with qsort and a mtime comparator; two entries
+touched within the same SECOND (a fast double-touch — exactly
+what the test did) compared equal, and qsort's instability
+scrambled them against the file's own newest-first order. The fix
+is a stable insertion sort with document order breaking ties (n
+<= 128, so O(n^2) is nothing). General rule: any model whose
+order IS its meaning needs stability or an explicit tiebreak
+that preserves the source order.
+
+**Never wait on an enum whose ACCEPTED value is 0.** The X11
+recents test waited for `fd_result.outcome == ACCEPTED` — but the
+result struct had been memset to zero, and ACCEPTED is literally
+0 in that enum: the wait was vacuously true before any callback
+fired, and the failure surfaced two asserts later as a confusing
+"count == 0 on an ACCEPTED result". Wait on a field that only a
+REAL answer sets (the count), or on an explicit answered flag.
+
+**mkdtemp templates are single-use; row bounds are
+parent-relative.** Two test-engineering traps from the same group:
+`make_dialog_scratch` kept its XXXXXX template in a static
+buffer, which mkdtemp CONSUMES — the second caller got a corrupt
+template and NULL (make it a local array; the strdup'd return was
+already safe). And `fdk_widget_get_bounds` on a List row returns
+PARENT-RELATIVE geometry (the rows container's space) — a click
+computed from it landed on the dialog's Up button and browsed to
+/; use `fdk_widget_get_absolute_bounds` for input targets, and
+walk list -> scrollview -> rows container -> row to find the row
+widget at all.
+
+**Non-auto-paint windows need the explicit paint before
+readback.** The overlay-fade test pumped 1.2 s of real clock and
+read the strip from the server — but a regular window paints only
+when asked (auto_paint is the popup/dialog default, not the app
+window's), so the readback showed the FIRST frame with the thumb
+still up. Every pixel assertion that follows state changes during
+pumping needs its `fdk_window_paint` between the pumps and the
+XGetImage.

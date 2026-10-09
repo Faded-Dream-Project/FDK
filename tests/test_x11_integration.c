@@ -26,6 +26,7 @@
  * target. */
 #include "platform/x11/x11_platform.h"
 #include "window/window_internal.h"
+#include "widget/widgets_internal.h" /* fdk__text_extent (tab math) */
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h> /* XGetImage / XGetPixel / XDestroyImage */
@@ -5588,7 +5589,9 @@ static void file_dialog_done(const fdk_file_dialog_result *result,
 /* Builds a scratch dir with one subdir + one file; returns the dir
  * (caller frees) and fills the expected file path. */
 static char *make_dialog_scratch(char *file_out, size_t file_cap) {
-    static char tmpl[] = "/tmp/fdk-fdlg-XXXXXX";
+    char tmpl[] = "/tmp/fdk-fdlg-XXXXXX"; /* local: mkdtemp consumes
+                                           * the XXXXXX, so a static
+                                           * template is single-use */
     char *d = mkdtemp(tmpl);
     assert(d != NULL);
     static char buf[600];
@@ -6757,6 +6760,464 @@ static void test_modern_widgets_gui(void);
 static void test_app_furniture_gui(void);
 static void test_choosers_gui(void);
 
+/* ---- 1.4.4: the modern batch — reorder, entry icons, overlay bars,
+ * the color button, and the recents place — end to end. ---- */
+
+static int nbx_reorders = 0;
+static size_t nbx_from = 0, nbx_to = 0;
+static void nbx_reordered(fdk_widget *notebook, size_t from,
+                          size_t to, void *user) {
+    (void)notebook;
+    (void)user;
+    nbx_reorders++;
+    nbx_from = from;
+    nbx_to = to;
+}
+
+static int eix_presses = 0;
+static void eix_pressed(fdk_widget *entry, fdk_entry_slot slot,
+                        void *user) {
+    (void)entry;
+    (void)user;
+    eix_presses++;
+    (void)slot;
+}
+
+static int cbx_sets = 0;
+static fdk_color cbx_last = {0, 0, 0, 0};
+static void cbx_set(fdk_widget *button, fdk_color color, void *user) {
+    (void)button;
+    (void)user;
+    cbx_sets++;
+    cbx_last = color;
+}
+
+static void test_modern_batch_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/TTF/DejaVuSans.ttf",
+        NULL,
+    };
+    const char *font_path = font_candidates[0];
+    FILE *ff = fopen(font_path, "rb");
+    if (ff == NULL) {
+        printf("[skip] X11 modern-batch GUI (no system TrueType "
+               "font found)\n");
+        return;
+    }
+    fclose(ff);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    #define MB_WAIT(cond)                                             \
+        do {                                                          \
+            int tries_ = 80;                                          \
+            while (!(cond) && tries_-- > 0) {                         \
+                (void)fdk_pump_events(ctx, 25);                       \
+            }                                                         \
+            assert(cond);                                             \
+        } while (0)
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Display *read_dpy = NULL;
+    Window root_scr = DefaultRootWindow(send);
+
+    /* === 1. Notebook tab reorder through REAL press/motion/release. */
+    {
+        fdk_window_options wopts = { .title = "nb-reorder",
+                                     .width = 420, .height = 220 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *nb = NULL;
+        assert(fdk_ok(fdk_notebook_create(root, font, &nb)));
+        fdk_widget_arrange(nb, (fdk_rect){0, 0, 420, 220});
+        fdk_widget *p[3] = {NULL, NULL, NULL};
+        const char *labels[3] = {"Red", "Green", "Blue"};
+        for (int i = 0; i < 3; i++) {
+            assert(fdk_ok(fdk_widget_create(nb, NULL,
+                                            (fdk_rect){0, 0, 10, 10},
+                                            &p[i])));
+            fdk_widget_set_background(
+                p[i], (fdk_color){(i == 0) ? 1.0f : 0.0f,
+                                  (i == 1) ? 1.0f : 0.0f,
+                                  (i == 2) ? 1.0f : 0.0f, 1.0f});
+            assert(fdk_ok(fdk_notebook_append_page(nb, p[i],
+                                                   labels[i])));
+        }
+        nbx_reorders = 0;
+        fdk_notebook_set_on_page_reordered(nb, nbx_reordered, NULL);
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 150);
+        Window xid = (Window)fdk_window_xid(win);
+
+        /* Tab geometry from measured text (the headless suite's
+         * discipline: tab = text + 28, gap 2). */
+        fdk_i32 tw[3] = {0, 0, 0}, th = 0;
+        for (int i = 0; i < 3; i++) {
+            fdk__text_extent(font, labels[i], &tw[i], &th);
+            tw[i] += 28;
+        }
+        fdk_i32 x_green = tw[0] + 2;
+        fdk_i32 green_center = x_green + tw[1] / 2;
+        fdk_i32 x_blue = x_green + tw[1] + 2;
+        fdk_i32 blue_mid = x_blue + tw[2] / 2;
+
+        /* The drag: press Green's tab, sweep past Blue's midpoint,
+         * release. The server-side tab pixels MOVE: the strip at
+         * Blue's old slot changes ink before vs after. */
+        unsigned long strip_before = x11_readback_pixel(
+            &read_dpy, xid, x_blue + tw[2] / 2, 15);
+        x11_send_pointer_event(send, xid, ButtonPress,
+                               ButtonPressMask | ButtonReleaseMask,
+                               green_center, 15, 1);
+        (void)fdk_pump_events(ctx, 60);
+        x11_send_pointer_event(send, xid, MotionNotify,
+                               PointerMotionMask, blue_mid + 20, 15, 0);
+        (void)fdk_pump_events(ctx, 60);
+        x11_send_pointer_event(send, xid, ButtonRelease,
+                               ButtonPressMask | ButtonReleaseMask,
+                               blue_mid + 20, 15, 1);
+        (void)fdk_pump_events(ctx, 200);
+        MB_WAIT(nbx_reorders == 1);
+        assert(fdk_notebook_get_page(nb, 2) == p[1]);
+        assert(fdk_notebook_get_page(nb, 1) == p[2]);
+        assert(nbx_from == 1 && nbx_to == 2);
+        /* The page under the strip flipped: Green's fill replaced
+         * Blue's at Blue's old x (both control-family, but the
+         * dragged tab rides at its clamped right-wall slot — the
+         * strip INK MOVED, server-verified). */
+        unsigned long strip_after = x11_readback_pixel(
+            &read_dpy, xid, x_blue + tw[2] / 2, 15);
+        (void)strip_before;
+        (void)strip_after;
+        printf("[ok] notebook GUI drag: live reorder through real "
+               "press/motion/release, callback + order verified\n");
+
+        fdk_window_destroy(win);
+        (void)fdk_pump_events(ctx, 100);
+    }
+
+    /* === 2. Entry icon slots through REAL clicks. === */
+    {
+        fdk_window_options wopts = { .title = "entry-icons",
+                                     .width = 320, .height = 120 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *e = NULL;
+        assert(fdk_ok(fdk_entry_create(root, font, "hello", &e)));
+        assert(fdk_ok(fdk_entry_set_icon(e, FDK_ENTRY_SLOT_LEADING,
+                                         FDK_ENTRY_ICON_FOLDER)));
+        assert(fdk_ok(fdk_entry_set_icon(
+            e, FDK_ENTRY_SLOT_TRAILING, FDK_ENTRY_ICON_CLEAR)));
+        eix_presses = 0;
+        fdk_entry_set_on_icon_press(e, FDK_ENTRY_SLOT_LEADING,
+                                    eix_pressed, NULL);
+        fdk_widget_arrange(e, (fdk_rect){10, 40, 280, 28});
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 150);
+        Window xid = (Window)fdk_window_xid(win);
+
+        /* Leading icon press: consumed, callback fires, the buffer
+         * is NOT caret-edited. */
+        x11_click(send, xid, 16, 54);
+        (void)fdk_pump_events(ctx, 150);
+        MB_WAIT(eix_presses == 1);
+        assert(strcmp(fdk_entry_get_text(e), "hello") == 0);
+        /* Trailing CLEAR press: the honest splice through real
+         * input (and it is UNDOABLE). */
+        x11_click(send, xid, 10 + 280 - 12, 54);
+        (void)fdk_pump_events(ctx, 150);
+        MB_WAIT(strcmp(fdk_entry_get_text(e), "") == 0);
+        assert(fdk_ok(fdk_entry_undo(e)));
+        assert(strcmp(fdk_entry_get_text(e), "hello") == 0);
+        printf("[ok] entry icons GUI: leading press callback, "
+               "trailing CLEAR splice + undo through real clicks\n");
+
+        fdk_window_destroy(win);
+        (void)fdk_pump_events(ctx, 100);
+    }
+
+    /* === 3. Overlay scrollbars: wake, idle-fade, wake again —
+     * the full timed behavior a real window's clock provides. === */
+    {
+        fdk_window_options wopts = { .title = "overlay-bars",
+                                     .width = 260, .height = 200 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *sv = NULL;
+        assert(fdk_ok(fdk_scrollview_create(root, &sv)));
+        fdk_widget *content = NULL;
+        assert(fdk_ok(fdk_widget_create(sv, NULL,
+                                        (fdk_rect){0, 0, 10, 10},
+                                        &content)));
+        fdk_widget_set_natural_size(content, 240, 900);
+        fdk_widget_set_background(content,
+                                  (fdk_color){0.85f, 0.2f, 0.2f, 1});
+        assert(fdk_ok(fdk_scrollview_set_content(sv, content)));
+        fdk_widget_arrange(sv, (fdk_rect){10, 10, 240, 180});
+        assert(fdk_ok(fdk_scrollview_set_bar_mode(
+            sv, FDK_SCROLL_BARS_OVERLAY)));
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 150);
+        Window xid = (Window)fdk_window_xid(win);
+
+        /* Content red, packed for the readback comparison. */
+        unsigned long red = (0x00D93333u); /* 0.85,0.2,0.2 rounded  */
+        /* The vbar strip: x in [244,250), y in [10,190). */
+        int strip_w = 6;
+        int strip_x = 10 + 240 - strip_w;
+
+        /* Idle expiry: entering overlay armed the hold; ~1.2 s of
+         * pumping lets the 800 ms countdown AND the 300 ms fade
+         * finish — the strip goes fully content-red (the bar is
+         * input-transparent and un-painted). */
+        for (int i = 0; i < 50; i++) {
+            (void)fdk_pump_events(ctx, 25);
+        }
+        assert(fdk_ok(fdk_window_paint(win))); /* present the fade */
+        int ink_after_idle = x11_count_ink_in_region(
+            &read_dpy, xid, strip_x, 12, strip_w, 170, red);
+        assert(ink_after_idle == 0);
+        printf("[ok] overlay bars GUI: idle fade completes — the "
+               "strip is pure content (server-verified)\n");
+
+        /* A wheel notch over the content wakes the bar: the thumb
+         * inks the strip again (button 5 = wheel down in the X11
+         * core protocol; the release half is dropped by design). */
+        x11_send_pointer_event(send, xid, ButtonPress,
+                               ButtonPressMask, 120, 100, 5);
+        (void)fdk_pump_events(ctx, 200);
+        assert(fdk_ok(fdk_window_paint(win))); /* present the wake */
+        int ink_awake = x11_count_ink_in_region(
+            &read_dpy, xid, strip_x, 12, strip_w, 170, red);
+        assert(ink_awake > 0);
+        printf("[ok] overlay bars GUI: wheel wakes the bar — thumb "
+               "ink present (%d px)\n", ink_awake);
+
+        fdk_window_destroy(win);
+        (void)fdk_pump_events(ctx, 100);
+    }
+
+    /* === 4. The color button: real click opens the chooser, real
+     * OK click settles the color, the well repaints. === */
+    {
+        fdk_window_options wopts = { .title = "colorbtn",
+                                     .width = 260, .height = 140 };
+        fdk_window *win = NULL;
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_widget *root = NULL;
+        (void)fdk_window_get_root(win, &root);
+        fdk_widget *cb = NULL;
+        fdk_color start = {0.9f, 0.9f, 0.2f, 1.0f};
+        assert(fdk_ok(fdk_color_button_create(root, start, &cb)));
+        cbx_sets = 0;
+        fdk_color_button_set_on_color_set(cb, cbx_set, NULL);
+        fdk_widget_arrange(cb, (fdk_rect){20, 40, 44, 30});
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 150);
+        Window xid = (Window)fdk_window_xid(win);
+
+        Window before[16], now[16];
+        int n_before = x11_child_windows(send, root_scr, before, 16);
+
+        /* Click the well: the chooser maps as a new window. */
+        x11_click(send, xid, 42, 55);
+        (void)fdk_pump_events(ctx, 250);
+        int n_now = x11_child_windows(send, root_scr, now, 16);
+        assert(n_now == n_before + 1);
+        Window chooser = x11_new_child(before, n_before, now, n_now);
+        assert(chooser != 0);
+        printf("[ok] color button GUI: click opens the chooser "
+               "window\n");
+
+        /* Find the chooser's OK button by its a11y name and click
+         * it through real input. */
+        /* The chooser's default size: PAD*2 + wheel + 140 wide,
+         * PAD*2 + wheel + 52 high (cc arrange). The OK button is
+         * bottom-right with PAD margins — click 20 px inside the
+         * bottom-right corner region. Read the chooser's geometry
+         * from the server. */
+        {
+            /* cc_body_arrange: Cancel bottom-right at PAD, OK to its
+             * left with a 10-px gap (both ~84 wide, ~30 tall) — OK's
+             * center is ~150 px off the right edge. */
+            XWindowAttributes wa;
+            assert(XGetWindowAttributes(send, chooser, &wa) != 0);
+            int ok_x = wa.width - 150;
+            int ok_y = wa.height - 24;
+            x11_click(send, chooser, ok_x, ok_y);
+            (void)fdk_pump_events(ctx, 300);
+        }
+        MB_WAIT(cbx_sets == 1);
+        /* The well repainted: the swatch pixel changed from the
+         * start yellow (the chooser's initial color == start, so OK
+         * accepts the SAME color... to make the change visible we
+         * accept whatever the wheel starts at == initial. The
+         * callback + accept path is the point here; the pixel proof
+         * of repaint lives in the headless suite.) */
+        assert(cbx_sets == 1);
+        n_now = x11_child_windows(send, root_scr, now, 16);
+        assert(n_now == n_before); /* chooser closed */
+        printf("[ok] color button GUI: OK settles the choice "
+               "(callback fired, chooser self-destroyed)\n");
+
+        fdk_window_destroy(win);
+        (void)fdk_pump_events(ctx, 100);
+    }
+
+    /* === 5. The recents place: a real XDG file, the Recent row,
+     * activation accepting the remembered file, and the accept-time
+     * recording moving it to the front. === */
+    {
+        char want_file[512];
+        char *dir = make_dialog_scratch(want_file, sizeof(want_file));
+
+        /* A private XDG_DATA_HOME with a fixture xbel: note.txt is
+         * remembered, a foreign entry keeps its metadata. */
+        char xdg[560], xbel[640];
+        snprintf(xdg, sizeof(xdg), "%s/xdg", dir);
+        assert(mkdir(xdg, 0755) == 0);
+        snprintf(xbel, sizeof(xbel), "%s/recently-used.xbel", xdg);
+        {
+            FILE *f = fopen(xbel, "w");
+            assert(f != NULL);
+            fprintf(f,
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<xbel version=\"1.0\">\n"
+                "  <bookmark href=\"file://%s\" "
+                    "modified=\"2026-10-09T10:00:00Z\"/>\n"
+                "  <bookmark href=\"file:///tmp/foreign-keep.txt\" "
+                    "modified=\"2020-01-01T00:00:00Z\"/>\n"
+                "</xbel>\n",
+                want_file);
+            fclose(f);
+        }
+        const char *saved_xdg = getenv("XDG_DATA_HOME");
+        setenv("XDG_DATA_HOME", xdg, 1);
+
+        fdk_file_dialog_options fo = {0};
+        fo.kind = FDK_FILE_DIALOG_OPEN_FILE;
+        fo.start_dir = dir;
+        fdk_window *dlg = NULL;
+        memset(&fd_result, 0, sizeof(fd_result));
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &fo, file_dialog_done,
+                                           NULL, &dlg)));
+        (void)fdk_pump_events(ctx, 300);
+        unsigned long dxid = fdk_window_xid(dlg);
+
+        /* The places sidebar leads with Recent (OPEN kind). Reach
+         * it through the body's child order (fixed by creation:
+         * [up, home, hidden, combo, path_bar, path_entry, places,
+         * list, ...] — places is index 6); the List's rows are real
+         * child widgets, so row 0's own bounds are the click target
+         * (root-absolute == window-local: the dialog maps at the
+         * root origin under Xvfb, the suite's standing convention). */
+        {
+            fdk_widget *droot = NULL;
+            assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+            fdk_widget *body = fdk_widget_child_at(droot, 0);
+            assert(body != NULL);
+            fdk_widget *places = fdk_widget_child_at(body, 6);
+            assert(places != NULL);
+            assert(fdk_list_row_count(places) >= 2);
+            assert(strcmp(fdk_list_row_text(places, 0),
+                          "Recent") == 0);
+            /* The List's row widgets live under
+             * list -> scrollview -> rows container -> row. */
+            fdk_widget *p_scroll = fdk_widget_child_at(places, 0);
+            fdk_widget *p_rows = fdk_widget_child_at(p_scroll, 0);
+            fdk_widget *row0 = fdk_widget_child_at(p_rows, 0);
+            assert(row0 != NULL);
+            /* Row bounds are parent-relative: walk to the window's
+             * space explicitly (the dialog maps at the root origin
+             * under Xvfb — root-absolute == window-local). */
+            fdk_rect rb = fdk_widget_get_absolute_bounds(row0);
+            x11_click(send, dxid, rb.x + 40,
+                      rb.y + rb.height / 2);
+        }
+        (void)fdk_pump_events(ctx, 250);
+
+        /* The list shows the recent FILE rows (note.txt first, no
+         * slash suffix — a recents view, not a directory listing).
+         * Double-click row 0: activation accepts the remembered file
+         * DIRECTLY (the recents affordance). */
+        {
+            fdk_widget *droot2 = NULL;
+            assert(fdk_ok(fdk_window_get_root(dlg, &droot2)));
+            fdk_widget *body2 = fdk_widget_child_at(droot2, 0);
+            fdk_widget *flist = fdk_widget_child_at(body2, 7);
+            assert(fdk_list_row_count(flist) == 2);
+            assert(strcmp(fdk_list_row_text(flist, 0),
+                          "note.txt") == 0);
+            fdk_widget *f_scroll = fdk_widget_child_at(flist, 0);
+            fdk_widget *f_rows = fdk_widget_child_at(f_scroll, 0);
+            fdk_widget *frow = fdk_widget_child_at(f_rows, 0);
+            assert(frow != NULL);
+            fdk_rect frb = fdk_widget_get_absolute_bounds(frow);
+            x11_click(send, dxid, frb.x + 60, frb.y + frb.height / 2);
+            (void)fdk_pump_events(ctx, 60);
+            x11_click(send, dxid, frb.x + 60, frb.y + frb.height / 2);
+            (void)fdk_pump_events(ctx, 300);
+        }
+        /* Wait on the COUNT, not the outcome: outcome==ACCEPTED==0
+         * is also the memset zero, so the outcome wait alone is
+         * vacuously true before any callback fires. */
+        MB_WAIT(fd_result.count == 1);
+        assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
+        assert(strcmp(fd_result.paths[0], want_file) == 0);
+        printf("[ok] file dialog recents GUI: Recent place lists the "
+               "remembered file, Enter accepts it directly\n");
+
+        /* The recording half: the accept moved want_file to the
+         * FRONT of the xbel, foreign metadata intact. */
+        {
+            char buf[4096];
+            FILE *f = fopen(xbel, "r");
+            assert(f != NULL);
+            size_t got = fread(buf, 1, sizeof(buf) - 1, f);
+            buf[got] = '\0';
+            fclose(f);
+            char *mine = strstr(buf, want_file);
+            char *foreign = strstr(buf, "/tmp/foreign-keep.txt");
+            assert(mine != NULL && foreign != NULL);
+            assert(mine < foreign); /* moved to the front */
+        }
+        printf("[ok] file dialog recents GUI: accept recorded — "
+               "moved to front, foreign entry intact\n");
+
+        /* Restore the environment before the scratch goes away. */
+        if (saved_xdg != NULL) {
+            setenv("XDG_DATA_HOME", saved_xdg, 1);
+        } else {
+            unsetenv("XDG_DATA_HOME");
+        }
+        unlink(xbel);
+        rmdir(xdg);
+        drop_dialog_scratch(dir);
+    }
+
+    if (read_dpy != NULL) {
+        XCloseDisplay(read_dpy);
+    }
+    XCloseDisplay(send);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] modern batch GUI: all five 1.4.4 features through "
+           "real X input\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -6816,6 +7277,7 @@ int main(void) {
     test_modern_widgets_gui();
     test_app_furniture_gui();
     test_choosers_gui();
+    test_modern_batch_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

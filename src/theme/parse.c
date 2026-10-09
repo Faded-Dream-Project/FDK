@@ -322,6 +322,8 @@ static const key_entry k_metric_keys[] = {
     {"menu_corner_radius", FDK_TM_MENU_CORNER_RADIUS},
     {"list_row_height", FDK_TM_LIST_ROW_HEIGHT},
     {"focus_ring_width", FDK_TM_FOCUS_RING_WIDTH},
+    /* 1.4.4: the overlay bar's thickness. */
+    {"scrollbar_overlay_width", FDK_TM_SCROLLBAR_OVERLAY_WIDTH},
 };
 
 static const struct {
@@ -337,6 +339,7 @@ static const struct {
     [FDK_TM_MENU_CORNER_RADIUS] = {0, 16},
     [FDK_TM_LIST_ROW_HEIGHT] = {16, 48},
     [FDK_TM_FOCUS_RING_WIDTH] = {1, 4},
+    [FDK_TM_SCROLLBAR_OVERLAY_WIDTH] = {4, 12},
 };
 
 /* Key-table lookup against a key segment (exact bytes). */
