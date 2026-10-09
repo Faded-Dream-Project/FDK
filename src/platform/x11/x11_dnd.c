@@ -167,8 +167,11 @@ static void xdnd_dispatch_drag(fdk_platform_window *pwindow,
     ev.type = type;
     ev.drag.offered_formats = offered;
     ev.drag.accepted_formats = accepted;
-    ev.drag.position.x = x;
-    ev.drag.position.y = y;
+    /* Root coordinates arrive PHYSICAL; drag events speak logical
+     * tree space like every other pointer event (1.4.5). */
+    int ds = pwindow->conn->scale;
+    ev.drag.position.x = (ds > 1) ? (x / (fdk_f32)ds) : x;
+    ev.drag.position.y = (ds > 1) ? (y / (fdk_f32)ds) : y;
     /* The event struct has documented this field since v1 ("the
      * keyboard modifiers held right now"); v1 never populated it —
      * every drag event delivered 0. The truth differs per side: the

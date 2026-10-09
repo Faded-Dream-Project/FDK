@@ -9,8 +9,8 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.4** (the modern
-batch), by a full in-depth code review — every claim below was
+Last audited: 2026-10-10, at milestone **1.4.5** (HiDPI
+everywhere + the item grid), by a full in-depth code review — every claim below was
 re-verified against the tree, not copied from docs. THE AUDIT'S
 OWN FIRST CATCH: the ledger's "themed tooltips" candidate was
 stale (the 1.3.2 tooltip has been fully themed since birth —
@@ -19,19 +19,20 @@ truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.4** (the modern batch: notebook tab
-  reordering, the color-well button, file-dialog XDG recents,
-  overlay scrollbars, entry icon slots, List activate-on-single-
-  click)
+- **HEAD:** milestone **1.4.5** (X11 HiDPI: Xft.dpi/screen-metric
+  detection, integer scales, physical windows, divided input; the
+  IconView item grid: glyph cells, the List's selection model,
+  grid keyboard nav)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **549 exported symbols**, `make verify-exports` OK in
+- **Public API:** **570 exported symbols**, `make verify-exports` OK in
   debug AND release
-- **Tests:** headless suite all-pass (533 groups, incl. the 1.4.4
-  additions); X11 integration suite all-pass (real Xvfb, real
-  input, incl. the modern-batch GUI group); 31 test files
-- **Scale:** ~54k lines of C in `src/` (+ generated Wayland
+- **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
+  suites); X11 integration suite all-pass (real Xvfb, real input,
+  incl. the modern-batch, HiDPI (private 192-dpi server), and
+  iconview GUI groups); 32 test files
+- **Scale:** ~56k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
 ## Implemented — DO NOT re-add any of these
@@ -43,7 +44,10 @@ busy), separator, frame, notebook, list (multi-select, rubber-band +
 auto-scroll, row icons), tree (row icons; multi-select + rubber band
 + auto-scroll), scrollview + scrollbar (smooth wheel), menu /
 menu-bar / context menu (accelerators + mnemonics), combo (editable),
-slider (marks/ticks + labels; vertical orientation), spinbutton,
+slider (marks/ticks + labels; vertical orientation), **iconview**
+(the 1.4.5 item grid: glyph cells in a re-flowing column field,
+the List's selection model, grid keyboard nav, batch fills),
+spinbutton,
 toolbar, tooltip, spinner, link-button (role on button), paned,
 expander, statusbar, stack + stackswitcher, revealer (slide modes;
 crossfade via the paint group), levelbar, canvas (drawing area),
@@ -74,7 +78,10 @@ sidebar rhythm).
 ### Platform / input (SHIPPED)
 
 - X11 backend: full window lifecycle, EWMH/ICCCM, XIM **full-Unicode**
-  input, resize edges, decorations
+  input, resize edges, decorations, **HiDPI** (1.4.5: Xft.dpi /
+  screen-metric detection at connect, integer scale [1,3],
+  physical-sized windows + divided input — the same core
+  compositing the Wayland side rides)
 - Wayland backend: xdg-shell lifecycle, libxkbcommon keymap, client
   key repeat (1.3.5), output hot-plug/unplug, compositor-death
   resilience, cursor shapes
@@ -82,8 +89,9 @@ sidebar rhythm).
 - DnD: both directions (X11 + Wayland), `fdk_drag_begin`
 - Focus traversal, double/triple-click, shift-click range select
 - **HiDPI on Wayland: SHIPPED** — fractional-scale-v1 listener,
-  viewport source rectangles, `fdk_window_get_scale` (the ledger's
-  "HiDPI LATER" is stale for Wayland; X11 honestly reports 1.0)
+  viewport source rectangles, `fdk_window_get_scale`
+- **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
+  detection, integer scales, physical windows, divided input
 
 ### Infrastructure (SHIPPED)
 
@@ -111,14 +119,14 @@ sidebar rhythm).
 
 ## What's left (the authoritative backlog)
 
-### NEXT — milestone 1.4.5 (from the parity ledger, value order)
+### NEXT — milestone 1.4.6 (from the parity ledger, value order)
 
-1. **X11 HiDPI** — RandR/Xft.dpi detection (the last "honestly
-   reports 1.0" confession; the Wayland side is done)
-2. **IconView / GridView** — the canvas-based item grid (the
-   biggest remaining widget gap)
-3. **IME completion surface** — likely staying LATER (needs a real
-   IME protocol surface)
+1. **IconView rubber band** — the List's drag-select, grid-shaped
+   (the one IconView delta GTK carries)
+2. **IME completion surface** — likely staying LATER (needs a real
+   IME protocol surface; the no-bus policy applies)
+3. **The polish pass** — theme metric coverage for the 1.4.4/1.4.5
+   furniture, rig checks for the new widgets
 
 ### LATER (real, not next)
 

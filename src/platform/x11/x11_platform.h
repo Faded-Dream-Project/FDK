@@ -18,6 +18,12 @@
 #include <X11/extensions/XShm.h>
 #include <stddef.h>
 
+/* 1.4.5: HiDPI detection (x11_connection.c) + the scale query op
+ * (x11_window.c, registered in the ops table). */
+int fdk__x11_detect_scale(Display *display);
+fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
+                                    fdk_f32 *out_scale);
+
 struct fdk_platform_connection {
     /* Application id (fdk_init_options.app_id), duplicated at connect
      * time; NULL when unset. Applied to every window as WM_CLASS (the
@@ -27,6 +33,17 @@ struct fdk_platform_connection {
     Display *display;
     int screen;
     Window root;
+
+    /* HiDPI scale (1.4.5): X11 has no scale protocol — the window
+     * is created at logical x scale physical pixels and the core's
+     * paint path composites the logical tree up (the same
+     * intermediate + integer-scale blit the Wayland backend rides
+     * with viewporter). INTEGER ONLY: the core's blit is the
+     * nearest-neighbor block path (no resampling artifacts). One
+     * detection at connect — see x11_connection.c for the two
+     * conventions (Xft.dpi resource, screen physical metric). */
+    int scale;
+
     Atom wm_delete_window;
     Atom wm_protocols;
     Atom net_wm_name;

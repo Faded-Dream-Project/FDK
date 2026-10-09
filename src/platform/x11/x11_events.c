@@ -111,6 +111,21 @@ static fdk_u32 x11_lookup_codepoint(fdk_platform_window *pwindow,
     return 0;
 }
 
+/* HiDPI (1.4.5): physical window coordinates -> logical tree
+ * coordinates. The X window is logical x conn->scale pixels; every
+ * coordinate handed to the core (and thus to widget hit-testing)
+ * divides back down. Integer division by an integer scale is the
+ * exact inverse of the paint path's integer block scaling: a widget
+ * at logical x occupies physical [x*s, (x+1)*s), and any physical
+ * pixel in that range maps back to x. */
+static fdk_f32 x11_to_logical_x(fdk_platform_window *pwindow, int px) {
+    int s = pwindow->conn->scale;
+    return (s > 1) ? (fdk_f32)(px / s) : (fdk_f32)px;
+}
+static fdk_f32 x11_to_logical_y(fdk_platform_window *pwindow, int py) {
+    return x11_to_logical_x(pwindow, py);
+}
+
 /* Fills `out` for events that don't need cross-referencing against
  * connection-level state (WM_DELETE_WINDOW etc — those are handled in
  * x11_dispatch_pending directly). Returns nonzero if `xevent` produced
@@ -120,6 +135,9 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                              fdk_event_data *out) {
     switch (xevent->type) {
         case ConfigureNotify: {
+            /* last_size stays PHYSICAL (the framebuffer pair sizes
+             * from it); the event the CORE sees is logical (the root
+             * widget and the paint intermediate size from that). */
             fdk_size new_size = {
                 .width = xevent->xconfigure.width,
                 .height = xevent->xconfigure.height,
@@ -130,7 +148,14 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             }
             pwindow->last_size = new_size;
             out->type = FDK_EVENT_WINDOW_CONFIGURE;
-            out->configure.size = new_size;
+            if (pwindow->conn->scale > 1) {
+                out->configure.size.width =
+                    new_size.width / pwindow->conn->scale;
+                out->configure.size.height =
+                    new_size.height / pwindow->conn->scale;
+            } else {
+                out->configure.size = new_size;
+            }
             return 1;
         }
 
@@ -204,8 +229,10 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
 
         case MotionNotify:
             out->type = FDK_EVENT_POINTER_MOTION;
-            out->pointer.position.x = (fdk_f32)xevent->xmotion.x;
-            out->pointer.position.y = (fdk_f32)xevent->xmotion.y;
+            out->pointer.position.x =
+                x11_to_logical_x(pwindow, xevent->xmotion.x);
+            out->pointer.position.y =
+                x11_to_logical_y(pwindow, xevent->xmotion.y);
             return 1;
 
         case ButtonPress:
@@ -220,8 +247,10 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                     return 0; /* only translate the press half */
                 }
                 out->type = FDK_EVENT_POINTER_SCROLL;
-                out->scroll.position.x = (fdk_f32)xevent->xbutton.x;
-                out->scroll.position.y = (fdk_f32)xevent->xbutton.y;
+                out->scroll.position.x =
+                    x11_to_logical_x(pwindow, xevent->xbutton.x);
+                out->scroll.position.y =
+                    x11_to_logical_y(pwindow, xevent->xbutton.y);
                 out->scroll.delta_x = 0.0f;
                 out->scroll.delta_y = (xevent->xbutton.button == Button4) ? 1.0f : -1.0f;
                 return 1;
@@ -244,8 +273,10 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             out->type = (xevent->type == ButtonPress)
                 ? FDK_EVENT_POINTER_BUTTON_DOWN
                 : FDK_EVENT_POINTER_BUTTON_UP;
-            out->pointer_button.position.x = (fdk_f32)xevent->xbutton.x;
-            out->pointer_button.position.y = (fdk_f32)xevent->xbutton.y;
+            out->pointer_button.position.x =
+                x11_to_logical_x(pwindow, xevent->xbutton.x);
+            out->pointer_button.position.y =
+                x11_to_logical_y(pwindow, xevent->xbutton.y);
             out->pointer_button.button = xevent->xbutton.button;
             out->pointer_button.modifiers =
                 fdk__x11_translate_modifiers(xevent->xbutton.state);
@@ -254,14 +285,18 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
 
         case EnterNotify:
             out->type = FDK_EVENT_POINTER_ENTER;
-            out->pointer.position.x = (fdk_f32)xevent->xcrossing.x;
-            out->pointer.position.y = (fdk_f32)xevent->xcrossing.y;
+            out->pointer.position.x =
+                x11_to_logical_x(pwindow, xevent->xcrossing.x);
+            out->pointer.position.y =
+                x11_to_logical_y(pwindow, xevent->xcrossing.y);
             return 1;
 
         case LeaveNotify:
             out->type = FDK_EVENT_POINTER_LEAVE;
-            out->pointer.position.x = (fdk_f32)xevent->xcrossing.x;
-            out->pointer.position.y = (fdk_f32)xevent->xcrossing.y;
+            out->pointer.position.x =
+                x11_to_logical_x(pwindow, xevent->xcrossing.x);
+            out->pointer.position.y =
+                x11_to_logical_y(pwindow, xevent->xcrossing.y);
             return 1;
 
         case PropertyNotify: {

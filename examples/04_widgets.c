@@ -11,6 +11,8 @@
  *                     reveals advanced options, and a Paned whose
  *                     divider DRAGS (and answers the arrows when
  *                     focused — Tab to it)
+ *   1.4.5 frame     — the item grid: an IconView of glyph cells
+ *                      (click, ctrl/shift, keyboard grid nav)
  *   1.4.4 frame     — the modern batch: a REORDERABLE notebook, a
  *                      color-well button, an icon-slot entry, an
  *                      overlay-scrollbar list
@@ -135,6 +137,23 @@ static void on_path_icon(fdk_widget *entry, fdk_entry_slot slot,
                "through to the caret.");
 }
 
+/* ---- 1.4.5: the grid callbacks ---- */
+
+static void on_iv_selection(fdk_widget *view, void *user) {
+    (void)view;
+    (void)user;
+    set_status("IconView: selection changed (try arrows — Down "
+               "steps a whole row).");
+}
+
+static void on_iv_activate(fdk_widget *view, size_t index, void *user) {
+    (void)view;
+    (void)user;
+    char buf[96];
+    snprintf(buf, sizeof(buf), "IconView: opened item %zu.", index);
+    set_status(buf);
+}
+
 /* ---- 1.4.3: the chooser-batch callbacks ---- */
 
 static fdk_context *g_ctx = NULL; /* the dialogs' context */
@@ -214,7 +233,7 @@ int main(void) {
     g_ctx = ctx;
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 1330)) {
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 1620)) {
         fdk_shutdown(ctx);
         return 1;
     }
@@ -498,6 +517,43 @@ int main(void) {
         (void)fdk_widget_set_tooltip(
             osv, "Overlay scrollbars: thin thumbs that fade when "
                  "idle and return on scroll — wheel me");
+    }
+
+    (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
+
+    /* --- frame: the 1.4.5 furniture (the item grid) ---
+     *
+     * An IconView: fixed-size cells (glyph over label) flowing in
+     * as many columns as the width fits; the whole selection model
+     * (click / ctrl / shift in reading order) and grid keyboard
+     * navigation (Down steps a ROW). */
+    {
+        fdk_widget *f145 = NULL;
+        (void)fdk_frame_create(content, font16, "1.4.5 — item grid",
+                               &f145);
+        fdk_widget_set_background(f145, col(26, 29, 40));
+        fdk_widget *iv = NULL;
+        (void)fdk_iconview_create(f145, font16, &iv);
+        static const char *iv_labels[6] = {
+            "Folder", "Report", "Home", "Drive", "Notes", "Recent",
+        };
+        static const fdk_row_icon iv_icons[6] = {
+            FDK_ROW_ICON_FOLDER, FDK_ROW_ICON_FILE, FDK_ROW_ICON_HOME,
+            FDK_ROW_ICON_DRIVE, FDK_ROW_ICON_FILE, FDK_ROW_ICON_RECENT,
+        };
+        fdk_iconview_begin_batch(iv);
+        for (int i = 0; i < 6; i++) {
+            (void)fdk_iconview_append(iv, iv_labels[i], iv_icons[i]);
+        }
+        fdk_iconview_end_batch(iv);
+        fdk_widget_set_natural_size(iv, 420, 200);
+        fdk_iconview_set_on_selection_changed(iv, on_iv_selection,
+                                              NULL);
+        fdk_iconview_set_on_item_activate(iv, on_iv_activate, NULL);
+        (void)fdk_widget_set_tooltip(
+            iv, "The item grid: cells flow into columns; click, "
+                "ctrl/shift-select, or drive it with the arrows "
+                "(Down steps a whole row; Enter opens)");
     }
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);

@@ -748,6 +748,78 @@ fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
 /* The row's icon (NONE for non-lists / out-of-range rows). */
 fdk_row_icon fdk_list_row_get_icon(fdk_widget *list, size_t row);
 
+/* ---- IconView (1.4.5) ----------------------------------------------
+ *
+ * The canvas-based item GRID the parity ledger parked since its
+ * first draft (GtkIconView / QListView-icon-mode): a scrolling
+ * field of fixed-size cells, each a symbolic glyph over a
+ * single-line label, laid out left-to-right then top-to-bottom in
+ * as many columns as the current width fits (re-flowing on
+ * resize — the same request/allocate rhythm the List applies to
+ * rows).
+ *
+ * Selection is the List's whole model — NONE / SINGLE / MULTIPLE,
+ * click / ctrl-toggle / shift-range-in-reading-order, keyboard
+ * navigation (Left/Right step one item, Up/Down step one ROW of
+ * the grid, Home/End the field's ends, Enter activates the cursor)
+ * — and activation is the List's discipline too: double-click or
+ * Enter fires on_item_activate once.
+ *
+ * Items are glyph+label pairs (fdk_row_icon's vector language at
+ * the cell's center, the label clipped to the cell's width — no
+ * wrap, no ellipsis glyph, the honest clip). set_item_size adjusts
+ * the cell geometry for denser or airier fields. Batch
+ * begin/end wraps bulk fills (one relayout at the end).
+ *
+ * The a11y tree exposes the view as a LIST whose item children are
+ * the cells themselves (name = label, SELECTED on the chosen).
+ */
+
+fdk_result fdk_iconview_create(fdk_widget *parent, fdk_font *font,
+                              fdk_widget **out_iconview);
+/* Appends an item (label copied, glyph from the symbolic set).
+ * Returns the new item's index. */
+size_t fdk_iconview_append(fdk_widget *iconview, const char *label,
+                           fdk_row_icon icon);
+size_t fdk_iconview_item_count(fdk_widget *iconview);
+/* The item's label (toolkit-owned; valid until it is removed). */
+const char *fdk_iconview_item_label(fdk_widget *iconview, size_t index);
+fdk_row_icon fdk_iconview_item_icon(fdk_widget *iconview, size_t index);
+fdk_result fdk_iconview_set_item_label(fdk_widget *iconview,
+                                       size_t index, const char *label);
+fdk_result fdk_iconview_set_item_icon(fdk_widget *iconview,
+                                      size_t index, fdk_row_icon icon);
+/* Removes one item (indices shift down; the selection follows the
+ * List's survivor rules). */
+fdk_result fdk_iconview_remove_item(fdk_widget *iconview, size_t index);
+void fdk_iconview_clear(fdk_widget *iconview);
+/* Cell geometry (icon box + label band). Defaults: 96 x 84. */
+fdk_result fdk_iconview_set_item_size(fdk_widget *iconview,
+                                      fdk_i32 width, fdk_i32 height);
+/* The List's selection surface, verbatim. */
+void fdk_iconview_set_selection_mode(fdk_widget *iconview,
+                                     fdk_list_selection_mode mode);
+fdk_i64 fdk_iconview_get_selected(fdk_widget *iconview);
+bool fdk_iconview_is_selected(fdk_widget *iconview, size_t index);
+size_t fdk_iconview_selected_count(fdk_widget *iconview);
+fdk_result fdk_iconview_selected_at(fdk_widget *iconview, size_t position,
+                                    size_t *out_index);
+fdk_result fdk_iconview_select(fdk_widget *iconview, size_t index);
+void fdk_iconview_clear_selection(fdk_widget *iconview);
+void fdk_iconview_set_on_selection_changed(fdk_widget *iconview,
+                                           fdk_list_selection_fn fn,
+                                           void *user_data);
+/* Double-click / Enter: the "open this item" gesture. */
+typedef void (*fdk_iconview_item_fn)(fdk_widget *iconview,
+                                     size_t index, void *user_data);
+void fdk_iconview_set_on_item_activate(fdk_widget *iconview,
+                                       fdk_iconview_item_fn fn,
+                                       void *user_data);
+/* Bulk-mutation batching (the List's contract: mutations between
+ * begin/end skip per-mutation relayout; end_batch settles once). */
+void fdk_iconview_begin_batch(fdk_widget *iconview);
+void fdk_iconview_end_batch(fdk_widget *iconview);
+
 /* ---- Tree (Phase 9) ----
  *
  * A hierarchical expandable tree on the ScrollView: nodes hold text,

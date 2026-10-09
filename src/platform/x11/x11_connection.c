@@ -59,6 +59,67 @@ static int x11_io_error_handler(Display *display) {
     return 0; /* unreachable when armed; lets Xlib exit when not */
 }
 
+
+/* HiDPI scale detection (1.4.5).
+ *
+ * X11 has no scale protocol; two conventions exist, and we read
+ * them in priority order, pure Xlib (no Xsettings daemon, no
+ * Xrandr dependency):
+ *
+ *   1. The "Xft.dpi" resource string - what real desktop sessions
+ *      set through xrdb (and what XSETTINGS-synced environments
+ *      mirror into the RESOURCE_MANAGER property XGetDefault
+ *      reads). This is the same source GDK's X11 backend trusts.
+ *
+ *   2. The screen's own physical metric: pixels per millimeter
+ *      from the core protocol's width/widthmm - what a bare
+ *      "Xvfb -dpi N" establishes, which is exactly how the test
+ *      rig drives a scale-2 environment end to end.
+ *
+ * scale = round(dpi / 96) clamped to [1, 3]. INTEGER ONLY on
+ * purpose: the core's HiDPI compositing path is the
+ * nearest-neighbor block blit (fdk_window_paint), and a
+ * fractional X11 scale would shimmer on every text edge instead
+ * of staying pixel-exact. 96 dpi (the X convention) maps to 1;
+ * 144 dpi maps to 2; a 75-dpi projector still maps to 1 (never
+ * downscale).
+ */
+int fdk__x11_detect_scale(Display *display) {
+    double dpi = -1.0;
+
+    const char *xft = XGetDefault(display, "Xft", "dpi");
+    if (xft != NULL) {
+        dpi = atof(xft);
+        if (dpi < 0.0 || dpi > 10000.0) {
+            dpi = -1.0; /* pathological resource: fall through */
+        }
+    }
+    if (dpi <= 0.0) {
+        Screen *scr = ScreenOfDisplay(display, DefaultScreen(display));
+        int px = WidthOfScreen(scr);
+        int mm = WidthMMOfScreen(scr);
+        if (mm > 0 && px > 0) {
+            dpi = ((double)px * 25.4) / (double)mm;
+        }
+    }
+    if (dpi <= 0.0) {
+        return 1; /* no honest signal: unscaled */
+    }
+    int scale = (int)(dpi / 96.0 + 0.5);
+    if (scale < 1) {
+        scale = 1; /* never downscale */
+    }
+    if (scale > 3) {
+        scale = 3; /* 300% is the practical ceiling */
+    }
+    if (scale > 1) {
+        FDK_INFO("HiDPI: scale %d (detected %.1f dpi) - windows are "
+                 "physical-sized, the tree composites up",
+                 scale, dpi);
+    }
+    return scale;
+}
+
 fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
                                void *dispatch_user_data, const char *app_id,
                                fdk_platform_connection **out_conn) {
@@ -77,6 +138,12 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->display = display;
     conn->screen = DefaultScreen(display);
     conn->root = RootWindow(display, conn->screen);
+
+    /* HiDPI scale (1.4.5): detected ONCE at connect - see
+     * fdk__x11_detect_scale below for the two conventions and the
+     * integer-only rule. */
+    conn->scale = fdk__x11_detect_scale(display);
+
     conn->dispatch = dispatch;
     conn->dispatch_user_data = dispatch_user_data;
     conn->windows = NULL;

@@ -7218,6 +7218,271 @@ static void test_modern_batch_gui(void) {
            "real X input\n");
 }
 
+
+/* ---- 1.4.5: X11 HiDPI, end to end on a private 192-dpi Xvfb ---- */
+
+static int hidpi_hits = 0;
+static void hidpi_button_cb(fdk_widget *w, void *user) {
+    (void)w;
+    (void)user;
+    hidpi_hits++;
+}
+
+static void test_x11_hidpi_gui(void) {
+    /* A private Xvfb at 192 dpi: the screen metric path of the
+     * detection (Xft.dpi unset on a bare server) -> scale 2. */
+    char *saved_display = getenv("DISPLAY");
+    const char *disp = ":98";
+    unlink("/tmp/.X11-unix/X98");
+    pid_t xvfb = fork();
+    if (xvfb == 0) {
+        execlp("Xvfb", "Xvfb", disp, "-screen", "0", "800x600x24",
+               "-dpi", "192", (char *)NULL);
+        _exit(127);
+    }
+    assert(xvfb > 0);
+    setenv("DISPLAY", disp, 1);
+    /* Let the server come up. */
+    for (int i = 0; i < 40; i++) {
+        struct timespec ts = { .tv_nsec = 100 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+        Display *probe = XOpenDisplay(disp);
+        if (probe != NULL) {
+            XCloseDisplay(probe);
+            break;
+        }
+    }
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    fdk_result r = init_with_retry(&ctx, &opts);
+    if (!fdk_ok(r)) {
+        /* The 192-dpi server did not come up in this environment:
+         * say so honestly rather than fail the suite. */
+        printf("[skip] X11 HiDPI GUI (private 192-dpi Xvfb unavailable)\n");
+        kill(xvfb, SIGTERM);
+        waitpid(xvfb, NULL, 0);
+        if (saved_display != NULL) {
+            setenv("DISPLAY", saved_display, 1);
+        } else {
+            unsetenv("DISPLAY");
+        }
+        return;
+    }
+    assert(fdk_ok(r));
+
+    /* 1. The scale is honest: 192 dpi -> 2. */
+    fdk_window_options wopts = { .title = "hidpi",
+                                 .width = 220, .height = 140 };
+    fdk_window *win = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_f32 scale = 1.0f;
+    assert(fdk_ok(fdk_window_get_scale(win, &scale)));
+    assert(scale == 2.0f);
+    printf("[ok] X11 HiDPI: 192-dpi Xvfb detected, scale == 2\n");
+
+    /* 2. The X window is PHYSICAL: 220x140 logical -> 440x280 px,
+     * verified server-side through a second connection. */
+    Display *geo = XOpenDisplay(disp);
+    assert(geo != NULL);
+    {
+        Window root_ret = None;
+        int x = 0, y = 0;
+        unsigned int pw = 0, ph = 0, bw = 0, depth = 0;
+        Status st = XGetGeometry(geo, (Window)fdk_window_xid(win),
+                                 &root_ret, &x, &y, &pw, &ph, &bw,
+                                 &depth);
+        assert(st != 0);
+        assert(pw == 440 && ph == 280);
+    }
+    printf("[ok] X11 HiDPI: the window is physical-sized "
+           "(440x280 for 220x140 logical)\n");
+
+    /* 3. The logical size the core sees is unchanged. */
+    fdk_size wsz = {0, 0};
+    assert(fdk_ok(fdk_window_get_size(win, &wsz)));
+    assert(wsz.width == 220 && wsz.height == 140);
+
+    /* 4. Pixel proof of the block scaling: a logical 20x10 widget
+     * at logical (10, 20) becomes a 40x20 PHYSICAL block at (20,
+     * 40). Painted through the widget tree -> intermediate ->
+     * integer-scale blit. */
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget *block = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){10, 20, 20, 10},
+                                    &block)));
+    fdk_widget_set_background(block, (fdk_color){0.9f, 0.1f, 0.1f, 1});
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+    assert(fdk_ok(fdk_window_paint(win)));
+
+    Display *rb = NULL;
+    unsigned long px_in = x11_readback_pixel(&rb, fdk_window_xid(win),
+                                             40, 50);   /* logical (20,25) */
+    unsigned long px_edge = x11_readback_pixel(&rb, fdk_window_xid(win),
+                                               58, 50);  /* logical (29,25): inside the 2x block */
+    unsigned long px_out = x11_readback_pixel(&rb, fdk_window_xid(win),
+                                              70, 50);   /* logical (35,25): outside */
+    unsigned long red = 0x00E61A1Au; /* 0.9,0.1,0.1 rounded */
+    assert(px_in == red);
+    assert(px_edge == red); /* the block doubled to 40 wide */
+    assert(px_out != red);
+    printf("[ok] X11 HiDPI: logical 20x10 block renders as a 40x20 "
+           "physical block (server-verified)\n");
+
+    /* 5. Input proof: a PHYSICAL click at (40, 50) hits the widget
+     * at LOGICAL (20, 25) — the division in the event layer. */
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        NULL,
+    };
+    fdk_font *font = fdk_font_load(font_candidates[0], 16);
+    if (font != NULL) {
+        fdk_widget *btn = NULL;
+        assert(fdk_ok(fdk_button_create(root, font, "Hi", &btn)));
+        fdk_widget_arrange(btn, (fdk_rect){10, 20, 20, 10});
+        fdk_widget_set_background(block, (fdk_color){0, 0, 0, 0});
+        /* Position the button exactly over the block's old slot. */
+        hidpi_hits = 0;
+        fdk_button_set_on_activate(btn, hidpi_button_cb, NULL);
+        (void)fdk_pump_events(ctx, 100);
+        assert(fdk_ok(fdk_window_paint(win)));
+        Display *send = XOpenDisplay(disp);
+        assert(send != NULL);
+        x11_click(send, (Window)fdk_window_xid(win), 40, 50);
+        (void)fdk_pump_events(ctx, 200);
+        assert(hidpi_hits == 1);
+        printf("[ok] X11 HiDPI: physical click at (40,50) activates "
+               "the logical (20,25) button\n");
+        XCloseDisplay(send);
+        fdk_font_destroy(font);
+    }
+
+    XCloseDisplay(rb);
+    XCloseDisplay(geo);
+    fdk_window_destroy(win);
+    (void)fdk_pump_events(ctx, 100);
+    fdk_shutdown(ctx);
+
+    kill(xvfb, SIGTERM);
+    waitpid(xvfb, NULL, 0);
+    unlink("/tmp/.X11-unix/X98");
+    if (saved_display != NULL) {
+        setenv("DISPLAY", saved_display, 1);
+    } else {
+        unsetenv("DISPLAY");
+    }
+    printf("[ok] X11 HiDPI GUI: scale detection, physical window, "
+           "logical tree, block-doubled pixels, divided input\n");
+}
+
+
+/* ---- 1.4.5: the IconView through real input ---- */
+
+static int ivgui_sels = 0;
+static void ivgui_sel(fdk_widget *w, void *user) {
+    (void)w;
+    (void)user;
+    ivgui_sels++;
+}
+
+static int ivgui_acts = 0;
+static size_t ivgui_last = 999;
+static void ivgui_activate(fdk_widget *w, size_t index, void *user) {
+    (void)w;
+    (void)user;
+    ivgui_acts++;
+    ivgui_last = index;
+}
+
+static void test_iconview_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        NULL,
+    };
+    FILE *ff = fopen(font_candidates[0], "rb");
+    if (ff == NULL) {
+        printf("[skip] X11 iconview GUI (no system font)\n");
+        return;
+    }
+    fclose(ff);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_font *font = fdk_font_load(font_candidates[0], 16);
+    assert(font != NULL);
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+
+    fdk_window_options wopts = { .title = "iconview",
+                                 .width = 430, .height = 320 };
+    fdk_window *win = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *root = NULL;
+    (void)fdk_window_get_root(win, &root);
+    fdk_widget *iv = NULL;
+    assert(fdk_ok(fdk_iconview_create(root, font, &iv)));
+    fdk_iconview_set_on_selection_changed(iv, ivgui_sel, NULL);
+    fdk_iconview_set_on_item_activate(iv, ivgui_activate, NULL);
+    static const char *labels[9] = {
+        "Alpha", "Beta", "Gamma", "Delta", "Epsilon",
+        "Zeta", "Eta", "Theta", "Iota",
+    };
+    static const fdk_row_icon icons[9] = {
+        FDK_ROW_ICON_FOLDER, FDK_ROW_ICON_FILE, FDK_ROW_ICON_HOME,
+        FDK_ROW_ICON_DRIVE, FDK_ROW_ICON_FILE, FDK_ROW_ICON_FOLDER,
+        FDK_ROW_ICON_FILE, FDK_ROW_ICON_RECENT, FDK_ROW_ICON_FILE,
+    };
+    fdk_iconview_begin_batch(iv);
+    for (int i = 0; i < 9; i++) {
+        (void)fdk_iconview_append(iv, labels[i], icons[i]);
+    }
+    fdk_iconview_end_batch(iv);
+    fdk_widget_arrange(iv, (fdk_rect){10, 10, 410, 300});
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+    Window xid = (Window)fdk_window_xid(win);
+    assert(fdk_ok(fdk_window_paint(win)));
+
+    /* A real click on item 4 (FOUR columns at 410 wide: step 100;
+     * item 4 = row 1, column 0 -> cell (0..96, 88..172), center
+     * (48, 130)). */
+    ivgui_sels = 0;
+    x11_click(send, xid, 48, 130);
+    (void)fdk_pump_events(ctx, 150);
+    assert(fdk_iconview_get_selected(iv) == 4);
+    assert(ivgui_sels == 1);
+    assert(fdk_ok(fdk_window_paint(win)));
+    printf("[ok] iconview GUI: real click selects (item 4, the "
+           "second row's middle cell)\n");
+
+    /* Enter activates the cursor. */
+    ivgui_acts = 0;
+    x11_send_key_event(send, xid, KeyPress, 36);
+    (void)fdk_pump_events(ctx, 150);
+    assert(ivgui_acts == 1 && ivgui_last == 4);
+    printf("[ok] iconview GUI: Enter activates the cursor's item\n");
+
+    /* Keyboard grid nav: Down = one ROW (+4 columns) -> item 8,
+     * the last (a 4x3 grid with 9 items). */
+    x11_send_key_event(send, xid, KeyPress, 116); /* Down (keycode 116 -> scancode 108) */
+    (void)fdk_pump_events(ctx, 150);
+    assert(fdk_iconview_get_selected(iv) == 8);
+    printf("[ok] iconview GUI: Down steps a whole grid row\n");
+
+    XCloseDisplay(send);
+    fdk_window_destroy(win);
+    (void)fdk_pump_events(ctx, 100);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] iconview GUI: selection, activation, grid "
+           "navigation through real X input\n");
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -7278,6 +7543,8 @@ int main(void) {
     test_app_furniture_gui();
     test_choosers_gui();
     test_modern_batch_gui();
+    test_x11_hidpi_gui();
+    test_iconview_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

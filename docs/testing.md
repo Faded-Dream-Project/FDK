@@ -1526,3 +1526,30 @@ window's), so the readback showed the FIRST frame with the thumb
 still up. Every pixel assertion that follows state changes during
 pumping needs its `fdk_window_paint` between the pumps and the
 XGetImage.
+
+## 1.4.5 — three lessons from HiDPI and the grid
+
+**Integer division is the exact inverse of integer block
+scaling.** A widget at logical x occupies physical [x*s, (x+1)*s);
+dividing any physical pixel in that range maps back to x — so the
+X11 input translation can be plain integer division, no rounding
+disputes, and hit-testing stays exact at every scale. The
+symmetry is the whole argument for INTEGER scales on X11: the
+nearest-neighbor block blit composites losslessly, and its
+inverse divides losslessly; a fractional scale would break both
+directions at once.
+
+**Range from the ANCHOR, not the cursor.** The IconView's first
+shift-select ranged from the keyboard cursor — so a ctrl-click
+followed by shift-click selected the wrong span (the ctrl had
+moved the cursor but the user's mental anchor was their last
+plain click). GTK's rule: ctrl does NOT move the anchor; only a
+plain click does. The same shape bit nothing earlier only because
+the List's cursor and anchor happened to move together in its
+tests.
+
+**Cold-start navigation lands on item 0 — even in a grid.** The
+first Down on a fresh IconView selected item 0+COLUMNS (the
+grid-shaped reading of "step a row"), where every list since v1
+lands the first key on the first item. The cold-start flag has to
+override EVERY navigation case, not just the row-stepping one.

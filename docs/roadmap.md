@@ -4294,7 +4294,65 @@ secret scans clean.
 
 ---
 
-## The GTK/Qt feature-parity ledger
+### 1.4.5 — HiDPI everywhere, and the item grid (the ledger's NEXT list, emptied again)
+
+The sixth milestone of the directive: the last "honestly reports
+1.0" confession retired, and the biggest parked widget shipped.
+
+X11 HIDPI. The core already owned the whole compositing half (the
+Phase 3 paint path renders the logical tree into an intermediate
+and block-scales it onto the physical buffer — the machinery the
+Wayland backend rides with viewporter); what X11 lacked was
+detection and physical sizing, both now in the backend. Detection
+is ONE query at connect, pure Xlib: the Xft.dpi resource string
+(the convention real desktops set through xrdb and XSETTINGS-synced
+sessions — the same source GDK's X11 backend trusts), falling back
+to the screen's own pixels-per-millimeter (what a bare Xvfb -dpi
+establishes). scale = round(dpi/96) clamped to [1, 3], INTEGER
+ONLY on purpose: the compositing blit is the pixel-exact
+nearest-neighbor block path, and a fractional scale would shimmer
+on every text edge. Windows are created at logical x scale; resize
+hints, move_resize, popup offsets, and the WM-drag anchors scale
+with them; every pointer/scroll/drag/configure coordinate divides
+back to logical at the translation boundary (integer division is
+the exact inverse of integer block scaling); query_pointer returns
+logical; DnD events divide at their single dispatch chokepoint.
+The e2e group runs a private 192-dpi Xvfb: scale 2 detected, the
+window measures 440x280 for 220x140 logical server-side, a logical
+20x10 block renders as a 40x20 physical block (server-verified),
+and a physical click at (40,50) activates the logical (20,25)
+button — while the whole existing suite passes unchanged on the
+default display (the scale-1 invariance proof).
+
+THE ICONVIEW. The ledger's OUT-for-now since its first draft
+(GtkIconView / QListView-icon-mode): a scrolling field of
+fixed-size cells — the 16-px vector glyphs centered over a
+single-line clipped label — flowing left-to-right, top-to-bottom,
+in as many columns as the current width fits (re-flowing on every
+arrange; set_item_size tunes the cell). The List's whole
+discipline rides along: ScrollView internals, the
+NONE/SINGLE/MULTIPLE selection model with click / ctrl-toggle /
+shift-range-in-reading-order (the ANCHOR is the last plain click —
+ctrl does not move it, GTK's rule, pinned by test), keyboard
+navigation where Down steps a whole GRID ROW and the cold start
+lands on item 0 (the List's first-Down rule), Enter/double-click
+activation, batched bulk fills, removal with survivor + cell
+re-index rules, and the a11y tree with the cells as real LIST_ITEM
+children (label as name, SELECTED state; the view a LIST with an
+item-count value text). The shift-range lesson the tests taught:
+range from the ANCHOR, not the cursor — the first draft ranged
+from the keyboard cursor and a ctrl-then-shift sequence selected
+the wrong span.
+
+Battery on the final tree: debug + release zero warnings; headless
+suite all-pass (the new iconview suite's five groups); X11
+integration all-pass including the HiDPI and iconview GUI groups;
+Wayland suite, interop, both tooltip rigs, compositor-death, and
+both example rigs PASS (the rigs re-screened to 1720 for the
+taller example); verify-exports 570 symbols in BOTH configs;
+secret scans clean.
+
+---\n\n## The GTK/Qt feature-parity ledger
 
 The standing directive ("every small feature that is in GTK and Qt
 must be in FDK too") needs a ledger, not a vibe — one place that
@@ -4327,8 +4385,8 @@ CROSSFADE 1.4.3); Stack/StackSwitcher SHIPPED
 (1.4.2);
 LevelBar SHIPPED (1.4.2); Scale marks
 SHIPPED (1.4.2 — slider ticks + labels; vertical orientation 1.4.3); DropDown-menu-button
-SHIPPED (1.4.3 — the MenuButton); IconView/GridView OUT-for-now (needs a canvas-
-based item layout; the List covers the row case); DrawingArea ==
+SHIPPED (1.4.3 — the MenuButton); IconView/GridView SHIPPED (1.4.5 — the item grid: glyph cells,
+the List's whole selection model, grid keyboard nav); DrawingArea ==
 Canvas SHIPPED; GLArea OUT (no OpenGL backend in scope — the
 software renderer is the product); Assistant/wizard OUT (dialog
 composition, app-level); FontChooser SHIPPED (1.4.3 — fdk_font_enumerate +
@@ -4354,9 +4412,10 @@ Infrastructure: theme files + tokens/metrics SHIPPED (28 colors,
 narrator, actions) SHIPPED; i18n (catalog, plurals, dates)
 SHIPPED; undo/redo SHIPPED (1.3.3); preferences SHIPPED (1.3.7);
 export surface SHIPPED (1.3.9); HiDPI: Wayland SHIPPED (Phase 3
-completion — fractional-scale-v1 + viewporter + fdk_window_get_scale;
-the 2026-10-10 root-file audit caught this entry lagging the tree),
-X11 LATER (RandR/Xft.dpi detection — get_scale honestly returns 1.0);
+completion — fractional-scale-v1 + viewporter) AND X11 SHIPPED
+(1.4.5 — Xft.dpi / screen-metric detection, integer scales, the
+core's block-blit compositing, physical windows with divided
+input);
 CSS-like
 styling OUT (the .fdk theme format is the customization surface —
 deliberate, per the no-CSS-engine stance); icon theme loading OUT
@@ -4370,10 +4429,12 @@ ledger's own stale claim — the 1.3.2 tooltip was already fully
 themed; the root PROGRESS.md audit caught it before any duplicate
 work).
 
-The NEXT list (1.4.5 candidates, in rough value order): X11
-HiDPI (RandR/Xft.dpi detection — the last "honestly reports 1.0"
-confession); ICONVIEW / GRIDVIEW (the canvas-based item grid the
-ledger parked as OUT-for-now — the biggest remaining widget gap,
-and the LATER list's own head); and the IME completion surface
-(preedit is display-only today — needs a real IME protocol
-surface, likely staying LATER).
+The 1.4.5 list shipped in full.
+
+The NEXT list (1.4.6 candidates, in rough value order): the
+ICONVIEW's rubber band (the List's drag-select, grid-shaped — the
+one IconView delta GTK carries); the IME completion surface
+(preedit is display-only; needs a real IME protocol surface —
+may stay LATER by the no-bus policy); and the polish pass the
+"serious project" bar keeps earning (theme metric coverage for
+the 1.4.4/1.4.5 furniture, rig checks for the new widgets).

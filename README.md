@@ -357,6 +357,13 @@ painters, per-slot sensitivity and press callbacks — the search
 preset is now built on them), plus the List's
 activate-on-single-click for the places-sidebar rhythm.
 
+The 1.4.5 milestone closes the two oldest confessions: X11 HiDPI
+(detected from the desktop's dpi conventions — windows render
+pixel-exact at 2x/3x with logical input coordinates unchanged) and
+the IconView, the item grid every file manager's "icon view" is —
+glyph cells that re-flow into columns, the List's whole selection
+model, and keyboard navigation where Down steps a full grid row.
+
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session
 frame with an expander and a draggable splitter, the 1.4.3 row
@@ -364,7 +371,8 @@ frame with an expander and a draggable splitter, the 1.4.3 row
 its fading panel, and the three chooser buttons), the 1.4.4 row
 (a reorderable three-tab notebook, the color well with its live
 swatch, a path entry with folder and clear icons, and an
-overlay-scrollbar column you can wheel), a grid, a button
+overlay-scrollbar column you can wheel), the 1.4.5 row (a
+six-cell IconView — click, ctrl/shift, arrows), a grid, a button
 row with a link button and a busy spinner, a progress bar, and a
 live status label that every control reports into. Then
 `examples/12_settings.c`: the whole 1.4.2 furniture composed into

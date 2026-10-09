@@ -61,6 +61,15 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
      * parent's client-area origin + (x, y) in ROOT coordinates —
      * override-redirect windows place directly, no WM frame math.
      * Top-levels stay WM-managed at (0,0) as before. */
+    /* HiDPI (1.4.5): the X WINDOW is PHYSICAL — logical x
+     * conn->scale. The core's paint path composites the logical
+     * widget tree up onto this physical framebuffer (the same
+     * machinery the Wayland backend rides with viewporter), and
+     * x11_events.c divides incoming coordinates back to logical. */
+    fdk_i32 scale = conn->scale;
+    fdk_i32 pw = width * scale;
+    fdk_i32 ph = height * scale;
+
     fdk_i32 win_x = 0, win_y = 0;
     if (popup != 0) {
         if (parent != NULL) {
@@ -72,8 +81,11 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                 win_y = 0;
             }
         }
-        win_x += pop_x;
-        win_y += pop_y;
+        /* pop_x/pop_y are LOGICAL offsets from the parent's origin
+         * (widget-space math — tooltip/menu placement): the root
+         * coordinates X wants are physical. */
+        win_x += pop_x * scale;
+        win_y += pop_y * scale;
     }
 
     Window xwindow;
@@ -90,8 +102,8 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                            EnterWindowMask | LeaveWindowMask |
                            PropertyChangeMask;
         xwindow = XCreateWindow(conn->display, conn->root,
-                                win_x, win_y, (unsigned int)width,
-                                (unsigned int)height, 0,
+                                win_x, win_y, (unsigned int)pw,
+                                (unsigned int)ph, 0,
                                 CopyFromParent, InputOutput,
                                 CopyFromParent,
                                 CWOverrideRedirect | CWBorderPixel |
@@ -136,8 +148,8 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
         attrs.bit_gravity = NorthWestGravity; /* retain bits top-left */
         attrs.border_pixel = black;
         xwindow = XCreateWindow(conn->display, conn->root,
-                                win_x, win_y, (unsigned int)width,
-                                (unsigned int)height, 0,
+                                win_x, win_y, (unsigned int)pw,
+                                (unsigned int)ph, 0,
                                 CopyFromParent, InputOutput,
                                 CopyFromParent,
                                 CWBackPixel | CWBitGravity |
@@ -210,8 +222,11 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     }
 
     pwindow->drop_formats = 0; /* fdk_window_set_drop_formats fills it */
-    pwindow->last_size.width = width;
-    pwindow->last_size.height = height;
+    /* PHYSICAL (the framebuffer pair sizes from this); the core's
+     * window->last_size stays LOGICAL and x11_events.c divides the
+     * ConfigureNotify it hands the core. */
+    pwindow->last_size.width = pw;
+    pwindow->last_size.height = ph;
     pwindow->maximized = 0;
     pwindow->minimized = 0;
     pwindow->presented_ever = 0;
@@ -480,8 +495,10 @@ void fdk_x11_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 
     if (width <= 0 || height <= 0) {
         return;
     }
+    fdk_i32 scale = pwindow->conn->scale; /* logical in, physical out */
     XResizeWindow(pwindow->conn->display, pwindow->xwindow,
-                  (unsigned int)width, (unsigned int)height);
+                  (unsigned int)(width * scale),
+                  (unsigned int)(height * scale));
     XFlush(pwindow->conn->display);
 }
 
@@ -552,11 +569,14 @@ void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,
         return;
     }
 
+    fdk_i32 scale = pwindow->conn->scale; /* hints are physical too */
     hints->flags = 0;
     if (min_size.width > 0 || min_size.height > 0) {
         hints->flags |= PMinSize;
-        hints->min_width = min_size.width > 0 ? min_size.width : 1;
-        hints->min_height = min_size.height > 0 ? min_size.height : 1;
+        hints->min_width =
+            (min_size.width > 0 ? min_size.width : 1) * scale;
+        hints->min_height =
+            (min_size.height > 0 ? min_size.height : 1) * scale;
     }
     if (max_size.width > 0 || max_size.height > 0) {
         hints->flags |= PMaxSize;
@@ -564,8 +584,10 @@ void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,
          * dimension"; approximate "unbounded" with a very large value
          * since XSizeHints has no explicit "no limit" sentinel once
          * PMaxSize is set at all. */
-        hints->max_width = max_size.width > 0 ? max_size.width : 100000;
-        hints->max_height = max_size.height > 0 ? max_size.height : 100000;
+        hints->max_width =
+            (max_size.width > 0 ? max_size.width : 100000) * scale;
+        hints->max_height =
+            (max_size.height > 0 ? max_size.height : 100000) * scale;
     }
 
     XSetWMNormalHints(pwindow->conn->display, pwindow->xwindow, hints);
@@ -821,8 +843,10 @@ void fdk_x11_window_move_resize_to(fdk_platform_window *pwindow,
     if (pwindow == NULL || width <= 0 || height <= 0) {
         return;
     }
+    fdk_i32 scale = pwindow->conn->scale;
     XMoveResizeWindow(pwindow->conn->display, pwindow->xwindow, x, y,
-                      (unsigned int)width, (unsigned int)height);
+                      (unsigned int)(width * scale),
+                      (unsigned int)(height * scale));
     XFlush(pwindow->conn->display);
 }
 
@@ -853,8 +877,12 @@ fdk_result fdk_x11_window_begin_move(fdk_platform_window *pwindow,
     }
     Window child = 0;
     int rx = 0, ry = 0;
+    /* local_x/local_y are LOGICAL (widget space); the translation and
+     * the WM message want physical root coordinates (1.4.5). */
+    fdk_i32 scale = pwindow->conn->scale;
     if (!XTranslateCoordinates(pwindow->conn->display, pwindow->xwindow,
-                               pwindow->conn->root, local_x, local_y,
+                               pwindow->conn->root,
+                               local_x * scale, local_y * scale,
                                &rx, &ry, &child)) {
         return FDK_ERR_PLATFORM_INIT;
     }
@@ -895,8 +923,11 @@ fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
     }
     Window child = 0;
     int rx = 0, ry = 0;
+    /* Logical local coords -> physical root coords (1.4.5). */
+    fdk_i32 rscale = pwindow->conn->scale;
     if (!XTranslateCoordinates(pwindow->conn->display, pwindow->xwindow,
-                               pwindow->conn->root, local_x, local_y,
+                               pwindow->conn->root,
+                               local_x * rscale, local_y * rscale,
                                &rx, &ry, &child)) {
         return FDK_ERR_PLATFORM_INIT;
     }
@@ -905,6 +936,22 @@ fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
     XUngrabPointer(pwindow->conn->display, CurrentTime);
     send_root_message(pwindow, pwindow->conn->net_wm_moveresize,
                       rx, ry, dir, 1);
+    return FDK_OK;
+}
+
+/* ---- HiDPI scale query (1.4.5) ---- */
+
+fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
+                                    fdk_f32 *out_scale) {
+    if (pwindow == NULL || out_scale == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* Integer by construction (see the connection's detection):
+     * the core's nearest-neighbor block-blit compositing stays
+     * pixel-exact. Detected once at connect — X11 has no dynamic
+     * scale protocol to listen for (dpi changes need a restart,
+     * same as every X toolkit). */
+    *out_scale = (fdk_f32)pwindow->conn->scale;
     return FDK_OK;
 }
 
@@ -937,8 +984,12 @@ int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
                        &win_x, &win_y, &mask)) {
         return 0;
     }
-    *out_x = win_x;
-    *out_y = win_y;
+    /* Physical bounds check (last_size is physical); LOGICAL outputs
+     * — the core synthesizes motion events from these (1.4.5). */
+    *out_x = pwindow->conn->scale > 1
+        ? win_x / pwindow->conn->scale : win_x;
+    *out_y = pwindow->conn->scale > 1
+        ? win_y / pwindow->conn->scale : win_y;
     return win_x >= 0 && win_y >= 0 &&
            win_x < (int)pwindow->last_size.width &&
            win_y < (int)pwindow->last_size.height;

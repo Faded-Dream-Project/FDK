@@ -122,15 +122,25 @@ void fdk_window_resize(fdk_window *window, fdk_i32 width, fdk_i32 height);
  * Returns FDK_ERR_INVALID_ARGUMENT if window or out_size is NULL. */
 fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
 
-/* ---- HiDPI (Phase 3 completion) ----
+/* ---- HiDPI (Phase 3 completion; X11 since 1.4.5) ----
  *
  * Reports the window's current scale factor: the number of BUFFER
  * (physical) pixels per logical unit. 1.0 = the window's pixels are
- * its logical units (every X11 window — the X11 core protocol has no
- * scale concept, and X11 HiDPI conventions live in font/DPI settings
- * outside FDK's scope, honestly). On Wayland this is the live
- * wl_surface buffer scale / fractional-scale preference, updated by
- * the compositor as the window moves between outputs.
+ * its logical units.
+ *
+ * Per backend:
+ *   - Wayland: the live wl_surface buffer scale / fractional-scale
+ *     preference, updated by the compositor as the window moves
+ *     between outputs.
+ *   - X11 (1.4.5): detected ONCE at connect from the desktop's two
+ *     conventions — the Xft.dpi resource string (xrdb /
+ *     XSETTINGS-synced sessions; what GDK's X11 backend trusts) or,
+ *     failing that, the screen's own pixels-per-millimeter metric
+ *     (what a bare "Xvfb -dpi N" establishes). scale = round(dpi/96)
+ *     clamped to [1, 3], INTEGER ONLY (the compositing path is the
+ *     pixel-exact nearest-neighbor block blit — fractional scales
+ *     would shimmer). X11 has no dynamic scale protocol: a dpi
+ *     change needs a restart, same as every X toolkit.
  *
  * What scales and what doesn't:
  *   - fdk_surface_get_info() reports PHYSICAL dimensions (logical
@@ -138,6 +148,9 @@ fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
  *   - The WIDGET layer (fdk_window_set_content, decorations) stays
  *     LOGICAL: FDK composites the widget tree onto the physical
  *     buffer at the current scale automatically (fdk_window_paint).
+ *   - Pointer/scroll/drag events arrive in LOGICAL coordinates on
+ *     both backends (the X11 backend divides physical input by the
+ *     scale); hit-testing and widget math never see the factor.
  *   - Apps that want crisp text/images at scale > 1 load fonts and
  *     images at size x scale themselves; fdk_window_get_scale tells
  *     them the factor.
