@@ -949,10 +949,16 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
     menu_gutters(v->model, &cg, &ag);
     fdk_i32 rh = fdk__menu_row_height(v->model);
 
-    /* Chrome: the menu surface + hairline border. */
-    fdk_surface_fill_rect(surface, bounds, fdk__pal_control());
+    /* Chrome: the menu surface + hairline border (1.4.0: the dedicated
+     * MENU_BACKGROUND surface with rounded corners, one step above the
+     * control fill — popups read as elevated layers, not as buttons).
+     * Radius 0 degenerates to the plain square chrome. */
+    fdk_i32 menu_r =
+        fdk_theme_get_metric(NULL, FDK_TM_MENU_CORNER_RADIUS);
+    fdk_surface_fill_rounded_rect(surface, bounds, menu_r,
+                                  fdk__pal_menu_bg());
     fdk_color border = fdk__pal_border();
-    fdk_surface_draw_rect(surface, bounds, border);
+    fdk_surface_draw_rounded_rect(surface, bounds, menu_r, border);
 
     fdk_i32 yy = bounds.y;
     for (size_t i = 0; i < v->model->count; i++) {
@@ -971,14 +977,21 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
                    it->enabled;
         if ((int)i == v->open_row && it->enabled) {
             /* The submenu-parent row stays lit while its child is
-             * open — accent-tinted so it reads "active", not merely
-             * hovered. */
-            fdk_color accent = fdk__pal_accent();
-            fdk_surface_fill_rect(
-                surface, row,
-                (fdk_color){accent.r, accent.g, accent.b, 0.45f});
+             * open — the selection fill so it reads "active", not
+             * merely hovered (1.4.0: the token replaces the hardcoded
+             * accent-alpha). */
+            fdk_surface_fill_rect(surface, row, fdk__pal_selection());
         } else if (lit) {
-            fdk_surface_fill_rect(surface, row, fdk__pal_control_hover());
+            /* 1.4.0: the hover state is an inset rounded PILL, not a
+             * full-width band — the modern menu-row look. The inset
+             * keeps the pill inside the popup's rounded corners. */
+            fdk_rect pill = {bounds.x + 3, yy + 1,
+                             bounds.width - 6, rh - 2};
+            if (pill.width > 0 && pill.height > 0) {
+                fdk_i32 pill_r = menu_r > 3 ? menu_r - 3 : 2;
+                fdk_surface_fill_rounded_rect(surface, pill, pill_r,
+                                              fdk__pal_row_hover());
+            }
         }
 
         fdk_i32 text_x = bounds.x + MENU_PAD_X;

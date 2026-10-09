@@ -2054,7 +2054,7 @@ static void test_label_radio_arrow_gui(void) {
  * paints by default; fdk_theme_set_default() re-damages the tree so
  * the next window paint shows the new colors AND the new metrics
  * (square vs rounded button corners, 1px vs 3px separator band);
- * switching back restores the v1 pixels exactly. */
+ * switching back restores the Modern pixels exactly. */
 static void test_theme_switch_gui(void) {
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
@@ -2086,12 +2086,12 @@ static void test_theme_switch_gui(void) {
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
 
-    /* v1 defaults: control fill 0.16/0.18/0.26 -> 0x292E42; border
-     * 0.30/0.33/0.44 -> 0x4D5470; radius 8 cuts the corner pixel;
-     * 1px rule at y = 70 + 10/2 = 75. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00292E42u);
+    /* Modern defaults (1.4.0): control fill 0.13/0.15/0.20 ->
+     * 0x212633; border 0.20/0.23/0.30 -> 0x333B4D; radius 8 cuts the
+     * corner pixel; 1px rule at y = 70 + 10/2 = 75. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00212633u);
     assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00141414u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x004D5470u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x00333B4Du);
     assert(x11_readback_pixel(&rb_dpy, xid, 80, 74) == 0x00141414u);
     assert(x11_readback_pixel(&rb_dpy, xid, 80, 76) == 0x00141414u);
 
@@ -2124,13 +2124,13 @@ static void test_theme_switch_gui(void) {
     assert(x11_readback_pixel(&rb_dpy, xid, 80, 73) == 0x00141414u);
     assert(x11_readback_pixel(&rb_dpy, xid, 80, 77) == 0x00141414u);
 
-    /* Back to the built-in: the v1 pixels return exactly. */
+    /* Back to the built-in: the Modern pixels return exactly. */
     fdk_theme_set_default(NULL);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00292E42u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00212633u);
     assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00141414u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x004D5470u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x00333B4Du);
 
     fdk_theme_destroy(light);
     XCloseDisplay(rb_dpy);
@@ -2235,16 +2235,16 @@ static void test_decorations_gui(void) {
     assert(fdk_window_get_decorated(win) == true);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    /* Band fill (v1 control bg) and its themed 1px bottom rule. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00292E42u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 27) == 0x004D5470u);
+    /* Band fill (Modern control bg) and its themed 1px bottom rule. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00212633u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 27) == 0x00333B4Du);
     /* The close button (22x20 at x=292..314): fill at its left edge,
      * vertically centered - clear of the radius-8 corners and of the
      * centered glyph. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 295, 14) == 0x00292E42u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 295, 14) == 0x00212633u);
     /* Content now starts BELOW the 28px band. */
     assert(x11_readback_pixel(&rb_dpy, xid, 10, 50) == 0x003C78C8u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 10, 5) == 0x00292E42u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 10, 5) == 0x00212633u);
     /* The WM has been asked to drop its chrome. */
     assert(motif_hints_present(rb_dpy, xid));
 
@@ -2299,7 +2299,7 @@ static void test_decorations_gui(void) {
     assert(fdk_ok(fdk_window_set_decorated(win, true)));
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00292E42u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00212633u);
 
     /* ---- Phase 8 completion: band buttons + double-click ---- */
     {
@@ -2410,14 +2410,14 @@ static void test_decorations_gui(void) {
         assert(fdk_ok(fdk_window_paint(win)));
         (void)fdk_pump_events(ctx, 200);
         assert(x11_readback_pixel(&rb_dpy, xid, 160, 38) ==
-               0x00292E42u); /* band fill: the band now covers 0..39 */
+               0x00212633u); /* band fill: the band now covers 0..39 */
         assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) ==
-               0x00292E42u);
+               0x00212633u);
         /* Content moved down: row 50 was content before (28px band),
          * still content (below 40) — and the band's bottom rule moved
          * from y=27 to y=39. */
         assert(x11_readback_pixel(&rb_dpy, xid, 160, 39) ==
-               0x004D5470u); /* themed rule at the new band bottom */
+               0x00333B4Du); /* themed rule at the new band bottom */
         fdk_theme_set_default(NULL); /* revert to built-in */
         fdk_theme_destroy(tall);
         assert(fdk_ok(fdk_window_paint(win)));
@@ -4938,16 +4938,28 @@ static void test_menu_gui(void) {
     printf("[ok] menu: clicking the bar title maps the popup\n");
 
     /* Auto-paint: the popup's surface color, server-side, without
-     * the test ever calling fdk_window_paint on it. */
+     * the test ever calling fdk_window_paint on it. 1.4.0: the
+     * surface is MENU_BACKGROUND and the corners round at the menu
+     * radius — sample the TOP-CENTER (clear of both corner arcs and
+     * of the first row's vertically-centered text). */
     Display *rb = NULL;
-    unsigned long px = x11_readback_pixel(&rb, (unsigned long)popup, 6, 6);
-    fdk_color ctl = fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
-    int cr = (int)((px >> 16) & 0xFFu);
-    int cg = (int)((px >> 8) & 0xFFu);
-    int cb = (int)(px & 0xFFu);
-    assert(cr == (int)(ctl.r * 255.0f + 0.5f) &&
-           cg == (int)(ctl.g * 255.0f + 0.5f) &&
-           cb == (int)(ctl.b * 255.0f + 0.5f));
+    {
+        Window root_ret;
+        int gx, gy;
+        unsigned int pw, ph, bw, dep;
+        assert(XGetGeometry(send, (Window)popup, &root_ret, &gx, &gy,
+                            &pw, &ph, &bw, &dep));
+        unsigned long px =
+            x11_readback_pixel(&rb, (unsigned long)popup,
+                               (int)(pw / 2), 4);
+        fdk_color ctl = fdk_theme_get_color(NULL, FDK_TK_MENU_BACKGROUND);
+        int cr = (int)((px >> 16) & 0xFFu);
+        int cg = (int)((px >> 8) & 0xFFu);
+        int cb = (int)(px & 0xFFu);
+        assert(cr == (int)(ctl.r * 255.0f + 0.5f) &&
+               cg == (int)(ctl.g * 255.0f + 0.5f) &&
+               cb == (int)(ctl.b * 255.0f + 0.5f));
+    }
     printf("[ok] menu: popup AUTO-PAINTED (server-side pixel proof)\n");
 
     /* Keyboard: Down lands on Open, Enter activates it. */
@@ -5128,13 +5140,26 @@ static void test_combo_gui(void) {
     Window pop = x11_new_child(before, n_before, now, n_now);
     assert(pop != 0);
 
-    /* The dropdown is auto-painted (menu surface color). */
+    /* The dropdown is auto-painted (menu surface color; 1.4.0:
+     * MENU_BACKGROUND, sampled top-center — clear of the rounded
+     * corner arcs). */
     Display *rb = NULL;
-    unsigned long px = x11_readback_pixel(&rb, (unsigned long)pop, 6, 6);
-    fdk_color ctl = fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
-    assert((int)((px >> 16) & 0xFFu) == (int)(ctl.r * 255.0f + 0.5f) &&
-           (int)((px >> 8) & 0xFFu) == (int)(ctl.g * 255.0f + 0.5f) &&
-           (int)(px & 0xFFu) == (int)(ctl.b * 255.0f + 0.5f));
+    {
+        Window root_ret;
+        int gx, gy;
+        unsigned int pw, ph, bw, dep;
+        assert(XGetGeometry(send, pop, &root_ret, &gx, &gy, &pw, &ph,
+                            &bw, &dep));
+        unsigned long px =
+            x11_readback_pixel(&rb, (unsigned long)pop,
+                               (int)(pw / 2), 4);
+        fdk_color ctl = fdk_theme_get_color(NULL, FDK_TK_MENU_BACKGROUND);
+        assert((int)((px >> 16) & 0xFFu) ==
+                   (int)(ctl.r * 255.0f + 0.5f) &&
+               (int)((px >> 8) & 0xFFu) ==
+                   (int)(ctl.g * 255.0f + 0.5f) &&
+               (int)(px & 0xFFu) == (int)(ctl.b * 255.0f + 0.5f));
+    }
     printf("[ok] combo: click opens the auto-painted dropdown\n");
 
     /* Pick "Green" (row 1). */
@@ -5636,9 +5661,10 @@ static void test_file_dialog_gui(void) {
     printf("[ok] file dialog: Escape answers CANCELLED (count 0)\n");
 
     /* --- 3. OPEN_FOLDER via the accept BUTTON (the click path):
-     * body child order is fixed by creation — 1.2.3: [up, home,
-     * hidden, combo, path, places, list, status, accept, cancel];
-     * accept is index 8. */
+     * body child order is fixed by creation — 1.4.0: [up, home,
+     * hidden, combo, path_bar, path_entry, places, list, status,
+     * accept, cancel]; accept is index 9 (the breadcrumb bar and its
+     * hidden location entry are indices 4 and 5). */
     fdk_file_dialog_options o3 = {0};
     o3.kind = FDK_FILE_DIALOG_OPEN_FOLDER;
     o3.start_dir = dir;
@@ -5650,7 +5676,7 @@ static void test_file_dialog_gui(void) {
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
         fdk_widget *body = fdk_widget_child_at(droot, 0);
         assert(body != NULL);
-        fdk_widget *accept = fdk_widget_child_at(body, 8);
+        fdk_widget *accept = fdk_widget_child_at(body, 9);
         assert(accept != NULL);
         fdk_rect ab = fdk_widget_get_bounds(accept);
         /* The list holds one row (sub/): select it first. */
@@ -5828,6 +5854,102 @@ static void test_file_dialog_gui(void) {
     assert(fd_result.count == 0);
     printf("[ok] file dialog: empty SAVE name never answers "
            "(validation keeps the dialog up)\n");
+
+    /* --- 8. (1.4.0) The breadcrumb path bar + Ctrl+L location mode:
+     * at rest the bar is the path row and the raw entry is hidden;
+     * Ctrl+L swaps them (entry seeded with the current dir, focused);
+     * Escape there returns to breadcrumbs WITHOUT cancelling; the
+     * breadcrumb root crumb CLICK navigates to "/" (the folder-kind
+     * listing shows only directories, so Down+Enter accepts one). */
+    {
+        fdk_file_dialog_options o8 = {0};
+        o8.kind = FDK_FILE_DIALOG_OPEN_FOLDER;
+        o8.start_dir = dir;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &o8, file_dialog_done,
+                                           NULL, &dlg)));
+        (void)fdk_pump_events(ctx, 250);
+        dxid = fdk_window_xid(dlg);
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+        fdk_widget *body = fdk_widget_child_at(droot, 0);
+        fdk_widget *pbar = fdk_widget_child_at(body, 4);
+        fdk_widget *pentry = fdk_widget_child_at(body, 5);
+        assert(pbar != NULL && pentry != NULL);
+
+        /* At rest: breadcrumbs visible, location entry hidden. */
+        assert(fdk_widget_get_visible(pbar));
+        assert(!fdk_widget_get_visible(pentry));
+
+        /* Ctrl+L -> location mode. */
+        x11_send_key_event_ctrl(send_dpy, dxid, 46); /* L (X kc 46) */
+        (void)fdk_pump_events(ctx, 200);
+        assert(!fdk_widget_get_visible(pbar));
+        assert(fdk_widget_get_visible(pentry));
+        /* Seeded with the browsed dir, focused. */
+        assert(strcmp(fdk_entry_get_text(pentry), dir) == 0);
+        assert(fdk_widget_has_focus(pentry));
+
+        /* Escape IN location mode returns to breadcrumbs, no cancel.
+         * The entry opened with the path SELECTED (type-over
+         * convention), so Escape #1 collapses that selection (the
+         * Entry's contract — consumed), and Escape #2 bubbles to the
+         * window layer, where location mode turns it into
+         * "back to breadcrumbs" instead of a cancel. */
+        fd_result.outcome = FDK_FILE_DIALOG_ERROR; /* sentinel */
+        x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Esc: unselect */
+        (void)fdk_pump_events(ctx, 150);
+        assert(fd_result.outcome == FDK_FILE_DIALOG_ERROR);
+        x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Esc: exit */
+        (void)fdk_pump_events(ctx, 200);
+        assert(fdk_widget_get_visible(pbar));
+        assert(!fdk_widget_get_visible(pentry));
+        assert(fd_result.outcome == FDK_FILE_DIALOG_ERROR);
+
+        /* The root crumb click navigates to "/". The bar's bounds
+         * are body-relative = window coordinates (content at origin);
+         * crumb 0 ("/") starts at FD_PB_PAD_X = 10px inside. */
+        fdk_rect pb = fdk_widget_get_bounds(pbar);
+        assert(pb.width > 100 && pb.height >= 24);
+        x11_send_pointer_event(send_dpy, dxid, ButtonPress,
+                               ButtonPressMask | ButtonReleaseMask,
+                               pb.x + 12, pb.y + pb.height / 2, 1);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(send_dpy, dxid, ButtonRelease,
+                               ButtonPressMask | ButtonReleaseMask,
+                               pb.x + 12, pb.y + pb.height / 2, 1);
+        (void)fdk_pump_events(ctx, 300);
+        /* Navigation proven two ways: the synced location entry (the
+         * hidden path_entry tracks d->dir whenever it holds no
+         * focus) now reads "/", and the listing switched to root's
+         * directories. */
+        assert(strcmp(fdk_entry_get_text(pentry), "/") == 0);
+        /* Folder-kind row activation NAVIGATES (the browser rule),
+         * so the keyboard accept is: Down selects root's first
+         * directory, then the accept BUTTON answers with it. */
+        x11_send_key_event(send_dpy, dxid, KeyPress, 116); /* Down */
+        (void)fdk_pump_events(ctx, 150);
+        {
+            fdk_widget *accept = fdk_widget_child_at(body, 9);
+            assert(accept != NULL);
+            fdk_rect ab = fdk_widget_get_bounds(accept);
+            x11_send_pointer_event(send_dpy, dxid, ButtonPress,
+                                   ButtonPressMask | ButtonReleaseMask,
+                                   ab.x + 8, ab.y + ab.height / 2, 1);
+            (void)fdk_pump_events(ctx, 100);
+            x11_send_pointer_event(send_dpy, dxid, ButtonRelease,
+                                   ButtonPressMask | ButtonReleaseMask,
+                                   ab.x + 8, ab.y + ab.height / 2, 1);
+            (void)fdk_pump_events(ctx, 300);
+        }
+        assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
+        assert(fd_result.count == 1);
+        assert(fd_result.paths[0][0] == '/');
+        assert(strncmp(fd_result.paths[0], dir,
+                       strlen(dir)) != 0); /* NOT the scratch dir */
+        printf("[ok] file dialog: breadcrumb bar + Ctrl+L location "
+               "mode + crumb-click navigation (-> %s)\n",
+               fd_result.paths[0]);
+    }
 
     XCloseDisplay(send_dpy);
     fdk_shutdown(ctx); /* any dialog window left dies here safely */

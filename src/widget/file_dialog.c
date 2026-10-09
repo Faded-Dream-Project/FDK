@@ -107,6 +107,9 @@
 #define FD_MAX_MEDIA 8     /* /media + /mnt entries shown (each)    */
 #define FD_NAME_MAX 255    /* NAME_MAX-safe cap for typed names     */
 #define FD_PATH_BUF 4096   /* PATH_MAX-safe scratch for canonical   */
+#define FD_KEY_L_EVDEV ((fdk_scancode)38) /* evdev KEY_L — the same
+                                             value shortcut.c's table
+                                             assigns the letter "L" */
 
 /* ---- entry model ----
  *
@@ -677,7 +680,9 @@ typedef struct fdk_file_dialog {
     fdk_widget *home_btn;
     fdk_widget *hidden_toggle;
     fdk_widget *filter_combo;
-    fdk_widget *path_entry;
+    fdk_widget *path_bar;    /* the breadcrumb row (1.4.0)          */
+    fdk_widget *path_entry;  /* the Ctrl+L location entry           */
+    bool location_mode;      /* true = entry shown, bar hidden      */
     fdk_widget *places_list;
     fdk_widget *list;
     fdk_widget *name_label;  /* SAVE only                          */
@@ -714,6 +719,10 @@ typedef struct fdk_file_dialog {
 typedef struct fdk_file_dialog_body {
     fdk_widget base;
     fdk_file_dialog *dialog; /* owned */
+    /* The regions body_paint fills with the sidebar surface (the
+     * places panel + the path row share the sidebar tone; everything
+     * else is the window surface). Body-relative, set by arrange. */
+    fdk_rect sidebar_rect;
 } fdk_file_dialog_body;
 
 /* Heap context handed to the nested overwrite confirmation (the
@@ -819,6 +828,407 @@ static void fdlg_fill_list(fdk_file_dialog *d) {
     fdk_list_end_batch(d->list);
 }
 
+/* ---- the breadcrumb path bar (1.4.0) ----
+ *
+ * The modern path display: the current directory split into clickable
+ * segments separated by small vector chevrons — "Home  >  user  >
+ * docs" — replacing the always-editable raw path Entry at rest. The
+ * Entry survives behind Ctrl+L (the GTK location-toggle: type a path
+ * by hand when the breadcrumbs cannot express it); Enter in the entry
+ * browses and returns to breadcrumbs, Esc there abandons the edit and
+ * returns too. The bar paints the flat-entry chrome (field fill +
+ * border, rounded at the entry radius), the CURRENT segment in the
+ * accent color, hover pills under the clickable segments, and an
+ * ellipsis segment when too many crumbs precede the tail to fit
+ * (clicking it jumps to the first collapsed crumb).
+ *
+ * Segment data: one entry per path component plus the leading "/"
+ * (the root crumb; a relative dir — cannot happen for our normalized
+ * dirs, but parsed honestly anyway — gets no leading slash crumb). */
+
+#define FD_PB_MAX_SEGS 64   /* path components cap (deep trees collapse) */
+#define FD_PB_PAD_X 10      /* inner left/right padding                  */
+#define FD_PB_SEG_GAP 8     /* text-to-chevron breathing room            */
+#define FD_PB_CHEV_W 14     /* the chevron slot between segments         */
+
+typedef struct fdk_path_bar {
+    fdk_widget base;
+    fdk_file_dialog *dialog; /* borrowed (the body outlives the bar) */
+    fdk_font *font;          /* borrowed from the dialog              */
+    /* Parsed segments: display label + the absolute prefix clicking
+     * the segment browses to. seg_count == 0 only before the first
+     * set_path. */
+    char *seg_text[FD_PB_MAX_SEGS];
+    char *seg_path[FD_PB_MAX_SEGS];
+    size_t seg_count;
+    /* Visual layout, rebuilt at arrange-time for the current width:
+     * first_visible = the leading segments replaced by the ellipsis
+     * crumb (0 = none collapsed), x/w per VISIBLE crumb, and the
+     * chevron x between crumb i and i+1. Local coordinates. */
+    size_t first_visible;
+    fdk_i32 crumb_x[FD_PB_MAX_SEGS + 1]; /* +1 = the ellipsis crumb   */
+    fdk_i32 crumb_w[FD_PB_MAX_SEGS + 1];
+    fdk_i32 chev_x[FD_PB_MAX_SEGS];
+    int hover_crumb; /* -1 none; index into the VISIBLE crumb table */
+    bool pressed;
+} fdk_path_bar;
+
+static fdk_path_bar *pbar_of(fdk_widget *w) {
+    return (fdk_path_bar *)(void *)w;
+}
+
+/* Frees the parsed segments (the visual table is indices, owned by
+ * nothing). Called from set_path and the destroy hook. */
+static void pbar_clear_segments(fdk_path_bar *pb) {
+    for (size_t i = 0; i < pb->seg_count; i++) {
+        fdk_free(pb->seg_text[i]);
+        fdk_free(pb->seg_path[i]);
+    }
+    pb->seg_count = 0;
+    pb->hover_crumb = -1;
+}
+
+/* Forward: set_path relayouts the new crumbs for the current width;
+ * the layout pass is defined below it. */
+static void pbar_relayout(fdk_path_bar *pb, fdk_i32 width);
+
+/* Splits `dir` into crumbs. Each label is one path component; the
+ * root crumb ("/") leads absolute paths. Allocation failure keeps
+ * the previous segments (a stale breadcrumb beats a blank bar). */
+static void pbar_set_path(fdk_path_bar *pb, const char *dir) {
+    if (dir == NULL || dir[0] == '\0') {
+        pbar_clear_segments(pb);
+        fdk_widget_invalidate(&pb->base);
+        return;
+    }
+    char *texts[FD_PB_MAX_SEGS];
+    char *paths[FD_PB_MAX_SEGS];
+    size_t n = 0;
+    size_t consumed = 0;
+    bool absolute = dir[0] == '/';
+    if (absolute) {
+        texts[0] = fdk__strdup("/");
+        paths[0] = fdk__strdup("/");
+        if (texts[0] == NULL || paths[0] == NULL) {
+            fdk_free(texts[0]);
+            fdk_free(paths[0]);
+            return; /* OOM: keep the old crumbs */
+        }
+        n = 1;
+        consumed = 1;
+    }
+    while (n < FD_PB_MAX_SEGS && dir[consumed] != '\0') {
+        size_t end = consumed;
+        while (dir[end] != '\0' && dir[end] != '/') {
+            end++;
+        }
+        if (end > consumed) { /* skip empty components (//, trailing) */
+            /* The prefix includes everything up to (not past) this
+             * component; absolute prefixes get their slash back. */
+            size_t prefix_len = end + (absolute && consumed > 1 ? 1 : 0);
+            char *text = fdk_alloc(end - consumed + 1);
+            char *path = fdk_alloc(prefix_len + 1);
+            if (text == NULL || path == NULL) {
+                fdk_free(text);
+                fdk_free(path);
+                break; /* keep the crumbs that fit */
+            }
+            memcpy(text, dir + consumed, end - consumed);
+            text[end - consumed] = '\0';
+            memcpy(path, dir, prefix_len);
+            path[prefix_len] = '\0';
+            texts[n] = text;
+            paths[n] = path;
+            n++;
+        }
+        /* Advance past this component's separator — but never past
+         * the NUL: when `end` sits ON the terminator (last component,
+         * no trailing slash), park there so the loop condition reads
+         * dir[strlen] ('\0') and exits instead of walking one byte
+         * off the end of the string. */
+        consumed = (dir[end] == '/') ? end + 1 : end;
+    }
+    pbar_clear_segments(pb);
+    for (size_t i = 0; i < n; i++) {
+        pb->seg_text[i] = texts[i];
+        pb->seg_path[i] = paths[i];
+    }
+    pb->seg_count = n;
+    pb->first_visible = 0;
+    /* New crumbs need a visual layout for the CURRENT width. The
+     * arrange hook relayouts on size changes only — it cannot see
+     * content changes (and at first arrange the segments were not
+     * parsed yet: construction arranges BEFORE the first reload).
+     * Width 0 (never placed) skips: the arrange will lay them out. */
+    if (pb->base.bounds.width > 0) {
+        pbar_relayout(pb, pb->base.bounds.width);
+    }
+    fdk_widget_invalidate(&pb->base);
+}
+
+/* Rebuilds the visual layout for `width`. Collapses leading crumbs
+ * (never the last two: the ellipsis plus the current folder must
+ * always show) when the full run does not fit. */
+static void pbar_relayout(fdk_path_bar *pb, fdk_i32 width) {
+    pb->first_visible = 0;
+    if (pb->font == NULL || pb->seg_count == 0) {
+        return;
+    }
+    fdk_i32 avail = width - FD_PB_PAD_X * 2;
+    if (avail < 0) {
+        avail = 0;
+    }
+
+    /* Total width of every crumb + the separators between them. */
+    fdk_i32 seg_w[FD_PB_MAX_SEGS];
+    fdk_i32 total = 0;
+    for (size_t i = 0; i < pb->seg_count; i++) {
+        fdk_i32 tw = 0, th = 0;
+        fdk__text_extent(pb->font, pb->seg_text[i], &tw, &th);
+        seg_w[i] = tw;
+        total += tw;
+        if (i + 1 < pb->seg_count) {
+            total += FD_PB_CHEV_W + FD_PB_SEG_GAP * 2;
+        }
+    }
+
+    if (total <= avail) {
+        fdk_i32 x = FD_PB_PAD_X;
+        for (size_t i = 0; i < pb->seg_count; i++) {
+            pb->crumb_x[i] = x;
+            pb->crumb_w[i] = seg_w[i];
+            x += seg_w[i] + FD_PB_SEG_GAP;
+            if (i + 1 < pb->seg_count) {
+                pb->chev_x[i] = x;
+                x += FD_PB_CHEV_W - FD_PB_SEG_GAP * 0;
+                x += FD_PB_SEG_GAP;
+            }
+        }
+        return;
+    }
+
+    /* Overflow: measure the ellipsis crumb, then keep dropping
+     * leading crumbs (after the root, which the ellipsis replaces
+     * for absolute paths anyway) until the run fits. Never collapse
+     * into the last crumb. */
+    fdk_i32 ell_w = 0, ell_h = 0;
+    fdk__text_extent(pb->font, "...", &ell_w, &ell_h);
+    fdk_i32 ell_slot = ell_w + FD_PB_CHEV_W + FD_PB_SEG_GAP * 2;
+    size_t first = 1; /* the root is subsumed by "..." when collapsing */
+    while (first + 1 < pb->seg_count) {
+        fdk_i32 run = ell_slot;
+        for (size_t i = first; i < pb->seg_count; i++) {
+            run += seg_w[i];
+            if (i + 1 < pb->seg_count) {
+                run += FD_PB_CHEV_W + FD_PB_SEG_GAP * 2;
+            }
+        }
+        if (run <= avail) {
+            break;
+        }
+        first++;
+    }
+    pb->first_visible = first;
+
+    fdk_i32 x = FD_PB_PAD_X;
+    /* The ellipsis crumb sits at index FD_PB_MAX_SEGS in the tables. */
+    pb->crumb_x[FD_PB_MAX_SEGS] = x;
+    pb->crumb_w[FD_PB_MAX_SEGS] = ell_w;
+    x += ell_w + FD_PB_SEG_GAP;
+    pb->chev_x[0] = x;
+    x += FD_PB_CHEV_W + FD_PB_SEG_GAP;
+    for (size_t i = first; i < pb->seg_count; i++) {
+        pb->crumb_x[i] = x;
+        pb->crumb_w[i] = seg_w[i];
+        x += seg_w[i] + FD_PB_SEG_GAP;
+        if (i + 1 < pb->seg_count) {
+            pb->chev_x[i] = x;
+            x += FD_PB_CHEV_W + FD_PB_SEG_GAP;
+        }
+    }
+}
+
+/* The VISIBLE crumb count: the tail segments plus (when collapsed)
+ * the ellipsis crumb. Visible index v maps: FD_PB_MAX_SEGS = "..."
+ * (browses to the first collapsed crumb), else segment v. */
+static size_t pbar_visible_count(const fdk_path_bar *pb) {
+    if (pb->seg_count == 0) {
+        return 0;
+    }
+    return pb->seg_count - pb->first_visible +
+           (pb->first_visible > 0 ? 1 : 0);
+}
+
+static void pbar_paint(fdk_widget *w, fdk_surface *surface,
+                       fdk_rect bounds, fdk_rect clip) {
+    (void)clip;
+    fdk_path_bar *pb = pbar_of(w);
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        return;
+    }
+
+    /* Field chrome: the flat-entry pair, rounded at the entry radius. */
+    fdk_i32 radius =
+        fdk_theme_get_metric(NULL, FDK_TM_ENTRY_CORNER_RADIUS);
+    fdk_surface_fill_rounded_rect(surface, bounds, radius,
+                                  fdk__pal_entry());
+    fdk_surface_draw_rounded_rect(surface, bounds, radius,
+                                  fdk__pal_entry_border());
+
+    if (pb->font == NULL || pb->seg_count == 0) {
+        return;
+    }
+    fdk_i32 baseline =
+        fdk__center_baseline(pb->font, bounds.y, bounds.height);
+    fdk_i32 cy = bounds.y + bounds.height / 2;
+    size_t visible = pbar_visible_count(pb);
+    fdk_color chev = fdk__pal_border();
+
+    for (size_t v = 0; v < visible; v++) {
+        bool is_ell = (v == 0 && pb->first_visible > 0);
+        size_t seg = is_ell ? 0 : pb->first_visible + v -
+                                      (pb->first_visible > 0 ? 1 : 0);
+        const char *text = is_ell ? "..." : pb->seg_text[seg];
+        fdk_i32 x = pb->crumb_x[v];
+        fdk_i32 cw = pb->crumb_w[v];
+
+        /* Hover pill under the clickable crumb (rounded, inset). */
+        if ((fdk_i32)v == pb->hover_crumb || pb->pressed) {
+            fdk_rect pill = {bounds.x + x - 4, bounds.y + 2,
+                             cw + 8, bounds.height - 4};
+            if (pill.width > 0 && pill.height > 0) {
+                fdk_surface_fill_rounded_rect(
+                    surface, pill, radius > 2 ? radius - 2 : 2,
+                    fdk__pal_row_hover());
+            }
+        }
+
+        /* The CURRENT directory crumb reads in the accent color —
+         * the one you are "in"; earlier crumbs are plain text. */
+        bool current = (seg + 1 == pb->seg_count) && !is_ell;
+        fdk__draw_text(surface, pb->font, text,
+                       current ? fdk__pal_accent() : fdk__pal_text(),
+                       bounds.x + x, baseline);
+
+        /* The chevron AFTER this crumb (not after the last). */
+        if (v + 1 < visible) {
+            fdk_i32 chx = bounds.x + pb->chev_x[is_ell ? 0 : seg];
+            fdk_surface_draw_line(surface, chx - 3, cy - 2, chx, cy + 1,
+                                  chev);
+            fdk_surface_draw_line(surface, chx, cy + 1, chx + 3, cy - 2,
+                                  chev);
+        }
+    }
+}
+
+/* Local-x -> visible-crumb index (-1 = gap/chrome). */
+static int pbar_hit(const fdk_path_bar *pb, fdk_f32 x) {
+    if (x < (fdk_f32)FD_PB_PAD_X) {
+        return -1;
+    }
+    size_t visible = pbar_visible_count(pb);
+    for (size_t v = 0; v < visible; v++) {
+        fdk_i32 x0 = pb->crumb_x[v];
+        fdk_i32 x1 = x0 + pb->crumb_w[v];
+        if (x >= (fdk_f32)x0 && x <= (fdk_f32)x1) {
+            return (int)v;
+        }
+    }
+    return -1;
+}
+
+/* fdlg_browse is defined below (the browsing section); the bar
+ * navigates through it. */
+static void fdlg_browse(fdk_file_dialog *d, const char *dir);
+
+static bool pbar_handle_event(fdk_widget *w,
+                              const fdk_widget_event *ev) {
+    fdk_path_bar *pb = pbar_of(w);
+    switch (ev->type) {
+    case FDK_WIDGET_POINTER_MOTION:
+    case FDK_WIDGET_POINTER_ENTER: {
+        int hit = pbar_hit(pb, ev->pointer.position.x);
+        if (hit != pb->hover_crumb) {
+            pb->hover_crumb = hit;
+            fdk_widget_invalidate(w);
+        }
+        return false; /* hover only; the bar eats nothing */
+    }
+    case FDK_WIDGET_POINTER_LEAVE:
+        if (pb->hover_crumb != -1) {
+            pb->hover_crumb = -1;
+            fdk_widget_invalidate(w);
+        }
+        return false;
+    case FDK_WIDGET_POINTER_DOWN:
+        if (ev->pointer.button == FDK_POINTER_BUTTON_LEFT) {
+            pb->pressed = true;
+            fdk_widget_invalidate(w);
+            return true;
+        }
+        return false;
+    case FDK_WIDGET_POINTER_UP: {
+        bool was = pb->pressed;
+        pb->pressed = false;
+        fdk_widget_invalidate(w);
+        if (!was || ev->pointer.button != FDK_POINTER_BUTTON_LEFT) {
+            return true;
+        }
+        /* Release inside the bar on a crumb = navigate there. */
+        if (ev->pointer.position.x >= 0.0f &&
+            ev->pointer.position.y >= 0.0f &&
+            ev->pointer.position.x < (fdk_f32)w->bounds.width &&
+            ev->pointer.position.y < (fdk_f32)w->bounds.height) {
+            int v = pbar_hit(pb, ev->pointer.position.x);
+            if (v >= 0 && pb->dialog != NULL) {
+                bool is_ell = (v == 0 && pb->first_visible > 0);
+                size_t seg = is_ell
+                    ? 1 /* the first collapsed crumb */
+                    : pb->first_visible + (size_t)v -
+                          (pb->first_visible > 0 ? 1 : 0);
+                if (seg < pb->seg_count) {
+                    fdlg_browse(pb->dialog, pb->seg_path[seg]);
+                }
+            }
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+static void pbar_measure(fdk_widget *w, fdk_size *out) {
+    fdk_path_bar *pb = pbar_of(w);
+    out->width = FD_PB_PAD_X * 2 + 120; /* the row is flexible-width */
+    fdk_i32 th = 20;
+    if (pb->font != NULL) {
+        fdk_font_metrics m;
+        fdk_font_get_metrics(pb->font, &m);
+        th = m.ascent + m.descent + 8;
+    }
+    out->height = th > FD_ROW_H ? th : FD_ROW_H;
+}
+
+static void pbar_arrange(fdk_widget *w, fdk_rect assigned) {
+    fdk_widget_set_bounds(w, assigned);
+    pbar_relayout(pbar_of(w), assigned.width);
+}
+
+static void pbar_destroy(fdk_widget *w) {
+    pbar_clear_segments(pbar_of(w));
+}
+
+static const fdk_widget_class fdk_path_bar_class = {
+    .size = sizeof(fdk_path_bar),
+    .name = "path-bar",
+    .handle_event = pbar_handle_event,
+    .paint = pbar_paint,
+    .measure = pbar_measure,
+    .arrange = pbar_arrange,
+    .destroy = pbar_destroy,
+};
+
 /* Syncs the path bar to d->dir — unless the user is mid-typing in
  * it (focus check): never clobber a path being entered. */
 static void fdlg_sync_path_bar(fdk_file_dialog *d) {
@@ -826,6 +1236,39 @@ static void fdlg_sync_path_bar(fdk_file_dialog *d) {
         !fdk_widget_has_focus(d->path_entry)) {
         (void)fdk_entry_set_text(d->path_entry, d->dir);
     }
+    if (d->path_bar != NULL) {
+        pbar_set_path(pbar_of(d->path_bar), d->dir);
+    }
+}
+
+/* 1.4.0 — Ctrl+L: swap the breadcrumb bar for the raw location Entry
+ * (and back). Entering location mode seeds the entry with the current
+ * directory, shows it, hides the bar, and focuses the entry with the
+ * whole path selected (type-over replaces; arrows edit). Leaving
+ * returns focus to the file list (the keyboard browsing home) and
+ * restores the breadcrumbs — the entry's text survives in case the
+ * user toggles back (GTK parity: nothing is lost by peeking). */
+static void fdlg_set_location_mode(fdk_file_dialog *d, bool on) {
+    if (d->path_bar == NULL || d->path_entry == NULL ||
+        d->location_mode == on) {
+        return;
+    }
+    d->location_mode = on;
+    if (on) {
+        (void)fdk_entry_set_text(d->path_entry, d->dir);
+        fdk_entry_select_all(d->path_entry);
+        fdk_widget_set_visible(d->path_bar, false);
+        fdk_widget_set_visible(d->path_entry, true);
+        fdk_widget_focus(d->path_entry);
+    } else {
+        fdk_widget_set_visible(d->path_entry, false);
+        fdk_widget_set_visible(d->path_bar, true);
+        fdk_widget_focus(d->list);
+    }
+    /* The row swaps in place; re-run the body's placement (the body
+     * is the window content — nothing above it re-arranges on a
+     * visibility flip, so the dialog drives its own placement). */
+    fdk_widget_arrange(d->body, fdk_widget_get_bounds(d->body));
 }
 
 /* Re-scans the CURRENT directory (hidden toggle flips, filter
@@ -1290,6 +1733,10 @@ static void fdlg_path_activated(fdk_widget *entry, void *user) {
     }
     fdlg_browse(d, target);
     fdk_free(target);
+    /* A typed location is a one-shot: browse, then back to the
+     * breadcrumbs (the GTK rhythm — the entry is for getting
+     * somewhere the crumbs cannot reach, not a mode to live in). */
+    fdlg_set_location_mode(d, false);
 }
 
 static void fdlg_place_activated(fdk_widget *list, size_t row,
@@ -1366,9 +1813,29 @@ static void fdlg_window_event(fdk_window *window,
         fdlg_cancelled(d);
         return;
     }
-    if (ev->type == FDK_EVENT_KEY_DOWN &&
-        ev->key.scancode == FDK_KEY_ESC) {
-        fdlg_cancelled(d);
+    if (ev->type == FDK_EVENT_KEY_DOWN) {
+        /* Ctrl+L toggles the location entry (1.4.0, the GTK file
+         * chooser's binding). Matched on the PHYSICAL L (evdev 38)
+         * with exactly Ctrl held — the shortcut-scancode discipline:
+         * layout-stable, and no dependence on what codepoint Ctrl+L
+         * resolves to on any backend. */
+        if ((ev->key.modifiers & FDK_MOD_CTRL) != 0 &&
+            (ev->key.modifiers & ~(fdk_u32)FDK_MOD_CTRL) == 0 &&
+            ev->key.scancode == FD_KEY_L_EVDEV) {
+            fdlg_set_location_mode(d, !d->location_mode);
+            return;
+        }
+        if (ev->key.scancode == FDK_KEY_ESC) {
+            if (d->location_mode) {
+                /* Esc in the location entry abandons the edit —
+                 * back to breadcrumbs, NOT a dialog cancel (the
+                 * GTK behavior; the entry does not consume Esc
+                 * itself, so the window hook sees it). */
+                fdlg_set_location_mode(d, false);
+            } else {
+                fdlg_cancelled(d);
+            }
+        }
     }
 }
 
@@ -1393,6 +1860,28 @@ static void fdlg_destroyed(fdk_window *window, void *user) {
 }
 
 /* ---- body hooks ---- */
+
+/* The body's own paint: the dialog's two surfaces. Everything is the
+ * window surface; the places sidebar sits on the sidebar surface (the
+ * half-step-off panel tone). Painting this here — instead of setting
+ * a per-widget background snapshot — keeps both surfaces resolving
+ * through the CURRENT theme at paint time, so a re-themed dialog
+ * actually changes color (the set_background snapshot would not).
+ * Children paint on top of these fills (the normal tree walk). */
+static void fdlg_body_paint(fdk_widget *w, fdk_surface *surface,
+                            fdk_rect bounds, fdk_rect clip) {
+    (void)clip;
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        return;
+    }
+    fdk_surface_fill_rect(surface, bounds,
+                          fdk_theme_get_color(NULL,
+                                              FDK_TK_WINDOW_BACKGROUND));
+    fdk_rect sb = fbody_of(w)->sidebar_rect;
+    if (sb.width > 0 && sb.height > 0) {
+        fdk_surface_fill_rect(surface, sb, fdk__pal_sidebar());
+    }
+}
 
 static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
     fdk_widget_set_bounds(w, a);
@@ -1428,12 +1917,20 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
                    combo_h});
     y += FD_TOPBAR_H + FD_GAP / 2;
 
-    /* Path bar (Entry): full width. */
+    /* Path row: the breadcrumb bar at rest, the location Entry in
+     * Ctrl+L mode — one row, one occupant, same slot either way.
+     * The bar needs its crumb layout rebuilt for the placed width
+     * (set_bounds does not run the arrange hook, and the body owns
+     * placement for every child — same rule as the rows below). */
+    fdk_widget *path_row = d->location_mode ? d->path_entry
+                                             : d->path_bar;
     fdk_size path_n = {0, 0};
-    fdk_widget_measure(d->path_entry, &path_n);
+    fdk_widget_measure(path_row, &path_n);
     fdk_i32 path_h = path_n.height > 0 ? path_n.height : FD_ROW_H;
-    fdk_widget_set_bounds(
-        d->path_entry, (fdk_rect){x, y, iw, path_h});
+    fdk_widget_set_bounds(path_row, (fdk_rect){x, y, iw, path_h});
+    if (path_row == d->path_bar) {
+        pbar_relayout(pbar_of(d->path_bar), iw);
+    }
     y += path_h + FD_GAP / 2;
 
     /* Buttons: bottom-right; status line bottom-left. */
@@ -1466,13 +1963,16 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
         list_bottom = name_y - FD_GAP / 2;
     }
 
-    /* Middle: places sidebar + file list. */
+    /* Middle: places sidebar + file list. The sidebar rect is
+     * remembered for body_paint's sidebar-surface fill. */
     fdk_i32 list_h = list_bottom - y;
     if (list_h < 40) {
         list_h = 40;
     }
     fdk_widget_set_bounds(
         d->places_list, (fdk_rect){x, y, FD_PLACES_W, list_h});
+    fbody_of(w)->sidebar_rect =
+        (fdk_rect){x, y, FD_PLACES_W, list_h};
     fdk_widget_set_bounds(
         d->list,
         (fdk_rect){x + FD_PLACES_W + FD_GAP, y,
@@ -1534,7 +2034,7 @@ static const fdk_widget_class fdk_file_dialog_body_class = {
     .size = sizeof(fdk_file_dialog_body),
     .name = "file-dialog-body",
     .handle_event = NULL,
-    .paint = NULL, /* base paint: the window_background fill */
+    .paint = fdlg_body_paint, /* window + sidebar surfaces (1.4.0) */
     .measure = NULL,
     .arrange = fdlg_body_arrange,
     .destroy = fdlg_body_destroy,
@@ -1705,10 +2205,11 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
         goto fail;
     }
     fbody_of(body)->dialog = d;
+    fbody_of(body)->sidebar_rect = (fdk_rect){0, 0, 0, 0};
     d->body = body;
     fdk_widget_set_accessible_name(body, title);
-    fdk_widget_set_background(
-        body, fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
+    /* No set_background snapshot: fdlg_body_paint fills both surfaces
+     * through the live theme (1.4.0). */
 
     /* The dialog's font: the system default (dialogs are toolkit
      * chrome; there is no options.font to borrow). */
@@ -1753,13 +2254,24 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
                          (fdk_i64)d->active_filter);
     fdk_combo_set_on_changed(d->filter_combo, fdlg_filter_changed, d);
 
-    /* Path bar: an Entry (type a location, Enter browses), seeded
-     * with the starting directory. */
+    /* Path row (1.4.0): the breadcrumb bar at rest, the location
+     * Entry behind Ctrl+L. Both are created; the entry starts
+     * hidden (location_mode = false) — the swap flips visibility,
+     * placement follows in fdlg_body_arrange. */
+    r = fdk_widget_create(body, &fdk_path_bar_class,
+                          (fdk_rect){0, 0, 0, 0}, &d->path_bar);
+    if (!fdk_ok(r)) {
+        goto fail;
+    }
+    pbar_of(d->path_bar)->dialog = d;
+    pbar_of(d->path_bar)->font = d->font;
+
     r = fdk_entry_create(body, d->font, d->dir, &d->path_entry);
     if (!fdk_ok(r)) {
         goto fail;
     }
     fdk_entry_set_on_activate(d->path_entry, fdlg_path_activated, d);
+    fdk_widget_set_visible(d->path_entry, false);
 
     /* Places sidebar. */
     r = fdk_list_create(body, d->font, &d->places_list);
@@ -1825,6 +2337,9 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
         goto fail;
     }
     fdk_button_set_on_activate(d->accept_btn, fdlg_accept_clicked, d);
+    /* The accept button carries the dialog: suggested-role (accent-
+     * filled) — the modern dialog's one obviously-primary action. */
+    fdk_button_set_role(d->accept_btn, FDK_BUTTON_ROLE_SUGGESTED);
     r = fdk_button_create(body, d->font, "Cancel", &d->cancel_btn);
     if (!fdk_ok(r)) {
         goto fail;

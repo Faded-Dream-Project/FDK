@@ -152,6 +152,34 @@ void fdk_button_set_on_activate(fdk_widget *button,
                                 fdk_button_activate_fn on_activate,
                                 void *user_data);
 
+/* 1.4.0 — the button's visual role (GTK/Qt action styles): NORMAL
+ * paints with the control family; SUGGESTED paints accent-filled
+ * (the "Open"/"Save" button of a dialog — the one action that makes
+ * the dialog happen); DESTRUCTIVE paints danger-filled (the
+ * irreversible action). Roles are paint-only: same size, same
+ * activation, same focus behavior. Default NORMAL. */
+typedef enum fdk_button_role {
+    FDK_BUTTON_ROLE_NORMAL = 0,
+    FDK_BUTTON_ROLE_SUGGESTED = 1,
+    FDK_BUTTON_ROLE_DESTRUCTIVE = 2,
+} fdk_button_role;
+
+/* Sets the role (repaints; unknown enum values are ignored). */
+void fdk_button_set_role(fdk_widget *button, fdk_button_role role);
+/* The current role (FDK_BUTTON_ROLE_NORMAL for non-buttons). */
+fdk_button_role fdk_button_get_role(fdk_widget *button);
+
+/* 1.4.0 — the toggle-button state (a Button that stays "pressed in"
+ * when checked, like GTK's GtkToggleButton / Qt's checkable QPushButton).
+ * A checked NORMAL button paints the pressed fill persistently; a
+ * checked SUGGESTED/DESTRUCTIVE button paints the accent/danger
+ * pressed fill. Paint-only: activation and focus are unchanged, and
+ * unlike Toggle there is no on-changed callback — buttons with state
+ * are usually driven by app state (set it when that state changes). */
+void fdk_button_set_checked(fdk_widget *button, bool checked);
+/* The current checked state (false for non-buttons). */
+bool fdk_button_is_checked(fdk_widget *button);
+
 /* ---- Toggle ---- */
 
 /* On/off switch with optional trailing label. Natural size covers
@@ -329,6 +357,16 @@ void fdk_entry_select_all(fdk_widget *entry);
  * and fires no callbacks. */
 fdk_result fdk_entry_set_preedit(fdk_widget *entry, const char *preedit);
 
+/* 1.4.0 — PLACEHOLDER TEXT, shown in the disabled-text color while
+ * the buffer is empty (and no preedit is showing). It is never
+ * selectable, never copied, never in the buffer, and disappears the
+ * moment text exists. Copied; NULL clears it. The placeholder has
+ * no effect on the entry's natural size (it may ellipsize if longer
+ * than the field). */
+void fdk_entry_set_placeholder(fdk_widget *entry, const char *text);
+/* The current placeholder (toolkit-owned; NULL when unset). */
+const char *fdk_entry_get_placeholder(fdk_widget *entry);
+
 /* PASSWORD MODE: renders one bullet per cluster instead of the text.
  * The buffer, the caret, the selection, and the hit-testing all keep
  * working in the same byte/cluster space — only the rendering (and
@@ -467,6 +505,12 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
 /* Switches modes; clears the selection. */
 void fdk_list_set_selection_mode(fdk_widget *list,
                                  fdk_list_selection_mode mode);
+
+/* 1.4.0 — the row height rows are actually placed at (the theme's
+ * list_row_height floor or the font's metrics, whichever is taller;
+ * 20 for a fontless list). For mouse-to-row math over a list and
+ * "how many rows fit" planning. 0 for a non-list. */
+fdk_i32 fdk_list_get_row_height(fdk_widget *list);
 
 /* Row CRUD. append writes the new row's index to *out_index when
  * non-NULL. Row text is copied. */

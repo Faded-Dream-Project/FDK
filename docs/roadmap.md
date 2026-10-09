@@ -3697,3 +3697,99 @@ X11 integration 109 [ok] exit 0; interop rig PASS; X11 examples
 PASS; compositor-death rig PASS; verify-exports 441 symbols in
 debug AND release; release zero warnings; debug-remnant and
 secret scans clean.
+
+### 1.4.0 — the modern face (the visual polish milestone)
+
+The first milestone of the user's "keep going until FDK is a perfect,
+modern, polished toolkit" directive, and the final audit's second
+sweep turned visual: the theme vocabulary grew the families the
+widget catalog actually needs to look like a 2020s toolkit, the
+built-in default palette was retuned ("FDK Modern" — flatter
+surfaces, subtler borders, a fresher indigo accent), the catalog
+learned the GTK/Qt action vocabulary (button roles, toggle buttons,
+entry placeholders), and the file dialog got the modern path UI
+(breadcrumbs + the Ctrl+L location toggle).
+
+THEME VOCABULARY (the customization ask): nine new color tokens —
+sidebar_background, menu_background (popups are their own surface
+now, not a control fill), accent_hover/accent_pressed/accent_text
+(the filled-button family), link, entry_background/entry_border (the
+flat sunken-field pair), row_hover (a soft dense-row hover) — and
+four new metrics — entry_corner_radius, menu_corner_radius,
+list_row_height (a LAYOUT metric: 30px default rows; fonts taller
+than the metric still win), focus_ring_width. All append-only per
+the ABI policy; parse.c, the .fdk grammar tables, and the format doc
+grew with them. THE 1.3.2 TOKENS ARE WIRED AT LAST: selection_
+background, focus_ring, and selection_alpha replaced the hardcoded
+accent-with-0.45-alpha at every call site (list/tree/menu/entry
+selections, both focus rings) — theme files could always SET those
+tokens, only the widgets never asked.
+
+THE MODERN PALETTE: window 0.09/0.10/0.14, controls 0.13/0.15/0.20
+(the v1 window/control contrast cut roughly in half), border
+0.20/0.23/0.30 (v1's 0.30 border read as heavy outlining at rest),
+accent 0.42/0.62/1.00 (slightly indigo, brighter; white-on-accent
+contrast > 3.5:1). The v1 look survives EXACTLY as a documented
+.fdk recipe in fdk-theme-format.md — and that promise is pinned by
+a test (the recipe parses and reproduces v1's 8-bit roundings
+component for component).
+
+WIDGET CATALOG: fdk_button_set_role (NORMAL/SUGGESTED/DESTRUCTIVE —
+GTK's action styles; suggested = accent-filled + accent_text label,
+the file dialog's Open/Save button is one now; destructive =
+danger-filled with inline hover/press shades) and fdk_button_set_
+checked (the toggle-button state — a button that stays pressed in);
+fdk_entry_set_placeholder (hint text in the disabled color, only
+while empty, never in the buffer or hit-testing); fdk_list_get_
+row_height (the row height as placed — the theme floor or the font
+metrics, whichever is taller); entries repaint FLAT (entry fill +
+1px border, focus = the themed ring drawn over the border, 2px by
+default); menus/combo popups paint the menu surface with rounded
+corners and inset rounded hover pills; combo fields round at the
+entry radius.
+
+THE FILE DIALOG: the path row is a BREADCRUMB BAR — the current
+directory split into clickable crumbs with vector chevrons, the
+current crumb in accent, hover pills, an ellipsis crumb that
+collapses deep paths (clicking it jumps to the first collapsed
+crumb). Ctrl+L (the GTK binding, matched on the physical evdev L
+with exactly Ctrl held) swaps in the raw location Entry — seeded
+with the current dir, selected for type-over; Enter browses and
+returns to breadcrumbs, Esc there abandons the edit and returns
+(the window hook checks location mode BEFORE the cancel-on-Esc).
+The Places sidebar sits on the sidebar surface (the dialog body
+paints both surfaces through the LIVE theme — no set_background
+snapshot, so a re-themed dialog actually changes color); the accept
+button is suggested-role; body child order grew by two (path_bar,
+path_entry) and the X11 test that indexes it moved with them.
+
+THREE REAL BUGS the milestone's own tests flushed out: (1) the
+breadcrumb parser walked one byte past the NUL on the last path
+component (ASan heap-buffer-overflow at the first pbar_set_path);
+(2) the crumb visual table was never built for the placed width —
+set_bounds does not run the arrange hook, and the body owns all
+child placement, so set_path now relayouts for the current width
+(at first arrange the segments were not even parsed yet);
+(3) the X11 popup-surface pixel proofs sampled (6,6) — inside the
+new rounded-corner cut — and now sample top-center, clear of both
+corner arcs.
+
+TESTS: test_theme pins the Modern palette, the new tokens/metrics,
+and the v1 recipe round-trip (9 groups); test_controls gains the
+roles/checked pixel group (each role's fill, the checked pressed
+fill, activation unchanged, argument safety); test_entry gains the
+placeholder group (set/get/clear, never in the buffer, paints only
+while empty, argument safety); test_list's click geometry is
+computed from fdk_list_get_row_height instead of the hardcoded 26
+(and viewports grew to fit 30px rows); the X11 suite gains the
+breadcrumb e2e (at-rest visibility, Ctrl+L swap with seeded
+selected text, the Esc-into-breadcrumbs two-step — the first Esc
+collapses the selection, the second exits the mode — and the
+root-crumb click navigating to "/" proven by the synced entry text
+plus a folder accept from root's listing).
+
+Battery on the final tree: headless all-pass; X11 integration all
+[ok] exit 0 (the +1 breadcrumb group); interop rig PASS; X11 and
+sway example rigs 11/11; both tooltip rigs PASS; compositor-death
+rig PASS; verify-exports green (the new APIs ride the generated
+map); release zero warnings; debug-remnant and secret scans clean.

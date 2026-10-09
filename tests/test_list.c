@@ -123,7 +123,7 @@ static void test_single(void) {
     fdk_widget *root = fresh_root();
     fdk_widget *list = NULL;
     assert(fdk_ok(fdk_list_create(root, g_font, &list)));
-    fdk_rect r = { 0, 0, 200, 160 };
+    fdk_rect r = { 0, 0, 200, 210 }; /* 6 rows x 30px + headroom */
     fdk_widget_set_bounds(list, r);
     for (int i = 0; i < 6; i++) {
         char buf[32];
@@ -133,21 +133,28 @@ static void test_single(void) {
     g_changes = 0;
     fdk_list_set_on_selection_changed(list, on_changed, NULL);
 
-    /* Click row 2 (rows are ~26px tall; click y=2.5*26=65). */
-    click(root, 50, 65, 0);
+    /* 1.4.0: rows lay out at the theme's LIST_ROW_HEIGHT floor (30
+     * with the default Modern theme; the font's own metrics when
+     * taller) — every click y below is computed from the PUBLIC
+     * row-height getter, not a hardcoded constant. */
+    const fdk_i32 rh = fdk_list_get_row_height(list);
+    assert(rh >= 16);
+
+    /* Click row 2 (center of the row band). */
+    click(root, 50, (float)(2 * rh + rh / 2), 0);
     assert(fdk_list_get_selected(list) == 2);
     assert(fdk_list_is_selected(list, 2));
     assert(!fdk_list_is_selected(list, 1));
     assert(g_changes == 1);
 
     /* Click row 4: exactly one selection moves. */
-    click(root, 50, 4 * 26 + 13, 0);
+    click(root, 50, (float)(4 * rh + rh / 2), 0);
     assert(fdk_list_get_selected(list) == 4);
     assert(!fdk_list_is_selected(list, 2));
     assert(g_changes == 2);
 
     /* Shift-click in SINGLE mode: still a single selection. */
-    click(root, 50, 13, FDK_MOD_SHIFT);
+    click(root, 50, (float)(rh / 2), FDK_MOD_SHIFT);
     assert(fdk_list_get_selected(list) == 0);
     assert(fdk_list_selected_count(list) == 1);
 
@@ -166,7 +173,7 @@ static void test_multiple(void) {
     fdk_widget *root = fresh_root();
     fdk_widget *list = NULL;
     assert(fdk_ok(fdk_list_create(root, g_font, &list)));
-    fdk_rect r = { 0, 0, 200, 160 };
+    fdk_rect r = { 0, 0, 200, 260 }; /* 8 rows x 30px + headroom */
     fdk_widget_set_bounds(list, r);
     for (int i = 0; i < 8; i++) {
         char buf[32];
@@ -176,36 +183,36 @@ static void test_multiple(void) {
     fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
     g_changes = 0;
     fdk_list_set_on_selection_changed(list, on_changed, NULL);
+    const fdk_i32 rh = fdk_list_get_row_height(list);
 
     /* Plain click row 1 (anchor). */
-    click(root, 50, 1 * 26 + 13, 0);
+    click(root, 50, (float)(1 * rh + rh / 2), 0);
     assert(fdk_list_selected_count(list) == 1);
     assert(fdk_list_is_selected(list, 1));
 
     /* Shift-click row 4: range 1..4. */
-    click(root, 50, 4 * 26 + 13, FDK_MOD_SHIFT);
+    click(root, 50, (float)(4 * rh + rh / 2), FDK_MOD_SHIFT);
     assert(fdk_list_selected_count(list) == 4);
     for (size_t i = 1; i <= 4; i++) {
         assert(fdk_list_is_selected(list, i));
     }
 
-    /* Ctrl+click row 5 (the last visible one; viewport is 148px):
-     * adds without clearing. */
-    click(root, 50, 5 * 26 + 13, FDK_MOD_CTRL);
+    /* Ctrl+click row 5: adds without clearing. */
+    click(root, 50, (float)(5 * rh + rh / 2), FDK_MOD_CTRL);
     assert(fdk_list_selected_count(list) == 5);
     assert(fdk_list_is_selected(list, 5));
 
     /* Ctrl+click row 2: TOGGLES OFF (it was in the range). */
-    click(root, 50, 2 * 26 + 13, FDK_MOD_CTRL);
+    click(root, 50, (float)(2 * rh + rh / 2), FDK_MOD_CTRL);
     assert(!fdk_list_is_selected(list, 2));
     assert(fdk_list_selected_count(list) == 4);
 
     /* Plain click row 5 (anchor 5, selection resets to {5}), then
      * ctrl+shift+click row 4: ADDITIVE range 4..5 — ctrl+shift never
      * clears, unlike plain shift. */
-    click(root, 50, 5 * 26 + 13, 0);
+    click(root, 50, (float)(5 * rh + rh / 2), 0);
     assert(fdk_list_selected_count(list) == 1);
-    click(root, 50, 4 * 26 + 13, FDK_MOD_CTRL | FDK_MOD_SHIFT);
+    click(root, 50, (float)(4 * rh + rh / 2), FDK_MOD_CTRL | FDK_MOD_SHIFT);
     assert(fdk_list_is_selected(list, 4));
     assert(fdk_list_is_selected(list, 5));
     assert(fdk_list_selected_count(list) == 2);
@@ -213,12 +220,12 @@ static void test_multiple(void) {
     assert(!fdk_list_is_selected(list, 1));
 
     /* Plain click: collapse to one. */
-    click(root, 50, 3 * 26 + 13, 0);
+    click(root, 50, (float)(3 * rh + rh / 2), 0);
     assert(fdk_list_selected_count(list) == 1);
     assert(fdk_list_get_selected(list) == 3);
 
     /* Enumerate in order. */
-    click(root, 50, 5 * 26 + 13, FDK_MOD_CTRL);
+    click(root, 50, (float)(5 * rh + rh / 2), FDK_MOD_CTRL);
     size_t row = 999;
     assert(fdk_ok(fdk_list_selected_at(list, 0, &row)));
     assert(row == 3);
@@ -283,14 +290,26 @@ static void test_keyboard(void) {
     assert(fdk_list_get_selected(list) == 9);
 
     /* PageUp from 9: viewport = 160 (rows are narrow -> no hbar;
-     * the vbar steals from WIDTH, not height), row_h 26 -> 6 rows. */
+     * the vbar steals from WIDTH, not height); page = vh/rh rows
+     * (30px rows -> 5). The getter keeps this honest across theme
+     * metric changes. */
     fdk_event_data pgup = ev_key(FDK_KEY_PAGE_UP, 0);
     assert(fdk_widget_tree_handle_event(root, &pgup));
-    assert(fdk_list_get_selected(list) == 3);
+    {
+        fdk_i32 krh = fdk_list_get_row_height(list);
+        fdk_i64 page = (krh > 0) ? 160 / krh : 10;
+        if (page < 1) {
+            page = 1;
+        }
+        assert(fdk_list_get_selected(list) == 9 - page);
+    }
 
     /* MULTIPLE + shift+arrows extend from the anchor. */
     fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
-    click(root, 50, 2 * 26 + 13, 0); /* anchor row 2 */
+    {
+        fdk_i32 krh = fdk_list_get_row_height(list);
+        click(root, 50, (float)(2 * krh + krh / 2), 0); /* anchor row 2 */
+    }
     fdk_event_data sdown = ev_key(FDK_KEY_DOWN, FDK_MOD_SHIFT);
     assert(fdk_widget_tree_handle_event(root, &sdown));
     assert(fdk_widget_tree_handle_event(root, &sdown));
@@ -314,7 +333,7 @@ static void test_scrolling(void) {
         snprintf(buf, sizeof(buf), "row %02d", i);
         assert(fdk_ok(fdk_list_append(list, buf, NULL)));
     }
-    /* 60 rows x 26px = 1560px of content in a 148px viewport. */
+    /* 60 rows x 30px = 1800px of content in a ~148px viewport. */
     fdk_event_data wheel = {
         .type = FDK_EVENT_POINTER_SCROLL,
     };
@@ -335,7 +354,7 @@ static void test_scrolling(void) {
     fdk__animation_pump(100000);
     fdk__animation_set_test_clock(-1);
     /* Row 59 is now at the bottom; its content y =
-     * 59*26 + 13 - scroll. Click near the bottom of the viewport. */
+     * 59*rh + rh/2 - scroll. Click near the bottom of the viewport. */
     click(root, 50, 148, 0);
     assert(fdk_list_get_selected(list) >= 55);
 

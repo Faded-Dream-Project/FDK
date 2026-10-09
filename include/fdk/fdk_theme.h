@@ -4,9 +4,10 @@
  * Phase 7 theme engine. A theme is the toolkit's central palette and
  * metric set: the named colors the widget catalog paints with (text,
  * control surfaces and their hover/pressed/disabled states, accent,
- * track, border) plus the handful of paint-time metrics (button corner
- * radius, separator thickness). The built-in default theme is the
- * Phase 6 "v1" palette exactly — switching to it changes no pixels.
+ * track, border) plus the paint-time metrics (corner radii, separator
+ * thickness, row heights, focus ring width). The built-in default is
+ * the 1.4.0 "Modern" palette — a flatter, calmer retune of the Phase
+ * 6 v1 look (the v1 values survive as a documented .fdk theme).
  *
  * Design notes:
  *
@@ -108,14 +109,33 @@ typedef enum fdk_theme_token {
     FDK_TK_WARNING                   = 17,/* caution                  */
     FDK_TK_DANGER                    = 18,/* destructive/error        */
 
-    FDK_TK_COUNT = 19
+    /* 1.4.0 append — the modern-face vocabulary. Surfaces beyond the
+     * control fill (sidebars, popup menus); the accent family a filled
+     * button needs (hover/pressed states of the accent itself, and the
+     * text color that stays legible on an accent fill); the flat-entry
+     * pair (a field fill distinct from control fills plus its border,
+     * the modern "entry = sunken surface" convention); the link color;
+     * and a row-hover fill softer than a control hover for dense lists.
+     * Same append-only policy as before: new values at the end. */
+    FDK_TK_SIDEBAR_BACKGROUND        = 19,/* places/panel sidebars    */
+    FDK_TK_MENU_BACKGROUND           = 20,/* menu/combo popup surface */
+    FDK_TK_ACCENT_HOVER              = 21,/* accent fill under pointer*/
+    FDK_TK_ACCENT_PRESSED            = 22,/* accent fill while pressed*/
+    FDK_TK_ACCENT_TEXT               = 23,/* text ON an accent fill   */
+    FDK_TK_LINK                      = 24,/* hyperlink text           */
+    FDK_TK_ENTRY_BACKGROUND          = 25,/* text-field fill          */
+    FDK_TK_ENTRY_BORDER              = 26,/* text-field edge          */
+    FDK_TK_ROW_HOVER                 = 27,/* dense-row hover fill     */
+
+    FDK_TK_COUNT = 28
 } fdk_theme_token;
 
 /* Integer paint metrics. Most are paint-time values only (they never
  * change a widget's natural size); the exceptions are layout metrics —
- * currently FDK_TM_TITLE_BAR_HEIGHT, which sizes the FDK-drawn title
- * band (a theme switch re-arranges decorated windows; see
- * fdk_window_set_decorated). */
+ * FDK_TM_TITLE_BAR_HEIGHT (sizes the FDK-drawn title band; see
+ * fdk_window_set_decorated) and FDK_TM_LIST_ROW_HEIGHT (sizes every
+ * List row; a theme switch re-arranges lists and marks them for
+ * re-layout). */
 typedef enum fdk_theme_metric {
     FDK_TM_BUTTON_CORNER_RADIUS = 0, /* Button fill/focus-ring corners, 0..32 */
     FDK_TM_SEPARATOR_THICKNESS = 1, /* Separator band thickness,    1..8  */
@@ -124,14 +144,25 @@ typedef enum fdk_theme_metric {
     FDK_TM_MENU_ITEM_HEIGHT    = 4, /* Menu bar/row minimum height, 16..48 */
     FDK_TM_TOOLTIP_CORNER_RADIUS = 5, /* Tooltip box radius,         0..16 */
 
-    FDK_TM_COUNT = 6
+    /* 1.4.0 append — the modern-face metrics: entry corner radius
+     * (fields round softer than buttons by convention), menu/combo
+     * popup radius, the list row height (a LAYOUT metric: switching
+     * it re-arranges lists — the FDK_TM_TITLE_BAR_HEIGHT rule), and
+     * the focus ring stroke width shared by every ring painter. */
+    FDK_TM_ENTRY_CORNER_RADIUS  = 6, /* Entry field corners,        0..16 */
+    FDK_TM_MENU_CORNER_RADIUS   = 7, /* Menu/combo popup corners,   0..16 */
+    FDK_TM_LIST_ROW_HEIGHT      = 8, /* List row height,            16..48 */
+    FDK_TM_FOCUS_RING_WIDTH     = 9, /* Focus ring stroke,          1..4  */
+
+    FDK_TM_COUNT = 10
 } fdk_theme_metric;
 
 /* ---- Lifecycle ---- */
 
-/* A fresh copy of the built-in default theme (the Phase 6 v1 palette
- * and metrics). Modify it with the setters below and install it with
- * fdk_theme_set_default(). Returns NULL only on allocation failure. */
+/* A fresh copy of the built-in default theme (the 1.4.0 "Modern"
+ * palette and metrics). Modify it with the setters below and install
+ * it with fdk_theme_set_default(). Returns NULL only on allocation
+ * failure. */
 fdk_theme *fdk_theme_create_default(void);
 
 /* Parses a theme from memory. `text` need not be NUL-terminated —
@@ -156,7 +187,7 @@ void fdk_theme_destroy(fdk_theme *theme);
 
 /* ---- Access ---- */
 
-/* The theme's display name ("FDK Dark" for the built-in theme; the
+/* The theme's display name ("FDK Modern" for the built-in theme; the
  * `name` key for parsed themes). Never NULL; valid until the theme is
  * destroyed or renamed. A NULL theme means the current default. */
 const char *fdk_theme_name(const fdk_theme *theme);
@@ -185,13 +216,14 @@ fdk_result fdk_theme_set_color(fdk_theme *theme, fdk_theme_token token,
                                fdk_color color);
 
 /* Overrides a metric on an owned theme, range-checked per metric
- * (button_corner_radius 0..32, separator_thickness 1..8). Same
- * no-repaint contract as fdk_theme_set_color(). */
+ * (button_corner_radius 0..32, separator_thickness 1..8, and the
+ * rest as the enum comments above document). Same no-repaint
+ * contract as fdk_theme_set_color(). */
 fdk_result fdk_theme_set_metric(fdk_theme *theme, fdk_theme_metric metric,
                                 fdk_i32 value);
 
 /* Renames a theme (copied; capped at 127 bytes, longer names are an
- * FDK_ERR_INVALID_ARGUMENT). NULL name restores "FDK Dark". */
+ * FDK_ERR_INVALID_ARGUMENT). NULL name restores "FDK Modern". */
 fdk_result fdk_theme_set_name(fdk_theme *theme, const char *name);
 
 /* ---- The current default theme ---- */

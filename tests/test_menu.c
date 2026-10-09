@@ -358,14 +358,17 @@ static void test_view_paint(void) {
     fdk_surface *s = NULL;
     assert(fdk_ok(fdk_surface_create(w, h, &s)));
 
-    /* Paint: menu surface = control color. */
+    /* Paint: menu surface = the MENU_BACKGROUND token (1.4.0: popups
+     * are their own surface, not the control fill; the sample point is
+     * the mid-height right edge — clear of the rounded corners AND of
+     * any row's text). */
     fdk_widget_invalidate_all(root);
     fdk_widget_tree_paint(root, s);
-    fdk_u32 mid = px_at(s, w - 5, 2);
+    fdk_u32 mid = px_at(s, w - 4, h / 2);
     int mr = (int)((mid >> 16) & 0xFFu);
     int mg = (int)((mid >> 8) & 0xFFu);
     int mb = (int)(mid & 0xFFu);
-    fdk_color ctl = fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
+    fdk_color ctl = fdk_theme_get_color(NULL, FDK_TK_MENU_BACKGROUND);
     assert(mr == (int)(ctl.r * 255.0f + 0.5f) &&
            mg == (int)(ctl.g * 255.0f + 0.5f) &&
            mb == (int)(ctl.b * 255.0f + 0.5f));

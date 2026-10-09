@@ -104,6 +104,18 @@ fdk_color fdk__pal_control_disabled(void);
 fdk_color fdk__pal_accent(void);
 fdk_color fdk__pal_track(void);
 fdk_color fdk__pal_border(void);
+/* 1.4.0 modern-face family (statics.c, same paint-time resolution). */
+fdk_color fdk__pal_selection(void);
+fdk_color fdk__pal_focus_ring(void);
+fdk_color fdk__pal_sidebar(void);
+fdk_color fdk__pal_menu_bg(void);
+fdk_color fdk__pal_accent_hover(void);
+fdk_color fdk__pal_accent_pressed(void);
+fdk_color fdk__pal_accent_text(void);
+fdk_color fdk__pal_link(void);
+fdk_color fdk__pal_entry(void);
+fdk_color fdk__pal_entry_border(void);
+fdk_color fdk__pal_row_hover(void);
 
 /* ---- shared instance structs ---- */
 
@@ -142,6 +154,8 @@ typedef struct fdk_button {
     void *on_activate_data;
     bool pressed;      /* pointer down inside */
     bool hovering;
+    fdk_button_role role; /* 1.4.0 paint role (default NORMAL) */
+    bool checked;      /* 1.4.0 toggle-button state */
 } fdk_button;
 
 /* Shared shape of Toggle / Checkbox / Radio: an indicator box/circle/

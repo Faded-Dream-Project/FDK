@@ -31,8 +31,8 @@
 #define BTN_PAD_X 16
 #define BTN_PAD_Y 8
 /* BTN_RADIUS moved to the theme: FDK_TM_BUTTON_CORNER_RADIUS,
- * built-in default 8 (Phase 7). */
-#define BTN_FOCUS_INSET 2
+ * built-in default 8 (Phase 7). The focus-ring inset/width moved to
+ * the theme too: FDK_TM_FOCUS_RING_WIDTH, built-in default 2 (1.4.0). */
 
 /* Toggle: track 34x18, knob 12, gap 8 before optional label. */
 #define TOGGLE_TRACK_W 34
@@ -91,15 +91,48 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
         return;
     }
 
+    /* The active-state ladder, per role (1.4.0). NORMAL rides the
+     * control family as v1 did; SUGGESTED is accent-filled with the
+     * accent's own hover/pressed states and accent-text label;
+     * DESTRUCTIVE is danger-filled, its hover/pressed derived by an
+     * inline shade (no token pair — the family is one color wide). */
+    const bool disabled = (w->flags & FDK_WF_ENABLED) == 0;
+    const bool active = b->pressed || b->checked;
     fdk_color fill;
-    if ((w->flags & FDK_WF_ENABLED) == 0) {
-        fill = fdk__pal_control_disabled();
-    } else if (b->pressed) {
-        fill = fdk__pal_control_pressed();
-    } else if (b->hovering) {
-        fill = fdk__pal_control_hover();
-    } else {
-        fill = fdk__pal_control();
+    fdk_color label_col;
+    switch (b->role) {
+    case FDK_BUTTON_ROLE_SUGGESTED:
+        fill = disabled   ? fdk__pal_control_disabled()
+             : active     ? fdk__pal_accent_pressed()
+             : b->hovering ? fdk__pal_accent_hover()
+                          : fdk__pal_accent();
+        label_col = disabled ? fdk__pal_text_disabled()
+                             : fdk__pal_accent_text();
+        break;
+    case FDK_BUTTON_ROLE_DESTRUCTIVE: {
+        fdk_color danger = fdk_theme_get_color(NULL, FDK_TK_DANGER);
+        if (disabled) {
+            fill = fdk__pal_control_disabled();
+        } else if (active) {
+            fill = (fdk_color){danger.r * 0.78f, danger.g * 0.78f,
+                               danger.b * 0.78f, danger.a};
+        } else if (b->hovering) {
+            fill = (fdk_color){danger.r * 0.90f, danger.g * 0.90f,
+                               danger.b * 0.90f, danger.a};
+        } else {
+            fill = danger;
+        }
+        label_col = disabled ? fdk__pal_text_disabled()
+                             : fdk__pal_accent_text();
+        break;
+    }
+    default:
+        fill = disabled   ? fdk__pal_control_disabled()
+             : active     ? fdk__pal_control_pressed()
+             : b->hovering ? fdk__pal_control_hover()
+                          : fdk__pal_control();
+        label_col = disabled ? fdk__pal_text_disabled() : fdk__pal_text();
+        break;
     }
     /* Themed corner radius (default 8 = the v1 BTN_RADIUS exactly).
      * Radius 0 = square corners - the renderer's rounded-rect treats
@@ -107,18 +140,18 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
     fdk_i32 radius = fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
     fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
 
-    /* Focus ring: a second rounded outline just inside the fill. */
-    if ((w->flags & FDK_WF_FOCUSED) != 0) {
-        fdk_rect ring = {bounds.x + BTN_FOCUS_INSET,
-                         bounds.y + BTN_FOCUS_INSET,
-                         bounds.width - BTN_FOCUS_INSET * 2,
-                         bounds.height - BTN_FOCUS_INSET * 2};
+    /* Focus ring: a themed-color, themed-width rounded outline just
+     * inside the fill (1.4.0: FOCUS_RING token + FOCUS_RING_WIDTH
+     * metric, replacing the hardcoded accent hairline). */
+    if ((w->flags & FDK_WF_FOCUSED) != 0 && !disabled) {
+        fdk_i32 fw = fdk_theme_get_metric(NULL, FDK_TM_FOCUS_RING_WIDTH);
+        fdk_rect ring = {bounds.x + fw, bounds.y + fw,
+                         bounds.width - fw * 2,
+                         bounds.height - fw * 2};
         if (ring.width > 0 && ring.height > 0) {
-            fdk_i32 ring_r = radius > BTN_FOCUS_INSET
-                                 ? radius - BTN_FOCUS_INSET
-                                 : 0;
+            fdk_i32 ring_r = radius > fw ? radius - fw : 0;
             fdk_surface_draw_rounded_rect(surface, ring, ring_r,
-                                          fdk__pal_accent());
+                                          fdk__pal_focus_ring());
         }
     }
 
@@ -132,10 +165,7 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
         }
         fdk_i32 baseline = fdk__center_baseline(b->font, bounds.y,
                                                 bounds.height);
-        fdk__draw_text(surface, b->font, b->text,
-                       (w->flags & FDK_WF_ENABLED) != 0
-                           ? fdk__pal_text()
-                           : fdk__pal_text_disabled(),
+        fdk__draw_text(surface, b->font, b->text, label_col,
                        text_x, baseline);
     }
 }
@@ -300,6 +330,55 @@ void fdk_button_set_on_activate(fdk_widget *button,
     fdk_button *b = button_of(button);
     b->on_activate = on_activate;
     b->on_activate_data = user_data;
+}
+
+/* ---- 1.4.0: role + toggle-button state ---- */
+
+void fdk_button_set_role(fdk_widget *button, fdk_button_role role) {
+    if (button == NULL || button->klass != &fdk_button_class_def) {
+        return;
+    }
+    switch (role) {
+    case FDK_BUTTON_ROLE_NORMAL:
+    case FDK_BUTTON_ROLE_SUGGESTED:
+    case FDK_BUTTON_ROLE_DESTRUCTIVE:
+        break;
+    default:
+        return; /* unknown values ignored (documented) */
+    }
+    fdk_button *b = button_of(button);
+    if (b->role == role) {
+        return;
+    }
+    b->role = role;
+    fdk_widget_invalidate(button);
+}
+
+fdk_button_role fdk_button_get_role(fdk_widget *button) {
+    if (button == NULL || button->klass != &fdk_button_class_def) {
+        return FDK_BUTTON_ROLE_NORMAL;
+    }
+    return button_of(button)->role;
+}
+
+void fdk_button_set_checked(fdk_widget *button, bool checked) {
+    if (button == NULL || button->klass != &fdk_button_class_def) {
+        return;
+    }
+    fdk_button *b = button_of(button);
+    checked = checked ? true : false; /* clamp to exactly true/false */
+    if (b->checked == checked) {
+        return;
+    }
+    b->checked = checked;
+    fdk_widget_invalidate(button);
+}
+
+bool fdk_button_is_checked(fdk_widget *button) {
+    if (button == NULL || button->klass != &fdk_button_class_def) {
+        return false;
+    }
+    return button_of(button)->checked;
 }
 
 /* ---- check family: shared logic ---- */

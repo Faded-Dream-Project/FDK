@@ -2,11 +2,28 @@
  * theme.c — theme object lifecycle, the built-in default, and the
  * current-default switch
  *
- * The v1 palette lives on as the built-in default theme, byte-for-byte
- * the floats src/widget/statics.c painted with through Phase 6 —
- * installing the built-in theme (or never touching themes at all)
- * changes no pixels. Parsing lives in parse.c; this file owns the
- * object.
+ * The built-in default is the 1.4.0 "Modern" retune of the Phase 6
+ * v1 palette: same token roles, flatter and calmer values. The v1
+ * look survives exactly — every value it painted with is reproducible
+ * as a .fdk theme file (docs/fdk-theme-format.md records the v1
+ * palette for exactly that). What the retune changes and why:
+ *
+ *  - SURFACES: the window/control contrast was cut roughly in half
+ *    (0.07/0.16 v1 -> 0.09/0.12 Modern) — modern apps read controls
+ *    as shapes on a surface, not as raised chrome.
+ *  - BORDERS: v1's 0.30 border read as heavy outlining at rest; the
+ *    Modern border is barely-there at rest and does its work on hover
+ *    and focus instead.
+ *  - ACCENT: v1's sky blue (0.35/0.65/0.95) goes slightly indigo and
+ *    brighter (0.42/0.62/1.00) — enough to pop against the darker
+ *    control family while keeping white-accent-text contrast > 3.5:1.
+ *  - NEW FAMILIES: sidebar/menu surfaces one step off the control
+ *    fill, flat entries (window-tone fill + subtle border — the
+ *    sunken-field convention replacing v1's raised-field entry),
+ *    accent hover/pressed fills + accent-on-accent text, a link
+ *    color, and a row-hover softer than the control hover.
+ *
+ * Parsing lives in parse.c; this file owns the object.
  *
  * The one deliberate internal cycle in FDK so far lives here: the
  * widget catalog resolves tokens through fdk__theme_current(), and
@@ -24,50 +41,64 @@
 
 #include <string.h>
 
-/* ---- The built-in default (the Phase 6 v1 palette) ---- */
+/* ---- The built-in default (the 1.4.0 "Modern" palette) ---- */
 
 /* The built-in name lives in a static array so the struct needs no
  * const-dropping cast: the instance is never mutated or freed. */
-static char g_builtin_name[] = "FDK Dark";
+static char g_builtin_name[] = "FDK Modern";
 
 static fdk_theme g_builtin = {
     .name = g_builtin_name,
     .author = NULL,
     .colors = {
-        /* FDK_TK_WINDOW_BACKGROUND: new token, no v1 consumer; the
-         * darkest surface color in the v1 family. */
-        [FDK_TK_WINDOW_BACKGROUND] = {0.07f, 0.09f, 0.13f, 1.0f},
-        [FDK_TK_TEXT] = {0.92f, 0.93f, 0.96f, 1.0f},
-        [FDK_TK_TEXT_DISABLED] = {0.45f, 0.47f, 0.52f, 1.0f},
-        [FDK_TK_CONTROL_BACKGROUND] = {0.16f, 0.18f, 0.26f, 1.0f},
-        [FDK_TK_CONTROL_BACKGROUND_HOVER] = {0.22f, 0.25f, 0.36f, 1.0f},
-        [FDK_TK_CONTROL_BACKGROUND_PRESSED] = {0.28f, 0.32f, 0.46f, 1.0f},
-        [FDK_TK_CONTROL_BACKGROUND_DISABLED] = {0.12f, 0.13f, 0.18f, 1.0f},
-        [FDK_TK_CONTROL_BORDER] = {0.30f, 0.33f, 0.44f, 1.0f},
-        [FDK_TK_ACCENT] = {0.35f, 0.65f, 0.95f, 1.0f},
-        [FDK_TK_TRACK] = {0.10f, 0.12f, 0.17f, 1.0f},
-        /* 1.3.2: elevated surface for tooltips (one step above
-         * control_background, with its own high-contrast text), a
-         * translucent selection riding the accent family, the focus
-         * ring as accent, and the semantic trio calibrated to read
-         * against the dark background. */
+        /* Surfaces: calm, low-contrast layering. */
+        [FDK_TK_WINDOW_BACKGROUND] = {0.09f, 0.10f, 0.14f, 1.0f},
+        [FDK_TK_TEXT] = {0.93f, 0.94f, 0.97f, 1.0f},
+        [FDK_TK_TEXT_DISABLED] = {0.44f, 0.46f, 0.52f, 1.0f},
+        [FDK_TK_CONTROL_BACKGROUND] = {0.13f, 0.15f, 0.20f, 1.0f},
+        [FDK_TK_CONTROL_BACKGROUND_HOVER] = {0.17f, 0.20f, 0.27f, 1.0f},
+        [FDK_TK_CONTROL_BACKGROUND_PRESSED] = {0.21f, 0.25f, 0.33f, 1.0f},
+        [FDK_TK_CONTROL_BACKGROUND_DISABLED] = {0.11f, 0.12f, 0.16f, 1.0f},
+        [FDK_TK_CONTROL_BORDER] = {0.20f, 0.23f, 0.30f, 1.0f},
+        [FDK_TK_ACCENT] = {0.42f, 0.62f, 1.00f, 1.0f},
+        [FDK_TK_TRACK] = {0.11f, 0.12f, 0.16f, 1.0f},
+        /* 1.3.2 tokens, recalibrated against the Modern surfaces. */
         [FDK_TK_TOOLTIP_BACKGROUND] = {0.95f, 0.96f, 0.99f, 1.0f},
         [FDK_TK_TOOLTIP_TEXT] = {0.11f, 0.13f, 0.19f, 1.0f},
         [FDK_TK_TOOLTIP_BORDER] = {0.70f, 0.73f, 0.82f, 1.0f},
-        [FDK_TK_SELECTION_BACKGROUND] = {0.35f, 0.65f, 0.95f, 0.45f},
+        [FDK_TK_SELECTION_BACKGROUND] = {0.42f, 0.62f, 1.00f, 0.38f},
         [FDK_TK_SELECTION_TEXT] = {0.95f, 0.96f, 0.99f, 1.0f},
-        [FDK_TK_FOCUS_RING] = {0.35f, 0.65f, 0.95f, 0.90f},
-        [FDK_TK_SUCCESS] = {0.36f, 0.73f, 0.42f, 1.0f},
-        [FDK_TK_WARNING] = {0.90f, 0.68f, 0.25f, 1.0f},
-        [FDK_TK_DANGER] = {0.91f, 0.35f, 0.36f, 1.0f},
+        [FDK_TK_FOCUS_RING] = {0.42f, 0.62f, 1.00f, 0.90f},
+        [FDK_TK_SUCCESS] = {0.38f, 0.74f, 0.45f, 1.0f},
+        [FDK_TK_WARNING] = {0.91f, 0.69f, 0.27f, 1.0f},
+        [FDK_TK_DANGER] = {0.91f, 0.36f, 0.38f, 1.0f},
+        /* 1.4.0: the modern-face families — popup and sidebar
+         * surfaces a half-step above the control fill; the accent's
+         * own hover/pressed states and its on-fill text; the link
+         * blue; the flat-entry pair; the soft row hover. */
+        [FDK_TK_SIDEBAR_BACKGROUND] = {0.10f, 0.12f, 0.16f, 1.0f},
+        [FDK_TK_MENU_BACKGROUND] = {0.15f, 0.17f, 0.23f, 1.0f},
+        [FDK_TK_ACCENT_HOVER] = {0.50f, 0.69f, 1.00f, 1.0f},
+        [FDK_TK_ACCENT_PRESSED] = {0.34f, 0.52f, 0.88f, 1.0f},
+        [FDK_TK_ACCENT_TEXT] = {0.97f, 0.98f, 1.00f, 1.0f},
+        [FDK_TK_LINK] = {0.55f, 0.73f, 1.00f, 1.0f},
+        [FDK_TK_ENTRY_BACKGROUND] = {0.07f, 0.08f, 0.11f, 1.0f},
+        [FDK_TK_ENTRY_BORDER] = {0.17f, 0.19f, 0.25f, 1.0f},
+        [FDK_TK_ROW_HOVER] = {0.14f, 0.16f, 0.22f, 0.60f},
     },
     .metrics = {
-        [FDK_TM_BUTTON_CORNER_RADIUS] = 8, /* was BTN_RADIUS */
+        [FDK_TM_BUTTON_CORNER_RADIUS] = 8,
         [FDK_TM_SEPARATOR_THICKNESS] = 1,
-        [FDK_TM_TITLE_BAR_HEIGHT] = 28, /* was DECO_TITLE_H */
+        [FDK_TM_TITLE_BAR_HEIGHT] = 28,
         [FDK_TM_SCROLLBAR_WIDTH] = 12,
         [FDK_TM_MENU_ITEM_HEIGHT] = 26,
         [FDK_TM_TOOLTIP_CORNER_RADIUS] = 6,
+        /* 1.4.0: fields round softer than buttons, menus round like
+         * tooltips, rows breathe at 30px, rings stroke at 2px. */
+        [FDK_TM_ENTRY_CORNER_RADIUS] = 6,
+        [FDK_TM_MENU_CORNER_RADIUS] = 8,
+        [FDK_TM_LIST_ROW_HEIGHT] = 30,
+        [FDK_TM_FOCUS_RING_WIDTH] = 2,
     },
 };
 
@@ -171,7 +202,7 @@ void fdk_theme_destroy(fdk_theme *theme) {
 const char *fdk_theme_name(const fdk_theme *theme) {
     const fdk_theme *t =
         (theme != NULL) ? theme : fdk__theme_current();
-    return (t->name != NULL) ? t->name : "FDK Dark";
+    return (t->name != NULL) ? t->name : "FDK Modern";
 }
 
 const char *fdk_theme_author(const fdk_theme *theme) {
@@ -249,6 +280,22 @@ fdk_result fdk_theme_set_metric(fdk_theme *theme, fdk_theme_metric metric,
         lo = 0;
         hi = 16;
         break;
+    case FDK_TM_ENTRY_CORNER_RADIUS:
+        lo = 0;
+        hi = 16;
+        break;
+    case FDK_TM_MENU_CORNER_RADIUS:
+        lo = 0;
+        hi = 16;
+        break;
+    case FDK_TM_LIST_ROW_HEIGHT:
+        lo = 16;
+        hi = 48;
+        break;
+    case FDK_TM_FOCUS_RING_WIDTH:
+        lo = 1;
+        hi = 4;
+        break;
     default:
         return FDK_ERR_INVALID_ARGUMENT;
     }
@@ -265,7 +312,7 @@ fdk_result fdk_theme_set_name(fdk_theme *theme, const char *name) {
     }
     if (name == NULL) {
         fdk_free(theme->name);
-        theme->name = fdk__theme_strdup("FDK Dark");
+        theme->name = fdk__theme_strdup("FDK Modern");
         return (theme->name != NULL) ? FDK_OK : FDK_ERR_OUT_OF_MEMORY;
     }
     size_t n = strlen(name);

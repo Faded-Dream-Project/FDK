@@ -109,6 +109,15 @@ static fdk_i32 list_row_height(const fdk_list *l) {
     fdk_font_metrics m;
     fdk_font_get_metrics(l->font, &m);
     fdk_i32 h = m.ascent + m.descent + LIST_ROW_PAD_Y * 2;
+    /* 1.4.0: the theme's LIST_ROW_HEIGHT is the FLOOR — the modern
+     * airy default (30) wins when the font fits inside it; a font
+     * taller than the metric still wins (rows must fit their text;
+     * the metric's range tops out at 48). */
+    fdk_i32 floor_h =
+        fdk_theme_get_metric(NULL, FDK_TM_LIST_ROW_HEIGHT);
+    if (h < floor_h) {
+        h = floor_h;
+    }
     return (h < 16) ? 16 : h;
 }
 
@@ -381,15 +390,15 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
 
     fdk_color fill;
     if (row->selected) {
-        /* Accent-tinted selection band (the v1 way, matching the
-         * Entry selection highlight). */
-        fdk_color accent = fdk__pal_accent();
-        fill = (fdk_color){accent.r, accent.g, accent.b, 0.45f};
+        /* The 1.3.2 SELECTION_BACKGROUND token, wired in 1.4.0 (the
+         * hardcoded accent-with-0.45-alpha is gone). */
+        fill = fdk__pal_selection();
         fdk_surface_fill_rect(surface, bounds, fill);
     } else if ((w->flags & FDK_WF_HOVERED) != 0 &&
                (w->flags & FDK_WF_ENABLED) != 0) {
-        fdk_surface_fill_rect(surface, bounds,
-                              fdk__pal_control_hover());
+        /* 1.4.0: the soft ROW_HOVER fill (subtler than a control
+         * hover — dense lists must not strobe under the pointer). */
+        fdk_surface_fill_rect(surface, bounds, fdk__pal_row_hover());
     }
 
     /* The row's parent chain: rows container -> scrollview -> list.
@@ -772,6 +781,18 @@ void fdk_list_set_selection_mode(fdk_widget *list,
         list_clear_selection(l);
         list_fire_changed(l);
     }
+}
+
+/* 1.4.0 — the row height this list actually lays rows out at (the
+ * theme's LIST_ROW_HEIGHT floor, the font's metrics, whichever is
+ * taller; 20 for a fontless list). Apps use it to map mouse coords
+ * to row indices over a list, and to predict how many rows a fixed
+ * height will show. 0 for a non-list. */
+fdk_i32 fdk_list_get_row_height(fdk_widget *list) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return 0;
+    }
+    return list_row_height(list_of(list));
 }
 
 static fdk_result list_grow(fdk_list *l) {

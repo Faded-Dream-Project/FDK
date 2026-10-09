@@ -350,13 +350,11 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     fdk_tree_node_rec *n = &t->nodes[row->node];
 
     if (n->selected) {
-        fdk_color accent = fdk__pal_accent();
-        fdk_surface_fill_rect(surface, bounds,
-                              (fdk_color){accent.r, accent.g, accent.b,
-                                          0.45f});
+        /* The 1.3.2 SELECTION_BACKGROUND token, wired in 1.4.0. */
+        fdk_surface_fill_rect(surface, bounds, fdk__pal_selection());
     } else if ((w->flags & FDK_WF_HOVERED) != 0 &&
                (w->flags & FDK_WF_ENABLED) != 0) {
-        fdk_surface_fill_rect(surface, bounds, fdk__pal_control_hover());
+        fdk_surface_fill_rect(surface, bounds, fdk__pal_row_hover());
     }
 
     fdk_i32 depth = 0;

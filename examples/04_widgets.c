@@ -96,7 +96,7 @@ int main(void) {
     }
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 685)) {
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 745)) {
         fdk_shutdown(ctx);
         return 1;
     }
@@ -109,6 +109,11 @@ int main(void) {
     fdk_widget *profile = NULL;
     (void)fdk_frame_create(content, font16, "Profile", &profile);
     fdk_widget_set_background(profile, col(26, 29, 40));
+    /* 1.4.0: an entry with PLACEHOLDER text — the hint paints in the
+     * disabled-text color only while the field is empty. */
+    fdk_widget *search = NULL;
+    (void)fdk_entry_create(profile, font16, "", &search);
+    fdk_entry_set_placeholder(search, "Search the settings…");
     fdk_widget *pub = NULL;
     (void)fdk_toggle_create(profile, font16, "Public profile", &pub);
     fdk_toggle_set_on_changed(pub, on_any_change, (void *)"Public profile");
@@ -185,12 +190,13 @@ int main(void) {
     (void)fdk_grid_attach(cells, gc[3], 0, 1, 2, 1); /* colspan 2 */
     (void)fdk_grid_attach(cells, gc[4], 2, 1, 1, 1);
 
-    /* --- button row --- */
+    /* --- button row (1.4.0 roles) --- */
     fdk_widget *row = NULL;
     (void)fdk_box_create(content, FDK_HORIZONTAL, &row);
     fdk_box_set_spacing(row, 10);
     fdk_widget *apply = NULL;
     (void)fdk_button_create(row, font16, "Apply", &apply);
+    fdk_button_set_role(apply, FDK_BUTTON_ROLE_SUGGESTED);
     fdk_button_set_on_activate(apply, on_apply, NULL);
     (void)fdk_widget_set_tooltip(
         apply,
@@ -202,6 +208,21 @@ int main(void) {
     fdk_button_set_on_activate(reset, on_reset, NULL);
     (void)fdk_widget_set_tooltip(
         reset, "Clear the progress bar and the apply counter");
+    /* A toggle-BUTTON (stays pressed in) and a destructive one —
+     * the 1.4.0 role/state vocabulary. */
+    fdk_widget *pin = NULL;
+    (void)fdk_button_create(row, font16, "Pin", &pin);
+    fdk_button_set_checked(pin, true);
+    (void)fdk_widget_set_tooltip(
+        pin, "A checked button stays pressed in (the toggle-button "
+             "state) — app state drives it");
+    fdk_widget *danger = NULL;
+    (void)fdk_button_create(row, font16, "Delete profile…", &danger);
+    fdk_button_set_role(danger, FDK_BUTTON_ROLE_DESTRUCTIVE);
+    fdk_button_set_on_activate(danger, on_reset, NULL);
+    (void)fdk_widget_set_tooltip(
+        danger, "The destructive role paints danger-filled — reserve "
+                "it for the irreversible action");
     fdk_widget *filler = NULL;
     (void)fdk_widget_create(row, NULL, (fdk_rect){0, 0, 0, 1}, &filler);
     fdk_widget_set_expand(filler, true, false);

@@ -492,6 +492,89 @@ static void test_paint(void) {
            "underline are pixel-visible\n");
 }
 
+/* ---- 1.4.0: placeholder text ---- */
+
+static void test_placeholder(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *entry = NULL;
+    assert(fdk_ok(fdk_entry_create(root, g_font, "", &entry)));
+    fdk_widget_set_bounds(entry, (fdk_rect){10, 10, 220, 32});
+
+    /* Default: no placeholder. */
+    assert(fdk_entry_get_placeholder(entry) == NULL);
+
+    /* Set/get (owned copy). */
+    fdk_entry_set_placeholder(entry, "Search files...");
+    assert(fdk_entry_get_placeholder(entry) != NULL);
+    assert(strcmp(fdk_entry_get_placeholder(entry), "Search files...")
+           == 0);
+    /* The placeholder never enters the buffer. */
+    assert(strcmp(fdk_entry_get_text(entry), "") == 0);
+    assert(fdk_entry_get_cursor(entry) == 0);
+
+    /* Pixel proof: an empty entry with a placeholder paints ink in
+     * the text band; clearing the placeholder removes it. The blank
+     * reference is the field's own fill, sampled right of the text
+     * run but inside the field. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(260, 60, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    fdk_u32 blank = px_at(s, 215, 10 + 16);
+    int with_ink = 0;
+    for (int x = 18; x < 200; x++) {
+        if (px_at(s, x, 10 + 16) != blank) {
+            with_ink++;
+        }
+    }
+    assert(with_ink > 8); /* the placeholder glyphs are on screen */
+
+    fdk_entry_set_placeholder(entry, NULL);
+    assert(fdk_entry_get_placeholder(entry) == NULL);
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    blank = px_at(s, 215, 10 + 16);
+    int bare_ink = 0;
+    for (int x = 18; x < 200; x++) {
+        if (px_at(s, x, 10 + 16) != blank) {
+            bare_ink++;
+        }
+    }
+    assert(bare_ink == 0); /* nothing left in the empty field */
+
+    /* Text wins: with text present the placeholder is not painted
+     * (a row through the band differs from the placeholder paint). */
+    fdk_entry_set_placeholder(entry, "placeholder words");
+    assert(fdk_ok(fdk_entry_set_text(entry, "real text")));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    blank = px_at(s, 215, 10 + 16);
+    int text_ink = 0;
+    for (int x = 18; x < 200; x++) {
+        if (px_at(s, x, 10 + 16) != blank) {
+            text_ink++;
+        }
+    }
+    assert(text_ink > 8);
+
+    /* Empty string clears, same as NULL. */
+    fdk_entry_set_placeholder(entry, "");
+    assert(fdk_entry_get_placeholder(entry) == NULL);
+
+    /* Argument safety: non-entries are inert, getters NULL/false. */
+    fdk_entry_set_placeholder(NULL, "x");
+    assert(fdk_entry_get_placeholder(NULL) == NULL);
+    fdk_widget *lbl = NULL;
+    assert(fdk_ok(fdk_label_create(root, g_font, "x", &lbl)));
+    fdk_entry_set_placeholder(lbl, "x");
+    assert(fdk_entry_get_placeholder(lbl) == NULL);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] entry: placeholder — set/get/clear, never in the "
+           "buffer, paints only while empty, argument safety\n");
+}
+
 /* ---- horizontal scrolling keeps the caret visible ---- */
 
 static void test_scroll(void) {
@@ -562,6 +645,7 @@ int main(void) {
     test_clipboard_standalone();
     test_cap();
     test_paint();
+    test_placeholder();
     test_scroll();
     test_undo_redo();
 

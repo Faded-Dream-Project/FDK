@@ -262,7 +262,9 @@ static void combo_paint(fdk_widget *w, fdk_surface *surface,
         return;
     }
     /* The field (the Entry paints itself above it in editable mode —
-     * but the field chrome still frames it). */
+     * but the field chrome still frames it). 1.4.0: rounded corners
+     * at the entry radius (the combo is a field-shaped control; the
+     * fill ladder is unchanged). */
     fdk_color fill = fdk__pal_control();
     if (c->hovering && fdk_widget_is_effectively_enabled(w)) {
         fill = fdk__pal_control_hover();
@@ -270,8 +272,10 @@ static void combo_paint(fdk_widget *w, fdk_surface *surface,
     if (c->pressed && fdk_widget_is_effectively_enabled(w)) {
         fill = fdk__pal_control_pressed();
     }
-    fdk_surface_fill_rect(surface, bounds, fill);
-    fdk_surface_draw_rect(surface, bounds, fdk__pal_border());
+    fdk_i32 cr =
+        fdk_theme_get_metric(NULL, FDK_TM_ENTRY_CORNER_RADIUS);
+    fdk_surface_fill_rounded_rect(surface, bounds, cr, fill);
+    fdk_surface_draw_rounded_rect(surface, bounds, cr, fdk__pal_border());
 
     /* Chevron zone: a subtle inset panel with a vector chevron. */
     fdk_rect cz = {bounds.x + bounds.width - COMBO_CHEVRON, bounds.y,

@@ -57,6 +57,7 @@ typedef struct fdk_entry {
     size_t anchor;         /* selection anchor (== caret: no sel)     */
     char *preedit;         /* owned, NULL when no preedit             */
     size_t preedit_len;
+    char *placeholder;     /* owned, NULL when unset (1.4.0)         */
     fdk_entry_changed_fn on_changed;
     void *on_changed_data;
     fdk_entry_activate_fn on_activate;
@@ -1246,26 +1247,38 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         return;
     }
 
-    fdk_color fill;
-    if ((w->flags & FDK_WF_ENABLED) == 0) {
-        fill = fdk__pal_control_disabled();
-    } else if ((w->flags & FDK_WF_FOCUSED) != 0) {
-        /* Focused entries read as "active": the window background
-         * token, the field convention the v1 palette supports. */
-        fill = fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
-    } else {
-        fill = fdk__pal_control();
-    }
-    fdk_i32 radius = fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
+    /* The modern field (1.4.0): a FLAT, slightly sunken surface —
+     * ENTRY_BACKGROUND fill with a 1px ENTRY_BORDER outline — instead
+     * of v1's raised control fill. Focus reads as the themed ring
+     * (FOCUS_RING token, FOCUS_RING_WIDTH metric) drawn over the
+     * border, so a focused field is outlined in accent, not filled
+     * differently; disabled fields keep the control-disabled fill. */
+    const bool focused = (w->flags & FDK_WF_FOCUSED) != 0;
+    fdk_color fill = ((w->flags & FDK_WF_ENABLED) == 0)
+        ? fdk__pal_control_disabled()
+        : fdk__pal_entry();
+    fdk_i32 radius = fdk_theme_get_metric(NULL, FDK_TM_ENTRY_CORNER_RADIUS);
     fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
 
-    if ((w->flags & FDK_WF_FOCUSED) != 0) {
-        fdk_rect ring = {bounds.x + 2, bounds.y + 2,
-                         bounds.width - 4, bounds.height - 4};
-        if (ring.width > 0 && ring.height > 0) {
-            fdk_i32 rr = radius > 2 ? radius - 2 : 0;
-            fdk_surface_draw_rounded_rect(surface, ring, rr,
-                                          fdk__pal_accent());
+    if ((w->flags & FDK_WF_ENABLED) != 0) {
+        fdk_surface_draw_rounded_rect(
+            surface, bounds, radius,
+            focused ? fdk__pal_focus_ring() : fdk__pal_entry_border());
+        if (focused) {
+            fdk_i32 fw =
+                fdk_theme_get_metric(NULL, FDK_TM_FOCUS_RING_WIDTH);
+            /* Wider rings stack outlines inward (1px = 2px total).
+             * The 1px border underneath is simply overdrawn. */
+            for (fdk_i32 i = 1; i < fw; i++) {
+                fdk_rect inset = {bounds.x + i, bounds.y + i,
+                                  bounds.width - i * 2,
+                                  bounds.height - i * 2};
+                if (inset.width > 0 && inset.height > 0) {
+                    fdk_i32 rr = radius > i ? radius - i : 0;
+                    fdk_surface_draw_rounded_rect(
+                        surface, inset, rr, fdk__pal_focus_ring());
+                }
+            }
         }
     }
 
@@ -1291,11 +1304,9 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         fdk_rect sel = {sel_x, bounds.y + 2, sel_w,
                         bounds.height - 4};
         if (sel_w > 0 && sel.height > 0) {
-            /* Accent at low alpha over the field fill: the v1 way to
-             * say "selected" without a dedicated token. */
-            fdk_color accent = fdk__pal_accent();
-            fdk_color hl = {accent.r, accent.g, accent.b, 0.45f};
-            fdk_surface_fill_rect(surface, sel, hl);
+            /* The 1.3.2 SELECTION_BACKGROUND token, wired in 1.4.0
+             * (the hardcoded accent-alpha is gone). */
+            fdk_surface_fill_rect(surface, sel, fdk__pal_selection());
         }
     }
 
@@ -1340,6 +1351,17 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         e->text[hi] = saved_hi;
         fdk__draw_text(surface, e->font, e->text + hi, text_col,
                        text_x + w_hi, baseline);
+    }
+
+    /* Placeholder (1.4.0): shown only when there is nothing else to
+     * draw — empty buffer, no preedit — in the disabled-text color.
+     * It never joins selection/caret geometry: hit-testing, the caret
+     * position, and copy all see a genuinely empty field. Overlong
+     * placeholders clip at the field edge (no wrap, no ellipsis —
+     * the placeholder must not change the entry's natural size). */
+    if (e->len == 0 && e->preedit_len == 0 && e->placeholder != NULL) {
+        fdk__draw_text(surface, e->font, e->placeholder,
+                       fdk__pal_text_disabled(), text_x, baseline);
     }
 
     /* Preedit (IME groundwork): rendered AT the caret, underlined,
@@ -1404,6 +1426,7 @@ static void entry_destroy(fdk_widget *w) {
     e->undo = NULL;
     fdk_free(e->text);
     fdk_free(e->preedit);
+    fdk_free(e->placeholder);
 }
 
 /* ---- a11y ---- */
@@ -1720,6 +1743,45 @@ fdk_result fdk_entry_set_preedit(fdk_widget *entry, const char *preedit) {
     entry_scroll_to_caret(e);
     fdk_widget_invalidate(entry);
     return FDK_OK;
+}
+
+void fdk_entry_set_placeholder(fdk_widget *entry, const char *text) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return;
+    }
+    fdk_entry *e = entry_of(entry);
+    if (text == NULL || text[0] == '\0') {
+        /* NULL and "" both clear (a placeholder is decoration; an
+         * empty one is nothing to paint). */
+        if (e->placeholder == NULL) {
+            return;
+        }
+        fdk_free(e->placeholder);
+        e->placeholder = NULL;
+    } else {
+        size_t len = strlen(text);
+        if (len > ENTRY_MAX_TEXT) {
+            return; /* same cap as text; silently ignored, setter is void */
+        }
+        char *copy = fdk_alloc(len + 1);
+        if (copy == NULL) {
+            return; /* keep the old placeholder on OOM (fail-soft) */
+        }
+        memcpy(copy, text, len + 1);
+        fdk_free(e->placeholder);
+        e->placeholder = copy;
+    }
+    /* Only an EMPTY entry's paint depends on it — invalidate
+     * unconditionally anyway: cheap, and correct across set_text
+     * races the caller may have pending. */
+    fdk_widget_invalidate(entry);
+}
+
+const char *fdk_entry_get_placeholder(fdk_widget *entry) {
+    if (entry == NULL || entry->klass != &fdk_entry_class_def) {
+        return NULL;
+    }
+    return entry_of(entry)->placeholder;
 }
 
 void fdk_entry_set_on_changed(fdk_widget *entry,

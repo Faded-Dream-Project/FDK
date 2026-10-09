@@ -298,6 +298,16 @@ static const key_entry k_color_keys[] = {
     {"success", FDK_TK_SUCCESS},
     {"warning", FDK_TK_WARNING},
     {"danger", FDK_TK_DANGER},
+    /* 1.4.0 modern-face vocabulary. */
+    {"sidebar_background", FDK_TK_SIDEBAR_BACKGROUND},
+    {"menu_background", FDK_TK_MENU_BACKGROUND},
+    {"accent_hover", FDK_TK_ACCENT_HOVER},
+    {"accent_pressed", FDK_TK_ACCENT_PRESSED},
+    {"accent_text", FDK_TK_ACCENT_TEXT},
+    {"link", FDK_TK_LINK},
+    {"entry_background", FDK_TK_ENTRY_BACKGROUND},
+    {"entry_border", FDK_TK_ENTRY_BORDER},
+    {"row_hover", FDK_TK_ROW_HOVER},
 };
 
 static const key_entry k_metric_keys[] = {
@@ -307,6 +317,11 @@ static const key_entry k_metric_keys[] = {
     {"scrollbar_width", FDK_TM_SCROLLBAR_WIDTH},
     {"menu_item_height", FDK_TM_MENU_ITEM_HEIGHT},
     {"tooltip_corner_radius", FDK_TM_TOOLTIP_CORNER_RADIUS},
+    /* 1.4.0 modern-face metrics. */
+    {"entry_corner_radius", FDK_TM_ENTRY_CORNER_RADIUS},
+    {"menu_corner_radius", FDK_TM_MENU_CORNER_RADIUS},
+    {"list_row_height", FDK_TM_LIST_ROW_HEIGHT},
+    {"focus_ring_width", FDK_TM_FOCUS_RING_WIDTH},
 };
 
 static const struct {
@@ -318,6 +333,10 @@ static const struct {
     [FDK_TM_SCROLLBAR_WIDTH] = {6, 24},
     [FDK_TM_MENU_ITEM_HEIGHT] = {16, 48},
     [FDK_TM_TOOLTIP_CORNER_RADIUS] = {0, 16},
+    [FDK_TM_ENTRY_CORNER_RADIUS] = {0, 16},
+    [FDK_TM_MENU_CORNER_RADIUS] = {0, 16},
+    [FDK_TM_LIST_ROW_HEIGHT] = {16, 48},
+    [FDK_TM_FOCUS_RING_WIDTH] = {1, 4},
 };
 
 /* Key-table lookup against a key segment (exact bytes). */

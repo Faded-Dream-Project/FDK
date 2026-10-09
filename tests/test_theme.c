@@ -109,41 +109,70 @@ static void write_file(const char *path, const char *text) {
     fclose(f);
 }
 
-/* ---- 1. the built-in default IS the v1 palette ---- */
+/* ---- 1. the built-in default IS the 1.4.0 Modern palette ---- */
 
 static void test_builtin_pin(void) {
-    /* The nine v1 colors, component for component, plus the two
-     * v1 metrics. If this ever fails, "never touching themes"
-     * changed someone's pixels. */
+    /* The core colors, component for component. If this ever fails,
+    * the built-in "Modern" palette (the 1.4.0 retune of v1) changed
+    * without its test — the pin IS the palette's regression net.
+    * The v1 values it replaced are preserved as the documented
+    * .fdk recipe in docs/fdk-theme-format.md. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TEXT),
-                    exact(0.92f, 0.93f, 0.96f), "text");
+                    exact(0.93f, 0.94f, 0.97f), "text");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TEXT_DISABLED),
-                    exact(0.45f, 0.47f, 0.52f), "text_disabled");
+                    exact(0.44f, 0.46f, 0.52f), "text_disabled");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND),
-                    exact(0.16f, 0.18f, 0.26f), "control bg");
+                    exact(0.13f, 0.15f, 0.20f), "control bg");
     assert_color_eq(
         fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_HOVER),
-        exact(0.22f, 0.25f, 0.36f), "control bg hover");
+        exact(0.17f, 0.20f, 0.27f), "control bg hover");
     assert_color_eq(
         fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_PRESSED),
-        exact(0.28f, 0.32f, 0.46f), "control bg pressed");
+        exact(0.21f, 0.25f, 0.33f), "control bg pressed");
     assert_color_eq(
         fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_DISABLED),
-        exact(0.12f, 0.13f, 0.18f), "control bg disabled");
+        exact(0.11f, 0.12f, 0.16f), "control bg disabled");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_CONTROL_BORDER),
-                    exact(0.30f, 0.33f, 0.44f), "control border");
+                    exact(0.20f, 0.23f, 0.30f), "control border");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT),
-                    exact(0.35f, 0.65f, 0.95f), "accent");
+                    exact(0.42f, 0.62f, 1.00f), "accent");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TRACK),
-                    exact(0.10f, 0.12f, 0.17f), "track");
-    /* The one NEW token (no v1 consumer) is documented as such. */
+                    exact(0.11f, 0.12f, 0.16f), "track");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND),
-                    exact(0.07f, 0.09f, 0.13f), "window background");
+                    exact(0.09f, 0.10f, 0.14f), "window background");
+    /* The 1.4.0 modern-face families, pinned with the rest. */
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_SIDEBAR_BACKGROUND),
+                    exact(0.10f, 0.12f, 0.16f), "sidebar bg");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_MENU_BACKGROUND),
+                    exact(0.15f, 0.17f, 0.23f), "menu bg");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT_HOVER),
+                    exact(0.50f, 0.69f, 1.00f), "accent hover");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT_PRESSED),
+                    exact(0.34f, 0.52f, 0.88f), "accent pressed");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT_TEXT),
+                    exact(0.97f, 0.98f, 1.00f), "accent text");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_LINK),
+                    exact(0.55f, 0.73f, 1.00f), "link");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ENTRY_BACKGROUND),
+                    exact(0.07f, 0.08f, 0.11f), "entry bg");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ENTRY_BORDER),
+                    exact(0.17f, 0.19f, 0.25f), "entry border");
+    /* row_hover ships translucent (the soft dense-list hover). */
+    {
+        fdk_color rh_want = {0.14f, 0.16f, 0.22f, 0.60f};
+        assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ROW_HOVER),
+                        rh_want, "row hover");
+    }
 
     assert(fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
     assert(fdk_theme_get_metric(NULL, FDK_TM_SEPARATOR_THICKNESS) == 1);
+    /* The 1.4.0 metrics. */
+    assert(fdk_theme_get_metric(NULL, FDK_TM_ENTRY_CORNER_RADIUS) == 6);
+    assert(fdk_theme_get_metric(NULL, FDK_TM_MENU_CORNER_RADIUS) == 8);
+    assert(fdk_theme_get_metric(NULL, FDK_TM_LIST_ROW_HEIGHT) == 30);
+    assert(fdk_theme_get_metric(NULL, FDK_TM_FOCUS_RING_WIDTH) == 2);
 
-    assert(strcmp(fdk_theme_name(NULL), "FDK Dark") == 0);
+    assert(strcmp(fdk_theme_name(NULL), "FDK Modern") == 0);
     assert(fdk_theme_author(NULL) == NULL);
 
     /* get_default is never NULL and NULL-theme access resolves to it. */
@@ -158,10 +187,14 @@ static void test_builtin_pin(void) {
         assert(fdk_theme_get_color(t, (fdk_theme_token)i).r ==
                fdk_theme_get_color(NULL, (fdk_theme_token)i).r);
     }
+    for (int i = 0; i < FDK_TM_COUNT; i++) {
+        assert(fdk_theme_get_metric(t, (fdk_theme_metric)i) ==
+               fdk_theme_get_metric(NULL, (fdk_theme_metric)i));
+    }
     assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
-    assert(strcmp(fdk_theme_name(t), "FDK Dark") == 0);
+    assert(strcmp(fdk_theme_name(t), "FDK Modern") == 0);
     fdk_theme_destroy(t);
-    printf("[ok] built-in default theme = the Phase 6 v1 palette, "
+    printf("[ok] built-in default theme = the 1.4.0 Modern palette, "
            "component for component\n");
 }
 
@@ -176,7 +209,7 @@ static void test_programmatic(void) {
     assert_color_eq(fdk_theme_get_color(t, FDK_TK_ACCENT), c, "set/get");
     /* Not installed: the current default is untouched. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT),
-                    exact(0.35f, 0.65f, 0.95f), "current untouched");
+                    exact(0.42f, 0.62f, 1.00f), "current untouched");
 
     assert(fdk_ok(fdk_theme_set_metric(t, FDK_TM_BUTTON_CORNER_RADIUS,
                                        0)));
@@ -211,7 +244,7 @@ static void test_programmatic(void) {
     assert(fdk_ok(fdk_theme_set_name(t, "Custom")));
     assert(strcmp(fdk_theme_name(t), "Custom") == 0);
     assert(fdk_theme_set_name(t, NULL) == FDK_OK);
-    assert(strcmp(fdk_theme_name(t), "FDK Dark") == 0);
+    assert(strcmp(fdk_theme_name(t), "FDK Modern") == 0);
     char big[200];
     memset(big, 'x', sizeof big - 1);
     big[sizeof big - 1] = '\0';
@@ -242,10 +275,24 @@ static const char *k_full_theme =
     "control_border = #171819\n"
     "accent = #1a1B1c\n"
     "track = #1D1e1F\n"
+    "# 1.4.0 modern-face keys:\n"
+    "sidebar_background = #202122\n"
+    "menu_background = #232425\n"
+    "accent_hover = #262728\n"
+    "accent_pressed = #292a2b\n"
+    "accent_text = #2c2d2e\n"
+    "link = #2f3031\n"
+    "entry_background = #323334\n"
+    "entry_border = #353637\n"
+    "row_hover = #38393a3b\n"
     "\n"
     "[metrics]\n"
     "button_corner_radius = 5\n"
-    "separator_thickness = 3\n";
+    "separator_thickness = 3\n"
+    "entry_corner_radius = 4\n"
+    "menu_corner_radius = 7\n"
+    "list_row_height = 22\n"
+    "focus_ring_width = 3\n";
 
 static void test_parse_full(void) {
     fdk_theme *t = parse_ok(k_full_theme);
@@ -271,9 +318,45 @@ static void test_parse_full(void) {
     assert_color_eq(fdk_theme_get_color(t, FDK_TK_TRACK),
                     exact(29.0f / 255, 30.0f / 255, 31.0f / 255),
                     "track");
+    /* The 1.4.0 keys parse to their tokens (row_hover carries an
+     * explicit alpha — the 8-digit form on the new vocabulary too). */
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_SIDEBAR_BACKGROUND),
+                    exact(32.0f / 255, 33.0f / 255, 34.0f / 255),
+                    "sidebar hex");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_MENU_BACKGROUND),
+                    exact(35.0f / 255, 36.0f / 255, 37.0f / 255),
+                    "menu hex");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_ACCENT_HOVER),
+                    exact(38.0f / 255, 39.0f / 255, 40.0f / 255),
+                    "accent hover hex");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_ACCENT_PRESSED),
+                    exact(41.0f / 255, 42.0f / 255, 43.0f / 255),
+                    "accent pressed hex");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_ACCENT_TEXT),
+                    exact(44.0f / 255, 45.0f / 255, 46.0f / 255),
+                    "accent text hex");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_LINK),
+                    exact(47.0f / 255, 48.0f / 255, 49.0f / 255),
+                    "link hex");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_ENTRY_BACKGROUND),
+                    exact(50.0f / 255, 51.0f / 255, 52.0f / 255),
+                    "entry bg hex");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_ENTRY_BORDER),
+                    exact(53.0f / 255, 54.0f / 255, 55.0f / 255),
+                    "entry border hex");
+    {
+        fdk_color rh = fdk_theme_get_color(t, FDK_TK_ROW_HOVER);
+        fdk_color rh_want = {56.0f / 255, 57.0f / 255, 58.0f / 255,
+                             59.0f / 255};
+        assert_color_eq(rh, rh_want, "row hover hex");
+    }
 
     assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_CORNER_RADIUS) == 5);
     assert(fdk_theme_get_metric(t, FDK_TM_SEPARATOR_THICKNESS) == 3);
+    assert(fdk_theme_get_metric(t, FDK_TM_ENTRY_CORNER_RADIUS) == 4);
+    assert(fdk_theme_get_metric(t, FDK_TM_MENU_CORNER_RADIUS) == 7);
+    assert(fdk_theme_get_metric(t, FDK_TM_LIST_ROW_HEIGHT) == 22);
+    assert(fdk_theme_get_metric(t, FDK_TM_FOCUS_RING_WIDTH) == 3);
 
     fdk_theme_destroy(t);
     printf("[ok] complete .fdk parse: all tokens, escapes, hex forms\n");
@@ -296,15 +379,15 @@ static void test_parse_partial_and_tolerances(void) {
                     "partial track");
     /* Inherited: */
     assert_color_eq(fdk_theme_get_color(t, FDK_TK_CONTROL_BACKGROUND),
-                    exact(0.16f, 0.18f, 0.26f), "partial inherits bg");
+                    exact(0.13f, 0.15f, 0.20f), "partial inherits bg");
     assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
-    assert(strcmp(fdk_theme_name(t), "FDK Dark") == 0);
+    assert(strcmp(fdk_theme_name(t), "FDK Modern") == 0);
     fdk_theme_destroy(t);
 
     /* Comments-only file = the defaults, but named. */
     fdk_theme *t2 = parse_ok("# nothing but comments\n\n# really\n");
     assert_color_eq(fdk_theme_get_color(t2, FDK_TK_TEXT),
-                    exact(0.92f, 0.93f, 0.96f), "comments-only text");
+                    exact(0.93f, 0.94f, 0.97f), "comments-only text");
     fdk_theme_destroy(t2);
 
     /* Whitespace, bracket space, CRLF, lone CR, BOM, no final
@@ -441,7 +524,7 @@ static void test_parse_errors(void) {
     {
         fdk_theme *t = parse_ok("[colors]\n#text = #FFFFFF\n");
         assert_color_eq(fdk_theme_get_color(t, FDK_TK_TEXT),
-                        exact(0.92f, 0.93f, 0.96f),
+                        exact(0.93f, 0.94f, 0.97f),
                         "comment-looking line changed nothing");
         fdk_theme_destroy(t);
     }
@@ -600,13 +683,13 @@ static void test_switch_repaints(void) {
     fdk_surface *s = NULL;
     assert(fdk_ok(fdk_surface_create(200, 120, &s)));
 
-    /* Baseline paint: v1 colors. */
+    /* Baseline paint: Modern colors. */
     fdk_widget_tree_paint(root, s);
     fdk_u32 btn_px = px_at(s, 80, 35); /* button center, clear of the
                                         * radius-8 corners */
-    assert(btn_px == px_of(exact(0.16f, 0.18f, 0.26f)));
-    fdk_u32 sep_px = px_at(s, 80, 75); /* 70 + 10/2 = the v1 line */
-    assert(sep_px == px_of(exact(0.30f, 0.33f, 0.44f)));
+    assert(btn_px == px_of(exact(0.13f, 0.15f, 0.20f)));
+    fdk_u32 sep_px = px_at(s, 80, 75); /* 70 + 10/2 = the 1px line */
+    assert(sep_px == px_of(exact(0.20f, 0.23f, 0.30f)));
     /* 1px rule: the rows above/below are root, not separator. */
     assert(px_at(s, 80, 74) == px_of(exact(0.07f, 0.09f, 0.13f)));
     assert(px_at(s, 80, 76) == px_of(exact(0.07f, 0.09f, 0.13f)));
@@ -642,17 +725,17 @@ static void test_switch_repaints(void) {
     assert(px_at(s, 80, 35) == px_of(exact(0.5f, 0.1f, 0.1f)));
 
     /* Destroying the CURRENT theme reverts to the built-in and is
-     * safe: the next paint is v1 again, no dangling pointer. */
+     * safe: the next paint is Modern again, no dangling pointer. */
     fdk_theme_set_default(light); /* light is current; dark2 is not */
     fdk_theme_destroy(light);
     assert(fdk_theme_get_default() != NULL);
     fdk_widget_tree_paint(root, s); /* flush the revert damage */
-    assert(px_at(s, 80, 35) == px_of(exact(0.16f, 0.18f, 0.26f)));
+    assert(px_at(s, 80, 35) == px_of(exact(0.13f, 0.15f, 0.20f)));
 
     /* NULL switch = the built-in, explicitly. */
     fdk_theme_set_default(NULL);
     fdk_widget_tree_paint(root, s);
-    assert(px_at(s, 80, 35) == px_of(exact(0.16f, 0.18f, 0.26f)));
+    assert(px_at(s, 80, 35) == px_of(exact(0.13f, 0.15f, 0.20f)));
 
     fdk_theme_destroy(dark2);
     fdk_surface_destroy(s);
@@ -689,9 +772,121 @@ static void test_root_registry(void) {
 
     /* And the theme engine still works for a fresh tree. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TEXT),
-                    exact(0.92f, 0.93f, 0.96f), "post-churn default");
+                    exact(0.93f, 0.94f, 0.97f), "post-churn default");
     printf("[ok] root registry: 8 roots created/destroyed in scrambled "
            "order, switches before/during/after all safe\n");
+}
+
+/* ---- 9. the documented v1 recipe round-trips (1.4.0) ----
+ *
+ * docs/fdk-theme-format.md promises: loading the printed "v1.fdk"
+ * recipe reproduces the Phase 6 v1 palette exactly. This test keeps
+ * that promise honest — the recipe below is the doc's, verbatim;
+ * a mismatch means the doc lied or the parser drifted.
+ */
+static void test_v1_recipe(void) {
+    static const char v1_fdk[] =
+        "version = 1\n"
+        "name    = \"FDK Dark (v1)\"\n"
+        "\n"
+        "[colors]\n"
+        "window_background          = #121721\n"
+        "text                       = #EBEDF5\n"
+        "text_disabled              = #737885\n"
+        "control_background         = #292E42\n"
+        "control_background_hover   = #38405C\n"
+        "control_background_pressed = #475275\n"
+        "control_background_disabled= #1F212E\n"
+        "control_border             = #4D5470\n"
+        "accent                     = #59A6F2\n"
+        "track                      = #1A1F2B\n"
+        "tooltip_background         = #F2F5FC\n"
+        "tooltip_text               = #1C2130\n"
+        "tooltip_border             = #B3BAD1\n"
+        "selection_background       = #59A6F273\n"
+        "selection_text             = #F2F5FC\n"
+        "focus_ring                 = #59A6F2E6\n"
+        "success                    = #5CBA6B\n"
+        "warning                    = #E6AD40\n"
+        "danger                     = #E8595C\n"
+        "sidebar_background         = #1A1F29\n"
+        "menu_background            = #262B3B\n"
+        "accent_hover               = #80B0FF\n"
+        "accent_pressed             = #5785D9\n"
+        "accent_text                = #F7FAFF\n"
+        "link                       = #8CBAFF\n"
+        "entry_background           = #12151D\n"
+        "entry_border               = #2B3040\n"
+        "row_hover                  = #24293899\n"
+        "\n"
+        "[metrics]\n"
+        "button_corner_radius = 8\n"
+        "separator_thickness  = 1\n"
+        "title_bar_height     = 28\n"
+        "scrollbar_width      = 12\n"
+        "menu_item_height     = 26\n"
+        "tooltip_corner_radius = 6\n"
+        "entry_corner_radius  = 6\n"
+        "menu_corner_radius   = 8\n"
+        "list_row_height      = 26\n"
+        "focus_ring_width     = 1\n";
+    fdk_result r = FDK_ERR_UNKNOWN;
+    fdk_theme *t = fdk_theme_parse(v1_fdk, sizeof v1_fdk - 1, &r);
+    assert(t != NULL && r == FDK_OK);
+
+    /* The v1 core at PIXEL exactness: the parser stores
+     * channel/255 floats, so the pins are the 8-bit roundings of the
+     * v1 literals (0.16 -> 41 -> 41/255) — the same pixels the v1
+     * floats painted, which is the doc's actual promise. */
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_WINDOW_BACKGROUND),
+                    exact(18 / 255.0f, 23 / 255.0f, 33 / 255.0f),
+                    "v1 window bg");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_TEXT),
+                    exact(235 / 255.0f, 237 / 255.0f, 245 / 255.0f),
+                    "v1 text");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_CONTROL_BACKGROUND),
+                    exact(41 / 255.0f, 46 / 255.0f, 66 / 255.0f),
+                    "v1 control bg");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_CONTROL_BACKGROUND_HOVER),
+                    exact(56 / 255.0f, 64 / 255.0f, 92 / 255.0f),
+                    "v1 control hover");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_CONTROL_BACKGROUND_PRESSED),
+                    exact(71 / 255.0f, 82 / 255.0f, 117 / 255.0f),
+                    "v1 control pressed");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_CONTROL_BORDER),
+                    exact(77 / 255.0f, 84 / 255.0f, 112 / 255.0f),
+                    "v1 border");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_ACCENT),
+                    exact(89 / 255.0f, 166 / 255.0f, 242 / 255.0f),
+                    "v1 accent");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_TRACK),
+                    exact(26 / 255.0f, 31 / 255.0f, 43 / 255.0f),
+                    "v1 track");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_TEXT_DISABLED),
+                    exact(115 / 255.0f, 120 / 255.0f, 133 / 255.0f),
+                    "v1 text disabled");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_CONTROL_BACKGROUND_DISABLED),
+                    exact(31 / 255.0f, 33 / 255.0f, 46 / 255.0f),
+                    "v1 control disabled");
+    /* The 8-digit forms carry their alphas. */
+    {
+        fdk_color sel_want = {89 / 255.0f, 166 / 255.0f, 242 / 255.0f,
+                              115 / 255.0f}; /* 0x73 */
+        assert_color_eq(fdk_theme_get_color(t, FDK_TK_SELECTION_BACKGROUND),
+                        sel_want, "v1 selection");
+        fdk_color ring_want = {89 / 255.0f, 166 / 255.0f, 242 / 255.0f,
+                               230 / 255.0f}; /* 0xE6 */
+        assert_color_eq(fdk_theme_get_color(t, FDK_TK_FOCUS_RING),
+                        ring_want, "v1 ring");
+    }
+    /* The v1 metrics, including the row-height (26) the recipe pins. */
+    assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
+    assert(fdk_theme_get_metric(t, FDK_TM_LIST_ROW_HEIGHT) == 26);
+    assert(fdk_theme_get_metric(t, FDK_TM_FOCUS_RING_WIDTH) == 1);
+
+    fdk_theme_destroy(t);
+    printf("[ok] the documented v1 recipe parses and reproduces the "
+           "Phase 6 palette exactly\n");
 }
 
 int main(void) {
@@ -703,6 +898,7 @@ int main(void) {
     test_load_files();
     test_switch_repaints();
     test_root_registry();
+    test_v1_recipe();
     printf("all headless theme tests passed\n");
     return 0;
 }

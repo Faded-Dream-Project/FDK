@@ -48,6 +48,17 @@ static fdk_u32 px_at(fdk_surface *s, int x, int y) {
            0x00FFFFFFu;
 }
 
+/* Mirrors the renderer's pack_color() exactly (clamp + round) —
+ * the theme's floats to the pixel the surface will hold. */
+static fdk_u32 pack_color(fdk_color c) {
+    fdk_f32 r = c.r < 0.0f ? 0.0f : (c.r > 1.0f ? 1.0f : c.r);
+    fdk_f32 g = c.g < 0.0f ? 0.0f : (c.g > 1.0f ? 1.0f : c.g);
+    fdk_f32 b = c.b < 0.0f ? 0.0f : (c.b > 1.0f ? 1.0f : c.b);
+    return ((fdk_u32)(r * 255.0f + 0.5f) << 16) |
+           ((fdk_u32)(g * 255.0f + 0.5f) << 8) |
+           (fdk_u32)(b * 255.0f + 0.5f);
+}
+
 /* Accent color test: the palette's blue fill (89, 166, 242) against
  * the dark track (~26, 31, 43). */
 static int is_accent(fdk_u32 px) {
@@ -219,6 +230,95 @@ static void test_button(void) {
     printf("[ok] button: click-in activates, release-out does not, "
            "Space/Enter, disabled ignores input, re-measure, type "
            "checks\n");
+}
+
+/* ---- 1.4.0: button roles + toggle-button state ---- */
+
+static void test_button_roles(void) {
+    fdk_widget *root = fresh_root();
+
+    fdk_widget *plain = NULL, *suggested = NULL, *destructive = NULL;
+    assert(fdk_ok(fdk_button_create(root, g_font, "Plain", &plain)));
+    assert(fdk_ok(fdk_button_create(root, g_font, "Open", &suggested)));
+    assert(fdk_ok(fdk_button_create(root, g_font, "Delete", &destructive)));
+    fdk_widget_arrange(plain, (fdk_rect){10, 10, 120, 34});
+    fdk_widget_arrange(suggested, (fdk_rect){140, 10, 120, 34});
+    fdk_widget_arrange(destructive, (fdk_rect){270, 10, 120, 34});
+
+    /* Default role is NORMAL; getters see the live state. */
+    assert(fdk_button_get_role(plain) == FDK_BUTTON_ROLE_NORMAL);
+    assert(fdk_button_get_role(suggested) == FDK_BUTTON_ROLE_NORMAL);
+    assert(!fdk_button_is_checked(plain));
+
+    fdk_button_set_role(suggested, FDK_BUTTON_ROLE_SUGGESTED);
+    fdk_button_set_role(destructive, FDK_BUTTON_ROLE_DESTRUCTIVE);
+    assert(fdk_button_get_role(suggested) ==
+           FDK_BUTTON_ROLE_SUGGESTED);
+    assert(fdk_button_get_role(destructive) ==
+           FDK_BUTTON_ROLE_DESTRUCTIVE);
+
+    /* Unknown enum values are ignored (documented). */
+    fdk_button_set_role(plain, (fdk_button_role)99);
+    assert(fdk_button_get_role(plain) == FDK_BUTTON_ROLE_NORMAL);
+
+    /* Pixel proof: each role paints its own fill. Sample the button
+     * centers, clear of the radius-8 corners and the label ink
+     * (x + 8 is inside the fill, left of the centered text). */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(400, 60, &s)));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+
+    fdk_color want_plain = fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
+    fdk_color want_sugg = fdk_theme_get_color(NULL, FDK_TK_ACCENT);
+    fdk_color want_dest = fdk_theme_get_color(NULL, FDK_TK_DANGER);
+    fdk_u32 p = px_at(s, 18, 27);
+    fdk_u32 su = px_at(s, 148, 27);
+    fdk_u32 de = px_at(s, 278, 27);
+    assert(p == pack_color(want_plain));
+    assert(su == pack_color(want_sugg));
+    assert(de == pack_color(want_dest));
+    /* The three roles really differ from each other. */
+    assert(p != su && su != de && p != de);
+
+    /* Toggle-button state: a checked NORMAL button paints the
+     * pressed fill persistently. */
+    fdk_button_set_checked(plain, true);
+    assert(fdk_button_is_checked(plain));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    fdk_color want_checked =
+        fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_PRESSED);
+    assert(px_at(s, 18, 27) == pack_color(want_checked));
+    /* Un-checking restores the resting fill. */
+    fdk_button_set_checked(plain, false);
+    assert(!fdk_button_is_checked(plain));
+    fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
+    fdk_widget_tree_paint(root, s);
+    assert(px_at(s, 18, 27) == pack_color(want_plain));
+
+    /* Roles are paint-only: activation is unchanged. */
+    fdk_button_set_on_activate(suggested, on_btn_activate, NULL);
+    btn_activates = 0;
+    click(root, 200.0f, 27.0f);
+    assert(btn_activates == 1);
+
+    /* Argument safety: non-buttons are inert. */
+    fdk_button_set_role(NULL, FDK_BUTTON_ROLE_SUGGESTED);
+    fdk_button_set_checked(NULL, true);
+    assert(fdk_button_get_role(NULL) == FDK_BUTTON_ROLE_NORMAL);
+    assert(!fdk_button_is_checked(NULL));
+    fdk_widget *lbl = NULL;
+    assert(fdk_ok(fdk_label_create(root, g_font, "x", &lbl)));
+    fdk_button_set_role(lbl, FDK_BUTTON_ROLE_SUGGESTED);
+    fdk_button_set_checked(lbl, true);
+    assert(fdk_button_get_role(lbl) == FDK_BUTTON_ROLE_NORMAL);
+    assert(!fdk_button_is_checked(lbl));
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] button roles: NORMAL/SUGGESTED/DESTRUCTIVE paints + "
+           "toggle-button checked state + argument safety\n");
 }
 
 /* ---- Toggle / Checkbox ---- */
@@ -916,6 +1016,7 @@ int main(void) {
 
     test_label();
     test_button();
+    test_button_roles();
     test_toggle_and_checkbox();
     test_radio_group();
     test_label_modes();

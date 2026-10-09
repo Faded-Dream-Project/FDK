@@ -125,6 +125,45 @@ fdk_color fdk__pal_border(void) {
     return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BORDER);
 }
 
+/* 1.4.0 modern-face accessors — same single-seam contract as the
+ * family above: resolve against the CURRENT default at paint time.
+ * The selection/focus-ring pair finally wires the 1.3.2 tokens into
+ * the catalog (they were theme-file-only until now; the hardcoded
+ * accent-alpha call sites are gone). */
+fdk_color fdk__pal_selection(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_SELECTION_BACKGROUND);
+}
+fdk_color fdk__pal_focus_ring(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_FOCUS_RING);
+}
+fdk_color fdk__pal_sidebar(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_SIDEBAR_BACKGROUND);
+}
+fdk_color fdk__pal_menu_bg(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_MENU_BACKGROUND);
+}
+fdk_color fdk__pal_accent_hover(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_ACCENT_HOVER);
+}
+fdk_color fdk__pal_accent_pressed(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_ACCENT_PRESSED);
+}
+fdk_color fdk__pal_accent_text(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_ACCENT_TEXT);
+}
+fdk_color fdk__pal_link(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_LINK);
+}
+fdk_color fdk__pal_entry(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_ENTRY_BACKGROUND);
+}
+fdk_color fdk__pal_entry_border(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_ENTRY_BORDER);
+}
+fdk_color fdk__pal_row_hover(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_ROW_HOVER);
+}
+
 /* ---- Label ---- */
 
 /* Display-cache plumbing: the label's text broken into the lines

@@ -118,6 +118,15 @@ permitted and stored verbatim.
 | `success`                  | Positive/validated semantic state                   |
 | `warning`                  | Caution semantic state                              |
 | `danger`                   | Destructive/error semantic state                    |
+| `sidebar_background`       | Places/panel sidebar surfaces (1.4.0; the file dialog's Places column) |
+| `menu_background`          | Menu/combo POPUP surface (1.4.0)                    |
+| `accent_hover`             | Filled-button accent under the pointer (1.4.0)      |
+| `accent_pressed`           | Filled-button accent while pressed (1.4.0)          |
+| `accent_text`              | Text ON an accent fill (1.4.0: suggested buttons)   |
+| `link`                     | Hyperlink text (1.4.0; reserved for link-styled controls) |
+| `entry_background`         | Text-field fill (1.4.0; the flat modern field)      |
+| `entry_border`             | Text-field edge (1.4.0)                             |
+| `row_hover`                | Dense-row hover fill (1.4.0; lists, menus, breadcrumbs) |
 
 All optional; each inherits from the built-in default theme when absent.
 
@@ -129,15 +138,23 @@ All optional; each inherits from the built-in default theme when absent.
 | `separator_thickness`  | 1–8    | 1       | Separator band thickness        |
 | `tooltip_corner_radius` | 0–16  | 6       | Tooltip box corner radius (1.3.2) |
 | `title_bar_height`     | 12–64  | 28      | FDK-drawn title band height     |
+| `menu_item_height`     | 16–48  | 26      | Menu bar/row minimum height     |
+| `scrollbar_width`      | 6–24   | 12      | ScrollView bar thickness        |
+| `entry_corner_radius`  | 0–16   | 6       | Entry-field corners (1.4.0; also the combo field and the breadcrumb bar) |
+| `menu_corner_radius`   | 0–16   | 8       | Menu/combo popup corners (1.4.0) |
+| `list_row_height`      | 16–48  | 30      | List row height FLOOR (1.4.0)   |
+| `focus_ring_width`     | 1–4    | 2       | Focus ring stroke (1.4.0; buttons and entries) |
 
 All optional; each inherits from the built-in default theme when absent.
 Most metrics are paint-time values only — they do not change any
 widget's natural size (a separator's size request remains the
-application's). `title_bar_height` is the exception, deliberately:
-it is a LAYOUT metric — switching the default theme re-arranges
-every decorated window (the band grows/shrinks and the content
-widget reflows below it), then repaints. It only affects windows
-using FDK's own decorations (`fdk_window_set_decorated`).
+application's). The exceptions are LAYOUT metrics, deliberately:
+`title_bar_height` re-arranges every decorated window (the band
+grows/shrinks and the content widget reflows below it), and
+`list_row_height` re-places every List row — switching the default
+theme re-arranges both, then repaints. `title_bar_height` only
+affects windows using FDK's own decorations
+(`fdk_window_set_decorated`).
 
 ## Error semantics
 
@@ -180,6 +197,66 @@ track                    = #E1E4EA
 button_corner_radius = 6
 separator_thickness  = 1
 ```
+
+## The v1 look as a theme file (the legacy recipe)
+
+The built-in default is the 1.4.0 "Modern" palette — a flatter, calmer
+retune of the original Phase 6 "v1" look. Every pixel the v1 palette
+painted is reproducible exactly by loading this theme
+(`fdk_theme_load` + `fdk_theme_set_default`):
+
+```
+# v1.fdk — the Phase 6 v1 palette, exact (the pre-1.4.0 built-in)
+version = 1
+name    = "FDK Dark (v1)"
+
+[colors]
+window_background          = #121721
+text                       = #EBEDF5
+text_disabled              = #737885
+control_background         = #292E42
+control_background_hover   = #38405C
+control_background_pressed = #475275
+control_background_disabled= #1F212E
+control_border             = #4D5470
+accent                     = #59A6F2
+track                      = #1A1F2B
+tooltip_background         = #F2F5FC
+tooltip_text               = #1C2130
+tooltip_border             = #B3BAD1
+selection_background       = #59A6F273
+selection_text             = #F2F5FC
+focus_ring                 = #59A6F2E6
+success                    = #5CBA6B
+warning                    = #E6AD40
+danger                     = #E8595C
+sidebar_background         = #1A1F29
+menu_background            = #262B3B
+accent_hover               = #80B0FF
+accent_pressed             = #5785D9
+accent_text                = #F7FAFF
+link                       = #8CBAFF
+entry_background           = #12151D
+entry_border               = #2B3040
+row_hover                  = #24293899
+
+[metrics]
+button_corner_radius = 8
+separator_thickness  = 1
+title_bar_height     = 28
+scrollbar_width      = 12
+menu_item_height     = 26
+tooltip_corner_radius = 6
+entry_corner_radius  = 6
+menu_corner_radius   = 8
+list_row_height      = 26
+focus_ring_width     = 1
+```
+
+(Values are the 8-bit roundings of the v1 floats; the 1.4.0-only keys
+carry v1-calibrated analogues so the recipe stays complete — a v1
+strict reconstruction of the pre-1.4.0 pixels ignores them, since no
+pre-1.4.0 widget consumed them.)
 
 ## What is deliberately NOT in version 1
 
