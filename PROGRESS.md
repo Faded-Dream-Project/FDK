@@ -9,7 +9,9 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.14** (the live
+Last audited: 2026-10-10, at milestone **1.4.15** (the chrome
+uniformity tail: the toolkit's own dialogs wear the FDK title bar;
+1.4.14 the live
 settings desktop — maintainer-requested after USING 1.4.13 for
 real: `fdk-set theme set NAME --app APP` per-app themes, LIVE
 re-theming when the command runs, the X11 INCR-drop fix behind
@@ -24,7 +26,15 @@ is always the truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.14** (the live settings desktop:
+- **HEAD:** milestone **1.4.15** (the chrome uniformity tail: the
+  toolkit's OWN dialogs — message, prompt, About, font chooser,
+  color chooser, file dialog — wear the FDK title bar like every
+  decorated application window, each growing by the band so its
+  content keeps the designed size; the file picker stays resizable
+  with a 560x360 floor, the fixed-content dialogs pin
+  non-resizable; dialog close buttons route through the same
+  CLOSE_REQUEST cancel paths the WMs always used. 1.4.14 the live
+  settings desktop:
   the theme-settings ENGINE — $FDK_THEME > the application's own
   <app_id>.prefs > the global fdk.prefs > built-in, resolved by
   src/theme/settings.c — plus `fdk-set theme set NAME --app APP`,

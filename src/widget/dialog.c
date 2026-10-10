@@ -452,7 +452,11 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        .height = height,
+        /* 1.4.15: the FDK title bar — the toolkit's dialogs wear the
+         * chrome its applications do; the window grows by the band so
+         * the content keeps its designed size. */
+        .height = height + fdk_theme_get_metric(NULL,
+                                                FDK_TM_TITLE_BAR_HEIGHT),
     };
     fdk_window *win = NULL;
     fdk_result r = fdk_window_create(ctx, &wopts, &win);
@@ -466,6 +470,8 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
     d->window = win;
     d->modal = modal;
     fdk__window_set_auto_paint(win, true);
+    (void)fdk_window_set_decorated(win, true);
+    fdk_window_set_resizable(win, false); /* fixed-content dialog */
     fdk__window_set_destroy_notify(win, dialog_destroyed, d);
     fdk_window_set_event_callback(win, dialog_window_event, d);
 
@@ -664,7 +670,9 @@ fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        .height = height,
+        /* 1.4.15: the FDK title bar (see the message-dialog site). */
+        .height = height + fdk_theme_get_metric(NULL,
+                                                FDK_TM_TITLE_BAR_HEIGHT),
     };
     fdk_window *win = NULL;
     fdk_result r = fdk_window_create(ctx, &wopts, &win);
@@ -678,6 +686,8 @@ fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
     d->window = win;
     d->modal = modal;
     fdk__window_set_auto_paint(win, true);
+    (void)fdk_window_set_decorated(win, true);
+    fdk_window_set_resizable(win, false); /* fixed-content dialog */
     fdk__window_set_destroy_notify(win, dialog_destroyed, d);
     fdk_window_set_event_callback(win, dialog_window_event, d);
 

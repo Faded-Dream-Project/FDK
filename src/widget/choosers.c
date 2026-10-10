@@ -417,7 +417,9 @@ fdk_result fdk_dialog_show_about(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = name,
         .width = width,
-        .height = height,
+        /* 1.4.15: the FDK title bar (see dialog.c). */
+        .height = height + fdk_theme_get_metric(NULL,
+                                                FDK_TM_TITLE_BAR_HEIGHT),
     };
     fdk_window *win = NULL;
     fdk_result r = fdk_window_create(ctx, &wopts, &win);
@@ -437,6 +439,8 @@ fdk_result fdk_dialog_show_about(fdk_context *ctx,
     }
     a->window = win;
     fdk__window_set_auto_paint(win, true);
+    (void)fdk_window_set_decorated(win, true);
+    fdk_window_set_resizable(win, false); /* fixed-content dialog */
     fdk__window_set_destroy_notify(win, about_destroyed, a);
     fdk_window_set_event_callback(win, about_window_event, a);
 
@@ -925,7 +929,9 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        .height = height,
+        /* 1.4.15: the FDK title bar (see dialog.c). */
+        .height = height + fdk_theme_get_metric(NULL,
+                                                FDK_TM_TITLE_BAR_HEIGHT),
     };
     fdk_window *win = NULL;
     r = fdk_window_create(ctx, &wopts, &win);
@@ -934,6 +940,8 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     }
     fc->window = win;
     fdk__window_set_auto_paint(win, true);
+    (void)fdk_window_set_decorated(win, true);
+    fdk_window_set_resizable(win, false); /* fixed-content dialog */
     fdk__window_set_destroy_notify(win, fc_destroyed, fc);
     fdk_window_set_event_callback(win, fc_window_event, fc);
 
@@ -1629,7 +1637,9 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        .height = height,
+        /* 1.4.15: the FDK title bar (see dialog.c). */
+        .height = height + fdk_theme_get_metric(NULL,
+                                                FDK_TM_TITLE_BAR_HEIGHT),
     };
     fdk_window *win = NULL;
     fdk_result r = fdk_window_create(ctx, &wopts, &win);
@@ -1642,6 +1652,8 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
     }
     cc->window = win;
     fdk__window_set_auto_paint(win, true);
+    (void)fdk_window_set_decorated(win, true);
+    fdk_window_set_resizable(win, false); /* fixed-content dialog */
     fdk__window_set_destroy_notify(win, cc_destroyed, cc);
     fdk_window_set_event_callback(win, cc_window_event, cc);
 

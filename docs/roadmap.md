@@ -4847,3 +4847,20 @@ complete until the settings FOLLOW the running desktop — gsettings
 never required restarting applications, and neither does FDK now.
 The NEXT list stays empty; everything the maintainer's usage
 report identified has shipped.
+
+## 1.4.15 — the chrome uniformity tail
+
+1.4.14 put the FDK title bar on every example; the one surface left
+inconsistent was the toolkit's OWN chrome — message dialogs,
+prompts, the About box, the font and color choosers, and the file
+picker still took whatever frame the WM handed them (and under bare
+X, no frame at all). They now wear the FDK title bar like every
+decorated application window: each dialog grows by the band so its
+content keeps the designed size, the fixed-content dialogs pin
+non-resizable, and the file picker stays resizable with a 560x360
+floor. The band's close button routes through the same
+FDK_EVENT_WINDOW_CLOSE_REQUEST cancel paths window managers have
+always used — no new dismissal semantics, just the affordance
+finally visible. The dialog GUI groups in the X11 suite (modal
+grab, Enter/Escape/click responses, early destroy) pass unchanged
+on the decorated windows; the picker's band was pixel-verified.

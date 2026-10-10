@@ -3216,10 +3216,15 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     if (fdlg_kind_save(kind)) {
         height += FD_ROW_H + FD_GAP;
     }
+    /* 1.4.15: the FDK title bar — the picker wears the chrome its
+     * applications do (band + close + drag + FDK resize), the window
+     * grows by the band so the browsing area keeps its designed
+     * size, and a resize floor keeps the shrunk case honest. */
+    fdk_i32 band = fdk_theme_get_metric(NULL, FDK_TM_TITLE_BAR_HEIGHT);
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        .height = height,
+        .height = height + band,
     };
     fdk_window *win = NULL;
     fdk_result r = fdk_window_create(ctx, &wopts, &win);
@@ -3228,6 +3233,9 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     }
     d->window = win;
     fdk__window_set_auto_paint(win, true);
+    (void)fdk_window_set_decorated(win, true);
+    fdk_window_set_size_limits(win, (fdk_size){560, 360},
+                               (fdk_size){0, 0});
     fdk__window_set_destroy_notify(win, fdlg_destroyed, d);
     fdk_window_set_event_callback(win, fdlg_window_event, d);
 
