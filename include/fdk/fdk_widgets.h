@@ -885,6 +885,49 @@ fdk_result fdk_textview_set_preedit(fdk_widget *textview,
 fdk_result fdk_textview_undo(fdk_widget *textview);
 fdk_result fdk_textview_redo(fdk_widget *textview);
 
+/* ---- Picture (1.4.9) ----
+ *
+ * The image display widget: one owned surface (decoded from a
+ * file, or ownership transferred from the app's own render),
+ * painted under a content-fit policy. Natural size = the image's
+ * pixel size; the parent assigns what it wants and the fit
+ * adapts. Scaled paints ride the transformed-blit engine —
+ * integer scale-ups stay sharp (nearest-neighbor), everything
+ * else antialiases.
+ *
+ *   FDK_PICTURE_FIT_NONE     — 1:1 top-left, clipped
+ *   FDK_PICTURE_FIT_CONTAIN  — fit inside, aspect kept, centered
+ *   FDK_PICTURE_FIT_COVER    — fill, aspect kept, center-cropped
+ *   FDK_PICTURE_FIT_FILL     — stretch, aspect broken
+ *
+ * Not focusable, no input. The a11y IMAGE role carries the app's
+ * accessible name (the alt text — fdk_widget_set_accessible_name)
+ * and reports the pixel size as the value text.
+ */
+
+typedef enum fdk_picture_fit {
+    FDK_PICTURE_FIT_NONE = 0,
+    FDK_PICTURE_FIT_CONTAIN,
+    FDK_PICTURE_FIT_COVER,
+    FDK_PICTURE_FIT_FILL,
+} fdk_picture_fit;
+
+fdk_result fdk_picture_create(fdk_widget *parent,
+                              fdk_widget **out_picture);
+/* Decodes path (PNG/JPEG/BMP/... — anything stb_image reads) into
+ * the picture's owned surface. Fails with the loader's errors
+ * (UNSUPPORTED for undecodable data). */
+fdk_result fdk_picture_set_from_file(fdk_widget *picture,
+                                     const char *path);
+/* Takes OWNERSHIP of `surface` (NULL clears). A surface handed to
+ * a non-picture widget is destroyed here — the transfer stays
+ * single-owner even on a type mismatch. */
+void fdk_picture_set_surface(fdk_widget *picture, fdk_surface *surface);
+void fdk_picture_set_fit(fdk_widget *picture, fdk_picture_fit fit);
+fdk_picture_fit fdk_picture_get_fit(fdk_widget *picture);
+fdk_i32 fdk_picture_image_width(fdk_widget *picture);
+fdk_i32 fdk_picture_image_height(fdk_widget *picture);
+
 /* ---- Tree (Phase 9) ----
  *
  * A hierarchical expandable tree on the ScrollView: nodes hold text,

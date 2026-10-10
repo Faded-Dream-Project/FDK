@@ -130,7 +130,7 @@ CPPFLAGS:= -Iinclude -Isrc
 # system font discovery, see src/text/fontscan.c). No-op stub on
 # glibc >= 2.34 where dlopen lives in libc; required for static
 # linking on older glibc.
-LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl
+LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz
 
 # pkg-config exposure (fdk.pc): private deps are the ones the .so
 # already links (apps need nothing); Requires.private lets static

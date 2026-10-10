@@ -104,6 +104,9 @@ typedef enum fdk_a11y_role {
 
     /* 1.4.8 append — the text document. */
     FDK_A11Y_ROLE_TEXT_VIEW = 50, /* multi-line editor (GtkTextView) */
+
+    /* 1.4.9 append — the image display. */
+    FDK_A11Y_ROLE_IMAGE = 51,   /* a picture widget (GtkPicture)   */
 } fdk_a11y_role;
 
 /* Stable, human-readable name ("button", "check menu item"). Never

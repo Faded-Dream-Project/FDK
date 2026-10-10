@@ -131,3 +131,61 @@ fdk_result fdk_surface_create_from_image(const char *path,
     *out_surface = surface;
     return FDK_OK;
 }
+
+/* The memory twin (1.4.9): decodes an in-memory image stream
+ * (PNG/JPEG/BMP/... — the clipboard's image/png reads ride this).
+ * Same validation ladder as the file variant minus the stat checks;
+ * a documented hard cap on input length keeps hostile "images" from
+ * claiming unbounded allocations. */
+fdk_result fdk_surface_create_from_image_bytes(const void *data,
+                                               size_t len,
+                                               fdk_surface **out_surface) {
+    if (data == NULL || out_surface == NULL || len == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (len > FDK_IMAGE_MAX_FILE_BYTES) {
+        FDK_WARN("image buffer too large to decode (%zu bytes, max %u)",
+                 len, FDK_IMAGE_MAX_FILE_BYTES);
+        return FDK_ERR_UNSUPPORTED;
+    }
+    int w = 0, h = 0, channels = 0;
+    unsigned char *px = stbi_load_from_memory(
+        (const stbi_uc *)data, (int)len, &w, &h, &channels, 4);
+    if (px == NULL) {
+        FDK_WARN("image decode failed: %s",
+                 stbi_failure_reason() != NULL ? stbi_failure_reason()
+                                               : "unknown reason");
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (w <= 0 || h <= 0 || w > 16384 || h > 16384) {
+        FDK_WARN("image dimensions out of range (%dx%d)", w, h);
+        stbi_image_free(px);
+        return FDK_ERR_UNSUPPORTED;
+    }
+    fdk_surface *surface = NULL;
+    fdk_result r = fdk_surface_create_format(w, h,
+                                             FDK_SURFACE_FORMAT_ARGB8888,
+                                             &surface);
+    if (!fdk_ok(r)) {
+        stbi_image_free(px);
+        return r;
+    }
+    for (int y = 0; y < h; y++) {
+        const unsigned char *srow = px + (size_t)y * (size_t)w * 4u;
+        fdk_u32 *drow = surface->fb.pixels +
+                        (size_t)y * (size_t)surface->fb.stride;
+        for (int x = 0; x < w; x++) {
+            unsigned char r8 = srow[(size_t)x * 4u + 0u];
+            unsigned char g8 = srow[(size_t)x * 4u + 1u];
+            unsigned char b8 = srow[(size_t)x * 4u + 2u];
+            unsigned char a8 = srow[(size_t)x * 4u + 3u];
+            drow[x] = ((fdk_u32)a8 << 24) | ((fdk_u32)r8 << 16) |
+                      ((fdk_u32)g8 << 8) | (fdk_u32)b8;
+        }
+    }
+    stbi_image_free(px);
+    FDK_DEBUG("image decoded from %zu bytes (%dx%d, %d channels)", len,
+              w, h, channels);
+    *out_surface = surface;
+    return FDK_OK;
+}

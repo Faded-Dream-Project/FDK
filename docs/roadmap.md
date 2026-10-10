@@ -4532,11 +4532,34 @@ select, Ctrl+A, read-only); X11 examples 12/12 (03_text grew the
 editor frame); sway 12/12; interop + both tooltip rigs +
 compositor-death PASS; verify-exports 584 in both configs.
 
+The 1.4.9 list shipped its middle: the IMAGE milestone. The PNG
+CODEC — a complete encoder over zlib (IHDR/IDAT/IEND, chunk CRCs,
+filter-0 scanlines) behind fdk_surface_save_png plus the memory
+twin fdk_surface_create_from_image_bytes for clipboard reads; the
+PICTURE widget — one owned surface under four content-fit
+policies (NONE 1:1 clipped, CONTAIN letterbox, COVER center-crop,
+FILL stretch), scaled paints on the transformed-blit engine
+(integer scale-ups stay sharp), the IMAGE a11y role with the
+pixel-size value text; and the CLIPBOARD's image surface —
+fdk_clipboard_set_image/get_image, the seam carrying encoded PNG
+bytes (the core owns the format), X11 serving/reading the
+image/png target in ONE atomic property (the documented 4 MiB
+practical cap; INCR stays the deliberate later) and Wayland
+moving bytes through the data-device pipe (32 MiB read bound)
+with one-content-at-a-time replacement on both. 595 exported
+symbols; zlib is a build-time link (notices updated).
+
+Battery at 1.4.9: debug + release zero warnings; headless all
+pass (+the png/picture suite: pixel-exact round-trips, letterbox/
+crop/stretch pixel proofs, ownership transfer, IMAGE role); X11
+integration 147 [ok] (+the clipboard-image round-trip group); X11
+examples 12/12 (04 grew the four-fits picture frame; the three
+GUI rigs re-screened to 2080); sway 12/12; interop + both tooltip
+rigs + compositor-death PASS (the interop rig's link line gained
+-lz); verify-exports 595 in both configs.
+
 The NEXT list (value order): label MARKUP (bold/italic/color
 spans over the shaping engine — no XML, an attribute-run layer);
-image LOADING surfaced to apps (stb_image already decodes
-internally: fdk_surface_from_file + a picture widget with fit
-modes); clipboard IMAGE format (image/png round-trips);
 window STATE surfaces (fullscreen/maximize/minimize on EWMH +
-xdg_toplevel); the IME completion surface (still LATER by the
-no-bus policy).
+xdg_toplevel); the IME completion surface (LATER by the no-bus
+policy) and INCR transfers (the clipboard's 4 MiB cap lifter).

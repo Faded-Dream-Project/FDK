@@ -114,6 +114,7 @@ static void device_data_offer(void *data, struct wl_data_device *device,
     conn->pending_offer = offer;
     conn->pending_offer_has_text = 0;
     conn->pending_offer_has_uris = 0;
+    conn->pending_offer_has_image = 0;
     wl_data_offer_add_listener(offer, &g_offer_listener, conn);
 }
 
@@ -128,6 +129,7 @@ static void device_selection(void *data, struct wl_data_device *device,
         /* Clipboard emptied. */
         conn->selection_offer = NULL;
         conn->selection_offer_has_text = 0;
+        conn->selection_offer_has_image = 0;
         return;
     }
     /* Promote the pending offer (per protocol ordering the ::offer
@@ -136,13 +138,17 @@ static void device_selection(void *data, struct wl_data_device *device,
      * well-behaved compositor; if it somehow does, treat it as
      * text-less rather than dereferencing untracked state. */
     int has_text = 0;
+    int has_image = 0;
     if (conn->pending_offer == offer) {
         has_text = conn->pending_offer_has_text;
+        has_image = conn->pending_offer_has_image;
         conn->pending_offer = NULL;
         conn->pending_offer_has_text = 0;
+        conn->pending_offer_has_image = 0;
     }
     conn->selection_offer = offer;
     conn->selection_offer_has_text = has_text;
+    conn->selection_offer_has_image = has_image;
 
     /* 1.2.4: this event does NOT mean our own source was replaced.
      * wlroots 0.18 echoes the freshly-set selection back to the
@@ -205,9 +211,31 @@ static void source_send(void *data, struct wl_data_source *source,
                         const char *mime_type, int32_t fd) {
     (void)source;
     fdk_platform_connection *conn = data;
+    if (strcmp(mime_type, "image/png") == 0) {
+        /* 1.4.9: the image content. */
+        const unsigned char *png = conn->clip_owned_png;
+        size_t len = conn->clip_owned_png_len;
+        if (png == NULL) {
+            close(fd);
+            return;
+        }
+        size_t off = 0;
+        while (off < len) {
+            ssize_t n = write(fd, png + off, len - off);
+            if (n < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            off += (size_t)n;
+        }
+        close(fd);
+        return;
+    }
     if (strcmp(mime_type, "text/plain;charset=utf-8") != 0 &&
         strcmp(mime_type, "text/plain") != 0) {
-        /* We only ever offer text MIMes, but be strict anyway. */
+        /* We only ever offer text and image MIMes; be strict anyway. */
         close(fd);
         return;
     }
@@ -244,10 +272,14 @@ static void source_cancelled(void *data, struct wl_data_source *source) {
     }
     fdk_free(conn->clip_owned_text);
     conn->clip_owned_text = NULL;
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = NULL;
+    conn->clip_owned_png_len = 0;
     if (conn->selection_offer != NULL) {
         wl_data_offer_destroy(conn->selection_offer);
         conn->selection_offer = NULL;
         conn->selection_offer_has_text = 0;
+        conn->selection_offer_has_image = 0;
     }
 }
 
@@ -448,6 +480,9 @@ void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn) {
     }
     fdk_free(conn->clip_owned_text);
     conn->clip_owned_text = NULL;
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = NULL;
+    conn->clip_owned_png_len = 0;
     if (conn->pending_offer != NULL &&
         conn->pending_offer != conn->selection_offer) {
         wl_data_offer_destroy(conn->pending_offer);
@@ -455,11 +490,13 @@ void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn) {
     conn->pending_offer = NULL;
     conn->pending_offer_has_text = 0;
     conn->pending_offer_has_uris = 0;
+    conn->pending_offer_has_image = 0;
     if (conn->selection_offer != NULL) {
         wl_data_offer_destroy(conn->selection_offer);
         conn->selection_offer = NULL;
     }
     conn->selection_offer_has_text = 0;
+    conn->selection_offer_has_image = 0;
     if (conn->data_device != NULL) {
         wl_data_device_release(conn->data_device);
         conn->data_device = NULL;
@@ -532,6 +569,10 @@ fdk_result fdk_wayland_clipboard_set_text(fdk_platform_connection *conn,
         wl_data_source_destroy(conn->clip_source);
     }
     conn->clip_source = source;
+    /* One content at a time: text replaces the image (1.4.9). */
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = NULL;
+    conn->clip_owned_png_len = 0;
     fdk_free(conn->clip_owned_text);
     conn->clip_owned_text = copy;
 
@@ -675,6 +716,7 @@ char *fdk_wayland_clipboard_get_text(fdk_platform_connection *conn) {
     wl_data_offer_destroy(conn->selection_offer);
     conn->selection_offer = NULL;
     conn->selection_offer_has_text = 0;
+    conn->selection_offer_has_image = 0;
     return text;
 }
 
@@ -772,4 +814,175 @@ char *fdk_wayland_clipboard_get_primary_text(
     conn->primary_selection_offer = NULL;
     conn->primary_selection_offer_has_text = 0;
     return text;
+}
+
+
+/* ---- the two IMAGE ops (1.4.9) ---- */
+
+fdk_result fdk_wayland_clipboard_set_image(fdk_platform_connection *conn,
+                                           const unsigned char *png,
+                                           size_t len) {
+    if (conn->data_device == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (png == NULL || len == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    unsigned char *copy = fdk_alloc(len);
+    if (copy == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(copy, png, len);
+    struct wl_data_source *source =
+        wl_data_device_manager_create_data_source(
+            conn->data_device_manager);
+    if (source == NULL) {
+        fdk_free(copy);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    wl_data_source_add_listener(source, &g_source_listener, conn);
+    wl_data_source_offer(source, "image/png");
+
+    if (conn->clip_source != NULL) {
+        wl_data_source_destroy(conn->clip_source);
+    }
+    conn->clip_source = source;
+    /* One content at a time: the image replaces the text. */
+    fdk_free(conn->clip_owned_text);
+    conn->clip_owned_text = NULL;
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = copy;
+    conn->clip_owned_png_len = len;
+
+    wl_data_device_set_selection(conn->data_device, source,
+                                 conn->last_input_serial);
+    wl_display_flush(conn->display);
+    return FDK_OK;
+}
+
+/* Bounded binary read of the selection offer's image/png (the pipe
+ * mechanics of read_offer_text, binary: no NUL sentinel, a 32 MiB
+ * cap — images are bigger than text, and the pipe has no property
+ * limits to respect). Returns fdk_alloc'd bytes + *out_len. */
+static unsigned char *read_offer_image(fdk_platform_connection *conn,
+                                       size_t *out_len) {
+    int fds[2];
+    if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) {
+        FDK_WARN("clipboard: pipe2 failed (%s)", strerror(errno));
+        return NULL;
+    }
+    wl_data_offer_receive(conn->selection_offer, "image/png", fds[1]);
+    wl_display_flush(conn->display);
+
+    size_t cap = 4096, len = 0;
+    unsigned char *buf = fdk_alloc(cap);
+    if (buf == NULL) {
+        close(fds[0]);
+        close(fds[1]);
+        return NULL;
+    }
+    struct timespec deadline_ts;
+    clock_gettime(CLOCK_MONOTONIC, &deadline_ts);
+    uint64_t deadline = (uint64_t)deadline_ts.tv_sec * 1000u +
+                        (uint64_t)deadline_ts.tv_nsec / 1000000u +
+                        FDK_WL_CLIP_READ_MS * 2; /* images: wider   */
+
+    int done = 0;
+    while (!done) {
+        ssize_t n = read(fds[0], buf + len, cap - len);
+        if (n > 0) {
+            len += (size_t)n;
+            if (len == cap) {
+                if (cap >= 32u * 1024u * 1024u) {
+                    FDK_WARN("clipboard: image offer larger than "
+                             "32 MiB — truncating read");
+                    break;
+                }
+                unsigned char *grown = fdk_realloc(buf, cap * 2);
+                if (grown == NULL) {
+                    break; /* keep what we have */
+                }
+                buf = grown;
+                cap *= 2;
+            }
+            continue;
+        }
+        if (n == 0) {
+            done = 1;
+            break;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            break;
+        }
+        struct timespec now_ts;
+        clock_gettime(CLOCK_MONOTONIC, &now_ts);
+        uint64_t now = (uint64_t)now_ts.tv_sec * 1000u +
+                       (uint64_t)now_ts.tv_nsec / 1000000u;
+        if (now >= deadline) {
+            FDK_WARN("clipboard: image offer read timed out");
+            break;
+        }
+        struct pollfd pfd = { fds[0], POLLIN, 0 };
+        int r = poll(&pfd, 1, (int)(deadline - now));
+        if (r < 0 && errno != EINTR) {
+            break;
+        }
+    }
+    close(fds[0]);
+    close(fds[1]);
+    if (len == 0) {
+        fdk_free(buf);
+        return NULL;
+    }
+    *out_len = len;
+    return buf;
+}
+
+unsigned char *fdk_wayland_clipboard_get_image(
+    fdk_platform_connection *conn, size_t *out_len) {
+    if (out_len == NULL) {
+        return NULL;
+    }
+    *out_len = 0;
+    if (conn->data_device == NULL) {
+        FDK_WARN("clipboard: no wl_data_device on this compositor");
+        return NULL;
+    }
+    /* We own it: serve the local copy. */
+    if (conn->clip_source != NULL) {
+        if (conn->clip_owned_png == NULL) {
+            return NULL;
+        }
+        unsigned char *copy = fdk_alloc(conn->clip_owned_png_len);
+        if (copy == NULL) {
+            return NULL;
+        }
+        memcpy(copy, conn->clip_owned_png, conn->clip_owned_png_len);
+        *out_len = conn->clip_owned_png_len;
+        return copy;
+    }
+    if (conn->selection_offer == NULL ||
+        !conn->selection_offer_has_image) {
+        /* Catch up on selection events (one bounded roundtrip —
+         * get_text's discipline). */
+        if (wl_display_roundtrip(conn->display) < 0) {
+            return NULL;
+        }
+        if (conn->selection_offer == NULL ||
+            !conn->selection_offer_has_image) {
+            return NULL; /* genuinely no image selection */
+        }
+    }
+    unsigned char *png = read_offer_image(conn, out_len);
+
+    /* The offer is single-use per receive: drop it so a later read
+     * forces a fresh look (get_text's discipline). */
+    wl_data_offer_destroy(conn->selection_offer);
+    conn->selection_offer = NULL;
+    conn->selection_offer_has_text = 0;
+    conn->selection_offer_has_image = 0;
+    return png;
 }

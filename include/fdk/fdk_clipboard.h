@@ -83,6 +83,26 @@ fdk_result fdk_clipboard_set_text(fdk_context *ctx, const char *text);
  * re-entrantly from inside this call. */
 char *fdk_clipboard_get_text(fdk_context *ctx);
 
+/* ---- Clipboard images (1.4.9) ----
+ *
+ * Images ride the same clipboard as text: set_image encodes the
+ * surface as PNG and takes ownership of the selection serving the
+ * image/png target (replacing any text content — one clipboard
+ * content at a time); get_image reads the current image/png (or
+ * whatever image bytes the owner serves) and decodes it into a
+ * fresh ARGB8888 surface (fdk_surface_destroy to release). NULL /
+ * FDK_ERR_UNSUPPORTED when the clipboard has no image or the
+ * backend cannot move it.
+ *
+ * X11 transports the bytes in one atomic property (the documented
+ * practical cap is 4 MiB — larger sets fail with
+ * FDK_ERR_UNSUPPORTED; incremental INCR transfer stays a
+ * deliberate later). Wayland moves the bytes through the
+ * data-device pipe (no cap). */
+fdk_result fdk_clipboard_set_image(fdk_context *ctx,
+                                   const fdk_surface *surface);
+fdk_surface *fdk_clipboard_get_image(fdk_context *ctx);
+
 /* ---- PRIMARY selection (1.3.4) ----
  *
  * The classic Unix "current selection" buffer, distinct from the

@@ -41,6 +41,11 @@
  * incremental transfers (refused with a warning — local transfers
  * are atomic and always fit), COMPOUND_TEXT (we serve
  * UTF8_STRING/TEXT/STRING, which every modern client accepts).
+ *
+ * 1.4.9 adds the IMAGE surface: image/png as a served/read target,
+ * carried in ONE atomic property (the documented 4 MiB practical
+ * cap — INCR remains the deliberate later). One clipboard content
+ * at a time: owning an image clears the owned text and vice versa.
  */
 
 #include "platform/x11/x11_platform.h"
@@ -56,6 +61,11 @@
 #include <time.h>
 
 #define FDK_CLIP_WAIT_MS 250
+/* The atomic property cap for image payloads: comfortably inside
+ * every real server's max-request size while covering ordinary
+ * screenshots and UI renders. Larger sets refuse with
+ * FDK_ERR_UNSUPPORTED (the INCR later would lift this). */
+#define FDK_CLIP_IMAGE_MAX_BYTES (4u * 1024u * 1024u)
 
 /* ---- the selection descriptor (one machinery, two selections) ---- */
 
@@ -96,8 +106,12 @@ fdk_result fdk_x11_clipboard_init(fdk_platform_connection *conn) {
         XInternAtom(conn->display, "text/plain;charset=utf-8", False);
     conn->atom_fdk_selection =
         XInternAtom(conn->display, "_FDK_SELECTION", False);
+    conn->atom_image_png = XInternAtom(conn->display, "image/png",
+                                       False);
     conn->clip_owned_text = NULL;
     conn->primary_owned_text = NULL;
+    conn->clip_owned_png = NULL;
+    conn->clip_owned_png_len = 0;
     return FDK_OK;
 }
 
@@ -110,6 +124,9 @@ void fdk_x11_clipboard_shutdown(fdk_platform_connection *conn) {
         conn->clip_owned_text = NULL;
         fdk_free(conn->primary_owned_text);
         conn->primary_owned_text = NULL;
+        fdk_free(conn->clip_owned_png);
+        conn->clip_owned_png = NULL;
+        conn->clip_owned_png_len = 0;
         return;
     }
     if (conn->clip_helper != None) {
@@ -134,6 +151,9 @@ void fdk_x11_clipboard_shutdown(fdk_platform_connection *conn) {
     conn->clip_owned_text = NULL;
     fdk_free(conn->primary_owned_text);
     conn->primary_owned_text = NULL;
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = NULL;
+    conn->clip_owned_png_len = 0;
 }
 
 /* One ownership+store, parameterized over the selection. verify:
@@ -175,6 +195,12 @@ static fdk_result selection_set_text(fdk_platform_connection *conn,
 
 fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
                                       const char *text) {
+    /* One content at a time (1.4.9): text replaces the clipboard's
+     * image. (PRIMARY's set does NOT touch the clipboard image —
+     * different selection, different content.) */
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = NULL;
+    conn->clip_owned_png_len = 0;
     return selection_set_text(conn, sel_of_clipboard(conn), text, true);
 }
 
@@ -188,12 +214,15 @@ fdk_result fdk_x11_clipboard_set_primary_text(
 /* Appends `count` atoms to the TARGETS reply. */
 static void serve_targets(fdk_platform_connection *conn, Window requestor,
                           Atom property) {
-    Atom targets[4];
+    Atom targets[5];
     int n = 0;
     targets[n++] = conn->utf8_string;
     targets[n++] = conn->atom_text_plain;
     targets[n++] = conn->atom_text;
     targets[n++] = XA_STRING;
+    if (conn->clip_owned_png != NULL) {
+        targets[n++] = conn->atom_image_png; /* 1.4.9 */
+    }
     XChangeProperty(conn->display, requestor, property, XA_ATOM, 32,
                     PropModeReplace, (const unsigned char *)targets, n);
 }
@@ -287,7 +316,11 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
             property = None;
         }
 
-        if (sel.owned == NULL || *sel.owned == NULL) {
+        bool have_content =
+            (sel.owned != NULL && *sel.owned != NULL) ||
+            (req->selection == conn->atom_clipboard &&
+             conn->clip_owned_png != NULL);
+        if (!have_content) {
             /* Not the owner anymore (a stale request raced our
              * SelectionClear), or an unknown selection: refuse per the
              * ICCCM — the reply must name property None, so the
@@ -296,6 +329,14 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
             property = None;
         } else if (req->target == conn->atom_targets) {
             serve_targets(conn, req->requestor, property);
+        } else if (req->target == conn->atom_image_png &&
+                   req->selection == conn->atom_clipboard &&
+                   conn->clip_owned_png != NULL) {
+            /* 1.4.9: the image target, served atomically. */
+            XChangeProperty(conn->display, req->requestor, property,
+                            conn->atom_image_png, 8, PropModeReplace,
+                            conn->clip_owned_png,
+                            (int)conn->clip_owned_png_len);
         } else if (req->target == conn->utf8_string ||
                    req->target == conn->atom_text_plain ||
                    req->target == conn->atom_text ||
@@ -332,6 +373,9 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
                 conn->clip_helper) {
                 fdk_free(conn->clip_owned_text);
                 conn->clip_owned_text = NULL;
+                fdk_free(conn->clip_owned_png);
+                conn->clip_owned_png = NULL;
+                conn->clip_owned_png_len = 0;
             }
         } else if (xevent->xselectionclear.selection == XA_PRIMARY) {
             if (XGetSelectionOwner(conn->display, XA_PRIMARY) !=
@@ -526,4 +570,118 @@ char *fdk_x11_clipboard_get_text(fdk_platform_connection *conn) {
 
 char *fdk_x11_clipboard_get_primary_text(fdk_platform_connection *conn) {
     return selection_get_text(conn, sel_of_primary(conn));
+}
+
+/* ---- clipboard images (1.4.9) ---- */
+
+fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
+                                       const unsigned char *png,
+                                       size_t len) {
+    if (png == NULL || len == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (len > FDK_CLIP_IMAGE_MAX_BYTES) {
+        FDK_WARN("clipboard: image payload %zu bytes exceeds the "
+                 "atomic cap (%u); refusing (INCR is a later)",
+                 len, FDK_CLIP_IMAGE_MAX_BYTES);
+        return FDK_ERR_UNSUPPORTED;
+    }
+    unsigned char *copy = fdk_alloc(len);
+    if (copy == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(copy, png, len);
+    XSetSelectionOwner(conn->display, conn->atom_clipboard,
+                       conn->clip_helper, CurrentTime);
+    if (XGetSelectionOwner(conn->display, conn->atom_clipboard) !=
+        conn->clip_helper) {
+        fdk_free(copy);
+        FDK_WARN("clipboard: image ownership did not take effect");
+        return FDK_ERR_PLATFORM;
+    }
+    /* One content at a time: the image replaces the owned text. */
+    fdk_free(conn->clip_owned_text);
+    conn->clip_owned_text = NULL;
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = copy;
+    conn->clip_owned_png_len = len;
+    XFlush(conn->display);
+    return FDK_OK;
+}
+
+/* Raw bytes from a property read: the atomic image read. */
+static unsigned char *bytes_from_property(fdk_platform_connection *conn,
+                                          size_t *out_len) {
+    Atom type = None;
+    int format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    if (XGetWindowProperty(conn->display, conn->clip_helper,
+                           conn->atom_fdk_selection, 0, 0x400000, True,
+                           AnyPropertyType, &type, &format, &nitems,
+                           &bytes_after, &data) != Success) {
+        return NULL;
+    }
+    if (type == conn->atom_incr) {
+        FDK_WARN("clipboard: INCR image transfer offered — refusing "
+                 "(oversized selection, not supported yet)");
+        if (data != NULL) {
+            XFree(data);
+        }
+        return NULL;
+    }
+    if (data == NULL || type == None || format != 8 || nitems == 0) {
+        if (data != NULL) {
+            XFree(data);
+        }
+        return NULL;
+    }
+    unsigned char *out = fdk_alloc(nitems);
+    if (out == NULL) {
+        XFree(data);
+        return NULL;
+    }
+    memcpy(out, data, nitems);
+    *out_len = (size_t)nitems;
+    XFree(data);
+    return out;
+}
+
+unsigned char *fdk_x11_clipboard_get_image(fdk_platform_connection *conn,
+                                           size_t *out_len) {
+    if (out_len == NULL) {
+        return NULL;
+    }
+    *out_len = 0;
+    /* Fast path: we own it. */
+    if (XGetSelectionOwner(conn->display, conn->atom_clipboard) ==
+        conn->clip_helper) {
+        if (conn->clip_owned_png == NULL) {
+            return NULL;
+        }
+        unsigned char *copy = fdk_alloc(conn->clip_owned_png_len);
+        if (copy == NULL) {
+            return NULL;
+        }
+        memcpy(copy, conn->clip_owned_png, conn->clip_owned_png_len);
+        *out_len = conn->clip_owned_png_len;
+        return copy;
+    }
+    if (XGetSelectionOwner(conn->display, conn->atom_clipboard) == None) {
+        return NULL; /* nobody owns it: empty */
+    }
+    /* Convert image/png from the current owner (bounded wait). */
+    XConvertSelection(conn->display, conn->atom_clipboard,
+                      conn->atom_image_png, conn->atom_fdk_selection,
+                      conn->clip_helper, CurrentTime);
+    XEvent notify;
+    if (!wait_selection_notify(conn, sel_of_clipboard(conn), &notify)) {
+        FDK_WARN("clipboard: image owner did not answer within %d ms",
+                 FDK_CLIP_WAIT_MS);
+        return NULL;
+    }
+    if (notify.xselection.property == None) {
+        return NULL; /* owner has no image */
+    }
+    return bytes_from_property(conn, out_len);
 }

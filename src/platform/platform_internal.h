@@ -401,6 +401,30 @@ typedef struct fdk_platform_ops {
         fdk_platform_connection *conn, const char *text);
     char *(*clipboard_get_primary_text)(fdk_platform_connection *conn);
 
+    /* ---- OPTIONAL clipboard image operations (1.4.9) ----
+     *
+     * The clipboard's image/png surface behind the core's
+     * encode/decode (fdk_clipboard_set_image / get_image). The
+     * seam carries ENCODED PNG bytes — backends move bytes for the
+     * image/png target (X11) or mime type (Wayland), the core owns
+     * the format. One clipboard content at a time: setting an
+     * image replaces any text the backend serves and vice versa.
+     *
+     * clipboard_set_image copies `png` (never NULL, len > 0) and
+     * makes the backend the owner serving image/png. Backends may
+     * refuse payloads beyond their transport's comfortable atomic
+     * size (X11: 4 MiB — INCR stays a deliberate LATER) with
+     * FDK_ERR_UNSUPPORTED.
+     *
+     * clipboard_get_image returns freshly allocated PNG bytes
+     * (fdk_free) with *out_len set, or NULL when the clipboard has
+     * no image (or it is unreadable/oversized). */
+    fdk_result (*clipboard_set_image)(
+        fdk_platform_connection *conn, const unsigned char *png,
+        size_t len);
+    unsigned char *(*clipboard_get_image)(
+        fdk_platform_connection *conn, size_t *out_len);
+
     /* ---- OPTIONAL popup/dialog grab operations (Phase 9
      * completion — the menu machinery) ----
      *

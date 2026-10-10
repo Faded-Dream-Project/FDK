@@ -3960,6 +3960,51 @@ static void test_clipboard(void) {
     printf("[ok] clipboard: FDK round trip, replace semantics, "
            "empty-as-NULL\n");
 
+    /* --- 1b. The image round trip (1.4.9): encode a gradient
+     * surface onto the clipboard, read it back, compare pixels.
+     * Own-ownership fast path + the encode/decode seam. --- */
+    {
+        fdk_surface *img = NULL;
+        assert(fdk_ok(fdk_surface_create_format(
+            24, 16, FDK_SURFACE_FORMAT_ARGB8888, &img)));
+        for (int y = 0; y < 16; y++) {
+            fdk_surface_info info;
+            assert(fdk_ok(fdk_surface_get_info(img, &info)));
+            for (int x = 0; x < 24; x++) {
+                info.pixels[(size_t)y * (size_t)info.stride +
+                            (size_t)x] =
+                    ((fdk_u32)0xFFu << 24) |
+                    ((fdk_u32)(x * 10) << 16) |
+                    ((fdk_u32)(y * 15) << 8) | 0x40u;
+            }
+        }
+        assert(fdk_ok(fdk_clipboard_set_image(ctx, img)));
+        /* One content at a time: the image replaced the text. */
+        assert(fdk_clipboard_get_text(ctx) == NULL);
+        fdk_surface *back = fdk_clipboard_get_image(ctx);
+        assert(back != NULL);
+        fdk_surface_info bi;
+        assert(fdk_ok(fdk_surface_get_info(back, &bi)));
+        assert(bi.width == 24 && bi.height == 16);
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 24; x++) {
+                fdk_surface_info ii;
+                assert(fdk_ok(fdk_surface_get_info(img, &ii)));
+                assert(bi.pixels[(size_t)y * (size_t)bi.stride +
+                                 (size_t)x] ==
+                       ii.pixels[(size_t)y * (size_t)ii.stride +
+                                 (size_t)x]);
+            }
+        }
+        fdk_surface_destroy(back);
+        fdk_surface_destroy(img);
+        /* Back to text: replaces the image. */
+        assert(fdk_ok(fdk_clipboard_set_text(ctx, "again")));
+        assert(fdk_clipboard_get_image(ctx) == NULL);
+        printf("[ok] clipboard image: FDK round trip is pixel-exact, "
+               "text/image replace each other\n");
+    }
+
     /* --- 2. Foreign owner serves FDK's get (the child must stay
      * alive while FDK reads, so the handshake is manual: wait for
      * "R", read the clipboard, then hang up + reap) --- */

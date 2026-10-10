@@ -159,6 +159,12 @@ struct fdk_platform_connection {
     char *clip_owned_text;    /* fdk_alloc'd, NULL when not owner     */
     char *primary_owned_text; /* fdk_alloc'd, NULL when not PRIMARY's
                                * owner (1.3.4; XA_PRIMARY)             */
+    /* 1.4.9: the clipboard's owned image (encoded PNG). One content
+     * at a time: owning an image clears owned text and vice versa.
+     * atom_image_png is the target we serve/read. */
+    unsigned char *clip_owned_png; /* fdk_alloc'd, NULL when no image  */
+    size_t clip_owned_png_len;
+    Atom atom_image_png;      /* image/png                            */
 
     /* --- Drag and drop (1.2.0, XDND) — x11_dnd.c ---
      *
@@ -445,6 +451,13 @@ char *fdk_x11_clipboard_get_text(fdk_platform_connection *conn);
 fdk_result fdk_x11_clipboard_set_primary_text(
     fdk_platform_connection *conn, const char *text);
 char *fdk_x11_clipboard_get_primary_text(fdk_platform_connection *conn);
+/* 1.4.9: the clipboard's image/png surface (atomic property
+ * transfers; the 4 MiB documented cap). */
+fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
+                                       const unsigned char *png,
+                                       size_t len);
+unsigned char *fdk_x11_clipboard_get_image(
+    fdk_platform_connection *conn, size_t *out_len);
 
 /* Drag and drop (x11_dnd.c). init/shutdown: connection lifetime
  * (called from x11_connection.c next to the clipboard's).

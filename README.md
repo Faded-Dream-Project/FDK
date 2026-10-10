@@ -381,6 +381,16 @@ cut/copy/paste + PRIMARY middle-click, read-only, IME preedit
 display). Run `examples/03_text.c`: the editor frame under the
 label modes — click in and type.
 
+1.4.9 is the image milestone: a complete PNG encoder over zlib
+(fdk_surface_save_png — renders can be saved), the memory decode
+twin, the PICTURE widget (an owned surface under NONE / CONTAIN /
+COVER / FILL fit policies — integer scale-ups stay sharp, the rest
+antialias), and the clipboard's image surface: copy a surface as
+image/png and paste it back on X11 (one atomic property) and
+Wayland (the data-device pipe), with text and image replacing each
+other like any real clipboard. Run `examples/04_widgets.c` — the
+"1.4.9 — picture" frame shows the logo under all four fits.
+
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session
 frame with an expander and a draggable splitter, the 1.4.3 row

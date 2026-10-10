@@ -54,6 +54,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int g_argc = 0;
+static char **g_argv = NULL;
+
+
 static fdk_font *font16 = NULL;
 static fdk_widget *status = NULL;
 static fdk_widget *progress = NULL;
@@ -214,7 +218,9 @@ static void on_color_chooser(fdk_widget *w, void *user) {
     set_status("The color chooser opened.");
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    g_argc = argc;
+    g_argv = argv;
     font16 = fdk_font_load_system_default(16);
     if (font16 == NULL) {
         fprintf(stderr, "04_widgets: no system TrueType font found "
@@ -233,7 +239,7 @@ int main(void) {
     g_ctx = ctx;
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 1620)) {
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 1980)) {
         fdk_shutdown(ctx);
         return 1;
     }
@@ -554,6 +560,52 @@ int main(void) {
             iv, "The item grid: cells flow into columns; click, "
                 "ctrl/shift-select, or drive it with the arrows "
                 "(Down steps a whole row; Enter opens)");
+    }
+
+    /* --- frame: the 1.4.9 picture (the image display) ---
+     *
+     * The logo under all four fit policies is a four-way viewer:
+     * NONE (1:1 clipped), CONTAIN (letterbox), COVER (crop), FILL
+     * (stretch). The loaded file path can be overridden as argv[1].
+     */
+    {
+        fdk_widget *f149 = NULL;
+        (void)fdk_frame_create(content, font16,
+                               "1.4.9 — picture (four fits)",
+                               &f149);
+        fdk_widget_set_background(f149, col(26, 29, 40));
+        const char *pic_path = "examples/data/fdk_logo.png";
+        if (g_argc > 1 && g_argv[1] != NULL) {
+            pic_path = g_argv[1];
+        }
+        static const fdk_picture_fit fits[4] = {
+            FDK_PICTURE_FIT_NONE, FDK_PICTURE_FIT_CONTAIN,
+            FDK_PICTURE_FIT_COVER, FDK_PICTURE_FIT_FILL,
+        };
+        static const char *fit_names[4] = {
+            "NONE", "CONTAIN", "COVER", "FILL",
+        };
+        for (int i = 0; i < 4; i++) {
+            fdk_widget *row = NULL;
+            (void)fdk_box_create(f149, FDK_HORIZONTAL, &row);
+            fdk_widget_set_expand(row, true, false);
+            fdk_widget *lab = NULL;
+            (void)fdk_label_create(row, font16, fit_names[i], &lab);
+            fdk_widget_set_natural_size(lab, 64, 0);
+            fdk_label_set_color(lab, col(150, 158, 178));
+            fdk_widget *pic = NULL;
+            (void)fdk_picture_create(row, &pic);
+            if (fdk_picture_set_from_file(pic, pic_path) != FDK_OK) {
+                /* No logo in this checkout: the empty picture keeps
+                 * the frame honest (zero-size, no crash). */
+            }
+            fdk_picture_set_fit(pic, fits[i]);
+            fdk_widget_set_natural_size(pic, 0, 72);
+            fdk_widget_set_expand(pic, true, true);
+            (void)fdk_widget_set_tooltip(
+                pic, "The picture widget: an owned surface under a "
+                     "content-fit policy");
+        }
     }
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);

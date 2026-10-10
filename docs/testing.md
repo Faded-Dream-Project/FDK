@@ -1633,3 +1633,17 @@ before a hexdump showed the bytes were perfect: the format
 string's own '[' bracket had been swallowed by the TERMINAL
 rendering of an output byte, not by the text engine. When a
 probe's output looks impossible, hexdump before theorizing.
+
+## 1.4.9 — one lesson from the image milestone
+
+**A taller example breaks the rigs that pixel-pin it — check the
+screens before the frames.** Adding a 360-px frame to example 04
+pushed the grid frame's blue cell past the rigs' 1720-px screens;
+the X11 rig failed its pixel check with "0 px" found — which reads
+like a rendering regression but is a SCREEN-SIZE regression. The
+standing rule: whenever an example's window height grows, re-screen
+every rig that captures it (X11 + sway + tooltip), or the failure
+points at the wrong layer entirely. Also: any rig that links the
+FDK sources with its own cc line needs -lz the moment the PNG
+encoder lands (the interop rig's compile failed before its own
+checks could run).

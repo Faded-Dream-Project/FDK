@@ -114,3 +114,36 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 ---
+
+---
+
+## zlib (system library, NOT vendored)
+
+- Linked at BUILD time only (no source copied into the tree):
+  `-lz` in the Makefile's LDFLAGS.
+- Source: https://zlib.net/ — Jean-loup Gailly and Mark Adler.
+- Used for: the PNG encoder's IDAT compression and chunk CRCs
+  (src/render/png_encode.c, 1.4.9). The DECODE side needs nothing
+  from zlib (PNG decode is stb_image's own inflated).
+
+License (zlib license, permissive and FDK-compatible):
+
+------------------------------------------------------------------------------
+Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+------------------------------------------------------------------------------

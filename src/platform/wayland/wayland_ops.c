@@ -33,6 +33,8 @@ static const fdk_platform_ops g_wayland_ops = {
     .clipboard_get_text = fdk_wayland_clipboard_get_text,
     .clipboard_set_primary_text = fdk_wayland_clipboard_set_primary_text,
     .clipboard_get_primary_text = fdk_wayland_clipboard_get_primary_text,
+    .clipboard_set_image = fdk_wayland_clipboard_set_image,
+    .clipboard_get_image = fdk_wayland_clipboard_get_image,
     .window_set_drop_formats = fdk_wayland_window_set_drop_formats,
     .drag_begin = fdk_wayland_drag_begin,
 };

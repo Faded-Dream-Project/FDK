@@ -150,4 +150,10 @@ fdk_result fdk__surface_blit_alpha(fdk_surface *dst, fdk_i32 dst_x,
                                    fdk_i32 dst_y, fdk_surface *src,
                                    fdk_f32 alpha);
 
+/* PNG encoder (png_encode.c, 1.4.9): a complete 8-bit RGBA PNG
+ * stream in one heap buffer (fdk_free). The clipboard's image/png
+ * target and fdk_surface_save_png ride it. */
+fdk_result fdk__png_encode(const fdk_surface *surface,
+                           unsigned char **out, size_t *out_len);
+
 #endif /* FDK_SURFACE_INTERNAL_H */

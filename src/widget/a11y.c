@@ -67,6 +67,7 @@ static const struct {
     {FDK_A11Y_ROLE_COLOR_CHOOSER, "color chooser"},
     {FDK_A11Y_ROLE_FONT_CHOOSER, "font chooser"},
     {FDK_A11Y_ROLE_TEXT_VIEW, "text view"},
+    {FDK_A11Y_ROLE_IMAGE, "image"},
 };
 
 const char *fdk_a11y_role_name(fdk_a11y_role role) {

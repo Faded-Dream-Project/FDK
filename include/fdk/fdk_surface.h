@@ -204,6 +204,21 @@ fdk_result fdk_surface_create_format(fdk_i32 width, fdk_i32 height,
  *                              exceeds the dimension/size bounds) —
  *                              logged at WARN with the decoder's reason
  */
+/* Writes `surface` to `path` as an 8-bit RGBA PNG (one IDAT,
+ * zlib-compressed filter-0 scanlines — the encoder the clipboard's
+ * image/png target rides). Returns FDK_ERR_PLATFORM when the file
+ * cannot be written, FDK_ERR_OUT_OF_MEMORY on any allocation. */
+fdk_result fdk_surface_save_png(const fdk_surface *surface,
+                                const char *path);
+
+/* The memory twin of fdk_surface_create_from_image: decodes an
+ * in-memory image stream (the clipboard's image reads ride this).
+ * Same formats, same validation ladder minus the filesystem checks.
+ * Fails with FDK_ERR_UNSUPPORTED for undecodable data. */
+fdk_result fdk_surface_create_from_image_bytes(const void *data,
+                                               size_t len,
+                                               fdk_surface **out_surface);
+
 fdk_result fdk_surface_create_from_image(const char *path,
                                          fdk_surface **out_surface);
 

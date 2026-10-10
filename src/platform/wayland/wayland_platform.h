@@ -163,6 +163,11 @@ struct fdk_platform_connection {
      * stays for the source's lifetime). cancelled destroys both. */
     struct wl_data_source *clip_source;
     char *clip_owned_text;
+    /* 1.4.9: the image content (encoded PNG). One clipboard content
+     * at a time — owning an image clears owned text and vice versa;
+     * the source offers image/png only. */
+    unsigned char *clip_owned_png;
+    size_t clip_owned_png_len;
 
     /* The compositor's current selection, as seen by us: the latest
      * wl_data_device::data_offer that a ::selection event named.
@@ -178,10 +183,12 @@ struct fdk_platform_connection {
      * its flags into the selection slot). */
     struct wl_data_offer *selection_offer;
     int selection_offer_has_text;
+    int selection_offer_has_image; /* 1.4.9: image/png in the MIME list */
     struct wl_data_offer *pending_offer;
     int pending_offer_has_text;
     int pending_offer_has_uris; /* 1.2.0: text/uri-list in the pending
                                    offer — drag offers carry it */
+    int pending_offer_has_image; /* 1.4.9 */
 
     /* --- Drag and drop (1.2.0, wayland_dnd.c) ---
      *
@@ -543,6 +550,13 @@ fdk_result fdk_wayland_clipboard_set_primary_text(
     fdk_platform_connection *conn, const char *text);
 char *fdk_wayland_clipboard_get_primary_text(
     fdk_platform_connection *conn);
+/* 1.4.9: the clipboard's image/png surface (data-device pipe
+ * transfers — no size cap beyond the 32 MiB read bound). */
+fdk_result fdk_wayland_clipboard_set_image(
+    fdk_platform_connection *conn, const unsigned char *png,
+    size_t len);
+unsigned char *fdk_wayland_clipboard_get_image(
+    fdk_platform_connection *conn, size_t *out_len);
 
 /* Declared here, defined across wayland_connection.c, wayland_window.c
  * dispatch is wl_display_dispatch() itself (no separate translate step

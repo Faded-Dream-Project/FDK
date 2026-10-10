@@ -9,9 +9,9 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.8** (the TextView —
-the multi-line editor, the last widget-family hole), by a full
-in-depth code review — every claim below was
+Last audited: 2026-10-10, at milestone **1.4.9** (the image
+milestone: the PNG codec, the Picture widget, the clipboard's
+image surface), by a full in-depth code review — every claim below was
 re-verified against the tree, not copied from docs. THE AUDIT'S
 OWN FIRST CATCH: the ledger's "themed tooltips" candidate was
 stale (the 1.3.2 tooltip has been fully themed since birth —
@@ -20,19 +20,20 @@ truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.8** (the TextView multi-line editor;
-  1.4.7 shipped the grid's edge-chasing band + the file dialog's
-  icon mode)
+- **HEAD:** milestone **1.4.9** (the PNG codec + the Picture
+  widget + the clipboard image surface; 1.4.8 shipped the TextView
+  multi-line editor)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **584 exported symbols**, `make verify-exports` OK in
+- **Public API:** **595 exported symbols**, `make verify-exports` OK in
   debug AND release
 - **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
-  suites and the eight 1.4.8 textview groups); X11 integration
-  suite all-pass — **146 [ok]** (real Xvfb, real input, incl. the
-  modern-batch, HiDPI (private 192-dpi server), iconview GUI,
-  file-dialog icon-mode, and textview GUI groups); 33 test files
+  suites, the eight 1.4.8 textview groups, and the 1.4.9 png/
+  picture suite); X11 integration suite all-pass — **147 [ok]**
+  (real Xvfb, real input, incl. the modern-batch, HiDPI (private
+  192-dpi server), iconview GUI, file-dialog icon-mode, textview
+  GUI, and clipboard-image groups); 34 test files
 - **Scale:** ~56k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
@@ -52,6 +53,9 @@ the List's selection model, grid keyboard nav, batch fills; the
 edge-chasing auto-scroll BOTH axes + cell double-click
 activation),
 spinbutton,
+**picture** (1.4.9 — the image display: an owned surface under
+NONE/CONTAIN/COVER/FILL fit policies, scaled paints on the
+transformed-blit engine, the IMAGE a11y role),
 **textview** (1.4.8 — the multi-line editor: word-wrap through the
 break engine + no-wrap mode, caret/selection across visual lines
 with the goal column, PageUp/PageDown, paragraph triple-click,
@@ -125,6 +129,10 @@ sidebar rhythm).
 - Preferences: `.fdk-prefs` persistence, atomic saves (1.3.7)
 - Text: fontconfig scan, stb_truetype shaping, AA rendering,
   ellipsize, line breaking
+- **Images (1.4.9)**: stb_image decode (file + memory), the PNG
+  ENCODER over zlib (fdk_surface_save_png), the Picture widget,
+  clipboard image/png (X11 atomic property + Wayland data-device
+  pipe, one-content-at-a-time)
 - Shortcuts/accelerators/mnemonics (1.3.3 / 1.3.6)
 - Versioned shared-library export surface (version script +
   verify-exports gate)
@@ -140,15 +148,12 @@ application still cannot build on FDK today:
 1. **Label markup** — rich spans (bold/italic/color, maybe size)
    in labels/buttons/tooltips: a tiny attribute-run layer over
    the shaping engine, no HTML/XML parser.
-2. **Image loading surfaced to apps** — stb_image already decodes
-   internally; apps need `fdk_surface_from_file` (PNG/JPEG at
-   minimum) + a picture widget with fit modes.
-3. **Clipboard image format** — image/png on the clipboard
-   (screenshots and copied renders round-trip with the desktop).
-4. **Window state surfaces** — fullscreen/maximize/minimize
+2. **Window state surfaces** — fullscreen/maximize/minimize
    requests + state queries on both backends (EWMH + xdg_toplevel).
-5. **IME completion surface** — LATER by the no-bus policy until a
+3. **IME completion surface** — LATER by the no-bus policy until a
    protocol joins third_party/wayland-protocols
+4. **INCR transfers** — the X11 clipboard's 4 MiB atomic cap
+   lifter (screenshots from other tools may exceed it)
 
 ### LATER (real, not next)
 
