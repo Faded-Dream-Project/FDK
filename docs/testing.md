@@ -1647,3 +1647,17 @@ points at the wrong layer entirely. Also: any rig that links the
 FDK sources with its own cc line needs -lz the moment the PNG
 encoder lands (the interop rig's compile failed before its own
 checks could run).
+
+## 1.4.10 — the pre-write that neutered the change detector
+
+**A state helper must own its own writes.** The Wayland configure
+handler set pwindow->fullscreen BEFORE calling the compare-and-flip
+helper that also takes it as a parameter — so the helper's
+"did anything change" compare read the NEW value against itself,
+always equal, and a fullscreen-ONLY flip (unset after set, nothing
+else moving) took the early return: the flag updated in the
+platform struct but no event fired, and the WINDOW layer's cache —
+what the public getter reads — went stale. The suite caught it as
+"the unset configure arrived on the wire, the flag never cleared."
+Rule: exactly one function writes a state field — the one that
+decides whether the write is a change.

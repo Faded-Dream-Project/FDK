@@ -59,14 +59,15 @@ typedef enum fdk_event_type {
      * so the resize path re-drives the first paint through EXPOSE). */
     FDK_EVENT_WINDOW_EXPOSE = 4,
 
-    /* The window's maximized/minimized state changed — because the
-     * application called fdk_window_maximize/unmaximize/minimize/
-     * restore, or because the platform reported a change (a window
-     * manager acting on its own, a taskbar un-minimize, an xdg-shell
-     * configure). `state.maximized` / `state.minimized` hold the NEW
-     * state as FDK knows it; compare against fdk_window_is_maximized()
-     * calls you made earlier, or just re-read the flags. Emitted only
-     * on actual changes. */
+    /* The window's maximized/minimized/fullscreen state changed —
+     * because the application called fdk_window_maximize/unmaximize/
+     * minimize/restore/fullscreen/unfullscreen, or because the
+     * platform reported a change (a window manager acting on its
+     * own, a taskbar un-minimize, an xdg-shell configure).
+     * `state.maximized` / `state.minimized` / `state.fullscreen`
+     * hold the NEW state as FDK knows it; compare against
+     * fdk_window_is_maximized() calls you made earlier, or just
+     * re-read the flags. Emitted only on actual changes. */
     FDK_EVENT_WINDOW_STATE = 5,
 
     /* The compositor overrode FDK's decoration request (Wayland
@@ -134,6 +135,7 @@ typedef struct fdk_expose_event {
 typedef struct fdk_state_event {
     int maximized; /* nonzero = window is now maximized */
     int minimized; /* nonzero = window is now minimized/iconic */
+    int fullscreen; /* 1.4.10: nonzero = window is now fullscreen */
 } fdk_state_event;
 
 typedef struct fdk_decoration_event {

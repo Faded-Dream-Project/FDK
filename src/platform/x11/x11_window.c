@@ -622,18 +622,22 @@ void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,
  * outcome) and the PropertyNotify translation in x11_events.c (where
  * the WM's property rewrite is the outcome). */
 void fdk_x11_window_update_state(fdk_platform_window *pwindow,
-                                 int maximized, int minimized) {
+                                 int maximized, int minimized,
+                                 int fullscreen) {
     if (pwindow->maximized == maximized &&
-        pwindow->minimized == minimized) {
+        pwindow->minimized == minimized &&
+        pwindow->fullscreen == fullscreen) {
         return;
     }
     pwindow->maximized = maximized;
     pwindow->minimized = minimized;
+    pwindow->fullscreen = fullscreen;
     fdk_event_data event;
     memset(&event, 0, sizeof event);
     event.type = FDK_EVENT_WINDOW_STATE;
     event.state.maximized = maximized;
     event.state.minimized = minimized;
+    event.state.fullscreen = fullscreen;
     pwindow->conn->dispatch(pwindow, &event,
                             pwindow->conn->dispatch_user_data);
 }
@@ -664,18 +668,28 @@ static void send_root_message(fdk_platform_window *pwindow, Atom type,
  * (a list of state atoms). Returns -1 when the property is absent or
  * unreadable (not maximized as far as anyone can tell). */
 int fdk_x11_window_net_state_maximized(fdk_platform_window *pwindow) {
+    return fdk__x11_net_state(pwindow, 0);
+}
+
+int fdk__x11_net_state_fullscreen(fdk_platform_window *pwindow) {
+    return fdk__x11_net_state(pwindow, 1);
+}
+
+/* Shared _NET_WM_STATE reader: `what` 0 = the BOTH-axes maximized
+ * question, 1 = the FULLSCREEN question. One property read answers
+ * either. */
+int fdk__x11_net_state(fdk_platform_window *pwindow, int what) {
     Atom type = None;
     int format = 0;
     unsigned long nitems = 0, bytes_after = 0;
     unsigned char *prop = NULL;
-    int maximized = 0;
+    int vert = 0, horiz = 0, fullscreen = 0;
     if (XGetWindowProperty(pwindow->conn->display, pwindow->xwindow,
                            pwindow->conn->net_wm_state,
                            0, 64, False, XA_ATOM, &type, &format,
                            &nitems, &bytes_after, &prop) == Success &&
         type == XA_ATOM && format == 32) {
         Atom *atoms = (Atom *)prop;
-        int vert = 0, horiz = 0;
         for (unsigned long i = 0; i < nitems; i++) {
             if (atoms[i] == pwindow->conn->net_wm_state_maximized_vert) {
                 vert = 1;
@@ -683,15 +697,20 @@ int fdk_x11_window_net_state_maximized(fdk_platform_window *pwindow) {
             if (atoms[i] == pwindow->conn->net_wm_state_maximized_horiz) {
                 horiz = 1;
             }
+            if (atoms[i] == pwindow->conn->net_wm_state_fullscreen) {
+                fullscreen = 1;
+            }
         }
-        /* "Maximized" means BOTH axes — VERT alone is a half-maximize
-         * (drag-to-edge snap), which FDK does not model as maximized. */
-        maximized = (vert && horiz) ? 1 : 0;
     }
     if (prop != NULL) {
         XFree(prop);
     }
-    return maximized;
+    if (what == 1) {
+        return fullscreen;
+    }
+    /* "Maximized" means BOTH axes — VERT alone is a half-maximize
+     * (drag-to-edge snap), which FDK does not model as maximized. */
+    return (vert && horiz) ? 1 : 0;
 }
 
 /* Reads WM_STATE's first CARD32 (NormalState=1 / IconicState=3) —
@@ -792,7 +811,8 @@ fdk_result fdk_x11_window_set_maximized(fdk_platform_window *pwindow,
                           (unsigned int)pwindow->saved_h);
     }
     XFlush(dpy);
-    fdk_x11_window_update_state(pwindow, want, pwindow->minimized);
+    fdk_x11_window_update_state(pwindow, want, pwindow->minimized,
+                               pwindow->fullscreen);
     return FDK_OK;
 }
 
@@ -833,7 +853,8 @@ fdk_result fdk_x11_window_set_minimized(fdk_platform_window *pwindow,
     /* Optimistic flip under a WM (WM_STATE's PropertyNotify will
      * agree — no second event — or correct us); the actual outcome
      * under bare X. */
-    fdk_x11_window_update_state(pwindow, pwindow->maximized, want);
+    fdk_x11_window_update_state(pwindow, pwindow->maximized, want,
+                               pwindow->fullscreen);
     return FDK_OK;
 }
 
@@ -1050,4 +1071,62 @@ void fdk_x11_cursor_shutdown(fdk_platform_connection *conn) {
             conn->resize_cursors[i] = None;
         }
     }
+}
+
+
+fdk_result fdk_x11_window_set_fullscreen(fdk_platform_window *pwindow,
+                                         bool fullscreen) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    int want = fullscreen ? 1 : 0;
+    if (want == pwindow->fullscreen) {
+        return FDK_OK; /* idempotent request */
+    }
+    Display *dpy = pwindow->conn->display;
+    if (pwindow->conn->ewmh_wm) {
+        /* The EWMH WM owns the outcome: the client-message request
+         * (ADD/REMOVE _NET_WM_STATE_FULLSCREEN), confirmation via the
+         * property rewrite -> PropertyNotify -> update_state. */
+        send_root_message(pwindow, pwindow->conn->net_wm_state,
+                          want ? 1L : 0L,
+                          (long)pwindow->conn->net_wm_state_fullscreen,
+                          0L, 1L);
+        return FDK_OK;
+    }
+    /* Bare X: FDK is the WM — the maximize fallback's geometry
+     * discipline (save, fill, restore). */
+    if (want) {
+        Window child = 0;
+        int x = 0, y = 0;
+        if (!XTranslateCoordinates(dpy, pwindow->xwindow,
+                                   pwindow->conn->root, 0, 0, &x, &y,
+                                   &child)) {
+            return FDK_ERR_PLATFORM_INIT;
+        }
+        if (!pwindow->has_saved) {
+            pwindow->saved_x = x;
+            pwindow->saved_y = y;
+            pwindow->saved_w = pwindow->last_size.width;
+            pwindow->saved_h = pwindow->last_size.height;
+            pwindow->has_saved = 1;
+        }
+        XMoveResizeWindow(dpy, pwindow->xwindow, 0, 0,
+                          (unsigned int)DisplayWidth(dpy,
+                                                     pwindow->conn->screen),
+                          (unsigned int)DisplayHeight(
+                              dpy, pwindow->conn->screen));
+    } else {
+        if (!pwindow->has_saved) {
+            return FDK_OK; /* nothing to restore to */
+        }
+        XMoveResizeWindow(dpy, pwindow->xwindow,
+                          pwindow->saved_x, pwindow->saved_y,
+                          (unsigned int)pwindow->saved_w,
+                          (unsigned int)pwindow->saved_h);
+    }
+    XFlush(dpy);
+    fdk_x11_window_update_state(pwindow, pwindow->maximized,
+                               pwindow->minimized, want);
+    return FDK_OK;
 }

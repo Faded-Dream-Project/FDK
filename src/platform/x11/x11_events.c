@@ -311,7 +311,8 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                 fdk_x11_window_update_state(
                     pwindow,
                     fdk_x11_window_net_state_maximized(pwindow),
-                    pwindow->minimized);
+                    pwindow->minimized,
+                    fdk__x11_net_state_fullscreen(pwindow));
                 return 0; /* the FDK state event (if any) was already
                              dispatched by the helper */
             }
@@ -320,7 +321,8 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                 if (iconic >= 0) {
                     fdk_x11_window_update_state(pwindow,
                                                 pwindow->maximized,
-                                                iconic);
+                                                iconic,
+                                                pwindow->fullscreen);
                 }
                 return 0;
             }

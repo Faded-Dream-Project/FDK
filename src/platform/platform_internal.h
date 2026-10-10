@@ -230,6 +230,11 @@ typedef struct fdk_platform_ops {
      * saved for restore) and dispatches the state event. Wayland:
      * xdg_toplevel.set_maximized/unset; state arrives via configure.
      * NULL = backend cannot maximize at all. */
+    /* 1.4.10: the fullscreen request pair (one op, bool — the
+     * maximize pattern). State truth flows back through
+     * FDK_EVENT_WINDOW_STATE exactly like maximized. */
+    fdk_result (*window_set_fullscreen)(fdk_platform_window *pwindow,
+                                        bool fullscreen);
     fdk_result (*window_set_maximized)(fdk_platform_window *pwindow,
                                        bool maximized);
 

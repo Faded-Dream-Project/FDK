@@ -9,9 +9,9 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.9** (the image
-milestone: the PNG codec, the Picture widget, the clipboard's
-image surface), by a full in-depth code review — every claim below was
+Last audited: 2026-10-10, at milestone **1.4.10** (fullscreen on
+both backends — the window-state surface closed), by a full
+in-depth code review — every claim below was
 re-verified against the tree, not copied from docs. THE AUDIT'S
 OWN FIRST CATCH: the ledger's "themed tooltips" candidate was
 stale (the 1.3.2 tooltip has been fully themed since birth —
@@ -20,13 +20,13 @@ truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.9** (the PNG codec + the Picture
-  widget + the clipboard image surface; 1.4.8 shipped the TextView
-  multi-line editor)
+- **HEAD:** milestone **1.4.10** (fullscreen both backends — the
+  window-state surface closed; 1.4.9 shipped the PNG codec + the
+  Picture widget + the clipboard image surface)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **595 exported symbols**, `make verify-exports` OK in
+- **Public API:** **598 exported symbols**, `make verify-exports` OK in
   debug AND release
 - **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
   suites, the eight 1.4.8 textview groups, and the 1.4.9 png/
@@ -104,6 +104,10 @@ sidebar rhythm).
 - Clipboard: text + URI formats, **PRIMARY selection** (1.3.4)
 - DnD: both directions (X11 + Wayland), `fdk_drag_begin`
 - Focus traversal, double/triple-click, shift-click range select
+- **Window states**: maximize/minimize/restore (Phase 8) +
+  **FULLSCREEN (1.4.10)** on both backends — EWMH client messages
+  with the bare-X fallback; xdg_toplevel requests with the
+  configure states array as truth
 - **HiDPI on Wayland: SHIPPED** — fractional-scale-v1 listener,
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
@@ -148,11 +152,9 @@ application still cannot build on FDK today:
 1. **Label markup** — rich spans (bold/italic/color, maybe size)
    in labels/buttons/tooltips: a tiny attribute-run layer over
    the shaping engine, no HTML/XML parser.
-2. **Window state surfaces** — fullscreen/maximize/minimize
-   requests + state queries on both backends (EWMH + xdg_toplevel).
-3. **IME completion surface** — LATER by the no-bus policy until a
+2. **IME completion surface** — LATER by the no-bus policy until a
    protocol joins third_party/wayland-protocols
-4. **INCR transfers** — the X11 clipboard's 4 MiB atomic cap
+3. **INCR transfers** — the X11 clipboard's 4 MiB atomic cap
    lifter (screenshots from other tools may exceed it)
 
 ### LATER (real, not next)

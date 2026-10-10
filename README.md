@@ -391,6 +391,14 @@ Wayland (the data-device pipe), with text and image replacing each
 other like any real clipboard. Run `examples/04_widgets.c` — the
 "1.4.9 — picture" frame shows the logo under all four fits.
 
+1.4.10 closes the window-state surface: FULLSCREEN joins
+maximize/minimize/restore on both backends —
+fdk_window_fullscreen/unfullscreen/is_fullscreen, the EWMH client
+message under a real WM (the bare-X geometry fallback when nobody
+is listening), xdg_toplevel requests on Wayland with the
+compositor's configure as the truth, and FDK_EVENT_WINDOW_STATE
+carrying all three flags.
+
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session
 frame with an expander and a draggable splitter, the 1.4.3 row

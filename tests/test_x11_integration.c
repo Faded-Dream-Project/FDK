@@ -2442,6 +2442,7 @@ static void test_decorations_gui(void) {
 static int state_gui_events = 0;
 static int state_gui_last_max = -1;
 static int state_gui_last_min = -1;
+static int state_gui_last_fs = -1; /* 1.4.10 */
 
 static void state_window_callback(fdk_window *window,
                                   const fdk_event_data *event,
@@ -2452,6 +2453,7 @@ static void state_window_callback(fdk_window *window,
         state_gui_events++;
         state_gui_last_max = event->state.maximized;
         state_gui_last_min = event->state.minimized;
+        state_gui_last_fs = event->state.fullscreen;
     }
 }
 
@@ -2540,12 +2542,56 @@ static void test_window_state_gui(void) {
         assert(wa.map_state == IsViewable);
     }
 
+    /* Fullscreen (1.4.10): fills the screen like maximize but is
+     * its OWN state; unfullscreen restores the remembered geometry.
+     * The saved geometry comes from the last restore (300x200 at
+     * 0,0 — the fullscreen fallback only saves when nothing was
+     * saved; here the maximize dance above left has_saved set with
+     * the 300x200 geometry, which is exactly what unfullscreen
+     * should land on). */
+    assert(!fdk_window_is_fullscreen(win));
+    int evfs = state_gui_events;
+    assert(fdk_ok(fdk_window_fullscreen(win)));
+    assert(fdk_window_is_fullscreen(win));
+    assert(state_gui_events == evfs + 1);
+    assert(state_gui_last_fs == 1);
+    assert(!fdk_window_is_maximized(win)); /* its own state */
+    (void)fdk_pump_events(ctx, 200);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
+                            &w, &h, &bw, &depth));
+        assert(px == 0 && py == 0);
+        assert((int)w == DisplayWidth(rb_dpy, DefaultScreen(rb_dpy)));
+        assert((int)h == DisplayHeight(rb_dpy, DefaultScreen(rb_dpy)));
+    }
+    /* Idempotent. */
+    assert(fdk_ok(fdk_window_fullscreen(win)));
+    assert(state_gui_events == evfs + 1);
+    /* Unfullscreen: back to the saved geometry + event. */
+    assert(fdk_ok(fdk_window_unfullscreen(win)));
+    assert(!fdk_window_is_fullscreen(win));
+    assert(state_gui_events == evfs + 2);
+    assert(state_gui_last_fs == 0);
+    (void)fdk_pump_events(ctx, 200);
+    {
+        Window root_ret = 0;
+        int px = 0, py = 0;
+        unsigned int bw = 0, depth = 0, w = 0, h = 0;
+        assert(XGetGeometry(rb_dpy, (Window)xid, &root_ret, &px, &py,
+                            &w, &h, &bw, &depth));
+        assert(px == 0 && py == 0 && w == 300 && h == 200);
+    }
+
     XCloseDisplay(rb_dpy);
     fdk_window_destroy(win);
     fdk_shutdown(ctx);
     printf("[ok] X11 window state (bare X): maximize fills the screen "
            "and remembers geometry, unmaximize restores, minimize "
-           "unmaps, restore remaps, every flip delivers exactly one "
+           "unmaps, restore remaps, FULLSCREEN fills as its own state "
+           "and unfullscreen restores, every flip delivers exactly one "
            "FDK_EVENT_WINDOW_STATE\n");
 }
 

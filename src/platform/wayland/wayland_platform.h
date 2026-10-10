@@ -585,6 +585,8 @@ void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
  * contract of each): */
 fdk_result fdk_wayland_window_set_wm_decorations(fdk_platform_window *pwindow,
                                                  bool on);
+fdk_result fdk_wayland_window_set_fullscreen(
+    fdk_platform_window *pwindow, bool fullscreen);
 fdk_result fdk_wayland_window_set_maximized(fdk_platform_window *pwindow,
                                             bool maximized);
 fdk_result fdk_wayland_window_set_minimized(fdk_platform_window *pwindow,
@@ -615,7 +617,8 @@ void fdk_wayland_cursor_teardown(fdk_platform_connection *conn);
 int fdk_wayland_release_queue_dispatch(fdk_platform_connection *conn);
 
 void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
-                                     int maximized, int minimized);
+                                     int maximized, int minimized,
+                                     int fullscreen);
 
 /* Software rendering (fdk_surface machinery) — see the render_slots
  * comment in struct fdk_platform_window above for the recycling

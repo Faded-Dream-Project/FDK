@@ -18,6 +18,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_move_to = fdk_x11_window_move_to,
     .window_move_resize_to = fdk_x11_window_move_resize_to,
     .window_set_maximized = fdk_x11_window_set_maximized,
+    .window_set_fullscreen = fdk_x11_window_set_fullscreen,
     .window_set_minimized = fdk_x11_window_set_minimized,
     .window_begin_move = fdk_x11_window_begin_move,
     .window_begin_resize = fdk_x11_window_begin_resize,

@@ -181,6 +181,7 @@ struct fdk_window {
      * these caches, mirroring how last_size mirrors CONFIGURE). */
     bool maximized;
     bool minimized;
+    bool fullscreen; /* 1.4.10 */
 
     /* Size limits last handed to fdk_window_set_size_limits — the
      * hints go to the platform, but FDK's own resize-edge drag ALSO

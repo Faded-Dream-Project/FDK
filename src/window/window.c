@@ -1003,6 +1003,26 @@ fdk_result fdk_window_maximize(fdk_window *window) {
     return window->ops->window_set_maximized(window->pwindow, true);
 }
 
+fdk_result fdk_window_fullscreen(fdk_window *window) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->window_set_fullscreen == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->window_set_fullscreen(window->pwindow, true);
+}
+
+fdk_result fdk_window_unfullscreen(fdk_window *window) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->window_set_fullscreen == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->window_set_fullscreen(window->pwindow, false);
+}
+
 fdk_result fdk_window_unmaximize(fdk_window *window) {
     if (window == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
@@ -1035,6 +1055,10 @@ fdk_result fdk_window_restore(fdk_window *window) {
 
 bool fdk_window_is_maximized(const fdk_window *window) {
     return window != NULL && window->maximized;
+}
+
+bool fdk_window_is_fullscreen(const fdk_window *window) {
+    return window != NULL && window->fullscreen;
 }
 
 bool fdk_window_is_minimized(const fdk_window *window) {
@@ -1479,6 +1503,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         bool was_min = window->minimized;
         window->maximized = event->state.maximized != 0;
         window->minimized = event->state.minimized != 0;
+        window->fullscreen = event->state.fullscreen != 0;
         if ((was_max != window->maximized ||
              was_min != window->minimized) &&
             window->root != NULL) {

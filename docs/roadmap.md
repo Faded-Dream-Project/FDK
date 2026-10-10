@@ -4558,8 +4558,29 @@ GUI rigs re-screened to 2080); sway 12/12; interop + both tooltip
 rigs + compositor-death PASS (the interop rig's link line gained
 -lz); verify-exports 595 in both configs.
 
+The 1.4.10 list closed the window-STATE surface: FULLSCREEN on
+both backends (fdk_window_fullscreen/unfullscreen/is_fullscreen)
+— X11 rides the EWMH _NET_WM_STATE_FULLSCREEN client message with
+the bare-X geometry fallback (the maximize world-split); Wayland
+rides xdg_toplevel_set_fullscreen with the configure's states
+array as truth. FDK_EVENT_WINDOW_STATE grew state.fullscreen; the
+shared _NET_WM_STATE reader answers both the maximized and the
+fullscreen question in one property read. A real bug the sway
+suite caught: the Wayland configure handler PRE-WROTE the flag
+before the change-detecting helper — a fullscreen-ONLY flip
+(UnSET after SET, nothing else moving) went tautological and
+never dispatched the event; the helper owns the write now. 598
+exported symbols.
+
+Battery at 1.4.10: debug + release zero warnings; headless
+all-pass; X11 integration 147 [ok] (fullscreen as its own state:
+fills the screen, restores the remembered geometry, one event per
+flip); the Wayland suite PASS under sway (set honored -> FULLSCREEN
+configure -> event; unset -> flag cleared); X11 examples 12/12;
+sway 12/12; interop + both tooltip rigs + compositor-death PASS;
+verify-exports 598 in both configs.
+
 The NEXT list (value order): label MARKUP (bold/italic/color
 spans over the shaping engine — no XML, an attribute-run layer);
-window STATE surfaces (fullscreen/maximize/minimize on EWMH +
-xdg_toplevel); the IME completion surface (LATER by the no-bus
-policy) and INCR transfers (the clipboard's 4 MiB cap lifter).
+the IME completion surface (LATER by the no-bus policy) and INCR
+transfers (the clipboard's 4 MiB cap lifter).

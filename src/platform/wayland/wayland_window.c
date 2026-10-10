@@ -331,12 +331,18 @@ static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
             activated = 1;
         }
     }
-    pwindow->fullscreen = fullscreen;
+    /* 1.4.10: fullscreen flows INTO update_state as a parameter —
+     * the handler must NOT pre-write pwindow->fullscreen, or the
+     * helper's change detection goes tautological for fullscreen-
+     * only flips (found live by the sway suite: the unset configure
+     * arrived, the flag never cleared, no event fired). update_state
+     * owns the write; the resize-gate reads below run AFTER it. */
     int minimized = pwindow->minimized;
     if (activated && minimized) {
         minimized = 0;
     }
-    fdk_wayland_window_update_state(pwindow, maximized, minimized);
+    fdk_wayland_window_update_state(pwindow, maximized, minimized,
+                                    fullscreen);
 }
 
 static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
@@ -1848,17 +1854,22 @@ void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
  * compositor's authoritative states) and set_minimized (the
  * request-optimistic flip). */
 void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
-                                     int maximized, int minimized) {
-    if (pwindow->maximized == maximized && pwindow->minimized == minimized) {
+                                     int maximized, int minimized,
+                                     int fullscreen) {
+    if (pwindow->maximized == maximized &&
+        pwindow->minimized == minimized &&
+        pwindow->fullscreen == fullscreen) {
         return;
     }
     pwindow->maximized = maximized;
     pwindow->minimized = minimized;
+    pwindow->fullscreen = fullscreen;
     fdk_event_data event;
     memset(&event, 0, sizeof event);
     event.type = FDK_EVENT_WINDOW_STATE;
     event.state.maximized = maximized;
     event.state.minimized = minimized;
+    event.state.fullscreen = fullscreen;
     pwindow->conn->dispatch(pwindow, &event, pwindow->conn->dispatch_user_data);
 }
 
@@ -1952,6 +1963,26 @@ fdk_result fdk_wayland_window_set_maximized(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
+fdk_result fdk_wayland_window_set_fullscreen(
+    fdk_platform_window *pwindow, bool fullscreen) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* Popups: no toplevel (see set_maximized) — refuse honestly. */
+    if (pwindow->xdg_toplevel == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (fullscreen) {
+        xdg_toplevel_set_fullscreen(pwindow->xdg_toplevel, NULL);
+    } else {
+        xdg_toplevel_unset_fullscreen(pwindow->xdg_toplevel);
+    }
+    /* No optimistic flip: the compositor answers with a configure
+     * carrying FULLSCREEN in states (or not); update_state runs from
+     * xdg_toplevel_configure either way (the set_maximized rule). */
+    return FDK_OK;
+}
+
 fdk_result fdk_wayland_window_set_minimized(fdk_platform_window *pwindow,
                                             bool minimized) {
     if (pwindow == NULL) {
@@ -1970,7 +2001,8 @@ fdk_result fdk_wayland_window_set_minimized(fdk_platform_window *pwindow,
     xdg_toplevel_set_minimized(pwindow->xdg_toplevel);
     /* Fire-and-forget request: no acknowledgement exists, so mark
      * optimistic (cleared on the next activated configure). */
-    fdk_wayland_window_update_state(pwindow, pwindow->maximized, 1);
+    fdk_wayland_window_update_state(pwindow, pwindow->maximized,
+                                    1, pwindow->fullscreen);
     return FDK_OK;
 }
 

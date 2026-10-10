@@ -19,6 +19,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .window_set_size_limits = fdk_wayland_window_set_size_limits,
     .window_set_wm_decorations = fdk_wayland_window_set_wm_decorations,
     .window_set_maximized = fdk_wayland_window_set_maximized,
+    .window_set_fullscreen = fdk_wayland_window_set_fullscreen,
     .window_set_minimized = fdk_wayland_window_set_minimized,
     .window_begin_move = fdk_wayland_window_begin_move,
     .window_begin_resize = fdk_wayland_window_begin_resize,

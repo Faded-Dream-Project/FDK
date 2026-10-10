@@ -521,6 +521,42 @@ int main(void) {
     printf("[ok] minimize: request sent, optimistic state flagged, "
            "restore honestly UNSUPPORTED\n");
 
+    /* ---- Fullscreen (1.4.10): request + configure-driven state ----
+     *
+     * The same three-world honesty as maximize: (a) compositor
+     * honors it -> configure carries FULLSCREEN -> is_fullscreen
+     * flips + state event; (b) declines (floating window under sway)
+     * -> no fake flag, no invented event. Both are protocol-correct;
+     * the rig's WAYLAND_DEBUG count proves the request went out. */
+    {
+        int before_fs = g_state_events;
+        assert(fdk_ok(fdk_window_fullscreen(win)));
+        for (int i = 0; i < 40; i++) {
+            (void)fdk_pump_events(ctx, 50);
+            if (fdk_window_is_fullscreen(win)) {
+                break;
+            }
+        }
+        if (fdk_window_is_fullscreen(win)) {
+            assert(g_state_events > before_fs);
+            printf("[ok] fullscreen: xdg configure reported FULLSCREEN "
+                   "state, FDK_EVENT_WINDOW_STATE delivered\n");
+        } else {
+            assert(g_state_events == before_fs);
+            printf("[ok] fullscreen request sent; compositor declined "
+                   "(FDK reports the truth, no invented state)\n");
+        }
+        /* Leave the world as we found it. */
+        assert(fdk_ok(fdk_window_unfullscreen(win)));
+        for (int i = 0; i < 40; i++) {
+            (void)fdk_pump_events(ctx, 50);
+            if (!fdk_window_is_fullscreen(win)) {
+                break;
+            }
+        }
+        assert(!fdk_window_is_fullscreen(win));
+    }
+
     /* ---- Layout reflow on resize (Phase 5 completion item) ----
      *
      * The Phase 5 roadmap entry recorded a Wayland-side reflow test

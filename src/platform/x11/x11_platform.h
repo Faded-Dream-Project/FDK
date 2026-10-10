@@ -66,6 +66,7 @@ struct fdk_platform_connection {
     Atom net_wm_state;
     Atom net_wm_state_maximized_vert;
     Atom net_wm_state_maximized_horiz;
+    Atom net_wm_state_fullscreen; /* 1.4.10 */
     Atom net_wm_moveresize;
     Atom wm_state;         /* ICCCM WM_STATE (iconic/normal tracking) */
     Atom wm_change_state;  /* ICCCM iconify request message type      */
@@ -267,6 +268,7 @@ struct fdk_platform_window {
      * pre-maximize geometry for the bare-X fallback's restore. */
     int maximized;
     int minimized;
+    int fullscreen; /* 1.4.10: tracked via _NET_WM_STATE property */
     int has_saved;
     fdk_i32 saved_x, saved_y, saved_w, saved_h;
 
@@ -388,10 +390,16 @@ void fdk_x11_cursor_shutdown(fdk_platform_connection *conn);
 /* Compare-and-flip + FDK_EVENT_WINDOW_STATE dispatch (no-op when the
  * state didn't change). */
 void fdk_x11_window_update_state(fdk_platform_window *pwindow,
-                                 int maximized, int minimized);
+                                 int maximized, int minimized,
+                                 int fullscreen);
 /* Window's _NET_WM_STATE property -> maximized (both axes), 0 when
  * absent/unreadable. */
 int fdk_x11_window_net_state_maximized(fdk_platform_window *pwindow);
+int fdk__x11_net_state_fullscreen(fdk_platform_window *pwindow);
+/* Shared reader: what=0 both-axes maximized, what=1 fullscreen. */
+int fdk__x11_net_state(fdk_platform_window *pwindow, int what);
+fdk_result fdk_x11_window_set_fullscreen(fdk_platform_window *pwindow,
+                                         bool fullscreen);
 /* Window's WM_STATE property -> iconic flag, -1 when unreadable. */
 int fdk_x11_window_wm_state_iconic(fdk_platform_window *pwindow);
 void fdk_x11_window_set_size_limits(fdk_platform_window *pwindow,

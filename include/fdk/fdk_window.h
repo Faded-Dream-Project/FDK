@@ -185,6 +185,27 @@ void fdk_window_set_size_limits(fdk_window *window, fdk_size min_size, fdk_size 
  * Returns FDK_ERR_UNSUPPORTED when the backend cannot maximize at
  * all; FDK_OK means the request was sent/applied — watch
  * FDK_EVENT_WINDOW_STATE for the confirmed state. */
+/* Asks for the window to go FULLSCREEN — the whole screen, every
+ * edge, no WM furniture (the presentation/video/kiosk state).
+ * On X11 this is the EWMH _NET_WM_STATE_FULLSCREEN client message
+ * under a conforming WM (with the bare-X geometry fallback when
+ * nobody is listening — the same world-split maximize uses); on
+ * Wayland it is xdg_toplevel.set_fullscreen. State confirmation
+ * arrives as FDK_EVENT_WINDOW_STATE; fdk_window_is_fullscreen()
+ * reads FDK's last-known truth. Returns FDK_ERR_UNSUPPORTED when
+ * the backend cannot (e.g. a Wayland popup with no toplevel).
+ * (1.4.10) */
+fdk_result fdk_window_fullscreen(fdk_window *window);
+
+/* Returns a fullscreen window to its former state. The compositor
+ * restores the remembered geometry (the pre-fullscreen size is the
+ * WM's business, not FDK's guess). */
+fdk_result fdk_window_unfullscreen(fdk_window *window);
+
+/* FDK's last-known fullscreen state (updated by the platform's
+ * state events, not by request optimism). */
+bool fdk_window_is_fullscreen(const fdk_window *window);
+
 fdk_result fdk_window_maximize(fdk_window *window);
 
 /* Returns a maximized window to its remembered (or compositor-
