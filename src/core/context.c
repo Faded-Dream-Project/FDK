@@ -404,6 +404,14 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->ops = ops;
     ctx->conn = conn;
 
+    /* The theme-settings engine (1.4.14): bind this application's
+     * identity (the per-app <app_id>.prefs override leg) and arm the
+     * inotify watch that makes `fdk-theme set` / `fdk-set theme set`
+     * re-theme THIS process while it runs. Bridged through the
+     * window layer (window_internal.h) — core never includes theme
+     * internals. */
+    fdk__window_theme_settings_init(ctx->app_id);
+
     FDK_INFO("initialized (backend=%s, app_id=%s)",
              ops->name ? ops->name : "?",
              ctx->app_id ? ctx->app_id : "(none)");
@@ -546,8 +554,24 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             }
         }
 
-        struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
-        int pr = poll(&pfd, 1, wait_ms);
+        struct pollfd pfds[2];
+        pfds[0].fd = fd;
+        pfds[0].events = POLLIN;
+        pfds[0].revents = 0;
+        pfds[1].fd = -1;
+        pfds[1].events = POLLIN;
+        pfds[1].revents = 0;
+        int nfds = 1;
+        /* The theme-settings watch (1.4.14): one more fd in the same
+         * wait. poll() on both; the settings fd's readable path runs
+         * BELOW the backend's, so a settings change coalesces with
+         * whatever input also arrived. -1 means no watch (tools,
+         * headless tests, apps that own their theme). */
+        pfds[1].fd = fdk__window_theme_watch_fd();
+        if (pfds[1].fd >= 0) {
+            nfds = 2;
+        }
+        int pr = poll(pfds, (nfds_t)nfds, wait_ms);
         if (pr < 0) {
             if (errno_is_eintr()) {
                 /* Signal arrived mid-poll; nothing dispatched, caller
@@ -560,12 +584,24 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             return FDK_ERR_UNKNOWN;
         }
 
-        if (pfd.revents & (POLLERR | POLLNVAL)) {
+        if (pfds[0].revents & (POLLERR | POLLNVAL)) {
             FDK_ERROR("poll() reported fd error condition");
             return FDK_ERR_PLATFORM_INIT;
         }
 
-        if ((pfd.revents & (POLLIN | POLLHUP)) != 0) {
+        if (nfds == 2 && (pfds[1].revents & (POLLIN | POLLERR)) != 0) {
+            /* A settings file changed: re-theme (every live tree was
+             * invalidated) and repaint this context's damaged windows
+             * right here — fdk_run() applications have no paint loop,
+             * and a re-theme waiting for the next input event would
+             * not be live. Counts as dispatched activity. */
+            if (fdk__window_theme_watch_pump(ctx) != 0) {
+                fdk__window_flush_geo_repaints(ctx);
+                return 1;
+            }
+        }
+
+        if ((pfds[0].revents & (POLLIN | POLLHUP)) != 0) {
             int dispatched = ctx->ops->dispatch_pending(ctx->conn);
             if (dispatched < 0) {
                 /* Backend returned a negative fdk_result cast to int —
@@ -682,6 +718,11 @@ void fdk_shutdown(fdk_context *ctx) {
     /* Tooltip module state (its popup died with the window sweep;
      * this clears the font/text copies). */
     fdk__tooltip_shutdown();
+
+    /* The theme-settings watch (1.4.14): stop watching the settings
+     * files — there is no pump left to drain them. The installed
+     * theme (if any) stays: theme state is process-wide. */
+    fdk__window_theme_settings_shutdown();
 
     /* Leaked timers are freed WITHOUT firing (shutdown is teardown,
     * not delivery — the same policy the leaked-window sweep uses). */

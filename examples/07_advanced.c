@@ -233,14 +233,21 @@ static void layout_all(fdk_i32 w, fdk_i32 h) {
     fdk_i32 bar_h = 26;
     fdk_i32 tool_h = 38;
     fdk_i32 status_h = 26;
-    fdk_widget_arrange(g_bar, (fdk_rect){0, 0, w, bar_h});
-    fdk_widget_arrange(g_toolbar, (fdk_rect){0, bar_h, w, tool_h});
-    fdk_i32 nb_h = h - bar_h - tool_h - status_h;
+    /* The FDK title band (1.4.14) owns the top strip: the whole
+     * stack starts below it when the window is decorated. */
+    fdk_i32 top = (app.window != NULL &&
+                   fdk_window_get_decorated(app.window))
+                      ? fdk_theme_get_metric(NULL,
+                                             FDK_TM_TITLE_BAR_HEIGHT)
+                      : 0;
+    fdk_widget_arrange(g_bar, (fdk_rect){0, top, w, bar_h});
+    fdk_widget_arrange(g_toolbar, (fdk_rect){0, top + bar_h, w, tool_h});
+    fdk_i32 nb_h = h - top - bar_h - tool_h - status_h;
     if (nb_h < 40) {
         nb_h = 40;
     }
     fdk_widget_arrange(g_notebook,
-                       (fdk_rect){0, bar_h + tool_h, w, nb_h});
+                       (fdk_rect){0, top + bar_h + tool_h, w, nb_h});
     fdk_widget_arrange(status, (fdk_rect){8, h - status_h + 2,
                                           w - 16, status_h - 4});
 }
@@ -343,6 +350,9 @@ int main(void) {
         return 1;
     }
     fdk_window_set_event_callback(app.window, window_event, NULL);
+    /* 1.4.14: the FDK title bar — every example wears the toolkit's
+     * own drawn chrome (themed band + close + FDK resize). */
+    (void)fdk_window_set_decorated(app.window, true);
     fdk_widget *root = NULL;
     assert(fdk_ok(fdk_window_get_root(app.window, &root)));
     /* F1 -> About (the help-key convention). */

@@ -1,14 +1,16 @@
 # The FDK Command-Line Tools
 
-FDK's settings face for shells and scripts: `fdk-theme` and
-`fdk-prefs` (1.4.13). Every desktop toolkit ends up needing this —
-GTK has `gsettings`, Qt has its platform-theme configuration — for
-one reason: **most applications never ship a settings UI**, and a
-desktop where changing the theme requires each application to have
-built a theme picker is a desktop that cannot change its theme.
-FDK's answer is two small tools over one global settings file.
+FDK's settings face for shells and scripts: `fdk-theme`,
+`fdk-prefs` (1.4.13), and `fdk-set` (1.4.14). Every desktop toolkit
+ends up needing this — GTK has `gsettings`, Qt has its
+platform-theme configuration — for one reason: **most applications
+never ship a settings UI**, and a desktop where changing the theme
+requires each application to have built a theme picker is a desktop
+that cannot change its theme. FDK's answer is three small tools over
+one global settings file plus the per-application stores the prefs
+system already owns.
 
-Both tools are ordinary applications on the public API — built by
+All three are ordinary applications on the public API — built by
 `make` (or `make tools`), installed by `make install` into
 `$(PREFIX)/bin`, and doubles as the reference consumer of the
 prefs and theme-discovery surfaces.
@@ -47,26 +49,53 @@ the first theme resolution** (usually the first paint):
 
 ```
 $FDK_THEME                   (per-process override, like GTK_THEME)
+  else theme.name in the application's own store (1.4.14)
   else theme.name in the fdk store
   else the built-in "FDK Modern"
 ```
 
 An application that calls `fdk_theme_set_default()` before its
-first paint **owns the process's theme** — the global setting never
+first paint **owns the process's theme** — no settings source ever
 overrides an explicit choice. That is the same contract GTK gives:
 `GTK_THEME` beats the setting, an explicit gtk-theme-name set in
 code beats everything. The precedence rules live in
-`include/fdk/fdk_theme.h`; the boot code is `src/theme/theme.c`.
+`include/fdk/fdk_theme.h`; the engine is `src/theme/settings.c`.
 
 Failure is soft at every step, on purpose (the prefs resilience
 rule): a missing or corrupt settings file means "no preference",
 and a name that does not resolve on the search path logs one
-warning and stays on the built-in theme. **A themed launch must
+warning and stays on the current theme. **A themed launch must
 never be a failed launch.**
 
-Running applications do not live-reload the setting — new launches
-pick it up. (Live re-theming is what `fdk_theme_set_default()` is
-for, in an app that offers a picker.)
+### Live re-theming (1.4.14)
+
+Running applications **follow the settings files live**. While a
+display context exists, FDK watches the settings files' directories
+(inotify) and re-resolves whenever one changes: `fdk-theme set` and
+`fdk-set theme set` re-theme every running FDK application the
+moment they land — including applications driven by plain
+`fdk_run()` (the pump repaints their damaged windows itself).
+Applications that installed their own theme opted out and are never
+overridden; a settings directory that did not exist at application
+start cannot be watched (the setting applies at the next launch
+instead — the honest limitation).
+
+The developer's side of the contract is
+`fdk_theme_set_allowed_themes()`: an application whose brand is one
+theme (or a curated set) clamps every settings source above to the
+list — see `fdk_theme.h` for the exact semantics.
+
+### The per-application store (1.4.14)
+
+The second and third resolution legs live in the application's OWN
+prefs store — the `<app_id>.prefs` file under the same XDG
+resolution, where `app_id` is the identity passed to `fdk_init()`.
+That is the file `fdk-set theme set NAME --app APP` writes, and the
+reason one application can keep its own theme while the desktop's
+default changes. Note that under `$FDK_PREFS_FILE` (the explicit
+single-file override) every store resolves to that one file, so the
+per-app leg is a no-op there — the XDG layout is where per-app
+separation exists.
 
 ## Theme discovery — where themes live
 
@@ -133,13 +162,58 @@ matrix        /usr/local/share/fdk/themes/matrix.fdk
 
 $ fdk-theme set matrix
 theme set: Matrix (/usr/local/share/fdk/themes/matrix.fdk)
-new FDK applications will use it; running ones keep their current theme
+running FDK applications re-theme the moment this lands (they watch the settings file)
 
 $ fdk-theme get
 matrix
 
 $ FDK_THEME=daylight some-fdk-app &      # one launch, one theme
 ```
+
+## fdk-set (1.4.14)
+
+The per-application face: the same theme setting, scoped to one
+application instead of every FDK app on the desktop. Without
+`--app` it is `fdk-theme set` spelled differently (same file, same
+validation, same exit codes — the tools interoperate); with
+`--app <app_id>` it writes the application's OWN `<app_id>.prefs`
+store, which outranks the global setting for that application
+only:
+
+```
+fdk-set theme set "matrix"                    the global default
+fdk-set theme set "matrix" --app my.editor   one app's own theme
+fdk-set theme get [--app <app_id>] [--verbose]
+fdk-set theme reset [--app <app_id>]
+fdk-set theme list [--paths]
+```
+
+`--app` takes the application id passed to `fdk_init()` — the same
+identity that names its prefs file and its taskbar entry (the
+examples use `org.fdk.exampleNN`; an application's documentation is
+the place its id is stated). `get --app` walks the full precedence
+(env, the app's store, the global store) and `--verbose` names the
+leg that answered. `reset --app` removes only the override — the
+application falls back to the global setting, live in both
+directions.
+
+A desktop-shaped session:
+
+```
+$ fdk-theme set matrix                 # the desktop goes dark-green
+$ fdk-set theme set daylight --app org.fdk.mywriter
+theme set: Daylight (/usr/local/share/fdk/themes/daylight.fdk)
+org.fdk.mywriter re-themes the moment this lands (it watches its own settings file)
+
+$ fdk-set theme get --app org.fdk.mywriter --verbose
+daylight
+source: the application's settings (~/.config/org.fdk.mywriter.prefs) [app org.fdk.mywriter]
+
+$ fdk-set theme reset --app org.fdk.mywriter   # back to the desktop default
+```
+
+Exit codes match `fdk-theme`'s exactly (0 ok; 1 usage or unusable;
+2 not found; 3 could not save).
 
 ## fdk-prefs
 
@@ -168,7 +242,7 @@ cannot save.
 
 ## First run, permissions, and honest failures
 
-Both tools create the config directory when it does not exist
+All three tools create the config directory when it does not exist
 (`~/.config` on a minimal system) — that is TOOL policy, not
 library policy: `fdk_prefs_save()` deliberately never grows
 directory trees, and the tools deliberately never fail on first
@@ -186,7 +260,8 @@ name, fails loudly. Both postures are deliberate — see
 ## For packagers
 
 - `make install` lays out: headers + libs as before,
-  `$(PREFIX)/bin/fdk-theme`, `$(PREFIX)/bin/fdk-prefs`, and
+  `$(PREFIX)/bin/fdk-theme`, `$(PREFIX)/bin/fdk-prefs`,
+  `$(PREFIX)/bin/fdk-set`, and
   `$(PREFIX)/share/fdk/themes/*.fdk` (the shipped themes: the
   complete light `daylight` and the partial `matrix`).
 - All knobs (`PREFIX`, `BINDIR`, `DATADIR`, `LIBDIR`, `INCDIR`)

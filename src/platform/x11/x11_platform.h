@@ -491,6 +491,21 @@ fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
 unsigned char *fdk_x11_clipboard_get_image(
     fdk_platform_connection *conn, size_t *out_len);
 
+/* THE selection-read engine (1.4.14, x11_clipboard.c): convert
+ * `selection`/`target` onto `requestor`'s atom_fdk_selection
+ * property, wait the bounded notify, read atomic/multi-part/INCR
+ * (foreign requestors get PropertyChangeMask for the flight, their
+ * own mask restored after). The clipboard's gets pass the helper
+ * window; the XDND drop fetch (x11_dnd.c) passes the drop-target
+ * window — external file managers serve text/uri-list via INCR, the
+ * drop that used to vanish. Returns RAW bytes (fdk_alloc'd,
+ * *out_len and *out_type set) or NULL (refusal/timeout/malformation). */
+unsigned char *fdk__x11_read_selection(fdk_platform_connection *conn,
+                                       Window requestor, Atom selection,
+                                       Atom target, unsigned long timestamp,
+                                       int notify_wait_ms, Atom *out_type,
+                                       size_t *out_len);
+
 /* Drag and drop (x11_dnd.c). init/shutdown: connection lifetime
  * (called from x11_connection.c next to the clipboard's).
  * window_init: stamps XdndAware on a new window (x11_window.c calls

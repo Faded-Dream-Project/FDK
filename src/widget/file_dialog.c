@@ -92,17 +92,23 @@
 #include <time.h>
 #include <unistd.h>
 
-#define FD_PAD 12          /* outer padding                        */
-#define FD_GAP 8           /* vertical gap between rows            */
-#define FD_TOPBAR_H 34     /* Up + Home + toggle + filter row      */
-#define FD_STATUS_H 22     /* status line                          */
-#define FD_BTN_MIN_W 90    /* minimum button width                 */
-#define FD_BTN_PAD 32      /* button text padding (both sides)     */
-#define FD_PLACES_W 148    /* places sidebar width                 */
-#define FD_LIST_W 456      /* file list width                      */
-#define FD_LIST_H 300      /* list viewport height                 */
-#define FD_ROW_H 28        /* path bar / name row height           */
-#define FD_COMBO_W 170     /* filter combo width                   */
+/* Dialog geometry (1.4.14, the "small picker" retune): the 1.2.0
+ * values (636x472 with a 14px face) read as a toy on modern
+ * 1080p+ desktops — GTK's chooser opens ~30% larger. The retune:
+ * 864x~620, a 15px face, taller rows, a wider places sidebar, and
+ * breathing room in every gap. All sizes stay logical pixels (the
+ * HiDPI scale applies on top at paint time). */
+#define FD_PAD 16          /* outer padding                        */
+#define FD_GAP 10          /* vertical gap between rows            */
+#define FD_TOPBAR_H 40     /* Up + Home + toggle + filter row      */
+#define FD_STATUS_H 24     /* status line                          */
+#define FD_BTN_MIN_W 96    /* minimum button width                 */
+#define FD_BTN_PAD 36      /* button text padding (both sides)     */
+#define FD_PLACES_W 184    /* places sidebar width                 */
+#define FD_LIST_W 640      /* file list width                      */
+#define FD_LIST_H 420      /* list viewport height                 */
+#define FD_ROW_H 34        /* path bar / name row height           */
+#define FD_COMBO_W 200     /* filter combo width                   */
 #define FD_MAX_ENTRIES 8192 /* scan cap: pathological dirs degrade,
                                they do not OOM the dialog           */
 #define FD_MAX_PLACES 24   /* sidebar cap (mounts + media + mnt)    */
@@ -3244,8 +3250,11 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
      * through the live theme (1.4.0). */
 
     /* The dialog's font: the system default (dialogs are toolkit
-     * chrome; there is no options.font to borrow). */
-    d->font = fdk_font_load_system_default(14);
+     * chrome; there is no options.font to borrow). 15px since the
+     * 1.4.14 retune — the picker's text was the "too small" half of
+     * the maintainer's report, and 15px is the size the widget
+     * examples' UI chrome already reads best at. */
+    d->font = fdk_font_load_system_default(15);
     if (d->font == NULL) {
         r = FDK_ERR_PLATFORM;
         goto fail;

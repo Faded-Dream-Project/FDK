@@ -645,20 +645,27 @@ static uint64_t now_ms(void) {
     return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
 }
 
-/* Waits up to FDK_CLIP_WAIT_MS for the SelectionNotify answering our
- * convert of `sel`. Non-matching events are left in Xlib's queue
- * untouched (XCheckTypedWindowEvent removes only the match), so no
- * event is ever dispatched re-entrantly or lost. Returns 1 with
- * *out_notify filled on success, 0 on timeout. */
-static int wait_selection_notify(fdk_platform_connection *conn, sel_desc sel,
-                                 XEvent *out_notify) {
-    uint64_t deadline = now_ms() + FDK_CLIP_WAIT_MS;
+/* Waits up to FDK_CLIP_WAIT_MS for the SelectionNotify answering a
+ * convert of `selection` by `requestor` (1.4.14: parameterized — the
+ * clipboard's helper window and a DnD drop target share this). 
+ * Non-matching events are left in Xlib's queue untouched
+ * (XCheckTypedWindowEvent removes only the match), so no event is
+ * ever dispatched re-entrantly or lost. Returns 1 with *out_notify
+ * filled on success, 0 on timeout. `wait_ms` is the caller's bound:
+ * the clipboard's 250 (FDK_CLIP_WAIT_MS), the DnD drop fetch's 600
+ * (FDK_XDND_WAIT_MS — a file manager under load answers slower than
+ * toolkit-to-toolkit peers; a drop that vanishes because the source
+ * was busy for 300 ms is a real report). */
+static int wait_selection_notify_on(fdk_platform_connection *conn,
+                                     Window requestor, Atom selection,
+                                     int wait_ms, XEvent *out_notify) {
+    uint64_t deadline = now_ms() + (uint64_t)wait_ms;
     XFlush(conn->display);
     for (;;) {
         XEvent ev;
-        if (XCheckTypedWindowEvent(conn->display, conn->clip_helper,
+        if (XCheckTypedWindowEvent(conn->display, requestor,
                                    SelectionNotify, &ev)) {
-            if (ev.xselection.selection == sel.atom) {
+            if (ev.xselection.selection == selection) {
                 *out_notify = ev;
                 return 1;
             }
@@ -724,17 +731,18 @@ static char *utf8_from_property(Atom type, const unsigned char *data,
     return out;
 }
 
-/* Waits for one PropertyNotify (NewValue) on the helper's selection
- * property — the INCR read pump. Delete notifications are SKIPPED
- * (each chunk we read+delete generates one); foreign events are left
- * in Xlib's queue untouched. Returns 1 with *out filled, 0 on the
- * deadline. */
+/* Waits for one PropertyNotify (NewValue) on `requestor`'s selection
+ * property — the INCR read pump (1.4.14: parameterized requestor).
+ * Delete notifications are SKIPPED (each chunk we read+delete
+ * generates one); foreign events are left in Xlib's queue
+ * untouched. Returns 1 with *out filled, 0 on the deadline. */
 static int wait_property_new_value(fdk_platform_connection *conn,
-                                    uint64_t deadline, XEvent *out) {
+                                    Window requestor, uint64_t deadline,
+                                    XEvent *out) {
     XFlush(conn->display);
     for (;;) {
         XEvent ev;
-        if (XCheckTypedWindowEvent(conn->display, conn->clip_helper,
+        if (XCheckTypedWindowEvent(conn->display, requestor,
                                    PropertyNotify, &ev)) {
             if (ev.xproperty.atom == conn->atom_fdk_selection &&
                 ev.xproperty.state == PropertyNewValue) {
@@ -758,25 +766,45 @@ static int wait_property_new_value(fdk_platform_connection *conn,
     }
 }
 
-/* The INCR read loop (1.4.12): the seed property (type INCR, a 32-bit
- * byte estimate) is already consumed by the caller; chunks arrive as
- * NewValue notifications on the helper's selection property, each
- * read WITH delete (the delete is what tells the owner to send the
- * next chunk), until the zero-length terminator. Bounded by a
- * per-chunk deadline and a whole-flight deadline; the total is
- * bounded by FDK_CLIP_INCR_MAX_BYTES. Returns the concatenated bytes
- * (fdk_alloc'd, *out_len set) or NULL. */
+/* The INCR read loop (1.4.12; requestor-parameterized 1.4.14): the
+ * seed property (type INCR, a 32-bit byte estimate) is already
+ * consumed by the caller; chunks arrive as NewValue notifications on
+ * `requestor`'s selection property, each read WITH delete (the
+ * delete is what tells the owner to send the next chunk), until the
+ * zero-length terminator. Bounded by a per-chunk deadline and a
+ * whole-flight deadline; the total is bounded by
+ * FDK_CLIP_INCR_MAX_BYTES. Returns the concatenated bytes
+ * (fdk_alloc'd, *out_len set) or NULL.
+ *
+ * A FOREIGN requestor (a DnD drop target — anything but the
+ * clipboard helper) has not selected PropertyChangeMask; the flight
+ * adds it for the duration and restores the window's own mask
+ * afterwards (XGetWindowAttributes reports OUR selection — one
+ * display connection, one client). */
 static unsigned char *incr_read_all(fdk_platform_connection *conn,
+                                     Window requestor,
                                      unsigned long estimate,
                                      size_t *out_len) {
     *out_len = 0;
+    bool foreign = (requestor != conn->clip_helper);
+    long saved_mask = 0;
+    if (foreign) {
+        XWindowAttributes wa;
+        if (!XGetWindowAttributes(conn->display, requestor, &wa)) {
+            return NULL; /* dying window: not our problem to solve */
+        }
+        saved_mask = (long)wa.your_event_mask;
+        XSelectInput(conn->display, requestor,
+                     saved_mask | PropertyChangeMask);
+    }
+    unsigned char *result = NULL;
     size_t cap = (size_t)estimate;
     if (cap == 0 || cap > FDK_CLIP_INCR_MAX_BYTES) {
         cap = FDK_CLIP_INCR_MAX_BYTES; /* estimate is a HINT, not truth */
     }
     unsigned char *buf = fdk_alloc(cap + 1); /* +1: text NUL room */
     if (buf == NULL) {
-        return NULL;
+        goto out;
     }
     size_t got = 0;
     uint64_t flight_deadline = now_ms() + FDK_CLIP_INCR_TOTAL_WAIT_MS;
@@ -787,23 +815,21 @@ static unsigned char *incr_read_all(fdk_platform_connection *conn,
                                 ? chunk_deadline
                                 : flight_deadline;
         XEvent ev;
-        if (!wait_property_new_value(conn, deadline, &ev)) {
+        if (!wait_property_new_value(conn, requestor, deadline, &ev)) {
             FDK_WARN("clipboard: INCR read stalled (owner silent past "
                      "the deadline after %zu bytes)",
                      got);
-            fdk_free(buf);
-            return NULL;
+            goto out;
         }
         Atom type = None;
         int format = 0;
         unsigned long nitems = 0, bytes_after = 0;
         unsigned char *data = NULL;
-        if (XGetWindowProperty(conn->display, conn->clip_helper,
+        if (XGetWindowProperty(conn->display, requestor,
                                conn->atom_fdk_selection, 0, 0x400000, True,
                                AnyPropertyType, &type, &format, &nitems,
                                &bytes_after, &data) != Success) {
-            fdk_free(buf);
-            return NULL;
+            goto out;
         }
         if (type == None) {
             /* A stale NewValue: the owner's SEED WRITE generates one
@@ -822,22 +848,22 @@ static unsigned char *incr_read_all(fdk_platform_connection *conn,
             if (data != NULL) {
                 XFree(data);
             }
-            fdk_free(buf);
-            return NULL;
+            goto out;
         }
         if (nitems == 0) {
             /* The zero-length terminator: the flight is complete. */
             XFree(data);
             *out_len = got;
-            return buf;
+            result = buf;
+            buf = NULL;
+            goto out;
         }
         if (got + (size_t)nitems > FDK_CLIP_INCR_MAX_BYTES) {
             FDK_WARN("clipboard: INCR payload exceeds the %u bound; "
                      "dropping the transfer",
                      FDK_CLIP_INCR_MAX_BYTES);
             XFree(data);
-            fdk_free(buf);
-            return NULL;
+            goto out;
         }
         if (got + (size_t)nitems > cap) {
             /* The owner sent more than its estimate (a HINT — the
@@ -846,8 +872,7 @@ static unsigned char *incr_read_all(fdk_platform_connection *conn,
             unsigned char *grown = fdk_realloc(buf, ncap + 1);
             if (grown == NULL) {
                 XFree(data);
-                fdk_free(buf);
-                return NULL;
+                goto out;
             }
             buf = grown;
             cap = ncap;
@@ -856,24 +881,64 @@ static unsigned char *incr_read_all(fdk_platform_connection *conn,
         got += (size_t)nitems;
         XFree(data);
     }
+
+out:
+    fdk_free(buf);
+    if (foreign) {
+        XSelectInput(conn->display, requestor, saved_mask);
+    }
+    return result;
 }
 
 /* One convert attempt for `target` against `sel`, returning the RAW
  * bytes plus the property type (UTF8_STRING / XA_STRING / image/png
  * / or an INCR flight's already-concatenated payload — the type the
- * owner NAMED). Returns NULL on refusal/timeout/malformation. */
+ * owner NAMED). Returns NULL on refusal/timeout/malformation.
+ * Thin wrapper: the engine (below) is requestor-parameterized since
+ * 1.4.14 — the DnD drop fetch shares it with the app-window drop
+ * target as requestor. */
 static unsigned char *convert_selection_bytes(
     fdk_platform_connection *conn, sel_desc sel, Atom target,
     Atom *out_type, size_t *out_len) {
+    return fdk__x11_read_selection(conn, conn->clip_helper, sel.atom,
+                                   target, CurrentTime,
+                                   FDK_CLIP_WAIT_MS, out_type, out_len);
+}
+
+/* THE selection-read engine (1.4.14): convert `selection`/`target`
+ * onto `requestor`'s atom_fdk_selection property, wait the bounded
+ * notify window, then read the answer — atomic (possibly multi-part)
+ * or INCR (the seed's 32-bit value is the estimate; the read-with-
+ * delete of the seed is the go signal; chunks pump until the
+ * zero-length terminator). Foreign requestors get PropertyChangeMask
+ * for the flight and their own mask back afterwards (incr_read_all).
+ *
+ * Every user of a selection READ lands here: the clipboard's text
+ * and image gets (helper as requestor) and the XDND drop fetch (the
+ * drop-target window as requestor — external file managers serve
+ * text/uri-list via INCR for larger lists, which is exactly the drop
+ * that used to vanish before this engine existed). `timestamp` is
+ * the XDND drop timestamp for DnD, CurrentTime for the clipboard.
+ *
+ * Returns the RAW bytes (fdk_alloc'd, *out_len set, *out_type the
+ * answer's property type — for an INCR flight, the type the owner
+ * NAMED for the target), or NULL on refusal (property None in the
+ * notify), timeout, or malformation. */
+unsigned char *fdk__x11_read_selection(fdk_platform_connection *conn,
+                                       Window requestor, Atom selection,
+                                       Atom target, unsigned long timestamp,
+                                       int notify_wait_ms, Atom *out_type,
+                                       size_t *out_len) {
     *out_type = None;
     *out_len = 0;
-    XConvertSelection(conn->display, sel.atom, target,
-                      conn->atom_fdk_selection, conn->clip_helper,
-                      CurrentTime);
+    XConvertSelection(conn->display, selection, target,
+                      conn->atom_fdk_selection, requestor,
+                      (Time)timestamp);
     XEvent notify;
-    if (!wait_selection_notify(conn, sel, &notify)) {
-        FDK_WARN("%s: owner did not answer within %d ms", sel.name,
-                 FDK_CLIP_WAIT_MS);
+    if (!wait_selection_notify_on(conn, requestor, selection,
+                                  notify_wait_ms, &notify)) {
+        FDK_WARN("selection read: owner did not answer within %d ms",
+                 notify_wait_ms);
         return NULL;
     }
     if (notify.xselection.property == None) {
@@ -883,7 +948,7 @@ static unsigned char *convert_selection_bytes(
     int format = 0;
     unsigned long nitems = 0, bytes_after = 0;
     unsigned char *data = NULL;
-    if (XGetWindowProperty(conn->display, conn->clip_helper,
+    if (XGetWindowProperty(conn->display, requestor,
                            conn->atom_fdk_selection, 0, 0x400000, True,
                            AnyPropertyType, &type, &format, &nitems,
                            &bytes_after, &data) != Success) {
@@ -901,7 +966,8 @@ static unsigned char *convert_selection_bytes(
         if (data != NULL) {
             XFree(data);
         }
-        unsigned char *all = incr_read_all(conn, estimate, out_len);
+        unsigned char *all = incr_read_all(conn, requestor, estimate,
+                                           out_len);
         if (all != NULL) {
             *out_type = target; /* the type the owner NAMED */
         }
@@ -927,7 +993,7 @@ static unsigned char *convert_selection_bytes(
         XFree(data);
         while (bytes_after > 0 && got <= FDK_CLIP_INCR_MAX_BYTES) {
             data = NULL;
-            if (XGetWindowProperty(conn->display, conn->clip_helper,
+            if (XGetWindowProperty(conn->display, requestor,
                                    conn->atom_fdk_selection,
                                    (long)(got / 4), 0x400000, True,
                                    AnyPropertyType, &type, &format,

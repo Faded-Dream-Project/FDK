@@ -654,7 +654,12 @@ static void relayout(void) {
     if (w < 320) {
         w = 320;
     }
-    fdk_i32 y = 10;
+    /* The FDK title band (1.4.14) owns the top strip: the absolute
+     * layout starts below it when the window is decorated. */
+    fdk_i32 y = 10 + (fdk_window_get_decorated(app.window)
+                          ? fdk_theme_get_metric(NULL,
+                                                 FDK_TM_TITLE_BAR_HEIGHT)
+                          : 0);
 
     /* CLIPBOARD */
     fdk_widget_set_bounds(app.h_clip, (fdk_rect){x, y, w, 20});
@@ -740,6 +745,9 @@ int main(void) {
         return 1;
     }
     fdk_window_set_event_callback(app.window, window_event, NULL);
+    /* 1.4.14: the FDK title bar — every example wears the toolkit's
+     * own drawn chrome (themed band + close + FDK resize). */
+    (void)fdk_window_set_decorated(app.window, true);
     fdk_window_set_drop_formats(app.window,
                                 FDK_DRAG_FORMAT_TEXT |
                                     FDK_DRAG_FORMAT_URI_LIST);

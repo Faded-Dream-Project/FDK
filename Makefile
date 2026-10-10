@@ -11,7 +11,8 @@
 #                   uses $DISPLAY if set, otherwise starts and tears
 #                   down a throwaway Xvfb automatically
 #   make examples   build example programs (linked against the static lib)
-#   make tools      build the command-line tools (fdk-theme, fdk-prefs;
+#   make tools      build the command-line tools (fdk-theme, fdk-prefs,
+#                   fdk-set;
 #                   also part of the default `make` — they are ordinary
 #                   applications on the public API, its reference
 #                   consumer)

@@ -21,9 +21,11 @@
  */
 
 #include "fdk/fdk_prefs.h"
+
 #include "fdk/fdk_error.h"
 #include "fdk/fdk_log.h"
 
+#include "prefs_internal.h"
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
 
@@ -421,7 +423,7 @@ static int prefs_parse(fdk_prefs *p, const char *data, size_t size) {
 /* $FDK_PREFS_FILE, else $XDG_CONFIG_HOME/<app>.prefs, else
  * $HOME/.config/<app>.prefs, else NULL (memory-only). The result
  * is owned (fdk_alloc'd). */
-static char *prefs_resolve_path(const char *app_id) {
+char *fdk__prefs_resolve_path(const char *app_id) {
     const char *override = getenv("FDK_PREFS_FILE");
     if (override != NULL && override[0] == '/') {
         return prefs_strdup(override);
@@ -513,7 +515,7 @@ fdk_result fdk_prefs_open(const char *app_id, fdk_prefs **out_prefs) {
         fdk_free(p);
         return FDK_ERR_OUT_OF_MEMORY;
     }
-    p->path = prefs_resolve_path(app_id);
+    p->path = fdk__prefs_resolve_path(app_id);
 
     if (p->path == NULL) {
         /* Memory-only: no directory to read or write. */

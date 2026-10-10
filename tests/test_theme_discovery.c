@@ -402,6 +402,253 @@ static void test_boot_empty_env_is_unset(void) {
     assert(streq(fdk_theme_name(t), "Alpha Test"));
 }
 
+/* ---- 1.4.14: the per-app leg + the whitelist + the live recheck -------- */
+
+/* The app prefs file under the same sandbox dir as the global one —
+ * what `fdk-set theme set NAME --app APP` writes for the app whose
+ * fdk_init identity is APP. */
+static void app_settings_file(const char *app_id, const char *contents) {
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s.prefs", g_dir, app_id);
+    if (contents == NULL) {
+        remove(path);
+        return;
+    }
+    FILE *f = fopen(path, "wb");
+    assert(f != NULL);
+    assert(fwrite(contents, 1, strlen(contents), f) == strlen(contents));
+    fclose(f);
+}
+
+/* Binds the process to an application identity (what fdk_init does;
+ * the test drives the settings engine directly through the internal
+ * header it already includes). */
+static void bind_app(const char *app_id) {
+    fdk__theme_settings_set_app_id(app_id);
+}
+
+/* The XDG sandbox layout: $FDK_PREFS_FILE is a SINGLE-file override
+ * (one absolute path for every store — the rig variable), so the
+ * per-app leg is invisible under it. Per-app resolution needs the
+ * real desktop layout: XDG_CONFIG_HOME/<store>.prefs per store,
+ * which is exactly what this variant arranges. */
+static void xdg_env(void) {
+    discovery_env(); /* theme dirs + a clean FDK_THEME */
+    use_env("FDK_PREFS_FILE", NULL);
+    use_env("XDG_CONFIG_HOME", g_dir);
+    fdk__theme_scan_reset_for_tests();
+}
+
+/* The global store in the XDG layout (g_dir/fdk.prefs). */
+static void xdg_global_file(const char *contents) {
+    char path[512];
+    snprintf(path, sizeof path, "%s/fdk.prefs", g_dir);
+    if (contents == NULL) {
+        remove(path);
+        return;
+    }
+    FILE *f = fopen(path, "wb");
+    assert(f != NULL);
+    assert(fwrite(contents, 1, strlen(contents), f) == strlen(contents));
+    fclose(f);
+}
+
+static void xdg_cleanup(void) {
+    xdg_global_file(NULL);
+    app_settings_file("org.fdk.example99", NULL);
+    use_env("XDG_CONFIG_HOME", NULL);
+}
+
+static void test_boot_app_store_beats_global(void) {
+    boot_scenario_start();
+    xdg_env();
+    bind_app("org.fdk.example99");
+    xdg_global_file("[theme]\nname = alpha\n");
+    app_settings_file("org.fdk.example99", "[theme]\nname = beta\n");
+    fdk_theme *t = fdk_theme_get_default();
+    assert(streq(fdk_theme_name(t), "Beta"));
+    /* The per-app override wins over the global setting. */
+    fdk__theme_settings_reset_for_tests();
+    bind_app(NULL);
+    xdg_cleanup();
+}
+
+static void test_boot_global_when_app_store_empty(void) {
+    boot_scenario_start();
+    xdg_env();
+    bind_app("org.fdk.example99");
+    xdg_global_file("[theme]\nname = alpha\n");
+    app_settings_file("org.fdk.example99", NULL);
+    fdk_theme *t = fdk_theme_get_default();
+    assert(streq(fdk_theme_name(t), "Alpha Test"));
+    fdk__theme_settings_reset_for_tests();
+    bind_app(NULL);
+    xdg_cleanup();
+}
+
+static void test_boot_env_beats_app_store(void) {
+    boot_scenario_start();
+    xdg_env();
+    bind_app("org.fdk.example99");
+    xdg_global_file(NULL);
+    app_settings_file("org.fdk.example99", "[theme]\nname = beta\n");
+    use_env("FDK_THEME", "alpha");
+    fdk_theme *t = fdk_theme_get_default();
+    assert(streq(fdk_theme_name(t), "Alpha Test"));
+    use_env("FDK_THEME", NULL);
+    fdk__theme_settings_reset_for_tests();
+    bind_app(NULL);
+    xdg_cleanup();
+}
+
+static void test_whitelist_argument_safety(void) {
+    boot_scenario_start();
+    discovery_env();
+    /* NULL list with a count is rejected; empty entries are rejected;
+     * oversize entries are rejected; count 0 clears. */
+    assert(!fdk_ok(fdk_theme_set_allowed_themes(NULL, 2)));
+    const char *bad_empty[2] = {"alpha", ""};
+    assert(!fdk_ok(fdk_theme_set_allowed_themes(bad_empty, 2)));
+    const char *bad_huge[1] = {"0123456789012345678901234567890123456789"
+                               "0123456789012345678901234567890123456789"
+                               "0123456789012345678901234567890123456789"
+                               "0123456789"};
+    assert(!fdk_ok(fdk_theme_set_allowed_themes(bad_huge, 1)));
+    assert(fdk_theme_allowed_count() == 0);
+    assert(fdk_theme_allowed_name(0) == NULL);
+    assert(fdk_ok(fdk_theme_set_allowed_themes(NULL, 0))); /* clear */
+}
+
+static void test_whitelist_clamps_boot(void) {
+    boot_scenario_start();
+    discovery_env();
+    settings_file("[theme]\nname = beta\n");
+    /* The user set 'beta'; the developer allows only alpha. */
+    const char *only[1] = {"alpha"};
+    assert(fdk_ok(fdk_theme_set_allowed_themes(only, 1)));
+    fdk_theme *t = fdk_theme_get_default();
+    assert(streq(fdk_theme_name(t), "Alpha Test"));
+    assert(fdk_theme_allowed_count() == 1);
+    assert(streq(fdk_theme_allowed_name(0), "alpha"));
+    fdk_theme_clear_allowed_themes();
+}
+
+static void test_whitelist_no_setting_means_first_allowed(void) {
+    boot_scenario_start();
+    discovery_env();
+    settings_file(NULL);
+    const char *curated[2] = {"beta", "alpha"};
+    assert(fdk_ok(fdk_theme_set_allowed_themes(curated, 2)));
+    fdk_theme *t = fdk_theme_get_default();
+    /* Nothing set anywhere: the first allowed theme, NOT the built-in. */
+    assert(streq(fdk_theme_name(t), "Beta"));
+    fdk_theme_clear_allowed_themes();
+}
+
+static void test_whitelist_internal_name_spelling(void) {
+    boot_scenario_start();
+    discovery_env();
+    settings_file("[theme]\nname = beta\n");
+    /* oddname.fdk's internal name is "The Odd One": allowing the
+     * DISPLAY name accepts a user setting the STEM. */
+    const char *only[1] = {"The Odd One"};
+    assert(fdk_ok(fdk_theme_set_allowed_themes(only, 1)));
+    /* 'beta' is NOT allowed — the clamp falls back to the only entry,
+     * which must resolve through the internal-name path. */
+    fdk_theme *t = fdk_theme_get_default();
+    assert(streq(fdk_theme_name(t), "The Odd One"));
+    fdk_theme_clear_allowed_themes();
+}
+
+static void test_whitelist_allows_the_set_theme(void) {
+    boot_scenario_start();
+    discovery_env();
+    settings_file("[theme]\nname = beta\n");
+    const char *curated[2] = {"alpha", "beta"};
+    assert(fdk_ok(fdk_theme_set_allowed_themes(curated, 2)));
+    fdk_theme *t = fdk_theme_get_default();
+    assert(streq(fdk_theme_name(t), "Beta")); /* allowed: unchanged */
+    fdk_theme_clear_allowed_themes();
+}
+
+static void test_whitelist_reclamps_a_running_app(void) {
+    boot_scenario_start();
+    discovery_env();
+    settings_file("[theme]\nname = beta\n");
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "Beta"));
+    /* The restriction arrives AFTER the boot installed beta. */
+    const char *only[1] = {"alpha"};
+    assert(fdk_ok(fdk_theme_set_allowed_themes(only, 1)));
+    assert(streq(fdk_theme_name(fdk_theme_get_default()),
+                 "Alpha Test"));
+    fdk_theme_clear_allowed_themes();
+}
+
+static void test_recheck_follows_file_changes(void) {
+    boot_scenario_start();
+    discovery_env();
+    settings_file("[theme]\nname = alpha\n");
+    assert(streq(fdk_theme_name(fdk_theme_get_default()),
+                 "Alpha Test"));
+    /* The live follow's core (what the inotify drain lands in): a
+     * settings change re-themes the RUNNING process. */
+    settings_file("[theme]\nname = beta\n");
+    fdk__theme_settings_recheck();
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "Beta"));
+    /* Same value again: no-op, current survives. */
+    fdk__theme_settings_recheck();
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "Beta"));
+    /* Cleared at runtime: revert to the built-in. */
+    settings_file(NULL);
+    fdk__theme_settings_recheck();
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "FDK Modern"));
+    /* Unresolvable at runtime: soft, current survives. */
+    settings_file("[theme]\nname = no-such-theme\n");
+    fdk__theme_settings_recheck();
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "FDK Modern"));
+}
+
+static void test_recheck_app_store_change(void) {
+    boot_scenario_start();
+    xdg_env();
+    bind_app("org.fdk.example99");
+    xdg_global_file("[theme]\nname = alpha\n");
+    app_settings_file("org.fdk.example99", NULL);
+    assert(streq(fdk_theme_name(fdk_theme_get_default()),
+                 "Alpha Test"));
+    /* The per-app override lands while the app runs. */
+    app_settings_file("org.fdk.example99", "[theme]\nname = beta\n");
+    fdk__theme_settings_recheck();
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "Beta"));
+    /* And is forgotten live. */
+    app_settings_file("org.fdk.example99", NULL);
+    fdk__theme_settings_recheck();
+    assert(streq(fdk_theme_name(fdk_theme_get_default()),
+                 "Alpha Test"));
+    fdk__theme_settings_reset_for_tests();
+    bind_app(NULL);
+    xdg_cleanup();
+}
+
+static void test_recheck_opted_out_app_is_left_alone(void) {
+    boot_scenario_start();
+    discovery_env();
+    settings_file("[theme]\nname = alpha\n");
+    /* The app installs its own theme: ownership flips. */
+    fdk_theme *own = fdk_theme_create_default();
+    assert(own != NULL);
+    assert(fdk_ok(fdk_theme_set_name(own, "Explicitly Mine")));
+    fdk_theme_set_default(own);
+    settings_file("[theme]\nname = beta\n");
+    fdk__theme_settings_recheck(); /* must stand down */
+    assert(streq(fdk_theme_name(fdk_theme_get_default()),
+                 "Explicitly Mine"));
+    fdk_theme_destroy(own);
+    /* Destroy reverts to the built-in (not to the setting — the
+     * process stays opted out). */
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "FDK Modern"));
+}
+
 /* ---- main -------------------------------------------------------------- */
 
 int main(void) {
@@ -451,10 +698,24 @@ int main(void) {
     test_boot_runs_once();
     test_boot_empty_env_is_unset();
 
+    test_boot_app_store_beats_global();
+    test_boot_global_when_app_store_empty();
+    test_boot_env_beats_app_store();
+    test_whitelist_argument_safety();
+    test_whitelist_clamps_boot();
+    test_whitelist_no_setting_means_first_allowed();
+    test_whitelist_internal_name_spelling();
+    test_whitelist_allows_the_set_theme();
+    test_whitelist_reclamps_a_running_app();
+    test_recheck_follows_file_changes();
+    test_recheck_app_store_change();
+    test_recheck_opted_out_app_is_left_alone();
+
     /* Leave the boot in the pristine state for anything that
      * follows in this process (nothing does today, but the reset
      * also frees the last scenario's boot theme under LSan). */
     fdk__theme_boot_reset_for_tests();
+    bind_app(NULL); /* release the settings engine's app-id copy */
 
     char cmd[600];
     snprintf(cmd, sizeof cmd, "rm -rf %s %s", g_dir, g_dir2);

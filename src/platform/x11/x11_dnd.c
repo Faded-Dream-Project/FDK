@@ -56,7 +56,15 @@ static char *dnd_strdup(const char *s) {
 
 #define FDK_XDND_VERSION 5
 #define FDK_XDND_DROP_TIMEOUT_MS 2000
-#define FDK_XDND_WAIT_MS 250
+/* The drop fetch's per-convert notify wait (1.4.14: 250 -> 600 ms).
+ * 250 was fine for toolkit-to-toolkit drops, but a real file
+ * manager under load (thumbnails, indexing) routinely answers its
+ * SelectionRequests later than that — and a drop that silently
+ * vanishes because the source was busy for 300 ms is exactly the
+ * "hovered fine, dropped nothing" report. 600 ms keeps the gesture
+ * bounded without punishing slow sources. INCR flights carry their
+ * own (longer) deadlines inside the shared read engine. */
+#define FDK_XDND_WAIT_MS 600
 
 /* ---- init / teardown (called from x11_connection.c) ---- */
 
@@ -335,43 +343,6 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
     return 0;
 }
 
-/* Bounded wait for the SelectionNotify answering our drop convert —
- * same discipline as the clipboard's wait (events that are not the
- * one we want stay queued; nothing is dispatched re-entrantly). */
-static int xdnd_wait_notify(fdk_platform_connection *conn, Window requestor,
-                            XEvent *out) {
-    uint64_t deadline = (uint64_t)time(NULL) * 1000 + FDK_XDND_WAIT_MS;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    deadline = (uint64_t)ts.tv_sec * 1000u +
-               (uint64_t)ts.tv_nsec / 1000000u + FDK_XDND_WAIT_MS;
-    XFlush(conn->display);
-    for (;;) {
-        XEvent ev;
-        if (XCheckTypedWindowEvent(conn->display, requestor,
-                                   SelectionNotify, &ev)) {
-            if (ev.xselection.selection ==
-                conn->atom_xdnd_selection) {
-                *out = ev;
-                return 1;
-            }
-            continue;
-        }
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        uint64_t now = (uint64_t)ts.tv_sec * 1000u +
-                       (uint64_t)ts.tv_nsec / 1000000u;
-        if (now >= deadline) {
-            return 0;
-        }
-        struct pollfd pfd = { ConnectionNumber(conn->display), POLLIN, 0 };
-        int r = poll(&pfd, 1, (int)(deadline - now));
-        if (r < 0 && errno != EINTR) {
-            return 0;
-        }
-        XEventsQueued(conn->display, QueuedAfterReading);
-    }
-}
-
 /* Latin-1 (XA_STRING) widening — same shape as the clipboard's. */
 static char *xdnd_utf8_from_property(Atom type, const unsigned char *data,
                                      unsigned long len) {
@@ -393,60 +364,69 @@ static char *xdnd_utf8_from_property(Atom type, const unsigned char *data,
     return out;
 }
 
+/* The drop fetch (1.4.14, reworked): ONE shared selection-read
+ * engine (fdk__x11_read_selection) against the DROP TARGET window as
+ * requestor — atomic answers, multi-part atomics, and INCR flights
+ * all flow through it. Before this existed the fetch did its own
+ * atomic-only read, and a source answering text/uri-list via INCR
+ * (what GTK/Qt file managers do for larger lists) read back as a
+ * format-32 INCR seed — which the old `fmt != 8` check silently
+ * discarded: the hover said "drop it", the drop vanished. Reported
+ * live on X11; reproduced by the incr-files/incr-text rigs.
+ *
+ * FORMAT FALLBACK is also here now: a target that refuses or times
+ * out falls through to the next format the intersection allows
+ * (uri-list -> UTF-8 text) instead of failing the whole drop — the
+ * spec-correct retry a picker owes the user. */
 static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
                                 fdk_platform_window *pwindow,
                                 unsigned long timestamp) {
     int accepted = conn->xdnd.offered & pwindow->drop_formats;
-    /* Prefer the richest format the intersection allows: files over
-     * text (a file drop IS text, but the app registered URI_LIST
-     * because it wants paths). */
-    Atom target = None;
+
+    /* Preference order: files over text (a file drop IS text, but
+     * the app registered URI_LIST because it wants paths). */
+    Atom try_order[2];
+    int try_count = 0;
     if (accepted & FDK_DRAG_FORMAT_URI_LIST) {
-        target = conn->atom_text_uri_list;
-    } else if (accepted & FDK_DRAG_FORMAT_TEXT) {
-        target = conn->utf8_string;
-    } else {
+        try_order[try_count++] = conn->atom_text_uri_list;
+    }
+    if (accepted & FDK_DRAG_FORMAT_TEXT) {
+        try_order[try_count++] = conn->utf8_string;
+    }
+    if (try_count == 0) {
         xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
                   (long)pwindow->xwindow, 0, 0, 0, 0);
         return;
     }
 
-    XConvertSelection(conn->display, conn->atom_xdnd_selection, target,
-                      conn->atom_fdk_selection, pwindow->xwindow,
-                      (Time)timestamp);
-    XEvent notify;
-    if (!xdnd_wait_notify(conn, pwindow->xwindow, &notify)) {
-        FDK_WARN("dnd: drop source did not answer within %d ms",
-                 FDK_XDND_WAIT_MS);
-        xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
-                  (long)pwindow->xwindow, 0, 0, 0, 0);
-        return;
-    }
-    if (notify.xselection.property == None) {
-        xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
-                  (long)pwindow->xwindow, 0, 0, 0, 0);
-        return;
-    }
-
-    Atom type = None;
-    int fmt = 0;
-    unsigned long n = 0, after = 0;
-    unsigned char *data = NULL;
-    if (XGetWindowProperty(conn->display, pwindow->xwindow,
-                           conn->atom_fdk_selection, 0, 0x100000, True,
-                           AnyPropertyType, &type, &fmt, &n, &after,
-                           &data) != Success ||
-        data == NULL || fmt != 8) {
-        if (data != NULL) {
-            XFree(data);
+    unsigned char *raw = NULL;
+    size_t raw_len = 0;
+    Atom got_type = None;
+    Atom got_target = None;
+    for (int i = 0; i < try_count && raw == NULL; i++) {
+        got_target = try_order[i];
+        raw = fdk__x11_read_selection(
+            conn, pwindow->xwindow, conn->atom_xdnd_selection,
+            got_target, timestamp, FDK_XDND_WAIT_MS, &got_type,
+            &raw_len);
+        if (raw == NULL) {
+            FDK_WARN("dnd: drop convert for target %lu failed; %s",
+                     (unsigned long)got_target,
+                     (i + 1 < try_count)
+                         ? "trying the next acceptable format"
+                         : "no acceptable format answered");
         }
+    }
+    if (raw == NULL) {
         xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
                   (long)pwindow->xwindow, 0, 0, 0, 0);
         return;
     }
 
-    char *payload = xdnd_utf8_from_property(type, data, n);
-    XFree(data);
+    /* Widen/keep as UTF-8 exactly like the old path did (XA_STRING
+     * Latin-1 widen; everything else passes through as bytes). */
+    char *payload = xdnd_utf8_from_property(got_type, raw, raw_len);
+    fdk_free(raw);
     if (payload == NULL) {
         xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
                   (long)pwindow->xwindow, 0, 0, 0, 0);
@@ -459,7 +439,7 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
     size_t uri_count = 0;
     const char *text = NULL;
     char *text_copy = NULL;
-    if (target == conn->atom_text_uri_list) {
+    if (got_target == conn->atom_text_uri_list) {
         (void)fdk__dnd_parse_uri_list(payload, strlen(payload), &uris,
                                       &uri_count);
         if (uris == NULL) {
@@ -534,8 +514,11 @@ void fdk_x11_dnd_source_finish(fdk_platform_connection *conn, int status) {
 
 /* Deepest window under the root coordinate (the drag target search):
  * descend the tree, testing containment via translation. Skips our
- * own origin window (a source dropping onto itself is the app's
- * call, not the toolkit's — XDND allows it, v1 does not). */
+ * clip_helper (our own XDND source identity — dropping onto the
+ * helper would loop the drag back to its own state machine). The
+ * ORIGIN window is NOT skipped: XDND allows a source dropping onto
+ * itself, and FDK's receiver answers it like any external target
+ * (the gesture reads as a normal self-drop to the application). */
 static Window xdnd_window_under(fdk_platform_connection *conn, int rx,
                                 int ry) {
     Window cur = conn->root;

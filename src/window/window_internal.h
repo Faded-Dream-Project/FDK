@@ -346,6 +346,29 @@ void fdk__window_set_destroy_notify(fdk_window *window,
  * pointer revalidation may destroy windows mid-flush. */
 void fdk__window_flush_geo_repaints(fdk_context *ctx);
 
+/* ---- the theme-settings bridge (1.4.14) --------------------------------
+ *
+ * The core layer's crossing point to the theme settings engine
+ * (src/theme/settings.c — per-app + global theme resolution, the
+ * developer whitelist, and the inotify live follow). Core cannot
+ * include theme internals (layering runs the other way); the window
+ * layer already includes both, so it forwards. See window.c. */
+
+/* fdk_init binds the context's app identity and arms the settings
+ * watch; fdk_shutdown releases it (installed-theme state is
+ * process-wide and outlives any one context). */
+void fdk__window_theme_settings_init(const char *app_id);
+void fdk__window_theme_settings_shutdown(void);
+
+/* The pump's poll face: the inotify fd to poll alongside the
+ * backend's event fd (-1 when no settings file is watched), and the
+ * drain for when it reports readable — which re-themes every live
+ * tree when a watched settings file changed and repaints this
+ * context's damaged windows, returning 1 (the pump counts it as
+ * activity), 0 when nothing changed. */
+int fdk__window_theme_watch_fd(void);
+int fdk__window_theme_watch_pump(fdk_context *ctx);
+
 /* Re-asserts a popup's input grab (after a popup above it closed).
  * Backend-optional; no-op when unsupported. */
 void fdk__window_regrab(fdk_window *window);

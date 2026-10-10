@@ -953,6 +953,11 @@ against REAL external applications (no FDK-to-FDK):
     dragging INTO FDK). Full handshake; exit 0 only on Finished
     success=1. The X11 suite spawns it against a registered window
     and asserts the decoded drops (files -> POSIX paths, text).
+    The incr-files / incr-text modes (1.4.14) serve the payload
+    through the ICCM INCR protocol in 64-byte chunks — what GTK/Qt
+    file managers do for larger uri-lists, and exactly the drop that
+    silently vanished before the shared selection-read engine
+    existed (the live "hovered fine, dropped nothing" report).
   - scripts/xdnd_sink.c — raw-Xlib XDND TARGET (an external window
     FDK drags INTO). The suite drives a REAL pointer via XTEST
     (scripts/xtest_driver.c) with HUMAN-PACED steps and pumps

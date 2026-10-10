@@ -269,8 +269,8 @@ static int cmd_set(const char *name) {
     printf("theme set: %s (%s)\n", fdk_theme_name(t),
            fdk_theme_file_path(t) != NULL ? fdk_theme_file_path(t)
                                           : "(built-in)");
-    printf("new FDK applications will use it; running ones keep "
-           "their current theme\n");
+    printf("running FDK applications re-theme the moment this lands "
+           "(1.4.14: they watch the settings file)\n");
     fdk_theme_destroy(t);
     return 0;
 }

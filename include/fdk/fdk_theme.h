@@ -284,11 +284,22 @@ fdk_theme *fdk_theme_get_default(void);
  * entries are ignored (XDG rules).
  *
  * THE GLOBAL SETTING. FDK keeps one toolkit-level preference: the
- * theme name, read from the reserved "fdk" prefs store (the file at
- * $FDK_PREFS_FILE / $XDG_CONFIG_HOME/fdk.prefs /
- * ~/.config/fdk.prefs — see fdk_prefs.h) key "theme.name", with
- * $FDK_THEME as a per-process override (the GTK_THEME precedent:
- * first run of a new app, a screenshot rig, a theming session).
+ * theme name, read (1.4.14) in priority order:
+ *
+ *   1. $FDK_THEME — the per-process override (the GTK_THEME
+ *      precedent: first run of a new app, a screenshot rig, a
+ *      theming session)
+ *   2. theme.name in the APPLICATION's own store — the
+ *      <app_id>.prefs file under the same $FDK_PREFS_FILE /
+ *      $XDG_CONFIG_HOME resolution (see fdk_prefs.h), where app_id
+ *      is the identity passed to fdk_init(). This is the per-app
+ *      override `fdk-set theme set NAME --app APP` writes: one
+ *      application keeping its own theme while the desktop's
+ *      default changes.
+ *   3. theme.name in the reserved "fdk" store — the global default
+ *      every FDK application inherits (`fdk-theme set NAME` /
+ *      `fdk-set theme set NAME`).
+ *   4. the built-in theme, quietly.
  *
  * The setting is applied ONCE per process, lazily, at the first
  * resolution of the current default theme — the first paint or
@@ -298,14 +309,33 @@ fdk_theme *fdk_theme_get_default(void);
  * choice: that call opts the process out of the global setting
  * entirely (same contract as GTK's explicit theme override).
  *
+ * THE LIVE FOLLOW (1.4.14). While a display context runs, FDK
+ * watches the settings files (inotify on their directories) and
+ * re-resolves whenever one changes: `fdk-theme set` re-themes every
+ * RUNNING FDK application the moment it lands, through the same
+ * repaint-all switch fdk_theme_set_default() uses — including
+ * applications driven by plain fdk_run() (the pump repaints their
+ * damaged windows itself). Applications that installed their own
+ * theme opted out and are never overridden. A watched directory
+ * that does not exist yet cannot be watched — an application
+ * started before its config directory was created follows the
+ * setting at its next launch (documented, honest).
+ *
  * The boot is fail-soft on every step, matching the prefs resilience
  * rule: an unreadable or corrupt settings file means no preference;
  * a name that does not resolve on the search path logs ONE warning
  * and stays on the built-in theme. A themed launch must never be a
- * failed launch.
+ * failed launch — and neither must a live re-theme.
+ *
+ * THE WHITELIST (1.4.14). fdk_theme_set_allowed_themes() is the
+ * developer's side of the contract: an application whose brand is
+ * ONE theme (or a curated set) restricts what any settings source
+ * above may install. See the API block below for the exact clamp
+ * semantics.
  *
  * The command-line face of all this is `fdk-theme` (list / get / set
- * / reset) and the generic `fdk-prefs`; see docs/cli.md. */
+ * / reset / path), `fdk-set theme ... [--app APP]` (the per-app
+ * override), and the generic `fdk-prefs`; see docs/cli.md. */
 
 /* Finds and loads a theme by name on the search path above. `name`
  * may be a file STEM ("matrix" -> matrix.fdk, exact, case-sensitive)
@@ -347,6 +377,50 @@ fdk_theme *fdk_theme_find(const char *name, fdk_result *out_error);
 size_t fdk_theme_available_count(void);
 const char *fdk_theme_available_name(size_t index);
 const char *fdk_theme_available_path(size_t index);
+
+/* ---- The developer whitelist (1.4.14) ---------------------------------- */
+
+/* Restricts which themes the SETTINGS sources ($FDK_THEME, the
+ * per-app store, the global store) may install in this process —
+ * the developer's answer to "my application is my brand's theme,
+ * or one of these three curated themes, and nothing the user sets
+ * globally changes that".
+ *
+ * Semantics:
+ *   - `names` entries are theme STEMS or INTERNAL names ("matrix",
+ *     "Daylight") — matching the two spellings fdk_theme_find()
+ *     accepts; a settings value matching EITHER the raw name or the
+ *     loaded theme's internal name is considered allowed.
+ *   - A resolved setting OUTSIDE the list falls back to names[0]
+ *     (one INFO log line); no setting at all also resolves to
+ *     names[0] — a whitelisted app's default is its first allowed
+ *     theme, not the built-in.
+ *   - The restriction governs SETTINGS ONLY: the application's own
+ *     fdk_theme_set_default() calls are always honored (and opt the
+ *     process out of settings-following as always). It is a user-
+ *     facing override clamp, not a sandbox against code.
+ *   - Calling this AFTER a settings theme is already applied
+ *     re-clamps immediately (an unallowed current theme is replaced
+ *     by names[0]).
+ *
+ * NULL names, an empty entry, or an entry at/over 127 bytes is
+ * FDK_ERR_INVALID_ARGUMENT (nothing changes); count 0 CLEARS the
+ * restriction (same as fdk_theme_clear_allowed_themes). Entries are
+ * copied. FDK_ERR_OUT_OF_MEMORY is the other failure.
+ *
+ * The list does NOT have to be installed themes: an allowed name
+ * that later fails to load fails soft (one warning, current theme
+ * stays) exactly like any other settings resolution. */
+fdk_result fdk_theme_set_allowed_themes(const char *const *names,
+                                        size_t count);
+
+/* Clears the whitelist (back to "any settings theme goes"). */
+void fdk_theme_clear_allowed_themes(void);
+
+/* The whitelist's contents, for settings UIs: the count and entry
+ * `index` (NULL past the end). Empty list = no restriction. */
+size_t fdk_theme_allowed_count(void);
+const char *fdk_theme_allowed_name(size_t index);
 
 #ifdef __cplusplus
 }

@@ -14,6 +14,8 @@
  */
 
 #include "fdk/fdk.h"
+
+#include "theme/theme_internal.h" /* boot reset for the live-follow scenario */
 #include "fdk/fdk_event.h"
 #include "fdk/fdk_window.h"
 
@@ -6844,6 +6846,232 @@ static void test_dnd_receiver_gui(void) {
     fdk_shutdown(ctx);
 }
 
+/* 1.4.14: INCR-served drops — what GTK/Qt file managers do for larger
+ * uri-lists. The old atomic-only fetch read the INCR seed as a
+ * format-32 property and silently discarded the drop (the live
+ * "hovered fine, dropped nothing" report); the shared read engine
+ * now pumps the chunks. The rig serves both payloads incrementally
+ * in 64-byte chunks, so the multi-round dance is genuinely exercised.
+ */
+static void test_dnd_receiver_incr_gui(void) {
+    const char *src_bin = getenv("FDK_XDND_SOURCE_BIN");
+    if (src_bin == NULL) {
+        src_bin = "/home/z/my-project/scripts/xdnd_source";
+    }
+    if (access(src_bin, X_OK) != 0) {
+        printf("[skip] dnd incr: %s not built (external interop "
+               "rig builds it)\n", src_bin);
+        return;
+    }
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "dnd incr target",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, dnd_count_window_event, NULL);
+    fdk_window_set_drop_formats(win, FDK_DRAG_FORMAT_TEXT |
+                                         FDK_DRAG_FORMAT_URI_LIST);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 250);
+
+    Display *probe = XOpenDisplay(NULL);
+    assert(probe != NULL);
+    unsigned long xid = fdk_window_xid(win);
+    int lx = 0, ly = 0;
+    Window junk = None;
+    XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
+                          80, 60, &lx, &ly, &junk);
+    char cmd[512];
+
+    /* --- files drop served via INCR --- */
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d incr-files", src_bin, xid,
+             lx, ly);
+    FILE *child = popen(cmd, "r");
+    assert(child != NULL);
+    alarm(8);
+    int rc = pump_child_while_draining(ctx, child, 8);
+    alarm(0);
+    assert(rc == 0);
+    assert(dnd_rx.enters >= 1);
+    assert(dnd_rx.drops == 1);
+    assert(dnd_rx.uri_count == 2);
+    assert(strcmp(dnd_rx.uris[0], "/etc/hostname") == 0);
+    assert(strcmp(dnd_rx.uris[1], "/etc/os-release") == 0);
+    printf("[ok] dnd incr: external source streamed a 2-file uri-list "
+           "via INCR chunks, decoded to POSIX paths\n");
+
+    /* --- text drop served via INCR --- */
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d incr-text", src_bin, xid,
+             lx, ly);
+    child = popen(cmd, "r");
+    assert(child != NULL);
+    alarm(8);
+    rc = pump_child_while_draining(ctx, child, 8);
+    alarm(0);
+    assert(rc == 0);
+    assert(dnd_rx.drops == 1);
+    assert(strcmp(dnd_rx.last_text, "Hello from an external client") == 0);
+    printf("[ok] dnd incr: external text drop streamed via INCR "
+           "chunks, decoded as UTF-8\n");
+
+    XCloseDisplay(probe);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+}
+
+/* ---- 1.4.14: the settings live follow ---------------------------------- */
+
+/* Writes `body` to `path` (NULL body removes the file) — the exact
+ * write pattern fdk_prefs_save() uses matters here: the IN_MOVED_TO
+ * an atomic rename generates on the WATCHED DIRECTORY is the event
+ * the pump listens for, so the helper writes via a temp + rename. */
+static void live_write_settings(const char *path, const char *body) {
+    if (body == NULL) {
+        remove(path);
+        return;
+    }
+    char tmp[600];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    assert(f != NULL);
+    assert(fwrite(body, 1, strlen(body), f) == strlen(body));
+    fclose(f);
+    assert(rename(tmp, path) == 0);
+}
+
+/* The real thing `fdk-theme set` / `fdk-set theme set` buy on a live
+ * desktop: a RUNNING application re-themes the moment the settings
+ * file lands, with no restart and no settings menu of its own — the
+ * inotify watch the pump polls, the re-resolution, the repaint-all
+ * switch, and the pump's own repaint sweep for fdk_run()-shaped apps,
+ * all exercised end to end against a real X server. */
+static void test_settings_live_follow_gui(void) {
+    char tmpl[] = "/tmp/fdk-live-XXXXXX";
+    assert(mkdtemp(tmpl) != NULL);
+
+    /* Sandbox the whole settings stack: the fixtures are the theme
+     * search path, the sandbox is the config dir. */
+    char self[512];
+    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+    assert(n > 0);
+    self[n] = '\0';
+    char *slash = strrchr(self, '/');
+    assert(slash != NULL);
+    *slash = '\0';
+
+    char fixtures[1024];
+    snprintf(fixtures, sizeof fixtures, "%s/../../tests/data/themes",
+             self);
+    struct stat st;
+    assert(stat(fixtures, &st) == 0 && S_ISDIR(st.st_mode));
+
+    const char *saved_xdg = getenv("XDG_CONFIG_HOME");
+    const char *saved_theme = getenv("FDK_THEME");
+    const char *saved_dir = getenv("FDK_THEME_DIR");
+    const char *saved_prefs = getenv("FDK_PREFS_FILE");
+    setenv("XDG_CONFIG_HOME", tmpl, 1);
+    setenv("FDK_THEME_DIR", fixtures, 1);
+    unsetenv("FDK_THEME");
+    unsetenv("FDK_PREFS_FILE");
+
+    /* Earlier GUI tests installed their own themes (set_default is an
+     * opt-out): rewind the settings engine so this scenario boots
+     * from a clean slate, then let THIS init bind the app identity. */
+    fdk__theme_boot_reset_for_tests();
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11,
+                              .app_id = "org.fdk.livetest" };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "live follow",
+                                 .width = 240, .height = 120 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+    assert(strcmp(fdk_theme_name(NULL), "FDK Modern") == 0);
+
+    char global[600];
+    snprintf(global, sizeof global, "%s/fdk.prefs", tmpl);
+    char appfile[600];
+    snprintf(appfile, sizeof appfile, "%s/org.fdk.livetest.prefs", tmpl);
+
+    /* The global setting lands: the RUNNING app re-themes. */
+    live_write_settings(global, "[theme]\nname = alpha\n");
+    for (int i = 0; i < 10 && strcmp(fdk_theme_name(NULL), "Alpha Test") != 0;
+         i++) {
+        (void)fdk_pump_events(ctx, 120);
+    }
+    assert(strcmp(fdk_theme_name(NULL), "Alpha Test") == 0);
+    printf("[ok] settings live follow: a global setting written under a "
+           "running app re-themed it without a restart\n");
+
+    /* The per-app override beats the global one, live. */
+    live_write_settings(appfile, "[theme]\nname = beta\n");
+    for (int i = 0; i < 10 && strcmp(fdk_theme_name(NULL), "Beta") != 0;
+         i++) {
+        (void)fdk_pump_events(ctx, 120);
+    }
+    assert(strcmp(fdk_theme_name(NULL), "Beta") == 0);
+    printf("[ok] settings live follow: the app's own override won over "
+           "the global setting, live\n");
+
+    /* Forgetting the override falls back to the global setting. */
+    live_write_settings(appfile, NULL);
+    for (int i = 0; i < 10 && strcmp(fdk_theme_name(NULL), "Alpha Test") != 0;
+         i++) {
+        (void)fdk_pump_events(ctx, 120);
+    }
+    assert(strcmp(fdk_theme_name(NULL), "Alpha Test") == 0);
+
+    /* Clearing the global setting reverts to the built-in. */
+    live_write_settings(global, NULL);
+    for (int i = 0; i < 10 && strcmp(fdk_theme_name(NULL), "FDK Modern") != 0;
+         i++) {
+        (void)fdk_pump_events(ctx, 120);
+    }
+    assert(strcmp(fdk_theme_name(NULL), "FDK Modern") == 0);
+    printf("[ok] settings live follow: resets propagate (app override "
+           "removed, then the global setting cleared)\n");
+
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    fdk__theme_boot_reset_for_tests();
+
+    /* Restore the environment the rest of the suite expects. */
+    if (saved_xdg != NULL) {
+        setenv("XDG_CONFIG_HOME", saved_xdg, 1);
+    } else {
+        unsetenv("XDG_CONFIG_HOME");
+    }
+    if (saved_theme != NULL) {
+        setenv("FDK_THEME", saved_theme, 1);
+    } else {
+        unsetenv("FDK_THEME");
+    }
+    if (saved_dir != NULL) {
+        setenv("FDK_THEME_DIR", saved_dir, 1);
+    } else {
+        unsetenv("FDK_THEME_DIR");
+    }
+    if (saved_prefs != NULL) {
+        setenv("FDK_PREFS_FILE", saved_prefs, 1);
+    } else {
+        unsetenv("FDK_PREFS_FILE");
+    }
+
+    char cmd[600];
+    snprintf(cmd, sizeof cmd, "rm -rf %s", tmpl);
+    assert(system(cmd) == 0);
+}
+
 /* Source side: FDK drags into a raw-Xlib sink window, driven by the
  * REAL pointer through XTEST. */
 static struct {
@@ -8476,7 +8704,9 @@ int main(void) {
     test_list_activation_gui();
     test_file_dialog_gui();
     test_dnd_receiver_gui();
+    test_dnd_receiver_incr_gui();
     test_dnd_source_gui();
+    test_settings_live_follow_gui();
     test_window_shortcuts_and_accelerators_gui();
     test_menu_mnemonics_gui();
     test_modern_widgets_gui();

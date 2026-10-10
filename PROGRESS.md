@@ -9,10 +9,13 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.13** (the command-line
-face — maintainer-requested after the 1.4.12 audit closed the
-backlog: `fdk-theme` / `fdk-prefs`, theme discovery, the global
-settings store), building on the full in-depth code review done at
+Last audited: 2026-10-10, at milestone **1.4.14** (the live
+settings desktop — maintainer-requested after USING 1.4.13 for
+real: `fdk-set theme set NAME --app APP` per-app themes, LIVE
+re-theming when the command runs, the X11 INCR-drop fix behind
+"hovered fine, dropped nothing", the FDK title bar on every
+example, the file-picker size retune, and the developer theme
+whitelist), building on the full in-depth code review done at
 1.4.12 — every claim below was re-verified against the
 tree, not copied from docs. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
 tooltips" candidate was stale (the 1.3.2 tooltip has been fully
@@ -21,31 +24,42 @@ is always the truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.13** (the command-line face:
-  `fdk-theme` list/get/set/reset/path + `fdk-prefs`, theme discovery
-  over the XDG data hierarchy, the global `theme.name` setting in
-  the reserved "fdk" prefs store — the maintainer found the one gap
-  the 1.4.12 "backlog empty" conclusion had left: no shell face
-  for the settings half, no way to retheme apps without their own
-  settings menus. 1.4.12 shipped INCR transfers — the X11
-  clipboard streams past the 4 MiB atomic cap in both directions,
-  64 MiB bound; 1.4.11 the markup milestone; 1.4.10 fullscreen
-  both backends; 1.4.9 the PNG codec + Picture + clipboard images)
+- **HEAD:** milestone **1.4.14** (the live settings desktop:
+  the theme-settings ENGINE — $FDK_THEME > the application's own
+  <app_id>.prefs > the global fdk.prefs > built-in, resolved by
+  src/theme/settings.c — plus `fdk-set theme set NAME --app APP`,
+  the inotify LIVE FOLLOW (running apps re-theme the moment the
+  settings file lands; the pump polls the watch fd and repaints
+  fdk_run()-shaped apps itself), fdk_theme_set_allowed_themes (the
+  developer whitelist: one brand theme, or a curated set, clamped
+  over every settings source), the X11 INCR-drop fix (the shared
+  requestor-parameterized selection-read engine: atomic,
+  multi-part, and INCR reads for clipboard AND XDND; format
+  fallback uri-list -> text; 600 ms drop-convert budget) — the
+  maintainer's live reports drove all of it: drops from real file
+  managers vanished after a "drop it" hover, the picker read as a
+  toy, and retheming demanded a restart. 1.4.13 the command-line
+  face; 1.4.12 INCR clipboard transfers; 1.4.11 markup; 1.4.10
+  fullscreen; 1.4.9 PNG codec + Picture + clipboard images)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **612 exported symbols** (607 + the 1.4.13 five:
-  fdk_theme_find, fdk_theme_available_count/name/path,
-  fdk_theme_file_path), `make verify-exports` OK in debug AND release
-- **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
-  suites, the eight 1.4.8 textview groups, the 1.4.9 png/
-  picture suite, the 1.4.11 markup suite, and the 1.4.13
-  theme-discovery + CLI-tools suites); X11 integration
-  suite all-pass — **150 [ok]** (real Xvfb, real input, incl. the
-  modern-batch, HiDPI (private 192-dpi server), iconview GUI,
-  file-dialog icon-mode, textview GUI, clipboard-image, and the
-  1.4.12 INCR read/serve/image groups); 37 test files (38 .c in
-  tests/ counting bench.c, which is the perf harness, not a suite)
+- **Public API:** **616 exported symbols** (612 + the 1.4.14 four:
+  fdk_theme_set_allowed_themes, fdk_theme_clear_allowed_themes,
+  fdk_theme_allowed_count, fdk_theme_allowed_name), `make
+  verify-exports` OK in debug AND release
+- **Tests:** headless suite all-pass — **549 [ok] checks** (incl.
+  the 1.4.4 + iconview suites, the eight 1.4.8 textview groups,
+  the 1.4.9 png/picture suite, the 1.4.11 markup suite, the
+  1.4.13 theme-discovery + CLI-tools suites, and the 1.4.14
+  per-app-priority / whitelist / live-recheck / fdk-set groups);
+  X11 integration suite all-pass (real Xvfb, real input, incl.
+  the modern-batch, HiDPI (private 192-dpi server), iconview GUI,
+  file-dialog icon-mode, textview GUI, clipboard-image, the
+  1.4.12 INCR read/serve/image groups, and the 1.4.14 INCR-DROP
+  + settings-live-follow groups against the external rigs);
+  37 test files (38 .c in tests/ counting bench.c, which is the
+  perf harness, not a suite)
 - **Scale:** ~58k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
@@ -93,10 +107,16 @@ bar, Ctrl+L location entry — modernized 1.4.0; XDG recently-used
 place + accept-time recording since 1.4.4; **icon mode since
 1.4.7** — options.view seeds the IconView browsing surface, the
 toolbar's Icons checkbox flips it live, and every accept path
-reads through the surface abstraction), **color button** (the
+reads through the surface abstraction; **the 1.4.14 size retune**
+— 866x614 window, 15px face, 34px rows, 184px places, 640x420
+list: the "small picker, small text" report closed), **color button** (the
 color-well swatch that opens the ColorChooser — 1.4.4; alpha
 checkerboard, heap-token lifetime guard), path-bar composite,
-window decorations (server-side deco bar). Entry icon slots
+window decorations (the FDK-drawn title band — themed fill, title,
+close/min/max, band drag, FDK-driven resize; **worn by EVERY
+example since 1.4.14** — example_window.h decorates the standard
+window, 06/07/09/10 decorate their own, 02 stays bare because its
+subject is raw-surface rendering that never paints the tree). Entry icon slots
 (leading/trailing glyphs + custom painters + press callbacks,
 1.4.4). List activate-on-single-click (1.4.4 — the places
 sidebar rhythm).
@@ -123,7 +143,14 @@ sidebar rhythm).
   key repeat (1.3.5), output hot-plug/unplug, compositor-death
   resilience, cursor shapes
 - Clipboard: text + URI formats, **PRIMARY selection** (1.3.4)
-- DnD: both directions (X11 + Wayland), `fdk_drag_begin`
+- DnD: both directions (X11 + Wayland), `fdk_drag_begin`; **the
+  1.4.14 INCR-drop fix** — X11 drops now read through the shared
+  requestor-parameterized selection engine (atomic, multi-part,
+  AND incremental transfers; what GTK/Qt file managers do for
+  larger uri-lists — previously the drop read the INCR seed as
+  garbage and vanished after a "drop it" hover), with format
+  fallback (uri-list refused -> UTF-8 text) and a 600 ms
+  convert budget
 - Focus traversal, double/triple-click, shift-click range select
 - **Window states**: maximize/minimize/restore (Phase 8) +
   **FULLSCREEN (1.4.10)** on both backends — EWMH client messages
@@ -140,16 +167,24 @@ sidebar rhythm).
   (`FDK_TK_*` / `FDK_TM_*`), runtime switching, Modern + legacy
   recipes; button roles (suggested/destructive/link), placeholder
   text, hover fades (1.4.1/1.4.2)
-- **Theme discovery + the global setting + the CLI (1.4.13)**:
-  fdk_theme_find / fdk_theme_available_* over the XDG data
-  hierarchy ($FDK_THEME_DIR > $XDG_DATA_HOME/fdk/themes >
-  $XDG_DATA_DIRS, where `make install` puts the shipped themes:
-  daylight, matrix), fdk_theme_file_path, the one-shot lazy
-  settings boot in theme.c (theme.name in the reserved "fdk"
-  prefs store; $FDK_THEME per-process override; explicit
-  set_default opts the process out; fail-soft throughout), and the
-  **fdk-theme / fdk-prefs** command-line tools (tools/, installed
-  to $(PREFIX)/bin) — docs/cli.md is the reference
+- **Theme discovery + the settings engine + the CLI (1.4.13,
+  grown into its final shape 1.4.14)**: fdk_theme_find /
+  fdk_theme_available_* over the XDG data hierarchy
+  ($FDK_THEME_DIR > $XDG_DATA_HOME/fdk/themes > $XDG_DATA_DIRS,
+  where `make install` puts the shipped themes: daylight, matrix),
+  fdk_theme_file_path, the settings ENGINE (src/theme/settings.c:
+  $FDK_THEME > the app's own <app_id>.prefs > the global fdk.prefs
+  > built-in; the one-shot lazy boot; **the inotify live follow** —
+  the pump polls the watch fd, re-resolves on watched-file changes,
+  and repaints fdk_run()-shaped apps itself; explicit set_default
+  opts the process out AND stands the watch down; fail-soft
+  throughout), **fdk_theme_set_allowed_themes** (the developer
+  whitelist: stems or internal names, first-allowed fallback,
+  immediate re-clamp, settings-only — code is always honored), and
+  the **fdk-theme / fdk-prefs / fdk-set** command-line tools
+  (tools/, installed to $(PREFIX)/bin; fdk-set theme set NAME
+  [--app APP] writes the per-app override) — docs/cli.md is the
+  reference
 - Animation: easing library (**11 functions**), animator, smooth
   scroll, menu/combo fades, revealer slides, expander door
 - **Paint group (1.4.3): per-widget subtree opacity** — the ARGB
@@ -189,10 +224,11 @@ sidebar rhythm).
 
 The backlog is EMPTY. The widget families shipped across the
 board; rich text shipped in 1.4.11; INCR transfers shipped in
-1.4.12; the command-line face shipped in 1.4.13 (the one gap the
-maintainer identified after the 1.4.12 audit — a settings CLI is
-toolkit infrastructure, the gsettings role, not an application
-feature). What remains is LATER-by-policy (IME completion surface
+1.4.12; the command-line face shipped in 1.4.13; the live settings
+desktop shipped in 1.4.14 (per-app themes, live re-theming, the
+INCR-drop fix, the whitelist — the maintainer's own usage reports
+were the backlog, and every item closed). What remains is
+LATER-by-policy (IME completion surface
 waits for a protocol joining third_party/wayland-protocols) and
 OUT-by-policy (the deliberate non-goals below) — the line where
 adding anything more would make FDK something other than a

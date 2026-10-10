@@ -38,7 +38,6 @@
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
-#include "fdk/fdk_prefs.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -118,111 +117,85 @@ const fdk_theme *fdk__theme_builtin(void) {
 
 /* ---- The current default ---- */
 
-/* The global-settings boot (1.4.13). Resolves, ONCE per process, the
- * toolkit-level theme preference:
+/* The global-settings boot (1.4.13, reworked 1.4.14). The ONE-SHOT
+ * guard lives here; the resolution itself — $FDK_THEME, then the
+ * application's own store, then the global "fdk" store, clamped by
+ * the developer whitelist — lives in settings.c, which also owns
+ * the live follow (the inotify watch the pump polls) and the
+ * installed theme's lifetime.
  *
- *     $FDK_THEME           (per-process override, the GTK_THEME
- *                           precedent — theming one launch, a rig)
- *       else theme.name in the "fdk" prefs store
- *         ($FDK_PREFS_FILE / $XDG_CONFIG_HOME/fdk.prefs /
- *          ~/.config/fdk.prefs — the file `fdk-theme set` writes)
- *       else the built-in theme, quietly.
- *
- * It runs lazily at the FIRST resolution of the current default
- * (the first paint, fdk_theme_get_default(), any NULL-theme
+ * The boot runs lazily at the FIRST resolution of the current
+ * default (the first paint, fdk_theme_get_default(), any NULL-theme
  * accessor) — before which an application may pre-empt it by
  * calling fdk_theme_set_default() itself; that call sets the boot
- * flag and the process is thereafter entirely the application's
- * (the explicit-override-owns-the-choice contract, fdk_theme.h).
+ * flag AND the ownership flag below, and the process is thereafter
+ * entirely the application's (the explicit-override-owns-the-choice
+ * contract, fdk_theme.h).
  *
- * Every failure is soft, per the prefs resilience rule: a missing
- * or corrupt settings file is "no preference" (fdk_prefs_open
- * already absorbed that), a name that finds nothing on the search
- * path logs ONE warning and keeps the built-in theme. A themed
- * launch must never be a failed launch.
- *
- * The theme the boot installs is owned here for the process
- * lifetime (g_boot_theme): nobody ever destroys it, and the static
- * keeps it root-reachable for LSan. The reset hook below exists so
- * the TEST suite can run several boot scenarios in one process. */
+ * Every failure is soft, per the prefs resilience rule — settings.c
+ * warns and keeps the current theme. A themed launch must never be
+ * a failed launch. */
 static bool g_booted;           /* the one-shot guard; set FIRST
                                  * inside the boot because the
                                  * set_default() it calls re-enters
                                  * via fdk__theme_current() */
-static fdk_theme *g_boot_theme; /* the boot's install, owned for
-                                 * the process lifetime */
+static bool g_settings_installing; /* the settings engine is on the
+                                 * stack of a set_default call: NOT
+                                 * an application opt-out */
+static bool g_app_owned;        /* application code set the default
+                                 * itself — settings stand down
+                                 * (checked by settings.c's watch) */
 
-static void boot_from_settings(void) {
-    if (g_booted) {
-        return;
-    }
-    g_booted = true;
+/* NULL means "the built-in theme". Only heap themes (or NULL) are ever
+ * stored here — the built-in is referred to, never installed, so it
+ * can never be destroyed out from under the process. */
+static fdk_theme *g_current;
 
-    const char *name = getenv("FDK_THEME");
-    const char *origin = "$FDK_THEME";
-    if (name != NULL && name[0] == '\0') {
-        name = NULL; /* exported-empty means unset here */
-    }
-
-    fdk_prefs *prefs = NULL;
-    if (name == NULL) {
-        fdk_result pr = fdk_prefs_open("fdk", &prefs);
-        if (fdk_ok(pr)) {
-            /* The value pointer is owned by the store; used below
-             * strictly before the destroy at the exit. */
-            const char *v = fdk_prefs_get(prefs, "theme.name", NULL);
-            if (v != NULL && v[0] != '\0') {
-                name = v;
-                origin = "the global settings file";
-            }
-        } else {
-            /* open() only hard-fails on OOM / a NULL app_id — worth
-             * one warning, then the built-in theme carries on. */
-            FDK_WARN("theme: opening the global settings failed (%d)",
-                     (int)pr);
-        }
-    }
-
-    if (name == NULL) {
-        fdk_prefs_destroy(prefs);
-        return; /* no preference anywhere: the built-in stays */
-    }
-
-    fdk_result r = FDK_OK;
-    fdk_theme *t = fdk_theme_find(name, &r);
-    if (t == NULL) {
-        if (r != FDK_ERR_NOT_FOUND) {
-            /* It WAS configured but the file is broken — the louder
-             * variant of the same soft failure. */
-            FDK_WARN("theme: '%s' (%s) failed to load (error %d); "
-                     "staying on the built-in theme",
-                     name, origin, (int)r);
-        } else {
-            FDK_WARN("theme: '%s' (%s) is not on the theme search "
-                     "path; staying on the built-in theme",
-                     name, origin);
-        }
-        fdk_prefs_destroy(prefs);
-        return;
-    }
-
-    g_boot_theme = t;
-    fdk_theme_set_default(t);
-    FDK_INFO("theme: '%s' applied (%s)", name, origin);
-    fdk_prefs_destroy(prefs);
+/* The opt-out flag's reader (theme_internal.h): settings.c's watch
+ * and recheck stand down when the application owns the choice. */
+bool fdk__theme_settings_app_owned(void) {
+    return g_app_owned;
 }
 
-/* Internal, TEST-only: rewind the one-shot boot so the next current
- * resolution re-runs it (each scenario in tests/test_theme_discovery.c
- * starts from a clean slate). Destroys a previously installed boot
- * theme — fdk_theme_destroy() reverts the current default first, so
- * nothing dangles. Not part of the public API, never installed. */
-void fdk__theme_boot_reset_for_tests(void) {
-    if (g_boot_theme != NULL) {
-        fdk_theme_destroy(g_boot_theme); /* reverts current first */
-        g_boot_theme = NULL;
+/* The settings engine's install path: same switch, no opt-out. */
+void fdk__theme_set_default_settings(fdk_theme *theme) {
+    g_settings_installing = true;
+    fdk_theme_set_default(theme);
+    g_settings_installing = false;
+}
+
+/* The switch's shared core. `explicit_call` distinguishes an
+ * application's fdk_theme_set_default() (sets the ownership flag —
+ * the process's theme is now the application's, and the settings
+ * engine stands down) from the settings engine's own installs and
+ * the destroy-path's revert (which must NOT flip ownership: an
+ * app destroying a borrowed pointer must not accidentally opt the
+ * process back INTO settings-following). */
+static void set_default_impl(fdk_theme *theme, bool explicit_call) {
+    /* An explicit set is an opt-out: the application that installs
+     * its own theme BEFORE anything resolves the current default
+     * owns the process's choice, and the global setting never gets
+     * a chance to override it. Inside the boot itself the flag is
+     * already set, so this line is a no-op there. */
+    g_booted = true;
+    if (explicit_call) {
+        g_app_owned = true;
     }
-    g_booted = false;
+
+    fdk_theme *next = (theme != NULL) ? theme : &g_builtin;
+    if (next == fdk__theme_current()) {
+        return; /* already current: no repaint storm */
+    }
+    g_current = (next == &g_builtin) ? NULL : next;
+
+    /* Every live tree repaints on its next paint: paint hooks resolve
+     * tokens at paint time, so a full damage mark per root is the
+     * whole switch. */
+    fdk__widget_roots_invalidate_all();
+}
+
+void fdk_theme_set_default(fdk_theme *theme) {
+    set_default_impl(theme, !g_settings_installing);
 }
 
 /* fdk_alloc'd copy (NULL -> NULL). See theme_internal.h for why this
@@ -239,35 +212,29 @@ char *fdk__theme_strdup(const char *s) {
     return copy;
 }
 
-/* NULL means "the built-in theme". Only heap themes (or NULL) are ever
- * stored here — the built-in is referred to, never installed, so it
- * can never be destroyed out from under the process. */
-static fdk_theme *g_current;
-
 fdk_theme *fdk__theme_current(void) {
-    boot_from_settings();
+    if (!g_booted) {
+        /* One-shot even on soft failure: mark FIRST (the settings
+         * boot's own installs re-enter this function through the
+         * switch below, and a resolve-nothing boot must not rerun
+         * on every paint either). */
+        g_booted = true;
+        fdk__theme_settings_boot();
+    }
     return (g_current != NULL) ? g_current : &g_builtin;
 }
 
-void fdk_theme_set_default(fdk_theme *theme) {
-    /* An explicit set is an opt-out: the application that installs
-     * its own theme BEFORE anything resolves the current default
-     * owns the process's choice, and the global setting never gets
-     * a chance to override it (the boot checks this flag first).
-     * Inside the boot itself the flag is already set, so this line
-     * is a no-op there. */
-    g_booted = true;
-
-    fdk_theme *next = (theme != NULL) ? theme : &g_builtin;
-    if (next == fdk__theme_current()) {
-        return; /* already current: no repaint storm */
-    }
-    g_current = (next == &g_builtin) ? NULL : next;
-
-    /* Every live tree repaints on its next paint: paint hooks resolve
-     * tokens at paint time, so a full damage mark per root is the
-     * whole switch. */
-    fdk__widget_roots_invalidate_all();
+/* Internal, TEST-only: rewind the one-shot boot (and the settings
+ * engine's installed theme + whitelist with it) so the next current
+ * resolution re-runs it — each scenario in
+ * tests/test_theme_discovery.c starts from a clean slate. Not part
+ * of the public API, never installed. */
+void fdk__theme_boot_reset_for_tests(void) {
+    fdk__theme_settings_reset_for_tests(); /* destroys the install,
+                                            * reverting current first */
+    g_booted = false;
+    g_app_owned = false;
+    g_settings_installing = false;
 }
 
 fdk_theme *fdk_theme_get_default(void) {
@@ -313,17 +280,15 @@ void fdk_theme_destroy(fdk_theme *theme) {
     if (theme == NULL) {
         return;
     }
-    if (theme == g_boot_theme) {
-        /* An application may legitimately destroy the theme the boot
-         * installed (it holds a borrowed pointer from get_default();
-         * the revert below then applies). The boot's ownership slot
-         * must not dangle. */
-        g_boot_theme = NULL;
-    }
+    /* The settings engine's ownership slot must not dangle if this
+     * is the theme it installed (an application may legitimately
+     * destroy the borrowed current-default pointer it holds). */
+    fdk__theme_settings_forget(theme);
     if (theme == g_current) {
         /* The current default must never dangle: revert first (this
-         * also repaints, showing the built-in palette). */
-        fdk_theme_set_default(NULL);
+         * also repaints, showing the built-in palette). The revert
+         * is NOT an application call — no ownership flip. */
+        set_default_impl(NULL, false);
     }
     fdk_free(theme->name);
     fdk_free(theme->author);

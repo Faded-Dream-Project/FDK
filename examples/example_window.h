@@ -1,5 +1,6 @@
 /*
- * example_window.h — the shared example-window helper (1.2.5)
+ * example_window.h — the shared example-window helper (1.2.5;
+ * 1.4.14: the FDK title bar everywhere)
  *
  * Every example used to hand-roll the same boilerplate: init (with
  * or without an app_id), a window titled however it felt that day,
@@ -11,38 +12,40 @@
  *                            ("org.fdk.exampleNN" — taskbars and rig
  *                            rules can address each demo)
  *   - fdk_example_open()   — the standard window: "FDK NN — name"
- *                            title, an in-window HEADER (the example
- *                            titlebar: name on the left, "Esc — quit"
- *                            hint on the right, a hairline below — the
- *                            label survives in every screenshot/rig
- *                            capture even when the WM titlebar is
- *                            cropped), a content box the example
- *                            fills, and a status line at the bottom
- *                            (fdk_example_set_status)
+ *                            title, THE FDK TITLE BAR (1.4.14: every
+ *                            example wears the toolkit's own drawn
+ *                            chrome — themed band, title, close/min/
+ *                            max, FDK-driven resize — instead of the
+ *                            helper's old in-window header row, which
+ *                            duplicated exactly that), a content box
+ *                            the example fills, and a status line at
+ *                            the bottom (fdk_example_set_status)
  *   - fdk_example_pump()   — ONE loop pass: pump events, then a
  *                            damage-gated, frame-paced paint
  *   - fdk_example_run()    — pump until quit
  *   - fdk_example_close()  — teardown in the right order
  *
  * Quit semantics live in ONE place: WM close request (the destroy
- * helper, the rig's close path) and Escape both flip ex->quit; an
- * example needing window-level events chains through ex->on_event
- * (called BEFORE the quit handling — observe-only; there is no
- * honest consume API, so handlers must not assume events stop).
+ * helper, the rig's close path), the FDK title bar's close button,
+ * and Escape all flip ex->quit; an example needing window-level
+ * events chains through ex->on_event (called BEFORE the quit
+ * handling — observe-only; there is no honest consume API, so
+ * handlers must not assume events stop).
  *
  * Two integration tiers, both real:
  *   FULL  — fdk_example_open + content in ex->content: the box-layout
- *           demos (01, 03, 04, 05, 08).
+ *           demos (01, 03, 04, 05, 08, 11, 12).
  *   INIT  — fdk_example_init only, the example owns its window: the
  *           demos whose subject IS the window chrome or framebuffer —
- *           02 (raw-surface renderer: the widget frame would fight
- *           the direct surface writes), 06 (the FDK decoration band
- *           is the titlebar — a helper header would duplicate it),
- *           and the manual-bounds playgrounds (07, 09, 10) whose
- *           absolute set_bounds layouts predate the box contract.
+ *           02 (raw-surface renderer: the widget layer never paints,
+ *           so an FDK band would be an invisible input zone — the one
+ *           example that stays bare, honestly), 06 (the FDK decoration
+ *           band is the demo itself), and the manual-bounds
+ *           playgrounds (07, 09, 10) whose absolute set_bounds layouts
+ *           predate the box contract (each calls set_decorated itself).
  *
- * Fontless systems: the header/status labels accept a NULL font (the
- * 07 contract — text is absent, everything else renders), so the
+ * Fontless systems: the status label accepts a NULL font (the 07
+ * contract — text is absent, everything else renders), so the
  * helper never fails just because no TrueType face is installed.
  *
  * Header-only on purpose: the Makefile builds every C file under
@@ -75,9 +78,7 @@ typedef struct fdk_example {
     fdk_widget *root;     /* the window's root widget            */
     fdk_widget *content;  /* the vertical box examples fill      */
     fdk_widget *status;   /* helper-owned bottom label           */
-    fdk_widget *header_label; /* "FDK NN — name" (restylable)    */
-    fdk_widget *header_hint;  /* "Esc — quit" (restylable)       */
-    fdk_font *ui;         /* 14px UI font (header + status)      */
+    fdk_font *ui;         /* 14px UI font (status)               */
     char label[96];       /* "FDK NN — name", for exit lines     */
     long frames;          /* painted frames (the pump counts)    */
     long frame_limit;     /* FDK_DEMO_FRAMES, 0 = unlimited      */
@@ -123,7 +124,10 @@ FDK_EXAMPLE_FN static bool fdk_example_init(fdk_context **ctx,
 }
 
 /* Opens the standard window. The example builds its widgets inside
- * ex->content (a padded vertical box). */
+ * ex->content (a padded vertical box). 1.4.14: the window wears the
+ * FDK TITLE BAR (set_decorated) — the toolkit's own themed chrome
+ * carrying the "FDK NN — name" title and the close button; the old
+ * in-window header row duplicated it and is gone. */
 FDK_EXAMPLE_FN static bool fdk_example_open(fdk_example *ex,
                                             fdk_context *ctx,
                                             const char *number,
@@ -146,6 +150,12 @@ FDK_EXAMPLE_FN static bool fdk_example_open(fdk_example *ex,
                 number);
         return false;
     }
+    /* The FDK title bar: every example shows the toolkit's own drawn
+     * chrome (themed band, title, window buttons, FDK-driven resize
+     * once the WM chrome is dropped). A backend/WM that refuses to
+     * drop its decorations is not fatal — the example runs with the
+     * WM's chrome instead, and the band simply never appears. */
+    (void)fdk_window_set_decorated(ex->window, true);
     fdk_window_set_event_callback(ex->window, fdk_example__window_event,
                                   ex);
     if (!fdk_ok(fdk_window_get_root(ex->window, &ex->root))) {
@@ -154,10 +164,12 @@ FDK_EXAMPLE_FN static bool fdk_example_open(fdk_example *ex,
         return false;
     }
     /* NULL on fontless systems is fine — labels accept it (the 07
-     * contract): the header text is absent, nothing else changes. */
+     * contract): the status text is absent, nothing else changes. */
     ex->ui = fdk_font_load_system_default(14);
 
-    /* root: vertical box — [header][hairline][content...][status] */
+    /* root: vertical box — [content...][status] (the title band above
+     * both is the window layer's decoration subtree, laid out by
+     * fdk_window_layout, not a child of this box). */
     fdk_widget *frame = NULL;
     if (!fdk_ok(fdk_box_create(ex->root, FDK_VERTICAL, &frame))) {
         goto fail;
@@ -165,29 +177,6 @@ FDK_EXAMPLE_FN static bool fdk_example_open(fdk_example *ex,
     fdk_box_set_padding(frame, 0);
     fdk_box_set_spacing(frame, 0);
     fdk_window_set_content(ex->window, frame);
-
-    /* The example titlebar: name left, "Esc — quit" right. */
-    fdk_widget *header = NULL;
-    if (!fdk_ok(fdk_box_create(frame, FDK_HORIZONTAL, &header))) {
-        goto fail;
-    }
-    fdk_box_set_padding(header, 10);
-    fdk_box_set_spacing(header, 8);
-    fdk_widget *title_lbl = NULL;
-    (void)fdk_label_create(header, ex->ui, ex->label, &title_lbl);
-    ex->header_label = title_lbl;
-    fdk_widget *spacer = NULL;
-    if (fdk_ok(fdk_box_create(header, FDK_HORIZONTAL, &spacer))) {
-        fdk_widget_set_expand(spacer, true, false); /* push hint right */
-    }
-    fdk_widget *hint_lbl = NULL;
-    (void)fdk_label_create(header, ex->ui, "Esc — quit", &hint_lbl);
-    ex->header_hint = hint_lbl;
-    (void)fdk_label_set_color(
-        hint_lbl, fdk_theme_get_color(NULL, FDK_TK_TEXT_DISABLED));
-
-    fdk_widget *hair = NULL;
-    (void)fdk_separator_create(frame, FDK_HORIZONTAL, &hair);
 
     /* The example's content box (padded, spaced). */
     if (!fdk_ok(fdk_box_create(frame, FDK_VERTICAL, &ex->content))) {

@@ -42,6 +42,7 @@ static char g_sandbox[256]; /* the settings-file path inside it */
 static char g_fixtures[1024];
 static char g_theme_tool[1024];
 static char g_prefs_tool[1024];
+static char g_set_tool[1024];
 
 static const char *fixture(const char *name) {
     static char path[1100];
@@ -115,6 +116,34 @@ static void sandbox_env(void) {
     assert(setenv("XDG_DATA_DIRS", g_root, 1) == 0);
     assert(unsetenv("FDK_THEME") == 0);
     assert(unsetenv("XDG_CONFIG_HOME") == 0);
+}
+
+/* The XDG sandbox layout for the PER-APP stores (1.4.14): under
+ * $FDK_PREFS_FILE every store resolves to the same single file, so
+ * `--app` separation needs XDG_CONFIG_HOME/<store>.prefs — the real
+ * desktop layout. Both files live in g_root. */
+static void xdg_sandbox_env(void) {
+    assert(unsetenv("FDK_PREFS_FILE") == 0);
+    assert(setenv("XDG_CONFIG_HOME", g_root, 1) == 0);
+    assert(setenv("FDK_THEME_DIR", g_fixtures, 1) == 0);
+    assert(setenv("XDG_DATA_HOME", g_root, 1) == 0);
+    assert(setenv("XDG_DATA_DIRS", g_root, 1) == 0);
+    assert(unsetenv("FDK_THEME") == 0);
+    remove(g_sandbox); /* the FDK_PREFS_FILE variant, unused here */
+}
+
+/* The global store's file in the XDG layout. */
+static const char *xdg_global_path(void) {
+    static char path[512];
+    snprintf(path, sizeof path, "%s/fdk.prefs", g_root);
+    return path;
+}
+
+/* The app store's file in the XDG layout. */
+static const char *xdg_app_path(const char *app_id) {
+    static char path[512];
+    snprintf(path, sizeof path, "%s/%s.prefs", g_root, app_id);
+    return path;
 }
 
 /* ---- fdk-theme -------------------------------------------------------- */
@@ -365,6 +394,131 @@ static void test_first_run_creates_config_dir(void) {
     assert(file_contains(deep, "width = 100"));
 }
 
+/* ---- fdk-set (1.4.14) --------------------------------------------------- */
+
+static void test_set_help_version(void) {
+    char out[8192];
+    assert(run_capture(cmdln(g_set_tool, "help"), out, sizeof out) == 0);
+    assert(strstr(out, "usage:") != NULL);
+    assert(strstr(out, "theme set <name> [--app <app-id>]") != NULL);
+    assert(run_capture(cmdln(g_set_tool, "version"), out, sizeof out) ==
+           0);
+    assert(strstr(out, "fdk-set (FDK)") != NULL);
+    assert(run_capture(cmdln(g_set_tool, ""), out, sizeof out) == 1);
+    assert(run_capture(cmdln(g_set_tool, "nope get"), out, sizeof out) ==
+           1); /* unknown group */
+    assert(run_capture(cmdln(g_set_tool, "theme"), out, sizeof out) == 1);
+    assert(run_capture(cmdln(g_set_tool, "theme frobnicate"),
+                       out, sizeof out) == 1);
+}
+
+static void test_set_global_interops_with_fdk_theme(void) {
+    char out[8192];
+    xdg_sandbox_env();
+
+    /* fdk-set writes the SAME global store fdk-theme reads. */
+    assert(run_capture(cmdln(g_set_tool, "theme set alpha"),
+                       out, sizeof out) == 0);
+    assert(strstr(out, "theme set: Alpha Test (") != NULL);
+    assert(file_contains(xdg_global_path(), "name = alpha"));
+    assert(run_capture(cmdln(g_theme_tool, "get"), out, sizeof out) == 0);
+    assert(has_line(out, "alpha"));
+
+    /* And fdk-theme's write is what fdk-set's get reports. */
+    assert(run_capture(cmdln(g_theme_tool, "set beta"), out,
+                       sizeof out) == 0);
+    assert(run_capture(cmdln(g_set_tool, "theme get"), out,
+                       sizeof out) == 0);
+    assert(has_line(out, "beta"));
+
+    /* reset through fdk-set; fdk-theme sees the cleared store. */
+    assert(run_capture(cmdln(g_set_tool, "theme reset"), out,
+                       sizeof out) == 0);
+    assert(run_capture(cmdln(g_theme_tool, "get"), out, sizeof out) == 0);
+    assert(has_line(out, "FDK Modern"));
+    remove(xdg_global_path());
+}
+
+static void test_set_per_app_store(void) {
+    char out[8192];
+    xdg_sandbox_env();
+
+    /* Nothing set: get --app falls through to the built-in. */
+    assert(run_capture(cmdln(g_set_tool, "theme get --app org.fdk.app1"),
+                       out, sizeof out) == 0);
+    assert(has_line(out, "FDK Modern"));
+
+    /* The per-app override lands in the APP's own file, not the
+     * global store. */
+    assert(run_capture(
+               cmdln(g_set_tool, "theme set alpha --app org.fdk.app1"),
+               out, sizeof out) == 0);
+    assert(file_contains(xdg_app_path("org.fdk.app1"), "name = alpha"));
+    assert(!file_contains(xdg_global_path(), "name = alpha"));
+
+    /* The global setting does not leak into the app's get. */
+    assert(run_capture(cmdln(g_set_tool, "theme set beta"), out,
+                       sizeof out) == 0);
+    assert(run_capture(cmdln(g_set_tool, "theme get --app org.fdk.app1"),
+                       out, sizeof out) == 0);
+    assert(has_line(out, "alpha"));
+
+    /* Without --app the global value answers. */
+    assert(run_capture(cmdln(g_set_tool, "theme get"), out,
+                       sizeof out) == 0);
+    assert(has_line(out, "beta"));
+
+    /* --verbose names the source (on stderr — merged into the
+     * capture for the assertion, exactly how the fdk-theme tests
+     * handle it). */
+    assert(run_capture(
+               cmdln(g_set_tool,
+                     "theme get --app org.fdk.app1 --verbose 2>&1"),
+               out, sizeof out) == 0);
+    assert(strstr(out, "the application's settings") != NULL);
+
+    /* reset --app removes only the app's override. */
+    assert(run_capture(
+               cmdln(g_set_tool, "theme reset --app org.fdk.app1"),
+               out, sizeof out) == 0);
+    assert(!file_contains(xdg_app_path("org.fdk.app1"), "name ="));
+    assert(run_capture(cmdln(g_set_tool, "theme get --app org.fdk.app1"),
+                       out, sizeof out) == 0);
+    assert(has_line(out, "beta")); /* falls back to the global setting */
+
+    remove(xdg_global_path());
+    remove(xdg_app_path("org.fdk.app1"));
+}
+
+static void test_set_exit_codes_and_built_in_alias(void) {
+    char out[8192];
+    xdg_sandbox_env();
+
+    /* not-found (2), unusable (1), usage (1). */
+    assert(run_capture(cmdln(g_set_tool, "theme set no-such-theme"),
+                       out, sizeof out) == 2);
+    assert(run_capture(cmdln(g_set_tool, "theme set broken"), out,
+                       sizeof out) == 1);
+    assert(run_capture(cmdln(g_set_tool, "theme set"), out,
+                       sizeof out) == 1);
+    assert(run_capture(cmdln(g_set_tool, "theme set alpha --app"), out,
+                       sizeof out) == 1); /* --app without a value */
+    assert(run_capture(
+               cmdln(g_set_tool, "theme set alpha --app \"\""), out,
+               sizeof out) == 1); /* empty app id */
+
+    /* 'FDK Modern' is the reset alias, globally and per-app. */
+    assert(run_capture(cmdln(g_set_tool, "theme set alpha --app a.b"), out,
+                       sizeof out) == 0);
+    assert(run_capture(
+               cmdln(g_set_tool, "theme set 'FDK Modern' --app a.b"), out,
+               sizeof out) == 0);
+    assert(strstr(out, "cleared — FDK Modern") != NULL);
+    assert(!file_contains(xdg_app_path("a.b"), "name ="));
+    remove(xdg_app_path("a.b"));
+    remove(xdg_global_path());
+}
+
 /* ---- main -------------------------------------------------------------- */
 
 int main(void) {
@@ -385,12 +539,15 @@ int main(void) {
              self);
     snprintf(g_prefs_tool, sizeof g_prefs_tool, "%s/../tools/fdk-prefs",
              self);
+    snprintf(g_set_tool, sizeof g_set_tool, "%s/../tools/fdk-set",
+             self);
     snprintf(g_fixtures, sizeof g_fixtures,
              "%s/../../tests/data/themes", self);
 
     struct stat st;
     assert(stat(g_theme_tool, &st) == 0);
     assert(stat(g_prefs_tool, &st) == 0);
+    assert(stat(g_set_tool, &st) == 0);
     assert(stat(fixture("alpha.fdk"), &st) == 0);
 
     assert(setenv("HOME", tmpl, 1) == 0);
@@ -409,6 +566,12 @@ int main(void) {
     test_prefs_path();
 
     test_first_run_creates_config_dir();
+
+    test_set_help_version();
+    test_set_global_interops_with_fdk_theme();
+    test_set_per_app_store();
+    test_set_exit_codes_and_built_in_alias();
+    sandbox_env(); /* restore the single-file layout the dir test used */
 
     char cmd[600];
     snprintf(cmd, sizeof cmd, "rm -rf %s", tmpl);

@@ -46,20 +46,15 @@ static const char *THEME_FILES[] = {
 
 /* Applies the app's own themed styling on top of the engine's
  * repaint: root surface color and title accent come from tokens of
- * the theme that is CURRENT now — and the example header (the
- * helper's chrome) re-themes with it, the documented app-side
- * re-theme pattern extended to every label the window owns. */
+ * the theme that is CURRENT now. 1.4.14: the example's chrome — the
+ * FDK title band the window now wears — themes ITSELF through the
+ * same tokens (that is the toolkit's chrome doing what it preaches);
+ * what stays app-owned here is the root surface, the demo title
+ * label, and the status line. */
 static void apply_app_theming(void) {
     fdk_widget_set_background(
         root, fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
     fdk_label_set_color(title, fdk_theme_get_color(NULL, FDK_TK_ACCENT));
-    if (g_ex != NULL) {
-        fdk_label_set_color(g_ex->header_label,
-                            fdk_theme_get_color(NULL, FDK_TK_TEXT));
-        fdk_label_set_color(
-            g_ex->header_hint,
-            fdk_theme_get_color(NULL, FDK_TK_TEXT_DISABLED));
-    }
     (void)fdk_label_set_text(status, fdk_theme_name(NULL));
     printf("PHASE: %s\n", fdk_theme_name(NULL));
     fflush(stdout);

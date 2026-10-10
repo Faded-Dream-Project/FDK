@@ -1878,6 +1878,68 @@ void fdk__window_flush_geo_repaints(fdk_context *ctx) {
     }
 }
 
+/* ---- the theme-settings bridge (1.4.14) --------------------------------
+ *
+ * Core cannot reach into the theme module (layering runs the other
+ * way); the window layer already includes both sides' internals, so
+ * it is the sanctioned crossing point (docs/architecture.md): core
+ * calls these through window_internal.h, they forward to the theme
+ * settings engine (src/theme/settings.c). */
+
+/* fdk_init: bind the app identity + arm the inotify watch. */
+void fdk__window_theme_settings_init(const char *app_id) {
+    fdk__theme_settings_set_app_id(app_id);
+}
+
+/* fdk_shutdown: release the watch (installed theme state is
+ * process-wide and outlives the context). */
+void fdk__window_theme_settings_shutdown(void) {
+    fdk__theme_settings_shutdown();
+}
+
+/* The pump's poll face: -1 when no settings file is watched. */
+int fdk__window_theme_watch_fd(void) {
+    return fdk__theme_settings_watch_fd();
+}
+
+/* The pump's readable face. Drains the watch; when a watched settings
+ * file changed (and the re-theming therefore ran — every live tree
+ * was invalidated), every window of THIS context with pending damage
+ * is repainted NOW: fdk_run() applications have no paint loop of
+ * their own, and a re-theme that waits for the next input event is
+ * not live. Custom pump;paint loops are unaffected — the repaint
+ * consumes the damage their own gate would have painted anyway.
+ * Returns 1 when a re-theme cycle ran (the pump counts it as
+ * activity), 0 otherwise. */
+int fdk__window_theme_watch_pump(fdk_context *ctx) {
+    if (!fdk__theme_settings_watch_drain()) {
+        return 0;
+    }
+    if (ctx == NULL) {
+        return 1;
+    }
+    /* Same destroy-safety discipline as the geo flush: paint hooks
+     * run application code; re-verify registration by identity and
+     * only advance the index when the slot still holds its entry. */
+    size_t i = 0;
+    while (i < ctx->window_count) {
+        fdk_window *window = ctx->windows[i];
+        if (window == NULL || window->root == NULL ||
+            !fdk_widget_tree_has_damage(window->root)) {
+            i++;
+            continue;
+        }
+        fdk_platform_window *pwindow = window->pwindow;
+        (void)fdk_window_paint(window);
+        if (fdk_context_find_window_by_pwindow(ctx, pwindow) == window) {
+            i++;
+        }
+        /* else: destroyed mid-paint; the slot holds the next window
+         * — visit it (no index advance). */
+    }
+    return 1;
+}
+
 /* Is `widget` still a live descendant of `root`? (The content
  * pointer is weak: a destroyed content must silently deactivate.) */
 static bool widget_in_tree(fdk_widget *root, fdk_widget *widget) {

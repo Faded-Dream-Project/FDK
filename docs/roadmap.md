@@ -4761,3 +4761,89 @@ application feature — a settings face is exactly what a toolkit
 owes its applications' users (gsettings is not "beyond GTK"). The
 NEXT list stays empty; the gap the maintainer found was the last
 one of its kind.
+
+## 1.4.14 — the live settings desktop (maintainer-requested)
+
+The maintainer USED 1.4.13 on a real desktop, and the usage report
+became the milestone: `fdk-theme set` should reach RUNNING apps,
+not just the next launch; one application should be able to keep
+its own theme while the desktop's default changes; drops from a
+real file manager hovered fine and then vanished; the file picker
+read as a toy; every example should wear the toolkit's own title
+bar; and a developer whose brand is one theme should be able to
+say so. All of it shipped, plus the crash-hunt hardening the
+reports flushed out.
+
+- The settings ENGINE (src/theme/settings.c): the boot's
+  resolution grew its final shape — $FDK_THEME, then the
+  application's OWN <app_id>.prefs store (the per-app override),
+  then the global fdk.prefs store, then the built-in — one
+  resolver shared by the boot and every live recheck. theme.c
+  keeps the one-shot guard and the ownership flag (an explicit
+  fdk_theme_set_default() opts the process out, and the settings
+  engine stands down permanently); settings.c owns resolution,
+  the installed theme's lifetime, and the watch.
+- THE LIVE FOLLOW: while a display context runs, the settings
+  files' directories are watched (inotify; atomic temp+rename
+  saves arrive as IN_MOVED_TO, hand edits as IN_CLOSE_WRITE).
+  The pump polls the watch fd beside the backend's event fd, and
+  on a watched-file change re-resolves and — when the theme
+  actually changed — repaints every damaged window of the context
+  right there (fdk_run()-shaped applications have no paint loop
+  of their own; a re-theme waiting for the next input event would
+  not be live). Verified end to end against a real X server: the
+  pixel probe watched a running app flip palettes the moment the
+  file landed, per-app overrides winning and being forgotten
+  live, resets reverting to the built-in.
+- fdk-set (tools/fdk-set.c): the per-application face —
+  `fdk-set theme set NAME [--app APP]` writes the app's own store
+  (`fdk-theme set` interop is exact: same global file, same
+  validation, same exit codes). `get --app` walks the full
+  precedence and --verbose names the leg that answered.
+- The DEVELOPER WHITELIST: fdk_theme_set_allowed_themes() clamps
+  every settings source to a curated list (stems or internal
+  names; a setting outside the list falls back to names[0]; no
+  setting at all means names[0], not the built-in; the clamp
+  re-runs immediately when the list arrives late). It governs
+  settings only — the developer's own code is always honored.
+- THE INCR-DROP FIX (x11_clipboard.c + x11_dnd.c): the drop fetch
+  now runs through one requestor-parameterized selection-read
+  engine — atomic, multi-part atomic, and INCR flights (a foreign
+  requestor gets PropertyChangeMask for the flight and its own
+  mask back after). The report it closes: a GTK/Qt file manager
+  serving text/uri-list via INCR read as a format-32 seed, which
+  the old `fmt != 8` check silently discarded — hover said "drop
+  it", the drop vanished. Reproduced with a purpose-built
+  incr-files/incr-text rig (64-byte chunks, the real ICCCM dance),
+  fixed, and pinned by two new X11 interop groups. Plus: format
+  fallback (uri-list refused -> UTF-8 text), a 600 ms drop-convert
+  budget (real sources under load answer slower than
+  toolkit-to-toolkit peers), and the duplicated dead-connection
+  guard in x11_dispatch.c that the hardening pass flushed out.
+- The PICKER RETUNE (file_dialog.c): 866x614, a 15px face, 34px
+  rows, a 184px places sidebar, a 640x420 list — the "small
+  picker, small text" report closed (verified visually before and
+  after).
+- The FDK TITLE BAR ON EVERY EXAMPLE (example_window.h + 07/09/
+  10): the helper's standard window is now decorated (the
+  toolkit's own themed band carries the title and close button;
+  the old in-window header row that duplicated it is gone), the
+  INIT-tier examples decorate their own windows, and each
+  absolute-layout example shifts its content below the band.
+  02_rendering stays bare on purpose — its subject is raw-surface
+  rendering that never paints the widget tree, and an unpainted
+  band would be an invisible input zone.
+- Tests: the discovery suite grew the per-app-priority matrix, the
+  whitelist matrix (clamp, first-allowed, stem-vs-internal-name,
+  late arrival, argument safety), and the live-recheck matrix
+  (file changes followed live, resets reverted, opted-out apps
+  left alone); the CLI suite grew the fdk-set groups (global
+  interop, per-app store, exit codes); the X11 suite grew the
+  INCR-drop and settings-live-follow groups. 616 exported
+  symbols, verify-exports green, headless + X11 suites green.
+
+Where this leaves the line: a toolkit's settings story is not
+complete until the settings FOLLOW the running desktop — gsettings
+never required restarting applications, and neither does FDK now.
+The NEXT list stays empty; everything the maintainer's usage
+report identified has shipped.
