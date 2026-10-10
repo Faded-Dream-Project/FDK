@@ -12,6 +12,9 @@
  *                     divider DRAGS (and answers the arrows when
  *                     focused — Tab to it)
  *   1.4.5 frame     — the item grid: an IconView of glyph cells
+ *   1.4.11 frame    — markup: rich text (bold/italic/color/underline
+ *                     /strikethrough) in NOWRAP/WRAP/ELLIPSIZE
+ *                     labels, a button, and the tooltips
  *                      (click, ctrl/shift, keyboard grid nav)
  *   1.4.4 frame     — the modern batch: a REORDERABLE notebook, a
  *                      color-well button, an icon-slot entry, an
@@ -239,7 +242,7 @@ int main(int argc, char **argv) {
     g_ctx = ctx;
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 1980)) {
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 2260)) {
         fdk_shutdown(ctx);
         return 1;
     }
@@ -606,6 +609,77 @@ int main(int argc, char **argv) {
                 pic, "The picture widget: an owned surface under a "
                      "content-fit policy");
         }
+    }
+
+    /* --- frame: the 1.4.11 markup (rich text everywhere) ---
+     *
+     * One tiny tag vocabulary (<b> <i> <u> <s> <color=#rrggbb> +
+     * entities) driving every text surface: a NOWRAP label with
+     * mixed styles and colors, a WRAP label whose bold words wrap
+     * by their BOLD widths, an ELLIPSIZE label cut by styled
+     * metrics, and a button whose label is markup. Hover the rows:
+     * the TOOLTIPS are markup too. */
+    {
+        fdk_widget *f1411 = NULL;
+        (void)fdk_frame_create(content, font16,
+                               "1.4.11 — markup (rich text)", &f1411);
+        fdk_widget_set_background(f1411, col(26, 29, 40));
+
+        fdk_widget *mrow1 = NULL;
+        (void)fdk_box_create(f1411, FDK_HORIZONTAL, &mrow1);
+        fdk_box_set_spacing(mrow1, 16);
+        fdk_widget *ml1 = NULL;
+        (void)fdk_label_create(
+            mrow1, font16,
+            "<b>Bold</b> <i>italic</i> <u>under</u> "
+            "<s>gone</s> <color=#f0a35e>amber</color> "
+            "<b><i><color=#7ec8e3>everything</color></i></b> "
+            "&amp; entities &lt;too&gt;",
+            &ml1);
+        (void)fdk_widget_set_tooltip_markup(
+            ml1, "<b>NOWRAP</b> markup: mixed styles, run colors, "
+                 "decoration bars — <u>one</u> label");
+
+        fdk_widget *mrow2 = NULL;
+        (void)fdk_box_create(f1411, FDK_HORIZONTAL, &mrow2);
+        fdk_box_set_spacing(mrow2, 16);
+        fdk_widget *ml2 = NULL;
+        (void)fdk_label_create(
+            mrow2, font16,
+            "<b>Wrapped markup:</b> the <color=#9fd98a>green</color> "
+            "words wrap by their <b>BOLD</b> widths — a styled word "
+            "moves whole, exactly like a plain one",
+            &ml2);
+        fdk_label_set_mode(ml2, FDK_LABEL_WRAP);
+        fdk_widget_set_natural_size(ml2, 400, 0);
+        fdk_widget_set_expand(ml2, true, false);
+        (void)fdk_widget_set_tooltip_markup(
+            ml2, "<b>WRAP</b> markup: the break engine measures "
+                 "each glyph at <i>its own</i> style");
+
+        fdk_widget *mrow3 = NULL;
+        (void)fdk_box_create(f1411, FDK_HORIZONTAL, &mrow3);
+        fdk_box_set_spacing(mrow3, 16);
+        fdk_widget *ml3 = NULL;
+        (void)fdk_label_create(
+            mrow3, font16,
+            "<b>A very long bold headline that will not fit and "
+            "gets cut by styled metrics</b>",
+            &ml3);
+        fdk_label_set_mode(ml3, FDK_LABEL_ELLIPSIZE);
+        fdk_widget_set_natural_size(ml3, 300, 0);
+        fdk_widget_set_expand(ml3, true, false);
+        (void)fdk_widget_set_tooltip_markup(
+            ml3, "<b>ELLIPSIZE</b> markup: the prefix is chosen by "
+                 "<color=#f0a35e>styled</color> widths");
+
+        fdk_widget *mbtn = NULL;
+        (void)fdk_button_create(mrow3, font16, NULL, &mbtn);
+        (void)fdk_button_set_markup(
+            mbtn, "Run <b>now</b>, <color=#9fd98a>go</color>");
+        (void)fdk_widget_set_tooltip_markup(
+            mbtn, "A markup <b>button</b>: the label is rich text "
+                 "too");
     }
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);

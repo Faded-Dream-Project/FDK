@@ -29,6 +29,7 @@
 
 #include "fdk/fdk_layout.h"
 #include "fdk/fdk_widget.h"
+#include "fdk/fdk_text.h" /* 1.4.11: fdk_span (tooltip/label/button markup) */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -105,8 +106,16 @@ struct fdk_widget {
 
     /* Tooltip text (1.3.2): owned copy, NULL when unset; shown by
      * the tooltip module (tooltip.c) when the pointer rests on this
-     * widget. Freed by teardown like name. */
+     * widget. Freed by teardown like name.
+     *
+     * 1.4.11 markup: tooltip_spans are the parsed attribute runs of
+     * tooltipMarkup (fdk_widget_set_tooltip_markup); tooltip then
+     * holds the PLAIN text, and the tooltip module wraps and paints
+     * through the span-aware passes. set_tooltip clears both;
+     * teardown frees both. */
     char *tooltip;
+    fdk_span *tooltip_spans;   /* owned; NULL when the tip is plain */
+    size_t tooltip_span_count;
 
     /* Accessibility overrides (Phase 10): when set, these beat the
      * class descriptor's computed name/description in

@@ -70,6 +70,18 @@ fdk_result fdk_label_create(fdk_widget *parent, fdk_font *font,
  * container. NULL or "" clears the text. */
 fdk_result fdk_label_set_text(fdk_widget *label, const char *text);
 
+/* Replaces the text with MARKUP (1.4.11): the tiny tag vocabulary
+ * from fdk_text.h (<b> <i> <u> <s> <color=#rrggbb[aa]> + entities)
+ * parses into plain text + attribute spans, and every display mode
+ * lays out and paints styled — a bold word measures BOLD-wide in
+ * NOWRAP and WRAP, ellipsize cuts by styled widths, colors and
+ * underline/strikethrough bars paint per run. get_text reports the
+ * PLAIN text (what a11y narrates); set_text clears the markup. NULL
+ * clears the label; a tag-free string is just plain text. Returns
+ * FDK_ERR_OUT_OF_MEMORY if the parse allocation fails (old content
+ * untouched). */
+fdk_result fdk_label_set_markup(fdk_widget *label, const char *markup);
+
 /* Text color (default: the palette's text color — get_color
  * reports the same resolution). */
 void fdk_label_set_color(fdk_widget *label, fdk_color color);
@@ -137,6 +149,15 @@ fdk_result fdk_button_create(fdk_widget *parent, fdk_font *font,
 
 /* Replaces the label (copied; re-measures). */
 fdk_result fdk_button_set_text(fdk_widget *button, const char *text);
+
+/* Replaces the label with MARKUP (1.4.11) — the Label's markup
+ * contract on a button: tags parse to plain text + spans, the
+ * natural size uses styled widths, paint draws styled glyphs, run
+ * colors, and decoration bars. get_text reports the PLAIN label;
+ * set_text clears the markup. The role machinery (fills, focus
+ * ring, the LINK underline) is markup-agnostic. */
+fdk_result fdk_button_set_markup(fdk_widget *button, const char *markup);
+
 /* The button's current label (toolkit-owned copy; valid until the
  * next set_text/destroy; NULL when it has no text). */
 const char *fdk_button_get_text(fdk_widget *button);

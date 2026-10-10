@@ -9,39 +9,47 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.10** (fullscreen on
-both backends — the window-state surface closed), by a full
-in-depth code review — every claim below was
-re-verified against the tree, not copied from docs. THE AUDIT'S
-OWN FIRST CATCH: the ledger's "themed tooltips" candidate was
-stale (the 1.3.2 tooltip has been fully themed since birth —
-tokens, parser, Modern retune, tests); the tree is always the
-truth, including over this file.
+Last audited: 2026-10-10, at milestone **1.4.11** (the markup
+milestone — rich text everywhere), by a full in-depth code review
+— every claim below was re-verified against the tree, not copied
+from docs. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
+tooltips" candidate was stale (the 1.3.2 tooltip has been fully
+themed since birth — tokens, parser, Modern retune, tests); the tree
+is always the truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.10** (fullscreen both backends — the
-  window-state surface closed; 1.4.9 shipped the PNG codec + the
-  Picture widget + the clipboard image surface)
+- **HEAD:** milestone **1.4.11** (the markup milestone — rich
+  text: the attribute-run layer, the tag scanner, and markup in
+  labels/buttons/tooltips; 1.4.10 shipped fullscreen both
+  backends; 1.4.9 shipped the PNG codec + the Picture widget +
+  the clipboard image surface)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **598 exported symbols**, `make verify-exports` OK in
+- **Public API:** **607 exported symbols**, `make verify-exports` OK in
   debug AND release
 - **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
-  suites, the eight 1.4.8 textview groups, and the 1.4.9 png/
-  picture suite); X11 integration suite all-pass — **147 [ok]**
-  (real Xvfb, real input, incl. the modern-batch, HiDPI (private
-  192-dpi server), iconview GUI, file-dialog icon-mode, textview
-  GUI, and clipboard-image groups); 34 test files
-- **Scale:** ~56k lines of C in `src/` (+ generated Wayland
+  suites, the eight 1.4.8 textview groups, the 1.4.9 png/
+  picture suite, and the 1.4.11 markup suite); X11 integration
+  suite all-pass — **147 [ok]** (real Xvfb, real input, incl. the
+  modern-batch, HiDPI (private 192-dpi server), iconview GUI,
+  file-dialog icon-mode, textview GUI, and clipboard-image
+  groups); 34 test files
+- **Scale:** ~58k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
 ## Implemented — DO NOT re-add any of these
 
 ### Widget catalog (all SHIPPED, class names from `src/widget/*.c`)
 
-button, toggle, checkbox, radio, label, entry, progress (determinate +
+button (with **MARKUP since 1.4.11** — fdk_button_set_markup:
+styled label widths, run colors, decoration bars; the role
+machinery is markup-agnostic), toggle, checkbox, radio, label
+(with **MARKUP since 1.4.11** — rich spans in all three display
+modes: NOWRAP measures styled, WRAP breaks by styled widths,
+ELLIPSIZE cuts by styled metrics; get_text reports the PLAIN
+text), entry, progress (determinate +
 busy), separator, frame, notebook, list (multi-select, rubber-band +
 auto-scroll, row icons), tree (row icons; multi-select + rubber band
 + auto-scroll), scrollview + scrollbar (smooth wheel), menu /
@@ -61,7 +69,10 @@ break engine + no-wrap mode, caret/selection across visual lines
 with the goal column, PageUp/PageDown, paragraph triple-click,
 the Entry's whole splice/undo/clipboard/PRIMARY/preedit
 discipline, the full a11y text interface under TEXT_VIEW),
-toolbar, tooltip, spinner, link-button (role on button), paned,
+toolbar, tooltip (with **MARKUP since 1.4.11** —
+fdk_widget_set_tooltip_markup: the tip wraps by styled widths and
+paints run colors + decoration bars; get_tooltip reports the
+PLAIN text), spinner, link-button (role on button), paned,
 expander, statusbar, stack + stackswitcher, revealer (slide modes;
 crossfade via the paint group), levelbar, canvas (drawing area),
 search entry (preset; debounced search-changed; BUILT on the
@@ -137,24 +148,31 @@ sidebar rhythm).
   ENCODER over zlib (fdk_surface_save_png), the Picture widget,
   clipboard image/png (X11 atomic property + Wayland data-device
   pipe, one-content-at-a-time)
+- **Rich text / markup (1.4.11)**: fdk_span (byte range +
+  absolute style + optional color + underline/strikethrough), the
+  span twins of measure/draw/break/ellipsize (zero spans == the
+  classic behavior), fdk_markup_parse — a TAG SCANNER (<b> <i>
+  <u> <s> <color=#rrggbb[aa]> + the six classic entities; nesting
+  merges; unknown tags, stray '<', and unmatched closes stay
+  LITERAL; unclosed tags close implicitly), the STYLE-VARIANT-
+  keyed glyph cache (regular + bold rasters coexist in one font
+  object), decoration bars in run colors, kerning resets at
+  style-run boundaries. NO size markup (a font is one face at
+  one pixel size — the documented tradeoff)
 - Shortcuts/accelerators/mnemonics (1.3.3 / 1.3.6)
 - Versioned shared-library export surface (version script +
   verify-exports gate)
 
 ## What's left (the authoritative backlog)
 
-### NEXT — milestone 1.4.9+ (the "serious toolkit" audit, value order)
+### NEXT — milestone 1.4.12 (the last real item)
 
-The widget families are shipped across the board (the TextView
-closed the last hole in 1.4.8); the remaining work is what a REAL
-application still cannot build on FDK today:
+The widget families are shipped across the board; rich text
+shipped in 1.4.11 (the attribute-run layer + the tag scanner +
+markup in labels/buttons/tooltips). What remains before the
+"anything more would not be a toolkit" line:
 
-1. **Label markup** — rich spans (bold/italic/color, maybe size)
-   in labels/buttons/tooltips: a tiny attribute-run layer over
-   the shaping engine, no HTML/XML parser.
-2. **IME completion surface** — LATER by the no-bus policy until a
-   protocol joins third_party/wayland-protocols
-3. **INCR transfers** — the X11 clipboard's 4 MiB atomic cap
+1. **INCR transfers** — the X11 clipboard's 4 MiB atomic cap
    lifter (screenshots from other tools may exceed it)
 
 ### LATER (real, not next)

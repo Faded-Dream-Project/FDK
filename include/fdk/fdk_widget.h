@@ -288,6 +288,14 @@ const char *fdk_widget_get_name(const fdk_widget *widget);
  * is parented there) — detached trees store the text but never show
  * it. Returns FDK_ERR_OUT_OF_MEMORY if the copy fails. */
 fdk_result fdk_widget_set_tooltip(fdk_widget *widget, const char *text);
+/* The tooltip's MARKUP twin (1.4.11): the tiny tag vocabulary from
+ * fdk_text.h (<b> <i> <u> <s> <color=#rrggbb[aa]> + entities) parses
+ * into plain text + attribute spans; the tip wraps by STYLED widths
+ * (a bold word is BOLD-wide) and paints styled glyphs, run colors,
+ * and underline/strikethrough bars. get_tooltip reports the PLAIN
+ * text; set_tooltip clears the markup. NULL or "" clears the tip. */
+fdk_result fdk_widget_set_tooltip_markup(fdk_widget *widget,
+                                          const char *markup);
 /* The widget's tooltip text (toolkit-owned copy; NULL when unset);
  * valid until the next set or destroy. */
 const char *fdk_widget_get_tooltip(const fdk_widget *widget);

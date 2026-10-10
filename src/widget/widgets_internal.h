@@ -162,7 +162,7 @@ void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
 typedef struct fdk_label {
     fdk_widget base;
     fdk_font *font;    /* borrowed */
-    char *text;        /* owned, may be NULL */
+    char *text;        /* owned, may be NULL (markup: the PLAIN text) */
     fdk_color color;   /* text color                          */
     bool color_set;    /* false: resolve the theme's text color
                        * at paint time (the default) — the getter
@@ -178,6 +178,17 @@ typedef struct fdk_label {
     fdk_i32 ellipsis_x;     /* ELLIPSIZE mode: prefix advance (pen) */
     fdk_i32 ellipsis_w;     /* ELLIPSIZE mode: the "..." run's advance */
     bool ellipsized;        /* ELLIPSIZE mode: text did not fit   */
+    /* 1.4.11 markup: the parsed attribute spans (owned; NULL for a
+     * plain set_text label) and the flattened-run cache the paint
+     * path builds alongside the line cache (rebuilt on the same
+     * dirty/width triggers, freed with the label). The run type is
+     * forward-declared below — text_internal.h carries the text
+     * layer's vendored includes, which the widget translation units
+     * deliberately do not see. */
+    fdk_span *spans;
+    size_t span_count;
+    struct fdk__text_run *runs; /* owned flatten cache, may be NULL */
+    size_t run_count;
 } fdk_label;
 
 /* The shared hover-fade state (1.4.1): the visual blend a control
@@ -205,7 +216,7 @@ void fdk__hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
 typedef struct fdk_button {
     fdk_widget base;
     fdk_font *font;    /* borrowed */
-    char *text;        /* owned, may be NULL */
+    char *text;        /* owned, may be NULL (markup: the PLAIN text) */
     fdk_button_activate_fn on_activate;
     void *on_activate_data;
     bool pressed;      /* pointer down inside */
@@ -213,6 +224,12 @@ typedef struct fdk_button {
     fdk_button_role role; /* 1.4.0 paint role (default NORMAL) */
     bool checked;      /* 1.4.0 toggle-button state */
     fdk_hover_fade fade; /* 1.4.1: hover paint blend */
+    /* 1.4.11 markup: parsed attribute spans (owned; NULL when the
+     * text was set with fdk_button_set_text). Buttons are single-
+     * line: measure/paint flatten per call (no cache to keep
+     * coherent with anything). */
+    fdk_span *spans;
+    size_t span_count;
 } fdk_button;
 
 /* Shared shape of Toggle / Checkbox / Radio: an indicator box/circle/

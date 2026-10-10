@@ -23,6 +23,8 @@
 
 #include "text_internal.h"
 
+#include "core/alloc_internal.h" /* the span wrappers free flattened runs */
+
 /* stbtt pair kerning is called directly below; everything else rides
  * the cached-glyph walk from text.c. */
 
@@ -36,13 +38,16 @@
  * NULL for a non-NULL font). */
 static const fdk_glyph *shape_at(fdk_font *f, const char *utf8,
                                  size_t len, size_t i, int *io_prev_g,
-                                 fdk_f32 *io_pen, fdk_u32 *out_cp) {
+                                 fdk_f32 *io_pen, fdk_u32 *out_cp,
+                                 unsigned style_flags) {
     fdk_u32 cp = 0;
     (void)fdk_text_utf8_next(utf8, len, i, &cp);
-    const fdk_glyph *glyph = fdk_text_glyph_for(f, cp);
-    /* The cache key packs (glyph index, subpixel phase); kerning
-     * wants the raw glyph id, so unpack it the same way text.c does. */
-    int g = glyph->key / FDK_TEXT_SUBPIXEL_PHASES;
+    const fdk_glyph *glyph =
+        fdk_text_glyph_for_styled(f, cp, style_flags);
+    /* The cache key packs (glyph index, style variant, subpixel
+     * phase); kerning wants the raw glyph id, so unpack it the same
+     * way text.c does. */
+    int g = fdk_text_key_glyph(glyph->key);
 
     if (*io_prev_g >= 0) {
         int kern = stbtt_GetGlyphKernAdvance(&f->info, *io_prev_g, g);
@@ -63,6 +68,45 @@ static bool is_wrap_space(fdk_u32 cp) {
 /* A line's reported advance uses the same rounding as measure. */
 static fdk_i32 pen_round(fdk_f32 pen) {
     return (fdk_i32)(pen + 0.5f);
+}
+
+/* ---- span-aware shaping cursor (1.4.11) ---------------------------
+ *
+ * The wrap/ellipsize engines are attribute-blind at their core; the
+ * SPAN variants of both passes (the Label's markup modes) feed them
+ * the effective style per byte through this cursor. Kerning resets
+ * at style-run boundaries exactly as it does at line boundaries —
+ * a bold word's last glyph never kerns against the regular text
+ * after it (the two rasterizations are different slots; pretending
+ * kerning applies would drift measure from paint). */
+typedef struct style_cursor {
+    const fdk__text_run *runs;
+    size_t n_runs;
+    unsigned prev_style; /* style of the last SHAPED glyph         */
+    bool have_prev;      /* false at line starts / cursor resets    */
+} style_cursor;
+
+static void style_cursor_reset(style_cursor *sc) {
+    sc->have_prev = false;
+}
+
+/* Shapes the glyph at byte i under the cursor's run style, resetting
+ * the caller's previous-glyph id when the style changed (kerning
+ * never crosses a style boundary). Returns the shaped glyph. */
+static const fdk_glyph *shape_at_cursor(fdk_font *f, const char *utf8,
+                                        size_t len, size_t i,
+                                        style_cursor *sc, int *io_prev_g,
+                                        fdk_f32 *io_pen, fdk_u32 *out_cp) {
+    unsigned style = fdk__run_style_at(sc->runs, sc->n_runs, i,
+                                       f->style);
+    if (sc->have_prev && style != sc->prev_style) {
+        *io_prev_g = -1; /* style boundary: no kerning across it */
+    }
+    const fdk_glyph *g = shape_at(f, utf8, len, i, io_prev_g, io_pen,
+                                  out_cp, style);
+    sc->prev_style = style;
+    sc->have_prev = true;
+    return g;
 }
 
 /* ---- line breaking ---- */
@@ -121,13 +165,20 @@ static bool wrap_emit(fdk_text_line *out_lines, size_t max_lines,
     return true;
 }
 
-fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
-                                     const char *utf8, size_t byte_len,
-                                     fdk_i32 max_width,
-                                     fdk_text_line *out_lines,
-                                     size_t max_lines,
-                                     size_t *out_line_count,
-                                     bool *out_truncated) {
+/* The engine the public break entry points ride (and the markup
+ * Label's cached-runs paint path calls directly): runs == NULL (or
+ * n_runs == 0) is the classic single-style walk; otherwise the style
+ * cursor feeds each glyph its run's style and kerning resets at
+ * style boundaries. Same greedy algorithm either way — one rounding
+ * rule, one whitespace definition. */
+fdk_result fdk__break_lines_runs(const fdk_font *font,
+                                  const char *utf8, size_t byte_len,
+                                  const fdk__text_run *runs,
+                                  size_t n_runs, fdk_i32 max_width,
+                                  fdk_text_line *out_lines,
+                                  size_t max_lines,
+                                  size_t *out_line_count,
+                                  bool *out_truncated) {
     fdk_font *f = fdk_text_font_mutable(font); /* cache-warming, like measure */
     if (f == NULL || utf8 == NULL || out_line_count == NULL ||
         (out_lines == NULL && max_lines > 0) || max_width < 1) {
@@ -149,11 +200,12 @@ fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
     size_t i = 0;
     int prev_g = -1;
     fdk_f32 pen = 0.0f;
+    style_cursor sc = {runs, n_runs, 0, false};
 
     while (i < byte_len) {
         fdk_u32 cp = 0;
         fdk_f32 pen_before = pen;
-        shape_at(f, utf8, byte_len, i, &prev_g, &pen, &cp);
+        shape_at_cursor(f, utf8, byte_len, i, &sc, &prev_g, &pen, &cp);
         size_t next = i + (size_t)fdk_text_utf8_next(utf8, byte_len, i,
                                                      &cp);
         /* `next` recomputes the consumed length; decoding twice is
@@ -177,6 +229,7 @@ fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
             i = next;
             pen = 0.0f;
             prev_g = -1;
+            style_cursor_reset(&sc);
             continue;
         }
 
@@ -214,6 +267,7 @@ fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
             i = next;
             pen = 0.0f;
             prev_g = -1;
+            style_cursor_reset(&sc);
             continue;
         }
 
@@ -232,6 +286,7 @@ fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
             i = ws.break_at;
             pen = 0.0f;
             prev_g = -1;
+            style_cursor_reset(&sc);
             continue;
         }
 
@@ -244,6 +299,7 @@ fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
             i = ws.break_at;
             pen = 0.0f;
             prev_g = -1;
+            style_cursor_reset(&sc);
             continue;
         }
 
@@ -275,6 +331,7 @@ fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
         }
         pen = 0.0f;
         prev_g = -1;
+        style_cursor_reset(&sc);
     }
 
     /* Final line: only if visible bytes remain — a trailing pure
@@ -293,6 +350,47 @@ fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
     return FDK_OK;
 }
 
+fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
+                                     const char *utf8, size_t byte_len,
+                                     fdk_i32 max_width,
+                                     fdk_text_line *out_lines,
+                                     size_t max_lines,
+                                     size_t *out_line_count,
+                                     bool *out_truncated) {
+    return fdk__break_lines_runs(font, utf8, byte_len, NULL, 0,
+                                  max_width, out_lines, max_lines,
+                                  out_line_count, out_truncated);
+}
+
+fdk_result fdk_font_break_lines_spans_utf8(
+    const fdk_font *font, const char *utf8, size_t byte_len,
+    const fdk_span *spans, size_t span_count, fdk_i32 max_width,
+    fdk_text_line *out_lines, size_t max_lines,
+    size_t *out_line_count, bool *out_truncated) {
+    if (spans == NULL && span_count > 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (spans == NULL || span_count == 0) {
+        /* No attributes: exactly the classic walk (no flatten cost). */
+        return fdk__break_lines_runs(font, utf8, byte_len, NULL, 0,
+                                      max_width, out_lines, max_lines,
+                                      out_line_count, out_truncated);
+    }
+    fdk__text_run *runs = NULL;
+    size_t n_runs = 0;
+    fdk_result r = fdk__span_flatten(utf8, byte_len, spans, span_count,
+                                     fdk_font_get_style(font), &runs,
+                                     &n_runs);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    r = fdk__break_lines_runs(font, utf8, byte_len, runs, n_runs,
+                              max_width, out_lines, max_lines,
+                              out_line_count, out_truncated);
+    fdk_free(runs);
+    return r;
+}
+
 /* ---- ellipsis ---- */
 
 /* The ellipsis run: shared macro (see text_internal.h) — the pass
@@ -300,11 +398,16 @@ fdk_result fdk_font_break_lines_utf8(const fdk_font *font,
  * definition. Theming the character (or the policy) belongs to the
  * theme engine, not the text layer. */
 
-fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
-                                   const char *utf8, size_t byte_len,
-                                   fdk_i32 max_width,
-                                   size_t *out_prefix_bytes,
-                                   bool *out_fits) {
+/* The engine both public ellipsize entry points ride. The span walk
+ * shapes each glyph at its run's style (kerning resets at style
+ * boundaries through the shared cursor); the ellipsis itself is
+ * measured at the FONT's own style — it is the toolkit's truncation
+ * mark, not part of any run. */
+fdk_result fdk__ellipsize_runs(const fdk_font *font,
+                                const char *utf8, size_t byte_len,
+                                const fdk__text_run *runs, size_t n_runs,
+                                fdk_i32 max_width,
+                                size_t *out_prefix_bytes, bool *out_fits) {
     fdk_font *f = fdk_text_font_mutable(font); /* cache-warming, like measure */
     if (f == NULL || utf8 == NULL || out_prefix_bytes == NULL ||
         max_width < 0) {
@@ -319,7 +422,11 @@ fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
     }
 
     fdk_text_metrics whole;
-    if (!fdk_ok(fdk_font_measure_utf8(font, utf8, byte_len, &whole))) {
+    fdk_result mr = (runs != NULL)
+        ? fdk__measure_runs(font, utf8, byte_len, runs, n_runs,
+                            byte_len, &whole)
+        : fdk_font_measure_utf8(font, utf8, byte_len, &whole);
+    if (!fdk_ok(mr)) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
     if (whole.advance_width <= max_width) {
@@ -352,9 +459,10 @@ fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
     size_t i = 0;
     int prev_g = -1;
     fdk_f32 pen = 0.0f;
+    style_cursor sc = {runs, n_runs, 0, false};
     while (i < byte_len) {
         fdk_u32 cp = 0;
-        shape_at(f, utf8, byte_len, i, &prev_g, &pen, &cp);
+        shape_at_cursor(f, utf8, byte_len, i, &sc, &prev_g, &pen, &cp);
         size_t next = i + (size_t)fdk_text_utf8_next(utf8, byte_len,
                                                      i, &cp);
         if (pen_round(pen) > budget) {
@@ -368,4 +476,39 @@ fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
 
     *out_prefix_bytes = best;
     return FDK_OK;
+}
+
+fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
+                                   const char *utf8, size_t byte_len,
+                                   fdk_i32 max_width,
+                                   size_t *out_prefix_bytes,
+                                   bool *out_fits) {
+    return fdk__ellipsize_runs(font, utf8, byte_len, NULL, 0, max_width,
+                               out_prefix_bytes, out_fits);
+}
+
+fdk_result fdk_font_ellipsize_spans_utf8(
+    const fdk_font *font, const char *utf8, size_t byte_len,
+    const fdk_span *spans, size_t span_count, fdk_i32 max_width,
+    size_t *out_prefix_bytes, bool *out_fits) {
+    if (spans == NULL && span_count > 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (spans == NULL || span_count == 0) {
+        return fdk__ellipsize_runs(font, utf8, byte_len, NULL, 0,
+                                   max_width, out_prefix_bytes,
+                                   out_fits);
+    }
+    fdk__text_run *runs = NULL;
+    size_t n_runs = 0;
+    fdk_result r = fdk__span_flatten(utf8, byte_len, spans, span_count,
+                                     fdk_font_get_style(font), &runs,
+                                     &n_runs);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    r = fdk__ellipsize_runs(font, utf8, byte_len, runs, n_runs,
+                            max_width, out_prefix_bytes, out_fits);
+    fdk_free(runs);
+    return r;
 }

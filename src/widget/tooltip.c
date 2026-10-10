@@ -42,6 +42,7 @@
 #include "widgets_internal.h"
 #include "../theme/theme_internal.h"
 #include "../window/window_internal.h"
+#include "../text/text_internal.h" /* 1.4.11: fdk__span_flatten/draw_runs */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -70,6 +71,8 @@ typedef struct fdk_tooltip_state {
     fdk_window *win;              /* the popup (owned)                */
     fdk_widget *shown_target;     /* compared by address only         */
     char *text;                   /* owned copy the popup paints      */
+    fdk_span *spans;              /* owned copy (markup tips, 1.4.11) */
+    size_t span_count;
     fdk_font *font;               /* owned; loaded per show           */
 } fdk_tooltip_state;
 
@@ -101,6 +104,9 @@ static void tip_clear_shown_state(void) {
     }
     fdk_free(g_tip.text);
     g_tip.text = NULL;
+    fdk_free(g_tip.spans);
+    g_tip.spans = NULL;
+    g_tip.span_count = 0;
     g_tip.shown_target = NULL;
 }
 
@@ -127,28 +133,43 @@ static void tip_dismiss(void) {
 }
 
 /* Wraps `text` at the tip width, writing the line array (caller
- * frees with fdk_free) and the widest line's advance. Returns false
- * on failure (nothing to show). */
+ * frees with fdk_free) and the widest line's advance. The span
+ * parameters (1.4.11) may be NULL/0: plain tooltips wrap exactly as
+ * before; markup tooltips wrap by STYLED widths (a bold word is
+ * BOLD-wide — the line it lands on is measured as it will paint).
+ * Returns false on failure (nothing to show). */
 static bool tip_wrap(fdk_font *font, const char *text,
+                     const fdk_span *spans, size_t span_count,
                      fdk_text_line **out_lines, size_t *out_n,
                      fdk_i32 *out_widest) {
     *out_lines = NULL;
     *out_n = 0;
     *out_widest = 0;
     size_t n = 0;
-    if (!fdk_ok(fdk_font_break_lines_utf8(font, text, strlen(text),
-                                          TIP_MAX_W - TIP_PAD_X * 2, NULL,
-                                          0, &n, NULL)) ||
-        n == 0) {
+    fdk_result br = (spans != NULL && span_count > 0)
+        ? fdk_font_break_lines_spans_utf8(font, text, strlen(text),
+                                          spans, span_count,
+                                          TIP_MAX_W - TIP_PAD_X * 2,
+                                          NULL, 0, &n, NULL)
+        : fdk_font_break_lines_utf8(font, text, strlen(text),
+                                    TIP_MAX_W - TIP_PAD_X * 2, NULL, 0,
+                                    &n, NULL);
+    if (!fdk_ok(br) || n == 0) {
         return false;
     }
     fdk_text_line *lines = fdk_alloc_array(n, sizeof(*lines));
     if (lines == NULL) {
         return false;
     }
-    if (!fdk_ok(fdk_font_break_lines_utf8(font, text, strlen(text),
+    fdk_result fr = (spans != NULL && span_count > 0)
+        ? fdk_font_break_lines_spans_utf8(font, text, strlen(text),
+                                          spans, span_count,
                                           TIP_MAX_W - TIP_PAD_X * 2,
-                                          lines, n, &n, NULL))) {
+                                          lines, n, &n, NULL)
+        : fdk_font_break_lines_utf8(font, text, strlen(text),
+                                    TIP_MAX_W - TIP_PAD_X * 2,
+                                    lines, n, &n, NULL);
+    if (!fdk_ok(fr)) {
         fdk_free(lines);
         return false;
     }
@@ -189,19 +210,42 @@ static void tip_paint(fdk_widget *canvas, fdk_surface *surface,
     fdk_text_line *lines = NULL;
     size_t n = 0;
     fdk_i32 widest = 0;
-    if (!tip_wrap(font, text, &lines, &n, &widest)) {
+    if (!tip_wrap(font, text, g_tip.spans, g_tip.span_count, &lines,
+                  &n, &widest)) {
         return;
     }
     fdk_font_metrics fm;
     fdk_font_get_metrics(font, &fm);
     fdk_i32 pitch = fm.ascent + fm.descent;
     fdk_i32 y = bounds.y + TIP_PAD_Y + fm.ascent;
-    for (size_t i = 0; i < n; i++) {
-        (void)fdk_surface_draw_utf8(surface, font,
-                                    text + lines[i].byte_offset,
-                                    lines[i].byte_len,
-                                    bounds.x + TIP_PAD_X, y, fg);
-        y += pitch;
+    if (g_tip.spans != NULL && g_tip.span_count > 0) {
+        /* Markup (1.4.11): styled glyphs + run colors + decoration
+         * bars, per wrapped line, over one flatten of the module's
+         * own span copy (the target may have died — never touched
+         * from here). */
+        struct fdk__text_run *runs = NULL;
+        size_t n_runs = 0;
+        size_t len = strlen(text);
+        (void)fdk__span_flatten(text, len, g_tip.spans,
+                                g_tip.span_count,
+                                fdk_font_get_style(font), &runs,
+                                &n_runs);
+        for (size_t i = 0; i < n; i++) {
+            (void)fdk__draw_runs(surface, font, text, len, runs,
+                                 n_runs, lines[i].byte_offset,
+                                 lines[i].byte_len,
+                                 bounds.x + TIP_PAD_X, y, fg);
+            y += pitch;
+        }
+        fdk_free(runs);
+    } else {
+        for (size_t i = 0; i < n; i++) {
+            (void)fdk_surface_draw_utf8(surface, font,
+                                        text + lines[i].byte_offset,
+                                        lines[i].byte_len,
+                                        bounds.x + TIP_PAD_X, y, fg);
+            y += pitch;
+        }
     }
     fdk_free(lines);
 }
@@ -239,7 +283,8 @@ static void tip_delay_elapsed(fdk_timer *timer, void *user) {
     fdk_text_line *lines = NULL;
     size_t n = 0;
     fdk_i32 widest = 0;
-    if (!tip_wrap(font, target->tooltip, &lines, &n, &widest)) {
+    if (!tip_wrap(font, target->tooltip, target->tooltip_spans,
+                  target->tooltip_span_count, &lines, &n, &widest)) {
         fdk_font_destroy(font);
         return;
     }
@@ -302,12 +347,26 @@ static void tip_delay_elapsed(fdk_timer *timer, void *user) {
 
     /* Module-owned state from here on: the text COPY (the target may
      * die while shown — its string must not dangle under tip_paint)
-     * and the font. */
+     * and the font. Markup tips (1.4.11) copy the span array too —
+     * the same "never touch the target after show" rule. */
     g_tip.text = fdk__strdup(target->tooltip);
     if (g_tip.text == NULL) {
         fdk_window_destroy(pop);
         fdk_font_destroy(font);
         return;
+    }
+    if (target->tooltip_spans != NULL && target->tooltip_span_count > 0) {
+        g_tip.spans = fdk_alloc_array(target->tooltip_span_count,
+                                      sizeof *g_tip.spans);
+        if (g_tip.spans == NULL) {
+            /* OOM: the tip shows PLAIN (the text is there; only the
+             * styling is lost) — degrading beats not showing. */
+            g_tip.span_count = 0;
+        } else {
+            memcpy(g_tip.spans, target->tooltip_spans,
+                   target->tooltip_span_count * sizeof *g_tip.spans);
+            g_tip.span_count = target->tooltip_span_count;
+        }
     }
     g_tip.font = font;
     g_tip.win = pop;

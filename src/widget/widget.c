@@ -353,6 +353,7 @@ static void teardown_free(fdk_widget *w) {
     fdk_free(w->children);
     fdk_free(w->name);
     fdk_free(w->tooltip);
+    fdk_free(w->tooltip_spans);
     fdk_free(w->a11y_name);
     fdk_free(w->a11y_description);
     /* The paint group's offscreen (1.4.3): after the subclass hook,
@@ -1061,6 +1062,11 @@ fdk_result fdk_widget_set_tooltip(fdk_widget *widget, const char *text) {
     }
     fdk_free(widget->tooltip);
     widget->tooltip = NULL;
+    /* Plain text clears any markup spans (the setters are mutually
+     * exclusive by ownership — same rule as the label/button pair). */
+    fdk_free(widget->tooltip_spans);
+    widget->tooltip_spans = NULL;
+    widget->tooltip_span_count = 0;
     if (text != NULL && text[0] != '\0') {
         size_t len = strlen(text) + 1;
         widget->tooltip = fdk_alloc(len);
@@ -1069,6 +1075,35 @@ fdk_result fdk_widget_set_tooltip(fdk_widget *widget, const char *text) {
         }
         memcpy(widget->tooltip, text, len);
     }
+    return FDK_OK;
+}
+
+/* fdk_widget_set_tooltip_markup (1.4.11): the tooltip's markup twin —
+ * tags parse to plain text + spans, get_tooltip reports the PLAIN
+ * text, and the tooltip module wraps and paints through the
+ * span-aware passes. NULL clears the tooltip entirely. */
+fdk_result fdk_widget_set_tooltip_markup(fdk_widget *widget,
+                                          const char *markup) {
+    if (widget == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+
+    char *plain = NULL;
+    fdk_span *spans = NULL;
+    size_t span_count = 0;
+    if (markup != NULL && markup[0] != '\0') {
+        fdk_result r = fdk_markup_parse(markup, &plain, &spans,
+                                        &span_count);
+        if (!fdk_ok(r)) {
+            return r; /* old tooltip untouched (OOM discipline) */
+        }
+    }
+
+    fdk_free(widget->tooltip);
+    fdk_free(widget->tooltip_spans);
+    widget->tooltip = plain;
+    widget->tooltip_spans = spans;
+    widget->tooltip_span_count = span_count;
     return FDK_OK;
 }
 

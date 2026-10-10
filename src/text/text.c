@@ -209,10 +209,16 @@ static fdk_u8 *synthesize_italic(fdk_u8 *bits, int w, int h,
     return out;
 }
 
-/* Finds the cache slot for a (glyph, subpixel phase) key, rasterizing
- * on miss and evicting LRU when full. Returns the entry (never
- * NULL). `key` = glyph_index * FDK_TEXT_SUBPIXEL_PHASES + phase. */
-static fdk_glyph *glyph_slot(fdk_font *font, int key) {
+/* Finds the cache slot for a (glyph, subpixel phase, style variant)
+ * key, rasterizing on miss and evicting LRU when full. Returns the
+ * entry (never NULL). `key` = glyph_index * FDK_TEXT_KEY_STRIDE +
+ * variant * FDK_TEXT_SUBPIXEL_PHASES + phase; `style_flags` is the
+ * ABSOLUTE synthetic style to bake in (1.4.11: the font's own style
+ * for the single-style entry points, the run's style for span walks
+ * — the variant component of the key keeps the rasterizations from
+ * colliding). */
+static fdk_glyph *glyph_slot(fdk_font *font, int key,
+                             unsigned style_flags) {
     /* Hit? */
     for (int i = 0; i < font->glyph_count; i++) {
         if (font->glyphs[i].key == key) {
@@ -242,8 +248,8 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key) {
         font->stats.evictions++;
     }
 
-    int glyph_index = key / FDK_TEXT_SUBPIXEL_PHASES;
-    int phase = key % FDK_TEXT_SUBPIXEL_PHASES;
+    int glyph_index = key / FDK_TEXT_KEY_STRIDE;
+    int phase = (key % FDK_TEXT_KEY_STRIDE) % FDK_TEXT_SUBPIXEL_PHASES;
 
     /* Rasterize with stb at the font's baked-in scale, shifted by the
      * subpixel phase (Phase 6 completion): the bitmap lands where the
@@ -261,9 +267,11 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key) {
 
     /* Synthetic styles — applied to the bitmap and (for bold) the
      * advance, before the entry is cached, so measure and draw agree
-     * by construction. */
+     * by construction. 1.4.11: the REQUESTED style is baked in, not
+     * the font's current one — the key's variant component keeps
+     * regular/bold/italic rasters of the same glyph distinct. */
     if (bits != NULL && w > 0 && h > 0) {
-        if ((font->style & FDK_FONT_STYLE_BOLD) != 0) {
+        if ((style_flags & FDK_FONT_STYLE_BOLD) != 0) {
             int stem = font->pixel_size / 24;
             if (stem < 1) {
                 stem = 1;
@@ -271,7 +279,7 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key) {
             bits = synthesize_bold(bits, w, h, stem, &w);
             advance += (fdk_f32)stem;
         }
-        if ((font->style & FDK_FONT_STYLE_ITALIC) != 0) {
+        if ((style_flags & FDK_FONT_STYLE_ITALIC) != 0) {
             bits = synthesize_italic(bits, w, h, yoff, xoff, &w, &xoff);
         }
     }
@@ -302,17 +310,29 @@ void fdk_text_flush_cache(fdk_font *font) {
     font->stats.cached_glyphs = 0;
 }
 
-const fdk_glyph *fdk_text_glyph_for(fdk_font *font, fdk_u32 codepoint) {
+const fdk_glyph *fdk_text_glyph_for_styled(fdk_font *font,
+                                           fdk_u32 codepoint,
+                                           unsigned style_flags) {
     if (font == NULL) {
         return NULL;
     }
     /* FindGlyphIndex returns 0 for unmapped codepoints — and glyph 0
      * IS .notdef (the font's missing-glyph box, or an empty glyph),
-     * so the fallback is free and its metrics stay valid. Phase 0 —
-     * metrics-only callers (ascent probes, cache warmers) don't care
-     * which phase the bitmap carries. */
+     * so the fallback is free and its metrics stay valid. */
     int g = stbtt_FindGlyphIndex(&font->info, (int)codepoint);
-    return glyph_slot(font, g * FDK_TEXT_SUBPIXEL_PHASES);
+    int variant = fdk_text_style_variant(style_flags);
+    return glyph_slot(font, g * FDK_TEXT_KEY_STRIDE +
+                                variant * FDK_TEXT_SUBPIXEL_PHASES,
+                      style_flags);
+}
+
+const fdk_glyph *fdk_text_glyph_for(fdk_font *font, fdk_u32 codepoint) {
+    if (font == NULL) {
+        return NULL;
+    }
+    /* Same lookup with the font object's own style — the Phase-6
+     * single-style semantics. */
+    return fdk_text_glyph_for_styled(font, codepoint, font->style);
 }
 
 /* ---- Font container validation ---- */
@@ -644,6 +664,7 @@ fdk_font *fdk_text_font_mutable(const fdk_font *font) {
  * text_internal.h. */
 int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
                         size_t *io_i, int *io_prev_g, fdk_f32 *io_pen,
+                        unsigned style_flags,
                         const fdk_glyph **out_glyph, fdk_i32 *out_pen_x) {
     if (*io_i >= len) {
         return 0;
@@ -674,8 +695,14 @@ int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
         phase = FDK_TEXT_SUBPIXEL_PHASES - 1;
     }
 
+    /* The full key: glyph * STRIDE + variant * PHASES + phase. The
+     * glyph_for_styled twin below bakes phase 0 (its callers have no
+     * pen context); THIS walk owns the subpixel phase. */
+    int variant = fdk_text_style_variant(style_flags);
     const fdk_glyph *glyph =
-        glyph_slot(font, g * FDK_TEXT_SUBPIXEL_PHASES + phase);
+        glyph_slot(font, g * FDK_TEXT_KEY_STRIDE +
+                            variant * FDK_TEXT_SUBPIXEL_PHASES + phase,
+                   style_flags);
     *io_pen += glyph->advance;
     *io_i += (size_t)consumed;
     *io_prev_g = g;
@@ -707,7 +734,7 @@ fdk_result fdk_font_measure_utf8(const fdk_font *font,
         const fdk_glyph *glyph = NULL;
         fdk_i32 pen_x = 0;
         if (!fdk_text_shape_step(f, utf8, byte_len, &i, &prev_g, &pen,
-                                 &glyph, &pen_x)) {
+                                 f->style, &glyph, &pen_x)) {
             break;
         }
         if (glyph->w > 0 && glyph->h > 0) {
@@ -776,7 +803,7 @@ fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
         const fdk_glyph *glyph = NULL;
         fdk_i32 gx = 0;
         if (!fdk_text_shape_step(font, utf8, byte_len, &i, &prev_g, &pen,
-                                 &glyph, &gx)) {
+                                 font->style, &glyph, &gx)) {
             break;
         }
         if (glyph->bits == NULL || glyph->w <= 0 || glyph->h <= 0) {

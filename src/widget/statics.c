@@ -316,13 +316,36 @@ static void label_reset_cache(fdk_label *l) {
     l->ellipsized = false;
 }
 
+/* Rebuilds the flattened attribute-run cache for the CURRENT text
+ * (1.4.11). Cheap (single-digit spans in practice) and coherent with
+ * whatever the font's style is RIGHT NOW — a rebuild happens on the
+ * same triggers the line cache does, so the two never disagree. On
+ * OOM the runs stay empty and the label degrades to its plain-text
+ * paths (text still shows, unstyled — never a blank label). */
+static void label_rebuild_runs(fdk_label *l) {
+    fdk_free(l->runs);
+    l->runs = NULL;
+    l->run_count = 0;
+    if (l->text == NULL || l->span_count == 0 || l->font == NULL) {
+        return;
+    }
+    size_t len = strlen(l->text);
+    (void)fdk__span_flatten(l->text, len, l->spans, l->span_count,
+                            fdk_font_get_style(l->font), &l->runs,
+                            &l->run_count);
+}
+
 /* Rebuilds the display cache for `width` pixels. Pure toolkit code:
  * no callbacks run, allocation failures degrade to an empty cache
- * (a paint that draws nothing rather than a crash). */
+ * (a paint that draws nothing rather than a crash). The span-aware
+ * paths (1.4.11) ride the SAME engines the plain ones do, over the
+ * flattened run cache — one rounding rule, one whitespace policy. */
 static void label_rebuild(fdk_label *l, fdk_i32 width) {
     label_reset_cache(l);
     l->lines_dirty = false;
     l->built_width = width;
+    label_rebuild_runs(l);
+    const struct fdk__text_run *runs = l->run_count > 0 ? l->runs : NULL;
 
     if (l->font == NULL || l->text == NULL || l->text[0] == '\0') {
         return; /* nothing to show: 0 lines */
@@ -332,13 +355,21 @@ static void label_rebuild(fdk_label *l, fdk_i32 width) {
     if (l->mode == FDK_LABEL_ELLIPSIZE && width > 0) {
         size_t prefix = len;
         bool fits = true;
-        (void)fdk_font_ellipsize_utf8(l->font, l->text, len, width,
+        fdk_result er = runs != NULL
+            ? fdk__ellipsize_runs(l->font, l->text, len, runs,
+                                  l->run_count, width, &prefix, &fits)
+            : fdk_font_ellipsize_utf8(l->font, l->text, len, width,
                                       &prefix, &fits);
+        if (!fdk_ok(er)) {
+            return;
+        }
         fdk_text_metrics pm;
         fdk_i32 prefix_adv = 0;
-        if (prefix > 0 &&
-            fdk_ok(fdk_font_measure_utf8(l->font, l->text, prefix,
-                                         &pm))) {
+        fdk_result mr = runs != NULL
+            ? fdk__measure_runs(l->font, l->text, len, runs,
+                                l->run_count, prefix, &pm)
+            : fdk_font_measure_utf8(l->font, l->text, prefix, &pm);
+        if (fdk_ok(mr)) {
             prefix_adv = pm.advance_width;
         }
         fdk_text_metrics em;
@@ -372,16 +403,24 @@ static void label_rebuild(fdk_label *l, fdk_i32 width) {
 
     if (l->mode == FDK_LABEL_WRAP && width > 0) {
         size_t count = 0;
-        if (!fdk_ok(fdk_font_break_lines_utf8(l->font, l->text, len,
-                                              width, NULL, 0, &count,
-                                              NULL)) ||
-            count == 0 || !label_reserve(l, count)) {
+        fdk_result br = runs != NULL
+            ? fdk__break_lines_runs(l->font, l->text, len, runs,
+                                    l->run_count, width, NULL, 0, &count,
+                                    NULL)
+            : fdk_font_break_lines_utf8(l->font, l->text, len, width,
+                                        NULL, 0, &count, NULL);
+        if (!fdk_ok(br) || count == 0 || !label_reserve(l, count)) {
             return; /* error or nothing that fits: empty cache */
         }
         size_t filled = 0;
-        (void)fdk_font_break_lines_utf8(l->font, l->text, len, width,
-                                        l->lines, l->lines_cap, &filled,
-                                        NULL);
+        (void)(runs != NULL
+                   ? fdk__break_lines_runs(l->font, l->text, len, runs,
+                                           l->run_count, width, l->lines,
+                                           l->lines_cap, &filled, NULL)
+                   : fdk_font_break_lines_utf8(l->font, l->text, len,
+                                               width, l->lines,
+                                               l->lines_cap, &filled,
+                                               NULL));
         l->line_count = filled;
         return;
     }
@@ -390,7 +429,11 @@ static void label_rebuild(fdk_label *l, fdk_i32 width) {
      * full line; the label's bounds clip whatever overflows. */
     fdk_text_metrics whole;
     fdk_i32 adv = 0;
-    if (fdk_ok(fdk_font_measure_utf8(l->font, l->text, len, &whole))) {
+    fdk_result mr = runs != NULL
+        ? fdk__measure_runs(l->font, l->text, len, runs, l->run_count,
+                            len, &whole)
+        : fdk_font_measure_utf8(l->font, l->text, len, &whole);
+    if (fdk_ok(mr)) {
         adv = whole.advance_width;
     }
     if (!label_reserve(l, 1)) {
@@ -429,8 +472,20 @@ static void label_measure(fdk_widget *w, fdk_size *out) {
 
     if (l->mode != FDK_LABEL_WRAP) {
         /* NOWRAP and ELLIPSIZE: the natural size is the full text —
-         * an ellipsized label shows everything it gets room for. */
-        fdk__text_extent(l->font, l->text, &out->width, &out->height);
+         * an ellipsized label shows everything it gets room for.
+         * Markup: styled widths (a bold word is BOLD-wide). */
+        if (l->span_count > 0) {
+            fdk_text_metrics m;
+            if (fdk_ok(fdk_font_measure_spans_utf8(
+                    l->font, l->text, strlen(l->text), l->spans,
+                    l->span_count, &m))) {
+                out->width = m.advance_width;
+                out->height = pitch;
+            }
+        } else {
+            fdk__text_extent(l->font, l->text, &out->width,
+                             &out->height);
+        }
         return;
     }
 
@@ -443,15 +498,28 @@ static void label_measure(fdk_widget *w, fdk_size *out) {
     size_t len = strlen(l->text);
     fdk_text_metrics whole;
     fdk_i32 width = w->natural_w;
-    if (width <= 0 &&
-        fdk_ok(fdk_font_measure_utf8(l->font, l->text, len, &whole))) {
-        width = whole.advance_width;
+    if (width <= 0) {
+        fdk_result mr = l->span_count > 0
+            ? fdk_font_measure_spans_utf8(l->font, l->text, len,
+                                          l->spans, l->span_count,
+                                          &whole)
+            : fdk_font_measure_utf8(l->font, l->text, len, &whole);
+        if (fdk_ok(mr)) {
+            width = whole.advance_width;
+        }
     }
     out->width = width > 0 ? width : 0;
     size_t count = 0;
     if (width > 0) {
-        (void)fdk_font_break_lines_utf8(l->font, l->text, len, width,
-                                        NULL, 0, &count, NULL);
+        if (l->span_count > 0) {
+            (void)fdk_font_break_lines_spans_utf8(
+                l->font, l->text, len, l->spans, l->span_count, width,
+                NULL, 0, &count, NULL);
+        } else {
+            (void)fdk_font_break_lines_utf8(l->font, l->text, len,
+                                            width, NULL, 0, &count,
+                                            NULL);
+        }
     }
     out->height = (fdk_i32)count * pitch;
 }
@@ -496,10 +564,20 @@ static void label_paint(fdk_widget *w, fdk_surface *surface,
         fdk_i32 baseline = bounds.y + (fdk_i32)i * pitch + fm.ascent;
 
         if (line->byte_len > 0) {
-            (void)fdk_surface_draw_utf8(surface, l->font,
-                                        l->text + line->byte_offset,
-                                        line->byte_len, x, baseline,
-                                        color);
+            if (l->run_count > 0) {
+                /* Markup (1.4.11): styled glyphs, run colors, and the
+                 * decoration bars, over the line's byte range of the
+                 * SAME run array the layout pass broke on. */
+                (void)fdk__draw_runs(surface, l->font, l->text,
+                                     strlen(l->text), l->runs,
+                                     l->run_count, line->byte_offset,
+                                     line->byte_len, x, baseline, color);
+            } else {
+                (void)fdk_surface_draw_utf8(surface, l->font,
+                                            l->text + line->byte_offset,
+                                            line->byte_len, x, baseline,
+                                            color);
+            }
         }
         /* ELLIPSIZE: the ellipsis run lands exactly where the prefix
          * pen stopped (same rounding as the layout pass). */
@@ -517,6 +595,8 @@ static void label_destroy(fdk_widget *w) {
     fdk_label *l = label_of(w);
     fdk_free(l->text);
     fdk_free(l->lines);
+    fdk_free(l->spans);
+    fdk_free(l->runs);
 }
 
 /* ---- a11y ---- */
@@ -709,10 +789,59 @@ fdk_result fdk_label_set_text(fdk_widget *label, const char *text) {
     }
     fdk_free(l->text);
     l->text = copy;
+    /* Plain text clears any markup spans (the two setters are
+     * mutually exclusive by ownership: text IS the truth). */
+    fdk_free(l->spans);
+    l->spans = NULL;
+    l->span_count = 0;
+    fdk_free(l->runs);
+    l->runs = NULL;
+    l->run_count = 0;
     l->lines_dirty = true;
     fdk_widget_invalidate(label);
     fdk_widget_child_layout_changed(label->parent);
     /* A11y: the label's text IS its accessible name. */
+    fdk__a11y_notify(label, FDK_A11Y_NAME_CHANGED, 0);
+    return FDK_OK;
+}
+
+/* fdk_label_set_markup (1.4.11): parses the tiny tag vocabulary into
+ * plain text + attribute spans; fdk_label_get_text then reports the
+ * PLAIN text (screen readers never hear tags), and every display
+ * mode (NOWRAP / WRAP / ELLIPSIZE) lays out and paints through the
+ * span-aware engines. NULL markup clears the label entirely; a
+ * string with no tags is simply plain text (set_markup("") is
+ * set_text("")). No markup getter: like GTK, the markup string is
+ * not preserved round-trip. */
+fdk_result fdk_label_set_markup(fdk_widget *label, const char *markup) {
+    if (label == NULL || label->klass != &fdk_label_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_label *l = label_of(label);
+
+    char *plain = NULL;
+    fdk_span *spans = NULL;
+    size_t span_count = 0;
+    if (markup != NULL) {
+        fdk_result r = fdk_markup_parse(markup, &plain, &spans,
+                                        &span_count);
+        if (!fdk_ok(r)) {
+            return r; /* old content untouched (OOM discipline) */
+        }
+    }
+
+    fdk_free(l->text);
+    fdk_free(l->spans);
+    fdk_free(l->runs);
+    l->text = plain;         /* NULL when markup == NULL */
+    l->spans = spans;
+    l->span_count = span_count;
+    l->runs = NULL;
+    l->run_count = 0;
+    l->lines_dirty = true;
+    fdk_widget_invalidate(label);
+    fdk_widget_child_layout_changed(label->parent);
+    /* A11y: the PLAIN text is the accessible name (never the tags). */
     fdk__a11y_notify(label, FDK_A11Y_NAME_CHANGED, 0);
     return FDK_OK;
 }

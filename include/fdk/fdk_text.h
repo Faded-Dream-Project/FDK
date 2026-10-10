@@ -348,6 +348,134 @@ fdk_font *fdk_font_load_system_default(fdk_i32 pixel_size);
 fdk_font *fdk_font_load_face(const char *path, fdk_i32 face_index,
                              fdk_i32 pixel_size);
 
+/* ---- Rich text: attribute spans (1.4.11) ---------------------------
+ *
+ * A SPAN layers presentation attributes over a byte range of plain
+ * UTF-8 text: synthetic style flags, an optional color override, and
+ * underline/strikethrough decorations. The span entry points below
+ * (measure / draw / break / ellipsize) are the attribute-aware twins
+ * of the single-style ones; a span list of zero entries is exactly
+ * the classic behavior.
+ *
+ * Contract (deliberately small, Pango-attribute-flavored):
+ *  - byte_start/byte_end are a half-open range into the plain text,
+ *    the same string passed to the entry point. Ranges are clamped
+ *    to [0, byte_len]; boundaries that land mid-codepoint snap
+ *    outward to codepoint boundaries.
+ *  - `style` is ABSOLUTE for the range: it replaces the font's own
+ *    style flags there (a bold span over a bold-styled font stays
+ *    bold; over a regular font it becomes bold). Unknown bits are
+ *    ignored.
+ *  - Spans may overlap and arrive in any order; when they do, LATER
+ *    array entries win WHOLESALE over earlier ones for the bytes
+ *    they cover (the winning span's full attribute set applies —
+ *    there is no per-attribute merge across spans; nest markup tags
+ *    and the parser merges for you).
+ *  - Kerning never crosses a style-run boundary, exactly as it never
+ *    crosses a line boundary: a bold word's last glyph does not kern
+ *    against the regular text after it.
+ *  - Size changes are NOT spans: a font is one face at one pixel
+ *    size by design, and honest synthesis has no size story. Bold
+ *    and italic ride the Phase-6 synthesis (stem dilation / oblique
+ *    shear); when a real bold/italic face FILE exists, painting the
+ *    whole run with that face via fdk_font_load() is the better
+ *    choice — same tradeoff as fdk_font_set_style.
+ *  - Underline and strikethrough are drawn by the span passes as
+ *    metrics-derived bars in the run's color.
+ */
+typedef struct fdk_span {
+    size_t byte_start;   /* first byte (clamped, boundary-snapped) */
+    size_t byte_end;     /* one past the last byte                  */
+    unsigned style;      /* ABSOLUTE FDK_FONT_STYLE_* flags         */
+    bool color_set;      /* false: paint in the caller's base color */
+    fdk_color color;     /* valid only when color_set               */
+    bool underline;      /* draw the under-baseline bar             */
+    bool strikethrough; /* draw the through-the-glyph bar          */
+} fdk_span;
+
+/* Measures attributed text: the advance is where drawing the same
+ * spans ends up (per-run styled shaping, one rounded total); ink
+ * bounds are the union of all runs' glyph boxes. Zero spans measures
+ * exactly like fdk_font_measure_utf8. */
+fdk_result fdk_font_measure_spans_utf8(const fdk_font *font,
+                                       const char *utf8, size_t byte_len,
+                                       const fdk_span *spans,
+                                       size_t span_count,
+                                       fdk_text_metrics *out);
+
+/* Draws one line of attributed text. base_color paints every byte
+ * whose run does not set a color (and the decorations of such runs);
+ * runs that set one paint in theirs. Decorations (underline /
+ * strikethrough) draw as metrics-derived bars per decorated run.
+ * Damage and clip semantics are fdk_surface_draw_utf8's. */
+fdk_result fdk_surface_draw_spans_utf8(fdk_surface *surface,
+                                       fdk_font *font, const char *utf8,
+                                       size_t byte_len,
+                                       const fdk_span *spans,
+                                       size_t span_count,
+                                       fdk_i32 pen_x, fdk_i32 baseline_y,
+                                       fdk_color base_color);
+
+/* fdk_font_break_lines_utf8's attributed twin: word-wrap accounting
+ * for per-run styled widths (a bold word measures bold). Emitted
+ * lines are byte ranges into the SAME plain text — paint them with
+ * fdk_surface_draw_spans_utf8 over the same span array. */
+fdk_result fdk_font_break_lines_spans_utf8(
+    const fdk_font *font, const char *utf8, size_t byte_len,
+    const fdk_span *spans, size_t span_count, fdk_i32 max_width,
+    fdk_text_line *out_lines, size_t max_lines,
+    size_t *out_line_count, bool *out_truncated);
+
+/* fdk_font_ellipsize_utf8's attributed twin: the prefix is chosen by
+ * styled widths; the ellipsis itself renders at the font's own style
+ * (it is the toolkit's truncation mark, not part of any run). */
+fdk_result fdk_font_ellipsize_spans_utf8(
+    const fdk_font *font, const char *utf8, size_t byte_len,
+    const fdk_span *spans, size_t span_count, fdk_i32 max_width,
+    size_t *out_prefix_bytes, bool *out_fits);
+
+/* ---- Markup: the tiny tag scanner (1.4.11) -------------------------
+ *
+ * fdk_markup_parse() turns a markup STRING into the plain text +
+ * fdk_span list the entry points above take — what
+ * fdk_label_set_markup / fdk_button_set_markup /
+ * fdk_widget_set_tooltip_markup accept.
+ *
+ * This is NOT an XML/HTML parser and never will be: a fixed-vocabulary
+ * TAG SCANNER, lenient by design.
+ *
+ *   <b> bold          <i> italic        <u> underline
+ *   <s> strikethrough
+ *   <color=#RRGGBB> or <color=#RRGGBBAA> or <color='#...'> — run
+ *        color; closed by </color> (a `<color=red>` NAME is not
+ *        supported — FDK colors are #rrggbb[#aa], same as .fdk
+ *        theme files).
+ *
+ *   Entities: &amp; &lt; &gt; &quot; &apos; &nbsp; &amp; etc. — an
+ *   unknown entity passes through as literal text.
+ *
+ *   Nesting works (<b>bold <color=#f00>red</color></b> emits a bold
+ *   run and a bold+red run — the scanner merges tags into effective
+ *   attributes, so callers never see overlapping spans).
+ *   Unknown tags are LITERAL TEXT (markup that isn't FDK's vocabulary
+ *   stays visible — an `<x>` prints as "<x>", it never vanishes).
+ *   An unclosed tag at end-of-string closes implicitly.
+ *   A '<' that starts no recognized tag is a literal '<'.
+ *
+ * Ownership: *out_plain and *out_spans (when *out_span_count > 0)
+ * are fdk_alloc'd; free them with fdk_free (or fdk_markup_free's
+ * convenience below). Parsing never fails on CONTENT — only on NULL
+ * arguments (FDK_ERR_INVALID_ARGUMENT) or allocation failure
+ * (FDK_ERR_OUT_OF_MEMORY, with *out_plain left NULL).
+ */
+fdk_result fdk_markup_parse(const char *markup, char **out_plain,
+                            fdk_span **out_spans,
+                            size_t *out_span_count);
+
+/* Frees a parse result (NULL-tolerant; a zero-span parse owns only
+ * the plain string). */
+void fdk_markup_free(char *plain, fdk_span *spans);
+
 /* ---- System font enumeration (1.4.3) ----
  *
  * The font-scan surface exposed: every LOADABLE face under the

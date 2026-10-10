@@ -88,7 +88,21 @@ static fdk_i32 check_indicator_w(const fdk_widget *w) {
 static void button_measure(fdk_widget *w, fdk_size *out) {
     fdk_button *b = button_of(w);
     fdk_i32 tw = 0, th = 0;
-    fdk__text_extent(b->font, b->text, &tw, &th);
+    if (b->span_count > 0 && b->text != NULL && b->font != NULL) {
+        /* Markup (1.4.11): styled widths — a bold word is BOLD-wide.
+         * Height stays the font's pitch (synthesis never changes it). */
+        fdk_text_metrics m;
+        if (fdk_ok(fdk_font_measure_spans_utf8(
+                b->font, b->text, strlen(b->text), b->spans,
+                b->span_count, &m))) {
+            tw = m.advance_width;
+        }
+        fdk_font_metrics fm;
+        fdk_font_get_metrics(b->font, &fm);
+        th = fm.ascent + fm.descent;
+    } else {
+        fdk__text_extent(b->font, b->text, &tw, &th);
+    }
     out->width = tw + BTN_PAD_X * 2;
     out->height = th + BTN_PAD_Y * 2;
     if (out->width < 24) {
@@ -196,15 +210,34 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
     /* Centered text. */
     if (b->font != NULL && b->text != NULL) {
         fdk_i32 tw = 0, th = 0;
-        fdk__text_extent(b->font, b->text, &tw, &th);
+        if (b->span_count > 0) {
+            fdk_text_metrics m;
+            if (fdk_ok(fdk_font_measure_spans_utf8(
+                    b->font, b->text, strlen(b->text), b->spans,
+                    b->span_count, &m))) {
+                tw = m.advance_width;
+            }
+            fdk_font_metrics fm;
+            fdk_font_get_metrics(b->font, &fm);
+            th = fm.ascent + fm.descent;
+        } else {
+            fdk__text_extent(b->font, b->text, &tw, &th);
+        }
         fdk_i32 text_x = bounds.x + (bounds.width - tw) / 2;
         if (text_x < bounds.x) {
             text_x = bounds.x;
         }
         fdk_i32 baseline = fdk__center_baseline(b->font, bounds.y,
                                                 bounds.height);
-        fdk__draw_text(surface, b->font, b->text, label_col,
-                       text_x, baseline);
+        if (b->span_count > 0) {
+            /* Markup: styled glyphs, run colors, decoration bars. */
+            (void)fdk_surface_draw_spans_utf8(
+                surface, b->font, b->text, strlen(b->text), b->spans,
+                b->span_count, text_x, baseline, label_col);
+        } else {
+            fdk__draw_text(surface, b->font, b->text, label_col,
+                           text_x, baseline);
+        }
         /* LINK underline: under the whole text run, fading in with
          * the hover blend (or persistent when checked — the active
          * link read). Same baseline+2 rule as the mnemonics. */
@@ -269,7 +302,9 @@ static bool button_handle_event(fdk_widget *w,
 }
 
 static void button_destroy(fdk_widget *w) {
-    fdk_free(button_of(w)->text);
+    fdk_button *b = button_of(w);
+    fdk_free(b->text);
+    fdk_free(b->spans);
 }
 
 /* ---- a11y ---- */
@@ -356,9 +391,49 @@ fdk_result fdk_button_set_text(fdk_widget *button, const char *text) {
     }
     fdk_free(b->text);
     b->text = copy;
+    /* Plain text clears any markup spans (the setters are mutually
+     * exclusive by ownership). */
+    fdk_free(b->spans);
+    b->spans = NULL;
+    b->span_count = 0;
     fdk_widget_invalidate(button);
     fdk_widget_child_layout_changed(button->parent);
     /* A11y: the label IS the accessible name. */
+    fdk__a11y_notify(button, FDK_A11Y_NAME_CHANGED, 0);
+    return FDK_OK;
+}
+
+/* fdk_button_set_markup (1.4.11): the Label's markup contract on a
+ * button — tags parse to plain text + spans, get_text reports the
+ * PLAIN label (what the a11y tree narrates), and measure/paint use
+ * the styled widths. The role machinery (fills, focus ring, the
+ * LINK underline) is markup-agnostic: the underline still bars the
+ * whole run, under whatever the spans paint. */
+fdk_result fdk_button_set_markup(fdk_widget *button, const char *markup) {
+    if (button == NULL || button->klass != &fdk_button_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_button *b = button_of(button);
+
+    char *plain = NULL;
+    fdk_span *spans = NULL;
+    size_t span_count = 0;
+    if (markup != NULL) {
+        fdk_result r = fdk_markup_parse(markup, &plain, &spans,
+                                        &span_count);
+        if (!fdk_ok(r)) {
+            return r; /* old content untouched (OOM discipline) */
+        }
+    }
+
+    fdk_free(b->text);
+    fdk_free(b->spans);
+    b->text = plain;
+    b->spans = spans;
+    b->span_count = span_count;
+    fdk_widget_invalidate(button);
+    fdk_widget_child_layout_changed(button->parent);
+    /* A11y: the PLAIN label is the accessible name. */
     fdk__a11y_notify(button, FDK_A11Y_NAME_CHANGED, 0);
     return FDK_OK;
 }

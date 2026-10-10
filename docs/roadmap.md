@@ -4584,3 +4584,72 @@ The NEXT list (value order): label MARKUP (bold/italic/color
 spans over the shaping engine — no XML, an attribute-run layer);
 the IME completion surface (LATER by the no-bus policy) and INCR
 transfers (the clipboard's 4 MiB cap lifter).
+
+## 1.4.11 — the markup milestone (rich text everywhere)
+
+The serious-toolkit audit's top item: LABEL MARKUP, delivered as
+the whole attribute-run layer rather than a label-only hack.
+
+The engine side (src/text/): the glyph cache's key grew a STYLE
+VARIANT component (normal/bold/italic/bold-italic under the
+subpixel phase) — one font object now holds regular and bold
+rasters of the same glyph side by side, so mixed-style runs paint
+without cache thrash and fdk_font_set_style keeps its documented
+flush while switch-backs stay cheap. The shaping walk
+(fdk_text_shape_step) takes the ABSOLUTE style per glyph; the
+measure/draw/break/ellipsize engines all ride the same flattened
+run array (fdk__span_flatten: caller spans — any order, overlaps,
+later-wins — to one sorted contiguous run list, gaps at the
+font's own style), so there is still exactly ONE rounding rule
+and ONE whitespace policy in the text stack. Kerning resets at
+style-run boundaries exactly as it resets at line boundaries.
+
+The public surface (fdk_text.h): fdk_span (byte range + absolute
+style + optional color + underline/strikethrough), the span twins
+of measure/draw/break/ellipsize (zero spans == the classic
+behavior, byte for byte), and fdk_markup_parse — a TAG SCANNER,
+deliberately not an XML parser: <b> <i> <u> <s> <color=#rrggbb[aa]>
+(+ quoted forms) with a nesting attribute stack, the six classic
+entities, unknown tags and stray '<' as literal text, unclosed
+tags closed implicitly, and unmatched closing tags LITERAL (a
+failed <color=red> value degrades to visible text, and its
+</color> partner does not vanish after it). The scanner merges
+nested tags into maximal non-overlapping runs; a tag-free string
+parses to zero spans.
+
+The widget surface: fdk_label_set_markup (all three display
+modes — NOWRAP measures styled, WRAP breaks by styled widths, an
+ellipsized label cuts inside the right run), fdk_button_set_markup
+(the role machinery untouched), and fdk_widget_set_tooltip_markup
+(the tip wraps and paints through the span passes over its own
+copy). get_text/get_label/get_tooltip report the PLAIN text —
+what a11y narrates; set_text/set_tooltip clear the markup. The
+label caches its flattened runs beside the line cache (rebuilt on
+the same dirty/width triggers); buttons and tooltips flatten per
+call (no cache to cohere). Decoration bars (underline at
+descent/2 below the baseline, strikethrough at 30% of the ascent,
+pixel_size/16 thick) paint per run in the run's color, clipped to
+the painted byte range.
+
+A real bug the battery caught: the first cut of the style-keyed
+cache DROPPED the subpixel phase from the key (every glyph
+rasterized at phase 0) — the menu hover test failed because text
+ink moved up to a pixel. The fix threads the phase through the
+full key (glyph * STRIDE + variant * PHASES + phase); the
+baseline-vs-change experiment (stash, rebuild, rerun) pinned the
+regression to the text layer before any guesswork. Tests: the new
+tests/test_markup.c (scanner contract, span measure/draw identity
+and widening, run-boundary kerning sums, decoration bar geometry
+via spaces-only runs, wrap/ellipsize discrimination widths found
+by SEARCH rather than magic numbers, label/button/tooltip
+integration) — 34 test files, 607 exported symbols.
+
+Battery at 1.4.11: debug + release zero warnings; headless
+all-pass (incl. the markup suite); X11 integration 147 [ok];
+example 04 grew the markup frame (NOWRAP/WRAP/ELLIPSIZE + button
++ markup tooltips; window 560x2260) and exits cleanly;
+verify-exports 607 in both configs.
+
+The NEXT list: INCR transfers (the X11 clipboard's 4 MiB cap
+lifter) — the last real item before the "anything more would not
+be a toolkit" line; IME stays LATER by the no-bus policy.

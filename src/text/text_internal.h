@@ -28,6 +28,23 @@
  * makes. */
 #define FDK_TEXT_SUBPIXEL_PHASES 4
 
+/* Style VARIANTS the cache keys apart (1.4.11): normal / bold /
+ * italic / bold-italic. Rich-text runs flip styles per run; baking
+ * the style into the KEY (instead of into the font object alone)
+ * lets a bold word and the regular text around it share one font
+ * object with BOTH rasterizations resident — no cache thrash, no
+ * style-flip re-rasterization when a label repaints mixed runs.
+ * fdk_font_set_style() still flushes (its documented contract), but
+ * per-run styled lookups are variant-keyed and stable. */
+#define FDK_TEXT_STYLE_VARIANTS 4
+
+/* Full cache-key stride per glyph id: phases * style variants. Keys
+ * are glyph_index * STRIDE + variant * PHASES + phase; TrueType
+ * glyph ids are uint16, so the worst key is 65535*16+15 ≈ 1.05e6,
+ * comfortably inside int. */
+#define FDK_TEXT_KEY_STRIDE \
+    (FDK_TEXT_SUBPIXEL_PHASES * FDK_TEXT_STYLE_VARIANTS)
+
 /* A rasterized glyph, cached. `xoff`/`yoff` are stb's bitmap-box
  * offsets: where the bitmap's top-left sits relative to the pen
  * position (xoff) and the baseline (yoff; <= 0 means above it).
@@ -37,7 +54,8 @@
  * per pixel, stride == w); NULL when the glyph has no ink (space,
  * combining marks with empty bitmaps) — such glyphs still advance. */
 typedef struct fdk_glyph {
-    int key;              /* cache key: glyph_index * PHASES + phase */
+    int key;              /* cache key: glyph*STRIDE + variant*PHASES
+                                 + phase (see FDK_TEXT_KEY_STRIDE) */
     fdk_i32 w, h;
     fdk_i32 xoff, yoff;
     fdk_f32 advance;
@@ -71,6 +89,26 @@ struct fdk_font {
     fdk_font_cache_stats stats;
 };
 
+/* Unpacks the glyph id from a cache key (the kerning passes need
+ * the raw stb glyph id; keys pack phase and style variant below
+ * it). One definition — text.c and layout.c both use it. */
+static inline int fdk_text_key_glyph(int key) {
+    return key / FDK_TEXT_KEY_STRIDE;
+}
+
+/* Maps FDK_FONT_STYLE_* flags to the 0..3 variant index baked into
+ * cache keys (bit 0 = bold, bit 1 = italic — the flag order). */
+static inline int fdk_text_style_variant(unsigned style_flags) {
+    int v = 0;
+    if ((style_flags & FDK_FONT_STYLE_BOLD) != 0) {
+        v |= 1;
+    }
+    if ((style_flags & FDK_FONT_STYLE_ITALIC) != 0) {
+        v |= 2;
+    }
+    return v;
+}
+
 /* Decodes the codepoint at s[i] (i < len). Writes the codepoint to
  * *out_cp and returns the number of bytes consumed (>= 1) — invalid
  * sequences yield U+FFFD and consume exactly one byte, never reading
@@ -83,8 +121,23 @@ int fdk_text_utf8_next(const char *s, size_t len, size_t i,
  * entry (never NULL): unmapped codepoints resolve to glyph 0
  * (.notdef). The entry's metrics (advance/xoff/yoff/w/h) are always
  * populated; entry->bits is NULL exactly when the glyph has no ink
- * (space, empty bitmaps) — such glyphs still advance the pen. */
+ * (space, empty bitmaps) — such glyphs still advance the pen.
+ *
+ * The styled twin (below) is the 1.4.11 core: it rasterizes with
+ * the REQUESTED style flags (absolute — they replace the font's
+ * current style for that glyph) under a variant-keyed cache entry.
+ * This one keeps its Phase-6 semantics: the font object's own
+ * fdk_font_set_style() style is what gets baked. */
 const fdk_glyph *fdk_text_glyph_for(fdk_font *font, fdk_u32 codepoint);
+
+/* The styled run core (1.4.11): same lookup/rasterize contract, but
+ * the synthetic style comes from `style_flags` instead of the font's
+ * current style. Regular and bold rasters of the same glyph coexist
+ * in the cache under different keys. Unknown style bits are ignored
+ * (masked to bold/italic), matching fdk_font_set_style. */
+const fdk_glyph *fdk_text_glyph_for_styled(fdk_font *font,
+                                           fdk_u32 codepoint,
+                                           unsigned style_flags);
 
 /* The ellipsis run shared by the ellipsize pass (src/text/layout.c)
  * and the Label paint hook (src/widget/statics.c): U+2026, HORIZONTAL
@@ -102,10 +155,110 @@ const fdk_glyph *fdk_text_glyph_for(fdk_font *font, fdk_u32 codepoint);
  * end of run, 1 on progress. The measure walk, the draw walk, AND
  * the line/ellipsis layout pass (src/text/layout.c) share this —
  * every width FDK ever reports or paints comes from the same
- * arithmetic. */
+ * arithmetic.
+ *
+ * `style_flags` is the ABSOLUTE synthetic style for THIS glyph
+ * (1.4.11): the single-style entry points pass the font's own
+ * fdk_font_get_style(), the span-aware walks pass the effective
+ * style of the byte being consumed. Callers that reset the pen
+ * (line breaks, run boundaries) pass *io_prev_g = -1 so kerning
+ * never crosses the boundary. */
 int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
                         size_t *io_i, int *io_prev_g, fdk_f32 *io_pen,
+                        unsigned style_flags,
                         const fdk_glyph **out_glyph, fdk_i32 *out_pen_x);
+
+/* ---- Flattened attribute runs (1.4.11, src/text/span.c) -----------
+
+ * The span-aware passes (measure/draw/break/ellipsize with attributes,
+ * and the Label/Button/tooltip markup paint hooks) never walk the
+ * caller's fdk_span array directly: spans may overlap and arrive in
+ * any order, but the shaping passes need "the ONE effective attribute
+ * set for byte i", monotonic and cheap. fdk__span_flatten() produces
+ * exactly that: a sorted, non-overlapping, maximally-merged run
+ * array over [0, byte_len). */
+typedef struct fdk__text_run {
+    size_t start;      /* first byte of the run (codepoint boundary) */
+    size_t end;        /* one past the last byte                      */
+    unsigned style;    /* ABSOLUTE FDK_FONT_STYLE_* flags             */
+    bool color_set;    /* false: paint with the caller's base color   */
+    fdk_color color;   /* valid only when color_set                   */
+    bool underline;    /* decoration flags, drawn by the span passes  */
+    bool strikethrough;
+} fdk__text_run;
+
+/* Flattens `n` spans (later array entries win wholesale on overlap —
+ * the documented fdk_span contract) over the plain text
+ * [0, byte_len) into *out_runs (fdk_alloc'd; free with fdk_free) and
+ * *out_run_count. Spans are clamped to the text, empty/degenerate
+ * ones dropped, boundaries snapped outward to codepoint boundaries
+ * when the caller's spans land mid-codepoint (the markup parser
+ * never does, but the public API allows it). Bytes no span covers
+ * become gap runs at `default_style` (the font's own style) with no
+ * color and no decorations — so the run array is CONTIGUOUS over the
+ * whole text and every walk can treat run styles as absolute.
+ *
+ * Returns FDK_ERR_INVALID_ARGUMENT for NULL out pointers or a NULL
+ * span array with n > 0; FDK_ERR_OUT_OF_MEMORY on allocation
+ * failure (in which case *out_runs stays NULL). An empty span list
+ * flattens to zero runs — the callers' plain-text path. */
+fdk_result fdk__span_flatten(const char *utf8, size_t byte_len,
+                             const fdk_span *spans, size_t n,
+                             unsigned default_style,
+                             fdk__text_run **out_runs,
+                             size_t *out_run_count);
+
+/* The effective style for byte i, or the font's own style when no
+ * run covers it. Linear scan — runs are few (a markup label has
+ * single digits) and correctness beats a premature index. */
+unsigned fdk__run_style_at(const fdk__text_run *runs, size_t n,
+                           size_t byte_i, unsigned fallback);
+
+/* Runs-level measure (the engine under the public span entry point
+ * and the ellipsize pass): same contract as fdk_font_measure_utf8,
+ * but every glyph shapes at its run's style and kerning resets at
+ * run boundaries. `limit` measures only [0, limit) bytes (limit <=
+ * byte_len) — the ellipsized label's prefix advance. The advance is
+ * ONE rounded total (the float pen accumulates across runs); ink
+ * bounds are the union of the walked glyph boxes. */
+fdk_result fdk__measure_runs(const fdk_font *font, const char *utf8,
+                             size_t byte_len,
+                             const fdk__text_run *runs, size_t n_runs,
+                             size_t limit, fdk_text_metrics *out);
+
+/* The wrap/ellipsize engines over a CACHED run array (the public
+ * span entry points flatten and call these; the markup Label caches
+ * its runs and calls them directly). Identical semantics to the
+ * public span twins. */
+fdk_result fdk__break_lines_runs(const fdk_font *font,
+                                  const char *utf8, size_t byte_len,
+                                  const fdk__text_run *runs,
+                                  size_t n_runs, fdk_i32 max_width,
+                                  fdk_text_line *out_lines,
+                                  size_t max_lines,
+                                  size_t *out_line_count,
+                                  bool *out_truncated);
+
+fdk_result fdk__ellipsize_runs(const fdk_font *font,
+                                const char *utf8, size_t byte_len,
+                                const fdk__text_run *runs, size_t n_runs,
+                                fdk_i32 max_width,
+                                size_t *out_prefix_bytes, bool *out_fits);
+
+/* Runs-level paint: draws bytes [off, off+count) of the attributed
+ * text with each glyph at its run's style/color, decorations
+ * included (bars clipped to the visible range — a run half inside
+ * the range bars only its visible half). base_color paints runs
+ * that set no color. Damage/clip semantics are
+ * fdk_surface_draw_utf8's, plus fill_rect's for the bars. The
+ * widget layer's markup paint hooks (Label/Button/tooltip) call
+ * this with their cached runs. */
+fdk_result fdk__draw_runs(fdk_surface *surface, fdk_font *font,
+                          const char *utf8, size_t byte_len,
+                          const fdk__text_run *runs, size_t n_runs,
+                          size_t off, size_t count,
+                          fdk_i32 pen_x, fdk_i32 baseline_y,
+                          fdk_color base_color);
 
 /* Drops every cached (glyph, phase) rasterization — used when the
  * font's synthetic style changes (the style is baked in at raster
