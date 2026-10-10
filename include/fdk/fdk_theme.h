@@ -208,6 +208,15 @@ const char *fdk_theme_name(const fdk_theme *theme);
  * the current default. */
 const char *fdk_theme_author(const fdk_theme *theme);
 
+/* The file this theme was loaded from (set by fdk_theme_load(), and
+ * therefore by fdk_theme_find(), which loads what it finds). NULL
+ * for every other origin: the built-in default, create_default(),
+ * parse-from-memory. The string is owned by the theme and valid
+ * until destroy; a NULL theme means the current default. Purely
+ * informational — the mirror of fdk_font_get_file_path(), and what
+ * `fdk-theme path` prints. */
+const char *fdk_theme_file_path(const fdk_theme *theme);
+
 /* A token's color. A NULL theme means the current default. An out-of-
  * range token logs a warning and returns opaque black. */
 fdk_color fdk_theme_get_color(const fdk_theme *theme,
@@ -252,6 +261,92 @@ void fdk_theme_set_default(fdk_theme *theme);
  * otherwise a borrowed pointer to whatever fdk_theme_set_default()
  * installed. */
 fdk_theme *fdk_theme_get_default(void);
+
+/* ---- Theme discovery (1.4.13) ------------------------------------------ */
+
+/* Where themes come from when nobody spells out a path. The search
+ * path, in priority order (first wins), mirrors the font layer's
+ * discovery and the XDG basedir spec:
+ *
+ *   1. $FDK_THEME_DIR          — one explicit directory (absolute;
+ *                                the test suite and sandboxed rigs)
+ *   2. $XDG_DATA_HOME/fdk/themes   (default ~/.local/share/fdk/themes)
+ *   3. $XDG_DATA_DIRS entries .../fdk/themes (default
+ *      /usr/local/share:/usr/share — which is where `make install`
+ *      puts the themes FDK ships)
+ *
+ * A theme file is named <stem>.fdk. The STEM is the canonical handle:
+ * `fdk_theme_find("matrix")` looks for matrix.fdk walking the path in
+ * order. Stems should be 1..64 characters of [A-Za-z0-9_-] (the same
+ * character class as a prefs key half) — the direct lookup accepts
+ * exactly that grammar, so a stem outside it is reachable only
+ * through its internal name. Non-absolute or empty environment
+ * entries are ignored (XDG rules).
+ *
+ * THE GLOBAL SETTING. FDK keeps one toolkit-level preference: the
+ * theme name, read from the reserved "fdk" prefs store (the file at
+ * $FDK_PREFS_FILE / $XDG_CONFIG_HOME/fdk.prefs /
+ * ~/.config/fdk.prefs — see fdk_prefs.h) key "theme.name", with
+ * $FDK_THEME as a per-process override (the GTK_THEME precedent:
+ * first run of a new app, a screenshot rig, a theming session).
+ *
+ * The setting is applied ONCE per process, lazily, at the first
+ * resolution of the current default theme — the first paint or
+ * fdk_theme_get_default() — BEFORE any other code has installed a
+ * theme, so a plain application picks it up with zero opt-in. An
+ * application that calls fdk_theme_set_default() first OWNS the
+ * choice: that call opts the process out of the global setting
+ * entirely (same contract as GTK's explicit theme override).
+ *
+ * The boot is fail-soft on every step, matching the prefs resilience
+ * rule: an unreadable or corrupt settings file means no preference;
+ * a name that does not resolve on the search path logs ONE warning
+ * and stays on the built-in theme. A themed launch must never be a
+ * failed launch.
+ *
+ * The command-line face of all this is `fdk-theme` (list / get / set
+ * / reset) and the generic `fdk-prefs`; see docs/cli.md. */
+
+/* Finds and loads a theme by name on the search path above. `name`
+ * may be a file STEM ("matrix" -> matrix.fdk, exact, case-sensitive)
+ * or, when no stem matches, a theme's INTERNAL name as it appears in
+ * the file ("Daylight" — the quoted `name` key). On success returns
+ * a theme owned by the caller and writes FDK_OK to *out_error when
+ * non-NULL. On failure returns NULL and writes:
+ *
+ *   FDK_ERR_INVALID_ARGUMENT   NULL/empty name
+ *   FDK_ERR_NOT_FOUND          no such stem anywhere, and no file's
+ *                              internal name matches either
+ *   FDK_ERR_THEME_PARSE / _VERSION / _IO / _OUT_OF_MEMORY
+ *                              the named stem EXISTS but the file is
+ *                              unusable (the loud theme posture: a
+ *                              theme that was asked for by name and
+ *                              fails, fails loudly; a broken file
+ *                              that merely sits in a scanned
+ *                              directory is skipped with one warning
+ *                              instead — it must not hide its
+ *                              neighbors) */
+fdk_theme *fdk_theme_find(const char *name, fdk_result *out_error);
+
+/* Enumerates every theme visible on the search path — the engine
+ * behind `fdk-theme list`. The scan runs ONCE per process (the first
+ * call) and the result is cached for the process lifetime, exactly
+ * like the font layer's cached system default: the set of installed
+ * themes is not something that changes under a running application,
+ * and tools that care run in their own short-lived processes.
+ *
+ * Entries are (stem, path) pairs — the built-in theme has no file
+ * and is not listed. When the same stem exists in several
+ * directories the highest-priority directory wins (later ones are
+ * shadowed, the same precedence fdk_theme_find applies). Output is
+ * sorted by stem (byte order), so listings are stable and diffable.
+ *
+ * The returned strings are borrowed from the cache: valid until
+ * process end, never freed by the caller. NULL/0 past the end (and
+ * for a name when no themes are installed at all). */
+size_t fdk_theme_available_count(void);
+const char *fdk_theme_available_name(size_t index);
+const char *fdk_theme_available_path(size_t index);
 
 #ifdef __cplusplus
 }

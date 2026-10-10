@@ -8417,6 +8417,13 @@ static void test_textview_gui(void) {
 }
 
 int main(void) {
+    /* Hermeticity (1.4.13): pin the global-settings boot (the "fdk"
+     * prefs store + $FDK_THEME) to nothing so this suite's pixel
+     * expectations — sampled against the built-in Modern palette —
+     * hold on any machine, including one with a global theme set. */
+    setenv("FDK_PREFS_FILE", "/nonexistent-fdk-hermetic.prefs", 1);
+    setenv("FDK_THEME", "", 1);
+
     signal(SIGALRM, alarm_handler);
 
     test_connect_and_shutdown();

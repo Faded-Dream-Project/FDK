@@ -1,0 +1,9 @@
+# alpha.fdk — discovery test fixture (tests/data/themes).
+# Minimal valid theme; the internal name deliberately differs from
+# a "pretty" form so tests can pin exact matching.
+version = 1
+name    = "Alpha Test"
+author  = "FDK tests"
+
+[colors]
+accent = #FF0000

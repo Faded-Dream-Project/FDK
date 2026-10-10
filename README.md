@@ -67,12 +67,26 @@ smooth wheel/keyboard scrolling in every ScrollView (fast notches
 accumulate into one glide; every programmatic scroll stays
 instant).
 
+The command-line face (1.4.13): `fdk-theme set matrix` is real —
+theme discovery over the XDG data hierarchy (`$FDK_THEME_DIR`,
+`~/.local/share/fdk/themes`, the system data dirs where `make
+install` puts the themes FDK ships), one global setting
+(`~/.config/fdk.prefs`, the reserved "fdk" store, with
+`$FDK_THEME` as the per-process override) applied by every FDK
+application that did not explicitly install its own theme, and
+`fdk-prefs` to read and write any application's settings store
+from a shell — the settings half for applications without their
+own settings UI (`docs/cli.md`).
+
 See "What works today"
 below and `docs/roadmap.md` for an honest, specific list of what is
 and isn't covered.
 
 After `make install`, link applications with
-`cc myapp.c $(pkg-config --cflags --libs fdk)`.
+`cc myapp.c $(pkg-config --cflags --libs fdk)`. The same install puts
+the `fdk-theme` and `fdk-prefs` command-line tools into `$(PREFIX)/bin`
+and the shipped themes into `$(PREFIX)/share/fdk/themes` — so
+`fdk-theme set daylight` works immediately after installing.
 
 ## Requirements
 
@@ -90,11 +104,12 @@ After `make install`, link applications with
 ## Building
 
 ```sh
-make            # debug build (ASan+UBSan on by default)
+make            # debug build (ASan+UBSan on by default): libs + tools
 make test       # platform-independent test suite (no display needed)
 make test-x11   # X11 integration test suite (real window lifecycle,
                 # auto-starts a throwaway Xvfb if $DISPLAY isn't set)
 make examples   # build the example programs
+make tools      # build fdk-theme / fdk-prefs (also in plain `make`)
 ```
 
 To require the Wayland backend at build time (rather than the default

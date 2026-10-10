@@ -1,6 +1,6 @@
 /*
- * theme.c — theme object lifecycle, the built-in default, and the
- * current-default switch
+ * theme.c — theme object lifecycle, the built-in default, the
+ * current-default switch, and the global-settings boot (1.4.13)
  *
  * The built-in default is the 1.4.0 "Modern" retune of the Phase 6
  * v1 palette: same token roles, flatter and calmer values. The v1
@@ -38,7 +38,9 @@
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
+#include "fdk/fdk_prefs.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* ---- The built-in default (the 1.4.0 "Modern" palette) ---- */
@@ -116,6 +118,113 @@ const fdk_theme *fdk__theme_builtin(void) {
 
 /* ---- The current default ---- */
 
+/* The global-settings boot (1.4.13). Resolves, ONCE per process, the
+ * toolkit-level theme preference:
+ *
+ *     $FDK_THEME           (per-process override, the GTK_THEME
+ *                           precedent — theming one launch, a rig)
+ *       else theme.name in the "fdk" prefs store
+ *         ($FDK_PREFS_FILE / $XDG_CONFIG_HOME/fdk.prefs /
+ *          ~/.config/fdk.prefs — the file `fdk-theme set` writes)
+ *       else the built-in theme, quietly.
+ *
+ * It runs lazily at the FIRST resolution of the current default
+ * (the first paint, fdk_theme_get_default(), any NULL-theme
+ * accessor) — before which an application may pre-empt it by
+ * calling fdk_theme_set_default() itself; that call sets the boot
+ * flag and the process is thereafter entirely the application's
+ * (the explicit-override-owns-the-choice contract, fdk_theme.h).
+ *
+ * Every failure is soft, per the prefs resilience rule: a missing
+ * or corrupt settings file is "no preference" (fdk_prefs_open
+ * already absorbed that), a name that finds nothing on the search
+ * path logs ONE warning and keeps the built-in theme. A themed
+ * launch must never be a failed launch.
+ *
+ * The theme the boot installs is owned here for the process
+ * lifetime (g_boot_theme): nobody ever destroys it, and the static
+ * keeps it root-reachable for LSan. The reset hook below exists so
+ * the TEST suite can run several boot scenarios in one process. */
+static bool g_booted;           /* the one-shot guard; set FIRST
+                                 * inside the boot because the
+                                 * set_default() it calls re-enters
+                                 * via fdk__theme_current() */
+static fdk_theme *g_boot_theme; /* the boot's install, owned for
+                                 * the process lifetime */
+
+static void boot_from_settings(void) {
+    if (g_booted) {
+        return;
+    }
+    g_booted = true;
+
+    const char *name = getenv("FDK_THEME");
+    const char *origin = "$FDK_THEME";
+    if (name != NULL && name[0] == '\0') {
+        name = NULL; /* exported-empty means unset here */
+    }
+
+    fdk_prefs *prefs = NULL;
+    if (name == NULL) {
+        fdk_result pr = fdk_prefs_open("fdk", &prefs);
+        if (fdk_ok(pr)) {
+            /* The value pointer is owned by the store; used below
+             * strictly before the destroy at the exit. */
+            const char *v = fdk_prefs_get(prefs, "theme.name", NULL);
+            if (v != NULL && v[0] != '\0') {
+                name = v;
+                origin = "the global settings file";
+            }
+        } else {
+            /* open() only hard-fails on OOM / a NULL app_id — worth
+             * one warning, then the built-in theme carries on. */
+            FDK_WARN("theme: opening the global settings failed (%d)",
+                     (int)pr);
+        }
+    }
+
+    if (name == NULL) {
+        fdk_prefs_destroy(prefs);
+        return; /* no preference anywhere: the built-in stays */
+    }
+
+    fdk_result r = FDK_OK;
+    fdk_theme *t = fdk_theme_find(name, &r);
+    if (t == NULL) {
+        if (r != FDK_ERR_NOT_FOUND) {
+            /* It WAS configured but the file is broken — the louder
+             * variant of the same soft failure. */
+            FDK_WARN("theme: '%s' (%s) failed to load (error %d); "
+                     "staying on the built-in theme",
+                     name, origin, (int)r);
+        } else {
+            FDK_WARN("theme: '%s' (%s) is not on the theme search "
+                     "path; staying on the built-in theme",
+                     name, origin);
+        }
+        fdk_prefs_destroy(prefs);
+        return;
+    }
+
+    g_boot_theme = t;
+    fdk_theme_set_default(t);
+    FDK_INFO("theme: '%s' applied (%s)", name, origin);
+    fdk_prefs_destroy(prefs);
+}
+
+/* Internal, TEST-only: rewind the one-shot boot so the next current
+ * resolution re-runs it (each scenario in tests/test_theme_discovery.c
+ * starts from a clean slate). Destroys a previously installed boot
+ * theme — fdk_theme_destroy() reverts the current default first, so
+ * nothing dangles. Not part of the public API, never installed. */
+void fdk__theme_boot_reset_for_tests(void) {
+    if (g_boot_theme != NULL) {
+        fdk_theme_destroy(g_boot_theme); /* reverts current first */
+        g_boot_theme = NULL;
+    }
+    g_booted = false;
+}
+
 /* fdk_alloc'd copy (NULL -> NULL). See theme_internal.h for why this
  * is not the widget layer's fdk__strdup. */
 char *fdk__theme_strdup(const char *s) {
@@ -136,10 +245,19 @@ char *fdk__theme_strdup(const char *s) {
 static fdk_theme *g_current;
 
 fdk_theme *fdk__theme_current(void) {
+    boot_from_settings();
     return (g_current != NULL) ? g_current : &g_builtin;
 }
 
 void fdk_theme_set_default(fdk_theme *theme) {
+    /* An explicit set is an opt-out: the application that installs
+     * its own theme BEFORE anything resolves the current default
+     * owns the process's choice, and the global setting never gets
+     * a chance to override it (the boot checks this flag first).
+     * Inside the boot itself the flag is already set, so this line
+     * is a no-op there. */
+    g_booted = true;
+
     fdk_theme *next = (theme != NULL) ? theme : &g_builtin;
     if (next == fdk__theme_current()) {
         return; /* already current: no repaint storm */
@@ -163,9 +281,13 @@ fdk_theme *fdk_theme_get_default(void) {
  * which case nothing was allocated. */
 static bool init_from_builtin(fdk_theme *t) {
     *t = g_builtin; /* struct copy; the static's pointers are
-                     * immediately replaced with owned copies below */
+                     * immediately replaced with owned copies below.
+                     * path copies as NULL — only fdk_theme_load()
+                     * ever sets it, and create_default/parse themes
+                     * are genuinely pathless. */
     t->name = NULL;
     t->author = NULL;
+    t->path = NULL;
     t->name = fdk__theme_strdup(g_builtin.name);
     if (t->name == NULL) {
         return false;
@@ -191,6 +313,13 @@ void fdk_theme_destroy(fdk_theme *theme) {
     if (theme == NULL) {
         return;
     }
+    if (theme == g_boot_theme) {
+        /* An application may legitimately destroy the theme the boot
+         * installed (it holds a borrowed pointer from get_default();
+         * the revert below then applies). The boot's ownership slot
+         * must not dangle. */
+        g_boot_theme = NULL;
+    }
     if (theme == g_current) {
         /* The current default must never dangle: revert first (this
          * also repaints, showing the built-in palette). */
@@ -198,6 +327,7 @@ void fdk_theme_destroy(fdk_theme *theme) {
     }
     fdk_free(theme->name);
     fdk_free(theme->author);
+    fdk_free(theme->path);
     fdk_free(theme);
 }
 
@@ -213,6 +343,18 @@ const char *fdk_theme_author(const fdk_theme *theme) {
     const fdk_theme *t =
         (theme != NULL) ? theme : fdk__theme_current();
     return t->author; /* NULL when unset (documented) */
+}
+
+/* The file this theme was loaded from (fdk_theme_load — and so
+ * fdk_theme_find, which loads what it finds). NULL for themes that
+ * came from anywhere else: the built-in default, create_default(),
+ * parse-from-memory. The string is owned by the theme and valid
+ * until destroy; a NULL theme means the current default. Purely
+ * informational — the mirror of fdk_font_get_file_path(). */
+const char *fdk_theme_file_path(const fdk_theme *theme) {
+    const fdk_theme *t =
+        (theme != NULL) ? theme : fdk__theme_current();
+    return t->path;
 }
 
 fdk_color fdk_theme_get_color(const fdk_theme *theme,

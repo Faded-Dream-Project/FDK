@@ -1,0 +1,56 @@
+# daylight.fdk — the light theme FDK ships (1.4.13).
+#
+# A complete theme on purpose: every token overridden, so it doubles
+# as a worked example of the full [colors]/[metrics] vocabulary. The
+# dark default is the built-in "FDK Modern"; this is its daylight
+# counterpart — same calm surfaces, same flat fields, inverted.
+#
+# Install location (make install): <prefix>/share/fdk/themes/, which
+# the default $XDG_DATA_DIRS already covers — `fdk-theme set daylight`
+# finds it with zero configuration.
+
+version = 1
+name    = "Daylight"
+author  = "FDK project"
+
+[colors]
+window_background          = #F4F5F7
+text                       = #1B1F27
+text_disabled              = #9AA0AB
+control_background         = #FFFFFF
+control_background_hover   = #E8EBF0
+control_background_pressed = #D6DAE2
+control_background_disabled= #ECECEC
+control_border             = #C4C9D2
+accent                     = #2563EB
+track                      = #E1E4EA
+tooltip_background         = #1B1F27
+tooltip_text               = #F4F5F7
+tooltip_border             = #4A5060
+selection_background       = #2563EB60
+selection_text             = #FFFFFF
+focus_ring                 = #2563EB
+success                    = #16A34A
+warning                    = #D97706
+danger                     = #DC2626
+sidebar_background         = #ECEDF1
+menu_background            = #FFFFFF
+accent_hover               = #3B82F6
+accent_pressed             = #1D4ED8
+accent_text                = #FFFFFF
+link                       = #2563EB
+entry_background           = #FFFFFF
+entry_border               = #C4C9D2
+row_hover                  = #EDF0F5
+
+[metrics]
+button_corner_radius  = 6
+separator_thickness   = 1
+title_bar_height      = 28
+scrollbar_width       = 12
+menu_item_height      = 26
+tooltip_corner_radius = 6
+entry_corner_radius   = 6
+menu_corner_radius    = 8
+list_row_height       = 30
+focus_ring_width      = 2

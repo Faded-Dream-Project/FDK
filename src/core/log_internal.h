@@ -24,4 +24,17 @@
 #define FDK_WARN(...)  fdk_log(FDK_LOG_WARN,  FDK_LOG_TAG, __VA_ARGS__)
 #define FDK_ERROR(...) fdk_log(FDK_LOG_ERROR, FDK_LOG_TAG, __VA_ARGS__)
 
+/* Scoped minimum-level override (internal). Push a temporary level,
+ * pop to restore; nesting to depth 8, deeper pushes are counted but
+ * ignored (an honest degradation — the worst case is over-silencing
+ * or over-chattiness inside a pathological nesting, never a crash
+ * or a lost pop). The motivating user: theme discovery's internal-
+ * name pass PROBES many .fdk files, and a file that fails to parse
+ * mid-scan is a skip-with-warning, not an ERROR the user must see —
+ * while the SAME file asked for BY NAME (the direct stem pass) must
+ * keep its full loud diagnostics. The bracket scopes exactly that
+ * difference without a level-getter racing a second thread. */
+void fdk__log_level_push(fdk_log_level level);
+void fdk__log_level_pop(void);
+
 #endif /* FDK_LOG_INTERNAL_H */

@@ -21,7 +21,8 @@
 ## Commands
 
 ```sh
-make            # debug build: libfdk.a + libfdk.so, ASan+UBSan enabled
+make            # debug build: libfdk.a + libfdk.so + the CLI tools,
+                # ASan+UBSan enabled
 make release    # optimized build (-O2 -DNDEBUG), no sanitizers
 make static     # libfdk.a only
 make shared     # libfdk.so only
@@ -31,10 +32,12 @@ make test-x11   # build and run the X11 integration test suite
                 # (uses $DISPLAY if set, otherwise auto-starts/stops a
                 # throwaway Xvfb — requires Xvfb to be installed)
 make examples   # build example programs, linked against libfdk.a
+make tools      # build the command-line tools (fdk-theme, fdk-prefs);
+                # also part of plain `make` — see docs/cli.md
 make bench      # build and run the performance baseline harness
                 # (release objects, no sanitizers; see docs/performance.md)
-make install    # install headers + both libraries + fdk.pc
-                # (PREFIX=/usr/local by default)
+make install    # install headers + both libraries + fdk.pc + the
+                # tools + the shipped themes (PREFIX=/usr/local by default)
 make uninstall  # remove what `install` put there
 make clean      # remove build/ entirely
 ```
@@ -65,6 +68,27 @@ For building against the tree without installing, compile with
 `-Iinclude` and link `build/libfdk.a` (plus `-lX11 -lXext -lm`, and
 the Wayland libs when built with Wayland enabled) — the same flags
 the Makefile computes.
+
+### Install layout (1.4.13)
+
+`make install` lays out, under `PREFIX` (default `/usr/local`, all
+overridable: `LIBDIR`, `INCDIR`, `BINDIR`, `DATADIR`):
+
+| Path                                  | Contents                      |
+|---------------------------------------|-------------------------------|
+| `$(INCDIR)/fdk/`                      | public headers                |
+| `$(LIBDIR)/libfdk.a`, `libfdk.so`     | the library                  |
+| `$(LIBDIR)/pkgconfig/fdk.pc`          | pkg-config file               |
+| `$(BINDIR)/fdk-theme`, `fdk-prefs`    | the command-line tools        |
+| `$(DATADIR)/fdk/themes/*.fdk`         | the shipped themes (daylight, matrix) |
+
+The themes directory is on the runtime discovery path through the
+default `XDG_DATA_DIRS` (`/usr/local/share` and `/usr/share` both
+are), so an installed FDK — and `fdk-theme list` — finds the
+shipped themes with zero configuration. A nonstandard `DATADIR`
+should be accompanied by a matching `XDG_DATA_DIRS` entry in the
+target environment; `$FDK_THEME_DIR` overrides everything for
+sandboxed setups. See `docs/cli.md`.
 
 ## Optional Wayland build
 

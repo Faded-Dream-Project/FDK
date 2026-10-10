@@ -1,0 +1,25 @@
+# matrix.fdk — the high-contrast green-on-black theme FDK ships
+# (1.4.13).
+#
+# Deliberately sparse: only seven colors and one metric are
+# overridden; everything else inherits the built-in defaults —
+# partial themes are a feature, not a fallback, and this file is the
+# proof FDK installs next to the complete one. (The same look ships
+# in examples/data/ for demo 08; this copy is the packaged artifact.)
+
+version = 1
+name    = "Matrix"
+author  = "FDK project"
+
+[colors]
+window_background          = #060A06
+text                       = #39FF88
+control_background         = #0C2412
+control_background_hover   = #123618
+control_background_pressed = #1A4A22
+control_border             = #1E5A2C
+accent                     = #7CFFA8
+track                      = #08170C
+
+[metrics]
+button_corner_radius = 2

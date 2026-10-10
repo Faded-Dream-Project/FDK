@@ -32,6 +32,9 @@
 struct fdk_theme {
     char *name;   /* owned, never NULL ("FDK Dark" default) */
     char *author; /* owned, NULL when unset                  */
+    char *path;   /* owned, NULL unless fdk_theme_load() —
+                   * informational only (fdk_theme_file_path),
+                   * never consulted for behavior            */
 
     /* Straight RGBA. Indexed by fdk_theme_token. */
     fdk_color colors[FDK_TK_COUNT];
@@ -46,8 +49,24 @@ struct fdk_theme {
 const fdk_theme *fdk__theme_builtin(void);
 
 /* The current default theme; never NULL. This is what a NULL `theme`
- * argument to the public accessors resolves to. */
+ * argument to the public accessors resolves to. Calling it (or
+ * fdk_theme_set_default(), which resolves through it) runs the
+ * one-shot global-settings boot on first use — see theme.c. */
 fdk_theme *fdk__theme_current(void);
+
+/* theme.c, TEST-only: rewind the one-shot global-settings boot (and
+ * drop the theme it installed) so a test process can exercise
+ * several boot scenarios. Used by tests/test_theme_discovery.c via
+ * the internal-header include precedent (window_internal.h et al.);
+ * never part of the installed API. */
+void fdk__theme_boot_reset_for_tests(void);
+
+/* discover.c, TEST-only: forget the cached available-theme scan so
+ * the next available_* call rescans — same contract and rationale as
+ * the boot reset above (the cache is process-lifetime BY DESIGN;
+ * only the test suite, which changes the environment mid-process,
+ * needs to rewind it). */
+void fdk__theme_scan_reset_for_tests(void);
 
 /* parse.c: fills `t` (already initialized to a copy of the built-in
  * defaults) from the input, applying overrides. Returns FDK_OK or the

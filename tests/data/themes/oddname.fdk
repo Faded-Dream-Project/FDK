@@ -1,0 +1,8 @@
+# oddname.fdk — discovery test fixture: file stem and internal name
+# intentionally unrelated, to pin the internal-name lookup pass.
+version = 1
+name    = "The Odd One"
+author  = "FDK tests"
+
+[colors]
+accent = #0000FF

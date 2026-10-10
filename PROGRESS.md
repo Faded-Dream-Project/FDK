@@ -9,34 +9,42 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.12** (INCR transfers —
-the clipboard's atomic cap lifted, the last NEXT item), by a full
-in-depth code review — every claim below was re-verified against
-the tree, not copied from docs. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
+Last audited: 2026-10-10, at milestone **1.4.13** (the command-line
+face — maintainer-requested after the 1.4.12 audit closed the
+backlog: `fdk-theme` / `fdk-prefs`, theme discovery, the global
+settings store), building on the full in-depth code review done at
+1.4.12 — every claim below was re-verified against the
+tree, not copied from docs. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
 tooltips" candidate was stale (the 1.3.2 tooltip has been fully
 themed since birth — tokens, parser, Modern retune, tests); the tree
 is always the truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.12** (INCR transfers — the X11
+- **HEAD:** milestone **1.4.13** (the command-line face:
+  `fdk-theme` list/get/set/reset/path + `fdk-prefs`, theme discovery
+  over the XDG data hierarchy, the global `theme.name` setting in
+  the reserved "fdk" prefs store — the maintainer found the one gap
+  the 1.4.12 "backlog empty" conclusion had left: no shell face
+  for the settings half, no way to retheme apps without their own
+  settings menus. 1.4.12 shipped INCR transfers — the X11
   clipboard streams past the 4 MiB atomic cap in both directions,
-  64 MiB bound; 1.4.11 shipped the markup milestone — rich text:
-  the attribute-run layer, the tag scanner, markup in
-  labels/buttons/tooltips; 1.4.10 fullscreen both backends; 1.4.9
-  the PNG codec + the Picture widget + the clipboard image surface)
+  64 MiB bound; 1.4.11 the markup milestone; 1.4.10 fullscreen
+  both backends; 1.4.9 the PNG codec + Picture + clipboard images)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **607 exported symbols**, `make verify-exports` OK in
-  debug AND release
+- **Public API:** **612 exported symbols** (607 + the 1.4.13 five:
+  fdk_theme_find, fdk_theme_available_count/name/path,
+  fdk_theme_file_path), `make verify-exports` OK in debug AND release
 - **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
   suites, the eight 1.4.8 textview groups, the 1.4.9 png/
-  picture suite, and the 1.4.11 markup suite); X11 integration
+  picture suite, the 1.4.11 markup suite, and the 1.4.13
+  theme-discovery + CLI-tools suites); X11 integration
   suite all-pass — **150 [ok]** (real Xvfb, real input, incl. the
   modern-batch, HiDPI (private 192-dpi server), iconview GUI,
   file-dialog icon-mode, textview GUI, clipboard-image, and the
-  1.4.12 INCR read/serve/image groups); 35 test files (36 .c in
+  1.4.12 INCR read/serve/image groups); 37 test files (38 .c in
   tests/ counting bench.c, which is the perf harness, not a suite)
 - **Scale:** ~58k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
@@ -132,6 +140,16 @@ sidebar rhythm).
   (`FDK_TK_*` / `FDK_TM_*`), runtime switching, Modern + legacy
   recipes; button roles (suggested/destructive/link), placeholder
   text, hover fades (1.4.1/1.4.2)
+- **Theme discovery + the global setting + the CLI (1.4.13)**:
+  fdk_theme_find / fdk_theme_available_* over the XDG data
+  hierarchy ($FDK_THEME_DIR > $XDG_DATA_HOME/fdk/themes >
+  $XDG_DATA_DIRS, where `make install` puts the shipped themes:
+  daylight, matrix), fdk_theme_file_path, the one-shot lazy
+  settings boot in theme.c (theme.name in the reserved "fdk"
+  prefs store; $FDK_THEME per-process override; explicit
+  set_default opts the process out; fail-soft throughout), and the
+  **fdk-theme / fdk-prefs** command-line tools (tools/, installed
+  to $(PREFIX)/bin) — docs/cli.md is the reference
 - Animation: easing library (**11 functions**), animator, smooth
   scroll, menu/combo fades, revealer slides, expander door
 - **Paint group (1.4.3): per-widget subtree opacity** — the ARGB
@@ -171,7 +189,10 @@ sidebar rhythm).
 
 The backlog is EMPTY. The widget families shipped across the
 board; rich text shipped in 1.4.11; INCR transfers shipped in
-1.4.12. What remains is LATER-by-policy (IME completion surface
+1.4.12; the command-line face shipped in 1.4.13 (the one gap the
+maintainer identified after the 1.4.12 audit — a settings CLI is
+toolkit infrastructure, the gsettings role, not an application
+feature). What remains is LATER-by-policy (IME completion surface
 waits for a protocol joining third_party/wayland-protocols) and
 OUT-by-policy (the deliberate non-goals below) — the line where
 adding anything more would make FDK something other than a
@@ -192,10 +213,10 @@ Assistant/wizard · D-Bus anything.
 
 ```sh
 source /home/z/my-project/scripts/fdk-env.sh && cd $FDK_ROOT
-make                 # debug build, ASan+UBSan
+make                 # debug build, ASan+UBSan (libs + the CLI tools)
 make test            # headless suite
 make test-x11        # X11 integration (auto-Xvfb)
-make release && make verify-exports   # 531 symbols, both configs
+make release && make verify-exports   # 612 symbols, both configs
 ```
 
 Full battery (before each milestone commit): interop rig, X11 + sway

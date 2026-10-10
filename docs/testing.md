@@ -1661,3 +1661,43 @@ what the public getter reads — went stale. The suite caught it as
 "the unset configure arrived on the wire, the flag never cleared."
 Rule: exactly one function writes a state field — the one that
 decides whether the write is a change.
+
+## 1.4.13 — testing the command-line face
+
+Two new binaries in the plain `make test` battery, and both had to
+earn their place differently from every headless test before them:
+
+- `tests/test_theme_discovery.c` tests the LIBRARY half — the
+  search path, both lookup passes of fdk_theme_find(), the
+  enumeration cache, and the full boot-precedence matrix
+  (env > file > built-in; explicit set_default opts out; every
+  failure soft). The process-lifetime caches (the scan, the
+  one-shot boot) are rewound between scenarios through internal
+  reset hooks (fdk__theme_scan_reset_for_tests /
+  fdk__theme_boot_reset_for_tests) — the same
+  internal-header-precedent the X11 suite uses, because those
+  caches are process-lifetime BY DESIGN and only a test that
+  deliberately restages the environment mid-process needs to
+  rewind them.
+- `tests/test_cli_tools.c` tests the TOOLS as real subprocesses
+  (popen, exit codes, stdout text, file side effects) — the CLI
+  contract a script would consume, not the functions behind it.
+  Locating the tools relative to /proc/self/exe keeps the suite
+  cwd-independent; the tools run under the same ASan build as
+  everything else, so a leak in a tool is a failed exit code
+  here, not a silent pass. Two lessons from its first runs: a
+  probe that asserts a stderr DIAGNOSTIC must merge `2>&1` into
+  the capture (popen reads stdout only), and a sandbox whose
+  "file path" is used as a DIRECTORY prefix produces
+  path-under-a-file failures that look like tool bugs and are
+  test bugs.
+
+One discipline note for the future: theme-identity assertions
+anywhere in the suite (test_theme.c's palette pins, the X11
+suite's pixel samples) now depend on the global-settings boot
+finding NOTHING. Both binaries pin `FDK_PREFS_FILE` at a
+nonexistent absolute path and `FDK_THEME` at empty (which the boot
+reads as unset) at the top of main() — hermetic on any machine,
+including one where the developer ran `fdk-theme set matrix`
+before `make test`. Any future binary that pins theme pixels
+should copy those two lines.

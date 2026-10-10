@@ -890,6 +890,15 @@ static void test_v1_recipe(void) {
 }
 
 int main(void) {
+    /* Hermeticity (1.4.13): the lazy global-settings boot reads the
+     * reserved "fdk" prefs store and $FDK_THEME at the first theme
+     * resolution. Pin both to nothing so this binary's built-in-
+     * palette pins hold on ANY machine — including one where the
+     * user ran `fdk-theme set matrix`. (An empty FDK_THEME behaves
+     * as unset; an absolute missing file is a clean first run.) */
+    setenv("FDK_PREFS_FILE", "/nonexistent-fdk-hermetic.prefs", 1);
+    setenv("FDK_THEME", "", 1);
+
     test_builtin_pin();
     test_programmatic();
     test_parse_full();

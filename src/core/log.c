@@ -1,4 +1,5 @@
-#include "fdk/fdk_log.h"
+#define FDK_LOG_TAG "log"
+#include "core/log_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -7,6 +8,31 @@
 static fdk_log_level g_min_level = FDK_LOG_INFO;
 static fdk_log_sink_fn g_sink = NULL;
 static void *g_sink_user_data = NULL;
+
+/* The push/pop level stack (log_internal.h). Depth-bounded; the
+ * counter keeps counting past the bound so every pop has a push and
+ * the pairs never desynchronize. */
+#define LOG_LEVEL_STACK_MAX 8
+static fdk_log_level g_level_stack[LOG_LEVEL_STACK_MAX];
+static int g_level_stack_depth;
+
+void fdk__log_level_push(fdk_log_level level) {
+    if (g_level_stack_depth < LOG_LEVEL_STACK_MAX) {
+        g_level_stack[g_level_stack_depth] = g_min_level;
+    }
+    g_level_stack_depth++;
+    g_min_level = level;
+}
+
+void fdk__log_level_pop(void) {
+    if (g_level_stack_depth == 0) {
+        return; /* a pop without a push: ignored, never a crash */
+    }
+    g_level_stack_depth--;
+    if (g_level_stack_depth < LOG_LEVEL_STACK_MAX) {
+        g_min_level = g_level_stack[g_level_stack_depth];
+    }
+}
 
 static const char *level_name(fdk_log_level level) {
     switch (level) {

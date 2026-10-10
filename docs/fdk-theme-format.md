@@ -278,3 +278,31 @@ shipped by a major toolkit. Adding keys later is backward-compatible
 (unknown keys stay errors for old parsers by design — a theme that
 needs a key this FDK does not know should fail loudly, not render
 wrong); adding *sections* later bumps `version`.
+
+## Discovery and installation (1.4.13)
+
+A theme file does not need to be loaded by path. The discovery layer
+(`fdk_theme_find`, the engine behind the `fdk-theme` CLI) resolves a
+NAME against the XDG search path and the naming rules below; the
+normative reference for that half is `docs/cli.md` and
+`include/fdk/fdk_theme.h`.
+
+- A theme is installed by placing `<stem>.fdk` in a search directory:
+  `$FDK_THEME_DIR`, `$XDG_DATA_HOME/fdk/themes`
+  (default `~/.local/share/fdk/themes`), or any `$XDG_DATA_DIRS`
+  entry's `fdk/themes` (default `/usr/local/share:/usr/share`, which
+  is where `make install` puts the themes FDK ships).
+- The stem is the canonical handle: `matrix` resolves to
+  `matrix.fdk`, exact and case-sensitive, first directory on the
+  path wins. Stems should be 1..64 characters of `[A-Za-z0-9_-]`
+  (the same character class as a prefs key half).
+- A theme whose file name differs from its internal `name` is also
+  reachable BY that internal name — the discovery pass compares the
+  quoted `name` exactly.
+- The stem grammar is a security boundary as well as a convention:
+  a lookup name is interpolated into a path only when it matches the
+  grammar, so `../`-shaped or `/`-containing input can never walk
+  outside the search directories.
+
+Nothing in this section changes the file format itself — it is pure
+placement policy over version 1.

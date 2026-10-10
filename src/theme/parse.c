@@ -786,6 +786,16 @@ fdk_theme *fdk_theme_load(const char *path, fdk_result *out_error) {
         FDK_ERROR("fdk_theme_load: %s rejected (%s)", path,
                   fdk_result_to_string(
                       out_error != NULL ? *out_error : FDK_ERR_UNKNOWN));
+        return NULL;
+    }
+
+    /* Remember where this theme came from (fdk_theme_file_path —
+     * the font layer's get_file_path precedent). Informational only:
+     * an allocation failure here costs the diagnostic, not the
+     * theme. */
+    t->path = fdk__theme_strdup(path);
+    if (t->path == NULL) {
+        FDK_WARN("fdk_theme_load: cannot record the path of %s", path);
     }
     return t;
 }

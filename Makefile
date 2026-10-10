@@ -11,7 +11,12 @@
 #                   uses $DISPLAY if set, otherwise starts and tears
 #                   down a throwaway Xvfb automatically
 #   make examples   build example programs (linked against the static lib)
-#   make install    install headers + libraries to PREFIX (default /usr/local)
+#   make tools      build the command-line tools (fdk-theme, fdk-prefs;
+#                   also part of the default `make` — they are ordinary
+#                   applications on the public API, its reference
+#                   consumer)
+#   make install    install headers + libraries + tools + shipped themes
+#                   to PREFIX (default /usr/local)
 #   make uninstall  remove what `install` installed
 #   make clean      remove build output
 #
@@ -35,6 +40,8 @@ AR       ?= ar
 PREFIX   ?= /usr/local
 LIBDIR   ?= $(PREFIX)/lib
 INCDIR   ?= $(PREFIX)/include
+BINDIR   ?= $(PREFIX)/bin
+DATADIR  ?= $(PREFIX)/share
 # Version for the pkg-config file and the shared-library SONAME;
 # kept in one place, mirroring include/fdk/fdk_version.h (the header
 # is the source of truth — a mismatch is a release-blocker).
@@ -231,6 +238,20 @@ X11_TEST_BIN := $(BUILD_DIR)/tests/test_x11_integration
 EXAMPLE_SRCS := $(wildcard examples/*.c)
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 
+# Command-line tools (1.4.13). Built like tests and examples — against
+# the static archive, on the public headers only (tools/toolutil.h is
+# the one tools-local header). They link the full LDFLAGS set like
+# every other consumer of libfdk.a.
+TOOL_SRCS := $(wildcard tools/*.c)
+TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/tools/%,$(TOOL_SRCS))
+
+# Shipped themes: installed into $(DATADIR)/fdk/themes, which the
+# runtime discovery path reaches through the default $XDG_DATA_DIRS
+# (/usr/local/share and /usr/share both are) — an installed FDK finds
+# its own themes with zero configuration, and `fdk-theme list` after
+# `make install` shows exactly these next to the built-in.
+SHIPPED_THEMES := $(wildcard themes/*.fdk)
+
 # Header dependency tracking: -MMD -MP writes a .d beside each object
 # naming every header it included. Without this, editing a struct in
 # an internal header did NOT recompile the .c files that include it
@@ -243,9 +264,9 @@ EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 # library object did.
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
-.PHONY: all release static shared test test-x11 test-wayland bench examples install uninstall clean verify-exports
+.PHONY: all release static shared test test-x11 test-wayland bench examples tools install uninstall clean verify-exports
 
-all: static shared
+all: static shared tools
 
 # `make release` re-invokes make with FDK_CONFIG=release: every
 # object then rebuilds against the release flags through the config
@@ -433,6 +454,14 @@ $(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
+# --- Tools (1.4.13) ------------------------------------------------------
+
+tools: $(TOOL_BINS)
+
+$(BUILD_DIR)/tools/%: tools/%.c $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+
 # --- Install ------------------------------------------------------------
 
 # Performance baseline harness (Phase 11): NOT part of `make test`
@@ -479,12 +508,18 @@ install: all $(BUILD_DIR)/fdk.pc
 	install -d $(DESTDIR)$(LIBDIR)/pkgconfig
 	install -m 644 $(BUILD_DIR)/fdk.pc \
 	               $(DESTDIR)$(LIBDIR)/pkgconfig/fdk.pc
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 755 $(TOOL_BINS) $(DESTDIR)$(BINDIR)/
+	install -d $(DESTDIR)$(DATADIR)/fdk/themes
+	install -m 644 $(SHIPPED_THEMES) $(DESTDIR)$(DATADIR)/fdk/themes/
 
 uninstall:
 	rm -rf $(DESTDIR)$(INCDIR)/fdk
 	rm -f $(DESTDIR)$(LIBDIR)/libfdk.a
 	rm -f $(DESTDIR)$(LIBDIR)/libfdk.so
 	rm -f $(DESTDIR)$(LIBDIR)/pkgconfig/fdk.pc
+	rm -f $(addprefix $(DESTDIR)$(BINDIR)/,$(notdir $(TOOL_BINS)))
+	rm -rf $(DESTDIR)$(DATADIR)/fdk
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -4713,3 +4713,51 @@ That empties the NEXT list. What remains is LATER-by-policy (the IME
 completion surface waits for a protocol in third_party/) and OUT-by-
 policy (the deliberate non-goals) — the point where adding anything
 more would make FDK something other than a toolkit.
+
+## 1.4.13 — the command-line face (maintainer-requested)
+
+The 1.4.12 audit closed the NEXT list with "adding anything more
+would make FDK something other than a toolkit" — and then the
+maintainer asked the question that found the gap in that very
+conclusion: "is there a tool like `fdk-theme set 'name'` — a CLI to
+set things when there's no settings menu?" There was not. The prefs
+library (1.3.7) had no shell face, theme choice was per-application
+API only, and a desktop of FDK apps without their own settings UIs
+could not be rethemed at all. GTK's answer to that shape of problem
+is gsettings; this milestone is FDK's:
+
+- Theme DISCOVERY (src/theme/discover.c): the XDG search path
+  ($FDK_THEME_DIR > $XDG_DATA_HOME/fdk/themes > $XDG_DATA_DIRS
+  entries), fdk_theme_find() (stem match first, internal-name
+  fallback — both passes path-safe: lookup names only become paths
+  through the [A-Za-z0-9_-] stem grammar), and the one-shot cached
+  fdk_theme_available_*() enumeration behind `fdk-theme list`.
+- The GLOBAL SETTING (theme.c): one toolkit-level preference,
+  theme.name in the reserved "fdk" prefs store, applied once per
+  process at the first theme resolution — $FDK_THEME wins over the
+  file, an explicit fdk_theme_set_default() opts the process out,
+  every failure is soft (a themed launch must never be a failed
+  launch). fdk_theme_file_path() joined the public API (the font
+  layer's get_file_path precedent), and fdk__log_level_push/pop()
+  (log.c) scopes the discovery probe's quiet-vs-loud postures.
+- The TOOLS (tools/): fdk-theme (list / get / set / reset / path,
+  validate-before-write, scriptable exit codes) and fdk-prefs
+  (typed get/set/remove/list/path over any application's store);
+  both are ordinary public-API applications — the reference
+  consumer — with the one piece of policy a library should never
+  own (mkdir -p on first run) factored into tools/toolutil.h.
+- Packaging: make install lays out $(PREFIX)/bin tools and the
+  shipped themes (daylight, matrix) under $(PREFIX)/share/fdk/themes,
+  which the default XDG_DATA_DIRS already covers.
+- Tests: tests/test_theme_discovery.c (the search path, both lookup
+  passes, the loud-vs-quiet broken-file postures, the full
+  boot-precedence matrix) and tests/test_cli_tools.c (real
+  subprocesses, exit codes, file side effects); test_theme.c and
+  the X11 suite pin the settings boot off so their palette pins
+  stay hermetic on machines with a global theme set.
+
+Where this leaves the line: the CLI is infrastructure, not an
+application feature — a settings face is exactly what a toolkit
+owes its applications' users (gsettings is not "beyond GTK"). The
+NEXT list stays empty; the gap the maintainer found was the last
+one of its kind.
