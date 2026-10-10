@@ -4352,7 +4352,46 @@ both example rigs PASS (the rigs re-screened to 1720 for the
 taller example); verify-exports 570 symbols in BOTH configs;
 secret scans clean.
 
----\n\n## The GTK/Qt feature-parity ledger
+---\n\n### 1.4.6 — the grid's rubber band, and themed cells (the ledger's NEXT list, emptied again)
+
+The seventh milestone of the directive: the IconView's one
+remaining GTK delta, plus the theme coverage the new furniture
+earned.
+
+THE RUBBER BAND, GRID-SHAPED. The List's 1.4.2 drag-select,
+ported to two dimensions: a left press on EMPTY grid space sweeps
+a rect; every cell whose slot INTERSECTS the rect selects live,
+plain replacing / ctrl unioning over the press-time snapshot; the
+anchor is glued to CONTENT space (captured at press with the
+offset — the auto-scroll composition rule, ready for the one
+delta that stays: edge-chasing). The press and the release each
+fire the selection callback once; motions never spam it. The band
+paints UNDER the cells — the List's accent tint + border, clamped
+to the view — and leaves with the gesture.
+
+THEMED CELLS. The IconView's default cell geometry joined the
+LAYOUT metrics (iconview_cell_width 64..192 default 96,
+iconview_cell_height 64..224 default 84): a theme re-slots every
+grid, fdk_iconview_set_item_size overrides per widget — the same
+rule FDK_TM_LIST_ROW_HEIGHT already follows.
+
+The 1.4.6 test lessons (testing.md): filling one UNION member
+then memsetting another wipes both (the motion builder trap);
+a test surface is not cleared between paints, so "gone after the
+gesture" needs a region something repaints every frame; and the
+empty-space press target must be verified against the CELL
+geometry, not eyeballed (the first pixel-proof press landed
+inside a cell and asserted true for the wrong reason).
+
+Battery on the final tree: debug + release zero warnings; the
+headless suite all-pass (the iconview suite's sixth group); the
+X11 integration suite all-pass; the Wayland suite, interop, both
+tooltip rigs, compositor-death, and both example rigs PASS;
+verify-exports in BOTH configs; secret scans clean.
+
+---
+
+## The GTK/Qt feature-parity ledger
 
 The standing directive ("every small feature that is in GTK and Qt
 must be in FDK too") needs a ledger, not a vibe — one place that
@@ -4386,7 +4425,8 @@ CROSSFADE 1.4.3); Stack/StackSwitcher SHIPPED
 LevelBar SHIPPED (1.4.2); Scale marks
 SHIPPED (1.4.2 — slider ticks + labels; vertical orientation 1.4.3); DropDown-menu-button
 SHIPPED (1.4.3 — the MenuButton); IconView/GridView SHIPPED (1.4.5 — the item grid: glyph cells,
-the List's whole selection model, grid keyboard nav); DrawingArea ==
+the List's whole selection model, grid keyboard nav; the rubber
+band + themed cell metrics 1.4.6); DrawingArea ==
 Canvas SHIPPED; GLArea OUT (no OpenGL backend in scope — the
 software renderer is the product); Assistant/wizard OUT (dialog
 composition, app-level); FontChooser SHIPPED (1.4.3 — fdk_font_enumerate +
@@ -4431,10 +4471,13 @@ work).
 
 The 1.4.5 list shipped in full.
 
-The NEXT list (1.4.6 candidates, in rough value order): the
-ICONVIEW's rubber band (the List's drag-select, grid-shaped — the
-one IconView delta GTK carries); the IME completion surface
-(preedit is display-only; needs a real IME protocol surface —
-may stay LATER by the no-bus policy); and the polish pass the
-"serious project" bar keeps earning (theme metric coverage for
-the 1.4.4/1.4.5 furniture, rig checks for the new widgets).
+The 1.4.6 list shipped in full.
+
+The NEXT list (1.4.7 candidates, in rough value order): the
+FILE DIALOG's icon mode (the IconView as the browsing surface —
+GtkFileChooser's list/icon toggle); the IconView band's
+edge-chasing AUTO-SCROLL (the List's 1.4.3 machinery, grid-
+shaped — the last IconView delta); and the IME completion
+surface (preedit is display-only; needs a real IME protocol
+surface — LATER by the no-bus policy until a protocol joins
+third_party/wayland-protocols).

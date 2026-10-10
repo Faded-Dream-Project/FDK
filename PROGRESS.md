@@ -9,8 +9,8 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.5** (HiDPI
-everywhere + the item grid), by a full in-depth code review — every claim below was
+Last audited: 2026-10-10, at milestone **1.4.6** (the grid's
+rubber band + themed cells), by a full in-depth code review — every claim below was
 re-verified against the tree, not copied from docs. THE AUDIT'S
 OWN FIRST CATCH: the ledger's "themed tooltips" candidate was
 stale (the 1.3.2 tooltip has been fully themed since birth —
@@ -19,10 +19,8 @@ truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.5** (X11 HiDPI: Xft.dpi/screen-metric
-  detection, integer scales, physical windows, divided input; the
-  IconView item grid: glyph cells, the List's selection model,
-  grid keyboard nav)
+- **HEAD:** milestone **1.4.6** (the IconView rubber band +
+  themed cell metrics; 1.4.5 shipped X11 HiDPI + the item grid)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
@@ -46,7 +44,8 @@ auto-scroll, row icons), tree (row icons; multi-select + rubber band
 menu-bar / context menu (accelerators + mnemonics), combo (editable),
 slider (marks/ticks + labels; vertical orientation), **iconview**
 (the 1.4.5 item grid: glyph cells in a re-flowing column field,
-the List's selection model, grid keyboard nav, batch fills),
+the List's selection model, grid keyboard nav, batch fills; the
+1.4.6 rubber band + themed cell metrics),
 spinbutton,
 toolbar, tooltip, spinner, link-button (role on button), paned,
 expander, statusbar, stack + stackswitcher, revealer (slide modes;
@@ -119,14 +118,14 @@ sidebar rhythm).
 
 ## What's left (the authoritative backlog)
 
-### NEXT — milestone 1.4.6 (from the parity ledger, value order)
+### NEXT — milestone 1.4.7 (from the parity ledger, value order)
 
-1. **IconView rubber band** — the List's drag-select, grid-shaped
-   (the one IconView delta GTK carries)
-2. **IME completion surface** — likely staying LATER (needs a real
-   IME protocol surface; the no-bus policy applies)
-3. **The polish pass** — theme metric coverage for the 1.4.4/1.4.5
-   furniture, rig checks for the new widgets
+1. **File dialog icon mode** — the IconView as the browsing
+   surface (GtkFileChooser's list/icon toggle)
+2. **IconView band auto-scroll** — the List's edge-chasing
+   machinery, grid-shaped (the last IconView delta)
+3. **IME completion surface** — LATER by the no-bus policy until a
+   protocol joins third_party/wayland-protocols
 
 ### LATER (real, not next)
 

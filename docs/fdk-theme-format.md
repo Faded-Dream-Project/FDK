@@ -145,6 +145,8 @@ All optional; each inherits from the built-in default theme when absent.
 | `list_row_height`      | 16–48  | 30      | List row height FLOOR (1.4.0)   |
 | `focus_ring_width`     | 1–4    | 2       | Focus ring stroke (1.4.0; buttons and entries) |
 | `scrollbar_overlay_width` | 4–12 | 6       | Overlay bar thickness (1.4.4; the transient thumb) |
+| `iconview_cell_width`   | 64–192 | 96     | IconView cell width (1.4.6; LAYOUT metric) |
+| `iconview_cell_height`  | 64–224 | 84     | IconView cell height (1.4.6; LAYOUT metric) |
 
 All optional; each inherits from the built-in default theme when absent.
 Most metrics are paint-time values only — they do not change any
@@ -247,6 +249,8 @@ separator_thickness  = 1
 title_bar_height     = 28
 scrollbar_width      = 12
 scrollbar_overlay_width = 6
+iconview_cell_width   = 96
+iconview_cell_height  = 84
 menu_item_height     = 26
 tooltip_corner_radius = 6
 entry_corner_radius  = 6

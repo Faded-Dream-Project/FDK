@@ -73,6 +73,22 @@ typedef struct fdk_iconview {
     void *on_selection_data;
     fdk_iconview_item_fn on_activate;
     void *on_activate_data;
+    /* ---- the rubber-band sweep (1.4.6) ----
+     *
+     * The List's drag-select, grid-shaped: a left press on EMPTY
+     * grid space sweeps a 2-D rect; every cell whose slot INTERSECTS
+     * the rect selects live, plain replacing / ctrl unioning over
+     * the press-time snapshot. The anchor is glued to CONTENT space
+     * (captured at press with the offset) so a later auto-scroll
+     * extension (future work) composes; today the sweep is
+     * viewport-only. MULTIPLE mode only. */
+    bool banding;
+    bool band_ctrl;
+    fdk_f32 band_x, band_y;        /* viewport-space press point  */
+    fdk_f32 band_ax_cx, band_ay_cy; /* CONTENT-space anchor       */
+    fdk_f32 band_now_x, band_now_y;
+    bool *band_base;               /* ctrl-union snapshot         */
+    size_t band_base_cap;
 } fdk_iconview;
 
 static fdk_iconview *iv_of(fdk_widget *w) {
@@ -400,11 +416,131 @@ static const fdk_widget_class fdk_iv_cell_class_def = {
     .a11y = &iv_cell_a11y,
 };
 
+/* ---- the rubber-band sweep (1.4.6) ---- */
+
+/* The sweep's selection pass: the CONTENT-space band rect vs every
+ * cell's slot rect — plain intersection, ctrl unions the snapshot. */
+static void iv_apply_band(fdk_iconview *iv) {
+    if (iv->count == 0) {
+        return;
+    }
+    fdk_i32 off_x = 0, off_y = 0;
+    if (iv->scroll != NULL) {
+        fdk_scrollview_get_scroll_offset(iv->scroll, &off_x, &off_y);
+    }
+    /* The moving edge is viewport-space + the CURRENT offset. */
+    fdk_f32 now_cx = iv->band_now_x + (fdk_f32)off_x;
+    fdk_f32 now_cy = iv->band_now_y + (fdk_f32)off_y;
+    fdk_f32 x1 = (iv->band_ax_cx < now_cx) ? iv->band_ax_cx : now_cx;
+    fdk_f32 x2 = (iv->band_ax_cx < now_cx) ? now_cx : iv->band_ax_cx;
+    fdk_f32 y1 = (iv->band_ay_cy < now_cy) ? iv->band_ay_cy : now_cy;
+    fdk_f32 y2 = (iv->band_ay_cy < now_cy) ? now_cy : iv->band_ay_cy;
+    /* Widen a hair so an edge-aligned sweep still catches cells. */
+    x1 -= 1.0f;
+    y1 -= 1.0f;
+    x2 += 1.0f;
+    y2 += 1.0f;
+    for (size_t i = 0; i < iv->count; i++) {
+        fdk_i32 sx = 0, sy = 0;
+        iv_cell_slot(iv, i, &sx, &sy);
+        bool hit = (fdk_f32)sx < x2 &&
+                   (fdk_f32)(sx + iv->cell_w) > x1 &&
+                   (fdk_f32)sy < y2 &&
+                   (fdk_f32)(sy + iv->cell_h) > y1;
+        bool want = hit ||
+                    (iv->band_ctrl && iv->band_base != NULL &&
+                     i < iv->band_base_cap && iv->band_base[i]);
+        if (iv->items[i].selected != want) {
+            iv->items[i].selected = want;
+            if (want) {
+                iv->selected_count++;
+            } else if (iv->selected_count > 0) {
+                iv->selected_count--;
+            }
+        }
+    }
+    fdk_widget_invalidate(&iv->base);
+}
+
 /* ---- the view's keyboard ---- */
 
 static bool iv_handle_event(fdk_widget *w,
                             const fdk_widget_event *ev) {
     fdk_iconview *iv = iv_of(w);
+
+    /* ---- the rubber-band sweep (1.4.6) ----
+     *
+     * A left press reaching the VIEW itself is by construction on
+     * EMPTY space (cells consume their own presses; the scrollview
+     * does not consume presses) — the band start. MULTIPLE mode
+     * only; the implicit grab delivers motions + the release. */
+    switch (ev->type) {
+    case FDK_WIDGET_POINTER_DOWN: {
+        if (ev->pointer.button != FDK_POINTER_BUTTON_LEFT ||
+            iv->mode != FDK_LIST_SELECTION_MULTIPLE ||
+            (w->flags & FDK_WF_ENABLED) == 0) {
+            return false;
+        }
+        iv->banding = true;
+        iv->band_ctrl =
+            (ev->pointer.modifiers & FDK_MOD_CTRL) != 0;
+        iv->band_x = iv->band_now_x = ev->pointer.position.x;
+        iv->band_y = iv->band_now_y = ev->pointer.position.y;
+        /* The anchor is glued to the CONTENT it was pressed on. */
+        fdk_i32 ox = 0, oy = 0;
+        if (iv->scroll != NULL) {
+            fdk_scrollview_get_scroll_offset(iv->scroll, &ox, &oy);
+        }
+        iv->band_ax_cx = iv->band_x + (fdk_f32)ox;
+        iv->band_ay_cy = iv->band_y + (fdk_f32)oy;
+        /* Ctrl-union snapshot: the selection as the sweep found it. */
+        if (iv->band_ctrl && iv->count > 0) {
+            bool *snap = fdk_alloc_array(iv->count, sizeof(bool));
+            if (snap != NULL) {
+                for (size_t i = 0; i < iv->count; i++) {
+                    snap[i] = iv->items[i].selected;
+                }
+                iv->band_base = snap;
+                iv->band_base_cap = iv->count;
+            }
+        } else {
+            fdk_free(iv->band_base);
+            iv->band_base = NULL;
+            iv->band_base_cap = 0;
+        }
+        if (!fdk_widget_has_focus(w)) {
+            (void)fdk_widget_focus(w);
+        }
+        iv_apply_band(iv);
+        iv_fire_selection_changed(iv);
+        return true;
+    }
+    case FDK_WIDGET_POINTER_MOTION:
+        if (!iv->banding) {
+            return false;
+        }
+        iv->band_now_x = ev->position.x;
+        iv->band_now_y = ev->position.y;
+        iv_apply_band(iv);
+        return true;
+    case FDK_WIDGET_POINTER_UP:
+        if (!iv->banding) {
+            return false;
+        }
+        iv->banding = false;
+        fdk_free(iv->band_base);
+        iv->band_base = NULL;
+        iv->band_base_cap = 0;
+        /* The band rect disappears with the gesture. */
+        fdk_widget_invalidate(w);
+        /* One gesture: the callback fires here (and at the press —
+         * motions never spam it). */
+        iv_fire_selection_changed(iv);
+        return true;
+    default:
+        break;
+    }
+
     if (ev->type != FDK_WIDGET_KEY_DOWN) {
         return false;
     }
@@ -481,12 +617,56 @@ static bool iv_handle_event(fdk_widget *w,
 
 static void iv_view_paint(fdk_widget *w, fdk_surface *surface,
                           fdk_rect bounds, fdk_rect clip) {
-    (void)surface;
-    (void)bounds;
     (void)clip;
-    /* The cells are real child widgets; the focus ring is painted
-     * by the focused cursor's cell border logic above. */
-    (void)w;
+    fdk_iconview *iv = iv_of(w);
+    /* The rubber band (1.4.6), painted UNDER the cells (the view's
+     * paint runs before its scrollview subtree): the List's accent
+     * tint + border, clamped to the view's bounds. The anchor's
+     * on-screen position tracks the CONTENT it is glued to. */
+    if (iv->banding) {
+        fdk_i32 axo = 0, ayo = 0;
+        if (iv->scroll != NULL) {
+            fdk_scrollview_get_scroll_offset(iv->scroll, &axo, &ayo);
+        }
+        fdk_f32 anchor_vx = iv->band_ax_cx - (fdk_f32)axo;
+        fdk_f32 anchor_vy = iv->band_ay_cy - (fdk_f32)ayo;
+        fdk_f32 x1 = (anchor_vx < iv->band_now_x) ? anchor_vx
+                                                  : iv->band_now_x;
+        fdk_f32 x2 = (anchor_vx < iv->band_now_x) ? iv->band_now_x
+                                                  : anchor_vx;
+        fdk_f32 y1 = (anchor_vy < iv->band_now_y) ? anchor_vy
+                                                  : iv->band_now_y;
+        fdk_f32 y2 = (anchor_vy < iv->band_now_y) ? iv->band_now_y
+                                                  : anchor_vy;
+        fdk_i32 bx1 = (fdk_i32)x1 + bounds.x;
+        fdk_i32 by1 = (fdk_i32)y1 + bounds.y;
+        fdk_i32 bx2 = (fdk_i32)x2 + bounds.x;
+        fdk_i32 by2 = (fdk_i32)y2 + bounds.y;
+        if (bx1 < bounds.x) {
+            bx1 = bounds.x;
+        }
+        if (by1 < bounds.y) {
+            by1 = bounds.y;
+        }
+        if (bx2 > bounds.x + bounds.width) {
+            bx2 = bounds.x + bounds.width;
+        }
+        if (by2 > bounds.y + bounds.height) {
+            by2 = bounds.y + bounds.height;
+        }
+        fdk_i32 bw = bx2 - bx1;
+        fdk_i32 bh = by2 - by1;
+        if (bw > 0 && bh > 0) {
+            fdk_color accent = fdk__pal_accent();
+            fdk_rect band = {bx1, by1, bw, bh};
+            fdk_color tint = {accent.r, accent.g, accent.b,
+                              accent.a * 0.16f};
+            fdk_color edge = {accent.r, accent.g, accent.b,
+                              accent.a * 0.55f};
+            fdk_surface_fill_rect(surface, band, tint);
+            fdk_surface_draw_rect(surface, band, edge);
+        }
+    }
 }
 
 static void iv_view_destroy(fdk_widget *w) {
@@ -495,6 +675,8 @@ static void iv_view_destroy(fdk_widget *w) {
         fdk_free(iv->items[i].label);
     }
     fdk_free(iv->items);
+    fdk_free(iv->band_base);
+    iv->band_base = NULL;
 }
 
 static void iv_view_a11y_describe(const fdk_widget *w,
@@ -578,9 +760,15 @@ fdk_result fdk_iconview_create(fdk_widget *parent, fdk_font *font,
     iv->selected_count = 0;
     iv->batch_depth = 0;
     iv->batch_dirty = false;
-    iv->cell_w = IV_CELL_W;
-    iv->cell_h = IV_CELL_H;
+    /* The themed defaults (LAYOUT metrics — 1.4.6): a theme can
+     * re-slot every grid; set_item_size overrides per-widget. */
+    iv->cell_w = fdk_theme_get_metric(NULL, FDK_TM_ICONVIEW_CELL_WIDTH);
+    iv->cell_h = fdk_theme_get_metric(NULL,
+                                      FDK_TM_ICONVIEW_CELL_HEIGHT);
     iv->columns = 1;
+    iv->banding = false;
+    iv->band_base = NULL;
+    iv->band_base_cap = 0;
     fdk_widget_set_can_focus(w, true);
 
     r = fdk_scrollview_create(w, &iv->scroll);

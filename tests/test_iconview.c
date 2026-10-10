@@ -411,6 +411,121 @@ static void test_paint_and_a11y(void) {
            "LIST_ITEM children with SELECTED state\n");
 }
 
+/* ---- the rubber-band sweep (1.4.6) ---- */
+
+static void test_rubber_band(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *iv = make_view(root, NULL);
+    g_sel_changes = 0;
+    fdk_iconview_set_selection_mode(iv, FDK_LIST_SELECTION_MULTIPLE);
+    fdk_iconview_set_on_selection_changed(iv, on_sel, NULL);
+
+    /* A press on EMPTY grid space (the gap right of item 1's cell:
+     * cells span x 0..96 and 100..196; x=198 is between-columns
+     * gap... at 2 columns x 198 is past both — inside the view's
+     * 200px width, on the grid's empty right margin) starts the
+     * band; sweeping to (10, 100) covers items 0..3's area. */
+    fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    198.0f, 20.0f, 0);
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                  10.0f, 100.0f, 0);
+    /* Motion events speak the `pointer` member (a UNION with
+     * pointer_button — filling one then memsetting the other wipes
+     * both; the dedicated builder avoids the trap). */
+    fdk_event_data move;
+    memset(&move, 0, sizeof(move));
+    move.type = FDK_EVENT_POINTER_MOTION;
+    move.pointer.position.x = 10.0f;
+    move.pointer.position.y = 100.0f;
+
+    assert(fdk_widget_tree_handle_event(root, &down) == true);
+    assert(g_sel_changes == 1); /* the press fired (empty sweep)  */
+    (void)fdk_widget_tree_handle_event(root, &move);
+    /* The swept rect (content space): x [9,199], y [19,101] —
+     * items 0..3 (rows 0-1 of the 2-column grid). */
+    assert(fdk_iconview_selected_count(iv) == 4);
+    assert(fdk_iconview_is_selected(iv, 0));
+    assert(fdk_iconview_is_selected(iv, 1));
+    assert(fdk_iconview_is_selected(iv, 2));
+    assert(fdk_iconview_is_selected(iv, 3));
+    assert(!fdk_iconview_is_selected(iv, 4));
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(g_sel_changes == 2); /* the release fired once         */
+    assert(fdk_iconview_selected_count(iv) == 4); /* settled      */
+
+    /* Ctrl-union: an existing selection survives a zero-extent
+     * ctrl sweep (a plain one clears). */
+    down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 198.0f, 20.0f,
+                     FDK_MOD_CTRL);
+    up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 198.0f, 20.0f,
+                   FDK_MOD_CTRL);
+    (void)fdk_widget_tree_handle_event(root, &down);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(fdk_iconview_selected_count(iv) == 4); /* snapshot kept */
+    down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 198.0f, 20.0f, 0);
+    up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 198.0f, 20.0f, 0);
+    (void)fdk_widget_tree_handle_event(root, &down);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(fdk_iconview_selected_count(iv) == 0); /* plain cleared */
+
+    /* SINGLE mode refuses the band (the press is not consumed). */
+    fdk_iconview_set_selection_mode(iv, FDK_LIST_SELECTION_SINGLE);
+    down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 198.0f, 20.0f, 0);
+    assert(fdk_widget_tree_handle_event(root, &down) == false);
+
+    /* Band pixels: while the sweep is LIVE, the view paints the
+     * accent-tinted rect; released, the gap returns to the root's
+     * fill. The root gets an explicit background here so every
+     * repaint COVERS the gap (a background-less root never paints,
+     * and a test surface is not cleared between frames). */
+    fdk_widget_set_background(root, (fdk_color){0.06f, 0.07f, 0.10f, 1});
+    fdk_iconview_set_selection_mode(iv, FDK_LIST_SELECTION_MULTIPLE);
+    /* The press point must be EMPTY grid space: 198 is past the
+     * second column's 196 edge, inside the view's 200 width. */
+    down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 198.0f, 10.0f, 0);
+    assert(fdk_widget_tree_handle_event(root, &down) == true);
+    (void)fdk_widget_tree_handle_event(root, &move);
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(240, 420, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    /* The inter-column GAP strip (x 97..99) carries no cell ink:
+     * live it shows the band's tint over the window background;
+     * released it is exactly the bare background again. The
+     * reference pixel comes from outside the view (x=205), where
+     * only the root's themed fill reaches. */
+    unsigned long bg = px_at(s, 205, 40);
+    int band_gap_ink = 0;
+    for (int y = 24; y < 84; y += 2) {
+        for (int x = 97; x < 100; x++) {
+            if (px_at(s, x, y) != bg) {
+                band_gap_ink++;
+            }
+        }
+    }
+    assert(band_gap_ink > 20); /* the live tint fills the gap     */
+    (void)fdk_widget_tree_handle_event(root, &up);
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    int after_gap_ink = 0;
+    for (int y = 24; y < 84; y += 2) {
+        for (int x = 97; x < 100; x++) {
+            if (px_at(s, x, y) != bg) {
+                after_gap_ink++;
+            }
+        }
+    }
+    assert(after_gap_ink == 0); /* the band rect left with the
+                                   gesture — the selection stays  */
+    fdk_surface_destroy(s);
+
+    fdk_widget_destroy(root);
+    printf("[ok] iconview rubber band: live 2-D sweep selects the "
+           "intersecting cells, press/release callback cadence, "
+           "ctrl-union vs plain-clear, SINGLE refuses, band pixels "
+           "present live and gone after release\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -437,6 +552,7 @@ int main(void) {
     test_keyboard();
     test_mutation();
     test_paint_and_a11y();
+    test_rubber_band();
 
     fdk_font_destroy(g_font);
     printf("all iconview tests passed\n");

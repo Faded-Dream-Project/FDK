@@ -1553,3 +1553,28 @@ first Down on a fresh IconView selected item 0+COLUMNS (the
 grid-shaped reading of "step a row"), where every list since v1
 lands the first key on the first item. The cold-start flag has to
 override EVERY navigation case, not just the row-stepping one.
+
+## 1.4.6 — three lessons from the grid's band
+
+**Union members alias — fill one, don't memset the other.** A
+synthetic motion event built by filling `pointer_button.position`
+and then "fixing" `pointer.position` arrived as (0,0): the two
+structs share the fdk_event_data union, so the trailing memset of
+`pointer_button` wiped the just-written `pointer`. Motion events
+get their own zero-then-fill builder; anything else is the trap.
+
+**A test surface is not cleared between paints.** "The band is
+gone after the gesture" cannot be read as "the region is now
+transparent": frame 2 only DRAWS over frame 1, and a region
+nothing paints in frame 2 keeps frame 1's pixels. Give the root
+an explicit background (it repaints every frame), or compare
+against a pixel something reliably repaints.
+
+**Verify the empty-space press target against the cell
+geometry.** A pixel-proof press at x=190 was confidently "empty
+grid space" — inside the second column's 100..196 cell. The
+press consumed by a CELL still returns true (it selected!), so
+the assert passed for the wrong reason and the band never started.
+Compute the gap coordinate from the slot math, and when a gesture
+test needs empty space, assert the band state (not just the
+consumed flag) before sweeping.

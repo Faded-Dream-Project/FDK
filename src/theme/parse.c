@@ -324,6 +324,9 @@ static const key_entry k_metric_keys[] = {
     {"focus_ring_width", FDK_TM_FOCUS_RING_WIDTH},
     /* 1.4.4: the overlay bar's thickness. */
     {"scrollbar_overlay_width", FDK_TM_SCROLLBAR_OVERLAY_WIDTH},
+    /* 1.4.6: the IconView's default cell geometry. */
+    {"iconview_cell_width", FDK_TM_ICONVIEW_CELL_WIDTH},
+    {"iconview_cell_height", FDK_TM_ICONVIEW_CELL_HEIGHT},
 };
 
 static const struct {
@@ -340,6 +343,8 @@ static const struct {
     [FDK_TM_LIST_ROW_HEIGHT] = {16, 48},
     [FDK_TM_FOCUS_RING_WIDTH] = {1, 4},
     [FDK_TM_SCROLLBAR_OVERLAY_WIDTH] = {4, 12},
+    [FDK_TM_ICONVIEW_CELL_WIDTH] = {64, 192},
+    [FDK_TM_ICONVIEW_CELL_HEIGHT] = {64, 224},
 };
 
 /* Key-table lookup against a key segment (exact bytes). */

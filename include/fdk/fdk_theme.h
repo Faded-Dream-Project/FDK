@@ -157,8 +157,13 @@ typedef enum fdk_theme_metric {
      * keeps FDK_TM_SCROLLBAR_WIDTH; the overlay bar is deliberately
      * thinner (the modern transient indicator). */
     FDK_TM_SCROLLBAR_OVERLAY_WIDTH = 10, /* Overlay bar thickness, 4..12 */
+    /* 1.4.6: the IconView's default cell geometry (LAYOUT metrics:
+     * switching them re-slots every grid). fdk_iconview_set_item_size
+     * overrides per-widget. */
+    FDK_TM_ICONVIEW_CELL_WIDTH  = 11, /* Cell width,            64..192 */
+    FDK_TM_ICONVIEW_CELL_HEIGHT = 12, /* Cell height,           64..224 */
 
-    FDK_TM_COUNT = 11
+    FDK_TM_COUNT = 13
 } fdk_theme_metric;
 
 /* ---- Lifecycle ---- */

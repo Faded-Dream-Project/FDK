@@ -362,7 +362,9 @@ The 1.4.5 milestone closes the two oldest confessions: X11 HiDPI
 pixel-exact at 2x/3x with logical input coordinates unchanged) and
 the IconView, the item grid every file manager's "icon view" is —
 glyph cells that re-flow into columns, the List's whole selection
-model, and keyboard navigation where Down steps a full grid row.
+model (rubber-band drag-select included since 1.4.6, with themed
+cell metrics), and keyboard navigation where Down steps a full
+grid row.
 
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session

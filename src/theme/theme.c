@@ -99,6 +99,8 @@ static fdk_theme g_builtin = {
         [FDK_TM_MENU_CORNER_RADIUS] = 8,
         [FDK_TM_LIST_ROW_HEIGHT] = 30,
         [FDK_TM_SCROLLBAR_OVERLAY_WIDTH] = 6,
+        [FDK_TM_ICONVIEW_CELL_WIDTH] = 96,
+        [FDK_TM_ICONVIEW_CELL_HEIGHT] = 84,
         [FDK_TM_FOCUS_RING_WIDTH] = 2,
     },
 };
@@ -300,6 +302,14 @@ fdk_result fdk_theme_set_metric(fdk_theme *theme, fdk_theme_metric metric,
     case FDK_TM_SCROLLBAR_OVERLAY_WIDTH:
         lo = 4;
         hi = 12;
+        break;
+    case FDK_TM_ICONVIEW_CELL_WIDTH:
+        lo = 64;
+        hi = 192;
+        break;
+    case FDK_TM_ICONVIEW_CELL_HEIGHT:
+        lo = 64;
+        hi = 224;
         break;
     default:
         return FDK_ERR_INVALID_ARGUMENT;
