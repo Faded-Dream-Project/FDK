@@ -372,6 +372,15 @@ grid, and the toolbar's Icons checkbox flips list/grid live at
 any time (run `examples/09_capabilities.c`, the new "Icons View"
 button).
 
+1.4.8 closes the last widget-family hole: the TextView, a real
+multi-line editor — word-wrap (or one horizontal field), a caret
+and selection that span visual lines with the goal-column rule,
+PageUp/PageDown, paragraph triple-clicks, and the Entry's whole
+editing discipline underneath (undo runs that coalesce, clipboard
+cut/copy/paste + PRIMARY middle-click, read-only, IME preedit
+display). Run `examples/03_text.c`: the editor frame under the
+label modes — click in and type.
+
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session
 frame with an expander and a draggable splitter, the 1.4.3 row

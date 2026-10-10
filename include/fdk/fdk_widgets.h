@@ -820,6 +820,71 @@ void fdk_iconview_set_on_item_activate(fdk_widget *iconview,
 void fdk_iconview_begin_batch(fdk_widget *iconview);
 void fdk_iconview_end_batch(fdk_widget *iconview);
 
+/* ---- TextView (1.4.8) ----
+ *
+ * The multi-line text editor — the last widget-family hole. One
+ * UTF-8 document in the Entry's whole discipline: caret + selection
+ * as byte offsets, splice-based edits with the coalescing undo
+ * stack, clipboard cut/copy/paste + PRIMARY middle-click, caret
+ * blink, read-only mode. What is NEW is the second dimension:
+ * lines.
+ *
+ * The document wraps by words at the viewport width (WRAP_WORD,
+ * the default) or lays out one horizontal field with no soft
+ * breaks (WRAP_NONE — horizontal scrolling). Hard newlines are
+ * paragraphs; Enter inserts one, Backspace/Delete across a line
+ * boundary joins lines (a plain splice — nothing special).
+ *
+ * Pointer: click positions the caret (line from y, offset from x);
+ * drag extends; double-click selects the word; triple-click selects
+ * the PARAGRAPH (the whole logical line, wraps included). Keyboard:
+ * arrows move by codepoint / visual line, Home/End the visual
+ * line's ends, Ctrl+arrows the word motions, Ctrl+Home/End the
+ * document's ends, PageUp/PageDown the viewport's pages,
+ * Shift extends everything. Ctrl+A/C/X/V/Z/Y ride the clipboard +
+ * undo stack exactly like the Entry.
+ *
+ * IME ground: fdk_textview_set_preedit renders the composition
+ * inline at the caret (display-only, the Entry's contract).
+ *
+ * The a11y tree exposes the view as TEXT_VIEW with the full text
+ * interface (length/caret/selection/at-offset/set-caret/
+ * set-selection — the ATK Text shape, the Entry's twin).
+ */
+
+typedef enum fdk_textview_wrap {
+    FDK_TEXTVIEW_WRAP_WORD = 0, /* soft-wrap at the viewport width */
+    FDK_TEXTVIEW_WRAP_NONE,     /* one horizontal field, no breaks */
+} fdk_textview_wrap;
+
+fdk_result fdk_textview_create(fdk_widget *parent, fdk_font *font,
+                               fdk_widget **out_textview);
+/* Replaces the whole document (not undoable — the programmatic
+ * reset, the Entry's set_text contract). */
+void fdk_textview_set_text(fdk_widget *textview, const char *utf8);
+const char *fdk_textview_get_text(fdk_widget *textview);
+/* Visual (wrapped) line count — what is on screen. */
+size_t fdk_textview_line_count(fdk_widget *textview);
+/* Logical line count (paragraphs: newline count + 1). */
+size_t fdk_textview_paragraph_count(fdk_widget *textview);
+void fdk_textview_set_wrap(fdk_widget *textview,
+                           fdk_textview_wrap wrap);
+void fdk_textview_set_read_only(fdk_widget *textview, bool read_only);
+bool fdk_textview_get_read_only(fdk_widget *textview);
+/* Selection as [anchor, caret) byte offsets; false when empty. */
+bool fdk_textview_get_selection(fdk_widget *textview,
+                                size_t *anchor, size_t *caret);
+void fdk_textview_select_all(fdk_widget *textview);
+void fdk_textview_set_on_changed(fdk_widget *textview,
+                                 fdk_entry_changed_fn fn,
+                                 void *user_data);
+/* IME ground: the composition string rendered at the caret. */
+fdk_result fdk_textview_set_preedit(fdk_widget *textview,
+                                    const char *preedit);
+/* The Entry's undo surface, verbatim (Ctrl+Z / Ctrl+Shift+Z / Y). */
+fdk_result fdk_textview_undo(fdk_widget *textview);
+fdk_result fdk_textview_redo(fdk_widget *textview);
+
 /* ---- Tree (Phase 9) ----
  *
  * A hierarchical expandable tree on the ScrollView: nodes hold text,

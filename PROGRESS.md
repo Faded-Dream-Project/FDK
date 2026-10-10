@@ -9,9 +9,9 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.7** (the grid's
-edge-chasing band, cell double-click activation, and the file
-dialog's icon mode), by a full in-depth code review — every claim below was
+Last audited: 2026-10-10, at milestone **1.4.8** (the TextView —
+the multi-line editor, the last widget-family hole), by a full
+in-depth code review — every claim below was
 re-verified against the tree, not copied from docs. THE AUDIT'S
 OWN FIRST CATCH: the ledger's "themed tooltips" candidate was
 stale (the 1.3.2 tooltip has been fully themed since birth —
@@ -20,19 +20,19 @@ truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.7** (the IconView band auto-scroll +
-  cell double-click activation + the file dialog's icon browsing
-  surface; 1.4.6 shipped the grid's rubber band + themed cells)
+- **HEAD:** milestone **1.4.8** (the TextView multi-line editor;
+  1.4.7 shipped the grid's edge-chasing band + the file dialog's
+  icon mode)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **570 exported symbols**, `make verify-exports` OK in
+- **Public API:** **584 exported symbols**, `make verify-exports` OK in
   debug AND release
 - **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
-  suites — the double-click activation group since 1.4.7); X11
-  integration suite all-pass — **145 [ok]** (real Xvfb, real input,
-  incl. the modern-batch, HiDPI (private 192-dpi server), iconview
-  GUI, and the file-dialog icon-mode groups); 32 test files
+  suites and the eight 1.4.8 textview groups); X11 integration
+  suite all-pass — **146 [ok]** (real Xvfb, real input, incl. the
+  modern-batch, HiDPI (private 192-dpi server), iconview GUI,
+  file-dialog icon-mode, and textview GUI groups); 33 test files
 - **Scale:** ~56k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
@@ -52,6 +52,11 @@ the List's selection model, grid keyboard nav, batch fills; the
 edge-chasing auto-scroll BOTH axes + cell double-click
 activation),
 spinbutton,
+**textview** (1.4.8 — the multi-line editor: word-wrap through the
+break engine + no-wrap mode, caret/selection across visual lines
+with the goal column, PageUp/PageDown, paragraph triple-click,
+the Entry's whole splice/undo/clipboard/PRIMARY/preedit
+discipline, the full a11y text interface under TEXT_VIEW),
 toolbar, tooltip, spinner, link-button (role on button), paned,
 expander, statusbar, stack + stackswitcher, revealer (slide modes;
 crossfade via the paint group), levelbar, canvas (drawing area),
@@ -102,7 +107,7 @@ sidebar rhythm).
 
 ### Infrastructure (SHIPPED)
 
-- Theme engine: `.fdk` format, **28 color tokens + 11 metrics**
+- Theme engine: `.fdk` format, **28 color tokens + 14 metrics**
   (`FDK_TK_*` / `FDK_TM_*`), runtime switching, Modern + legacy
   recipes; button roles (suggested/destructive/link), placeholder
   text, hover fades (1.4.1/1.4.2)
@@ -126,26 +131,23 @@ sidebar rhythm).
 
 ## What's left (the authoritative backlog)
 
-### NEXT — milestone 1.4.8 (fresh "serious toolkit" audit, value order)
+### NEXT — milestone 1.4.9+ (the "serious toolkit" audit, value order)
 
-The widget families are shipped across the board; the remaining
-work is what a REAL application still cannot build on FDK today:
+The widget families are shipped across the board (the TextView
+closed the last hole in 1.4.8); the remaining work is what a REAL
+application still cannot build on FDK today:
 
-1. **Multi-line text editor (the TextView-class widget)** — the
-   known big gap: Entry is single-line only. Needs wrapping,
-   a cursor + selection spanning lines, keyboard nav over
-   visual lines, scroll integration, and undo integration.
-2. **Label markup** — rich spans (bold/italic/color, maybe size)
+1. **Label markup** — rich spans (bold/italic/color, maybe size)
    in labels/buttons/tooltips: a tiny attribute-run layer over
    the shaping engine, no HTML/XML parser.
-3. **Image loading surfaced to apps** — stb_image already decodes
+2. **Image loading surfaced to apps** — stb_image already decodes
    internally; apps need `fdk_surface_from_file` (PNG/JPEG at
    minimum) + a picture widget with fit modes.
-4. **Clipboard image format** — image/png on the clipboard
+3. **Clipboard image format** — image/png on the clipboard
    (screenshots and copied renders round-trip with the desktop).
-5. **Window state surfaces** — fullscreen/maximize/minimize
+4. **Window state surfaces** — fullscreen/maximize/minimize
    requests + state queries on both backends (EWMH + xdg_toplevel).
-6. **IME completion surface** — LATER by the no-bus policy until a
+5. **IME completion surface** — LATER by the no-bus policy until a
    protocol joins third_party/wayland-protocols
 
 ### LATER (real, not next)

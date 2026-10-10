@@ -175,7 +175,7 @@ int main(void) {
     }
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "03", "text", 640, 765)) {
+    if (!fdk_example_open(&ex, ctx, "03", "text", 640, 950)) {
         fdk_shutdown(ctx);
         return 1;
     }
@@ -252,8 +252,27 @@ int main(void) {
     fdk_radio_set_checked(r3, true);
     set_status(status, "Selection: South — arrow keys move it");
 
+    /* --- frame: the 1.4.8 multi-line editor --- */
+    fdk_widget *edit_frame = NULL;
+    (void)fdk_frame_create(content, f16, "Editor", &edit_frame);
+    fdk_widget_set_background(edit_frame, col(26, 29, 40));
+    fdk_widget *editor = NULL;
+    (void)fdk_textview_create(edit_frame, f16, &editor);
+    fdk_textview_set_text(
+        editor,
+        "The TextView: a real multi-line editor on the same shaping "
+        "engine.\n"
+        "\n"
+        "Click to place the caret; drag to select; double-click a "
+        "word; triple-click a paragraph. Enter makes a new line, "
+        "Backspace joins them, Ctrl+Z/C/V/A are the classics. This "
+        "text wraps at the frame's width — narrow the window and it "
+        "reflows, scrollbars and all.");
+    fdk_widget_set_natural_size(editor, 300, 140);
+    fdk_widget_set_expand(editor, true, true);
+
     fdk_example_set_status(&ex, "shaped by day, wrapped by night — "
-                                   "narrow me");
+                                   "narrow me (and type in the editor)");
 
     while (fdk_example_pump(&ex)) {
         if (animate) {

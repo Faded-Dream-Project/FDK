@@ -7685,6 +7685,123 @@ static void test_iconview_gui(void) {
            "navigation through real X input\n");
 }
 
+/* ---- 1.4.8: the TextView through real input ---- */
+
+static void test_textview_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        NULL,
+    };
+    FILE *ff = fopen(font_candidates[0], "rb");
+    if (ff == NULL) {
+        printf("[skip] X11 textview GUI (no system font)\n");
+        return;
+    }
+    fclose(ff);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_font *font = fdk_font_load(font_candidates[0], 16);
+    assert(font != NULL);
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+
+    fdk_window_options wopts = { .title = "textview",
+                                 .width = 420, .height = 240 };
+    fdk_window *win = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *root = NULL;
+    (void)fdk_window_get_root(win, &root);
+    fdk_widget *tv = NULL;
+    assert(fdk_ok(fdk_textview_create(root, font, &tv)));
+    fdk_textview_set_text(tv, "the quick brown fox\njumps over");
+    fdk_widget_arrange(tv, (fdk_rect){10, 10, 400, 220});
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 200);
+    Window xid = (Window)fdk_window_xid(win);
+
+    #define TV_WAIT(cond)                                          \
+        do {                                                        \
+            int tries_ = 40;                                        \
+            while (!(cond) && tries_-- > 0) {                       \
+                (void)fdk_pump_events(ctx, 25);                     \
+            }                                                       \
+            assert(cond);                                           \
+        } while (0)
+
+    /* Click into the second line (y=48 lands on the wrapped tail
+     * of the first paragraph or the second line): focus + caret. */
+    x11_click(send, xid, 60, 48);
+    (void)fdk_pump_events(ctx, 60);
+    size_t caret0 = fdk_a11y_text_caret(tv);
+    assert(caret0 > 0);
+
+    /* Real typing at the caret: 'q' 'q' (US keycode 24). */
+    x11_send_key_event(send, xid, KeyPress, 24);
+    (void)fdk_pump_events(ctx, 15);
+    x11_send_key_event(send, xid, KeyRelease, 24);
+    (void)fdk_pump_events(ctx, 15);
+    x11_send_key_event(send, xid, KeyPress, 24);
+    (void)fdk_pump_events(ctx, 15);
+    x11_send_key_event(send, xid, KeyRelease, 24);
+    TV_WAIT(fdk_textview_get_text(tv)[caret0] == 'q' &&
+            fdk_textview_get_text(tv)[caret0 + 1] == 'q');
+
+    /* Enter (keycode 36) splits the paragraph at the caret. */
+    size_t paras0 = fdk_textview_paragraph_count(tv);
+    x11_send_key_event(send, xid, KeyPress, 36);
+    (void)fdk_pump_events(ctx, 15);
+    x11_send_key_event(send, xid, KeyRelease, 36);
+    TV_WAIT(fdk_textview_paragraph_count(tv) == paras0 + 1);
+
+    /* Drag-select across lines: press on line 0, drag to line 1. */
+    x11_send_pointer_event(send, xid, ButtonPress,
+                           ButtonPressMask, 20, 20, 1);
+    (void)fdk_pump_events(ctx, 15);
+    x11_send_pointer_event(send, xid, MotionNotify,
+                           PointerMotionMask, 200, 50, 0);
+    (void)fdk_pump_events(ctx, 30);
+    x11_send_pointer_event(send, xid, ButtonRelease,
+                           ButtonReleaseMask, 200, 50, 1);
+    (void)fdk_pump_events(ctx, 60);
+    size_t sa = 0, sc = 0;
+    TV_WAIT(fdk_textview_get_selection(tv, &sa, &sc) && sc - sa > 10);
+
+    /* Double-click selects the word. */
+    x11_click(send, xid, 60, 20);
+    (void)fdk_pump_events(ctx, 60);
+    x11_click(send, xid, 60, 20);
+    (void)fdk_pump_events(ctx, 60);
+    TV_WAIT(fdk_textview_get_selection(tv, &sa, &sc) && sc - sa >= 3);
+
+    /* Ctrl+A selects the whole document. */
+    x11_send_key_event_ctrl(send, xid, 38); /* a */
+    (void)fdk_pump_events(ctx, 60);
+    TV_WAIT(fdk_textview_get_selection(tv, &sa, &sc) &&
+            sa == 0 && sc == strlen(fdk_textview_get_text(tv)));
+
+    /* Read-only refuses typing. */
+    fdk_textview_set_read_only(tv, true);
+    size_t len0 = strlen(fdk_textview_get_text(tv));
+    x11_send_key_event(send, xid, KeyPress, 24);
+    (void)fdk_pump_events(ctx, 30);
+    x11_send_key_event(send, xid, KeyRelease, 24);
+    TV_WAIT(strlen(fdk_textview_get_text(tv)) == len0);
+
+    printf("[ok] textview GUI: click caret, real typing, Enter "
+           "split, drag + word select, Ctrl+A, read-only — all "
+           "through real X input\n");
+
+    #undef TV_WAIT
+    XCloseDisplay(send);
+    fdk_window_destroy(win);
+    (void)fdk_pump_events(ctx, 100);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+}
+
 int main(void) {
     signal(SIGALRM, alarm_handler);
 
@@ -7747,6 +7864,7 @@ int main(void) {
     test_modern_batch_gui();
     test_x11_hidpi_gui();
     test_iconview_gui();
+    test_textview_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

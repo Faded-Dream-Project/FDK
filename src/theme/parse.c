@@ -327,6 +327,8 @@ static const key_entry k_metric_keys[] = {
     /* 1.4.6: the IconView's default cell geometry. */
     {"iconview_cell_width", FDK_TM_ICONVIEW_CELL_WIDTH},
     {"iconview_cell_height", FDK_TM_ICONVIEW_CELL_HEIGHT},
+    /* 1.4.8: the TextView's inner padding. */
+    {"textview_pad", FDK_TM_TEXTVIEW_PAD},
 };
 
 static const struct {
@@ -345,6 +347,7 @@ static const struct {
     [FDK_TM_SCROLLBAR_OVERLAY_WIDTH] = {4, 12},
     [FDK_TM_ICONVIEW_CELL_WIDTH] = {64, 192},
     [FDK_TM_ICONVIEW_CELL_HEIGHT] = {64, 224},
+    [FDK_TM_TEXTVIEW_PAD] = {0, 32},
 };
 
 /* Key-table lookup against a key segment (exact bytes). */

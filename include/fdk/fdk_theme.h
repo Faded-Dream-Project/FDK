@@ -162,8 +162,11 @@ typedef enum fdk_theme_metric {
      * overrides per-widget. */
     FDK_TM_ICONVIEW_CELL_WIDTH  = 11, /* Cell width,            64..192 */
     FDK_TM_ICONVIEW_CELL_HEIGHT = 12, /* Cell height,           64..224 */
+    /* 1.4.8: the TextView's inner padding (LAYOUT metric: switching
+     * it re-wraps every document). */
+    FDK_TM_TEXTVIEW_PAD         = 13, /* Text inset, both axes,   0..32 */
 
-    FDK_TM_COUNT = 13
+    FDK_TM_COUNT = 14
 } fdk_theme_metric;
 
 /* ---- Lifecycle ---- */

@@ -4510,14 +4510,33 @@ chase sweeping 27 items — all through real X input); X11
 examples 12/12; sway examples 12/12; interop, both tooltip rigs,
 compositor-death all PASS; verify-exports 570 in both configs.
 
-The NEXT list (fresh audit, in rough value order): a serious
-TOOLKIT audit pass — what a real application still cannot build
-on FDK today (the multi-line text editor is the known big gap:
-Entry is single-line; a TextView-class widget with wrapping,
-cursor/selection across lines, and scroll integration is the
-last widget-family hole); rich label MARKUP (bold/italic/color
-spans); image LOADING surfaced to apps (stb_image decodes
-internally — apps need fdk_surface_from_file + a picture
-widget); clipboard IMAGE formats; window STATE surfaces
-(fullscreen/maximize/minimize ops); the IME completion surface
-(still LATER by the no-bus policy).
+The 1.4.8 list shipped its head: the TEXTVIEW — the last
+widget-family hole, closed. One UTF-8 document in the Entry's
+whole discipline (splice, coalescing undo with gesture grouping,
+clipboard + PRIMARY middle-click, caret blink, read-only, IME
+preedit display), plus the second dimension: word-wrap through
+the break engine (WRAP_WORD at the viewport, WRAP_NONE one
+horizontal field), visual-line navigation with the goal column,
+PageUp/PageDown, paragraph triple-click, per-line selection fills,
+both-axis scroll-to-caret, the entry-style field + focus ring,
+and the full a11y text interface under a new TEXT_VIEW role (the
+Entry's twin). The wrap cache re-breaks per edit — v1 honesty,
+the same shape the label carries per paint; the line-indexed
+model is the recorded future optimization. Theme metric:
+textview_pad (28 colors + 14 metrics). 584 exported symbols.
+
+Battery at 1.4.8: debug + release zero warnings; headless all
+pass (+8 textview groups); X11 integration 146 [ok] (+the GUI
+group: click caret, real XIM typing, Enter split, drag + word
+select, Ctrl+A, read-only); X11 examples 12/12 (03_text grew the
+editor frame); sway 12/12; interop + both tooltip rigs +
+compositor-death PASS; verify-exports 584 in both configs.
+
+The NEXT list (value order): label MARKUP (bold/italic/color
+spans over the shaping engine — no XML, an attribute-run layer);
+image LOADING surfaced to apps (stb_image already decodes
+internally: fdk_surface_from_file + a picture widget with fit
+modes); clipboard IMAGE format (image/png round-trips);
+window STATE surfaces (fullscreen/maximize/minimize on EWMH +
+xdg_toplevel); the IME completion surface (still LATER by the
+no-bus policy).

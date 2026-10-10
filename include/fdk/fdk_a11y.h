@@ -101,6 +101,9 @@ typedef enum fdk_a11y_role {
                                       * chain)                          */
     FDK_A11Y_ROLE_COLOR_CHOOSER = 48, /* HSV wheel + hex field         */
     FDK_A11Y_ROLE_FONT_CHOOSER = 49,  /* family list + size + preview  */
+
+    /* 1.4.8 append — the text document. */
+    FDK_A11Y_ROLE_TEXT_VIEW = 50, /* multi-line editor (GtkTextView) */
 } fdk_a11y_role;
 
 /* Stable, human-readable name ("button", "check menu item"). Never

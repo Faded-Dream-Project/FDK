@@ -147,6 +147,7 @@ All optional; each inherits from the built-in default theme when absent.
 | `scrollbar_overlay_width` | 4–12 | 6       | Overlay bar thickness (1.4.4; the transient thumb) |
 | `iconview_cell_width`   | 64–192 | 96     | IconView cell width (1.4.6; LAYOUT metric) |
 | `iconview_cell_height`  | 64–224 | 84     | IconView cell height (1.4.6; LAYOUT metric) |
+| `textview_pad`          | 0–32   | 8      | TextView inner inset, both axes (1.4.8; LAYOUT metric) |
 
 All optional; each inherits from the built-in default theme when absent.
 Most metrics are paint-time values only — they do not change any
@@ -251,6 +252,7 @@ scrollbar_width      = 12
 scrollbar_overlay_width = 6
 iconview_cell_width   = 96
 iconview_cell_height  = 84
+textview_pad          = 8
 menu_item_height     = 26
 tooltip_corner_radius = 6
 entry_corner_radius  = 6

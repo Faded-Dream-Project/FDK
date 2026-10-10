@@ -1607,3 +1607,29 @@ the scroll assert happily passes. The 2-D band needs a 2-D
 gesture in the test: press in the margin, DRAG diagonally over
 real columns, then hold at the edge. The chase then extends the
 selection through the growing offset exactly as designed.
+
+## 1.4.8 — three lessons from the textview's first tests
+
+**Keys route to the FOCUSED widget — headless trees start
+cold.** A headless suite that types without a click (or an
+explicit fdk_widget_focus) is typing into the void: dispatch_key
+delivers to root->focused, NULL before the first focus. The
+symptom is seductive — "handled=1" never lies because the
+assertion is about the TEXT, which silently stays empty. Every
+editing test now focuses first (or clicks, which focuses).
+
+**An opaque field breaks ink-count proofs.** The iconview's
+"count non-zero pixels" proof assumed a transparent background
+where only glyphs ink. A textview paints an opaque rounded field
+— EVERY pixel is non-zero, before and after any state change.
+The honest proof on an opaque surface is VARIANCE (how many
+pixels differ from the fill) and VALUE CHANGE at specific
+coordinates (the selection tint shifted a known pixel).
+
+**A control character in a printf %s eats the terminal, not the
+buffer.** A test-probe printed "text=]" where "text=[h]" was
+expected — and the hunt went deep into the splice machinery
+before a hexdump showed the bytes were perfect: the format
+string's own '[' bracket had been swallowed by the TERMINAL
+rendering of an output byte, not by the text engine. When a
+probe's output looks impossible, hexdump before theorizing.
