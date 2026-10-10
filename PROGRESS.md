@@ -36,7 +36,8 @@ is always the truth, including over this file.
   suite all-pass — **150 [ok]** (real Xvfb, real input, incl. the
   modern-batch, HiDPI (private 192-dpi server), iconview GUI,
   file-dialog icon-mode, textview GUI, clipboard-image, and the
-  1.4.12 INCR read/serve/image groups); 34 test files
+  1.4.12 INCR read/serve/image groups); 35 test files (36 .c in
+  tests/ counting bench.c, which is the perf harness, not a suite)
 - **Scale:** ~58k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
