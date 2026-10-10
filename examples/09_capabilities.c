@@ -753,8 +753,6 @@ int main(void) {
                                     FDK_DRAG_FORMAT_URI_LIST);
 
     (void)fdk_window_get_root(app.window, &app.root);
-    fdk_color panel =
-        fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
 
     /* ---- CLIPBOARD ---- */
     (void)fdk_label_create(app.root, app.font, "CLIPBOARD", &app.h_clip);
@@ -806,7 +804,8 @@ int main(void) {
     (void)fdk_label_create(app.root, app.font, "DROP TARGET", &app.h_drop);
     (void)fdk_label_create(app.root, app.font,
                            "DROP FILES OR TEXT HERE", &app.drop_panel);
-    fdk_widget_set_background(app.drop_panel, panel);
+    fdk_widget_set_background_token(app.drop_panel,
+                                   FDK_TK_CONTROL_BACKGROUND);
     fdk_label_set_alignment(app.drop_panel, FDK_ALIGN_CENTER);
     (void)fdk_label_create(app.root, app.font, "Last drop: -",
                            &app.drop_status);
@@ -842,7 +841,8 @@ int main(void) {
     (void)fdk_label_create(app.root, app.font,
                            "press and drag from here -> another app",
                            &app.drag_panel);
-    fdk_widget_set_background(app.drag_panel, panel);
+    fdk_widget_set_background_token(app.drag_panel,
+                                   FDK_TK_CONTROL_BACKGROUND);
     fdk_label_set_alignment(app.drag_panel, FDK_ALIGN_CENTER);
     fdk_widget_set_event_callback(app.drag_panel, drag_panel_event, NULL);
     (void)fdk_label_create(app.root, app.font, "Last drag: -",

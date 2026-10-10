@@ -1,0 +1,68 @@
+# pink-rave.fdk — "Pink Rave", the all-pink theme FDK ships (1.4.16).
+#
+# The lights-down club floor: a deep plum-rose dark base so the hot
+# pinks can GLOW. Every surface is a shade of pink — the window is
+# dark mulberry, controls ride a rose ramp (#4A1834 -> #6D254C),
+# menus and sidebars sit one step off, entries sink to near-black
+# plum, and the accent is neon hot pink (#FF2D9A) with its own
+# brighter-hover / deeper-pressed family. The title band is the
+# loudest voice in the room: solid hot pink, white title, pink-on-
+# pink buttons — the decoration turns "mostly pink" into a statement.
+#
+# The semantic states stay distinguishable by staying IN the family:
+# success is a rose pink, warning a bright pale pink, danger a
+# saturated blue-red pink — urgency reads as saturation, the same
+# trick Mono Chromatic plays with intensity.
+#
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default search path covers — `fdk-theme set pink-rave`
+# (or `set "Pink Rave"`) finds it with zero configuration.
+
+version = 1
+name    = "Pink Rave"
+author  = "FDK project"
+
+[colors]
+window_background          = #2E0F22
+text                       = #FFE9F4
+text_disabled              = #B5869E
+control_background         = #4A1834
+control_background_hover   = #5B1E40
+control_background_pressed = #6D254C
+control_background_disabled= #3A1428
+control_border             = #7A2C55
+accent                     = #FF2D9A
+track                      = #3D1530
+tooltip_background         = #FFE9F4
+tooltip_text               = #4A1834
+tooltip_border             = #FF9AC8
+selection_background       = #FF2D9A55
+selection_text             = #FFFFFF
+focus_ring                 = #FF2D9A
+success                    = #E86FA8
+warning                    = #FFA3D2
+danger                     = #FF2E55
+sidebar_background         = #38132A
+menu_background            = #451A33
+accent_hover               = #FF5CAE
+accent_pressed             = #E0177F
+accent_text                = #FFFFFF
+link                       = #FF9AC8
+entry_background           = #270C1C
+entry_border               = #5E2143
+row_hover                  = #6D254C59
+titlebar_background        = #FF2D9A
+titlebar_text              = #FFFFFF
+titlebar_border            = #C2187F
+titlebar_button_hover      = #FF5CAE
+titlebar_button_pressed    = #E0177F
+
+[metrics]
+button_shape          = 0
+button_corner_radius  = 16
+title_bar_height      = 32
+entry_corner_radius   = 12
+menu_corner_radius    = 12
+menu_item_height      = 28
+list_row_height       = 30
+focus_ring_width      = 2

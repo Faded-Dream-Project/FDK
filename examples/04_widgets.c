@@ -248,13 +248,11 @@ int main(int argc, char **argv) {
     }
     fdk_widget *content = ex.content;
     fdk_box_set_spacing(content, 12);
-    fdk_widget_set_background(ex.root, col(18, 20, 28));
-    (void)fdk_window_paint(ex.window); /* repaint under the new bg */
 
     /* --- frame: profile options --- */
     fdk_widget *profile = NULL;
     (void)fdk_frame_create(content, font16, "Profile", &profile);
-    fdk_widget_set_background(profile, col(26, 29, 40));
+    fdk_widget_set_background_token(profile, FDK_TK_CONTROL_BACKGROUND);
     /* 1.4.0: an entry with PLACEHOLDER text — the hint paints in the
      * disabled-text color only while the field is empty. */
     fdk_widget *search = NULL;
@@ -281,7 +279,7 @@ int main(int argc, char **argv) {
     /* --- frame: rendering mode (radio group = frame's children) --- */
     fdk_widget *render = NULL;
     (void)fdk_frame_create(content, font16, "Renderer", &render);
-    fdk_widget_set_background(render, col(26, 29, 40));
+    fdk_widget_set_background_token(render, FDK_TK_CONTROL_BACKGROUND);
     fdk_widget *r1 = NULL, *r2 = NULL, *r3 = NULL;
     (void)fdk_radio_create(render, font16, "Software (X11)", &r1);
     (void)fdk_radio_create(render, font16, "Software (Wayland)", &r2);
@@ -307,7 +305,7 @@ int main(int argc, char **argv) {
      * the arrows — Home/End jump to the walls. */
     fdk_widget *session = NULL;
     (void)fdk_frame_create(content, font16, "Session", &session);
-    fdk_widget_set_background(session, col(26, 29, 40));
+    fdk_widget_set_background_token(session, FDK_TK_CONTROL_BACKGROUND);
     fdk_widget *adv = NULL;
     (void)fdk_expander_create(session, font16, "Advanced settings", &adv);
     (void)fdk_widget_set_tooltip(
@@ -329,12 +327,12 @@ int main(int argc, char **argv) {
     fdk_widget *pane_a = NULL;
     (void)fdk_widget_create(split, NULL, (fdk_rect){0, 0, 210, 62},
                             &pane_a);
-    fdk_widget_set_background(pane_a, col(46, 93, 163));
+    fdk_widget_set_background_token(pane_a, FDK_TK_CONTROL_BACKGROUND);
     fdk_widget_set_corner_radius(pane_a, 6);
     fdk_widget *pane_b = NULL;
     (void)fdk_widget_create(split, NULL, (fdk_rect){0, 0, 210, 62},
                             &pane_b);
-    fdk_widget_set_background(pane_b, col(28, 62, 110));
+    fdk_widget_set_background_token(pane_b, FDK_TK_SIDEBAR_BACKGROUND);
     fdk_widget_set_corner_radius(pane_b, 6);
     (void)fdk_widget_set_tooltip(
         split, "Drag the divider between the panes — or focus the "
@@ -355,7 +353,8 @@ int main(int argc, char **argv) {
         fdk_widget *f143 = NULL;
         (void)fdk_frame_create(content, font16, "1.4.3 — choosers",
                                &f143);
-        fdk_widget_set_background(f143, col(26, 29, 40));
+        fdk_widget_set_background_token(f143,
+                                FDK_TK_CONTROL_BACKGROUND);
 
         fdk_widget *frow = NULL;
         (void)fdk_box_create(f143, FDK_HORIZONTAL, &frow);
@@ -441,7 +440,8 @@ int main(int argc, char **argv) {
         fdk_widget *f144 = NULL;
         (void)fdk_frame_create(content, font16, "1.4.4 — modern batch",
                                &f144);
-        fdk_widget_set_background(f144, col(26, 29, 40));
+        fdk_widget_set_background_token(f144,
+                                FDK_TK_CONTROL_BACKGROUND);
 
         fdk_widget *mrow = NULL;
         (void)fdk_box_create(f144, FDK_HORIZONTAL, &mrow);
@@ -540,7 +540,8 @@ int main(int argc, char **argv) {
         fdk_widget *f145 = NULL;
         (void)fdk_frame_create(content, font16, "1.4.5 — item grid",
                                &f145);
-        fdk_widget_set_background(f145, col(26, 29, 40));
+        fdk_widget_set_background_token(f145,
+                                FDK_TK_CONTROL_BACKGROUND);
         fdk_widget *iv = NULL;
         (void)fdk_iconview_create(f145, font16, &iv);
         static const char *iv_labels[6] = {
@@ -576,7 +577,8 @@ int main(int argc, char **argv) {
         (void)fdk_frame_create(content, font16,
                                "1.4.9 — picture (four fits)",
                                &f149);
-        fdk_widget_set_background(f149, col(26, 29, 40));
+        fdk_widget_set_background_token(f149,
+                                FDK_TK_CONTROL_BACKGROUND);
         const char *pic_path = "examples/data/fdk_logo.png";
         if (g_argc > 1 && g_argv[1] != NULL) {
             pic_path = g_argv[1];
@@ -623,7 +625,8 @@ int main(int argc, char **argv) {
         fdk_widget *f1411 = NULL;
         (void)fdk_frame_create(content, font16,
                                "1.4.11 — markup (rich text)", &f1411);
-        fdk_widget_set_background(f1411, col(26, 29, 40));
+        fdk_widget_set_background_token(f1411,
+                                FDK_TK_CONTROL_BACKGROUND);
 
         fdk_widget *mrow1 = NULL;
         (void)fdk_box_create(f1411, FDK_HORIZONTAL, &mrow1);
@@ -693,7 +696,8 @@ int main(int argc, char **argv) {
      * other tracks and the gaps stay put). */
     fdk_widget *grid_frame = NULL;
     (void)fdk_frame_create(content, font16, "Layout — grid", &grid_frame);
-    fdk_widget_set_background(grid_frame, col(26, 29, 40));
+    fdk_widget_set_background_token(grid_frame,
+                                FDK_TK_CONTROL_BACKGROUND);
     fdk_widget *cells = NULL;
     (void)fdk_grid_create(grid_frame, 2, 3, &cells);
     fdk_grid_set_spacing(cells, 8);

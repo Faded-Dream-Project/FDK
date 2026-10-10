@@ -215,15 +215,26 @@ static void child_move_to_front(fdk_widget *parent, fdk_widget *child) {
 static void base_paint(fdk_widget *widget, fdk_surface *surface,
                        fdk_rect bounds, fdk_rect clip) {
     (void)clip;
-    if (widget->background.a <= 0.0f) {
-        return; /* transparent default: paints nothing */
+    /* 1.4.16: a TOKEN-FOLLOWING background resolves against the
+     * current default theme HERE, at paint time — which is the whole
+     * point: a theme switch already damages every root, and the
+     * repaint that follows re-resolves, so the fill tracks the theme
+     * live with no per-widget hook. An explicit background (the
+     * legacy path below) stays frozen across switches by contract. */
+    fdk_color bg;
+    if ((widget->flags & FDK_WF_BG_TOKEN) != 0) {
+        bg = fdk_theme_get_color(NULL, widget->background_token);
+    } else {
+        bg = widget->background;
+        if (bg.a <= 0.0f) {
+            return; /* transparent default: paints nothing */
+        }
     }
     if (widget->corner_radius > 0) {
         fdk_surface_fill_rounded_rect(surface, bounds,
-                                      widget->corner_radius,
-                                      widget->background);
+                                      widget->corner_radius, bg);
     } else {
-        fdk_surface_fill_rect(surface, bounds, widget->background);
+        fdk_surface_fill_rect(surface, bounds, bg);
     }
 }
 
@@ -2067,10 +2078,33 @@ void fdk_widget_set_background(fdk_widget *widget, fdk_color color) {
     }
     /* An explicit background is an OVERRIDE: from here on the widget
      * (window roots included) owns this color outright — theme
-     * switches no longer re-default it (1.2.1; see the root default
-     * in fdk_window_get_root). */
-    widget->flags &= ~(unsigned)FDK_WF_ROOT_BG_DEFAULT;
+     * switches no longer re-default it, and any token-following mode
+     * is off (1.2.1 root default, 1.4.16 token mode: an application's
+     * fixed color always wins). */
+    widget->flags &= ~((unsigned)FDK_WF_ROOT_BG_DEFAULT |
+                       (unsigned)FDK_WF_BG_TOKEN);
     widget->background = color;
+    fdk_widget_invalidate(widget);
+}
+
+void fdk_widget_set_background_token(fdk_widget *widget,
+                                      fdk_theme_token token) {
+    if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0 ||
+        (unsigned)token >= (unsigned)FDK_TK_COUNT) {
+        return;
+    }
+    /* The token-following twin of set_background: the fill resolves
+     * the token at PAINT time (base_paint), so the widget tracks
+     * every theme switch live — the missing half of the
+     * window_background opt-in story: an application surface that
+     * rides the theme instead of pinning a color. The cached
+     * `background` field goes inert (kept in sync with the current
+     * resolution for getters/debuggers, but nothing reads it while
+     * the flag is set). */
+    widget->flags &= ~(unsigned)FDK_WF_ROOT_BG_DEFAULT;
+    widget->flags |= FDK_WF_BG_TOKEN;
+    widget->background_token = token;
+    widget->background = fdk_theme_get_color(NULL, token);
     fdk_widget_invalidate(widget);
 }
 

@@ -1,0 +1,75 @@
+# faded-dream.fdk — "Faded Dream", the calm default theme FDK ships
+# (1.4.16) — the packaged copy of the toolkit's built-in palette.
+#
+# FDK is the Faded Dream ToolKit; since 1.4.16 the default theme
+# finally says so on screen: a true gray ramp (window #232329,
+# controls #33333C) with no hue pressure at rest, and exactly one
+# voice of color — a soft violet (#8F79D9) kept to the small parts:
+# checked boxes, focus rings, progress fills, links. The semantics
+# are desaturated to the same calm register (sage success, muted
+# amber warning, dusty-rose danger) so nothing shouts over the gray
+# field it sits in. This is a THEME-ABILITY CONTRACT FILE as much as
+# a theme: every token is overridden and every value matches the
+# built-in exactly, so `fdk-theme set faded-dream` is pixel-identical
+# to the default, and the test suite diffs this file against the
+# engine's palette to catch drift in either direction.
+#
+# The titlebar family is deliberately absent: unset keys fall back
+# to control_background/text/control_border, so the band wears the
+# calm gray chrome the default has always painted. (Mono Chromatic
+# and Pink Rave are the themes that opt INTO a distinct band.)
+#
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default search path covers — `fdk-theme set faded-dream`
+# (or `set "Faded Dream"`) finds it with zero configuration.
+
+version = 1
+name    = "Faded Dream"
+author  = "FDK project"
+
+[colors]
+window_background          = #232329
+text                       = #E6E6EC
+text_disabled              = #8B8B96
+control_background         = #33333C
+control_background_hover   = #3E3E49
+control_background_pressed = #4A4A57
+control_background_disabled= #2B2B33
+control_border             = #464653
+accent                     = #8F79D9
+track                      = #2A2A31
+tooltip_background         = #F0EFF5
+tooltip_text               = #26262E
+tooltip_border             = #B9B7C9
+selection_background       = #8F79D961
+selection_text             = #F2F1F8
+focus_ring                 = #8F79D9E6
+success                    = #7BB98A
+warning                    = #D9B25F
+danger                     = #D97C8C
+sidebar_background         = #292931
+menu_background            = #373742
+accent_hover               = #A18DE3
+accent_pressed             = #7763C2
+accent_text                = #F5F3FB
+link                       = #A992E8
+entry_background           = #1E1E24
+entry_border               = #3B3B47
+row_hover                  = #3A3A4659
+
+[metrics]
+button_shape          = 0
+button_corner_radius  = 8
+separator_thickness   = 1
+title_bar_height      = 28
+scrollbar_width       = 12
+menu_item_height      = 26
+tooltip_corner_radius = 6
+entry_corner_radius   = 6
+menu_corner_radius    = 8
+list_row_height       = 30
+focus_ring_width      = 2
+scrollbar_overlay_width = 6
+iconview_cell_width   = 96
+iconview_cell_height  = 84
+textview_pad          = 8

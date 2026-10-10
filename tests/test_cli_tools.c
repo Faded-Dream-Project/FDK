@@ -10,7 +10,7 @@
  *   fdk-theme: list content (--paths), get across all three origins
  *   (nothing set / the settings file / $FDK_THEME), set + the file
  *   it wrote, reset, path, the exit codes for not-found (2) and
- *   unusable-theme (1), and the 'FDK Modern' == reset alias
+ *   unusable-theme (1), and the 'Faded Dream' == reset alias
  *
  *   fdk-prefs: typed set/get round trips (int/bool/double/string),
  *   list layout, remove, the missing-key exit (2) vs --default (0),
@@ -163,7 +163,7 @@ static void test_theme_list(void) {
     sandbox_env();
     int rc = run_capture(cmdln(g_theme_tool, "list"), out, sizeof out);
     assert(rc == 0);
-    assert(has_line(out, "FDK Modern    (built-in default)"));
+    assert(has_line(out, "Faded Dream    (built-in default)"));
     assert(has_line(out, "alpha"));
     assert(has_line(out, "beta"));
     assert(has_line(out, "broken"));
@@ -182,7 +182,7 @@ static void test_theme_get_set_reset(void) {
 
     /* Nothing set: the built-in, exactly. */
     assert(run_capture(cmdln(g_theme_tool, "get"), out, sizeof out) == 0);
-    assert(has_line(out, "FDK Modern"));
+    assert(has_line(out, "Faded Dream"));
 
     /* set: validated, stored, reported with the internal name and
      * the file it came from. */
@@ -213,16 +213,16 @@ static void test_theme_get_set_reset(void) {
     /* reset: back to the built-in, key gone. */
     assert(run_capture(cmdln(g_theme_tool, "reset"), out, sizeof out) == 0);
     assert(run_capture(cmdln(g_theme_tool, "get"), out, sizeof out) == 0);
-    assert(has_line(out, "FDK Modern"));
+    assert(has_line(out, "Faded Dream"));
     assert(!file_contains(g_sandbox, "name ="));
 
-    /* 'FDK Modern' as the set argument is the reset alias. */
+    /* 'Faded Dream' as the set argument is the reset alias. */
     assert(run_capture(cmdln(g_theme_tool, "set alpha"), out,
                        sizeof out) == 0);
-    assert(run_capture(cmdln(g_theme_tool, "set \"FDK Modern\""), out,
+    assert(run_capture(cmdln(g_theme_tool, "set \"Faded Dream\""), out,
                        sizeof out) == 0);
     assert(run_capture(cmdln(g_theme_tool, "get"), out, sizeof out) == 0);
-    assert(has_line(out, "FDK Modern"));
+    assert(has_line(out, "Faded Dream"));
 }
 
 static void test_theme_exit_codes(void) {
@@ -435,7 +435,7 @@ static void test_set_global_interops_with_fdk_theme(void) {
     assert(run_capture(cmdln(g_set_tool, "theme reset"), out,
                        sizeof out) == 0);
     assert(run_capture(cmdln(g_theme_tool, "get"), out, sizeof out) == 0);
-    assert(has_line(out, "FDK Modern"));
+    assert(has_line(out, "Faded Dream"));
     remove(xdg_global_path());
 }
 
@@ -446,7 +446,7 @@ static void test_set_per_app_store(void) {
     /* Nothing set: get --app falls through to the built-in. */
     assert(run_capture(cmdln(g_set_tool, "theme get --app org.fdk.app1"),
                        out, sizeof out) == 0);
-    assert(has_line(out, "FDK Modern"));
+    assert(has_line(out, "Faded Dream"));
 
     /* The per-app override lands in the APP's own file, not the
      * global store. */
@@ -507,13 +507,13 @@ static void test_set_exit_codes_and_built_in_alias(void) {
                cmdln(g_set_tool, "theme set alpha --app \"\""), out,
                sizeof out) == 1); /* empty app id */
 
-    /* 'FDK Modern' is the reset alias, globally and per-app. */
+    /* 'Faded Dream' is the reset alias, globally and per-app. */
     assert(run_capture(cmdln(g_set_tool, "theme set alpha --app a.b"), out,
                        sizeof out) == 0);
     assert(run_capture(
-               cmdln(g_set_tool, "theme set 'FDK Modern' --app a.b"), out,
+               cmdln(g_set_tool, "theme set 'Faded Dream' --app a.b"), out,
                sizeof out) == 0);
-    assert(strstr(out, "cleared — FDK Modern") != NULL);
+    assert(strstr(out, "cleared — Faded Dream") != NULL);
     assert(!file_contains(xdg_app_path("a.b"), "name ="));
     remove(xdg_app_path("a.b"));
     remove(xdg_global_path());

@@ -6,8 +6,10 @@
  * control surfaces and their hover/pressed/disabled states, accent,
  * track, border) plus the paint-time metrics (corner radii, separator
  * thickness, row heights, focus ring width). The built-in default is
- * the 1.4.0 "Modern" palette — a flatter, calmer retune of the Phase
- * 6 v1 look (the v1 values survive as a documented .fdk theme).
+ * the 1.4.16 "Faded Dream" palette — the calm gray-with-violet retune
+ * of the 1.4.0 "Modern" look (the Modern values survive as a
+ * documented .fdk theme recipe, and the Phase 6 v1 values before
+ * them).
  *
  * Design notes:
  *
@@ -127,7 +129,25 @@ typedef enum fdk_theme_token {
     FDK_TK_ENTRY_BORDER              = 26,/* text-field edge          */
     FDK_TK_ROW_HOVER                 = 27,/* dense-row hover fill     */
 
-    FDK_TK_COUNT = 28
+    /* 1.4.16 append — the titlebar family. FDK-drawn decorations
+     * (fdk_window_set_decorated) paint through these tokens: the
+     * band fill, its title text and glyphs, the bottom rule, and the
+     * window-management buttons' hover/pressed states. They are
+     * FALLBACK tokens: a theme that does not override one reads the
+     * base token it derives from (titlebar_background falls back to
+     * control_background, titlebar_text to text, titlebar_border to
+     * control_border, titlebar_button_hover/pressed to the control
+     * hover/pressed) — so every pre-1.4.16 partial theme keeps the
+     * exact band it always had, and a theme that wants a distinct
+     * chrome (a black band over white content, a hot-pink rave bar)
+     * says so in five keys. Same append-only policy as ever. */
+    FDK_TK_TITLEBAR_BACKGROUND       = 28,/* deco band fill           */
+    FDK_TK_TITLEBAR_TEXT             = 29,/* band title + glyphs      */
+    FDK_TK_TITLEBAR_BORDER           = 30,/* band bottom rule         */
+    FDK_TK_TITLEBAR_BUTTON_HOVER     = 31,/* band button under pointer*/
+    FDK_TK_TITLEBAR_BUTTON_PRESSED   = 32,/* band button while pressed*/
+
+    FDK_TK_COUNT = 33
 } fdk_theme_token;
 
 /* Integer paint metrics. Most are paint-time values only (they never
@@ -165,16 +185,26 @@ typedef enum fdk_theme_metric {
     /* 1.4.8: the TextView's inner padding (LAYOUT metric: switching
      * it re-wraps every document). */
     FDK_TM_TEXTVIEW_PAD         = 13, /* Text inset, both axes,   0..32 */
+    /* 1.4.16: the BUTTON SHAPE — how a button's corners are cut,
+     * independent of the radius number. 0 ROUNDED (the
+     * button_corner_radius metric, the historical look), 1 CIRCLE
+     * (radius = min(width, height)/2 — a true circle on square
+     * buttons, a pill on wide ones; Mono Chromatic ships this),
+     * 2 SQUARE (radius 0 regardless of the metric). Paint-time only
+     * — no widget's natural size changes. Applies to the catalog
+     * Button, the MenuButton, and the decoration band's window
+     * buttons, so a theme's shape story covers the whole chrome. */
+    FDK_TM_BUTTON_SHAPE         = 14, /* 0 rounded, 1 circle, 2 square */
 
-    FDK_TM_COUNT = 14
+    FDK_TM_COUNT = 15
 } fdk_theme_metric;
 
 /* ---- Lifecycle ---- */
 
-/* A fresh copy of the built-in default theme (the 1.4.0 "Modern"
- * palette and metrics). Modify it with the setters below and install
- * it with fdk_theme_set_default(). Returns NULL only on allocation
- * failure. */
+/* A fresh copy of the built-in default theme (the 1.4.16 "Faded
+ * Dream" palette and metrics). Modify it with the setters below and
+ * install it with fdk_theme_set_default(). Returns NULL only on
+ * allocation failure. */
 fdk_theme *fdk_theme_create_default(void);
 
 /* Parses a theme from memory. `text` need not be NUL-terminated —
@@ -199,7 +229,7 @@ void fdk_theme_destroy(fdk_theme *theme);
 
 /* ---- Access ---- */
 
-/* The theme's display name ("FDK Modern" for the built-in theme; the
+/* The theme's display name ("Faded Dream" for the built-in theme; the
  * `name` key for parsed themes). Never NULL; valid until the theme is
  * destroyed or renamed. A NULL theme means the current default. */
 const char *fdk_theme_name(const fdk_theme *theme);
@@ -217,8 +247,10 @@ const char *fdk_theme_author(const fdk_theme *theme);
  * `fdk-theme path` prints. */
 const char *fdk_theme_file_path(const fdk_theme *theme);
 
-/* A token's color. A NULL theme means the current default. An out-of-
- * range token logs a warning and returns opaque black. */
+/* A token's color. A NULL theme means the current default. The
+ * titlebar family reads through its base token when the theme never
+ * overrode it (see the enum's FALLBACK note); an out-of-range token
+ * logs a warning and returns opaque black. */
 fdk_color fdk_theme_get_color(const fdk_theme *theme,
                                fdk_theme_token token);
 
@@ -231,8 +263,10 @@ fdk_i32 fdk_theme_get_metric(const fdk_theme *theme,
 
 /* Overrides a token's color on an owned theme. Does NOT repaint
  * anything: install the result with fdk_theme_set_default(), or
- * invalidate manually, when you want the change on screen. Returns
- * FDK_ERR_INVALID_ARGUMENT for a NULL theme or out-of-range token. */
+ * invalidate manually, when you want the change on screen. Overriding
+ * a titlebar token marks it set — the read stops falling back to its
+ * base token. Returns FDK_ERR_INVALID_ARGUMENT for a NULL theme or
+ * out-of-range token. */
 fdk_result fdk_theme_set_color(fdk_theme *theme, fdk_theme_token token,
                                fdk_color color);
 
@@ -244,7 +278,7 @@ fdk_result fdk_theme_set_metric(fdk_theme *theme, fdk_theme_metric metric,
                                 fdk_i32 value);
 
 /* Renames a theme (copied; capped at 127 bytes, longer names are an
- * FDK_ERR_INVALID_ARGUMENT). NULL name restores "FDK Modern". */
+ * FDK_ERR_INVALID_ARGUMENT). NULL name restores "Faded Dream". */
 fdk_result fdk_theme_set_name(fdk_theme *theme, const char *name);
 
 /* ---- The current default theme ---- */
@@ -266,14 +300,25 @@ fdk_theme *fdk_theme_get_default(void);
 
 /* Where themes come from when nobody spells out a path. The search
  * path, in priority order (first wins), mirrors the font layer's
- * discovery and the XDG basedir spec:
+ * discovery over the XDG basedir spec, plus the 1.4.16 custom folder:
  *
  *   1. $FDK_THEME_DIR          — one explicit directory (absolute;
  *                                the test suite and sandboxed rigs)
- *   2. $XDG_DATA_HOME/fdk/themes   (default ~/.local/share/fdk/themes)
- *   3. $XDG_DATA_DIRS entries .../fdk/themes (default
- *      /usr/local/share:/usr/share — which is where `make install`
- *      puts the themes FDK ships)
+ *   2. $HOME/.FDKThemes        — the custom per-user folder: drop a
+ *                                .fdk file here and it beats every
+ *                                system location (the ~/.fonts
+ *                                precedent, applied to themes)
+ *   3. $XDG_DATA_HOME/fdk/.FDKThemes   (default
+ *      ~/.local/share/fdk/.FDKThemes — the canonical folder
+ *      `make install` fills)
+ *   4. $XDG_DATA_HOME/fdk/themes       (the 1.4.13 location, still
+ *      scanned so themes an older FDK installed keep resolving)
+ *   5. each $XDG_DATA_DIRS entry's fdk/.FDKThemes then its
+ *      fdk/themes (default /usr/local/share:/usr/share — the pair
+ *      per entry, canonical first, legacy still honored)
+ *
+ * FDK's own shipped themes live in the source tree's .FDKThemes/
+ * folder and install into <prefix>/share/fdk/.FDKThemes/.
  *
  * A theme file is named <stem>.fdk. The STEM is the canonical handle:
  * `fdk_theme_find("matrix")` looks for matrix.fdk walking the path in

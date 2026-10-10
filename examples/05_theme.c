@@ -1,13 +1,19 @@
-/* 05_theme.c — the Phase 7 theme engine, live.
+/* 05_theme.c — the theme engine, live (Phase 7; 1.4.16: the three
+ * faces).
  *
- * One panel of catalog widgets under three themes: the built-in
- * "FDK Dark" (the exact Phase 6 v1 palette), plus "Daylight" and
- * "Matrix" loaded from .fdk files in examples/data/. The "Next
- * theme" button cycles the default theme at runtime — FDK repaints
- * the whole tree (fills, text, accent, focus ring, separator
- * thickness, corner radius) and the demo re-applies its own themed
- * styling: root background and title color come from tokens, the
- * documented app-side re-theme pattern.
+ * One panel of catalog widgets cycling the toolkit's whole shipped
+ * face collection: the built-in "Faded Dream" (the 1.4.16 default —
+ * gray with violet accents), then five .fdk files — "Daylight" and
+ * "Matrix" from examples/data/, and the 1.4.16 trio from the
+ * source tree's .FDKThemes/ folder: "Mono Chromatic" (black/white,
+ * CIRCLE buttons, black band), "Pink Rave" (all-pink, hot-pink
+ * band), and "Faded Dream" (the packaged copy of the default).
+ * The "Next theme" button cycles the default theme at runtime —
+ * FDK repaints the whole tree (fills, text, accent, focus ring,
+ * separator thickness, corner radius, BUTTON SHAPE, and the FDK
+ * title band's own chrome — the titlebar family) and the demo
+ * re-applies its own themed styling: the title color comes from a
+ * token, the documented app-side re-theme pattern.
  *
  * For the test rig the demo prints two machine-readable lines:
  *   RIG: next <x> <y> <w> <h>   — the Next-theme button's absolute
@@ -29,12 +35,14 @@ static fdk_font *font16 = NULL;
 static fdk_widget *title = NULL;
 static fdk_widget *status = NULL;
 static fdk_widget *progress = NULL;
-static fdk_widget *root = NULL;
 static fdk_widget *next_btn = NULL;
 static fdk_example *g_ex = NULL;
 
-/* The cycle: built-in, then two parsed files. */
-#define THEME_COUNT 3
+/* The cycle: the built-in, then five parsed files — the two
+ * examples/data/ fixtures and the three 1.4.16 faces from the
+ * source tree's .FDKThemes/ folder (the same files `make install`
+ * ships, so the demo doubles as a smoke test of the custom folder). */
+#define THEME_COUNT 6
 static fdk_theme *themes[THEME_COUNT];
 static int current_theme = 0;
 
@@ -42,18 +50,20 @@ static const char *THEME_FILES[] = {
     NULL, /* index 0: the built-in theme */
     "examples/data/daylight.fdk",
     "examples/data/matrix.fdk",
+    ".FDKThemes/mono-chromatic.fdk",
+    ".FDKThemes/pink-rave.fdk",
+    ".FDKThemes/faded-dream.fdk",
 };
 
 /* Applies the app's own themed styling on top of the engine's
- * repaint: root surface color and title accent come from tokens of
- * the theme that is CURRENT now. 1.4.14: the example's chrome — the
- * FDK title band the window now wears — themes ITSELF through the
- * same tokens (that is the toolkit's chrome doing what it preaches);
- * what stays app-owned here is the root surface, the demo title
- * label, and the status line. */
+ * repaint: the title accent comes from a token of the theme that is
+ * CURRENT now. 1.4.14: the example's chrome — the FDK title band
+ * the window now wears — themes ITSELF through the same tokens
+ * (that is the toolkit's chrome doing what it preaches); 1.4.16:
+ * the root surface rides the window_background TOKEN (the new
+ * token-following background — no re-set needed on a switch), so
+ * the only app-owned restyle left is this title label. */
 static void apply_app_theming(void) {
-    fdk_widget_set_background(
-        root, fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND));
     fdk_label_set_color(title, fdk_theme_get_color(NULL, FDK_TK_ACCENT));
     (void)fdk_label_set_text(status, fdk_theme_name(NULL));
     printf("PHASE: %s\n", fdk_theme_name(NULL));
@@ -94,7 +104,7 @@ int main(void) {
     printf("05_theme: using font %s\n",
            fdk_font_get_file_path(font16));
 
-    /* Themes 1 and 2 come from .fdk files — the same parser a
+    /* Themes 1..5 come from .fdk files — the same parser a
      * downloaded theme would go through. */
     for (int i = 1; i < THEME_COUNT; i++) {
         fdk_result r = FDK_ERR_UNKNOWN;
@@ -121,7 +131,6 @@ int main(void) {
         return 1;
     }
     g_ex = &ex;
-    root = ex.root;
     fdk_widget *content = ex.content;
 
     title = NULL;

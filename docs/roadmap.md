@@ -4864,3 +4864,116 @@ always used — no new dismissal semantics, just the affordance
 finally visible. The dialog GUI groups in the X11 suite (modal
 grab, Enter/Escape/click responses, early destroy) pass unchanged
 on the decorated windows; the picker's band was pixel-verified.
+
+## 1.4.16 — the three faces
+
+The maintainer's next report was not a bug list — it was the
+theming-ability test: "make three themes, Mono Chromatic (black and
+white, modern), Pink Rave (mostly pink — hot pink, rose, many
+shades), Faded Dream (the default calm theme, gray style, purple
+small parts); store them in a custom folder called .FDKThemes;
+make sure the theme can affect the decoration and the title bar;
+let buttons turn into circles when the theme says so; and every
+example app should be affected." Everything shipped:
+
+- THE FACES (.FDKThemes/): mono-chromatic.fdk — the monochrome
+  manifesto, white world with black speech, a near-black titlebar
+  family opted in over white content, `button_shape = 1` (the
+  circle proof), a taller 36px band; pink-rave.fdk — the club
+  floor, plum window (#2E0F22), a rose control ramp, the neon
+  hot-pink accent family (#FF2D9A), a solid hot-pink band with
+  pink-on-pink buttons, semantics kept IN the family (urgency =
+  saturation); faded-dream.fdk — the packaged copy of the new
+  default, complete on purpose like daylight (the shipped-themes
+  suite diffs it against the engine byte-for-byte, a drift guard
+  in both directions).
+- THE FOLDER: the source tree's themes/ became .FDKThemes/ (git
+  mv, history preserved); discovery grew $HOME/.FDKThemes (the
+  per-user custom folder that outranks every system location, the
+  ~/.fonts precedent) and the canonical
+  $XDG_DATA_HOME/fdk/.FDKThemes + per-XDG-entry pairs, with the
+  1.4.13 fdk/themes still scanned so older installs keep
+  resolving; `make install` now fills
+  <prefix>/share/fdk/.FDKThemes/ (five faces).
+- THE DEFAULT RETUNED: the built-in is "Faded Dream" now — a true
+  gray ramp where Modern carried a blue undertone (#232329
+  window, #33333C controls), one violet voice (#8F79D9) kept to
+  the small parts (checked boxes, focus rings, progress, links),
+  semantics desaturated to the same calm register. The Modern
+  values survive as a documented .fdk recipe (byte-exact, extracted
+  from the 1.4.15 tree), exactly as v1's did before them. The
+  toolkit is the Faded Dream ToolKit; since 1.4.16 the default
+  finally says so on screen.
+- THE TITLEBAR FAMILY: five new FALLBACK tokens
+  (titlebar_background/text/border/button_hover/button_pressed).
+  The parser records an override mask (colors_set[]) and
+  fdk_theme_get_color reads unset family members through to their
+  base tokens — so a pre-1.4.16 partial theme paints exactly the
+  band it always painted (control fill and all), while a theme
+  that wants a distinct chrome says so in five keys. The deco
+  band, its bottom rule, its vector glyphs, AND the title label
+  (re-applied through the band's existing theme hook) all resolve
+  them; the band buttons' hover/pressed ride their own two. The
+  window layer's deco_paint now shapes its buttons through the
+  shared fdk__button_shape_radius, so CIRCLE themes get circular
+  window buttons.
+- THE BUTTON SHAPE: FDK_TM_BUTTON_SHAPE (0 rounded / 1 circle /
+  2 square, `button_shape` in the file). The shared radius
+  arithmetic lives in controls.c and serves the catalog Button,
+  the MenuButton, and the deco band's buttons; the focus ring
+  insets mirror it, so a ring follows its button's silhouette at
+  any shape. Paint-time only — no size request changes anywhere.
+- THE TOKEN-FOLLOWING BACKGROUND:
+  fdk_widget_set_background_token(w, token) — the missing half of
+  the window_background opt-in story: a widget whose fill resolves
+  a theme token at PAINT time tracks every theme switch live (a
+  switch already damages every root; the repaint re-resolves). An
+  explicit set_background still wins and cancels the mode. Every
+  example's structural panels now ride it (control/sidebar
+  tokens), the hardcoded root backgrounds are gone from 03/04/08/
+  11, and 09's startup-snapshot panels became token-followers —
+  all twelve demo apps re-face under every theme, live.
+- THE 1.4.15 OFFSET BUG, SWEPT OUT BY THE AUDIT: re-running the
+  X11 suite for real (the 1.4.15 claim had gone stale) caught two
+  things. First, every dialog test's child navigation was one slot
+  off — the 1.4.15 band had become root child 0 and "body =
+  child_at(root, 0)" silently grabbed the band. Second, and worse:
+  all five custom dialog-body arrange hooks (message/prompt,
+  About, font chooser, color chooser, file picker) positioned
+  children with `assigned.y + PAD` — harmless while dialogs sat at
+  y=0, a 28px DOUBLE OFFSET once the band moved them down; every
+  dialog's content rode too low since 1.4.15, and the color
+  chooser's wheel was the pixel that proved it. All five hooks now
+  place children in the body's LOCAL coordinates (the standard
+  parent-relative model the box layout always used), the dialog
+  groups navigate band-aware, the accept/crumb clicks use
+  absolute bounds, and the chooser's wheel sampling reads the
+  band metric. A latent parser UB also died: the duplicate-key
+  bitmask crossed 32 tokens exactly when the vocabulary hit 33 —
+  the guard is a byte array now.
+- Tests: test_theme grew the titlebar-fallback family (three
+  layers: theme-overridden base, builtin base, set-key precedence,
+  programmatic-set semantics, strictness edges), the button-shape
+  group (parse/range/set_metric + the shared arithmetic + a pixel
+  proof through the catalog Button: same geometry, only the shape
+  flipped, the near-corner pixel filled vs cut), and the
+  background-token group (paint-time resolution, live switch,
+  explicit-color precedence, re-entry); test_theme_discovery grew
+  the ~/.FDKThemes priority group and the canonical-vs-legacy
+  XDG group (shadowing + legacy-only stems still resolving);
+  test_shipped_themes is NEW (all five faces pinned —
+  faded-dream byte-equal to the built-in across every base token,
+  mono's black band + white world + circles, rave's hot-pink
+  accent and band, the 1.4.13 pair intact, enumeration + internal
+  names); the X11 suite grew the titlebar-theming group (mono's
+  black band over white content, rave's hot-pink band over plum,
+  the built-in's fallback gray — each pixel-verified through the
+  server, plus the band-rule rows). 617 exported symbols,
+  verify-exports green in debug AND release, headless 564 [ok],
+  X11 all-pass — run for real this time, and the stale claim
+  corrected in the ledger.
+
+Where this leaves the line: theming now reaches the whole surface
+— chrome included — from data files in a folder the user owns, and
+the maintainer's ability test is the shipped demo. The NEXT list
+stays empty.

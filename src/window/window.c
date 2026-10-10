@@ -293,27 +293,34 @@ static bool deco_has_minimize(const fdk_window *window) {
 
 /* ---- Band painting (fill + rule + vector-glyph buttons) ---- */
 
-/* Button fill by interaction state: the same tokens the catalog
- * Button uses, so the band buttons theme-switch for free. */
+/* Button fill by interaction state: the TITLEBAR family's own
+ * hover/pressed tokens (1.4.16) — which fall back to the control
+ * family's when the theme did not opt into a distinct chrome, so
+ * the band buttons theme-switch for free exactly as they always
+ * did. Resting state paints the band fill itself (the buttons are
+ * invisible until the pointer arrives — the pre-1.4.16 posture,
+ * kept deliberately). */
 static fdk_color deco_button_fill(const fdk_window *window, int which) {
     if (window->deco_pressed == which) {
-        return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_PRESSED);
+        return fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BUTTON_PRESSED);
     }
     if (window->deco_hover == which) {
-        return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_HOVER);
+        return fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BUTTON_HOVER);
     }
-    return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
+    return fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BACKGROUND);
 }
 
 /* Draws one window-management glyph centered in (bx, by, bw, bh) in
  * the band's (window-local) coordinate space. `which`: 1 minimize,
  * 2 maximize (restore glyph when the window is maximized), 3 close.
  * All primitives — no font, so the glyphs survive a fontless system
- * and scale with the button, not the font size. */
+ * and scale with the button, not the font size. The ink is the
+ * TITLEBAR_TEXT token (the title's own color — the band reads as
+ * one surface, text and glyphs the same voice). */
 static void deco_paint_glyph(fdk_window *window, fdk_surface *surface,
                              int which, fdk_i32 bx, fdk_i32 by,
                              fdk_i32 bw, fdk_i32 bh, fdk_color fill) {
-    fdk_color ink = fdk_theme_get_color(NULL, FDK_TK_TEXT);
+    fdk_color ink = fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_TEXT);
     fdk_i32 cx = bx + bw / 2;
     fdk_i32 cy = by + bh / 2;
     switch (which) {
@@ -357,12 +364,22 @@ static void deco_bar_paint(fdk_widget *w, fdk_surface *surface,
     if (bounds.width <= 0 || bounds.height <= 0) {
         return;
     }
+    /* The band's own surface: the TITLEBAR_BACKGROUND token (1.4.16)
+     * — which falls back to control_background when the theme never
+     * opted into a distinct chrome, so every pre-1.4.16 theme keeps
+     * its exact band and a theme that WANTS a black band over white
+     * content (Mono Chromatic) or a hot-pink one (Pink Rave) says so
+     * in one key. */
     fdk_surface_fill_rect(
         surface, bounds,
-        fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND));
+        fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BACKGROUND));
 
     /* Window-management buttons (bounds are root/window-local, which
-     * is exactly where the hit rects live). */
+     * is exactly where the hit rects live). The button shape follows
+     * the theme's button_shape story like every other button (1.4.16
+     * — a CIRCLE theme gets circular window buttons; the hit rects
+     * stay rectangular, the same honesty as the catalog Button whose
+     * hit box is its bounds). */
     const struct {
         int which;
         const fdk_rect *rect;
@@ -377,7 +394,10 @@ static void deco_bar_paint(fdk_widget *w, fdk_surface *surface,
             continue;
         }
         fdk_color fill = deco_button_fill(window, buttons[i].which);
-        fdk_surface_fill_rect(surface, *buttons[i].rect, fill);
+        fdk_i32 br = fdk__button_shape_radius(buttons[i].rect->width,
+                                              buttons[i].rect->height);
+        fdk_surface_fill_rounded_rect(surface, *buttons[i].rect, br,
+                                      fill);
         deco_paint_glyph(window, surface, buttons[i].which,
                          buttons[i].rect->x, buttons[i].rect->y,
                          buttons[i].rect->width, buttons[i].rect->height,
@@ -391,7 +411,7 @@ static void deco_bar_paint(fdk_widget *w, fdk_surface *surface,
     fdk_surface_fill_rect(
         surface, (fdk_rect){bounds.x, bounds.y + bounds.height - t,
                             bounds.width, t},
-        fdk_theme_get_color(NULL, FDK_TK_CONTROL_BORDER));
+        fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BORDER));
 }
 
 static const fdk_widget_class deco_bar_class = {
@@ -613,12 +633,21 @@ static bool deco_bar_event(fdk_widget *w, const fdk_widget_event *ev,
 /* Theme switches may change title_bar_height (a LAYOUT metric): re-
  * run the band arrangement + content layout. Called from the widget
  * root registry's theme-notify walk; the same walk damages the root
- * afterwards, so no explicit invalidate is needed. */
+ * afterwards, so no explicit invalidate is needed. 1.4.16: the walk
+ * also re-applies the title label's TITLEBAR_TEXT color — an
+ * explicitly-set label color would otherwise survive the switch
+ * frozen, and the title must follow the band's chrome like the
+ * glyphs do. */
 static void deco_bar_theme_changed(fdk_widget *w) {
     fdk_window *window = fdk_widget_get_user_data(w);
     if (window == NULL || !window->decorated ||
         window->deco_bar != w) {
         return;
+    }
+    if (window->deco_title != NULL) {
+        fdk_label_set_color(
+            window->deco_title,
+            fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_TEXT));
     }
     window_arrange_deco(window);
     fdk_window_layout(window);
@@ -2031,9 +2060,13 @@ fdk_result fdk_window_set_decorated(fdk_window *window, bool decorated) {
         }
         /* The band carries its owning window (interaction + the theme
          * hook), and gets the theme-notify hook so a
-         * title_bar_height metric change re-arranges it. */
+         * title_bar_height metric change re-arranges it — and so the
+         * title label re-reads TITLEBAR_TEXT on every switch. */
         fdk_widget_set_user_data(window->deco_bar, window);
         fdk__widget_set_theme_hook(window->deco_bar, deco_bar_theme_changed);
+        fdk_label_set_color(
+            window->deco_title,
+            fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_TEXT));
         fdk_widget_set_event_callback(window->deco_bar, deco_bar_event,
                                       window);
         window->decorated = true;

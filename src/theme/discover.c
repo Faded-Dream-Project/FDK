@@ -79,12 +79,14 @@
 /* ---- the search path -------------------------------------------------- */
 
 /* Hard cap on directories consulted. The real path is 1 (env) + 1
- * (XDG_DATA_HOME) + N (XDG_DATA_DIRS); XDG systems have two or three
+ * (~/.FDKThemes) + 2 (the XDG_DATA_HOME pair) + N*2 (the XDG_DATA_
+ * DIRS pairs — each entry contributes the canonical .FDKThemes scan
+ * and the legacy fdk/themes scan); XDG systems have two or three
  * data dirs. The cap exists so a pathological XDG_DATA_DIRS (a loop
  * writing colons, a quoting accident) degrades to "first 14 entries"
  * with a warning instead of unbounded work — the same bounded-honesty
  * rule every FDK scanner follows. */
-#define THEME_MAX_DIRS 16
+#define THEME_MAX_DIRS 36
 #define THEME_MAX_DIRS_FROM_XDG 14
 
 /* Suffix of a theme file, with the dot. */
@@ -93,33 +95,82 @@
 /* Stem grammar bound (mirrors the prefs key-half bound). */
 #define THEME_STEM_MAX 64
 
+/* Appends one directory to the list when `dir` is non-NULL and fits;
+ * returns false when the list is full (the caller decides whether
+ * that is a warning). */
+static bool theme_dirs_add(char dirs[THEME_MAX_DIRS][1024], size_t *n,
+                           const char *dir) {
+    if (dir == NULL || dir[0] == '\0') {
+        return true; /* nothing to add, not an overflow */
+    }
+    if (*n >= THEME_MAX_DIRS) {
+        return false;
+    }
+    /* %.1000s: the callers build into 1100-byte stack buffers, but
+     * the list's rows are 1024 — a path longer than that truncates
+     * (and fails the stat that follows) instead of warning. */
+    snprintf(dirs[*n], 1024, "%.1000s", dir);
+    (*n)++;
+    return true;
+}
+
 /* Collects the search path into `dirs` (fixed-size, no allocation to
  * free) and returns the count. Entries are pointers into the ENVIRON
  * and stack buffers copied into `storage` — the caller copies what it
- * needs before the storage goes out of scope. */
+ * needs before the storage goes out of scope.
+ *
+ * 1.4.16: the custom folder. $HOME/.FDKThemes joins right after the
+ * environment override (the ~/.fonts precedent applied to themes —
+ * a user's personal folder outranks every system location), and the
+ * XDG entries each scan TWO subfolders: the canonical fdk/.FDKThemes
+ * (where `make install` now puts the shipped set) first, then the
+ * 1.4.13 fdk/themes (still honored, so a system an older FDK
+ * installed into keeps resolving its themes). Same-stem shadowing
+ * follows list order: canonical wins over legacy within one entry. */
 static size_t theme_dirs(char dirs[THEME_MAX_DIRS][1024]) {
     size_t n = 0;
 
     const char *env = getenv("FDK_THEME_DIR");
     if (env != NULL && env[0] == '/') {
-        snprintf(dirs[n], 1024, "%s", env);
-        n++;
+        (void)theme_dirs_add(dirs, &n, env);
     } else if (env != NULL && env[0] != '\0') {
         FDK_WARN("theme: $FDK_THEME_DIR is not absolute and is ignored");
     }
 
+    /* The custom per-user folder: $HOME/.FDKThemes. Skipped quietly
+     * when HOME is unset/non-absolute (the same posture as every
+     * home-derived default — no warning for an environment the
+     * platform itself does not provide). */
+    const char *home = getenv("HOME");
+    if (home != NULL && home[0] == '/') {
+        char custom[1100];
+        snprintf(custom, sizeof custom, "%s/.FDKThemes", home);
+        (void)theme_dirs_add(dirs, &n, custom);
+    }
+
     const char *xdg_home = getenv("XDG_DATA_HOME");
+    char home_pair[2][1100];
+    size_t home_pair_count = 0;
     if (xdg_home != NULL && xdg_home[0] == '/') {
-        snprintf(dirs[n], 1024, "%s/fdk/themes", xdg_home);
-        n++;
+        snprintf(home_pair[0], sizeof home_pair[0],
+                 "%s/fdk/.FDKThemes", xdg_home);
+        snprintf(home_pair[1], sizeof home_pair[1],
+                 "%s/fdk/themes", xdg_home);
+        home_pair_count = 2;
     } else {
         /* XDG default when unset OR non-absolute (spec rule: a
          * non-absolute XDG var is ignored, not used relatively). */
-        const char *home = getenv("HOME");
-        if (home != NULL && home[0] == '/') {
-            snprintf(dirs[n], 1024, "%s/.local/share/fdk/themes", home);
-            n++;
+        const char *h = getenv("HOME");
+        if (h != NULL && h[0] == '/') {
+            snprintf(home_pair[0], sizeof home_pair[0],
+                     "%s/.local/share/fdk/.FDKThemes", h);
+            snprintf(home_pair[1], sizeof home_pair[1],
+                     "%s/.local/share/fdk/themes", h);
+            home_pair_count = 2;
         }
+    }
+    for (size_t i = 0; i < home_pair_count; i++) {
+        (void)theme_dirs_add(dirs, &n, home_pair[i]);
     }
 
     const char *xdg_dirs = getenv("XDG_DATA_DIRS");
@@ -129,15 +180,25 @@ static size_t theme_dirs(char dirs[THEME_MAX_DIRS][1024]) {
 
     /* Walk the colon list. Empty and non-absolute entries are
      * skipped (XDG rules; also what makes a trailing/double colon
-     * harmless). */
+     * harmless). Each entry contributes its canonical .FDKThemes
+     * scan then its legacy themes scan. */
     const char *p = xdg_dirs;
     size_t taken = 0;
     while (*p != '\0' && taken < THEME_MAX_DIRS_FROM_XDG) {
         const char *colon = strchr(p, ':');
         size_t len = (colon != NULL) ? (size_t)(colon - p) : strlen(p);
-        if (len > 0 && p[0] == '/' && n < THEME_MAX_DIRS) {
-            snprintf(dirs[n], 1024, "%.*s/fdk/themes", (int)len, p);
-            n++;
+        if (len > 0 && p[0] == '/') {
+            char canonical[1100];
+            char legacy[1100];
+            snprintf(canonical, sizeof canonical,
+                     "%.*s/fdk/.FDKThemes", (int)len, p);
+            snprintf(legacy, sizeof legacy,
+                     "%.*s/fdk/themes", (int)len, p);
+            if (!theme_dirs_add(dirs, &n, canonical) ||
+                !theme_dirs_add(dirs, &n, legacy)) {
+                FDK_WARN("theme: search path truncated at %d entries",
+                         (int)THEME_MAX_DIRS);
+            }
             taken++;
         } else if (len > 0 && p[0] != '/') {
             FDK_WARN("theme: non-absolute $XDG_DATA_DIRS entry ignored");

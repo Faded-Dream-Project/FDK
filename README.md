@@ -67,16 +67,23 @@ smooth wheel/keyboard scrolling in every ScrollView (fast notches
 accumulate into one glide; every programmatic scroll stays
 instant).
 
-The command-line face (1.4.13): `fdk-theme set matrix` is real —
-theme discovery over the XDG data hierarchy (`$FDK_THEME_DIR`,
-`~/.local/share/fdk/themes`, the system data dirs where `make
-install` puts the themes FDK ships), one global setting
-(`~/.config/fdk.prefs`, the reserved "fdk" store, with
-`$FDK_THEME` as the per-process override) applied by every FDK
-application that did not explicitly install its own theme, and
-`fdk-prefs` to read and write any application's settings store
-from a shell — the settings half for applications without their
-own settings UI (`docs/cli.md`).
+The command-line face (1.4.13) and the three faces (1.4.16):
+`fdk-theme set pink-rave` is real — theme discovery over the XDG
+data hierarchy plus the custom folders (`$FDK_THEME_DIR`,
+`$HOME/.FDKThemes`, `~/.local/share/fdk/.FDKThemes`, the legacy
+`fdk/themes`, and the system data dirs where `make install` puts
+the five faces FDK ships: `faded-dream` — the packaged copy of the
+calm gray-with-violet default — `daylight`, `matrix`,
+`mono-chromatic` (black-and-white, circle buttons, a black title
+band) and `pink-rave` (the all-pink club floor with a hot-pink
+band)). One global setting (`~/.config/fdk.prefs`, the reserved
+"fdk" store, with `$FDK_THEME` as the per-process override)
+applied — LIVE — by every FDK application that did not explicitly
+install its own theme (the settings file is watched; `fdk-theme
+set` re-themes running apps the moment it lands, decoration and
+title bar included), and `fdk-prefs` to read and write any
+application's settings store from a shell — the settings half for
+applications without their own settings UI (`docs/cli.md`).
 
 See "What works today"
 below and `docs/roadmap.md` for an honest, specific list of what is
@@ -84,9 +91,11 @@ and isn't covered.
 
 After `make install`, link applications with
 `cc myapp.c $(pkg-config --cflags --libs fdk)`. The same install puts
-the `fdk-theme` and `fdk-prefs` command-line tools into `$(PREFIX)/bin`
-and the shipped themes into `$(PREFIX)/share/fdk/themes` — so
-`fdk-theme set daylight` works immediately after installing.
+the `fdk-theme`, `fdk-set`, and `fdk-prefs` command-line tools into
+`$(PREFIX)/bin` and the five shipped faces into
+`$(PREFIX)/share/fdk/.FDKThemes` — so `fdk-theme set daylight`
+(and `set mono-chromatic`, `set pink-rave`, `set faded-dream`)
+works immediately after installing.
 
 ## Requirements
 
@@ -461,12 +470,18 @@ fdk_theme *t = fdk_theme_load("my-theme.fdk", NULL); /* strict .fdk */
 fdk_theme_set_default(t);   /* every live window repaints, themed  */
 ```
 
-Ten color tokens (text, control surfaces with hover/pressed/
-disabled states, accent, track, border) and two paint metrics
-(button corner radius, separator thickness) resolve at paint time,
-so a theme switch is one call — no cached colors, no tree walk by
-the app. The built-in default theme is the Phase 6 palette exactly:
-never touching themes changes no pixels. Themes parse from memory or
+Thirty-three color tokens (text, control surfaces with hover/
+pressed/disabled states, accent, track, border, the sidebar/menu/
+entry/row families — and the 1.4.16 TITLEBAR family, which themes
+the FDK-drawn decoration band itself and falls back to the control
+family when unset) and sixteen paint metrics — corner radii, the
+1.4.16 BUTTON SHAPE (rounded, circle, square — Mono Chromatic ships
+circles), row heights, the title band's height — resolve at paint
+time, so a theme switch is one call — no cached colors, no tree
+walk by the app. The built-in default theme is "Faded Dream" (1.4.16
+— the calm gray-with-violet face; its exact pre-1.4.16 "FDK Modern"
+and Phase 6 predecessors survive as documented recipes): never
+touching themes changes no pixels. Themes parse from memory or
 disk with a strict, bounded, fail-closed grammar
 (`docs/fdk-theme-format.md`; the security rules behind it are
 `docs/security.md`) — unknown keys, duplicates, and malformed values
@@ -780,10 +795,14 @@ with the edge.
 ![07_text_layout hold frame](docs/screenshots/text_layout_frame_480x620.png)
 ![07_text_layout after the resize](docs/screenshots/text_layout_reflow_340x620.png)
 
-And the theme engine's proof — `05_theme` held under each of its
-three themes (built-in FDK Dark, Daylight from a complete `.fdk`
-file, Matrix from a deliberately partial one): same widgets, same
-layout, same code; only the default theme differs between captures.
+And the theme engine's proof — `05_theme` cycling its six faces
+(the built-in Faded Dream, Daylight from a complete `.fdk` file,
+Matrix from a deliberately partial one, and the 1.4.16 trio from
+the source tree's `.FDKThemes/` folder: Mono Chromatic's
+black-and-white world with its circle buttons, Pink Rave's
+all-pink club floor, and the packaged Faded Dream itself): same
+widgets, same layout, same code; only the default theme differs
+between captures.
 The rig also verifies the round trip back to FDK Dark is
 pixel-exact.
 

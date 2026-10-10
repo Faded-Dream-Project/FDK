@@ -246,12 +246,16 @@ EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 TOOL_SRCS := $(wildcard tools/*.c)
 TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/tools/%,$(TOOL_SRCS))
 
-# Shipped themes: installed into $(DATADIR)/fdk/themes, which the
-# runtime discovery path reaches through the default $XDG_DATA_DIRS
-# (/usr/local/share and /usr/share both are) — an installed FDK finds
-# its own themes with zero configuration, and `fdk-theme list` after
-# `make install` shows exactly these next to the built-in.
-SHIPPED_THEMES := $(wildcard themes/*.fdk)
+# Shipped themes: the source tree's .FDKThemes/ folder (1.4.16 —
+# the custom folder the maintainer asked for by name), installed
+# into $(DATADIR)/fdk/.FDKThemes, which the runtime discovery path
+# reaches through the default $XDG_DATA_DIRS (/usr/local/share and
+# /usr/share both are) — an installed FDK finds its own themes with
+# zero configuration, and `fdk-theme list` after `make install`
+# shows exactly these next to the built-in. The five shipped faces:
+# faded-dream (the packaged copy of the default), daylight, matrix,
+# mono-chromatic, pink-rave.
+SHIPPED_THEMES := $(wildcard .FDKThemes/*.fdk)
 
 # Header dependency tracking: -MMD -MP writes a .d beside each object
 # naming every header it included. Without this, editing a struct in
@@ -511,8 +515,8 @@ install: all $(BUILD_DIR)/fdk.pc
 	               $(DESTDIR)$(LIBDIR)/pkgconfig/fdk.pc
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 $(TOOL_BINS) $(DESTDIR)$(BINDIR)/
-	install -d $(DESTDIR)$(DATADIR)/fdk/themes
-	install -m 644 $(SHIPPED_THEMES) $(DESTDIR)$(DATADIR)/fdk/themes/
+	install -d $(DESTDIR)$(DATADIR)/fdk/.FDKThemes
+	install -m 644 $(SHIPPED_THEMES) $(DESTDIR)$(DATADIR)/fdk/.FDKThemes/
 
 uninstall:
 	rm -rf $(DESTDIR)$(INCDIR)/fdk

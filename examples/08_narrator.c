@@ -84,7 +84,6 @@ int main(void) {
         return 1;
     }
     g_ex = &ex;
-    fdk_widget_set_background(ex.root, col(24, 26, 35));
     fdk_widget *content = ex.content;
 
     /* The form: a heading, a checkbox, a slider, a spin, buttons —

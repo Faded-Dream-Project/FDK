@@ -123,6 +123,38 @@ static void button_measure(fdk_widget *w, fdk_size *out) {
     }
 }
 
+/* ---- 1.4.16: the themed button SHAPE ----
+ *
+ * The effective corner radius for a button-shaped (w, h) box under
+ * the current theme's FDK_TM_BUTTON_SHAPE: ROUNDED defers to the
+ * button_corner_radius metric (the historical look), CIRCLE clips
+ * to half the short side — a true circle on a square button, a pill
+ * on a wide one — and SQUARE is sharp regardless of the metric. The
+ * renderer clamps any radius to min(w,h)/2 itself, but the callers
+ * want the number (focus-ring insets mirror it), so the arithmetic
+ * lives here once instead of three times. */
+fdk_i32 fdk__button_shape_radius(fdk_i32 w, fdk_i32 h) {
+    switch (fdk_theme_get_metric(NULL, FDK_TM_BUTTON_SHAPE)) {
+    case 1: /* CIRCLE */
+        return (w < h ? w : h) / 2;
+    case 2: /* SQUARE */
+        return 0;
+    default: /* ROUNDED: the metric, clamped to the box */
+        {
+            fdk_i32 r = fdk_theme_get_metric(NULL,
+                                             FDK_TM_BUTTON_CORNER_RADIUS);
+            fdk_i32 half = (w < h ? w : h) / 2;
+            if (r < 0) {
+                r = 0;
+            }
+            if (r > half) {
+                r = half;
+            }
+            return r;
+        }
+    }
+}
+
 static void button_paint(fdk_widget *w, fdk_surface *surface,
                          fdk_rect bounds, fdk_rect clip) {
     (void)clip;
@@ -130,7 +162,6 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
     if (bounds.width <= 0 || bounds.height <= 0) {
         return;
     }
-
     /* The active-state ladder, per role (1.4.0; 1.4.1 fades the
      * HOVER rungs). NORMAL rides the control family as v1 did;
      * SUGGESTED is accent-filled with the accent's own hover/
@@ -183,10 +214,15 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
         label_col = disabled ? fdk__pal_text_disabled() : fdk__pal_text();
         break;
     }
-    /* Themed corner radius (default 8 = the v1 BTN_RADIUS exactly).
-     * Radius 0 = square corners - the renderer's rounded-rect treats
-     * that as a plain fill. */
-    fdk_i32 radius = fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
+    /* Themed corner shape (1.4.16): ROUNDED rides the
+     * button_corner_radius metric (default 8 = the v1 BTN_RADIUS
+     * exactly; radius 0 = square corners — the renderer's
+     * rounded-rect treats that as a plain fill), CIRCLE rounds to
+     * half the short side, SQUARE forces 0. The focus-ring inset
+     * below mirrors the same number so a ring follows its button's
+     * silhouette at any shape. */
+    fdk_i32 radius = fdk__button_shape_radius(bounds.width,
+                                               bounds.height);
     if (fill.a > 0.0f) {
         fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
     }

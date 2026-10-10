@@ -51,7 +51,7 @@ the first theme resolution** (usually the first paint):
 $FDK_THEME                   (per-process override, like GTK_THEME)
   else theme.name in the application's own store (1.4.14)
   else theme.name in the fdk store
-  else the built-in "FDK Modern"
+  else the built-in "Faded Dream"
 ```
 
 An application that calls `fdk_theme_set_default()` before its
@@ -109,16 +109,32 @@ $FDK_THEME_DIR                        (one explicit directory)
 ```
 
 `make install` puts FDK's shipped themes into
-`$(PREFIX)/share/fdk/themes` — the default `XDG_DATA_DIRS` already
-covers `/usr/local/share` and `/usr/share`, so an installed FDK
-finds them with zero configuration.
+`$(PREFIX)/share/fdk/.FDKThemes` (1.4.16: the custom folder — the
+source tree's `.FDKThemes/`, five faces: `faded-dream` the packaged
+copy of the default, `daylight`, `matrix`, `mono-chromatic`,
+`pink-rave`) — the default `XDG_DATA_DIRS` already covers
+`/usr/local/share` and `/usr/share`, so an installed FDK finds them
+with zero configuration.
+
+The full search path, first match wins:
+
+```
+$FDK_THEME_DIR                     one explicit directory (absolute)
+$HOME/.FDKThemes                   the per-user custom folder (1.4.16)
+$XDG_DATA_HOME/fdk/.FDKThemes      (default ~/.local/share/fdk/.FDKThemes)
+$XDG_DATA_HOME/fdk/themes          the 1.4.13 location, still scanned
+each $XDG_DATA_DIRS entry's fdk/.FDKThemes, then its fdk/themes
+```
+
+Drop a `.fdk` file in `~/.FDKThemes` and it outranks every system
+theme — the `~/.fonts` precedent applied to themes.
 
 A theme file is `<stem>.fdk`; the **stem is the handle**
 (`matrix` → `matrix.fdk`, exact and case-sensitive). Stems should
 be 1–64 characters of `[A-Za-z0-9_-]` — the same character class as
 a prefs key half. A theme whose file name differs from its internal
 `name` key is reachable by that internal name too (`fdk-theme set
-"Daylight"` works).
+"Pink Rave"` works).
 
 The library surface under all of this is
 `fdk_theme_find()` / `fdk_theme_available_count()` /
@@ -132,7 +148,7 @@ those return, plus the built-in theme.
 fdk-theme list [--paths]      themes on the search path
 fdk-theme get [--verbose]    the effective theme, and (with -v) why
 fdk-theme set <name>         remember <name> in the global store
-fdk-theme reset              forget it (back to FDK Modern)
+fdk-theme reset              forget it (back to Faded Dream)
 fdk-theme path [<name>]      the file a theme lives in
 ```
 
@@ -140,7 +156,7 @@ fdk-theme path [<name>]      the file a theme lives in
 rejected with exit 2 and never stored, because a stored-but-broken
 name would silently no-op every future launch (the library's
 soft-fail boot is right for applications, wrong for the tool whose
-whole job is to say "this works"). `set "FDK Modern"` is accepted
+whole job is to say "this works"). `set "Faded Dream"` is accepted
 and means reset.
 
 Exit codes (stable, for scripts):
@@ -156,13 +172,20 @@ A typical session:
 
 ```
 $ fdk-theme list
-FDK Modern    (built-in default)
-daylight      /usr/local/share/fdk/themes/daylight.fdk
-matrix        /usr/local/share/fdk/themes/matrix.fdk
+Faded Dream   (built-in default)
+daylight      /usr/local/share/fdk/.FDKThemes/daylight.fdk
+faded-dream   /usr/local/share/fdk/.FDKThemes/faded-dream.fdk
+matrix        /usr/local/share/fdk/.FDKThemes/matrix.fdk
+mono-chromatic /usr/local/share/fdk/.FDKThemes/mono-chromatic.fdk
+pink-rave     /usr/local/share/fdk/.FDKThemes/pink-rave.fdk
 
-$ fdk-theme set matrix
-theme set: Matrix (/usr/local/share/fdk/themes/matrix.fdk)
+$ fdk-theme set pink-rave
+theme set: Pink Rave (/usr/local/share/fdk/.FDKThemes/pink-rave.fdk)
 running FDK applications re-theme the moment this lands (they watch the settings file)
+
+$ fdk-theme set mono-chromatic
+theme set: Mono Chromatic (/usr/local/share/fdk/.FDKThemes/mono-chromatic.fdk)
+the whole desktop goes black-and-white — circle buttons included
 
 $ fdk-theme get
 matrix
@@ -200,9 +223,9 @@ directions.
 A desktop-shaped session:
 
 ```
-$ fdk-theme set matrix                 # the desktop goes dark-green
+$ fdk-theme set pink-rave               # the desktop goes all-pink
 $ fdk-set theme set daylight --app org.fdk.mywriter
-theme set: Daylight (/usr/local/share/fdk/themes/daylight.fdk)
+theme set: Daylight (/usr/local/share/fdk/.FDKThemes/daylight.fdk)
 org.fdk.mywriter re-themes the moment this lands (it watches its own settings file)
 
 $ fdk-set theme get --app org.fdk.mywriter --verbose
@@ -262,8 +285,10 @@ name, fails loudly. Both postures are deliberate — see
 - `make install` lays out: headers + libs as before,
   `$(PREFIX)/bin/fdk-theme`, `$(PREFIX)/bin/fdk-prefs`,
   `$(PREFIX)/bin/fdk-set`, and
-  `$(PREFIX)/share/fdk/themes/*.fdk` (the shipped themes: the
-  complete light `daylight` and the partial `matrix`).
+  `$(PREFIX)/share/fdk/.FDKThemes/*.fdk` (the five shipped
+  faces: `faded-dream` the packaged default, the complete light
+  `daylight`, the partial `matrix`, the 1.4.16 `mono-chromatic`
+  and `pink-rave`).
 - All knobs (`PREFIX`, `BINDIR`, `DATADIR`, `LIBDIR`, `INCDIR`)
   are documented in `docs/build.md`.
 - No runtime dependency beyond the library itself. The tools read

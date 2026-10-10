@@ -84,11 +84,6 @@ static lane_t lanes[] = {
 #define LABEL_W 104
 #define RACE_MS 2200
 
-static fdk_color col(int r, int g, int b) {
-    return (fdk_color){ .r = (fdk_f32)r / 255.0f, .g = (fdk_f32)g / 255.0f,
-                        .b = (fdk_f32)b / 255.0f, .a = 1.0f };
-}
-
 static void set_status(const char *text) {
     (void)fdk_label_set_text(status, text);
 }
@@ -289,7 +284,6 @@ int main(void) {
     }
     fdk_widget *content = ex.content;
     fdk_box_set_spacing(content, 10);
-    fdk_widget_set_background(ex.root, col(18, 20, 28));
 
     /* Header row: Play + the status line. */
     fdk_widget *header = NULL;
@@ -326,7 +320,7 @@ int main(void) {
         fdk_widget *lane = NULL;
         (void)fdk_widget_create(race_zone, NULL,
                                 (fdk_rect){0, 0, 100, LANE_H}, &lane);
-        fdk_widget_set_background(lane, col(26, 29, 40));
+        fdk_widget_set_background_token(lane, FDK_TK_CONTROL_BACKGROUND);
         (void)fdk_widget_set_tooltip(lane, lanes[i].name);
         fdk_widget *block = NULL;
         (void)fdk_widget_create(lane, NULL,

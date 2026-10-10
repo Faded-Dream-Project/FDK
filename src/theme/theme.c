@@ -2,26 +2,27 @@
  * theme.c — theme object lifecycle, the built-in default, the
  * current-default switch, and the global-settings boot (1.4.13)
  *
- * The built-in default is the 1.4.0 "Modern" retune of the Phase 6
- * v1 palette: same token roles, flatter and calmer values. The v1
- * look survives exactly — every value it painted with is reproducible
- * as a .fdk theme file (docs/fdk-theme-format.md records the v1
- * palette for exactly that). What the retune changes and why:
+ * The built-in default is the 1.4.16 "Faded Dream" palette — the
+ * gray-with-violet calm retune requested as the toolkit's home face
+ * (FDK IS the Faded Dream ToolKit; the default finally says so on
+ * screen). What changed from the 1.4.0 "Modern" palette and why:
  *
- *  - SURFACES: the window/control contrast was cut roughly in half
- *    (0.07/0.16 v1 -> 0.09/0.12 Modern) — modern apps read controls
- *    as shapes on a surface, not as raised chrome.
- *  - BORDERS: v1's 0.30 border read as heavy outlining at rest; the
- *    Modern border is barely-there at rest and does its work on hover
- *    and focus instead.
- *  - ACCENT: v1's sky blue (0.35/0.65/0.95) goes slightly indigo and
- *    brighter (0.42/0.62/1.00) — enough to pop against the darker
- *    control family while keeping white-accent-text contrast > 3.5:1.
- *  - NEW FAMILIES: sidebar/menu surfaces one step off the control
- *    fill, flat entries (window-tone fill + subtle border — the
- *    sunken-field convention replacing v1's raised-field entry),
- *    accent hover/pressed fills + accent-on-accent text, a link
- *    color, and a row-hover softer than the control hover.
+ *  - SURFACES went NEUTRAL: Modern carried a blue undertone in every
+ *    gray (0.13/0.15/0.20); Faded Dream is a true gray ramp
+ *    (#232329 window, #33333C controls) — calm means no hue pressure
+ *    at rest. The 1.4.0 Modern values survive as a documented .fdk
+ *    recipe in docs/fdk-theme-format.md, exactly as v1's did.
+ *  - THE ACCENT family went VIOLET (#8F79D9, hover #A18DE3, pressed
+ *    #7763C2): "purple, small parts around" — checked boxes, focus
+ *    rings, progress fills, links; small areas, one hue, the single
+ *    voice of color in the calm field.
+ *  - SEMANTICS desaturated to the same calm register (success sage,
+ *    warning muted amber, danger dusty rose) so an error banner never
+ *    shouts over the gray world it sits in.
+ *  - The titlebar family ships UNSET in the built-in (the fallback
+ *    mask below): the band reads control_background/text as it
+ *    always did, and only a theme that opts into a distinct chrome
+ *    gets one.
  *
  * Parsing lives in parse.c; this file owns the object.
  *
@@ -42,50 +43,109 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- The built-in default (the 1.4.0 "Modern" palette) ---- */
+/* ---- The built-in default (the 1.4.16 "Faded Dream" palette) ---- */
 
 /* The built-in name lives in a static array so the struct needs no
  * const-dropping cast: the instance is never mutated or freed. */
-static char g_builtin_name[] = "FDK Modern";
+static char g_builtin_name[] = "Faded Dream";
+
+/* Helper: k/255 as a float, written once so the palette below reads
+ * in 8-bit channel values (the .fdk file's hex, in decimals) and the
+ * float/hex correspondence stays exact by construction. */
+#define C8(k) ((fdk_f32)(k) / 255.0f)
 
 static fdk_theme g_builtin = {
     .name = g_builtin_name,
     .author = NULL,
     .colors = {
-        /* Surfaces: calm, low-contrast layering. */
-        [FDK_TK_WINDOW_BACKGROUND] = {0.09f, 0.10f, 0.14f, 1.0f},
-        [FDK_TK_TEXT] = {0.93f, 0.94f, 0.97f, 1.0f},
-        [FDK_TK_TEXT_DISABLED] = {0.44f, 0.46f, 0.52f, 1.0f},
-        [FDK_TK_CONTROL_BACKGROUND] = {0.13f, 0.15f, 0.20f, 1.0f},
-        [FDK_TK_CONTROL_BACKGROUND_HOVER] = {0.17f, 0.20f, 0.27f, 1.0f},
-        [FDK_TK_CONTROL_BACKGROUND_PRESSED] = {0.21f, 0.25f, 0.33f, 1.0f},
-        [FDK_TK_CONTROL_BACKGROUND_DISABLED] = {0.11f, 0.12f, 0.16f, 1.0f},
-        [FDK_TK_CONTROL_BORDER] = {0.20f, 0.23f, 0.30f, 1.0f},
-        [FDK_TK_ACCENT] = {0.42f, 0.62f, 1.00f, 1.0f},
-        [FDK_TK_TRACK] = {0.11f, 0.12f, 0.16f, 1.0f},
-        /* 1.3.2 tokens, recalibrated against the Modern surfaces. */
-        [FDK_TK_TOOLTIP_BACKGROUND] = {0.95f, 0.96f, 0.99f, 1.0f},
-        [FDK_TK_TOOLTIP_TEXT] = {0.11f, 0.13f, 0.19f, 1.0f},
-        [FDK_TK_TOOLTIP_BORDER] = {0.70f, 0.73f, 0.82f, 1.0f},
-        [FDK_TK_SELECTION_BACKGROUND] = {0.42f, 0.62f, 1.00f, 0.38f},
-        [FDK_TK_SELECTION_TEXT] = {0.95f, 0.96f, 0.99f, 1.0f},
-        [FDK_TK_FOCUS_RING] = {0.42f, 0.62f, 1.00f, 0.90f},
-        [FDK_TK_SUCCESS] = {0.38f, 0.74f, 0.45f, 1.0f},
-        [FDK_TK_WARNING] = {0.91f, 0.69f, 0.27f, 1.0f},
-        [FDK_TK_DANGER] = {0.91f, 0.36f, 0.38f, 1.0f},
-        /* 1.4.0: the modern-face families — popup and sidebar
-         * surfaces a half-step above the control fill; the accent's
-         * own hover/pressed states and its on-fill text; the link
-         * blue; the flat-entry pair; the soft row hover. */
-        [FDK_TK_SIDEBAR_BACKGROUND] = {0.10f, 0.12f, 0.16f, 1.0f},
-        [FDK_TK_MENU_BACKGROUND] = {0.15f, 0.17f, 0.23f, 1.0f},
-        [FDK_TK_ACCENT_HOVER] = {0.50f, 0.69f, 1.00f, 1.0f},
-        [FDK_TK_ACCENT_PRESSED] = {0.34f, 0.52f, 0.88f, 1.0f},
-        [FDK_TK_ACCENT_TEXT] = {0.97f, 0.98f, 1.00f, 1.0f},
-        [FDK_TK_LINK] = {0.55f, 0.73f, 1.00f, 1.0f},
-        [FDK_TK_ENTRY_BACKGROUND] = {0.07f, 0.08f, 0.11f, 1.0f},
-        [FDK_TK_ENTRY_BORDER] = {0.17f, 0.19f, 0.25f, 1.0f},
-        [FDK_TK_ROW_HOVER] = {0.14f, 0.16f, 0.22f, 0.60f},
+        /* The gray ramp: calm, hueless layering. */
+        [FDK_TK_WINDOW_BACKGROUND] = {C8(35), C8(35), C8(41), 1.0f},
+        [FDK_TK_TEXT] = {C8(230), C8(230), C8(236), 1.0f},
+        [FDK_TK_TEXT_DISABLED] = {C8(139), C8(139), C8(150), 1.0f},
+        [FDK_TK_CONTROL_BACKGROUND] = {C8(51), C8(51), C8(60), 1.0f},
+        [FDK_TK_CONTROL_BACKGROUND_HOVER] = {C8(62), C8(62), C8(73), 1.0f},
+        [FDK_TK_CONTROL_BACKGROUND_PRESSED] = {C8(74), C8(74), C8(87), 1.0f},
+        [FDK_TK_CONTROL_BACKGROUND_DISABLED] = {C8(43), C8(43), C8(51), 1.0f},
+        [FDK_TK_CONTROL_BORDER] = {C8(70), C8(70), C8(83), 1.0f},
+        /* The one voice of color: violet, kept to small parts. */
+        [FDK_TK_ACCENT] = {C8(143), C8(121), C8(217), 1.0f},
+        [FDK_TK_TRACK] = {C8(42), C8(42), C8(49), 1.0f},
+        /* 1.3.2 tokens, recalibrated for the gray field: tooltips go
+         * near-white (the calm popup), selection is the violet at a
+         * whisper, semantics desaturated to the same register. */
+        [FDK_TK_TOOLTIP_BACKGROUND] = {C8(240), C8(239), C8(245), 1.0f},
+        [FDK_TK_TOOLTIP_TEXT] = {C8(38), C8(38), C8(46), 1.0f},
+        [FDK_TK_TOOLTIP_BORDER] = {C8(185), C8(183), C8(201), 1.0f},
+        [FDK_TK_SELECTION_BACKGROUND] = {C8(143), C8(121), C8(217),
+                                    C8(97)},  /* 0x61 */
+        [FDK_TK_SELECTION_TEXT] = {C8(242), C8(241), C8(248), 1.0f},
+        [FDK_TK_FOCUS_RING] = {C8(143), C8(121), C8(217), C8(230)}, /* 0xE6 */
+        [FDK_TK_SUCCESS] = {C8(123), C8(185), C8(138), 1.0f},
+        [FDK_TK_WARNING] = {C8(217), C8(178), C8(95), 1.0f},
+        [FDK_TK_DANGER] = {C8(217), C8(124), C8(140), 1.0f},
+        /* 1.4.0: the modern-face families, retuned onto the gray ramp
+         * — sidebar/menu a step off the control fill, the violet's
+         * own hover/pressed, flat entries sunk one step below the
+         * window, the soft row hover. */
+        [FDK_TK_SIDEBAR_BACKGROUND] = {C8(41), C8(41), C8(49), 1.0f},
+        [FDK_TK_MENU_BACKGROUND] = {C8(55), C8(55), C8(66), 1.0f},
+        [FDK_TK_ACCENT_HOVER] = {C8(161), C8(141), C8(227), 1.0f},
+        [FDK_TK_ACCENT_PRESSED] = {C8(119), C8(99), C8(194), 1.0f},
+        [FDK_TK_ACCENT_TEXT] = {C8(245), C8(243), C8(251), 1.0f},
+        [FDK_TK_LINK] = {C8(169), C8(146), C8(232), 1.0f},
+        [FDK_TK_ENTRY_BACKGROUND] = {C8(30), C8(30), C8(36), 1.0f},
+        [FDK_TK_ENTRY_BORDER] = {C8(59), C8(59), C8(71), 1.0f},
+        [FDK_TK_ROW_HOVER] = {C8(58), C8(58), C8(70), C8(89)}, /* 0x59 */
+        /* 1.4.16: the titlebar family — deliberately UNSET here (see
+         * colors_set below): the band falls back to the control/text/
+         * border tokens above, pixel-identical to 1.4.15, and a theme
+         * opts into a distinct chrome by setting the keys. The values
+         * in this initializer are inert placeholders the fallback
+         * never reads (create_default copies them but the mask says
+         * unset, and get_color resolves through the fallback first). */
+        [FDK_TK_TITLEBAR_BACKGROUND] = {0.0f, 0.0f, 0.0f, 0.0f},
+        [FDK_TK_TITLEBAR_TEXT] = {0.0f, 0.0f, 0.0f, 0.0f},
+        [FDK_TK_TITLEBAR_BORDER] = {0.0f, 0.0f, 0.0f, 0.0f},
+        [FDK_TK_TITLEBAR_BUTTON_HOVER] = {0.0f, 0.0f, 0.0f, 0.0f},
+        [FDK_TK_TITLEBAR_BUTTON_PRESSED] = {0.0f, 0.0f, 0.0f, 0.0f},
+    },
+    /* The override mask: every base token ships SET (a theme that
+     * overrides nothing inherits exactly these values); every
+     * titlebar token ships UNSET (the fallback family). init_from_
+     * builtin copies this array along with the colors, so the mask
+     * semantics survive create_default() and parse-into. Written one
+     * designator per token (no GNU range extensions — the build is
+     * -std=c17 -Wpedantic). */
+    .colors_set = {
+        [FDK_TK_WINDOW_BACKGROUND] = true,
+        [FDK_TK_TEXT] = true,
+        [FDK_TK_TEXT_DISABLED] = true,
+        [FDK_TK_CONTROL_BACKGROUND] = true,
+        [FDK_TK_CONTROL_BACKGROUND_HOVER] = true,
+        [FDK_TK_CONTROL_BACKGROUND_PRESSED] = true,
+        [FDK_TK_CONTROL_BACKGROUND_DISABLED] = true,
+        [FDK_TK_CONTROL_BORDER] = true,
+        [FDK_TK_ACCENT] = true,
+        [FDK_TK_TRACK] = true,
+        [FDK_TK_TOOLTIP_BACKGROUND] = true,
+        [FDK_TK_TOOLTIP_TEXT] = true,
+        [FDK_TK_TOOLTIP_BORDER] = true,
+        [FDK_TK_SELECTION_BACKGROUND] = true,
+        [FDK_TK_SELECTION_TEXT] = true,
+        [FDK_TK_FOCUS_RING] = true,
+        [FDK_TK_SUCCESS] = true,
+        [FDK_TK_WARNING] = true,
+        [FDK_TK_DANGER] = true,
+        [FDK_TK_SIDEBAR_BACKGROUND] = true,
+        [FDK_TK_MENU_BACKGROUND] = true,
+        [FDK_TK_ACCENT_HOVER] = true,
+        [FDK_TK_ACCENT_PRESSED] = true,
+        [FDK_TK_ACCENT_TEXT] = true,
+        [FDK_TK_LINK] = true,
+        [FDK_TK_ENTRY_BACKGROUND] = true,
+        [FDK_TK_ENTRY_BORDER] = true,
+        [FDK_TK_ROW_HOVER] = true,
+        /* FDK_TK_TITLEBAR_* deliberately stay false. */
     },
     .metrics = {
         [FDK_TM_BUTTON_CORNER_RADIUS] = 8,
@@ -104,6 +164,9 @@ static fdk_theme g_builtin = {
         [FDK_TM_ICONVIEW_CELL_HEIGHT] = 84,
         [FDK_TM_TEXTVIEW_PAD] = 8,
         [FDK_TM_FOCUS_RING_WIDTH] = 2,
+        /* 1.4.16: ROUNDED — the calm default; the shape story is a
+         * per-theme decision (Mono Chromatic ships CIRCLE). */
+        [FDK_TM_BUTTON_SHAPE] = 0,
     },
 };
 
@@ -113,6 +176,29 @@ static fdk_theme g_builtin = {
 
 const fdk_theme *fdk__theme_builtin(void) {
     return &g_builtin;
+}
+
+/* ---- The fallback map (1.4.16) ---------------------------------------- */
+
+/* One step of the titlebar family's read-through. The chain is a
+ * single level deep by construction (every fallback target is a base
+ * token), so no recursion guard is needed; the default arm is the
+ * function's contract for every base token. */
+fdk_theme_token fdk__token_fallback(fdk_theme_token token) {
+    switch (token) {
+    case FDK_TK_TITLEBAR_BACKGROUND:
+        return FDK_TK_CONTROL_BACKGROUND;
+    case FDK_TK_TITLEBAR_TEXT:
+        return FDK_TK_TEXT;
+    case FDK_TK_TITLEBAR_BORDER:
+        return FDK_TK_CONTROL_BORDER;
+    case FDK_TK_TITLEBAR_BUTTON_HOVER:
+        return FDK_TK_CONTROL_BACKGROUND_HOVER;
+    case FDK_TK_TITLEBAR_BUTTON_PRESSED:
+        return FDK_TK_CONTROL_BACKGROUND_PRESSED;
+    default:
+        return token;
+    }
 }
 
 /* ---- The current default ---- */
@@ -301,7 +387,7 @@ void fdk_theme_destroy(fdk_theme *theme) {
 const char *fdk_theme_name(const fdk_theme *theme) {
     const fdk_theme *t =
         (theme != NULL) ? theme : fdk__theme_current();
-    return (t->name != NULL) ? t->name : "FDK Modern";
+    return (t->name != NULL) ? t->name : "Faded Dream";
 }
 
 const char *fdk_theme_author(const fdk_theme *theme) {
@@ -331,6 +417,14 @@ fdk_color fdk_theme_get_color(const fdk_theme *theme,
                  (int)token);
         return (fdk_color){0.0f, 0.0f, 0.0f, 1.0f};
     }
+    /* The fallback family (theme_internal.h): a titlebar token the
+     * theme never overrode reads through to its base token — which
+     * may itself be overridden (a partial theme that sets only
+     * control_background re-themes the band, exactly as every theme
+     * before 1.4.16 did). */
+    if (!t->colors_set[token]) {
+        token = fdk__token_fallback(token);
+    }
     return t->colors[token];
 }
 
@@ -357,6 +451,7 @@ fdk_result fdk_theme_set_color(fdk_theme *theme, fdk_theme_token token,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     theme->colors[token] = color;
+    theme->colors_set[token] = true; /* an override stops the fallback */
     return FDK_OK;
 }
 
@@ -423,6 +518,10 @@ fdk_result fdk_theme_set_metric(fdk_theme *theme, fdk_theme_metric metric,
         lo = 0;
         hi = 32;
         break;
+    case FDK_TM_BUTTON_SHAPE:
+        lo = 0;
+        hi = 2;
+        break;
     default:
         return FDK_ERR_INVALID_ARGUMENT;
     }
@@ -439,7 +538,7 @@ fdk_result fdk_theme_set_name(fdk_theme *theme, const char *name) {
     }
     if (name == NULL) {
         fdk_free(theme->name);
-        theme->name = fdk__theme_strdup("FDK Modern");
+        theme->name = fdk__theme_strdup("Faded Dream");
         return (theme->name != NULL) ? FDK_OK : FDK_ERR_OUT_OF_MEMORY;
     }
     size_t n = strlen(name);

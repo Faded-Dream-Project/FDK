@@ -2915,8 +2915,11 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
     if (d == NULL) {
         return;
     }
-    fdk_i32 x = a.x + FD_PAD;
-    fdk_i32 y = a.y + FD_PAD;
+    /* Children in the BODY's local coordinates (1.4.16: the 1.4.15
+     * title band made a.y nonzero and the old a.y + FD_PAD base
+     * double-offset the whole picker below its band). */
+    fdk_i32 x = FD_PAD;
+    fdk_i32 y = FD_PAD;
     fdk_i32 iw = a.width - FD_PAD * 2;
 
     /* Toolbar: Up + Home + toggle on the left, sized by measure;
@@ -2943,7 +2946,7 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
     fdk_i32 combo_h = FD_TOPBAR_H - 6;
     fdk_widget_set_bounds(
         d->filter_combo,
-        (fdk_rect){a.x + a.width - FD_PAD - FD_COMBO_W,
+        (fdk_rect){a.width - FD_PAD - FD_COMBO_W,
                    y + (FD_TOPBAR_H - combo_h) / 2, FD_COMBO_W,
                    combo_h});
     y += FD_TOPBAR_H + FD_GAP / 2;
@@ -2970,7 +2973,7 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
     fdk_widget_measure(d->cancel_btn, &can_n);
     fdk_i32 btn_h = (acc_n.height > can_n.height) ? acc_n.height
                                                   : can_n.height;
-    fdk_i32 status_y = a.y + a.height - FD_PAD - FD_STATUS_H;
+    fdk_i32 status_y = a.height - FD_PAD - FD_STATUS_H;
     fdk_i32 btn_y = status_y - FD_GAP - btn_h;
 
     /* Name row (SAVE only), above the status area. */
@@ -3019,11 +3022,11 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
                                      FD_STATUS_H});
     fdk_widget_set_bounds(
         d->cancel_btn,
-        (fdk_rect){a.x + a.width - FD_PAD - can_n.width, btn_y,
+        (fdk_rect){a.width - FD_PAD - can_n.width, btn_y,
                    can_n.width, btn_h});
     fdk_widget_set_bounds(
         d->accept_btn,
-        (fdk_rect){a.x + a.width - FD_PAD - can_n.width - FD_GAP -
+        (fdk_rect){a.width - FD_PAD - can_n.width - FD_GAP -
                        acc_n.width,
                    btn_y, acc_n.width, btn_h});
 }

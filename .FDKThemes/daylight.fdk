@@ -2,12 +2,14 @@
 #
 # A complete theme on purpose: every token overridden, so it doubles
 # as a worked example of the full [colors]/[metrics] vocabulary. The
-# dark default is the built-in "FDK Modern"; this is its daylight
-# counterpart — same calm surfaces, same flat fields, inverted.
+# dark default is the built-in "Faded Dream" (1.4.16 — gray with
+# violet accents; before that the blue-toned "FDK Modern"); this is
+# the daylight counterpart — same calm surfaces, same flat fields,
+# inverted.
 #
-# Install location (make install): <prefix>/share/fdk/themes/, which
-# the default $XDG_DATA_DIRS already covers — `fdk-theme set daylight`
-# finds it with zero configuration.
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default $XDG_DATA_DIRS already covers — `fdk-theme set
+# daylight` finds it with zero configuration.
 
 version = 1
 name    = "Daylight"

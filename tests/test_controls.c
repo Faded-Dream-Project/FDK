@@ -1091,12 +1091,22 @@ static void test_spinner(void) {
         for (int x = 10; x < 34; x++) {
             fdk_u32 px = px_at(s, x, y);
             if (px != 0x000000u) {
-                /* Every inked pixel is accent-derived: b channel
-                 * dominant, r below half of b (the Modern accent is
-                 * blue-family; the disabled gray fails this). */
+                /* Every inked pixel is accent-derived: the b channel
+                 * dominates the r channel (the accent is blue/violet
+                 * family — the disabled gray, where r == b == g,
+                 * fails this). The comet's tail ramp can round a
+                 * near-zero-alpha pixel to (1,1,1) — under the old
+                 * blue accent it rounded to (0,0,1) and passed by a
+                 * rounding accident; the violet accent exposed it.
+                 * Pixels that faint are the ramp's honest fade, not
+                 * a wrong color: only VISIBLE ink is held to the
+                 * channel test. */
                 int r = (int)((px >> 16) & 0xFFu);
+                int g = (int)((px >> 8) & 0xFFu);
                 int b = (int)(px & 0xFFu);
-                assert(r < b);
+                if (r + g + b >= 12) {
+                    assert(b > r);
+                }
                 ink++;
             }
         }

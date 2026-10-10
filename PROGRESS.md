@@ -9,66 +9,93 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.15** (the chrome
-uniformity tail: the toolkit's own dialogs wear the FDK title bar;
-1.4.14 the live
-settings desktop — maintainer-requested after USING 1.4.13 for
-real: `fdk-set theme set NAME --app APP` per-app themes, LIVE
-re-theming when the command runs, the X11 INCR-drop fix behind
-"hovered fine, dropped nothing", the FDK title bar on every
-example, the file-picker size retune, and the developer theme
-whitelist), building on the full in-depth code review done at
-1.4.12 — every claim below was re-verified against the
-tree, not copied from docs. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
+Last audited: 2026-10-10, at milestone **1.4.16** (the three
+faces: Mono Chromatic, Pink Rave, and Faded Dream as the new
+built-in default — the maintainer's theming-ability test, shipped
+as three .fdk files in the custom `.FDKThemes/` folder with the
+TITLEBAR token family that themes the decoration band and the
+`button_shape` metric that turns every button circular), building
+on 1.4.15 (the chrome uniformity tail: the toolkit's own dialogs
+wear the FDK title bar), 1.4.14 (the live settings desktop —
+per-app themes, LIVE re-theming when the command runs, the X11
+INCR-drop fix, the FDK title bar on every example, the
+file-picker size retune, the developer theme whitelist) and the
+1.4.12 full in-depth code review — every claim below was
+re-verified against the tree, not copied from docs. THIS AUDIT'S
+OWN FIRST CATCHES: 1.4.15's "X11 suite all-pass" claim was stale —
+the decorated dialogs had shifted every dialog test's child
+navigation one slot (the band became root child 0) and the suite
+had not actually been run; worse, all five custom dialog-body
+arrange hooks (message/prompt, About, font chooser, color chooser,
+file picker) were double-offsetting their children by the band
+height — every dialog's content rode 28px too low since 1.4.15.
+Both fixed and pinned at 1.4.16; the tree is always the truth,
+including over this file. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
 tooltips" candidate was stale (the 1.3.2 tooltip has been fully
 themed since birth — tokens, parser, Modern retune, tests); the tree
 is always the truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.15** (the chrome uniformity tail: the
-  toolkit's OWN dialogs — message, prompt, About, font chooser,
-  color chooser, file dialog — wear the FDK title bar like every
-  decorated application window, each growing by the band so its
-  content keeps the designed size; the file picker stays resizable
-  with a 560x360 floor, the fixed-content dialogs pin
-  non-resizable; dialog close buttons route through the same
-  CLOSE_REQUEST cancel paths the WMs always used. 1.4.14 the live
-  settings desktop:
-  the theme-settings ENGINE — $FDK_THEME > the application's own
-  <app_id>.prefs > the global fdk.prefs > built-in, resolved by
-  src/theme/settings.c — plus `fdk-set theme set NAME --app APP`,
-  the inotify LIVE FOLLOW (running apps re-theme the moment the
-  settings file lands; the pump polls the watch fd and repaints
-  fdk_run()-shaped apps itself), fdk_theme_set_allowed_themes (the
-  developer whitelist: one brand theme, or a curated set, clamped
-  over every settings source), the X11 INCR-drop fix (the shared
-  requestor-parameterized selection-read engine: atomic,
-  multi-part, and INCR reads for clipboard AND XDND; format
-  fallback uri-list -> text; 600 ms drop-convert budget) — the
-  maintainer's live reports drove all of it: drops from real file
-  managers vanished after a "drop it" hover, the picker read as a
-  toy, and retheming demanded a restart. 1.4.13 the command-line
-  face; 1.4.12 INCR clipboard transfers; 1.4.11 markup; 1.4.10
-  fullscreen; 1.4.9 PNG codec + Picture + clipboard images)
+- **HEAD:** milestone **1.4.16** (the three faces — the theming
+  ability test the maintainer asked for: **Faded Dream** is the new
+  built-in default (the calm gray-with-violet retune; the packaged
+  copy ships as .FDKThemes/faded-dream.fdk and the pre-1.4.16
+  "FDK Modern" values survive as a documented recipe), **Mono
+  Chromatic** (black-and-white discipline: white world, black
+  speech, a near-black titlebar family, CIRCLE buttons) and **Pink
+  Rave** (the all-pink club floor: plum surfaces, hot-pink accent,
+  a hot-pink band) ship in the source tree's **`.FDKThemes/`**
+  folder — the custom folder, also live as the per-user
+  `~/.FDKThemes` (outranking every system location) and the
+  canonical `<datadir>/fdk/.FDKThemes` install target (the legacy
+  `fdk/themes` still scanned). The engine grew the **TITLEBAR
+  token family** (five FALLBACK tokens: unset keys read through to
+  control/text/border, so pre-1.4.16 themes keep their exact band;
+  the band's fill, text, rule, and button hover/pressed now come
+  from the theme — the title label follows TITLEBAR_TEXT on every
+  switch), the **`button_shape` metric** (0 rounded / 1 circle /
+  2 square — applied to the catalog Button, MenuButton, AND the
+  decoration band's window buttons), and
+  **`fdk_widget_set_background_token`** (the token-following
+  background: a widget whose fill resolves a theme token at PAINT
+  time, so app surfaces track every theme switch live — every
+  example's panels now ride it, and the examples' hardcoded root
+  backgrounds are gone so all twelve demo apps re-face under every
+  theme). Also this milestone: the 1.4.15 dialog double-offset bug
+  fixed in all five custom body-arrange hooks + the stale dialog
+  X11 groups repaired and re-run for real. 1.4.15 the chrome
+  uniformity tail; 1.4.14 the live settings desktop; 1.4.13 the
+  command-line face; 1.4.12 INCR clipboard transfers; 1.4.11
+  markup; 1.4.10 fullscreen; 1.4.9 PNG codec + Picture +
+  clipboard images)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
-  xdg-decoration, viewporter, **fractional-scale**, primary-selection)
-- **Public API:** **616 exported symbols** (612 + the 1.4.14 four:
-  fdk_theme_set_allowed_themes, fdk_theme_clear_allowed_themes,
-  fdk_theme_allowed_count, fdk_theme_allowed_name), `make
-  verify-exports` OK in debug AND release
-- **Tests:** headless suite all-pass — **549 [ok] checks** (incl.
+  xdg-decoration, viewporter, **fractional-scale**,
+  primary-selection)
+- **Public API:** **617 exported symbols** (616 +
+  fdk_widget_set_background_token), `make verify-exports` OK in
+  debug AND release
+- **Tests:** headless suite all-pass — **564 [ok] checks** (incl.
   the 1.4.4 + iconview suites, the eight 1.4.8 textview groups,
   the 1.4.9 png/picture suite, the 1.4.11 markup suite, the
-  1.4.13 theme-discovery + CLI-tools suites, and the 1.4.14
-  per-app-priority / whitelist / live-recheck / fdk-set groups);
+  1.4.13 theme-discovery + CLI-tools suites, the 1.4.14
+  per-app-priority / whitelist / live-recheck / fdk-set groups,
+  and the 1.4.16 additions: the titlebar-fallback, button-shape
+  (arithmetic + pixel proof), widget-background-token groups in
+  test_theme, the ~/.FDKThemes + XDG-canonical-vs-legacy
+  discovery groups, and the whole test_shipped_themes suite —
+  the five faces pinned: faded-dream byte-equal to the built-in,
+  mono's black band + circle buttons, rave's hot-pink band);
   X11 integration suite all-pass (real Xvfb, real input, incl.
   the modern-batch, HiDPI (private 192-dpi server), iconview GUI,
   file-dialog icon-mode, textview GUI, clipboard-image, the
-  1.4.12 INCR read/serve/image groups, and the 1.4.14 INCR-DROP
-  + settings-live-follow groups against the external rigs);
-  37 test files (38 .c in tests/ counting bench.c, which is the
+  1.4.12 INCR read/serve/image groups, the 1.4.14 INCR-DROP
+  + settings-live-follow groups against the external rigs, and
+  the 1.4.16 titlebar-theming group — Mono Chromatic's black
+  band over white content, Pink Rave's hot-pink band over plum,
+  the built-in's fallback gray, each on the server's own pixels);
+  38 test files (39 .c in tests/ counting bench.c, which is the
   perf harness, not a suite)
 - **Scale:** ~58k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
@@ -123,6 +150,11 @@ list: the "small picker, small text" report closed), **color button** (the
 color-well swatch that opens the ColorChooser — 1.4.4; alpha
 checkerboard, heap-token lifetime guard), path-bar composite,
 window decorations (the FDK-drawn title band — themed fill, title,
+  **its every pixel theme data since 1.4.16: the TITLEBAR token
+  family (fallback semantics) paints the band, rule, glyphs, and
+  title label, and the window buttons follow the theme's
+  button_shape story (circle themes get circular window
+  buttons)**,
 close/min/max, band drag, FDK-driven resize; **worn by EVERY
 example since 1.4.14** — example_window.h decorates the standard
 window, 06/07/09/10 decorate their own, 02 stays bare because its
@@ -173,15 +205,43 @@ sidebar rhythm).
 
 ### Infrastructure (SHIPPED)
 
-- Theme engine: `.fdk` format, **28 color tokens + 14 metrics**
-  (`FDK_TK_*` / `FDK_TM_*`), runtime switching, Modern + legacy
-  recipes; button roles (suggested/destructive/link), placeholder
-  text, hover fades (1.4.1/1.4.2)
+- Theme engine: `.fdk` format, **33 color tokens + 15 metrics**
+  (`FDK_TK_*` / `FDK_TM_*`), runtime switching, the Faded Dream /
+  Modern / v1 recipes; button roles (suggested/destructive/link),
+  placeholder text, hover fades (1.4.1/1.4.2). **The 1.4.16
+  additions: the TITLEBAR family** (titlebar_background/text/
+  border/button_hover/button_pressed — FALLBACK tokens: unset keys
+  read through to control/text/border so pre-1.4.16 partial themes
+  keep their exact band; the deco band, its rule, its glyphs, and
+  the title label all resolve them; titlebar_button_* carry the
+  band buttons' hover/pressed) **and the button_shape metric**
+  (0 rounded / 1 circle / 2 square, applied by the catalog Button,
+  MenuButton, and the deco band's window buttons via the shared
+  fdk__button_shape_radius); **the built-in default is Faded
+  Dream** (gray ramp #232329/#33333C + the violet accent family
+  #8F79D9 — the packaged copy ships as faded-dream.fdk and the
+  test suite diffs them byte-for-byte); **the override mask**
+  (colors_set[] behind the fallback) also fixed a latent UB: the
+  parser's duplicate-detection bitmask crossed 32 tokens
+- **fdk_widget_set_background_token (1.4.16)**: the token-following
+  background — a widget's fill resolves a theme token at PAINT
+  time, tracking every theme switch live with no hook (explicit
+  set_background still wins and cancels the mode); the examples'
+  structural panels ride it
+- **The three faces + the .FDKThemes folder (1.4.16)**: Mono
+  Chromatic (white world / black speech / near-black titlebar /
+  circle buttons), Pink Rave (plum floor / rose ramp / hot-pink
+  accent and band), Faded Dream (the default's packaged copy);
+  shipped in the source tree's `.FDKThemes/` (daylight + matrix
+  alongside), installed to `<prefix>/share/fdk/.FDKThemes/`,
+  discovered on the grown search path
+  ($FDK_THEME_DIR > **$HOME/.FDKThemes** > $XDG_DATA_HOME/fdk/
+  .FDKThemes > the legacy fdk/themes > each XDG_DATA_DIRS entry's
+  pair) — test_shipped_themes pins all five
 - **Theme discovery + the settings engine + the CLI (1.4.13,
   grown into its final shape 1.4.14)**: fdk_theme_find /
-  fdk_theme_available_* over the XDG data hierarchy
-  ($FDK_THEME_DIR > $XDG_DATA_HOME/fdk/themes > $XDG_DATA_DIRS,
-  where `make install` puts the shipped themes: daylight, matrix),
+  fdk_theme_available_* over the search path above
+  (where `make install` puts the shipped five faces),
   fdk_theme_file_path, the settings ENGINE (src/theme/settings.c:
   $FDK_THEME > the app's own <app_id>.prefs > the global fdk.prefs
   > built-in; the one-shot lazy boot; **the inotify live follow** —
@@ -237,7 +297,12 @@ board; rich text shipped in 1.4.11; INCR transfers shipped in
 1.4.12; the command-line face shipped in 1.4.13; the live settings
 desktop shipped in 1.4.14 (per-app themes, live re-theming, the
 INCR-drop fix, the whitelist — the maintainer's own usage reports
-were the backlog, and every item closed). What remains is
+were the backlog, and every item closed); the three faces shipped
+in 1.4.16 (Mono Chromatic, Pink Rave, Faded Dream as the default,
+the .FDKThemes folder, the titlebar family, button shapes, the
+token-following background — the theming-ability test the
+maintainer asked for, and with it the 1.4.15 dialog-offset bug
+swept out). What remains is
 LATER-by-policy (IME completion surface
 waits for a protocol joining third_party/wayland-protocols) and
 OUT-by-policy (the deliberate non-goals below) — the line where

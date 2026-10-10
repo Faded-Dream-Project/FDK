@@ -139,6 +139,17 @@ fdk_color fdk__pal_entry(void);
 fdk_color fdk__pal_entry_border(void);
 fdk_color fdk__pal_row_hover(void);
 
+/* ---- 1.4.16: the themed button SHAPE (controls.c) ------------------
+ *
+ * The FDK_TM_BUTTON_SHAPE metric's effective corner radius for a
+ * button-shaped box of (w, h): CIRCLE clips to min(w,h)/2 (a true
+ * circle on square buttons, a pill on wide ones), SQUARE is 0, and
+ * ROUNDED is the button_corner_radius metric. Shared by the catalog
+ * Button, the MenuButton, and the window layer's decoration buttons
+ * so one theme key shapes the whole chrome. Paint-time only — no
+ * size request changes anywhere. */
+fdk_i32 fdk__button_shape_radius(fdk_i32 w, fdk_i32 h);
+
 /* ---- 1.4.1: the shared symbolic row glyphs (statics.c) ----------
  *
  * Font-independent vector strokes shared by the List (1.4.1) and

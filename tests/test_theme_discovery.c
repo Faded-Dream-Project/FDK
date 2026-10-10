@@ -2,7 +2,9 @@
  * tests (1.4.13).
  *
  * Everything is sandboxed through the environment the discovery
- * layer already reads: $FDK_THEME_DIR / $XDG_DATA_HOME /
+ * layer already reads: $FDK_THEME_DIR / $HOME/.FDKThemes /
+ * $XDG_DATA_HOME (both its fdk/.FDKThemes and the legacy
+ * fdk/themes) /
  * $FDK_PREFS_FILE / $FDK_THEME point at mkdtemp sandboxes and
  * fixtures in tests/data/themes/ (alpha, beta, oddname, broken), so
  * the test never sees the machine's real themes or settings — and
@@ -233,6 +235,114 @@ static void test_find_no_dirs(void) {
     assert(fdk_theme_available_path(0) == NULL);
 }
 
+
+/* ---- discovery: the 1.4.16 custom folder ------------------------------ */
+
+static void mkdirs(const char *path) {
+    char cmd[600];
+    snprintf(cmd, sizeof cmd, "mkdir -p '%s'", path);
+    assert(system(cmd) == 0);
+}
+
+static void write_theme(const char *path, const char *name,
+                        const char *accent) {
+    FILE *f = fopen(path, "wb");
+    assert(f != NULL);
+    fprintf(f, "version = 1\nname = \"%s\"\n[colors]\naccent = %s\n",
+            name, accent);
+    fclose(f);
+}
+
+static void test_find_custom_folder(void) {
+    /* $HOME/.FDKThemes outranks every XDG location: the same stem
+     * planted in BOTH the custom folder and XDG_DATA_HOME's
+     * canonical .FDKThemes resolves to the custom copy. */
+    char custom_dir[600], custom[600], xdg_dir[600], xdg[600];
+    snprintf(custom_dir, sizeof custom_dir, "%s/.FDKThemes", g_dir);
+    snprintf(xdg_dir, sizeof xdg_dir, "%s/fdk/.FDKThemes", g_dir2);
+    mkdirs(custom_dir);
+    mkdirs(xdg_dir);
+    snprintf(custom, sizeof custom, "%.580s/mine.fdk", custom_dir);
+    snprintf(xdg, sizeof xdg, "%.580s/mine.fdk", xdg_dir);
+    write_theme(custom, "Mine Custom", "#111111");
+    write_theme(xdg, "Mine XDG", "#222222");
+
+    use_env("FDK_THEME_DIR", NULL);
+    use_env("XDG_DATA_HOME", g_dir2);
+    use_env("XDG_DATA_DIRS", g_dir); /* no fdk/ inside */
+    use_env("HOME", g_dir);
+    use_env("FDK_THEME", NULL);
+    use_env("FDK_PREFS_FILE", NULL);
+    fdk__theme_scan_reset_for_tests();
+
+    fdk_result r = FDK_ERR_UNKNOWN;
+    fdk_theme *t = fdk_theme_find("mine", &r);
+    assert(t != NULL);
+    assert(streq(fdk_theme_name(t), "Mine Custom")); /* NOT "Mine XDG" */
+    char want[600];
+    snprintf(want, sizeof want, "%.560s/.FDKThemes/mine.fdk", g_dir);
+    assert(streq(fdk_theme_file_path(t), want));
+    fdk_theme_destroy(t);
+
+    /* And it is reachable by internal name too. */
+    t = fdk_theme_find("Mine XDG", &r);
+    assert(t != NULL);
+    assert(streq(fdk_theme_name(t), "Mine XDG"));
+    fdk_theme_destroy(t);
+
+    remove(custom);
+    remove(xdg);
+}
+
+static void test_find_xdg_canonical_beats_legacy(void) {
+    /* Within ONE XDG entry, the canonical fdk/.FDKThemes shadows the
+     * legacy fdk/themes for the same stem — and a stem that exists
+     * ONLY in legacy still resolves (older installs keep working). */
+    char canon_dir[600], legacy_dir[600];
+    char both_canon[600], both_legacy[600], oldie[600];
+    snprintf(canon_dir, sizeof canon_dir, "%s/fdk/.FDKThemes", g_dir2);
+    snprintf(legacy_dir, sizeof legacy_dir, "%s/fdk/themes", g_dir2);
+    mkdirs(canon_dir);
+    mkdirs(legacy_dir);
+    snprintf(both_canon, sizeof both_canon, "%.580s/both.fdk", canon_dir);
+    snprintf(both_legacy, sizeof both_legacy, "%.580s/both.fdk", legacy_dir);
+    snprintf(oldie, sizeof oldie, "%.580s/oldie.fdk", legacy_dir);
+    write_theme(both_canon, "Both Canonical", "#333333");
+    write_theme(both_legacy, "Both Legacy", "#444444");
+    write_theme(oldie, "Oldie Legacy", "#555555");
+
+    use_env("FDK_THEME_DIR", NULL);
+    use_env("XDG_DATA_HOME", g_dir2);
+    use_env("XDG_DATA_DIRS", g_dir);
+    use_env("HOME", g_dir2); /* no .FDKThemes in the sandbox */
+    use_env("FDK_THEME", NULL);
+    use_env("FDK_PREFS_FILE", NULL);
+    fdk__theme_scan_reset_for_tests();
+
+    fdk_result r = FDK_ERR_UNKNOWN;
+    fdk_theme *t = fdk_theme_find("both", &r);
+    assert(t != NULL);
+    assert(streq(fdk_theme_name(t), "Both Canonical"));
+    fdk_theme_destroy(t);
+
+    t = fdk_theme_find("oldie", &r);
+    assert(t != NULL);
+    assert(streq(fdk_theme_name(t), "Oldie Legacy"));
+    fdk_theme_destroy(t);
+
+    /* Enumeration: both stems listed once each, canonical path won
+     * for 'both'. */
+    size_t n = fdk_theme_available_count();
+    assert(n == 2);
+    assert(streq(fdk_theme_available_name(0), "both"));
+    assert(streq(fdk_theme_available_name(1), "oldie"));
+    assert(contains(fdk_theme_available_path(0), "fdk/.FDKThemes"));
+
+    remove(both_canon);
+    remove(both_legacy);
+    remove(oldie);
+}
+
 /* ---- discovery: enumeration ------------------------------------------ */
 
 static void test_enumeration(void) {
@@ -308,7 +418,7 @@ static void test_boot_no_preference(void) {
     discovery_env();
     settings_file(NULL);
     fdk_theme *t = fdk_theme_get_default();
-    assert(streq(fdk_theme_name(t), "FDK Modern"));
+    assert(streq(fdk_theme_name(t), "Faded Dream"));
 }
 
 static void test_boot_from_settings(void) {
@@ -339,7 +449,7 @@ static void test_boot_unresolvable_is_soft(void) {
     fdk_theme *t = fdk_theme_get_default();
     /* Soft failure: one warning (visible in the log output of the
      * binary), built-in stays, nothing crashes. */
-    assert(streq(fdk_theme_name(t), "FDK Modern"));
+    assert(streq(fdk_theme_name(t), "Faded Dream"));
 }
 
 static void test_boot_explicit_set_opts_out(void) {
@@ -601,11 +711,11 @@ static void test_recheck_follows_file_changes(void) {
     /* Cleared at runtime: revert to the built-in. */
     settings_file(NULL);
     fdk__theme_settings_recheck();
-    assert(streq(fdk_theme_name(fdk_theme_get_default()), "FDK Modern"));
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "Faded Dream"));
     /* Unresolvable at runtime: soft, current survives. */
     settings_file("[theme]\nname = no-such-theme\n");
     fdk__theme_settings_recheck();
-    assert(streq(fdk_theme_name(fdk_theme_get_default()), "FDK Modern"));
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "Faded Dream"));
 }
 
 static void test_recheck_app_store_change(void) {
@@ -646,7 +756,7 @@ static void test_recheck_opted_out_app_is_left_alone(void) {
     fdk_theme_destroy(own);
     /* Destroy reverts to the built-in (not to the setting — the
      * process stays opted out). */
-    assert(streq(fdk_theme_name(fdk_theme_get_default()), "FDK Modern"));
+    assert(streq(fdk_theme_name(fdk_theme_get_default()), "Faded Dream"));
 }
 
 /* ---- main -------------------------------------------------------------- */
@@ -677,6 +787,11 @@ int main(void) {
     struct stat st;
     assert(stat(fixture("alpha.fdk"), &st) == 0);
 
+    /* 1.4.16: the custom per-user folder is part of the search path
+     * now — pin $HOME to the (themeless) sandbox so this binary is
+     * hermetic on a host that happens to have ~/.FDKThemes. */
+    use_env("HOME", g_dir2);
+
     test_find_stem();
     test_find_internal_name();
     test_find_case_sensitive();
@@ -685,6 +800,8 @@ int main(void) {
     test_find_broken_neighbor_skipped();
     test_find_broken_direct_is_loud();
     test_find_priority();
+    test_find_custom_folder();
+    test_find_xdg_canonical_beats_legacy();
     test_find_no_dirs();
     test_enumeration();
     test_file_path_origins();

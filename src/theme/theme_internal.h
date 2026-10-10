@@ -30,7 +30,7 @@
 #define FDK_THEME_INPUT_MAX (1024u * 1024u)
 
 struct fdk_theme {
-    char *name;   /* owned, never NULL ("FDK Dark" default) */
+    char *name;   /* owned, never NULL ("Faded Dream" default) */
     char *author; /* owned, NULL when unset                  */
     char *path;   /* owned, NULL unless fdk_theme_load() —
                    * informational only (fdk_theme_file_path),
@@ -39,9 +39,26 @@ struct fdk_theme {
     /* Straight RGBA. Indexed by fdk_theme_token. */
     fdk_color colors[FDK_TK_COUNT];
 
+    /* The OVERRIDE mask (1.4.16): colors_set[t] is true when a
+     * [colors] key (or fdk_theme_set_color) put the value there,
+     * false when it is merely the inherited built-in default. The
+     * FALLBACK tokens (the titlebar family — see fdk__token_fallback)
+     * consult it: an unset titlebar_background reads through to
+     * control_background, so pre-1.4.16 partial themes theme the
+     * band exactly as they always did. Base tokens are always
+     * effectively set (the built-in initializes them), so only the
+     * fallback family ever sees a false bit in practice. */
+    bool colors_set[FDK_TK_COUNT];
+
     /* Indexed by fdk_theme_metric. */
     fdk_i32 metrics[FDK_TM_COUNT];
 };
+
+/* The fallback map (theme.c): for the titlebar family, the token a
+ * read falls back to when the theme never overrode it. Returns the
+ * token itself for every base token (the whole non-titlebar
+ * vocabulary, and every titlebar token in a theme that set it). */
+fdk_theme_token fdk__token_fallback(fdk_theme_token token);
 
 /* The built-in default theme (v1 palette + metrics). A single static
  * instance, shared and never mutated: create_default() copies it, the

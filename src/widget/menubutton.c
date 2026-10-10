@@ -194,8 +194,10 @@ static void mbtn_paint(fdk_widget *w, fdk_surface *surface,
                            a.a + (hov.a - a.a) * ht};
         label_col = fdk__pal_text();
     }
-    fdk_i32 radius =
-        fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
+    /* Themed corner shape (1.4.16): the same shape story as the
+     * catalog Button — ROUNDED/CIRCLE/SQUARE from the theme. */
+    fdk_i32 radius = fdk__button_shape_radius(bounds.width,
+                                              bounds.height);
     fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
 
     /* Focus ring (the button's themed rule). */

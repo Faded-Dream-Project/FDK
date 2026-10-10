@@ -308,6 +308,14 @@ static const key_entry k_color_keys[] = {
     {"entry_background", FDK_TK_ENTRY_BACKGROUND},
     {"entry_border", FDK_TK_ENTRY_BORDER},
     {"row_hover", FDK_TK_ROW_HOVER},
+    /* 1.4.16 titlebar vocabulary (the FALLBACK family — unset keys
+     * read through to their base tokens at lookup time, not here;
+     * the parser just records the override). */
+    {"titlebar_background", FDK_TK_TITLEBAR_BACKGROUND},
+    {"titlebar_text", FDK_TK_TITLEBAR_TEXT},
+    {"titlebar_border", FDK_TK_TITLEBAR_BORDER},
+    {"titlebar_button_hover", FDK_TK_TITLEBAR_BUTTON_HOVER},
+    {"titlebar_button_pressed", FDK_TK_TITLEBAR_BUTTON_PRESSED},
 };
 
 static const key_entry k_metric_keys[] = {
@@ -329,6 +337,9 @@ static const key_entry k_metric_keys[] = {
     {"iconview_cell_height", FDK_TM_ICONVIEW_CELL_HEIGHT},
     /* 1.4.8: the TextView's inner padding. */
     {"textview_pad", FDK_TM_TEXTVIEW_PAD},
+    /* 1.4.16: the button SHAPE (0 rounded / 1 circle / 2 square) —
+     * the radius number stays button_corner_radius's job. */
+    {"button_shape", FDK_TM_BUTTON_SHAPE},
 };
 
 static const struct {
@@ -348,6 +359,7 @@ static const struct {
     [FDK_TM_ICONVIEW_CELL_WIDTH] = {64, 192},
     [FDK_TM_ICONVIEW_CELL_HEIGHT] = {64, 224},
     [FDK_TM_TEXTVIEW_PAD] = {0, 32},
+    [FDK_TM_BUTTON_SHAPE] = {0, 2},
 };
 
 /* Key-table lookup against a key segment (exact bytes). */
@@ -388,8 +400,15 @@ typedef struct {
     bool implicit_theme;   /* still before any section header */
     unsigned sections_seen; /* bit 0=[theme] 1=[colors] 2=[metrics] */
     unsigned seen_theme;   /* bit per k_theme_keys entry        */
-    unsigned seen_colors;  /* bit per token                     */
-    unsigned seen_metrics; /* bit per metric                    */
+    /* Duplicate tracking for colors/metrics crossed into array
+     * territory at 1.4.16: the token vocabulary hit 33 entries
+     * (FDK_TK_COUNT), and the old `unsigned` bitmask's 1u << id
+     * would be undefined behavior for the last token — a silent
+     * hole waiting for the first theme that used it. The honest
+     * representation is a byte per token/metric; three theme keys
+     * stay a bitmask (3 bits, nowhere near a word). */
+    bool seen_colors[FDK_TK_COUNT];  /* per-token duplicate guard  */
+    bool seen_metrics[FDK_TM_COUNT]; /* per-metric duplicate guard */
 } parse_state;
 
 /* ---- one line ---- */
@@ -509,8 +528,7 @@ static fdk_result handle_color_entry(parse_state *st, const char *key,
         return fail(line, FDK_ERR_THEME_PARSE,
                     "unknown color token");
     }
-    unsigned bit = 1u << e->id;
-    if (st->seen_colors & bit) {
+    if (st->seen_colors[e->id]) {
         return fail(line, FDK_ERR_THEME_PARSE,
                     "duplicate color token");
     }
@@ -520,7 +538,10 @@ static fdk_result handle_color_entry(parse_state *st, const char *key,
         return r;
     }
     st->theme->colors[e->id] = c;
-    st->seen_colors |= bit;
+    st->theme->colors_set[e->id] = true; /* the override mask (1.4.16):
+                                          * a set key stops the titlebar
+                                          * fallback read-through */
+    st->seen_colors[e->id] = true;
     return FDK_OK;
 }
 
@@ -534,8 +555,7 @@ static fdk_result handle_metric_entry(parse_state *st, const char *key,
         return fail(line, FDK_ERR_THEME_PARSE,
                     "unknown metric");
     }
-    unsigned bit = 1u << e->id;
-    if (st->seen_metrics & bit) {
+    if (st->seen_metrics[e->id]) {
         return fail(line, FDK_ERR_THEME_PARSE,
                     "duplicate metric");
     }
@@ -552,7 +572,7 @@ static fdk_result handle_metric_entry(parse_state *st, const char *key,
         return FDK_ERR_THEME_PARSE;
     }
     st->theme->metrics[e->id] = (fdk_i32)value;
-    st->seen_metrics |= bit;
+    st->seen_metrics[e->id] = true;
     return FDK_OK;
 }
 
@@ -634,7 +654,7 @@ fdk_result fdk__theme_parse_into(fdk_theme *t, const char *text,
     }
 
     parse_state st = {.theme = t, .section = SEC_THEME,
-                    .implicit_theme = true, 0u, 0u, 0u, 0u};
+                    .implicit_theme = true, 0u, 0u};
 
     for (;;) {
         const char *line = NULL;

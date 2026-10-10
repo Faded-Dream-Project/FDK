@@ -174,29 +174,30 @@ static void about_body_arrange(fdk_widget *w, fdk_rect assigned) {
     if (a == NULL) {
         return;
     }
-    /* The Close button: bottom-right, the message dialog's rule. */
+    /* The Close button: bottom-right, the message dialog's rule.
+     * Children in the BODY's local coordinates (1.4.16: the 1.4.15
+     * band made assigned.y nonzero and the old assigned.y + ... bases
+     * double-offset the content below the band). */
     fdk_size bn = {0, 0};
     size_t n = fdk_widget_child_count(w);
     fdk_widget *close_btn =
         (n > 0) ? fdk_widget_child_at(w, n - 1) : NULL;
     if (close_btn != NULL) {
         fdk_widget_measure(close_btn, &bn);
-        fdk_i32 bx = assigned.x + assigned.width - CHOOSE_PAD -
-                     bn.width;
-        if (bx < assigned.x + CHOOSE_PAD) {
-            bx = assigned.x + CHOOSE_PAD;
+        fdk_i32 bx = assigned.width - CHOOSE_PAD - bn.width;
+        if (bx < CHOOSE_PAD) {
+            bx = CHOOSE_PAD;
         }
-        fdk_i32 by = assigned.y + assigned.height - CHOOSE_PAD -
-                     bn.height;
+        fdk_i32 by = assigned.height - CHOOSE_PAD - bn.height;
         fdk_widget_set_bounds(close_btn,
                               (fdk_rect){bx, by, bn.width, bn.height});
     }
 
     /* The content stack, top-down from the padding. */
-    fdk_i32 x = assigned.x + CHOOSE_PAD;
-    fdk_i32 y = assigned.y + CHOOSE_PAD;
+    fdk_i32 x = CHOOSE_PAD;
+    fdk_i32 y = CHOOSE_PAD;
     fdk_i32 max_w = assigned.width - CHOOSE_PAD * 2;
-    fdk_i32 bottom = assigned.y + assigned.height - CHOOSE_PAD -
+    fdk_i32 bottom = assigned.height - CHOOSE_PAD -
                      (close_btn != NULL ? bn.height + CHOOSE_PAD : 0);
 
     if (a->logo != NULL) {
@@ -247,7 +248,7 @@ static void about_body_arrange(fdk_widget *w, fdk_rect assigned) {
     }
     /* The comments wrap under the full width (below the logo row). */
     fdk_i32 full_y = (a->logo != NULL)
-        ? assigned.y + CHOOSE_PAD + 72
+        ? CHOOSE_PAD + 72
         : y;
     if (full_y < y) {
         full_y = y;
@@ -773,8 +774,10 @@ static void fc_body_arrange(fdk_widget *w, fdk_rect assigned) {
             bh = cancel_n.height;
         }
     }
-    fdk_i32 by = assigned.y + assigned.height - CHOOSE_PAD - bh;
-    fdk_i32 x = assigned.x + assigned.width - CHOOSE_PAD;
+    /* Children in the BODY's local coordinates (the 1.4.16
+     * double-offset fix — see about_body_arrange). */
+    fdk_i32 by = assigned.height - CHOOSE_PAD - bh;
+    fdk_i32 x = assigned.width - CHOOSE_PAD;
     if (cancel_btn != NULL) {
         x -= cancel_n.width;
         fdk_widget_set_bounds(cancel_btn,
@@ -790,20 +793,20 @@ static void fc_body_arrange(fdk_widget *w, fdk_rect assigned) {
     /* The list fills the left column, below the padding, above the
      * buttons (self-scrolling — the List's own scrollview rides
      * along). */
-    fdk_i32 top = assigned.y + CHOOSE_PAD;
+    fdk_i32 top = CHOOSE_PAD;
     fdk_i32 bottom = by - CHOOSE_PAD;
     if (bottom < top + 40) {
         bottom = top + 40;
     }
     if (fc->list != NULL) {
         fdk_widget_set_bounds(fc->list,
-                              (fdk_rect){assigned.x + CHOOSE_PAD,
+                              (fdk_rect){CHOOSE_PAD,
                                          top, FC_LIST_W,
                                          bottom - top});
     }
     /* The right column: size row at the top, preview below. */
-    fdk_i32 rx = assigned.x + CHOOSE_PAD + FC_LIST_W + CHOOSE_PAD;
-    fdk_i32 rw = assigned.x + assigned.width - CHOOSE_PAD - rx;
+    fdk_i32 rx = CHOOSE_PAD + FC_LIST_W + CHOOSE_PAD;
+    fdk_i32 rw = assigned.width - CHOOSE_PAD - rx;
     if (rw < 60) {
         rw = 60;
     }
@@ -1524,8 +1527,11 @@ static void cc_body_arrange(fdk_widget *w, fdk_rect assigned) {
             bh = cancel_n.height;
         }
     }
-    fdk_i32 by = assigned.y + assigned.height - CHOOSE_PAD - bh;
-    fdk_i32 x = assigned.x + assigned.width - CHOOSE_PAD;
+    /* Children in the BODY's local coordinates (the 1.4.16
+     * double-offset fix — the wheel rode 28px low under the 1.4.15
+     * band; caught by the chooser's own pixel test). */
+    fdk_i32 by = assigned.height - CHOOSE_PAD - bh;
+    fdk_i32 x = assigned.width - CHOOSE_PAD;
     if (cancel_btn != NULL) {
         x -= cancel_n.width;
         fdk_widget_set_bounds(cancel_btn,
@@ -1539,15 +1545,15 @@ static void cc_body_arrange(fdk_widget *w, fdk_rect assigned) {
     }
 
     /* The wheel on the left; the side column on the right. */
-    fdk_i32 top = assigned.y + CHOOSE_PAD;
+    fdk_i32 top = CHOOSE_PAD;
     if (cc->wheel != NULL) {
         fdk_widget_set_bounds(
             cc->wheel,
-            (fdk_rect){assigned.x + CHOOSE_PAD, top, CC_WHEEL,
+            (fdk_rect){CHOOSE_PAD, top, CC_WHEEL,
                        CC_WHEEL});
     }
-    fdk_i32 rx = assigned.x + CHOOSE_PAD + CC_WHEEL + CHOOSE_PAD;
-    fdk_i32 rw = assigned.x + assigned.width - CHOOSE_PAD - rx;
+    fdk_i32 rx = CHOOSE_PAD + CC_WHEEL + CHOOSE_PAD;
+    fdk_i32 rw = assigned.width - CHOOSE_PAD - rx;
     if (rw < 90) {
         rw = 90;
     }

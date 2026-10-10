@@ -30,6 +30,7 @@
 #include "fdk/fdk_layout.h"
 #include "fdk/fdk_widget.h"
 #include "fdk/fdk_text.h" /* 1.4.11: fdk_span (tooltip/label/button markup) */
+#include "fdk/fdk_theme.h" /* 1.4.16: background_token (token-following bg) */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -74,6 +75,18 @@
  * fdk_theme_set_default() switch (1.2.1: the stale-paint fix — see
  * fdk_window_get_root). */
 #define FDK_WF_ROOT_BG_DEFAULT 0x100u
+
+/* 1.4.16: the widget's background is TOKEN-FOLLOWING — set by
+ * fdk_widget_set_background_token(), cleared by an explicit
+ * fdk_widget_set_background() (an application's fixed color always
+ * wins). While set, the default paint hook resolves the stored
+ * fdk_theme_token at PAINT time, so the fill tracks every theme
+ * switch live with no hook of its own (a switch already damages
+ * every root; the repaint re-resolves). The window-root default
+ * (above) stays its own mechanism: the root's color is ALSO read by
+ * the backend's creation-time pixel, which is why it caches and
+ * re-reads through a hook instead of resolving at paint time. */
+#define FDK_WF_BG_TOKEN 0x200u
 
 struct fdk_widget {
     const fdk_widget_class *klass;   /* never NULL (base class at minimum) */
@@ -135,9 +148,12 @@ struct fdk_widget {
     size_t a11y_relation_cap;
 
     /* Base style (Phase 4 theme seed): background fill + corner
-     * radius used by the default paint hook. */
+     * radius used by the default paint hook. 1.4.16: when the
+     * FDK_WF_BG_TOKEN flag is set, `background` is inert and
+     * `background_token` resolves at paint time instead. */
     fdk_color background;            /* a == 0 -> no background          */
     fdk_i32 corner_radius;
+    fdk_theme_token background_token; /* valid while FDK_WF_BG_TOKEN    */
 
     /* Per-child layout hints (Phase 5) — carried BY the child for
      * whatever container holds it. See fdk_layout.h. */

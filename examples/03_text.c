@@ -181,8 +181,6 @@ int main(void) {
     }
     fdk_widget *content = ex.content;
     fdk_box_set_spacing(content, 12);
-    fdk_widget_set_background(ex.root, col(18, 20, 28));
-    (void)fdk_window_paint(ex.window); /* repaint under the new bg */
 
     /* --- canvas: the raw-rendering gallery (fixed height) --- */
     fdk_widget *canvas = NULL;
@@ -193,7 +191,7 @@ int main(void) {
     /* --- frame: a wrapping paragraph --- */
     fdk_widget *para_frame = NULL;
     (void)fdk_frame_create(content, f16, "Paragraph", &para_frame);
-    fdk_widget_set_background(para_frame, col(26, 29, 40));
+    fdk_widget_set_background_token(para_frame, FDK_TK_CONTROL_BACKGROUND);
     fdk_widget *para = NULL;
     (void)fdk_label_create(
         para_frame, f16,
@@ -210,7 +208,7 @@ int main(void) {
     /* --- frame: ellipsized truncation --- */
     fdk_widget *trunc_frame = NULL;
     (void)fdk_frame_create(content, f16, "Truncation", &trunc_frame);
-    fdk_widget_set_background(trunc_frame, col(26, 29, 40));
+    fdk_widget_set_background_token(trunc_frame, FDK_TK_CONTROL_BACKGROUND);
     fdk_widget *trunc = NULL;
     (void)fdk_label_create(
         trunc_frame, f16,
@@ -224,7 +222,7 @@ int main(void) {
     /* --- frame: the three alignments --- */
     fdk_widget *align_frame = NULL;
     (void)fdk_frame_create(content, f16, "Alignment", &align_frame);
-    fdk_widget_set_background(align_frame, col(26, 29, 40));
+    fdk_widget_set_background_token(align_frame, FDK_TK_CONTROL_BACKGROUND);
     fdk_widget *a_start = NULL, *a_center = NULL, *a_end = NULL;
     (void)fdk_label_create(align_frame, f16, "<< start-aligned",
                            &a_start);
@@ -241,7 +239,7 @@ int main(void) {
     /* --- frame: keyboard-owned selection --- */
     fdk_widget *key_frame = NULL;
     (void)fdk_frame_create(content, f16, "Keyboard", &key_frame);
-    fdk_widget_set_background(key_frame, col(26, 29, 40));
+    fdk_widget_set_background_token(key_frame, FDK_TK_CONTROL_BACKGROUND);
     fdk_widget *r1 = NULL, *r2 = NULL, *r3 = NULL;
     (void)fdk_radio_create(key_frame, f16, "North", &r1);
     (void)fdk_radio_create(key_frame, f16, "East", &r2);
@@ -255,7 +253,7 @@ int main(void) {
     /* --- frame: the 1.4.8 multi-line editor --- */
     fdk_widget *edit_frame = NULL;
     (void)fdk_frame_create(content, f16, "Editor", &edit_frame);
-    fdk_widget_set_background(edit_frame, col(26, 29, 40));
+    fdk_widget_set_background_token(edit_frame, FDK_TK_CONTROL_BACKGROUND);
     fdk_widget *editor = NULL;
     (void)fdk_textview_create(edit_frame, f16, &editor);
     fdk_textview_set_text(

@@ -2089,12 +2089,12 @@ static void test_theme_switch_gui(void) {
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
 
-    /* Modern defaults (1.4.0): control fill 0.13/0.15/0.20 ->
-     * 0x212633; border 0.20/0.23/0.30 -> 0x333B4D; radius 8 cuts the
-     * corner pixel; 1px rule at y = 70 + 10/2 = 75. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00212633u);
+    /* Faded Dream defaults (1.4.16): control fill #33333C; border
+     * #464653; radius 8 cuts the corner pixel; 1px rule at
+     * y = 70 + 10/2 = 75. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x0033333Cu);
     assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00141414u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x00333B4Du);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x00464653u);
     assert(x11_readback_pixel(&rb_dpy, xid, 80, 74) == 0x00141414u);
     assert(x11_readback_pixel(&rb_dpy, xid, 80, 76) == 0x00141414u);
 
@@ -2131,9 +2131,9 @@ static void test_theme_switch_gui(void) {
     fdk_theme_set_default(NULL);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x00212633u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x0033333Cu);
     assert(x11_readback_pixel(&rb_dpy, xid, 21, 21) == 0x00141414u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x00333B4Du);
+    assert(x11_readback_pixel(&rb_dpy, xid, 80, 75) == 0x00464653u);
 
     fdk_theme_destroy(light);
     XCloseDisplay(rb_dpy);
@@ -2238,16 +2238,17 @@ static void test_decorations_gui(void) {
     assert(fdk_window_get_decorated(win) == true);
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    /* Band fill (Modern control bg) and its themed 1px bottom rule. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00212633u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 27) == 0x00333B4Du);
+    /* Band fill (Faded Dream control bg via the titlebar fallback) and
+     * its themed 1px bottom rule. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x0033333Cu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 27) == 0x00464653u);
     /* The close button (22x20 at x=292..314): fill at its left edge,
      * vertically centered - clear of the radius-8 corners and of the
      * centered glyph. */
-    assert(x11_readback_pixel(&rb_dpy, xid, 295, 14) == 0x00212633u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 295, 14) == 0x0033333Cu);
     /* Content now starts BELOW the 28px band. */
     assert(x11_readback_pixel(&rb_dpy, xid, 10, 50) == 0x003C78C8u);
-    assert(x11_readback_pixel(&rb_dpy, xid, 10, 5) == 0x00212633u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 10, 5) == 0x0033333Cu);
     /* The WM has been asked to drop its chrome. */
     assert(motif_hints_present(rb_dpy, xid));
 
@@ -2302,7 +2303,7 @@ static void test_decorations_gui(void) {
     assert(fdk_ok(fdk_window_set_decorated(win, true)));
     assert(fdk_ok(fdk_window_paint(win)));
     (void)fdk_pump_events(ctx, 200);
-    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00212633u);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x0033333Cu);
 
     /* ---- Phase 8 completion: band buttons + double-click ---- */
     {
@@ -2413,14 +2414,14 @@ static void test_decorations_gui(void) {
         assert(fdk_ok(fdk_window_paint(win)));
         (void)fdk_pump_events(ctx, 200);
         assert(x11_readback_pixel(&rb_dpy, xid, 160, 38) ==
-               0x00212633u); /* band fill: the band now covers 0..39 */
+               0x0033333Cu); /* band fill: the band now covers 0..39 */
         assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) ==
-               0x00212633u);
+               0x0033333Cu);
         /* Content moved down: row 50 was content before (28px band),
          * still content (below 40) — and the band's bottom rule moved
          * from y=27 to y=39. */
         assert(x11_readback_pixel(&rb_dpy, xid, 160, 39) ==
-               0x00333B4Du); /* themed rule at the new band bottom */
+               0x00464653u); /* themed rule at the new band bottom */
         fdk_theme_set_default(NULL); /* revert to built-in */
         fdk_theme_destroy(tall);
         assert(fdk_ok(fdk_window_paint(win)));
@@ -2438,6 +2439,96 @@ static void test_decorations_gui(void) {
            "band height, round trip\n");
 }
 
+
+
+/* ---- 1.4.16: the titlebar family, end to end on a real server --------
+ *
+ * The maintainer's theming ask, pixel-verified: the DECORATION is a
+ * theme surface. Mono Chromatic paints a near-black band over a
+ * white window (the chrome is the color pairing); Pink Rave paints
+ * a hot-pink band over a plum window; the built-in paints its calm
+ * gray band through the FALLBACK (control fill). Each switch
+ * re-reads the root's themed window background too — the whole
+ * window re-faces live, on the server's own pixels. The themes come
+ * from the source tree's .FDKThemes/ folder: the same files the
+ * suite ships. */
+static void test_titlebar_theming_gui(void) {
+    /* build/tests/ -> ../../.FDKThemes/<face>.fdk */
+    char self[512];
+    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+    assert(n > 0);
+    self[n] = '\0';
+    char *slash = strrchr(self, '/');
+    assert(slash != NULL);
+    *slash = '\0';
+    char mono_path[600], rave_path[600];
+    snprintf(mono_path, sizeof mono_path,
+             "%.500s/../../.FDKThemes/mono-chromatic.fdk", self);
+    snprintf(rave_path, sizeof rave_path,
+             "%.500s/../../.FDKThemes/pink-rave.fdk", self);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_window_options wopts = { .title = "FDK titlebar theming",
+                                 .width = 320, .height = 200 };
+    fdk_window *win = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    assert(fdk_ok(fdk_window_set_decorated(win, true)));
+    fdk_window_show(win);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb_dpy = NULL;
+    unsigned long xid = fdk_window_xid(win);
+
+    /* Baseline: the built-in Faded Dream — the band reads the
+     * control fill through the unset titlebar family. */
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x0033333Cu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 100) ==
+           0x00232329u); /* themed root: window_background */
+
+    /* Mono Chromatic: black band over white content, black rule. */
+    fdk_result r = FDK_ERR_UNKNOWN;
+    fdk_theme *mono = fdk_theme_load(mono_path, &r);
+    assert(mono != NULL && r == FDK_OK);
+    fdk_theme_set_default(mono);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x000A0A0Au);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 100) ==
+           0x00FFFFFFu); /* the white half of the pairing */
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 35) ==
+           0x00000000u); /* titlebar_border: the black rule (36px band) */
+
+    /* Pink Rave: hot-pink band over plum, the deep-pink rule. */
+    fdk_theme *rave = fdk_theme_load(rave_path, &r);
+    assert(rave != NULL && r == FDK_OK);
+    fdk_theme_set_default(rave);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x00FF2D9Au);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 100) ==
+           0x002E0F22u); /* the plum floor */
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 31) ==
+           0x00C2187Fu); /* titlebar_border at the 32px band bottom */
+
+    /* Back to the built-in: the fallback band again, byte-exact. */
+    fdk_theme_set_default(NULL);
+    fdk_theme_destroy(mono);
+    fdk_theme_destroy(rave);
+    assert(fdk_ok(fdk_window_paint(win)));
+    (void)fdk_pump_events(ctx, 200);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 5) == 0x0033333Cu);
+    assert(x11_readback_pixel(&rb_dpy, xid, 160, 100) == 0x00232329u);
+
+    XCloseDisplay(rb_dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 titlebar theming: Mono Chromatic's black band over "
+           "white, Pink Rave's hot-pink band over plum, the built-in's "
+           "fallback gray — all on the server's own pixels\n");
+}
 
 /* ---- Phase 8 completion: window state + resize edges + EWMH ---- */
 
@@ -6005,7 +6096,15 @@ static void test_dialog_gui(void) {
     assert(dlg_xid != 0);
     fdk_widget *dlg_root = NULL;
     assert(fdk_ok(fdk_window_get_root(dlg, &dlg_root)));
-    fdk_widget *body = fdk_widget_child_at(dlg_root, 0);
+    /* 1.4.15 dressed the dialogs in the FDK title band: root child 0
+     * is the BAND, the body is child 1. (Found live at 1.4.16: the
+     * old child-0 navigation silently grabbed the band, whose only
+     * child is the title label, and the OK-button lookup went NULL —
+     * the 1.4.15 "dialog groups all-pass" claim had run a stale
+     * binary. The band is part of the dialog's shape now; navigate
+     * past it honestly.) */
+    assert(fdk_widget_child_at(dlg_root, 0) != NULL); /* the band */
+    fdk_widget *body = fdk_widget_child_at(dlg_root, 1);
     assert(body != NULL);
     fdk_widget *ok_btn = fdk_widget_child_at(body, 1); /* label, OK, Cancel */
     assert(ok_btn != NULL);
@@ -6294,11 +6393,14 @@ static void test_file_dialog_gui(void) {
     {
         fdk_widget *droot = NULL;
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
-        fdk_widget *body = fdk_widget_child_at(droot, 0);
+        /* 1.4.15's band is root child 0; the body is child 1. */
+        fdk_widget *body = fdk_widget_child_at(droot, 1);
         assert(body != NULL);
         fdk_widget *accept = fdk_widget_child_at(body, 11);
         assert(accept != NULL);
-        fdk_rect ab = fdk_widget_get_bounds(accept);
+        /* ABSOLUTE bounds: the body sits below the 1.4.15 title
+         * band, so parent-relative y would click 28px too high. */
+        fdk_rect ab = fdk_widget_get_absolute_bounds(accept);
         /* The list holds one row (sub/): select it first. */
         dxid = fdk_window_xid(dlg);
         x11_send_key_event(send_dpy, dxid, KeyPress, 116); /* Down */
@@ -6337,7 +6439,7 @@ static void test_file_dialog_gui(void) {
     {
         fdk_widget *droot = NULL;
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
-        fdk_widget *body = fdk_widget_child_at(droot, 0);
+        fdk_widget *body = fdk_widget_child_at(droot, 1);
         fdk_widget *grid = fdk_widget_child_at(body, 9);
         fdk_widget *rows = fdk_widget_child_at(body, 8);
         assert(grid != NULL && rows != NULL);
@@ -6382,7 +6484,7 @@ static void test_file_dialog_gui(void) {
     {
         fdk_widget *droot = NULL;
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
-        fdk_widget *body = fdk_widget_child_at(droot, 0);
+        fdk_widget *body = fdk_widget_child_at(droot, 1);
         fdk_widget *grid = fdk_widget_child_at(body, 9);
         assert(fdk_iconview_item_count(grid) == 2);
         /* iv -> scrollview -> grid container -> cell 0. The
@@ -6612,7 +6714,7 @@ static void test_file_dialog_gui(void) {
         dxid = fdk_window_xid(dlg);
         fdk_widget *droot = NULL;
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
-        fdk_widget *body = fdk_widget_child_at(droot, 0);
+        fdk_widget *body = fdk_widget_child_at(droot, 1);
         fdk_widget *pbar = fdk_widget_child_at(body, 5);
         fdk_widget *pentry = fdk_widget_child_at(body, 6);
         assert(pbar != NULL && pentry != NULL);
@@ -6646,10 +6748,11 @@ static void test_file_dialog_gui(void) {
         assert(!fdk_widget_get_visible(pentry));
         assert(fd_result.outcome == FDK_FILE_DIALOG_ERROR);
 
-        /* The root crumb click navigates to "/". The bar's bounds
-         * are body-relative = window coordinates (content at origin);
-         * crumb 0 ("/") starts at FD_PB_PAD_X = 10px inside. */
-        fdk_rect pb = fdk_widget_get_bounds(pbar);
+        /* The root crumb click navigates to "/". ABSOLUTE bounds
+         * (the body now sits below the 1.4.15 title band — the old
+         * body-relative click landed in the band); crumb 0 ("/")
+         * starts at FD_PB_PAD_X = 10px inside. */
+        fdk_rect pb = fdk_widget_get_absolute_bounds(pbar);
         assert(pb.width > 100 && pb.height >= 24);
         x11_send_pointer_event(send_dpy, dxid, ButtonPress,
                                ButtonPressMask | ButtonReleaseMask,
@@ -6672,7 +6775,8 @@ static void test_file_dialog_gui(void) {
         {
             fdk_widget *accept = fdk_widget_child_at(body, 11);
             assert(accept != NULL);
-            fdk_rect ab = fdk_widget_get_bounds(accept);
+            /* ABSOLUTE bounds — the body sits below the band. */
+            fdk_rect ab = fdk_widget_get_absolute_bounds(accept);
             x11_send_pointer_event(send_dpy, dxid, ButtonPress,
                                    ButtonPressMask | ButtonReleaseMask,
                                    ab.x + 8, ab.y + ab.height / 2, 1);
@@ -6996,7 +7100,7 @@ static void test_settings_live_follow_gui(void) {
     assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
     fdk_window_show(win);
     (void)fdk_pump_events(ctx, 200);
-    assert(strcmp(fdk_theme_name(NULL), "FDK Modern") == 0);
+    assert(strcmp(fdk_theme_name(NULL), "Faded Dream") == 0);
 
     char global[600];
     snprintf(global, sizeof global, "%s/fdk.prefs", tmpl);
@@ -7033,11 +7137,11 @@ static void test_settings_live_follow_gui(void) {
 
     /* Clearing the global setting reverts to the built-in. */
     live_write_settings(global, NULL);
-    for (int i = 0; i < 10 && strcmp(fdk_theme_name(NULL), "FDK Modern") != 0;
+    for (int i = 0; i < 10 && strcmp(fdk_theme_name(NULL), "Faded Dream") != 0;
          i++) {
         (void)fdk_pump_events(ctx, 120);
     }
-    assert(strcmp(fdk_theme_name(NULL), "FDK Modern") == 0);
+    assert(strcmp(fdk_theme_name(NULL), "Faded Dream") == 0);
     printf("[ok] settings live follow: resets propagate (app override "
            "removed, then the global setting cleared)\n");
 
@@ -7670,9 +7774,10 @@ static void test_tooltip_gui(void) {
         unsigned long bot = x11_readback_pixel(&rb_dpy, tip,
                                                wa.width / 2,
                                                (int)wa.height - 3);
-        /* 0.95,0.96,0.99 with the renderer's rounding -> 0xF2F5FC */
-        assert(top == 0xF2F5FCu);
-        assert(bot == 0xF2F5FCu);
+        /* Faded Dream's tooltip fill #F0EFF5 (the 1.4.16 default;
+         * was Modern's 0xF2F5FC). */
+        assert(top == 0xF0EFF5u);
+        assert(bot == 0xF0EFF5u);
         /* And the label REALLY painted: some pixel in the glyph band
          * differs from the fill (glyphs + their antialiasing). */
         bool glyph = false;
@@ -7680,7 +7785,7 @@ static void test_tooltip_gui(void) {
              !glyph && yy <= (int)wa.height / 2 + 3; yy++) {
             for (int xx = 4; !glyph && xx <= (int)wa.width - 4; xx += 2) {
                 if (x11_readback_pixel(&rb_dpy, tip, xx, yy) !=
-                    0xF2F5FCu) {
+                    0xF0EFF5u) {
                     glyph = true;
                 }
             }
@@ -8091,7 +8196,8 @@ static void test_modern_batch_gui(void) {
         {
             fdk_widget *droot = NULL;
             assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
-            fdk_widget *body = fdk_widget_child_at(droot, 0);
+            /* 1.4.15's band is root child 0; the body is child 1. */
+            fdk_widget *body = fdk_widget_child_at(droot, 1);
             assert(body != NULL);
             fdk_widget *places = fdk_widget_child_at(body, 7);
             assert(places != NULL);
@@ -8120,7 +8226,7 @@ static void test_modern_batch_gui(void) {
         {
             fdk_widget *droot2 = NULL;
             assert(fdk_ok(fdk_window_get_root(dlg, &droot2)));
-            fdk_widget *body2 = fdk_widget_child_at(droot2, 0);
+            fdk_widget *body2 = fdk_widget_child_at(droot2, 1);
             fdk_widget *flist = fdk_widget_child_at(body2, 8);
             assert(fdk_list_row_count(flist) == 2);
             assert(strcmp(fdk_list_row_text(flist, 0),
@@ -8684,6 +8790,7 @@ int main(void) {
     test_label_radio_arrow_gui();
     test_theme_switch_gui();
     test_decorations_gui();
+    test_titlebar_theming_gui();
     test_window_state_gui();
     test_resize_edges_gui();
     test_resize_retains_pixels();
@@ -10279,7 +10386,8 @@ static void test_choosers_gui(void) {
          * the URL callback fires and the dialog STAYS OPEN. */
         fdk_widget *root = NULL;
         (void)fdk_window_get_root(win, &root);
-        fdk_widget *body = fdk_widget_child_at(root, 0);
+        /* 1.4.15's band is root child 0; the body is child 1. */
+        fdk_widget *body = fdk_widget_child_at(root, 1);
         assert(body != NULL);
         /* Find the link button among the body's children by role. */
         fdk_widget *link = NULL;
@@ -10335,7 +10443,8 @@ static void test_choosers_gui(void) {
              * is self-scrolling — no wrapper). */
             fdk_widget *root = NULL;
             (void)fdk_window_get_root(win, &root);
-            fdk_widget *body = fdk_widget_child_at(root, 0);
+            /* 1.4.15's band is root child 0; the body is child 1. */
+            fdk_widget *body = fdk_widget_child_at(root, 1);
             assert(body != NULL);
             fdk_widget *list = fdk_widget_child_at(body, 0);
             assert(list != NULL);
@@ -10387,8 +10496,12 @@ static void test_choosers_gui(void) {
          * Sample the ring's right and upper-left mid-radius points —
          * readback proofs of the per-pixel rasterization. */
         Display *rb = NULL;
+        /* Pad + wheel center — in WINDOW coordinates, so the 1.4.15
+         * title band (the theme's title_bar_height) shifts the body
+         * down; read the metric instead of assuming 28. */
+        int band = fdk_theme_get_metric(NULL, FDK_TM_TITLE_BAR_HEIGHT);
         int cx = 20 + 108; /* pad + wheel center  */
-        int cy = 20 + 108;
+        int cy = band + 20 + 108;
         int mr = (82 + 104) / 2; /* mid-ring radius */
         unsigned long right_px =
             x11_readback_pixel(&rb, xid, cx + mr, cy);
@@ -10409,7 +10522,8 @@ static void test_choosers_gui(void) {
          * color (the honest no-interaction answer). */
         fdk_widget *root = NULL;
         (void)fdk_window_get_root(win, &root);
-        fdk_widget *body = fdk_widget_child_at(root, 0);
+        /* 1.4.15's band is root child 0; the body is child 1. */
+        fdk_widget *body = fdk_widget_child_at(root, 1);
         size_t n = fdk_widget_child_count(body);
         fdk_widget *ok = fdk_widget_child_at(body, n - 2);
         fdk_rect ob = fdk_widget_get_absolute_bounds(ok);

@@ -1,0 +1,71 @@
+# mono-chromatic.fdk — "Mono Chromatic", the black-and-white theme
+# FDK ships (1.4.16).
+#
+# The monochrome manifesto: two colors, total discipline. White is
+# the world (window, controls, menus, entries); black is everything
+# that speaks (text, rules, checked states, the focus ring). The
+# chrome carries the inversion — a near-black title band with white
+# title text and circular window buttons — so the decoration IS the
+# "chromatic" pairing the name promises: the black half sits over
+# the white half on every decorated window.
+#
+# Severity reads as INTENSITY, not hue: success is a dark charcoal,
+# warning a middle gray, danger pure black on white text (the loudest
+# possible statement inside a two-color world). Buttons are CIRCLES
+# (button_shape = 1) — the shape story this theme exists to prove;
+# entries and menus keep soft modern rounds so the flat fields still
+# read as fields.
+#
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default search path covers — `fdk-theme set
+# mono-chromatic` (or `set "Mono Chromatic"`) finds it with zero
+# configuration.
+
+version = 1
+name    = "Mono Chromatic"
+author  = "FDK project"
+
+[colors]
+window_background          = #FFFFFF
+text                       = #111111
+text_disabled              = #9E9E9E
+control_background         = #FFFFFF
+control_background_hover   = #E8E8E8
+control_background_pressed = #D4D4D4
+control_background_disabled= #F2F2F2
+control_border             = #111111
+accent                     = #111111
+track                      = #E4E4E4
+tooltip_background         = #111111
+tooltip_text               = #FFFFFF
+tooltip_border             = #555555
+selection_background       = #11111180
+selection_text             = #FFFFFF
+focus_ring                 = #111111
+success                    = #3F3F3F
+warning                    = #8A8A8A
+danger                     = #000000
+sidebar_background         = #F4F4F4
+menu_background            = #FFFFFF
+accent_hover               = #2E2E2E
+accent_pressed             = #000000
+accent_text                = #FFFFFF
+link                       = #333333
+entry_background           = #FFFFFF
+entry_border               = #111111
+row_hover                  = #00000014
+titlebar_background        = #0A0A0A
+titlebar_text              = #FFFFFF
+titlebar_border            = #000000
+titlebar_button_hover      = #2E2E2E
+titlebar_button_pressed    = #454545
+
+[metrics]
+button_shape          = 1
+button_corner_radius  = 16
+title_bar_height      = 36
+entry_corner_radius   = 8
+menu_corner_radius    = 10
+menu_item_height      = 28
+list_row_height       = 30
+focus_ring_width      = 2

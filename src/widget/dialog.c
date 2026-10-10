@@ -205,11 +205,16 @@ static void dialog_body_arrange(fdk_widget *w, fdk_rect assigned) {
     if (bw > 0) {
         bw -= DLG_BTN_GAP;
     }
-    fdk_i32 x = assigned.x + assigned.width - DLG_PAD - bw;
-    if (x < assigned.x + DLG_PAD) {
-        x = assigned.x + DLG_PAD;
+    /* Children are placed in the BODY's own (local) coordinates —
+     * 1.4.15's band made assigned.y nonzero for the first time and
+     * the old assigned.y + ... bases double-offset every child by
+     * the band height (the content rode 28px too low; caught live
+     * by the color chooser's wheel pixels at 1.4.16). */
+    fdk_i32 x = assigned.width - DLG_PAD - bw;
+    if (x < DLG_PAD) {
+        x = DLG_PAD;
     }
-    fdk_i32 y = assigned.y + assigned.height - DLG_PAD - bh;
+    fdk_i32 y = assigned.height - DLG_PAD - bh;
     for (size_t i = first_button; i < n; i++) {
         fdk_widget *c = fdk_widget_child_at(w, i);
         fdk_size nat = {0, 0};
@@ -228,15 +233,14 @@ static void dialog_body_arrange(fdk_widget *w, fdk_rect assigned) {
         }
         fdk_widget_set_bounds(
             d->label,
-            (fdk_rect){assigned.x + DLG_PAD, assigned.y + DLG_PAD, lw,
-                       lh});
+            (fdk_rect){DLG_PAD, DLG_PAD, lw, lh});
     }
     if (d->entry != NULL) {
         fdk_i32 ew = assigned.width - DLG_PAD * 2;
-        fdk_i32 ey = assigned.y + assigned.height - DLG_PAD - bh -
-                     DLG_GAP - DLG_ENTRY_H;
+        fdk_i32 ey = assigned.height - DLG_PAD - bh - DLG_GAP -
+                     DLG_ENTRY_H;
         fdk_widget_set_bounds(d->entry,
-                              (fdk_rect){assigned.x + DLG_PAD, ey, ew,
+                              (fdk_rect){DLG_PAD, ey, ew,
                                          DLG_ENTRY_H});
     }
 }

@@ -30,6 +30,7 @@
 #include "fdk/fdk_widgets.h"
 
 #include "widget/widget_internal.h"
+#include "widget/widgets_internal.h" /* 1.4.16: fdk__button_shape_radius */
 
 #include <assert.h>
 #include <stdio.h>
@@ -109,60 +110,88 @@ static void write_file(const char *path, const char *text) {
     fclose(f);
 }
 
-/* ---- 1. the built-in default IS the 1.4.0 Modern palette ---- */
+/* ---- 1. the built-in default IS the 1.4.16 Faded Dream palette ---- */
+
+/* k/255, the same construction the engine's own palette uses, so the
+ * pins and the .fdk hex stay byte-identical by construction. */
+static fdk_color c8(int r, int g, int b) {
+    fdk_color c = {(fdk_f32)r / 255.0f, (fdk_f32)g / 255.0f,
+                   (fdk_f32)b / 255.0f, 1.0f};
+    return c;
+}
 
 static void test_builtin_pin(void) {
     /* The core colors, component for component. If this ever fails,
-    * the built-in "Modern" palette (the 1.4.0 retune of v1) changed
-    * without its test — the pin IS the palette's regression net.
-    * The v1 values it replaced are preserved as the documented
-    * .fdk recipe in docs/fdk-theme-format.md. */
+    * the built-in "Faded Dream" palette (the 1.4.16 gray-with-violet
+    * retune) changed without its test — the pin IS the palette's
+    * regression net. The 1.4.0 Modern values it replaced are
+    * preserved as a documented .fdk recipe in
+    * docs/fdk-theme-format.md, exactly as v1's were before them. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TEXT),
-                    exact(0.93f, 0.94f, 0.97f), "text");
+                    c8(230, 230, 236), "text");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TEXT_DISABLED),
-                    exact(0.44f, 0.46f, 0.52f), "text_disabled");
+                    c8(139, 139, 150), "text_disabled");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND),
-                    exact(0.13f, 0.15f, 0.20f), "control bg");
+                    c8(51, 51, 60), "control bg");
     assert_color_eq(
         fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_HOVER),
-        exact(0.17f, 0.20f, 0.27f), "control bg hover");
+        c8(62, 62, 73), "control bg hover");
     assert_color_eq(
         fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_PRESSED),
-        exact(0.21f, 0.25f, 0.33f), "control bg pressed");
+        c8(74, 74, 87), "control bg pressed");
     assert_color_eq(
         fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND_DISABLED),
-        exact(0.11f, 0.12f, 0.16f), "control bg disabled");
+        c8(43, 43, 51), "control bg disabled");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_CONTROL_BORDER),
-                    exact(0.20f, 0.23f, 0.30f), "control border");
+                    c8(70, 70, 83), "control border");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT),
-                    exact(0.42f, 0.62f, 1.00f), "accent");
+                    c8(143, 121, 217), "accent");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TRACK),
-                    exact(0.11f, 0.12f, 0.16f), "track");
+                    c8(42, 42, 49), "track");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND),
-                    exact(0.09f, 0.10f, 0.14f), "window background");
+                    c8(35, 35, 41), "window background");
     /* The 1.4.0 modern-face families, pinned with the rest. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_SIDEBAR_BACKGROUND),
-                    exact(0.10f, 0.12f, 0.16f), "sidebar bg");
+                    c8(41, 41, 49), "sidebar bg");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_MENU_BACKGROUND),
-                    exact(0.15f, 0.17f, 0.23f), "menu bg");
+                    c8(55, 55, 66), "menu bg");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT_HOVER),
-                    exact(0.50f, 0.69f, 1.00f), "accent hover");
+                    c8(161, 141, 227), "accent hover");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT_PRESSED),
-                    exact(0.34f, 0.52f, 0.88f), "accent pressed");
+                    c8(119, 99, 194), "accent pressed");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT_TEXT),
-                    exact(0.97f, 0.98f, 1.00f), "accent text");
+                    c8(245, 243, 251), "accent text");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_LINK),
-                    exact(0.55f, 0.73f, 1.00f), "link");
+                    c8(169, 146, 232), "link");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ENTRY_BACKGROUND),
-                    exact(0.07f, 0.08f, 0.11f), "entry bg");
+                    c8(30, 30, 36), "entry bg");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ENTRY_BORDER),
-                    exact(0.17f, 0.19f, 0.25f), "entry border");
+                    c8(59, 59, 71), "entry border");
     /* row_hover ships translucent (the soft dense-list hover). */
     {
-        fdk_color rh_want = {0.14f, 0.16f, 0.22f, 0.60f};
+        fdk_color rh_want = {(fdk_f32)58 / 255.0f, (fdk_f32)58 / 255.0f,
+                             (fdk_f32)70 / 255.0f, (fdk_f32)89 / 255.0f};
         assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ROW_HOVER),
                         rh_want, "row hover");
     }
+    /* 1.4.16: the titlebar family is UNSET in the built-in — every
+     * one reads through to its base token (the fallback contract,
+     * pinned here so the band cannot silently drift off the control
+     * family for themes that never opted into chrome). */
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BACKGROUND),
+                    c8(51, 51, 60), "titlebar bg (fallback: control)");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_TEXT),
+                    c8(230, 230, 236), "titlebar text (fallback: text)");
+    assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BORDER),
+                    c8(70, 70, 83), "titlebar border (fallback: border)");
+    assert_color_eq(
+        fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BUTTON_HOVER),
+        c8(62, 62, 73), "titlebar btn hover (fallback)");
+    assert_color_eq(
+        fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BUTTON_PRESSED),
+        c8(74, 74, 87), "titlebar btn pressed (fallback)");
+    /* 1.4.16: ROUNDED is the default shape. */
+    assert(fdk_theme_get_metric(NULL, FDK_TM_BUTTON_SHAPE) == 0);
 
     assert(fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
     assert(fdk_theme_get_metric(NULL, FDK_TM_SEPARATOR_THICKNESS) == 1);
@@ -172,7 +201,7 @@ static void test_builtin_pin(void) {
     assert(fdk_theme_get_metric(NULL, FDK_TM_LIST_ROW_HEIGHT) == 30);
     assert(fdk_theme_get_metric(NULL, FDK_TM_FOCUS_RING_WIDTH) == 2);
 
-    assert(strcmp(fdk_theme_name(NULL), "FDK Modern") == 0);
+    assert(strcmp(fdk_theme_name(NULL), "Faded Dream") == 0);
     assert(fdk_theme_author(NULL) == NULL);
 
     /* get_default is never NULL and NULL-theme access resolves to it. */
@@ -192,7 +221,7 @@ static void test_builtin_pin(void) {
                fdk_theme_get_metric(NULL, (fdk_theme_metric)i));
     }
     assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
-    assert(strcmp(fdk_theme_name(t), "FDK Modern") == 0);
+    assert(strcmp(fdk_theme_name(t), "Faded Dream") == 0);
     fdk_theme_destroy(t);
     printf("[ok] built-in default theme = the 1.4.0 Modern palette, "
            "component for component\n");
@@ -209,7 +238,8 @@ static void test_programmatic(void) {
     assert_color_eq(fdk_theme_get_color(t, FDK_TK_ACCENT), c, "set/get");
     /* Not installed: the current default is untouched. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ACCENT),
-                    exact(0.42f, 0.62f, 1.00f), "current untouched");
+                    exact((fdk_f32)143 / 255.0f, (fdk_f32)121 / 255.0f,
+                   (fdk_f32)217 / 255.0f), "current untouched");
 
     assert(fdk_ok(fdk_theme_set_metric(t, FDK_TM_BUTTON_CORNER_RADIUS,
                                        0)));
@@ -244,7 +274,7 @@ static void test_programmatic(void) {
     assert(fdk_ok(fdk_theme_set_name(t, "Custom")));
     assert(strcmp(fdk_theme_name(t), "Custom") == 0);
     assert(fdk_theme_set_name(t, NULL) == FDK_OK);
-    assert(strcmp(fdk_theme_name(t), "FDK Modern") == 0);
+    assert(strcmp(fdk_theme_name(t), "Faded Dream") == 0);
     char big[200];
     memset(big, 'x', sizeof big - 1);
     big[sizeof big - 1] = '\0';
@@ -379,15 +409,17 @@ static void test_parse_partial_and_tolerances(void) {
                     "partial track");
     /* Inherited: */
     assert_color_eq(fdk_theme_get_color(t, FDK_TK_CONTROL_BACKGROUND),
-                    exact(0.13f, 0.15f, 0.20f), "partial inherits bg");
+                    exact((fdk_f32)51 / 255.0f, (fdk_f32)51 / 255.0f,
+                   (fdk_f32)60 / 255.0f), "partial inherits bg");
     assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
-    assert(strcmp(fdk_theme_name(t), "FDK Modern") == 0);
+    assert(strcmp(fdk_theme_name(t), "Faded Dream") == 0);
     fdk_theme_destroy(t);
 
     /* Comments-only file = the defaults, but named. */
     fdk_theme *t2 = parse_ok("# nothing but comments\n\n# really\n");
     assert_color_eq(fdk_theme_get_color(t2, FDK_TK_TEXT),
-                    exact(0.93f, 0.94f, 0.97f), "comments-only text");
+                    exact((fdk_f32)230 / 255.0f, (fdk_f32)230 / 255.0f,
+                   (fdk_f32)236 / 255.0f), "comments-only text");
     fdk_theme_destroy(t2);
 
     /* Whitespace, bracket space, CRLF, lone CR, BOM, no final
@@ -524,7 +556,8 @@ static void test_parse_errors(void) {
     {
         fdk_theme *t = parse_ok("[colors]\n#text = #FFFFFF\n");
         assert_color_eq(fdk_theme_get_color(t, FDK_TK_TEXT),
-                        exact(0.93f, 0.94f, 0.97f),
+                        exact((fdk_f32)230 / 255.0f, (fdk_f32)230 / 255.0f,
+                        (fdk_f32)236 / 255.0f),
                         "comment-looking line changed nothing");
         fdk_theme_destroy(t);
     }
@@ -683,13 +716,13 @@ static void test_switch_repaints(void) {
     fdk_surface *s = NULL;
     assert(fdk_ok(fdk_surface_create(200, 120, &s)));
 
-    /* Baseline paint: Modern colors. */
+    /* Baseline paint: Faded Dream colors. */
     fdk_widget_tree_paint(root, s);
     fdk_u32 btn_px = px_at(s, 80, 35); /* button center, clear of the
                                         * radius-8 corners */
-    assert(btn_px == px_of(exact(0.13f, 0.15f, 0.20f)));
+    assert(btn_px == px_of(c8(51, 51, 60)));
     fdk_u32 sep_px = px_at(s, 80, 75); /* 70 + 10/2 = the 1px line */
-    assert(sep_px == px_of(exact(0.20f, 0.23f, 0.30f)));
+    assert(sep_px == px_of(c8(70, 70, 83))); /* control_border */
     /* 1px rule: the rows above/below are root, not separator. */
     assert(px_at(s, 80, 74) == px_of(exact(0.07f, 0.09f, 0.13f)));
     assert(px_at(s, 80, 76) == px_of(exact(0.07f, 0.09f, 0.13f)));
@@ -730,12 +763,12 @@ static void test_switch_repaints(void) {
     fdk_theme_destroy(light);
     assert(fdk_theme_get_default() != NULL);
     fdk_widget_tree_paint(root, s); /* flush the revert damage */
-    assert(px_at(s, 80, 35) == px_of(exact(0.13f, 0.15f, 0.20f)));
+    assert(px_at(s, 80, 35) == px_of(c8(51, 51, 60)));
 
     /* NULL switch = the built-in, explicitly. */
     fdk_theme_set_default(NULL);
     fdk_widget_tree_paint(root, s);
-    assert(px_at(s, 80, 35) == px_of(exact(0.13f, 0.15f, 0.20f)));
+    assert(px_at(s, 80, 35) == px_of(c8(51, 51, 60)));
 
     fdk_theme_destroy(dark2);
     fdk_surface_destroy(s);
@@ -772,7 +805,8 @@ static void test_root_registry(void) {
 
     /* And the theme engine still works for a fresh tree. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TEXT),
-                    exact(0.93f, 0.94f, 0.97f), "post-churn default");
+                    exact((fdk_f32)230 / 255.0f, (fdk_f32)230 / 255.0f,
+                   (fdk_f32)236 / 255.0f), "post-churn default");
     printf("[ok] root registry: 8 roots created/destroyed in scrambled "
            "order, switches before/during/after all safe\n");
 }
@@ -889,6 +923,236 @@ static void test_v1_recipe(void) {
            "Phase 6 palette exactly\n");
 }
 
+/* ---- 1.4.16: the titlebar fallback family ---- */
+
+static void test_titlebar_fallback(void) {
+    /* The contract in three layers:
+     *   (a) unset keys read the BASE token — including one the theme
+     *       itself overrode (a partial theme re-themes the band);
+     *   (b) a set key stops the fallback dead;
+     *   (c) fdk_theme_set_color counts as "set" (programmatic
+     *       themes get the same semantics as parsed ones).
+     * Plus the grammar's strictness edges: unknown titlebar keys
+     * still parse-error, and duplicates still fail. */
+    const char *partial =
+        "version = 1\n"
+        "[colors]\n"
+        "control_background = #101010\n"
+        "text               = #EFEFEF\n";
+    fdk_theme *t = parse_ok(partial);
+
+    /* (a) both fallback paths: the base the THEME overrode... */
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_TITLEBAR_BACKGROUND),
+                    exact(16 / 255.0f, 16 / 255.0f, 16 / 255.0f),
+                    "unset titlebar bg follows the theme's control bg");
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_TITLEBAR_TEXT),
+                    exact(239 / 255.0f, 239 / 255.0f, 239 / 255.0f),
+                    "unset titlebar text follows the theme's text");
+    /* ...and the base the theme left at the built-in default. */
+    assert_color_eq(fdk_theme_get_color(t, FDK_TK_TITLEBAR_BORDER),
+                    c8(70, 70, 83),
+                    "unset titlebar border follows the builtin border");
+    assert_color_eq(
+        fdk_theme_get_color(t, FDK_TK_TITLEBAR_BUTTON_HOVER),
+        c8(62, 62, 73), "unset titlebar hover follows the builtin");
+    fdk_theme_destroy(t);
+
+    /* (b) a set key wins over BOTH the fallback and the base. */
+    const char *opted_in =
+        "version = 1\n"
+        "[colors]\n"
+        "control_background  = #FFFFFF\n"
+        "titlebar_background = #0A0A0A\n"
+        "titlebar_text       = #FFFFFF\n"
+        "titlebar_button_hover = #2E2E2E\n"
+        "titlebar_button_pressed = #454545\n"
+        "titlebar_border     = #000000\n";
+    fdk_theme *mono = parse_ok(opted_in);
+    assert_color_eq(fdk_theme_get_color(mono, FDK_TK_TITLEBAR_BACKGROUND),
+                    exact(10 / 255.0f, 10 / 255.0f, 10 / 255.0f),
+                    "set titlebar bg beats the white control bg");
+    assert_color_eq(fdk_theme_get_color(mono, FDK_TK_TITLEBAR_TEXT),
+                    exact(1.0f, 1.0f, 1.0f), "set titlebar text");
+    assert_color_eq(fdk_theme_get_color(mono, FDK_TK_TITLEBAR_BORDER),
+                    exact(0.0f, 0.0f, 0.0f), "set titlebar border");
+    assert_color_eq(fdk_theme_get_color(mono, FDK_TK_CONTROL_BACKGROUND),
+                    exact(1.0f, 1.0f, 1.0f),
+                    "the base token is untouched by the chrome keys");
+    /* The unset members of an otherwise-set family still fall back. */
+    assert_color_eq(fdk_theme_get_color(mono, FDK_TK_TITLEBAR_BUTTON_HOVER),
+                    exact(46 / 255.0f, 46 / 255.0f, 46 / 255.0f),
+                    "set hover; pressed checked separately below");
+    assert_color_eq(
+        fdk_theme_get_color(mono, FDK_TK_TITLEBAR_BUTTON_PRESSED),
+        exact(69 / 255.0f, 69 / 255.0f, 69 / 255.0f),
+        "set pressed");
+    fdk_theme_destroy(mono);
+
+    /* (c) set_color marks the override: a create_default theme with
+     * only TITLEBAR_BACKGROUND set diverges from its own control
+     * fill; every other member still reads through. */
+    fdk_theme *prog = fdk_theme_create_default();
+    assert(prog != NULL);
+    assert(fdk_ok(fdk_theme_set_color(prog, FDK_TK_TITLEBAR_BACKGROUND,
+                                      exact(0.25f, 0.5f, 0.75f))));
+    assert_color_eq(fdk_theme_get_color(prog, FDK_TK_TITLEBAR_BACKGROUND),
+                    exact(0.25f, 0.5f, 0.75f), "programmatic set wins");
+    assert_color_eq(fdk_theme_get_color(prog, FDK_TK_TITLEBAR_TEXT),
+                    c8(230, 230, 236),
+                    "programmatic theme's unset text still falls back");
+    fdk_theme_destroy(prog);
+
+    /* Strictness: a typo'd titlebar key is still a parse error, and
+     * a duplicate titlebar key is still a duplicate. */
+    parse_fails("version = 1\n[colors]\ntitlebar_bakground = #000000\n",
+                FDK_ERR_THEME_PARSE, "unknown titlebar key");
+    parse_fails("version = 1\n[colors]\n"
+                "titlebar_background = #000000\n"
+                "titlebar_background = #111111\n",
+                FDK_ERR_THEME_PARSE, "duplicate titlebar key");
+
+    printf("[ok] titlebar family: unset keys read through to their "
+           "base tokens, set keys win, programmatic counts as set\n");
+}
+
+/* ---- 1.4.16: the button SHAPE metric ---- */
+
+static void test_button_shape(void) {
+    /* Parse + range + default + the shared radius arithmetic. */
+    assert(fdk_theme_get_metric(NULL, FDK_TM_BUTTON_SHAPE) == 0);
+    assert(fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
+
+    fdk_theme *t = parse_ok("version = 1\n[metrics]\nbutton_shape = 1\n");
+    assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_SHAPE) == 1);
+    fdk_theme_destroy(t);
+
+    t = parse_ok("version = 1\n[metrics]\nbutton_shape = 2\n");
+    assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_SHAPE) == 2);
+    fdk_theme_destroy(t);
+
+    parse_fails("version = 1\n[metrics]\nbutton_shape = 3\n",
+                FDK_ERR_THEME_PARSE, "shape 3 out of range");
+    parse_fails("version = 1\n[metrics]\nbutton_shape = -1\n",
+                FDK_ERR_THEME_PARSE, "negative shape");
+
+    fdk_theme *prog = fdk_theme_create_default();
+    assert(prog != NULL);
+    assert(fdk_theme_set_metric(prog, FDK_TM_BUTTON_SHAPE, 1) == FDK_OK);
+    assert(fdk_theme_set_metric(prog, FDK_TM_BUTTON_SHAPE, 2) == FDK_OK);
+    assert(fdk_theme_set_metric(prog, FDK_TM_BUTTON_SHAPE, 3) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    fdk_theme_destroy(prog);
+
+    /* The shared arithmetic (fdk__button_shape_radius, via the
+     * internal header — the same include precedent as the discovery
+     * suite): ROUNDED honors the radius metric clamped to the box,
+     * CIRCLE is half the short side, SQUARE is 0. */
+    fdk_theme *round = fdk_theme_create_default();
+    assert(round != NULL);
+    fdk_theme_set_default(round); /* becomes the NULL-resolution */
+    assert(fdk__button_shape_radius(120, 30) == 8);  /* metric < half */
+    assert(fdk__button_shape_radius(12, 30) == 6);   /* clamped to 6 */
+    fdk_theme_set_metric(round, FDK_TM_BUTTON_SHAPE, 1);
+    assert(fdk__button_shape_radius(120, 30) == 15); /* circle: pill */
+    assert(fdk__button_shape_radius(30, 30) == 15);  /* circle: round */
+    fdk_theme_set_metric(round, FDK_TM_BUTTON_SHAPE, 2);
+    assert(fdk__button_shape_radius(120, 30) == 0);  /* square */
+    fdk_theme_destroy(round); /* reverts current to the built-in */
+
+    /* Pixel proof through the catalog Button itself: the same
+     * theme, same geometry, only the SHAPE flipped. ROUNDED (radius
+     * 8) fills the near-corner pixel; CIRCLE (radius 15 on a 30-px
+     * button) cuts it. */
+    {
+        fdk_theme *pxt = parse_ok("version = 1\n[metrics]\n"
+                                  "button_corner_radius = 8\n");
+        fdk_theme_set_default(pxt);
+        fdk_widget *b = NULL;
+        assert(fdk_ok(fdk_button_create(NULL, NULL, NULL, &b)));
+        fdk_widget_set_bounds(b, (fdk_rect){10, 10, 120, 30});
+        fdk_surface *ps = NULL;
+        assert(fdk_ok(fdk_surface_create(140, 50, &ps)));
+        fdk_surface_fill(ps, exact(0.0f, 0.0f, 0.0f));
+        fdk_widget_tree_paint(b, ps);
+        /* (13,13): 3px in from the button corner. */
+        assert(px_at(ps, 13, 13) == px_of(c8(51, 51, 60))); /* filled */
+        fdk_theme_set_metric(pxt, FDK_TM_BUTTON_SHAPE, 1);
+        fdk_widget_invalidate(b); /* tree paint is damage-gated; the
+                                   * metric change itself is not a
+                                   * repaint trigger (the documented
+                                   * set_metric contract) */
+        fdk_surface_fill(ps, exact(0.0f, 0.0f, 0.0f));
+        fdk_widget_tree_paint(b, ps);
+        assert(px_at(ps, 13, 13) == 0x00000000u); /* circle cut it */
+        /* DEAD CENTER still filled in both shapes. */
+        assert(px_at(ps, 70, 25) == px_of(c8(51, 51, 60)));
+        fdk_widget_destroy(b);
+        fdk_surface_destroy(ps);
+        fdk_theme_set_default(NULL);
+        fdk_theme_destroy(pxt);
+    }
+
+    printf("[ok] button_shape: parse/range/set_metric + the shared "
+           "radius arithmetic (rounded/circle/square) + pixel proof\n");
+}
+
+/* ---- 1.4.16: the token-following widget background ---- */
+
+static void test_background_token(void) {
+    /* A plain widget whose background is a TOKEN paints the token's
+     * color, and a theme switch re-resolves it at paint time with no
+     * re-set call — the pixel flips. An explicit set_background then
+     * cancels the mode (frozen across switches); setting the token
+     * again re-enters it. */
+    fdk_theme *a = parse_ok("version = 1\n[colors]\n"
+                            "sidebar_background = #123456\n");
+    fdk_theme *b = parse_ok("version = 1\n[colors]\n"
+                            "sidebar_background = #654321\n");
+    fdk_theme_set_default(a);
+
+    fdk_widget *w = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 100, 40}, &w)));
+    fdk_widget_set_background_token(w, FDK_TK_SIDEBAR_BACKGROUND);
+
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(100, 40, &s)));
+    fdk_widget_tree_paint(w, s);
+    assert(px_at(s, 50, 20) == px_of(exact(0x12 / 255.0f, 0x34 / 255.0f,
+                                           0x56 / 255.0f)));
+
+    /* The switch re-damages the root; the SAME call re-resolves. */
+    assert(w->has_damage == false);
+    fdk_theme_set_default(b);
+    assert(w->has_damage == true); /* the invalidating walk ran */
+    fdk_widget_tree_paint(w, s);
+    assert(px_at(s, 50, 20) == px_of(exact(0x65 / 255.0f, 0x43 / 255.0f,
+                                           0x21 / 255.0f)));
+
+    /* Explicit color: wins immediately, survives the next switch. */
+    fdk_widget_set_background(w, exact(0.5f, 0.5f, 0.5f));
+    fdk_widget_tree_paint(w, s);
+    assert(px_at(s, 50, 20) == px_of(exact(0.5f, 0.5f, 0.5f)));
+    fdk_theme_set_default(a);
+    fdk_widget_tree_paint(w, s);
+    assert(px_at(s, 50, 20) == px_of(exact(0.5f, 0.5f, 0.5f)));
+
+    /* Re-entering token mode resumes following. */
+    fdk_widget_set_background_token(w, FDK_TK_SIDEBAR_BACKGROUND);
+    fdk_widget_tree_paint(w, s);
+    assert(px_at(s, 50, 20) == px_of(exact(0x12 / 255.0f, 0x34 / 255.0f,
+                                           0x56 / 255.0f)));
+
+    fdk_widget_destroy(w);
+    fdk_surface_destroy(s);
+    fdk_theme_set_default(NULL);
+    fdk_theme_destroy(a);
+    fdk_theme_destroy(b);
+
+    printf("[ok] widget background tokens: paint-time resolution, live "
+           "switching, explicit-color precedence\n");
+}
+
 int main(void) {
     /* Hermeticity (1.4.13): the lazy global-settings boot reads the
      * reserved "fdk" prefs store and $FDK_THEME at the first theme
@@ -908,6 +1172,9 @@ int main(void) {
     test_switch_repaints();
     test_root_registry();
     test_v1_recipe();
+    test_titlebar_fallback();
+    test_button_shape();
+    test_background_token();
     printf("all headless theme tests passed\n");
     return 0;
 }

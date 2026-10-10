@@ -57,7 +57,7 @@
 #include <strings.h>
 #include <string.h>
 
-#define BUILTIN_NAME "FDK Modern"
+#define BUILTIN_NAME "Faded Dream"
 
 /* The toolkit's own reserved store (fdk_prefs.h / docs/cli.md). */
 #define GLOBAL_APP_ID "fdk"

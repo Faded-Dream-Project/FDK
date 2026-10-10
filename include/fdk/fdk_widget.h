@@ -73,6 +73,7 @@
 #include "fdk_event.h"
 #include "fdk_surface.h"
 #include "fdk_types.h"
+#include "fdk_theme.h" /* 1.4.16: fdk_theme_token (background_token) */
 #include "fdk_window.h"
 
 #ifdef __cplusplus
@@ -477,6 +478,20 @@ void fdk_widget_arrange(fdk_widget *widget, fdk_rect assigned);
 void fdk_widget_set_background(fdk_widget *widget, fdk_color color);
 /* Rounded-corner radius for the background fill (0 = square). */
 void fdk_widget_set_corner_radius(fdk_widget *widget, fdk_i32 radius);
+/* 1.4.16: the token-following background — the twin of
+ * fdk_widget_set_background(). The fill resolves `token` against the
+ * CURRENT default theme at paint time (see fdk_theme.h for the token
+ * vocabulary), so the widget's surface tracks every theme switch live:
+ * a sidebar painted with FDK_TK_SIDEBAR_BACKGROUND is pink under Pink
+ * Rave, black-and-white under Mono Chromatic, gray under Faded Dream,
+ * with no re-set call anywhere. An explicit set_background() on the
+ * same widget wins and cancels the mode (an application's fixed color
+ * is its own business); setting a token again re-enters it. The
+ * window_background token is the usual choice for app surfaces; out
+ * of range tokens are ignored. The corner radius keeps working
+ * alongside. */
+void fdk_widget_set_background_token(fdk_widget *widget,
+                                     fdk_theme_token token);
 
 /* ---- Window integration ---- */
 

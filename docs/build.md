@@ -80,15 +80,17 @@ overridable: `LIBDIR`, `INCDIR`, `BINDIR`, `DATADIR`):
 | `$(LIBDIR)/libfdk.a`, `libfdk.so`     | the library                  |
 | `$(LIBDIR)/pkgconfig/fdk.pc`          | pkg-config file               |
 | `$(BINDIR)/fdk-theme`, `fdk-prefs`    | the command-line tools        |
-| `$(DATADIR)/fdk/themes/*.fdk`         | the shipped themes (daylight, matrix) |
+| `$(DATADIR)/fdk/.FDKThemes/*.fdk`     | the five shipped faces (faded-dream, daylight, matrix, mono-chromatic, pink-rave) |
 
-The themes directory is on the runtime discovery path through the
-default `XDG_DATA_DIRS` (`/usr/local/share` and `/usr/share` both
-are), so an installed FDK — and `fdk-theme list` — finds the
-shipped themes with zero configuration. A nonstandard `DATADIR`
-should be accompanied by a matching `XDG_DATA_DIRS` entry in the
-target environment; `$FDK_THEME_DIR` overrides everything for
-sandboxed setups. See `docs/cli.md`.
+The .FDKThemes directory is on the runtime discovery path through
+the default `XDG_DATA_DIRS` (`/usr/local/share` and `/usr/share`
+both are), so an installed FDK — and `fdk-theme list` — finds the
+shipped faces with zero configuration. The legacy
+`fdk/themes` location is still scanned, and `$HOME/.FDKThemes` is
+the per-user custom folder that outranks both. A nonstandard
+`DATADIR` should be accompanied by a matching `XDG_DATA_DIRS` entry
+in the target environment; `$FDK_THEME_DIR` overrides everything
+for sandboxed setups. See `docs/cli.md`.
 
 ## Optional Wayland build
 
