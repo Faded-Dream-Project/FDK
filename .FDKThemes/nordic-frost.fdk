@@ -1,0 +1,74 @@
+# nordic-frost.fdk — "Nordic Frost", the cool minimal Scandinavian
+# face for FDK's theme system.
+#
+# The Nord palette (https://nordtheme.com, MIT) at its most
+# restrained: polar-night surfaces (nord0 #2E3440 world, nord1
+# #3B4252 controls and title band, a deep custom rail for the
+# sidebar), snow-storm text (#ECEFF4), and exactly one voice of
+# color — the frost cyan of nord8 (#88C0D0) as the accent, the focus
+# ring, and the edge of the INVERTED frost-white tooltip. Borders
+# and pressed states ride nord3, links are nord7's quiet teal, and
+# the semantic trio is Nord's own aurora (green / yellow / red).
+# Corners stay tight (4px) and the band slim (28px) — less
+# furniture, more winter light.
+#
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default search path covers — `fdk-theme set
+# nordic-frost` (or `set "Nordic Frost"`) finds it with zero
+# configuration.
+
+version = 1
+name    = "Nordic Frost"
+author  = "FDK project"
+
+[colors]
+window_background          = #2E3440
+text                       = #ECEFF4
+text_disabled              = #7B879E
+control_background         = #3B4252
+control_background_hover   = #434C5E
+control_background_pressed = #4C566A
+control_background_disabled= #333B4A
+control_border             = #4C566A
+accent                     = #88C0D0
+track                      = #2A303C
+tooltip_background         = #ECEFF4
+tooltip_text               = #2E3440
+tooltip_border             = #88C0D0
+selection_background       = #81A1C15C
+selection_text             = #ECEFF4
+focus_ring                 = #88C0D0E6
+success                    = #A3BE8C
+warning                    = #EBCB8B
+danger                     = #BF616A
+sidebar_background         = #272D38
+menu_background            = #3B4252
+accent_hover               = #9FD2DD
+accent_pressed             = #6FA5B7
+accent_text                = #2E3440
+link                       = #8FBCBB
+entry_background           = #242A34
+entry_border               = #4C566A
+row_hover                  = #4C566A59
+titlebar_background        = #3B4252
+titlebar_text              = #E5E9F0
+titlebar_border            = #434C5E
+titlebar_button_hover      = #434C5E
+titlebar_button_pressed    = #4C566A
+
+[metrics]
+button_shape          = 0
+button_corner_radius  = 4
+separator_thickness   = 1
+title_bar_height      = 28
+scrollbar_width       = 12
+menu_item_height      = 26
+tooltip_corner_radius = 4
+entry_corner_radius   = 4
+menu_corner_radius    = 6
+list_row_height       = 30
+focus_ring_width      = 2
+scrollbar_overlay_width = 6
+iconview_cell_width   = 96
+iconview_cell_height  = 84
+textview_pad          = 8

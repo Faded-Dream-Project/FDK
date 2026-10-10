@@ -1,0 +1,73 @@
+# solar-flare.fdk — "Solar Flare", the midnight-and-amber face for
+# FDK's theme system.
+#
+# The night side of a star: deep midnight-navy surfaces (#0B1020
+# world, #070C18 sidebar / title band / tooltips, #151D31 elevated
+# controls, #050912 sunken fields) under warm-white text (#FFF3E0),
+# with one burning family of light — amber #FFB020 buttons with
+# deep-warm labels, gold #FFC94D focus rings, orange #FF9838 links,
+# golden #FFD166 warnings. The signature is the chrome: a solid
+# amber rule under the title band — the flare line every decorated
+# window wears — with amber-washed band-button states beneath a
+# #FFD9A6 title. Soft 10px rounds keep it futuristic rather than
+# loud.
+#
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default search path covers — `fdk-theme set solar-flare`
+# (or `set "Solar Flare"`) finds it with zero configuration.
+
+version = 1
+name    = "Solar Flare"
+author  = "FDK project"
+
+[colors]
+window_background          = #0B1020
+text                       = #FFF3E0
+text_disabled              = #6E7890
+control_background         = #151D31
+control_background_hover   = #1D2942
+control_background_pressed = #273452
+control_background_disabled= #101728
+control_border             = #2E3D5E
+accent                     = #FFB020
+track                      = #121A2E
+tooltip_background         = #070B16
+tooltip_text               = #FFD9A6
+tooltip_border             = #5C4812
+selection_background       = #FFB02055
+selection_text             = #FFF3E0
+focus_ring                 = #FFC94DE6
+success                    = #3ECF8E
+warning                    = #FFD166
+danger                     = #FF5C5C
+sidebar_background         = #070C18
+menu_background            = #141D33
+accent_hover               = #FFC34D
+accent_pressed             = #E0960D
+accent_text                = #1A1206
+link                       = #FF9838
+entry_background           = #050912
+entry_border               = #2E3D5E
+row_hover                  = #27345259
+titlebar_background        = #070C18
+titlebar_text              = #FFD9A6
+titlebar_border            = #FFB020
+titlebar_button_hover      = #33270F
+titlebar_button_pressed    = #463614
+
+[metrics]
+button_shape          = 0
+button_corner_radius  = 10
+separator_thickness   = 1
+title_bar_height      = 30
+scrollbar_width       = 12
+menu_item_height      = 26
+tooltip_corner_radius = 8
+entry_corner_radius   = 8
+menu_corner_radius    = 10
+list_row_height       = 30
+focus_ring_width      = 2
+scrollbar_overlay_width = 6
+iconview_cell_width   = 96
+iconview_cell_height  = 84
+textview_pad          = 8

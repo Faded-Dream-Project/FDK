@@ -1,0 +1,73 @@
+# amoled-void.fdk — "AMOLED Void", the near-pure-black premium face
+# for FDK's theme system.
+#
+# Built for the OLED panel: #000000 is the world, and everything
+# above it is a whisper-violet ramp (sidebar #050507, sunken fields
+# #0A0A0F, controls #0E0D12, menus #17161E) separated by hairline
+# #292733 borders. Text is crisp white; the one color is an
+# electric violet family — #7C3AED filled buttons with white labels,
+# #A78BFA links and focus rings, and the 1px #5B36B8 rule that
+# underlines the title band: the void's single stroke of light.
+# Corners are SQUARE everywhere (button_shape = 2) — the brutalist
+# premium read. Nothing rounded, nothing decorative; contrast does
+# all the work.
+#
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default search path covers — `fdk-theme set amoled-void`
+# (or `set "AMOLED Void"`) finds it with zero configuration.
+
+version = 1
+name    = "AMOLED Void"
+author  = "FDK project"
+
+[colors]
+window_background          = #000000
+text                       = #FFFFFF
+text_disabled              = #6E6A7E
+control_background         = #0E0D12
+control_background_hover   = #1A1922
+control_background_pressed = #262430
+control_background_disabled= #0A0A0E
+control_border             = #292733
+accent                     = #7C3AED
+track                      = #131218
+tooltip_background         = #14131A
+tooltip_text               = #EDE9FE
+tooltip_border             = #3F3655
+selection_background       = #7C3AED55
+selection_text             = #EDE9FE
+focus_ring                 = #A78BFAE6
+success                    = #34D399
+warning                    = #FBBF24
+danger                     = #F43F5E
+sidebar_background         = #050507
+menu_background            = #17161E
+accent_hover               = #8F50F2
+accent_pressed             = #6827D3
+accent_text                = #FFFFFF
+link                       = #A78BFA
+entry_background           = #0A0A0F
+entry_border               = #2C2938
+row_hover                  = #2E2A3B4D
+titlebar_background        = #05050A
+titlebar_text              = #FFFFFF
+titlebar_border            = #5B36B8
+titlebar_button_hover      = #1A1922
+titlebar_button_pressed    = #262430
+
+[metrics]
+button_shape          = 2
+button_corner_radius  = 0
+separator_thickness   = 1
+title_bar_height      = 32
+scrollbar_width       = 12
+menu_item_height      = 26
+tooltip_corner_radius = 0
+entry_corner_radius   = 0
+menu_corner_radius    = 0
+list_row_height       = 30
+focus_ring_width      = 2
+scrollbar_overlay_width = 6
+iconview_cell_width   = 96
+iconview_cell_height  = 84
+textview_pad          = 8

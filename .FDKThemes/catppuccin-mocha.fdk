@@ -1,0 +1,75 @@
+# catppuccin-mocha.fdk — "Catppuccin Mocha", the cozy dark-pastel
+# face for FDK's theme system.
+#
+# The dark half of the Catppuccin pair: the official Mocha palette
+# (https://catppuccin.com, MIT) worn over FDK's surface ladder.
+# Base (#1E1E2E) is the world, mantle (#181825) the recessed field,
+# crust (#11111B) the chrome layer — the title band, the menus, and
+# the tooltips all wear it — and surface0 (#313244) carries the
+# controls up the official ladder (surface1 hover, surface2 pressed).
+# Four pastel voices share the small parts: mauve (#CBA6F7) is the
+# accent, lavender (#B4BEFE) the selection wash, soft blue (#89B4FA)
+# the focus ring, and pink (#F5C2E8) the links. The semantic trio
+# (green / yellow / red) keeps Catppuccin's own calm saturation so
+# nothing shouts over the mocha field it sits in.
+#
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default search path covers — `fdk-theme set
+# catppuccin-mocha` (or `set "Catppuccin Mocha"`) finds it with zero
+# configuration.
+
+version = 1
+name    = "Catppuccin Mocha"
+author  = "FDK project"
+
+[colors]
+window_background          = #1E1E2E
+text                       = #CDD6F4
+text_disabled              = #6C7086
+control_background         = #313244
+control_background_hover   = #45475A
+control_background_pressed = #585B70
+control_background_disabled= #262635
+control_border             = #45475A
+accent                     = #CBA6F7
+track                      = #232333
+tooltip_background         = #11111B
+tooltip_text               = #CDD6F4
+tooltip_border             = #45475A
+selection_background       = #B4BEFE55
+selection_text             = #CDD6F4
+focus_ring                 = #89B4FAE6
+success                    = #A6E3A1
+warning                    = #F9E2AF
+danger                     = #F38BA8
+sidebar_background         = #181825
+menu_background            = #11111B
+accent_hover               = #D7B9FA
+accent_pressed             = #B795F1
+accent_text                = #1E1E2E
+link                       = #F5C2E8
+entry_background           = #181825
+entry_border               = #45475A
+row_hover                  = #585B7059
+titlebar_background        = #11111B
+titlebar_text              = #BAC2DE
+titlebar_border            = #313244
+titlebar_button_hover      = #45475A
+titlebar_button_pressed    = #585B70
+
+[metrics]
+button_shape          = 0
+button_corner_radius  = 8
+separator_thickness   = 1
+title_bar_height      = 30
+scrollbar_width       = 12
+menu_item_height      = 26
+tooltip_corner_radius = 6
+entry_corner_radius   = 6
+menu_corner_radius    = 8
+list_row_height       = 30
+focus_ring_width      = 2
+scrollbar_overlay_width = 6
+iconview_cell_width   = 96
+iconview_cell_height  = 84
+textview_pad          = 8

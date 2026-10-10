@@ -1,0 +1,75 @@
+# catppuccin-latte.fdk — "Catppuccin Latte", the warm light-pastel
+# face for FDK's theme system.
+#
+# Mocha's daytime sibling: the official Latte palette
+# (https://catppuccin.com, MIT) inverted onto FDK's light-theme
+# layering. Mantle (#E6E9EF) is the world, base (#EFF1F5) lifts the
+# controls, crust (#DCE0E8) recesses the sidebar and the title band,
+# and the text is Latte's muted slate (#4C4F69) — the creamy,
+# readable register the palette is famous for. The accent is the
+# mauve (#8839EF) with its own hover/pressed family and near-white
+# labels; the tooltips invert to dark slate with a mauve edge, menus
+# are the one pure-white surface, links are Latte blue, and the
+# semantic trio keeps Latte's own pastel green / gold / red. Fields
+# stay flat and outlined — calm surfaces, no hard shadows.
+#
+# Install location (make install): <prefix>/share/fdk/.FDKThemes/,
+# which the default search path covers — `fdk-theme set
+# catppuccin-latte` (or `set "Catppuccin Latte"`) finds it with zero
+# configuration.
+
+version = 1
+name    = "Catppuccin Latte"
+author  = "FDK project"
+
+[colors]
+window_background          = #E6E9EF
+text                       = #4C4F69
+text_disabled              = #8C8FA1
+control_background         = #EFF1F5
+control_background_hover   = #EAEDF2
+control_background_pressed = #DCE0E8
+control_background_disabled= #ECEFF4
+control_border             = #BCC0CC
+accent                     = #8839EF
+track                      = #D6DAE3
+tooltip_background         = #4C4F69
+tooltip_text               = #EFF1F5
+tooltip_border             = #8839EF
+selection_background       = #8839EF40
+selection_text             = #4C4F69
+focus_ring                 = #1E66F5
+success                    = #40A02B
+warning                    = #DF8E1D
+danger                     = #D20F39
+sidebar_background         = #DCE0E8
+menu_background            = #FFFFFF
+accent_hover               = #9B5BF1
+accent_pressed             = #7028D0
+accent_text                = #EFF1F5
+link                       = #1E66F5
+entry_background           = #EFF1F5
+entry_border               = #BCC0CC
+row_hover                  = #D9DEE8
+titlebar_background        = #DCE0E8
+titlebar_text              = #4C4F69
+titlebar_border            = #BCC0CC
+titlebar_button_hover      = #CCD0DA
+titlebar_button_pressed    = #BCC0CC
+
+[metrics]
+button_shape          = 0
+button_corner_radius  = 8
+separator_thickness   = 1
+title_bar_height      = 30
+scrollbar_width       = 12
+menu_item_height      = 26
+tooltip_corner_radius = 6
+entry_corner_radius   = 6
+menu_corner_radius    = 8
+list_row_height       = 30
+focus_ring_width      = 2
+scrollbar_overlay_width = 6
+iconview_cell_width   = 96
+iconview_cell_height  = 84
+textview_pad          = 8
