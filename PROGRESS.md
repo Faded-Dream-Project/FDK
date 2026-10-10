@@ -9,21 +9,22 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.11** (the markup
-milestone — rich text everywhere), by a full in-depth code review
-— every claim below was re-verified against the tree, not copied
-from docs. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
+Last audited: 2026-10-10, at milestone **1.4.12** (INCR transfers —
+the clipboard's atomic cap lifted, the last NEXT item), by a full
+in-depth code review — every claim below was re-verified against
+the tree, not copied from docs. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
 tooltips" candidate was stale (the 1.3.2 tooltip has been fully
 themed since birth — tokens, parser, Modern retune, tests); the tree
 is always the truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.11** (the markup milestone — rich
-  text: the attribute-run layer, the tag scanner, and markup in
-  labels/buttons/tooltips; 1.4.10 shipped fullscreen both
-  backends; 1.4.9 shipped the PNG codec + the Picture widget +
-  the clipboard image surface)
+- **HEAD:** milestone **1.4.12** (INCR transfers — the X11
+  clipboard streams past the 4 MiB atomic cap in both directions,
+  64 MiB bound; 1.4.11 shipped the markup milestone — rich text:
+  the attribute-run layer, the tag scanner, markup in
+  labels/buttons/tooltips; 1.4.10 fullscreen both backends; 1.4.9
+  the PNG codec + the Picture widget + the clipboard image surface)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
@@ -32,10 +33,10 @@ is always the truth, including over this file.
 - **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
   suites, the eight 1.4.8 textview groups, the 1.4.9 png/
   picture suite, and the 1.4.11 markup suite); X11 integration
-  suite all-pass — **147 [ok]** (real Xvfb, real input, incl. the
+  suite all-pass — **150 [ok]** (real Xvfb, real input, incl. the
   modern-batch, HiDPI (private 192-dpi server), iconview GUI,
-  file-dialog icon-mode, textview GUI, and clipboard-image
-  groups); 34 test files
+  file-dialog icon-mode, textview GUI, clipboard-image, and the
+  1.4.12 INCR read/serve/image groups); 34 test files
 - **Scale:** ~58k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
@@ -165,15 +166,15 @@ sidebar rhythm).
 
 ## What's left (the authoritative backlog)
 
-### NEXT — milestone 1.4.12 (the last real item)
+### NEXT — nothing
 
-The widget families are shipped across the board; rich text
-shipped in 1.4.11 (the attribute-run layer + the tag scanner +
-markup in labels/buttons/tooltips). What remains before the
-"anything more would not be a toolkit" line:
-
-1. **INCR transfers** — the X11 clipboard's 4 MiB atomic cap
-   lifter (screenshots from other tools may exceed it)
+The backlog is EMPTY. The widget families shipped across the
+board; rich text shipped in 1.4.11; INCR transfers shipped in
+1.4.12. What remains is LATER-by-policy (IME completion surface
+waits for a protocol joining third_party/wayland-protocols) and
+OUT-by-policy (the deliberate non-goals below) — the line where
+adding anything more would make FDK something other than a
+toolkit.
 
 ### LATER (real, not next)
 

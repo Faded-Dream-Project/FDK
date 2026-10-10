@@ -4653,3 +4653,63 @@ verify-exports 607 in both configs.
 The NEXT list: INCR transfers (the X11 clipboard's 4 MiB cap
 lifter) — the last real item before the "anything more would not
 be a toolkit" line; IME stays LATER by the no-bus policy.
+
+## 1.4.12 — INCR transfers (the clipboard's atomic cap lifted)
+
+The audit's last NEXT item: the ICCCM incremental-transfer protocol,
+both directions, on the X11 clipboard. Payloads past the atomic
+threshold (4 MiB — unchanged for small transfers) now stream in
+256 KiB chunks; the hard bound is 64 MiB both ways (a clipboard is
+not a file transfer service).
+
+SERVING is event-driven: a SelectionRequest for an oversized payload
+seeds the requestor's property with type INCR and the rounded byte
+estimate, selects PropertyChangeMask on the REQUESTOR's window
+(per-client masks — nobody else's selections are disturbed), and
+answers each PropertyDelete with the next chunk, ending with the
+zero-length terminator. The session borrows the owned content's
+bytes (one copy total; the Latin-1 legacy re-encode is the one
+session-owned exception); replacing or losing the content aborts the
+flight with the graceful terminator before the bytes vanish. One TX
+flight at a time — a new request supersedes (documented
+simplification). READING pumps PropertyNotify (NewValue) on the
+helper — which now selects PropertyChangeMask at init — with a
+1s-per-chunk and 30s-per-flight deadline; the seed read's delete is
+the protocol's go signal; a zero-length property ends the flight;
+the estimate is a hint (the buffer grows if the owner overshoots,
+bounded); and atomic multi-part reads cover foreign owners that
+write more than one read window.
+
+TWO real bugs the raw-Xlib child tests caught before any human ever
+would: (1) the STALE-NOTIFICATION RACE — the owner's seed WRITE
+generates a NewValue that is still queued when the reader's chunk
+loop starts, so the first "chunk" read finds the property GONE (the
+reader just deleted it) and v1-of-the-milestone failed the whole
+transfer; the reader now treats a vanished property (type None) as
+a stale notify and keeps waiting (a type-correct zero-length
+property remains the terminator — the two are distinguishable, and
+the distinction is the fix). (2) The test children had the mirror
+bug — their chunk handling must not start before the SelectionNotify
+(the seed's NewValue precedes it in the queue). The connection also
+gained a tolerant X protocol-error handler (log and continue, like
+GTK/Qt) — INCR writes to foreign windows outlive the requestor's
+guaranteed lifetime, and a dead requestor mid-flight must be a
+warning, not process death.
+
+Tests: three new X11 groups with forked raw-Xlib children — INCR
+READ (a foreign owner streams 4,882,432 bytes; FDK reassembles and
+verifies wholesale), INCR SERVE (FDK owns the big text; a foreign
+reader drives the delete choreography and verifies byte-exact), and
+INCR IMAGE (a noisy 1250x1000 surface encodes past the atomic cap;
+the reader verifies the PNG signature and length floor; FDK's fast
+path still decodes pixel-exact). X11 integration 147 -> 150 [ok];
+607 exported symbols (unchanged — INCR is behavior, not API shape;
+the public docs moved their caps).
+
+Battery at 1.4.12: debug + release zero warnings; headless all-pass;
+X11 integration 150 [ok]; verify-exports 607 in both configs.
+
+That empties the NEXT list. What remains is LATER-by-policy (the IME
+completion surface waits for a protocol in third_party/) and OUT-by-
+policy (the deliberate non-goals) — the point where adding anything
+more would make FDK something other than a toolkit.

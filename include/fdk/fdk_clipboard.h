@@ -27,8 +27,10 @@
  *
  * Scope notes (documented rather than faked):
  *   - UTF-8 text only. No image/URI formats in v1.
- *   - INCR (incremental, >~1 MiB) transfers are not supported;
- *     oversized reads fail with a warning instead of hanging.
+ *   - INCR (incremental) transfers are SUPPORTED on X11 since
+ *     1.4.12 — payloads past the atomic property threshold stream
+ *     in ICCCM chunks both directions (hard bound 64 MiB); before
+ *     that, oversized reads failed with a warning.
  *   - PRIMARY is a FIRST-CLASS citizen since 1.3.4 (see the primary
  *     API below): X11 serves/reads the real ICCCM XA_PRIMARY
  *     selection, Wayland uses wp_primary_selection_unstable_v1 where
@@ -71,15 +73,15 @@ fdk_result fdk_clipboard_set_text(fdk_context *ctx, const char *text);
 
 /* Reads the current clipboard text into a freshly allocated,
  * NUL-terminated UTF-8 string. Returns NULL when the clipboard is
- * empty, unreadable (owner refused / timed out / oversized INCR
- * transfer), or the backend has no clipboard support — a warning is
+ * empty or unreadable (owner refused / timed out) — a warning is
  * logged in those cases, never an error code the caller must branch
  * on. The caller frees the string with fdk_free() (free() is also
  * correct on every supported platform).
  *
  * On X11 this performs the bounded synchronous convert described in
- * the file header. Events that arrive while FDK waits for the owning
- * client's SelectionNotify stay queued — FDK never dispatches them
+ * the file header; since 1.4.12 an INCR-offering owner streams its
+ * chunks under per-chunk and whole-flight deadlines. Events that
+ * arrive while FDK waits stay queued — FDK never dispatches them
  * re-entrantly from inside this call. */
 char *fdk_clipboard_get_text(fdk_context *ctx);
 
@@ -94,11 +96,11 @@ char *fdk_clipboard_get_text(fdk_context *ctx);
  * FDK_ERR_UNSUPPORTED when the clipboard has no image or the
  * backend cannot move it.
  *
- * X11 transports the bytes in one atomic property (the documented
- * practical cap is 4 MiB — larger sets fail with
- * FDK_ERR_UNSUPPORTED; incremental INCR transfer stays a
- * deliberate later). Wayland moves the bytes through the
- * data-device pipe (no cap). */
+ * X11 transports small payloads in one atomic property; since
+ * 1.4.12, payloads past the atomic threshold (4 MiB) stream via
+ * ICCCM INCR chunks BOTH directions, with a hard 64 MiB bound —
+ * larger sets fail with FDK_ERR_UNSUPPORTED. Wayland moves the
+ * bytes through the data-device pipe (no cap). */
 fdk_result fdk_clipboard_set_image(fdk_context *ctx,
                                    const fdk_surface *surface);
 fdk_surface *fdk_clipboard_get_image(fdk_context *ctx);

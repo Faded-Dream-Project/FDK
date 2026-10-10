@@ -59,6 +59,26 @@ static int x11_io_error_handler(Display *display) {
     return 0; /* unreachable when armed; lets Xlib exit when not */
 }
 
+/* Protocol-error handler (1.4.12, the INCR milestone): LOG and
+ * continue, never die. Xlib's default handler EXITS the process on
+ * any recoverable protocol error — unacceptable for a toolkit that
+ * writes properties and selects events on FOREIGN windows (an INCR
+ * requestor that dies mid-flight turns our next chunk write into a
+ * BadWindow; a stale WM/selection peer does the same to any
+ * request). GTK and Qt both install exactly such a tolerant handler;
+ * the errors that matter (a broken request) still surface as the
+ * feature failing, and the IO handler above still owns connection
+ * death. */
+static int x11_error_handler(Display *display, XErrorEvent *ev) {
+    (void)display;
+    FDK_WARN("X protocol error %u (request %u.%u, resource 0x%lx) "
+             "— ignored (stale peer or dead requestor)",
+             (unsigned)ev->error_code,
+             (unsigned)ev->request_code, (unsigned)ev->minor_code,
+             (unsigned long)ev->resourceid);
+    return 0;
+}
+
 
 /* HiDPI scale detection (1.4.5).
  *
@@ -155,6 +175,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     memset(conn->key_down, 0, sizeof conn->key_down);
     g_io_conn = conn;
     (void)XSetIOErrorHandler(x11_io_error_handler);
+    (void)XSetErrorHandler(x11_error_handler);
 
     /* Key-repeat discipline (1.3.0): ask the XKB extension for
      * DETECTABLE auto-repeat — real KeyReleases only, repeats as

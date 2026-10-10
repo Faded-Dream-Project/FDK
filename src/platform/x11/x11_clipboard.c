@@ -37,15 +37,26 @@
  *     untouched for the normal dispatch loop. poll() on the
  *     connection fd provides the bounded wait.
  *
- * Not supported, deliberately (see fdk_clipboard.h): INCR
- * incremental transfers (refused with a warning — local transfers
- * are atomic and always fit), COMPOUND_TEXT (we serve
- * UTF8_STRING/TEXT/STRING, which every modern client accepts).
+ * Not supported, deliberately (see fdk_clipboard.h): COMPOUND_TEXT
+ * (we serve UTF8_STRING/TEXT/STRING, which every modern client
+ * accepts).
  *
- * 1.4.9 adds the IMAGE surface: image/png as a served/read target,
- * carried in ONE atomic property (the documented 4 MiB practical
- * cap — INCR remains the deliberate later). One clipboard content
- * at a time: owning an image clears the owned text and vice versa.
+ * 1.4.9 adds the IMAGE surface: image/png as a served/read target.
+ * One clipboard content at a time: owning an image clears the owned
+ * text and vice versa.
+ *
+ * 1.4.12 adds INCR (incremental) transfers, BOTH directions: the
+ * ICCCM's chunked protocol for payloads beyond the atomic cap
+ * (4 MiB). SERVING is event-driven — the requestor's deletes of the
+ * property (PropertyNotify on ITS window, which we select) trigger
+ * each next chunk, ending with the zero-length terminator; a flight
+ * aborts gracefully when the owned content changes underneath it.
+ * READING pumps PropertyNotify (NewValue) on the helper with a
+ * per-chunk deadline and a whole-flight bound; the helper selects
+ * PropertyChangeMask for exactly this. The hard payload bound is
+ * 64 MiB both ways. One TX flight at a time (a new request
+ * supersedes — a documented simplification; the read side is
+ * naturally serial).
  */
 
 #include "platform/x11/x11_platform.h"
@@ -55,19 +66,54 @@
 
 #include <X11/Xatom.h>
 #include <errno.h>
+#include <stdint.h>
 #include <poll.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #define FDK_CLIP_WAIT_MS 250
-/* The atomic property cap for image payloads: comfortably inside
- * every real server's max-request size while covering ordinary
- * screenshots and UI renders. Larger sets refuse with
- * FDK_ERR_UNSUPPORTED (the INCR later would lift this). */
-#define FDK_CLIP_IMAGE_MAX_BYTES (4u * 1024u * 1024u)
+/* The atomic property cap: payloads at or under this size serve (and
+ * read) in ONE property write/read, exactly as every FDK clipboard
+ * transfer did before 1.4.12. Comfortably inside every real server's
+ * max-request size while covering ordinary screenshots and UI
+ * renders. */
+#define FDK_CLIP_ATOMIC_MAX_BYTES (4u * 1024u * 1024u)
+
+/* ---- INCR (incremental) transfer parameters (1.4.12) -------------
+ *
+ * Payloads beyond the atomic cap stream in chunks, per the ICCCM's
+ * incremental-transfer protocol: the owner seeds the requestor's
+ * property with type INCR and a 32-bit byte estimate; the requestor
+ * deletes it; the owner answers each delete with the next chunk and
+ * ends the flight with a zero-length chunk. Both directions ride
+ * this module. */
+
+/* Chunk size: the guaranteed protocol minimum max-request size is
+ * 262144 bytes for the WHOLE request; XChangeProperty's overhead is
+ * small but real, so stay a little under. (Servers typically accept
+ * 16 MiB — the conservatism buys portability, and throughput at 256
+ * KiB per roundtrip is a non-issue locally.) */
+#define FDK_CLIP_INCR_CHUNK_BYTES 262080
+
+/* The hard payload bound for incremental transfers (both directions):
+ * a sanity alloc limit, the X11 twin of the Wayland pipe's 32 MiB
+ * read bound (matched generously — a clipboard is not a file
+ * transfer service). */
+#define FDK_CLIP_INCR_MAX_BYTES (64u * 1024u * 1024u)
+
+/* Per-chunk wait and whole-flight deadline for the READER (the
+ * serve side is event-driven and never blocks): owners answer
+ * deletes in microseconds locally; a dead owner must not hang the
+ * caller's thread for more than the deadlines below. */
+#define FDK_CLIP_INCR_CHUNK_WAIT_MS 1000
+#define FDK_CLIP_INCR_TOTAL_WAIT_MS 30000
 
 /* ---- the selection descriptor (one machinery, two selections) ---- */
+
+/* INCR serve internals (defined below — the abort is needed early by
+ * the content-changing paths). */
+static void incr_tx_end(fdk_platform_connection *conn, bool write_end);
 
 typedef struct {
     Atom atom;         /* the selection this descriptor addresses */
@@ -98,6 +144,12 @@ fdk_result fdk_x11_clipboard_init(fdk_platform_connection *conn) {
         FDK_WARN("clipboard: could not create helper window");
         return FDK_ERR_PLATFORM;
     }
+    /* 1.4.12: the helper watches its own properties — the read side
+     * of INCR pumps PropertyNotify (NewValue) on atom_fdk_selection.
+     * Event masks are per-client per-window, so this cannot disturb
+     * anyone else's selections on the helper (XDND replies are
+     * SendEvent'd to the creator and arrive regardless). */
+    XSelectInput(conn->display, conn->clip_helper, PropertyChangeMask);
     conn->atom_clipboard = XInternAtom(conn->display, "CLIPBOARD", False);
     conn->atom_targets = XInternAtom(conn->display, "TARGETS", False);
     conn->atom_incr = XInternAtom(conn->display, "INCR", False);
@@ -116,6 +168,10 @@ fdk_result fdk_x11_clipboard_init(fdk_platform_connection *conn) {
 }
 
 void fdk_x11_clipboard_shutdown(fdk_platform_connection *conn) {
+    /* End any in-flight incremental serve WITHOUT the terminating
+     * write (the requestor's read times out — teardown is not the
+     * moment for protocol traffic), then drop the session's copy. */
+    incr_tx_end(conn, false);
     if (conn->display_dead) {
         /* Server gone: ownership died with the connection — free the
          * local copies and leave the XIDs to the dead socket. */
@@ -173,6 +229,13 @@ static fdk_result selection_set_text(fdk_platform_connection *conn,
         return FDK_ERR_OUT_OF_MEMORY;
     }
     memcpy(copy, text, len + 1);
+
+    /* Abort an in-flight incremental serve that streams the content
+     * being replaced (graceful zero chunk) BEFORE the bytes vanish. */
+    if (conn->clip_incr_tx.active && !conn->clip_incr_tx.owns_bytes &&
+        conn->clip_incr_tx.bytes == (const unsigned char *)*sel.owned) {
+        incr_tx_end(conn, true);
+    }
 
     /* ICCCM: acquiring ownership with CurrentTime is legal for
      * programs that have not seen a timestamp; owners should treat
@@ -268,6 +331,117 @@ static char *latin1_from_utf8(const char *utf8, size_t *out_len) {
     return out;
 }
 
+/* ---- INCR serving (1.4.12): we own a payload beyond the atomic cap --
+ *
+ * The ICCCM incremental dance, owner side: seed the requestor's
+ * property with type INCR and a 32-bit byte estimate; watch the
+ * requestor's window (PropertyChangeMask — per-client masks, so this
+ * never disturbs the requestor's own selections); each PropertyDelete
+ * of the property answers with the next chunk; a zero-length chunk
+ * ends the flight. All chunk writes are event-driven from dispatch —
+ * the serve side never blocks. A dead requestor surfaces as a
+ * tolerated protocol error (the connection's 1.4.12 error handler)
+ * and the flight simply stalls until the next content change
+ * supersedes it. */
+
+/* Ends the in-flight transfer (if any) with the graceful zero-length
+ * chunk, deselects the requestor's window, and clears the session.
+ * `write_end` false skips the terminating write (shutdown / dead
+ * display): the requestor's read times out instead. */
+static void incr_tx_end(fdk_platform_connection *conn, bool write_end) {
+    if (!conn->clip_incr_tx.active) {
+        return;
+    }
+    if (write_end && !conn->display_dead) {
+        XChangeProperty(conn->display, conn->clip_incr_tx.requestor,
+                        conn->clip_incr_tx.property,
+                        conn->clip_incr_tx.type, 8, PropModeReplace,
+                        NULL, 0);
+        XSelectInput(conn->display, conn->clip_incr_tx.requestor, 0);
+        XFlush(conn->display);
+    }
+    if (conn->clip_incr_tx.owns_bytes) {
+        /* The Latin-1 legacy path: the session owned its copy. The
+         * launder goes through unsigned char * (the session's own
+         * non-const storage discipline — borrowed flights never take
+         * this branch). */
+        fdk_free((unsigned char *)(uintptr_t)conn->clip_incr_tx.bytes);
+    }
+    conn->clip_incr_tx.active = false;
+    conn->clip_incr_tx.bytes = NULL;
+}
+
+/* Seeds a new incremental serve of `len` bytes at `bytes` (borrowed
+ * from the owned content unless `owns_bytes`). Supersedes any flight
+ * in progress. The caller still sends its SelectionNotify naming the
+ * property — the INCR seed is what the requestor reads first. */
+static void incr_tx_begin(fdk_platform_connection *conn, Window requestor,
+                          Atom property, Atom type,
+                          const unsigned char *bytes, size_t len,
+                          bool owns_bytes) {
+    incr_tx_end(conn, true); /* graceful end for the superseded flight */
+
+    /* Watch the requestor's property deletes. Per-client event masks
+     * make this safe against the requestor's own (and third parties')
+     * selections on the same window. */
+    XSelectInput(conn->display, requestor, PropertyChangeMask);
+
+    /* The INCR seed property: type INCR, format 32, one value = the
+     * byte estimate, rounded up to a multiple of 4 (the format's
+     * unit) as the protocol's estimate semantics expect. */
+    unsigned long estimate = (unsigned long)((len + 3u) & ~(size_t)3u);
+    XChangeProperty(conn->display, requestor, property, conn->atom_incr,
+                    32, PropModeReplace,
+                    (const unsigned char *)&estimate, 1);
+
+    conn->clip_incr_tx.requestor = requestor;
+    conn->clip_incr_tx.property = property;
+    conn->clip_incr_tx.type = type;
+    conn->clip_incr_tx.bytes = bytes;
+    conn->clip_incr_tx.len = len;
+    conn->clip_incr_tx.pos = 0;
+    conn->clip_incr_tx.owns_bytes = owns_bytes;
+    conn->clip_incr_tx.active = true;
+}
+
+static void incr_serve_begin(fdk_platform_connection *conn, Window requestor,
+                             Atom property, Atom type,
+                             const unsigned char *bytes, size_t len) {
+    incr_tx_begin(conn, requestor, property, type, bytes, len, false);
+}
+
+static void incr_serve_begin_owned(fdk_platform_connection *conn,
+                                   Window requestor, Atom property,
+                                   Atom type, unsigned char *bytes,
+                                   size_t len) {
+    incr_tx_begin(conn, requestor, property, type, bytes, len, true);
+}
+
+/* One PropertyDelete from the active requestor: stream the next chunk
+ * (or the zero-length terminator when the bytes ran out). */
+static void incr_tx_next_chunk(fdk_platform_connection *conn) {
+    if (!conn->clip_incr_tx.active) {
+        return;
+    }
+    size_t remain = conn->clip_incr_tx.len - conn->clip_incr_tx.pos;
+    if (remain == 0) {
+        /* The requestor deleted the LAST data chunk: the zero-length
+         * terminator ends the flight per the ICCCM. */
+        incr_tx_end(conn, true);
+        return;
+    }
+    size_t chunk = remain > FDK_CLIP_INCR_CHUNK_BYTES
+                       ? FDK_CLIP_INCR_CHUNK_BYTES
+                       : remain;
+    XChangeProperty(conn->display, conn->clip_incr_tx.requestor,
+                    conn->clip_incr_tx.property, conn->clip_incr_tx.type,
+                    8, PropModeReplace,
+                    conn->clip_incr_tx.bytes + conn->clip_incr_tx.pos,
+                    (int)chunk);
+    XFlush(conn->display);
+    conn->clip_incr_tx.pos += chunk;
+}
+
 static void serve_text(fdk_platform_connection *conn, sel_desc sel,
                        Window requestor, Atom property, Atom target) {
     const char *owned = *sel.owned;
@@ -275,14 +449,33 @@ static void serve_text(fdk_platform_connection *conn, sel_desc sel,
         return; /* property left unset -> refusal */
     }
     if (target == conn->utf8_string || target == conn->atom_text_plain) {
+        size_t len = strlen(owned);
+        if (len > FDK_CLIP_ATOMIC_MAX_BYTES) {
+            /* 1.4.12: beyond the atomic cap, stream incrementally. */
+            incr_serve_begin(conn, requestor, property, target,
+                             (const unsigned char *)owned, len);
+            return;
+        }
         XChangeProperty(conn->display, requestor, property, target, 8,
                         PropModeReplace,
                         (const unsigned char *)owned,
-                        (int)strlen(owned));
+                        (int)len);
     } else { /* XA_STRING or TEXT: Latin-1 */
         size_t len = 0;
         char *latin = latin1_from_utf8(owned, &len);
         if (latin == NULL) {
+            return;
+        }
+        if (len > FDK_CLIP_ATOMIC_MAX_BYTES) {
+            /* The Latin-1 re-encode is a temporary buffer — the INCR
+             * flight cannot point into it. Stream it through a
+             * session that OWNS its bytes (the tx takes ownership of
+             * the malloc'd copy and frees it at flight end — the one
+             * place a second copy exists, and only for legacy
+             * targets larger than the atomic cap, a pathological
+             * corner by any measure). */
+            incr_serve_begin_owned(conn, requestor, property, XA_STRING,
+                                   (unsigned char *)latin, len);
             return;
         }
         XChangeProperty(conn->display, requestor, property,
@@ -295,6 +488,27 @@ static void serve_text(fdk_platform_connection *conn, sel_desc sel,
 
 int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
                                    const XEvent *xevent) {
+    /* INCR chunk pump FIRST (1.4.12): PropertyNotify arrives on the
+     * REQUESTOR's (foreign) window for an in-flight serve, and on
+     * the helper for read-side traffic — both BEFORE the helper
+     * guard, which would otherwise discard foreign-window events. */
+    if (xevent->type == PropertyNotify) {
+        const XPropertyEvent *pe = &xevent->xproperty;
+        if (pe->window == conn->clip_helper) {
+            /* Read-side strays (the deletes our own chunk reads
+             * generate): consumed by the reader's wait loop when it
+             * is running, swallowed here when it is not. */
+            return 1;
+        }
+        if (conn->clip_incr_tx.active &&
+            pe->window == conn->clip_incr_tx.requestor &&
+            pe->atom == conn->clip_incr_tx.property &&
+            pe->state == PropertyDelete) {
+            incr_tx_next_chunk(conn);
+            return 1;
+        }
+        return 0; /* someone else's property traffic: not ours */
+    }
     if (conn->clip_helper == None ||
         xevent->xany.window != conn->clip_helper) {
         return 0;
@@ -332,11 +546,19 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
         } else if (req->target == conn->atom_image_png &&
                    req->selection == conn->atom_clipboard &&
                    conn->clip_owned_png != NULL) {
-            /* 1.4.9: the image target, served atomically. */
-            XChangeProperty(conn->display, req->requestor, property,
-                            conn->atom_image_png, 8, PropModeReplace,
-                            conn->clip_owned_png,
-                            (int)conn->clip_owned_png_len);
+            /* 1.4.9: the image target. 1.4.12: beyond the atomic cap,
+             * stream incrementally. */
+            if (conn->clip_owned_png_len > FDK_CLIP_ATOMIC_MAX_BYTES) {
+                incr_serve_begin(conn, req->requestor, property,
+                                 conn->atom_image_png,
+                                 conn->clip_owned_png,
+                                 conn->clip_owned_png_len);
+            } else {
+                XChangeProperty(conn->display, req->requestor, property,
+                                conn->atom_image_png, 8, PropModeReplace,
+                                conn->clip_owned_png,
+                                (int)conn->clip_owned_png_len);
+            }
         } else if (req->target == conn->utf8_string ||
                    req->target == conn->atom_text_plain ||
                    req->target == conn->atom_text ||
@@ -371,6 +593,19 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
         if (xevent->xselectionclear.selection == conn->atom_clipboard) {
             if (XGetSelectionOwner(conn->display, conn->atom_clipboard) !=
                 conn->clip_helper) {
+                /* Abort any in-flight incremental serve of the content
+                 * being dropped (graceful zero chunk) BEFORE the bytes
+                 * it points at vanish. A session-owned flight (the
+                 * Latin-1 re-encode) cannot be told apart per slot —
+                 * ending it is conservative and always safe. */
+                if (conn->clip_incr_tx.active &&
+                    (conn->clip_incr_tx.owns_bytes ||
+                     conn->clip_incr_tx.bytes ==
+                         (const unsigned char *)conn->clip_owned_text ||
+                     conn->clip_incr_tx.bytes ==
+                         (const unsigned char *)conn->clip_owned_png)) {
+                    incr_tx_end(conn, true);
+                }
                 fdk_free(conn->clip_owned_text);
                 conn->clip_owned_text = NULL;
                 fdk_free(conn->clip_owned_png);
@@ -380,6 +615,12 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
         } else if (xevent->xselectionclear.selection == XA_PRIMARY) {
             if (XGetSelectionOwner(conn->display, XA_PRIMARY) !=
                 conn->clip_helper) {
+                if (conn->clip_incr_tx.active &&
+                    !conn->clip_incr_tx.owns_bytes &&
+                    conn->clip_incr_tx.bytes ==
+                        (const unsigned char *)conn->primary_owned_text) {
+                    incr_tx_end(conn, true);
+                }
                 fdk_free(conn->primary_owned_text);
                 conn->primary_owned_text = NULL;
             }
@@ -483,10 +724,149 @@ static char *utf8_from_property(Atom type, const unsigned char *data,
     return out;
 }
 
-/* One convert attempt for `target` against `sel`. Returns the UTF-8
- * text (fdk_alloc) or NULL (refused / timeout / oversized). */
-static char *convert_selection(fdk_platform_connection *conn, sel_desc sel,
-                                Atom target) {
+/* Waits for one PropertyNotify (NewValue) on the helper's selection
+ * property — the INCR read pump. Delete notifications are SKIPPED
+ * (each chunk we read+delete generates one); foreign events are left
+ * in Xlib's queue untouched. Returns 1 with *out filled, 0 on the
+ * deadline. */
+static int wait_property_new_value(fdk_platform_connection *conn,
+                                    uint64_t deadline, XEvent *out) {
+    XFlush(conn->display);
+    for (;;) {
+        XEvent ev;
+        if (XCheckTypedWindowEvent(conn->display, conn->clip_helper,
+                                   PropertyNotify, &ev)) {
+            if (ev.xproperty.atom == conn->atom_fdk_selection &&
+                ev.xproperty.state == PropertyNewValue) {
+                *out = ev;
+                return 1;
+            }
+            continue; /* our own deletes / other properties: skip */
+        }
+        uint64_t now = now_ms();
+        if (now >= deadline) {
+            return 0;
+        }
+        struct pollfd pfd;
+        pfd.fd = ConnectionNumber(conn->display);
+        pfd.events = POLLIN;
+        int r = poll(&pfd, 1, (int)(deadline - now));
+        if (r < 0 && errno != EINTR) {
+            return 0;
+        }
+        XEventsQueued(conn->display, QueuedAfterReading);
+    }
+}
+
+/* The INCR read loop (1.4.12): the seed property (type INCR, a 32-bit
+ * byte estimate) is already consumed by the caller; chunks arrive as
+ * NewValue notifications on the helper's selection property, each
+ * read WITH delete (the delete is what tells the owner to send the
+ * next chunk), until the zero-length terminator. Bounded by a
+ * per-chunk deadline and a whole-flight deadline; the total is
+ * bounded by FDK_CLIP_INCR_MAX_BYTES. Returns the concatenated bytes
+ * (fdk_alloc'd, *out_len set) or NULL. */
+static unsigned char *incr_read_all(fdk_platform_connection *conn,
+                                     unsigned long estimate,
+                                     size_t *out_len) {
+    *out_len = 0;
+    size_t cap = (size_t)estimate;
+    if (cap == 0 || cap > FDK_CLIP_INCR_MAX_BYTES) {
+        cap = FDK_CLIP_INCR_MAX_BYTES; /* estimate is a HINT, not truth */
+    }
+    unsigned char *buf = fdk_alloc(cap + 1); /* +1: text NUL room */
+    if (buf == NULL) {
+        return NULL;
+    }
+    size_t got = 0;
+    uint64_t flight_deadline = now_ms() + FDK_CLIP_INCR_TOTAL_WAIT_MS;
+
+    for (;;) {
+        uint64_t chunk_deadline = now_ms() + FDK_CLIP_INCR_CHUNK_WAIT_MS;
+        uint64_t deadline = chunk_deadline < flight_deadline
+                                ? chunk_deadline
+                                : flight_deadline;
+        XEvent ev;
+        if (!wait_property_new_value(conn, deadline, &ev)) {
+            FDK_WARN("clipboard: INCR read stalled (owner silent past "
+                     "the deadline after %zu bytes)",
+                     got);
+            fdk_free(buf);
+            return NULL;
+        }
+        Atom type = None;
+        int format = 0;
+        unsigned long nitems = 0, bytes_after = 0;
+        unsigned char *data = NULL;
+        if (XGetWindowProperty(conn->display, conn->clip_helper,
+                               conn->atom_fdk_selection, 0, 0x400000, True,
+                               AnyPropertyType, &type, &format, &nitems,
+                               &bytes_after, &data) != Success) {
+            fdk_free(buf);
+            return NULL;
+        }
+        if (type == None) {
+            /* A stale NewValue: the owner's SEED WRITE generates one
+             * before our delete of the seed, and it is still queued
+             * when the chunk loop starts — reading then finds the
+             * property GONE (we deleted it). A vanished property is
+             * not a chunk, not an error: skip and keep waiting under
+             * the same deadlines. (The terminator, by contrast, is a
+             * TYPE-CORRECT zero-length property, handled below.) */
+            if (data != NULL) {
+                XFree(data);
+            }
+            continue;
+        }
+        if (data == NULL || format != 8) {
+            if (data != NULL) {
+                XFree(data);
+            }
+            fdk_free(buf);
+            return NULL;
+        }
+        if (nitems == 0) {
+            /* The zero-length terminator: the flight is complete. */
+            XFree(data);
+            *out_len = got;
+            return buf;
+        }
+        if (got + (size_t)nitems > FDK_CLIP_INCR_MAX_BYTES) {
+            FDK_WARN("clipboard: INCR payload exceeds the %u bound; "
+                     "dropping the transfer",
+                     FDK_CLIP_INCR_MAX_BYTES);
+            XFree(data);
+            fdk_free(buf);
+            return NULL;
+        }
+        if (got + (size_t)nitems > cap) {
+            /* The owner sent more than its estimate (a HINT — the
+             * ICCCM allows it): grow to fit, still under the bound. */
+            size_t ncap = got + (size_t)nitems;
+            unsigned char *grown = fdk_realloc(buf, ncap + 1);
+            if (grown == NULL) {
+                XFree(data);
+                fdk_free(buf);
+                return NULL;
+            }
+            buf = grown;
+            cap = ncap;
+        }
+        memcpy(buf + got, data, (size_t)nitems);
+        got += (size_t)nitems;
+        XFree(data);
+    }
+}
+
+/* One convert attempt for `target` against `sel`, returning the RAW
+ * bytes plus the property type (UTF8_STRING / XA_STRING / image/png
+ * / or an INCR flight's already-concatenated payload — the type the
+ * owner NAMED). Returns NULL on refusal/timeout/malformation. */
+static unsigned char *convert_selection_bytes(
+    fdk_platform_connection *conn, sel_desc sel, Atom target,
+    Atom *out_type, size_t *out_len) {
+    *out_type = None;
+    *out_len = 0;
     XConvertSelection(conn->display, sel.atom, target,
                       conn->atom_fdk_selection, conn->clip_helper,
                       CurrentTime);
@@ -504,22 +884,28 @@ static char *convert_selection(fdk_platform_connection *conn, sel_desc sel,
     unsigned long nitems = 0, bytes_after = 0;
     unsigned char *data = NULL;
     if (XGetWindowProperty(conn->display, conn->clip_helper,
-                           conn->atom_fdk_selection, 0, 0x100000, True,
+                           conn->atom_fdk_selection, 0, 0x400000, True,
                            AnyPropertyType, &type, &format, &nitems,
                            &bytes_after, &data) != Success) {
         return NULL;
     }
     if (type == conn->atom_incr) {
-        /* Incremental transfer: v1 refuses rather than half-receive.
-         * (XGetWindowProperty with delete=True already consumed the
-         * INCR property and its 0-length read is what the protocol
-         * expects for a refusal.) */
-        FDK_WARN("%s: INCR transfer offered — refusing "
-                 "(oversized selection, not supported in v1)", sel.name);
+        /* Incremental transfer (1.4.12): the seed's single 32-bit
+         * value is the byte estimate; the delete above (read with
+         * delete=True) is already the protocol's go signal. Pump the
+         * chunks. */
+        unsigned long estimate = 0;
+        if (data != NULL && nitems >= 1) {
+            estimate = ((unsigned long *)data)[0];
+        }
         if (data != NULL) {
             XFree(data);
         }
-        return NULL;
+        unsigned char *all = incr_read_all(conn, estimate, out_len);
+        if (all != NULL) {
+            *out_type = target; /* the type the owner NAMED */
+        }
+        return all;
     }
     if (data == NULL || type == None || format != 8) {
         if (data != NULL) {
@@ -527,8 +913,65 @@ static char *convert_selection(fdk_platform_connection *conn, sel_desc sel,
         }
         return NULL;
     }
-    char *out = utf8_from_property(type, data, nitems);
-    XFree(data);
+    /* Atomic read — possibly multi-part when a foreign owner wrote
+     * more than one read window (the delete lands with the LAST
+     * part). Bounded by the incremental payload bound. */
+    {
+        size_t got = (size_t)nitems;
+        unsigned char *out = fdk_alloc(got > 0 ? got : 1);
+        if (out == NULL) {
+            XFree(data);
+            return NULL;
+        }
+        memcpy(out, data, got);
+        XFree(data);
+        while (bytes_after > 0 && got <= FDK_CLIP_INCR_MAX_BYTES) {
+            data = NULL;
+            if (XGetWindowProperty(conn->display, conn->clip_helper,
+                                   conn->atom_fdk_selection,
+                                   (long)(got / 4), 0x400000, True,
+                                   AnyPropertyType, &type, &format,
+                                   &nitems, &bytes_after,
+                                   &data) != Success ||
+                data == NULL) {
+                fdk_free(out);
+                return NULL;
+            }
+            if (got + (size_t)nitems > FDK_CLIP_INCR_MAX_BYTES) {
+                XFree(data);
+                fdk_free(out);
+                return NULL;
+            }
+            unsigned char *grown = fdk_realloc(out, got + (size_t)nitems);
+            if (grown == NULL) {
+                XFree(data);
+                fdk_free(out);
+                return NULL;
+            }
+            out = grown;
+            memcpy(out + got, data, (size_t)nitems);
+            got += (size_t)nitems;
+            XFree(data);
+        }
+        *out_type = type;
+        *out_len = got;
+        return out;
+    }
+}
+
+/* One convert attempt for `target` against `sel`. Returns the UTF-8
+ * text (fdk_alloc) or NULL (refused / timeout / malformed). */
+static char *convert_selection(fdk_platform_connection *conn, sel_desc sel,
+                                Atom target) {
+    Atom type = None;
+    size_t len = 0;
+    unsigned char *raw = convert_selection_bytes(conn, sel, target, &type,
+                                                 &len);
+    if (raw == NULL) {
+        return NULL;
+    }
+    char *out = utf8_from_property(type, raw, len);
+    fdk_free(raw);
     return out;
 }
 
@@ -580,10 +1023,13 @@ fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
     if (png == NULL || len == 0) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    if (len > FDK_CLIP_IMAGE_MAX_BYTES) {
+    if (len > FDK_CLIP_INCR_MAX_BYTES) {
+        /* 1.4.12: the atomic cap lifted — payloads up to the hard
+         * 64 MiB bound are owned and streamed incrementally past the
+         * atomic threshold. Beyond THAT is not a clipboard. */
         FDK_WARN("clipboard: image payload %zu bytes exceeds the "
-                 "atomic cap (%u); refusing (INCR is a later)",
-                 len, FDK_CLIP_IMAGE_MAX_BYTES);
+                 "incremental bound (%u); refusing",
+                 len, FDK_CLIP_INCR_MAX_BYTES);
         return FDK_ERR_UNSUPPORTED;
     }
     unsigned char *copy = fdk_alloc(len);
@@ -591,6 +1037,11 @@ fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
         return FDK_ERR_OUT_OF_MEMORY;
     }
     memcpy(copy, png, len);
+    /* Abort an in-flight serve of the image being replaced. */
+    if (conn->clip_incr_tx.active && !conn->clip_incr_tx.owns_bytes &&
+        conn->clip_incr_tx.bytes == conn->clip_owned_png) {
+        incr_tx_end(conn, true);
+    }
     XSetSelectionOwner(conn->display, conn->atom_clipboard,
                        conn->clip_helper, CurrentTime);
     if (XGetSelectionOwner(conn->display, conn->atom_clipboard) !=
@@ -609,43 +1060,9 @@ fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
     return FDK_OK;
 }
 
-/* Raw bytes from a property read: the atomic image read. */
-static unsigned char *bytes_from_property(fdk_platform_connection *conn,
-                                          size_t *out_len) {
-    Atom type = None;
-    int format = 0;
-    unsigned long nitems = 0, bytes_after = 0;
-    unsigned char *data = NULL;
-    if (XGetWindowProperty(conn->display, conn->clip_helper,
-                           conn->atom_fdk_selection, 0, 0x400000, True,
-                           AnyPropertyType, &type, &format, &nitems,
-                           &bytes_after, &data) != Success) {
-        return NULL;
-    }
-    if (type == conn->atom_incr) {
-        FDK_WARN("clipboard: INCR image transfer offered — refusing "
-                 "(oversized selection, not supported yet)");
-        if (data != NULL) {
-            XFree(data);
-        }
-        return NULL;
-    }
-    if (data == NULL || type == None || format != 8 || nitems == 0) {
-        if (data != NULL) {
-            XFree(data);
-        }
-        return NULL;
-    }
-    unsigned char *out = fdk_alloc(nitems);
-    if (out == NULL) {
-        XFree(data);
-        return NULL;
-    }
-    memcpy(out, data, nitems);
-    *out_len = (size_t)nitems;
-    XFree(data);
-    return out;
-}
+/* Raw bytes from a property read: retired in 1.4.12 — the shared
+ * convert_selection_bytes (atomic, multi-part atomic, and INCR)
+ * replaced it; image reads are just typed raw reads now. */
 
 unsigned char *fdk_x11_clipboard_get_image(fdk_platform_connection *conn,
                                            size_t *out_len) {
@@ -670,18 +1087,22 @@ unsigned char *fdk_x11_clipboard_get_image(fdk_platform_connection *conn,
     if (XGetSelectionOwner(conn->display, conn->atom_clipboard) == None) {
         return NULL; /* nobody owns it: empty */
     }
-    /* Convert image/png from the current owner (bounded wait). */
-    XConvertSelection(conn->display, conn->atom_clipboard,
-                      conn->atom_image_png, conn->atom_fdk_selection,
-                      conn->clip_helper, CurrentTime);
-    XEvent notify;
-    if (!wait_selection_notify(conn, sel_of_clipboard(conn), &notify)) {
-        FDK_WARN("clipboard: image owner did not answer within %d ms",
-                 FDK_CLIP_WAIT_MS);
+    /* Convert image/png from the current owner (bounded wait; the
+     * shared raw reader handles the atomic case AND, since 1.4.12,
+     * an INCR offer from owners past the atomic cap). */
+    Atom type = None;
+    unsigned char *raw = convert_selection_bytes(
+        conn, sel_of_clipboard(conn), conn->atom_image_png, &type,
+        out_len);
+    if (raw == NULL) {
         return NULL;
     }
-    if (notify.xselection.property == None) {
-        return NULL; /* owner has no image */
+    if (type != conn->atom_image_png) {
+        /* The owner answered with a different type than it was asked
+         * for — not a PNG seam; refuse rather than feed garbage to
+         * the decoder. */
+        fdk_free(raw);
+        return NULL;
     }
-    return bytes_from_property(conn, out_len);
+    return raw;
 }

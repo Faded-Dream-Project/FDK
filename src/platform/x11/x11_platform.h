@@ -167,6 +167,30 @@ struct fdk_platform_connection {
     size_t clip_owned_png_len;
     Atom atom_image_png;      /* image/png                            */
 
+    /* 1.4.12: the INCR (incremental) transfer machinery — both
+     * directions ride the helper window. TX is an in-flight SERVE of
+     * a payload beyond the atomic cap: chunks stream to the
+     * REQUESTOR's window+property, each triggered by its delete of
+     * the previous chunk (PropertyNotify), ending with a zero-length
+     * chunk. The bytes point INTO the owned content (never a second
+     * copy); replacing/freeing the content aborts the flight with
+     * the graceful zero chunk. One flight at a time — a new request
+     * supersedes the old one (documented simplification). The read
+     * side is stack-local to the reading call. */
+    struct {
+        Window requestor;       /* foreign window we write chunks to  */
+        Atom property;          /* its property                       */
+        Atom type;              /* chunk property type (the target)   */
+        const unsigned char *bytes; /* the copy being streamed: the
+                                     * owned content (borrowed), or a
+                                     * session-owned re-encode (the
+                                     * Latin-1 legacy path)            */
+        size_t len;
+        size_t pos;
+        bool owns_bytes;        /* free `bytes` at flight end         */
+        bool active;
+    } clip_incr_tx;
+
     /* --- Drag and drop (1.2.0, XDND) — x11_dnd.c ---
      *
      * Receiver state: the XDND handshake runs on client messages

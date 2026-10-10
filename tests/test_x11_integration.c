@@ -3958,6 +3958,372 @@ static void clip_latin1_requestor_main(int sock, const char *want) {
     }
 }
 
+/* ---- INCR (incremental) transfer roles (1.4.12) ----
+ *
+ * The ICCCM chunked protocol exercised with raw-Xlib children, both
+ * directions: an OWNER that serves a multi-megabyte payload via INCR
+ * (proving FDK's read pump), a READER that drives deletes against
+ * FDK's serve (proving the chunk writer), and an image reader for
+ * the image/png seam. Payloads are a rotating 16-byte pattern so both
+ * sides of the fork build the identical bytes and verify WHOLESALE.
+ *
+ * arg grammar: "BYTES:SEED" (owner + text reader) or "MINBYTES"
+ * (image reader, which checks the PNG signature + a length floor
+ * instead of exact bytes). */
+
+#define INCR_TEST_CHUNK 262080 /* same conservative chunk FDK uses */
+
+static unsigned char *incr_test_payload(const char *arg,
+                                        size_t *out_len) {
+    size_t want = strtoull(arg, NULL, 10);
+    const char *colon = strchr(arg, ':');
+    unsigned char seed = (unsigned char)(colon != NULL && colon[1] != '\0'
+                                             ? colon[1]
+                                             : 'A');
+    unsigned char *buf = malloc(want);
+    if (buf == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < want; i++) {
+        /* Printable-range rotating pattern: NUL-free (clipboard TEXT
+         * is NUL-terminated by contract — embedded NULs would
+         * truncate), cheap to build, byte-position-sensitive to
+         * verify. Range 0x21..0x7E. */
+        buf[i] = (unsigned char)(0x21u + ((i * 7u + seed) % 0x5Eu));
+    }
+    *out_len = want;
+    return buf;
+}
+
+/* The foreign INCR OWNER: owns CLIPBOARD, serves UTF8_STRING in
+ * chunks. One flight at a time (the tests never overlap). */
+static void clip_incr_owner_main(int sock, const char *arg) {
+    alarm(0);
+    size_t len = 0;
+    unsigned char *payload = incr_test_payload(arg, &len);
+    if (payload == NULL) {
+        _exit(20);
+    }
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(21);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom clip = XInternAtom(dpy, "CLIPBOARD", False);
+    Atom utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+    Atom targets = XInternAtom(dpy, "TARGETS", False);
+    Atom incr = XInternAtom(dpy, "INCR", False);
+    XSetSelectionOwner(dpy, clip, w, CurrentTime);
+    if (XGetSelectionOwner(dpy, clip) != w) {
+        _exit(22);
+    }
+    XFlush(dpy);
+    (void)!write(sock, "R", 1);
+
+    Window flight_requestor = None;
+    Atom flight_property = None;
+    size_t pos = 0;
+
+    for (;;) {
+        struct pollfd pfds[2];
+        pfds[0].fd = ConnectionNumber(dpy);
+        pfds[0].events = POLLIN;
+        pfds[0].revents = 0;
+        pfds[1].fd = sock;
+        pfds[1].events = POLLIN;
+        pfds[1].revents = 0;
+        int r = poll(pfds, 2, 3000);
+        if (r < 0) {
+            _exit(23);
+        }
+        if (pfds[1].revents != 0) {
+            char c;
+            if (recv(sock, &c, 1, 0) <= 0) {
+                _exit(0);
+            }
+            _exit(0);
+        }
+        while (XPending(dpy) > 0) {
+            XEvent ev;
+            XNextEvent(dpy, &ev);
+            if (ev.type == SelectionRequest &&
+                ev.xselectionrequest.selection == clip) {
+                XSelectionRequestEvent *req = &ev.xselectionrequest;
+                Atom property = req->property != None
+                                    ? req->property
+                                    : req->target;
+                if (req->target == targets) {
+                    Atom list[1] = { utf8 };
+                    XChangeProperty(dpy, req->requestor, property,
+                                    XA_ATOM, 32, PropModeReplace,
+                                    (const unsigned char *)list, 1);
+                } else if (req->target == utf8 && property != None) {
+                    /* Seed the incremental transfer. */
+                    XSelectInput(dpy, req->requestor,
+                                 PropertyChangeMask);
+                    unsigned long estimate =
+                        (unsigned long)((len + 3u) & ~(size_t)3u);
+                    XChangeProperty(dpy, req->requestor, property,
+                                    incr, 32, PropModeReplace,
+                                    (const unsigned char *)&estimate, 1);
+                    flight_requestor = req->requestor;
+                    flight_property = property;
+                    pos = 0;
+                } else {
+                    property = None;
+                }
+                XSelectionEvent reply;
+                memset(&reply, 0, sizeof(reply));
+                reply.type = SelectionNotify;
+                reply.display = dpy;
+                reply.requestor = req->requestor;
+                reply.selection = req->selection;
+                reply.target = req->target;
+                reply.property = property;
+                reply.time = req->time;
+                XSendEvent(dpy, req->requestor, False, 0,
+                           (XEvent *)&reply);
+                XFlush(dpy);
+            } else if (ev.type == PropertyNotify &&
+                       ev.xproperty.window == flight_requestor &&
+                       ev.xproperty.atom == flight_property &&
+                       ev.xproperty.state == PropertyDelete) {
+                /* Stream the next chunk (or the terminator). */
+                size_t remain = len - pos;
+                if (remain == 0) {
+                    XChangeProperty(dpy, flight_requestor,
+                                    flight_property, utf8, 8,
+                                    PropModeReplace, NULL, 0);
+                    XSelectInput(dpy, flight_requestor, 0);
+                    flight_requestor = None;
+                } else {
+                    size_t chunk = remain > INCR_TEST_CHUNK
+                                       ? INCR_TEST_CHUNK
+                                       : remain;
+                    XChangeProperty(dpy, flight_requestor,
+                                    flight_property, utf8, 8,
+                                    PropModeReplace, payload + pos,
+                                    (int)chunk);
+                    pos += chunk;
+                }
+                XFlush(dpy);
+            }
+        }
+    }
+}
+
+/* The foreign INCR READER: converts the current owner's UTF8_STRING,
+ * drives the delete-choreography, verifies the WHOLE payload against
+ * the locally-built twin, reports "P". arg = "BYTES:SEED". */
+static void clip_incr_reader_main(int sock, const char *arg) {
+    alarm(0);
+    size_t want_len = 0;
+    unsigned char *want = incr_test_payload(arg, &want_len);
+    if (want == NULL) {
+        _exit(40);
+    }
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(41);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom clip = XInternAtom(dpy, "CLIPBOARD", False);
+    Atom utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+    Atom prop = XInternAtom(dpy, "_FDK_TEST_PROP", False);
+    Atom incr = XInternAtom(dpy, "INCR", False);
+    XSelectInput(dpy, w, PropertyChangeMask);
+    XConvertSelection(dpy, clip, utf8, prop, w, CurrentTime);
+    XFlush(dpy);
+
+    unsigned char *got = NULL;
+    size_t got_len = 0;
+    int failed = 0;
+    bool seeded = false; /* chunk handling starts only AFTER the
+                          * SelectionNotify — the seed WRITE's own
+                          * NewValue is queued BEFORE it and must not
+                          * read as a chunk (the stale-notify race the
+                          * library reader handles the same way). */
+    for (;;) {
+        XEvent ev;
+        if (XPending(dpy) == 0) {
+            struct pollfd pfd = { ConnectionNumber(dpy), POLLIN, 0 };
+            if (poll(&pfd, 1, 5000) <= 0) {
+                _exit(42); /* owner silent */
+            }
+            continue;
+        }
+        XNextEvent(dpy, &ev);
+        if (!seeded && ev.type != SelectionNotify) {
+            continue; /* pre-seed noise (the seed's NewValue echo) */
+        }
+        if (ev.type == SelectionNotify &&
+            ev.xselection.selection == clip) {
+            if (ev.xselection.property == None) {
+                _exit(43); /* refused */
+            }
+            Atom type = None;
+            int fmt = 0;
+            unsigned long n = 0, left = 0;
+            unsigned char *data = NULL;
+            if (XGetWindowProperty(dpy, w, prop, 0, 64, True,
+                                   AnyPropertyType, &type, &fmt, &n,
+                                   &left, &data) != Success) {
+                _exit(44);
+            }
+            if (type != incr) {
+                _exit(45); /* not an INCR offer — the test is wrong */
+            }
+            if (data != NULL) {
+                XFree(data);
+            }
+            got = malloc(want_len + 16);
+            if (got == NULL) {
+                _exit(46);
+            }
+            seeded = true;
+            continue;
+        }
+        if (seeded && ev.type == PropertyNotify &&
+            ev.xproperty.window == w &&
+            ev.xproperty.atom == prop &&
+            ev.xproperty.state == PropertyNewValue) {
+            Atom type = None;
+            int fmt = 0;
+            unsigned long n = 0, left = 0;
+            unsigned char *data = NULL;
+            if (XGetWindowProperty(dpy, w, prop, 0,
+                                   INCR_TEST_CHUNK / 4 + 8, True,
+                                   AnyPropertyType, &type, &fmt, &n,
+                                   &left, &data) != Success ||
+                type != utf8 || fmt != 8) {
+                failed = 1;
+                break;
+            }
+            if (n == 0) {
+                /* The zero-length terminator: verify and report. */
+                if (data != NULL) {
+                    XFree(data);
+                }
+                int ok = got_len == want_len &&
+                         memcmp(got, want, want_len) == 0;
+                (void)!write(sock, ok ? "P" : "F", 1);
+                _exit(ok ? 0 : 47);
+            }
+            if (got_len + n > want_len) {
+                failed = 1;
+                if (data != NULL) {
+                    XFree(data);
+                }
+                break;
+            }
+            memcpy(got + got_len, data, n);
+            got_len += n;
+            XFree(data);
+        }
+    }
+    _exit(failed ? 48 : 0);
+}
+
+/* The foreign INCR IMAGE reader: same choreography against the
+ * image/png target; verifies the length floor and the PNG magic (the
+ * parent cannot predict the encoder's exact bytes, and does not need
+ * to — the flight is byte-transparent). arg = "MINBYTES". */
+static void clip_incr_image_reader_main(int sock, const char *arg) {
+    alarm(0);
+    size_t min_len = strtoull(arg, NULL, 10);
+    Display *dpy = clip_child_open_display();
+    if (dpy == NULL) {
+        _exit(50);
+    }
+    Window w = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                   0, 0, 1, 1, 0, 0, 0);
+    Atom clip = XInternAtom(dpy, "CLIPBOARD", False);
+    Atom png = XInternAtom(dpy, "image/png", False);
+    Atom prop = XInternAtom(dpy, "_FDK_TEST_PROP", False);
+    Atom incr = XInternAtom(dpy, "INCR", False);
+    XSelectInput(dpy, w, PropertyChangeMask);
+    XConvertSelection(dpy, clip, png, prop, w, CurrentTime);
+    XFlush(dpy);
+
+    /* Bound: the test image is ~5 MB; 16 MB is a generous ceiling. */
+    unsigned char *buf = malloc(16u * 1024u * 1024u);
+    if (buf == NULL) {
+        _exit(51);
+    }
+    size_t got_len = 0;
+    bool seeded = false; /* as in the text reader: the seed's own
+                          * NewValue precedes the SelectionNotify. */
+    for (;;) {
+        XEvent ev;
+        if (XPending(dpy) == 0) {
+            struct pollfd pfd = { ConnectionNumber(dpy), POLLIN, 0 };
+            if (poll(&pfd, 1, 5000) <= 0) {
+                _exit(52);
+            }
+            continue;
+        }
+        XNextEvent(dpy, &ev);
+        if (!seeded && ev.type != SelectionNotify) {
+            continue;
+        }
+        if (ev.type == SelectionNotify &&
+            ev.xselection.selection == clip) {
+            if (ev.xselection.property == None) {
+                _exit(53);
+            }
+            Atom type = None;
+            int fmt = 0;
+            unsigned long n = 0, left = 0;
+            unsigned char *data = NULL;
+            if (XGetWindowProperty(dpy, w, prop, 0, 64, True,
+                                   AnyPropertyType, &type, &fmt, &n,
+                                   &left, &data) != Success ||
+                type != incr) {
+                _exit(54); /* not an INCR offer — test premise wrong */
+            }
+            if (data != NULL) {
+                XFree(data);
+            }
+            seeded = true;
+            continue;
+        }
+        if (seeded && ev.type == PropertyNotify &&
+            ev.xproperty.window == w &&
+            ev.xproperty.atom == prop &&
+            ev.xproperty.state == PropertyNewValue) {
+            Atom type = None;
+            int fmt = 0;
+            unsigned long n = 0, left = 0;
+            unsigned char *data = NULL;
+            if (XGetWindowProperty(dpy, w, prop, 0,
+                                   INCR_TEST_CHUNK / 4 + 8, True,
+                                   AnyPropertyType, &type, &fmt, &n,
+                                   &left, &data) != Success ||
+                type != png || fmt != 8) {
+                _exit(55);
+            }
+            if (n == 0) {
+                if (data != NULL) {
+                    XFree(data);
+                }
+                int ok = got_len >= min_len && got_len > 8 &&
+                         buf[0] == 0x89 && buf[1] == 'P' &&
+                         buf[2] == 'N' && buf[3] == 'G';
+                (void)!write(sock, ok ? "P" : "F", 1);
+                _exit(ok ? 0 : 56);
+            }
+            if (got_len + n > 16u * 1024u * 1024u) {
+                _exit(57);
+            }
+            memcpy(buf + got_len, data, n);
+            got_len += n;
+            XFree(data);
+        }
+    }
+}
+
 /* Spawns a clipboard child role and returns its pid + socket. */
 static pid_t clip_spawn(void (*fn)(int, const char *), const char *arg,
                         int *out_sock) {
@@ -4226,6 +4592,163 @@ static void test_clipboard(void) {
                WEXITSTATUS(status) == 0);
         printf("[ok] clipboard: multi-byte UTF-8 from a foreign owner "
                "round-trips exactly\n");
+    }
+
+    /* --- 8. INCR READ (1.4.12): a foreign owner serves ~4.7 MiB in
+     * chunks; FDK's read pump reassembles and returns the WHOLE
+     * payload, byte-exact against the locally-built twin. --- */
+    {
+        size_t want_len = 4882432; /* ~4.65 MiB: 19 chunks */
+        char arg[32];
+        snprintf(arg, sizeof arg, "%zu:R", want_len);
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_incr_owner_main, arg, &sock);
+        assert(pid > 0);
+        alarm(20);
+        char c = 0;
+        assert(recv(sock, &c, 1, 0) == 1 && c == 'R');
+        alarm(0);
+        char *big = fdk_clipboard_get_text(ctx);
+        assert(big != NULL);
+        assert(strlen(big) == want_len);
+        /* Wholesale verification against the same rotating pattern. */
+        int mismatch = -1;
+        for (size_t i = 0; i < want_len; i++) {
+            unsigned char expect =
+                (unsigned char)(0x21u + ((i * 7u + 'R') % 0x5Eu));
+            if ((unsigned char)big[i] != expect) {
+                mismatch = (int)i;
+                break;
+            }
+        }
+        assert(mismatch < 0);
+        fdk_free(big);
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] clipboard INCR read: %zu bytes reassembled from "
+               "chunks, byte-exact\n",
+               want_len);
+    }
+
+    /* --- 9. INCR SERVE (1.4.12): FDK owns the big text; a foreign
+     * reader drives the delete choreography against FDK's chunk
+     * writer (the parent pumps dispatch — the chunks are
+     * event-driven). --- */
+    {
+        size_t want_len = 4882432;
+        char arg[32];
+        snprintf(arg, sizeof arg, "%zu:Q", want_len);
+        /* The payload itself: same rotating pattern, NUL-free. */
+        char *big = malloc(want_len + 1);
+        assert(big != NULL);
+        for (size_t i = 0; i < want_len; i++) {
+            big[i] = (char)(unsigned char)(0x21u +
+                                           ((i * 7u + 'Q') % 0x5Eu));
+        }
+        big[want_len] = '\0';
+        assert(fdk_ok(fdk_clipboard_set_text(ctx, big)));
+        free(big);
+
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_incr_reader_main, arg, &sock);
+        assert(pid > 0);
+        alarm(20);
+        char c = 0;
+        for (int i = 0; i < 400; i++) {
+            (void)fdk_pump_events(ctx, 25);
+            ssize_t n = recv(sock, &c, 1, MSG_DONTWAIT);
+            if (n == 1) {
+                break;
+            }
+        }
+        alarm(0);
+        if (c != 'P') {
+            int st = 0;
+            (void)waitpid(pid, &st, 0);
+            fprintf(stderr, "clipboard INCR reader child failed: "
+                            "exit=%d sig=%d msg=%d\n",
+                    WIFEXITED(st) ? WEXITSTATUS(st) : -1,
+                    WIFSIGNALED(st) ? WTERMSIG(st) : 0, (int)c);
+            assert(0);
+        }
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+        printf("[ok] clipboard INCR serve: foreign reader verified %zu "
+               "streamed bytes wholesale\n",
+               want_len);
+    }
+
+    /* --- 10. INCR IMAGE (1.4.12): a noisy ~5 MP surface encodes to
+     * >4 MiB of PNG; the clipboard streams it incrementally to a
+     * foreign reader (signature + length floor verified there), and
+     * FDK's own fast path still decodes pixel-exact. --- */
+    {
+        fdk_surface *img = NULL;
+        assert(fdk_ok(fdk_surface_create_format(
+            1250, 1000, FDK_SURFACE_FORMAT_ARGB8888, &img)));
+        fdk_surface_info info;
+        assert(fdk_ok(fdk_surface_get_info(img, &info)));
+        unsigned long lcg = 0x12345678u;
+        for (int y = 0; y < 1000; y++) {
+            for (int x = 0; x < 1250; x++) {
+                lcg = lcg * 1103515245u + 12345u;
+                fdk_u32 px = 0xFF000000u | (fdk_u32)(lcg >> 8);
+                info.pixels[(size_t)y * (size_t)info.stride +
+                            (size_t)x] = px;
+            }
+        }
+        assert(fdk_ok(fdk_clipboard_set_image(ctx, img)));
+
+        int sock = -1;
+        pid_t pid = clip_spawn(clip_incr_image_reader_main,
+                               "4194304", &sock);
+        assert(pid > 0);
+        alarm(30);
+        char c = 0;
+        for (int i = 0; i < 600; i++) {
+            (void)fdk_pump_events(ctx, 25);
+            ssize_t n = recv(sock, &c, 1, MSG_DONTWAIT);
+            if (n == 1) {
+                break;
+            }
+        }
+        alarm(0);
+        if (c != 'P') {
+            int st = 0;
+            (void)waitpid(pid, &st, 0);
+            fprintf(stderr, "clipboard INCR image reader child failed: "
+                            "exit=%d sig=%d msg=%d\n",
+                    WIFEXITED(st) ? WEXITSTATUS(st) : -1,
+                    WIFSIGNALED(st) ? WTERMSIG(st) : 0, (int)c);
+            assert(0);
+        }
+        close(sock);
+        int status = 0;
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+               WEXITSTATUS(status) == 0);
+
+        /* The fast path: FDK decodes its own copy pixel-exact. */
+        fdk_surface *back = fdk_clipboard_get_image(ctx);
+        assert(back != NULL);
+        fdk_surface_info bi;
+        assert(fdk_ok(fdk_surface_get_info(back, &bi)));
+        assert(bi.width == 1250 && bi.height == 1000);
+        for (int y = 0; y < 1000; y += 37) {
+            for (int x = 0; x < 1250; x += 29) {
+                assert(bi.pixels[(size_t)y * (size_t)bi.stride +
+                                 (size_t)x] ==
+                       info.pixels[(size_t)y * (size_t)info.stride +
+                                   (size_t)x]);
+            }
+        }
+        fdk_surface_destroy(back);
+        fdk_surface_destroy(img);
+        printf("[ok] clipboard INCR image: >4MiB PNG streamed to a "
+               "foreign reader; fast-path decode pixel-exact\n");
     }
 
     fdk_shutdown(ctx);
