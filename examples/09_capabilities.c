@@ -97,7 +97,7 @@ static struct {
     fdk_rect drop_rect;
     fdk_widget *drop_status;
     /* dialog section */
-    fdk_widget *dlg_btns[5]; /* File Files Folder Folders | Ask */
+    fdk_widget *dlg_btns[6]; /* File Files Folder Folders Icons | Ask */
     fdk_widget *dialog_status;
     /* drag section */
     fdk_widget *drag_panel;
@@ -468,6 +468,28 @@ static void dlg_folders_clicked(fdk_widget *w, void *user) {
     (void)w; (void)user;
     open_dialog(FDK_FILE_DIALOG_OPEN_FOLDERS);
 }
+static void dlg_icons_clicked(fdk_widget *w, void *user) {
+    /* 1.4.7: OPEN_FILE on the item grid — the GTK list/icon toggle,
+     * seeded through options.view (the dialog's own "Icons" checkbox
+     * flips it live). */
+    (void)w; (void)user;
+    fdk_file_dialog_options opts = {0};
+    opts.kind = FDK_FILE_DIALOG_OPEN_FILE;
+    opts.title = "Icons";
+    opts.modal = true;
+    opts.view = FDK_FILE_DIALOG_VIEW_ICONS;
+    fdk_result r = fdk_dialog_open_file(app.ctx, &opts,
+                                        file_dialog_done,
+                                        (void *)(intptr_t)
+                                            FDK_FILE_DIALOG_OPEN_FILE,
+                                        NULL);
+    if (!fdk_ok(r)) {
+        set_status(app.dialog_status, "Dialog failed to open (%s)",
+                   fdk_result_to_string(r));
+        printf("PHASE: dialog error 0\n");
+        fflush(stdout);
+    }
+}
 
 static void ask_done(fdk_dialog_response response, void *user) {
     (void)user;
@@ -678,7 +700,7 @@ static void relayout(void) {
     /* DIALOGS */
     fdk_widget_set_bounds(app.h_dlg, (fdk_rect){x, y, w, 20});
     y += 24;
-    lay_button_row(app.dlg_btns, 5, x, y, 28);
+    lay_button_row(app.dlg_btns, 6, x, y, 28);
     y += 34;
     fdk_widget_set_bounds(app.dialog_status, (fdk_rect){x, y, w, 20});
     y += 30;
@@ -792,13 +814,17 @@ int main(void) {
                             &app.dlg_btns[2]);
     (void)fdk_button_create(app.root, app.font, "Select Folders",
                             &app.dlg_btns[3]);
-    (void)fdk_button_create(app.root, app.font, "Ask Yes/No",
+    /* 1.4.7: the icon-mode browsing surface (options.view). */
+    (void)fdk_button_create(app.root, app.font, "Icons View",
                             &app.dlg_btns[4]);
+    (void)fdk_button_create(app.root, app.font, "Ask Yes/No",
+                            &app.dlg_btns[5]);
     fdk_button_set_on_activate(app.dlg_btns[0], dlg_file_clicked, NULL);
     fdk_button_set_on_activate(app.dlg_btns[1], dlg_files_clicked, NULL);
     fdk_button_set_on_activate(app.dlg_btns[2], dlg_folder_clicked, NULL);
     fdk_button_set_on_activate(app.dlg_btns[3], dlg_folders_clicked, NULL);
-    fdk_button_set_on_activate(app.dlg_btns[4], ask_clicked, NULL);
+    fdk_button_set_on_activate(app.dlg_btns[4], dlg_icons_clicked, NULL);
+    fdk_button_set_on_activate(app.dlg_btns[5], ask_clicked, NULL);
     (void)fdk_label_create(app.root, app.font, "Outcome: -",
                            &app.dialog_status);
     fdk_label_set_mode(app.dialog_status, FDK_LABEL_ELLIPSIZE);

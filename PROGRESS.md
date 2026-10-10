@@ -9,8 +9,9 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.6** (the grid's
-rubber band + themed cells), by a full in-depth code review — every claim below was
+Last audited: 2026-10-10, at milestone **1.4.7** (the grid's
+edge-chasing band, cell double-click activation, and the file
+dialog's icon mode), by a full in-depth code review — every claim below was
 re-verified against the tree, not copied from docs. THE AUDIT'S
 OWN FIRST CATCH: the ledger's "themed tooltips" candidate was
 stale (the 1.3.2 tooltip has been fully themed since birth —
@@ -19,17 +20,19 @@ truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.6** (the IconView rubber band +
-  themed cell metrics; 1.4.5 shipped X11 HiDPI + the item grid)
+- **HEAD:** milestone **1.4.7** (the IconView band auto-scroll +
+  cell double-click activation + the file dialog's icon browsing
+  surface; 1.4.6 shipped the grid's rubber band + themed cells)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**, primary-selection)
 - **Public API:** **570 exported symbols**, `make verify-exports` OK in
   debug AND release
 - **Tests:** headless suite all-pass (incl. the 1.4.4 + iconview
-  suites); X11 integration suite all-pass (real Xvfb, real input,
-  incl. the modern-batch, HiDPI (private 192-dpi server), and
-  iconview GUI groups); 32 test files
+  suites — the double-click activation group since 1.4.7); X11
+  integration suite all-pass — **145 [ok]** (real Xvfb, real input,
+  incl. the modern-batch, HiDPI (private 192-dpi server), iconview
+  GUI, and the file-dialog icon-mode groups); 32 test files
 - **Scale:** ~56k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
 
@@ -45,7 +48,9 @@ menu-bar / context menu (accelerators + mnemonics), combo (editable),
 slider (marks/ticks + labels; vertical orientation), **iconview**
 (the 1.4.5 item grid: glyph cells in a re-flowing column field,
 the List's selection model, grid keyboard nav, batch fills; the
-1.4.6 rubber band + themed cell metrics),
+1.4.6 rubber band + themed cell metrics; the 1.4.7 band
+edge-chasing auto-scroll BOTH axes + cell double-click
+activation),
 spinbutton,
 toolbar, tooltip, spinner, link-button (role on button), paned,
 expander, statusbar, stack + stackswitcher, revealer (slide modes;
@@ -55,7 +60,10 @@ entry's icon slots since 1.4.4), **menu button**
 (attached-popup hybrid — the hamburger), dialog (+ modal run),
 **file dialog** (OPEN/SAVE, places sidebar, filters, breadcrumb path
 bar, Ctrl+L location entry — modernized 1.4.0; XDG recently-used
-place + accept-time recording since 1.4.4), **color button** (the
+place + accept-time recording since 1.4.4; **icon mode since
+1.4.7** — options.view seeds the IconView browsing surface, the
+toolbar's Icons checkbox flips it live, and every accept path
+reads through the surface abstraction), **color button** (the
 color-well swatch that opens the ColorChooser — 1.4.4; alpha
 checkerboard, heap-token lifetime guard), path-bar composite,
 window decorations (server-side deco bar). Entry icon slots
@@ -118,13 +126,26 @@ sidebar rhythm).
 
 ## What's left (the authoritative backlog)
 
-### NEXT — milestone 1.4.7 (from the parity ledger, value order)
+### NEXT — milestone 1.4.8 (fresh "serious toolkit" audit, value order)
 
-1. **File dialog icon mode** — the IconView as the browsing
-   surface (GtkFileChooser's list/icon toggle)
-2. **IconView band auto-scroll** — the List's edge-chasing
-   machinery, grid-shaped (the last IconView delta)
-3. **IME completion surface** — LATER by the no-bus policy until a
+The widget families are shipped across the board; the remaining
+work is what a REAL application still cannot build on FDK today:
+
+1. **Multi-line text editor (the TextView-class widget)** — the
+   known big gap: Entry is single-line only. Needs wrapping,
+   a cursor + selection spanning lines, keyboard nav over
+   visual lines, scroll integration, and undo integration.
+2. **Label markup** — rich spans (bold/italic/color, maybe size)
+   in labels/buttons/tooltips: a tiny attribute-run layer over
+   the shaping engine, no HTML/XML parser.
+3. **Image loading surfaced to apps** — stb_image already decodes
+   internally; apps need `fdk_surface_from_file` (PNG/JPEG at
+   minimum) + a picture widget with fit modes.
+4. **Clipboard image format** — image/png on the clipboard
+   (screenshots and copied renders round-trip with the desktop).
+5. **Window state surfaces** — fullscreen/maximize/minimize
+   requests + state queries on both backends (EWMH + xdg_toplevel).
+6. **IME completion surface** — LATER by the no-bus policy until a
    protocol joins third_party/wayland-protocols
 
 ### LATER (real, not next)

@@ -5664,10 +5664,11 @@ static void test_file_dialog_gui(void) {
     printf("[ok] file dialog: Escape answers CANCELLED (count 0)\n");
 
     /* --- 3. OPEN_FOLDER via the accept BUTTON (the click path):
-     * body child order is fixed by creation — 1.4.0: [up, home,
-     * hidden, combo, path_bar, path_entry, places, list, status,
-     * accept, cancel]; accept is index 9 (the breadcrumb bar and its
-     * hidden location entry are indices 4 and 5). */
+     * body child order is fixed by creation — 1.4.7: [up, home,
+     * hidden, view_toggle, combo, path_bar, path_entry, places,
+     * list, grid, status, accept, cancel]; accept is index 11 (the
+     * breadcrumb bar and its hidden location entry are indices 5
+     * and 6; the Icons checkbox is 3, the icon-mode grid is 9). */
     fdk_file_dialog_options o3 = {0};
     o3.kind = FDK_FILE_DIALOG_OPEN_FOLDER;
     o3.start_dir = dir;
@@ -5679,7 +5680,7 @@ static void test_file_dialog_gui(void) {
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
         fdk_widget *body = fdk_widget_child_at(droot, 0);
         assert(body != NULL);
-        fdk_widget *accept = fdk_widget_child_at(body, 9);
+        fdk_widget *accept = fdk_widget_child_at(body, 11);
         assert(accept != NULL);
         fdk_rect ab = fdk_widget_get_bounds(accept);
         /* The list holds one row (sub/): select it first. */
@@ -5704,6 +5705,127 @@ static void test_file_dialog_gui(void) {
     }
     printf("[ok] file dialog: OPEN_FOLDER button accept -> %s "
            "(stat-verified directory)\n", fd_result.paths[0]);
+
+    /* --- 3b. ICON MODE (1.4.7): options.view starts the grid; the
+     * keyboard accept path runs through the IconView (the surface
+     * abstraction reads the grid's selection); the cell labels drop
+     * the list view's trailing slash (the glyph carries dir-ness). */
+    fdk_file_dialog_options o3b = {0};
+    o3b.kind = FDK_FILE_DIALOG_OPEN_FILE;
+    o3b.start_dir = dir;
+    o3b.view = FDK_FILE_DIALOG_VIEW_ICONS;
+    assert(fdk_ok(fdk_dialog_open_file(ctx, &o3b, file_dialog_done,
+                                       NULL, &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    dxid = fdk_window_xid(dlg);
+    {
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+        fdk_widget *body = fdk_widget_child_at(droot, 0);
+        fdk_widget *grid = fdk_widget_child_at(body, 9);
+        fdk_widget *rows = fdk_widget_child_at(body, 8);
+        assert(grid != NULL && rows != NULL);
+        assert(fdk_widget_get_visible(grid));
+        assert(!fdk_widget_get_visible(rows));
+        assert(fdk_iconview_item_count(grid) == 2);
+        assert(strcmp(fdk_iconview_item_label(grid, 0), "sub") == 0);
+        assert(fdk_iconview_item_icon(grid, 0) == FDK_ROW_ICON_FOLDER);
+        assert(strcmp(fdk_iconview_item_label(grid, 1),
+                      "note.txt") == 0);
+        assert(fdk_iconview_item_icon(grid, 1) == FDK_ROW_ICON_FILE);
+        /* The list surface stays empty until a flip refills it. */
+        assert(fdk_list_row_count(rows) == 0);
+    }
+    /* Down Down -> note.txt (sub sorts first); Enter accepts on
+     * grid activation. */
+    x11_send_key_event(send_dpy, dxid, KeyPress, 116);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 116);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 36);
+    (void)fdk_pump_events(ctx, 250);
+    assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
+    assert(fd_result.count == 1);
+    assert(strcmp(fd_result.paths[0], want_file) == 0);
+    printf("[ok] file dialog icon mode: grid surface filled (glyph "
+           "carries dir-ness), keyboard accept through the "
+           "IconView -> %s\n", want_file);
+
+    /* --- 3c. Icon mode navigation + the LIVE flip: a real double-
+     * click on the sub/ CELL descends; clicking the toolbar's Icons
+     * checkbox swaps back to the rows (refilled); Up re-lists the
+     * scratch root in list form (slash suffix intact). */
+    fdk_file_dialog_options o3c = {0};
+    o3c.kind = FDK_FILE_DIALOG_OPEN_FILE;
+    o3c.start_dir = dir;
+    o3c.view = FDK_FILE_DIALOG_VIEW_ICONS;
+    assert(fdk_ok(fdk_dialog_open_file(ctx, &o3c, file_dialog_done,
+                                       NULL, &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    dxid = fdk_window_xid(dlg);
+    {
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+        fdk_widget *body = fdk_widget_child_at(droot, 0);
+        fdk_widget *grid = fdk_widget_child_at(body, 9);
+        assert(fdk_iconview_item_count(grid) == 2);
+        /* iv -> scrollview -> grid container -> cell 0. The
+         * scrollview's children are [vbar, hbar, content] until a
+         * shown bar raises itself over the content — find the grid
+         * container as the child WITH children (the bars are
+         * childless). */
+        fdk_widget *gscroll = fdk_widget_child_at(grid, 0);
+        assert(gscroll != NULL);
+        fdk_widget *gcont = NULL;
+        for (size_t ci = 0; ci < fdk_widget_child_count(gscroll);
+             ci++) {
+            fdk_widget *ch = fdk_widget_child_at(gscroll, ci);
+            if (fdk_widget_child_count(ch) > 0) {
+                gcont = ch;
+                break;
+            }
+        }
+        assert(gcont != NULL);
+        fdk_widget *cell0 = fdk_widget_child_at(gcont, 0);
+        assert(cell0 != NULL);
+        fdk_rect cb = fdk_widget_get_absolute_bounds(cell0);
+        /* The double click: two presses inside the window's
+         * predicate window (back-to-back with a short pump). */
+        x11_click(send_dpy, dxid, cb.x + cb.width / 2,
+                  cb.y + 12);
+        (void)fdk_pump_events(ctx, 60);
+        x11_click(send_dpy, dxid, cb.x + cb.width / 2,
+                  cb.y + 12);
+        (void)fdk_pump_events(ctx, 250);
+        assert(fdk_iconview_item_count(grid) == 0);
+
+        /* The live flip: the Icons checkbox (toolbar, body child
+         * 3). */
+        fdk_widget *vt = fdk_widget_child_at(body, 3);
+        assert(vt != NULL);
+        fdk_rect vb = fdk_widget_get_absolute_bounds(vt);
+        x11_click(send_dpy, dxid, vb.x + 10, vb.y + vb.height / 2);
+        (void)fdk_pump_events(ctx, 250);
+        fdk_widget *rows = fdk_widget_child_at(body, 8);
+        assert(fdk_widget_get_visible(rows));
+        assert(!fdk_widget_get_visible(grid));
+        assert(fdk_list_row_count(rows) == 0); /* still in sub/ */
+
+        /* Up: back to the scratch root, the LIST form (slash). */
+        fdk_widget *up = fdk_widget_child_at(body, 0);
+        fdk_rect ub = fdk_widget_get_absolute_bounds(up);
+        x11_click(send_dpy, dxid, ub.x + 8, ub.y + ub.height / 2);
+        (void)fdk_pump_events(ctx, 250);
+        assert(fdk_list_row_count(rows) == 2);
+        assert(strcmp(fdk_list_row_text(rows, 0), "sub/") == 0);
+    }
+    /* Escape closes the still-open dialog. */
+    x11_send_key_event(send_dpy, dxid, KeyPress, 9);
+    (void)fdk_pump_events(ctx, 250);
+    assert(fd_result.outcome == FDK_FILE_DIALOG_CANCELLED);
+    printf("[ok] file dialog icon mode: cell double-click descends, "
+           "the Icons checkbox flips the surface live, Up re-lists "
+           "in list form\n");
 
     /* --- 4. SAVE, fresh name, keyboard only: the Name row holds the
      * initial focus; Enter in it is the Save activation. No file
@@ -5875,8 +5997,8 @@ static void test_file_dialog_gui(void) {
         fdk_widget *droot = NULL;
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
         fdk_widget *body = fdk_widget_child_at(droot, 0);
-        fdk_widget *pbar = fdk_widget_child_at(body, 4);
-        fdk_widget *pentry = fdk_widget_child_at(body, 5);
+        fdk_widget *pbar = fdk_widget_child_at(body, 5);
+        fdk_widget *pentry = fdk_widget_child_at(body, 6);
         assert(pbar != NULL && pentry != NULL);
 
         /* At rest: breadcrumbs visible, location entry hidden. */
@@ -5932,7 +6054,7 @@ static void test_file_dialog_gui(void) {
         x11_send_key_event(send_dpy, dxid, KeyPress, 116); /* Down */
         (void)fdk_pump_events(ctx, 150);
         {
-            fdk_widget *accept = fdk_widget_child_at(body, 9);
+            fdk_widget *accept = fdk_widget_child_at(body, 11);
             assert(accept != NULL);
             fdk_rect ab = fdk_widget_get_bounds(accept);
             x11_send_pointer_event(send_dpy, dxid, ButtonPress,
@@ -7129,7 +7251,7 @@ static void test_modern_batch_gui(void) {
             assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
             fdk_widget *body = fdk_widget_child_at(droot, 0);
             assert(body != NULL);
-            fdk_widget *places = fdk_widget_child_at(body, 6);
+            fdk_widget *places = fdk_widget_child_at(body, 7);
             assert(places != NULL);
             assert(fdk_list_row_count(places) >= 2);
             assert(strcmp(fdk_list_row_text(places, 0),
@@ -7157,7 +7279,7 @@ static void test_modern_batch_gui(void) {
             fdk_widget *droot2 = NULL;
             assert(fdk_ok(fdk_window_get_root(dlg, &droot2)));
             fdk_widget *body2 = fdk_widget_child_at(droot2, 0);
-            fdk_widget *flist = fdk_widget_child_at(body2, 7);
+            fdk_widget *flist = fdk_widget_child_at(body2, 8);
             assert(fdk_list_row_count(flist) == 2);
             assert(strcmp(fdk_list_row_text(flist, 0),
                           "note.txt") == 0);
@@ -7473,6 +7595,86 @@ static void test_iconview_gui(void) {
     (void)fdk_pump_events(ctx, 150);
     assert(fdk_iconview_get_selected(iv) == 8);
     printf("[ok] iconview GUI: Down steps a whole grid row\n");
+
+    /* --- 1.4.7: double-click activation through real input. The
+     * pair lands on item 8's cell (row 2, column 0: center (48,
+     * 218) in view space -> window (58, 228)). */
+    ivgui_acts = 0;
+    ivgui_last = 999;
+    x11_click(send, xid, 58, 228);
+    (void)fdk_pump_events(ctx, 60);
+    x11_click(send, xid, 58, 228);
+    (void)fdk_pump_events(ctx, 150);
+    assert(ivgui_acts == 1 && ivgui_last == 8);
+    printf("[ok] iconview GUI: a real double-click pair activates "
+           "the cell's item\n");
+
+    /* --- 1.4.7: the band's edge-chasing auto-scroll (grid-shaped,
+     * vertical — the horizontal chase is structurally dormant: the
+     * grid's columns always fit the arranged width, so x never
+     * clamps away from 0). A held press on EMPTY grid space at the
+     * bottom edge sweeps and chases: the timer scrolls, the band
+     * (viewport-space) extends over newly revealed rows. */
+    {
+        fdk_window *win2 = NULL;
+        fdk_window_options w2 = { .title = "iv-autoscroll",
+                                  .width = 460, .height = 220 };
+        assert(fdk_ok(fdk_window_create(ctx, &w2, &win2)));
+        fdk_widget *root2 = NULL;
+        (void)fdk_window_get_root(win2, &root2);
+        fdk_widget *iv2 = NULL;
+        assert(fdk_ok(fdk_iconview_create(root2, font, &iv2)));
+        fdk_iconview_set_selection_mode(iv2,
+                                        FDK_LIST_SELECTION_MULTIPLE);
+        fdk_iconview_begin_batch(iv2);
+        for (int i = 0; i < 40; i++) {
+            char lab[16];
+            snprintf(lab, sizeof(lab), "g%d", i);
+            (void)fdk_iconview_append(iv2, lab, FDK_ROW_ICON_FILE);
+        }
+        fdk_iconview_end_batch(iv2);
+        fdk_widget_arrange(iv2, (fdk_rect){0, 0, 460, 220});
+        fdk_window_show(win2);
+        (void)fdk_pump_events(ctx, 150);
+        Window xid2 = (Window)fdk_window_xid(win2);
+        fdk_widget *sc2 = fdk_widget_child_at(iv2, 0);
+        fdk_i32 ox0 = 0, oy0 = 0;
+        fdk_scrollview_get_scroll_offset(sc2, &ox0, &oy0);
+        assert(oy0 == 0);
+
+        /* The sweep needs a real 2-D shape: a stationary hold at
+         * empty margin x selects NOTHING in a grid (cells must
+         * INTERSECT the band — unlike full-width list rows). So:
+         * press in the empty right margin (x=420, past the last
+         * column's 396), drag diagonally to (150, 212) — inside
+         * column 1's span AND inside the bottom edge zone (viewport
+         * 220 tall: the zone starts at 204) — then hold: the timer
+         * chases while the band covers columns 1..3 and every row
+         * the growing offset reveals. */
+        x11_send_pointer_event(send, xid2, ButtonPress,
+                               ButtonPressMask, 420, 30, 1);
+        (void)fdk_pump_events(ctx, 60);
+        x11_send_pointer_event(send, xid2, MotionNotify,
+                               PointerMotionMask, 150, 212, 0);
+        (void)fdk_pump_events(ctx, 60);
+        for (int i = 0; i < 48; i++) {
+            (void)fdk_pump_events(ctx, 25);
+        }
+        fdk_i32 ox1 = 0, oy1 = 0;
+        fdk_scrollview_get_scroll_offset(sc2, &ox1, &oy1);
+        assert(oy1 > oy0 + 300); /* many ticks' worth of chasing */
+        size_t sel2 = fdk_iconview_selected_count(iv2);
+        assert(sel2 > 12); /* beyond one viewport's rows          */
+        x11_send_pointer_event(send, xid2, ButtonRelease,
+                               ButtonReleaseMask, 150, 212, 1);
+        (void)fdk_pump_events(ctx, 150);
+        assert(fdk_iconview_selected_count(iv2) == sel2);
+        printf("[ok] iconview GUI: band auto-scroll chased the "
+               "bottom edge %dpx and swept %zu items\n", oy1, sel2);
+
+        fdk_window_destroy(win2);
+        (void)fdk_pump_events(ctx, 100);
+    }
 
     XCloseDisplay(send);
     fdk_window_destroy(win);

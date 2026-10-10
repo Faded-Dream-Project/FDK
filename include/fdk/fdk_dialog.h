@@ -178,6 +178,17 @@ typedef enum fdk_file_dialog_kind {
     FDK_FILE_DIALOG_SAVE_FILE   = 4, /* one target path to WRITE      */
 } fdk_file_dialog_kind;
 
+/* The browsing surface (1.4.7): the classic List rows, or the
+ * item GRID (the IconView — GTK's list/icon toggle). Both surfaces
+ * carry the same entry indexes, the same selection model, and the
+ * same activation gesture (double-click opens); the toolbar's
+ * "Icons" checkbox flips between them at any time. Zero (LIST)
+ * is the default and the pre-1.4.7 behavior. */
+typedef enum fdk_file_dialog_view {
+    FDK_FILE_DIALOG_VIEW_LIST = 0,
+    FDK_FILE_DIALOG_VIEW_ICONS,
+} fdk_file_dialog_view;
+
 /* SAVE_FILE (1.2.3) differs from the OPEN kinds on one axis,
  * honestly: paths[0] is where the application SHOULD write — the
  * file may not exist yet (the usual save-as case), so no existence
@@ -231,6 +242,10 @@ typedef struct fdk_file_dialog_options {
                               converges on — see the section below).
                               Zero (the default) shows the place and
                               records acceptances. Ignored by SAVE. */
+    fdk_file_dialog_view view; /* 1.4.7: the browsing surface —
+                              FDK_FILE_DIALOG_VIEW_ICONS starts the
+                              dialog on the item grid; zero (LIST)
+                              keeps the classic rows. */
 } fdk_file_dialog_options;
 
 /* Called once, from inside event dispatch, when the dialog closes.

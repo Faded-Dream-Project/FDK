@@ -4473,11 +4473,51 @@ The 1.4.5 list shipped in full.
 
 The 1.4.6 list shipped in full.
 
-The NEXT list (1.4.7 candidates, in rough value order): the
-FILE DIALOG's icon mode (the IconView as the browsing surface —
-GtkFileChooser's list/icon toggle); the IconView band's
-edge-chasing AUTO-SCROLL (the List's 1.4.3 machinery, grid-
-shaped — the last IconView delta); and the IME completion
-surface (preedit is display-only; needs a real IME protocol
-surface — LATER by the no-bus policy until a protocol joins
-third_party/wayland-protocols).
+The 1.4.7 list shipped in full.
+
+1.4.7 — the grid comes of age. The IconView's rubber band learned
+to CHASE: the List's 1.4.3 edge-holding timer, grid-shaped (both
+axes — though the horizontal chase is structurally dormant, since
+the grid's columns always fit the arranged width, the x clamps at
+zero and only the y axis ever moves; the code is honest about
+it and the tick disarms when nothing moved). The cells deliver
+the double-click ACTIVATION the header claimed since 1.4.5 (the
+List's predicate, same-item pairs, triple re-arm — a doc/impl
+mismatch flushed out by the milestone's audit). And the FILE
+DIALOG grew its icon mode: options.view seeds the surface, the
+toolbar's "Icons" checkbox flips it live (the location-mode
+discipline — flip, arrange, fill, focus), the accept/validation
+paths read through a surface abstraction (List and IconView
+carry the same entry indexes), and the grid's labels drop the
+list view's trailing slash — the folder glyph carries dir-ness.
+
+The milestone's structural find: the IconView never had the
+List's scrollview SELF-SYNC on relayout ("set_bounds does not
+run arrange hooks — dialogs position surfaces by hand"). The
+file dialog's body arrange uses set_bounds, so the grid's
+internal scrollview stayed at its creation 0x0 — nothing
+painted, scrolled, or hit-tested. Fixed the List's way (relayout
+re-syncs the internals at the view's current bounds), plus a
+latent 1.4.5 double-offset in iv_arrange itself (the assigned
+rect's x/y leaked into the child's parent-relative bounds — every
+arrange site at x=0 had hidden it). Both caught live by the new
+GUI tests, both now pinned by them.
+
+Battery at 1.4.7: debug + release zero warnings; headless all
+pass; X11 integration 145 [ok] (the icon-mode keyboard accept,
+the cell double-click descent, the live flip, the 576px edge
+chase sweeping 27 items — all through real X input); X11
+examples 12/12; sway examples 12/12; interop, both tooltip rigs,
+compositor-death all PASS; verify-exports 570 in both configs.
+
+The NEXT list (fresh audit, in rough value order): a serious
+TOOLKIT audit pass — what a real application still cannot build
+on FDK today (the multi-line text editor is the known big gap:
+Entry is single-line; a TextView-class widget with wrapping,
+cursor/selection across lines, and scroll integration is the
+last widget-family hole); rich label MARKUP (bold/italic/color
+spans); image LOADING surfaced to apps (stb_image decodes
+internally — apps need fdk_surface_from_file + a picture
+widget); clipboard IMAGE formats; window STATE surfaces
+(fullscreen/maximize/minimize ops); the IME completion surface
+(still LATER by the no-bus policy).

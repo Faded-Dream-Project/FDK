@@ -526,6 +526,50 @@ static void test_rubber_band(void) {
            "present live and gone after release\n");
 }
 
+/* ---- 1.4.7: double-click activation ----
+ *
+ * The cells deliver what the header claimed since 1.4.5: two rapid
+ * presses on the SAME item activate; two presses on DIFFERENT
+ * items select only; a triple press activates exactly once (the
+ * re-arm rule). The window-less predicate is clock-driven — the
+ * test drives it with presses back-to-back (inside the double-
+ * click window by construction). */
+static void test_double_click_activation(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *iv = make_view(root, NULL);
+    g_activates = 0;
+    g_last_activated = 999;
+    fdk_iconview_set_on_item_activate(iv, on_activate, NULL);
+
+    /* Item 4 lives at column 0, row 2: slot (0, 168), cell 96x84 —
+     * its center is (48, 210) in view space. */
+    click(root, 48.0f, 210.0f, 0);
+    assert(g_activates == 0); /* single press: select only */
+    assert(fdk_iconview_is_selected(iv, 4));
+    click(root, 48.0f, 210.0f, 0); /* the double press */
+    assert(g_activates == 1);
+    assert(g_last_activated == 4);
+
+    /* A different item after the pair: no activation (the chain
+     * broke), and the new item selects. */
+    click(root, 148.0f, 210.0f, 0); /* item 5: column 1, row 2 */
+    assert(g_activates == 1);
+    assert(fdk_iconview_get_selected(iv) == 5);
+
+    /* Triple press: press, press (activates), press — the third
+     * re-arms from zero and does NOT fire again. */
+    click(root, 148.0f, 210.0f, 0);
+    assert(g_activates == 2);
+    assert(g_last_activated == 5);
+    click(root, 148.0f, 210.0f, 0);
+    assert(g_activates == 2); /* the re-arm rule */
+
+    fdk_widget_destroy(root);
+    printf("[ok] iconview: double-click activation (same-item pair "
+           "fires once; the chain breaks across items; triple "
+           "re-arms)\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -540,6 +584,8 @@ int main(void) {
             break;
         }
     }
+
+
     if (g_font == NULL) {
         printf("[skip] no system TrueType font found — the iconview "
                "label geometry needs real glyphs; see "
@@ -553,6 +599,7 @@ int main(void) {
     test_mutation();
     test_paint_and_a11y();
     test_rubber_band();
+    test_double_click_activation();
 
     fdk_font_destroy(g_font);
     printf("all iconview tests passed\n");

@@ -1364,6 +1364,9 @@ typedef struct fdk_file_dialog {
     bool location_mode;      /* true = entry shown, bar hidden      */
     fdk_widget *places_list;
     fdk_widget *list;
+    fdk_widget *grid;       /* the icon-mode browsing surface (1.4.7)*/
+    fdk_widget *view_toggle;/* the toolbar's Icons checkbox (1.4.7)  */
+    bool icon_mode;         /* grid shown, list hidden (1.4.7)       */
     fdk_widget *name_label;  /* SAVE only                          */
     fdk_widget *name_entry;  /* SAVE only                          */
     fdk_widget *status;
@@ -1498,13 +1501,76 @@ static char **fdlg_active_patterns(fdk_file_dialog *d, size_t *count) {
 
 /* ---- browsing ---- */
 
+/* The active browsing surface's selection, abstracted over the
+ * two views (1.4.7): the List and the IconView carry the SAME
+ * entry indexes, so every accept/validation path reads through
+ * these and never knows which surface is up. */
+static size_t fdlg_surface_selected_count(const fdk_file_dialog *d) {
+    if (d->icon_mode) {
+        return fdk_iconview_selected_count(d->grid);
+    }
+    return fdk_list_selected_count(d->list);
+}
+
+static bool fdlg_surface_selected_at(const fdk_file_dialog *d,
+                                     size_t position, size_t *out_row) {
+    if (d->icon_mode) {
+        return fdk_iconview_selected_at(d->grid, position,
+                                        out_row) == FDK_OK;
+    }
+    return fdk_list_selected_at(d->list, position, out_row) == FDK_OK;
+}
+
+static fdk_i64 fdlg_surface_get_selected(const fdk_file_dialog *d) {
+    if (d->icon_mode) {
+        return fdk_iconview_get_selected(d->grid);
+    }
+    return fdk_list_get_selected(d->list);
+}
+
+static void fdlg_surface_focus(fdk_file_dialog *d) {
+    (void)fdk_widget_focus(d->icon_mode ? d->grid : d->list);
+}
+
+/* The icon-mode fill (1.4.7): same data, grid-shaped. The labels
+ * drop the list view's trailing "/" — the folder GLYPH carries
+ * dir-ness in the grid (the slash was a text-mode affordance). */
+static void fdlg_fill_grid(fdk_file_dialog *d) {
+    fdk_iconview_begin_batch(d->grid);
+    fdk_iconview_clear(d->grid);
+    if (d->recent_mode) {
+        for (size_t i = 0; i < d->recent_count; i++) {
+            const char *p = d->recents[i].path;
+            const char *base = strrchr(p, '/');
+            base = (base != NULL) ? base + 1 : p;
+            (void)fdk_iconview_append(d->grid, base,
+                                      FDK_ROW_ICON_FILE);
+        }
+        fdk_iconview_end_batch(d->grid);
+        return;
+    }
+    for (size_t i = 0; i < d->entries.count; i++) {
+        (void)fdk_iconview_append(
+            d->grid, d->entries.v[i].name,
+            d->entries.v[i].dir ? FDK_ROW_ICON_FOLDER
+                                : FDK_ROW_ICON_FILE);
+    }
+    fdk_iconview_end_batch(d->grid);
+}
+
 /* Rebuilds the file list rows from d->entries (the list widget is
  * cleared and re-appended; the selection resets — a snapshot list
  * cannot keep stale selections alive). The whole rebuild runs in ONE
  * list batch: a directory with 8192 entries is 8192 appends that
  * settle in a single relayout instead of re-placing the list per
- * append (the O(N^2) shape the 1.3.0 audit measured). */
+ * append (the O(N^2) shape the 1.3.0 audit measured). The icon
+ * mode fills the GRID instead — the same data, the other surface
+ * (1.4.7); the idle surface stays stale until the next flip. */
 static void fdlg_fill_list(fdk_file_dialog *d) {
+    if (d->icon_mode) {
+        fdlg_fill_grid(d);
+        return;
+    }
     fdk_list_begin_batch(d->list);
     fdk_list_clear(d->list);
     if (d->recent_mode) {
@@ -2027,12 +2093,45 @@ static void fdlg_set_location_mode(fdk_file_dialog *d, bool on) {
     } else {
         fdk_widget_set_visible(d->path_entry, false);
         fdk_widget_set_visible(d->path_bar, true);
-        fdk_widget_focus(d->list);
+        fdlg_surface_focus(d);
     }
     /* The row swaps in place; re-run the body's placement (the body
      * is the window content — nothing above it re-arranges on a
      * visibility flip, so the dialog drives its own placement). */
     fdk_widget_arrange(d->body, fdk_widget_get_bounds(d->body));
+}
+
+/* ---- icon mode (1.4.7) -------------------------------------------- */
+
+/* Flips the browsing surface (the toolbar's "Icons" checkbox). The
+ * fdlg_set_location_mode discipline: flip the mode, swap visibility,
+ * refill the NOW-active surface (the idle one keeps its stale rows
+ * until the next flip — cheap and honest), focus it, and re-run the
+ * body's placement so the surfaces trade the same slot. */
+static void fdlg_set_icon_mode(fdk_file_dialog *d, bool on) {
+    if (d->grid == NULL || d->icon_mode == on) {
+        return;
+    }
+    d->icon_mode = on;
+    if (on) {
+        fdk_widget_set_visible(d->list, false);
+        fdk_widget_set_visible(d->grid, true);
+    } else {
+        fdk_widget_set_visible(d->grid, false);
+        fdk_widget_set_visible(d->list, true);
+    }
+    /* Place the newly-active surface FIRST: a surface that was
+     * never placed (the grid before the first flip) still holds its
+     * creation 0x0, and the fill's scrollview self-sync honestly
+     * skips at 0x0 — arrange, then fill, then focus. */
+    fdk_widget_arrange(d->body, fdk_widget_get_bounds(d->body));
+    fdlg_fill_list(d);
+    fdlg_surface_focus(d);
+}
+
+static void fdlg_view_toggled(fdk_widget *w, bool checked, void *user) {
+    (void)w;
+    fdlg_set_icon_mode(user, checked);
 }
 
 /* Re-scans the CURRENT directory (hidden toggle flips, filter
@@ -2188,7 +2287,7 @@ static void fdlg_try_accept(fdk_file_dialog *d) {
      * validation is stat + the kind's file/folder contract + the
      * lone-directory descend rule, same shape as the browse case. */
     if (d->recent_mode) {
-        size_t sel_count = fdk_list_selected_count(d->list);
+        size_t sel_count = fdlg_surface_selected_count(d);
         if (sel_count == 0) {
             fdlg_set_status(d, "Nothing selected");
             return;
@@ -2200,7 +2299,7 @@ static void fdlg_try_accept(fdk_file_dialog *d) {
         size_t n = 0;
         for (size_t p = 0; p < sel_count; p++) {
             size_t row = 0;
-            if (fdk_list_selected_at(d->list, p, &row) == FDK_OK &&
+            if (fdlg_surface_selected_at(d, p, &row) &&
                 row < d->recent_count) {
                 rows[n++] = row;
             }
@@ -2266,7 +2365,7 @@ static void fdlg_try_accept(fdk_file_dialog *d) {
         fdlg_respond(d, &r);
         return;
     }
-    size_t sel_count = fdk_list_selected_count(d->list);
+    size_t sel_count = fdlg_surface_selected_count(d);
     if (sel_count == 0) {
         fdlg_set_status(d, "Nothing selected");
         return;
@@ -2283,7 +2382,7 @@ static void fdlg_try_accept(fdk_file_dialog *d) {
     size_t n = 0;
     for (size_t p = 0; p < sel_count; p++) {
         size_t row = 0;
-        if (fdk_list_selected_at(d->list, p, &row) == FDK_OK &&
+        if (fdlg_surface_selected_at(d, p, &row) &&
             row < d->entries.count) {
             rows[n++] = row;
         }
@@ -2629,23 +2728,21 @@ static void fdlg_place_activated(fdk_widget *list, size_t row,
  * name into the Name row (the native "save over that one" flow);
  * picking a directory does not (Open means navigate there). The
  * recents view never runs this (SAVE has no recents). */
-static void fdlg_selection_changed(fdk_widget *list, void *user) {
-    (void)list;
+static void fdlg_selection_changed(fdk_widget *surface, void *user) {
+    (void)surface; /* the List's or the Grid's — indexes are shared */
     fdk_file_dialog *d = user;
     if (d->recent_mode ||
         !fdlg_kind_save(d->kind) || d->name_entry == NULL) {
         return;
     }
-    fdk_i64 sel = fdk_list_get_selected(d->list);
+    fdk_i64 sel = fdlg_surface_get_selected(d);
     if (sel >= 0 && (size_t)sel < d->entries.count &&
         !d->entries.v[sel].dir) {
         (void)fdk_entry_set_text(d->name_entry, d->entries.v[sel].name);
     }
 }
 
-static void fdlg_row_activated(fdk_widget *list, size_t row, void *user) {
-    (void)list;
-    fdk_file_dialog *d = user;
+static void fdlg_entry_activated(fdk_file_dialog *d, size_t row) {
     /* Recents view (1.4.4): activation resolves the remembered
      * path against the CURRENT filesystem — gone files are
      * honestly dropped from the view, directories descend, files
@@ -2695,6 +2792,20 @@ static void fdlg_row_activated(fdk_widget *list, size_t row, void *user) {
     } else {
         fdlg_try_accept(d);
     }
+}
+
+/* The two surfaces' activation callbacks (1.4.7): the List's row
+ * gesture and the IconView's cell gesture land in the same body —
+ * the entry indexes are shared. */
+static void fdlg_row_activated(fdk_widget *list, size_t row, void *user) {
+    (void)list;
+    fdlg_entry_activated(user, row);
+}
+
+static void fdlg_grid_activated(fdk_widget *grid, size_t item,
+                                void *user) {
+    (void)grid;
+    fdlg_entry_activated(user, item);
 }
 
 static void fdlg_accept_clicked(fdk_widget *w, void *user) {
@@ -2818,6 +2929,11 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
     fdk_widget_measure(d->hidden_toggle, &hid_n);
     fdk_widget_set_bounds(d->hidden_toggle,
                           (fdk_rect){tx, y, hid_n.width, FD_TOPBAR_H});
+    tx += hid_n.width + FD_GAP;
+    fdk_size view_n = {0, 0};
+    fdk_widget_measure(d->view_toggle, &view_n);
+    fdk_widget_set_bounds(d->view_toggle,
+                          (fdk_rect){tx, y, view_n.width, FD_TOPBAR_H});
     fdk_i32 combo_h = FD_TOPBAR_H - 6;
     fdk_widget_set_bounds(
         d->filter_combo,
@@ -2872,8 +2988,10 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
         list_bottom = name_y - FD_GAP / 2;
     }
 
-    /* Middle: places sidebar + file list. The sidebar rect is
-     * remembered for body_paint's sidebar-surface fill. */
+    /* Middle: places sidebar + the browsing surface (the List or
+     * the 1.4.7 IconView — one occupant, same slot either way, the
+     * location_mode discipline). The sidebar rect is remembered for
+     * body_paint's sidebar-surface fill. */
     fdk_i32 list_h = list_bottom - y;
     if (list_h < 40) {
         list_h = 40;
@@ -2882,8 +3000,9 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
         d->places_list, (fdk_rect){x, y, FD_PLACES_W, list_h});
     fbody_of(w)->sidebar_rect =
         (fdk_rect){x, y, FD_PLACES_W, list_h};
+    fdk_widget *surface = d->icon_mode ? d->grid : d->list;
     fdk_widget_set_bounds(
-        d->list,
+        surface,
         (fdk_rect){x + FD_PLACES_W + FD_GAP, y,
                    iw - FD_PLACES_W - FD_GAP, list_h});
 
@@ -3153,6 +3272,21 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     }
     fdk_toggle_set_on_changed(d->hidden_toggle, fdlg_hidden_toggled, d);
 
+    /* View toggle (1.4.7): the Icons checkbox — the GTK list/icon
+     * browsing switch, in the toggle language the toolbar already
+     * speaks. Set BEFORE the callback wiring so the construction
+     * state never fires the flip. */
+    r = fdk_toggle_create(body, d->font, "Icons", &d->view_toggle);
+    if (!fdk_ok(r)) {
+        goto fail;
+    }
+    if (options != NULL &&
+        options->view == FDK_FILE_DIALOG_VIEW_ICONS) {
+        fdk_toggle_set_checked(d->view_toggle, true);
+        d->icon_mode = true;
+    }
+    fdk_toggle_set_on_changed(d->view_toggle, fdlg_view_toggled, d);
+
     /* Filter combo: one row per pattern + "All files"; the first
      * pattern starts active when filters were given. */
     r = fdk_combo_create(body, d->font, &d->filter_combo);
@@ -3229,6 +3363,29 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     fdk_list_set_on_selection_changed(d->list,
                                       fdlg_selection_changed, d);
 
+    /* The icon-mode surface (1.4.7): the same data, grid-shaped.
+     * Both carry the same entry indexes (the abstraction above is
+     * what every accept path reads); the iconview starts hidden
+     * unless options asked for it — visibility + the first fill
+     * follow the initial icon_mode. */
+    r = fdk_iconview_create(body, d->font, &d->grid);
+    if (!fdk_ok(r)) {
+        goto fail;
+    }
+    fdk_iconview_set_selection_mode(
+        d->grid, fdlg_kind_multi(kind)
+                    ? FDK_LIST_SELECTION_MULTIPLE
+                    : FDK_LIST_SELECTION_SINGLE);
+    fdk_iconview_set_on_item_activate(d->grid, fdlg_grid_activated,
+                                      d);
+    fdk_iconview_set_on_selection_changed(d->grid,
+                                          fdlg_selection_changed, d);
+    if (!d->icon_mode) {
+        fdk_widget_set_visible(d->grid, false);
+    } else {
+        fdk_widget_set_visible(d->list, false);
+    }
+
     /* The Name row (SAVE only): label + entry, seeded from
      * start_name and selected so typing replaces it (the
      * rename-everywhere convention). */
@@ -3283,12 +3440,13 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     if (modal) {
         (void)fdk__window_set_modal(win, true);
     }
-    /* Keyboard browsing from the first keypress: the list for the
-     * OPEN kinds, the Name row for SAVE (type the name at once). */
+    /* Keyboard browsing from the first keypress: the browsing
+     * surface for the OPEN kinds, the Name row for SAVE (type the
+     * name at once). */
     if (fdlg_kind_save(kind) && d->name_entry != NULL) {
         fdk_widget_focus(d->name_entry);
     } else {
-        fdk_widget_focus(d->list);
+        fdlg_surface_focus(d);
     }
 
     if (out_window != NULL) {

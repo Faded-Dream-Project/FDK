@@ -1578,3 +1578,32 @@ the assert passed for the wrong reason and the band never started.
 Compute the gap coordinate from the slot math, and when a gesture
 test needs empty space, assert the band state (not just the
 consumed flag) before sweeping.
+
+## 1.4.7 — two lessons from the dialog integration
+
+**Composite widgets need the self-sync, not just the arrange
+hook.** The IconView's internal scrollview sized itself only in
+the class's arrange hook — and the file dialog's body arrange
+places surfaces with `fdk_widget_set_bounds`, which runs NO
+hooks. Result: the grid's scrollview stayed at its creation
+0x0 and nothing painted, scrolled, or hit-tested, while the
+same widget worked perfectly in every example (they arrange
+through the layout engine). The List has carried the fix since
+1.2: relayout re-syncs the internals to the widget's CURRENT
+bounds, covering both paths. Rule: any composite whose internals
+depend on its bounds must self-sync in its relayout, because
+"someone will set_bounds you" is not hypothetical — it is the
+file dialog's house style. Same bug class, second instance:
+iv_arrange passed the PARENT-space rect to the child (a latent
+double-offset that every x=0 arrange site hid — arrange the
+CHILD with the inner {0,0,w,h} rect, never the assigned one).
+
+**A stationary edge-hold proves nothing in a grid.** The List's
+auto-scroll proof was a held press at empty margin x: rows
+stretch across the full content width, so even a zero-WIDTH band
+intersects every row. Grid cells do not — a 2px band at margin x
+selects nothing, and the assert "selection extended" fails while
+the scroll assert happily passes. The 2-D band needs a 2-D
+gesture in the test: press in the margin, DRAG diagonally over
+real columns, then hold at the edge. The chase then extends the
+selection through the growing offset exactly as designed.

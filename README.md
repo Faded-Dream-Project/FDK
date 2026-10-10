@@ -364,7 +364,13 @@ the IconView, the item grid every file manager's "icon view" is —
 glyph cells that re-flow into columns, the List's whole selection
 model (rubber-band drag-select included since 1.4.6, with themed
 cell metrics), and keyboard navigation where Down steps a full
-grid row.
+grid row. 1.4.7 finishes the grid: the band chases the viewport
+edge (the List's auto-scroll, both axes), cells activate on a
+double click like every list row, and the FILE DIALOG grew the
+matching browsing surface — `options.view` starts it on the item
+grid, and the toolbar's Icons checkbox flips list/grid live at
+any time (run `examples/09_capabilities.c`, the new "Icons View"
+button).
 
 Run `examples/04_widgets.c`: a settings-style panel built entirely
 from the catalog — frames of controls, a radio group, a session

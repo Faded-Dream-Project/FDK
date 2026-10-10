@@ -9,9 +9,11 @@
  * columns as the current width fits. The List's whole discipline
  * applies — ScrollView internals (bars, wheel, clipping), the
  * selection model (NONE/SINGLE/MULTIPLE with click / ctrl / shift
- * in reading order), activation by double-click or Enter, batched
- * bulk mutation, and the a11y LIST with the cells as real child
- * widgets.
+ * in reading order), activation by double-click (1.4.7 — the
+ * header claimed it since 1.4.5; the cells now deliver it) or
+ * Enter, the 1.4.7 band auto-scroll (BOTH axes — the grid scrolls
+ * sideways too), batched bulk mutation, and the a11y LIST with the
+ * cells as real child widgets.
  *
  * Geometry: cells are CELL_W x CELL_H (settable); the icon box is
  * the cell's top band (48 px default), the label the bottom band
@@ -24,12 +26,14 @@
 
 #include "widgets_internal.h"
 #include "../theme/theme_internal.h"
+#include "../window/window_internal.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define IV_CELL_W 96
 #define IV_CELL_H 84
@@ -79,9 +83,10 @@ typedef struct fdk_iconview {
      * grid space sweeps a 2-D rect; every cell whose slot INTERSECTS
      * the rect selects live, plain replacing / ctrl unioning over
      * the press-time snapshot. The anchor is glued to CONTENT space
-     * (captured at press with the offset) so a later auto-scroll
-     * extension (future work) composes; today the sweep is
-     * viewport-only. MULTIPLE mode only. */
+     * (captured at press with the offset) so the 1.4.7 auto-scroll
+     * extension composes: the moving edge rides the offset, the
+     * anchor does not, and the sweep GROWS as the view chases the
+     * pointer. MULTIPLE mode only. */
     bool banding;
     bool band_ctrl;
     fdk_f32 band_x, band_y;        /* viewport-space press point  */
@@ -89,14 +94,45 @@ typedef struct fdk_iconview {
     fdk_f32 band_now_x, band_now_y;
     bool *band_base;               /* ctrl-union snapshot         */
     size_t band_base_cap;
+    /* ---- band auto-scroll (1.4.7) ----
+     *
+     * The List's edge-chasing timer, grid-shaped: while the sweep
+     * pointer rests outside the viewport's edge zone on EITHER
+     * axis, a repeating timer scrolls toward it and re-applies the
+     * band. The band's coordinates are VIEWPORT-space (apply_band
+     * adds the CURRENT offset when mapping cells), so a stationary
+     * pointer needs no updates while the content slides under it —
+     * the sweep simply GROWS as the view chases. Disarmed at the
+     * release, on destruction, and when the pointer re-enters. */
+    fdk_timer *band_scroll_timer;
+    /* ---- double-click activation (1.4.7) ----
+     * The List's predicate discipline: same item, same press
+     * semantics (fdk__window_is_double_click; the second press is
+     * on the same cell, so dx/dy are 0). A triple click re-arms
+     * from zero. */
+    bool have_last_click;
+    size_t last_click_item;
+    fdk_i64 last_click_ms;
 } fdk_iconview;
 
 static fdk_iconview *iv_of(fdk_widget *w) {
     return (fdk_iconview *)(void *)w;
 }
 
+static fdk_i64 iv_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (fdk_i64)ts.tv_sec * 1000 + (fdk_i64)ts.tv_nsec / 1000000;
+}
+
 extern const fdk_widget_class fdk_iconview_class_def;
 static const fdk_widget_class fdk_iv_cell_class_def;
+
+/* The band auto-scroll constants (1.4.7): the List's cadence, step,
+ * and edge zone — applied to BOTH axes (the grid scrolls sideways). */
+#define IV_BAND_SCROLL_MS 40
+#define IV_BAND_SCROLL_STEP 24
+#define IV_BAND_EDGE 16
 
 /* ---- geometry ---- */
 
@@ -147,6 +183,20 @@ static void iv_relayout(fdk_iconview *iv) {
                                   (fdk_rect){x, y, iv->cell_w,
                                              iv->cell_h});
         }
+        /* Self-sync the internal scrollview to the view's CURRENT
+         * bounds (the List's rule, found live by the 1.4.7 file
+         * dialog integration): set_bounds does not run arrange
+         * hooks — fdk_widget_arrange is the layout engine's entry —
+         * and dialogs that position surfaces by hand (the file
+         * dialog's body arrange) use set_bounds. Without this, the
+         * scrollview stays at its creation 0x0 and nothing paints,
+         * scrolls, or hit-tests. */
+        if (iv->scroll != NULL && iv->base.bounds.width > 0 &&
+            iv->base.bounds.height > 0) {
+            fdk_rect inner = { 0, 0, iv->base.bounds.width,
+                               iv->base.bounds.height };
+            fdk_widget_set_bounds(iv->scroll, inner);
+        }
         fdk__scrollview_layout_changed(iv->scroll);
     }
 }
@@ -174,7 +224,13 @@ static void iv_arrange(fdk_widget *w, fdk_rect assigned) {
     fdk_iconview *iv = iv_of(w);
     fdk_widget_set_bounds(w, assigned);
     if (iv->scroll != NULL) {
-        fdk_widget_arrange(iv->scroll, assigned);
+        /* INNER rect: the scrollview is the view's full-area child —
+         * the List's pattern. (Passing `assigned` through verbatim
+         * double-offseted the scrollview by the view's own x/y — a
+         * latent 1.4.5 bug every arrange site at x=0 hid.) */
+        fdk_rect inner = { 0, 0, assigned.width, assigned.height };
+        fdk_widget_set_bounds(iv->scroll, inner);
+        fdk_widget_child_layout_changed(iv->scroll);
     }
     /* Columns follow the CURRENT width; the cells re-slot. */
     size_t cols = iv_columns_for(iv, assigned.width);
@@ -364,6 +420,24 @@ static bool iv_cell_handle_event(fdk_widget *w,
             (void)fdk_widget_focus(iv_w);
         }
         iv_cursor_select(iv, index, ev->pointer.modifiers);
+        /* Double-click = activation (1.4.7 — the doc's claim since
+         * 1.4.5, now delivered by the cells): the List's predicate,
+         * the same press semantics (the second press is on the SAME
+         * cell, so the slop dx/dy are 0). */
+        fdk_i64 now = iv_now_ms();
+        bool is_double =
+            iv->have_last_click && iv->last_click_item == index &&
+            fdk__window_is_double_click(now, iv->last_click_ms, 0, 0);
+        if (is_double) {
+            iv->have_last_click = false; /* a triple re-arms */
+            if (iv->on_activate != NULL) {
+                iv->on_activate(iv_w, index, iv->on_activate_data);
+            }
+        } else {
+            iv->have_last_click = true;
+            iv->last_click_item = index;
+            iv->last_click_ms = now;
+        }
         return true;
     }
     default:
@@ -462,6 +536,107 @@ static void iv_apply_band(fdk_iconview *iv) {
     fdk_widget_invalidate(&iv->base);
 }
 
+/* ---- band auto-scroll (1.4.7, grid-shaped) ---- */
+
+static void iv_band_scroll_disarm(fdk_iconview *iv);
+
+/* The repeating tick: scrolls one step toward the pointer's side
+ * of the viewport on whichever axis is pinned, then re-applies the
+ * selection. The band's coords are viewport-space — the pointer
+ * resting at the edge needs no update; the growing scroll offset
+ * does the extending (the List's rule, both axes now). Disarms
+ * itself when the scroll has nowhere further to go. */
+static void iv_band_scroll_tick(fdk_timer *timer, void *user) {
+    (void)timer;
+    fdk_iconview *iv = user;
+    if (!iv->banding || iv->scroll == NULL) {
+        iv->band_scroll_timer = NULL;
+        return;
+    }
+    fdk_i32 off_x = 0, off_y = 0;
+    fdk_scrollview_get_scroll_offset(iv->scroll, &off_x, &off_y);
+    fdk_i32 vw = 0, vh = 0;
+    fdk__scrollview_viewport(iv->scroll, &vw, &vh);
+    fdk_i32 dx = 0, dy = 0;
+    if (iv->band_now_x < (fdk_f32)IV_BAND_EDGE) {
+        dx = -IV_BAND_SCROLL_STEP;
+    } else if (iv->band_now_x > (fdk_f32)(vw - IV_BAND_EDGE)) {
+        dx = IV_BAND_SCROLL_STEP;
+    }
+    if (iv->band_now_y < (fdk_f32)IV_BAND_EDGE) {
+        dy = -IV_BAND_SCROLL_STEP;
+    } else if (iv->band_now_y > (fdk_f32)(vh - IV_BAND_EDGE)) {
+        dy = IV_BAND_SCROLL_STEP;
+    }
+    if (dx == 0 && dy == 0) {
+        iv_band_scroll_disarm(iv);
+        return;
+    }
+    fdk_i32 want_x = off_x + dx;
+    fdk_i32 want_y = off_y + dy;
+    if (want_x < 0) {
+        want_x = 0;
+    }
+    if (want_y < 0) {
+        want_y = 0;
+    }
+    /* The scrollview clamps to its own max; read back the truth so
+     * the band never claims a scroll that did not happen. */
+    (void)fdk_scrollview_scroll_to(iv->scroll, want_x, want_y);
+    fdk_i32 new_x = 0, new_y = 0;
+    fdk_scrollview_get_scroll_offset(iv->scroll, &new_x, &new_y);
+    if (new_x == off_x && new_y == off_y) {
+        /* Clamped at the end on BOTH axes: nowhere further. */
+        iv_band_scroll_disarm(iv);
+        return;
+    }
+    iv_apply_band(iv);
+    fdk_widget_invalidate(&iv->base);
+}
+
+/* Arms (once) the auto-scroll timer; a detached tree (no window
+ * context) cannot arm it — the band then stays put, honestly. */
+static void iv_band_scroll_arm(fdk_iconview *iv) {
+    if (iv->band_scroll_timer != NULL || iv->scroll == NULL) {
+        return;
+    }
+    fdk_context *ctx =
+        fdk__window_context(fdk__widget_window_owner(&iv->base));
+    if (ctx == NULL) {
+        return;
+    }
+    iv->band_scroll_timer =
+        fdk_timer_add(ctx, IV_BAND_SCROLL_MS, true,
+                      iv_band_scroll_tick, iv);
+}
+
+static void iv_band_scroll_disarm(fdk_iconview *iv) {
+    if (iv->band_scroll_timer != NULL) {
+        fdk_timer_remove(iv->band_scroll_timer);
+        iv->band_scroll_timer = NULL;
+    }
+}
+
+/* Re-evaluates after every motion: arm while the pointer rests
+ * outside the visible band on EITHER axis, disarm when it comes
+ * back inside. The band's own coords need no bookkeeping — they
+ * are viewport-space already. */
+static void iv_band_scroll_track(fdk_iconview *iv) {
+    if (iv->scroll == NULL) {
+        return;
+    }
+    fdk_i32 vw = 0, vh = 0;
+    fdk__scrollview_viewport(iv->scroll, &vw, &vh);
+    if (iv->band_now_x < (fdk_f32)IV_BAND_EDGE ||
+        iv->band_now_x > (fdk_f32)(vw - IV_BAND_EDGE) ||
+        iv->band_now_y < (fdk_f32)IV_BAND_EDGE ||
+        iv->band_now_y > (fdk_f32)(vh - IV_BAND_EDGE)) {
+        iv_band_scroll_arm(iv);
+    } else {
+        iv_band_scroll_disarm(iv);
+    }
+}
+
 /* ---- the view's keyboard ---- */
 
 static bool iv_handle_event(fdk_widget *w,
@@ -512,6 +687,9 @@ static bool iv_handle_event(fdk_widget *w,
             (void)fdk_widget_focus(w);
         }
         iv_apply_band(iv);
+        /* A press that STARTS at the edge chases immediately (the
+         * List's 1.4.3 rule, applied at the gesture's birth). */
+        iv_band_scroll_track(iv);
         iv_fire_selection_changed(iv);
         return true;
     }
@@ -522,12 +700,14 @@ static bool iv_handle_event(fdk_widget *w,
         iv->band_now_x = ev->position.x;
         iv->band_now_y = ev->position.y;
         iv_apply_band(iv);
+        iv_band_scroll_track(iv);
         return true;
     case FDK_WIDGET_POINTER_UP:
         if (!iv->banding) {
             return false;
         }
         iv->banding = false;
+        iv_band_scroll_disarm(iv);
         fdk_free(iv->band_base);
         iv->band_base = NULL;
         iv->band_base_cap = 0;
@@ -671,6 +851,7 @@ static void iv_view_paint(fdk_widget *w, fdk_surface *surface,
 
 static void iv_view_destroy(fdk_widget *w) {
     fdk_iconview *iv = iv_of(w);
+    iv_band_scroll_disarm(iv);
     for (size_t i = 0; i < iv->count; i++) {
         fdk_free(iv->items[i].label);
     }
