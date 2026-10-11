@@ -69,6 +69,38 @@ static int native_byte_order(void) {
 
 /* ---- slot lifecycle ----------------------------------------------------- */
 
+static int slot_create(fdk_platform_connection *conn,
+                       fdk_platform_window *pwindow, int slot, int w, int h);
+static void slot_destroy(fdk_platform_connection *conn,
+                         fdk_platform_window *pwindow, int slot);
+
+/* Creates BOTH slots at (w, h) when they do not exist. Shared by the
+ * framebuffer acquisition path and the GPU-lane downgrade path in
+ * present() (which must recreate slots mid-frame — see
+ * fdk_x11_window_present). Returns FDK_OK, or the error the original
+ * inline block produced (FDK_ERR_UNSUPPORTED for the visual check,
+ * FDK_ERR_OUT_OF_MEMORY for the second slot). */
+static fdk_result ensure_slot_pair(fdk_platform_connection *conn,
+                                   fdk_platform_window *pwindow, int w,
+                                   int h) {
+    if (pwindow->render_slots[0].image != NULL) {
+        return FDK_OK;
+    }
+    if (slot_create(conn, pwindow, 0, w, h) != 0) {
+        return FDK_ERR_UNSUPPORTED; /* visual check failed, logged */
+    }
+    if (slot_create(conn, pwindow, 1, w, h) != 0) {
+        slot_destroy(conn, pwindow, 0);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    pwindow->render_back = 0;
+    pwindow->render_size.width = w;
+    pwindow->render_size.height = h;
+    FDK_DEBUG("framebuffer pair created (%dx%d, %s path)", w, h,
+              conn->shm_ok ? "MIT-SHM" : "copy");
+    return FDK_OK;
+}
+
 /* Destroys one slot's XImage and shared segment (or malloc buffer).
  * Safe on a never-created slot (image == NULL). */
 static void slot_destroy(fdk_platform_connection *conn,
@@ -272,7 +304,9 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
      * CLEARS the window again (every clear was a resize-step flash;
      * see the window-creation comment in x11_window.c). Current
      * pixels are untouched — a never-presented window keeps showing
-     * whatever the background drew until the first present. */
+     * whatever the background drew until the first present. Runs for
+     * BOTH present paths — the GPU lane owns every pixel the same
+     * way once engaged. */
     if (!pwindow->background_dropped) {
         XSetWindowBackgroundPixmap(conn->display, pwindow->xwindow, None);
         pwindow->background_dropped = 1;
@@ -285,6 +319,50 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
     fdk_i32 h = pwindow->last_size.height;
     if (w <= 0) w = 1;
     if (h <= 0) h = 1;
+
+    /* --- GPU present lane (1.4.18) ----------------------------------
+     *
+     * Engages lazily HERE — the first framebuffer acquisition of any
+     * window on the connection pays the one-shot libGL dlopen (never
+     * at connect: headless and no-window apps must not touch GL at
+     * all). A window that once downgraded (gl_downgraded) never
+     * re-engages; a connection-wide policy refusal (software renderer
+     * without FDK_GL_FORCE, no usable FBConfig) is sticky on the lane
+     * state itself, so the check below stays cheap after the first
+     * window. On engagement the application draws into the lane's
+     * STAGING buffer instead of the XImage slots — same contract, same
+     * damage model, and the stride is exactly w (matching the classic
+     * path's depth-24 XImage layout). */
+    if (pwindow->gl_win == NULL && !pwindow->gl_downgraded) {
+        if (conn->gl == NULL && !conn->gl_tried) {
+            conn->gl = fdk_x11_gl_try_load(conn);
+            conn->gl_tried = 1;
+        }
+        if (conn->gl != NULL) {
+            pwindow->gl_win = fdk_x11_gl_window_try_init(conn->gl, pwindow);
+        }
+    }
+    if (pwindow->gl_win != NULL) {
+        fdk_u32 *staging =
+            fdk_x11_gl_window_staging(pwindow->gl_win, w, h);
+        if (staging != NULL) {
+            pwindow->render_size.width = w;
+            pwindow->render_size.height = h;
+            out_fb->pixels = staging;
+            out_fb->width = w;
+            out_fb->height = h;
+            out_fb->stride = w;
+            return FDK_OK;
+        }
+        /* Staging allocation failed: this window stays on the classic
+         * path for good (the classic path has its own OOM reporting
+         * below — same failure, same honest answer). */
+        FDK_WARN("GPU lane staging allocation failed — reverting to the "
+                 "CPU present path");
+        fdk_x11_gl_window_destroy(conn->gl, pwindow->gl_win);
+        pwindow->gl_win = NULL;
+        pwindow->gl_downgraded = 1;
+    }
 
     /* Recreate BOTH slots on any size change; XImages cannot be
      * resized in place. A resize while a put is in flight is the
@@ -305,18 +383,10 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
     }
 
     if (pwindow->render_slots[0].image == NULL) {
-        if (slot_create(conn, pwindow, 0, w, h) != 0) {
-            return FDK_ERR_UNSUPPORTED; /* visual check failed, logged */
+        fdk_result slot_rc = ensure_slot_pair(conn, pwindow, w, h);
+        if (!fdk_ok(slot_rc)) {
+            return slot_rc;
         }
-        if (slot_create(conn, pwindow, 1, w, h) != 0) {
-            slot_destroy(conn, pwindow, 0);
-            return FDK_ERR_OUT_OF_MEMORY;
-        }
-        pwindow->render_back = 0;
-        pwindow->render_size.width = w;
-        pwindow->render_size.height = h;
-        FDK_DEBUG("framebuffer pair created (%dx%d, %s path)", w, h,
-                  conn->shm_ok ? "MIT-SHM" : "copy");
     }
 
     /* Hand out the back slot. If the previous frame's SHM put is
@@ -375,19 +445,83 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     /* Documented no-op when nothing was ever acquired/drawn (the
-     * window simply keeps its background pixel contents). */
-    if (pwindow->render_slots[0].image == NULL) {
+     * window simply keeps its background pixel contents). With the
+     * GPU lane active the XImage slots are NULL by design — the lane's
+     * staging buffer is this window's framebuffer. */
+    if (pwindow->render_slots[0].image == NULL &&
+        pwindow->gl_win == NULL) {
         return FDK_OK;
     }
 
     /* Nothing changed since the last present — not even a request
      * is sent (the damage-tracking contract; see
-     * platform_internal.h). */
+     * platform_internal.h). Applies to the GPU lane equally: an
+     * unchanged frame must not swap either. */
     if (!damage->full && damage->count == 0) {
         return FDK_OK;
     }
 
     fdk_platform_connection *conn = pwindow->conn;
+
+    /* --- GPU present lane (1.4.18) -------------------------------
+     *
+     * Fast path: upload the damaged rects into the window's GL
+     * texture, composite the fullscreen quad, swap. A nonzero return
+     * is the lane's PERMANENT downgrade verdict — and the frame must
+     * not be lost on the way down: the staging buffer still holds
+     * exactly (last-presented + this frame's drawing), so it is
+     * copied into freshly created classic slots and the whole image
+     * goes out through the SHM/copy path below, full damage. The
+     * window never shows a broken or stale frame because of the
+     * downgrade itself. */
+    if (pwindow->gl_win != NULL) {
+        fdk_i32 gw = pwindow->render_size.width;
+        fdk_i32 gh = pwindow->render_size.height;
+        if (fdk_x11_gl_window_present(pwindow->gl_win, damage, gw, gh) ==
+            0) {
+            pwindow->presented_ever = 1;
+            return FDK_OK;
+        }
+
+        FDK_WARN("GPU present lane failed — reverting this window to "
+                 "the CPU present path (permanent)");
+        fdk_result slot_rc = ensure_slot_pair(conn, pwindow, gw, gh);
+        if (fdk_ok(slot_rc)) {
+            XImage *dst = pwindow->render_slots[pwindow->render_back].image;
+            /* The accessor with the current size returns the EXISTING
+             * staging buffer (no reallocation happens on a size match) —
+             * the opaque-lane-safe way to reach this frame's pixels. */
+            const fdk_u32 *src =
+                fdk_x11_gl_window_staging(pwindow->gl_win, gw, gh);
+            if (dst != NULL && src != NULL &&
+                dst->width == gw && dst->height == gh) {
+                size_t row_bytes = (size_t)gw * sizeof(fdk_u32);
+                for (int y = 0; y < gh; y++) {
+                    memcpy(dst->data + (size_t)y * (size_t)dst->bytes_per_line,
+                           src + (size_t)y * (size_t)gw, row_bytes);
+                }
+            }
+        }
+        fdk_x11_gl_window_destroy(conn->gl, pwindow->gl_win);
+        pwindow->gl_win = NULL;
+        pwindow->gl_downgraded = 1;
+
+        if (!fdk_ok(slot_rc)) {
+            /* Could not even build the classic slots (visual check or
+             * OOM — both logged inside). The surface layer retains the
+             * damage, so the next present retries on the classic path
+             * once acquisition has rebuilt the slots. */
+            return slot_rc;
+        }
+
+        static const fdk_platform_damage fallback_full = {
+            {{0, 0, 0, 0}}, /* rects (unused) */
+            0,              /* count */
+            1               /* full */
+        };
+        damage = &fallback_full;
+        /* Fall through: the classic path presents the salvaged frame. */
+    }
 
     if (pwindow->render_gc == NULL) {
         pwindow->render_gc = XCreateGC(conn->display, pwindow->xwindow, 0, NULL);
@@ -531,10 +665,18 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
 }
 
 /* Called from fdk_x11_window_destroy() — releases both slots, their
- * pixel storage / shared segments, and the GC. */
+ * pixel storage / shared segments, the GC, and the GPU-lane state
+ * (context + texture + staging) if this window presented through it. */
 void fdk_x11_surface_cleanup(fdk_platform_window *pwindow) {
     if (pwindow == NULL) {
         return;
+    }
+    /* GPU lane teardown (1.4.18): destroys the GLX context while the
+     * display is still alive; libGL itself stays pinned (loader state
+     * belongs to the connection and dies at disconnect). */
+    if (pwindow->gl_win != NULL) {
+        fdk_x11_gl_window_destroy(pwindow->conn->gl, pwindow->gl_win);
+        pwindow->gl_win = NULL;
     }
     /* If a put is still in flight, let the server finish reading
      * before tearing the segment away (XSync guarantees completion). */
@@ -556,4 +698,12 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow) {
 
 int fdk_x11_window_ever_presented(fdk_platform_window *pwindow) {
     return pwindow != NULL && pwindow->presented_ever != 0;
+}
+
+int fdk_x11_window_render_path(fdk_platform_window *pwindow) {
+    /* The window_render_path op (1.4.18): 1 while this window presents
+     * through the GPU lane, 0 on the classic CPU path (including
+     * never-engaged and downgraded windows — the honest, current
+     * answer, read live off the backend's own state). */
+    return (pwindow != NULL && pwindow->gl_win != NULL) ? 1 : 0;
 }

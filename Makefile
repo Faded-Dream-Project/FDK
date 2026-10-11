@@ -64,7 +64,7 @@ X11_CFLAGS     := $(shell pkg-config --cflags x11)
 # Xext: the MIT-SHM extension (XShmPutImage presentation fast path,
 # Phase 3 completion). It is part of the base X11 distribution and
 # present wherever libX11 is.
-X11_LIBS       := $(shell pkg-config --libs x11) -lXext
+X11_LIBS       := $(shell pkg-config --libs x11) -lXext -ldl
 
 # Wayland is optional. Detection order:
 # 1. If FDK_DISABLE_WAYLAND=1 is set, never build Wayland (skip).
@@ -408,7 +408,7 @@ $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
 test-x11: $(X11_TEST_BIN)
 	@if [ -n "$$DISPLAY" ]; then \
 		echo "== running X11 integration test against DISPLAY=$$DISPLAY =="; \
-		"$(X11_TEST_BIN)" || exit 1; \
+		LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_TEST_BIN)" || exit 1; \
 	else \
 		echo "== no DISPLAY set, starting a throwaway Xvfb =="; \
 		XVFB_NUM=$$((90 + ($$$$ % 400))); \
@@ -418,7 +418,7 @@ test-x11: $(X11_TEST_BIN)
 		XVFB_PID=$$!; \
 		sleep 2; \
 		echo "== running X11 integration test against DISPLAY=$$XVFB_DISP (Xvfb pid $$XVFB_PID) =="; \
-		DISPLAY="$$XVFB_DISP" "$(X11_TEST_BIN)"; \
+		DISPLAY="$$XVFB_DISP" LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_TEST_BIN)"; \
 		TEST_RESULT=$$?; \
 		kill "$$XVFB_PID" 2>/dev/null; \
 		wait "$$XVFB_PID" 2>/dev/null; \

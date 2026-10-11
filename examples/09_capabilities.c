@@ -867,6 +867,22 @@ int main(void) {
     rig_announce("btn-folders", app.dlg_btns[3]);
     rig_announce("btn-ask", app.dlg_btns[4]);
 
+    /* The render path (1.4.18): the hybrid model's observable — CPU
+     * rasterization either way, with the presentation riding the GPU
+     * lane when the machine has one (and the policy accepts it). One
+     * paint first: the lane engages at the surface's first framebuffer
+     * acquisition, so the query before any paint would always read
+     * CPU. */
+    {
+        (void)fdk_window_paint(app.window);
+        fdk_render_path rpath = FDK_RENDER_PATH_CPU;
+        if (fdk_ok(fdk_window_get_render_path(app.window, &rpath))) {
+            printf("RENDER: %s\n",
+                   rpath == FDK_RENDER_PATH_GL ? "gl" : "cpu");
+            fflush(stdout);
+        }
+    }
+
     const char *frames = getenv("FDK_DEMO_FRAMES");
     app.frames_left = frames != NULL ? atoi(frames) : -1;
 

@@ -4427,8 +4427,10 @@ SHIPPED (1.4.2 — slider ticks + labels; vertical orientation 1.4.3); DropDown-
 SHIPPED (1.4.3 — the MenuButton); IconView/GridView SHIPPED (1.4.5 — the item grid: glyph cells,
 the List's whole selection model, grid keyboard nav; the rubber
 band + themed cell metrics 1.4.6); DrawingArea ==
-Canvas SHIPPED; GLArea OUT (no OpenGL backend in scope — the
-software renderer is the product); Assistant/wizard OUT (dialog
+Canvas SHIPPED; GPU present lane SHIPPED (1.4.18 — hybrid:
+CPU rasterization + GLX presentation, runtime-loaded, CPU fallback);
+GLArea itself OUT (app-facing GL drawable; rasterization stays CPU
+by design); Assistant/wizard OUT (dialog
 composition, app-level); FontChooser SHIPPED (1.4.3 — fdk_font_enumerate +
 the picker dialog); ColorChooser SHIPPED (1.4.3 — the HSV wheel on
 the canvas); AboutDialog SHIPPED (1.4.3 — labels + link buttons in
@@ -5047,3 +5049,71 @@ itself — the settings app's accent pill edge reads a coverage ramp
 catalog scrolls under the wheel with its classic bar + thumb in
 place. Where this leaves the line: the toolkit finally LOOKS like
 its own demo. The NEXT list stays empty.
+
+## 1.4.18 — the GPU present lane (hybrid rendering)
+
+The maintainer's ask: verify whether FDK's rendering system uses GPU
+hardware acceleration, and if it is missing, implement it the way
+this codebase would want it — hybrid where appropriate, with a
+reliable CPU fallback, no unnecessary complexity, and no regressions.
+
+The verification came first and came back clean: **no GPU anywhere in
+the pipeline.** Every pixel was CPU-rasterized in `src/render/`,
+presentation was MIT-SHM/wl_shm, the Makefile linked nothing GL, and
+the parity ledger said so outright ("GLArea OUT — the software
+renderer is the product"). The renderer IS the product — so the lane
+that fits this architecture accelerates the OTHER half of a frame:
+not rasterization but presentation.
+
+**What shipped** (`src/platform/x11/x11_gl.c`, one new file + the
+seam edits):
+
+- CPU rasterization unchanged and byte-identical; the GPU lane takes
+  over the damaged-rect upload (one `glTexSubImage2D` per rect,
+  BGRA/UNSIGNED_BYTE straight from the framebuffer's own bytes), one
+  fullscreen NEAREST quad, `glXSwapBuffers`.
+- Runtime-loaded (`dlopen` + a hand-declared API subset): zero new
+  build dependencies, zero new link flags beyond `-ldl`, builds
+  anywhere libX11 builds, engages only where libGL + GLX + a
+  matching FBConfig exist.
+- Policy: hardware renderers get the lane; llvmpipe/softpipe/swrast
+  are refused (the CPU path is faster there); `FDK_NO_GL=1` opts out,
+  `FDK_GL_FORCE=1` overrides for testing. The verdict is cached
+  process-wide so a hundred connections pay one probe.
+- Reliability: the first present self-verifies server-side (four
+  pixels, `XGetImage`, the tests' own channel); any failure
+  permanently downgrades that window AND salvages the in-flight frame
+  into the classic SHM slots — no torn, stale, or lost frames, ever.
+- Introspection: `fdk_window_get_render_path()` (the 621st export)
+  reports the live path per window; example 09 prints `RENDER: cpu|gl`.
+
+**Verified**: the integration suite grew four groups — the policy
+matrix, the byte-identity proof (same scene through both paths,
+`memcmp` of server-side captures, full and partial damage), the
+poisoned-present downgrade (salvage + permanence + later frames), and
+resize-under-the-lane — and the ENTIRE 160-group suite was then run
+three times with `FDK_GL_FORCE=1`, putting every widget, dialog, DnD,
+and clipboard test through the lane. A purpose-built examples rig
+re-proved byte-identity at the app level (four static examples
+byte-identical between the two paths; all twelve run and exit cleanly
+both ways). Headless, Wayland, interop, compositor-death, and both
+tooltip rigs all green; release zero warnings; verify-exports 621.
+
+**Found and fixed on the way** (pre-existing, confirmed against
+pristine 1.4.17): both tooltip rigs had been stale since 1.4.16/1.4.17
+— the hover target (the progress bar) went below the fold when
+example 04 became a scrolling catalog, the X11 rig inherited the
+machine's global theme instead of pinning hermetic, and the pixel
+expectations were Modern-palette-era. Both rigs now hover the color
+well (the example's hardcoded, theme-independent swatch — a stabler
+target than any theme token), pin hermetic prefs, and check the
+tooltip fill baseline-relative. The examples pixel rig's
+Modern-palette color constants remain stale (its failure reproduces
+identically on pristine 1.4.17; the battery uses the frame-budget
+smoke and the new GL equivalence rig instead) — recorded here
+honestly as maintenance debt, not silently dropped.
+
+The parity ledger's line moves: GPU PRESENT SHIPPED (hybrid);
+GLArea itself stays OUT (a widget-level GL drawable is a different,
+app-facing feature — and rasterization stays CPU by design).
+

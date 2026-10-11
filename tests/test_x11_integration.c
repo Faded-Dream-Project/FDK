@@ -3609,6 +3609,8 @@ static void test_mitm_shm_and_double_buffer(void) {
     assert(fdk_ok(fdk_window_get_surface(win, &surface)));
     fdk_surface_info info;
     assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    fdk_render_path lane = FDK_RENDER_PATH_CPU;
+    assert(fdk_ok(fdk_window_get_render_path(win, &lane)));
     fdk_color frame_a = { .r = 1.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f };
     fdk_surface_fill(surface, frame_a);
     assert(fdk_ok(fdk_surface_present(surface)));
@@ -3618,7 +3620,10 @@ static void test_mitm_shm_and_double_buffer(void) {
     if (before >= 0 && during >= 0) {
         /* Two slots = two segments while the window renders. (Only
          * meaningful when the server has MIT-SHM — Xvfb does.) */
-        if (during - before == 2) {
+        if (lane == FDK_RENDER_PATH_GL) {
+            printf("[ok] GPU present lane active (no SysV segments — "
+                   "GL owns the buffer pair)\n");
+        } else if (during - before == 2) {
             printf("[ok] MIT-SHM presentation active (2 SysV segments "
                    "for the buffer pair)\n");
         } else if (during - before == 0) {
@@ -3640,7 +3645,18 @@ static void test_mitm_shm_and_double_buffer(void) {
 
     fdk_surface_info info2;
     assert(fdk_ok(fdk_surface_get_info(surface, &info2)));
-    assert(info2.pixels != info.pixels); /* the swap happened */
+    if (lane == FDK_RENDER_PATH_GL) {
+        /* 1.4.18: the GPU lane double-buffers INSIDE GL — its back
+         * buffer swaps at glXSwapBuffers — so the CPU-side staging
+         * buffer is legitimately the SAME pointer across presents.
+         * The semantic this test actually pins (un-presented drawing
+         * never reaches the server) is checked below and holds for
+         * both paths. */
+        printf("[ok] GPU lane: GL owns the double buffering (staging "
+               "pointer stable by design)\n");
+    } else {
+        assert(info2.pixels != info.pixels); /* the swap happened */
+    }
 
     fdk_color frame_b = { .r = 0.0f, .g = 0.0f, .b = 1.0f, .a = 1.0f };
     fdk_surface_fill(surface, frame_b);
@@ -5630,6 +5646,23 @@ static void test_menu_gui(void) {
      * diffs the ROOT's child list. */
     Window root_scr = DefaultRootWindow(send);
 
+    /* 1.4.18: child-count checks are BOUNDED wait-until-state loops
+     * (the suite's pump-timeout-is-a-ceiling lesson), not fixed-sleep
+     * races — the GPU lane adds real create/teardown latency for
+     * popup windows (GLX contexts), which made fixed 200 ms pumps
+     * flaky under FDK_GL_FORCE. The wait pumps events while polling,
+     * so slow machines converge instead of asserting stale state. */
+    #define MENU_WAIT_CHILDREN(want)                                    \
+        do {                                                            \
+            int tries_ = 80;                                            \
+            n_now = x11_child_windows(send, root_scr, now, 16);         \
+            while (n_now != (want) && tries_-- > 0) {                   \
+                (void)fdk_pump_events(ctx, 25);                         \
+                n_now = x11_child_windows(send, root_scr, now, 16);     \
+            }                                                           \
+            assert(n_now == (want));                                    \
+        } while (0)
+
     Window before[16], now[16];
     int n_before = x11_child_windows(send, root_scr, before, 16);
     assert(n_before >= 0);
@@ -5683,15 +5716,11 @@ static void test_menu_gui(void) {
 
     /* --- Escape dismissal --- */
     x11_click(send, xid, 20, row_h / 2);
-    (void)fdk_pump_events(ctx, 200);
-    n_now = x11_child_windows(send, root_scr, now, 16);
-    assert(n_now == n_before + 1);
+    MENU_WAIT_CHILDREN(n_before + 1);
     popup = x11_new_child(before, n_before, now, n_now);
     x11_send_key_event(send, popup, KeyPress, 9); /* Escape */
     x11_send_key_event(send, popup, KeyRelease, 9);
-    (void)fdk_pump_events(ctx, 200);
-    n_now = x11_child_windows(send, root_scr, now, 16);
-    assert(n_now == n_before);
+    MENU_WAIT_CHILDREN(n_before);
     printf("[ok] menu: Escape dismisses the chain\n");
 
     /* --- check item through a real click --- */
@@ -5712,18 +5741,14 @@ static void test_menu_gui(void) {
 
     /* --- submenu: hover opens a popup-of-popup --- */
     x11_click(send, xid, 70, row_h / 2); /* Edit title */
-    (void)fdk_pump_events(ctx, 200);
-    n_now = x11_child_windows(send, root_scr, now, 16);
-    assert(n_now == n_before + 1);
+    MENU_WAIT_CHILDREN(n_before + 1);
     Window edit_pop = x11_new_child(before, n_before, now, n_now);
     assert(edit_pop != 0);
     /* Hover the "Recent" row (row 1 of the Edit menu): the submenu
      * maps as ANOTHER root child (X11 nests by placement, not by
      * window parentage; the FDK layer tracks the chain). */
     x11_move(send, edit_pop, 30, row_h + row_h / 2);
-    (void)fdk_pump_events(ctx, 250);
-    n_now = x11_child_windows(send, root_scr, now, 16);
-    assert(n_now == n_before + 2);
+    MENU_WAIT_CHILDREN(n_before + 2);
     Window sub = 0;
     for (int i = 0; i < n_now; i++) {
         if (now[i] != edit_pop && now[i] != xid) {
@@ -5752,18 +5777,14 @@ static void test_menu_gui(void) {
 
     /* Close the rest; the bar's toggle click also works. */
     x11_click(send, xid, 70, row_h / 2);
-    (void)fdk_pump_events(ctx, 200);
-    n_now = x11_child_windows(send, root_scr, now, 16);
-    assert(n_now == n_before);
+    MENU_WAIT_CHILDREN(n_before);
 
     /* Destroying the bar with a chain open is safe (close via
      * fdk_menu_bar_close first exercises the public path). */
     x11_click(send, xid, 20, row_h / 2);
     (void)fdk_pump_events(ctx, 200);
     fdk_menu_bar_close(bar);
-    (void)fdk_pump_events(ctx, 150);
-    n_now = x11_child_windows(send, root_scr, now, 16);
-    assert(n_now == n_before);
+    MENU_WAIT_CHILDREN(n_before);
 
     XCloseDisplay(rb);
     XCloseDisplay(send);
@@ -5776,6 +5797,7 @@ static void test_menu_gui(void) {
     printf("[ok] menu GUI: bar click, auto-paint, keyboard, check "
            "item, submenu nesting, level-wise Escape, close, clean "
            "teardown\n");
+    #undef MENU_WAIT_CHILDREN
 }
 
 static int combo_changed_hits = 0;
@@ -8750,6 +8772,354 @@ static void test_textview_gui(void) {
     fdk_shutdown(ctx);
 }
 
+
+/* ---- GPU present lane (1.4.18) ------------------------------------------- */
+
+/* Policy matrix: FDK_NO_GL=1 is a STRICT CPU answer; FDK_GL_FORCE=1
+ * engages the lane wherever the GLX machinery exists (this rig: Xvfb
+ * with Mesa llvmpipe — exactly what FORCE was designed to exercise).
+ * The default policy is renderer-driven (software = CPU path) and is
+ * therefore environment-dependent, so it is OBSERVED here, not
+ * asserted — the machine running the suite may well have a real GPU. */
+static void test_gl_lane_policy_gui(void) {
+    /* API sanity: the query refuses NULLs. */
+    assert(fdk_window_get_render_path(NULL, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    {
+        fdk_render_path p = (fdk_render_path)-1;
+        assert(fdk_window_get_render_path(NULL, &p) ==
+               FDK_ERR_INVALID_ARGUMENT);
+    }
+
+    /* The window-local helper: one context, window, surface; returns
+     * the render path observed AFTER the first framebuffer acquisition
+     * (the lane's decision point). */
+    #define GL_LANE_OBSERVE(env_setup, want_title) do { \
+        env_setup; \
+        fdk_context *ctx = NULL; \
+        fdk_init_options opts = { .backend = FDK_PLATFORM_X11 }; \
+        assert(fdk_ok(init_with_retry(&ctx, &opts))); \
+        fdk_window *win = NULL; \
+        fdk_window_options wopts = { .title = "gl lane policy", \
+                                     .width = 96, .height = 72 }; \
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win))); \
+        fdk_window_show(win); \
+        (void)fdk_pump_events(ctx, 120); \
+        fdk_surface *s = NULL; \
+        assert(fdk_ok(fdk_window_get_surface(win, &s))); \
+        fdk_surface_info info; \
+        assert(fdk_ok(fdk_surface_get_info(s, &info))); \
+        fdk_render_path path = (fdk_render_path)-1; \
+        assert(fdk_ok(fdk_window_get_render_path(win, &path))); \
+        printf("    %s: render path %s\n", want_title, \
+               path == FDK_RENDER_PATH_GL ? "GL" : "CPU"); \
+        fdk_window_destroy(win); \
+        fdk_shutdown(ctx); \
+        (void)path; \
+    } while (0)
+
+    setenv("FDK_NO_GL", "1", 1);
+    unsetenv("FDK_GL_FORCE");
+    {
+        fdk_context *ctx = NULL;
+        fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+        assert(fdk_ok(init_with_retry(&ctx, &opts)));
+        fdk_window *win = NULL;
+        fdk_window_options wopts = { .title = "gl lane no-gl",
+                                     .width = 96, .height = 72 };
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 120);
+        fdk_surface *s = NULL;
+        assert(fdk_ok(fdk_window_get_surface(win, &s)));
+        fdk_surface_info info;
+        assert(fdk_ok(fdk_surface_get_info(s, &info)));
+        fdk_render_path path = (fdk_render_path)-1;
+        assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+        assert(path == FDK_RENDER_PATH_CPU);
+        fdk_window_destroy(win);
+        fdk_shutdown(ctx);
+    }
+    unsetenv("FDK_NO_GL");
+
+    /* Default policy (no knobs): observe. On this llvmpipe rig the
+     * expected answer is CPU (software renderer refusal); on a
+     * hardware-GPU machine it is GL. */
+    {
+        fdk_context *ctx = NULL;
+        fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+        assert(fdk_ok(init_with_retry(&ctx, &opts)));
+        fdk_window *win = NULL;
+        fdk_window_options wopts = { .title = "gl lane default",
+                                     .width = 96, .height = 72 };
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 120);
+        fdk_surface *s = NULL;
+        assert(fdk_ok(fdk_window_get_surface(win, &s)));
+        fdk_surface_info info;
+        assert(fdk_ok(fdk_surface_get_info(s, &info)));
+        fdk_render_path path = (fdk_render_path)-1;
+        assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+        assert(path == FDK_RENDER_PATH_CPU || path == FDK_RENDER_PATH_GL);
+        fdk_window_destroy(win);
+        fdk_shutdown(ctx);
+    }
+
+    printf("[ok] GL lane policy: FDK_NO_GL strictly CPU; default "
+           "observed (renderer-driven)\n");
+}
+
+/* THE core equivalence proof: the same drawing, presented through the
+ * GPU lane (FDK_GL_FORCE) and through the CPU path (FDK_NO_GL), must
+ * read back BYTE-IDENTICAL from the X server — full frames and
+ * partial-damage frames alike. Two sequential connections (one live
+ * at a time), full-window XGetImage captures, exact memcmp. */
+static void test_gl_lane_pixel_equivalence_gui(void) {
+    const int W = 220, H = 140;
+    unsigned long *cap[2] = { NULL, NULL };
+
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass == 0) {
+            setenv("FDK_GL_FORCE", "1", 1);
+            unsetenv("FDK_NO_GL");
+        } else {
+            setenv("FDK_NO_GL", "1", 1);
+            unsetenv("FDK_GL_FORCE");
+        }
+
+        fdk_context *ctx = NULL;
+        fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+        assert(fdk_ok(init_with_retry(&ctx, &opts)));
+        fdk_window *win = NULL;
+        fdk_window_options wopts = { .title =
+                                         pass == 0 ? "gl equiv (lane)"
+                                                   : "gl equiv (cpu)",
+                                     .width = W, .height = H };
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 150);
+
+        fdk_surface *s = NULL;
+        assert(fdk_ok(fdk_window_get_surface(win, &s)));
+        fdk_surface_info info;
+        assert(fdk_ok(fdk_surface_get_info(s, &info)));
+        assert(info.width == W && info.height == H);
+        fdk_render_path path = (fdk_render_path)-1;
+        assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+
+        /* Frame 1: full redraw with a mix of fills, rects, a line and
+         * an AA circle — every primitive family the lane must carry
+         * through unchanged. */
+        fdk_surface_fill(s, (fdk_color){ .r = 0.1f, .g = 0.2f, .b = 0.3f, .a = 1 });
+        fdk_surface_fill_rect(s, (fdk_rect){ .x = 10, .y = 10, .width = 60, .height = 40 },
+                              (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+        fdk_surface_fill_rect(s, (fdk_rect){ .x = 90, .y = 12, .width = 50, .height = 50 },
+                              (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+        fdk_surface_draw_rect(s, (fdk_rect){ .x = 5, .y = 5, .width = W - 10, .height = H - 10 },
+                              (fdk_color){ .r = 1, .g = 1, .b = 0, .a = 1 });
+        fdk_surface_draw_line(s, 0, 0, W - 1, H - 1,
+                              (fdk_color){ .r = 1, .g = 1, .b = 1, .a = 1 });
+        fdk_surface_fill_circle_aa(s, 170, 100, 28,
+                                   (fdk_color){ .r = 0.6f, .g = 0.4f, .b = 0.9f, .a = 1 });
+        assert(fdk_ok(fdk_surface_present(s)));
+        (void)fdk_pump_events(ctx, 150);
+
+        /* Frame 2: PARTIAL damage — a small rect far from the first
+         * frame's hot spots; everything else must survive untouched
+         * through the lane's texture-retention model. */
+        fdk_surface_info i2;
+        assert(fdk_ok(fdk_surface_get_info(s, &i2)));
+        fdk_surface_fill_rect(s, (fdk_rect){ .x = 30, .y = 100, .width = 40, .height = 25 },
+                              (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+        assert(fdk_ok(fdk_surface_present(s)));
+        (void)fdk_pump_events(ctx, 150);
+
+        /* Full-window server-side capture. */
+        Display *rb = XOpenDisplay(NULL);
+        assert(rb != NULL);
+        XImage *im = XGetImage(rb, (Drawable)win->pwindow->xwindow, 0, 0,
+                               (unsigned)W, (unsigned)H, ~0UL, ZPixmap);
+        assert(im != NULL);
+        cap[pass] = malloc(sizeof(unsigned long) * (size_t)(W * H));
+        assert(cap[pass] != NULL);
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                cap[pass][(size_t)y * W + x] = XGetPixel(im, x, y);
+            }
+        }
+        XDestroyImage(im);
+        XCloseDisplay(rb);
+
+        printf("    equivalence pass %d (%s): captured %dx%d\n", pass,
+               path == FDK_RENDER_PATH_GL ? "GL lane" : "CPU", W, H);
+        if (pass == 0 && path != FDK_RENDER_PATH_GL) {
+            printf("[skip] GL lane not engageable on this display — "
+                   "equivalence degenerates to CPU-vs-CPU (still "
+                   "checked)\n");
+        }
+
+        fdk_window_destroy(win);
+        fdk_shutdown(ctx);
+    }
+    unsetenv("FDK_GL_FORCE");
+    unsetenv("FDK_NO_GL");
+
+    /* Byte-identical? */
+    long diffs = 0;
+    for (int i = 0; i < W * H; i++) {
+        if (cap[0][i] != cap[1][i]) {
+            diffs++;
+        }
+    }
+    /* Spot-check a few known pixels so "both wrong identically" cannot
+     * pass silently: red rect center, green rect center, blue frame-2
+     * rect, background. */
+    assert(cap[1][40 * W + 40] == 0x00FF0000UL);
+    assert(cap[1][37 * W + 115] == 0x0000FF00UL);
+    assert(cap[1][112 * W + 50] == 0x000000FFUL);
+    assert((cap[1][70 * W + 210] & 0xFFFFFFUL) != 0x00FF0000UL);
+
+    free(cap[0]);
+    free(cap[1]);
+    assert(diffs == 0);
+    printf("[ok] GL lane equivalence: GPU and CPU presents are "
+           "byte-identical (%dx%d, incl. partial damage)\n", W, H);
+}
+
+/* The guaranteed fallback: FDK_GL_FAIL_AT poisons exactly one present;
+ * the window must downgrade PERMANENTLY, the poisoned frame must still
+ * reach the screen (the staging buffer is salvaged into the classic
+ * slots), and subsequent frames must keep presenting correctly. */
+static void test_gl_lane_downgrade_gui(void) {
+    setenv("FDK_GL_FORCE", "1", 1);
+    setenv("FDK_GL_FAIL_AT", "2", 1);
+    unsetenv("FDK_NO_GL");
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "gl lane downgrade",
+                                 .width = 180, .height = 120 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 150);
+
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &s)));
+
+    Display *rb = NULL;
+    unsigned long xid = (unsigned long)win->pwindow->xwindow;
+
+    /* Frame 1 (through the lane): red. */
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    fdk_surface_fill(s, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s)));
+    (void)fdk_pump_events(ctx, 120);
+    fdk_render_path path = (fdk_render_path)-1;
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    assert(path == FDK_RENDER_PATH_GL);
+    assert(x11_readback_pixel(&rb, xid, 50, 60) == 0x00FF0000UL);
+
+    /* Frame 2 — POISONED: the lane reports failure; the salvage path
+     * presents the frame through the CPU instead. Yellow must reach
+     * the screen and the path must flip to CPU. */
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    fdk_surface_fill(s, (fdk_color){ .r = 1, .g = 1, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s)));
+    (void)fdk_pump_events(ctx, 120);
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    assert(path == FDK_RENDER_PATH_CPU);
+    assert(x11_readback_pixel(&rb, xid, 50, 60) == 0x00FFFF00UL);
+
+    /* Frame 3 (CPU path): a partial-damage rect on top. */
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    fdk_surface_fill_rect(s, (fdk_rect){ .x = 10, .y = 10, .width = 50, .height = 50 },
+                          (fdk_color){ .r = 0, .g = 1, .b = 1, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s)));
+    (void)fdk_pump_events(ctx, 120);
+    assert(x11_readback_pixel(&rb, xid, 35, 35) == 0x0000FFFFUL);
+    assert(x11_readback_pixel(&rb, xid, 150, 100) == 0x00FFFF00UL);
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    assert(path == FDK_RENDER_PATH_CPU);
+
+    if (rb != NULL) {
+        XCloseDisplay(rb);
+    }
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    unsetenv("FDK_GL_FAIL_AT");
+    unsetenv("FDK_GL_FORCE");
+    printf("[ok] GL lane downgrade: poisoned present salvaged through "
+           "the CPU path, permanent, pixels exact\n");
+}
+
+/* Resize under the lane: the staging buffer and texture re-allocate at
+ * the new size, the surface contract resets damage to full, and the
+ * path STAYS GL. */
+static void test_gl_lane_resize_gui(void) {
+    setenv("FDK_GL_FORCE", "1", 1);
+    unsetenv("FDK_NO_GL");
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "gl lane resize",
+                                 .width = 160, .height = 120 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 150);
+
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &s)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    fdk_render_path path = (fdk_render_path)-1;
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    if (path != FDK_RENDER_PATH_GL) {
+        printf("[skip] GL lane not engageable on this display — resize "
+               "test covered by the CPU-path suite\n");
+        fdk_window_destroy(win);
+        fdk_shutdown(ctx);
+        unsetenv("FDK_GL_FORCE");
+        return;
+    }
+
+    fdk_surface_fill(s, (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s)));
+    (void)fdk_pump_events(ctx, 150);
+
+    fdk_window_resize(win, 260, 180);
+    (void)fdk_pump_events(ctx, 250);
+
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    assert(info.width == 260 && info.height == 180);
+    fdk_surface_fill(s, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+    fdk_surface_fill_rect(s, (fdk_rect){ .x = 40, .y = 30, .width = 90, .height = 60 },
+                          (fdk_color){ .r = 1, .g = 1, .b = 1, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s)));
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *rb = NULL;
+    unsigned long xid = (unsigned long)win->pwindow->xwindow;
+    assert(x11_readback_pixel(&rb, xid, 200, 150) == 0x000000FFUL);
+    assert(x11_readback_pixel(&rb, xid, 85, 60) == 0x00FFFFFFUL);
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    assert(path == FDK_RENDER_PATH_GL);
+
+    if (rb != NULL) {
+        XCloseDisplay(rb);
+    }
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    unsetenv("FDK_GL_FORCE");
+    printf("[ok] GL lane resize: texture re-allocates at the new size, "
+           "path stays GL, pixels exact\n");
+}
+
 int main(void) {
     /* Hermeticity (1.4.13): pin the global-settings boot (the "fdk"
      * prefs store + $FDK_THEME) to nothing so this suite's pixel
@@ -8823,6 +9193,10 @@ int main(void) {
     test_x11_hidpi_gui();
     test_iconview_gui();
     test_textview_gui();
+    test_gl_lane_policy_gui();
+    test_gl_lane_pixel_equivalence_gui();
+    test_gl_lane_downgrade_gui();
+    test_gl_lane_resize_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

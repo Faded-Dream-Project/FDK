@@ -22,8 +22,12 @@ overrides; see `docs/text.md`. Any distro layout works, including
 Arch's variable-font `NotoSans[wdth,wght].ttf` naming.
 
 Core lifecycle, real X11 and Wayland backends, the rendering layer
-(damage-tracked software renderer with images, alpha compositing,
-transforms, and antialiasing), the widget foundation with layout
+(damage-tracked software rasterizer with images, alpha compositing,
+transforms, and antialiasing — plus, since 1.4.18, a GPU present
+lane: byte-identical output with the damaged rects uploaded to a GL
+texture and composited through GLX where a hardware renderer
+exists, runtime-loaded with a guaranteed CPU fallback), the widget
+foundation with layout
 (box + grid), the text stack (TrueType shaping with subpixel
 positioning), the core widget catalog, the theme engine
 (runtime-switchable `.fdk` files), FDK-drawn window decorations with
@@ -197,6 +201,15 @@ while (!done) {
                                               no-op if nothing changed */
 }
 ```
+
+The presentation is hybrid (1.4.18): the CPU rasterizes every pixel
+exactly as always, and where the machine has a hardware GL renderer
+the finished frame's damaged rects upload to a GL texture and one
+fullscreen composite carries them to the screen — byte-identical to
+the shared-memory path (pinned by tests, not assumed), with
+`fdk_window_get_render_path()` reporting which path a window uses
+and any GPU failure reverting that window to the CPU path mid-frame
+without losing the frame.
 
 Run `examples/02_rendering.c` to see this live: a gradient-and-
 logo primitives panel where a bouncing ball updates at 1-2% of the

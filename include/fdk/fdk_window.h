@@ -161,6 +161,49 @@ fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
 fdk_result fdk_window_get_scale(const fdk_window *window,
                                 fdk_f32 *out_scale);
 
+/* ---- Render-path introspection (1.4.18) ---------------------------------
+ *
+ * FDK is a HYBRID renderer: every pixel is rasterized on the CPU
+ * (the surface layer's exact, antialiased software rasterizer —
+ * identical output on every machine), while the PRESENTATION of a
+ * finished frame takes one of two paths:
+ *
+ *   FDK_RENDER_PATH_CPU — the software path. The damaged rects
+ *       travel to the server through shared memory (MIT-SHM/XPutImage
+ *       on X11, wl_shm on Wayland).
+ *
+ *   FDK_RENDER_PATH_GL — the GPU present lane (X11 today). The
+ *       damaged rects upload into a GL texture and one fullscreen
+ *       composite carries the frame to the screen through GLX —
+ *       byte-identical pixels, hardware-accelerated blit.
+ *
+ * Which path a window uses is decided by the backend at the first
+ * framebuffer acquisition, from real capabilities (libGL loadable,
+ * GLX present, a matching FBConfig, a hardware renderer — Mesa's
+ * software rasterizers stay on the CPU path because it is faster
+ * there). It is not a request: applications cannot force a path,
+ * they can only observe it (and rely on the guaranteed fallback:
+ * any lane failure permanently and seamlessly reverts that window
+ * to FDK_RENDER_PATH_CPU, mid-frame, without losing the frame).
+ *
+ * Environment knobs (mirroring FDK_NO_MIT_SHM's shape):
+ *   FDK_NO_GL=1    never load the GPU lane (opt out entirely)
+ *   FDK_GL_FORCE=1 engage it even on software GL renderers
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - window or out_path is NULL
+ *   FDK_ERR_NOT_INITIALIZED  - window has no live backend connection
+ */
+typedef enum fdk_render_path {
+    /* Software present: CPU rasterization + SHM/copy transport. */
+    FDK_RENDER_PATH_CPU = 0,
+    /* Hybrid present: CPU rasterization + GPU composite (GLX). */
+    FDK_RENDER_PATH_GL = 1
+} fdk_render_path;
+
+fdk_result fdk_window_get_render_path(const fdk_window *window,
+                                      fdk_render_path *out_path);
+
 /* Sets minimum/maximum size hints. Pass 0 for either dimension of
  * either struct to mean "no constraint" in that dimension. These are
  * hints handed to the platform (WM_NORMAL_HINTS on X11, xdg_toplevel

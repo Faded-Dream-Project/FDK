@@ -1,14 +1,14 @@
 # FDK Rendering (Phase 3)
 
-This document describes FDK's software rendering layer: the public
+This document describes FDK's hybrid rendering layer: the public
 `fdk_surface` API (`include/fdk/fdk_surface.h`), the damage-tracking
 model that makes partial redraws correct, the clip stack, offscreen
 surfaces (two pixel formats), image decoding, per-pixel alpha
 compositing, affine-transformed blits, antialiased primitives, frame
-pacing, HiDPI scale handling, and how the X11 (MIT-SHM,
-double-buffered) and Wayland (buffer scale / fractional viewport)
-backends present pixels without any backend type leaking into
-application code.
+pacing, HiDPI scale handling, and how the X11 (MIT-SHM double
+buffer, plus the 1.4.18 GPU present lane) and Wayland (buffer scale /
+fractional viewport) backends present pixels without any backend type
+leaking into application code.
 
 Everything here is implemented and tested — headless in
 `tests/test_render.c` (`make test`, no display needed, thanks to
@@ -321,6 +321,92 @@ pixel-identical). Damage rects convert to surface-local logical
 coordinates at present time, rounding outward. Verified end-to-end
 against sway at output scale 2 (physical exactly 2x logical).
 
+## The GPU present lane (1.4.18)
+
+FDK is a HYBRID renderer, and the split is deliberate: **every pixel
+is rasterized on the CPU** (the surface layer's exact, antialiased
+software rasterizer — identical output on every machine, pinned by
+thousands of pixel checks), while the **presentation of a finished
+frame** takes one of two paths:
+
+- **CPU path** (`FDK_RENDER_PATH_CPU`): the damaged rects travel to
+  the server through shared memory — the MIT-SHM double-buffer
+  machinery above on X11, `wl_shm` on Wayland.
+- **GPU path** (`FDK_RENDER_PATH_GL`, X11 today): the damaged rects
+  upload into a per-window GL texture and one fullscreen composite
+  carries the frame to the screen through GLX — `glTexSubImage2D`
+  (BGRA/UNSIGNED_BYTE, the framebuffer's little-endian XRGB8888
+  bytes read in place, zero conversion), a NEAREST 1:1 quad, and
+  `glXSwapBuffers`. **Byte-identical to the CPU path by
+  construction** — pinned, not assumed: the integration suite draws
+  the same scene through both paths and `memcmp`s the server-side
+  captures (`test_gl_lane_pixel_equivalence_gui`), and the examples
+  rig re-proves it at the app level (four static examples' captures
+  are byte-identical between `FDK_GL_FORCE=1` and `FDK_NO_GL=1`).
+
+The lane lives in `src/platform/x11/x11_gl.c` and is **loaded at
+runtime** — `dlopen("libGL.so.1")` with a hand-declared API subset
+(no GL headers, no new build dependencies; GLX entry points resolve
+through `glXGetProcAddress`, core GL through `dlsym`, which on GLVND
+is the dependable path for core symbols). It engages lazily at a
+window's FIRST framebuffer acquisition — headless apps and apps that
+open no window never touch libGL at all.
+
+The hybrid's texture plays the role the SHM front slot plays: the
+retained "what the screen shows" copy. Damage rects make the texture
+differ from the staging buffer exactly where the app drew; the quad
+repaints everything from the texture each frame; the swap publishes
+it. There is no ShmCompletion routing and no slot-sync memcpy — GL's
+own back buffer is transient between swaps (the quad redraws all of
+it every frame), so the asynchronous-read hazard that forces the
+two-slot dance in the SHM path does not exist here.
+
+**Policy** (who gets the GPU path):
+
+- The lane requires a hardware renderer. Mesa's software rasterizers
+  (llvmpipe, softpipe, swrast — detected from the first context's
+  `GL_RENDERER` string) are REFUSED by default: they software-
+  rasterize the composite that the SHM path avoids entirely, so the
+  CPU path is genuinely faster there. `virgl`/`d3d12` (real, if
+  virtualized, GPUs) stay eligible.
+- `FDK_NO_GL=1` opts out entirely — never load libGL (the
+  `FDK_NO_MIT_SHM` escape hatch's shape).
+- `FDK_GL_FORCE=1` engages the lane even on software renderers —
+  what the test suite uses to exercise every code path under Xvfb's
+  llvmpipe, and what a user profiling the lane wants.
+
+**Failure is downgrade, never a broken frame.** The lane's first
+present SELF-VERIFIES — four spread pixels read back server-side
+(`XGetImage`, the same channel the tests trust) and compared against
+the staging buffer; a driver that composites wrong downgrades before
+the user sees it. Any later failure (GL error, lost context) is
+permanent for that window, and the downgrade path SALVAGES the frame:
+the staging buffer still holds exactly (last-presented + this frame's
+drawing), so it is copied into freshly created classic slots and the
+whole image goes out through the SHM path immediately — the window
+never shows a stale or torn frame because of the downgrade itself.
+`fdk_window_get_render_path()` reads the live answer (including a
+mid-session downgrade) so applications and tests can observe it.
+
+libGL is pinned for process lifetime (never `dlclose`d): Mesa/GLVND
+register process-global state that does not survive unload cleanly,
+and FDK apps may create and destroy contexts repeatedly (every test
+does). The one consequence — Mesa's per-display caches are orphaned
+by `XCloseDisplay` and LeakSanitizer reports them at exit — is
+suppressed by module name in `tests/data/lsan-gl.supp` (applied
+automatically by `make test-x11`), which keeps the sanitizer strict
+for everything FDK owns.
+
+What the lane deliberately does NOT do: rasterize on the GPU. Text,
+AA chrome, images, transforms — the whole `fdk_surface` pipeline —
+stay on the CPU, where they are exact, testable headless, and
+identical across machines. GPU-side scaling (a HiDPI present-time
+scale, removing the CPU's integer composite step) is the natural
+follow-up and needs no architectural change; an EGL sibling for the
+Wayland backend is the same shape but is NOT shipped unverified —
+this tree has no EGL runtime to test against, and unverified lanes
+are worse than none.
+
 ## What is deliberately not here yet
 
 Honest remaining gaps: no premultiplied-alpha fast paths (everything is
@@ -330,4 +416,6 @@ rendering is `src/text/`'s AA glyph masks — Subpixel RGB glyph
 rasterization is a possible later refinement); fractional HiDPI is
 exercised by the code paths but the sway test rig runs integer scale 2
 (headless outputs with true fractional scales are a compositor-config
-matter). None of these reshape this layer's contracts.
+matter); the GPU present lane covers X11/GLX only (a Wayland/EGL
+sibling is designed-for but unshipped, per the section above). None of
+these reshape this layer's contracts.

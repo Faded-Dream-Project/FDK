@@ -1009,6 +1009,27 @@ fdk_result fdk_window_get_scale(const fdk_window *window,
     return window->ops->window_get_scale(window->pwindow, out_scale);
 }
 
+fdk_result fdk_window_get_render_path(const fdk_window *window,
+                                      fdk_render_path *out_path) {
+    if (window == NULL || out_path == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ctx == NULL || window->ctx->conn == NULL) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+    /* NULL op = the backend has no GPU lane at all (Wayland today):
+    * CPU is the honest answer. Otherwise the backend reports its
+    * LIVE state — including a mid-session downgrade, which is
+    * exactly what an app monitoring this wants to see. */
+    if (window->ops->window_render_path == NULL ||
+        !window->ops->window_render_path(window->pwindow)) {
+        *out_path = FDK_RENDER_PATH_CPU;
+    } else {
+        *out_path = FDK_RENDER_PATH_GL;
+    }
+    return FDK_OK;
+}
+
 void fdk_window_set_size_limits(fdk_window *window, fdk_size min_size, fdk_size max_size) {
     if (window == NULL) {
         return;

@@ -11,6 +11,7 @@
 #define FDK_X11_PLATFORM_H
 
 #include "platform/platform_internal.h"
+#include "platform/x11/x11_gl.h"
 
 #include <X11/Xlib.h>
 #include <sys/ipc.h>
@@ -23,6 +24,11 @@
 int fdk__x11_detect_scale(Display *display);
 fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
                                     fdk_f32 *out_scale);
+
+/* 1.4.18: render-path introspection op (x11_surface.c) behind
+ * fdk_window_get_render_path() — 1 while this window presents
+ * through the GPU lane, 0 on the CPU path. */
+int fdk_x11_window_render_path(fdk_platform_window *pwindow);
 
 struct fdk_platform_connection {
     /* Application id (fdk_init_options.app_id), duplicated at connect
@@ -120,6 +126,20 @@ struct fdk_platform_connection {
      * other X event; their drawable is the window we put to). */
     int shm_ok;
     int shm_event_base;
+
+    /* --- GPU present lane (1.4.18, x11_gl.c) ---
+     *
+     * gl: the per-connection lane state — libGL handle, resolved
+     * entry points, renderer-policy verdict. Loaded LAZILY at the
+     * first framebuffer acquisition of any window (never at
+     * connect: headless apps and no-window apps must not touch
+     * libGL at all). NULL = the lane is not available on this
+     * connection (no libGL, no GLX, unresolved symbols, FDK_NO_GL)
+     * OR the policy refused it (software renderer without
+     * FDK_GL_FORCE). gl_tried makes the attempt one-shot — NULL is
+     * sticky, windows never re-attempt. */
+    struct fdk_x11_gl *gl;
+    int gl_tried;
 
     /* --- Resize cursors (1.1.4) ---
      *
@@ -324,6 +344,16 @@ struct fdk_platform_window {
                                background None (the server never
                                clears again — the resize-flash fix;
                                see x11_window.c) */
+
+    /* GPU present lane state (1.4.18, x11_gl.c): non-NULL while this
+     * window presents through GLX (staging buffer + context +
+     * texture). NULL = the classic SHM/copy path — including after a
+     * mid-session downgrade, which is permanent per window.
+     * gl_downgraded is that permanence: set when a lane present fails
+     * (or the staging buffer cannot be allocated), never cleared —
+     * the re-engagement attempt in get_framebuffer checks it. */
+    struct fdk_x11_gl_window *gl_win;
+    int gl_downgraded;
 };
 
 /* Implemented in x11_events.c, used by x11_dispatch.c. Not part of

@@ -211,6 +211,12 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->popup = (popup != 0);
     pwindow->input_transparent = (input_transparent != 0);
     pwindow->grabbed = 0;
+    /* GPU present lane (1.4.18): engages lazily at the first
+     * framebuffer acquisition (x11_surface.c), not here — window
+     * creation must never depend on libGL existing. gl_downgraded is
+     * the permanent per-window fallback verdict. */
+    pwindow->gl_win = NULL;
+    pwindow->gl_downgraded = 0;
     /* Input-transparent popups (1.3.2, tooltips): the EMPTY XShape
      * input region at CREATE time — the window is unmapped here, so
      * the very first mapping is already click-through. Servers

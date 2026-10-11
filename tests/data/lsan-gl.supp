@@ -1,0 +1,21 @@
+# LSan suppressions for third-party GL driver allocations (1.4.18).
+#
+# The GPU present lane (src/platform/x11/x11_gl.c) dlopens libGL and
+# pins it for process lifetime. Mesa/GLVND allocate per-display caches
+# (roughly 100 KB per X connection: FBConfig tables, dispatch state)
+# that XCloseDisplay does not free — the pointers live in Xlib's
+# display-extension state, which Xlib itself drops at close, so LSan
+# sees them as unreachable at process exit.
+#
+# These are NOT FDK leaks: every FDK allocation comes from fdk_alloc
+# (src/core/alloc.c) and stays fully accounted under the sanitizers.
+# The suppressions match by MODULE so LeakSanitizer remains strict for
+# everything FDK owns.
+#
+# Applied by `make test-x11` automatically; pass the same file to any
+# sanitized run that exercises the lane (see docs/testing.md).
+leak:libGLX_mesa
+leak:libGLdispatch
+leak:libgallium
+leak:libgbm
+leak:libdrm

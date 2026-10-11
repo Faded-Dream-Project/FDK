@@ -1706,3 +1706,91 @@ reads as unset) at the top of main() — hermetic on any machine,
 including one where the developer ran `fdk-theme set matrix`
 before `make test`. Any future binary that pins theme pixels
 should copy those two lines.
+
+## 1.4.18 — testing the GPU present lane
+
+The lane's test design follows its failure model: everything that
+can break must be observable, and every observation must be
+server-side truth (the same `XGetImage`-over-a-second-connection
+channel the rest of the suite trusts — deliberately NOT
+`glReadPixels`, whose read-back-buffer behavior on this stack is
+quirky; see the comment on `self_check` in `src/platform/x11/x11_gl.c`).
+
+Four groups in `tests/test_x11_integration.c`:
+
+- **`test_gl_lane_policy_gui`** — the env matrix. `FDK_NO_GL=1` is
+  asserted strictly CPU; the DEFAULT policy is observed, not
+  asserted (the suite's machine may have a real GPU — on the Xvfb
+  rigs it is llvmpipe, so the expected observation is the software
+  refusal).
+- **`test_gl_lane_pixel_equivalence_gui`** — THE proof: the same
+  scene (fills, rects, border, line, AA circle; full frame then a
+  partial-damage frame) presented through `FDK_GL_FORCE=1` and
+  `FDK_NO_GL=1`, captured full-window server-side, `memcmp`ed — zero
+  differing pixels allowed — plus absolute spot-checks so "both
+  wrong identically" cannot pass.
+- **`test_gl_lane_downgrade_gui`** — `FDK_GL_FAIL_AT=2` (the
+  documented test seam, same family as `FDK_NO_MIT_SHM`) poisons
+  exactly the second present: the frame must still reach the screen
+  (the staging buffer is salvaged into the classic slots), the path
+  must flip to CPU permanently, and later frames must stay exact.
+- **`test_gl_lane_resize_gui`** — resize under the lane: staging and
+  texture re-allocate at the new size, damage resets to full per the
+  surface contract, and the path stays GL.
+
+Two pre-existing groups became lane-AWARE (assertions that pin the
+SHM path's internal mechanics branch on the render path):
+`test_mitm_shm_and_double_buffer` — the slot-swap pointer
+observation does not apply when GL owns the double buffering (the
+SEMANTIC it pins, un-presented drawing never reaching the server, is
+checked for both paths), and its SysV-segment accounting reads "no
+segments, GL owns the pair" instead of misreporting "copy path".
+
+**The whole-suite forced run**: beyond the four groups, the entire
+160-group suite is run with `FDK_GL_FORCE=1` (three consecutive
+clean runs at bring-up) — every widget, dialog, DnD, and clipboard
+test through the lane. This is a session verification, not a
+committed gate (the default-policy run is the gate; the lane's
+behavior is covered by its four groups and by construction — the
+pixels are the CPU path's pixels).
+
+**LSan and Mesa**: loading libGL (even when the policy then refuses
+llvmpipe) leaves Mesa's per-display caches orphaned by `XCloseDisplay`;
+LeakSanitizer reports ~100 KB per connection at exit. These are
+third-party allocations, not FDK leaks — `make test-x11` exports
+`LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp` automatically
+(module-name matching keeps the sanitizer strict for FDK-owned
+code). Any sanitized run that exercises the lane should pass the
+same file.
+
+**The examples-level proof** (`scripts/verify_gl_examples.sh` in the
+staging environment, outside the repo): every example runs twice —
+`FDK_GL_FORCE=1` and `FDK_NO_GL=1` — asserting clean exits and
+actual lane engagement (from the console log) both ways, and the
+captures of the static examples (01, 02, 03, 09) must be
+byte-identical between the paths. 05/06 are excluded from the
+byte-compare (their theme-cycle/entrance animations race the capture
+— the differing pixels are the same palette's blend states, not
+render-path differences).
+
+**One timing lesson, relearned**: `test_menu_gui`'s child-window
+counts were fixed-sleep races (pump 200 ms, then assert). The lane
+adds real create/teardown latency for popup windows (GLX contexts),
+which made them flaky under `FDK_GL_FORCE` — fixed by converting the
+counts to the suite's own bounded wait-until-state pattern (poll +
+pump, ceiling 2 s), which hardens the test for BOTH policies.
+
+**Rig maintenance found by this milestone** (pre-existing,
+reproduced on pristine 1.4.17): both tooltip rigs had been stale
+since the 1.4.16 palette change and the 1.4.17 scrolling-catalog
+restructure — the hover target (the progress bar) went below the
+fold, the X11 rig inherited the machine's global theme, and the
+pixel expectations were Modern-era. Both rigs now pin hermetic
+prefs, hover the color-well swatch (the example's hardcoded,
+theme-independent demo color — stabler than any theme token), and
+check the tooltip fill baseline-relative (Faded Dream's light text
+glyphs legitimately fall inside the fill tolerance class; the
+tooltip is the DELTA over that baseline). The examples pixel rig's
+color constants are still Modern-era (its failure reproduces on
+pristine 1.4.17; the battery runs the frame-budget smoke plus the
+GL equivalence rig instead) — known debt, recorded in the roadmap.

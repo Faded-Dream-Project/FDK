@@ -346,6 +346,20 @@ typedef struct fdk_platform_ops {
      * answer to "is this window actually on screen yet". */
     int (*window_ever_presented)(fdk_platform_window *pwindow);
 
+    /* OPTIONAL render-path introspection (1.4.18) behind
+     * fdk_window_get_render_path(): returns the presentation path
+     * this window actually uses RIGHT NOW — 0 = the CPU/software
+     * path (MIT-SHM or XPutImage copy, or the Wayland wl_shm commit),
+     * 1 = the GPU present lane (X11/GLX: damaged rects uploaded to a
+     * GL texture, one fullscreen composite, glXSwapBuffers). NULL =
+     * the backend has no GPU lane at all (Wayland today) and the
+     * frontend answers 0/CPU. The value is read LIVE off the
+     * backend's own state, so it reflects mid-session downgrades.
+     * FDK's rasterization is CPU-side on BOTH paths — see
+     * docs/rendering.md's GPU-present-lane section for the hybrid
+     * model and the policy/env knobs (FDK_NO_GL, FDK_GL_FORCE). */
+    int (*window_render_path)(fdk_platform_window *pwindow);
+
     /* OPTIONAL HiDPI scale query behind fdk_window_get_scale()
      * (Phase 3 completion): writes the window's current scale factor
      * (1.0 = one buffer pixel per logical unit) to *out_scale.

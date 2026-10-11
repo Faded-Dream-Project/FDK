@@ -9,7 +9,19 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-11, at milestone **1.4.17** (the smooth
+Last audited: 2026-10-11, at milestone **1.4.18** (the GPU present
+lane — the maintainer's hardware-acceleration ask, verified-absent
+first, then implemented as a hybrid: CPU rasterization unchanged and
+byte-identical, GLX presentation runtime-loaded via dlopen with a
+hand-declared API subset [no new build deps], policy-gated [hardware
+renderers only; llvmpipe/softpipe/swrast refused because the SHM path
+is faster there; FDK_NO_GL / FDK_GL_FORCE knobs], self-verifying on
+its first present, permanently downgrading with full frame salvage on
+any failure, observable via fdk_window_get_render_path; the whole
+160-group X11 suite additionally ran three times with FDK_GL_FORCE=1
+so every widget/dialog/DnD test went through the lane, and a new
+examples rig proves byte-identity at the app level), building on
+**1.4.17** (the smooth
 pass: the maintainer's polishing report — every themed control now
 paints through the antialiased primitives so corners and circle
 indicators read smooth; the hover-fade use-after-free fixed with
@@ -47,7 +59,15 @@ is always the truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.17** (the smooth pass — see above;
+- **HEAD:** milestone **1.4.18** (the GPU present lane — see above;
+  the full narrative is docs/roadmap.md "1.4.18 — the GPU present
+  lane (hybrid rendering)"; the one-sentence architecture: FDK is now
+  a hybrid renderer — every pixel rasterized on the CPU exactly as
+  before, presentation on the GPU where one exists. Verified
+  GPU-accelerated operations: the damaged-rect texture upload, the
+  fullscreen composite, and the buffer swap — i.e. the entire
+  pixels-to-screen half of every frame). Before it: **1.4.17** (the
+  smooth pass — see above;
   the full narrative is docs/roadmap.md "1.4.17 — the smooth
   pass"). Before it: 1.4.16 (the three faces — the theming
   ability test the maintainer asked for: **Faded Dream** is the new
@@ -85,9 +105,10 @@ is always the truth, including over this file.
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**,
   primary-selection)
-- **Public API:** **620 exported symbols** (617 +
+- **Public API:** **621 exported symbols** (620 +
   fdk_surface_draw_rounded_rect_aa +
-  fdk_scrollview_set_vertical_only/get_vertical_only),
+  fdk_scrollview_set_vertical_only/get_vertical_only +
+  fdk_window_get_render_path),
   `make verify-exports` OK in debug AND release
 - **Tests:** headless suite all-pass — **570 [ok] checks** (incl.
   the 1.4.4 + iconview suites, the eight 1.4.8 textview groups,
@@ -100,7 +121,12 @@ is always the truth, including over this file.
   discovery groups, and the whole test_shipped_themes suite —
   the five faces pinned: faded-dream byte-equal to the built-in,
   mono's black band + circle buttons, rave's hot-pink band);
-  X11 integration suite all-pass (real Xvfb, real input, incl.
+  X11 integration suite all-pass (**160 [ok] groups**, real Xvfb,
+  real input, incl. the four 1.4.18 GPU-lane groups — policy matrix,
+  byte-identity of GPU vs CPU presents, the poisoned-present
+  downgrade salvage, resize-under-the-lane — plus the whole suite
+  green three times over with FDK_GL_FORCE=1; the MIT-SHM
+  double-buffer test is lane-aware),
   the modern-batch, HiDPI (private 192-dpi server), iconview GUI,
   file-dialog icon-mode, textview GUI, clipboard-image, the
   1.4.12 INCR read/serve/image groups, the 1.4.14 INCR-DROP
@@ -218,6 +244,18 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **GPU present lane: SHIPPED (1.4.18, X11)** — hybrid rendering:
+  CPU rasterization unchanged (byte-identical, pinned by tests),
+  GLX presentation via runtime-loaded libGL (dlopen, hand-declared
+  API subset, no new build deps); hardware-renderer policy with
+  software refusal (llvmpipe/softpipe/swrast), FDK_NO_GL /
+  FDK_GL_FORCE / FDK_GL_FAIL_AT knobs; first-present server-side
+  self-verification; permanent downgrade with full frame salvage;
+  `fdk_window_get_render_path()` introspection (621st export);
+  `tests/data/lsan-gl.supp` for Mesa's exit-time allocations. See
+  docs/rendering.md "The GPU present lane (1.4.18)". The Wayland/EGL
+  sibling is DESIGNED (same shape) but deliberately unshipped — no
+  EGL runtime to verify against in this tree.
 
 ### Infrastructure (SHIPPED)
 

@@ -261,6 +261,12 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
      * is. */
     conn->shm_ok = 0;
     conn->shm_event_base = 0;
+
+    /* GPU present lane (1.4.18): NOT loaded here — see x11_gl.h. The
+     * fields just start NULL/0; the first framebuffer acquisition on
+     * any window pays the one-shot dlopen. */
+    conn->gl = NULL;
+    conn->gl_tried = 0;
     if (getenv("FDK_NO_MIT_SHM") == NULL) {
         int major = 0, minor = 0, pixmaps = 0;
         if (XShmQueryVersion(display, &major, &minor,
@@ -389,6 +395,12 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
     fdk_x11_dnd_shutdown(conn);
 
     fdk_x11_cursor_shutdown(conn);
+
+    /* GPU lane state (1.4.18): per-window contexts died with their
+     * windows above; what remains is the loader state. libGL itself
+     * stays pinned for process lifetime (x11_gl.c header comment). */
+    fdk_x11_gl_shutdown(conn->gl);
+    conn->gl = NULL;
 
     free(conn->app_id);
     conn->app_id = NULL;
