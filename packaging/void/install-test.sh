@@ -14,6 +14,13 @@ VERSION="$(fdk_expected_version)"
 echo "== FDK xbps install-test ($VERSION) =="
 
 xbps-install -Sy gcc pkgconf 2>/dev/null || xbps-install -Sy gcc pkgconf
+# Runtime libraries the packages need in this fresh container. xbps
+# resolves the shlib-requires declared on the packages; installing them
+# explicitly keeps the test hermetic against repo metadata variance.
+xbps-install -Sy libX11 libXext zlib 2>/dev/null || true
+xbps-install -Sy libxkbcommon 2>/dev/null || true
+xbps-install -Sy wayland-client 2>/dev/null || \
+    xbps-install -Sy libwayland-client 2>/dev/null || true
 xbps-install -Sy dejavu-fonts-ttf 2>/dev/null || \
     echo "NOTE: dejavu-fonts-ttf unavailable; smoke may fail on font discovery (disclosed)"
 

@@ -99,6 +99,7 @@ xbps-create \
     -l "Proprietary" \
     -H "https://github.com/FemBoyGamerTechGuy/FDK" \
     -D "fdk-libs-$VERSION"_"$REVISION" \
+    --shlib-requires "libX11.so.6 libXext.so.6 libz.so.1 libwayland-client.so.0 libxkbcommon.so.0" \
     "$DV"
 
 mv ./*.xbps dist/ 2>/dev/null || true
