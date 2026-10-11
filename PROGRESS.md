@@ -9,7 +9,33 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-12, at milestone **1.5.4** (the picker's
+Last audited: 2026-10-12, at milestone **1.6.0** (the public 1.0.0
+decision — the real release: the project owner, having validated
+the 1.5.x picker overhaul on real hardware [native Wayland under
+labwc included — "works native wayland", the FDK-drawn decorations
+carrying move/resize without compositor shortcuts], explicitly
+demanded the release ["i want a perfect release and the release
+needs to be to the main release FDK not FDK test"], which is
+exactly the explicit-owner-decision input docs/versioning.md's
+enforcement section requires; the decision was recorded there
+FIRST per policy, then fdk_version.h moved to 1.0.0 with the
+test_core pin following in the same commit; the versioned-SONAME
+scheme re-activated in the Makefile [-Wl,-soname,libfdk.so.1 on
+the link line; install stages libfdk.so.1.0.0 + libfdk.so.1 SONAME
+symlink + libfdk.so dev symlink, uninstall removes all three];
+README badge + status, abi-policy SONAME paragraphs, packaging.md
+banner, roadmap convention note all synced; the v1.0.0 tag was
+re-created on the decision commit and pushed to the MAIN
+repository, release.yml's matrix building all five families —
+deb, rpm, pkg.tar.zst, apk, xbps — plus the pristine source
+archive into the release; the "success but no packages" mystery
+the owner reported was root-caused on the way: since the
+2026-10-11 retraction every packaging job had been exiting 0 via
+the disclosed PACKAGING-SKIP guard [green checkmark, zero
+packages], and the Void family's CI-env failure the owner
+remembered was from the retracted attempt — its fixes landed
+afterward and were proven green in the matrix before this
+release), building on **1.5.4** (the picker's
 crash fix — the maintainer's fourth report ["it crashes anytime I
 try to open anything that has to do with the filepicker", an ASan
 heap-buffer-overflow inside nsvg__parseNameValue] resolved at the

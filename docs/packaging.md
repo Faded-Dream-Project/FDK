@@ -5,17 +5,18 @@ from source, installing the binary packages the project publishes,
 what those packages contain, how the release pipeline produces and
 validates them, and how a maintainer cuts a release.
 
-> **No release is published.** The public version is pre-1.0
-> (`0.0.1`, `docs/versioning.md`): a 2026-10-11 v1.0.0 attempt was
-> retracted the same day — the tag and the never-published draft
-> release were deleted — when manual testing showed the file and
-> folder pickers were not release-ready. Everything below describes
-> the *validated pipeline* that exists on `main` and the *release
-> shape* it will produce; the packaging scripts themselves refuse to
-> run at pre-1.0 versions (a disclosed `PACKAGING-SKIP`, so CI stays
-> honest and green) until the real 1.0.0 decision flips the versioned
-> layout back on. Build from source (`docs/build.md`) in the
-> meantime.
+> **v1.0.0 is released.** The public version is `1.0.0` — the
+> deliberate, recorded decision of 2026-10-12 (`docs/versioning.md`),
+> made after the picker overhaul closed the 2026-10-11 retraction's
+> named blockers and after the project owner's real-hardware
+> validation. The packaging pipeline is live: a `v*` tag push runs
+> the full cross-distribution matrix (build + native package +
+> clean-container install-tests per family) and stages a draft
+> GitHub Release with every validated artifact plus `SHA256SUMS`.
+> The release-posture guard (`fdk_require_release_posture`) keeps
+> its place as infrastructure: if the public version ever returns
+> to a pre-1.0 posture, packaging discloses a `PACKAGING-SKIP`
+> rather than staging an inconsistent payload.
 
 - Repository home: https://github.com/FemBoyGamerTechGuy/FDK
 - Releases: https://github.com/FemBoyGamerTechGuy/FDK/releases

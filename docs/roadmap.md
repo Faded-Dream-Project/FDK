@@ -4,8 +4,9 @@
 (Phase numbers, and the `1.0.0` / `1.1.x` milestone labels) is an
 **internal engineering milestone** — a history marker for when work
 landed. None of them is the public version. The public version of
-FDK is `0.0.1` by deliberate policy and stays there for the
-foreseeable future; see `docs/versioning.md` before touching
+FDK is `1.0.0` — the deliberate, recorded decision of 2026-10-12
+(`docs/versioning.md`), which for the project's whole earlier life
+was the `0.0.1` joke. See `docs/versioning.md` before touching
 `include/fdk/fdk_version.h`.
 
 Work proceeds in phases. Each phase should compile, pass its tests,
@@ -5640,3 +5641,55 @@ exclusively) leave the shape at its default fill — drawn and
 honest, not a miss. That boundary is now stated in fdk_dialog.h,
 icon_svg.c, the vendor README, and here, replacing the wrong
 "unsupported" claims of 1.5.2/1.5.3.
+
+## 1.6.0 — the public 1.0.0 decision (the real release)
+
+The maintainer's fifth report closed the loop: "Good its fixed …
+works native wayland … i want a perfect release and the release
+needs to be to the main release FDK not FDK test." Native Wayland
+validated on real hardware (labwc, no compositor-side move/resize
+shortcuts needed — the FDK-drawn decorations carry it), the picker
+overhaul holding up in daily use, and an explicit owner demand for
+the release. That is exactly the input docs/versioning.md's
+enforcement section requires for a version bump: an explicit
+project-owner decision, with the document updated first.
+
+**What moved.** docs/versioning.md rewritten around the 1.0.0
+decision (what it rested on: the retraction's named blockers closed
+by 1.5.1-1.5.4, owner real-hardware validation, the explicit demand;
+what it does NOT mean: no audit softening). include/fdk/fdk_version.h
+carries 1.0.0 with the full history in its comment block.
+tests/test_core.c pins 1.0.0. The Makefile re-activated the
+versioned-SONAME scheme: `FDK_VERSION_MAJOR` derived from the header,
+`FDK_SONAME = libfdk.so.$(FDK_VERSION_MAJOR)`, the link line carries
+`-Wl,-soname,$(FDK_SONAME)`, and install stages the real file
+`libfdk.so.1.0.0` + the SONAME symlink `libfdk.so.1` + the
+development symlink `libfdk.so` (uninstall removes all three).
+README's badge and status line, docs/abi-policy.md's SONAME
+paragraphs, docs/packaging.md's banner, and this file's versioning
+convention note all record the new posture.
+
+**Why this 1.0.0 is not the retracted one.** The 2026-10-11 attempt
+was a distribution pass bumping a number over pickers that manual
+testing immediately broke. This decision inverts the order: the
+pickers were fixed first (four milestones, each pixel-verified and
+regression-pinned), the owner validated the result on real hardware
+including native Wayland under labwc, and only then demanded the
+number move. Component quality gated the release, exactly the lesson
+the retraction recorded.
+
+**The pipeline the release rides.** ci.yml (every push to main)
+runs the full battery plus the cross-distribution packaging matrix —
+at 1.0.0 the `fdk_require_release_posture` guard passes every
+family through for real builds again (the PACKAGING-SKIP era, honest
+while it lasted, is over). release.yml (a `v*` tag push) runs the
+same matrix with upload, produces the pristine `git archive` source
+tarball, generates SHA256SUMS and the notes from the artifacts that
+actually exist, and stages a DRAFT release — published only after
+every family's artifacts are verified present. The v1.0.0 tag was
+re-created on this decision commit and pushed to the main
+repository; the Void Linux family whose CI bootstrap failed during
+the retracted attempt had been fixed and proven green in the interim
+(matrix fully green at 1.5.0-era commit 83a997e), so the release
+carries all five families: deb, rpm, pkg.tar.zst, apk, xbps, plus
+the source archive.

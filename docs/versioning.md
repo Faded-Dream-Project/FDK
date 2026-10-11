@@ -2,14 +2,16 @@
 
 ## The rule
 
-The public version of FDK is **0.0.1** — on purpose. The number is a
-project joke: *this absurdly capable toolkit is still called 0.0.1.*
-It is not an alpha marker, not a stability claim, and not a maturity
-signal, and it does not license any lowering of engineering
-standards.
+The public version of FDK is **1.0.0** — the deliberate, recorded
+1.0.0 decision of 2026-10-12. For the entire life before it the
+number was a project joke (`0.0.1` — *this absurdly capable toolkit
+is still called 0.0.1*), and the decision to leave the joke behind
+was made exactly the way this document demands: by the project
+owner, explicitly, after the retraction's stated blockers were
+closed — not by autonomy, feature accumulation, or semver pressure.
 
 ```
-Public version:       0.0.1         (the joke, restored)
+Public version:       1.0.0         (the recorded owner decision)
 Engineering standard: extremely high (unchanged by the number)
 ```
 
@@ -18,24 +20,42 @@ number is never permission for lower standards, and engineering
 quality is never *why* the version moves — or, as the retraction
 below proved, why it should not.
 
-## What 0.0.1 does NOT mean
+## What the 1.0.0 decision rested on
 
-- It does **not** mean the toolkit is immature: the public API and
-  ABI are already governed by `docs/abi-policy.md`
-  (`FDK_ABI_STABLE`, append-only, size-pinned, opaque layouts —
-  keyed to the Phase 11 stabilization milestone, a *different*
-  axis from the public version).
+The 2026-10-11 retraction named its blockers precisely: the file
+and folder pickers were not release-ready (unfinished file-type
+iconography, no system icon-theme integration, picker-quality
+defects). The milestones that closed them — picker stabilization
+(1.5.1), the audit pass (the default detection channel, SVG
+rasterization, the refusal set — 1.5.2), the polish pass (per-pixel
+alpha compositing, the live XSETTINGS desktop — 1.5.3), and the
+crash fix (CSS-class SVGs — 1.5.4) — are recorded in
+`docs/roadmap.md`, each pixel-verified and regression-pinned. The
+project owner then tested the result on real hardware (native
+Wayland under labwc included) and demanded the release. Component
+closed the gate, not pipeline greenness — the lesson the retraction
+taught, applied.
+
+With this decision the **SONAME scheme activates** (`libfdk.so.1`),
+the packaging pipeline leaves its disclosed `PACKAGING-SKIP`
+posture, and binary distribution (deb / rpm / pkg.tar.zst / apk /
+xbps plus the pristine source archive) becomes a published
+artifact set rather than dormant infrastructure.
+
+## What 1.0.0 does NOT mean
+
 - It does **not** soften any audit: dependency, license, security,
   API, memory, DPI, accessibility, theme, installation,
   external-consumer, performance, X11, Wayland, GUI, visual
   regression, and sanitizer testing all remain fully in force.
 - It does **not** license fake completion or marketing language
   beyond what is verified.
-- It **does** mean: FDK makes no stable-distribution promises yet.
-  The from-source build (`make`, `make install`) is the supported
-  consumption path; binary packaging exists as *infrastructure*
-  (`packaging/`, `docs/packaging.md`) awaiting the deliberate
-  release decision, not as a published artifact.
+- It **does** mean: FDK now makes stable-distribution promises. The
+  ABI contract is `docs/abi-policy.md` (`FDK_ABI_STABLE`, the
+  SONAME, append-only rules); the from-source build (`make`, `make
+  install`) remains the fully supported consumption path, with
+  binary packaging (`packaging/`, `docs/packaging.md`) as the
+  published channel alongside it.
 
 ## Internal milestones are not versions
 
@@ -62,28 +82,24 @@ Exactly one source of truth: `include/fdk/fdk_version.h`
   (`docs/packaging.md`) — every recipe substitutes `@VERSION@`
   from the header; nothing hand-edits a version string.
 
-## The SONAME policy (designed, dormant)
+## The SONAME policy (active since 1.0.0)
 
-The shared library currently builds and installs as a single
-unversioned `libfdk.so` with no SONAME — the honest pre-release
-posture. The versioned scheme is designed and ready to activate
-with the real public 1.0.0 decision: the real file carries the full
-version (`libfdk.so.<major.minor.patch>`), the SONAME symlink
-(`libfdk.so.<major>`) is what executables record as `NEEDED`, and
-the development symlink (`libfdk.so`) is what pkg-config's `-lfdk`
-resolves against. Under that policy, ABI-compatible releases
-(minor/patch) keep the SONAME and move only the file version; a
-future major that breaks the ABI moves the SONAME major in the same
-commit. Because nothing depending on an FDK SONAME exists in
-public distribution, activating `libfdk.so.1` at the real 1.0.0
-breaks no one and invents no history. The Makefile and packaging
-pipeline derive both from the header, so the scheme switches on
-with the version bump itself.
+The shared library builds and installs under the versioned scheme:
+the real file carries the full version (`libfdk.so.<major.minor.patch>`),
+the SONAME symlink (`libfdk.so.<major>`) is what executables record
+as `NEEDED`, and the development symlink (`libfdk.so`) is what
+pkg-config's `-lfdk` resolves against. Under that policy,
+ABI-compatible releases (minor/patch) keep the SONAME and move only
+the file version; a future major that breaks the ABI moves the
+SONAME major in the same commit. Because nothing depending on an
+FDK SONAME existed in public distribution before 1.0.0, activating
+`libfdk.so.1` broke no one and invented no history. The Makefile
+and packaging pipeline derive both from the header.
 
 ## Enforcement
 
 `tests/test_core.c::test_version` pins the public version at
-`0.0.1`. A change to the version macros without the matching test
+`1.0.0`. A change to the version macros without the matching test
 change fails the suite. Changing both is a deliberate act that
 requires:
 
@@ -92,6 +108,10 @@ requires:
    prestige, not a competitor's higher number, not a packaging
    milestone being "done enough"), and
 2. updating this document to record the new decision first.
+
+The 1.0.0 bump of 2026-10-12 satisfied both: the owner demanded the
+release after verifying the picker work on real hardware, and this
+document was updated in the same commit that moved the macros.
 
 ## History
 
@@ -119,3 +139,15 @@ requires:
   infrastructure for the eventual, deliberate 1.0.0 — a decision
   that now also carries the lesson that *component quality, not
   pipeline greenness, gates the number.*
+- 2026-10-12: **the real 1.0.0.** The retraction's named blockers
+  were closed by the picker overhaul (milestones 1.5.1 through
+  1.5.4: file-type iconography + system icon-theme integration,
+  SVG rasterization with the refusal set, per-pixel alpha
+  compositing + the live XSETTINGS desktop, and the CSS-class SVG
+  crash fix — each pixel-verified and regression-pinned), the
+  project owner validated the result on real hardware (native
+  Wayland under labwc included) and explicitly demanded the
+  release, and this document recorded the decision in the same
+  commit that moved the macros. The versioned-SONAME scheme
+  (`libfdk.so.1`) activated with it; the `v1.0.0` tag was re-created
+  on the decision commit and pushed to the main repository.

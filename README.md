@@ -14,7 +14,7 @@ developed as part of the
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
-[![Version: 0.0.1](https://img.shields.io/badge/version-0.0.1-blueviolet?style=flat-square)](docs/versioning.md)
+[![Version: 1.0.0](https://img.shields.io/badge/version-1.0.0-blueviolet?style=flat-square)](docs/versioning.md)
 [![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/FemBoyGamerTechGuy/Faded-Dream-dotfiles)
 
 </div>
@@ -29,15 +29,17 @@ layout, text, and theme engines, and FDK-drawn window decorations —
 with no GTK/Qt dependency and a minimal, always-justified dependency
 set (`docs/dependencies.md`).
 
-**Status:** pre-1.0 (public version `0.0.1`, the deliberate joke
-— `docs/versioning.md`). All roadmap phases complete, ABI frozen
-(`FDK_ABI_STABLE`, `docs/abi-policy.md`), license finalized, and a
-cross-distribution packaging + CI pipeline built and validated
-(`docs/packaging.md`) — but no public release has been made: a
-2026-10-11 v1.0.0 attempt was retracted the same day when manual
-testing showed the file/folder pickers and icon-theme support were
-not release-ready (the record lives in `docs/versioning.md`). The
-phase-by-phase account of what is and isn't covered lives in
+**Status:** **v1.0.0 released** — the deliberate, recorded 1.0.0
+decision of 2026-10-12 (`docs/versioning.md`), made by the project
+owner after the picker overhaul closed the retraction's named
+blockers and after real-hardware validation (native Wayland under
+labwc included). All roadmap phases complete, ABI frozen with the
+`libfdk.so.1` SONAME (`docs/abi-policy.md`), license finalized, and
+a cross-distribution packaging + CI pipeline built and validated
+(`docs/packaging.md`). Binary packages (.deb / .rpm / .pkg.tar.zst /
+.apk / .xbps) and the pristine source archive ship on the
+[releases page](https://github.com/FemBoyGamerTechGuy/FDK/releases).
+The phase-by-phase account of what is and isn't covered lives in
 `docs/roadmap.md` and `PROGRESS.md`.
 
 FDK is **distro-agnostic**: it builds and runs on any modern Linux
@@ -272,7 +274,7 @@ Real captured frames from the test rigs — not mockups
 | `docs/threading.md` | UI-thread affinity, worker-thread rules |
 | `docs/performance.md` | The performance baseline harness |
 | `docs/abi-policy.md` | The ABI freeze, struct classification, subclassing decision |
-| `docs/versioning.md` | The 0.0.1 policy, the 2026-10-11 1.0.0 retraction record, and the dormant SONAME scheme |
+| `docs/versioning.md` | The 1.0.0 decision, the 0.0.1 joke era, the 2026-10-11 retraction record, and the active SONAME scheme |
 | `docs/packaging.md` | Binary packages per distribution, reproducing builds, the release runbook |
 | `docs/dependencies.md` | Every current and anticipated dependency, justified |
 | `docs/licensing-policy.md` | What licenses are/aren't allowed in, and the audit procedure |

@@ -10,16 +10,17 @@ struct and verified the freeze rules against the actual headers.
 Between engineering milestones the rules in this document now BIND.
 
 **The public version number is not the ABI contract.** FDK's
-public version is `0.0.1` (`docs/versioning.md`, the deliberate
-joke — see its 2026-10-11 retraction record) — but ABI status was
+public version is `1.0.0` (the recorded 2026-10-12 decision,
+`docs/versioning.md`) — but ABI status was
 frozen and binding long before any number, and it is still
 `FDK_ABI_STABLE` plus the Phase 11 freeze that constitute the
-contract, not the version string. The shared library carries no
-SONAME in the pre-release posture (a single unversioned
-`libfdk.so`); the versioned-SONAME scheme (`libfdk.so.<major>`,
-derived from `FDK_VERSION_MAJOR` in the Makefile) is designed and
-dormant, activating with the real public 1.0.0 decision — the
-policy lives in `docs/versioning.md`'s "SONAME policy" section.
+contract, not the version string. Since that decision the shared
+library carries the versioned SONAME scheme: the real file
+`libfdk.so.<major.minor.patch>`, the SONAME symlink
+`libfdk.so.<major>` (derived from `FDK_VERSION_MAJOR` in the
+Makefile) that executables record as `NEEDED`, and the
+development symlink `libfdk.so` — the policy lives in
+`docs/versioning.md`'s "SONAME policy" section.
 
 ### The struct classification (the Phase 11 audit)
 
@@ -91,13 +92,11 @@ The following rules apply and are enforced by review:
    existing values' numeric meaning never changes.
 5. **Removing a public symbol is an ABI break**, full stop — it does
    not happen because a version number "looks big enough", and it
-   does not happen because the public version once was a joke
-   `0.0.1` either. The public version is decoupled from ABI status
+   did not happen when the public version moved from the `0.0.1`
+   joke to `1.0.0`. The public version is decoupled from ABI status
    (`docs/versioning.md`); a symbol removal would be its own recorded
-   ABI-generation event — and under the dormant SONAME policy it
-   would move the SONAME
-   major (`libfdk.so.2`) in the same change once that scheme
-   activates with the real public 1.0.0.
+   ABI-generation event — and under the active SONAME policy it
+   would move the SONAME major (`libfdk.so.2`) in the same change.
 
 ## Versioning
 

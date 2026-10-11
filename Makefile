@@ -43,17 +43,19 @@ LIBDIR   ?= $(PREFIX)/lib
 INCDIR   ?= $(PREFIX)/include
 BINDIR   ?= $(PREFIX)/bin
 DATADIR  ?= $(PREFIX)/share
-# Version for the pkg-config file; kept in one place, mirroring
-# include/fdk/fdk_version.h (the header is the source of truth —
-# a mismatch is a release-blocker).
+# Version for the pkg-config file and the shared-library SONAME;
+# kept in one place, mirroring include/fdk/fdk_version.h (the header
+# is the source of truth — a mismatch is a release-blocker).
 FDK_PC_VERSION := $(shell sed -n 's/^#define FDK_VERSION_STRING "\(.*\)"/\1/p' include/fdk/fdk_version.h)
-# No SONAME while the public version is 0.0.1 (docs/versioning.md's
-# retraction record): the .so builds and installs as a single
-# unversioned file, the honest pre-distribution posture. The
-# versioned scheme (libfdk.so.<major> real file + SONAME + dev
-# symlinks) is designed and documented, and activates with the
-# real public 1.0.0 decision — see docs/versioning.md and
-# docs/packaging.md.
+# SONAME major, also derived from the header: ABI-breaking changes
+# bump FDK_VERSION_MAJOR (docs/versioning.md's soname policy) and
+# with it the SONAME (libfdk.so.<major>). ABI-compatible releases
+# (minor/patch bumps) keep the SONAME and only move the file version
+# - the standard Linux convention, active since the public 1.0.0
+# decision of 2026-10-12 (before that the .so carried no SONAME at
+# all and installed as a single unversioned file).
+FDK_VERSION_MAJOR := $(shell sed -n 's/^#define FDK_VERSION_MAJOR \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)
+FDK_SONAME := libfdk.so.$(FDK_VERSION_MAJOR)
 
 STD      := -std=c17
 WARN     := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
@@ -366,7 +368,7 @@ $(STATIC_LIB): $(LIB_OBJS)
 
 $(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -fPIC -shared -Wl,--version-script=$(EXPORT_MAP) -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
+	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(FDK_SONAME) -Wl,--version-script=$(EXPORT_MAP) -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
 
 # Generates the export map: intersection of header-declared names and
 # archive-defined globals (see the EXPORT_MAP block above). Depends on
@@ -563,11 +565,14 @@ install: all $(BUILD_DIR)/fdk.pc
 	install -m 644 include/fdk/*.h $(DESTDIR)$(INCDIR)/fdk/
 	install -d $(DESTDIR)$(LIBDIR)
 	install -m 644 $(STATIC_LIB) $(DESTDIR)$(LIBDIR)/
-# Unversioned shared-library install (the pre-1.0.0 posture, per
-# docs/versioning.md's retraction record): a single libfdk.so. The
-# versioned layout (libfdk.so.<version> + SONAME + dev symlink)
-# activates with the real public 1.0.0 decision.
-	install -m 755 $(SHARED_LIB) $(DESTDIR)$(LIBDIR)/
+# Versioned shared-library install (the soname scheme, active since
+# the public 1.0.0 decision of 2026-10-12): the real file carries
+# the full version, the SONAME symlink is what executables record
+# as NEEDED, and the unversioned libfdk.so is the development
+# symlink pkg-config's -lfdk resolves against.
+	install -m 755 $(SHARED_LIB) $(DESTDIR)$(LIBDIR)/libfdk.so.$(FDK_PC_VERSION)
+	ln -sf libfdk.so.$(FDK_PC_VERSION) $(DESTDIR)$(LIBDIR)/$(FDK_SONAME)
+	ln -sf $(FDK_SONAME) $(DESTDIR)$(LIBDIR)/libfdk.so
 	install -d $(DESTDIR)$(LIBDIR)/pkgconfig
 	install -m 644 $(BUILD_DIR)/fdk.pc \
 		               $(DESTDIR)$(LIBDIR)/pkgconfig/fdk.pc
@@ -580,6 +585,8 @@ uninstall:
 	rm -rf $(DESTDIR)$(INCDIR)/fdk
 	rm -f $(DESTDIR)$(LIBDIR)/libfdk.a
 	rm -f $(DESTDIR)$(LIBDIR)/libfdk.so
+	rm -f $(DESTDIR)$(LIBDIR)/$(FDK_SONAME)
+	rm -f $(DESTDIR)$(LIBDIR)/libfdk.so.$(FDK_PC_VERSION)
 	rm -f $(DESTDIR)$(LIBDIR)/pkgconfig/fdk.pc
 	rm -f $(addprefix $(DESTDIR)$(BINDIR)/,$(notdir $(TOOL_BINS)))
 	rm -rf $(DESTDIR)$(DATADIR)/fdk
