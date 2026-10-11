@@ -104,12 +104,8 @@ xbps-create \
 mv ./*.xbps dist/ 2>/dev/null || true
 ls -la dist/*.xbps
 
-echo "== package metadata: =="
-for x in dist/*.xbps; do
-    echo "--- $x"
-    xbps-query --repository="$(pwd)/dist" -S -p pkgver "fdk-libs" >/dev/null 2>&1 || true
-    xbps-uhelper fmtmsg "$(basename "$x" .xbps)" 2>/dev/null || true
-done
+echo "== package metadata (pkgver lines from the repository index): =="
+xbps-query --repository=dist -S fdk-libs fdk-devel 2>/dev/null | head -8 || true
 
 # --- payload verification ---------------------------------------------------
 EXT="$STAGE/extract"

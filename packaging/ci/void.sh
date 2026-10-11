@@ -24,7 +24,7 @@ docker pull -q "$VOID_IMAGE"
 
 RUN "$VOID_IMAGE" '
     set -eu
-    xbps-install -Sy base-devel pkgconf findutils \
+    xbps-install -Sy base-devel pkgconf findutils zstd \
         libX11-devel libXext-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-fonts-ttf tar
