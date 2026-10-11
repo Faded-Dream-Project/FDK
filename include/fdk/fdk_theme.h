@@ -317,11 +317,15 @@ fdk_theme *fdk_theme_get_default(void);
  *      fdk/themes (default /usr/local/share:/usr/share — the pair
  *      per entry, canonical first, legacy still honored)
  *
- * FDK's own shipped themes live in the source tree's .FDKThemes/
- * folder and install into <prefix>/share/fdk/.FDKThemes/.
+ * FDK's own shipped face — faded-dream.fdk, the packaged copy of
+ * the built-in default — lives in the source tree's .FDKThemes/
+ * folder and installs into <prefix>/share/fdk/.FDKThemes/ (the
+ * 1.0.0 posture: exactly ONE theme ships, the default's copy; the
+ * next faces are user-installed .FDKThemes drop-ins, not package
+ * content).
  *
  * A theme file is named <stem>.fdk. The STEM is the canonical handle:
- * `fdk_theme_find("matrix")` looks for matrix.fdk walking the path in
+ * `fdk_theme_find("my-theme")` looks for my-theme.fdk walking the path in
  * order. Stems should be 1..64 characters of [A-Za-z0-9_-] (the same
  * character class as a prefs key half) — the direct lookup accepts
  * exactly that grammar, so a stem outside it is reachable only
@@ -383,7 +387,8 @@ fdk_theme *fdk_theme_get_default(void);
  * override), and the generic `fdk-prefs`; see docs/cli.md. */
 
 /* Finds and loads a theme by name on the search path above. `name`
- * may be a file STEM ("matrix" -> matrix.fdk, exact, case-sensitive)
+ * may be a file STEM ("my-theme" -> my-theme.fdk, exact,
+ * case-sensitive)
  * or, when no stem matches, a theme's INTERNAL name as it appears in
  * the file ("Daylight" — the quoted `name` key). On success returns
  * a theme owned by the caller and writes FDK_OK to *out_error when

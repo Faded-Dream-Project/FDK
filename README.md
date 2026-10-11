@@ -89,7 +89,8 @@ suite (`docs/testing.md`).
   synthetic bold/italic, an LRU glyph cache, labels that wrap,
   ellipsize, and align — and full-Unicode XIM input on X11.
 - **Theming** — runtime-switchable `.fdk` theme files with a strict,
-  fail-closed grammar; ten shipped faces; live re-theming of running
+  fail-closed grammar; one shipped face (the default); more faces
+  are user-installed `.FDKThemes` drop-ins; live re-theming of running
   applications; `fdk-theme` / `fdk-set` command-line tools.
 - **FDK-drawn window decorations** — a themed title band with full
   window management (drag, maximize, fullscreen, resize), handing off
@@ -163,10 +164,12 @@ cc myapp.c $(pkg-config --cflags --libs fdk)
 ```
 
 The same install puts the `fdk-theme`, `fdk-set`, and `fdk-prefs`
-command-line tools into `$(PREFIX)/bin` and the ten shipped theme
-faces into `$(PREFIX)/share/fdk/.FDKThemes` — so
-`fdk-theme set daylight` (or `set catppuccin-mocha`,
-`set mono-chromatic`, …) works immediately after installing.
+command-line tools into `$(PREFIX)/bin` and the one shipped theme —
+`faded-dream`, the packaged copy of the built-in default — into
+`$(PREFIX)/share/fdk/.FDKThemes`. Additional faces are not package
+content: drop any `.fdk` file into `~/.FDKThemes` (or
+`~/.local/share/fdk/.FDKThemes`) and `fdk-theme set <name>` picks
+it up immediately.
 
 ## A first window
 
@@ -236,10 +239,10 @@ fdk_theme_set_default(t);
   duplicates, and malformed values are line-numbered errors, never a
   half-themed UI; missing tokens inherit the built-in defaults
   (`docs/fdk-theme-format.md`).
-- Ten faces ship with the toolkit: `faded-dream` (the calm
-  gray-with-violet default), `daylight`, `matrix`, `mono-chromatic`,
-  `pink-rave`, `catppuccin-mocha`, `catppuccin-latte`, `nordic-frost`,
-  `amoled-void`, and `solar-flare`.
+- One face ships with the toolkit: `faded-dream` — the packaged
+  copy of the calm gray-with-violet built-in default (the fallback
+  theme, byte-equal by contract). The next faces are `.FDKThemes`
+  drop-ins the user installs, not package content.
 - `fdk-theme set <name>` changes the global theme — applied live by
   every running FDK application that didn't install its own;
   `fdk-set` does the same per application. Custom themes load from

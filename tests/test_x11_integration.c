@@ -2473,10 +2473,11 @@ static void test_decorations_gui(void) {
  * gray band through the FALLBACK (control fill). Each switch
  * re-reads the root's themed window background too — the whole
  * window re-faces live, on the server's own pixels. The themes come
- * from the source tree's .FDKThemes/ folder: the same files the
- * suite ships. */
+ * from tests/data/faces/ — the engine fixture corpus (the 1.0.0
+ * alignment: the package ships only faded-dream, the default's
+ * packaged copy; these two faces stay as fixtures, never shipped). */
 static void test_titlebar_theming_gui(void) {
-    /* build/tests/ -> ../../.FDKThemes/<face>.fdk */
+    /* build/tests/ -> ../../tests/data/faces/<face>.fdk */
     char self[512];
     ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     assert(n > 0);
@@ -2486,9 +2487,9 @@ static void test_titlebar_theming_gui(void) {
     *slash = '\0';
     char mono_path[600], rave_path[600];
     snprintf(mono_path, sizeof mono_path,
-             "%.500s/../../.FDKThemes/mono-chromatic.fdk", self);
+             "%.500s/../../tests/data/faces/mono-chromatic.fdk", self);
     snprintf(rave_path, sizeof rave_path,
-             "%.500s/../../.FDKThemes/pink-rave.fdk", self);
+             "%.500s/../../tests/data/faces/pink-rave.fdk", self);
 
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };

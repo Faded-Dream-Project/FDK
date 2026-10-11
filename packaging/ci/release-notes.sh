@@ -63,14 +63,14 @@ NOTES="$(dirname "$(pwd)")/notes.md"
     echo ""
     echo "| Artifact | Target | Contents |"
     echo "| --- | --- | --- |"
-    for f in libfdk1_*.deb; do [ -f "$f" ] && echo "| \`$f\` | Debian 12 / 13, Ubuntu 24.04+ (glibc >= 2.36) | runtime: libfdk.so.1 + 10 theme faces |"; done
+    for f in libfdk1_*.deb; do [ -f "$f" ] && echo "| \`$f\` | Debian 12 / 13, Ubuntu 24.04+ (glibc >= 2.36) | runtime: libfdk.so.1 + the default theme (faded-dream) |"; done
     for f in fdk-dev_*.deb; do [ -f "$f" ] && echo "| \`$f\` | Debian 12 / 13, Ubuntu 24.04+ | headers, pkg-config, CLI tools |"; done
-    for f in libfdk1-*.rpm; do [ -f "$f" ] && echo "| \`$f\` | RHEL 10 family + Fedora 42+ (glibc >= 2.38) | runtime: libfdk.so.1 + 10 theme faces |"; done
+    for f in libfdk1-*.rpm; do [ -f "$f" ] && echo "| \`$f\` | RHEL 10 family + Fedora 42+ (glibc >= 2.38) | runtime: libfdk.so.1 + the default theme (faded-dream) |"; done
     for f in fdk-devel-*.rpm; do [ -f "$f" ] && echo "| \`$f\` | RHEL 10 family + Fedora 42+ | headers, pkg-config, CLI tools |"; done
     for f in fdk-*.pkg.tar.zst; do [ -f "$f" ] && echo "| \`$f\` | Arch Linux (x86_64, rolling) | runtime + development files (single package, Arch convention) |"; done
-    for f in fdk-*r0*.apk; do case "$f" in *dev*) continue;; esac; [ -f "$f" ] && echo "| \`$f\` | Alpine Linux 3.22 (musl, x86_64) | runtime: libfdk.so.1 + theme faces |"; done
+    for f in fdk-*r0*.apk; do case "$f" in *dev*) continue;; esac; [ -f "$f" ] && echo "| \`$f\` | Alpine Linux 3.22 (musl, x86_64) | runtime: libfdk.so.1 + the default theme |"; done
     for f in fdk-dev*r0*.apk; do [ -f "$f" ] && echo "| \`$f\` | Alpine Linux 3.22 (musl) | headers, pkg-config, CLI tools |"; done
-    for f in fdk-libs*.xbps; do [ -f "$f" ] && echo "| \`$f\` | Void Linux (glibc, x86_64) | runtime: libfdk.so.1 + theme faces |"; done
+    for f in fdk-libs*.xbps; do [ -f "$f" ] && echo "| \`$f\` | Void Linux (glibc, x86_64) | runtime: libfdk.so.1 + the default theme |"; done
     for f in fdk-devel*.xbps; do [ -f "$f" ] && echo "| \`$f\` | Void Linux (glibc) | headers, pkg-config, CLI tools |"; done
     [ "$have_src" = 1 ] && echo "| \`fdk-$VERSION.tar.gz\` | source | pristine source archive (\`git archive\` of this tag) |"
     echo ""

@@ -9,7 +9,30 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-12, at milestone **1.6.0** (the public 1.0.0
+Last audited: 2026-10-12, at milestone **1.6.1** (the one-face
+alignment — the 1.0.0 re-cut: the owner inspected the live v1.0.0
+release and set the product posture ["it needs to ship only one the
+next ones must be in (.FDKthemes) btw the default one being
+Faded-dream"] — FDK ships EXACTLY ONE theme, `faded-dream.fdk`, the
+packaged copy of the built-in default/fallback; the next faces are
+.FDKThemes drop-ins the user installs, never package content;
+the Makefile's SHIPPED_THEMES is PINNED to that single file [the
+wildcard is gone — a stray .fdk can no longer ride into a release],
+the source tree's `.FDKThemes/` carries only the one face, and the
+nine faces FDK grew between 1.4.13 and 1.4.17 are preserved as
+engine fixtures in `tests/data/faces/` [never installed:
+test_shipped_themes.c pins BOTH the one-face shipped contract —
+opendir scan of `.FDKThemes/` included — AND the nine-fixture
+corpus with every color/metric pin carried over; the X11
+titlebar-theming rig loads mono-chromatic + pink-rave from the
+fixtures; example 05 cycles the built-in + two examples/data
+fixtures + the one shipped face]; README, docs/build.md,
+docs/cli.md, docs/fdk-theme-format.md, docs/packaging.md,
+include/fdk/fdk_theme.h, the tools' usage lines, and
+packaging/ci/release-notes.sh all record the one-face posture; the
+v1.0.0 tag was re-created on this commit and the release assets
+replaced on the main repository), on top of the prior audit at
+milestone **1.6.0** (the public 1.0.0
 decision — the real release: the project owner, having validated
 the 1.5.x picker overhaul on real hardware [native Wayland under
 labwc included — "works native wayland", the FDK-drawn decorations

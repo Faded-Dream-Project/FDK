@@ -2,11 +2,13 @@
  * fdk-set.c — the per-application settings face of the FDK command
  * line (1.4.14)
  *
- *     fdk-set theme set "matrix"                 the global default
- *                                                 (same file fdk-theme
- *                                                 writes — the tools
- *                                                 are interoperable)
- *     fdk-set theme set "matrix" --app org.fdk.example09
+ *     fdk-set theme set "faded-dream"         the global default
+ *                               (the one shipped face; further faces
+ *                               are ~/.FDKThemes drop-ins)
+ *                               (same file fdk-theme
+ *                               writes — the tools
+ *                               are interoperable)
+ *     fdk-set theme set "faded-dream" --app org.fdk.example09
  *                                               ONE application's own
  *                                               theme: it wins over
  *                                               the global setting

@@ -1,13 +1,17 @@
-/* 05_theme.c — the theme engine, live (Phase 7; 1.4.16: the three
- * faces).
+/* 05_theme.c — the theme engine, live (Phase 7; 1.4.16; the 1.0.0
+ * alignment).
  *
- * One panel of catalog widgets cycling the toolkit's whole shipped
- * face collection: the built-in "Faded Dream" (the 1.4.16 default —
- * gray with violet accents), then five .fdk files — "Daylight" and
- * "Matrix" from examples/data/, and the 1.4.16 trio from the
- * source tree's .FDKThemes/ folder: "Mono Chromatic" (black/white,
- * CIRCLE buttons, black band), "Pink Rave" (all-pink, hot-pink
- * band), and "Faded Dream" (the packaged copy of the default).
+ * One panel of catalog widgets cycling the toolkit's theme faces
+ * at hand: the built-in "Faded Dream" (the 1.4.16 default — gray
+ * with violet accents), two .fdk files from examples/data/
+ * ("Daylight" and "Matrix" — authored demo fixtures, the documented
+ * load-your-own-file path), and the ONE face the package ships:
+ * "Faded Dream" again, as .FDKThemes/faded-dream.fdk (the packaged
+ * copy of the default — byte-equal to the built-in, pinned so by
+ * the test suite). The 1.0.0 posture: FDK ships exactly one theme
+ * — the default; the next faces are .FDKThemes drop-ins the user
+ * installs, and this demo's examples/data pair shows exactly that
+ * consumption pattern.
  * The "Next theme" button cycles the default theme at runtime —
  * FDK repaints the whole tree (fills, text, accent, focus ring,
  * separator thickness, corner radius, BUTTON SHAPE, and the FDK
@@ -38,11 +42,12 @@ static fdk_widget *progress = NULL;
 static fdk_widget *next_btn = NULL;
 static fdk_example *g_ex = NULL;
 
-/* The cycle: the built-in, then five parsed files — the two
- * examples/data/ fixtures and the three 1.4.16 faces from the
- * source tree's .FDKThemes/ folder (the same files `make install`
- * ships, so the demo doubles as a smoke test of the custom folder). */
-#define THEME_COUNT 6
+/* The cycle: the built-in, two parsed files from examples/data/
+ * (the load-your-own path every app can use), and the one face the
+ * package ships — .FDKThemes/faded-dream.fdk, the packaged copy of
+ * the default (the 1.0.0 alignment: exactly one shipped face; the
+ * demo doubles as a smoke test of the custom folder). */
+#define THEME_COUNT 4
 static fdk_theme *themes[THEME_COUNT];
 static int current_theme = 0;
 
@@ -50,8 +55,6 @@ static const char *THEME_FILES[] = {
     NULL, /* index 0: the built-in theme */
     "examples/data/daylight.fdk",
     "examples/data/matrix.fdk",
-    ".FDKThemes/mono-chromatic.fdk",
-    ".FDKThemes/pink-rave.fdk",
     ".FDKThemes/faded-dream.fdk",
 };
 

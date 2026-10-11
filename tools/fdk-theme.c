@@ -3,7 +3,9 @@
  *
  *     fdk-theme list              what is installed, where
  *     fdk-theme get               what a new FDK app would use
- *     fdk-theme set "matrix"      make that the global theme
+ *     fdk-theme set "faded-dream" make that the global theme
+ *                               (the one shipped face; further faces
+ *                               are ~/.FDKThemes drop-ins)
  *     fdk-theme reset             back to the built-in theme
  *     fdk-theme path [name]       where a theme file lives
  *

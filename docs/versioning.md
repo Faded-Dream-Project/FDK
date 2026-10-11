@@ -151,3 +151,19 @@ document was updated in the same commit that moved the macros.
   commit that moved the macros. The versioned-SONAME scheme
   (`libfdk.so.1`) activated with it; the `v1.0.0` tag was re-created
   on the decision commit and pushed to the main repository.
+- 2026-10-12 (same day, hours later): **the 1.0.0 alignment — one
+  shipped face.** The owner inspected the live release and set the
+  product posture: FDK ships exactly ONE theme — `faded-dream`, the
+  packaged copy of the built-in default — and the next faces are
+  `.FDKThemes` drop-ins the user installs, never package content
+  ("it needs to ship only one the next ones must be in (.FDKthemes)
+  btw the default one being Faded-dream"). The version number did
+  NOT move — a scope decision is not a version decision; the
+  release was re-cut instead: `SHIPPED_THEMES` in the Makefile
+  pinned to the single file (a stray .fdk can no longer ride a
+  wildcard into a release), the source tree's `.FDKThemes/`
+  reduced to `faded-dream.fdk`, the nine other faces preserved as
+  engine fixtures under `tests/data/faces/` (never installed, their
+  pins carried over to the fixture corpus in test_shipped_themes.c),
+  and the `v1.0.0` tag re-created on the alignment commit with the
+  release assets replaced on the main repository.

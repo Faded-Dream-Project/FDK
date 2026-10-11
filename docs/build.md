@@ -89,14 +89,16 @@ overridable: `LIBDIR`, `INCDIR`, `BINDIR`, `DATADIR`):
 | `$(LIBDIR)/libfdk.a`, `libfdk.so`     | the library                  |
 | `$(LIBDIR)/pkgconfig/fdk.pc`          | pkg-config file               |
 | `$(BINDIR)/fdk-theme`, `fdk-prefs`    | the command-line tools        |
-| `$(DATADIR)/fdk/.FDKThemes/*.fdk`     | the five shipped faces (faded-dream, daylight, matrix, mono-chromatic, pink-rave) |
+| `$(DATADIR)/fdk/.FDKThemes/*.fdk`     | the one shipped face (faded-dream — the packaged copy of the built-in default) |
 
 The .FDKThemes directory is on the runtime discovery path through
 the default `XDG_DATA_DIRS` (`/usr/local/share` and `/usr/share`
 both are), so an installed FDK — and `fdk-theme list` — finds the
-shipped faces with zero configuration. The legacy
+shipped face with zero configuration. The legacy
 `fdk/themes` location is still scanned, and `$HOME/.FDKThemes` is
-the per-user custom folder that outranks both. A nonstandard
+the per-user custom folder that outranks both — the place
+additional faces go (1.0.0: the package ships exactly one theme,
+the default's packaged copy). A nonstandard
 `DATADIR` should be accompanied by a matching `XDG_DATA_DIRS` entry
 in the target environment; `$FDK_THEME_DIR` overrides everything
 for sandboxed setups. See `docs/cli.md`.

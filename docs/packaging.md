@@ -162,8 +162,11 @@ similar default UI font is picked up automatically; override with
 Every package family ships:
 
 - **runtime**: `libfdk.so.1` (the SONAME; real file
-  `libfdk.so.<version>`) and the ten shipped `.fdk` theme faces in
-  `/usr/share/fdk/.FDKThemes`
+  `libfdk.so.<version>`) and the one shipped `.fdk` theme face —
+  `faded-dream.fdk`, the packaged copy of the built-in default — in
+  `/usr/share/fdk/.FDKThemes` (the 1.0.0 alignment: additional
+  faces are user-installed `~/.FDKThemes` drop-ins, not package
+  content)
 - **development**: the headers in `/usr/include/fdk`, the
   `libfdk.so` development symlink, `fdk.pc` for pkg-config, and the
   `fdk-theme` / `fdk-set` / `fdk-prefs` command-line tools

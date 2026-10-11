@@ -294,10 +294,18 @@ TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/tools/%,$(TOOL_SRCS))
 # reaches through the default $XDG_DATA_DIRS (/usr/local/share and
 # /usr/share both are) — an installed FDK finds its own themes with
 # zero configuration, and `fdk-theme list` after `make install`
-# shows exactly these next to the built-in. The five shipped faces:
-# faded-dream (the packaged copy of the default), daylight, matrix,
-# mono-chromatic, pink-rave.
-SHIPPED_THEMES := $(wildcard .FDKThemes/*.fdk)
+# shows exactly these next to the built-in.
+#
+# 1.0.0 alignment (the owner's directive, 2026-10-12): the package
+# ships EXACTLY ONE face — faded-dream, the packaged copy of the
+# built-in default. The list is PINNED (not a wildcard) so a stray
+# file in .FDKThemes/ can never silently ride into a release; the
+# next faces are .FDKThemes drop-ins the user installs (the
+# $HOME/.FDKThemes slot discovery already scans), not package
+# content. The nine former faces live on as engine fixtures in
+# tests/data/faces/ (pinned by test_shipped_themes.c, never
+# installed).
+SHIPPED_THEMES := .FDKThemes/faded-dream.fdk
 
 # Header dependency tracking: -MMD -MP writes a .d beside each object
 # naming every header it included. Without this, editing a struct in

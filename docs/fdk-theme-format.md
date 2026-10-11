@@ -373,11 +373,15 @@ normative reference for that half is `docs/cli.md` and
   install` fills), `$XDG_DATA_HOME/fdk/themes` (the 1.4.13
   location, still scanned), then each `$XDG_DATA_DIRS` entry's
   `fdk/.FDKThemes` followed by its `fdk/themes` (default
-  `/usr/local/share:/usr/share`). FDK's own five faces ship in the
-  source tree's `.FDKThemes/` and install into
-  `<prefix>/share/fdk/.FDKThemes/`.
-- The stem is the canonical handle: `matrix` resolves to
-  `matrix.fdk`, exact and case-sensitive, first directory on the
+  `/usr/local/share:/usr/share`). FDK's own shipped face —
+  `faded-dream.fdk`, the packaged copy of the built-in default (the
+  1.0.0 posture: exactly one face ships) — lives in the source
+  tree's `.FDKThemes/` and installs into
+  `<prefix>/share/fdk/.FDKThemes/`. Additional faces are
+  user-installed drop-ins (start with `~/.FDKThemes`), never
+  package content.
+- The stem is the canonical handle: `my-theme` resolves to
+  `my-theme.fdk`, exact and case-sensitive, first directory on the
   path wins. Stems should be 1..64 characters of `[A-Za-z0-9_-]`
   (the same character class as a prefs key half).
 - A theme whose file name differs from its internal `name` is also

@@ -5693,3 +5693,76 @@ the retracted attempt had been fixed and proven green in the interim
 (matrix fully green at 1.5.0-era commit 83a997e), so the release
 carries all five families: deb, rpm, pkg.tar.zst, apk, xbps, plus
 the source archive.
+
+## 1.6.1 — the one-face alignment (the 1.0.0 re-cut)
+
+The owner's sixth report, hours after the release went live, was a
+product-direction call, not a bug: "How many themes does FDK ship?
+It needs to ship only one. The next ones must be in (.FDKthemes).
+Btw the default one being Faded-dream." FDK 1.0.0 as published
+shipped TEN faces in `.FDKThemes/` — the default's packaged copy
+plus nine more the toolkit had grown across 1.4.13–1.4.17 (daylight,
+matrix, the 1.4.16 trio, the catppuccin pair, nordic-frost,
+amoled-void, solar-flare). Ten faces in the install is a desktop
+environment's posture; a toolkit with one default face and a clean
+drop-in mechanism for the rest is the posture the owner wants. "Its
+not a bug but faded dream its like the default theme like the
+fallback" — exactly: the one shipped theme IS the fallback,
+packaged.
+
+**The structural cut.** `git mv` moved the nine faces out of the
+shipped folder into `tests/data/faces/` — a fixture corpus in the
+established `tests/data/themes/` convention (alpha/beta/broken/
+oddname already lived there), never installed, never shipped.
+`.FDKThemes/` now carries exactly `faded-dream.fdk`. The Makefile's
+`SHIPPED_THEMES` — previously a wildcard — is PINNED to that one
+file, so the one-face contract is structural: a stray `.fdk`
+dropped into `.FDKThemes/` no longer rides a wildcard into every
+package; it has to survive `make test` first (see below), and even
+then the Makefile line itself is the explicit owner-controlled
+list.
+
+**The contract, pinned both directions.** test_shipped_themes.c was
+rewritten as two contracts in one suite. The shipped contract:
+faded-dream.fdk mirrors the built-in default byte-for-byte (the
+existing pin, kept), the folder enumerates as exactly one stem, AND
+an opendir scan of `.FDKThemes/` itself counts `.fdk` entries —
+exactly one, and it is `faded-dream.fdk` — so re-bloat fails in the
+test battery, not in a package review. The corpus contract: all
+nine faces load from `tests/data/faces/` with every color, metric,
+titlebar-family, and button-shape pin carried over verbatim
+(complete themes, a partial theme, the opted-in titlebar family,
+all three button shapes, two official palettes — the engine's
+coverage did not shrink with the shipped set), plus a nine-stem
+enumeration + quoted-name resolution round against the corpus
+(with `fdk__theme_scan_reset_for_tests()` between the two
+enumeration environments — the discovery scan caches).
+
+**The rigs that followed the files.** The X11 titlebar-theming
+suite (Mono Chromatic's near-black band over white, Pink Rave's
+hot-pink band over plum, the built-in's fallback gray — pixel
+readback from the server) now loads its two faces from the fixture
+corpus; the assertion bytes are untouched. Example 05 cycles four
+faces instead of six: the built-in, the two `examples/data/`
+fixtures (the documented load-your-own path — now also the demo of
+exactly how a user consumes a non-shipped face), and the one
+shipped file. Docs synced everywhere the ten-face claim lived:
+README (two places), docs/build.md's install table,
+docs/cli.md (the `fdk-theme list` transcript now shows the real
+1.0.0 install — one shipped face — and then a user drop-in
+appearing in `~/.FDKThemes`), docs/fdk-theme-format.md,
+docs/packaging.md's contents list, fdk_theme.h's discovery section,
+the `fdk-theme`/`fdk-set` usage headers, and
+packaging/ci/release-notes.sh's asset table ("the default theme"
+where it said "10 theme faces").
+
+**The re-cut.** The version number did not move — a scope decision
+is not a version decision (docs/versioning.md records the
+distinction and the full entry). The published v1.0.0 release and
+tag were deleted, the tag re-created on this alignment commit, and
+release.yml re-ran the full five-family matrix so every deb, rpm,
+pkg.tar.zst, apk, and xbps on the main repository's v1.0.0 release
+installs exactly one theme: the default's packaged copy. The nine
+faces remain one `git checkout` away from a future "theme pack"
+distribution — the `.FDKThemes` drop-in mechanism they will ride
+already exists and is tested.
