@@ -2,55 +2,52 @@
 
 ## The rule
 
-The public version of FDK is **1.0.0** — the first stable public
-release, adopted 2026-10-11 by an explicit project-owner decision
-for the v1.0.0 distribution milestone (source archives + native
-binary packages + the release pipeline; see `docs/packaging.md`).
+The public version of FDK is **0.0.1** — on purpose. The number is a
+project joke: *this absurdly capable toolkit is still called 0.0.1.*
+It is not an alpha marker, not a stability claim, and not a maturity
+signal, and it does not license any lowering of engineering
+standards.
 
 ```
-Public version:      1.0.0         (semver, from here on)
-Engineering standard: extremely high  (unchanged by the number)
+Public version:       0.0.1         (the joke, restored)
+Engineering standard: extremely high (unchanged by the number)
 ```
 
 The two axes stay decoupled in both directions: a higher version
 number is never permission for lower standards, and engineering
-quality was never *why* the version moved. The bump happened because
-the owner decided FDK is ready to be *distributed and depended on*
-as a stable 1.x — which brings compatibility obligations the number
-now has to honor (below).
+quality is never *why* the version moves — or, as the retraction
+below proved, why it should not.
 
-## What 1.0.0 does NOT mean
+## What 0.0.1 does NOT mean
 
-- It does **not** mean every imaginable feature is implemented — the
-  roadmap (`docs/roadmap.md`) still tracks what is deliberately not
-  covered, and the OUT-for-now list remains honest.
+- It does **not** mean the toolkit is immature: the public API and
+  ABI are already governed by `docs/abi-policy.md`
+  (`FDK_ABI_STABLE`, append-only, size-pinned, opaque layouts —
+  keyed to the Phase 11 stabilization milestone, a *different*
+  axis from the public version).
 - It does **not** soften any audit: dependency, license, security,
   API, memory, DPI, accessibility, theme, installation,
   external-consumer, performance, X11, Wayland, GUI, visual
   regression, and sanitizer testing all remain fully in force.
 - It does **not** license fake completion or marketing language
   beyond what is verified.
-- It **does** mean: within the 1.x series, the public API and ABI
-  are stable per `docs/abi-policy.md` (append-only, size-pinned,
-  opaque layouts), and releases follow semantic versioning:
-  - **patch** (1.0.x): fixes only, no new API;
-  - **minor** (1.x.0): additive API, ABI-compatible, SONAME
-    unchanged;
-  - **major** (x.0.0): the compatibility epoch breaks; the SONAME
-    major moves with it.
+- It **does** mean: FDK makes no stable-distribution promises yet.
+  The from-source build (`make`, `make install`) is the supported
+  consumption path; binary packaging exists as *infrastructure*
+  (`packaging/`, `docs/packaging.md`) awaiting the deliberate
+  release decision, not as a published artifact.
 
 ## Internal milestones are not versions
 
 `docs/roadmap.md` tracks work with Phase numbers and internal
 milestone labels (`1.0.0`, `1.0.1`, `1.1.0`, …, `1.4.19`). These
 are **engineering milestones** — history markers for when work
-landed. **Disambiguation, which now matters:** the *roadmap
-milestone labelled "1.0.0"* (Phase 11 stabilization, 2024) is a
-different thing from the *public version 1.0.0* adopted 2026-10-11
-by this policy. Milestone labels appear in the roadmap, in commit
-messages, and as parenthetical history tags in prose, but the
-version the toolkit reports to the world is governed by this
-document alone.
+landed. **Disambiguation, which matters:** the *roadmap milestone
+labelled "1.0.0"* (Phase 11 stabilization, 2024) is a different
+thing from any *public version 1.0.0*. Milestone labels appear in
+the roadmap, in commit messages, and as parenthetical history tags
+in prose, but the version the toolkit reports to the world is
+governed by this document alone.
 
 ## Where the public version lives
 
@@ -62,41 +59,38 @@ Exactly one source of truth: `include/fdk/fdk_version.h`
 - `fdk.pc` via the Makefile's `sed` extraction (`FDK_PC_VERSION`)
 - example/banner output, the benchmark harness header
 - release archives and all packaging metadata
-  (`docs/packaging.md`)
+  (`docs/packaging.md`) — every recipe substitutes `@VERSION@`
+  from the header; nothing hand-edits a version string.
 
-## The SONAME policy (adopted with 1.0.0)
+## The SONAME policy (designed, dormant)
 
-The shared library carries a real SONAME since 1.0.0:
-**`libfdk.so.<FDK_VERSION_MAJOR>`** — currently `libfdk.so.1`. The
-installed layout is the standard one: the versioned real file
-(`libfdk.so.1.0.0`), the SONAME symlink executables record as
-`NEEDED` (`libfdk.so.1`), and the development symlink
-pkg-config's `-lfdk` resolves against (`libfdk.so`). Before 1.0.0
-the library shipped as a single unversioned `libfdk.so` with no
-SONAME — acceptable for a from-source toolkit, wrong for binary
-packaging.
-
-The ABI itself was frozen long before the number caught up
-(`FDK_ABI_STABLE`, `docs/abi-policy.md`, keyed to the Phase 11
-stabilization). Because nothing depending on an FDK SONAME existed
-in public distribution before 1.0.0, introducing
-`libfdk.so.1` now breaks no one and invents no history: 1.x is
-simply the first compatibility epoch. Minor and patch releases keep
-the SONAME and move only the file version; a future 2.0.0 that
-breaks the ABI moves the SONAME major in the same commit, and the
-test suite plus the packaging pipeline carry both automatically
-(they derive the SONAME from the header).
+The shared library currently builds and installs as a single
+unversioned `libfdk.so` with no SONAME — the honest pre-release
+posture. The versioned scheme is designed and ready to activate
+with the real public 1.0.0 decision: the real file carries the full
+version (`libfdk.so.<major.minor.patch>`), the SONAME symlink
+(`libfdk.so.<major>`) is what executables record as `NEEDED`, and
+the development symlink (`libfdk.so`) is what pkg-config's `-lfdk`
+resolves against. Under that policy, ABI-compatible releases
+(minor/patch) keep the SONAME and move only the file version; a
+future major that breaks the ABI moves the SONAME major in the same
+commit. Because nothing depending on an FDK SONAME exists in
+public distribution, activating `libfdk.so.1` at the real 1.0.0
+breaks no one and invents no history. The Makefile and packaging
+pipeline derive both from the header, so the scheme switches on
+with the version bump itself.
 
 ## Enforcement
 
 `tests/test_core.c::test_version` pins the public version at
-`1.0.0`. A change to the version macros without the matching test
+`0.0.1`. A change to the version macros without the matching test
 change fails the suite. Changing both is a deliberate act that
 requires:
 
 1. an explicit project-owner decision (not autonomy, not
    accumulation of features, not semver expectations, not version
-   prestige, not a competitor's higher number), and
+   prestige, not a competitor's higher number, not a packaging
+   milestone being "done enough"), and
 2. updating this document to record the new decision first.
 
 ## History
@@ -108,9 +102,20 @@ requires:
   1.1.2), and this "0.0.1 on purpose" joke became the project's
   longest-running bit: *this absurdly capable toolkit is still
   called 0.0.1.*
-- 2026-10-11: the owner retired the joke by adopting **1.0.0** for
-  the first public distribution milestone — release pipeline, native
-  packages across five distribution families, finalized license
-  (`LICENSE`), and this policy. The joke's real legacy survives in
-  the discipline above: the number was never allowed to mean
-  anything about quality in either direction.
+- 2026-10-11 (morning): a distribution pass bumped the public
+  version to **1.0.0**, tagged `v1.0.0`, and produced a draft
+  GitHub Release with native packages across five distribution
+  families.
+- 2026-10-11 (same day): **retracted.** Manual testing immediately
+  after the pass showed the file picker and folder picker were not
+  release-ready (unfinished file-type iconography, no system
+  icon-theme integration, picker-quality defects), which is exactly
+  the "fake completion" this policy forbids. The `v1.0.0` tag was
+  deleted from the remote, the draft release (never published, so
+  no consumer ever saw it) was deleted with it, and the public
+  version returned to `0.0.1`. Nothing was rewritten: the source
+  commits, the finalized license, the packaging recipes, and the
+  CI/release workflows from that pass all remain on `main` as
+  infrastructure for the eventual, deliberate 1.0.0 — a decision
+  that now also carries the lesson that *component quality, not
+  pipeline greenness, gates the number.*

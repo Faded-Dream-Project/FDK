@@ -5,6 +5,18 @@ from source, installing the binary packages the project publishes,
 what those packages contain, how the release pipeline produces and
 validates them, and how a maintainer cuts a release.
 
+> **No release is published.** The public version is pre-1.0
+> (`0.0.1`, `docs/versioning.md`): a 2026-10-11 v1.0.0 attempt was
+> retracted the same day — the tag and the never-published draft
+> release were deleted — when manual testing showed the file and
+> folder pickers were not release-ready. Everything below describes
+> the *validated pipeline* that exists on `main` and the *release
+> shape* it will produce; the packaging scripts themselves refuse to
+> run at pre-1.0 versions (a disclosed `PACKAGING-SKIP`, so CI stays
+> honest and green) until the real 1.0.0 decision flips the versioned
+> layout back on. Build from source (`docs/build.md`) in the
+> meantime.
+
 - Repository home: https://github.com/FemBoyGamerTechGuy/FDK
 - Releases: https://github.com/FemBoyGamerTechGuy/FDK/releases
 - Build from source: `docs/build.md` (the authoritative reference)
@@ -57,14 +69,17 @@ automatically (`docs/build.md` "Optional Wayland").
 
 ## Installing binary packages
 
-All commands below assume you downloaded the artifacts from the
+*(Forward-looking: applies to the first published release and every
+one after it — see the note above for why none exists yet.)* All
+commands below assume you downloaded the artifacts from the
 [releases page](https://github.com/FemBoyGamerTechGuy/FDK/releases)
-and verified them (`sha256sum -c SHA256SUMS`).
+and verified them (`sha256sum -c SHA256SUMS`). `<ver>` below is the
+release's version (the file names on the page carry it).
 
 ### Debian / Ubuntu (.deb)
 
 ```sh
-sudo apt install ./libfdk1_1.0.0-1_amd64.deb ./fdk-dev_1.0.0-1_amd64.deb
+sudo apt install ./libfdk1_<ver>-1_amd64.deb ./fdk-dev_<ver>-1_amd64.deb
 ```
 
 Runtime package `libfdk1`, development package `fdk-dev`. Built on
@@ -78,7 +93,7 @@ libwayland-client0, libxkbcommon0) automatically.
 ### RHEL 10 family / Fedora (.rpm)
 
 ```sh
-sudo dnf install ./libfdk1-1.0.0-1.*.rpm ./fdk-devel-1.0.0-1.*.rpm
+sudo dnf install ./libfdk1-<ver>-1.*.rpm ./fdk-devel-<ver>-1.*.rpm
 ```
 
 Runtime package `libfdk1`, development package `fdk-devel`. Built on
@@ -91,7 +106,7 @@ libraries.
 ### Arch Linux (.pkg.tar.zst)
 
 ```sh
-sudo pacman -U fdk-1.0.0-1-x86_64.pkg.tar.zst
+sudo pacman -U fdk-<ver>-1-x86_64.pkg.tar.zst
 ```
 
 One package (Arch convention for a library this size) carrying the
@@ -100,7 +115,7 @@ runtime and the development files together.
 ### Alpine Linux (.apk, musl)
 
 ```sh
-sudo apk add --allow-untrusted fdk-1.0.0-r0-x86_64.apk fdk-dev-1.0.0-r0-x86_64.apk
+sudo apk add --allow-untrusted fdk-<ver>-r0-x86_64.apk fdk-dev-<ver>-r0-x86_64.apk
 ```
 
 Runtime package `fdk` + development package `fdk-dev` (Alpine
@@ -180,7 +195,7 @@ the packaging claims otherwise.
 | `.apk` (musl) | Alpine 3.22 | Alpine 3.22 | x86_64 |
 | `.xbps` | Void (glibc) | Void (glibc) | x86_64 |
 
-arm64 is **not** produced in v1.0.0: the pipeline is
+arm64 is **not** produced: the pipeline is
 architecture-parameterized end to end (the scripts use `uname -m`
 and the images are multi-arch), but no arm64 build has been
 validated, so none is claimed or shipped. Do not assume the x86_64
@@ -261,10 +276,10 @@ frames fails everywhere it can run.
    Wayland where a compositor rig exists).
 3. **Commit and push to `main`** — CI runs the full packaging matrix
    on the push. Let it go green.
-4. **Tag** — `git tag -a v1.0.0 -m "FDK 1.0.0" && git push origin
-   v1.0.0`. The release workflow builds every package from the exact
-   tagged revision, then creates a **draft** GitHub Release with the
-   artifacts, SHA256SUMS, and generated notes.
+4. **Tag** — `git tag -a v<version> -m "FDK <version>" && git push
+   origin v<version>`. The release workflow builds every package
+   from the exact tagged revision, then creates a **draft** GitHub
+   Release with the artifacts, SHA256SUMS, and generated notes.
 5. **Review and publish** — check the draft's artifacts and notes
    (they are generated from the artifacts that actually built:
    a failed optional target appears as "not in this release", never
@@ -283,7 +298,7 @@ anywhere in the repository or workflows.
 
 ## Signing
 
-The v1.0.0 packages are **not GPG-signed**. Integrity is provided by
+Release packages are **not GPG-signed**. Integrity is provided by
 the `SHA256SUMS` file on the release page served over HTTPS, plus
 the release's provenance (the CI run that built it, linked from the
 release). Per-distribution signing (a Debian apt repository, an RPM
@@ -305,7 +320,7 @@ rather than half-implemented.
   RPMs: 2.38). Build from source instead; do not force-install.
 - **apk refuses the package** — upstream packages are unsigned:
   `apk add --allow-untrusted ./fdk-...apk` (see *Signing*).
-- **Wrong architecture** — v1.0.0 ships x86_64 only; on arm64 build
+- **Wrong architecture** — releases ship x86_64 only; on arm64 build
   from source (`make FDK_CONFIG=release install PREFIX=/usr`).
 - **Theme not found after install** — the faces live in
   `/usr/share/fdk/.FDKThemes` and are discovered through the default

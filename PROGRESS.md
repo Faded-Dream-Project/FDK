@@ -10,10 +10,16 @@ account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
 Last audited: 2026-10-11, at milestone **1.5.0** (the
-release-engineering pass — public **v1.0.0**: the version decision
-itself [0.0.1 retired, 1.0.0 adopted per docs/versioning.md, suite
-pin moved, SONAME libfdk.so.1 introduced with the standard versioned
-install layout, ABI unchanged at 621 exports]; the packaging tree
+release-engineering pass — RETRACTED same-day, see below; the
+packaging/CI infrastructure below remains on main as dormant
+release tooling): the version decision itself [1.0.0 adopted, then
+**retracted the same day** — the premature v1.0.0 tag and its
+never-published draft release deleted; version back to 0.0.1 per
+docs/versioning.md's retraction record; SONAME scheme back to
+dormant, the Makefile installs the single unversioned libfdk.so;
+the packaging scripts gained a pre-1.0 PACKAGING-SKIP guard so CI
+stays green AND honest; ABI unchanged at 621 exports]; the
+packaging tree
 [packaging/: dpkg-deb + rpmbuild + makepkg + abuild + xbps-create,
 five families, no libfdk.a anywhere per the license's 4(d)]; GitHub
 Actions [ci.yml push/PR validation, reusable distro-packages.yml
@@ -21,7 +27,7 @@ docker matrix, release.yml tag → draft release via GITHUB_TOKEN
 with minimal permissions and SHA-pinned actions]; docs/packaging.md
 the full packaging+release reference; the Debian and RPM pipelines
 validated END-TO-END locally [build, package, extraction-based
-graphical smoke under Xvfb], musl compile probe 80/80 — then the CI iterations themselves took the matrix to fully green: all five distro pipelines + the ubuntu home-ground job pass end-to-end on main [build, native package, clean-container install-test, graphical smoke, removal]; the v1.0.0 tag produced the DRAFT release with the four validated families + source + SHA256SUMS, void joining on main after the tag), building on
+graphical smoke under Xvfb], musl compile probe 80/80 — then the CI iterations themselves took the matrix to fully green: all five distro pipelines + the ubuntu home-ground job pass end-to-end on main [build, native package, clean-container install-test, graphical smoke, removal] — all before the retraction; the v1.0.0 tag's DRAFT release (four validated families + source + SHA256SUMS, void joining on main after the tag) was deleted as part of it), building on
 **1.4.19** (the drop that
 landed — the maintainer's live report that real-file-manager drops
 hover fine but never complete; three XDND receiver bugs found and
@@ -127,6 +133,23 @@ the OPEN REVIEW ITEMS list replaced by a NOTICE recording the
 counsel-free adoption; README, `docs/licensing-policy.md`, and the
 roadmap's Phase 1 line synced to match. Rights holder unchanged:
 FemBoyGamerTechGuy, by established handle.
+
+Same-date **v1.0.0 retraction** (release-state only): the v1.0.0
+release-engineering pass was undone hours after it ran — manual
+testing showed the file/folder pickers were not release-ready
+(uniform page glyphs for every file, no system icon-theme
+consultation, visible picker defects). The premature `v1.0.0` tag
+was deleted from the remote, the never-published draft GitHub
+Release (9 assets: four distro families + source + SHA256SUMS)
+was deleted with it, the public version returned to **0.0.1**
+(docs/versioning.md carries the full retraction record), the
+SONAME scheme returned to its documented dormant state (the
+Makefile builds and installs the single unversioned libfdk.so),
+and the packaging scripts gained the pre-1.0 PACKAGING-SKIP guard.
+Nothing else was rewritten: the license finalization, the
+packaging tree, the CI/release workflows, and all source commits
+remain on main. The picker + icon-theme overhaul that motivated
+the retraction is the next ledger entry.
 
 ## Current state (verified this audit)
 

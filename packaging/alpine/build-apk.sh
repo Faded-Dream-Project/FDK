@@ -14,6 +14,7 @@
 
 set -eu
 . "$(dirname "$0")/../ci/common.sh"
+fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
 ARCH="$(uname -m)"

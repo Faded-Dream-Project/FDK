@@ -5314,3 +5314,35 @@ revision and created the DRAFT GitHub Release with the artifacts,
 SHA256SUMS, and generated notes that state Void's absence honestly.
 Main is now fully green across all six jobs — the next tag produces
 the complete five-family set.
+
+## The 1.5.0 retraction (same-day, recorded honestly)
+
+Hours after the tag, manual testing of the toolkit itself — the part
+the matrix does not cover — showed the file picker and folder picker
+were not release-ready: every file wore the same page glyph (no
+file-type iconography at all), no system icon theme was consulted
+(the toolkit forced its own small vector set), and picker-quality
+defects were visible in ordinary use. A pipeline cannot gate what it
+does not measure; "matrix green" had said nothing about component
+quality.
+
+The retraction, performed the same day (2026-10-11):
+
+- the **v1.0.0 tag** was deleted from the remote (and locally);
+- the **draft GitHub Release** (never published — drafts are visible
+  to collaborators only, so no consumer ever saw it) was deleted
+  with it;
+- the **public version returned to 0.0.1** per docs/versioning.md's
+  retraction record (suite pin moved back, SONAME scheme returned
+  to its documented dormant state, the Makefile installs the single
+  unversioned libfdk.so again);
+- **nothing was rewritten**: the source commits, the finalized
+  license, the packaging tree, and the CI/release workflows all
+  remain on main as validated infrastructure for the eventual,
+  deliberate 1.0.0 — which now also requires the picker and
+  icon-theme work below to land first.
+
+The packaging scripts gained a release-posture guard: at pre-1.0
+versions they refuse with a disclosed PACKAGING-SKIP (exit 0) rather
+than staging an inconsistent payload, so CI stays green AND honest
+at the same time.

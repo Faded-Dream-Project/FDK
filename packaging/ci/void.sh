@@ -9,6 +9,8 @@
 
 set -eu
 cd "$(dirname "$0")/../.."
+. "$(dirname "$0")/common.sh"
+fdk_require_release_posture
 
 RUN() { # RUN <image> <script> [args...]
     img="$1"; shift

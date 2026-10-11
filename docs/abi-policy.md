@@ -10,15 +10,16 @@ struct and verified the freeze rules against the actual headers.
 Between engineering milestones the rules in this document now BIND.
 
 **The public version number is not the ABI contract.** FDK's
-public version is now `1.0.0` (`docs/versioning.md`, adopted
-2026-10-11 for the first public distribution milestone) and follows
-semver — but ABI status was frozen and binding long before the
-number caught up, and it is still `FDK_ABI_STABLE` plus the Phase
-11 freeze that constitute the contract, not the version string.
-Since 1.0.0 the shared library also carries a real SONAME
-(`libfdk.so.1`, derived from `FDK_VERSION_MAJOR` in the Makefile)
-whose major tracks ABI-breaking changes — the policy lives in
-`docs/versioning.md`'s "SONAME policy" section.
+public version is `0.0.1` (`docs/versioning.md`, the deliberate
+joke — see its 2026-10-11 retraction record) — but ABI status was
+frozen and binding long before any number, and it is still
+`FDK_ABI_STABLE` plus the Phase 11 freeze that constitute the
+contract, not the version string. The shared library carries no
+SONAME in the pre-release posture (a single unversioned
+`libfdk.so`); the versioned-SONAME scheme (`libfdk.so.<major>`,
+derived from `FDK_VERSION_MAJOR` in the Makefile) is designed and
+dormant, activating with the real public 1.0.0 decision — the
+policy lives in `docs/versioning.md`'s "SONAME policy" section.
 
 ### The struct classification (the Phase 11 audit)
 
@@ -93,19 +94,21 @@ The following rules apply and are enforced by review:
    does not happen because the public version once was a joke
    `0.0.1` either. The public version is decoupled from ABI status
    (`docs/versioning.md`); a symbol removal would be its own recorded
-   ABI-generation event — and since 1.0.0 it would move the SONAME
-   major (`libfdk.so.2`) in the same change.
+   ABI-generation event — and under the dormant SONAME policy it
+   would move the SONAME
+   major (`libfdk.so.2`) in the same change once that scheme
+   activates with the real public 1.0.0.
 
 ## Versioning
 
 `fdk_get_version()` / `fdk_get_version_string()` let an application
 detect a mismatch between the headers it compiled against and the
 `.so` it loaded at runtime — always check these if you're loading FDK
-as a plugin/dlopen rather than linking it normally. Since 1.0.0 the
-version follows semver (`docs/versioning.md`) and the SONAME
-(`libfdk.so.1`) already separates ABI generations at the dynamic
-linker level; for finer-grained gating still prefer feature tests
-and `FDK_ABI_STABLE` over numeric comparisons.
+as a plugin/dlopen rather than linking it normally. The SONAME
+scheme (dormant until the real public 1.0.0 — see
+`docs/versioning.md`) will separate ABI generations at the dynamic
+linker level once activated; for finer-grained gating still prefer
+feature tests and `FDK_ABI_STABLE` over numeric comparisons.
 
 ## Practical guidance for FDK's own implementers
 

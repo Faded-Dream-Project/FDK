@@ -20,6 +20,28 @@ fdk_expected_version() {
         include/fdk/fdk_version.h
 }
 
+# RELEASE-POSTURE GUARD. The packaging pipeline is release
+# infrastructure: it stages the versioned shared-library layout
+# (libfdk.so.<version> real file + SONAME symlink + dev symlink)
+# that the Makefile installs only once the public version reaches
+# 1.0.0 — see docs/versioning.md, whose 2026-10-11 retraction record
+# returned the tree to the unversioned pre-release posture. At
+# pre-1.0 versions every packaging script refuses with this
+# DISCLOSED skip instead of producing an inconsistent payload.
+# exit 0 on purpose: a green CI run must mean "nothing to package
+# yet", never "pipeline broken".
+fdk_require_release_posture() {
+    _major="$(sed -n 's/^#define FDK_VERSION_MAJOR \([0-9]*\).*/\1/p' \
+        include/fdk/fdk_version.h)"
+    if [ "${_major:-0}" -lt 1 ]; then
+        echo "PACKAGING-SKIP: public version $(fdk_expected_version) is pre-1.0"
+        echo "PACKAGING-SKIP: (docs/versioning.md — the retraction record). The versioned"
+        echo "PACKAGING-SKIP: packaging layout activates with the public 1.0.0 decision."
+        echo "PACKAGING-SKIP: nothing was built; this is the honest posture, not a failure."
+        exit 0
+    fi
+}
+
 # Starts a private Xvfb and exports DISPLAY. Prints XVFB-SKIP and
 # returns 1 (without failing the caller) when no Xvfb exists — the
 # callers disclose the skip in their output. The X server is killed
