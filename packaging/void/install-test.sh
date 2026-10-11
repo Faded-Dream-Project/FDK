@@ -19,8 +19,9 @@ xbps-install -Sy gcc pkgconf 2>/dev/null || xbps-install -Sy gcc pkgconf
 # explicitly keeps the test hermetic against repo metadata variance.
 xbps-install -Sy libX11 libXext zlib 2>/dev/null || true
 xbps-install -Sy libxkbcommon 2>/dev/null || true
-xbps-install -Sy wayland-client 2>/dev/null || \
-    xbps-install -Sy libwayland-client 2>/dev/null || true
+# Void's wayland client runtime library ships in the package named
+# plainly 'wayland' (wayland-devel is its -devel sibling).
+xbps-install -Sy wayland 2>/dev/null || true
 xbps-install -Sy dejavu-fonts-ttf 2>/dev/null || \
     echo "NOTE: dejavu-fonts-ttf unavailable; smoke may fail on font discovery (disclosed)"
 
