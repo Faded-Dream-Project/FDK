@@ -149,4 +149,75 @@ fdk_result fdk__theme_parse_into(fdk_theme *t, const char *text,
  * other way). */
 char *fdk__theme_strdup(const char *s);
 
+/* ---- the icon-theme engine (icon_theme.c) ---------------------------
+ *
+ * The freedesktop icon-theme resolution infrastructure shared by
+ * every internal icon consumer (today: the file/folder pickers).
+ * NOT public API and never installed: applications get themed icons
+ * through the toolkit's own widgets; exposing a lookup API is a
+ * deliberate future decision, recorded in docs/roadmap.md.
+ *
+ * All functions are UI-thread-only (they stat, read small files,
+ * and decode images synchronously — bounded work, but not
+ * thread-safe). Everything caches until fdk__icon_theme_reset(). */
+
+/* The kinds of place the pickers' sidebars resolve icons for. */
+typedef enum {
+    FDK_ICON_PLACE_HOME = 0,
+    FDK_ICON_PLACE_RECENT,
+    FDK_ICON_PLACE_DRIVE,
+    FDK_ICON_PLACE_FOLDER,
+} fdk_icon_place_kind;
+
+/* Drops every cache: parsed index.theme data, (name,size) lookups
+ * (positive AND negative), decoded surfaces, and the detected
+ * current-theme name. CONTRACT: callers must ensure no widget still
+ * borrows a cached surface — the file dialogs call this at CREATION
+ * (before any row exists), and the test suite owns its surfaces.
+ * The next current-name read re-reads the desktop's settings, so a
+ * changed icon theme is picked up by the next dialog, never served
+ * stale from a previous session. */
+void fdk__icon_theme_reset(void);
+
+/* The user's selected icon theme name (static storage, cached until
+ * reset). Detection, no bus: $FDK_ICON_THEME > $XDG_CONFIG_HOME/
+ * icon-theme > gtk-3.0/gtk-4.0 settings.ini gtk-icon-theme-name >
+ * kdeglobals [Icons] Theme > "hicolor". */
+const char *fdk__icon_theme_current_name(void);
+
+/* Resolves one icon name at one size through the full chain (the
+ * current theme, its Inherits, hicolor, then /usr/share/pixmaps).
+ * Returns an fdk_alloc'd absolute path (caller frees) or NULL.
+ * PNG-only on purpose: the toolkit's decoder cannot raster SVG/XPM,
+ * and the engine never offers a path it cannot paint. */
+char *fdk__icon_theme_lookup(const char *icon_name, fdk_i32 size);
+
+/* Decodes (once; cached; borrowed until reset) the icon at the
+ * requested size. A candidate whose name ends in "-symbolic" is
+ * tinted through its alpha mask with the current theme's text ink.
+ * NULL when nothing decodable exists — the caller falls back to the
+ * procedural glyph set, never to a wrong-type icon. */
+fdk_surface *fdk__icon_theme_surface(const char *icon_name, fdk_i32 size);
+
+/* Resolves the FIRST chain entry that yields a decodable surface
+ * (borrowed, cached), or NULL when the whole chain misses. */
+fdk_surface *fdk__icon_theme_surface_chain(const char *const *names,
+                                           fdk_i32 size);
+
+/* Classification: the candidate-name chain for a filesystem entry.
+ * `name` is matched case-insensitively against the extension table
+ * (images / audio / video / archives / documents / fonts / source
+ * code / system files); unknown or extension-less files pay ONE
+ * stat to split on the executable bit. Every chain ends in a
+ * generic virtually every theme ships. Returns static storage. */
+const char *const *fdk__icon_chain_for_entry(const char *dir,
+                                             const char *name,
+                                             bool is_dir);
+/* The extension-table chain for a bare name, or NULL when the
+ * extension is unknown (the caller decides what that means). */
+const char *const *fdk__icon_chain_for_name(const char *name);
+
+/* The places-sidebar chains (symbolic-first, per the desktop norm). */
+const char *const *fdk__icon_chain_place(fdk_icon_place_kind kind);
+
 #endif /* FDK_THEME_INTERNAL_H */

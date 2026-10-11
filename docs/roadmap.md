@@ -5346,3 +5346,97 @@ The packaging scripts gained a release-posture guard: at pre-1.0
 versions they refuse with a disclosed PACKAGING-SKIP (exit 0) rather
 than staging an inconsistent payload, so CI stays green AND honest
 at the same time.
+
+## 1.5.1 — the picker stabilization (post-retraction)
+
+The retraction's debt, paid in full. The file and folder pickers
+became what a toolkit's flagship component should be, and the
+"icon" in IconView stopped being a euphemism for "one vector page
+glyph for everything."
+
+**The engine.** A new internal module, src/theme/icon_theme.c,
+implements the freedesktop Icon Theme Specification to the extent
+FDK's renderer honestly supports: the XDG search path
+(~/.icons, $XDG_DATA_HOME/icons, $XDG_DATA_DIRS/icons, the pixmaps
+last resort — derived from the data dirs so the test rig can own
+it), index.theme parsing (the INI subset the spec defines:
+Name/Inherits/Hidden/Directories plus per-directory Size/Type/
+Scale/MinSize/MaxSize/Threshold/Context), inheritance chains
+(cycle-guarded, depth-capped, hicolor-terminal), size matching per
+directory type with a strict pass and a documented relaxed
+closest-size fallback, and the user's selected theme detected
+WITHOUT any bus — $FDK_ICON_THEME (also the hermetic test seam),
+the classic icon-theme config file, GTK3/GTK4 settings.ini, KDE's
+kdeglobals, hicolor when the desktop says nothing. PNG only, on
+purpose: stb_image is the vendored decoder, no SVG rasterizer will
+be vendored, and the engine never offers a path it cannot paint.
+Symbolic icons tint through their alpha mask with the active
+theme's text ink. Three cache layers (parsed themes, positive AND
+negative lookups, decoded surfaces) reset at every dialog creation
+— a changed desktop theme is picked up by the next dialog, never
+served stale. Path safety throughout: theme names, icon names, and
+directory subpaths are validated before they are ever glued into a
+filesystem path.
+
+**The classification.** A content-based extension table (images,
+audio, video, archives with per-family chains, documents, fonts,
+source code per language, system files) with case-insensitive
+matching (photo.PNG is an image), compound extensions
+(archive.tar.gz), and the executable-bit split for extension-less
+files — ONE stat, only when the extension says nothing. Every
+chain ends in a generic virtually every theme ships; past the chain
+the floor is FDK's own procedural glyph set, never a wrong-type
+icon.
+
+**The seams.** List rows and IconView items grew borrowed raster-
+icon fields (fdk__list_row_set_icon_image /
+fdk__iconview_item_set_icon_image, internal by design — the
+public API did not grow, verify-exports still 621) painted through
+one shared helper (fdk__row_icon_paint_image: aspect-fit, centered,
+the transformed blit's exact semantics — integer upscales stay
+sharp, everything else antialiases). The picker fills set the
+symbolic glyph AND the raster inside the same batch (the O(N)
+discipline preserved); the places sidebar resolves symbolic-first
+chains (the desktop sidebar norm).
+
+**What testing found, honestly.** Three real bugs fell out of the
+work, two of them pre-existing and invisible until the pixels were
+read back from the X server:
+
+- fdk_list_row_set_icon's switch never listed FDK_ROW_ICON_RECENT
+  — the Recent place's clock glyph had rendered as NOTHING since
+  1.4.4 (the enum grew; the validator didn't).
+- The dialog's icon grid was stuck at ONE COLUMN since 1.4.7: the
+  body arrange positions surfaces with set_bounds (which runs no
+  hooks), and the IconView derived its column count only in the
+  arrange hook. fdk__iconview_reflow is the fix — the third
+  instance of the 1.4.7 self-sync lesson (testing.md tells all
+  three). The old icon-mode keyboard test had been PASSING against
+  the bug; it now pins the intended column flow.
+- The engine's chain walk read chain[depth] past chain_len into
+  uninitialized stack slots — intermittent SEGVs caught by running
+  the new suite 30 times in a row; a single green run had proven
+  nothing.
+
+**Real-theme verification.** The fixture rig proves determinism
+(solid-color icons, color is identity, per-row X-server pixel
+assertions at 16 and 48 px plus a theme-switch cache-drop group);
+pointing the same rig at the system's real Adwaita proved the
+engine against a real index.theme — and caught two spec bugs no
+fixture could: theme directory names legally contain slashes
+("16x16/places" — the naive validation rejected every directory of
+every real theme), and hicolor's own Directories= line is 11 KiB
+(an 8 KiB line cap rejected the spec's flagship theme). The
+gallery pair in docs/screenshots/ (list + grid, Adwaita's own
+folder/text/executable/audio icons visibly distinct) is from that
+rig; the VLM review of the same screenshots reads "finished and
+professional, no glitches."
+
+The public API did not change: zero new exported symbols, zero
+signature changes — the whole capability is internal
+infrastructure consumed by the dialogs (an app-facing lookup API
+stays a deliberate future decision). The header documentation
+(include/fdk/fdk_dialog.h's icon-themes section) states the exact
+limits: PNG-only, SVG sizes contribute nothing, scale!=1
+directories skipped (the window layer's integer compositing makes
+them pointless), procedural glyphs as the floor.

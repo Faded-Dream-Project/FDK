@@ -165,6 +165,15 @@ The file dialog's new-folder prompt on X11:
 
 ![File dialog new-folder prompt](screenshots/prompt_dialog_newfolder_x11_1024x768.png)
 
+The file picker wearing the DESKTOP's own icons (Adwaita, resolved
+through the internal freedesktop icon-theme engine — every file type
+distinct: folders, archives, executables, images, text, audio) — list
+view and icon-grid view, both captured on X11:
+
+![File picker, themed icons, list view](screenshots/file_picker_themed_list_x11_1024x768.png)
+
+![File picker, themed icons, grid view](screenshots/file_picker_themed_grid_x11_1024x768.png)
+
 FDK Files (`examples/10_file_manager.c`) — column view on X11, and
 the home folder on Wayland:
 

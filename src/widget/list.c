@@ -53,7 +53,22 @@ typedef struct fdk_list_row {
     char *text;   /* owned */
     bool selected;
     fdk_row_icon icon; /* 1.4.1: the vector glyph before the text */
+    fdk_surface *image; /* borrowed raster icon (the icon-theme
+                         * engine's cache owns it; NULL = symbolic
+                         * only). Paint order: image wins. */
 } fdk_list_row;
+/* The icon band a row reserves: the same 16+6 whenever EITHER the
+ * symbolic glyph or the raster image is present (the raster twin
+ * shares the geometry so switching surfaces never re-flows text). */
+static fdk_i32 row_icon_band(const fdk_list_row *row) {
+    if (row == NULL) {
+        return 0;
+    }
+    return (row->icon != FDK_ROW_ICON_NONE || row->image != NULL)
+               ? LIST_ICON + LIST_ICON_GAP
+               : 0;
+}
+
 
 typedef struct fdk_list {
     fdk_widget base;
@@ -186,7 +201,7 @@ static void list_relayout(fdk_list *l) {
     for (size_t i = 0; i < l->count; i++) {
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
-        tw += fdk__row_icon_advance(l->row_widgets[i]->icon);
+        tw += row_icon_band(l->row_widgets[i]);
         if (tw + LIST_ROW_PAD_X * 2 > w) {
             w = tw + LIST_ROW_PAD_X * 2;
         }
@@ -225,8 +240,7 @@ static void list_place_appended(fdk_list *l) {
     fdk_list_row *row = l->row_widgets[l->count - 1];
     fdk_i32 tw = 0;
     fdk__text_extent(l->font, row->text, &tw, NULL);
-    fdk_i32 want = tw + LIST_ROW_PAD_X * 2 +
-                   fdk__row_icon_advance(row->icon);
+    fdk_i32 want = tw + LIST_ROW_PAD_X * 2 + row_icon_band(row);
     if (want > l->content_width) {
         l->content_width = want;
         /* Widths stretch for every row: re-place the list. */
@@ -475,13 +489,20 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     fdk_i32 text_x = bounds.x + LIST_ROW_PAD_X;
     /* The symbolic glyph before the text (1.4.1): vertically
      * centered in its own 16-px box. */
-    if (row->icon != FDK_ROW_ICON_NONE) {
+    if (row->image != NULL || row->icon != FDK_ROW_ICON_NONE) {
         fdk_i32 gy = bounds.y + (bounds.height - LIST_ICON) / 2;
         if (gy < bounds.y) {
             gy = bounds.y;
         }
-        fdk__row_icon_paint(surface, row->icon, text_x, gy,
+        if (row->image != NULL) {
+            /* The icon-theme engine's raster icon, scaled into the
+             * same 16-px band the symbolic glyphs occupy. */
+            fdk__row_icon_paint_image(surface, row->image, text_x, gy,
+                                      LIST_ICON);
+        } else {
+            fdk__row_icon_paint(surface, row->icon, text_x, gy,
                        (w->flags & FDK_WF_ENABLED) == 0);
+        }
         text_x += LIST_ICON + LIST_ICON_GAP;
     }
     fdk__draw_text(surface, font, row->text, fdk__pal_text(),
@@ -911,7 +932,7 @@ static void list_measure(fdk_widget *w, fdk_size *out) {
     for (size_t i = 0; i < l->count; i++) {
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
-        tw += fdk__row_icon_advance(l->row_widgets[i]->icon);
+        tw += row_icon_band(l->row_widgets[i]);
         if (tw + LIST_ROW_PAD_X * 2 > width) {
             width = tw + LIST_ROW_PAD_X * 2;
         }
@@ -1364,6 +1385,9 @@ fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
     case FDK_ROW_ICON_HOME:
     case FDK_ROW_ICON_DRIVE:
     case FDK_ROW_ICON_FILE:
+    case FDK_ROW_ICON_RECENT: /* 1.4.4's glyph was silently dropped
+                               * here (read as NONE) — the Recent
+                               * place lost its clock face; fixed. */
         break;
     default:
         icon = FDK_ROW_ICON_NONE; /* unknown values read as NONE */
@@ -1394,6 +1418,31 @@ fdk_row_icon fdk_list_row_get_icon(fdk_widget *list, size_t row) {
         return FDK_ROW_ICON_NONE;
     }
     return l->row_widgets[row]->icon;
+}
+
+fdk_result fdk__list_row_set_icon_image(fdk_widget *list, size_t row,
+                                        fdk_surface *image) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list *l = list_of(list);
+    if (row >= l->count) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list_row *r = l->row_widgets[row];
+    if (r->image == image) {
+        return FDK_OK;
+    }
+    r->image = image; /* borrowed: the icon-theme cache owns it */
+    if (l->batch_depth > 0) {
+        l->batch_dirty = true;
+        return FDK_OK;
+    }
+    /* Presence (not content) changes the row's content width — the
+     * same settle path the symbolic setter takes. */
+    list_relayout(l);
+    fdk_widget_invalidate(&r->base);
+    return FDK_OK;
 }
 
 void fdk_list_set_on_selection_changed(fdk_widget *list,

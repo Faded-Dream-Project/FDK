@@ -1538,28 +1538,80 @@ static void fdlg_surface_focus(fdk_file_dialog *d) {
     (void)fdk_widget_focus(d->icon_mode ? d->grid : d->list);
 }
 
+/* ---- themed row icons ----------------------------------------------
+ *
+ * The picker's icons resolve through the shared icon-theme engine
+ * (src/theme/icon_theme.c): the desktop's theme, its inheritance
+ * chain, hicolor, then the procedural glyph set as the final
+ * fallback — never a wrong-type icon, never a stretched blob. The
+ * engine's caches (lookups and decoded surfaces) live for the
+ * dialog's lifetime (reset at creation), so a fill pays the theme
+ * walk only once per DISTINCT icon name, not per row.
+ *
+ * Two sizes, both real theme directories: 16 px for list rows (the
+ * classic sidebar/list size), 48 px for the icon grid's band. */
+
+#define FD_ICON_LIST 16
+#define FD_ICON_GRID 48
+
+/* Resolves one entry's raster icon at `size` (NULL when the theme
+ * chain misses — the caller's procedural glyph is the fallback). */
+static fdk_surface *fdlg_entry_icon(fdk_file_dialog *d, size_t i,
+                                    fdk_i32 size) {
+    if (d->recent_mode) {
+        const char *p = d->recents[i].path;
+        const char *base = strrchr(p, '/');
+        base = (base != NULL) ? base + 1 : p;
+        /* Recents are files by contract; a vanished or odd entry
+         * still classifies honestly by name. */
+        char dirbuf[FD_PATH_BUF];
+        dirbuf[0] = '\0';
+        if (base != p) {
+            size_t dl = (size_t)(base - p);
+            if (dl < sizeof(dirbuf)) {
+                memcpy(dirbuf, p, dl);
+                dirbuf[dl] = '\0';
+            }
+        }
+        const char *const *chain =
+            fdk__icon_chain_for_entry(dirbuf, base, false);
+        return fdk__icon_theme_surface_chain(chain, size);
+    }
+    const fdk_fd_entry *e = &d->entries.v[i];
+    const char *const *chain =
+        fdk__icon_chain_for_entry(d->dir, e->name, e->dir);
+    return fdk__icon_theme_surface_chain(chain, size);
+}
+
 /* The icon-mode fill (1.4.7): same data, grid-shaped. The labels
- * drop the list view's trailing "/" — the folder GLYPH carries
- * dir-ness in the grid (the slash was a text-mode affordance). */
+ * drop the list view's trailing "/" — the icon carries dir-ness in
+ * the grid (the slash was a text-mode affordance). */
 static void fdlg_fill_grid(fdk_file_dialog *d) {
     fdk_iconview_begin_batch(d->grid);
     fdk_iconview_clear(d->grid);
-    if (d->recent_mode) {
-        for (size_t i = 0; i < d->recent_count; i++) {
+    size_t n = d->recent_mode ? d->recent_count : d->entries.count;
+    /* Appends AND raster icons ride ONE batch — the icon setter is
+     * batch-deferred exactly like the appends, so the fill stays
+     * O(N): one relayout at end_batch, never a settle per item. */
+    for (size_t i = 0; i < n; i++) {
+        const char *label;
+        fdk_row_icon glyph;
+        if (d->recent_mode) {
             const char *p = d->recents[i].path;
             const char *base = strrchr(p, '/');
             base = (base != NULL) ? base + 1 : p;
-            (void)fdk_iconview_append(d->grid, base,
-                                      FDK_ROW_ICON_FILE);
+            label = base;
+            glyph = FDK_ROW_ICON_FILE;
+        } else {
+            label = d->entries.v[i].name;
+            glyph = d->entries.v[i].dir ? FDK_ROW_ICON_FOLDER
+                                        : FDK_ROW_ICON_FILE;
         }
-        fdk_iconview_end_batch(d->grid);
-        return;
-    }
-    for (size_t i = 0; i < d->entries.count; i++) {
-        (void)fdk_iconview_append(
-            d->grid, d->entries.v[i].name,
-            d->entries.v[i].dir ? FDK_ROW_ICON_FOLDER
-                                : FDK_ROW_ICON_FILE);
+        (void)fdk_iconview_append(d->grid, label, glyph);
+        fdk_surface *img = fdlg_entry_icon(d, i, FD_ICON_GRID);
+        if (img != NULL) {
+            (void)fdk__iconview_item_set_icon_image(d->grid, i, img);
+        }
     }
     fdk_iconview_end_batch(d->grid);
 }
@@ -1571,7 +1623,13 @@ static void fdlg_fill_grid(fdk_file_dialog *d) {
  * settle in a single relayout instead of re-placing the list per
  * append (the O(N^2) shape the 1.3.0 audit measured). The icon
  * mode fills the GRID instead — the same data, the other surface
- * (1.4.7); the idle surface stays stale until the next flip. */
+ * (1.4.7); the idle surface stays stale until the next flip.
+ *
+ * Every row wears an icon: the themed raster when the desktop's
+ * icon theme serves one (the shared engine — folders, file types,
+ * executables), the procedural glyph set otherwise. The pre-theme
+ * list showed NO icons at all — the "unfinished picker" look the
+ * stabilization pass exists to fix. */
 static void fdlg_fill_list(fdk_file_dialog *d) {
     if (d->icon_mode) {
         fdlg_fill_grid(d);
@@ -1581,14 +1639,18 @@ static void fdlg_fill_list(fdk_file_dialog *d) {
     fdk_list_clear(d->list);
     if (d->recent_mode) {
         /* Recents view (1.4.4): one row per recent FILE — the
-         * basename with the page glyph (the full path is what
-         * activation resolves, not what the row shows). */
+         * basename (the full path is what activation resolves,
+         * not what the row shows), themed by what it is. */
         for (size_t i = 0; i < d->recent_count; i++) {
             const char *p = d->recents[i].path;
             const char *base = strrchr(p, '/');
             base = (base != NULL) ? base + 1 : p;
             (void)fdk_list_append(d->list, base, NULL);
             (void)fdk_list_row_set_icon(d->list, i, FDK_ROW_ICON_FILE);
+            fdk_surface *img = fdlg_entry_icon(d, i, FD_ICON_LIST);
+            if (img != NULL) {
+                (void)fdk__list_row_set_icon_image(d->list, i, img);
+            }
         }
         fdk_list_end_batch(d->list);
         return;
@@ -1601,6 +1663,16 @@ static void fdlg_fill_list(fdk_file_dialog *d) {
             snprintf(row, sizeof(row), "%s", d->entries.v[i].name);
         }
         (void)fdk_list_append(d->list, row, NULL);
+        /* The symbolic glyph is the fallback; the themed raster
+         * (when the desktop serves one) paints over it. */
+        (void)fdk_list_row_set_icon(
+            d->list, i,
+            d->entries.v[i].dir ? FDK_ROW_ICON_FOLDER
+                                : FDK_ROW_ICON_FILE);
+        fdk_surface *img = fdlg_entry_icon(d, i, FD_ICON_LIST);
+        if (img != NULL) {
+            (void)fdk__list_row_set_icon_image(d->list, i, img);
+        }
     }
     fdk_list_end_batch(d->list);
 }
@@ -3014,6 +3086,12 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
         surface,
         (fdk_rect){x + FD_PLACES_W + FD_GAP, y,
                    iw - FD_PLACES_W - FD_GAP, list_h});
+    if (d->icon_mode && d->grid != NULL) {
+        /* Hand-placed views re-flow their columns from the new
+         * width (set_bounds never runs the arrange hook) — without
+         * this the dialog's grid stayed a single column. */
+        (void)fdk__iconview_reflow(d->grid);
+    }
 
     fdk_widget_set_bounds(d->status,
                           (fdk_rect){x, status_y,
@@ -3151,6 +3229,13 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
         return FDK_ERR_OUT_OF_MEMORY;
     }
     memset(d, 0, sizeof(*d));
+    /* The icon-theme caches reset at every dialog creation: the
+     * desktop's icon theme is re-detected (settings files, env)
+     * and every cached surface is dropped BEFORE any row can
+     * borrow one — the reset contract's one safe point. A theme
+     * changed between dialogs is picked up here, never served
+     * stale. */
+    fdk__icon_theme_reset();
     d->ctx = ctx;
     d->kind = kind;
     d->show_hidden = (options != NULL) && options->show_hidden;
@@ -3353,22 +3438,44 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
      * rhythm — double-clicking a place was a wart the Recent place
      * made obvious). File rows keep the classic double-click. */
     fdk_list_set_activate_on_single_click(d->places_list, true);
-    /* The Recent place leads the sidebar (1.4.4) — OPEN kinds only. */
+    /* The Recent place leads the sidebar (1.4.4) — OPEN kinds only.
+     * Every place row resolves its themed icon first (symbolic-
+     * first chains: the desktop sidebar norm), the procedural
+     * glyph set underneath as the fallback. */
+    fdk_list_begin_batch(d->places_list);
     if (fdlg_recents_on(d)) {
         (void)fdk_list_append(d->places_list, "Recent", NULL);
         (void)fdk_list_row_set_icon(d->places_list, 0,
                                     FDK_ROW_ICON_RECENT);
+        fdk_surface *img = fdk__icon_theme_surface_chain(
+            fdk__icon_chain_place(FDK_ICON_PLACE_RECENT), FD_ICON_LIST);
+        if (img != NULL) {
+            (void)fdk__list_row_set_icon_image(d->places_list, 0, img);
+        }
     }
     for (size_t i = 0; i < d->place_count; i++) {
         (void)fdk_list_append(d->places_list, d->places[i].label,
                               NULL);
         /* 1.4.1: the symbolic place glyphs — Home gets the house,
          * the root and real mounts get the drive slab, everything
-         * else (XDG user dirs) the folder. */
-        (void)fdk_list_row_set_icon(
-            d->places_list, i + (fdlg_recents_on(d) ? 1 : 0),
-            fdlg_place_icon(d->places[i].path, d->places[i].label));
+         * else (XDG user dirs) the folder. The chain follows the
+         * same mapping. */
+        fdk_row_icon glyph =
+            fdlg_place_icon(d->places[i].path, d->places[i].label);
+        size_t row = i + (fdlg_recents_on(d) ? 1 : 0);
+        (void)fdk_list_row_set_icon(d->places_list, row, glyph);
+        fdk_icon_place_kind kind_place =
+            (glyph == FDK_ROW_ICON_HOME)     ? FDK_ICON_PLACE_HOME
+            : (glyph == FDK_ROW_ICON_DRIVE)  ? FDK_ICON_PLACE_DRIVE
+                                             : FDK_ICON_PLACE_FOLDER;
+        fdk_surface *img = fdk__icon_theme_surface_chain(
+            fdk__icon_chain_place(kind_place), FD_ICON_LIST);
+        if (img != NULL) {
+            (void)fdk__list_row_set_icon_image(d->places_list, row,
+                                               img);
+        }
     }
+    fdk_list_end_batch(d->places_list);
 
     /* The file list. */
     r = fdk_list_create(body, d->font, &d->list);

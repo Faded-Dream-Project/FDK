@@ -182,6 +182,46 @@ fdk_i32 fdk__row_icon_advance(fdk_row_icon icon) {
                                         : LIST_ICON + LIST_ICON_GAP;
 }
 
+/* The raster twin (the icon-theme engine's borrowed surfaces):
+ * aspect-fit, centered, inside a box x box square at (x, y). The
+ * transformed blit's semantics ARE the scaling policy — integer
+ * scale-ups stay nearest-neighbor sharp, everything else
+ * antialiases — so the List rows and the IconView cells scale
+ * identically by construction. NULL image or a non-positive box
+ * draws nothing (the caller's symbolic fallback takes over). */
+void fdk__row_icon_paint_image(fdk_surface *surface, fdk_surface *img,
+                               fdk_i32 x, fdk_i32 y, fdk_i32 box) {
+    if (surface == NULL || img == NULL || box <= 0) {
+        return;
+    }
+    fdk_surface_info info;
+    if (fdk_surface_get_info(img, &info) != FDK_OK ||
+        info.width <= 0 || info.height <= 0) {
+        return;
+    }
+    /* Aspect-preserving fit into the box. */
+    float fw = (float)info.width;
+    float fh = (float)info.height;
+    float scale = (fw >= fh) ? (float)box / fw : (float)box / fh;
+    fdk_i32 dw = (fdk_i32)(fw * scale + 0.5f);
+    fdk_i32 dh = (fdk_i32)(fh * scale + 0.5f);
+    if (dw < 1) {
+        dw = 1;
+    }
+    if (dh < 1) {
+        dh = 1;
+    }
+    fdk_i32 dx = x + (box - dw) / 2;
+    fdk_i32 dy = y + (box - dh) / 2;
+    /* First scale about the source origin, then translate the
+     * result to (dx, dy) — the matrix composition order that maps
+     * source pixel (px, py) to (px*scale + dx, py*scale + dy). */
+    fdk_matrix m = fdk_matrix_mul(fdk_matrix_scale(scale),
+                                  fdk_matrix_translate((float)dx,
+                                                       (float)dy));
+    (void)fdk_surface_blit_transformed(surface, m, img);
+}
+
 void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
                          fdk_i32 x, fdk_i32 cy, bool disabled) {
     /* (x, cy) = the glyph box's top-left corner; the box is

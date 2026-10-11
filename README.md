@@ -68,6 +68,15 @@ suite (`docs/testing.md`).
   submenus, toolbar, Canvas, dialogs (including a real file dialog
   with list/icon browsing), Font and Color choosers, Picture, sliders,
   spinners, level bars, revealers, and more.
+- **Desktop icon themes in the file dialogs** — the pickers resolve
+  their icons through an internal freedesktop icon-theme engine: the
+  user's selected theme (GTK/KDE settings, no bus) with full
+  inheritance and fallback, per-file-type icons (folders, images,
+  audio, video, archives, source, executables), symbolic icons
+  tinted with the active theme's ink — PNG through the vendored
+  decoder, FDK's procedural glyphs as the honest floor
+  (`include/fdk/fdk_dialog.h`'s icon-themes section states the
+  exact limits).
 - **Layout** — box (horizontal/vertical) and grid containers with
   margins, expansion, baseline and cross-axis alignment, spans, and
   per-widget min/max limits; automatic reflow on resize.

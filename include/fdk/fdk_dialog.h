@@ -303,6 +303,38 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 void *user_data,
                                 fdk_window **out_window);
 
+/* ---- Icon themes (the picker's iconography, 1.5.1) ------------------
+ *
+ * The dialog's rows wear the DESKTOP's icons, resolved through an
+ * internal freedesktop icon-theme engine (src/theme/icon_theme.c):
+ * the user's selected theme — detected from $FDK_ICON_THEME (an
+ * explicit override), the classic $XDG_CONFIG_HOME/icon-theme file,
+ * GTK3/GTK4 settings.ini's gtk-icon-theme-name, or KDE's kdeglobals
+ * [Icons] Theme; hicolor when the desktop says nothing — then its
+ * Inherits chain, then hicolor, then the unthemed pixmaps
+ * directories. Every row classifies by CONTENT: folders (folder),
+ * images / audio / video / archives / PDFs / fonts / source files
+ * by extension (case-insensitive, the GTK convention), and
+ * extension-less files by the executable bit; each classification
+ * tries a chain of names ending in a generic virtually every theme
+ * ships. Icon sizes are the real theme directories' own: 16 px for
+ * list rows, 48 px for the icon grid.
+ *
+ * Honest limitations, stated here rather than marketed around:
+ *   - PNG icons only: FDK's decoder is the vendored stb_image and no
+ *     SVG rasterizer is vendored. A size a theme ships only as SVG
+ *     contributes nothing — the engine keeps searching other sizes
+ *     and themes before falling back.
+ *   - The final fallback is FDK's own procedural glyph set (the
+ *     folder tab, the page) — never a stretched wrong-format blob
+ *     and never a wrong-type icon.
+ *   - Symbolic icons (-symbolic names, the sidebar's preference) are
+ *     tinted through their alpha mask with the current FDK theme's
+ *     text ink when the theme provides a decodable one.
+ *   - Caches (lookups and decoded icons) reset at every dialog
+ *     creation: a changed desktop icon theme is picked up by the
+ *     NEXT dialog, never served stale. */
+
 /* ---- Recent files (1.4.4) ----------------------------------------
  *
  * The OPEN dialog's sidebar leads with a "Recent" place: the XDG

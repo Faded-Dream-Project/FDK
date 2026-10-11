@@ -46,6 +46,9 @@ typedef struct fdk_iv_item {
     fdk_widget *cell;    /* owned via the tree (class iconview-item) */
     char *label;         /* owned */
     fdk_row_icon icon;
+    fdk_surface *image;  /* borrowed raster icon (the icon-theme
+                          * engine's cache owns it; NULL = symbolic
+                          * only). Paint order: image wins. */
     bool selected;
 } fdk_iv_item;
 
@@ -368,14 +371,22 @@ static void iv_cell_paint(fdk_widget *w, fdk_surface *surface,
     bool disabled = (iv_w->flags & FDK_WF_ENABLED) == 0;
 
     /* The glyph: centered in the icon band (the 16-px vector
-     * language, centered honestly rather than stretched). */
+     * language, centered honestly rather than stretched). A raster
+     * icon (the icon-theme engine) paints instead, fit into the
+     * band's own scale — 48 px in the default geometry, the size
+     * real themes carry a dedicated directory for. */
     fdk_i32 icon_band = iv->cell_h - 24; /* label band below */
     if (icon_band < 16) {
         icon_band = 16;
     }
-    fdk_i32 gx = bounds.x + (bounds.width - 16) / 2;
-    fdk_i32 gy = bounds.y + (icon_band - 16) / 2;
-    if (item->icon != FDK_ROW_ICON_NONE) {
+    if (item->image != NULL) {
+        fdk_i32 box = icon_band < IV_ICON_BOX ? icon_band : IV_ICON_BOX;
+        fdk_i32 gx = bounds.x + (bounds.width - box) / 2;
+        fdk_i32 gy = bounds.y + (icon_band - box) / 2;
+        fdk__row_icon_paint_image(surface, item->image, gx, gy, box);
+    } else if (item->icon != FDK_ROW_ICON_NONE) {
+        fdk_i32 gx = bounds.x + (bounds.width - 16) / 2;
+        fdk_i32 gy = bounds.y + (icon_band - 16) / 2;
         fdk__row_icon_paint(surface, item->icon, gx, gy, disabled);
     }
 
@@ -996,6 +1007,7 @@ size_t fdk_iconview_append(fdk_widget *iconview, const char *label,
     iv->items[iv->count].cell = cell;
     iv->items[iv->count].label = copy;
     iv->items[iv->count].icon = icon;
+    iv->items[iv->count].image = NULL;
     iv->items[iv->count].selected = false;
     iv->count++;
     iv_settle(iv);
@@ -1062,6 +1074,44 @@ fdk_result fdk_iconview_set_item_icon(fdk_widget *iconview,
     }
     iv->items[index].icon = icon;
     iv_settle(iv);
+    return FDK_OK;
+}
+
+fdk_result fdk__iconview_item_set_icon_image(fdk_widget *iconview,
+                                             size_t index,
+                                             fdk_surface *image) {
+    if (iconview == NULL || iconview->klass != &fdk_iconview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_iconview *iv = iv_of(iconview);
+    if (index >= iv->count) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    iv->items[index].image = image; /* borrowed: the icon-theme
+                                     * cache owns it */
+    iv_settle(iv);
+    return FDK_OK;
+}
+
+fdk_result fdk__iconview_reflow(fdk_widget *iconview) {
+    /* Dialogs position the view by hand (set_bounds — the file
+     * dialog's body arrange owns every child's slot), and set_bounds
+     * deliberately does NOT run the arrange hook where `iv->columns`
+     * is normally derived. This is the hand-placement counterpart:
+     * re-derive the column count from the CURRENT bounds and re-slot
+     * when it moved. Found live by the icon-theme pixel group: the
+     * dialog's grid had been a single column since 1.4.7 — every
+     * navigation test used two items, where one column is
+     * indistinguishable from the intended flow. */
+    if (iconview == NULL || iconview->klass != &fdk_iconview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_iconview *iv = iv_of(iconview);
+    size_t cols = iv_columns_for(iv, iv->base.bounds.width);
+    if (cols != iv->columns) {
+        iv->columns = cols;
+        iv_relayout(iv);
+    }
     return FDK_OK;
 }
 

@@ -946,6 +946,23 @@ safety) and test_file_dialog_logic.c (the scan seam — hidden and
 dirs-only filtering, dirs-first ordering, no ./.. rows, unreadable
 dirs fail closed, entries ownership, result_free tolerance).
 
+1.5.1 grew the icon-theme suite, tests/test_icon_theme.c: a fully
+synthetic theme tree (a fixture theme with an inheritance chain, a
+scalable directory, scale!=1 decoys, SVG decoys, a pixmaps fallback,
+deliberately-missing names — every fixture icon a SOLID-COLOR PNG so
+color is identity) pins the engine's whole contract headlessly: the
+name-detection chain (env override > icon-theme file > gtk ini >
+kdeglobals > hicolor, hostile names rejected), size matching (exact /
+scalable range / relaxed closest), inheritance and the hicolor
+terminal, the PNG-only rule (SVG on disk is a miss, never offered),
+path safety, the positive AND negative lookup caches, the reset
+semantics, surface decoding with the symbolic alpha-mask tint proven
+by pixel readback, and the file-type classification table including
+the executable-bit split for extension-less files. A repeated-run
+sweep (30 consecutive runs) caught a real chain-walk bug reading
+uninitialized stack slots — the suite is run in a loop when the
+engine changes.
+
 The GUI/interop layer is where 1.2.0's real coverage lives, all
 against REAL external applications (no FDK-to-FDK):
 
@@ -1834,3 +1851,51 @@ source committing (exit 9 = failure, by rig contract), and the
 refused conversion delivering `drops == 1` with empty payload plus
 `Finished(accepted=1)`. The group honors `FDK_XDND_GTK_SOURCE_BIN`
 and skips honestly when the rig binary is absent.
+
+## 1.5.1 — testing the icon-theme engine and the picker's icons
+
+**The engine's contract is pinnable headlessly; only the PAINT is
+GUI work.** The icon-theme engine (src/theme/icon_theme.c) got a
+dedicated headless suite (test_icon_theme.c) built on a synthetic
+theme tree — inheritance chains, scalable and threshold directories,
+scale!=1 and SVG decoys, a pixmaps fallback — with SOLID-COLOR PNG
+fixtures so a resolved icon's identity is checkable by color, not
+just by path. The GUI layer gets three X11 groups (the
+file-dialog-icons family): every LIST row's icon band sampled from
+the X SERVER's own pixels (folder blue, archive orange, text red,
+image green, executable magenta, audio yellow — the fixture theme
+colors), the same identities at the grid's 48-px scale, and a
+theme-switch group proving the caches drop. The environment
+(XDG_DATA_HOME / XDG_CONFIG_HOME / FDK_ICON_THEME) is saved and
+restored around the group so the suite's other pixel expectations
+never see the fixture world.
+
+**Run new stateful engine tests in a loop.** The suite passed its
+first run and failed intermittently on the tenth: the chain walk
+read `chain[depth]` past `chain_len` into uninitialized stack slots
+and passed garbage theme names to the loader — valid-looking often
+enough to pass, a SEGV rarely enough to hide. Thirty consecutive
+runs is now the bar when that file changes; a single green run
+proved nothing.
+
+**A test that passes can still be pinning a bug.** The icon-mode
+keyboard test ("Down Down -> note.txt") had been passing for a year
+against a dialog whose grid was STUCK AT ONE COLUMN — the re-flow
+fix (fdk__iconview_reflow, the third instance of the 1.4.7 lesson:
+hand-placed composites must self-sync EVERYTHING derived from their
+bounds, columns included) laid the two items side by side and the
+test's Down-Down became a no-op. The corrected sequence (Right,
+Right) now pins the intended column flow. When a layout fix breaks
+a passing test, read the test against the INTENDED design before
+"fixing" either side.
+
+**Real-theme verification beats fixture-only verification.** The
+fixture theme proves determinism; the same rig pointed at the
+system's real Adwaita proved the engine against a REAL index.theme
+— and immediately caught two spec-compliance bugs the fixtures
+could never show: theme directory names legally contain slashes
+("16x16/places" — the naive no-slash validation rejected every
+directory of every real theme), and hicolor's Directories= line is
+11 KiB (an 8 KiB line cap rejected the spec's own flagship theme).
+Both rigs (fixture + real) live in scripts/ and their screenshots
+land in docs/screenshots/ and download/fdk-picker-demo/.

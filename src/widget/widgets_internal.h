@@ -163,6 +163,37 @@ fdk_i32 fdk__row_icon_advance(fdk_row_icon icon);
 void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
                          fdk_i32 x, fdk_i32 cy, bool disabled);
 
+/* ---- raster row icons (the icon-theme engine's surfaces) ----
+ *
+ * A row may instead (or additionally) carry a BORROWED raster icon
+ * (an fdk_surface decoded by src/theme/icon_theme.c). The borrow
+ * contract: the surface is owned by the icon-theme cache and stays
+ * valid until fdk__icon_theme_reset() — which the file dialogs call
+ * only at dialog creation, before any row exists. Paint order: the
+ * raster wins when present; the symbolic glyph is the fallback.
+ * The reserved band is the same 16 px + gap whenever EITHER icon
+ * is present. */
+void fdk__row_icon_paint_image(fdk_surface *surface, fdk_surface *img,
+                               fdk_i32 x, fdk_i32 y, fdk_i32 box);
+
+/* List rows: sets/clears the row's raster icon (borrowed; NULL
+ * clears back to the symbolic glyph, if any). Re-measures like the
+ * symbolic setter. Internal seam for the file dialogs — not public
+ * API. */
+fdk_result fdk__list_row_set_icon_image(fdk_widget *list, size_t row,
+                                        fdk_surface *image);
+
+/* IconView items: the same seam, grid-shaped. */
+fdk_result fdk__iconview_item_set_icon_image(fdk_widget *iconview,
+                                             size_t index,
+                                             fdk_surface *image);
+
+/* IconView re-flow for hand-placed views: re-derives the column
+ * count from the CURRENT bounds (set_bounds callers — the file
+ * dialog's body arrange — never run the arrange hook where columns
+ * are normally derived). Safe no-op when the count did not move. */
+fdk_result fdk__iconview_reflow(fdk_widget *iconview);
+
 /* ---- shared instance structs ---- */
 
 /* Label. `lines` is the display cache: the text broken into the

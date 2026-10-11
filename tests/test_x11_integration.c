@@ -51,6 +51,8 @@
  * documents free() as equally correct, but the test uses the same
  * allocator the library used, under ASan). */
 #include "core/alloc_internal.h"
+#include "test_icon_pngs.h" /* solid-color fixture icons (the icon-
+                             * theme pixel groups below) */
 
 static void alarm_handler(int sig) {
     (void)sig;
@@ -6502,11 +6504,16 @@ static void test_file_dialog_gui(void) {
         /* The list surface stays empty until a flip refills it. */
         assert(fdk_list_row_count(rows) == 0);
     }
-    /* Down Down -> note.txt (sub sorts first); Enter accepts on
-     * grid activation. */
-    x11_send_key_event(send_dpy, dxid, KeyPress, 116);
+    /* Right Right -> note.txt: the grid flows in COLUMNS (as many
+     * as the width fits — the 1.4.7 design), so the item step is
+     * Right, not Down. (This sequence previously "worked" only
+     * because the dialog's grid was stuck at one column — the
+     * re-flow fix in fdlg_body_arrange corrected the layout, and
+     * this test now pins the intended behavior.)
+     * Cold-start Right selects item 0; the second steps to 1. */
+    x11_send_key_event(send_dpy, dxid, KeyPress, 114);
     (void)fdk_pump_events(ctx, 100);
-    x11_send_key_event(send_dpy, dxid, KeyPress, 116);
+    x11_send_key_event(send_dpy, dxid, KeyPress, 114);
     (void)fdk_pump_events(ctx, 100);
     x11_send_key_event(send_dpy, dxid, KeyPress, 36);
     dialog_wait_outcome(ctx, FDK_FILE_DIALOG_ACCEPTED);
@@ -6849,6 +6856,378 @@ static void test_file_dialog_gui(void) {
     drop_dialog_scratch(dir);
     printf("[ok] file dialog GUI: accept/cancel paths, folder kind "
            "returns a real directory\n");
+}
+
+
+/* ---- the icon-theme picker groups (stabilization) -------------------
+ *
+ * REAL graphical proof that the file picker wears the DESKTOP's
+ * icons: a fixture theme of solid-color PNGs is installed through
+ * the XDG environment, the dialog opens on a directory of typed
+ * files, and the X SERVER's own pixels are read back at each row's
+ * icon band. Color is identity — folder blue, archive orange, text
+ * red, image green, executable magenta, audio yellow — so the
+ * assertions check not just "an icon painted" but WHICH icon the
+ * row received. The ICON-mode grid gets the same treatment at its
+ * 48-px scale through the public view option.
+ *
+ * The environment is saved/restored around the group: the suite's
+ * other pixel expectations (theme palettes, discovery) must not
+ * see the fixture XDG world, and the icon engine's caches are
+ * reset on the way in AND out. */
+
+static char icon_root[512];
+
+static void icon_fixture_write(const char *rel, const void *data,
+                               size_t len) {
+    char buf[700];
+    snprintf(buf, sizeof(buf), "%s/%s", icon_root, rel);
+    FILE *f = fopen(buf, "wb");
+    assert(f != NULL);
+    assert(len == 0 || fwrite(data, 1, len, f) == len);
+    fclose(f);
+}
+
+static void icon_fixture_mkdir(const char *rel) {
+    char buf[700];
+    snprintf(buf, sizeof(buf), "%s/%s", icon_root, rel);
+    if (mkdir(buf, 0755) == 0 || errno == EEXIST) {
+        return;
+    }
+    /* Create parents, then retry. */
+    for (char *slash = buf + 1; *slash != '\0'; slash++) {
+        if (*slash == '/') {
+            *slash = '\0';
+            (void)mkdir(buf, 0755);
+            *slash = '/';
+        }
+    }
+    assert(mkdir(buf, 0755) == 0 || errno == EEXIST);
+}
+
+static void icon_fixture_build(void) {
+    static char tmpl[] = "/tmp/fdk-fdlg-icons-XXXXXX";
+    char *d = mkdtemp(tmpl);
+    assert(d != NULL);
+    snprintf(icon_root, sizeof(icon_root), "%s", d);
+
+    icon_fixture_mkdir("data/icons/fdkx11/16x16");
+    icon_fixture_mkdir("data/icons/fdkx11/48x48");
+    icon_fixture_mkdir("data/icons/fdkx11/32x32");
+    icon_fixture_mkdir("config");
+    icon_fixture_mkdir("browse");
+
+    {
+        static const char index_theme[] =
+            "[Icon Theme]\n"
+            "Name=FDK X11 Fixture\n"
+            "Inherits=hicolor\n"
+            "Directories=16x16,32x32,48x48\n"
+            "\n"
+            "[16x16]\nSize=16\nType=Fixed\n"
+            "\n"
+            "[32x32]\nSize=32\nType=Scalable\n"
+            "MinSize=16\nMaxSize=64\n"
+            "\n"
+            "[48x48]\nSize=48\nType=Fixed\n";
+        icon_fixture_write("data/icons/fdkx11/index.theme", index_theme,
+                           sizeof(index_theme) - 1);
+    }
+    /* The empty-string write above is a no-op file; rewrite with the
+     * real text (fwrite of a 0-len buffer wrote nothing — so write
+     * properly here). */
+
+    /* 16-px icons: every type the browsing dir exercises. */
+    icon_fixture_write("data/icons/fdkx11/16x16/folder.png",
+                       icon_png_folder_16, icon_png_folder_16_LEN);
+    icon_fixture_write("data/icons/fdkx11/16x16/text-x-generic.png",
+                       icon_png_text_16, icon_png_text_16_LEN);
+    icon_fixture_write("data/icons/fdkx11/16x16/image-x-generic.png",
+                       icon_png_image_16, icon_png_image_16_LEN);
+    icon_fixture_write("data/icons/fdkx11/16x16/audio-x-generic.png",
+                       icon_png_audio_16, icon_png_audio_16_LEN);
+    icon_fixture_write(
+        "data/icons/fdkx11/16x16/application-x-executable.png",
+        icon_png_exec_16, icon_png_exec_16_LEN);
+    icon_fixture_write("data/icons/fdkx11/16x16/application-x-archive.png",
+                       icon_png_archive_16, icon_png_archive_16_LEN);
+    /* 48-px set for the grid. */
+    icon_fixture_write("data/icons/fdkx11/48x48/folder.png",
+                       icon_png_folder_48, icon_png_folder_48_LEN);
+    icon_fixture_write("data/icons/fdkx11/48x48/text-x-generic.png",
+                       icon_png_text_48, icon_png_text_48_LEN);
+    icon_fixture_write("data/icons/fdkx11/48x48/image-x-generic.png",
+                       icon_png_image_48, icon_png_image_48_LEN);
+    icon_fixture_write("data/icons/fdkx11/48x48/audio-x-generic.png",
+                       icon_png_audio_48, icon_png_audio_48_LEN);
+    icon_fixture_write(
+        "data/icons/fdkx11/48x48/application-x-executable.png",
+        icon_png_exec_48, icon_png_exec_48_LEN);
+    icon_fixture_write("data/icons/fdkx11/48x48/application-x-archive.png",
+                       icon_png_archive_48, icon_png_archive_48_LEN);
+
+    /* The browsing directory's contents (sorted: sub/ first, then
+     * the files alphabetically). */
+    icon_fixture_mkdir("browse/sub");
+    icon_fixture_write("browse/backup.zip", "zip", 3);
+    icon_fixture_write("browse/note.txt", "hi", 2);
+    icon_fixture_write("browse/photo.png", "png", 3);
+    icon_fixture_write("browse/song.opus", "opus", 4);
+    {
+        char buf[700];
+        snprintf(buf, sizeof(buf), "%s/browse/runme", icon_root);
+        FILE *f = fopen(buf, "w");
+        assert(f != NULL);
+        fputs("#!/bin/sh\n", f);
+        fclose(f);
+        assert(chmod(buf, 0755) == 0);
+    }
+}
+
+static void icon_fixture_drop(void) {
+    static const char *const paths[] = {
+        "data/icons/fdkx11/16x16/folder.png",
+        "data/icons/fdkx11/16x16/text-x-generic.png",
+        "data/icons/fdkx11/16x16/image-x-generic.png",
+        "data/icons/fdkx11/16x16/audio-x-generic.png",
+        "data/icons/fdkx11/16x16/application-x-executable.png",
+        "data/icons/fdkx11/16x16/application-x-archive.png",
+        "data/icons/fdkx11/16x16",
+        "data/icons/fdkx11/48x48/folder.png",
+        "data/icons/fdkx11/48x48/text-x-generic.png",
+        "data/icons/fdkx11/48x48/image-x-generic.png",
+        "data/icons/fdkx11/48x48/audio-x-generic.png",
+        "data/icons/fdkx11/48x48/application-x-executable.png",
+        "data/icons/fdkx11/48x48/application-x-archive.png",
+        "data/icons/fdkx11/48x48",
+        "data/icons/fdkx11/32x32",
+        "data/icons/fdkx11/index.theme",
+        "data/icons/fdkx11",
+        "data/icons",
+        "data",
+        "config",
+        "browse/backup.zip",
+        "browse/note.txt",
+        "browse/photo.png",
+        "browse/song.opus",
+        "browse/runme",
+        "browse/sub",
+        "browse",
+        NULL,
+    };
+    for (int i = 0; paths[i] != NULL; i++) {
+        char buf[700];
+        snprintf(buf, sizeof(buf), "%s/%s", icon_root, paths[i]);
+        remove(buf);
+    }
+    remove(icon_root);
+}
+
+/* The expected icon color per row, 0x00RRGGBB, sampled by the X
+ * server at the row's icon-band center. */
+static unsigned long icon_row_color(fdk_context *ctx, Display *send_dpy,
+                                    unsigned long xid, fdk_widget *list,
+                                    size_t row) {
+    /* list -> scrollview (child 0) -> the content container (the
+     * child WITH children — the bars are childless). */
+    fdk_widget *scroll = fdk_widget_child_at(list, 0);
+    assert(scroll != NULL);
+    fdk_widget *cont = NULL;
+    for (size_t ci = 0; ci < fdk_widget_child_count(scroll); ci++) {
+        fdk_widget *ch = fdk_widget_child_at(scroll, ci);
+        if (fdk_widget_child_count(ch) > 0) {
+            cont = ch;
+            break;
+        }
+    }
+    assert(cont != NULL);
+    assert(row < fdk_widget_child_count(cont));
+    fdk_widget *row_w = fdk_widget_child_at(cont, row);
+    assert(row_w != NULL);
+    fdk_rect rb = fdk_widget_get_absolute_bounds(row_w);
+    /* LIST_ROW_PAD_X (10) + half the 16-px glyph box; vertical
+     * center of the row (34-16)/2 + 8. */
+    (void)fdk_pump_events(ctx, 60);
+    return x11_readback_pixel(&send_dpy, xid,
+                              rb.x + 10 + 8, rb.y + 9 + 8);
+}
+
+static void test_file_dialog_icons_gui(void) {
+    icon_fixture_build();
+
+    /* Save + swap the icon environment; reset both ways. */
+    const char *saved_data = getenv("XDG_DATA_HOME");
+    const char *saved_cfg = getenv("XDG_CONFIG_HOME");
+    const char *saved_dirs = getenv("XDG_DATA_DIRS");
+    const char *saved_theme = getenv("FDK_ICON_THEME");
+    char buf[700];
+    snprintf(buf, sizeof(buf), "%s/data", icon_root);
+    setenv("XDG_DATA_HOME", buf, 1);
+    snprintf(buf, sizeof(buf), "%s/config", icon_root);
+    setenv("XDG_CONFIG_HOME", buf, 1);
+    setenv("XDG_DATA_DIRS", "/nonexistent-fdk-icon-test", 1);
+    setenv("FDK_ICON_THEME", "fdkx11", 1);
+    fdk__icon_theme_reset();
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    Display *send_dpy = XOpenDisplay(NULL);
+    assert(send_dpy != NULL);
+
+    /* --- 1. LIST view: each row's icon band carries ITS type's
+     * color, read back from the X server. Row order is the dialog's
+     * documented sort: dirs first, then alphabetical files. */
+    {
+        fdk_file_dialog_options o = {0};
+        o.kind = FDK_FILE_DIALOG_OPEN_FILE;
+        snprintf(buf, sizeof(buf), "%s/browse", icon_root);
+        o.start_dir = buf;
+        fdk_window *dlg = NULL;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &o, file_dialog_done,
+                                           NULL, &dlg)));
+        (void)fdk_pump_events(ctx, 300);
+        unsigned long xid = fdk_window_xid(dlg);
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+        fdk_widget *body = fdk_widget_child_at(droot, 1);
+        fdk_widget *list = fdk_widget_child_at(body, 8);
+        assert(fdk_list_row_count(list) == 6);
+
+        struct { size_t row; unsigned long want; const char *what; } want[] = {
+            { 0, 0x000000FFu, "sub/ folder" },
+            { 1, 0x00FF8000u, "backup.zip archive" },
+            { 2, 0x00FF0000u, "note.txt text" },
+            { 3, 0x0000FF00u, "photo.png image" },
+            { 4, 0x00FF00FFu, "runme executable" },
+            { 5, 0x00FFFF00u, "song.opus audio" },
+        };
+        for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+            unsigned long px = icon_row_color(ctx, send_dpy, xid, list,
+                                              want[i].row);
+            assert(px == want[i].want);
+        }
+        printf("[ok] file dialog icons: every list row wears its "
+               "type's themed icon (folder/archive/text/image/"
+               "executable/audio — X-server pixel proof)\n");
+
+        /* The theme genuinely resolved through the chain: the
+         * engine's current name is the fixture theme. */
+        assert(strcmp(fdk__icon_theme_current_name(), "fdkx11") == 0);
+        x11_send_key_event(send_dpy, xid, KeyPress, 9);
+        dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
+    }
+
+    /* --- 2. ICON view (the 48-px scale, through the public view
+     * option): the grid cells carry the same identities. */
+    {
+        fdk_file_dialog_options o = {0};
+        o.kind = FDK_FILE_DIALOG_OPEN_FILE;
+        snprintf(buf, sizeof(buf), "%s/browse", icon_root);
+        o.start_dir = buf;
+        o.view = FDK_FILE_DIALOG_VIEW_ICONS;
+        fdk_window *dlg = NULL;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &o, file_dialog_done,
+                                           NULL, &dlg)));
+        (void)fdk_pump_events(ctx, 300);
+        unsigned long xid = fdk_window_xid(dlg);
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+        fdk_widget *body = fdk_widget_child_at(droot, 1);
+        fdk_widget *grid = fdk_widget_child_at(body, 9);
+        assert(fdk_iconview_item_count(grid) == 6);
+        /* grid -> scrollview -> container -> cell N; the icon box is
+         * 48 px centered horizontally, top band. */
+        fdk_widget *gscroll = fdk_widget_child_at(grid, 0);
+        fdk_widget *gcont = NULL;
+        for (size_t ci = 0; ci < fdk_widget_child_count(gscroll); ci++) {
+            fdk_widget *ch = fdk_widget_child_at(gscroll, ci);
+            if (fdk_widget_child_count(ch) > 0) {
+                gcont = ch;
+                break;
+            }
+        }
+        assert(gcont != NULL);
+        struct { size_t cell; unsigned long want; } gw[] = {
+            { 0, 0x000000FFu }, /* sub/ folder  */
+            { 1, 0x00FF8000u }, /* backup.zip   */
+            { 2, 0x00FF0000u }, /* note.txt     */
+            { 3, 0x0000FF00u }, /* photo.png    */
+            { 4, 0x00FF00FFu }, /* runme        */
+            { 5, 0x00FFFF00u }, /* song.opus    */
+        };
+        for (size_t i = 0; i < sizeof(gw) / sizeof(gw[0]); i++) {
+            fdk_widget *cell = fdk_widget_child_at(gcont, gw[i].cell);
+            assert(cell != NULL);
+            fdk_rect cb = fdk_widget_get_absolute_bounds(cell);
+            (void)fdk_pump_events(ctx, 60);
+            unsigned long px = x11_readback_pixel(
+                &send_dpy, xid, cb.x + 24 + 24, cb.y + 6 + 24);
+            assert(px == gw[i].want);
+        }
+        printf("[ok] file dialog icons: the icon GRID wears the "
+               "same themed identities at 48 px (X-server pixels)\n");
+        x11_send_key_event(send_dpy, xid, KeyPress, 9);
+        dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
+    }
+
+    /* --- 3. Theme switching drops the caches: rebuild WITHOUT the
+     * fixture in the chain (a nonexistent theme name) -> the rows
+     * fall back to the procedural glyphs, and the previously-solid
+     * color pixels are gone. */
+    {
+        setenv("FDK_ICON_THEME", "no-such-theme", 1);
+        fdk__icon_theme_reset();
+        fdk_file_dialog_options o = {0};
+        o.kind = FDK_FILE_DIALOG_OPEN_FILE;
+        snprintf(buf, sizeof(buf), "%s/browse", icon_root);
+        o.start_dir = buf;
+        fdk_window *dlg = NULL;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &o, file_dialog_done,
+                                           NULL, &dlg)));
+        (void)fdk_pump_events(ctx, 300);
+        unsigned long xid = fdk_window_xid(dlg);
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+        fdk_widget *body = fdk_widget_child_at(droot, 1);
+        fdk_widget *list = fdk_widget_child_at(body, 8);
+        /* Row 0 is still the folder row — but now the procedural
+         * glyph (theme ink strokes on the theme background), NOT
+         * solid fixture blue. */
+        unsigned long px = icon_row_color(ctx, send_dpy, xid, list, 0);
+        assert(px != 0x000000FFu);
+        printf("[ok] file dialog icons: switching the theme away "
+               "drops the icon caches (procedural fallback)\n");
+        x11_send_key_event(send_dpy, xid, KeyPress, 9);
+        dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
+    }
+
+    XCloseDisplay(send_dpy);
+    fdk_shutdown(ctx);
+
+    /* Restore the world. */
+    if (saved_data != NULL) {
+        setenv("XDG_DATA_HOME", saved_data, 1);
+    } else {
+        unsetenv("XDG_DATA_HOME");
+    }
+    if (saved_cfg != NULL) {
+        setenv("XDG_CONFIG_HOME", saved_cfg, 1);
+    } else {
+        unsetenv("XDG_CONFIG_HOME");
+    }
+    if (saved_dirs != NULL) {
+        setenv("XDG_DATA_DIRS", saved_dirs, 1);
+    } else {
+        unsetenv("XDG_DATA_DIRS");
+    }
+    if (saved_theme != NULL) {
+        setenv("FDK_ICON_THEME", saved_theme, 1);
+    } else {
+        unsetenv("FDK_ICON_THEME");
+    }
+    fdk__icon_theme_reset();
+    icon_fixture_drop();
 }
 
 /* ---- 1.2.0: drag and drop ---------------------------------------- */
@@ -9086,7 +9465,8 @@ static void test_gl_lane_pixel_equivalence_gui(void) {
         assert(cap[pass] != NULL);
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
-                cap[pass][(size_t)y * W + x] = XGetPixel(im, x, y);
+                cap[pass][(size_t)y * (size_t)W + (size_t)x] =
+                    XGetPixel(im, x, y);
             }
         }
         XDestroyImage(im);
@@ -9321,6 +9701,7 @@ int main(void) {
     test_a11y_gui();
     test_list_activation_gui();
     test_file_dialog_gui();
+    test_file_dialog_icons_gui();
     test_dnd_receiver_gui();
     test_dnd_receiver_gtk_gui();
     test_dnd_receiver_incr_gui();

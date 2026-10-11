@@ -9,7 +9,27 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-11, at milestone **1.5.0** (the
+Last audited: 2026-10-11, at milestone **1.5.1** (the picker
+stabilization — the file/folder pickers wear the desktop's icon
+theme through a new internal freedesktop icon-theme engine
+[src/theme/icon_theme.c: XDG discovery, index.theme parsing with
+real-theme directory subpaths, inheritance, size matching, PNG-only
+raster, symbolic tinting, 3-layer caches reset per dialog]; List and
+IconView grew borrowed raster-icon seams (fdk__list_row_set_icon_
+image / fdk__iconview_item_set_icon_image / fdk__row_icon_paint_
+image); every picker row now classifies by content [folders, images,
+audio, video, archives, documents, fonts, source, executables —
+extension table + exec-bit split]; tests/test_icon_theme.c pins the
+engine headlessly with solid-color fixture themes; the X11 suite
+gained three file-dialog-icons groups reading the X SERVER's own
+pixels [per-row identity at 16 and 48 px + theme-switch cache drop];
+real-theme verification against the system's Adwaita caught two
+spec bugs [directory names contain slashes; hicolor's 11-KiB
+Directories line] and produced the docs/screenshots gallery pair;
+also fixed: FDK_ROW_ICON_RECENT silently reading as NONE, the
+dialog icon-grid's one-column layout [fdk__iconview_reflow], and
+the engine's uninitialized chain-slot read [found by a 30-run
+sweep]), building on **1.5.0** (the
 release-engineering pass — RETRACTED same-day, see below; the
 packaging/CI infrastructure below remains on main as dormant
 release tooling): the version decision itself [1.0.0 adopted, then
@@ -235,7 +255,7 @@ the retraction is the next ledger entry.
   the 1.4.16 titlebar-theming group — Mono Chromatic's black
   band over white content, Pink Rave's hot-pink band over plum,
   the built-in's fallback gray, each on the server's own pixels);
-  38 test files (39 .c in tests/ counting bench.c, which is the
+  39 test files (40 .c in tests/ counting bench.c, which is the
   perf harness, not a suite)
 - **Scale:** ~58k lines of C in `src/` (+ generated Wayland
   protocols), 22 public headers, 12 examples
@@ -345,7 +365,21 @@ subject is raw-surface rendering that never paints the tree). Entry icon slots
 1.4.4). List activate-on-single-click (1.4.4 — the places
 sidebar rhythm).
 
-### Dialogs & pickers (SHIPPED 1.4.3 — choosers.c)
+### Dialogs & pickers (SHIPPED 1.4.3 — choosers.c; icons 1.5.1)
+
+- **FilePicker / FolderPicker iconography (1.5.1)** — every row and
+  grid cell wears the DESKTOP's icons via the internal icon-theme
+  engine (src/theme/icon_theme.c): user-theme detection (GTK/KDE
+  settings + $FDK_ICON_THEME override, no bus), inheritance chains,
+  Fixed/Scalable/Threshold size matching with a relaxed fallback,
+  pixmaps last resort, per-type classification (extension table +
+  executable-bit split), symbolic tinting, three cache layers reset
+  per dialog. PNG-only (stb decoder; SVG/XPM are honest misses),
+  procedural glyphs as the floor. List rows 16 px, grid cells 48 px.
+  Fixed on the way: the RECENT glyph's silent drop in
+  fdk_list_row_set_icon's switch; the dialog icon-grid's stuck-at-
+  one-column layout (fdk__iconview_reflow, the 1.4.7 lesson's third
+  instance); the chain walk's uninitialized-slot read.
 
 - **AboutDialog** — logo/name/version/comments/copyright, LINK
   website row (activating fires a callback with the URL — FDK never
