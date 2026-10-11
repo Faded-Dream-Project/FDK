@@ -6,16 +6,22 @@
  * RECEIVER: FDK windows carry the XdndAware property (version 5,
  * set at window creation). The four client messages a source sends
  * — XDndEnter (the source's type list, inline for <=3 types, else
- * the XdndTypeList property), XDndPosition (root x/y + the action),
- * XDndLeave, XDndDrop — are routed here from fdk_x11_dispatch_pending
- * before ordinary translation. Each Position is answered with an
- * XDndStatus whose accept bit is the intersection of the source's
- * offered types and the window's registered fdk_drag_format mask
- * (the cursor feedback the dragging client shows). A Drop triggers
- * the same bounded convert-and-wait the clipboard uses, but against
- * the XdndSelection with the DROP TARGET window as requestor, then
+ * the XdndTypeList property, slab-read with a containment cap),
+ * XDndPosition (root x/y + the action), XDndLeave, XDndDrop — are
+ * routed here from fdk_x11_dispatch_pending before ordinary
+ * translation. Each Position is answered with an XDndStatus whose
+ * accept bit is the intersection of the source's offered types and
+ * the window's registered fdk_drag_format mask and whose action
+ * field names XdndActionCopy (1.4.19: action-strict sources — the
+ * Qt family, several XWayland bridges — treat a None action as a
+ * refusal and never commit the drop), the cursor feedback the
+ * dragging client shows. A Drop triggers the same bounded
+ * convert-and-wait the clipboard uses, but against the
+ * XdndSelection with the DROP TARGET window as requestor, then
  * one FDK_EVENT_DRAG_DROP with the decoded payload (POSIX paths /
- * UTF-8 text), then the XDndFinished reply.
+ * UTF-8 text — or an EMPTY payload if every format failed, so the
+ * gesture never vanishes silently), then the XDndFinished reply
+ * (accepted + the performed action, v5).
  *
  * SOURCE: fdk_drag_begin takes the XdndSelection on the clipboard
  * helper window, grabs the pointer with owner_events=True (so the
@@ -56,15 +62,16 @@ static char *dnd_strdup(const char *s) {
 
 #define FDK_XDND_VERSION 5
 #define FDK_XDND_DROP_TIMEOUT_MS 2000
-/* The drop fetch's per-convert notify wait (1.4.14: 250 -> 600 ms).
- * 250 was fine for toolkit-to-toolkit drops, but a real file
- * manager under load (thumbnails, indexing) routinely answers its
- * SelectionRequests later than that — and a drop that silently
- * vanishes because the source was busy for 300 ms is exactly the
- * "hovered fine, dropped nothing" report. 600 ms keeps the gesture
- * bounded without punishing slow sources. INCR flights carry their
- * own (longer) deadlines inside the shared read engine. */
-#define FDK_XDND_WAIT_MS 600
+/* The drop fetch's per-convert notify wait. History: 250 ms (1.2.0,
+ * toolkit-to-toolkit peers) -> 600 ms (1.4.14: a real file manager
+ * under load answers its SelectionRequests later than that — the
+ * "hovered fine, dropped nothing" report) -> 1000 ms (1.4.19: a file
+ * manager waking cold — GVFS mounts resolving, caches faulting — can
+ * genuinely take longer still, and the failure shape is the
+ * silent-vanish class this file's other 1.4.19 fixes close; still
+ * bounded because the fetch runs inside the event loop). INCR flights
+ * carry their own (longer) deadlines inside the shared read engine. */
+#define FDK_XDND_WAIT_MS 1000
 
 /* ---- init / teardown (called from x11_connection.c) ---- */
 
@@ -134,6 +141,47 @@ static int xdnd_types_to_formats(fdk_platform_connection *conn,
     return formats;
 }
 
+/* Reads the source's XdndTypeList property in slabs and accumulates
+ * the offered formats (1.4.19). The old single read capped at 64
+ * atoms and ignored the `after` remainder — invisible for the small
+ * lists toolkit peers send each other, but a browser or office-suite
+ * drag can carry many dozens of flavors, and a text/uri-list sitting
+ * past the 64th atom made the whole drag silently unreadable. The
+ * property is untrusted input (docs/security.md): slab-bounded reads
+ * and the hard FDK_XDND_TYPE_CAP keep a hostile source from parking
+ * gigabytes behind the atom list. */
+#define FDK_XDND_TYPE_SLAB 256
+#define FDK_XDND_TYPE_CAP 1024
+
+static int xdnd_read_type_list(fdk_platform_connection *conn) {
+    int formats = 0;
+    long offset = 0; /* in 32-bit units (atoms) */
+    int total = 0;
+    for (;;) {
+        Atom type = None;
+        int fmt = 0;
+        unsigned long n = 0, after = 0;
+        unsigned char *data = NULL;
+        if (XGetWindowProperty(conn->display, conn->xdnd.source,
+                               conn->atom_xdnd_type_list, offset,
+                               FDK_XDND_TYPE_SLAB, False, XA_ATOM,
+                               &type, &fmt, &n, &after,
+                               &data) != Success ||
+            data == NULL || fmt != 32) {
+            break; /* unreadable/absent tail: keep what accumulated */
+        }
+        formats |= xdnd_types_to_formats(conn, (const Atom *)data,
+                                         (int)n);
+        total += (int)n;
+        XFree(data);
+        if (after == 0 || total >= FDK_XDND_TYPE_CAP) {
+            break;
+        }
+        offset += (long)n;
+    }
+    return formats;
+}
+
 /* ---- receiver ---- */
 
 static void xdnd_send(fdk_platform_connection *conn, Window to,
@@ -160,10 +208,22 @@ static void xdnd_send_status(fdk_platform_connection *conn, Window source,
     /* Flags: bit0 = accept, bit1 = send position updates while in the
      * rectangle, bit2 = want position events anyway. We always want
      * motions (no rectangle), so bit2 is set — the default every
-     * mainstream toolkit ships. */
+     * mainstream toolkit ships.
+     *
+     * l[4] = the ACTION the target will perform (spec, v2+). FDK's
+     * drag model is copy-only, so an accepting answer names
+     * XdndActionCopy; a refusal names None. 1.4.19: this field was
+     * always 0 — GTK sources tolerate a None action with the accept
+     * bit set, but action-STRICT sources (the Qt family's qxcbdrag
+     * resolves the status action first and an unresolvable action
+     * reads as "not accepted"; several compositor XWayland bridges
+     * do the same) then refuse to commit the drop at all: the hover
+     * highlights, the release vanishes. The live report this fix
+     * came from had exactly that shape. */
     long flags = 0x4 | (accept ? 0x1 : 0x0);
     xdnd_send(conn, source, conn->atom_xdnd_status,
-              (long)conn->xdnd.dest_window, flags, 0, 0, 0);
+              (long)conn->xdnd.dest_window, flags, 0, 0,
+              accept ? (long)conn->atom_xdnd_action_copy : 0);
 }
 
 static void xdnd_dispatch_drag(fdk_platform_window *pwindow,
@@ -217,21 +277,9 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
             conn->xdnd.version = FDK_XDND_VERSION;
         }
         if (msg->data.l[1] & 1) {
-            /* >3 types: read the source's XdndTypeList property. */
-            Atom type = None;
-            int fmt = 0;
-            unsigned long n = 0, after = 0;
-            unsigned char *data = NULL;
-            conn->xdnd.offered = 0;
-            if (XGetWindowProperty(conn->display, conn->xdnd.source,
-                                   conn->atom_xdnd_type_list, 0, 64,
-                                   False, XA_ATOM, &type, &fmt, &n,
-                                   &after, &data) == Success &&
-                data != NULL && fmt == 32) {
-                conn->xdnd.offered = xdnd_types_to_formats(
-                    conn, (const Atom *)data, (int)n);
-                XFree(data);
-            }
+            /* >3 types: the source's XdndTypeList property (slab-read,
+             * see xdnd_read_type_list). */
+            conn->xdnd.offered = xdnd_read_type_list(conn);
         } else {
             Atom three[3] = {
                 (Atom)msg->data.l[2], (Atom)msg->data.l[3],
@@ -364,6 +412,31 @@ static char *xdnd_utf8_from_property(Atom type, const unsigned char *data,
     return out;
 }
 
+/* Drop-time modifier truth: the same server query the position path
+ * uses, taken one last time at the moment the payload is delivered
+ * (success and failed-transfer paths share it). */
+static fdk_u32 drop_modifiers_now(fdk_platform_connection *conn,
+                                  fdk_platform_window *pwindow) {
+    Window rret = None, cret = None;
+    int rx = 0, ry = 0, wx = 0, wy = 0;
+    unsigned int state = 0;
+    if (XQueryPointer(conn->display, pwindow->xwindow, &rret, &cret,
+                      &rx, &ry, &wx, &wy, &state)) {
+        return fdk__x11_translate_modifiers(state);
+    }
+    return 0;
+}
+
+/* The XdndFinished a CONSUMED drop answers: accepted bit set and
+ * (v5) the action the target performed named in l[2] — GTK4 sources
+ * read that field for their completion bookkeeping. */
+static void xdnd_send_finished_ok(fdk_platform_connection *conn,
+                                  fdk_platform_window *pwindow) {
+    xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
+              (long)pwindow->xwindow, 1,
+              (long)conn->atom_xdnd_action_copy, 0, 0);
+}
+
 /* The drop fetch (1.4.14, reworked): ONE shared selection-read
  * engine (fdk__x11_read_selection) against the DROP TARGET window as
  * requestor — atomic answers, multi-part atomics, and INCR flights
@@ -377,7 +450,17 @@ static char *xdnd_utf8_from_property(Atom type, const unsigned char *data,
  * FORMAT FALLBACK is also here now: a target that refuses or times
  * out falls through to the next format the intersection allows
  * (uri-list -> UTF-8 text) instead of failing the whole drop — the
- * spec-correct retry a picker owes the user. */
+ * spec-correct retry a picker owes the user.
+ *
+ * 1.4.19: a fetch where EVERY format failed used to return without
+ * dispatching anything — the drop vanished SILENTLY (no event, no
+ * app-visible signal; the live report was "hovered fine, released,
+ * nothing happened"). The gesture is now still delivered as an
+ * empty-payload FDK_EVENT_DRAG_DROP — the contract the Wayland
+ * backend already had (it dispatches the drop unconditionally) and
+ * the empty-uri-list precedent below. The app sees the gesture land
+ * and can tell the user the payload could not be read; the WARN
+ * names the failing stage for the log. */
 static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
                                 fdk_platform_window *pwindow,
                                 unsigned long timestamp) {
@@ -417,19 +500,32 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
                          : "no acceptable format answered");
         }
     }
-    if (raw == NULL) {
-        xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
-                  (long)pwindow->xwindow, 0, 0, 0, 0);
-        return;
-    }
-
     /* Widen/keep as UTF-8 exactly like the old path did (XA_STRING
-     * Latin-1 widen; everything else passes through as bytes). */
-    char *payload = xdnd_utf8_from_property(got_type, raw, raw_len);
-    fdk_free(raw);
+     * Latin-1 widen; everything else passes through as bytes). Only a
+     * real read is widened — a failed fetch reaches the empty-gesture
+     * path below with nothing allocated. */
+    char *payload = NULL;
+    if (raw != NULL) {
+        payload = xdnd_utf8_from_property(got_type, raw, raw_len);
+        fdk_free(raw);
+    }
     if (payload == NULL) {
-        xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
-                  (long)pwindow->xwindow, 0, 0, 0, 0);
+        /* Every format failed (refusal / timeout / malformed) or the
+         * widen alloc died: deliver the EMPTY gesture anyway (1.4.19
+         * — see the function comment), then answer Finished as a
+         * consumed drop. */
+        FDK_WARN("dnd: drop transfer failed for all %d format(s) — "
+                 "delivering the gesture with an empty payload",
+                 try_count);
+        fdk_event_data ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = FDK_EVENT_DRAG_DROP;
+        ev.drag.offered_formats = conn->xdnd.offered;
+        ev.drag.accepted_formats = accepted;
+        ev.drag.modifiers = drop_modifiers_now(conn, pwindow);
+        conn->dispatch(pwindow, &ev, conn->dispatch_user_data);
+        xdnd_send_finished_ok(conn, pwindow);
+        conn->xdnd.source = None;
         return;
     }
 
@@ -462,27 +558,17 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
     ev.drag.text = text;
     ev.drag.uris = uris;
     ev.drag.uri_count = uri_count;
-    /* Drop-time modifiers: the same server query the position path
-     * used, one last time. */
-    {
-        Window rret = None, cret = None;
-        int rxn = 0, ryn = 0, wx = 0, wy = 0;
-        unsigned int state = 0;
-        if (XQueryPointer(conn->display, pwindow->xwindow, &rret, &cret,
-                          &rxn, &ryn, &wx, &wy, &state)) {
-            ev.drag.modifiers = fdk__x11_translate_modifiers(state);
-        }
-    }
+    /* Drop-time modifiers: the shared server query. */
+    ev.drag.modifiers = drop_modifiers_now(conn, pwindow);
     conn->dispatch(pwindow, &ev, conn->dispatch_user_data);
 
     fdk__dnd_free_uri_list(uris, uri_count);
     fdk_free(text_copy);
     fdk_free(payload);
 
-    /* XDND v2+: l[1] bit0 says the drop was accepted — the source's
-     * result reporting reads it. */
-    xdnd_send(conn, conn->xdnd.source, conn->atom_xdnd_finished,
-              (long)pwindow->xwindow, 1, 0, 0, 0);
+    /* XDND v2+: l[1] bit0 says the drop was accepted; v5 also names
+     * the performed action in l[2] (xdnd_send_finished_ok). */
+    xdnd_send_finished_ok(conn, pwindow);
     conn->xdnd.source = None;
 }
 

@@ -376,16 +376,30 @@ static void report_drop(const fdk_event_data *ev) {
                    kind, folders, files, d->uris[0]);
         snprintf(summary, sizeof(summary), "%s %zu", kind, d->uri_count);
         (void)fdk_label_set_text(app.drop_panel, summary);
+        printf("PHASE: drop %s\n", summary);
+        /* The demo's job is to show WHAT arrived: every decoded
+         * payload entry (POSIX paths — file:// URIs are decoded by
+         * the library), folders included. */
+        for (size_t i = 0; i < d->uri_count && i < 8; i++) {
+            printf("  item[%zu] = %s\n", i, d->uris[i]);
+        }
+        if (d->uri_count > 8) {
+            printf("  ... and %zu more\n", d->uri_count - 8);
+        }
     } else if (d->text != NULL) {
         set_status(app.drop_status, "Last drop: text \"%s\"", d->text);
-        snprintf(summary, sizeof(summary), "text: %s", d->text);
-        (void)fdk_label_set_text(app.drop_panel, summary);
+        (void)fdk_label_set_text(app.drop_panel, d->text);
+        printf("PHASE: drop text: %s\n", d->text);
     } else {
-        set_status(app.drop_status, "Last drop: empty payload");
+        /* NULL text with NULL uris: the gesture landed but the
+         * payload could not be transferred (the library also routes
+         * a genuinely empty owner answer here). */
+        set_status(app.drop_status,
+                   "Last drop: empty payload (transfer failed)");
         (void)fdk_label_set_text(app.drop_panel, "(empty)");
-        snprintf(summary, sizeof(summary), "text 0");
+        printf("PHASE: drop empty (the gesture landed; no payload "
+               "was transferred)\n");
     }
-    printf("PHASE: drop %s\n", summary);
     fflush(stdout);
 }
 

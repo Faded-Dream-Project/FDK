@@ -5117,3 +5117,75 @@ The parity ledger's line moves: GPU PRESENT SHIPPED (hybrid);
 GLArea itself stays OUT (a widget-level GL drawable is a different,
 app-facing feature — and rasterization stays CPU by design).
 
+
+## 1.4.19 — the drop that landed (XDND receiver faithfulness)
+
+The maintainer ran 1.4.18 on real hardware (the GL lane engaged,
+`nvidia-smi` confirmed) and reported: dragging files from the file
+manager onto the capabilities example highlights the drop panel
+("drop it!") but the release prints nothing — maybe it works and
+doesn't print? The recon that followed was humbling in the right
+direction: every GTK3-on-X11-shaped handshake we could synthesize
+ALREADY passed (a new GTK-faithful rig — XdndEnter v5 with bit 0 and
+an 8-type XdndTypeList property, text/uri-list at index 4 and not
+among the inline three, real server-clock drop timestamps, file://
+payloads with folders, INCR variants, both render lanes — all green
+in a 12-cell matrix). The failure lives in behaviors our peers had
+that our rigs didn't. Three of those were real bugs, all in the
+receiver's half of the conversation:
+
+- **The action atom (the likely root cause).** FDK's XdndStatus
+  reply carried the accept bit and an empty rectangle but left l[4]
+  — the action the target will perform, spec-required since v2 —
+  at None. GTK sources shrug; action-STRICT sources do not: the Qt
+  family's drag machinery resolves the status action first and an
+  unresolvable action reads as "not accepted" — the source cancels
+  instead of committing the drop, and several compositor XWayland
+  bridges behave the same. The symptom is EXACTLY the report: hover
+  highlights (our ENTER/MOTION events fire off the Position stream,
+  whatever the source's cursor says), release vanishes. The reply
+  now names XdndActionCopy when accepting (FDK's drag model is
+  copy-only, so this is also the honest answer), None when refusing;
+  XdndFinished gained the same field (v5 sources read it for their
+  completion bookkeeping).
+- **The silent vanish.** A drop whose payload transfer failed —
+  owner refused every format, timed out, served nothing readable —
+  returned without dispatching ANY event. No gesture, no signal,
+  nothing to print: the app (and its developer) could only guess.
+  The Wayland backend never had this hole (it dispatches the drop
+  unconditionally); the X11 fetch now delivers the same contract:
+  an FDK_EVENT_DRAG_DROP with both data pointers NULL, a WARN naming
+  the failing stage, and a Finished that reports the consumed
+  gesture. The header contract documents the exception.
+- **The 64-atom cap.** XdndTypeList was read in one 64-atom
+  XGetWindowProperty with the `after` remainder ignored — a source
+  offering a longer list (browsers and office suites can) had its
+  tail silently dropped, and a text/uri-list past the 64th atom made
+  the whole drag unreadable. Now slab-read (256-atom windows) with
+  a 1024-atom containment cap for hostile properties.
+
+Two smaller moves in the same spirit: the drop-fetch budget rose
+600 ms -> 1000 ms (a file manager waking cold — GVFS resolving,
+caches faulting — genuinely takes longer than a toolkit peer; the
+history comment in x11_dnd.c carries the whole ladder), and the
+capabilities example now prints what actually arrived — every decoded
+path (folders included, POSIX-decoded from file://), the text
+preview, or the honest "drop empty (the gesture landed; no payload
+was transferred)". The folder question the maintainer asked while
+filing this: yes — folders were always decoded and counted (the
+example stats each URI); the demo just never showed its work.
+
+**Verified**: three new suite groups (TypeList-path discovery with
+uri-list at index 4 + real timestamps; the action-strict source,
+which ABORTS the drag exactly like Qt when the status action is
+None — exit 9 unless the receiver answers an action; the refused
+conversion, which must still deliver the empty gesture and answer
+Finished(accepted=1)). The new external rig runs the full matrix —
+six modes × both render paths — against the real example app under
+Xvfb+openbox: ALL PASS, and the strict-mode pin would have failed on
+1.4.18's None action. Headless, the whole X11 suite (default and
+FDK_GL_FORCE=1), and verify-exports 621 all green.
+
+The parity ledger's line moves: DnD receiver marked
+ACTION-FAITHFUL (spec-complete XdndStatus/XdndFinished replies);
+widget-level drop targets remain future work, unchanged.

@@ -111,7 +111,13 @@ typedef enum fdk_event_type {
      * it after). The widget tree does not consume drag events —
      * they always reach the application's window callback, which
      * hit-tests its own widgets (v1 DnD is window-level; widget-
-     * level drop targets are future work, documented honestly). */
+     * level drop targets are future work, documented honestly).
+     *
+     * 1.4.19: DROP is delivered even when the payload transfer
+     * itself failed (owner refused, timed out, or served nothing
+     * readable) — with both data pointers NULL. The gesture landing
+     * is the application's signal; a drop that vanishes silently
+     * with no event at all is the failure mode this closes. */
     FDK_EVENT_DRAG_ENTER = 30,
     FDK_EVENT_DRAG_MOTION = 31,
     FDK_EVENT_DRAG_LEAVE = 32,
@@ -275,11 +281,16 @@ typedef struct fdk_scroll_event {
  * FDK only dispatches ENTER/MOTION/LEAVE/DROP at all when the
  * intersection is nonzero, so a drop the window cannot read is
  * never delivered (the drag visually passes over the window
- * instead). On DROP exactly one of the data pointers is non-NULL
- * for each accepted format bit (text for TEXT, uris for URI_LIST),
- * and both are invalid the moment the callback returns. URIs
- * arrive as POSIX paths when the source offered file:// URIs
- * (percent-decoding applied); non-file URIs pass through as-is. */
+ * instead). On DROP the data pointer for each accepted format bit
+ * carries the transferred payload (text for TEXT, uris for
+ * URI_LIST), with one honest exception (1.4.19): when the transfer
+ * itself failed — the owner refused or never answered — the DROP
+ * still arrives with BOTH pointers NULL (an empty gesture, so the
+ * application can react and report; the alternative, no event at
+ * all, was a silent vanish). Both pointers are invalid the moment
+ * the callback returns. URIs arrive as POSIX paths when the source
+ * offered file:// URIs (percent-decoding applied); non-file URIs
+ * pass through as-is. */
 typedef struct fdk_drag_event {
     int offered_formats;    /* fdk_drag_format OR-mask from the source */
     int accepted_formats;   /* intersection with this window's mask    */

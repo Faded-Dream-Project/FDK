@@ -9,7 +9,22 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-11, at milestone **1.4.18** (the GPU present
+Last audited: 2026-10-11, at milestone **1.4.19** (the drop that
+landed — the maintainer's live report that real-file-manager drops
+hover fine but never complete; three XDND receiver bugs found and
+pinned: the XdndStatus action atom was always None, which
+action-strict sources [Qt family, several XWayland bridges] read as
+a refusal and cancel the drop — now answers XdndActionCopy, and
+XdndFinished carries the performed action too [v5]; a failed payload
+transfer silently vanished with NO event — now delivered as an
+empty-payload DRAG_DROP, the contract Wayland always had; the
+XdndTypeList read capped at 64 atoms with the remainder ignored —
+now slab-read with a containment cap; drop-fetch budget 600->1000ms;
+the capabilities example now prints every decoded payload entry
+including folders; verified by a new GTK-faithful rig [8-type
+TypeList with uri-list at index 4, real timestamps, strict and
+refusing source modes] across a 6-mode x 2-lane app-level matrix and
+three new suite groups), building on **1.4.18** (the GPU present
 lane — the maintainer's hardware-acceleration ask, verified-absent
 first, then implemented as a hybrid: CPU rasterization unchanged and
 byte-identical, GLX presentation runtime-loaded via dlopen with a
@@ -233,8 +248,16 @@ sidebar rhythm).
   AND incremental transfers; what GTK/Qt file managers do for
   larger uri-lists — previously the drop read the INCR seed as
   garbage and vanished after a "drop it" hover), with format
-  fallback (uri-list refused -> UTF-8 text) and a 600 ms
-  convert budget
+  fallback (uri-list refused -> UTF-8 text) and a 1000 ms
+  convert budget; **the 1.4.19 receiver-faithfulness pass** —
+  XdndStatus answers the v2+ action atom (XdndActionCopy; action-
+  strict sources like Qt read a None action as a refusal and cancel
+  the drop: hover highlights, release vanishes — the maintainer's
+  live report), XdndFinished carries the performed action (v5), a
+  failed transfer delivers an EMPTY-payload DRAG_DROP instead of
+  vanishing silently (Wayland's contract, now X11's too), the
+  XdndTypeList read is slab-bounded past 64 atoms (1024 cap), and
+  the GTK-faithful rig + three suite groups pin all of it
 - Focus traversal, double/triple-click, shift-click range select
 - **Window states**: maximize/minimize/restore (Phase 8) +
   **FULLSCREEN (1.4.10)** on both backends — EWMH client messages

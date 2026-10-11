@@ -7051,6 +7051,108 @@ static void test_dnd_receiver_incr_gui(void) {
     fdk_shutdown(ctx);
 }
 
+/* 1.4.19: the GTK-faithful source — what a real file manager puts on
+ * the wire. Three pins:
+ *   - gtk-files: XdndEnter v5 with bit0 + the XdndTypeList property
+ *     (EIGHT types, text/uri-list at index 4, NOT among the inline
+ *     three) and REAL drop timestamps — the TypeList discovery path
+ *     and the server-clock convert.
+ *   - strict-files: the source is action-strict (Qt family /
+ *     XWayland bridges): an XdndStatus whose l[4] action is None
+ *     reads as a refusal and the drag is cancelled. FDK must answer
+ *     a non-None action atom or this rig exits 9.
+ *   - refuse-files: every ConvertSelection answered property=None —
+ *     the drop gesture must STILL be delivered (empty payload), the
+ *     old silent-vanish behavior is pinned away.
+ */
+static void test_dnd_receiver_gtk_gui(void) {
+    const char *src_bin = getenv("FDK_XDND_GTK_SOURCE_BIN");
+    if (src_bin == NULL) {
+        src_bin = "/home/z/my-project/scripts/xdnd_source_gtk";
+    }
+    if (access(src_bin, X_OK) != 0) {
+        printf("[skip] dnd gtk: %s not built (external interop "
+               "rig builds it)\n", src_bin);
+        return;
+    }
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "dnd gtk target",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, dnd_count_window_event, NULL);
+    fdk_window_set_drop_formats(win, FDK_DRAG_FORMAT_TEXT |
+                                         FDK_DRAG_FORMAT_URI_LIST);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 250);
+
+    Display *probe = XOpenDisplay(NULL);
+    assert(probe != NULL);
+    unsigned long xid = fdk_window_xid(win);
+    int lx = 0, ly = 0;
+    Window junk = None;
+    XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
+                          80, 60, &lx, &ly, &junk);
+    char cmd[512];
+
+    /* --- TypeList discovery + real timestamps --- */
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d gtk-files", src_bin, xid,
+             lx, ly);
+    FILE *child = popen(cmd, "r");
+    assert(child != NULL);
+    alarm(10);
+    int rc = pump_child_while_draining(ctx, child, 10);
+    alarm(0);
+    assert(rc == 0);
+    assert(dnd_rx.enters >= 1);
+    assert(dnd_rx.drops == 1);
+    assert(dnd_rx.uri_count == 2);
+    assert(strcmp(dnd_rx.uris[0], "/etc/hostname") == 0);
+    assert(strcmp(dnd_rx.uris[1], "/etc/os-release") == 0);
+    printf("[ok] dnd gtk: TypeList-path enter (uri-list at index 4), "
+           "real drop timestamp, 2 files decoded\n");
+
+    /* --- the action-strict source must see a non-None action --- */
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d strict-files", src_bin, xid,
+             lx, ly);
+    child = popen(cmd, "r");
+    assert(child != NULL);
+    alarm(10);
+    rc = pump_child_while_draining(ctx, child, 10);
+    alarm(0);
+    assert(rc == 0); /* exit 9 = STRICT-ABORT = missing action atom */
+    assert(dnd_rx.drops == 1);
+    assert(dnd_rx.uri_count == 2);
+    printf("[ok] dnd gtk: action-strict source committed the drop "
+           "(XdndStatus carries XdndActionCopy)\n");
+
+    /* --- refused conversion still delivers the gesture --- */
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d refuse-files", src_bin, xid,
+             lx, ly);
+    child = popen(cmd, "r");
+    assert(child != NULL);
+    alarm(10);
+    rc = pump_child_while_draining(ctx, child, 10);
+    alarm(0);
+    assert(rc == 0); /* Finished(accepted=1): the gesture consumed */
+    assert(dnd_rx.drops == 1);
+    assert(dnd_rx.uri_count == 0);
+    assert(dnd_rx.last_text[0] == '\0');
+    printf("[ok] dnd gtk: refused conversion delivered as an empty-payload "
+           "drop (no silent vanish)\n");
+
+    XCloseDisplay(probe);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+}
+
 /* ---- 1.4.14: the settings live follow ---------------------------------- */
 
 /* Writes `body` to `path` (NULL body removes the file) — the exact
@@ -9181,6 +9283,7 @@ int main(void) {
     test_list_activation_gui();
     test_file_dialog_gui();
     test_dnd_receiver_gui();
+    test_dnd_receiver_gtk_gui();
     test_dnd_receiver_incr_gui();
     test_dnd_source_gui();
     test_settings_live_follow_gui();

@@ -1794,3 +1794,43 @@ tooltip is the DELTA over that baseline). The examples pixel rig's
 color constants are still Modern-era (its failure reproduces on
 pristine 1.4.17; the battery runs the frame-budget smoke plus the
 GL equivalence rig instead) — known debt, recorded in the roadmap.
+
+## 1.4.19 — testing the GTK-faithful DnD receiver
+
+The maintainer's live report (drops from a real file manager hover
+fine, release vanishes) exposed a rig blind spot: every XDND test
+spoke the handshake our own peer speaks — ≤3 inline types,
+CurrentTime drops, small atomic answers. Real GTK file managers do
+more, and action-strict sources (the Qt family, several XWayland
+bridges) check things GTK never does. Three layers close it:
+
+**`scripts/xdnd_source_gtk`** — a raw-Xlib source that reproduces
+the GTK wire shape exactly: XdndEnter v5 with bit 0 set and an
+8-type XdndTypeList property (text/uri-list at index 4, NOT among
+the inline three — the property-read discovery path), real
+server-clock drop timestamps (the PropertyNotify round-trip, like a
+button-release time), file:// payloads with CRLF (including a
+directory URI), ICCCM-style SelectionNotify answers, and four extra
+modes: `gtk-folder` (folder classification), `incr-files`, plus
+`strict-files` (an action-strict source that ABORTS with XdndLeave
+and exit 9 when the receiver's XdndStatus carries no action atom —
+the Qt behavior 1.4.18 actually had) and `refuse-files` (every
+ConvertSelection answered property=None — the ICCCM refusal the
+empty-gesture delivery exists for).
+
+**`scripts/verify_dnd_gtk_x11.sh`** — the app-level matrix: Xvfb +
+openbox + the real `09_capabilities` binary, six modes × both
+present paths (CPU and `FDK_GL_FORCE=1`; the lane is the new
+variable on real desktops). Each cell asserts the source's whole
+handshake (status accept, finished success), the app's PHASE line
+with the right classification (files / folder / text / empty), and
+that the app survived. 12/12 green; the strict cell fails on an
+action-less status by construction.
+
+**Suite groups** (`test_dnd_receiver_gtk_gui`) — the same three pins
+inside `make test-x11`, no display rig needed beyond the suite's
+own: TypeList-path enter with decoded paths, the action-strict
+source committing (exit 9 = failure, by rig contract), and the
+refused conversion delivering `drops == 1` with empty payload plus
+`Finished(accepted=1)`. The group honors `FDK_XDND_GTK_SOURCE_BIN`
+and skips honestly when the rig binary is absent.
