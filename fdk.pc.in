@@ -15,7 +15,10 @@ Version: @VERSION@
 URL: https://github.com/FemBoyGamerTechGuy/FDK
 Cflags: -I${includedir}
 Libs: -L${libdir} -lfdk
-# The .so already carries these; static linking resolves them through
-# Requires.private. Applications themselves need none of them.
-Requires.private: @PC_REQUIRES@
+# The .so already carries every platform dependency; a dynamically
+# linked application needs NONE of them, and a plain
+# `pkg-config --cflags --libs fdk` must succeed on machines without
+# the X11 development packages — hence raw flags in Libs.private (used
+# only by --static consumers) rather than Requires.private, whose
+# package graph pkg-config resolves (and fails on) for every query.
 Libs.private: @PC_LIBS@ -lm

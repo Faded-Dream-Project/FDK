@@ -79,9 +79,10 @@ Section 4(d).
 %setup -q -n fdk-%{version}
 
 %build
-# Plain make (not %make_build): the spec stays portable across rpm
-# variants — Fedora, RHEL clones, and even a foreign rpmbuild for
-# local validation. FDK_CONFIG is pinned here AND in %install: the
+# Plain make, not the Fedora make-build macro: the spec stays
+# portable across rpm variants — Fedora, RHEL clones, and even a
+# foreign rpmbuild for local validation. FDK_CONFIG is pinned here
+# AND in the install section below: the
 # Makefile's config stamp would otherwise silently rebuild the payload
 # in debug config (sanitizers linked into the shipped .so) between the
 # two stages.

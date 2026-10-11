@@ -78,25 +78,26 @@ fi
 
 # --- xbps-create: one package per stow dir ---------------------------------
 mkdir -p dist
+# xbps-create takes SHORT flags only (long options are rejected);
+# -A architecture, -n name-version_revision, -s short description,
+# -D long description, -m maintainer, -l license, -d dependencies.
 xbps-create \
-    --architecture "$ARCH" \
-    --name "fdk-libs-$VERSION"_"$REVISION" \
-    --short-desc "Faded Dream ToolKit - runtime library and theme faces" \
-    --desc "The FDK runtime: the shared library (libfdk.so.1) and the ten shipped theme faces. Applications built with FDK need this package at run time; the FDK runtime is installed separately by the end user per the license's separate-runtime model." \
-    --maintainer "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
-    --license "Proprietary" \
-    --homepage "https://github.com/FemBoyGamerTechGuy/FDK" \
+    -A "$ARCH" \
+    -n "fdk-libs-$VERSION"_"$REVISION" \
+    -s "Faded Dream ToolKit - runtime library and theme faces" \
+    -D "The FDK runtime: the shared library (libfdk.so.1) and the ten shipped theme faces. Applications built with FDK need this package at run time; the FDK runtime is installed separately by the end user per the license's separate-runtime model." \
+    -m "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
+    -l "Proprietary" \
     "$RT"
 
 xbps-create \
-    --architecture "$ARCH" \
-    --name "fdk-devel-$VERSION"_"$REVISION" \
-    --short-desc "Faded Dream ToolKit - development files" \
-    --desc "Headers, pkg-config metadata, the development symlink, and the fdk-theme / fdk-set / fdk-prefs tools. The static archive is deliberately not shipped: distributing statically-linked FDK requires separate written authorization." \
-    --maintainer "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
-    --license "Proprietary" \
-    --homepage "https://github.com/FemBoyGamerTechGuy/FDK" \
-    --dependencies "fdk-libs-$VERSION"_"$REVISION" \
+    -A "$ARCH" \
+    -n "fdk-devel-$VERSION"_"$REVISION" \
+    -s "Faded Dream ToolKit - development files" \
+    -D "Headers, pkg-config metadata, the development symlink, and the fdk-theme / fdk-set / fdk-prefs tools. The static archive is deliberately not shipped: distributing statically-linked FDK requires separate written authorization." \
+    -m "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
+    -l "Proprietary" \
+    -d "fdk-libs-$VERSION"_"$REVISION" \
     "$DV"
 
 mv ./*.xbps dist/ 2>/dev/null || true

@@ -16,7 +16,7 @@ echo "== FDK arch install-test ($VERSION, $ARCH) =="
 
 pacman -Sy --noconfirm --needed \
     gcc pkgconf libx11 libxext zlib wayland libxkbcommon \
-    xvfb ttf-dejavu >/dev/null
+    xorg-server-xvfb ttf-dejavu >/dev/null
 
 PKG="$(ls dist/fdk-*.pkg.tar.* 2>/dev/null | head -1)"
 [ -n "$PKG" ] || { echo "INSTALL-TEST FAIL: no arch package in dist/"; exit 1; }

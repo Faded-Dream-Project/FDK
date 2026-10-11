@@ -178,10 +178,16 @@ LDFLAGS := $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz $(ENV_LDFLAGS)
 # pkg-config exposure (fdk.pc): private deps are the ones the .so
 # already links (apps need nothing); Requires.private lets static
 # linking pull them in transitively.
-PC_REQUIRES := $(if $(FDK_HAS_WAYLAND),wayland-client xkbcommon,) x11
+# v1.0.0: the private link set ships as RAW FLAGS in fdk.pc's
+# Libs.private, not as Requires.private package names — pkg-config
+# resolves the Requires.private graph on every query and fails on
+# machines without the X11 dev packages, which contradicts "a
+# dynamically linked application needs none of them" (observed live
+# in the Debian install-test container).
+PC_LIBS_RAW := $(X11_LIBS) $(WAYLAND_LIBS) -ldl
 # -ldl for static linking (see LDFLAGS above); -lm is appended by
 # fdk.pc.in itself.
-PC_LIBS := -ldl
+PC_LIBS := $(PC_LIBS_RAW)
 
 # Per-source-file extra flags: platform backends need their own
 # pkg-config include paths, and the Wayland backend additionally
@@ -536,7 +542,6 @@ $(BUILD_DIR)/fdk.pc: fdk.pc.in include/fdk/fdk_version.h Makefile
 	     -e 's|@LIBDIR@|$(LIBDIR)|g' \
 	     -e 's|@INCDIR@|$(INCDIR)|g' \
 	     -e 's|@VERSION@|$(FDK_PC_VERSION)|g' \
-	     -e 's|@PC_REQUIRES@|$(PC_REQUIRES)|g' \
 	     -e 's|@PC_LIBS@|$(PC_LIBS)|g' fdk.pc.in > $@
 
 install: all $(BUILD_DIR)/fdk.pc
