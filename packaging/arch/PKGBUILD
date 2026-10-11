@@ -1,0 +1,49 @@
+# packaging/arch/PKGBUILD — Arch Linux package for FDK.
+#
+# Built by packaging/arch/build-pkg.sh inside an archlinux:base
+# container: makepkg runs as an unprivileged builder user, from the
+# pristine source tarball the script prepares (fdk-<ver>.tar.gz) and
+# the sha256 the script computes and substitutes below (@SHA256@).
+#
+# Arch convention for a library this size: ONE package carrying both
+# the runtime and the development files (the split philosophy per
+# distribution is documented in docs/packaging.md).
+#
+# The static archive is deliberately NOT packaged (FDK Proprietary
+# License 4(d): distributing statically-linked FDK requires separate
+# written authorization) — build() removes it from the staging tree.
+
+pkgname=fdk
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Faded Dream ToolKit — native C GUI toolkit for X11 and Wayland (runtime + development files)"
+arch=('x86_64')
+url="https://github.com/FemBoyGamerTechGuy/FDK"
+license=('LicenseRef-Proprietary')
+depends=(libx11 libxext zlib wayland libxkbcommon)
+makedepends=(pkgconf)
+source=("fdk-$pkgver.tar.gz")
+sha256sums=('@SHA256@')
+
+build() {
+    cd "$srcdir/fdk-$pkgver"
+    # FDK_CONFIG is pinned here AND in package(): the Makefile's config
+    # stamp would otherwise silently rebuild the payload in debug config
+    # (sanitizers) between the two stages.
+    make FDK_CONFIG=release all PREFIX=/usr LIBDIR=/usr/lib
+}
+
+check() {
+    cd "$srcdir/fdk-$pkgver"
+    make test
+}
+
+package() {
+    cd "$srcdir/fdk-$pkgver"
+    make FDK_CONFIG=release install DESTDIR="$pkgdir" PREFIX=/usr LIBDIR=/usr/lib
+    # The static archive is NOT shipped (license posture, see above).
+    rm -f "$pkgdir"/usr/lib/libfdk.a
+    install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/fdk/LICENSE
+    install -Dm644 THIRD-PARTY-NOTICES.md \
+        "$pkgdir"/usr/share/licenses/fdk/THIRD-PARTY-NOTICES.md
+}

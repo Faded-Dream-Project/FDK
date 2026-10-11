@@ -14,6 +14,15 @@ with exclusive venue in Bucharest (Section 14). It was finalized and
 adopted by the Licensor without review by legal counsel and is not
 legal advice; the Licensor may revise it as Section 12 provides.
 
+The binary packages published in this repository's GitHub Releases
+(`docs/packaging.md`) are built and distributed **by the Licensor
+directly** — that is the "channel the Licensor authorizes" under
+Section 4(d). Nothing in the packaging grants any third party a
+right to repackage or redistribute the toolkit; those acts remain
+governed by the license. The packages deliberately ship no static
+archive (`libfdk.a`): distributing a statically-linked FDK would
+itself require separate written authorization.
+
 ## What FDK may depend on
 
 Third-party code (source incorporated directly, or libraries linked

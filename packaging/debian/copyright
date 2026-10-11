@@ -1,0 +1,15 @@
+Format: see /usr/share/doc/libfdk1/LICENSE
+Upstream-Name: FDK (Faded Dream ToolKit)
+Source: https://github.com/FemBoyGamerTechGuy/FDK
+
+Files: *
+Copyright: 2026 FemBoyGamerTechGuy
+License: FDK-Proprietary-1.0
+ FDK is proprietary software distributed under the FDK Proprietary
+ License, Version 1.0. The complete license text is installed as
+ /usr/share/doc/libfdk1/LICENSE (and ships in the source
+ distribution at the repository root). All rights reserved.
+ .
+ Applications built with FDK remain the property of their authors;
+ the license's restrictions apply to the toolkit itself. See the
+ license's Section 5 ("Applications and Developer Rights").

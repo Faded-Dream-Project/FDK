@@ -1,0 +1,66 @@
+# packaging/void/template — XBPS source template for FDK.
+#
+# REFERENCE metadata for distro packagers building FDK with
+# xbps-src from the void-packages tree. The release pipeline
+# (packaging/void/build-xbps.sh) builds the same two packages with
+# xbps-create directly, from this metadata — same names, versions,
+# dependencies, and file layout.
+#
+# Void convention: fdk-libs (runtime) + fdk-devel (development
+# files), /usr/lib as the library directory (Void uses no lib64).
+#
+# The static archive is deliberately NOT packaged (FDK Proprietary
+# License 4(d): distributing statically-linked FDK requires separate
+# written authorization).
+
+pkgname=fdk
+version=@VERSION@
+revision=1
+archs="x86_64"
+wrksrc="fdk-${version}"
+build_style="gnu-makefile"
+hostmakedepends="pkgconf"
+makedepends="libX11-devel libXext-devel zlib-devel wayland-devel libxkbcommon-devel"
+short_desc="Faded Dream ToolKit — native C GUI toolkit for X11 and Wayland"
+maintainer="FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>"
+license="Proprietary"
+homepage="https://github.com/FemBoyGamerTechGuy/FDK"
+distfiles="https://github.com/FemBoyGamerTechGuy/FDK/releases/download/v${version}/fdk-${version}.tar.gz"
+checksum=SKIP
+
+do_build() {
+        make
+        make test
+        make FDK_CONFIG=release all
+}
+
+do_check() {
+        make test
+}
+
+do_install() {
+        make FDK_CONFIG=release install DESTDIR=${DESTDIR} PREFIX=/usr LIBDIR=/usr/lib
+        # The static archive is NOT shipped (license posture, see above).
+        rm -f ${DESTDIR}/usr/lib/libfdk.a
+        vlicense LICENSE
+        vdoc THIRD-PARTY-NOTICES.md
+}
+
+fdk-libs_package() {
+        short_desc+=" — runtime library and theme faces"
+        pkg_install() {
+                vmove "usr/lib/libfdk.so.*"
+                vmove usr/share/fdk
+        }
+}
+
+fdk-devel_package() {
+        depends="fdk-libs-${version}_${revision}"
+        short_desc+=" — development files"
+        pkg_install() {
+                vmove usr/include
+                vmove "usr/lib/libfdk.so"
+                vmove usr/lib/pkgconfig
+                vmove usr/bin
+        }
+}

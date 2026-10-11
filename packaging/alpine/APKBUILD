@@ -1,0 +1,63 @@
+# packaging/alpine/APKBUILD — Alpine Linux package for FDK.
+#
+# Built by packaging/alpine/build-apk.sh inside an alpine:3.22
+# container: abuild runs as an unprivileged builder user in the
+# abuild group, from the pristine source tarball the script prepares
+# (fdk-<ver>.tar.gz) with the sha512 the script computes and
+# substitutes below (@SHA512@).
+#
+# Alpine's abuild automatically derives the runtime `so:lib*.so.N`
+# dependencies from the built ELF, so depends stays empty by design.
+#
+# Subpackage split (Alpine convention): fdk (runtime + CLI tools)
+# and fdk-dev (headers, dev symlink, pkgconfig). The custom dev()
+# moves /usr/bin into -dev so the runtime package stays lean —
+# the tools are development-time utilities.
+#
+# The static archive is deliberately NOT packaged (FDK Proprietary
+# License 4(d)); build() removes it from the staging tree.
+
+pkgname=fdk
+pkgver=@VERSION@
+pkgrel=0
+pkgdesc="Faded Dream ToolKit — native C GUI toolkit for X11 and Wayland (musl)"
+url="https://github.com/FemBoyGamerTechGuy/FDK"
+arch="x86_64"
+license="Proprietary"
+depends=""
+makedepends="build-base pkgconf libx11-dev libxext-dev zlib-dev wayland-dev libxkbcommon-dev"
+subpackages="$pkgname-dev"
+source="fdk-$pkgver.tar.gz"
+sha512sums="@SHA512@"
+
+builddir="$srcdir/fdk-$pkgver"
+
+build() {
+    # FDK_CONFIG is pinned here AND in package(): the Makefile's config
+    # stamp would otherwise silently rebuild the payload in debug config
+    # (sanitizers) between the two stages.
+    make FDK_CONFIG=release all PREFIX=/usr LIBDIR=/usr/lib
+}
+
+check() {
+    make test
+}
+
+package() {
+    make FDK_CONFIG=release install DESTDIR="$pkgdir" PREFIX=/usr LIBDIR=/usr/lib
+    # The static archive is NOT shipped (license posture, see above).
+    rm -f "$pkgdir"/usr/lib/libfdk.a
+    install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/fdk/LICENSE
+    install -Dm644 THIRD-PARTY-NOTICES.md \
+        "$pkgdir"/usr/share/licenses/fdk/THIRD-PARTY-NOTICES.md
+}
+
+dev() {
+    default_dev
+    # The CLI tools are development utilities; keep them with the
+    # development files, not the runtime.
+    if [ -d "$pkgdir"/usr/bin ]; then
+        mkdir -p "$subpkgdir"/usr
+        mv "$pkgdir"/usr/bin "$subpkgdir"/usr/bin
+    fi
+}

@@ -9,7 +9,21 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-11, at milestone **1.4.19** (the drop that
+Last audited: 2026-10-11, at milestone **1.5.0** (the
+release-engineering pass — public **v1.0.0**: the version decision
+itself [0.0.1 retired, 1.0.0 adopted per docs/versioning.md, suite
+pin moved, SONAME libfdk.so.1 introduced with the standard versioned
+install layout, ABI unchanged at 621 exports]; the packaging tree
+[packaging/: dpkg-deb + rpmbuild + makepkg + abuild + xbps-create,
+five families, no libfdk.a anywhere per the license's 4(d)]; GitHub
+Actions [ci.yml push/PR validation, reusable distro-packages.yml
+docker matrix, release.yml tag → draft release via GITHUB_TOKEN
+with minimal permissions and SHA-pinned actions]; docs/packaging.md
+the full packaging+release reference; the Debian and RPM pipelines
+validated END-TO-END locally [build, package, extraction-based
+graphical smoke under Xvfb], musl compile probe 80/80 — the arch/
+alpine/void pipelines execute on the GitHub runners), building on
+**1.4.19** (the drop that
 landed — the maintainer's live report that real-file-manager drops
 hover fine but never complete; three XDND receiver bugs found and
 pinned: the XdndStatus action atom was always None, which
@@ -82,6 +96,22 @@ was rewritten as the FDK Proprietary License v1.0 (restrictive on the
 toolkit, applications expressly excluded — its Section 5);
 `docs/screenshots.md` now indexes the captured gallery;
 `docs/licensing-policy.md` updated to match.
+
+Same-date **v1.0.0 release-engineering pass** (build system +
+packaging + CI + docs): public version 0.0.1 → 1.0.0 (fdk_version.h
++ its test pin; the Makefile now derives SONAME libfdk.so.1 and
+installs the standard versioned layout libfdk.so.1.0.0 + symlinks;
+fdk.pc/install paths unchanged in spirit — LIBDIR override already
+existed); packaging/ tree with per-distro native recipes (debian
+control+dpkg-deb, fedora spec, arch PKGBUILD, alpine APKBUILD, void
+xbps) + ci/ orchestrators + common/smoke.c public-API smoke app;
+.github/workflows/ (ci, distro-packages, release); docs/packaging.md
+new, versioning.md rewritten as the 1.0.0 decision record, abi-
+policy/build/licensing-policy/README synced. THE CONFIG-STAMP
+FOOTGUN pinned: `make install` after `make release` silently
+rebuilds debug+ASan into the payload — all recipes pin
+FDK_CONFIG=release on install (caught live by the Debian NEEDED
+scan failing on libasan.so.8).
 
 Same-date **license finalization pass** (docs/licensing only — again
 zero toolkit code touched): the license's open decisions were closed
@@ -215,6 +245,19 @@ FemBoyGamerTechGuy, by established handle.
   open-source license.
 - **docs/screenshots.md** — the gallery index for every capture in
   `docs/screenshots/`.
+- **packaging/** — the ONE packaging tree: debian/ (control
+  templates + build-deb.sh + install-test.sh), fedora/ (fdk.spec +
+  scripts), arch/ (PKGBUILD + scripts), alpine/ (APKBUILD +
+  scripts), void/ (xbps template + scripts), ci/ (host-side docker
+  orchestrators per distro + release-notes.sh + common.sh),
+  common/smoke.c (the public-API package smoke test). Do not create
+  packaging metadata anywhere else.
+- **.github/workflows/** — ci.yml (push/PR validation), distro-
+  packages.yml (the reusable docker packaging matrix), release.yml
+  (v-tag → draft GitHub Release via the ephemeral GITHUB_TOKEN,
+  minimal permissions, SHA-pinned actions).
+- **docs/packaging.md** — the packaging/release reference (install
+  per distro, reproduce, runbook, troubleshooting, signing posture).
 
 ### Widget catalog (all SHIPPED, class names from `src/widget/*.c`)
 

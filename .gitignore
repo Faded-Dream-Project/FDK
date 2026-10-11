@@ -21,3 +21,9 @@ core.*
 
 # Local, machine-specific
 compile_commands.json
+
+# Packaging pipeline output (packages, staging trees, verdict markers)
+/dist/
+
+# Local rpmbuild tree (packaging/fedora) — build output, like /build/
+/build-rpm/

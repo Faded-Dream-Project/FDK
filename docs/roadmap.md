@@ -5191,3 +5191,81 @@ FDK_GL_FORCE=1), and verify-exports 621 all green.
 The parity ledger's line moves: DnD receiver marked
 ACTION-FAITHFUL (spec-complete XdndStatus/XdndFinished replies);
 widget-level drop targets remain future work, unchanged.
+
+## 1.5.0 — the release-engineering pass (public v1.0.0)
+
+The maintainer asked for the v1.0.0 release itself: cross-
+distribution packaging, a GitHub Actions release pipeline, and a
+consistent version story — "inspect first, report real results,
+publish nothing unvalidated."
+
+The version decision came first because everything hangs off it:
+the public version moved 0.0.1 → **1.0.0** (the first stable public
+release; the joke is retired with honors in docs/versioning.md,
+which records the decision, the semver contract, and the history —
+including the disambiguation from the 2024 "1.0.0" *milestone*
+label). One source of truth as always: include/fdk/fdk_version.h,
+the suite pin in test_core.c moved with it, and the Makefile now
+derives a real **SONAME** (libfdk.so.1 — previously the .so had
+none and installed as a single unversioned file) with the standard
+versioned layout (libfdk.so.1.0.0 + soname + dev symlinks). The ABI
+is unchanged — verify-exports still counts 621; the SONAME is the
+compatibility *label* for the epoch that Phase 11 froze long ago.
+
+The packaging tree (packaging/) covers five families, each built
+with its distribution's own tools from a pristine tarball:
+dpkg-deb (libfdk1 + fdk-dev, Debian multiarch paths, auto-derived
+Depends from the payload's ELF NEEDED), rpmbuild (a portable spec —
+plain make, no Fedora-only macros — building on AlmaLinux 10 so the
+glibc floor covers RHEL 10 + newer Fedora), makepkg (single-package
+Arch convention), abuild (musl, with the CLI tools moved into
+fdk-dev), and xbps-create (fdk-libs + fdk-devel, with an xbps-src
+template as reference). No libfdk.a anywhere: the license's
+separate-runtime model (4(d)) makes shipping the static archive an
+invitation to the one thing the license forbids — documented in
+every recipe and in docs/packaging.md.
+
+The GitHub Actions layer (.github/workflows/): ci.yml (ubuntu home-
+ground battery + the full matrix on every push/PR), a reusable
+distro-packages.yml (docker-driven per-distro pipelines on GitHub-
+hosted runners — build, native package, clean-container install-
+test: package manager, ldconfig, pkg-config, fdk-theme, a public-
+API smoke app under Xvfb, and removal verification), and release.yml
+(v-tag → same matrix with upload + pristine git-archive source +
+SHA256SUMS + generated notes → **draft** release via the ephemeral
+GITHUB_TOKEN, contents:write granted to the release job alone;
+required targets failing skips the release entirely, optional
+targets failing just shows up as an honestly-missing artifact).
+Actions pinned to full commit SHAs; no caching (a green check must
+mean "this exact source built"), no secrets, fork PRs get the read-
+only token.
+
+The pipeline's first catch was a beauty: the Debian build's NEEDED
+scan failed on libasan.so.8 — the Makefile's config stamp means
+`make install` after `make release` silently rebuilds the payload
+in debug config with sanitizers. Every recipe now pins
+FDK_CONFIG=release on the install line (docs/build.md carries the
+warning for humans). The second catch: ld-linux-x86-64.so.2 in
+NEEDED needed a map entry. The third: fdk_window_set_content
+returns void, not fdk_result — the smoke app now knows.
+
+Verified locally on the staging host (Debian 13, x86_64, no docker
+available there): the full battery (headless + X11 suite green
+three consecutive runs after one confirmed load-flake in
+test_choosers_gui — the flake reproduced once under build load and
+not in three clean re-runs; recorded as maintenance debt, not
+touched), the .deb pipeline END-TO-END including extraction-based
+graphical smoke (SMOKE version=1.0.0, render=cpu, PASS), the .rpm
+pipeline end-to-end via an unprivileged extraction of Debian's
+rpmbuild (spec parses, builds, packages; auto-soname-deps correct;
+extraction smoke PASS), and a musl compile probe (apt-get download
+musl-dev, -nostdinc against its headers: 80 sources, 0 failures) de-
+risking the Alpine target. The arch/alpine/void pipelines execute
+on the GitHub-hosted runners — that is what the runners are FOR,
+and their first real runs are the CI polls after the push.
+
+The ledger's anti-duplication contract extends: packaging/ is the
+ONE packaging tree (docs/packaging.md the ONE packaging doc); do
+not re-create per-distro metadata outside it; the smoke app is
+packaging/common/smoke.c; the version lives ONLY in fdk_version.h
+(+ its test pin).

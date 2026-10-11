@@ -49,6 +49,15 @@ make release PREFIX=/usr
 make CC=clang
 ```
 
+> **Release-config installs:** the configuration stamp (below) means
+> a plain `make install` after `make release` rebuilds in *debug*
+> config — sanitizers and all — before installing. For an optimized
+> install, pin the config on the install invocation too:
+> `make FDK_CONFIG=release install PREFIX=/usr`. The packaging
+> recipes (`packaging/`, `docs/packaging.md`) all do this, and the
+> Debian build fails loudly if a sanitizer runtime ever appears in
+> the payload.
+
 ### Linking an application
 
 After `make install`, applications find FDK through pkg-config:

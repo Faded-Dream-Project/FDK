@@ -14,7 +14,7 @@ developed as part of the
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
-[![Version: 0.0.1](https://img.shields.io/badge/version-0.0.1-blueviolet?style=flat-square)](docs/versioning.md)
+[![Version: 1.0.0](https://img.shields.io/badge/version-1.0.0-blueviolet?style=flat-square)](docs/versioning.md)
 [![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/FemBoyGamerTechGuy/Faded-Dream-dotfiles)
 
 </div>
@@ -29,11 +29,12 @@ layout, text, and theme engines, and FDK-drawn window decorations —
 with no GTK/Qt dependency and a minimal, always-justified dependency
 set (`docs/dependencies.md`).
 
-**Status:** mature development release — all roadmap phases complete,
-ABI frozen (`FDK_ABI_STABLE`, `docs/abi-policy.md`). The public version
-is **0.0.1 on purpose**: the number is a project joke, not a maturity
-signal (`docs/versioning.md`). The phase-by-phase account of what is
-and isn't covered lives in `docs/roadmap.md` and `PROGRESS.md`.
+**Status:** v1.0.0 — the first stable public release. All roadmap
+phases complete, ABI frozen (`FDK_ABI_STABLE`, `docs/abi-policy.md`),
+license finalized, native packages for five distribution families
+built and install-tested by the release pipeline
+(`docs/packaging.md`). The phase-by-phase account of what is and
+isn't covered lives in `docs/roadmap.md` and `PROGRESS.md`.
 
 FDK is **distro-agnostic**: it builds and runs on any modern Linux
 distribution where X11, Wayland, and POSIX are available.
@@ -103,6 +104,19 @@ suite (`docs/testing.md`).
 - `Xvfb`, optionally, to run `make test-x11` without an existing
   desktop session
 
+## Installation
+
+Binary packages (`.deb`, `.rpm`, `.pkg.tar.zst`, `.apk`, `.xbps`)
+for x86_64 are published on the
+[releases page](https://github.com/FemBoyGamerTechGuy/FDK/releases)
+and install with each distribution's own package manager — Debian
+12/13 and Ubuntu 24.04+, the RHEL 10 family and Fedora 42+, Arch,
+Alpine 3.22 (musl), and Void (glibc). Exact per-distribution
+commands, supported-environment matrix, and troubleshooting:
+[`docs/packaging.md`](docs/packaging.md).
+
+Everything else builds from source (below).
+
 ## Building
 
 ```sh
@@ -123,7 +137,7 @@ make FDK_DISABLE_WAYLAND=1   # force an X11-only build
 Release builds, `make install`, and the full command reference are in
 `docs/build.md`.
 
-## Installation and linking
+## Installing from source and linking
 
 ```sh
 make install                      # PREFIX defaults to /usr/local
@@ -242,7 +256,8 @@ Real captured frames from the test rigs — not mockups
 | `docs/threading.md` | UI-thread affinity, worker-thread rules |
 | `docs/performance.md` | The performance baseline harness |
 | `docs/abi-policy.md` | The ABI freeze, struct classification, subclassing decision |
-| `docs/versioning.md` | Why FDK is (and stays) version 0.0.1 |
+| `docs/versioning.md` | The 1.0.0 decision, semver + SONAME policy, and the retired 0.0.1 joke |
+| `docs/packaging.md` | Binary packages per distribution, reproducing builds, the release runbook |
 | `docs/dependencies.md` | Every current and anticipated dependency, justified |
 | `docs/licensing-policy.md` | What licenses are/aren't allowed in, and the audit procedure |
 | `docs/fdk-theme-format.md` | The `.fdk` theme file grammar |

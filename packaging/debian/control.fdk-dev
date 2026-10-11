@@ -1,0 +1,18 @@
+Package: fdk-dev
+Architecture: any
+Section: libdevel
+Priority: optional
+Version: @PKGVER@
+Depends: libfdk1 (= @PKGVER@)
+Recommends: pkg-config
+Homepage: https://github.com/FemBoyGamerTechGuy/FDK
+Description: Faded Dream ToolKit — development files
+ Headers, the pkg-config metadata, the unversioned development
+ symlink, and the fdk-theme / fdk-set / fdk-prefs command-line tools
+ for developing applications against FDK (libfdk1).
+ .
+ Note: the static archive (libfdk.a) is deliberately NOT shipped.
+ Distributing an application with the FDK runtime statically linked
+ or bundled requires separate written authorization under the FDK
+ Proprietary License, Section 4(d); build from source if you need
+ the static archive for local development.

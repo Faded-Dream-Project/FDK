@@ -1,0 +1,75 @@
+# ci.yml — validation builds for pushes to main and pull requests.
+#
+# Two jobs:
+#   build-test       — the project's home-ground full battery on an
+#                      ubuntu runner (both backends compiled, both
+#                      test suites, release + examples, export check)
+#   distro-packages  — the full cross-distribution packaging matrix
+#                      (debian/rpm/arch/alpine/void, build + clean
+#                      install-tests inside pinned containers)
+#
+# No secrets are used anywhere in this workflow: everything runs on
+# the ephemeral GITHUB_TOKEN with contents: read. Pull requests from
+# forks therefore run with a read-only token — untrusted PR code
+# executes only inside ephemeral, throwaway runner VMs and containers
+# with nothing write-enabled to reach.
+#
+# No caching is configured on purpose: every run builds from a clean
+# tree so a green check always means "this exact source builds and
+# passes", never "some cached earlier state did".
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build + test (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libx11-dev libxext-dev zlib1g-dev \
+            libwayland-dev libxkbcommon-dev \
+            libgl1 xvfb fonts-dejavu-core
+
+      - name: Build (debug, sanitizers)
+        run: make
+
+      - name: Headless test suite
+        run: make test
+
+      - name: X11 integration suite (throwaway Xvfb)
+        run: make test-x11
+
+      - name: Wayland integration suite (self-skips without a compositor)
+        run: make test-wayland
+
+      - name: Release build + examples + export surface
+        # One invocation, one config: `make release` followed by plain
+        # `make examples` would silently flip the config stamp back to
+        # debug (sanitizer builds). FDK_CONFIG pinned throughout.
+        run: make FDK_CONFIG=release all examples verify-exports
+
+  distro-packages:
+    name: distro packages
+    uses: ./.github/workflows/distro-packages.yml
+    permissions:
+      contents: read

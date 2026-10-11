@@ -1,0 +1,10 @@
+fdk (@PKGVER@) unstable; urgency=medium
+
+  * Binary package built from the upstream FDK source tree at
+    version @VERSION@. See the upstream repository's docs/packaging.md
+    for the packaging pipeline and the exact build environment.
+    Binary packages are built and published by the upstream
+    maintainer (the Licensor) — the distribution channel authorized
+    under the FDK Proprietary License, Section 4(d).
+
+ -- FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>  @DATE@

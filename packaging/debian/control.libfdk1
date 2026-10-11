@@ -1,0 +1,20 @@
+Package: libfdk1
+Architecture: any
+Section: libs
+Priority: optional
+Version: @PKGVER@
+Depends: @RUNTIME_DEPS@
+Recommends: libgl1
+Homepage: https://github.com/FemBoyGamerTechGuy/FDK
+Description: Faded Dream ToolKit — native GUI toolkit runtime (X11 and Wayland)
+ FDK is a general-purpose native C GUI toolkit for modern Linux
+ desktops: native X11 and Wayland backends talking directly to Xlib
+ and libwayland-client, a damage-tracked software rasterizer with an
+ optional GPU present lane, its own widget, layout, text, and theme
+ engines, and FDK-drawn window decorations.
+ .
+ This package carries the FDK runtime: the shared library and the
+ ten shipped theme faces. Applications built with FDK are governed
+ by their authors' own licenses (see the FDK Proprietary License,
+ Section 5); the runtime itself is installed separately by the end
+ user per its Section 4(d).

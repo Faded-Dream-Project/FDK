@@ -1,0 +1,75 @@
+# distro-packages.yml — the reusable cross-distribution packaging job.
+#
+# Called by ci.yml (validation, no upload) and release.yml (upload).
+# Each matrix entry runs on its own GitHub-hosted Ubuntu runner and
+# drives the whole pipeline through the pinned target-distribution
+# container image via docker:
+#
+#   1. build + full test battery inside the target distro container
+#   2. native package build with the target distro's own tools
+#      (dpkg-deb / rpmbuild / makepkg / abuild / xbps-create)
+#   3. install-test in CLEAN containers of every supported target
+#      for that family (native package manager, ldconfig, pkg-config,
+#      the shipped CLI tool, a compile+run smoke test under Xvfb,
+#      and removal verification)
+#
+# alpine and void are marked optional until their pipelines have
+# proven stable: a failure there does not block a release, and the
+# release notes are generated from the artifacts that actually
+# exist — a missing target is reported as unavailable, never claimed.
+#
+# All steps run with the ephemeral GITHUB_TOKEN (contents: read
+# only); artifact upload uses the runner's runtime token, not a
+# repository credential.
+
+name: distro-packages
+
+on:
+  workflow_call:
+    inputs:
+      upload:
+        description: Upload the built packages as workflow artifacts
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  package:
+    name: ${{ matrix.id }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: debian
+            script: debian.sh
+            optional: false
+          - id: rpm
+            script: fedora.sh
+            optional: false
+          - id: arch
+            script: arch.sh
+            optional: false
+          - id: alpine
+            script: alpine.sh
+            optional: true
+          - id: void
+            script: void.sh
+            optional: true
+    continue-on-error: ${{ matrix.optional }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build and install-test (${{ matrix.id }})
+        run: sh packaging/ci/${{ matrix.script }}
+
+      - name: Upload packages
+        if: ${{ inputs.upload }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pkg-${{ matrix.id }}
+          path: dist/
+          if-no-files-found: error
