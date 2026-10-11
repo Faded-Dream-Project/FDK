@@ -231,7 +231,7 @@ static void base_paint(fdk_widget *widget, fdk_surface *surface,
         }
     }
     if (widget->corner_radius > 0) {
-        fdk_surface_fill_rounded_rect(surface, bounds,
+        fdk_surface_fill_rounded_rect_aa(surface, bounds,
                                       widget->corner_radius, bg);
     } else {
         fdk_surface_fill_rect(surface, bounds, bg);

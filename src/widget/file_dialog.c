@@ -1893,9 +1893,9 @@ static void pbar_paint(fdk_widget *w, fdk_surface *surface,
     /* Field chrome: the flat-entry pair, rounded at the entry radius. */
     fdk_i32 radius =
         fdk_theme_get_metric(NULL, FDK_TM_ENTRY_CORNER_RADIUS);
-    fdk_surface_fill_rounded_rect(surface, bounds, radius,
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, radius,
                                   fdk__pal_entry());
-    fdk_surface_draw_rounded_rect(surface, bounds, radius,
+    fdk_surface_draw_rounded_rect_aa(surface, bounds, radius,
                                   fdk__pal_entry_border());
 
     if (pb->font == NULL || pb->seg_count == 0) {
@@ -1920,7 +1920,7 @@ static void pbar_paint(fdk_widget *w, fdk_surface *surface,
             fdk_rect pill = {bounds.x + x - 4, bounds.y + 2,
                              cw + 8, bounds.height - 4};
             if (pill.width > 0 && pill.height > 0) {
-                fdk_surface_fill_rounded_rect(
+                fdk_surface_fill_rounded_rect_aa(
                     surface, pill, radius > 2 ? radius - 2 : 2,
                     fdk__pal_row_hover());
             }

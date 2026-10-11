@@ -599,6 +599,21 @@ fdk_result fdk_scrollview_set_bar_mode(fdk_widget *scrollview,
                                        fdk_scroll_bar_mode mode);
 fdk_scroll_bar_mode fdk_scrollview_get_bar_mode(fdk_widget *scrollview);
 
+/* 1.4.17: vertical-only scrolling. The content is ARRANGED at the
+ * viewport's width (never wider), the horizontal bar never appears,
+ * and scroll_x is pinned to 0 — a tall column inside a box layout
+ * keeps the box's cross-clamp behavior it had before adoption,
+ * instead of growing a horizontal scroll range from its natural
+ * width. This is the recipe the internal List has always used; it
+ * is how a whole window's content (example 04's catalog) becomes a
+ * vertically scrolling page: give the scrollview a constrained slot
+ * (size limits or a fixed one — a box never assigns LESS than a
+ * child's natural along-axis size) and let the vertical axis carry
+ * the overflow. Idempotent; re-arranges and re-clamps on change. */
+fdk_result fdk_scrollview_set_vertical_only(fdk_widget *scrollview,
+                                            bool vertical_only);
+bool fdk_scrollview_get_vertical_only(fdk_widget *scrollview);
+
 /* Adopts `content` as the scrollable child (reparented, replacing
  * and destroying any previous content). NULL clears (and destroys)
  * the current content. */

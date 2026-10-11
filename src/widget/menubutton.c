@@ -198,7 +198,7 @@ static void mbtn_paint(fdk_widget *w, fdk_surface *surface,
      * catalog Button — ROUNDED/CIRCLE/SQUARE from the theme. */
     fdk_i32 radius = fdk__button_shape_radius(bounds.width,
                                               bounds.height);
-    fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, radius, fill);
 
     /* Focus ring (the button's themed rule). */
     if ((w->flags & FDK_WF_FOCUSED) != 0 && !disabled) {
@@ -208,7 +208,7 @@ static void mbtn_paint(fdk_widget *w, fdk_surface *surface,
                          bounds.height - fw * 2};
         if (ring.width > 0 && ring.height > 0) {
             fdk_i32 ring_r = radius > fw ? radius - fw : 0;
-            fdk_surface_draw_rounded_rect(surface, ring, ring_r,
+            fdk_surface_draw_rounded_rect_aa(surface, ring, ring_r,
                                           fdk__pal_focus_ring());
         }
     }

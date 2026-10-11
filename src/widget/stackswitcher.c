@@ -240,7 +240,7 @@ static void sw_paint(fdk_widget *w, fdk_surface *surface,
              * accent ink, no fade on state. */
             fdk_color fill = disabled ? fdk__pal_control_disabled()
                                       : fdk__pal_accent();
-            fdk_surface_fill_rounded_rect(surface, pill,
+            fdk_surface_fill_rounded_rect_aa(surface, pill,
                                           SWITCHER_PILL_H / 2, fill);
         } else if (!disabled && sw->fades[i].t > 0.0f) {
             /* The hover whisper: ROW_HOVER blended by the fade. */
@@ -248,7 +248,7 @@ static void sw_paint(fdk_widget *w, fdk_surface *surface,
             fdk_f32 t = sw->fades[i].t;
             fdk_color fill = {base.r, base.g, base.b, base.a * t};
             if (fill.a > 0.0f) {
-                fdk_surface_fill_rounded_rect(surface, pill,
+                fdk_surface_fill_rounded_rect_aa(surface, pill,
                                               SWITCHER_PILL_H / 2,
                                               fill);
             }

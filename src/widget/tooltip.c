@@ -204,8 +204,8 @@ static void tip_paint(fdk_widget *canvas, fdk_surface *surface,
     fdk_color fg = fdk_theme_get_color(NULL, FDK_TK_TOOLTIP_TEXT);
     fdk_i32 radius =
         fdk_theme_get_metric(NULL, FDK_TM_TOOLTIP_CORNER_RADIUS);
-    fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
-    fdk_surface_draw_rounded_rect(surface, bounds, radius, border);
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, radius, fill);
+    fdk_surface_draw_rounded_rect_aa(surface, bounds, radius, border);
 
     fdk_text_line *lines = NULL;
     size_t n = 0;

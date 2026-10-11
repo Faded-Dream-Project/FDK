@@ -33,6 +33,7 @@
 #include "fdk/fdk_animation.h"
 
 #include "widget/widget_internal.h"
+#include "widget/widgets_internal.h" /* fdk_hover_fade + the arm (1.4.17) */
 
 #include <assert.h>
 #include <stdio.h>
@@ -479,6 +480,45 @@ static void test_concurrent(void) {
            "independent completions, one pump for all)\n");
 }
 
+/* 1.4.17 regression: the shared hover fade's STORED handle must be
+ * cleared when the flight ends — the animation engine reaps
+ * finished handles after its ~1 s zombie grace, and hover events
+ * can be minutes apart. Pre-fix, the stale pointer sat in the fade
+ * struct across the reaping and the NEXT arm's
+ * fdk_animation_cancel() read freed memory (found live by ASan in
+ * the settings demo: hover a switcher pill, wait, hover again). */
+static void test_hover_fade_reap_cycle(void) {
+    g_time = 0;
+    fdk__animation_set_test_clock(0);
+    fdk_widget *root = fresh_root();
+    fdk_hover_fade f = { .t = 0.0f, .from = 0.0f, .target = 0.0f,
+                         .anim = NULL };
+
+    /* Hover: the fade flies 0 -> 1 and completes. */
+    fdk__hover_fade_arm(root, &f, true);
+    assert(f.anim != NULL);
+    at(200); /* past the 120 ms flight */
+    assert(f.t == 1.0f);
+    assert(f.anim == NULL); /* done cleared the stored handle */
+
+    /* Pump the engine past GRACE_PUMPS so the zombie is genuinely
+     * FREED — the exact window the ASan report opened. */
+    for (int i = 0; i < 80; i++) {
+        at(216 + i * 16);
+    }
+
+    /* The second hover: pre-fix, this cancel read freed memory. */
+    fdk__hover_fade_arm(root, &f, false);
+    assert(f.anim != NULL);
+    at(2000); /* the leave flight lands */
+    assert(f.t == 0.0f);
+    assert(f.anim == NULL);
+
+    fdk_widget_destroy(root);
+    printf("[ok] animation: hover-fade handle survives zombie "
+           "reaping (done clears the stored flight)\n");
+}
+
 int main(void) {
     test_easing();
     test_lifecycle();
@@ -486,6 +526,7 @@ int main(void) {
     test_cancel();
     test_tick_cancels_self();
     test_restart_from_done();
+    test_hover_fade_reap_cycle();
     test_destroy_detach();
     test_argument_safety();
     test_concurrent();

@@ -216,12 +216,12 @@ static void slider_paint(fdk_widget *w, fdk_surface *surface,
     }
     if (vert) {
         if (track.height > 0) {
-            fdk_surface_fill_rounded_rect(surface, track,
+            fdk_surface_fill_rounded_rect_aa(surface, track,
                                           SLIDER_TRACK_H / 2,
                                           fdk__pal_track());
         }
     } else if (track.width > 0) {
-        fdk_surface_fill_rounded_rect(surface, track, SLIDER_TRACK_H / 2,
+        fdk_surface_fill_rounded_rect_aa(surface, track, SLIDER_TRACK_H / 2,
                                       fdk__pal_track());
     }
     /* Filled run from the minimum to the thumb: horizontal runs
@@ -239,7 +239,7 @@ static void slider_paint(fdk_widget *w, fdk_surface *surface,
         }
         fdk_rect fill = {track.x, top, track.width, bottom - top};
         if (fill.height > 0) {
-            fdk_surface_fill_rounded_rect(surface, fill,
+            fdk_surface_fill_rounded_rect_aa(surface, fill,
                                           SLIDER_TRACK_H / 2,
                                           fdk__pal_accent());
         }
@@ -248,7 +248,7 @@ static void slider_paint(fdk_widget *w, fdk_surface *surface,
                          (tpos + SLIDER_THUMB_W / 2) - track.x,
                          track.height};
         if (fill.width > 0) {
-            fdk_surface_fill_rounded_rect(surface, fill,
+            fdk_surface_fill_rounded_rect_aa(surface, fill,
                                           SLIDER_TRACK_H / 2,
                                           fdk__pal_accent());
         }
@@ -334,13 +334,13 @@ static void slider_paint(fdk_widget *w, fdk_surface *surface,
                            bounds.y + c_cross - SLIDER_THUMB_H / 2,
                            SLIDER_THUMB_W, SLIDER_THUMB_H};
     }
-    fdk_surface_fill_rounded_rect(surface, thumb, SLIDER_THUMB_W / 2,
+    fdk_surface_fill_rounded_rect_aa(surface, thumb, SLIDER_THUMB_W / 2,
                                   thumb_col);
     if ((w->flags & FDK_WF_FOCUSED) != 0) {
         fdk_rect ring = { thumb.x + 1, thumb.y + 1, thumb.width - 2,
                           thumb.height - 2 };
         if (ring.width > 0 && ring.height > 0) {
-            fdk_surface_draw_rounded_rect(surface, ring,
+            fdk_surface_draw_rounded_rect_aa(surface, ring,
                                           (SLIDER_THUMB_W / 2) - 1,
                                           fdk__pal_accent());
         }

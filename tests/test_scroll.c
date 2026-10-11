@@ -723,6 +723,84 @@ static void test_overlay_bars(void) {
            "round-trip, no phantom bars on fitting axes\n");
 }
 
+/* ---- vertical-only scrolling (1.4.17) ---- */
+
+static void test_vertical_only(void) {
+    assert(fdk_scrollview_set_vertical_only(NULL, true) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    fdk_widget *root = fresh_root();
+    fdk_widget *sv = NULL;
+    assert(fdk_ok(fdk_scrollview_create(root, &sv)));
+    assert(fdk_scrollview_get_vertical_only(sv) == false);
+
+    fdk_widget *content = make_content(sv, 500, 900,
+                                       (fdk_color){1, 0, 0, 1});
+    assert(fdk_ok(fdk_scrollview_set_content(sv, content)));
+    fdk_rect r = { 0, 0, 200, 150 };
+    fdk_widget_set_bounds(sv, r);
+
+    /* Pre-state: both axes overflow (the L-shape math). */
+    (void)fdk_scrollview_scroll_to(sv, 10000, 10000);
+    fdk_i32 sx = -1, sy = -1;
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sx > 0 && sy > 0);
+
+    /* Engage: the horizontal range collapses, any live x offset
+     * dies, and the content is arranged at the VIEWPORT's width
+     * (the cross-clamp look a plain box used to give it) instead of
+     * its 500-px natural. */
+    assert(fdk_ok(fdk_scrollview_set_vertical_only(sv, true)));
+    assert(fdk_scrollview_get_vertical_only(sv) == true);
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sx == 0);
+    assert(sy > 0); /* the vertical range is untouched */
+    fdk_i32 vw = -1, vh = -1;
+    fdk__scrollview_viewport(sv, &vw, &vh);
+    fdk_rect cb = fdk_widget_get_bounds(content);
+    assert(cb.width == vw);
+    assert(cb.height == 900);
+
+    /* The horizontal axis is dead to PROGRAMMATIC scrolls too (the
+     * clamp range is zero), while the vertical one still moves —
+     * both instantly, no flight to settle. */
+    assert(fdk_ok(fdk_scrollview_scroll_to(sv, 10000, 0)));
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sx == 0 && sy == 0);
+    assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 10000)));
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sx == 0 && sy > 0);
+    assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 0)));
+
+    /* And to the WHEEL: a horizontal notch contributes nothing (the
+     * flight retargets through the same zero clamp), a vertical one
+     * still glides. Wheel-down is delta -1 (the platform sign). */
+    fdk_event_data hwheel = ev_scroll(100, 100, 5.0f, 0.0f);
+    (void)fdk_widget_tree_handle_event(root, &hwheel);
+    fdk_event_data vwheel = ev_scroll(100, 100, 0.0f, -1.0f);
+    (void)fdk_widget_tree_handle_event(root, &vwheel);
+    settle();
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sx == 0 && sy > 0);
+
+    /* Idempotent; disengage restores the horizontal range. */
+    assert(fdk_scrollview_set_vertical_only(sv, true) == FDK_OK);
+    assert(fdk_ok(fdk_scrollview_set_vertical_only(sv, false)));
+    assert(fdk_scrollview_get_vertical_only(sv) == false);
+    (void)fdk_scrollview_scroll_to(sv, 10000, 10000);
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
+    assert(sx > 0);
+
+    /* Type checks on a non-scrollview. */
+    assert(fdk_scrollview_set_vertical_only(content, true) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_scrollview_get_vertical_only(content) == false);
+
+    fdk_widget_destroy(root);
+    printf("[ok] scrollview: vertical-only (content at viewport "
+           "width, horizontal range collapses, vertical intact)\n");
+}
+
 int main(void) {
     test_basics();
     test_paint_clipping();
@@ -732,6 +810,7 @@ int main(void) {
     test_adoption();
     test_hit_testing();
     test_overlay_bars();
+    test_vertical_only();
     printf("all scrollview tests passed\n");
     return 0;
 }

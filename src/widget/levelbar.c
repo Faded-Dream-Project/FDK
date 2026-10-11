@@ -87,11 +87,11 @@ static void levelbar_paint(fdk_widget *w, fdk_surface *surface,
                           bounds.y + (bounds.height - h) / 2,
                           bounds.width, h};
         if (track.width > 0 && track.height > 0) {
-            fdk_surface_fill_rounded_rect(surface, track, h / 2, off);
+            fdk_surface_fill_rounded_rect_aa(surface, track, h / 2, off);
             fdk_rect run = track;
             run.width = (fdk_i32)((fdk_f32)track.width * frac + 0.5f);
             if (run.width > 0) {
-                fdk_surface_fill_rounded_rect(surface, run, h / 2, on);
+                fdk_surface_fill_rounded_rect_aa(surface, run, h / 2, on);
             }
         }
         return;
@@ -124,7 +124,7 @@ static void levelbar_paint(fdk_widget *w, fdk_surface *surface,
         if (block.x + block.width > bounds.x + bounds.width) {
             break; /* squeezed bounds: draw what honestly fits */
         }
-        fdk_surface_fill_rounded_rect(surface, block,
+        fdk_surface_fill_rounded_rect_aa(surface, block,
                                       LEVELBAR_BLOCK_H / 2,
                                       (i < lit) ? on : off);
     }

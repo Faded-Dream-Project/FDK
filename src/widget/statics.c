@@ -194,8 +194,8 @@ void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
         /* Tabbed folder: the tab spans the top-left, the body below
          * — outline + soft fill, rounded 2. */
         fdk_rect body = {x + 1, cy + 4, 14, 10};
-        fdk_surface_fill_rounded_rect(surface, body, 2, soft);
-        fdk_surface_draw_rounded_rect(surface, body, 2, ink);
+        fdk_surface_fill_rounded_rect_aa(surface, body, 2, soft);
+        fdk_surface_draw_rounded_rect_aa(surface, body, 2, ink);
         fdk_rect tab = {x + 1, cy + 2, 6, 2};
         fdk_surface_fill_rect(surface, tab, ink);
         break;
@@ -215,8 +215,8 @@ void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
     case FDK_ROW_ICON_DRIVE: {
         /* Slab: rounded outline + soft fill + the activity LED. */
         fdk_rect slab = {x + 2, cy + 4, 12, 8};
-        fdk_surface_fill_rounded_rect(surface, slab, 3, soft);
-        fdk_surface_draw_rounded_rect(surface, slab, 3, ink);
+        fdk_surface_fill_rounded_rect_aa(surface, slab, 3, soft);
+        fdk_surface_draw_rounded_rect_aa(surface, slab, 3, ink);
         fdk_surface_fill_circle(surface, x + 11, cy + 8, 1, ink);
         break;
     }
@@ -268,6 +268,28 @@ static void fdk__hover_fade_tick(fdk_animation *anim, double eased,
      * this tick owns nothing but the blend). */
 }
 
+/* 1.4.17: the done callback is the whole fix for the reaped-handle
+ * read. The fade struct stores its flight's handle so a later arm
+ * can retarget-from-live — but the animation engine reaps finished
+ * handles after its ~1 s zombie grace, and hover events can be
+ * MINUTES apart. Without clearing here, the stored handle outlives
+ * its allocation and the next arm's fdk_animation_cancel() reads
+ * freed memory (found live by ASan in the settings demo: hover a
+ * switcher pill, wait, hover again). Every other stored-handle
+ * owner in the tree (revealer, expander, the scrollbar fade and
+ * the scroll flight) already clears its pointer in its done
+ * callback — the shared fade now follows the same contract: the
+ * handle is stored only while the flight is RUNNING, and running
+ * animations are never freed out from under a caller. */
+static void fdk__hover_fade_done(fdk_animation *anim, bool finished,
+                                 void *user) {
+    (void)finished; /* cancel and completion both land the clear */
+    fdk_hover_fade *f = user;
+    if (f->anim == anim) {
+        f->anim = NULL;
+    }
+}
+
 void fdk__hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
                          bool entering) {
     if (f->anim != NULL) {
@@ -280,7 +302,8 @@ void fdk__hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
     }
     f->from = f->t;
     f->anim = fdk_widget_animate(w, HOVER_FADE_MS, FDK_EASE_QUAD_OUT,
-                                 fdk__hover_fade_tick, NULL, f);
+                                 fdk__hover_fade_tick,
+                                 fdk__hover_fade_done, f);
 }
 
 /* ---- Label ---- */
@@ -963,7 +986,7 @@ static void progress_paint(fdk_widget *w, fdk_surface *surface,
     if (r > 8) {
         r = 8;
     }
-    fdk_surface_fill_rounded_rect(surface, bounds, r,
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, r,
                                   ((w->flags & FDK_WF_ENABLED) != 0) ? fdk__pal_track()
                                              : fdk__pal_control_disabled());
     if (p->indeterminate) {
@@ -991,7 +1014,7 @@ static void progress_paint(fdk_widget *w, fdk_surface *surface,
             if (br > (bx1 - bx0) / 2) {
                 br = (bx1 - bx0) / 2;
             }
-            fdk_surface_fill_rounded_rect(surface, block, br,
+            fdk_surface_fill_rounded_rect_aa(surface, block, br,
                                           fdk__pal_accent());
         }
         return;
@@ -1022,7 +1045,7 @@ static void progress_paint(fdk_widget *w, fdk_surface *surface,
     if (fill_r > fill_w / 2) {
         fill_r = fill_w / 2;
     }
-    fdk_surface_fill_rounded_rect(surface, fill, fill_r, fdk__pal_accent());
+    fdk_surface_fill_rounded_rect_aa(surface, fill, fill_r, fdk__pal_accent());
 }
 
 /* ---- a11y ---- */
@@ -1256,14 +1279,14 @@ static void frame_paint(fdk_widget *w, fdk_surface *surface,
      * Children paint on top afterwards (normal tree walk). */
     if (w->background.a > 0.0f) {
         if (w->corner_radius > 0) {
-            fdk_surface_fill_rounded_rect(surface, bounds,
+            fdk_surface_fill_rounded_rect_aa(surface, bounds,
                                           w->corner_radius,
                                           w->background);
         } else {
             fdk_surface_fill_rect(surface, bounds, w->background);
         }
     }
-    fdk_surface_draw_rounded_rect(surface, bounds, 8, fdk__pal_border());
+    fdk_surface_draw_rounded_rect_aa(surface, bounds, 8, fdk__pal_border());
 
     if (f->font != NULL && f->title != NULL) {
         fdk_font_metrics fm;

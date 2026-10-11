@@ -197,7 +197,7 @@ static void expander_paint(fdk_widget *w, fdk_surface *surface,
         fdk_rect pill = {bounds.x, bounds.y, bounds.width, header};
         fdk_color fill = e->pressed ? fdk__pal_control_pressed()
                                     : fdk__pal_row_hover();
-        fdk_surface_fill_rounded_rect(surface, pill, 6, fill);
+        fdk_surface_fill_rounded_rect_aa(surface, pill, 6, fill);
     }
 
     /* The disclosure chevron: pointing right when collapsed,
@@ -253,7 +253,7 @@ static void expander_paint(fdk_widget *w, fdk_surface *surface,
         fdk_rect ring = {bounds.x + fw, bounds.y + fw,
                          bounds.width - fw * 2, header - fw * 2};
         if (ring.width > 0 && ring.height > 0) {
-            fdk_surface_draw_rounded_rect(surface, ring, 6,
+            fdk_surface_draw_rounded_rect_aa(surface, ring, 6,
                                           fdk__pal_focus_ring());
         }
     }

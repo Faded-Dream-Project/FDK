@@ -1027,10 +1027,10 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
      * Radius 0 degenerates to the plain square chrome. */
     fdk_i32 menu_r =
         fdk_theme_get_metric(NULL, FDK_TM_MENU_CORNER_RADIUS);
-    fdk_surface_fill_rounded_rect(surface, bounds, menu_r,
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, menu_r,
                                   fdk__pal_menu_bg());
     fdk_color border = fdk__pal_border();
-    fdk_surface_draw_rounded_rect(surface, bounds, menu_r, border);
+    fdk_surface_draw_rounded_rect_aa(surface, bounds, menu_r, border);
 
     fdk_i32 yy = bounds.y;
     for (size_t i = 0; i < v->model->count; i++) {
@@ -1073,7 +1073,7 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
                     fdk_color base = fdk__pal_row_hover();
                     fdk_color fill = {base.r, base.g, base.b,
                                       base.a * t};
-                    fdk_surface_fill_rounded_rect(surface, pill, pill_r,
+                    fdk_surface_fill_rounded_rect_aa(surface, pill, pill_r,
                                                   fill);
                 }
             }

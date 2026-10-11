@@ -359,9 +359,9 @@ static void iv_cell_paint(fdk_widget *w, fdk_surface *surface,
     /* Selected cells: the selection tint + a hairline accent
      * border; the focused view's cursor cell gets the ring. */
     if (item->selected) {
-        fdk_surface_fill_rounded_rect(surface, bounds, 6,
+        fdk_surface_fill_rounded_rect_aa(surface, bounds, 6,
                                       fdk__pal_selection());
-        fdk_surface_draw_rounded_rect(surface, bounds, 6,
+        fdk_surface_draw_rounded_rect_aa(surface, bounds, 6,
                                       fdk__pal_accent());
     }
 

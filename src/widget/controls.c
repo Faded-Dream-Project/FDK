@@ -224,7 +224,7 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
     fdk_i32 radius = fdk__button_shape_radius(bounds.width,
                                                bounds.height);
     if (fill.a > 0.0f) {
-        fdk_surface_fill_rounded_rect(surface, bounds, radius, fill);
+        fdk_surface_fill_rounded_rect_aa(surface, bounds, radius, fill);
     }
 
     /* Focus ring: a themed-color, themed-width rounded outline just
@@ -238,7 +238,7 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
                          bounds.height - fw * 2};
         if (ring.width > 0 && ring.height > 0) {
             fdk_i32 ring_r = radius > fw ? radius - fw : 0;
-            fdk_surface_draw_rounded_rect(surface, ring, ring_r,
+            fdk_surface_draw_rounded_rect_aa(surface, ring, ring_r,
                                           fdk__pal_focus_ring());
         }
     }
@@ -691,7 +691,7 @@ static void toggle_paint(fdk_widget *w, fdk_surface *surface,
                               ? fdk__pal_control_disabled()
                               : (c->checked ? fdk__pal_accent()
                                             : fdk__pal_track());
-    fdk_surface_fill_rounded_rect(surface, track, r, track_col);
+    fdk_surface_fill_rounded_rect_aa(surface, track, r, track_col);
 
     /* Knob: left when off, right when on. */
     fdk_i32 knob_x = c->checked
@@ -701,7 +701,7 @@ static void toggle_paint(fdk_widget *w, fdk_surface *surface,
         knob_x = track.x; /* degenerate tiny track */
     }
     fdk_i32 knob_y = track_y + (TOGGLE_TRACK_H - TOGGLE_KNOB) / 2;
-    fdk_surface_fill_circle(surface,
+    fdk_surface_fill_circle_aa(surface,
                             knob_x + TOGGLE_KNOB / 2,
                             knob_y + TOGGLE_KNOB / 2, TOGGLE_KNOB / 2,
                             (fdk_color){0.92f, 0.93f, 0.96f, 1.0f});
@@ -817,7 +817,7 @@ static void checkbox_paint(fdk_widget *w, fdk_surface *surface,
                                        : blend_colors(fdk__pal_control(),
                                                       fdk__pal_control_hover(),
                                                       c->fade.t));
-    fdk_surface_fill_rounded_rect(surface, box, 4, fill);
+    fdk_surface_fill_rounded_rect_aa(surface, box, 4, fill);
 
     if (c->checked) {
         /* Check mark: two strokes inside the box. */
@@ -933,14 +933,14 @@ static void radio_paint(fdk_widget *w, fdk_surface *surface,
                          ? fdk__pal_control_disabled()
                          : (c->hovering ? fdk__pal_control_hover()
                                         : fdk__pal_control());
-    fdk_surface_fill_circle(surface, extent.x + RADIO_EXTENT / 2,
+    fdk_surface_fill_circle_aa(surface, extent.x + RADIO_EXTENT / 2,
                             extent.y + RADIO_EXTENT / 2,
                             RADIO_EXTENT / 2, ring);
 
     if (c->checked) {
         /* Inner dot, inset by a third of the extent. */
         fdk_i32 dot_r = RADIO_EXTENT / 2 - RADIO_EXTENT / 3;
-        fdk_surface_fill_circle(
+        fdk_surface_fill_circle_aa(
             surface, extent.x + RADIO_EXTENT / 2,
             extent.y + RADIO_EXTENT / 2, dot_r,
             ((w->flags & FDK_WF_ENABLED) == 0 ? fdk__pal_text_disabled()

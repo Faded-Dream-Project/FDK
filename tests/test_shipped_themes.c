@@ -164,6 +164,102 @@ static void test_pink_rave(void) {
            "accent and band\n");
 }
 
+static void test_amoled_void(void) {
+    fdk_theme *t = load_stem("amoled-void");
+    assert(strcmp(fdk_theme_name(t), "AMOLED Void") == 0);
+
+    /* The pure-black world on a whisper-violet ramp. */
+    assert_channel(fdk_theme_get_color(t, FDK_TK_WINDOW_BACKGROUND),
+                   0, 0, 0, "void window (true black)");
+    assert_channel(fdk_theme_get_color(t, FDK_TK_CONTROL_BACKGROUND),
+                   14, 13, 18, "void control (whisper violet)");
+    assert_channel(fdk_theme_get_color(t, FDK_TK_ACCENT),
+                   124, 58, 237, "void accent (electric violet)");
+    /* The hairline band with the violet rule. */
+    assert_channel(fdk_theme_get_color(t, FDK_TK_TITLEBAR_BACKGROUND),
+                   5, 5, 10, "void band");
+    assert_channel(fdk_theme_get_color(t, FDK_TK_TITLEBAR_BORDER),
+                   91, 54, 184, "void band rule (violet)");
+    /* Square corners, slim band. */
+    assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_SHAPE) == 2);
+    assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_CORNER_RADIUS) == 0);
+    assert(fdk_theme_get_metric(t, FDK_TM_TITLE_BAR_HEIGHT) == 32);
+    fdk_theme_destroy(t);
+    printf("[ok] amoled-void.fdk: true-black world, electric-violet "
+           "family, square corners\n");
+}
+
+static void test_catppuccin_pair(void) {
+    /* Mocha: the official v0.4.5 palette — crust chrome, surface0
+     * controls, mauve accent. */
+    fdk_theme *mo = load_stem("catppuccin-mocha");
+    assert(strcmp(fdk_theme_name(mo), "Catppuccin Mocha") == 0);
+    assert_channel(fdk_theme_get_color(mo, FDK_TK_WINDOW_BACKGROUND),
+                   30, 30, 46, "mocha window (base #1E1E2E)");
+    assert_channel(fdk_theme_get_color(mo, FDK_TK_CONTROL_BACKGROUND),
+                   49, 50, 68, "mocha control (surface0)");
+    assert_channel(fdk_theme_get_color(mo, FDK_TK_ACCENT),
+                   203, 166, 247, "mocha accent (mauve)");
+    assert_channel(fdk_theme_get_color(mo, FDK_TK_TITLEBAR_BACKGROUND),
+                   17, 17, 27, "mocha band (crust)");
+    assert_channel(fdk_theme_get_color(mo, FDK_TK_TITLEBAR_BORDER),
+                   49, 50, 68, "mocha band rule (surface0)");
+    assert(fdk_theme_get_metric(mo, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
+    fdk_theme_destroy(mo);
+
+    /* Latte: the light twin — mantle chrome, base controls, the
+     * same mauve accent voice. */
+    fdk_theme *la = load_stem("catppuccin-latte");
+    assert(strcmp(fdk_theme_name(la), "Catppuccin Latte") == 0);
+    assert_channel(fdk_theme_get_color(la, FDK_TK_WINDOW_BACKGROUND),
+                   230, 233, 239, "latte window (#E6E9EF)");
+    assert_channel(fdk_theme_get_color(la, FDK_TK_CONTROL_BACKGROUND),
+                   239, 241, 245, "latte control (base)");
+    assert_channel(fdk_theme_get_color(la, FDK_TK_ACCENT),
+                   136, 57, 239, "latte accent (mauve)");
+    assert_channel(fdk_theme_get_color(la, FDK_TK_TITLEBAR_BACKGROUND),
+                   220, 224, 232, "latte band (mantle)");
+    assert_channel(fdk_theme_get_color(la, FDK_TK_TITLEBAR_BORDER),
+                   188, 192, 204, "latte band rule");
+    assert(fdk_theme_get_metric(la, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
+    fdk_theme_destroy(la);
+    printf("[ok] catppuccin-mocha.fdk + catppuccin-latte.fdk: the "
+           "official pair, dark crust chrome and light mantle chrome\n");
+}
+
+static void test_nordic_frost_and_solar_flare(void) {
+    /* Nord: the official sixteen, nord8 cyan as the only voice. */
+    fdk_theme *nf = load_stem("nordic-frost");
+    assert(strcmp(fdk_theme_name(nf), "Nordic Frost") == 0);
+    assert_channel(fdk_theme_get_color(nf, FDK_TK_WINDOW_BACKGROUND),
+                   46, 52, 64, "nord window (#2E3440)");
+    assert_channel(fdk_theme_get_color(nf, FDK_TK_CONTROL_BACKGROUND),
+                   59, 66, 82, "nord control (#3B4252)");
+    assert_channel(fdk_theme_get_color(nf, FDK_TK_ACCENT),
+                   136, 192, 208, "nord accent (nord8 frost cyan)");
+    assert_channel(fdk_theme_get_color(nf, FDK_TK_TITLEBAR_BORDER),
+                   67, 76, 94, "nord band rule (#434C5E)");
+    assert(fdk_theme_get_metric(nf, FDK_TM_BUTTON_CORNER_RADIUS) == 4);
+    assert(fdk_theme_get_metric(nf, FDK_TM_TITLE_BAR_HEIGHT) == 28);
+    fdk_theme_destroy(nf);
+
+    /* Solar Flare: midnight navy under amber energy. */
+    fdk_theme *sf = load_stem("solar-flare");
+    assert(strcmp(fdk_theme_name(sf), "Solar Flare") == 0);
+    assert_channel(fdk_theme_get_color(sf, FDK_TK_WINDOW_BACKGROUND),
+                   11, 16, 32, "flare window (#0B1020)");
+    assert_channel(fdk_theme_get_color(sf, FDK_TK_CONTROL_BACKGROUND),
+                   21, 29, 49, "flare control (#151D31)");
+    assert_channel(fdk_theme_get_color(sf, FDK_TK_ACCENT),
+                   255, 176, 32, "flare accent (amber #FFB020)");
+    assert_channel(fdk_theme_get_color(sf, FDK_TK_TITLEBAR_BORDER),
+                   255, 176, 32, "flare band rule (solid amber)");
+    assert(fdk_theme_get_metric(sf, FDK_TM_BUTTON_CORNER_RADIUS) == 10);
+    fdk_theme_destroy(sf);
+    printf("[ok] nordic-frost.fdk + solar-flare.fdk: Nord's cyan "
+           "restraint and the amber flare\n");
+}
+
 static void test_daylight_and_matrix_unchanged(void) {
     /* The 1.4.13 pair: the retune must not have drifted them.
      * daylight is complete (its own values stand alone); matrix is
@@ -196,18 +292,25 @@ static void test_daylight_and_matrix_unchanged(void) {
 }
 
 static void test_folder_enumerates(void) {
-    /* $FDK_THEME_DIR pointed at the folder: all five stems list. */
+    /* $FDK_THEME_DIR pointed at the folder: all ten stems list,
+     * alphabetically (the 1.4.17 polish pass pinned the five faces
+     * the data-only task could not). */
     assert(setenv("FDK_THEME_DIR", g_folder, 1) == 0);
     assert(setenv("XDG_DATA_HOME", "/nonexistent-fdk-shipped", 1) == 0);
     assert(setenv("XDG_DATA_DIRS", "/nonexistent-fdk-shipped", 1) == 0);
     assert(setenv("HOME", "/nonexistent-fdk-shipped", 1) == 0);
 
-    assert(fdk_theme_available_count() == 5);
-    assert(strcmp(fdk_theme_available_name(0), "daylight") == 0);
-    assert(strcmp(fdk_theme_available_name(1), "faded-dream") == 0);
-    assert(strcmp(fdk_theme_available_name(2), "matrix") == 0);
-    assert(strcmp(fdk_theme_available_name(3), "mono-chromatic") == 0);
-    assert(strcmp(fdk_theme_available_name(4), "pink-rave") == 0);
+    assert(fdk_theme_available_count() == 10);
+    assert(strcmp(fdk_theme_available_name(0), "amoled-void") == 0);
+    assert(strcmp(fdk_theme_available_name(1), "catppuccin-latte") == 0);
+    assert(strcmp(fdk_theme_available_name(2), "catppuccin-mocha") == 0);
+    assert(strcmp(fdk_theme_available_name(3), "daylight") == 0);
+    assert(strcmp(fdk_theme_available_name(4), "faded-dream") == 0);
+    assert(strcmp(fdk_theme_available_name(5), "matrix") == 0);
+    assert(strcmp(fdk_theme_available_name(6), "mono-chromatic") == 0);
+    assert(strcmp(fdk_theme_available_name(7), "nordic-frost") == 0);
+    assert(strcmp(fdk_theme_available_name(8), "pink-rave") == 0);
+    assert(strcmp(fdk_theme_available_name(9), "solar-flare") == 0);
 
     /* Internal-name reachability: the quoted name resolves too (the
      * maintainer's spelled-out names work as CLI arguments). */
@@ -222,9 +325,15 @@ static void test_folder_enumerates(void) {
     t = fdk_theme_find("Faded Dream", &r);
     assert(t != NULL && r == FDK_OK);
     fdk_theme_destroy(t);
+    t = fdk_theme_find("Catppuccin Mocha", &r);
+    assert(t != NULL && r == FDK_OK);
+    fdk_theme_destroy(t);
+    t = fdk_theme_find("Solar Flare", &r);
+    assert(t != NULL && r == FDK_OK);
+    fdk_theme_destroy(t);
 
     assert(unsetenv("FDK_THEME_DIR") == 0);
-    printf("[ok] the .FDKThemes folder enumerates all five faces; "
+    printf("[ok] the .FDKThemes folder enumerates all ten faces; "
            "internal names resolve\n");
 }
 
@@ -250,10 +359,18 @@ int main(void) {
     assert(stat(theme_file("pink-rave"), &st) == 0);
     assert(stat(theme_file("daylight"), &st) == 0);
     assert(stat(theme_file("matrix"), &st) == 0);
+    assert(stat(theme_file("amoled-void"), &st) == 0);
+    assert(stat(theme_file("catppuccin-latte"), &st) == 0);
+    assert(stat(theme_file("catppuccin-mocha"), &st) == 0);
+    assert(stat(theme_file("nordic-frost"), &st) == 0);
+    assert(stat(theme_file("solar-flare"), &st) == 0);
 
     test_faded_dream_is_the_default();
     test_mono_chromatic();
     test_pink_rave();
+    test_amoled_void();
+    test_catppuccin_pair();
+    test_nordic_frost_and_solar_flare();
     test_daylight_and_matrix_unchanged();
     test_folder_enumerates();
 

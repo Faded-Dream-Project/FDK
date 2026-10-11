@@ -1,7 +1,8 @@
 /*
  * surface_aa.c — antialiased drawing primitives
  * (fdk_surface_draw_line_aa / draw_circle_aa / fill_circle_aa /
- * fill_rounded_rect_aa; see include/fdk/fdk_surface.h).
+ * fill_rounded_rect_aa / draw_rounded_rect_aa; see
+ * include/fdk/fdk_surface.h).
  *
  * Every primitive computes each pixel's EXACT geometric coverage (the
  * fraction of the pixel's area the ideal shape covers — via signed
@@ -17,9 +18,12 @@
  *   - every blended value is inside the convex hull of background and
  *     shape colors (no overshoot from filtering).
  *
- * The crisp (_non-_aa) variants remain the defaults: exact integer
- * geometry, zero float math in the hot path. The _aa variants trade
- * that for smooth edges and cost a distance evaluation per pixel.
+ * The crisp (_non-_aa) variants remain the primitive-level defaults:
+ * exact integer geometry, zero float math in the hot path. Since
+ * 1.4.17 the WIDGET layer paints its themed chrome through the _aa
+ * variants (buttons, fields, pills, rings — the polish pass); the
+ * crisp calls live on in the renderer's own contract, the examples'
+ * crisp-vs-AA demo, and applications that want raw integer geometry.
  *
  * Not part of the public API beyond the documented functions — never
  * installed.
@@ -266,6 +270,92 @@ void fdk_surface_fill_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
             float dist = sdf - (float)r;
 
             float cov = 0.5f - dist;
+            if (cov <= 0.0f) {
+                continue;
+            }
+            if (cov > 1.0f) {
+                cov = 1.0f;
+            }
+            fdk__surface_blend_coverage(surface, x, y, color, cov);
+        }
+    }
+
+    fdk__surface_damage_add(
+        surface, (fdk_rect){ .x = x0, .y = y0,
+                             .width = x1 - x0, .height = y1 - y0 });
+}
+
+/* ---- antialiased rounded-rectangle OUTLINE (1.4.17) --------------------
+ *
+ * A 1-px stroke evaluated against the rounded rect INSET BY HALF A
+ * PIXEL, so the stroke's boundary runs through the pixel centers of
+ * the rect's edge rows/columns. Consequences the tests pin:
+ *
+ *   - straight sides land full-coverage on exactly the pixels the
+ *     crisp draw_rounded_rect inks — corner radius 0 collapses to a
+ *     byte-identical fdk_surface_draw_rect;
+ *   - only the curved corners blend (a smooth ~2-px ramp);
+ *   - the stroke rides the same boundary fill_rounded_rect_aa
+ *     fills, so an outlined fill reads as one shape. */
+void fdk_surface_draw_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
+                                      fdk_i32 corner_radius,
+                                      fdk_color color) {
+    if (surface == NULL || rect.width <= 0 || rect.height <= 0) {
+        return;
+    }
+    if (!fdk_ok(fdk__surface_acquire(surface))) {
+        return;
+    }
+
+    int half_min = rect.width < rect.height ? rect.width : rect.height;
+    int r = corner_radius;
+    if (r < 0) {
+        r = 0;
+    }
+    if (r * 2 > half_min) {
+        r = half_min / 2;
+    }
+
+    /* The inset geometry: half-extents shrink by 0.5, and the corner
+     * radius follows (never below 0 — a 0-radius box insets to a
+     * plain box). Pixel centers then sit exactly ON the straight
+     * boundary lines. */
+    float ctr_x = (float)rect.x + (float)rect.width * 0.5f;
+    float ctr_y = (float)rect.y + (float)rect.height * 0.5f;
+    float half_w = (float)rect.width * 0.5f - 0.5f;
+    float half_h = (float)rect.height * 0.5f - 0.5f;
+    float ir = (float)r - 0.5f;
+    if (ir < 0.0f) {
+        ir = 0.0f;
+    }
+    float core_w = half_w - ir;
+    float core_h = half_h - ir;
+
+    /* The stroke extends at most 1 px (coverage > 0) from the inset
+     * boundary, i.e. at most 1.5 px outside the rect's own bounds —
+     * the rect expanded by 2 covers every inked pixel. */
+    int x0 = rect.x - 2;
+    int y0 = rect.y - 2;
+    int x1 = rect.x + rect.width + 2;
+    int y1 = rect.y + rect.height + 2;
+
+    for (int y = y0; y < y1; y++) {
+        for (int x = x0; x < x1; x++) {
+            float px = (float)x + 0.5f;
+            float py = (float)y + 0.5f;
+            float qx = fabsf(px - ctr_x) - core_w;
+            float qy = fabsf(py - ctr_y) - core_h;
+
+            float ax = qx > 0.0f ? qx : 0.0f;
+            float ay = qy > 0.0f ? qy : 0.0f;
+            float outside = sqrtf(ax * ax + ay * ay);
+            float inside = qx > qy ? qx : qy;
+            float sdf = outside + (inside < 0.0f ? inside : 0.0f);
+            float dist = sdf - ir;
+
+            /* Ring coverage: full ON the inset boundary (dist = 0),
+             * gone one pixel to either side. */
+            float cov = 1.0f - fabsf(dist);
             if (cov <= 0.0f) {
                 continue;
             }

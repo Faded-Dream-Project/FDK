@@ -138,7 +138,7 @@ geometry (no antialiasing yet — that is deliberate, listed in
 | `blit` | opaque surface-to-surface copy; clipped on source AND destination (bounds + clip stack); damages the destination |
 | `blit_blend` | per-pixel source-over from an ARGB8888 source (integer blend, one rounding per channel); an XRGB source is refused — that is `blit`'s job |
 | `blit_transformed` | inverse-mapped affine blit (see "Transforms") |
-| `draw_line_aa` / `draw_circle_aa` / `fill_circle_aa` / `fill_rounded_rect_aa` | coverage-based antialiased variants (see "Antialiasing") |
+| `draw_line_aa` / `draw_circle_aa` / `fill_circle_aa` / `fill_rounded_rect_aa` / `draw_rounded_rect_aa` | coverage-based antialiased variants (see "Antialiasing") |
 
 `draw_rect`'s corners and `draw_rounded_rect`'s arcs are plotted
 exactly once each — with translucent colors a double blend is a
@@ -266,14 +266,26 @@ surface through one:
 ## Antialiasing
 
 The `_aa` primitive variants (line, circle outline, filled circle,
-rounded rect) compute each pixel's exact geometric coverage — signed
-distance to the ideal shape — and blend the color weighted by that
-coverage through the same source-over math as everything else. The
-axis-aligned cases collapse to exactly 0/1 coverage (an AA horizontal
-line is byte-identical to the crisp one — pinned by test), and every
-blended value stays inside the convex hull of background and shape
-color. The crisp variants remain the defaults: exact integer geometry
-at lower cost; `_aa` is opt-in smoothness.
+rounded rect, rounded-rect outline) compute each pixel's exact
+geometric coverage — signed distance to the ideal shape — and blend
+the color weighted by that coverage through the same source-over
+math as everything else. The axis-aligned cases collapse to exactly
+0/1 coverage (an AA horizontal line is byte-identical to the crisp
+one — pinned by test; a zero-radius AA outline is byte-identical to
+`draw_rect`), and every blended value stays inside the convex hull
+of background and shape color.
+
+Since 1.4.17 the **widget layer paints its themed chrome through
+the `_aa` variants** — buttons, check/radio indicators, entry and
+combo fields, menus, tooltips, pills, sliders, scrollbars, focus
+rings, window-band buttons: interior pixels stay byte-identical to
+the crisp path (full coverage), and only the curved boundary fringes
+blend, so corners read smooth at any theme radius (the maintainer's
+polish pass: every button like example 02's smooth green square,
+radios as actual circles). The crisp variants remain the defaults at
+the PRIMITIVE level — exact integer geometry at lower cost, still
+the right choice for an application's own raw drawing; the crisp-vs-
+AA demo panel in example 02 keeps demonstrating the difference.
 
 ## X11 presentation: MIT-SHM + double buffering
 

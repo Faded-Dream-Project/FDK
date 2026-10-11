@@ -219,7 +219,11 @@ typedef struct fdk_hover_fade {
 /* statics.c: arms (or retargets) a shared hover fade toward 1
  * (entering) / 0 (leaving) — the 1.4.1 Button/check machinery,
  * shared by the StackSwitcher's pills and the menu rows since
- * 1.4.2. Cancels the running flight first (retarget-from-live). */
+ * 1.4.2. Cancels the running flight first (retarget-from-live).
+ * The flight's done callback clears f->anim on completion AND on
+ * cancel (1.4.17), so the stored handle is non-NULL only while the
+ * flight is RUNNING — safe against the animation engine's zombie
+ * reaping. */
 void fdk__hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
                          bool entering);
 

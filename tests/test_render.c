@@ -1036,6 +1036,83 @@ static void test_aa_primitives(void) {
            "monotone falloff, rounded-rect SDF\n");
 }
 
+/* 1.4.17: the AA rounded-rect OUTLINE. The stroke's boundary runs
+ * through the pixel centers of the rect's edge rows, so radius 0
+ * collapses to a byte-identical crisp draw_rect, straight sides of
+ * a rounded outline land FULL coverage on the boundary pixels (the
+ * crisp variant's row), only the corners blend, no ink escapes the
+ * rect expanded by 2, and every blended value stays inside the
+ * bg/ink hull. */
+static void test_aa_rounded_outline(void) {
+    fdk_color c = rgb(200, 30, 90);
+
+    /* Radius 0: byte-identical to the crisp rect outline. */
+    fdk_surface *crisp = NULL, *aa = NULL;
+    assert(fdk_ok(fdk_surface_create(24, 24, &crisp)));
+    assert(fdk_ok(fdk_surface_create(24, 24, &aa)));
+    fdk_surface_fill(crisp, rgb(0, 0, 0));
+    fdk_surface_fill(aa, rgb(0, 0, 0));
+    fdk_rect r0 = { .x = 4, .y = 6, .width = 12, .height = 9 };
+    fdk_surface_draw_rect(crisp, r0, c);
+    fdk_surface_draw_rounded_rect_aa(aa, r0, 0, c);
+    for (int y = 0; y < 24; y++) {
+        for (int x = 0; x < 24; x++) {
+            assert(px_at(crisp, x, y) == px_at(aa, x, y));
+        }
+    }
+
+    /* A real radius: the straight/corner split. */
+    fdk_surface_fill(aa, rgb(0, 0, 0));
+    fdk_rect rr = { .x = 2, .y = 2, .width = 20, .height = 20 };
+    fdk_surface_draw_rounded_rect_aa(aa, rr, 6, c);
+    /* Straight top edge, mid-span: FULL coverage (the pixel centers
+     * sit exactly on the inset boundary). */
+    assert(px_at(aa, 12, 2) == pack(200, 30, 90));
+    /* One row inside and one outside the straight edge: empty —
+     * the stroke is exactly 1 px on the straights. */
+    assert((px_at(aa, 12, 3) & 0x00FFFFFFu) == 0u);
+    assert((px_at(aa, 12, 1) & 0x00FFFFFFu) == 0u);
+    /* The rect's own corner pixel: cut to nothing (the arc bows
+     * inside it), same read as the crisp variant. */
+    assert((px_at(aa, 2, 2) & 0x00FFFFFFu) == 0u);
+    /* A pixel ON the corner arc's diagonal: strictly between empty
+     * and full, and its outward neighbor is strictly lighter
+     * (monotone ramp away from the stroke). */
+    fdk_u32 ce = px_at(aa, 4, 4) & 0x00FFFFFFu;
+    int cer = (int)((ce >> 16) & 0xFFu);
+    assert(cer > 0 && cer < 200);
+    fdk_u32 outer2 = px_at(aa, 3, 3) & 0x00FFFFFFu;
+    int o2r = (int)((outer2 >> 16) & 0xFFu);
+    assert(o2r < cer);
+    /* Nothing escapes the rect expanded by 2 (the iteration bound
+     * itself). */
+    for (int y = 0; y < 24; y++) {
+        for (int x = 0; x < 24; x++) {
+            if (x >= rr.x - 2 && x < rr.x + rr.width + 2 &&
+                y >= rr.y - 2 && y < rr.y + rr.height + 2) {
+                continue;
+            }
+            assert((px_at(aa, x, y) & 0x00FFFFFFu) == 0u);
+        }
+    }
+    /* Hull: every inked pixel sits between background (0) and the
+     * ink — no overshoot from the filtering. */
+    for (int y = 0; y < 24; y++) {
+        for (int x = 0; x < 24; x++) {
+            fdk_u32 p = px_at(aa, x, y) & 0x00FFFFFFu;
+            int pr = (int)((p >> 16) & 0xFFu);
+            int pg = (int)((p >> 8) & 0xFFu);
+            int pb = (int)(p & 0xFFu);
+            assert(pr <= 200 && pg <= 30 && pb <= 90);
+        }
+    }
+
+    fdk_surface_destroy(crisp);
+    fdk_surface_destroy(aa);
+    printf("[ok] AA rounded outline: r=0 == crisp draw_rect, "
+           "straight sides exact, corners ramp\n");
+}
+
 int main(void) {
     test_offscreen_create_info_destroy();
     test_offscreen_argument_checks();
@@ -1057,6 +1134,7 @@ int main(void) {
     test_blit_transformed();
     test_transformed_alpha();
     test_aa_primitives();
+    test_aa_rounded_outline();
     printf("all headless render tests passed\n");
     return 0;
 }

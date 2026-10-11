@@ -4647,7 +4647,9 @@ integration) — 34 test files, 607 exported symbols.
 Battery at 1.4.11: debug + release zero warnings; headless
 all-pass (incl. the markup suite); X11 integration 147 [ok];
 example 04 grew the markup frame (NOWRAP/WRAP/ELLIPSIZE + button
-+ markup tooltips; window 560x2260) and exits cleanly;
++ markup tooltips; window 560x2260 at the time — since 1.4.17 the
+same catalog lives in a screen-sized scrolling window) and exits
+cleanly;
 verify-exports 607 in both configs.
 
 The NEXT list: INCR transfers (the X11 clipboard's 4 MiB cap
@@ -4977,3 +4979,71 @@ Where this leaves the line: theming now reaches the whole surface
 — chrome included — from data files in a folder the user owns, and
 the maintainer's ability test is the shipped demo. The NEXT list
 stays empty.
+
+## 1.4.17 — the smooth pass
+
+The maintainer's polishing report, answered in kind. Three complaints
+and one crash:
+
+- **Buttons were pixilated.** Every themed control rode the CRISP
+  rounded-rect fills — hard staircase corners on any radius, chunky
+  circle indicators ("not a perfect ball"), jagged pill ends. The
+  AA primitives existed since 1.3.0 but only example 02's demo panel
+  and a few glyphs used them: the toolkit's own chrome never did.
+  The widget layer now paints through the `_aa` variants — 57 call
+  sites across the catalog (buttons, checks, radios, toggle tracks
+  and knobs, entry/combo/textview fields, menus, tooltips,
+  switcher pills, sliders, levelbars, scrollbars, expanders, icon
+  selections, chooser wells, paned handles, frames, progress, the
+  window band's buttons). Interior pixels are byte-identical to the
+  crisp path (full coverage through the same blend atom — the
+  entire headless pixel battery survived unchanged); only the curved
+  boundary fringes blend, so every theme's corners read smooth. The
+  missing family member shipped with it: `fdk_surface_draw_rounded_
+  rect_aa` — a 1-px stroke whose boundary runs through the pixel
+  centers of the rect's edge rows, so straight sides land on exactly
+  the crisp outline's pixels (radius 0 is byte-identical to
+  `draw_rect`, pinned) and only the corners ramp. 620 exported
+  symbols.
+- **A use-after-free in the settings demo** (ASan: heap-use-after-free
+  in `fdk_animation_cancel` from `fdk__hover_fade_arm`). The shared
+  hover fade stored its flight's handle but never CLEARED it when
+  the flight ended — the animation engine reaps finished handles
+  after its ~1 s zombie grace, and hover events can be minutes
+  apart, so the next arm read freed memory. The fix is the done
+  callback every other stored-handle owner (revealer, expander, the
+  scrollbar fade, the scroll flight) already had: done clears
+  `f->anim` on completion AND cancel, so the stored handle is only
+  non-NULL while the flight is running. Reproduced by a regression
+  test that pumps past the grace and arms again, and end-to-end
+  under Xvfb (three hover sweeps across the reaping window — the
+  exact report scenario — zero sanitizer output).
+- **Example 04 could not fit the screen** (a 560x2260 window) and
+  could not scroll. The window now opens 560x860 with the whole
+  catalog inside a ScrollView. Making a box give a scrollview a
+  viewport-sized slot needed the documented recipe encoded as
+  public API: `fdk_scrollview_set_vertical_only` — the content is
+  arranged at the VIEWPORT's width (the cross-clamp look a plain
+  box used to give it — no h-scrollbar, the grid still absorbs
+  resizes), the horizontal range collapses, scroll_x pins to 0.
+  That plus a max-height size limit (a box never assigns less than
+  a child's natural along-axis size) is the public version of what
+  the List widget always did internally; headless suite pins the
+  semantics (content at viewport width, programmatic + wheel inert
+  horizontally, vertical intact, round-trip).
+- **The five 1.4.17 data-only faces are now pinned**: the shipped-
+  theme suite's enumeration pin (left at five by the previous
+  task's scope compliance) counts all ten faces, and amoled-void,
+  the catppuccin pair, nordic-frost and solar-flare each got the
+  face-pin groups (their palettes, bands, shapes, radii) the data-
+  only task could not write.
+
+Battery: debug and release builds zero warnings; headless 570 [ok];
+X11 integration all-pass (156 [ok]); verify-exports 620 green in
+both configs; all twelve examples frame-budget smoke under Xvfb
+with zero sanitizer output; live pixel verification of the polish
+itself — the settings app's accent pill edge reads a coverage ramp
+(bg → 93%-blend → full) instead of a hard step, and example 04's
+catalog scrolls under the wheel with its classic bar + thumb in
+place. Where this leaves the line: the toolkit finally LOOKS like
+its own demo. The NEXT list stays empty.

@@ -87,6 +87,13 @@ typedef struct fdk_scrollview {
     /* 1.4.4: CLASSIC (layout-owned strips) or OVERLAY (transient
      * thumbs that fade when idle — see fdk_scrollview_set_bar_mode). */
     fdk_scroll_bar_mode mode;
+    /* 1.4.17: vertical-only scrolling — the content is arranged at
+     * the VIEWPORT's width (never wider), no horizontal bar, and
+     * scroll_x is pinned to 0. The recipe the internal List has
+     * always used, now public: a tall column in a box layout keeps
+     * the box's cross-clamp behavior instead of growing an
+     * h-scrollbar. */
+    bool vertical_only;
 } fdk_scrollview;
 
 typedef struct fdk_scrollbar {
@@ -167,12 +174,16 @@ static void axis_extents(fdk_scrollview *sv, bool horizontal,
         if (horizontal) {
             other_bar = (ch > h && h > 0) ? bar_width() : 0;
         } else {
-            other_bar = (cw > w && w > 0) ? bar_width() : 0;
+            /* Vertical-only never shows an h-bar, so the vertical
+             * viewport never pays for one (1.4.17). */
+            other_bar = (cw > w && w > 0 && !sv->vertical_only)
+                            ? bar_width()
+                            : 0;
         }
     }
     if (horizontal) {
         *out_view = (w - other_bar > 0) ? w - other_bar : 0;
-        *out_content = cw;
+        *out_content = sv->vertical_only ? *out_view : cw;
     } else {
         *out_view = (h - other_bar > 0) ? h - other_bar : 0;
         *out_content = ch;
@@ -349,7 +360,7 @@ static void scrollview_layout(fdk_widget *w) {
     fdk_i32 cw = 0, ch = 0;
     content_extent(sv, &cw, &ch);
     bool need_v = (ch > h_);
-    bool need_h = (cw > w_);
+    bool need_h = (cw > w_) && !sv->vertical_only;
     fdk_i32 th = bar_thickness(sv);
     /* Both-overflow corner: CLASSIC loses both strips (the L shape);
     * OVERLAY keeps the full viewport — the vertical bar runs the
@@ -377,9 +388,14 @@ static void scrollview_layout(fdk_widget *w) {
      * is the obvious one), and only the arrange hook lays its
      * children out — set_bounds moved the box but left every child
      * at its creation bounds, so a box content rendered nothing
-     * (found live by example 11's 40-row list: zero rows painted). */
+     * (found live by example 11's 40-row list: zero rows painted).
+     * Vertical-only (1.4.17): the content's WIDTH is the viewport —
+     * a column whose natural width exceeds the viewport keeps the
+     * box cross-clamp behavior it had before adoption instead of
+     * growing a horizontal scroll range. */
     if (sv->content != NULL) {
-        fdk_rect cb = { -sv->scroll_x, -sv->scroll_y, cw, ch };
+        fdk_i32 content_w = sv->vertical_only ? vw : cw;
+        fdk_rect cb = { -sv->scroll_x, -sv->scroll_y, content_w, ch };
         fdk_widget_arrange(sv->content, cb);
     }
 
@@ -681,12 +697,12 @@ static void scrollbar_paint(fdk_widget *w, fdk_surface *surface,
             tr = (fdk_rect){bounds.x + 1, bounds.y + pos, inner, len};
         }
         if (tr.width > 0 && tr.height > 0) {
-            fdk_surface_fill_rounded_rect(surface, tr, 3, thumb_col);
+            fdk_surface_fill_rounded_rect_aa(surface, tr, 3, thumb_col);
         }
         return;
     }
     /* Trough: the track token. */
-    fdk_surface_fill_rounded_rect(surface, bounds, 2, fdk__pal_track());
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, 2, fdk__pal_track());
     /* Thumb: control background (hover/press accents come for free
      * with the palette's control family). */
     fdk_color thumb_col = fdk__pal_control();
@@ -708,7 +724,7 @@ static void scrollbar_paint(fdk_widget *w, fdk_surface *surface,
         tr = (fdk_rect){bounds.x + pad, bounds.y + pos, inner, len};
     }
     if (tr.width > 0 && tr.height > 0) {
-        fdk_surface_fill_rounded_rect(surface, tr, 2, thumb_col);
+        fdk_surface_fill_rounded_rect_aa(surface, tr, 2, thumb_col);
     }
 }
 
@@ -1097,6 +1113,38 @@ fdk_scroll_bar_mode fdk_scrollview_get_bar_mode(fdk_widget *scrollview) {
         return FDK_SCROLL_BARS_CLASSIC;
     }
     return scroll_of(scrollview)->mode;
+}
+
+fdk_result fdk_scrollview_set_vertical_only(fdk_widget *scrollview,
+                                            bool vertical_only) {
+    if (scrollview == NULL ||
+        scrollview->klass != &fdk_scrollview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_scrollview *sv = scroll_of(scrollview);
+    if (sv->vertical_only == vertical_only) {
+        return FDK_OK; /* idempotent */
+    }
+    sv->vertical_only = vertical_only;
+    if (vertical_only) {
+        /* Any live horizontal offset dies here; the clamp keeps it
+         * at 0 from now on (the axis reports no scroll range). */
+        sv->scroll_x = 0;
+    }
+    /* The content's arranged width and the bar plan both change:
+     * re-arrange and re-clamp at the new truth, exactly like a bar
+     * mode switch. */
+    scrollview_layout(scrollview);
+    fdk_widget_invalidate(scrollview);
+    return FDK_OK;
+}
+
+bool fdk_scrollview_get_vertical_only(fdk_widget *scrollview) {
+    if (scrollview == NULL ||
+        scrollview->klass != &fdk_scrollview_class_def) {
+        return false;
+    }
+    return scroll_of(scrollview)->vertical_only;
 }
 
 /* Internal: the scroll area's viewport size (bounds minus visible

@@ -1958,9 +1958,9 @@ static void cbtn_paint(fdk_widget *w, fdk_surface *surface,
     }
     fdk_i32 radius =
         fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS);
-    fdk_surface_fill_rounded_rect(surface, bounds, radius, face);
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, radius, face);
     if ((w->flags & FDK_WF_ENABLED) != 0) {
-        fdk_surface_draw_rounded_rect(surface, bounds, radius,
+        fdk_surface_draw_rounded_rect_aa(surface, bounds, radius,
                                       fdk__pal_border());
     }
 
@@ -1981,9 +1981,9 @@ static void cbtn_paint(fdk_widget *w, fdk_surface *surface,
             c.g = c.g * 0.5f + face.g * 0.5f;
             c.b = c.b * 0.5f + face.b * 0.5f;
         }
-        fdk_surface_fill_rounded_rect(surface, well, 3, c);
+        fdk_surface_fill_rounded_rect_aa(surface, well, 3, c);
     }
-    fdk_surface_draw_rounded_rect(surface, well, 3, fdk__pal_border());
+    fdk_surface_draw_rounded_rect_aa(surface, well, 3, fdk__pal_border());
 }
 
 static void cbtn_measure(fdk_widget *w, fdk_size *out) {

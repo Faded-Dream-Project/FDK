@@ -45,6 +45,10 @@
  *
  * The progress bar sweeps once on startup (so a screenshot shows it
  * mid-fill) and then holds; Tab moves focus through the controls.
+ * 1.4.17: the whole catalog scrolls — the window opens screen-sized
+ * (560x860) with the column inside a ScrollView, so nothing hides
+ * below the fold; wheel it, drag the classic edge bars, or grow the
+ * window tall enough that the scroll range collapses to zero.
  * Set FDK_DEMO_ANIMATE=1 to keep it sweeping forever, or
  * FDK_DEMO_FRAMES=N to exit after N frames. Close the window or
  * press ESC to exit. Needs a system TrueType font (exits with a
@@ -242,12 +246,37 @@ int main(int argc, char **argv) {
     g_ctx = ctx;
 
     fdk_example ex;
-    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 2260)) {
+    /* 1.4.17: the catalog's natural height (~2200 px) is taller than
+     * any screen — the window now opens at a screen-friendly height
+     * and the WHOLE column rides a ScrollView, so every frame is
+     * reachable without resizing. The status line and the title band
+     * stay pinned outside the scroll, exactly where the helper put
+     * them.
+     *
+     * The scroll recipe (the public version of what the List widget
+     * does internally): VERTICAL-ONLY, so the catalog keeps the exact
+     * width the box used to cross-clamp it to (no h-scrollbar — the
+     * frames fill the viewport and the grid still absorbs resizes);
+     * a MAX-HEIGHT size limit caps the scrollview's natural height,
+     * because a box never assigns a child LESS than its natural
+     * along-axis size — with the cap, the expanding slot is the
+     * window's height and the overflow goes to the scroll axis. */
+    if (!fdk_example_open(&ex, ctx, "04", "widgets", 560, 860)) {
         fdk_shutdown(ctx);
         return 1;
     }
-    fdk_widget *content = ex.content;
-    fdk_box_set_spacing(content, 12);
+    fdk_widget *scroller = NULL;
+    (void)fdk_scrollview_create(ex.content, &scroller);
+    (void)fdk_scrollview_set_vertical_only(scroller, true);
+    (void)fdk_widget_set_size_limits(scroller, 0, 0, 0, 600);
+    (void)fdk_widget_set_expand(scroller, true, true);
+    fdk_widget *scroll_column = NULL;
+    (void)fdk_box_create(scroller, FDK_VERTICAL, &scroll_column);
+    fdk_box_set_padding(scroll_column, 0);
+    fdk_box_set_spacing(scroll_column, 12);
+    (void)fdk_scrollview_set_content(scroller, scroll_column);
+
+    fdk_widget *content = scroll_column;
 
     /* --- frame: profile options --- */
     fdk_widget *profile = NULL;

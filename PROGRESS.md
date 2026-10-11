@@ -9,16 +9,26 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-10, at milestone **1.4.16** (the three
-faces: Mono Chromatic, Pink Rave, and Faded Dream as the new
-built-in default — the maintainer's theming-ability test, shipped
-as three .fdk files in the custom `.FDKThemes/` folder with the
-TITLEBAR token family that themes the decoration band and the
-`button_shape` metric that turns every button circular), building
-on 1.4.15 (the chrome uniformity tail: the toolkit's own dialogs
-wear the FDK title bar), 1.4.14 (the live settings desktop —
-per-app themes, LIVE re-theming when the command runs, the X11
-INCR-drop fix, the FDK title bar on every example, the
+Last audited: 2026-10-11, at milestone **1.4.17** (the smooth
+pass: the maintainer's polishing report — every themed control now
+paints through the antialiased primitives so corners and circle
+indicators read smooth; the hover-fade use-after-free fixed with
+the done-callback handle clear every other animation owner already
+had; example 04 opens screen-sized and scrolls its whole catalog
+through the new `fdk_scrollview_set_vertical_only` recipe; the five
+data-only faces from the previous task are now pinned in the
+shipped-theme suite), building on **1.4.16** (the three faces:
+Mono Chromatic, Pink Rave, and Faded Dream as the new built-in
+default — the maintainer's theming-ability test, shipped as three
+.fdk files in the custom `.FDKThemes/` folder with the TITLEBAR
+token family that themes the decoration band and the `button_shape`
+metric that turns every button circular; plus FIVE MORE faces
+shipped data-only at the same audit: Catppuccin Mocha, Catppuccin
+Latte, Nordic Frost, AMOLED Void, Solar Flare — ten stems total in
+.FDKThemes/), 1.4.15 (the chrome uniformity tail: the toolkit's
+own dialogs wear the FDK title bar), 1.4.14 (the live settings
+desktop — per-app themes, LIVE re-theming when the command runs,
+the X11 INCR-drop fix, the FDK title bar on every example, the
 file-picker size retune, the developer theme whitelist) and the
 1.4.12 full in-depth code review — every claim below was
 re-verified against the tree, not copied from docs. THIS AUDIT'S
@@ -37,7 +47,9 @@ is always the truth, including over this file.
 
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.16** (the three faces — the theming
+- **HEAD:** milestone **1.4.17** (the smooth pass — see above;
+  the full narrative is docs/roadmap.md "1.4.17 — the smooth
+  pass"). Before it: 1.4.16 (the three faces — the theming
   ability test the maintainer asked for: **Faded Dream** is the new
   built-in default (the calm gray-with-violet retune; the packaged
   copy ships as .FDKThemes/faded-dream.fdk and the pre-1.4.16
@@ -73,10 +85,11 @@ is always the truth, including over this file.
   backends both linked (Wayland protocols wired: xdg-shell,
   xdg-decoration, viewporter, **fractional-scale**,
   primary-selection)
-- **Public API:** **617 exported symbols** (616 +
-  fdk_widget_set_background_token), `make verify-exports` OK in
-  debug AND release
-- **Tests:** headless suite all-pass — **564 [ok] checks** (incl.
+- **Public API:** **620 exported symbols** (617 +
+  fdk_surface_draw_rounded_rect_aa +
+  fdk_scrollview_set_vertical_only/get_vertical_only),
+  `make verify-exports` OK in debug AND release
+- **Tests:** headless suite all-pass — **570 [ok] checks** (incl.
   the 1.4.4 + iconview suites, the eight 1.4.8 textview groups,
   the 1.4.9 png/picture suite, the 1.4.11 markup suite, the
   1.4.13 theme-discovery + CLI-tools suites, the 1.4.14
@@ -113,7 +126,10 @@ ELLIPSIZE cuts by styled metrics; get_text reports the PLAIN
 text), entry, progress (determinate +
 busy), separator, frame, notebook, list (multi-select, rubber-band +
 auto-scroll, row icons), tree (row icons; multi-select + rubber band
-+ auto-scroll), scrollview + scrollbar (smooth wheel), menu /
++ auto-scroll), scrollview + scrollbar (smooth wheel; 1.4.17:
+`fdk_scrollview_set_vertical_only` — content arranged at the
+viewport's width, horizontal range collapsed, the recipe for a
+scrolling whole-window catalog), menu /
 menu-bar / context menu (accelerators + mnemonics), combo (editable),
 slider (marks/ticks + labels; vertical orientation), **iconview**
 (the 1.4.5 item grid: glyph cells in a re-flowing column field,
@@ -205,6 +221,19 @@ sidebar rhythm).
 
 ### Infrastructure (SHIPPED)
 
+- **The AA chrome pass (1.4.17)**: every themed control paints
+  through the antialiased primitives (fill/draw_rounded_rect_aa,
+  fill_circle_aa — 57 call sites across the widget layer); interior
+  pixels byte-identical to the crisp path, only the curved fringes
+  blend; **fdk_surface_draw_rounded_rect_aa** completes the public
+  AA family (1-px stroke through the edge rows' pixel centers —
+  radius 0 is byte-identical to draw_rect, straight sides exactly
+  the crisp outline's pixels, corners ramp)
+- **Hover-fade handle lifetime (1.4.17)**: the shared
+  fdk__hover_fade_arm's done callback clears the stored flight
+  handle on completion AND cancel — the reaped-zombie
+  use-after-free the settings demo found under ASan; the
+  regression test pumps past the grace and arms again
 - Theme engine: `.fdk` format, **33 color tokens + 15 metrics**
   (`FDK_TK_*` / `FDK_TM_*`), runtime switching, the Faded Dream /
   Modern / v1 recipes; button roles (suggested/destructive/link),
@@ -302,7 +331,12 @@ in 1.4.16 (Mono Chromatic, Pink Rave, Faded Dream as the default,
 the .FDKThemes folder, the titlebar family, button shapes, the
 token-following background — the theming-ability test the
 maintainer asked for, and with it the 1.4.15 dialog-offset bug
-swept out). What remains is
+swept out); the five extra faces shipped data-only on top of it
+(Catppuccin Mocha/Latte, Nordic Frost, AMOLED Void, Solar Flare);
+and 1.4.17 closed the maintainer's polishing report in full (the
+AA chrome pass over every themed control, the hover-fade
+use-after-free, example 04's screen-sized scrolling catalog, the
+ten-face enumeration pins). What remains is
 LATER-by-policy (IME completion surface
 waits for a protocol joining third_party/wayland-protocols) and
 OUT-by-policy (the deliberate non-goals below) — the line where

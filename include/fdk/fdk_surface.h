@@ -409,6 +409,15 @@ void fdk_surface_draw_rounded_rect(fdk_surface *surface, fdk_rect rect,
 void fdk_surface_fill_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
                                       fdk_i32 corner_radius, fdk_color color);
 
+/* Antialiased rounded-rectangle OUTLINE: a 1-pixel stroke whose
+ * boundary runs through the pixel centers of the rect's edge rows,
+ * so straight sides land full-coverage on exactly the pixels the
+ * crisp variant inks (a radius of 0 is byte-identical to
+ * fdk_surface_draw_rect) while the curved corners blend a smooth
+ * 2-pixel ramp. Same radius clamping as the crisp variant. */
+void fdk_surface_draw_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
+                                      fdk_i32 corner_radius, fdk_color color);
+
 /* Copies `src_rect` (in SOURCE surface coordinates) of `src` to
  * (dst_x, dst_y) on `dst`, opaque pixel copy, clipped against the
  * source bounds, the destination bounds, and the destination's clip

@@ -396,7 +396,7 @@ static void deco_bar_paint(fdk_widget *w, fdk_surface *surface,
         fdk_color fill = deco_button_fill(window, buttons[i].which);
         fdk_i32 br = fdk__button_shape_radius(buttons[i].rect->width,
                                               buttons[i].rect->height);
-        fdk_surface_fill_rounded_rect(surface, *buttons[i].rect, br,
+        fdk_surface_fill_rounded_rect_aa(surface, *buttons[i].rect, br,
                                       fill);
         deco_paint_glyph(window, surface, buttons[i].which,
                          buttons[i].rect->x, buttons[i].rect->y,

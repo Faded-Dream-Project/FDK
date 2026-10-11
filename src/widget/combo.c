@@ -274,8 +274,8 @@ static void combo_paint(fdk_widget *w, fdk_surface *surface,
     }
     fdk_i32 cr =
         fdk_theme_get_metric(NULL, FDK_TM_ENTRY_CORNER_RADIUS);
-    fdk_surface_fill_rounded_rect(surface, bounds, cr, fill);
-    fdk_surface_draw_rounded_rect(surface, bounds, cr, fdk__pal_border());
+    fdk_surface_fill_rounded_rect_aa(surface, bounds, cr, fill);
+    fdk_surface_draw_rounded_rect_aa(surface, bounds, cr, fdk__pal_border());
 
     /* Chevron zone: a subtle inset panel with a vector chevron. */
     fdk_rect cz = {bounds.x + bounds.width - COMBO_CHEVRON, bounds.y,

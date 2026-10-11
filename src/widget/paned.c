@@ -206,7 +206,7 @@ static void paned_paint(fdk_widget *w, fdk_surface *surface,
             if (pill.width > 0 && pill.height > 0) {
                 fdk_color a = fdk__pal_accent();
                 fdk_color fill = {a.r, a.g, a.b, a.a * 0.45f};
-                fdk_surface_fill_rounded_rect(surface, pill,
+                fdk_surface_fill_rounded_rect_aa(surface, pill,
                                               FDK_PANED_DIVIDER / 2, fill);
             }
         }
@@ -236,7 +236,7 @@ static void paned_paint(fdk_widget *w, fdk_surface *surface,
             if (pill.width > 0 && pill.height > 0) {
                 fdk_color a = fdk__pal_accent();
                 fdk_color fill = {a.r, a.g, a.b, a.a * 0.45f};
-                fdk_surface_fill_rounded_rect(surface, pill,
+                fdk_surface_fill_rounded_rect_aa(surface, pill,
                                               FDK_PANED_DIVIDER / 2, fill);
             }
         }
