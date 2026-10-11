@@ -180,11 +180,26 @@ typedef enum {
 void fdk__icon_theme_reset(void);
 
 /* The user's selected icon theme name (static storage, cached until
- * reset). Detection, no bus: $FDK_ICON_THEME > $XDG_CONFIG_HOME/
- * icon-theme > gtk-3.0/gtk-4.0 settings.ini gtk-icon-theme-name >
- * kdeglobals [Icons] Theme > the search path's own default/
- * index.theme Inherits= > "hicolor". */
+ * reset). Detection, no bus: $FDK_ICON_THEME > XSETTINGS live (the
+ * X11 channel the desktop's own GTK apps obey — see
+ * src/platform/x11/x11_xsettings.c) > gtk-3.0/gtk-4.0
+ * settings.ini gtk-icon-theme-name > XFCE xfconf's xsettings.xml
+ * IconThemeName > kdeglobals [Icons] Theme > the classic icon-theme
+ * file > system gtk settings.ini (/etc, /usr/share) > the search
+ * path's own default/index.theme Inherits= > "hicolor". */
 const char *fdk__icon_theme_current_name(void);
+
+/* ---- the live XSETTINGS seam (src/platform/x11/x11_xsettings.c) ------
+ *
+ * Reads one STRING setting from the XSETTINGS manager (if any) on
+ * the default display, using the reader's own short-lived X
+ * connection. Implemented in the X11 backend — the only layer
+ * allowed to include Xlib — and declared here because the icon
+ * engine consumes it. Returns false (out untouched) when there is
+ * no display, no manager, or the property will not parse: the
+ * detection chain then falls through to its file channels. */
+bool fdk__x11_xsettings_string(const char *setting_name, char *out,
+                               size_t cap);
 
 /* Resolves one icon name at one size through the full chain (the
  * current theme, its Inherits, hicolor, then /usr/share/pixmaps).

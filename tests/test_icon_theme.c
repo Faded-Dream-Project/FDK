@@ -25,8 +25,12 @@
  *
  * Covered, group by group:
  *
- *   name detection  — env override > icon-theme file > gtk ini >
- *                     kdeglobals > hicolor; hostile names rejected
+ *   name detection  — env override > XSETTINGS live > user gtk ini >
+ *                     xfconf xsettings.xml > kdeglobals > icon-theme
+ *                     file > system gtk ini > default/index.theme >
+ *                     hicolor; hostile names rejected; XML entities
+ *                     unescaped (the XSETTINGS channel itself is
+ *                     exercised live in the X11 integration suite)
  *   lookup          — exact size, inheritance, hicolor terminal,
  *                     relaxed closest-size, scale!=1 skipped,
  *                     SVG never offered, pixmaps last resort
@@ -135,6 +139,14 @@ static void env_point_at_fixture(void) {
     setenv("XDG_CONFIG_HOME", buf, 1);
     snprintf(buf, sizeof(buf), "%s/datadirs", g_root);
     setenv("XDG_DATA_DIRS", buf, 1);
+    /* The SYSTEM config roots get a scratch dir too: unset, the
+     * system-gtk channel would read the host's real /etc/xdg (not
+     * hermetic); and unset DISPLAY keeps a live desktop's XSETTINGS
+     * daemon (channel 2) out of these file-channel tests when the
+     * suite happens to run from inside a session. */
+    snprintf(buf, sizeof(buf), "%s/sysxdg", g_root);
+    setenv("XDG_CONFIG_DIRS", buf, 1);
+    unsetenv("DISPLAY");
     unsetenv("FDK_ICON_THEME");
     unsetenv("XDG_ICON_THEME");
     fdk__icon_theme_reset();
@@ -165,6 +177,8 @@ static void env_point_at_fixture(void) {
  *   <root>/config/         (empty until a detection test fills it)
  *   <root>/datadirs/icons/default/  written by the detection test
  *                               (the system-default channel)
+ *   <root>/sysxdg/          the system XDG_CONFIG_DIRS root (the
+ *                               system-gtk channel's fixture)
  */
 static void build_fixture(void) {
     static char tmpl[] = "/tmp/fdk-itheme-XXXXXX";
@@ -321,6 +335,15 @@ static void drop_fixture(void) {
         "datadirs/icons/default",
         "datadirs/icons",
         "datadirs",
+        "sysxdg/gtk-3.0/settings.ini",
+        "sysxdg/gtk-3.0",
+        "sysxdg/gtk-4.0/settings.ini",
+        "sysxdg/gtk-4.0",
+        "sysxdg",
+        "config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml",
+        "config/xfce4/xfconf/xfce-perchannel-xml",
+        "config/xfce4/xfconf",
+        "config/xfce4",
         NULL,
     };
     for (int i = 0; files[i] != NULL; i++) {
@@ -380,9 +403,87 @@ static void test_current_name(void) {
     CHECK(strcmp(fdk__icon_theme_current_name(), "fdktest") == 0,
           "kdeglobals [Icons] Theme detected");
 
+    /* ---- 1.5.3 channels ---- */
+
+    /* XFCE xfconf xsettings.xml (nested property, the real layout
+     * xfsettingsd persists). Beats kdeglobals (channel 5 > 7). */
+    fixture_dir("config/xfce4/xfconf/xfce-perchannel-xml");
+    fixture_text("config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml",
+                 "<channel name=\"xsettings\" version=\"1\">\n"
+                 "  <property name=\"Net\" type=\"empty\">\n"
+                 "    <property name=\"IconThemeName\" type=\"string\" "
+                 "value=\"fdktest\"/>\n"
+                 "  </property>\n"
+                 "</channel>\n");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk__icon_theme_current_name(), "fdktest") == 0,
+          "xfconf xsettings.xml IconThemeName detected (beats kdeglobals)");
+
+    /* xfconf value with an XML entity: unescaped before use. */
+    fixture_text("config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml",
+                 "<channel name=\"xsettings\" version=\"1\">\n"
+                 "  <property name=\"IconThemeName\" type=\"string\" "
+                 "value=\"A&amp;B\"/>\n"
+                 "</channel>\n");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk__icon_theme_current_name(), "A&B") == 0,
+          "xfconf XML entity unescaped in the value");
+
+    /* User GTK ini beats xfconf (channel 3 > 4 — GTK's own fallback
+     * order; the desktop's GTK apps would see the same winner). */
+    fixture_dir("config/gtk-3.0");
+    fixture_text("config/gtk-3.0/settings.ini",
+                 "[Settings]\ngtk-icon-theme-name=fdkparent\n");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk__icon_theme_current_name(), "fdkparent") == 0,
+          "user gtk ini beats xfconf");
+    {
+        char buf[600];
+        snprintf(buf, sizeof(buf), "%s/config/gtk-3.0/settings.ini",
+                 g_root);
+        remove(buf);
+    }
+
+    /* System GTK settings.ini (XDG_CONFIG_DIRS root): serves when
+     * every user channel is silent. */
+    fixture_dir("sysxdg/gtk-3.0");
+    fixture_text("sysxdg/gtk-3.0/settings.ini",
+                 "[Settings]\ngtk-icon-theme-name=fdklegacy\n");
     {
         char buf[600];
         snprintf(buf, sizeof(buf), "%s/config/kdeglobals", g_root);
+        remove(buf);
+    }
+    {
+        char buf[600];
+        snprintf(buf, sizeof(buf),
+                 "%s/config/xfce4/xfconf/xfce-perchannel-xml/"
+                 "xsettings.xml", g_root);
+        remove(buf);
+    }
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk__icon_theme_current_name(), "fdklegacy") == 0,
+          "system gtk settings.ini (XDG_CONFIG_DIRS) detected");
+
+    /* The system channel sits BELOW every USER channel: the user's
+     * gtk-4.0 ini wins when both exist. */
+    fixture_dir("config/gtk-4.0");
+    fixture_text("config/gtk-4.0/settings.ini",
+                 "[Settings]\ngtk-icon-theme-name=fdktest\n");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk__icon_theme_current_name(), "fdktest") == 0,
+          "user gtk-4.0 ini beats the system gtk-3.0 ini");
+    {
+        char buf[600];
+        snprintf(buf, sizeof(buf), "%s/config/gtk-4.0/settings.ini",
+                 g_root);
+        remove(buf);
+    }
+
+    {
+        char buf[600];
+        snprintf(buf, sizeof(buf), "%s/sysxdg/gtk-3.0/settings.ini",
+                 g_root);
         remove(buf);
     }
     fdk__icon_theme_reset();
@@ -420,8 +521,9 @@ static void test_current_name(void) {
     CHECK(strcmp(fdk__icon_theme_current_name(), "fdkparent") == 0,
           "name re-detected after reset");
     printf("[ok] icon theme: name detection chain "
-           "(env > icon-theme > gtk ini > kdeglobals > default/"
-           "index.theme > hicolor; hostile names rejected)\n");
+           "(env > XSETTINGS > gtk ini > xfconf > kdeglobals > "
+           "icon-theme file > system gtk ini > default/index.theme > "
+           "hicolor; hostile names rejected)\n");
 }
 
 /* ---- 2. lookup ------------------------------------------------------- */

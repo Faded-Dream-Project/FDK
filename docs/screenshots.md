@@ -173,7 +173,11 @@ Adwaita here). The list view resolves the theme's 16-px PNGs; the
 grid's 48-px cells are RASTERIZED FROM SVG (Adwaita ships no 48-px
 PNGs — the vendored nanosvg renders the scalable assets at the
 requested size, verified pixel-level against an independent cairo
-reference), both captured on X11:
+reference). Since 1.5.3 the icons composite with true per-pixel
+alpha — the transparent surround around every artwork shows the row
+or cell background (the earlier builds painted an opaque black box
+there), and the detection chain reads the LIVE desktop through
+XSETTINGS on X11 in addition to the file channels. Captured on X11:
 
 ![File picker, themed icons, list view](screenshots/file_picker_themed_list_x11_1024x768.png)
 

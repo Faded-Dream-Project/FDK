@@ -1000,6 +1000,180 @@ static char *it_lookup(const char *icon_name, fdk_i32 size) {
     return NULL;
 }
 
+/* ---- desktop-config readers (the detection chain's file channels) --- */
+
+/* Reads <root>/gtk-3.0/settings.ini then <root>/gtk-4.0/settings.ini,
+ * returning the first [Settings] gtk-icon-theme-name that parses into
+ * a usable theme name. One reader for the USER root and every SYSTEM
+ * root — the file grammar is the same wherever GTK puts it. */
+static bool it_read_gtk_ini_theme(const char *root, char *out,
+                                  size_t cap) {
+    if (root == NULL || root[0] == '\0') {
+        return false;
+    }
+    static const char *const gtk_confs[] = {
+        "gtk-3.0/settings.ini",
+        "gtk-4.0/settings.ini",
+    };
+    for (size_t i = 0; i < sizeof(gtk_confs) / sizeof(gtk_confs[0]);
+         i++) {
+        char path[IT_PATH_MAX];
+        if (snprintf(path, sizeof(path), "%s/%s", root, gtk_confs[i]) >=
+            (int)sizeof(path)) {
+            continue;
+        }
+        char *buf = it_read_index(path);
+        if (buf == NULL) {
+            continue;
+        }
+        char *save = NULL;
+        char *line = strtok_r(buf, "\n", &save);
+        bool in_settings = false;
+        while (line != NULL) {
+            char *s = it_trim(line);
+            if (s[0] == '[') {
+                in_settings = strncmp(s, "[Settings", 9) == 0;
+            } else if (in_settings) {
+                char *eq = strchr(s, '=');
+                if (eq != NULL) {
+                    *eq = '\0';
+                    char *key = it_trim(s);
+                    if (strcmp(key, "gtk-icon-theme-name") == 0) {
+                        char *val = it_trim(eq + 1);
+                        /* GTK tolerates quoted values. */
+                        size_t vl = strlen(val);
+                        if (vl >= 2 && val[0] == '"' &&
+                            val[vl - 1] == '"') {
+                            val[vl - 1] = '\0';
+                            val++;
+                        }
+                        if (it_name_copy(out, cap, val)) {
+                            fdk_free(buf);
+                            return true;
+                        }
+                    }
+                }
+            }
+            line = strtok_r(NULL, "\n", &save);
+        }
+        fdk_free(buf);
+    }
+    return false;
+}
+
+/* Unescapes the five XML predefined entities in place (theme names
+ * with & or ' are rare but legal; a scanner must not hand the theme
+ * engine "&amp;" as a directory name). */
+static void it_xml_unescape(char *s) {
+    char *w = s;
+    const char *r = s;
+    while (*r != '\0') {
+        if (*r != '&') {
+            *w++ = *r++;
+            continue;
+        }
+        if (strncmp(r, "&amp;", 5) == 0) {
+            *w++ = '&';
+            r += 5;
+        } else if (strncmp(r, "&lt;", 4) == 0) {
+            *w++ = '<';
+            r += 4;
+        } else if (strncmp(r, "&gt;", 4) == 0) {
+            *w++ = '>';
+            r += 4;
+        } else if (strncmp(r, "&quot;", 6) == 0) {
+            *w++ = '"';
+            r += 6;
+        } else if (strncmp(r, "&apos;", 6) == 0) {
+            *w++ = '\'';
+            r += 6;
+        } else {
+            *w++ = *r++; /* a bare & — pass it through verbatim */
+        }
+    }
+    *w = '\0';
+}
+
+/* Reads XFCE's xfconf channel file
+ * <cfg_root>/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml and
+ * returns its IconThemeName property. xfconf stores settings as
+ * nested <property name="..." type="string" value="..."/> elements;
+ * the channel file is the DURABLE form of what xfsettingsd serves
+ * over XSETTINGS, so the same value governs both channels. A bounded
+ * attribute scan (not an XML parser — the file is flat, attribute-
+ * quoted, and untrusted; every read is length-checked and the value
+ * must survive it_name_ok before it is believed). */
+static bool it_read_xfconf_icon_theme(const char *cfg_root, char *out,
+                                      size_t cap) {
+    if (cfg_root == NULL || cfg_root[0] == '\0') {
+        return false;
+    }
+    char path[IT_PATH_MAX];
+    if (snprintf(path, sizeof(path),
+                 "%s/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml",
+                 cfg_root) >= (int)sizeof(path)) {
+        return false;
+    }
+    char *buf = it_read_index(path);
+    if (buf == NULL) {
+        return false;
+    }
+    bool found = false;
+
+    /* Find name="IconThemeName"; the same element's value="..." (or
+     * the nearest following one, xfconf writes them in one line)
+     * carries the theme. */
+    const char *needle = "name=\"IconThemeName\"";
+    const char *p = buf;
+    size_t len = strlen(buf);
+    while (!found) {
+        const char *hit = strstr(p, needle);
+        if (hit == NULL) {
+            break;
+        }
+        /* Scan forward for value=" within the same element (bounded
+         * generously: one element, hundreds of bytes at most). */
+        const char *scan = hit + strlen(needle);
+        const char *limit = scan + 512;
+        if (limit > buf + len) {
+            limit = buf + len;
+        }
+        while (scan < limit) {
+            if (scan[0] == '>' || scan[0] == '<') {
+                break; /* left the element without a value */
+            }
+            if (strncmp(scan, "value=\"", 7) == 0) {
+                const char *v = scan + 7;
+                const char *end = v;
+                while (end < limit && *end != '"') {
+                    end++;
+                }
+                if (end < limit && end > v) {
+                    size_t vlen = (size_t)(end - v);
+                    if (vlen < cap) {
+                        char scratch[IT_NAME_MAX];
+                        size_t n = vlen < sizeof(scratch) - 1
+                                       ? vlen
+                                       : sizeof(scratch) - 1;
+                        memcpy(scratch, v, n);
+                        scratch[n] = '\0';
+                        it_xml_unescape(scratch);
+                        if (it_name_copy(out, cap, scratch)) {
+                            found = true;
+                        }
+                    }
+                }
+                break;
+            }
+            scan++;
+        }
+        p = hit + strlen(needle);
+    }
+
+    fdk_free(buf);
+    return found;
+}
+
 /* ---- the public-internal API ----------------------------------------- */
 
 char *fdk__icon_theme_lookup(const char *icon_name, fdk_i32 size) {
@@ -1030,6 +1204,24 @@ const char *fdk__icon_theme_current_name(void) {
         return g_current;
     }
 
+    /* 2. XSETTINGS live (X11/XLibre): the channel the desktop's own
+     *    GTK applications obey — xfsettingsd on XFCE, gsd under
+     *    GNOME/XWayland, mate/cinnamon settings daemons, xsettingsd.
+     *    No bus, no daemon library: a short-lived X connection reads
+     *    the manager's property (src/platform/x11/x11_xsettings.c).
+     *    Beats every file channel, exactly as it does inside GTK —
+     *    a live desktop statement outranks stale files. Absent under
+     *    a pure Wayland session (no manager reachable): the file
+     *    chain carries on. */
+    {
+        char live[IT_NAME_MAX];
+        if (fdk__x11_xsettings_string("Net/IconThemeName", live,
+                                      sizeof(live)) &&
+            it_name_copy(g_current, sizeof(g_current), live)) {
+            return g_current;
+        }
+    }
+
     /* The config-root scratch: XDG_CONFIG_HOME or ~/.config. */
     const char *home = getenv("HOME");
     char cfg[IT_PATH_MAX];
@@ -1042,75 +1234,21 @@ const char *fdk__icon_theme_current_name(void) {
         cfg[0] = '\0';
     }
 
-    /* 2. The classic single-line icon-theme file (GNOME 2 era,
-     *    still honored by several desktops). */
-    if (cfg[0] != '\0') {
-        char path[IT_PATH_MAX];
-        if (snprintf(path, sizeof(path), "%s/icon-theme", cfg) <
-            (int)sizeof(path)) {
-            char *buf = it_read_index(path);
-            if (buf != NULL) {
-                char *name = it_trim(strtok(buf, "\n"));
-                if (it_name_copy(g_current, sizeof(g_current), name)) {
-                    fdk_free(buf);
-                    return g_current;
-                }
-                fdk_free(buf);
-            }
-        }
+    /* 3. GTK3/GTK4 settings.ini (user): [Settings]
+     *    gtk-icon-theme-name. No bus, no daemon — the file IS the
+     *    desktop's statement. */
+    if (cfg[0] != '\0' &&
+        it_read_gtk_ini_theme(cfg, g_current, sizeof(g_current))) {
+        return g_current;
     }
 
-    /* 3/4. GTK3/GTK4 settings.ini: [Settings] gtk-icon-theme-name.
-     * No bus, no daemon — the file IS the desktop's statement. */
-    static const char *const gtk_confs[] = {
-        "gtk-3.0/settings.ini",
-        "gtk-4.0/settings.ini",
-    };
-    for (size_t i = 0; i < sizeof(gtk_confs) / sizeof(gtk_confs[0]);
-         i++) {
-        if (cfg[0] == '\0') {
-            break;
-        }
-        char path[IT_PATH_MAX];
-        if (snprintf(path, sizeof(path), "%s/%s", cfg, gtk_confs[i]) >=
-            (int)sizeof(path)) {
-            continue;
-        }
-        char *buf = it_read_index(path);
-        if (buf == NULL) {
-            continue;
-        }
-        char *save = NULL;
-        char *line = strtok_r(buf, "\n", &save);
-        bool in_settings = false;
-        while (line != NULL) {
-            char *s = it_trim(line);
-            if (s[0] == '[') {
-                in_settings = strncmp(s, "[Settings", 9) == 0;
-            } else if (in_settings) {
-                char *eq = strchr(s, '=');
-                if (eq != NULL) {
-                    *eq = '\0';
-                    char *key = it_trim(s);
-                    if (strcmp(key, "gtk-icon-theme-name") == 0) {
-                        char *val = it_trim(eq + 1);
-                        /* GTK tolerates quoted values. */
-                        size_t vl = strlen(val);
-                        if (vl >= 2 && val[0] == '"' && val[vl - 1] == '"') {
-                            val[vl - 1] = '\0';
-                            val++;
-                        }
-                        if (it_name_copy(g_current, sizeof(g_current),
-                                         val)) {
-                            fdk_free(buf);
-                            return g_current;
-                        }
-                    }
-                }
-            }
-            line = strtok_r(NULL, "\n", &save);
-        }
-        fdk_free(buf);
+    /* 4. XFCE: xfconf's durable xsettings.xml (the file behind
+     *    xfsettingsd's XSETTINGS). Live XFCE sessions answer through
+     *    channel 2 above; this is the no-daemon truth for the
+     *    XFCE-on-Wayland sessions that do not serve XSETTINGS. */
+    if (cfg[0] != '\0' &&
+        it_read_xfconf_icon_theme(cfg, g_current, sizeof(g_current))) {
+        return g_current;
     }
 
     /* 5. KDE: kdeglobals [Icons] Theme=. */
@@ -1147,7 +1285,65 @@ const char *fdk__icon_theme_current_name(void) {
         }
     }
 
-    /* 6. The system default theme: the icon search path's own
+    /* 6. The classic single-line icon-theme file (GNOME 2 era,
+     *    still honored by several desktops). */
+    if (cfg[0] != '\0') {
+        char path[IT_PATH_MAX];
+        if (snprintf(path, sizeof(path), "%s/icon-theme", cfg) <
+            (int)sizeof(path)) {
+            char *buf = it_read_index(path);
+            if (buf != NULL) {
+                char *name = it_trim(strtok(buf, "\n"));
+                if (it_name_copy(g_current, sizeof(g_current), name)) {
+                    fdk_free(buf);
+                    return g_current;
+                }
+                fdk_free(buf);
+            }
+        }
+    }
+
+    /* 7. GTK's SYSTEM settings.ini: each $XDG_CONFIG_DIRS entry
+     *    (default /etc/xdg — the path GTK itself reads), plus the
+     *    /etc and /usr/share spellings some distros ship. The
+     *    distro's statement when the user never chose one. */
+    {
+        static const char *const sys_extra[4][2] = {
+            { "/etc", "gtk-3.0" }, { "/etc", "gtk-4.0" },
+            { "/usr/share", "gtk-3.0" }, { "/usr/share", "gtk-4.0" },
+        };
+        char dirs_buf[IT_PATH_MAX];
+        const char *xdirs = getenv("XDG_CONFIG_DIRS");
+        if (xdirs == NULL || xdirs[0] == '\0') {
+            xdirs = "/etc/xdg";
+        }
+        snprintf(dirs_buf, sizeof(dirs_buf), "%s", xdirs);
+        char *save = NULL;
+        for (char *tok = strtok_r(dirs_buf, ":", &save); tok != NULL;
+             tok = strtok_r(NULL, ":", &save)) {
+            if (tok[0] == '\0') {
+                continue;
+            }
+            char root[IT_PATH_MAX];
+            if (snprintf(root, sizeof(root), "%s", tok) <
+                    (int)sizeof(root) &&
+                it_read_gtk_ini_theme(root, g_current,
+                                      sizeof(g_current))) {
+                return g_current;
+            }
+        }
+        for (int i = 0; i < 4; i++) {
+            char root[IT_PATH_MAX];
+            if (snprintf(root, sizeof(root), "%s/%s", sys_extra[i][0],
+                         sys_extra[i][1]) < (int)sizeof(root) &&
+                it_read_gtk_ini_theme(root, g_current,
+                                      sizeof(g_current))) {
+                return g_current;
+            }
+        }
+    }
+
+    /* 8. The system default theme: the icon search path's own
      *    <base>/default/index.theme, [Icon Theme] Inherits=. This is
      *    the channel stock GNOME/XFCE systems actually publish (set
      *    by the distro or update-alternatives; gsettings itself is
@@ -1204,7 +1400,7 @@ const char *fdk__icon_theme_current_name(void) {
         }
     }
 
-    /* 7. The spec's universal default. */
+    /* 9. The spec's universal default. */
     snprintf(g_current, sizeof(g_current), "hicolor");
     return g_current;
 }

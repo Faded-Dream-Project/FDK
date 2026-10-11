@@ -1966,3 +1966,72 @@ installed shared library, run under Xvfb, dialog + icon engine live)
 is now the standing proof that the install actually serves a
 developer outside the source tree; the .pc's prefix stamp keeps
 it honest across prefix changes.
+
+## 1.5.3 — the black-box lessons: the fast path nobody composited
+
+**The exact-size path is the one nobody tests.** 1.5.2 shipped
+pixel-verified icon rendering — and every icon still wore an opaque
+black box wherever the artwork had transparent margins. The root
+cause: `fdk_surface_blit_transformed`'s identity and integer-
+translation FAST PATHS routed ARGB8888 sources through
+`fdk_surface_blit` — the documented OPAQUE raw copy — so a sprite's
+transparent padding (RGB 0,0,0) painted as solid black. Only icons
+decoded at EXACTLY their cell size hit the path: 16-px list rows,
+48-px grid cells, the sidebar's places — precisely the reported
+surfaces. Scaled blits always took the compositing paths and were
+clean, which is why scale-varying fixtures never saw it. The
+fixture PNGs made it worse: solid full-bleed squares have no
+transparent margin at all, so every template match passed while the
+defect lived in the un-sampled ring. The fix (route ARGB sources
+through `blit_blend` on the exact paths) is pinned by a render-level
+regression that blits a transparent-margined sprite at identity AND
+translation, plus margin checks in the picker rigs: the ring around
+every fixture icon must be the row background, never black, and the
+SVG grid check now samples the cairosvg reference's TRANSPARENT
+region too — the old matcher only compared opaque pixels, which is
+exactly where a black box hides.
+
+**One seam, three surfaces.** The list rows, the icon-view cells,
+the sidebar places, the About-dialog logo, and the public Picture
+widget all turned out to share the defect (the logo via a direct
+plain-blit call of its own). When a compositing bug surfaces
+anywhere, sweep every consumer of the primitive, not the reported
+widget — the shared helper meant one fix cleaned all of them, but
+the About logo needed its own call-site change.
+
+**Decode the wire format from a real implementation.** The XSETTINGS
+reader's property layout was not taken from memory of the spec (the
+spec's prose is ambiguous about the per-setting header): a REAL
+xsettingsd 1.0.2 ran under Xvfb, its `_XSETTINGS_SETTINGS` bytes
+were dumped from the selection owner's window, and the layout was
+decoded byte-for-byte (type, 1 pad byte, u16 name_len, name,
+pad-to-4, serial, value — with the property on the MANAGER's window,
+not the root). The reader was then verified END-TO-END against that
+daemon, including a live theme change; the repo's X11 test group
+uses an in-repo writer that reproduces the decoded format, and the
+first draft of that writer had its own off-by-one (name_len at
+setting+1 instead of +2) — caught immediately because the reader,
+already validated against the real daemon, refused the property.
+That is the order that works: pin the reader to the real world
+first, then the in-repo fixture chases the reader.
+
+**Hermeticity now includes the display.** The headless detection
+tests unset `DISPLAY` (a live desktop's XSETTINGS daemon would
+otherwise leak its theme into file-channel assertions when the suite
+runs from inside a session) and point `XDG_CONFIG_DIRS` at scratch
+(the new system-gtk channel would otherwise read the host's real
+`/etc/xdg`). Every new desktop-config channel widens the surface a
+test environment can accidentally inject — isolate the whole
+channel set, not just the one under test.
+
+**Ask the desktop through the channel the desktop's own apps use.**
+File-config detection kept missing the user's LIVE theme because
+modern desktops state it through a daemon, not a file: XFCE serves
+XSETTINGS via xfsettingsd, GNOME mirrors gsettings to XWayland
+clients, KDE serves XWayland clients from kdeglobals. Reading
+XSETTINGS directly (one short-lived X connection, one bounded
+property read, no D-Bus, no daemon library) finally hears the same
+statement the desktop's GTK applications obey — and under pure
+Wayland, where no manager is reachable, the chain falls through to
+the files honestly (kdeglobals on KDE, xfconf on XFCE, the gtk ini
+when written; verified under sway with DISPLAY unset).

@@ -9,7 +9,46 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-11, at milestone **1.5.2** (the exhaustive
+Last audited: 2026-10-11, at milestone **1.5.3** (the picker's
+polish pass — the maintainer's third report ["black boxes or bars
+around folder icons, worst in the grid, present in the list; the
+active desktop theme still not detected without an override; the
+sidebar too"] resolved into two root causes, both fixed internally
+[public API and its 621 exports unchanged]: (1) icon COMPOSITING
+violated the blit contract on the exact-size fast paths
+[fdk_surface_blit_transformed's identity and integer-translation
+paths routed ARGB8888 icon sources through fdk_surface_blit — the
+documented OPAQUE raw copy — so every icon decoded at exactly its
+cell size (16-px list rows, 48-px grid cells, the sidebar's places)
+painted its transparent margins as opaque BLACK; scaled blits
+composited correctly, which is exactly why 1.5.2's verifications
+missed it — the fixture icons were full-bleed squares and the
+template matches sampled only the reference's opaque pixels; now
+ARGB sources composite source-over on both fast paths, XRGB sources
+keep the raw copy; the same defect class swept through every
+consumer of the primitive: the About dialog's logo (its own plain-
+blit call site) and the public Picture widget (inherits the fix)];
+regression guards: a render-level transparent-margin test at
+identity AND translation, transparent-margined fixture icons +
+margin ring checks in the picker rigs, and the SVG grid proof now
+sampling the cairosvg reference's TRANSPARENT region; (2) theme
+detection now hears the LIVE desktop through XSETTINGS
+[Net/IconThemeName read from the settings manager via one
+short-lived X connection — pure Xlib, no D-Bus, the no-bus policy
+intact; the channel the desktop's own GTK apps obey on X11/XLibre:
+xfsettingsd, gsd-under-XWayland, mate/cinnamon, xsettingsd; the
+wire format decoded byte-for-byte from a REAL xsettingsd 1.0.2 and
+the reader verified end-to-end against that daemon including a
+live theme change; precedence: FDK_ICON_THEME > XSETTINGS > user
+gtk ini > xfconf xsettings.xml > kdeglobals > classic icon-theme
+file > SYSTEM gtk ini (XDG_CONFIG_DIRS + /etc + /usr/share) >
+default/index.theme > hicolor; pure-Wayland sessions have no
+manager and fall to the file channels — proven under sway with
+DISPLAY unset]; tests: headless detection groups for the new file
+channels, an X11 XSETTINGS group with an in-repo spec-conformant
+fake manager (both byte orders, int/string/color skip, precedence,
+fallbacks), and both picker rigs re-verified pixel-level + VLM on
+X11 AND Wayland), building on **1.5.2** (the exhaustive
 pre-1.0 audit pass — the maintainer's second desktop report
 ["only recognizable folder icons; text files indistinguishable"]
 traced to THREE root causes, all fixed internally [public API and

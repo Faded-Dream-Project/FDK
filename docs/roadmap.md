@@ -5507,3 +5507,67 @@ default-prefix build silently installed a stale fdk.pc pointing at
 regenerates on prefix change via its own stamp), and the session
 example rigs' stale pins are recorded in docs/testing.md's 1.5.2
 lessons so the next re-run starts from current reality.
+
+## 1.5.3 — the picker's polish pass: compositing and the live desktop
+
+The maintainer's third report ("black boxes or bars around folder
+icons, worst in the grid; theme detection still not the active
+one; the sidebar too") resolved into two root causes, both real,
+both now pixel-proven dead in every view on both backends — with
+the public API and its 621 exports untouched.
+
+**The black boxes were an alpha-compositing defect on the renderer's
+exact-size fast paths.** `fdk_surface_blit_transformed` promises
+SOURCE-OVER compositing for ARGB sources in its public contract —
+but its identity and integer-translation fast paths routed ARGB
+icons through `fdk_surface_blit`, the documented OPAQUE raw copy.
+An icon decoded at exactly its cell size (16-px list rows, 48-px
+grid cells, the sidebar's 16-px places — every themed icon FDK
+serves, because the engine deliberately rasterizes at the REQUESTED
+size) blitted 1:1 and splatted its transparent margins' RGB (0,0,0)
+as opaque black. Scaled blits took the compositing paths and were
+clean — which is also why the 1.5.2 verifications missed it: the
+fixture icons were solid full-bleed squares (no transparent ring to
+sample) and the template matches compared only the reference's
+OPAQUE pixels, exactly where a black box does not reach. The fix
+routes ARGB sources through `blit_blend` (integer source-over) on
+both fast paths; XRGB sources keep the raw copy. The same defect
+class was swept through every consumer of the primitive: the About
+dialog's logo (its own plain-blit call site, now `blit_blend`) and
+the public Picture widget (inherits the fix through the same
+transformed blit). Regression guards: a render-level test pinning
+transparent margins at identity AND translation (both destination
+formats, half-alpha blend math included), the picker rigs' margin
+checks (the ring around every fixture icon must be the row
+background — the fixtures now carry transparent margins precisely
+so the check can fail), and the SVG grid proof now sampling the
+cairosvg reference's TRANSPARENT region as well as its opaque core.
+
+**Theme detection now hears the LIVE desktop.** The file-config
+chain kept missing the active theme because modern desktops state
+it through a daemon, not a file. The engine now reads XSETTINGS
+directly — `Net/IconThemeName` from the settings manager on the
+default display (one short-lived X connection, one bounded property
+read; pure Xlib, no D-Bus, honoring the no-bus policy) — which is
+the exact channel the desktop's own GTK applications obey on
+X11/XLibre: xfsettingsd on XFCE, gnome-settings-daemon under GNOME/
+XWayland, the mate/cinnamon daemons, xsettingsd. The wire format
+was decoded byte-for-byte from a real xsettingsd 1.0.2 under Xvfb
+(the property lives on the SELECTION OWNER's window; the per-setting
+header is type, 1 pad byte, u16 name length, name, pad-to-4,
+serial, value) and the reader is verified END-TO-END against that
+daemon, including a live theme change. The full precedence:
+`FDK_ICON_THEME` (explicit override) > XSETTINGS live > user gtk
+settings.ini > XFCE's xfconf xsettings.xml > kdeglobals > the
+classic icon-theme file > the SYSTEM gtk settings.ini (every
+`XDG_CONFIG_DIRS` entry plus the `/etc` and `/usr/share` spellings)
+> `default/index.theme` `Inherits=` > hicolor. Under pure Wayland
+no manager is reachable: the file channels carry detection
+(kdeglobals on KDE, xfconf on XFCE, the gtk ini when written —
+GNOME's gsettings remains D-Bus and out of policy reach, so stock
+GNOME systems answer through the default channel; all documented
+in fdk_dialog.h). New tests pin both byte orders, the skip math
+over integer/string/color neighbors, env-over-XSETTINGS
+precedence, unreadable-property fallback, and the
+manager-disappeared fallback; the Wayland rig proves file-channel
+detection end to end with DISPLAY unset under sway.

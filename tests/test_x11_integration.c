@@ -7230,6 +7230,261 @@ static void test_file_dialog_icons_gui(void) {
     icon_fixture_drop();
 }
 
+/* ---- 1.5.3: XSETTINGS live icon-theme detection -------------------
+ *
+ * A FAKE settings manager plays the other side of the real protocol:
+ * it takes the _XSETTINGS_S0 selection and publishes the
+ * _XSETTINGS_SETTINGS property on ITS window. The WIRE FORMAT this
+ * writer emits was decoded byte-for-byte from a REAL xsettingsd
+ * 1.0.2 under Xvfb and cross-checked against its own reference
+ * reader (dump_xsettings); the live-daemon end-to-end proof lives in
+ * the manual rig (scripts/probe_xsettings.c, run against the real
+ * xsettingsd binary). This group pins the engine-side behavior:
+ * precedence (env > XSETTINGS > files), both byte orders, integer/
+ * string/color settings being SKIPPED correctly on the walk, and the
+ * unreadable-property fallback. */
+
+static size_t xs_put_u16(unsigned char *p, size_t off, unsigned long v,
+                         int be) {
+    if (be) {
+        p[off] = (unsigned char)(v >> 8);
+        p[off + 1] = (unsigned char)v;
+    } else {
+        p[off] = (unsigned char)v;
+        p[off + 1] = (unsigned char)(v >> 8);
+    }
+    return off + 2;
+}
+
+static size_t xs_put_u32(unsigned char *p, size_t off, unsigned long v,
+                         int be) {
+    for (size_t i = 0; i < 4; i++) {
+        p[off + i] = (unsigned char)(be ? (v >> (8 * (3 - i)))
+                                        : (v >> (8 * i)));
+    }
+    return off + 4;
+}
+
+/* Appends one INTEGER setting (name + serial + card32 value),
+ * 4-aligned the way the real daemons lay settings out. */
+static size_t xs_put_int(unsigned char *p, size_t off, const char *name,
+                         unsigned long v, int be) {
+    p[off] = 0; /* type 0 = integer */
+    off += 2;  /* type byte + 1 pad byte: name_len u16 lands at +2 */
+    off = xs_put_u16(p, off, (unsigned long)strlen(name), be);
+    size_t name_off = off;
+    memcpy(p + off, name, strlen(name));
+    off += strlen(name);
+    while ((off - 12) % 4 != 0) { /* pad to a 4-byte boundary */
+        p[off++] = 0;
+    }
+    (void)name_off;
+    off = xs_put_u32(p, off, 1, be); /* the setting's serial */
+    off = xs_put_u32(p, off, v, be);
+    return off;
+}
+
+/* Appends one STRING setting. */
+static size_t xs_put_str(unsigned char *p, size_t off, const char *name,
+                         const char *val, int be) {
+    p[off] = 1; /* type 1 = string */
+    off += 2;  /* type byte + 1 pad byte: name_len u16 lands at +2 */
+    off = xs_put_u16(p, off, (unsigned long)strlen(name), be);
+    memcpy(p + off, name, strlen(name));
+    off += strlen(name);
+    while ((off - 12) % 4 != 0) {
+        p[off++] = 0;
+    }
+    off = xs_put_u32(p, off, 1, be); /* the setting's serial */
+    off = xs_put_u32(p, off, (unsigned long)strlen(val), be);
+    memcpy(p + off, val, strlen(val));
+    off += strlen(val);
+    while ((off - 12) % 4 != 0) {
+        p[off++] = 0;
+    }
+    return off;
+}
+
+/* Appends one COLOR setting (4 x card16) — exercises the skip math
+ * for the widest value type. */
+static size_t xs_put_color(unsigned char *p, size_t off, const char *name,
+                           int be) {
+    p[off] = 2; /* type 2 = color */
+    off += 2;  /* type byte + 1 pad byte: name_len u16 lands at +2 */
+    off = xs_put_u16(p, off, (unsigned long)strlen(name), be);
+    memcpy(p + off, name, strlen(name));
+    off += strlen(name);
+    while ((off - 12) % 4 != 0) {
+        p[off++] = 0;
+    }
+    off = xs_put_u32(p, off, 1, be); /* the setting's serial */
+    off = xs_put_u16(p, off, 0x1234, be);
+    off = xs_put_u16(p, off, 0x5678, be);
+    off = xs_put_u16(p, off, 0x9ABC, be);
+    off = xs_put_u16(p, off, 0xDEF0, be);
+    return off;
+}
+
+/* Publishes a property shaped like a full desktop settings set (the
+ * icon theme buried among integer/string/color neighbors — the walk
+ * must skip them all correctly), the way real daemons order nothing
+ * in particular. */
+static void xs_publish(Display *d, Window w, Atom prop, const char *theme,
+                       int be) {
+    unsigned char buf[2048];
+    size_t off = 0;
+    buf[off++] = (unsigned char)(be ? 1 : 0);
+    buf[off++] = 0; buf[off++] = 0; buf[off++] = 0;
+    off = xs_put_u32(buf, off, 1, be);    /* serial */
+    off = xs_put_u32(buf, off, 6, be);    /* 6 settings */
+    off = xs_put_int(buf, off, "Xft/DPI", 96, be);
+    off = xs_put_str(buf, off, "Net/ThemeName", "Adwaita", be);
+    off = xs_put_str(buf, off, "Net/IconThemeName", theme, be);
+    off = xs_put_str(buf, off, "Gtk/ToolbarStyle", "Icons", be);
+    off = xs_put_color(buf, off, "Gtk/Something", be);
+    off = xs_put_int(buf, off, "Gtk/CursorBlinkTime", 1200, be);
+    XChangeProperty(d, w, prop, prop, 8, PropModeReplace, buf,
+                    (int)off);
+    XSync(d, False);
+}
+
+static void test_xsettings_detection_gui(void) {
+    /* Hermetic file channels: every XDG root points at scratch dirs
+     * that carry NOTHING (the icon search path has no default/
+     * index.theme, no user config) so the ONLY statements are the
+     * property this group installs and the one file it writes. */
+    static char cfg_root[] = "/tmp/fdk-xsdetect-XXXXXX";
+    char buf[700];
+    if (mkdtemp(cfg_root) == NULL) {
+        perror("mkdtemp");
+        exit(2);
+    }
+    snprintf(buf, sizeof(buf), "%s/config", cfg_root);
+    mkdir(buf, 0755);
+    snprintf(buf, sizeof(buf), "%s/data", cfg_root);
+    mkdir(buf, 0755);
+
+    const char *saved_data = getenv("XDG_DATA_HOME");
+    const char *saved_cfg = getenv("XDG_CONFIG_HOME");
+    const char *saved_cdirs = getenv("XDG_CONFIG_DIRS");
+    const char *saved_dirs = getenv("XDG_DATA_DIRS");
+    const char *saved_theme = getenv("FDK_ICON_THEME");
+    snprintf(buf, sizeof(buf), "%s/data", cfg_root);
+    setenv("XDG_DATA_HOME", buf, 1);
+    snprintf(buf, sizeof(buf), "%s/config", cfg_root);
+    setenv("XDG_CONFIG_HOME", buf, 1);
+    setenv("XDG_CONFIG_DIRS", "/nonexistent-fdk-xs", 1);
+    setenv("XDG_DATA_DIRS", "/nonexistent-fdk-xs", 1);
+    unsetenv("FDK_ICON_THEME");
+
+    Display *d = XOpenDisplay(NULL);
+    assert(d != NULL);
+    char sel_name[32];
+    snprintf(sel_name, sizeof(sel_name), "_XSETTINGS_S%d",
+             DefaultScreen(d));
+    Atom sel = XInternAtom(d, sel_name, False);
+    Atom prop = XInternAtom(d, "_XSETTINGS_SETTINGS", False);
+    Window mgr = XCreateSimpleWindow(d, DefaultRootWindow(d), 0, 0, 1, 1,
+                                     0, 0, 0);
+
+    /* 1. No manager, no files: hicolor. */
+    fdk__icon_theme_reset();
+    assert(strcmp(fdk__icon_theme_current_name(), "hicolor") == 0);
+
+    /* 2. LSB-first property with the icon theme among five other
+     * settings: detected, file channels silent. */
+    xs_publish(d, mgr, prop, "fdkxs-live", 0);
+    XSetSelectionOwner(d, sel, mgr, CurrentTime);
+    XSync(d, False);
+    fdk__icon_theme_reset();
+    assert(strcmp(fdk__icon_theme_current_name(), "fdkxs-live") == 0);
+
+    /* 3. The explicit env override still beats the live desktop. */
+    setenv("FDK_ICON_THEME", "fdkxs-override", 1);
+    fdk__icon_theme_reset();
+    assert(strcmp(fdk__icon_theme_current_name(), "fdkxs-override") == 0);
+    unsetenv("FDK_ICON_THEME");
+
+    /* 4. MSB-first property: the same settings, big-endian words. */
+    xs_publish(d, mgr, prop, "fdkxs-be", 1);
+    XSync(d, False);
+    fdk__icon_theme_reset();
+    assert(strcmp(fdk__icon_theme_current_name(), "fdkxs-be") == 0);
+
+    /* 5. A TRUNCATED property (lying count): unreadable — the chain
+     * falls through to the file channels and finds the gtk ini. */
+    snprintf(buf, sizeof(buf), "%s/config/gtk-3.0", cfg_root);
+    mkdir(buf, 0755);
+    snprintf(buf, sizeof(buf), "%s/config/gtk-3.0/settings.ini",
+             cfg_root);
+    FILE *f = fopen(buf, "w");
+    assert(f != NULL);
+    fputs("[Settings]\ngtk-icon-theme-name=fdkxs-file\n", f);
+    fclose(f);
+    {
+        unsigned char junk[16] = { 0, 0, 0, 0, 1, 0, 0, 0,
+                                   9, 0, 0, 0, 1, 0, 0, 0 };
+        XChangeProperty(d, mgr, prop, prop, 8, PropModeReplace, junk, 16);
+    }
+    XSync(d, False);
+    fdk__icon_theme_reset();
+    assert(strcmp(fdk__icon_theme_current_name(), "fdkxs-file") == 0);
+
+    /* 6. Manager gone (selection disowned + property deleted): the
+     * file channel still answers — the reader must not crash or
+     * cache a stale live value. */
+    XSetSelectionOwner(d, sel, None, CurrentTime);
+    XDeleteProperty(d, mgr, prop);
+    XSync(d, False);
+    fdk__icon_theme_reset();
+    assert(strcmp(fdk__icon_theme_current_name(), "fdkxs-file") == 0);
+
+    /* Restore the world. */
+    XDestroyWindow(d, mgr);
+    XCloseDisplay(d);
+    if (saved_data != NULL) {
+        setenv("XDG_DATA_HOME", saved_data, 1);
+    } else {
+        unsetenv("XDG_DATA_HOME");
+    }
+    if (saved_cfg != NULL) {
+        setenv("XDG_CONFIG_HOME", saved_cfg, 1);
+    } else {
+        unsetenv("XDG_CONFIG_HOME");
+    }
+    if (saved_cdirs != NULL) {
+        setenv("XDG_CONFIG_DIRS", saved_cdirs, 1);
+    } else {
+        unsetenv("XDG_CONFIG_DIRS");
+    }
+    if (saved_dirs != NULL) {
+        setenv("XDG_DATA_DIRS", saved_dirs, 1);
+    } else {
+        unsetenv("XDG_DATA_DIRS");
+    }
+    if (saved_theme != NULL) {
+        setenv("FDK_ICON_THEME", saved_theme, 1);
+    } else {
+        unsetenv("FDK_ICON_THEME");
+    }
+    fdk__icon_theme_reset();
+
+    static const char *const cleanup[] = {
+        "config/gtk-3.0/settings.ini", "config/gtk-3.0", "config",
+        "data", NULL,
+    };
+    for (int i = 0; cleanup[i] != NULL; i++) {
+        snprintf(buf, sizeof(buf), "%s/%s", cfg_root, cleanup[i]);
+        remove(buf);
+    }
+    remove(cfg_root);
+
+    printf("[ok] XSETTINGS live icon-theme detection (LSB+MSB "
+           "properties, skip of int/string/color neighbors, env "
+           "precedence, unreadable-property fallback, manager-gone "
+           "fallback)\n");
+}
+
 /* ---- 1.2.0: drag and drop ---------------------------------------- */
 
 static struct {
@@ -9702,6 +9957,7 @@ int main(void) {
     test_list_activation_gui();
     test_file_dialog_gui();
     test_file_dialog_icons_gui();
+    test_xsettings_detection_gui();
     test_dnd_receiver_gui();
     test_dnd_receiver_gtk_gui();
     test_dnd_receiver_incr_gui();

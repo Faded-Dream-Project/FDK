@@ -926,6 +926,102 @@ static void test_transformed_alpha(void) {
            "scale\n");
 }
 
+static void test_transformed_argb_exact_blit(void) {
+    /* THE 1.5.3 REGRESSION: an ARGB8888 sprite blitted at EXACTLY
+     * 1:1 (identity or integer translation — the fast paths) must
+     * composite source-over, honoring per-pixel alpha. The old fast
+     * paths routed ARGB sources through the OPAQUE raw-copy blit, so
+     * a sprite's transparent margins painted as opaque BLACK — every
+     * file-picker icon decoded at exactly its cell size wore a black
+     * box (16-px list rows, 48-px grid cells, the sidebar's places).
+     * XRGB sources keep the raw copy (checked here too, so the fast
+     * path's crispness stays pinned). */
+    fdk_surface *src = NULL;
+    assert(fdk_ok(fdk_surface_create_format(
+        6, 6, FDK_SURFACE_FORMAT_ARGB8888, &src)));
+    /* All-transparent by construction (create_format zeroes), then a
+     * 4x4 opaque red core at (1,1) and one 50%-blue pixel in the
+     * MARGIN at (5,1) to pin the blend math on the exact path (a
+     * half-alpha pixel over the destination background). */
+    fdk_color red = { .r = 1.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f };
+    fdk_surface_fill_rect(src, (fdk_rect){ .x = 1, .y = 1, .width = 4,
+                                           .height = 4 }, red);
+    fdk_color blue50 = { .r = 0.0f, .g = 0.0f, .b = 1.0f, .a = 0.5f };
+    fdk_surface_fill_rect(src, (fdk_rect){ .x = 5, .y = 1, .width = 1,
+                                           .height = 1 }, blue50);
+
+    fdk_surface *dst = NULL;
+    assert(fdk_ok(fdk_surface_create(20, 20, &dst)));
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+
+    /* Identity: margins stay background (NOT black), core red. */
+    assert(fdk_ok(fdk_surface_blit_transformed(
+        dst, fdk_matrix_identity(), src)));
+    assert(is_color(dst, 0, 0, pack(9, 9, 9)));   /* transparent margin */
+    assert(is_color(dst, 5, 5, pack(9, 9, 9)));   /* margin corner     */
+    assert(is_color(dst, 1, 1, pack(255, 0, 0))); /* core corner       */
+    assert(is_color(dst, 3, 3, pack(255, 0, 0))); /* core interior     */
+    /* The 50% blue margin pixel over (9,9,9): r = g = (9*127+127)/255
+     * = 4, b = (255*128+9*127+127)/255 = 132 — the honest half-blend,
+     * same arithmetic the scaled path produces. */
+    fdk_u32 half = px_at(dst, 5, 1) & 0x00FFFFFFu;
+    int hr = (int)((half >> 16) & 0xFFu);
+    int hg = (int)((half >> 8) & 0xFFu);
+    int hb = (int)(half & 0xFFu);
+    assert(hr >= 3 && hr <= 6);
+    assert(hg >= 3 && hg <= 6);
+    assert(hb >= 130 && hb <= 134);
+    /* The pixel right of it (fully transparent margin) stays bg. */
+    assert(is_color(dst, 5, 0, pack(9, 9, 9)));
+
+    /* Integer translation: same contract, relocated (in bounds). */
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+    assert(fdk_ok(fdk_surface_blit_transformed(
+        dst, fdk_matrix_translate(10.0f, 12.0f), src)));
+    assert(is_color(dst, 10, 12, pack(9, 9, 9))); /* margin stays bg  */
+    assert(is_color(dst, 15, 17, pack(9, 9, 9))); /* margin corner     */
+    assert(is_color(dst, 11, 13, pack(255, 0, 0)));
+    assert(is_color(dst, 13, 15, pack(255, 0, 0)));
+    /* The 50% blue margin pixel, relocated: (5,1) + (10,12). */
+    fdk_u32 half2 = px_at(dst, 15, 13) & 0x00FFFFFFu;
+    assert((int)((half2 >> 16) & 0xFFu) >= 3 &&
+           (int)((half2 >> 16) & 0xFFu) <= 6);
+    assert((int)(half2 & 0xFFu) >= 130 &&
+           (int)(half2 & 0xFFu) <= 134);
+
+    /* ARGB destination: margins keep the destination's own alpha
+     * (the sprite composites, never stamps). */
+    fdk_surface *adst = NULL;
+    assert(fdk_ok(fdk_surface_create_format(
+        20, 20, FDK_SURFACE_FORMAT_ARGB8888, &adst)));
+    fdk_color obg = { .r = 0.1f, .g = 0.2f, .b = 0.3f, .a = 1.0f };
+    fdk_surface_fill(adst, obg);
+    assert(fdk_ok(fdk_surface_blit_transformed(
+        adst, fdk_matrix_translate(5.0f, 5.0f), src)));
+    assert(is_color(adst, 5, 5, pack(26, 51, 77)));  /* margin = bg   */
+    assert(is_color(adst, 6, 6, pack(255, 0, 0)));   /* core          */
+
+    /* XRGB source on the same fast paths: still the raw opaque copy
+     * (byte-exact crispness is part of the contract). */
+    fdk_surface *xsrc = NULL;
+    assert(fdk_ok(fdk_surface_create(6, 6, &xsrc)));
+    fdk_surface_fill(xsrc, rgb(0, 200, 0));
+    fdk_surface_fill(dst, rgb(9, 9, 9));
+    assert(fdk_ok(fdk_surface_blit_transformed(
+        dst, fdk_matrix_translate(2.0f, 3.0f), xsrc)));
+    assert(is_color(dst, 2, 3, pack(0, 200, 0)));
+    assert(is_color(dst, 8, 3, pack(9, 9, 9))); /* just past the edge */
+    assert(is_color(dst, 7, 8, pack(0, 200, 0))); /* bottom-right core */
+
+    fdk_surface_destroy(dst);
+    fdk_surface_destroy(adst);
+    fdk_surface_destroy(src);
+    fdk_surface_destroy(xsrc);
+    printf("[ok] transformed ARGB exact-path compositing: transparent "
+           "margins stay background on identity/translation fast "
+           "paths\n");
+}
+
 static void test_aa_primitives(void) {
     /* Axis-aligned AA lines are pixel-identical to crisp ones. */
     fdk_surface *crisp = NULL, *aa = NULL;
@@ -1133,6 +1229,7 @@ int main(void) {
     test_matrix_algebra();
     test_blit_transformed();
     test_transformed_alpha();
+    test_transformed_argb_exact_blit();
     test_aa_primitives();
     test_aa_rounded_outline();
     printf("all headless render tests passed\n");

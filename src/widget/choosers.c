@@ -164,8 +164,14 @@ static void about_logo_paint(fdk_widget *canvas, fdk_surface *surface,
     if (w <= 0 || h <= 0) {
         return;
     }
-    (void)fdk_surface_blit(surface, bounds.x, bounds.y, a->logo_img,
-                           (fdk_rect){0, 0, w, h});
+    /* The logo's paint: the decoded image, top-left in the canvas.
+     * blit_BLEND, not the plain blit: the logo decodes to ARGB8888
+     * (fdk_surface_create_from_image's contract) and a transparent
+     * margin around the artwork must show the dialog's background,
+     * not the padding's raw RGB (the 1.5.3 black-box defect — the
+     * icon blit fast paths had the same bug). */
+    (void)fdk_surface_blit_blend(surface, bounds.x, bounds.y, a->logo_img,
+                                 (fdk_rect){0, 0, w, h});
 }
 
 static void about_body_arrange(fdk_widget *w, fdk_rect assigned) {

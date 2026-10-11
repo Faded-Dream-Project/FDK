@@ -278,14 +278,39 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
         return FDK_OK;
     }
 
-    /* Fast paths that reduce to the crisp, exact blit. */
+    /* Fast paths that reduce to the crisp, exact blit.
+     *
+     * An ARGB8888 source MUST composite source-over even on these
+     * exact paths — fdk_surface_blit is an OPAQUE raw copy, so
+     * routing a sprite with transparent padding through it splats the
+     * padding's RGB (typically 0,0,0) as opaque black. That was the
+     * 1.5.3 defect: every icon decoded at exactly its cell size
+     * (16-px list rows, 48-px grid cells, the sidebar's 16-px places)
+     * blitted 1:1 through the translation fast path and wore a black
+     * box around the artwork; only scaled blits took the compositing
+     * paths and stayed clean. blit_blend is the exact-1:1 source-over
+     * (integer math, transparent pixels skip the write). XRGB sources
+     * keep the plain opaque copy — no alpha to honor, byte-exact. */
     if (matrix_is_identity(m)) {
+        if (src->format == FDK_SURFACE_FORMAT_ARGB8888) {
+            return fdk_surface_blit_blend(dst, 0, 0, src,
+                                          (fdk_rect){ .x = 0, .y = 0,
+                                                      .width = src->fb.width,
+                                                      .height = src->fb.height });
+        }
         return fdk_surface_blit(dst, 0, 0, src,
                                 (fdk_rect){ .x = 0, .y = 0,
                                             .width = src->fb.width,
                                             .height = src->fb.height });
     }
     if (matrix_is_int_translation(m)) {
+        if (src->format == FDK_SURFACE_FORMAT_ARGB8888) {
+            return fdk_surface_blit_blend(dst, (fdk_i32)m.tx,
+                                          (fdk_i32)m.ty, src,
+                                          (fdk_rect){ .x = 0, .y = 0,
+                                                      .width = src->fb.width,
+                                                      .height = src->fb.height });
+        }
         return fdk_surface_blit(dst, (fdk_i32)m.tx, (fdk_i32)m.ty, src,
                                 (fdk_rect){ .x = 0, .y = 0,
                                             .width = src->fb.width,

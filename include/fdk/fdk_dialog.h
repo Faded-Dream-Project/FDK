@@ -303,25 +303,41 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 void *user_data,
                                 fdk_window **out_window);
 
-/* ---- Icon themes (the picker's iconography, 1.5.1 + 1.5.2) ----------
+/* ---- Icon themes (the picker's iconography, 1.5.1 + 1.5.2 + 1.5.3) --
  *
  * The dialog's rows wear the DESKTOP's icons, resolved through an
  * internal freedesktop icon-theme engine (src/theme/icon_theme.c):
- * the user's selected theme — detected from $FDK_ICON_THEME (an
- * explicit override), the classic $XDG_CONFIG_HOME/icon-theme file,
- * GTK3/GTK4 settings.ini's gtk-icon-theme-name, KDE's kdeglobals
- * [Icons] Theme, or the icon search path's own default/index.theme
- * Inherits= line (the channel stock GNOME/XFCE systems publish;
- * gsettings itself is D-Bus and out of the no-bus policy's reach);
- * hicolor when the desktop says nothing — then its Inherits chain,
- * then hicolor, then the unthemed pixmaps directories. Every row
- * classifies by CONTENT: folders (folder), images / audio / video /
- * archives / PDFs / fonts / source files by extension
- * (case-insensitive, the GTK convention), and extension-less files
- * by the executable bit; each classification tries a chain of names
- * ending in a generic virtually every theme ships. Icon sizes are
- * the real theme directories' own: 16 px for list rows, 48 px for
- * the icon grid.
+ * the user's selected theme, detected in a fixed precedence that
+ * mirrors the desktop's own GTK applications — $FDK_ICON_THEME (the
+ * explicit override), the LIVE XSETTINGS channel on X11/XLibre
+ * (Net/IconThemeName, read from the settings daemon the desktop's
+ * GTK apps actually obey: xfsettingsd on XFCE, gsd under GNOME/
+ * XWayland, mate/cinnamon daemons, xsettingsd — pure Xlib, no D-Bus,
+ * per the no-bus policy), the user's GTK3/GTK4 settings.ini
+ * gtk-icon-theme-name, XFCE's xfconf xsettings.xml IconThemeName,
+ * KDE's kdeglobals [Icons] Theme, the classic $XDG_CONFIG_HOME/
+ * icon-theme file, the SYSTEM gtk settings.ini (each $XDG_CONFIG_
+ * DIRS entry plus the /etc and /usr/share spellings), the icon
+ * search path's own default/index.theme Inherits= line, and hicolor
+ * when the desktop says nothing — then its Inherits chain, then
+ * hicolor, then the unthemed pixmaps directories. Under a pure
+ * Wayland session there is no XSETTINGS: the file channels carry
+ * detection (kdeglobals on KDE, xfconf on XFCE, the gtk ini when the
+ * user wrote one — GNOME's gsettings itself is D-Bus and out of the
+ * no-bus policy's reach, so stock GNOME systems answer through the
+ * default channel). Every row classifies by CONTENT: folders
+ * (folder), images / audio / video / archives / PDFs / fonts /
+ * source files by extension (case-insensitive, the GTK convention),
+ * and extension-less files by the executable bit; each
+ * classification tries a chain of names ending in a generic
+ * virtually every theme ships. Icon sizes are the real theme
+ * directories' own: 16 px for list rows, 48 px for the icon grid.
+ *
+ * Icon COMPOSITING honors per-pixel alpha end to end (1.5.3): PNG
+ * and SVG assets decode to straight-alpha ARGB surfaces and
+ * composite source-over on every blit path — exact 1:1, scaled, and
+ * the HiDPI intermediate alike — so an icon's transparent surround
+ * shows the row or cell background, never an opaque black box.
  *
  * Asset formats: a same-directory probe prefers PNG (exact pixels)
  * and falls back to the directory's SVG, rasterized at the REQUESTED
