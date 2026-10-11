@@ -21,8 +21,7 @@ docker matrix, release.yml tag → draft release via GITHUB_TOKEN
 with minimal permissions and SHA-pinned actions]; docs/packaging.md
 the full packaging+release reference; the Debian and RPM pipelines
 validated END-TO-END locally [build, package, extraction-based
-graphical smoke under Xvfb], musl compile probe 80/80 — the arch/
-alpine/void pipelines execute on the GitHub runners), building on
+graphical smoke under Xvfb], musl compile probe 80/80 — then the CI iterations themselves took the matrix to fully green: all five distro pipelines + the ubuntu home-ground job pass end-to-end on main [build, native package, clean-container install-test, graphical smoke, removal]; the v1.0.0 tag produced the DRAFT release with the four validated families + source + SHA256SUMS, void joining on main after the tag), building on
 **1.4.19** (the drop that
 landed — the maintainer's live report that real-file-manager drops
 hover fine but never complete; three XDND receiver bugs found and

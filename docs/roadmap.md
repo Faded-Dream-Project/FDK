@@ -5284,3 +5284,33 @@ for exactly those environments), Arch's Xvfb package is
 xorg-server-xvfb, AlmaLinux 10 keeps Xvfb in the CRB repository,
 and the Void image lacks findutils. Five fixes, one commit, and the
 matrix re-ran.
+
+The iterations after that ran exactly as the design intended: every
+failure was a fact, every fix was small, and nothing shipped
+unvalidated. The matrix went green target by target — alpine first
+(build + clean-container install-test), then arch and rpm, then
+debian (whose Ubuntu-22.04 informational probe PASSED, upgrading the
+support claim to glibc 2.35), and finally void, whose last miles were
+a lesson in distro packager dialects: xbps-create's non-mnemonic
+short-flag map (-S long-desc, -D dependencies, -H homepage), the zstd
+binary the minimal image lacks, and the wayland client runtime living
+in the package named plainly 'wayland'. The pipeline caught real bugs
+on the way through: a binary-deb architecture field dpkg -i rejects
+('any' is a source-package value), a phantom libm6 dependency (modern
+Debian owns libm.so.6 in libc6), a pkg-config usability break
+(Requires.private graph resolution failing plain queries on machines
+without X11 dev packages — now raw Libs.private flags, matching "a
+dynamously linked application needs none of them"), rpm's
+percent-words-in-comments parser trap, and two timing races in the
+X11 suite that only fast uninstrumented builds expose (the
+smooth-scroll mid-flight sample and the file-dialog outcome waits —
+both converted to the suite's bounded wait-until-state pattern, with
+a delivery gate because ACCEPTED is the enum's zero value).
+
+The v1.0.0 tag was pushed with the matrix four-fifths green (void's
+last fixes landed one and two commits after the tag, on main); the
+release workflow built every validated target from the exact tagged
+revision and created the DRAFT GitHub Release with the artifacts,
+SHA256SUMS, and generated notes that state Void's absence honestly.
+Main is now fully green across all six jobs — the next tag produces
+the complete five-family set.
