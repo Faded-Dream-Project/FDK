@@ -23,22 +23,25 @@ ARCH="$(uname -m)"
 echo "== building FDK $VERSION XBPS packages ($ARCH, glibc) =="
 
 # --- test suites on the plain tree first ---------------------------------
-# FDK_CONFIG is pinned on the install line too (config-stamp trap: a
-# plain `make install` after a release build silently rebuilds debug
+# FDK_SANITIZE=0: this environment ships no sanitizer runtimes
+# (musl / minimal image) — the same debug config without
+# -fsanitize; the sanitizer gates run on the glibc targets. FDK_CONFIG
+# is pinned on the install line too (config-stamp trap: a plain
+# `make install` after a release build silently rebuilds debug
 # with sanitizers into the payload).
-make
-make test
+make FDK_SANITIZE=0
+make FDK_SANITIZE=0 test
 if command -v Xvfb >/dev/null 2>&1; then
-    make test-x11
+    make FDK_SANITIZE=0 test-x11
 else
     echo "XVFB-SKIP: Xvfb not present; the X11 integration suite was not run for this build (disclosed)"
 fi
-make FDK_CONFIG=release all
+make FDK_SANITIZE=0 FDK_CONFIG=release all
 
 # --- stage + split ---------------------------------------------------------
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-make FDK_CONFIG=release install DESTDIR="$STAGE" PREFIX=/usr LIBDIR=/usr/lib
+make FDK_SANITIZE=0 FDK_CONFIG=release install DESTDIR="$STAGE" PREFIX=/usr LIBDIR=/usr/lib
 
 SO_REAL="libfdk.so.$VERSION"
 SO_MAJOR="libfdk.so.$(sed -n 's/^#define FDK_VERSION_MAJOR \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)"

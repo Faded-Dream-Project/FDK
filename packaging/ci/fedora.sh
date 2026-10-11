@@ -27,7 +27,9 @@ docker pull -q almalinux:10
 
 RUN almalinux:10 '
     set -eu
-    dnf install -y -q gcc make pkgconf-pkg-config rpm-build cpio \
+    # Xvfb lives in the CRB repository on RHEL-10 clones.
+    dnf install -y -q --enablerepo=crb \
+        gcc make pkgconf-pkg-config rpm-build cpio \
         libX11-devel libXext-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-sans-fonts dejavu-sans-mono-fonts \

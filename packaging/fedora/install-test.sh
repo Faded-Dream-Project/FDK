@@ -15,10 +15,14 @@ VERSION="$(fdk_expected_version)"
 
 echo "== FDK rpm install-test ($VERSION) =="
 
-dnf install -y -q gcc pkgconf-pkg-config xvfb \
+# Xvfb is xorg-x11-server-Xvfb on Fedora/RHEL; on RHEL-10 clones it
+# lives in the CRB repository.
+dnf install -y -q gcc pkgconf-pkg-config \
     dejavu-sans-fonts dejavu-sans-mono-fonts 2>/dev/null || \
-dnf install -y -q gcc pkgconf-pkg-config xorg-x11-server-Xvfb \
+dnf install -y -q gcc pkgconf-pkg-config \
     dejavu-sans-fonts dejavu-sans-mono-fonts
+dnf install -y -q xorg-x11-server-Xvfb 2>/dev/null || \
+    dnf install -y -q --enablerepo=crb xorg-x11-server-Xvfb
 
 RPMS="$(ls dist/*.rpm)"
 [ -n "$RPMS" ] || { echo "INSTALL-TEST FAIL: no rpms in dist/"; exit 1; }

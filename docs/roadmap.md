@@ -5269,3 +5269,18 @@ ONE packaging tree (docs/packaging.md the ONE packaging doc); do
 not re-create per-distro metadata outside it; the smoke app is
 packaging/common/smoke.c; the version lives ONLY in fdk_version.h
 (+ its test pin).
+
+The first real CI run (push b09baee) taught the pipelines their
+environments: the ubuntu home-ground job went green INCLUDING the
+strict-leak X11 suite; the five container jobs each hit a real
+distro fact — Debian bookworm's older libxcb leaves ~336 bytes at
+XCloseDisplay (all tests passed; the exit-time LSan report failed
+the target with zero FDK frames — now handled by a disclosed
+LSAN_OPTIONS=exitcode=0 for container X11 runs while ubuntu CI and
+dev machines stay strict), Alpine's build-base and Void's minimal
+image ship no sanitizer runtimes at all (-lasan fails to link —
+now a documented FDK_SANITIZE=0 Makefile knob, config-stamp-keyed,
+for exactly those environments), Arch's Xvfb package is
+xorg-server-xvfb, AlmaLinux 10 keeps Xvfb in the CRB repository,
+and the Void image lacks findutils. Five fixes, one commit, and the
+matrix re-ran.

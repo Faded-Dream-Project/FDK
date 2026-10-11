@@ -112,7 +112,19 @@ else
 endif
 
 BUILD_DIR   := build
-DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1 -fsanitize=address,undefined
+# Sanitizers are the debug default on glibc toolchains. Musl-based
+# or minimal environments that ship no sanitizer runtimes (Alpine's
+# build-base, the lean Void image) set FDK_SANITIZE=0 to build the
+# same debug configuration without -fsanitize; the sanitizer gates
+# stay enforced on the glibc runs (CI ubuntu job + development
+# machines). The config stamp below keys on this knob too, so a
+# sanitized and an unsanitized build can never mix objects.
+FDK_SANITIZE ?= 1
+ifeq ($(FDK_SANITIZE),0)
+  DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1
+else
+  DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1 -fsanitize=address,undefined
+endif
 REL_FLAGS   := -O2 -DNDEBUG
 
 # Build configuration (debug by default; `make release` re-invokes
@@ -302,9 +314,9 @@ shared: $(SHARED_LIB)
 $(CONFIG_STAMP): FORCE
 	@mkdir -p $(BUILD_DIR)
 	@cur=`cat $@ 2>/dev/null || echo none`; \
-	if [ x"$$cur" != x"$(FDK_CONFIG)-wl$(BUILD_WAYLAND)" ]; then \
+	if [ x"$$cur" != x"$(FDK_CONFIG)-wl$(BUILD_WAYLAND)-san$(FDK_SANITIZE)" ]; then \
 		rm -f $(BUILD_DIR)/.config-*; \
-		printf '%s\n' '$(FDK_CONFIG)-wl$(BUILD_WAYLAND)' > $@; \
+		printf '%s\n' '$(FDK_CONFIG)-wl$(BUILD_WAYLAND)-san$(FDK_SANITIZE)' > $@; \
 	fi
 
 .PHONY: FORCE

@@ -24,7 +24,7 @@ RUN archlinux:base '
     set -eu
     pacman -Sy --noconfirm --needed \
         base-devel pkgconf libx11 libxext zlib wayland libxkbcommon \
-        xvfb ttf-dejavu tar
+        xorg-server-xvfb ttf-dejavu tar
     sh packaging/arch/build-pkg.sh
 '
 
