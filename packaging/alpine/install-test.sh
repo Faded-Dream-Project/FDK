@@ -16,8 +16,8 @@ ARCH="$(uname -m)"
 
 echo "== FDK apk install-test ($VERSION, $ARCH) =="
 
-apk add --no-cache gcc pkgconf xvfb 2>/dev/null || \
-    apk add --no-cache gcc pkgconf
+apk add --no-cache gcc musl-dev pkgconf xvfb 2>/dev/null || \
+    apk add --no-cache gcc musl-dev pkgconf
 apk add --no-cache font-dejavu 2>/dev/null || \
     echo "NOTE: font-dejavu unavailable; smoke may fail on font discovery (disclosed)"
 

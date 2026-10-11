@@ -6311,10 +6311,36 @@ static struct {
     size_t count;
 } fd_result;
 
+/* Bumped on every file_dialog_done delivery (see dialog_wait_outcome
+ * for why the outcome alone cannot be waited on). */
+static unsigned fd_dialog_fires;
+
+/* Bounded wait for the dialog callback's outcome. A single fixed pump
+ * is not always enough on fast uninstrumented builds — the accept key
+ * can need one further poll cycle to be processed and answered
+ * (observed live on the Void CI container: the overwrite-confirm
+ * Enter landed after the one pump the test allowed). Waits up to
+ * ~2 s for the expected outcome; the surrounding asserts still
+ * enforce it, and an outcome that never arrives still fails hard. */
+static void dialog_wait_outcome(fdk_context *ctx,
+                                fdk_file_dialog_outcome outcome) {
+    /* ACCEPTED is the enum's zero value, so fd_result.outcome alone is
+     * vacuously ACCEPTED before any callback fires (the struct is
+     * memset in file_dialog_done) — wait for an actual delivery. */
+    unsigned fired_at_entry = fd_dialog_fires;
+    for (int i = 0; i < 25; i++) {
+        if (fd_dialog_fires > fired_at_entry &&
+            fd_result.outcome == outcome)
+            return;
+        (void)fdk_pump_events(ctx, 80);
+    }
+}
+
 static void file_dialog_done(const fdk_file_dialog_result *result,
                              void *user) {
     (void)user;
     memset(&fd_result, 0, sizeof(fd_result));
+    fd_dialog_fires++;
     fd_result.outcome = result->outcome;
     fd_result.count = result->count;
     for (size_t i = 0; i < result->count && i < 4; i++) {
@@ -6379,7 +6405,7 @@ static void test_file_dialog_gui(void) {
     x11_send_key_event(send_dpy, dxid, KeyPress, 116); /* Down -> note */
     (void)fdk_pump_events(ctx, 100);
     x11_send_key_event(send_dpy, dxid, KeyPress, 36); /* Enter -> accept on activation */
-    (void)fdk_pump_events(ctx, 250);
+    dialog_wait_outcome(ctx, FDK_FILE_DIALOG_ACCEPTED);
     assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
     assert(fd_result.count == 1);
     assert(strcmp(fd_result.paths[0], want_file) == 0);
@@ -6395,7 +6421,7 @@ static void test_file_dialog_gui(void) {
     (void)fdk_pump_events(ctx, 250);
     dxid = fdk_window_xid(dlg);
     x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Escape (keycode 9 = scancode 1) */
-    (void)fdk_pump_events(ctx, 250);
+    dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
     assert(fd_result.outcome == FDK_FILE_DIALOG_CANCELLED);
     assert(fd_result.count == 0);
     printf("[ok] file dialog: Escape answers CANCELLED (count 0)\n");
@@ -6483,7 +6509,7 @@ static void test_file_dialog_gui(void) {
     x11_send_key_event(send_dpy, dxid, KeyPress, 116);
     (void)fdk_pump_events(ctx, 100);
     x11_send_key_event(send_dpy, dxid, KeyPress, 36);
-    (void)fdk_pump_events(ctx, 250);
+    dialog_wait_outcome(ctx, FDK_FILE_DIALOG_ACCEPTED);
     assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
     assert(fd_result.count == 1);
     assert(strcmp(fd_result.paths[0], want_file) == 0);
@@ -6561,7 +6587,7 @@ static void test_file_dialog_gui(void) {
     }
     /* Escape closes the still-open dialog. */
     x11_send_key_event(send_dpy, dxid, KeyPress, 9);
-    (void)fdk_pump_events(ctx, 250);
+    dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
     assert(fd_result.outcome == FDK_FILE_DIALOG_CANCELLED);
     printf("[ok] file dialog icon mode: cell double-click descends, "
            "the Icons checkbox flips the surface live, Up re-lists "
@@ -6580,7 +6606,7 @@ static void test_file_dialog_gui(void) {
     (void)fdk_pump_events(ctx, 250);
     dxid = fdk_window_xid(dlg);
     x11_send_key_event(send_dpy, dxid, KeyPress, 36); /* Enter = Save */
-    (void)fdk_pump_events(ctx, 250);
+    dialog_wait_outcome(ctx, FDK_FILE_DIALOG_ACCEPTED);
     assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
     assert(fd_result.count == 1);
     {
@@ -6648,7 +6674,7 @@ static void test_file_dialog_gui(void) {
     x11_send_key_event(send_dpy, dxid, KeyPress, 9);
     (void)fdk_pump_events(ctx, 100);
     x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Esc: cancel */
-    (void)fdk_pump_events(ctx, 250);
+    dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
     assert(fd_result.outcome == FDK_FILE_DIALOG_CANCELLED);
     printf("[ok] file dialog: overwrite ask declined -> dialog stays "
            "up, then cancels\n");
@@ -6694,7 +6720,7 @@ static void test_file_dialog_gui(void) {
     }
     assert(confirm_xid != None);
     x11_send_key_event(send_dpy, confirm_xid, KeyPress, 36); /* Enter=Yes */
-    (void)fdk_pump_events(ctx, 300);
+    dialog_wait_outcome(ctx, FDK_FILE_DIALOG_ACCEPTED);
     assert(fd_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
     assert(fd_result.count == 1);
     assert(strcmp(fd_result.paths[0], want_file) == 0);
@@ -6714,7 +6740,7 @@ static void test_file_dialog_gui(void) {
     x11_send_key_event(send_dpy, dxid, KeyPress, 36); /* Enter */
     (void)fdk_pump_events(ctx, 250);
     x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Esc */
-    (void)fdk_pump_events(ctx, 250);
+    dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
     assert(fd_result.outcome == FDK_FILE_DIALOG_CANCELLED);
     assert(fd_result.count == 0);
     printf("[ok] file dialog: empty SAVE name never answers "
@@ -6762,7 +6788,7 @@ static void test_file_dialog_gui(void) {
          * "back to breadcrumbs" instead of a cancel. */
         fd_result.outcome = FDK_FILE_DIALOG_ERROR; /* sentinel */
         x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Esc: unselect */
-        (void)fdk_pump_events(ctx, 150);
+        dialog_wait_outcome(ctx, FDK_FILE_DIALOG_ERROR);
         assert(fd_result.outcome == FDK_FILE_DIALOG_ERROR);
         x11_send_key_event(send_dpy, dxid, KeyPress, 9); /* Esc: exit */
         (void)fdk_pump_events(ctx, 200);

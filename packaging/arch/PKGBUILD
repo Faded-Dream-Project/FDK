@@ -25,7 +25,9 @@ license=('LicenseRef-Proprietary')
 # LTRANS codegen — past the point where --as-needed decides to keep
 # libm — so the test binaries fail to link (undefined sincosf/exp2/
 # floorf). Disabling LTO is the canonical Arch escape for this class.
-options=(!lto)
+# !debug: makepkg's default OPTIONS can split a -debug package that
+# the artifact collection does not expect.
+options=(!lto !debug)
 depends=(libx11 libxext zlib wayland libxkbcommon)
 makedepends=(pkgconf)
 source=("fdk-$pkgver.tar.gz")

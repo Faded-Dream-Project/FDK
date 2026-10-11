@@ -29,6 +29,7 @@ RUN almalinux:10 '
     set -eu
     dnf install -y -q \
         gcc make pkgconf-pkg-config rpm-build cpio \
+        libasan libubsan \
         libX11-devel libXext-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-sans-fonts dejavu-sans-mono-fonts

@@ -27,7 +27,7 @@ apt-get update -qq
 # fallback below.
 apt-get install -y --no-install-recommends \
     libx11-6 libxext6 zlib1g \
-    gcc pkg-config xvfb fonts-dejavu-core
+    gcc libc6-dev pkg-config xvfb fonts-dejavu-core
 apt-get install -y --no-install-recommends libwayland-client0 libxkbcommon0 \
     2>/dev/null || echo "NOTE: wayland runtime packages unavailable on this image (X11-only payload expected)"
 

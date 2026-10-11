@@ -56,7 +56,7 @@ su builder -s /bin/sh -c "
     cd '$WORK'
     makepkg --force
 "
-PKG="$(find "$WORK" -maxdepth 1 -name 'fdk-*.pkg.tar.*' -type f)"
+PKG="$(find "$WORK" -maxdepth 1 -name 'fdk-*.pkg.tar.*' -type f ! -name '*debug*')"
 [ -n "$PKG" ] || { echo "BUILD FAIL: makepkg produced no package"; exit 1; }
 mkdir -p dist
 cp "$PKG" dist/
