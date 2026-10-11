@@ -165,10 +165,15 @@ The file dialog's new-folder prompt on X11:
 
 ![File dialog new-folder prompt](screenshots/prompt_dialog_newfolder_x11_1024x768.png)
 
-The file picker wearing the DESKTOP's own icons (Adwaita, resolved
-through the internal freedesktop icon-theme engine — every file type
-distinct: folders, archives, executables, images, text, audio) — list
-view and icon-grid view, both captured on X11:
+The file picker wearing the DESKTOP's own icons — every file type
+distinct: folders, archives, executables, images, text, audio. Both
+views were captured with NO theme override at all: the engine found
+the system default channel on its own (/usr/share/icons/default ->
+Adwaita here). The list view resolves the theme's 16-px PNGs; the
+grid's 48-px cells are RASTERIZED FROM SVG (Adwaita ships no 48-px
+PNGs — the vendored nanosvg renders the scalable assets at the
+requested size, verified pixel-level against an independent cairo
+reference), both captured on X11:
 
 ![File picker, themed icons, list view](screenshots/file_picker_themed_list_x11_1024x768.png)
 

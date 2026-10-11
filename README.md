@@ -70,11 +70,14 @@ suite (`docs/testing.md`).
   spinners, level bars, revealers, and more.
 - **Desktop icon themes in the file dialogs** — the pickers resolve
   their icons through an internal freedesktop icon-theme engine: the
-  user's selected theme (GTK/KDE settings, no bus) with full
-  inheritance and fallback, per-file-type icons (folders, images,
-  audio, video, archives, source, executables), symbolic icons
-  tinted with the active theme's ink — PNG through the vendored
-  decoder, FDK's procedural glyphs as the honest floor
+  user's selected theme (GTK/KDE settings or the system default
+  channel, no bus) with full inheritance and fallback,
+  per-file-type icons (folders, images, audio, video, archives,
+  source, executables), symbolic icons tinted with the active
+  theme's ink — PNG through the vendored decoder and SVG rasterized
+  at the requested size through the vendored nanosvg, with broken
+  assets refused so they never shadow the chain behind them, and
+  FDK's procedural glyphs as the honest floor
   (`include/fdk/fdk_dialog.h`'s icon-themes section states the
   exact limits).
 - **Layout** — box (horizontal/vertical) and grid containers with

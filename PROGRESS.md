@@ -9,7 +9,36 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-11, at milestone **1.5.1** (the picker
+Last audited: 2026-10-11, at milestone **1.5.2** (the exhaustive
+pre-1.0 audit pass — the maintainer's second desktop report
+["only recognizable folder icons; text files indistinguishable"]
+traced to THREE root causes, all fixed internally [public API and
+its 621 exports unchanged]: (1) theme detection missed the system
+default channel [the icon search path's own default/index.theme
+Inherits= line — the channel stock GNOME/XFCE systems publish; the
+engine fell to hicolor on stock systems and every file type dropped
+to the procedural glyphs, the reported symptom exactly], (2) PNG-
+only lookups missed every SVG-only size [Adwaita's entire 48-px
+scalable tree — now rasterized at the REQUESTED size through the
+vendored nanosvg (third_party/nanosvg/, zlib license, the stb
+precedent; librsvg rejected with its Cairo/GLib stack), same-dir
+PNG preferred, undrawable SVGs are honest misses], (3) a broken
+asset could shadow the whole chain behind it [the new decode-
+refusal set: exists-but-will-not-raster paths are refused, probes
+skip them, the search restarts — the shadowing regression test
+pins an empty SVG in the own theme losing to the parent's valid
+PNG]; verification is pixel-level AND independent [cairosvg/cairo
+renders the reference from Adwaita's own SVG; the screenshot grid
+must match within AA tolerance; VLM review of both views: "no
+defects found"]; the audit also fixed make install PREFIX=X
+installing a stale fdk.pc [prefix-stamped regeneration; caught by
+the new external-application test — a standalone app compiled
+through pkg-config against the INSTALLED tree, run under Xvfb with
+the file dialog + icon engine live]; repo-wide TODO/stub/no-op
+sweep clean, both-backend batteries green, sway/X11 example rigs
+refreshed for the 1.4.16 theme colors and 1.4.17 scrolled catalog;
+full narrative: docs/roadmap.md "1.5.2"), building on **1.5.1**
+(the picker
 stabilization — the file/folder pickers wear the desktop's icon
 theme through a new internal freedesktop icon-theme engine
 [src/theme/icon_theme.c: XDG discovery, index.theme parsing with
@@ -370,12 +399,15 @@ sidebar rhythm).
 - **FilePicker / FolderPicker iconography (1.5.1)** — every row and
   grid cell wears the DESKTOP's icons via the internal icon-theme
   engine (src/theme/icon_theme.c): user-theme detection (GTK/KDE
-  settings + $FDK_ICON_THEME override, no bus), inheritance chains,
+  settings + the system default/index.theme channel + $FDK_ICON_THEME
+  override, no bus), inheritance chains,
   Fixed/Scalable/Threshold size matching with a relaxed fallback,
   pixmaps last resort, per-type classification (extension table +
-  executable-bit split), symbolic tinting, three cache layers reset
-  per dialog. PNG-only (stb decoder; SVG/XPM are honest misses),
-  procedural glyphs as the floor. List rows 16 px, grid cells 48 px.
+  executable-bit split), symbolic tinting, three cache layers plus
+  the decode-refusal set, reset per dialog. PNG preferred per
+  directory, SVG rasterized at the requested size via the vendored
+  nanosvg (undrawable SVGs and XPM are honest misses), procedural
+  glyphs as the floor. List rows 16 px, grid cells 48 px.
   Fixed on the way: the RECENT glyph's silent drop in
   fdk_list_row_set_icon's switch; the dialog icon-grid's stuck-at-
   one-column layout (fdk__iconview_reflow, the 1.4.7 lesson's third

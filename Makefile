@@ -200,7 +200,8 @@ extra_flags = $(if $(findstring src/platform/x11/,$(1)),$(X11_CFLAGS)) \
               $(if $(findstring src/platform/wayland/,$(1)),$(WAYLAND_CFLAGS) -Wno-cast-qual) \
               $(if $(findstring src/text/,$(1)),-Ithird_party/stb) \
               $(if $(findstring src/widget/,$(1)),-Ithird_party/stb) \
-              $(if $(findstring src/render/,$(1)),-Ithird_party/stb)
+              $(if $(findstring src/render/,$(1)),-Ithird_party/stb) \
+              $(if $(findstring src/theme/,$(1)),-Ithird_party/nanosvg)
 
 # --- Sources ------------------------------------------------------------
 
@@ -533,14 +534,29 @@ bench: $(BUILD_DIR)/bench
 	$(BUILD_DIR)/bench
 
 # pkg-config file: generated from fdk.pc.in so the version comes
-# from fdk_version.h, never from a second hand-edited copy.
-$(BUILD_DIR)/fdk.pc: fdk.pc.in include/fdk/fdk_version.h Makefile
+# from fdk_version.h, never from a second hand-edited copy. The
+# prefix-side stamp matters: `make install PREFIX=/custom` after a
+# default-prefix build must REGENERATE the .pc, not silently install
+# one that points applications at the old prefix (command-line
+# variables do not invalidate file targets on their own — the same
+# lesson as the config stamp, scoped to the one file that cares).
+$(BUILD_DIR)/fdk.pc: fdk.pc.in include/fdk/fdk_version.h Makefile \
+                     $(BUILD_DIR)/fdk.pc.prefix
 	@mkdir -p $(BUILD_DIR)
 	@sed -e 's|@PREFIX@|$(PREFIX)|g' \
 	     -e 's|@LIBDIR@|$(LIBDIR)|g' \
 	     -e 's|@INCDIR@|$(INCDIR)|g' \
 	     -e 's|@VERSION@|$(FDK_PC_VERSION)|g' \
 	     -e 's|@PC_LIBS@|$(PC_LIBS)|g' fdk.pc.in > $@
+
+# Rewritten only when PREFIX/LIBDIR/INCDIR actually change, so
+# same-prefix installs stay incremental (the CONFIG_STAMP pattern).
+$(BUILD_DIR)/fdk.pc.prefix: FORCE
+	@mkdir -p $(BUILD_DIR)
+	@cur=`cat $@ 2>/dev/null || echo none`; \
+	if [ x"$$cur" != x"prefix=$(PREFIX)|libdir=$(LIBDIR)|incdir=$(INCDIR)" ]; then \
+		printf '%s\n' 'prefix=$(PREFIX)|libdir=$(LIBDIR)|incdir=$(INCDIR)' > $@; \
+	fi
 
 install: all $(BUILD_DIR)/fdk.pc
 	install -d $(DESTDIR)$(INCDIR)/fdk

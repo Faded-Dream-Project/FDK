@@ -5440,3 +5440,70 @@ stays a deliberate future decision). The header documentation
 limits: PNG-only, SVG sizes contribute nothing, scale!=1
 directories skipped (the window layer's integer compositing makes
 them pointless), procedural glyphs as the floor.
+
+## 1.5.2 — the audit pass: the default channel, SVG, and the refusal set
+
+The maintainer's second desktop report ("still only recognizable
+folder icons; text files indistinguishable") opened the exhaustive
+pre-1.0 audit — and its first finding invalidated an assumption
+1.5.1 had shipped on: every verification rig ran with
+`FDK_ICON_THEME` pointed at a servable theme, so none of them
+exercised what the engine does when the desktop says nothing. On
+this system that path fell straight to hicolor (whose mimetype set
+is nearly empty here), every file type dropped to the procedural
+glyphs, and the report's symptom reproduced exactly. Three root
+causes, three fixes, all internal (the public API and its 621
+exports are untouched):
+
+**The system-default channel.** Detection now consults the icon
+search path's own `default/index.theme` `Inherits=` line (user
+bases first, system bases after — the XDG priority order, the same
+convention every other base-resolved setting follows) between
+kdeglobals and the hicolor floor. This is the channel stock
+GNOME/XFCE systems actually publish; gsettings itself is D-Bus and
+the no-bus policy keeps it out of reach. On this box the engine
+now resolves Adwaita with no override at all — and the regression
+suite pins the channel's presence, comma form, and removal.
+
+**SVG rasterization through the vendored nanosvg.** Adwaita (like
+Breeze, Yaru, and every modern theme's larger sizes) keeps its
+48-px icons ONLY as SVG; a PNG-only engine misses the entire grid
+view on exactly those themes. nanosvg (two single headers, zlib
+license, zero link dependencies — the stb precedent applied to
+SVG, and the reason librsvg was rejected with its Cairo/GLib
+stack) rasterizes at the REQUESTED size: a same-directory probe
+prefers PNG (exact pixels) and falls back to the directory's SVG;
+Scalable directories serve any in-range size; the icon's document
+box is aspect-fit into the cell. The honest-miss rule survives:
+SVGs built from features nanosvg deliberately does not implement
+(CSS classes, <text>, filters, masks) produce no drawable coverage
+and are treated as misses, never blank cells. Verification is
+pixel-level AND independent: cairosvg (cairo) renders the
+reference from the same Adwaita SVG, and the screenshot's grid
+cells must match it within AA tolerance; the VLM review of both
+views reads "no defects found" / "identical to the native
+GtkFileChooserDialog."
+
+**The decode-refusal set.** The first integration cached surface-
+level misses, which let one broken asset in the highest-priority
+theme permanently shadow every valid icon behind it (the parent
+theme's PNG, hicolor, ...). A path that exists but will not raster
+is now REFUSED — remembered in a bounded set, skipped by probes,
+its lookup-cache entry dropped — and the search restarts and walks
+on. The shadowing regression test (an empty SVG in the own theme,
+a valid PNG in the parent; the served surface must be
+pixel-identical to the parent's, and a post-refusal lookup must
+skip the empty SVG) is the standing guard for the mechanism.
+
+The audit's wider net (repo-wide TODO/stub/no-op sweep, both
+backend batteries, the sway/X11 example rigs refreshed for the
+1.4.16 theme colors and the 1.4.17 scrolled catalog, release build
+and export count re-verified, install + a genuinely independent
+external application compiled through pkg-config against the
+installed tree and run with the dialog live) surfaced two more
+real defects, both fixed: `make install PREFIX=/custom` after a
+default-prefix build silently installed a stale fdk.pc pointing at
+/usr/local (the external-app compile caught it; the .pc now
+regenerates on prefix change via its own stamp), and the session
+example rigs' stale pins are recorded in docs/testing.md's 1.5.2
+lessons so the next re-run starts from current reality.

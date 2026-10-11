@@ -1899,3 +1899,70 @@ directory of every real theme), and hicolor's Directories= line is
 11 KiB (an 8 KiB line cap rejected the spec's own flagship theme).
 Both rigs (fixture + real) live in scripts/ and their screenshots
 land in docs/screenshots/ and download/fdk-picker-demo/.
+
+## 1.5.2 — the audit lessons: detection, refusal, and the independent reference
+
+**The user's report is the spec.** 1.5.1 shipped a large green test
+report — fixture theme pixel proofs, X-server template matches, a
+VLM review — and the maintainer's next desktop session still saw
+"only recognizable folder icons, text files indistinguishable."
+Every one of those tests ran with `FDK_ICON_THEME` pointed at a
+theme the engine could serve; none of them tested what the engine
+does when the DESKTOP says nothing. On a stock system the detection
+chain fell straight to hicolor, whose mimetype set is nearly empty
+on Debian-family distros — every file type fell to the procedural
+glyphs, exactly the reported symptom. The lesson has two halves:
+test the DEFAULT path, not just the override path; and when a user
+reports what they saw, reproduce THEIR environment shape before
+trusting any rig that proves something adjacent.
+
+**A missing channel is invisible to everything downstream.** The
+fix itself was one channel: the icon search path's own
+`default/index.theme` `Inherits=` line (the one stock GNOME/XFCE
+systems actually publish; gsettings itself is D-Bus and out of the
+no-bus policy's reach). The new regression group pins detection
+with and without that file, including the comma-list form and the
+removal path — because a channel that can be added can silently
+regress back out.
+
+**One broken asset must never shadow the chain behind it.** The
+first SVG integration refused undrawable assets at the surface
+layer and cached the miss — which meant a single empty or
+CSS-class SVG in the highest-priority theme permanently pinned the
+procedural glyph even when the parent theme carried a perfectly
+good PNG. The shadowing regression test (an empty `shadow-test.svg`
+in the own theme, a valid PNG in the parent; the served surface
+must be pixel-identical to the parent's) is now the standing guard
+for the whole refusal-set mechanism. The bug class generalizes:
+whenever a lookup returns "first candidate" and the CONSUMER can
+reject it, the rejection must feed back into the search or the
+chain's lower-priority entries are dead code.
+
+**Verify a rasterizer against a SECOND rasterizer.** "The icon
+decoded" is provable with color-identity fixtures; "the icon is
+CORRECT" needs a reference nobody in this repo wrote. The grid
+view's 48-px proof renders Adwaita's own SVG through cairosvg
+(cairo) and template-matches the screenshot against it with AA
+tolerance — an independent engine agreeing on the output is the
+strongest available ground truth, and the same pattern applies to
+any future decode path (image scaling, PNG encode).
+
+**Rigs outside the tree rot quietly.** The sway/X11 example rigs
+still pinned the pre-1.4.16 window backgrounds and the 1.4.13-era
+example geometry (04 grew a ScrollView in 1.4.17 and its grid moved
+below the fold). The rigs "failed" against a perfectly healthy
+tree — and had they been silently skipped, the failure mode would
+have been invisible. Session-owned rigs need the same re-verification
+discipline as repo tests: after any theming or example-layout
+milestone, re-run them BEFORE trusting their verdict in either
+direction.
+
+**The install .pc is an application-facing API.** `make install
+PREFIX=/custom` after a default-prefix build silently installed a
+`fdk.pc` still pointing at `/usr/local` — the external application
+compiled against the staging tree FAILED to find headers. The
+external-app test (pkg-config discovery, installed headers,
+installed shared library, run under Xvfb, dialog + icon engine live)
+is now the standing proof that the install actually serves a
+developer outside the source tree; the .pc's prefix stamp keeps
+it honest across prefix changes.

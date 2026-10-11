@@ -182,15 +182,26 @@ void fdk__icon_theme_reset(void);
 /* The user's selected icon theme name (static storage, cached until
  * reset). Detection, no bus: $FDK_ICON_THEME > $XDG_CONFIG_HOME/
  * icon-theme > gtk-3.0/gtk-4.0 settings.ini gtk-icon-theme-name >
- * kdeglobals [Icons] Theme > "hicolor". */
+ * kdeglobals [Icons] Theme > the search path's own default/
+ * index.theme Inherits= > "hicolor". */
 const char *fdk__icon_theme_current_name(void);
 
 /* Resolves one icon name at one size through the full chain (the
  * current theme, its Inherits, hicolor, then /usr/share/pixmaps).
  * Returns an fdk_alloc'd absolute path (caller frees) or NULL.
- * PNG-only on purpose: the toolkit's decoder cannot raster SVG/XPM,
- * and the engine never offers a path it cannot paint. */
+ * PNG or SVG: same-directory probes prefer PNG (exact pixels) and
+ * fall back to the vendored nanosvg rasterizer for SVG (rendered
+ * at the REQUESTED size). XPM is never offered — no decoder. */
 char *fdk__icon_theme_lookup(const char *icon_name, fdk_i32 size);
+
+/* ---- the SVG policy layer (icon_svg.c) -------------------------------
+ *
+ * Rasterizes ONE themed SVG file into an fdk_surface at the exact
+ * requested size, with the same reject-first/bounded/honest-miss
+ * discipline as surface_image.c (see icon_svg.c's header for the
+ * full policy). Used only by icon_theme.c's decode step. */
+fdk_result fdk__icon_svg_raster(const char *path, fdk_i32 size,
+                                fdk_surface **out_surface);
 
 /* Decodes (once; cached; borrowed until reset) the icon at the
  * requested size. A candidate whose name ends in "-symbolic" is

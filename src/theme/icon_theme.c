@@ -26,9 +26,11 @@
  *     desktop daemon (the toolkit's no-D-Bus policy): $FDK_ICON_THEME
  *     (explicit override — also the hermetic test seam), the
  *     classic $XDG_CONFIG_HOME/icon-theme file, GTK3/GTK4
- *     settings.ini's gtk-icon-theme-name, and KDE's kdeglobals
- *     [Icons] Theme; hicolor is the honest default when the
- *     desktop says nothing;
+ *     settings.ini's gtk-icon-theme-name, KDE's kdeglobals
+ *     [Icons] Theme, and the system default theme (the icon search
+ *     path's own <base>/default/index.theme Inherits= line — the
+ *     channel stock GNOME/XFCE systems actually set); hicolor is the
+ *     honest default when the desktop says nothing;
  *   - caching at three layers (parsed index.theme data, name+size
  *     path lookups including negative results, decoded surfaces)
  *     with fdk__icon_theme_reset() as the single invalidation
@@ -39,13 +41,19 @@
  * Honest limitations, stated once here and repeated in the docs
  * rather than papered over:
  *
- *   - SVG and XPM icons are FOUND but not used: FDK's decoder is
- *     the vendored stb_image (PNG/JPEG/BMP/...), and no SVG
- *     rasterizer will be vendored. Themes that ship a size only
- *     as SVG contribute nothing for that size — the engine keeps
- *     searching other sizes and themes, and the final fallback is
- *     the toolkit's own procedural glyph set, never a stretched
- *     wrong-format blob.
+ *   - SVG icons are rasterized through the vendored nanosvg
+ *     (third_party/nanosvg/): the icon-shaped subset of SVG — paths,
+ *     transforms, groups, gradients, opacity, inline presentation
+ *     attributes. SVGs that need features nanosvg deliberately does
+ *     not implement (CSS <style> classes, <text>, filters, masks)
+ *     produce no drawable coverage and are treated as MISSES — the
+ *     chain keeps searching, and the final fallback stays the
+ *     toolkit's own procedural glyph set, never a blank cell. XPM
+ *     remains an honest miss (no decoder).
+ *   - A same-directory probe prefers PNG (exact pixels, zero decode
+ *     risk) and falls back to SVG in that directory; a Scalable
+ *     directory's SVG rasterizes at the REQUESTED size, which is the
+ *     spec's intent for scalable assets.
  *   - Scale>1 directories (the @2x HiDPI scheme) are skipped: the
  *     window layer composites the logical widget tree with exact
  *     integer scaling, so a logical-size icon behaves exactly like
@@ -103,6 +111,11 @@
 #define IT_LOOKUP_CACHE 512   /* name+size results (positive and negative) */
 #define IT_THEME_CACHE 16     /* parsed index.theme structs               */
 #define IT_SURFACE_CACHE 256  /* decoded icon surfaces                    */
+#define IT_REFUSED_MAX 32     /* paths that exist but will not raster —
+                              * the decode-refusal set (shadowing guard:
+                              * a corrupt PNG or an SVG full of features
+                              * nanosvg cannot draw must not hide the
+                              * next candidate in the chain)             */
 #define IT_PIXMAPS_FALLBACK 1 /* /usr/share/pixmaps, flat                 */
 
 /* Directory type values. */
@@ -639,6 +652,38 @@ static bool g_current_read = false;
 
 static size_t g_surface_refused = 0; /* logged-once latch when full */
 
+/* Paths that exist on disk but failed to decode — the decode-refusal
+ * set. Probes skip them, so the chain walk falls through to the NEXT
+ * candidate (another size, another theme, the procedural floor)
+ * instead of letting one broken asset shadow everything behind it.
+ * Bounded: a hostile theme cannot make FDK loop; the cap simply turns
+ * further breakage into the honest miss. Cleared by reset. */
+static char *g_refused[IT_REFUSED_MAX];
+static size_t g_refused_count = 0;
+
+static bool it_path_refused(const char *path) {
+    for (size_t i = 0; i < g_refused_count; i++) {
+        if (strcmp(g_refused[i], path) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Returns false when the set is full (caller treats the candidate as
+ * terminal: no progress possible, the honest miss). */
+static bool it_refuse_add(const char *path) {
+    if (g_refused_count >= IT_REFUSED_MAX) {
+        return false;
+    }
+    char *copy = fdk__theme_strdup(path);
+    if (copy == NULL) {
+        return false; /* OOM: treat as terminal, same as full */
+    }
+    g_refused[g_refused_count++] = copy;
+    return true;
+}
+
 /* ---- parsed-theme lookup (through the cache) ------------------------ */
 
 /* Finds (parsing and caching on first use) the index.theme data for
@@ -733,17 +778,23 @@ static fdk_i32 it_dir_distance(const it_dir *d, fdk_i32 want) {
 
 /* ---- the probe ------------------------------------------------------- */
 
-/* Does <base>/<theme>/<dir>/<icon>.png exist as a regular file?
- * PNG only, on purpose: FDK's decoder is stb_image, and the engine
- * never offers a path it cannot raster (SVG/XPM hits are simply
- * not candidates — the honest miss, see the file header). */
-static bool it_probe_png(const it_base *base, const char *theme,
-                         const it_dir *dir, const char *icon,
-                         char *out, size_t out_len) {
+/* Does <base>/<theme>/<dir>/<icon>.<ext> exist as a regular file,
+ * AND is it not on the decode-refusal set? PNG first (exact pixels,
+ * the decode-safe path), then SVG (raster at the requested size via
+ * the vendored nanosvg — see icon_svg.c for the policy layer and its
+ * honest-miss rules). XPM is not probed: no decoder, never offered.
+ * The refusal check here is what makes a broken asset TRANSPARENT to
+ * the chain: the walk simply proceeds to the next candidate. */
+static bool it_probe_file(const it_base *base, const char *theme,
+                          const it_dir *dir, const char *icon,
+                          const char *ext, char *out, size_t out_len) {
     char path[IT_PATH_MAX];
-    if (snprintf(path, sizeof(path), "%s/%s/%s/%s.png", base->path,
-                 theme, dir->name, icon) >= (int)sizeof(path)) {
+    if (snprintf(path, sizeof(path), "%s/%s/%s/%s.%s", base->path,
+                 theme, dir->name, icon, ext) >= (int)sizeof(path)) {
         return false;
+    }
+    if (it_path_refused(path)) {
+        return false; /* exists but will not raster: skip */
     }
     struct stat st;
     if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
@@ -751,6 +802,16 @@ static bool it_probe_png(const it_base *base, const char *theme,
     }
     snprintf(out, out_len, "%s", path);
     return true;
+}
+
+/* PNG-then-SVG probe in one directory. */
+static bool it_probe_icon(const it_base *base, const char *theme,
+                          const it_dir *dir, const char *icon,
+                          char *out, size_t out_len) {
+    if (it_probe_file(base, theme, dir, icon, "png", out, out_len)) {
+        return true;
+    }
+    return it_probe_file(base, theme, dir, icon, "svg", out, out_len);
 }
 
 /* ---- the lookup ------------------------------------------------------ */
@@ -803,6 +864,22 @@ static void it_lookup_cache_put(const char *name, fdk_i32 size,
         }
     } else {
         slot->path = NULL;
+    }
+}
+
+/* Drops ONE (name,size) entry so the next lookup re-walks the chain
+ * — the decode-refusal retry loop's lever: after a path is refused,
+ * the cached positive that pointed at it must not be served again. */
+static void it_lookup_cache_invalidate(const char *name, fdk_i32 size) {
+    for (size_t i = 0; i < IT_LOOKUP_CACHE; i++) {
+        if (g_lookup_cache[i].used &&
+            g_lookup_cache[i].size == size &&
+            strcmp(g_lookup_cache[i].name, name) == 0) {
+            fdk_free(g_lookup_cache[i].path);
+            g_lookup_cache[i].path = NULL;
+            g_lookup_cache[i].used = false;
+            return;
+        }
     }
 }
 
@@ -885,8 +962,8 @@ static char *it_lookup(const char *icon_name, fdk_i32 size) {
                     continue;
                 }
                 char probe[IT_PATH_MAX];
-                if (it_probe_png(&bases[theme_base], chain[c], &t->dirs[d],
-                                 icon_name, probe, sizeof(probe))) {
+                if (it_probe_icon(&bases[theme_base], chain[c], &t->dirs[d],
+                                  icon_name, probe, sizeof(probe))) {
                     best_dist = dist;
                     snprintf(best_path, sizeof(best_path), "%s", probe);
                     if (pass == 0) {
@@ -905,12 +982,18 @@ static char *it_lookup(const char *icon_name, fdk_i32 size) {
         if (!bases[b].flat) {
             continue;
         }
-        char path[IT_PATH_MAX];
-        if (snprintf(path, sizeof(path), "%s/%s.png", bases[b].path,
-                     icon_name) < (int)sizeof(path)) {
-            struct stat st;
-            if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
-                return fdk__theme_strdup(path);
+        static const char *const exts[] = { "png", "svg" };
+        for (size_t e = 0; e < sizeof(exts) / sizeof(exts[0]); e++) {
+            char path[IT_PATH_MAX];
+            if (snprintf(path, sizeof(path), "%s/%s.%s", bases[b].path,
+                         icon_name, exts[e]) < (int)sizeof(path)) {
+                if (it_path_refused(path)) {
+                    continue;
+                }
+                struct stat st;
+                if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+                    return fdk__theme_strdup(path);
+                }
             }
         }
     }
@@ -1064,7 +1147,64 @@ const char *fdk__icon_theme_current_name(void) {
         }
     }
 
-    /* 6. The spec's universal default. */
+    /* 6. The system default theme: the icon search path's own
+     *    <base>/default/index.theme, [Icon Theme] Inherits=. This is
+     *    the channel stock GNOME/XFCE systems actually publish (set
+     *    by the distro or update-alternatives; gsettings itself is
+     *    D-Bus and out of policy reach). First base in XDG priority
+     *    order wins — a user-level ~/.icons/default outranks the
+     *    system one, mirroring every other base-resolved setting. */
+    {
+        it_base bases[16];
+        size_t base_count = it_collect_bases(bases, 16);
+        for (size_t b = 0; b < base_count; b++) {
+            if (bases[b].flat) {
+                continue;
+            }
+            char path[IT_PATH_MAX];
+            if (snprintf(path, sizeof(path), "%s/default/index.theme",
+                         bases[b].path) >= (int)sizeof(path)) {
+                continue;
+            }
+            char *buf = it_read_index(path);
+            if (buf == NULL) {
+                continue;
+            }
+            char *save = NULL;
+            char *line = strtok_r(buf, "\n", &save);
+            bool in_icon_theme = false;
+            while (line != NULL) {
+                char *s = it_trim(line);
+                if (s[0] == '[') {
+                    in_icon_theme = strncmp(s, "[Icon Theme", 11) == 0;
+                } else if (in_icon_theme) {
+                    char *eq = strchr(s, '=');
+                    if (eq != NULL) {
+                        *eq = '\0';
+                        char *key = it_trim(s);
+                        if (strcmp(key, "Inherits") == 0) {
+                            /* Comma-separated list; the first entry is
+                             * the default theme. */
+                            char *val = it_trim(eq + 1);
+                            char *comma = strchr(val, ',');
+                            if (comma != NULL) {
+                                *comma = '\0';
+                            }
+                            if (it_name_copy(g_current, sizeof(g_current),
+                                             it_trim(val))) {
+                                fdk_free(buf);
+                                return g_current;
+                            }
+                        }
+                    }
+                }
+                line = strtok_r(NULL, "\n", &save);
+            }
+            fdk_free(buf);
+        }
+    }
+
+    /* 7. The spec's universal default. */
     snprintf(g_current, sizeof(g_current), "hicolor");
     return g_current;
 }
@@ -1130,22 +1270,55 @@ fdk_surface *fdk__icon_theme_surface(const char *icon_name, fdk_i32 size) {
     slot->size = size;
     slot->surf = NULL;
 
-    char *path = fdk__icon_theme_lookup(icon_name, size);
-    if (path == NULL) {
-        return NULL; /* negative result now cached */
-    }
-    fdk_surface *surf = NULL;
-    if (fdk_surface_create_from_image(path, &surf) != FDK_OK) {
+    /* The decode-refusal retry loop. A path that exists but will not
+     * raster (corrupt PNG; an SVG built from features nanosvg cannot
+     * draw) is REFUSED — added to the refusal set, its (name,size)
+     * lookup cache entry dropped — and the search restarts, now
+     * skipping that path. Without this, one broken asset in the
+     * highest-priority theme would shadow every valid icon behind it
+     * (the parent theme's PNG, hicolor, ...) and pin the procedural
+     * glyph instead. The loop is bounded: every iteration either
+     * decodes, refuses one DISTINCT path (proven progress), or hits
+     * the refusal-set cap / a true miss — at most IT_REFUSED_MAX + 1
+     * lookups for one (name,size), ever. */
+    for (size_t attempt = 0; attempt <= IT_REFUSED_MAX; attempt++) {
+        it_lookup_cache_invalidate(icon_name, size);
+        char *path = fdk__icon_theme_lookup(icon_name, size);
+        if (path == NULL) {
+            break; /* every candidate probed and missed: honest miss */
+        }
+        fdk_surface *surf = NULL;
+        size_t pl = strlen(path);
+        bool is_svg = pl >= 4 && strcmp(path + pl - 4, ".svg") == 0;
+        if (is_svg) {
+            /* SVG rasterizes at the REQUESTED size — the size passed
+             * to this function, not any size declared inside the
+             * file. */
+            (void)fdk__icon_svg_raster(path, size, &surf);
+        } else {
+            (void)fdk_surface_create_from_image(path, &surf);
+        }
+        if (surf != NULL) {
+            fdk_free(path);
+            size_t nl = strlen(icon_name);
+            if (nl > 9 && strcmp(icon_name + nl - 9, "-symbolic") == 0) {
+                it_tint_symbolic(surf);
+            }
+            slot->surf = surf;
+            return surf;
+        }
+        /* Undecodable candidate: refuse it and let the chain walk
+         * fall through to the next one. */
+        FDK_INFO("icon '%s' at %d px exists but will not raster; "
+                 "refusing '%s' and continuing the chain",
+                 icon_name, size, path);
+        bool added = it_refuse_add(path);
         fdk_free(path);
-        return NULL; /* undecodable on disk: the honest miss */
+        if (!added) {
+            break; /* refusal set full: no progress possible */
+        }
     }
-    fdk_free(path);
-    size_t nl = strlen(icon_name);
-    if (nl > 9 && strcmp(icon_name + nl - 9, "-symbolic") == 0) {
-        it_tint_symbolic(surf);
-    }
-    slot->surf = surf;
-    return surf;
+    return NULL; /* total miss, negative result now cached */
 }
 
 fdk_surface *fdk__icon_theme_surface_chain(const char *const *names,
@@ -1181,6 +1354,11 @@ void fdk__icon_theme_reset(void) {
         g_surface_cache[i].used = false;
         g_surface_cache[i].surf = NULL;
     }
+    for (size_t i = 0; i < g_refused_count; i++) {
+        fdk_free(g_refused[i]);
+        g_refused[i] = NULL;
+    }
+    g_refused_count = 0;
     g_current[0] = '\0';
     g_current_read = false;
     g_surface_refused = 0;

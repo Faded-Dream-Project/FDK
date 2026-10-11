@@ -145,20 +145,26 @@ static void env_point_at_fixture(void) {
  *   <root>/data/icons/
  *     fdktest/            (Inherits=fdkparent)
  *       index.theme
- *       16x16/   Fixed 16   folder, text-x-generic, image-x-generic,
+ *       16x16/   Fixed 16   folder (.png + green .svg contest),
+ *                            text-x-generic, image-x-generic,
  *                            run-symbolic
- *       48x48/   Fixed 48   folder, image-x-generic
+ *       48x48/   Fixed 48   folder, image-x-generic,
+ *                            shadow-test.svg (EMPTY — refusal fixture)
  *       32x32/   Scalable 16..64  audio-x-generic
  *       64x64@2/ Fixed 64 Scale=2  video-x-generic   (must be skipped)
- *       24x24/   Threshold 24       archive.png (only .svg decoy in
- *                                    the fixture for 'application-zip')
+ *       24x24/   Threshold 24   (only the empty application-zip.svg
+ *                               decoy)
+ *       svgonly/ Scalable 8..512  image-x-preview.svg (solid RED,
+ *                               rasterized through nanosvg)
  *     fdkparent/          (Inherits=hicolor)
  *       index.theme
- *       48x48/   Fixed 48   package-x-generic
+ *       48x48/   Fixed 48   package-x-generic, shadow-test.png
  *     hicolor/
  *       index.theme        (no Inherits — the terminal)
  *       16x16/   Fixed 16   text-x-generic   (the inherited last hit)
  *   <root>/config/         (empty until a detection test fills it)
+ *   <root>/datadirs/icons/default/  written by the detection test
+ *                               (the system-default channel)
  */
 static void build_fixture(void) {
     static char tmpl[] = "/tmp/fdk-itheme-XXXXXX";
@@ -174,16 +180,18 @@ static void build_fixture(void) {
     fixture_dir("data/icons/fdktest/32x32");
     fixture_dir("data/icons/fdktest/48x48");
     fixture_dir("data/icons/fdktest/64x64@2");
+    fixture_dir("data/icons/fdktest/svgonly");
     fixture_dir("data/icons/fdkparent/48x48");
     fixture_dir("data/icons/hicolor/16x16");
     fixture_dir("config");
     fixture_dir("datadirs/pixmaps");
+    fixture_dir("datadirs/icons/default");
 
     fixture_text("data/icons/fdktest/index.theme",
                  "[Icon Theme]\n"
                  "Name=FDK Test\n"
                  "Inherits=fdkparent\n"
-                 "Directories=16x16,24x24,32x32,48x48,64x64@2\n"
+                 "Directories=16x16,24x24,32x32,48x48,64x64@2,svgonly\n"
                  "\n"
                  "[16x16]\nSize=16\nType=Fixed\n"
                  "\n"
@@ -194,7 +202,10 @@ static void build_fixture(void) {
                  "\n"
                  "[48x48]\nSize=48\nType=Fixed\n"
                  "\n"
-                 "[64x64@2]\nSize=64\nType=Fixed\nScale=2\n");
+                 "[64x64@2]\nSize=64\nType=Fixed\nScale=2\n"
+                 "\n"
+                 "[svgonly]\nSize=128\nType=Scalable\nMinSize=8\n"
+                 "MaxSize=512\n");
 
     fixture_text("data/icons/fdkparent/index.theme",
                  "[Icon Theme]\n"
@@ -231,12 +242,34 @@ static void build_fixture(void) {
     /* scale!=1: present on disk, must never resolve. */
     fixture_png("data/icons/fdktest/64x64@2/video-x-generic.png",
                 icon_png_video_48, icon_png_video_48_LEN);
-    /* The threshold dir carries ONLY an SVG decoy for the zip name:
-     * found on disk, never offered (PNG-only contract). */
+    /* The threshold dir carries ONLY an empty-SVG decoy for the zip
+     * name: found on disk (lookup offers it), refused at raster
+     * time, and nothing else carries the name. */
     fixture_text("data/icons/fdktest/24x24/application-zip.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
+    /* The same-dir contest: folder.png (blue) vs folder.svg (green)
+     * — the PNG must win. */
+    fixture_text("data/icons/fdktest/16x16/folder.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"16\" height=\"16\" "
+                 "viewBox=\"0 0 16 16\">"
+                 "<rect x=\"0\" y=\"0\" width=\"16\" "
+                 "height=\"16\" fill=\"#00FF00\"/></svg>");
+    /* The rasterizable SVG in the scalable-only dir: solid red. */
+    fixture_text("data/icons/fdktest/svgonly/image-x-preview.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" "
+                 "viewBox=\"0 0 64 64\">"
+                 "<path d=\"M0 0 H64 V64 H0 Z\" "
+                 "fill=\"#FF0000\"/></svg>");
+    /* The refusal pair: an EMPTY svg in the own theme, a valid PNG
+     * in the parent — the refusal must expose the parent's icon. */
+    fixture_text("data/icons/fdktest/48x48/shadow-test.svg",
                  "<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
     /* The parent's 48-px archive chain member. */
     fixture_png("data/icons/fdkparent/48x48/package-x-generic.png",
+                icon_png_archive_48, icon_png_archive_48_LEN);
+    fixture_png("data/icons/fdkparent/48x48/shadow-test.png",
                 icon_png_archive_48, icon_png_archive_48_LEN);
     /* hicolor's terminal 16-px text icon. */
     fixture_png("data/icons/hicolor/16x16/text-x-generic.png",
@@ -251,22 +284,27 @@ static void drop_fixture(void) {
     char buf[600];
     static const char *const files[] = {
         "data/icons/fdktest/16x16/folder.png",
+        "data/icons/fdktest/16x16/folder.svg",
         "data/icons/fdktest/16x16/text-x-generic.png",
         "data/icons/fdktest/16x16/image-x-generic.png",
         "data/icons/fdktest/16x16/run-symbolic.png",
         "data/icons/fdktest/48x48/folder.png",
         "data/icons/fdktest/48x48/image-x-generic.png",
+        "data/icons/fdktest/48x48/shadow-test.svg",
         "data/icons/fdktest/32x32/audio-x-generic.png",
         "data/icons/fdktest/64x64@2/video-x-generic.png",
         "data/icons/fdktest/24x24/application-zip.svg",
+        "data/icons/fdktest/svgonly/image-x-preview.svg",
         "data/icons/fdktest/24x24",
         "data/icons/fdktest/16x16",
         "data/icons/fdktest/32x32",
         "data/icons/fdktest/48x48",
         "data/icons/fdktest/64x64@2",
+        "data/icons/fdktest/svgonly",
         "data/icons/fdktest/index.theme",
         "data/icons/fdktest",
         "data/icons/fdkparent/48x48/package-x-generic.png",
+        "data/icons/fdkparent/48x48/shadow-test.png",
         "data/icons/fdkparent/48x48",
         "data/icons/fdkparent/index.theme",
         "data/icons/fdkparent",
@@ -279,6 +317,9 @@ static void drop_fixture(void) {
         "config",
         "datadirs/pixmaps/fdk-legacy.png",
         "datadirs/pixmaps",
+        "datadirs/icons/default/index.theme",
+        "datadirs/icons/default",
+        "datadirs/icons",
         "datadirs",
         NULL,
     };
@@ -348,14 +389,39 @@ static void test_current_name(void) {
     CHECK(strcmp(fdk__icon_theme_current_name(), "hicolor") == 0,
           "no statement anywhere -> hicolor");
 
+    /* The system-default channel: <base>/default/index.theme
+     * Inherits= — the channel stock GNOME/XFCE publish when no
+     * user config exists (gsettings itself is D-Bus, out of
+     * policy reach). Lives in the XDG_DATA_DIRS base here. */
+    fixture_text("datadirs/icons/default/index.theme",
+                 "[Icon Theme]\nName=Default\nInherits=fdkparent\n");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk__icon_theme_current_name(), "fdkparent") == 0,
+          "system default/index.theme Inherits= detected");
+    /* A comma list serves its first entry only. */
+    fixture_text("datadirs/icons/default/index.theme",
+                 "[Icon Theme]\nName=Default\nInherits=fdkparent,other\n");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk__icon_theme_current_name(), "fdkparent") == 0,
+          "default channel takes the first Inherits entry");
+    {
+        char buf[600];
+        snprintf(buf, sizeof(buf), "%s/datadirs/icons/default/"
+                 "index.theme", g_root);
+        remove(buf);
+    }
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk__icon_theme_current_name(), "hicolor") == 0,
+          "default channel removed -> hicolor again");
+
     /* Detection re-reads after reset (no stale name across swaps). */
     setenv("FDK_ICON_THEME", "fdkparent", 1);
     fdk__icon_theme_reset();
     CHECK(strcmp(fdk__icon_theme_current_name(), "fdkparent") == 0,
           "name re-detected after reset");
     printf("[ok] icon theme: name detection chain "
-           "(env > icon-theme > gtk ini > kdeglobals > hicolor; "
-           "hostile names rejected)\n");
+           "(env > icon-theme > gtk ini > kdeglobals > default/"
+           "index.theme > hicolor; hostile names rejected)\n");
 }
 
 /* ---- 2. lookup ------------------------------------------------------- */
@@ -390,8 +456,8 @@ static void test_lookup(void) {
           "relaxed closest-size fallback");
     fdk_free(p);
 
-    /* Inheritance: archive names miss fdktest (SVG decoy never
-     * offered) -> the parent's package-x-generic. */
+    /* Inheritance: package-x-generic misses fdktest entirely
+     * -> the parent's own file. */
     p = fdk__icon_theme_lookup("package-x-generic", 48);
     CHECK(p != NULL && strstr(p, "fdkparent/48x48") != NULL,
           "inherited hit from parent theme");
@@ -404,18 +470,36 @@ static void test_lookup(void) {
     p = fdk__icon_theme_lookup("nothing-anywhere", 16);
     CHECK(p == NULL, "negative cache hit");
 
-    /* SVG is never offered even though the file exists. */
+    /* SVG is now a first-class candidate: the file exists, the
+     * LOOKUP offers it (filesystem truth — whether it RASTERS is
+     * the surface layer's business, see test_surfaces). */
     p = fdk__icon_theme_lookup("application-zip", 24);
-    CHECK(p == NULL, "SVG decoy never offered (PNG-only)");
+    CHECK(p != NULL && strstr(p, "24x24/application-zip.svg") != NULL,
+          "SVG candidate offered by lookup");
+    fdk_free(p);
+
+    /* The rasterizable SVG in the scalable dir: any size in its
+     * 8..512 range is distance-0. */
+    p = fdk__icon_theme_lookup("image-x-preview", 48);
+    CHECK(p != NULL && strstr(p, "svgonly/image-x-preview.svg") != NULL,
+          "scalable-dir SVG resolves at any in-range size");
+    fdk_free(p);
+
+    /* Same-directory contest: folder.png beats folder.svg. */
+    p = fdk__icon_theme_lookup("folder", 16);
+    CHECK(p != NULL && strstr(p, "16x16/folder.png") != NULL,
+          "PNG preferred over SVG in the same directory");
+    fdk_free(p);
 
     /* scale != 1 directories are skipped. */
     p = fdk__icon_theme_lookup("video-x-generic", 64);
     CHECK(p == NULL, "scale!=1 dir skipped");
 
-    /* Threshold: 22 within 24+-2 -> the dir serves... but the only
-     * file in it is the SVG decoy -> miss (honest). */
+    /* Threshold: 22 within 24+-2 -> the dir would serve, but the
+     * only file in it is the empty application-zip.svg (a different
+     * name) -> archive-x-generic misses honestly. */
     p = fdk__icon_theme_lookup("archive-x-generic", 22);
-    CHECK(p == NULL, "threshold dir with only SVG misses");
+    CHECK(p == NULL, "threshold dir without the name misses");
 
     /* The pixmaps flat fallback. */
     p = fdk__icon_theme_lookup("fdk-legacy", 16);
@@ -430,8 +514,8 @@ static void test_lookup(void) {
           "icon name with slash rejected");
 
     printf("[ok] icon theme: lookup (exact, scalable, relaxed, "
-           "inheritance, hicolor terminal, SVG/scale skips, pixmaps, "
-           "negative cache, path safety)\n");
+           "inheritance, hicolor terminal, SVG candidates, PNG-first, "
+           "scale skips, pixmaps, negative cache, path safety)\n");
 }
 
 /* ---- 3. reset drops the caches --------------------------------------- */
@@ -443,11 +527,16 @@ static void test_reset(void) {
     CHECK(p != NULL, "pre-reset lookup");
     fdk_free(p);
 
-    /* Break the fixture, reset, and confirm the miss is fresh. Both
-     * the 16 and the 48 file must go: the relaxed pass would
-     * otherwise LEGITIMATELY serve the 48-px icon at distance 32. */
+    /* Break the fixture, reset, and confirm the miss is fresh. The
+     * 16 PNG, the 16 SVG (the same-dir runner-up), and the 48 PNG
+     * must all go: the relaxed pass would otherwise LEGITIMATELY
+     * serve the 48-px icon at distance 32, and the SVG would win
+     * its directory outright once the PNG is gone. */
     char buf[600];
     snprintf(buf, sizeof(buf), "%s/data/icons/fdktest/16x16/folder.png",
+             g_root);
+    remove(buf);
+    snprintf(buf, sizeof(buf), "%s/data/icons/fdktest/16x16/folder.svg",
              g_root);
     remove(buf);
     snprintf(buf, sizeof(buf), "%s/data/icons/fdktest/48x48/folder.png",
@@ -463,6 +552,12 @@ static void test_reset(void) {
                 icon_png_folder_16, icon_png_folder_16_LEN);
     fixture_png("data/icons/fdktest/48x48/folder.png",
                 icon_png_folder_48, icon_png_folder_48_LEN);
+    fixture_text("data/icons/fdktest/16x16/folder.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"16\" height=\"16\" "
+                 "viewBox=\"0 0 16 16\">"
+                 "<rect x=\"0\" y=\"0\" width=\"16\" "
+                 "height=\"16\" fill=\"#00FF00\"/></svg>");
     fdk__icon_theme_reset();
     p = fdk__icon_theme_lookup("folder", 16);
     CHECK(p != NULL, "reset drops negative cache");
@@ -522,13 +617,97 @@ static void test_surfaces(void) {
     CHECK(fdk__icon_theme_surface_chain(chain_miss, 16) == NULL,
           "all-miss chain returns NULL");
 
+    /* SVG rasterization: the scalable dir's solid-RED icon, decoded
+     * at the REQUESTED size with the requested geometry, identity
+     * by color. This is the pixel-level proof the nanosvg path
+     * actually draws. */
+    fdk_surface *svg = fdk__icon_theme_surface("image-x-preview", 48);
+    CHECK(svg != NULL, "SVG surface rasterizes");
+    if (svg != NULL) {
+        CHECK(fdk_surface_get_info(svg, &info) == FDK_OK &&
+              info.width == 48 && info.height == 48,
+              "SVG rasterized at the requested size");
+        px = info.pixels[0];
+        CHECK((px >> 24 & 0xFFu) == 0xFFu &&
+              (px >> 16 & 0xFFu) == 0xFFu &&
+              (px >> 8 & 0xFFu) == 0x00u &&
+              (px & 0xFFu) == 0x00u,
+              "SVG icon is solid red (identity by color)");
+        px = info.pixels[(size_t)23 * (size_t)info.stride + 23];
+        CHECK((px >> 24 & 0xFFu) == 0xFFu &&
+              (px >> 16 & 0xFFu) == 0xFFu,
+              "SVG center pixel red too (full coverage)");
+    }
+    /* A different requested size rasterizes at THAT size. */
+    fdk_surface *svg24 = fdk__icon_theme_surface("image-x-preview", 24);
+    CHECK(svg24 != NULL && svg24 != svg &&
+          fdk_surface_get_info(svg24, &info) == FDK_OK &&
+          info.width == 24,
+          "SVG rasters per requested size (24 is its own surface)");
+
+    /* The same-dir contest at the SURFACE level: folder.svg (green)
+     * lost to folder.png (blue) — already proven above by the blue
+     * identity; the lookup-level check pins the mechanism. */
+
+    /* THE SHADOWING REGRESSION: fdktest/48x48/shadow-test.svg is
+     * EMPTY (exists, will never raster). The refusal set must skip
+     * it and the chain must fall through to fdkparent's valid PNG —
+     * the exact bug class where one broken asset in the
+     * highest-priority theme pins the procedural glyph forever. */
+    fdk_surface *shadow = fdk__icon_theme_surface("shadow-test", 48);
+    CHECK(shadow != NULL, "empty-SVG refusal falls through to parent");
+    if (shadow != NULL) {
+        /* Identity: same pixels as a direct decode of the parent's
+         * PNG (byte-for-byte the same fixture asset). */
+        char pathbuf[600];
+        snprintf(pathbuf, sizeof(pathbuf),
+                 "%s/data/icons/fdkparent/48x48/shadow-test.png", g_root);
+        fdk_surface *ref = NULL;
+        CHECK(fdk_surface_create_from_image(pathbuf, &ref) == FDK_OK,
+              "reference decode of the parent PNG");
+        if (ref != NULL) {
+            fdk_surface_info ri, si;
+            bool same = fdk_surface_get_info(ref, &ri) == FDK_OK &&
+                        fdk_surface_get_info(shadow, &si) == FDK_OK &&
+                        ri.width == si.width &&
+                        ri.height == si.height;
+            if (same) {
+                for (fdk_i32 y = 0; y < si.height && same; y++) {
+                    const fdk_u32 *ra = ri.pixels + (size_t)y * (size_t)ri.stride;
+                    const fdk_u32 *sa = si.pixels + (size_t)y * (size_t)si.stride;
+                    for (fdk_i32 x = 0; x < si.width; x++) {
+                        if (ra[x] != sa[x]) {
+                            same = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            CHECK(same, "refused-svg chain serves the parent's PNG "
+                  "(pixel identity)");
+            fdk_surface_destroy(ref);
+        }
+    }
+    /* The refusal is durable and cache-coherent: the post-refusal
+     * lookup skips the empty SVG and returns the parent's PNG. */
+    char *sp = fdk__icon_theme_lookup("shadow-test", 48);
+    CHECK(sp != NULL && strstr(sp, "fdkparent/48x48/shadow-test.png") != NULL,
+          "lookup after refusal skips the empty SVG");
+    fdk_free(sp);
+
+    /* The empty-SVG name with NO valid fallback anywhere: honest
+     * miss at the surface level (refused, nothing left to serve). */
+    CHECK(fdk__icon_theme_surface("application-zip", 24) == NULL,
+          "undrawable SVG with no fallback is a surface-level miss");
+
     /* Reset destroys the surfaces (the fresh decode proves it). */
     fdk__icon_theme_reset();
     fdk_surface *fresh = fdk__icon_theme_surface("folder", 16);
     CHECK(fresh != NULL && fresh != s,
           "reset drops decoded surfaces (new pointer)");
     printf("[ok] icon theme: surfaces (decode, borrow identity, "
-           "symbolic tint pixels, chain resolution, reset)\n");
+           "symbolic tint pixels, chain resolution, SVG raster "
+           "identity, refusal/shadowing, reset)\n");
 }
 
 /* ---- 5. classification ----------------------------------------------- */

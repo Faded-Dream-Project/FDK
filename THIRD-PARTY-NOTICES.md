@@ -115,6 +115,40 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 
+## nanosvg.h + nanosvgrast.h (master, maintenance-era revision)
+
+- Vendored at: third_party/nanosvg/ (provenance and update procedure
+  in third_party/nanosvg/README.md)
+- Source: https://github.com/memononen/nanosvg (Mikko Mononen)
+- SHA-256:
+  - nanosvg.h     e34fd5d084be106cea972d19ce5d27fd96d17ba89f8d06bdceee058420c8b2b0
+  - nanosvgrast.h 79a9c5f4db19debf9f3a648a1589e96d92854f245a5cb4f3d823f263785234d8
+- Used for: rasterizing icon-theme SVG assets at the requested size
+  (src/theme/icon_svg.c's policy layer; compiled once in
+  src/theme/nanosvg_impl.c, allocator and diagnostic notes there).
+
+License (zlib license):
+
+------------------------------------------------------------------------------
+Copyright (c) 2013-14 Mikko Mononen
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+------------------------------------------------------------------------------
+
 ---
 
 ## zlib (system library, NOT vendored)

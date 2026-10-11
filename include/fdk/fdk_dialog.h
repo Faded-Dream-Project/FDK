@@ -303,37 +303,53 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 void *user_data,
                                 fdk_window **out_window);
 
-/* ---- Icon themes (the picker's iconography, 1.5.1) ------------------
+/* ---- Icon themes (the picker's iconography, 1.5.1 + 1.5.2) ----------
  *
  * The dialog's rows wear the DESKTOP's icons, resolved through an
  * internal freedesktop icon-theme engine (src/theme/icon_theme.c):
  * the user's selected theme — detected from $FDK_ICON_THEME (an
  * explicit override), the classic $XDG_CONFIG_HOME/icon-theme file,
- * GTK3/GTK4 settings.ini's gtk-icon-theme-name, or KDE's kdeglobals
- * [Icons] Theme; hicolor when the desktop says nothing — then its
- * Inherits chain, then hicolor, then the unthemed pixmaps
- * directories. Every row classifies by CONTENT: folders (folder),
- * images / audio / video / archives / PDFs / fonts / source files
- * by extension (case-insensitive, the GTK convention), and
- * extension-less files by the executable bit; each classification
- * tries a chain of names ending in a generic virtually every theme
- * ships. Icon sizes are the real theme directories' own: 16 px for
- * list rows, 48 px for the icon grid.
+ * GTK3/GTK4 settings.ini's gtk-icon-theme-name, KDE's kdeglobals
+ * [Icons] Theme, or the icon search path's own default/index.theme
+ * Inherits= line (the channel stock GNOME/XFCE systems publish;
+ * gsettings itself is D-Bus and out of the no-bus policy's reach);
+ * hicolor when the desktop says nothing — then its Inherits chain,
+ * then hicolor, then the unthemed pixmaps directories. Every row
+ * classifies by CONTENT: folders (folder), images / audio / video /
+ * archives / PDFs / fonts / source files by extension
+ * (case-insensitive, the GTK convention), and extension-less files
+ * by the executable bit; each classification tries a chain of names
+ * ending in a generic virtually every theme ships. Icon sizes are
+ * the real theme directories' own: 16 px for list rows, 48 px for
+ * the icon grid.
+ *
+ * Asset formats: a same-directory probe prefers PNG (exact pixels)
+ * and falls back to the directory's SVG, rasterized at the REQUESTED
+ * size through the vendored nanosvg (third_party/nanosvg/ — the
+ * icon-shaped SVG subset: paths, transforms, groups, gradients,
+ * opacity). XPM assets are honest misses (no decoder).
  *
  * Honest limitations, stated here rather than marketed around:
- *   - PNG icons only: FDK's decoder is the vendored stb_image and no
- *     SVG rasterizer is vendored. A size a theme ships only as SVG
- *     contributes nothing — the engine keeps searching other sizes
- *     and themes before falling back.
+ *   - SVGs that need features nanosvg deliberately does not
+ *     implement (CSS <style> classes, <text>, filters, masks)
+ *     produce no drawable coverage and are REFUSED: the engine
+ *     drops that candidate and keeps walking the chain (another
+ *     size, another theme) — a broken asset never shadows the
+ *     valid icons behind it. The refusal set is bounded and resets
+ *     with the other caches.
+ *   - Scale != 1 directories (the @2x HiDPI scheme) are skipped:
+ *     the window layer composites the logical tree with exact
+ *     integer scaling, so a logical-size icon behaves exactly like
+ *     every procedural glyph already does.
  *   - The final fallback is FDK's own procedural glyph set (the
  *     folder tab, the page) — never a stretched wrong-format blob
  *     and never a wrong-type icon.
  *   - Symbolic icons (-symbolic names, the sidebar's preference) are
  *     tinted through their alpha mask with the current FDK theme's
  *     text ink when the theme provides a decodable one.
- *   - Caches (lookups and decoded icons) reset at every dialog
- *     creation: a changed desktop icon theme is picked up by the
- *     NEXT dialog, never served stale. */
+ *   - Caches (lookups, decoded icons, and the refusal set) reset at
+ *     every dialog creation: a changed desktop icon theme is picked
+ *     up by the NEXT dialog, never served stale. */
 
 /* ---- Recent files (1.4.4) ----------------------------------------
  *
