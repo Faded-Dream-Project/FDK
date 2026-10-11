@@ -2035,3 +2035,51 @@ statement the desktop's GTK applications obey — and under pure
 Wayland, where no manager is reachable, the chain falls through to
 the files honestly (kdeglobals on KDE, xfconf on XFCE, the gtk ini
 when written; verified under sway with DISPLAY unset).
+
+## 1.5.4 — the misdocumented-vendor lessons
+
+**Vendored means read, not remembered.** The repo's own docs said
+the vendored nanosvg had no CSS-class support; the vendored bytes
+(byte-identical to upstream master, sums recorded in the vendor
+README) parsed class rules all along. Capability claims about
+third-party code must be verified against the actual vendored
+revision — a remembered subset from an older era created the exact
+blind spot under which an upstream one-byte heap overflow shipped
+through two milestones of "exhaustive" verification. The 1.5.4
+audit starts at the vendored bytes and the recorded sums, not at
+the prose describing them.
+
+**The crashing shape was the most ordinary CSS in the world.** A
+rule ending in `;` plus a trailing newline — one declaration per
+line, the way every human and every icon-theme generator authors
+CSS — was the heap-overflow trigger; the exotic shapes (trailing
+comments, colonless tokens) were NOT. The 1.5.2/1.5.3 fixtures
+used single-line authoring-style CSS, the one shape that happens
+to be safe, so the suites stayed green while every real theme
+crashed. Fixture sets for parser-adjacent code must include the
+UNREMARKABLE real-world shapes (multiline rules, trailing
+whitespace), not just the pathological ones — the new class group
+pins eight shapes, and the two that were overflow forms are the
+boring ones.
+
+**A one-byte read past a strndup is a trim that forgot its NUL.**
+The ASan signature — READ of size 1, 0 bytes after an exactly-
+sized region, inside a property parser — narrows the search to
+scan/trim loops that dereference at `end` when `end` is computed
+as one-past-the-NUL. The diagnostic sweep is mechanical: grep the
+parser for `*end`/`*str` dereferences where the pointer can equal
+the exclusive bound. The fix pattern is equally mechanical: trim
+by looking at `byte[-1]`, never at `*end` — and prove output
+equivalence on well-formed input by tracing the compensating
+arithmetic the old code was doing.
+
+**Reproduce the report before fixing, then keep it forever.** The
+user's ASan frame (`nsvg__parseNameValue`, one byte past a 17-byte
+region from `nsvg__content`'s strndup) was turned into a fixture
+that aborted at the same frame BEFORE any fix existed — the fix
+was then proven against the reproduced failure, not against a
+theory — and the fixture stayed in the suite as the permanent
+regression, plus an X11 dialog round replaying the exact crash
+flow (dialog open on a class-only theme, fills read back from the
+X server). A crash report is a test specification arriving for
+free; file it, don't just fix it.

@@ -343,16 +343,22 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
  * and falls back to the directory's SVG, rasterized at the REQUESTED
  * size through the vendored nanosvg (third_party/nanosvg/ — the
  * icon-shaped SVG subset: paths, transforms, groups, gradients,
- * opacity). XPM assets are honest misses (no decoder).
+ * opacity, plus simple CSS <style>+class= rules carrying the
+ * presentation properties — the authoring shape of Papirus/Breeze/
+ * Tela, applied and pixel-pinned since 1.5.4). XPM assets are
+ * honest misses (no decoder).
  *
  * Honest limitations, stated here rather than marketed around:
  *   - SVGs that need features nanosvg deliberately does not
- *     implement (CSS <style> classes, <text>, filters, masks)
- *     produce no drawable coverage and are REFUSED: the engine
- *     drops that candidate and keeps walking the chain (another
- *     size, another theme) — a broken asset never shadows the
- *     valid icons behind it. The refusal set is bounded and resets
- *     with the other caches.
+ *     implement (<text>, filters, masks) produce no drawable
+ *     coverage and are REFUSED: the engine drops that candidate
+ *     and keeps walking the chain (another size, another theme) —
+ *     a broken asset never shadows the valid icons behind it.
+ *     The refusal set is bounded and resets with the other caches.
+ *   - Class rules that set only NON-presentation properties (a
+ *     bare color:/currentColor rule, the ColorScheme-* idiom)
+ *     do not style the shape: it draws with its default fill
+ *     rather than the scheme color — rendered, honest, not a miss.
  *   - Scale != 1 directories (the @2x HiDPI scheme) are skipped:
  *     the window layer composites the logical tree with exact
  *     integer scaling, so a logical-size icon behaves exactly like

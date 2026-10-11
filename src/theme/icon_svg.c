@@ -17,9 +17,14 @@
  *     100000x100000 cannot allocate anything larger than the icon
  *     cell the engine asked for;
  *   - honest-miss on empty output: some real-world SVGs use
- *     features nanosvg deliberately does not implement (CSS class
- *     fills, <text>, filters, masks). When a parse produces no
- *     drawable coverage the icon is reported as a MISS so the
+ *     features nanosvg deliberately does not implement (<text>,
+ *     filters, masks). Simple CSS <style>+class= rules ARE parsed
+ *     and their presentation-property fills apply — the 2023-era
+ *     upstream master this vendor tracks carries class support
+ *     (the Papirus/Breeze/Tela authoring shape); rules that set
+ *     only color:/currentColor leave the default fill. When a
+ *     parse produces no drawable coverage the icon is reported as
+ *     a MISS so the
  *     lookup chain keeps searching — other sizes, other themes, the
  *     procedural glyph floor — instead of drawing a blank cell;
  *   - fdk_alloc discipline: the file buffer and raster buffer are

@@ -167,7 +167,11 @@ static void env_point_at_fixture(void) {
  *       24x24/   Threshold 24   (only the empty application-zip.svg
  *                               decoy)
  *       svgonly/ Scalable 8..512  image-x-preview.svg (solid RED,
- *                               rasterized through nanosvg)
+ *                               rasterized through nanosvg) +
+ *                               class-*.svg (CSS <style>+class= —
+ *                               the modern-theme shape, incl. the
+ *                               trailing-whitespace properties text
+ *                               that overflowed the parser's heap)
  *     fdkparent/          (Inherits=hicolor)
  *       index.theme
  *       48x48/   Fixed 48   package-x-generic, shadow-test.png
@@ -276,6 +280,69 @@ static void build_fixture(void) {
                  "viewBox=\"0 0 64 64\">"
                  "<path d=\"M0 0 H64 V64 H0 Z\" "
                  "fill=\"#FF0000\"/></svg>");
+    /* CSS-class SVGs — the modern authoring shape (Papirus/Breeze/
+     * Tela fill through <style> + class=). The vendored upstream
+     * nanosvg parses these; the fixtures pin that the fills apply
+     * AND the two properties-text shapes that used to overflow the
+     * parser's heap (see the CSS-class group in test_surfaces). */
+    fixture_text("data/icons/fdktest/svgonly/class-red.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">"
+                 "<style type=\"text/css\">.s0{fill:#FF0000}</style>"
+                 "<path class=\"s0\" d=\"M0 0 H64 V64 H0 Z\"/></svg>");
+    /* The standard multiline rule (one declaration per line). The
+     * properties text ends ';' + newline — the exact shape whose
+     * empty final chunk read one byte past the heap block. */
+    fixture_text("data/icons/fdktest/svgonly/class-newlines.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">"
+                 "<style type=\"text/css\">\n"
+                 ".s0 {\n  fill: #FF0000;\n}\n"
+                 "</style>\n"
+                 "<path class=\"s0\" d=\"M0 0 H64 V64 H0 Z\"/>\n"
+                 "</svg>\n");
+    /* A trailing comment after the last declaration (a colonless
+     * final chunk — the other malformed-tail robustness shape). */
+    fixture_text("data/icons/fdktest/svgonly/class-comment-tail.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">"
+                 "<style type=\"text/css\">"
+                 ".s0{fill:#FF0000; /* trailing comment */}"
+                 "</style>"
+                 "<path class=\"s0\" d=\"M0 0 H64 V64 H0 Z\"/></svg>");
+    /* Two rules, one element: class="a b" applies both, the later
+     * attribute class wins the fill. */
+    fixture_text("data/icons/fdktest/svgonly/class-order.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">"
+                 "<style type=\"text/css\">"
+                 ".a{fill:#0000FF}.b{fill:#FF0000}"
+                 "</style>"
+                 "<path class=\"a b\" d=\"M0 0 H64 V64 H0 Z\"/></svg>");
+    /* Selector list: .c,.d — the element carries only d. */
+    fixture_text("data/icons/fdktest/svgonly/class-list.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">"
+                 "<style type=\"text/css\">.c,.d{fill:#00FF00}</style>"
+                 "<path class=\"d\" d=\"M0 0 H64 V64 H0 Z\"/></svg>");
+    /* A class name with no matching rule: default fill, no crash. */
+    fixture_text("data/icons/fdktest/svgonly/class-unknown.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">"
+                 "<style type=\"text/css\">.zz{fill:#FF0000}</style>"
+                 "<path class=\"s0\" d=\"M0 0 H64 V64 H0 Z\"/></svg>");
+    /* Empty rule body: a no-op. */
+    fixture_text("data/icons/fdktest/svgonly/class-empty.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">"
+                 "<style type=\"text/css\">.s0{}</style>"
+                 "<path class=\"s0\" d=\"M0 0 H64 V64 H0 Z\"/></svg>");
+    /* Whitespace-only rule body — the second overflow shape. */
+    fixture_text("data/icons/fdktest/svgonly/class-ws-only.svg",
+                 "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                 "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">"
+                 "<style type=\"text/css\">.s0{   }</style>"
+                 "<path class=\"s0\" d=\"M0 0 H64 V64 H0 Z\"/></svg>");
     /* The refusal pair: an EMPTY svg in the own theme, a valid PNG
      * in the parent — the refusal must expose the parent's icon. */
     fixture_text("data/icons/fdktest/48x48/shadow-test.svg",
@@ -309,6 +376,14 @@ static void drop_fixture(void) {
         "data/icons/fdktest/64x64@2/video-x-generic.png",
         "data/icons/fdktest/24x24/application-zip.svg",
         "data/icons/fdktest/svgonly/image-x-preview.svg",
+        "data/icons/fdktest/svgonly/class-red.svg",
+        "data/icons/fdktest/svgonly/class-newlines.svg",
+        "data/icons/fdktest/svgonly/class-comment-tail.svg",
+        "data/icons/fdktest/svgonly/class-order.svg",
+        "data/icons/fdktest/svgonly/class-list.svg",
+        "data/icons/fdktest/svgonly/class-unknown.svg",
+        "data/icons/fdktest/svgonly/class-empty.svg",
+        "data/icons/fdktest/svgonly/class-ws-only.svg",
         "data/icons/fdktest/24x24",
         "data/icons/fdktest/16x16",
         "data/icons/fdktest/32x32",
@@ -669,6 +744,30 @@ static void test_reset(void) {
 
 /* ---- 4. surfaces + symbolic tint ------------------------------------- */
 
+/* A full-bleed class-fixture icon checked by center color at 48 px:
+ * the fixture paths cover the whole cell, so the fill color is the
+ * identity. Shared by the CSS-class regression group below. */
+static void check_class_icon(const char *name, fdk_u32 r, fdk_u32 g,
+                              fdk_u32 b, const char *what) {
+    fdk_surface *s = fdk__icon_theme_surface(name, 48);
+    CHECK(s != NULL, what);
+    if (s == NULL) {
+        return;
+    }
+    fdk_surface_info info;
+    if (fdk_surface_get_info(s, &info) != FDK_OK ||
+        info.width != 48 || info.height != 48) {
+        CHECK(false, "class icon rasterized at the requested size");
+        return;
+    }
+    fdk_u32 px = info.pixels[(size_t)24 * (size_t)info.stride + 24];
+    CHECK((px >> 24 & 0xFFu) == 0xFFu &&
+          (px >> 16 & 0xFFu) == r &&
+          (px >> 8 & 0xFFu) == g &&
+          (px & 0xFFu) == b,
+          what);
+}
+
 static void test_surfaces(void) {
     setenv("FDK_ICON_THEME", "fdktest", 1);
     fdk__icon_theme_reset();
@@ -747,6 +846,40 @@ static void test_surfaces(void) {
           info.width == 24,
           "SVG rasters per requested size (24 is its own surface)");
 
+    /* ---- CSS-class SVGs: the modern-theme authoring shape -------
+     * The vendored upstream nanosvg parses <style> blocks and
+     * simple class selectors — the shape Papirus/Breeze/Tela themes
+     * fill their icons through. The group pins that class fills
+     * APPLY and holds the two properties-text shapes that used to
+     * read one byte past the strndup'ed rule text (a
+     * heap-buffer-overflow under ASAN — the crash that aborted
+     * every file-dialog open on a class-using desktop theme): a
+     * declaration block ending ';' + trailing whitespace (the
+     * standard multiline rule) and a whitespace-only block. Both
+     * shapes sent the name scanner to end, and the old right-trim
+     * dereferenced *end one byte past the NUL. */
+    check_class_icon("class-red", 0xFF, 0x00, 0x00,
+                     "class-styled SVG: the fill applies (solid red)");
+    check_class_icon("class-newlines", 0xFF, 0x00, 0x00,
+                     "multiline class CSS rasterizes red (the "
+                     "trailing-newline overflow shape)");
+    check_class_icon("class-comment-tail", 0xFF, 0x00, 0x00,
+                     "trailing-comment class CSS rasterizes red (the "
+                     "colonless-tail shape)");
+    check_class_icon("class-order", 0xFF, 0x00, 0x00,
+                     "multi-class: both rules apply, attribute order "
+                     "wins the fill (red)");
+    check_class_icon("class-list", 0x00, 0xFF, 0x00,
+                     "selector-list rule applies to each member "
+                     "(solid green)");
+    check_class_icon("class-unknown", 0x00, 0x00, 0x00,
+                     "unmatched class keeps the default black fill");
+    check_class_icon("class-empty", 0x00, 0x00, 0x00,
+                     "empty rule body is a no-op (default fill)");
+    check_class_icon("class-ws-only", 0x00, 0x00, 0x00,
+                     "whitespace-only rule body survives (the second "
+                     "overflow shape, default fill)");
+
     /* The same-dir contest at the SURFACE level: folder.svg (green)
      * lost to folder.png (blue) — already proven above by the blue
      * identity; the lookup-level check pins the mechanism. */
@@ -809,7 +942,8 @@ static void test_surfaces(void) {
           "reset drops decoded surfaces (new pointer)");
     printf("[ok] icon theme: surfaces (decode, borrow identity, "
            "symbolic tint pixels, chain resolution, SVG raster "
-           "identity, refusal/shadowing, reset)\n");
+           "identity, CSS-class shapes incl. the heap-overflow "
+           "regressions, refusal/shadowing, reset)\n");
 }
 
 /* ---- 5. classification ----------------------------------------------- */

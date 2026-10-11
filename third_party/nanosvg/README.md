@@ -27,23 +27,44 @@ straight into an RGBA buffer — the exact input format
 ## The supported subset (the honest limits)
 
 nanosvg deliberately implements the icon-shaped subset of SVG:
-geometry, transforms, gradients, opacity. It does NOT implement
-`<text>`, CSS classes/`<style>` blocks (Breeze's ColorScheme-*
-classes), filters, masks, or clip-path references. Icon-theme SVGs
-are overwhelmingly plain paths with inline fills — Adwaita's entire
-scalable tree parses cleanly. When an SVG nonetheless needs an
-unsupported feature, the parse yields empty or zero-coverage output;
-FDK's policy layer (src/theme/icon_svg.c) detects that and reports
-the icon as a MISS so the chain keeps searching (other sizes, other
-themes, the procedural glyph floor) instead of drawing a blank.
+geometry, transforms, gradients, opacity — and, in the 2023-era
+master this vendor tracks, simple CSS class rules (`<style>`
+blocks with `.`-selectors, `class=` attributes; the authoring
+shape of Papirus/Breeze/Tela). It does NOT implement `<text>`,
+filters, masks, or clip-path references, and class rules that set
+non-presentation properties (a bare `color:`/`currentColor` rule,
+the ColorScheme-* idiom) are ignored — such shapes draw with
+default fills or produce zero coverage. Icon-theme SVGs are
+overwhelmingly plain paths with inline or class fills. When an
+SVG nonetheless needs an unsupported feature, the parse yields
+empty or zero-coverage output; FDK's policy layer
+(src/theme/icon_svg.c) detects that and reports the icon as a
+MISS so the chain keeps searching (other sizes, other themes, the
+procedural glyph floor) instead of drawing a blank.
 
 ## Provenance
 
 - Source: https://github.com/memononen/nanosvg (master, 2023-era
   final revision; the repository is in maintenance mode)
-- SHA-256:
+- Upstream base SHA-256 (the revision vendored, then
+  byte-identical):
   - nanosvg.h     e34fd5d084be106cea972d19ce5d27fd96d17ba89f8d06bdceee058420c8b2b0
   - nanosvgrast.h 79a9c5f4db19debf9f3a648a1589e96d92854f245a5cb4f3d823f263785234d8
+- LOCAL PATCH (nanosvg.h, marked `FDK PATCH (bounds)` at the
+  `nsvg__parseNameValue` trim): the upstream name right-trim
+  dereferenced `*str` with `str == end`, and `nsvg__parseStyle`
+  computes `end` as one past the NUL of the tightly `strndup`'ed
+  class-properties text — so ANY CSS declaration block ending in
+  `;` + trailing whitespace (the standard multiline rule) read ONE
+  BYTE past the heap block (heap-buffer-overflow under ASan; every
+  file-dialog open on a class-using theme aborted — caught in the
+  wild by the maintainer's 1.5.4 report, reproduced and fixed
+  locally). The patch trims by `str[-1]` instead: identical output
+  for well-formed declarations, bounds-safe for malformed ones.
+  Upstream is in maintenance mode; worth reporting there, kept as
+  a marked local diff meanwhile. The vendored nanosvg.h therefore
+  no longer matches the upstream sum above — the diff is exactly
+  the marked patch.
 
 ## Update procedure
 
@@ -51,8 +72,12 @@ themes, the procedural glyph floor) instead of drawing a blank.
 2. Record new SHA-256 sums here and in THIRD-PARTY-NOTICES.md.
 3. `make clean && make && make test` — the icon-theme suite pins
    rasterization behavior (color identity, aspect fit, empty-asset
-   miss) and will catch regressions.
-4. Keep the allocator note in sync: this version exposes no
+   miss, and since 1.5.4 the CSS-class shapes incl. both overflow
+   forms) and will catch regressions.
+4. Re-evaluate every `FDK PATCH` marker: upstream may have fixed
+   the same bug differently (drop the local diff), or not (re-apply
+   it on the new base and re-record the sums and this note).
+5. Keep the allocator note in sync: this version exposes no
    allocator macros and uses plain malloc/free internally; every
    allocation it makes is freed by its own nsvgDelete /
    nsvgDeleteRasterizer pair, and the buffers FDK hands it or

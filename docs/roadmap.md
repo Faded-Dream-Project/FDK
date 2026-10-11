@@ -5476,7 +5476,9 @@ prefers PNG (exact pixels) and falls back to the directory's SVG;
 Scalable directories serve any in-range size; the icon's document
 box is aspect-fit into the cell. The honest-miss rule survives:
 SVGs built from features nanosvg deliberately does not implement
-(CSS classes, <text>, filters, masks) produce no drawable coverage
+(<text>, filters, masks — the "CSS classes" this section long
+listed among them was WRONG: the vendored master parses simple
+class rules, see 1.5.4) produce no drawable coverage
 and are treated as misses, never blank cells. Verification is
 pixel-level AND independent: cairosvg (cairo) renders the
 reference from the same Adwaita SVG, and the screenshot's grid
@@ -5571,3 +5573,70 @@ over integer/string/color neighbors, env-over-XSETTINGS
 precedence, unreadable-property fallback, and the
 manager-disappeared fallback; the Wayland rig proves file-channel
 detection end to end with DISPLAY unset under sway.
+
+## 1.5.4 — the picker's crash fix: CSS-class SVGs
+
+The maintainer's fourth report was a hard one: "it crashes
+anytime I try to open anything that has to do with the
+filepicker" — an AddressSanitizer heap-buffer-overflow, READ of
+size 1, in `nsvg__parseNameValue`, through `fdk_dialog_open_file`
+-> `fdk__icon_theme_surface_chain` -> `fdk__icon_svg_raster` ->
+`nsvgParse`. Every dialog open on the maintainer's desktop
+aborted inside the vendored SVG parser — and the timing was not a
+coincidence: 1.5.3's live XSETTINGS detection finally selected
+the REAL active theme, whose SVGs carry CSS class rules, so the
+class parser was suddenly exercised on every icon where the older
+file-channel detection had picked a PNG-only fallback.
+
+**The root cause was upstream; the blind spot was ours.** The
+vendored nanosvg headers are byte-identical to upstream master
+(the README's recorded sums prove it), and that master PARSES CSS
+`<style>` blocks and simple `class=` selectors — but the repo's
+own documentation (the vendor README, fdk_dialog.h, icon_svg.c,
+this roadmap) said it did not. That misdocumentation mattered
+twice over: the capability claim was never questioned, and the
+1.5.2/1.5.3 SVG fixtures were authored as single-line CSS — the
+one shape that happens NOT to crash. In the class path,
+`nsvg__parseNameValue`'s name right-trim dereferenced `*str` with
+`str == end`, where `nsvg__parseStyle` computes `end` as one past
+the NUL of the tightly `strndup`'ed class-properties text. The
+exact trigger: a declaration block whose final `;`-chunk is empty
+after left-trim — i.e. ANY rule ending in `;` + trailing
+whitespace, the standard multiline shape every real theme
+authors:
+
+    .ColorScheme-Text {
+        fill: #dfdfdf;
+    }
+
+The 17-byte block in the maintainer's report and the 19-byte
+block in our reproduction are the same mechanism at different
+rule lengths. The fix is one function, marked `FDK PATCH
+(bounds)` in the vendored header: trim by `str[-1]` (never
+dereference at or past `end`) instead of `*str` plus a
+compensating `++str` — provably identical output for every
+well-formed declaration, bounds-safe for every malformed one.
+The vendor README's provenance now records the local diff against
+the recorded upstream sums, so a future update re-evaluates the
+patch instead of silently losing it.
+
+**Regression-pinned three ways.** A headless class-fixture group
+in test_icon_theme.c — eight shapes: the plain rule, the
+multiline rule, the trailing comment, multi-class ordering,
+selector lists, an unmatched class, an empty body, and a
+whitespace-only body (the multiline and whitespace-only shapes
+are the overflow forms; all pinned by center-pixel color
+identity). An X11 dialog round in test_x11_integration.c where a
+class-only theme serves every icon and the class-rule fills are
+read back from the X SERVER through the real open-file dialog —
+the maintainer's exact crash flow as a permanent assertion. And
+the full headless + X11 suites green on the patched tree, zero
+warnings under the strict set.
+
+**The honest fidelity note.** Class rules carrying presentation
+properties (fill, stroke, opacity...) apply; rules that set only
+`color:`/`currentColor` (the ColorScheme-* idiom some themes use
+exclusively) leave the shape at its default fill — drawn and
+honest, not a miss. That boundary is now stated in fdk_dialog.h,
+icon_svg.c, the vendor README, and here, replacing the wrong
+"unsupported" claims of 1.5.2/1.5.3.

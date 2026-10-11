@@ -6982,6 +6982,56 @@ static void icon_fixture_build(void) {
         fclose(f);
         assert(chmod(buf, 0755) == 0);
     }
+
+    /* A second, CSS-class-styled theme: every icon is an SVG whose
+     * fill comes from a <style> rule with MULTILINE, trailing-
+     * whitespace CSS — the exact properties-text shape that read
+     * one byte past the strndup'ed rule text in the vendored
+     * nanosvg before the bounds fix (the crash that aborted every
+     * file-dialog open on a class-using desktop theme). */
+    icon_fixture_mkdir("data/icons/fdkx11css/scalable");
+    {
+        static const char css_index[] =
+            "[Icon Theme]\n"
+            "Name=FDK X11 CSS Fixture\n"
+            "Inherits=hicolor\n"
+            "Directories=scalable\n"
+            "\n"
+            "[scalable]\nSize=128\nType=Scalable\n"
+            "MinSize=8\nMaxSize=512\n";
+        icon_fixture_write("data/icons/fdkx11css/index.theme", css_index,
+                           sizeof(css_index) - 1);
+    }
+    {
+        static const char folder_svg[] =
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+            "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">\n"
+            "<style type=\"text/css\">\n"
+            ".ColorScheme-Folder {\n"
+            "\tfill: #FF00FF;\n"
+            "}\n"
+            "</style>\n"
+            "<path class=\"ColorScheme-Folder\" "
+            "d=\"M0 0 H64 V64 H0 Z\"/>\n"
+            "</svg>\n";
+        icon_fixture_write("data/icons/fdkx11css/scalable/folder.svg",
+                           folder_svg, strlen(folder_svg));
+    }
+    {
+        static const char text_svg[] =
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+            "width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">\n"
+            "<style type=\"text/css\">\n"
+            ".ColorScheme-Text {\n"
+            "\tfill: #00FFFF;\n"
+            "}\n"
+            "</style>\n"
+            "<path class=\"ColorScheme-Text\" "
+            "d=\"M0 0 H64 V64 H0 Z\"/>\n"
+            "</svg>\n";
+        icon_fixture_write("data/icons/fdkx11css/scalable/text-x-generic.svg",
+                           text_svg, strlen(text_svg));
+    }
 }
 
 static void icon_fixture_drop(void) {
@@ -7003,6 +7053,11 @@ static void icon_fixture_drop(void) {
         "data/icons/fdkx11/32x32",
         "data/icons/fdkx11/index.theme",
         "data/icons/fdkx11",
+        "data/icons/fdkx11css/scalable/folder.svg",
+        "data/icons/fdkx11css/scalable/text-x-generic.svg",
+        "data/icons/fdkx11css/scalable",
+        "data/icons/fdkx11css/index.theme",
+        "data/icons/fdkx11css",
         "data/icons",
         "data",
         "config",
@@ -7198,6 +7253,43 @@ static void test_file_dialog_icons_gui(void) {
         assert(px != 0x000000FFu);
         printf("[ok] file dialog icons: switching the theme away "
                "drops the icon caches (procedural fallback)\n");
+        x11_send_key_event(send_dpy, xid, KeyPress, 9);
+        dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
+    }
+
+    /* --- 4. CSS-class SVGs through the REAL dialog: the crash
+     * regression. Before the vendored-nanosvg bounds fix, opening
+     * a dialog on a class-using theme aborted the process inside
+     * nsvgParse — a heap-buffer-overflow one byte past the
+     * strndup'ed class properties text (the multiline rule's
+     * trailing whitespace leaves an empty final declaration
+     * chunk, and the old name right-trim dereferenced *end). Now
+     * the rows wear the class-rule fills, read back from the X
+     * server. */
+    {
+        setenv("FDK_ICON_THEME", "fdkx11css", 1);
+        fdk__icon_theme_reset();
+        fdk_file_dialog_options o = {0};
+        o.kind = FDK_FILE_DIALOG_OPEN_FILE;
+        snprintf(buf, sizeof(buf), "%s/browse", icon_root);
+        o.start_dir = buf;
+        fdk_window *dlg = NULL;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &o, file_dialog_done,
+                                           NULL, &dlg)));
+        (void)fdk_pump_events(ctx, 300);
+        unsigned long xid = fdk_window_xid(dlg);
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
+        fdk_widget *body = fdk_widget_child_at(droot, 1);
+        fdk_widget *list = fdk_widget_child_at(body, 8);
+        assert(fdk_list_row_count(list) == 6);
+        unsigned long fpx = icon_row_color(ctx, send_dpy, xid, list, 0);
+        assert(fpx == 0x00FF00FFu); /* sub/: the class-rule magenta */
+        unsigned long tpx = icon_row_color(ctx, send_dpy, xid, list, 2);
+        assert(tpx == 0x0000FFFFu); /* note.txt: the class-rule cyan */
+        printf("[ok] file dialog icons: CSS-class SVGs render through "
+               "the dialog — the multiline-rule crash shape, fills "
+               "applied (X-server pixels)\n");
         x11_send_key_event(send_dpy, xid, KeyPress, 9);
         dialog_wait_outcome(ctx, FDK_FILE_DIALOG_CANCELLED);
     }

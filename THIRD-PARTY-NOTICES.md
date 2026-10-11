@@ -120,9 +120,14 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - Vendored at: third_party/nanosvg/ (provenance and update procedure
   in third_party/nanosvg/README.md)
 - Source: https://github.com/memononen/nanosvg (Mikko Mononen)
-- SHA-256:
+- SHA-256 (upstream base; the vendored nanosvg.h carries one
+  marked local patch since 1.5.4):
   - nanosvg.h     e34fd5d084be106cea972d19ce5d27fd96d17ba89f8d06bdceee058420c8b2b0
   - nanosvgrast.h 79a9c5f4db19debf9f3a648a1589e96d92854f245a5cb4f3d823f263785234d8
+- Local diff from upstream: one marked bounds fix in nanosvg.h
+  (nsvg__parseNameValue's name right-trim read one byte past a
+  strndup'ed class-properties string — see the LOCAL PATCH note in
+  third_party/nanosvg/README.md).
 - Used for: rasterizing icon-theme SVG assets at the requested size
   (src/theme/icon_svg.c's policy layer; compiled once in
   src/theme/nanosvg_impl.c, allocator and diagnostic notes there).

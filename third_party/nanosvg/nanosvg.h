@@ -1947,9 +1947,19 @@ static int nsvg__parseNameValue(NSVGparser* p, const char* start, const char* en
 
 	val = str;
 
-	// Right Trim
-	while (str > start &&  (*str == ':' || nsvg__isspace(*str))) --str;
-	++str;
+	// FDK PATCH (bounds): right-trim the NAME by examining the byte
+	// BEFORE the cut (str[-1]) instead of dereferencing *str. The
+	// upstream trim left str == end when a declaration chunk carries
+	// no ':' and then read *end — which nsvg__parseStyle computes as
+	// one past the NUL terminator of the strndup'ed
+	// NSVGstyleDeclaration::propertiesText (an exactly-sized heap
+	// block, so the read was a heap-buffer-overflow; any class CSS
+	// whose declaration block ends in ';' + trailing whitespace —
+	// the standard multiline rule shape — hit it). Output is
+	// unchanged for every well-formed declaration: the trim now
+	// stops ON the byte after the last name character, so the old
+	// compensating ++str is gone too.
+	while (str > start && nsvg__isspace(str[-1])) --str;
 
 	n = (int)(str - start);
 	if (n > 511) n = 511;

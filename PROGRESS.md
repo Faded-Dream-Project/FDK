@@ -9,7 +9,35 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-11, at milestone **1.5.3** (the picker's
+Last audited: 2026-10-12, at milestone **1.5.4** (the picker's
+crash fix — the maintainer's fourth report ["it crashes anytime I
+try to open anything that has to do with the filepicker", an ASan
+heap-buffer-overflow inside nsvg__parseNameValue] resolved at the
+root, not the symptom: the vendored upstream nanosvg PARSES CSS
+<style>+class= rules — the repo's own docs had wrongly claimed it
+did not, and that misdocumented blind spot is precisely how an
+upstream one-byte OOB read shipped for two milestones — and the
+name right-trim dereferenced *str with str == end, one byte past
+the NUL of the strndup'ed class-properties text, whenever a CSS
+declaration block ends in ';' + trailing whitespace (the standard
+multiline rule every real theme authors, so EVERY dialog open on
+a class-using theme aborted; 1.5.3's live XSETTINGS detection had
+just made FDK finally select those real themes, which is why the
+crash surfaced exactly then); fixed with a marked one-function
+bounds patch in the vendored header [trim by str[-1] — identical
+output for well-formed declarations], the vendor README's
+provenance now recording the local diff against the upstream
+sums, and the stale capability claims corrected in fdk_dialog.h /
+icon_svg.c / roadmap; regression-pinned THREE ways: a headless
+class-fixture group [eight shapes incl. both overflow forms and
+positive fill-application pins], an X11 dialog round where a
+class-only theme's fills are read back from the X SERVER through
+the real open-file dialog [the maintainer's exact crash flow as a
+permanent assertion], and the full headless + X11 suites green;
+honest fidelity boundary documented [class rules with
+presentation properties apply; color:/currentColor-only rules
+leave the default fill]; public API and its 621 exports
+unchanged), building on **1.5.3** (the picker's
 polish pass — the maintainer's third report ["black boxes or bars
 around folder icons, worst in the grid, present in the list; the
 active desktop theme still not detected without an override; the
