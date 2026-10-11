@@ -2083,3 +2083,35 @@ regression, plus an X11 dialog round replaying the exact crash
 flow (dialog open on a class-only theme, fills read back from the
 X server). A crash report is a test specification arriving for
 free; file it, don't just fix it.
+
+## 1.6.0 — the release-blocking pair (allocator identity + runner timing)
+
+**Pointer identity after free is not an assertion.** The icon-theme
+surfaces group ended with "reset drops decoded surfaces (new
+pointer)" — `fresh != s` where `s` had just been freed by the reset.
+Under ASan (the default build) the quarantine guarantees a fresh
+address, so it passed everywhere we ran it — until the Void Linux
+packaging job, which builds `FDK_SANITIZE=0` because Void's container
+ships no sanitizer runtimes: plain glibc legitimately hands the
+re-decode the same just-freed chunk, and the assert failed
+deterministically there (reproduced locally with `make
+FDK_SANITIZE=0 test` — the exact Void condition — while the sanitized
+build passes both). The fix replaces the proxy with the contract:
+rewrite the backing asset to a different solid color after the reset
+and require the fresh decode to show the NEW pixels — a cache that
+survived reset would still show the old blue. Content, not address;
+the assertion is now allocator-independent by construction.
+
+**A cold click can flake under CI load; make it warm and retried.**
+The catalog GUI test clicked the toggle with a bare ButtonPress (no
+prior motion) into 100 ms pump windows, while the button above it
+used motion + press + release. On a heavily loaded runner — five
+docker packaging jobs in parallel — the X server once delivered past
+the window and the flip assert aborted the Alpine job (the same job
+passed on re-run: a timing flake, not a regression). The toggle click
+now mirrors the button's motion-first pattern and retries up to four
+times, each retry guarded by the checked state and preceded by a
+400 ms drain so a late in-flight pair settles (and flips) before the
+next attempt. The lesson generalizes: synthetic input through a real
+X server is subject to scheduler noise — warm the pointer, widen the
+windows, and retry idempotently instead of trusting one 100 ms pump.

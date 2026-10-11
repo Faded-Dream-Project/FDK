@@ -1793,16 +1793,37 @@ static void test_widget_catalog_gui(void) {
     }
     assert(accent25 >= pb.width / 4 - 6 && accent25 <= pb.width / 4 + 6);
 
-    /* REAL click on the toggle: state flips. */
-    fdk_rect tb = fdk_widget_get_bounds(tog);
-    int tx = tb.x + 12;
-    int ty = tb.y + tb.height / 2;
-    x11_send_pointer_event(send_dpy, xid, ButtonPress,
-                           ButtonPressMask, tx, ty, Button1);
-    (void)fdk_pump_events(ctx, 100);
-    x11_send_pointer_event(send_dpy, xid, ButtonRelease,
-                           ButtonReleaseMask, tx, ty, Button1);
-    (void)fdk_pump_events(ctx, 200);
+    /* REAL click on the toggle: state flips. Motion first — a real
+     * pointer is already at the target before pressing, and the
+     * button's proven pattern above is motion + press + release.
+     * The click is ALSO retried (guarded by the checked state): a
+     * heavily loaded CI runner once let the 100 ms pump window
+     * elapse before the X server delivered the pair (the same job
+     * passed on re-run — a timing flake, not a code regression;
+     * hardened so it cannot gate a release). Each retry starts by
+     * draining any in-flight pair, so a late delivery settles
+     * before the next attempt and a settled flip stops the loop. */
+    for (int attempt = 0;
+         !fdk_toggle_is_checked(tog) && attempt < 4; attempt++) {
+        if (attempt > 0) {
+            (void)fdk_pump_events(ctx, 400);
+            if (fdk_toggle_is_checked(tog)) {
+                break;
+            }
+        }
+        fdk_rect tb = fdk_widget_get_bounds(tog);
+        int tx = tb.x + 12;
+        int ty = tb.y + tb.height / 2;
+        x11_send_pointer_event(send_dpy, xid, MotionNotify,
+                               PointerMotionMask, tx, ty, 0);
+        (void)fdk_pump_events(ctx, 100);
+        x11_send_pointer_event(send_dpy, xid, ButtonPress,
+                               ButtonPressMask, tx, ty, Button1);
+        (void)fdk_pump_events(ctx, 150);
+        x11_send_pointer_event(send_dpy, xid, ButtonRelease,
+                               ButtonReleaseMask, tx, ty, Button1);
+        (void)fdk_pump_events(ctx, 300);
+    }
     assert(fdk_toggle_is_checked(tog));
 
     /* Button still activates on repeated clicks (three more to fill

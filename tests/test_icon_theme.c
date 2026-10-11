@@ -935,11 +935,33 @@ static void test_surfaces(void) {
     CHECK(fdk__icon_theme_surface("application-zip", 24) == NULL,
           "undrawable SVG with no fallback is a surface-level miss");
 
-    /* Reset destroys the surfaces (the fresh decode proves it). */
+    /* Reset destroys the surfaces — proven by CONTENT, not pointer
+     * identity. Pointer inequality after a free is an allocator
+     * implementation detail: under ASan (the default build) the
+     * quarantine guarantees a fresh address, but the Void Linux
+     * packaging pipeline builds FDK_SANITIZE=0 and plain glibc
+     * legitimately reuses the just-freed chunk for the same-size
+     * re-decode, which flaked the old `fresh != s` assert exactly
+     * there. The behavioral contract of reset is that the next
+     * lookup re-reads the asset from disk: rewrite the backing
+     * file to a different solid color and require the fresh decode
+     * to show the NEW pixels (a surviving cache would still show
+     * the original blue). */
+    fixture_png("data/icons/fdktest/16x16/folder.png",
+                icon_png_image_16, icon_png_image_16_LEN);
     fdk__icon_theme_reset();
     fdk_surface *fresh = fdk__icon_theme_surface("folder", 16);
-    CHECK(fresh != NULL && fresh != s,
-          "reset drops decoded surfaces (new pointer)");
+    int fresh_green = 0;
+    if (fresh != NULL && fdk_surface_get_info(fresh, &info) == FDK_OK) {
+        px = info.pixels[0];
+        fresh_green = (px >> 24 & 0xFFu) == 0xFFu &&
+                      (px >> 16 & 0xFFu) == 0x00u &&
+                      (px >> 8 & 0xFFu) == 0xFFu &&
+                      (px & 0xFFu) == 0x00u;
+    }
+    CHECK(fresh != NULL && fresh_green,
+          "reset drops decoded surfaces (fresh decode shows the "
+          "rewritten asset, not the cached blue)");
     printf("[ok] icon theme: surfaces (decode, borrow identity, "
            "symbolic tint pixels, chain resolution, SVG raster "
            "identity, CSS-class shapes incl. the heap-overflow "
