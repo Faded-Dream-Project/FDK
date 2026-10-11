@@ -36,6 +36,9 @@ RUN debian:bookworm '
         xvfb fonts-dejavu-core
     sh packaging/debian/build-deb.sh
 '
+# The container writes dist/ as root; take it back for the runner user
+# so the verdict marker below (and artifact upload) can write it.
+sudo chown -R "$(id -u):$(id -g)" dist 2>/dev/null || true
 
 for img in debian:bookworm debian:trixie ubuntu:24.04; do
     docker pull -q "$img"

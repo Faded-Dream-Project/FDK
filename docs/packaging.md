@@ -69,10 +69,11 @@ sudo apt install ./libfdk1_1.0.0-1_amd64.deb ./fdk-dev_1.0.0-1_amd64.deb
 
 Runtime package `libfdk1`, development package `fdk-dev`. Built on
 Debian 12 (bookworm, glibc 2.36); install-tested on Debian 12,
-Debian 13, and Ubuntu 24.04. Ubuntu 22.04 (glibc 2.35) is below the
-build floor — build from source there. `apt` resolves the runtime
-dependencies (libx11-6, libxext6, zlib1g, libwayland-client0,
-libxkbcommon0) automatically.
+Debian 13, Ubuntu 24.04, and Ubuntu 22.04 (glibc 2.35 — verified by
+the pipeline's informational probe, which passes). Anything older
+(glibc < 2.35) is below the build floor — build from source there.
+`apt` resolves the runtime dependencies (libx11-6, libxext6, zlib1g,
+libwayland-client0, libxkbcommon0) automatically.
 
 ### RHEL 10 family / Fedora (.rpm)
 
@@ -173,7 +174,7 @@ the packaging claims otherwise.
 
 | Target | Built on | Install-tested on | Architectures |
 | --- | --- | --- | --- |
-| `.deb` | Debian 12 (bookworm) | Debian 12, Debian 13, Ubuntu 24.04 | x86_64 |
+| `.deb` | Debian 12 (bookworm) | Debian 12, Debian 13, Ubuntu 24.04, Ubuntu 22.04 | x86_64 |
 | `.rpm` | AlmaLinux 10 | AlmaLinux 10, Fedora 42 | x86_64 |
 | `.pkg.tar.zst` | Arch Linux (base, rolling) | Arch Linux | x86_64 |
 | `.apk` (musl) | Alpine 3.22 | Alpine 3.22 | x86_64 |

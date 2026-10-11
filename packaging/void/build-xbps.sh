@@ -78,26 +78,27 @@ fi
 
 # --- xbps-create: one package per stow dir ---------------------------------
 mkdir -p dist
-# xbps-create takes SHORT flags only (long options are rejected);
-# -A architecture, -n name-version_revision, -s short description,
-# -D long description, -m maintainer, -l license, -d dependencies.
+# xbps-create flag map (short letters are not mnemonic: -S is the
+# long description, -D the dependency list, -H the homepage).
 xbps-create \
     -A "$ARCH" \
     -n "fdk-libs-$VERSION"_"$REVISION" \
     -s "Faded Dream ToolKit - runtime library and theme faces" \
-    -D "The FDK runtime: the shared library (libfdk.so.1) and the ten shipped theme faces. Applications built with FDK need this package at run time; the FDK runtime is installed separately by the end user per the license's separate-runtime model." \
+    -S "The FDK runtime: the shared library (libfdk.so.1) and the ten shipped theme faces. Applications built with FDK need this package at run time; the FDK runtime is installed separately by the end user per the license's separate-runtime model." \
     -m "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
     -l "Proprietary" \
+    -H "https://github.com/FemBoyGamerTechGuy/FDK" \
     "$RT"
 
 xbps-create \
     -A "$ARCH" \
     -n "fdk-devel-$VERSION"_"$REVISION" \
     -s "Faded Dream ToolKit - development files" \
-    -D "Headers, pkg-config metadata, the development symlink, and the fdk-theme / fdk-set / fdk-prefs tools. The static archive is deliberately not shipped: distributing statically-linked FDK requires separate written authorization." \
+    -S "Headers, pkg-config metadata, the development symlink, and the fdk-theme / fdk-set / fdk-prefs tools. The static archive is deliberately not shipped: distributing statically-linked FDK requires separate written authorization." \
     -m "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
     -l "Proprietary" \
-    -d "fdk-libs-$VERSION"_"$REVISION" \
+    -H "https://github.com/FemBoyGamerTechGuy/FDK" \
+    -D "fdk-libs-$VERSION"_"$REVISION" \
     "$DV"
 
 mv ./*.xbps dist/ 2>/dev/null || true
