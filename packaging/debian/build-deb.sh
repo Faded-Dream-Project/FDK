@@ -128,9 +128,13 @@ sed -e "s|@PKGVER@|$PKGVER|g" -e "s|@VERSION@|$VERSION|g" -e "s|@DATE@|$DATE|g" 
     packaging/debian/changelog > "$DV/usr/share/doc/fdk-dev/changelog"
 
 # --- DEBIAN control files ------------------------------------------------
-sed -e "s|@PKGVER@|$PKGVER|" -e "s|@RUNTIME_DEPS@|$RUNTIME_DEPS|" \
+# Binary .debs carry the CONCRETE architecture — "any" is a
+# source-package-level value that dpkg -i rejects ("package
+# architecture (any) does not match system"); caught live by the
+# CI install-test.
+sed -e "s|@PKGVER@|$PKGVER|" -e "s|@ARCH@|$ARCH|" -e "s|@RUNTIME_DEPS@|$RUNTIME_DEPS|" \
     packaging/debian/control.libfdk1 > "$RT/DEBIAN/control"
-sed -e "s|@PKGVER@|$PKGVER|" \
+sed -e "s|@PKGVER@|$PKGVER|" -e "s|@ARCH@|$ARCH|" \
     packaging/debian/control.fdk-dev > "$DV/DEBIAN/control"
 printf 'activate-noawait ldconfig\n' > "$RT/DEBIAN/triggers"
 for pkgdir in "$RT" "$DV"; do

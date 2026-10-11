@@ -1,5 +1,6 @@
 Package: libfdk1
-Architecture: any
+Architecture: @ARCH@
+Maintainer: FemBoyGamerTechGuy <242450780+FemBoyGamerTechGuy@users.noreply.github.com>
 Section: libs
 Priority: optional
 Version: @PKGVER@

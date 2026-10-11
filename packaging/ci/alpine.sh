@@ -31,6 +31,11 @@ RUN alpine:3.22 '
         libx11-dev libxext-dev zlib-dev \
         wayland-dev libxkbcommon-dev \
         font-dejavu
+    # mesa GL runtime: the X11 suite forces the GL present lane in its
+    # equivalence/downgrade groups — llvmpipe satisfies them, exactly
+    # like the glibc containers get implicitly via their xvfb stack.
+    apk add --no-cache mesa-gl mesa-dri-gallium 2>/dev/null || \
+        echo "NOTE: mesa GL unavailable; the forced-lane suite groups would fail (disclosed)"
     apk add --no-cache xvfb 2>/dev/null || \
         apk add --no-cache xorg-server-xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"

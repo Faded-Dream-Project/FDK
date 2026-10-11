@@ -1,5 +1,6 @@
 Package: fdk-dev
-Architecture: any
+Architecture: @ARCH@
+Maintainer: FemBoyGamerTechGuy <242450780+FemBoyGamerTechGuy@users.noreply.github.com>
 Section: libdevel
 Priority: optional
 Version: @PKGVER@

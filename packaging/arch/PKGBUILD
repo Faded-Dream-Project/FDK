@@ -20,6 +20,12 @@ pkgdesc="Faded Dream ToolKit — native C GUI toolkit for X11 and Wayland (runti
 arch=('x86_64')
 url="https://github.com/FemBoyGamerTechGuy/FDK"
 license=('LicenseRef-Proprietary')
+# !lto: makepkg's default LDFLAGS carry -Wl,--as-needed, and with
+# -flto the static archive's libm references only materialize after
+# LTRANS codegen — past the point where --as-needed decides to keep
+# libm — so the test binaries fail to link (undefined sincosf/exp2/
+# floorf). Disabling LTO is the canonical Arch escape for this class.
+options=(!lto)
 depends=(libx11 libxext zlib wayland libxkbcommon)
 makedepends=(pkgconf)
 source=("fdk-$pkgver.tar.gz")

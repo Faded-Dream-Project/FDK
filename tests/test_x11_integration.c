@@ -7792,11 +7792,24 @@ static void test_animation_gui(void) {
     (void)fdk_pump_events(ctx, 5);
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
     assert(off == 0);
-    /* ~35 ms in: mid-flight, strictly between 0 and 48 (cubic-out
-     * covers ~60% by then — generous bounds for scheduler jitter). */
-    (void)fdk_pump_events(ctx, 35);
-    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
-    assert(off > 0 && off < 48);
+    /* Mid-flight: bounded wait for the first movement instead of one
+     * fixed 35 ms sample. On fast uninstrumented builds (the distro
+     * containers run the debug config without sanitizers) the first
+     * ticker fire can land anywhere in the flight — a single strict
+     * sample raced there (observed live on the Void CI container:
+     * off still 0 after the fixed sample). The bounded wait keeps the
+     * assertion's real claim — the wheel produces SMOOTH motion that
+     * approaches 48 without jumping — and still fails if nothing
+     * ever moves. */
+    int moved = 0;
+    for (int i = 0; i < 10 && !moved; i++) {
+        (void)fdk_pump_events(ctx, 8);
+        assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
+        if (off > 0)
+            moved = 1;
+    }
+    assert(moved);
+    assert(off < 48); /* strictly before the settle target */
     /* Settled: exactly the notch's target. NOTE the pump-count
      * arithmetic: ONE fdk_pump_events call fires the ticker ONCE
      * (a pump is a single poll cycle — it wakes at the timer
