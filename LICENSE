@@ -6,13 +6,6 @@ FDK (the Faded Dream ToolKit) is developed as part of the Faded Dream
 Project. "Faded Dream Project" is used in this license as a project
 name only and does not, by itself, designate a legal entity.
 
-*** DRAFT — FLAGGED FOR LEGAL REVIEW. This license text has NOT been
-*** reviewed by qualified legal counsel and MUST NOT be relied upon
-*** for any public or commercial release until it has been. Items
-*** marked [REVIEW] below specifically require the Licensor's decision
-*** or jurisdiction-specific language. See the end of this file for a
-*** summary of open review items.
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. DEFINITIONS
@@ -27,17 +20,18 @@ whole or in part, in original or modified form.
 against the Toolkit. An Application includes that developer's own
 source code, object code, assets, resources, and branding. An
 Application does NOT include the Toolkit itself, any modified version
-of the Toolkit, or any part of the Toolkit extracted from an
-Application.
+of the Toolkit, or any part of the Toolkit.
 
-"Runtime Copy" means an unmodified binary form of the Toolkit (for
-example, an unmodified shared library or an unmodified statically
-linked object) included in a distributed Application solely because,
-and solely to the extent, the Application needs it to execute.
+"Runtime Copy" means a binary form of the Toolkit that an Application
+needs to be present at run time in order to execute — for example,
+the FDK shared library (libfdk) installed on an end user's system. A
+Runtime Copy is and remains part of the Toolkit, not part of an
+Application, wherever it is installed, however it is obtained, and
+whoever installs it.
 
 "Licensor" means FemBoyGamerTechGuy, the copyright holder of the
-Toolkit. [REVIEW: confirm whether the Licensor should be identified
-by a legal name or a registered entity rather than this handle.]
+Toolkit, identified here by the established project handle under
+which the Toolkit is authored and published.
 
 "You" means any individual or entity that obtains access to the
 Toolkit, in any form and through any channel.
@@ -86,20 +80,20 @@ limited, non-exclusive, non-transferable, revocable license to:
   c. Distribute and commercially sell or otherwise exploit Your
      Applications, subject to Section 5; and
 
-  d. Distribute Runtime Copies as part of Your Applications,
-     provided that each such Runtime Copy is unmodified, retains all
-     copyright, trademark, and other proprietary notices, is
-     distributed solely as incorporated into and required to execute
-     an Application, is not distributed separately from an
-     Application or as a standalone library, toolkit, SDK, component,
-     or asset package, and is not itself the subject of a charge
-     attributable to the Toolkit.
-
-  [REVIEW: Section 4(d) implements a "runtime accompaniment" model —
-  Applications may carry the unmodified FDK runtime they need. If the
-  Licensor instead intends that end users obtain the Toolkit runtime
-  separately, this subsection should be removed or narrowed, and
-  Section 5 adjusted accordingly.]
+  d. Rely on a separately installed FDK runtime. An Application You
+     distribute must consist of Your own code, assets, and
+     branding. You may NOT bundle, embed, statically link,
+     redistribute, or otherwise package or include the Toolkit — or
+     any Runtime Copy of it — in or with anything You distribute:
+     not in or with the Application itself, its installer, a
+     container or sandbox image, an archive, or any other
+     distribution artifact, unless the Licensor first grants that
+     permission in a further, specific Written Authorization. The
+     FDK runtime is obtained and installed separately by the end
+     user, from the Licensor or from a channel the Licensor
+     authorizes. Stating that Your Application requires the FDK
+     runtime, or directing users to an authorized channel for it,
+     is permitted and does not constitute distributing the Toolkit.
 
 5. APPLICATIONS AND DEVELOPER RIGHTS
 
@@ -134,6 +128,16 @@ limited, non-exclusive, non-transferable, revocable license to:
      or asset collection — that act is governed by Section 6, not by
      this Section.
 
+  f. The separate-runtime rule in Section 4(d) is a limit on what
+     You may distribute of the Toolkit, never on Your Application.
+     An Application that requires a separately installed FDK runtime
+     is none the less complete, independent, and fully distributable
+     under this Section, and nothing in that rule restricts Your
+     Application's own packaging, installer, pricing, distribution
+     channels, or terms — so long as the artifact You distribute
+     does not itself contain or accompany the Toolkit or a Runtime
+     Copy of it.
+
 6. RESTRICTIONS ON THE TOOLKIT
 
 Except as expressly permitted by Section 4, or by separate Written
@@ -160,9 +164,9 @@ Authorization, You may NOT:
      proprietary notice contained in the Toolkit or in a Runtime Copy;
 
   f. Reverse engineer, decompile, or disassemble the Toolkit, except
-     to the extent such acts are expressly permitted by mandatory
-     applicable law notwithstanding this restriction [REVIEW: the
-     scope of this carve-out is jurisdiction-dependent];
+     where, and strictly to the extent, such acts are permitted by
+     mandatory provisions of applicable law that cannot be waived by
+     contract;
 
   g. Use the Toolkit's shipped assets (including its theme faces)
      outside of an Application, or redistribute them as standalone
@@ -202,15 +206,17 @@ BE ERROR-FREE, SECURE, OR THAT ITS USE WILL BE UNINTERRUPTED.
 
 10. LIMITATION OF LIABILITY
 
-[REVIEW: liability caps and exclusions are heavily
-jurisdiction-dependent; some liability (for example, for gross
-negligence, or for death or personal injury) cannot be limited by
-contract in many jurisdictions. Do not finalize this section without
-counsel.] TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO
-EVENT SHALL THE LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
-SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS,
-REVENUE, OR DATA, ARISING OUT OF OR RELATED TO THIS LICENSE OR THE
-USE OR INABILITY TO USE THE TOOLKIT.
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL
+THE LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS, REVENUE, OR
+DATA, ARISING OUT OF OR RELATED TO THIS LICENSE OR THE USE OR
+INABILITY TO USE THE TOOLKIT. SOME JURISDICTIONS DO NOT ALLOW THE
+EXCLUSION OR LIMITATION OF CERTAIN DAMAGES — INCLUDING, IN SOME
+CASES, LIABILITY FOR DEATH OR PERSONAL INJURY, OR FOR GROSS
+NEGLIGENCE OR WILLFUL MISCONDUCT — SO SOME OR ALL OF THE ABOVE
+LIMITATIONS AND EXCLUSIONS MAY NOT APPLY TO YOU. NOTHING IN THIS
+SECTION EXCLUDES OR LIMITS LIABILITY TO THE EXTENT THAT APPLICABLE
+LAW PROHIBITS SUCH EXCLUSION OR LIMITATION.
 
 11. TERMINATION
 
@@ -219,8 +225,10 @@ breach any of its terms. Upon termination, You must cease all new use
 and distribution of the Toolkit and destroy copies in Your
 possession, except that: (a) Applications You validly distributed
 before termination may continue to be used, executed, and further
-distributed by their recipients together with the Runtime Copies
-included in them; and (b) You may retain archive copies strictly for
+distributed by their recipients; (b) end users who separately
+obtained a Runtime Copy under this license hold their own license
+from the Licensor and may continue to install and use it to run those
+Applications; and (c) You may retain archive copies strictly for
 supporting Applications You validly distributed before termination,
 for so long as You continue to comply with Sections 4 through 7.
 
@@ -244,24 +252,32 @@ remain in effect. The Licensor's failure to enforce any provision is
 not a waiver of it. You may not assign this license or the rights it
 grants without the Licensor's prior written consent.
 
-[REVIEW: governing law and venue are deliberately left unspecified
-pending the Licensor's decision.]
+14. GOVERNING LAW AND VENUE
+
+This license and any dispute, claim, or controversy arising out of or
+relating to it, to the Toolkit, or to the use or distribution of the
+Toolkit shall be governed by and construed in accordance with the
+laws of Romania, without regard to its conflict-of-laws provisions.
+The parties consent to the exclusive jurisdiction and venue of the
+courts of Bucharest, Romania, for any such dispute, except and only
+to the extent that applicable law grants a mandatory, non-waivable
+forum to a party (for example, the forum protections that European
+Union consumer-protection law grants to consumers). Nothing in this
+Section limits either party's right to seek interim or protective
+relief in any jurisdiction in which Toolkit rights are infringed.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-OPEN REVIEW ITEMS (for the Licensor, before publication)
+NOTICE
 
-  1. Legal identity of the Licensor — the copyright line currently
-     uses the established author handle "FemBoyGamerTechGuy";
-     confirm with counsel whether a legal name or registered entity
-     should appear instead.
-  2. Governing law and venue (Section 13).
-  3. Jurisdiction-appropriate liability language (Section 10) and the
-     reverse-engineering carve-out (Section 6(f)).
-  4. The runtime-accompaniment model in Section 4(d) — confirm or
-     narrow it.
-  5. Overall review of the final text by qualified legal counsel.
-     This draft follows the repository's existing licensing posture
-     (see docs/licensing-policy.md) but is not legal advice.
+This license was finalized and adopted by the Licensor without review
+by qualified legal counsel. It states the Licensor's chosen terms for
+the Toolkit and is not legal advice. The substantive choices in it —
+identifying the Licensor by the established project handle
+(Section 1), the separate-runtime distribution model (Section 4(d)),
+and the governing law and venue (Section 14) — are the Licensor's
+decisions, made on the information available at the time of adoption,
+and may be revised in a later version of this license as provided in
+Section 12.
 
 END OF LICENSE

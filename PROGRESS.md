@@ -79,9 +79,25 @@ examples 02 and 04 decode it at that size; do not resize the asset
 without checking their panel layout); the README was rewritten
 concise with the Faded Dream Project banner and badge row; `LICENSE`
 was rewritten as the FDK Proprietary License v1.0 (restrictive on the
-toolkit, applications expressly excluded — its Section 5; still
-draft-flagged for legal review); `docs/screenshots.md` now indexes
-the captured gallery; `docs/licensing-policy.md` updated to match.
+toolkit, applications expressly excluded — its Section 5);
+`docs/screenshots.md` now indexes the captured gallery;
+`docs/licensing-policy.md` updated to match.
+
+Same-date **license finalization pass** (docs/licensing only — again
+zero toolkit code touched): the license's open decisions were closed
+by the Licensor — governing law and venue set (laws of Romania,
+exclusive venue Bucharest, with the EU consumer-forum savings);
+Section 4(d) rewritten from runtime-accompaniment to the
+**separate-runtime model** (applications are distributed WITHOUT the
+FDK runtime — no bundling, embedding, static linking, or packaging of
+it without further written authorization; end users install the
+runtime themselves from an authorized channel); the draft banner and
+every [REVIEW] flag resolved into operative text; Section 5 gained
+5(f) stating the model restricts the toolkit, never the application;
+the OPEN REVIEW ITEMS list replaced by a NOTICE recording the
+counsel-free adoption; README, `docs/licensing-policy.md`, and the
+roadmap's Phase 1 line synced to match. Rights holder unchanged:
+FemBoyGamerTechGuy, by established handle.
 
 ## Current state (verified this audit)
 
@@ -189,11 +205,14 @@ the captured gallery; `docs/licensing-policy.md` updated to match.
   screenshots, docs table, principles, license notice). The long
   per-phase narrative it replaced lives on in `docs/roadmap.md`,
   `PROGRESS.md`, and `docs/screenshots.md` — linked, not deleted.
-- **LICENSE** — the FDK Proprietary License v1.0: restrictive on the
-  toolkit (no redistribute/modify/sublicense/publish/exploit without
-  written authorization), with an explicit application-developer
-  rights section (Section 5) and a runtime-accompaniment grant
-  (Section 4d, flagged [REVIEW]). NOT an open-source license.
+- **LICENSE** — the FDK Proprietary License v1.0, finalized: restrictive
+  on the toolkit (no redistribute/modify/sublicense/publish/exploit
+  without written authorization), with an explicit
+  application-developer rights section (Section 5), the
+  separate-runtime distribution model (Section 4d — applications ship
+  WITHOUT the FDK runtime; end users install it separately), and
+  Romanian governing law with Bucharest venue (Section 14). NOT an
+  open-source license.
 - **docs/screenshots.md** — the gallery index for every capture in
   `docs/screenshots/`.
 

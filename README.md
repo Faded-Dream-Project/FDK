@@ -273,8 +273,8 @@ framework implementation, and shipped assets — remains the exclusive
 property of its rights holder and may not be copied, modified,
 redistributed, sublicensed, published, or commercially exploited
 without express written authorization. See [`LICENSE`](LICENSE)
-(the FDK Proprietary License, version 1.0 — still flagged for legal
-review before publication).
+(the FDK Proprietary License, version 1.0; governed by the laws of
+Romania, with exclusive venue in Bucharest).
 
 **Applications built with FDK are governed separately and remain
 yours.** The license governs FDK itself, not the software you build
@@ -282,6 +282,13 @@ with it: your application's source code, assets, branding, and
 licensing stay your independent property, and you may distribute and
 sell your applications under terms of your choosing. FDK's
 restrictions never attach to independent application code.
+
+**The FDK runtime is installed separately.** Applications must not
+bundle, embed, or redistribute the FDK runtime: end users obtain and
+install it themselves — for example, `make install` from this
+repository, or another channel the Licensor authorizes — to run FDK
+applications. Requiring the runtime does not diminish your
+application's independence or its distributability.
 
 Third-party components bundled with FDK remain under their own
 permissive licenses — see `THIRD-PARTY-NOTICES.md`.

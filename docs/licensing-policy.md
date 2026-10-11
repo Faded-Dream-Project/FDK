@@ -3,12 +3,16 @@
 ## FDK's own license
 
 FDK itself is proprietary software — see `/LICENSE` (the FDK
-Proprietary License, version 1.0). The license is restrictive toward
-the toolkit itself while expressly leaving applications built with FDK
-under their authors' own terms — read Section 5 ("Applications and
-Developer Rights") before assuming either direction. The text remains
-a draft flagged for legal review before any public or commercial
-release; do not treat it as final.
+Proprietary License, version 1.0, adopted 2026-10-11). The license is
+restrictive toward the toolkit itself while expressly leaving
+applications built with FDK under their authors' own terms — read
+Section 5 ("Applications and Developer Rights") and Section 4(d)
+(the separate-runtime model: applications are distributed without the
+FDK runtime, which end users install separately) before assuming
+either direction. The license is governed by the laws of Romania,
+with exclusive venue in Bucharest (Section 14). It was finalized and
+adopted by the Licensor without review by legal counsel and is not
+legal advice; the Licensor may revise it as Section 12 provides.
 
 ## What FDK may depend on
 

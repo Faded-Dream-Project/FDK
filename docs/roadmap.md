@@ -48,7 +48,9 @@ Implemented and tested:
 - Test suite: 15 tests across lifecycle and allocation, passing clean
   under AddressSanitizer + UndefinedBehaviorSanitizer
 - `01_hello_world` example, actually builds and runs
-- LICENSE (proprietary draft, flagged for legal review),
+- LICENSE (proprietary, FDK Proprietary License v1.0 — finalized
+  2026-10-11 with the separate-runtime model and Romanian governing
+  law; the original Phase 1 draft is history),
   `docs/dependencies.md`, `docs/licensing-policy.md`,
   `docs/abi-policy.md`, `docs/memory.md`, `docs/threading.md`,
   `docs/architecture.md`
