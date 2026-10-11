@@ -27,13 +27,17 @@ docker pull -q almalinux:10
 
 RUN almalinux:10 '
     set -eu
-    # Xvfb lives in the CRB repository on RHEL-10 clones.
-    dnf install -y -q --enablerepo=crb \
+    dnf install -y -q \
         gcc make pkgconf-pkg-config rpm-build cpio \
         libX11-devel libXext-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
-        dejavu-sans-fonts dejavu-sans-mono-fonts \
-        xorg-x11-server-Xvfb
+        dejavu-sans-fonts dejavu-sans-mono-fonts
+    # RHEL 10 ships no standalone Xorg server: Xvfb is absent even
+    # from CRB. The build container then skips the X11 suite
+    # (disclosed by the build script); the Fedora 42 install-test
+    # still runs the full graphical validation.
+    dnf install -y -q --enablerepo=crb xorg-x11-server-Xvfb 2>/dev/null || \
+        echo "XVFB-SKIP (container-level): no Xvfb in the el10 repositories — the X11 suite is skipped on this builder and disclosed"
     sh packaging/fedora/build-rpm.sh
 '
 

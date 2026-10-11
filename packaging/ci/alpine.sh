@@ -34,8 +34,12 @@ RUN alpine:3.22 '
     # mesa GL runtime: the X11 suite forces the GL present lane in its
     # equivalence/downgrade groups — llvmpipe satisfies them, exactly
     # like the glibc containers get implicitly via their xvfb stack.
+    # Driver package names moved across Alpine releases; try the
+    # known combinations in order and disclose if none is available.
     apk add --no-cache mesa-gl mesa-dri-gallium 2>/dev/null || \
-        echo "NOTE: mesa GL unavailable; the forced-lane suite groups would fail (disclosed)"
+        apk add --no-cache mesa-gl 2>/dev/null || \
+        apk add --no-cache mesa 2>/dev/null || \
+        echo "NOTE: no mesa GL package combination available; the forced-lane suite groups would fail (disclosed)"
     apk add --no-cache xvfb 2>/dev/null || \
         apk add --no-cache xorg-server-xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"

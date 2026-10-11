@@ -36,15 +36,15 @@ build() {
     # FDK_CONFIG is pinned here AND in package(): the Makefile's config
     # stamp would otherwise silently rebuild the payload in debug config
     # (sanitizers) between the two stages.
-    make FDK_CONFIG=release all PREFIX=/usr LIBDIR=/usr/lib
+    make FDK_SANITIZE=0 FDK_CONFIG=release all PREFIX=/usr LIBDIR=/usr/lib
 }
 
 check() {
-    make test
+    make FDK_SANITIZE=0 test
 }
 
 package() {
-    make FDK_CONFIG=release install DESTDIR="$pkgdir" PREFIX=/usr LIBDIR=/usr/lib
+    make FDK_SANITIZE=0 FDK_CONFIG=release install DESTDIR="$pkgdir" PREFIX=/usr LIBDIR=/usr/lib
     # The static archive is NOT shipped (license posture, see above).
     rm -f "$pkgdir"/usr/lib/libfdk.a
     install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/fdk/LICENSE

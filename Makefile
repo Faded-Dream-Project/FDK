@@ -153,13 +153,27 @@ CONFIG_FLAGS := $(if $(filter release,$(FDK_CONFIG)),$(REL_FLAGS),$(DEBUG_FLAGS)
 # ONE stamp name so a flip of either forces one full rebuild.
 CONFIG_STAMP := $(BUILD_DIR)/.config-$(FDK_CONFIG)-wl$(BUILD_WAYLAND)
 
-CFLAGS  ?= $(STD) $(WARN) $(FEATURE) $(CONFIG_FLAGS)
+# Flag composition (v1.0.0): the project's flag set is the BASE and
+# any environment-provided CFLAGS/LDFLAGS are APPENDED. Distro build
+# environments — abuild, makepkg, xbps-src, rpmbuild — export their
+# own hardening flags there; under the old ?= definitions those
+# exports REPLACED this list entirely, silently dropping -std=c17,
+# -D_POSIX_C_SOURCE, and every -l the links need (observed live: the
+# Alpine abuild-built CLI tools failed with undefined X11 references,
+# the Arch makepkg-built tests with undefined libm symbols). Composing
+# keeps the project's flags mandatory AND lets distro hardening
+# apply. Command-line overrides (make CFLAGS=... LDFLAGS=...) still
+# win over both, as always.
+ENV_CFLAGS  := $(CFLAGS)
+ENV_LDFLAGS := $(LDFLAGS)
+CFLAGS  := $(STD) $(WARN) $(FEATURE) $(CONFIG_FLAGS) $(ENV_CFLAGS)
 CPPFLAGS:= -Iinclude -Isrc
 # -ldl: the text layer dlopen()s fontconfig at run time (optional
 # system font discovery, see src/text/fontscan.c). No-op stub on
 # glibc >= 2.34 where dlopen lives in libc; required for static
-# linking on older glibc.
-LDFLAGS ?= $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz
+# linking on older glibc. Project -l flags precede the environment's
+# so a distro-exported -Wl,--as-needed cannot drop them.
+LDFLAGS := $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz $(ENV_LDFLAGS)
 
 # pkg-config exposure (fdk.pc): private deps are the ones the .so
 # already links (apps need nothing); Requires.private lets static

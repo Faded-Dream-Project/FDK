@@ -26,9 +26,6 @@ apt-get update -qq
 # images where they are absent, apt skips them harmlessly via the
 # fallback below.
 apt-get install -y --no-install-recommends \
-    libx11-6 libxext6 zlib1g libm6 \
-    gcc pkg-config xvfb fonts-dejavu-core 2>/dev/null || \
-apt-get install -y --no-install-recommends \
     libx11-6 libxext6 zlib1g \
     gcc pkg-config xvfb fonts-dejavu-core
 apt-get install -y --no-install-recommends libwayland-client0 libxkbcommon0 \

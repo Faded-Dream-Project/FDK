@@ -28,6 +28,12 @@ RUN "$VOID_IMAGE" '
         libX11-devel libXext-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-fonts-ttf tar
+    # GL runtime for the X11-suite forced-lane groups (llvmpipe),
+    # layered over the known package-name combinations:
+    xbps-install -Sy mesa mesa-dri 2>/dev/null || \
+        xbps-install -Sy libglvnd mesa-dri 2>/dev/null || \
+        xbps-install -Sy mesa 2>/dev/null || \
+        echo "NOTE: no GL runtime package combination available; the forced-lane suite groups would fail (disclosed)"
     xbps-install -Sy xorg-server-xvfb 2>/dev/null || \
         xbps-install -Sy xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"

@@ -66,7 +66,7 @@ RUNTIME_DEPS="$(for soname in $NEEDED; do
     case "$soname" in
         libc.so.6|libdl.so.2|libpthread.so.0) pkg="libc6" ;;
         ld-linux-x86-64.so.2|ld-linux-aarch64.so.1) pkg="libc6" ;;
-        libm.so.6)                            pkg="libm6" ;;
+        libm.so.6)                            pkg="libc6" ;;
         libgcc_s.so.1)                        pkg="libgcc-s1" ;;
         libX11.so.6)                          pkg="libx11-6" ;;
         libXext.so.6)                         pkg="libxext6" ;;
