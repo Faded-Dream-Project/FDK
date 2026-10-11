@@ -1,119 +1,267 @@
-FADED DREAM TOOLKIT (FDK) — PROPRIETARY SOFTWARE LICENSE
-Version 0.1 — Draft
+FDK PROPRIETARY LICENSE
+Version 1.0, 2026
+Copyright (c) 2026 FemBoyGamerTechGuy. All rights reserved.
 
-*** THIS IS A DRAFT LICENSE TEMPLATE. IT HAS NOT BEEN REVIEWED BY A
-*** QUALIFIED LAWYER AND MUST NOT BE RELIED UPON FOR ANY PUBLIC OR
-*** COMMERCIAL RELEASE UNTIL IT HAS BEEN. Sections marked [REVIEW] are
-*** especially likely to need jurisdiction-specific language, and the
-*** placeholder copyright holder below must be replaced with the
-*** correct legal entity or individual.
+FDK (the Faded Dream ToolKit) is developed as part of the Faded Dream
+Project. "Faded Dream Project" is used in this license as a project
+name only and does not, by itself, designate a legal entity.
 
-Copyright (c) 2026 [COPYRIGHT HOLDER NAME] ("Licensor"). All rights
-reserved.
+*** DRAFT — FLAGGED FOR LEGAL REVIEW. This license text has NOT been
+*** reviewed by qualified legal counsel and MUST NOT be relied upon
+*** for any public or commercial release until it has been. Items
+*** marked [REVIEW] below specifically require the Licensor's decision
+*** or jurisdiction-specific language. See the end of this file for a
+*** summary of open review items.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. DEFINITIONS
 
-"Software" means the Faded Dream ToolKit (FDK) source code, object
-code, headers, build scripts, documentation, themes, and associated
-files distributed by Licensor, in any form.
+"Toolkit" means FDK itself: its source code, object code, headers,
+build scripts, build configuration, documentation, the command-line
+tools shipped with it (fdk-theme, fdk-set, fdk-prefs), and the
+toolkit assets it ships (including the bundled .fdk theme faces), in
+whole or in part, in original or modified form.
 
-"You" means the individual or entity exercising rights under this
-License.
+"Application" means software created by a developer that uses or links
+against the Toolkit. An Application includes that developer's own
+source code, object code, assets, resources, and branding. An
+Application does NOT include the Toolkit itself, any modified version
+of the Toolkit, or any part of the Toolkit extracted from an
+Application.
 
-2. GRANT OF LICENSE
+"Runtime Copy" means an unmodified binary form of the Toolkit (for
+example, an unmodified shared library or an unmodified statically
+linked object) included in a distributed Application solely because,
+and solely to the extent, the Application needs it to execute.
 
-Subject to the terms of this License, Licensor grants You a limited,
-non-exclusive, non-transferable, revocable license to use the
-Software solely for the purpose of [REVIEW: define permitted use —
-e.g. "developing and running applications that link against the
-Software"], provided You comply with all terms herein.
+"Licensor" means FemBoyGamerTechGuy, the copyright holder of the
+Toolkit. [REVIEW: confirm whether the Licensor should be identified
+by a legal name or a registered entity rather than this handle.]
 
-No other rights are granted. All rights not expressly granted to You
-are reserved by Licensor.
+"You" means any individual or entity that obtains access to the
+Toolkit, in any form and through any channel.
 
-3. RESTRICTIONS
+"Written Authorization" means an express, written permission issued
+by the Licensor for a specific act or set of acts. This license
+itself is one such authorization, for the acts it expressly permits.
 
-Except as expressly permitted in Section 2, You may NOT, without
-Licensor's prior written authorization:
+2. OWNERSHIP
 
-   a. Redistribute the Software, in source or object form, to any
-      third party;
-   b. Modify, adapt, translate, or create derivative works based on
-      the Software;
-   c. Use the Software, or any application built with it, for
-      commercial purposes;
-   d. Sublicense, rent, lease, or otherwise transfer any rights in
-      the Software to any third party;
-   e. Remove or alter any copyright, trademark, or other proprietary
-      notice contained in the Software;
-   f. Reverse engineer, decompile, or disassemble the Software except
-      to the extent such restriction is prohibited by applicable law
-      notwithstanding this limitation [REVIEW: this carve-out exists
-      in many jurisdictions' statutory law and should not be removed
-      without legal advice].
+The Toolkit is licensed, not sold. The Licensor retains all right,
+title, and interest in and to the Toolkit, including all intellectual
+property rights therein. No ownership or co-ownership of the Toolkit
+is transferred to You by this license or by access to the Toolkit's
+repository. All rights not expressly granted in Section 4 are
+reserved by the Licensor.
 
-4. OWNERSHIP
+This license grants no rights in the Licensor's names, marks, logos,
+or branding, including "FDK", "Faded Dream ToolKit", and "Faded
+Dream".
 
-The Software is licensed, not sold. Licensor retains all right,
-title, and interest in and to the Software, including all
-intellectual property rights therein. This License does not grant
-You any rights to Licensor's trademarks, trade names, or logos.
+3. SCOPE — WHAT THIS LICENSE GOVERNS
 
-5. THIRD-PARTY COMPONENTS
+This license governs the Toolkit and the materials expressly covered
+by it. It does NOT automatically govern Applications. Applications
+built with the Toolkit are governed by their authors' own licenses
+and terms, by applicable law, by any separate agreements that apply
+to them, and by the licenses of any third-party components their
+authors include. Nothing in this license is intended to reach into,
+restrict, or claim rights over independent Application code or
+assets, as further described in Section 5.
 
-The Software may include or link against third-party components
-distributed under separate permissive open-source licenses (see
+4. LICENSE GRANT
+
+Subject to the terms of this license, the Licensor grants You a
+limited, non-exclusive, non-transferable, revocable license to:
+
+  a. Download, install, and use the Toolkit, and to make the copies
+     of it (including backup copies) that are reasonably necessary to
+     do so, for the purpose of developing, building, testing, and
+     running Applications;
+
+  b. Build Applications that link against, bind, or otherwise
+     incorporate the Toolkit;
+
+  c. Distribute and commercially sell or otherwise exploit Your
+     Applications, subject to Section 5; and
+
+  d. Distribute Runtime Copies as part of Your Applications,
+     provided that each such Runtime Copy is unmodified, retains all
+     copyright, trademark, and other proprietary notices, is
+     distributed solely as incorporated into and required to execute
+     an Application, is not distributed separately from an
+     Application or as a standalone library, toolkit, SDK, component,
+     or asset package, and is not itself the subject of a charge
+     attributable to the Toolkit.
+
+  [REVIEW: Section 4(d) implements a "runtime accompaniment" model —
+  Applications may carry the unmodified FDK runtime they need. If the
+  Licensor instead intends that end users obtain the Toolkit runtime
+  separately, this subsection should be removed or narrowed, and
+  Section 5 adjusted accordingly.]
+
+5. APPLICATIONS AND DEVELOPER RIGHTS
+
+  a. Applications are independent works. To the maximum extent
+     permitted by applicable law, this license claims no rights over
+     Applications, and the Licensor neither owns nor co-owns an
+     Application by virtue of its author having used the Toolkit to
+     build it.
+
+  b. You retain all rights in and to Your Applications, including
+     their source code, assets, branding, and licensing. You may
+     distribute, license, sell, or otherwise exploit Your
+     Applications under terms You choose, subject to applicable law,
+     to any separate agreements that bind You, and to the licenses of
+     third-party components You include in them.
+
+  c. Applications do not become the property of the Licensor or of
+     the Faded Dream Project merely because they use FDK. The
+     restrictions of Section 6 attach to the Toolkit, never to
+     independent Application code or assets.
+
+  d. Nothing in this license limits Your right to state factually
+     that Your Application is built with FDK. However, You may not
+     name, brand, or market Your Application in a way that states or
+     implies that it IS the Toolkit, that it is part of the Faded
+     Dream Project, or that the Licensor endorses it, without prior
+     Written Authorization.
+
+  e. The boundary: if You extract, adapt, or republish Toolkit code,
+     Toolkit components, or Toolkit assets outside of an Application
+     — for example, as another toolkit, framework, library, template,
+     or asset collection — that act is governed by Section 6, not by
+     this Section.
+
+6. RESTRICTIONS ON THE TOOLKIT
+
+Except as expressly permitted by Section 4, or by separate Written
+Authorization, You may NOT:
+
+  a. Copy or redistribute the Toolkit, in source or object form,
+     including publishing, uploading, mirroring, or packaging it for
+     third parties — in whole or in part, original or modified;
+
+  b. Modify, adapt, translate, or create derivative works of the
+     Toolkit, or distribute a Toolkit modified by You or for You;
+
+  c. Sublicense, sell, rent, lease, lend, or otherwise transfer
+     rights in the Toolkit to any third party;
+
+  d. Commercially exploit the Toolkit itself — including charging for
+     access to it, offering it as a product or hosted service, or
+     building a competing toolkit, framework, or SDK upon it. This
+     subsection restricts the Toolkit; it does NOT restrict the
+     commercial distribution or sale of Applications, which Section
+     4(c) expressly permits;
+
+  e. Remove, obscure, or alter any copyright, trademark, or other
+     proprietary notice contained in the Toolkit or in a Runtime Copy;
+
+  f. Reverse engineer, decompile, or disassemble the Toolkit, except
+     to the extent such acts are expressly permitted by mandatory
+     applicable law notwithstanding this restriction [REVIEW: the
+     scope of this carve-out is jurisdiction-dependent];
+
+  g. Use the Toolkit's shipped assets (including its theme faces)
+     outside of an Application, or redistribute them as standalone
+     theme or asset packages.
+
+Access to the Toolkit's repository — including cloning it, reading
+its source, or building it locally — grants only the rights in this
+license. Such access does not grant any right to redistribute, reuse,
+repackage, or sublicense the Toolkit beyond Sections 4 and 5, and does
+not constitute ownership of any kind.
+
+7. THIRD-PARTY COMPONENTS
+
+The Toolkit incorporates or links against third-party components
+distributed under their own permissive licenses (see
 docs/dependencies.md and THIRD-PARTY-NOTICES.md). Those components
-remain governed by their own license terms, which are not modified
-or superseded by this License. Nothing in this License is intended
-to impose additional restrictions on properly-licensed third-party
-components beyond what their own licenses require.
+remain governed by their own license terms, which this license does
+not modify or supersede. Nothing in this license imposes additional
+restrictions on properly-licensed third-party components beyond what
+their own licenses require, and nothing in this license limits the
+rights those licenses grant You with respect to those components.
 
-6. NO WARRANTY
+8. SUPPORT AND UPDATES
 
-THE SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
-NONINFRINGEMENT. LICENSOR DOES NOT WARRANT THAT THE SOFTWARE WILL BE
-ERROR-FREE OR THAT ITS USE WILL BE UNINTERRUPTED.
+The Licensor is not obligated to provide support, maintenance,
+updates, error corrections, or new versions of the Toolkit to You.
+Any such materials the Licensor chooses to provide are governed by
+this license unless expressly stated otherwise.
 
-7. LIMITATION OF LIABILITY
+9. NO WARRANTY
+
+THE TOOLKIT IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, AND
+NONINFRINGEMENT. THE LICENSOR DOES NOT WARRANT THAT THE TOOLKIT WILL
+BE ERROR-FREE, SECURE, OR THAT ITS USE WILL BE UNINTERRUPTED.
+
+10. LIMITATION OF LIABILITY
 
 [REVIEW: liability caps and exclusions are heavily
-jurisdiction-dependent and some cannot be limited by contract at all
-(e.g. liability for gross negligence or death/personal injury in many
-jurisdictions). Do not finalize this section without counsel.] TO THE
-MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL LICENSOR
-BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR
-PUNITIVE DAMAGES ARISING OUT OF OR RELATED TO YOUR USE OF THE
-SOFTWARE.
+jurisdiction-dependent; some liability (for example, for gross
+negligence, or for death or personal injury) cannot be limited by
+contract in many jurisdictions. Do not finalize this section without
+counsel.] TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO
+EVENT SHALL THE LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS,
+REVENUE, OR DATA, ARISING OUT OF OR RELATED TO THIS LICENSE OR THE
+USE OR INABILITY TO USE THE TOOLKIT.
 
-8. TERMINATION
+11. TERMINATION
 
-This License terminates automatically if You breach any of its
-terms. Upon termination, You must cease all use of the Software and
-destroy all copies in Your possession.
+This license and the rights it grants terminate automatically if You
+breach any of its terms. Upon termination, You must cease all new use
+and distribution of the Toolkit and destroy copies in Your
+possession, except that: (a) Applications You validly distributed
+before termination may continue to be used, executed, and further
+distributed by their recipients together with the Runtime Copies
+included in them; and (b) You may retain archive copies strictly for
+supporting Applications You validly distributed before termination,
+for so long as You continue to comply with Sections 4 through 7.
 
-9. GOVERNING LAW
+12. CHANGES TO THIS LICENSE
 
-[REVIEW: insert governing law and venue — deliberately left blank
-pending legal review and Licensor's actual jurisdiction.]
+The Licensor may revise this license at any time. Revisions govern
+copies of the Toolkit distributed after the revision takes effect;
+copies distributed to You under this version remain governed by this
+version for the rights already granted.
 
-10. ENTIRE AGREEMENT
+13. GENERAL
 
-This License constitutes the entire agreement between You and
-Licensor concerning the Software and supersedes all prior or
-contemporaneous agreements, whether written or oral, concerning its
-subject matter.
+This license is the entire agreement between You and the Licensor
+concerning the Toolkit and supersedes any prior or contemporaneous
+understandings on that subject. No rights are granted by implication,
+estoppel, or otherwise under any of the Licensor's intellectual
+property rights except as expressly set forth herein. If any
+provision of this license is held unenforceable, it will be enforced
+to the maximum extent permissible and the remaining provisions will
+remain in effect. The Licensor's failure to enforce any provision is
+not a waiver of it. You may not assign this license or the rights it
+grants without the Licensor's prior written consent.
 
-11. NO IMPLIED RIGHTS
+[REVIEW: governing law and venue are deliberately left unspecified
+pending the Licensor's decision.]
 
-No rights or licenses are granted by implication, estoppel, or
-otherwise under any of Licensor's intellectual property rights,
-except as expressly set forth in this License.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
----
+OPEN REVIEW ITEMS (for the Licensor, before publication)
 
-END OF LICENSE DRAFT. See docs/licensing-policy.md for the dependency
-license-compatibility rules that govern what may be incorporated into
-the Software under Section 5.
+  1. Legal identity of the Licensor — the copyright line currently
+     uses the established author handle "FemBoyGamerTechGuy";
+     confirm with counsel whether a legal name or registered entity
+     should appear instead.
+  2. Governing law and venue (Section 13).
+  3. Jurisdiction-appropriate liability language (Section 10) and the
+     reverse-engineering carve-out (Section 6(f)).
+  4. The runtime-accompaniment model in Section 4(d) — confirm or
+     narrow it.
+  5. Overall review of the final text by qualified legal counsel.
+     This draft follows the repository's existing licensing posture
+     (see docs/licensing-policy.md) but is not legal advice.
+
+END OF LICENSE

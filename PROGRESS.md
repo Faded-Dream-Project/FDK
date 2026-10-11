@@ -72,9 +72,27 @@ tooltips" candidate was stale (the 1.3.2 tooltip has been fully
 themed since birth — tokens, parser, Modern retune, tests); the tree
 is always the truth, including over this file.
 
+Same-date **v1.0.0-prep documentation pass** (docs/branding only —
+zero toolkit code touched): the Faded Dream moon logo replaced
+`examples/data/fdk_logo.png` (SAME 96x96 RGBA format and size —
+examples 02 and 04 decode it at that size; do not resize the asset
+without checking their panel layout); the README was rewritten
+concise with the Faded Dream Project banner and badge row; `LICENSE`
+was rewritten as the FDK Proprietary License v1.0 (restrictive on the
+toolkit, applications expressly excluded — its Section 5; still
+draft-flagged for legal review); `docs/screenshots.md` now indexes
+the captured gallery; `docs/licensing-policy.md` updated to match.
+
 ## Current state (verified this audit)
 
-- **HEAD:** milestone **1.4.18** (the GPU present lane — see above;
+- **HEAD:** milestone **1.4.19** (the drop that landed — the XDND
+  receiver-faithfulness pass: XdndStatus now answers the action atom
+  so action-strict sources [Qt family, several XWayland bridges]
+  commit their drops, a failed payload transfer delivers an
+  empty-payload DRAG_DROP instead of silently vanishing, the
+  XdndTypeList slab-read replaced the 64-atom truncation; the full
+  narrative is docs/roadmap.md "1.4.19 — the drop that landed").
+  Before it: **1.4.18** (the GPU present lane — see above;
   the full narrative is docs/roadmap.md "1.4.18 — the GPU present
   lane (hybrid rendering)"; the one-sentence architecture: FDK is now
   a hybrid renderer — every pixel rasterized on the CPU exactly as
@@ -155,6 +173,29 @@ is always the truth, including over this file.
   protocols), 22 public headers, 12 examples
 
 ## Implemented — DO NOT re-add any of these
+
+### Branding, docs, and release assets (v1.0.0-prep pass)
+
+- **Faded Dream logo** — `examples/data/fdk_logo.png`, 96x96 RGBA:
+  crescent moon centered over a night sky fading soft purple (lower)
+  to deep dark blue (upper), rounded badge, transparent outside,
+  no text/UI elements. Consumed by examples 02 (image panel) and
+  04 (picture fits) and displayed at the top of README.md. Do NOT
+  create a second/competing logo asset; the generator lives outside
+  the repository (scripts/make_fdk_logo.py in the worklog's
+  workspace).
+- **README.md** — the concise front page (banner, badges, features,
+  build/install, first-window example, examples table, themes,
+  screenshots, docs table, principles, license notice). The long
+  per-phase narrative it replaced lives on in `docs/roadmap.md`,
+  `PROGRESS.md`, and `docs/screenshots.md` — linked, not deleted.
+- **LICENSE** — the FDK Proprietary License v1.0: restrictive on the
+  toolkit (no redistribute/modify/sublicense/publish/exploit without
+  written authorization), with an explicit application-developer
+  rights section (Section 5) and a runtime-accompaniment grant
+  (Section 4d, flagged [REVIEW]). NOT an open-source license.
+- **docs/screenshots.md** — the gallery index for every capture in
+  `docs/screenshots/`.
 
 ### Widget catalog (all SHIPPED, class names from `src/widget/*.c`)
 

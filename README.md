@@ -1,148 +1,142 @@
+<div align="center">
+
+<img src="examples/data/fdk_logo.png" width="96" alt="FDK logo — a crescent moon over a dreamy night sky fading from soft purple into deep dark blue"/>
+
 # Faded Dream ToolKit (FDK)
 
-FDK is a native C17 GUI toolkit being built for modern Linux desktops,
-targeting the practical role GTK and Qt currently serve for
-applications that choose to target it. Minimal dependencies, no
-GTK/Qt dependency, real X11 and Wayland backends, and its own `.fdk`
-theme format (shipped in Phase 7). See `docs/roadmap.md` for the
-full project plan and current status.
+**Part of the Faded Dream Project**
 
-FDK is **distro-agnostic**: it should build and run on any modern
-Linux distribution where its genuinely unavoidable system interfaces
-(X11 protocol, Wayland protocol, POSIX) are available. It is not
-designed around any specific distribution.
+FDK is a general-purpose native GUI toolkit for modern Linux desktops,
+developed as part of the
+[Faded Dream Project](https://github.com/FemBoyGamerTechGuy/Faded-Dream-dotfiles).
 
-**Status: 0.0.1 — mature development release: all eleven roadmap phases complete, ABI frozen; real X11 + Wayland backends; the no-bus policy and embedded narrator; the consolidated, dual-backend-verified example suite.** The version number is a deliberate joke and nothing else — see `docs/versioning.md`.
+[![License: FDK Proprietary v1.0](https://img.shields.io/badge/license-FDK%20Proprietary%20v1.0-blueviolet?style=flat-square)](LICENSE)
+[![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
+[![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
+[![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
+[![Version: 0.0.1](https://img.shields.io/badge/version-0.0.1-blueviolet?style=flat-square)](docs/versioning.md)
+[![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/FemBoyGamerTechGuy/Faded-Dream-dotfiles)
 
-**Fonts:** FDK bundles no font (licensing posture). The demos and
-`fdk_font_load_system_default()` discover a system UI font through
-fontconfig (loaded at run time — no build or link dependency), the
-standard font directories, or `$FDK_FONT_FILE` / `$FDK_FONT_DIRS`
-overrides; see `docs/text.md`. Any distro layout works, including
-Arch's variable-font `NotoSans[wdth,wght].ttf` naming.
+</div>
 
-Core lifecycle, real X11 and Wayland backends, the rendering layer
-(damage-tracked software rasterizer with images, alpha compositing,
-transforms, and antialiasing — plus, since 1.4.18, a GPU present
-lane: byte-identical output with the damaged rects uploaded to a GL
-texture and composited through GLX where a hardware renderer
-exists, runtime-loaded with a guaranteed CPU fallback), the widget
-foundation with layout
-(box + grid), the text stack (TrueType shaping with subpixel
-positioning), the core widget catalog, the theme engine
-(runtime-switchable `.fdk` files), FDK-drawn window decorations with
-full window management, the advanced widget phase — clipboard, text
-Entry (now with password/read-only/max-length modes), ScrollView,
-List, Tree, Slider, SpinButton, Toolbar, Notebook, Canvas, Menu,
-ComboBox, and modal dialogs — the accessibility core (describe /
-notify / perform over the widget tree itself), the embedded narrator
-— FDK's in-process screen reader core: no D-Bus, no registry, no
-bridge process, just an application-wired sink that receives the
-narrated focus/toggle/value utterances (the no-bus policy,
-`docs/dependencies.md`) — and the complete i18n
-engine: explicit-locale formatting (numbers with Western/Indian/
-Swiss/Arabic grouping, currency, percent), an exact proleptic-
-Gregorian calendar with pattern-driven date/time formatting in 15
-languages, CLDR plural rules for 33 languages, and strict, bounded
-`.fmo` translation catalogs with context and plural support — and
-the Phase 11 stabilization pass: layout batching (515x faster bulk
-tree construction), the performance baseline harness, the ABI audit
-with compile-time size assertions and the subclassing decision,
-the memory-safety audit, pkg-config packaging, and the "1.0.0"
-milestone ABI freeze (`FDK_ABI_STABLE` = 1; the public version is
-0.0.1 by policy — `docs/versioning.md`).
+---
 
-The application platform layered on top: the full clipboard (both
-X11 selections — CLIPBOARD and the classic Unix PRIMARY middle-click
-buffer — plus cross-process Wayland data-device and
-primary-selection protocols), drag and drop, file dialogs, keyboard
-shortcuts and menu accelerators, Alt-letter menu mnemonics,
-tooltips over real platform popup surfaces, the undo/redo stack
-(with the Entry's built-in coalescing history), the timer queue
-(caret blink, indeterminate progress, Wayland client-driven key
-repeat), full-Unicode XIM text entry on X11, application
-preferences — a strict, human-editable, atomically-saved settings
-store (`fdk_prefs`, `docs/fdk-prefs-format.md`) whose corrupt-file
-posture is fail-soft: defaults, one warning, the app keeps running —
-and the animation layer (`fdk_animation`): an eleven-curve easing
-library and a one-ticker animator ("drive a number from 0 to 1,
-call me per frame") with exact handle-lifetime guarantees, plus
-smooth wheel/keyboard scrolling in every ScrollView (fast notches
-accumulate into one glide; every programmatic scroll stays
-instant).
+FDK targets the practical role GTK and Qt currently serve for
+applications that choose to target it: real X11 and Wayland backends
+that talk directly to Xlib and libwayland-client, its own
+damage-tracked renderer with a GPU present lane, its own widget,
+layout, text, and theme engines, and FDK-drawn window decorations —
+with no GTK/Qt dependency and a minimal, always-justified dependency
+set (`docs/dependencies.md`).
 
-The command-line face (1.4.13) and the three faces (1.4.16):
-`fdk-theme set pink-rave` is real — theme discovery over the XDG
-data hierarchy plus the custom folders (`$FDK_THEME_DIR`,
-`$HOME/.FDKThemes`, `~/.local/share/fdk/.FDKThemes`, the legacy
-`fdk/themes`, and the system data dirs where `make install` puts
-the five faces FDK ships: `faded-dream` — the packaged copy of the
-calm gray-with-violet default — `daylight`, `matrix`,
-`mono-chromatic` (black-and-white, circle buttons, a black title
-band) and `pink-rave` (the all-pink club floor with a hot-pink
-band)). One global setting (`~/.config/fdk.prefs`, the reserved
-"fdk" store, with `$FDK_THEME` as the per-process override)
-applied — LIVE — by every FDK application that did not explicitly
-install its own theme (the settings file is watched; `fdk-theme
-set` re-themes running apps the moment it lands, decoration and
-title bar included), and `fdk-prefs` to read and write any
-application's settings store from a shell — the settings half for
-applications without their own settings UI (`docs/cli.md`).
+**Status:** mature development release — all roadmap phases complete,
+ABI frozen (`FDK_ABI_STABLE`, `docs/abi-policy.md`). The public version
+is **0.0.1 on purpose**: the number is a project joke, not a maturity
+signal (`docs/versioning.md`). The phase-by-phase account of what is
+and isn't covered lives in `docs/roadmap.md` and `PROGRESS.md`.
 
-See "What works today"
-below and `docs/roadmap.md` for an honest, specific list of what is
-and isn't covered.
+FDK is **distro-agnostic**: it builds and runs on any modern Linux
+distribution where X11, Wayland, and POSIX are available.
 
-After `make install`, link applications with
-`cc myapp.c $(pkg-config --cflags --libs fdk)`. The same install puts
-the `fdk-theme`, `fdk-set`, and `fdk-prefs` command-line tools into
-`$(PREFIX)/bin` and the five shipped faces into
-`$(PREFIX)/share/fdk/.FDKThemes` — so `fdk-theme set daylight`
-(and `set mono-chromatic`, `set pink-rave`, `set faded-dream`)
-works immediately after installing.
+**Fonts:** FDK bundles no font (licensing posture). Applications
+discover a system UI font at run time through fontconfig, the standard
+font directories, or `$FDK_FONT_FILE` / `$FDK_FONT_DIRS` overrides —
+see `docs/text.md`.
+
+## Features
+
+Everything below is implemented and covered by the two-tier test
+suite (`docs/testing.md`).
+
+- **Native X11 and Wayland backends** — real Xlib and
+  libwayland-client integration, popup surfaces, HiDPI, and a
+  poll()-based event loop you can either own or hand to `fdk_run()`.
+- **Rendering** — a damage-tracked software rasterizer (gradients,
+  antialiased shapes, alpha compositing, transforms, image decode and
+  PNG encode), plus a hybrid GPU present lane (1.4.18): where a
+  hardware GL renderer exists, frames reach the screen through
+  GLX — byte-identical to the CPU path, with a guaranteed mid-frame
+  fallback (`FDK_NO_GL` / `FDK_GL_FORCE` knobs, `docs/rendering.md`).
+- **Widgets** — a full catalog: buttons (with role vocabulary),
+  entries (password / read-only / max-length), TextView editor, List,
+  Tree, IconView, Notebook with drag-reorderable tabs, menus and
+  submenus, toolbar, Canvas, dialogs (including a real file dialog
+  with list/icon browsing), Font and Color choosers, Picture, sliders,
+  spinners, level bars, revealers, and more.
+- **Layout** — box (horizontal/vertical) and grid containers with
+  margins, expansion, baseline and cross-axis alignment, spans, and
+  per-widget min/max limits; automatic reflow on resize.
+- **Text** — TrueType shaping with kerning and subpixel positioning,
+  synthetic bold/italic, an LRU glyph cache, labels that wrap,
+  ellipsize, and align — and full-Unicode XIM input on X11.
+- **Theming** — runtime-switchable `.fdk` theme files with a strict,
+  fail-closed grammar; ten shipped faces; live re-theming of running
+  applications; `fdk-theme` / `fdk-set` command-line tools.
+- **FDK-drawn window decorations** — a themed title band with full
+  window management (drag, maximize, fullscreen, resize), handing off
+  to the WM/compositor where protocols exist.
+- **Platform services** — clipboard (X11 CLIPBOARD and PRIMARY,
+  Wayland data-device and primary-selection, including images), drag
+  and drop (text, files, and folders), keyboard shortcuts, menu
+  accelerators and mnemonics, tooltips, undo/redo, and an atomically
+  saved application preferences store.
+- **Internationalization** — explicit-locale formatting (number
+  groupings including Indian and Arabic-Indic, currency, dates),
+  CLDR plural rules for 33 languages, and strict `.fmo` translation
+  catalogs (`docs/i18n.md`).
+- **Accessibility** — the accessibility tree *is* the widget tree:
+  describe / observe / drive any widget headlessly, plus the embedded
+  narrator — an in-process screen reader core with no D-Bus and no
+  bridge process.
+- **Animation** — an easing-curve library and a one-ticker animator
+  with exact handle-lifetime guarantees; smooth wheel/keyboard
+  scrolling in every ScrollView.
 
 ## Requirements
 
-- GCC with C17 support (developed against GCC 13+; any reasonably
-  current GCC should work — see `docs/build.md`)
-- X11 development headers (always required — X11 is FDK's baseline
-  backend, see `docs/dependencies.md`)
+- GCC with C17 support (developed against GCC 13+; see `docs/build.md`)
+- X11 development headers (always required — X11 is the baseline
+  backend)
 - Optional: Wayland development headers (`libwayland-dev`,
   `wayland-protocols`, `libxkbcommon-dev`) — auto-detected at build
-  time; if absent, FDK builds as X11-only and the runtime
-  FDK_PLATFORM_WAYLAND selection fails cleanly with FDK_ERR_NO_DISPLAY
-- `Xvfb`, optionally, only if you want to run `make test-x11`
-  without an existing desktop session
+  time; if absent, FDK builds as X11-only
+- `Xvfb`, optionally, to run `make test-x11` without an existing
+  desktop session
 
 ## Building
 
 ```sh
 make            # debug build (ASan+UBSan on by default): libs + tools
 make test       # platform-independent test suite (no display needed)
-make test-x11   # X11 integration test suite (real window lifecycle,
-                # auto-starts a throwaway Xvfb if $DISPLAY isn't set)
+make test-x11   # X11 integration suite (auto-starts a throwaway Xvfb)
 make examples   # build the example programs
-make tools      # build fdk-theme / fdk-prefs (also in plain `make`)
 ```
 
-To require the Wayland backend at build time (rather than the default
-auto-skip when its dev headers are missing):
+Optional build knobs:
 
 ```sh
-make FDK_ENABLE_WAYLAND=1   # errors if wayland-dev / xkbcommon-dev absent
+make FDK_ENABLE_WAYLAND=1    # require the Wayland backend (error if
+                             # wayland-dev / xkbcommon-dev are absent)
+make FDK_DISABLE_WAYLAND=1   # force an X11-only build
 ```
 
-To force-build X11-only even on a system with Wayland dev headers:
+Release builds, `make install`, and the full command reference are in
+`docs/build.md`.
+
+## Installation and linking
 
 ```sh
-make FDK_DISABLE_WAYLAND=1
+make install                      # PREFIX defaults to /usr/local
+cc myapp.c $(pkg-config --cflags --libs fdk)
 ```
 
-See `docs/build.md` for the full command reference, including
-release builds, `make install`, and the optional-build knobs in
-detail.
+The same install puts the `fdk-theme`, `fdk-set`, and `fdk-prefs`
+command-line tools into `$(PREFIX)/bin` and the ten shipped theme
+faces into `$(PREFIX)/share/fdk/.FDKThemes` — so
+`fdk-theme set daylight` (or `set catppuccin-mocha`,
+`set mono-chromatic`, …) works immediately after installing.
 
-## What works today
+## A first window
 
 ```c
 #include "fdk/fdk.h"
@@ -173,699 +167,63 @@ int main(void) {
 }
 ```
 
-Run `examples/01_hello_world.c` (via `make examples`) to see a fuller
-version of this — it opens a real window, logs resize/keyboard events,
-and exits cleanly when closed. It needs a reachable X11 or Wayland
-display to run.
+`examples/01_hello_world.c` (via `make examples`) is a fuller version
+of this — it needs a reachable X11 or Wayland display to run.
 
-Rendering works today too — Phase 3's second slice. The window's
-`fdk_surface` gives you a CPU framebuffer (XRGB8888) that survives
-resizes, a blending primitive set (fills, rects, gradients, lines,
-circles, rounded rects), a clip stack, offscreen surfaces, blits —
-and presents send only what changed:
+## Examples
 
-```c
-fdk_surface *surface = NULL;
-fdk_window_get_surface(window, &surface);
+Twelve example programs build with `make examples` (run from the
+repository root):
 
-while (!done) {
-    fdk_pump_events(ctx, 15);              /* own the loop */
-    if (!fdk_surface_frame_ready(surface))
-        continue;                          /* compositor-paced (Wayland) */
-    fdk_surface_info info;
-    fdk_surface_get_info(surface, &info);  /* pixels + size + stride */
-    /* draw via helpers or info.pixels directly; helpers record
-     * damage automatically; raw writers call fdk_surface_invalidate */
-    fdk_surface_fill_gradient_vertical(surface, full_rect, top, bottom);
-    fdk_surface_present(surface);          /* sends only the damage;
-                                              no-op if nothing changed */
-}
-```
+| Example | Shows |
+|---|---|
+| `01_hello_world` | a real window, event logging, clean shutdown |
+| `02_rendering` | the software renderer end to end — primitives, image compositing, transforms, AA |
+| `03_text` | glyph rendering gallery and the multi-line TextView editor |
+| `04_widgets` | the widget catalog with live interactions |
+| `05_theme` | live theme cycling, including external `.fdk` files |
+| `06_decorations` | FDK-drawn decorations and window management |
+| `07_advanced` | menus, popups, modal dialogs, notebook, canvas |
+| `08_narrator` | the embedded narrator speaking focus and toggles |
+| `09_capabilities` | platform/input capabilities, render-path report, drag-and-drop receiver |
+| `10_file_manager` | FDK Files — a real small file manager |
+| `11_animation` | the animation engine: an easing-curve race |
+| `12_settings` | a complete settings application from the catalog |
 
-The presentation is hybrid (1.4.18): the CPU rasterizes every pixel
-exactly as always, and where the machine has a hardware GL renderer
-the finished frame's damaged rects upload to a GL texture and one
-fullscreen composite carries them to the screen — byte-identical to
-the shared-memory path (pinned by tests, not assumed), with
-`fdk_window_get_render_path()` reporting which path a window uses
-and any GPU failure reverting that window to the CPU path mid-frame
-without losing the frame.
+## Themes
 
-Run `examples/02_rendering.c` to see this live: a gradient-and-
-logo primitives panel where a bouncing ball updates at 1-2% of the
-window's damage per frame (the console prints the live damage
-statistics), plus image decoding, transforms, antialiased shapes,
-and alpha compositing panels — all software, all damage-tracked.
-Identical code on X11 and Wayland; on Wayland the loop is
-additionally paced by the compositor's frame callbacks. The ball
-animates for a short intro and then freezes — an idle FDK app costs
-zero presents. Windows that nobody renders into still show the
-plain platform background. See `docs/rendering.md` for the full
-rendering design.
-
-And widgets work today too — Phase 4's foundation. Attach a tree to
-the window's root widget and FDK does the retained-mode work:
-hit-testing, hover and enter/leave synthesis, the implicit pointer
-grab, focus with built-in Tab traversal, event bubbling, and
-damage-driven repaints that clip to exactly what changed:
-
-```c
-fdk_widget *root = NULL;
-fdk_window_get_root(window, &root);
-
-fdk_widget *button = NULL;
-fdk_widget_create(root, NULL, (fdk_rect){20, 20, 120, 48}, &button);
-fdk_widget_set_background(button, panel_color);
-fdk_widget_set_corner_radius(button, 8);
-fdk_widget_set_can_focus(button, true);
-fdk_widget_set_event_callback(button, on_button_event, &state);
-
-while (!done) {
-    fdk_pump_events(ctx, 15);   /* input routed into the tree */
-    fdk_window_paint(window);   /* repaint damage only + present */
-}
-```
-
-A widget that handles an event consumes it — the window-level
-callback only sees what the tree didn't. Widgets can destroy
-themselves, their ancestors, or the whole window from inside an event
-callback; the core defers the frees so no dispatcher ever walks freed
-memory. Run `examples/04_widgets.c` for a live catalog of real
-controls with hover, press, focus-tint, and a quit button — every
-interaction state the foundation routes.
-
-Layout works today too — Phase 5, complete. Boxes (horizontal or
-vertical) lay children out from per-child requests and hints —
-margins, expansion, cross-axis alignment, BASELINE alignment — and
-the GRID places children in (column, row) cells with spans, per-
-track expansion, and homogeneous mode; per-widget MIN/MAX size
-limits clamp every measure so any container negotiates within
-them. The classic two-pass measure/arrange model underneath it all,
-and the window's CONTENT widget reflows automatically on every
-resize — on X11 AND Wayland (a client-side resize re-arranges the
-tree and reaches the compositor's screen):
-
-```c
-fdk_widget *content = NULL;
-fdk_box_create(root, FDK_VERTICAL, &content);
-fdk_box_set_padding(content, 12);
-fdk_box_set_spacing(content, 10);
-fdk_window_set_content(window, content);   /* auto-reflow on resize */
-
-fdk_widget *header = NULL;
-fdk_widget_create(content, NULL, (fdk_rect){0, 0, 0, 40}, &header);
-/* bounds are size REQUESTS now — layout assigns the real geometry */
-fdk_widget *main_area = NULL;
-fdk_widget_create(content, NULL, (fdk_rect){0, 0, 0, 50}, &main_area);
-fdk_widget_set_expand(main_area, false, true);   /* take the leftover */
-```
-
-Run `examples/04_widgets.c` and look at the "Layout — grid" frame:
-a 3-column grid with a two-column spanning cell and an expanding
-last column — resize the window and watch ONLY that column absorb
-the width while the other tracks and the gaps stay exactly
-`spacing` pixels. The whole panel is built from boxes and the grid;
-nothing is placed by hand, and every child reflows live through
-configure -> relayout -> damage -> repaint.
-
-And text renders for real now — Phase 6, complete. Load a
-TrueType font, measure a UTF-8 run (advance + ink bounds), and draw
-it kerned and anti-aliased onto any surface with SUBPIXEL glyph
-positioning (four phase-keyed rasterizations per glyph — every glyph
-paints within 1/8 px of where the pen actually is); measurement and
-drawing share one shaping walk, so what you measure is exactly
-where it paints. Synthetic BOLD and ITALIC styles ride the font
-object (`fdk_font_set_style`) — stems widen and the advance grows
-with them, italic shears at the baseline without touching the
-advance. Glyphs rasterize once per (glyph, phase) and live in an
-LRU cache; each run costs a single damage rectangle:
-
-```c
-/* Explicit path — full control when you ship your own face: */
-fdk_font *font = fdk_font_load("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24);
-
-/* Or discover the system default (fontconfig, font dirs, or
- * $FDK_FONT_FILE override — see docs/text.md): */
-fdk_font *ui = fdk_font_load_system_default(24);
-printf("picked %s\n", fdk_font_get_file_path(ui));
-
-fdk_text_metrics m;
-fdk_font_measure_utf8(font, "Hello, FDK", 10, &m);   /* advance + ink box */
-
-fdk_surface_draw_utf8(surface, font, "Hello, FDK", 10,
-                      40, 120, (fdk_color){1, 1, 1, 1});  /* pen, baseline */
-```
-
-Run `examples/03_text.c`'s canvas half: a 96px wordmark, a size
-ladder, colored runs chained by measured advances, a per-glyph
-wave line, and a live glyph-cache stats footer — all drawn straight
-through `fdk_surface_draw_utf8`.
-
-And the core widget catalog — Phase 6's main event. Eight real
-widgets on the Phase 4 object model, sized by their measured text
-and driven by the same event routing as everything else:
-
-```c
-fdk_widget *btn = NULL;
-fdk_button_create(frame, font, "Apply", &btn);
-fdk_button_set_on_activate(btn, on_apply, NULL);   /* click OR Space */
-
-fdk_widget *opt = NULL;
-fdk_radio_create(frame, font, "Software (auto)", &opt);
-fdk_radio_set_checked(opt, true);  /* siblings in the parent uncheck */
-
-fdk_progress_set_fraction(bar, 0.75f);
-```
-
-Label, Button (with the 1.4.0 role vocabulary — normal/suggested/
-destructive/link — and toggle-button state), Toggle, Checkbox,
-RadioButton (its group IS its parent widget), ProgressBar (determinate
-or busy), Separator, Frame — a titled container whose children arrange
-below the title band automatically — plus the 1.4.1 furniture:
-Spinner (the rotating busy comet), Paned (the two-pane splitter whose
-divider drags and answers the arrow keys), and Expander (the animated
-disclosure door). Controls activate on release-inside after a press
-(the implicit grab keeps the release even if the pointer left),
-answer Space/Enter when focused, dim + go input-transparent when
-disabled, and fade their hover fills over 120 ms (press feedback
-still snaps).
-
-The 1.4.2 app furniture rounds out the structure every real
-application reaches for: Stack (named pages, exactly one visible)
-with its StackSwitcher (the accent pill row — bound loosely enough
-that either widget can die first), Revealer (the animated drawer
-that slides from any edge), Statusbar (GTK's context-scoped
-message stack: push returns a handle, pop is LIFO per context),
-SearchEntry (the magnifier preset with a clear button and the
-Esc-clears ladder), and LevelBar (the battery-style meter). The
-existing family grew too: the List gained rubber-band sweep
-selection and row icons, the Tree row icons that survive
-collapses, the Slider labeled tick marks, and the menu/combo rows
-fade their hover pills like the buttons do.
-
-The 1.4.3 chooser batch finishes the dialog surfaces: the
-MenuButton (a button that pops up an attached, app-owned menu
-model — the hamburger), the vertical Slider orientation, the
-SearchEntry's debounced search-changed (one fire after the last
-edit), the Revealer's CROSSFADE (a real per-pixel fade through the
-new paint-group engine — a per-widget subtree opacity that
-composites through a cached ARGB offscreen), the rubber band that
-auto-scrolls when the sweep chases the viewport edge (in the Tree
-too, which gained the List's whole multi-selection model), and the
-dialog trio: About (logo, website link row, scrolling license),
-the FontChooser (every loadable system face, live preview at the
-chosen size), and the ColorChooser (an HSV wheel rasterized
-per-pixel on the canvas — drag the ring for hue, the triangle for
-saturation and value, type a #rrggbb, compare against the initial
-swatch).
-
-The 1.4.4 modern batch completes the interaction furniture: the
-Notebook's tabs REORDER by drag (the strip swaps live under the
-pointer, the shown page never changes), the ColorButton (a
-color-well swatch over an alpha checkerboard that opens the
-ColorChooser and reports the pick), the file dialog's Recent place
-(the shared XDG recently-used.xbel — one click lists what every
-desktop app remembers, accepting a row records it back, foreign
-apps' metadata survives byte-for-byte), overlay scrollbars (thin
-transient thumbs over the full-viewport content that fade when
-idle and return on scroll — themed `scrollbar_overlay_width`), and
-the Entry's icon slots (leading/trailing vector glyphs, custom
-painters, per-slot sensitivity and press callbacks — the search
-preset is now built on them), plus the List's
-activate-on-single-click for the places-sidebar rhythm.
-
-The 1.4.5 milestone closes the two oldest confessions: X11 HiDPI
-(detected from the desktop's dpi conventions — windows render
-pixel-exact at 2x/3x with logical input coordinates unchanged) and
-the IconView, the item grid every file manager's "icon view" is —
-glyph cells that re-flow into columns, the List's whole selection
-model (rubber-band drag-select included since 1.4.6, with themed
-cell metrics), and keyboard navigation where Down steps a full
-grid row. 1.4.7 finishes the grid: the band chases the viewport
-edge (the List's auto-scroll, both axes), cells activate on a
-double click like every list row, and the FILE DIALOG grew the
-matching browsing surface — `options.view` starts it on the item
-grid, and the toolbar's Icons checkbox flips list/grid live at
-any time (run `examples/09_capabilities.c`, the new "Icons View"
-button).
-
-1.4.8 closes the last widget-family hole: the TextView, a real
-multi-line editor — word-wrap (or one horizontal field), a caret
-and selection that span visual lines with the goal-column rule,
-PageUp/PageDown, paragraph triple-clicks, and the Entry's whole
-editing discipline underneath (undo runs that coalesce, clipboard
-cut/copy/paste + PRIMARY middle-click, read-only, IME preedit
-display). Run `examples/03_text.c`: the editor frame under the
-label modes — click in and type.
-
-1.4.9 is the image milestone: a complete PNG encoder over zlib
-(fdk_surface_save_png — renders can be saved), the memory decode
-twin, the PICTURE widget (an owned surface under NONE / CONTAIN /
-COVER / FILL fit policies — integer scale-ups stay sharp, the rest
-antialias), and the clipboard's image surface: copy a surface as
-image/png and paste it back on X11 (one atomic property) and
-Wayland (the data-device pipe), with text and image replacing each
-other like any real clipboard. Run `examples/04_widgets.c` — the
-"1.4.9 — picture" frame shows the logo under all four fits.
-
-1.4.10 closes the window-state surface: FULLSCREEN joins
-maximize/minimize/restore on both backends —
-fdk_window_fullscreen/unfullscreen/is_fullscreen, the EWMH client
-message under a real WM (the bare-X geometry fallback when nobody
-is listening), xdg_toplevel requests on Wayland with the
-compositor's configure as the truth, and FDK_EVENT_WINDOW_STATE
-carrying all three flags.
-
-Run `examples/04_widgets.c`: a settings-style panel built entirely
-from the catalog — frames of controls, a radio group, a session
-frame with an expander and a draggable splitter, the 1.4.3 row
-(a menu button, a vertical marked slider, a crossfade toggle with
-its fading panel, and the three chooser buttons), the 1.4.4 row
-(a reorderable three-tab notebook, the color well with its live
-swatch, a path entry with folder and clear icons, and an
-overlay-scrollbar column you can wheel), the 1.4.5 row (a
-six-cell IconView — click, ctrl/shift, arrows), a grid, a button
-row with a link button and a busy spinner, a progress bar, and a
-live status label that every control reports into. Then
-`examples/12_settings.c`: the whole 1.4.2 furniture composed into
-one working settings app — search field, pill-switched stack,
-statusbar, marked slider, level meters, spinning sync, a
-multi-select storage list with icons and the rubber band, and a
-slide-up advanced drawer.
-
-Text layout completes the picture — labels that wrap, truncate with
-an ellipsis exactly at their right edge, and align their lines:
-
-```c
-fdk_label_set_mode(body, FDK_LABEL_WRAP);      /* greedy word-wrap  */
-fdk_label_set_mode(path, FDK_LABEL_ELLIPSIZE); /* "..." at the edge */
-fdk_label_set_alignment(title, FDK_ALIGN_CENTER);
-
-fdk_font_break_lines_utf8(font, text, len, width, NULL, 0, &n, NULL);
-/* -> n lines, each measured by the same walk that paints it */
-```
-
-Radio groups own their arrow keys: Up/Left and Down/Right move the
-selection through the group (wrapping, skipping hidden/disabled
-members) with focus following — Space still toggles, Tab still
-traverses the whole tree.
-
-Run `examples/03_text.c`'s widget half: a wrapping paragraph that
-reflows taller when the window narrows, a truncated path line, the
-three alignments, and a keyboard-owned radio group — one window
-with the raw-rendering gallery above it.
-
-And the theme engine — the whole toolkit restyles at runtime, from
-data:
+FDK restyles at runtime from data: every live window repaints from one
+call, decoration included.
 
 ```c
 fdk_theme *t = fdk_theme_load("my-theme.fdk", NULL); /* strict .fdk */
-fdk_theme_set_default(t);   /* every live window repaints, themed  */
+fdk_theme_set_default(t);
 ```
 
-Thirty-three color tokens (text, control surfaces with hover/
-pressed/disabled states, accent, track, border, the sidebar/menu/
-entry/row families — and the 1.4.16 TITLEBAR family, which themes
-the FDK-drawn decoration band itself and falls back to the control
-family when unset) and sixteen paint metrics — corner radii, the
-1.4.16 BUTTON SHAPE (rounded, circle, square — Mono Chromatic ships
-circles), row heights, the title band's height — resolve at paint
-time, so a theme switch is one call — no cached colors, no tree
-walk by the app. The built-in default theme is "Faded Dream" (1.4.16
-— the calm gray-with-violet face; its exact pre-1.4.16 "FDK Modern"
-and Phase 6 predecessors survive as documented recipes): never
-touching themes changes no pixels. Themes parse from memory or
-disk with a strict, bounded, fail-closed grammar
-(`docs/fdk-theme-format.md`; the security rules behind it are
-`docs/security.md`) — unknown keys, duplicates, and malformed values
-are errors with line numbers, never half-themed UI. Missing tokens
-inherit the built-in defaults, so a three-line theme is a real
-theme.
+- The `.fdk` grammar is strict and fail-closed — unknown keys,
+  duplicates, and malformed values are line-numbered errors, never a
+  half-themed UI; missing tokens inherit the built-in defaults
+  (`docs/fdk-theme-format.md`).
+- Ten faces ship with the toolkit: `faded-dream` (the calm
+  gray-with-violet default), `daylight`, `matrix`, `mono-chromatic`,
+  `pink-rave`, `catppuccin-mocha`, `catppuccin-latte`, `nordic-frost`,
+  `amoled-void`, and `solar-flare`.
+- `fdk-theme set <name>` changes the global theme — applied live by
+  every running FDK application that didn't install its own;
+  `fdk-set` does the same per application. Custom themes load from
+  `$FDK_THEME_DIR`, `~/.FDKThemes`, and the XDG data hierarchy
+  (`docs/cli.md`).
 
-Run `examples/05_theme.c` (from the repository root — it loads
-`examples/data/daylight.fdk` and `examples/data/matrix.fdk`): one
-panel of catalog widgets cycling through three themes with real
-clicks, including the app-side pattern for tokens the engine does
-not force on anyone (window background, label accents).
+## What it looks like
 
-And FDK-drawn window decorations plus full window management — the
-toolkit owns its title bar:
-
-```c
-fdk_window_set_decorated(window, true);  /* themed band + buttons  */
-fdk_window_maximize(window);             /* request; state events */
-```
-
-A themed band inside the client area (height is the
-`title_bar_height` theme metric) with the window title and three
-vector-glyph buttons — minimize, maximize/restore, close — that
-render with or without fonts. The close button delivers a normal
-close-request (application semantics unchanged); double-clicking the
-band toggles maximize; a 5px edge/corner zone resizes the window
-(since the WM frame is gone, FDK provides the handles). The
-platform's own chrome is asked away — `_MOTIF_WM_HINTS` on X11,
-xdg-decoration on Wayland — and where the platform has a protocol
-for it, drags and state changes are HANDED to the WM/compositor
-(EWMH `_NET_WM_STATE` / `_NET_WM_MOVERESIZE`, `xdg_toplevel`
-requests); under bare X (no WM) FDK performs them itself. State
-truth arrives as `FDK_EVENT_WINDOW_STATE`, never request optimism;
-on Wayland a compositor that insists on its own decorations comes
-back as `FDK_EVENT_WINDOW_DECORATION` and FDK drops its band before
-you see the event — a window can never end up with two title bars.
-
-Run `examples/06_decorations.c`: a decorated window you can drag by
-its band, double-click to maximize, resize by its edges, manage by
-its buttons, and close by its button — with a runtime toggle between
-FDK-drawn and platform decorations.
-
-### Images, alpha compositing, transforms, antialiasing (Phase 3
-### completion)
-
-Run `examples/02_rendering.c`: four panels — a PNG decoded from disk and
-composited with per-pixel alpha (the file's 50%-transparent band
-actually blends over the panel background), the same image through
-the transform pipeline (exact 2x integer block scaling, a slowly
-rotating bilinear copy, an enlarged fractional scale), crisp vs
-antialiased primitives side by side, and a runtime-built transparent
-sprite blended twice so the alpha visibly ACCUMULATES where the two
-copies overlap. On X11 this all travels through the MIT-SHM shared
-memory path on a double buffer; on a scaled Wayland output the widget
-layer composites through the logical intermediate while raw pixels
-stay physical.
-
-### The advanced widget phase — Phase 9, complete
-
-Everything a real application needs for input and structure: a
-clipboard architecture (real ICCCM selection ownership on X11,
-`wl_data_device` on Wayland), a text Entry (cluster-safe cursor,
-selection with the full modifier grammar, cut/copy/paste, password
-mode, IME preedit groundwork), ScrollView with overlay scrollbars,
-List and Tree with multi-select, Slider, SpinButton, Toolbar,
-Notebook, Canvas — and the popup machinery that ties them together:
-
-```c
-fdk_menu *file = NULL;
-fdk_menu_create(font, &file);
-fdk_menu_item *it = NULL;
-fdk_menu_append(file, "Open", &it);
-fdk_menu_item_set_on_activate(it, on_open, NULL);
-fdk_menu_append_check(file, "Show toolbar", true, NULL);
-
-fdk_widget *bar = NULL;
-fdk_menu_bar_create(window_content, font, &bar);
-fdk_menu_bar_append(bar, "File", file);   /* bar + dropdowns + submenus */
-```
-
-Menus, submenus, and combo dropdowns are TOOLKIT-OWNED popup windows:
-`fdk_window_create_popup` on the window layer (override-redirect +
-input grabs on X11, `xdg_popup` with positioners on Wayland) with a
-parent-relative position, a grab at show, and a close request on the
-outside press — the widget layer creates them, auto-paints them, and
-dismisses them. The app loop pumps events and paints ITS windows
-only. Dialogs ride the same machinery: `fdk_dialog_show_message` is
-non-blocking by design (nothing in FDK blocks the event loop), modal
-on X11 through a real server-side pointer+keyboard grab (the test
-suite verifies the grab by REFUSING a foreign grab while the dialog
-lives), and honestly non-modal on Wayland where no toplevel-grab
-protocol exists.
-
-```c
-fdk_dialog_options opts = {
-    .title = "Discard changes?",
-    .text  = "The file has unsaved changes.",
-    .buttons = FDK_DIALOG_OK_CANCEL,
-    .modal = true,   /* X11: server-side input grab; Wayland: ignored */
-};
-fdk_dialog_show_message(ctx, &opts, on_answer, NULL);
-/* Enter answers OK, Escape answers Cancel, buttons answer themselves,
- * early destroy answers Cancel — exactly one on_response, always. */
-```
-
-Run `examples/07_advanced.c`: every Phase 9 control in one window —
-a menu bar with submenus and a real message dialog, a toolbar, a
-notebook of pages (controls, a list, a tree, a canvas), combos, a
-status label narrating everything. The popups open, grab, and
-dismiss themselves while the demo only pumps events.
-
-### The accessibility core — Phase 10, first slice
-
-The accessibility tree IS the widget tree — no parallel object
-model, no daemon, nothing that can drift out of sync with what is
-on screen. Every widget can be described, observed, and DRIVEN
-without a display, which makes the layer testable headless and
-gives FDK the automation seam GTK and Qt had to bolt on later:
-
-```c
-fdk_a11y_info info;
-fdk_a11y_describe(slider, &info);
-/* info.role == FDK_A11Y_ROLE_SLIDER
- * info.value_current / value_min / value_max, info.value_text
- * info.states: ENABLED | VISIBLE | SHOWING | FOCUSABLE ... */
-
-fdk_a11y_subscribe(NULL, on_a11y_event, NULL);   /* global scope */
-/* ... every children/state/name/bounds/value change, forever */
-
-fdk_a11y_perform(slider, FDK_A11Y_ACTION_SET_VALUE, 55.0);
-/* programmatic driving through the widget's own semantics — the
- * same code path the keyboard takes. Screen readers' "click" and
- * the test suite's assertions share this API. */
-```
-
-Thirty-four roles (WAI-ARIA/ATK naming), a 17-flag state set
-(SHOWING walks ancestors — a hidden container hides its subtree),
-a value interface (sliders, progress, spins, scrolls, entries,
-notebooks, combos), per-widget accessible-name overrides over
-class-computed names (a Label's text, a window's title), change
-notifications with the same reentrancy discipline as the event
-system, and action drivers for the whole interactive catalog. The
-Entry also gained the three modes the roadmap had promised:
-password (one bullet per cluster — the caret, selection, and
-hit-testing never change), read-only (selection + copy keep
-working), and max length. Since 1.1.0 the toolkit also ships its
-own consumer: the embedded narrator — FDK's screen reader core
-(`fdk_a11y_set_speaker` + `fdk_a11y_narrator_start`), which
-narrates focus moves, toggles, and value changes through an
-application-wired sink with no registry, no bus, and no bridge
-process (the no-bus policy, `docs/dependencies.md`). An external
-assistive-technology bridge, if an application wants one, is a
-CONSUMER of the same public API; `docs/roadmap.md`'s Phase 10 entry
-records exactly what is and isn't there. Run
-`examples/08_narrator.c` to watch it live: a scripted tour walks
-focus through a form while the narrator speaks each move through a
-subtitle bar, then keeps narrating your own keyboard and pointer
-interaction until you close the window.
-
-### Internationalization — Phase 10, second half
-
-One design rule: FDK never calls `setlocale()` and never reads the
-environment — every function takes its locale as an explicit value,
-so one process can format for a different locale per call, and every
-result is deterministic under test:
-
-```c
-fdk_locale de, hi, ar, ja, ru, pl;
-fdk_locale_parse("de", &de);        /* BCP-47 AND "de_DE.UTF-8" work */
-fdk_locale_parse("hi", &hi);
-fdk_locale_parse("ar", &ar);
-fdk_locale_parse("ja", &ja);
-fdk_locale_parse("ru", &ru);
-fdk_locale_parse("pl", &pl);
-
-char buf[96];
-fdk_format_int(buf, sizeof buf, &de, 1234567, NULL);   /* 1.234.567  */
-fdk_format_int(buf, sizeof buf, &hi, 12345678, NULL);  /* 1,23,45,678 */
-fdk_format_int(buf, sizeof buf, &ar, 1234567, NULL);   /* ١٬٢٣٤٬٥٦٧  */
-
-fdk_format_currency(buf, sizeof buf, &de, 1234.5, "EUR"); /* 1.234,50 € */
-fdk_format_date(buf, sizeof buf, &ja, &(fdk_date){2025, 12, 25},
-                FDK_DATE_LONG);                          /* 2025年12月25日 */
-
-/* CLDR plurals — 33 languages, every rule shape: */
-fdk_plural_category_int(&de, 1);   /* FDK_PLURAL_ONE   */
-fdk_plural_category_int(&ru, 21);  /* ONE (Russian 21 is singular!) */
-fdk_plural_category_int(&pl, 21);  /* MANY (Polish 21 is NOT)      */
-
-/* Translation catalogs: strict, bounded .fmo files (the theme
- * parser's discipline — unknown anything is a line-numbered error),
- * with contexts and category-named plural forms: */
-fdk_catalog *cat = NULL;
-fdk_catalog_load("src/de.fmo", &cat);
-const char *tmpl = fdk_translate_plural(cat, &de, "%d file",
-                                        "%d files", n);
-snprintf(buf, sizeof buf, tmpl, n);   /* the app formats; FDK
-                                       * never interprets strings */
-```
-
-The calendar is the proleptic Gregorian year 1..9999 on exact
-civil-day integer math (no time_t, no leap-year folklore), the
-month/weekday names ship for 15 languages — inflected FORMAT forms
-where the language requires them ("25 декабря", not "декабрь") —
-and number formatting covers Western, Indian (1,23,45,678), Swiss
-(1'234'567), and Arabic-Indic grouping with their separators and
-digits. `docs/i18n.md` records the whole design and the honest
-deviations from full CLDR data.
-
-### What it looks like
-
-Since the Wayland deferred-first-frame fix (milestone 1.1.1) the
-whole example suite runs on both backends under the test rigs, and
-the captures below are real compositor output from sway (headless,
-wlr-screencopy) — every example launched in the same
-show -> paint -> pump order a real application uses, screenshot-
-verified, then closed through the real close path. (This rig
-exists because an earlier state (milestone 1.1.0) shipped a
-Wayland bug where exactly that ordering never mapped a window —
-see the platform notes in `docs/architecture.md`.)
-
-![02_rendering on Wayland](docs/screenshots/suite_wayland_02_rendering.png)
-
-![03_text on Wayland](docs/screenshots/suite_wayland_03_text.png)
+Real captured frames from the test rigs — not mockups
+(`docs/screenshots.md` has the full gallery):
 
 ![04_widgets on Wayland](docs/screenshots/suite_wayland_04_widgets.png)
 
-![07_advanced on Wayland](docs/screenshots/suite_wayland_07_advanced.png)
+![02_rendering on Wayland](docs/screenshots/suite_wayland_02_rendering.png)
 
-The earlier per-feature proofs below were captured with the same
-discipline while each subsystem landed (Xvfb + `x11grab`, or the
-weston/sway compositor screenshot paths; some show example names
-from before the suite was consolidated to eight programs — the
-feature proofs are unchanged):
-
-These are real captured frames from the test rig — not mockups. The
-first two are the X11 backend (Xvfb display, `x11grab` capture): the
-demo window at 640x480, and again after a live resize to 800x600 —
-the framebuffer follows the resize and the ball/logo reposition into
-the new bounds. The dark area around each window is the bare Xvfb
-root window, kept in frame on purpose: it shows the window boundary
-is real.
-
-![X11 demo window at 640x480](docs/screenshots/x11_frame_640x480.png)
-
-![X11 demo window after a live resize to 800x600](docs/screenshots/x11_frame_800x600.png)
-
-The next two are the same example running under Wayland (weston 14,
-headless backend, compositor screenshot), captured 3.5 seconds apart.
-The gradient occupies the whole frame because the kiosk shell
-configures the surface fullscreen; the shifted colors between the two
-frames show the animation genuinely advancing frame by frame on the
-Wayland present path.
-
-![Wayland demo, first capture](docs/screenshots/wayland_frame_1.png)
-
-![Wayland demo, 3.5 s later — gradient advanced](docs/screenshots/wayland_frame_2.png)
-
-A 10-second screencast of the animated X11 session — including the
-live resize and a clean window close mid-render — is committed
-alongside the stills:
-[`docs/screenshots/fdk_render_x11.mp4`](docs/screenshots/fdk_render_x11.mp4).
-
-The widget foundation has its own captured proof — two frames of the
-Phase 4 foundation demo (since folded into the widget catalog,
-`examples/04_widgets.c`) under Xvfb, driven by real injected input
-(XSendEvent through the X server): the initial state, and after two
-button clicks plus a Tab. Between the frames the meter recolored AND
-grew (a `set_bounds` layout change repainting only the affected
-region), and the "hue" button's color shifted because keyboard focus
-moved to it. The quit button ends the demo by destroying the window
-from inside its own pointer-release handler — and the process exits
-cleanly (exit 0, ~390 frames).
-
-![03_widgets initial state](docs/screenshots/widgets_frame_initial.png)
-
-![03_widgets after clicks + Tab: meter recolored and grown, focus moved](docs/screenshots/widgets_frame_interacted.png)
-
-And the layout engine's proof — the layout demo (its grid now lives
-in the "Layout — grid" frame of `examples/04_widgets.c`) held at two
-different window sizes (660x480 and 500x380), captured during its
-steady phases: the header dots stay anchored top-left, the expanding
-panel owns whatever space the window gives it, the footer stays
-pinned to the bottom. Nothing in the example computes geometry by
-hand.
-
-![04_layout at 660x480](docs/screenshots/layout_hold_660x480.png)
-
-![04_layout at 500x380 — same code, reflowed](docs/screenshots/layout_hold_500x380.png)
-
-And the text foundation's proof — the raw-rendering half of
-`03_text` in its deterministic hold frame (real shaped glyphs,
-PIL-verified down to the colored runs and the stats footer):
-
-![05_text hold frame: wordmark, size ladder, colored runs, wave, stats](docs/screenshots/text_frame_640x480.png)
-
-The widget catalog's proof — `04_widgets` in its deterministic hold
-frame: two frames (Profile / Renderer) with real title bands, a
-toggle, checkboxes, a checked radio (the accent dot), buttons, a
-full progress bar, and the status label — every element PIL-verified
-by the test rig:
-
-![06_widgets catalog hold frame](docs/screenshots/widgets_catalog_frame_520x430.png)
-
-Text layout's proof — the label-mode half of `03_text` at full width
-and after the rig narrows the window: the paragraph re-wraps from
-five lines to seven and the truncated line's ellipsis moves left
-with the edge.
-
-![07_text_layout hold frame](docs/screenshots/text_layout_frame_480x620.png)
-![07_text_layout after the resize](docs/screenshots/text_layout_reflow_340x620.png)
-
-And the theme engine's proof — `05_theme` cycling its six faces
-(the built-in Faded Dream, Daylight from a complete `.fdk` file,
-Matrix from a deliberately partial one, and the 1.4.16 trio from
-the source tree's `.FDKThemes/` folder: Mono Chromatic's
-black-and-white world with its circle buttons, Pink Rave's
-all-pink club floor, and the packaged Faded Dream itself): same
-widgets, same layout, same code; only the default theme differs
-between captures.
-The rig also verifies the round trip back to FDK Dark is
-pixel-exact.
-
-![08_theme under three themes](docs/screenshots/theme_three_themes_1380x330.png)
-
-And the decorations' proof — `06_decorations` decorated (note the
-FDK band: title, the three management buttons, themed rule — at the
-post-drag position) vs. toggled back to WM decorations (band gone,
-content reflows to the full window):
-
-![09_decorations on/off](docs/screenshots/decorations_on_off_1050x360.png)
-
-The Phase 8 completion, driven by real input in the test rig:
-decorated and dragged; then MAXIMIZED via the band's own maximize
-button (fills the screen); then restored by double-clicking the band
-and GROWN 460x300 -> 500x330 by dragging the bottom-right resize
-corner FDK draws:
-
-![09_decorations window management](docs/screenshots/decorations_management_1636x340.png)
-
-The Phase 9 completion, same rig, same discipline — `07_advanced`
-driven by real clicks through the X server: (1) the File menu open
-below its bar title — a toolkit-owned popup the demo never paints
-itself; (2) a ComboBox dropdown; (3) the modal message dialog (its
-own toplevel, grabbing input server-side); (4) a nested submenu
-chain, each level its own popup. Escape peels the chain one level
-per press; the rig's XQueryTree assertion proves every popup window
-left the X server when the chain closed:
-
-![11_advanced popups through real input](docs/screenshots/advanced_widgets_2600x578.png)
-
-## Project principles
-
-- **No GTK, no Qt, no wrapping either.** FDK implements its own
-  widget system, rendering, layout, event handling, and window
-  decorations. The X11 and Wayland backends talk directly to Xlib and
-  libwayland-client — the two explicitly project-permitted platform
-  interfaces — not through any intermediate toolkit.
-- **Minimal dependencies, always justified.** Every dependency FDK
-  takes on is documented in `docs/dependencies.md` before it's added,
-  with license, purpose, and whether it's optional.
-- **No copyleft, anywhere in the dependency graph.** See
-  `docs/licensing-policy.md`.
-- **Correct over quick; architecture over feature-count.** See
-  `docs/roadmap.md`'s phase structure — each phase is meant to leave a
-  working, tested foundation for the next, not a pile of stubs.
-- **No fake completion.** Phase status in `docs/roadmap.md` lists what
-  is NOT covered as carefully as what is — e.g. Phase 2 has no
-  automated Wayland integration test yet, and says so plainly rather
-  than claiming "Wayland support" without qualification.
+![Three themes, same code](docs/screenshots/theme_three_themes_1380x330.png)
 
 ## Documentation
 
@@ -873,19 +231,57 @@ left the X server when the chain closed:
 |---|---|
 | `docs/architecture.md` | Layering, module boundaries, public/internal header split |
 | `docs/roadmap.md` | Phase-by-phase plan and current status |
-| `docs/build.md` | Build system reference |
-| `docs/testing.md` | The two-tier test suite, what each covers, and known environment quirks |
+| `PROGRESS.md` | The fast, authoritative implemented-features ledger |
+| `docs/build.md` | Build system reference, release builds, install |
+| `docs/testing.md` | The two-tier test suite and environment quirks |
+| `docs/rendering.md` | The renderer, the GPU present lane, and its env knobs |
+| `docs/text.md` | The text stack and font discovery |
+| `docs/i18n.md` | The internationalization engine |
+| `docs/platform-input.md` | Keyboard/IME/XIM input across backends |
 | `docs/memory.md` | Ownership model, allocation policy |
 | `docs/threading.md` | UI-thread affinity, worker-thread rules |
-| `docs/abi-policy.md` | The ABI freeze, struct classification, and the subclassing decision |
-| `docs/versioning.md` | The public version policy: why FDK is and stays `0.0.1`, and what that number does (and does not) mean |
-| `docs/dependencies.md` | Every current and anticipated dependency, with justification |
+| `docs/performance.md` | The performance baseline harness |
+| `docs/abi-policy.md` | The ABI freeze, struct classification, subclassing decision |
+| `docs/versioning.md` | Why FDK is (and stays) version 0.0.1 |
+| `docs/dependencies.md` | Every current and anticipated dependency, justified |
 | `docs/licensing-policy.md` | What licenses are/aren't allowed in, and the audit procedure |
 | `docs/fdk-theme-format.md` | The `.fdk` theme file grammar |
 | `docs/fdk-catalog-format.md` | The `.fmo` translation-catalog grammar |
-| `docs/fdk-prefs-format.md` | The `.prefs` application-settings grammar and resilience rules |
+| `docs/fdk-prefs-format.md` | The `.prefs` application-settings grammar |
+| `docs/cli.md` | The `fdk-theme` / `fdk-set` / `fdk-prefs` tools |
+| `docs/security.md` | The strict-parser security rules |
+| `docs/screenshots.md` | The captured proof gallery |
+
+## Project principles
+
+- **No GTK, no Qt, no wrapping either.** FDK implements its own
+  widget system, rendering, layout, event handling, and decorations;
+  the X11 and Wayland backends talk directly to Xlib and
+  libwayland-client.
+- **Minimal dependencies, always justified** (`docs/dependencies.md`).
+- **No copyleft, anywhere in the dependency graph**
+  (`docs/licensing-policy.md`).
+- **Correct over quick; architecture over feature-count**
+  (`docs/roadmap.md`).
+- **No fake completion** — the roadmap lists what is *not* covered as
+  carefully as what is.
 
 ## License
 
-FDK is proprietary software. See `LICENSE` — note that it is currently
-a draft flagged for legal review, not a finalized license.
+FDK is **proprietary software**. The toolkit — its source code,
+framework implementation, and shipped assets — remains the exclusive
+property of its rights holder and may not be copied, modified,
+redistributed, sublicensed, published, or commercially exploited
+without express written authorization. See [`LICENSE`](LICENSE)
+(the FDK Proprietary License, version 1.0 — still flagged for legal
+review before publication).
+
+**Applications built with FDK are governed separately and remain
+yours.** The license governs FDK itself, not the software you build
+with it: your application's source code, assets, branding, and
+licensing stay your independent property, and you may distribute and
+sell your applications under terms of your choosing. FDK's
+restrictions never attach to independent application code.
+
+Third-party components bundled with FDK remain under their own
+permissive licenses — see `THIRD-PARTY-NOTICES.md`.
