@@ -309,6 +309,14 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->net_wm_moveresize = XInternAtom(display, "_NET_WM_MOVERESIZE", False);
     conn->wm_state = XInternAtom(display, "WM_STATE", False);
     conn->wm_change_state = XInternAtom(display, "WM_CHANGE_STATE", False);
+    /* Desktop switching (1.1.0-rc1, the Openbox report): watching the
+     * root's _NET_CURRENT_DESKTOP is how a popup hears that the world
+     * under it changed — an open dropdown belongs to the desktop it
+     * opened on, and its grab outliving the switch is exactly the
+     * "workspace switching stopped working" class of bug. Interned
+     * unconditionally (cheap, server-global) and selected below. */
+    conn->net_current_desktop =
+        XInternAtom(display, "_NET_CURRENT_DESKTOP", False);
 
     /* Probe the WM's EWMH capabilities ONCE, from the root's
      * _NET_SUPPORTED atom list — the EWMH-sanctioned capability
@@ -362,6 +370,17 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->xdnd.dest_window = None;
     conn->xdnd.hover = NULL;
     conn->xdnd.offered = 0;
+
+    /* Root PropertyChangeMask (1.1.0-rc1): _NET_CURRENT_DESKTOP
+     * switches arrive as root PropertyNotify events — the popup
+     * watchdog's desktop-change input. Selected AFTER the EWMH probe
+     * above (order on the wire is irrelevant, but this documents
+     * intent: the mask exists for the watchdog, nothing else reads
+     * root properties). WMs that never write the property simply
+     * never wake the path. */
+    XSelectInput(display, conn->root, PropertyChangeMask);
+    conn->popup_watchdog_ms = 0;
+    conn->desktop_changed = 0;
 
     FDK_INFO("connected (screen %d, %dx%d root)", conn->screen,
              DisplayWidth(display, conn->screen),

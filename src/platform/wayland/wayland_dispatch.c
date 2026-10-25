@@ -25,15 +25,37 @@
 /* Marks the connection dead (once) and returns the fatal result the
  * pump/fdk_run contract consumes — the same shape X11's IO-error
  * longjmp produces. Callers pass the failing syscall's errno for the
- * one-time log. */
+ * one-time log.
+ *
+ * 1.1.0-rc1 (the labwc report, 2026-10-26): the one-time line now
+ * carries the PROTOCOL error when libwayland has one — interface,
+ * object id, and code from wl_display_get_protocol_error(), the two
+ * facts a compositor's own log correlates ("zwlr_layer_surface_v1#
+ * 23: error 2: ..."). The compositor's human message rides only the
+ * WAYLAND_DEBUG=1 stream (libwayland does not store it client-side);
+ * the code + interface + id are the complete client-side truth. */
 static int connection_dead(fdk_platform_connection *conn, const char *what,
                            int err) {
     if (!conn->display_dead) {
         conn->display_dead = 1;
-        FDK_ERROR("%s failed (errno=%d) — the Wayland connection is "
-                  "dead (compositor gone?); subsequent pumps return "
-                  "FDK_ERR_NO_DISPLAY without further logging",
-                  what, err);
+        const struct wl_interface *iface = NULL;
+        uint32_t id = 0;
+        uint32_t code = wl_display_get_protocol_error(conn->display,
+                                                      &iface, &id);
+        if (iface != NULL) {
+            FDK_ERROR("%s failed (errno=%d) — Wayland protocol error %u "
+                      "on %s#%u; the connection is dead (compositor "
+                      "gone or protocol violation). Subsequent pumps "
+                      "return FDK_ERR_NO_DISPLAY without further "
+                      "logging",
+                      what, err, (unsigned)code, iface->name,
+                      (unsigned)id);
+        } else {
+            FDK_ERROR("%s failed (errno=%d) — the Wayland connection is "
+                      "dead (compositor gone?); subsequent pumps return "
+                      "FDK_ERR_NO_DISPLAY without further logging",
+                      what, err);
+        }
     }
     return (int)FDK_ERR_NO_DISPLAY;
 }

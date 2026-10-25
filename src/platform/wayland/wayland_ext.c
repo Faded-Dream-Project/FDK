@@ -18,15 +18,16 @@
  * callback BEFORE that, against a live surface.
  *
  * The xdg-shell machinery is deliberately absent here: xdg_surface,
- * xdg_toplevel, xdg_popup all stay NULL, `configured` stays 0, and
- * the ext marker (wayland_platform.h) bypasses every gate that
- * assumes an xdg handshake — the first-configure commit deferral in
- * present(), the show()/hide() commit pair, the toplevel resize and
+ * xdg_toplevel, xdg_popup all stay NULL, and the ext marker
+ * (wayland_platform.h) bypasses every gate that assumes an xdg
+ * handshake — the show()/hide() commit pair, the toplevel resize and
  * size-limit requests. The add-on's own role handshake owns mapping
  * and size: it reports the role's configure through
- * fdk_ext_surface_notify_configure(), and commits happen only when
- * the add-on renders (present) — the layer-shell rule "wait for the
- * initial configure before committing" is the add-on's to obey.
+ * fdk_ext_surface_notify_configure(), which (wayland_ext.c below)
+ * flips `configured` and commits any buffer whose present was
+ * deferred by the pre-configure gate — the layer-shell rule "wait
+ * for the initial configure before committing" is enforced by FDK's
+ * present() for EVERY surface it renders, add-on or not.
  */
 
 #define FDK_LOG_TAG "wayland"
@@ -87,8 +88,9 @@ fdk_result fdk_wayland_ext_surface_adopt(fdk_platform_connection *conn,
                                    * buffer math divides/multiplies) */
     pwindow->last_size.height = 1;
     pwindow->pending_size = pwindow->last_size;
-    pwindow->configured = 0; /* and present() does NOT gate on it for
-                              * ext surfaces — no xdg handshake exists */
+    pwindow->configured = 0; /* the pre-configure gate applies to ext
+                              * surfaces too — flipped by the resized
+                              * op (notify_configure) below */
     pwindow->maximized = 0;
     pwindow->minimized = 0;
     pwindow->fullscreen = 0;
@@ -178,15 +180,44 @@ void *fdk_wayland_native_display(fdk_platform_connection *conn) {
 /* fdk_ext_surface_notify_configure()'s op: the role assigned this
  * size (the add-on already acked its protocol configure); the render
  * slots size themselves from it at the next acquire/present — the
- * same fields xdg_surface_configure updates for normal windows. */
+ * same fields xdg_surface_configure updates for normal windows.
+ *
+ * 1.1.0-rc1 (found live on labwc and sway, 2026-10-26): this op ALSO
+ * flips `configured` — the flag present()'s first-configure gate
+ * reads — and commits the deferred first frame. The add-on contract
+ * (fdk_extend.h, and fdk-shell's layer_configure): notify_configure
+ * runs AFTER the role's configure was acked, so a commit happening
+ * here is post-ack on the wire. The bug it closes: the demo bar
+ * painted immediately after show() (before the role's configure
+ * could possibly arrive — one full round trip away), present()
+ * attached+committed the buffer, and the compositor killed the
+ * connection: "zwlr_layer_surface_v1: error 2: layer_surface has
+ * never been configured". The add-on can no longer get this wrong:
+ * FDK holds the buffer until this op runs. */
 void fdk_wayland_ext_surface_resized(fdk_platform_window *pwindow,
                                      fdk_i32 width, fdk_i32 height) {
     if (pwindow == NULL || width < 1 || height < 1) {
         return;
     }
+    int size_changed =
+        pwindow->last_size.width != width ||
+        pwindow->last_size.height != height;
+    if (size_changed) {
+        /* A real resize: a fractional viewport's source rectangle is
+         * size-derived, so it must re-apply before the next commit
+         * (the same reset xdg_surface_configure performs). */
+        pwindow->scale_applied = 0;
+    }
     pwindow->last_size.width = width;
     pwindow->last_size.height = height;
     pwindow->pending_size = pwindow->last_size;
+    pwindow->configured = 1; /* the gate: the role is configured    */
+
+    /* The same deferred-first-frame commit xdg_surface_configure
+     * performs after ITS ack — the pending buffer an eager add-on
+     * painted (pre-configure) goes out now, post-ack, or an EXPOSE
+     * re-drives the paint when the configure changed the size. */
+    (void)fdk__wayland_commit_deferred_first_frame(pwindow);
 }
 
 /* fdk_ext_surface_native()'s op: the wrapped wl_surface. */

@@ -196,6 +196,17 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             out->type = (xevent->type == KeyPress) ? FDK_EVENT_KEY_DOWN : FDK_EVENT_KEY_UP;
             out->key.scancode = x11_keycode_to_scancode(xevent->xkey.keycode);
             out->key.modifiers = fdk__x11_translate_modifiers(xevent->xkey.state);
+            /* Popup dismissal reason (1.1.0-rc1): the window layer
+             * consumes Escape for popups (its scancode check lives in
+             * window.c, backend-neutral); stamping the reason HERE —
+             * keycode 9 is the universal ESC keycode on Linux X
+             * servers (evdev scancode 1 + the documented +8 offset) —
+             * lets FDK_POPUP_TRACE attribute the release to "escape"
+             * instead of a bare "destroy". */
+            if (pwindow->popup && xevent->type == KeyPress &&
+                xevent->xkey.keycode == 9) {
+                fdk_x11_window_popup_set_release_reason(pwindow, "escape");
+            }
             /* Repeat detection (1.3.0): with XKB detectable
              * auto-repeat (requested at connect), a KeyPress of an
              * already-down keycode IS the repeat — track the 256-bit
@@ -261,12 +272,18 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
              * coordinates — owner_events False reports everything
              * against the grab window) is the universal "click away"
              * gesture: it becomes a close request, never a button
-             * event inside the tree. */
+             * event inside the tree.
+             *
+             * The release reason rides along (1.1.0-rc1): the
+             * dismissal path through window.c destroys the popup, and
+             * FDK_POPUP_TRACE's ungrab line then says WHY. */
             if (pwindow->popup && xevent->type == ButtonPress &&
                 (xevent->xbutton.x < 0 ||
                  xevent->xbutton.y < 0 ||
                  xevent->xbutton.x >= (int)pwindow->last_size.width ||
                  xevent->xbutton.y >= (int)pwindow->last_size.height)) {
+                fdk_x11_window_popup_set_release_reason(pwindow,
+                                                        "outside-click");
                 out->type = FDK_EVENT_WINDOW_CLOSE_REQUEST;
                 return 1;
             }

@@ -596,9 +596,18 @@ void *fdk_wayland_native_display(fdk_platform_connection *conn);
 /* fdk_ext_surface_native()'s op: the wrapped wl_surface. */
 fdk_result fdk_wayland_ext_surface_native(fdk_platform_window *pwindow,
                                           fdk_ext_native_handle *out);
-/* fdk_ext_surface_notify_configure()'s op: buffer-side resize. */
+/* fdk_ext_surface_notify_configure()'s op: buffer-side resize +
+ * configured-gate flip + deferred-first-frame commit (wayland_ext.c).
+ * Runs AFTER the add-on acked its role's configure. */
 void fdk_wayland_ext_surface_resized(fdk_platform_window *pwindow,
                                      fdk_i32 width, fdk_i32 height);
+/* The deferred-first-frame commit shared by xdg_surface_configure()
+ * and fdk_wayland_ext_surface_resized(): commits (post-ack) a buffer
+ * whose present was deferred by the pre-configure gate, or dispatches
+ * EXPOSE to re-drive a paint the configure's size invalidated.
+ * Returns 1 when a frame was committed. Defined in wayland_window.c. */
+int fdk__wayland_commit_deferred_first_frame(
+    fdk_platform_window *pwindow);
 
 /* Shared wl_surface/fractional-scale listeners (defined in
  * wayland_window.c, non-static since 1.1.0): the adoption path

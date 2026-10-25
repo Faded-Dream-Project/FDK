@@ -73,6 +73,17 @@ void fdk_x11_gl_shutdown(struct fdk_x11_gl *gl);
  * when the lane never got far enough to query one. */
 const char *fdk_x11_gl_renderer(const struct fdk_x11_gl *gl);
 
+/* Timer-based self-check retries (1.1.0-rc1): the dispatch tail's
+ * probe tick — fires the scheduled attempt when its deadline passes
+ * (one probe pass, never a blocking wait; see x11_gl.c). */
+void fdk_x11_gl_selfcheck_tick(struct fdk_x11_gl *gl);
+
+/* The pending retry's deadline as "ms from now", for the ops table's
+ * next_wakeup_ms (the pump wakes to run the tick). Returns 0 when no
+ * retry is pending, else 1 with *out_ms_until set (<= 0 = due). */
+int fdk_x11_gl_selfcheck_next_wakeup(struct fdk_x11_gl *gl,
+                                     long long *out_ms_until);
+
 /* Tries to engage the lane for one window: finds an FBConfig matching
  * the window's visual, creates the context, applies the renderer
  * policy, and initializes GL state. Returns NULL (and logs why) when

@@ -244,6 +244,64 @@ static void context_dispatch_event(fdk_platform_window *pwindow,
     fdk_window_dispatch_event(window, event);
 }
 
+/* ---- fatal-dispatch reporting (1.1.0-rc1, the labwc report) -----------
+ *
+ * A dispatch_pending failure means the backend connection is dead —
+ * unrecoverable. Both pump call sites below route through this
+ * helper:
+ *   - the FIRST failure (or a failure with a NEW code) logs one line
+ *     and returns the error immediately (the app reacts fast);
+ *   - identical repeats log NOTHING — the backend's circuit breaker
+ *     already said everything once — and, when the caller gave a
+ *     timeout, the remaining budget is SLEPT OUT before the error
+ *     returns, so an application loop that ignores the fatal return
+ *     paces itself at its own pump cadence instead of busy-spinning
+ *     at 100% CPU (found live: ~2.2M identical log lines in 3s while
+ *     the demo bar spun on a connection labwc had killed).
+ *
+ * fdk_run()'s loop exits on the first fatal return, so the sleep only
+ * ever applies to application-owned pump loops — the documented
+ * "treat a negative pump result as fatal" contract's safety net. */
+static int report_fatal_dispatch(fdk_context *ctx, int code,
+                                 const struct timespec *deadline,
+                                 bool finite) {
+    if (ctx->fatal_dispatch_reported != code) {
+        if (ctx->fatal_dispatch_reported != 0) {
+            FDK_ERROR("backend dispatch_pending failed (%d) — a NEW "
+                      "failure mode after %d",
+                      code, ctx->fatal_dispatch_reported);
+        } else {
+            FDK_ERROR("backend dispatch_pending failed (%d) — the "
+                      "event connection is dead; stopping this pump "
+                      "(the backend logged its one detail line)",
+                      code);
+        }
+        ctx->fatal_dispatch_reported = code;
+        return code;
+    }
+    /* Identical repeat: silent + paced. Nothing can be dispatched on
+     * a dead connection, so "wait up to timeout_ms" degrades to
+     * waiting the remaining budget; the fatal code still returns so a
+     * cooperating loop terminates on its own terms. */
+    if (finite && deadline != NULL) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long long rem_ns =
+            (long long)(deadline->tv_sec - now.tv_sec) * 1000000000LL +
+            (long long)(deadline->tv_nsec - now.tv_nsec);
+        if (rem_ns > 0) {
+            struct timespec ts = {
+                .tv_sec = (time_t)(rem_ns / 1000000000LL),
+                .tv_nsec = (long)(rem_ns % 1000000000LL),
+            };
+            while (nanosleep(&ts, &ts) != 0 && errno_is_eintr()) {
+                /* interrupted: sleep out what remains */
+            }
+        }
+    }
+    return code;
+}
+
 /* ---- backend selection ----
  * FDK_PLATFORM_AUTO: try Wayland first if $WAYLAND_DISPLAY looks set
  * (existence-only check here; the actual connection attempt in
@@ -357,6 +415,7 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->quit_requested = 0;
     ctx->ops = NULL;
     ctx->conn = NULL;
+    ctx->fatal_dispatch_reported = 0;
     ctx->windows = NULL;
     ctx->window_count = 0;
     ctx->window_capacity = 0;
@@ -488,8 +547,12 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
     for (;;) {
         int buffered = ctx->ops->dispatch_pending(ctx->conn);
         if (buffered < 0) {
-            FDK_ERROR("backend dispatch_pending failed (%d)", buffered);
-            return buffered;
+            /* Log-once + paced repeats (see report_fatal_dispatch):
+             * the FIRST failure speaks, identical repeats wait out the
+             * remaining budget so a loop that ignores the fatal return
+             * cannot busy-spin. */
+            return report_fatal_dispatch(ctx, buffered, &deadline,
+                                         finite);
         }
         /* Due timers fire between batches (deadline order). A fired
          * timer counts toward the return value so the canonical
@@ -630,9 +693,10 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
                 /* Backend returned a negative fdk_result cast to int —
                  * unrecoverable connection failure. Propagate it so the
                  * caller (fdk_run() or an application-owned loop) can
-                 * treat the connection as dead. */
-                FDK_ERROR("backend dispatch_pending failed (%d)", dispatched);
-                return dispatched;
+                 * treat the connection as dead — logged once, paced on
+                 * repeats (report_fatal_dispatch). */
+                return report_fatal_dispatch(ctx, dispatched, &deadline,
+                                             finite);
             }
             if (dispatched > 0) {
                 /* 1.2.2: same batch-end flush as the loop head — the

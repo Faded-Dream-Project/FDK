@@ -379,6 +379,19 @@ fdk_result fdk_ext_surface_get_size(const fdk_ext_surface *surface,
  * present carries the new size. X11 add-ons never call this (the
  * server's ConfigureNotify arrives on its own).
  *
+ * THE PRESENT GATE (1.1.0-rc1): on Wayland, presents before this
+ * call are DEFERRED, not committed — no wl_surface.attach reaches
+ * the wire until the role's configure has been reported (and, by
+ * the documented contract above, acked). The first notified
+ * configure commits the deferred first frame post-ack; a configure
+ * that changes the size re-drives the paint via EXPOSE instead.
+ * The layer-shell rule "never commit a buffer before the first
+ * configure" is therefore enforced BY FDK: an add-on that paints
+ * eagerly (immediately after show(), the way every example does)
+ * cannot trip the compositor's protocol error (found live on labwc
+ * and sway: "zwlr_layer_surface_v1: error 2: layer_surface has
+ * never been configured" took down the whole connection).
+ *
  * Can fail with:
  *   FDK_ERR_INVALID_ARGUMENT - surface NULL, or w/h <= 0
  */

@@ -10,7 +10,15 @@
 #include <X11/Xatom.h>
 #include <X11/cursorfont.h> /* XC_* cursor glyph indices (1.1.4) */
 #include <X11/extensions/shape.h> /* XShape input regions (1.3.2) */
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+/* The popup lifecycle trace (FDK_POPUP_TRACE=1) — defined below,
+ * forward-declared so window_create's create line can use it. */
+static void popup_trace(const char *fmt, ...);
 
 /* The creation-time window fill (1.2.1): the theme's window-
  * background token instead of WhitePixel, so the frame a compositor
@@ -211,6 +219,17 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->popup = (popup != 0);
     pwindow->input_transparent = (input_transparent != 0);
     pwindow->grabbed = 0;
+    pwindow->popup_saved_focus = None;
+    pwindow->popup_saved_revert = RevertToPointerRoot;
+    pwindow->popup_grab_ms = 0;
+    pwindow->popup_release_reason[0] = '\0';
+    if (pwindow->popup) {
+        popup_trace("create 0x%lx parent 0x%lx %dx%d at (%d,%d)",
+                    (unsigned long)xwindow,
+                    (unsigned long)(parent != NULL ? parent->xwindow
+                                                   : None),
+                    pw, ph, win_x, win_y);
+    }
     /* GPU present lane (1.4.18): engages lazily at the first
      * framebuffer acquisition (x11_surface.c), not here — window
      * creation must never depend on libGL existing. gl_downgraded is
@@ -326,7 +345,19 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
         pwindow->xic = NULL;
     }
     if (pwindow->popup) {
+        /* "destroy" is the fallback reason only: a dismissal that
+         * already stamped its own (outside-click, escape,
+         * desktop-change, watchdog) keeps it — the trace must answer
+         * WHY, not merely that. */
+        if (pwindow->popup_release_reason[0] == '\0') {
+            fdk_x11_window_popup_set_release_reason(pwindow, "destroy");
+        }
         fdk_x11_window_popup_ungrab(pwindow);
+        popup_trace("destroy 0x%lx (%s)",
+                    (unsigned long)pwindow->xwindow,
+                    pwindow->popup_release_reason[0] != '\0'
+                        ? pwindow->popup_release_reason
+                        : "destroy");
     }
     if (pwindow->modal_grab) {
         /* An active modal grab would outlive the dying grab window —
@@ -354,29 +385,170 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
     fdk_free(pwindow);
 }
 
+/* ---- popup lifecycle trace (FDK_POPUP_TRACE=1, 1.1.0-rc1) --------------
+ *
+ * The dropdown investigation on real desktops needed exactly one
+ * thing the logs never had: WHAT the popup machinery did and WHEN.
+ * FDK_POPUP_TRACE=1 turns the popup lifecycle into explicit INFO
+ * lines — create, map, raise, grab (with the server's verdict),
+ * focus takeover, unmap, destroy, dismissal reason, grab-held
+ * duration, watchdog interventions. Every popup path in this file,
+ * x11_events.c (dismissal), x11_dispatch.c (watchdog, desktop
+ * switch) and window.c (Escape/app dismissal) speaks through here.
+ *
+ * Checked once into a tri-state (-1 unknown, 0 off, 1 on) so the
+ * per-event cost is a cached flag read. */
+static int g_popup_trace_enabled = -1;
+static int popup_trace_on(void) {
+    if (g_popup_trace_enabled < 0) {
+        g_popup_trace_enabled = (getenv("FDK_POPUP_TRACE") != NULL);
+    }
+    return g_popup_trace_enabled;
+}
+/* The format engine (shared by the static convenience wrapper below
+ * and the public cross-file entry point). */
+static void popup_trace_v(const char *fmt, va_list ap) {
+    char line[256];
+    int n = vsnprintf(line, sizeof(line), fmt, ap);
+    if (n <= 0) {
+        return;
+    }
+    fdk_log(FDK_LOG_INFO, "popup", "%s", line);
+}
+/* The shared entry point (x11_platform.h): x11_surface.c's
+ * first-present line and any other cross-file popup diagnostics
+ * route through here. */
+void fdk__x11_popup_trace(const char *fmt, ...) {
+    if (!popup_trace_on()) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    popup_trace_v(fmt, ap);
+    va_end(ap);
+}
+static void popup_trace(const char *fmt, ...) {
+    if (!popup_trace_on()) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    popup_trace_v(fmt, ap);
+    va_end(ap);
+}
+
+/* Monotonic milliseconds — the shared X11-side clock (declared in
+ * x11_platform.h; the watchdog and the GL self-check retry pacing
+ * read the same time base). */
+uint64_t fdk__x11_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u +
+           (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+/* Maps a grab status to its protocol name (trace + diagnostics). */
+static const char *grab_status_name(int status) {
+    switch (status) {
+        case GrabSuccess:     return "success";
+        case AlreadyGrabbed:  return "already-grabbed";
+        case GrabInvalidTime: return "invalid-time";
+        case GrabNotViewable: return "not-viewable";
+        case GrabFrozen:      return "frozen";
+        default:              return "unknown";
+    }
+}
+
+/* Error-swallowing for the focus RESTORE (below): the window that
+ * held focus before a popup opened may be gone by the time the popup
+ * closes — XSetInputFocus on a dead XID is a BadMatch/BadWindow the
+ * default handler would turn into process exit. Zero says "handled". */
+static int swallow_focus_errors(Display *dpy, XErrorEvent *ev) {
+    (void)dpy;
+    (void)ev;
+    return 0;
+}
+
 void fdk_x11_window_popup_grab(fdk_platform_window *pwindow) {
     if (pwindow == NULL || !pwindow->popup || pwindow->grabbed) {
         return;
     }
     Display *dpy = pwindow->conn->display;
-    /* The popup's grab: pointer events ANYWHERE on the screen route
-     * to our connection (owner_events False reports them against
-     * the grab window); clicks outside the popup's bounds become a
-     * dismissal in x11_events.c. The keyboard grab routes keys to
-     * the popup regardless of the WM's focus (menus need arrows). */
+
+    /* THE 1.1.0-rc1 GRAB REWORK (found live on Openbox, 2026-10-26):
+     * an active XGrabKeyboard DEACTIVATES the window manager's
+     * passive grabs for as long as it is held — Openbox's Super+1..4
+     * workspace bindings silently stopped working while a dropdown
+     * was open ("switching stops working for a few seconds, then
+     * recovers" — the recovery being the outside-click dismissal).
+     *
+     * The pointer grab stays: it is what makes outside CLICKS arrive
+     * against the popup (owner_events False) so dismissal works. The
+     * keyboard grab is GONE — popups route keys through FOCUS
+     * instead: XSetInputFocus on the popup (restored on release).
+     * Focus routes arrows/Escape to the popup exactly like a grab
+     * would, while every passive grab on other windows (the WM's
+     * bindings above all) keeps firing — the EWMH-compatible shape
+     * real menus use. Popups that truly need text input still work:
+     * text arrives through focus too. */
     int pr = XGrabPointer(dpy, pwindow->xwindow, False,
                           ButtonPressMask | ButtonReleaseMask |
                               PointerMotionMask,
                           GrabModeAsync, GrabModeAsync, None, None,
                           CurrentTime);
-    int kr = XGrabKeyboard(dpy, pwindow->xwindow, False,
-                           GrabModeAsync, GrabModeAsync, CurrentTime);
-    if (pr != GrabSuccess || kr != GrabSuccess) {
-        FDK_WARN("popup grab: pointer=%d keyboard=%d (popup works, "
-                 "but outside clicks/keys may escape)",
-                 pr == GrabSuccess ? 1 : 0, kr == GrabSuccess ? 1 : 0);
+    if (pr != GrabSuccess) {
+        /* GrabFrozen (another client holds a grab that froze the
+         * pointer) or AlreadyGrabbed can be transient — one sync +
+         * retry rides out a race with the WM's own short-lived
+         * grabs. NotViewable means the window is not on screen;
+         * retrying cannot help. */
+        if (pr == GrabFrozen || pr == AlreadyGrabbed) {
+            XSync(dpy, False);
+            pr = XGrabPointer(dpy, pwindow->xwindow, False,
+                              ButtonPressMask | ButtonReleaseMask |
+                                  PointerMotionMask,
+                              GrabModeAsync, GrabModeAsync, None, None,
+                              CurrentTime);
+        }
     }
+    if (pr != GrabSuccess) {
+        FDK_WARN("popup pointer grab refused (%s) — the popup works, "
+                 "but outside clicks may escape",
+                 grab_status_name(pr));
+        popup_trace("grab 0x%lx REFUSED (%s)",
+                    (unsigned long)pwindow->xwindow,
+                    grab_status_name(pr));
+        pwindow->grabbed = 1; /* the release path stays symmetric */
+        return;
+    }
+
+    /* Keyboard ROUTING: remember who had focus, hand it to the
+     * popup. RevertToPointerRoot (not RevertToParent): if we die
+     * without restoring, the server falls back to pointer-following
+     * instead of a dead window. */
+    Window prev_focus = None;
+    int prev_revert = RevertToPointerRoot;
+    XGetInputFocus(dpy, &prev_focus, &prev_revert);
+    pwindow->popup_saved_focus = prev_focus;
+    pwindow->popup_saved_revert =
+        (prev_revert == RevertToParent || prev_revert == RevertToNone)
+            ? RevertToPointerRoot
+            : prev_revert;
+    /* XSetInputFocus needs a VIEWABLE window (BadMatch otherwise,
+     * and Xlib's default error path is exit). The grab above is a
+     * roundtrip — the map request that preceded it (window_show's
+     * XMapWindow) is already processed, so the popup is viewable
+     * when this request executes. */
+    XSetInputFocus(dpy, pwindow->xwindow, RevertToPointerRoot,
+                   CurrentTime);
+    XFlush(dpy);
+
     pwindow->grabbed = 1;
+    pwindow->popup_grab_ms = fdk__x11_now_ms();
+    popup_trace("grab 0x%lx pointer=success focus=0x%lx (was 0x%lx)",
+                (unsigned long)pwindow->xwindow,
+                (unsigned long)pwindow->xwindow,
+                (unsigned long)prev_focus);
 }
 
 void fdk_x11_window_popup_ungrab(fdk_platform_window *pwindow) {
@@ -384,34 +556,80 @@ void fdk_x11_window_popup_ungrab(fdk_platform_window *pwindow) {
         return;
     }
     Display *dpy = pwindow->conn->display;
-    /* Release both grabs unconditionally — a successful grab of
-     * either kind must be undone even if the other failed. */
-    XUngrabKeyboard(dpy, CurrentTime);
+    /* Release the pointer grab; restore the focus the popup took
+     * (best effort — the previous holder may be gone, and a failed
+     * restore must not kill the process: swallow the async error
+     * while a sync barrier flushes it into OUR handler). */
     XUngrabPointer(dpy, CurrentTime);
+    {
+        int (*prev_handler)(Display *, XErrorEvent *) =
+            XSetErrorHandler(swallow_focus_errors);
+        Window want = pwindow->popup_saved_focus;
+        int revert = pwindow->popup_saved_revert;
+        if (want != None && want != pwindow->xwindow) {
+            XSetInputFocus(dpy, want, revert, CurrentTime);
+        } else {
+            /* Nobody focusable preceded us (a dock-owned popup):
+             * release to pointer-following rather than parking focus
+             * on a closing popup. */
+            XSetInputFocus(dpy, PointerRoot, RevertToPointerRoot,
+                           CurrentTime);
+        }
+        XSync(dpy, False); /* barrier: errors land in the swallower */
+        XSetErrorHandler(prev_handler);
+    }
     XFlush(dpy);
     pwindow->grabbed = 0;
+    if (pwindow->popup_grab_ms != 0) {
+        popup_trace("ungrab 0x%lx (%s) — held %lld ms",
+                    (unsigned long)pwindow->xwindow,
+                    pwindow->popup_release_reason[0] != '\0'
+                        ? pwindow->popup_release_reason
+                        : "release",
+                    (long long)(fdk__x11_now_ms() -
+                                pwindow->popup_grab_ms));
+        pwindow->popup_grab_ms = 0;
+    } else {
+        popup_trace("ungrab 0x%lx (%s)",
+                    (unsigned long)pwindow->xwindow,
+                    pwindow->popup_release_reason[0] != '\0'
+                        ? pwindow->popup_release_reason
+                        : "release");
+    }
+}
+
+void fdk_x11_window_popup_set_release_reason(
+    fdk_platform_window *pwindow, const char *reason) {
+    if (pwindow == NULL || reason == NULL) {
+        return;
+    }
+    snprintf(pwindow->popup_release_reason,
+             sizeof(pwindow->popup_release_reason), "%s", reason);
 }
 
 void fdk_x11_window_popup_regrab(fdk_platform_window *pwindow) {
     if (pwindow == NULL || !pwindow->popup || !pwindow->grabbed) {
         return;
     }
-    /* Same grabs as popup_grab, re-issued on THIS window: a nested
+    /* Same grab as popup_grab, re-issued on THIS window: a nested
      * popup's grab replaced ours, and closing the child did not give
      * it back (grabs do not stack) — the menu machinery calls this
-     * when a submenu closes but the parent menu stays open. */
+     * when a submenu closes but the parent menu stays open.
+     * Focus-side nesting is symmetrical: the child's ungrab restored
+     * focus to US (we were its saved focus), so only the pointer
+     * grab needs re-arming here. */
     Display *dpy = pwindow->conn->display;
     int pr = XGrabPointer(dpy, pwindow->xwindow, False,
                           ButtonPressMask | ButtonReleaseMask |
                               PointerMotionMask,
                           GrabModeAsync, GrabModeAsync, None, None,
                           CurrentTime);
-    int kr = XGrabKeyboard(dpy, pwindow->xwindow, False,
-                           GrabModeAsync, GrabModeAsync, CurrentTime);
-    if (pr != GrabSuccess || kr != GrabSuccess) {
-        FDK_WARN("popup regrab: pointer=%d keyboard=%d",
-                 pr == GrabSuccess ? 1 : 0, kr == GrabSuccess ? 1 : 0);
+    if (pr != GrabSuccess) {
+        FDK_WARN("popup regrab refused (%s)", grab_status_name(pr));
     }
+    popup_trace("regrab 0x%lx pointer=%s",
+                (unsigned long)pwindow->xwindow,
+                grab_status_name(pr));
 }
 
 fdk_result fdk_x11_window_set_modal(fdk_platform_window *pwindow,
@@ -464,7 +682,19 @@ void fdk_x11_window_show(fdk_platform_window *pwindow) {
          * maps. A keyboard grab would also steal the app's keys for
          * as long as the hint is up. Menus keep the grab: they ARE
          * an input context. */
+        popup_trace("map 0x%lx %dx%d",
+                    (unsigned long)pwindow->xwindow,
+                    pwindow->last_size.width, pwindow->last_size.height);
         XMapWindow(pwindow->conn->display, pwindow->xwindow);
+        /* RAISE on map (1.1.0-rc1, the invisible-dropdown suspect):
+         * mapping does NOT restack — an override-redirect popup
+         * created under a WM-managed window (a terminal over the
+         * bar's area, or the bar itself re-raised by the WM's ABOVE
+         * layer management) stays UNDER it and the dropdown is
+         * painted but never seen. XRaiseWindow puts the popup above
+         * every sibling of its root parent — exactly what a menu
+         * is for. */
+        XRaiseWindow(pwindow->conn->display, pwindow->xwindow);
         XFlush(pwindow->conn->display);
         if (!pwindow->input_transparent) {
             /* Map FIRST, then grab: grabbing before the window
@@ -479,7 +709,9 @@ void fdk_x11_window_show(fdk_platform_window *pwindow) {
 
 void fdk_x11_window_hide(fdk_platform_window *pwindow) {
     if (pwindow->popup) {
+        fdk_x11_window_popup_set_release_reason(pwindow, "unmap");
         fdk_x11_window_popup_ungrab(pwindow);
+        popup_trace("unmap 0x%lx", (unsigned long)pwindow->xwindow);
     }
     XUnmapWindow(pwindow->conn->display, pwindow->xwindow);
     XFlush(pwindow->conn->display);

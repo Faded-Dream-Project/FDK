@@ -439,6 +439,69 @@ static void put_region(fdk_platform_window *pwindow, XImage *img,
     }
 }
 
+/* THE lane downgrade (1.4.18, shared since 1.1.0-rc1): a lane
+ * verdict against this window — a failed present OR the self-check
+ * tick's REAL-failure decision (which lands between presents) —
+ * salvages the current frame and re-presents it through the classic
+ * path, full damage, permanently for this window. The staging buffer
+ * still holds exactly (last-presented + the drawing since), so the
+ * window never shows a broken or stale frame because of the downgrade
+ * itself.
+ *
+ * The tick calls this with no present in flight; the present path
+ * calls it on its own -1 return — same contract, one implementation. */
+fdk_result fdk__x11_surface_downgrade_from_lane(
+    fdk_platform_window *pwindow) {
+    if (pwindow == NULL || pwindow->gl_win == NULL) {
+        return FDK_OK;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    fdk_i32 gw = pwindow->render_size.width;
+    fdk_i32 gh = pwindow->render_size.height;
+
+    FDK_WARN("GPU present lane failed — reverting this window to "
+             "the CPU present path (permanent)");
+    fdk_result slot_rc = ensure_slot_pair(conn, pwindow, gw, gh);
+    if (fdk_ok(slot_rc)) {
+        XImage *dst = pwindow->render_slots[pwindow->render_back].image;
+        /* The accessor with the current size returns the EXISTING
+         * staging buffer (no reallocation happens on a size match) —
+         * the opaque-lane-safe way to reach this frame's pixels. */
+        const fdk_u32 *src = fdk_x11_gl_window_staging(pwindow->gl_win,
+                                                       gw, gh);
+        if (dst != NULL && src != NULL &&
+            dst->width == gw && dst->height == gh) {
+            size_t row_bytes = (size_t)gw * sizeof(fdk_u32);
+            for (int y = 0; y < gh; y++) {
+                memcpy(dst->data + (size_t)y * (size_t)dst->bytes_per_line,
+                       src + (size_t)y * (size_t)gw, row_bytes);
+            }
+        }
+    }
+    fdk_x11_gl_window_destroy(conn->gl, pwindow->gl_win);
+    pwindow->gl_win = NULL;
+    pwindow->gl_downgraded = 1;
+
+    if (!fdk_ok(slot_rc)) {
+        /* Could not even build the classic slots (visual check or
+         * OOM — both logged inside). The surface layer retains the
+         * damage, so the next present retries on the classic path
+         * once acquisition has rebuilt the slots. */
+        return slot_rc;
+    }
+
+    /* The salvaged frame goes out through the classic path NOW, full
+     * damage — by recursing into the (gl_win == NULL) present, which
+     * owns the GC creation, clamping, puts, completion bookkeeping
+     * and slot sync. */
+    static const fdk_platform_damage fallback_full = {
+        {{0, 0, 0, 0}}, /* rects (unused) */
+        0,              /* count */
+        1               /* full */
+    };
+    return fdk_x11_window_present(pwindow, &fallback_full);
+}
+
 fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                  const fdk_platform_damage *damage) {
     if (pwindow == NULL || damage == NULL) {
@@ -467,60 +530,26 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
      *
      * Fast path: upload the damaged rects into the window's GL
      * texture, composite the fullscreen quad, swap. A nonzero return
-     * is the lane's PERMANENT downgrade verdict — and the frame must
-     * not be lost on the way down: the staging buffer still holds
-     * exactly (last-presented + this frame's drawing), so it is
-     * copied into freshly created classic slots and the whole image
-     * goes out through the SHM/copy path below, full damage. The
+     * is the lane's PERMANENT downgrade verdict — handled by the
+     * shared downgrade helper (salvage + classic re-present; the
      * window never shows a broken or stale frame because of the
-     * downgrade itself. */
+     * downgrade itself). */
     if (pwindow->gl_win != NULL) {
         fdk_i32 gw = pwindow->render_size.width;
         fdk_i32 gh = pwindow->render_size.height;
         if (fdk_x11_gl_window_present(pwindow->gl_win, damage, gw, gh) ==
             0) {
+            if (!pwindow->presented_ever && pwindow->popup) {
+                fdk__x11_popup_trace("first-present 0x%lx lane=gl "
+                                     "%dx%d",
+                                     (unsigned long)pwindow->xwindow,
+                                     gw, gh);
+            }
             pwindow->presented_ever = 1;
             return FDK_OK;
         }
 
-        FDK_WARN("GPU present lane failed — reverting this window to "
-                 "the CPU present path (permanent)");
-        fdk_result slot_rc = ensure_slot_pair(conn, pwindow, gw, gh);
-        if (fdk_ok(slot_rc)) {
-            XImage *dst = pwindow->render_slots[pwindow->render_back].image;
-            /* The accessor with the current size returns the EXISTING
-             * staging buffer (no reallocation happens on a size match) —
-             * the opaque-lane-safe way to reach this frame's pixels. */
-            const fdk_u32 *src =
-                fdk_x11_gl_window_staging(pwindow->gl_win, gw, gh);
-            if (dst != NULL && src != NULL &&
-                dst->width == gw && dst->height == gh) {
-                size_t row_bytes = (size_t)gw * sizeof(fdk_u32);
-                for (int y = 0; y < gh; y++) {
-                    memcpy(dst->data + (size_t)y * (size_t)dst->bytes_per_line,
-                           src + (size_t)y * (size_t)gw, row_bytes);
-                }
-            }
-        }
-        fdk_x11_gl_window_destroy(conn->gl, pwindow->gl_win);
-        pwindow->gl_win = NULL;
-        pwindow->gl_downgraded = 1;
-
-        if (!fdk_ok(slot_rc)) {
-            /* Could not even build the classic slots (visual check or
-             * OOM — both logged inside). The surface layer retains the
-             * damage, so the next present retries on the classic path
-             * once acquisition has rebuilt the slots. */
-            return slot_rc;
-        }
-
-        static const fdk_platform_damage fallback_full = {
-            {{0, 0, 0, 0}}, /* rects (unused) */
-            0,              /* count */
-            1               /* full */
-        };
-        damage = &fallback_full;
-        /* Fall through: the classic path presents the salvaged frame. */
+        return fdk__x11_surface_downgrade_from_lane(pwindow);
     }
 
     if (pwindow->render_gc == NULL) {
@@ -601,6 +630,12 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
     /* The pixels are on their way to the server — for the
      * window_ever_presented diagnostic op this counts as presented
      * (X11 has no map-time handshake that could defer it). */
+    if (!pwindow->presented_ever && pwindow->popup) {
+        fdk__x11_popup_trace("first-present 0x%lx lane=cpu %dx%d",
+                             (unsigned long)pwindow->xwindow,
+                             pwindow->render_size.width,
+                             pwindow->render_size.height);
+    }
     pwindow->presented_ever = 1;
 
     /* Swap: the presented slot becomes front (its contents are now

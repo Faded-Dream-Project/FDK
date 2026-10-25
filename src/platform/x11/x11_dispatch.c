@@ -4,6 +4,124 @@
 
 #include "core/log_internal.h"
 
+#include <string.h>
+
+/* ---- the popup-grab watchdog + desktop-switch release (1.1.0-rc1) ---
+ *
+ * The Openbox report's safety nets: a popup's POINTER grab must never
+ * outlive the popup's own relevance.
+ *
+ *   DESKTOP CHANGE: the root's _NET_CURRENT_DESKTOP PropertyNotify
+ *   latches conn->desktop_changed (handled where root events arrive
+ *   in dispatch_pending, below). The tick responds by dismissing
+ *   every grabbed popup — an open dropdown belongs to the desktop it
+ *   opened on, and a grab that survives the switch is exactly the
+ *   "workspace switching stopped working" report.
+ *
+ *   NOT-VIEWABLE WATCHDOG: a popup that unmapped (WM action, our own
+ *   hide, an X error) without releasing its grab would hold the
+ *   pointer hostage forever. While any window holds a popup grab,
+ *   every 500 ms each grabbed window's map_state is checked (one
+ *   XGetWindowAttributes round trip per grabbed window per tick —
+ *   zero cost when no popup is open); not viewable → release + one
+ *   warning naming the duration.
+ *
+ * The tick runs at the END of dispatch_pending: the pump calls it at
+ * least once per loop pass, so 500 ms elapses under any sane poll
+ * cadence (and the platform-deadline cap in context.c keeps
+ * indefinite fdk_run loops honest). */
+#define POPUP_WATCHDOG_INTERVAL_MS 500
+
+void fdk_x11_popup_watchdog_tick(fdk_platform_connection *conn) {
+    if (conn == NULL || conn->display_dead ||
+        conn->window_count == 0) {
+        return;
+    }
+    uint64_t now = fdk__x11_now_ms();
+    int any_grab = 0;
+    for (size_t i = 0; i < conn->window_count; i++) {
+        if (conn->windows[i]->grabbed) {
+            any_grab = 1;
+            break;
+        }
+    }
+    if (!any_grab && !conn->desktop_changed) {
+        return; /* the common case: nothing held, nothing owed */
+    }
+    if (!conn->desktop_changed &&
+        now - conn->popup_watchdog_ms < POPUP_WATCHDOG_INTERVAL_MS) {
+        return; /* paced */
+    }
+    conn->popup_watchdog_ms = now;
+
+    /* Iterate a SNAPSHOT index walk: dismissals destroy windows, and
+     * destroy mutates conn->windows (the registry unlinks). Walking
+     * indices while entries vanish would skip windows — so the
+     * desktop-change pass re-scans from the head until no grabbed
+     * popup remains (bounded: each iteration removes at least one). */
+    if (conn->desktop_changed) {
+        conn->desktop_changed = 0;
+        int dismissed = 0;
+        for (;;) {
+            fdk_platform_window *victim = NULL;
+            for (size_t i = 0; i < conn->window_count; i++) {
+                if (conn->windows[i]->grabbed &&
+                    conn->windows[i]->popup) {
+                    victim = conn->windows[i];
+                    break;
+                }
+            }
+            if (victim == NULL) {
+                break;
+            }
+            fdk_x11_window_popup_set_release_reason(victim,
+                                                    "desktop-change");
+            FDK_WARN("desktop switch with a popup open — dismissing "
+                     "it and releasing its grab");
+            fdk_event_data event;
+            memset(&event, 0, sizeof(event));
+            event.type = FDK_EVENT_WINDOW_CLOSE_REQUEST;
+            conn->dispatch(victim, &event,
+                           conn->dispatch_user_data);
+            dismissed++;
+        }
+        if (dismissed == 0) {
+            /* A grabbed NON-popup (modal dialog) rode across the
+             * switch: modality survives desktops by design — nothing
+             * to do, but say so under trace. */
+            FDK_DEBUG("desktop switch with no popup grabs outstanding");
+        }
+        return;
+    }
+
+    /* The viewability sweep (only when a grab is held). */
+    for (size_t i = 0; i < conn->window_count; i++) {
+        fdk_platform_window *pwindow = conn->windows[i];
+        if (!pwindow->grabbed || !pwindow->popup) {
+            continue;
+        }
+        XWindowAttributes wa;
+        if (XGetWindowAttributes(conn->display, pwindow->xwindow,
+                                 &wa) == 0) {
+            continue; /* window dying: destroy will release */
+        }
+        if (wa.map_state != IsViewable) {
+            uint64_t held =
+                pwindow->popup_grab_ms != 0
+                    ? (uint64_t)(now - pwindow->popup_grab_ms)
+                    : 0;
+            FDK_WARN("popup 0x%lx is not viewable but still holds "
+                     "its grab (held %llu ms) — the watchdog is "
+                     "releasing it",
+                     (unsigned long)pwindow->xwindow,
+                     (unsigned long long)held);
+            fdk_x11_window_popup_set_release_reason(
+                pwindow, "watchdog-not-viewable");
+            fdk_x11_window_popup_ungrab(pwindow);
+        }
+    }
+}
+
 int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
     if (conn == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
@@ -39,6 +157,19 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
          * (and dead-key sequences) entirely. Filtered events produce
          * no FDK event. */
         if (conn->xim != NULL && XFilterEvent(&xevent, None)) {
+            continue;
+        }
+
+        /* Root PropertyNotify (1.1.0-rc1): the popup watchdog's
+         * desktop-change input. _NET_CURRENT_DESKTOP changes arrive
+         * on the ROOT window (PropertyChangeMask selected at
+         * connect); handled BEFORE the window-table lookup — the
+         * root is deliberately not a registered window. Other root
+         * property churn (the WM's own bookkeeping) is ignored. */
+        if (xevent.type == PropertyNotify &&
+            xevent.xproperty.window == conn->root &&
+            xevent.xproperty.atom == conn->net_current_desktop) {
+            conn->desktop_changed = 1;
             continue;
         }
 
@@ -136,6 +267,19 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
     /* The XDND source's Finished watchdog (retires a target that
      * died mid-handshake after the drop was sent). */
     fdk_x11_dnd_source_tick(conn);
+
+    /* The popup-grab watchdog + desktop-switch release (1.1.0-rc1):
+     * the last thing this dispatch does — everything above may have
+     * opened or closed popups, and the tick's job is exactly to
+     * observe the state the batch left behind. */
+    fdk_x11_popup_watchdog_tick(conn);
+
+    /* The GL lane's timer-based self-check retry (1.1.0-rc1, B.2):
+     * fires the scheduled probe attempt here instead of the OLD
+     * inline XSync+nanosleep budget, so a present never blocks the
+     * loop (a popup may be holding its grab). The pump wakes for the
+     * deadline through fdk_x11_next_wakeup_ms. */
+    fdk_x11_gl_selfcheck_tick(conn->gl);
 
     fdk__x11_io_armed = 0;
     return processed;

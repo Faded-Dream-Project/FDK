@@ -139,6 +139,64 @@ static const struct zxdg_toplevel_decoration_v1_listener
 static fdk_result commit_render_pending(fdk_platform_window *pwindow,
                                         const fdk_platform_damage *damage);
 
+/* THE deferred-first-frame commit, shared by xdg_surface_configure()
+ * and the extension path (wayland_ext.c's resized op — the add-on's
+ * role configure). Mirrors the 1.1.0 fix: an application that painted
+ * BEFORE the first configure had its first present deferred (the
+ * protocol forbids committing content before the ack) with the damage
+ * already consumed — and every later present was a no-op against a
+ * clean tree, so the pending buffer was never committed and the
+ * surface never mapped. The commit the deferred present waits for
+ * happens HERE, after the ack:
+ *   - pending buffer still at the configured size -> commit as-is
+ *     (full damage; the painted content is valid)
+ *   - configure proposed a different size -> drop the stale pending
+ *     at the next acquisition; dispatch EXPOSE so the tree
+ *     re-invalidates and the app's next paint redraws and presents at
+ *     the real size (same re-drive the X11 backend's ExposureMask
+ *     provides on first map).
+ * Returns 1 when the pending frame was committed, 0 otherwise. */
+int fdk__wayland_commit_deferred_first_frame(
+    fdk_platform_window *pwindow) {
+    if (pwindow == NULL ||
+        pwindow->render_pending == NULL || pwindow->rendered_ever) {
+        return 0;
+    }
+    fdk_size want = {
+        .width = physical_dim(pwindow->last_size.width < 1
+                                  ? 1
+                                  : pwindow->last_size.width,
+                              pwindow->scale_x120),
+        .height = physical_dim(pwindow->last_size.height < 1
+                                   ? 1
+                                   : pwindow->last_size.height,
+                               pwindow->scale_x120),
+    };
+    fdk_size have = { .width = 0, .height = 0 };
+    for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+        if (pwindow->render_slots[i].buffer == pwindow->render_pending) {
+            have = pwindow->render_slots[i].size;
+            break;
+        }
+    }
+    if (have.width == want.width && have.height == want.height) {
+        fdk_platform_damage full;
+        memset(&full, 0, sizeof(full));
+        full.full = 1;
+        (void)commit_render_pending(pwindow, &full);
+        FDK_DEBUG("deferred first frame committed at configure");
+        return 1;
+    }
+    fdk_event_data event;
+    memset(&event, 0, sizeof(event));
+    event.type = FDK_EVENT_WINDOW_EXPOSE;
+    pwindow->conn->dispatch(pwindow, &event,
+                            pwindow->conn->dispatch_user_data);
+    FDK_DEBUG("configure resized past the deferred frame; "
+              "EXPOSE re-drives the first paint");
+    return 0;
+}
+
 static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
                                    uint32_t serial) {
     fdk_platform_window *pwindow = data;
@@ -203,50 +261,11 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
      * damage empty, every later present was a no-op: the pending
      * buffer was NEVER committed and the window never mapped — the
      * app sat invisible forever. The commit the deferred present was
-     * waiting for happens HERE, now that ack_configure has been sent:
-     *
-     *   - pending buffer still at the configured size -> commit it
-     *     as-is (full damage; the content the app painted is valid)
-     *   - configure proposed a different size -> the stale pending
-     *     is dropped at the next acquisition; dispatch EXPOSE so the
-     *     tree re-invalidates and the app's next paint redraws and
-     *     presents at the real size (same re-drive the X11 backend's
-     *     ExposureMask provides on first map) */
-    if (pwindow->render_pending != NULL && !pwindow->rendered_ever) {
-        fdk_size want = {
-            .width = physical_dim(pwindow->last_size.width < 1
-                                      ? 1
-                                      : pwindow->last_size.width,
-                                  pwindow->scale_x120),
-            .height = physical_dim(pwindow->last_size.height < 1
-                                       ? 1
-                                       : pwindow->last_size.height,
-                                   pwindow->scale_x120),
-        };
-        fdk_size have = { .width = 0, .height = 0 };
-        for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
-            if (pwindow->render_slots[i].buffer ==
-                pwindow->render_pending) {
-                have = pwindow->render_slots[i].size;
-                break;
-            }
-        }
-        if (have.width == want.width && have.height == want.height) {
-            fdk_platform_damage full;
-            memset(&full, 0, sizeof(full));
-            full.full = 1;
-            (void)commit_render_pending(pwindow, &full);
-            FDK_DEBUG("deferred first frame committed at configure");
-        } else {
-            fdk_event_data event;
-            memset(&event, 0, sizeof(event));
-            event.type = FDK_EVENT_WINDOW_EXPOSE;
-            pwindow->conn->dispatch(pwindow, &event,
-                                    pwindow->conn->dispatch_user_data);
-            FDK_DEBUG("configure resized past the deferred frame; "
-                      "EXPOSE re-drives the first paint");
-        }
-    }
+     * waiting for happens HERE, now that ack_configure has been sent
+     * (see fdk__wayland_commit_deferred_first_frame — shared with
+     * the extension path, which hits the identical bug through the
+     * add-on's role configure). */
+    (void)fdk__wayland_commit_deferred_first_frame(pwindow);
 
     /* The very first configure is required before the first
      * wl_surface_commit() (see fdk_wayland_window_show()) — but only
@@ -1285,7 +1304,7 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
         return FDK_OK;
     }
 
-    if (!pwindow->configured && !pwindow->ext) {
+    if (!pwindow->configured) {
         /* xdg-shell forbids the first real commit before
          * ack_configure; the buffer stays pending and is committed
          * by xdg_surface_configure() the moment the first configure
@@ -1294,12 +1313,21 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
          * waiting for "the application's next present" would wait
          * forever: with the tree clean it would be a no-op).
          *
-         * EXTENSION surfaces (1.1.0) bypass the gate: they carry no
-         * xdg role, so no xdg handshake defers anything — their
-         * commit discipline belongs to the add-on's own role
-         * protocol (layer-shell's "wait for the initial configure"
-         * is the add-on's to obey before it ever renders). */
-        FDK_DEBUG("present deferred until first xdg configure");
+         * EXTENSION surfaces (1.1.0) ride the SAME gate (1.1.0-rc1
+         * fix, found live on labwc/sway 2026-10-26: "zwlr_layer_
+         * surface_v1: error 2: layer_surface has never been
+         * configured" killed the bar the moment it painted before
+         * its role's first configure): their configured flag flips
+         * in wayland_ext.c's resized op — the add-on reports its
+         * role's configure through fdk_ext_surface_notify_configure()
+         * AFTER acking it, and that op commits the deferred first
+         * frame exactly like xdg_surface_configure does here. The
+         * old design left the commit discipline to each add-on; one
+         * that painted eagerly (the demo bar, right after show())
+         * attached a buffer pre-configure and took down the whole
+         * connection. The gate is the library's to own: no surface
+         * FDK renders commits content before its role is configured. */
+        FDK_DEBUG("present deferred until first configure (xdg or role)");
         return FDK_OK;
     }
 

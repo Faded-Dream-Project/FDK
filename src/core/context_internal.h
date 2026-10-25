@@ -39,6 +39,19 @@ struct fdk_context {
     const fdk_platform_ops *ops;
     fdk_platform_connection *conn;
 
+    /* Fatal-dispatch reporting (1.1.0-rc1, the labwc report
+     * 2026-10-26): the FIRST dispatch_pending failure a pump/fdk_run
+     * sees is logged ONCE here (the backend logs its own one-time
+     * detail line — Wayland's connection_dead carries the protocol
+     * error's interface/id/code); identical repeats log NOTHING and,
+     * when the caller gave a timeout, the pump waits the remaining
+     * budget before returning the error so an application loop that
+     * ignores the fatal return cannot busy-spin the CPU (the report's
+     * "backend dispatch_pending failed (-101)" line printed ~2.2
+     * million times in three seconds). A DIFFERENT fatal code resets
+     * the dedupe (a new failure mode gets its one line). */
+    int fatal_dispatch_reported; /* 0 = none yet; else the code      */
+
     /* Top-level windows created against this context. Maintained by
      * fdk_context_register_window() / _unregister_window() (called from
      * fdk_window_create() / fdk_window_destroy() in src/window/window.c).

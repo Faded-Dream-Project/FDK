@@ -18,6 +18,7 @@
 #include <sys/shm.h>
 #include <X11/extensions/XShm.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* 1.4.5: HiDPI detection (x11_connection.c) + the scale query op
  * (x11_window.c, registered in the ops table). */
@@ -76,8 +77,24 @@ struct fdk_platform_connection {
     Atom net_wm_moveresize;
     Atom wm_state;         /* ICCCM WM_STATE (iconic/normal tracking) */
     Atom wm_change_state;  /* ICCCM iconify request message type      */
+    Atom net_current_desktop; /* root PropertyNotify watched by the
+                               * popup watchdog (1.1.0-rc1) — desktop
+                               * switches dismiss open popups + their
+                               * grabs                              */
     int ewmh_wm;           /* nonzero: an EWMH WM is running          */
     int ewmh_state_ok;     /* nonzero: it advertises _NET_WM_STATE    */
+    /* Popup-grab watchdog pacing (1.1.0-rc1): the last watchdog
+     * tick (monotonic ms) — the check runs at most every 500 ms
+     * while any popup holds a grab, and only then (the common case,
+     * no popup open, pays nothing). Set at connect; read/written by
+     * x11_dispatch.c's tail. */
+    uint64_t popup_watchdog_ms;
+    /* Desktop-switch latch (1.1.0-rc1): set by the root
+     * PropertyNotify handler in dispatch_pending when
+     * _NET_CURRENT_DESKTOP changes; consumed by the watchdog tick,
+     * which dismisses every grabbed popup (they belong to the world
+     * they opened in). */
+    int desktop_changed;
     /* Display death (1.3.0): set by the XIO error handler the moment
      * the connection to the X server is lost. Every teardown path
      * checks it and skips server requests (they cannot succeed and —
@@ -286,9 +303,9 @@ struct fdk_platform_window {
     XIC xic;
 
     /* Phase 9 popup state: override-redirect windows that grab the
-     * pointer (and keyboard) while shown; a click outside their
-     * bounds dismisses them (translated to a close request in
-     * x11_events.c, never delivered as a button event). */
+     * pointer while shown; a click outside their bounds dismisses
+     * them (translated to a close request in x11_events.c, never
+     * delivered as a button event). */
     int popup;
     /* Input-transparent popup (1.3.2, tooltips): set at CREATE from
      * fdk_window_options.input_transparent — empty XShape input
@@ -297,6 +314,27 @@ struct fdk_platform_window {
      * steals keyboard focus from the app that owns it. */
     int input_transparent;
     int grabbed;
+
+    /* --- Popup grab accounting (1.1.0-rc1, the Openbox report) ---
+     *
+     * The grab is POINTER-ONLY now (an active XGrabKeyboard
+     * deactivates the WM's passive grabs — Super+number workspace
+     * switching died while a dropdown was open); keys route through
+     * XSetInputFocus instead, and these fields carry what the
+     * release path owes back:
+     *   popup_saved_focus/_revert — who held focus before the popup
+     *     took it (restored best-effort on ungrab; the holder may
+     *     have died — errors are swallowed there);
+     *   popup_grab_ms — when the grab was taken (the trace line and
+     *     the watchdog log the HELD duration);
+     *   popup_release_reason — set by every dismissal path before
+     *     the release ("outside-click", "escape", "destroy",
+     *     "unmap", "desktop-change", "watchdog-not-viewable") so
+     *     FDK_POPUP_TRACE answers WHY a popup went away. */
+    Window popup_saved_focus;
+    int popup_saved_revert;
+    uint64_t popup_grab_ms;
+    char popup_release_reason[32];
 
     /* 1.2.0 DnD: the formats this window accepts as a drop target
      * (mirror of the fdk_window's public mask, kept live by the
@@ -501,15 +539,43 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow);
 void fdk_x11_surface_shm_completion(fdk_platform_window *pwindow,
                                     unsigned long shmseg);
 
+/* THE lane downgrade (x11_surface.c, shared 1.1.0-rc1): salvages the
+ * current staging frame into fresh classic slots and re-presents it
+ * full-damage through the SHM/copy path, permanently marking the
+ * window CPU. Used by the present path's own -1 verdict AND by the
+ * GL self-check tick's REAL-failure decision (which lands between
+ * presents). No-op when the window is not on the lane. */
+fdk_result fdk__x11_surface_downgrade_from_lane(
+    fdk_platform_window *pwindow);
+
 /* Popup grabs (x11_window.c): called from window_show/hide when the
  * window is a popup. Idempotent; failures log and continue (the
- * popup still works, it just doesn't grab). */
+ * popup still works, it just doesn't grab). POINTER-ONLY since
+ * 1.1.0-rc1 (the Openbox passive-grab finding) — keys route through
+ * focus, saved + restored here. */
 void fdk_x11_window_popup_grab(fdk_platform_window *pwindow);
 void fdk_x11_window_popup_ungrab(fdk_platform_window *pwindow);
 
 /* Re-asserts a popup's grab after a nested popup's grab replaced it
  * (menu submenu dismissal — grabs do not stack). */
 void fdk_x11_window_popup_regrab(fdk_platform_window *pwindow);
+
+/* Stamps WHY the next release happens (outside-click / escape /
+ * destroy / unmap / desktop-change / watchdog-not-viewable) — the
+ * FDK_POPUP_TRACE answer to "why did my popup go away". Call BEFORE
+ * the ungrab/destroy so the trace line carries it. */
+void fdk_x11_window_popup_set_release_reason(
+    fdk_platform_window *pwindow, const char *reason);
+
+/* The popup lifecycle trace line (FDK_POPUP_TRACE=1; x11_window.c):
+ * one INFO line tagged "popup". Safe to call from any X11 file —
+ * the env check is cached; with tracing off it is a flag test. */
+void fdk__x11_popup_trace(const char *fmt, ...);
+
+/* Monotonic milliseconds (CLOCK_MONOTONIC) — the shared X11-side
+ * clock for grab-held accounting, the popup watchdog, and the GL
+ * self-check retry pacing. */
+uint64_t fdk__x11_now_ms(void);
 
 /* Modal-dialog grab on a toplevel (Phase 9 completion): while set,
  * no other window on the connection receives input; outside
@@ -585,6 +651,13 @@ int fdk_x11_dnd_source_handle_event(fdk_platform_connection *conn,
 int fdk_x11_dnd_source_handle_helper_message(
     fdk_platform_connection *conn, const XEvent *xevent);
 void fdk_x11_dnd_source_tick(fdk_platform_connection *conn);
+
+/* The popup-grab watchdog + desktop-switch release (1.1.0-rc1,
+ * x11_dispatch.c): called at the end of every dispatch_pending —
+ * releases any popup grab whose window is no longer viewable, and
+ * dismisses grabbed popups latched by a _NET_CURRENT_DESKTOP change.
+ * Zero cost when no popup holds a grab and no switch happened. */
+void fdk_x11_popup_watchdog_tick(fdk_platform_connection *conn);
 int fdk_x11_dnd_serve_selection(fdk_platform_connection *conn,
                                 const XSelectionRequestEvent *req);
 void fdk_x11_dnd_source_finish(fdk_platform_connection *conn, int status);
