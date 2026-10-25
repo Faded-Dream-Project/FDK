@@ -9,7 +9,39 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-12, at milestone **1.6.1** (the one-face
+Last audited: 2026-10-25, at milestone **1.7.0** (the extension API
++ fdk-shell — the 1.1.0-rc1 candidate: the owner directed FDK to
+grow a public extension API ["add an extension API to FDK so
+add-on packages can be built on top of it, and prove it by building
+a layer-shell add-on as a SEPARATE package that uses only that
+public API"] and set the version to 1.1.0-rc1 [minor, not 1.0.1,
+because public API is added; a CANDIDATE — no git tag, the v1.0.0
+release and its tag untouched, the owner decides the final 1.1.0].
+What landed: include/fdk/fdk_extend.h [the versioned extension API
+— surface kinds with create/destroy/popup_attached callbacks whose
+create builds the native surface through the documented
+native-display accessor and FDK ADOPTS it into the full
+event/render/popup machinery; loop fd sources in the pump's poll
+set with the timer fire discipline; the public fdk_surface render
+path + native display/handle accessors; popups on extension
+surfaces with the zwlr get_popup hook on Wayland; backend +
+capability queries; docs/EXTENDING.md is the contract narrative];
+src/window/extend.c + src/core/extfd.c + the ext_surface_adopt /
+ext_surface_native / ext_surface_resized / native_display platform
+ops wired into BOTH backends; 20 new exported symbols, 641 total,
+SONAME unchanged (append-only). fdk-shell 0.1.0 [the first add-on
+package: fdk-shell/ — own build, own version, own pc file, ready to
+move repo; wlr-layer-shell v4 via vendored scanner bindings on
+Wayland, _NET_WM_WINDOW_TYPE_DOCK + _NET_WM_STRUT_PARTIAL on
+X11/XLibre, the XOR-anchoring zone math, popups, the bar demo;
+tests/isolation.sh is the prefix-isolation PROOF]. Tests:
+test_extend.c headless + five X11-integration sections + the two
+fdk-shell suites, all ASan/UBSan green; two latent FDK bugs found
+by the rigs on the way (uninitialized fullscreen/geo_repaint fields
+on the create path; the wayland NULL-proxy destroy + the ext-popup
+handshake commit). CHANGELOG.md created [1.0.0 + the candidate].
+
+Prior audit at milestone **1.6.1** (the one-face
 alignment — the 1.0.0 re-cut: the owner inspected the live v1.0.0
 release and set the product posture ["it needs to ship only one the
 next ones must be in (.FDKthemes) btw the default one being

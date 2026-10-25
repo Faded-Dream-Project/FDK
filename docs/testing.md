@@ -2115,3 +2115,67 @@ times, each retry guarded by the checked state and preceded by a
 next attempt. The lesson generalizes: synthetic input through a real
 X server is subject to scheduler noise — warm the pointer, widen the
 windows, and retry idempotently instead of trusting one 100 ms pump.
+
+## Extension API tests (1.1.0)
+
+The extension surface (`include/fdk/fdk_extend.h`, docs/EXTENDING.md)
+gets the same two-tier treatment as every other subsystem:
+
+**`make test`** — `tests/test_extend.c`, headless: the API-version
+surface (the runtime number equals the compile-time one) and the
+argument/NULL-safety ladder of every `fdk_ext_*` entry point. The
+real surface machinery needs a display and lives one tier up.
+
+**`make test-x11`** — five sections in `tests/test_x11_integration.c`
+that drive the API exactly the way a real add-on would:
+
+- *basics*: backend identity, the four capabilities' honest X11
+  answers, and the native-display accessor proven REAL by a
+  property roundtrip — a property written through FDK's handed-out
+  `Display*` and read back through the test's own second
+  connection, which nothing but the same `Display*` could satisfy.
+- *lifecycle*: a registered kind whose create callback builds an
+  unmapped dock-typed X window; the adoption verified server-side
+  (geometry, the dock property surviving adoption, the map at
+  show); rendering through the public `fdk_surface` path with
+  server-side pixel readback; REAL input (XSendEvent press/release)
+  delivered through the extension event callback; and the teardown
+  ORDERING asserted (the kind's role teardown runs while the native
+  window is still alive — checked from inside the destroy callback —
+  then the window is gone from the server).
+- *notify_configure*: the Wayland-shaped size report mirrored on X11
+  (event delivery, size cache, the render path resizing).
+- *popup*: an extension popup parented to the adopted window —
+  positioned at parent-origin + offset, override-redirect, rendered
+  and pixel-verified, dismissed by the out-of-bounds press (the
+  grab shape) AND by Escape, and swept with its parent.
+- *fd sources*: a pipe's read end wakes the pump; the callback sees
+  `FDK_EXT_FD_IN`; EOF reports `HUP` even though only IN was
+  watched (poll(2)'s rule); self-removal inside the callback never
+  fires again (deferred free, ASan-clean); plain removal; the
+  argument-validation ladder.
+
+**fdk-shell's own suites** (`make -C fdk-shell test` /
+`test-wayland` / `isolation`): the X11 backend's strut and dock
+semantics verified server-side (auto/explicit zones, margins, every
+anchored edge, the XOR rule; anchor geometry stretching, cornering,
+centering; the EXCLUSIVE keyboard grab proven by a second client's
+grab FAILING while the layer holds it and SUCCEEDING after
+destroy); the Wayland backend against a real layer-shell compositor
+(the maintainer rigs start sway headless): the layer handshake
+driven by an EMPTY commit at show, configure-driven sizes, present
+on a live connection, popup adoption through the get_popup hook,
+every layer level and keyboard mode; and the prefix-isolation
+build proof (`tests/isolation.sh`) — FDK installed into a throwaway
+prefix, fdk-shell rebuilt against that prefix ALONE, the demo run
+from the installed stack, and the dynamic boundary audited (all
+imported `fdk_*` symbols resolve from `libfdk.so.1`; the package
+exports only its own namespace).
+
+**Wayland gaps, stated honestly**: outside-click dismissal on
+Wayland is not driven in this environment (the headless seat
+produces no pointer events, so no real input serial exists for
+xdg_popup.grab — the machinery is the same menu-tested grab path
+the toolkit itself uses), and visual readback on Wayland would need
+the compositor's screenshot channel. The X11 leg covers both
+behaviors for the shared machinery.

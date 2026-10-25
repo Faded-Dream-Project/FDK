@@ -14,7 +14,7 @@ developed as part of the
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
-[![Version: 1.0.0](https://img.shields.io/badge/version-1.0.0-blueviolet?style=flat-square)](docs/versioning.md)
+[![Version: 1.1.0-rc1](https://img.shields.io/badge/version-1.1.0--rc1-blueviolet?style=flat-square)](docs/versioning.md)
 [![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/FemBoyGamerTechGuy/Faded-Dream-dotfiles)
 
 </div>
@@ -29,15 +29,24 @@ layout, text, and theme engines, and FDK-drawn window decorations —
 with no GTK/Qt dependency and a minimal, always-justified dependency
 set (`docs/dependencies.md`).
 
-**Status:** **v1.0.0 released** — the deliberate, recorded 1.0.0
-decision of 2026-10-12 (`docs/versioning.md`), made by the project
-owner after the picker overhaul closed the retraction's named
-blockers and after real-hardware validation (native Wayland under
-labwc included). All roadmap phases complete, ABI frozen with the
-`libfdk.so.1` SONAME (`docs/abi-policy.md`), license finalized, and
-a cross-distribution packaging + CI pipeline built and validated
-(`docs/packaging.md`). Binary packages (.deb / .rpm / .pkg.tar.zst /
-.apk / .xbps) and the pristine source archive ship on the
+**Status:** **v1.0.0 released; v1.1.0-rc1 in the tree** — the
+deliberate, recorded 1.0.0 decision of 2026-10-12
+(`docs/versioning.md`), then the 2026-10-25 candidate adding the
+public **extension API** (`fdk/extend.h`, `docs/EXTENDING.md`): a
+small, documented, stable, versioned surface that add-on packages
+build on so FDK stays simple and becomes the root other libraries
+grow from. The first add-on, **fdk-shell** (layer-shell surfaces —
+panels, docks, overlays — on wlr-layer-shell and EWMH dock hints,
+behind one API), lives in `fdk-shell/` as a separate package that
+compiles against FDK's installed public headers and library only
+(the `fdk-shell/tests/isolation.sh` proof). The v1.0.0 release and
+its tag are untouched; no tag exists for the candidate (the owner
+decides the final 1.1.0). ABI append-only, SONAME unchanged:
+`libfdk.so.1` (`docs/abi-policy.md`). All roadmap phases complete,
+license finalized, and a cross-distribution packaging + CI pipeline
+built and validated (`docs/packaging.md`). Binary packages (.deb /
+.rpm / .pkg.tar.zst / .apk / .xbps) and the pristine source archive
+ship on the
 [releases page](https://github.com/FemBoyGamerTechGuy/FDK/releases).
 The phase-by-phase account of what is and isn't covered lives in
 `docs/roadmap.md` and `PROGRESS.md`.

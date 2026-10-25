@@ -5766,3 +5766,75 @@ installs exactly one theme: the default's packaged copy. The nine
 faces remain one `git checkout` away from a future "theme pack"
 distribution — the `.FDKThemes` drop-in mechanism they will ride
 already exists and is tested.
+
+## 1.7.0 — the extension API + fdk-shell (the 1.1.0-rc1 candidate, 2026-10-25)
+
+The owner directive that opened this milestone: *add an extension
+API to FDK so add-on packages can be built on top of it, and prove
+it by building a layer-shell add-on as a SEPARATE package that uses
+only that public API* — the next release after 1.0.0, versioned
+1.1.0-rc1 (the owner chose the minor bump over 1.0.1 because public
+API is added, and kept the final-tag decision; no tag exists for
+the candidate and the v1.0.0 release is untouched).
+
+**The extension API** (`include/fdk/fdk_extend.h`,
+`docs/EXTENDING.md`): versioned (FDK_EXT_API_VERSION + the runtime
+twin), opaque handles, crisp ownership (the add-on owns its ROLE
+objects; FDK owns the native surface). Five capability areas, each
+implemented and tested: (1) surface KINDS — register a named kind
+with create/destroy/popup_attached callbacks; the add-on builds the
+native surface itself through the documented native-display
+accessor; FDK adopts it (a new platform op) into the full
+event/render/popup machinery; (2) loop integration — fd sources
+join `fdk_pump_events`' poll set with the timer fire discipline
+(timers deliberately ride the existing public `fdk_timer_*` API —
+one primitive, not two); (3) documented render/native accessors —
+`fdk_ext_surface_get_surface` hands out the ordinary public
+`fdk_surface`, and the display/handle accessors keep every FDK
+public header backend-type-free; (4) popups on extension surfaces —
+`fdk_ext_popup_create`, the full grab/dismissal contract, with the
+Wayland kind's popup_attached hook implementing the
+zwlr_layer_surface_v1.get_popup pattern; (5) backend + capability
+queries. The extension surface is an internal fdk_window never
+exposed as one — the window-API footguns are unreachable by
+construction.
+
+**The structural finds the rigs paid for**: the extension surface
+work flushed out two latent FDK bugs — `window->fullscreen` and
+`window->geo_repaint_pending` were never initialized on the create
+path (fdk_alloc does not zero; garbage reads) — and two
+adoption-path defects (the wayland destroy marshaled
+xdg_surface_destroy on the adopted surface's NULL proxy; the ext
+show-gate swallowed the extension POPUP's xdg handshake commit).
+
+**fdk-shell 0.1.0** (`fdk-shell/` — own build, own version, own
+pkg-config file, ready to move to its own repo): layers (background
+/ bottom / top / overlay), edge anchors, margins, exclusive zone,
+keyboard interactivity, per-output selection, popups — one desc
+struct, both backends. Wayland: wlr-layer-shell v4 via vendored
+wayland-scanner bindings (xdg-shell vendored too — the generated
+code cites xdg_popup_interface, which FDK keeps private; an add-on
+vendors what it speaks). X11/XLibre: _NET_WM_WINDOW_TYPE_DOCK +
+_NET_WM_STRUT_PARTIAL with the exclusive-zone math mirroring
+wlroots' XOR-anchoring rule. The demo (`fdk-shell/examples/bar.c`):
+a colored top bar with one working dropdown.
+
+**The proof the requirement demanded**: `fdk-shell/tests/
+isolation.sh` installs FDK into a throwaway prefix, rebuilds
+fdk-shell against that prefix ALONE (the include path contains
+nothing else — a private reach is a compile error), links and RUNS
+the demo from the installed stack, and verifies all 14 imported
+fdk_* symbols resolve from libfdk.so.1 while the package's shared
+library exports only its own namespace.
+
+**Tests**: `tests/test_extend.c` (headless version + argument
+ladder); five X11-integration sections (the native-display identity
+proven by a property roundtrip through a second connection; the
+adopt lifecycle with server-side dock-property, pixel-readback,
+real-input and teardown-ordering verification; notify_configure;
+popup positioning + dismissal + parent sweep; fd sources with
+IN/HUP/self-removal/removal semantics); fdk-shell's own Xvfb suite
+(strut math, anchor geometry, the EXCLUSIVE grab proven by a second
+client's grab failing, popup on a layer) and sway-headless Wayland
+suite (layer handshake, configure-driven size, present, popup
+adoption, every level + keyboard mode). All green under ASan/UBSan.
