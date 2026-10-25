@@ -21,9 +21,25 @@ MINVER="$(fdkshell_min_fdk_ver xbps)"
 
 echo "== fdk-shell xbps install-test ($FDKSHELL_VERSION, FDK floor $MINVER) =="
 
-xbps-install -Sy gcc pkgconf make libX11-devel libX11 wayland-devel \
-    wayland findutils xorg-server-xvfb >/dev/null 2>&1 || \
-    xbps-install -Sy gcc pkgconf make libX11-devel wayland-devel findutils xvfb >/dev/null
+xbps-install -Sy gcc pkgconf make findutils >/dev/null 2>&1 || \
+    xbps-install -Sy gcc pkgconf make findutils >/dev/null
+# Runtime shlibs the FDK + fdk-shell packages need in this fresh
+# container: xbps resolves the shlib-requires DECLARED on the packages
+# only against installed providers — without these lines the fdk-devel
+# transaction aborts "unresolvable shlib libXext.so.6 / libxkbcommon.so.0"
+# (the same hermetic lines FDK's own void install-test carries).
+xbps-install -Sy libX11 libXext zlib 2>/dev/null || true
+xbps-install -Sy libxkbcommon 2>/dev/null || true
+# Void's wayland client runtime library ships in the package named
+# plainly 'wayland' (wayland-devel is its -devel sibling).
+xbps-install -Sy wayland 2>/dev/null || true
+# libX11-devel: the smoke's second Xlib readback connection (TEST
+# INFRASTRUCTURE — the .pc chain deliberately carries no x11
+# Requires; the smoke's own link line carries -lX11).
+xbps-install -Sy libX11-devel 2>/dev/null || true
+xbps-install -Sy xorg-server-xvfb 2>/dev/null || \
+    xbps-install -Sy xvfb 2>/dev/null || \
+    echo "XVFB-SKIP: no Xvfb in the repositories — graphical smoke skipped, disclosed"
 
 SHELL_XBPS="$(ls dist/fdk-shell-[0-9]*.xbps 2>/dev/null | head -1)"
 FDK_RT_XBPS="$(ls dist/fdk-libs-*.xbps 2>/dev/null | head -1)"

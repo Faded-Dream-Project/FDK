@@ -242,6 +242,16 @@ deb verification extracts packages instead of installing them:
    discovery failures print the real diagnostic instead of
    swallowing it.
 
+The same run closed void: the corrected .pc made the build-phase
+smoke discover and link the installed fdk-shell (the old
+"cannot find" never recurred to fire its new diagnostic), and the
+remaining void failure was the install-test's missing runtime
+shlibs — xbps resolves a package's declared shlib-requires only
+against INSTALLED providers, so the combined-set transaction
+aborted on fdk-devel's libXext.so.6/libxkbcommon.so.0; the
+install-test now pre-installs the same runtime shlibs FDK's own
+void install-test carries.
+
 Also: the fdk-shell distro build scripts restored the explaining
 comment for FDK's `LSAN_OPTIONS=exitcode=0` distro-container leak
 policy (the copy had dropped it), the inert copies of that flag

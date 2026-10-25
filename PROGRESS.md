@@ -53,9 +53,17 @@ locally], and pkg-config discovery failures now print the real
 diagnostic [2>/dev/null swallowed the void failure's evidence;
 pkgconf 3.0.7 was built from source locally and PROVEN to accept
 the old bytes, so the void cause is pending its diagnostic].
-Proven locally: a mini installed-prefix + the exact clean-container
-compile line = SMOKE OK; the isolation proof (links the demo
-through the .pc alone) still green. docs/testing.md's 1.1.0-rc1
+The third push closed void: the corrected .pc made the build-phase
+smoke discover/link the installed fdk-shell (the old 'cannot find'
+never recurred — the diagnostic never fired), and the remaining
+failure was the void install-test's missing RUNTIME shlibs [xbps
+resolves declared shlib-requires only against installed providers —
+the combined-set transaction aborted on fdk-devel's libXext.so.6 /
+libxkbcommon.so.0; now pre-installs the same hermetic shlib lines
+FDK's own void install-test carries]. Proven locally: a mini
+installed-prefix + the exact clean-container compile line = SMOKE
+OK; the isolation proof (links the demo through the .pc alone)
+still green. docs/testing.md's 1.1.0-rc1
 packaging-matrix lesson + CHANGELOG rc1 Fixed section carry the
 full narratives. Prior state below.)
 

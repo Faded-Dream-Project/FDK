@@ -2256,12 +2256,20 @@ isolation proof (which links the demo through the .pc alone) still
 green. And the helper learned the session's meta-lesson: pkg-config
 discovery failures now print the REAL diagnostic instead of
 swallowing it with 2>/dev/null — a bare "not found" cost this whole
-round (the void failure mode is still unexplained-with-evidence:
-pkgconf 3.0.7 was built from source locally and PROVEN to accept
-the old .pc bytes, the package provably carried the file, and
-"installed successfully" printed six seconds after fdk.pc discovery
-worked in the same shell — the next run's diagnostic will say
-which of the three it actually was).
+round (the void failure mode closed itself empirically: the next run,
+with the corrected .pc, discovered and linked the installed
+fdk-shell cleanly — the diagnostic never fired; the lite pkgconf
+3.0.7 build used for the local proof evidently lacks whatever
+strictness void's full build applies to the OLD .pc shape). The
+same run then exposed the LAST defect, void's shlib resolution:
+xbps resolves a package's DECLARED shlib-requires only against
+INSTALLED providers, so installing the combined FDK + fdk-shell set
+in a fresh container aborted on fdk-devel's libXext.so.6 /
+libxkbcommon.so.0 — fdk-shell's void install-test now pre-installs
+the same runtime shlibs FDK's own void install-test always has
+(libX11 libXext zlib, libxkbcommon, wayland — hermetic against repo
+metadata variance), plus libX11-devel for the smoke's readback and
+a tolerant Xvfb line.
 
 ## Extension API tests (1.1.0)
 
