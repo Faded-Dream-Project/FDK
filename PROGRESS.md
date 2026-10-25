@@ -88,10 +88,14 @@ per-family packages and why there is no XWarpPointer dodge [a
 passive grab activates only on synthesized KEY input — XSendEvent
 delivery cannot]. The dependency is honest and permanent: the core
 suite's XWarpPointer/XSendEvent tricks cannot verify that the WM's
-Super bindings survive an open popup. Docs: testing.md's sixth-class
-lesson, CHANGELOG's matrix section [now "six defect classes"],
-fdk-shell/Makefile. No tags, no releases; 1.0.0 untouched. Prior
-state below.)
+Super bindings survive an open popup. The same run's void job died
+one step earlier — a reposync connection timeout on the round-robin
+mirror [an outage, not a code defect; the code was green on the five
+other families] — so the critical xbps line now retries once after
+10s, the tolerance the later lines already carried. Docs:
+testing.md's sixth-class lesson, CHANGELOG's matrix section
+[now "six defect classes"], fdk-shell/Makefile. No tags, no
+releases; 1.0.0 untouched. Prior state below.)
 
 Last audited: 2026-10-26, at milestone **1.7.3** (the live-desktop
 bar findings — sway/labwc + Openbox, all four reproduced in this

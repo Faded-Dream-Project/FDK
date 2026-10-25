@@ -2472,4 +2472,10 @@ XTEST for years with XWarpPointer (pointer placement) and XSendEvent
 a KEY event — which XSendEvent's `send_event` delivery can never
 trigger. Verifying that the WM's Super bindings survive an open
 popup has no cheaper input channel; the sandbox never saw the
-failure because it has carried the Xtst dev package all along.
+failure because it has carried the Xtst dev package all along. The
+same run's void job died one step earlier at reposync — a plain
+connection timeout on the round-robin mirror (`repo-default.
+voidlinux.org`, unreachable from the runner AND a second network at
+the same moment — a mirror outage, not a code defect); the critical
+xbps line now retries once after 10 s, the same cheap tolerance the
+later lines (mesa/Xvfb) always carried.

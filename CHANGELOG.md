@@ -347,7 +347,11 @@ for years with XWarpPointer (pointer placement) and XSendEvent
 (delivery), but a passive grab activates only on synthesized input
 — a KEY event — which XSendEvent's `send_event` delivery can never
 trigger; the test that proves the WM's Super bindings survive an
-open popup has no cheaper input channel.
+open popup has no cheaper input channel. The same run's void job
+died one step earlier — a reposync connection timeout on the
+round-robin mirror (a mirror outage, not a code defect); the
+critical xbps line now retries once, the same tolerance the later
+lines always carried.
 
 ### Unreleased-candidate notes
 
