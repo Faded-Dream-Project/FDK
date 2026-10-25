@@ -1,0 +1,12 @@
+/* libfdk-shell.so exports exactly the package's public namespace —
+ * fdk_shell_* (and the version string helper). The package's own
+ * internals (fdkshell__*) and the vendored wayland-scanner interface
+ * structs stay local, mirroring FDK's own export discipline: the
+ * fdk_* namespace belongs to FDK alone, and an add-on never leaks
+ * its privates into the dynamic symbol table. */
+{
+  global:
+    fdk_shell_*;
+  local:
+    *;
+};
