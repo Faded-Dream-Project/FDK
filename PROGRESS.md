@@ -67,6 +67,32 @@ still green. docs/testing.md's 1.1.0-rc1
 packaging-matrix lesson + CHANGELOG rc1 Fixed section carry the
 full narratives. Prior state below.)
 
+Last audited: 2026-10-26, at milestone **1.7.4** (the push of the
+1.7.3 fixes + the sixth CI defect class it exposed: the live-desktop
+commits landed on origin [three commits, core 1041 lines / fdk-shell
+947 / docs 247] and five of six CI jobs went red at the identical
+line — `tests/test_x11.c: fatal error:
+X11/extensions/XTest.h: No such file or directory`. Root cause: the
+new passive-grab passthrough test synthesizes Super+number keys
+through the XTEST extension, and the Xtst HEADER ships only with
+each distro's dev package [libxtst-dev deb/apk, libXtst-devel
+rpm/void, libxtst arch] — which none of the six build environments
+pre-installed; the rpm job "passed" only through its disclosed el10
+Xvfb skip [the suite build is Xvfb-gated there, so the missing
+header was never compiled — a skip, not a pass, read at the JOB
+level as always]. Fix: the dev package declared in all six install
+lists [ci.yml's ubuntu apt + each family's build container], the
+first matrix lesson's test-infrastructure class applied to the
+builders themselves; the Makefile's XTest comment now names the
+per-family packages and why there is no XWarpPointer dodge [a
+passive grab activates only on synthesized KEY input — XSendEvent
+delivery cannot]. The dependency is honest and permanent: the core
+suite's XWarpPointer/XSendEvent tricks cannot verify that the WM's
+Super bindings survive an open popup. Docs: testing.md's sixth-class
+lesson, CHANGELOG's matrix section [now "six defect classes"],
+fdk-shell/Makefile. No tags, no releases; 1.0.0 untouched. Prior
+state below.)
+
 Last audited: 2026-10-26, at milestone **1.7.3** (the live-desktop
 bar findings — sway/labwc + Openbox, all four reproduced in this
 environment BEFORE fixing: [1] the Wayland layer-surface startup

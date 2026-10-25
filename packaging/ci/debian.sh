@@ -31,9 +31,12 @@ RUN debian:bookworm '
     set -eu
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
+    # libxtst-dev: the fdk-shell X11 suite drives its passive-grab
+    # passthrough test with XTEST-synthesized keys — test
+    # infrastructure, the same class as the X11 dev headers.
     apt-get install -y --no-install-recommends \
         build-essential pkg-config \
-        libx11-dev libxext-dev zlib1g-dev \
+        libx11-dev libxext-dev libxtst-dev zlib1g-dev \
         libwayland-dev libxkbcommon-dev \
         xvfb fonts-dejavu-core
     sh packaging/debian/build-deb.sh

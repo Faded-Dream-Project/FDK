@@ -44,9 +44,13 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
+          # libxtst-dev: fdk-shell's X11 suite synthesizes Super+number
+          # keys through the XTEST extension (the passive-grab
+          # passthrough test) — test infrastructure, the same class
+          # as libx11-dev (nothing in the package chain ships it).
           sudo apt-get install -y --no-install-recommends \
             pkg-config \
-            libx11-dev libxext-dev zlib1g-dev \
+            libx11-dev libxext-dev libxtst-dev zlib1g-dev \
             libwayland-dev libxkbcommon-dev \
             libgl1 xvfb fonts-dejavu-core
 

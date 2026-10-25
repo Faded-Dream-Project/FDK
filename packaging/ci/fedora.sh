@@ -29,10 +29,15 @@ docker pull -q almalinux:10
 
 RUN almalinux:10 '
     set -eu
+    # libXtst-devel: the fdk-shell X11 suite drives its passive-grab
+    # passthrough test with XTEST-synthesized keys — test
+    # infrastructure, the same class as the X11 dev headers. (On
+    # this el10 builder the suite still self-skips without Xvfb;
+    # the package keeps the builder honest the day it does not.)
     dnf install -y -q \
         gcc make pkgconf-pkg-config rpm-build cpio \
         libasan libubsan \
-        libX11-devel libXext-devel zlib-devel \
+        libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-sans-fonts dejavu-sans-mono-fonts
     # RHEL 10 ships no standalone Xorg server: Xvfb is absent even

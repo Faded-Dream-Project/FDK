@@ -2450,3 +2450,26 @@ unmap/destroy, and the REASON each release happened
 (outside-click / escape / unmap / destroy / desktop-change /
 watchdog-not-viewable) with the grab-held duration. This is the
 first tool to reach for when a popup misbehaves on a real desktop.
+
+The push of these fixes taught the CI-side lesson (the sixth
+packaging-matrix class): five of six jobs died at the identical
+line — `tests/test_x11.c: fatal error:
+X11/extensions/XTest.h: No such file or directory`. The
+passive-grab passthrough test synthesizes Super+number through the
+XTEST extension, and the Xtst HEADER ships only with each distro's
+dev package (`libxtst-dev` deb/apk, `libXtst-devel` rpm/void,
+`libxtst` arch) — which none of the six build environments
+pre-installed. The rpm job "passed" only through its disclosed el10
+Xvfb skip: the suite build is Xvfb-gated there, so the missing
+header was never compiled against — a skip, not a pass (the exact
+reason job-level verdicts are read, never the run checkmark). The
+fix declares the package in all six install lists — CI's ubuntu apt
+and each family's build container — the first matrix lesson (the
+libx11-dev class) applied to the builders themselves. And the
+dependency is HONEST, not incidental: the core suite has dodged
+XTEST for years with XWarpPointer (pointer placement) and XSendEvent
+(delivery), but a passive grab activates only on synthesized input —
+a KEY event — which XSendEvent's `send_event` delivery can never
+trigger. Verifying that the WM's Super bindings survive an open
+popup has no cheaper input channel; the sandbox never saw the
+failure because it has carried the Xtst dev package all along.

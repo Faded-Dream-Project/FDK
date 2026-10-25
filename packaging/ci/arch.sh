@@ -24,8 +24,12 @@ docker pull -q archlinux:base
 
 RUN archlinux:base '
     set -eu
+    # libxtst: the fdk-shell X11 suite drives its passive-grab
+    # passthrough test with XTEST-synthesized keys — test
+    # infrastructure, the same class as the X11 headers (the arch
+    # libx11 is unsplit; libxtst carries both header and library).
     pacman -Sy --noconfirm --needed \
-        base-devel pkgconf libx11 libxext zlib wayland libxkbcommon \
+        base-devel pkgconf libx11 libxext libxtst zlib wayland libxkbcommon \
         xorg-server-xvfb ttf-dejavu tar
     sh packaging/arch/build-pkg.sh
     sh fdk-shell/packaging/arch/build-pkg.sh

@@ -92,7 +92,14 @@ FDK_SO_LIBS ?= -L$(FDK_ROOT)/build -lfdk
 # connection; speaking the native protocol is this package's right).
 X11_DEPS    := $(shell pkg-config --cflags --libs x11 2>/dev/null || echo -lX11)
 # XTest (the popup-grab test's fake-input channel; test-link only
-# would suffice, but the discovery is shared and harmless)
+# would suffice, but the discovery is shared and harmless). The HEADER
+# ships only with the Xtst dev package — libxtst-dev (deb/apk),
+# libXtst-devel (rpm/void), libxtst (arch); every CI container
+# pre-installs it as test infrastructure (the libx11-dev class).
+# No XWarpPointer substitute exists here: synthesizing a KEY is what
+# activates a passive grab, and XSendEvent delivery cannot — so
+# without the header the test build fails at <X11/extensions/XTest.h>,
+# naming its own remedy.
 X11_TEST_DEPS := $(shell pkg-config --cflags --libs xtst 2>/dev/null || echo -lXtst)
 WL_DEPS_C   := $(shell pkg-config --cflags wayland-client 2>/dev/null)
 WL_DEPS_L   := $(shell pkg-config --libs wayland-client 2>/dev/null || echo -lwayland-client)

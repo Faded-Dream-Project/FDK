@@ -26,8 +26,11 @@ docker pull -q "$VOID_IMAGE"
 
 RUN "$VOID_IMAGE" '
     set -eu
+    # libXtst-devel: the fdk-shell X11 suite drives its passive-grab
+    # passthrough test with XTEST-synthesized keys — test
+    # infrastructure, the same class as the X11 dev headers.
     xbps-install -Sy base-devel pkgconf findutils zstd \
-        libX11-devel libXext-devel zlib-devel \
+        libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-fonts-ttf tar
     # GL runtime for the X11-suite forced-lane groups (llvmpipe),

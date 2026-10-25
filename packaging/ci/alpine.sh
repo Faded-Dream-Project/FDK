@@ -28,9 +28,12 @@ docker pull -q alpine:3.22
 # package names depending on the release.
 RUN alpine:3.22 '
     set -eu
+    # libxtst-dev: the fdk-shell X11 suite drives its passive-grab
+    # passthrough test with XTEST-synthesized keys — test
+    # infrastructure, the same class as the X11 dev headers.
     apk add --no-cache \
         build-base pkgconf tar coreutils alpine-sdk \
-        libx11-dev libxext-dev zlib-dev \
+        libx11-dev libxext-dev libxtst-dev zlib-dev \
         wayland-dev libxkbcommon-dev \
         font-dejavu
     # mesa GL runtime: the X11 suite forces the GL present lane in its

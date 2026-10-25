@@ -259,11 +259,15 @@ happened with the grab-held duration.
 
 ### Fixed — the fdk-shell packaging matrix's first live CI pass
 
-Four defect classes, all packaging-script defects (none in library
-code), all invisible to the sandbox battery — three because the
-sandbox cannot run the native packagers (no rpmbuild/abuild/
-xbps-create/pacman, uid 1001, no docker), one because the local
-deb verification extracts packages instead of installing them:
+Six defect classes, all packaging/build-environment script defects
+(none in library code), all invisible to the sandbox battery — three
+of the first four because the sandbox cannot run the native packagers
+(no rpmbuild/abuild/xbps-create/pacman, uid 1001, no docker), the
+fourth because the local deb verification extracts packages instead
+of installing them; the fifth and sixth fell the same way (the .pc
+defect needed a clean-container consumer, the XTEST header a builder
+without it — this sandbox has carried the Xtst dev package all
+along):
 
 1. **The deb/rpm install-test smoke needed X11 dev headers as TEST
    INFRASTRUCTURE** (it reads server-side truth through a second
@@ -326,6 +330,24 @@ were removed, and the el10-leg Xvfb gating in the rpm/alpine/void
 install-tests now follows the helper's disclosed-skip contract
 (`if fdk_start_xvfb; then … else disclose`) instead of hard-failing
 on images with no Xorg server.
+
+A fourth push (the live-desktop bar fixes, 2026-10-26) added the
+sixth class: **the XTEST dev header is test infrastructure too — for
+the BUILDERS this time.** fdk-shell's new passive-grab passthrough
+test synthesizes Super+number keys through the XTEST extension, and
+five of six CI jobs died at the same line — `tests/test_x11.c:
+fatal error: X11/extensions/XTest.h: No such file or directory` —
+because no builder pre-installed the Xtst dev package (`libxtst-dev`
+deb/apk, `libXtst-devel` rpm/void, `libxtst` arch). The rpm job
+"passed" only through its disclosed el10 Xvfb skip: the suite never
+compiled where the header was missing. All six install lists (CI's
+ubuntu apt + each family's build container) now declare it. The
+dependency is honest, not incidental: the core suite dodged XTEST
+for years with XWarpPointer (pointer placement) and XSendEvent
+(delivery), but a passive grab activates only on synthesized input
+— a KEY event — which XSendEvent's `send_event` delivery can never
+trigger; the test that proves the WM's Super bindings survive an
+open popup has no cheaper input channel.
 
 ### Unreleased-candidate notes
 
