@@ -311,6 +311,16 @@ struct fdk_platform_window {
     struct wl_surface *surface;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
+    /* Extension surface (1.1.0, fdk_extend.h): nonzero when this
+     * wrapper ADOPTED an add-on's wl_surface (wayland_ext.c) — the
+     * surface's ROLE belongs to the add-on (a layer surface, an
+     * add-on protocol FDK does not know), so xdg_surface and
+     * xdg_toplevel stay NULL and every xdg-shell gate below
+     * (first-configure commit deferral, the show()/hide() commit
+     * handshake, toplevel resize/limits) must be bypassed: the
+     * add-on's own role handshake drives mapping and size, reported
+     * back through fdk_ext_surface_notify_configure(). */
+    int ext;
     int popup;                    /* Phase 9: xdg_popup window      */
     struct xdg_popup *xdg_popup;  /* set when popup                */
     /* Input-transparent popup (1.3.2, tooltips): set at CREATE from
@@ -573,6 +583,30 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
                                       const fdk_window_options *options,
                                       fdk_platform_window *parent,
                                       fdk_platform_window **out_pwindow);
+/* Extension-surface adoption (1.1.0) — wayland_ext.c. Wraps an
+ * add-on's role-carrying wl_surface (committed NEVER yet — the
+ * add-on's role handshake owns the first commit) in a registered
+ * pwindow with the render-slot machinery. See
+ * platform_internal.h's ext_surface_adopt contract. */
+fdk_result fdk_wayland_ext_surface_adopt(fdk_platform_connection *conn,
+                                         const fdk_ext_native_handle *native,
+                                         fdk_platform_window **out_pwindow);
+/* fdk_ext_get_native_display()'s op: the wl_display*, borrowed. */
+void *fdk_wayland_native_display(fdk_platform_connection *conn);
+/* fdk_ext_surface_native()'s op: the wrapped wl_surface. */
+fdk_result fdk_wayland_ext_surface_native(fdk_platform_window *pwindow,
+                                          fdk_ext_native_handle *out);
+/* fdk_ext_surface_notify_configure()'s op: buffer-side resize. */
+void fdk_wayland_ext_surface_resized(fdk_platform_window *pwindow,
+                                     fdk_i32 width, fdk_i32 height);
+
+/* Shared wl_surface/fractional-scale listeners (defined in
+ * wayland_window.c, non-static since 1.1.0): the adoption path
+ * attaches the same output-enter/leave and preferred-scale tracking
+ * to extension surfaces that created windows get. */
+extern const struct wl_surface_listener g_wl_surface_listener;
+extern const struct wp_fractional_scale_v1_listener
+    g_fractional_scale_listener;
 void fdk_wayland_window_destroy(fdk_platform_window *pwindow);
 void fdk_wayland_window_show(fdk_platform_window *pwindow);
 void fdk_wayland_window_hide(fdk_platform_window *pwindow);

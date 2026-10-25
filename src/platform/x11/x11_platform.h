@@ -270,6 +270,15 @@ struct fdk_platform_window {
     fdk_platform_connection *conn;
     Window xwindow;
     fdk_size last_size; /* most recent ConfigureNotify size */
+    /* Extension surface (1.1.0, fdk_extend.h): nonzero when this
+     * wrapper ADOPTED an add-on-created window (x11_ext.c) instead
+     * of creating it. Everything downstream treats it identically —
+     * the marker exists for the few create-time contracts that
+     * differ: FDK installed the event mask at adopt (the add-on
+     * selected none), and WM-chrome conveniences FDK adds at create
+     * (WM_DELETE_WINDOW, XDndAware, WM_CLASS, titles) were left to
+     * the add-on's own X calls. */
+    int ext;
     /* Per-window X Input Context (1.3.1): created at window create
      * when the connection has an XIM; Xutf8LookupString resolves
      * full-Unicode text through it. NULL = ASCII fallback. Destroyed
@@ -403,6 +412,22 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                                   const fdk_window_options *options,
                                   fdk_platform_window *parent,
                                   fdk_platform_window **out_pwindow);
+/* Extension-surface adoption (1.1.0) — x11_ext.c. Wraps an add-on's
+ * unmapped X window (built against the Display* fdk_extend.h hands
+ * out) in a registered pwindow: FDK's event mask, XIC when an XIM
+ * exists, real geometry via XGetGeometry. See platform_internal.h's
+ * ext_surface_adopt contract. */
+fdk_result fdk_x11_ext_surface_adopt(fdk_platform_connection *conn,
+                                     const fdk_ext_native_handle *native,
+                                     fdk_platform_window **out_pwindow);
+/* fdk_ext_get_native_display()'s op: the Display*, borrowed. */
+void *fdk_x11_native_display(fdk_platform_connection *conn);
+/* fdk_ext_surface_native()'s op: the wrapped window's XID. */
+fdk_result fdk_x11_ext_surface_native(fdk_platform_window *pwindow,
+                                      fdk_ext_native_handle *out);
+/* fdk_ext_surface_notify_configure()'s op: buffer-side resize. */
+void fdk_x11_ext_surface_resized(fdk_platform_window *pwindow,
+                                 fdk_i32 width, fdk_i32 height);
 void fdk_x11_window_destroy(fdk_platform_window *pwindow);
 void fdk_x11_window_show(fdk_platform_window *pwindow);
 void fdk_x11_window_hide(fdk_platform_window *pwindow);

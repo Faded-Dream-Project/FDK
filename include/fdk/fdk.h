@@ -32,6 +32,7 @@
 #include "fdk_undo.h"
 #include "fdk_prefs.h"
 #include "fdk_animation.h"
+#include "fdk_extend.h"
 
 /* Widget, layout, and theme public headers are added here as their
  * respective phases land (see docs/roadmap.md). Phase 2 added window
@@ -44,6 +45,7 @@
  * fdk_theme.h (themes: the built-in default, .fdk parsing, runtime
  * switching); Phase 9 adds fdk_clipboard.h (text clipboard over the
  * ICCCM CLIPBOARD selection / wl_data_device). Further layout
- * containers follow. */
+ * containers follow. 1.1.0 adds fdk_extend.h — the extension API
+ * add-on packages build on (docs/EXTENDING.md). */
 
 #endif /* FDK_H */

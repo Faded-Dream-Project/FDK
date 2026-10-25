@@ -77,6 +77,19 @@ struct fdk_window {
     bool is_popup;                    /* Phase 9: grabbed dismissal window */
     fdk_platform_window *pwindow;     /* backend-owned handle */
 
+    /* ---- Extension surfaces (1.1.0, include/fdk/fdk_extend.h) ----
+     *
+     * Non-NULL iff this window WRAPS an extension surface (the
+     * add-on-owned kind machinery in src/window/extend.c): the
+     * window was built around an ADOPTED platform window, its
+     * event_callback is extend.c's trampoline (routing to the
+     * add-on's fdk_ext_event_fn), and its destroy_notify frees the
+     * wrapper after the kind's role teardown. The window itself is
+     * NEVER exposed as an fdk_window* — the public handle is the
+     * fdk_ext_surface — so the window-API footguns (set_title,
+     * maximize, ...) stay unreachable for add-ons. */
+    struct fdk_ext_surface *ext;
+
     /* ---- Phase 9 completion: toolkit-window integration ----
      *
      * auto_paint: set on windows the TOOLKIT keeps alive and updated
@@ -302,6 +315,23 @@ fdk_result fdk__window_create_popup_ex(fdk_context *ctx, fdk_window *parent,
                                        fdk_i32 height,
                                        bool input_transparent,
                                        fdk_window **out_window);
+
+/* Shared field initialization for freshly-allocated fdk_windows
+ * (1.1.0: factored out of window_create_full so the extension-
+ * surface wrapper in extend.c builds identical windows around
+ * ADOPTED platform windows). Assigns EVERY field — fdk_alloc does
+ * not zero, and the refactor that extracted this block found two
+ * fields (fullscreen, geo_repaint_pending) the inline original
+ * never initialized. `options` may be NULL. */
+void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
+                             const fdk_window_options *options);
+
+/* Extension kinds (1.1.0, src/window/extend.c): the shutdown-side
+ * detach walk — add-on-owned kinds stop pointing at the dying
+ * context (their ctx goes NULL, the context's list empties). Called
+ * from fdk_shutdown() AFTER the leaked-window sweep (every kind
+ * surface's destroy_notify has already run). */
+void fdk__ext_kinds_detach(fdk_context *ctx);
 
 /* Diagnostic / regression seam: 1 once a frame has actually reached
  * the screen on the window's backend, 0 before that, -1 when the

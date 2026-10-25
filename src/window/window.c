@@ -760,22 +760,14 @@ fdk_result fdk__window_create_popup_ex(fdk_context *ctx, fdk_window *parent,
     return window_create_full(ctx, &options, parent, out_window);
 }
 
-static fdk_result window_create_full(fdk_context *ctx,
-                                     const fdk_window_options *options,
-                                     fdk_window *parent,
-                                     fdk_window **out_window) {
-    if (ctx == NULL || out_window == NULL) {
-        return FDK_ERR_INVALID_ARGUMENT;
-    }
-    if (ctx->ops == NULL || ctx->conn == NULL) {
-        return FDK_ERR_NOT_INITIALIZED;
-    }
-
-    fdk_window *window = fdk_alloc(sizeof(fdk_window));
-    if (window == NULL) {
-        return FDK_ERR_OUT_OF_MEMORY;
-    }
-
+/* Shared field initialization (1.1.0: also used by the extension-
+ * surface wrapper in extend.c, which builds an fdk_window around an
+ * ADOPTED platform window instead of a created one). Zeroes nothing
+ * — every field of the struct is assigned, mirroring the original
+ * inline block verbatim. `options` may be NULL (ext surfaces have no
+ * window options; popup-ness then comes from the caller). */
+void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
+                               const fdk_window_options *options) {
     window->ctx = ctx;
     window->ops = ctx->ops;
     window->event_callback = NULL;
@@ -804,6 +796,7 @@ static fdk_result window_create_full(fdk_context *ctx,
     window->drag_origin_y = 0;
     window->maximized = false;
     window->minimized = false;
+    window->fullscreen = false;
     window->min_size = (fdk_size){0, 0};
     window->max_size = (fdk_size){0, 0};
     window->resizable = false;
@@ -825,10 +818,31 @@ static fdk_result window_create_full(fdk_context *ctx,
     window->deco_pressed = 0;
     window->cursor_edge = FDK_WRES_NONE;
     window->is_popup = (options != NULL && options->popup != 0);
+    window->ext = NULL;
     window->shortcuts = NULL;
     window->shortcut_count = 0;
     window->shortcut_cap = 0;
     window->shortcut_next_id = 1;
+    window->geo_repaint_pending = false;
+}
+
+static fdk_result window_create_full(fdk_context *ctx,
+                                     const fdk_window_options *options,
+                                     fdk_window *parent,
+                                     fdk_window **out_window) {
+    if (ctx == NULL || out_window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx->ops == NULL || ctx->conn == NULL) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+
+    fdk_window *window = fdk_alloc(sizeof(fdk_window));
+    if (window == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+
+    fdk__window_init_fields(window, ctx, options);
 
     if (options != NULL && options->title != NULL) {
         size_t n = strlen(options->title) + 1;

@@ -18,6 +18,7 @@
 #include "fdk/fdk_dnd.h"
 #include "fdk/fdk_error.h"
 #include "fdk/fdk_event.h"
+#include "fdk/fdk_extend.h"
 #include "fdk/fdk_types.h"
 #include "fdk/fdk_window.h"
 
@@ -517,6 +518,75 @@ typedef struct fdk_platform_ops {
                              const char *const *uris, size_t uri_count,
                              void (*on_done)(int status, void *user),
                              void *user);
+
+    /* ---- OPTIONAL extension-surface adoption (1.1.0) ----
+     *
+     * The machinery behind include/fdk/fdk_extend.h (see that
+     * header for the ownership model; this is the backend half).
+     *
+     * ext_surface_adopt wraps a NATIVE surface an add-on created
+     * through the documented native-display accessor (an X11
+     * Window the add-on built unmapped with its own properties, or
+     * a wl_surface the add-on gave a protocol role FDK does not
+     * know) in a new fdk_platform_window and registers it for event
+     * routing — after which the platform treats it like any other
+     * window: dispatch translates its events, the render ops give
+     * it a framebuffer and a present path, popups can parent to it.
+     *
+     * Per backend:
+     *   X11: allocates the wrapper, installs FDK's standard event
+     *   mask (XSelectInput — the add-on selected nothing; FDK owns
+     *   event selection for windows it routes), creates the XIC
+     *   when the connection has an XIM, registers the XID.
+     *
+     *   Wayland: allocates the wrapper around the wl_surface (the
+     *   surface listener attaches — output enter/leave keeps the
+     *   HiDPI scale machinery live; the fractional-scale object is
+     *   bound when the manager exists), registers it in the
+     *   surface->pwindow table the seat uses for pointer/keyboard
+     *   focus routing. The surface must NOT have been committed yet
+     *   (the add-on's role handshake owns the first commit).
+     *
+     * The native handle arrives in the public tagged struct
+     * (fdk_ext_native_handle from fdk_extend.h) so this header stays
+     * free of backend types: xid is the Window, pointer is the
+     * wl_surface. Backends cast to their own types here — the only
+     * sanctioned crossing point.
+     *
+     * Returns FDK_ERR_INVALID_ARGUMENT for a NULL/out-of-backend
+     * native handle, FDK_ERR_OUT_OF_MEMORY, or
+     * FDK_ERR_WINDOW_CREATE on registration failure. The backend
+     * does NOT take ownership on failure. */
+    fdk_result (*ext_surface_adopt)(fdk_platform_connection *conn,
+                                    const fdk_ext_native_handle *native,
+                                    fdk_platform_window **out_pwindow);
+
+    /* OPTIONAL (1.1.0): writes a window's native surface handle in
+     * the same tagged shape ext_surface_adopt consumed (X11: the
+     * Window XID; Wayland: the wl_surface*) — the accessor behind
+     * fdk_ext_surface_native(). NULL op = no native handle. */
+    fdk_result (*ext_surface_native)(fdk_platform_window *pwindow,
+                                     fdk_ext_native_handle *out);
+
+    /* OPTIONAL (1.1.0): an extension surface's ROLE assigned it a
+     * new size (fdk_ext_surface_notify_configure — the Wayland
+     * shape; X11's server-driven ConfigureNotify never goes through
+     * it). The backend updates its buffer-side size bookkeeping
+     * (X11: last_size, which re-sizes the framebuffer pair at the
+     * next acquire; Wayland: last_size + pending_size, which sizes
+     * the render slots the next present commits). NULL op = the
+     * backend has no buffer bookkeeping to update. */
+    void (*ext_surface_resized)(fdk_platform_window *pwindow,
+                                fdk_i32 width, fdk_i32 height);
+
+    /* OPTIONAL (1.1.0): the backend's native display connection
+     * handle, borrowed for the connection's lifetime — the
+     * documented accessor behind fdk_ext_get_native_display()
+     * (include/fdk/fdk_extend.h). X11 returns the Display*; Wayland
+     * the struct wl_display*; the tag comes from
+     * fdk_ext_active_backend(). NULL op or NULL result = no native
+     * handle to hand out (none of the current backends). */
+    void *(*native_display)(fdk_platform_connection *conn);
 } fdk_platform_ops;
 
 /* Backend entry points. Each returns NULL if that backend was not
@@ -560,5 +630,27 @@ void fdk__dnd_free_uri_list(char **list, size_t count);
  * escaping. Returns an fdk_alloc'd NUL-terminated CRLF-joined
  * payload, or NULL. */
 char *fdk__dnd_build_uri_list(const char *const *uris, size_t count);
+
+/* ---- Extension surfaces (1.1.0) -----------------------------------------
+ *
+ * The window-layer half of include/fdk/fdk_extend.h (implemented in
+ * src/window/extend.c). The WAYLAND backend calls this from its
+ * popup-creation path when the popup's parent is an extension
+ * surface: an xdg_popup was created with NO xdg parent (the parent
+ * has no xdg_surface — its role belongs to the add-on), and the
+ * add-on's kind must adopt it (e.g.
+ * zwlr_layer_surface_v1.get_popup).
+ *
+ * `ctx` is the owning context — the SAME value the backend stored as
+ * dispatch_user_data at connect() time (context.c passes the context
+ * itself there; it is the one established bridge from a platform
+ * connection back to the core). The hook resolves the parent window
+ * through the registry and routes to the kind's popup_attached
+ * callback. Silent no-op when the parent is not an extension surface
+ * or its kind has no callback (the popup then stands on its grab
+ * alone). */
+void fdk__ext_popup_attached(fdk_context *ctx,
+                             fdk_platform_window *parent_pwindow,
+                             void *native_popup);
 
 #endif /* FDK_PLATFORM_INTERNAL_H */

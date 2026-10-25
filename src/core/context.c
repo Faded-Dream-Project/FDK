@@ -364,6 +364,11 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->timer_count = 0;
     ctx->timer_capacity = 0;
     ctx->timer_firing = NULL;
+    ctx->extfds = NULL;
+    ctx->extfd_count = 0;
+    ctx->extfd_capacity = 0;
+    ctx->extfd_firing = NULL;
+    ctx->ext_kinds_head = NULL;
 
     fdk_platform_backend requested = FDK_PLATFORM_AUTO;
     if (options != NULL) {
@@ -554,7 +559,17 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             }
         }
 
-        struct pollfd pfds[2];
+        /* The poll set: backend fd, theme-settings watch (1.4.14),
+         * and the extension fd sources (1.1.0) — the fixed pair the
+         * pump always polled became a stack array sized for all
+         * three. The backend fd stays entry 0 (its POLLERR|POLLNVAL
+         * handling below is the pump's own); the theme watch entry
+         * 1; the add-on sources follow, laid out by
+         * fdk__extfd_fill_poll at base 2. A bounded stack array, not
+         * a heap buffer: an add-on registering thousands of fd
+         * sources is a bug, and 256 entries cover every legitimate
+         * panel/notification-shell shape with room to spare. */
+        struct pollfd pfds[2 + 256];
         pfds[0].fd = fd;
         pfds[0].events = POLLIN;
         pfds[0].revents = 0;
@@ -562,15 +577,23 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
         pfds[1].events = POLLIN;
         pfds[1].revents = 0;
         int nfds = 1;
+        int has_theme = 0;
         /* The theme-settings watch (1.4.14): one more fd in the same
          * wait. poll() on both; the settings fd's readable path runs
          * BELOW the backend's, so a settings change coalesces with
          * whatever input also arrived. -1 means no watch (tools,
-         * headless tests, apps that own their theme). */
+         * headless tests, apps that own their theme). Tracked by its
+         * own flag: with extension sources following at pfds[2..),
+         * "nfds >= 2" no longer implies "the theme watch is
+         * present". */
         pfds[1].fd = fdk__window_theme_watch_fd();
         if (pfds[1].fd >= 0) {
             nfds = 2;
+            has_theme = 1;
         }
+        size_t extfd_base = (size_t)nfds;
+        size_t extfd_n = fdk__extfd_fill_poll(ctx, pfds, extfd_base);
+        nfds += (int)extfd_n;
         int pr = poll(pfds, (nfds_t)nfds, wait_ms);
         if (pr < 0) {
             if (errno_is_eintr()) {
@@ -589,7 +612,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             return FDK_ERR_PLATFORM_INIT;
         }
 
-        if (nfds == 2 && (pfds[1].revents & (POLLIN | POLLERR)) != 0) {
+        if (has_theme && (pfds[1].revents & (POLLIN | POLLERR)) != 0) {
             /* A settings file changed: re-theme (every live tree was
              * invalidated) and repaint this context's damaged windows
              * right here — fdk_run() applications have no paint loop,
@@ -622,6 +645,21 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
              * the meantime fire at the loop head; keep waiting the
              * remaining timeout (the deadline check returns 0 once
              * the budget is spent). */
+        }
+
+        /* Extension fd sources (1.1.0): dispatched AFTER the backend
+         * and theme watch, in registration order, with the timer
+         * fire discipline (a callback may remove/add sources,
+         * destroy windows, quit). A fired source counts toward the
+         * return value exactly like a fired timer — the pump's caller
+         * repaints or re-polls as its own loop sees fit. */
+        if (extfd_n > 0) {
+            int extfired = fdk__extfd_dispatch(ctx, pfds, extfd_base,
+                                               extfd_n);
+            if (extfired > 0) {
+                fdk__window_flush_geo_repaints(ctx);
+                return extfired;
+            }
         }
         /* Poll timeout or spurious wake: loop (the deadline check
          * returns 0 once the budget is spent). */
@@ -733,6 +771,21 @@ void fdk_shutdown(fdk_context *ctx) {
         t->active = false;
         timer_unlink_free(ctx, t);
     }
+    /* Leaked extension fd sources: same teardown-not-delivery
+     * policy (1.1.0). */
+    if (ctx->extfd_count > 0) {
+        FDK_WARN("shutdown with %zu extension fd source(s) still live "
+                 "— freeing",
+                 ctx->extfd_count);
+    }
+    fdk__extfd_shutdown(ctx);
+    /* Extension kinds (1.1.0): add-on owned, so NOT freed here — but
+     * they must stop pointing at this (about-to-be-freed) context.
+     * The detach walk NULLs each kind's ctx and empties the list; a
+     * kind destroyed afterwards skips the (gone) registry unlink.
+     * An add-on that never destroys its kinds leaks them by its own
+     * contract — fdk_ext_kind_destroy is the leak-free pattern. */
+    fdk__ext_kinds_detach(ctx);
     fdk_free(ctx->timers);
     fdk_free(ctx->windows);
     fdk_free(ctx->app_id);

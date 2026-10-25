@@ -408,7 +408,11 @@ static void wl_surface_leave_output(void *data, struct wl_surface *surface,
     (void)fdk_wayland_window_recompute_scale(pwindow, output, 0);
 }
 
-static const struct wl_surface_listener g_wl_surface_listener = {
+/* Non-static (1.1.0): wayland_ext.c's adoption path attaches the same
+ * output-tracking listener to adopted extension surfaces — enter/leave
+ * keeps the HiDPI scale machinery alive for them exactly like created
+ * windows. */
+const struct wl_surface_listener g_wl_surface_listener = {
     .enter = wl_surface_enter_output,
     .leave = wl_surface_leave_output,
 };
@@ -433,7 +437,9 @@ static void fractional_preferred_scale(void *data,
     }
 }
 
-static const struct wp_fractional_scale_v1_listener
+/* Non-static (1.1.0): wayland_ext.c attaches the same preferred-scale
+ * listener to adopted extension surfaces. */
+const struct wp_fractional_scale_v1_listener
     g_fractional_scale_listener = {
     .preferred_scale = fractional_preferred_scale,
 };
@@ -1279,14 +1285,20 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
         return FDK_OK;
     }
 
-    if (!pwindow->configured) {
+    if (!pwindow->configured && !pwindow->ext) {
         /* xdg-shell forbids the first real commit before
          * ack_configure; the buffer stays pending and is committed
          * by xdg_surface_configure() the moment the first configure
          * is acked (see the deferred-first-frame block there — the
          * surface layer has already consumed this frame's damage, so
          * waiting for "the application's next present" would wait
-         * forever: with the tree clean it would be a no-op). */
+         * forever: with the tree clean it would be a no-op).
+         *
+         * EXTENSION surfaces (1.1.0) bypass the gate: they carry no
+         * xdg role, so no xdg handshake defers anything — their
+         * commit discipline belongs to the add-on's own role
+         * protocol (layer-shell's "wait for the initial configure"
+         * is the add-on's to obey before it ever renders). */
         FDK_DEBUG("present deferred until first xdg configure");
         return FDK_OK;
     }
@@ -1435,9 +1447,26 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
          * parent when the topmost popup is destroyed, so no re-grab
          * request exists here (unlike X11). Nested popups MUST be
          * destroyed topmost-first — the window layer's popup-family
-         * sweep guarantees that order. */
-        if (parent == NULL || (parent->xdg_toplevel == NULL &&
-                               parent->xdg_popup == NULL)) {
+         * sweep guarantees that order.
+         *
+         * 1.1.0 — EXTENSION-surface parents: the parent's wl_surface
+         * carries the ADD-ON's role (a layer surface), not an
+         * xdg_surface, so the xdg_popup is created with NO xdg
+         * parent and the kind's popup_attached hook hands the popup
+         * proxy to the add-on, which parents it to its role object
+         * (zwlr_layer_surface_v1.get_popup — the waybar pattern).
+         * The positioner's parent-relative coordinates apply against
+         * the layer surface once attached. */
+        if (parent == NULL) {
+            FDK_ERROR("popup window needs a toplevel or popup parent");
+            xdg_surface_destroy(pwindow->xdg_surface);
+            wl_surface_destroy(pwindow->surface);
+            fdk_free(pwindow);
+            return FDK_ERR_INVALID_ARGUMENT;
+        }
+        const int parent_is_ext = (parent->ext != 0);
+        if (!parent_is_ext && parent->xdg_toplevel == NULL &&
+            parent->xdg_popup == NULL) {
             FDK_ERROR("popup window needs a toplevel or popup parent");
             xdg_surface_destroy(pwindow->xdg_surface);
             wl_surface_destroy(pwindow->surface);
@@ -1467,8 +1496,12 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
                      XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y |
                      XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_X |
                      XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_Y);
+        /* EXT parents carry no xdg_surface (the add-on's role owns
+         * the surface): the popup starts xdg-parent-less and the
+         * kind's popup_attached hook parents it to the role. */
         pwindow->xdg_popup = xdg_surface_get_popup(
-            pwindow->xdg_surface, parent->xdg_surface, pos);
+            pwindow->xdg_surface,
+            parent_is_ext ? NULL : parent->xdg_surface, pos);
         xdg_positioner_destroy(pos);
         if (pwindow->xdg_popup == NULL) {
             FDK_ERROR("xdg_surface_get_popup failed");
@@ -1497,6 +1530,18 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
         if (conn->seat != NULL && !pwindow->input_transparent) {
             xdg_popup_grab(pwindow->xdg_popup, conn->seat,
                            conn->last_input_serial);
+        }
+        if (parent_is_ext) {
+            /* Hand the fresh popup proxy to the add-on's kind so its
+             * ROLE can adopt it (the zwlr_layer_surface_v1.get_popup
+             * pattern). Window-layer hook (src/window/extend.c) —
+             * silent no-op when the kind has no popup_attached
+             * callback, in which case the popup stands on its grab
+             * alone. ctx rides along as the connect()-time
+             * dispatch_user_data (the one established bridge from a
+             * connection back to the core — see platform_internal.h). */
+            fdk__ext_popup_attached((fdk_context *)conn->dispatch_user_data,
+                                    parent, pwindow->xdg_popup);
         }
         if (pwindow->input_transparent) {
             /* Click-through from the FIRST frame: input regions are
@@ -1716,6 +1761,16 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
 }
 
 void fdk_wayland_window_show(fdk_platform_window *pwindow) {
+    /* Extension surfaces (1.1.0): no commit here. A role-carrying
+     * surface (layer-shell above all) maps when its own protocol
+     * handshake completes — committing before the role's initial
+     * configure is a wlroots protocol ERROR that kills the whole
+     * connection. fdk_extend.h documents show() as a Wayland no-op
+     * for extension surfaces: the add-on's handshake + first present
+     * do the mapping. */
+    if (pwindow->ext) {
+        return;
+    }
     /* xdg-shell requires an initial "commit with no buffer" to
      * trigger the first configure, then the client must wait for
      * that configure before attaching any actual content. The first
@@ -1726,6 +1781,14 @@ void fdk_wayland_window_show(fdk_platform_window *pwindow) {
 }
 
 void fdk_wayland_window_hide(fdk_platform_window *pwindow) {
+    /* Extension surfaces (1.1.0): no NULL-buffer commit — unmapping
+     * a role-carrying surface is the ROLE's operation (a layer
+     * surface unmaps by destroying and re-creating its role object,
+     * the add-on's business), not a surface-state commit. Symmetric
+     * with show()'s no-op above and documented in fdk_extend.h. */
+    if (pwindow->ext) {
+        return;
+    }
     /* Unmap the surface by committing a NULL buffer — the documented
      * Wayland equivalent of X11's unmap. The previously committed
      * buffer gets wl_buffer::release'd by the compositor, which
@@ -1754,6 +1817,15 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
 }
 
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height) {
+    /* Extension surfaces (1.1.0): the size is ROLE-driven (the
+     * add-on reports it via fdk_ext_surface_notify_configure) — a
+     * client-side resize request has no meaning for a role FDK does
+     * not know, and the buffer-commit machinery below would fight
+     * the role's own size negotiation. Quietly ignored, matching
+     * fdk_extend.h's configure-flow documentation. */
+    if (pwindow->ext) {
+        return;
+    }
     /* Wayland gives clients no direct "resize me" request — the
      * toplevel's size is ultimately compositor-driven (interactive
      * resize, maximization, or compositor policy). What a client CAN

@@ -38,6 +38,10 @@ static const fdk_platform_ops g_wayland_ops = {
     .clipboard_get_image = fdk_wayland_clipboard_get_image,
     .window_set_drop_formats = fdk_wayland_window_set_drop_formats,
     .drag_begin = fdk_wayland_drag_begin,
+    .ext_surface_adopt = fdk_wayland_ext_surface_adopt,
+    .native_display = fdk_wayland_native_display,
+    .ext_surface_native = fdk_wayland_ext_surface_native,
+    .ext_surface_resized = fdk_wayland_ext_surface_resized,
 };
 
 const fdk_platform_ops *fdk_platform_wayland_ops(void) {

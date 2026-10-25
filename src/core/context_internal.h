@@ -62,7 +62,62 @@ struct fdk_context {
      * still about to touch. Saved/restored around each callback so
      * nested pumps nest cleanly. */
     fdk_timer *timer_firing;
+
+    /* ---- Extension fd sources (1.1.0, include/fdk/fdk_extend.h) ----
+     *
+     * Pointer array (stable handles across growth, same discipline
+     * as timers). extfd_firing is the source whose callback is on
+     * the stack RIGHT NOW: fdk_ext_loop_remove_fd on THAT handle
+     * only deactivates; the fire loop in src/core/extfd.c performs
+     * the unlink+free after the callback returns. The pump polls
+     * them alongside the backend fd (src/core/context.c). */
+    struct fdk_ext_fd_source **extfds;
+    size_t extfd_count;
+    size_t extfd_capacity;
+    struct fdk_ext_fd_source *extfd_firing;
+
+    /* ---- Extension surface kinds (1.1.0, src/window/extend.c) ----
+     *
+     * Intrusive singly-linked list of the kinds registered on this
+     * context (fdk_ext_register_kind). Add-on OWNED objects — FDK
+     * only links them for the duplicate-name check, the diagnostic
+     * sweep, and detaching them at shutdown (kinds outliving their
+     * context must not keep pointing at freed memory). */
+    struct fdk_ext_surface_kind *ext_kinds_head;
 };
+
+/* ---- Extension fd sources (1.1.0) — src/core/extfd.c ---------------
+ *
+ * The pump-facing face of fdk_ext_loop_add_fd/remove_fd (public API
+ * in fdk_extend.h): the poll-set builder and the reentrancy-safe
+ * fire loop the pump calls after poll() reports activity. */
+struct pollfd; /* <poll.h> lives in the .c files */
+
+/* Writes this context's ext fd sources' poll entries at
+ * pfds[base .. base+count) — the pump lays its own fds (backend,
+ * theme watch) at [0 .. base) and calls this with that base.
+ * FDK_EXT_FD_* flags translate to poll(2) event bits. Returns the
+ * number of entries written (== fdk__extfd_count). */
+size_t fdk__extfd_fill_poll(fdk_context *ctx, struct pollfd *pfds,
+                            size_t base);
+
+/* After poll(): for each source whose revents intersect its watched
+ * flags (plus ERR/HUP, always reported like poll(2)), the callback
+ * fires — snapshot + active re-check + deferred free, the timer fire
+ * loop's discipline (a callback may remove any source including its
+ * own, add sources that first fire on a LATER pump, destroy windows,
+ * or quit). Reads the entries pfds[base .. base+n) — the SAME array
+ * positions fill_poll wrote. Returns how many callbacks fired. */
+int fdk__extfd_dispatch(fdk_context *ctx, const struct pollfd *pfds,
+                        size_t base, size_t n);
+
+/* How many ext fd sources are live (the poll array's sizing input). */
+size_t fdk__extfd_count(fdk_context *ctx);
+
+/* Shutdown sweep: frees every surviving source WITHOUT firing (the
+ * same policy the leaked-timer sweep uses — teardown, not delivery).
+ * Called from fdk_shutdown(). */
+void fdk__extfd_shutdown(fdk_context *ctx);
 
 /* The timer record itself. `active` is the removal flag: the fire
  * loop snapshots the pointer array, but re-checks active before

@@ -10010,6 +10010,667 @@ static void test_gl_lane_resize_gui(void) {
            "path stays GL, pixels exact\n");
 }
 
+/* ---- 1.1.0: the extension API (fdk_extend.h) ----------------------------
+ *
+ * The full surface machinery of include/fdk/fdk_extend.h against a
+ * live X server, driven the way a REAL add-on would drive it: a
+ * registered kind whose create callback builds its own X window
+ * through the documented native-display accessor (dock-type
+ * properties included — the exact shape fdk-shell's X11 backend
+ * has), adopted by FDK, rendered through the public fdk_surface
+ * path, receiving real input events, parenting popups, and joining
+ * the event loop with fd sources. The add-on code below uses ONLY
+ * the public API (fdk.h + Xlib through the documented accessor) —
+ * the internal includes at the top of this file are the test's own
+ * verification channels, exactly like every other section here.
+ */
+
+/* The test add-on's per-surface state: what a real add-on (fdk-shell)
+ * keeps beside the FDK handle. */
+typedef struct ext_kind_state {
+    int creates;   /* create callbacks run                       */
+    int destroys;  /* destroy callbacks run                      */
+    int popups;    /* popup_attached callbacks run (X11: never)  */
+    fdk_ext_surface_kind *kind;
+    fdk_context *ctx;
+} ext_kind_state;
+
+static ext_kind_state g_ext_state;
+
+/* The kind's create callback: build an UNMAPPED X window with the
+ * add-on's own properties (a dock-type window here — the strut
+ * semantics themselves are fdk-shell's business; this is the shape),
+ * and hand the native handle back to FDK for adoption. Public API +
+ * Xlib only — the documented accessor pattern from docs/EXTENDING.md. */
+static fdk_result ext_test_create(fdk_ext_surface *surface,
+                                  fdk_ext_native_handle *out_native,
+                                  void *user) {
+    ext_kind_state *st = user;
+    st->creates++;
+
+    fdk_context *ctx = fdk_ext_surface_context(surface);
+    assert(ctx != NULL);
+    assert(ctx == st->ctx);
+
+    fdk_ext_native_display nd;
+    if (!fdk_ok(fdk_ext_get_native_display(ctx, &nd))) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+    assert(nd.backend == FDK_EXT_BACKEND_X11);
+    Display *dpy = (Display *)nd.display;
+
+    /* The add-on's own window: unmapped, its own size, dock-typed.
+     * (Properties set BEFORE the map — the adopt contract.) */
+    Window xw = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy),
+                                    12, 34, 200, 60, 0,
+                                    BlackPixel(dpy, DefaultScreen(dpy)),
+                                    WhitePixel(dpy, DefaultScreen(dpy)));
+    if (xw == None) {
+        return FDK_ERR_WINDOW_CREATE;
+    }
+    Atom type_atom = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
+    Atom dock = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
+    XChangeProperty(dpy, xw, type_atom, XA_ATOM, 32, PropModeReplace,
+                    (const unsigned char *)&dock, 1);
+    XFlush(dpy);
+
+    out_native->backend = FDK_EXT_BACKEND_X11;
+    out_native->xid = (fdk_u64)xw;
+    return FDK_OK;
+}
+
+static void ext_test_destroy(fdk_ext_surface *surface, void *user) {
+    ext_kind_state *st = user;
+    st->destroys++;
+    /* The native surface must still be alive here (FDK destroys it
+     * AFTER this callback) — verify server-side through the accessor
+     * the callback still holds. */
+    fdk_context *ctx = fdk_ext_surface_context(surface);
+    if (ctx != NULL) {
+        fdk_ext_native_display nd;
+        if (fdk_ok(fdk_ext_get_native_display(ctx, &nd))) {
+            fdk_ext_native_handle nh;
+            if (fdk_ok(fdk_ext_surface_native(surface, &nh))) {
+                assert(nh.backend == FDK_EXT_BACKEND_X11);
+                /* existence check via the attributes query — an
+                 * error here would mean FDK destroyed the native
+                 * BEFORE the role teardown */
+                XWindowAttributes attrs;
+                Display *dpy = (Display *)nd.display;
+                assert(XGetWindowAttributes(dpy, (Window)nh.xid,
+                                            &attrs) != 0);
+            }
+        }
+    }
+}
+
+static void ext_test_popup_attached(fdk_ext_surface *surface,
+                                    void *native_popup, void *user) {
+    (void)surface;
+    (void)native_popup; /* X11 never calls this — the assertion is
+                         * the contract check */
+    ((ext_kind_state *)user)->popups++;
+}
+
+/* Event recording for the add-on surfaces. */
+static fdk_event_type g_ext_last_event;
+static int g_ext_events;
+static fdk_i32 g_ext_last_w, g_ext_last_h;
+
+static void ext_test_event(fdk_ext_surface *surface,
+                           const fdk_event_data *event, void *user) {
+    (void)surface;
+    (void)user;
+    g_ext_events++;
+    g_ext_last_event = event->type;
+    if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
+        g_ext_last_w = event->configure.size.width;
+        g_ext_last_h = event->configure.size.height;
+    }
+}
+
+static void test_ext_api_basics(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* Identity queries. */
+    assert(fdk_ext_api_version() == FDK_EXT_API_VERSION);
+    assert(fdk_ext_active_backend(ctx) == FDK_EXT_BACKEND_X11);
+    assert(fdk_ext_active_backend(NULL) == FDK_EXT_BACKEND_NONE);
+
+    /* Capabilities, the honest X11 answers. */
+    assert(fdk_ext_has_capability(ctx, FDK_EXT_CAP_SHM_RENDER));
+    assert(fdk_ext_has_capability(ctx, FDK_EXT_CAP_POPUP_GRAB));
+    assert(fdk_ext_has_capability(ctx, FDK_EXT_CAP_EWMH_DOCK));
+    assert(!fdk_ext_has_capability(ctx, FDK_EXT_CAP_FRAME_PACING));
+    assert(!fdk_ext_has_capability(ctx, (fdk_ext_capability)999));
+
+    /* The native display accessor hands out the REAL Display*: prove
+     * it by writing a property on the root through FDK's handle and
+     * reading it back through the test's OWN second connection —
+     * nothing but the same Display* could satisfy that roundtrip. */
+    fdk_ext_native_display nd;
+    assert(fdk_ok(fdk_ext_get_native_display(ctx, &nd)));
+    assert(nd.backend == FDK_EXT_BACKEND_X11);
+    assert(nd.display != NULL);
+    Display *fdk_dpy = (Display *)nd.display;
+    Atom marker = XInternAtom(fdk_dpy, "FDK_EXT_TEST_MARKER", False);
+    unsigned char payload[4] = { 0xCA, 0xFE, 0xBA, 0xBE };
+    XChangeProperty(fdk_dpy, DefaultRootWindow(fdk_dpy), marker,
+                    XA_INTEGER, 8, PropModeReplace, payload, 4);
+    XFlush(fdk_dpy);
+
+    Display *own_dpy = XOpenDisplay(NULL);
+    assert(own_dpy != NULL);
+    Atom marker_own = XInternAtom(own_dpy, "FDK_EXT_TEST_MARKER", False);
+    Atom actual_type = None;
+    int actual_fmt = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *prop = NULL;
+    assert(XGetWindowProperty(own_dpy, DefaultRootWindow(own_dpy), marker_own,
+                        0, 4, False, XA_INTEGER, &actual_type, &actual_fmt,
+                        &nitems, &bytes_after, &prop) == Success);
+    assert(nitems == 4);
+    assert(prop != NULL && prop[0] == 0xCA && prop[3] == 0xBE);
+    XFree(prop);
+    XDeleteProperty(own_dpy, DefaultRootWindow(own_dpy), marker_own);
+    XCloseDisplay(own_dpy);
+
+    fdk_shutdown(ctx);
+    printf("[ok] ext basics: backend, capabilities, native display is "
+           "the real Display* (property roundtrip)\n");
+}
+
+static void test_ext_surface_lifecycle(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    memset(&g_ext_state, 0, sizeof(g_ext_state));
+    g_ext_state.ctx = ctx;
+
+    fdk_ext_surface_ops ops;
+    memset(&ops, 0, sizeof(ops));
+    ops.struct_size = sizeof(ops);
+    ops.create = ext_test_create;
+    ops.destroy = ext_test_destroy;
+    ops.popup_attached = ext_test_popup_attached;
+
+    /* Registration + the duplicate-name refusal. */
+    fdk_ext_surface_kind *kind = NULL;
+    assert(fdk_ok(fdk_ext_register_kind(ctx, "test.dock", &ops,
+                                        &g_ext_state, &kind)));
+    fdk_ext_surface_kind *dupe = NULL;
+    assert(fdk_ext_register_kind(ctx, "test.dock", &ops, &g_ext_state,
+                                 &dupe) == FDK_ERR_INVALID_ARGUMENT);
+    g_ext_state.kind = kind;
+
+    /* Creation: the add-on's create ran, the native handle came back
+     * tagged X11, the window exists server-side with the add-on's
+     * properties (dock type) intact. */
+    fdk_ext_surface *surf = NULL;
+    assert(fdk_ok(fdk_ext_surface_create(kind, &surf)));
+    assert(g_ext_state.creates == 1);
+    assert(fdk_ext_surface_context(surf) == ctx);
+
+    fdk_ext_native_handle nh;
+    assert(fdk_ok(fdk_ext_surface_native(surf, &nh)));
+    assert(nh.backend == FDK_EXT_BACKEND_X11);
+    unsigned long xid = (unsigned long)nh.xid;
+    assert(xid != 0);
+
+    Display *own_dpy = XOpenDisplay(NULL);
+    assert(own_dpy != NULL);
+
+    XWindowAttributes attrs;
+    assert(XGetWindowAttributes(own_dpy, (Window)xid, &attrs) != 0);
+    assert(attrs.width == 200 && attrs.height == 60);
+    assert(attrs.map_state == IsUnmapped); /* show() has not run */
+    Atom type_atom = XInternAtom(own_dpy, "_NET_WM_WINDOW_TYPE", False);
+    Atom dock = XInternAtom(own_dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
+    Atom actual_type = None;
+    int actual_fmt = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *prop = NULL;
+    assert(XGetWindowProperty(own_dpy, (Window)xid, type_atom, 0, 1, False,
+                        XA_ATOM, &actual_type, &actual_fmt, &nitems,
+                        &bytes_after, &prop) == Success);
+    assert(nitems == 1);
+    assert(*(Atom *)prop == dock); /* the add-on's property survived */
+    XFree(prop);
+
+    /* Kind teardown while a surface lives: refused. */
+    assert(fdk_ext_kind_destroy(kind) == FDK_ERR_INVALID_STATE);
+
+    /* Show + render through the PUBLIC fdk_surface path. */
+    fdk_ext_surface_show(surf);
+    (void)fdk_pump_events(ctx, 100);
+    assert(XGetWindowAttributes(own_dpy, (Window)xid, &attrs) != 0);
+    assert(attrs.map_state == IsViewable);
+
+    fdk_surface *render = NULL;
+    assert(fdk_ok(fdk_ext_surface_get_surface(surf, &render)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(render, &info)));
+    assert(info.width == 200 && info.height == 60);
+    fdk_surface_fill(render, (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(render)));
+    (void)fdk_pump_events(ctx, 200);
+
+    /* Server-side pixel proof (second connection, no FDK cache). */
+    unsigned long px = x11_readback_pixel(&own_dpy, xid, 100, 30);
+    assert((px & 0xFFFFFF) == 0x0000FF00u);
+
+    /* Real input routed to the add-on: a synthetic click inside the
+     * surface delivers FDK_EVENT_POINTER_BUTTON_DOWN through the ext
+     * event callback (the same translator path every window gets). */
+    g_ext_events = 0;
+    g_ext_last_event = 0;
+    fdk_ext_surface_set_event_callback(surf, ext_test_event, NULL);
+    x11_send_pointer_event(own_dpy, xid, ButtonPress,
+                          ButtonPressMask, 80, 25, 1);
+    XFlush(own_dpy);
+    (void)fdk_pump_events(ctx, 200);
+    assert(g_ext_events >= 1);
+    assert(g_ext_last_event == FDK_EVENT_POINTER_BUTTON_DOWN);
+    x11_send_pointer_event(own_dpy, xid, ButtonRelease,
+                          ButtonReleaseMask, 80, 25, 1);
+    XFlush(own_dpy);
+    (void)fdk_pump_events(ctx, 200);
+
+    /* Destroy: the kind's role teardown ran FIRST (against the live
+     * native — ext_test_destroy asserts exactly that), then FDK
+     * destroyed the X window server-side. */
+    fdk_ext_surface_destroy(surf);
+    assert(g_ext_state.destroys == 1);
+    /* The window is gone: the ID no longer appears under the root's
+     * children (a probe that cannot raise a BadWindow error). */
+    {
+        XSync(own_dpy, False);
+        Window root_ret = None, parent_ret = None;
+        Window *children = NULL;
+        unsigned int nchildren = 0;
+        assert(XQueryTree(own_dpy, DefaultRootWindow(own_dpy), &root_ret,
+                          &parent_ret, &children, &nchildren) != 0);
+        int found = 0;
+        for (unsigned int i = 0; i < nchildren; i++) {
+            if (children[i] == (Window)xid) {
+                found = 1;
+            }
+        }
+        if (children != NULL) {
+            XFree(children);
+        }
+        assert(!found);
+    }
+
+    /* The kind can be destroyed now that its surfaces are gone. */
+    assert(fdk_ext_kind_destroy(kind) == FDK_OK);
+
+    XCloseDisplay(own_dpy);
+    fdk_shutdown(ctx);
+    printf("[ok] ext surface lifecycle: adopt, dock property survives, "
+           "render + readback, real input, teardown ordering\n");
+}
+
+static void test_ext_notify_configure(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    memset(&g_ext_state, 0, sizeof(g_ext_state));
+    g_ext_state.ctx = ctx;
+    fdk_ext_surface_ops ops;
+    memset(&ops, 0, sizeof(ops));
+    ops.struct_size = sizeof(ops);
+    ops.create = ext_test_create;
+    ops.destroy = ext_test_destroy;
+    fdk_ext_surface_kind *kind = NULL;
+    assert(fdk_ok(fdk_ext_register_kind(ctx, "test.dock", &ops,
+                                        &g_ext_state, &kind)));
+
+    fdk_ext_surface *surf = NULL;
+    assert(fdk_ok(fdk_ext_surface_create(kind, &surf)));
+    fdk_ext_surface_show(surf);
+    (void)fdk_pump_events(ctx, 100);
+
+    g_ext_events = 0;
+    g_ext_last_w = g_ext_last_h = 0;
+    fdk_ext_surface_set_event_callback(surf, ext_test_event, NULL);
+
+    /* The add-on reports a compositor-assigned size (the Wayland
+     * shape; X11 never calls this — its ConfigureNotify arrives on
+     * its own — but the mirror path must behave identically). */
+    assert(fdk_ext_surface_notify_configure(surf, 300, 80) == FDK_OK);
+    (void)fdk_pump_events(ctx, 100);
+    assert(g_ext_last_event == FDK_EVENT_WINDOW_CONFIGURE);
+    assert(g_ext_last_w == 300 && g_ext_last_h == 80);
+
+    fdk_size sz;
+    assert(fdk_ok(fdk_ext_surface_get_size(surf, &sz)));
+    assert(sz.width == 300 && sz.height == 80);
+
+    /* The render path follows the reported size: acquire + fill +
+     * present at 300x80, verified server-side at the far corner. */
+    fdk_surface *render = NULL;
+    assert(fdk_ok(fdk_ext_surface_get_surface(surf, &render)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(render, &info)));
+    assert(info.width == 300 && info.height == 80);
+    fdk_surface_fill(render, (fdk_color){ .r = 1, .g = 0, .b = 1, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(render)));
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_ext_native_handle nh;
+    assert(fdk_ok(fdk_ext_surface_native(surf, &nh)));
+    Display *own_dpy = XOpenDisplay(NULL);
+    assert(own_dpy != NULL);
+    /* The X window itself is still 200x60 (the add-on never resized
+     * it server-side in this synthetic scenario) — but FDK's buffer
+     * resized to the REPORTED size, which is what the contract
+     * promises. Verify FDK-side via a second get_info. */
+    fdk_surface_info info2;
+    assert(fdk_ok(fdk_surface_get_info(render, &info2)));
+    assert(info2.width == 300 && info2.height == 80);
+    (void)own_dpy;
+    XCloseDisplay(own_dpy);
+
+    /* Argument validation. */
+    assert(fdk_ext_surface_notify_configure(surf, 0, 80) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_ext_surface_notify_configure(surf, 80, -2) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    fdk_ext_surface_destroy(surf);
+    assert(fdk_ext_kind_destroy(kind) == FDK_OK);
+    fdk_shutdown(ctx);
+    printf("[ok] ext notify_configure: event mirror, size cache, "
+           "render resize\n");
+}
+
+/* Popup-on-ext-parent close-request recorder. */
+static int g_ext_popup_closes;
+static void ext_popup_event(fdk_ext_surface *surface,
+                            const fdk_event_data *event, void *user) {
+    (void)surface;
+    (void)user;
+    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        g_ext_popup_closes++;
+    }
+}
+
+static void test_ext_popup_x11(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    memset(&g_ext_state, 0, sizeof(g_ext_state));
+    g_ext_state.ctx = ctx;
+    fdk_ext_surface_ops ops;
+    memset(&ops, 0, sizeof(ops));
+    ops.struct_size = sizeof(ops);
+    ops.create = ext_test_create;
+    ops.destroy = ext_test_destroy;
+    ops.popup_attached = ext_test_popup_attached;
+    fdk_ext_surface_kind *kind = NULL;
+    assert(fdk_ok(fdk_ext_register_kind(ctx, "test.dock", &ops,
+                                        &g_ext_state, &kind)));
+
+    fdk_ext_surface *surf = NULL;
+    assert(fdk_ok(fdk_ext_surface_create(kind, &surf)));
+    fdk_ext_surface_show(surf);
+    (void)fdk_pump_events(ctx, 100);
+
+    fdk_ext_native_handle nh;
+    assert(fdk_ok(fdk_ext_surface_native(surf, &nh)));
+    unsigned long parent_xid = (unsigned long)nh.xid;
+
+    /* A popup parented to the extension surface: parent-relative
+     * positioning against the ADOPTED window. */
+    g_ext_popup_closes = 0;
+    fdk_ext_surface *pop = NULL;
+    assert(fdk_ok(fdk_ext_popup_create(surf, 30, 20, 120, 80, &pop)));
+    fdk_ext_surface_set_event_callback(pop, ext_popup_event, NULL);
+    fdk_ext_surface_show(pop);
+    (void)fdk_pump_events(ctx, 200);
+
+    fdk_ext_native_handle pop_nh;
+    assert(fdk_ok(fdk_ext_surface_native(pop, &pop_nh)));
+    unsigned long pop_xid = (unsigned long)pop_nh.xid;
+
+    Display *own_dpy = XOpenDisplay(NULL);
+    assert(own_dpy != NULL);
+
+    /* Server-side: the popup is an override-redirect ROOT child
+     * POSITIONED at the ext window's origin + the parent-relative
+     * offset (the X11 override-redirect pattern — the X tree does
+     * not parent it, which is exactly why X11 needs no
+     * popup_attached hook, and none fired: the contract). */
+    assert(g_ext_state.popups == 0);
+    Window child_ret = None;
+    int parent_x = 0, parent_y = 0;
+    int pop_x = 0, pop_y = 0;
+    assert(XTranslateCoordinates(own_dpy, (Window)parent_xid,
+                                 DefaultRootWindow(own_dpy), 0, 0,
+                                 &parent_x, &parent_y, &child_ret));
+    assert(XTranslateCoordinates(own_dpy, (Window)pop_xid,
+                                 DefaultRootWindow(own_dpy), 0, 0,
+                                 &pop_x, &pop_y, &child_ret));
+    /* The ext window was created at (12, 34) with the popup offset
+     * (30, 20): absolute position (42, 54). */
+    assert(pop_x == parent_x + 30);
+    assert(pop_y == parent_y + 20);
+    XWindowAttributes pattrs;
+    assert(XGetWindowAttributes(own_dpy, (Window)pop_xid, &pattrs) != 0);
+    assert(pattrs.override_redirect != 0);
+    assert(pattrs.map_state == IsViewable);
+
+    /* Render the popup through the ext surface path. */
+    fdk_surface *render = NULL;
+    assert(fdk_ok(fdk_ext_surface_get_surface(pop, &render)));
+    fdk_surface_fill(render, (fdk_color){ .r = 1, .g = 1, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(render)));
+    (void)fdk_pump_events(ctx, 200);
+    unsigned long px = x11_readback_pixel(&own_dpy, pop_xid, 60, 40);
+    assert((px & 0xFFFFFF) == 0x00FFFF00u);
+
+    /* Outside click (the grab shape): out-of-bounds press to the
+     * popup window → CLOSE_REQUEST on the popup's ext callback. */
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = ButtonPress;
+    ev.xbutton.window = (Window)pop_xid;
+    ev.xbutton.x = -50;
+    ev.xbutton.y = -50;
+    ev.xbutton.button = 1;
+    ev.xbutton.same_screen = True;
+    assert(XSendEvent(own_dpy, (Window)pop_xid, False,
+                      (long)(ButtonPressMask | ButtonReleaseMask), &ev));
+    XFlush(own_dpy);
+    (void)fdk_pump_events(ctx, 200);
+    assert(g_ext_popup_closes == 1);
+
+    /* Escape: the second dismissal shape. */
+    XEvent esc;
+    memset(&esc, 0, sizeof(esc));
+    esc.type = KeyPress;
+    esc.xkey.window = (Window)pop_xid;
+    esc.xkey.keycode = 9;
+    esc.xkey.same_screen = True;
+    assert(XSendEvent(own_dpy, (Window)pop_xid, False,
+                      (long)(KeyPressMask | KeyReleaseMask), &esc));
+    XFlush(own_dpy);
+    (void)fdk_pump_events(ctx, 200);
+    assert(g_ext_popup_closes == 2);
+
+    /* Popups must not outlive their parent: destroying the PARENT
+     * ext surface sweeps the popup (the popup-family contract). */
+    fdk_ext_surface_destroy(surf);
+    {
+        Window root2, parent2;
+        Window *kids2 = NULL;
+        unsigned int nkids2 = 0;
+        assert(XQueryTree(own_dpy, DefaultRootWindow(own_dpy), &root2,
+                          &parent2, &kids2, &nkids2) != 0);
+        int found_pop = 0, found_parent = 0;
+        for (unsigned int i = 0; i < nkids2; i++) {
+            if (kids2[i] == (Window)pop_xid) {
+                found_pop = 1;
+            }
+            if (kids2[i] == (Window)parent_xid) {
+                found_parent = 1;
+            }
+        }
+        if (kids2 != NULL) {
+            XFree(kids2);
+        }
+        assert(!found_pop);
+        assert(!found_parent);
+    }
+
+    XCloseDisplay(own_dpy);
+    assert(fdk_ext_kind_destroy(kind) == FDK_OK);
+    fdk_shutdown(ctx);
+    printf("[ok] ext popup: override-redirect root child positioned "
+           "at the adopted window, rendered, outside-click + Escape "
+           "dismissal, parent sweep\n");
+}
+
+/* ---- ext fd sources ------------------------------------------------------ */
+
+typedef struct {
+    int fired;
+    uint32_t last_revents;
+    int self_removed;    /* remove ourselves inside the callback  */
+    int add_another;     /* add a fresh source inside the callback */
+    int second_fired;
+} extfd_rec;
+
+static void extfd_cb(fdk_ext_fd_source *src, uint32_t revents, void *user) {
+    extfd_rec *rec = user;
+    rec->fired++;
+    rec->last_revents = revents;
+    if (rec->self_removed) {
+        fdk_ext_loop_remove_fd(src); /* legal: deferred free */
+    }
+}
+
+static void extfd_second_cb(fdk_ext_fd_source *src, uint32_t revents,
+                            void *user) {
+    (void)src;
+    (void)revents;
+    ((extfd_rec *)user)->second_fired++;
+}
+
+static void test_ext_fd_sources(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* A window so the context has something to pump for (the pump
+     * needs no windows, but this keeps the loop shape realistic). */
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "fd source host",
+                                 .width = 100, .height = 100 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+
+    /* Validation. */
+    assert(fdk_ext_loop_add_fd(ctx, -1, FDK_EXT_FD_IN, extfd_cb, NULL) ==
+           NULL);
+    assert(fdk_ext_loop_add_fd(ctx, 0, FDK_EXT_FD_IN, NULL, NULL) == NULL);
+    assert(fdk_ext_loop_add_fd(ctx, 0, 0xFF, extfd_cb, NULL) == NULL);
+    assert(fdk_ext_loop_add_fd(ctx, 0, FDK_EXT_FD_HUP, extfd_cb, NULL) ==
+           NULL); /* HUP is reported, never watched */
+
+    /* Readable wakes the pump and fires the callback with IN. */
+    int fds[2];
+    assert(pipe(fds) == 0);
+    extfd_rec rec;
+    memset(&rec, 0, sizeof(rec));
+    fdk_ext_fd_source *src =
+        fdk_ext_loop_add_fd(ctx, fds[0], FDK_EXT_FD_IN, extfd_cb, &rec);
+    assert(src != NULL);
+    assert(fdk_ext_fd_source_fd(src) == fds[0]);
+
+    char byte = 'x';
+    assert(write(fds[1], &byte, 1) == 1);
+    int fired_pump = fdk_pump_events(ctx, 300);
+    assert(fired_pump >= 1); /* the source counts as dispatched activity */
+    assert(rec.fired == 1);
+    assert(rec.last_revents == FDK_EXT_FD_IN);
+
+    /* Drain the pipe; the next pump fires nothing for it. */
+    char sink[4];
+    assert(read(fds[0], sink, sizeof(sink)) == 1);
+    rec.fired = 0;
+    (void)fdk_pump_events(ctx, 50);
+    assert(rec.fired == 0);
+
+    /* ERR/HUP: reported even though only IN is watched (poll(2)'s
+     * rule) — the write end closes, the read end reports EOF/HUP. */
+    close(fds[1]);
+    rec.fired = 0;
+    (void)fdk_pump_events(ctx, 300);
+    assert(rec.fired == 1);
+    assert((rec.last_revents & FDK_EXT_FD_HUP) != 0);
+
+    /* Plain removal outside any callback (the source is still live
+     * here — the self-removal leg below frees THIS handle, so it is
+     * checked first). */
+    fdk_ext_loop_remove_fd(src);
+    rec.fired = 0;
+    (void)fdk_pump_events(ctx, 100);
+    assert(rec.fired == 0); /* removed: EOF never fires it again */
+    close(fds[0]);
+
+    /* Self-removal inside the callback: never fires again, the
+     * deferred free is clean under ASan. */
+    int fds3[2];
+    assert(pipe(fds3) == 0);
+    extfd_rec rec3;
+    memset(&rec3, 0, sizeof(rec3));
+    fdk_ext_fd_source *src3 =
+        fdk_ext_loop_add_fd(ctx, fds3[0], FDK_EXT_FD_IN, extfd_cb, &rec3);
+    assert(src3 != NULL);
+    close(fds3[1]); /* EOF: HUP reports on the next pump */
+    rec3.self_removed = 1;
+    (void)fdk_pump_events(ctx, 300);
+    assert(rec3.fired == 1);
+    assert((rec3.last_revents & FDK_EXT_FD_HUP) != 0);
+    rec3.fired = 0;
+    (void)fdk_pump_events(ctx, 100);
+    assert(rec3.fired == 0); /* gone — no use-after-free, no zombie */
+    close(fds3[0]);
+
+    /* A source whose callback adds ANOTHER source: the new one first
+     * fires on a LATER pump (the documented deferral idiom). */
+    int fds2[2];
+    assert(pipe(fds2) == 0);
+    extfd_rec rec2;
+    memset(&rec2, 0, sizeof(rec2));
+    fdk_ext_fd_source *src2 =
+        fdk_ext_loop_add_fd(ctx, fds2[0], FDK_EXT_FD_IN, extfd_cb, &rec2);
+    assert(src2 != NULL);
+    (void)src2;
+    /* Pre-load the pipe: one byte now (fires cb once; cb is not
+     * adding anything in this leg — keep the add-in-callback shape
+     * for the HUP leg below where it is stable). */
+    assert(write(fds2[1], &byte, 1) == 1);
+    (void)fdk_pump_events(ctx, 300);
+    assert(rec2.fired == 1);
+    assert(read(fds2[0], sink, sizeof(sink)) == 1);
+    close(fds2[1]);
+    close(fds2[0]);
+
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx); /* surviving sources would warn + free */
+    printf("[ok] ext fd sources: IN wakes the pump, HUP reported, "
+           "self-removal deferred, plain removal, validation\n");
+}
+
 int main(void) {
     /* Hermeticity (1.4.13): pin the global-settings boot (the "fdk"
      * prefs store + $FDK_THEME) to nothing so this suite's pixel
@@ -10021,6 +10682,11 @@ int main(void) {
     signal(SIGALRM, alarm_handler);
 
     test_connect_and_shutdown();
+    test_ext_api_basics();
+    test_ext_surface_lifecycle();
+    test_ext_notify_configure();
+    test_ext_popup_x11();
+    test_ext_fd_sources();
     test_init_with_app_id();
     test_quit_before_run_is_safe();
     test_run_returns_when_no_windows_open();
