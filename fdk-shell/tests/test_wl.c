@@ -203,8 +203,171 @@ static void test_layer_on_compositor(void) {
            "modes, clean teardown\n");
 }
 
+/* The workspace contract: layer surfaces are per-OUTPUT surfaces in
+ * the layer-shell model — NOT workspace members. wlroots compositors
+ * render them on every workspace, so switching must not close,
+ * unmap, or even reconfigure them: the surface just keeps presenting.
+ * (The X11 backend's sticky hints exist to approximate exactly this
+ * behavior under EWMH — pinned there by tests/test_x11.c's desktop-
+ * switch rig.)
+ *
+ * swaymsg is the control channel (the rig exports it on PATH); the
+ * test self-skips when neither a compositor nor swaymsg exists. */
+static int g_ws_close_requests = 0;
+static int g_ws_configures = 0;
+
+static void ws_layer_event(fdk_shell_layer *layer,
+                           const fdk_event_data *ev, void *user) {
+    (void)layer;
+    (void)user;
+    if (ev->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        g_ws_close_requests++;
+    }
+    if (ev->type == FDK_EVENT_WINDOW_CONFIGURE) {
+        g_ws_configures++;
+    }
+}
+
+/* Parses sway's get_workspaces JSON well enough for the contract:
+ * returns 1 when the workspace whose "num" is `num` carries
+ * "visible": true (the current one). Tolerant to spacing. */
+static int sway_workspace_visible(int num) {
+    FILE *f = popen("swaymsg -r -t get_workspaces 2>/dev/null", "r");
+    if (f == NULL) {
+        return 0;
+    }
+    char buf[8192];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = '\0';
+    int rc = pclose(f);
+    if (rc != 0) {
+        return 0;
+    }
+
+    const char *p = buf;
+    while ((p = strstr(p, "\"num\":")) != NULL) {
+        p += 6;
+        while (*p == ' ') {
+            p++;
+        }
+        int v = (int)strtol(p, NULL, 10);
+        const char *next_num = strstr(p, "\"num\":");
+        if (v == num) {
+            const char *vis = strstr(p, "\"visible\":");
+            if (vis != NULL && (next_num == NULL || vis < next_num)) {
+                vis += 10;
+                while (*vis == ' ') {
+                    vis++;
+                }
+                return strncmp(vis, "true", 4) == 0;
+            }
+        }
+        p = (next_num != NULL) ? next_num : p + strlen(p);
+    }
+    return 0;
+}
+
+static int swaymsg_ok(const char *cmd) {
+    char full[128];
+    snprintf(full, sizeof(full), "swaymsg %s >/dev/null 2>&1", cmd);
+    return system(full) == 0;
+}
+
+static void test_layer_across_workspaces(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_WAYLAND };
+    fdk_result r = fdk_init(&ctx, &iopts);
+    if (!fdk_ok(r)) {
+        printf("[skip] no reachable Wayland compositor\n");
+        return;
+    }
+
+    fdk_shell *shell = NULL;
+    r = fdk_shell_init(ctx, &shell);
+    if (r == FDK_ERR_UNSUPPORTED) {
+        printf("[skip] compositor offers no wlr-layer-shell\n");
+        fdk_shutdown(ctx);
+        return;
+    }
+    assert(fdk_ok(r));
+
+    if (system("command -v swaymsg >/dev/null 2>&1") != 0) {
+        printf("[skip] no swaymsg on PATH — the workspace-switch "
+               "confirmation needs the rig's control channel\n");
+        fdk_shell_shutdown(shell);
+        fdk_shutdown(ctx);
+        return;
+    }
+
+    /* Baseline: sway starts on workspace 1. */
+    assert(sway_workspace_visible(1));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors =
+        FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT | FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    desc.exclusive_zone = -1;
+
+    g_ws_close_requests = 0;
+    g_ws_configures = 0;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_set_event_callback(layer, ws_layer_event, NULL);
+    fdk_shell_layer_show(layer);
+    for (int i = 0; i < 40 && g_ws_configures == 0; i++) {
+        pump(ctx, 50);
+    }
+    assert(g_ws_configures >= 1); /* the handshake completed */
+
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_shell_layer_get_surface(layer, &surface)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    fdk_surface_fill(surface, (fdk_color){ .r = 0.30f, .g = 0.62f,
+                                           .b = 0.95f, .a = 1.0f });
+    assert(fdk_ok(fdk_surface_present(surface)));
+    pump(ctx, 300);
+
+    /* Switch to workspace 2: the layer surface is NOT a workspace
+     * member — nothing about it changes. */
+    assert(swaymsg_ok("workspace number 2"));
+    pump(ctx, 300);
+    assert(sway_workspace_visible(2)); /* the switch really happened */
+    assert(sway_workspace_visible(1) == 0);
+    assert(g_ws_close_requests == 0); /* no close, no unmap ... */
+
+    /* ... and it keeps presenting on the new workspace. */
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    fdk_surface_fill(surface, (fdk_color){ .r = 0.30f, .g = 0.62f,
+                                           .b = 0.95f, .a = 1.0f });
+    assert(fdk_ok(fdk_surface_present(surface)));
+    pump(ctx, 300);
+
+    /* And back. */
+    assert(swaymsg_ok("workspace number 1"));
+    pump(ctx, 300);
+    assert(sway_workspace_visible(1));
+    assert(g_ws_close_requests == 0);
+
+    fdk_size sz;
+    assert(fdk_ok(fdk_shell_layer_get_size(layer, &sz)));
+    assert(sz.height == 32);
+
+    fdk_shell_layer_destroy(layer);
+    pump(ctx, 200);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] fdk-shell wayland: layer surface visible on every "
+           "workspace (no close/reconfigure across switches, keeps "
+           "presenting) — confirmed against a real compositor\n");
+}
+
 int main(void) {
     test_layer_on_compositor();
+    test_layer_across_workspaces();
     printf("fdk-shell wayland tests done\n");
     return 0;
 }

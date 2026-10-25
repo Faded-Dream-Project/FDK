@@ -206,6 +206,9 @@ static void popup_event(fdk_shell_popup *popup, const fdk_event_data *ev,
                         void *user) {
     bar_app *app = user;
     switch (ev->type) {
+        case FDK_EVENT_WINDOW_EXPOSE:
+            popup_paint(app); /* same contract as the bar's expose */
+            break;
         case FDK_EVENT_POINTER_MOTION:
             app->popup_item_hover =
                 (ev->pointer.position.y >= 4.0f &&
@@ -239,6 +242,24 @@ static void bar_event(fdk_shell_layer *layer, const fdk_event_data *ev,
     switch (ev->type) {
         case FDK_EVENT_WINDOW_CONFIGURE:
             bar_paint(app); /* the compositor sized us: repaint */
+            break;
+        case FDK_EVENT_WINDOW_EXPOSE:
+            /* The ghost-bar fix (found live, 2026-10-25): an EXPOSE
+             * means the server no longer retains some region of the
+             * window — a desktop switch on a WM without sticky
+             * support, a fullscreen window that covered us closing,
+             * an unocclusion. fdk_event.h's contract for rendered
+             * surfaces is "re-present"; the retained-damage model
+             * would otherwise conclude nothing changed and paint
+             * NOTHING, leaving whatever was underneath showing in
+             * the bar's region. Re-paint on every expose (X sends
+             * them in bursts; painting the whole bar is the cheap,
+             * correct answer — same shape FDK's own examples use). */
+            bar_paint(app);
+            if (app->popup != NULL) {
+                popup_paint(app); /* it can be exposed too (a window
+                                   * raised over it, then lowered) */
+            }
             break;
         case FDK_EVENT_POINTER_MOTION: {
             fdk_f32 x = ev->pointer.position.x;

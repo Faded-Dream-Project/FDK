@@ -12,6 +12,26 @@
  *     _NET_WM_STRUT for older WMs): the number of pixels along each
  *     screen edge other windows must not use — what a panel "reserves"
  *     so maximized windows stop under it;
+ *   - STICKINESS: the layer follows the user across workspaces —
+ *     _NET_WM_DESKTOP = 0xFFFFFFFF ("all desktops") and
+ *     _NET_WM_STATE_STICKY, set as properties BEFORE mapping (the
+ *     EWMH initial-state contract WMs honor at map time) AND
+ *     re-asserted as root client messages AFTER mapping (for WMs
+ *     that came late, missed the properties, or need the request
+ *     shape). This mirrors what layer-shell gives for free: a
+ *     zwlr_layer_surface is per-output, not per-workspace, and every
+ *     wlroots compositor shows it on all of them.
+ *     The sticky window is never unmapped across desktop switches —
+ *     which also protects its pixels (an unmapped window's contents
+ *     are undefined once remapped; that was the ghost-bar bug);
+ *   - STACKING by layer level: TOP and OVERLAY carry
+ *     _NET_WM_STATE_ABOVE (plus _NET_WM_STATE_SKIP_TASKBAR /
+ *     _NET_WM_STATE_SKIP_PAGER for OVERLAY — the strongest EWMH
+ *     stacking behavior available). BACKGROUND/BOTTOM get the plain
+ *     dock type only: EWMH has NO below-normal-windows stacking
+ *     state, and that delta is documented honestly in the README
+ *     together with the fullscreen-over-docks limit and what a
+ *     custom WM would need to honor a true overlay layer;
  *   - geometry follows the protocol's anchoring math (anchored axes
  *     stretch between margins; unanchored axes take the desired size
  *     and CENTER — "displayed centered with respect to its anchors",
@@ -38,11 +58,48 @@
 
 #include <stdio.h>
 
+/* ---- atoms (interned once per shell) -------------------------------------- */
+
+typedef struct {
+    Atom net_wm_window_type;
+    Atom net_wm_window_type_dock;
+    Atom net_wm_strut;
+    Atom net_wm_strut_partial;
+    Atom net_wm_desktop;
+    Atom net_wm_state;
+    Atom net_wm_state_sticky;
+    Atom net_wm_state_above;
+    Atom net_wm_state_skip_taskbar;
+    Atom net_wm_state_skip_pager;
+} x11_atoms;
+
+static void x11_intern_atoms(Display *dpy, x11_atoms *a) {
+    a->net_wm_window_type = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
+    a->net_wm_window_type_dock =
+        XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
+    a->net_wm_strut = XInternAtom(dpy, "_NET_WM_STRUT", False);
+    a->net_wm_strut_partial = XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL",
+                                          False);
+    a->net_wm_desktop = XInternAtom(dpy, "_NET_WM_DESKTOP", False);
+    a->net_wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
+    a->net_wm_state_sticky =
+        XInternAtom(dpy, "_NET_WM_STATE_STICKY", False);
+    a->net_wm_state_above = XInternAtom(dpy, "_NET_WM_STATE_ABOVE", False);
+    a->net_wm_state_skip_taskbar =
+        XInternAtom(dpy, "_NET_WM_STATE_SKIP_TASKBAR", False);
+    a->net_wm_state_skip_pager =
+        XInternAtom(dpy, "_NET_WM_STATE_SKIP_PAGER", False);
+}
+
 /* ---- per-shell state ------------------------------------------------------ */
 
 typedef struct x11_shell_state {
     Display *dpy; /* borrowed: FDK's connection, its lifetime  */
     int screen;
+    x11_atoms atoms; /* interned once per shell (EWMH names are
+                      * server-global, but interning is a round trip
+                      * per call — one set per shell keeps layer
+                      * creation off that path) */
 } x11_shell_state;
 
 /* ---- per-layer state ------------------------------------------------------ */
@@ -54,22 +111,27 @@ typedef struct x11_layer_state {
     int grabbed;    /* keyboard grab active (EXCLUSIVE mode) */
 } x11_layer_state;
 
-/* ---- atoms (interned once per shell) -------------------------------------- */
+/* The EWMH "all desktops" value for _NET_WM_DESKTOP. */
+#define X11_NET_WM_DESKTOP_ALL 0xFFFFFFFFUL
 
-typedef struct {
-    Atom net_wm_window_type;
-    Atom net_wm_window_type_dock;
-    Atom net_wm_strut;
-    Atom net_wm_strut_partial;
-} x11_atoms;
-
-static void x11_intern_atoms(Display *dpy, x11_atoms *a) {
-    a->net_wm_window_type = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
-    a->net_wm_window_type_dock =
-        XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
-    a->net_wm_strut = XInternAtom(dpy, "_NET_WM_STRUT", False);
-    a->net_wm_strut_partial = XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL",
-                                          False);
+/* The _NET_WM_STATE atom list a layer level maps to — the stacking
+ * half of the layer semantics (see the file header). Populates
+ * `out` (up to 4 entries) and returns the count. */
+static int x11_layer_state_atoms(const x11_atoms *a,
+                                  fdk_shell_layer_level layer, Atom *out) {
+    int n = 0;
+    out[n++] = a->net_wm_state_sticky; /* every layer is a desktop-
+                                        * level surface: sticky */
+    if (layer == FDK_SHELL_LAYER_TOP || layer == FDK_SHELL_LAYER_OVERLAY) {
+        out[n++] = a->net_wm_state_above;
+    }
+    if (layer == FDK_SHELL_LAYER_OVERLAY) {
+        /* The strongest EWMH stacking behavior: above normal windows
+         * AND docks, out of the taskbar and the pager. */
+        out[n++] = a->net_wm_state_skip_taskbar;
+        out[n++] = a->net_wm_state_skip_pager;
+    }
+    return n;
 }
 
 /* ---- geometry: the anchoring math ------------------------------------------ */
@@ -189,6 +251,7 @@ fdk_result fdkshell__x11_init(fdk_shell *shell) {
     }
     st->dpy = (Display *)nd.display;
     st->screen = DefaultScreen(st->dpy);
+    x11_intern_atoms(st->dpy, &st->atoms);
     shell->x11 = st;
     return FDK_OK;
 }
@@ -231,16 +294,36 @@ fdk_result fdkshell__x11_layer_create(fdk_shell *shell,
         return FDK_ERR_WINDOW_CREATE;
     }
 
-    x11_atoms atoms;
-    x11_intern_atoms(dpy, &atoms);
+    const x11_atoms *atoms = &st->atoms;
 
     /* The DOCK type: the EWMH layering semantic. */
-    XChangeProperty(dpy, xw, atoms.net_wm_window_type, XA_ATOM, 32,
+    XChangeProperty(dpy, xw, atoms->net_wm_window_type, XA_ATOM, 32,
                     PropModeReplace,
-                    (const unsigned char *)&atoms.net_wm_window_type_dock, 1);
+                    (const unsigned char *)&atoms->net_wm_window_type_dock, 1);
+
+    /* STICKY (the workspace-following contract): _NET_WM_DESKTOP =
+     * "all desktops" as the pre-map property (the EWMH initial-state
+     * contract a WM honors when it maps the window) — so the layer
+     * is never unmapped by a desktop switch and its pixels survive
+     * (an unmapped window's contents are undefined on remap). The
+     * _NET_WM_STATE list below carries _NET_WM_STATE_STICKY for WMs
+     * that key off the state instead of the desktop hint. */
+    unsigned long all_desktops = X11_NET_WM_DESKTOP_ALL;
+    XChangeProperty(dpy, xw, atoms->net_wm_desktop, XA_CARDINAL, 32,
+                    PropModeReplace,
+                    (const unsigned char *)&all_desktops, 1);
+
+    /* The layer's stacking state (STICKY + per-level ABOVE/SKIP_*),
+     * also pre-map. */
+    Atom state_atoms[4];
+    int n_state = x11_layer_state_atoms(atoms, desc->layer, state_atoms);
+    XChangeProperty(dpy, xw, atoms->net_wm_state, XA_ATOM, 32,
+                    PropModeReplace,
+                    (const unsigned char *)state_atoms,
+                    (int)n_state);
 
     /* The exclusive zone as struts. */
-    x11_set_struts(dpy, &atoms, xw, desc, (int)x, (int)y, (int)w, (int)h,
+    x11_set_struts(dpy, atoms, xw, desc, (int)x, (int)y, (int)w, (int)h,
                    screen_w, screen_h);
 
     /* Make sure the requests are visible before FDK's adopt probe
@@ -292,6 +375,61 @@ void fdkshell__x11_layer_show(fdk_shell_layer *layer) {
     if (st == NULL || lst == NULL) {
         return;
     }
+    /* The layer window is mapped by the fdk_ext_surface_show that
+     * ALWAYS runs before this backend hook (shell.c's ordering).
+     * Re-assert the EWMH state through the REQUEST shapes now that
+     * the window is mapped — belt and braces for WMs that started
+     * after the pre-map properties were set, or that only move
+     * already-mapped windows through client messages:
+     *   _NET_WM_DESKTOP  -> move to "all desktops"
+     *   _NET_WM_STATE    -> ADD each of the layer's state atoms
+     * (EWMH allows two atoms per _NET_WM_STATE message; a 4-atom
+     * overlay layer sends the pair [STICKY, ABOVE] then [SKIP_TB,
+     * SKIP_PAGER].) */
+    {
+        Display *dpy = st->dpy;
+        Window root = DefaultRootWindow(dpy);
+
+        XEvent msg;
+        memset(&msg, 0, sizeof(msg));
+        msg.type = ClientMessage;
+        msg.xclient.window = lst->xwindow;
+        msg.xclient.message_type = st->atoms.net_wm_desktop;
+        msg.xclient.format = 32;
+        msg.xclient.data.l[0] = (long)X11_NET_WM_DESKTOP_ALL;
+        msg.xclient.data.l[1] = 0; /* timestamp: CurrentTime — the
+                                    * EWMH request shape; WMs that
+                                    * require a real timestamp still
+                                    * honored the pre-map property */
+        XSendEvent(dpy, root, False,
+                   (long)SubstructureNotifyMask | SubstructureRedirectMask,
+                   &msg);
+
+        Atom state_atoms[4];
+        int n_state =
+            x11_layer_state_atoms(&st->atoms, layer->desc.layer,
+                                  state_atoms);
+        for (int i = 0; i < n_state; i += 2) {
+            memset(&msg, 0, sizeof(msg));
+            msg.type = ClientMessage;
+            msg.xclient.window = lst->xwindow;
+            msg.xclient.message_type = st->atoms.net_wm_state;
+            msg.xclient.format = 32;
+            msg.xclient.data.l[0] = 1; /* _NET_WM_STATE_ADD */
+            msg.xclient.data.l[1] = (long)state_atoms[i];
+            msg.xclient.data.l[2] =
+                (i + 1 < n_state) ? (long)state_atoms[i + 1] : 0;
+            msg.xclient.data.l[3] = 1; /* source indication:
+                                        * application (EWMH) */
+            msg.xclient.data.l[4] = 0;
+            XSendEvent(dpy, root, False,
+                       (long)SubstructureNotifyMask |
+                           SubstructureRedirectMask,
+                       &msg);
+        }
+        XFlush(dpy);
+    }
+
     /* EXCLUSIVE keyboard: the grab rides the mapped window (X11's
      * answer to zwlr_layer_surface_v1's exclusive interactivity). */
     if (layer->desc.keyboard == FDK_SHELL_KBD_EXCLUSIVE && !lst->grabbed) {

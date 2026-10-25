@@ -164,10 +164,16 @@ typedef enum fdk_shell_keyboard_mode {
  *   output" protocol shape).
  *   X11: geometry is computed from the screen + anchors + margins +
  *   desired size; exclusive_zone becomes _NET_WM_STRUT_PARTIAL
- *   (auto = the surface's own extent); keyboard EXCLUSIVE maps to an
- *   XGrabKeyboard while shown, ON_DEMAND to best-effort focus; the
- *   layer level rides the dock window type + stacking the WM gives
- *   docks (background/overlay deltas are Wayland-only truth — X11
+ *   (auto = the surface's own extent); every layer is STICKY across
+ *   workspaces (_NET_WM_DESKTOP = 0xFFFFFFFF + _NET_WM_STATE_STICKY,
+ *   pre-map properties + post-map client messages — the Wayland
+ *   behavior arranged through EWMH); TOP/OVERLAY carry
+ *   _NET_WM_STATE_ABOVE (OVERLAY adds SKIP_TASKBAR/SKIP_PAGER — the
+ *   strongest EWMH stacking state; fullscreen-over-docks is a
+ *   documented protocol ceiling, see the README); keyboard EXCLUSIVE
+ *   maps to an XGrabKeyboard while shown, ON_DEMAND to best-effort
+ *   focus. BACKGROUND/BOTTOM have no below-normal-windows EWMH
+ *   mapping (background/overlay deltas are Wayland-only truth — X11
  *   documents this honestly).
  */
 typedef struct fdk_shell_layer_desc {
