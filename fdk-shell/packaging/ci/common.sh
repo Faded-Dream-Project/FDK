@@ -67,8 +67,14 @@ fdkshell_min_fdk_ver() {
 # Compiles and runs fdk-shell's bar smoke against the INSTALLED FDK +
 # fdk-shell (both found through pkg-config). $1 = expected fdk-shell
 # version. Requires cc + pkg-config + a running X server ($DISPLAY,
-# started by the caller through fdk_start_xvfb). Prints SMOKE-* lines;
-# returns the app's exit status.
+# started by the caller through fdk_start_xvfb) + the X11 development
+# packages (the smoke's readback connection is a DIRECT Xlib consumer
+# and modern ld refuses to resolve a binary's own X symbols through a
+# shared library's transitive NEEDED entries - "DSO missing from the
+# command line" - so the smoke's link line carries -lX11 itself; the
+# X11 dev packages are TEST INFRASTRUCTURE the install-tests
+# pre-install, the same class as gcc/pkg-config/xvfb). Prints SMOKE-*
+# lines; returns the app's exit status.
 fdkshell_run_smoke() {
     expected="$1"
     cc=""
@@ -83,19 +89,34 @@ fdkshell_run_smoke() {
         return 1
     fi
     # Both .pc files must resolve from the SAME environment: fdk-shell's
-    # Requires: fdk chain proves the metadata pair works together.
-    if ! pkg-config --exists fdk-shell 2>/dev/null; then
+    # Requires: fdk chain proves the metadata pair works together. A
+    # discovery failure prints the REAL pkg-config diagnostic (never
+    # swallow it - a bare "not found" has cost a whole CI-debug round).
+    if ! pc_err="$(pkg-config --exists fdk-shell 2>&1)"; then
         echo "SMOKE FAIL: pkg-config cannot find fdk-shell"
+        echo "  pkg-config diagnostic: $pc_err"
+        echo "  PKG_CONFIG_PATH='${PKG_CONFIG_PATH:-}'"
+        ls -la /usr/lib/pkgconfig/ 2>/dev/null | \
+            grep -i fdk | sed 's/^/  /' || true
         return 1
     fi
-    if ! pkg-config --exists fdk 2>/dev/null; then
+    if ! pc_err="$(pkg-config --exists fdk 2>&1)"; then
         echo "SMOKE FAIL: pkg-config cannot find fdk (fdk-shell's Requires)"
+        echo "  pkg-config diagnostic: $pc_err"
+        ls -la /usr/lib/pkgconfig/ 2>/dev/null | \
+            grep -i fdk | sed 's/^/  /' || true
+        return 1
+    fi
+    if ! pkg-config --exists x11 2>/dev/null; then
+        echo "SMOKE FAIL: pkg-config cannot find x11 - the X11 development"
+        echo "  packages are missing (test infrastructure; see the comment"
+        echo "  above and the install-test pre-installs)"
         return 1
     fi
     # shellcheck disable=SC2046
     "$cc" fdk-shell/packaging/common/smoke.c -o /tmp/fdkshell_package_smoke \
         $(pkg-config --cflags fdk-shell fdk) \
-        $(pkg-config --libs fdk-shell fdk) || {
+        $(pkg-config --libs fdk-shell fdk) $(pkg-config --libs x11) || {
         echo "SMOKE FAIL: compile against installed fdk-shell + fdk"
         return 1
     }

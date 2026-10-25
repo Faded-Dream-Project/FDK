@@ -225,6 +225,23 @@ deb verification extracts packages instead of installing them:
    successfully; the collection line FDK's own void build carries
    (`mv ./*.xbps dist/`) was missing.
 
+5. **The generated fdk-shell.pc carried the library's platform link
+   deps in Libs** (`pkg-config --libs x11 wayland-client` appended —
+   every consumer forced to install the X11 AND Wayland dev
+   packages; the clean-container smokes died at
+   `ld: cannot find -lwayland-client`; build-machine -L paths baked
+   into the artifact) **and never defined its own variables**
+   (`${libdir}`/`${includedir}` undefined — empty expansion that
+   only worked because /usr/include and the default linker path
+   need no flags). The .pc now matches fdk.pc's contract: variables
+   defined, `Libs: -lfdk-shell` + `Requires: fdk`, platform flags
+   in `Libs.private`. The smoke's own second Xlib connection now
+   carries `-lX11` on its link line (modern ld refuses to resolve a
+   binary's own symbols through a shared library's transitive
+   NEEDED — "DSO missing from command line"), and pkg-config
+   discovery failures print the real diagnostic instead of
+   swallowing it.
+
 Also: the fdk-shell distro build scripts restored the explaining
 comment for FDK's `LSAN_OPTIONS=exitcode=0` distro-container leak
 policy (the copy had dropped it), the inert copies of that flag

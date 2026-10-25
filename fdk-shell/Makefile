@@ -289,8 +289,8 @@ install: all
 	ln -sf libfdk-shell.so.$(FDKSHELL_VERSION) \
 	    $(DESTDIR)$(LIBDIR)/$(FDKSHELL_SONAME)
 	ln -sf $(FDKSHELL_SONAME) $(DESTDIR)$(LIBDIR)/libfdk-shell.so
-	@printf 'Name: fdk-shell\nDescription: Layer-shell surfaces (panels, docks, overlays) for FDK\nVersion: %s\nRequires: fdk\nCflags: -I$${includedir}\nLibs: -L$${libdir} -lfdk-shell %s\n' \
-	    '$(FDKSHELL_VERSION)' '$(shell pkg-config --libs x11 wayland-client 2>/dev/null || echo "")' \
+	@printf 'prefix=%s\nlibdir=%s\nincludedir=%s\n\nName: fdk-shell\nDescription: Layer-shell surfaces (panels, docks, overlays) for FDK\nVersion: %s\nURL: https://github.com/Faded-Dream-Project/FDK\nRequires: fdk\nCflags: -I$${includedir}\nLibs: -L$${libdir} -lfdk-shell\n# The .so already carries every platform dependency in its NEEDED\n# entries; a dynamically linked application needs none of them, and a\n# plain `pkg-config --cflags --libs fdk-shell` must succeed on machines\n# without the X11/Wayland development packages - hence raw platform\n# flags in Libs.private (used only by --static consumers) rather than\n# Requires.private or Libs.\nLibs.private: %s -lm\n' \
+	    '$(PREFIX)' '$(LIBDIR)' '$(INCDIR)' '$(FDKSHELL_VERSION)' '$(shell pkg-config --libs x11 wayland-client 2>/dev/null || echo "")' \
 	    > $(DESTDIR)$(LIBDIR)/pkgconfig/fdk-shell.pc
 
 uninstall:

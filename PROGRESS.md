@@ -36,9 +36,28 @@ those images run no sanitizer toolchain], and the rpm/alpine/void
 install-tests' `fdk_start_xvfb || exit 1` turned the el10
 honest-skip into a hard failure [now the helper's disclosed-skip
 if/else contract, the same shape as FDK's own install-tests].
-docs/testing.md's 1.1.0-rc1 packaging-matrix lesson +
-CHANGELOG rc1 Fixed section carry the full narratives. Prior
-state below.)
+A second push exposed the fifth and deepest class: the GENERATED
+fdk-shell.pc was wrong twice over — its Libs line carried the
+library's own platform link deps (-lX11 -lwayland-client, forcing
+every consumer to install the X11+Wayland dev packages and baking
+build-machine -L paths into the artifact; the deb/rpm smokes died
+at 'ld: cannot find -lwayland-client') and it referenced
+${libdir}/${includedir} without defining them [undefined .pc
+variables expand empty — it only worked because /usr/include and
+the default linker path need no flags]. The .pc now mirrors
+fdk.pc's contract [variables defined; Libs: -lfdk-shell +
+Requires: fdk; platform flags in Libs.private], the smoke's own
+Xlib readback carries -lX11 on its link line [modern ld refuses
+transitive resolution: 'DSO missing from command line', reproduced
+locally], and pkg-config discovery failures now print the real
+diagnostic [2>/dev/null swallowed the void failure's evidence;
+pkgconf 3.0.7 was built from source locally and PROVEN to accept
+the old bytes, so the void cause is pending its diagnostic].
+Proven locally: a mini installed-prefix + the exact clean-container
+compile line = SMOKE OK; the isolation proof (links the demo
+through the .pc alone) still green. docs/testing.md's 1.1.0-rc1
+packaging-matrix lesson + CHANGELOG rc1 Fixed section carry the
+full narratives. Prior state below.)
 
 Last audited: 2026-10-25, at milestone **1.7.1** (the rc1
 desktop-integration hardening, found live on a real NVIDIA GTX

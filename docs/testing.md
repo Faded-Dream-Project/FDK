@@ -2229,6 +2229,40 @@ honest-skip into a hard failure — the helper's contract is
 return-1-with-disclosure, and the callers now gate `if/else` like
 FDK's own fedora/alpine/void install-tests.
 
+The SECOND push exposed a fifth class, the deepest one: **the
+generated fdk-shell.pc was wrong twice over, and only its luck held
+it together.** Its Libs line appended `pkg-config --libs x11
+wayland-client` — the library's own platform link deps — so every
+consumer was forced to have the X11 AND Wayland dev packages
+installed (the deb/rpm clean-container smokes died at
+`ld: cannot find -lwayland-client`: -lX11 resolved because the
+install-tests had just started pre-installing libx11-dev) and the
+build machine's `-L` paths were baked into the artifact. And it
+referenced `${libdir}`/`${includedir}` without DEFINING them —
+undefined .pc variables expand empty, which "worked" only because
+headers in /usr/include and libraries in the default linker path
+need no -I/-L at all. The .pc now carries the same contract as
+fdk.pc: prefix/libdir/includedir defined, `Libs: -lfdk-shell` +
+`Requires: fdk`, platform flags in `Libs.private` (—static
+consumers only). The companion lesson: **modern ld does NOT resolve
+a binary's own undefined symbols through a shared library's
+transitive NEEDED entries** ("DSO missing from command line",
+reproduced locally: linking the smoke with just -lfdk-shell -lfdk
+fails on XGrabKeyboard) — so the smoke's own second Xlib connection
+carries `-lX11` on ITS link line, and the X11 dev packages stay
+test infrastructure. Proven locally end-to-end: a mini installed
+prefix, the exact clean-container compile line, SMOKE OK, and the
+isolation proof (which links the demo through the .pc alone) still
+green. And the helper learned the session's meta-lesson: pkg-config
+discovery failures now print the REAL diagnostic instead of
+swallowing it with 2>/dev/null — a bare "not found" cost this whole
+round (the void failure mode is still unexplained-with-evidence:
+pkgconf 3.0.7 was built from source locally and PROVEN to accept
+the old .pc bytes, the package provably carried the file, and
+"installed successfully" printed six seconds after fdk.pc discovery
+worked in the same shell — the next run's diagnostic will say
+which of the three it actually was).
+
 ## Extension API tests (1.1.0)
 
 The extension surface (`include/fdk/fdk_extend.h`, docs/EXTENDING.md)
