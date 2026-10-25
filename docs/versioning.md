@@ -29,8 +29,11 @@ below proved, why it should not.
 
 The extension-API additions are ABI-append-only (opaque types, new
 functions, `struct_size`-forwarded input structs), so the SONAME
-stays `libfdk.so.1`; the file name moves to
-`libfdk.so.1.1.0-rc1` with the SONAME symlink unchanged.
+stays `libfdk.so.1`; the file name moves to the numeric
+`libfdk.so.1.1.0` with the SONAME symlink unchanged (the .so file
+name is always numeric MAJOR.MINOR.PATCH — pre-release suffixes
+never appear in it; they live in the version string, pkg-config,
+and package metadata).
 
 ## What the 1.0.0 decision rested on
 

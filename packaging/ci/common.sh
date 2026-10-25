@@ -48,10 +48,11 @@ fdk_expected_version() {
 #
 # SCOPE: package METADATA only (Version fields, package filenames, and
 # the tarball/dir names the metadata-driven builds derive: rpm %setup,
-# makepkg $srcdir, abuild builddir). The .so real-file name
-# (libfdk.so.<raw>), the pkg-config Version and the smoke test keep the
-# RAW string — they come from fdk_version.h and the Makefile and must
-# stay byte-identical to what the library itself reports.
+# makepkg $srcdir, abuild builddir). The .so real-file name (numeric
+# MAJOR.MINOR.PATCH — see fdk_sover below), the pkg-config Version and
+# the smoke test keep the RAW string — they come from fdk_version.h and
+# the Makefile and must stay byte-identical to what the library itself
+# reports.
 fdk_packver() {
     _fp_family="$1"
     _fp_raw="${2:-$(fdk_expected_version)}"
@@ -61,6 +62,25 @@ fdk_packver() {
     arch|xbps) printf '%s\n' "$_fp_raw" | tr -d '-' ;;
     *)         printf '%s\n' "$_fp_raw" ;;
     esac
+}
+
+# The NUMERIC shared-library file version (MAJOR.MINOR.PATCH from the
+# header macros — never a pre-release suffix). The Makefile names the
+# real .so file with this (FDK_SO_VERSION) and the packaging scripts
+# must reference the same name when they split the install tree.
+# WHY numeric-only: Alpine's abuild derives the apk so:provides version
+# from the .so FILENAME tail (sover=${file##*.so.}); a suffixed tail
+# (libfdk.so.1.1.0-rc1) produced 'provides = so:libfdk.so.1=1.1.0-rc1'
+# and apk index rejected the whole package ("package file format
+# error", proven live on CI 2026-10-25 and reproduced locally with
+# apk-tools 2.14.12 — even a hyphenless '1.1.0rc1' tail is rejected;
+# only numeric tails are valid). The suffix lives in the version
+# string, pkg-config, and package metadata — never in the .so name.
+fdk_sover() {
+    printf '%s.%s.%s\n' \
+        "$(sed -n 's/^#define FDK_VERSION_MAJOR \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)" \
+        "$(sed -n 's/^#define FDK_VERSION_MINOR \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)" \
+        "$(sed -n 's/^#define FDK_VERSION_PATCH \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)"
 }
 
 # RELEASE-POSTURE GUARD. The packaging pipeline is release

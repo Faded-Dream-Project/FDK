@@ -177,14 +177,19 @@ Two scope rules keep this honest. First, the mapping touches
 **package metadata only** — the `Version` fields, the package
 filenames, and the tarball/top-dir names the metadata-driven builds
 derive (rpm `%setup`, makepkg `$srcdir`, abuild `builddir`). The
-`.so` real-file name (`libfdk.so.1.1.0-rc1`), the pkg-config
-`Version`, and the smoke test all keep the **raw** string, byte-
-identical to what `fdk_get_version_string()` reports — a package
-must never claim a version the library itself does not. Second, a
-plain numeric version passes through every grammar unchanged, so at
-final releases all five spellings are identical and the mapping is
-inert — the 1.0.0 artifacts are byte-for-byte what they were before
-this translation existed.
+`.so` real-file name is **numeric-only** (`libfdk.so.1.1.0`, from
+the Makefile's `FDK_SO_VERSION` — pre-release suffixes never appear
+in the .so file name, both because that is the GNU convention and
+because Alpine's abuild derives the apk `so:`provides version from
+the filename tail, where a suffixed tail makes `apk index` reject
+the whole package — reproduced and pinned locally), while the
+pkg-config `Version` and the smoke test keep the **raw** string,
+byte-identical to what `fdk_get_version_string()` reports — a
+package must never claim a version the library itself does not.
+Second, a plain numeric version passes through every grammar
+unchanged, so at final releases all five spellings are identical and
+the mapping is inert — the 1.0.0 artifacts are byte-for-byte what
+they were before this translation existed.
 
 ## What the packages contain (and deliberately omit)
 

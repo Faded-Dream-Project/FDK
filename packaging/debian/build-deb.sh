@@ -63,7 +63,11 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 make FDK_CONFIG=release install DESTDIR="$STAGE" PREFIX=/usr LIBDIR="$LIBDIR"
 
-SO_REAL="libfdk.so.$VERSION"
+# The .so real file is NUMERIC-ONLY (libfdk.so.1.1.0 — fdk_sover in
+# common.sh; the Makefile installs exactly this name). A pre-release
+# suffix in the filename would poison Alpine's so:provides and is not
+# the GNU convention anyway; the rc lives in the metadata (PKGVER).
+SO_REAL="libfdk.so.$(fdk_sover)"
 SO_MAJOR="libfdk.so.$(sed -n 's/^#define FDK_VERSION_MAJOR \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)"
 
 # --- derive the runtime Depends from what the .so actually needs -------

@@ -75,28 +75,50 @@ docs/EXTENDING.md.
 
 ### Packaging / build
 
-- The shared library file becomes `libfdk.so.1.1.0-rc1`; the SONAME
-  symlink stays `libfdk.so.1` (the additions are ABI-append-only —
-  no existing public symbol, type, or struct layout changed).
+- The shared library file becomes the numeric `libfdk.so.1.1.0`
+  (pre-release suffixes never appear in the .so file name — the rc
+  lives in the version string, pkg-config, and package metadata);
+  the SONAME symlink stays `libfdk.so.1` (the additions are
+  ABI-append-only — no existing public symbol, type, or struct
+  layout changed).
 - New public header installed: `include/fdk/fdk_extend.h`; the
   umbrella `fdk.h` includes it.
 
 ### Fixed — the rc version vs. the five package grammars
 
-Found live by CI on the first push of the candidate: the raw
-`1.1.0-rc1` string is illegal or wrong in four of the five package
-version grammars (rpm rejects the hyphen outright; apk reserves it
-for pkgrel; arch's `pkgver` forbids it; xbps forbids it AND the
-ambiguity broke repository lookups; deb accepted it but ordered the
-rc ABOVE the future final). The pipeline now translates the suffix
-once, at the metadata layer (`fdk_packver` in `packaging/ci/common.sh`):
-`1.1.0~rc1` for deb/rpm, `1.1.0_rc1` for apk, `1.1.0rc1` for
-arch/xbps — while the `.so` filename, pkg-config version, and smoke
-test keep the raw string the library itself reports. Plain releases
-pass through unchanged. Documented in `docs/packaging.md`. Also
-corrected three stale "ten shipped theme faces" package descriptions
-the one-face alignment had missed (deb control, rpm spec, xbps
-descriptions now say the default theme, faded-dream).
+Two distinct rc-version defects, both found live by CI on the
+candidate's first pushes:
+
+1. **Package metadata**: the raw `1.1.0-rc1` string is illegal or
+   wrong in four of the five package version grammars (rpm rejects
+   the hyphen outright; apk reserves it for pkgrel; arch's `pkgver`
+   forbids it; xbps forbids it AND the ambiguity broke repository
+   lookups; deb accepted it but ordered the rc ABOVE the future
+   final). The pipeline now translates the suffix once, at the
+   metadata layer (`fdk_packver` in `packaging/ci/common.sh`):
+   `1.1.0~rc1` for deb/rpm, `1.1.0_rc1` for apk, `1.1.0rc1` for
+   arch/xbps. Plain releases pass through unchanged.
+
+2. **The .so file name**: the real file was installed as
+   `libfdk.so.1.1.0-rc1`, and Alpine's abuild derives the apk
+   `so:`provides version from the .so FILENAME tail
+   (`sover=${file##*.so.}`) — producing
+   `provides = so:libfdk.so.1=1.1.0-rc1`, which `apk index`
+   rejects with "package file format error" (reproduced locally
+   with apk-tools 2.14.12; even a hyphenless `1.1.0rc1` tail is
+   rejected — only numeric tails are valid). The Makefile now names
+   the real file with the numeric `FDK_SO_VERSION`
+   (`libfdk.so.1.1.0`) — the GNU convention; pre-release suffixes
+   never appear in the .so file name.
+
+The dividing line in both fixes: pkg-config `Version` and the smoke
+test keep the raw string the library itself reports, while the .so
+file name is numeric — the file name and the version string are
+different things, and each stays what its grammar requires.
+Documented in `docs/packaging.md`. Also corrected three stale "ten
+shipped theme faces" package descriptions the one-face alignment
+had missed (deb control, rpm spec, xbps descriptions now say the
+default theme, faded-dream).
 
 ### Unreleased-candidate notes
 

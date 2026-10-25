@@ -55,6 +55,17 @@ FDK_PC_VERSION := $(shell sed -n 's/^#define FDK_VERSION_STRING "\(.*\)"/\1/p' i
 # decision of 2026-10-12 (before that the .so carried no SONAME at
 # all and installed as a single unversioned file).
 FDK_VERSION_MAJOR := $(shell sed -n 's/^#define FDK_VERSION_MAJOR \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)
+# The REAL .so file is named with the numeric MAJOR.MINOR.PATCH only —
+# no pre-release suffix, ever. Two reasons: it is the GNU convention
+# (versioned .so filenames are numeric), and Alpine's abuild derives
+# the apk so:provides version from the filename tail
+# (sover=${file##*.so.}) — a suffixed tail (libfdk.so.1.1.0-rc1) makes
+# apk index reject the package ("package file format error", proven
+# live on CI 2026-10-25). The rc suffix lives in the library's version
+# string, pkg-config Version, and package metadata — not here.
+FDK_VERSION_MINOR := $(shell sed -n 's/^#define FDK_VERSION_MINOR \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)
+FDK_VERSION_PATCH := $(shell sed -n 's/^#define FDK_VERSION_PATCH \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)
+FDK_SO_VERSION := $(FDK_VERSION_MAJOR).$(FDK_VERSION_MINOR).$(FDK_VERSION_PATCH)
 FDK_SONAME := libfdk.so.$(FDK_VERSION_MAJOR)
 
 STD      := -std=c17
@@ -575,11 +586,13 @@ install: all $(BUILD_DIR)/fdk.pc
 	install -m 644 $(STATIC_LIB) $(DESTDIR)$(LIBDIR)/
 # Versioned shared-library install (the soname scheme, active since
 # the public 1.0.0 decision of 2026-10-12): the real file carries
-# the full version, the SONAME symlink is what executables record
+# the numeric MAJOR.MINOR.PATCH (FDK_SO_VERSION — suffixes never
+# appear in the .so filename, see the derivation block above), the
+# SONAME symlink is what executables record
 # as NEEDED, and the unversioned libfdk.so is the development
 # symlink pkg-config's -lfdk resolves against.
-	install -m 755 $(SHARED_LIB) $(DESTDIR)$(LIBDIR)/libfdk.so.$(FDK_PC_VERSION)
-	ln -sf libfdk.so.$(FDK_PC_VERSION) $(DESTDIR)$(LIBDIR)/$(FDK_SONAME)
+	install -m 755 $(SHARED_LIB) $(DESTDIR)$(LIBDIR)/libfdk.so.$(FDK_SO_VERSION)
+	ln -sf libfdk.so.$(FDK_SO_VERSION) $(DESTDIR)$(LIBDIR)/$(FDK_SONAME)
 	ln -sf $(FDK_SONAME) $(DESTDIR)$(LIBDIR)/libfdk.so
 	install -d $(DESTDIR)$(LIBDIR)/pkgconfig
 	install -m 644 $(BUILD_DIR)/fdk.pc \
@@ -594,7 +607,7 @@ uninstall:
 	rm -f $(DESTDIR)$(LIBDIR)/libfdk.a
 	rm -f $(DESTDIR)$(LIBDIR)/libfdk.so
 	rm -f $(DESTDIR)$(LIBDIR)/$(FDK_SONAME)
-	rm -f $(DESTDIR)$(LIBDIR)/libfdk.so.$(FDK_PC_VERSION)
+	rm -f $(DESTDIR)$(LIBDIR)/libfdk.so.$(FDK_SO_VERSION)
 	rm -f $(DESTDIR)$(LIBDIR)/pkgconfig/fdk.pc
 	rm -f $(addprefix $(DESTDIR)$(BINDIR)/,$(notdir $(TOOL_BINS)))
 	rm -rf $(DESTDIR)$(DATADIR)/fdk

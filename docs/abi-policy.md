@@ -136,4 +136,7 @@ input-struct rule, made executable.
 The 1.1.0 additions are append-only against 1.0.0: new functions
 (620 -> 641 exported symbols), new opaque types, no layout change to
 any existing public struct — the SONAME stays `libfdk.so.1`, only
-the file name moves (`libfdk.so.1.1.0-rc1`).
+the file name moves (the numeric `libfdk.so.1.1.0`; pre-release
+suffixes never appear in the .so file name — Alpine's abuild derives
+apk so:provides versions from the filename tail, which rejected a
+suffixed name outright).

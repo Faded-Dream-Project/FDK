@@ -53,7 +53,10 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 make FDK_SANITIZE=0 FDK_CONFIG=release install DESTDIR="$STAGE" PREFIX=/usr LIBDIR=/usr/lib
 
-SO_REAL="libfdk.so.$VERSION"
+# The .so real file is NUMERIC-ONLY (libfdk.so.1.1.0 — fdk_sover in
+# common.sh; the Makefile installs exactly this name), matching the
+# Makefile's FDK_SO_VERSION. The rc suffix lives in PACKVER above.
+SO_REAL="libfdk.so.$(fdk_sover)"
 SO_MAJOR="libfdk.so.$(sed -n 's/^#define FDK_VERSION_MAJOR \([0-9]*\).*/\1/p' include/fdk/fdk_version.h)"
 
 RT="$STAGE/stow-fdk-libs"

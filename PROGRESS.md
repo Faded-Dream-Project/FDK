@@ -52,8 +52,19 @@ rc version string — rpm/apk/arch reject the hyphen, xbps's
 name-version split went ambiguous, deb ordered the rc above the
 future final — fixed by fdk_packver (packaging/ci/common.sh): the
 per-family pre-release spelling at the metadata layer only, raw
-string everywhere the library reports itself. See CHANGELOG's rc1
-Fixed section and docs/packaging.md's pre-release-versions section.
+string everywhere the library reports itself. The second push
+then failed ALPINE at the repository index with "package file
+format error": abuild derives the apk so:provides version from
+the .so FILENAME tail (sover=${file##*.so.}), so the raw-named
+libfdk.so.1.1.0-rc1 produced provides = so:libfdk.so.1=1.1.0-rc1
+which apk index rejects (reproduced locally with apk-tools
+2.14.12 — even hyphenless 1.1.0rc1 is rejected; only numeric
+tails are valid) — fixed at the root: the Makefile now installs
+the real .so as the numeric FDK_SO_VERSION (libfdk.so.1.1.0;
+suffixes never appear in the .so file name), and the debian/void
+packaging scripts follow via fdk_sover(). See CHANGELOG's rc1
+Fixed section and docs/packaging.md's pre-release-versions
+section.
 
 Prior audit at milestone **1.6.1** (the one-face
 alignment — the 1.0.0 re-cut: the owner inspected the live v1.0.0
