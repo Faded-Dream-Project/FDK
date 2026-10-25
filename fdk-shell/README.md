@@ -156,6 +156,33 @@ rig: a full EWMH window manager runs inside the test, switches
 `_NET_CURRENT_DESKTOP` through the pager-shaped client message, and
 checks the bar's pixels on the round trip).
 
+## The popup contract on real desktops (1.1.0-rc1 lessons)
+
+Two behaviors were found live (Openbox on X11) and are now the
+package's contract, each pinned by tests above:
+
+- **The popup's grab is POINTER-ONLY.** An active XGrabKeyboard
+  deactivates the window manager's passive grabs — Super+number
+  workspace switching stopped working while a dropdown was open.
+  Popups still receive keys (arrows, Escape) through focus:
+  FDK takes XSetInputFocus on the popup while it is open and
+  restores the previous focus on release. Outside-click dismissal
+  works exactly as before through the pointer grab.
+- **A desktop switch dismisses open popups.** The popup belongs to
+  the desktop it opened on; `_NET_CURRENT_DESKTOP` changes release
+  the grab and deliver the popup's close request (the sticky LAYER
+  rides through untouched — that contract is unchanged).
+- **The layer positions itself.** The window carries
+  USPosition/USSize WM_NORMAL_HINTS with the anchoring math; a
+  dock-typed window without position hints is "unplaced", and WMs
+  run their placement policy (Openbox centers it mid-screen).
+- **FDK_POPUP_TRACE=1** (FDK's env var) narrates the popup
+  lifecycle — create, map, grab verdicts, focus takeover, first
+  present, and the REASON each release happened (outside-click /
+  escape / unmap / destroy / desktop-change / watchdog) with the
+  grab-held duration. The first tool for any "the dropdown
+  misbehaves" report.
+
 ## A bar in thirty lines (of the parts that matter)
 
 ```c
@@ -254,20 +281,42 @@ desc struct field-by-field, including the per-backend notes.
   server-side pixel readback, the EXCLUSIVE grab verified by a
   second client's grab FAILING, popup position/render/dismissal/
   parent-sweep; the sticky/stacking state as pre-map properties
-  (per level); and the desktop-switch rig — a minimal EWMH window
+  (per level); the desktop-switch rig — a minimal EWMH window
   manager running INSIDE the test (root substructure redirect,
   `_NET_SUPPORTED`, per-window `_NET_WM_DESKTOP`, pager-shaped
   `_NET_CURRENT_DESKTOP` client-message switching) proving the
   layer never unmaps across switches, a control window does, the
   post-map state messages restore what the "late WM" deleted, and
-  the EXPOSE repaint returns the bar's pixels after the round trip.
+  the EXPOSE repaint returns the bar's pixels after the round trip;
+  and the 1.1.0-rc1 live-desktop regressions: the layer's
+  USPosition/USSize hints (the self-positioned dock contract — an
+  unpositioned dock is "unplaced" and real WMs move it), the
+  popup's pixels ON SCREEN (a ROOT-region readback proves stacking,
+  not just the window's own buffer) STAYING until a real dismissal,
+  the WM's PASSIVE grabs firing while a popup is open and after its
+  dismissal (the in-test WM registers a Super+number XGrabKey; a
+  XTest-synthesized Super+1 must REACH the WM through the open
+  dropdown — the pointer-only grab fix), and a desktop switch
+  dismissing an open popup with the sticky layer riding through.
 - `tests/test_wl.c` — against a real layer-shell compositor (the
   maintainer rigs run sway headless): layer handshake,
   configure-driven size, present, popup adoption, every layer level
-  + keyboard mode, clean teardown, and the workspace-switch
+  + keyboard mode, clean teardown, the workspace-switch
   confirmation (no close/reconfigure across switches, presenting
-  continues; swaymsg is the control channel). Self-skips without
-  `$WAYLAND_DISPLAY`.
+  continues; swaymsg is the control channel), and the eager-paint
+  startup regression (painting IMMEDIATELY after show() — before
+  the role's configure can arrive — must survive: FDK's present
+  gate holds the buffer until the post-ack report). Self-skips
+  without `$WAYLAND_DISPLAY`.
+- `tests/bar_rig.sh` (`make test-bar-rig`) — the REAL-COMPOSITOR
+  bar rig: the actual demo bar against headless sway AND labwc
+  (each self-skips when not runnable; labwc needs an Xwayland on
+  PATH) for several seconds — alive, pixels on the output (grim,
+  when available), the WAYLAND_DEBUG trace clean (the configure
+  arrived, no protocol error, and no `wl_surface.attach` before the
+  first `ack_configure`) — plus the compositor-kill leg: kill the
+  compositor mid-run and the bar must exit by itself, non-zero,
+  with exactly one fatal-dispatch line in a bounded log.
 - `tests/isolation.sh` — the prefix-isolation build proof (see
   Dependencies above), including the ELF boundary: the shared
   library carries a real `NEEDED: libfdk.so.1` entry, every

@@ -143,6 +143,16 @@ Rules that matter:
   layer-shell: create the role, set your parameters, and commit an
   EMPTY surface at show-time to start the configure — exactly what
   fdk-shell's `fdk_shell_layer_show` does.)
+- **Wayland, the buffer side (1.1.0-rc1)**: FDK now ENFORCES the
+  "no buffer before the first configure" rule on the present path —
+  a present before your first `fdk_ext_surface_notify_configure()`
+  is deferred and committed post-ack by that call (or re-driven via
+  EXPOSE when the configure changed the size). An add-on that paints
+  eagerly right after `show()` — the way every FDK example does —
+  can no longer trip the protocol error that killed the demo bar on
+  labwc and sway (`zwlr_layer_surface_v1: error 2: layer_surface has
+  never been configured`). Your obligation narrows to: ack your
+  role's configure, then report it.
 
 ### The destroy callback — role teardown
 

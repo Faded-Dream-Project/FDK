@@ -2371,3 +2371,82 @@ xdg_popup.grab — the machinery is the same menu-tested grab path
 the toolkit itself uses), and visual readback on Wayland would need
 the compositor's screenshot channel. The X11 leg covers both
 behaviors for the shared machinery.
+
+**The real-desktop bar rig (1.1.0-rc1, found live 2026-10-26 —
+sway/labwc on Wayland, Openbox on X11)**: three findings from the
+owner's machines, each now a permanent test.
+
+1. *The layer-surface startup sequence*. The demo bar painted
+   immediately after `show()` — before the role's configure could
+   arrive (one round trip away) — and wlroots killed the connection:
+   `zwlr_layer_surface_v1: error 2: layer_surface has never been
+   configured`. The reproduction needed BOTH halves: the trace shows
+   the attach landing 6 lines before any configure, and sway's log
+   shows the kill. The fix moved the no-buffer-before-configure gate
+   INTO FDK's present (extension surfaces ride the same
+   first-configure deferral xdg windows always had; the deferred
+   frame commits post-ack from `fdk_ext_surface_notify_configure`).
+   Pinned three ways: `test_wl.c`'s eager-paint test (paint with ZERO
+   pumps between show and present — the old code dies on the first
+   pump), the bar rig's WAYLAND_DEBUG trace assertion (no
+   `wl_surface.attach` before the first `ack_configure`, no
+   `wl_display.error`), and the bar rig's alive/pixels legs against
+   BOTH sway and labwc headless. LESSON: the earlier suite never
+   caught this because every test politely waited for the configure
+   before painting — the example that ships didn't. Rig what users
+   run, not what the suite finds convenient.
+
+2. *The fatal-dispatch busy-loop*. With the connection dead, the
+   app-owned pump loop spun at 100% CPU logging the same line ~2.2
+   MILLION times in three seconds (the backend's circuit breaker
+   said everything once; the core's own error report did not). The
+   core now logs a fatal dispatch result ONCE per code and — the
+   actual anti-busy-loop — repeats sleep out the caller's remaining
+   timeout before returning the error, so even a loop that ignores
+   the fatal return paces itself. The bar example now treats a
+   negative pump as fatal: cleanup, exit non-zero. Pinned by the bar
+   rig's compositor-kill leg (kill the compositor mid-run; the bar
+   must exit by itself within 5s, non-zero, with exactly one
+   fatal-report line in a bounded log).
+
+3. *The popup keyboard grab vs the WM's passive grabs*. An active
+   XGrabKeyboard DEACTIVATES passive grabs — Openbox's Super+number
+   workspace bindings silently died while a dropdown was open and
+   recovered only when the popup happened to close (reproduced
+   exactly against real Openbox under Xvfb: switch blocked with the
+   popup open, working after dismissal). Popups now take a
+   POINTER-ONLY grab and route keys through XSetInputFocus (saved +
+   restored, error-swallowed); every dismissal path stamps its
+   reason; a dispatch-tail watchdog releases any grab whose popup is
+   no longer viewable, and a _NET_CURRENT_DESKTOP switch dismisses
+   open popups outright (they belong to the desktop they opened on).
+   Pinned by the in-test EWMH WM's passive-grab rig: XGrabKey on the
+   root, XTest-synthesized Super+1, and the assertion that the WM
+   RECEIVES the key while the popup is open and right after its
+   dismissal. The same suite pins the popup's on-screen pixels
+   (ROOT-region readback — stacking, not just the window's buffer)
+   and that they STAY until a real dismissal.
+
+4. *The self-positioned dock* (found while building the Openbox
+   reproduction): a dock-typed window with NO position hints is
+   "unplaced" — Openbox runs its placement policy and CENTERS the
+   panel mid-screen (its debug log says so verbatim). fdk-shell now
+   sets USPosition/USSize WM_NORMAL_HINTS; the suite reads the hints
+   back and pins the anchoring math.
+
+**The GPU self-check is now timer-based**: the old retry budget ran
+inline — three XGetImage reads with XSync + 9 ms sleeps — blocking
+the event loop ~20+ ms exactly while a popup held its grab. One
+probe attempt per opportunity now (a completed present or the
+dispatch-tail tick, which the pump wakes for through the X11
+backend's new `next_wakeup_ms`), and the verdict machinery (budget,
+process-wide refusal, one warning, the probe window's downgrade) is
+unchanged — both existing self-check tests still pass unmodified.
+
+**FDK_POPUP_TRACE=1** turns the popup lifecycle into explicit INFO
+lines — create (with position), map, raise, grab (with the server's
+verdict + the focus takeover), first present (with the lane),
+unmap/destroy, and the REASON each release happened
+(outside-click / escape / unmap / destroy / desktop-change /
+watchdog-not-viewable) with the grab-held duration. This is the
+first tool to reach for when a popup misbehaves on a real desktop.

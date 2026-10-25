@@ -191,6 +191,72 @@ window):
    FDK_GL_FAIL_AT shape) and `fdk__x11_gl_test_reset()` clears the
    stamp between test groups.
 
+### Fixed — the live-desktop bar findings (2026-10-26; sway/labwc + Openbox)
+
+Four root causes found by running the fdk-shell demo bar on real
+desktops, each reproduced in this environment first (headless sway
+AND labwc 0.8.3 for the Wayland legs; a real Openbox 3.6.1 under
+Xvfb for the X11 legs) and each pinned by a permanent test:
+
+1. **Wayland: the layer surface's startup sequence** — the bar
+   painted immediately after `show()`, so FDK's present attached and
+   committed a buffer BEFORE the layer surface's first configure,
+   and wlroots killed the whole connection
+   (`zwlr_layer_surface_v1: error 2: layer_surface has never been
+   configured`). Extension surfaces now ride the same
+   first-configure deferral xdg windows always had: presents before
+   the role's configure are deferred, and
+   `fdk_ext_surface_notify_configure()` (the add-on's post-ack
+   report) commits the deferred first frame — the protocol rule is
+   enforced by FDK, not left to each add-on. Pinned by the
+   eager-paint test, the bar rig's WAYLAND_DEBUG trace assertions,
+   and alive/pixels legs against both compositors.
+
+2. **The fatal-dispatch busy-loop** — after that connection died,
+   the app-owned pump loop spun at 100% CPU logging the same
+   "backend dispatch_pending failed" line ~2.2 million times in 3
+   seconds (the backend's circuit breaker logged once; the core's
+   own error report did not). The core now reports a fatal dispatch
+   ONCE per code, and identical repeats sleep out the caller's
+   remaining timeout before returning the error — an ignoring loop
+   paces itself instead of spinning. The demo bar now exits
+   non-zero on a fatal pump. Pinned by the bar rig's
+   compositor-kill leg (self-exit within 5s, non-zero, one line,
+   bounded log). The one-time Wayland death line now carries the
+   protocol error's interface, object id and code from libwayland.
+
+3. **X11: popup keyboard grabs vs the WM's passive grabs** — an
+   active XGrabKeyboard deactivates passive grabs, so Openbox's
+   Super+number workspace switching silently stopped working while a
+   dropdown was open (recovered when it closed). Popups now take a
+   POINTER-ONLY grab and route keys through focus (XSetInputFocus,
+   saved and restored, error-swallowed); grab result codes are
+   handled explicitly (GrabFrozen/AlreadyGrabbed retried once,
+   NotViewable reported); every dismissal path stamps its reason; a
+   dispatch-tail watchdog releases any grab whose popup is no longer
+   viewable; and a _NET_CURRENT_DESKTOP switch dismisses open
+   popups. The GPU self-check's retry budget moved from inline
+   XSync+sleep rounds (~20 ms of blocked loop while a grab was
+   held) to timer-based attempts fired from the dispatch tail (the
+   pump wakes for them through the backend's new
+   `next_wakeup_ms`). Pinned by the in-test EWMH WM's passive-grab
+   rig (XTest-synthesized Super+1 received by the WM with the popup
+   open and after dismissal), the popup pixel-stays test
+   (root-region readback), and the desktop-change dismissal test.
+
+4. **X11: the layer's self-positioning** — a dock-typed window with
+   no position hints is "unplaced", and Openbox ran its placement
+   policy: the panel centered mid-screen (confirmed in its debug
+   log). fdk-shell now sets USPosition/USSize WM_NORMAL_HINTS with
+   the anchoring math; popups raise on map (an override-redirect
+   window created under a raised window stays under it otherwise).
+   Pinned by reading the hints back server-side.
+
+`FDK_POPUP_TRACE=1` documents the popup lifecycle for real-desktop
+diagnosis: create/map/raise, grab verdicts + focus takeover, first
+present (with the lane), unmap/destroy, and the REASON each release
+happened with the grab-held duration.
+
 ### Fixed — the fdk-shell packaging matrix's first live CI pass
 
 Four defect classes, all packaging-script defects (none in library

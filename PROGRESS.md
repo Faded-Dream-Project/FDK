@@ -67,6 +67,44 @@ still green. docs/testing.md's 1.1.0-rc1
 packaging-matrix lesson + CHANGELOG rc1 Fixed section carry the
 full narratives. Prior state below.)
 
+Last audited: 2026-10-26, at milestone **1.7.3** (the live-desktop
+bar findings — sway/labwc + Openbox, all four reproduced in this
+environment BEFORE fixing: [1] the Wayland layer-surface startup
+sequence — the demo bar painted before its role's first configure
+and wlroots killed the connection ["layer_surface has never been
+configured"]; extension surfaces now ride FDK's first-configure
+present gate, with notify_configure committing the deferred frame
+post-ack — pinned by the eager-paint test, the bar rig's
+WAYLAND_DEBUG trace assertions [no attach before the first
+ack_configure, no wl_display.error], and alive/pixels legs against
+BOTH headless sway AND labwc 0.8.3; [2] the fatal-dispatch
+busy-loop — 2.2M identical log lines at 100% CPU after the
+connection died; the core now logs a fatal dispatch once per code
+and identical repeats sleep out the caller's remaining timeout, the
+bar exits non-zero on a fatal pump, and the Wayland death line
+carries the protocol error's interface/id/code — pinned by the bar
+rig's compositor-kill leg; [3] the X11 popup keyboard grab vs the
+WM's passive grabs — Super+number workspace switching died while a
+dropdown was open [reproduced against real Openbox under Xvfb];
+popups now grab POINTER-ONLY and route keys through saved+restored
+XSetInputFocus, with explicit grab-result handling, dismissal
+reasons, a not-viewable watchdog, and desktop-switch dismissal of
+open popups — pinned by the in-test EWMH WM's passive-grab rig
+[XTest Super+1 received by the WM while the popup is open and after
+dismissal], the popup pixel-stays test, and the desktop-change
+test; the GPU self-check retry budget became timer-based [fired
+from the dispatch tail; the pump wakes via the X11 backend's new
+next_wakeup_ms — both existing self-check tests still pass]; [4]
+fdk-shell's layer windows now set USPosition/USSize hints [an
+unpositioned dock is "unplaced" — Openbox centered the panel
+mid-screen; confirmed in its debug log] and popups raise on map;
+FDK_POPUP_TRACE=1 documents the popup lifecycle with reasons and
+grab-held durations. make test, test-x11 [incl. both self-check
+tests], FDK_SANITIZE=0 test, release+verify-exports [641],
+examples, fdk-shell's 11-test X11 suite [twice], the Wayland suite
++ bar rig [sway+labwc+kill legs], and the isolation proof all
+green. Prior state below.)
+
 Last audited: 2026-10-25, at milestone **1.7.1** (the rc1
 desktop-integration hardening, found live on a real NVIDIA GTX
 1050 Ti desktop: the GPU present lane's self-check now decides
