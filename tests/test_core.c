@@ -17,20 +17,25 @@ static void test_version(void) {
     assert(fdk_get_version() == FDK_VERSION);
     assert(strcmp(fdk_get_version_string(), FDK_VERSION_STRING) == 0);
 
-    /* The public version is PINNED to 1.0.0 by policy
-     * (docs/versioning.md — the recorded 2026-10-12 decision). If
-     * these asserts fail, someone bumped the version without a
-     * recorded project-owner decision — read docs/versioning.md
-     * (including the 2026-10-11 retraction record: a premature
-     * 1.0.0 bump was reverted the same day) before "fixing" either
-     * side of the assert. Internal milestones (docs/roadmap.md's
-     * Phase numbers and 1.x labels) are a different axis and must
-     * never leak into these macros. */
+    /* The public version is PINNED to 1.1.0-rc1 by policy
+     * (docs/versioning.md — the recorded 2026-10-25 decision: the
+     * extension-API release candidate; the owner chose the minor
+     * bump over 1.0.1 because it adds public API, and no git tag
+     * exists for the candidate). If these asserts fail, someone
+     * bumped the version without a recorded project-owner decision —
+     * read docs/versioning.md (including the 2026-10-11 retraction
+     * record: a premature 1.0.0 bump was reverted the same day)
+     * before "fixing" either side of the assert. Internal milestones
+     * (docs/roadmap.md's Phase numbers and 1.x labels) are a
+     * different axis and must never leak into these macros. Note the
+     * ENCODED value carries no rc suffix — a candidate encodes as its
+     * base triple (1.1.0), and the suffix rides the string only. */
     assert(FDK_VERSION_MAJOR == 1);
-    assert(FDK_VERSION_MINOR == 0);
+    assert(FDK_VERSION_MINOR == 1);
     assert(FDK_VERSION_PATCH == 0);
-    assert(strcmp(FDK_VERSION_STRING, "1.0.0") == 0);
-    assert(fdk_get_version() == FDK_VERSION_ENCODE(1, 0, 0));
+    assert(strcmp(FDK_VERSION_SUFFIX, "rc1") == 0);
+    assert(strcmp(FDK_VERSION_STRING, "1.1.0-rc1") == 0);
+    assert(fdk_get_version() == FDK_VERSION_ENCODE(1, 1, 0));
     printf("[ok] version: %s (%d, pinned per docs/versioning.md)\n",
            fdk_get_version_string(), fdk_get_version());
 }

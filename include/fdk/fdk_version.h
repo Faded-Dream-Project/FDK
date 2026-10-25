@@ -9,21 +9,20 @@
 #define FDK_VERSION_H
 
 /*
- * THE PUBLIC VERSION IS 1.0.0 — THE RECORDED DECISION OF 2026-10-12
- * (docs/versioning.md).
+ * THE PUBLIC VERSION IS 1.1.0-rc1 — THE RECORDED DECISION OF
+ * 2026-10-25 (docs/versioning.md). A release CANDIDATE for the
+ * extension-API minor release (include/fdk/fdk_extend.h): the owner
+ * set the number ("not 1.0.1, since this adds public API"), set the
+ * candidate posture, and kept the final-tag decision. No git tag
+ * exists for this version; the v1.0.0 release is untouched.
  *
  * History, recorded in full in docs/versioning.md: the number was
  * a deliberate joke (0.0.1, "this absurdly capable toolkit is still
- * called 0.0.1") until the 2026-10-12 decision. A 2026-10-11
- * v1.0.0 bump made by a distribution pass was RETRACTED the same
- * day — manual testing showed the pickers were not release-ready;
- * the tag and the never-published draft were deleted, the version
- * returned to 0.0.1, and the picker overhaul that closed those
- * blockers followed (roadmap milestones 1.5.1-1.5.4). The project
- * owner then validated the result on real hardware (native Wayland
- * under labwc included) and demanded the release: the deliberate,
- * recorded 1.0.0 decision this header now carries. With it the
- * versioned-SONAME scheme (libfdk.so.1) activated.
+ * called 0.0.1") until the 2026-10-12 decision — after a retracted
+ * premature 1.0.0 pass whose named blockers were closed by the
+ * picker overhaul, the owner validated the result on real hardware
+ * (native Wayland under labwc included) and demanded the release,
+ * then set the one-face posture that re-cut its assets.
  *
  * The bump discipline is unchanged: these macros change only by
  * an explicit project-owner decision, recorded in
@@ -36,11 +35,14 @@
  * accidental bumps fail the build instead of shipping quietly.
  */
 #define FDK_VERSION_MAJOR 1
-#define FDK_VERSION_MINOR 0
+#define FDK_VERSION_MINOR 1
 #define FDK_VERSION_PATCH 0
 
-/* "1.0.0" style string, generated from the numeric components. */
-#define FDK_VERSION_STRING "1.0.0"
+/* "1.1.0-rc1" style string, generated from the numeric components
+ * plus the pre-release suffix (empty when the release is final).
+ * The suffix lives here, next to the numeric triple it decorates. */
+#define FDK_VERSION_SUFFIX "rc1"
+#define FDK_VERSION_STRING "1.1.0-rc1"
 
 /* Encode major/minor/patch into a single comparable integer:
  * (major * 1000000) + (minor * 1000) + patch */

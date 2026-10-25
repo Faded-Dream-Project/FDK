@@ -2,16 +2,23 @@
 
 ## The rule
 
-The public version of FDK is **1.0.0** — the deliberate, recorded
-1.0.0 decision of 2026-10-12. For the entire life before it the
-number was a project joke (`0.0.1` — *this absurdly capable toolkit
-is still called 0.0.1*), and the decision to leave the joke behind
-was made exactly the way this document demands: by the project
-owner, explicitly, after the retraction's stated blockers were
-closed — not by autonomy, feature accumulation, or semver pressure.
+The public version of FDK is **1.1.0-rc1** — a release candidate,
+not a final release: the 2026-10-25 owner directive that FDK grow a
+public **extension API** (add-on packages building on `fdk/extend.h`)
+lands as the next MINOR release after 1.0.0, and the owner explicitly
+chose `1.1.0-rc1` over `1.0.1` because new public API is a minor bump
+("not 1.0.1, since this adds public API"). The `-rc1` suffix is the
+owner's brake: **no git tag is created for it and the live v1.0.0
+release is untouched** — the owner decides when the candidate becomes
+1.1.0. Before this, 1.0.0 was the deliberate, recorded decision of
+2026-10-12; for the entire life before it the number was a project
+joke (`0.0.1` — *this absurdly capable toolkit is still called
+0.0.1*), and every move was made exactly the way this document
+demands: by the project owner, explicitly — not by autonomy, feature
+accumulation, or semver pressure.
 
 ```
-Public version:       1.0.0         (the recorded owner decision)
+Public version:       1.1.0-rc1     (release candidate; owner decides the final tag)
 Engineering standard: extremely high (unchanged by the number)
 ```
 
@@ -19,6 +26,11 @@ The two axes stay decoupled in both directions: a higher version
 number is never permission for lower standards, and engineering
 quality is never *why* the version moves — or, as the retraction
 below proved, why it should not.
+
+The extension-API additions are ABI-append-only (opaque types, new
+functions, `struct_size`-forwarded input structs), so the SONAME
+stays `libfdk.so.1`; the file name moves to
+`libfdk.so.1.1.0-rc1` with the SONAME symlink unchanged.
 
 ## What the 1.0.0 decision rested on
 
@@ -98,9 +110,9 @@ and packaging pipeline derive both from the header.
 
 ## Enforcement
 
-`tests/test_core.c::test_version` pins the public version at
-`1.0.0`. A change to the version macros without the matching test
-change fails the suite. Changing both is a deliberate act that
+`tests/test_core.c::test_version` pins the public version (currently
+`1.1.0-rc1`). A change to the version macros without the matching
+test change fails the suite. Changing both is a deliberate act that
 requires:
 
 1. an explicit project-owner decision (not autonomy, not
@@ -112,6 +124,12 @@ requires:
 The 1.0.0 bump of 2026-10-12 satisfied both: the owner demanded the
 release after verifying the picker work on real hardware, and this
 document was updated in the same commit that moved the macros.
+
+The 1.1.0-rc1 bump of 2026-10-25 satisfies both again: the owner set
+the release target and the number in the same breath as the feature
+directive ("Bump FDK to 1.1.0-rc1 (not 1.0.1, since this adds public
+API)... Do NOT create or move any git tag and do NOT touch the 1.0.0
+release. I'll decide on the final tag.").
 
 ## History
 
@@ -167,3 +185,14 @@ document was updated in the same commit that moved the macros.
   pins carried over to the fixture corpus in test_shipped_themes.c),
   and the `v1.0.0` tag re-created on the alignment commit with the
   release assets replaced on the main repository.
+- 2026-10-25: **1.1.0-rc1 — the extension API candidate.** The owner
+  directed the next release to add a public extension API
+  (`include/fdk/fdk_extend.h`) so add-on packages can be built on top
+  of FDK — proved by fdk-shell, a separate layer-shell package that
+  compiles against FDK's installed public headers and library only —
+  and set the number explicitly: 1.1.0-rc1, a MINOR bump because the
+  change ADDS public API (the owner's own words ruled out 1.0.1).
+  The candidate carries no tag; the v1.0.0 release, its tag, and its
+  assets are untouched. The additions are ABI-append-only (new
+  functions, opaque types, no layout changes to existing public
+  structs), so the SONAME stays `libfdk.so.1`.
