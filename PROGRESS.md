@@ -62,9 +62,17 @@ which apk index rejects (reproduced locally with apk-tools
 tails are valid) — fixed at the root: the Makefile now installs
 the real .so as the numeric FDK_SO_VERSION (libfdk.so.1.1.0;
 suffixes never appear in the .so file name), and the debian/void
-packaging scripts follow via fdk_sover(). See CHANGELOG's rc1
-Fixed section and docs/packaging.md's pre-release-versions
-section.
+packaging scripts follow via fdk_sover(). The third push then
+exposed an independent 1-in-400 CI flake: the HiDPI test's private
+192-dpi Xvfb hard-coded :98 — inside the make test-x11 harness's
+own display range (90 + pid%400) — and on collision it unlinked
+the SUITE server's socket, probed the 96-dpi suite server via the
+TCP fallback, and aborted the debian job on the scale assertion;
+the private display now lives below every harness range, is checked
+free first, and is verified ours by its 800x600 geometry (proven
+both ways locally, docs/testing.md 1.1.0-rc1 lesson). See
+CHANGELOG's rc1 Fixed section and docs/packaging.md's
+pre-release-versions section.
 
 Prior audit at milestone **1.6.1** (the one-face
 alignment — the 1.0.0 re-cut: the owner inspected the live v1.0.0

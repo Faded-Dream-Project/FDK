@@ -2116,6 +2116,38 @@ next attempt. The lesson generalizes: synthetic input through a real
 X server is subject to scheduler noise — warm the pointer, widen the
 windows, and retry idempotently instead of trusting one 100 ms pump.
 
+## 1.1.0-rc1 — the display-number collision (a third CI flake class)
+
+**Two private X servers and one hard-coded display number.** The
+HiDPI GUI test forked its own 192-dpi Xvfb on a hard-coded `:98`,
+while the `make test-x11` harness (no `$DISPLAY` set — the CI
+container case) starts the suite server on `90 + pid % 400`, a range
+that INCLUDES 98. When the suite server landed on :98, three defects
+compounded: the test unlinked the SUITE server's socket (vandalism —
+that server was running a thousand other assertions), the forked
+192-dpi Xvfb refused to start ("Server is already active", the lock
+file governs, not the socket), and the readiness probe — a plain
+`XOpenDisplay` — then succeeded anyway, because it connected to the
+96-dpi SUITE server via the TCP fallback. The honest-skip never
+triggered, the scale assertion saw 1.0 instead of 2.0, and the whole
+debian job aborted (a flake: two earlier runs of the same commit
+family passed; the probability is 1-in-400 per run, gated on the
+recipe shell's PID). The fix has three layers, each independently
+sufficient: the private display now lives BELOW every harness's
+range (candidates 74-78, while the harnesses use 90-899); each
+candidate is checked FREE first (`XOpenDisplay` must fail before we
+spawn — a server already answering means the number is taken, and we
+never touch it); and after spawning, ownership is VERIFIED by the
+800x600 screen geometry, so even a foreign server that wins a race
+can never be mistaken for ours. Proven both ways locally: the happy
+path (173 [ok] incl. the full HiDPI section) and the exact CI
+scenario — a foreign 1024x768 Xvfb squatting on the first candidate
+is detected, skipped, and the suite still passes on the next one.
+The general lesson: a readiness probe answers "someone is serving",
+not "MY server is serving" — verify ownership by a property only
+your server can have (here: the screen geometry), and never manage
+another process's resources by path (the socket unlink).
+
 ## Extension API tests (1.1.0)
 
 The extension surface (`include/fdk/fdk_extend.h`, docs/EXTENDING.md)

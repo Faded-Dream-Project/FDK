@@ -9211,28 +9211,85 @@ static void hidpi_button_cb(fdk_widget *w, void *user) {
 
 static void test_x11_hidpi_gui(void) {
     /* A private Xvfb at 192 dpi: the screen metric path of the
-     * detection (Xft.dpi unset on a bare server) -> scale 2. */
+     * detection (Xft.dpi unset on a bare server) -> scale 2.
+     *
+     * Display choice: every harness around this suite picks its
+     * throwaway display inside 90..899 (the Makefile's test-x11:
+     * 90 + pid%400; the packaging smoke's fdk_start_xvfb:
+     * 100 + pid%800), so this private server lives BELOW that range.
+     * The collision is not hypothetical: CI hit it on 2026-10-25 —
+     * the suite server itself landed on :98, the forked 192-dpi Xvfb
+     * refused to start ("Server is already active"), and the probe
+     * then connected to the 96-dpi SUITE server, so the scale
+     * assertion aborted the whole run. For each candidate: (1) the
+     * display must be FREE (a server already answering means the
+     * number is taken — never touch it; the old code unlinked
+     * another server's socket, vandalizing the suite's display),
+     * (2) spawn our Xvfb, (3) verify the server that answers is OURS
+     * by its 800x600 screen. */
     char *saved_display = getenv("DISPLAY");
-    const char *disp = ":98";
-    unlink("/tmp/.X11-unix/X98");
-    pid_t xvfb = fork();
-    if (xvfb == 0) {
-        execlp("Xvfb", "Xvfb", disp, "-screen", "0", "800x600x24",
-               "-dpi", "192", (char *)NULL);
-        _exit(127);
-    }
-    assert(xvfb > 0);
-    setenv("DISPLAY", disp, 1);
-    /* Let the server come up. */
-    for (int i = 0; i < 40; i++) {
-        struct timespec ts = { .tv_nsec = 100 * 1000 * 1000 };
-        nanosleep(&ts, NULL);
-        Display *probe = XOpenDisplay(disp);
-        if (probe != NULL) {
-            XCloseDisplay(probe);
+    static const int candidates[] = { 78, 77, 76, 75, 74 };
+    char disp[16];
+    int disp_num = -1;
+    pid_t xvfb = -1;
+    int owned = 0;
+    size_t ci;
+    for (ci = 0; ci < sizeof(candidates) / sizeof(candidates[0]); ci++) {
+        snprintf(disp, sizeof(disp), ":%d", candidates[ci]);
+        /* (1) free? a live server answering means the number is
+         * taken by someone else — skip it entirely. */
+        Display *busy = XOpenDisplay(disp);
+        if (busy != NULL) {
+            XCloseDisplay(busy);
+            continue;
+        }
+        pid_t pid = fork();
+        if (pid == 0) {
+            execlp("Xvfb", "Xvfb", disp, "-screen", "0", "800x600x24",
+                   "-dpi", "192", (char *)NULL);
+            _exit(127);
+        }
+        assert(pid > 0);
+        /* (2) let it come up; (3) only OUR 800x600 answer counts. */
+        for (int i = 0; i < 40; i++) {
+            struct timespec ts = { .tv_nsec = 100 * 1000 * 1000 };
+            nanosleep(&ts, NULL);
+            Display *probe = XOpenDisplay(disp);
+            if (probe != NULL) {
+                if (DisplayWidth(probe, DefaultScreen(probe)) == 800 &&
+                    DisplayHeight(probe, DefaultScreen(probe)) == 600) {
+                    XCloseDisplay(probe);
+                    owned = 1;
+                } else {
+                    /* A foreign server answered — not ours, not
+                     * touched; it just lost this number to the race. */
+                    XCloseDisplay(probe);
+                }
+                break;
+            }
+        }
+        if (owned) {
+            xvfb = pid;
+            disp_num = candidates[ci];
             break;
         }
+        /* Our Xvfb did not come up on this number: reap it, next. */
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
     }
+    if (!owned) {
+        /* No private 192-dpi server could be started in this
+         * environment: say so honestly rather than fail the suite. */
+        printf("[skip] X11 HiDPI GUI (no private 192-dpi Xvfb could be "
+               "started; displays 74-78 unavailable)\n");
+        if (saved_display != NULL) {
+            setenv("DISPLAY", saved_display, 1);
+        } else {
+            unsetenv("DISPLAY");
+        }
+        return;
+    }
+    setenv("DISPLAY", disp, 1);
 
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
@@ -9349,7 +9406,13 @@ static void test_x11_hidpi_gui(void) {
 
     kill(xvfb, SIGTERM);
     waitpid(xvfb, NULL, 0);
-    unlink("/tmp/.X11-unix/X98");
+    /* Stale-socket insurance for OUR display number only (the
+     * SIGTERM'd server removes its socket itself). */
+    {
+        char sock[64];
+        snprintf(sock, sizeof(sock), "/tmp/.X11-unix/X%d", disp_num);
+        unlink(sock);
+    }
     if (saved_display != NULL) {
         setenv("DISPLAY", saved_display, 1);
     } else {

@@ -115,6 +115,16 @@ The dividing line in both fixes: pkg-config `Version` and the smoke
 test keep the raw string the library itself reports, while the .so
 file name is numeric — the file name and the version string are
 different things, and each stays what its grammar requires.
+Also fixed a third, independent CI flake the second push exposed:
+the HiDPI GUI test's private 192-dpi Xvfb used a hard-coded `:98`
+inside the `make test-x11` harness's own display range
+(90 + pid%400), and on collision the test unlinked the SUITE
+server's socket, its probe then reached the 96-dpi suite server
+over the TCP fallback, and the scale assertion aborted the debian
+job (1-in-400 per run, PID-gated). The private display now lives
+below every harness range, is checked free before spawning, and is
+verified OURS by its 800x600 geometry — a foreign server is never
+touched (docs/testing.md's 1.1.0-rc1 lesson).
 Documented in `docs/packaging.md`. Also corrected three stale "ten
 shipped theme faces" package descriptions the one-face alignment
 had missed (deb control, rpm spec, xbps descriptions now say the
