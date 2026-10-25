@@ -6,6 +6,16 @@
 # xbps-create directly, from this metadata — same names, versions,
 # dependencies, and file layout.
 #
+# VERSION SPELLING: while a release candidate is in the tree the raw
+# upstream version carries a hyphenated suffix ("1.1.0-rc1") that xbps
+# forbids (void-packages Manual: versions "must not contain dashes or
+# underscores" or special chars — a dash also makes the pkgname-version
+# split ambiguous). The pipeline therefore spells package versions the
+# xbps way, dropping the hyphen: 1.1.0rc1 (see fdk_packver in
+# packaging/ci/common.sh). Plain releases (1.1.0) are identical to
+# upstream. The same rule applies to wrksrc/distfiles below whenever
+# you carry a candidate version into this template by hand.
+#
 # Void convention: fdk-libs (runtime) + fdk-devel (development
 # files), /usr/lib as the library directory (Void uses no lib64).
 #

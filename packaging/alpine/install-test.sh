@@ -12,6 +12,11 @@ set -eu
 . "$(dirname "$0")/../ci/common.sh"
 
 VERSION="$(fdk_expected_version)"
+# The .apk FILENAMES carry the package-metadata version (fdk_packver in
+# common.sh: 1.1.0-rc1 -> 1.1.0_rc1, apk's native pre-release spelling);
+# the pkg-config check and the smoke test below keep the RAW version —
+# fdk.pc and the library report it.
+PACKVER="$(fdk_packver apk "$VERSION")"
 ARCH="$(uname -m)"
 
 echo "== FDK apk install-test ($VERSION, $ARCH) =="
@@ -21,8 +26,8 @@ apk add --no-cache gcc musl-dev pkgconf xvfb 2>/dev/null || \
 apk add --no-cache font-dejavu 2>/dev/null || \
     echo "NOTE: font-dejavu unavailable; smoke may fail on font discovery (disclosed)"
 
-RT="dist/fdk-$VERSION-r0-$ARCH.apk"
-DV="dist/fdk-dev-$VERSION-r0-$ARCH.apk"
+RT="dist/fdk-$PACKVER-r0-$ARCH.apk"
+DV="dist/fdk-dev-$PACKVER-r0-$ARCH.apk"
 [ -f "$RT" ] || { echo "INSTALL-TEST FAIL: missing $RT"; ls dist/; exit 1; }
 [ -f "$DV" ] || { echo "INSTALL-TEST FAIL: missing $DV"; ls dist/; exit 1; }
 

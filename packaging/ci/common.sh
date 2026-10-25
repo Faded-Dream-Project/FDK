@@ -20,6 +20,49 @@ fdk_expected_version() {
         include/fdk/fdk_version.h
 }
 
+# The PACKAGE-METADATA version for one distro family: fdk_packver <family>
+# [raw-version]. The raw version defaults to fdk_expected_version; callers
+# that only have a tag (release-notes.sh) pass it explicitly.
+#
+# WHY THIS EXISTS (found live by CI on 1.1.0-rc1, 2026-10-25): while a
+# release candidate is in the tree the raw version carries a hyphenated
+# pre-release suffix ("1.1.0-rc1"), and the five package grammars
+# disagree about that suffix — four of them reject it outright:
+#   rpm   reserves '-' for the Version-Release separator -> "Illegal char"
+#   apk   reserves '-' for the -rN pkgrel                 -> "not a valid version"
+#   arch  pkgver forbids hyphens entirely
+#   xbps  forbids dashes, underscores AND special chars (void-packages
+#         Manual: "Must not contain dashes or underscores"), and a '-'
+#         makes the pkgname-version split ambiguous so repository
+#         lookups fail
+#   deb   accepts "1.1.0-rc1" syntactically but ORDERS it above the
+#         eventual 1.1.0 final (the hyphen starts the debian_revision,
+#         and "rc1" > "1") — the opposite of what a candidate means.
+# Each family therefore gets its native pre-release spelling:
+#   deb, rpm       1.1.0-rc1 -> 1.1.0~rc1   (tilde sorts before the final)
+#   apk            1.1.0-rc1 -> 1.1.0_rc1   (apk's _rc suffix family)
+#   arch, xbps     1.1.0-rc1 -> 1.1.0rc1    (drop the hyphen)
+# A plain numeric version (1.1.0) passes through EVERY grammar unchanged,
+# so at final releases all five spell the same thing and this mapping is
+# inert — the 1.0.0 release artifacts are byte-identical under it.
+#
+# SCOPE: package METADATA only (Version fields, package filenames, and
+# the tarball/dir names the metadata-driven builds derive: rpm %setup,
+# makepkg $srcdir, abuild builddir). The .so real-file name
+# (libfdk.so.<raw>), the pkg-config Version and the smoke test keep the
+# RAW string — they come from fdk_version.h and the Makefile and must
+# stay byte-identical to what the library itself reports.
+fdk_packver() {
+    _fp_family="$1"
+    _fp_raw="${2:-$(fdk_expected_version)}"
+    case "$_fp_family" in
+    deb|rpm)   printf '%s\n' "$_fp_raw" | tr '-' '~' ;;
+    apk)       printf '%s\n' "$_fp_raw" | tr '-' '_' ;;
+    arch|xbps) printf '%s\n' "$_fp_raw" | tr -d '-' ;;
+    *)         printf '%s\n' "$_fp_raw" ;;
+    esac
+}
+
 # RELEASE-POSTURE GUARD. The packaging pipeline is release
 # infrastructure: it stages the versioned shared-library layout
 # (libfdk.so.<version> real file + SONAME symlink + dev symlink)

@@ -81,10 +81,30 @@ docs/EXTENDING.md.
 - New public header installed: `include/fdk/fdk_extend.h`; the
   umbrella `fdk.h` includes it.
 
+### Fixed — the rc version vs. the five package grammars
+
+Found live by CI on the first push of the candidate: the raw
+`1.1.0-rc1` string is illegal or wrong in four of the five package
+version grammars (rpm rejects the hyphen outright; apk reserves it
+for pkgrel; arch's `pkgver` forbids it; xbps forbids it AND the
+ambiguity broke repository lookups; deb accepted it but ordered the
+rc ABOVE the future final). The pipeline now translates the suffix
+once, at the metadata layer (`fdk_packver` in `packaging/ci/common.sh`):
+`1.1.0~rc1` for deb/rpm, `1.1.0_rc1` for apk, `1.1.0rc1` for
+arch/xbps — while the `.so` filename, pkg-config version, and smoke
+test keep the raw string the library itself reports. Plain releases
+pass through unchanged. Documented in `docs/packaging.md`. Also
+corrected three stale "ten shipped theme faces" package descriptions
+the one-face alignment had missed (deb control, rpm spec, xbps
+descriptions now say the default theme, faded-dream).
+
 ### Unreleased-candidate notes
 
-- No git tag, no GitHub release, no package build for rc1 (owner's
-  instruction). The v1.0.0 release and its tag are untouched.
+- No git tag, no GitHub release for rc1 (owner's instruction). The
+  v1.0.0 release and its tag are untouched. CI still builds and
+  install-tests all five package families on every push to main —
+  that is pipeline validation, not a release, and it is exactly how
+  the rc-version defect above was caught.
 
 ## [1.0.0] — 2026-10-12 (re-cut same day as the one-face alignment)
 

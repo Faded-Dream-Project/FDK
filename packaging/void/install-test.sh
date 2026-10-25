@@ -10,6 +10,12 @@ set -eu
 . "$(dirname "$0")/../ci/common.sh"
 
 VERSION="$(fdk_expected_version)"
+# The .xbps FILENAMES carry the package-metadata version (fdk_packver in
+# common.sh: 1.1.0-rc1 -> 1.1.0rc1 — xbps forbids dashes/underscores/special
+# chars, and a '-' makes the pkgname-version split ambiguous, which is
+# exactly how CI failed on the raw rc string); the pkg-config check and
+# the smoke test keep the RAW version.
+PACKVER="$(fdk_packver xbps "$VERSION")"
 
 echo "== FDK xbps install-test ($VERSION) =="
 
@@ -25,8 +31,8 @@ xbps-install -Sy wayland 2>/dev/null || true
 xbps-install -Sy dejavu-fonts-ttf 2>/dev/null || \
     echo "NOTE: dejavu-fonts-ttf unavailable; smoke may fail on font discovery (disclosed)"
 
-RT="dist/fdk-libs-$VERSION"_"1.$(uname -m).xbps"
-DV="dist/fdk-devel-$VERSION"_"1.$(uname -m).xbps"
+RT="dist/fdk-libs-$PACKVER"_"1.$(uname -m).xbps"
+DV="dist/fdk-devel-$PACKVER"_"1.$(uname -m).xbps"
 ls dist/*.xbps
 
 echo "== local repository + xbps-install =="

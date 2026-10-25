@@ -16,6 +16,13 @@ set -eu
 fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
+# Package metadata version: makepkg's pkgver forbids hyphens ("pkgver is
+# not allowed to contain ... hyphens"), so the raw "1.1.0-rc1" drops the
+# hyphen (1.1.0rc1, the Arch pre-release spelling). The tarball name and
+# its top directory follow pkgver (build()/check()/package() cd
+# "$srcdir/fdk-$pkgver"), so they use the SAME spelling. Plain releases
+# pass through unchanged (fdk_packver in common.sh).
+PACKVER="$(fdk_packver arch "$VERSION")"
 ARCH="$(uname -m)"
 
 echo "== building FDK $VERSION arch package ($ARCH) =="
@@ -45,10 +52,10 @@ rm -rf "$WORK"
 mkdir -p "$WORK/src"
 id builder >/dev/null 2>&1 || useradd -m builder
 tar --exclude=.git --exclude=build --exclude=dist \
-    -czf "$WORK/fdk-$VERSION.tar.gz" \
-    --transform "s|^\./|fdk-$VERSION/|" ./
-SHA="$(sha256sum "$WORK/fdk-$VERSION.tar.gz" | awk '{print $1}')"
-sed -e "s|@VERSION@|$VERSION|g" -e "s|@SHA256@|$SHA|" \
+    -czf "$WORK/fdk-$PACKVER.tar.gz" \
+    --transform "s|^\./|fdk-$PACKVER/|" ./
+SHA="$(sha256sum "$WORK/fdk-$PACKVER.tar.gz" | awk '{print $1}')"
+sed -e "s|@VERSION@|$PACKVER|g" -e "s|@SHA256@|$SHA|" \
     packaging/arch/PKGBUILD > "$WORK/PKGBUILD"
 chown -R builder:builder "$WORK"
 

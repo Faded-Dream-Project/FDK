@@ -17,6 +17,15 @@ set -eu
 fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
+# Package metadata version: rpm reserves '-' for the Version-Release
+# separator, so the raw "1.1.0-rc1" is an illegal Version ("Illegal
+# char '-'"); the tilde form (1.1.0~rc1) is rpm's native pre-release
+# spelling and sorts before the final. The tarball name and its top
+# directory follow the spec's Version (%setup -n fdk-%{version}), so
+# they use the SAME spelling; the %files wildcards (libfdk.so.1.*)
+# match the raw-named real file either way. Plain releases pass
+# through unchanged (fdk_packver in common.sh).
+PACKVER="$(fdk_packver rpm "$VERSION")"
 
 echo "== building FDK $VERSION RPMs =="
 
@@ -39,15 +48,17 @@ else
 fi
 
 # --- pristine source tarball ---------------------------------------------
-TARBALL="fdk-$VERSION.tar.gz"
+# PACKVER (not VERSION): the tarball name and top directory must match
+# the spec's Version field, which %setup -n fdk-%{version} derives.
+TARBALL="fdk-$PACKVER.tar.gz"
 mkdir -p dist build-rpm/SOURCES
 tar --exclude=.git --exclude=build --exclude=build-rpm --exclude=dist \
     -czf "build-rpm/SOURCES/$TARBALL" \
-    --transform "s|^\./|fdk-$VERSION/|" ./
+    --transform "s|^\./|fdk-$PACKVER/|" ./
 tar -tzf "build-rpm/SOURCES/$TARBALL" | head -3
 
 # --- spec with the version substituted from the header -------------------
-sed "s|@VERSION@|$VERSION|g" packaging/fedora/fdk.spec > build-rpm/fdk.spec
+sed "s|@VERSION@|$PACKVER|g" packaging/fedora/fdk.spec > build-rpm/fdk.spec
 
 # --- tests inside the rpmbuild too (%check runs the headless suite) ------
 rpmbuild -bb \

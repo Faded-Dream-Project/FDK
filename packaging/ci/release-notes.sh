@@ -11,10 +11,21 @@
 # "Unavailable in this release", never claimed.
 
 set -eu
+# common.sh for fdk_packver: the per-distro package-metadata version.
+# The install-command examples below must name the ACTUAL artifact
+# filenames, which carry the package grammar's spelling of a
+# pre-release suffix (1.1.0-rc1 -> 1.1.0~rc1 / 1.1.0_rc1 / 1.1.0rc1),
+# not the raw tag version. The source archive keeps the raw tag name
+# (release.yml creates it from git archive with the tag string).
+. "$(dirname "$0")/common.sh"
 
 TAG="${1:?usage: release-notes.sh <tag> <dist-dir>}"
 DIST="${2:?usage: release-notes.sh <tag> <dist-dir>}"
 VERSION="${TAG#v}"
+DEBVER="$(fdk_packver deb "$VERSION")"
+RPMVER="$(fdk_packver rpm "$VERSION")"
+ARCHVER="$(fdk_packver arch "$VERSION")"
+APKVER="$(fdk_packver apk "$VERSION")"
 
 cd "$DIST"
 
@@ -82,7 +93,7 @@ NOTES="$(dirname "$(pwd)")/notes.md"
         echo "## Install — Debian / Ubuntu"
         echo ""
         echo '```sh'
-        echo "sudo apt install ./libfdk1_${VERSION}-1_amd64.deb ./fdk-dev_${VERSION}-1_amd64.deb"
+        echo "sudo apt install ./libfdk1_${DEBVER}-1_amd64.deb ./fdk-dev_${DEBVER}-1_amd64.deb"
         echo '```'
         if [ -n "$ubuntu2204" ]; then
             echo ""
@@ -99,7 +110,7 @@ NOTES="$(dirname "$(pwd)")/notes.md"
         echo "## Install — RHEL 10 family / Fedora"
         echo ""
         echo '```sh'
-        echo "sudo dnf install ./libfdk1-$VERSION-1.*.rpm ./fdk-devel-$VERSION-1.*.rpm"
+        echo "sudo dnf install ./libfdk1-$RPMVER-1.*.rpm ./fdk-devel-$RPMVER-1.*.rpm"
         echo '```'
         echo ""
         echo "Built on AlmaLinux 10 (glibc 2.38); install-tested on AlmaLinux 10"
@@ -112,7 +123,7 @@ NOTES="$(dirname "$(pwd)")/notes.md"
         echo "## Install — Arch Linux"
         echo ""
         echo '```sh'
-        echo "sudo pacman -U fdk-$VERSION-1-x86_64.pkg.tar.zst"
+        echo "sudo pacman -U fdk-$ARCHVER-1-x86_64.pkg.tar.zst"
         echo '```'
         echo ""
     fi
@@ -121,7 +132,7 @@ NOTES="$(dirname "$(pwd)")/notes.md"
         echo "## Install — Alpine Linux"
         echo ""
         echo '```sh'
-        echo "sudo apk add --allow-untrusted fdk-$VERSION-r0-x86_64.apk fdk-dev-$VERSION-r0-x86_64.apk"
+        echo "sudo apk add --allow-untrusted fdk-$APKVER-r0-x86_64.apk fdk-dev-$APKVER-r0-x86_64.apk"
         echo '```'
         echo ""
         echo "The upstream packages are unsigned (see *Verification* below);"

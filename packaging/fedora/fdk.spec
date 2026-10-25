@@ -10,7 +10,7 @@
 # hand-edited version.
 #
 # Subpackage layout:
-#   libfdk1   — runtime: libfdk.so.1 + the ten shipped theme faces
+#   libfdk1   — runtime: libfdk.so.1 + the default theme (faded-dream)
 #   fdk-devel — headers, dev symlink, pkgconfig, CLI tools
 #
 # libfdk.a is intentionally NOT packaged (FDK Proprietary License
@@ -55,8 +55,9 @@ Summary:        Faded Dream ToolKit — runtime library and theme faces
 # automatically by rpmbuild from the ELF NEEDED entries.
 
 %description -n libfdk1
-The FDK runtime: the shared library (libfdk.so.1) and the ten
-shipped theme faces. Applications built with FDK need this package
+The FDK runtime: the shared library (libfdk.so.1) and the default
+theme (faded-dream; more faces are .FDKThemes drop-ins, never package
+content). Applications built with FDK need this package
 installed at run time; the FDK runtime is installed separately by
 the end user per the license's separate-runtime model (Section 4(d)).
 

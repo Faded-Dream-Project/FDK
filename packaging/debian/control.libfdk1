@@ -15,7 +15,7 @@ Description: Faded Dream ToolKit — native GUI toolkit runtime (X11 and Wayland
  engines, and FDK-drawn window decorations.
  .
  This package carries the FDK runtime: the shared library and the
- ten shipped theme faces. Applications built with FDK are governed
+ default theme (faded-dream). Applications built with FDK are governed
  by their authors' own licenses (see the FDK Proprietary License,
  Section 5); the runtime itself is installed separately by the end
  user per its Section 4(d).

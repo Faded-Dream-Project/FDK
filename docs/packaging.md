@@ -157,6 +157,35 @@ is required. FDK performs its own font discovery (DejaVu Sans or a
 similar default UI font is picked up automatically; override with
 `$FDK_FONT_FILE` / `$FDK_FONT_DIRS` — see `docs/text.md`).
 
+## Pre-release versions in package metadata
+
+While a release candidate is in the tree, the library's version
+string carries a hyphenated pre-release suffix — `1.1.0-rc1` today.
+The five package grammars disagree about that suffix, and four of
+them reject it outright, so the pipeline translates it once, at the
+metadata layer (`fdk_packver` in `packaging/ci/common.sh`):
+
+| Family | Raw `1.1.0-rc1` becomes | Why |
+| --- | --- | --- |
+| deb | `1.1.0~rc1` | dpkg accepts `1.1.0-rc1` but orders it **above** the future `1.1.0` final (the hyphen starts the debian revision); `~` is dpkg's native pre-release marker and sorts before the final |
+| rpm | `1.1.0~rc1` | `-` is the Version/Release separator — `Version: 1.1.0-rc1` is an illegal spec (`Illegal char '-'`); `~` is rpm's pre-release marker |
+| apk | `1.1.0_rc1` | `-` is reserved for the `-rN` pkgrel; `_rc` is apk's native pre-release suffix family |
+| arch | `1.1.0rc1` | `pkgver` forbids hyphens entirely |
+| xbps | `1.1.0rc1` | versions must not contain dashes, underscores, or special chars (void-packages Manual); a dash also makes the pkgname-version split ambiguous, which broke repository lookups |
+
+Two scope rules keep this honest. First, the mapping touches
+**package metadata only** — the `Version` fields, the package
+filenames, and the tarball/top-dir names the metadata-driven builds
+derive (rpm `%setup`, makepkg `$srcdir`, abuild `builddir`). The
+`.so` real-file name (`libfdk.so.1.1.0-rc1`), the pkg-config
+`Version`, and the smoke test all keep the **raw** string, byte-
+identical to what `fdk_get_version_string()` reports — a package
+must never claim a version the library itself does not. Second, a
+plain numeric version passes through every grammar unchanged, so at
+final releases all five spellings are identical and the mapping is
+inert — the 1.0.0 artifacts are byte-for-byte what they were before
+this translation existed.
+
 ## What the packages contain (and deliberately omit)
 
 Every package family ships:

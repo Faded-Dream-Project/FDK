@@ -18,6 +18,15 @@ set -eu
 fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
+# Package metadata version: xbps forbids dashes, underscores AND
+# special chars in versions (void-packages Manual), and a '-' makes
+# the pkgname-version split ambiguous — exactly how CI failed on
+# 1.1.0-rc1: the packages indexed as fdk-libs-1.1.0-rc1_1 but
+# "xbps-install fdk-libs" could not find them. The hyphenless
+# 1.1.0rc1 splits cleanly (name before the last '-', version_revision
+# after). Plain releases pass through unchanged (fdk_packver in
+# common.sh).
+PACKVER="$(fdk_packver xbps "$VERSION")"
 REVISION=1
 ARCH="$(uname -m)"
 
@@ -83,9 +92,9 @@ mkdir -p dist
 # long description, -D the dependency list, -H the homepage).
 xbps-create \
     -A "$ARCH" \
-    -n "fdk-libs-$VERSION"_"$REVISION" \
-    -s "Faded Dream ToolKit - runtime library and theme faces" \
-    -S "The FDK runtime: the shared library (libfdk.so.1) and the ten shipped theme faces. Applications built with FDK need this package at run time; the FDK runtime is installed separately by the end user per the license's separate-runtime model." \
+    -n "fdk-libs-$PACKVER"_"$REVISION" \
+    -s "Faded Dream ToolKit - runtime library and the default theme" \
+    -S "The FDK runtime: the shared library (libfdk.so.1) and the default theme (faded-dream). Applications built with FDK need this package at run time; the FDK runtime is installed separately by the end user per the license's separate-runtime model." \
     -m "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
     -l "Proprietary" \
     -H "https://github.com/FemBoyGamerTechGuy/FDK" \
@@ -93,13 +102,13 @@ xbps-create \
 
 xbps-create \
     -A "$ARCH" \
-    -n "fdk-devel-$VERSION"_"$REVISION" \
+    -n "fdk-devel-$PACKVER"_"$REVISION" \
     -s "Faded Dream ToolKit - development files" \
     -S "Headers, pkg-config metadata, the development symlink, and the fdk-theme / fdk-set / fdk-prefs tools. The static archive is deliberately not shipped: distributing statically-linked FDK requires separate written authorization." \
     -m "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
     -l "Proprietary" \
     -H "https://github.com/FemBoyGamerTechGuy/FDK" \
-    -D "fdk-libs-$VERSION"_"$REVISION" \
+    -D "fdk-libs-$PACKVER"_"$REVISION" \
     --shlib-requires "libX11.so.6 libXext.so.6 libz.so.1 libwayland-client.so.0 libxkbcommon.so.0" \
     "$DV"
 

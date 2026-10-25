@@ -14,6 +14,10 @@ set -eu
 . "$(dirname "$0")/../ci/common.sh"
 
 VERSION="$(fdk_expected_version)"
+# The .deb FILENAMES carry the package-metadata version (fdk_packver in
+# common.sh: 1.1.0-rc1 -> 1.1.0~rc1); the pkg-config check and the smoke
+# test below keep the RAW version — fdk.pc and the library report it.
+PKGVER="$(fdk_packver deb "$VERSION")-1"
 ARCH="$(dpkg --print-architecture)"
 
 echo "== FDK deb install-test ($VERSION, arch $ARCH) =="
@@ -31,8 +35,8 @@ apt-get install -y --no-install-recommends \
 apt-get install -y --no-install-recommends libwayland-client0 libxkbcommon0 \
     2>/dev/null || echo "NOTE: wayland runtime packages unavailable on this image (X11-only payload expected)"
 
-DEB_RT="dist/libfdk1_${VERSION}-1_${ARCH}.deb"
-DEB_DEV="dist/fdk-dev_${VERSION}-1_${ARCH}.deb"
+DEB_RT="dist/libfdk1_${PKGVER}_${ARCH}.deb"
+DEB_DEV="dist/fdk-dev_${PKGVER}_${ARCH}.deb"
 [ -f "$DEB_RT" ] || { echo "INSTALL-TEST FAIL: missing $DEB_RT"; exit 1; }
 [ -f "$DEB_DEV" ] || { echo "INSTALL-TEST FAIL: missing $DEB_DEV"; exit 1; }
 

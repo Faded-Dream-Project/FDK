@@ -17,6 +17,14 @@ set -eu
 fdk_require_release_posture
 
 VERSION="$(fdk_expected_version)"
+# Package metadata version: apk reserves '-' for the -rN pkgrel, so the
+# raw "1.1.0-rc1" is "not a valid version"; the underscore form
+# (1.1.0_rc1) is apk's native pre-release suffix family and sorts
+# before the final. The tarball name and its top directory follow
+# pkgver (builddir="$srcdir/fdk-$pkgver"), so they use the SAME
+# spelling. Plain releases pass through unchanged (fdk_packver in
+# common.sh).
+PACKVER="$(fdk_packver apk "$VERSION")"
 ARCH="$(uname -m)"
 
 echo "== building FDK $VERSION alpine packages ($ARCH, musl) =="
@@ -44,8 +52,8 @@ WORK="/home/builder/fdk-build"
 rm -rf "$WORK"
 mkdir -p "$WORK"
 tar --exclude=.git --exclude=build --exclude=dist \
-    -czf "$WORK/fdk-$VERSION.tar.gz" \
-    --transform "s|^\./|fdk-$VERSION/|" ./
+    -czf "$WORK/fdk-$PACKVER.tar.gz" \
+    --transform "s|^\./|fdk-$PACKVER/|" ./
 chown -R builder:builder "$WORK"
 
 su builder -c "abuild-keygen -a -n" </dev/null
@@ -54,7 +62,7 @@ cp /home/builder/.abuild/*.rsa.pub /etc/apk/keys/ 2>/dev/null || true
 
 # Prepare the APKBUILD root-side with the version substituted, then
 # let abuild finalize the checksum as the builder, then build.
-sed -e "s|@VERSION@|$VERSION|g" packaging/alpine/APKBUILD > "$WORK/APKBUILD"
+sed -e "s|@VERSION@|$PACKVER|g" packaging/alpine/APKBUILD > "$WORK/APKBUILD"
 chown builder:builder "$WORK/APKBUILD"
 su builder -c "cd '$WORK' && abuild checksum" </dev/null
 chown builder:builder "$WORK/APKBUILD"
