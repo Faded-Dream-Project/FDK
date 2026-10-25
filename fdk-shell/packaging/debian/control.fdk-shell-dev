@@ -1,0 +1,18 @@
+Package: fdk-shell-dev
+Architecture: @ARCH@
+Maintainer: FemBoyGamerTechGuy <242450780+FemBoyGamerTechGuy@users.noreply.github.com>
+Section: libdevel
+Priority: optional
+Version: @PKGVER@
+Depends: libfdk-shell0 (= @PKGVER@), fdk-dev (>= @MINVER@)
+Recommends: pkg-config
+Homepage: https://github.com/Faded-Dream-Project/FDK
+Description: Layer-shell surfaces for FDK — development files
+ The fdk-shell public header and the pkg-config metadata
+ (Requires: fdk) for developing panels, docks and overlays against
+ fdk-shell. Compile with `pkg-config --cflags --libs fdk-shell`;
+ the metadata carries the whole dependency chain.
+ .
+ The static archive is deliberately NOT shipped (FDK Proprietary
+ License 4(d), the same posture as the fdk-dev package): build from
+ source if you need it locally.

@@ -1,0 +1,56 @@
+# fdk-shell/packaging/arch/PKGBUILD — Arch Linux package for
+# fdk-shell.
+#
+# Built by fdk-shell/packaging/arch/build-pkg.sh inside the same
+# archlinux:base container run as FDK's package: FDK's pkg is
+# INSTALLED first, and makepkg builds from a pristine fdk-shell-only
+# tarball — the build() line compiles against the INSTALLED public
+# FDK (pkg-config), and the makepkg source tree carries no FDK
+# checkout at all (the isolation contract, by construction).
+#
+# Arch convention (mirroring FDK's own PKGBUILD): ONE package
+# carrying runtime + development files.
+#
+# The static archive is deliberately NOT packaged (FDK Proprietary
+# License 4(d)).
+
+pkgname=fdk-shell
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Layer-shell surfaces (panels, docks, overlays) for FDK (runtime + development files)"
+arch=('x86_64')
+url="https://github.com/Faded-Dream-Project/FDK"
+license=('LicenseRef-Proprietary')
+# THE REAL DEPENDENCY: the FDK runtime, with the version that
+# introduced the extension API fdk-shell is built against
+# (extension API v1 first shipped in @MINVER@ — Arch's pre-release
+# grammar). libx11/wayland are fdk-shell's own native protocol
+# dependencies (the extension API's documented accessors).
+depends=("fdk>=@MINVER@" 'libx11' 'wayland')
+makedepends=('pkgconf')
+options=(!lto !debug)
+source=("fdk-shell-$pkgver.tar.gz")
+sha256sums=('@SHA256@')
+
+build() {
+    cd "$srcdir/fdk-shell-$pkgver"
+    # The ONLY FDK on the compile line is the installed one — the
+    # makepkg tree has no FDK source (the isolation contract).
+    make CONFIG=release static shared \
+        FDK_CFLAGS="$(pkg-config --cflags fdk)" \
+        FDK_LIBS="$(pkg-config --libs fdk)" \
+        FDK_SO_LIBS="$(pkg-config --libs fdk)"
+}
+
+package() {
+    cd "$srcdir/fdk-shell-$pkgver"
+    make CONFIG=release install DESTDIR="$pkgdir" PREFIX=/usr LIBDIR=/usr/lib \
+        FDK_CFLAGS="$(pkg-config --cflags fdk)" \
+        FDK_LIBS="$(pkg-config --libs fdk)" \
+        FDK_SO_LIBS="$(pkg-config --libs fdk)"
+    # The static archive is NOT shipped (license posture, see above).
+    rm -f "$pkgdir"/usr/lib/libfdk-shell.a
+    install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/fdk-shell/LICENSE
+    install -Dm644 THIRD-PARTY-NOTICES.md \
+        "$pkgdir"/usr/share/licenses/fdk-shell/THIRD-PARTY-NOTICES.md
+}

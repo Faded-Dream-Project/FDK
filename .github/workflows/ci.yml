@@ -68,6 +68,28 @@ jobs:
         # debug (sanitizer builds). FDK_CONFIG pinned throughout.
         run: make FDK_CONFIG=release all examples verify-exports
 
+      - name: fdk-shell (the first add-on package) — build + X11 suite
+        # The add-on builds against the sibling checkout here; the
+        # ISOLATION proof (installed-prefix build, the no-internals
+        # boundary) is its own step below — the same proof the distro
+        # packaging jobs re-run against the dpkg/rpm/pacman/apk/xbps
+        # INSTALLED FDK inside their containers.
+        run: |
+          make -C fdk-shell clean
+          make -C fdk-shell static shared examples
+          make -C fdk-shell test-x11
+
+      - name: fdk-shell — the prefix-isolation proof
+        # THE add-on contract: FDK installed into a throwaway prefix,
+        # fdk-shell rebuilt against that prefix ALONE (no sibling-tree
+        # include path), the demo linked + run from the installed
+        # stack, and the dynamic boundary asserted (fdk_* imports all
+        # resolve from libfdk.so.1; exports are fdk_shell_* only).
+        run: make -C fdk-shell isolation
+
+      - name: fdk-shell — Wayland suite (self-skips without a compositor)
+        run: make -C fdk-shell test-wayland
+
   distro-packages:
     name: distro packages
     uses: ./.github/workflows/distro-packages.yml

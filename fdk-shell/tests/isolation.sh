@@ -58,6 +58,7 @@ echo "== 2. rebuilding fdk-shell against the prefix ALONE =="
 make clean >/dev/null
 FDK_CFLAGS="-I$PREFIX/include" \
 FDK_LIBS="-L$PREFIX/lib -lfdk" \
+FDK_SO_LIBS="-L$PREFIX/lib -lfdk" \
 make static shared examples >/tmp/fdkshell-isolation-build.log 2>&1 || {
     echo "FAIL: fdk-shell does not compile against the installed public headers alone"
     echo "     (this is exactly the private-include bug the proof exists to catch)"
@@ -108,6 +109,15 @@ rm -f "/tmp/.X11-unix/X$XVFB_NUM"
 echo "   demo ran 3s against the installed-prefix stack, exit 0"
 
 echo "== 5. the dynamic boundary of libfdk-shell.so =="
+# The .so carries a real NEEDED entry on libfdk.so.1 (the loader
+# resolves the whole chain; the distro package tools derive the
+# runtime dependency from the ELF).
+if ! objdump -p build/libfdk-shell.so | grep -q "NEEDED.*libfdk.so.1"; then
+    echo "FAIL: libfdk-shell.so has no NEEDED entry on libfdk.so.1"
+    objdump -p build/libfdk-shell.so | grep NEEDED
+    exit 1
+fi
+echo "   NEEDED: libfdk.so.1 (the dependency chain is in the ELF)"
 # Every undefined fdk_* symbol the package imports must resolve
 # against libfdk.so.1 (never another provider).
 MISSING=$(LD_LIBRARY_PATH="$PREFIX/lib" \

@@ -1,0 +1,23 @@
+Package: libfdk-shell0
+Architecture: @ARCH@
+Maintainer: FemBoyGamerTechGuy <242450780+FemBoyGamerTechGuy@users.noreply.github.com>
+Section: libs
+Priority: optional
+Version: @PKGVER@
+Depends: @RUNTIME_DEPS@
+Homepage: https://github.com/Faded-Dream-Project/FDK
+Description: Layer-shell surfaces (panels, docks, overlays) for FDK — runtime
+ fdk-shell is the first add-on package built on FDK's extension API
+ (fdk/extend.h): panel/bar/notification-style surfaces that live
+ outside the normal window stack — desktop background layers, docks,
+ top bars, overlays — behind one API on both FDK backends (Wayland
+ wlr-layer-shell v4; X11 dock windows with strut reservations).
+ .
+ This package carries the fdk-shell runtime: the shared library
+ (libfdk-shell.so.0). It depends on the FDK runtime with the version
+ that introduced the extension API it is built against — the
+ documented add-on versioning pattern (docs/EXTENDING.md).
+ .
+ The FDK and fdk-shell runtimes are installed separately by the end
+ user per the FDK Proprietary License, Section 4(d); applications
+ built with them remain the property of their authors.

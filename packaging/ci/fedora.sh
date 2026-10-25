@@ -42,12 +42,14 @@ RUN almalinux:10 '
     dnf install -y -q --enablerepo=crb xorg-x11-server-Xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb in the el10 repositories — the X11 suite is skipped on this builder and disclosed"
     sh packaging/fedora/build-rpm.sh
+    sh fdk-shell/packaging/fedora/build-rpm.sh
 '
 
 for img in almalinux:10 fedora:42; do
     docker pull -q "$img"
     RUN "$img" 'sh packaging/fedora/install-test.sh'
+    RUN "$img" 'sh fdk-shell/packaging/fedora/install-test.sh'
 done
 
-echo "===== FDK rpm pipeline OK ====="
+echo "===== FDK rpm pipeline OK (FDK + fdk-shell) ====="
 ls -la dist/

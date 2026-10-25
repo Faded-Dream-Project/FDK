@@ -48,16 +48,19 @@ WARN := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
         -Wcast-qual -Wpointer-arith -Wundef -Wwrite-strings
 FEATURE := -D_POSIX_C_SOURCE=200809L
 
-# Sanitizers by default (the same battery FDK itself runs under;
-# release drops them).
-FDKSHELL_SANITIZE ?= 1
+CONFIG     := debug
+
+# Sanitizers by default (the same battery FDK itself runs under);
+# RELEASE drops them (FDK's own convention: release = -O2 -DNDEBUG
+# with no sanitizer runtimes linked into the shipped .so -- the
+# packaging NEEDED scan fails loudly on any leak of them). An
+# explicit FDKSHELL_SANITIZE=0/1 on the command line still wins.
+FDKSHELL_SANITIZE ?= $(if $(filter release,$(CONFIG)),0,1)
 ifeq ($(FDKSHELL_SANITIZE),0)
 SAN_FLAGS :=
 else
 SAN_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 endif
-
-CONFIG     := debug
 CONFIG_STAMP := $(BUILD_DIR)/.config
 DBG_FLAGS  := -g -O0 -DFDKSHELL_DEBUG_BUILD=1
 REL_FLAGS  := -O2 -DNDEBUG
@@ -75,6 +78,15 @@ endif
 FDK_ROOT    ?= ..
 FDK_CFLAGS  ?= -I$(FDK_ROOT)/include
 FDK_LIBS    ?= $(FDK_ROOT)/build/libfdk.a -lX11 -lXext -ldl $(WL_DEPS_L) -lxkbcommon -lm -lz
+# The SHARED library links FDK's SHARED library (NEEDED: libfdk.so.1)
+# -- never the static archive (embedding FDK would defeat the
+# separate-runtime license model AND the add-on isolation contract).
+# Every consumer therefore gets the whole chain resolved by the
+# loader: ldd shows libfdk-shell.so.0 -> libfdk.so.1, and the distro
+# package tools derive the real runtime dependency from the ELF.
+# The default points at the sibling checkout's build tree; the
+# isolation/packaging flows override it with the installed -lfdk.
+FDK_SO_LIBS ?= -L$(FDK_ROOT)/build -lfdk
 # The backends' native dependencies (fdk-shell's OWN — see README's
 # dependency note: the extension API's native accessors hand out the
 # connection; speaking the native protocol is this package's right).
@@ -179,7 +191,7 @@ $(SHARED_LIB): $(OBJS_PIC) $(EXPORT_MAP)
 	$(CC) $(SAN_FLAGS) -fPIC -shared \
 	    -Wl,-soname,$(FDKSHELL_SONAME) \
 	    -Wl,--version-script=$(EXPORT_MAP) -o $@ $(OBJS_PIC) \
-	    $(BACKEND_LIBS)
+	    $(FDK_SO_LIBS) $(BACKEND_LIBS)
 
 # Regenerate the wayland bindings when a scanner is present; the
 # generated files are COMMITTED so the package builds without one

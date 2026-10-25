@@ -40,9 +40,11 @@ RUN "$VOID_IMAGE" '
         xbps-install -Sy xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"
     sh packaging/void/build-xbps.sh
+    sh fdk-shell/packaging/void/build-xbps.sh
 '
 
 RUN "$VOID_IMAGE" 'sh packaging/void/install-test.sh'
+RUN "$VOID_IMAGE" 'sh fdk-shell/packaging/void/install-test.sh'
 
-echo "===== FDK void pipeline OK ====="
+echo "===== FDK void pipeline OK (FDK + fdk-shell) ====="
 ls -la dist/

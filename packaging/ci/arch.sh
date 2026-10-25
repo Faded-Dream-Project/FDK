@@ -28,9 +28,11 @@ RUN archlinux:base '
         base-devel pkgconf libx11 libxext zlib wayland libxkbcommon \
         xorg-server-xvfb ttf-dejavu tar
     sh packaging/arch/build-pkg.sh
+    sh fdk-shell/packaging/arch/build-pkg.sh
 '
 
 RUN archlinux:base 'sh packaging/arch/install-test.sh'
+RUN archlinux:base 'sh fdk-shell/packaging/arch/install-test.sh'
 
-echo "===== FDK arch pipeline OK ====="
+echo "===== FDK arch pipeline OK (FDK + fdk-shell) ====="
 ls -la dist/

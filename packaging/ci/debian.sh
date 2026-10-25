@@ -37,6 +37,7 @@ RUN debian:bookworm '
         libwayland-dev libxkbcommon-dev \
         xvfb fonts-dejavu-core
     sh packaging/debian/build-deb.sh
+    sh fdk-shell/packaging/debian/build-deb.sh
 '
 # The container writes dist/ as root; take it back for the runner user
 # so the verdict marker below (and artifact upload) can write it.
@@ -45,6 +46,7 @@ sudo chown -R "$(id -u):$(id -g)" dist 2>/dev/null || true
 for img in debian:bookworm debian:trixie ubuntu:24.04; do
     docker pull -q "$img"
     RUN "$img" 'sh packaging/debian/install-test.sh'
+    RUN "$img" 'sh fdk-shell/packaging/debian/install-test.sh'
 done
 
 # Informational older-glibc probe: reported, never gating. The verdict
@@ -61,5 +63,5 @@ else
     echo "== INFO: ubuntu:22.04 (glibc 2.35) install-test did NOT pass — documented as unsupported; NOT a release blocker =="
 fi
 
-echo "===== FDK debian pipeline OK ====="
+echo "===== FDK debian pipeline OK (FDK + fdk-shell) ====="
 ls -la dist/

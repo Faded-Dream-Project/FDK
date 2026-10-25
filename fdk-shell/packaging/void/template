@@ -1,0 +1,77 @@
+# fdk-shell/packaging/void/template — XBPS source template for
+# fdk-shell.
+#
+# REFERENCE metadata (the same shape FDK's own template carries):
+# the release pipeline (fdk-shell/packaging/void/build-xbps.sh)
+# builds the same two packages with xbps-create directly, from this
+# metadata — same names, versions, dependencies, and file layout.
+#
+# fdk-shell is its OWN package (source tree fdk-shell/ inside the FDK
+# repository; ready to move to its own repository): the build compiles
+# against the INSTALLED public FDK (pkg-config) — never a sibling
+# checkout. Extension API v1 first shipped in FDK 1.1.0-rc1: THAT is
+# the version floor the runtime dependency pins (spelled the xbps
+# way, hyphenless — see fdk_packver in FDK's packaging/ci/common.sh).
+#
+# Void convention (mirroring FDK's): fdk-shell (runtime) +
+# fdk-shell-devel (development files), /usr/lib as the library
+# directory.
+#
+# The static archive is deliberately NOT packaged (FDK Proprietary
+# License 4(d)).
+
+pkgname=fdk-shell
+version=@VERSION@
+revision=1
+archs="x86_64"
+wrksrc="fdk-shell-${version}"
+build_style="gnu-makefile"
+hostmakedepends="pkgconf"
+makedepends="libX11-devel wayland-devel fdk-devel"
+short_desc="Layer-shell surfaces (panels, docks, overlays) for FDK"
+maintainer="FDK maintainers <https://github.com/Faded-Dream-Project/FDK>"
+license="Proprietary"
+homepage="https://github.com/Faded-Dream-Project/FDK"
+distfiles="https://github.com/Faded-Dream-Project/FDK/releases/download/v@FDKVERSION@/fdk-shell-${version}.tar.gz"
+checksum=SKIP
+
+do_build() {
+        # The ONLY FDK on the compile line is the installed one (the
+        # xbps-src tree carries no FDK source: the isolation contract).
+        make CONFIG=release FDKSHELL_SANITIZE=0 static shared \
+                FDK_CFLAGS="$(pkg-config --cflags fdk)" \
+                FDK_LIBS="$(pkg-config --libs fdk)" \
+                FDK_SO_LIBS="$(pkg-config --libs fdk)"
+}
+
+do_install() {
+        make CONFIG=release FDKSHELL_SANITIZE=0 install DESTDIR=${DESTDIR} \
+                PREFIX=/usr LIBDIR=/usr/lib \
+                FDK_CFLAGS="$(pkg-config --cflags fdk)" \
+                FDK_LIBS="$(pkg-config --libs fdk)" \
+                FDK_SO_LIBS="$(pkg-config --libs fdk)"
+        # The static archive is NOT shipped (license posture, see above).
+        rm -f ${DESTDIR}/usr/lib/libfdk-shell.a
+        vlicense LICENSE
+        vdoc THIRD-PARTY-NOTICES.md
+}
+
+fdk-shell_package() {
+        # THE REAL DEPENDENCY: the FDK runtime, versioned at the
+        # extension-API floor.
+        depends="fdk-libs>=@MINVER@"
+        short_desc+=" — runtime library"
+        pkg_install() {
+                vmove "usr/lib/libfdk-shell.so.*"
+        }
+}
+
+fdk-shell-devel_package() {
+        depends="fdk-shell-${version}_${revision} fdk-devel>=@MINVER@"
+        short_desc+=" — development files"
+        pkg_install() {
+                vmove usr/include
+                vmove "usr/lib/libfdk-shell.so"
+                vmove usr/lib/pkgconfig
+        }
+}

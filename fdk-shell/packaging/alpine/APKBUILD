@@ -1,0 +1,57 @@
+# fdk-shell/packaging/alpine/APKBUILD — Alpine Linux package for
+# fdk-shell.
+#
+# Built by fdk-shell/packaging/alpine/build-apk.sh inside the same
+# alpine:3.22 container run as FDK's packages: FDK's apks are
+# installed first, and abuild builds from a pristine fdk-shell-only
+# tarball — the build() line compiles against the INSTALLED public
+# FDK (pkg-config), and the abuild tree carries no FDK source (the
+# isolation contract, by construction).
+#
+# Subpackage split (Alpine convention, mirroring FDK's APKBUILD):
+# fdk-shell (runtime) and fdk-shell-dev (header + pkg-config).
+#
+# THE REAL DEPENDENCY: depends pins the FDK runtime package with the
+# version that introduced the extension API (v1 first shipped in
+# @MINVER@ — apk's pre-release grammar). abuild additionally derives
+# the so:libfdk.so.1 auto-dependency from the ELF NEEDED entries.
+#
+# The static archive is deliberately NOT packaged (FDK Proprietary
+# License 4(d)).
+
+pkgname=fdk-shell
+pkgver=@VERSION@
+pkgrel=0
+pkgdesc="Layer-shell surfaces (panels, docks, overlays) for FDK (musl)"
+url="https://github.com/Faded-Dream-Project/FDK"
+arch="x86_64"
+license="Proprietary"
+depends="fdk>=@MINVER@"
+makedepends="build-base pkgconf libx11-dev wayland-dev"
+subpackages="$pkgname-dev"
+source="fdk-shell-$pkgver.tar.gz"
+sha512sums="@SHA512@"
+
+builddir="$srcdir/fdk-shell-$pkgver"
+
+build() {
+    # The ONLY FDK on the compile line is the installed one — the
+    # abuild tree has no FDK source (the isolation contract).
+    make CONFIG=release FDKSHELL_SANITIZE=0 static shared \
+        FDK_CFLAGS="$(pkg-config --cflags fdk)" \
+        FDK_LIBS="$(pkg-config --libs fdk)" \
+        FDK_SO_LIBS="$(pkg-config --libs fdk)"
+}
+
+package() {
+    make CONFIG=release FDKSHELL_SANITIZE=0 install DESTDIR="$pkgdir" \
+        PREFIX=/usr LIBDIR=/usr/lib \
+        FDK_CFLAGS="$(pkg-config --cflags fdk)" \
+        FDK_LIBS="$(pkg-config --libs fdk)" \
+        FDK_SO_LIBS="$(pkg-config --libs fdk)"
+    # The static archive is NOT shipped (license posture, see above).
+    rm -f "$pkgdir"/usr/lib/libfdk-shell.a
+    install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/fdk-shell/LICENSE
+    install -Dm644 THIRD-PARTY-NOTICES.md \
+        "$pkgdir"/usr/share/licenses/fdk-shell/THIRD-PARTY-NOTICES.md
+}
