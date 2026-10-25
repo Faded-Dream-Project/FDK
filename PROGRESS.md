@@ -40,6 +40,20 @@ fdk-shell suites, all ASan/UBSan green; two latent FDK bugs found
 by the rigs on the way (uninitialized fullscreen/geo_repaint fields
 on the create path; the wayland NULL-proxy destroy + the ext-popup
 handshake commit). CHANGELOG.md created [1.0.0 + the candidate].
+2026-10-25, later (push addendum): the candidate was pushed to the
+remote, which had just been transferred to the Faded-Dream-Project
+organization — canonical repository URLs across the docs and every
+package's metadata now point at github.com/Faded-Dream-Project/FDK
+(GitHub redirects the old FemBoyGamerTechGuy/FDK locations; the
+LICENSE's Licensor and the packages' Maintainer/copyright identity
+lines are the owner's person and deliberately unchanged). The first
+CI run on the candidate failed four of five packaging jobs on the
+rc version string — rpm/apk/arch reject the hyphen, xbps's
+name-version split went ambiguous, deb ordered the rc above the
+future final — fixed by fdk_packver (packaging/ci/common.sh): the
+per-family pre-release spelling at the metadata layer only, raw
+string everywhere the library reports itself. See CHANGELOG's rc1
+Fixed section and docs/packaging.md's pre-release-versions section.
 
 Prior audit at milestone **1.6.1** (the one-face
 alignment — the 1.0.0 re-cut: the owner inspected the live v1.0.0

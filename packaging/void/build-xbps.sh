@@ -95,9 +95,9 @@ xbps-create \
     -n "fdk-libs-$PACKVER"_"$REVISION" \
     -s "Faded Dream ToolKit - runtime library and the default theme" \
     -S "The FDK runtime: the shared library (libfdk.so.1) and the default theme (faded-dream). Applications built with FDK need this package at run time; the FDK runtime is installed separately by the end user per the license's separate-runtime model." \
-    -m "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
+    -m "FDK maintainers <https://github.com/Faded-Dream-Project/FDK>" \
     -l "Proprietary" \
-    -H "https://github.com/FemBoyGamerTechGuy/FDK" \
+    -H "https://github.com/Faded-Dream-Project/FDK" \
     "$RT"
 
 xbps-create \
@@ -105,9 +105,9 @@ xbps-create \
     -n "fdk-devel-$PACKVER"_"$REVISION" \
     -s "Faded Dream ToolKit - development files" \
     -S "Headers, pkg-config metadata, the development symlink, and the fdk-theme / fdk-set / fdk-prefs tools. The static archive is deliberately not shipped: distributing statically-linked FDK requires separate written authorization." \
-    -m "FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>" \
+    -m "FDK maintainers <https://github.com/Faded-Dream-Project/FDK>" \
     -l "Proprietary" \
-    -H "https://github.com/FemBoyGamerTechGuy/FDK" \
+    -H "https://github.com/Faded-Dream-Project/FDK" \
     -D "fdk-libs-$PACKVER"_"$REVISION" \
     --shlib-requires "libX11.so.6 libXext.so.6 libz.so.1 libwayland-client.so.0 libxkbcommon.so.0" \
     "$DV"

@@ -32,10 +32,10 @@ build_style="gnu-makefile"
 hostmakedepends="pkgconf"
 makedepends="libX11-devel libXext-devel zlib-devel wayland-devel libxkbcommon-devel"
 short_desc="Faded Dream ToolKit — native C GUI toolkit for X11 and Wayland"
-maintainer="FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK>"
+maintainer="FDK maintainers <https://github.com/Faded-Dream-Project/FDK>"
 license="Proprietary"
-homepage="https://github.com/FemBoyGamerTechGuy/FDK"
-distfiles="https://github.com/FemBoyGamerTechGuy/FDK/releases/download/v${version}/fdk-${version}.tar.gz"
+homepage="https://github.com/Faded-Dream-Project/FDK"
+distfiles="https://github.com/Faded-Dream-Project/FDK/releases/download/v${version}/fdk-${version}.tar.gz"
 checksum=SKIP
 
 do_build() {

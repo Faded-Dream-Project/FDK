@@ -18,7 +18,7 @@ pkgver=@VERSION@
 pkgrel=1
 pkgdesc="Faded Dream ToolKit — native C GUI toolkit for X11 and Wayland (runtime + development files)"
 arch=('x86_64')
-url="https://github.com/FemBoyGamerTechGuy/FDK"
+url="https://github.com/Faded-Dream-Project/FDK"
 license=('LicenseRef-Proprietary')
 # !lto: makepkg's default LDFLAGS carry -Wl,--as-needed, and with
 # -flto the static archive's libm references only materialize after

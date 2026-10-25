@@ -12,7 +12,7 @@ includedir=@INCDIR@
 Name: fdk
 Description: Faded Dream ToolKit — C11 native GUI toolkit for Wayland and X11
 Version: @VERSION@
-URL: https://github.com/FemBoyGamerTechGuy/FDK
+URL: https://github.com/Faded-Dream-Project/FDK
 Cflags: -I${includedir}
 Libs: -L${libdir} -lfdk
 # The .so already carries every platform dependency; a dynamically

@@ -18,8 +18,8 @@ validates them, and how a maintainer cuts a release.
 > to a pre-1.0 posture, packaging discloses a `PACKAGING-SKIP`
 > rather than staging an inconsistent payload.
 
-- Repository home: https://github.com/FemBoyGamerTechGuy/FDK
-- Releases: https://github.com/FemBoyGamerTechGuy/FDK/releases
+- Repository home: https://github.com/Faded-Dream-Project/FDK
+- Releases: https://github.com/Faded-Dream-Project/FDK/releases
 - Build from source: `docs/build.md` (the authoritative reference)
 
 ## The release model in one paragraph
@@ -73,7 +73,7 @@ automatically (`docs/build.md` "Optional Wayland").
 *(Forward-looking: applies to the first published release and every
 one after it — see the note above for why none exists yet.)* All
 commands below assume you downloaded the artifacts from the
-[releases page](https://github.com/FemBoyGamerTechGuy/FDK/releases)
+[releases page](https://github.com/Faded-Dream-Project/FDK/releases)
 and verified them (`sha256sum -c SHA256SUMS`). `<ver>` below is the
 release's version (the file names on the page carry it).
 

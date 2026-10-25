@@ -6,7 +6,7 @@ Priority: optional
 Version: @PKGVER@
 Depends: libfdk1 (= @PKGVER@)
 Recommends: pkg-config
-Homepage: https://github.com/FemBoyGamerTechGuy/FDK
+Homepage: https://github.com/Faded-Dream-Project/FDK
 Description: Faded Dream ToolKit — development files
  Headers, the pkg-config metadata, the unversioned development
  symlink, and the fdk-theme / fdk-set / fdk-prefs command-line tools

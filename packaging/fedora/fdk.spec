@@ -22,7 +22,7 @@ Version:        @VERSION@
 Release:        1%{?dist}
 Summary:        Faded Dream ToolKit — native C GUI toolkit for X11 and Wayland
 License:        Proprietary
-URL:            https://github.com/FemBoyGamerTechGuy/FDK
+URL:            https://github.com/Faded-Dream-Project/FDK
 Source0:        fdk-%{version}.tar.gz
 # The upstream release artifacts carry no debuginfo subpackages.
 %define debug_package %{nil}
@@ -116,6 +116,6 @@ rm -f %{buildroot}%{_libdir}/libfdk.a
 %{_bindir}/fdk-prefs
 
 %changelog
-* Sun Oct 11 2026 FDK maintainers <https://github.com/FemBoyGamerTechGuy/FDK> - @VERSION@-1
+* Sun Oct 11 2026 FDK maintainers <https://github.com/Faded-Dream-Project/FDK> - @VERSION@-1
 - First public RPM packaging of FDK (@VERSION@), built and verified
   by the upstream release pipeline (docs/packaging.md).

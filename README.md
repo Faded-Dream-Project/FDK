@@ -8,14 +8,14 @@
 
 FDK is a general-purpose native GUI toolkit for modern Linux desktops,
 developed as part of the
-[Faded Dream Project](https://github.com/FemBoyGamerTechGuy/Faded-Dream-dotfiles).
+[Faded Dream Project](https://github.com/Faded-Dream-Project/Faded-Dream-dotfiles).
 
 [![License: FDK Proprietary v1.0](https://img.shields.io/badge/license-FDK%20Proprietary%20v1.0-blueviolet?style=flat-square)](LICENSE)
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
 [![Version: 1.1.0-rc1](https://img.shields.io/badge/version-1.1.0--rc1-blueviolet?style=flat-square)](docs/versioning.md)
-[![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/FemBoyGamerTechGuy/Faded-Dream-dotfiles)
+[![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/Faded-Dream-Project/Faded-Dream-dotfiles)
 
 </div>
 
@@ -47,7 +47,7 @@ license finalized, and a cross-distribution packaging + CI pipeline
 built and validated (`docs/packaging.md`). Binary packages (.deb /
 .rpm / .pkg.tar.zst / .apk / .xbps) and the pristine source archive
 ship on the
-[releases page](https://github.com/FemBoyGamerTechGuy/FDK/releases).
+[releases page](https://github.com/Faded-Dream-Project/FDK/releases).
 The phase-by-phase account of what is and isn't covered lives in
 `docs/roadmap.md` and `PROGRESS.md`.
 
@@ -136,7 +136,7 @@ suite (`docs/testing.md`).
 
 Binary packages (`.deb`, `.rpm`, `.pkg.tar.zst`, `.apk`, `.xbps`)
 for x86_64 are published on the
-[releases page](https://github.com/FemBoyGamerTechGuy/FDK/releases)
+[releases page](https://github.com/Faded-Dream-Project/FDK/releases)
 and install with each distribution's own package manager — Debian
 12/13 and Ubuntu 24.04+, the RHEL 10 family and Fedora 42+, Arch,
 Alpine 3.22 (musl), and Void (glibc). Exact per-distribution
