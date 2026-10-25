@@ -27,6 +27,8 @@
  * the internal headers expose the backend's XID for the readback
  * target. */
 #include "platform/x11/x11_platform.h"
+#include "platform/x11/x11_gl.h" /* fdk__x11_gl_test_reset (self-check
+                                    * stamp cleanup after the poison test) */
 #include "window/window_internal.h"
 #include "widget/widgets_internal.h" /* fdk__text_extent (tab math) */
 
@@ -10009,6 +10011,212 @@ static void test_gl_lane_downgrade_gui(void) {
            "the CPU path, permanent, pixels exact\n");
 }
 
+/* 1.1.0: the self-check's INCONCLUSIVE verdict — a window that
+ * presents BEFORE it is viewable (map_state != IsViewable; the live
+ * case was an override-redirect popup whose first present raced its
+ * own map on an NVIDIA desktop) must NOT be treated as a GPU
+ * failure: XGetImage would answer BadMatch (request 73), which
+ * proves nothing about the driver. The present succeeds, the window
+ * STAYS on the lane, and the check re-runs on the next completed
+ * present once the window is viewable — where (under this rig's
+ * llvmpipe) it passes and the connection is verified forever after. */
+static void test_gl_lane_selfcheck_inconclusive_gui(void) {
+    setenv("FDK_GL_FORCE", "1", 1);
+    unsetenv("FDK_NO_GL");
+    unsetenv("FDK_GL_SELFCHECK_POISON");
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* Created, NEVER shown: the first present runs entirely below the
+     * viewability gate. */
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "gl lane inconclusive",
+                                 .width = 190, .height = 130 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &s)));
+    /* The framebuffer acquisition is what engages the lane — get_info
+     * FIRST, then ask the path (get_surface alone creates the surface
+     * object; the platform window has not touched GL yet). */
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    fdk_render_path path = (fdk_render_path)-1;
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    if (path != FDK_RENDER_PATH_GL) {
+        printf("[skip] GL lane not engageable on this display — "
+               "inconclusive-verdict test degenerates\n");
+        fdk_window_destroy(win);
+        fdk_shutdown(ctx);
+        unsetenv("FDK_GL_FORCE");
+        return;
+    }
+
+    /* The un-viewable present: must succeed AND leave the window on
+     * the lane (no downgrade — the old code failed exactly here,
+     * treating the not-yet-viewable read as a GPU death sentence). */
+    fdk_surface_fill(s, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s)));
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    assert(path == FDK_RENDER_PATH_GL);
+
+    /* Now viewable: the next completed present re-runs the check, it
+     * passes, and the frame's pixels are on screen. */
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 150);
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    fdk_surface_fill(s, (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s)));
+    (void)fdk_pump_events(ctx, 120);
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    assert(path == FDK_RENDER_PATH_GL);
+
+    Display *rb = NULL;
+    unsigned long xid = (unsigned long)win->pwindow->xwindow;
+    assert(x11_readback_pixel(&rb, xid, 95, 65) == 0x0000FF00UL);
+    if (rb != NULL) {
+        XCloseDisplay(rb);
+    }
+
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    unsetenv("FDK_GL_FORCE");
+    printf("[ok] GL lane self-check: not-viewable present is "
+           "INCONCLUSIVE (stays GL), retried and passed once "
+           "viewable\n");
+}
+
+/* 1.1.0: the self-check's REAL-failure verdict — a persistent
+ * mismatch (after the retry budget) refuses the lane for the whole
+ * process, is logged exactly ONCE, and costs no per-window probing
+ * afterwards. FDK_GL_SELFCHECK_POISON forces every comparison to
+ * mismatch (the FDK_GL_FAIL_AT shape: the seam that makes a driver
+ * limitation reproducible under llvmpipe). */
+static int sc_warn_count = 0;
+static int sc_any_count = 0;
+static void sc_counting_sink(fdk_log_level level, const char *tag,
+                             const char *message, void *user) {
+    (void)tag;
+    (void)user;
+    sc_any_count++;
+    if (level >= FDK_LOG_WARN &&
+        strstr(message, "self-check") != NULL &&
+        strstr(message, "persistent mismatch") != NULL) {
+        sc_warn_count++;
+    }
+}
+
+static void test_gl_lane_selfcheck_real_failure_gui(void) {
+    setenv("FDK_GL_FORCE", "1", 1);
+    setenv("FDK_GL_SELFCHECK_POISON", "1", 1);
+    unsetenv("FDK_NO_GL");
+    unsetenv("FDK_GL_FAIL_AT");
+
+    fdk_log_set_sink(sc_counting_sink, NULL);
+    sc_warn_count = 0;
+    sc_any_count = 0;
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* Window 1: engages, presents, mismatches persistently through
+     * the retry budget, FAILS for real — downgraded with the frame
+     * salvaged onto the screen (the downgrade contract unchanged). */
+    fdk_window *win1 = NULL;
+    fdk_window_options wopts = { .title = "gl lane selfcheck fail 1",
+                                 .width = 170, .height = 110 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win1)));
+    fdk_window_show(win1);
+    (void)fdk_pump_events(ctx, 150);
+
+    fdk_surface *s1 = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win1, &s1)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s1, &info)));
+    fdk_render_path path = (fdk_render_path)-1;
+    assert(fdk_ok(fdk_window_get_render_path(win1, &path)));
+    if (path != FDK_RENDER_PATH_GL) {
+        printf("[skip] GL lane not engageable on this display — "
+               "real-failure test degenerates\n");
+        fdk_log_set_sink(NULL, NULL);
+        fdk_window_destroy(win1);
+        fdk_shutdown(ctx);
+        unsetenv("FDK_GL_SELFCHECK_POISON");
+        unsetenv("FDK_GL_FORCE");
+        return;
+    }
+
+    fdk_surface_fill(s1, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s1)));
+    (void)fdk_pump_events(ctx, 120);
+    assert(fdk_ok(fdk_window_get_render_path(win1, &path)));
+    assert(path == FDK_RENDER_PATH_CPU); /* the REAL verdict downgraded */
+
+    /* Window 2, SAME connection: the lane refuses engagement outright
+     * (gl->refused) — its first present goes straight through the CPU
+     * path, no GLX context, no probe, no second warning. */
+    fdk_window *win2 = NULL;
+    wopts.title = "gl lane selfcheck fail 2";
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win2)));
+    fdk_window_show(win2);
+    (void)fdk_pump_events(ctx, 150);
+    fdk_surface *s2 = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win2, &s2)));
+    assert(fdk_ok(fdk_surface_get_info(s2, &info)));
+    assert(fdk_ok(fdk_window_get_render_path(win2, &path)));
+    assert(path == FDK_RENDER_PATH_CPU);
+    fdk_surface_fill(s2, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s2)));
+    (void)fdk_pump_events(ctx, 120);
+
+    /* A FRESH connection (same knobs): FDK_GL_FORCE overrides the
+     * process-wide failure verdict (its documented escape hatch), so
+     * the new connection engages the lane again and the still-set
+     * poison re-declares the REAL failure — proving the verdict is
+     * decided per CONNECTION, never silently inherited across one. */
+    fdk_window_destroy(win2);
+    fdk_window_destroy(win1);
+    fdk_shutdown(ctx);
+    ctx = NULL;
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_window *win3 = NULL;
+    wopts.title = "gl lane selfcheck fail 3";
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win3)));
+    fdk_window_show(win3);
+    (void)fdk_pump_events(ctx, 150);
+    fdk_surface *s3 = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win3, &s3)));
+    assert(fdk_ok(fdk_surface_get_info(s3, &info)));
+    fdk_surface_fill(s3, (fdk_color){ .r = 1, .g = 1, .b = 0, .a = 1 });
+    assert(fdk_ok(fdk_surface_present(s3)));
+    (void)fdk_pump_events(ctx, 120);
+    assert(fdk_ok(fdk_window_get_render_path(win3, &path)));
+    assert(path == FDK_RENDER_PATH_CPU);
+    fdk_window_destroy(win3);
+    fdk_shutdown(ctx);
+
+    /* The log contract: the first connection (windows 1+2) logged
+     * exactly ONE persistent-mismatch warning — never one per window;
+     * the fresh re-forced connection may log one more of its own. */
+    assert(sc_warn_count >= 1);
+    assert(sc_warn_count <= 2);
+    fdk_log_set_sink(NULL, NULL);
+
+    /* The poison was a TEST artifact, not a driver truth: clear the
+     * process-wide failure stamp so later groups (and real-hardware
+     * runs of this suite) start from an honest UNVERIFIED state. */
+    fdk__x11_gl_test_reset();
+
+    unsetenv("FDK_GL_SELFCHECK_POISON");
+    unsetenv("FDK_GL_FORCE");
+    printf("[ok] GL lane self-check: persistent mismatch is a REAL "
+           "failure — lane refused for the process, one warning per "
+           "connection, no per-window probing\n");
+}
+
 /* Resize under the lane: the staging buffer and texture re-allocate at
  * the new size, the surface contract resets damage to full, and the
  * path STAYS GL. */
@@ -10603,12 +10811,23 @@ static void test_ext_popup_x11(void) {
 /* ---- ext fd sources ------------------------------------------------------ */
 
 typedef struct {
+    fdk_context *ctx;     /* the add-inside-callback leg needs the
+                           * loop handle at fire time */
+    int inner_fd;         /* the fd the callback adds when add_another */
+    void *inner_user;     /* the added source's user data          */
     int fired;
     uint32_t last_revents;
     int self_removed;    /* remove ourselves inside the callback  */
     int add_another;     /* add a fresh source inside the callback */
     int second_fired;
 } extfd_rec;
+
+static void extfd_second_cb(fdk_ext_fd_source *src, uint32_t revents,
+                            void *user) {
+    (void)src;
+    (void)revents;
+    ((extfd_rec *)user)->second_fired++;
+}
 
 static void extfd_cb(fdk_ext_fd_source *src, uint32_t revents, void *user) {
     extfd_rec *rec = user;
@@ -10617,13 +10836,13 @@ static void extfd_cb(fdk_ext_fd_source *src, uint32_t revents, void *user) {
     if (rec->self_removed) {
         fdk_ext_loop_remove_fd(src); /* legal: deferred free */
     }
-}
-
-static void extfd_second_cb(fdk_ext_fd_source *src, uint32_t revents,
-                            void *user) {
-    (void)src;
-    (void)revents;
-    ((extfd_rec *)user)->second_fired++;
+    if (rec->add_another && rec->ctx != NULL && rec->inner_fd >= 0) {
+        /* Legal per the extension API's loop contract: the pfds
+         * mapping is frozen at fill time, so the new source is not
+         * polled THIS round — it first fires on a LATER pump. */
+        (void)fdk_ext_loop_add_fd(rec->ctx, rec->inner_fd, FDK_EXT_FD_IN,
+                                  extfd_second_cb, rec->inner_user);
+    }
 }
 
 static void test_ext_fd_sources(void) {
@@ -10709,29 +10928,50 @@ static void test_ext_fd_sources(void) {
     close(fds3[0]);
 
     /* A source whose callback adds ANOTHER source: the new one first
-     * fires on a LATER pump (the documented deferral idiom). */
+     * fires on a LATER pump (the documented deferral idiom — the
+     * pfds mapping is frozen at fill time, so an fd added mid-fire is
+     * not polled in the round that added it, even when already
+     * readable). */
     int fds2[2];
     assert(pipe(fds2) == 0);
+    int fds_inner[2];
+    assert(pipe(fds_inner) == 0);
     extfd_rec rec2;
+    extfd_rec rec_inner;
     memset(&rec2, 0, sizeof(rec2));
+    memset(&rec_inner, 0, sizeof(rec_inner));
+    rec2.ctx = ctx;
+    rec2.inner_fd = fds_inner[0]; /* the inner pipe's READ end, which
+                                   * is pre-loaded readable below */
+    rec2.inner_user = &rec_inner;
+    rec2.add_another = 1;
     fdk_ext_fd_source *src2 =
         fdk_ext_loop_add_fd(ctx, fds2[0], FDK_EXT_FD_IN, extfd_cb, &rec2);
     assert(src2 != NULL);
-    (void)src2;
-    /* Pre-load the pipe: one byte now (fires cb once; cb is not
-     * adding anything in this leg — keep the add-in-callback shape
-     * for the HUP leg below where it is stable). */
-    assert(write(fds2[1], &byte, 1) == 1);
-    (void)fdk_pump_events(ctx, 300);
+    assert(write(fds2[1], &byte, 1) == 1); /* the outer source fires */
+    assert(write(fds_inner[1], &byte, 1) == 1); /* the inner fd is
+                                                 * readable FROM THE
+                                                 * START */
+    int fired_pump2 = fdk_pump_events(ctx, 300);
+    assert(fired_pump2 >= 1);
     assert(rec2.fired == 1);
-    assert(read(fds2[0], sink, sizeof(sink)) == 1);
+    assert(rec_inner.second_fired == 0); /* THE DEFERRAL: added mid-fire,
+                                          * not polled in this round —
+                                          * even though readable */
+    (void)fdk_pump_events(ctx, 300);
+    assert(rec_inner.second_fired == 1); /* fired on the LATER pump */
+    assert(read(fds_inner[0], sink, sizeof(sink)) == 1);
+    fdk_ext_loop_remove_fd(src2);
     close(fds2[1]);
     close(fds2[0]);
+    close(fds_inner[1]);
+    close(fds_inner[0]);
 
     fdk_window_destroy(win);
     fdk_shutdown(ctx); /* surviving sources would warn + free */
     printf("[ok] ext fd sources: IN wakes the pump, HUP reported, "
-           "self-removal deferred, plain removal, validation\n");
+           "self-removal deferred, plain removal, add-inside-callback "
+           "defers to the next pump, validation\n");
 }
 
 int main(void) {
@@ -10818,6 +11058,8 @@ int main(void) {
     test_gl_lane_policy_gui();
     test_gl_lane_pixel_equivalence_gui();
     test_gl_lane_downgrade_gui();
+    test_gl_lane_selfcheck_inconclusive_gui();
+    test_gl_lane_selfcheck_real_failure_gui();
     test_gl_lane_resize_gui();
 
     printf("\nall X11 integration tests passed\n");

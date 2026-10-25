@@ -103,4 +103,12 @@ int fdk_x11_gl_window_present(struct fdk_x11_gl_window *gwin,
                               const fdk_platform_damage *damage,
                               int w, int h);
 
+/* TEST SEAM (not exported by the library's version script): clears
+ * the process-wide self-check failure stamp — the verdict a poisoned
+ * run declared. The test suite calls this after exercising the
+ * REAL-failure path so later test groups (and real-hardware runs of
+ * the suite, where the poison was an artifact, not a driver truth)
+ * start from an honest UNVERIFIED state. */
+void fdk__x11_gl_test_reset(void);
+
 #endif /* FDK_X11_GL_H */

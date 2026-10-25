@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h> /* nanosleep — the self-check retry budget */
 
 /* The GPU presentation lane (1.4.18) — implementation.
  *
@@ -33,7 +34,7 @@
  *                   glTexSubImage2D of each damaged rect
  *                       (GL_UNPACK_ROW_LENGTH = staging stride)
  *                   one fullscreen quad, NEAREST, texenv REPLACE
- *                   [first frame: server-side pixel self-check]
+ *                   [first COMPLETED frame: server-side pixel self-check]
  *                   glXSwapBuffers
  *
  * The texture is the retained "what the screen shows" copy — the
@@ -161,8 +162,28 @@ struct fdk_x11_gl {
     int refused;                   /* policy verdict: stop offering the
                                     * lane to further windows on this
                                     * connection (software renderer, no
-                                    * usable context/visual) */
+                                    * usable context/visual, or a REAL
+                                    * self-check failure — see below) */
+    int selfcheck;                 /* first-frame verification verdict
+                                    * for the WHOLE connection (the
+                                    * driver-wide truth), so it is
+                                    * decided ONCE and logged ONCE:
+                                    *   0 = not yet verified (the next
+                                    *       completed, viewable present
+                                    *       of any window checks)
+                                    *   1 = passed (later windows skip
+                                    *       the probe entirely)
+                                    *   2 = failed for REAL (persistent
+                                    *       mismatch after retries —
+                                    *       gl->refused is set too) */
     char renderer[80];             /* first context's GL_RENDERER string */
+};
+
+/* selfcheck states (the field above). */
+enum {
+    GL_SELFCHECK_UNVERIFIED = 0,
+    GL_SELFCHECK_PASSED = 1,
+    GL_SELFCHECK_FAILED = 2
 };
 
 struct fdk_x11_gl_window {
@@ -245,12 +266,26 @@ static int gl_policy_decided = 0;
 static int gl_policy_refused = 0;
 static int gl_policy_no_gl = 0;
 static int gl_policy_force = 0;
+static int gl_policy_selfcheck_failed = 0;
 
 static void gl_policy_stamp(int refused, int no_gl, int force) {
     gl_policy_decided = 1;
     gl_policy_refused = refused;
     gl_policy_no_gl = no_gl;
     gl_policy_force = force;
+    /* The self-check verdict is NOT stamped here: it is decided later
+     * (at the first completed frame) by gl_selfcheck_stamp_failed,
+     * under the same env-knob key discipline. */
+}
+
+/* A REAL self-check failure is driver-wide: stamp it into the
+ * process-wide cache so later connections (same env knobs) refuse
+ * the lane before any GL call — one decision, one log line, for the
+ * whole process. Same key discipline as gl_policy_cached_refusal:
+     * flipping FDK_GL_FORCE / FDK_NO_GL between connections gets a
+     * fresh verdict. */
+static void gl_selfcheck_stamp_failed(void) {
+    gl_policy_selfcheck_failed = 1;
 }
 
 static int gl_policy_cached_refusal(void) {
@@ -259,6 +294,14 @@ static int gl_policy_cached_refusal(void) {
     if (gl_policy_decided && no_gl == gl_policy_no_gl &&
         force == gl_policy_force && gl_policy_refused) {
         return 1;
+    }
+    if (gl_policy_selfcheck_failed && !no_gl && !force) {
+        return 1; /* a REAL readback failure decided earlier in this
+                   * process, same knobs: refuse without re-probing */
+    }
+    if (gl_policy_selfcheck_failed && force) {
+        return 0; /* FDK_GL_FORCE explicitly overrides even a decided
+                   * real failure — the test seam's escape hatch */
     }
     return 0;
 }
@@ -298,6 +341,7 @@ struct fdk_x11_gl *fdk_x11_gl_try_load(fdk_platform_connection *conn) {
     gl->conn = conn;
     gl->lib = lib;
     gl->refused = 0;
+    gl->selfcheck = GL_SELFCHECK_UNVERIFIED;
     gl->renderer[0] = '\0';
     memset(&gl->fn, 0, sizeof(gl->fn));
 
@@ -396,6 +440,12 @@ void fdk_x11_gl_shutdown(struct fdk_x11_gl *gl) {
         return;
     }
     fdk_free(gl);
+}
+
+/* TEST SEAM — see x11_gl.h. Not exported (the version script keeps
+ * the fdk_x11_* internals out of the public surface). */
+void fdk__x11_gl_test_reset(void) {
+    gl_policy_selfcheck_failed = 0;
 }
 
 /* ---- per-window lane ------------------------------------------------------ */
@@ -646,48 +696,156 @@ static void draw_fullscreen_quad(struct fdk_x11_gl *gl, int w, int h) {
     gl->fn.glEnd();
 }
 
-/* First-frame self-verification, SERVER-side: after the swap, read
- * four spread pixels of the actual window through FDK's own display
- * connection (XGetImage — synchronous, exact, and the same channel
- * the integration tests trust). A mismatch means the driver's
- * composite is wrong — the lane downgrades and the classic path
- * immediately re-presents the correct frame, so the worst case on a
- * broken driver is one transient frame, never a persistent wrong
- * image. Reading the window (not the GL back buffer) also verifies
- * the actual contract: what the screen shows. (A GL-side
+/* First-COMPLETED-frame self-verification, SERVER-side: after the
+ * swap, read four spread pixels of the actual window through FDK's
+ * own display connection (XGetImage — synchronous, exact, and the
+ * same channel the integration tests trust). A mismatch means the
+ * driver's composite is wrong — the lane downgrades and the classic
+ * path immediately re-presents the correct frame, so the worst case
+ * on a broken driver is one transient frame, never a persistent
+ * wrong image. Reading the window (not the GL back buffer) also
+ * verifies the actual contract: what the screen shows. (A GL-side
  * glReadPixels pre-swap check was tried first and abandoned: this
  * stack's read-back-buffer behavior is quirky — glReadBuffer raises
  * INVALID_ENUM for either candidate constant, and the
  * glXGetProcAddress-resolved readback disagreed with the visible
- * framebuffer.) */
-static int self_check(struct fdk_x11_gl *gl, struct fdk_x11_gl_window *gwin) {
+ * framebuffer.)
+ *
+ * THE 1.1.0 REWORK — three verdicts, not one (found live on an
+ * NVIDIA GTX 1050 Ti desktop, 2026-10-25):
+ *
+ *   INCONCLUSIVE (retry later, never a failure):
+ *     - the window is not viewable yet (map_state != IsViewable). A
+ *       popup whose first present races its own map, a window the
+ *       WM has not mapped: XGetImage would raise BadMatch (request
+ *       73) — which proves NOTHING about the driver.
+ *     - XGetImage itself fails (NULL) for any reason. BadMatch is
+ *       the documented answer for not-viewable/out-of-bounds; it is
+ *       a property of the WINDOW STATE, not of the GPU lane.
+ *     Inconclusive means: this present still counts as successful,
+ *     and the NEXT completed present of ANY window on the connection
+ *     re-attempts the check. A window that never becomes viewable
+ *     simply never verifies — verification is opportunistic.
+ *
+ *   PASS: the probes match. The verdict is stored on the CONNECTION
+ *     (gl->selfcheck): later windows never probe again — no per-popup
+ *     XGetImage, no per-popup GLX-context churn, no repeated warnings.
+ *
+ *   FAIL (a REAL driver problem): the probes mismatch PERSISTENTLY —
+ *     after bounded retries that ride out present-latency timing.
+ *     The swap being issued does not mean its pixels are in the
+ *     window's visible content yet: DRI3/Present schedules the actual
+ *     flip at vblank, and a compositing WM re-composites on its own
+ *     clock. The first XGetImage can therefore read the window's
+ *     PRE-FRAME content — typically its creation background pixel
+ *     (the live report's "server (000000) vs CPU (color)" was exactly
+ *     the fdk-shell bar's BlackPixel background). One retry budget
+ *     (~3 vblanks) separates the timing case (a retry matches: PASS)
+ *     from the real limitation (every retry mismatches: FAIL). Only
+ *     the REAL case refuses the lane for the whole PROCESS (the
+ *     verdict is driver-wide — see gl_selfcheck_stamp_failed) and
+ *     logs once.
+ *
+ * FDK_GL_SELFCHECK_POISON=1 (test seam, the FDK_GL_FAIL_AT shape):
+ * force every probe comparison to mismatch — exercising the retry
+ * budget, the REAL-failure verdict, and the process-wide refusal
+ * end to end. FDK_GL_FORCE=1 overrides a decided failure verdict so
+ * later test groups can still engage the lane.
+ */
+#define GL_SELFCHECK_ATTEMPTS 3
+#define GL_SELFCHECK_RETRY_MS 9
+
+enum {
+    GL_CHK_PASS = 0,
+    GL_CHK_FAIL = 1,         /* REAL: persistent mismatch        */
+    GL_CHK_INCONCLUSIVE = -1 /* not viewable / read failed: retry  */
+};
+
+/* One probe pass: reads the four quarter-grid pixels and compares
+ * them to the staging buffer. Returns 0 = all match, 1 = at least
+ * one mismatch, -1 = a read failed (inconclusive). Probes are
+ * clamped into the SERVER-reported window bounds — the region must
+ * be inside the window or XGetImage raises BadMatch by contract. */
+static int self_check_probes(struct fdk_x11_gl *gl,
+                              struct fdk_x11_gl_window *gwin, int win_w,
+                              int win_h) {
     Display *dpy = gl->conn->display;
     int w = gwin->w;
     int h = gwin->h;
+    const int poisoned = getenv("FDK_GL_SELFCHECK_POISON") != NULL;
     for (int i = 0; i < 4; i++) {
         /* quarter-grid probes: w/8, 3w/8, 5w/8, 7w/8 (and same in y) */
         int sx = (w * (i * 2 + 1)) / 8;
         int sy = (h * (i * 2 + 1)) / 8;
         if (sx >= w) sx = w - 1;
         if (sy >= h) sy = h - 1;
+        if (sx >= win_w) sx = win_w - 1; /* staging and server sizes
+                                          * can differ mid-resize */
+        if (sy >= win_h) sy = win_h - 1;
+        if (sx < 0 || sy < 0) {
+            continue; /* degenerate 1px window: nothing to probe */
+        }
         XImage *im = XGetImage(dpy, gwin->xwindow, sx, sy, 1, 1, ~0UL,
                                ZPixmap);
         if (im == NULL) {
-            FDK_WARN("GPU lane self-check: XGetImage failed — "
-                     "downgrading");
+            /* BadMatch (not viewable / out of bounds) or any other
+             * read error: a property of the window state, not of the
+             * driver — inconclusive, retried at the next present. */
             return -1;
         }
         unsigned long got = (unsigned long)XGetPixel(im, 0, 0) & 0xFFFFFFUL;
         XDestroyImage(im);
         fdk_u32 want = gwin->staging[(size_t)sy * (size_t)w + (size_t)sx];
-        if (got != (unsigned long)(want & 0xFFFFFFUL)) {
-            FDK_WARN("GPU lane self-check mismatch at (%d,%d): server "
-                     "(%06lx) vs CPU (%06x) — downgrading",
-                     sx, sy, got, (unsigned)(want & 0xFFFFFFUL));
-            return -1;
+        if (poisoned || got != (unsigned long)(want & 0xFFFFFFUL)) {
+            return 1;
         }
     }
     return 0;
+}
+
+static int self_check(struct fdk_x11_gl *gl, struct fdk_x11_gl_window *gwin) {
+    Display *dpy = gl->conn->display;
+
+    /* The viewability gate: XGetWindowAttributes is a round trip —
+     * by the time it answers, the server has processed every request
+     * before it (the map, the swap). map_state IsViewable means the
+     * window is mapped AND every ancestor is: the honest programmatic
+     * equivalent of "wait for MapNotify/Expose". Anything else is
+     * INCONCLUSIVE — a not-yet-viewable window proves nothing. */
+    XWindowAttributes wa;
+    if (XGetWindowAttributes(dpy, gwin->xwindow, &wa) == 0) {
+        return GL_CHK_INCONCLUSIVE; /* window gone: not our verdict */
+    }
+    if (wa.map_state != IsViewable || wa.width < 1 || wa.height < 1) {
+        return GL_CHK_INCONCLUSIVE;
+    }
+
+    for (int attempt = 0; attempt < GL_SELFCHECK_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+            /* Ride out present latency: the swap was issued, but
+             * vblank-scheduled presents (DRI3/Present, compositing
+             * WMs) land the pixels up to a couple of vblanks later.
+             * XSync first (drain the wire), then give the compositor
+             * a slice of a vblank before re-reading. */
+            XSync(dpy, False);
+            struct timespec ts = { 0, GL_SELFCHECK_RETRY_MS * 1000000L };
+            nanosleep(&ts, NULL);
+        }
+        int rc = self_check_probes(gl, gwin, wa.width, wa.height);
+        if (rc == 0) {
+            if (attempt > 0) {
+                FDK_INFO("GPU lane self-check passed on retry %d — the "
+                         "first read raced the present landing "
+                         "(vblank/compositor latency)", attempt);
+            }
+            return GL_CHK_PASS;
+        }
+        if (rc < 0) {
+            return GL_CHK_INCONCLUSIVE; /* read failed: not a verdict */
+        }
+        /* mismatch — maybe timing; the loop decides after the budget */
+    }
+    return GL_CHK_FAIL;
 }
 
 int fdk_x11_gl_window_present(struct fdk_x11_gl_window *gwin,
@@ -788,13 +946,37 @@ int fdk_x11_gl_window_present(struct fdk_x11_gl_window *gwin,
     XFlush(dpy);
     gwin->presents++;
 
-    /* First frame through the lane proves the driver composites
-     * exactly (see self_check — server-side, after the swap); later
-     * frames trust that verdict. A failed check still leaves the
-     * bookkeeping consistent: the caller's downgrade path re-presents
-     * the correct pixels through the CPU path at once. */
-    if (gwin->presents == 1 && self_check(gl, gwin) != 0) {
-        return -1;
+    /* The self-check verdict belongs to the CONNECTION (the driver),
+     * not the window: while unverified, the first window whose frame
+     * completes on a VIEWABLE window decides for every later one.
+     * INCONCLUSIVE (not viewable / transient read failure) defers to
+     * the next completed present — the present itself SUCCEEDED, so
+     * zero is returned and the window stays on the lane. A REAL
+     * failure (persistent mismatch after the retry budget) refuses
+     * the lane for this connection AND stamps the process-wide
+     * policy (same env-knob key as the renderer verdict), so every
+     * later window — popups included — engages nothing, probes
+     * nothing, and logs nothing further. Exactly one warning per
+     * process either way. */
+    if (gl->selfcheck == GL_SELFCHECK_UNVERIFIED) {
+        int verdict = self_check(gl, gwin);
+        if (verdict == GL_CHK_PASS) {
+            gl->selfcheck = GL_SELFCHECK_PASSED;
+        } else if (verdict == GL_CHK_FAIL) {
+            FDK_WARN("GPU lane self-check: persistent mismatch after "
+                     "%d reads — a real driver readback limitation "
+                     "(renderer \"%s\"), refusing the GPU present "
+                     "lane for this process",
+                     GL_SELFCHECK_ATTEMPTS,
+                     gl->renderer[0] != '\0' ? gl->renderer : "unknown");
+            gl->selfcheck = GL_SELFCHECK_FAILED;
+            gl->refused = 1;
+            gl_selfcheck_stamp_failed();
+            return -1; /* this window downgrades; later ones never
+                        * engage — the caller salvages the frame */
+        }
+        /* GL_CHK_INCONCLUSIVE: fall through — the frame is fine, the
+         * verdict stays pending for the next completed present. */
     }
     return 0;
 }
