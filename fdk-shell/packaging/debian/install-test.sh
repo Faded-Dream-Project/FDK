@@ -31,8 +31,17 @@ echo "== fdk-shell deb install-test ($FDKSHELL_VERSION, arch $ARCH, FDK floor $M
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+# libx11-dev is TEST INFRASTRUCTURE, the same class as gcc/pkg-config/
+# xvfb on this line: the graphical smoke reads server-side truth (dock
+# type, _NET_WM_DESKTOP, the strut) through a second Xlib connection,
+# and nothing in the package dependency chain ships those headers — the
+# .pc files deliberately carry no x11 Requires (fdk.pc's documented
+# posture: `pkg-config --cflags fdk` must work on machines without the
+# X11 development packages). The alpine/void/arch install-tests declare
+# their X11 dev headers the same way (libx11-dev / libX11-devel / arch's
+# unsplit libx11).
 apt-get install -y --no-install-recommends \
-    libx11-6 libxext6 zlib1g libxkbcommon0 \
+    libx11-6 libx11-dev libxext6 zlib1g libxkbcommon0 \
     gcc libc6-dev pkg-config xvfb fonts-dejavu-core
 apt-get install -y --no-install-recommends libwayland-client0 \
     2>/dev/null || echo "NOTE: libwayland-client0 unavailable on this image (X11-only payload expected)"

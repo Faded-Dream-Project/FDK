@@ -35,7 +35,10 @@ make -C fdk-shell FDKSHELL_SANITIZE=0 static shared \
     FDK_LIBS="$(pkg-config --libs fdk)" \
     FDK_SO_LIBS="$(pkg-config --libs fdk)"
 if command -v Xvfb >/dev/null 2>&1; then
-    LSAN_OPTIONS=exitcode=0 make -C fdk-shell FDKSHELL_SANITIZE=0 test-x11 \
+    # FDKSHELL_SANITIZE=0: this environment ships no sanitizer runtimes
+    # (musl / minimal image) — the same posture as FDK's own alpine
+    # build; the sanitizer gates run on the glibc targets.
+    make -C fdk-shell FDKSHELL_SANITIZE=0 test-x11 \
         FDK_CFLAGS="$(pkg-config --cflags fdk)" \
         FDK_LIBS="$(pkg-config --libs fdk)" \
         FDK_SO_LIBS="$(pkg-config --libs fdk)"
@@ -62,25 +65,42 @@ install -m 644 LICENSE THIRD-PARTY-NOTICES.md "$STAGING/"
 tar -czf "$WORK/fdk-shell-$PACKVER.tar.gz" \
     --transform "s|^\./|fdk-shell-$PACKVER/|" \
     -C "$STAGING" ./
-SHA="$(sha512sum "$WORK/fdk-shell-$PACKVER.tar.gz" | awk '{print $1}')"
 
-mkdir -p "$WORK/src"
-sed -e "s|@VERSION@|$PACKVER|g" -e "s|@MINVER@|$MINVER|g" -e "s|@SHA512@|$SHA|" \
+# The signing key: FDK's own apk build (which ran earlier in this same
+# container) already generated one; generate only when missing so a
+# standalone run of this script also works. abuild refuses to build
+# without a key, and installs use --allow-untrusted either way.
+ls /home/builder/.abuild/*.rsa.pub >/dev/null 2>&1 || \
+    su builder -s /bin/sh -c "abuild-keygen -a -n" </dev/null
+cp /home/builder/.abuild/*.rsa.pub /etc/apk/keys/ 2>/dev/null || true
+
+# Prepare the APKBUILD root-side with version + FDK floor substituted,
+# then let abuild finalize the checksum as the builder, then build —
+# the exact proven sequence of FDK's own build-apk.sh (abuild checksum
+# writes the "<hash>  <filename>" entry; a hand-fed bare hash made
+# verify die with "is missing in checksums").
+sed -e "s|@VERSION@|$PACKVER|g" -e "s|@MINVER@|$MINVER|g" \
     fdk-shell/packaging/alpine/APKBUILD > "$WORK/APKBUILD"
 chown -R builder:builder "$WORK"
+su builder -s /bin/sh -c "cd '$WORK' && abuild checksum" </dev/null
+chown builder:builder "$WORK/APKBUILD"
+su builder -s /bin/sh -c "cd '$WORK' && abuild -r" </dev/null
 
-# abuild needs the sources under $HOME/<...>/src or $PWD/src keyed by
-# pkgname; run from $WORK with src/ present.
-su builder -s /bin/sh -c "
-    set -eu
-    cd '$WORK'
-    abuild -r -F || abuild -r
-"
-APKS="$(find "$WORK" -name 'fdk-shell*.apk' -type f 2>/dev/null || true)"
-[ -n "$APKS" ] || { echo "BUILD FAIL: abuild produced no packages"; find "$WORK" -name '*.apk' -o -name 'APKBUILD' | head; exit 1; }
+# --- collect the artifacts ------------------------------------------------
+# abuild writes to REPODEST (/home/builder/packages/<repo>/...), never
+# to $WORK. FDK's own apks live there too — filter by name.
+APKS="$(find /home/builder/packages -name 'fdk-shell*.apk' -type f 2>/dev/null || true)"
+[ -n "$APKS" ] || { echo "BUILD FAIL: abuild produced no packages"; find /home/builder/packages -type f 2>/dev/null | head; exit 1; }
 mkdir -p dist
 for a in $APKS; do
-    cp "$a" dist/
+    # Same presentation convention as FDK's apks: the arch suffix makes
+    # the release page self-describing (apk installs by content; the
+    # filename is presentation only).
+    base="$(basename "$a" .apk)"
+    case "$base" in
+        *-$ARCH) cp "$a" "dist/$base.apk" ;;
+        *)       cp "$a" "dist/$base-$ARCH.apk" ;;
+    esac
 done
 ls -la dist/*fdk-shell*
 

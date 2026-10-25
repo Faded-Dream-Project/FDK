@@ -76,6 +76,15 @@ make -C fdk-shell static shared \
     FDK_LIBS="$(pkg-config --libs fdk)" \
     FDK_SO_LIBS="$(pkg-config --libs fdk)"
 if command -v Xvfb >/dev/null 2>&1; then
+# The X11 suite in distro containers runs with LSan exitcode=0: every
+# test must still pass, but exit-time leak REPORTS from third-party
+# libraries do not fail the container run (this bookworm container:
+# FDK's own suite reports 1696 bytes in 20 allocations, fdk-shell's
+# suite one 128-byte object — every stack carries only stripped
+# distro-library frames, zero first-party frames; not reproducible
+# outside the container, absent on newer libX11). The STRICT leak gate
+# (exit-on-any-leak) runs in CI's ubuntu job and on every development
+# machine — the same documented posture as FDK's own build-deb.sh.
     LSAN_OPTIONS=exitcode=0 make -C fdk-shell test-x11 \
         FDK_CFLAGS="$(pkg-config --cflags fdk)" \
         FDK_LIBS="$(pkg-config --libs fdk)" \

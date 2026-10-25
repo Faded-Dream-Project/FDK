@@ -9,6 +9,37 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
+Last audited: 2026-10-25, at milestone **1.7.2** (the rc1
+packaging matrix's first live CI pass — the 1.7.1 commits were
+pushed and four of the six CI jobs failed, every defect a
+packaging-script defect, none in library code: the fdk-shell
+install-test smoke needs X11 DEV headers as test infrastructure
+[libx11-dev/libX11-devel now pre-installed by the deb/rpm
+install-tests, the class of gcc/pkg-config/xvfb — the .pc chain
+deliberately carries no x11 Requires, and CI's own deb BUILD
+container had proven the identical smoke green where the headers
+existed]; FDK's own rpm install-test selected `dist/*.rpm`, so the
+add-on's packages swept into a test whose removal step was then
+CORRECTLY refused by rpm — a working dependency blocking removal
+of its base [now FDK's own rpms by name; arch's sort-order
+`head -1` landmine made the deterministic `fdk-[0-9]*` glob]; the
+fdk-shell apk build hand-fed a bare sha512 into sha512sums, but
+abuild's verify needs the FILENAME in the array [now FDK's proven
+`abuild checksum` sequence; the rewrite also fixed REPODEST
+artifact collection and dropped the `abuild -r -F` cargo cult];
+the fdk-shell xbps build checked dist/ while xbps-create wrote
+into the CWD [the `mv ./*.xbps dist/` line restored]. Audited
+alongside: the fdk-shell distro builds had copied FDK's
+LSAN_OPTIONS=exitcode=0 leak policy without its comment [restored
+with the observed numbers; the inert alpine/void copies removed —
+those images run no sanitizer toolchain], and the rpm/alpine/void
+install-tests' `fdk_start_xvfb || exit 1` turned the el10
+honest-skip into a hard failure [now the helper's disclosed-skip
+if/else contract, the same shape as FDK's own install-tests].
+docs/testing.md's 1.1.0-rc1 packaging-matrix lesson +
+CHANGELOG rc1 Fixed section carry the full narratives. Prior
+state below.)
+
 Last audited: 2026-10-25, at milestone **1.7.1** (the rc1
 desktop-integration hardening, found live on a real NVIDIA GTX
 1050 Ti desktop: the GPU present lane's self-check now decides

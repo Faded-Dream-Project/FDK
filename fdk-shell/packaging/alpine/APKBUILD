@@ -30,7 +30,10 @@ depends="fdk>=@MINVER@"
 makedepends="build-base pkgconf libx11-dev wayland-dev"
 subpackages="$pkgname-dev"
 source="fdk-shell-$pkgver.tar.gz"
-sha512sums="@SHA512@"
+# Filled in by `abuild checksum` at build time (the entry must carry
+# the FILENAME: "<hash>  fdk-shell-<ver>.tar.gz" — a bare checksum
+# string makes abuild's verify die with "is missing in checksums").
+sha512sums=""
 
 builddir="$srcdir/fdk-shell-$pkgver"
 

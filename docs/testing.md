@@ -2148,6 +2148,87 @@ not "MY server is serving" — verify ownership by a property only
 your server can have (here: the screen geometry), and never manage
 another process's resources by path (the socket unlink).
 
+## 1.1.0-rc1 — the fdk-shell packaging matrix's first live CI pass
+
+Task 63's four commits (the fdk-shell hardening + five-family
+packaging) exposed four defect classes on their first push, every
+one a packaging-script defect rather than a library defect, and
+every one invisible to the sandbox battery — three of them because
+the sandbox cannot run the native packagers at all (no rpmbuild,
+abuild, xbps-create, pacman here; uid 1001, no root, no docker),
+and the fourth because the local deb verification EXTRACTS packages
+(`dpkg-deb -x`) rather than installing them, so dependency
+resolution and the clean-container header set never ran locally.
+
+1. **The X11 dev headers are test infrastructure, not a package
+   dependency.** The fdk-shell install-test smoke reads server-side
+   truth (dock type, `_NET_WM_DESKTOP`, the strut) through a second
+   Xlib connection — `#include <X11/Xlib.h>` — and the CLEAN
+   install container had libx11-6 (pulled by Xvfb) but not the
+   headers. Nothing in the package chain ships them, correctly:
+   `fdk.pc` deliberately carries no `x11` Requires (its documented
+   posture — `pkg-config --cflags fdk` must work on machines
+   without the X11 development packages), and fdk-shell's public
+   header includes no X11 header either. The fix declares the
+   headers where the other three families already had them —
+   `libx11-dev` / `libX11-devel` pre-installed by the deb/rpm
+   install-tests (alpine and void already declared theirs; arch
+   needs nothing, its libx11 package is unsplit) — the same class
+   as the gcc/pkg-config/xvfb those scripts already pre-install.
+   The CI logs themselves proved the fix sufficient: the identical
+   smoke compiled, linked (no `-lX11` — the X symbols resolve
+   transitively through libfdk.so.1's NEEDED), ran, and PASSED
+   inside the deb BUILD container, where the headers existed.
+2. **A dependency that works is a dependency that blocks removal.**
+   FDK's own rpm install-test did `ls dist/*.rpm` — harmless before
+   fdk-shell existed, fatal after: the add-on's rpms landed in
+   dist/ first (the orchestrator builds fdk-shell before the
+   install-tests), so FDK's install-test installed the COMBINED set
+   and its removal step (`rpm -e fdk-devel libfdk1`) was then
+   refused — correctly! — because `fdk-shell-devel` depends on
+   `fdk-devel`. The removal-refusal is the dependency declaration
+   WORKING; the test's package selection was wrong. It now selects
+   FDK's own rpms by name (`libfdk1-*.rpm fdk-devel-*.rpm`), the
+   per-package shape the deb/alpine/void families always had. Arch
+   had the same landmine hiding behind sort order (`ls dist/fdk-*`
+   matches `fdk-shell-*` too; `head -1` picked FDK's only because
+   digits sort before `s`) — now `fdk-[0-9]*` excludes the add-on
+   deterministically.
+3. **abuild's checksum array carries filenames.** The fdk-shell
+   apk build hand-computed the tarball's sha512 and sed'ed the bare
+   hash into `sha512sums=` — but abuild's verify looks for the
+   FILENAME as a word in the array (`list_has ${i##*/}
+   $sha512sums`), so a hash-only entry dies with "is missing in
+   checksums". The fix is FDK's own proven sequence: `sha512sums=""`
+   in the template + `abuild checksum` (as the builder) writes the
+   correct `<hash>  <filename>` form. Two more latent defects fell
+   out of the rewrite: abuild writes to REPODEST
+   (/home/builder/packages), never the build dir — the old `find
+   $WORK` would have come up empty even with correct checksums —
+   and `abuild -r -F`'s `-F` is "force run as root", pure cargo
+   cult next to the builder `su`.
+4. **xbps-create writes into the current directory.** Both fdk-shell
+   .xbps packages built successfully, then the script checked
+   `dist/` and found nothing — FDK's own void build carries the
+   line the copy dropped: `mv ./*.xbps dist/`.
+
+Plus two silent-mask cleanups: the fdk-shell distro build scripts
+copied FDK's `LSAN_OPTIONS=exitcode=0` leak policy but dropped its
+explaining comment (restored, with the observed numbers: this
+bookworm container reports 1696 bytes/20 allocations on FDK's own
+suite and one 128-byte object on fdk-shell's — all stacks
+stripped-distro frames, zero first-party; not reproducible outside
+the container by swapping bookworm's libX11/libxcb/libxkbcommon/
+libasan under a newer glibc, and absent on libX11 1.8.7 (ubuntu,
+strict) and 1.8.12 (dev machines, strict)) — and the alpine/void
+copies carried the flag where the sanitizer toolchain is OFF
+entirely (`FDKSHELL_SANITIZE=0`, musl/minimal images), where it was
+inert noise (removed). The same audit found the el10 shape bug
+before CI did: `fdk_start_xvfb || exit 1` turns the RHEL-10
+honest-skip into a hard failure — the helper's contract is
+return-1-with-disclosure, and the callers now gate `if/else` like
+FDK's own fedora/alpine/void install-tests.
+
 ## Extension API tests (1.1.0)
 
 The extension surface (`include/fdk/fdk_extend.h`, docs/EXTENDING.md)

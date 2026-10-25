@@ -18,7 +18,11 @@ pacman -Sy --noconfirm --needed \
     gcc pkgconf libx11 libxext zlib wayland libxkbcommon \
     xorg-server-xvfb ttf-dejavu >/dev/null
 
-PKG="$(ls dist/fdk-*.pkg.tar.* 2>/dev/null | head -1)"
+# fdk-[0-9]* — FDK's own package ONLY: the digit right after "fdk-"
+# can never match "fdk-shell-"'s s, so the add-on's package (which
+# also lands in dist/ by this point) is excluded deterministically
+# instead of relying on ls's sort order picking fdk-<version> first.
+PKG="$(ls dist/fdk-[0-9]*.pkg.tar.* 2>/dev/null | head -1)"
 [ -n "$PKG" ] || { echo "INSTALL-TEST FAIL: no arch package in dist/"; exit 1; }
 
 echo "== pacman -U =="

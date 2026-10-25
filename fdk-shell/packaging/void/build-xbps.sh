@@ -44,7 +44,10 @@ make -C fdk-shell FDKSHELL_SANITIZE=0 static shared \
     FDK_LIBS="$(pkg-config --libs fdk)" \
     FDK_SO_LIBS="$(pkg-config --libs fdk)"
 if command -v Xvfb >/dev/null 2>&1; then
-    LSAN_OPTIONS=exitcode=0 make -C fdk-shell FDKSHELL_SANITIZE=0 test-x11 \
+    # FDKSHELL_SANITIZE=0: this environment ships no sanitizer runtimes
+    # (minimal image) — the same posture as FDK's own void build; the
+    # sanitizer gates run on the glibc targets.
+    make -C fdk-shell FDKSHELL_SANITIZE=0 test-x11 \
         FDK_CFLAGS="$(pkg-config --cflags fdk)" \
         FDK_LIBS="$(pkg-config --libs fdk)" \
         FDK_SO_LIBS="$(pkg-config --libs fdk)"
@@ -111,6 +114,10 @@ xbps-create \
     -l "Proprietary" \
     -H "https://github.com/Faded-Dream-Project/FDK" \
     "$DV"
+
+# xbps-create writes ./<name>_<rev>.<arch>.xbps into the CURRENT
+# directory — the same collection line FDK's own build uses.
+mv ./*.xbps dist/ 2>/dev/null || true
 
 SHELL_XBPS_RT="dist/fdk-shell-$PACKVER"_"$REVISION.$ARCH.xbps"
 SHELL_XBPS_DV="dist/fdk-shell-devel-$PACKVER"_"$REVISION.$ARCH.xbps"

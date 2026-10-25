@@ -191,6 +191,49 @@ window):
    FDK_GL_FAIL_AT shape) and `fdk__x11_gl_test_reset()` clears the
    stamp between test groups.
 
+### Fixed — the fdk-shell packaging matrix's first live CI pass
+
+Four defect classes, all packaging-script defects (none in library
+code), all invisible to the sandbox battery — three because the
+sandbox cannot run the native packagers (no rpmbuild/abuild/
+xbps-create/pacman, uid 1001, no docker), one because the local
+deb verification extracts packages instead of installing them:
+
+1. **The deb/rpm install-test smoke needed X11 dev headers as TEST
+   INFRASTRUCTURE** (it reads server-side truth through a second
+   Xlib connection; the .pc chain deliberately carries no `x11`
+   Requires). The clean install containers now pre-install
+   `libx11-dev` / `libX11-devel` — the same class as their
+   gcc/pkg-config/xvfb, and what the alpine/void/arch families
+   already declared. CI's own logs proved the fix sufficient: the
+   identical smoke passed inside the deb build container, where the
+   headers existed.
+2. **FDK's own rpm install-test selected `dist/*.rpm`**, sweeping
+   the add-on's packages into a test whose removal step then got
+   (correctly) refused — a working dependency blocking removal of
+   its base. It now selects FDK's own rpms by name; arch's
+   equivalent `head -1` sort-order landmine is now a deterministic
+   `fdk-[0-9]*` glob.
+3. **The fdk-shell apk build hand-fed a bare sha512 into the
+   APKBUILD** — abuild's checksum array must carry the FILENAME
+   (`abuild checksum` writes the correct form; FDK's own apk
+   pipeline already used exactly that sequence). The rewrite also
+   fixed the artifact collection (abuild writes to REPODEST, not
+   the build dir) and dropped the `abuild -r -F` cargo cult.
+4. **The fdk-shell xbps build checked `dist/` while xbps-create
+   wrote into the current directory** — both packages had built
+   successfully; the collection line FDK's own void build carries
+   (`mv ./*.xbps dist/`) was missing.
+
+Also: the fdk-shell distro build scripts restored the explaining
+comment for FDK's `LSAN_OPTIONS=exitcode=0` distro-container leak
+policy (the copy had dropped it), the inert copies of that flag
+where the sanitizer toolchain is off (alpine/void, musl/minimal)
+were removed, and the el10-leg Xvfb gating in the rpm/alpine/void
+install-tests now follows the helper's disclosed-skip contract
+(`if fdk_start_xvfb; then … else disclose`) instead of hard-failing
+on images with no Xorg server.
+
 ### Unreleased-candidate notes
 
 - No git tag, no GitHub release for rc1 (owner's instruction). The

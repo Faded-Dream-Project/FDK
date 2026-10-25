@@ -23,8 +23,14 @@ dnf install -y -q gcc pkgconf-pkg-config \
 dnf install -y -q xorg-x11-server-Xvfb 2>/dev/null || \
     echo "XVFB-SKIP: no Xvfb on this image (RHEL 10 family) — graphical smoke skipped, disclosed"
 
-RPMS="$(ls dist/*.rpm)"
-[ -n "$RPMS" ] || { echo "INSTALL-TEST FAIL: no rpms in dist/"; exit 1; }
+# FDK's OWN rpms only — the add-on's install-test (which runs after
+# this one in the same container) exercises the combined FDK+
+# fdk-shell set against the dependency contract. A bare `ls dist/*.rpm`
+# would sweep fdk-shell's rpms into THIS test too, and the removal
+# step below would then be refused by rpm — correctly! — because
+# fdk-shell-devel depends on fdk-devel.
+RPMS="$(ls dist/libfdk1-*.rpm dist/fdk-devel-*.rpm 2>/dev/null)"
+[ -n "$RPMS" ] || { echo "INSTALL-TEST FAIL: no FDK rpms in dist/"; exit 1; }
 
 echo "== dnf install =="
 dnf install -y -q $RPMS
