@@ -1755,7 +1755,16 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         xdg_toplevel_destroy(pwindow->xdg_toplevel);
         pwindow->xdg_toplevel = NULL;
     }
-    xdg_surface_destroy(pwindow->xdg_surface);
+    if (pwindow->xdg_surface != NULL) {
+        /* NULL for EXTENSION surfaces (1.1.0): an adopted surface's
+         * role belongs to the add-on and was torn down by the kind's
+         * destroy callback BEFORE this — there is no xdg object here
+         * to destroy (found live by the fdk-shell sway rig: the NULL
+         * proxy marshaled through wl_proxy_get_version and killed
+         * the process). */
+        xdg_surface_destroy(pwindow->xdg_surface);
+        pwindow->xdg_surface = NULL;
+    }
     wl_surface_destroy(pwindow->surface);
     fdk_free(pwindow);
 }
@@ -1767,8 +1776,14 @@ void fdk_wayland_window_show(fdk_platform_window *pwindow) {
      * configure is a wlroots protocol ERROR that kills the whole
      * connection. fdk_extend.h documents show() as a Wayland no-op
      * for extension surfaces: the add-on's handshake + first present
-     * do the mapping. */
-    if (pwindow->ext) {
+     * do the mapping.
+     *
+     * EXTENSION POPUPS are the exception: they carry an FDK-OWNED
+     * xdg role (created through the normal popup path), so the
+     * initial empty commit below IS their handshake starter — the
+     * gate keys on the popup flag, not ext alone (found live by the
+     * fdk-shell sway rig: the popup's configure never arrived). */
+    if (pwindow->ext && !pwindow->popup) {
         return;
     }
     /* xdg-shell requires an initial "commit with no buffer" to
