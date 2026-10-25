@@ -372,11 +372,29 @@ int main(int argc, char **argv) {
     bar_paint(&app);
 
     /* The loop: pump; paint on demand (every event paints itself —
-     * the demo has no animation). */
+     * the demo has no animation). A FATAL pump result (the display
+     * connection died — FDK_ERR_NO_DISPLAY and friends) breaks the
+     * loop for cleanup and a NON-ZERO exit: the documented contract
+     * for application-owned loops (a negative pump result is fatal;
+     * the core logs it once and paces repeats, this side must exit).
+     * Found live on labwc 2026-10-26: the protocol-killed connection
+     * used to spin here forever at 100% CPU. */
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
+    int fatal = 0;
     while (app.running) {
-        (void)fdk_pump_events(ctx, 100);
+        fdk_result pr = fdk_pump_events(ctx, 100);
+        if (pr < 0) {
+            /* Negative = fatal (the display connection died —
+             * FDK_ERR_NO_DISPLAY and friends; a positive count is
+             * dispatched events, zero is a quiet timeout). */
+            fprintf(stderr,
+                    "bar: the display connection died (%d) — exiting\n",
+                    (int)pr);
+            fatal = 1;
+            app.running = 0;
+            break;
+        }
 
         if (auto_quit_s > 0) {
             struct timespec now;
@@ -392,6 +410,9 @@ int main(int argc, char **argv) {
     fdk_shell_layer_destroy(app.bar);
     fdk_shell_shutdown(app.shell);
     fdk_shutdown(ctx);
+    if (fatal) {
+        return 1;
+    }
     printf("bar: done (selected item: %d)\n", app.selected);
     return 0;
 }

@@ -203,6 +203,97 @@ static void test_layer_on_compositor(void) {
            "modes, clean teardown\n");
 }
 
+/* The startup-sequence regression (1.1.0-rc1, the labwc report):
+ * the demo bar's EXACT shape — paint IMMEDIATELY after show(), before
+ * a single pump, hence before the role's configure can possibly have
+ * arrived (it is one full round trip away). The live bug: present()
+ * attached+committed the buffer pre-configure and wlroots killed the
+ * connection ("zwlr_layer_surface_v1: error 2: layer_surface has
+ * never been configured"); the fix moved the gate into FDK's present
+ * (the buffer is held until notify_configure flips it, then committed
+ * post-ack). This test would fail against the old code exactly the
+ * way the live desktop did: the pump goes fatal and every later call
+ * disagrees with reality. */
+static void test_layer_eager_paint_startup(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_WAYLAND };
+    fdk_result r = fdk_init(&ctx, &iopts);
+    if (!fdk_ok(r)) {
+        printf("[skip] no reachable Wayland compositor\n");
+        return;
+    }
+
+    fdk_shell *shell = NULL;
+    r = fdk_shell_init(ctx, &shell);
+    if (r == FDK_ERR_UNSUPPORTED) {
+        printf("[skip] compositor offers no wlr-layer-shell\n");
+        fdk_shutdown(ctx);
+        return;
+    }
+    assert(fdk_ok(r));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    desc.exclusive_zone = -1;
+
+    g_configure_events = 0;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_set_event_callback(layer, layer_event, NULL);
+    fdk_shell_layer_show(layer); /* the empty-commit handshake start */
+
+    /* THE eager paint — zero pumps between show and present. */
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_shell_layer_get_surface(layer, &surface)));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    fdk_surface_fill(surface, (fdk_color){ .r = 0.13f, .g = 0.15f,
+                                           .b = 0.19f, .a = 1.0f });
+    assert(fdk_ok(fdk_surface_present(surface)));
+
+    /* The connection must survive the pumps (the old code's fatal
+     * dispatch lands on the FIRST pump after the commit), the
+     * configure must arrive, and the layer must end up configured at
+     * the compositor's size with a presentable surface. */
+    for (int i = 0; i < 40; i++) {
+        fdk_result pr = fdk_pump_events(ctx, 50);
+        assert(pr >= 0); /* fatal = the regression, loud and early */
+        if (g_configure_events > 0 && i > 4) {
+            break;
+        }
+    }
+    assert(g_configure_events >= 1);
+    assert(g_last_configure.height == 32);
+    assert(g_last_configure.width > 0);
+
+    /* The eager frame rode the deferred-first-frame path: by now it
+     * either committed (same size) or the EXPOSE re-drive repainted
+     * at the real size — either way a later present must succeed on a
+     * LIVE connection. */
+    assert(fdk_ok(fdk_surface_get_info(surface, &info)));
+    fdk_surface_fill(surface, (fdk_color){ .r = 0.13f, .g = 0.15f,
+                                           .b = 0.19f, .a = 1.0f });
+    assert(fdk_ok(fdk_surface_present(surface)));
+    pump(ctx, 300);
+
+    fdk_size sz;
+    assert(fdk_ok(fdk_shell_layer_get_size(layer, &sz)));
+    assert(sz.height == 32);
+
+    fdk_shell_layer_destroy(layer);
+    pump(ctx, 200);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] fdk-shell wayland: eager paint right after show() "
+           "survives (present gated until the role's configure, "
+           "deferred frame committed post-ack)\n");
+}
+
 /* The workspace contract: layer surfaces are per-OUTPUT surfaces in
  * the layer-shell model — NOT workspace members. wlroots compositors
  * render them on every workspace, so switching must not close,
@@ -367,6 +458,7 @@ static void test_layer_across_workspaces(void) {
 
 int main(void) {
     test_layer_on_compositor();
+    test_layer_eager_paint_startup();
     test_layer_across_workspaces();
     printf("fdk-shell wayland tests done\n");
     return 0;

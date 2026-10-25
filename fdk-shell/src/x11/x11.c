@@ -55,6 +55,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <X11/Xutil.h> /* XSizeHints / XSetWMNormalHints (self-positioning) */
 
 #include <stdio.h>
 
@@ -325,6 +326,28 @@ fdk_result fdkshell__x11_layer_create(fdk_shell *shell,
     /* The exclusive zone as struts. */
     x11_set_struts(dpy, atoms, xw, desc, (int)x, (int)y, (int)w, (int)h,
                    screen_w, screen_h);
+
+    /* SELF-POSITIONING (the EWMH contract for dock windows, found
+     * live against Openbox 2026-10-26): a dock-typed window with NO
+     * position hints is "unplaced" in the WM's eyes — Openbox runs
+     * its normal placement policy and CENTERS the panel mid-screen
+     * (its debug log says so verbatim: "placed window ... at 312,
+     * 370"). The anchoring math above computed the panel's real
+     * position; USPosition ("user specified") is the ICCCM bit that
+     * makes a WM honor it verbatim — the same thing every real
+     * panel sets. PPosition would do for most WMs; USPosition is
+     * the stronger claim (never overridden by placement) and is
+     * what the EWMH dock examples use. */
+    {
+        XSizeHints hints;
+        memset(&hints, 0, sizeof(hints));
+        hints.flags = USPosition | USSize | PPosition | PSize;
+        hints.x = (int)x;
+        hints.y = (int)y;
+        hints.width = (int)w;
+        hints.height = (int)h;
+        XSetWMNormalHints(dpy, xw, &hints);
+    }
 
     /* Make sure the requests are visible before FDK's adopt probe
      * (XGetGeometry syncs anyway, but the flush keeps the window

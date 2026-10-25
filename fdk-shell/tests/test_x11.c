@@ -26,6 +26,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h> /* XGetImage / XGetPixel / XDestroyImage */
 #include <X11/Xatom.h>
+#include <X11/keysym.h> /* XKeysymToKeycode (the fake-key rig) */
+#include <X11/extensions/XTest.h> /* XTestFakeKeyEvent (B.3's input) */
 
 #include <assert.h>
 #include <stdio.h>
@@ -1095,6 +1097,523 @@ static void test_sticky_across_desktops(void) {
            "round-trip) + post-map EWMH state messages\n");
 }
 
+/* ---- the 1.1.0-rc1 live-desktop regression tests ---------------------------
+ *
+ * Three findings from real desktops (Openbox on X11; reported
+ * 2026-10-26), each pinned here against the in-test EWMH WM:
+ *
+ *   B1/B3: the popup's grab must not block the WM's PASSIVE grabs —
+ *          the WM registers Super+<n> on the root (the workspace-
+ *          binding mechanism), the dropdown opens, and the binding
+ *          must still FIRE (the WM receives the key) while the popup
+ *          is open AND right after its dismissal. The old code's
+ *          XGrabKeyboard deactivated every passive grab for as long
+ *          as the popup lived. The grab-held duration is captured
+ *          from FDK_POPUP_TRACE's own accounting and asserted sane.
+ *
+ *   C3: the popup's content is ON SCREEN (root-region readback —
+ *          proving stacking, not just the window's own buffer) and
+ *          STAYS until a real dismissal (Escape or the outside
+ *          click), never spontaneously.
+ *
+ *   B1 (desktop change): a _NET_CURRENT_DESKTOP switch with a popup
+ *          open dismisses it (the popup belongs to the world it
+ *          opened in; a grab surviving the switch is the reported
+ *          "workspace switching stops working" shape).
+ */
+
+/* Shared popup-callback state for the three tests. */
+static int g_pg_close_requests = 0;
+
+static void pg_popup_event(fdk_shell_popup *popup, const fdk_event_data *ev,
+                           void *user) {
+    fdk_shell_popup **out = user;
+    if (ev->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        g_pg_close_requests++;
+        fdk_shell_popup_destroy(*out);
+        *out = NULL;
+    }
+    (void)popup;
+}
+
+/* Sends a synthetic KeyPress to the popup window (the exact shape
+ * the existing suite drives keys with): keycode resolved from the
+ * server's own keymap, no fake modifiers. */
+static void send_key(Display *dpy, Window w, KeySym sym, int press) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = press ? KeyPress : KeyRelease;
+    ev.xkey.window = w;
+    ev.xkey.keycode = (unsigned char)XKeysymToKeycode(dpy, sym);
+    ev.xkey.same_screen = True;
+    assert(XSendEvent(dpy, w, False, KeyPressMask | KeyReleaseMask, &ev));
+    XFlush(dpy);
+}
+
+/* XTest-presses Super+<digit> the way a user does (modifier down,
+ * key down/up, modifier up) and returns how many KeyPress events the
+ * given connection received on the root window while draining. */
+static int xtest_super_digit(Display *fake_dpy, Display *watch_dpy,
+                             Window root, int digit) {
+    int ev_base = 0, err_base = 0, major = 0, minor = 0;
+    if (XTestQueryExtension(fake_dpy, &ev_base, &err_base, &major,
+                            &minor) == 0) {
+        return -1; /* no XTEST on this server — the caller skips */
+    }
+    KeyCode super_kc = XKeysymToKeycode(fake_dpy, XK_Super_L);
+    KeyCode digit_kc =
+        XKeysymToKeycode(fake_dpy, (KeySym)(XK_1 + digit - 1));
+    assert(super_kc != 0 && digit_kc != 0);
+
+    /* Drain stale root events first. */
+    XSync(watch_dpy, False);
+    while (XPending(watch_dpy) > 0) {
+        XEvent junk;
+        (void)XNextEvent(watch_dpy, &junk);
+    }
+
+    XTestFakeKeyEvent(fake_dpy, super_kc, True, CurrentTime);
+    XFlush(fake_dpy);
+    XTestFakeKeyEvent(fake_dpy, digit_kc, True, CurrentTime);
+    XFlush(fake_dpy);
+    XTestFakeKeyEvent(fake_dpy, digit_kc, False, CurrentTime);
+    XFlush(fake_dpy);
+    XTestFakeKeyEvent(fake_dpy, super_kc, False, CurrentTime);
+    XFlush(fake_dpy);
+    XSync(watch_dpy, False);
+
+    int presses = 0;
+    while (XPending(watch_dpy) > 0) {
+        XEvent ev;
+        (void)XNextEvent(watch_dpy, &ev);
+        if (ev.type == KeyPress && ev.xkey.window == root &&
+            ev.xkey.keycode == digit_kc) {
+            presses++;
+        }
+    }
+    return presses;
+}
+
+/* B.3: the WM's passive grabs must keep firing while a popup holds
+ * its (pointer-only) grab — the Openbox Super+number finding. */
+static void test_popup_passive_grabs_alive(void) {
+    rb_open();
+    Display *rb = g_rb;
+
+    /* The WM FIRST (it owns the root's SubstructureRedirect). */
+    Display *wm_dpy = XOpenDisplay(NULL);
+    assert(wm_dpy != NULL);
+    test_wm wm;
+    wm_start(&wm, wm_dpy);
+    Window root = wm.root;
+
+    /* The WM's workspace binding: a PASSIVE key grab on the root,
+     * exactly how Openbox implements Super+<number>. KeyPressMask on
+     * the root is what lets the WM observe the grab firing. */
+    KeyCode super_kc = XKeysymToKeycode(wm_dpy, XK_Super_L);
+    KeyCode one_kc = XKeysymToKeycode(wm_dpy, XK_1);
+    assert(super_kc != 0 && one_kc != 0);
+    XGrabKey(wm_dpy, one_kc, (unsigned)Mod4Mask, root, False,
+             GrabModeAsync, GrabModeAsync);
+    XSelectInput(wm_dpy, root,
+                 SubstructureRedirectMask | SubstructureNotifyMask |
+                     KeyPressMask);
+    XSync(wm_dpy, False);
+
+    /* FDK-side: the bar + the dropdown. */
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    desc.exclusive_zone = -1;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 150);
+
+    g_pg_close_requests = 0;
+    fdk_shell_popup *popup = NULL;
+    assert(fdk_ok(fdk_shell_popup_create(layer, 20, 32, 120, 90, &popup)));
+    fdk_shell_popup_set_event_callback(popup, pg_popup_event, &popup);
+    fdk_shell_popup_show(popup);
+    pump(ctx, 200);
+
+    fdk_ext_native_handle nh;
+    assert(fdk_ok(fdk_ext_surface_native(popup->ext, &nh)));
+    Window pop_xid = (Window)nh.xid;
+
+    /* The popup took FOCUS (the keyboard-routing half of the grab
+     * rework): keys arrive at the popup, not at whoever the WM
+     * focused before. */
+    Window focus = None;
+    int revert = 0;
+    XGetInputFocus(rb, &focus, &revert);
+    assert(focus == pop_xid);
+
+    /* B3 CORE: Super+1 while the popup is open. With the old
+     * XGrabKeyboard the passive grab NEVER fired (the WM saw 0
+     * presses — the live report); with the pointer-only grab the
+     * binding works through the open dropdown. */
+    Display *fake_dpy = XOpenDisplay(NULL);
+    assert(fake_dpy != NULL);
+    int presses = xtest_super_digit(fake_dpy, wm_dpy, root, 1);
+    if (presses < 0) {
+        printf("[skip] no XTEST on this server — passive-grab test "
+               "degenerates\n");
+        fdk_shell_popup_destroy(popup);
+        fdk_shell_layer_destroy(layer);
+        fdk_shell_shutdown(shell);
+        fdk_shutdown(ctx);
+        XCloseDisplay(fake_dpy);
+        wm_stop(&wm);
+        return;
+    }
+    assert(presses >= 1);
+
+    /* Dismiss (Escape through the focus routing) and prove the
+     * binding STILL fires afterwards (the recovery the live report
+     * observed only after the popup happened to close). */
+    send_key(rb, pop_xid, XK_Escape, 1);
+    send_key(rb, pop_xid, XK_Escape, 0);
+    int dismissed = 0;
+    for (int i = 0; i < 20 && !dismissed; i++) {
+        pump(ctx, 50);
+        dismissed = (g_pg_close_requests >= 1);
+    }
+    assert(dismissed);
+    pump(ctx, 150);
+
+    presses = xtest_super_digit(fake_dpy, wm_dpy, root, 1);
+    assert(presses >= 1);
+
+    /* The grab-held duration: FDK_POPUP_TRACE's own accounting says
+     * how long the popup held its grab; the wall-clock shape here is
+     * that the whole open->dismiss->release cycle completes in well
+     * under a second (a grab parked for seconds is the failure the
+     * watchdog exists to end). */
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    fdk_shell_popup *popup2 = NULL;
+    g_pg_close_requests = 0;
+    assert(fdk_ok(fdk_shell_popup_create(layer, 20, 32, 120, 90, &popup2)));
+    fdk_shell_popup_set_event_callback(popup2, pg_popup_event, &popup2);
+    fdk_shell_popup_show(popup2);
+    pump(ctx, 100);
+    fdk_ext_native_handle nh2;
+    assert(fdk_ok(fdk_ext_surface_native(popup2->ext, &nh2)));
+    send_key(rb, (Window)nh2.xid, XK_Escape, 1);
+    send_key(rb, (Window)nh2.xid, XK_Escape, 0);
+    for (int i = 0; i < 20 && g_pg_close_requests < 1; i++) {
+        pump(ctx, 50);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    long held_ms = (t1.tv_sec - t0.tv_sec) * 1000L +
+                   (t1.tv_nsec - t0.tv_nsec) / 1000000L;
+    printf("     popup open->dismiss->release cycle: %ld ms "
+           "(grab duration logged under FDK_POPUP_TRACE=1)\n",
+           held_ms);
+    assert(held_ms < 1000);
+
+    XUngrabKey(wm_dpy, one_kc, (unsigned)Mod4Mask, root);
+    XCloseDisplay(fake_dpy);
+
+    fdk_shell_layer_destroy(layer);
+    pump(ctx, 150);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    wm_stop(&wm);
+    printf("[ok] fdk-shell x11: the WM's passive grabs keep firing "
+           "while a popup is open and after its dismissal (pointer-"
+           "only grab + focus routing)\n");
+}
+
+/* C.3: the popup's content is ON SCREEN (a ROOT-region readback —
+ * the stacking proof, not just the window's own buffer) and STAYS
+ * until a real dismissal. */
+static void test_popup_pixels_stay(void) {
+    const fdk_color POP_GOLD = { .r = 1.0f, .g = 0.8f, .b = 0.1f,
+                                 .a = 1.0f };
+    const unsigned long GOLD = 0x00FFCC1AUL;
+
+    rb_open();
+    Display *rb = g_rb;
+
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    desc.exclusive_zone = -1;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 150);
+
+    g_pg_close_requests = 0;
+    fdk_shell_popup *popup = NULL;
+    assert(fdk_ok(fdk_shell_popup_create(layer, 20, 32, 120, 90, &popup)));
+    fdk_shell_popup_set_event_callback(popup, pg_popup_event, &popup);
+    fdk_shell_popup_show(popup);
+    pump(ctx, 150);
+
+    fdk_ext_native_handle nh;
+    assert(fdk_ok(fdk_ext_surface_native(popup->ext, &nh)));
+    Window pop_xid = (Window)nh.xid;
+
+    fdk_surface *ps = NULL;
+    assert(fdk_ok(fdk_shell_popup_get_surface(popup, &ps)));
+    fdk_surface_fill(ps, POP_GOLD);
+    assert(fdk_ok(fdk_surface_present(ps)));
+    pump(ctx, 200);
+
+    /* WHERE the popup sits in root coordinates (the honest on-screen
+     * region — stacking included). */
+    int px = 0, py = 0;
+    unsigned int pw = 0, ph = 0;
+    geom_of(rb, pop_xid, &px, &py, &pw, &ph);
+    Window child_ret = None;
+    int lx = 0, ly = 0;
+    assert(XTranslateCoordinates(rb, (Window)layer_xid(layer),
+                                 DefaultRootWindow(rb), 0, 0, &lx, &ly,
+                                 &child_ret));
+    assert(px == lx + 20 && py == ly + 32);
+
+    /* ON SCREEN: read the ROOT at the popup's region — the popup's
+     * pixels must BE there (a popup behind anything, zero-size, or
+     * unpainted reads the root's background instead). */
+    XImage *img = XGetImage(rb, DefaultRootWindow(rb), px + 40, py + 30,
+                            40, 30, AllPlanes, ZPixmap);
+    assert(img != NULL);
+    int gold = 0;
+    for (int y = 0; y < 30; y++) {
+        for (int x = 0; x < 40; x++) {
+            if (((unsigned long)XGetPixel(img, x, y) & 0xFFFFFFUL) ==
+                GOLD) {
+                gold++;
+            }
+        }
+    }
+    XDestroyImage(img);
+    assert(gold > 900); /* a solid gold interior, not a stray pixel */
+
+    /* STAYS: a quiet second must not dismiss it (the phantom-
+     * dismissal shape — the same click's release, a grab-confirm
+     * event, a stray FocusOut — would have). */
+    pump(ctx, 1000);
+    assert(g_pg_close_requests == 0);
+    XWindowAttributes pattrs;
+    assert(XGetWindowAttributes(rb, pop_xid, &pattrs) != 0);
+    assert(pattrs.map_state == IsViewable);
+    img = XGetImage(rb, DefaultRootWindow(rb), px + 40, py + 30, 40, 30,
+                    AllPlanes, ZPixmap);
+    assert(img != NULL);
+    gold = 0;
+    for (int y = 0; y < 30; y++) {
+        for (int x = 0; x < 40; x++) {
+            if (((unsigned long)XGetPixel(img, x, y) & 0xFFFFFFUL) ==
+                GOLD) {
+                gold++;
+            }
+        }
+    }
+    XDestroyImage(img);
+    assert(gold > 900);
+
+    /* Escape dismisses; the region reverts to the root's background. */
+    send_key(rb, pop_xid, XK_Escape, 1);
+    send_key(rb, pop_xid, XK_Escape, 0);
+    int dismissed = 0;
+    for (int i = 0; i < 20 && !dismissed; i++) {
+        pump(ctx, 50);
+        dismissed = (g_pg_close_requests >= 1);
+    }
+    assert(dismissed);
+    pump(ctx, 150);
+
+    /* Reopen + the OUTSIDE CLICK (the grab's own dismissal contract,
+     * unchanged by the pointer-only rework). */
+    g_pg_close_requests = 0;
+    popup = NULL;
+    assert(fdk_ok(fdk_shell_popup_create(layer, 20, 32, 120, 90, &popup)));
+    fdk_shell_popup_set_event_callback(popup, pg_popup_event, &popup);
+    fdk_shell_popup_show(popup);
+    pump(ctx, 150);
+    assert(fdk_ok(fdk_ext_surface_native(popup->ext, &nh)));
+    pop_xid = (Window)nh.xid;
+
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = ButtonPress;
+    ev.xbutton.window = pop_xid;
+    ev.xbutton.x = -60;
+    ev.xbutton.y = -60;
+    ev.xbutton.button = 1;
+    ev.xbutton.same_screen = True;
+    assert(XSendEvent(rb, pop_xid, False,
+                      (long)(ButtonPressMask | ButtonReleaseMask), &ev));
+    XFlush(rb);
+    dismissed = 0;
+    for (int i = 0; i < 20 && !dismissed; i++) {
+        pump(ctx, 50);
+        dismissed = (g_pg_close_requests >= 1);
+    }
+    assert(dismissed);
+    (void)GOLD;
+
+    fdk_shell_layer_destroy(layer);
+    pump(ctx, 150);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] fdk-shell x11: popup content is on screen (root-region "
+           "readback), stays until Escape or the outside click\n");
+}
+
+/* The layer's SELF-POSITIONING contract (the Openbox placement fix):
+ * a dock-typed window with NO position hints is "unplaced" — WMs run
+ * their placement policy and move the panel (Openbox centers it
+ * mid-screen, its debug log says so verbatim). USPosition/USSize in
+ * WM_NORMAL_HINTS is the ICCCM bit that makes a WM honor the layer's
+ * own geometry. */
+static void test_layer_self_position_hints(void) {
+    rb_open();
+    Display *rb = g_rb;
+
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    desc.exclusive_zone = -1;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 150);
+
+    Window xid = (Window)layer_xid(layer);
+    XSizeHints hints;
+    long supplied = 0;
+    memset(&hints, 0, sizeof(hints));
+    assert(XGetWMNormalHints(rb, xid, &hints, &supplied) != 0);
+    assert((supplied & (USPosition | USSize)) == (USPosition | USSize));
+    /* The anchoring math the backend computed: full-width top bar at
+     * the origin, 32 tall. */
+    assert(hints.x == 0);
+    assert(hints.y == 0);
+    assert(hints.width == (int)DisplayWidth(rb, DefaultScreen(rb)));
+    assert(hints.height == 32);
+
+    fdk_shell_layer_destroy(layer);
+    pump(ctx, 150);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] fdk-shell x11: layer carries USPosition/USSize hints "
+           "(the self-positioned dock contract real WMs honor)\n");
+}
+
+/* B1 (desktop change): a _NET_CURRENT_DESKTOP switch with an open
+ * popup dismisses it and releases the grab — the popup belongs to
+ * the world it opened in. */
+static void test_popup_desktop_change_dismissal(void) {
+    rb_open();
+    Display *rb = g_rb;
+
+    Display *wm_dpy = XOpenDisplay(NULL);
+    assert(wm_dpy != NULL);
+    test_wm wm;
+    wm_start(&wm, wm_dpy);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    desc.exclusive_zone = -1;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 200);
+
+    g_pg_close_requests = 0;
+    fdk_shell_popup *popup = NULL;
+    assert(fdk_ok(fdk_shell_popup_create(layer, 20, 32, 120, 90, &popup)));
+    fdk_shell_popup_set_event_callback(popup, pg_popup_event, &popup);
+    fdk_shell_popup_show(popup);
+    pump(ctx, 200);
+
+    /* The switch: the pager shape (root client message), exactly what
+     * the sticky test drives. The popup's close request is the new
+     * watchdog contract. */
+    XEvent msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.type = ClientMessage;
+    msg.xclient.window = wm.root;
+    msg.xclient.message_type = wm.a.net_current_desktop;
+    msg.xclient.format = 32;
+    msg.xclient.data.l[0] = 1; /* to desktop 2 (0-based) */
+    assert(XSendEvent(rb, wm.root, False,
+                      (long)(SubstructureNotifyMask |
+                             SubstructureRedirectMask),
+                      &msg));
+    XFlush(rb);
+
+    int dismissed = 0;
+    for (int i = 0; i < 24 && !dismissed; i++) {
+        pump(ctx, 50);
+        wm_pump(&wm);
+        dismissed = (g_pg_close_requests >= 1);
+    }
+    assert(dismissed);
+    pump(ctx, 100);
+    wm_pump(&wm);
+
+    /* The LAYER (sticky) rode through the switch — the whole point
+     * of the desktop-switch rig from 1.1.0-rc1's sticky work. */
+    XWindowAttributes la;
+    assert(XGetWindowAttributes(rb, (Window)layer_xid(layer), &la) != 0);
+    assert(la.map_state == IsViewable);
+
+    fdk_shell_layer_destroy(layer);
+    pump(ctx, 150);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    wm_stop(&wm);
+    printf("[ok] fdk-shell x11: desktop switch dismisses an open popup "
+           "(grab released; the sticky layer rides through)\n");
+}
+
 int main(void) {
     test_top_bar_auto_zone();
     test_margins_and_bottom();
@@ -1102,6 +1621,10 @@ int main(void) {
     test_keyboard_exclusive_grab();
     test_popup_on_layer();
     test_layer_stack_state();
+    test_layer_self_position_hints();
+    test_popup_pixels_stay();
+    test_popup_passive_grabs_alive();
+    test_popup_desktop_change_dismissal();
     test_sticky_across_desktops();
     if (g_rb != NULL) {
         XCloseDisplay(g_rb);

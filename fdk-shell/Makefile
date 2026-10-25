@@ -91,6 +91,9 @@ FDK_SO_LIBS ?= -L$(FDK_ROOT)/build -lfdk
 # dependency note: the extension API's native accessors hand out the
 # connection; speaking the native protocol is this package's right).
 X11_DEPS    := $(shell pkg-config --cflags --libs x11 2>/dev/null || echo -lX11)
+# XTest (the popup-grab test's fake-input channel; test-link only
+# would suffice, but the discovery is shared and harmless)
+X11_TEST_DEPS := $(shell pkg-config --cflags --libs xtst 2>/dev/null || echo -lXtst)
 WL_DEPS_C   := $(shell pkg-config --cflags wayland-client 2>/dev/null)
 WL_DEPS_L   := $(shell pkg-config --libs wayland-client 2>/dev/null || echo -lwayland-client)
 
@@ -146,7 +149,7 @@ SHARED_LIB := $(BUILD_DIR)/libfdk-shell.so
 TEST_BINS := $(BUILD_DIR)/tests/test_x11 $(BUILD_DIR)/tests/test_wl
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(wildcard examples/*.c))
 
-.PHONY: all release static shared install uninstall test test-wayland test-x11 isolation examples clean regen-protocol
+.PHONY: all release static shared install uninstall test test-wayland test-x11 test-bar-rig isolation examples clean regen-protocol
 
 all: static shared examples
 
@@ -214,8 +217,9 @@ test: test-x11
 $(BUILD_DIR)/tests/test_x11: tests/test_x11.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
-	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) $< $(STATIC_LIB) \
-	    $(FDK_LIBS) $(BACKEND_LIBS) -o $@
+	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) \
+	    $(X11_TEST_DEPS) $< $(STATIC_LIB) \
+	    $(FDK_LIBS) $(BACKEND_LIBS) $(X11_TEST_DEPS) -o $@
 
 $(BUILD_DIR)/tests/test_wl: tests/test_wl.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
@@ -257,6 +261,17 @@ test-wayland: $(BUILD_DIR)/tests/test_wl
 		echo "== no WAYLAND_DISPLAY; the test binary will self-skip =="; \
 		"$(BUILD_DIR)/tests/test_wl"; \
 	fi
+
+# test-bar-rig — the REAL-COMPOSITOR bar integration rig (1.1.0-rc1):
+# the actual examples/bar against headless sway AND labwc (when each
+# is runnable): alive for seconds, pixels on the output, the
+# WAYLAND_DEBUG trace clean (configure arrived, no protocol error, no
+# attach before the first ack_configure), and the compositor-kill leg
+# (fatal dispatch logged once, non-zero exit, no busy-loop). Needs
+# the bar built (make examples) and a compositor on PATH; self-skips
+# per-compositor otherwise.
+test-bar-rig: examples
+	@bash tests/bar_rig.sh 4
 
 # The prefix-isolation proof (the HARD REQUIREMENT of the add-on
 # contract): FDK is installed into a throwaway prefix, this package
