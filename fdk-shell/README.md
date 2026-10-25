@@ -10,9 +10,11 @@ both of FDK's backends:
   and the wlroots family speak), via wayland-scanner bindings
   vendored in `src/wl/protocol/`.
 - **X11 / XLibre**: a `_NET_WM_WINDOW_TYPE_DOCK` window with
-  `_NET_WM_STRUT_PARTIAL` reservation hints — the EWMH world's
-  equivalent layering semantics, honored by OpenBox, fluxbox, IceWM
-  and friends.
+  `_NET_WM_STRUT_PARTIAL` reservation hints, sticky across workspaces
+  (`_NET_WM_DESKTOP` = 0xFFFFFFFF + `_NET_WM_STATE_STICKY`), and
+  per-level stacking state (`_NET_WM_STATE_ABOVE`, `SKIP_TASKBAR`,
+  `SKIP_PAGER`) — the EWMH world's equivalent layering semantics,
+  honored by OpenBox, fluxbox, IceWM and friends.
 
 Version 0.1.0. Own build, own version, own pkg-config file — a
 separate package that happens to live in FDK's tree for now, ready
@@ -60,6 +62,99 @@ make FDK_CFLAGS="-I/opt/fdk/include" FDK_LIBS="-L/opt/fdk/lib -lfdk"
 Backend knobs: `FDKSHELL_DISABLE_WAYLAND=1` (X11 only — for
 machines without wayland-client dev files), `FDKSHELL_DISABLE_X11=1`
 (Wayland only).
+
+## Workspaces and stacking (the per-backend truth)
+
+**Wayland**: a layer surface is per-OUTPUT, not per-workspace — every
+wlroots compositor shows it on all workspaces by construction. There
+is nothing to configure and nothing to prove at the API level; the
+sway-headless test (`tests/test_wl.c`) switches workspaces through
+the compositor's IPC and pins that nothing about the surface changes
+(no close, no reconfigure, presenting continues).
+
+**X11**: the same behavior is arranged through EWMH hints, both ways
+at once (properties BEFORE mapping — the initial-state contract WMs
+honor at map time — and root client messages AFTER mapping, for WMs
+that came late or only honor the request shape):
+
+- `_NET_WM_DESKTOP` = `0xFFFFFFFF` ("all desktops") and
+  `_NET_WM_STATE_STICKY` — the layer follows the user across
+  workspaces and is never unmapped by a desktop switch (which also
+  protects its pixels: an unmapped window's contents are undefined
+  once remapped — the ghost-bar bug).
+- `_NET_WM_STATE_ABOVE` for the TOP and OVERLAY layers;
+  OVERLAY additionally carries `_NET_WM_STATE_SKIP_TASKBAR` /
+`_NET_WM_STATE_SKIP_PAGER` — the strongest EWMH stacking behavior
+  available.
+
+| layer level | Wayland (protocol truth)     | X11 (EWMH mapping)                            |
+|-------------|------------------------------|------------------------------------------------|
+| background  | below everything             | dock type only (see the honest limits below)  |
+| bottom      | below normal windows         | dock type only (same)                          |
+| top         | docks and bars               | dock + `_NET_WM_STATE_ABOVE`                   |
+| overlay     | above everything, even       | dock + ABOVE + SKIP_TASKBAR + SKIP_PAGER       |
+|             | fullscreen                   | (strongest available; see the fullscreen note) |
+
+**The fullscreen-over-docks limit (X11)**: EWMH window managers draw
+fullscreen windows over docks BY DESIGN — the spec's fullscreen
+stacking rule. A dock carrying `_NET_WM_STATE_ABOVE` is kept above
+normal windows (and, on many WMs, above plain fullscreen windows),
+but EWMH has NO state that guarantees "above fullscreen windows" the
+way layer-shell's overlay layer does. This is a protocol ceiling,
+not an fdk-shell defect; on Wayland the overlay level really does
+sit above fullscreen surfaces.
+
+**What a custom WM would need to honor a true overlay layer**: EWMH
+alone cannot express it, so a WM that wants to must agree on a
+private contract. The minimal sufficient shape (any of these three,
+in increasing strength):
+
+1. **A private stacking state atom** — e.g. honor
+   `_NET_WM_STATE_ABOVE` on `_NET_WM_WINDOW_TYPE_DOCK` windows as
+   "above fullscreen, below nothing" (today's common WM behavior
+   puts fullscreen above even ABOVE docks). One stacking rule, no
+   new windows-must-understand protocol.
+2. **A private layer property** — the WM reads a CARDINAL such as
+   `_FDK_WM_LAYER` (0..3, background/bottom/top/overlay) off dock
+   windows and inserts them into its stack at that layer, with
+   overlay above fullscreen and system-modal windows. fdk-shell
+   would set it alongside the EWMH hints the day a WM adopts it.
+3. **The full layer-shell stacking model** — per-output layer
+   domains with the six-level order (background, bottom, normal,
+   top, fullscreen, overlay), exclusive-zone-aware reservation, and
+   keyboard-mode semantics — i.e. implement what wlroots does. The
+   `fdk_shell_layer_desc` fields map onto it 1:1 (they were designed
+   from zwlr_layer_shell_v1).
+
+The same WM should also honor the existing pieces this package
+already speaks: `_NET_WM_STRUT_PARTIAL` reservations, sticky
+desktops, and — for pixel correctness on unocclusion — sending
+`Expose` to dock windows when their content is lost (the section
+below).
+
+## Content loss and the EXPOSE contract
+
+A layer's pixels can be lost underneath the application on any
+backend: a desktop switch on a WM without sticky support, a
+fullscreen window that covered the bar closing, an unocclusion. FDK
+delivers `FDK_EVENT_WINDOW_EXPOSE` through the layer's event
+callback, and fdk_event.h's contract for rendered surfaces is
+**re-present** — the damage-tracking model otherwise concludes
+nothing changed and paints nothing. The demo bar's handler is the
+canonical shape:
+
+```c
+case FDK_EVENT_WINDOW_EXPOSE:
+    bar_paint(app);          /* re-fill + fdk_surface_present */
+    break;
+```
+
+On Wayland the compositor retains buffer content, so exposes are
+rare (the buffer is re-attached); on X11 they are the difference
+between a bar and a ghost (see `tests/test_x11.c`'s desktop-switch
+rig: a full EWMH window manager runs inside the test, switches
+`_NET_CURRENT_DESKTOP` through the pager-shaped client message, and
+checks the bar's pixels on the round trip).
 
 ## A bar in thirty lines (of the parts that matter)
 
@@ -130,9 +225,11 @@ desc struct field-by-field, including the per-backend notes.
 ## Honest limits (0.1.0)
 
 - **Layer levels**: background / bottom / top / overlay are
-  protocol truth on Wayland; on X11 they ride the stacking the WM
-  gives dock-typed windows (the deltas are Wayland-only — no fake
-  fidelity).
+  protocol truth on Wayland; on X11 they ride the stacking state of
+  the table above (ABOVE/SKIP_* per level). BACKGROUND/BOTTOM have
+  no below-normal-windows EWMH mapping — docks stack above normal
+  windows on every EWMH WM — and OVERLAY cannot be guaranteed above
+  fullscreen (the documented protocol ceiling). No fake fidelity.
 - **Per-output selection**: full on Wayland (the compositor's
   outputs, enumerated in discovery order). X11 reports exactly ONE
   output (the screen) — multi-monitor docks are a RandR feature
@@ -156,20 +253,63 @@ desc struct field-by-field, including the per-backend notes.
   explicit zone), anchor geometry (stretch / corner / centered),
   server-side pixel readback, the EXCLUSIVE grab verified by a
   second client's grab FAILING, popup position/render/dismissal/
-  parent-sweep.
+  parent-sweep; the sticky/stacking state as pre-map properties
+  (per level); and the desktop-switch rig — a minimal EWMH window
+  manager running INSIDE the test (root substructure redirect,
+  `_NET_SUPPORTED`, per-window `_NET_WM_DESKTOP`, pager-shaped
+  `_NET_CURRENT_DESKTOP` client-message switching) proving the
+  layer never unmaps across switches, a control window does, the
+  post-map state messages restore what the "late WM" deleted, and
+  the EXPOSE repaint returns the bar's pixels after the round trip.
 - `tests/test_wl.c` — against a real layer-shell compositor (the
   maintainer rigs run sway headless): layer handshake,
   configure-driven size, present, popup adoption, every layer level
-  + keyboard mode, clean teardown. Self-skips without
+  + keyboard mode, clean teardown, and the workspace-switch
+  confirmation (no close/reconfigure across switches, presenting
+  continues; swaymsg is the control channel). Self-skips without
   `$WAYLAND_DISPLAY`.
 - `tests/isolation.sh` — the prefix-isolation build proof (see
-  Dependencies above).
+  Dependencies above), including the ELF boundary: the shared
+  library carries a real `NEEDED: libfdk.so.1` entry, every
+  imported `fdk_*` symbol resolves from it, and the exports are
+  `fdk_shell_*` only.
 
 Not covered in this environment (documented for the release notes):
 outside-click dismissal ON WAYLAND needs a real input serial (the
 headless seat produces no pointer events; the machinery is FDK's
 existing, menu-tested xdg_popup grab path), and visual readback on
 Wayland would need the compositor's screenshot channel.
+
+## Packaging (the FDK dependency, declared everywhere)
+
+fdk-shell ships as its own package in every distribution family FDK
+does, each declaring a REAL, VERSIONED dependency on the FDK
+runtime — pinned at the FDK version that introduced the extension
+API this package is built against (extension API v1 first shipped
+in FDK 1.1.0-rc1; the API is append-only within the SONAME, so the
+floor never moves backwards):
+
+| family | runtime package | dependency declaration                    |
+|--------|-----------------|--------------------------------------------|
+| deb    | `libfdk-shell0` + `fdk-shell-dev` | `Depends: libfdk1 (>= 1.1.0~rc1)` (dev: `fdk-dev (>= …)`) |
+| rpm    | `libfdk-shell0` + `fdk-shell-devel` | `Requires: libfdk1 >= 1.1.0~rc1` |
+| arch   | `fdk-shell` (single package) | `depends=(fdk>=1.1.0rc1 …)` |
+| apk    | `fdk-shell` + `fdk-shell-dev` | `depends="fdk>=1.1.0_rc1"` (+ so: auto-deps) |
+| xbps   | `fdk-shell` + `fdk-shell-devel` | `depends="fdk-libs>=1.1.0rc1"` |
+
+(The pre-release spellings differ per grammar — the same
+`fdk_packver` mapping FDK's own packaging uses; plain releases are
+byte-identical across families.)
+
+Every family's install-test proves the dependency is REAL, in the
+native package manager: installing fdk-shell's runtime ALONE is
+refused (unmet `libfdk1`/`fdk`/`fdk-libs`), the full set installs
+together with resolution, pkg-config discovers the
+`fdk-shell` -> `fdk` chain, and the graphical smoke (a layer
+created, shown, presented, verified server-side for dock type +
+sticky + strut) runs from the installed stack. The build itself
+compiles against the INSTALLED FDK packages — the isolation proof
+re-run inside every packaging container.
 
 ## License
 

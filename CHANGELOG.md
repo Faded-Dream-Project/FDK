@@ -68,10 +68,34 @@ docs/EXTENDING.md.
 - X11/XLibre backend: `_NET_WM_WINDOW_TYPE_DOCK` +
   `_NET_WM_STRUT_PARTIAL` struts — the same layering semantics the
   EWMH world offers, behind the same API.
+- Desktop integration on X11 (found live on a real NVIDIA desktop):
+  layers are STICKY across workspaces (`_NET_WM_DESKTOP` =
+  0xFFFFFFFF + `_NET_WM_STATE_STICKY`, set as pre-map properties
+  and re-asserted as root client messages after mapping — the
+  Wayland behavior, arranged through EWMH); TOP/OVERLAY layers
+  carry `_NET_WM_STATE_ABOVE`, OVERLAY adds SKIP_TASKBAR/SKIP_PAGER
+  (the strongest EWMH stacking behavior; the fullscreen-over-docks
+  protocol ceiling and what a custom WM would need to honor a true
+  overlay layer are documented in fdk-shell's README); and the demo
+  bar repaints on `FDK_EVENT_WINDOW_EXPOSE` — the content-loss
+  contract that fixes the ghost-bar bug (a desktop round-trip left
+  the bar showing whatever was underneath).
+- fdk-shell's shared library links FDK's shared library (a real
+  `NEEDED: libfdk.so.1` entry — the whole chain resolves through
+  the loader and the distro dependency tooling), and its release
+  config drops the sanitizer runtimes like FDK's does.
 - Popups built on the Part-1 popup API; a demo bar (top-docked,
   one working dropdown); Xvfb strut/dock verification test and a
   prefix-isolation build test proving fdk-shell compiles against
   FDK's installed public headers and library ONLY.
+- fdk-shell packages in all five distribution families
+  (deb/rpm/arch/apk/xbps), each declaring a real, versioned
+  dependency on the FDK runtime pinned at the extension-API floor;
+  every family's install-test proves the dependency is enforced by
+  the native package manager (installing fdk-shell alone is
+  REFUSED), and the build itself compiles against the INSTALLED FDK
+  packages — the isolation proof re-run inside every packaging
+  container (fdk-shell/packaging/).
 
 ### Packaging / build
 
@@ -129,6 +153,43 @@ Documented in `docs/packaging.md`. Also corrected three stale "ten
 shipped theme faces" package descriptions the one-face alignment
 had missed (deb control, rpm spec, xbps descriptions now say the
 default theme, faded-dream).
+
+### Fixed — the GPU present lane's self-check verdicts (found live
+                on an NVIDIA GTX 1050 Ti desktop)
+
+The lane's first-frame self-verification had three defects, all
+visible as repeated warnings on a real desktop (every dropdown
+click re-logged the whole failure sequence, once per new popup
+window):
+
+1. **Not-viewable reads were treated as GPU failures.** A popup
+   whose first present raced its own map got `XGetImage` →
+   BadMatch — a property of the WINDOW STATE, not the driver. The
+   check now gates on viewability first (`map_state ==
+   IsViewable`, the programmatic MapNotify/Expose equivalent) and
+   clamps its probe region into the server-reported window bounds;
+   a not-viewable or unreadable window is INCONCLUSIVE and retried
+   at the next completed present, never a downgrade.
+2. **Present-latency timing was treated as a driver limitation.**
+   The first read after `glXSwapBuffers` can still show the
+   window's pre-frame background (DRI3/Present schedules the flip
+   at vblank; compositing WMs re-composite on their own clock) —
+   the live report's "server (000000) vs CPU (color)" mismatch was
+   exactly the bar window's BlackPixel background. A bounded retry
+   budget (~3 vblanks) now separates the timing case (a retry
+   matches: PASS, logged once at INFO) from the real limitation
+   (every retry mismatches: FAIL).
+3. **The verdict was per-window.** Each new popup re-engaged the
+   lane, re-probed, re-failed, and re-logged — the repeated
+   warnings, and the XID churn (window + GLX context + GC + two
+   SHM segments per click). The verdict is now decided once per
+   connection (the driver-wide truth): PASS and later windows skip
+   the probe entirely; a REAL failure refuses the lane for the
+   whole process (the same env-knob-keyed policy cache the
+   renderer verdict uses) and logs exactly one warning.
+   `FDK_GL_SELFCHECK_POISON=1` is the new test seam (the
+   FDK_GL_FAIL_AT shape) and `fdk__x11_gl_test_reset()` clears the
+   stamp between test groups.
 
 ### Unreleased-candidate notes
 

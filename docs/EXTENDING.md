@@ -198,6 +198,18 @@ The SAME backend-neutral stream applications receive on windows
   configure listener is the reference). FDK resizes its render
   machinery and delivers the event.
 
+**EXPOSE is a repaint obligation, not a notification** (found live,
+2026-10-25, in fdk-shell's demo bar): an add-on that drives its
+surface directly has no widget tree to auto-repaint it, so the
+`FDK_EVENT_WINDOW_EXPOSE` branch must re-draw and re-present the
+surface itself. The retained-damage model otherwise concludes
+nothing changed and paints nothing — and on X11 (where an unmapped
+or unoccluded window's pixels are gone) that leaves whatever the
+desktop painted underneath showing in the surface's region. The
+canonical shape is fdk-shell's demo bar handler: `EXPOSE -> re-fill
+-> fdk_surface_present()` (see the desktop-switch rig in
+fdk-shell/tests/test_x11.c for the end-to-end proof).
+
 ## 6. Rendering
 
 ```c

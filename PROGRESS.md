@@ -9,6 +9,27 @@ Full narrative history lives in `docs/roadmap.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
+Last audited: 2026-10-25, at milestone **1.7.1** (the rc1
+desktop-integration hardening, found live on a real NVIDIA GTX
+1050 Ti desktop: the GPU present lane's self-check now decides
+INCONCLUSIVE vs PASS vs REAL-FAILURE per connection with a
+present-latency retry budget [not-viewable windows and XGetImage
+BadMatch never downgrade; the verdict is process-wide and logged
+once — FDK_GL_SELFCHECK_POISON is the test seam]; fdk-shell's X11
+backend is sticky across workspaces [_NET_WM_DESKTOP 0xFFFFFFFF +
+_NET_WM_STATE_STICKY, pre-map properties + post-map client
+messages] with per-level stacking state [ABOVE for TOP/OVERLAY,
+SKIP_* for OVERLAY; the fullscreen-over-docks EWMH ceiling and the
+custom-WM contract documented in fdk-shell's README]; the demo bar
+repaints on EXPOSE [the ghost-content fix]; fdk-shell's shared
+library carries NEEDED libfdk.so.1 and its release config drops
+sanitizers; fdk-shell is PACKAGED in all five families with a real
+versioned FDK dependency [fdk-shell/packaging/, the install-tests
+prove the dependency is enforced by each native package manager,
+and every build compiles against the INSTALLED FDK — the isolation
+proof re-run per packaging container; CI's ubuntu job runs the
+fdk-shell suites + the isolation proof]. Prior state below.)
+
 Last audited: 2026-10-25, at milestone **1.7.0** (the extension API
 + fdk-shell — the 1.1.0-rc1 candidate: the owner directed FDK to
 grow a public extension API ["add an extension API to FDK so

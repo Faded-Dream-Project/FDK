@@ -2193,16 +2193,53 @@ semantics verified server-side (auto/explicit zones, margins, every
 anchored edge, the XOR rule; anchor geometry stretching, cornering,
 centering; the EXCLUSIVE keyboard grab proven by a second client's
 grab FAILING while the layer holds it and SUCCEEDING after
-destroy); the Wayland backend against a real layer-shell compositor
-(the maintainer rigs start sway headless): the layer handshake
-driven by an EMPTY commit at show, configure-driven sizes, present
-on a live connection, popup adoption through the get_popup hook,
-every layer level and keyboard mode; and the prefix-isolation
-build proof (`tests/isolation.sh`) — FDK installed into a throwaway
-prefix, fdk-shell rebuilt against that prefix ALONE, the demo run
-from the installed stack, and the dynamic boundary audited (all
-imported `fdk_*` symbols resolve from `libfdk.so.1`; the package
-exports only its own namespace).
+destroy); the sticky/stacking state as pre-map properties for every
+layer level (`_NET_WM_DESKTOP` = 0xFFFFFFFF, STICKY, per-level
+ABOVE / SKIP_TASKBAR / SKIP_PAGER); the desktop-switch rig — a
+minimal EWMH window manager running INSIDE the test (root
+substructure redirect, `_NET_SUPPORTED`, per-window
+`_NET_WM_DESKTOP`, pager-shaped `_NET_CURRENT_DESKTOP` client
+messages; the WM deliberately deletes `_NET_WM_STATE` at map time so
+only fdk-shell's post-map state messages can restore it) — proving
+the layer is NEVER unmapped across switches while a control window
+is, the post-map messages work, and the EXPOSE repaint returns the
+bar's pixels after the round trip (the ghost-bar fix's mechanism);
+the Wayland backend against a real layer-shell compositor (the
+maintainer rigs start sway headless): the layer handshake driven by
+an EMPTY commit at show, configure-driven sizes, present on a live
+connection, popup adoption through the get_popup hook, every layer
+level and keyboard mode, and the workspace-switch confirmation
+(swaying workspaces through the compositor's IPC: no close, no
+reconfigure, presenting continues — the per-output, per-workspace
+truth); and the prefix-isolation build proof (`tests/isolation.sh`)
+— FDK installed into a throwaway prefix, fdk-shell rebuilt against
+that prefix ALONE, the demo run from the installed stack, and the
+dynamic boundary audited (the shared library's real `NEEDED:
+libfdk.so.1` entry; all imported `fdk_*` symbols resolve from
+libfdk.so.1; the package exports only its own namespace).
+
+**fdk-shell's packaging dependency proofs** (fdk-shell/packaging/):
+every distribution family's install-test proves the FDK dependency
+is REAL in the native package manager — installing fdk-shell's
+runtime package ALONE is refused (unmet `libfdk1` / `fdk` /
+`fdk-libs`), the full set installs together with resolution,
+pkg-config discovers the `fdk-shell` -> `fdk` chain, and the
+graphical smoke (a layer created, shown, presented, and verified
+server-side for dock type + sticky + strut) runs from the installed
+stack. The build legs compile against the INSTALLED FDK packages —
+the isolation proof re-run inside every packaging container (and
+the rpm/arch/apk builds take it further: their pristine
+fdk-shell-only tarballs mean no sibling FDK checkout exists in the
+build chroot AT ALL).
+
+**The X11 WM-rig lessons (found live, 2026-10-25)**: (1) Xlib
+sign-extends 32-bit CARDINAL properties into the long it hands back
+— 0xFFFFFFFF reads as -1; every readback comparison masks to the
+wire's true 32 bits. (2) A client-message pump must XSync (round
+trip), not XFlush, after sending: the server processes the SendEvent
+asynchronously, and a flush-only pump races the delivery against
+its own XPending. Both were found by the desktop-switch rig's
+controls failing non-deterministically at first.
 
 **Wayland gaps, stated honestly**: outside-click dismissal on
 Wayland is not driven in this environment (the headless seat
