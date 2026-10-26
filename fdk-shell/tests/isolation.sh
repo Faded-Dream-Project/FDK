@@ -27,6 +27,10 @@
 #   5. Inspects the dynamic dependency: libfdk-shell.so's undefined
 #      fdk_* symbols all resolve from libfdk.so.1, and ldd shows the
 #      library bound to the prefix's copy.
+#   6. Builds the package copied ALONE into a scratch directory —
+#      no sibling FDK tree anywhere (the packaging families' pristine
+#      tarball condition): the make graph itself must not reach for
+#      ../build when the link inputs point at the prefix.
 #
 # Environment: needs the FDK build present (sibling tree — the
 # script builds it if needed), pkg-config, Xvfb for the run leg.
@@ -145,6 +149,36 @@ if [ -n "$LEAKED" ]; then
     exit 1
 fi
 echo "   exports: fdk_shell_* only"
+
+echo "== 6. the pristine-tree build (no sibling FDK anywhere) =="
+# The leg the rpm/alpine CI failure (run 40298760190) proved was
+# missing: every OTHER leg runs inside the sibling layout, where
+# ../build/libfdk.so physically exists even while the compile and
+# link lines point at the prefix — make's graph is satisfied by a
+# file the link never uses. The packaging families build from
+# PRISTINE fdk-shell-only tarballs: no sibling tree at all.
+SCRATCH=$(mktemp -d)
+tar -C .. --exclude=fdk-shell/build --exclude=fdk-shell/build-isolation \
+    -cf - fdk-shell | tar -C "$SCRATCH" -xf -
+if (cd "$SCRATCH/fdk-shell" && \
+    make FDK_CFLAGS="-I$PREFIX/include" \
+          FDK_LIBS="-L$PREFIX/lib -lfdk" \
+          FDK_SO_LIBS="-L$PREFIX/lib -lfdk" \
+          static shared examples) >/tmp/fdkshell-isolation-pristine.log 2>&1
+then
+    if [ ! -f "$SCRATCH/fdk-shell/build/libfdk-shell.so" ] || \
+       ! objdump -p "$SCRATCH/fdk-shell/build/libfdk-shell.so" \
+            | grep -q "NEEDED.*libfdk.so.1"; then
+        echo "FAIL: the pristine-tree library is missing or unbound"
+        rm -rf "$SCRATCH"; exit 1
+    fi
+    echo "   the package builds green from a tree with no sibling FDK"
+else
+    echo "FAIL: the pristine-tree build failed (the packaging condition):"
+    tail -5 /tmp/fdkshell-isolation-pristine.log
+    rm -rf "$SCRATCH"; exit 1
+fi
+rm -rf "$SCRATCH"
 
 # Restore the default (sibling-tree) build so later make targets
 # link the static archive again.

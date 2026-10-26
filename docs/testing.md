@@ -2502,3 +2502,31 @@ voidlinux.org`, unreachable from the runner AND a second network at
 the same moment — a mirror outage, not a code defect); the critical
 xbps line now retries once after 10 s, the same cheap tolerance the
 later lines (mesa/Xvfb) always carried.
+
+The second round's own push taught the next lesson, and a different
+genus — not missing builder infrastructure but a build-graph
+contract. The round's cross-package prerequisites (an FDK rebuild
+must invalidate fdk-shell's binaries; the rigs had measured a bar
+three patch-sets old) landed as UNCONDITIONAL make prerequisites on
+`../build/libfdk.a` and `../build/libfdk.so`. The isolation proof
+and every packaging family override `FDK_LIBS`/`FDK_SO_LIBS` to an
+INSTALLED FDK — and the pristine fdk-shell-only tarball families
+(rpm/alpine/arch) carry no sibling tree at all, so CI run 40298760190
+died at `No rule to make target '../build/libfdk.so'`; debian/void
+passed only because their build contexts still contain the sibling
+checkout — the file exists, make's graph is satisfied, the link
+never uses it. The sandbox could not have seen it: every local flow
+runs in the sibling layout, and the isolation proof built in the
+sibling DIRECTORY, where the file physically exists even while the
+compile and link lines point elsewhere. Two fixes, both verified
+locally before the push: the prerequisites are now GATED on the
+EXPANDED link inputs (`FDK_LINK_PREREQS`/`FDK_SO_PREREQ` — deferred
+`=` on purpose: a `:=` placed above `FDK_SO_LIBS`'s `?=` silently
+expanded an empty variable and dropped the shared library's
+prerequisite entirely, caught by the touch-relink check — touching
+`../build/libfdk.so` must relink `libfdk-shell.so`, touching the
+archive must relink the demo), and the isolation proof grew the leg
+that would have caught the whole thing — the pristine-tree build,
+the package copied ALONE into a scratch directory with no sibling
+FDK anywhere, built against the installed prefix: the packaging
+families' exact condition, now a permanent test.

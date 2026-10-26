@@ -87,6 +87,22 @@ FDK_LIBS    ?= $(FDK_ROOT)/build/libfdk.a -lX11 -lXext -ldl $(WL_DEPS_L) -lxkbco
 # rounds of diagnosis). FDK's own archive name is stable.
 FDK_ARCHIVE := $(FDK_ROOT)/build/libfdk.a
 FDK_SHARED  := $(FDK_ROOT)/build/libfdk.so
+# GATED to the sibling layout (2026-10-26, CI run 40298760190):
+# the isolation proof and every packaging family override
+# FDK_LIBS / FDK_SO_LIBS to an INSTALLED FDK (pkg-config or a
+# throwaway prefix) — there the sibling artifacts are NOT link
+# inputs and must not be prerequisites, and in the pristine
+# fdk-shell-only tarball families (rpm/alpine/arch) ../build
+# does not exist at all: make died with "No rule to make
+# target '../build/libfdk.so'". The gate keys on the EXPANDED
+# link inputs, so it follows whatever the caller set — the
+# defaults keep the discipline, any override steps it aside.
+# (=, deferred, on purpose: FDK_SO_LIBS is ?=-assigned further
+# below — a := here expanded an empty FDK_SO_LIBS and silently
+# dropped the shared library prerequisite; the gate must judge
+# the CALLER final value: default, command line, or environment.)
+FDK_LINK_PREREQS = $(if $(findstring $(FDK_ROOT)/build,$(FDK_LIBS)),$(FDK_ARCHIVE),)
+FDK_SO_PREREQ    = $(if $(findstring $(FDK_ROOT)/build,$(FDK_SO_LIBS)),$(FDK_SHARED),)
 # The SHARED library links FDK's SHARED library (NEEDED: libfdk.so.1)
 # -- never the static archive (embedding FDK would defeat the
 # separate-runtime license model AND the add-on isolation contract).
@@ -205,7 +221,7 @@ $(STATIC_LIB): $(OBJS)
 
 EXPORT_MAP := src/libfdk-shell.exports.map
 
-$(SHARED_LIB): $(OBJS_PIC) $(EXPORT_MAP) $(FDK_SHARED)
+$(SHARED_LIB): $(OBJS_PIC) $(EXPORT_MAP) $(FDK_SO_PREREQ)
 	@mkdir -p $(dir $@)
 	$(CC) $(SAN_FLAGS) -fPIC -shared \
 	    -Wl,-soname,$(FDKSHELL_SONAME) \
@@ -230,14 +246,14 @@ regen-protocol: $(WL_PROTO_SRC) $(XDG_PROTO_SRC)
 
 test: test-x11
 
-$(BUILD_DIR)/tests/test_x11: tests/test_x11.c $(STATIC_LIB) $(FDK_ARCHIVE)
+$(BUILD_DIR)/tests/test_x11: tests/test_x11.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
 	@mkdir -p $(dir $@)
 	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
 	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) \
 	    $(X11_TEST_DEPS) $< $(STATIC_LIB) \
 	    $(FDK_LIBS) $(BACKEND_LIBS) $(X11_TEST_DEPS) -o $@
 
-$(BUILD_DIR)/tests/test_wl: tests/test_wl.c $(STATIC_LIB) $(FDK_ARCHIVE)
+$(BUILD_DIR)/tests/test_wl: tests/test_wl.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
 	@mkdir -p $(dir $@)
 	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
 	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) $< $(STATIC_LIB) \
@@ -300,7 +316,7 @@ isolation: tests/isolation.sh
 
 examples: $(EXAMPLE_BINS)
 
-$(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB) $(FDK_ARCHIVE)
+$(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
 	@mkdir -p $(dir $@)
 	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
 	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) $< $(STATIC_LIB) \

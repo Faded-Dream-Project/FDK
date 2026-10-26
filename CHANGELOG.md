@@ -290,6 +290,22 @@ before the fix and measured before/after where a number exists:
 
 `scripts/w1_stress.sh`, `w2_verify.sh`, `w3_verify.sh`,
 `x2_measure.sh` (with the XTest driver) are the reusable rigs.
+
+The round's own push then exposed its build defect, closed before
+the next: the cross-package prerequisites that keep sibling-tree
+builds honest (an FDK rebuild must invalidate fdk-shell's binaries —
+the rigs' three-patch-old bar) had landed as UNCONDITIONAL make
+prerequisites on `../build/libfdk.a`/`../build/libfdk.so`, and the
+pristine fdk-shell-only tarball families (rpm/alpine/arch) died at
+`No rule to make target '../build/libfdk.so'` — their link inputs
+point at the installed FDK and their trees carry no sibling checkout
+at all (debian/void survived only because their build contexts still
+contain one). The prerequisites are now gated on the EXPANDED link
+inputs (deferred so they judge the caller's final values), and the
+isolation proof grew the pristine-tree leg — the package copied
+ALONE into a scratch directory, the containers' exact condition —
+that would have caught it before CI did.
+
 KNOWN FLAKE (once, not reproduced in 5 runs including under load):
 fdk-shell's passive-grab test asserted `presses >= 1` zero-times
 during a rig-teardown-heavy window — watched for in CI, no code
