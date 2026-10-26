@@ -14,7 +14,7 @@ developed as part of the
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
-[![Version: 1.1.0-rc1](https://img.shields.io/badge/version-1.1.0--rc1-blueviolet?style=flat-square)](docs/versioning.md)
+[![Version: 1.1.0-rc2](https://img.shields.io/badge/version-1.1.0--rc2-blueviolet?style=flat-square)](docs/versioning.md)
 [![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/Faded-Dream-Project/Faded-Dream-dotfiles)
 
 </div>
@@ -29,7 +29,14 @@ layout, text, and theme engines, and FDK-drawn window decorations —
 with no GTK/Qt dependency and a minimal, always-justified dependency
 set (`docs/dependencies.md`).
 
-**Status:** **v1.0.0 released; v1.1.0-rc1 in the tree** — the
+> **Which branch should I use?** `main` is **unstable by design** —
+> it is where development happens, commit by commit. To build or
+> package FDK, use the [`release`](https://github.com/Faded-Dream-Project/FDK/tree/release)
+> branch (a fast-forward-only pointer that moves only at approved,
+> tagged, CI-green releases — see `docs/RELEASING.md`) or the latest
+> [GitHub release](https://github.com/Faded-Dream-Project/FDK/releases).
+
+**Status:** **v1.0.0 released; v1.1.0-rc2 in the tree** — the
 deliberate, recorded 1.0.0 decision of 2026-10-12
 (`docs/versioning.md`), then the 2026-10-25 candidate adding the
 public **extension API** (`fdk/extend.h`, `docs/EXTENDING.md`): a

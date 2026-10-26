@@ -1,4 +1,5 @@
-# ci.yml — validation builds for pushes to main and pull requests.
+# ci.yml — validation builds for pushes to main and release, and
+# pull requests.
 #
 # Two jobs:
 #   build-test       — the project's home-ground full battery on an
@@ -22,7 +23,11 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # main is the development branch (unstable by design); release is
+    # the consumer-facing fast-forward pointer (docs/RELEASING.md) -
+    # both are validated identically so a consumer who pins the
+    # branch always sees green on exactly what they built.
+    branches: [main, release]
   pull_request:
   workflow_dispatch:
 

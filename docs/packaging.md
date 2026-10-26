@@ -5,6 +5,13 @@ from source, installing the binary packages the project publishes,
 what those packages contain, how the release pipeline produces and
 validates them, and how a maintainer cuts a release.
 
+> **Which ref should I package from?** Tags and the
+> [`release`](https://github.com/Faded-Dream-Project/FDK/tree/release)
+> branch, never `main` — `main` is the development branch and moves
+> commit by commit (`docs/RELEASING.md`). `release` is a
+> fast-forward-only pointer that sits exactly on approved, tagged,
+> CI-green releases, so a pinned build is reproducible.
+
 > **v1.0.0 is released.** The public version is `1.0.0` — the
 > deliberate, recorded decision of 2026-10-12 (`docs/versioning.md`),
 > made after the picker overhaul closed the 2026-10-11 retraction's
