@@ -241,6 +241,28 @@ exposed as an `fdk_window*`, so the window-API operations that would
 be meaningless on a role-carrying surface (set_title, maximize,
 resize) are unreachable by construction.
 
+### The hover cursor (1.1.0-rc1)
+
+```c
+fdk_ext_surface_set_cursor(surface, FDK_CURSOR_POINTER);
+```
+
+The shape the pointer takes while hovering the surface — the standard
+arrow or the pointing hand, exactly the two shapes a panel needs
+(`fdk_cursor_shape` in `fdk/fdk_window.h`; unknown values are a
+no-op). The shape is re-applied automatically on every pointer entry:
+Wayland cursor state does not survive leaving a surface, so a client
+that answers no `wl_pointer.enter` at all keeps whatever shape the
+compositor last showed (the W2 live report: the resize cursor
+"sticking" over the bar until the pointer left). On Wayland the
+preferred transport is cursor-shape-v1 when the compositor offers it,
+falling back to `wl_pointer.set_cursor` with an XCursor-theme image;
+on X11 it is a `XDefineCursor` with the cursor-font hand. A backend
+without the mechanism keeps the platform default — a hint, never an
+error. Typical panel usage: the hand while the pointer hovers a
+clickable region, the arrow otherwise (the demo bar's `set_cursor`
+calls in `fdk-shell/examples/bar.c` are the worked example).
+
 ## 7. Popups (dropdowns)
 
 ```c

@@ -2446,10 +2446,33 @@ unchanged — both existing self-check tests still pass unmodified.
 **FDK_POPUP_TRACE=1** turns the popup lifecycle into explicit INFO
 lines — create (with position), map, raise, grab (with the server's
 verdict + the focus takeover), first present (with the lane),
-unmap/destroy, and the REASON each release happened
-(outside-click / escape / unmap / destroy / desktop-change /
-watchdog-not-viewable) with the grab-held duration. This is the
-first tool to reach for when a popup misbehaves on a real desktop.
+close-request WITH ITS REASON (outside click / Escape / compositor
+dismissal — the backend generators stamp it through a single-slot
+internal channel), unmap/destroy (with the best-known reason: the
+preceding close-request, a parent sweep, or an application destroy
+whose in-bounds button `N ms ago` almost always means "item
+selected"), the REASON each release happened (outside-click /
+escape / unmap / destroy / desktop-change / watchdog-not-viewable)
+with the grab-held duration, and — the X2 diagnostic —
+`[popup] motion->present N ms`: the latency between a pointer
+motion landing on the popup and the present that answered it,
+reported at `fdk_surface_present` (the one place every present path
+converges, so app-driven extension popups are measured exactly like
+widget-tree windows). This is the first tool to reach for when a
+popup misbehaves on a real desktop.
+
+**FDK_STARTUP_TRACE=1** (1.1.0-rc1, the X1 diagnostic) logs one INFO
+line per startup phase with its own duration and the total since the
+first traced call: backend connect legs (`XOpenDisplay`, the
+Wayland roundtrip, `XOpenIM (lazy)` when it runs), EWMH detection,
+theme settings, the first fontconfig query, the GL self-check, and
+the first present. Phases that were skipped entirely (the lazy input
+method on a pointer-only app, the GL lane under the small-surface
+policy) simply never print — absence of the line IS the measurement
+that the cost was not paid. Pair it with
+**FDK_LOG_LEVEL** (`trace|debug|info|warn|error|none`, read once at
+library load, before any app code) to get the INFO lines without
+recompiling: the field-debugging knob a live-desktop report wants.
 
 The push of these fixes taught the CI-side lesson (the sixth
 packaging-matrix class): five of six jobs died at the identical

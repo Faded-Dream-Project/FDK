@@ -191,6 +191,110 @@ window):
    FDK_GL_FAIL_AT shape) and `fdk__x11_gl_test_reset()` clears the
    stamp between test groups.
 
+### Fixed — the second live-desktop round (2026-10-26; labwc/Wayland + Openbox/NVIDIA X11)
+
+Six findings from the owner's machines, each reproduced headlessly
+before the fix and measured before/after where a number exists:
+
+1. **Wayland: the buffer-in-flight freeze (W1)** — the release wait
+   in `get_framebuffer` used the DEFAULT-queue
+   `wl_display_prepare_read()`, which refuses while ANY default-queue
+   event is pending — under pointer motion that is always true, so
+   the wait degenerated into a pure 100ms sleep: releases on the
+   socket were never read, every acquire refused, the dispatch rate
+   collapsed to ~10 events/s against ~1000/s arriving, and wlroots
+   killed the connection when the server-side buffer overflowed. The
+   wait is now queue-scoped (`prepare_read_queue` on the release
+   queue): a release on the wire lands within one poll slice, and a
+   pending release event is dispatched immediately instead of slept
+   on. Complements: `wl_display_flush` after every commit (a present
+   between pumps no longer waits a full pump cadence to reach the
+   compositor), the frame request marshalled BEFORE the commit it
+   paces, an fd-lifetime flush in `create_shm_buffer`/cursor upload
+   (libwayland resolves fd arguments at FLUSH time by number — pools
+   created in one un-flushed burst aliased the newest memfd
+   server-side, so whole paint cycles silently never appeared), a
+   frame-callback pacing gate in the dispatch tail (hover repaints
+   can no longer commit faster than the compositor consumes), and the
+   release budget tightened 100ms -> 25ms. Verified by flood rigs on
+   headless sway AND labwc (~1000 injected events/s for 45s, popup
+   held open, max-rate variant): zero "in flight" warnings, zero
+   connection deaths, buffers created == destroyed (no leak), the
+   bar alive and selecting items afterwards.
+2. **Wayland: the cursor never answered enter (W2)** — a client
+   that answers no `wl_pointer.enter` keeps whatever shape the
+   compositor last showed anywhere (the report: the resize cursor
+   "sticking" over the bar until the pointer left). Every enter now
+   re-applies the window's stored shape citing the ENTER serial:
+   cursor-shape-v1's `set_shape` when the compositor offers it
+   (sway 1.10 does), else `wl_pointer.set_cursor` with the
+   XCursor-theme image. New public surface at every layer —
+   `fdk_window_set_cursor()`/`fdk_cursor_shape` (core),
+   `fdk_ext_surface_set_cursor()` (extension), and
+   `fdk_shell_{layer,popup}_set_cursor()` (fdk-shell) — two shapes:
+   the arrow and the pointing hand (the demo bar shows the hand over
+   its button). Rig-verified at the protocol level (every enter
+   serial cited by a `set_shape`) and the pixel level (hand over the
+   button, arrow elsewhere, hand again on motionless re-entry).
+3. **The hover that lit the whole bar (W3)** — the DEMO's bug, not
+   the pointer path's: the bar repainted its entire background in a
+   hover tint when any widget was hovered (the bar's own
+   `hover_button ? BAR_BG_HOVER : BAR_BG`). Only the button chip
+   carries hover now; ENTER seeds hover with its carried position
+   (re-entry onto the button highlights without any motion) and
+   LEAVE clears it. Pixel-verified in all four states.
+4. **X11: every app paid the input-method startup (X1)** —
+   `XOpenIM` ran at connect for every application; with a slow or
+   dead IM daemon configured that is SECONDS of startup for
+   pointer-only apps. The IM and per-window XICs are now lazy
+   (first FocusIn/KeyPress), `FDK_STARTUP_TRACE=1` phases the whole
+   startup (connect legs, EWMH, theme, first fontconfig query, GL
+   self-check, first present) with per-phase and total milliseconds,
+   and `FDK_LOG_LEVEL` (read at library load) answers field reports
+   without recompiling. Measured with a 700ms XOpenIM stall injected
+   via LD_PRELOAD: eager init 714ms / total 769ms -> lazy init 3ms /
+   total 54ms (the stall now costs a pointer-only app nothing); the
+   healthy-IM case improved 16ms -> 4ms of init. The typing tests
+   (real key entry through the lazy XIC) all still pass. One
+   regression FOUND AND FIXED by this change: window-create's XID
+   was previously flushed to the server only by the XIC round-trip —
+   a second connection could observe BadDrawable racing an un-flushed
+   create (reproduced minimal; an explicit `XSync` barrier now owns
+   the contract).
+5. **X11: the dropdown highlight trailing the pointer (X2)** — two
+   confirmed contributors. (a) The dispatch loop translated every
+   queued MotionNotify one at a time with a repaint each — now
+   redundant motions for the same window collapse to the latest
+   (buttons/keys/crossings keep exact order). (b) Every popup built
+   its OWN GLXContext on the GPU present lane — the panel/popup
+   class (<= 131072 px) now stays on the CPU path by policy (no
+   context, no texture upload, no vsync-scheduled swap; a
+   small-windows-only process never even dlopens libGL;
+   `FDK_GL_FORCE=1` overrides, and the byte-identical equivalence
+   proof still runs through it). New measurement:
+   `FDK_POPUP_TRACE=1` reports `[popup] motion->present N ms` at
+   `fdk_surface_present` — the convergence of every present path, so
+   extension-API popups (which paint directly) are measured exactly
+   like widget-tree windows. Under Xvfb/llvmpipe flood (max wire
+   rate, hover forced to flip every event): median 0-1ms, p90 1ms,
+   max 32-38ms in both lanes. On the reporter's NVIDIA hardware the
+   expected field signature: no more "GPU present lane active" per
+   click, and the same sub-frame latencies.
+6. **The popup trace's "(destroy)" (X3)** — close-requests now carry
+   their reason (outside click / Escape / compositor dismissal —
+   the generators stamp a single-slot channel; was "(unknown)" for
+   the X11 outside-click and the Wayland dismissal), and destroys
+   report the best-known reason, including "in-bounds button N ms
+   ago — likely item selected". All six paths verified live on both
+   backends.
+
+`scripts/w1_stress.sh`, `w2_verify.sh`, `w3_verify.sh`,
+`x2_measure.sh` (with the XTest driver) are the reusable rigs.
+KNOWN FLAKE (once, not reproduced in 5 runs including under load):
+fdk-shell's passive-grab test asserted `presses >= 1` zero-times
+during a rig-teardown-heavy window — watched for in CI, no code
+path connects it to this round.
+
 ### Fixed — the live-desktop bar findings (2026-10-26; sway/labwc + Openbox)
 
 Four root causes found by running the fdk-shell demo bar on real

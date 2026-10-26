@@ -363,6 +363,17 @@ two-slot dance in the SHM path does not exist here.
 
 **Policy** (who gets the GPU path):
 
+- **Small surfaces stay on the CPU path** (1.1.0-rc1, the X2 live
+  report): a window at or below `FDK_GL_MIN_PIXELS` (131072 px =
+  256x512) never engages the lane — and a process whose windows are
+  ALL small never even dlopens libGL. That is the whole panel/popup
+  class (a 4K-wide 32px bar is 122880 px, the demo dropdown is
+  180x92): their presents are a few hundred KB of SHM memcpy, while
+  the lane's per-WINDOW fixed costs — each engagement builds its own
+  GLXContext and makes it current, and the swap is vsync-scheduled —
+  cost milliseconds per popup on real drivers and can park a hover
+  repaint a full frame behind the input. `FDK_GL_FORCE=1` overrides
+  this gate exactly as it overrides the renderer gate.
 - The lane requires a hardware renderer. Mesa's software rasterizers
   (llvmpipe, softpipe, swrast — detected from the first context's
   `GL_RENDERER` string) are REFUSED by default: they software-
