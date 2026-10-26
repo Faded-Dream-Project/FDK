@@ -318,6 +318,22 @@ static unsigned long x11_readback_pixel(Display **out_dpy, unsigned long xid,
     return px;
 }
 
+/* Present-then-readback race guard (the alpine CI flake, 2026-10-26):
+ * a present XFlushes but the server processes asynchronously — and
+ * XShmPutImage reads the pixels AFTER the call returns (x11_surface.c
+ * says so itself). Readbacks here ride a SECOND connection, so they
+ * can beat the frame and see the PRE-paint content: the empty search
+ * entry reserves no clear zone, its pixels are pure fill, and the
+ * X-ink assert fires on code that was green one run earlier. Pumps
+ * drain the app connection (the ShmCompletion included) and give the
+ * server time to land the frame — the same idiom the suite uses
+ * everywhere a wait already separates paint from readback. */
+static void x11_frame_settle(fdk_context *ctx) {
+    for (int i = 0; i < 4; i++) {
+        (void)fdk_pump_events(ctx, 25);
+    }
+}
+
 typedef struct {
     fdk_context *ctx;
     int configure_count;
@@ -9510,6 +9526,7 @@ static void test_x11_hidpi_gui(void) {
     fdk_window_show(win);
     (void)fdk_pump_events(ctx, 200);
     assert(fdk_ok(fdk_window_paint(win)));
+    x11_frame_settle(ctx); /* drain + let the server land the frame */
 
     Display *rb = NULL;
     unsigned long px_in = x11_readback_pixel(&rb, fdk_window_xid(win),
@@ -11799,6 +11816,7 @@ static void test_modern_widgets_gui(void) {
          * own paints: every readback point below explicitly paints
          * pending damage first — the pump alone never presents.) */
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 40, 110) ==
                0x00C84646u);
         assert(x11_readback_pixel(&dpy, xid, 250, 110) ==
@@ -11819,6 +11837,7 @@ static void test_modern_widgets_gui(void) {
         /* Position 170 - 3 = 167: red now reaches x=150. */
         assert(fdk_paned_get_position(p) == 167);
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 150, 110) ==
                0x00C84646u);
         assert(x11_readback_pixel(&dpy, xid, 250, 110) ==
@@ -11838,6 +11857,7 @@ static void test_modern_widgets_gui(void) {
         }
         assert(fdk_paned_get_position(p) == 183);
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 175, 110) ==
                0x00C84646u);
 
@@ -11874,6 +11894,7 @@ static void test_modern_widgets_gui(void) {
         /* Collapsed: the content zone is the root's background. */
         unsigned long bg = theme_window_bg_pixel();
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 120, 60) == bg);
 
         /* Real click on the header band opens the door. Pump timing
@@ -11892,6 +11913,7 @@ static void test_modern_widgets_gui(void) {
         for (int i = 0; i < 20 && !opened; i++) {
             (void)fdk_pump_events(ctx, 30);
             assert(fdk_ok(fdk_window_paint(win)));
+            x11_frame_settle(ctx); /* drain + let the server land the frame */
             opened = x11_readback_pixel(&dpy, xid, 120, 45) ==
                      0x003CC878u;
         }
@@ -11908,6 +11930,7 @@ static void test_modern_widgets_gui(void) {
             full = (now.height == 124); /* header 24 + content 100 */
             if (full) {
                 assert(fdk_ok(fdk_window_paint(win)));
+                x11_frame_settle(ctx); /* drain + let the server land the frame */
                 full = x11_readback_pixel(&dpy, xid, 120, 100) ==
                        0x003CC878u;
             }
@@ -11958,6 +11981,7 @@ static void test_modern_widgets_gui(void) {
 
         /* Resting: no underline (the row under the text is bg). */
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, text_x + 2, baseline + 2) ==
                theme_window_bg_pixel());
 
@@ -11973,6 +11997,7 @@ static void test_modern_widgets_gui(void) {
         for (int i = 0; i < 30 && !underlined; i++) {
             (void)fdk_pump_events(ctx, 30);
             assert(fdk_ok(fdk_window_paint(win)));
+            x11_frame_settle(ctx); /* drain + let the server land the frame */
             underlined = x11_readback_pixel(&dpy, xid, text_x + 2,
                                             baseline + 2) == link_px;
         }
@@ -12015,6 +12040,7 @@ static void test_modern_widgets_gui(void) {
          * returning pumps. */
         unsigned long a[40 * 40];
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         XImage *img = XGetImage(dpy, (Drawable)xid, 20, 20, 40, 40,
                                 ~0UL, ZPixmap);
         assert(img != NULL);
@@ -12030,6 +12056,7 @@ static void test_modern_widgets_gui(void) {
                 (void)fdk_pump_events(ctx, 30);
             }
             assert(fdk_ok(fdk_window_paint(win)));
+            x11_frame_settle(ctx); /* drain + let the server land the frame */
             img = XGetImage(dpy, (Drawable)xid, 20, 20, 40, 40, ~0UL,
                             ZPixmap);
             assert(img != NULL);
@@ -12155,6 +12182,7 @@ static void test_app_furniture_gui(void) {
 
         /* Page 1 (red) is current. */
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 150, 150) ==
                0x00C84646u);
 
@@ -12172,6 +12200,7 @@ static void test_app_furniture_gui(void) {
                                ButtonReleaseMask, cx, cy, 1);
         FURNITURE_WAIT(fdk_stack_get_visible_child(stack) == pg2);
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 150, 150) ==
                0x004678DCu);
 
@@ -12210,6 +12239,7 @@ static void test_app_furniture_gui(void) {
 
         /* Hidden: the drawer's room shows the window background. */
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         fdk_color winbg =
             fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
         unsigned long bg_pack =
@@ -12221,6 +12251,7 @@ static void test_app_furniture_gui(void) {
         fdk_revealer_set_reveal_child(rv, true);
         FURNITURE_WAIT(fdk_revealer_get_child_revealed(rv));
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 100, 120) ==
                0x0046A05Au); /* wcol(70,160,90): the drawer's green */
 
@@ -12244,6 +12275,7 @@ static void test_app_furniture_gui(void) {
             assert(rn.height == 0 && rn.width == 0);
         }
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 100, 120) == bg_pack);
 
         XCloseDisplay(dpy);
@@ -12300,6 +12332,7 @@ static void test_app_furniture_gui(void) {
             (unsigned long)(zone.b * 255.0f + 0.5f);
         fdk_i32 top = 160 - nat.height;
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         assert(x11_readback_pixel(&dpy, xid, 140, top) == rule_pack);
         assert(x11_readback_pixel(&dpy, xid, 140, top + 2) ==
                zone_pack);
@@ -12356,6 +12389,7 @@ static void test_app_furniture_gui(void) {
 
         /* The clear X paints in the reserved right zone. */
         assert(fdk_ok(fdk_window_paint(win)));
+        x11_frame_settle(ctx); /* drain + let the server land the frame */
         fdk_color entry_fill =
             fdk_theme_get_color(NULL, FDK_TK_ENTRY_BACKGROUND);
         unsigned long fill_pack =
