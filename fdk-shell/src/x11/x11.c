@@ -58,6 +58,8 @@
 #include <X11/Xutil.h> /* XSizeHints / XSetWMNormalHints (self-positioning) */
 
 #include <stdio.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /* ---- atoms (interned once per shell) -------------------------------------- */
 
@@ -72,6 +74,7 @@ typedef struct {
     Atom net_wm_state_above;
     Atom net_wm_state_skip_taskbar;
     Atom net_wm_state_skip_pager;
+    Atom fdk_wm_layer; /* _FDK_WM_LAYER: the private layer name    */
 } x11_atoms;
 
 static void x11_intern_atoms(Display *dpy, x11_atoms *a) {
@@ -83,6 +86,12 @@ static void x11_intern_atoms(Display *dpy, x11_atoms *a) {
                                           False);
     a->net_wm_desktop = XInternAtom(dpy, "_NET_WM_DESKTOP", False);
     a->net_wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
+    /* The private layer contract (0.2.0): _FDK_WM_LAYER carries the
+     * layer NAME ("background"/"bottom"/"top"/"overlay") so a
+     * coordinating WM can implement true layer stacking without
+     * guessing from the EWMH type+state soup. Harmless on WMs that
+     * do not know it (an unknown property is ignored). */
+    a->fdk_wm_layer = XInternAtom(dpy, "_FDK_WM_LAYER", False);
     a->net_wm_state_sticky =
         XInternAtom(dpy, "_NET_WM_STATE_STICKY", False);
     a->net_wm_state_above = XInternAtom(dpy, "_NET_WM_STATE_ABOVE", False);
@@ -111,6 +120,52 @@ typedef struct x11_layer_state {
                      * surface's native handle) */
     int grabbed;    /* keyboard grab active (EXCLUSIVE mode) */
 } x11_layer_state;
+
+/* ---- the output face (0.2.0) -----------------------------------------------
+ *
+ * X11 without RandR probing (0.1.0 posture): ONE output — the whole
+ * screen of this connection, at the FDK-detected scale. 0.2.0's
+ * RandR work adds real per-output records + events; until then the
+ * honest single screen is the truth. */
+
+uint32_t fdkshell__x11_output_count(fdk_shell *shell) {
+    (void)shell;
+    return 1; /* the screen */
+}
+
+fdk_result fdkshell__x11_output_name(fdk_shell *shell, uint32_t index,
+                                     char *buf, size_t buflen) {
+    (void)shell;
+    if (index != 0) {
+        return FDK_ERR_NOT_FOUND;
+    }
+    snprintf(buf, buflen, "screen-0");
+    return FDK_OK;
+}
+
+fdk_result fdkshell__x11_output_get_info(fdk_shell *shell, uint32_t index,
+                                         fdk_shell_output_info *out) {
+    x11_shell_state *st = shell->x11;
+    if (st == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (index != 0) {
+        return FDK_ERR_NOT_FOUND;
+    }
+    out->x = 0;
+    out->y = 0;
+    out->width = DisplayWidth(st->dpy, st->screen);
+    out->height = DisplayHeight(st->dpy, st->screen);
+    out->scale = 1; /* FDK's X11 scale applies INSIDE the window's
+                     * paint path (logical x scale physical); the
+                     * output's own geometry stays physical pixels */
+    out->physical_width = 0; /* the server's screen mm is at the
+                              * DisplayWidthMM granularity and rarely
+                              * meaningful under Xvfb/EMU — zeros are
+                              * the honest no-statement */
+    out->physical_height = 0;
+    return FDK_OK;
+}
 
 /* The EWMH "all desktops" value for _NET_WM_DESKTOP. */
 #define X11_NET_WM_DESKTOP_ALL 0xFFFFFFFFUL
@@ -301,6 +356,39 @@ fdk_result fdkshell__x11_layer_create(fdk_shell *shell,
     XChangeProperty(dpy, xw, atoms->net_wm_window_type, XA_ATOM, 32,
                     PropModeReplace,
                     (const unsigned char *)&atoms->net_wm_window_type_dock, 1);
+
+    /* _FDK_WM_LAYER (0.2.0): the private layer-name property — the
+     * README's custom-WM contract, option 2, now actually set. */
+    {
+        static const char *layer_names[] = {
+            "background", "bottom", "top", "overlay",
+        };
+        const char *lname =
+            (desc->layer <= FDK_SHELL_LAYER_OVERLAY)
+                ? layer_names[desc->layer]
+                : "top";
+        XChangeProperty(dpy, xw, atoms->fdk_wm_layer, XA_STRING, 8,
+                        PropModeReplace, (const unsigned char *)lname,
+                        (int)strlen(lname));
+    }
+
+    /* The namespace -> WM_CLASS res_class mapping (0.2.0): the same
+     * rule-matching role the Wayland namespace plays — a WM matches
+     * res_class for its window rules. FDK set WM_CLASS from the
+     * context's app_id at adoption; a namespace in the desc wins
+     * over the generic class (res_name keeps FDK's instance). */
+    if (desc->struct_size >=
+            offsetof(fdk_shell_layer_desc, namespace_) +
+                sizeof(desc->namespace_) &&
+        desc->namespace_[0] != '\0') {
+        XClassHint hint;
+        hint.res_class = (char *)desc->namespace_;
+        char res_name[32];
+        snprintf(res_name, sizeof res_name, "fdk-shell:%u",
+                 (unsigned)(uintptr_t)layer);
+        hint.res_name = res_name;
+        XSetClassHint(dpy, xw, &hint);
+    }
 
     /* STICKY (the workspace-following contract): _NET_WM_DESKTOP =
      * "all desktops" as the pre-map property (the EWMH initial-state

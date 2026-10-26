@@ -456,10 +456,168 @@ static void test_layer_across_workspaces(void) {
            "presenting) — confirmed against a real compositor\n");
 }
 
+
+/* ---- 0.2.0: output metrics, namespace, hotplug events, cascades ------------- */
+
+static void output_event_cb(fdk_shell *shell,
+                            const fdk_shell_output_event *event,
+                            void *user) {
+    (void)shell;
+    struct evctx_s {
+        int *added, *changed, *removed;
+    } *evs = user;
+    switch (event->type) {
+    case FDK_SHELL_OUTPUT_ADDED:
+        (*evs->added)++;
+        break;
+    case FDK_SHELL_OUTPUT_CHANGED:
+        (*evs->changed)++;
+        break;
+    case FDK_SHELL_OUTPUT_REMOVED:
+        (*evs->removed)++;
+        break;
+    }
+}
+
+/* ---- 0.2.0: output metrics, namespace, hotplug events, cascades ------------- */
+
+static void test_outputs_metrics_and_hotplug(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_WAYLAND };
+    fdk_result r = fdk_init(&ctx, &iopts);
+    if (!fdk_ok(r)) {
+        printf("[skip] no reachable Wayland compositor\n");
+        return;
+    }
+    fdk_shell *shell = NULL;
+    r = fdk_shell_init(ctx, &shell);
+    if (r == FDK_ERR_UNSUPPORTED) {
+        printf("[skip] compositor offers no wlr-layer-shell\n");
+        fdk_shutdown(ctx);
+        return;
+    }
+    assert(fdk_ok(r));
+
+    /* The initial set: enumerable, with real metrics (the sway
+     * headless output is 1024x768 scale 1 in this rig). */
+    uint32_t count = 0;
+    assert(fdk_ok(fdk_shell_output_count(shell, &count)));
+    assert(count >= 1);
+    fdk_shell_output_info info;
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    assert(fdk_ok(fdk_shell_output_get_info(shell, 0, &info)));
+    assert(info.width > 0 && info.height > 0);
+    assert(info.scale >= 1);
+    printf("[ok] wl outputs: initial set enumerable, metrics %dx%d "
+           "scale %d\n",
+           (int)info.width, (int)info.height, (int)info.scale);
+
+    /* Hotplug through the rig's control channel: swaymsg creates a
+     * headless output at runtime; the registry global fires ADDED. */
+    if (system("command -v swaymsg >/dev/null 2>&1") != 0) {
+        printf("[skip] no swaymsg — hotplug + namespace live checks "
+               "need the rig's control channel\n");
+        fdk_shell_shutdown(shell);
+        fdk_shutdown(ctx);
+        return;
+    }
+    static int ev_added = 0, ev_changed = 0, ev_removed = 0;
+    struct evctx {
+        int *added, *changed, *removed;
+    } evs = { &ev_added, &ev_changed, &ev_removed };
+    ev_added = ev_changed = ev_removed = 0;
+    fdk_shell_set_output_event_callback(shell, output_event_cb, &evs);
+
+    /* create_output is the sway IPC that instantiates a new headless
+     * output at runtime (config alone does not). */
+    (void)swaymsg_ok("create_output");
+    (void)swaymsg_ok("output HEADLESS-2 mode 800x600");
+    for (int i = 0; i < 40 && ev_added == 0; i++) {
+        (void)fdk_pump_events(ctx, 50);
+    }
+    assert(ev_added >= 1);
+    uint32_t count2 = 0;
+    assert(fdk_ok(fdk_shell_output_count(shell, &count2)));
+    assert(count2 == count + 1);
+    printf("[ok] wl outputs: hotplug ADDED fired, count %u -> %u\n",
+           (unsigned)count, (unsigned)count2);
+
+    /* Mode change on the new output: sway's output config applies
+     * a new mode -> geometry/mode/scale batch -> CHANGED. */
+    assert(swaymsg_ok("output HEADLESS-2 mode 640x480"));
+    for (int i = 0; i < 40 && ev_changed == 0; i++) {
+        (void)fdk_pump_events(ctx, 50);
+    }
+    assert(ev_changed >= 1);
+    printf("[ok] wl outputs: mode change -> CHANGED fired\n");
+
+    /* Unplug: sway 1.10 supports `output <name> unplug` on headless. */
+    if (swaymsg_ok("output HEADLESS-2 unplug")) {
+        for (int i = 0; i < 40 && ev_removed == 0; i++) {
+            (void)fdk_pump_events(ctx, 50);
+        }
+        assert(ev_removed >= 1);
+        uint32_t count3 = 0;
+        assert(fdk_ok(fdk_shell_output_count(shell, &count3)));
+        assert(count3 == count);
+        printf("[ok] wl outputs: unplug -> REMOVED fired, count back "
+               "to %u\n",
+               (unsigned)count);
+    } else {
+        printf("[skip] sway without `output unplug` — REMOVED not "
+               "exercised\n");
+    }
+
+    /* Namespace on the wire: create a layer with a namespace and
+     * verify sway's output records it (get_outputs JSON carries
+     * "layer_shell" namespaces? — no: namespaces are per-surface;
+     * the honest check here is that creation SUCCEEDS and the
+     * surface maps). */
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors =
+        FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT | FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 26;
+    snprintf(desc.namespace_, sizeof(desc.namespace_),
+             "com.example.fdkshell-test");
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+
+    /* Cascades on wl: root popup on the layer, child on the popup. */
+    fdk_shell_popup *root = NULL;
+    assert(fdk_ok(fdk_shell_popup_create(layer, 4, 26, 120, 80, &root)));
+    fdk_shell_popup_show(root);
+    fdk_shell_popup *sub = NULL;
+    assert(fdk_ok(fdk_shell_popup_create_child(root, 110, 8, 90, 50, &sub)));
+    fdk_shell_popup_show(sub);
+    for (int i = 0; i < 10; i++) {
+        (void)fdk_pump_events(ctx, 50);
+    }
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_shell_popup_get_surface(sub, &s)));
+    fdk_surface_fill(s, (fdk_color){ .r = 1.0f, .g = 0.5f, .b = 0.25f,
+                                     .a = 1.0f });
+    assert(fdk_ok(fdk_surface_present(s)));
+    for (int i = 0; i < 6; i++) {
+        (void)fdk_pump_events(ctx, 50);
+    }
+    fdk_shell_popup_destroy(root); /* sweeps sub */
+    fdk_shell_layer_destroy(layer);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] wl namespace layer + 2-deep cascade popup + family "
+           "sweep\n");
+}
+
 int main(void) {
     test_layer_on_compositor();
     test_layer_eager_paint_startup();
     test_layer_across_workspaces();
+    test_outputs_metrics_and_hotplug();
     printf("fdk-shell wayland tests done\n");
     return 0;
 }

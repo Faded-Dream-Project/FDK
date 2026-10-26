@@ -254,7 +254,7 @@ fdk_result fdk_shell_output_count(fdk_shell *shell, uint32_t *out_count) {
     switch (shell->backend) {
 #if defined(FDKSHELL_BUILD_X11)
         case FDK_EXT_BACKEND_X11:
-            *out_count = 1; /* the screen — X11's honest single output */
+            *out_count = fdkshell__x11_output_count(shell);
             return FDK_OK;
 #endif
 #if defined(FDKSHELL_BUILD_WAYLAND)
@@ -276,11 +276,7 @@ fdk_result fdk_shell_output_name(fdk_shell *shell, uint32_t index,
     switch (shell->backend) {
 #if defined(FDKSHELL_BUILD_X11)
         case FDK_EXT_BACKEND_X11:
-            if (index != 0) {
-                return FDK_ERR_NOT_FOUND;
-            }
-            snprintf(buf, buflen, "screen-0");
-            return FDK_OK;
+            return fdkshell__x11_output_name(shell, index, buf, buflen);
 #endif
 #if defined(FDKSHELL_BUILD_WAYLAND)
         case FDK_EXT_BACKEND_WAYLAND:
@@ -289,6 +285,49 @@ fdk_result fdk_shell_output_name(fdk_shell *shell, uint32_t index,
         default:
             return FDK_ERR_UNSUPPORTED;
     }
+}
+
+fdk_result fdk_shell_output_get_info(fdk_shell *shell, uint32_t index,
+                                      fdk_shell_output_info *out) {
+    if (shell == NULL || out == NULL ||
+        out->struct_size != sizeof(fdk_shell_output_info)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    memset((char *)out + sizeof(out->struct_size), 0,
+           sizeof(*out) - sizeof(out->struct_size));
+    switch (shell->backend) {
+#if defined(FDKSHELL_BUILD_X11)
+        case FDK_EXT_BACKEND_X11:
+            return fdkshell__x11_output_get_info(shell, index, out);
+#endif
+#if defined(FDKSHELL_BUILD_WAYLAND)
+        case FDK_EXT_BACKEND_WAYLAND:
+            return fdkshell__wl_output_get_info(shell, index, out);
+#endif
+        default:
+            return FDK_ERR_UNSUPPORTED;
+    }
+}
+
+void fdk_shell_set_output_event_callback(fdk_shell *shell,
+                                         fdk_shell_output_event_fn fn,
+                                         void *user) {
+    if (shell == NULL) {
+        return;
+    }
+    shell->output_cb = fn;
+    shell->output_cb_user = user;
+}
+
+/* The backends' single fire path (shell_internal.h). */
+void fdkshell__fire_output_event(fdk_shell *shell,
+                                 fdk_shell_output_event_type type,
+                                 uint32_t index) {
+    if (shell == NULL || shell->output_cb == NULL) {
+        return;
+    }
+    fdk_shell_output_event ev = {.type = type, .index = index};
+    shell->output_cb(shell, &ev, shell->output_cb_user);
 }
 
 /* ---- layers ---------------------------------------------------------------- */
@@ -522,27 +561,36 @@ static void shell_popup_event(fdk_ext_surface *ext,
     }
 }
 
-fdk_result fdk_shell_popup_create(fdk_shell_layer *parent, int32_t x,
-                                  int32_t y, int32_t width, int32_t height,
-                                  fdk_shell_popup **out) {
-    if (parent == NULL || out == NULL) {
+/* The shared popup body: an extension popup parented to `parent_ext`
+ * (a layer OR another popup), wrapped and linked. */
+/* The shared popup body: an extension popup parented to `parent_ext`
+ * (a LAYER or another POPUP — the cascade API), wrapped and linked
+ * into the shell's popup list. */
+static fdk_result shell_popup_create_common(fdk_shell *shell,
+                                            fdk_shell_layer *layer_parent,
+                                            fdk_shell_popup *popup_parent,
+                                            fdk_ext_surface *parent_ext,
+                                            int32_t x, int32_t y,
+                                            int32_t width, int32_t height,
+                                            fdk_shell_popup **out) {
+    if (shell == NULL || parent_ext == NULL || out == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    fdk_shell *shell = parent->shell;
-
     fdk_shell_popup *popup = calloc(1, sizeof(*popup));
     if (popup == NULL) {
         return FDK_ERR_OUT_OF_MEMORY;
     }
     popup->shell = shell;
-    popup->parent = parent;
+    popup->parent = layer_parent; /* NULL for cascade children    */
+    popup->parent_popup = popup_parent;
     popup->size.width = width > 0 ? width : 0;
     popup->size.height = height > 0 ? height : 0;
 
-    /* Part 1's popup API — the entire grab/dismissal/positioning
-     * contract, on both backends (Wayland's kind popup_attached hook
-     * parents the xdg_popup to the layer surface). */
-    fdk_result r = fdk_ext_popup_create(parent->ext, x, y, width, height,
+    /* The extension API's popup contract — the entire grab/
+     * dismissal/positioning machinery, on both backends (Wayland's
+     * kind popup_attached hook parents the xdg_popup to the layer
+     * surface; a popup parent uses xdg_popup-on-xdg_popup). */
+    fdk_result r = fdk_ext_popup_create(parent_ext, x, y, width, height,
                                         &popup->ext);
     if (!fdk_ok(r)) {
         free(popup);
@@ -564,6 +612,39 @@ fdk_result fdk_shell_popup_create(fdk_shell_layer *parent, int32_t x,
     return FDK_OK;
 }
 
+fdk_result fdk_shell_popup_create(fdk_shell_layer *parent, int32_t x,
+                                  int32_t y, int32_t width, int32_t height,
+                                  fdk_shell_popup **out) {
+    if (parent == NULL || out == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    return shell_popup_create_common(parent->shell, parent, NULL,
+                                     parent->ext, x, y, width, height,
+                                     out);
+}
+
+fdk_result fdk_shell_popup_create_child(fdk_shell_popup *parent,
+                                        int32_t x, int32_t y,
+                                        int32_t width, int32_t height,
+                                        fdk_shell_popup **out) {
+    if (parent == NULL || out == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* The cascade chain resolves to its layer ancestor for the
+     * family teardown semantics (a layer dying sweeps every popup,
+     * root or cascade). */
+    fdk_shell_layer *root_layer = parent->parent;
+    for (fdk_shell_popup *p = parent; p != NULL; p = p->parent_popup) {
+        if (p->parent != NULL) {
+            root_layer = p->parent;
+            break;
+        }
+    }
+    return shell_popup_create_common(parent->shell, root_layer, parent,
+                                     parent->ext, x, y, width, height,
+                                     out);
+}
+
 static void shell_popup_unlink(fdk_shell *shell, fdk_shell_popup *popup) {
     if (popup->prev != NULL) {
         popup->prev->next = popup->next;
@@ -582,7 +663,28 @@ void fdk_shell_popup_destroy(fdk_shell_popup *popup) {
     if (popup == NULL) {
         return;
     }
-    shell_popup_unlink(popup->shell, popup);
+    fdk_shell *shell = popup->shell;
+    /* Cascade children die with their parent (the family contract):
+     * destroy their shell wrappers FIRST — the ext destroy below
+     * sweeps their ext surfaces, which would otherwise leave the
+     * wrappers' pointers dangling. Re-scan per round (the popup
+     * destroy's own recursion frees entries anywhere in the list —
+     * a saved `next` chain would dangle, the layer sweep's shape). */
+    for (;;) {
+        fdk_shell_popup *victim = NULL;
+        for (fdk_shell_popup *p = shell->popups_head; p != NULL;
+             p = p->next) {
+            if (p->parent_popup == popup) {
+                victim = p;
+                break;
+            }
+        }
+        if (victim == NULL) {
+            break;
+        }
+        fdk_shell_popup_destroy(victim);
+    }
+    shell_popup_unlink(shell, popup);
     fdk_ext_surface_destroy(popup->ext);
     free(popup);
 }

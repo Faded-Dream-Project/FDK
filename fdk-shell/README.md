@@ -16,7 +16,7 @@ both of FDK's backends:
   `SKIP_PAGER`) — the EWMH world's equivalent layering semantics,
   honored by OpenBox, fluxbox, IceWM and friends.
 
-Version 0.1.0. Own build, own version, own pkg-config file — a
+Version 0.2.0. Own build, own version, own pkg-config file — a
 separate package that happens to live in FDK's tree for now, ready
 to move to its own repository unchanged.
 
@@ -234,17 +234,27 @@ click and Escape dismissal — is `examples/bar.c`
 (`./build/examples/bar`, or `./build/examples/bar 5` to auto-quit
 after 5 seconds).
 
-## API surface (0.1.0)
+## API surface (0.2.0)
 
 - `fdk_shell_init` / `fdk_shell_shutdown` / `fdk_shell_version`
   / `fdk_shell_backend_supported`
-- Outputs: `fdk_shell_output_count`, `fdk_shell_output_name`
+- Outputs: `fdk_shell_output_count`, `fdk_shell_output_name`,
+  `fdk_shell_output_get_info` (position, logical size, scale,
+  physical mm — 0.2.0), and LIVE output events:
+  `fdk_shell_set_output_event_callback` (ADDED / REMOVED / CHANGED —
+  Wayland hotplug and mode changes proven against sway's
+  `create_output` / mode / `unplug` IPC; enumerate the initial set
+  right after init, react to everything after)
 - Layers: `fdk_shell_layer_create` / `destroy` / `get_surface` /
   `set_event_callback` / `get_size` / `show` / `hide` /
   `set_cursor` (desc: layer, anchors, margins, exclusive zone,
-  keyboard mode, desired size, output index)
+  keyboard mode, desired size, output index, and 0.2.0's
+  **namespace** — what compositor rules match on; Wayland's
+  zwlr namespace, X11's WM_CLASS res_class; "fdk-shell" default)
 - Popups: `fdk_shell_popup_create` / `destroy` / `get_surface` /
-  `set_event_callback` / `show` / `hide` / `set_cursor`
+  `set_event_callback` / `show` / `hide` / `set_cursor`, and 0.2.0's
+  **cascades**: `fdk_shell_popup_create_child` — submenus, any
+  depth, family teardown (destroying a parent sweeps its children)
 
 `include/fdk-shell/fdk-shell.h` documents every function and the
 desc struct field-by-field, including the per-backend notes.
@@ -257,7 +267,18 @@ surface; the W2 report was a bar that kept the resize cursor until
 the pointer left). The demo bar shows the worked example: the hand
 over its menu button, the arrow everywhere else.
 
-## Honest limits (0.1.0)
+## _FDK_WM_LAYER (0.2.0)
+
+Every layer window now carries `_FDK_WM_LAYER` (type STRING):
+"background" / "bottom" / "top" / "overlay" — the level's own name,
+next to the EWMH type+state hints. This is the README's custom-WM
+contract (option 2) actually set: a coordinating WM can implement
+true layer stacking by matching this one property, without guessing
+from the EWMH soup, and fdk-shell needed no release on their side to
+start speaking it. Unknown-property WMs ignore it (harmless by
+construction).
+
+## Honest limits (0.2.0)
 
 - **Layer levels**: background / bottom / top / overlay are
   protocol truth on Wayland; on X11 they ride the stacking state of
@@ -266,9 +287,10 @@ over its menu button, the arrow everywhere else.
   windows on every EWMH WM — and OVERLAY cannot be guaranteed above
   fullscreen (the documented protocol ceiling). No fake fidelity.
 - **Per-output selection**: full on Wayland (the compositor's
-  outputs, enumerated in discovery order). X11 reports exactly ONE
-  output (the screen) — multi-monitor docks are a RandR feature
-  outside this package's X11 scope.
+  outputs, live with hotplug events). X11: RandR output enumeration
+  lands with the core's RandR work (roadmap M-6) — until then X11
+  reports the screen as one output with real metrics, and output
+  events fire on Wayland only (the honest split, shrinking).
 - **Keyboard ON_DEMAND**: layer-shell v4 on Wayland; on X11 it
   degrades to "focusable, best-effort" (there is no per-surface
   on-demand focus protocol). EXCLUSIVE is a real XGrabKeyboard.

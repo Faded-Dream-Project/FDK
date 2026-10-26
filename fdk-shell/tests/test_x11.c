@@ -1614,6 +1614,183 @@ static void test_popup_desktop_change_dismissal(void) {
            "(grab released; the sticky layer rides through)\n");
 }
 
+
+/* ---- 0.2.0: namespace, _FDK_WM_LAYER, output info, cascades ---------------- */
+
+static void test_namespace_and_wm_layer(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                    FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 30;
+    snprintf(desc.namespace_, sizeof(desc.namespace_), "com.example.mybar");
+
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 60);
+
+    rb_open();
+    Display *dpy = g_rb;
+    unsigned long xid = layer_xid(layer);
+
+    /* The namespace rides WM_CLASS res_class. */
+    XClassHint hint;
+    memset(&hint, 0, sizeof(hint));
+    assert(XGetClassHint(dpy, (Window)xid, &hint) != 0);
+    assert(hint.res_class != NULL &&
+           strcmp(hint.res_class, "com.example.mybar") == 0);
+    XFree(hint.res_name);
+    XFree(hint.res_class);
+
+    /* _FDK_WM_LAYER carries the level name. */
+    Atom layer_atom = XInternAtom(dpy, "_FDK_WM_LAYER", False);
+    Atom actual = None;
+    int fmt = 0;
+    unsigned long n = 0, after = 0;
+    unsigned char *data = NULL;
+    assert(XGetWindowProperty(dpy, (Window)xid, layer_atom, 0, 64, False,
+                              XA_STRING, &actual, &fmt, &n, &after,
+                              &data) == Success &&
+           data != NULL);
+    assert(n >= 1 && strncmp((const char *)data, "top", n) == 0);
+    XFree(data);
+
+    /* A default (unset) namespace keeps fdk-shell. */
+    fdk_shell_layer_desc plain;
+    memset(&plain, 0, sizeof(plain));
+    plain.struct_size = sizeof(plain);
+    plain.layer = FDK_SHELL_LAYER_BOTTOM;
+    plain.anchors = FDK_SHELL_ANCHOR_BOTTOM;
+    plain.height = 20;
+    fdk_shell_layer *plain_layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &plain, &plain_layer)));
+    fdk_shell_layer_show(plain_layer);
+    pump(ctx, 60);
+    unsigned long pxid = layer_xid(plain_layer);
+    /* No app_id on this context and no namespace in the desc: FDK
+     * leaves WM_CLASS unset (fdk_window.c sets it from app_id only)
+     * — the namespace override is opt-in, nothing else changes. */
+    /* Its _FDK_WM_LAYER says "bottom". */
+    assert(XGetWindowProperty(dpy, (Window)pxid, layer_atom, 0, 64, False,
+                              XA_STRING, &actual, &fmt, &n, &after,
+                              &data) == Success &&
+           data != NULL);
+    assert(n >= 1 && strncmp((const char *)data, "bottom", n) == 0);
+    XFree(data);
+
+    fdk_shell_layer_destroy(plain_layer);
+    fdk_shell_layer_destroy(layer);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] namespace -> WM_CLASS res_class + _FDK_WM_LAYER level "
+           "names\n");
+}
+
+static void test_output_info_x11(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    uint32_t count = 0;
+    assert(fdk_ok(fdk_shell_output_count(shell, &count)));
+    assert(count == 1);
+
+    char name[64];
+    assert(fdk_ok(fdk_shell_output_name(shell, 0, name, sizeof(name))));
+    assert(strcmp(name, "screen-0") == 0);
+    assert(fdk_shell_output_name(shell, 1, name, sizeof(name)) ==
+           FDK_ERR_NOT_FOUND);
+
+    fdk_shell_output_info info;
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    assert(fdk_ok(fdk_shell_output_get_info(shell, 0, &info)));
+    rb_open();
+    Display *dpy = g_rb;
+    assert(info.x == 0 && info.y == 0);
+    assert(info.width == (int32_t)DisplayWidth(dpy, DefaultScreen(dpy)));
+    assert(info.height == (int32_t)DisplayHeight(dpy, DefaultScreen(dpy)));
+    assert(info.scale == 1);
+    /* struct_size contract: a wrong size is refused */
+    fdk_shell_output_info bad;
+    memset(&bad, 0, sizeof(bad));
+    bad.struct_size = sizeof(bad) - 8;
+    assert(fdk_shell_output_get_info(shell, 0, &bad) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 output info: the screen as one output, metrics "
+           "exact\n");
+}
+
+static void test_popup_cascade(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                    FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 60);
+
+    /* The root popup, then a cascade child, then a grandchild. */
+    fdk_shell_popup *root = NULL;
+    assert(fdk_ok(fdk_shell_popup_create(layer, 10, 32, 120, 80, &root)));
+    fdk_shell_popup_show(root);
+    pump(ctx, 60);
+
+    fdk_shell_popup *sub = NULL;
+    assert(fdk_ok(fdk_shell_popup_create_child(root, 100, 8, 90, 60, &sub)));
+    fdk_shell_popup_show(sub);
+    pump(ctx, 60);
+
+    fdk_shell_popup *subsub = NULL;
+    assert(fdk_ok(fdk_shell_popup_create_child(sub, 60, 10, 70, 40,
+                                               &subsub)));
+    fdk_shell_popup_show(subsub);
+    pump(ctx, 60);
+
+    /* All three render. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_shell_popup_get_surface(subsub, &s)));
+    fdk_surface_fill(s, (fdk_color){ .r = 1.0f, .g = 0.5f, .b = 0.25f,
+                                     .a = 1.0f });
+    assert(fdk_ok(fdk_surface_present(s)));
+
+    /* Family teardown: destroying the ROOT sweeps the cascade. */
+    fdk_shell_popup_destroy(root);
+    pump(ctx, 60);
+    /* sub/subsub's wrappers are gone; using them would be UB, so the
+     * assertion is the LAYER destroy surviving with a live-ish tree
+     * and the shell shutting down cleanly (ASan catches any dangling
+     * wrapper walk). */
+    fdk_shell_layer_destroy(layer);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] popup cascades: 3-deep create/render + family sweep\n");
+}
+
 int main(void) {
     test_top_bar_auto_zone();
     test_margins_and_bottom();
@@ -1626,6 +1803,9 @@ int main(void) {
     test_popup_passive_grabs_alive();
     test_popup_desktop_change_dismissal();
     test_sticky_across_desktops();
+    test_namespace_and_wm_layer();
+    test_output_info_x11();
+    test_popup_cascade();
     if (g_rb != NULL) {
         XCloseDisplay(g_rb);
     }

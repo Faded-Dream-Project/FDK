@@ -51,9 +51,9 @@
 extern "C" {
 #endif
 
-#define FDKSHELL_VERSION_STRING "0.1.0"
+#define FDKSHELL_VERSION_STRING "0.2.0"
 
-/* Returns this package's version ("0.1.0"). */
+/* Returns this package's version ("0.2.0"). */
 const char *fdk_shell_version(void);
 
 /* ---- the per-context handle ---------------------------------------------- */
@@ -94,9 +94,17 @@ int fdk_shell_backend_supported(fdk_context *ctx);
  *
  * Output selection is part of a layer's description (which screen a
  * panel docks to). Wayland enumerates the compositor's outputs in
- * discovery order; X11 reports exactly ONE output (the screen —
- * multi-monitor docks are a RandR feature outside this package's X11
- * scope, documented honestly in the README).
+ * discovery order (live: hot-plug and mode changes arrive as events);
+ * X11 reports the RandR outputs of the screen (0.2.0; the fallback
+ * before RandR probing is one output: the whole screen).
+ *
+ * The contract: enumerate the initial set right after fdk_shell_init
+ * (output_count / output_name / output_info), install the output
+ * event callback, and every later change — a monitor plugged in or
+ * unplugged, a mode or scale change — arrives there. Output indices
+ * are STABLE for the life of the output (a removed output's index is
+ * not reused while it is still enumerable; gone outputs keep their
+ * records until shutdown).
  */
 
 /* Writes the number of selectable outputs to *out_count. */
@@ -108,6 +116,65 @@ fdk_result fdk_shell_output_count(fdk_shell *shell, uint32_t *out_count);
  * FDK_ERR_NOT_FOUND for an out-of-range index. */
 fdk_result fdk_shell_output_name(fdk_shell *shell, uint32_t index,
                                  char *buf, size_t buflen);
+
+/* Output geometry/metrics (0.2.0). struct_size discipline: zero-init,
+ * set struct_size = sizeof(fdk_shell_output_info), read the fields.
+ *
+ *   x, y:          the output's position in the GLOBAL layout (the
+ *                  compositor's coordinate space; 0,0 for the X11
+ *                  screen).
+ *   width, height: the LOGICAL size (the compositor's mode divided
+ *                  by its scale — the size a panel sizes itself
+ *                  against).
+ *   scale:         the output's scale factor (1 on unscaled outputs;
+ *                  fractional-scale compositors round to the
+ *                  wl_output integer factor).
+ *   physical_width, physical_height: the monitor's physical size in
+ *                  millimeters (0 when the compositor does not say).
+ */
+typedef struct fdk_shell_output_info {
+    uint32_t struct_size;
+    int32_t x;
+    int32_t y;
+    int32_t width;
+    int32_t height;
+    int32_t scale;
+    int32_t physical_width;
+    int32_t physical_height;
+} fdk_shell_output_info;
+
+/* Writes output `index`'s current metrics to *out (struct_size must
+ * be set). FDK_ERR_NOT_FOUND for an out-of-range index. Metrics for
+ * an output that has not finished its first description round may be
+ * zero — the CHANGED event will arrive when they are. */
+fdk_result fdk_shell_output_get_info(fdk_shell *shell, uint32_t index,
+                                      fdk_shell_output_info *out);
+
+/* Output lifecycle events (0.2.0). */
+typedef enum fdk_shell_output_event_type {
+    FDK_SHELL_OUTPUT_ADDED = 1,   /* a new output became enumerable */
+    FDK_SHELL_OUTPUT_REMOVED = 2, /* an output went away            */
+    FDK_SHELL_OUTPUT_CHANGED = 3, /* metrics changed (mode/scale/
+                                     position) — re-read with
+                                     fdk_shell_output_info          */
+} fdk_shell_output_event_type;
+
+typedef struct fdk_shell_output_event {
+    fdk_shell_output_event_type type;
+    uint32_t index; /* the stable index the event is about          */
+} fdk_shell_output_event;
+
+typedef void (*fdk_shell_output_event_fn)(fdk_shell *shell,
+                                          const fdk_shell_output_event *event,
+                                          void *user);
+
+/* Installs (or with fn == NULL, removes) the output event receiver.
+ * The callback fires from inside FDK's dispatch (the pump), like
+ * every fdk-shell callback; it may call any fdk_shell function
+ * (creating a layer for a new output is the canonical reaction). */
+void fdk_shell_set_output_event_callback(fdk_shell *shell,
+                                         fdk_shell_output_event_fn fn,
+                                         void *user);
 
 /* ---- layers ---------------------------------------------------------------- */
 
@@ -189,6 +256,13 @@ typedef struct fdk_shell_layer_desc {
     int32_t width;  /* desired un-anchored axis size  */
     int32_t height; /* desired un-anchored axis size  */
     int32_t output_index; /* -1 default, >=0 specific  */
+    /* 0.2.0 (appended; old callers' smaller struct_size is honored):
+     * the surface's NAMESPACE — what compositor RULES match on.
+     * Wayland: zwlr_layer_shell's namespace argument (sway's
+     * for_window criteria, labwc's window-rules). X11: the window's
+     * WM_CLASS res_class (the same rule-matching role). NUL/empty
+     * defaults to "fdk-shell". */
+    char namespace_[64];
 } fdk_shell_layer_desc;
 
 /* The layer event callback: FDK's backend-neutral event stream (see
@@ -283,6 +357,18 @@ typedef struct fdk_shell_popup fdk_shell_popup;
 fdk_result fdk_shell_popup_create(fdk_shell_layer *parent, int32_t x,
                                   int32_t y, int32_t width, int32_t height,
                                   fdk_shell_popup **out);
+
+/* 0.2.0 — CASCADES: a popup parented to another popup (launcher
+ * menus with submenus). The child positions itself parent-relative
+ * (x, y in the PARENT POPUP's local coordinates), stacks above it,
+ * and dismisses together with it (destroying a parent sweeps its
+ * children — the same family contract layers follow). Any depth the
+ * backend allows: X11 through the window tree, Wayland through
+ * xdg_popup-on-xdg_popup (the compositor clamps to the screen). */
+fdk_result fdk_shell_popup_create_child(fdk_shell_popup *parent,
+                                        int32_t x, int32_t y,
+                                        int32_t width, int32_t height,
+                                        fdk_shell_popup **out);
 
 void fdk_shell_popup_destroy(fdk_shell_popup *popup);
 fdk_result fdk_shell_popup_get_surface(fdk_shell_popup *popup,

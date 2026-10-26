@@ -37,6 +37,7 @@
 #include <wayland-client.h>
 
 #include <limits.h>
+#include <stddef.h>
 #include <stdio.h>
 
 /* ---- per-shell state ------------------------------------------------------ */
@@ -46,9 +47,23 @@ typedef struct wl_output_rec {
     uint32_t global_name;     /* registry name (the retirement key)  */
     char name[64];            /* connector name, wl_output v4        */
     int gone;                 /* global removed (kept for stability) */
+    /* Live metrics (0.2.0): the geometry/mode/scale events fill
+     * these; `done` publishes a batch. x/y are layout position,
+     * mode_w/h the CURRENT mode's physical pixels, scale the
+     * integer factor; LOGICAL size = mode / scale. */
+    int32_t x, y;
+    int32_t phys_w, phys_h;  /* millimeters (geometry)                */
+    int32_t mode_w, mode_h;  /* current mode, physical px             */
+    int32_t scale;           /* wl_output factor (default 1)          */
+    int have_metrics;        /* first `done` batch landed             */
+    int metrics_dirty;       /* changes since the last `done`         */
+    fdk_shell *owner;        /* the handle (event firing)             */
+    uint32_t index;          /* the stable slot (event identity)      */
 } wl_output_rec;
 
 typedef struct wl_shell_state {
+    fdk_shell *owner;          /* the owning handle (event firing)   */
+    int discovering;           /* init roundtrip: ADDED stays quiet  */
     struct wl_display *display; /* borrowed: FDK's connection       */
     struct wl_registry *registry; /* fdk-shell's OWN registry        */
     struct zwlr_layer_shell_v1 *shell; /* NULL when unsupported     */
@@ -83,25 +98,77 @@ static void wl_output_geometry_cb(void *data, struct wl_output *output,
                                   int32_t ph, int32_t subpixel,
                                   const char *make, const char *model,
                                   int32_t transform) {
-    (void)data; (void)output; (void)x; (void)y; (void)pw; (void)ph;
-    (void)subpixel; (void)make; (void)model; (void)transform;
+    (void)output; (void)subpixel; (void)make; (void)model;
+    (void)transform;
+    wl_output_rec *rec = data;
+    if (rec->x != x || rec->y != y || rec->phys_w != pw ||
+        rec->phys_h != ph) {
+        rec->metrics_dirty = 1;
+    }
+    rec->x = x;
+    rec->y = y;
+    rec->phys_w = pw;
+    rec->phys_h = ph;
 }
 
 static void wl_output_mode_cb(void *data, struct wl_output *output,
                               uint32_t flags, int32_t width,
                               int32_t height, int32_t refresh) {
-    (void)data; (void)output; (void)flags; (void)width; (void)height;
-    (void)refresh;
+    (void)output; (void)refresh;
+    wl_output_rec *rec = data;
+    if ((flags & WL_OUTPUT_MODE_CURRENT) != 0) {
+        if (rec->mode_w != width || rec->mode_h != height) {
+            rec->metrics_dirty = 1;
+        }
+        rec->mode_w = width;
+        rec->mode_h = height;
+    }
+}
+
+/* The record's LIVE index: its position among the non-gone records
+ * — the same index space output_count/name/info enumerate. */
+static uint32_t wl_rec_live_index(wl_shell_state *st,
+                                  wl_output_rec *rec) {
+    uint32_t live = 0;
+    for (size_t i = 0; i < st->output_count; i++) {
+        if (&st->outputs[i] == rec) {
+            return live;
+        }
+        if (!st->outputs[i].gone) {
+            live++;
+        }
+    }
+    return 0; /* unreachable for a live record */
 }
 
 static void wl_output_done_cb(void *data, struct wl_output *output) {
-    (void)data;
     (void)output;
+    wl_output_rec *rec = data;
+    /* A batch completed: the honest publish point. The FIRST done
+     * completes the initial description (metrics become real); a
+     * later dirty batch is a CHANGED event. */
+    if (!rec->have_metrics) {
+        rec->have_metrics = 1;
+        rec->metrics_dirty = 0;
+        return; /* initial: the app enumerated after init instead */
+    }
+    if (rec->metrics_dirty && !rec->gone && rec->owner != NULL) {
+        rec->metrics_dirty = 0;
+        wl_shell_state *st = rec->owner->wl;
+        fdkshell__fire_output_event(
+            rec->owner, FDK_SHELL_OUTPUT_CHANGED,
+            wl_rec_live_index(st, rec));
+    }
 }
 
 static void wl_output_scale_cb(void *data, struct wl_output *output,
                                int32_t factor) {
-    (void)data; (void)output; (void)factor;
+    (void)output;
+    wl_output_rec *rec = data;
+    if (factor >= 1 && rec->scale != factor) {
+        rec->scale = factor;
+        rec->metrics_dirty = 1;
+    }
 }
 
 static void wl_output_description_cb(void *data, struct wl_output *output,
@@ -144,12 +211,24 @@ static void wl_registry_global(void *data, struct wl_registry *registry,
         wl_output_rec *rec = &st->outputs[st->output_count];
         memset(rec, 0, sizeof(*rec));
         rec->global_name = name;
+        rec->owner = st->owner;
+        rec->index = (uint32_t)st->output_count;
+        rec->scale = 1;
         rec->output = wl_registry_bind(registry, name,
                                        &wl_output_interface,
                                        version < 4 ? version : 4);
         if (rec->output != NULL) {
-            wl_output_add_listener(rec->output, &g_wl_output_listener, rec);
+            wl_output_add_listener(rec->output, &g_wl_output_listener,
+                                   rec);
             st->output_count++;
+            if (!st->discovering && st->owner != NULL) {
+                /* Hotplug after init: the app learns live. Outputs
+                 * during the init roundtrip are the enumerable
+                 * initial set instead (the documented contract). */
+                fdkshell__fire_output_event(
+                    st->owner, FDK_SHELL_OUTPUT_ADDED,
+                    wl_rec_live_index(st, rec));
+            }
         }
     }
 }
@@ -161,9 +240,22 @@ static void wl_registry_global_remove(void *data,
     wl_shell_state *st = data;
     for (size_t i = 0; i < st->output_count; i++) {
         if (st->outputs[i].global_name == name) {
-            st->outputs[i].gone = 1; /* records stay (index stability);
-                                      * the proxy is released at
-                                      * shutdown */
+            if (!st->outputs[i].gone) {
+                /* the live index it HELD (compute before retiring) */
+                uint32_t live = wl_rec_live_index(st, &st->outputs[i]);
+                st->outputs[i].gone = 1; /* records stay (slot
+                                          * stability); the proxy is
+                                          * released at shutdown.
+                                          * Outputs after it in the
+                                          * live enumeration shift
+                                          * down — CHANGED events for
+                                          * renumbered outputs are the
+                                          * app's enumeration's job
+                                          * (documented). */
+                fdkshell__fire_output_event(st->owner,
+                                            FDK_SHELL_OUTPUT_REMOVED,
+                                            live);
+            }
             return;
         }
     }
@@ -179,6 +271,8 @@ static const struct wl_registry_listener g_wl_registry_listener = {
  * is never touched). Returns 0 when zwlr_layer_shell was offered. */
 static int wl_discover(fdk_shell *shell) {
     wl_shell_state *st = shell->wl;
+    st->owner = shell;
+    st->discovering = 1; /* the initial set is enumerable, not evented */
     st->registry = wl_display_get_registry(st->display);
     if (st->registry == NULL) {
         return 0;
@@ -187,6 +281,12 @@ static int wl_discover(fdk_shell *shell) {
     if (wl_display_roundtrip(st->display) < 0) {
         return 0;
     }
+    /* A second roundtrip: the output records' first geometry/mode/
+     * scale/done batches land here (metrics complete at init). */
+    if (wl_display_roundtrip(st->display) < 0) {
+        return 0;
+    }
+    st->discovering = 0;
     return st->shell != NULL && st->compositor != NULL;
 }
 
@@ -370,6 +470,36 @@ uint32_t fdkshell__wl_output_count(fdk_shell *shell) {
     return n;
 }
 
+fdk_result fdkshell__wl_output_get_info(fdk_shell *shell, uint32_t index,
+                                         fdk_shell_output_info *out) {
+    wl_shell_state *st = shell->wl;
+    if (st == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    uint32_t live = 0;
+    for (size_t i = 0; i < st->output_count; i++) {
+        if (st->outputs[i].gone) {
+            continue;
+        }
+        if (live == index) {
+            const wl_output_rec *rec = &st->outputs[i];
+            out->x = rec->x;
+            out->y = rec->y;
+            out->scale = rec->scale > 0 ? rec->scale : 1;
+            /* logical size = current mode / scale (the integer
+             * factor; fractional compositors round here) */
+            int32_t scale = out->scale;
+            out->width = rec->mode_w / scale;
+            out->height = rec->mode_h / scale;
+            out->physical_width = rec->phys_w;
+            out->physical_height = rec->phys_h;
+            return FDK_OK;
+        }
+        live++;
+    }
+    return FDK_ERR_NOT_FOUND;
+}
+
 fdk_result fdkshell__wl_output_name(fdk_shell *shell, uint32_t index,
                                      char *buf, size_t buflen) {
     wl_shell_state *st = shell->wl;
@@ -445,8 +575,14 @@ fdk_result fdkshell__wl_layer_create(fdk_shell *shell,
     }
     lst->output = output;
     lst->closed = 0;
+    const char *ns =
+        (desc->struct_size >= offsetof(fdk_shell_layer_desc, namespace_) +
+                                  sizeof(desc->namespace_) &&
+         desc->namespace_[0] != '\0')
+            ? desc->namespace_
+            : "fdk-shell";
     lst->ls = zwlr_layer_shell_v1_get_layer_surface(
-        st->shell, surface, output, layer_ids[desc->layer], "fdk-shell");
+        st->shell, surface, output, layer_ids[desc->layer], ns);
     if (lst->ls == NULL) {
         free(lst);
         wl_surface_destroy(surface);

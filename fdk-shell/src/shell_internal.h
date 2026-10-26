@@ -41,6 +41,11 @@ struct fdk_shell {
     fdk_ext_surface_kind *kind; /* "fdk-shell.layer", registered    */
     fdk_ext_backend backend;
 
+    /* The output event receiver (0.2.0) — backends fire through
+     * fdkshell__fire_output_event(). */
+    fdk_shell_output_event_fn output_cb;
+    void *output_cb_user;
+
     /* Per-backend state (owned + defined by the backend .c). */
     void *x11;
     void *wl;
@@ -71,6 +76,8 @@ struct fdk_shell_popup {
     fdk_shell *shell;
     fdk_ext_surface *ext; /* FDK-OWNED popup extension surface */
     struct fdk_shell_layer *parent; /* dies with its layer       */
+    struct fdk_shell_popup *parent_popup; /* cascade chain (0.2.0);
+                                           * NULL for layer-rooted  */
     fdk_shell_popup_event_fn cb;
     void *cb_user;
     fdk_size size;
@@ -94,8 +101,22 @@ extern struct fdk_shell_layer *fdkshell__pending_layer;
  * All functions run on FDK's dispatch thread, inside shell.c's
  * calls. */
 
+/* shell.c: backends report output lifecycle changes through this;
+ * it routes to the app callback. index is the backend's STABLE
+ * record index. */
+void fdkshell__fire_output_event(fdk_shell *shell,
+                                 fdk_shell_output_event_type type,
+                                 uint32_t index);
+
 /* x11.c */
 #if defined(FDKSHELL_BUILD_X11)
+/* The X11 output face (0.2.0): RandR output records when RandR is
+ * reachable, the whole screen as one output otherwise. */
+uint32_t fdkshell__x11_output_count(fdk_shell *shell);
+fdk_result fdkshell__x11_output_name(fdk_shell *shell, uint32_t index,
+                                     char *buf, size_t buflen);
+fdk_result fdkshell__x11_output_get_info(fdk_shell *shell, uint32_t index,
+                                          fdk_shell_output_info *out);
 int fdkshell__x11_supported(fdk_context *ctx);
 fdk_result fdkshell__x11_init(fdk_shell *shell);
 void fdkshell__x11_shutdown(fdk_shell *shell);
@@ -114,10 +135,14 @@ void fdkshell__x11_layer_hide(fdk_shell_layer *layer);
  * adoption; shell.c wires it into the kind ops). */
 void shell_kind_popup_attached(fdk_ext_surface *surface,
                                void *native_popup, void *user);
-/* Output enumeration (shell.c's output API forwards to these). */
+/* Output enumeration + live metrics (shell.c's output API forwards
+ * to these). The registry/output listeners fire output events
+ * through fdkshell__fire_output_event(). */
 uint32_t fdkshell__wl_output_count(fdk_shell *shell);
 fdk_result fdkshell__wl_output_name(fdk_shell *shell, uint32_t index,
                                      char *buf, size_t buflen);
+fdk_result fdkshell__wl_output_get_info(fdk_shell *shell, uint32_t index,
+                                         fdk_shell_output_info *out);
 int fdkshell__wl_supported(fdk_context *ctx);
 fdk_result fdkshell__wl_init(fdk_shell *shell);
 void fdkshell__wl_shutdown(fdk_shell *shell);
