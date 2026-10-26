@@ -7464,6 +7464,159 @@ static void xs_publish(Display *d, Window w, Atom prop, const char *theme,
     XSync(d, False);
 }
 
+/* ---- the color-scheme live follow (1.1.0) ------------------------------------
+ *
+ * The full XSETTINGS dark-mode pipeline against a fake settings
+ * daemon speaking the byte format decoded from real xsettingsd: a
+ * property carrying Gtk/ColorScheme, a selection-owning manager
+ * window, an FDK context connecting AFTER the daemon exists (the
+ * backend arms the PropertyNotify follow at connect), and a LIVE
+ * property rewrite that must — through the context's own event
+ * loop — flip fdk_system_color_scheme() and install the scheme's
+ * variant face of the resolved theme. */
+static void xs_publish_scheme(Display *d, Window w, Atom prop,
+                              const char *scheme_val) {
+    unsigned char buf[512];
+    size_t off = 0;
+    buf[off++] = 0; /* LSB-first, like xsettingsd on x86           */
+    buf[off++] = 0;
+    buf[off++] = 0;
+    buf[off++] = 0;
+    off = xs_put_u32(buf, off, 1, 0); /* serial                    */
+    off = xs_put_u32(buf, off, 2, 0); /* two settings              */
+    off = xs_put_str(buf, off, "Gtk/ColorScheme", scheme_val, 0);
+    off = xs_put_str(buf, off, "Net/IconThemeName", "Adwaita", 0);
+    XChangeProperty(d, w, prop, prop, 8, PropModeReplace, buf,
+                    (int)off);
+    XSync(d, False);
+}
+
+static void test_color_scheme_xsettings_gui(void) {
+    static char theme_root[] = "/tmp/fdk-csx-XXXXXX";
+    if (mkdtemp(theme_root) == NULL) {
+        perror("mkdtemp");
+        exit(2);
+    }
+    char buf[700];
+
+    /* Two faces on a private search path: the base and its dark
+     * sibling — the variant convention. */
+    const char *faces[2][3] = {
+        {"daylight", "Daylight", "#88ccff"},
+        {"daylight-dark", "Daylight-Dark", "#ffcc88"},
+    };
+    for (int i = 0; i < 2; i++) {
+        snprintf(buf, sizeof buf, "%s/%s.fdk", theme_root, faces[i][0]);
+        FILE *f = fopen(buf, "w");
+        assert(f != NULL);
+        fprintf(f,
+                "version = 1\n"
+                "name = \"%s\"\n"
+                "author = \"color-scheme x11 test\"\n"
+                "\n"
+                "[colors]\n"
+                "accent = %s\n",
+                faces[i][1], faces[i][2]);
+        fclose(f);
+    }
+
+    const char *saved_theme = getenv("FDK_THEME");
+    const char *saved_dir = getenv("FDK_THEME_DIR");
+    const char *saved_cs = getenv("FDK_COLOR_SCHEME");
+    unsetenv("FDK_COLOR_SCHEME");
+    setenv("FDK_THEME", "daylight", 1);
+    setenv("FDK_THEME_DIR", theme_root, 1);
+
+    /* The fake daemon: manager window + selection + the property,
+     * all BEFORE the context connects (the arm looks the owner up
+     * at connect). */
+    Display *d = XOpenDisplay(NULL);
+    assert(d != NULL);
+    char sel_name[32];
+    snprintf(sel_name, sizeof sel_name, "_XSETTINGS_S%d",
+             DefaultScreen(d));
+    Atom sel = XInternAtom(d, sel_name, False);
+    Atom prop = XInternAtom(d, "_XSETTINGS_SETTINGS", False);
+    Window mgr = XCreateSimpleWindow(d, DefaultRootWindow(d), 0, 0, 1,
+                                     1, 0, 0, 0);
+    xs_publish_scheme(d, mgr, prop, "prefer-dark");
+    XSetSelectionOwner(d, sel, mgr, CurrentTime);
+    XSync(d, False);
+
+    /* Reset the whole theme/settings boot state (prior GUI groups
+     * call fdk_theme_set_default, which opts the process out of
+     * settings-following) and ALL scheme state (a prior group may
+     * have polled a manager-less desktop), then connect. */
+    fdk__theme_boot_reset_for_tests();
+    fdk__color_scheme_reset_for_tests();
+    fdk_context *ctx = NULL;
+    assert(fdk_init(&ctx, NULL) == FDK_OK);
+
+    /* The boot's poll reads the daemon: DARK, and the variant face
+     * installs (the boot may have run earlier in this process — the
+     * recheck is the same resolution either way). */
+    fdk__theme_settings_boot();
+    fdk__theme_settings_recheck();
+    assert(fdk_system_color_scheme() == FDK_COLOR_SCHEME_DARK);
+    assert(strcmp(fdk_theme_name(fdk_theme_get_default()),
+                  "Daylight-Dark") == 0);
+    printf("[ok] color-scheme: XSETTINGS read at boot — dark, the "
+           "variant face installed\n");
+
+    /* The LIVE flip: rewrite the property to prefer-light, pump the
+     * context's own loop, and the PropertyNotify (selected on the
+     * manager window at connect) must re-run resolution: scheme
+     * LIGHT, and with no -light sibling the base face returns. */
+    xs_publish_scheme(d, mgr, prop, "prefer-light");
+    for (int i = 0; i < 25; i++) {
+        (void)fdk_pump_events(ctx, 20);
+    }
+    assert(fdk_system_color_scheme() == FDK_COLOR_SCHEME_LIGHT);
+    assert(strcmp(fdk_theme_name(fdk_theme_get_default()),
+                  "Daylight") == 0);
+    printf("[ok] color-scheme: LIVE property rewrite through the "
+           "context's loop — light, base face restored\n");
+
+    /* And back to dark, the other direction. */
+    xs_publish_scheme(d, mgr, prop, "prefer-dark");
+    for (int i = 0; i < 25; i++) {
+        (void)fdk_pump_events(ctx, 20);
+    }
+    assert(fdk_system_color_scheme() == FDK_COLOR_SCHEME_DARK);
+    assert(strcmp(fdk_theme_name(fdk_theme_get_default()),
+                  "Daylight-Dark") == 0);
+    printf("[ok] color-scheme: live flip back to dark\n");
+
+    fdk_shutdown(ctx);
+
+    /* Teardown: daemon gone, env restored, faces removed. */
+    XSetSelectionOwner(d, sel, None, CurrentTime);
+    XDestroyWindow(d, mgr);
+    XSync(d, False);
+    XCloseDisplay(d);
+    if (saved_theme != NULL) {
+        setenv("FDK_THEME", saved_theme, 1);
+    } else {
+        unsetenv("FDK_THEME");
+    }
+    if (saved_dir != NULL) {
+        setenv("FDK_THEME_DIR", saved_dir, 1);
+    } else {
+        unsetenv("FDK_THEME_DIR");
+    }
+    if (saved_cs != NULL) {
+        setenv("FDK_COLOR_SCHEME", saved_cs, 1);
+    } else {
+        unsetenv("FDK_COLOR_SCHEME");
+    }
+    for (int i = 0; i < 2; i++) {
+        snprintf(buf, sizeof buf, "%s/%s.fdk", theme_root, faces[i][0]);
+        remove(buf);
+    }
+    remove(theme_root);
+    fdk__color_scheme_reset_for_tests();
+}
+
 static void test_xsettings_detection_gui(void) {
     /* Hermetic file channels: every XDG root points at scratch dirs
      * that carry NOTHING (the icon search path has no default/
@@ -11046,6 +11199,7 @@ int main(void) {
     test_file_dialog_gui();
     test_file_dialog_icons_gui();
     test_xsettings_detection_gui();
+    test_color_scheme_xsettings_gui();
     test_dnd_receiver_gui();
     test_dnd_receiver_gtk_gui();
     test_dnd_receiver_incr_gui();

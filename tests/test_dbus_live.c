@@ -31,6 +31,11 @@
 
 #include "fdk/fdk.h"
 #include "fdk/fdk_dbus.h"
+#include "fdk/fdk_theme.h"
+
+/* The scheme-engine seam (the mock-portal scenario drives the same
+ * recheck a real portal's SettingChanged fires). */
+#include "theme/theme_internal.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -54,6 +59,47 @@ static int pump_until(fdk_context *ctx, int *done, int timeout_ms) {
         (void)fdk_pump_events(ctx, 20);
     }
     return 1;
+}
+
+/* The mock portal's method handler: ReadOne on
+ * org.freedesktop.appearance/color-scheme answers the current test
+ * value (g_portal_answer); anything else is UnknownMethod. */
+static uint32_t g_portal_answer = 1; /* color-scheme: 1 = dark */
+static void portal_method_handler(fdk_dbus_connection *c,
+                                  fdk_dbus_message *call, void *user) {
+    (void)user;
+    const char *member = fdk_dbus_message_member(call);
+    const char *iface = fdk_dbus_message_interface(call);
+    if (member == NULL || iface == NULL ||
+        strcmp(iface, "org.freedesktop.portal.Settings") != 0) {
+        return;
+    }
+    if (strcmp(member, "ReadOne") == 0) {
+        fdk_dbus_value **args = NULL;
+        size_t n = 0;
+        if (fdk_dbus_message_read_args(call, &args, &n) != FDK_OK ||
+            n < 2 || args == NULL) {
+            fdk_dbus_values_free_array(args, n);
+            return;
+        }
+        const char *ns = fdk_dbus_value_string(args[0]);
+        const char *key = fdk_dbus_value_string(args[1]);
+        if (ns != NULL && key != NULL &&
+            strcmp(ns, "org.freedesktop.appearance") == 0 &&
+            strcmp(key, "color-scheme") == 0) {
+            fdk_dbus_message *reply =
+                fdk_dbus_message_new_method_return(call);
+            if (reply != NULL) {
+                (void)fdk_dbus_message_append_variant_uint32(
+                    reply, g_portal_answer);
+                (void)fdk_dbus_connection_send(c, reply);
+            }
+        }
+        fdk_dbus_values_free_array(args, n);
+        return;
+    }
+    /* ReadAll and friends: UnknownMethod (the engine only uses
+     * ReadOne + the SettingChanged subscription). */
 }
 
 /* request_name's reply handler + state. */
@@ -637,6 +683,12 @@ int main(void) {
             }
         }
         assert(watch_events == 2); /* appeared + vanished */
+        /* NameLost is a SEPARATE unicast to A that may trail the
+         * broadcast NameOwnerChanged by a dispatch batch — wait it
+         * out (bounded) instead of racing it. */
+        for (int i = 0; i < 100 && name_events_lost < 1; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
         assert(name_events_lost >= 1);
         fdk_dbus_name_watcher_free(w);
 
@@ -699,6 +751,129 @@ int main(void) {
          * which is exactly what this run exercises). */
         (void)fdk_pump_events(ctx, 20);
         printf("[ok] close-from-inside-its-own-callback: reaped cleanly\n");
+    }
+
+    /* ---- the mock portal: the color-scheme D-Bus channel -----------------
+     *
+     * Connection A BECOMES org.freedesktop.portal.Desktop (no real
+     * portal runs under dbus-run-session), serves ReadOne, and emits
+     * SettingChanged — the exact surface the theme engine's portal
+     * singleton consumes. The engine attaches through the pump's
+     * scheme tick (no XSETTINGS daemon exists in this container, so
+     * the portal is the active source); the scheme value and the
+     * theme re-check are asserted end to end. */
+    {
+        /* Hermetic theme fixtures: a face pair on a private path. */
+        static char theme_root[] = "/tmp/fdk-portal-themes-XXXXXX";
+        assert(mkdtemp(theme_root) != NULL);
+        char path[768];
+        const char *faces[2][3] = {
+            {"daylight", "Daylight", "#88ccff"},
+            {"daylight-dark", "Daylight-Dark", "#ffcc88"},
+        };
+        for (int i = 0; i < 2; i++) {
+            snprintf(path, sizeof path, "%s/%s.fdk", theme_root,
+                     faces[i][0]);
+            FILE *f = fopen(path, "w");
+            assert(f != NULL);
+            fprintf(f,
+                    "version = 1\n"
+                    "name = \"%s\"\n"
+                    "author = \"portal test\"\n"
+                    "\n"
+                    "[colors]\n"
+                    "accent = %s\n",
+                    faces[i][1], faces[i][2]);
+            fclose(f);
+        }
+        const char *saved_theme = getenv("FDK_THEME");
+        const char *saved_dir = getenv("FDK_THEME_DIR");
+        setenv("FDK_THEME", "daylight", 1);
+        setenv("FDK_THEME_DIR", theme_root, 1);
+        unsetenv("FDK_COLOR_SCHEME");
+
+        /* Reset the engines; the XSETTINGS poll finds no daemon (no
+         * DISPLAY-side manager in this rig), so the portal is the
+         * active source once the pump ticks. */
+        fdk__theme_boot_reset_for_tests();
+        fdk__color_scheme_reset_for_tests();
+
+        /* A serves the portal: RequestName first. */
+        static int portal_owned = 0;
+        fdk_dbus_pending *pp = fdk_dbus_connection_request_name(
+            a, "org.freedesktop.portal.Desktop",
+            FDK_DBUS_NAME_REPLACE_EXISTING | FDK_DBUS_NAME_DO_NOT_QUEUE,
+            reqname_reply, NULL);
+        assert(pp != NULL);
+        assert(pump_until(ctx, &g_reqname_done, 10000));
+        assert(g_reqname_code == FDK_DBUS_REQUEST_NAME_PRIMARY_OWNER);
+        portal_owned = 1;
+        (void)portal_owned;
+
+        /* The portal method handler: ReadOne(color-scheme) -> (v). */
+        fdk_dbus_connection_set_method_handler(a, portal_method_handler,
+                                               NULL);
+
+        /* Pump: the theme engine's scheme tick attaches its own
+         * connection to the (mock) portal, ReadOne lands, the
+         * recheck installs the DARK variant face. */
+        int portal_scheme_dark = 0;
+        for (int i = 0; i < 100 && !portal_scheme_dark; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            portal_scheme_dark =
+                (fdk_system_color_scheme() == FDK_COLOR_SCHEME_DARK);
+        }
+        assert(portal_scheme_dark);
+        assert(strcmp(fdk_theme_name(fdk_theme_get_default()),
+                      "Daylight-Dark") == 0);
+        printf("[ok] portal color-scheme: ReadOne through the mock "
+               "portal — dark, variant face installed\n");
+
+        /* LIVE: the portal emits SettingChanged(color-scheme=light);
+         * the engine's subscription must flip the scheme and the
+         * theme back to the base face. */
+        fdk_dbus_message *sig = fdk_dbus_message_new_signal(
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Settings", "SettingChanged");
+        assert(sig != NULL);
+        (void)fdk_dbus_message_append_string(sig,
+                                             "org.freedesktop.appearance");
+        (void)fdk_dbus_message_append_string(sig, "color-scheme");
+        (void)fdk_dbus_message_append_variant_uint32(sig, 2);
+        assert(fdk_dbus_connection_send(a, sig) == FDK_OK);
+        int portal_scheme_light = 0;
+        for (int i = 0; i < 100 && !portal_scheme_light; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            portal_scheme_light =
+                (fdk_system_color_scheme() == FDK_COLOR_SCHEME_LIGHT);
+        }
+        assert(portal_scheme_light);
+        assert(strcmp(fdk_theme_name(fdk_theme_get_default()),
+                      "Daylight") == 0);
+        printf("[ok] portal color-scheme: SettingChanged flips the "
+               "scheme + theme live\n");
+
+        /* Restore: the engine's portal connection is closed by the
+         * scheme shutdown below; env back; fixtures removed. */
+        fdk__theme_boot_reset_for_tests(); /* closes the installed
+                                            * theme cleanly */
+        fdk__color_scheme_reset_for_tests();
+        if (saved_theme != NULL) {
+            setenv("FDK_THEME", saved_theme, 1);
+        } else {
+            unsetenv("FDK_THEME");
+        }
+        if (saved_dir != NULL) {
+            setenv("FDK_THEME_DIR", saved_dir, 1);
+        } else {
+            unsetenv("FDK_THEME_DIR");
+        }
+        for (int i = 0; i < 2; i++) {
+            snprintf(path, sizeof path, "%s/%s.fdk", theme_root,
+                     faces[i][0]);
+            remove(path);
+        }
+        remove(theme_root);
     }
 
     /* ---- teardown --------------------------------------------------------- */

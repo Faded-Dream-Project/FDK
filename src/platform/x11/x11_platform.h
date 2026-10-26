@@ -23,6 +23,12 @@
 /* 1.4.5: HiDPI detection (x11_connection.c) + the scale query op
  * (x11_window.c, registered in the ops table). */
 int fdk__x11_detect_scale(Display *display);
+/* XSETTINGS follow (x11_xsettings.c): look up the settings daemon's
+ * manager window and select PropertyChangeMask on it (our
+ * connection's per-client mask — the owner window is untouched);
+ * the throttled re-arm catches daemons appearing/restarting later. */
+void fdk_x11_xsettings_arm(fdk_platform_connection *conn);
+void fdk_x11_xsettings_rearm_tick(fdk_platform_connection *conn);
 fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
                                     fdk_f32 *out_scale);
 
@@ -81,6 +87,16 @@ struct fdk_platform_connection {
                                * popup watchdog (1.1.0-rc1) — desktop
                                * switches dismiss open popups + their
                                * grabs                              */
+    /* XSETTINGS live follow (1.1.0): the settings daemon's manager
+     * window (owner of _XSETTINGS_S<screen>) and the property atom.
+     * PropertyNotify on owner/xsettings_settings routes to the theme
+     * recheck (color-scheme + icon-theme liveness — the GTK
+     * behavior). The owner is re-armed on a 2 s throttle (daemon
+     * restarts), and a daemon absent at connect leaves None until
+     * the throttle finds one. */
+    Window xsettings_owner;
+    Atom xsettings_settings;
+    uint64_t xsettings_rearm_ms;
     int ewmh_wm;           /* nonzero: an EWMH WM is running          */
     int ewmh_state_ok;     /* nonzero: it advertises _NET_WM_STATE    */
     /* Popup-grab watchdog pacing (1.1.0-rc1): the last watchdog

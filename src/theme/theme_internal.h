@@ -201,6 +201,32 @@ const char *fdk__icon_theme_current_name(void);
 bool fdk__x11_xsettings_string(const char *setting_name, char *out,
                                size_t cap);
 
+/* ---- the color-scheme module (1.1.0, color_scheme.c) --------------------
+ *
+ * The desktop's light/dark preference: sourced from XSETTINGS
+ * (X11) or org.freedesktop.portal.Settings (the D-Bus client),
+ * cached for the public getter, and fed to theme resolution's
+ * variant selection. */
+
+/* Re-reads XSETTINGS Gtk/ColorScheme (own short-lived connection;
+ * no-op without a display). Called lazily at the first query and
+ * on the backend's PropertyNotify for the settings property. */
+void fdk__color_scheme_poll_x11(void);
+
+/* True when the XSETTINGS channel ever produced a value (the
+ * portal is the fallback otherwise). */
+bool fdk__color_scheme_x11_spoke(void);
+
+/* Attaches the portal singleton when appropriate (called from the
+ * pump's theme tick; 30 s retry throttle after a failure). */
+void fdk__color_scheme_portal_tick(fdk_context *ctx);
+
+/* Closes the portal singleton (fdk_shutdown's theme teardown). */
+void fdk__color_scheme_shutdown(void);
+
+/* Test seam: full module-state reset. */
+void fdk__color_scheme_reset_for_tests(void);
+
 /* Resolves one icon name at one size through the full chain (the
  * current theme, its Inherits, hicolor, then /usr/share/pixmaps).
  * Returns an fdk_alloc'd absolute path (caller frees) or NULL.

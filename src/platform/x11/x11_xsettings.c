@@ -53,6 +53,8 @@
 #define FDK_LOG_TAG "x11"
 
 #include "platform/platform_internal.h"
+#include "platform/x11/x11_platform.h" /* the connection struct for
+                                          * the live-follow arm      */
 
 #include "core/log_internal.h"
 #include "theme/theme_internal.h"
@@ -64,6 +66,15 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
+#include <time.h>
+
+/* now_ms for the re-arm throttle (mirrors fdk__x11_now_ms in
+ * x11_dispatch.c — kept local so this file has no dispatch deps). */
+static uint64_t xs_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
 
 /* The property is daemon data; 64 KiB is a hostile-input bound (real
  * payloads are ~100-1000 bytes for a full GTK settings set). */
@@ -223,4 +234,68 @@ bool fdk__x11_xsettings_string(const char *setting_name, char *out,
         FDK_DEBUG("XSETTINGS live read: %s = '%s'", setting_name, out);
     }
     return found;
+}
+
+/* ---- the live follow (1.1.0) --------------------------------------------
+ *
+ * The short-lived-display reader above answers queries; this half
+ * keeps the answer FRESH: the settings daemon rewrites its
+ * _XSETTINGS_SETTINGS property on ITS manager window when any
+ * setting changes, and a PropertyChangeMask selected on that window
+ * (per-connection, server-side — the owner is not modified) routes
+ * the notification into our dispatch, which re-runs the theme
+ * resolution (color-scheme variant selection included). The manager
+ * window can be REPLACED (daemon restart): a throttled re-arm
+ * re-looks-up the selection owner and re-selects when it moved —
+ * one cheap GetSelectionOwner round trip per 2 s, nothing when the
+ * owner is stable.
+ */
+
+#define FDK_XSETTINGS_REARM_MS 2000
+
+void fdk_x11_xsettings_arm(fdk_platform_connection *conn) {
+    if (conn == NULL || conn->display == NULL) {
+        return;
+    }
+    Display *d = conn->display;
+    char sel_name[32];
+    snprintf(sel_name, sizeof(sel_name), "_XSETTINGS_S%d", conn->screen);
+    Atom sel = XInternAtom(d, sel_name, False);
+    Window owner = XGetSelectionOwner(d, sel);
+    if (owner == conn->xsettings_owner) {
+        return; /* unchanged (including both None) */
+    }
+    /* Selecting on the NEW owner (even None is a no-op select — skip
+     * it) and drop interest in the old one by... nothing to drop:
+     * masks are per-connection-per-window; the old window's events
+     * simply stop mattering (the dispatch filters by the CURRENT
+     * owner + atom). */
+    if (owner != None) {
+        XSelectInput(d, owner, PropertyChangeMask);
+        /* SYNC, not just flush: the mask change must REACH the
+         * server before this call returns, or a property rewritten
+         * between the arm and the next pump's flush generates its
+         * PropertyNotify for a connection whose select has not
+         * landed yet — the event is simply never sent (found live
+         * by the color-scheme rig: the flip publish raced the
+         * first pump). A round trip here runs once per owner
+         * change, never per property change. */
+        XSync(d, False);
+        FDK_INFO("XSETTINGS live follow armed on the settings "
+                 "daemon's window 0x%lx",
+                 (unsigned long)owner);
+    }
+    conn->xsettings_owner = owner;
+}
+
+void fdk_x11_xsettings_rearm_tick(fdk_platform_connection *conn) {
+    if (conn == NULL || conn->display == NULL) {
+        return;
+    }
+    uint64_t now = xs_now_ms();
+    if (now - conn->xsettings_rearm_ms < FDK_XSETTINGS_REARM_MS) {
+        return; /* paced: one round trip per 2 s, at most */
+    }
+    conn->xsettings_rearm_ms = now;
+    fdk_x11_xsettings_arm(conn);
 }

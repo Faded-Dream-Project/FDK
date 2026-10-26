@@ -403,6 +403,10 @@ void fdk__window_flush_geo_repaints(fdk_context *ctx);
  * process-wide and outlives any one context). */
 void fdk__window_theme_settings_init(const char *app_id);
 void fdk__window_theme_settings_shutdown(void);
+/* XSETTINGS PropertyNotify arrived (X11 backend -> theme recheck). */
+void fdk__window_theme_settings_notify(void);
+/* Once-per-pump scheme integration point (portal attach). */
+void fdk__window_theme_scheme_tick(fdk_context *ctx);
 
 /* The pump's poll face: the inotify fd to poll alongside the
  * backend's event fd (-1 when no settings file is watched), and the

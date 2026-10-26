@@ -1355,7 +1355,7 @@ static void conn_teardown(fdk_dbus_connection *c, int fire_callbacks) {
     c->deferred = NULL;
     c->deferred_cap = 0;
     for (size_t i = c->match_count; i > 0; i--) {
-        fdk_free(c->matches[i].rule);
+        fdk_free(c->matches[i - 1].rule);
     }
     fdk_free(c->matches);
     c->matches = NULL;

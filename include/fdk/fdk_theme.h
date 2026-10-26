@@ -472,6 +472,36 @@ void fdk_theme_clear_allowed_themes(void);
 size_t fdk_theme_allowed_count(void);
 const char *fdk_theme_allowed_name(size_t index);
 
+/* ---- The desktop color scheme (1.1.0) ------------------------------------
+ *
+ * The desktop's light/dark preference, as the running session
+ * actually states it: XSETTINGS Gtk/ColorScheme on X11 (live — the
+ * settings daemon's property rewrites re-run theme resolution),
+ * org.freedesktop.portal.Settings' org.freedesktop.appearance
+ * color-scheme everywhere else (live through SettingChanged; rides
+ * FDK's native D-Bus client on the event loop — no bus is one INFO
+ * line and a disabled feature, never a failure). $FDK_COLOR_SCHEME
+ * (dark/light/none) overrides everything and mutes the live
+ * following — the FDK_THEME precedent, for theming one launch.
+ *
+ * The THEME ENGINE consumes this automatically: when a scheme is
+ * preferred and the resolved theme has a sibling face "<name>-dark"
+ * / "<name>-light" on the same search path, that face installs
+ * instead (and the flip repaints every live tree, exactly like
+ * `fdk-theme set`). Ship one face and nothing changes; ship the
+ * pair and your app follows the desktop.
+ *
+ * Applications making their OWN dark-mode decisions (own assets,
+ * own palettes) read the same truth with this getter — cached, no
+ * socket traffic per call. UI-thread-only like the rest of themes. */
+typedef enum fdk_color_scheme {
+    FDK_COLOR_SCHEME_NONE = 0, /* no preference / unknown          */
+    FDK_COLOR_SCHEME_DARK = 1,
+    FDK_COLOR_SCHEME_LIGHT = 2,
+} fdk_color_scheme;
+
+fdk_color_scheme fdk_system_color_scheme(void);
+
 #ifdef __cplusplus
 }
 #endif

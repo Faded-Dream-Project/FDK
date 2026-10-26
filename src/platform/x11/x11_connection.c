@@ -403,6 +403,15 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->popup_watchdog_ms = 0;
     conn->desktop_changed = 0;
 
+    /* XSETTINGS live follow (1.1.0): arm on whatever settings
+     * daemon is running at connect; the dispatch's throttled
+     * re-arm catches later appearances/restarts. */
+    conn->xsettings_settings =
+        XInternAtom(display, "_XSETTINGS_SETTINGS", False);
+    conn->xsettings_owner = None;
+    conn->xsettings_rearm_ms = 0;
+    fdk_x11_xsettings_arm(conn);
+
     fdk__startup_trace("x11:connect complete");
     FDK_INFO("connected (screen %d, %dx%d root)", conn->screen,
              DisplayWidth(display, conn->screen),

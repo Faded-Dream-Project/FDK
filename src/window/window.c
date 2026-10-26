@@ -2108,7 +2108,29 @@ void fdk__window_theme_settings_init(const char *app_id) {
 /* fdk_shutdown: release the watch (installed theme state is
  * process-wide and outlives the context). */
 void fdk__window_theme_settings_shutdown(void) {
+    /* The portal singleton rides a D-Bus connection on this
+     * context's loop — close it BEFORE the connection registry's
+     * shutdown sweep (an app-level close frees it cleanly; leaving
+     * it would dangle the module's handle past the sweep). */
+    fdk__color_scheme_shutdown();
     fdk__theme_settings_shutdown();
+}
+
+/* The X11 backend's XSETTINGS-live entry: the settings daemon
+ * rewrote its property (a scheme change, an icon-theme change —
+ * the recheck re-reads whatever it tracks). Called from the X11
+ * dispatch, between event batches, on the UI thread. */
+void fdk__window_theme_settings_notify(void) {
+    fdk__color_scheme_poll_x11();
+    fdk__theme_settings_recheck();
+}
+
+/* The pump's scheme tick: the portal attach point (the D-Bus
+ * connection needs a live context's loop; this runs once per pump
+ * iteration and is internally throttled to nothing when the X11
+ * channel owns the answer or an override is set). */
+void fdk__window_theme_scheme_tick(fdk_context *ctx) {
+    fdk__color_scheme_portal_tick(ctx);
 }
 
 /* The pump's poll face: -1 when no settings file is watched. */

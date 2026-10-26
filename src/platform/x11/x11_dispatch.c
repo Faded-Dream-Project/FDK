@@ -3,6 +3,11 @@
 #include "platform/x11/x11_platform.h"
 
 #include "core/log_internal.h"
+/* The XSETTINGS notification routes to the theme recheck through
+ * the sanctioned platform->window->theme bridge (the same path the
+ * clipboard's window glue uses; window_internal.h pulls the ops
+ * surface this file already builds on). */
+#include "window/window_internal.h"
 
 #include <string.h>
 
@@ -204,6 +209,20 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
+        /* XSETTINGS live follow (1.1.0): a settings-daemon property
+         * rewrite — color-scheme, icon theme, whatever the daemon
+         * publishes. Routed BEFORE the window lookup (the manager
+         * window is not an FDK window); the theme recheck re-reads
+         * the whole XSETTINGS state it tracks, so one notification
+         * serves every consumer. */
+        if (xevent.type == PropertyNotify &&
+            conn->xsettings_owner != None &&
+            xevent.xproperty.window == conn->xsettings_owner &&
+            xevent.xproperty.atom == conn->xsettings_settings) {
+            fdk__window_theme_settings_notify();
+            continue;
+        }
+
         /* A drag WE started owns pointer events while active (the
          * XDND source state machine — target tracking, Enter/Leave/
          * Position emission, the drop handshake). Routed before
@@ -298,6 +317,11 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
     /* The XDND source's Finished watchdog (retires a target that
      * died mid-handshake after the drop was sent). */
     fdk_x11_dnd_source_tick(conn);
+
+    /* The XSETTINGS owner re-arm (1.1.0): throttled to one cheap
+     * selection-owner round trip per 2 s — catches settings daemons
+     * that appear or restart after connect. */
+    fdk_x11_xsettings_rearm_tick(conn);
 
     /* The popup-grab watchdog + desktop-switch release (1.1.0-rc1):
      * the last thing this dispatch does — everything above may have

@@ -338,6 +338,64 @@ static void uninstall_theme(void) {
     FDK_INFO("theme: setting cleared — back to the built-in theme");
 }
 
+/* The scheme-variant pass (1.1.0): when the desktop prefers a
+ * scheme and the resolved theme has a sibling face for it, prefer
+ * the sibling. Sibling naming: "<internal name>-dark" /
+ * "<internal name>-light" resolved through the SAME discovery — a
+ * face ships as its own .fdk file, and a theme without a sibling
+ * follows nothing (one face = one look, the shipped posture).
+ * The whitelist is deliberately NOT consulted here: it clamps the
+ * BASE resolution (the developer's brand statement); a sibling the
+ * developer did not ship simply does not exist on the search path,
+ * and one they DID ship is exactly the opt-in. */
+static void apply_scheme_variant(char *name, size_t name_cap,
+                                 fdk_theme **t_io,
+                                 const char **origin_io) {
+    fdk_color_scheme scheme = fdk_system_color_scheme();
+    if (scheme == FDK_COLOR_SCHEME_NONE) {
+        return;
+    }
+    /* The sibling convention (documented in fdk_theme.h): a face
+     * whose STEM is "<base stem>-dark"/"-light" (the usual spelling)
+     * or whose INTERNAL name is "<base internal>-Dark"/"-Light" —
+     * fdk_theme_find matches stems (pass 1) and internal names
+     * (pass 2), so both spellings are probed, stem-style first. */
+    const char *sfx_stem =
+        (scheme == FDK_COLOR_SCHEME_DARK) ? "-dark" : "-light";
+    const char *sfx_title =
+        (scheme == FDK_COLOR_SCHEME_DARK) ? "-Dark" : "-Light";
+    char variant[FDK_THEME_STRING_MAX];
+    fdk_result r = FDK_OK;
+    fdk_theme *vt = NULL;
+    for (int probe = 0; probe < 2 && vt == NULL; probe++) {
+        const char *suffix = (probe == 0) ? sfx_stem : sfx_title;
+        if ((size_t)snprintf(variant, sizeof variant, "%s%s", name,
+                             suffix) >= sizeof variant) {
+            continue; /* name + suffix cannot exist: skip the probe */
+        }
+        r = FDK_OK;
+        vt = fdk_theme_find(variant, &r);
+        if (vt == NULL && r != FDK_ERR_NOT_FOUND) {
+            /* A sibling EXISTS but fails to load: loud (the theme
+             * posture), and the base face stays — a broken variant
+             * must never take the desktop down with it. */
+            FDK_WARN("theme: scheme variant '%s' failed to load "
+                     "(error %d); staying on '%s'",
+                     variant, (int)r, name);
+            return;
+        }
+    }
+    if (vt == NULL) {
+        return; /* the common case: no sibling shipped            */
+    }
+    FDK_INFO("theme: scheme variant — '%s' prefers '%s'", name,
+             fdk_theme_name(vt));
+    fdk_theme_destroy(*t_io);
+    *t_io = vt;
+    snprintf(name, name_cap, "%s", fdk_theme_name(vt));
+    *origin_io = "the desktop's color-scheme variant";
+}
+
 /* The shared apply: resolve, short-circuit on "nothing changed",
  * install or uninstall. Safe to run any time; the boot and every
  * live recheck both land here. */
@@ -353,6 +411,7 @@ static void apply_resolved(void) {
         }
         return;
     }
+    apply_scheme_variant(name, sizeof name, &t, &origin);
     if (g_installed != NULL && strcmp(name, g_installed_name) == 0) {
         fdk_theme_destroy(t); /* same theme: no repaint storm */
         return;
@@ -367,6 +426,10 @@ void fdk__theme_settings_boot(void) {
         return;
     }
     g_boot_ran = true;
+    fdk__color_scheme_poll_x11(); /* one live read before the first
+                                   * variant decision; the getter
+                                   * caches, later updates arrive as
+                                   * XSETTINGS/portal events */
     apply_resolved();
 }
 

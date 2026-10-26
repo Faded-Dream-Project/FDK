@@ -661,6 +661,12 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             nfds = 2;
             has_theme = 1;
         }
+        /* The color-scheme portal attach (1.1.0): internally a set
+         * of no-op flag checks once the state is decided; the one
+         * expensive thing it can do (connect a D-Bus client) happens
+         * at most once per 30 s and only when the portal is the
+         * applicable source. */
+        fdk__window_theme_scheme_tick(ctx);
         size_t extfd_base = (size_t)nfds;
         size_t extfd_n = fdk__extfd_fill_poll(ctx, pfds, extfd_base);
         nfds += (int)extfd_n;
