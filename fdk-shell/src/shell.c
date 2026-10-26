@@ -446,6 +446,17 @@ void fdk_shell_layer_set_event_callback(fdk_shell_layer *layer,
     layer->cb_user = user;
 }
 
+void fdk_shell_layer_set_cursor(fdk_shell_layer *layer,
+                                fdk_shell_cursor cursor) {
+    if (layer == NULL) {
+        return;
+    }
+    /* The extension surface carries it; the shell's enum maps 1:1
+     * onto fdk_cursor_shape's values (both start DEFAULT=0,
+     * POINTER=1 — the extension API takes the plain int). */
+    fdk_ext_surface_set_cursor(layer->ext, (int)cursor);
+}
+
 fdk_result fdk_shell_layer_get_size(const fdk_shell_layer *layer,
                                     fdk_size *out_size) {
     if (layer == NULL || out_size == NULL) {
@@ -592,6 +603,14 @@ void fdk_shell_popup_set_event_callback(fdk_shell_popup *popup,
     }
     popup->cb = callback;
     popup->cb_user = user;
+}
+
+void fdk_shell_popup_set_cursor(fdk_shell_popup *popup,
+                                fdk_shell_cursor cursor) {
+    if (popup == NULL) {
+        return;
+    }
+    fdk_ext_surface_set_cursor(popup->ext, (int)cursor);
 }
 
 void fdk_shell_popup_show(fdk_shell_popup *popup) {

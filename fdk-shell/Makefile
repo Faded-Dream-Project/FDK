@@ -78,6 +78,15 @@ endif
 FDK_ROOT    ?= ..
 FDK_CFLAGS  ?= -I$(FDK_ROOT)/include
 FDK_LIBS    ?= $(FDK_ROOT)/build/libfdk.a -lX11 -lXext -ldl $(WL_DEPS_L) -lxkbcommon -lm -lz
+
+# Cross-package prerequisites (found live 2026-10-26, the W1-W3 chase):
+# the sibling FDK tree's artifacts are LINK INPUTS for this package's
+# binaries — every rule that links them must also DEPEND on them, or
+# an FDK rebuild leaves stale binaries behind (the rigs measured a
+# bar binary three patch-sets old this way, silently invalidating two
+# rounds of diagnosis). FDK's own archive name is stable.
+FDK_ARCHIVE := $(FDK_ROOT)/build/libfdk.a
+FDK_SHARED  := $(FDK_ROOT)/build/libfdk.so
 # The SHARED library links FDK's SHARED library (NEEDED: libfdk.so.1)
 # -- never the static archive (embedding FDK would defeat the
 # separate-runtime license model AND the add-on isolation contract).
@@ -196,7 +205,7 @@ $(STATIC_LIB): $(OBJS)
 
 EXPORT_MAP := src/libfdk-shell.exports.map
 
-$(SHARED_LIB): $(OBJS_PIC) $(EXPORT_MAP)
+$(SHARED_LIB): $(OBJS_PIC) $(EXPORT_MAP) $(FDK_SHARED)
 	@mkdir -p $(dir $@)
 	$(CC) $(SAN_FLAGS) -fPIC -shared \
 	    -Wl,-soname,$(FDKSHELL_SONAME) \
@@ -221,14 +230,14 @@ regen-protocol: $(WL_PROTO_SRC) $(XDG_PROTO_SRC)
 
 test: test-x11
 
-$(BUILD_DIR)/tests/test_x11: tests/test_x11.c $(STATIC_LIB)
+$(BUILD_DIR)/tests/test_x11: tests/test_x11.c $(STATIC_LIB) $(FDK_ARCHIVE)
 	@mkdir -p $(dir $@)
 	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
 	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) \
 	    $(X11_TEST_DEPS) $< $(STATIC_LIB) \
 	    $(FDK_LIBS) $(BACKEND_LIBS) $(X11_TEST_DEPS) -o $@
 
-$(BUILD_DIR)/tests/test_wl: tests/test_wl.c $(STATIC_LIB)
+$(BUILD_DIR)/tests/test_wl: tests/test_wl.c $(STATIC_LIB) $(FDK_ARCHIVE)
 	@mkdir -p $(dir $@)
 	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
 	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) $< $(STATIC_LIB) \
@@ -291,7 +300,7 @@ isolation: tests/isolation.sh
 
 examples: $(EXAMPLE_BINS)
 
-$(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB)
+$(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB) $(FDK_ARCHIVE)
 	@mkdir -p $(dir $@)
 	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
 	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) $< $(STATIC_LIB) \

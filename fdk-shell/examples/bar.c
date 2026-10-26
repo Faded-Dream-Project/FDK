@@ -85,9 +85,13 @@ static void bar_paint(bar_app *app) {
     app->bar_size.width = info.width;
     app->bar_size.height = info.height;
 
-    /* The bar field. */
-    fdk_color bg = app->hover_button ? BAR_BG_HOVER : BAR_BG;
-    fdk_surface_fill(s, bg);
+    /* The bar field. The background NEVER changes with hover (the
+     * 1.1.0-rc1 W3 report: the demo used to repaint the whole bar in
+     * its hover tint, so hovering the button lit the ENTIRE bar —
+     * correct hit-testing made it look like a pointer-path bug). Only
+     * the button chip carries hover state, the way every real panel
+     * does. */
+    fdk_surface_fill(s, BAR_BG);
 
     /* The "Menu" button: a rounded chip with an accent underline
      * while hovered/pressed. */
@@ -210,15 +214,30 @@ static void popup_event(fdk_shell_popup *popup, const fdk_event_data *ev,
             popup_paint(app); /* same contract as the bar's expose */
             break;
         case FDK_EVENT_POINTER_MOTION:
-            app->popup_item_hover =
+        case FDK_EVENT_POINTER_ENTER: {
+            /* Repaint ONLY when the hovered item changes (W1 (c)): the
+             * old code repainted on EVERY motion event — an unbounded
+             * commit rate the compositor never asked for, and the fuel
+             * of the buffer-in-flight spiral. Enter seeds hover the
+             * same way (position included). */
+            int hover =
                 (ev->pointer.position.y >= 4.0f &&
                  ev->pointer.position.y <
                      4.0f + 3.0f * (fdk_f32)POPUP_ITEM_H)
                     ? (int)((ev->pointer.position.y - 4.0f) /
                             (fdk_f32)POPUP_ITEM_H)
                     : -1;
-            popup_paint(app);
+            if (hover != app->popup_item_hover) {
+                app->popup_item_hover = hover;
+                /* The hand over a clickable item, the arrow over the
+                 * popup's padding. */
+                fdk_shell_popup_set_cursor(
+                    app->popup, hover >= 0 ? FDK_SHELL_CURSOR_POINTER
+                                           : FDK_SHELL_CURSOR_DEFAULT);
+                popup_paint(app);
+            }
             break;
+        }
         case FDK_EVENT_POINTER_BUTTON_DOWN:
             if (app->popup_item_hover >= 0) {
                 app->selected = app->popup_item_hover;
@@ -261,13 +280,24 @@ static void bar_event(fdk_shell_layer *layer, const fdk_event_data *ev,
                                    * raised over it, then lowered) */
             }
             break;
-        case FDK_EVENT_POINTER_MOTION: {
+        case FDK_EVENT_POINTER_MOTION:
+        case FDK_EVENT_POINTER_ENTER: {
+            /* ENTER carries its surface-local position (fdk_event.h);
+             * entering directly onto the button must highlight it
+             * WITHOUT waiting for a first motion (the W3 report's
+             * "hover state set on enter before any motion" — the
+             * demo's old enter-blindness made re-entry look dead). */
             fdk_f32 x = ev->pointer.position.x;
             fdk_f32 y = ev->pointer.position.y;
             int over = (x >= MENU_X && x < MENU_X + MENU_W && y >= 4 &&
                         y < 4 + MENU_H);
             if (over != app->hover_button) {
                 app->hover_button = over;
+                /* W2: the hand over the clickable button, the arrow
+                 * everywhere else — the cursor tracks hover. */
+                fdk_shell_layer_set_cursor(
+                    app->bar, over ? FDK_SHELL_CURSOR_POINTER
+                                   : FDK_SHELL_CURSOR_DEFAULT);
                 bar_paint(app);
             }
             break;
@@ -276,6 +306,8 @@ static void bar_event(fdk_shell_layer *layer, const fdk_event_data *ev,
             if (app->hover_button) {
                 app->hover_button = 0;
                 app->pressed_button = 0;
+                fdk_shell_layer_set_cursor(app->bar,
+                                           FDK_SHELL_CURSOR_DEFAULT);
                 bar_paint(app);
             }
             break;

@@ -240,14 +240,22 @@ after 5 seconds).
   / `fdk_shell_backend_supported`
 - Outputs: `fdk_shell_output_count`, `fdk_shell_output_name`
 - Layers: `fdk_shell_layer_create` / `destroy` / `get_surface` /
-  `set_event_callback` / `get_size` / `show` / `hide`
-  (desc: layer, anchors, margins, exclusive zone, keyboard mode,
-  desired size, output index)
+  `set_event_callback` / `get_size` / `show` / `hide` /
+  `set_cursor` (desc: layer, anchors, margins, exclusive zone,
+  keyboard mode, desired size, output index)
 - Popups: `fdk_shell_popup_create` / `destroy` / `get_surface` /
-  `set_event_callback` / `show` / `hide`
+  `set_event_callback` / `show` / `hide` / `set_cursor`
 
 `include/fdk-shell/fdk-shell.h` documents every function and the
 desc struct field-by-field, including the per-backend notes.
+
+**The hover cursor** (`fdk_shell_layer_set_cursor` /
+`fdk_shell_popup_set_cursor`, 1.1.0-rc1): the arrow or the pointing
+hand while the pointer hovers the surface — re-applied automatically
+on every entry (Wayland cursor state does not survive leaving a
+surface; the W2 report was a bar that kept the resize cursor until
+the pointer left). The demo bar shows the worked example: the hand
+over its menu button, the arrow everywhere else.
 
 ## Honest limits (0.1.0)
 

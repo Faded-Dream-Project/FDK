@@ -232,6 +232,23 @@ void fdk_shell_layer_set_event_callback(fdk_shell_layer *layer,
                                         fdk_shell_event_fn callback,
                                         void *user);
 
+/* ---- Cursor shape (0.1.0) ---------------------------------------------
+ *
+ * The pointer's shape while it hovers the layer or popup. The shape
+ * is re-applied automatically on every wl_pointer.enter (Wayland
+ * cursor state does not survive leaving a surface); X11 tracks it as
+ * window state. Typical panel usage: FDK_SHELL_CURSOR_DEFAULT at
+ * creation, FDK_SHELL_CURSOR_POINTER while the pointer hovers a
+ * clickable region. */
+typedef enum fdk_shell_cursor {
+    FDK_SHELL_CURSOR_DEFAULT = 0, /* the standard arrow */
+    FDK_SHELL_CURSOR_POINTER = 1, /* the pointing hand */
+} fdk_shell_cursor;
+
+/* Sets the layer's hover cursor shape. No-op on an unknown value. */
+void fdk_shell_layer_set_cursor(fdk_shell_layer *layer,
+                                fdk_shell_cursor cursor);
+
 /* The layer's current size (the most recent configure). */
 fdk_result fdk_shell_layer_get_size(const fdk_shell_layer *layer,
                                     fdk_size *out_size);
@@ -278,6 +295,11 @@ typedef void (*fdk_shell_popup_event_fn)(fdk_shell_popup *popup,
 void fdk_shell_popup_set_event_callback(fdk_shell_popup *popup,
                                         fdk_shell_popup_event_fn callback,
                                         void *user);
+
+/* Sets the popup's hover cursor shape (same semantics as the layer's;
+ * typical usage is the hand over the clickable items). */
+void fdk_shell_popup_set_cursor(fdk_shell_popup *popup,
+                                fdk_shell_cursor cursor);
 void fdk_shell_popup_show(fdk_shell_popup *popup);
 void fdk_shell_popup_hide(fdk_shell_popup *popup);
 
