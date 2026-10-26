@@ -91,3 +91,45 @@ not delivery — pending replies do not fire; the documented
 posture), then the timer/extfd sweeps. The reverse order would
 free records the connection teardown still touches. The registry
 (fdk_context->dbus_conns) exists for exactly this ordering.
+
+## D-004 — the two-client reconciliation: main's is canonical, the alt line is archived, its unique tests are ported
+**2026-10-27 (owner directive, Phase 2).**
+
+The repo briefly carried TWO native D-Bus clients: main's (D-001,
+115 exported symbols, broader surface) and an older, smaller one
+developed in parallel on the `alt/dbus-client` branch (41 exported
+symbols, 3 commits, archived — not merged, not deleted). The owner
+ruled main's client canonical and directed a test-suite comparison:
+port anything the alt battery covered that main's did not, and fix
+whatever the ports uncover.
+
+The comparison: the hostile-input coverage needed no port (main's
+20k-seed mutation fuzz and prefix-exhaustive truncation walk
+strictly dominate the alt's fixed mutation table). Three things
+were genuinely unique and were ported: the append all-or-nothing
+discipline, the reply/error constructor routing facts, and the
+live-bus cross-implementation leg (libdbus — dbus-send — parsing
+FDK's served reply bytes and printing them). The ports found and
+closed two real defects in main's accessors:
+`fdk_dbus_message_signature()` returned the frozen received-message
+field for every locally built message (read back "" after appending
+a body), and `fdk_dbus_message_read_args()` consulted only the
+received-message body store (a locally built message read back as
+"no arguments"). Both now see the builder's live buffers — exactly
+what serialize() puts on the wire. The alt's recon probe
+(scripts/dbus_probe.c in the staging sandbox) was NOT ported: its
+wire facts are byte-pinned in main's tests and it duplicates
+diagnostics the live battery already gives.
+
+## D-005 — the desktop-integration split: what is core vs what is fdk-shell
+**2026-10-27 (owner decision, recorded verbatim in intent).**
+
+Dark-mode following (B-06), the portal FileChooser fallback (B-09),
+and AT-SPI interop (B-10) belong in FDK CORE, built on the native
+D-Bus client — anything every FDK app needs to behave like a native
+app. The tray host (A-11/S-1), notification display (A-12/S-2), and
+media controls (MPRIS) belong in fdk-shell or add-on packages —
+anything a shell or panel provides TO other apps, which is exactly
+the add-on surface fdk/extend.h exists for. docs/dbus.md carries
+the split table; the roadmap's A-07/B-09 notes are annotated
+ accordingly.

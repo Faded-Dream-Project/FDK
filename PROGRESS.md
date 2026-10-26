@@ -67,6 +67,28 @@ still green. docs/testing.md's 1.1.0-rc1
 packaging-matrix lesson + CHANGELOG rc1 Fixed section carry the
 full narratives. Prior state below.)
 
+Last audited: 2026-10-27, at milestone **1.7.5** (the owner-directed
+verification pass + the CI-red day: the 0.2.0 packaging red's root
+cause was fdk-shell's Makefile carrying its own hand-maintained
+0.1.0 next to the header's 0.2.0 — every install-test caught the
+staged .so.0.1.0 / Version: 0.1.0; the Makefile now derives the
+version from the header like FDK's own [4d86464]; the alpine flake
+was a present-then-readback RACE — readbacks ride a second X
+connection and can beat the just-flushed frame, reading the empty
+pre-paint entry — x11_frame_settle now guards all 18 unguarded
+paint-then-readback sites [1373329]; the void reposync outage got
+real mirror rotation before every remote install [c42418d]; the
+release branch policy landed: a fast-forward-only consumer ref at
+the v1.0.0 commit, RELEASING.md, CI on both branches, README +
+packaging pointers [c8568ef]; and the alt/dbus-client test port
+closed three genuinely-unique coverage gaps and found TWO real
+accessor defects — fdk_dbus_message_signature and read_args were
+builder-blind for locally built messages — both fixed at the root,
+plus the FDK_LOG_TAG clobber in dbus_internal.h [ccafa7c]; DECISIONS
+D-004/D-005 record the reconciliation and the core/add-on split;
+ROADMAP-1.1.0 gained the verified-status table [this commit]. Prior
+state below.)
+
 Last audited: 2026-10-26, at milestone **1.7.4** (the push of the
 1.7.3 fixes + the sixth CI defect class it exposed: the live-desktop
 commits landed on origin [three commits, core 1041 lines / fdk-shell

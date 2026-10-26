@@ -37,6 +37,12 @@ used by multiple layers rather than sitting in the stack themselves:
 - **Core** (`src/core/`) — init/shutdown lifecycle, logging, error
   handling, memory allocation. Everything depends on this; it depends
   on nothing else in FDK. (Phase 1 — this is what currently exists.)
+- **D-Bus client** (`src/dbus/`) — the desktop bus spoken directly:
+  transports, SASL EXTERNAL auth, the full wire type system both
+  endiannesses, calls/replies/signals/names/properties/introspection,
+  riding the event loop as fd sources. Zero new dependencies —
+  implemented from the public specification in raw C (DECISIONS D-001;
+  docs/dbus.md is the module narrative).
 - **Theme** (`src/theme/`) — the theme API and the `.fdk`
   parser/loader (Phase 7). The built-in default theme is the Phase 6
   v1 palette exactly; the widget catalog resolves its 9 color

@@ -12,6 +12,56 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and in-development release
 candidates are marked until the owner promotes them.
 
+## [Unreleased-candidate fixes] — 2026-10-27 (on the rc2 line)
+
+### Fixed — CI and packaging truth
+
+- **The five-family packaging red at 0.2.0**: fdk-shell's Makefile
+  carried its own hand-maintained version (0.1.0) next to the
+  header's single source of truth (0.2.0) — the staged library was
+  `libfdk-shell.so.0.1.0` and the generated `.pc` said `Version:
+  0.1.0`, and every distro install-test caught the mismatch. The
+  Makefile now derives the version from the header (FDK's own
+  established pattern).
+- **The alpine CI flake**: readbacks ride a second X connection and
+  could beat the just-flushed present to the server, reading the
+  PRE-paint frame (the empty search entry — pure fill — exactly the
+  asserted-against pixel). `x11_frame_settle()` now guards all 18
+  paint-then-readback sites in the X11 suite.
+- **The void mirror outage**: `repo-default.voidlinux.org`'s
+  round-robin was unreachable for hours; the single same-host retry
+  could not recover. Real mirror rotation now runs before every
+  remote install (build + both install-test containers).
+
+### Fixed — D-Bus accessors (found by the alt-client test port)
+
+- `fdk_dbus_message_signature()` reported the frozen received-message
+  field for locally BUILT messages — an app that appended a body read
+  back `""`. It now reports the builder's live signature (what
+  serialize() puts on the wire).
+- `fdk_dbus_message_read_args()` consulted only the received-message
+  body store — reading back a locally built message silently returned
+  "no arguments". It now reads the builder's buffers.
+- `dbus_internal.h` unconditionally redefined `FDK_LOG_TAG`,
+  re-attributing a caller's own log tag (the test binary's
+  `dbus-test` became `dbus` on every line). The including
+  translation unit owns its tag now.
+
+### Added — the cross-implementation proof
+
+`make test-dbus` gains the libdbus leg: dbus-send calls the service
+FDK serves and libdbus's own parser must accept FDK's reply bytes
+and print them (ported from the retired alt client line; see
+DECISIONS D-004). Plus the append all-or-nothing, reply/error
+routing, and error-name discipline sections in the headless battery.
+
+### The repository
+
+- A `release` branch now exists (fast-forward-only pointer at
+  approved, tagged, CI-green releases — docs/RELEASING.md; created
+  at the v1.0.0 tag commit). CI runs on both `main` and `release`;
+  the README and packaging docs point consumers there.
+
 ## [1.1.0-rc2] — 2026-10-26 (release candidate; no tag — the owner
                  decides the final 1.1.0)
 
