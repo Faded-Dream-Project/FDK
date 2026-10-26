@@ -301,6 +301,20 @@ backend's events. `FDK_EXT_FD_IN/OUT` are the watch flags;
 `ERR/HUP` are reported like poll(2) reports them. The fd is never
 closed by FDK.
 
+**Retargeting the watch mask** (1.1.0): a protocol with an output
+buffer should watch `IN` alone while the buffer is empty and add
+`OUT` only while bytes are pending —
+
+```c
+fdk_ext_loop_update_fd(src, FDK_EXT_FD_IN);              /* drained */
+fdk_ext_loop_update_fd(src, FDK_EXT_FD_IN | FDK_EXT_FD_OUT); /* busy */
+```
+
+— because a socket with buffer space is ALWAYS writable: a
+permanently-watched POLLOUT wakes every pump for nothing (the
+busy-wait trap; the native D-Bus client is the first consumer).
+Safe inside the source's own callback.
+
 **Timers need no extension twin**: the public
 `fdk_timer_add` / `fdk_timer_remove` / `fdk_timer_reset` API (fdk
 1.3.1) IS the loop's timer surface — callable by any library on top
@@ -389,3 +403,98 @@ trip is harmless at any time.
 - Layer stacking LEVELS are protocol truth on Wayland; on X11 they
   ride whatever the WM gives dock-typed windows (fdk-shell documents
   this delta instead of faking fidelity).
+
+---
+
+## 13. The D-Bus client — a first-class native subsystem (1.1.0)
+
+`include/fdk/fdk_dbus.h` is FDK's own D-Bus client, implemented
+from the public specification in raw C (src/dbus/) with **no
+libdbus, sd-bus, or GLib anywhere** — the "no D-Bus library
+dependency" decision (docs/DECISIONS.md D-001). It exists because
+half the desktop-integration roadmap (dark mode on Wayland, tray,
+notifications, portals, AT-SPI, idle inhibit on X11) is one bus
+away, and FDK was not going to take a dependency to get it.
+
+The shape an add-on sees:
+
+```c
+static void on_ready(fdk_dbus_connection *c, int ok, const char *err, void *u) { ... }
+static void on_reply(fdk_dbus_connection *c, fdk_dbus_message *reply, void *u) {
+    if (reply && !fdk_dbus_message_is_error(reply)) {
+        fdk_dbus_value **args = NULL; size_t n = 0;
+        if (fdk_dbus_message_read_args(reply, &args, &n) == FDK_OK && n >= 1) {
+            const char *s = fdk_dbus_value_string(args[0]);
+            ...
+            fdk_dbus_values_free_array(args, n);
+        }
+    }
+}
+
+fdk_dbus_connection *bus = fdk_dbus_connect(ctx, FDK_DBUS_SESSION_BUS,
+                                            on_ready, user);
+/* later, once ready: */
+fdk_dbus_message *call = fdk_dbus_message_new_method_call(
+    "org.freedesktop.DBus", "/org/freedesktop/DBus",
+    "org.freedesktop.DBus", "ListNames");
+fdk_dbus_connection_call(bus, call, FDK_DBUS_TIMEOUT_DEFAULT,
+                         on_reply, user);   /* consumes `call` on success */
+```
+
+Everything is asynchronous and rides the SAME pump as your
+surfaces: the socket is an ext fd source (the update_fd recipe
+above), timeouts are fdk timers, and every callback fires between
+the connection's enter/leave discipline — a callback may call any
+fdk_dbus function, including `fdk_dbus_connection_close()` on the
+connection whose callback is running (the free is deferred; do not
+touch the handle afterwards, exactly like removing an fd source
+inside its own callback).
+
+**The three ownership rules** (the whole memory model):
+
+1. `fdk_dbus_value` trees, messages, and the `read_args` array are
+   owned by whoever last received them; `fdk_dbus_values_free_array`
+   for read_args output, `fdk_dbus_message_free` otherwise.
+2. `fdk_dbus_connection_call/send` CONSUME the message on success
+   (and leave it with you on failure — check the return, then free
+   on the failure paths only).
+3. A connection that dies stays a valid handle (every call answers
+   `FDK_ERR_INVALID_STATE`/NULL) until you `close()` it; close() is
+   the only free.
+
+**Degradation is the contract**: no bus reachable →
+`fdk_dbus_connect()` returns NULL after ONE log line, immediately
+(a refusing socket never blocks). Features built on it check for
+the connection and disable themselves; nothing busy-loops, nothing
+crashes. That is what makes the tray/notification/dark-mode layers
+safe on machines without a session bus.
+
+**Where the bodies are buried** (things the wire will teach you
+the hard way; the header documents each, the tests pin each):
+
+- The bus rewrites a well-known SENDER into the owner's unique
+  name in message headers — a `sender='org.example.Thing'` match
+  rule never fires. Scope rules by interface/member/arg0, or
+  watch the name and match its unique owner
+  (`fdk_dbus_connection_watch_name` gives you the transitions).
+- VARIANT aligns 1, and an empty array still pads to its element
+  alignment — the two marshaling rules everyone gets wrong; both
+  are pinned byte-for-byte against captured reference-
+  implementation output in tests/test_dbus.c.
+- `a{sv}` dict values are VARIANTS: `fdk_dbus_value_dict_lookup`
+  then `fdk_dbus_value_variant_value` is the reader idiom; the
+  constructors validate and reject a bare value where a variant
+  belongs (loudly, at construction — not silently on the wire).
+- Replies are delivered at most once; a late reply to a canceled
+  call is dropped silently (the specification's own rule).
+
+**Test coverage**: tests/test_dbus.c (headless: the value tree,
+marshaling with pinned reference bytes, the parser under every
+truncation prefix and 20k seeded mutations — ASan/UBSan under
+plain `make test`) and tests/test_dbus_live.c (`make test-dbus`:
+a REAL dbus-daemon via dbus-run-session — SASL+Hello, method
+calls routed through the daemon, error replies, timeouts,
+signals with arg0-filtered match rules, Properties Get/Set +
+typed PropertiesChanged, name watching through its full lifecycle,
+introspection, and close-from-inside-its-own-callback). The
+ubuntu CI job runs the live suite with skips made fatal.

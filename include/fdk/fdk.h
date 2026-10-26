@@ -33,6 +33,7 @@
 #include "fdk_prefs.h"
 #include "fdk_animation.h"
 #include "fdk_extend.h"
+#include "fdk_dbus.h"
 
 /* Widget, layout, and theme public headers are added here as their
  * respective phases land (see docs/roadmap.md). Phase 2 added window

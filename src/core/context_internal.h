@@ -97,6 +97,21 @@ struct fdk_context {
      * sweep, and detaching them at shutdown (kinds outliving their
      * context must not keep pointing at freed memory). */
     struct fdk_ext_surface_kind *ext_kinds_head;
+
+    /* ---- D-Bus connections (1.1.0, src/dbus/) ----------------------
+     *
+     * Every live fdk_dbus_connection registers here at creation and
+     * unregisters when freed. The registry exists so fdk_shutdown()
+     * can close survivors BEFORE the timer/extfd sweeps (a dbus
+     * connection owns ext fd sources and timers; sweeping those
+     * first would leave the connection touching freed records), and
+     * so zombie connections (closed from inside their own callback —
+     * the deferred-free discipline) can be reaped by the next public
+     * fdk_dbus entry point. The array itself lives in
+     * dbus_connection.c's registry code. */
+    struct fdk_dbus_connection **dbus_conns;
+    size_t dbus_conn_count;
+    size_t dbus_conn_capacity;
 };
 
 /* ---- Extension fd sources (1.1.0) — src/core/extfd.c ---------------

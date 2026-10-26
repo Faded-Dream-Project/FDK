@@ -199,3 +199,11 @@ release. I'll decide on the final tag.").
   assets are untouched. The additions are ABI-append-only (new
   functions, opaque types, no layout changes to existing public
   structs), so the SONAME stays `libfdk.so.1`.
+- 2026-10-26: **1.1.0-rc1 → 1.1.0-rc2 (rcN bump, same candidate).**
+  The owner's Phase 2 directive authorized rcN bumps freely ("Bump
+  FDK to 1.1.0-rc1 ... bumping rcN is fine"). rc2 marks the native
+  D-Bus client (the M-7 foundation): 115 new append-only public
+  symbols in include/fdk/fdk_dbus.h, plus the additive
+  fdk_ext_loop_update_fd() (FDK_EXT_API_VERSION stays 1 — no
+  ops-table growth). SONAME stays libfdk.so.1. Still no tag, no
+  release; the candidate remains the owner's to promote.

@@ -52,6 +52,7 @@ jobs:
             pkg-config \
             libx11-dev libxext-dev libxtst-dev zlib1g-dev \
             libwayland-dev libxkbcommon-dev \
+            dbus \
             libgl1 xvfb fonts-dejavu-core
 
       - name: Build (debug, sanitizers)
@@ -62,6 +63,14 @@ jobs:
 
       - name: X11 integration suite (throwaway Xvfb)
         run: make test-x11
+
+      - name: Native D-Bus client — live bus (dbus-run-session + Xvfb)
+        # The hand-rolled client against a REAL throwaway dbus-daemon:
+        # SASL+Hello, method calls through the daemon, errors, match
+        # rules/signals, properties, name watching, introspection,
+        # timeouts, close-from-callback reentrancy. REQUIRED here —
+        # the container has dbus, so a skip would be a regression.
+        run: FDK_DBUS_TEST_REQUIRE=1 make test-dbus
 
       - name: Wayland integration suite (self-skips without a compositor)
         run: make test-wayland

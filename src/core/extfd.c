@@ -128,6 +128,23 @@ int fdk_ext_fd_source_fd(const fdk_ext_fd_source *source) {
     return (source != NULL) ? source->fd : -1;
 }
 
+fdk_result fdk_ext_loop_update_fd(fdk_ext_fd_source *source,
+                                  uint32_t flags) {
+    if (source == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (!source->active) {
+        return FDK_OK; /* mid-removal: it will never fire again anyway */
+    }
+    if ((flags & ~FDK_EXTFD_POLL_MASK) != 0 || flags == 0) {
+        FDK_WARN("fdk_ext_loop_update_fd: bad flags 0x%x (IN|OUT only)",
+                 flags);
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    source->flags = flags;
+    return FDK_OK;
+}
+
 /* ---- the pump-facing face (context_internal.h) ---- */
 
 size_t fdk__extfd_count(fdk_context *ctx) {

@@ -17,7 +17,7 @@ static void test_version(void) {
     assert(fdk_get_version() == FDK_VERSION);
     assert(strcmp(fdk_get_version_string(), FDK_VERSION_STRING) == 0);
 
-    /* The public version is PINNED to 1.1.0-rc1 by policy
+    /* The public version is PINNED to 1.1.0-rc2 by policy
      * (docs/versioning.md — the recorded 2026-10-25 decision: the
      * extension-API release candidate; the owner chose the minor
      * bump over 1.0.1 because it adds public API, and no git tag
@@ -33,8 +33,8 @@ static void test_version(void) {
     assert(FDK_VERSION_MAJOR == 1);
     assert(FDK_VERSION_MINOR == 1);
     assert(FDK_VERSION_PATCH == 0);
-    assert(strcmp(FDK_VERSION_SUFFIX, "rc1") == 0);
-    assert(strcmp(FDK_VERSION_STRING, "1.1.0-rc1") == 0);
+    assert(strcmp(FDK_VERSION_SUFFIX, "rc2") == 0);
+    assert(strcmp(FDK_VERSION_STRING, "1.1.0-rc2") == 0);
     assert(fdk_get_version() == FDK_VERSION_ENCODE(1, 1, 0));
     printf("[ok] version: %s (%d, pinned per docs/versioning.md)\n",
            fdk_get_version_string(), fdk_get_version());

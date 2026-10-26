@@ -15,6 +15,9 @@
  * than including the widget internals from the core layer (the
  * one-way layering discipline: core never includes widget headers). */
 void fdk__tooltip_shutdown(void);
+/* D-Bus connections (1.1.0, src/dbus/): the shutdown sweep runs
+ * BEFORE the timer/extfd sweeps (see the call site). */
+void fdk__dbus_shutdown(fdk_context *ctx);
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -829,6 +832,14 @@ void fdk_shutdown(fdk_context *ctx) {
      * files — there is no pump left to drain them. The installed
      * theme (if any) stays: theme state is process-wide. */
     fdk__window_theme_settings_shutdown();
+
+    /* D-Bus connections (1.1.0): closed BEFORE the timer/extfd
+     * sweeps below — each connection owns ext fd sources and
+     * timers, and removing them after those sweeps would touch
+     * freed records. Teardown, not delivery: pending replies do
+     * NOT fire (the documented shutdown posture — an app that
+     * cares closes its connections before shutdown). */
+    fdk__dbus_shutdown(ctx);
 
     /* Leaked timers are freed WITHOUT firing (shutdown is teardown,
     * not delivery — the same policy the leaked-window sweep uses). */

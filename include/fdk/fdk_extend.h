@@ -481,6 +481,18 @@ fdk_ext_fd_source *fdk_ext_loop_add_fd(fdk_context *ctx, int fd,
                                        uint32_t flags, fdk_ext_fd_fn fn,
                                        void *user);
 
+/* Re-targets a live source's watch mask (FDK_EXT_FD_IN / OUT).
+ * This is how a protocol with an output buffer avoids the busy-wake
+ * trap: watch IN alone while the buffer is empty, add OUT only
+ * while bytes are pending — a socket whose buffer has space is
+ * always writable, so a permanently-watched POLLOUT would spin the
+ * loop. Invalid flags / NULL source are refused (FDK_ERR_INVALID_
+ * ARGUMENT); a deactivated (mid-removal) source is a no-op. Safe
+ * inside the source's own callback. Available since extension API
+ * v1 (the native D-Bus client is its first consumer). */
+fdk_result fdk_ext_loop_update_fd(fdk_ext_fd_source *source,
+                                  uint32_t flags);
+
 /* Removes and frees the source (the fd is NOT closed — it was
  * never FDK's). Safe inside the source's own callback (the free is
  * deferred until the callback returns, exactly like

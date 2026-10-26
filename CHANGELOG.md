@@ -12,6 +12,64 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and in-development release
 candidates are marked until the owner promotes them.
 
+## [1.1.0-rc2] — 2026-10-26 (release candidate; no tag — the owner
+                 decides the final 1.1.0)
+
+### Added — the native D-Bus client (`include/fdk/fdk_dbus.h`)
+
+The architectural unlock of the rest of the roadmap: a complete
+D-Bus client implemented FROM THE PUBLIC SPECIFICATION in raw C
+(src/dbus/), taking **no D-Bus library dependency of any kind** —
+no libdbus, no sd-bus, no GLib — and no new link-time or run-time
+dependency at all. Everything rides FDK's own event loop; every
+byte from the socket is treated as untrusted input.
+
+- **Wire format**: full marshaling and unmarshaling of every basic
+  and container type (alignment, both endiannesses, nesting depth
+  ≤ 64, 8 MiB message cap), with the byte layout PINNED against
+  captured reference-implementation output in the tests (the
+  169-byte GetNameOwner frame, variant bodies, int64 arrays,
+  empty-array padding).
+- **Transports + auth**: session/system bus resolution
+  (DBUS_*_BUS_ADDRESS, XDG_RUNTIME_DIR, ';' lists),
+  unix/path, unix/abstract, unix:dir, tcp:, nonce-tcp (percent
+  decoding); SASL EXTERNAL with the ANONYMOUS fallback; non-blocking,
+  CLOEXEC sockets; a no-bus environment fails fast with ONE log
+  line (the degradation contract every feature above this layer
+  keys off).
+- **Calls, signals, names**: async method calls with timeouts (at
+  most once; late replies to canceled calls dropped), match rules
+  (AddMatch refcounted, client-side fail-open evaluation incl.
+  argN), name ownership (RequestName + unicast NameAcquired/
+  NameLost), name watching with transition reconciliation
+  (GetNameOwner + NameOwnerChanged), properties (Get/Set + typed
+  PropertiesChanged subscription), introspection (a lenient XML
+  parser serving a full node model), and serving incoming method
+  calls (with the UnknownMethod auto-reply posture).
+- **The reentrancy discipline**: callbacks may call any fdk_dbus
+  function — including closing the connection whose callback is
+  running; a DEAD connection stays a valid handle until the app
+  closes it (every call answers a clean error, never a dangling
+  dereference); closes from inside a callback free at the
+  outermost wrapper.
+- **Hardening**: fuzz tests in plain `make test` (all truncation
+  prefixes + 20k seeded mutations under ASan/UBSan), grammar
+  validators (names/paths/strict UTF-8), uninvited SCM_RIGHTS
+  descriptors closed on arrival.
+- **Test surface**: tests/test_dbus.c (headless wire suite) and
+  tests/test_dbus_live.c (`make test-dbus` — a REAL dbus-daemon via
+  dbus-run-session; the ubuntu CI job makes skips fatal). 115 new
+  exported symbols (756 total), append-only; SONAME stays
+  libfdk.so.1.
+
+### Added — extension API
+
+- `fdk_ext_loop_update_fd()` — retarget a live fd source's watch
+  mask (the POLLOUT busy-wait trap's answer; the D-Bus client is
+  the first consumer). FDK_EXT_API_VERSION stays 1: a purely
+  additive function, no ops-table growth, old add-on binaries keep
+  working.
+
 ## [1.1.0-rc1] — 2026-10-25 (release candidate; no tag — the owner
                  decides the final 1.1.0)
 

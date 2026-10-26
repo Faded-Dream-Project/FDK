@@ -9,7 +9,7 @@
 #define FDK_VERSION_H
 
 /*
- * THE PUBLIC VERSION IS 1.1.0-rc1 — THE RECORDED DECISION OF
+ * THE PUBLIC VERSION IS 1.1.0-rc2 — THE RECORDED DECISION OF
  * 2026-10-25 (docs/versioning.md). A release CANDIDATE for the
  * extension-API minor release (include/fdk/fdk_extend.h): the owner
  * set the number ("not 1.0.1, since this adds public API"), set the
@@ -38,11 +38,11 @@
 #define FDK_VERSION_MINOR 1
 #define FDK_VERSION_PATCH 0
 
-/* "1.1.0-rc1" style string, generated from the numeric components
+/* "1.1.0-rc2" style string, generated from the numeric components
  * plus the pre-release suffix (empty when the release is final).
  * The suffix lives here, next to the numeric triple it decorates. */
-#define FDK_VERSION_SUFFIX "rc1"
-#define FDK_VERSION_STRING "1.1.0-rc1"
+#define FDK_VERSION_SUFFIX "rc2"
+#define FDK_VERSION_STRING "1.1.0-rc2"
 
 /* Encode major/minor/patch into a single comparable integer:
  * (major * 1000000) + (minor * 1000) + patch */

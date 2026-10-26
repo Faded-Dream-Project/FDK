@@ -1,8 +1,10 @@
 # ROADMAP-1.1.0 — the gap audit and the proposed release scope
 
-**Status:** proposal. 1.1.0 stays at `-rc1` until the project owner
-approves a scope. Nothing in this file is started; Phase 1 produced
-audit and plan only.
+**Status:** IN IMPLEMENTATION (Phase 2, owner-approved). Version is
+`-rc2`. Per-item status is marked inline as work lands; the
+owner's Phase 2 directive: implement every tier (MUST, SHOULD,
+COULD, DEFER), re-audit when done, keep going until nothing
+meaningful remains or the sandbox blocks it.
 
 **Base:** `main` @ `7db4a81` (2026-10-26). All verdicts were read out
 of the tree at that commit — headers, backends, tests, docs — not
@@ -191,7 +193,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | M-4 | **Window identity**: `_NET_WM_ICON` + xdg-toplevel-icon-v1 (set both, harmless where unsupported) + `_NET_WM_PID` + `WM_CLIENT_MACHINE` + `WM_WINDOW_ROLE`; `fdk_window_set_icon` API. | B-04 (icons/PID part) | S |
 | M-5 | **fdk-shell outputs**: output added/removed/resized events + per-output metrics (size/scale/position); configurable namespace; set `_FDK_WM_LAYER` alongside the EWMH hints. | A-01, A-02, A-04, A-09 | M |
 | M-6 | **X11 multi-monitor**: RandR output enumeration + change events in core (app-facing output API, shared with M-5's fdk-shell surface) + per-output docks in fdk-shell. | A-03, B-05 | M |
-| M-7 | **The D-Bus foundation + dark mode**: hand-rolled or dlopen'd D-Bus client (auth, marshaling, method calls, signals, name watching) behind an internal module with zero new link-time dependencies; then `Gtk/ColorScheme` on X11 and the portal `org.freedesktop.appearance` color-scheme on Wayland, feeding the theme engine (light/dark face selection). | B-08, B-06 | L |
+| M-7 | **The D-Bus foundation + dark mode**: **DONE (the foundation, rc2)** — a native client in raw C from the public specification (src/dbus/, 115 exported symbols), zero new dependencies of any kind, riding the FDK event loop; wire bytes pinned against captured reference-implementation output; fuzzed in `make test`; live-bus suite `make test-dbus` (real dbus-daemon: calls, errors, timeouts, match rules/signals, properties, name watching, introspection, close-from-callback reentrancy; CI makes skips fatal). Dark-mode following rides on top (next). | B-08, B-06 | L |
 | M-8 | **fdk-shell popup cascades**: expose popup-of-popup parenting (launcher menus with submenus). | A-10 | S |
 | M-9 | **The release gate**: every MUST lands with its rigs in this repo's style (in-test compositors/WMs, pixel readbacks, protocol traces), CHANGELOG + EXTENDING.md + README updates, extension API v2 bump if ops grow, five-family packaging version bumps, full local battery + CI green — and the owner's sign-off before any tag. | — | S |
 
