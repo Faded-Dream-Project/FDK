@@ -32,7 +32,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FDK_LOG_TAG "dbus"
+/* FDK_LOG_TAG is NOT defaulted here: log_internal.h requires it
+ * pre-defined by the INCLUDING translation unit, and each dbus .c
+ * sets "dbus" itself. A header-side #define would clobber a
+ * legitimate caller's tag (tests/test_dbus.c tags itself
+ * "dbus-test"; the unconditional define used to silently re-tag
+ * every log line the test emitted AND warn about the redefinition). */
 
 /* ---- limits (defensive; the spec's own numbers where it has them) ---- */
 

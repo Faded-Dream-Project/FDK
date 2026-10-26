@@ -38,6 +38,8 @@
 #include "theme/theme_internal.h"
 
 #include <assert.h>
+#include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -513,6 +515,66 @@ int main(void) {
     assert(g_reqname_code == FDK_DBUS_REQUEST_NAME_PRIMARY_OWNER);
     assert(name_events_acquired >= 1); /* NameAcquired arrived unicast */
     printf("[ok] RequestName primary owner + unicast NameAcquired\n");
+
+    /* ---- the cross-implementation leg (ported from the alt
+     * client's live battery, 2026-10-27): dbus-send — libdbus on
+     * the other end — calls the service A serves, and libdbus's own
+     * parser must accept FDK's reply bytes and print the value.
+     * Two independent D-Bus implementations agreeing on the wire is
+     * the strongest headless proof of marshal correctness there is.
+     * Self-skips (disclosed) when dbus-send is absent. The polling
+     * shape is the pclose-deadlock lesson the alt client paid for:
+     * the child cannot finish before A answers, and A can only
+     * answer while THIS loop pumps the bus. */
+    {
+        if (system("command -v dbus-send >/dev/null 2>&1") != 0) {
+            printf("[skip] no dbus-send on PATH — the libdbus "
+                   "cross-implementation reply leg\n");
+        } else {
+            FILE *out = popen(
+                "dbus-send --print-reply --reply-timeout=8000 "
+                "--dest=org.fdktest.Echo /org/fdktest/echo "
+                "org.fdktest.Echo.Echo string:'cross-implementation "
+                "hello' 2>&1",
+                "r");
+            assert(out != NULL);
+            char xbuf[4096];
+            size_t xgot = 0;
+            int xdone = 0;
+            int xms = 0;
+            struct pollfd xpf = {.fd = fileno(out), .events = POLLIN};
+            while (!xdone && xgot < sizeof xbuf - 1) {
+                int pr = poll(&xpf, 1, 50);
+                if (pr > 0) {
+                    size_t n = fread(xbuf + xgot, 1,
+                                     sizeof xbuf - 1 - xgot, out);
+                    if (n == 0) {
+                        xdone = 1; /* EOF: the child exited */
+                    } else {
+                        xgot += n;
+                    }
+                } else if (pr == 0) {
+                    xms += 50;
+                    assert(xms < 15000); /* bounded even if hung */
+                    (void)fdk_pump_events(ctx, 20);
+                } else {
+                    assert(errno == EINTR);
+                }
+            }
+            int xrc = pclose(out);
+            xbuf[xgot] = '\0';
+            if (xrc != 0 || strstr(xbuf, "cross-implementation hello") == NULL) {
+                fprintf(stderr, "cross-leg diagnostics rc=%d:\n%s\n", xrc, xbuf);
+            }
+            assert(xrc == 0); /* dbus-send itself succeeded */
+            assert(strstr(xbuf, "cross-implementation hello") !=
+                   NULL); /* libdbus parsed and printed FDK's bytes */
+            assert(strstr(xbuf, "string") != NULL); /* typed output */
+            printf("[ok] cross-implementation: libdbus (dbus-send) "
+                   "parsed FDK's served reply bytes and printed them "
+                   "back\n");
+        }
+    }
 
     /* ---- B: ListNames ---------------------------------------------- */
     {

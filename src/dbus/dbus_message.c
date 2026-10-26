@@ -467,7 +467,23 @@ const char *fdk_dbus_message_sender(const fdk_dbus_message *message) {
 }
 
 const char *fdk_dbus_message_signature(const fdk_dbus_message *message) {
-    return (message != NULL) ? message->signature : NULL;
+    if (message == NULL) {
+        return NULL;
+    }
+    /* A message the app is building (or built and sent) reports the
+     * signature its appends produced — exactly what serialize() puts
+     * in the wire header. The frozen `signature` field is the
+     * received-message store (the parser fills it from the header);
+     * for built messages it stayed "" forever, so the accessor
+     * under-reported every locally built message with a body. Found
+     * by the alt-client discipline port (tests/test_dbus.c). */
+    if (message->signature != NULL && message->signature[0] != '\0') {
+        return message->signature;
+    }
+    if (message->sig_buf != NULL) {
+        return message->sig_buf;
+    }
+    return message->signature;
 }
 
 int fdk_dbus_message_is_error(const fdk_dbus_message *message) {
@@ -485,12 +501,28 @@ fdk_result fdk_dbus_message_read_args(const fdk_dbus_message *message,
     }
     *out = NULL;
     *out_count = 0;
-    if (message->body == NULL || message->body_len == 0 ||
-        message->signature == NULL || message->signature[0] == '\0') {
+    /* The arguments live in one of two stores: the received-message
+     * body the parser stashed (body/signature), or the builder's
+     * buffers for a message the app constructed (body_buf/sig_buf).
+     * Reading back what you built is a legitimate ask — the
+     * alt-client discipline port round-trips exactly that way — and
+     * it used to silently read as "no arguments". */
+    const uint8_t *body = message->body;
+    size_t body_len = message->body_len;
+    const char *sig = message->signature;
+    if (body == NULL && message->body_buf.data != NULL) {
+        body = message->body_buf.data;
+        body_len = message->body_buf.len;
+        if (message->sig_buf != NULL) {
+            sig = message->sig_buf;
+        }
+    }
+    if (body == NULL || body_len == 0 ||
+        sig == NULL || sig[0] == '\0') {
         return FDK_OK; /* no arguments */
     }
-    fdk__dreader r = {message->body,
-                      message->body_len,
+    fdk__dreader r = {body,
+                      body_len,
                       0,
                       0,
                       message->endian,
@@ -501,7 +533,6 @@ fdk_result fdk_dbus_message_read_args(const fdk_dbus_message *message,
     fdk_dbus_value **values = NULL;
     size_t count = 0;
     size_t cap = 0;
-    const char *sig = message->signature;
     size_t pos = 0;
     while (sig[pos] != '\0') {
         size_t start = pos;

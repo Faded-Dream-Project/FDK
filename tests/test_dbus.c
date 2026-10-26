@@ -1000,6 +1000,99 @@ static void test_null_ladder(void) {
     printf("[ok] dbus NULL ladder + env resolution order\n");
 }
 
+
+/* The alt-client discipline ports (2026-10-27). The repo briefly
+ * carried TWO native D-Bus clients: this one on main, and an older,
+ * smaller one on the alt/dbus-client branch (kept as an archive).
+ * Its battery pinned three contracts main's battery never did, and
+ * the owner directed a comparison + port of anything unique. The
+ * hostile-input table itself did NOT need porting (main's mutation
+ * fuzz is 20k seeds against the alt's fixed table, and main's
+ * truncation walk is prefix-exhaustive); what was genuinely unique:
+ * the append all-or-nothing discipline, the reply/error constructor
+ * routing facts, and distinct error-code names. See
+ * docs/DECISIONS.md for the whole reconciliation. */
+static void test_alt_ports(void) {
+    fdk_dbus_message *call = fdk_dbus_message_new_method_call(
+        "dest.example", "/obj", "i.face", "Method");
+    assert(call != NULL);
+    assert(fdk_dbus_message_kind(call) == FDK_DBUS_MESSAGE_METHOD_CALL);
+
+    /* Append is all-or-nothing: the NULL arm fails and the message
+     * is EXACTLY as it was (empty signature), a valid append lands
+     * and derives the signature, and a later failed append still
+     * leaves the good body intact. */
+    assert(fdk_dbus_message_append(call, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    const char *sig = fdk_dbus_message_signature(call);
+    assert(sig != NULL && sig[0] == '\0');
+    assert(fdk_dbus_message_append_string(call, "payload") == FDK_OK);
+    assert(strcmp(fdk_dbus_message_signature(call), "s") == 0);
+    assert(fdk_dbus_message_append(call, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(strcmp(fdk_dbus_message_signature(call), "s") == 0);
+    fdk_dbus_value **args = NULL;
+    size_t n = 0;
+    assert(fdk_dbus_message_read_args(call, &args, &n) == FDK_OK);
+    assert(n == 1 && args != NULL);
+    assert(fdk_dbus_value_string(args[0]) != NULL &&
+           strcmp(fdk_dbus_value_string(args[0]), "payload") == 0);
+    fdk_dbus_values_free_array(args, n);
+
+    /* The convenience appends land the same way (two shapes). */
+    assert(fdk_dbus_message_append_int32(call, -7) == FDK_OK);
+    assert(strcmp(fdk_dbus_message_signature(call), "si") == 0);
+    assert(fdk_dbus_message_append(call, NULL) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(strcmp(fdk_dbus_message_signature(call), "si") == 0);
+
+    /* Reply/error constructor routing facts: the kind, the carried
+     * reply serial, the error name; the body appends normally. */
+    fdk_dbus_message *ret = fdk_dbus_message_new_method_return(call);
+    assert(ret != NULL);
+    assert(fdk_dbus_message_kind(ret) == FDK_DBUS_MESSAGE_METHOD_RETURN);
+    assert(fdk_dbus_message_reply_serial(ret) ==
+           fdk_dbus_message_serial(call));
+    assert(fdk_dbus_message_is_error(ret) == 0);
+    assert(fdk_dbus_message_append_string(ret, "answer") == FDK_OK);
+    fdk_dbus_message_free(ret);
+
+    fdk_dbus_message *err = fdk_dbus_message_new_error(
+        call, "i.face.Oops", "the story");
+    assert(err != NULL);
+    assert(fdk_dbus_message_is_error(err) != 0);
+    assert(fdk_dbus_message_kind(err) == FDK_DBUS_MESSAGE_ERROR);
+    assert(fdk_dbus_message_error_name(err) != NULL &&
+           strcmp(fdk_dbus_message_error_name(err), "i.face.Oops") == 0);
+    assert(fdk_dbus_message_reply_serial(err) ==
+           fdk_dbus_message_serial(call));
+    /* an INVALID error name is rejected at the constructor */
+    fdk_dbus_message *bad = fdk_dbus_message_new_error(
+        call, "not a valid error name!", "t");
+    assert(bad == NULL);
+    fdk_dbus_message_free(err);
+
+    /* Error codes name their failures distinctly — the codes this
+     * module returns map to non-NULL, pairwise-distinct strings. */
+    const fdk_result codes[] = {
+        FDK_ERR_INVALID_ARGUMENT, FDK_ERR_INVALID_STATE,
+        FDK_ERR_OUT_OF_MEMORY, FDK_ERR_LIMIT, FDK_ERR_UNSUPPORTED,
+    };
+    for (size_t i = 0; i < sizeof codes / sizeof codes[0]; i++) {
+        assert(fdk_result_to_string(codes[i]) != NULL);
+        for (size_t j = i + 1;
+             j < sizeof codes / sizeof codes[0]; j++) {
+            assert(strcmp(fdk_result_to_string(codes[i]),
+                          fdk_result_to_string(codes[j])) != 0);
+        }
+    }
+
+    fdk_dbus_message_free(call);
+    printf("[ok] dbus discipline ports: append all-or-nothing, "
+           "reply/error routing facts, distinct error names\n");
+}
+
+
 int main(void) {
     /* Deterministic fuzzing per build. */
     rng_state = 0x12345678u;
@@ -1021,6 +1114,7 @@ int main(void) {
     test_match_rules();
     test_introspection();
     test_null_ladder();
+    test_alt_ports();
 
     printf("\nall dbus wire tests passed\n");
     return 0;
