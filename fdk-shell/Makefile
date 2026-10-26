@@ -37,7 +37,15 @@ LIBDIR   ?= $(PREFIX)/lib
 INCDIR   ?= $(PREFIX)/include
 BINDIR   ?= $(PREFIX)/bin
 
-FDKSHELL_VERSION := 0.1.0
+# Version for the pkg-config file and the installed library name;
+# derived from the header (the single source of truth, the same one
+# fdk-shell/packaging/ci/common.sh reads) — never from a second
+# hand-edited copy. 0.2.0 taught this the hard way: the recipes said
+# 0.2.0 while this line still said 0.1.0, and every packaging
+# install-test caught the .so.0.1.0 / Version: 0.1.0 mismatch.
+FDKSHELL_VERSION := $(shell sed -n 's/^#define FDKSHELL_VERSION_STRING "\(.*\)"/\1/p' include/fdk-shell/fdk-shell.h)
+# SONAME major, hand-set: it changes only on an ABI break (the
+# exports map is append-only within a major).
 FDKSHELL_SONAME  := libfdk-shell.so.0
 
 BUILD_DIR := build
