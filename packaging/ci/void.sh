@@ -29,22 +29,19 @@ RUN "$VOID_IMAGE" '
     # libXtst-devel: the fdk-shell X11 suite drives its passive-grab
     # passthrough test with XTEST-synthesized keys — test
     # infrastructure, the same class as the X11 dev headers.
-    # The round-robin mirror (repo-default.voidlinux.org) occasionally
-    # times out at reposync under load — seen live 2026-10-26, a plain
-    # connection timeout on a run whose code was already green on the
-    # five other families. One retry after 10s before giving up; the
-    # later xbps lines below already carry their own tolerant fallbacks.
+    # The round-robin mirror (repo-default.voidlinux.org) went
+    # unreachable for hours on 2026-10-26 (runner + two other
+    # networks) — the old single retry of the same dead host could
+    # not recover. Rotate the real mirror list FIRST (the
+    # fdk_void_mirror_rotate helper in common.sh); every xbps line
+    # below then runs
+    # against the first mirror that answered.
+    . packaging/ci/common.sh
+    fdk_void_mirror_rotate
     xbps-install -Sy base-devel pkgconf findutils zstd \
         libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
-        dejavu-fonts-ttf tar || {
-        echo "NOTE: reposync/install failed (mirror blip?) — retrying once after 10s"
-        sleep 10
-        xbps-install -Sy base-devel pkgconf findutils zstd \
-            libX11-devel libXext-devel libXtst-devel zlib-devel \
-            wayland-devel libxkbcommon-devel \
-            dejavu-fonts-ttf tar
-    }
+        dejavu-fonts-ttf tar
     # GL runtime for the X11-suite forced-lane groups (llvmpipe),
     # layered over the known package-name combinations:
     xbps-install -Sy mesa mesa-dri 2>/dev/null || \

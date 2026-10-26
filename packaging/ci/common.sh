@@ -190,3 +190,43 @@ fdk_run_smoke() {
     # shellcheck disable=SC2086
     env $ld_env $xdg_env /tmp/fdk_package_smoke "$expected"
 }
+
+# Void mirror rotation (2026-10-26: repo-default.voidlinux.org's
+# round-robin was unreachable from the GitHub runner AND from two
+# other networks at once — a mirror outage, not a code defect; the
+# code was green on the five other families while void died one step
+# before any package resolution). The single 10s-retry of the same
+# dead host could not recover. This rotates the ACTUAL mirrors by
+# overriding xbps's repository conf (files in /etc/xbps.d with the
+# same name win over /usr/share/xbps.d; the shipped conf writes are
+# belt-and-braces since the containers run as root), probing each
+# with a bare `xbps-install -S` (repodata only). Memoized per
+# container through a stamp so build + install-test containers pay
+# the probe once each. POSIX sh; call AFTER sourcing, BEFORE any
+# remote xbps-install.
+fdk_void_mirror_rotate() {
+    if [ -f /tmp/.fdk-void-mirror-ok ]; then
+        return 0
+    fi
+    _vm_mirrors="
+https://repo-default.voidlinux.org/current
+https://mirror.clarkson.edu/voidlinux/current
+https://mirrors.servercentral.com/voidlinux/current
+https://repo-eu.voidlinux.org/current
+https://repo-us.voidlinux.org/current"
+    mkdir -p /etc/xbps.d
+    for _vm_m in $_vm_mirrors; do
+        printf 'repository=%s\n' "$_vm_m" \
+            > /etc/xbps.d/10-repository-main.conf
+        printf 'repository=%s\n' "$_vm_m" \
+            > /usr/share/xbps.d/10-repository-main.conf 2>/dev/null || true
+        if xbps-install -S >/dev/null 2>&1; then
+            echo "NOTE: void reposync via $_vm_m"
+            : > /tmp/.fdk-void-mirror-ok
+            return 0
+        fi
+        echo "NOTE: void mirror unreachable: $_vm_m (rotating)"
+    done
+    echo "FATAL: every void mirror failed (network outage?)"
+    return 1
+}

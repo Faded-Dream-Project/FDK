@@ -21,6 +21,12 @@ MINVER="$(fdkshell_min_fdk_ver xbps)"
 
 echo "== fdk-shell xbps install-test ($FDKSHELL_VERSION, FDK floor $MINVER) =="
 
+# Each install-test container is FRESH (docker run --rm): it starts
+# with the default round-robin repo conf, which was unreachable for
+# hours on 2026-10-26. Rotate before any remote xbps-install — the
+# stamp makes it one probe per container.
+fdk_void_mirror_rotate
+
 xbps-install -Sy gcc pkgconf make findutils >/dev/null 2>&1 || \
     xbps-install -Sy gcc pkgconf make findutils >/dev/null
 # Runtime shlibs the FDK + fdk-shell packages need in this fresh

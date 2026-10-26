@@ -19,6 +19,12 @@ PACKVER="$(fdk_packver xbps "$VERSION")"
 
 echo "== FDK xbps install-test ($VERSION) =="
 
+# Each install-test container is FRESH (docker run --rm): it starts
+# with the default round-robin repo conf, which was unreachable for
+# hours on 2026-10-26. Rotate before any remote xbps-install — the
+# stamp makes it one probe per container.
+fdk_void_mirror_rotate
+
 xbps-install -Sy gcc pkgconf 2>/dev/null || xbps-install -Sy gcc pkgconf
 # Runtime libraries the packages need in this fresh container. xbps
 # resolves the shlib-requires declared on the packages; installing them
