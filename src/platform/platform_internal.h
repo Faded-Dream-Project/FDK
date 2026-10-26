@@ -84,6 +84,15 @@ typedef struct fdk_platform_damage {
     int full;  /* 1 = whole surface damaged */
 } fdk_platform_damage;
 
+/* The pointing-hand cursor in the window_set_cursor op's shape space
+ * (1.1.0-rc1): 0 stays "default arrow", 1..8 are the resize compass
+ * (fdk_window_resize_edge), and 9 is the application-requested hand
+ * over clickable content. Plain #define, not an enum, so both backends
+ * and the core can use it without a shared-header dependency; the
+ * PUBLIC face of this is fdk_cursor_shape (fdk_window.h), mapped
+ * inside the window layer. */
+#define FDK_PLATFORM_CURSOR_POINTER 9
+
 typedef struct fdk_platform_ops {
     /* Human-readable backend name for logging ("x11", "wayland"). */
     const char *name;
@@ -287,15 +296,19 @@ typedef struct fdk_platform_ops {
      * changes.
      *
      * window_set_cursor selects the cursor shape shown over this
-     * window. `edge` is 0 (default arrow) or an
+     * window. `edge` is 0 (default arrow), an
      * fdk_window_resize_edge compass value (plain int here so this
      * header needn't depend on window_internal.h): FDK's resize-edge
      * zones use it to show the directional resize cursor BEFORE any
      * button is held — the affordance users expect from a resizable
-     * window. Called only on shape transitions (the window layer
-     * caches the applied shape). NULL = the backend cannot shape
-     * cursors; the platform default applies (documented per-backend —
-     * honest unsupported, no lying fallback). */
+     * window — or FDK_PLATFORM_CURSOR_POINTER (9): the pointing hand
+     * an application requests over clickable regions (1.1.0-rc1,
+     * fdk_window_set_cursor / fdk_ext_surface_set_cursor — the
+     * public fdk_cursor_shape enum maps onto this space; the backend
+     * owns the encoding). Called only on shape transitions (the
+     * window layer caches the applied shape). NULL = the backend
+     * cannot shape cursors; the platform default applies (documented
+     * per-backend — honest unsupported, no lying fallback). */
     int (*window_query_pointer)(fdk_platform_window *pwindow,
                                 fdk_i32 *out_x, fdk_i32 *out_y);
     void (*window_set_cursor)(fdk_platform_window *pwindow, int edge);
@@ -652,5 +665,28 @@ char *fdk__dnd_build_uri_list(const char *const *uris, size_t count);
 void fdk__ext_popup_attached(fdk_context *ctx,
                              fdk_platform_window *parent_pwindow,
                              void *native_popup);
+
+/* Popup close-request REASON channel (1.1.0-rc1, X3): a backend that
+ * is about to dispatch FDK_EVENT_WINDOW_CLOSE_REQUEST for a popup
+ * calls this with WHY (window_internal.h's FDK_POPUP_CLOSE_* values)
+ * immediately before the dispatch; the window layer's dispatcher
+ * consumes it when the event lands on a popup and FDK_POPUP_TRACE
+ * names the reason in its close-request line. Single-slot, set-then-
+ * consume; a reason nobody consumes is drained harmlessly by the next
+ * non-popup close-request. Defined in window.c. */
+void fdk__window_note_popup_close(int reason);
+
+/* The reason values (1.1.0-rc1, X3). Here rather than
+ * window_internal.h so the BACKEND generators (x11_events.c's outside
+ * click, wayland_window.c's xdg_popup_done) can cite them — they
+ * include this header through their platform headers; window.c gets
+ * them transitively through window_internal.h. */
+enum {
+    FDK_POPUP_CLOSE_NONE = 0,
+    FDK_POPUP_CLOSE_OUTSIDE_CLICK = 1, /* X11: press outside the grab */
+    FDK_POPUP_CLOSE_ESCAPE = 2,        /* window.c: the universal key */
+    FDK_POPUP_CLOSE_COMPOSITOR = 3,    /* Wayland: xdg_popup_done */
+    FDK_POPUP_CLOSE_PARENT = 4,        /* the parent's destroy sweep */
+};
 
 #endif /* FDK_PLATFORM_INTERNAL_H */

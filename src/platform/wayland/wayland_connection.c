@@ -5,6 +5,7 @@
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
 #include "generated/primary-selection-unstable-v1-client-protocol.h"
+#include "generated/cursor-shape-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -103,6 +104,21 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->fractional_manager =
             wl_registry_bind(registry, name,
                              &wp_fractional_scale_manager_v1_interface, fv);
+    } else if (strcmp(interface,
+                      wp_cursor_shape_manager_v1_interface.name) == 0) {
+        /* OPTIONAL (1.1.0-rc1, W2): cursor-shape-v1 — the compositor
+         * renders enumerated cursor shapes itself. Preferred over the
+         * client-side XCursor-theme path whenever offered: no theme
+         * files to hunt, and the shape follows the compositor's own
+         * cursor pipeline. Version 1 carries everything FDK uses
+         * (set_shape + the shape enum); v2 adds no request we need,
+         * so the bind stays at the offered version capped at 1. The
+         * per-pointer device is created when the seat's pointer
+         * materializes (wayland_seat.c). */
+        uint32_t cv = version < 1 ? version : 1;
+        conn->cursor_shape_manager =
+            wl_registry_bind(registry, name,
+                             &wp_cursor_shape_manager_v1_interface, cv);
     }
     /* Other globals (wl_data_device_manager, etc.) are
      * intentionally not bound — out of current scope, see
@@ -146,6 +162,7 @@ static const struct xdg_wm_base_listener g_wm_base_listener = {
 fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
                                 void *dispatch_user_data, const char *app_id,
                                 fdk_platform_connection **out_conn) {
+    fdk__startup_trace_begin("wayland:connect complete");
     struct wl_display *display = wl_display_connect(NULL);
     if (display == NULL) {
         FDK_INFO("wl_display_connect failed (no Wayland compositor reachable)");
@@ -309,6 +326,7 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
         return FDK_ERR_PLATFORM_INIT;
     }
 
+    fdk__startup_trace("wayland:connect complete");
     FDK_INFO("connected (compositor, shm, xdg_wm_base bound; seat=%s)",
              conn->seat ? "yes" : "no");
 

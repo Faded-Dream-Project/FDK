@@ -126,6 +126,7 @@ struct fdk_platform_connection {
      * running (the v1 behavior, for servers/locales without IM
      * support). */
     XIM xim;
+    int xim_tried; /* lazy bring-up guard (1.1.0-rc1, X1): one attempt */
 
     /* XSHAPE (1.3.2): probed at connect; the empty-input-region
      * primitive tooltips need (click-through popups). 0 = extension
@@ -169,7 +170,7 @@ struct fdk_platform_connection {
      * disconnect (fdk_x11_cursor_shutdown). The window-level shape
      * state (which cursor is currently defined on which window)
      * lives in the X server per window and dies with the window. */
-    Cursor resize_cursors[9];
+    Cursor resize_cursors[10];   /* 0..8 compass + 9 hand (W2) */
 
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
@@ -313,6 +314,20 @@ struct fdk_platform_window {
      * fdk_x11_window_show), so the hint is click-through and never
      * steals keyboard focus from the app that owns it. */
     int input_transparent;
+
+    /* Popup trace stamp (1.1.0-rc1, X3): the last IN-BOUNDS button
+     * press time on this popup — the destroy-site fallback uses it to
+     * tell "an item was selected" (app destroy right after a click)
+     * from a bare programmatic destroy. Milliseconds, monotonic. */
+    long long popup_last_button_ms;
+
+    /* Last cursor shape applied via XDefineCursor (1.1.0-rc1, W2):
+     * mirrors the Wayland pwindow's field so fdk_window_set_cursor
+     * behaves identically across backends — X11 re-applies a window
+     * cursor automatically on entry (the cursor is window state, not
+     * per-enter protocol), so this exists for get/set symmetry and
+     * the hand shape's glyph caching. */
+    int cursor_shape;
     int grabbed;
 
     /* --- Popup grab accounting (1.1.0-rc1, the Openbox report) ---
@@ -439,6 +454,15 @@ fdk_platform_window *fdk_x11_find_window(fdk_platform_connection *conn,
  * vtable in x11_ops.c. Exposed at file scope (not static) purely for
  * that cross-file wiring — none of these are called from outside
  * src/platform/x11/. */
+/* Lazy input-method bring-up (1.1.0-rc1, X1): opens the XIM exactly
+ * once, when a window first sees FocusIn/KeyPress — pointer-only apps
+ * never pay for it. */
+void fdk__x11_ensure_xim(fdk_platform_connection *conn);
+
+/* Lazy per-window XIC (same report): the first FocusIn/KeyPress on a
+ * window creates its input context. */
+void fdk__x11_window_ensure_xic(fdk_platform_window *pwindow);
+
 fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
                             void *dispatch_user_data, const char *app_id,
                             fdk_platform_connection **out_conn);

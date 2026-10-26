@@ -2,6 +2,8 @@
 
 #include "platform/wayland/wayland_platform.h"
 
+#include "generated/cursor-shape-v1-client-protocol.h"
+
 #include "core/log_internal.h"
 
 #include <sys/mman.h>
@@ -367,6 +369,17 @@ static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t seria
             conn->pointer_focus = conn->windows[i];
             conn->pointer_x = wl_fixed_to_double(sx);
             conn->pointer_y = wl_fixed_to_double(sy);
+
+            /* W2 (1.1.0-rc1): answer EVERY enter with the window's
+             * cursor shape, citing the ENTER serial. A client that
+             * answers nothing keeps whatever shape the compositor
+             * last showed over anything — the live report's "cursor
+             * stays the resize shape until the pointer leaves the
+             * bar". cursor-shape-v1's set_shape takes the serial
+             * directly; the set_cursor fallback requires it. */
+            fdk_wayland_cursor_apply(conn, conn->windows[i], serial,
+                                     conn->windows[i]->cursor_shape);
+
             fdk_event_data event = { .type = FDK_EVENT_POINTER_ENTER };
             /* 1.1.6: the enter must carry its surface-local position —
              * the window layer hit-tests ENTER through the resize-edge
@@ -541,7 +554,21 @@ static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t capabil
     if ((capabilities & WL_SEAT_CAPABILITY_POINTER) && conn->pointer == NULL) {
         conn->pointer = wl_seat_get_pointer(seat);
         wl_pointer_add_listener(conn->pointer, &g_pointer_listener, conn);
+        /* cursor-shape-v1 device (1.1.0-rc1, W2): derived from the
+         * manager + this pointer; the seat's pointer object is the
+         * lifetime anchor — recreated here whenever the capability
+         * (re)appears, destroyed alongside the pointer below. */
+        if (conn->cursor_shape_manager != NULL &&
+            conn->cursor_shape_device == NULL) {
+            conn->cursor_shape_device =
+                wp_cursor_shape_manager_v1_get_pointer(
+                    conn->cursor_shape_manager, conn->pointer);
+        }
     } else if (!(capabilities & WL_SEAT_CAPABILITY_POINTER) && conn->pointer != NULL) {
+        if (conn->cursor_shape_device != NULL) {
+            wp_cursor_shape_device_v1_destroy(conn->cursor_shape_device);
+            conn->cursor_shape_device = NULL;
+        }
         wl_pointer_destroy(conn->pointer);
         conn->pointer = NULL;
     }
@@ -567,6 +594,10 @@ void fdk_wayland_bind_seat_listeners(fdk_platform_connection *conn) {
 }
 
 void fdk_wayland_teardown_seat(fdk_platform_connection *conn) {
+    if (conn->cursor_shape_device != NULL) {
+        wp_cursor_shape_device_v1_destroy(conn->cursor_shape_device);
+        conn->cursor_shape_device = NULL;
+    }
     if (conn->keyboard) wl_keyboard_destroy(conn->keyboard);
     if (conn->pointer) wl_pointer_destroy(conn->pointer);
     if (conn->seat) wl_seat_destroy(conn->seat);

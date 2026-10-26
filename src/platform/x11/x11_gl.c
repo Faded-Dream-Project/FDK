@@ -1089,8 +1089,10 @@ int fdk_x11_gl_window_present(struct fdk_x11_gl_window *gwin,
      * popups included — engages nothing, probes nothing, and logs
      * nothing further. Exactly one warning per process either way. */
     if (gl->selfcheck == GL_SELFCHECK_UNVERIFIED) {
+        fdk__startup_trace_begin("x11:GL self-check");
         int verdict = self_check_attempt(gl, gwin);
         if (verdict == GL_CHK_PASS) {
+            fdk__startup_trace("x11:GL self-check");
             gl->selfcheck = GL_SELFCHECK_PASSED;
             gl->selfcheck_gwin = NULL;
             gl->selfcheck_attempts = 0;

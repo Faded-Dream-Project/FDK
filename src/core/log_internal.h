@@ -37,4 +37,20 @@
 void fdk__log_level_push(fdk_log_level level);
 void fdk__log_level_pop(void);
 
+/* ---- startup trace (1.1.0-rc1, X1) --------------------------------------
+ *
+ * FDK_STARTUP_TRACE=1 logs one INFO line per startup phase with the
+ * milliseconds elapsed since the first traced call — the field
+ * diagnostic for "every FDK app starts slowly on my machine" (the
+ * live report: X11 yes, Wayland no). Phases are traced at their
+ * natural sites (backend connect legs, theme, first font scan, GL
+ * context, self-check, first present); a phase's line reports BOTH
+ * its own duration (when paired via fdk__startup_trace_begin) and
+ * the total since t0. Without the env var the calls are two cheap
+ * branches. */
+void fdk__startup_trace_begin(const char *phase);
+void fdk__startup_trace(const char *phase);
+/* Test seam: forget t0 so a later suite re-traces from scratch. */
+void fdk__startup_trace_reset(void);
+
 #endif /* FDK_LOG_INTERNAL_H */

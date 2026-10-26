@@ -8,6 +8,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The GPU present lane's small-window floor (1.1.0-rc1, the X2
+ * report): surfaces at or below this many pixels present on the CPU
+ * path — 131072 px is 256x512, comfortably above every panel/popup
+ * geometry (a 4K-wide 32px bar is 122880 px) and below the window
+ * sizes the lane was built for (640x480 demos and up). The lane's
+ * per-window fixed cost (a private GLXContext per surface + a
+ * vsync-scheduled swap) cannot pay for itself on a surface whose
+ * whole present is a few hundred KB of SHM memcpy. FDK_GL_FORCE=1
+ * overrides the gate. See the engagement site below. */
+#define FDK_GL_MIN_PIXELS 131072
+
 /* Software framebuffer for the X11 backend — the machinery behind
  * fdk_surface (include/fdk/fdk_surface.h) on this platform.
  *
@@ -332,14 +343,52 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
      * window. On engagement the application draws into the lane's
      * STAGING buffer instead of the XImage slots — same contract, same
      * damage model, and the stride is exactly w (matching the classic
-     * path's depth-24 XImage layout). */
+     * path's depth-24 XImage layout).
+     *
+     * SMALL-WINDOW POLICY (1.1.0-rc1, the X2 report): a window at or
+     * below FDK_GL_MIN_PIXELS stays on the CPU path — no GLX context,
+     * no texture upload, no swap. That is the whole panel/popup class
+     * (the demo bar 1024x32, its dropdown 180x92, choosers, tooltips):
+     * their presents are a few hundred KB of SHM memcpy (tens of
+     * microseconds), while the lane's per-WINDOW fixed costs — each
+     * try_init builds its OWN GLXContext (share list NULL) and makes
+     * it current — cost milliseconds per popup on real drivers, and a
+     * vsync-scheduled swap can block a hover repaint a full frame.
+     * The X2 live report ("every click logs 'GPU present lane
+     * active'"; the dropdown highlight trailing the pointer) was
+     * exactly this mismatch. FDK_GL_FORCE=1 overrides the size gate
+     * the same way it overrides the software-renderer gate; the
+     * equivalence tests pin both lanes' pixels through that knob. */
     if (pwindow->gl_win == NULL && !pwindow->gl_downgraded) {
-        if (conn->gl == NULL && !conn->gl_tried) {
-            conn->gl = fdk_x11_gl_try_load(conn);
-            conn->gl_tried = 1;
-        }
-        if (conn->gl != NULL) {
-            pwindow->gl_win = fdk_x11_gl_window_try_init(conn->gl, pwindow);
+        /* The size gate runs BEFORE the dlopen: a process whose
+         * windows are all small (the panel/popup class) never loads
+         * the GL stack at all — the X1 spirit applied to memory and
+         * startup, not just milliseconds. */
+        int lane_eligible =
+            ((fdk_i64)w * (fdk_i64)h > FDK_GL_MIN_PIXELS ||
+             getenv("FDK_GL_FORCE") != NULL);
+        if (!lane_eligible) {
+            /* Sticky per window (the class of surface that starts
+             * small stays small: popups never resize, bars reconfigure
+             * within a factor of two); one INFO per process so the
+             * policy is discoverable in the field without per-window
+             * log spam. */
+            pwindow->gl_downgraded = 1;
+            static int small_policy_logged = 0;
+            if (!small_policy_logged) {
+                small_policy_logged = 1;
+                FDK_INFO("GL lane: small surfaces (<= %d px) present on "
+                         "the CPU path (FDK_GL_FORCE=1 overrides)",
+                         FDK_GL_MIN_PIXELS);
+            }
+        } else {
+            if (conn->gl == NULL && !conn->gl_tried) {
+                conn->gl = fdk_x11_gl_try_load(conn);
+                conn->gl_tried = 1;
+            }
+            if (conn->gl != NULL) {
+                pwindow->gl_win = fdk_x11_gl_window_try_init(conn->gl, pwindow);
+            }
         }
     }
     if (pwindow->gl_win != NULL) {
@@ -525,6 +574,15 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
     }
 
     fdk_platform_connection *conn = pwindow->conn;
+
+    /* First-present startup trace (1.1.0-rc1, X1): once per process. */
+    {
+        static int presented_once = 0;
+        if (!presented_once) {
+            presented_once = 1;
+            fdk__startup_trace("x11:first present");
+        }
+    }
 
     /* --- GPU present lane (1.4.18) -------------------------------
      *

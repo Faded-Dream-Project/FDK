@@ -41,6 +41,31 @@ static unsigned long x11_theme_window_pixel(void) {
 #define X11_DEFAULT_HEIGHT 480
 #define X11_DEFAULT_TITLE  "FDK Application"
 
+/* Lazy per-window XIC (1.1.0-rc1, X1): the FIRST FocusIn or KeyPress
+ * on a window brings up both the connection's XIM (once per process)
+ * and this window's XIC. Declared in x11_platform.h; called from the
+ * event translator. */
+void fdk__x11_window_ensure_xic(fdk_platform_window *pwindow) {
+    if (pwindow == NULL || pwindow->xic != NULL) {
+        return;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    fdk__x11_ensure_xim(conn);
+    if (conn->xim == NULL) {
+        return; /* no IM: the ASCII fallback path carries keys */
+    }
+    pwindow->xic = XCreateIC(conn->xim,
+                             XNInputStyle, XIMPreeditNothing |
+                                               XIMStatusNothing,
+                             XNClientWindow, pwindow->xwindow,
+                             XNFocusWindow, pwindow->xwindow,
+                             NULL);
+    if (pwindow->xic == NULL) {
+        FDK_WARN("XCreateIC failed — window falls back to ASCII "
+                 "text entry");
+    }
+}
+
 fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                                      const fdk_window_options *options,
                                      fdk_platform_window *parent,
@@ -290,25 +315,15 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->render_size.width = 0;
     pwindow->render_size.height = 0;
 
-    /* Input context (1.3.1): one XIC per window when the connection
-     * has an XIM — this is what makes Xutf8LookupString resolve the
-     * user's actual layout, non-ASCII included. The rootless style
-     * (PreeditNothing|StatusNothing) keeps composition out of FDK's
-     * geometry (no preedit window to place); the preedit SEAM for
-     * real IMEs remains the Entry's set_preedit API. */
+    /* Input context (1.3.1; LAZY since 1.1.0-rc1, X1): the XIC is
+     * created when this window first sees FocusIn or a KeyPress
+     * (fdk__x11_window_ensure_xic, x11_events.c) — together with the
+     * lazy XOpenIM this takes pointer-only apps (panels, the demo
+     * bar) entirely off the input-method startup path. The rootless
+     * style (PreeditNothing|StatusNothing) keeps composition out of
+     * FDK's geometry (no preedit window to place); the preedit SEAM
+     * for real IMEs remains the Entry's set_preedit API. */
     pwindow->xic = NULL;
-    if (conn->xim != NULL) {
-        pwindow->xic = XCreateIC(conn->xim,
-                                 XNInputStyle, XIMPreeditNothing |
-                                                   XIMStatusNothing,
-                                 XNClientWindow, pwindow->xwindow,
-                                 XNFocusWindow, pwindow->xwindow,
-                                 NULL);
-        if (pwindow->xic == NULL) {
-            FDK_WARN("XCreateIC failed — window falls back to ASCII "
-                     "text entry");
-        }
-    }
 
     fdk_result r = fdk_x11_register_window(conn, pwindow);
     if (!fdk_ok(r)) {
@@ -319,6 +334,25 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
         fdk_free(pwindow);
         return r;
     }
+
+    /* Creation BARRIER (1.1.0-rc1, found by the lazy-XIC change): the
+     * XCreateWindow + properties + name burst is fully async in Xlib;
+     * fdk_window_create hands out the XID (fdk_window_xid, the
+     * extension API's native accessor), and the CONTRACT of a handed
+     * out XID is that ANY connection — a second client, a test rig,
+     * the application's own X calls — can query the window the moment
+     * the call returns. HEAD satisfied that only by accident: the
+     * eager per-window XCreateIC round-tripped right here and flushed
+     * the burst; taking the XIC lazy (X1) removed the accident and a
+     * racing second connection saw BadDrawable (reproduced minimal:
+     * create + GetGeometry on a second Display without a sync). Make
+     * the barrier explicit: XSync flushes AND waits, so the window
+     * exists server-side and any create-time protocol error surfaces
+     * through the error handler HERE, not as a mystery later. One
+     * round-trip per created window — window creation was never the
+     * startup path X1 is about (that was XOpenIM/GL/fonts, in whole
+     * seconds). */
+    XSync(conn->display, False);
 
     FDK_DEBUG("window created (0x%lx, %dx%d, \"%s\")", xwindow, width, height, title);
 
@@ -1256,8 +1290,11 @@ int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
 
 /* Glyph indices in the server's built-in cursor font for each
  * fdk_window_resize_edge compass value (index 0 is unused — 0 means
- * "default arrow"). Corners get corner cursors, edges get arrows. */
-static const unsigned int resize_cursor_glyphs[9] = {
+ * "default arrow"). Corners get corner cursors, edges get arrows.
+ * Index 9 (FDK_PLATFORM_CURSOR_POINTER) is the pointing hand
+ * applications request over clickable content — the cursor-font
+ * twin of Wayland's cursor-shape "pointer". */
+static const unsigned int resize_cursor_glyphs[10] = {
     0,                          /* FDK_WRES_NONE — default */
     XC_top_side,                /* N  */
     XC_top_right_corner,        /* NE */
@@ -1267,13 +1304,17 @@ static const unsigned int resize_cursor_glyphs[9] = {
     XC_bottom_left_corner,      /* SW */
     XC_left_side,               /* W  */
     XC_top_left_corner,         /* NW */
+    XC_hand2,                   /* 9 = the pointing hand */
 };
 
 void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
-    if (pwindow == NULL || edge < 0 || edge > 8) {
+    if (pwindow == NULL || edge < 0 || edge > 9) {
         return;
     }
     fdk_platform_connection *conn = pwindow->conn;
+    pwindow->cursor_shape = edge; /* get/set symmetry with the Wayland
+                                   * backend; X11 re-applies window
+                                   * cursors on entry by itself */
     Cursor cursor = None;
     if (edge != 0) {
         if (conn->resize_cursors[edge] == None) {
@@ -1298,12 +1339,12 @@ void fdk_x11_cursor_shutdown(fdk_platform_connection *conn) {
     }
     if (conn->display_dead) {
         /* Server gone: the cursors died with the connection. */
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < 10; i++) {
             conn->resize_cursors[i] = None;
         }
         return;
     }
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < 10; i++) {
         if (conn->resize_cursors[i] != None) {
             XFreeCursor(conn->display, conn->resize_cursors[i]);
             conn->resize_cursors[i] = None;

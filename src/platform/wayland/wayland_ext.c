@@ -100,6 +100,7 @@ fdk_result fdk_wayland_ext_surface_adopt(fdk_platform_connection *conn,
     pwindow->buffer_size.width = 0;
     pwindow->buffer_size.height = 0;
     pwindow->buffer_attached = 0;
+    pwindow->cursor_shape = 0; /* default arrow until shaped (W2) */
     for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
         pwindow->bg_pending[i] = NULL;
     }

@@ -109,6 +109,27 @@ void fdk_window_destroy(fdk_window *window);
  * string passed in. NULL is treated as an empty title. */
 void fdk_window_set_title(fdk_window *window, const char *title);
 
+/* ---- Cursor shape (1.1.0-rc1) -------------------------------------------
+ *
+ * The shape the pointer takes while hovering this window. FDK's own
+ * resize-edge affordances (directional cursors over a resizable
+ * window's borders) run BELOW this setting; an application-set shape
+ * applies to the window as a whole and is re-applied automatically
+ * every time the pointer enters (Wayland cursor state does not
+ * survive leaving a surface; X11 tracks it as window state).
+ *
+ * The shape is a HINT: a backend or platform without the needed
+ * mechanism keeps its default arrow — never a wrong shape. */
+typedef enum fdk_cursor_shape {
+    FDK_CURSOR_DEFAULT = 0, /* the platform's standard arrow */
+    FDK_CURSOR_POINTER = 1, /* the pointing hand over clickable things */
+} fdk_cursor_shape;
+
+/* Sets the window's hover cursor shape (fdk_cursor_shape above).
+ * Applies immediately when the pointer is over the window, and on
+ * every subsequent entry. No-op on an unknown shape value. */
+void fdk_window_set_cursor(fdk_window *window, fdk_cursor_shape shape);
+
 /* Requests a resize to (width, height). This is a request, not a
  * guarantee — the platform/compositor may clamp, ignore, or adjust it
  * (e.g. Wayland only actually resizes a toplevel in response to a

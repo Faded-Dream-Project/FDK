@@ -267,6 +267,22 @@ fdk_result fdk_surface_present(fdk_surface *surface) {
         return r; /* damage retained — a retry re-presents it */
     }
 
+    /* Popup latency trace (1.1.0-rc1, X2): THE convergence point of
+     * every present — the widget-tree auto-paint tail and the
+     * application-driven presents of extension-API popups (the demo
+     * bar paints its popup surface directly) both land here. A motion
+     * stamped by the dispatcher (window.c) that is still unpresented
+     * when this present completes is exactly the "hover highlight
+     * trails the pointer" latency the X2 report asked to measure;
+     * one line per motion-to-present pair (the stamp resets). */
+    if (surface->window->is_popup && fdk__popup_trace_enabled() &&
+        surface->window->popup_motion_ms != 0) {
+        FDK_INFO("[popup] motion->present %lld ms",
+                 (long long)(fdk__window_now_ms() -
+                             surface->window->popup_motion_ms));
+        surface->window->popup_motion_ms = 0;
+    }
+
     /* Damage consumed. The buffer has been handed to the platform —
      * force the next drawing call / get_info to re-acquire. On
      * Wayland the mapping now belongs to the compositor until

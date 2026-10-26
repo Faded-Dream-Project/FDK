@@ -27,9 +27,15 @@
  *
  * The window layer drives this through the optional window_set_cursor
  * op (see window.c's compass cache — the op only sees transitions):
- * edge 0 is "default" (left_ptr), 1..8 the resize compass. */
+ * edge 0 is "default" (left_ptr), 1..8 the resize compass, 9 the
+ * pointing hand (FDK_PLATFORM_CURSOR_POINTER). wayland_seat.c
+ * re-applies the focused window's stored shape on EVERY
+ * wl_pointer.enter (fdk_wayland_cursor_apply) — cursor state does not
+ * survive leaving a surface. */
 
 #include "platform/wayland/wayland_platform.h"
+
+#include "generated/cursor-shape-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -70,9 +76,9 @@
 #define XCURSOR_MAX_DIM     512u                 /* real: <= 128    */
 
 /* Cursor names for the compass — the legacy core names every theme
- * ships (index 0 = the default arrow). Themes that only implement
- * the modern naming still symlink these. */
-static const char *const g_cursor_names[9] = {
+ * ships (index 0 = the default arrow; index 9 = the pointing hand).
+ * Themes that only implement the modern naming still symlink these. */
+static const char *const g_cursor_names[10] = {
     "left_ptr",             /* 0 = default                       */
     "top_side",             /* N  (FDK_WRES_N)                   */
     "top_right_corner",     /* NE                                */
@@ -82,6 +88,22 @@ static const char *const g_cursor_names[9] = {
     "bottom_left_corner",   /* SW                                */
     "left_side",            /* W                                 */
     "top_left_corner",      /* NW                                */
+    "pointer",              /* 9 = the hand (FDK_PLATFORM_CURSOR_POINTER) */
+};
+
+/* cursor-shape-v1's enum for the same space (the protocol's numbering,
+ * used only when the compositor offers the manager). */
+static const uint32_t g_cursor_shape_v1[10] = {
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_N_RESIZE,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NE_RESIZE,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_E_RESIZE,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SE_RESIZE,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_S_RESIZE,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SW_RESIZE,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_W_RESIZE,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NW_RESIZE,
+    WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER,
 };
 
 static uint32_t rd_u32(const unsigned char *p) {
@@ -352,6 +374,12 @@ static struct wl_buffer *cursor_upload(fdk_platform_connection *conn,
 
     struct wl_shm_pool *pool =
         wl_shm_create_pool(conn->shm, fd, (int32_t)length);
+    /* FD LIFETIME: same rule as create_shm_buffer (wayland_window.c) —
+     * the request carrying fd is resolved at FLUSH time by number, so
+     * the fd must stay open until the create_pool request is on the
+     * wire; flushing here closes the aliasing window where two pools
+     * created in one burst would both name the newest memfd. */
+    (void)wl_display_flush(conn->display);
     close(fd);
     if (pool == NULL) {
         munmap(map, length);
@@ -440,13 +468,46 @@ static int cursor_shape_get(fdk_platform_connection *conn, const char *name,
 
 /* ---- the platform op --------------------------------------------- */
 
-void fdk_wayland_window_set_cursor(fdk_platform_window *pwindow, int edge) {
-    if (pwindow == NULL || edge < 0 || edge > 8) {
+/* THE shape application (1.1.0-rc1, the W2 report). Two transports,
+ * in preference order:
+ *
+ *   cursor-shape-v1 (when the compositor offered the manager and the
+ *   seat's pointer exists): wp_cursor_shape_device_v1.set_shape(serial,
+ *   enum) — the compositor renders the shape itself; no theme files,
+ *   no client cursor surface, and the serial is whatever input serial
+ *   the caller holds (the ENTER serial on entry — the protocol's
+ *   explicit "use a serial from an enter or button event" rule).
+ *
+ *   wl_pointer.set_cursor(serial, surface, hx, hy) with the XCursor
+ *   theme path below — the fallback for compositors without the
+ *   protocol. The serial must be the enter serial while the pointer
+ *   is entering; last_input_serial (the caller passes it) is exactly
+ *   that at enter time.
+ *
+ * Called from TWO places: the op below (shape transitions requested
+ * by the window layer or the application) and wayland_seat.c's
+ * pointer_enter — which is the W2 fix itself: a client that answers
+ * NO enter at all keeps whatever shape the compositor last showed
+ * over anything (the reported "cursor stays the resize shape until
+ * the pointer leaves"), so EVERY wl_pointer.enter re-applies the
+ * focused window's stored shape. */
+void fdk_wayland_cursor_apply(fdk_platform_connection *conn,
+                              fdk_platform_window *pwindow,
+                              uint32_t serial, int shape) {
+    if (conn == NULL || pwindow == NULL || shape < 0 || shape > 9) {
         return;
     }
-    fdk_platform_connection *conn = pwindow->conn;
-    if (conn->pointer == NULL || conn->last_input_serial == 0) {
-        return; /* no pointer yet: nothing to shape, honestly */
+
+    if (conn->cursor_shape_device != NULL && conn->pointer != NULL) {
+        wp_cursor_shape_device_v1_set_shape(conn->cursor_shape_device,
+                                            serial,
+                                            g_cursor_shape_v1[shape]);
+        return; /* the compositor owns the pixels from here */
+    }
+
+    /* Theme fallback. */
+    if (conn->pointer == NULL || serial == 0) {
+        return; /* no pointer yet / no serial to cite: nothing to shape */
     }
 
     /* Nominal cursor size follows the window's scale (24px at 1x is
@@ -455,8 +516,8 @@ void fdk_wayland_window_set_cursor(fdk_platform_window *pwindow, int edge) {
     if (nominal < 12) {
         nominal = 12;
     }
-    int shape = cursor_shape_get(conn, g_cursor_names[edge], nominal);
-    if (shape < 0) {
+    int idx = cursor_shape_get(conn, g_cursor_names[shape], nominal);
+    if (idx < 0) {
         return; /* compositor default arrow stays */
     }
 
@@ -467,23 +528,39 @@ void fdk_wayland_window_set_cursor(fdk_platform_window *pwindow, int edge) {
         }
     }
 
-    /* Commit the image, then point the pointer at it. The serial is
-     * the latest input serial (the enter serial while hovering) —
-     * exactly what the protocol wants set_cursor to cite. */
-    wl_surface_attach(conn->cursor_surface, conn->cursor_cache[shape].buffer,
+    /* Commit the image, then point the pointer at it. */
+    wl_surface_attach(conn->cursor_surface, conn->cursor_cache[idx].buffer,
                       0, 0);
     wl_surface_damage(conn->cursor_surface, 0, 0, INT32_MAX, INT32_MAX);
     wl_surface_commit(conn->cursor_surface);
-    wl_pointer_set_cursor(conn->pointer, conn->last_input_serial,
-                          conn->cursor_surface,
-                          conn->cursor_cache[shape].hotspot_x,
-                          conn->cursor_cache[shape].hotspot_y);
-    (void)wl_display_flush(conn->display);
+    wl_pointer_set_cursor(conn->pointer, serial, conn->cursor_surface,
+                          conn->cursor_cache[idx].hotspot_x,
+                          conn->cursor_cache[idx].hotspot_y);
+}
+
+void fdk_wayland_window_set_cursor(fdk_platform_window *pwindow, int edge) {
+    if (pwindow == NULL || edge < 0 || edge > 9) {
+        return;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    if (conn->pointer == NULL || conn->last_input_serial == 0) {
+        return; /* no pointer yet: nothing to shape, honestly */
+    }
+    pwindow->cursor_shape = edge;
+    fdk_wayland_cursor_apply(conn, pwindow, conn->last_input_serial, edge);
 }
 
 void fdk_wayland_cursor_teardown(fdk_platform_connection *conn) {
     if (conn == NULL) {
         return;
+    }
+    if (conn->cursor_shape_device != NULL) {
+        wp_cursor_shape_device_v1_destroy(conn->cursor_shape_device);
+        conn->cursor_shape_device = NULL;
+    }
+    if (conn->cursor_shape_manager != NULL) {
+        wp_cursor_shape_manager_v1_destroy(conn->cursor_shape_manager);
+        conn->cursor_shape_manager = NULL;
     }
     for (size_t i = 0; i < conn->cursor_cache_count; i++) {
         if (conn->cursor_cache[i].buffer != NULL) {

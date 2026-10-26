@@ -350,6 +350,16 @@ fdk_result fdk_ext_surface_native(fdk_ext_surface *surface,
 fdk_result fdk_ext_surface_get_surface(fdk_ext_surface *surface,
                                        fdk_surface **out);
 
+/* Sets the surface's hover cursor shape (1.1.0-rc1). The shape is
+ * re-applied automatically on every pointer entry (Wayland's cursor
+ * state does not survive leaving a surface); the fdk_cursor_shape
+ * enum lives in fdk_window.h. Add-ons rendering panels typically set
+ * FDK_CURSOR_DEFAULT once at creation and FDK_CURSOR_POINTER while
+ * the pointer hovers a clickable region. No-op on an unknown shape.
+ * Available since extension API v1 (append-only addition). */
+void fdk_ext_surface_set_cursor(fdk_ext_surface *surface,
+                                int shape);
+
 /* Makes the surface visible. X11: maps the window. Wayland: a
  * documented no-op — a role-carrying surface maps when its own
  * protocol handshake and first buffer commit complete, both of

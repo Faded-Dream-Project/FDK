@@ -92,6 +92,37 @@ static fdk_result create_shm_buffer(fdk_platform_connection *conn,
     }
 
     struct wl_shm_pool *pool = wl_shm_create_pool(conn->shm, fd, (int32_t)length);
+    /* FD LIFETIME (1.1.0-rc1, found live on sway/labwc headless — the
+     * invisible-hover/w1 chase): libwayland resolves an fd argument at
+     * FLUSH time, by number. Closing it before the create_pool request
+     * has been written to the socket lets the kernel hand that number
+     * to the NEXT memfd — and every pool created earlier in the same
+     * un-flushed burst then aliases the newest memfd on the SERVER
+     * side (the client keeps its own, now-private, mappings). The
+     * compositors still accept everything — buffers created, commits
+     * processed, releases and frame callbacks flowing — but the
+     * server reads the WRONG pages, so whole paint cycles silently
+     * never appear on screen (the demo bar's hover repaint being the
+     * live report). Flushing HERE, while fd is still open, guarantees
+     * the request that carries it goes out referring to THIS memfd.
+     * EAGAIN (socket full) is retried by the next flush — but then fd
+     * would close into a queued request again, so keep retrying inline
+     * a bounded number of times; on persistent failure the pool is
+     * unusable anyway and the caller degrades honestly. */
+    {
+        int tries = 0;
+        while (wl_display_flush(conn->display) < 0 && errno == EAGAIN &&
+               tries < 64) {
+            /* the send buffer is full because the compositor is behind;
+             * poll for writability, bounded, then retry */
+            struct pollfd pfd = {
+                .fd = wl_display_get_fd(conn->display),
+                .events = POLLOUT,
+            };
+            poll(&pfd, 1, 10);
+            tries++;
+        }
+    }
     close(fd);
     if (pool == NULL) {
         munmap(pixels, length);
@@ -390,6 +421,12 @@ static void xdg_popup_configure(void *data, struct xdg_popup *popup,
 static void xdg_popup_done(void *data, struct xdg_popup *popup) {
     (void)popup;
     fdk_platform_window *pwindow = data;
+    /* X3 (1.1.0-rc1): the compositor's dismissal carries its reason —
+     * the single-slot channel window.c's dispatcher consumes when the
+     * close-request lands on the popup (the trace then says
+     * "compositor dismissal (outside click or focus loss)" instead of
+     * "(unknown)"). */
+    fdk__window_note_popup_close(FDK_POPUP_CLOSE_COMPOSITOR);
     fdk_event_data event = { .type = FDK_EVENT_WINDOW_CLOSE_REQUEST };
     pwindow->conn->dispatch(pwindow, &event,
                             pwindow->conn->dispatch_user_data);
@@ -1047,20 +1084,41 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                 break;
             }
             /* Nothing buffered — READ from the display fd, bounded.
-             * The prepare_read/poll/read_events dance is the same
-             * libwayland idiom wayland_dispatch.c uses (and Mesa's
-             * swapchain waits): read_events routes every event to its
-             * target queue, then the release-queue dispatch above
-             * credits only wl_buffer listeners — a configure read
-             * here stays buffered for the main loop, un-run. Safe to
-             * nest inside a listener: single-threaded, and the outer
-             * dispatch_pending holds no read marker while listeners
-             * execute. */
+             *
+             * 1.1.0-rc1 rework (the W1 report): the old wait used
+             * wl_display_prepare_read() — the DEFAULT-queue variant,
+             * which REFUSES while any default-queue event is pending.
+             * Under heavy pointer motion that is always the case
+             * (every motion is a default-queue event), so the wait
+             * fell into its usleep(1000) fallback and degenerated
+             * into a pure 100ms sleep: releases sitting on the socket
+             * were never read, the wait always failed, every refused
+             * acquire burned 100ms, the dispatch rate collapsed to
+             * ~10 events/s against ~1000/s arriving, the backlog
+             * grew without bound, and on wlroots the server's 4096-byte
+             * per-client buffer overflows and the compositor kills the
+             * connection outright ("Data too big for buffer").
+             *
+             * The fix is the QUEUE-SCOPED variant:
+             * wl_display_prepare_read_queue(display, release_queue)
+             * only fails when the RELEASE queue itself has pending
+             * events — which we then dispatch (progress!), never
+             * sleep. On success, poll+read_events reads EVERYTHING
+             * waiting on the socket into its target queues: release
+             * events land in the release queue (dispatched below),
+             * while default-queue events (motions, configures) are
+             * BUFFERED un-run for the outer loop — reading is safe
+             * from inside a listener precisely because no listener
+             * runs here. The event stream never stalls, so a release
+             * that is already on the wire arrives within one poll
+             * slice. */
             int remaining = (int)(wait_deadline - now_ms());
             if (remaining > 10) {
                 remaining = 10;
             }
-            if (wl_display_prepare_read(pwindow->conn->display) == 0) {
+            if (wl_display_prepare_read_queue(
+                    pwindow->conn->display,
+                    pwindow->conn->release_queue) == 0) {
                 struct pollfd pfd = {
                     .fd = wl_display_get_fd(pwindow->conn->display),
                     .events = POLLIN,
@@ -1077,10 +1135,15 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                     wl_display_cancel_read(pwindow->conn->display);
                 }
             } else {
-                /* Events already queued somewhere: dispatch_pending
-                 * above will have consumed ours next iteration; do
-                 * not spin the CPU waiting for the compositor. */
-                usleep(1000);
+                /* The RELEASE queue has events waiting (the only
+                 * reason the queue-scoped prepare refuses): dispatch
+                 * them right now — one of them may be the release this
+                 * wait exists for — and loop immediately. The 1.1.6
+                 * code slept a millisecond here instead, which under a
+                 * busy default queue turned the whole budget into a
+                 * fixed sleep with zero events ever read (the W1
+                 * freeze). */
+                (void)fdk_wayland_release_queue_dispatch(pwindow->conn);
             }
         }
     }
@@ -1246,14 +1309,23 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
             }
         }
     }
-    wl_surface_commit(pwindow->surface);
-
-    pwindow->rendered_ever = 1;
-
     /* Frame callback for pacing: fires when the compositor has
      * presented this commit (see frame_callback_done). Tracked in
      * pwindow->frame_cb so window_destroy can reap one that never
-     * fires. */
+     * fires.
+     *
+     * ORDER (1.1.0-rc1, found live on sway/labwc headless rigs): the
+     * frame request MUST be marshalled BEFORE the commit it paces.
+     * wl_surface.frame's contract attaches the callback to the commit
+     * it is submitted with; requesting it after the commit attaches it
+     * to the NEXT frame cycle instead — and on wlroots the pending
+     * callback is part of what schedules the output's repaint, so a
+     * commit whose callback trails it can leave the compositor with
+     * damage but no scheduled frame: the commit is processed (the old
+     * buffer is even released), yet the output never re-renders and
+     * wlr-screencopy keeps photographing the stale frame. Every
+     * reference client (weston-simple-shm, GTK, Qt) requests frame
+     * first; now FDK does too. */
     struct wl_callback *cb = wl_surface_frame(pwindow->surface);
     if (cb != NULL) {
         /* A previous callback that never fired (hidden/minimized
@@ -1267,6 +1339,9 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
         wl_callback_add_listener(cb, &g_frame_callback_listener, pwindow);
         pwindow->frame_cb = cb;
     }
+    wl_surface_commit(pwindow->surface);
+
+    pwindow->rendered_ever = 1;
     pwindow->frame_ack = 0;
     pwindow->frame_commit_ms = now_ms();
 
@@ -1282,6 +1357,20 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
     FDK_DEBUG("render buffer presented (%dx%d, %d damage rects)",
               size.width, size.height,
               damage->full ? -1 : damage->count);
+
+    /* Flush after every commit (1.1.0-rc1, the W1 checklist): the
+     * pump's dispatch tail flushes eventually, but a present from an
+     * application paint loop (the demo bar, between pumps) would
+     * otherwise sit in libwayland's output buffer until the next pump
+     * pass — a full pump cadence of latency (100ms in the bar's loop)
+     * before the compositor can even begin to present, frame, or
+     * release. EPIPE here means the compositor is gone; the dispatch
+     * layer's circuit breaker owns the reporting, so this is a quiet
+     * mark-dead. EAGAIN (send buffer full) is not an error: the
+     * request stays queued and rides the next flush. */
+    if (wl_display_flush(pwindow->conn->display) < 0 && errno != EAGAIN) {
+        pwindow->conn->display_dead = 1;
+    }
     return FDK_OK;
 }
 
@@ -1408,6 +1497,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->buffer_size.width = 0;
     pwindow->buffer_size.height = 0;
     pwindow->buffer_attached = 0;
+    pwindow->cursor_shape = 0; /* default arrow until shaped (W2) */
     for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
         pwindow->bg_pending[i] = NULL; /* 1.3.2: fdk_alloc not zeroed */
     }

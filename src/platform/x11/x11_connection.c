@@ -140,10 +140,39 @@ int fdk__x11_detect_scale(Display *display) {
     return scale;
 }
 
+/* The LAZY input-method bring-up (1.1.0-rc1, X1 — see the comment at
+ * the old eager call site above). Invoked from the event translator
+ * when a window first sees FocusIn or a KeyPress: the locale dance +
+ * XOpenIM run exactly once per process, only for keyboard users. */
+void fdk__x11_ensure_xim(fdk_platform_connection *conn) {
+    if (conn == NULL || conn->xim != NULL || conn->xim_tried ||
+        conn->display_dead) {
+        return;
+    }
+    conn->xim_tried = 1;
+    fdk__startup_trace_begin("x11:XOpenIM (lazy)");
+    const char *cur = setlocale(LC_CTYPE, NULL);
+    if (cur == NULL || strcmp(cur, "C") == 0) {
+        (void)setlocale(LC_CTYPE, "");
+    }
+    XSetLocaleModifiers("");
+    conn->xim = XOpenIM(conn->display, NULL, NULL, NULL);
+    fdk__startup_trace("x11:XOpenIM (lazy)");
+    if (conn->xim != NULL) {
+        FDK_INFO("X input method opened — full-Unicode text entry "
+                 "via Xutf8LookupString");
+    } else {
+        FDK_INFO("X input method unavailable — ASCII text-entry "
+                 "fallback (non-ASCII input will not resolve)");
+    }
+}
+
 fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
                                void *dispatch_user_data, const char *app_id,
                                fdk_platform_connection **out_conn) {
+    fdk__startup_trace_begin("x11:XOpenDisplay");
     Display *display = XOpenDisplay(NULL);
+    fdk__startup_trace("x11:XOpenDisplay");
     if (display == NULL) {
         FDK_INFO("XOpenDisplay failed (no X11 display reachable)");
         return FDK_ERR_NO_DISPLAY;
@@ -197,29 +226,20 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
         }
     }
 
-    /* X Input Method (1.3.1): bring up the connection-wide XIM so
-     * per-window XICs can resolve full-Unicode text input. Only the
-     * CTYPE locale is touched, and only when it is still the "C"
-     * default (an application that set its own locale keeps it);
-     * Xutf8LookupString needs a UTF-8 locale to decode non-ASCII. A
-     * failed XOpenIM (no IM support on the server) is not an error —
-     * the ASCII fallback path keeps running. */
+    /* X Input Method (1.3.1; LAZY since 1.1.0-rc1, the X1 report):
+     * XOpenIM used to run right here for every application — and on a
+     * desktop with an input-method daemon configured but slow or gone
+     * (the classic XSetLocaleModifiers + XOpenIM stall), it cost
+     * SECONDS of startup for apps that never type. The IM (and its
+     * per-window XICs) now materialize at the first window that
+     * actually RECEIVES keyboard focus or a key event
+     * (fdk__x11_ensure_xim, called from the event translator) —
+     * pointer-only apps (panels, launchers, the demo bar) never pay
+     * a millisecond. A failed XOpenIM is not an error — the ASCII
+     * fallback path keeps running, and the one-shot xim_tried flag
+     * keeps the attempt from repeating per event. */
     conn->xim = NULL;
-    {
-        const char *cur = setlocale(LC_CTYPE, NULL);
-        if (cur == NULL || strcmp(cur, "C") == 0) {
-            (void)setlocale(LC_CTYPE, "");
-        }
-        XSetLocaleModifiers("");
-        conn->xim = XOpenIM(display, NULL, NULL, NULL);
-        if (conn->xim != NULL) {
-            FDK_INFO("X input method opened — full-Unicode text entry "
-                     "via Xutf8LookupString");
-        } else {
-            FDK_INFO("X input method unavailable — ASCII text-entry "
-                     "fallback (non-ASCII input will not resolve)");
-        }
-    }
+    conn->xim_tried = 0;
 
     /* XSHAPE probe (1.3.2): the empty-input-region primitive behind
      * click-through tooltips. */
@@ -235,7 +255,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     }
     /* fdk_alloc does not zero — None is 0 but be explicit anyway:
      * no font cursor exists until window_set_cursor first needs one. */
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < 10; i++) {
         conn->resize_cursors[i] = None;
     }
 
@@ -350,6 +370,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
             XFree(prop);
         }
     }
+    fdk__startup_trace("x11:EWMH detection");
     FDK_INFO("EWMH window manager %s (maximize support: %s)",
              conn->ewmh_wm ? "detected" : "not detected",
              conn->ewmh_state_ok ? "yes" : "no");
@@ -382,6 +403,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->popup_watchdog_ms = 0;
     conn->desktop_changed = 0;
 
+    fdk__startup_trace("x11:connect complete");
     FDK_INFO("connected (screen %d, %dx%d root)", conn->screen,
              DisplayWidth(display, conn->screen),
              DisplayHeight(display, conn->screen));

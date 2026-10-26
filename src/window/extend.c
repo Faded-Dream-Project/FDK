@@ -414,6 +414,16 @@ fdk_result fdk_ext_surface_get_surface(fdk_ext_surface *surface,
     return fdk_window_get_surface(surface->window, out);
 }
 
+void fdk_ext_surface_set_cursor(fdk_ext_surface *surface, int shape) {
+    if (surface == NULL) {
+        return;
+    }
+    /* The internal window wrapper carries the shape exactly like an
+     * application window's would; the plain int IS fdk_cursor_shape's
+     * values (the header keeps the dependency-free signature). */
+    fdk_window_set_cursor(surface->window, (fdk_cursor_shape)shape);
+}
+
 void fdk_ext_surface_show(fdk_ext_surface *surface) {
     if (surface == NULL || surface->window == NULL) {
         return;

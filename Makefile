@@ -226,7 +226,8 @@ ifeq ($(BUILD_WAYLAND),1)
                            src/platform/wayland/generated/xdg-decoration-unstable-v1-protocol.c \
                            src/platform/wayland/generated/viewporter-protocol.c \
                            src/platform/wayland/generated/fractional-scale-v1-protocol.c \
-                           src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c
+                           src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c \
+                           src/platform/wayland/generated/cursor-shape-v1-protocol.c
 else
   # Stub providing fdk_platform_wayland_ops() returning NULL and
   # fdk_platform_wayland_display_present() returning 0, so

@@ -2,6 +2,8 @@
 
 #include "platform/x11/x11_platform.h"
 
+#include <time.h> /* X3's in-bounds click stamp */
+
 #include "core/log_internal.h"
 
 #include <X11/keysym.h>
@@ -179,6 +181,12 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
         case FocusOut:
             out->type = FDK_EVENT_WINDOW_FOCUS;
             out->focus.focused = (xevent->type == FocusIn);
+            /* Lazy IM/XIC (1.1.0-rc1, X1): focus precedes keys in any
+             * real text-entry flow — bring the input context up HERE
+             * so the first KeyPress already resolves through it. */
+            if (xevent->type == FocusIn && pwindow != NULL) {
+                fdk__x11_window_ensure_xic(pwindow);
+            }
             /* Keep the input context's focus in step (XIM discipline):
              * composition state resets on blur exactly like the
              * widget layer's FOCUS_OUT semantics. */
@@ -193,6 +201,13 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
 
         case KeyPress:
         case KeyRelease: {
+            /* Lazy IM/XIC (1.1.0-rc1, X1): a key arriving without any
+             * prior FocusIn (bare X, no WM) still gets a context —
+             * the XIC resolves this event too, since the event struct
+             * is already in hand when the context is born. */
+            if (xevent->type == KeyPress && pwindow != NULL) {
+                fdk__x11_window_ensure_xic(pwindow);
+            }
             out->type = (xevent->type == KeyPress) ? FDK_EVENT_KEY_DOWN : FDK_EVENT_KEY_UP;
             out->key.scancode = x11_keycode_to_scancode(xevent->xkey.keycode);
             out->key.modifiers = fdk__x11_translate_modifiers(xevent->xkey.state);
@@ -284,6 +299,12 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                  xevent->xbutton.y >= (int)pwindow->last_size.height)) {
                 fdk_x11_window_popup_set_release_reason(pwindow,
                                                         "outside-click");
+                /* X3: the close-request this generates carries its
+                 * reason — the single-slot channel window.c's
+                 * dispatcher consumes when the event lands on the
+                 * popup (was "(unknown)" before the generator noted
+                 * it). */
+                fdk__window_note_popup_close(FDK_POPUP_CLOSE_OUTSIDE_CLICK);
                 out->type = FDK_EVENT_WINDOW_CLOSE_REQUEST;
                 return 1;
             }
@@ -297,6 +318,16 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             out->pointer_button.button = xevent->xbutton.button;
             out->pointer_button.modifiers =
                 fdk__x11_translate_modifiers(xevent->xbutton.state);
+            if (xevent->type == ButtonPress && pwindow->popup) {
+                /* X3: remember when a click LANDED INSIDE the popup —
+                 * an application destroy that follows within a second
+                 * is almost always an item selection. */
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                pwindow->popup_last_button_ms =
+                    (long long)ts.tv_sec * 1000 +
+                    (long long)ts.tv_nsec / 1000000;
+            }
             return 1;
         }
 

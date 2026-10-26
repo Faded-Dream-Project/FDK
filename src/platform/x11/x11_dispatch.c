@@ -151,6 +151,37 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
         XEvent xevent;
         XNextEvent(conn->display, &xevent);
 
+        /* Motion coalescing (1.1.0-rc1, X2 — the lagging dropdown
+         * highlight): X11 queues EVERY MotionNotify the pointer
+         * hardware produced (hundreds per second in motion), and the
+         * old loop translated and dispatched them one at a time — a
+         * listener repaint per event meant the present rate, not the
+         * frame rate, paced the backlog, and the hover feedback fell
+         * further behind with every event (the live report: "the
+         * dropdown highlight lags behind the pointer; on Wayland
+         * it's instant"). The X11-correct drain: when this event is
+         * a motion and MORE motions for the same window are already
+         * queued, skip ahead to the LATEST one — the intermediate
+         * positions are dead state nobody can render between frames
+         * anyway (Xt/GTK's classic XPeekIfEvent pattern). Buttons,
+         * keys, crossings and everything else keep exact ordering;
+         * only the redundant motion spam collapses. */
+        if (xevent.type == MotionNotify) {
+            XEvent newer;
+            while (XPending(conn->display) > 0 &&
+                   XPeekEvent(conn->display, &newer) &&
+                   newer.type == MotionNotify &&
+                   newer.xmotion.window == xevent.xmotion.window) {
+                /* Consume the peeked motion; the loop re-peeks until
+                 * the next queued event is not a same-window motion.
+                 * Only POSITION is lost (dead state between frames);
+                 * buttons, keys, and crossings keep exact order, and
+                 * a different window's motions are never swallowed
+                 * (its own coalescing pass handles them). */
+                XNextEvent(conn->display, &xevent);
+            }
+        }
+
         /* IM filtering (1.3.1): Xlib requires EVERY event to pass
          * through XFilterEvent before normal processing when an input
          * method is active — the IM may consume composition traffic

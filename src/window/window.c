@@ -16,6 +16,7 @@
 #include "core/shortcut_internal.h"
 #include "widget/menu_internal.h"
 
+#include <stdlib.h> /* getenv (FDK_POPUP_TRACE) */
 #include <string.h>
 #include <time.h>
 
@@ -100,12 +101,52 @@ static void window_update_cursor(fdk_window *window, fdk_i32 x,
 static void window_reset_cursor(fdk_window *window);
 static void window_revalidate_pointer(fdk_window *window);
 
-/* Internal size floors for the FDK-driven resize drag when the app
- * set no explicit limits via fdk_window_set_size_limits: a decorated
- * window must keep at least band + 8px of content; any window keeps
- * 60x32. */
 #define DECO_MIN_W 60
 #define DECO_MIN_H 32
+
+/* ---- popup lifecycle trace (1.1.0-rc1, X2/X3) -------------------------- */
+
+/* Monotonic milliseconds; shared with surface.c's present tail
+ * (the popup latency line). */
+long long fdk__window_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + (long long)ts.tv_nsec / 1000000;
+}
+
+/* Shared with surface.c's present tail (the motion->present latency
+ * line): the FDK_POPUP_TRACE gate, read once. */
+int fdk__popup_trace_enabled(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *v = getenv("FDK_POPUP_TRACE");
+        on = (v != NULL && v[0] != '\0') ? 1 : 0;
+    }
+    return on;
+}
+
+static int popup_trace_enabled(void) {
+    return fdk__popup_trace_enabled();
+}
+
+/* The single-slot close-request reason channel (see
+ * window_internal.h). Single-threaded UI; set-consume pairs. */
+static int g_pending_popup_close_reason = FDK_POPUP_CLOSE_NONE;
+
+void fdk__window_note_popup_close(int reason) {
+    g_pending_popup_close_reason = reason;
+}
+
+static const char *popup_close_reason_name(int reason) {
+    switch (reason) {
+        case FDK_POPUP_CLOSE_OUTSIDE_CLICK: return "outside click";
+        case FDK_POPUP_CLOSE_ESCAPE: return "Escape";
+        case FDK_POPUP_CLOSE_COMPOSITOR:
+            return "compositor dismissal (outside click or focus loss)";
+        case FDK_POPUP_CLOSE_PARENT: return "parent closed";
+        default: return "unknown";
+    }
+}
 
 /* ---- Pure helpers (headless-tested in tests/test_window_logic.c) ---- */
 
@@ -817,6 +858,10 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->deco_hover = 0;
     window->deco_pressed = 0;
     window->cursor_edge = FDK_WRES_NONE;
+    window->app_cursor_shape = -1; /* no app shape requested yet */
+    window->popup_motion_ms = 0;
+    window->popup_button_ms = 0;
+    window->popup_close_reason = FDK_POPUP_CLOSE_NONE;
     window->is_popup = (options != NULL && options->popup != 0);
     window->ext = NULL;
     window->shortcuts = NULL;
@@ -910,6 +955,28 @@ void fdk_window_destroy(fdk_window *window) {
     if (window == NULL) {
         return;
     }
+    /* Popup end-of-life trace (1.1.0-rc1, X3 — "(destroy)" was all the
+     * old log said): name the best-known reason. A close-request
+     * reason was already logged at its dispatch; the interesting
+     * cases here are the APPLICATION destroy — where a recent
+     * in-bounds button-down almost always means an item was selected
+     * — and the parent sweep. */
+    if (window->is_popup && popup_trace_enabled()) {
+        if (window->popup_close_reason != FDK_POPUP_CLOSE_NONE) {
+            FDK_INFO("[popup] destroy (after close-request: %s)",
+                     popup_close_reason_name(window->popup_close_reason));
+        } else if (g_pending_popup_close_reason == FDK_POPUP_CLOSE_PARENT) {
+            FDK_INFO("[popup] destroy (parent closed)");
+            g_pending_popup_close_reason = FDK_POPUP_CLOSE_NONE;
+        } else if (window->popup_button_ms != 0 &&
+                   fdk__window_now_ms() - window->popup_button_ms < 1000) {
+            FDK_INFO("[popup] destroy (application; in-bounds button "
+                     "%lld ms ago — likely item selected)",
+                     (long long)(fdk__window_now_ms() - window->popup_button_ms));
+        } else {
+            FDK_INFO("[popup] destroy (application)");
+        }
+    }
     /* Toolkit destroy-notify FIRST, while the window is still whole:
      * holders of borrowed references (the menu session's popups)
      * must drop them before any teardown happens. The notify may
@@ -921,6 +988,7 @@ void fdk_window_destroy(fdk_window *window) {
      * them first, deepest-first via recursion (each popup's own
      * sweep runs inside its destroy). */
     while (window->popup_first != NULL) {
+        fdk__window_note_popup_close(FDK_POPUP_CLOSE_PARENT);
         fdk_window_destroy(window->popup_first);
     }
     /* Unlink from OUR popup parent (if we are somebody's popup). */
@@ -965,6 +1033,32 @@ void fdk_window_destroy(fdk_window *window) {
     fdk_context_unregister_window(window->ctx, window);
     window->ops->window_destroy(window->pwindow);
     fdk_free(window);
+}
+
+void fdk_window_set_cursor(fdk_window *window, fdk_cursor_shape shape) {
+    if (window == NULL) {
+        return;
+    }
+    if (shape != FDK_CURSOR_DEFAULT && shape != FDK_CURSOR_POINTER) {
+        return; /* unknown value: keep the current shape, no error */
+    }
+    if (window->ops->window_set_cursor == NULL) {
+        return; /* backend cannot shape cursors: default arrow stays */
+    }
+    /* Map the public enum onto the op's shape space: DEFAULT is the
+     * shared 0; POINTER rides FDK_PLATFORM_CURSOR_POINTER. The
+     * application's explicit choice overrides the compass-based
+     * shape the resize affordance picked (window->cursor_edge caches
+     * that side; returning to DEFAULT clears the hand only — the
+     * compass re-evaluates on the next motion/enter). */
+    int op_shape = (shape == FDK_CURSOR_POINTER)
+                       ? FDK_PLATFORM_CURSOR_POINTER
+                       : 0;
+    if (window->app_cursor_shape == (int)shape) {
+        return; /* already applied */
+    }
+    window->app_cursor_shape = (int)shape;
+    window->ops->window_set_cursor(window->pwindow, op_shape);
 }
 
 void fdk_window_set_title(fdk_window *window, const char *title) {
@@ -1220,6 +1314,14 @@ static void window_update_cursor(fdk_window *window, fdk_i32 x,
             edge = FDK_WRES_NONE;
         }
     }
+    /* An application-requested shape (fdk_window_set_cursor) OWNS the
+     * cursor: the resize affordance stands down entirely — a panel or
+     * kiosk surface asked for exactly the arrow or the hand, and
+     * border-hover resize cursors would fight it (1.1.0-rc1). */
+    if (window->app_cursor_shape >= 0) {
+        window->cursor_edge = (int)FDK_WRES_NONE; /* bookkeeping only */
+        return;
+    }
     if ((int)edge == window->cursor_edge) {
         return;
     }
@@ -1228,13 +1330,18 @@ static void window_update_cursor(fdk_window *window, fdk_i32 x,
 }
 
 /* Restores the default arrow unconditionally (pointer left the
- * window, or the edge zones disappeared). */
+ * window, or the edge zones disappeared) — unless the application
+ * owns the shape, in which case only the compass bookkeeping clears
+ * (the stored shape is re-applied on the next entry by the backend). */
 static void window_reset_cursor(fdk_window *window) {
     if (window->ops->window_set_cursor == NULL ||
         window->cursor_edge == FDK_WRES_NONE) {
         return;
     }
     window->cursor_edge = FDK_WRES_NONE;
+    if (window->app_cursor_shape >= 0) {
+        return; /* keep the app's shape; bookkeeping only */
+    }
     window->ops->window_set_cursor(window->pwindow, (int)FDK_WRES_NONE);
 }
 
@@ -1487,6 +1594,28 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
     bool state_flipped = false;
     bool first_expose = false;
 
+    /* Popup lifecycle trace (1.1.0-rc1, X2/X3): close requests carry
+     * their reason (the single-slot channel the generators note);
+     * pointer motion/button stamps feed the latency measurement. */
+    if (window->is_popup && popup_trace_enabled()) {
+        if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+            int reason = g_pending_popup_close_reason;
+            g_pending_popup_close_reason = FDK_POPUP_CLOSE_NONE;
+            window->popup_close_reason = reason;
+            FDK_INFO("[popup] close-request (%s)",
+                     popup_close_reason_name(reason));
+        } else if (event->type == FDK_EVENT_POINTER_MOTION ||
+                   event->type == FDK_EVENT_POINTER_ENTER) {
+            window->popup_motion_ms = fdk__window_now_ms();
+        } else if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+            window->popup_button_ms = fdk__window_now_ms();
+        }
+    } else if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        /* Not tracing, or not a popup: the channel still drains so a
+         * stale reason can never leak into a later popup's trace. */
+        g_pending_popup_close_reason = FDK_POPUP_CLOSE_NONE;
+    }
+
     if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
         /* A cached framebuffer acquired at the OLD size is stale now;
          * drop it so the next acquire re-fetches at the new size
@@ -1526,6 +1655,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         fdk_context *esc_ctx = window->ctx;
         fdk_platform_window *esc_pwindow = window->pwindow;
         fdk_event_data close = { .type = FDK_EVENT_WINDOW_CLOSE_REQUEST };
+        fdk__window_note_popup_close(FDK_POPUP_CLOSE_ESCAPE);
         fdk_window_dispatch_event(window, &close);
         if (fdk_context_find_window_by_pwindow(esc_ctx, esc_pwindow) !=
             window) {
@@ -1730,10 +1860,30 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * paint rides the EXPOSE every backend dispatches on first map;
      * hover/selection changes ride the events that caused them. The
      * application's own windows never take this path — their loop,
-     * their pacing. */
+     * their pacing.
+     *
+     * 1.1.0-rc1 (the W1 report): the tail now consults
+     * fdk_surface_frame_ready — frame-callback pacing plus the
+     * backend's own capacity gate — so hover motion can no longer
+     * repaint faster than the compositor consumes frames. Un-paced,
+     * every pointer motion produced a full acquire/present cycle at
+     * the INPUT rate (up to 1000/s); the compositor latches at its
+     * frame rate, the surplus commits filled every render slot, and
+     * the acquisition path spent its whole release budget refusing
+     * (the "all N render buffers in flight" spiral). Pacing here
+     * bounds the commit rate at the compositor's consumption rate;
+     * the damage stays set and the next frame-ack (or the 250ms
+     * starvation guard for hidden surfaces) repaints it. */
     if (window->auto_paint && window->root != NULL &&
-        fdk_widget_tree_has_damage(window->root)) {
+        fdk_widget_tree_has_damage(window->root) &&
+        (window->surface == NULL || fdk_surface_frame_ready(window->surface))) {
         (void)fdk_window_paint(window);
+        /* The motion->present latency line itself lives in
+         * fdk_surface_present (surface.c) — the ONE place every
+         * present path converges (the auto-paint tail here AND the
+         * application-driven presents of extension-API popups, which
+         * paint their surfaces directly and never enter this tail).
+         * Printing it there measures the same latency for both. */
     }
 }
 

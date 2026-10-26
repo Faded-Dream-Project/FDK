@@ -9732,9 +9732,11 @@ static void test_textview_gui(void) {
 /* Policy matrix: FDK_NO_GL=1 is a STRICT CPU answer; FDK_GL_FORCE=1
  * engages the lane wherever the GLX machinery exists (this rig: Xvfb
  * with Mesa llvmpipe — exactly what FORCE was designed to exercise).
- * The default policy is renderer-driven (software = CPU path) and is
- * therefore environment-dependent, so it is OBSERVED here, not
- * asserted — the machine running the suite may well have a real GPU. */
+ * The default policy is SIZE + renderer driven (1.1.0-rc1): surfaces
+ * at or below FDK_GL_MIN_PIXELS are deterministically CPU (pinned
+ * below), larger ones follow the renderer (software = CPU path) and
+ * are therefore environment-dependent — OBSERVED here, not asserted —
+ * the machine running the suite may well have a real GPU. */
 static void test_gl_lane_policy_gui(void) {
     /* API sanity: the query refuses NULLs. */
     assert(fdk_window_get_render_path(NULL, NULL) ==
@@ -9744,33 +9746,6 @@ static void test_gl_lane_policy_gui(void) {
         assert(fdk_window_get_render_path(NULL, &p) ==
                FDK_ERR_INVALID_ARGUMENT);
     }
-
-    /* The window-local helper: one context, window, surface; returns
-     * the render path observed AFTER the first framebuffer acquisition
-     * (the lane's decision point). */
-    #define GL_LANE_OBSERVE(env_setup, want_title) do { \
-        env_setup; \
-        fdk_context *ctx = NULL; \
-        fdk_init_options opts = { .backend = FDK_PLATFORM_X11 }; \
-        assert(fdk_ok(init_with_retry(&ctx, &opts))); \
-        fdk_window *win = NULL; \
-        fdk_window_options wopts = { .title = "gl lane policy", \
-                                     .width = 96, .height = 72 }; \
-        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win))); \
-        fdk_window_show(win); \
-        (void)fdk_pump_events(ctx, 120); \
-        fdk_surface *s = NULL; \
-        assert(fdk_ok(fdk_window_get_surface(win, &s))); \
-        fdk_surface_info info; \
-        assert(fdk_ok(fdk_surface_get_info(s, &info))); \
-        fdk_render_path path = (fdk_render_path)-1; \
-        assert(fdk_ok(fdk_window_get_render_path(win, &path))); \
-        printf("    %s: render path %s\n", want_title, \
-               path == FDK_RENDER_PATH_GL ? "GL" : "CPU"); \
-        fdk_window_destroy(win); \
-        fdk_shutdown(ctx); \
-        (void)path; \
-    } while (0)
 
     setenv("FDK_NO_GL", "1", 1);
     unsetenv("FDK_GL_FORCE");
@@ -9796,15 +9771,17 @@ static void test_gl_lane_policy_gui(void) {
     }
     unsetenv("FDK_NO_GL");
 
-    /* Default policy (no knobs): observe. On this llvmpipe rig the
-     * expected answer is CPU (software renderer refusal); on a
-     * hardware-GPU machine it is GL. */
+    /* Default policy (no knobs): SIZE-driven for small windows —
+     * deterministic on every machine (the gate needs no GL at all):
+     * 96x72 is far below FDK_GL_MIN_PIXELS, so the CPU path is the
+     * answer even on a hardware-GPU display. This is the 1.1.0-rc1
+     * X2 fix's own leg: the panel/popup class never builds a lane. */
     {
         fdk_context *ctx = NULL;
         fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
         assert(fdk_ok(init_with_retry(&ctx, &opts)));
         fdk_window *win = NULL;
-        fdk_window_options wopts = { .title = "gl lane default",
+        fdk_window_options wopts = { .title = "gl lane default small",
                                      .width = 96, .height = 72 };
         assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
         fdk_window_show(win);
@@ -9815,13 +9792,41 @@ static void test_gl_lane_policy_gui(void) {
         assert(fdk_ok(fdk_surface_get_info(s, &info)));
         fdk_render_path path = (fdk_render_path)-1;
         assert(fdk_ok(fdk_window_get_render_path(win, &path)));
-        assert(path == FDK_RENDER_PATH_CPU || path == FDK_RENDER_PATH_GL);
+        assert(path == FDK_RENDER_PATH_CPU);
         fdk_window_destroy(win);
         fdk_shutdown(ctx);
     }
 
-    printf("[ok] GL lane policy: FDK_NO_GL strictly CPU; default "
-           "observed (renderer-driven)\n");
+    /* Default policy for a LARGE window (640x480, above the size
+     * floor) stays renderer-driven — software rasterizers refuse the
+     * lane, hardware GPUs engage it — so it is OBSERVED, not
+     * asserted: the machine running the suite may well have a real
+     * GPU. */
+    {
+        fdk_context *ctx = NULL;
+        fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+        assert(fdk_ok(init_with_retry(&ctx, &opts)));
+        fdk_window *win = NULL;
+        fdk_window_options wopts = { .title = "gl lane default large",
+                                     .width = 640, .height = 480 };
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_window_show(win);
+        (void)fdk_pump_events(ctx, 120);
+        fdk_surface *s = NULL;
+        assert(fdk_ok(fdk_window_get_surface(win, &s)));
+        fdk_surface_info info;
+        assert(fdk_ok(fdk_surface_get_info(s, &info)));
+        fdk_render_path path = (fdk_render_path)-1;
+        assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+        printf("    default/large: render path %s\n",
+               path == FDK_RENDER_PATH_GL ? "GL" : "CPU");
+        fdk_window_destroy(win);
+        fdk_shutdown(ctx);
+    }
+
+    printf("[ok] GL lane policy: FDK_NO_GL strictly CPU; small windows "
+           "CPU by size (deterministic); large default observed "
+           "(renderer-driven)\n");
 }
 
 /* THE core equivalence proof: the same drawing, presented through the

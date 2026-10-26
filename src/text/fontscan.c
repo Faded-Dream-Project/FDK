@@ -326,10 +326,12 @@ static bool fs_try_fontconfig(char **out_path, long *out_face) {
      * fontconfig leak failing both integration suites' ASan runs
      * (1.1.5). */
     fs_lsan_off();
+    fdk__startup_trace_begin("font: fontconfig first query");
     bool found = false;
     if (g_fc.FcInit()) {
         found = fs_fontconfig_walk(out_path, out_face);
     }
+    fdk__startup_trace("font: fontconfig first query");
     fs_lsan_on();
     return found;
 }

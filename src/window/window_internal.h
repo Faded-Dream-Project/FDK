@@ -244,6 +244,20 @@ struct fdk_window {
      * window's geometry changes (see window_revalidate_pointer) and
      * reset when the edge zones disappear. */
     int cursor_edge;
+    /* The application's requested hover shape (fdk_window_set_cursor,
+     * 1.1.0-rc1): -1 none requested (the compass rules), else the
+     * fdk_cursor_shape value last set. The backend op layer carries the
+     * applied shape on the pwindow (cursor_shape) for enter-time
+     * re-application. */
+    int app_cursor_shape;
+
+    /* Popup trace stamps (FDK_POPUP_TRACE, 1.1.0-rc1): the last
+     * pointer-motion time (for the motion-to-present latency), the
+     * last in-bounds button-down time (the "likely item selected"
+     * hint at destroy), and the last close-request reason. */
+    long long popup_motion_ms;
+    long long popup_button_ms;
+    int popup_close_reason;
 
     /* ---- 1.2.2: batched geometry repaint ----
      *
@@ -426,5 +440,29 @@ typedef struct fdk_drag_closure {
  * plain int callback): unpacks the closure, fires the app callback,
  * frees the closure. */
 void fdk__drag_report_done(int status, void *user);
+
+/* ---- popup lifecycle trace (1.1.0-rc1, X2/X3) ---------------------------
+ *
+ * FDK_POPUP_TRACE=1 logs popup lifecycle events at INFO: creation
+ * (size + anchor), every close-request WITH ITS REASON (outside
+ * click / Escape / compositor dismissal), every destroy with the
+ * best-known reason (a preceding close-request, a parent sweep, an
+ * application destroy — with the in-bounds-button hint that usually
+ * means "item selected"), and the motion-to-present latency the X2
+ * report asked to measure (reported in fdk_surface_present — the
+ * convergence point of every present path). The reason rides a
+ * single-slot internal channel: generators call
+ * fdk__window_note_popup_close() right before dispatching the
+ * CLOSE_REQUEST (see platform_internal.h), and the dispatcher
+ * consumes it when the event lands on a popup. */
+void fdk__window_note_popup_close(int reason);
+
+/* The FDK_POPUP_TRACE gate (window.c; read-once). Shared with
+ * surface.c's present tail, which owns the motion->present latency
+ * line — every present path converges there. */
+int fdk__popup_trace_enabled(void);
+
+/* Monotonic milliseconds (window.c; shared for the same line). */
+long long fdk__window_now_ms(void);
 
 #endif /* FDK_WINDOW_INTERNAL_H */

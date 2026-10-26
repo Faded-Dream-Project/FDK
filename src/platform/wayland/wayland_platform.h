@@ -54,6 +54,18 @@ struct fdk_platform_connection {
      * wayland_window.c blocks on it with a bounded poll. */
     struct wl_event_queue *release_queue;
 
+    /* cursor-shape-v1 (1.1.0-rc1, the W2 report): the OPTIONAL
+     * manager global and the per-pointer device derived from it.
+     * When the compositor offers the protocol, cursor shaping goes
+     * through set_shape(serial, enum) — no client-side cursor
+     * surfaces, no theme-file hunting, and the compositor renders
+     * the shape in its own cursor pipeline. Absent (GNOME before
+     * 46, older compositors), shaping falls back to the XCursor
+     * theme path in wayland_cursor.c. The device is (re)created
+     * whenever the seat's pointer object is (seat_capabilities). */
+    struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
+    struct wp_cursor_shape_device_v1 *cursor_shape_device;
+
     /* Globals discovered during the initial registry roundtrip
      * (see wayland_registry.c). All required for Phase 2's
      * "create a window, get input, handle close/resize" scope —
@@ -274,14 +286,24 @@ struct fdk_platform_connection {
 
 #define FDK_WL_RENDER_SLOTS 4
 
-/* Bounded release wait (1.1.6): when every render slot is in flight
- * and the application still wants a framebuffer, FDK waits this long
- * (dispatching the dedicated release queue) for the compositor to
- * release a buffer before considering reaping or refusing. Slow
- * compositors (Muffin's experimental Wayland session on older
- * hardware was the live report) then see delayed frames instead of
- * dropped ones. */
-#define FDK_WL_RELEASE_WAIT_MS 100
+/* Bounded release wait (1.1.6; reworked 1.1.0-rc1): when every render
+ * slot is in flight and the application still wants a framebuffer,
+ * FDK waits this long — READING the display socket (queue-scoped
+ * prepare_read, see get_framebuffer) — for the compositor to release
+ * a buffer before considering reaping or refusing. The 1.1.6 budget
+ * was 100ms of what turned out to be pure usleep under a busy default
+ * queue (the W1 freeze: the dispatch loop collapsed to ~10 events/s
+ * and wlroots killed clients whose 4096-byte server buffer backed
+ * up). With the wait actually reading events, a release that is on
+ * the wire lands within one poll slice (~1ms locally) and one that
+ * the compositor will send at its next frame lands within ~16ms at
+ * 60Hz; 25ms covers a slow compositor's release latency while never
+ * blocking the event loop long enough to matter. Slow compositors
+ * (Muffin's experimental Wayland session, the 1.1.6 report) see
+ * delayed frames instead of dropped ones; the pacing gate in
+ * fdk_window_paint's auto-paint tail keeps repaint attempts off the
+ * refusal path in the first place. */
+#define FDK_WL_RELEASE_WAIT_MS 25
 
 /* Interactive-resize churn bound (1.1.7): when every busy slot holds
  * a buffer at the WRONG size (the interactive-resize state — every
@@ -484,6 +506,15 @@ struct fdk_platform_window {
     int maximized;
     int minimized;
     int fullscreen;
+
+    /* Last cursor shape APPLIED through window_set_cursor (1.1.0-rc1,
+     * W2): the seat's pointer_enter re-applies exactly this shape on
+     * every entry (with the enter serial) — Wayland cursor state does
+     * not survive leaving a surface, and a client that answers no
+     * wl_pointer.enter at all keeps whatever shape it had before
+     * (the resize cursor "sticking" until the pointer left the bar).
+     * 0 = default arrow; see FDK_PLATFORM_CURSOR_POINTER. */
+    int cursor_shape;
     struct zxdg_toplevel_decoration_v1 *toplevel_decoration;
     int deco_client_side;
 };
@@ -651,6 +682,15 @@ void fdk_wayland_window_set_cursor(fdk_platform_window *pwindow, int edge);
 /* Cursor machinery teardown (wayland_cursor.c): destroys the cursor
  * surface, every cached shape buffer, and the cache itself. Called
  * from fdk_wayland_disconnect(). */
+/* Applies `shape` (the window_set_cursor op's space) citing `serial`
+ * — cursor-shape-v1's set_shape when the manager/device exist, else
+ * the XCursor-theme set_cursor path. wayland_seat.c calls this on
+ * every wl_pointer.enter (the W2 fix); the op below calls it on
+ * shape transitions. */
+void fdk_wayland_cursor_apply(fdk_platform_connection *conn,
+                              fdk_platform_window *pwindow,
+                              uint32_t serial, int shape);
+
 void fdk_wayland_cursor_teardown(fdk_platform_connection *conn);
 
 /* Drains the dedicated wl_buffer release queue (wayland_dispatch.c

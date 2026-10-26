@@ -455,7 +455,9 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
      * partially-constructed state. */
     const fdk_platform_ops *ops = NULL;
     fdk_platform_connection *conn = NULL;
+    fdk__startup_trace_begin("backend connect");
     fdk_result r = select_and_connect(requested, ctx, &ops, &conn);
+    fdk__startup_trace("backend connect");
     if (!fdk_ok(r)) {
         /* On any connection failure, the context is fully torn down
          * — no half-initialized state escapes to the caller. */
@@ -474,7 +476,9 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
      * re-theme THIS process while it runs. Bridged through the
      * window layer (window_internal.h) — core never includes theme
      * internals. */
+    fdk__startup_trace_begin("theme settings");
     fdk__window_theme_settings_init(ctx->app_id);
+    fdk__startup_trace("theme settings");
 
     FDK_INFO("initialized (backend=%s, app_id=%s)",
              ops->name ? ops->name : "?",
