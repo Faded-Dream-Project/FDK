@@ -173,3 +173,81 @@ every call — a flooding client must never block or spin the daemon.
 The rig (fdk-shell/tests/notifyd_rig.sh) pins all of this with
 dbus-send (libdbus) and gdbus (GLib) as the cross-implementation
 callers and gdbus monitor as the signal receiver.
+
+## D-007 — trayhost: the StatusNotifier tray host's shape (S-1 / A-11)
+
+**Context.** S-1 needs a full org.kde.StatusNotifierWatcher host:
+the registration service, the item protocol (properties + New*
+signals + menus), and a rendering surface. The sandbox rig proves
+the whole path against a real dbus-daemon with a synthetic item
+(the probe), but shape decisions were made that a real desktop
+will rub against — recorded here, honestly.
+
+- *One floating strip, not reserved space*: the tray renders as a
+  TOP-layer pill at the top-right edge with
+  `exclusive_zone = 0` — it floats OVER panels rather than
+  reserving strut space. A panel embedding a tray wants the panel
+  to own the strut and the tray to live inside it; that is an
+  embedding API (the bar's pattern), not the standalone host's
+  job. `--anchor/--margin/--cell/--bar-height` cover placement.
+- *Passive fades, never hides*: a Passive item draws at alpha
+  0.45 (a scratch-surface alpha multiply — the transform blit
+  has no alpha knob). Hiding it would break the "still there,
+  still clickable" contract the SNI status encodes.
+  NeedsAttention swaps to the attention pixmap and adds the
+  accent marker strip; the host does NOT animate urgency
+  (blinking is a panel-policy decision, D-007's honest limit).
+- *No tooltip windows*: ToolTip data is parsed and kept (title +
+  description), but nothing renders it — a hover tooltip is a
+  separate popup contract (S-4 input regions would sharpen its
+  pointer targeting); the standalone host declines to fake it.
+- *Both registration dialects*: the KDE form (a bus name whose
+  object path is the canonical /StatusNotifierItem) and the
+  Ayatana form (a bare object path, the caller being the item).
+  Signal subscriptions are scoped to the item's UNIQUE bus name
+  (":1.x" — the header value the bus rewrites well-known names
+  into; a well-known-sender rule would never fire, the
+  documented fdk_dbus.h trap).
+- *Vanished items drop by NameOwnerChanged* (the owner_sub,
+  held for the connection's lifetime — freeing a subscription
+  REMOVES its match rule, a bug the rig's drop legs caught):
+  hostile clients never unregister politely, so the host watches
+  owner loss, not the Unregister call.
+- *The dbusmenu contract, pinned*: GetLayout's reply is TWO
+  out-arguments (u revision + the BARE root struct — not
+  variant-wrapped; the av children ARE variant-wrapped);
+  AboutToShow precedes each open; Event(id, "clicked") fires on
+  row selection with NO_REPLY_EXPECTED; mnemonic underscores are
+  stripped at parse ("Fi_rst" renders "First"). Menu refreshes
+  arriving while a menu is OPEN are discarded (stale-safe): the
+  open cascade's rows point INTO the old tree; replacing it
+  mid-open would dangle every row — the next open re-fetches.
+- *The cascade*: submenus open as child popups at the parent's
+  right edge, flipping LEFT when the global right edge is near
+  (the global-x chain is tracked at creation — popups carry no
+  query API). Destroying the ROOT popup lets the backend's
+  family sweep take the native children (destroying them again
+  would double-free); the wrappers free by hand.
+- *IconTheme truth*: the property answers the override channel
+  the icon lookup itself honors first (FDK_ICON_THEME) or
+  "default" — a public-API client cannot read the discovered
+  theme name (the internal accessor is not exported), and
+  pixmaps are the primary channel for real items anyway.
+- *Activate coordinates*: SCREEN coordinates where the anchoring
+  math makes them knowable (X11; the trace logs the computed
+  bar origin), layer-local otherwise — Wayland has no global
+  space, the documented layer-shell truth.
+- *Self-registration over the real bus path*: after taking the
+  Watcher name the host calls RegisterStatusNotifierHost through
+  its own socket and is served by its own handler — exactly as a
+  third party's registration would be (no shortcut).
+
+The rig (fdk-shell/tests/trayhost_rig.sh, 62 checks) pins all of
+this with dbus-send (libdbus) and gdbus (GLib) as the
+cross-implementation callers, gdbus monitor as the signal
+receiver, and the probe — a synthetic item with the
+dual-resolution a(iiay) icon, the full dbusmenu tree, and a live
+control interface — as the item side; X11 legs pixel-verify the
+bar, the fade blend (0.45·icon + 0.55·bg), the amber attention
+swap, and the cascade's edge flip under XTEST input; Wayland legs
+prove the layer-shell handshake under headless sway.

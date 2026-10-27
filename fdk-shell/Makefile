@@ -189,7 +189,7 @@ SHARED_LIB := $(BUILD_DIR)/libfdk-shell.so
 TEST_BINS := $(BUILD_DIR)/tests/test_x11 $(BUILD_DIR)/tests/test_wl
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(wildcard examples/*.c))
 
-.PHONY: all release static shared install uninstall test test-wayland test-x11 test-bar-rig test-notifyd isolation examples clean regen-protocol
+.PHONY: all release static shared install uninstall test test-wayland test-x11 test-bar-rig test-notifyd test-tray isolation examples clean regen-protocol
 
 all: static shared examples
 
@@ -333,6 +333,29 @@ $(NOTIFYD_PROBE): tests/notifyd_probe.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
 
 test-notifyd: examples $(NOTIFYD_PROBE)
 	@bash tests/notifyd_rig.sh 8
+
+# test-tray — the StatusNotifier tray host's full integration rig
+# (1.1.0, S-1/A-11): protocol legs against a REAL dbus-daemon with
+# dbus-send (libdbus) and gdbus (GLib) as the cross-implementation
+# callers and gdbus monitor as the signal receiver; the probe — a
+# synthetic StatusNotifierItem with the dual-resolution a(iiay) icon
+# and a full dbusmenu tree — drives the host end to end; hostile
+# registration and etiquette matrices; X11 pixel + XTEST-click +
+# menu-cascade + Passive/NeedsAttention legs under Xvfb (openbox
+# when present); Wayland layer-shell legs under headless sway. The
+# host runs sanitized with the LSan suppressions. Needs dbus, Xvfb,
+# python3-PIL; self-skips otherwise (TRAY_RIG_REQUIRE=1 makes a skip
+# fatal -- CI does).
+TRAY_PROBE := $(BUILD_DIR)/tests/trayhost_probe
+
+$(TRAY_PROBE): tests/trayhost_probe.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
+	@mkdir -p $(dir $@)
+	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
+	    $(FDK_CFLAGS) $< $(STATIC_LIB) \
+	    $(FDK_LIBS) $(BACKEND_LIBS) -o $@
+
+test-tray: examples $(TRAY_PROBE)
+	@bash tests/trayhost_rig.sh 8
 
 # The prefix-isolation proof (the HARD REQUIREMENT of the add-on
 # contract): FDK is installed into a throwaway prefix, this package

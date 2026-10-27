@@ -47,8 +47,9 @@ make release        # optimized
 make test           # X11 backend tests (auto-starts a throwaway Xvfb)
 make test-wayland   # Wayland tests against $WAYLAND_DISPLAY (self-skips)
 make isolation      # the prefix-isolation build proof
-make examples       # the demo bar + notifyd (the notification daemon)
-make test-notifyd   # notifyd's full rig (real dbus-daemon, pixels, clicks)
+make examples       # the demo bar + notifyd + trayhost
+make test-notifyd   # notifyd's rig (real dbus-daemon, pixels, clicks)
+make test-tray      # trayhost's rig (real dbus-daemon, menus, clicks)
 make install PREFIX=/usr   # headers + libs + pkg-config
 ```
 
@@ -433,3 +434,48 @@ matrix, X11 pixel + XTEST-click + EWMH legs under Xvfb, and
 Wayland layer-shell legs under headless sway when available.
 What only a real desktop can prove is listed in
 FDK's docs/TESTING-ON-DESKTOP.md.
+
+## trayhost — the StatusNotifier tray host example
+
+`examples/trayhost.c` is a complete **org.kde.StatusNotifierWatcher
+host** on FDK's native D-Bus client: it owns the registration
+service, speaks the item protocol to whatever registers, and
+renders the items as a floating top-right strip with their
+dbusmenus as popup cascades.
+
+```sh
+./build/examples/trayhost [--margin N] [--cell N] [--bar-height N]
+                          [--anchor tr|tl|br|bl] [--output N]
+                          [--replace] [--wait]
+FDK_TRAYHOST_TRACE=1  # every registration, fetch, menu transaction
+```
+
+Both registration dialects are served (the KDE bus-name form and
+the Ayatana object-path form), the four watcher properties are
+served through org.freedesktop.DBus.Properties (Get/GetAll, with
+PropertiesChanged emission), and the host registers itself over
+the real bus path once it owns the name. Item loading walks the
+org.kde → org.ayatana → org.freedesktop interface fallback chain,
+decodes the a(iiay) ARGB32 pixmaps (network byte order), parses
+the ToolTip struct, and prefetches the dbusmenu so the FIRST
+right-click works. The New* signal family is scoped to the item's
+unique bus name, and vanished items drop via NameOwnerChanged —
+hostile clients never unregister politely. The dbusmenu client
+speaks the whole contract: GetLayout's two out-arguments, the
+AboutToShow handshake, Event(clicked/opened/closed), mnemonic
+stripping ("Fi_rst" renders "First"), separators, checkmarks,
+radios, disabled rows, and submenus that cascade and flip at the
+screen edge. Passive items fade to alpha 0.45 (never hidden);
+NeedsAttention draws the attention pixmap plus an accent marker.
+
+`make test-tray` runs the rig: real dbus-daemon legs with
+dbus-send (libdbus) and gdbus (GLib) as cross-implementation
+callers, the synthetic-item probe driving the item side (its
+dual-resolution pixmap, its full menu tree, its live control
+interface), hostile-registration and etiquette matrices, X11
+pixel + XTEST-click + cascade + status-change legs under Xvfb,
+and Wayland layer-shell legs under headless sway when available.
+What only a real desktop can prove is listed in FDK's
+docs/TESTING-ON-DESKTOP.md §§5–7; the recorded shape decisions
+(tooltip honesty, the fade-not-hide posture, the floating strip)
+are docs/DECISIONS.md D-007.

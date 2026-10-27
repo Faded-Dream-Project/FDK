@@ -14,6 +14,38 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-27 (on the rc2 line)
 
+### Added — the StatusNotifier tray host (S-1 / A-11)
+
+- **`trayhost` (fdk-shell example, S-1 / A-11)**: a complete
+  org.kde.StatusNotifierWatcher host on FDK's native D-Bus client,
+  rendering the registered StatusNotifierItems as a floating
+  top-right TOP-layer strip on both backends. The full protocol
+  surface: both registration dialects (the KDE bus-name form and
+  the Ayatana object-path form), the four watcher properties
+  through org.freedesktop.DBus.Properties (Get/GetAll/
+  PropertiesChanged emission), the host self-registration over
+  the real bus path, item loading with the
+  org.kde→org.ayatana→org.freedesktop interface fallback chain,
+  the a(iiay) ARGB32 network-byte-order pixmap decode with
+  best-size selection, the (sa(iiay)(ss)ss) ToolTip parse, the
+  New* signal family (scoped to the item's unique bus name — the
+  documented well-known-sender match-rule trap), and vanished-item
+  drops via NameOwnerChanged (hostile clients never unregister
+  politely). The full com.canonical.dbusmenu client: GetLayout's
+  two-out-argument reply parse (u revision + the bare root
+  struct), AboutToShow handshakes, Event(clicked/opened/closed)
+  with NO_REPLY_EXPECTED, mnemonic-underscore stripping,
+  separators/checkmarks/radios/disabled rows, cascading submenus
+  that flip at the screen edge, and mid-open refreshes that are
+  discarded stale-safe (the open rows point into the old tree).
+  Rendering honesty: Passive items fade to alpha 0.45 (never
+  hidden), NeedsAttention swaps to the attention pixmap plus an
+  accent marker strip, left/middle/right clicks drive
+  Activate/SecondaryActivate/the menu. Hostile-input posture and
+  the polite bus-name etiquette match notifyd's. Env trace:
+  FDK_TRAYHOST_TRACE=1. Rig: `make -C fdk-shell test-tray` (62
+  checks; D-007 records the shape decisions).
+
 ### Added — the notification daemon (S-2 / A-12) and its substrate
 
 - **`fdk_icon_theme_surface(name, size)` (FDK core, public API —

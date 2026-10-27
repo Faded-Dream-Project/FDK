@@ -121,6 +121,21 @@ jobs:
         # test infrastructure, the same class as libxtst-dev.
         run: NOTIFYD_RIG_REQUIRE=1 make -C fdk-shell test-notifyd
 
+      - name: fdk-shell — trayhost rig (the StatusNotifier tray host, end to end)
+        # S-1/A-11: org.kde.StatusNotifierWatcher served on the
+        # native D-Bus client, proven against a REAL throwaway
+        # dbus-daemon — both registration dialects (KDE bus-name and
+        # Ayatana object-path), the four watcher properties, hostile
+        # registration refusals, the drop-on-vanish path, the
+        # bus-name etiquette matrix, and the full dbusmenu round
+        # (GetLayout's two out-args, AboutToShow, Event) driven by a
+        # synthetic item; X11 pixel + XTEST-click + menu-cascade +
+        # Passive/NeedsAttention legs under Xvfb. (The Wayland
+        # layer-shell legs self-skip on runners without sway — the
+        # sandbox and TESTING-ON-DESKTOP cover them.) Same test-infra
+        # class as the notifyd step above.
+        run: TRAY_RIG_REQUIRE=1 make -C fdk-shell test-tray
+
   distro-packages:
     name: distro packages
     uses: ./.github/workflows/distro-packages.yml

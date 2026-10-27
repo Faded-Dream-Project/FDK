@@ -45,11 +45,12 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 14 (S-2 pending owner verification) · PARTIAL 11 ·
-IN PROGRESS 1 (M-9) · MISSING 31 ·
+**Counts:** DONE 15 (S-2 and S-1 pending owner verification) ·
+PARTIAL 11 ·
+IN PROGRESS 1 (M-9) · MISSING 30 ·
 DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
-Re-verified 2026-10-27 (post-notifyd): the full battery plus the
-notifyd rig (all three phases green).
+Re-verified 2026-10-27 (post-trayhost): the full battery plus the
+notifyd rig and the trayhost rig (all three phases green each).
 
 | id | item | status | evidence | remaining |
 |----|------|--------|----------|-----------|
@@ -63,7 +64,7 @@ notifyd rig (all three phases green).
 | A-08 | auto-hide / reveal | **MISSING** | no API | C-5 (needs A-06) |
 | A-09 | `_FDK_WM_LAYER` | **DONE** | set on every layer; "_FDK_WM_LAYER level names" test | — |
 | A-10 | cascading submenus | **DONE** | `fdk_shell_popup_create_child` any depth; "popup cascades: 3-deep create/render + family sweep" (x11) + "2-deep cascade popup + family sweep" (wl) | — |
-| A-11 | tray host | **MISSING** | no StatusNotifier code | S-1, fdk-shell side (D-002) |
+| A-11 | tray host | **DONE (should work; owner verification pending)** | trayhost (fdk-shell/examples/trayhost.c) — the full org.kde.StatusNotifierWatcher host on the native client: both registration dialects, the four properties (Get/GetAll/PropertiesChanged), item loading with the interface fallback chain and the a(iiay) decode, New* signal handling, vanished-item drops via NameOwnerChanged, and the complete dbusmenu round (GetLayout two-out-arg parse, AboutToShow, Event, mnemonic stripping, cascading submenus with edge flip); the rig (make -C fdk-shell test-tray) proves protocol (real dbus-daemon, libdbus+GLib cross-implementation callers, gdbus-monitor signal receipt), hostile registrations, the etiquette matrix, X11 pixels+XTEST-clicks+menu-cascade+Passive-fade/NeedsAttention under Xvfb+openbox, and sway layer-shell handshake+pixels. Owner steps: docs/TESTING-ON-DESKTOP.md §§5–7 | S-1 (D-007 records the shape decisions) |
 | A-12 | notification surfaces | **DONE (should work; owner verification pending)** | notifyd (fdk-shell/examples/notifyd.c) — the full org.freedesktop.Notifications server on the native client; the rig (make -C fdk-shell test-notifyd) proves protocol (real dbus-daemon, libdbus+GLib cross-implementation callers, gdbus-monitor signal receipt), hostile/rate limits, name etiquette, X11 pixels+XTEST-clicks+EWMH under Xvfb+openbox, and sway layer-shell handshake+pixels. Owner steps: docs/TESTING-ON-DESKTOP.md §§1–4 (labwc, real incumbents, real clients, hotplug) | — |
 | A-13 | outside-click dismissal, real serial | **DONE** | the core wl suite's menu leg drives xdg_popup.grab with REAL injector serials against sway: "outside click dismissed" (tests/test_wayland_integration.c) | owner's desktop: dismissal on layer popups specifically |
 | B-01 | IME | **PARTIAL** (X11 compose) / **MISSING** (Wayland) | no text-input-v3 binding; XIM `PreeditNothing`; entry/TextView preedit groundwork renders it | M-1 |
@@ -94,7 +95,7 @@ notifyd rig (all three phases green).
 | M-7 | D-Bus foundation + dark mode | **DONE** (foundation 4d42c8c; dark mode d2a253f) | live-bus battery green incl. cross-implementation; wire bytes pinned vs captured reference output; fuzzed; CI makes skips fatal | — [VERIFIED-CHANGED: the row's "rides on top (next)" is stale — dark mode landed] |
 | M-8 | popup cascades | **DONE** (rc2, 0.2.0) | 3-deep x11 + 2-deep wl family sweeps — d2bc0de | — |
 | M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags beyond v1.0.0, rc line held, per-push CI, per-item docs | owner's real-desktop sign-off before any tag |
-| S-1 | tray host | **MISSING** | = A-11 | fdk-shell on the D-Bus client |
+| S-1 | tray host | **DONE (should work; owner verification pending)** | = A-11 (trayhost + the rig; D-007 records the shape decisions) | owner verification via docs/TESTING-ON-DESKTOP.md |
 | S-2 | notification display | **DONE (should work; owner verification pending)** | = A-12 (notifyd + the rig; D-006 records the shape decisions) | owner verification via docs/TESTING-ON-DESKTOP.md |
 | S-3 | idle inhibition | **MISSING** | = B-11 | wl protocol + ScreenSaver D-Bus |
 | S-4 | input regions | **PARTIAL** | = A-06 | the region API |
@@ -165,7 +166,7 @@ What 0.1.0 already does (verified in `fdk-shell/src/`, pinned by
 | A-08 | **Auto-hide / reveal** — no API. Possible today only via destroy/recreate churn (Wayland) or hide (X11); a real answer needs A-06 plus zone animation. | missing | M | panels want it; gtk-layer-shell doesn't provide it either (it is panel-toolkit territory, and fdk-shell IS the panel toolkit here) |
 | A-09 | **`_FDK_WM_LAYER` property** — the README's custom-WM contract (option 2) says fdk-shell "would set it the day a WM adopts it"; setting it unconditionally is harmless on WMs that don't know it and lets the owner's WM adopt without an fdk-shell release. | partial | S | property + README note |
 | A-10 | **Cascading submenus** — core popups parent to any extension surface (verified: `fdk_ext_popup_create` → `fdk__window_create_popup_ex` accepts a popup parent), but fdk-shell's API only takes a LAYER parent, so bars can't build launcher menus with submenus. | partial | S | expose popup-of-popup in the fdk-shell API |
-| A-11 | **StatusNotifier tray host** — no StatusNotifierItem/Watcher. A panel without a tray is half a panel; this is the single most-requested panel feature after the bar itself. Rides the D-Bus foundation (B-08). | missing | M–L | fdk-shell add-on surface + fd sources is exactly the architecture for it |
+| A-11 | **StatusNotifier tray host** — no StatusNotifierItem/Watcher. A panel without a tray is half a panel; this is the single most-requested panel feature after the bar itself. Rides the D-Bus foundation (B-08). | missing | M–L | fdk-shell add-on surface + fd sources is exactly the architecture for it | **[DONE 2026-10-27: trayhost — should work; owner verification pending (docs/TESTING-ON-DESKTOP.md)]** |
 | A-12 | **Notification surfaces** — no org.freedesktop.Notifications client. The overlay layer exists; the protocol client doesn't. Rides B-08. | missing | S–M | natural fdk-shell example (OSD/notification shell) | **[DONE 2026-10-27: notifyd — should work; owner verification pending (docs/TESTING-ON-DESKTOP.md)]** |
 | A-13 | **Wayland outside-click dismissal** — machinery exists (xdg_popup grab, menu-tested) but is untested against a real seat serial; headless rigs can't produce one. | partial | S | owner's machine verification; rig with wlroots virtual pointer can synthesize real serials |
 
@@ -289,7 +290,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 
 | # | item | gaps closed | effort |
 |---|------|-------------|--------|
-| S-1 | **StatusNotifier tray host** in fdk-shell (rides M-7's D-Bus) | A-11 | M–L |
+| S-1 | **StatusNotifier tray host** in fdk-shell (rides M-7's D-Bus) | A-11 | M–L | **[DONE 2026-10-27: trayhost, the rig, D-007 — should work; owner verification pending]** |
 | S-2 | **Notification display** — org.freedesktop.Notifications client as an fdk-shell example/add-on on the overlay layer | A-12 | S–M | **[DONE 2026-10-27: notifyd, the rig, D-006 — should work; owner verification pending]** |
 | S-3 | **Idle inhibition** — idle-inhibit-unstable-v1 (Wayland) + org.freedesktop.ScreenSaver (X11, rides M-7) | B-11 | S–M |
 | S-4 | **Input regions / click-through** — wl_surface.set_input_region + XShape, exposed on windows and extension surfaces | A-06, A-07 | S–M |
