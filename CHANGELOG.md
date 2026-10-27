@@ -12,6 +12,49 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and in-development release
 candidates are marked until the owner promotes them.
 
+## [Unreleased-candidate features] — 2026-10-27 (on the rc2 line)
+
+### Added — the notification daemon (S-2 / A-12) and its substrate
+
+- **`fdk_icon_theme_surface(name, size)` (FDK core, public API —
+  the 758th export)**: the icon-theme engine the file dialogs use,
+  exposed as an owned-clone lookup for applications that draw their
+  own chrome. Resolves one icon name through the full live-theme
+  policy (XSETTINGS, the GTK/KDE/XFCE channels, Inherits, hicolor,
+  pixmaps), rasterizes themed SVG at the requested size, tints
+  `-symbolic` names, and hands back a fresh ARGB8888 surface; NULL
+  on a miss is the caller's cue to draw its own glyph.
+- **`notifyd` (fdk-shell example, S-2 / A-12)**: a complete
+  org.freedesktop.Notifications server on FDK's native D-Bus client,
+  displaying cards as overlay layers on both backends. The full
+  specification surface (Notify with replaces_id/actions/hints,
+  expiry semantics including critical-never-expires, CloseNotification
+  with correct reasons, ActionInvoked, honest GetCapabilities,
+  GetServerInformation, Introspect), a render-only markup sanitizer
+  (links drawn, never followed; `<img>` stripped, src never opened),
+  size/rate caps with every call still answered, the polite
+  bus-name etiquette (one clear line naming an incumbent through its
+  own GetServerInformation; `--replace` / `--wait` for the takeover
+  dance), per-card layers sized exactly to the card (the honest
+  click-through shape until input regions land), stacking that
+  self-heals across output changes, and an env-gated trace
+  (FDK_NOTIFYD_TRACE=1). The rig
+  (`make -C fdk-shell test-notifyd`) proves it against a real
+  dbus-daemon with libdbus and GLib as cross-implementation callers,
+  plus pixel, XTEST-click, EWMH, and layer-shell legs.
+- **`docs/TESTING-ON-DESKTOP.md`**: the numbered owner-verification
+  checklist for everything only a real desktop can prove.
+
+### Fixed
+
+- **LSan vs fontconfig's cold cache**: a fresh CI runner's first
+  fontconfig query writes its on-disk cache through the FcAtomic
+  machinery, whose small bookkeeping pools (320 B) sit outside
+  fontscan.c's `__lsan_disable` bracket and are held for the process
+  lifetime by design — nondeterministic by cache temperature. Now
+  suppressed by module in tests/data/lsan-gl.supp (the GL-lane
+  pattern), so sanitized runs stay strict for everything FDK owns.
+
 ## [Unreleased-candidate fixes] — 2026-10-27 (on the rc2 line)
 
 ### Fixed — CI and packaging truth

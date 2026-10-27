@@ -2530,3 +2530,54 @@ that would have caught the whole thing — the pristine-tree build,
 the package copied ALONE into a scratch directory with no sibling
 FDK anywhere, built against the installed prefix: the packaging
 families' exact condition, now a permanent test.
+
+## 1.1.0 — the notifyd rig (S-2 / A-12)
+
+`make -C fdk-shell test-notifyd` — the notification daemon's full
+integration rig (fdk-shell/tests/notifyd_rig.sh), three phases:
+
+- **Protocol** (a real dbus-daemon via dbus-run-session + bare
+  Xvfb): GetServerInformation/GetCapabilities/Notify through
+  dbus-send (libdbus) AND gdbus (GLib) — two reference
+  implementations parsing FDK's served bytes — with gdbus monitor
+  as a third-party signal receiver for NotificationClosed reasons
+  1/2/3 and ActionInvoked; replaces_id continuity (one closed
+  signal, no spurious close on replace); a hostile battery (1 MiB
+  body, 100 actions, broken markup, entity decoding, four shapes of
+  garbage image-data, wrong argument types) that must leave the
+  daemon answering; the rate limit through the probe (one process,
+  40 real calls in the window — shell loops of per-process callers
+  physically cannot cross it); and the name-etiquette matrix
+  (decline with the incumbent's own GetServerInformation, --replace
+  handover with the first daemon exiting cleanly on NameLost, the
+  refusing-owner refusal line).
+- **Pixels + EWMH** (Xvfb + openbox): the card ON SCREEN by PIL
+  readback of the server's own framebuffer — the raw image-data
+  icon's red pixels (sent through the probe: a TRUE ay byte array;
+  gdbus's text form infers bare number lists as int32 arrays, which
+  the daemon refuses by element-signature check — the rig pins that
+  refusal too), the urgency strip, boundedness against the desktop;
+  stacking (newest at the edge, the older card slides down);
+  XTEST clicks (above the stack hits nothing — the layer is
+  card-sized; on the card invokes default + closes reason 2);
+  expiry removal; and the EWMH mapping by xprop
+  (DOCK/ABOVE/SKIP_TASKBAR). openbox needs XDG_DATA_DIRS pointed at
+  the user-space prefix's themes or it exits theme-less and no EWMH
+  atoms exist.
+- **Layer-shell** (headless sway): the daemon's WAYLAND_DEBUG trace
+  must show zwlr_layer_surface_v1.configure for the card, no
+  wl_display.error, and no attach before the first ack_configure
+  (the present-gate class); grim proves the card's pixels and their
+  removal. NOTE: sway's Wayland socket is `wayland-N`, NOT
+  `sway-ipc.*` (that one is swaymsg's control socket).
+
+The daemon runs SANITIZED with tests/data/lsan-gl.supp throughout —
+which is how the rig caught, in order: the unique-name NameAcquired
+trap (the daemon announced "serving" on its OWN :1.x reflection and
+never sent RequestName), the self-acquisition echo (RequestName's
+NameOwnerChanged reflected back through the name watcher as a
+phantom incumbent), two value-tree ownership double-frees, a
+use-after-free on the trace's borrowed args, and fontconfig's
+cold-cache 320 B. The id parser's own trap is documented in the
+rig: gdbus prints `(uint32 N,)` — extracting "the first number"
+yields 32, from the TYPE NAME, every time.

@@ -19,3 +19,16 @@ leak:libGLdispatch
 leak:libgallium
 leak:libgbm
 leak:libdrm
+
+# fontconfig (added 1.1.0, the notifyd rig): the COLD-CACHE write
+# path. src/text/fontscan.c brackets the first FcInit + query walk
+# with __lsan_disable (the warm-cache allocations, 1.1.5's fix), but
+# when fontconfig's on-disk cache is cold it writes new cache files
+# through the FcAtomic machinery, whose small bookkeeping pools
+# (256 B + 2 x 32 B) are allocated OUTSIDE that bracket and held for
+# the process lifetime by design. Nondeterministic by cache
+# temperature — a fresh CI runner hits it, a warmed sandbox does not
+# (verified by repeated runs both ways). Same class as the GL entries
+# above: third-party process-lifetime state, suppressed by module so
+# everything FDK allocates stays under strict accounting.
+leak:libfontconfig

@@ -55,9 +55,9 @@ jobs:
           # as libx11-dev (nothing in the package chain ships it).
           sudo apt-get install -y --no-install-recommends \
             pkg-config \
-            libx11-dev libxext-dev libxtst-dev zlib1g-dev \
+            libx11-dev libxext-dev libxtst-dev libxi-dev zlib1g-dev \
             libwayland-dev libxkbcommon-dev \
-            dbus \
+            dbus libglib2.0-bin \
             libgl1 xvfb fonts-dejavu-core
 
       - name: Build (debug, sanitizers)
@@ -107,6 +107,19 @@ jobs:
 
       - name: fdk-shell — Wayland suite (self-skips without a compositor)
         run: make -C fdk-shell test-wayland
+
+      - name: fdk-shell — notifyd rig (the notification daemon, end to end)
+        # S-2/A-12: the org.freedesktop.Notifications server on the
+        # native D-Bus client, proven against a REAL throwaway
+        # dbus-daemon — dbus-send (libdbus) and gdbus (GLib) as
+        # cross-implementation callers, gdbus monitor as the signal
+        # receiver; hostile-input and rate-limit batteries; the
+        # bus-name etiquette matrix; X11 pixel + XTEST-click + EWMH
+        # legs under Xvfb. (The Wayland layer-shell legs self-skip on
+        # runners without sway — the sandbox and TESTING-ON-DESKTOP
+        # cover them.) libxi-dev/libglib2.0-bin above are this step's
+        # test infrastructure, the same class as libxtst-dev.
+        run: NOTIFYD_RIG_REQUIRE=1 make -C fdk-shell test-notifyd
 
   distro-packages:
     name: distro packages

@@ -47,7 +47,8 @@ make release        # optimized
 make test           # X11 backend tests (auto-starts a throwaway Xvfb)
 make test-wayland   # Wayland tests against $WAYLAND_DISPLAY (self-skips)
 make isolation      # the prefix-isolation build proof
-make examples       # the demo bar
+make examples       # the demo bar + notifyd (the notification daemon)
+make test-notifyd   # notifyd's full rig (real dbus-daemon, pixels, clicks)
 make install PREFIX=/usr   # headers + libs + pkg-config
 ```
 
@@ -394,3 +395,41 @@ re-run inside every packaging container.
 
 Same as FDK (see FDK's LICENSE) — this package is part of the same
 project, distributed separately.
+
+## notifyd — the notification daemon example (0.2.0)
+
+`examples/notifyd.c` is a complete **org.freedesktop.Notifications
+server** on FDK's native D-Bus client, displaying its cards as
+overlay layers through this package — the S-2/A-12 roadmap item,
+shipped as the "natural fdk-shell example" the audit called for.
+Run it from any session with a session bus:
+
+```sh
+./build/examples/notifyd [--timeout-ms N] [--max-visible N]
+                         [--width N] [--margin N] [--gap N]
+                         [--anchor tr|tl|br|bl] [--output N]
+                         [--replace] [--wait]
+FDK_NOTIFYD_TRACE=1   # every bus call, signal, and placement decision
+```
+
+It speaks the full specification surface — Notify with replaces_id,
+actions, hints (urgency, category, image-data/icon, transient,
+resident), expiry (default / 0 = never / explicit; critical with the
+default timeout never expires), CloseNotification, correct
+NotificationClosed reasons, ActionInvoked, GetCapabilities (an
+honest five), GetServerInformation, and Introspect for bus tools.
+Everything arriving over the bus is treated as untrusted: body
+markup is sanitized to a render-only subset (links render, never
+follow; `<img>` is stripped, its src never opened), sizes and rates
+are capped, and a flood gets its calls answered while its content is
+dropped. The bus-name etiquette is the polite-daemon posture — see
+docs/DECISIONS.md D-006 for the recorded shape decisions (one layer
+per card, sized exactly to the card; newest-at-the-edge stacking).
+
+`make test-notifyd` runs the rig: real dbus-daemon legs with
+dbus-send (libdbus) and gdbus (GLib) as cross-implementation
+callers, hostile-input and rate-limit batteries, the name-conflict
+matrix, X11 pixel + XTEST-click + EWMH legs under Xvfb, and
+Wayland layer-shell legs under headless sway when available.
+What only a real desktop can prove is listed in
+FDK's docs/TESTING-ON-DESKTOP.md.

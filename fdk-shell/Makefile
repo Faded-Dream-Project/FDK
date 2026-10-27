@@ -189,7 +189,7 @@ SHARED_LIB := $(BUILD_DIR)/libfdk-shell.so
 TEST_BINS := $(BUILD_DIR)/tests/test_x11 $(BUILD_DIR)/tests/test_wl
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(wildcard examples/*.c))
 
-.PHONY: all release static shared install uninstall test test-wayland test-x11 test-bar-rig isolation examples clean regen-protocol
+.PHONY: all release static shared install uninstall test test-wayland test-x11 test-bar-rig test-notifyd isolation examples clean regen-protocol
 
 all: static shared examples
 
@@ -312,6 +312,27 @@ test-wayland: $(BUILD_DIR)/tests/test_wl
 # per-compositor otherwise.
 test-bar-rig: examples
 	@bash tests/bar_rig.sh 4
+
+# test-notifyd -- the notification daemon's full integration rig
+# (1.1.0, S-2/A-12): protocol legs against a REAL dbus-daemon with
+# dbus-send (libdbus) and gdbus (GLib) as the cross-implementation
+# callers and gdbus monitor as the signal receiver; hostile-input and
+# rate-limit batteries through the probe; the name-etiquette matrix
+# (decline / --replace handover / refusal); X11 pixel + XTEST-click
+# + EWMH legs under Xvfb (openbox when present); Wayland layer-shell
+# legs under headless sway. The daemon runs sanitized with the LSan
+# suppressions. Needs dbus, Xvfb, python3-PIL; self-skips otherwise
+# (NOTIFYD_RIG_REQUIRE=1 makes a skip fatal -- CI does).
+NOTIFYD_PROBE := $(BUILD_DIR)/tests/notifyd_probe
+
+$(NOTIFYD_PROBE): tests/notifyd_probe.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
+	@mkdir -p $(dir $@)
+	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
+	    $(FDK_CFLAGS) $< $(STATIC_LIB) \
+	    $(FDK_LIBS) $(BACKEND_LIBS) -o $@
+
+test-notifyd: examples $(NOTIFYD_PROBE)
+	@bash tests/notifyd_rig.sh 8
 
 # The prefix-isolation proof (the HARD REQUIREMENT of the add-on
 # contract): FDK is installed into a throwaway prefix, this package

@@ -133,3 +133,43 @@ anything a shell or panel provides TO other apps, which is exactly
 the add-on surface fdk/extend.h exists for. docs/dbus.md carries
 the split table; the roadmap's A-07/B-09 notes are annotated
  accordingly.
+
+## D-006 — notifyd: the notification daemon's shape (S-2 / A-12)
+**2026-10-27.**
+
+The notification display is **one card per notification, one
+zwlr-layer / EWMH-overlay layer surface per card, sized EXACTLY to
+the card** — not one big stack surface. The alternatives traded
+against:
+
+- *One surface per output (the mako shape)*: repaint-on-any-change
+  with zero flicker, but the inter-card gaps and side padding sit
+  INSIDE the input surface — clicks there are eaten (the
+  transparent-margin trap), and without arbitrary input regions
+  (A-06 is still partial: full-surface transparency only) the
+  stack surface cannot make its dead zones click-through. The
+  per-card shape makes the gaps genuinely outside any surface;
+  only the 4–8 px rounded CORNERS eat clicks, which is the honest
+  limit until S-4 lands input regions.
+- *Re-anchoring a card in place when the stack shifts*: layer
+  margins are create-time parameters (A-05's documented
+  destroy/re-create idiom), so a stack change re-creates the
+  layers BELOW the change point. Same-size content updates (the
+  common progress-bar replace) repaint in place with no flicker.
+
+Other recorded calls: links are RENDERED (underlined, themed link
+color) and never followed or fetched — `<img>` is stripped with its
+src never opened; the body translator maps the spec's `<b> <i> <u>
+<a>` onto FDK's markup vocabulary and filters everything else; the
+summary is escaped plain (the spec allows markup in the BODY only).
+The bus-name etiquette is the polite-daemon posture:
+ALLOW_REPLACEMENT always, REPLACE_EXISTING only with `--replace`,
+DO_NOT_QUEUE unless `--wait`; an incumbent is named through its own
+GetServerInformation (one clear line) and never fought. Critical
+urgency with the server-default timeout never expires (the spec's
+recommendation); explicit timeouts are always honored. The rate
+limit (25 Notify/s) and live cap (32) drop content but still answer
+every call — a flooding client must never block or spin the daemon.
+The rig (fdk-shell/tests/notifyd_rig.sh) pins all of this with
+dbus-send (libdbus) and gdbus (GLib) as the cross-implementation
+callers and gdbus monitor as the signal receiver.

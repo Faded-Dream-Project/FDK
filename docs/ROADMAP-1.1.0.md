@@ -45,8 +45,11 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 13 · PARTIAL 11 · IN PROGRESS 1 (M-9) · MISSING 32 ·
+**Counts:** DONE 14 (S-2 pending owner verification) · PARTIAL 11 ·
+IN PROGRESS 1 (M-9) · MISSING 31 ·
 DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
+Re-verified 2026-10-27 (post-notifyd): the full battery plus the
+notifyd rig (all three phases green).
 
 | id | item | status | evidence | remaining |
 |----|------|--------|----------|-----------|
@@ -61,7 +64,7 @@ DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
 | A-09 | `_FDK_WM_LAYER` | **DONE** | set on every layer; "_FDK_WM_LAYER level names" test | — |
 | A-10 | cascading submenus | **DONE** | `fdk_shell_popup_create_child` any depth; "popup cascades: 3-deep create/render + family sweep" (x11) + "2-deep cascade popup + family sweep" (wl) | — |
 | A-11 | tray host | **MISSING** | no StatusNotifier code | S-1, fdk-shell side (D-002) |
-| A-12 | notification surfaces | **MISSING** | no org.freedesktop.Notifications client | S-2, fdk-shell side (D-002) |
+| A-12 | notification surfaces | **DONE (should work; owner verification pending)** | notifyd (fdk-shell/examples/notifyd.c) — the full org.freedesktop.Notifications server on the native client; the rig (make -C fdk-shell test-notifyd) proves protocol (real dbus-daemon, libdbus+GLib cross-implementation callers, gdbus-monitor signal receipt), hostile/rate limits, name etiquette, X11 pixels+XTEST-clicks+EWMH under Xvfb+openbox, and sway layer-shell handshake+pixels. Owner steps: docs/TESTING-ON-DESKTOP.md §§1–4 (labwc, real incumbents, real clients, hotplug) | — |
 | A-13 | outside-click dismissal, real serial | **DONE** | the core wl suite's menu leg drives xdg_popup.grab with REAL injector serials against sway: "outside click dismissed" (tests/test_wayland_integration.c) | owner's desktop: dismissal on layer popups specifically |
 | B-01 | IME | **PARTIAL** (X11 compose) / **MISSING** (Wayland) | no text-input-v3 binding; XIM `PreeditNothing`; entry/TextView preedit groundwork renders it | M-1 |
 | B-02 | text shaping | **MISSING** | stb_truetype codepoint-at-a-time LTR (docs/text.md); no HarfBuzz/FriBidi anywhere | M-2 |
@@ -92,7 +95,7 @@ DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
 | M-8 | popup cascades | **DONE** (rc2, 0.2.0) | 3-deep x11 + 2-deep wl family sweeps — d2bc0de | — |
 | M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags beyond v1.0.0, rc line held, per-push CI, per-item docs | owner's real-desktop sign-off before any tag |
 | S-1 | tray host | **MISSING** | = A-11 | fdk-shell on the D-Bus client |
-| S-2 | notification display | **MISSING** | = A-12 | fdk-shell overlay-layer example/add-on |
+| S-2 | notification display | **DONE (should work; owner verification pending)** | = A-12 (notifyd + the rig; D-006 records the shape decisions) | owner verification via docs/TESTING-ON-DESKTOP.md |
 | S-3 | idle inhibition | **MISSING** | = B-11 | wl protocol + ScreenSaver D-Bus |
 | S-4 | input regions | **PARTIAL** | = A-06 | the region API |
 | S-5 | cursor shape set | **PARTIAL** | = B-12 | the named set |
@@ -163,7 +166,7 @@ What 0.1.0 already does (verified in `fdk-shell/src/`, pinned by
 | A-09 | **`_FDK_WM_LAYER` property** — the README's custom-WM contract (option 2) says fdk-shell "would set it the day a WM adopts it"; setting it unconditionally is harmless on WMs that don't know it and lets the owner's WM adopt without an fdk-shell release. | partial | S | property + README note |
 | A-10 | **Cascading submenus** — core popups parent to any extension surface (verified: `fdk_ext_popup_create` → `fdk__window_create_popup_ex` accepts a popup parent), but fdk-shell's API only takes a LAYER parent, so bars can't build launcher menus with submenus. | partial | S | expose popup-of-popup in the fdk-shell API |
 | A-11 | **StatusNotifier tray host** — no StatusNotifierItem/Watcher. A panel without a tray is half a panel; this is the single most-requested panel feature after the bar itself. Rides the D-Bus foundation (B-08). | missing | M–L | fdk-shell add-on surface + fd sources is exactly the architecture for it |
-| A-12 | **Notification surfaces** — no org.freedesktop.Notifications client. The overlay layer exists; the protocol client doesn't. Rides B-08. | missing | S–M | natural fdk-shell example (OSD/notification shell) | **[IN PROGRESS 2026-10-27]** |
+| A-12 | **Notification surfaces** — no org.freedesktop.Notifications client. The overlay layer exists; the protocol client doesn't. Rides B-08. | missing | S–M | natural fdk-shell example (OSD/notification shell) | **[DONE 2026-10-27: notifyd — should work; owner verification pending (docs/TESTING-ON-DESKTOP.md)]** |
 | A-13 | **Wayland outside-click dismissal** — machinery exists (xdg_popup grab, menu-tested) but is untested against a real seat serial; headless rigs can't produce one. | partial | S | owner's machine verification; rig with wlroots virtual pointer can synthesize real serials |
 
 Not gaps (checked, fine): exclusive-zone edge semantics including the
@@ -287,7 +290,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | # | item | gaps closed | effort |
 |---|------|-------------|--------|
 | S-1 | **StatusNotifier tray host** in fdk-shell (rides M-7's D-Bus) | A-11 | M–L |
-| S-2 | **Notification display** — org.freedesktop.Notifications client as an fdk-shell example/add-on on the overlay layer | A-12 | S–M | **[IN PROGRESS 2026-10-27]** |
+| S-2 | **Notification display** — org.freedesktop.Notifications client as an fdk-shell example/add-on on the overlay layer | A-12 | S–M | **[DONE 2026-10-27: notifyd, the rig, D-006 — should work; owner verification pending]** |
 | S-3 | **Idle inhibition** — idle-inhibit-unstable-v1 (Wayland) + org.freedesktop.ScreenSaver (X11, rides M-7) | B-11 | S–M |
 | S-4 | **Input regions / click-through** — wl_surface.set_input_region + XShape, exposed on windows and extension surfaces | A-06, A-07 | S–M |
 | S-5 | **Cursor shape set** — full named set over cursor-shape-v1 + core font cursors | B-12 | S |
