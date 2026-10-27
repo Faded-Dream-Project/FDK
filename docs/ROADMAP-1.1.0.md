@@ -59,7 +59,7 @@ unaffected):
 | id | item | status | evidence | remaining |
 |----|------|--------|----------|-----------|
 | T-B | reusable notifications + tray: the app-facing API in FDK core (notification client, StatusNotifierItem export, DBusMenu server) on the native D-Bus client, and the host-side model module in fdk-shell (watcher/host, item state, dbusmenu client, notification server/queue — data + events, no drawing), with trayhost/notifyd as thin reference UIs | **IN PROGRESS (2026-10-27)** | documented in docs/EXTENDING.md + docs/DECISIONS.md D-008; rigs for the app-facing API against the real notifyd + trayhost | the whole item |
-| T-C | UI font size from the theme/settings (font_size + optional ui_scale, default 16px; a desktop text-scaling preference followed by default, FDK settings overriding); notification box, paddings, icons, tray cells scaled from it | **MISSING** | the 14px hardcode in trayhost/notifyd is the owner's complaint | the whole item |
+| T-C | UI font size from the theme/settings (font_size + optional ui_scale, default 16px; a desktop text-scaling preference followed by default, FDK settings overriding); notification box, paddings, icons, tray cells scaled from it | **IN PROGRESS (2026-10-27)** | the 14px hardcode in trayhost/notifyd is the owner's complaint | the whole item |
 
 | id | item | status | evidence | remaining |
 |----|------|--------|----------|-----------|
