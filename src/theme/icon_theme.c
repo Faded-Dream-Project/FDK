@@ -1800,3 +1800,35 @@ const char *const *fdk__icon_chain_place(fdk_icon_place_kind kind) {
         return k_chain_place_folder;
     }
 }
+
+/* ---- the public wrapper (1.1.0) --------------------------------------------
+ *
+ * fdk_icon_theme_surface(): the engine's cached decode, handed out as
+ * a FRESH owned clone (see include/fdk/fdk_theme.h). The clone is a
+ * raw ARGB->ARGB blit onto a created surface — verbatim alpha, so a
+ * transparent-surround icon composites exactly like the engine's own
+ * in-tree consumers draw it. */
+fdk_surface *fdk_icon_theme_surface(const char *icon_name, fdk_i32 size) {
+    fdk_surface *cached = fdk__icon_theme_surface(icon_name, size);
+    if (cached == NULL) {
+        return NULL;
+    }
+    fdk_surface_info info;
+    if (fdk_surface_get_info(cached, &info) != FDK_OK) {
+        return NULL;
+    }
+    fdk_surface *clone = NULL;
+    if (fdk_surface_create_format(info.width, info.height,
+                                  FDK_SURFACE_FORMAT_ARGB8888,
+                                  &clone) != FDK_OK) {
+        return NULL;
+    }
+    if (fdk_surface_blit(clone, 0, 0, cached,
+                         (fdk_rect){ .x = 0, .y = 0,
+                                     .width = info.width,
+                                     .height = info.height }) != FDK_OK) {
+        fdk_surface_destroy(clone);
+        return NULL;
+    }
+    return clone;
+}

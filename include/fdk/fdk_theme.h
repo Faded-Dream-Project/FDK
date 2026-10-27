@@ -502,6 +502,32 @@ typedef enum fdk_color_scheme {
 
 fdk_color_scheme fdk_system_color_scheme(void);
 
+/* ---- Themed icon lookup (1.1.0) --------------------------------------------
+ *
+ * The icon-theme engine the file dialogs use (src/theme/icon_theme.c),
+ * exposed for applications that draw their own chrome: panel trays,
+ * notification daemons, launchers. Resolves one icon NAME at one
+ * pixel size through the full policy the desktop's own toolkit
+ * follows — the live theme ($FDK_ICON_THEME override, XSETTINGS
+ * Net/IconThemeName on X11, the GTK/KDE/XFCE settings-file channels
+ * elsewhere), its Inherits chain, hicolor, then the unthemed
+ * pixmaps directories — preferring PNG at the exact size and
+ * rasterizing themed SVG at the REQUESTED size through the vendored
+ * nanosvg. A "-symbolic" name is tinted through its alpha mask with
+ * the current theme's text ink.
+ *
+ * Returns a FRESHLY ALLOCATED offscreen ARGB8888 surface (straight
+ * alpha, composites correctly through fdk_surface_blit_blend),
+ * owned by the caller and released with fdk_surface_destroy —
+ * the engine's internal cache is never handed out, so two callers
+ * never alias one buffer. NULL when the name resolves to nothing
+ * decodable (or name is NULL/empty, size out of 1..4096): callers
+ * fall back to their own glyph, never to a wrong-type icon. Same
+ * UI-thread-only rule as the rest of themes; resolution cost after
+ * the first call is a cache hit plus one clone.
+ */
+fdk_surface *fdk_icon_theme_surface(const char *icon_name, fdk_i32 size);
+
 #ifdef __cplusplus
 }
 #endif

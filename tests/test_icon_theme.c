@@ -846,6 +846,36 @@ static void test_surfaces(void) {
           info.width == 24,
           "SVG rasters per requested size (24 is its own surface)");
 
+    /* ---- the PUBLIC wrapper: fdk_icon_theme_surface (1.1.0) ------
+     * The add-on surface (notifyd's icon path, the future tray
+     * host's): an OWNED clone, never the cache's own pointer, with
+     * the pixels arriving verbatim (identity by color on the solid
+     * fixtures) and the miss contract falling to NULL. */
+    {
+        fdk_surface *pub = fdk_icon_theme_surface("folder", 16);
+        CHECK(pub != NULL, "public icon lookup decodes");
+        if (pub != NULL) {
+            CHECK(pub != s, "public lookup is an owned clone, not the cache");
+            CHECK(fdk_surface_get_info(pub, &info) == FDK_OK &&
+                  info.width == 16 && info.height == 16,
+                  "public clone keeps the geometry");
+            fdk_u32 ppx = info.pixels[0];
+            CHECK((ppx >> 24 & 0xFFu) == 0xFFu &&
+                  (ppx >> 16 & 0xFFu) == 0x00u &&
+                  (ppx >> 8 & 0xFFu) == 0x00u &&
+                  (ppx & 0xFFu) == 0xFFu,
+                  "public clone pixels verbatim (solid blue identity)");
+            fdk_surface_destroy(pub);
+        }
+        CHECK(fdk_icon_theme_surface("no-such-icon-anywhere", 16) == NULL,
+              "public lookup misses to NULL");
+        CHECK(fdk_icon_theme_surface(NULL, 16) == NULL &&
+              fdk_icon_theme_surface("", 16) == NULL &&
+              fdk_icon_theme_surface("folder", 0) == NULL &&
+              fdk_icon_theme_surface("folder", 5000) == NULL,
+              "public lookup rejects NULL/empty names and bad sizes");
+    }
+
     /* ---- CSS-class SVGs: the modern-theme authoring shape -------
      * The vendored upstream nanosvg parses <style> blocks and
      * simple class selectors — the shape Papirus/Breeze/Tela themes
