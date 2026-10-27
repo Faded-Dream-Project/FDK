@@ -52,6 +52,15 @@ DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
 Re-verified 2026-10-27 (post-trayhost): the full battery plus the
 notifyd rig and the trayhost rig (all three phases green each).
 
+**Phase 2 owner directives** (the mission's lettered tasks,
+tracked beside the register; the register's 62-item math is
+unaffected):
+
+| id | item | status | evidence | remaining |
+|----|------|--------|----------|-----------|
+| T-B | reusable notifications + tray: the app-facing API in FDK core (notification client, StatusNotifierItem export, DBusMenu server) on the native D-Bus client, and the host-side model module in fdk-shell (watcher/host, item state, dbusmenu client, notification server/queue — data + events, no drawing), with trayhost/notifyd as thin reference UIs | **IN PROGRESS (2026-10-27)** | documented in docs/EXTENDING.md + docs/DECISIONS.md D-008; rigs for the app-facing API against the real notifyd + trayhost | the whole item |
+| T-C | UI font size from the theme/settings (font_size + optional ui_scale, default 16px; a desktop text-scaling preference followed by default, FDK settings overriding); notification box, paddings, icons, tray cells scaled from it | **MISSING** | the 14px hardcode in trayhost/notifyd is the owner's complaint | the whole item |
+
 | id | item | status | evidence | remaining |
 |----|------|--------|----------|-----------|
 | A-01 | output events | **DONE** | `fdk_shell_output_*` + live sway hotplug legs (tests/test_wl.c: "hotplug ADDED fired", "mode change -> CHANGED", "unplug -> REMOVED") — d2bc0de | — |
