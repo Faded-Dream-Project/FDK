@@ -121,6 +121,15 @@ fdk_dbus_value *fdk_dbus_value_new_variant(const fdk_dbus_value *child);
 fdk_dbus_value *fdk_dbus_value_new_array(const char *elem_sig,
                                          fdk_dbus_value **items,
                                          size_t count);
+/* The BYTE-ARRAY fast form: one flat allocation instead of `count`
+ * byte nodes. Signature is "y" by construction; count is capped at
+ * the message-size limit (8 MiB default) — bulk payloads like icons
+ * and image data are exactly what this is for. Read the result with
+ * fdk_dbus_value_array_flat_bytes(); fdk_dbus_value_array_item()
+ * refuses it (a DEBUG line, NULL — the tree API and the flat API
+ * are deliberately distinct). Marshals as one block. */
+fdk_dbus_value *fdk_dbus_value_new_byte_array(const uint8_t *data,
+                                              size_t count);
 /* A STRUCT: any children, in order — ownership like new_array. */
 fdk_dbus_value *fdk_dbus_value_new_struct(fdk_dbus_value **items,
                                           size_t count);
@@ -169,6 +178,12 @@ const char *fdk_dbus_value_array_signature(const fdk_dbus_value *value);
 size_t      fdk_dbus_value_array_count(const fdk_dbus_value *value);
 const fdk_dbus_value *fdk_dbus_value_array_item(const fdk_dbus_value *value,
                                                 size_t index);
+/* ARRAY, the flat form: the byte block behind a byte array built
+ * with fdk_dbus_value_new_byte_array() (borrowed, lives with the
+ * node); NULL with *count 0 for every other array — the reader a
+ * bulk payload deserves, instead of n array_item() hops. */
+const uint8_t *fdk_dbus_value_array_flat_bytes(const fdk_dbus_value *value,
+                                               size_t *count);
 
 /* VARIANT: its signature (borrowed) and its single child. */
 const char *fdk_dbus_value_variant_signature(const fdk_dbus_value *value);

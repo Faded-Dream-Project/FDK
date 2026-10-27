@@ -796,10 +796,24 @@ int fdk__dbus_marshal_value(fdk__dbuf *b, const fdk_dbus_value *v,
             return r;
         }
         size_t start = b->len;
-        for (size_t i = 0; i < v->v.array.n; i++) {
-            r = fdk__dbus_marshal_value(b, v->v.array.items[i], depth + 1);
+        /* The flat byte-array fast path: one block write instead
+         * of n single-byte marshals (bulk payloads — icons, image
+         * data — were n heap nodes and n switch dispatches). */
+        if (v->v.array.flat != NULL) {
+            if (es[0] != 'y' || es[1] != '\0') {
+                return FDK_ERR_INVALID_ARGUMENT;
+            }
+            r = fdk__dbuf_put(b, v->v.array.flat, v->v.array.n);
             if (r != FDK_OK) {
                 return r;
+            }
+        } else {
+            for (size_t i = 0; i < v->v.array.n; i++) {
+                r = fdk__dbus_marshal_value(b, v->v.array.items[i],
+                                            depth + 1);
+                if (r != FDK_OK) {
+                    return r;
+                }
             }
         }
         size_t n = b->len - start;
@@ -1161,6 +1175,34 @@ static fdk_dbus_value *unmarshal_typed(fdk__dreader *r, const char *sig) {
             return NULL;
         }
         size_t region_end = r->pos + n;
+
+        /* BYTE arrays take the flat fast path: the whole region is
+         * one block, exactly as it left — bulk payloads (icons,
+         * image data) arrive as ONE allocation, readable through
+         * fdk_dbus_value_array_flat_bytes(). This is the same shape
+         * fdk_dbus_value_new_byte_array() builds; every 'ay' on the
+         * wire is flat from here on, and the tree form exists only
+         * for hand-built values. */
+        if (es[0] == 'y' && es[1] == '\0') {
+            fdk_dbus_value *v = value_new_local(FDK_DBUS_ARRAY);
+            if (v == NULL) {
+                fdk_free(es);
+                return NULL;
+            }
+            v->v.array.elem_sig = es; /* ownership moves to the node */
+            v->v.array.n = n;
+            if (n > 0) {
+                v->v.array.flat = fdk_alloc_array(n, 1);
+                if (v->v.array.flat == NULL) {
+                    fdk_free(es);
+                    fdk_free(v);
+                    return NULL;
+                }
+                memcpy(v->v.array.flat, r->data + r->pos, n);
+            }
+            r->pos = region_end;
+            return v;
+        }
 
         r->depth++;
         if (r->depth > FDK_DBUS_MAX_DEPTH) {

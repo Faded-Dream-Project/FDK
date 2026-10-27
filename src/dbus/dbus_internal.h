@@ -191,6 +191,14 @@ struct fdk_dbus_value {
             char *elem_sig; /* owned; one complete type         */
             fdk_dbus_value **items;
             size_t n;
+            uint8_t *flat; /* owned; the BYTE-ARRAY fast form:
+                             non-NULL only for arrays built by
+                             fdk_dbus_value_new_byte_array() —
+                             one flat allocation instead of n byte
+                             nodes (bulk payloads: icons, image
+                             data). items stays NULL there; readers
+                             use fdk_dbus_value_array_flat_bytes()
+                             (array_item() refuses it, loudly).   */
         } array;
         struct { /* VARIANT                                   */
             char *sig; /* owned; exactly one complete type      */

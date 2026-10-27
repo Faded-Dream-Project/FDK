@@ -611,6 +611,18 @@ static void pixmap_free_list(pixmap *list, size_t count) {
 
 /* One (iiay) struct -> pixmap. ARGB32 in NETWORK byte order: the
  * byte sequence in the array is A,R,G,B per pixel. */
+/* A byte from an 'ay' value: the FLAT form first (every array that
+ * arrived on the wire is flat since the value model grew the bulk
+ * form), the tree form second (hand-built values). */
+static uint8_t ay_byte(const fdk_dbus_value *ay, size_t index) {
+    size_t n = 0;
+    const uint8_t *flat = fdk_dbus_value_array_flat_bytes(ay, &n);
+    if (flat != NULL) {
+        return index < n ? flat[index] : 0;
+    }
+    return fdk_dbus_value_byte(fdk_dbus_value_array_item(ay, index));
+}
+
 static int pixmap_from_struct(const fdk_dbus_value *v, pixmap *out) {
     memset(out, 0, sizeof(*out));
     if (v == NULL || fdk_dbus_value_type(v) != FDK_DBUS_STRUCT ||
@@ -648,14 +660,10 @@ static int pixmap_from_struct(const fdk_dbus_value *v, pixmap *out) {
     for (int32_t y = 0; y < h; y++) {
         for (int32_t x = 0; x < w; x++) {
             size_t off = ((size_t)y * (size_t)w + (size_t)x) * 4u;
-            uint32_t a = fdk_dbus_value_byte(
-                fdk_dbus_value_array_item(data, off + 0));
-            uint32_t r = fdk_dbus_value_byte(
-                fdk_dbus_value_array_item(data, off + 1));
-            uint32_t g = fdk_dbus_value_byte(
-                fdk_dbus_value_array_item(data, off + 2));
-            uint32_t b = fdk_dbus_value_byte(
-                fdk_dbus_value_array_item(data, off + 3));
+            uint32_t a = ay_byte(data, off + 0);
+            uint32_t r = ay_byte(data, off + 1);
+            uint32_t g = ay_byte(data, off + 2);
+            uint32_t b = ay_byte(data, off + 3);
             px[(size_t)y * (size_t)w + (size_t)x] =
                 (a << 24) | (r << 16) | (g << 8) | b;
         }
@@ -665,6 +673,7 @@ static int pixmap_from_struct(const fdk_dbus_value *v, pixmap *out) {
     out->pixels = px;
     return 1;
 }
+
 
 /* The a(iiay) array -> an owned pixmap list (bounded). */
 static size_t pixmap_list_from_array(const fdk_dbus_value *arr,

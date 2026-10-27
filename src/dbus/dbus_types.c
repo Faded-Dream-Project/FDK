@@ -274,6 +274,39 @@ fdk_dbus_value *fdk_dbus_value_new_array(const char *elem_sig,
     return v;
 }
 
+fdk_dbus_value *fdk_dbus_value_new_byte_array(const uint8_t *data,
+                                              size_t count) {
+    if (count > 0 && data == NULL) {
+        return NULL;
+    }
+    if (count > FDK_DBUS_MAX_MESSAGE_DEFAULT) {
+        FDK_WARN("fdk_dbus_value_new_byte_array: %zu bytes over the %u "
+                 "MiB message cap — rejected",
+                 count, FDK_DBUS_MAX_MESSAGE_DEFAULT / (1024u * 1024u));
+        return NULL;
+    }
+    fdk_dbus_value *v = value_new(FDK_DBUS_ARRAY);
+    if (v == NULL) {
+        return NULL;
+    }
+    v->v.array.elem_sig = dup_str("y");
+    if (v->v.array.elem_sig == NULL) {
+        fdk_free(v);
+        return NULL;
+    }
+    if (count > 0) {
+        v->v.array.flat = fdk_alloc_array(count, 1);
+        if (v->v.array.flat == NULL) {
+            fdk_free(v->v.array.elem_sig);
+            fdk_free(v);
+            return NULL;
+        }
+        memcpy(v->v.array.flat, data, count);
+    }
+    v->v.array.n = count;
+    return v;
+}
+
 fdk_dbus_value *fdk_dbus_value_new_struct(fdk_dbus_value **items,
                                           size_t count) {
     if (count != 0 && items == NULL) {
@@ -384,10 +417,25 @@ fdk_dbus_value *fdk_dbus_value_clone(const fdk_dbus_value *value) {
             return NULL;
         }
         v->v.array.elem_sig = dup_str(value->v.array.elem_sig);
-        if (v->v.array.elem_sig == NULL ||
-            (value->v.array.n > 0 &&
-             (v->v.array.items = fdk_alloc_array(
-                  value->v.array.n, sizeof(fdk_dbus_value *))) == NULL)) {
+        if (v->v.array.elem_sig == NULL) {
+            fdk_free(v);
+            return NULL;
+        }
+        if (value->v.array.flat != NULL) {
+            v->v.array.flat = fdk_alloc_array(value->v.array.n, 1);
+            if (v->v.array.flat == NULL) {
+                fdk_free(v->v.array.elem_sig);
+                fdk_free(v);
+                return NULL;
+            }
+            memcpy(v->v.array.flat, value->v.array.flat,
+                   value->v.array.n);
+            v->v.array.n = value->v.array.n;
+            return v;
+        }
+        if (value->v.array.n > 0 &&
+            (v->v.array.items = fdk_alloc_array(
+                 value->v.array.n, sizeof(fdk_dbus_value *))) == NULL) {
             fdk_free(v->v.array.elem_sig);
             fdk_free(v);
             return NULL;
@@ -454,10 +502,14 @@ void fdk_dbus_value_free(fdk_dbus_value *value) {
         break;
     case FDK_DBUS_ARRAY:
         fdk_free(value->v.array.elem_sig);
-        for (size_t i = 0; i < value->v.array.n; i++) {
-            fdk_dbus_value_free(value->v.array.items[i]);
+        if (value->v.array.flat != NULL) {
+            fdk_free(value->v.array.flat);
+        } else {
+            for (size_t i = 0; i < value->v.array.n; i++) {
+                fdk_dbus_value_free(value->v.array.items[i]);
+            }
+            fdk_free(value->v.array.items);
         }
-        fdk_free(value->v.array.items);
         break;
     case FDK_DBUS_STRUCT:
     case FDK_DBUS_DICT_ENTRY:
@@ -570,7 +622,26 @@ const fdk_dbus_value *fdk_dbus_value_array_item(const fdk_dbus_value *value,
     if (wrong_type(value, FDK_DBUS_ARRAY) || index >= value->v.array.n) {
         return NULL;
     }
+    if (value->v.array.flat != NULL) {
+        FDK_DEBUG("fdk_dbus_value_array_item: flat byte array — read it "
+                  "with fdk_dbus_value_array_flat_bytes()");
+        return NULL;
+    }
     return value->v.array.items[index];
+}
+
+const uint8_t *fdk_dbus_value_array_flat_bytes(const fdk_dbus_value *value,
+                                               size_t *count) {
+    if (wrong_type(value, FDK_DBUS_ARRAY) || value->v.array.flat == NULL) {
+        if (count != NULL) {
+            *count = 0;
+        }
+        return NULL;
+    }
+    if (count != NULL) {
+        *count = value->v.array.n;
+    }
+    return value->v.array.flat;
 }
 
 const char *fdk_dbus_value_variant_signature(const fdk_dbus_value *value) {

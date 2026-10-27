@@ -245,7 +245,8 @@ TEXT_SRCS     := $(wildcard src/text/*.c)
 THEME_SRCS    := $(wildcard src/theme/*.c)
 I18N_SRCS     := $(wildcard src/i18n/*.c)
 DBUS_SRCS     := $(wildcard src/dbus/*.c)
-LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS) $(THEME_SRCS) $(I18N_SRCS) $(DBUS_SRCS)
+DESKTOP_SRCS  := $(wildcard src/desktop/*.c)
+LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS) $(THEME_SRCS) $(I18N_SRCS) $(DBUS_SRCS) $(DESKTOP_SRCS)
 
 # Static and shared builds use separate object trees (obj/ vs obj-pic/)
 # since shared objects must be position-independent (-fPIC) and static
@@ -285,7 +286,7 @@ SHARED_LIB := $(BUILD_DIR)/libfdk.so
 # lists may wrap freely). Every header already follows this.
 EXPORT_MAP := $(BUILD_DIR)/libfdk.exports.map
 
-TEST_SRCS := $(filter-out tests/test_x11_integration.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/bench.c,$(wildcard tests/*.c))
+TEST_SRCS := $(filter-out tests/test_x11_integration.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/bench.c,$(wildcard tests/*.c))
 TEST_BINS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%,$(TEST_SRCS))
 
 X11_TEST_SRC := tests/test_x11_integration.c
@@ -497,8 +498,14 @@ test-x11: $(X11_TEST_BIN)
 # ubuntu CI job sets FDK_DBUS_TEST_REQUIRE=1 to make skips fail.
 DBUS_LIVE_SRC := tests/test_dbus_live.c
 DBUS_LIVE_BIN := $(BUILD_DIR)/tests/test_dbus_live
+DBUS_NOTIFY_BIN := $(BUILD_DIR)/tests/test_notify_client
+DBUS_TRAY_BIN := $(BUILD_DIR)/tests/test_tray_item
+# One session, every live test: each binary skips individually when it
+# must, and REQUIRE knobs (FDK_DBUS_TEST_REQUIRE / FDK_TRAY_TEST_REQUIRE)
+# make the skips failures where CI demands it.
+DBUS_LIVE_ALL := "$(DBUS_LIVE_BIN) && $(DBUS_NOTIFY_BIN) && $(DBUS_TRAY_BIN)"
 
-test-dbus: $(DBUS_LIVE_BIN)
+test-dbus: $(DBUS_LIVE_BIN) $(DBUS_NOTIFY_BIN) $(DBUS_TRAY_BIN)
 	@if ! command -v dbus-run-session >/dev/null 2>&1; then \
 		echo "[skip] dbus-run-session not available"; exit 0; fi
 	@if [ -z "$$DISPLAY" ]; then \
@@ -509,7 +516,7 @@ test-dbus: $(DBUS_LIVE_BIN)
 		XVFB_PID=$$!; \
 		sleep 2; \
 		echo "== running D-Bus live test under dbus-run-session + Xvfb :$$XVFB_NUM =="; \
-		DISPLAY="$$XVFB_DISP" dbus-run-session -- "$(DBUS_LIVE_BIN)"; \
+		DISPLAY="$$XVFB_DISP" dbus-run-session -- sh -c $(DBUS_LIVE_ALL); \
 		TEST_RESULT=$$?; \
 		kill "$$XVFB_PID" 2>/dev/null; \
 		wait "$$XVFB_PID" 2>/dev/null; \
@@ -517,7 +524,7 @@ test-dbus: $(DBUS_LIVE_BIN)
 		exit $$TEST_RESULT; \
 	else \
 		echo "== running D-Bus live test under dbus-run-session (DISPLAY=$$DISPLAY) =="; \
-		dbus-run-session -- "$(DBUS_LIVE_BIN)"; \
+		dbus-run-session -- sh -c $(DBUS_LIVE_ALL); \
 	fi
 
 $(DBUS_LIVE_BIN): $(DBUS_LIVE_SRC) $(STATIC_LIB)

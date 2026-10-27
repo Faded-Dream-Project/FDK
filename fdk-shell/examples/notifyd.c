@@ -638,6 +638,19 @@ oom:
  * sized by it — width*height overflow is checked in 64-bit.
  */
 
+
+/* A byte from an 'ay' value: the FLAT form first (every array that
+ * arrived on the wire is flat since the value model grew the bulk
+ * form), the tree form second (hand-built values). */
+static uint8_t ay_byte(const fdk_dbus_value *ay, size_t index) {
+    size_t n = 0;
+    const uint8_t *flat = fdk_dbus_value_array_flat_bytes(ay, &n);
+    if (flat != NULL) {
+        return index < n ? flat[index] : 0;
+    }
+    return fdk_dbus_value_byte(fdk_dbus_value_array_item(ay, index));
+}
+
 /* Decodes an (iiibiiay) hint value into an owned ARGB surface, or
  * NULL when the struct is malformed / oversized (logged at trace). */
 static fdk_surface *icon_from_image_data(const fdk_dbus_value *v) {
@@ -731,16 +744,12 @@ static fdk_surface *icon_from_image_data(const fdk_dbus_value *v) {
         for (int x = 0; x < width; x++) {
             size_t off = (size_t)y * (size_t)rowstride +
                          (size_t)x * (size_t)channels;
-            const fdk_dbus_value *px = fdk_dbus_value_array_item(data, off);
-            uint32_t r = fdk_dbus_value_byte(px);
-            uint32_t g = fdk_dbus_value_byte(
-                fdk_dbus_value_array_item(data, off + 1));
-            uint32_t b = fdk_dbus_value_byte(
-                fdk_dbus_value_array_item(data, off + 2));
+            uint32_t r = ay_byte(data, off);
+            uint32_t g = ay_byte(data, off + 1);
+            uint32_t b = ay_byte(data, off + 2);
             uint32_t a = 0xFFu;
             if (alpha_present) {
-                a = fdk_dbus_value_byte(
-                    fdk_dbus_value_array_item(data, off + 3));
+                a = ay_byte(data, off + 3);
             }
             info.pixels[(size_t)y * (size_t)info.stride + (size_t)x] =
                 (a << 24) | (r << 16) | (g << 8) | b;
