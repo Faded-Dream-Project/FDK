@@ -257,7 +257,7 @@ phase_P() {
     : > "$DLOG"; : > "$MLOG"
 
     echo "   P0: the host takes the Watcher name"
-    DISPLAY="$PH_DISP" FDK_TRAYHOST_TRACE=1 "$TRAYHOST" \
+    DISPLAY="$PH_DISP" FDK_TRAYHOST_TRACE=1 "$TRAYHOST" --font-size 14 \
         --quit-after "$((PH_LIFE * 5 + 20))" >>"$DLOG" 2>&1 &
     DPID=$!
     wait_for_name
@@ -442,13 +442,13 @@ Introspect 2>&1)
     local BLOG="$WORK/b.log" CLOG="$WORK/c.log"
     : > "$BLOG"; : > "$CLOG"
     DISPLAY="$PH_DISP" LSAN_OPTIONS="suppressions=$SUPP" \
-        FDK_TRAYHOST_TRACE=1 "$TRAYHOST" --quit-after 6 >>"$DLOG" 2>&1 &
+        FDK_TRAYHOST_TRACE=1 "$TRAYHOST" --font-size 14 --quit-after 6 >>"$DLOG" 2>&1 &
     local APID=$!
     wait_for_name
     check "P8 incumbent serving" $?
 
     DISPLAY="$PH_DISP" LSAN_OPTIONS="suppressions=$SUPP" \
-        "$TRAYHOST" >"$BLOG" 2>&1
+        "$TRAYHOST" --font-size 14 >"$BLOG" 2>&1
     local brc=$?
     grep -q "already owned" "$BLOG"
     local bline=$?
@@ -500,7 +500,7 @@ phase_X() {
     local SNAP="$PH_WORK/x1.png" SNAP2="$PH_WORK/x2.png" SNAP3="$PH_WORK/x3.png"
 
     echo "   X0: the host and the probe under X"
-    DISPLAY="$PH_DISP" FDK_TRAYHOST_TRACE=1 "$TRAYHOST" \
+    DISPLAY="$PH_DISP" FDK_TRAYHOST_TRACE=1 "$TRAYHOST" --font-size 14 \
         --quit-after "$((PH_LIFE * 5 + 30))" >>"$DLOG" 2>&1 &
     local DPID=$!
     wait_for_name
@@ -755,6 +755,162 @@ exit(0 if ok else 1)
     grep -qE "ERROR: (Leak|Address)Sanitizer" "$DLOG" \
         && check "X-last no sanitizer findings" 1 \
         || check "X-last no sanitizer findings" 0
+
+    # XS: the TASK C size sweep — 12 / 16 / 24 / 32 px through the
+    # ENV channel ($FDK_UI_FONT_SIZE -> fdk_ui_font_px -> bar, cell,
+    # menu rows), each proving the geometry follows the font, the
+    # icon still lands centered in its cell, the menu opens with
+    # text inside its rows, and the whole menu fits the screen.
+    for S in 12 16 24 32; do
+        local SLOG="$PH_WORK/xs$S.log" SSNAP="$PH_WORK/xs$S.png" \
+              SPLOG="$PH_WORK/xsp$S.log"
+        : > "$SLOG"; : > "$SPLOG"
+        DISPLAY="$PH_DISP" FDK_TRAYHOST_TRACE=1 FDK_UI_FONT_SIZE=$S \
+            "$TRAYHOST" --quit-after 30 >>"$SLOG" 2>&1 &
+        local SPID=$!
+        wait_for_name
+        check "XS$S host up at font $S px" $?
+        sleep 0.5
+        local ui font_px bar_h cell row_fl
+        ui=$(grep -o \
+            'ui: font [0-9]*px (k=[0-9.]*) bar_h=[0-9]* cell=[0-9]* row>=[0-9]*' \
+            "$SLOG" | tail -1)
+        font_px=$(printf '%s' "$ui" | sed 's/.*font \([0-9]*\)px.*/\1/')
+        bar_h=$(printf '%s' "$ui" | sed 's/.*bar_h=\([0-9]*\).*/\1/')
+        cell=$(printf '%s' "$ui" | sed 's/.*cell=\([0-9]*\).*/\1/')
+        row_fl=$(printf '%s' "$ui" | sed 's/.*row>=\([0-9]*\).*/\1/')
+        local want_bar want_cell
+        want_bar=$(awk -v s="$S" 'BEGIN{printf "%d", int(36*s/14+0.5)}')
+        want_cell=$(awk -v s="$S" 'BEGIN{printf "%d", int(30*s/14+0.5)}')
+        check "XS$S trace math: font=$font_px bar=$bar_h/$want_bar cell=$cell/$want_cell" \
+            $([ "$font_px" = "$S" ] && [ "$bar_h" = "$want_bar" ] &&
+              [ "$cell" = "$want_cell" ] && [ "$row_fl" -ge 20 ] &&
+              echo 0 || echo 1)
+        # The menu fits the 768-tall screen: bar + 10 rows + pads.
+        check "XS$S the 10-row menu fits below the bar" \
+            $([ $(( 4 + bar_h + 8 + 10 * row_fl )) -lt 760 ] &&
+              echo 0 || echo 1)
+        # A fresh probe registers with THIS host instance.
+        DISPLAY="$PH_DISP" LSAN_OPTIONS="suppressions=$SUPP" \
+            "$PROBE" kde 14 >>"$SPLOG" 2>&1 &
+        local QPID=$!
+        sleep 1.6
+        grep -q "registered$" "$SPLOG"
+        check "XS$S the probe registered" $?
+        sleep 0.6
+        grab "$PH_DISP" "$SSNAP"
+        [ -s "$SSNAP" ]
+        check "XS$S framebuffer readable" $?
+        # The icon centered in the computed cell: bar_w = 2*pad + cell,
+        # pad = round(3S/14); blue at the center.
+        local bar_pad cx cy
+        bar_pad=$(awk -v s="$S" 'BEGIN{printf "%d", int(3*s/14+0.5)}')
+        cx=$(( 1024 - 4 - 2 * bar_pad - cell + bar_pad + cell / 2 ))
+        cy=$(( 4 + bar_h / 2 ))
+        local verdicts
+        verdicts=$(python3 - "$SSNAP" "$cx" "$cy" << 'PYX'
+import sys
+from PIL import Image
+snap, cx, cy = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+img = Image.open(snap).convert('RGB')
+W, H = img.size
+def px(x, y):
+    if 0 <= x < W and 0 <= y < H:
+        return img.getpixel((x, y))
+    return (0, 0, 0)
+c = px(cx, cy)
+icon_ok = len(c) == 3 and c[2] > 120 and c[0] < 120
+desk_ok = px(900, 20) == (0, 0, 0)
+print('%d %d %s' % (0 if icon_ok else 1, 0 if desk_ok else 1,
+                    '%d %d %d' % c))
+PYX
+)
+        local v_icon v_desk v_rgb
+        v_icon=$(printf '%s' "$verdicts" | cut -d' ' -f1)
+        v_desk=$(printf '%s' "$verdicts" | cut -d' ' -f2)
+        v_rgb=$(printf '%s' "$verdicts" | cut -d' ' -f3-)
+        check "XS$S the blue icon centered in its cell ($v_rgb)" \
+            "${v_icon:-1}"
+        check "XS$S the desktop beside the bar untouched" "${v_desk:-1}"
+        # Right-click opens the menu; row one carries text.
+        if [ -n "$PH_XTEST" ]; then
+            # The raw right-click driver (button 3), the X3 leg's
+            # proven inline shape — UNQUOTED heredoc so the computed
+            # cell coordinates land in the python.
+            DISPLAY="$PH_DISP" python3 - << PYX 2>/dev/null
+import ctypes
+lib = ctypes.CDLL("libXtst.so.6")
+lib.XOpenDisplay.restype = ctypes.c_void_p
+d = lib.XOpenDisplay(None)
+lib.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                     ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_ulong]
+lib.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint,
+                                     ctypes.c_int, ctypes.c_ulong]
+lib.XTestFakeMotionEvent(d, -1, $cx, $cy, 0)
+lib.XSync(d, 0)
+lib.XTestFakeButtonEvent(d, 3, 1, 0)
+lib.XSync(d, 0)
+lib.XTestFakeButtonEvent(d, 3, 0, 0)
+lib.XSync(d, 0)
+PYX
+            sleep 1.0
+            grab "$PH_DISP" "$SSNAP"
+            local menu_y0=$(( 4 + bar_h ))
+            local mrow0=$(( menu_y0 + 4 ))
+            local mver
+            mver=$(python3 - "$SSNAP" "$mrow0" "$row_fl" \
+                          "$menu_y0" << 'PYX'
+import sys
+from PIL import Image
+snap, mrow0, row_fl, menu_y0 = sys.argv[1], *(int(v) for v in
+                                               sys.argv[2:5])
+img = Image.open(snap).convert('RGB')
+W, H = img.size
+def px(x, y):
+    if 0 <= x < W and 0 <= y < H:
+        return img.getpixel((x, y))
+    return (0, 0, 0)
+BG = (240, 239, 245)
+def is_bg(x, y, tol=10):
+    r, g, b = px(x, y)
+    return (abs(r-BG[0]) <= tol and abs(g-BG[1]) <= tol and
+            abs(b-BG[2]) <= tol)
+# The menu opened: its row-one background is neither the desktop's
+# black nor absent.
+mc = px(1000, mrow0 + row_fl // 2)
+menu_ok = len(mc) == 3 and mc != (0, 0, 0)
+# Text inside the row-one band: a glyph core somewhere in the row.
+txt = 0
+for x in range(720, 991, 3):
+    for y in range(mrow0, mrow0 + row_fl + 1, 2):
+        if not is_bg(x, y):
+            txt = 1
+            break
+    if txt:
+        break
+print('%d %d %s' % (0 if menu_ok else 1, 0 if txt else 1,
+                    '%d %d %d' % mc))
+PYX
+)
+            local v_menu v_txt v_mrgb
+            v_menu=$(printf '%s' "$mver" | cut -d' ' -f1)
+            v_txt=$(printf '%s' "$mver" | cut -d' ' -f2)
+            v_mrgb=$(printf '%s' "$mver" | cut -d' ' -f3-)
+            check "XS$S the menu opened below the bar ($v_mrgb)" \
+                "${v_menu:-1}"
+            check "XS$S menu row one carries text inside its rows" \
+                "${v_txt:-1}"
+        else
+            note "XS$S menu leg (skipped: no XTEST)"
+        fi
+        grep -qE "ERROR: (Leak|Address)Sanitizer" "$SLOG" \
+            && check "XS$S host sanitizer-clean" 1 \
+            || check "XS$S host sanitizer-clean" 0
+        kill $QPID $SPID 2>/dev/null
+        wait $QPID $SPID 2>/dev/null
+        sleep 0.4
+    done
     return $((1 - PASS))
 }
 
@@ -764,7 +920,7 @@ phase_W() {
 
     export WAYLAND_DISPLAY="$PH_WSOCK"
     echo "   W0: the host runs under a real compositor"
-    FDK_TRAYHOST_TRACE=1 WAYLAND_DEBUG=1 "$TRAYHOST" \
+    FDK_TRAYHOST_TRACE=1 WAYLAND_DEBUG=1 "$TRAYHOST" --font-size 14 \
         --quit-after "$PH_LIFE" >>"$DLOG" 2>&1 &
     local DPID=$!
     wait_for_name

@@ -14,6 +14,55 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-27 (on the rc2 line)
 
+### Added — the app-facing notification + tray API (TASK B side 1)
+
+- **`fdk_notify.h` (core)**: the app side of
+  org.freedesktop.Notifications on the native D-Bus client —
+  send (summary/body markup/actions/replaces/timeout/icon as
+  name, path, or raw image bytes), withdraw, and
+  NotificationClosed + ActionInvoked events carrying the
+  note_user the send took. The daemon adoption flow (name watch,
+  capabilities + identity probe), the NO_BUS/NO_DAEMON states
+  reported through the API, re-adoption on daemon restart, and
+  teardown-inside-its-own-event are proven by
+  tests/test_notify_client.c against an in-test mock daemon on a
+  REAL bus (every marshaled field validated at the mock, the
+  image-data bytes read back flat).
+- **`fdk_tray.h` (core)**: the app side of the tray — a
+  StatusNotifierItem export (both interface spellings, the New* +
+  PropertiesChanged dual emission) with a complete DBusMenu
+  server (labels, separators, check/radio with sibling clearing,
+  any-depth submenus, enabled/disabled, live LayoutUpdated, the
+  AboutToShow dirty handshake, Event→click callbacks). KDE-first
+  / ayatana-fallback watcher registration with re-registration
+  through watcher restarts, proven by tests/test_tray_item.c
+  against an in-test mock watcher/host.
+- **The byte-array bulk form** in the D-Bus value model:
+  `fdk_dbus_value_new_byte_array` / `_array_flat_bytes` — one
+  flat allocation instead of n byte nodes, marshaled as one
+  block, produced by the UNMARSHALER too (every 'ay' on the wire
+  is flat). A 256x256 icon stopped being 256K heap nodes on the
+  UI thread; notifyd's and trayhost's byte walks take the flat
+  path first (both rigs re-run ALL PASS). Exports 758 → 795.
+
+### Added — the UI font size (TASK C)
+
+- **`fdk_ui_font_size` / `fdk_ui_scale` / `fdk_ui_font_px`**
+  (core, fdk_theme.h; src/theme/ui_metrics.c): one process-wide
+  answer to "what size is the UI text?", resolved like the color
+  scheme — `$FDK_UI_FONT_SIZE`/`$FDK_UI_SCALE` overrides, then
+  FDK's settings store (`ui.font_size`/`ui.scale`), then the
+  desktop's statement (XSETTINGS `Gtk/FontName` on X11; the
+  portal's `font-name` and `text-scaling-factor` — followed LIVE
+  unless overridden), then the 16 px / 1.0 defaults. The shells
+  scale every dimension off it (card, pads, icon box, buttons,
+  bar height, cell, menu rows) with `--font-size` pinning; core
+  chrome re-derives its historical sizes at the 14 px baseline
+  (ratios preserved; `FDK_UI_FONT_SIZE=14` = the old pixels).
+  tests/test_ui_metrics.c plus the rigs' XS sweeps (12/16/24/32
+  through the ENV channel: glyph-free side pads, on-screen
+  menus, trace math) all green.
+
 ### Added — the StatusNotifier tray host (S-1 / A-11)
 
 - **`trayhost` (fdk-shell example, S-1 / A-11)**: a complete

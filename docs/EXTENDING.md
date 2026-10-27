@@ -498,3 +498,139 @@ signals with arg0-filtered match rules, Properties Get/Set +
 typed PropertiesChanged, name watching through its full lifecycle,
 introspection, and close-from-inside-its-own-callback). The
 ubuntu CI job runs the live suite with skips made fatal.
+
+## 14. Desktop notifications — the app side (1.1.0)
+
+`include/fdk/fdk_notify.h` is the CLIENT half of
+org.freedesktop.Notifications: send a notification to whatever
+daemon the desktop runs, receive closed/action events, withdraw
+early. It owns its session-bus connection, discovers the daemon
+by name, and reports every absence (no bus, no daemon, daemon
+restart) as a STATUS — never a crash, never a busy-loop.
+
+```c
+#include <fdk/fdk.h>
+
+static void on_sent(fdk_notify *n, uint32_t id, void *note, void *u) {
+    printf("shown as id %u\n", id);           /* the replace key */
+}
+static void on_action(fdk_notify *n, uint32_t id, const char *key,
+                      void *note, void *u) {
+    if (strcmp(key, "open") == 0) { /* the user clicked "Open it" */ }
+}
+static void on_closed(fdk_notify *n, uint32_t id, uint32_t reason,
+                      void *note, void *u) { }
+
+int main(void) {
+    fdk_context *ctx = NULL;
+    fdk_init(&ctx, NULL);
+
+    fdk_notify_callbacks cb = {
+        .on_sent = on_sent, .on_action = on_action,
+        .on_closed = on_closed,
+    };
+    fdk_notify *n = fdk_notify_open(ctx, &cb);
+
+    static const char *actions[] = {"open", "Open it", NULL};
+    fdk_notify_request req = {
+        .app_name = "myapp",
+        .icon = "dialog-information",     /* theme name or file:// */
+        .summary = "Download complete",
+        .body = "<b>report.pdf</b> is ready",
+        .actions = actions,
+        .urgency = FDK_NOTIFY_URGENCY_NORMAL,
+        .timeout_ms = -1,                 /* the daemon's default  */
+    };
+    fdk_notify_send(n, &req, NULL /* note_user travels back */);
+
+    fdk_run(ctx);                          /* events fire from here */
+    fdk_notify_close(n);
+    fdk_shutdown(ctx);
+}
+```
+
+The daemon's capabilities (`fdk_notify_capabilities`, once
+`on_ready` fired) tell you what it renders ("body-markup",
+"actions", "icon-static", ...). `image_data`/`image_width`/... in
+the request carry a raw RGB/RGBA buffer as the image-data hint.
+Replaces: pass the id `on_sent` gave you as `replaces_id`.
+Every event about one notification carries the `note_user` its
+send took — no id bookkeeping is forced on the app.
+
+**Test coverage**: tests/test_notify_client.c (`make test-dbus`,
+same dbus-run-session): an in-test mock daemon on a REAL bus —
+the adoption flow, a full Notify round trip with EVERY marshaled
+field validated at the mock (the image-data bytes read back
+flat), withdraw/replaces, malformed-request refusal, the daemon
+vanish/return cycle, and teardown-inside-its-own-event.
+
+## 15. The tray — the app side (1.1.0)
+
+`include/fdk/fdk_tray.h` is the ITEM half of the desktop tray:
+a StatusNotifierItem export (both the org.kde and org.ayatana
+spellings) plus a complete DBusMenu server. The item registers
+with whichever StatusNotifierWatcher answers — KDE name first,
+the ayatana twin as the fallback — re-registers through watcher
+restarts, and reports HOSTED / UNHOSTED through `on_host`.
+
+```c
+fdk_tray_item_options opts = {
+    .id = "myapp-net",                    /* stable, app-unique   */
+    .title = "MyApp network",
+};
+fdk_tray_item *item = fdk_tray_item_open(ctx, &opts, NULL, NULL);
+
+/* A pixmap: ARGB32 in NETWORK (big-endian) byte order. */
+static const uint8_t px[16] = { 0xFF,0x00,0x00,0xFF, /* ... */ };
+fdk_tray_item_set_icon_pixmap(item, 2, 2, px, sizeof px);
+fdk_tray_item_set_tooltip(item, NULL, "MyApp", "All good");
+fdk_tray_item_set_status(item, FDK_TRAY_STATUS_ACTIVE);
+
+fdk_tray_menu *menu = fdk_tray_menu_create();
+uint32_t quit = fdk_tray_menu_add(menu, 0, "_Quit");
+fdk_tray_menu_on_click(menu, on_menu_click, NULL);
+fdk_tray_item_set_menu(item, menu);
+/* live updates: set_label/set_check/set_enabled emit
+   LayoutUpdated; hosts re-fetch. Radio semantics are the
+   toolkit-standard sibling clearing. */
+```
+
+The menu serves com.canonical.dbusmenu's five core calls
+(GetLayout — the two-out-arg nested struct — GetGroupProperties,
+GetProperty, AboutToShow with the dirty handshake, Event); the
+optional bulk group forms are refused with UnknownMethod (an
+honest refusal beats a guessed signature — FDK's own host never
+calls them). Labels may carry the `_` mnemonic convention.
+
+**Test coverage**: tests/test_tray_item.c (`make test-dbus`): an
+in-test mock watcher/host on a REAL bus — registration, the
+host's GetAll walk (pixmap bytes flat-read, the ToolTip shape),
+the full GetLayout tree walk (labels, mnemonic, separator, check,
+radio pair, 2-deep submenu, disabled), Event→click callback,
+LayoutUpdated + the AboutToShow dirty handshake, New*/Properties-
+Changed receipts, activation/scroll, and the watcher
+vanish/return cycle with re-registration.
+
+## 16. The UI font size — one number, everywhere (1.1.0)
+
+`fdk_ui_font_size()` / `fdk_ui_scale()` / `fdk_ui_font_px()`
+(fdk_theme.h) answer "what size is the UI text?" the same way
+`fdk_system_color_scheme()` answers "dark or light?": the
+`$FDK_UI_FONT_SIZE` / `$FDK_UI_SCALE` overrides, then FDK's
+settings store (`ui.font_size` / `ui.scale` — `fdk-set fdk
+ui.font_size 18`), then the desktop's statement (XSETTINGS
+`Gtk/FontName` on X11; the portal's `font-name` and
+`text-scaling-factor`), then the 16 px / 1.0 defaults. The
+answer follows the desktop LIVE (the same events the color
+scheme rides) unless the environment or the settings store owns
+it. Getters never touch a socket.
+
+The reference shells (notifyd, trayhost) scale EVERYTHING off
+this number — card and bar geometry, paddings, icon boxes,
+button and menu rows — with `--font-size N` pinning it for
+tests; `FDK_UI_FONT_SIZE=24 notifyd` is the whole setup. Core's
+own chrome follows with `fdk__ui_derived_px(ref)`: a
+historically-fixed size re-derived at
+`round(ref * fdk_ui_font_px() / 14)` (the design baseline), so
+`FDK_UI_FONT_SIZE=14` lands every value on its historical pixel
+size — the backward-compatible escape hatch.

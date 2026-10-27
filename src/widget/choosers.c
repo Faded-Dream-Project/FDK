@@ -363,7 +363,7 @@ fdk_result fdk_dialog_show_about(fdk_context *ctx,
     a->user_data = user_data;
     a->negative = FDK_DIALOG_CLOSE;
     a->modal = modal;
-    a->font = fdk_font_load_system_default(CHOOSE_FONT_PX);
+    a->font = fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
     a->name_font = a->font;
     if (website != NULL) {
         a->website = fdk__strdup(website);
@@ -910,7 +910,7 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     fc->size = (init_size >= FC_MIN_SIZE && init_size <= FC_MAX_SIZE)
         ? init_size
         : 12;
-    fc->font = fdk_font_load_system_default(CHOOSE_FONT_PX);
+    fc->font = fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
     fc->sample = fdk__strdup(sample);
     if (fc->sample == NULL) {
         if (fc->font != NULL) {
@@ -1641,7 +1641,7 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
     cc->user_data = user_data;
     cc->modal = modal;
     cc->initial = initial;
-    cc->font = fdk_font_load_system_default(CHOOSE_FONT_PX);
+    cc->font = fdk_font_load_system_default(fdk__ui_derived_px(CHOOSE_FONT_PX));
     cc_rgb_to_hsv(initial, &cc->h, &cc->s, &cc->v);
 
     fdk_i32 width = CHOOSE_PAD * 2 + CC_WHEEL + 140;

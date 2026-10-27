@@ -443,6 +443,7 @@ void fdk__theme_settings_recheck(void) {
         watch_stop();
         return;
     }
+    fdk__ui_metrics_invalidate(); /* the store leg may have changed */
     apply_resolved();
 }
 
@@ -593,6 +594,13 @@ void fdk__theme_settings_set_app_id(const char *app_id) {
         }
     }
     watch_start();
+}
+
+/* The current app id (borrowed; NULL when unset) — the ui-metrics
+ * module reads the app-scoped settings file with the same
+ * precedence the theme resolution uses. */
+const char *fdk__theme_settings_app_id(void) {
+    return g_app_id;
 }
 
 /* fdk_shutdown: release the watch (the installed theme, if any, is

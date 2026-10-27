@@ -398,7 +398,7 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
 
     /* Font: borrowed, or the system default we load and own. */
     if (d->font == NULL) {
-        d->font_owned = fdk_font_load_system_default(DLG_FONT_PX);
+        d->font_owned = fdk_font_load_system_default(fdk__ui_derived_px(DLG_FONT_PX));
         d->font = d->font_owned;
     }
 
@@ -611,7 +611,7 @@ fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
     d->surfaced = false;
 
     if (d->font == NULL) {
-        d->font_owned = fdk_font_load_system_default(DLG_FONT_PX);
+        d->font_owned = fdk_font_load_system_default(fdk__ui_derived_px(DLG_FONT_PX));
         d->font = d->font_owned;
     }
 

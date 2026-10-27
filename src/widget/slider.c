@@ -122,7 +122,7 @@ static fdk_font *slider_label_font(fdk_slider *s) {
     if (s->label_font_failed) {
         return NULL;
     }
-    s->label_font = fdk_font_load_system_default(12);
+    s->label_font = fdk_font_load_system_default(fdk__ui_derived_px(12));
     if (s->label_font == NULL) {
         s->label_font_failed = true; /* one honest attempt */
     }

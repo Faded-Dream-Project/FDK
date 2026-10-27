@@ -3350,7 +3350,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
      * 1.4.14 retune — the picker's text was the "too small" half of
      * the maintainer's report, and 15px is the size the widget
      * examples' UI chrome already reads best at. */
-    d->font = fdk_font_load_system_default(15);
+    d->font = fdk_font_load_system_default(fdk__ui_derived_px(15));
     if (d->font == NULL) {
         r = FDK_ERR_PLATFORM;
         goto fail;

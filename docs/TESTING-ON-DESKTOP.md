@@ -219,3 +219,71 @@ DISPLAY=:0 FDK_TRAYHOST_TRACE=1 \
 - Items that register through a real session bus (not
   dbus-run-session): same round as above — this is the
   deployment shape the rigs approximate.
+
+## 8. the UI font size on your desktop (TASK C — needs your eyes)
+
+The shells and FDK's chrome now scale off one answer: the
+theme/settings (`ui.font_size`, `ui.scale`), the desktop's own
+statement (XSETTINGS on X11, the portal on Wayland), or the 16 px
+default. On your labwc setup the visible change is notifyd /
+trayhost rendering at 16 px instead of the old 14.
+
+1. The default (nothing set anywhere):
+
+```sh
+DISPLAY=:0 ./fdk-shell/build/examples/notifyd
+notify-send "Default size" "should read comfortably at 16 px"
+DISPLAY=:0 ./fdk-shell/build/examples/trayhost   # bar taller than before
+```
+
+Expected: cards and the tray strip are ~14% larger than the old
+builds (font 16 vs the old 14); nothing clipped — summary and
+body inside the card, menu rows inside the menu.
+
+2. Each size, explicitly (the rig's XS sweep, by hand):
+
+```sh
+for S in 12 16 24 32; do
+  DISPLAY=:0 FDK_UI_FONT_SIZE=$S FDK_NOTIFYD_TRACE=1 \
+    ./fdk-shell/build/examples/notifyd &
+  notify-send "Size $S" "the card grows with the font; nothing clips"
+  sleep 4; pkill -f 'examples/notifyd'
+done
+FDK_TRAYHOST_TRACE=1 FDK_UI_FONT_SIZE=32 \
+  DISPLAY=:0 ./fdk-shell/build/examples/trayhost
+```
+
+Expected: each daemon's first trace line reads
+`ui: font <S>px (k=...) card_w=...` (trayhost: `bar_h=...`) —
+the number you asked for; the card/bar/menu grow with it; at 32
+px the menu's 10 rows still fit the screen and no label touches
+a card edge.
+
+3. The desktop's own statement (the follow-by-default channel):
+run your session's settings (labwc + xsettingsd / gsettings
+portal) with a different font (`gsettings set
+org.gnome.desktop.interface font-name 'Sans 11'` where a portal
+exists), restart notifyd, and confirm the trace line follows.
+`FDK_UI_FONT_SIZE` beats it; `fdk-set fdk ui.font_size 18` beats
+it too (the FDK-settings-wins rule).
+
+4. Trace variable: `FDK_NOTIFYD_TRACE=1` / `FDK_TRAYHOST_TRACE=1`
+prints the `ui:` metrics line (the one the rigs parse).
+
+## 9. the app-facing API against YOUR desktop (TASK B — needs your eyes)
+
+The core client (`fdk_notify.h`) and tray item (`fdk_tray.h`)
+are proven against in-test mocks; against your real daemon/host
+this is the check (build any example against the installed FDK,
+or use the rig's probe binary as the item):
+
+1. Your daemon (dunst / mako / the DE's own) — send with actions
+   and an image, confirm the action callback and the close
+   reason arrive; kill the daemon mid-flight and confirm the
+   status moves to NO_DAEMON and back on restart.
+2. Your tray host (Waybar / the panel's) — register an item with
+   the snippet in docs/EXTENDING.md §15, confirm the icon, the
+   tooltip, the menu tree (including radios and a submenu), and
+   a live `set_label` (the host re-fetches on LayoutUpdated).
+3. Restart the host (or the watcher service) and confirm the
+   item re-registers (on_host flips 0 then 1).

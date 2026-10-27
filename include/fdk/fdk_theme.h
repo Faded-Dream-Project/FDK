@@ -502,6 +502,28 @@ typedef enum fdk_color_scheme {
 
 fdk_color_scheme fdk_system_color_scheme(void);
 
+/* ---- UI metrics (1.1.0) ---------------------------------------------------
+ *
+ * The process's UI font size and scale — one answer, resolved like
+ * the color scheme: the $FDK_UI_FONT_SIZE / $FDK_UI_SCALE
+ * environment overrides, then FDK's settings store
+ * (ui.font_size / ui.scale), then the desktop's statement
+ * (XSETTINGS Gtk/FontName on X11; the portal's font-name and
+ * text-scaling-factor), then the 16 px / 1.0 defaults. The answer
+ * follows the desktop LIVE (the same events the color scheme
+ * rides) unless the environment or the settings store owns it.
+ * Getters never touch a socket; UI-thread only.
+ *
+ * fdk_ui_font_px() is the one number a renderer should use:
+ * round(base * scale), clamped to [8, 96]. */
+
+/* The base UI font size in pixels (before the scale). */
+int fdk_ui_font_size(void);
+/* The UI scale multiplier (1.0 default). */
+double fdk_ui_scale(void);
+/* The effective size: round(base * scale), clamped [8, 96]. */
+int fdk_ui_font_px(void);
+
 /* ---- Themed icon lookup (1.1.0) --------------------------------------------
  *
  * The icon-theme engine the file dialogs use (src/theme/icon_theme.c),

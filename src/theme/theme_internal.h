@@ -113,6 +113,8 @@ bool fdk__theme_settings_watch_drain(void);
 
 /* settings.c: lifecycle, bridged from core through window.c. */
 void fdk__theme_settings_set_app_id(const char *app_id);
+/* The current app id (borrowed; NULL when unset). */
+const char *fdk__theme_settings_app_id(void);
 void fdk__theme_settings_shutdown(void);
 
 /* settings.c: fdk_theme_destroy's ownership slot — forget `theme` if
@@ -271,5 +273,26 @@ const char *const *fdk__icon_chain_for_name(const char *name);
 
 /* The places-sidebar chains (symbolic-first, per the desktop norm). */
 const char *const *fdk__icon_chain_place(fdk_icon_place_kind kind);
+
+
+/* ---- the ui-metrics module (1.1.0, ui_metrics.c) --------------------------
+ *
+ * The process's UI font size and scale (see fdk_theme.h's public
+ * getters). Same live channels as the color scheme: this X11 poll
+ * (the backend's PropertyNotify), the portal tick (the pump), the
+ * settings-file invalidation. */
+
+/* A historically-fixed widget/chrome font size, re-derived for the
+ * current UI metrics: round(ref * fdk_ui_font_px() / 14), clamped
+ * to [8, 96]. The 14 baseline is the size the widget set was
+ * designed against (the shells' old hardcode); at
+ * FDK_UI_FONT_SIZE=14 every value lands exactly on its historical
+ * pixel size — the backward-compatible escape hatch. */
+int fdk__ui_derived_px(int reference_px);
+
+void fdk__ui_metrics_poll_x11(void);
+void fdk__ui_metrics_portal_tick(fdk_context *ctx);
+void fdk__ui_metrics_shutdown(void);
+void fdk__ui_metrics_invalidate(void);
 
 #endif /* FDK_THEME_INTERNAL_H */

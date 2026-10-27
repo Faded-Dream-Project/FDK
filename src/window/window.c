@@ -2113,6 +2113,7 @@ void fdk__window_theme_settings_shutdown(void) {
      * shutdown sweep (an app-level close frees it cleanly; leaving
      * it would dangle the module's handle past the sweep). */
     fdk__color_scheme_shutdown();
+    fdk__ui_metrics_shutdown();
     fdk__theme_settings_shutdown();
 }
 
@@ -2122,6 +2123,7 @@ void fdk__window_theme_settings_shutdown(void) {
  * dispatch, between event batches, on the UI thread. */
 void fdk__window_theme_settings_notify(void) {
     fdk__color_scheme_poll_x11();
+    fdk__ui_metrics_poll_x11();
     fdk__theme_settings_recheck();
 }
 
@@ -2131,6 +2133,7 @@ void fdk__window_theme_settings_notify(void) {
  * channel owns the answer or an override is set). */
 void fdk__window_theme_scheme_tick(fdk_context *ctx) {
     fdk__color_scheme_portal_tick(ctx);
+    fdk__ui_metrics_portal_tick(ctx);
 }
 
 /* The pump's poll face: -1 when no settings file is watched. */
@@ -2211,7 +2214,8 @@ static void deco_load_font(fdk_window *window) {
     if (window->deco_font != NULL) {
         return; /* app font borrowed, or already loaded */
     }
-    window->deco_font_owned = fdk_font_load_system_default(14);
+    window->deco_font_owned = fdk_font_load_system_default(
+        fdk__ui_derived_px(14));
     window->deco_font = window->deco_font_owned;
     /* NULL (no system font) is legal: the band renders without title
      * text; the loader already warned once. The window buttons are

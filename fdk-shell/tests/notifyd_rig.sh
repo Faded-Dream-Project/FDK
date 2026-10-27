@@ -191,7 +191,7 @@ phase_P() {
     start_daemon_p() {
         # Outlives the whole phase (PH_LIFE covers the interaction
         # legs; explicit kills do the cleanup).
-        DISPLAY="$PH_DISP" FDK_NOTIFYD_TRACE=1 "$NOTIFYD" \
+        DISPLAY="$PH_DISP" FDK_NOTIFYD_TRACE=1 "$NOTIFYD" --font-size 14 \
             --quit-after "$((PH_LIFE * 5 + 20))" "$@" >>"$PH_DLOG" 2>&1 &
         DPID=$!
     }
@@ -356,14 +356,14 @@ phase_P() {
     local BLOG="$PH_WORK/b.log" CLOG="$PH_WORK/c.log"
     : > "$BLOG"
     DISPLAY="$PH_DISP" LSAN_OPTIONS="suppressions=$SUPP" \
-        FDK_NOTIFYD_TRACE=1 "$NOTIFYD" --quit-after 6 >>"$PH_DLOG" 2>&1 &
+        FDK_NOTIFYD_TRACE=1 "$NOTIFYD" --font-size 14 --quit-after 6 >>"$PH_DLOG" 2>&1 &
     local APID=$!
     wait_for_name
     check "P9 incumbent serving" $?
 
     # B: declines politely, one clear line, exit 0
     DISPLAY="$PH_DISP" LSAN_OPTIONS="suppressions=$SUPP" \
-        "$NOTIFYD" >"$BLOG" 2>&1
+        "$NOTIFYD" --font-size 14 >"$BLOG" 2>&1
     local brc=$?
     grep -q "already owned" "$BLOG"
     local bline=$?
@@ -420,7 +420,7 @@ phase_X() {
     local SNAP="$PH_WORK/x1.png" SNAP2="$PH_WORK/x2.png"
 
     echo "   X0: the daemon takes the bus name"
-    DISPLAY="$PH_DISP" FDK_NOTIFYD_TRACE=1 "$NOTIFYD" \
+    DISPLAY="$PH_DISP" FDK_NOTIFYD_TRACE=1 "$NOTIFYD" --font-size 14 \
         --quit-after "$((PH_LIFE * 5 + 20))" >>"$PH_DLOG" 2>&1 &
     local DPID=$!
     wait_for_name
@@ -544,7 +544,7 @@ exit(0 if ok else 1)
 
     # X5: the EWMH mapping (a WM was present for this leg).
     if [ "$PH_OPENBOX" = "1" ] && have xprop; then
-        DISPLAY="$PH_DISP" FDK_NOTIFYD_TRACE=1 "$NOTIFYD" \
+        DISPLAY="$PH_DISP" FDK_NOTIFYD_TRACE=1 "$NOTIFYD" --font-size 14 \
             --quit-after 30 >>"$PH_DLOG" 2>&1 &
         DPID=$!
         wait_for_name
@@ -570,6 +570,110 @@ exit(0 if ok else 1)
     else
         note "X5 (skipped: no WM or xprop)"
     fi
+
+    # XS: the TASK C size sweep — 12 / 16 / 24 / 32 px through the
+    # ENV channel (the whole metrics chain: $FDK_UI_FONT_SIZE ->
+    # fdk_ui_font_px -> every card dimension), each proving the card
+    # grows with the font and no text clips at the card's edges.
+    for S in 12 16 24 32; do
+        local SLOG="$PH_WORK/xs$S.log" SSNAP="$PH_WORK/xs$S.png"
+        : > "$SLOG"
+        DISPLAY="$PH_DISP" FDK_NOTIFYD_TRACE=1 FDK_UI_FONT_SIZE=$S \
+            "$NOTIFYD" --quit-after 30 >>"$SLOG" 2>&1 &
+        local SPID=$!
+        wait_for_name
+        check "XS$S daemon up at font $S px" $?
+        sleep 0.5
+        local ui font_px card_w pad_x pad_y
+        ui=$(grep -o \
+            'ui: font [0-9]*px (k=[0-9.]*) card_w=[0-9]* pad=[0-9]*/[0-9]*' \
+            "$SLOG" | tail -1)
+        font_px=$(printf '%s' "$ui" | sed 's/.*font \([0-9]*\)px.*/\1/')
+        card_w=$(printf '%s' "$ui" | sed 's/.*card_w=\([0-9]*\).*/\1/')
+        pad_x=$(printf '%s' "$ui" |
+                sed 's/.*pad=\([0-9]*\)\/.*/\1/')
+        pad_y=$(printf '%s' "$ui" |
+                sed 's/.*pad=[0-9]*\/\([0-9]*\).*/\1/')
+        check "XS$S trace: font=$font_px card_w=$card_w pad_x=$pad_x" \
+            $([ -n "$font_px" ] && [ "$font_px" = "$S" ] &&
+              [ "$card_w" -ge 300 ] && [ "$pad_x" -ge 6 ] &&
+              echo 0 || echo 1)
+        g_notify "RigApp" 0 "" "Size $S" \
+            "The $S pixel sweep body wraps cleanly without clipping any text at the card edges" \
+            "[]" "{}" 15000 >/dev/null 2>&1
+        sleep 1.2
+        grab "$PH_DISP" "$SSNAP"
+        [ -s "$SSNAP" ]
+        check "XS$S framebuffer readable" $?
+        local x0=$(( 1024 - 8 - card_w ))
+        # ONE python pass over the snapshot (a per-pixel helper would
+        # spawn a PIL process per sample — the sweep would take
+        # minutes): bounded left edge, summary text present inside
+        # the text column, and the side pads glyph-free.
+        local verdicts
+        verdicts=$(python3 - "$SSNAP" "$x0" "$card_w" "$pad_x" "$pad_y" \
+                          "$S" << 'PYX'
+import sys
+from PIL import Image
+snap, x0, card_w, pad_x, pad_y, fs = sys.argv[1:7]
+x0, card_w, pad_x, pad_y, fs = map(int, (x0, card_w, pad_x, pad_y, fs))
+img = Image.open(snap).convert('RGB')
+W, H = img.size
+BG = (240, 239, 245)
+def px(x, y):
+    if 0 <= x < W and 0 <= y < H:
+        return img.getpixel((x, y))
+    return (0, 0, 0)
+def is_bg(x, y, tol=10):
+    r, g, b = px(x, y)
+    return (abs(r-BG[0]) <= tol and abs(g-BG[1]) <= tol and
+            abs(b-BG[2]) <= tol)
+# 1. bounded: the pixel LEFT of the traced edge is NOT the card (a
+# WM's root texture is not necessarily black — openbox draws one),
+# the pixel inside IS the card's fill.
+left = (not is_bg(x0 - 4, 40, 30)) and is_bg(x0 + 12, 40, 30)
+# 2. summary text present inside the text column.
+band0, band1 = 8 + pad_y, 8 + pad_y + fs + 6
+txt = 0
+for x in range(x0 + pad_x, x0 + card_w - pad_x, 2):
+    for y in range(band0, band1 + 1, 2):
+        if not is_bg(x, y):
+            txt = 1
+            break
+    if txt:
+        break
+# 3. the side pads carry no glyph pixels (nothing clips). The LEFT
+# scan starts past the urgency strip (normal-urgency cards carry
+# one; its width scales with the font: round(3*S/14)).
+strip_w = int(3 * fs / 14 + 0.5)
+edge = 0
+for x in range(x0 + strip_w + 2, x0 + pad_x):
+    for y in range(band0, band1 + 1):
+        if not is_bg(x, y):
+            edge = 1
+for x in range(x0 + card_w - pad_x + 1, x0 + card_w - 4):
+    for y in range(band0, band1 + 1):
+        if not is_bg(x, y):
+            edge = 1
+print('%d %d %d' % (0 if left else 1, 0 if txt else 1, edge))
+PYX
+)
+        local v_left v_txt v_edge
+        v_left=$(printf '%s' "$verdicts" | cut -d' ' -f1)
+        v_txt=$(printf '%s' "$verdicts" | cut -d' ' -f2)
+        v_edge=$(printf '%s' "$verdicts" | cut -d' ' -f3)
+        check "XS$S card's left edge where the trace says" \
+            "${v_left:-1}"
+        check "XS$S summary text renders inside the card" "${v_txt:-1}"
+        check "XS$S side pads glyph-free (no horizontal clipping)" \
+            "${v_edge:-1}"
+        grep -qE "ERROR: (Leak|Address)Sanitizer" "$SLOG" \
+            && check "XS$S sanitizer-clean" 1 \
+            || check "XS$S sanitizer-clean" 0
+        kill $SPID 2>/dev/null
+        wait $SPID 2>/dev/null
+        sleep 0.4
+    done
     return $((1 - PASS))
 }
 
@@ -583,7 +687,7 @@ phase_W() {
 
     export WAYLAND_DISPLAY="$PH_WSOCK"
     echo "   W0: the daemon runs under a real compositor"
-    FDK_NOTIFYD_TRACE=1 WAYLAND_DEBUG=1 "$NOTIFYD" \
+    FDK_NOTIFYD_TRACE=1 WAYLAND_DEBUG=1 "$NOTIFYD" --font-size 14 \
         --quit-after "$PH_LIFE" >>"$PH_DLOG" 2>&1 &
     local DPID=$!
     wait_for_name

@@ -101,13 +101,55 @@ static const char *const k_caps[] = {
 #define RATE_MAX 25 /* Notify calls per window before dropping      */
 
 /* Card metrics (logical px). */
-#define CARD_PAD_X 14
-#define CARD_PAD_Y 12
-#define CARD_RADIUS 8
-#define ICON_BOX 36
-#define ICON_GAP 10
-#define BUTTON_H 26
-#define BUTTON_GAP 8
+/* The UI metrics (TASK C): every card dimension derives from the
+ * process's UI font size (fdk_ui_font_px — theme/settings, the
+ * desktop's statement, default 16), scaled off the 14 px baseline
+ * the card was designed against, so text, box, paddings, icons and
+ * buttons grow together and nothing clips. --font-size pins it. */
+typedef struct {
+    int font_px;
+    double k; /* font_px / 14 — the design baseline               */
+    int pad_x, pad_y;   /* card interior padding (14 / 12)        */
+    int radius;         /* the card's corner radius (8)           */
+    int icon_box;       /* the icon's square (36)                 */
+    int icon_gap;       /* icon-to-text gap (10)                  */
+    int button_h;       /* action button height (26)              */
+    int button_gap;     /* button block's top gap (8)             */
+    int button_r;       /* the button's corner radius (5)         */
+    int button_pad;     /* the button's side padding (16 / 8)     */
+    int strip_w;        /* the urgency strip's width (3)          */
+    int text_gap;       /* summary-to-body gap (4)                */
+} ui_metrics;
+
+static ui_metrics g_ui;
+
+static int sc(int base) {
+    int v = (int)((double)base * g_ui.k + 0.5);
+    return v < 1 ? 1 : v;
+}
+
+static void ui_init(int font_override_px) {
+    int f = font_override_px > 0 ? font_override_px : fdk_ui_font_px();
+    if (f < 8) {
+        f = 8;
+    }
+    if (f > 96) {
+        f = 96;
+    }
+    g_ui.font_px = f;
+    g_ui.k = (double)f / 14.0;
+    g_ui.pad_x = sc(14);
+    g_ui.pad_y = sc(12);
+    g_ui.radius = sc(8);
+    g_ui.icon_box = sc(36);
+    g_ui.icon_gap = sc(10);
+    g_ui.button_h = sc(26);
+    g_ui.button_gap = sc(8);
+    g_ui.button_r = sc(5);
+    g_ui.button_pad = sc(16);
+    g_ui.strip_w = sc(3);
+    g_ui.text_gap = sc(4);
+}
 #define MAX_BODY_LINES 6
 
 /* ---- logging ------------------------------------------------------------ */
@@ -163,6 +205,7 @@ typedef struct {
     uint32_t default_timeout_ms; /* expire_timeout == -1    */
     int max_visible;             /* cards per stack         */
     int card_width;              /* logical px              */
+    int font_size;               /* px; 0 = the UI metrics   */
     int edge_margin;             /* gap from screen edge    */
     int card_gap;                /* gap between cards       */
     anchor_kind anchor;
@@ -834,7 +877,7 @@ static fdk_surface *resolve_icon(const char *app_icon,
             return s;
         }
         /* A name that came through image-path is still a NAME. */
-        fdk_surface *t = fdk_icon_theme_surface(path_hint, ICON_BOX);
+        fdk_surface *t = fdk_icon_theme_surface(path_hint, g_ui.icon_box);
         if (t != NULL) {
             return t;
         }
@@ -843,7 +886,7 @@ static fdk_surface *resolve_icon(const char *app_icon,
         if (app_icon[0] == '/' || strncmp(app_icon, "file://", 7) == 0) {
             return icon_from_file(app_icon);
         }
-        return fdk_icon_theme_surface(app_icon, ICON_BOX);
+        return fdk_icon_theme_surface(app_icon, g_ui.icon_box);
     }
     /* The deprecated icon_data hint is the last resort (the spec's
      * compatibility order). */
@@ -924,7 +967,7 @@ static void paint_note(notifyd *app, note *n) {
      * limit until S-4's input regions). */
     fdk_surface_fill_rounded_rect(
         s, (fdk_rect){ .x = 0, .y = 0, .width = w, .height = h },
-        CARD_RADIUS, bg);
+        g_ui.radius, bg);
 
     /* The urgency strip along the left edge (dunst/mako convention):
      * normal = accent, critical = danger, low = none. */
@@ -932,24 +975,24 @@ static void paint_note(notifyd *app, note *n) {
         fdk_color strip = n->urgency >= 2 ? danger : accent;
         fdk_surface_fill_rect(
             s, (fdk_rect){ .x = 0,
-                           .y = CARD_RADIUS,
-                           .width = 3,
-                           .height = h - 2 * CARD_RADIUS },
+                           .y = g_ui.radius,
+                           .width = g_ui.strip_w,
+                           .height = h - 2 * g_ui.radius },
             strip);
     }
 
     /* Layout: [pad][icon? ICON_BOX][gap]text column[pad]. */
-    int text_x = CARD_PAD_X;
+    int text_x = g_ui.pad_x;
     if (n->icon != NULL) {
-        text_x += ICON_BOX + ICON_GAP;
+        text_x += g_ui.icon_box + g_ui.icon_gap;
     }
-    int text_w = w - text_x - CARD_PAD_X;
+    int text_w = w - text_x - g_ui.pad_x;
     if (text_w < 40) {
         text_w = 40;
     }
 
     /* Summary: single line, ellipsized, bold (its spans carry it). */
-    int y = CARD_PAD_Y;
+    int y = g_ui.pad_y;
     if (n->sum_plain != NULL) {
         size_t sum_len = strlen(n->sum_plain);
         size_t draw_len = sum_len;
@@ -986,7 +1029,7 @@ static void paint_note(notifyd *app, note *n) {
         } else {
             got = 0;
         }
-        int by = y + fm.line_height + 4;
+        int by = y + fm.line_height + g_ui.text_gap;
         for (size_t li = 0; li < got; li++) {
             fdk_surface_draw_spans_utf8(
                 s, app->font, n->body_plain + lines[li].byte_offset,
@@ -1005,23 +1048,24 @@ static void paint_note(notifyd *app, note *n) {
     if (n->icon != NULL) {
         fdk_surface_info ii;
         if (fdk_ok(fdk_surface_get_info(n->icon, &ii))) {
-            int bx = CARD_PAD_X, by = CARD_PAD_Y;
-            if (ii.width <= ICON_BOX && ii.height <= ICON_BOX) {
+            int bx = g_ui.pad_x, by = g_ui.pad_y;
+            if (ii.width <= g_ui.icon_box &&
+                ii.height <= g_ui.icon_box) {
                 fdk_surface_blit_blend(
-                    s, bx + (ICON_BOX - ii.width) / 2,
-                    by + (ICON_BOX - ii.height) / 2, n->icon,
+                    s, bx + (g_ui.icon_box - ii.width) / 2,
+                    by + (g_ui.icon_box - ii.height) / 2, n->icon,
                     (fdk_rect){ .x = 0, .y = 0, .width = ii.width,
                                 .height = ii.height });
             } else {
-                double scale = (double)ICON_BOX /
+                double scale = (double)g_ui.icon_box /
                                (ii.width > ii.height ? ii.width
                                                      : ii.height);
                 fdk_i32 dw = (fdk_i32)(ii.width * scale + 0.5);
                 fdk_i32 dh = (fdk_i32)(ii.height * scale + 0.5);
                 fdk_matrix m = { .m00 = (float)scale, .m01 = 0.0f,
                                  .m10 = 0.0f, .m11 = (float)scale,
-                                 .tx = (float)(bx + (ICON_BOX - dw) / 2),
-                                 .ty = (float)(by + (ICON_BOX - dh) / 2) };
+                                 .tx = (float)(bx + (g_ui.icon_box - dw) / 2),
+                                 .ty = (float)(by + (g_ui.icon_box - dh) / 2) };
                 fdk_surface_blit_transformed(s, m, n->icon);
             }
         }
@@ -1030,7 +1074,7 @@ static void paint_note(notifyd *app, note *n) {
     /* Action buttons along the bottom. */
     if (n->action_count > 0) {
         int bx = text_x;
-        int btop = h - CARD_PAD_Y - BUTTON_H;
+        int btop = h - g_ui.pad_y - g_ui.button_h;
         for (int i = 0; i < n->action_count; i++) {
             char label[MAX_ACTION_LABEL + 8];
             snprintf(label, sizeof(label), " %s ",
@@ -1038,17 +1082,18 @@ static void paint_note(notifyd *app, note *n) {
             fdk_text_metrics tm;
             fdk_font_measure_utf8(app->font, label, strlen(label),
                                   &tm);
-            int bw = tm.advance_width + 16;
+            int bw = tm.advance_width + g_ui.button_pad;
             fdk_color fill = n->hover_btn == i ? btn_hover : btn_bg;
             if (n->press_kind == i) {
                 fill = accent;
             }
             fdk_surface_fill_rounded_rect(
                 s, (fdk_rect){ .x = bx, .y = btop, .width = bw,
-                               .height = BUTTON_H },
-                5, fill);
-            int tx = bx + 8;
-            int ty = btop + (BUTTON_H - fm.line_height) / 2 + fm.ascent;
+                               .height = g_ui.button_h },
+                g_ui.button_r, fill);
+            int tx = bx + g_ui.button_pad / 2;
+            int ty = btop + (g_ui.button_h - fm.line_height) / 2 +
+                    fm.ascent;
             fdk_surface_draw_utf8(s, app->font, label, strlen(label),
                                   tx, ty,
                                   n->press_kind == i
@@ -1058,7 +1103,7 @@ static void paint_note(notifyd *app, note *n) {
                                                               .b = 1.0f,
                                                               .a = 1.0f })
                                       : fg);
-            bx += bw + BUTTON_GAP;
+            bx += bw + g_ui.button_gap;
         }
     }
 
@@ -1085,8 +1130,8 @@ static void note_destroy_layer(note *n) {
 static void note_measure(notifyd *app, note *n) {
     fdk_font_metrics fm;
     fdk_font_get_metrics(app->font, &fm);
-    int text_w = app->opt.card_width - 2 * CARD_PAD_X -
-                 (n->icon != NULL ? ICON_BOX + ICON_GAP : 0);
+    int text_w = app->opt.card_width - 2 * g_ui.pad_x -
+                 (n->icon != NULL ? g_ui.icon_box + g_ui.icon_gap : 0);
     if (text_w < 40) {
         text_w = 40;
     }
@@ -1108,18 +1153,18 @@ static void note_measure(notifyd *app, note *n) {
         if (line_count == 0) {
             line_count = 1; /* an explicit newline-only body */
         }
-        text_h += 4 + (int)line_count * fm.line_height;
+        text_h += g_ui.text_gap + (int)line_count * fm.line_height;
     }
     int content_h = text_h;
-    if (n->icon != NULL && content_h < ICON_BOX) {
-        content_h = ICON_BOX;
+    if (n->icon != NULL && content_h < g_ui.icon_box) {
+        content_h = g_ui.icon_box;
     }
-    int h = CARD_PAD_Y + content_h + CARD_PAD_Y;
+    int h = g_ui.pad_y + content_h + g_ui.pad_y;
     if (n->action_count > 0) {
-        h += BUTTON_H + 8;
+        h += g_ui.button_h + g_ui.button_gap;
     }
-    if (h < CARD_PAD_Y * 2 + fm.line_height) {
-        h = CARD_PAD_Y * 2 + fm.line_height; /* never a sliver */
+    if (h < g_ui.pad_y * 2 + fm.line_height) {
+        h = g_ui.pad_y * 2 + fm.line_height; /* never a sliver */
     }
     n->card_w = app->opt.card_width;
     n->card_h = h;
@@ -1318,21 +1363,23 @@ static int hit_button(notifyd *app, note *n, float x, float y) {
     }
     fdk_font_metrics fm;
     fdk_font_get_metrics(app->font, &fm);
-    int btop = n->card_h - CARD_PAD_Y - BUTTON_H;
-    if (y < (float)btop || y > (float)(btop + BUTTON_H)) {
+    int btop = n->card_h - g_ui.pad_y - g_ui.button_h;
+    if (y < (float)btop ||
+        y > (float)(btop + g_ui.button_h)) {
         return -1;
     }
-    int bx = CARD_PAD_X + (n->icon != NULL ? ICON_BOX + ICON_GAP : 0);
+    int bx = g_ui.pad_x +
+             (n->icon != NULL ? g_ui.icon_box + g_ui.icon_gap : 0);
     for (int i = 0; i < n->action_count; i++) {
         char label[MAX_ACTION_LABEL + 8];
         snprintf(label, sizeof(label), " %s ", n->actions[i].label);
         fdk_text_metrics tm;
         fdk_font_measure_utf8(app->font, label, strlen(label), &tm);
-        int bw = tm.advance_width + 16;
+        int bw = tm.advance_width + g_ui.button_pad;
         if (x >= (float)bx && x < (float)(bx + bw)) {
             return i;
         }
-        bx += bw + BUTTON_GAP;
+        bx += bw + g_ui.button_gap;
     }
     return -1;
 }
@@ -2221,7 +2268,10 @@ static void usage(FILE *out) {
         "                   for the server default (-1); critical ones\n"
         "                   never expire (default 5000)\n"
         "  --max-visible N  cards kept in the stack (default 5)\n"
-        "  --width N        card width in logical px (default 360)\n"
+        "  --width N        card width in logical px (default: scaled\n"
+        "                  from the UI font size; 360 at 14 px)\n"
+        "  --font-size N    pin the UI font size in px (default: theme/\n"
+        "                  settings / the desktop statement / 16)\n"
         "  --margin N       gap from the screen edges (default 8)\n"
         "  --gap N          gap between cards (default 8)\n"
         "  --anchor W       tr (default) | tl | br | bl\n"
@@ -2240,7 +2290,10 @@ static void usage(FILE *out) {
 static void parse_args(notifyd *app, int argc, char **argv) {
     app->opt.default_timeout_ms = 5000;
     app->opt.max_visible = 5;
-    app->opt.card_width = 360;
+    /* -1 = derive from the UI metrics after ui_init(); --width
+     * pins it. */
+    app->opt.card_width = -1;
+    app->opt.font_size = 0;
     app->opt.edge_margin = 8;
     app->opt.card_gap = 8;
     app->opt.anchor = ANCHOR_TR;
@@ -2268,6 +2321,13 @@ static void parse_args(notifyd *app, int argc, char **argv) {
             }
             if (app->opt.max_visible > 16) {
                 app->opt.max_visible = 16;
+            }
+        } else if (strcmp(a, "--font-size") == 0 && i + 1 < argc) {
+            app->opt.font_size = atoi(argv[++i]);
+            if (app->opt.font_size < 8 || app->opt.font_size > 96) {
+                fprintf(stderr, "--font-size: %d out of [8, 96]\n",
+                        app->opt.font_size);
+                exit(2);
             }
         } else if (strcmp(a, "--width") == 0 && i + 1 < argc) {
             app->opt.card_width = atoi(argv[++i]);
@@ -2367,7 +2427,15 @@ int main(int argc, char **argv) {
     fdk_shell_set_output_event_callback(g_app.shell, output_event,
                                         &g_app);
 
-    g_app.font = fdk_font_load_system_default(14);
+    ui_init(g_app.opt.font_size);
+    if (g_app.opt.card_width < 0) {
+        g_app.opt.card_width = (int)(360.0 * g_ui.k + 0.5);
+    }
+    tracef("ui: font %dpx (k=%.2f) card_w=%d pad=%d/%d icon=%d "
+           "button=%d",
+           g_ui.font_px, g_ui.k, g_app.opt.card_width, g_ui.pad_x,
+           g_ui.pad_y, g_ui.icon_box, g_ui.button_h);
+    g_app.font = fdk_font_load_system_default(g_ui.font_px);
     if (g_app.font == NULL) {
         sayf("no system font found — cards render without text "
              "(install a font, e.g. fonts-dejavu-core)");

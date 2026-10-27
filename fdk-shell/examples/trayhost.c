@@ -115,18 +115,58 @@
 #define MAX_MENU_NODES 200  /* GetLayout parse budget              */
 #define MAX_MENU_DEPTH 8    /* cascade depth budget                */
 #define MAX_LABEL_BYTES 256
-#define MAX_MENU_WIDTH 300
+/* The UI metrics (TASK C): the bar, the cells and the menu derive
+ * from the process's UI font size (fdk_ui_font_px — theme/settings,
+ * the desktop statement, default 16) scaled off the 14 px baseline
+ * the host was designed against. --font-size pins it; explicit
+ * --cell / --bar-height still win (the operator's explicit call). */
+typedef struct {
+    int font_px;
+    double k; /* font_px / 14 — the design baseline               */
+    int bar_pad;        /* the strip's inner padding (3)           */
+    int menu_row_h;     /* the row height floor (28)               */
+    int menu_pad_x;     /* the menu's side padding (10)            */
+    int menu_pad_y;     /* the menu's top/bottom padding (4)       */
+    int menu_sep_h;     /* a separator row (9)                     */
+    int menu_arrow_w;   /* the arrow column reserve (18)           */
+    int menu_max_w;     /* the menu width cap (300)                */
+    int glyph_col;      /* the state-glyph column (26)             */
+    int row_gap;        /* line_height + this = row height (10)    */
+} ui_metrics;
+
+static ui_metrics g_ui;
+
+static int sc(int base) {
+    int v = (int)((double)base * g_ui.k + 0.5);
+    return v < 1 ? 1 : v;
+}
+
+static void ui_init(int font_override_px) {
+    int f = font_override_px > 0 ? font_override_px : fdk_ui_font_px();
+    if (f < 8) {
+        f = 8;
+    }
+    if (f > 96) {
+        f = 96;
+    }
+    g_ui.font_px = f;
+    g_ui.k = (double)f / 14.0;
+    g_ui.bar_pad = sc(3);
+    g_ui.menu_row_h = sc(28);
+    g_ui.menu_pad_x = sc(10);
+    g_ui.menu_pad_y = sc(4);
+    g_ui.menu_sep_h = sc(9);
+    g_ui.menu_arrow_w = sc(18);
+    g_ui.menu_max_w = sc(300);
+    g_ui.glyph_col = sc(26);
+    g_ui.row_gap = sc(10);
+}
 
 /* Bar metrics (logical px). */
-#define BAR_PAD 3
 #define BAR_RADIUS 6
 #define ICON_INSET 1        /* cell border around the drawn icon    */
 
 /* Menu metrics (logical px). */
-#define MENU_ROW_H 28
-#define MENU_PAD_X 10
-#define MENU_SEP_H 9
-#define MENU_ARROW_W 18
 
 /* ---- logging ------------------------------------------------------------ */
 
@@ -160,8 +200,9 @@ static void sayf(const char *fmt, ...) {
 typedef enum { ANCHOR_TR = 0, ANCHOR_TL, ANCHOR_BR, ANCHOR_BL } anchor_kind;
 
 typedef struct {
-    int bar_height;  /* the strip's height          */
-    int cell;        /* one item's cell             */
+    int bar_height;  /* the strip's height (0 = UI metrics) */
+    int cell;        /* one item's cell (0 = UI metrics)    */
+    int font_size;   /* px; 0 = the UI metrics              */
     int edge_margin; /* gap from the screen edges   */
     anchor_kind anchor;
     int output_index;    /* -1 = every output            */
@@ -2196,9 +2237,9 @@ static void bar_screen_size(trayhost *app, int *w, int *h) {
  * recreate idiom — the only documented way to resize a layer). */
 static void bar_relayout(trayhost *app) {
     int count = bar_drawable_count(app);
-    int want_w = 2 * BAR_PAD + count * app->opt.cell;
-    if (want_w < 2 * BAR_PAD) {
-        want_w = 2 * BAR_PAD; /* the empty strip keeps a toe-hold      */
+    int want_w = 2 * g_ui.bar_pad + count * app->opt.cell;
+    if (want_w < 2 * g_ui.bar_pad) {
+        want_w = 2 * g_ui.bar_pad; /* the empty strip keeps a toe-hold */
     }
     if (app->bar != NULL && app->bar_w == want_w) {
         bar_paint(app);
@@ -2392,7 +2433,7 @@ static void bar_paint_cell(trayhost *app, fdk_surface *s, tray_item *it,
         fdk_surface_fill_rect(
             s, (fdk_rect){ .x = cell_x + 3,
                            .y = app->bar_h - 4,
-                           .width = app->opt.cell - 6,
+                           .width = app->opt.cell - 2 * g_ui.bar_pad,
                            .height = 3 },
             accent);
     }
@@ -2425,7 +2466,8 @@ static void bar_paint(trayhost *app) {
         if (it->loading || it->failed) {
             continue;
         }
-        bar_paint_cell(app, s, it, BAR_PAD + i * app->opt.cell);
+        bar_paint_cell(app, s, it,
+                        g_ui.bar_pad + i * app->opt.cell);
         i++;
     }
     (void)fdk_surface_present(s);
@@ -2446,9 +2488,9 @@ static menu_level2 *menu_level_build(tray_item *item, menu_node *list,
 
     fdk_font_metrics fm;
     fdk_font_get_metrics(g_app.font, &fm);
-    int row_h = fm.line_height + 10;
-    if (row_h < MENU_ROW_H) {
-        row_h = MENU_ROW_H;
+    int row_h = fm.line_height + g_ui.row_gap;
+    if (row_h < g_ui.menu_row_h) {
+        row_h = g_ui.menu_row_h;
     }
 
     /* Count first, then fill. */
@@ -2462,10 +2504,10 @@ static menu_level2 *menu_level_build(tray_item *item, menu_node *list,
         return NULL;
     }
     int width = 140;
-    int y = 4;
+    int y = g_ui.menu_pad_y;
     int ri = 0;
     for (menu_node *nd = list; nd != NULL; nd = nd->next) {
-        int rh = nd->is_separator ? MENU_SEP_H : row_h;
+        int rh = nd->is_separator ? g_ui.menu_sep_h : row_h;
         lvl->rows[ri].node = nd->is_separator ? NULL : nd;
         lvl->rows[ri].y = y;
         lvl->rows[ri].h = rh;
@@ -2473,8 +2515,9 @@ static menu_level2 *menu_level_build(tray_item *item, menu_node *list,
             fdk_text_metrics tm;
             fdk_font_measure_utf8(g_app.font, nd->label,
                                   strlen(nd->label), &tm);
-            int need = MENU_PAD_X + 26 /* glyph column */ + MENU_PAD_X +
-                       tm.advance_width + MENU_ARROW_W + MENU_PAD_X;
+            int need = g_ui.menu_pad_x + g_ui.glyph_col +
+                       g_ui.menu_pad_x + tm.advance_width +
+                       g_ui.menu_arrow_w + g_ui.menu_pad_x;
             if (need > width) {
                 width = need;
             }
@@ -2483,8 +2526,8 @@ static menu_level2 *menu_level_build(tray_item *item, menu_node *list,
         ri++;
     }
     lvl->row_count = ri;
-    lvl->width = width > MAX_MENU_WIDTH ? MAX_MENU_WIDTH : width;
-    lvl->height = y + 4;
+    lvl->width = width > g_ui.menu_max_w ? g_ui.menu_max_w : width;
+    lvl->height = y + g_ui.menu_pad_y;
     return lvl;
 }
 
@@ -2544,7 +2587,7 @@ static void menu_open_root(trayhost *app, tray_item *it, int cell_index) {
      * shape every right-edge tray menu has). Clamped only so the
      * global right edge stays on screen (when the bar origin is
      * knowable; Wayland's compositor clamps for us). */
-    int cell_x = BAR_PAD + cell_index * app->opt.cell;
+    int cell_x = g_ui.bar_pad + cell_index * app->opt.cell;
     int x = cell_x + app->opt.cell - lvl->width;
     if (app->have_bar_pos) {
         int max_x = 1024 - app->bar_x - lvl->width;
@@ -2696,9 +2739,10 @@ static void menu_level_paint(menu_level2 *lvl) {
             line.a = 0.22f;
             fdk_surface_fill_rect(
                 s,
-                (fdk_rect){ .x = MENU_PAD_X,
+                (fdk_rect){ .x = g_ui.menu_pad_x,
                             .y = row->y + row->h / 2,
-                            .width = w - 2 * MENU_PAD_X, .height = 1 },
+                            .width = w - 2 * g_ui.menu_pad_x,
+                            .height = 1 },
                 line);
             continue;
         }
@@ -2710,7 +2754,7 @@ static void menu_level_paint(menu_level2 *lvl) {
                 hover);
         }
         int ty = row->y + (row->h - fm.line_height) / 2 + fm.ascent;
-        int tx = MENU_PAD_X + 22;
+        int tx = g_ui.menu_pad_x + sc(22);
         fdk_color text = fg;
         if (!nd->enabled) {
             text.a = 0.45f;
@@ -2718,12 +2762,12 @@ static void menu_level_paint(menu_level2 *lvl) {
         /* The state glyph column (checkmark / radio). */
         if (nd->is_check && nd->toggle_state) {
             fdk_surface_draw_utf8(s, g_app.font, "\xE2\x9C\x93", 3,
-                                  MENU_PAD_X, ty, accent);
+                                  g_ui.menu_pad_x, ty, accent);
         } else if (nd->is_radio) {
             fdk_surface_draw_utf8(
                 s, g_app.font,
                 nd->toggle_state ? "\xE2\x97\x8F" : "\xE2\x97\x8B", 3,
-                MENU_PAD_X, ty, nd->toggle_state ? accent : text);
+                g_ui.menu_pad_x, ty, nd->toggle_state ? accent : text);
         }
         if (nd->label != NULL) {
             fdk_surface_draw_utf8(s, g_app.font, nd->label,
@@ -2734,7 +2778,8 @@ static void menu_level_paint(menu_level2 *lvl) {
             fdk_color arrow = fg;
             arrow.a = nd->enabled ? 0.8f : 0.35f;
             fdk_surface_draw_utf8(s, g_app.font, "\xE2\x96\xB8", 3,
-                                  w - MENU_PAD_X - 10, ty, arrow);
+                                  w - g_ui.menu_pad_x - sc(10), ty,
+                                  arrow);
         }
     }
     (void)fdk_surface_present(s);
@@ -2851,9 +2896,10 @@ static void bar_layer_event(fdk_shell_layer *layer,
         break;
     case FDK_EVENT_POINTER_BUTTON_UP: {
         int cell = app->opt.cell;
-        int idx = ((int)ev->pointer_button.position.x - BAR_PAD) / cell;
+        int idx = ((int)ev->pointer_button.position.x - g_ui.bar_pad) /
+                  cell;
         int in_cell =
-            (int)ev->pointer_button.position.x >= BAR_PAD &&
+            (int)ev->pointer_button.position.x >= g_ui.bar_pad &&
             idx >= 0 && idx < bar_drawable_count(app);
         if (!in_cell) {
             break;
@@ -3117,7 +3163,10 @@ static void usage(FILE *out) {
         "(org.kde.StatusNotifierWatcher)\n\n"
         "usage: trayhost [options]\n\n"
         "  --bar-height N  the strip's height in logical px (default 36)\n"
-        "  --cell N        one item's cell in logical px (default 30)\n"
+        "  --cell N        one item's cell in logical px (default: scaled\n"
+        "                  from the UI font size; 30 at 14 px)\n"
+        "  --font-size N    pin the UI font size in px (default: theme/\n"
+        "                  settings / the desktop statement / 16)\n"
         "  --margin N      gap from the screen edges (default 4)\n"
         "  --anchor W      tr (default) | tl | br | bl\n"
         "  --output N      show on output N only (default: all)\n"
@@ -3133,8 +3182,9 @@ static void usage(FILE *out) {
 }
 
 static void parse_args(trayhost *app, int argc, char **argv) {
-    app->opt.bar_height = 36;
-    app->opt.cell = 30;
+    app->opt.bar_height = 0; /* 0 = derive from the UI metrics   */
+    app->opt.cell = 0;        /* 0 = derive                        */
+    app->opt.font_size = 0;   /* 0 = the UI metrics                */
     app->opt.edge_margin = 4;
     app->opt.anchor = ANCHOR_TR;
     app->opt.output_index = -1;
@@ -3196,6 +3246,13 @@ static void parse_args(trayhost *app, int argc, char **argv) {
             app->opt.output_index = atoi(argv[++i]);
         } else if (strcmp(a, "--quit-after") == 0 && i + 1 < argc) {
             app->opt.quit_after_s = strtod(argv[++i], NULL);
+        } else if (strcmp(a, "--font-size") == 0 && i + 1 < argc) {
+            app->opt.font_size = atoi(argv[++i]);
+            if (app->opt.font_size < 8 || app->opt.font_size > 96) {
+                fprintf(stderr, "--font-size: %d out of [8, 96]\n",
+                        app->opt.font_size);
+                exit(2);
+            }
         } else {
             fprintf(stderr, "trayhost: unknown option '%s' (--help)\n",
                     a);
@@ -3250,7 +3307,17 @@ int main(int argc, char **argv) {
     }
     fdk_shell_set_output_event_callback(g_app.shell, output_event, &g_app);
 
-    g_app.font = fdk_font_load_system_default(14);
+    ui_init(g_app.opt.font_size);
+    if (g_app.opt.bar_height <= 0) {
+        g_app.opt.bar_height = sc(36);
+    }
+    if (g_app.opt.cell <= 0) {
+        g_app.opt.cell = sc(30);
+    }
+    tracef("ui: font %dpx (k=%.2f) bar_h=%d cell=%d row>=%d",
+           g_ui.font_px, g_ui.k, g_app.opt.bar_height, g_app.opt.cell,
+           g_ui.menu_row_h);
+    g_app.font = fdk_font_load_system_default(g_ui.font_px);
     if (g_app.font == NULL) {
         sayf("no system font found — menus render without text "
              "(install a font, e.g. fonts-dejavu-core)");

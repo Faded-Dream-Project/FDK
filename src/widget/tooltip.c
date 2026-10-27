@@ -275,7 +275,7 @@ static void tip_delay_elapsed(fdk_timer *timer, void *user) {
         return; /* detached tree: never show (documented) */
     }
 
-    fdk_font *font = fdk_font_load_system_default(12);
+    fdk_font *font = fdk_font_load_system_default(fdk__ui_derived_px(12));
     if (font == NULL) {
         return; /* no font: no tooltip (honest) */
     }

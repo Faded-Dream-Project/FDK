@@ -251,3 +251,74 @@ control interface — as the item side; X11 legs pixel-verify the
 bar, the fade blend (0.45·icon + 0.55·bg), the amber attention
 swap, and the cascade's edge flip under XTEST input; Wayland legs
 prove the layer-shell handshake under headless sway.
+
+## D-008 — the reusable notification/tray split: app-facing API in core, host-side model in fdk-shell
+
+**2026-10-27 (TASK B, the owner's directive).**
+
+Two audiences, two packages, one protocol each — the split
+follows D-005's line (what every app needs vs what a shell
+provides TO other apps):
+
+- **The APP side lives in FDK core** (`fdk_notify.h`,
+  `fdk_tray.h`, src/desktop/): a notification CLIENT (send /
+  replace / withdraw / closed+action events) and a tray ITEM
+  export (SNI properties + DBusMenu server). Any FDK app can now
+  live in the tray and raise notifications against any desktop's
+  daemon/host, on the native D-Bus client, zero new deps. Rigged
+  against in-test mocks on a REAL bus (make test-dbus) — the
+  mock daemon/watcher validates every marshaled field, including
+  the flat byte-array image-data.
+- **The HOST side stays in fdk-shell** (notifyd, trayhost — the
+  reference UIs). The model/drawing split (the protocol and
+  state machinery extracted from the renderers) is the next
+  slice; the current examples remain the executable spec.
+
+Recorded calls: the notification client owns its OWN bus
+connection (a daemon's traffic and an item's export each keep a
+socket — the bus is cheap, and one connection per service object
+keeps method-serving unambiguous). The tray item registers
+KDE-first, ayatana-fallback, and re-registers on watcher
+restarts, but does NOT reconnect a dead bus (an icon has no
+traffic to piggyback a retry on — the honest limit, documented
+in the header; the notification client DOES retry, its sends
+being the natural retry point). The dbusmenu server refuses the
+optional bulk group calls with UnknownMethod. The SNI emission
+discipline is dual: the New* family AND PropertiesChanged, both
+interface spellings — misses nobody. Every a{sv} builder in the
+new code follows the ownership rule pinned by the trayhost bug
+hunt: containers TAKE their children on success only.
+
+The byte-array bulk form (`fdk_dbus_value_new_byte_array` /
+`_array_flat_bytes`) grew out of this: a 256x256 icon was 256K
+heap nodes on the UI thread; it is now ONE allocation, marshaled
+as one block, and the UNMARSHALER produces the same flat form —
+every 'ay' on the wire is flat from here on.
+
+## D-009 — the UI font size: one process-wide answer, everything scales off it
+
+**2026-10-27 (TASK C, the owner's directive).**
+
+The complaint: notifyd/trayhost rendered at a fixed 14 px. The
+fix's shape mirrors the color-scheme module exactly — one cached
+answer over four channels, live-refreshed by the same events:
+`$FDK_UI_FONT_SIZE`/`$FDK_UI_SCALE` overrides > FDK's settings
+store (`ui.font_size`/`ui.scale`) > the desktop's statement
+(XSETTINGS `Gtk/FontName` parsed as points at 96 dpi; the
+portal's `font-name` and `text-scaling-factor`) > the 16 px /
+1.0 defaults. FDK settings override the desktop (the owner's
+explicit choice wins); the desktop is followed live otherwise.
+
+Scaling: the shells derive EVERY dimension from
+`fdk_ui_font_px()` at the 14 px design baseline (k = px/14) —
+card width and pads, icon box, buttons, bar height, cell, menu
+rows — so text and geometry grow together (the rigs' XS sweeps
+prove 12/16/24/32 with glyph-free side pads and on-screen
+menus). Core chrome re-derives via
+`fdk__ui_derived_px(ref) = round(ref·px/14)`: the historical
+widget sizes keep their RATIOS (tooltip stays smaller than
+dialog), and `FDK_UI_FONT_SIZE=14` lands every value on its
+historical pixel size — the escape hatch. The rigs pin
+`--font-size 14` for their pixel legs (byte-identical geometry)
+and the sweep legs drive the sizes through the ENV channel —
+proving the metrics chain end to end, not just the arithmetic.
