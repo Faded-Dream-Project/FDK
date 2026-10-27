@@ -58,7 +58,7 @@ jobs:
             libx11-dev libxext-dev libxtst-dev libxi-dev zlib1g-dev \
             libwayland-dev libxkbcommon-dev \
             dbus libglib2.0-bin \
-            libgl1 xvfb fonts-dejavu-core
+            libgl1 xvfb fonts-dejavu-core python3-pil
 
       - name: Build (debug, sanitizers)
         run: make
