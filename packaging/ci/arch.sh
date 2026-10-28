@@ -32,6 +32,10 @@ RUN archlinux:base '
         base-devel pkgconf libx11 libxext libxtst zlib wayland libxkbcommon \
         xorg-server-xvfb ttf-dejavu tar \
         harfbuzz fribidi wqy-zenhei
+    # A name-keyed CFF font for the CFF suites real-font legs.
+    # Optional and disclosed: the crafted-font legs always run.
+    pacman -Sy --noconfirm --needed gsfonts 2>/dev/null || \
+        echo "URW-FONT-SKIP: no gsfonts in this repo — the CFF real-font legs skip honestly (disclosed)"
     sh packaging/arch/build-pkg.sh
     sh fdk-shell/packaging/arch/build-pkg.sh
 '

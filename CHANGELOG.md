@@ -14,6 +14,34 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-28 (on the rc2 line)
 
+### Added — CFF outlines: OpenType 'OTTO' faces render (the Arch tofu report)
+
+- **The native Type 2 module (core, `src/text/cff.c`)**: CFF-flavored
+  OpenType fonts — Noto Sans CJK, URW base35, most .otf files — now
+  load and render instead of being rejected as silent-tofu risks.
+  Both dialects: `CFF ` including CID-keyed FDArray/FDSelect, and
+  `CFF2` at the default instance. Written from the public Adobe
+  specifications with real bounds, an operator budget, depth caps
+  and stack limits (D-011; provenance in docs/THIRD-PARTY.md).
+- **One rasterizer, both flavors**: CFF geometry reaches the SAME
+  `stbtt_Rasterize` call the glyf path uses, as `stbtt_vertex`
+  arrays — no look or metric drift between flavors. HarfBuzz glyph
+  extents route through the native ink box; advances stay with
+  hmtx; `maxp numGlyphs` must equal the CharStrings INDEX count or
+  the face is rejected.
+- **Hardened load order**: the native parser gates 'OTTO' faces
+  BEFORE stb's own CFF initialization runs (stb trusts a fabricated
+  512 MiB extent and asserts on malformed bytes — the fuzz battery
+  found it live). Fallback candidates may now be either sfnt flavor;
+  a loaded fallback that does not cover the segment's probe
+  codepoint is discarded before caching.
+- **tests/test_cff.c**: dual-decoder vertex agreement against stb's
+  own Type 2 path over real URW + Noto faces, a crafted seac/subr/
+  cyclic-subr font (real foundry fonts no longer carry seac), loader
+  rejection (numGlyphs cross-check, hostile extents, truncation),
+  and a deterministic mutation fuzz over the CFF table region.
+
+
 ### Added — complex-script text shaping, level 1 (M-2 / B-02)
 
 - **The shaped pipeline (core, `src/text/shaping.c`)**: text now

@@ -61,6 +61,12 @@ RUN almalinux:10 '
     dnf install -y -q google-noto-sans-cjk-ttc-fonts 2>/dev/null || \
         dnf install -y -q wqy-zenhei-fonts 2>/dev/null || \
         echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping fallback leg skips honestly (disclosed)"
+    # A name-keyed CFF font for the CFF suites real-font legs (the
+    # loader now takes OTTO faces; the vertex-agreement sweep and the
+    # fuzz battery want real Type 2 data). Optional and disclosed: the
+    # crafted-font legs always run, the real-font legs skip without it.
+    dnf install -y -q urw-base35-fonts 2>/dev/null || \
+        echo "URW-FONT-SKIP: no urw-base35-fonts in this repo — the CFF real-font legs skip honestly (disclosed)"
     sh packaging/fedora/build-rpm.sh
     sh fdk-shell/packaging/fedora/build-rpm.sh
 '

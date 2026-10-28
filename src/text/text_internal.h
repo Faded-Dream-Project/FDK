@@ -13,6 +13,49 @@
 
 #include "stb_truetype.h"
 
+/* ---- CFF / OpenType-CFF outlines (src/text/cff.c — the CFF-outline item, the Arch tofu report) ---------------
+ *
+ * Native Type 2 charstring support for 'OTTO' sfnt faces ('CFF ' and
+ * 'CFF2' tables), written from the public Adobe/OpenType specifications
+ * — no FreeType-derived code; provenance in cff.c's header and
+ * docs/THIRD-PARTY.md. The parse borrows the font file's bytes (lives
+ * and dies with fdk_font.file_data) and hands glyph geometry back as
+ * stbtt_vertex arrays in font units, so the SAME stb rasterizer draws
+ * glyf and CFF outlines and the two flavors cannot drift apart. */
+
+typedef struct fdk_cff_font fdk_cff_font;
+
+/* Parses the 'CFF ' (is_cff2 == 0) or 'CFF2' (is_cff2 == 1) table at
+ * file offset [table_off, table_off + table_len) (absolute — in a
+ * TrueType Collection the per-face table directory carries absolute
+ * offsets). units_per_em is the sfnt head value (the FontMatrix is
+ * pre-scaled onto it). Returns NULL when the table is malformed —
+ * the caller treats the face as unusable. */
+fdk_cff_font *fdk__cff_parse(const fdk_u8 *file, size_t file_size,
+                             size_t face_off, size_t table_off,
+                             size_t table_len, int is_cff2,
+                             int units_per_em);
+
+/* Releases a parse (the file bytes are NOT freed here). NULL-safe. */
+void fdk__cff_destroy(fdk_cff_font *f);
+
+/* The CharStrings INDEX size — the CFF glyph-id space (0 for NULL). */
+int fdk__cff_glyph_count(const fdk_cff_font *f);
+
+/* Runs the glyph's charstring and emits its outline as an
+ * fdk_alloc'd stbtt_vertex array (font units, through the FontMatrix,
+ * int16-clamped like stb's own geometry) into *out. Returns the vertex
+ * count — 0 for an ink-less glyph (*out ends NULL) — or -1 when the
+ * charstring is malformed (the caller's missing-glyph policy applies;
+ * *out stays NULL). Free the array with fdk_free(). */
+int fdk__cff_glyph_shape(fdk_cff_font *f, int gid, stbtt_vertex **out);
+
+/* The glyph's ink bbox in font units (floor/ceil'd, control points
+ * included — the same fields a glyf xMin..yMax box covers). Returns
+ * false for empty or malformed glyphs: there is no box. */
+bool fdk__cff_glyph_box(fdk_cff_font *f, int gid, int *x0, int *y0,
+                        int *x1, int *y1);
+
 /* Glyph cache capacity. Subpixel positioning (below) keys each
  * (glyph, phase) pair separately, so four entries exist per distinct
  * glyph: 2048 keeps the same real-glyph coverage 512 gave at integer
@@ -68,6 +111,9 @@ struct fdk_font {
     size_t file_size;           /* its length (the HarfBuzz blob
                                    needs it; 0 = pre-M-2 object) */
     stbtt_fontinfo info;
+    fdk_cff_font *cff;         /* the parsed CFF/CFF2 view for
+                                   'OTTO' faces; NULL for glyf faces.
+                                   Borrows file_data (destroyed first). */
     fdk_f32 scale;              /* font units -> pixels (pixel size) */
     fdk_i32 pixel_size;
     unsigned style;             /* fdk_font_style flags (synthetic) */

@@ -59,7 +59,7 @@ jobs:
             libwayland-dev libxkbcommon-dev \
             dbus libglib2.0-bin \
             libgl1 xvfb fonts-dejavu-core python3-pil \
-            libharfbuzz0b libfribidi0 fonts-wqy-zenhei
+            libharfbuzz0b libfribidi0 fonts-wqy-zenhei fonts-urw-base35
 
       - name: Build (debug, sanitizers)
         run: make

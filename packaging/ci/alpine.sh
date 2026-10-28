@@ -37,6 +37,10 @@ RUN alpine:3.22 '
         wayland-dev libxkbcommon-dev \
         font-dejavu \
         harfbuzz fribidi font-wqy-zenhei
+    # A name-keyed CFF font for the CFF suites real-font legs.
+    # Optional and disclosed: the crafted-font legs always run.
+    apk add --no-cache font-urw-base35 2>/dev/null || \
+        echo "URW-FONT-SKIP: no font-urw-base35 in this repo — the CFF real-font legs skip honestly (disclosed)"
     # mesa GL runtime: the X11 suite forces the GL present lane in its
     # equivalence/downgrade groups — llvmpipe satisfies them, exactly
     # like the glibc containers get implicitly via their xvfb stack.

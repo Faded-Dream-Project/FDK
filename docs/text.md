@@ -57,7 +57,9 @@ stripped container without it simply falls through:
 3. **fontconfig** — the generic `sans-serif` family under the
    user's own fontconfig policy (per-user fonts, distro aliases,
    the works). The best-match list is walked past candidates FDK
-   cannot rasterize (CFF/`OTTO` outlines) and past files that fail
+   cannot load (containers that fail validation — since the CFF
+   work, `OTTO` faces are loadable, so Noto Sans CJK and friends
+   resolve instead of being walked past) and past files that fail
    the container validation, honoring the collection face index
    (`FC_INDEX`) fontconfig reports.
 4. **Known exact paths** — the historical candidate list (DejaVu,
@@ -180,13 +182,16 @@ dependency is allowed (and why GPL/LGPL never will be).
 
 stb_truetype does no range checking of font-file offsets — it assumes
 a trusted font (its own header says so). FDK therefore validates the
-sfnt container itself before parsing: magic (TrueType flavor only —
-CFF/`OTTO` is rejected explicitly rather than rendering tofu), the
+sfnt container itself before parsing: magic (TrueType flavor or
+CFF-flavored OpenType `OTTO` — both load; see the CFF section), the
 table directory inside the file, and every table's
 `[offset, offset+length)` extent inside the file. This defeats
-garbage files and truncated fonts (the test suite feeds both). It is
+garbage files and truncated fonts (the test suite feeds both, plus a
+deterministic mutation fuzz over the CFF table region). It is
 not a full audit of table contents: load fonts from sources you
-trust.
+trust. For `OTTO` faces the CFF table itself is additionally parsed
+by FDK's own bounds-checked Type 2 module BEFORE stb ever touches
+the face — see below for why that order is load-bearing.
 
 ## Complex-script shaping (M-2 level 1, 1.1.0)
 
@@ -256,9 +261,66 @@ The fallback chain: one font per script per primary font, loaded at
 the same pixel size, `is_fallback`-flagged (never gets fallbacks of
 its own — two levels, no cycles), destroyed with its primary.
 `fdk_font_has_glyph()` answers coverage questions directly. Fallback
-fonts are TrueType-flavored only (the rasterizer's honest limit —
-the same gate the system-default resolver applies); on a CJK-less
-machine the primary's `.notdef` renders, honestly.
+candidates may be either sfnt flavor (the loader takes CFF outlines
+since the native Type 2 module landed — before it, a CJK font set
+made only of CFF faces, as on Arch, left every fallback candidate
+unloadable and CJK text rendered as `.notdef` boxes — the tofu
+report that closed with this item); a fallback that loads but does
+not cover the segment's probe codepoint is discarded before it can
+poison the cache. On a CJK-less machine the primary's `.notdef`
+renders, honestly.
+
+## CFF outlines — OpenType 'OTTO' faces (1.1.0)
+
+CFF-flavored OpenType (`OTTO` sfnt carrying a `CFF `/`CFF2` table —
+Noto Sans CJK, URW base35, most .otf fonts) renders through FDK's
+own Type 2 charstring module, `src/text/cff.c` — an original
+implementation written from the public Adobe specifications (TN
+5176, TN 5177, the OpenType CFF2 chapter; provenance in
+`docs/THIRD-PARTY.md`). The vendored stb_truetype carries a Type 2
+interpreter of its own, but it initializes its CFF view with a
+FABRICATED 512 MiB table extent (its own `@TODO` admits it), has no
+CFF2 support, and asserts on malformed INDEX/DICT bytes — a single
+mutated byte in a Private DICT takes `stbtt_InitFont` down through
+`stbtt__cff_int`'s assert. FDK's module owns the whole CFF path
+with real bounds, budgets and depth caps instead.
+
+**The load order is load-bearing**: for an `OTTO` face, the native
+parser runs FIRST and the face is rejected outright when the CFF
+table fails to parse — only then does `stbtt_InitFont` run (for the
+cmap/hmtx/hhea side, which is format-agnostic). stb never sees a
+CFF table the hardened parser rejected; the fuzz battery found the
+assert hazard live before the reorder closed it.
+
+**The seam**: glyph geometry comes back as `stbtt_vertex` arrays in
+font units (through the FontMatrix, int16-clamped), rasterized by
+the SAME public `stbtt_Rasterize` call the glyf path uses — one
+rasterizer, one look, no drift between flavors. Advances and the
+vertical metrics still come from hmtx/hhea through stb; HarfBuzz's
+glyph-extents callback routes through the native ink box (GPOS mark
+attachment rides it). maxp `numGlyphs` must equal the CharStrings
+INDEX count (the OpenType CFF chapter's rule) — a mismatch rejects
+the face.
+
+**What the interpreter covers**: both dialects (`CFF ` incl.
+CID-keyed FDArray/FDSelect — the Noto posture — and `CFF2` at the
+default instance, blend deltas dropped), local and global subrs
+with the spec's bias rule, the full curve operator set including
+the four flex forms, endchar-seac composition (StandardEncoding
+codes resolved through the charset), hint masks sized from the
+declared stems, and the IMPLICIT contour close (Type 2 charstrings
+need not line back to their moveto — the consumer closes them, and
+the closing vertex is synthesized exactly where stb's own decode
+puts it).
+
+**The fence**: for every glyph examined, this module and stb's own
+Type 2 path must emit byte-identical vertex streams — two
+independent decodings of the same charstrings agreeing is the
+strongest reference available without shipping a third
+rasterizer. `tests/test_cff.c` sweeps real URW and Noto faces
+against it and pins a crafted seac/subr/cyclic-subr font (real
+foundry fonts no longer carry seac), plus loader rejection and a
+deterministic mutation fuzz over the CFF table region.
 
 ## Line layout: wrapping and ellipsis
 
@@ -314,9 +376,21 @@ Recorded on the roadmap, in rough dependency order:
   fallback pipeline above). Level 2 (full paragraph bidi with
   per-line direction carrying, justification, true RTL caret
   granularity) stays on the roadmap.
-- Colored glyphs (emoji), SDF rendering, hinting.
+- ~~CFF-flavored OpenType (`OTTO`)~~ — SHIPPED (the native Type 2
+  module above; CFF2 renders at the default instance — variation
+  instances are roadmap material with the rest of variable-font
+  support).
+- Colored glyphs (emoji), SDF rendering, hinting, variable-font
+  instances beyond the default.
 
 ## Testing
+
+`tests/test_cff.c` (the CFF-outline item): the crafted seac/subr/
+cyclic-subr font (geometry pinned vertex-exact, cross-checked
+against stb's own decode), the vertex-agreement sweep over real URW
+name-keyed and Noto CID-keyed faces, loader rejection (numGlyphs
+cross-check, hostile table extents, truncation, CFF2-tag-on-CFF1),
+and a deterministic mutation fuzz over the CFF table region.
 
 `tests/test_shaping.c` (M-2): the complex-script suite — RTL visual
 order, mixed bidi, per-script fallback selection (the charset-

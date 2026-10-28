@@ -61,6 +61,10 @@ RUN "$VOID_IMAGE" '
     xbps-install -Sy noto-fonts-cjk 2>/dev/null || \
         xbps-install -Sy wqy-zenhei-font 2>/dev/null || \
         echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping fallback leg skips honestly (disclosed)"
+    # A name-keyed CFF font for the CFF suites real-font legs.
+    # Optional and disclosed: the crafted-font legs always run.
+    xbps-install -Sy urw-base35-fonts 2>/dev/null || \
+        echo "URW-FONT-SKIP: no urw-base35-fonts in this repo — the CFF real-font legs skip honestly (disclosed)"
     xbps-install -Sy xorg-server-xvfb 2>/dev/null || \
         xbps-install -Sy xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"

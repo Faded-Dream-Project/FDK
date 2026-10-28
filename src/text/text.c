@@ -209,6 +209,80 @@ static fdk_u8 *synthesize_italic(fdk_u8 *bits, int w, int h,
     return out;
 }
 
+/* The CFF twin of stbtt_GetGlyphBitmapSubpixel (the CFF-outline item): shape through
+ * the native Type 2 interpreter (never stb's — its CFF view trusts a
+ * fabricated 512 MiB extent; see cff.c's header), take the ink box off
+ * the emitted vertices with stb's exact floor/ceil arithmetic, and
+ * rasterize with the SAME public stbtt_Rasterize call stb's own glyph
+ * path uses — one rasterizer, one look, no drift between flavors.
+ * Returns an fdk_alloc'd w*h bitmap or NULL for ink-less glyphs. */
+static fdk_u8 *cff_glyph_bitmap(const fdk_font *font, int glyph_index,
+                                int phase, int *out_w, int *out_h,
+                                fdk_i32 *out_xoff, fdk_i32 *out_yoff) {
+    *out_w = 0;
+    *out_h = 0;
+    *out_xoff = 0;
+    *out_yoff = 0;
+
+    stbtt_vertex *verts = NULL;
+    int nv = fdk__cff_glyph_shape(font->cff, glyph_index, &verts);
+    if (nv <= 0 || verts == NULL) {
+        fdk_free(verts); /* NULL on every path that returns <= 0 */
+        return NULL;     /* no ink (space) or malformed charstring */
+    }
+
+    /* Ink box in font units over the emitted geometry — endpoints and
+     * control points, the fields a glyf xMin..yMax box covers. */
+    int gx0 = verts[0].x, gy0 = verts[0].y;
+    int gx1 = gx0, gy1 = gy0;
+    for (int i = 0; i < nv; i++) {
+        int xs[3] = { verts[i].x, verts[i].cx, verts[i].cx1 };
+        int ys[3] = { verts[i].y, verts[i].cy, verts[i].cy1 };
+        int fields = verts[i].type == STBTT_vcurve
+                         ? 2
+                         : (verts[i].type == STBTT_vcubic ? 3 : 1);
+        for (int k = 0; k < fields; k++) {
+            if (xs[k] < gx0) gx0 = xs[k];
+            if (xs[k] > gx1) gx1 = xs[k];
+            if (ys[k] < gy0) gy0 = ys[k];
+            if (ys[k] > gy1) gy1 = ys[k];
+        }
+    }
+
+    /* stbtt_GetGlyphBitmapBoxSubpixel's arithmetic, y-flip included:
+     * font y-up becomes bitmap y-down, subpixel shift on x only. */
+    fdk_f32 shift = (fdk_f32)phase * 0.25f;
+    fdk_f32 sc = font->scale;
+    int ix0 = (int)floorf((fdk_f32)gx0 * sc + shift);
+    int iy0 = (int)floorf(-(fdk_f32)gy1 * sc);
+    int ix1 = (int)ceilf((fdk_f32)gx1 * sc + shift);
+    int iy1 = (int)ceilf(-(fdk_f32)gy0 * sc);
+    *out_xoff = ix0;
+    *out_yoff = iy0;
+    *out_w = ix1 - ix0;
+    *out_h = iy1 - iy0;
+
+    fdk_u8 *bits = NULL;
+    if (ix1 > ix0 && iy1 > iy0) {
+        fdk_u8 *pixels = fdk_alloc((size_t)(ix1 - ix0) *
+                                   (size_t)(iy1 - iy0));
+        if (pixels != NULL) {
+            stbtt__bitmap gbm;
+            gbm.w = ix1 - ix0;
+            gbm.h = iy1 - iy0;
+            gbm.stride = ix1 - ix0;
+            gbm.pixels = pixels;
+            /* 0.35f flatness, invert=1 — the parameters
+             * stbtt_GetGlyphBitmapSubpixel itself passes. */
+            stbtt_Rasterize(&gbm, 0.35f, verts, nv, sc, sc, shift, 0.0f,
+                            ix0, iy0, 1, NULL);
+            bits = pixels;
+        }
+    }
+    fdk_free(verts);
+    return bits;
+}
+
 /* Finds the cache slot for a (glyph, subpixel phase, style variant)
  * key, rasterizing on miss and evicting LRU when full. Returns the
  * entry (never NULL). `key` = glyph_index * FDK_TEXT_KEY_STRIDE +
@@ -255,12 +329,18 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key,
      * subpixel phase (Phase 6 completion): the bitmap lands where the
      * float pen actually is (within 1/8 px) instead of snapping to
      * whole pixels. The returned xoff already includes the shift, so
-     * callers keep placing at pen_x + xoff with pen_x = floor(pen). */
+     * callers keep placing at pen_x + xoff with pen_x = floor(pen).
+     * CFF faces route through the native interpreter but the
+     * same stb rasterizer — the bitmap contract is identical. */
     int w = 0, h = 0;
     fdk_i32 xoff = 0, yoff = 0;
-    fdk_u8 *bits = stbtt_GetGlyphBitmapSubpixel(
-        &font->info, 0, font->scale, (fdk_f32)phase * 0.25f, 0.0f,
-        glyph_index, &w, &h, &xoff, &yoff);
+    fdk_u8 *bits = font->cff != NULL
+                       ? cff_glyph_bitmap(font, glyph_index, phase,
+                                          &w, &h, &xoff, &yoff)
+                       : stbtt_GetGlyphBitmapSubpixel(
+                             &font->info, 0, font->scale,
+                             (fdk_f32)phase * 0.25f, 0.0f, glyph_index,
+                             &w, &h, &xoff, &yoff);
     int advance_raw = 0;
     stbtt_GetGlyphHMetrics(&font->info, glyph_index, &advance_raw, NULL);
     fdk_f32 advance = (fdk_f32)advance_raw * font->scale;
@@ -389,6 +469,8 @@ static long validate_sfnt_face(const unsigned char *data, size_t size,
         return -1;
     }
 
+    const unsigned char *fdata = data; /* the face's sfnt start     */
+    size_t fsize = size;               /* bytes from fdata          */
     long face = 0;
     fdk_u32 tag = be32(data);
     if (tag == 0x74746366u) { /* 'ttcf' — collection */
@@ -407,33 +489,97 @@ static long validate_sfnt_face(const unsigned char *data, size_t size,
             return -1;
         }
         face = (long)off;
-        data += off;
-        size -= (size_t)off;
-        tag = be32(data);
+        fdata = data + off;
+        fsize = size - (size_t)off;
+        tag = be32(fdata);
     } else if (face_index != 0) {
         return -1; /* single-face file, only face 0 exists */
     }
 
-    /* Only TrueType-flavored sfnt (glyf outlines). CFF-flavored
-     * OpenType ('OTTO') parses but cannot rasterize in stb — reject
-     * it explicitly rather than shipping silent tofu. */
-    if (tag != 0x00010000u) {
+    /* TrueType-flavored sfnt (glyf outlines) or CFF-flavored OpenType
+     * ('OTTO' — the Noto CJK posture): both parse; 'OTTO' faces get
+     * their outlines from the native CFF module (src/text/cff.c)
+     * — stb's own Type 2 path is never used (docs/DECISIONS.md). */
+    if (tag != 0x00010000u && tag != 0x4F54544Fu) { /* 'OTTO' */
         return -1;
     }
 
-    fdk_u32 num_tables = be16(data + 4);
-    if ((size_t)num_tables > (size - 12) / 16) {
+    fdk_u32 num_tables = be16(fdata + 4);
+    if ((size_t)num_tables > (fsize - 12) / 16) {
         return -1; /* directory itself would run past the buffer */
     }
-    const unsigned char *rec = data + 12;
+    const unsigned char *rec = fdata + 12;
     for (fdk_u32 i = 0; i < num_tables; i++, rec += 16) {
         fdk_u32 off = be32(rec + 8);
         fdk_u32 len = be32(rec + 12);
+        /* Table offsets in a collection are FILE-absolute (the TTC
+         * spec: "offsets are relative to the beginning of the file"),
+         * so extents are checked against the WHOLE file, not the bytes
+         * after this face's header — Noto Sans CJK's trailing vmtx
+         * ends 2 bytes before EOF while its faces start up to 2.5 KiB
+         * in; a face-relative budget rejects the font by exactly that
+         * gap (found live: the Arch tofu report). */
         if (off > size || len > size - off) {
             return -1; /* table extent outside the file */
         }
     }
     return face;
+}
+
+/* Finds the table with 4-byte tag `tag` in the face's (already
+ * validated) table directory; writes its absolute offset and length.
+ * Returns false when absent. `face_off` is the face's own sfnt start
+ * (table offsets inside a collection are file-absolute, which is
+ * exactly what the record carries). */
+static bool sfnt_table(const unsigned char *data, size_t size,
+                        long face_off, const char *tag,
+                        fdk_u32 *out_off, fdk_u32 *out_len) {
+    fdk_u32 num_tables = be16(data + face_off + 4);
+    const unsigned char *rec = data + face_off + 12;
+    for (fdk_u32 i = 0; i < num_tables; i++, rec += 16) {
+        if (memcmp(rec, tag, 4) == 0) {
+            fdk_u32 off = be32(rec + 8);
+            fdk_u32 len = be32(rec + 12);
+            /* validate_sfnt_face already proved the extent in-file;
+             * re-check cheaply against the arguments anyway. */
+            if (off > size || len > size - off) {
+                return false;
+            }
+            *out_off = off;
+            *out_len = len;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Builds the CFF view for an 'OTTO' face (src/text/cff.c):
+ * locates 'CFF '/'CFF2', reads unitsPerEm out of head, and hands the
+ * table to the native parser. stb keeps the cmap/hmtx/hhea/GPOS side
+ * of the face (its table-directory work is format-agnostic); the Type
+ * 2 charstrings are ours. Returns false when the face carries no
+ * usable CFF table — the loader rejects the face, exactly as a glyf
+ * face with a broken directory is rejected. */
+static fdk_cff_font *load_cff_view(const unsigned char *data, size_t size,
+                                   long face_off) {
+    fdk_u32 toff = 0, tlen = 0;
+    int is_cff2 = 0;
+    if (sfnt_table(data, size, face_off, "CFF ", &toff, &tlen)) {
+        is_cff2 = 0;
+    } else if (sfnt_table(data, size, face_off, "CFF2", &toff, &tlen)) {
+        is_cff2 = 1;
+    } else {
+        return NULL; /* no outline table at all */
+    }
+
+    fdk_u32 head_off = 0, head_len = 0;
+    if (!sfnt_table(data, size, face_off, "head", &head_off, &head_len) ||
+        head_len < 20 || head_off + head_len > size) {
+        return NULL; /* no trustworthy unitsPerEm */
+    }
+    int upem = (int)be16(data + head_off + 18);
+    return fdk__cff_parse(data, size, (size_t)face_off, toff, tlen,
+                          is_cff2, upem);
 }
 
 /* ---- Font lifecycle ---- */
@@ -596,12 +742,53 @@ fdk_font *fdk_text_font_load_face(const char *path, long face_index,
         return NULL;
     }
 
+    /* 'OTTO': the hardened native CFF parse gates the face BEFORE
+     * stb's own CFF initialization ever runs — stb trusts a
+     * fabricated 512 MiB table extent and asserts on malformed
+     * INDEX/DICT bytes (found live by the fuzz battery: one mutated
+     * byte in a Private DICT took stbtt_InitFont down through
+     * stbtt__cff_int's assert). This module's parser decides
+     * whether the table is parseable at all; stb then handles the
+     * cmap/hmtx/hhea side — the format-agnostic table work FDK
+     * still reads through it. */
+    fdk_cff_font *cff = NULL;
+    if (be32(data + face_offset) == 0x4F54544Fu) { /* 'OTTO' */
+        cff = load_cff_view(data, size, face_offset);
+        if (cff == NULL) {
+            FDK_ERROR("fdk_font_load: %s is CFF-flavored but its CFF "
+                      "table failed to parse",
+                      path);
+            fdk_free(font);
+            fdk_free(data);
+            return NULL;
+        }
+    }
+
     if (!stbtt_InitFont(&font->info, data, (int)face_offset)) {
         FDK_ERROR("fdk_font_load: %s rejected by the font parser",
                   path);
+        fdk__cff_destroy(cff);
         fdk_free(font);
         fdk_free(data);
         return NULL;
+    }
+
+    if (cff != NULL) {
+        font->cff = cff;
+        /* The OpenType CFF chapter: maxp numGlyphs must equal the
+         * CharStrings INDEX count. A mismatch means cmap could hand
+         * out glyph ids the CFF side has no charstring for (or vice
+         * versa) — malformed, and rejected rather than trusted. */
+        if (fdk__cff_glyph_count(font->cff) != font->info.numGlyphs) {
+            FDK_ERROR("fdk_font_load: %s numGlyphs (%d) != CharStrings "
+                      "count (%d) — malformed CFF face",
+                      path, font->info.numGlyphs,
+                      fdk__cff_glyph_count(font->cff));
+            fdk__cff_destroy(font->cff);
+            fdk_free(font);
+            fdk_free(data);
+            return NULL;
+        }
     }
 
     font->file_data = data;
@@ -624,9 +811,10 @@ fdk_font *fdk_text_font_load_face(const char *path, long face_index,
                                 font->metrics.descent +
                                 font->metrics.line_gap;
 
-    FDK_INFO("loaded %s @ %dpx (ascent %d descent %d line %d)", path,
+    FDK_INFO("loaded %s @ %dpx (ascent %d descent %d line %d%s)", path,
              pixel_size, font->metrics.ascent, font->metrics.descent,
-             font->metrics.line_height);
+             font->metrics.line_height,
+             font->cff != NULL ? ", CFF outlines" : "");
     return font;
 }
 
@@ -636,8 +824,9 @@ void fdk_font_destroy(fdk_font *font) {
     }
     /* The HarfBuzz blob references file_data READ-ONLY and the
      * fallback fonts are owned by this font — both must go before
-     * the bytes do. */
+     * the bytes do. The CFF view also borrows the bytes. */
     fdk__shaping_font_destroy(font);
+    fdk__cff_destroy(font->cff);
     for (int i = 0; i < font->glyph_count; i++) {
         fdk_free(font->glyphs[i].bits);
     }

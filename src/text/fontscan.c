@@ -126,11 +126,15 @@ static char *fs_strdup(const char *s) {
     return d;
 }
 
-/* Tag-level gate: is `path` a TrueType-flavored sfnt, or a 'ttcf'
- * collection containing face `face`? Reads only the header bytes; the
- * full table-directory validation happens later inside
+/* Tag-level gate: does `path` (at collection face `face`) carry a face
+ * the loader accepts — TrueType-flavored sfnt ('glyf' outlines) or,
+ * since the CFF-outline item, CFF-flavored OpenType ('OTTO' — the Noto CJK posture,
+ * rasterized by src/text/cff.c)? Reads only the header bytes; the full
+ * table-directory validation happens later inside
  * fdk_text_font_load_face() (text.c). On success *out_face receives
  * the face to parse (clamped to 0 for negative input). */
+#define FS_SFNT_TRUETYPE 0x00010000u
+#define FS_SFNT_OTTO     0x4F54544Fu
 static bool fs_file_has_face(const char *path, long face, long *out_face) {
     if (face < 0) {
         face = 0;
@@ -146,8 +150,10 @@ static bool fs_file_has_face(const char *path, long face, long *out_face) {
     unsigned char hdr[12];
     if (fread(hdr, 1, sizeof(hdr), f) == sizeof(hdr)) {
         fdk_u32 tag = fs_be32(hdr);
-        if (tag == 0x00010000u && face == 0) {
-            ok = true; /* plain sfnt, glyf outlines */
+        if (tag == FS_SFNT_TRUETYPE || tag == FS_SFNT_OTTO) {
+            if (face == 0) {
+                ok = true; /* plain sfnt: glyf or CFF outlines */
+            }
         } else if (tag == 0x74746366u) { /* 'ttcf' — collection */
             fdk_u32 num = fs_be32(hdr + 8);
             if (num != 0 && (fdk_u32)face < num) {
@@ -159,8 +165,9 @@ static bool fs_file_has_face(const char *path, long face, long *out_face) {
                     unsigned char sub[4];
                     if (off >= 12u && fseek(f, (long)off, SEEK_SET) == 0 &&
                         fread(sub, 1, 4, f) == 4 &&
-                        fs_be32(sub) == 0x00010000u) {
-                        ok = true; /* that face is TrueType-flavored */
+                        (fs_be32(sub) == FS_SFNT_TRUETYPE ||
+                         fs_be32(sub) == FS_SFNT_OTTO)) {
+                        ok = true; /* that face is loadable */
                     }
                 }
             }

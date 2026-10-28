@@ -56,6 +56,16 @@ LGPL/AGPL projects (the licensing-policy rule):
 - The D-Bus wire protocol and SASL profile (src/dbus/). Byte-level
   correctness was validated against the reference implementation's
   observable output (captured socket writes) — behavior, not code.
+- The Compact Font Format and Type 2 charstring format (src/text/
+  cff.c), implemented from Adobe TN #5176, TN #5177 and the OpenType
+  CFF2 chapter — original code, no FreeType/fontTools lineage. The
+  two normative data tables those specs define (the 391 Standard
+  Strings and the 256-entry StandardEncoding) are embedded as spec
+  data with their provenance noted at each table; they are needed
+  only for endchar-seac accent resolution. Byte-level correctness
+  is validated by dual-decoder agreement: the module's vertex
+  streams must match the vendored stb_truetype's own Type 2 decode
+  glyph-for-glyph on real fonts (tests/test_cff.c).
 - wlr-layer-shell v4 (fdk-shell, from the vendored XML).
 - xdg-shell, xdg-decoration, viewporter, fractional-scale-v1,
   primary-selection-unstable-v1, cursor-shape-v1 (Wayland scanner

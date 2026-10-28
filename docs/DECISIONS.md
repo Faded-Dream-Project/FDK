@@ -376,3 +376,60 @@ earlier fallback query (shaping made those routine) would otherwise
 pin the system config for the whole test binary. The old in-process
 form was an artifact of FDK never touching fontconfig before the
 resolver; the fork-then-exec form is the honest contract.
+
+## D-011 — CFF outlines: a native Type 2 module, gated ahead of stb
+
+**2026-10-28 (the CFF-outline item / B-02 follow-up — the Arch tofu
+report: a machine whose CJK fonts are all CFF-flavored (Noto Sans
+CJK) rendered every CJK glyph as a `.notdef` box, because the loader
+rejected 'OTTO' outright rather than ship silent tofu — the stance
+text.md recorded at 1.0.x. The report's closure is the stance
+changing: reject nothing the stack can render honestly.)**
+
+**1. Native, not stb.** The vendored stb_truetype carries a Type 2
+interpreter, but (a) it initializes its CFF view with a fabricated
+512 MiB table extent (its own `@TODO`), so every operator read past
+the real table is bounded only by that lie; (b) it has no CFF2
+support; (c) it ASSERTS on malformed INDEX/DICT bytes — point (c)
+was found live, not theorized: the new fuzz battery's first run
+took `stbtt_InitFont` down through `stbtt__cff_int`'s assert on a
+single mutated Private DICT byte. `src/text/cff.c` is an original
+implementation from the public Adobe specs (5176, 5177, the CFF2
+chapter) with real bounds, a per-glyph operator budget, depth caps
+and stack limits; provenance in docs/THIRD-PARTY.md.
+
+**2. The load order is the security posture.** For 'OTTO' faces the
+hardened parser runs FIRST; a face whose CFF table fails to parse is
+rejected BEFORE stbtt_InitFont ever sees the bytes (stb still owns
+the format-agnostic cmap/hmtx/hhea side afterwards). The fuzz
+battery that found the assert hazard is the fence that keeps the
+order honest.
+
+**3. One seam, one rasterizer.** The module hands glyph geometry
+back as `stbtt_vertex` arrays in font units — the SAME public
+`stbtt_Rasterize` call draws glyf and CFF outlines, so the flavors
+cannot drift in look or metrics. HarfBuzz's extents callback routes
+through the native ink box; advances stay with hmtx; maxp
+`numGlyphs` must equal the CharStrings INDEX count or the face is
+rejected (the OpenType CFF chapter's rule, enforced at load).
+
+**4. The fence is dual-decoder agreement.** For every glyph
+examined, the native module and stb's own Type 2 path must emit
+byte-identical vertex streams — two independent decodings of the
+same charstrings. The development session needed exactly this fence:
+the interpreter shipped with its operator table mislabeled (18/19/
+20/21), the flex numbers off by one, the subr bias applied
+backwards, flex1's vertical end off its return axis, the vh/hv
+trailing-arg axis pinned to the operator instead of the group, an
+impossible rlinecurve arity, and no implicit contour close — every
+one of these was found by diffing vertex streams against stb on
+real fonts (Noto CID + URW name-keyed, ~200k glyph interpretations
+before the push), and each fix is pinned by tests/test_cff.c. The
+seac path (which stb does not implement at all) is pinned by a
+crafted font — real foundry fonts no longer carry seac.
+
+**5. CFF2 at the default instance, honestly fenced.** The CFF2
+parse is real (4-byte INDEX counts, FDArray required, blend/vsindex
+consumed) but renders the DEFAULT instance: blend deltas are
+dropped, which is exactly the default-coordinate composition.
+Variable-font instances beyond the default stay roadmap material.

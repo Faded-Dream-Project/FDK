@@ -544,7 +544,15 @@ static hb_bool_t sh_fn_extents(hb_font_t *font, void *font_data,
     (void)user_data;
     const fdk_font *f = font_data;
     int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-    if (!stbtt_GetGlyphBox(&f->info, (int)glyph, &x0, &y0, &x1, &y1)) {
+    /* CFF-flavored faces have no glyf table, so stbtt_GetGlyphBox
+     * cannot answer for them — the native box (same ink fields a
+     * glyf xMin..yMax box covers) steps in (src/text/cff.c). */
+    bool have = f->cff != NULL
+                    ? fdk__cff_glyph_box(f->cff, (int)glyph, &x0, &y0,
+                                         &x1, &y1)
+                    : stbtt_GetGlyphBox(&f->info, (int)glyph, &x0, &y0,
+                                        &x1, &y1);
+    if (!have) {
         memset(extents, 0, sizeof *extents);
         return 0;
     }
@@ -709,6 +717,21 @@ static fdk_font *sh_fallback_for(fdk_font *primary, int script,
     fdk_font *f = fdk_text_font_load_face(path, face,
                                           primary->pixel_size);
     if (f == NULL) {
+        fdk_free(path);
+        primary->fallback_script[primary->n_fallbacks] = script;
+        primary->fallbacks[primary->n_fallbacks] = NULL;
+        primary->n_fallbacks++;
+        return NULL;
+    }
+    /* Coverage verification BEFORE the slot is taken: fontconfig's
+     * sort ranks charset-covering fonts first, but it is a ranking,
+     * not a guarantee — on the tofu machine (all CJK fonts CFF and
+     * rejected by the old loader) the first LOADABLE candidate was a
+     * Latin-only font, and caching it for the script would have
+     * poisoned every later codepoint of that script. A loaded font
+     * that does not map the probe is the same as no answer. */
+    if (!fdk__font_covers(f, probe_cp)) {
+        fdk_font_destroy(f);
         fdk_free(path);
         primary->fallback_script[primary->n_fallbacks] = script;
         primary->fallbacks[primary->n_fallbacks] = NULL;
