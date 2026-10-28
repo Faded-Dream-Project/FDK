@@ -21,8 +21,12 @@
  *     PropertiesChanged signal receipts, and the live-update
  *     LayoutUpdated flow.
  *
- * Skips loudly (exit 0) without a session bus; FDK_DBUS_TEST_REQUIRE
- * =1 makes the skip a failure (CI sets it).
+ * Skips loudly (exit 0) without a session bus, without a display
+ * backend, or when a REAL watcher already owns the bus name (a live
+ * desktop tray — this test must never fight, or queue behind, the
+ * user's own watcher); FDK_DBUS_TEST_REQUIRE=1 makes any skip a
+ * failure (CI sets it — CI's dbus-run-session bus is always private
+ * and empty).
  */
 
 #include "fdk/fdk.h"
@@ -288,6 +292,38 @@ static void generic_done(fdk_dbus_connection *c, fdk_dbus_message *reply,
     (void)reply;
     int *flag = user;
     *flag = 1;
+}
+
+/* The live-test skip discipline (test_dbus_live.c's posture): exit 0
+ * with a loud reason unless FDK_DBUS_TEST_REQUIRE turns it into a
+ * failure. Returns the exit code main() should return. */
+static int live_skip(const char *why) {
+    printf("[skip] %s\n", why);
+    if (getenv("FDK_DBUS_TEST_REQUIRE") != NULL) {
+        fprintf(stderr, "FAIL: FDK_DBUS_TEST_REQUIRE set but %s\n", why);
+        return 1;
+    }
+    return 0;
+}
+
+/* RequestName's reply code: 1 = primary owner, 2 = queued,
+ * 3 = exists (another owner), 4 = already ours. Only 1 puts the mock
+ * in the watcher seat — captured so a real desktop's tray can never
+ * be fought or queued behind. */
+static uint32_t g_reqname_code = 0;
+
+static void reqname_code_done(fdk_dbus_connection *c,
+                              fdk_dbus_message *reply, void *user) {
+    (void)c;
+    int *flag = user;
+    *flag = 1;
+    fdk_dbus_value **args = NULL;
+    size_t n = 0;
+    if (reply != NULL &&
+        fdk_ok(fdk_dbus_message_read_args(reply, &args, &n)) && n >= 1) {
+        g_reqname_code = fdk_dbus_value_uint32(args[0]);
+    }
+    fdk_dbus_values_free_array(args, n);
 }
 
 /* ---- the mock host's client-side calls ------------------------------------- */
@@ -713,31 +749,64 @@ static void host_event(fdk_context *ctx, fdk_dbus_connection *bus,
 /* ---- main -------------------------------------------------------------------- */
 
 int main(void) {
+    /* Skip discipline (test_dbus_live.c's posture, kept identical):
+     * no display backend → skip; no session bus → skip. A user's real
+     * desktop has both, but an SSH session, a service context, or a
+     * bare build VM may not — those must never see an abort. */
+    const char *display = getenv("DISPLAY");
+    const char *wl_display = getenv("WAYLAND_DISPLAY");
+    if ((display == NULL || display[0] == '\0') &&
+        (wl_display == NULL || wl_display[0] == '\0')) {
+        return live_skip("no DISPLAY / WAYLAND_DISPLAY — the tray item "
+                         "needs a live fdk_context (run: make test-dbus)");
+    }
     const char *bus_addr = getenv("DBUS_SESSION_BUS_ADDRESS");
     if (bus_addr == NULL || bus_addr[0] == '\0') {
-        printf("[skip] no DBUS_SESSION_BUS_ADDRESS in the environment\n");
-        if (getenv("FDK_DBUS_TEST_REQUIRE") != NULL) {
-            return 1;
-        }
-        return 0;
+        return live_skip("no DBUS_SESSION_BUS_ADDRESS in the environment");
     }
 
     fdk_context *ctx = NULL;
-    assert(fdk_init(&ctx, NULL) == FDK_OK);
+    if (fdk_init(&ctx, NULL) != FDK_OK) {
+        /* DISPLAY set but dead (stale SSH forward, crashed Xvfb): a
+         * skip, not an abort — the environment, not the code, failed. */
+        return live_skip("fdk_init found no usable display backend — "
+                         "stale DISPLAY? (run: make test-dbus)");
+    }
 
     /* The mock watcher/host first. */
     fdk_dbus_connection *mock =
         fdk_dbus_connect(ctx, FDK_DBUS_SESSION_BUS, mock_ready, &g_mock.ready);
-    assert(mock != NULL);
-    assert(pump_until(ctx, &g_mock.ready, 15000));
+    if (mock == NULL) {
+        fdk_shutdown(ctx);
+        return live_skip("session bus address unreachable (stale "
+                         "DBUS_SESSION_BUS_ADDRESS?) — run: make test-dbus");
+    }
+    if (!pump_until(ctx, &g_mock.ready, 15000)) {
+        fdk_dbus_connection_close(mock);
+        fdk_shutdown(ctx);
+        return live_skip("session bus never greeted us (stale address?)");
+    }
     fdk_dbus_connection_set_method_handler(mock, mock_method_handler, NULL);
     {
         g_mock.reqname_done = 0;
+        g_reqname_code = 0;
+        /* DO_NOT_QUEUE is the safety rail: on a user's real desktop a
+         * REAL watcher may own this name — the mock must lose the
+         * race CLEANLY, not queue up to steal the name when the real
+         * watcher later exits. */
         fdk_dbus_pending *p = fdk_dbus_connection_request_name(
-            mock, WATCHER_NAME, FDK_DBUS_NAME_ALLOW_REPLACEMENT,
-            generic_done, &g_mock.reqname_done);
+            mock, WATCHER_NAME,
+            FDK_DBUS_NAME_ALLOW_REPLACEMENT | FDK_DBUS_NAME_DO_NOT_QUEUE,
+            reqname_code_done, &g_mock.reqname_done);
         assert(p != NULL);
         assert(pump_until(ctx, &g_mock.reqname_done, 5000));
+        if (g_reqname_code != 1) {
+            fdk_dbus_connection_close(mock);
+            fdk_shutdown(ctx);
+            return live_skip(
+                "a real StatusNotifierWatcher owns this bus (a live tray) "
+                "— run under a private bus: make test-dbus");
+        }
     }
     subscribe_host_signals(mock);
 
@@ -979,11 +1048,14 @@ int main(void) {
         assert(unhosted && g_app.host_count == 2);
 
         g_mock.reqname_done = 0;
+        g_reqname_code = 0;
         fdk_dbus_pending *p = fdk_dbus_connection_request_name(
-            mock, WATCHER_NAME, FDK_DBUS_NAME_ALLOW_REPLACEMENT,
-            generic_done, &g_mock.reqname_done);
+            mock, WATCHER_NAME,
+            FDK_DBUS_NAME_ALLOW_REPLACEMENT | FDK_DBUS_NAME_DO_NOT_QUEUE,
+            reqname_code_done, &g_mock.reqname_done);
         assert(p != NULL);
         assert(pump_until(ctx, &g_mock.reqname_done, 5000));
+        assert(g_reqname_code == 1); /* we just released it: ours again */
         int rehosted = 0;
         clock_gettime(CLOCK_MONOTONIC, &start);
         while (!rehosted) {
