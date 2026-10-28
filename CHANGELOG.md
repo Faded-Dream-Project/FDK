@@ -12,6 +12,44 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and in-development release
 candidates are marked until the owner promotes them.
 
+## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
+
+### Added — the desktop host models: the T-B side 2 split (fdk-shell 0.3.0)
+
+- **`include/fdk-shell/fdk-shell-desktop.h` (public API)**: the
+  StatusNotifierWatcher host model (`fdk_shell_tray_host`) and the
+  org.freedesktop.Notifications server model
+  (`fdk_shell_notify_server`) — DATA AND EVENTS ONLY. Snapshot APIs
+  (struct_size structs with caller buffers), one preorder menu walk,
+  and action entry points (Activate / SecondaryActivate / Scroll,
+  menu open/close/event, action_invoke / close). Coarse events:
+  ITEMS_CHANGED / ITEM_STATE / MENU_CHANGED / HOST_STATE and ADDED /
+  REPLACED / CLOSED / SERVER_STATE. The name etiquette (refuse /
+  --replace / --wait; the RequestName-EXISTS refusal; dormant after
+  refusal — never a queue-lurker) with serving() as the query.
+- **`src/desktop/tray_model.c`, `src/desktop/notify_model.c`**: the
+  protocol halves extracted from the reference UIs — the watcher
+  service, both registration dialects, per-item property/pixmap/
+  tooltip/menu state, the dbusmenu client (two-out-arg GetLayout,
+  AboutToShow, NO_REPLY_EXPECTED Events, the stale-safe mid-open
+  discard, the load-time prefetch); the Notifications server with
+  the flood gate, live-set cap, expiration timers, and the record
+  store. The rigs' trace vocabulary moved house with the code (the
+  models emit the same lines under FDK_TRAYHOST_TRACE /
+  FDK_NOTIFYD_TRACE).
+- **`examples/trayhost.c` / `examples/notifyd.c` rewritten as thin
+  UIs** over the models — rendering and input only. The UNCHANGED
+  rigs re-proved both pairs end to end (notifyd 68, trayhost 103
+  checks, all three phases each): the split's
+  behavior-preservation proof.
+- **`tests/test_desktop_model.c` (`make -C fdk-shell
+  test-desktop`)**: the models headlessly on a private
+  dbus-run-session bus — an in-test mock item and client; snapshot
+  fields byte-exact, the pixmap copy, the menu round, interaction
+  forwarding, vanished-item drops, hostile/duplicate registrations,
+  the etiquette matrix including dormant-after-vacate, Notify ids/
+  replaces/actions/expiry/flood/live-set, and both signals out.
+
 ## [Unreleased-candidate features] — 2026-10-28 (on the rc2 line)
 
 ### Added — idle/screensaver inhibition (S-3 / B-11)

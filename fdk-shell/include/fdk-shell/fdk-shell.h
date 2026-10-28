@@ -51,9 +51,9 @@
 extern "C" {
 #endif
 
-#define FDKSHELL_VERSION_STRING "0.2.0"
+#define FDKSHELL_VERSION_STRING "0.3.0"
 
-/* Returns this package's version ("0.2.0"). */
+/* Returns this package's version ("0.3.0"). */
 const char *fdk_shell_version(void);
 
 /* ---- the per-context handle ---------------------------------------------- */

@@ -547,3 +547,70 @@ served by the freedesktop service GNOME's session still registers
 alongside on modern systems — where it is not, the honest
 UNSUPPORTED degradation is the documented answer, not a silent
 failure.
+
+## D-014 — the desktop models: protocol extracted from the renderers, one bus connection per model (T-B side 2)
+
+**2026-10-29 (the host-side model split — the roadmap's T-B second
+half: trayhost/notifyd carried their protocol and their rendering in
+one file each; every future panel would have had to copy the
+protocol half. The split is the answer: the protocol lives in the
+library, the rendering stays in the examples, and the UNCHANGED rigs
+are the proof the split changed nothing observable.)**
+
+**1. Data and events, never pixels.** The two models
+(fdk-shell/src/desktop/tray_model.c, notify_model.c;
+include/fdk-shell/fdk-shell-desktop.h) own exactly what the roadmap
+worded: the watcher service, the item registry, the per-item state,
+the dbusmenu client; the Notifications server, the etiquette matrix,
+the flood gate, the live-set cap, the expiration timers, the record
+store. Their public surface is snapshots (struct_size structs with
+caller buffers), one preorder menu walk, and action entry points the
+UI forwards (Activate/SecondaryActivate/Scroll, menu
+open/close/event, action_invoke/close). No surface, font, or pixel
+type appears in the header — markup translation, icon-file/theme
+resolution, and card/bar drawing stayed with the reference UIs,
+which is what "thin" means here.
+
+**2. One model per bus connection — and create is asynchronous about
+the name.** A model owns its connection's single method handler and
+its NameAcquired/NameLost events, so a second model on one
+connection is the documented misuse. Name acquisition is protocol-
+inherently asynchronous (RequestName's roundtrip), so create returns
+after installing the surface and the outcome arrives as the
+HOST_STATE/SERVER_STATE event with serving() as the query — a
+synchronous FDK_ERR_EXISTS would have been a lie the bus can charge
+for later. The etiquette matrix itself is the reference's verbatim:
+refuse / --replace (REPLACE_EXISTING) / --wait (queue), the
+self-registration as host over the real bus path, and — the leg the
+split initially lost — the RequestName EXISTS reply must reach the
+app as a refusal (the rig's squat-probe leg hung on a model that
+ignored its own RequestName replies), and a refusal makes the model
+DORMANT: it never grabs the name when the incumbent vacates (the
+queue-lurker vandal posture the test pins).
+
+**3. The rigs were the spec, and the trace channel moved house.**
+Both rigs ran UNCHANGED against the split (notifyd 68, trayhost 103
+— all three phases each: protocol with cross-implementation callers,
+X11 pixels + XTEST, sway layer-shell). Where the rigs grep the host
+log for protocol transactions (GetAll, GetLayout prefetch, nodes<=N,
+menu labels, AboutToShow, the refusal lines), the models emit the
+SAME lines on the SAME channel (stderr under FDK_TRAYHOST_TRACE /
+FDK_NOTIFYD_TRACE): logging is not drawing, and the rigs' vocabulary
+is now the models' contract. The new tests/test_desktop_model.c
+(test-desktop) drives the models headlessly on a private
+dbus-run-session bus with an in-test mock item and client — the
+snapshot fields byte-exact, the etiquette matrix including
+dormant-after-vacate, the deferred-release-adjacent refusal
+split (incumbent-watcher vs RequestName-EXISTS, distinguished by the
+app's own posture flags since the event is deliberately coarse).
+
+**4. The decode is the flat form first.** The live-debugging lesson
+that cost the most pixels: 'ay' arrays arrive on the wire as the
+value model's FLAT bulk form — a tree-form per-index read returns
+nothing there, which renders a fully transparent icon that every
+pixel check sees as "no icon". Every byte-array decode in both
+models (SNI pixmaps, image-data) reads flat-first, tree-second, and
+refuses non-"y" element signatures (reading ints as bytes is the
+silent all-zero icon again). The image-data field order is the
+spec's SEVEN fields with the data at index 6 — an off-by-one there
+is the same invisible-icon symptom.

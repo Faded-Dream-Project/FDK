@@ -611,7 +611,33 @@ LayoutUpdated + the AboutToShow dirty handshake, New*/Properties-
 Changed receipts, activation/scroll, and the watcher
 vanish/return cycle with re-registration.
 
-## 16. The UI font size — one number, everywhere (1.1.0)
+## 16. The desktop HOST models — fdk-shell's other half (1.1.0)
+
+Sections 14-15 are the APP side (FDK core: a client and an item).
+The HOST side lives in the fdk-shell package:
+`include/fdk-shell/fdk-shell-desktop.h` — the
+org.kde.StatusNotifierWatcher host model (`fdk_shell_tray_host`)
+and the org.freedesktop.Notifications server model
+(`fdk_shell_notify_server`), DATA AND EVENTS ONLY. A panel or OSD
+creates the model on its own `fdk_dbus_connection` (created in the
+connection's ready callback — the model refuses a not-yet-ready
+connection), receives coarse events
+(ITEMS_CHANGED / ITEM_STATE / MENU_CHANGED / HOST_STATE; ADDED /
+REPLACED / CLOSED / SERVER_STATE), snapshots state through the
+struct_size read APIs, and forwards user interactions through the
+action entry points (Activate / SecondaryActivate / Scroll, the
+menu open/close/event round, action_invoke / close). Rendering is
+entirely the caller's: the reference UIs are
+`fdk-shell/examples/trayhost.c` (the bar + menu cascades) and
+`fdk-shell/examples/notifyd.c` (the card stack) — thin over the
+models, with the rigs (`make -C fdk-shell test-tray`,
+`test-notifyd`) proving the pairs end to end and
+`make -C fdk-shell test-desktop` proving the models headlessly on
+a private bus (D-014 records the shape decisions, including the
+one-model-per-connection rule and the asynchronous name
+etiquette).
+
+## 17. The UI font size — one number, everywhere (1.1.0)
 
 `fdk_ui_font_size()` / `fdk_ui_scale()` / `fdk_ui_font_px()`
 (fdk_theme.h) answer "what size is the UI text?" the same way

@@ -160,7 +160,7 @@ XDG_PROTO_SRC := src/wl/protocol/xdg-shell.xml
 XDG_PROTO_HDR := src/wl/protocol/xdg-shell-client-protocol.h
 XDG_PROTO_C   := src/wl/protocol/xdg-shell-protocol.c
 
-SRCS := src/shell.c
+SRCS := src/shell.c src/desktop/tray_model.c src/desktop/notify_model.c
 ifeq ($(BUILD_X11),1)
   SRCS += src/x11/x11.c
   DEFS += -DFDKSHELL_BUILD_X11=1
@@ -187,9 +187,10 @@ STATIC_LIB := $(BUILD_DIR)/libfdk-shell.a
 SHARED_LIB := $(BUILD_DIR)/libfdk-shell.so
 
 TEST_BINS := $(BUILD_DIR)/tests/test_x11 $(BUILD_DIR)/tests/test_wl
+DESKTOP_MODEL_BIN := $(BUILD_DIR)/tests/test_desktop_model
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(wildcard examples/*.c))
 
-.PHONY: all release static shared install uninstall test test-wayland test-x11 test-bar-rig test-notifyd test-tray isolation examples clean regen-protocol
+.PHONY: all release static shared install uninstall test test-wayland test-x11 test-desktop test-bar-rig test-notifyd test-tray isolation examples clean regen-protocol
 
 all: static shared examples
 
@@ -262,6 +263,12 @@ $(BUILD_DIR)/tests/test_x11: tests/test_x11.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
 	    $(FDK_LIBS) $(BACKEND_LIBS) $(X11_TEST_DEPS) -o $@
 
 $(BUILD_DIR)/tests/test_wl: tests/test_wl.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
+	@mkdir -p $(dir $@)
+	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
+	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) $< $(STATIC_LIB) \
+	    $(FDK_LIBS) $(BACKEND_LIBS) -o $@
+
+$(DESKTOP_MODEL_BIN): tests/test_desktop_model.c $(STATIC_LIB) $(FDK_LINK_PREREQS)
 	@mkdir -p $(dir $@)
 	$(CC) $(STD) $(WARN) $(FEATURE) $(CFLAGS_CONFIG) $(SAN_FLAGS) \
 	    -Iinclude -Isrc $(FDK_CFLAGS) $(BACKEND_CFLAGS) $< $(STATIC_LIB) \
@@ -405,3 +412,28 @@ clean:
 
 DEPS := $(OBJS:.o=.d) $(OBJS_PIC:.o=.d)
 -include $(DEPS)
+
+# The desktop models' headless test: the tray-host and notify-server
+# MODELS proven directly on a private bus (dbus-run-session) + a
+# throwaway Xvfb — no rendering, an in-test mock item and client.
+test-desktop: $(DESKTOP_MODEL_BIN)
+	@if ! command -v dbus-run-session >/dev/null 2>&1; then \
+		echo "[skip] dbus-run-session not available"; exit 0; fi
+	@if [ -z "$$DISPLAY" ]; then \
+		XVFB_NUM=$$((130 + ($$$$ % 20))); \
+		XVFB_DISP=":$$XVFB_NUM"; \
+		rm -f "/tmp/.X11-unix/X$$XVFB_NUM"; \
+		Xvfb "$$XVFB_DISP" -screen 0 1024x768x24 >/tmp/fdkshell-xvfb-desktop.log 2>&1 & \
+		XVFB_PID=$$!; \
+		sleep 2; \
+		echo "== running desktop model tests under dbus-run-session + Xvfb :$$XVFB_NUM =="; \
+		DISPLAY="$$XVFB_DISP" LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/$(LSAN_SUPP)" dbus-run-session -- "$(DESKTOP_MODEL_BIN)"; \
+		TEST_RESULT=$$?; \
+		kill "$$XVFB_PID" 2>/dev/null; \
+		wait "$$XVFB_PID" 2>/dev/null; \
+		rm -f "/tmp/.X11-unix/X$$XVFB_NUM"; \
+		exit $$TEST_RESULT; \
+	else \
+		echo "== running desktop model tests under dbus-run-session (DISPLAY=$$DISPLAY) =="; \
+		LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/$(LSAN_SUPP)" dbus-run-session -- "$(DESKTOP_MODEL_BIN)"; \
+	fi

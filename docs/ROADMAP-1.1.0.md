@@ -45,10 +45,16 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 20 (S-2 and S-1 pending owner verification; M-4,
-M-3, M-1, and S-3 landed 2026-10-28) · PARTIAL 9 ·
-IN PROGRESS 1 (M-9) · MISSING 25 ·
+**Counts:** DONE 21 (T-B both sides landed 2026-10-29; S-2 and S-1
+pending owner verification; M-4, M-3, M-1, and S-3 landed
+2026-10-28) · PARTIAL 8 · IN PROGRESS 1 (M-9) · MISSING 25 ·
 DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
+Re-verified 2026-10-29 (post-T-B-side-2): the full dual-backend
+fdk-shell build zero warnings, core make test + test-x11 +
+test-dbus, fdk-shell test-x11 + the NEW test-desktop (26 legs),
+and BOTH desktop rigs unchanged-and-green (notifyd 68, trayhost
+103 — the split's behavior-preservation proof), verify-exports
+802.
 Re-verified 2026-10-27 (post-trayhost): the full battery plus the
 notifyd rig and the trayhost rig (all three phases green each).
 Re-verified 2026-10-28 (post-M-4/M-3): full dual-backend build zero
@@ -64,7 +70,7 @@ unaffected):
 
 | id | item | status | evidence | remaining |
 |----|------|--------|----------|-----------|
-| T-B | reusable notifications + tray: the app-facing API in FDK core (notification client, StatusNotifierItem export, DBusMenu server) on the native D-Bus client, and the host-side model module in fdk-shell (watcher/host, item state, dbusmenu client, notification server/queue — data + events, no drawing), with trayhost/notifyd as thin reference UIs | **PARTIAL** — side 1 (the core app-facing API) DONE: fdk_notify.h + fdk_tray.h (src/desktop/), the byte-array bulk form in the value model, live-bus rigs with in-test mock daemon/watcher (make test-dbus, all green); docs EXTENDING.md §§14-15 + DECISIONS D-008 | side 2: the fdk-shell host-side model split (extract protocol/state from the renderers, the no-drawing module + minimal examples) |
+| T-B | reusable notifications + tray: the app-facing API in FDK core (notification client, StatusNotifierItem export, DBusMenu server) on the native D-Bus client, and the host-side model module in fdk-shell (watcher/host, item state, dbusmenu client, notification server/queue — data + events, no drawing), with trayhost/notifyd as thin reference UIs | **DONE** — side 1 (the core app-facing API): fdk_notify.h + fdk_tray.h (src/desktop/), the byte-array bulk form in the value model, live-bus rigs with in-test mock daemon/watcher (make test-dbus, all green); docs EXTENDING.md §§14-15 + DECISIONS D-008. Side 2 (the host-side model split, 2026-10-29): fdk-shell-desktop.h + src/desktop/{tray_model,notify_model}.c (0.3.0) — the watcher/item registry/dbusmenu client and the Notifications server/etiquette/flood/live-cap/timers as no-drawing models with snapshot + action APIs; trayhost/notifyd rewritten as the thin reference UIs; the UNCHANGED rigs re-proved both pairs end to end (notifyd 68, trayhost 103 checks — the behavior-preservation proof); new make -C fdk-shell test-desktop drives the models headlessly on a private bus; DECISIONS D-014, EXTENDING.md §16 | — |
 | T-C | UI font size from the theme/settings (font_size + optional ui_scale, default 16px; a desktop text-scaling preference followed by default, FDK settings overriding); notification box, paddings, icons, tray cells scaled from it | **DONE (should work; owner verification pending)** | src/theme/ui_metrics.c (the four-channel resolution, live-following the XSETTINGS/portal/settings events — the color-scheme module's shape); notifyd/trayhost scale every dimension off fdk_ui_font_px() with --font-size pinning; core chrome via fdk__ui_derived_px (14-px baseline, ratios preserved, FDK_UI_FONT_SIZE=14 = the historical pixels); tests/test_ui_metrics.c + the rigs' XS sweeps (12/16/24/32: glyph-free pads, on-screen menus, trace-math) all green; DECISIONS D-009; owner steps TESTING-ON-DESKTOP.md §8 | your eyes on the real desktop (§8) |
 
 | id | item | status | evidence | remaining |

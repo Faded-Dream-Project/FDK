@@ -50,6 +50,7 @@ make isolation      # the prefix-isolation build proof
 make examples       # the demo bar + notifyd + trayhost
 make test-notifyd   # notifyd's rig (real dbus-daemon, pixels, clicks)
 make test-tray      # trayhost's rig (real dbus-daemon, menus, clicks)
+make test-desktop   # the desktop models' headless test (private bus)
 make install PREFIX=/usr   # headers + libs + pkg-config
 ```
 
@@ -396,6 +397,23 @@ re-run inside every packaging container.
 
 Same as FDK (see FDK's LICENSE) — this package is part of the same
 project, distributed separately.
+
+## The desktop host models (0.3.0)
+
+`include/fdk-shell/fdk-shell-desktop.h` is the HOST half of the
+desktop protocols, as library code: `fdk_shell_tray_host` (the
+StatusNotifierWatcher service, the item registry in both
+registration dialects, per-item state, the dbusmenu client) and
+`fdk_shell_notify_server` (the org.freedesktop.Notifications server,
+the etiquette matrix, the flood gate, the live-set cap, expiration)
+— DATA AND EVENTS ONLY, no rendering. Create the model on your own
+`fdk_dbus_connection` (in its ready callback), snapshot through the
+struct_size read APIs, forward interactions through the action entry
+points. The examples below are the thin reference UIs over them; the
+rigs prove the pairs end to end and `make test-desktop` proves the
+models headlessly. One model per bus connection; name acquisition is
+asynchronous (the HOST_STATE / SERVER_STATE event + serving()).
+docs/DECISIONS.md D-014 records the shape decisions.
 
 ## notifyd — the notification daemon example (0.2.0)
 
