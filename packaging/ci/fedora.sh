@@ -34,6 +34,13 @@ RUN almalinux:10 '
     # infrastructure, the same class as the X11 dev headers. (On
     # this el10 builder the suite still self-skips without Xvfb;
     # the package keeps the builder honest the day it does not.)
+    # The base image drifts: a stale container plus a fresh repo makes
+    # any NEW package pull a partial toolchain upgrade (the glibc
+    # cascade that broke this builder on 2026-10-28: the transaction
+    # upgraded glibc mid-session and libX11-devel's files never
+    # landed). One coherent full update first, then the build set.
+    dnf -y -q update || \
+        echo "NOTE: full container update failed — continuing with the image's state (disclosed)"
     dnf install -y -q \
         gcc make pkgconf-pkg-config rpm-build cpio \
         libasan libubsan \

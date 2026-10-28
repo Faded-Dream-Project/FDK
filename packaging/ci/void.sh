@@ -38,6 +38,12 @@ RUN "$VOID_IMAGE" '
     # against the first mirror that answered.
     . packaging/ci/common.sh
     fdk_void_mirror_rotate
+    # The base image drifts: a stale container plus a fresh repo makes
+    # any NEW package pull a partial toolchain upgrade (the cascade
+    # that broke this builder on 2026-10-28). One coherent full
+    # upgrade first, then the build set.
+    xbps-install -Syu || \
+        echo "NOTE: full container upgrade failed — continuing with the image's state (disclosed)"
     xbps-install -Sy base-devel pkgconf findutils zstd \
         libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
