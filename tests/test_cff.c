@@ -52,9 +52,12 @@ static const char *urw_candidates[] = {
     /* Debian/Ubuntu (fonts-urw-base35) and Void */
     "/usr/share/fonts/opentype/urw-base35/NimbusSans-Regular.otf",
     "/usr/share/fonts/opentype/urw-base35/C059-Roman.otf",
-    /* Alpine (font-urw-base35) and Fedora (urw-base35-fonts) */
+    /* Alpine (font-urw-base35 — the package NAME is the directory)
+     * and Fedora (urw-base35-fonts) */
     "/usr/share/fonts/urw-base35/NimbusSans-Regular.otf",
     "/usr/share/fonts/urw-base35/C059-Roman.otf",
+    "/usr/share/fonts/font-urw-base35/NimbusSans-Regular.otf",
+    "/usr/share/fonts/font-urw-base35/C059-Roman.otf",
     /* Arch (gsfonts) */
     "/usr/share/fonts/gsfonts/NimbusSans-Regular.otf",
     NULL,
