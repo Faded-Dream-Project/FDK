@@ -17,6 +17,9 @@ Current open items:
 5. [trayhost on Wayland (sway / labwc)](#5-trayhost-on-wayland)
 6. [trayhost on X11 (Openbox / any EWMH WM)](#6-trayhost-on-x11)
 7. [trayhost against real incumbents](#7-trayhost-against-real-incumbents)
+8. [the UI font size on your desktop (TASK C)](#8-the-ui-font-size-on-your-desktop-task-c--needs-your-eyes)
+9. [the app-facing API against YOUR desktop (TASK B)](#9-the-app-facing-api-against-your-desktop-task-b--needs-your-eyes)
+10. [text_demo: complex scripts, bidi, fallback, caret (M-2)](#10-text_demo-complex-scripts-bidi-fallback-caret-m-2--needs-your-eyes)
 
 ---
 
@@ -287,3 +290,61 @@ or use the rig's probe binary as the item):
    a live `set_label` (the host re-fetches on LayoutUpdated).
 3. Restart the host (or the watcher service) and confirm the
    item re-registers (on_host flips 0 then 1).
+
+## 10. text_demo: complex scripts, bidi, fallback, caret (M-2 — needs your eyes)
+
+The shaping pipeline (HarfBuzz + FriBidi + per-script fontconfig
+fallback) is proven headlessly (tests/test_shaping.c: RTL visual
+order, mixed bidi, fallback resolution); `examples/text_demo`
+puts it IN FRONT OF YOUR EYES without an input method:
+
+```sh
+./build/examples/text_demo "مرحبا 漢字" "नमस्ते"
+# no arguments: the built-in showcase (Latin / Arabic / CJK /
+# Devanagari / one mixed bidi line)
+```
+
+Each argument is one frame: a wrap Label (passive layout) and an
+Entry prefilled with the string (caret parked at the END of the
+buffer), plus the byte/codepoint census in the frame title.
+
+What to verify, per string:
+
+- `مرحبا` (Arabic, RTL): the letters JOIN — one connected word
+  (initial/medial/final forms), not five isolated glyphs; the
+  caret starts after the last codepoint which is on the LEFT
+  (the logical end of an RTL run renders leftmost); clicking
+  mid-word snaps the caret between CLUSTERS, and the caret's
+  horizontal movement mirrors the visual order (clicking right
+  of center lands EARLIER in the buffer).
+- `漢字` (CJK): full-width ideographs from the CJK fallback face
+  (the default Latin face has no Han coverage — if these render,
+  the fallback channel worked); the caret snaps at the glyph
+  boundary between the two characters.
+- `नमस्ते` (Devanagari): the conjunct + matras shape correctly
+  (न म स्ते — the स्ते cluster must render as a ligature with
+  the vowel signs ATTACHED, not as separate letters); the caret
+  treats each attached cluster as ONE position.
+- `مرحبا 漢字` (the mixed line): the Arabic sits RIGHT of the CJK
+  (first strong character is Arabic: RTL paragraph base, so
+  logical-first renders rightmost); the two scripts come from
+  two different faces (fallback mixing inside one line).
+
+The size follows the UI metrics (item 8's answer):
+`FDK_UI_FONT_SIZE=24 ./build/examples/text_demo ...` grows the
+whole column around the same strings.
+
+CI / no-pointer mode (the rigs use this; exit 0 and a PNG):
+
+```sh
+Xvfb :94 -screen 0 1024x768x24 &
+DISPLAY=:94 ./build/examples/text_demo "مرحبا 漢字" "नमस्ते" \
+    --screenshot out.png
+```
+
+Expected: `[screenshot] out.png (720xNNN, 2 blocks)` and a PNG
+whose frames hold joined Arabic, wide CJK, and shaped Devanagari
+(the sandbox rig verifies ink presence + a contiguous joined
+Arabic run; the EYE checks above are yours).
+
+**Status: DONE (should work; owner verification pending).**
