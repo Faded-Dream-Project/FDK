@@ -36,6 +36,7 @@
 #include "fdk/fdk_dialog.h"
 #include "fdk/fdk_theme.h"
 #include "fdk/fdk_widgets.h"
+#include "fdk/fdk_idle.h"
 
 /* Internal seam (same discipline as test_x11_integration.c): the
  * deferred-first-frame regression below asserts backend commit state
@@ -2341,6 +2342,68 @@ int main(void) {
         }
         ime_client_stop();
     }
+    }
+
+    /* ---- Idle inhibition (1.1.0, S-3) ----
+     *
+     * sway/wlroots implements zwp_idle_inhibit_manager_v1, so the
+     * COMPOSITOR path engages here: the inhibitor object lives on
+     * the window's surface, the status flips ACTIVE synchronously
+     * (no bus in this rig — the D-Bus half is pinned by
+     * test_dbus_live's mock ScreenSaver), and both the release and
+     * the window-dies-inhibited shapes keep the connection healthy
+     * (any protocol error on the inhibitor would kill the next
+     * roundtrip). Weston kiosk-shell offers no manager: the honest
+     * UNSUPPORTED handle, still released cleanly. */
+    {
+        fdk_window *dw = NULL;
+        fdk_window_options dopts = { .title = "FDK idle test",
+                                     .width = 220, .height = 120 };
+        assert(fdk_ok(fdk_window_create(ctx, &dopts, &dw)));
+        fdk_widget *droot = NULL;
+        assert(fdk_ok(fdk_window_get_root(dw, &droot)));
+        fdk_widget_set_background(droot, (fdk_color){0.3f, 0.2f, 0.3f, 1.0f});
+        fdk_window_show(dw);
+        (void)fdk_pump_events(ctx, 100);
+
+        fdk_idle_inhibitor *inh = NULL;
+        assert(fdk_ok(fdk_idle_inhibit(ctx, dw, "fdk-tests",
+                                       "the rig display", &inh)));
+        assert(inh != NULL);
+        if (fdk_idle_inhibitor_status(inh) == FDK_IDLE_INHIBIT_ACTIVE) {
+            printf("[ok] wayland idle: compositor inhibitor engaged "
+                   "(ACTIVE)\n");
+            fdk_idle_uninhibit(inh);
+            (void)fdk_pump_events(ctx, 150);
+            /* The window is still fully alive: a paint round proves
+             * the surface path never tripped on inhibitor state. */
+            fdk_window_paint(dw);
+            (void)fdk_pump_events(ctx, 150);
+            assert(fdk__window_ever_presented(dw) != 0);
+
+            /* The window-dies-inhibited shape: engage, destroy the
+             * window WITH the inhibitor up (the destroy path must
+             * release it — a surface-scoped proxy outliving its
+             * surface would be a protocol error), and the
+             * connection must survive the next roundtrip. */
+            fdk_idle_inhibitor *inh2 = NULL;
+            assert(fdk_ok(fdk_idle_inhibit(ctx, dw, "fdk-tests",
+                                           "dying engaged", &inh2)));
+            assert(fdk_idle_inhibitor_status(inh2) ==
+                   FDK_IDLE_INHIBIT_ACTIVE);
+            fdk_window_destroy(dw);
+            (void)fdk_pump_events(ctx, 200);
+            fdk_idle_uninhibit(inh2); /* severed at destroy: no-op
+                                       * on the compositor half */
+            printf("[ok] wayland idle: release + destroy-while-"
+                   "inhibited both protocol-clean\n");
+        } else {
+            printf("[ok] wayland idle: no manager here — the honest "
+                   "UNSUPPORTED handle, released cleanly\n");
+            fdk_idle_uninhibit(inh);
+            fdk_window_destroy(dw);
+        }
+        (void)fdk_pump_events(ctx, 100);
     }
 
     if (win != NULL) {

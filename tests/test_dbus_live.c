@@ -33,6 +33,7 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_dbus.h"
 #include "fdk/fdk_theme.h"
+#include "fdk/fdk_idle.h"
 
 /* The scheme-engine seam (the mock-portal scenario drives the same
  * recheck a real portal's SettingChanged fires). */
@@ -103,6 +104,81 @@ static void portal_method_handler(fdk_dbus_connection *c,
     }
     /* ReadAll and friends: UnknownMethod (the engine only uses
      * ReadOne + the SettingChanged subscription). */
+}
+
+/* ---- the mock org.freedesktop.ScreenSaver (S-3 idle inhibition) ----
+ *
+ * A becomes the desktop's screensaver service: Inhibit(app, reason)
+ * answers a distinct cookie (or a refusal for the sentinel app
+ * name), UnInhibit(cookie) records the release. The idle module's
+ * full D-Bus half is pinned against it: the cookie round trip, the
+ * DEFERRED release, and the error path. */
+static int g_ss_inhibits, g_ss_uninhibits;
+static uint32_t g_ss_last_cookie, g_ss_last_uninhibited;
+static char g_ss_last_app[64], g_ss_last_reason[64];
+
+static void screensaver_handler(fdk_dbus_connection *c,
+                                fdk_dbus_message *call, void *user) {
+    (void)user;
+    const char *iface = fdk_dbus_message_interface(call);
+    const char *member = fdk_dbus_message_member(call);
+    if (iface == NULL ||
+        strcmp(iface, "org.freedesktop.ScreenSaver") != 0) {
+        return;
+    }
+    fdk_dbus_value **args = NULL;
+    size_t n = 0;
+    if (strcmp(member, "Inhibit") == 0) {
+        if (fdk_dbus_message_read_args(call, &args, &n) != FDK_OK ||
+            n != 2) {
+            fdk_dbus_values_free_array(args, n);
+            fdk_dbus_message *err = fdk_dbus_message_new_error(
+                call, "org.fdktest.Error.BadArgs", "Inhibit(s,s)");
+            if (err != NULL) {
+                (void)fdk_dbus_connection_send(c, err);
+            }
+            return;
+        }
+        const char *app = fdk_dbus_value_string(args[0]);
+        const char *reason = fdk_dbus_value_string(args[1]);
+        snprintf(g_ss_last_app, sizeof g_ss_last_app, "%s",
+                 app ? app : "");
+        snprintf(g_ss_last_reason, sizeof g_ss_last_reason, "%s",
+                 reason ? reason : "");
+        if (app != NULL && strcmp(app, "please-fail") == 0) {
+            fdk_dbus_values_free_array(args, n);
+            fdk_dbus_message *err = fdk_dbus_message_new_error(
+                call, "org.freedesktop.ScreenSaver.Error.Refused",
+                "the sentinel app is refused");
+            if (err != NULL) {
+                (void)fdk_dbus_connection_send(c, err);
+            }
+            return;
+        }
+        fdk_dbus_message *reply = fdk_dbus_message_new_method_return(call);
+        if (reply != NULL) {
+            g_ss_inhibits++;
+            g_ss_last_cookie = 1000u + (uint32_t)g_ss_inhibits;
+            (void)fdk_dbus_message_append_uint32(reply, g_ss_last_cookie);
+            (void)fdk_dbus_connection_send(c, reply);
+        }
+        fdk_dbus_values_free_array(args, n);
+        return;
+    }
+    if (strcmp(member, "UnInhibit") == 0) {
+        if (fdk_dbus_message_read_args(call, &args, &n) == FDK_OK &&
+            n == 1 && args != NULL &&
+            fdk_dbus_value_type(args[0]) == FDK_DBUS_UINT32) {
+            g_ss_last_uninhibited = fdk_dbus_value_uint32(args[0]);
+            g_ss_uninhibits++;
+        }
+        fdk_dbus_values_free_array(args, n);
+        fdk_dbus_message *reply = fdk_dbus_message_new_method_return(call);
+        if (reply != NULL) {
+            (void)fdk_dbus_connection_send(c, reply);
+        }
+        return;
+    }
 }
 
 /* request_name's reply handler + state. */
@@ -937,6 +1013,82 @@ int main(void) {
             remove(path);
         }
         remove(theme_root);
+    }
+
+    /* ---- Idle inhibition vs the mock ScreenSaver (1.1.0, S-3) ---- */
+    {
+        g_reqname_done = 0;
+        fdk_dbus_pending *sp = fdk_dbus_connection_request_name(
+            a, "org.freedesktop.ScreenSaver",
+            FDK_DBUS_NAME_REPLACE_EXISTING | FDK_DBUS_NAME_DO_NOT_QUEUE,
+            reqname_reply, NULL);
+        assert(sp != NULL);
+        assert(pump_until(ctx, &g_reqname_done, 10000));
+        assert(g_reqname_code == FDK_DBUS_REQUEST_NAME_PRIMARY_OWNER);
+        fdk_dbus_connection_set_method_handler(a, screensaver_handler,
+                                               NULL);
+        printf("[ok] idle: mock ScreenSaver service owns the name\n");
+
+        /* LEG 1: the cookie round trip. */
+        g_ss_inhibits = 0;
+        g_ss_uninhibits = 0;
+        fdk_idle_inhibitor *inh = NULL;
+        assert(fdk_ok(fdk_idle_inhibit(ctx, NULL, "fdk-tests",
+                                       "playing a video", &inh)));
+        assert(inh != NULL);
+        int active = 0;
+        for (int i = 0; i < 150 && !active; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            active = fdk_idle_inhibitor_status(inh) ==
+                     FDK_IDLE_INHIBIT_ACTIVE;
+        }
+        assert(active);
+        assert(g_ss_inhibits == 1);
+        assert(strcmp(g_ss_last_app, "fdk-tests") == 0);
+        assert(strcmp(g_ss_last_reason, "playing a video") == 0);
+        fdk_idle_uninhibit(inh);
+        for (int i = 0; i < 150 && g_ss_uninhibits == 0; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+        assert(g_ss_uninhibits == 1);
+        assert(g_ss_last_uninhibited == g_ss_last_cookie);
+        printf("[ok] idle: inhibit -> cookie -> ACTIVE; uninhibit "
+               "sent the matching cookie\n");
+
+        /* LEG 2: the DEFERRED release — the handle is dropped BEFORE
+         * the cookie lands (no pump between the calls); the desktop
+         * must still see the matching UnInhibit (cancelling would
+         * orphan the inhibition). */
+        fdk_idle_inhibitor *inh2 = NULL;
+        assert(fdk_ok(fdk_idle_inhibit(ctx, NULL, "fdk-tests",
+                                       "early release", &inh2)));
+        fdk_idle_uninhibit(inh2); /* cookie still in flight */
+        int settled = 0;
+        for (int i = 0; i < 200 && !settled; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            settled = (g_ss_inhibits == 2 && g_ss_uninhibits == 2);
+        }
+        assert(settled);
+        assert(g_ss_last_uninhibited == g_ss_last_cookie);
+        printf("[ok] idle: release-before-cookie still un-inhibits "
+               "(the deferred release, no orphan)\n");
+
+        /* LEG 3: the error path — the service refuses the sentinel
+         * app; the inhibitor degrades to UNSUPPORTED and releases
+         * cleanly. */
+        fdk_idle_inhibitor *inh3 = NULL;
+        assert(fdk_ok(fdk_idle_inhibit(ctx, NULL, "please-fail",
+                                       "x", &inh3)));
+        int unsup = 0;
+        for (int i = 0; i < 150 && !unsup; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            unsup = fdk_idle_inhibitor_status(inh3) ==
+                    FDK_IDLE_INHIBIT_UNSUPPORTED;
+        }
+        assert(unsup);
+        fdk_idle_uninhibit(inh3);
+        assert(g_ss_inhibits == 2); /* the refusal issued no cookie */
+        printf("[ok] idle: service refusal degrades to UNSUPPORTED\n");
     }
 
     /* ---- teardown --------------------------------------------------------- */

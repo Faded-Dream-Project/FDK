@@ -302,6 +302,18 @@ struct fdk_window {
      * destroyed with the window. Owns the tap / two-finger-scroll
      * synthesis policy — see src/window/touch.c. */
     struct fdk_touch_engine *touch;
+
+    /* ---- 1.1.0, S-3: idle inhibition ----
+     *
+     * The COMPOSITOR half of fdk_idle_inhibit (the platform
+     * inhibitor rides the pwindow; this flag is the window's own
+     * engagement record so its destroy path can disengage before
+     * the platform window dies). idle_inhib is the borrowed handle
+     * back-reference — severed (NULLed) at destroy so a
+     * released-late inhibitor never touches a dead window. One
+     * inhibitor per window (fdk_idle_inhibit refuses a second). */
+    int idle_inhibited;
+    struct fdk_idle_inhibitor *idle_inhib;
 };
 
 /* Called by the context's platform dispatch callback (see
@@ -325,6 +337,15 @@ typedef void (*fdk_touch_emit_fn)(void *user, const fdk_event_data *event);
 fdk_touch_engine *fdk__touch_engine_create(void);
 void fdk__touch_engine_destroy(fdk_touch_engine *engine);
 void fdk__touch_engine_reset(fdk_touch_engine *engine);
+
+/* ---- Idle inhibition (1.1.0, S-3; src/desktop/idle.c) --------------------
+ *
+ * The inhibitor handle's sever hook: called by the window destroy
+ * path AFTER it disengaged the platform inhibitor (the compositor
+ * half dies with the surface), so a released-late inhibitor never
+ * touches the dead window. Opaque here — idle.c owns the struct. */
+struct fdk_idle_inhibitor;
+void fdk__idle_inhibitor_sever(struct fdk_idle_inhibitor *inhib);
 int fdk__touch_engine_active(const fdk_touch_engine *engine);
 void fdk__touch_engine_feed(fdk_touch_engine *engine,
                             const fdk_event_data *event,

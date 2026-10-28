@@ -7,6 +7,7 @@
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
 #include "generated/xdg-toplevel-icon-v1-client-protocol.h"
+#include "generated/idle-inhibit-unstable-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -1863,6 +1864,13 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         xdg_toplevel_icon_v1_destroy(pwindow->toplevel_icon);
         pwindow->toplevel_icon = NULL;
     }
+    if (pwindow->idle_inhibitor != NULL) {
+        /* A window dying with the display still inhibited releases
+         * it (the inhibitor proxy is surface-scoped and would be a
+         * protocol error to keep after the surface dies). */
+        zwp_idle_inhibitor_v1_destroy(pwindow->idle_inhibitor);
+        pwindow->idle_inhibitor = NULL;
+    }
     if (pwindow->toplevel_icon_buffer != NULL) {
         wl_buffer_destroy(pwindow->toplevel_icon_buffer);
         pwindow->toplevel_icon_buffer = NULL;
@@ -1988,6 +1996,39 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
  *     GNOME): one INFO line, then a permanent quiet no-op per
  *     window (the warn-once stamp below).
  */
+/* Idle inhibition (1.1.0, S-3): the per-surface inhibitor, engaged
+ * and released by the idle module through the ops table. The proxy
+ * rides the pwindow (the window destroy path releases a live one);
+ * the inhibitor object itself carries NO events — the protocol is
+ * create-to-inhibit, destroy-to-release. */
+fdk_result fdk_wayland_window_set_idle_inhibit(
+    fdk_platform_window *pwindow, int inhibit) {
+    if (pwindow == NULL || pwindow->conn == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pwindow->conn->idle_inhibit_manager == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* the D-Bus fallback engages */
+    }
+    if (inhibit) {
+        if (pwindow->idle_inhibitor != NULL) {
+            return FDK_OK; /* idempotent engage */
+        }
+        if (pwindow->surface == NULL) {
+            return FDK_ERR_INVALID_STATE;
+        }
+        pwindow->idle_inhibitor =
+            zwp_idle_inhibit_manager_v1_create_inhibitor(
+                pwindow->conn->idle_inhibit_manager, pwindow->surface);
+        return pwindow->idle_inhibitor != NULL ? FDK_OK
+                                               : FDK_ERR_OUT_OF_MEMORY;
+    }
+    if (pwindow->idle_inhibitor != NULL) {
+        zwp_idle_inhibitor_v1_destroy(pwindow->idle_inhibitor);
+        pwindow->idle_inhibitor = NULL;
+    }
+    return FDK_OK; /* release without engagement: idempotent */
+}
+
 void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
                                  const fdk_u32 *pixels,
                                  int width, int height) {

@@ -14,6 +14,40 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-28 (on the rc2 line)
 
+### Added — idle/screensaver inhibition (S-3 / B-11)
+
+- **`fdk_idle.h` (public API, append-only)**:
+  `fdk_idle_inhibit` / `fdk_idle_uninhibit` /
+  `fdk_idle_inhibitor_status` — one inhibitor handle, whatever the
+  desktop speaks. Wayland engages the compositor's own
+  `zwp_idle_inhibit_manager_v1` (surface-scoped through a new
+  window-scoped platform op; the engagement is window-owned — a
+  window dying while inhibited releases its inhibitor). Everywhere
+  else (X11, Wayland compositors without the protocol) the
+  `org.freedesktop.ScreenSaver` D-Bus service carries it:
+  `Inhibit(app, reason)` returns a cookie, `UnInhibit(cookie)`
+  releases it.
+- **The deferred-release lifecycle**: the D-Bus half is async — the
+  cookie may arrive after the application already released the
+  inhibitor. Cancelling would orphan the inhibition on the desktop
+  (the call was already sent), so the release is remembered and the
+  matching `UnInhibit` goes out the moment the cookie lands; the
+  handle's memory is owned by a three-slot reference count (user
+  handle, bus handshake, pending call) so the late reply never
+  touches freed memory.
+- **Tests**: the live-bus rig's mock
+  `org.freedesktop.ScreenSaver` pins the cookie round trip, the
+  deferred release (release-before-cookie still un-inhibits — no
+  orphan), and the service-refusal degradation; the sway rig pins
+  the compositor inhibitor (engage, release, and
+  destroy-while-inhibited, all protocol-clean against the real
+  wlroots implementation); the X11 rig pins the no-bus fallback
+  shape (clean UNSUPPORTED degradation, early-release-clean under
+  ASan).
+- **Named limit**: GNOME's `org.gnome.ScreenSaver` variant is not
+  probed (on GNOME Wayland the compositor protocol path engages
+  anyway).
+
 ### Added — IME composition, both backends (M-1 / B-01)
 
 - **The IME event family (public API, append-only)**:

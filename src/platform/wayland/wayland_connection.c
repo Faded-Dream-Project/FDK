@@ -8,6 +8,7 @@
 #include "generated/cursor-shape-v1-client-protocol.h"
 #include "generated/xdg-toplevel-icon-v1-client-protocol.h"
 #include "generated/text-input-unstable-v3-client-protocol.h"
+#include "generated/idle-inhibit-unstable-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -147,6 +148,14 @@ static void registry_global(void *data, struct wl_registry *registry,
             wl_registry_bind(registry, name,
                              &zwp_text_input_manager_v3_interface, tv);
         fdk_wayland_ime_seat_ready(conn);
+    } else if (strcmp(interface,
+                      zwp_idle_inhibit_manager_v1_interface.name) == 0) {
+        /* OPTIONAL (1.1.0, S-3): idle-inhibit — absent means the
+         * window op answers UNSUPPORTED and the D-Bus ScreenSaver
+         * fallback carries idle inhibition instead. */
+        conn->idle_inhibit_manager =
+            wl_registry_bind(registry, name,
+                             &zwp_idle_inhibit_manager_v1_interface, 1);
     }
     /* Other globals (wl_data_device_manager, etc.) are
      * intentionally not bound — out of current scope, see
@@ -390,6 +399,10 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
         conn->toplevel_icon_manager = NULL;
     }
     fdk_wayland_ime_teardown(conn);
+    if (conn->idle_inhibit_manager != NULL) {
+        zwp_idle_inhibit_manager_v1_destroy(conn->idle_inhibit_manager);
+        conn->idle_inhibit_manager = NULL;
+    }
     if (conn->fractional_manager) {
         wp_fractional_scale_manager_v1_destroy(conn->fractional_manager);
     }

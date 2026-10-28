@@ -508,3 +508,42 @@ on_changed, and the surrounding text + caret arriving BACK at the
 input method. The generated input-method-v2 protocol code is
 test-only (compiled into the test binary, never the library); the
 library ships the client side alone.
+
+---
+
+## D-013 — idle inhibition: one handle, two mechanisms, the deferred release (S-3 / B-11)
+
+**1. The mechanism choice is per-desktop, not per-backend.** One
+inhibitor handle picks whatever the desktop actually speaks:
+Wayland compositors with `zwp_idle_inhibit_manager_v1` get the
+compositor's own (surface-scoped) inhibitor through a new
+window-scoped platform op; everything else — X11, Wayland without
+the manager — rides `org.freedesktop.ScreenSaver` on the native
+D-Bus client. The op answering FDK_ERR_UNSUPPORTED is the fallback
+trigger, not an error.
+
+**2. The compositor half is window-owned.** The engagement flag and
+the inhibitor's back-reference live on the WINDOW: its destroy path
+disengages the platform inhibitor before the platform window dies
+(a surface-scoped proxy outliving its surface is a protocol error)
+and severs the handle's back-reference — a released-late inhibitor
+never touches a dead window. One inhibitor per window (a second
+inhibit on an engaged window is FDK_ERR_INVALID_STATE).
+
+**3. The D-Bus half's release is deferred, never cancelled.** The
+cookie may arrive after the user released the handle. Cancelling
+the pending Inhibit would orphan the inhibition on the desktop (the
+call was already sent; only the answer is dropped) — so the release
+is remembered and the matching UnInhibit goes out when the cookie
+lands. Three reference slots own the memory (user handle, the bus
+handshake, the pending call) — the handshake racing a release was a
+live use-after-free the design caught before any rig did. The
+live-bus mock pins the deferred path as the headline assertion.
+
+**4. Scope fence.** GNOME's org.gnome.ScreenSaver variant (same
+Inhibit shape) is deliberately not probed: on GNOME Wayland the
+compositor protocol engages, and the X11-on-GNOME user base is
+served by the freedesktop service GNOME's session still registers
+alongside on modern systems — where it is not, the honest
+UNSUPPORTED degradation is the documented answer, not a silent
+failure.

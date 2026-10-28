@@ -11429,6 +11429,54 @@ static void test_ext_fd_sources(void) {
            "defers to the next pump, validation\n");
 }
 
+/* Idle inhibition (1.1.0, S-3): X11 has no platform op — the D-Bus
+ * fallback engages. This rig runs under Xvfb WITHOUT a session bus,
+ * so the inhibitor degrades to UNSUPPORTED (a connect failure or
+ * no-daemon error); the lifecycle shapes that matter here are: the
+ * handle exists, is released cleanly, and the release-before-
+ * anything-arrives shape (the async handshake racing a release)
+ * never touches freed memory (ASan's whole point in this suite). */
+static void test_idle_fallback_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &opts)));
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "idle fallback",
+                                 .width = 200, .height = 100 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+
+    fdk_idle_inhibitor *inh = NULL;
+    assert(fdk_ok(fdk_idle_inhibit(ctx, win, "fdk-tests",
+                                   "the Xvfb rig", &inh)));
+    assert(inh != NULL);
+    /* Settle: the connect either fails fast (no bus) or the
+     * handshake runs to its failure — both end UNSUPPORTED. */
+    int settled = 0;
+    for (int i = 0; i < 100 && !settled; i++) {
+        (void)fdk_pump_events(ctx, 20);
+        settled = fdk_idle_inhibitor_status(inh) ==
+                  FDK_IDLE_INHIBIT_UNSUPPORTED;
+    }
+    assert(settled);
+    fdk_idle_uninhibit(inh);
+
+    /* The release-during-handshake shape: inhibit then release
+     * IMMEDIATELY (the deferred-release path with nothing ever
+     * arriving). */
+    fdk_idle_inhibitor *inh2 = NULL;
+    assert(fdk_ok(fdk_idle_inhibit(ctx, NULL, "fdk-tests", "early", &inh2)));
+    fdk_idle_uninhibit(inh2);
+    for (int i = 0; i < 50; i++) {
+        (void)fdk_pump_events(ctx, 20);
+    }
+
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] idle fallback: no-bus degrades to UNSUPPORTED; "
+           "early release is clean (ASan-clean)\n");
+}
+
 int main(void) {
     /* Hermeticity (1.4.13): pin the global-settings boot (the "fdk"
      * prefs store + $FDK_THEME) to nothing so this suite's pixel
@@ -11519,6 +11567,7 @@ int main(void) {
     test_gl_lane_selfcheck_inconclusive_gui();
     test_gl_lane_selfcheck_real_failure_gui();
     test_gl_lane_resize_gui();
+    test_idle_fallback_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

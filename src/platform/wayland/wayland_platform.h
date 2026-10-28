@@ -77,6 +77,11 @@ struct fdk_platform_connection {
      * lets the compositor scale, so they are not listened to. */
     struct xdg_toplevel_icon_manager_v1 *toplevel_icon_manager;
 
+    /* idle-inhibit (1.1.0, S-3): the OPTIONAL manager — absent means
+     * the compositor has no idle-inhibit protocol and the window op
+     * answers FDK_ERR_UNSUPPORTED (the D-Bus fallback engages). */
+    struct zwp_idle_inhibit_manager_v1 *idle_inhibit_manager;
+
     /* text-input-v3 (1.1.0, M-1): the OPTIONAL IME manager + the
      * per-seat text input object (wayland_ime.c). enter/leave are
      * the focus gates; the latched pending strings + the showing
@@ -396,6 +401,11 @@ struct fdk_platform_window {
      * no-op itself is permanent per compositor, the LOG is once
      * per window so a per-frame set_icon caller cannot spam. */
     int icon_absent_logged;
+    /* Idle inhibitor (1.1.0, S-3): the per-surface
+     * zwp_idle_inhibitor_v1 while engaged (NULL otherwise); dies
+     * with the window (the destroy path) or at the idle module's
+     * release — whichever comes first. */
+    struct zwp_idle_inhibitor_v1 *idle_inhibitor;
     /* Extension surface (1.1.0, fdk_extend.h): nonzero when this
      * wrapper ADOPTED an add-on's wl_surface (wayland_ext.c) — the
      * surface's ROLE belongs to the add-on (a layer surface, an
@@ -743,6 +753,11 @@ void fdk_wayland_ime_window_destroyed(fdk_platform_connection *conn,
                                       fdk_platform_window *pwindow);
 void fdk_wayland_ime_update_surrounding(fdk_platform_window *pwindow,
                                         const char *text, int cursor);
+
+/* Idle inhibition (1.1.0, S-3; wayland_window.c): the platform op —
+ * create/destroy the per-surface zwp_idle_inhibitor_v1. */
+fdk_result fdk_wayland_window_set_idle_inhibit(
+    fdk_platform_window *pwindow, int inhibit);
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size);

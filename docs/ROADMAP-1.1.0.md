@@ -45,9 +45,9 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 19 (S-2 and S-1 pending owner verification; M-4,
-M-3, and M-1 landed 2026-10-28) · PARTIAL 9 ·
-IN PROGRESS 1 (M-9) · MISSING 26 ·
+**Counts:** DONE 20 (S-2 and S-1 pending owner verification; M-4,
+M-3, M-1, and S-3 landed 2026-10-28) · PARTIAL 9 ·
+IN PROGRESS 1 (M-9) · MISSING 25 ·
 DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
 Re-verified 2026-10-27 (post-trayhost): the full battery plus the
 notifyd rig and the trayhost rig (all three phases green each).
@@ -92,7 +92,7 @@ unaffected):
 | B-08 | D-Bus foundation | **DONE** [VERIFIED-CHANGED: audit said missing] | M-7's native client (src/dbus/, 112 exported fdk_dbus_* of 757 total, commit 4d42c8c): live daemon battery incl. the ported libdbus cross-implementation leg; 20k-mutation fuzz + prefix-exhaustive truncation in `make test` | — |
 | B-09 | portal FileChooser fallback | **MISSING** | own dialogs everywhere (fdk_dialog.h: "no portal") | C-1 — **moved to CORE** on the native client (D-002) |
 | B-10 | AT-SPI interop | **MISSING** | internal a11y tree only; comments state the no-daemon posture | S-8 — **CORE** on the native client (D-002) |
-| B-11 | idle/screensaver inhibition | **MISSING** | no idle-inhibit / org.freedesktop.ScreenSaver | S-3 |
+| B-11 | idle/screensaver inhibition | **DONE** | S-3 shipped: fdk_idle.h (fdk_idle_inhibit/uninhibit/status — one handle, either mechanism); Wayland zwp_idle_inhibit_manager_v1 through the window-scoped platform op (window-owned engagement, sever-at-destroy); org.freedesktop.ScreenSaver on the native D-Bus client with the DEFERRED release (uninhibit-before-cookie still sends the matching UnInhibit — no orphaned inhibition); the window-dies-inhibited release; tests/test_idle.c + the mock-ScreenSaver legs in the live D-Bus rig (cookie round trip, deferred release, refusal) + the sway rig (engage/release/destroy-while-inhibited) + the X11 no-bus fallback | GNOME's org.gnome.ScreenSaver variant not probed (documented); owner's real-desktop check |
 | B-12 | cursor shape set | **PARTIAL** | public surface exactly 2 shapes (fdk_window.h: DEFAULT/POINTER) + internal per-edge resize + enter re-apply (c58f5da W2) | S-5: full named set |
 | B-13 | drag icons + drop targets | **PARTIAL** | DnD window-level both backends; drag icon explicitly absent ("start_drag with NO icon surface") | S-9 |
 | B-14 | image formats | **PARTIAL** | stb static raster + nanosvg; no animated | C-4 |
@@ -112,7 +112,7 @@ unaffected):
 | M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags beyond v1.0.0, rc line held, per-push CI, per-item docs | owner's real-desktop sign-off before any tag |
 | S-1 | tray host | **DONE (should work; owner verification pending)** | = A-11 (trayhost + the rig; D-007 records the shape decisions) | owner verification via docs/TESTING-ON-DESKTOP.md |
 | S-2 | notification display | **DONE (should work; owner verification pending)** | = A-12 (notifyd + the rig; D-006 records the shape decisions) | owner verification via docs/TESTING-ON-DESKTOP.md |
-| S-3 | idle inhibition | **MISSING** | = B-11 | wl protocol + ScreenSaver D-Bus |
+| S-3 | idle inhibition | **DONE** | = B-11 (both mechanisms; the live-bus mock + the sway rig) | — |
 | S-4 | input regions | **PARTIAL** | = A-06 | the region API |
 | S-5 | cursor shape set | **PARTIAL** | = B-12 | the named set |
 | S-6 | xdg_activation + startup notification | **MISSING** | no code | the whole item |
@@ -265,7 +265,7 @@ has an API surface, tests, and docs in the tree):
 | B-08 | **The D-Bus foundation.** No D-Bus client of any kind (by design, zero-dependency). Blocks: dark mode on Wayland (B-06), tray (A-11), notifications (A-12), portals (B-09), AT-SPI (B-10), idle inhibition on X11 (B-11). | missing | one architectural decision gates five features | L | none — new module, dlopen posture like GLX/fontconfig (libdbus-1.so.3 present in the target sandbox) **[VERIFIED-CHANGED: CLOSED by M-7 - implemented NATIVELY in raw C from the spec; no libdbus dlopen at all, no new dependency of any kind (docs/DECISIONS.md D-001); the dlopen speculation above predates the decision and never applied]** |
 | B-09 | **Portal dialogs** — own widgets everywhere; no xdg-desktop-portal FileChooser fallback. | partial | functionally fine everywhere; required only under Flatpak-style sandboxes | M | none **[VERIFIED-CHANGED: the fallback is CORE work on the native D-Bus client per the 2026-10-27 owner decision (D-002), not a Flatpak-only nicety; verdict stays MISSING until it lands]** |
 | B-10 | **AT-SPI2 interop** — internal a11y tree exists; Orca and other OS screen readers cannot see FDK apps (no D-Bus). Deliberate no-daemon-dependency posture so far. | missing | blind users on real desktops get nothing from FDK apps even though the internal tree is rich | L | none |
-| B-11 | **Idle/screensaver inhibition** — no org.freedesktop.ScreenSaver, no idle-inhibit-unstable-v1. | missing | video players keep the screen blanking mid-play | S–M | none |
+| B-11 | **Idle/screensaver inhibition** — no org.freedesktop.ScreenSaver, no idle-inhibit-unstable-v1. | missing | video players keep the screen blanking mid-play | S–M | none | **[DONE 2026-10-28: S-3 — both mechanisms, the deferred-release lifecycle]** |
 | B-12 | **Cursor shape set** — 2 shapes (arrow/hand) + per-edge resize cursors; Wayland rides cursor-shape-v1 (all names available), X11 uses core `XCreateFontCursor` (no themes). | partial | standard shapes (text beam, wait, crosshair, grab) missing from the public surface | S | none |
 | B-13 | **Drag icons + widget-level drop targets** — DnD is window-level (apps hit-test); no drag icon on either backend. | partial | usable but visibly rough; file managers do manual hit-testing today | S (icon) / M (targets) | none |
 | B-14 | **Image formats** — stb_image decode (JPEG/PNG/BMP/TGA/PSD/GIF-static/HDR/PIC/PNM) + PNG encode + nanosvg. No animated GIF/WebP/APNG/AVIF; SVG without filters/masks/text. | partial | static raster + SVG solid; animated content missing | S–M | none |
@@ -307,7 +307,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 |---|------|-------------|--------|
 | S-1 | **StatusNotifier tray host** in fdk-shell (rides M-7's D-Bus) | A-11 | M–L | **[DONE 2026-10-27: trayhost, the rig, D-007 — should work; owner verification pending]** |
 | S-2 | **Notification display** — org.freedesktop.Notifications client as an fdk-shell example/add-on on the overlay layer | A-12 | S–M | **[DONE 2026-10-27: notifyd, the rig, D-006 — should work; owner verification pending]** |
-| S-3 | **Idle inhibition** — idle-inhibit-unstable-v1 (Wayland) + org.freedesktop.ScreenSaver (X11, rides M-7) | B-11 | S–M |
+| S-3 | **Idle inhibition** — idle-inhibit-unstable-v1 (Wayland) + org.freedesktop.ScreenSaver (X11, rides M-7) | B-11 | S–M | **[DONE 2026-10-28 — see B-11's register row]** |
 | S-4 | **Input regions / click-through** — wl_surface.set_input_region + XShape, exposed on windows and extension surfaces | A-06, A-07 | S–M |
 | S-5 | **Cursor shape set** — full named set over cursor-shape-v1 + core font cursors | B-12 | S |
 | S-6 | **xdg_activation + startup notification** | B-04 (activation part) | M |

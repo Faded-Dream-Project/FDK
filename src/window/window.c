@@ -870,6 +870,8 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->shortcut_next_id = 1;
     window->geo_repaint_pending = false;
     window->touch = NULL; /* M-3: lazily created at first touch */
+    window->idle_inhibited = 0; /* S-3: the inhibitor engages later */
+    window->idle_inhib = NULL;
 }
 
 static fdk_result window_create_full(fdk_context *ctx,
@@ -1033,6 +1035,20 @@ void fdk_window_destroy(fdk_window *window) {
     window->shortcut_cap = 0;
     fdk__touch_engine_destroy(window->touch);
     window->touch = NULL;
+    /* S-3 idle inhibition: disengage the compositor half BEFORE the
+     * platform window dies (the inhibitor proxy rides it), then
+     * sever the handle's back-reference — a released-late
+     * inhibitor must never touch this window. */
+    if (window->idle_inhibited) {
+        if (window->ops->window_set_idle_inhibit != NULL) {
+            (void)window->ops->window_set_idle_inhibit(window->pwindow, 0);
+        }
+        window->idle_inhibited = 0;
+    }
+    if (window->idle_inhib != NULL) {
+        fdk__idle_inhibitor_sever(window->idle_inhib);
+        window->idle_inhib = NULL;
+    }
     fdk_context_unregister_window(window->ctx, window);
     window->ops->window_destroy(window->pwindow);
     fdk_free(window);

@@ -197,6 +197,15 @@ typedef struct fdk_platform_ops {
     void (*ime_update_surrounding)(fdk_platform_window *pwindow,
                                    const char *text, int cursor);
 
+    /* OPTIONAL (1.1.0, S-3 idle inhibition): engage/release the
+     * compositor's native idle inhibition for this window's
+     * surface (Wayland: zwp_idle_inhibit_manager_v1). Returns
+     * FDK_ERR_UNSUPPORTED when the backend/compositor has no
+     * native mechanism — the idle module then rides the
+     * org.freedesktop.ScreenSaver D-Bus path instead. Idempotent. */
+    fdk_result (*window_set_idle_inhibit)(fdk_platform_window *pwindow,
+                                          int inhibit);
+
     /* --- Window operations --- */
 
     /* Creates a window. `parent` is NULL for top-levels; for popup
