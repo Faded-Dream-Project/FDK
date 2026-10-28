@@ -43,7 +43,7 @@ RUN "$VOID_IMAGE" '
     # that broke this builder on 2026-10-28). One coherent full
     # upgrade first, then the build set.
     xbps-install -Syu || \
-        echo "NOTE: full container upgrade failed — continuing with the image's state (disclosed)"
+        echo "NOTE: full container upgrade failed — continuing with the image state (disclosed)"
     xbps-install -Sy base-devel pkgconf findutils zstd \
         libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
@@ -55,12 +55,12 @@ RUN "$VOID_IMAGE" '
         xbps-install -Sy libglvnd mesa-dri 2>/dev/null || \
         xbps-install -Sy mesa 2>/dev/null || \
         echo "NOTE: no GL runtime package combination available; the forced-lane suite groups would fail (disclosed)"
-    # A CJK font for the shaping suite's per-script fallback leg —
-    # non-fatal: a repo without one is disclosed and the suite's
+    # A CJK font for the shaping suites per-script fallback leg —
+    # non-fatal: a repo without one is disclosed and the suites
     # fallback leg skips honestly (primary .notdef).
     xbps-install -Sy noto-fonts-cjk 2>/dev/null || \
         xbps-install -Sy wqy-zenhei-font 2>/dev/null || \
-        echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping suite's fallback leg skips honestly (disclosed)"
+        echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping fallback leg skips honestly (disclosed)"
     xbps-install -Sy xorg-server-xvfb 2>/dev/null || \
         xbps-install -Sy xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"

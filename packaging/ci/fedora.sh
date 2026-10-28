@@ -37,10 +37,10 @@ RUN almalinux:10 '
     # The base image drifts: a stale container plus a fresh repo makes
     # any NEW package pull a partial toolchain upgrade (the glibc
     # cascade that broke this builder on 2026-10-28: the transaction
-    # upgraded glibc mid-session and libX11-devel's files never
+    # upgraded glibc mid-session and the libX11-devel files never
     # landed). One coherent full update first, then the build set.
     dnf -y -q update || \
-        echo "NOTE: full container update failed — continuing with the image's state (disclosed)"
+        echo "NOTE: full container update failed — continuing with the image state (disclosed)"
     dnf install -y -q \
         gcc make pkgconf-pkg-config rpm-build cpio \
         libasan libubsan \
@@ -54,13 +54,13 @@ RUN almalinux:10 '
     # still runs the full graphical validation.
     dnf install -y -q --enablerepo=crb xorg-x11-server-Xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb in the el10 repositories — the X11 suite is skipped on this builder and disclosed"
-    # A CJK font for the shaping suite's per-script fallback leg. Any
+    # A CJK font for the shaping suites per-script fallback leg. Any
     # flavor works (the resolver accepts TrueType-flavored faces); a
-    # repo without one is DISCLOSED — the suite's fallback leg skips
+    # repo without one is DISCLOSED — the shaping fallback leg skips
     # honestly (primary .notdef) rather than failing.
     dnf install -y -q google-noto-sans-cjk-ttc-fonts 2>/dev/null || \
         dnf install -y -q wqy-zenhei-fonts 2>/dev/null || \
-        echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping suite's fallback leg skips honestly (disclosed)"
+        echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping fallback leg skips honestly (disclosed)"
     sh packaging/fedora/build-rpm.sh
     sh fdk-shell/packaging/fedora/build-rpm.sh
 '
