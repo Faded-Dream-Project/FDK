@@ -29,6 +29,8 @@ license=('LicenseRef-Proprietary')
 # the artifact collection does not expect.
 options=(!lto !debug)
 depends=(libx11 libxext zlib wayland libxkbcommon)
+optdepends=('harfbuzz: complex-script text shaping'
+            'fribidi: right-to-left text support')
 makedepends=(pkgconf)
 source=("fdk-$pkgver.tar.gz")
 sha256sums=('@SHA256@')

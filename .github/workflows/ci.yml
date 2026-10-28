@@ -58,13 +58,17 @@ jobs:
             libx11-dev libxext-dev libxtst-dev libxi-dev zlib1g-dev \
             libwayland-dev libxkbcommon-dev \
             dbus libglib2.0-bin \
-            libgl1 xvfb fonts-dejavu-core python3-pil
+            libgl1 xvfb fonts-dejavu-core python3-pil \
+            libharfbuzz0b libfribidi0 fonts-wqy-zenhei
 
       - name: Build (debug, sanitizers)
         run: make
 
       - name: Headless test suite
         run: make test
+
+      - name: Text shaping — the legacy posture (FDK_SHAPING=0)
+        run: FDK_SHAPING=0 ./build/tests/test_shaping
 
       - name: X11 integration suite (throwaway Xvfb)
         run: make test-x11

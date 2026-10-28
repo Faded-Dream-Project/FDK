@@ -41,7 +41,8 @@ RUN "$VOID_IMAGE" '
     xbps-install -Sy base-devel pkgconf findutils zstd \
         libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
-        dejavu-fonts-ttf tar
+        dejavu-fonts-ttf tar \
+        harfbuzz fribidi wqy-zenhei-font
     # GL runtime for the X11-suite forced-lane groups (llvmpipe),
     # layered over the known package-name combinations:
     xbps-install -Sy mesa mesa-dri 2>/dev/null || \

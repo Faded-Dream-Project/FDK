@@ -210,6 +210,7 @@ static bool fs_try_env_file(char **out_path, long *out_face) {
  */
 typedef int fs_FcBool;
 typedef unsigned char fs_FcChar8;
+typedef uint32_t fs_FcChar32;
 typedef struct _FcPattern fs_FcPattern;
 typedef struct _FcConfig fs_FcConfig;
 typedef struct _FcFontSet fs_FcFontSet;
@@ -244,6 +245,14 @@ typedef struct {
                                     int id, fs_FcChar8 **out);
     fs_FcBool (*FcPatternGetInteger)(fs_FcPattern *p, const char *object,
                                      int id, int *out);
+    /* M-2 fallback: charset-filtered queries (FcCharSet objects are
+     * reference-counted; FcCharSetDestroy after the pattern holds a
+     * COPY is the documented pattern). */
+    void *(*FcCharSetCreate)(void);
+    fs_FcBool (*FcCharSetAddChar)(void *cs, fs_FcChar32 c);
+    void (*FcCharSetDestroy)(void *cs);
+    fs_FcBool (*FcPatternAddCharSet)(fs_FcPattern *p, const char *object,
+                                     void *value);
 } fs_fc_api;
 
 static fs_fc_api g_fc;     /* zeroed until resolved */
@@ -284,6 +293,10 @@ static bool fs_fc_load(void) {
         {"FcFontSetDestroy", (void **)&g_fc.FcFontSetDestroy},
         {"FcPatternGetString", (void **)&g_fc.FcPatternGetString},
         {"FcPatternGetInteger", (void **)&g_fc.FcPatternGetInteger},
+        {"FcCharSetCreate", (void **)&g_fc.FcCharSetCreate},
+        {"FcCharSetAddChar", (void **)&g_fc.FcCharSetAddChar},
+        {"FcCharSetDestroy", (void **)&g_fc.FcCharSetDestroy},
+        {"FcPatternAddCharSet", (void **)&g_fc.FcPatternAddCharSet},
     };
     for (size_t i = 0; i < sizeof(syms) / sizeof(syms[0]); i++) {
         void *sym = dlsym(g_fc_lib, syms[i].name);
@@ -387,6 +400,92 @@ static bool fs_fontconfig_walk(char **out_path, long *out_face) {
         }
     }
     g_fc.FcFontSetDestroy(set);
+    return found;
+}
+
+/* M-2 (shaping.c's per-script fallback): fontconfig's answer for "a
+ * font covering this language". Same pattern/sort walk as the
+ * default-font resolver, but the pattern is FC_LANG instead of the
+ * sans-serif family — fontconfig ranks every font whose charset
+ * covers the language, and the first TrueType-flavored candidate
+ * through the same loadable-face gate wins. The LSan bracket and
+ * the process-lifetime fontconfig posture are fs_try_fontconfig's
+ * (the same reasoning applies verbatim). */
+bool fdk_text_resolve_fallback_font(const char *lang, fdk_u32 probe_cp,
+                                    char **out_path, long *out_face) {
+    if (lang == NULL || out_path == NULL || out_face == NULL) {
+        return false;
+    }
+    if (!fs_fc_load()) {
+        return false;
+    }
+    fs_lsan_off();
+    bool found = false;
+    if (g_fc.FcInit()) {
+        fs_FcPattern *pat = g_fc.FcPatternCreate();
+        if (pat != NULL) {
+            (void)g_fc.FcPatternAddString(pat, "lang",
+                                          (const fs_FcChar8 *)lang);
+            (void)g_fc.FcPatternAddBool(pat, "scalable", 1);
+            if (probe_cp != 0 && g_fc.FcCharSetCreate != NULL &&
+                g_fc.FcPatternAddCharSet != NULL) {
+                /* The decisive filter: only fonts whose charset
+                 * actually maps the probe codepoint. FC_LANG alone
+                 * lets weak matches (a Latin-only font ranking first
+                 * for "zh" on this very machine) win the sort. */
+                void *cs = g_fc.FcCharSetCreate();
+                if (cs != NULL) {
+                    (void)g_fc.FcCharSetAddChar(cs,
+                                                (fs_FcChar32)probe_cp);
+                    (void)g_fc.FcPatternAddCharSet(pat, "charset", cs);
+                    g_fc.FcCharSetDestroy(cs);
+                }
+            }
+            (void)g_fc.FcConfigSubstitute(NULL, pat,
+                                           FS_FC_MATCH_PATTERN);
+            g_fc.FcDefaultSubstitute(pat);
+
+            int result = 0;
+            fs_FcFontSet *set = g_fc.FcFontSort(NULL, pat, 1, NULL,
+                                                &result);
+            g_fc.FcPatternDestroy(pat);
+            if (set != NULL) {
+                const fs_FcFontSetView *view =
+                    (const fs_FcFontSetView *)set;
+                int n = view->nfont;
+                if (n < 0) {
+                    n = 0;
+                }
+                if (n > 32) {
+                    n = 32; /* the same pathological-sort cap */
+                }
+                for (int i = 0; i < n && !found; i++) {
+                    fs_FcChar8 *file = NULL;
+                    int index = 0;
+                    if (g_fc.FcPatternGetString(view->fonts[i], "file",
+                                                0, &file) !=
+                            FS_FC_RESULT_MATCH ||
+                        file == NULL) {
+                        continue;
+                    }
+                    (void)g_fc.FcPatternGetInteger(view->fonts[i],
+                                                   "index", 0, &index);
+                    long face = 0;
+                    if (fs_file_has_face((const char *)file,
+                                         (long)index, &face)) {
+                        char *dup = fs_strdup((const char *)file);
+                        if (dup != NULL) {
+                            *out_path = dup;
+                            *out_face = face;
+                            found = true;
+                        }
+                    }
+                }
+                g_fc.FcFontSetDestroy(set);
+            }
+        }
+    }
+    fs_lsan_on();
     return found;
 }
 

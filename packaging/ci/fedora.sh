@@ -39,7 +39,8 @@ RUN almalinux:10 '
         libasan libubsan \
         libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
-        dejavu-sans-fonts dejavu-sans-mono-fonts
+        dejavu-sans-fonts dejavu-sans-mono-fonts \
+        harfbuzz fribidi wqy-zenhei-fonts
     # RHEL 10 ships no standalone Xorg server: Xvfb is absent even
     # from CRB. The build container then skips the X11 suite
     # (disclosed by the build script); the Fedora 42 install-test

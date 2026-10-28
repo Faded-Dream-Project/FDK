@@ -36,6 +36,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 
 /* ---- helpers ---- */
@@ -1195,13 +1197,30 @@ static void test_system_font_discovery(void) {
         assert(n > 0 && (size_t)n < sizeof(conf));
         assert(tt_write_text(fconf, conf) == 0);
 
+        /* The shaping pipeline (M-2) queries fontconfig for
+         * per-script fallbacks, and fontconfig loads its config
+         * exactly ONCE per process — a fork() child inherits the
+         * parent's already-initialized state, so the crafted
+         * FONTCONFIG_FILE only takes effect in a FRESH exec. The leg
+         * re-execs this test binary with a marker argument; the
+         * parent asserts the child's verdict. (The old in-process
+         * form was valid only while FDK never touched fontconfig
+         * before the resolver did — an artifact, not a contract.) */
         tt_scrub_env();
-        setenv("FONTCONFIG_FILE", fconf, 1);
-        f = fdk_font_load_system_default(16);
-        assert(f != NULL);
-        assert(fdk_font_get_file_path(f) != NULL);
-        assert(strcmp(fdk_font_get_file_path(f), fcopy) == 0);
-        fdk_font_destroy(f);
+        pid_t pid = fork();
+        assert(pid >= 0);
+        if (pid == 0) {
+            setenv("FDK_TEST_FC_CONF", fconf, 1);
+            setenv("FDK_TEST_FC_COPY", fcopy, 1);
+            execl("/proc/self/exe", "test_text", "--fc-fontconfig-leg",
+                  (char *)NULL);
+            _exit(127); /* exec failed */
+        }
+        {
+            int st = 0;
+            assert(waitpid(pid, &st, 0) == pid);
+            assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+        }
         tt_scrub_env();
 
         /* Best-effort cleanup; fontconfig may leave cache files in
@@ -1367,7 +1386,34 @@ static void test_system_font_discovery(void) {
            "corrupt-candidate rejection, cache consistency\n");
 }
 
-int main(void) {
+/* The re-exec'd fontconfig leg (see test_system_font_discovery):
+ * a FRESH process whose fontconfig inits under the crafted config
+ * the parent set in FDK_TEST_FC_CONF. Proves FDK resolves through
+ * fontconfig by loading the only face that config exposes. */
+static int run_fc_fontconfig_leg(void) {
+    const char *conf = getenv("FDK_TEST_FC_CONF");
+    const char *copy = getenv("FDK_TEST_FC_COPY");
+    if (conf == NULL || copy == NULL) {
+        return 1;
+    }
+    tt_scrub_env();
+    setenv("FONTCONFIG_FILE", conf, 1);
+    fdk_font *f = fdk_font_load_system_default(16);
+    if (f == NULL || fdk_font_get_file_path(f) == NULL ||
+        strcmp(fdk_font_get_file_path(f), copy) != 0) {
+        return 1;
+    }
+    fdk_font_destroy(f);
+    tt_scrub_env();
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc == 2 && argv != NULL &&
+        strcmp(argv[1], "--fc-fontconfig-leg") == 0) {
+        return run_fc_fontconfig_leg();
+    }
+
     find_fonts();
     if (g_sans == NULL) {
         printf("[skip] no system TrueType font found (tried DejaVu Sans, "

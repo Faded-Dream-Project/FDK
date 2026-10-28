@@ -38,7 +38,8 @@ RUN debian:bookworm '
         build-essential pkg-config \
         libx11-dev libxext-dev libxtst-dev zlib1g-dev \
         libwayland-dev libxkbcommon-dev \
-        xvfb fonts-dejavu-core
+        xvfb fonts-dejavu-core \
+        libharfbuzz0b libfribidi0 fonts-wqy-zenhei
     sh packaging/debian/build-deb.sh
     sh fdk-shell/packaging/debian/build-deb.sh
 '

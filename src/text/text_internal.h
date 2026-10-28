@@ -65,6 +65,8 @@ typedef struct fdk_glyph {
 
 struct fdk_font {
     unsigned char *file_data;   /* whole font file, fdk_alloc'd */
+    size_t file_size;           /* its length (the HarfBuzz blob
+                                   needs it; 0 = pre-M-2 object) */
     stbtt_fontinfo info;
     fdk_f32 scale;              /* font units -> pixels (pixel size) */
     fdk_i32 pixel_size;
@@ -72,6 +74,17 @@ struct fdk_font {
     char *source_path;          /* fdk_alloc'd copy of the load path
                                    (fdk_font_get_file_path); NULL is
                                    non-fatal — see text.c */
+
+    /* M-2 shaping state (src/text/shaping.c): the per-font HarfBuzz
+     * objects (opaque here — a sh_hb_font_cache *) and the per-script
+     * fallback fonts this font owns. Fallback fonts set is_fallback
+     * and never get fallbacks of their own (two levels, no cycles). */
+    void *shaper;
+#define FDK_TEXT_FALLBACK_MAX 8
+    fdk_font *fallbacks[FDK_TEXT_FALLBACK_MAX];
+    int fallback_script[FDK_TEXT_FALLBACK_MAX];
+    int n_fallbacks;
+    bool is_fallback;
 
     fdk_font_metrics metrics;
 
@@ -214,6 +227,80 @@ fdk_result fdk__span_flatten(const char *utf8, size_t byte_len,
 unsigned fdk__run_style_at(const fdk__text_run *runs, size_t n,
                            size_t byte_i, unsigned fallback);
 
+/* M-2 (shaping.c): the by-GLYPH-ID twin the HarfBuzz output needs —
+ * shaping hands back glyph ids, not codepoints. Same cache, same
+ * rasterization, same variant keying; `phase` is the subpixel phase
+ * (0..FDK_TEXT_SUBPIXEL_PHASES-1) the placement's fractional pen
+ * picked. Never NULL for a non-NULL font. */
+const fdk_glyph *fdk_text_glyph_for_id_styled(fdk_font *font, int glyph,
+                                              unsigned style_flags,
+                                              int phase);
+
+/* The synthetic-bold stem dilation (px) the rasterizer bakes into
+ * inked glyphs' bitmaps AND advances (glyph_slot). ONE definition so
+ * the shaping pen math and the rasterizer can never drift apart. */
+static inline int fdk__text_bold_stem(const fdk_font *font) {
+    int stem = font->pixel_size / 24;
+    return stem < 1 ? 1 : stem;
+}
+
+/* ---- M-2 shaping level 1 (src/text/shaping.c) -------------------------
+ *
+ * The shaped placement array is the ONE seam between the text bytes
+ * and every consumer (measure, draw, wrap, ellipsize, caret). See
+ * shaping.c's header for the design. */
+
+typedef struct fdk__placement {
+    const fdk_glyph *raster; /* styled, phase-baked rasterization  */
+    fdk_font *font;          /* the font that rasterized it        */
+    fdk_i32 x;               /* left edge: floor(pen + x_offset)   */
+    fdk_i32 y_shift;         /* mark y offset from GPOS (px)       */
+    fdk_f32 pen_after;       /* cumulative visual pen after it     */
+    size_t cluster;          /* byte offset of its cluster origin  */
+} fdk__placement;
+
+typedef struct fdk__shaped {
+    fdk__placement *places;  /* VISUAL order                        */
+    size_t n_places;
+    fdk_f32 total;           /* the final visual pen                */
+    fdk_f32 ink_top, ink_bottom;
+    int has_ink;
+    fdk_u32 *cp;             /* decoded codepoints, LOGICAL order    */
+    size_t *cp_byte;         /* byte offset of each                 */
+    size_t n_cp;
+    fdk_f32 *cp_pen;         /* [n_cp + 1]: logical cumulative pen
+                                (per-cp advance attribution; the
+                                wrap/ellipsize/caret consumers)     */
+    int rtl_visual;          /* any RTL segment present             */
+    size_t range_end;        /* off + count of the shaped range     */
+} fdk__shaped;
+
+/* Shapes [off, off+count) under the (optional) flattened style runs.
+ * The full pipeline (FriBidi + HarfBuzz + per-script fallback) when
+ * the libraries are loadable, the legacy codepoint walk otherwise —
+ * identical output structures either way. NULL only on allocation
+ * failure or a NULL font/text. Free with fdk__shaped_free. */
+fdk__shaped *fdk__shape_range(fdk_font *font, const char *utf8,
+                              size_t byte_len, size_t off, size_t count,
+                              const fdk__text_run *runs, size_t n_runs);
+void fdk__shaped_free(fdk__shaped *s);
+
+/* The visual boundary x (rounded) for a LOGICAL byte boundary — the
+ * Entry caret's mapping. Exact for single-direction text; segment
+ * granularity for mixed-direction text (documented level-1). */
+fdk_i32 fdk__shaped_caret_x(const fdk__shaped *s, size_t byte);
+
+/* Releases the font's HarfBuzz objects and its fallback fonts —
+ * fdk_font_destroy() calls this BEFORE freeing file_data (the hb
+ * blob references it READ-ONLY). */
+void fdk__shaping_font_destroy(fdk_font *font);
+
+/* Does the font map this codepoint to a real (non-.notdef) glyph?
+ * Control characters count as covered (every font's answer to them
+ * is legitimately empty ink). */
+bool fdk__font_covers(fdk_font *font, fdk_u32 cp);
+
+
 /* Runs-level measure (the engine under the public span entry point
  * and the ellipsize pass): same contract as fdk_font_measure_utf8,
  * but every glyph shapes at its run's style and kerning resets at
@@ -307,5 +394,14 @@ void fdk_text_font_discovery_reset_for_tests(void);
  * subsequent call. Used by fdk_font_load_system_default()'s retry
  * loop. */
 void fdk_text_font_discovery_reject(const char *path);
+
+/* M-2 fallback resolution (fontscan.c): fontconfig's answer for "a
+ * font covering this language" — the per-script fallback font when
+ * the primary font has no glyphs for a script. On success *out_path
+ * is a fdk_alloc'd string the CALLER frees and *out_face is the
+ * collection face index. Returns false when fontconfig is absent or
+ * has no answer (the caller caches the miss). */
+bool fdk_text_resolve_fallback_font(const char *lang, fdk_u32 probe_cp,
+                                    char **out_path, long *out_face);
 
 #endif /* FDK_TEXT_INTERNAL_H */

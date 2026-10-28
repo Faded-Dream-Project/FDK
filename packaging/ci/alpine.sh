@@ -35,7 +35,8 @@ RUN alpine:3.22 '
         build-base pkgconf tar coreutils alpine-sdk \
         libx11-dev libxext-dev libxtst-dev zlib-dev \
         wayland-dev libxkbcommon-dev \
-        font-dejavu
+        font-dejavu \
+        harfbuzz fribidi font-wqy-zenhei
     # mesa GL runtime: the X11 suite forces the GL present lane in its
     # equivalence/downgrade groups — llvmpipe satisfies them, exactly
     # like the glibc containers get implicitly via their xvfb stack.

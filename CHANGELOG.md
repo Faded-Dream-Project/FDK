@@ -12,7 +12,58 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and in-development release
 candidates are marked until the owner promotes them.
 
-## [Unreleased-candidate features] — 2026-10-27 (on the rc2 line)
+## [Unreleased-candidate features] — 2026-10-28 (on the rc2 line)
+
+### Added — complex-script text shaping, level 1 (M-2 / B-02)
+
+- **The shaped pipeline (core, `src/text/shaping.c`)**: text now
+  renders through the full complex-script stack when HarfBuzz and
+  FriBidi are loadable at run time — dlopen'd, never build
+  dependencies, exactly the GLX/fontconfig posture. FriBidi resolves
+  the Unicode bidi algorithm (Arabic, Hebrew, Persian, Urdu render in
+  VISUAL order instead of backwards; brackets mirror); HarfBuzz
+  shapes through the font's real GSUB/GPOS tables (joining forms,
+  ligatures, mark attachment with x/y offsets, real kerning) fed by
+  custom font funcs backed by stb_truetype itself (26.6 pre-scaled,
+  so shaped and legacy advances agree by construction); fontconfig
+  supplies a per-script fallback font, charset-filtered on a probe
+  codepoint, so CJK next to Latin picks the right font per segment.
+  `$FDK_SHAPING` pins the posture (0 legacy, 1 require, unset auto);
+  without the libraries the 1.4.x codepoint-at-a-time walk runs with
+  IDENTICAL metrics — pinned by a test that re-execs itself under
+  the other posture.
+- **Every text consumer reads shaped placements**: measure, draw,
+  span draws with decorations, markup labels, TextView, wrap,
+  ellipsize, and the Entry caret + click hit-test (carets and clicks
+  can no longer disagree with the ink). One rounding rule survives:
+  the pen floors per glyph, rounds once per reported width.
+- **Public surface (+2, 797 exports)**:
+  `fdk_text_shaping_available()` (the pipeline's verdict — surface
+  it or ignore it, the API is identical either way) and
+  `fdk_font_has_glyph()` (coverage probe).
+- **tests/test_shaping.c**: RTL visual order, mixed bidi, fallback
+  selection, cluster/byte mapping, caret monotonicity, Arabic wrap +
+  ellipsize agreement, draw/measure agreement on a trilingual
+  string, the fallback lifecycle (dies with its primary, ASan
+  clean), and the cross-posture Latin pin. CI runs both postures
+  (the ubuntu job's auto probe + an explicit `FDK_SHAPING=0` leg;
+  every distro container gains harfbuzz + fribidi + a CJK font).
+- **Packaging**: the optional runtimes are declared the `libgl1`
+  way — deb `Recommends: libharfbuzz0b, libfribidi0`, rpm
+  `Recommends:`, arch `optdepends` — never hard dependencies.
+
+### Fixed
+
+- **The live desktop-bus posture of the TASK B live tests**: both
+  `test_notify_client` and `test_tray_item` now follow
+  `test_dbus_live.c`'s skip discipline — no display backend, a stale
+  bus address, or a REAL notification daemon / StatusNotifierWatcher
+  already owning the bus name each skips loudly (exit 0, guidance
+  included) instead of aborting on an assertion, and the mock never
+  queues behind (DO_NOT_QUEUE) a real desktop's watcher — running
+  the binaries by hand on a live desktop can no longer crash the
+  suite OR vandalize the user's tray by stealing the watcher name.
+
 
 ### Added — the app-facing notification + tray API (TASK B side 1)
 

@@ -272,10 +272,7 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key,
      * regular/bold/italic rasters of the same glyph distinct. */
     if (bits != NULL && w > 0 && h > 0) {
         if ((style_flags & FDK_FONT_STYLE_BOLD) != 0) {
-            int stem = font->pixel_size / 24;
-            if (stem < 1) {
-                stem = 1;
-            }
+            int stem = fdk__text_bold_stem(font);
             bits = synthesize_bold(bits, w, h, stem, &w);
             advance += (fdk_f32)stem;
         }
@@ -323,6 +320,28 @@ const fdk_glyph *fdk_text_glyph_for_styled(fdk_font *font,
     int variant = fdk_text_style_variant(style_flags);
     return glyph_slot(font, g * FDK_TEXT_KEY_STRIDE +
                                 variant * FDK_TEXT_SUBPIXEL_PHASES,
+                      style_flags);
+}
+
+const fdk_glyph *fdk_text_glyph_for_id_styled(fdk_font *font, int glyph,
+                                              unsigned style_flags,
+                                              int phase) {
+    if (font == NULL) {
+        return NULL;
+    }
+    if (glyph < 0) {
+        glyph = 0;
+    }
+    if (phase < 0) {
+        phase = 0;
+    }
+    if (phase >= FDK_TEXT_SUBPIXEL_PHASES) {
+        phase = FDK_TEXT_SUBPIXEL_PHASES - 1;
+    }
+    int variant = fdk_text_style_variant(style_flags);
+    return glyph_slot(font,
+                      glyph * FDK_TEXT_KEY_STRIDE +
+                          variant * FDK_TEXT_SUBPIXEL_PHASES + phase,
                       style_flags);
 }
 
@@ -586,6 +605,7 @@ fdk_font *fdk_text_font_load_face(const char *path, long face_index,
     }
 
     font->file_data = data;
+    font->file_size = size;
     font->pixel_size = pixel_size;
     font->scale = stbtt_ScaleForPixelHeight(&font->info, (float)pixel_size);
     font->source_path = text_strdup_path(path);
@@ -614,6 +634,10 @@ void fdk_font_destroy(fdk_font *font) {
     if (font == NULL) {
         return;
     }
+    /* The HarfBuzz blob references file_data READ-ONLY and the
+     * fallback fonts are owned by this font — both must go before
+     * the bytes do. */
+    fdk__shaping_font_destroy(font);
     for (int i = 0; i < font->glyph_count; i++) {
         fdk_free(font->glyphs[i].bits);
     }
@@ -722,42 +746,24 @@ fdk_result fdk_font_measure_utf8(const fdk_font *font,
         return FDK_ERR_INVALID_ARGUMENT;
     }
 
-    fdk_text_metrics m = {0, 0, 0};
-    size_t i = 0;
-    int prev_g = -1;
-    fdk_f32 pen = 0.0f;
-    fdk_f32 ink_top = 0.0f;    /* min y-offset above baseline (<= 0) */
-    fdk_f32 ink_bottom = 0.0f; /* max y-offset below baseline (>= 0) */
-    int has_ink = 0;
-
-    for (;;) {
-        const fdk_glyph *glyph = NULL;
-        fdk_i32 pen_x = 0;
-        if (!fdk_text_shape_step(f, utf8, byte_len, &i, &prev_g, &pen,
-                                 f->style, &glyph, &pen_x)) {
-            break;
-        }
-        if (glyph->w > 0 && glyph->h > 0) {
-            /* Vector outline box would need another stb call; the
-             * rasterized box is already cached and is what draw()
-             * actually paints — use it. */
-            if ((fdk_f32)glyph->yoff < ink_top) {
-                ink_top = (fdk_f32)glyph->yoff;
-            }
-            fdk_f32 bottom = (fdk_f32)(glyph->yoff + glyph->h);
-            if (bottom > ink_bottom) {
-                ink_bottom = bottom;
-            }
-            has_ink = 1;
-        }
+    /* M-2: the shaped placement pipeline — the same total and ink
+     * bounds the legacy walk produced for pure-LTR text (and the
+     * correct visual total for everything else). The shaped result
+     * owns nothing the caller outlives: it is freed before return,
+     * after copying the metrics out. */
+    fdk__shaped *s = fdk__shape_range(f, utf8, byte_len, 0, byte_len,
+                                      NULL, 0);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
     }
-
-    m.advance_width = (fdk_i32)(pen + 0.5f);
-    if (has_ink) {
-        m.ink_top = (fdk_i32)ink_top;
-        m.ink_bottom = (fdk_i32)ink_bottom;
+    fdk_text_metrics m = {0, 0, 0};
+    m.advance_width = (fdk_i32)(s->total + 0.5f);
+    if (s->has_ink) {
+        m.ink_top = (fdk_i32)s->ink_top;
+        m.ink_bottom = (fdk_i32)s->ink_bottom;
     }
     *out = m;
+    fdk__shaped_free(s);
     return FDK_OK;
 }
 
@@ -793,25 +799,29 @@ fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
     fdk_i64 bx1 = (fdk_i64)surface->clip_x1;
     fdk_i64 by1 = (fdk_i64)surface->clip_y1;
 
-    size_t i = 0;
-    int prev_g = -1;
-    fdk_f32 pen = 0.0f;
+    /* M-2: the shaped placement walk — glyphs in VISUAL order, each
+     * at its floored pen position, marks riding their GPOS y_shift.
+     * The legacy fallback path produces the identical walk for
+     * single-direction text. */
+    fdk__shaped *s = fdk__shape_range(font, utf8, byte_len, 0, byte_len,
+                                      NULL, 0);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+
     fdk_i64 ux0 = 0, uy0 = 0, ux1 = -1, uy1 = -1; /* empty union */
     int any = 0;
 
-    for (;;) {
-        const fdk_glyph *glyph = NULL;
-        fdk_i32 gx = 0;
-        if (!fdk_text_shape_step(font, utf8, byte_len, &i, &prev_g, &pen,
-                                 font->style, &glyph, &gx)) {
-            break;
-        }
-        if (glyph->bits == NULL || glyph->w <= 0 || glyph->h <= 0) {
+    for (size_t i = 0; i < s->n_places; i++) {
+        const fdk__placement *p = &s->places[i];
+        const fdk_glyph *glyph = p->raster;
+        if (glyph == NULL || glyph->bits == NULL || glyph->w <= 0 ||
+            glyph->h <= 0) {
             continue;
         }
         fdk_rect dst = {
-            pen_x + gx + glyph->xoff,
-            baseline_y + glyph->yoff,
+            pen_x + p->x + glyph->xoff,
+            baseline_y + glyph->yoff + p->y_shift,
             glyph->w,
             glyph->h,
         };
@@ -829,6 +839,7 @@ fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
                            (fdk_i64)dst.y + dst.height);
         }
     }
+    fdk__shaped_free(s);
 
     /* One damage rect per run, clipped to the pixels actually
      * reachable. Nothing drawn (all-whitespace run, empty string) ->

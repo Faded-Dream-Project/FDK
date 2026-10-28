@@ -27,12 +27,18 @@ needs no platform font services.
 - **`fdk_font_get_cache_stats()`** — cached/hit/miss/eviction
   counters for the glyph cache (useful for demos and profiling).
 
-Shaping v1 is single-line, left-to-right, codepoint-at-a-time with
-pair kerning (`kern` table, basic GPOS pair support via stb).
-Ligatures, bidi, and complex scripts are roadmap items; codepoints
-missing from the font render as the font's `.notdef` glyph, and
-invalid UTF-8 decodes to U+FFFD one bad byte at a time, never reading
-past `byte_len`.
+Shaping (M-2 level 1, 1.1.0) is single-line with the full
+complex-script pipeline when HarfBuzz and FriBidi are loadable at
+run time — the Unicode bidi algorithm (Arabic, Hebrew, Persian, Urdu
+render in visual order, not backwards), GSUB/GPOS shaping
+(ligatures, contextual forms, mark attachment, real kerning), and a
+per-script fontconfig fallback so CJK next to Latin picks the right
+font per segment. Without the libraries the classic
+codepoint-at-a-time LTR walk runs instead, with metrics identical to
+1.4.x. See "Complex-script shaping" below. Codepoints missing from
+the font AND every fallback render as the font's `.notdef` glyph,
+and invalid UTF-8 decodes to U+FFFD one bad byte at a time, never
+reading past `byte_len`.
 
 ## System font discovery (1.0.1)
 
@@ -182,13 +188,86 @@ garbage files and truncated fonts (the test suite feeds both). It is
 not a full audit of table contents: load fonts from sources you
 trust.
 
+## Complex-script shaping (M-2 level 1, 1.1.0)
+
+The full pipeline — `src/text/shaping.c` — is the GLX/fontconfig
+posture applied to text: **HarfBuzz and FriBidi are dlopen'd at run
+time, never build dependencies, never dlclose'd**. A machine without
+them gets the 1.4.x codepoint-at-a-time walk, bit-identical metrics;
+a machine with them gets real complex-script rendering. `$FDK_SHAPING`
+pins it: `0` forces the legacy walk, `1` requires the libraries (a
+loud error if missing), unset auto-probes. `fdk_text_shaping_available()`
+reports the verdict; the soname probe covers Debian's
+`libharfbuzz.so.0b` spelling and everyone else's `libharfbuzz.so.0`.
+
+The pipeline, one shaped range at a time:
+
+```
+UTF-8 range ─▶ decode ─▶ FriBidi (paragraph direction, embedding
+                            levels, visual->logical map; embedding
+                            controls like LRE/RLE are REMOVED)
+                │
+                ├─ segment by (direction parity, script, style, font)
+                │    └─ font per segment: the primary if it covers
+                │       the script, else fontconfig's answer for the
+                │       script's language (charset-filtered on a probe
+                │       codepoint — FC_LANG alone lets weak matches
+                │       through), cached on the primary font
+                │
+                └─ per segment: mirror brackets (RTL) ─▶ HarfBuzz
+                     shape (GSUB/GPOS: ligatures, joining forms,
+                     mark attachment, kerning) ─▶ placements
+```
+
+**Placements are the one seam**: every consumer — measure, draw,
+wrap, ellipsize, the Entry caret and hit-test — reads the same array
+of `(glyph raster, left-edge x, cumulative pen, cluster byte)`
+entries in visual order. The legacy walk produces the same structure
+(one placement per codepoint), so there is still exactly one
+rounding rule in the stack (the pen floors per glyph, rounds once
+per reported width), and Latin metrics are IDENTICAL across both
+postures — `tests/test_shaping.c` pins that by re-exec'ing itself
+under the other posture and comparing.
+
+The glyph metrics HarfBuzz shapes against come from stb_truetype
+itself (custom `hb_font_funcs`: nominal glyph, advances, extents),
+pre-scaled to 26.6 pixels against FDK's pixel-height box — so a
+shaped advance and a legacy advance of the same glyph agree by
+construction. The synthetic-bold stem is added to shaped advances
+exactly as the rasterizer bakes it into cached advances (one shared
+`fdk__text_bold_stem()`).
+
+Level-1 scope, stated honestly:
+
+- each measured/drawn range is its own bidi paragraph (the standard
+  level-1 toolkit semantics; wrapped lines re-order per line);
+- line breaking stays LOGICAL (spaces, hard breaks); ligature
+  clusters never split (the per-cp attribution lands a merged
+  glyph's advance on its cluster's last codepoint);
+- the Entry caret maps through the visual placement boundary —
+  exact for single-direction text (including CJK), segment
+  granularity for mixed-direction runs;
+- embedding controls (LRE/RLE/PDF/LRO/RLO and friends) that FriBidi
+  removes contribute no glyphs and no advance — a run made only of
+  them is invisible;
+- color emoji stays out of scope (ROADMAP C-3, after HarfBuzz).
+
+The fallback chain: one font per script per primary font, loaded at
+the same pixel size, `is_fallback`-flagged (never gets fallbacks of
+its own — two levels, no cycles), destroyed with its primary.
+`fdk_font_has_glyph()` answers coverage questions directly. Fallback
+fonts are TrueType-flavored only (the rasterizer's honest limit —
+the same gate the system-default resolver applies); on a CJK-less
+machine the primary's `.notdef` renders, honestly.
+
 ## Line layout: wrapping and ellipsis
 
 `fdk_font_break_lines_utf8` (src/text/layout.c) is the greedy
-word-wrapper. It rides the SAME per-glyph walk as measure and draw
-(decode -> kern -> advance), so a returned line's
-`advance_width` is by construction the width painting those bytes
-produces — there is no second rounding rule in the stack. Rules:
+word-wrapper. It rides the shaped result's per-codepoint LOGICAL pen
+attribution (the same placements measure and draw consume), so a
+returned line's `advance_width` is by construction the width shaping
+those bytes produces — there is no second rounding rule in the
+stack. Rules:
 breaks land after space runs (the space stays out of the next line),
 a word longer than the line breaks at glyph boundaries rather than
 overflowing, `'\n'` is a hard break (`"\r\n"` counts once, empty
@@ -230,10 +309,23 @@ Recorded on the roadmap, in rough dependency order:
 - Width-for-height label layout (wrap labels re-flow at the
   ALLOCATED width; their natural height still answers the natural
   width — documented in fdk_widgets.h).
-- Bidi and complex scripts; fallback font chains.
+- ~~Bidi and complex scripts; fallback font chains~~ — SHIPPED at
+  level 1 (M-2: the dlopen'd HarfBuzz + FriBidi + fontconfig
+  fallback pipeline above). Level 2 (full paragraph bidi with
+  per-line direction carrying, justification, true RTL caret
+  granularity) stays on the roadmap.
 - Colored glyphs (emoji), SDF rendering, hinting.
 
 ## Testing
+
+`tests/test_shaping.c` (M-2): the complex-script suite — RTL visual
+order, mixed bidi, per-script fallback selection (the charset-
+filtered fontconfig query), cluster/byte mapping, caret monotonicity,
+Arabic wrap and ellipsize agreement, draw/measure agreement on a
+trilingual string, and the Latin compatibility pin (the suite
+re-execs itself under the other posture and compares metrics). Both
+postures run in CI (the ubuntu job runs the auto probe and an
+explicit `FDK_SHAPING=0` leg).
 
 `tests/test_text.c` (11 cases, ASan+UBSan): lifecycle and failure
 modes, metrics sanity and 2× scale proportionality, measurement

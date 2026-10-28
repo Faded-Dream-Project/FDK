@@ -33,6 +33,7 @@
 #include "fdk/fdk_clipboard.h"
 #include "fdk/fdk_undo.h"
 
+#include <math.h>
 #include <time.h>
 
 #define ENTRY_PAD_X 8
@@ -410,25 +411,23 @@ static bool entry_slot_interactive(const fdk_entry *e, int slot) {
 
 /* ---- geometry ---- */
 
-/* Cumulative advance width (px) of s[0..i) — an O(n) walk through
- * the glyph cache; n is bounded by the entry cap. Glyph advances
- * are subpixel floats; the entry rounds the SUM once (integer
- * caret geometry, float-consistent accumulation). */
+/* Cumulative advance width (px) of s[0..i) — the shaped caret
+ * mapping (M-2): the boundary's VISUAL pen, cluster-accurate for
+ * LTR text (including CJK through the fallback chain) and
+ * ligature-aware; kerning-consistent with the ink fdk_surface_draw
+ * paints. One shape per call; n is bounded by the entry cap. */
 static fdk_i32 text_width_to(fdk_font *font, const char *s, size_t len,
                              size_t i) {
     if (font == NULL || i == 0) {
         return 0;
     }
-    fdk_f32 x = 0.0f;
-    size_t at = 0;
-    while (at < i) {
-        fdk_u32 cp = 0;
-        int n = fdk_text_utf8_next(s, len, at, &cp);
-        const fdk_glyph *g = fdk_text_glyph_for(font, cp);
-        x += g->advance;
-        at += (size_t)n;
+    fdk__shaped *sh = fdk__shape_range(font, s, len, 0, len, NULL, 0);
+    if (sh == NULL) {
+        return 0;
     }
-    return (fdk_i32)(x + 0.5f);
+    fdk_i32 x = fdk__shaped_caret_x(sh, i);
+    fdk__shaped_free(sh);
+    return x;
 }
 
 /* ---- password mode geometry ----
@@ -473,7 +472,10 @@ static fdk_i32 entry_width_to(const fdk_entry *e, size_t offset) {
     return (fdk_i32)cluster_count(e, offset) * bullet_advance(e);
 }
 
-/* Hit-test: the boundary whose advance is closest to local x. */
+/* Hit-test: the boundary whose VISUAL position is closest to local
+ * x (M-2: the shaped caret mapping — the same positions the caret
+ * renders at, so clicks and carets can never disagree). Password
+ * mode keeps the bullet-cluster walk. */
 static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
     if (e->font == NULL || e->len == 0) {
         return 0;
@@ -483,15 +485,36 @@ static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
     if (x <= 0.0f) {
         return 0;
     }
+    if (!e->password) {
+        fdk__shaped *sh =
+            fdk__shape_range(e->font, e->text, e->len, 0, e->len,
+                             NULL, 0);
+        if (sh == NULL) {
+            return 0;
+        }
+        size_t best = e->len;
+        fdk_f32 best_d =
+            fabsf(x - (fdk_f32)fdk__shaped_caret_x(sh, e->len));
+        for (size_t k = 0; k < sh->n_cp; k++) {
+            fdk_f32 d = fabsf(
+                x - (fdk_f32)fdk__shaped_caret_x(sh, sh->cp_byte[k]));
+            if (d < best_d) {
+                best_d = d;
+                best = sh->cp_byte[k];
+            }
+        }
+        fdk__shaped_free(sh);
+        return best;
+    }
     fdk_f32 acc = 0.0f;
     size_t at = 0;
-    fdk_f32 bullet_adv = e->password ? (fdk_f32)bullet_advance(e) : 0.0f;
+    fdk_f32 bullet_adv = (fdk_f32)bullet_advance(e);
     while (at < e->len) {
         fdk_u32 cp = 0;
         int n = fdk_text_utf8_next(e->text, e->len, at, &cp);
-        const fdk_glyph *g = e->password ? NULL
-                                         : fdk_text_glyph_for(e->font, cp);
-        fdk_f32 next_acc = acc + (e->password ? bullet_adv : g->advance);
+        const fdk_glyph *g = NULL;
+        (void)g;
+        fdk_f32 next_acc = acc + bullet_adv;
         if (x < acc + (next_acc - acc) * 0.5f) {
             return at; /* closer to this boundary than the next */
         }

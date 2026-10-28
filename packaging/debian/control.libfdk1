@@ -5,7 +5,7 @@ Section: libs
 Priority: optional
 Version: @PKGVER@
 Depends: @RUNTIME_DEPS@
-Recommends: libgl1
+Recommends: libgl1, libharfbuzz0b, libfribidi0
 Homepage: https://github.com/Faded-Dream-Project/FDK
 Description: Faded Dream ToolKit — native GUI toolkit runtime (X11 and Wayland)
  FDK is a general-purpose native C GUI toolkit for modern Linux

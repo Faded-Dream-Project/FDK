@@ -222,55 +222,28 @@ fdk_result fdk__measure_runs(const fdk_font *font, const char *utf8,
         return FDK_ERR_INVALID_ARGUMENT;
     }
 
-    fdk_text_metrics m = {0, 0, 0};
-    fdk_f32 ink_top = 0.0f;
-    fdk_f32 ink_bottom = 0.0f;
-    int has_ink = 0;
-
     if (runs == NULL || n_runs == 0) {
         /* No attributes at all: byte-for-byte the classic walk over
          * [0, limit). */
         return fdk_font_measure_utf8(font, utf8, limit, out);
     }
 
-    /* Runs are contiguous over the whole text, so the walk is: for
-     * each run, shape bytes from the run's visible start (>= the
-     * walk origin 0) up to min(run end, limit). */
-    size_t i = 0;
-    fdk_f32 pen = 0.0f;
-    for (size_t k = 0; k < n_runs && i < limit; k++) {
-        size_t r_end = runs[k].end < limit ? runs[k].end : limit;
-        if (i >= r_end) {
-            continue; /* entirely past the limit */
-        }
-        int prev_g = -1; /* kerning resets at every run boundary */
-        while (i < r_end) {
-            const fdk_glyph *glyph = NULL;
-            fdk_i32 pen_x = 0;
-            if (!fdk_text_shape_step(f, utf8, byte_len, &i, &prev_g,
-                                     &pen, runs[k].style, &glyph,
-                                     &pen_x)) {
-                break;
-            }
-            if (glyph->w > 0 && glyph->h > 0) {
-                if ((fdk_f32)glyph->yoff < ink_top) {
-                    ink_top = (fdk_f32)glyph->yoff;
-                }
-                fdk_f32 bottom = (fdk_f32)(glyph->yoff + glyph->h);
-                if (bottom > ink_bottom) {
-                    ink_bottom = bottom;
-                }
-                has_ink = 1;
-            }
-        }
+    /* M-2: the shaped placement pipeline under the flattened runs —
+     * per-run styles, kerning context resetting at run boundaries,
+     * the full complex-script behavior for whatever the runs cover. */
+    fdk__shaped *s = fdk__shape_range(f, utf8, byte_len, 0, limit, runs,
+                                      n_runs);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
     }
-
-    m.advance_width = (fdk_i32)(pen + 0.5f);
-    if (has_ink) {
-        m.ink_top = (fdk_i32)ink_top;
-        m.ink_bottom = (fdk_i32)ink_bottom;
+    fdk_text_metrics m = {0, 0, 0};
+    m.advance_width = (fdk_i32)(s->total + 0.5f);
+    if (s->has_ink) {
+        m.ink_top = (fdk_i32)s->ink_top;
+        m.ink_bottom = (fdk_i32)s->ink_bottom;
     }
     *out = m;
+    fdk__shaped_free(s);
     return FDK_OK;
 }
 
@@ -327,6 +300,28 @@ static fdk_i32 strike_y(const fdk_font *font, fdk_i32 baseline) {
 
 /* ---- runs-level paint (the engine under the public span draw) ---- */
 
+/* The logical pen at a byte boundary (the shaped result's per-cp
+ * attribution): cp_pen[k] when the byte is cp k's own boundary, the
+ * cp's END pen when it lands mid-codepoint, the total past the range.
+ * The decoration bars' extents come from here. */
+static fdk_f32 shaped_pen_at_byte(const fdk__shaped *s, size_t byte) {
+    if (s == NULL || s->cp_pen == NULL || s->n_cp == 0) {
+        return 0.0f;
+    }
+    if (byte >= s->range_end) {
+        return s->cp_pen[s->n_cp];
+    }
+    for (size_t k = 0; k < s->n_cp; k++) {
+        size_t next =
+            k + 1 < s->n_cp ? s->cp_byte[k + 1] : s->range_end;
+        if (byte >= s->cp_byte[k] && byte < next) {
+            return byte == s->cp_byte[k] ? s->cp_pen[k]
+                                         : s->cp_pen[k + 1];
+        }
+    }
+    return 0.0f;
+}
+
 fdk_result fdk__draw_runs(fdk_surface *surface, fdk_font *font,
                           const char *utf8, size_t byte_len,
                           const fdk__text_run *runs, size_t n_runs,
@@ -345,14 +340,10 @@ fdk_result fdk__draw_runs(fdk_surface *surface, fdk_font *font,
                                      pen_x, baseline_y, base_color);
     }
 
-    /* The paint walk: per run, the shaping engine's own step with the
-     * run's ABSOLUTE style; kerning resets at run boundaries; the
-     * float pen carries across runs (from the range origin `off`) so
-     * the range's total is the measured advance of [off, off+count)
-     * by construction. Runs are contiguous, so entering run k always
-     * finds the walk cursor i exactly at the run's visible start —
-     * a run straddling `off` simply starts walking at off. Damage:
-     * the union of every glyph box in the range, one rect, clipped
+    /* The paint walk (M-2): the shaped placements for [off,
+     * off+count) under the runs — per-run styles and colors, the
+     * decoration bars over each run's visible extent. Damage: the
+     * union of every glyph box in the range, one rect, clipped
      * exactly like text.c does it (blend_mask's reachable pixels);
      * decoration bars ride fill_rect's own clip+damage bookkeeping. */
     fdk_i64 bx0 = (fdk_i64)surface->clip_x0;
@@ -360,81 +351,95 @@ fdk_result fdk__draw_runs(fdk_surface *surface, fdk_font *font,
     fdk_i64 bx1 = (fdk_i64)surface->clip_x1;
     fdk_i64 by1 = (fdk_i64)surface->clip_y1;
 
-    size_t end = off + count;
-    size_t i = off;
-    fdk_f32 pen = 0.0f;
+    fdk__shaped *s = fdk__shape_range(font, utf8, byte_len, off, count,
+                                      runs, n_runs);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+
+    const size_t end = off + count;
     fdk_i64 ux0 = 0, uy0 = 0, ux1 = -1, uy1 = -1;
     int any = 0;
     fdk_i32 thick = deco_thickness(font->pixel_size);
     fdk_i32 uly = underline_y(font, baseline_y);
     fdk_i32 sty = strike_y(font, baseline_y);
 
-    for (size_t k = 0; k < n_runs && i < end; k++) {
-        size_t r_start = runs[k].start > off ? runs[k].start : off;
-        size_t r_end = runs[k].end < end ? runs[k].end : end;
-        if (i >= r_end || r_start >= r_end) {
-            continue; /* entirely outside the visible range */
+    for (size_t i = 0; i < s->n_places; i++) {
+        const fdk__placement *p = &s->places[i];
+        const fdk_glyph *glyph = p->raster;
+        if (glyph == NULL || glyph->bits == NULL || glyph->w <= 0 ||
+            glyph->h <= 0) {
+            continue;
         }
-        fdk_color color = runs[k].color_set ? runs[k].color : base_color;
-        fdk_f32 run_pen_start = pen;
-        int prev_g = -1; /* kerning resets at every run boundary */
-        while (i < r_end) {
-            const fdk_glyph *glyph = NULL;
-            fdk_i32 gx = 0;
-            if (!fdk_text_shape_step(font, utf8, byte_len, &i, &prev_g,
-                                     &pen, runs[k].style, &glyph, &gx)) {
+        /* The run's color: the placement's cluster byte selects the
+         * run (the byte's effective attributes), exactly as the
+         * per-run walk did. */
+        fdk_color color = base_color;
+        for (size_t k = 0; k < n_runs; k++) {
+            if (p->cluster >= runs[k].start && p->cluster < runs[k].end) {
+                color = runs[k].color_set ? runs[k].color : base_color;
                 break;
             }
-            if (glyph->bits == NULL || glyph->w <= 0 || glyph->h <= 0) {
-                continue;
-            }
-            fdk_rect dst = {
-                pen_x + gx + glyph->xoff,
-                baseline_y + glyph->yoff,
-                glyph->w,
-                glyph->h,
-            };
-            fdk_surface_blend_mask(surface, dst, glyph->bits, glyph->w,
-                                   color);
-            if (!any) {
-                ux0 = dst.x;
-                uy0 = dst.y;
-                ux1 = (fdk_i64)dst.x + dst.width;
-                uy1 = (fdk_i64)dst.y + dst.height;
-                any = 1;
-            } else {
-                if (dst.x < ux0) {
-                    ux0 = dst.x;
-                }
-                if (dst.y < uy0) {
-                    uy0 = dst.y;
-                }
-                if ((fdk_i64)dst.x + dst.width > ux1) {
-                    ux1 = (fdk_i64)dst.x + dst.width;
-                }
-                if ((fdk_i64)dst.y + dst.height > uy1) {
-                    uy1 = (fdk_i64)dst.y + dst.height;
-                }
-            }
         }
-        /* The run's visible bars: only over the visible portion (a
-         * run half outside the range bars only its inside half). */
-        if (runs[k].underline || runs[k].strikethrough) {
-            fdk_i32 x = pen_x + (fdk_i32)(run_pen_start + 0.5f);
-            fdk_i32 w = (fdk_i32)(pen + 0.5f) -
-                        (fdk_i32)(run_pen_start + 0.5f);
-            if (runs[k].underline && w > 0) {
-                fdk_surface_fill_rect(surface,
-                                      (fdk_rect){x, uly, w, thick},
-                                      color);
+        fdk_rect dst = {
+            pen_x + p->x + glyph->xoff,
+            baseline_y + glyph->yoff + p->y_shift,
+            glyph->w,
+            glyph->h,
+        };
+        fdk_surface_blend_mask(surface, dst, glyph->bits, glyph->w,
+                               color);
+        if (!any) {
+            ux0 = dst.x;
+            uy0 = dst.y;
+            ux1 = (fdk_i64)dst.x + dst.width;
+            uy1 = (fdk_i64)dst.y + dst.height;
+            any = 1;
+        } else {
+            if (dst.x < ux0) {
+                ux0 = dst.x;
             }
-            if (runs[k].strikethrough && w > 0) {
-                fdk_surface_fill_rect(surface,
-                                      (fdk_rect){x, sty, w, thick},
-                                      color);
+            if (dst.y < uy0) {
+                uy0 = dst.y;
+            }
+            if ((fdk_i64)dst.x + dst.width > ux1) {
+                ux1 = (fdk_i64)dst.x + dst.width;
+            }
+            if ((fdk_i64)dst.y + dst.height > uy1) {
+                uy1 = (fdk_i64)dst.y + dst.height;
             }
         }
     }
+
+    /* The decoration bars: per run, over the run's VISIBLE extent
+     * (a run half outside the range bars only its inside half). The
+     * run's visible advance is its cp_pen span — the logical
+     * attribution the shaped result carries. */
+    for (size_t k = 0; k < n_runs; k++) {
+        size_t r_start = runs[k].start > off ? runs[k].start : off;
+        size_t r_end = runs[k].end < end ? runs[k].end : end;
+        if (r_start >= r_end) {
+            continue;
+        }
+        if (!runs[k].underline && !runs[k].strikethrough) {
+            continue;
+        }
+        fdk_color color = runs[k].color_set ? runs[k].color : base_color;
+        /* the run's [r_start, r_end) advance from the logical pen */
+        fdk_f32 x0f = shaped_pen_at_byte(s, r_start);
+        fdk_f32 x1f = shaped_pen_at_byte(s, r_end);
+        fdk_i32 x = pen_x + (fdk_i32)(x0f + 0.5f);
+        fdk_i32 w = (fdk_i32)(x1f + 0.5f) - (fdk_i32)(x0f + 0.5f);
+        if (runs[k].underline && w > 0) {
+            fdk_surface_fill_rect(surface, (fdk_rect){x, uly, w, thick},
+                                  color);
+        }
+        if (runs[k].strikethrough && w > 0) {
+            fdk_surface_fill_rect(surface, (fdk_rect){x, sty, w, thick},
+                                  color);
+        }
+    }
+    fdk__shaped_free(s);
 
     if (any) {
         fdk_i64 dx0 = ux0 > bx0 ? ux0 : bx0;

@@ -1,12 +1,12 @@
 /*
  * fdk_text.h — Faded Dream ToolKit: fonts and text rendering
  *
- * Phase 6 text foundation. A font is a TrueType/OpenType file loaded
- * from disk at a fixed pixel size; text is UTF-8, shaped left-to-right
- * with kerning, rasterized anti-aliased by the vendored stb_truetype
- * (see third_party/stb/README.md), cached per glyph, and blended onto
- * any fdk_surface through the renderer's clip stack and damage
- * tracking.
+ * Phase 6 text foundation, M-2 shaping level 1 on top. A font is a
+ * TrueType/OpenType file loaded from disk at a fixed pixel size;
+ * text is UTF-8, rasterized anti-aliased by the vendored
+ * stb_truetype (see third_party/stb/README.md), cached per glyph,
+ * and blended onto any fdk_surface through the renderer's clip
+ * stack and damage tracking.
  *
  * Design notes:
  *
@@ -15,23 +15,36 @@
  *    applications (and the test suite) can measure and render text
  *    headlessly.
  *
+ *  - Shaping (M-2 level 1): when HarfBuzz and FriBidi are loadable
+ *    at run time (dlopen — never a build dependency), text is
+ *    shaped through the real complex-script pipeline: the Unicode
+ *    bidi algorithm reorders runs to visual order (Arabic, Hebrew,
+ *    Persian, Urdu render correctly instead of backwards), GSUB/GPOS
+ *    shaping produces ligatures, contextual forms, mark attachment
+ *    and kerning, and fontconfig supplies a per-script fallback
+ *    font when the loaded font has no glyphs for a script (CJK next
+ *    to Latin, for example). Without the libraries, the classic
+ *    codepoint-at-a-time LTR walk runs instead — identical metrics
+ *    to 1.4.x. $FDK_SHAPING=0 pins the legacy walk, =1 requires the
+ *    libraries (a loud error if missing), unset auto-probes.
+ *
  *  - One font object per (file, pixel size). Ask for 12 px and 16 px
  *    of the same face and you own two fdk_font objects, each with its
  *    own glyph cache. This keeps the shaping math (scale baked in at
  *    load) trivial and the cache hot.
  *
- *  - Layout is single-line and left-to-right. Line breaking, bidi,
- *    and complex shaping (ligatures, Arabic joining, Indic reordering)
- *    are out of scope for v1 and tracked on the roadmap; what v1 does
- *    promise is: Unicode codepoint coverage via the font's cmap,
- *    pair kerning, and metrics that agree exactly with what
- *    fdk_surface_draw_utf8() paints.
+ *  - Layout is single-line; each measured/drawn range is its own
+ *    paragraph (the standard level-1 toolkit semantics). Line
+ *    breaking stays LOGICAL — spaces and hard breaks — and each
+ *    emitted line is a visual paragraph of its own. Pure-LTR text
+ *    (including CJK) maps caret positions exactly; mixed-direction
+ *    text lands carets at segment granularity.
  *
- *  - Missing glyphs (codepoints absent from the font) render as the
- *    font's own .notdef glyph — usually a hollow box — and measure at
- *    that glyph's advance. Invalid UTF-8 decodes to U+FFFD
- *    (REPLACEMENT CHARACTER), one bad byte at a time, never reading
- *    past byte_len.
+ *  - Missing glyphs (codepoints absent from the font AND from every
+ *    fallback) render as the font's own .notdef glyph — usually a
+ *    hollow box — and measure at that glyph's advance. Invalid UTF-8
+ *    decodes to U+FFFD (REPLACEMENT CHARACTER), one bad byte at a
+ *    time, never reading past byte_len.
  *
  *  - Text rendering is fully software and backend-neutral: it draws
  *    into the surface's framebuffer, so it works identically on
@@ -506,6 +519,22 @@ typedef struct fdk_font_info {
 fdk_result fdk_font_enumerate(fdk_font_info **out_infos,
                               size_t *out_count);
 void fdk_font_info_list_free(fdk_font_info *infos, size_t count);
+
+/* ---- Shaping level 1 (M-2) ------------------------------------------ */
+
+/* Is the full complex-script pipeline active? 1 when HarfBuzz and
+ * FriBidi were loadable at run time (or $FDK_SHAPING=1 succeeded),
+ * 0 when the classic codepoint-at-a-time walk is running. Apps can
+ * surface this (an "advanced text rendering: off" indicator) or
+ * simply ignore it — the API is identical either way, only the
+ * glyph quality differs. The probe runs once per process. */
+int fdk_text_shaping_available(void);
+
+/* Does this font map the codepoint to a real (non-.notdef) glyph?
+ * The honest answer before shipping a string of exotic codepoints
+ * at it: false means the shaping pipeline will route them to the
+ * per-script fallback (whose answer fontconfig decides). */
+bool fdk_font_has_glyph(const fdk_font *font, fdk_u32 codepoint);
 
 #ifdef __cplusplus
 }

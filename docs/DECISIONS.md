@@ -322,3 +322,57 @@ historical pixel size — the escape hatch. The rigs pin
 `--font-size 14` for their pixel legs (byte-identical geometry)
 and the sweep legs drive the sizes through the ENV channel —
 proving the metrics chain end to end, not just the arithmetic.
+
+## D-010 — text shaping: dlopen'd HarfBuzz + FriBidi, placements as the one seam
+
+**2026-10-28 (M-2 / B-02, the owner's "real toolkit, not a toy"
+directive).**
+
+The gap: every text walk was codepoint-at-a-time LTR — Arabic,
+Hebrew, Persian, Urdu rendered in LOGICAL order (backwards), Indic
+conjuncts came out malformed, mixed-script strings needed manual
+font switching. The decision has three parts:
+
+**1. The dependency posture — the GLX/fontconfig rule, verbatim.**
+HarfBuzz and FriBidi are dlopen'd at run time, never build
+dependencies, never dlclose'd, and absent libraries degrade to the
+1.4.x walk with IDENTICAL metrics (pinned by a self-re-exec'ing
+test). The alternative — a hard link — would hand a C toolkit a
+C++-runtime dependency chain (harfbuzz pulls glib on some distros)
+for zero additional capability; the dlopen route gets the full
+pipeline on every real desktop while a pristine container keeps
+building and testing green. `$FDK_SHAPING=0/1` pins the posture for
+tests and diagnostics. The vendored ABI declarations (no system
+headers) mirror the fontconfig layer; the soname probe covers
+Debian's `libharfbuzz.so.0b` and everyone else's `libharfbuzz.so.0`.
+
+**2. The seam — placements, not callbacks.** The tempting design
+was per-consumer shaping hooks; the shipped design is ONE shaped
+structure every consumer reads: an array of placements (raster, x,
+pen, cluster byte) in visual order, plus the per-codepoint logical
+pen attribution. Measure, draw, span draws, wrap, ellipsize, the
+Entry caret AND its hit-test all consume it — which is what makes
+carets agree with ink and clicks agree with carets, and keeps the
+"one rounding rule" invariant intact. The legacy walk emits the
+same structure, so the consumers have exactly one code path.
+
+**3. Level-1 scope, honestly fenced.** Each range is its own bidi
+paragraph; line breaking stays logical; ligature clusters never
+split (advance attributed to the cluster's last codepoint);
+embedding controls FriBidi removes are invisible; the Entry caret
+is exact for single-direction text and segment-granular for mixed
+direction; color emoji stays out (C-3). The fallback chain is two
+levels deep (fallbacks never get fallbacks), charset-filtered on a
+probe codepoint — FC_LANG alone provably lets a Latin-only font win
+the "zh" sort on this very machine — and dies with its primary
+font. Synthetic bold's stem is added to shaped advances through the
+same shared `fdk__text_bold_stem()` the rasterizer bakes in, so
+bold measure and bold ink cannot drift.
+
+The one re-baseline worth recording: the fontconfig e2e discovery
+test now runs its crafted-config leg in a re-exec'd child —
+fontconfig loads its config exactly once per process, and any
+earlier fallback query (shaping made those routine) would otherwise
+pin the system config for the whole test binary. The old in-process
+form was an artifact of FDK never touching fontconfig before the
+resolver; the fork-then-exec form is the honest contract.

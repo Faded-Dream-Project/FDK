@@ -30,7 +30,8 @@ RUN archlinux:base '
     # libx11 is unsplit; libxtst carries both header and library).
     pacman -Sy --noconfirm --needed \
         base-devel pkgconf libx11 libxext libxtst zlib wayland libxkbcommon \
-        xorg-server-xvfb ttf-dejavu tar
+        xorg-server-xvfb ttf-dejavu tar \
+        harfbuzz fribidi wqy-zenhei
     sh packaging/arch/build-pkg.sh
     sh fdk-shell/packaging/arch/build-pkg.sh
 '

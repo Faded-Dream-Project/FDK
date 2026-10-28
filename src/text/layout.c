@@ -1,22 +1,27 @@
 /*
- * layout.c — line breaking and ellipsis on top of the run-level text
- * API (Phase 6 completion).
+ * layout.c — line breaking and ellipsis on top of the shaped
+ * placement pipeline (Phase 6 completion; M-2 rework).
  *
- * Both passes ride the SAME shaping arithmetic as measure and draw
- * (decode -> kern against previous glyph -> advance), so a line's
- * reported advance is by construction the width its bytes paint at.
- * There is no second rounding rule anywhere in the text stack.
+ * Both passes ride the shaped result's per-codepoint LOGICAL pen
+ * attribution (fdk__shape_range's cp_pen array — the cumulative
+ * advance after each codepoint, kerning and ligature effects
+ * attributed to the cluster's last cp), so a line's reported
+ * advance is by construction the advance its bytes shape to. There
+ * is still no second rounding rule anywhere in the text stack: the
+ * pen floors per glyph at draw time and rounds once per reported
+ * line width, exactly as before.
  *
  * The wrapper is the classic greedy algorithm, chosen deliberately
- * over Knuth-Plass-class optimizers: it is O(n) in shaped glyphs,
- * needs no lookahead buffer, and its failures are local (one long-ish
+ * over Knuth-Plass-class optimizers: it is O(n) in codepoints, needs
+ * no lookahead buffer, and its failures are local (one long-ish
  * line) rather than global (a reflowed paragraph). Word processing
  * this is not; labels and one-paragraph widget text it is.
  *
- * Kerning never crosses a line boundary: every emitted line restarts
- * the walk at its own first byte with a fresh pen and a previous
- * glyph of "none" — exactly what fdk_surface_draw_utf8() does for
- * those bytes, so agreement is structural, not incidental.
+ * Shaping context does not cross a line boundary: every emitted line
+ * restarts its own shape when it is drawn (the widgets draw line
+ * ranges), and the attribution's context is the whole text — the
+ * only place they can differ is kerning ACROSS a space at a line
+ * break, which is ~0 in real fonts (kern pairs live inside words).
  */
 
 #define FDK_LOG_TAG "text"
@@ -25,42 +30,6 @@
 
 #include "core/alloc_internal.h" /* the span wrappers free flattened runs */
 
-/* stbtt pair kerning is called directly below; everything else rides
- * the cached-glyph walk from text.c. */
-
-/* ---- shared shaped-glyph step ---- */
-
-/* One shaped glyph, decoded at byte i (NOT consumed — the caller
- * advances i itself). Mirrors fdk_text_shape_step's arithmetic
- * exactly (same decode, same pair kerning, same advance) but also
- * reports the codepoint, which the layout passes need for their
- * whitespace and hard-break rules. Returns the cached glyph (never
- * NULL for a non-NULL font). */
-static const fdk_glyph *shape_at(fdk_font *f, const char *utf8,
-                                 size_t len, size_t i, int *io_prev_g,
-                                 fdk_f32 *io_pen, fdk_u32 *out_cp,
-                                 unsigned style_flags) {
-    fdk_u32 cp = 0;
-    (void)fdk_text_utf8_next(utf8, len, i, &cp);
-    const fdk_glyph *glyph =
-        fdk_text_glyph_for_styled(f, cp, style_flags);
-    /* The cache key packs (glyph index, style variant, subpixel
-     * phase); kerning wants the raw glyph id, so unpack it the same
-     * way text.c does. */
-    int g = fdk_text_key_glyph(glyph->key);
-
-    if (*io_prev_g >= 0) {
-        int kern = stbtt_GetGlyphKernAdvance(&f->info, *io_prev_g, g);
-        if (kern != 0) {
-            *io_pen += (fdk_f32)kern * f->scale;
-        }
-    }
-    *io_pen += glyph->advance;
-    *io_prev_g = g;
-    *out_cp = cp;
-    return glyph;
-}
-
 static bool is_wrap_space(fdk_u32 cp) {
     return cp == 0x20u || cp == 0x09u; /* space, tab */
 }
@@ -68,45 +37,6 @@ static bool is_wrap_space(fdk_u32 cp) {
 /* A line's reported advance uses the same rounding as measure. */
 static fdk_i32 pen_round(fdk_f32 pen) {
     return (fdk_i32)(pen + 0.5f);
-}
-
-/* ---- span-aware shaping cursor (1.4.11) ---------------------------
- *
- * The wrap/ellipsize engines are attribute-blind at their core; the
- * SPAN variants of both passes (the Label's markup modes) feed them
- * the effective style per byte through this cursor. Kerning resets
- * at style-run boundaries exactly as it does at line boundaries —
- * a bold word's last glyph never kerns against the regular text
- * after it (the two rasterizations are different slots; pretending
- * kerning applies would drift measure from paint). */
-typedef struct style_cursor {
-    const fdk__text_run *runs;
-    size_t n_runs;
-    unsigned prev_style; /* style of the last SHAPED glyph         */
-    bool have_prev;      /* false at line starts / cursor resets    */
-} style_cursor;
-
-static void style_cursor_reset(style_cursor *sc) {
-    sc->have_prev = false;
-}
-
-/* Shapes the glyph at byte i under the cursor's run style, resetting
- * the caller's previous-glyph id when the style changed (kerning
- * never crosses a style boundary). Returns the shaped glyph. */
-static const fdk_glyph *shape_at_cursor(fdk_font *f, const char *utf8,
-                                        size_t len, size_t i,
-                                        style_cursor *sc, int *io_prev_g,
-                                        fdk_f32 *io_pen, fdk_u32 *out_cp) {
-    unsigned style = fdk__run_style_at(sc->runs, sc->n_runs, i,
-                                       f->style);
-    if (sc->have_prev && style != sc->prev_style) {
-        *io_prev_g = -1; /* style boundary: no kerning across it */
-    }
-    const fdk_glyph *g = shape_at(f, utf8, len, i, io_prev_g, io_pen,
-                                  out_cp, style);
-    sc->prev_style = style;
-    sc->have_prev = true;
-    return g;
 }
 
 /* ---- line breaking ---- */
@@ -126,19 +56,29 @@ static const fdk_glyph *shape_at_cursor(fdk_font *f, const char *utf8,
  *                      last space run (= the current word's first
  *                      byte while a word is being shaped) */
 typedef struct wrap_state {
+    /* byte bookmarks (emission) and cp-index twins (pen math): the
+     * per-codepoint attribution pen is TEXT-absolute, so every
+     * line-relative value is a difference against the line-start
+     * cp's pen. */
     size_t line_start;
+    size_t line_start_k;
     size_t nonspace_end;
+    size_t nonspace_end_k;
     fdk_f32 pen_after_nonspace;
     size_t committed_end;
+    size_t committed_end_k;
     fdk_f32 pen_after_committed;
     size_t break_at;
 } wrap_state;
 
-static void wrap_reset(wrap_state *ws, size_t start) {
+static void wrap_reset(wrap_state *ws, size_t start, size_t start_k) {
     ws->line_start = start;
+    ws->line_start_k = start_k;
     ws->nonspace_end = start;
+    ws->nonspace_end_k = start_k;
     ws->pen_after_nonspace = 0.0f;
     ws->committed_end = start;
+    ws->committed_end_k = start_k;
     ws->pen_after_committed = 0.0f;
     ws->break_at = start;
 }
@@ -166,11 +106,11 @@ static bool wrap_emit(fdk_text_line *out_lines, size_t max_lines,
 }
 
 /* The engine the public break entry points ride (and the markup
- * Label's cached-runs paint path calls directly): runs == NULL (or
- * n_runs == 0) is the classic single-style walk; otherwise the style
- * cursor feeds each glyph its run's style and kerning resets at
- * style boundaries. Same greedy algorithm either way — one rounding
- * rule, one whitespace definition. */
+ * Label's cached-runs paint path calls directly): the text is
+ * shaped ONCE (runs included — the shaper segments by style), and
+ * the greedy walk advances over the shaped result's codepoints with
+ * the LOGICAL pen attribution. Same greedy algorithm as always —
+ * one rounding rule, one whitespace definition. */
 fdk_result fdk__break_lines_runs(const fdk_font *font,
                                   const char *utf8, size_t byte_len,
                                   const fdk__text_run *runs,
@@ -192,44 +132,54 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
         return FDK_OK;
     }
 
+    fdk__shaped *sh = fdk__shape_range(f, utf8, byte_len, 0, byte_len,
+                                       runs, n_runs);
+    if (sh == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    const size_t n_cp = sh->n_cp;
+    const fdk_u32 *cp = sh->cp;
+    const size_t *cp_byte = sh->cp_byte;
+    const fdk_f32 *cp_pen = sh->cp_pen;
+
     size_t count = 0;
     bool dropped = false;
     wrap_state ws;
-    wrap_reset(&ws, 0);
+    wrap_reset(&ws, 0, 0);
 
-    size_t i = 0;
-    int prev_g = -1;
-    fdk_f32 pen = 0.0f;
-    style_cursor sc = {runs, n_runs, 0, false};
-
-    while (i < byte_len) {
-        fdk_u32 cp = 0;
-        fdk_f32 pen_before = pen;
-        shape_at_cursor(f, utf8, byte_len, i, &sc, &prev_g, &pen, &cp);
-        size_t next = i + (size_t)fdk_text_utf8_next(utf8, byte_len, i,
-                                                     &cp);
-        /* `next` recomputes the consumed length; decoding twice is
-         * intentional: shape_at keeps its own signature tight and
-         * the decoder is a pure table walk over <= 4 bytes. */
-        bool space = is_wrap_space(cp);
+    size_t k = 0; /* the cp index being consumed */
+    while (k < n_cp) {
+        fdk_u32 c = cp[k];
+        size_t byte = cp_byte[k];
+        size_t next_byte =
+            k + 1 < n_cp ? cp_byte[k + 1] : byte_len;
+        /* LINE-RELATIVE pens: the attribution is text-absolute, the
+         * greedy walk restarts at every line. */
+        fdk_f32 pen = cp_pen[k + 1] - cp_pen[ws.line_start_k];
+        fdk_f32 pen_before = cp_pen[k] - cp_pen[ws.line_start_k];
+        bool space = is_wrap_space(c);
 
         /* Hard break: '\n', '\r', or a "\r\n" pair (one break). The
          * line ends at its last visible glyph (nonspace_end); a hard
          * break ALWAYS emits its line, empty or not ("a\n\nb" is
          * three lines). */
-        if (cp == 0x0Au || cp == 0x0Du) {
+        if (c == 0x0Au || c == 0x0Du) {
             if (!wrap_emit(out_lines, max_lines, &count, ws.line_start,
                            ws.nonspace_end, ws.pen_after_nonspace)) {
                 dropped = true;
             }
-            if (cp == 0x0Du && next < byte_len && utf8[next] == '\n') {
-                next++; /* swallow the \n of a \r\n */
+            if (c == 0x0Du && next_byte < byte_len &&
+                utf8[next_byte] == '\n') {
+                next_byte++; /* swallow the \n of a \r\n */
+                k++;
             }
-            wrap_reset(&ws, next);
-            i = next;
-            pen = 0.0f;
-            prev_g = -1;
-            style_cursor_reset(&sc);
+            k++; /* past the newline cp itself */
+            /* the next line starts at the first cp at/after
+             * next_byte (== k unless the bytes and cps disagree) */
+            while (k < n_cp && cp_byte[k] < next_byte) {
+                k++;
+            }
+            wrap_reset(&ws, next_byte, k);
             continue;
         }
 
@@ -237,18 +187,20 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
          * break opportunity just past this space. */
         if (space) {
             ws.committed_end = ws.nonspace_end;
+            ws.committed_end_k = ws.nonspace_end_k;
             ws.pen_after_committed = ws.pen_after_nonspace;
-            ws.break_at = next;
+            ws.break_at = next_byte;
         }
 
         /* Overflow? The pen is rounded exactly as a line's advance
          * would be reported. */
         if (pen_round(pen) <= max_width) {
             if (!space) {
-                ws.nonspace_end = next;
+                ws.nonspace_end = next_byte;
+                ws.nonspace_end_k = k + 1;
                 ws.pen_after_nonspace = pen;
             }
-            i = next;
+            k++;
             continue;
         }
 
@@ -263,11 +215,8 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
                     dropped = true;
                 }
             }
-            wrap_reset(&ws, next);
-            i = next;
-            pen = 0.0f;
-            prev_g = -1;
-            style_cursor_reset(&sc);
+            k++;
+            wrap_reset(&ws, next_byte, k);
             continue;
         }
 
@@ -276,17 +225,19 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
             /* Word break: the overflowing word moves to the next
              * line WHOLE; this line ends at the last completed word
              * (trailing spaces trimmed by construction). Restart the
-             * walk at the word's first byte with a fresh pen. */
+             * walk at the word's first cp. */
             if (!wrap_emit(out_lines, max_lines, &count, ws.line_start,
                            ws.committed_end,
                            ws.pen_after_committed)) {
                 dropped = true;
             }
-            wrap_reset(&ws, ws.break_at);
-            i = ws.break_at;
-            pen = 0.0f;
-            prev_g = -1;
-            style_cursor_reset(&sc);
+            {
+                size_t target = ws.break_at;
+                while (k > 0 && cp_byte[k - 1] >= target) {
+                    k--;
+                }
+                wrap_reset(&ws, target, k);
+            }
             continue;
         }
 
@@ -295,11 +246,13 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
             /* Only spaces (no visible word) before an overflowing
              * word: nothing to emit — the next line starts at the
              * word, the spaces vanish. */
-            wrap_reset(&ws, ws.break_at);
-            i = ws.break_at;
-            pen = 0.0f;
-            prev_g = -1;
-            style_cursor_reset(&sc);
+            {
+                size_t target = ws.break_at;
+                while (k > 0 && cp_byte[k - 1] >= target) {
+                    k--;
+                }
+                wrap_reset(&ws, target, k);
+            }
             continue;
         }
 
@@ -315,23 +268,20 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
                            ws.nonspace_end, pen_before)) {
                 dropped = true;
             }
-            wrap_reset(&ws, i);
-            /* i stays: the overflowing glyph re-shapes on the new
-             * line (fresh pen — it may fit there, or overflow alone
-             * and be emitted by the branch below). */
+            wrap_reset(&ws, byte, k);
+            /* k stays: the overflowing cp re-shapes on the new line
+             * (fresh pen — it may fit there, or overflow alone and
+             * be emitted by the branch below). */
         } else {
             /* The line's first glyph overflows alone: emit it as a
              * one-glyph line and move PAST it. */
             if (!wrap_emit(out_lines, max_lines, &count, ws.line_start,
-                           next, pen)) {
+                           next_byte, pen)) {
                 dropped = true;
             }
-            wrap_reset(&ws, next);
-            i = next;
+            k++;
+            wrap_reset(&ws, next_byte, k);
         }
-        pen = 0.0f;
-        prev_g = -1;
-        style_cursor_reset(&sc);
     }
 
     /* Final line: only if visible bytes remain — a trailing pure
@@ -347,6 +297,7 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
     if (out_truncated != NULL && max_lines > 0) {
         *out_truncated = dropped;
     }
+    fdk__shaped_free(sh);
     return FDK_OK;
 }
 
@@ -398,11 +349,12 @@ fdk_result fdk_font_break_lines_spans_utf8(
  * definition. Theming the character (or the policy) belongs to the
  * theme engine, not the text layer. */
 
-/* The engine both public ellipsize entry points ride. The span walk
- * shapes each glyph at its run's style (kerning resets at style
- * boundaries through the shared cursor); the ellipsis itself is
- * measured at the FONT's own style — it is the toolkit's truncation
- * mark, not part of any run. */
+/* The engine both public ellipsize entry points ride. The prefix
+ * walk is the shaped result's per-cp logical pen (ligatures and
+ * kerning attributed to the cluster's last cp — the prefix budget
+ * therefore lands on cluster boundaries, never splitting one); the
+ * ellipsis itself is measured at the FONT's own style — it is the
+ * toolkit's truncation mark, not part of any run. */
 fdk_result fdk__ellipsize_runs(const fdk_font *font,
                                 const char *utf8, size_t byte_len,
                                 const fdk__text_run *runs, size_t n_runs,
@@ -455,24 +407,24 @@ fdk_result fdk__ellipsize_runs(const fdk_font *font,
      * within the budget, trailing spaces trimmed: one pass, freezing
      * `best` only on non-space glyphs. `best` 0 means not even one
      * visible glyph fits beside the ellipsis. */
+    fdk__shaped *sh = fdk__shape_range(f, utf8, byte_len, 0, byte_len,
+                                       runs, n_runs);
+    if (sh == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
     size_t best = 0;
-    size_t i = 0;
-    int prev_g = -1;
-    fdk_f32 pen = 0.0f;
-    style_cursor sc = {runs, n_runs, 0, false};
-    while (i < byte_len) {
-        fdk_u32 cp = 0;
-        shape_at_cursor(f, utf8, byte_len, i, &sc, &prev_g, &pen, &cp);
-        size_t next = i + (size_t)fdk_text_utf8_next(utf8, byte_len,
-                                                     i, &cp);
+    for (size_t k = 0; k < sh->n_cp; k++) {
+        fdk_f32 pen = sh->cp_pen[k + 1];
+        size_t next_byte =
+            k + 1 < sh->n_cp ? sh->cp_byte[k + 1] : byte_len;
         if (pen_round(pen) > budget) {
             break; /* this glyph pushed past the budget */
         }
-        if (!is_wrap_space(cp)) {
-            best = next;
+        if (!is_wrap_space(sh->cp[k])) {
+            best = next_byte;
         }
-        i = next;
     }
+    fdk__shaped_free(sh);
 
     *out_prefix_bytes = best;
     return FDK_OK;

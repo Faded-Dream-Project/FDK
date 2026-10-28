@@ -34,6 +34,8 @@ BuildRequires:  libXext-devel
 BuildRequires:  zlib-devel
 BuildRequires:  wayland-devel
 BuildRequires:  libxkbcommon-devel
+Recommends:     harfbuzz
+Recommends:     fribidi
 
 %description
 FDK is a general-purpose native C GUI toolkit for modern Linux
