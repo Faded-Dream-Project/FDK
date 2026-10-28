@@ -40,13 +40,20 @@ RUN almalinux:10 '
         libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-sans-fonts dejavu-sans-mono-fonts \
-        harfbuzz fribidi wqy-zenhei-fonts
+        harfbuzz fribidi
     # RHEL 10 ships no standalone Xorg server: Xvfb is absent even
     # from CRB. The build container then skips the X11 suite
     # (disclosed by the build script); the Fedora 42 install-test
     # still runs the full graphical validation.
     dnf install -y -q --enablerepo=crb xorg-x11-server-Xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb in the el10 repositories — the X11 suite is skipped on this builder and disclosed"
+    # A CJK font for the shaping suite's per-script fallback leg. Any
+    # flavor works (the resolver accepts TrueType-flavored faces); a
+    # repo without one is DISCLOSED — the suite's fallback leg skips
+    # honestly (primary .notdef) rather than failing.
+    dnf install -y -q google-noto-sans-cjk-ttc-fonts 2>/dev/null || \
+        dnf install -y -q wqy-zenhei-fonts 2>/dev/null || \
+        echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping suite's fallback leg skips honestly (disclosed)"
     sh packaging/fedora/build-rpm.sh
     sh fdk-shell/packaging/fedora/build-rpm.sh
 '

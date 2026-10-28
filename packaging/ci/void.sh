@@ -42,13 +42,19 @@ RUN "$VOID_IMAGE" '
         libX11-devel libXext-devel libXtst-devel zlib-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-fonts-ttf tar \
-        harfbuzz fribidi wqy-zenhei-font
+        harfbuzz fribidi
     # GL runtime for the X11-suite forced-lane groups (llvmpipe),
     # layered over the known package-name combinations:
     xbps-install -Sy mesa mesa-dri 2>/dev/null || \
         xbps-install -Sy libglvnd mesa-dri 2>/dev/null || \
         xbps-install -Sy mesa 2>/dev/null || \
         echo "NOTE: no GL runtime package combination available; the forced-lane suite groups would fail (disclosed)"
+    # A CJK font for the shaping suite's per-script fallback leg —
+    # non-fatal: a repo without one is disclosed and the suite's
+    # fallback leg skips honestly (primary .notdef).
+    xbps-install -Sy noto-fonts-cjk 2>/dev/null || \
+        xbps-install -Sy wqy-zenhei-font 2>/dev/null || \
+        echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping suite's fallback leg skips honestly (disclosed)"
     xbps-install -Sy xorg-server-xvfb 2>/dev/null || \
         xbps-install -Sy xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"
