@@ -1088,6 +1088,43 @@ void fdk_window_set_title(fdk_window *window, const char *title) {
     }
 }
 
+void fdk_window_set_icon(fdk_window *window, const fdk_u32 *pixels,
+                         fdk_i32 width, fdk_i32 height) {
+    if (window == NULL) {
+        return;
+    }
+    /* The clear form: NULL pixels or non-positive dimensions reach
+     * the backend too (it deletes the property / resets the toplevel
+     * icon), so early-out only on the NULL-window case. Clamp the
+     * pathological giant: a desktop icon has no business mapping a
+     * second framebuffer's worth of pixels. */
+    if (width > 512) {
+        width = 512;
+    }
+    if (height > 512) {
+        height = 512;
+    }
+    if (window->ops->window_set_icon == NULL) {
+        /* Backend without the op (Wayland build before 1.1.0): the
+         * documented honest no-op. */
+        return;
+    }
+    window->ops->window_set_icon(window->pwindow, pixels,
+                                 (int)width, (int)height);
+}
+
+void fdk_window_set_role(fdk_window *window, const char *role) {
+    if (window == NULL) {
+        return;
+    }
+    if (window->ops->window_set_role == NULL) {
+        /* Wayland: no WM_WINDOW_ROLE protocol exists — the public
+         * header documents this no-op. */
+        return;
+    }
+    window->ops->window_set_role(window->pwindow, role);
+}
+
 void fdk_window_resize(fdk_window *window, fdk_i32 width, fdk_i32 height) {
     if (window == NULL || width <= 0 || height <= 0) {
         return;

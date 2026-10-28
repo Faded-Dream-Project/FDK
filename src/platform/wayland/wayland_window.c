@@ -6,6 +6,7 @@
 
 #include "generated/viewporter-client-protocol.h"
 #include "generated/fractional-scale-v1-client-protocol.h"
+#include "generated/xdg-toplevel-icon-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -1493,6 +1494,11 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->minimized = 0;
     pwindow->toplevel_decoration = NULL;
     pwindow->deco_client_side = 0;
+    pwindow->toplevel_icon = NULL;          /* M-4: set_icon fills */
+    pwindow->toplevel_icon_buffer = NULL;
+    pwindow->toplevel_icon_buffer_size.width = 0;
+    pwindow->toplevel_icon_buffer_size.height = 0;
+    pwindow->icon_absent_logged = 0;
     pwindow->buffer = NULL;
     pwindow->buffer_size.width = 0;
     pwindow->buffer_size.height = 0;
@@ -1850,6 +1856,17 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         pwindow->buffer = NULL;
         pwindow->buffer_attached = 0;
     }
+    /* Toplevel icon pair (M-4): both die here, icon first (the
+     * buffer must not outlive it), proxies only — the mapping is
+     * already gone (munmap'd at set_icon). */
+    if (pwindow->toplevel_icon != NULL) {
+        xdg_toplevel_icon_v1_destroy(pwindow->toplevel_icon);
+        pwindow->toplevel_icon = NULL;
+    }
+    if (pwindow->toplevel_icon_buffer != NULL) {
+        wl_buffer_destroy(pwindow->toplevel_icon_buffer);
+        pwindow->toplevel_icon_buffer = NULL;
+    }
     fdk_wayland_unregister_window(pwindow->conn, pwindow);
     /* A frame callback still awaiting `done` when the window dies
      * will never fire — reap its proxy (leak found by the sway
@@ -1947,6 +1964,173 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
         return;
     }
     xdg_toplevel_set_title(pwindow->xdg_toplevel, title != NULL ? title : "");
+}
+
+/* Toplevel icon (1.1.0, M-4) — xdg-toplevel-icon-v1.
+ *
+ * The protocol's shape drives this implementation:
+ *   - the buffer MUST be wl_shm-backed and SQUARE; a non-square
+ *     source is centered on a transparent square (the letterbox an
+ *     icon deserves, not a stretch);
+ *   - add_buffer freezes the pool region — the buffer is written
+ *     ONCE and never touched again, destroyed only with the icon;
+ *   - state is double-buffered: applied at the next surface commit,
+ *     so the icon lands together with whatever the window paints
+ *     next (a window that never paints still gets its icon at the
+ *     explicit commit this function sends — committing an empty
+ *     surface state is legal and how icon-only updates are done);
+ *   - compositor absence is the COMMON case today (wlroots < 0.19,
+ *     GNOME): one INFO line, then a permanent quiet no-op per
+ *     window (the warn-once stamp below).
+ */
+void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
+                                 const fdk_u32 *pixels,
+                                 int width, int height) {
+    if (pwindow == NULL) {
+        return;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+
+    /* Clear path (and the popup no-op): destroy the pair, reset the
+     * toplevel's icon to its default, commit. Manager-less composit
+     * -ors never bound anything, so clear is always safe. */
+    if (pwindow->toplevel_icon != NULL) {
+        xdg_toplevel_icon_v1_destroy(pwindow->toplevel_icon);
+        pwindow->toplevel_icon = NULL;
+    }
+    if (pwindow->toplevel_icon_buffer != NULL) {
+        wl_buffer_destroy(pwindow->toplevel_icon_buffer);
+        pwindow->toplevel_icon_buffer = NULL;
+    }
+    if (pixels == NULL || width <= 0 || height <= 0) {
+        if (conn->toplevel_icon_manager != NULL &&
+            pwindow->xdg_toplevel != NULL) {
+            xdg_toplevel_icon_manager_v1_set_icon(
+                conn->toplevel_icon_manager, pwindow->xdg_toplevel, NULL);
+            /* Reset state applies at the next commit — send one only
+             * if the surface is past its first configure (a state-only
+             * commit before that is protocol-legal but pointless: the
+             * deferred first-frame commit carries it anyway). */
+            if (pwindow->configured && pwindow->surface != NULL) {
+                wl_surface_commit(pwindow->surface);
+            }
+        }
+        return;
+    }
+    if (conn->toplevel_icon_manager == NULL ||
+        pwindow->xdg_toplevel == NULL) {
+        /* Popups genuinely have no toplevel to icon (same as title);
+         * manager absence on a toplevel is the honest-unsupported
+         * case — one INFO line per window, never per call. */
+        if (pwindow->xdg_toplevel != NULL && !pwindow->icon_absent_logged) {
+            FDK_INFO("compositor offers no xdg-toplevel-icon-v1: "
+                     "fdk_window_set_icon is a no-op here");
+            pwindow->icon_absent_logged = 1;
+        }
+        return;
+    }
+
+    /* Build the SQUARE ARGB8888 buffer (centered letterbox for a
+     * non-square source; stride = side*4; FDK's pixel packing is
+     * already the wire format). */
+    int side = width > height ? width : height;
+    size_t stride = (size_t)side * 4u;
+    size_t length = stride * (size_t)side;
+    int fd = memfd_create("fdk-toplevel-icon", MFD_CLOEXEC);
+    if (fd < 0) {
+        FDK_WARN("toplevel icon: memfd_create failed (%s)", strerror(errno));
+        return;
+    }
+    if (ftruncate(fd, (off_t)length) < 0) {
+        FDK_WARN("toplevel icon: ftruncate failed (%s)", strerror(errno));
+        close(fd);
+        return;
+    }
+    uint32_t *buf = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED,
+                         fd, 0);
+    if (buf == MAP_FAILED) {
+        FDK_WARN("toplevel icon: mmap failed (%s)", strerror(errno));
+        close(fd);
+        return;
+    }
+    struct wl_shm_pool *pool =
+        wl_shm_create_pool(conn->shm, fd, (int32_t)length);
+    /* FD-lifetime flush, same rule as create_shm_buffer: the fd must
+     * survive until the create_pool request carrying it is ON THE
+     * WIRE, or the kernel may recycle its number first. */
+    {
+        int tries = 0;
+        while (wl_display_flush(conn->display) < 0 && errno == EAGAIN &&
+               tries < 64) {
+            struct pollfd pfd = {
+                .fd = wl_display_get_fd(conn->display),
+                .events = POLLOUT,
+            };
+            poll(&pfd, 1, 10);
+            tries++;
+        }
+    }
+    close(fd);
+    if (pool == NULL) {
+        munmap(buf, length);
+        FDK_WARN("toplevel icon: wl_shm_create_pool failed");
+        return;
+    }
+    struct wl_buffer *buffer = wl_shm_pool_create_buffer(
+        pool, 0, side, side, (int32_t)stride, WL_SHM_FORMAT_ARGB8888);
+    wl_shm_pool_destroy(pool);
+    if (buffer == NULL) {
+        munmap(buf, length);
+        FDK_WARN("toplevel icon: wl_shm_pool_create_buffer failed");
+        return;
+    }
+    /* Keep the icon buffer OFF the release queue: wl_buffer::release
+     * is documented UNUSED for this protocol, and the mapping is
+     * frozen anyway — no listener, no queue, no re-entrancy. */
+
+    /* Fill: transparent square, source centered. */
+    memset(buf, 0, length);
+    int off_x = (side - width) / 2;
+    int off_y = (side - height) / 2;
+    for (int y = 0; y < height; y++) {
+        uint32_t *dst = buf + (size_t)(off_y + y) * (size_t)side +
+                        (size_t)off_x;
+        const fdk_u32 *src = pixels + (size_t)y * (size_t)width;
+        memcpy(dst, src, (size_t)width * 4u);
+    }
+    /* The mapping can go NOW: wl_shm's contract keeps the
+     * server-side mapping alive until the buffer is destroyed, and
+     * the client may munmap once the requests are written (the pool
+     * is already destroyed; the region is frozen from the client's
+     * perspective the moment add_buffer is sent below). */
+    munmap(buf, length);
+
+    /* create icon -> add_buffer -> set_icon -> commit; keep the
+     * pair on the window (see wayland_platform.h for the lifetime
+     * reasoning). */
+    struct xdg_toplevel_icon_v1 *icon =
+        xdg_toplevel_icon_manager_v1_create_icon(conn->toplevel_icon_manager);
+    if (icon == NULL) {
+        wl_buffer_destroy(buffer);
+        FDK_WARN("toplevel icon: create_icon failed");
+        return;
+    }
+    xdg_toplevel_icon_v1_add_buffer(icon, buffer, 1);
+    xdg_toplevel_icon_manager_v1_set_icon(conn->toplevel_icon_manager,
+                                          pwindow->xdg_toplevel, icon);
+    pwindow->toplevel_icon = icon;
+    pwindow->toplevel_icon_buffer = buffer;
+    pwindow->toplevel_icon_buffer_size.width = side;
+    pwindow->toplevel_icon_buffer_size.height = side;
+    /* The icon state is double-buffered: it applies at the surface's
+     * next commit. Send one only past the first configure; before
+     * that the deferred-first-frame commit (xdg_surface_configure's
+     * handshake) carries the toplevel state to the compositor — a
+     * pre-configure state commit is protocol-legal but would race
+     * FDK's own gate discipline for zero benefit. */
+    if (pwindow->configured) {
+        wl_surface_commit(pwindow->surface);
+    }
 }
 
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height) {

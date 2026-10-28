@@ -356,6 +356,160 @@ static unsigned long fdk_window_xid(fdk_window *win) {
     return (unsigned long)win->pwindow->xwindow;
 }
 
+/* ---- Window identity (1.1.0, M-4) ---------------------------------------
+ *
+ * Reads the identity properties BACK from the X server with a second
+ * raw-Xlib connection — the same rig posture as motif_hints_present:
+ * the verification is against real server state, not against FDK's
+ * own bookkeeping. Covers the whole M-4 contract: _NET_WM_PID equals
+ * our pid, WM_CLIENT_MACHINE equals our hostname, WM_WINDOW_ROLE
+ * follows set_role (and the create-time defaults), and _NET_WM_ICON
+ * round-trips the EXACT ARGB pixels (dims header + every word). */
+static unsigned char *x11_read_property(Display *dpy, unsigned long xid,
+                                        const char *name, Atom *out_type,
+                                        int *out_fmt,
+                                        unsigned long *out_nitems) {
+    Atom prop = XInternAtom(dpy, name, False);
+    unsigned char *data = NULL;
+    unsigned long left = 0;
+    if (XGetWindowProperty(dpy, (Window)xid, prop, 0, 4096, False,
+                           AnyPropertyType, out_type, out_fmt, out_nitems,
+                           &left, &data) != Success) {
+        return NULL;
+    }
+    return data;
+}
+
+static void test_window_identity(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "identity test", .width = 200, .height = 150 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+
+    Display *dpy = XOpenDisplay(NULL);
+    assert(dpy != NULL);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* --- _NET_WM_PID: the live pid, as CARDINAL/32 --- */
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid, "_NET_WM_PID",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(type == XA_CARDINAL);
+        assert(fmt == 32);
+        assert(n == 1);
+        long pid_read = (long)((unsigned long *)data)[0];
+        /* Xlib sign-extends 32-bit cardinals on readback (the live
+         * lesson pinned in the 1.1.0-rc1 battery) — mask first. */
+        pid_read &= 0xFFFFFFFFL;
+        assert(pid_read == (long)getpid());
+        XFree(data);
+    }
+
+    /* --- WM_CLIENT_MACHINE: our own hostname --- */
+    {
+        char host[64] = { 0 };
+        assert(gethostname(host, sizeof(host) - 1) == 0);
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid, "WM_CLIENT_MACHINE",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(type == XA_STRING);
+        assert(n == strlen(host));
+        assert(memcmp(data, host, n) == 0);
+        XFree(data);
+    }
+
+    /* --- WM_WINDOW_ROLE: default "main", then set_role --- */
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid, "WM_WINDOW_ROLE",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(type == XA_STRING);
+        assert(n == 4 && memcmp(data, "main", 4) == 0);
+        XFree(data);
+    }
+    fdk_window_set_role(win, "toolbox");
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid, "WM_WINDOW_ROLE",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(type == XA_STRING);
+        assert(n == 7 && memcmp(data, "toolbox", 7) == 0);
+        XFree(data);
+    }
+    /* NULL reverts to the default */
+    fdk_window_set_role(win, NULL);
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid, "WM_WINDOW_ROLE",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(n == 4 && memcmp(data, "main", 4) == 0);
+        XFree(data);
+    }
+
+    /* --- _NET_WM_ICON: byte-exact ARGB round-trip + clear --- */
+    enum { ICON_W = 16, ICON_H = 12 }; /* non-square on purpose */
+    static fdk_u32 icon[ICON_W * ICON_H];
+    for (int i = 0; i < ICON_W * ICON_H; i++) {
+        icon[i] = 0xFF000000u | (uint32_t)(i * 7) |
+                  ((uint32_t)(i * 13) << 8) | ((uint32_t)(i * 29) << 16);
+    }
+    fdk_window_set_icon(win, icon, ICON_W, ICON_H);
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid, "_NET_WM_ICON",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(type == XA_CARDINAL);
+        assert(fmt == 32);
+        assert(n == (unsigned long)(2 + ICON_W * ICON_H));
+        unsigned long *words = (unsigned long *)data;
+        assert(words[0] == (unsigned long)ICON_W);
+        assert(words[1] == (unsigned long)ICON_H);
+        for (int i = 0; i < ICON_W * ICON_H; i++) {
+            assert((words[2 + i] & 0xFFFFFFFFL) == icon[i]);
+        }
+        XFree(data);
+    }
+    /* replace: a 4x4 solid image replaces the whole property */
+    static const fdk_u32 small[16] = { 0x80FF8000u };
+    fdk_window_set_icon(win, small, 4, 4);
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid, "_NET_WM_ICON",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(n == 2 + 16);
+        unsigned long *words = (unsigned long *)data;
+        assert(words[0] == 4 && words[1] == 4);
+        assert((words[2] & 0xFFFFFFFFL) == 0x80FF8000u);
+        XFree(data);
+    }
+    /* clear: property gone */
+    fdk_window_set_icon(win, NULL, 0, 0);
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid, "_NET_WM_ICON",
+                                                &type, &fmt, &n);
+        /* deleted property: data == NULL (or n == 0) */
+        assert(data == NULL || n == 0);
+        XFree(data);
+    }
+
+    XCloseDisplay(dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 window identity: PID + client machine + role + icon round-trip\n");
+}
+
 static fdk_color wcol(int r, int g, int b);
 
 /* ---- 1.2.2 regression: the resize-storm wedge ----
@@ -11171,6 +11325,7 @@ int main(void) {
     test_run_returns_when_no_windows_open();
     test_window_create_show_destroy();
     test_window_set_title();
+    test_window_identity();
     test_resize_delivers_configure_event();
     test_resize_storm_backlog_drains();
     test_close_request_delivered();

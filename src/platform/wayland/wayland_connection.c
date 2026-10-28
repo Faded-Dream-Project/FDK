@@ -6,6 +6,7 @@
 #include "generated/fractional-scale-v1-client-protocol.h"
 #include "generated/primary-selection-unstable-v1-client-protocol.h"
 #include "generated/cursor-shape-v1-client-protocol.h"
+#include "generated/xdg-toplevel-icon-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -119,6 +120,19 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->cursor_shape_manager =
             wl_registry_bind(registry, name,
                              &wp_cursor_shape_manager_v1_interface, cv);
+    } else if (strcmp(interface,
+                      xdg_toplevel_icon_manager_v1_interface.name) == 0) {
+        /* OPTIONAL (1.1.0, M-4): xdg-toplevel-icon-v1 — the compositor
+         * accepts per-toplevel window icons (taskbars, docks,
+         * switchers). KDE Plasma 6.3+ and adopters of the staging
+         * protocol; absent on wlroots < 0.19 / GNOME at bind time.
+         * v1 is the only released version; the advisory icon_size
+         * /done events are not listened to (FDK ships raster pixels
+         * and lets the compositor scale — see wayland_platform.h). */
+        uint32_t iv = version < 1 ? version : 1;
+        conn->toplevel_icon_manager =
+            wl_registry_bind(registry, name,
+                             &xdg_toplevel_icon_manager_v1_interface, iv);
     }
     /* Other globals (wl_data_device_manager, etc.) are
      * intentionally not bound — out of current scope, see
@@ -356,6 +370,10 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
 
     if (conn->decoration_manager) {
         zxdg_decoration_manager_v1_destroy(conn->decoration_manager);
+    }
+    if (conn->toplevel_icon_manager) {
+        xdg_toplevel_icon_manager_v1_destroy(conn->toplevel_icon_manager);
+        conn->toplevel_icon_manager = NULL;
     }
     if (conn->fractional_manager) {
         wp_fractional_scale_manager_v1_destroy(conn->fractional_manager);

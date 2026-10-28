@@ -189,6 +189,24 @@ typedef struct fdk_platform_ops {
     void (*window_show)(fdk_platform_window *pwindow);
     void (*window_hide)(fdk_platform_window *pwindow);
     void (*window_set_title)(fdk_platform_window *pwindow, const char *title);
+
+    /* OPTIONAL (1.1.0, M-4 window identity): the window's icon as
+     * width x height ARGB8888 pixels (fdk_u32 packing, A<<24|R<<16|
+     * G<<8|B — identical bytes to _NET_WM_ICON and the
+     * xdg-toplevel-icon ARGB8888 buffer). pixels == NULL or
+     * non-positive dims CLEAR the icon; repeated calls replace
+     * (last wins). The pixels need only live for the call — every
+     * backend copies into its own representation (the X11 property
+     * buffer / the Wayland SHM pool) before returning. */
+    void (*window_set_icon)(fdk_platform_window *pwindow,
+                            const fdk_u32 *pixels,
+                            int width, int height);
+    /* OPTIONAL (M-4): the ICCCM WM_WINDOW_ROLE string (X11; Wayland
+     * leaves it NULL — no protocol exists, the public API documents
+     * the no-op). NULL/empty reverts the role to the backend's
+     * create-time default. */
+    void (*window_set_role)(fdk_platform_window *pwindow,
+                            const char *role);
     void (*window_resize)(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
     void (*window_set_size_limits)(fdk_platform_window *pwindow,
                                     fdk_size min_size, fdk_size max_size);

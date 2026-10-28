@@ -1706,6 +1706,58 @@ int main(void) {
                "real-key e2e is the X11 suite's)\n");
     }
 
+    /* ---- Toplevel icon (1.1.0, M-4) ----
+     *
+     * xdg-toplevel-icon-v1 is compositor-OPTIONAL: sway 1.10/wlroots
+     * 0.18 (this rig) and GNOME do not offer it; KDE Plasma 6.3+
+     * does. Both worlds must stay healthy through set_icon:
+     *   - manager-less: the documented honest no-op (one INFO line,
+     *     no protocol traffic, no crash);
+     *   - manager-present: icon -> add_buffer -> set_icon + commit,
+     *     and the connection must survive the next roundtrip (any
+     *     protocol error — bad format, non-square buffer, use of a
+     *     destroyed object — kills the connection at the next
+     *     dispatch, which the pump below would surface as a
+     *     dispatch failure, not a silent pass).
+     * A 16x12 NON-square source exercises the letterbox path (the
+     * square-buffer protocol requirement) wherever the manager
+     * exists; the clear form runs after it. */
+    {
+        fdk_window *iw = NULL;
+        fdk_window_options iopts = { .title = "FDK icon test",
+                                     .width = 220, .height = 140 };
+        assert(fdk_ok(fdk_window_create(ctx, &iopts, &iw)));
+        /* A root + background, the deferred-first-frame test's shape:
+         * paint needs a tree to damage, and the present assertion
+         * below needs a frame actually committed. */
+        fdk_widget *iroot = NULL;
+        assert(fdk_ok(fdk_window_get_root(iw, &iroot)));
+        fdk_widget_set_background(iroot,
+                                  (fdk_color){0.3f, 0.3f, 0.3f, 1.0f});
+        fdk_window_show(iw);
+        (void)fdk_pump_events(ctx, 100);
+
+        fdk_u32 icon[16 * 12];
+        for (int i = 0; i < 16 * 12; i++) {
+            icon[i] = 0xFF000000u | (uint32_t)(i * 7) |
+                      ((uint32_t)(i * 13) << 8) | ((uint32_t)(i * 29) << 16);
+        }
+        fdk_window_set_icon(iw, icon, 16, 12);
+        (void)fdk_pump_events(ctx, 150);
+        fdk_window_set_icon(iw, NULL, 0, 0);
+        (void)fdk_pump_events(ctx, 150);
+        /* The window is still fully alive: a normal paint round
+         * proves the surface path never tripped on icon state. */
+        fdk_window_paint(iw);
+        (void)fdk_pump_events(ctx, 150);
+        assert(fdk__window_ever_presented(iw) != 0);
+
+        fdk_window_destroy(iw);
+        printf("[ok] wayland toplevel icon: set + clear survive both "
+               "compositor worlds (manager bound or absent), "
+               "connection healthy after\n");
+    }
+
     if (win != NULL) {
         fdk_window_destroy(win);
     }

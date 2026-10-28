@@ -14,6 +14,34 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-28 (on the rc2 line)
 
+### Added — window identity: icons, PID, host, role (M-4 / B-04)
+
+- **`fdk_window_set_icon()` (public API)**: a window's icon — the
+  image taskbars, docks, and window switchers show for it — as
+  width x height ARGB8888 pixels (the toolkit's native `fdk_u32`
+  packing, identical bytes to `_NET_WM_ICON`). X11 writes the EWMH
+  property (byte-exact round-trip pinned by the integration test);
+  Wayland speaks `xdg-toplevel-icon-v1` where the compositor offers
+  it (KDE Plasma 6.3+; non-square sources are letterboxed onto the
+  protocol's required square buffer), and where it does not the call
+  is the documented honest no-op — one INFO line, no error, because
+  Wayland offers no icon fallback path. `NULL`/non-positive
+  dimensions clear the icon on both backends.
+- **`fdk_window_set_role()` (public API)**: the ICCCM
+  `WM_WINDOW_ROLE` string (X11; no Wayland protocol exists — the
+  documented no-op). Windows now carry create-time identity the
+  desktop reads: `_NET_WM_PID`, `WM_CLIENT_MACHINE`, and a default
+  role (`main`/`popup`); WM_CLASS was already set from the
+  app_id. On Wayland the app_id remains the whole identity story
+  by protocol design.
+- **Tests**: the X11 integration suite reads every identity
+  property back from the server through a second raw-Xlib
+  connection (pid equality, hostname equality, role default +
+  override + revert, byte-exact icon round-trip including replace
+  and clear); the Wayland suite proves set + clear keep the
+  connection healthy in both compositor worlds (manager bound or
+  absent) and the surface path never trips on icon state.
+
 ### Added — CFF outlines: OpenType 'OTTO' faces render (the Arch tofu report)
 
 - **The native Type 2 module (core, `src/text/cff.c`)**: CFF-flavored

@@ -109,6 +109,65 @@ void fdk_window_destroy(fdk_window *window);
  * string passed in. NULL is treated as an empty title. */
 void fdk_window_set_title(fdk_window *window, const char *title);
 
+/* ---- Window identity (1.1.0, M-4) ----------------------------------------
+ *
+ * The properties a desktop uses to recognize, group, and represent
+ * this window: its ICON (taskbars, docks, window switchers, mission
+ * control), its process identity, and its ICCCM window role.
+ *
+ * fdk_window_set_icon installs `width` x `height` pixels as the
+ * window's icon. `pixels` is the toolkit's native ARGB8888 packing
+ * (fdk_u32, A<<24 | R<<16 | G<<8 | B — the same layout
+ * fdk_surface_create renders and _NET_WM_ICON carries), row-major,
+ * no row padding, exactly width*height entries; the data is COPIED
+ * before the call returns, so callers may free their buffer
+ * immediately. One size is enough: desktops scale it (a 64x64
+ * source covers dock to switcher on every mainstream desktop).
+ * Repeated calls REPLACE the icon (the last call wins) — the
+ * application wanting a multi-size set simply picks its best
+ * single source; that is what every mainstream toolkit ships in
+ * practice, and what both backends below implement.
+ *
+ * Per backend:
+ *   - X11: the image replaces the _NET_WM_ICON property (EWMH:
+ *     the desktop scales what it gets). Passing NULL (or
+ *     non-positive dimensions) CLEARS the icon — the property goes
+ *     away and the desktop falls back to its generic icon.
+ *   - Wayland: xdg-toplevel-icon-v1 where the compositor advertises
+ *     it (KDE Plasma 6.3+, others as they adopt the staging
+ *     protocol): the LAST set wins, applied at the toplevel's next
+ *     wl_surface.commit. Where the compositor does not implement
+ *     the protocol the call is a documented no-op (one INFO line at
+ *     most — Wayland gives no fallback path for window icons, same
+ *     honest posture as every unsupported desktop feature).
+ *
+ * Window identity beyond the icon is set AUTOMATICALLY at window
+ * creation and needs no API:
+ *   - X11: _NET_WM_PID (the process id), WM_CLIENT_MACHINE (the
+ *     host name), WM_WINDOW_ROLE (fdk_window_set_role below, or
+ *     "main" for plain toplevels / "popup" for the popup family),
+ *     and WM_CLASS (from fdk_init_options' app_id — since 1.0).
+ *     Together these are what EWMH pagers, session managers, and
+ *     _NET_WM_PINNING-style desktops read.
+ *   - Wayland: the xdg_toplevel's app_id (from fdk_init_options)
+ *     is the whole identity the protocol offers; there is no PID
+ *     or machine property on Wayland by design.
+ *
+ * `pixels` NULL or width/height <= 0 clears the icon (both
+ * backends). Dimensions above 512 are clamped (an icon is a
+ * desktop affordance, not a second framebuffer). */
+void fdk_window_set_icon(fdk_window *window, const fdk_u32 *pixels,
+                         fdk_i32 width, fdk_i32 height);
+
+/* Sets the ICCCM WM_WINDOW_ROLE for this window (X11; on Wayland
+ * there is no role protocol — the call is a documented no-op, no
+ * error). `role` is copied; NULL or "" reverts to the default
+ * ("main" for toplevels, "popup" for popup windows). The role lets
+ * a session manager or WM tell windows of the same class apart
+ * ("toolbox" vs "main"); applications that never care simply never
+ * call this. Safe before or after fdk_window_show(). */
+void fdk_window_set_role(fdk_window *window, const char *role);
+
 /* ---- Cursor shape (1.1.0-rc1) -------------------------------------------
  *
  * The shape the pointer takes while hovering this window. FDK's own

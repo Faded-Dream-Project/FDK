@@ -63,6 +63,19 @@ struct fdk_platform_connection {
     Atom utf8_string;
     Atom motif_wm_hints; /* _MOTIF_WM_HINTS, Phase 8 decorations */
 
+    /* Window identity atoms (1.1.0, M-4): _NET_WM_ICON (the EWMH
+     * ARGB icon list a taskbar/dock/switcher reads), _NET_WM_PID +
+     * WM_CLIENT_MACHINE (the process identity session managers and
+     * EWMH pagers correlate — set once per window at create), and
+     * WM_WINDOW_ROLE (ICCCM 5.5.1, the per-window role string).
+     * Interned unconditionally at connect: a property write to an
+     * atom no WM ever reads is one round-trip wasted, not an error
+     * — and the bare-X test rigs READ them back. */
+    Atom net_wm_icon;
+    Atom net_wm_pid;
+    Atom wm_client_machine;
+    Atom wm_window_role;
+
     /* Phase 8 window management: EWMH atoms + what the running WM
      * actually supports, probed once at connect from the root's
      * _NET_SUPPORTED list (see x11_connection.c). ewmh_wm != 0 means
@@ -510,6 +523,20 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow);
 void fdk_x11_window_show(fdk_platform_window *pwindow);
 void fdk_x11_window_hide(fdk_platform_window *pwindow);
 void fdk_x11_window_set_title(fdk_platform_window *pwindow, const char *title);
+
+/* Window identity (1.1.0, M-4): the icon + ICCCM role ops behind the
+ * same-named platform_internal.h entries. set_icon builds/replaces
+ * _NET_WM_ICON (multi-image: repeated calls before the flush append
+ * images); pixels==NULL/non-positive dims delete the property.
+ * set_role rewrites WM_WINDOW_ROLE (NULL/empty = the "main"/
+ * "popup" default). PID + WM_CLIENT_MACHINE are set at CREATE in
+ * x11_window.c (no public op — they never change). */
+void fdk_x11_window_set_icon(fdk_platform_window *pwindow,
+                             const fdk_u32 *pixels,
+                             int width, int height);
+void fdk_x11_window_set_role(fdk_platform_window *pwindow,
+                             const char *role);
+
 void fdk_x11_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 fdk_result fdk_x11_window_set_wm_decorations(fdk_platform_window *pwindow,
                                              bool on);

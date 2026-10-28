@@ -45,12 +45,15 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 15 (S-2 and S-1 pending owner verification) ·
-PARTIAL 11 ·
-IN PROGRESS 1 (M-9) · MISSING 30 ·
+**Counts:** DONE 17 (S-2 and S-1 pending owner verification; M-4
+landed 2026-10-28) · PARTIAL 10 ·
+IN PROGRESS 1 (M-9) · MISSING 28 ·
 DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
 Re-verified 2026-10-27 (post-trayhost): the full battery plus the
 notifyd rig and the trayhost rig (all three phases green each).
+Re-verified 2026-10-28 (post-M-4): full dual-backend build zero
+warnings, make test, make test-x11 (identity leg green), sway rig
+(WAYLAND RIG PASS incl. the toplevel-icon leg), verify-exports 799.
 
 **Phase 2 owner directives** (the mission's lettered tasks,
 tracked beside the register; the register's 62-item math is
@@ -79,7 +82,7 @@ unaffected):
 | B-01 | IME | **PARTIAL** (X11 compose) / **MISSING** (Wayland) | no text-input-v3 binding; XIM `PreeditNothing`; entry/TextView preedit groundwork renders it | M-1 |
 | B-02 | text shaping | **DONE (level 1)** | M-2 shipped: the dlopen'd HarfBuzz + FriBidi + charset-filtered fontconfig fallback pipeline (src/text/shaping.c, docs/text.md "Complex-script shaping"); every text consumer reads shaped placements; tests/test_shaping.c pins both postures incl. the Latin compatibility re-exec; level 2 (paragraph bidi, RTL caret granularity, justification) stays open. FOLLOW-UP SHIPPED: CFF-flavored OpenType ('OTTO') renders through the native Type 2 module (src/text/cff.c, D-011) — the Arch tofu report closed; tests/test_cff.c pins dual-decoder vertex agreement, seac, and the fuzz fence | — |
 | B-03 | touch | **MISSING** | no wl_touch / XI2 touch / event types | M-3 |
-| B-04 | window icons + PID | **MISSING** | no `_NET_WM_ICON`/`_NET_WM_PID`/`WM_CLIENT_MACHINE`/toplevel-icon; no `fdk_window_set_icon` | M-4 (+S-6 activation) |
+| B-04 | window icons + PID | **DONE** | fdk_window_set_icon + fdk_window_set_role (fdk_window.h); X11: _NET_WM_ICON byte-exact round-trip pinned by the integration rig (second raw-Xlib connection), _NET_WM_PID + WM_CLIENT_MACHINE + WM_WINDOW_ROLE at create ("main"/"popup" defaults, set_role rewrites); Wayland: xdg-toplevel-icon-v1 bound where offered (square-buffer letterbox, frozen-pool discipline, icon+buffer pair owned by the window), manager-absent = the documented no-op; sway rig proves connection health both worlds | real-desktop taskbars/docks (TESTING-ON-DESKTOP.md) |
 | B-05 | X11 RandR (core) | **MISSING** | x11_connection.c: one screen, no output model | M-6 |
 | B-06 | dark mode following | **DONE** [VERIFIED-CHANGED: audit said partial] | XSETTINGS `Gtk/ColorScheme` (x11_xsettings.c) + `org.freedesktop.appearance` portal on the native client; live: "SettingChanged flips the scheme + theme live" — d2a253f | — |
 | B-07 | X11 DPI awareness | **DONE** [VERIFIED-CHANGED: audit said missing] | shipped 1.4.5: Xft.dpi + physical-size fallback, integer scale [1,3]; `test_x11_hidpi_gui` end-to-end on a private 192-dpi Xvfb | — (RandR scale is N/A: X11 has no scale protocol) |
@@ -98,7 +101,7 @@ unaffected):
 | M-1 | IME both backends | **MISSING** | = B-01 | the whole item |
 | M-2 | shaping level 1 | **DONE** | = B-02 (level 1; level 2 open) | — |
 | M-3 | touch basics | **MISSING** | = B-03 | the whole item |
-| M-4 | window identity | **MISSING** | = B-04 icons/PID part | the whole item |
+| M-4 | window identity | **DONE** | = B-04 (icons/PID part); activation rides S-6 | — |
 | M-5 | fdk-shell outputs | **DONE** (rc2, 0.2.0) | live sway output hotplug/metrics legs + namespace + `_FDK_WM_LAYER` — d2bc0de | — |
 | M-6 | X11 multi-monitor | **MISSING** | = A-03/B-05 | the whole item |
 | M-7 | D-Bus foundation + dark mode | **DONE** (foundation 4d42c8c; dark mode d2a253f) | live-bus battery green incl. cross-implementation; wire bytes pinned vs captured reference output; fuzzed; CI makes skips fatal | — [VERIFIED-CHANGED: the row's "rides on top (next)" is stale — dark mode landed] |
@@ -288,7 +291,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | M-1 | **IME, both backends**: bind text-input-v3 (enable/surrounding-text/commit/preedit/deactivate on focus changes), deliver new IME events, wire Entry/TextView preedit (the groundwork API already renders it); X11: XIM preedit callbacks (`XIMPreeditCallbacks`) driving the same events. | B-01 | M |
 | M-2 | **Text shaping level 1**: HarfBuzz via runtime dlopen (the GLX/fontconfig posture) + FriBidi (dlopen) + per-script font fallback chain through fontconfig; Entry/TextView/Label/markup all draw shaped runs. Color emoji explicitly NOT in M-2 (see C-3). **[DONE — shipped with the placement seam (one shaped structure every consumer reads), the 26.6-scaled stb-backed hb font funcs, cluster-attributed wrap/ellipsize, the shaped Entry caret + hit-test, and tests/test_shaping.c running both postures]** | B-02 | M–L |
 | M-3 | **Touch basics**: wl_touch binding → touch events (slots, tap → click synthesis policy documented, two-finger scroll); X11 XI2 touch via dlopen'd libXi with the same event model. Gestures/tablets stay deferred. | B-03 | M |
-| M-4 | **Window identity**: `_NET_WM_ICON` + xdg-toplevel-icon-v1 (set both, harmless where unsupported) + `_NET_WM_PID` + `WM_CLIENT_MACHINE` + `WM_WINDOW_ROLE`; `fdk_window_set_icon` API. | B-04 (icons/PID part) | S |
+| M-4 | **Window identity**: `_NET_WM_ICON` + xdg-toplevel-icon-v1 (set both, harmless where unsupported) + `_NET_WM_PID` + `WM_CLIENT_MACHINE` + `WM_WINDOW_ROLE`; `fdk_window_set_icon` API. **[DONE 2026-10-28: both setters + create-time PID/machine/role; X11 property round-trip rig; Wayland protocol wiring + honest no-op]** | B-04 (icons/PID part) | S |
 | M-5 | **fdk-shell outputs**: **DONE (rc2, fdk-shell 0.2.0)** — live output events (ADDED/REMOVED/CHANGED; proven against sway's create_output/mode/unplug IPC) + per-output metrics (position, logical size, scale, physical mm — fdk_shell_output_get_info); configurable namespace (Wayland's zwlr namespace / X11's WM_CLASS res_class); `_FDK_WM_LAYER` set on every layer. X11 side: the screen as one output with real metrics; per-output X11 records land with M-6's RandR. | A-01, A-02, A-04, A-09 | M |
 | M-6 | **X11 multi-monitor**: RandR output enumeration + change events in core (app-facing output API, shared with M-5's fdk-shell surface) + per-output docks in fdk-shell. | A-03, B-05 | M |
 | M-7 | **The D-Bus foundation + dark mode**: **DONE (the foundation, rc2)** — a native client in raw C from the public specification (src/dbus/, 115 exported symbols), zero new dependencies of any kind, riding the FDK event loop; wire bytes pinned against captured reference-implementation output; fuzzed in `make test`; live-bus suite `make test-dbus` (real dbus-daemon: calls, errors, timeouts, match rules/signals, properties, name watching, introspection, close-from-callback reentrancy; CI makes skips fatal). Dark-mode following rides on top (next). **[VERIFIED-CHANGED: it no longer rides on top - dark mode (B-06) LANDED at d2a253f; M-7 is complete]** | B-08, B-06 | L |

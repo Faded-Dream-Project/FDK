@@ -66,6 +66,17 @@ struct fdk_platform_connection {
     struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
     struct wp_cursor_shape_device_v1 *cursor_shape_device;
 
+    /* xdg-toplevel-icon-v1 (1.1.0, M-4): the OPTIONAL manager for
+     * window icons. Present on KDE Plasma 6.3+ and any compositor
+     * that adopted the staging protocol; absent everywhere else at
+     * the time of writing (wlroots < 0.19, GNOME) — set_icon then
+     * logs one INFO line and no-ops, the documented honest
+     * unsupported posture (Wayland offers no icon fallback). The
+     * manager's icon_size/done events are advisory (preferred
+     * sizes for scalable sources); FDK ships raster pixels and
+     * lets the compositor scale, so they are not listened to. */
+    struct xdg_toplevel_icon_manager_v1 *toplevel_icon_manager;
+
     /* Globals discovered during the initial registry roundtrip
      * (see wayland_registry.c). All required for Phase 2's
      * "create a window, get input, handle close/resize" scope —
@@ -333,6 +344,25 @@ struct fdk_platform_window {
     struct wl_surface *surface;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
+
+    /* Toplevel icon (1.1.0, M-4): the xdg-toplevel-icon-v1 pair a
+     * set_icon call leaves on this toplevel. The PROTOCOL lets the
+     * icon object die right after manager.set_icon ("can be
+     * destroyed without the toplevel losing its icon") — but the
+     * wl_buffer must outlive the ICON, so the honest lifetime here
+     * is: both stay on the window, both are destroyed together (a
+     * replacement set_icon, window destroy). Buffer contents are
+     * frozen the moment add_buffer is sent (the spec forbids
+     * touching the pool region afterwards), which is exactly why
+     * they are never recycled. NULL when no icon is set or the
+     * compositor never offered the manager (the set_icon no-op). */
+    struct xdg_toplevel_icon_v1 *toplevel_icon;
+    struct wl_buffer *toplevel_icon_buffer;
+    fdk_size toplevel_icon_buffer_size; /* the SQUARE buffer dims */
+    /* Warn-once stamp for the manager-less INFO line (M-4): the
+     * no-op itself is permanent per compositor, the LOG is once
+     * per window so a per-frame set_icon caller cannot spam. */
+    int icon_absent_logged;
     /* Extension surface (1.1.0, fdk_extend.h): nonzero when this
      * wrapper ADOPTED an add-on's wl_surface (wayland_ext.c) — the
      * surface's ROLE belongs to the add-on (a layer surface, an
@@ -651,6 +681,12 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow);
 void fdk_wayland_window_show(fdk_platform_window *pwindow);
 void fdk_wayland_window_hide(fdk_platform_window *pwindow);
 void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *title);
+
+/* Toplevel icon (1.1.0, M-4): xdg-toplevel-icon-v1 where bound, the
+ * documented honest no-op where the compositor offers nothing. */
+void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
+                                 const fdk_u32 *pixels,
+                                 int width, int height);
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size);

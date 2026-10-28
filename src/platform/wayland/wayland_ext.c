@@ -101,6 +101,14 @@ fdk_result fdk_wayland_ext_surface_adopt(fdk_platform_connection *conn,
     pwindow->buffer_size.height = 0;
     pwindow->buffer_attached = 0;
     pwindow->cursor_shape = 0; /* default arrow until shaped (W2) */
+    /* M-4: extension surfaces carry no toplevel (their role is the
+     * add-on's) — the icon pair stays NULL forever; set_icon's
+     * toplevel gate is the no-op path. */
+    pwindow->toplevel_icon = NULL;
+    pwindow->toplevel_icon_buffer = NULL;
+    pwindow->toplevel_icon_buffer_size.width = 0;
+    pwindow->toplevel_icon_buffer_size.height = 0;
+    pwindow->icon_absent_logged = 0;
     for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
         pwindow->bg_pending[i] = NULL;
     }

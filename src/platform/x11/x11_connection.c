@@ -310,6 +310,10 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->net_wm_name = XInternAtom(display, "_NET_WM_NAME", False);
     conn->utf8_string = XInternAtom(display, "UTF8_STRING", False);
     conn->motif_wm_hints = XInternAtom(display, "_MOTIF_WM_HINTS", False);
+    conn->net_wm_icon = XInternAtom(display, "_NET_WM_ICON", False);
+    conn->net_wm_pid = XInternAtom(display, "_NET_WM_PID", False);
+    conn->wm_client_machine = XInternAtom(display, "WM_CLIENT_MACHINE", False);
+    conn->wm_window_role = XInternAtom(display, "WM_WINDOW_ROLE", False);
     conn->net_wm_state = XInternAtom(display, "_NET_WM_STATE", False);
     conn->net_wm_state_maximized_vert =
         XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);

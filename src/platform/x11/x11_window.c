@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h> /* getpid/gethostname (M-4 window identity) */
 
 /* The popup lifecycle trace (FDK_POPUP_TRACE=1) — defined below,
  * forward-declared so window_create's create line can use it. */
@@ -300,6 +301,35 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
         class_hint.res_name =
             last_dot != NULL ? last_dot + 1 : conn->app_id;
         XSetClassHint(conn->display, pwindow->xwindow, &class_hint);
+    }
+
+    /* Window identity, the M-4 set (1.1.0): _NET_WM_PID +
+     * WM_CLIENT_MACHINE (the process identity — session managers,
+     * EWMH pagers, and taskbar correlators read the pair; the PID
+     * alone is ambiguous across hosts) + WM_WINDOW_ROLE (ICCCM 5.5.1;
+     * role = "popup" for the popup family, "main" for toplevels —
+     * fdk_window_set_role rewrites it per app). All three are
+     * write-once at create: they never change over a window's life,
+     * which is why there is no public setter for them. */
+    {
+        long pid = (long)getpid();
+        XChangeProperty(conn->display, pwindow->xwindow, conn->net_wm_pid,
+                        XA_CARDINAL, 32, PropModeReplace,
+                        (const unsigned char *)&pid, 1);
+        char hostname[64];
+        if (gethostname(hostname, sizeof(hostname)) == 0) {
+            hostname[sizeof(hostname) - 1] = '\0';
+            XChangeProperty(conn->display, pwindow->xwindow,
+                            conn->wm_client_machine,
+                            XA_STRING, 8, PropModeReplace,
+                            (const unsigned char *)hostname,
+                            (int)strlen(hostname));
+        }
+        const char *role = pwindow->popup ? "popup" : "main";
+        XChangeProperty(conn->display, pwindow->xwindow,
+                        conn->wm_window_role,
+                        XA_STRING, 8, PropModeReplace,
+                        (const unsigned char *)role, (int)strlen(role));
     }
 
     pwindow->render_slots[0].image = NULL;
@@ -761,6 +791,68 @@ void fdk_x11_window_set_title(fdk_platform_window *pwindow, const char *title) {
                      8, PropModeReplace,
                      (const unsigned char *)title, (int)strlen(title));
     XFlush(pwindow->conn->display);
+}
+
+/* _NET_WM_ICON (EWMH 1.3): a flat CARDINAL/32 list of images, each
+ * [width, height, ARGB pixels...] — the ARGB packing (A<<24|R<<16|
+ * G<<8|B) is EXACTLY FDK's native fdk_u32 pixel, so the copy is a
+ * memcpy with two leading words per image. The property is replaced
+ * whole on every write (last-call-wins, matching the public header's
+ * single-image posture); a clear (NULL pixels) deletes the property.
+ * WMs scale whatever they get; 64x64 covers dock-to-switcher
+ * everywhere. */
+void fdk_x11_window_set_icon(fdk_platform_window *pwindow,
+                             const fdk_u32 *pixels,
+                             int width, int height) {
+    if (pwindow == NULL) {
+        return;
+    }
+    Display *dpy = pwindow->conn->display;
+    if (pixels == NULL || width <= 0 || height <= 0) {
+        XDeleteProperty(dpy, pwindow->xwindow, pwindow->conn->net_wm_icon);
+        XFlush(dpy);
+        return;
+    }
+    /* Overflow-safe image length (X11 property caps at 2^18 words
+     * per image in sane WMs; our 512x512 clamp keeps us far below). */
+    size_t n_pixels = (size_t)width * (size_t)height;
+    if (n_pixels > (16u << 20) /* 16M words: hard insanity guard */) {
+        return;
+    }
+    unsigned long *data = fdk_alloc((n_pixels + 2) * sizeof(unsigned long));
+    if (data == NULL) {
+        FDK_WARN("_NET_WM_ICON: allocation failed (%dx%d)", width, height);
+        return;
+    }
+    data[0] = (unsigned long)width;
+    data[1] = (unsigned long)height;
+    for (size_t i = 0; i < n_pixels; i++) {
+        data[i + 2] = (unsigned long)pixels[i];
+    }
+    XChangeProperty(dpy, pwindow->xwindow, pwindow->conn->net_wm_icon,
+                    XA_CARDINAL, 32, PropModeReplace,
+                    (const unsigned char *)data, (int)(n_pixels + 2));
+    fdk_free(data);
+    XFlush(dpy);
+}
+
+/* WM_WINDOW_ROLE (ICCCM 5.5.1): the STRING that distinguishes same-
+ * class windows for session managers. NULL/empty reverts to the
+ * create-time default ("main"/"popup"). */
+void fdk_x11_window_set_role(fdk_platform_window *pwindow,
+                             const char *role) {
+    if (pwindow == NULL) {
+        return;
+    }
+    Display *dpy = pwindow->conn->display;
+    if (role == NULL || role[0] == '\0') {
+        role = pwindow->popup ? "popup" : "main";
+    }
+    XChangeProperty(dpy, pwindow->xwindow,
+                    pwindow->conn->wm_window_role,
+                    XA_STRING, 8, PropModeReplace,
+                    (const unsigned char *)role, (int)strlen(role));
+    XFlush(dpy);
 }
 
 void fdk_x11_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height) {
