@@ -616,3 +616,21 @@ void fdk__colorbutton_apply_result(fdk_widget *button,
                                    const fdk_color_dialog_result *res);
 
 #endif /* FDK_WIDGETS_INTERNAL_H */
+
+/* ---- IME context queries (1.1.0, M-1) ----------------------------------
+ *
+ * The window layer's surrounding-text hook needs the FOCUSED text
+ * widget's (text, caret) without the backend knowing widget types.
+ * Each text widget file implements its own predicate (class-pointer
+ * check + field read, borrowed pointers); widget.c's dispatcher asks
+ * each in turn. NULL focus / a non-text focus answers 0. */
+
+/* entry.c: */
+int fdk__entry_ime_context(fdk_widget *w, const char **out_text,
+                           int *out_cursor);
+/* textview.c: */
+int fdk__textview_ime_context(fdk_widget *w, const char **out_text,
+                              int *out_cursor);
+/* widget.c — tries each: */
+int fdk__widget_ime_context(fdk_widget *focused, const char **out_text,
+                            int *out_cursor);

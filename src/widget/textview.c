@@ -50,6 +50,7 @@
 #include "fdk/fdk_clipboard.h"
 #include "fdk/fdk_undo.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -1321,6 +1322,26 @@ static bool tv_handle_event(fdk_widget *w,
     case FDK_WIDGET_FOCUS_OUT:
         tv_blink_stop(tv);
         return false;
+    case FDK_WIDGET_IME_PREEDIT: {
+        /* Composition renders inline at the caret (the groundwork
+         * API's render path); the event text is callback-scoped and
+         * set_preedit copies it. */
+        if ((w->flags & FDK_WF_ENABLED) == 0) {
+            return false;
+        }
+        (void)fdk_textview_set_preedit(w, ev->ime.text);
+        return true;
+    }
+    case FDK_WIDGET_IME_COMMIT: {
+        if ((w->flags & FDK_WF_ENABLED) == 0 || tv->read_only) {
+            return false;
+        }
+        (void)fdk_textview_set_preedit(w, NULL);
+        tv_delete_selection(tv);
+        (void)tv_splice(tv, tv->caret, tv->caret, ev->ime.text,
+                        strlen(ev->ime.text));
+        return true;
+    }
     default:
         break;
     }
@@ -1847,6 +1868,20 @@ void fdk_textview_set_on_changed(fdk_widget *textview,
     fdk_textview *tv = tv_of(textview);
     tv->on_changed = fn;
     tv->on_changed_data = user_data;
+}
+
+/* The IME surrounding-text context (M-1): the view's text and caret
+ * (BORROWED — see the entry twin). Returns 0 when `w` is not a
+ * textview. */
+int fdk__textview_ime_context(fdk_widget *w, const char **out_text,
+                              int *out_cursor) {
+    if (w == NULL || w->klass != &fdk_textview_class_def) {
+        return 0;
+    }
+    fdk_textview *tv = tv_of(w);
+    *out_text = tv->text;
+    *out_cursor = (tv->caret <= INT_MAX) ? (int)tv->caret : INT_MAX;
+    return 1;
 }
 
 fdk_result fdk_textview_set_preedit(fdk_widget *textview,

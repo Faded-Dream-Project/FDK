@@ -11,6 +11,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .test_repeat_info = fdk_wayland_test_repeat_info,
     .test_default_keymap = fdk_wayland_test_default_keymap,
     .test_touch = fdk_wayland_test_touch,
+    .ime_update_surrounding = fdk_wayland_ime_update_surrounding,
     .window_create = fdk_wayland_window_create,
     .window_destroy = fdk_wayland_window_destroy,
     .window_show = fdk_wayland_window_show,

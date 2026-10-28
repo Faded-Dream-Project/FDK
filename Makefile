@@ -228,7 +228,8 @@ ifeq ($(BUILD_WAYLAND),1)
                            src/platform/wayland/generated/fractional-scale-v1-protocol.c \
                            src/platform/wayland/generated/primary-selection-unstable-v1-protocol.c \
                            src/platform/wayland/generated/cursor-shape-v1-protocol.c \
-                           src/platform/wayland/generated/xdg-toplevel-icon-v1-protocol.c
+                           src/platform/wayland/generated/xdg-toplevel-icon-v1-protocol.c \
+                           src/platform/wayland/generated/text-input-unstable-v3-protocol.c
 else
   # Stub providing fdk_platform_wayland_ops() returning NULL and
   # fdk_platform_wayland_display_present() returning 0, so
@@ -549,9 +550,13 @@ test-wayland: $(WL_TEST_BIN)
 		"$(WL_TEST_BIN)"; \
 	fi
 
-$(WL_TEST_BIN): $(WL_TEST_SRC) $(STATIC_LIB)
+$(WL_TEST_BIN): $(WL_TEST_SRC) \
+                 src/platform/wayland/generated/input-method-unstable-v2-protocol.c \
+                 $(STATIC_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< \
+	       src/platform/wayland/generated/input-method-unstable-v2-protocol.c \
+	       $(STATIC_LIB) -o $@ $(LDFLAGS)
 
 $(X11_TEST_BIN): $(X11_TEST_SRC) $(STATIC_LIB)
 	@mkdir -p $(dir $@)

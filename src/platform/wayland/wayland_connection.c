@@ -7,6 +7,7 @@
 #include "generated/primary-selection-unstable-v1-client-protocol.h"
 #include "generated/cursor-shape-v1-client-protocol.h"
 #include "generated/xdg-toplevel-icon-v1-client-protocol.h"
+#include "generated/text-input-unstable-v3-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -133,6 +134,19 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->toplevel_icon_manager =
             wl_registry_bind(registry, name,
                              &xdg_toplevel_icon_manager_v1_interface, iv);
+    } else if (strcmp(interface,
+                      zwp_text_input_manager_v3_interface.name) == 0) {
+        /* OPTIONAL (1.1.0, M-1): text-input-v3 — the IME composition
+         * protocol. Absent (no compositor IME support) means no
+         * composition on Wayland; keys keep flowing through
+         * wl_keyboard. The per-seat text input object is created
+         * once the seat binds (fdk_wayland_ime_seat_ready — the
+         * manager may bind before or after the seat). */
+        uint32_t tv = version < 1 ? version : 1;
+        conn->text_input_manager =
+            wl_registry_bind(registry, name,
+                             &zwp_text_input_manager_v3_interface, tv);
+        fdk_wayland_ime_seat_ready(conn);
     }
     /* Other globals (wl_data_device_manager, etc.) are
      * intentionally not bound — out of current scope, see
@@ -375,6 +389,7 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
         xdg_toplevel_icon_manager_v1_destroy(conn->toplevel_icon_manager);
         conn->toplevel_icon_manager = NULL;
     }
+    fdk_wayland_ime_teardown(conn);
     if (conn->fractional_manager) {
         wp_fractional_scale_manager_v1_destroy(conn->fractional_manager);
     }

@@ -14,6 +14,59 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-28 (on the rc2 line)
 
+### Added — IME composition, both backends (M-1 / B-01)
+
+- **The IME event family (public API, append-only)**:
+  `FDK_EVENT_IME_PREEDIT` / `FDK_EVENT_IME_COMMIT` (event types
+  50/51) with the `fdk_ime_event` payload — UTF-8 `text` (owned
+  by FDK for the callback duration only, the drag-payload rule)
+  and the preedit `cursor` as a UTF-8 byte offset. The same pair
+  arrives as widget events (`FDK_WIDGET_IME_PREEDIT/COMMIT`,
+  delivered to the focused widget only, like keys): the toolkit's
+  Entry and TextView consume both — composition renders inline at
+  the caret, commit splices at the caret through the single
+  mutation primitive (undo/on_changed/a11y ride it) and replaces
+  any selection. Custom text surfaces receive the window-level
+  events instead. A single-codepoint commit ALSO arrives as the
+  KEY_DOWN codepoint (compose keys keep working); multi-codepoint
+  commits arrive only as IME_COMMIT.
+- **Wayland**: `zwp_text_input_v3` (optional global — absent
+  compositor support means keys still work, no composition). The
+  v3 state machine is honored exactly: preedit/commit latch and
+  apply at `done` (a commit clears the preedit first); enter/leave
+  gate enable/disable; surrounding text (focused text widget's
+  text + caret, bytes) is pushed on focus gain and after IME
+  routing. Client-side self-heal for the wlroots window-destroy
+  gap (focus dropped without `leave` leaves the v3 input enabled —
+  and enable-on-enabled is a state no-op, so the IM would never
+  re-activate): a stale session is closed before the next enable.
+  A window dying mid-composition can no longer leak its batch into
+  a freed window (the destroy-path guard).
+- **X11**: per-window XICs now request `XIMPreeditCallbacks |
+  XIMStatusNothing` first (the old PreeditNothing posture remains
+  the fallback when the input method refuses callbacks). The
+  composition buffer is maintained by a pure UTF-8 splice
+  (XIM's character indices against byte offsets — the translation
+  XIM clients historically corrupt; headless-tested including the
+  grow-and-retry and hostile-draw resets); commits flow
+  Xutf8LookupString with the multi-codepoint case dispatching
+  IME_COMMIT and swallowing the key event.
+- **Tests**: tests/test_ime.c (the buffer-math battery — the CJK
+  and 4-byte-emoji character-index shapes, refusal paths, the
+  pinyin-style composition cycle; widget routing — consumption,
+  caret splice, selection replace, undoability, read-only/
+  disabled/no-focus fall-through; surrounding-text context
+  queries). The sway rig drives the REAL protocol both ways: a
+  second connection binds `zwp_input_method_manager_v2` (the
+  fcitx5 role) and pushes preedit revisions and commits through
+  sway's relay — asserted at the window callback (custom-surface
+  seam), in the Entry (splice + on_changed), and back at the
+  input method (surrounding text + caret). The XIM callback
+  wiring itself is owner-verified on a real desktop
+  (docs/TESTING-ON-DESKTOP.md §11) — no XIM server exists in the
+  sandbox, which the buffer math being pure-and-pinned accounts
+  for.
+
 ### Added — touch basics: slots, tap clicks, two-finger scroll (M-3 / B-03)
 
 - **The touch event family (public API, append-only)**:

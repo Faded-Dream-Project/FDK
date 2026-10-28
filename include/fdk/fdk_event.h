@@ -162,6 +162,39 @@ typedef enum fdk_event_type {
     FDK_EVENT_TOUCH_CANCEL = 43, /* compositor aborted the whole
                                     * gesture: all slots die, nothing
                                     * is synthesized afterwards */
+
+    /* ---- IME (1.1.0, M-1) ----
+     *
+     * Input-method events: the composition (preedit) text an IME
+     * builds before committing, and the committed text it finally
+     * delivers. `text` is UTF-8, owned by FDK for the duration of
+     * the callback ONLY (the drag-payload contract). PREEDIT with
+     * an empty string clears the composition; COMMIT never carries
+     * an empty string.
+     *
+     * Delivery: FDK routes both events at the FOCUSED text widget
+     * first — an Entry or TextView with keyboard focus consumes them
+     * (preedit renders inline at the caret via the same machinery
+     * fdk_entry_set_preedit drives; commit inserts the text). When
+     * nothing focused consumes them they reach the application's
+     * window callback — custom text surfaces implement their own
+     * composition handling there.
+     *
+     * A single-character commit ALSO arrives as the ordinary
+     * KEY_DOWN's codepoint (backwards compatibility: simple dead-key
+     * and compose sequences keep working for codepoint-only
+     * consumers); multi-character commits (the CJK/indic case an IME
+     * exists for) arrive ONLY as FDK_EVENT_IME_COMMIT.
+     *
+     * Per backend: Wayland text-input-v3 (enable on keyboard focus,
+     * surrounding text, the enable/disable/commit state machine);
+     * X11 XIM with XIMPreeditCallbacks (the per-IC composition
+     * buffer maintained from the draw/done callbacks; commits flow
+     * Xutf8LookupString). Committed text > 1 codepoint dispatches
+     * IME_COMMIT; the preedit buffer dispatches IME_PREEDIT on
+     * every change. */
+    FDK_EVENT_IME_COMMIT   = 50, /* the IME delivered final text   */
+    FDK_EVENT_IME_PREEDIT  = 51, /* composition text changed       */
 } fdk_event_type;
 
 typedef struct fdk_configure_event {
@@ -329,6 +362,19 @@ typedef struct fdk_touch_event {
     fdk_pointf position;   /* window-local, logical coordinates */
 } fdk_touch_event;
 
+/* ---- IME payloads (1.1.0, M-1) ---------------------------------------- */
+
+typedef struct fdk_ime_event {
+    /* NUL-terminated UTF-8, owned by FDK for the callback duration
+     * only — copy it if it must survive (the drag-payload rule).
+     * COMMIT: never empty. PREEDIT: empty clears the composition. */
+    const char *text;
+    /* PREEDIT: the cursor offset in UTF-8 BYTES into text (0 = start).
+     * The Entry/TextView render it as the composition caret. COMMIT:
+     * unused (0). */
+    int cursor;
+} fdk_ime_event;
+
 /* Drag-and-drop payload. `offered_formats` is the OR of every
  * fdk_drag_format the SOURCE offers (fdk_dnd.h); `accepted_formats`
  * is its intersection with the formats this window registered —
@@ -375,6 +421,7 @@ typedef struct fdk_event_data {
         fdk_scroll_event scroll;
         fdk_drag_event drag;
         fdk_touch_event touch;
+        fdk_ime_event ime;
     };
 } fdk_event_data;
 

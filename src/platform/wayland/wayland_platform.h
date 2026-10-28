@@ -77,6 +77,24 @@ struct fdk_platform_connection {
      * lets the compositor scale, so they are not listened to. */
     struct xdg_toplevel_icon_manager_v1 *toplevel_icon_manager;
 
+    /* text-input-v3 (1.1.0, M-1): the OPTIONAL IME manager + the
+     * per-seat text input object (wayland_ime.c). enter/leave are
+     * the focus gates; the latched pending strings + the showing
+     * flag are the v3 batch state the `done` event applies;
+     * ime_enabled tracks the v3 enabled session (its enable event
+     * only fires on a false->true commit — the self-heal seam for
+     * compositors that drop focus without a leave). */
+    struct zwp_text_input_manager_v3 *text_input_manager;
+    struct zwp_text_input_v3 *text_input;
+    fdk_platform_window *ime_focus;      /* the enter() surface's owner */
+    char *ime_pending_preedit;           /* latched, freed per batch   */
+    char *ime_pending_commit;            /* latched, freed per batch   */
+    int ime_pending_preedit_cursor;
+    int ime_preedit_showing;             /* a PREEDIT was dispatched   */
+    int ime_enabled;                     /* v3 session open (no leave) */
+    char *ime_surrounding;               /* last pushed context (copy) */
+    int ime_surrounding_cursor;
+
     /* Globals discovered during the initial registry roundtrip
      * (see wayland_registry.c). All required for Phase 2's
      * "create a window, get input, handle close/resize" scope —
@@ -713,6 +731,18 @@ void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
 int fdk_wayland_test_touch(fdk_platform_connection *conn,
                            fdk_platform_window *win, int phase,
                            uint32_t id, double x, double y);
+
+/* text-input-v3 (1.1.0, M-1; wayland_ime.c): called when BOTH the
+ * manager and the seat exist (either binding order), and from the
+ * surrounding push. teardown is part of disconnect;
+ * window_destroyed is the destroy-path guard (a dying window's
+ * latched batch must never apply — see wayland_ime.c). */
+void fdk_wayland_ime_seat_ready(fdk_platform_connection *conn);
+void fdk_wayland_ime_teardown(fdk_platform_connection *conn);
+void fdk_wayland_ime_window_destroyed(fdk_platform_connection *conn,
+                                      fdk_platform_window *pwindow);
+void fdk_wayland_ime_update_surrounding(fdk_platform_window *pwindow,
+                                        const char *text, int cursor);
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size);

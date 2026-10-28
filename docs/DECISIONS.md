@@ -433,3 +433,78 @@ parse is real (4-byte INDEX counts, FDArray required, blend/vsindex
 consumed) but renders the DEFAULT instance: blend deltas are
 dropped, which is exactly the default-coordinate composition.
 Variable-font instances beyond the default stay roadmap material.
+
+---
+
+## D-012 — IME: one event model, the v3 state machine honored, self-heal over protocol blame (M-1 / B-01)
+
+**1. The event surface is two events and a borrowed pointer.**
+`FDK_EVENT_IME_PREEDIT` / `FDK_EVENT_IME_COMMIT` with UTF-8 text
+owned by FDK for the callback duration only (the drag-payload
+rule — IME traffic is transient by nature; nobody needs to own a
+composition after the next event revises it). The single-codepoint
+compatibility rule: a one-codepoint commit ALSO rides the ordinary
+KEY_DOWN codepoint (compose-key consumers keep working untouched),
+multi-codepoint commits ride IME_COMMIT alone. Widget-level twins
+deliver to the FOCUSED widget like keys; Entry/TextView consume
+them (the groundwork preedit API renders composition inline;
+commit splices through the single mutation primitive). Custom text
+surfaces get the window-level pair — the same seam the drag model
+uses for "the toolkit does not own your surface."
+
+**2. The Wayland side honors the v3 batch semantics exactly.**
+preedit/commit events LATCH; `done` APPLIES (a pending commit
+clears the showing preedit first — v3's replace ordering). Acting
+per-event would show preedit the compositor revises in the same
+batch. `enter`/`leave` gate enable/disable; surrounding text is
+pushed at focus gain and after IME routing (per-keystroke sync is
+churn the protocol allows and no consumer needs — the honest
+cadence recorded in the header).
+
+**3. The compositor gap is closed CLIENT-SIDE, not blamed.**
+wlroots drops the text-input's focused surface when a window dies
+WITHOUT sending `leave`; the v3 input stays enabled; and
+enable-on-enabled is a state-machine no-op — the enable EVENT
+(which is what activates the input method) only fires on a
+false→true commit transition. Result: after closing a window, no
+IM ever re-activates for the next one. The fix tracks the enabled
+session client-side and closes a stale one at the next `enter`
+(disable + commit first, then the real enable) — spec-clean,
+compositor-agnostic, and exactly what the sway rig now pins: the
+deactivate→activate pair after a window switch. The tempting
+alternative (destroy + recreate the text_input object on keyboard
+focus changes) was built and REJECTED: sway sends wl_keyboard
+enter BEFORE the relay's text-input leave/enter, so the recreation
+raced the relay and discarded exactly the events it meant to
+repair — the probe rig demonstrated the regression live.
+
+**4. The destroy-path guard.** A window dying while holding IME
+focus leaves its latched batch pointing at freed memory (a done
+arriving after the destroy would dispatch into it) — the Wayland
+destroy path now clears the focus and drops the batch. The session
+stays marked enabled deliberately: the next enter's self-heal needs
+to see it to close it (see 3).
+
+**5. The X11 side asks for callbacks and degrades honestly.**
+XIMPreeditCallbacks | XIMStatusNothing first (inline composition —
+what CSD toolkits do); the PreeditNothing posture remains the
+fallback for input methods that refuse the style (composition is
+then unavailable but full-Unicode commits still flow
+Xutf8LookupString — the 1.3.1 guarantee). The composition buffer
+splice is a PURE function (character indices ↔ byte offsets —
+where XIM clients historically corrupt their buffers; it was: the
+first run of its own test battery caught the mid-character offset
+bug) pinned headless, including the overflow grow-and-retry and
+the hostile-draw reset. The XIM callback wiring itself has no
+server in the sandbox: code-reviewed, owner-verified on a real
+fcitx5 desktop (TESTING-ON-DESKTOP.md §11).
+
+**6. The rig plays the input method.** The sway suite carries a
+second wl_display connection binding zwp_input_method_manager_v2 —
+the fcitx5 role — driving preedit revisions and commits through
+sway's real relay and asserting the full loop: events at the
+window callback (the custom-surface seam), the Entry's splice +
+on_changed, and the surrounding text + caret arriving BACK at the
+input method. The generated input-method-v2 protocol code is
+test-only (compiled into the test binary, never the library); the
+library ships the client side alone.

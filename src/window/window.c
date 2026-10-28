@@ -1901,6 +1901,33 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         }
     }
 
+    /* ---- IME surrounding-text push (1.1.0, M-1) ----
+     *
+     * The honest cadence: on focus GAIN (the tree focus follows the
+     * window focus event) and after every IME event's routing (the
+     * composition changed the context). The backend with an IME
+     * machinery gets the focused text widget's (text, caret);
+     * backends without the op (X11: XIM tracks its own state)
+     * never pay anything. Per-keystroke sync stays out — the
+     * protocol allows it, no consumer needs it. */
+    if ((event->type == FDK_EVENT_WINDOW_FOCUS &&
+         event->focus.focused != 0) ||
+        event->type == FDK_EVENT_IME_COMMIT ||
+        event->type == FDK_EVENT_IME_PREEDIT) {
+        if (window->ops->ime_update_surrounding != NULL) {
+            const char *ime_text = NULL;
+            int ime_cursor = 0;
+            fdk_widget *ime_focused = (window->root != NULL)
+                ? fdk_widget_tree_get_focused(window->root)
+                : NULL;
+            if (fdk__widget_ime_context(ime_focused, &ime_text,
+                                        &ime_cursor)) {
+                window->ops->ime_update_surrounding(
+                    window->pwindow, ime_text, ime_cursor);
+            }
+        }
+    }
+
     /* ---- 1.1.4→1.2.2: geometry-change fallout ----
      *
      * Events that change what SHOULD be under the pointer or on the

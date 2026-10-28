@@ -54,6 +54,16 @@
 #include <time.h>   /* nanosleep — the pacing regression's guard wait */
 #include <fcntl.h>
 #include <unistd.h> /* access() — the injector-availability probe */
+#include <poll.h>
+
+/* IME end-to-end (1.1.0, M-1): this test ALSO plays the input
+ * method — a second wl_display connection binding
+ * zwp_input_method_manager_v2 (the fcitx5 role) and driving the
+ * app's text-input-v3 through the REAL compositor relay. The
+ * generated protocol code is TEST-ONLY (the library itself ships
+ * only the client side), compiled straight into this binary. */
+#include <wayland-client.h>
+#include "platform/wayland/generated/input-method-unstable-v2-client-protocol.h"
 
 static fdk_dialog_response g_wayland_dlg_last =
     (fdk_dialog_response)-99;
@@ -349,6 +359,274 @@ static void wl_accel_window_cb(fdk_window *window,
     if (event->type == FDK_EVENT_KEY_DOWN) {
         (*(int *)user)++;
     }
+}
+
+/* ---- IME end-to-end section (1.1.0, M-1) ----------------------------------
+ *
+ * THE RIG: this test plays BOTH sides of the IME protocol against
+ * the real compositor relay (sway 1.10 / wlroots 0.18):
+ *
+ *   APP side  — the FDK library itself: binds text-input-v3, gets
+ *               enter on keyboard focus, enables, receives
+ *               preedit/commit through the v3 state machine
+ *               (src/platform/wayland/wayland_ime.c).
+ *   IM side   — a SECOND wl_display connection here, binding
+ *               zwp_input_method_manager_v2 and driving the app's
+ *               text-input through sway's input-method relay (the
+ *               fcitx5 role: activate, surrounding_text, then
+ *               set_preedit_string / commit_string + commit).
+ *
+ * Two legs:
+ *   A (pipeline) — a window with NO text widget: PREEDIT/COMMIT
+ *       fall through the unconsumed routing to the window callback
+ *       (custom text surfaces implement composition there — the
+ *       documented contract).
+ *   B (entry) — a focused Entry consumes COMMIT (splices into the
+ *       buffer) and the IM side's surrounding_text event proves the
+ *       FULL loop: entry text -> fdk__widget_ime_context ->
+ *       ime_update_surrounding -> set_surrounding_text -> sway
+ *       relay -> the IM's surrounding_text event.
+ *
+ * Skip discipline (the rig's standing shape): no
+ * zwp_input_method_manager_v2 (kiosk-shell weston) skips the whole
+ * section; no keyboard focus this run (seat without capability —
+ * the injector could not start) skips the driven legs but still
+ * proves the library-side connection stayed healthy. */
+
+typedef struct {
+    struct wl_display *disp;
+    struct wl_registry *reg;
+    struct wl_seat *seat;
+    struct zwp_input_method_manager_v2 *imm;
+    struct zwp_input_method_v2 *im;
+    int activations;
+    int deactivations;
+    int done_count; /* commit()'s serial discipline: the number of
+                    * done events the compositor has issued */
+    char surround[512];
+    uint32_t surround_cursor;
+    int surround_count;
+} ime_client;
+
+static ime_client g_ime;
+
+/* Leg A's capture: IME events that fall through to the window
+ * callback (nothing focused consumes them). */
+static struct {
+    int preedits;
+    int commits;
+    char last_preedit[256];
+    char last_commit[256];
+    int last_preedit_cursor;
+} g_ime_cb;
+
+static void ime_win_cb(fdk_window *w, const fdk_event_data *ev,
+                       void *user) {
+    (void)w;
+    (void)user;
+    if (ev->type == FDK_EVENT_IME_PREEDIT) {
+        g_ime_cb.preedits++;
+        snprintf(g_ime_cb.last_preedit, sizeof g_ime_cb.last_preedit,
+                 "%s", ev->ime.text);
+        g_ime_cb.last_preedit_cursor = ev->ime.cursor;
+    } else if (ev->type == FDK_EVENT_IME_COMMIT) {
+        g_ime_cb.commits++;
+        snprintf(g_ime_cb.last_commit, sizeof g_ime_cb.last_commit,
+                 "%s", ev->ime.text);
+    }
+}
+
+/* Leg B's capture: the entry's on_changed (the commit's mutation
+ * signal) + the entry's own buffer assertions. */
+static int g_ime_entry_changes = 0;
+
+static void ime_entry_changed(fdk_widget *entry, void *user) {
+    (void)entry;
+    (void)user;
+    g_ime_entry_changes++;
+}
+
+static void ime_reg_global(void *data, struct wl_registry *reg,
+                           uint32_t name, const char *iface,
+                           uint32_t version) {
+    ime_client *c = data;
+    uint32_t v = version < 1 ? version : 1;
+    if (strcmp(iface, "zwp_input_method_manager_v2") == 0) {
+        c->imm = wl_registry_bind(reg, name,
+                                  &zwp_input_method_manager_v2_interface, v);
+    } else if (strcmp(iface, "wl_seat") == 0) {
+        c->seat = wl_registry_bind(reg, name, &wl_seat_interface, 1);
+    }
+}
+
+static void ime_reg_global_remove(void *data, struct wl_registry *reg,
+                                  uint32_t name) {
+    (void)data;
+    (void)reg;
+    (void)name;
+}
+
+static const struct wl_registry_listener ime_reg_listener = {
+    .global = ime_reg_global,
+    .global_remove = ime_reg_global_remove,
+};
+
+static void ime_evt_activate(void *data,
+                             struct zwp_input_method_v2 *im) {
+    (void)im;
+    ime_client *c = data;
+    c->activations++;
+}
+
+static void ime_evt_deactivate(void *data,
+                               struct zwp_input_method_v2 *im) {
+    (void)im;
+    ime_client *c = data;
+    c->deactivations++;
+}
+
+static void ime_evt_surrounding(void *data,
+                                struct zwp_input_method_v2 *im,
+                                const char *text, uint32_t cursor,
+                                uint32_t anchor) {
+    (void)im;
+    (void)anchor;
+    ime_client *c = data;
+    snprintf(c->surround, sizeof c->surround, "%s",
+             text != NULL ? text : "");
+    c->surround_cursor = cursor;
+    c->surround_count++;
+}
+
+static void ime_evt_done(void *data, struct zwp_input_method_v2 *im) {
+    (void)im;
+    ime_client *c = data;
+    c->done_count++;
+}
+
+/* libwayland ABORTS on a NULL listener member when its event
+ * arrives — sway sends text_change_cause and content_type around
+ * every activation, so every member of the listener struct needs a
+ * body even where the rig only counts. */
+static void ime_evt_change_cause(void *data,
+                                 struct zwp_input_method_v2 *im,
+                                 uint32_t cause) {
+    (void)data;
+    (void)im;
+    (void)cause;
+}
+
+static void ime_evt_content_type(void *data,
+                                 struct zwp_input_method_v2 *im,
+                                 uint32_t hint, uint32_t purpose) {
+    (void)data;
+    (void)im;
+    (void)hint;
+    (void)purpose;
+}
+
+static void ime_evt_unavailable(void *data,
+                                struct zwp_input_method_v2 *im) {
+    (void)im;
+    ime_client *c = data;
+    c->deactivations++; /* the IM object went inert — treat as a
+                         * deactivation for the rig's sequencing */
+}
+
+static const struct zwp_input_method_v2_listener ime_im_listener = {
+    .activate = ime_evt_activate,
+    .deactivate = ime_evt_deactivate,
+    .surrounding_text = ime_evt_surrounding,
+    .text_change_cause = ime_evt_change_cause,
+    .content_type = ime_evt_content_type,
+    .done = ime_evt_done,
+    .unavailable = ime_evt_unavailable,
+};
+
+/* Connect the IM side. Returns false when THIS compositor offers no
+ * input-method-v2 (the honest skip — weston kiosk-shell). */
+static bool ime_client_start(void) {
+    memset(&g_ime, 0, sizeof g_ime);
+    g_ime.disp = wl_display_connect(NULL);
+    if (g_ime.disp == NULL) {
+        return false;
+    }
+    struct wl_registry *reg = wl_display_get_registry(g_ime.disp);
+    wl_registry_add_listener(reg, &ime_reg_listener, &g_ime);
+    wl_display_roundtrip(g_ime.disp);
+    if (g_ime.imm == NULL || g_ime.seat == NULL) {
+        wl_registry_destroy(reg);
+        if (g_ime.seat != NULL) {
+            wl_seat_destroy(g_ime.seat);
+            g_ime.seat = NULL;
+        }
+        wl_display_disconnect(g_ime.disp);
+        g_ime.disp = NULL;
+        return false;
+    }
+    g_ime.reg = reg;
+    g_ime.im = zwp_input_method_manager_v2_get_input_method(g_ime.imm,
+                                                             g_ime.seat);
+    if (g_ime.im == NULL) {
+        wl_display_disconnect(g_ime.disp);
+        g_ime.disp = NULL;
+        return false;
+    }
+    zwp_input_method_v2_add_listener(g_ime.im, &ime_im_listener, &g_ime);
+    wl_display_roundtrip(g_ime.disp); /* listener armed + any queued
+                                       * events drained */
+    return true;
+}
+
+/* Non-blocking dispatch of the IM connection (data-ready only —
+ * poll() provides the timeout; wl_display_dispatch never blocks
+ * once poll says readable). */
+static int ime_client_poll(int timeout_ms) {
+    struct pollfd pfd;
+    pfd.fd = wl_display_get_fd(g_ime.disp);
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    if (poll(&pfd, 1, timeout_ms) > 0 && (pfd.revents & POLLIN) != 0) {
+        return wl_display_dispatch(g_ime.disp);
+    }
+    return 0;
+}
+
+static void ime_client_stop(void) {
+    if (g_ime.im != NULL) {
+        zwp_input_method_v2_destroy(g_ime.im);
+        g_ime.im = NULL;
+    }
+    if (g_ime.imm != NULL) {
+        zwp_input_method_manager_v2_destroy(g_ime.imm);
+        g_ime.imm = NULL;
+    }
+    if (g_ime.seat != NULL) {
+        wl_seat_destroy(g_ime.seat);
+        g_ime.seat = NULL;
+    }
+    if (g_ime.reg != NULL) {
+        wl_registry_destroy(g_ime.reg);
+        g_ime.reg = NULL;
+    }
+    if (g_ime.disp != NULL) {
+        wl_display_disconnect(g_ime.disp);
+        g_ime.disp = NULL;
+    }
+}
+
+/* One IME batch: preedit revision (or NULL to skip), optional
+ * commit text (or NULL), then commit(serial) to apply. */
+static void ime_send(const char *preedit, const char *commit_text) {
+    if (preedit != NULL) {
+        zwp_input_method_v2_set_preedit_string(
+            g_ime.im, preedit, 0, (int32_t)strlen(preedit));
+    }
+    if (commit_text != NULL) {
+        zwp_input_method_v2_commit_string(g_ime.im, commit_text);
+    }
+    zwp_input_method_v2_commit(g_ime.im, (uint32_t)g_ime.done_count);
+    wl_display_flush(g_ime.disp);
 }
 
 int main(void) {
@@ -1867,6 +2145,202 @@ int main(void) {
         printf("[ok] wayland toplevel icon: set + clear survive both "
                "compositor worlds (manager bound or absent), "
                "connection healthy after\n");
+    }
+
+    /* ---- IME end-to-end (1.1.0, M-1) ----
+     *
+     * The IM side connects FIRST (before any window): sway's relay
+     * binds the input method when it appears, and every later
+     * text-input enable reaches it as activate — the robust order
+     * (the IM-after-app order is sway's known start-race window).
+     * The injector's virtual keyboard gives the seat KEYBOARD
+     * capability so sway auto-focuses the mapped windows: without it
+     * (bare run, no injector binary) the text-input never gets
+     * enter and the driven legs skip honestly. */
+    {
+    if (!ime_client_start()) {
+        printf("[skip] wayland ime: no zwp_input_method_manager_v2 "
+               "here (compositor without an IME relay — kiosk-shell "
+               "weston)\n");
+    } else {
+        int focus_ever = 0;
+
+        /* LEG A — the pipeline: no text widget, the window callback
+         * is the composition surface. */
+        {
+            memset(&g_ime_cb, 0, sizeof g_ime_cb);
+            fdk_window *aw = NULL;
+            fdk_window_options aopts = { .title = "FDK ime pipeline",
+                                         .width = 260, .height = 120 };
+            assert(fdk_ok(fdk_window_create(ctx, &aopts, &aw)));
+            fdk_widget *aroot = NULL;
+            assert(fdk_ok(fdk_window_get_root(aw, &aroot)));
+            fdk_widget_set_background(aroot,
+                                      (fdk_color){0.25f, 0.25f, 0.3f, 1.0f});
+            fdk_window_set_event_callback(aw, ime_win_cb, NULL);
+            fdk_window_show(aw);
+
+            (void)wayland_injector_start();
+            int base_activations = g_ime.activations;
+            for (int i = 0; i < 45 &&
+                            g_ime.activations == base_activations;
+                 i++) {
+                (void)fdk_pump_events(ctx, 100);
+                ime_client_poll(25);
+            }
+            if (g_ime.activations == base_activations) {
+                printf("[skip] wayland ime A: no keyboard focus this "
+                       "run (seat without keyboard capability — "
+                       "injector unavailable)\n");
+            } else {
+                focus_ever = 1;
+
+                /* The preedit batch: composition text shows (and
+                 * revises) at the window callback. */
+                ime_send("nihao", NULL);
+                for (int i = 0; i < 20 && g_ime_cb.preedits == 0; i++) {
+                    (void)fdk_pump_events(ctx, 50);
+                    ime_client_poll(20);
+                }
+                assert(g_ime_cb.preedits == 1);
+                assert(strcmp(g_ime_cb.last_preedit, "nihao") == 0);
+
+                /* A revision in the SAME composition: the v3 batch
+                 * replaces the preedit. */
+                ime_send("ni hao", NULL);
+                for (int i = 0; i < 20 && g_ime_cb.preedits == 1; i++) {
+                    (void)fdk_pump_events(ctx, 50);
+                    ime_client_poll(20);
+                }
+                assert(g_ime_cb.preedits == 2);
+                assert(strcmp(g_ime_cb.last_preedit, "ni hao") == 0);
+
+                /* The commit batch: the preedit clears FIRST, then
+                 * the final text lands (the v3 replace semantic). */
+                ime_send(NULL, "\xe4\xbd\xa0\xe5\xa5\xbd"); /* 你好 */
+                for (int i = 0; i < 20 && g_ime_cb.commits == 0; i++) {
+                    (void)fdk_pump_events(ctx, 50);
+                    ime_client_poll(20);
+                }
+                assert(g_ime_cb.commits == 1);
+                assert(strcmp(g_ime_cb.last_commit,
+                              "\xe4\xbd\xa0\xe5\xa5\xbd") == 0);
+                assert(g_ime_cb.preedits == 3); /* the clear arrived */
+                assert(g_ime_cb.last_preedit[0] == '\0');
+
+                printf("[ok] wayland ime A: preedit (show/revise/"
+                       "clear) + commit reached the window callback "
+                       "through the real sway relay\n");
+            }
+            fdk_window_destroy(aw);
+            /* The window's death deactivates the IM on the relay;
+             * drain the deactivate before leg B re-activates it. */
+            for (int i = 0; i < 10 && g_ime.deactivations == 0; i++) {
+                (void)fdk_pump_events(ctx, 50);
+                ime_client_poll(20);
+            }
+        }
+
+        /* LEG B — the Entry: COMMIT splices into the buffer and the
+         * surrounding-text loop closes (the IM SEES the entry). */
+        {
+            g_ime_entry_changes = 0;
+            g_ime.surround_count = 0;
+            g_ime.surround[0] = '\0';
+            fdk_window *bw = NULL;
+            fdk_window_options bopts = { .title = "FDK ime entry",
+                                         .width = 300, .height = 140 };
+            assert(fdk_ok(fdk_window_create(ctx, &bopts, &bw)));
+            fdk_widget *broot = NULL;
+            assert(fdk_ok(fdk_window_get_root(bw, &broot)));
+            fdk_widget *bentry = NULL;
+            assert(fdk_ok(fdk_entry_create(broot, NULL, "", &bentry)));
+            fdk_entry_set_on_changed(bentry, ime_entry_changed, NULL);
+            assert(fdk_widget_focus(bentry));
+            fdk_window_show(bw);
+
+            int base_activations = g_ime.activations;
+            for (int i = 0; i < 45 &&
+                            g_ime.activations == base_activations;
+                 i++) {
+                (void)fdk_pump_events(ctx, 100);
+                ime_client_poll(25);
+            }
+            if (g_ime.activations == base_activations &&
+                g_injector != NULL) {
+                /* The click fallback (the key-repeat section's
+                 * discipline): a REAL pointer press with a REAL
+                 * serial — sway re-evaluates keyboard focus on it.
+                 * The window floats at (100,60) per the rig config;
+                 * 300x140 -> center (250,130). */
+                wayland_inject("move 250 130");
+                pump_and_paint(ctx, bw, 300);
+                wayland_inject("tap 1");
+                for (int i = 0; i < 30 &&
+                                g_ime.activations == base_activations;
+                     i++) {
+                    (void)fdk_pump_events(ctx, 100);
+                    ime_client_poll(25);
+                }
+            }
+            if (g_ime.activations == base_activations) {
+                printf("[skip] wayland ime B: no keyboard focus this "
+                       "run (act=%d deact=%d)\n",
+                       g_ime.activations, g_ime.deactivations);
+            } else {
+                /* The composition first: the entry consumes PREEDIT
+                 * (the window callback must NOT see it — the capture
+                 * from leg A was reset and stays empty). */
+                memset(&g_ime_cb, 0, sizeof g_ime_cb);
+                ime_send("nihao", NULL);
+                for (int i = 0; i < 20 && g_ime_entry_changes == 0; i++) {
+                    (void)fdk_pump_events(ctx, 50);
+                    ime_client_poll(20);
+                }
+                assert(strcmp(fdk_entry_get_text(bentry), "") == 0);
+                assert(g_ime_cb.preedits == 0); /* consumed by the
+                                                 * entry, never fell
+                                                 * through */
+
+                /* The commit: the entry splices it at the caret. */
+                ime_send(NULL, "h\xc7\x8eo"); /* "hǎo" */
+                for (int i = 0; i < 20 && g_ime_entry_changes == 0;
+                     i++) {
+                    (void)fdk_pump_events(ctx, 50);
+                    ime_client_poll(20);
+                }
+                assert(g_ime_entry_changes == 1);
+                assert(strcmp(fdk_entry_get_text(bentry), "h\xc7\x8eo") == 0);
+
+                /* The full loop: our surrounding push (fired by the
+                 * IME routing hook after the commit) must reach the
+                 * IM side through the relay — text AND byte cursor. */
+                for (int i = 0; i < 20 && g_ime.surround_count == 0;
+                     i++) {
+                    (void)fdk_pump_events(ctx, 50);
+                    ime_client_poll(20);
+                }
+                assert(g_ime.surround_count > 0);
+                assert(strcmp(g_ime.surround, "h\xc7\x8eo") == 0);
+                assert(g_ime.surround_cursor == 4); /* h(1) + ǎ(2) + o(1)
+                                                      * bytes — the caret
+                                                      * at the end */
+
+                printf("[ok] wayland ime B: entry consumed COMMIT "
+                       "(splice + on_changed) and the IM received the "
+                       "updated surrounding text + caret — the full "
+                       "loop through sway\n");
+            }
+            fdk_window_destroy(bw);
+        }
+
+        if (focus_ever == 0) {
+            printf("[ok] wayland ime: the text-input-v3 binding stayed "
+                   "healthy through an IM-present compositor (no "
+                   "focus this run; the driven legs skipped)\n");
+        }
+        ime_client_stop();
+    }
     }
 
     if (win != NULL) {

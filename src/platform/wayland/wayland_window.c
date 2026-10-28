@@ -1868,6 +1868,11 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         pwindow->toplevel_icon_buffer = NULL;
     }
     fdk_wayland_unregister_window(pwindow->conn, pwindow);
+    /* IME focus guard (M-1): a window dying mid-composition leaves
+     * the text-input's latched batch pointing at freed memory — the
+     * IME module drops it (and marks the session stale for the next
+     * enter's self-heal). */
+    fdk_wayland_ime_window_destroyed(pwindow->conn, pwindow);
     /* A frame callback still awaiting `done` when the window dies
      * will never fire — reap its proxy (leak found by the sway
      * headless test). */

@@ -348,3 +348,43 @@ whose frames hold joined Arabic, wide CJK, and shaped Devanagari
 Arabic run; the EYE checks above are yours).
 
 **Status: DONE (should work; owner verification pending).**
+
+## 11. IME against a real input method (M-1 — needs your eyes)
+
+The sandbox has no fcitx5/ibus; the sway rig proved the protocol
+both ways with a hand-rolled input-method client, and the XIM
+callback wiring is code-reviewed. A real engine on your desktop is
+the last witness.
+
+### Wayland, sway + fcitx5
+
+```sh
+sudo pacman -S fcitx5 fcitx5-configtool fcitx5-mozc   # or ibus-anthy / your engine
+export GTK_IM_MODULE= QT_IM_MODULE= SDL_IM_MODULE=    # leave these unset for other apps
+export XMODIFIERS=@im=fcitx
+fcitx5 -d --replace
+# then run any FDK example with a text field under sway:
+./build/examples/controls_demo   # or your own app with an Entry
+```
+
+Type in the entry: composition must appear INLINE at the caret
+(underlined), revise as you type, and commit whole words. Switch
+windows (or close one and focus another) — the IME must KEEP
+working (the stale-session self-heal; the compositor never sends
+the leave wlroots owes). Check the fcitx5 candidate window opens
+near the caret.
+
+### X11, fcitx5 via XIM
+
+```sh
+export XMODIFIERS=@im=fcitx
+fcitx5 -d --replace
+DISPLAY=:0 ./build/examples/controls_demo
+```
+
+Same expectations: inline composition (the XIMPreeditCallbacks
+path), multi-character commits landing whole. A one-character
+commit may also arrive as a normal keypress — that is the
+compatibility rule, not a bug.
+
+**Status: DONE (should work; owner verification pending).**

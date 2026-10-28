@@ -33,6 +33,7 @@
 #include "fdk/fdk_clipboard.h"
 #include "fdk/fdk_undo.h"
 
+#include <limits.h>
 #include <math.h>
 #include <time.h>
 
@@ -1480,6 +1481,29 @@ static bool entry_handle_event(fdk_widget *w,
     case FDK_WIDGET_FOCUS_OUT:
         entry_blink_stop(entry_of(w));
         return false;
+    case FDK_WIDGET_IME_PREEDIT: {
+        /* The IME's composition string renders inline at the caret
+         * (the display-only groundwork API's render path). The
+         * event's text is callback-scoped; set_preedit copies. */
+        if ((w->flags & FDK_WF_ENABLED) == 0) {
+            return false;
+        }
+        (void)fdk_entry_set_preedit(w, ev->ime.text);
+        return true;
+    }
+    case FDK_WIDGET_IME_COMMIT: {
+        /* The IME delivered final text: clear the composition, then
+         * insert through the single mutation primitive (undo, caret
+         * scroll, on_changed, a11y all ride it). */
+        if ((w->flags & FDK_WF_ENABLED) == 0 || e->read_only) {
+            return false;
+        }
+        (void)fdk_entry_set_preedit(w, NULL);
+        entry_delete_selection(e);
+        (void)entry_splice(e, e->caret, e->caret, ev->ime.text,
+                           strlen(ev->ime.text));
+        return true;
+    }
     default:
         break;
     }
@@ -2144,6 +2168,21 @@ void fdk_entry_select_all(fdk_widget *entry) {
     }
     fdk_entry *e = entry_of(entry);
     entry_set_selection(e, 0, e->len);
+}
+
+/* The IME surrounding-text context (M-1): the entry's text and caret
+ * (BORROWED — valid until the next mutation; the caller pushes it
+ * through the platform immediately). Returns 0 when `w` is not an
+ * entry. */
+int fdk__entry_ime_context(fdk_widget *w, const char **out_text,
+                           int *out_cursor) {
+    if (w == NULL || w->klass != &fdk_entry_class_def) {
+        return 0;
+    }
+    fdk_entry *e = entry_of(w);
+    *out_text = e->text;
+    *out_cursor = (e->caret <= INT_MAX) ? (int)e->caret : INT_MAX;
+    return 1;
 }
 
 fdk_result fdk_entry_set_preedit(fdk_widget *entry, const char *preedit) {

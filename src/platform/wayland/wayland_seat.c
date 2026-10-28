@@ -825,6 +825,10 @@ void fdk_wayland_bind_seat_listeners(fdk_platform_connection *conn) {
         FDK_ERROR("xkb_context_new failed — keyboard input will not work");
     }
     wl_seat_add_listener(conn->seat, &g_seat_listener, conn);
+    /* text-input-v3 (M-1): the manager may already be bound (either
+     * registry order is legal) — create the text input now if both
+     * halves exist; the manager's own handler calls the same thing. */
+    fdk_wayland_ime_seat_ready(conn);
 }
 
 void fdk_wayland_teardown_seat(fdk_platform_connection *conn) {

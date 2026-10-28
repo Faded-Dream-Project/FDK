@@ -342,6 +342,17 @@ struct fdk_platform_window {
      * (and focus-unset) with the window. */
     XIC xic;
 
+    /* XIM IME composition state (1.1.0, M-1; x11_ime.c): the per-IC
+     * preedit buffer (UTF-8, lazily allocated at the first draw
+     * callback), its capacity, the showing flag, and the per-window
+     * XIMCallback array (client_data = this pwindow — XIM callbacks
+     * carry their own context). NULL/0/0 when the window never
+     * composes. */
+    char *ime_preedit;
+    size_t ime_preedit_cap;
+    int ime_preedit_showing;
+    void *ime_cbs; /* fdk_x11_preedit_cbs — opaque here */
+
     /* Phase 9 popup state: override-redirect windows that grab the
      * pointer while shown; a click outside their bounds dismisses
      * them (translated to a close request in x11_events.c, never
@@ -596,6 +607,25 @@ int fdk_x11_xi2_handle_cookie(fdk_platform_connection *conn,
 int fdk_x11_xi2_test_touch(fdk_platform_connection *conn,
                           fdk_platform_window *pwindow, int phase,
                           uint32_t id, double x, double y);
+
+/* XIM IME (1.1.0, M-1; src/platform/x11/x11_ime.c): the preedit
+ * callback machinery behind FDK_EVENT_IME_PREEDIT. attach_cbs builds
+ * the per-window XIMCallback array + returns the XNPreeditAttributes
+ * nested list for XCreateIC (caller XFree's the LIST — the callback
+ * array stays on the pwindow); dispatch is the event entry point
+ * (also the test seam's body); test_apply drives the buffer math
+ * headless; window_cleanup is the destroy path. fdk__x11_preedit_
+ * apply is the pure UTF-8 char-index splice every draw callback
+ * runs (declared here so tests/test_ime.c can pin it directly). */
+void *fdk_x11_ime_attach_cbs(fdk_platform_window *pwindow);
+void fdk_x11_ime_dispatch(fdk_platform_window *pwindow,
+                          fdk_event_type type, const char *text,
+                          int cursor);
+size_t fdk_x11_ime_test_apply(char *buf, size_t cap, long chg_first,
+                              long chg_length, const char *insert);
+void fdk_x11_ime_window_cleanup(fdk_platform_window *pwindow);
+size_t fdk__x11_preedit_apply(char *buf, size_t cap, long chg_first,
+                              long chg_length, const char *insert);
 
 /* The module's record (x11_xi2.c owns the definition's twin — the
  * dlopen handle, the extension opcode for GenericEvent matching,

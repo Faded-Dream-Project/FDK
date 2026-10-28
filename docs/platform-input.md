@@ -45,6 +45,61 @@ Resolution paths differ per backend:
 - **Wayland**: xkbcommon state (the wl_keyboard keymap) resolves
   keysym → UTF-32 per key press.
 
+## Input methods — IME composition (1.1.0, M-1)
+
+One event model covers both backends: `FDK_EVENT_IME_PREEDIT`
+(the composition string an input method is building — empty clears
+it; the payload carries the composition caret as a UTF-8 byte
+offset) and `FDK_EVENT_IME_COMMIT` (the final text; never empty).
+`text` is UTF-8 owned by FDK for the callback duration only — the
+drag-payload rule. Routing mirrors keys: the FOCUSED Entry or
+TextView consumes both (preedit renders inline at the caret through
+the `fdk_entry_set_preedit` / `fdk_textview_set_preedit`
+groundwork; commit splices at the caret through the single
+mutation primitive, so undo, on_changed, and a11y all ride it).
+When nothing focused consumes them they reach the application's
+window callback — custom text surfaces implement their own
+composition there. A single-codepoint commit ALSO arrives as the
+ordinary KEY_DOWN's codepoint (compose keys keep working for
+codepoint-only consumers); multi-codepoint commits — the CJK case
+an IME exists for — arrive ONLY as `IME_COMMIT`.
+
+Backend machinery:
+
+- **Wayland**: `zwp_text_input_v3` (optional global — absent means
+  no IME on that compositor; keys still flow). The v3 batch state
+  machine is honored exactly: `preedit_string`/`commit_string`
+  latch pending state, `done` applies it (commit replaces preedit
+  first — the v3 ordering), `enter`/`leave` gate enable/disable.
+  Surrounding text is pushed on focus gain and after IME routing
+  through the window layer's `ime_update_surrounding` hook (the
+  focused text widget's text + caret in bytes). One compositor
+  quirk is closed client-side: wlroots drops the focused surface
+  on window destroy WITHOUT sending `leave`, which leaves the
+  v3 input enabled — and `enable`-on-enabled is a state-machine
+  no-op (the compositor never re-activates the IM). FDK tracks the
+  enabled session and closes a stale one at the next `enter`
+  (disable + commit first), so window switches keep IME working.
+  `delete_surrounding_text` (autocorrect-style context edits) is
+  consumed and logged, not applied — level-2 material; most CJK
+  engines never send it.
+- **X11 (1.1.0)**: the per-window XIC now asks for
+  `XIMPreeditCallbacks | XIMStatusNothing` FIRST (falling back to
+  the 1.3.1 PreeditNothing posture when the input method refuses
+  the callback style): the IM hands composition to FDK through the
+  preedit start/draw/done callbacks, the per-IC composition buffer
+  is maintained by a pure, headless-tested UTF-8 splice
+  (character-index ↔ byte-offset — the translation every XIM
+  client historically corrupts), and commits flow
+  Xutf8LookupString: one codepoint stays the KEY_DOWN codepoint,
+  more than one dispatches `IME_COMMIT` and the key event is
+  swallowed.
+
+What is deliberately level-2 (the roadmap's honest fence):
+paragraph-level bidi in composition, preedit highlight spans
+(v3's cursor_begin/cursor_end are read, only the caret renders),
+`delete_surrounding_text`, and rich preedit styling.
+
 ## Modifier tracking
 
 The four `fdk_key_modifier` bits (Shift/Ctrl/Alt/Super) reflect

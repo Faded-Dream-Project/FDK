@@ -104,6 +104,14 @@ typedef enum fdk_widget_event_type {
      * FOCUS_IN again on window focus, matching toolkit convention). */
     FDK_WIDGET_FOCUS_IN      = 9,
     FDK_WIDGET_FOCUS_OUT     = 10,
+
+    /* IME composition traffic (1.1.0, M-1), delivered to the FOCUSED
+     * widget only (same routing as KEY_*): .ime carries the UTF-8
+     * text + preedit cursor. The toolkit's Entry and TextView consume
+     * both (preedit renders inline at the caret, commit inserts);
+     * custom text widgets that want composition implement these. */
+    FDK_WIDGET_IME_PREEDIT   = 11, /* .ime: composition text changed */
+    FDK_WIDGET_IME_COMMIT    = 12, /* .ime: final text delivered     */
 } fdk_widget_event_type;
 
 typedef struct fdk_widget_event {
@@ -118,6 +126,8 @@ typedef struct fdk_widget_event {
         struct { fdk_pointf position; fdk_u32 button; fdk_u32 modifiers; } pointer; /* DOWN / UP */
         struct { fdk_pointf position; fdk_f32 delta_x, delta_y; } scroll;
         fdk_key_event key; /* KEY_DOWN / KEY_UP                     */
+        struct { const char *text; int cursor; } ime; /* IME_*: UTF-8,
+                          * valid for the callback duration only    */
     };
 } fdk_widget_event;
 

@@ -45,7 +45,12 @@ static unsigned long x11_theme_window_pixel(void) {
 /* Lazy per-window XIC (1.1.0-rc1, X1): the FIRST FocusIn or KeyPress
  * on a window brings up both the connection's XIM (once per process)
  * and this window's XIC. Declared in x11_platform.h; called from the
- * event translator. */
+ * event translator.
+ *
+ * 1.1.0 (M-1): the IC is created with XIMPreeditCallbacks — the IM
+ * hands COMPOSITION to us and we render it inline (the Entry
+ * preedit groundwork) — falling back to the old PreeditNothing style
+ * when the IM refuses (not every input method serves callbacks). */
 void fdk__x11_window_ensure_xic(fdk_platform_window *pwindow) {
     if (pwindow == NULL || pwindow->xic != NULL) {
         return;
@@ -55,12 +60,35 @@ void fdk__x11_window_ensure_xic(fdk_platform_window *pwindow) {
     if (conn->xim == NULL) {
         return; /* no IM: the ASCII fallback path carries keys */
     }
-    pwindow->xic = XCreateIC(conn->xim,
-                             XNInputStyle, XIMPreeditNothing |
-                                               XIMStatusNothing,
-                             XNClientWindow, pwindow->xwindow,
-                             XNFocusWindow, pwindow->xwindow,
-                             NULL);
+    /* Preedit callbacks first (M-1): the per-window callback array
+     * (client_data = this pwindow) + the nested list XCreateIC
+     * consumes. The LIST dies with XCreateIC's return (Xlib copies
+     * what it needs); the ARRAY stays on the pwindow. */
+    void *preedit_list = fdk_x11_ime_attach_cbs(pwindow);
+    if (preedit_list != NULL) {
+        pwindow->xic = XCreateIC(conn->xim,
+                                 XNInputStyle,
+                                 (XIMPreeditCallbacks | XIMStatusNothing),
+                                 XNClientWindow, pwindow->xwindow,
+                                 XNFocusWindow, pwindow->xwindow,
+                                 XNPreeditAttributes, preedit_list,
+                                 NULL);
+        XFree(preedit_list);
+    }
+    if (pwindow->xic == NULL) {
+        /* The IM refused the callbacks style (or the array alloc
+         * failed): composition is unavailable for this window — the
+         * 1.3.1 PreeditNothing posture still gives full-Unicode
+         * COMMIT text through Xutf8LookupString. */
+        fdk_free(pwindow->ime_cbs);
+        pwindow->ime_cbs = NULL;
+        pwindow->xic = XCreateIC(conn->xim,
+                                 XNInputStyle, XIMPreeditNothing |
+                                                   XIMStatusNothing,
+                                 XNClientWindow, pwindow->xwindow,
+                                 XNFocusWindow, pwindow->xwindow,
+                                 NULL);
+    }
     if (pwindow->xic == NULL) {
         FDK_WARN("XCreateIC failed — window falls back to ASCII "
                  "text entry");
@@ -356,10 +384,11 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
      * created when this window first sees FocusIn or a KeyPress
      * (fdk__x11_window_ensure_xic, x11_events.c) — together with the
      * lazy XOpenIM this takes pointer-only apps (panels, the demo
-     * bar) entirely off the input-method startup path. The rootless
-     * style (PreeditNothing|StatusNothing) keeps composition out of
-     * FDK's geometry (no preedit window to place); the preedit SEAM
-     * for real IMEs remains the Entry's set_preedit API. */
+     * bar) entirely off the input-method startup path. M-1: the
+     * created IC asks for XIMPreeditCallbacks FIRST (composition
+     * flows into FDK_EVENT_IME_PREEDIT and renders inline at the
+     * caret), falling back to PreeditNothing|StatusNothing when the
+     * IM refuses the callback style — see ensure_xic. */
     pwindow->xic = NULL;
 
     fdk_result r = fdk_x11_register_window(conn, pwindow);
@@ -407,6 +436,7 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
          * and free only — the XIDs vanish with the connection. The
          * pixel buffers leak here, a bounded one-time cost during
          * process teardown on a dead display (1.3.0). */
+        fdk_x11_ime_window_cleanup(pwindow);
         fdk_x11_unregister_window(pwindow->conn, pwindow);
         fdk_free(pwindow);
         return;
@@ -415,6 +445,10 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
         XDestroyIC(pwindow->xic);
         pwindow->xic = NULL;
     }
+    /* IME composition state (M-1): AFTER XDestroyIC — the IC may
+     * still hold references into the callback array, so it dies
+     * first; then the preedit buffer and the array itself. */
+    fdk_x11_ime_window_cleanup(pwindow);
     if (pwindow->popup) {
         /* "destroy" is the fallback reason only: a dismissal that
          * already stamped its own (outside-click, escape,

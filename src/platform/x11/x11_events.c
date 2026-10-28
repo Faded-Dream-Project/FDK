@@ -2,8 +2,10 @@
 
 #include "platform/x11/x11_platform.h"
 
+#include <string.h>
 #include <time.h> /* X3's in-bounds click stamp */
 
+#include "core/alloc_internal.h"
 #include "core/log_internal.h"
 
 #include <X11/keysym.h>
@@ -42,19 +44,53 @@ static fdk_scancode x11_keycode_to_scancode(unsigned int keycode) {
  * ACTUAL keyboard, é/ä/中 included); without one it falls back to
  * XLookupString, which resolves ASCII reliably and approximates the
  * rest of Latin-1. Returns 0 for keys with no textual result
- * (arrows, F-keys, bare modifiers). */
+ * (arrows, F-keys, bare modifiers).
+ *
+ * M-1 (IME): `commit_buf`/`commit_cap` carry the event's FULL text out
+ * (NUL-terminated, `*commit_len` its byte length) — the multi-
+ * codepoint IME-commit case the single codepoint return cannot
+ * represent. An IME commit CAN exceed 15 UTF-8 bytes (a pasted-
+ * length phrase commit), so the XIC leg retries XBufferOverflow
+ * with a heap buffer sized by the overflow answer; that heap string
+ * is returned through `*heap_out` (caller frees) and is the same
+ * text the stack copy holds. Pass commit_buf == NULL to skip the
+ * side channel. */
 static fdk_u32 x11_lookup_codepoint(fdk_platform_window *pwindow,
-                                    XKeyEvent *xkey) {
+                                    XKeyEvent *xkey,
+                                    char *commit_buf, size_t commit_cap,
+                                    int *commit_len, char **heap_out) {
     char buf[16];
     KeySym keysym = NoSymbol;
     int len = 0;
+    const char *text = buf; /* what the decode legs read below */
     if (pwindow != NULL && pwindow->xic != NULL) {
         Status status = 0;
         len = Xutf8LookupString(pwindow->xic, xkey, buf,
                                 (int)sizeof(buf) - 1, &keysym, &status);
         if (status == XBufferOverflow) {
-            len = 0; /* a single key event cannot overflow 15 UTF-8
-                      * bytes honestly; treat as no text */
+            /* The commit does not fit 15 bytes — a REAL IME shape
+             * (phrase commits). Xlib's contract: the return value is
+             * the needed byte count; retry with exactly that. */
+            int want = (len > 0) ? len : 256;
+            char *grown = fdk_alloc((size_t)want + 1u);
+            if (grown != NULL) {
+                len = Xutf8LookupString(pwindow->xic, xkey, grown,
+                                        want, &keysym, &status);
+                if (len > 0) {
+                    grown[len] = '\0';
+                    text = grown;
+                    if (heap_out != NULL) {
+                        *heap_out = grown;
+                    } else {
+                        fdk_free(grown);
+                    }
+                } else {
+                    fdk_free(grown);
+                    len = 0;
+                }
+            } else {
+                len = 0;
+            }
         }
     } else {
         len = XLookupString(xkey, buf, (int)sizeof(buf) - 1, &keysym,
@@ -63,7 +99,25 @@ static fdk_u32 x11_lookup_codepoint(fdk_platform_window *pwindow,
     if (len <= 0) {
         return 0;
     }
-    buf[len] = '\0';
+    /* NUL-terminate the stack path (the heap path did its own). */
+    if (text == buf) {
+        buf[len] = '\0';
+    }
+
+    /* The side channel: the full text copied into the caller's
+     * buffer (clipped to its declared capacity — truncation is the
+     * honest degradation of a too-small caller buffer); the heap
+     * string, when the overflow path allocated one, goes to
+     * *heap_out and the caller prefers it. */
+    if (commit_buf != NULL && commit_len != NULL) {
+        size_t n = (size_t)len;
+        if (n + 1u > commit_cap) {
+            n = commit_cap - 1u;
+        }
+        memcpy(commit_buf, text, n);
+        commit_buf[n] = '\0';
+        *commit_len = (int)n;
+    }
 
     /* Ctrl+letter (Phase 9): the lookup reports the CONTROL
      * character (^X = 0x18) for these, but the codepoint contract is
@@ -84,24 +138,24 @@ static fdk_u32 x11_lookup_codepoint(fdk_platform_window *pwindow,
     /* Decode UTF-8 (Xutf8) or Latin-1 (XLookupString fallback) to a
      * codepoint. */
     {
-        unsigned char c0 = (unsigned char)buf[0];
+        unsigned char c0 = (unsigned char)text[0];
         if (c0 < 0x80) {
             return (fdk_u32)c0;
         }
         if ((c0 & 0xE0u) == 0xC0u && len >= 2) {
             return (fdk_u32)(((c0 & 0x1Fu) << 6) |
-                             ((unsigned char)buf[1] & 0x3Fu));
+                             ((unsigned char)text[1] & 0x3Fu));
         }
         if ((c0 & 0xF0u) == 0xE0u && len >= 3) {
             return (fdk_u32)(((c0 & 0x0Fu) << 12) |
-                             (((unsigned char)buf[1] & 0x3Fu) << 6) |
-                             ((unsigned char)buf[2] & 0x3Fu));
+                             (((unsigned char)text[1] & 0x3Fu) << 6) |
+                             ((unsigned char)text[2] & 0x3Fu));
         }
         if ((c0 & 0xF8u) == 0xF0u && len >= 4) {
             return (fdk_u32)(((c0 & 0x07u) << 18) |
-                             (((unsigned char)buf[1] & 0x3Fu) << 12) |
-                             (((unsigned char)buf[2] & 0x3Fu) << 6) |
-                             ((unsigned char)buf[3] & 0x3Fu));
+                             (((unsigned char)text[1] & 0x3Fu) << 12) |
+                             (((unsigned char)text[2] & 0x3Fu) << 6) |
+                             ((unsigned char)text[3] & 0x3Fu));
         }
         /* XLookupString's Latin-1 single byte (the no-XIC fallback):
          * the honest best answer that path can give. */
@@ -247,9 +301,47 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                     out->key.is_repeat = 0;
                 }
             }
-            out->key.codepoint = (xevent->type == KeyPress)
-                ? x11_lookup_codepoint(pwindow, &xevent->xkey)
-                : 0; /* KeyRelease codepoint lookup is meaningless */
+            out->key.codepoint = 0; /* KeyRelease codepoint lookup is
+                                     * meaningless */
+            if (xevent->type == KeyPress) {
+                /* M-1 (IME): the full-text side channel — a commit of
+                 * MORE than one codepoint is the IME case (the CJK
+                 * phrase an input method exists for): it dispatches
+                 * FDK_EVENT_IME_COMMIT directly and the key event
+                 * itself is swallowed (the IM already spoke; a
+                 * KEY_DOWN with a truncated codepoint would be a
+                 * lie). One codepoint (the compose-key/dead-key
+                 * shape) stays the ordinary KEY_DOWN codepoint — the
+                 * documented compatibility contract. */
+                char commit[256];
+                int commit_len = 0;
+                char *heap = NULL;
+                out->key.codepoint = x11_lookup_codepoint(
+                    pwindow, &xevent->xkey, commit,
+                    sizeof(commit), &commit_len, &heap);
+                const char *commit_text = (heap != NULL) ? heap : commit;
+                if (commit_len > 0) {
+                    /* Count codepoints: lead (non-continuation)
+                     * bytes. */
+                    int cps = 0;
+                    for (const unsigned char *p =
+                             (const unsigned char *)commit_text;
+                         *p != 0; p++) {
+                        if ((*p & 0xC0u) != 0x80u) {
+                            cps++;
+                        }
+                    }
+                    if (cps > 1) {
+                        fdk_x11_ime_dispatch(pwindow,
+                                             FDK_EVENT_IME_COMMIT,
+                                             commit_text, 0);
+                        fdk_free(heap);
+                        return 0; /* swallowed: IME_COMMIT replaces
+                                   * the key event entirely */
+                    }
+                }
+                fdk_free(heap);
+            }
             return 1;
         }
 

@@ -1437,6 +1437,20 @@ fdk_widget *fdk_widget_tree_get_focused(fdk_widget *any) {
     return (root != NULL) ? root->focused : NULL;
 }
 
+/* The IME surrounding-text dispatcher (M-1): ask each text-widget
+ * family whether `focused` is theirs; first hit answers with the
+ * borrowed (text, caret). 0 = not a text widget (or NULL). */
+int fdk__widget_ime_context(fdk_widget *focused, const char **out_text,
+                            int *out_cursor) {
+    if (focused == NULL) {
+        return 0;
+    }
+    if (fdk__entry_ime_context(focused, out_text, out_cursor)) {
+        return 1;
+    }
+    return fdk__textview_ime_context(focused, out_text, out_cursor);
+}
+
 void fdk_widget_tree_clear_focus(fdk_widget *any) {
     fdk_widget *root = find_root(any);
     if (root == NULL) {
@@ -1935,6 +1949,28 @@ static bool route_event(fdk_widget *root, const fdk_event_data *event) {
             }
             return dispatch_key(root, root->focused, &event->key,
                                 event->type == FDK_EVENT_KEY_DOWN);
+        }
+
+        case FDK_EVENT_IME_PREEDIT:
+        case FDK_EVENT_IME_COMMIT: {
+            /* IME traffic targets the FOCUSED widget, exactly like
+             * keys (the composition belongs to whatever text surface
+             * holds the caret). No focused widget / a non-text
+             * widget: not consumed — the application's window
+             * callback gets it for custom composition handling. */
+            fdk_widget *focused = root->focused;
+            if (focused == NULL ||
+                (focused->flags & FDK_WF_DESTROYING) != 0) {
+                return false;
+            }
+            fdk_widget_event ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.type = (event->type == FDK_EVENT_IME_COMMIT)
+                          ? FDK_WIDGET_IME_COMMIT
+                          : FDK_WIDGET_IME_PREEDIT;
+            ev.ime.text = event->ime.text;
+            ev.ime.cursor = event->ime.cursor;
+            return deliver_single(root, focused, &ev);
         }
 
         case FDK_EVENT_WINDOW_FOCUS: {

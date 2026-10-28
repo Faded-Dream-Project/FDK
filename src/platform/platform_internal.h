@@ -187,6 +187,16 @@ typedef struct fdk_platform_ops {
                       fdk_platform_window *pwin, int phase,
                       uint32_t id, double x, double y);
 
+    /* OPTIONAL (1.1.0, M-1 IME): push the focused text widget's
+     * context (UTF-8 text + caret byte offset; NULL text = the focus
+     * moved to a non-text widget) to the platform's input-method
+     * machinery. Wayland: set_surrounding_text + commit on the
+     * enabled text-input-v3. X11 leaves it NULL (XIM tracks its own
+     * state through the IC). Called by the window layer's
+     * post-routing hook — focus gains and IME event routing. */
+    void (*ime_update_surrounding)(fdk_platform_window *pwindow,
+                                   const char *text, int cursor);
+
     /* --- Window operations --- */
 
     /* Creates a window. `parent` is NULL for top-levels; for popup
