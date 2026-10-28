@@ -14,6 +14,34 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-28 (on the rc2 line)
 
+### Added — touch basics: slots, tap clicks, two-finger scroll (M-3 / B-03)
+
+- **The touch event family (public API, append-only)**:
+  `FDK_EVENT_TOUCH_DOWN/UP/MOTION/CANCEL` — one slot per contact
+  (`fdk_touch_event.id`), positions window-local logical. FDK
+  synthesizes on top: a TAP (single slot, within
+  `FDK_TOUCH_TAP_MS`/`FDK_TOUCH_TAP_SLOP`) emits a full left click
+  pair (widget applications work on touchscreens unchanged), and
+  two active slots turn the centroid's motion into
+  `FDK_EVENT_POINTER_SCROLL` with natural-scrolling deltas. A
+  multi-gesture latch kills the lifted-last-finger phantom click;
+  CANCEL wipes every slot without synthesizing anything.
+- **Wayland**: wl_touch bound from the seat capabilities; the
+  id→window map rides the connection (UP/MOTION carry only ids).
+- **X11**: XI2 touch (XI 2.2+) through dlopen'd libXi — the GL
+  lane's load discipline: no build/link dependency, absent libXi
+  or old XI simply means no touch events ($FDK_NO_XI2 opts out);
+  GenericEvent cookies translated through the dispatch loop;
+  XI 2.2's emulation rule keeps the synthesized tap the only click
+  a touch produces.
+- **Tests**: the full policy battery runs headless against the
+  engine (tests/test_touch.c — tap/slop/timeout/drag/natural
+  deltas/re-arm/phantom-latch/cancel/protocol noise); both
+  backends' REAL translate paths are driven through the `test_touch`
+  ops seam (the test_key discipline — sway's seat has no touch
+  device and Xvfb cannot inject touch); the XI2 module itself
+  loads and negotiates 2.2 on the rig's Xvfb.
+
 ### Added — window identity: icons, PID, host, role (M-4 / B-04)
 
 - **`fdk_window_set_icon()` (public API)**: a window's icon — the

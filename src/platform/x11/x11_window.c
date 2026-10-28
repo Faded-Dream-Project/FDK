@@ -217,6 +217,13 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
      * event we can translate rather than killing the connection. */
     XSetWMProtocols(conn->display, xwindow, &conn->wm_delete_window, 1);
 
+    /* XI2 touch selection (1.1.0, M-3): harmless no-op where the
+     * extension is absent; where present, the server routes
+     * XI_TouchBegin/Update/End for this window and suppresses the
+     * emulated core-button twin (XI 2.2's rule) — the tap synthesis
+     * stays the only click a touch produces. */
+    fdk_x11_xi2_select_window(conn, (unsigned long)xwindow);
+
     /* XDND awareness (1.2.0): without the XdndAware property no
      * dragging client ever begins a drag over this window. */
     {

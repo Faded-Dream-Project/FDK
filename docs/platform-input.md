@@ -128,3 +128,69 @@ Both backends synthesize the window-enter/leave pair FDK's hover
 model expects, and the resize-edge cursor shaping runs in the
 window layer (see fdk_window.h's resize section) — the backends
 only translate cursor-shape requests.
+
+## Touch input (1.1.0, M-3)
+
+Direct-touch contact tracking is a first-class event family:
+`FDK_EVENT_TOUCH_DOWN/UP/MOTION/CANCEL`, one slot per contact
+(`fdk_touch_event.id`), positions window-local and logical like
+every pointer event. The two backends translate; the POLICY lives
+once in the core (src/window/touch.c):
+
+- **Tap synthesis**: a single-slot contact lifted within
+  `FDK_TOUCH_TAP_MS` and `FDK_TOUCH_TAP_SLOP` logical px of its
+  start synthesizes a full left
+  `FDK_EVENT_POINTER_BUTTON_DOWN`+`UP` pair at the tracked
+  position — widget applications work on touchscreens for free.
+  The verdict comes from the ENGINE's tracked position because
+  wl_touch's up event carries no coordinates (the protocol omits
+  them; XI2's TouchEnd does not, but its coordinates equal the
+  last update anyway).
+- **Two-finger scroll**: while exactly two slots are active, the
+  CENTROID's motion emits `FDK_EVENT_POINTER_SCROLL` with
+  natural-scrolling deltas (delta = -(travel): fingers drag down,
+  content follows). Entering two slots cancels every pending tap;
+  re-entry re-arms the centroid from the re-entry instant (no
+  jump). A multi_ever latch — armed the moment any second slot
+  appears, cleared only when the engine goes fully idle — makes
+  the lifted-last finger of a two-finger gesture never click
+  (the classic tap-after-scroll phantom).
+- **Cancel**: wipes every slot and disarms all pending taps; a
+  click after a compositor takeover would be a phantom press.
+
+Trackpad two-finger scrolling is NOT this path: the platform's
+own gesture recognition delivers it as ordinary
+`FDK_EVENT_POINTER_SCROLL` (wl_pointer axis / wheel buttons), which
+FDK already translated since Phase 2.
+
+Per backend:
+
+- **Wayland**: wl_touch bound from the seat's capabilities; DOWN
+  carries the surface (window lookup), UP/MOTION only the id, so
+  the connection keeps an id→window map (`FDK_WL_TOUCH_IDS`,
+  bounded; overflow contacts drop with one INFO line). Coordinates
+  are surface-local logical — a straight copy. The frame/shape/
+  orientation events are no-ops (nothing in the model consumes
+  batch delimiters or contact ellipses).
+- **X11**: XI2 touch (XI_TouchBegin/Update/End, X Input >= 2.2)
+  through dlopen'd libXi — the GL lane's load discipline (no
+  build/link dependency; absent libXi or old XI = no touch events,
+  never an init failure; `$FDK_NO_XI2` opts out). XI2 events arrive
+  as GenericEvents through Xlib's cookie mechanism
+  (XGetEventData/XFreeEventData — libX11 itself); windows select
+  the touch masks at create time, and XI 2.2's emulation rule
+  suppresses the core-button twin of a touch on windows that
+  selected XI2 touch — FDK's synthesized tap click is the only
+  click a touch produces. Coordinates are window-local PHYSICAL
+  pixels, divided by the connection's integer scale exactly like
+  core pointer events.
+
+Testing (the reachability problem): sway headless's seat exposes
+no touch capability (wlroots has no virtual-touch protocol), and
+Xvfb has no touch injection facility — so each backend exposes the
+REAL translate path as a test seam (`test_touch` in the ops table,
+the 1.3.5 test_key discipline), and the full policy battery runs
+headless against the engine itself (tests/test_touch.c: tap, slop,
+timeout, drag, natural deltas, re-arm, phantom-tap latch, cancel,
+protocol noise). Real touch HARDWARE remains the owner's desktop
+check (TESTING-ON-DESKTOP.md).

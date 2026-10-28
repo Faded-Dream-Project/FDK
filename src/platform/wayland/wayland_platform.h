@@ -235,10 +235,25 @@ struct fdk_platform_connection {
     void *drag_on_done_user;
 
     /* Bound from the seat's capabilities (wayland_seat.c). May be
-     * NULL if the seat genuinely has no keyboard/pointer — checked
-     * before use, never assumed present. */
+     * NULL if the seat genuinely has no keyboard/pointer/touch —
+     * checked before use, never assumed present. */
     struct wl_keyboard *keyboard;
     struct wl_pointer *pointer;
+    struct wl_touch *touch; /* M-3: wl_touch, direct contact slots */
+
+    /* wl_touch slot routing (M-3): DOWN carries the surface; UP and
+     * MOTION carry only the id — this table maps id → the window
+     * the contact went down on, so the whole contact's events land
+     * on the right dispatch target. Bounded at FDK_WL_TOUCH_IDS;
+     * overflow contacts are dropped with one INFO line (the core's
+     * tap/scroll policy needs exactly <= 2 sane slots anyway — a
+     * 30-finger palm grab is not precision input). */
+#define FDK_WL_TOUCH_IDS 32
+    struct {
+        int in_use;
+        uint32_t id;
+        fdk_platform_window *win;
+    } touch_ids[FDK_WL_TOUCH_IDS];
 
     /* xkbcommon keymap state, populated from the compositor-supplied
      * keymap (wl_keyboard::keymap event) rather than FDK guessing at
@@ -687,6 +702,17 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
 void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
                                  const fdk_u32 *pixels,
                                  int width, int height);
+
+/* Touch test seam (1.1.0, M-3), the test_key discipline: drives the
+ * REAL wl_touch listener bodies (sway headless exposes no touch
+ * capability, so the rig cannot reach them through the protocol).
+ * phase 0=down 1=motion 2=up 3=cancel; (x,y) logical surface-local,
+ * ignored for up/cancel; `win` = the target surface's platform
+ * window for the down phase. Returns 1 when a down was deliverable
+ * (0 = dropped: unknown surface). */
+int fdk_wayland_test_touch(fdk_platform_connection *conn,
+                           fdk_platform_window *win, int phase,
+                           uint32_t id, double x, double y);
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size);

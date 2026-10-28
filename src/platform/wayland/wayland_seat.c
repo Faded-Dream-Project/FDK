@@ -531,6 +531,225 @@ static const struct wl_pointer_listener g_pointer_listener = {
     .axis_discrete = pointer_axis_discrete,
 };
 
+/* ---- wl_touch: direct-contact slots (1.1.0, M-3) ----------------------
+ *
+ * Wayland touch coordinates are surface-local LOGICAL — the same
+ * space wl_pointer delivers — so translation is a straight copy into
+ * fdk_touch_event. DOWN names the surface (window lookup by the same
+ * walk pointer_enter uses); UP/MOTION name only the id, so the
+ * connection keeps the id→window map (conn->touch_ids). CANCEL kills
+ * every contact. The tap/two-finger-scroll POLICY lives in the core
+ * (src/window/touch.c) — this layer only translates.
+ *
+ * The bodies are plain-argument functions so the test seam
+ * (fdk_wayland_test_touch) drives the REAL listener paths — the
+ * 1.3.5 test_key discipline: sway headless's seat exposes no touch
+ * capability (no virtual-touch protocol exists in wlroots), so the
+ * listener bodies would otherwise be unreachable from the rig. */
+
+static fdk_platform_window *touch_window_for_surface(
+    fdk_platform_connection *conn, struct wl_surface *surface) {
+    for (size_t i = 0; i < conn->window_count; i++) {
+        if (conn->windows[i]->surface == surface) {
+            return conn->windows[i];
+        }
+    }
+    return NULL;
+}
+
+static void touch_map_id(fdk_platform_connection *conn, uint32_t id,
+                         fdk_platform_window *win) {
+    for (int i = 0; i < FDK_WL_TOUCH_IDS; i++) {
+        if (!conn->touch_ids[i].in_use) {
+            conn->touch_ids[i].in_use = 1;
+            conn->touch_ids[i].id = id;
+            conn->touch_ids[i].win = win;
+            return;
+        }
+    }
+    FDK_INFO("touch: over the %d-contact map — contact dropped",
+             FDK_WL_TOUCH_IDS);
+}
+
+static fdk_platform_window *touch_lookup_id(fdk_platform_connection *conn,
+                                            uint32_t id) {
+    for (int i = 0; i < FDK_WL_TOUCH_IDS; i++) {
+        if (conn->touch_ids[i].in_use && conn->touch_ids[i].id == id) {
+            return conn->touch_ids[i].win;
+        }
+    }
+    return NULL;
+}
+
+static void touch_unmap_id(fdk_platform_connection *conn, uint32_t id) {
+    for (int i = 0; i < FDK_WL_TOUCH_IDS; i++) {
+        if (conn->touch_ids[i].in_use && conn->touch_ids[i].id == id) {
+            conn->touch_ids[i].in_use = 0;
+            return;
+        }
+    }
+}
+
+/* The DOWN body. Returns 1 when the event was deliverable (the
+ * surface is one of our windows), 0 when dropped (unknown surface /
+ * id-map overflow) — the seam's skip signal. */
+static int touch_down_event(fdk_platform_connection *conn,
+                            struct wl_surface *surface, uint32_t id,
+                            double x, double y) {
+    fdk_platform_window *win = touch_window_for_surface(conn, surface);
+    if (win == NULL) {
+        return 0;
+    }
+    touch_map_id(conn, id, win);
+    fdk_event_data event = { .type = FDK_EVENT_TOUCH_DOWN };
+    event.touch.id = id;
+    event.touch.position.x = (fdk_f32)x;
+    event.touch.position.y = (fdk_f32)y;
+    conn->dispatch(win, &event, conn->dispatch_user_data);
+    return 1;
+}
+
+static void touch_motion_event(fdk_platform_connection *conn, uint32_t id,
+                               double x, double y) {
+    fdk_platform_window *win = touch_lookup_id(conn, id);
+    if (win == NULL) {
+        return;
+    }
+    fdk_event_data event = { .type = FDK_EVENT_TOUCH_MOTION };
+    event.touch.id = id;
+    event.touch.position.x = (fdk_f32)x;
+    event.touch.position.y = (fdk_f32)y;
+    conn->dispatch(win, &event, conn->dispatch_user_data);
+}
+
+static void touch_up_event(fdk_platform_connection *conn, uint32_t id) {
+    fdk_platform_window *win = touch_lookup_id(conn, id);
+    if (win == NULL) {
+        return;
+    }
+    touch_unmap_id(conn, id);
+    /* The UP event carries NO coordinates — the protocol omits them.
+     * The core engine tracks each slot's last MOTION position and
+     * uses THAT for the tap verdict and the synthesized click (see
+     * src/window/touch.c), so the event legitimately carries only the
+     * id. */
+    fdk_event_data event = { .type = FDK_EVENT_TOUCH_UP };
+    event.touch.id = id;
+    event.touch.position.x = 0.0f;
+    event.touch.position.y = 0.0f;
+    conn->dispatch(win, &event, conn->dispatch_user_data);
+}
+
+static void touch_cancel_all(fdk_platform_connection *conn) {
+    for (int i = 0; i < FDK_WL_TOUCH_IDS; i++) {
+        if (conn->touch_ids[i].in_use) {
+            fdk_platform_window *win = conn->touch_ids[i].win;
+            conn->touch_ids[i].in_use = 0;
+            fdk_event_data event = { .type = FDK_EVENT_TOUCH_CANCEL };
+            event.touch.id = conn->touch_ids[i].id;
+            event.touch.position.x = 0.0f;
+            event.touch.position.y = 0.0f;
+            conn->dispatch(win, &event, conn->dispatch_user_data);
+        }
+    }
+}
+
+static void touch_down(void *data, struct wl_touch *wl_touch,
+                       uint32_t serial, uint32_t time,
+                       struct wl_surface *surface, int32_t id,
+                       wl_fixed_t x, wl_fixed_t y) {
+    (void)wl_touch;
+    (void)serial;
+    (void)time;
+    fdk_platform_connection *conn = data;
+    (void)touch_down_event(conn, surface, (uint32_t)id,
+                           wl_fixed_to_double(x), wl_fixed_to_double(y));
+}
+
+static void touch_up(void *data, struct wl_touch *wl_touch,
+                     uint32_t serial, uint32_t time, int32_t id) {
+    (void)wl_touch;
+    (void)serial;
+    (void)time;
+    fdk_platform_connection *conn = data;
+    touch_up_event(conn, (uint32_t)id);
+}
+
+static void touch_motion(void *data, struct wl_touch *wl_touch,
+                         uint32_t time, int32_t id, wl_fixed_t x,
+                         wl_fixed_t y) {
+    (void)wl_touch;
+    (void)time;
+    fdk_platform_connection *conn = data;
+    touch_motion_event(conn, (uint32_t)id, wl_fixed_to_double(x),
+                       wl_fixed_to_double(y));
+}
+
+static void touch_frame(void *data, struct wl_touch *wl_touch) {
+    /* The compositor's batch delimiter: events since the last frame
+     * belong to one hardware snapshot. FDK dispatches each contact
+     * event as it arrives (the core engine is order-driven, not
+     * batch-driven), so the delimiter needs no action. */
+    (void)data;
+    (void)wl_touch;
+}
+
+static void touch_cancel(void *data, struct wl_touch *wl_touch) {
+    (void)wl_touch;
+    fdk_platform_connection *conn = data;
+    touch_cancel_all(conn);
+}
+
+static void touch_shape(void *data, struct wl_touch *wl_touch,
+                        int32_t id, wl_fixed_t major, wl_fixed_t minor) {
+    /* Contact ellipse geometry: no fdk_event carries it (nothing in
+     * the M-3 policy consumes contact shape). */
+    (void)data; (void)wl_touch; (void)id; (void)major; (void)minor;
+}
+
+static void touch_orientation(void *data, struct wl_touch *wl_touch,
+                              int32_t id, wl_fixed_t orientation) {
+    (void)data; (void)wl_touch; (void)id; (void)orientation;
+}
+
+static const struct wl_touch_listener g_touch_listener = {
+    .down = touch_down,
+    .up = touch_up,
+    .motion = touch_motion,
+    .frame = touch_frame,
+    .cancel = touch_cancel,
+    .shape = touch_shape,
+    .orientation = touch_orientation,
+};
+
+/* Test seam (M-3), the test_key discipline: drive the REAL bodies.
+ * phase: 0=down, 1=motion, 2=up, 3=cancel. (x,y) ignored for up/
+ * cancel. The DOWN phase targets `win`'s surface — callers hold a
+ * platform window from the context's registry (the seam is internal
+ * to tests + this backend). Returns 1 when a down was deliverable,
+ * 0 otherwise (and always 1 for the other phases). */
+int fdk_wayland_test_touch(fdk_platform_connection *conn,
+                           fdk_platform_window *win, int phase,
+                           uint32_t id, double x, double y) {
+    if (conn == NULL) {
+        return 0;
+    }
+    switch (phase) {
+    case 0:
+        return touch_down_event(conn, win != NULL ? win->surface : NULL,
+                                id, x, y);
+    case 1:
+        touch_motion_event(conn, id, x, y);
+        return 1;
+    case 2:
+        touch_up_event(conn, id);
+        return 1;
+    default:
+        touch_cancel_all(conn);
+        return 1;
+    }
+}
+
 /* ---- Seat capability binding ---- */
 
 static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t capabilities) {
@@ -572,6 +791,21 @@ static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t capabil
         wl_pointer_destroy(conn->pointer);
         conn->pointer = NULL;
     }
+
+    /* Touch (1.1.0, M-3): bind the contact-slot stream. Direct
+     * touchscreens only — trackpad two-finger scrolling arrives as
+     * wl_pointer axis events the existing handler translates. The
+     * id→window map is wiped on any capability change (a seat whose
+     * touch device vanished mid-gesture never leaves stale ids). */
+    if ((capabilities & WL_SEAT_CAPABILITY_TOUCH) && conn->touch == NULL) {
+        conn->touch = wl_seat_get_touch(seat);
+        wl_touch_add_listener(conn->touch, &g_touch_listener, conn);
+    } else if (!(capabilities & WL_SEAT_CAPABILITY_TOUCH) &&
+               conn->touch != NULL) {
+        wl_touch_destroy(conn->touch);
+        conn->touch = NULL;
+        memset(conn->touch_ids, 0, sizeof(conn->touch_ids));
+    }
 }
 
 static void seat_name(void *data, struct wl_seat *seat, const char *name) {
@@ -598,6 +832,8 @@ void fdk_wayland_teardown_seat(fdk_platform_connection *conn) {
         wp_cursor_shape_device_v1_destroy(conn->cursor_shape_device);
         conn->cursor_shape_device = NULL;
     }
+    if (conn->touch) wl_touch_destroy(conn->touch);
+    conn->touch = NULL;
     if (conn->keyboard) wl_keyboard_destroy(conn->keyboard);
     if (conn->pointer) wl_pointer_destroy(conn->pointer);
     if (conn->seat) wl_seat_destroy(conn->seat);

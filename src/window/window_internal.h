@@ -294,12 +294,44 @@ struct fdk_window {
     size_t shortcut_count;
     size_t shortcut_cap;
     int shortcut_next_id;
+
+    /* ---- 1.1.0, M-3: the touch-slot engine ----
+     *
+     * Lazily created at the first FDK_EVENT_TOUCH_* this window
+     * receives (the common desktop never pays the allocation),
+     * destroyed with the window. Owns the tap / two-finger-scroll
+     * synthesis policy — see src/window/touch.c. */
+    struct fdk_touch_engine *touch;
 };
 
 /* Called by the context's platform dispatch callback (see
  * src/core/context.c) once it has resolved a raw fdk_platform_window*
  * back to the fdk_window* that owns it. Not part of the public API. */
 void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event);
+
+/* ---- Touch-slot engine (1.1.0, M-3; src/window/touch.c) ----
+ *
+ * Opaque state + the pure policy functions the window layer drives.
+ * The engine never touches windows or platforms itself; synthesized
+ * events return through the emit callback the window glue passes
+ * (which routes them back through fdk_window_dispatch_event, so a
+ * synthesized tap click behaves exactly like a real one).
+ *
+ * fdk__touch_engine_feed is internal (not exported); the test rig
+ * drives it directly against a recording sink (tests/test_touch.c). */
+typedef struct fdk_touch_engine fdk_touch_engine;
+typedef void (*fdk_touch_emit_fn)(void *user, const fdk_event_data *event);
+
+fdk_touch_engine *fdk__touch_engine_create(void);
+void fdk__touch_engine_destroy(fdk_touch_engine *engine);
+void fdk__touch_engine_reset(fdk_touch_engine *engine);
+int fdk__touch_engine_active(const fdk_touch_engine *engine);
+void fdk__touch_engine_feed(fdk_touch_engine *engine,
+                            const fdk_event_data *event,
+                            fdk_touch_emit_fn emit, void *user);
+/* Test-only clock override for the engine (tests/test_touch.c): pass
+ * NULL to restore the production monotonic clock. */
+void fdk__touch_set_test_clock(long long (*now)(void *user), void *user);
 
 /* Resolves the opaque root-owner pointer the widget layer hands out
  * (fdk__widget_window_owner, set on window-owned roots) back to the

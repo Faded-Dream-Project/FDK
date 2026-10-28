@@ -869,6 +869,7 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->shortcut_cap = 0;
     window->shortcut_next_id = 1;
     window->geo_repaint_pending = false;
+    window->touch = NULL; /* M-3: lazily created at first touch */
 }
 
 static fdk_result window_create_full(fdk_context *ctx,
@@ -1030,6 +1031,8 @@ void fdk_window_destroy(fdk_window *window) {
     window->shortcuts = NULL;
     window->shortcut_count = 0;
     window->shortcut_cap = 0;
+    fdk__touch_engine_destroy(window->touch);
+    window->touch = NULL;
     fdk_context_unregister_window(window->ctx, window);
     window->ops->window_destroy(window->pwindow);
     fdk_free(window);
@@ -1616,6 +1619,14 @@ size_t fdk_window_shortcut_count(const fdk_window *window) {
     return (window != NULL) ? window->shortcut_count : 0;
 }
 
+/* The touch engine's emit sink (M-3): synthesized tap clicks and
+ * two-finger scrolls re-enter the full dispatch pipeline so they
+ * behave exactly like platform-delivered pointer events. `user` is
+ * the fdk_window the raw touch event arrived on. */
+static void touch_synthesis_emit(void *user, const fdk_event_data *event) {
+    fdk_window *window = user;
+    fdk_window_dispatch_event(window, event);
+}
 
 void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) {
     /* Keep fdk_window_get_size() authoritative without requiring the
@@ -1856,6 +1867,38 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * Re-verify registration before the auto-paint tail touches it. */
     if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
         return; /* destroyed by the event callback */
+    }
+
+    /* ---- Touch-slot engine (1.1.0, M-3) ----
+     *
+     * The raw TOUCH_* event has now been fully routed (tree, then
+     * the application callback). Feed the gesture engine LAST: its
+     * synthesized events — tap clicks, two-finger scrolls — re-enter
+     * through fdk_window_dispatch_event itself, so they get the
+     * IDENTICAL treatment a real pointer event gets (widget routing,
+     * grabs, hover, the auto-paint tail). Synthesized events are
+     * POINTER_* types, so the recursion is bounded by construction;
+     * the engine is created lazily — a desktop without touch never
+     * allocates it. A synthesized click may destroy the window (the
+     * quit button), hence the re-verify below. */
+    if (event->type == FDK_EVENT_TOUCH_DOWN ||
+        event->type == FDK_EVENT_TOUCH_UP ||
+        event->type == FDK_EVENT_TOUCH_MOTION ||
+        event->type == FDK_EVENT_TOUCH_CANCEL) {
+        if (window->touch == NULL) {
+            window->touch = fdk__touch_engine_create();
+            if (window->touch == NULL) {
+                FDK_WARN("touch engine allocation failed — raw touch "
+                         "events still delivered, no synthesis");
+            }
+        }
+        if (window->touch != NULL) {
+            fdk__touch_engine_feed(window->touch, event,
+                                   touch_synthesis_emit, window);
+        }
+        if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
+            return; /* destroyed by a synthesized click's routing */
+        }
     }
 
     /* ---- 1.1.4→1.2.2: geometry-change fallout ----

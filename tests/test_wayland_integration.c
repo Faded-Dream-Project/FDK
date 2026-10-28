@@ -64,6 +64,48 @@ static int g_rep_repeats = 0;
 static long long g_rep_first_ms = 0;
 static long long g_rep_press_ms = 0;
 
+/* Touch-slot capture (1.1.0, M-3): raw slot events + the synthesis
+ * the core engine layers on top (click pairs, scrolls). */
+typedef struct {
+    int touch_downs, touch_ups, touch_cancels;
+    int clicks, releases;
+    int scrolls;
+    fdk_f32 last_scroll_dx, last_scroll_dy;
+    fdk_pointf click_pos;
+} wl_touch_capture;
+static wl_touch_capture g_wl_touch;
+
+static void wl_touch_evt_cb(fdk_window *w, const fdk_event_data *ev,
+                            void *user) {
+    (void)w;
+    (void)user;
+    switch (ev->type) {
+    case FDK_EVENT_TOUCH_DOWN:
+        g_wl_touch.touch_downs++;
+        break;
+    case FDK_EVENT_TOUCH_UP:
+        g_wl_touch.touch_ups++;
+        break;
+    case FDK_EVENT_TOUCH_CANCEL:
+        g_wl_touch.touch_cancels++;
+        break;
+    case FDK_EVENT_POINTER_BUTTON_DOWN:
+        g_wl_touch.clicks++;
+        g_wl_touch.click_pos = ev->pointer_button.position;
+        break;
+    case FDK_EVENT_POINTER_BUTTON_UP:
+        g_wl_touch.releases++;
+        break;
+    case FDK_EVENT_POINTER_SCROLL:
+        g_wl_touch.scrolls++;
+        g_wl_touch.last_scroll_dx = ev->scroll.delta_x;
+        g_wl_touch.last_scroll_dy = ev->scroll.delta_y;
+        break;
+    default:
+        break;
+    }
+}
+
 static long long rep_now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -1704,6 +1746,75 @@ int main(void) {
                "entry undo/redo — driven through fdk_window_dispatch_"
                "event (sway headless cannot route wl_keyboard.key; "
                "real-key e2e is the X11 suite's)\n");
+    }
+
+    /* ---- Touch slots (1.1.0, M-3) ----
+     *
+     * sway headless's seat carries no touch capability (wlroots has
+     * no virtual-touch protocol), so the rig drives the REAL wl_touch
+     * listener bodies through the ops test seam — the test_key
+     * discipline: the bodies the protocol events would call, the
+     * same id→window routing, the same dispatch. The CORE engine
+     * (tap clicks, two-finger scroll) runs identically behind both
+     * backends; its full policy battery lives in tests/test_touch.c,
+     * and the X11 suite drives the XI2 twin of this same seam. */
+    {
+        fdk_window *tw = NULL;
+        fdk_window_options topts = { .title = "FDK touch test",
+                                     .width = 220, .height = 140 };
+        assert(fdk_ok(fdk_window_create(ctx, &topts, &tw)));
+        fdk_window_show(tw);
+        (void)fdk_pump_events(ctx, 100);
+
+        /* The capture rides the window callback; synthesized clicks
+         * arrive through the same dispatch as raw touch events. */
+        fdk_window_set_event_callback(tw, wl_touch_evt_cb, &g_wl_touch);
+        g_wl_touch = (wl_touch_capture){ 0 };
+        fdk_platform_window *tpw = tw->pwindow;
+        assert(ctx->ops->test_touch != NULL);
+
+        /* Tap: down + up in place -> raw pair + synthesized click. */
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 0, 1, 60.0, 50.0);
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 2, 1, 0, 0);
+        (void)fdk_pump_events(ctx, 60);
+        assert(g_wl_touch.touch_downs == 1);
+        assert(g_wl_touch.touch_ups == 1);
+        assert(g_wl_touch.clicks == 1);
+        assert(g_wl_touch.releases == 1);
+        assert(g_wl_touch.click_pos.x == 60.0f);
+        assert(g_wl_touch.click_pos.y == 50.0f);
+
+        /* Two-finger scroll: natural deltas, no phantom click. */
+        g_wl_touch = (wl_touch_capture){ 0 };
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 0, 10, 100.0, 100.0);
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 0, 11, 160.0, 100.0);
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 1, 10, 120.0, 140.0);
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 2, 10, 120.0, 140.0);
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 2, 11, 160.0, 100.0);
+        (void)fdk_pump_events(ctx, 60);
+        assert(g_wl_touch.scrolls == 1);
+        assert(g_wl_touch.last_scroll_dx == -10.0f);
+        assert(g_wl_touch.last_scroll_dy == -20.0f);
+        assert(g_wl_touch.clicks == 0);
+
+        /* Cancel: every slot dies, nothing synthesizes. */
+        g_wl_touch = (wl_touch_capture){ 0 };
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 0, 20, 30.0, 30.0);
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 3, 20, 0, 0);
+        (void)ctx->ops->test_touch(ctx->conn, tpw, 2, 20, 30.0, 30.0);
+        (void)fdk_pump_events(ctx, 60);
+        assert(g_wl_touch.touch_cancels == 1);
+        assert(g_wl_touch.clicks == 0);
+
+        /* Unknown surface: a down aimed at NULL drops cleanly. */
+        g_wl_touch = (wl_touch_capture){ 0 };
+        assert(ctx->ops->test_touch(ctx->conn, NULL, 0, 99, 5.0, 5.0) == 0);
+
+        fdk_window_set_event_callback(tw, NULL, NULL);
+        fdk_window_destroy(tw);
+        printf("[ok] wayland touch: tap->click, two-finger natural scroll, "
+               "cancel — through the real wl_touch listener bodies "
+               "(the test seam; sway's seat has no touch device)\n");
     }
 
     /* ---- Toplevel icon (1.1.0, M-4) ----

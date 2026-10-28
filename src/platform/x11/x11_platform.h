@@ -188,6 +188,16 @@ struct fdk_platform_connection {
     struct fdk_x11_gl *gl;
     int gl_tried;
 
+    /* XI2 touch (1.1.0, M-3): dlopen'd libXi + the X Input
+     * extension's opcode and 2.2-touch verdict. Loaded EAGERLY at
+     * connect (unlike the lazy GL lane: selecting XI_TouchBegin on
+     * windows must happen at CREATE time, so the capability must be
+     * known before the first window exists). NULL = no libXi / no
+     * extension / XI < 2.2 — windows then simply carry no touch
+     * selection, and touch events never arrive (the honest
+     * degradation; core input is unaffected). */
+    struct fdk_x11_xi2 *xi2;
+
     /* --- Resize cursors (1.1.4) ---
      *
      * Directional resize cursors, lazily created from the server's
@@ -568,6 +578,38 @@ int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
                                  fdk_i32 *out_x, fdk_i32 *out_y);
 void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge);
 void fdk_x11_cursor_shutdown(fdk_platform_connection *conn);
+
+/* XI2 touch (1.1.0, M-3; src/platform/x11/x11_xi2.c): dlopen'd
+ * libXi behind the touch event model. try_load pins the library
+ * and probes XI >= 2.2 (NULL = unavailable, sticky); select_window
+ * (from window create) selects XI_TouchBegin/Update/End;
+ * handle_cookie (from the dispatch loop's GenericEvent branch)
+ * translates one delivered cookie; test_touch drives the SAME
+ * translation+dispatch path with synthesized geometry (the
+ * Wayland test_touch twin). */
+struct fdk_x11_xi2 *fdk_x11_xi2_try_load(fdk_platform_connection *conn);
+void fdk_x11_xi2_shutdown(struct fdk_x11_xi2 *xi2);
+void fdk_x11_xi2_select_window(fdk_platform_connection *conn,
+                               unsigned long xwindow);
+int fdk_x11_xi2_handle_cookie(fdk_platform_connection *conn,
+                              XGenericEventCookie *cookie);
+int fdk_x11_xi2_test_touch(fdk_platform_connection *conn,
+                          fdk_platform_window *pwindow, int phase,
+                          uint32_t id, double x, double y);
+
+/* The module's record (x11_xi2.c owns the definition's twin — the
+ * dlopen handle, the extension opcode for GenericEvent matching,
+ * the 2.2-touch verdict, and the libXi function table). Only the
+ * opcode is read outside the module (the dispatch loop's cookie
+ * match). */
+struct fdk_x11_xi2 {
+    void *lib; /* dlopen handle; pinned for the process lifetime */
+    int opcode; /* the X Input extension's major opcode on this server */
+    int touch_ok; /* server speaks XI >= 2.2 (touch events exist) */
+    int warned_once; /* one INFO line per connection, not per window */
+    Status (*query_version)(Display *, int *, int *);
+    Status (*select_events)(Display *, Window, void *, int);
+};
 
 /* Phase 8 state helpers (x11_window.c), shared with x11_events.c's
  * PropertyNotify translation: */

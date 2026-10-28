@@ -122,6 +122,46 @@ typedef enum fdk_event_type {
     FDK_EVENT_DRAG_MOTION = 31,
     FDK_EVENT_DRAG_LEAVE = 32,
     FDK_EVENT_DRAG_DROP  = 33,
+
+    /* ---- Touch (1.1.0, M-3) ----
+     *
+     * Direct-touch contact tracking (touchscreens; trackpads report
+     * two-finger scrolling as ordinary FDK_EVENT_POINTER_SCROLL via
+     * the platform's own gesture recognition). Each contact is a
+     * SLOT: `id` identifies it from TOUCH_DOWN to TOUCH_UP/CANCEL,
+     * `position` is window-local LOGICAL coordinates like every
+     * pointer event. Multiple slots are simultaneously active (two
+     * fingers = two slots with distinct ids).
+     *
+     * FDK synthesizes on top of raw slots (the policy lives in the
+     * core, identical on both backends — see docs/platform-input.md):
+     *   - TAP: one slot, down-to-up within FDK_TOUCH_TAP_MS and
+     *     FDK_TOUCH_TAP_SLOP logical pixels of travel, synthesizes a
+     *     full left POINTER_BUTTON_DOWN + POINTER_BUTTON_UP pair at
+     *     the tap position (widgets and applications that only
+     *     handle pointer events work on touch for free).
+     *   - TWO-FINGER SCROLL: while exactly two slots are active, the
+     *     CENTROID's motion synthesizes FDK_EVENT_POINTER_SCROLL with
+     *     NATURAL-scrolling deltas (fingers drag down, content
+     *     follows: delta = -(centroid travel); the platform's
+     *     natural-scroll users get the flip they expect, the
+     *     conventional users invert in their settings like they
+     *     already do for trackpads).
+     * Raw TOUCH_* events are delivered alongside the synthesis —
+     * gesture-aware applications read them directly; plain
+     * widget applications never need to.
+     *
+     * Wayland: wl_touch translated 1:1 (surface-local coords are
+     * already logical). X11: XI2 touch (XI_TouchBegin/Update/End)
+     * through dlopen'd libXi, the GL lane's load discipline — absent
+     * libXi or XI < 2.2 means no touch events on that display, never
+     * an init failure. */
+    FDK_EVENT_TOUCH_DOWN   = 40,
+    FDK_EVENT_TOUCH_UP     = 41,
+    FDK_EVENT_TOUCH_MOTION = 42,
+    FDK_EVENT_TOUCH_CANCEL = 43, /* compositor aborted the whole
+                                    * gesture: all slots die, nothing
+                                    * is synthesized afterwards */
 } fdk_event_type;
 
 typedef struct fdk_configure_event {
@@ -275,6 +315,20 @@ typedef struct fdk_scroll_event {
     fdk_f32 delta_y;
 } fdk_scroll_event;
 
+/* ---- Touch slots (1.1.0, M-3) ---------------------------------------- */
+
+/* Tap-recognition constants (the documented policy; logical px and
+ * monotonic ms — see FDK_EVENT_TOUCH_DOWN above): within these
+ * bounds a single-slot contact is a TAP and synthesizes a click. */
+#define FDK_TOUCH_TAP_MS 300
+#define FDK_TOUCH_TAP_SLOP 10.0f
+
+typedef struct fdk_touch_event {
+    fdk_u32 id;            /* backend-assigned slot id, stable for the
+                              * contact's lifetime */
+    fdk_pointf position;   /* window-local, logical coordinates */
+} fdk_touch_event;
+
 /* Drag-and-drop payload. `offered_formats` is the OR of every
  * fdk_drag_format the SOURCE offers (fdk_dnd.h); `accepted_formats`
  * is its intersection with the formats this window registered —
@@ -320,6 +374,7 @@ typedef struct fdk_event_data {
         fdk_pointer_button_event pointer_button;
         fdk_scroll_event scroll;
         fdk_drag_event drag;
+        fdk_touch_event touch;
     };
 } fdk_event_data;
 

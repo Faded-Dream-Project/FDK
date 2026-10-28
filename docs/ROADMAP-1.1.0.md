@@ -45,15 +45,18 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 17 (S-2 and S-1 pending owner verification; M-4
-landed 2026-10-28) · PARTIAL 10 ·
-IN PROGRESS 1 (M-9) · MISSING 28 ·
+**Counts:** DONE 18 (S-2 and S-1 pending owner verification; M-4 and
+M-3 landed 2026-10-28) · PARTIAL 10 ·
+IN PROGRESS 1 (M-9) · MISSING 27 ·
 DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
 Re-verified 2026-10-27 (post-trayhost): the full battery plus the
 notifyd rig and the trayhost rig (all three phases green each).
-Re-verified 2026-10-28 (post-M-4): full dual-backend build zero
-warnings, make test, make test-x11 (identity leg green), sway rig
-(WAYLAND RIG PASS incl. the toplevel-icon leg), verify-exports 799.
+Re-verified 2026-10-28 (post-M-4/M-3): full dual-backend build zero
+warnings, make test, make test-x11 (identity + XI2-touch legs green;
+the 12 pre-existing tolerated MIT-SHM warnings traced to the BASE
+commit ec0b2f2's own runs under direct Xvfb — environmental Xvfb
+XID-base recycling, not a regression), the sway rig (WAYLAND RIG
+PASS incl. the toplevel-icon and touch legs), verify-exports 799.
 
 **Phase 2 owner directives** (the mission's lettered tasks,
 tracked beside the register; the register's 62-item math is
@@ -81,7 +84,7 @@ unaffected):
 | A-13 | outside-click dismissal, real serial | **DONE** | the core wl suite's menu leg drives xdg_popup.grab with REAL injector serials against sway: "outside click dismissed" (tests/test_wayland_integration.c) | owner's desktop: dismissal on layer popups specifically |
 | B-01 | IME | **PARTIAL** (X11 compose) / **MISSING** (Wayland) | no text-input-v3 binding; XIM `PreeditNothing`; entry/TextView preedit groundwork renders it | M-1 |
 | B-02 | text shaping | **DONE (level 1)** | M-2 shipped: the dlopen'd HarfBuzz + FriBidi + charset-filtered fontconfig fallback pipeline (src/text/shaping.c, docs/text.md "Complex-script shaping"); every text consumer reads shaped placements; tests/test_shaping.c pins both postures incl. the Latin compatibility re-exec; level 2 (paragraph bidi, RTL caret granularity, justification) stays open. FOLLOW-UP SHIPPED: CFF-flavored OpenType ('OTTO') renders through the native Type 2 module (src/text/cff.c, D-011) — the Arch tofu report closed; tests/test_cff.c pins dual-decoder vertex agreement, seac, and the fuzz fence | — |
-| B-03 | touch | **MISSING** | no wl_touch / XI2 touch / event types | M-3 |
+| B-03 | touch | **DONE** | M-3 shipped: FDK_EVENT_TOUCH_* slots + the core tap/two-finger-scroll engine (src/window/touch.c, the policy pinned headless by tests/test_touch.c); wl_touch on Wayland (id→window map); XI2 touch via dlopen'd libXi on X11 ($FDK_NO_XI2 opts out); both translate paths driven through the test_touch ops seam; real touch hardware = TESTING-ON-DESKTOP.md | — |
 | B-04 | window icons + PID | **DONE** | fdk_window_set_icon + fdk_window_set_role (fdk_window.h); X11: _NET_WM_ICON byte-exact round-trip pinned by the integration rig (second raw-Xlib connection), _NET_WM_PID + WM_CLIENT_MACHINE + WM_WINDOW_ROLE at create ("main"/"popup" defaults, set_role rewrites); Wayland: xdg-toplevel-icon-v1 bound where offered (square-buffer letterbox, frozen-pool discipline, icon+buffer pair owned by the window), manager-absent = the documented no-op; sway rig proves connection health both worlds | real-desktop taskbars/docks (TESTING-ON-DESKTOP.md) |
 | B-05 | X11 RandR (core) | **MISSING** | x11_connection.c: one screen, no output model | M-6 |
 | B-06 | dark mode following | **DONE** [VERIFIED-CHANGED: audit said partial] | XSETTINGS `Gtk/ColorScheme` (x11_xsettings.c) + `org.freedesktop.appearance` portal on the native client; live: "SettingChanged flips the scheme + theme live" — d2a253f | — |
@@ -100,7 +103,7 @@ unaffected):
 | B-19 | session restore protocols | **PARTIAL** | typed prefs store; no WM_SAVE_YOURSELF / xdg session | D-5 |
 | M-1 | IME both backends | **MISSING** | = B-01 | the whole item |
 | M-2 | shaping level 1 | **DONE** | = B-02 (level 1; level 2 open) | — |
-| M-3 | touch basics | **MISSING** | = B-03 | the whole item |
+| M-3 | touch basics | **DONE** | = B-03 (slots, tap→click, two-finger scroll; both backends; policy battery + seams) | — |
 | M-4 | window identity | **DONE** | = B-04 (icons/PID part); activation rides S-6 | — |
 | M-5 | fdk-shell outputs | **DONE** (rc2, 0.2.0) | live sway output hotplug/metrics legs + namespace + `_FDK_WM_LAYER` — d2bc0de | — |
 | M-6 | X11 multi-monitor | **MISSING** | = A-03/B-05 | the whole item |
@@ -290,7 +293,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 |---|------|-------------|--------|
 | M-1 | **IME, both backends**: bind text-input-v3 (enable/surrounding-text/commit/preedit/deactivate on focus changes), deliver new IME events, wire Entry/TextView preedit (the groundwork API already renders it); X11: XIM preedit callbacks (`XIMPreeditCallbacks`) driving the same events. | B-01 | M |
 | M-2 | **Text shaping level 1**: HarfBuzz via runtime dlopen (the GLX/fontconfig posture) + FriBidi (dlopen) + per-script font fallback chain through fontconfig; Entry/TextView/Label/markup all draw shaped runs. Color emoji explicitly NOT in M-2 (see C-3). **[DONE — shipped with the placement seam (one shaped structure every consumer reads), the 26.6-scaled stb-backed hb font funcs, cluster-attributed wrap/ellipsize, the shaped Entry caret + hit-test, and tests/test_shaping.c running both postures]** | B-02 | M–L |
-| M-3 | **Touch basics**: wl_touch binding → touch events (slots, tap → click synthesis policy documented, two-finger scroll); X11 XI2 touch via dlopen'd libXi with the same event model. Gestures/tablets stay deferred. | B-03 | M |
+| M-3 | **Touch basics**: wl_touch binding → touch events (slots, tap → click synthesis policy documented, two-finger scroll); X11 XI2 touch via dlopen'd libXi with the same event model. Gestures/tablets stay deferred. **[DONE 2026-10-28: the core slot engine with tap-click synthesis + natural-delta two-finger scroll + the multi_ever phantom-tap latch; wl_touch bound + the id→window map; XI2 touch via dlopen'd libXi with $FDK_NO_XI2; tests/test_touch.c pins every policy rule headless, both translate paths driven through the test_touch seam, XI 2.2 negotiated on the rig's Xvfb]** | B-03 | M |
 | M-4 | **Window identity**: `_NET_WM_ICON` + xdg-toplevel-icon-v1 (set both, harmless where unsupported) + `_NET_WM_PID` + `WM_CLIENT_MACHINE` + `WM_WINDOW_ROLE`; `fdk_window_set_icon` API. **[DONE 2026-10-28: both setters + create-time PID/machine/role; X11 property round-trip rig; Wayland protocol wiring + honest no-op]** | B-04 (icons/PID part) | S |
 | M-5 | **fdk-shell outputs**: **DONE (rc2, fdk-shell 0.2.0)** — live output events (ADDED/REMOVED/CHANGED; proven against sway's create_output/mode/unplug IPC) + per-output metrics (position, logical size, scale, physical mm — fdk_shell_output_get_info); configurable namespace (Wayland's zwlr namespace / X11's WM_CLASS res_class); `_FDK_WM_LAYER` set on every layer. X11 side: the screen as one output with real metrics; per-output X11 records land with M-6's RandR. | A-01, A-02, A-04, A-09 | M |
 | M-6 | **X11 multi-monitor**: RandR output enumeration + change events in core (app-facing output API, shared with M-5's fdk-shell surface) + per-output docks in fdk-shell. | A-03, B-05 | M |

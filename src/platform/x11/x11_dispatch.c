@@ -196,6 +196,28 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
+        /* XI2 touch (1.1.0, M-3): GenericEvents (type 35) carry the
+         * X Input protocol; the cookie payload needs XGetEventData
+         * (libX11 itself). Matched by the extension opcode and fully
+         * handled by the dlopen'd-libXi module (x11_xi2.c), which
+         * resolves its own target window from the payload. The
+         * cookie data is freed HERE — the module never owns it. */
+        if (xevent.type == 35 /* GenericEvent */) {
+            if (conn->xi2 != NULL &&
+                xevent.xcookie.extension == conn->xi2->opcode) {
+                if (XGetEventData(conn->display, &xevent.xcookie)) {
+                    (void)fdk_x11_xi2_handle_cookie(conn, &xevent.xcookie);
+                    XFreeEventData(conn->display, &xevent.xcookie);
+                    processed++;
+                }
+                continue;
+            }
+            /* Someone else's GenericEvent (another extension's):
+             * nothing to translate, nothing to free (we never fetched
+             * the cookie). */
+            continue;
+        }
+
         /* Root PropertyNotify (1.1.0-rc1): the popup watchdog's
          * desktop-change input. _NET_CURRENT_DESKTOP changes arrive
          * on the ROOT window (PropertyChangeMask selected at

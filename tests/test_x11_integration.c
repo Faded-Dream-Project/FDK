@@ -54,6 +54,7 @@
  * documents free() as equally correct, but the test uses the same
  * allocator the library used, under ASan). */
 #include "core/alloc_internal.h"
+#include "core/context_internal.h" /* conn: the XI2 verdict read (M-3) */
 #include "test_icon_pngs.h" /* solid-color fixture icons (the icon-
                              * theme pixel groups below) */
 
@@ -508,6 +509,130 @@ static void test_window_identity(void) {
     fdk_window_destroy(win);
     fdk_shutdown(ctx);
     printf("[ok] X11 window identity: PID + client machine + role + icon round-trip\n");
+}
+
+/* ---- Touch (1.1.0, M-3) -------------------------------------------------
+ *
+ * The XI2 module is loaded eagerly at connect (dlopen'd libXi + the
+ * XI 2.2 probe). This leg drives the REAL translate+dispatch path
+ * through fdk_x11_xi2_test_touch — the same xi2_dispatch_touch the
+ * GenericEvent branch calls — so the engine, the scale conversion,
+ * and the window dispatch all run exactly as a hardware touchscreen
+ * would drive them. (Xvfb speaks XI 2.4; libXi.so.6 ships with the
+ * base image. Real touch HARDWARE is the owner's desktop check.)
+ */
+typedef struct {
+    int touch_downs, touch_ups, touch_motions, touch_cancels;
+    int clicks, releases;
+    int scrolls;
+    fdk_f32 last_scroll_dx, last_scroll_dy;
+} touch_capture;
+
+static void touch_evt_cb(fdk_window *w, const fdk_event_data *event,
+                         void *user) {
+    (void)w;
+    touch_capture *cap = user;
+    switch (event->type) {
+    case FDK_EVENT_TOUCH_DOWN:
+        cap->touch_downs++;
+        break;
+    case FDK_EVENT_TOUCH_UP:
+        cap->touch_ups++;
+        break;
+    case FDK_EVENT_TOUCH_MOTION:
+        cap->touch_motions++;
+        break;
+    case FDK_EVENT_TOUCH_CANCEL:
+        cap->touch_cancels++;
+        break;
+    case FDK_EVENT_POINTER_BUTTON_DOWN:
+        cap->clicks++;
+        break;
+    case FDK_EVENT_POINTER_BUTTON_UP:
+        cap->releases++;
+        break;
+    case FDK_EVENT_POINTER_SCROLL:
+        cap->scrolls++;
+        cap->last_scroll_dx = event->scroll.delta_x;
+        cap->last_scroll_dy = event->scroll.delta_y;
+        break;
+    default:
+        break;
+    }
+}
+
+static void test_xi2_touch(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, NULL, &win)));
+    touch_capture cap = { 0 };
+    fdk_window_set_event_callback(win, touch_evt_cb, &cap);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+
+    /* The module verdict: Xvfb + libXi -> loaded and 2.2+ capable.
+     * (The conn cast is the sanctioned x11-internal reach this test
+     * file already uses — it includes x11_platform.h.) */
+    struct fdk_platform_connection *xconn = (struct fdk_platform_connection *)ctx->conn;
+    assert(xconn != NULL);
+    if (xconn->xi2 != NULL) {
+        assert(xconn->xi2->touch_ok != 0);
+        printf("    (XI2: loaded, opcode %d, touch capable)\n",
+               xconn->xi2->opcode);
+    } else {
+        printf("    (XI2: not available — translate-path legs only)\n");
+    }
+
+    /* The translate path is drivable regardless of the module's
+     * load verdict (the seam calls xi2_dispatch_touch directly):
+     * a full tap through the XI geometry space. */
+    fdk_platform_window *pw = win->pwindow;
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 0, 7, 120.0, 90.0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 2, 7, 122.0, 92.0) == 1);
+    assert(cap.touch_downs == 1);
+    assert(cap.touch_ups == 1);
+    assert(cap.clicks == 1);
+    assert(cap.releases == 1);
+
+    /* Drag: over slop — a touch, but no click. */
+    touch_capture cap2 = { 0 };
+    fdk_window_set_event_callback(win, touch_evt_cb, &cap2);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 0, 8, 50.0, 50.0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 1, 8, 90.0, 130.0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 2, 8, 90.0, 130.0) == 1);
+    assert(cap2.touch_motions == 1);
+    assert(cap2.clicks == 0);
+
+    /* Two-finger scroll through the XI path: natural deltas. */
+    touch_capture cap3 = { 0 };
+    fdk_window_set_event_callback(win, touch_evt_cb, &cap3);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 0, 20, 100.0, 100.0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 0, 21, 160.0, 100.0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 1, 20, 120.0, 140.0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 2, 20, 120.0, 140.0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 2, 21, 160.0, 100.0) == 1);
+    assert(cap3.touch_downs == 2);
+    assert(cap3.scrolls == 1);
+    assert(cap3.last_scroll_dx == -10.0f);
+    assert(cap3.last_scroll_dy == -20.0f);
+    assert(cap3.clicks == 0); /* multi gesture: no phantom tap */
+
+    /* Cancel path. */
+    touch_capture cap4 = { 0 };
+    fdk_window_set_event_callback(win, touch_evt_cb, &cap4);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 0, 30, 10.0, 10.0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 3, 30, 0, 0) == 1);
+    assert(fdk_x11_xi2_test_touch(ctx->conn, pw, 2, 30, 10.0, 10.0) == 1);
+    assert(cap4.touch_cancels == 1);
+    assert(cap4.clicks == 0);
+
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 XI2 touch: tap->click, drag, two-finger scroll, cancel "
+           "— all through the real translate path\n");
 }
 
 static fdk_color wcol(int r, int g, int b);
@@ -11326,6 +11451,7 @@ int main(void) {
     test_window_create_show_destroy();
     test_window_set_title();
     test_window_identity();
+    test_xi2_touch();
     test_resize_delivers_configure_event();
     test_resize_storm_backlog_drains();
     test_close_request_delivered();

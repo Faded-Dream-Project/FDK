@@ -287,6 +287,13 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
      * any window pays the one-shot dlopen. */
     conn->gl = NULL;
     conn->gl_tried = 0;
+
+    /* XI2 touch (1.1.0, M-3): loaded EAGERLY — windows select their
+     * touch masks at CREATE time, so the capability must be known
+     * before the first window exists (contrast the lazy GL lane
+     * above). NULL is sticky and harmless: no touch selection, no
+     * touch events, core input unaffected. */
+    conn->xi2 = getenv("FDK_NO_XI2") ? NULL : fdk_x11_xi2_try_load(conn);
     if (getenv("FDK_NO_MIT_SHM") == NULL) {
         int major = 0, minor = 0, pixmaps = 0;
         if (XShmQueryVersion(display, &major, &minor,
@@ -455,6 +462,11 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
      * stays pinned for process lifetime (x11_gl.c header comment). */
     fdk_x11_gl_shutdown(conn->gl);
     conn->gl = NULL;
+
+    /* XI2 touch (M-3): same pinned-library discipline — the record
+     * dies, libXi stays loaded for the process lifetime. */
+    fdk_x11_xi2_shutdown(conn->xi2);
+    conn->xi2 = NULL;
 
     free(conn->app_id);
     conn->app_id = NULL;

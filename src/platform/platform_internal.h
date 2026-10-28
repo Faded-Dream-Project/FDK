@@ -175,6 +175,18 @@ typedef struct fdk_platform_ops {
      * xkb_state exists afterwards (the suite's go signal). */
     int (*test_default_keymap)(fdk_platform_connection *conn);
 
+    /* OPTIONAL test seam (1.1.0, M-3): the REAL wl_touch listener
+     * bodies, driven directly — sway headless's seat carries no
+     * touch capability (wlroots has no virtual-touch protocol), so
+     * the rig cannot reach them through the wire. phase:
+     * 0=down 1=motion 2=up 3=cancel; (x,y) logical surface-local
+     * (ignored for up/cancel); `pwin` names the down target's
+     * surface. Returns 1 when the down was deliverable. Only the
+     * Wayland backend implements it. */
+    int (*test_touch)(fdk_platform_connection *conn,
+                      fdk_platform_window *pwin, int phase,
+                      uint32_t id, double x, double y);
+
     /* --- Window operations --- */
 
     /* Creates a window. `parent` is NULL for top-levels; for popup
