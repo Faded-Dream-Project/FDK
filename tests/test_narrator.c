@@ -18,6 +18,7 @@
  *   limits       — subscriber-slot exhaustion and recovery
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_a11y.h"
 #include "fdk/fdk_i18n.h"

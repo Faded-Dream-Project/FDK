@@ -24,6 +24,7 @@
  * a leak in a tool is a failed exit code here, not a silent pass.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 
 #include <assert.h>

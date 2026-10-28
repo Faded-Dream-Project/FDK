@@ -16,6 +16,7 @@
  * exercises blending, so readback comparison is exact.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_surface.h"
 
@@ -56,11 +57,11 @@ static void test_offscreen_create_info_destroy(void) {
 
     fdk_surface_info info;
     assert(fdk_ok(fdk_surface_get_info(s, &info)));
-    assert(info.width == 100);
-    assert(info.height == 60);
-    assert(info.stride >= 100);          /* padded stride, see header */
+    CHECK_EQ(info.width, 100, "info.width");
+    CHECK_EQ(info.height, 60, "info.height");
+    CHECK_GE(info.stride, 100, "info.stride");          /* padded stride, see header */
     assert((info.stride & 15) == 0);     /* 16-px alignment by design */
-    assert(info.format == FDK_SURFACE_FORMAT_XRGB8888);
+    CHECK_EQ(info.format, FDK_SURFACE_FORMAT_XRGB8888, "info.format");
     assert(info.pixels != NULL);
 
     /* Fresh offscreen memory is zeroed (fdk_alloc), and writing
@@ -157,7 +158,7 @@ static void test_draw_rect_no_double_blend_corners(void) {
 
     fdk_u32 corner = px_at(s, 10, 10) & 0x00FFFFFFu;
     fdk_u32 edge = px_at(s, 30, 10) & 0x00FFFFFFu;
-    assert(corner == edge); /* corner == edge => no double blend */
+    CHECK_EQ(corner, edge, "corner"); /* corner == edge => no double blend */
     assert(corner == pack(128, 128, 128) || corner == pack(127, 127, 127) ||
            corner == pack(129, 129, 129)); /* 0.5*255 rounded */
     assert((px_at(s, 30, 30) & 0x00FFFFFFu) == pack(0, 0, 0)); /* interior */
@@ -184,7 +185,7 @@ static void test_gradient_interpolation(void) {
     assert(last == pack(255, 255, 255));
     /* Monotone and roughly centered (127..129 everywhere). */
     fdk_u32 m = (mid >> 16) & 0xFFu;
-    assert(m >= 126 && m <= 129);
+    CHECK_RANGE(m, 126, 129, "m");
     /* Rows strictly increase. */
     assert(px_at(s, 10, 10) < px_at(s, 10, 11));
     assert(px_at(s, 10, 50) < px_at(s, 10, 51));
@@ -297,7 +298,7 @@ static void test_rounded_rect_fill_and_outline(void) {
                                   5, half);
     fdk_u32 arc = px_at(s, 5 + 5, 62) & 0x00FFFFFFu; /* arc endpoint-ish */
     fdk_u32 edge = px_at(s, 30, 62) & 0x00FFFFFFu;   /* straight top edge */
-    assert(arc == edge); /* same single blend */
+    CHECK_EQ(arc, edge, "arc"); /* same single blend */
     assert(edge == pack(128, 128, 128) || edge == pack(127, 127, 127) ||
            edge == pack(129, 129, 129));
 
@@ -358,7 +359,7 @@ static void test_clip_stack(void) {
     assert(fdk_surface_get_clip(s).x == 20); /* back to outer */
     fdk_surface_pop_clip(s);
     inf = fdk_surface_get_clip(s);
-    assert(inf.x == INT32_MIN); /* back to infinite */
+    CHECK_EQ(inf.x, INT32_MIN, "inf.x"); /* back to infinite */
 
     /* Pop on empty stack = documented no-op, no crash. */
     fdk_surface_pop_clip(s);
@@ -580,7 +581,7 @@ static void test_argb_surface_and_blending(void) {
                                             FDK_SURFACE_FORMAT_ARGB8888, &s)));
     fdk_surface_info info;
     assert(fdk_ok(fdk_surface_get_info(s, &info)));
-    assert(info.format == FDK_SURFACE_FORMAT_ARGB8888);
+    CHECK_EQ(info.format, FDK_SURFACE_FORMAT_ARGB8888, "info.format");
     assert(px_at32(s, 5, 5) == 0x00000000u);
 
     /* Unknown format values are refused. */
@@ -724,7 +725,7 @@ static void test_image_decode(void) {
     fdk_surface_info info;
     assert(fdk_ok(fdk_surface_get_info(s, &info)));
     assert(info.width == 8 && info.height == 8);
-    assert(info.format == FDK_SURFACE_FORMAT_ARGB8888);
+    CHECK_EQ(info.format, FDK_SURFACE_FORMAT_ARGB8888, "info.format");
 
     /* Known pixels: red, blue50, green, transparent. */
     assert(px_at32(s, 0, 0) == 0xFFFF0000u);
@@ -968,9 +969,9 @@ static void test_transformed_argb_exact_blit(void) {
     int hr = (int)((half >> 16) & 0xFFu);
     int hg = (int)((half >> 8) & 0xFFu);
     int hb = (int)(half & 0xFFu);
-    assert(hr >= 3 && hr <= 6);
-    assert(hg >= 3 && hg <= 6);
-    assert(hb >= 130 && hb <= 134);
+    CHECK_RANGE(hr, 3, 6, "hr");
+    CHECK_RANGE(hg, 3, 6, "hg");
+    CHECK_RANGE(hb, 130, 134, "hb");
     /* The pixel right of it (fully transparent margin) stays bg. */
     assert(is_color(dst, 5, 0, pack(9, 9, 9)));
 
@@ -1055,11 +1056,11 @@ static void test_aa_primitives(void) {
                 int pg = (int)((p >> 8) & 0xFFu);
                 int pb = (int)(p & 0xFFu);
                 assert(pr <= 200 && pg <= 30 && pb <= 90);
-                assert(pr + pg + pb > 0);
+                CHECK_GT(pr + pg + pb, 0, "pr + pg + pb");
             }
         }
     }
-    assert(touched > 25); /* it is a line, not a point */
+    CHECK_GT(touched, 25, "touched"); /* it is a line, not a point */
 
     /* AA circle: center pixel fully covered; pixels at distance r+2
      * untouched; coverage monotone along a radius. */
@@ -1077,7 +1078,7 @@ static void test_aa_primitives(void) {
     for (int d = 0; d <= 10; d++) {
         fdk_u32 p = px_at(aa, 15 + d, 15) & 0x00FFFFFFu;
         int pr = (int)((p >> 16) & 0xFFu);
-        assert(pr <= prev + 1); /* coverage non-increasing outward */
+        CHECK_LE(pr, prev + 1, "pr"); /* coverage non-increasing outward */
         prev = pr;
     }
 
@@ -1123,7 +1124,7 @@ static void test_aa_primitives(void) {
      * covered (monotone ramp away from the shape). */
     fdk_u32 outer = px_at(aa, 4, 2) & 0x00FFFFFFu;
     int orr = (int)((outer >> 16) & 0xFFu);
-    assert(orr < cer);
+    CHECK_LT(orr, cer, "orr");
 
     fdk_surface_destroy(crisp2);
     fdk_surface_destroy(crisp);
@@ -1179,7 +1180,7 @@ static void test_aa_rounded_outline(void) {
     assert(cer > 0 && cer < 200);
     fdk_u32 outer2 = px_at(aa, 3, 3) & 0x00FFFFFFu;
     int o2r = (int)((outer2 >> 16) & 0xFFu);
-    assert(o2r < cer);
+    CHECK_LT(o2r, cer, "o2r");
     /* Nothing escapes the rect expanded by 2 (the iteration bound
      * itself). */
     for (int y = 0; y < 24; y++) {

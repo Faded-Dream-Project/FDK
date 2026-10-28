@@ -18,6 +18,7 @@
  * the behavioral ones go through the public measure/draw surface.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_text.h"
 

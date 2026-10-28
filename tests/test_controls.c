@@ -11,6 +11,7 @@
  * need real glyphs).
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
@@ -168,8 +169,8 @@ static void test_label(void) {
             }
         }
     }
-    assert(ink > 5);
-    assert(outside == 0); /* nothing paints outside the label */
+    CHECK_GT(ink, 5, "ink");
+    CHECK_EQ(outside, 0, "outside"); /* nothing paints outside the label */
 
     /* NULL font: zero natural size, no crash */
     fdk_widget *lf = NULL;
@@ -212,34 +213,34 @@ static void test_button(void) {
     fdk_widget_measure(btn, &nat);
     fdk_text_metrics tm;
     assert(fdk_ok(fdk_font_measure_utf8(g_font, "Click", 5, &tm)));
-    assert(nat.width >= tm.advance_width + 24);
+    CHECK_GE(nat.width, tm.advance_width + 24, "nat.width");
 
     /* click inside activates */
     float cx = (float)(b.x + b.width / 2);
     float cy = (float)(b.y + b.height / 2);
     click(root, cx, cy);
-    assert(btn_activates == 1);
+    CHECK_EQ(btn_activates, 1, "btn_activates");
 
     /* press inside, release far outside: NO activation */
     fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, cx, cy);
     (void)fdk_widget_tree_handle_event(root, &down);
     fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 390.0f, 290.0f);
     (void)fdk_widget_tree_handle_event(root, &up);
-    assert(btn_activates == 1);
+    CHECK_EQ(btn_activates, 1, "btn_activates");
 
     /* keyboard: focus + Space and Enter activate */
     assert(fdk_widget_focus(btn));
     fdk_event_data sp = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_SPACE);
     (void)fdk_widget_tree_handle_event(root, &sp);
-    assert(btn_activates == 2);
+    CHECK_EQ(btn_activates, 2, "btn_activates");
     fdk_event_data en = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_ENTER);
     (void)fdk_widget_tree_handle_event(root, &en);
-    assert(btn_activates == 3);
+    CHECK_EQ(btn_activates, 3, "btn_activates");
 
     /* disabled: input-transparent, no activation */
     fdk_widget_set_enabled(btn, false);
     click(root, cx, cy);
-    assert(btn_activates == 3);
+    CHECK_EQ(btn_activates, 3, "btn_activates");
     fdk_widget_set_enabled(btn, true);
 
     /* set_text re-measures */
@@ -271,8 +272,8 @@ static void test_button_roles(void) {
     fdk_widget_arrange(destructive, (fdk_rect){270, 10, 120, 34});
 
     /* Default role is NORMAL; getters see the live state. */
-    assert(fdk_button_get_role(plain) == FDK_BUTTON_ROLE_NORMAL);
-    assert(fdk_button_get_role(suggested) == FDK_BUTTON_ROLE_NORMAL);
+    CHECK_EQ(fdk_button_get_role(plain), FDK_BUTTON_ROLE_NORMAL, "fdk_button_get_role(plain)");
+    CHECK_EQ(fdk_button_get_role(suggested), FDK_BUTTON_ROLE_NORMAL, "fdk_button_get_role(suggested)");
     assert(!fdk_button_is_checked(plain));
 
     fdk_button_set_role(suggested, FDK_BUTTON_ROLE_SUGGESTED);
@@ -284,7 +285,7 @@ static void test_button_roles(void) {
 
     /* Unknown enum values are ignored (documented). */
     fdk_button_set_role(plain, (fdk_button_role)99);
-    assert(fdk_button_get_role(plain) == FDK_BUTTON_ROLE_NORMAL);
+    CHECK_EQ(fdk_button_get_role(plain), FDK_BUTTON_ROLE_NORMAL, "fdk_button_get_role(plain)");
 
     /* Pixel proof: each role paints its own fill. Sample the button
      * centers, clear of the radius-8 corners and the label ink
@@ -326,18 +327,18 @@ static void test_button_roles(void) {
     fdk_button_set_on_activate(suggested, on_btn_activate, NULL);
     btn_activates = 0;
     click(root, 200.0f, 27.0f);
-    assert(btn_activates == 1);
+    CHECK_EQ(btn_activates, 1, "btn_activates");
 
     /* Argument safety: non-buttons are inert. */
     fdk_button_set_role(NULL, FDK_BUTTON_ROLE_SUGGESTED);
     fdk_button_set_checked(NULL, true);
-    assert(fdk_button_get_role(NULL) == FDK_BUTTON_ROLE_NORMAL);
+    CHECK_EQ(fdk_button_get_role(NULL), FDK_BUTTON_ROLE_NORMAL, "fdk_button_get_role(NULL)");
     assert(!fdk_button_is_checked(NULL));
     fdk_widget *lbl = NULL;
     assert(fdk_ok(fdk_label_create(root, g_font, "x", &lbl)));
     fdk_button_set_role(lbl, FDK_BUTTON_ROLE_SUGGESTED);
     fdk_button_set_checked(lbl, true);
-    assert(fdk_button_get_role(lbl) == FDK_BUTTON_ROLE_NORMAL);
+    CHECK_EQ(fdk_button_get_role(lbl), FDK_BUTTON_ROLE_NORMAL, "fdk_button_get_role(lbl)");
     assert(!fdk_button_is_checked(lbl));
 
     fdk_surface_destroy(s);
@@ -378,7 +379,7 @@ static void test_toggle_and_checkbox(void) {
     fdk_widget_measure(tog, &nat);
     fdk_text_metrics tm;
     assert(fdk_ok(fdk_font_measure_utf8(g_font, "Dark mode", 9, &tm)));
-    assert(nat.width >= 34 + 8 + tm.advance_width - 2);
+    CHECK_GE(nat.width, 34 + 8 + tm.advance_width - 2, "nat.width");
 
     assert(!fdk_toggle_is_checked(tog));
     click(root, (float)(tb.x + 10), (float)(tb.y + tb.height / 2));
@@ -393,7 +394,7 @@ static void test_toggle_and_checkbox(void) {
     fdk_toggle_set_checked(tog, true);
     assert(fdk_toggle_is_checked(tog) && toggle_changes == 3);
     fdk_toggle_set_checked(tog, true); /* no-op: already checked */
-    assert(toggle_changes == 3);
+    CHECK_EQ(toggle_changes, 3, "toggle_changes");
 
     /* Space activates the focused toggle */
     assert(fdk_widget_focus(tog));
@@ -420,7 +421,7 @@ static void test_toggle_and_checkbox(void) {
             diff++;
         }
     }
-    assert(diff > 4); /* the knob actually moved */
+    CHECK_GT(diff, 4, "diff"); /* the knob actually moved */
 
     /* checkbox: same semantics */
     fdk_widget *cb = NULL;
@@ -488,7 +489,7 @@ static void test_radio_group(void) {
     assert(fdk_radio_is_checked(a) && radio_events == 1);
     fdk_radio_set_checked(b, true);
     assert(fdk_radio_is_checked(b) && !fdk_radio_is_checked(a));
-    assert(radio_events == 3); /* a: false, b: true */
+    CHECK_EQ(radio_events, 3, "radio_events"); /* a: false, b: true */
 
     /* click c: group-wide exclusivity through real input */
     fdk_rect cb3 = fdk_widget_get_bounds(c);
@@ -496,7 +497,7 @@ static void test_radio_group(void) {
     click(root, (float)(cb3.x + 8), (float)(cb3.y + cb3.height / 2));
     assert(fdk_radio_is_checked(c));
     assert(!fdk_radio_is_checked(b));
-    assert(radio_events == 1); /* only c has a callback */
+    CHECK_EQ(radio_events, 1, "radio_events"); /* only c has a callback */
 
     /* the OTHER group is untouched */
     assert(!fdk_radio_is_checked(x) && !fdk_radio_is_checked(y));
@@ -507,7 +508,7 @@ static void test_radio_group(void) {
     /* re-checking the checked radio is a no-op */
     radio_events = 0;
     fdk_radio_set_checked(c, true);
-    assert(radio_events == 0);
+    CHECK_EQ(radio_events, 0, "radio_events");
 
     fdk_widget_destroy(root);
     printf("[ok] radio: parent-scoped groups, exclusivity via program "
@@ -562,10 +563,10 @@ static void test_label_modes(void) {
     fdk_widget_set_natural_size(w, 120, 0);
     fdk_size nat;
     fdk_widget_measure(w, &nat);
-    assert(nat.width == 120);
-    assert(nat.height >= 2 * pitch); /* wraps to several lines */
+    CHECK_EQ(nat.width, 120, "nat.width");
+    CHECK_GE(nat.height, 2 * pitch, "nat.height"); /* wraps to several lines */
     fdk_i32 lines_nat = nat.height / pitch;
-    assert(lines_nat * pitch == nat.height); /* integral line count */
+    CHECK_EQ(lines_nat * pitch, nat.height, "lines_nat * pitch"); /* integral line count */
 
     fdk_widget_arrange(w, (fdk_rect){10, 10, 120, nat.height});
     assert(fdk_label_get_line_count(w) == (size_t)lines_nat);
@@ -574,7 +575,7 @@ static void test_label_modes(void) {
     fdk_widget_arrange(w, (fdk_rect){10, 10, 60, 400});
     assert(fdk_label_get_line_count(w) > (size_t)lines_nat);
     fdk_widget_arrange(w, (fdk_rect){10, 10, 400, 400});
-    assert(fdk_label_get_line_count(w) == 1);
+    CHECK_EQ(fdk_label_get_line_count(w), 1, "fdk_label_get_line_count(w)");
 
     /* Painted wrapped ink spans multiple line pitches and stays in
      * the horizontal band. */
@@ -586,9 +587,9 @@ static void test_label_modes(void) {
     int min_x = 0, max_x = 0;
     ink_extent_x(s, 10, 10 + 6 * pitch, &min_x, &max_x);
     assert(min_x >= 10 && min_x < 10 + 10); /* starts at the left edge */
-    assert(max_x < 10 + 120 + 4);           /* never past the width  */
+    CHECK_LT(max_x, 10 + 120 + 4, "max_x");           /* never past the width  */
     int rows = ink_rows(s, 10, 10 + 6 * pitch);
-    assert(rows > pitch); /* ink across more than one line box */
+    CHECK_GT(rows, pitch, "rows"); /* ink across more than one line box */
     fdk_surface_destroy(s);
 
     /* ELLIPSIZE: full text when wide, truncated ink when narrow. */
@@ -603,7 +604,7 @@ static void test_label_modes(void) {
     /* wide: everything shows */
     fdk_widget_arrange(w, (fdk_rect){10, 10, whole.advance_width + 4,
                                      pitch});
-    assert(fdk_label_get_line_count(w) == 1);
+    CHECK_EQ(fdk_label_get_line_count(w), 1, "fdk_label_get_line_count(w)");
     s = NULL;
     assert(fdk_ok(fdk_surface_create(400, 300, &s)));
     fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
@@ -616,14 +617,14 @@ static void test_label_modes(void) {
      * at the right end */
     fdk_i32 narrow = whole.advance_width / 2;
     fdk_widget_arrange(w, (fdk_rect){10, 10, narrow, pitch});
-    assert(fdk_label_get_line_count(w) == 1);
+    CHECK_EQ(fdk_label_get_line_count(w), 1, "fdk_label_get_line_count(w)");
     s = NULL;
     assert(fdk_ok(fdk_surface_create(400, 300, &s)));
     fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
     fdk_widget_tree_paint(root, s);
     ink_extent_x(s, 10, 10 + pitch, &min_x, &max_x);
-    assert(max_x < 10 + narrow);            /* clipped in width */
-    assert(max_x - min_x + 1 < full_ink_wide); /* truncated, not full */
+    CHECK_LT(max_x, 10 + narrow, "max_x");            /* clipped in width */
+    CHECK_LT(max_x - min_x + 1, full_ink_wide, "max_x - min_x + 1"); /* truncated, not full */
     assert(max_x > 10 + narrow - 40);       /* ink reaches the right
                                                * region: the ellipsis */
     fdk_surface_destroy(s);
@@ -642,9 +643,9 @@ static void test_label_modes(void) {
         fdk_widget_arrange(l0, (fdk_rect){20, y, 300, pitch});
         fdk_widget_arrange(l1, (fdk_rect){20, y + 40, 300, pitch});
         fdk_widget_arrange(l2, (fdk_rect){20, y + 80, 300, pitch});
-        assert(fdk_label_get_alignment(l0) == FDK_ALIGN_START);
-        assert(fdk_label_get_alignment(l1) == FDK_ALIGN_CENTER);
-        assert(fdk_label_get_alignment(l2) == FDK_ALIGN_END);
+        CHECK_EQ(fdk_label_get_alignment(l0), FDK_ALIGN_START, "fdk_label_get_alignment(l0)");
+        CHECK_EQ(fdk_label_get_alignment(l1), FDK_ALIGN_CENTER, "fdk_label_get_alignment(l1)");
+        CHECK_EQ(fdk_label_get_alignment(l2), FDK_ALIGN_END, "fdk_label_get_alignment(l2)");
 
         s = NULL;
         assert(fdk_ok(fdk_surface_create(400, 300, &s)));
@@ -654,10 +655,10 @@ static void test_label_modes(void) {
         ink_extent_x(s, y, y + pitch, &mn0, &mx0);
         ink_extent_x(s, y + 40, y + 40 + pitch, &mn1, &mx1);
         ink_extent_x(s, y + 80, y + 80 + pitch, &mn2, &mx2);
-        assert(mn0 >= 20 && mn0 <= 24);      /* START: left edge */
-        assert(mn1 > mn0 + 40);              /* CENTER: pushed in */
-        assert(mx1 < 320 - 40);              /* CENTER: not at edge */
-        assert(mx2 >= 320 - 5 && mx2 <= 320); /* END: right edge */
+        CHECK_RANGE(mn0, 20, 24, "mn0");      /* START: left edge */
+        CHECK_GT(mn1, mn0 + 40, "mn1");              /* CENTER: pushed in */
+        CHECK_LT(mx1, 320 - 40, "mx1");              /* CENTER: not at edge */
+        CHECK_RANGE(mx2, 320 - 5, 320, "mx2"); /* END: right edge */
         /* CENTER is symmetric within a couple of pixels. */
         int c0 = mn0 + mx0, c1 = mn1 + mx1, c2 = mn2 + mx2;
         assert(c1 > c0 && c1 < c2);
@@ -666,11 +667,11 @@ static void test_label_modes(void) {
     }
 
     /* mode round trip; unknown value ignored; empty text = 0 lines */
-    assert(fdk_label_get_mode(w) == FDK_LABEL_ELLIPSIZE);
+    CHECK_EQ(fdk_label_get_mode(w), FDK_LABEL_ELLIPSIZE, "fdk_label_get_mode(w)");
     fdk_label_set_mode(w, (fdk_label_mode)99);
-    assert(fdk_label_get_mode(w) == FDK_LABEL_ELLIPSIZE);
+    CHECK_EQ(fdk_label_get_mode(w), FDK_LABEL_ELLIPSIZE, "fdk_label_get_mode(w)");
     assert(fdk_ok(fdk_label_set_text(w, NULL)));
-    assert(fdk_label_get_line_count(w) == 0);
+    CHECK_EQ(fdk_label_get_line_count(w), 0, "fdk_label_get_line_count(w)");
 
     fdk_widget_destroy(root);
     printf("[ok] label modes: wrap line counts + ink spans, ellipsize "
@@ -746,7 +747,7 @@ static void test_radio_arrows(void) {
     radio_arrow_events = 0;
     key(root, FDK_KEY_UP);
     assert(fdk_radio_is_checked(a) && fdk_widget_has_focus(a));
-    assert(radio_arrow_events == 1); /* b false, a already-checked no-op */
+    CHECK_EQ(radio_arrow_events, 1, "radio_arrow_events"); /* b false, a already-checked no-op */
 
     /* Hidden member is skipped. */
     fdk_widget_set_visible(b, false);
@@ -774,7 +775,7 @@ static void test_radio_arrows(void) {
         assert(fdk_widget_focus(lone));
         root_key_events = 0;
         key(root, FDK_KEY_DOWN);
-        assert(root_key_events == 1); /* bubbled: nothing consumed it */
+        CHECK_EQ(root_key_events, 1, "root_key_events"); /* bubbled: nothing consumed it */
         assert(fdk_radio_is_checked(lone) == false); /* no selection
                                                         * change */
     }
@@ -820,7 +821,7 @@ static void test_progress(void) {
             filled0++;
         }
     }
-    assert(filled0 == 0); /* 0% paints no fill */
+    CHECK_EQ(filled0, 0, "progress fill width at 0%"); /* paints none */
 
     fdk_progress_set_fraction(p, 0.5f);
     fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
@@ -831,7 +832,7 @@ static void test_progress(void) {
             filled50++;
         }
     }
-    assert(filled50 >= 96 && filled50 <= 104); /* ~100 of 200 */
+    CHECK_RANGE(filled50, 96, 104, "progress fill width at 50% (of 200)");
 
     fdk_progress_set_fraction(p, 1.0f);
     fdk_surface_fill(s, (fdk_color){0, 0, 0, 1});
@@ -842,7 +843,7 @@ static void test_progress(void) {
             filled100++;
         }
     }
-    assert(filled100 >= 196);
+    CHECK_GE(filled100, 196, "progress fill width at 100% (of 200)");
 
     fdk_widget_destroy(root);
     fdk_surface_destroy(s);
@@ -872,14 +873,14 @@ static void test_separator(void) {
             on_line++;
         }
     }
-    assert(on_line >= 295); /* the rule spans the width */
+    CHECK_GE(on_line, 295, "on_line"); /* the rule spans the width */
     int off_line = 0;
     for (int x = 0; x < 300; x++) {
         if (px_at(s, x, line_y + 3) != 0) {
             off_line++;
         }
     }
-    assert(off_line == 0); /* and only the 1px line */
+    CHECK_EQ(off_line, 0, "off_line"); /* and only the 1px line */
 
     /* vertical variant */
     fdk_widget *vs = NULL;
@@ -919,7 +920,7 @@ static void test_frame(void) {
     fdk_font_metrics fm;
     fdk_font_get_metrics(g_font, &fm);
     fdk_i32 band = fm.ascent + fm.descent + 8;
-    assert(cb.y == fb.y + 10 + band);
+    CHECK_EQ(cb.y, fb.y + 10 + band, "cb.y");
     fdk_rect cb2 = fdk_widget_get_absolute_bounds(row2);
     assert(cb2.y > cb.y); /* stacked with the frame's spacing */
 
@@ -936,14 +937,14 @@ static void test_frame(void) {
             }
         }
     }
-    assert(title_ink > 5);
+    CHECK_GT(title_ink, 5, "title_ink");
 
     /* natural size includes the band: measure with children */
     fdk_size nat;
     fdk_widget_measure(frame, &nat);
     fdk_size row_nat;
     fdk_widget_measure(row, &row_nat);
-    assert(nat.height >= 10 * 2 + band + row_nat.height + 8 + 16 - 4);
+    CHECK_GE(nat.height, 10 * 2 + band + row_nat.height + 8 + 16 - 4, "nat.height");
 
     /* set_title repaints without relayout churn; NULL clears */
     assert(fdk_ok(fdk_frame_set_title(frame, "Advanced")));
@@ -959,7 +960,7 @@ static void test_frame(void) {
     fdk_widget_arrange(fr2, (fdk_rect){20, 40, 200, 100});
     fdk_rect f2b = fdk_widget_get_bounds(fr2);
     fdk_rect c2b = fdk_widget_get_absolute_bounds(child2);
-    assert(c2b.y == f2b.y + 10);
+    CHECK_EQ(c2b.y, f2b.y + 10, "c2b.y");
 
     fdk_widget_destroy(root);
     fdk_surface_destroy(s);
@@ -978,7 +979,7 @@ static void test_button_link(void) {
     fdk_widget_arrange(plain, (fdk_rect){10, 10, 120, 34});
     fdk_widget_arrange(link, (fdk_rect){140, 10, 120, 34});
     fdk_button_set_role(link, FDK_BUTTON_ROLE_LINK);
-    assert(fdk_button_get_role(link) == FDK_BUTTON_ROLE_LINK);
+    CHECK_EQ(fdk_button_get_role(link), FDK_BUTTON_ROLE_LINK, "fdk_button_get_role(link)");
 
     /* Flat: the LINK button paints NO fill — the surface background
      * shows through where a NORMAL button paints its control fill. */
@@ -1031,11 +1032,11 @@ static void test_button_link(void) {
     btn_activates = 0;
     fdk_button_set_on_activate(link, on_btn_activate, NULL);
     click(root, 200.0f, 27.0f);
-    assert(btn_activates == 1);
+    CHECK_EQ(btn_activates, 1, "btn_activates");
 
     /* Unknown values still ignored. */
     fdk_button_set_role(link, (fdk_button_role)42);
-    assert(fdk_button_get_role(link) == FDK_BUTTON_ROLE_LINK);
+    CHECK_EQ(fdk_button_get_role(link), FDK_BUTTON_ROLE_LINK, "fdk_button_get_role(link)");
 
     anim_at(0);
     fdk_surface_destroy(s);
@@ -1061,7 +1062,7 @@ static void test_spinner(void) {
     assert(!fdk_spinner_is_spinning(sp));
     fdk_a11y_info info;
     assert(fdk_ok(fdk_a11y_describe(sp, &info)));
-    assert(info.role == FDK_A11Y_ROLE_SPINNER);
+    CHECK_EQ(info.role, FDK_A11Y_ROLE_SPINNER, "info.role");
     assert((info.states & FDK_A11Y_BUSY) == 0);
     assert(info.value_text != NULL && strcmp(info.value_text, "idle") == 0);
     fdk_a11y_info_free(&info);
@@ -1105,13 +1106,13 @@ static void test_spinner(void) {
                 int g = (int)((px >> 8) & 0xFFu);
                 int b = (int)(px & 0xFFu);
                 if (r + g + b >= 12) {
-                    assert(b > r);
+                    CHECK_GT(b, r, "b");
                 }
                 ink++;
             }
         }
     }
-    assert(ink > 12); /* an arc, not a stray pixel */
+    CHECK_GT(ink, 12, "ink"); /* an arc, not a stray pixel */
 
     /* Stop: idle again; the phase PARKS (restart continues — GTK
      * semantics). Standalone: phase never advanced (no clock), so
@@ -1275,12 +1276,12 @@ static void test_argument_safety(void) {
     assert(fdk_label_get_text(NULL) == NULL);
     fdk_button_set_on_activate(NULL, NULL, NULL);
     fdk_toggle_set_checked(NULL, true);
-    assert(fdk_toggle_is_checked(NULL) == false);
+    CHECK_EQ(fdk_toggle_is_checked(NULL), false, "fdk_toggle_is_checked(NULL)");
     fdk_toggle_set_on_changed(NULL, NULL, NULL);
     fdk_checkbox_set_checked(NULL, true);
-    assert(fdk_checkbox_is_checked(NULL) == false);
+    CHECK_EQ(fdk_checkbox_is_checked(NULL), false, "fdk_checkbox_is_checked(NULL)");
     fdk_radio_set_checked(NULL, true);
-    assert(fdk_radio_is_checked(NULL) == false);
+    CHECK_EQ(fdk_radio_is_checked(NULL), false, "fdk_radio_is_checked(NULL)");
     fdk_progress_set_fraction(NULL, 0.5f);
     assert(fdk_progress_get_fraction(NULL) == 0.0f);
     assert(fdk_frame_set_title(NULL, "x") == FDK_ERR_INVALID_ARGUMENT);
@@ -1290,7 +1291,7 @@ static void test_argument_safety(void) {
     fdk_widget *lab = NULL;
     assert(fdk_ok(fdk_label_create(root, g_font, "L", &lab)));
     fdk_toggle_set_checked(lab, true); /* no-op: not a toggle */
-    assert(fdk_toggle_is_checked(lab) == false);
+    CHECK_EQ(fdk_toggle_is_checked(lab), false, "fdk_toggle_is_checked(lab)");
     fdk_progress_set_fraction(lab, 0.5f);
     assert(fdk_progress_get_fraction(lab) == 0.0f);
     assert(fdk_button_set_text(lab, "x") == FDK_ERR_INVALID_ARGUMENT);
@@ -1314,7 +1315,7 @@ static void test_statusbar(void) {
     fdk_u32 ctx_b = fdk_statusbar_get_context_id(sb, "hints");
     fdk_u32 ctx_a2 = fdk_statusbar_get_context_id(sb, "cursor");
     assert(ctx_a != 0 && ctx_b != 0 && ctx_a != ctx_b);
-    assert(ctx_a2 == ctx_a); /* stable                             */
+    CHECK_EQ(ctx_a2, ctx_a, "ctx_a2"); /* stable                             */
     assert(fdk_statusbar_get_context_id(sb, NULL) == 0);
     assert(fdk_statusbar_get_context_id(sb, "") == 0);
 
@@ -1359,7 +1360,7 @@ static void test_statusbar(void) {
     (void)fdk_statusbar_push(sb, ctx_a, "Ready");
     fdk_a11y_info info;
     assert(fdk_ok(fdk_a11y_describe(sb, &info)));
-    assert(info.role == FDK_A11Y_ROLE_STATUS_BAR);
+    CHECK_EQ(info.role, FDK_A11Y_ROLE_STATUS_BAR, "info.role");
     assert(info.name != NULL && strcmp(info.name, "Ready") == 0);
     fdk_a11y_info_free(&info);
 
@@ -1367,7 +1368,7 @@ static void test_statusbar(void) {
      * message-less bar). */
     fdk_size nat;
     fdk_widget_measure(sb, &nat);
-    assert(nat.height >= 24);
+    CHECK_GE(nat.height, 24, "nat.height");
     fdk_widget_arrange(sb, (fdk_rect){0, 0, 200, nat.height});
     fdk_surface *s = NULL;
     assert(fdk_ok(fdk_surface_create(200, nat.height, &s)));
@@ -1378,7 +1379,7 @@ static void test_statusbar(void) {
     fdk_widget_invalidate_all(root);
     fdk_widget_tree_paint(root, s);
     fdk_u32 bare = px_at(s, 12, nat.height / 2);
-    assert(with_text != bare);
+    CHECK_NE(with_text, bare, "with_text");
     fdk_surface_destroy(s);
 
     /* Argument safety. */
@@ -1404,8 +1405,8 @@ static void test_levelbar(void) {
     fdk_widget *lb = NULL;
     assert(fdk_ok(fdk_levelbar_create(root, 0.0, 10.0, &lb)));
     assert(fdk_levelbar_get_value(lb) == 0.0);
-    assert(fdk_levelbar_get_mode(lb) == FDK_LEVELBAR_DISCRETE);
-    assert(fdk_levelbar_get_segments(lb) == 5);
+    CHECK_EQ(fdk_levelbar_get_mode(lb), FDK_LEVELBAR_DISCRETE, "fdk_levelbar_get_mode(lb)");
+    CHECK_EQ(fdk_levelbar_get_segments(lb), 5, "fdk_levelbar_get_segments(lb)");
 
     /* Values clamp into the range. */
     fdk_levelbar_set_value(lb, 7.5);
@@ -1424,23 +1425,23 @@ static void test_levelbar(void) {
 
     /* Segments: bounds enforced ([2, 32]). */
     fdk_levelbar_set_segments(lb, 1); /* refused: stays 5          */
-    assert(fdk_levelbar_get_segments(lb) == 5);
+    CHECK_EQ(fdk_levelbar_get_segments(lb), 5, "fdk_levelbar_get_segments(lb)");
     fdk_levelbar_set_segments(lb, 7);
-    assert(fdk_levelbar_get_segments(lb) == 7);
+    CHECK_EQ(fdk_levelbar_get_segments(lb), 7, "fdk_levelbar_get_segments(lb)");
     fdk_levelbar_set_segments(lb, 100); /* refused: stays 7        */
-    assert(fdk_levelbar_get_segments(lb) == 7);
+    CHECK_EQ(fdk_levelbar_get_segments(lb), 7, "fdk_levelbar_get_segments(lb)");
 
     /* Mode round-trip + the natural sizes differ. */
     fdk_size nat_d;
     fdk_widget_measure(lb, &nat_d);
     fdk_levelbar_set_mode(lb, FDK_LEVELBAR_CONTINUOUS);
-    assert(fdk_levelbar_get_mode(lb) == FDK_LEVELBAR_CONTINUOUS);
+    CHECK_EQ(fdk_levelbar_get_mode(lb), FDK_LEVELBAR_CONTINUOUS, "fdk_levelbar_get_mode(lb)");
     fdk_size nat_c;
     fdk_widget_measure(lb, &nat_c);
-    assert(nat_c.width == 40); /* the continuous minimum            */
-    assert(nat_d.width == 7 * 10 + 6 * 6); /* 7 blocks + 6 gaps     */
+    CHECK_EQ(nat_c.width, 40, "nat_c.width"); /* the continuous minimum            */
+    CHECK_EQ(nat_d.width, 7 * 10 + 6 * 6, "nat_d.width"); /* 7 blocks + 6 gaps     */
     fdk_levelbar_set_mode(lb, (fdk_levelbar_mode)9); /* refused    */
-    assert(fdk_levelbar_get_mode(lb) == FDK_LEVELBAR_CONTINUOUS);
+    CHECK_EQ(fdk_levelbar_get_mode(lb), FDK_LEVELBAR_CONTINUOUS, "fdk_levelbar_get_mode(lb)");
 
     /* Discrete paint: the boundary rule. At 0 no block is lit; at
      * max EVERY block is lit (a full bar reads full). The sample
@@ -1471,7 +1472,7 @@ static void test_levelbar(void) {
     /* a11y: LEVEL_BAR role, the value interface, no actions. */
     fdk_a11y_info info;
     assert(fdk_ok(fdk_a11y_describe(lb, &info)));
-    assert(info.role == FDK_A11Y_ROLE_LEVEL_BAR);
+    CHECK_EQ(info.role, FDK_A11Y_ROLE_LEVEL_BAR, "info.role");
     assert(info.has_value);
     assert(info.value_min == 0.0 && info.value_max == 4.0);
     assert(info.value_current == 4.0); /* clamped by the range      */
@@ -1488,7 +1489,7 @@ static void test_levelbar(void) {
     fdk_levelbar_set_range(NULL, 0, 1);
     fdk_levelbar_set_mode(NULL, FDK_LEVELBAR_CONTINUOUS);
     fdk_levelbar_set_segments(NULL, 5);
-    assert(fdk_levelbar_get_segments(NULL) == 0);
+    CHECK_EQ(fdk_levelbar_get_segments(NULL), 0, "fdk_levelbar_get_segments(NULL)");
 
     fdk_surface_destroy(s);
     fdk_widget_destroy(root);

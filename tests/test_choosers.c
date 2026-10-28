@@ -13,6 +13,7 @@
  * the X11 integration suite (test_x11_integration.c), not here.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 

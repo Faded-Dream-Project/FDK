@@ -7,6 +7,7 @@
  * the wrap geometry; without one the suite honestly skips.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 

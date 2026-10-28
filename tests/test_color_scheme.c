@@ -10,6 +10,7 @@
  * ReadOne + SettingChanged over the native D-Bus client).
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_theme.h"
 

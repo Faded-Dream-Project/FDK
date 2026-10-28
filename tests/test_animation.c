@@ -29,6 +29,7 @@
  *     and after every transition
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_animation.h"
 

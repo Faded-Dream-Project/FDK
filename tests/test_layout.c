@@ -7,6 +7,7 @@
  * X11 integration test; these tests prove the engine's math.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_layout.h"
 #include "widget/widget_internal.h" /* fdk__widget_set_baseline */
@@ -55,33 +56,33 @@ static void test_box_measure(void) {
     /* horizontal: width = 50+100+30 + 2*spacing, height = max(30,20,40) */
     fdk_box_set_spacing(box, 10);
     fdk_widget_measure(box, &nat);
-    assert(nat.width == 180 + 20);
-    assert(nat.height == 40);
+    CHECK_EQ(nat.width, 180 + 20, "nat.width");
+    CHECK_EQ(nat.height, 40, "nat.height");
 
     /* padding adds to both axes */
     fdk_box_set_padding(box, 8);
     fdk_widget_measure(box, &nat);
-    assert(nat.width == 200 + 16);
-    assert(nat.height == 40 + 16);
+    CHECK_EQ(nat.width, 200 + 16, "nat.width");
+    CHECK_EQ(nat.height, 40 + 16, "nat.height");
 
     /* margins participate: a takes 50+5+5 wide, 30+2+2 tall */
     fdk_widget_set_margin(a, 5, 2, 5, 2);
     fdk_widget_measure(box, &nat);
-    assert(nat.width == 200 + 16 + 10);
-    assert(nat.height == 40 + 16); /* a: 34 tall < 40 — max wins */
+    CHECK_EQ(nat.width, 200 + 16 + 10, "nat.width");
+    CHECK_EQ(nat.height, 40 + 16, "nat.height"); /* a: 34 tall < 40 — max wins */
 
     /* homogeneous: width = 3 * max(60,100,30) + gaps + padding */
     fdk_box_set_homogeneous(box, true);
     fdk_widget_measure(box, &nat);
-    assert(nat.width == 300 + 20 + 16);
-    assert(nat.height == 40 + 16);
+    CHECK_EQ(nat.width, 300 + 20 + 16, "nat.width");
+    CHECK_EQ(nat.height, 40 + 16, "nat.height");
 
     /* vertical orientation swaps the roles */
     fdk_box_set_orientation(box, FDK_VERTICAL);
     fdk_box_set_homogeneous(box, false);
     fdk_widget_measure(box, &nat);
-    assert(nat.width == 100 + 16); /* widest child (b: 100) + padding */
-    assert(nat.height == 34 + 20 + 40 + 20 + 16); /* a(34)+b(20)+c(40) */
+    CHECK_EQ(nat.width, 100 + 16, "nat.width"); /* widest child (b: 100) + padding */
+    CHECK_EQ(nat.height, 34 + 20 + 40 + 20 + 16, "nat.height"); /* a(34)+b(20)+c(40) */
 
     fdk_widget_destroy(root);
     printf("[ok] box measure: naturals, spacing, padding, margins, "
@@ -169,7 +170,7 @@ static void test_box_arrange_vertical_margins(void) {
      * same amount (margins fixed) */
     fdk_widget_set_expand(b, false, true);
     fdk_rect bb = fdk_widget_get_bounds(b);
-    assert(bb.height > 50);
+    CHECK_GT(bb.height, 50, "bb.height");
     assert(fdk_widget_get_bounds(a).height == 30); /* a untouched */
 
     fdk_widget_destroy(root);
@@ -232,7 +233,7 @@ static void test_dynamic_children_relayout(void) {
     /* hiding takes the child out of the layout; showing restores it */
     fdk_widget_set_visible(a, false);
     nb = fdk_widget_get_bounds(fdk_widget_child_at(box, 0));
-    assert(nb.x == 0); /* survivor moved to the start */
+    CHECK_EQ(nb.x, 0, "nb.x"); /* survivor moved to the start */
     fdk_widget_set_visible(a, true);
     assert_bounds(a, 0, 0, 100, 50, "a re-shown");
 
@@ -242,7 +243,7 @@ static void test_dynamic_children_relayout(void) {
     fdk_widget_set_natural_size(a, 40, 30);
     fdk_widget_set_expand(survivor, true, false);
     fdk_rect sb = fdk_widget_get_bounds(survivor);
-    assert(sb.width == 160); /* 100 natural + (200 - 40 - 100) leftover */
+    CHECK_EQ(sb.width, 160, "sb.width"); /* 100 natural + (200 - 40 - 100) leftover */
 
     fdk_widget_destroy(root);
     printf("[ok] dynamic relayout: add, remove, hide/show, hint change\n");
@@ -375,16 +376,16 @@ static void test_layout_paints(void) {
     fdk_surface_info info;
     assert(fdk_ok(fdk_surface_get_info(s, &info)));
     fdk_u32 px = info.pixels[50 * info.stride + 50] & 0xFFFFFFu;
-    assert(px == 0xFF0000u);
+    CHECK_EQ(px, 0xFF0000u, "px");
     px = info.pixels[50 * info.stride + 150] & 0xFFFFFFu;
-    assert(px == 0x00FF00u);
+    CHECK_EQ(px, 0x00FF00u, "px");
     px = info.pixels[50 * info.stride + 250] & 0xFFFFFFu;
-    assert(px == 0x0000FFu);
+    CHECK_EQ(px, 0x0000FFu, "px");
     /* boundary pixels: at x=100 the green starts (a is [0,100)) */
     px = info.pixels[50 * info.stride + 99] & 0xFFFFFFu;
-    assert(px == 0xFF0000u);
+    CHECK_EQ(px, 0xFF0000u, "px");
     px = info.pixels[50 * info.stride + 100] & 0xFFFFFFu;
-    assert(px == 0x00FF00u);
+    CHECK_EQ(px, 0x00FF00u, "px");
 
     fdk_widget_destroy(root);
     fdk_surface_destroy(s);
@@ -632,7 +633,7 @@ static void test_baseline_alignment(void) {
     fdk_widget *plain = mk_child(root, 30, 10);
     fdk_i32 b = 123;
     assert(!fdk_widget_get_baseline(plain, &b));
-    assert(b == 0);
+    CHECK_EQ(b, 0, "b");
 
     /* Synthesize text baselines via the internal setter (the Label
      * sets the same field from its font ascent in production). */
@@ -656,7 +657,7 @@ static void test_baseline_alignment(void) {
      * max(24-24+30, 24-12+16, 24-22+22) = max(30, 28, 24) = 30. */
     fdk_size m;
     fdk_widget_measure(row, &m);
-    assert(m.height == 30);
+    CHECK_EQ(m.height, 30, "m.height");
 
     /* Arrange: every child's baseline (or bottom) lands on y=24. */
     fdk_widget_arrange(row, (fdk_rect){0, 0, 200, 30});
@@ -674,10 +675,10 @@ static void test_baseline_alignment(void) {
         fdk_font_get_metrics(font, &fm);
         fdk_size lm;
         fdk_widget_measure(lab, &lm); /* populates the baseline */
-        assert(lm.height == fm.ascent + fm.descent);
+        CHECK_EQ(lm.height, fm.ascent + fm.descent, "lm.height");
         fdk_i32 lb = 0;
         assert(fdk_widget_get_baseline(lab, &lb));
-        assert(lb == fm.ascent);
+        CHECK_EQ(lb, fm.ascent, "lb");
         fdk_widget_destroy(lab);
         fdk_font_destroy(font);
     }
@@ -721,11 +722,11 @@ static void test_grid_notification_relayout(void) {
     assert(fdk_ok(fdk_grid_attach(grid2, c, 0, 0, 1, 1)));
     fdk_size before;
     fdk_widget_measure(outer, &before);
-    assert(before.height == 50);
+    CHECK_EQ(before.height, 50, "before.height");
     fdk_widget_set_natural_size(c, 50, 90);
     fdk_size after;
     fdk_widget_measure(outer, &after);
-    assert(after.height == 90); /* grid re-measured, box saw the growth */
+    CHECK_EQ(after.height, 90, "after.height"); /* grid re-measured, box saw the growth */
     assert_bounds(c, 0, 0, 50, 90, "grid child re-arranged at its new size");
 
     fdk_widget_destroy(outer);
@@ -790,7 +791,7 @@ static void test_layout_batch_equivalence(void) {
     fdk_widget_arrange(batched, (fdk_rect){0, 0, 400, 300});
     unsigned long digest_batched = 7;
     geometry_digest(batched, &digest_batched);
-    assert(digest_eager == digest_batched);
+    CHECK_EQ(digest_eager, digest_batched, "digest_eager");
 
     /* A SECOND mutation round inside a batch after a flush: marks
      * accumulate again and the next flush catches them. */
@@ -807,7 +808,7 @@ static void test_layout_batch_equivalence(void) {
     digest_batched = 7;
     geometry_digest(eager, &digest_eager);
     geometry_digest(batched, &digest_batched);
-    assert(digest_eager == digest_batched);
+    CHECK_EQ(digest_eager, digest_batched, "digest_eager");
 
     /* Nested batches: only the outermost flushes. */
     fdk_layout_begin_batch();

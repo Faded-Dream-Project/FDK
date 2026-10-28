@@ -12,6 +12,7 @@
  * (incl. its fake window manager) and test_wayland_integration.c.
  */
 
+#include "hermetic_env.h"
 #include "window/window_internal.h"
 
 #include <assert.h>

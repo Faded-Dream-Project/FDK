@@ -7,6 +7,7 @@
  * NOT run this under Xvfb/a real compositor without unsetting those
  * variables first, or it will fail for the wrong reason. */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 
 #include <assert.h>

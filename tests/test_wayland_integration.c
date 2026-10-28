@@ -31,6 +31,7 @@
  *    before it ever mapped a window).
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_dialog.h"
 #include "fdk/fdk_theme.h"

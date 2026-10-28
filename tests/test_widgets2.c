@@ -6,6 +6,7 @@
  * synthetic events through the tree, offscreen surfaces, ASan+UBSan.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 

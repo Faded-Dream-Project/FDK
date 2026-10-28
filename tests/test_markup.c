@@ -26,6 +26,7 @@
  *     set_text clears markup everywhere
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_text.h"
 #include "fdk/fdk_widgets.h"

@@ -17,6 +17,7 @@
  * file owns the stack itself.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 
 #include <assert.h>

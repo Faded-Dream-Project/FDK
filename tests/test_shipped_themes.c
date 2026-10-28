@@ -43,6 +43,7 @@
  * corpus it lists all nine, alphabetically.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_theme.h"
 

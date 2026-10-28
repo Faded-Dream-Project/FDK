@@ -9,6 +9,7 @@
  * display-dependent subsystem — see docs/testing.md's split.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 
 #include <assert.h>

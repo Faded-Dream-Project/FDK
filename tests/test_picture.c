@@ -7,6 +7,7 @@
  * ownership transfer, and the IMAGE a11y role.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 

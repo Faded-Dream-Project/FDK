@@ -44,6 +44,7 @@
  * integration suite's file-dialog group.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "core/alloc_internal.h"
 #include "theme/theme_internal.h"

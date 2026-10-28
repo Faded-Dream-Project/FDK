@@ -26,6 +26,7 @@
  *     scan, regular-beats-bold ranking, cache consistency
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_text.h"
 

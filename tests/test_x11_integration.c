@@ -13,6 +13,7 @@
  * shutdown — not just "compiles" or "doesn't crash".
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 
 #include "theme/theme_internal.h" /* boot reset for the live-follow scenario */

@@ -11,6 +11,7 @@
  * (XSendEvent) and the Wayland suite (virtual keyboard).
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 
 #include "core/shortcut_internal.h"

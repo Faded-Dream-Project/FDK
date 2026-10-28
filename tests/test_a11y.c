@@ -5,6 +5,7 @@
  * the widget layer — the same discipline as the rest of the headless
  * suite. */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_a11y.h"
 

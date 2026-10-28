@@ -29,6 +29,7 @@
  * ubuntu CI job does).
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_dbus.h"
 #include "fdk/fdk_theme.h"

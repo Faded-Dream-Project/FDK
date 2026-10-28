@@ -19,6 +19,7 @@
  *   - argument safety + the no-scrollbar-adoption rule
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
@@ -175,7 +176,7 @@ static void test_paint_clipping(void) {
      * fold is CLIPPED (the content extends to y=200 but the
      * viewport's clip must keep it invisible). */
     int red = (px_at(s, 60, 20) >> 16) & 0xFF; /* deep in viewport top */
-    assert(red > 200);
+    CHECK_GT(red, 200, "red");
     /* Below the scrollview's bottom edge (y >= 90): nothing painted
      * by it at all — the ROOT's background (transparent -> surface
      * clear color 0) shows. */
@@ -186,7 +187,7 @@ static void test_paint_clipping(void) {
     fdk_surface_invalidate_all(s);
     fdk_widget_tree_paint(root, s);
     int blue = px_at(s, 60, 20) & 0xFF;
-    assert(blue > 200);
+    CHECK_GT(blue, 200, "blue");
     /* Above the viewport (y < 10): still nothing. */
     assert(px_at(s, 60, 5) == 0x000000);
 
@@ -240,13 +241,13 @@ static void test_input(void) {
     fdk_event_data wheel = ev_scroll(100, 75, 0, -1);
     assert(fdk_widget_tree_handle_event(root, &wheel));
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 0);
+    CHECK_EQ(sy, 0, "sy");
     pump_at(70);
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 42);
+    CHECK_EQ(sy, 42, "sy");
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 48);
+    CHECK_EQ(sy, 48, "sy");
 
     /* Gesture accumulation: a second notch while the first flight
      * is airborne adds to the PENDING target — from the 48 rest
@@ -260,7 +261,7 @@ static void test_input(void) {
     assert(fdk_widget_tree_handle_event(root, &wheel));
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 144);
+    CHECK_EQ(sy, 144, "sy");
 
     /* The programmatic path snaps INSTANTLY, mid-flight: scroll_to
      * cancels the gesture animation and sets the truth now (no
@@ -270,10 +271,10 @@ static void test_input(void) {
     assert(fdk_widget_tree_handle_event(root, &wheel));
     assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 300)));
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 300);
+    CHECK_EQ(sy, 300, "sy");
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 300);
+    CHECK_EQ(sy, 300, "sy");
 
     /* The wheel event over a CHILD bubbles up: scroll while the
      * pointer is over the content's colored area (48 up, clamped
@@ -282,7 +283,7 @@ static void test_input(void) {
     assert(fdk_widget_tree_handle_event(root, &wheel));
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 252);
+    CHECK_EQ(sy, 252, "sy");
 
     /* Wheel up five more notches: 252 - 5*48 = 12, then a sixth
      * clamps to 0 (not negative) — the clamp rule unchanged. */
@@ -292,14 +293,14 @@ static void test_input(void) {
     }
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 0);
+    CHECK_EQ(sy, 0, "sy");
 
     /* Keyboard: unfocused scrollview ignores arrows (they belong to
      * the content's focusables). */
     fdk_event_data key = ev_key(FDK_KEY_DOWN);
     assert(!fdk_widget_tree_handle_event(root, &key));
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 0);
+    CHECK_EQ(sy, 0, "sy");
 
     /* Focused: arrows (32), PageDown (90% of viewport), Home/End —
      * every gesture settles before its assertion (same numbers the
@@ -309,7 +310,7 @@ static void test_input(void) {
     assert(fdk_widget_tree_handle_event(root, &key));
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 32);
+    CHECK_EQ(sy, 32, "sy");
 
     fdk_event_data pgdn = ev_key(FDK_KEY_PAGE_DOWN);
     assert(fdk_widget_tree_handle_event(root, &pgdn));
@@ -317,19 +318,19 @@ static void test_input(void) {
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
     /* viewport height = 150 - 12 (hbar) = 138; page = (138/10)*9 =
      * 117 (integer math, both in the engine and here). */
-    assert(sy == 32 + 117);
+    CHECK_EQ(sy, 32 + 117, "sy");
 
     fdk_event_data end = ev_key(FDK_KEY_END);
     assert(fdk_widget_tree_handle_event(root, &end));
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 1200 - 138);
+    CHECK_EQ(sy, 1200 - 138, "sy");
 
     fdk_event_data home = ev_key(FDK_KEY_HOME);
     assert(fdk_widget_tree_handle_event(root, &home));
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == 0);
+    CHECK_EQ(sy, 0, "sy");
 
     fdk_widget_destroy(root);
     printf("[ok] scrollview: wheel (incl. bubbling from content), "
@@ -371,17 +372,17 @@ static void test_container_content(void) {
     assert(rb.x == 0 && rb.y == 0);
     for (int i = 0; i < 10; i++) {
         fdk_rect kb = fdk_widget_get_bounds(kids[i]);
-        assert(kb.y == i * 25);       /* the box laid them out     */
-        assert(kb.height == 25);
+        CHECK_EQ(kb.y, i * 25, "kb.y");       /* the box laid them out     */
+        CHECK_EQ(kb.height, 25, "kb.height");
     }
 
     /* Scrolling moves the BOX; the children keep their slots. */
     assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 100)));
     rb = fdk_widget_get_bounds(rows);
-    assert(rb.y == -100);
+    CHECK_EQ(rb.y, -100, "rb.y");
     for (int i = 0; i < 10; i++) {
         fdk_rect kb = fdk_widget_get_bounds(kids[i]);
-        assert(kb.y == i * 25);       /* unchanged in-box position */
+        CHECK_EQ(kb.y, i * 25, "kb.y");       /* unchanged in-box position */
     }
 
     fdk_widget_destroy(root);
@@ -404,7 +405,7 @@ static void test_scrollbar(void) {
      * (300 > 200). Z-order after the layout's raise()s: content at
      * the bottom, then vbar, then hbar on top — the bars must sit
      * ABOVE the content for their strips to hit-test. */
-    assert(fdk_widget_child_count(sv) == 3);
+    CHECK_EQ(fdk_widget_child_count(sv), 3, "fdk_widget_child_count(sv)");
     fdk_widget *vbar = fdk_widget_child_at(sv, 1);
     fdk_widget *hbar = fdk_widget_child_at(sv, 2);
     assert(fdk_widget_child_at(sv, 0) == content);
@@ -414,7 +415,7 @@ static void test_scrollbar(void) {
     /* Bar geometry: vbar at the right edge, width = themed 12. */
     fdk_rect vb = fdk_widget_get_bounds(vbar);
     assert(vb.x == 200 - 12 && vb.width == 12);
-    assert(vb.y == 0);
+    CHECK_EQ(vb.y, 0, "vb.y");
 
     /* Content that fits: bars hidden, no scroll possible. */
     fdk_widget *sv2 = NULL;
@@ -436,7 +437,7 @@ static void test_scrollbar(void) {
     fdk_i32 page = (viewport_h / 10) * 9;
     click(root, 194, 100);
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sy == page);
+    CHECK_EQ(sy, page, "sy");
 
     /* Thumb drag: press on the thumb, move, release. Mirror the
      * engine's integer math exactly (bar_thumb):
@@ -470,7 +471,7 @@ static void test_scrollbar(void) {
                                       194, 81);
         assert(fdk_widget_tree_handle_event(root, &up));
         assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-        assert(sy == expect);
+        CHECK_EQ(sy, expect, "sy");
     }
 
     fdk_widget_destroy(root);
@@ -502,14 +503,14 @@ static void test_adoption(void) {
     assert(fdk_ok(fdk_scrollview_set_content(sv, c2)));
     /* c2 reparented into sv; old content destroyed. Child count:
      * 2 bars + c2. */
-    assert(fdk_widget_child_count(sv) == 3);
+    CHECK_EQ(fdk_widget_child_count(sv), 3, "fdk_widget_child_count(sv)");
     assert(c2->parent == sv);
     /* No overflow: bars hidden again. */
     assert(!fdk_widget_get_visible(fdk_widget_child_at(sv, 1)));
 
     /* NULL clears (destroys) the content. */
     assert(fdk_ok(fdk_scrollview_set_content(sv, NULL)));
-    assert(fdk_widget_child_count(sv) == 2);
+    CHECK_EQ(fdk_widget_child_count(sv), 2, "fdk_widget_child_count(sv)");
 
     fdk_widget_destroy(root);
     printf("[ok] scrollview: adoption rules (no scrollbars, replace "
@@ -590,16 +591,16 @@ static void test_overlay_bars(void) {
     fdk_widget *root = fresh_root();
     fdk_widget *sv = NULL;
     assert(fdk_ok(fdk_scrollview_create(root, &sv)));
-    assert(fdk_scrollview_get_bar_mode(sv) == FDK_SCROLL_BARS_CLASSIC);
+    CHECK_EQ(fdk_scrollview_get_bar_mode(sv), FDK_SCROLL_BARS_CLASSIC, "fdk_scrollview_get_bar_mode(sv)");
     assert(fdk_scrollview_set_bar_mode(sv, FDK_SCROLL_BARS_OVERLAY) ==
            FDK_OK);
-    assert(fdk_scrollview_get_bar_mode(sv) == FDK_SCROLL_BARS_OVERLAY);
+    CHECK_EQ(fdk_scrollview_get_bar_mode(sv), FDK_SCROLL_BARS_OVERLAY, "fdk_scrollview_get_bar_mode(sv)");
     assert(fdk_scrollview_set_bar_mode(sv, FDK_SCROLL_BARS_OVERLAY) ==
            FDK_OK); /* idempotent */
     assert(fdk_scrollview_set_bar_mode(NULL,
                                        FDK_SCROLL_BARS_OVERLAY) ==
            FDK_ERR_INVALID_ARGUMENT);
-    assert(fdk_scrollview_get_bar_mode(NULL) == FDK_SCROLL_BARS_CLASSIC);
+    CHECK_EQ(fdk_scrollview_get_bar_mode(NULL), FDK_SCROLL_BARS_CLASSIC, "fdk_scrollview_get_bar_mode(NULL)");
     fdk_widget *plain = NULL;
     assert(fdk_ok(fdk_widget_create(root, NULL,
                                     (fdk_rect){0, 0, 5, 5}, &plain)));
@@ -644,14 +645,14 @@ static void test_overlay_bars(void) {
             sv_child = root->children[i];
         }
     }
-    assert(sv_child == sv);
+    CHECK_EQ(sv_child, sv, "sv_child");
     for (size_t i = 0; i < sv->child_count && nbars < 2; i++) {
         if (sv->children[i]->klass->name != NULL &&
             strcmp(sv->children[i]->klass->name, "scrollbar") == 0) {
             bars[nbars++] = sv->children[i];
         }
     }
-    assert(nbars == 2);
+    CHECK_EQ(nbars, 2, "nbars");
     /* Detached tree (no window -> no idle clock): the honesty rule —
      * overlay bars stay VISIBLE while their axes overflow. */
     for (int i = 0; i < 2; i++) {
@@ -687,8 +688,8 @@ static void test_overlay_bars(void) {
     settle();
     fdk_i32 ox = 0, oy = 0;
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &ox, &oy)));
-    assert(oy == 48); /* one notch, clamped far from the edges */
-    assert(ox == 0);
+    CHECK_EQ(oy, 48, "oy"); /* one notch, clamped far from the edges */
+    CHECK_EQ(ox, 0, "ox");
     assert(fdk_widget_get_visible(bars[0]));
 
     /* Mode switch back: strips reserved again, offsets re-clamped. */
@@ -697,7 +698,7 @@ static void test_overlay_bars(void) {
     fdk__scrollview_viewport(sv, &vw, &vh);
     assert(vw == 200 - 12 && vh == 150 - 12);
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &ox, &oy)));
-    assert(oy == 48); /* unchanged: still in range */
+    CHECK_EQ(oy, 48, "oy"); /* unchanged: still in range */
 
     /* A fitting axis has no bar in either mode. */
     fdk_widget_destroy(root);
@@ -732,7 +733,7 @@ static void test_vertical_only(void) {
     fdk_widget *root = fresh_root();
     fdk_widget *sv = NULL;
     assert(fdk_ok(fdk_scrollview_create(root, &sv)));
-    assert(fdk_scrollview_get_vertical_only(sv) == false);
+    CHECK_EQ(fdk_scrollview_get_vertical_only(sv), false, "fdk_scrollview_get_vertical_only(sv)");
 
     fdk_widget *content = make_content(sv, 500, 900,
                                        (fdk_color){1, 0, 0, 1});
@@ -751,15 +752,15 @@ static void test_vertical_only(void) {
      * (the cross-clamp look a plain box used to give it) instead of
      * its 500-px natural. */
     assert(fdk_ok(fdk_scrollview_set_vertical_only(sv, true)));
-    assert(fdk_scrollview_get_vertical_only(sv) == true);
+    CHECK_EQ(fdk_scrollview_get_vertical_only(sv), true, "fdk_scrollview_get_vertical_only(sv)");
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sx == 0);
-    assert(sy > 0); /* the vertical range is untouched */
+    CHECK_EQ(sx, 0, "sx");
+    CHECK_GT(sy, 0, "sy"); /* the vertical range is untouched */
     fdk_i32 vw = -1, vh = -1;
     fdk__scrollview_viewport(sv, &vw, &vh);
     fdk_rect cb = fdk_widget_get_bounds(content);
-    assert(cb.width == vw);
-    assert(cb.height == 900);
+    CHECK_EQ(cb.width, vw, "cb.width");
+    CHECK_EQ(cb.height, 900, "cb.height");
 
     /* The horizontal axis is dead to PROGRAMMATIC scrolls too (the
      * clamp range is zero), while the vertical one still moves —
@@ -786,15 +787,15 @@ static void test_vertical_only(void) {
     /* Idempotent; disengage restores the horizontal range. */
     assert(fdk_scrollview_set_vertical_only(sv, true) == FDK_OK);
     assert(fdk_ok(fdk_scrollview_set_vertical_only(sv, false)));
-    assert(fdk_scrollview_get_vertical_only(sv) == false);
+    CHECK_EQ(fdk_scrollview_get_vertical_only(sv), false, "fdk_scrollview_get_vertical_only(sv)");
     (void)fdk_scrollview_scroll_to(sv, 10000, 10000);
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    assert(sx > 0);
+    CHECK_GT(sx, 0, "sx");
 
     /* Type checks on a non-scrollview. */
     assert(fdk_scrollview_set_vertical_only(content, true) ==
            FDK_ERR_INVALID_ARGUMENT);
-    assert(fdk_scrollview_get_vertical_only(content) == false);
+    CHECK_EQ(fdk_scrollview_get_vertical_only(content), false, "fdk_scrollview_get_vertical_only(content)");
 
     fdk_widget_destroy(root);
     printf("[ok] scrollview: vertical-only (content at viewport "

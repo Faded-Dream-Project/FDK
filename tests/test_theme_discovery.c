@@ -36,6 +36,7 @@
  *     (the boot theme's ownership is the reset hook's business)
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_prefs.h"
 #include "fdk/fdk_theme.h"

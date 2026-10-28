@@ -10,6 +10,12 @@
  * env override carries over everything.
  */
 
+/* The SUBJECT is the resolution itself: the metrics pin is opted
+ * out; the sandbox half still applies (the default-16 legs need a
+ * silent settings store). */
+#define FDK_TEST_NO_METRICS_PIN
+
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_theme.h"
 #include "theme/theme_internal.h"

@@ -14,6 +14,7 @@
  *   - argument safety
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 

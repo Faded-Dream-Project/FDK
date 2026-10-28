@@ -35,6 +35,7 @@
  * always private and empty).
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_dbus.h"
 #include "fdk/fdk_notify.h"

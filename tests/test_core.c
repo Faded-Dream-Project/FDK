@@ -7,6 +7,7 @@
  * `make test-x11`, not plain `make test`) rather than staying here
  * and making ordinary `make test` require a desktop session. */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 
 #include <assert.h>

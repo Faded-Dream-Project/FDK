@@ -10,6 +10,7 @@
  * safety of the public API surface.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_dnd.h"
 #include "platform/platform_internal.h"

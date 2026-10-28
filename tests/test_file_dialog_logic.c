@@ -11,6 +11,7 @@
  * validation — plus the result-model free function's tolerance.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "core/alloc_internal.h"
 #include "widget/widgets_internal.h"

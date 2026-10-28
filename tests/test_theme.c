@@ -25,6 +25,7 @@
  *     same center line; default 1 is the v1 rule exactly
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_theme.h"
 #include "fdk/fdk_widgets.h"

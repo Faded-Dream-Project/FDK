@@ -10,6 +10,7 @@
  * honestly skips.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
@@ -125,10 +126,10 @@ static void test_paned_layout(void) {
     fdk_widget *c1 = plain_child(p, 60, 40);
     fdk_widget *c2 = plain_child(p, 80, 40);
     fdk_widget_measure(p, &nat);
-    assert(nat.width == 60 + FDK_PANED_DIVIDER + 80); /* shrink-wrap */
-    assert(nat.height == 40);
+    CHECK_EQ(nat.width, 60 + FDK_PANED_DIVIDER + 80, "nat.width"); /* shrink-wrap */
+    CHECK_EQ(nat.height, 40, "nat.height");
     assert(!fdk_paned_position_is_set(p));
-    assert(fdk_paned_get_position(p) == 60);
+    CHECK_EQ(fdk_paned_get_position(p), 60, "fdk_paned_get_position(p)");
     assert(c1->bounds.width == 60); /* auto split applied          */
     assert(c2->bounds.x == 60 + FDK_PANED_DIVIDER);
     assert(c2->bounds.width == 300 - 60 - FDK_PANED_DIVIDER);
@@ -137,19 +138,19 @@ static void test_paned_layout(void) {
     /* Pin: the divider offset is clamped so it stays visible. */
     assert(fdk_paned_set_position(p, 100) == FDK_OK);
     assert(fdk_paned_position_is_set(p));
-    assert(fdk_paned_get_position(p) == 100);
+    CHECK_EQ(fdk_paned_get_position(p), 100, "fdk_paned_get_position(p)");
     assert(c1->bounds.width == 100);
     assert(c2->bounds.x == 100 + FDK_PANED_DIVIDER);
     assert(fdk_paned_set_position(p, -5) == FDK_ERR_INVALID_ARGUMENT);
     assert(fdk_paned_set_position(p, 5000) == FDK_OK); /* clamped */
-    assert(fdk_paned_get_position(p) == 300 - FDK_PANED_DIVIDER);
+    CHECK_EQ(fdk_paned_get_position(p), 300 - FDK_PANED_DIVIDER, "fdk_paned_get_position(p)");
     assert(c1->bounds.width == 300 - FDK_PANED_DIVIDER);
     assert(c2->bounds.width == 0); /* squeezed to zero, GTK-style  */
 
     /* Unset: back to the auto split. */
     fdk_paned_unset_position(p);
     assert(!fdk_paned_position_is_set(p));
-    assert(fdk_paned_get_position(p) == 60);
+    CHECK_EQ(fdk_paned_get_position(p), 60, "fdk_paned_get_position(p)");
     assert(c1->bounds.width == 60);
 
     /* The third child is refused loudly (the class's fixed slots). */
@@ -161,7 +162,7 @@ static void test_paned_layout(void) {
      * notifier (child re-measure -> paned relayout). */
     fdk_widget_set_natural_size(c1, 120, 40);
     fdk_widget_child_layout_changed(p);
-    assert(fdk_paned_get_position(p) == 120);
+    CHECK_EQ(fdk_paned_get_position(p), 120, "fdk_paned_get_position(p)");
     assert(c1->bounds.width == 120);
 
     /* Single child: it IS the paned (no divider reserved). */
@@ -175,7 +176,7 @@ static void test_paned_layout(void) {
     fdk_widget_arrange(pv, (fdk_rect){0, 220, 100, 300});
     fdk_widget *t1 = plain_child(pv, 40, 50);
     fdk_widget *t2 = plain_child(pv, 40, 70);
-    assert(fdk_paned_get_position(pv) == 50);
+    CHECK_EQ(fdk_paned_get_position(pv), 50, "fdk_paned_get_position(pv)");
     assert(t1->bounds.height == 50);
     assert(t2->bounds.y == 50 + FDK_PANED_DIVIDER);
     assert(t2->bounds.height == 300 - 50 - FDK_PANED_DIVIDER);
@@ -183,8 +184,8 @@ static void test_paned_layout(void) {
 
     /* Measure: vertical shrink-wrap swaps the axes. */
     fdk_widget_measure(pv, &nat);
-    assert(nat.height == 50 + FDK_PANED_DIVIDER + 70);
-    assert(nat.width == 40);
+    CHECK_EQ(nat.height, 50 + FDK_PANED_DIVIDER + 70, "nat.height");
+    CHECK_EQ(nat.width, 40, "nat.width");
 
     fdk_widget_destroy(root);
     printf("[ok] paned: auto split honors naturals, pin clamps to the "
@@ -210,18 +211,18 @@ static void test_paned_drag(void) {
     fdk_event_data move = ev_motion(150.0f, 100.0f);
     assert(fdk_widget_tree_handle_event(root, &move));
     assert(fdk_paned_position_is_set(p));
-    assert(fdk_paned_get_position(p) == 150 - 3);
+    CHECK_EQ(fdk_paned_get_position(p), 150 - 3, "fdk_paned_get_position(p)");
     fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 150.0f,
                                   100.0f);
     assert(fdk_widget_tree_handle_event(root, &up));
-    assert(fdk_paned_get_position(p) == 150 - 3); /* parked */
+    CHECK_EQ(fdk_paned_get_position(p), 150 - 3, "fdk_paned_get_position(p)"); /* parked */
 
     /* Drag clamps at both walls (presses start INSIDE the current
      * band — the divider owns only its own 6 px). */
     press_move_release(root, 150.0f, 100.0f, -50.0f, 100.0f);
-    assert(fdk_paned_get_position(p) == 0);
+    CHECK_EQ(fdk_paned_get_position(p), 0, "fdk_paned_get_position(p)");
     press_move_release(root, 3.0f, 100.0f, 900.0f, 100.0f);
-    assert(fdk_paned_get_position(p) == 300 - FDK_PANED_DIVIDER);
+    CHECK_EQ(fdk_paned_get_position(p), 300 - FDK_PANED_DIVIDER, "fdk_paned_get_position(p)");
 
     /* A press OUTSIDE the band is not ours (pane content owns it). */
     down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 10.0f, 100.0f);
@@ -275,10 +276,10 @@ static void test_paned_keyboard(void) {
     fdk_widget_focus(p);
     fdk_event_data right = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_RIGHT);
     assert(fdk_widget_tree_handle_event(root, &right));
-    assert(fdk_paned_get_position(p) == 108);
+    CHECK_EQ(fdk_paned_get_position(p), 108, "fdk_paned_get_position(p)");
     fdk_event_data left = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_LEFT);
     assert(fdk_widget_tree_handle_event(root, &left));
-    assert(fdk_paned_get_position(p) == 100);
+    CHECK_EQ(fdk_paned_get_position(p), 100, "fdk_paned_get_position(p)");
 
     /* Vertical paned answers Up/Down; Left/Right bubble. */
     fdk_widget *pv = NULL;
@@ -290,26 +291,26 @@ static void test_paned_keyboard(void) {
     fdk_widget_focus(pv);
     fdk_event_data down = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_DOWN);
     assert(fdk_widget_tree_handle_event(root, &down));
-    assert(fdk_paned_get_position(pv) == 108);
+    CHECK_EQ(fdk_paned_get_position(pv), 108, "fdk_paned_get_position(pv)");
     fdk_event_data up = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_UP);
     assert(fdk_widget_tree_handle_event(root, &up));
-    assert(fdk_paned_get_position(pv) == 100);
+    CHECK_EQ(fdk_paned_get_position(pv), 100, "fdk_paned_get_position(pv)");
     fdk_event_data miss = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_RIGHT);
     assert(!fdk_widget_tree_handle_event(root, &miss));
 
     /* Home/End jump to the extremes (clamped). */
     fdk_event_data end = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_END);
     assert(fdk_widget_tree_handle_event(root, &end));
-    assert(fdk_paned_get_position(pv) == 240 - FDK_PANED_DIVIDER);
+    CHECK_EQ(fdk_paned_get_position(pv), 240 - FDK_PANED_DIVIDER, "fdk_paned_get_position(pv)");
     fdk_event_data home = ev_key(FDK_EVENT_KEY_DOWN, FDK_KEY_HOME);
     assert(fdk_widget_tree_handle_event(root, &home));
-    assert(fdk_paned_get_position(pv) == 0);
+    CHECK_EQ(fdk_paned_get_position(pv), 0, "fdk_paned_get_position(pv)");
 
     /* a11y: SPLIT_PANE role, the divider offset is the value. */
     fdk_paned_set_position(pv, 42);
     fdk_a11y_info info;
     assert(fdk_ok(fdk_a11y_describe(pv, &info)));
-    assert(info.role == FDK_A11Y_ROLE_SPLIT_PANE);
+    CHECK_EQ(info.role, FDK_A11Y_ROLE_SPLIT_PANE, "info.role");
     assert(info.has_value);
     assert(info.value_current == 42.0);
     assert(info.value_min == 0.0);
@@ -347,7 +348,7 @@ static void test_expander_layout(void) {
     fdk_size nat;
     fdk_widget_measure(e, &nat);
     fdk_i32 header_h = nat.height;
-    assert(header_h >= 24); /* the fontless floor, or the band */
+    CHECK_GE(header_h, 24, "header_h"); /* the fontless floor, or the band */
     assert(nat.width > 0);  /* chevron + gap + "Details"      */
     assert((content->flags & FDK_WF_VISIBLE) == 0);
 
@@ -375,12 +376,12 @@ static void test_expander_layout(void) {
     assert(nat.height > header_h && nat.height < header_h + 120);
     anim_at(200); /* done (160 ms) */
     fdk_widget_measure(e, &nat);
-    assert(nat.height == header_h + 120);
+    CHECK_EQ(nat.height, header_h + 120, "nat.height");
 
     /* a11y: EXPANDER role, EXPANDED state, name = label. */
     fdk_a11y_info info;
     assert(fdk_ok(fdk_a11y_describe(e, &info)));
-    assert(info.role == FDK_A11Y_ROLE_EXPANDER);
+    CHECK_EQ(info.role, FDK_A11Y_ROLE_EXPANDER, "info.role");
     assert((info.states & FDK_A11Y_EXPANDED) != 0);
     assert(info.name != NULL && strcmp(info.name, "More") == 0);
     fdk_a11y_info_free(&info);
@@ -390,10 +391,10 @@ static void test_expander_layout(void) {
     assert(g_expand_changes == 2 && !g_last_expanded);
     anim_at(280); /* mid-return */
     fdk_widget_measure(e, &nat);
-    assert(nat.height > header_h);
+    CHECK_GT(nat.height, header_h, "nat.height");
     anim_at(400); /* landed */
     fdk_widget_measure(e, &nat);
-    assert(nat.height == header_h);
+    CHECK_EQ(nat.height, header_h, "nat.height");
     assert((content->flags & FDK_WF_VISIBLE) == 0);
 
     /* Retarget-from-live: expand, fly half-way, collapse — the
@@ -409,7 +410,7 @@ static void test_expander_layout(void) {
     fdk_expander_set_expanded(e, false);
     anim_at(490); /* 10 ms into the return */
     fdk_widget_measure(e, &nat);
-    assert(nat.height < half_h); /* already below the departure */
+    CHECK_LT(nat.height, half_h, "nat.height"); /* already below the departure */
 
     anim_at(0);
     fdk_widget_destroy(root);
@@ -431,7 +432,7 @@ static void test_expander_interaction(void) {
     fdk_size nat;
     fdk_widget_measure(e, &nat);
     fdk_i32 band = nat.height;
-    assert(band >= 24);
+    CHECK_GE(band, 24, "band");
     fdk_widget_arrange(e, (fdk_rect){10, 10, 260, band + 120});
 
     anim_at(0);
@@ -448,7 +449,7 @@ static void test_expander_interaction(void) {
     /* A click on the CONTENT area does not toggle (the child owns
      * it; the press reaches the child, not the header branch). */
     click(root, 60.0f, (float)(10 + band + 20)); /* content zone */
-    assert(g_expand_changes == 1); /* unchanged                    */
+    CHECK_EQ(g_expand_changes, 1, "g_expand_changes"); /* unchanged                    */
 
     /* Space toggles while focused (keyboard parity with buttons). */
     fdk_widget_focus(e);
@@ -472,16 +473,13 @@ static void test_expander_interaction(void) {
     fdk_widget_tree_paint(root, s);
     /* Glyph box: x = 10 + 6 = 16, centered on the header band. */
     fdk_i32 gx = 16 + 5; /* the glyph center, x                   */
-    int ink_below = 0, ink_right = 0;
+    int ink_below = 0;
     for (int dy = 1; dy <= 6; dy++) {
         if (px_at(s, gx + dy, 10 + band / 2) != 0x000000u) {
-            ink_below++; /* the rotated "v" arm sweeps below     */
-        }
-        if (px_at(s, gx + 3 + dy, 10 + band / 2 - dy) != 0x000000u) {
-            ink_right++;
+            ink_below++; /* the rotated arm sweeps right/below  */
         }
     }
-    assert(ink_below > 0); /* expanded: pointing DOWN             */
+    CHECK_GT(ink_below, 0, "expander chevron ink right of center");
 
     /* Destroy mid-flight is ASan-clean (the animator drops the
      * flight without firing done into a dying widget). */
@@ -528,7 +526,7 @@ static void test_row_icons(void) {
     fdk_widget_measure(list, &nat_plain);
     assert(fdk_list_row_set_icon(list, 1, FDK_ROW_ICON_FOLDER) == FDK_OK);
     fdk_widget_measure(list, &nat_icon);
-    assert(nat_icon.width == nat_plain.width + 16 + 6);
+    CHECK_EQ(nat_icon.width, nat_plain.width + 16 + 6, "nat_icon.width");
 
     /* The glyph paints ink inside its box (row 0, first column of
      * the icon zone; text starts 22 px further right). */
@@ -547,7 +545,7 @@ static void test_row_icons(void) {
             }
         }
     }
-    assert(ink > 6); /* the house glyph, not a stray pixel        */
+    CHECK_GT(ink, 6, "ink"); /* the house glyph, not a stray pixel        */
 
     /* Batch discipline: icons set inside a batch settle once. */
     fdk_list_begin_batch(list);
@@ -598,7 +596,7 @@ static void test_stack(void) {
     assert(fdk_stack_add(st, pg1, "general", "General") == FDK_OK);
     assert(fdk_stack_add(st, pg2, "appearance", NULL) == FDK_OK);
     assert(fdk_stack_add(st, pg3, "about", "About") == FDK_OK);
-    assert(fdk_stack_page_count(st) == 3);
+    CHECK_EQ(fdk_stack_page_count(st), 3, "fdk_stack_page_count(st)");
     assert(fdk_stack_get_child_by_name(st, "appearance") == pg2);
     assert(fdk_stack_get_child_by_name(st, "nope") == NULL);
     assert(strcmp(fdk_stack_page_name(st, 1), "appearance") == 0);
@@ -616,7 +614,7 @@ static void test_stack(void) {
     assert((pg1->flags & FDK_WF_VISIBLE) != 0);
     assert((pg2->flags & FDK_WF_VISIBLE) == 0);
     assert(strcmp(fdk_stack_get_visible_name(st), "general") == 0);
-    assert(fdk_stack_get_visible_child(st) == pg1);
+    CHECK_EQ(fdk_stack_get_visible_child(st), pg1, "fdk_stack_get_visible_child(st)");
 
     /* The natural size is the MAX over pages. */
     fdk_widget_measure(st, &nat);
@@ -637,7 +635,7 @@ static void test_stack(void) {
     assert(pg3->bounds.width == 300 && pg3->bounds.height == 200);
     /* Switching to the current page: no callback. */
     assert(fdk_stack_set_visible_name(st, "about") == FDK_OK);
-    assert(g_stack_changes == 1);
+    CHECK_EQ(g_stack_changes, 1, "g_stack_changes");
     assert(fdk_stack_set_visible_name(st, "nope") == FDK_ERR_NOT_FOUND);
     /* Switch by widget. */
     assert(fdk_stack_set_visible_child(st, pg2) == FDK_OK);
@@ -654,7 +652,7 @@ static void test_stack(void) {
     /* a11y: PANEL role, name = the current page's title. */
     fdk_a11y_info info;
     assert(fdk_ok(fdk_a11y_describe(st, &info)));
-    assert(info.role == FDK_A11Y_ROLE_PANEL);
+    CHECK_EQ(info.role, FDK_A11Y_ROLE_PANEL, "info.role");
     assert(info.name != NULL && strcmp(info.name, "appearance") == 0);
     fdk_a11y_info_free(&info);
 
@@ -663,11 +661,11 @@ static void test_stack(void) {
      * page keeps showing the same page. */
     g_stack_changes = 0;
     assert(fdk_stack_remove_page(st, 1) == FDK_OK); /* current, of 3 */
-    assert(fdk_stack_page_count(st) == 2);
-    assert(fdk_stack_get_visible_child(st) == pg3); /* shifted in    */
+    CHECK_EQ(fdk_stack_page_count(st), 2, "fdk_stack_page_count(st)");
+    CHECK_EQ(fdk_stack_get_visible_child(st), pg3, "fdk_stack_get_visible_child(st)"); /* shifted in    */
     assert(g_stack_changes == 1 && g_stack_last_index == 1);
     assert(fdk_stack_remove_page(st, 0) == FDK_OK); /* earlier page  */
-    assert(fdk_stack_get_visible_child(st) == pg3); /* same page     */
+    CHECK_EQ(fdk_stack_get_visible_child(st), pg3, "fdk_stack_get_visible_child(st)"); /* same page     */
     assert(fdk_stack_remove_page(st, 5) == FDK_ERR_INVALID_ARGUMENT);
 
     /* BOX pages — the regression example 12 found live: a page that
@@ -732,8 +730,8 @@ static void test_revealer(void) {
            FDK_ERR_INVALID_ARGUMENT);
 
     /* Defaults + the API's getters. */
-    assert(fdk_revealer_get_transition(rv) == FDK_REVEAL_SLIDE_DOWN);
-    assert(fdk_revealer_get_transition_duration(rv) == 160);
+    CHECK_EQ(fdk_revealer_get_transition(rv), FDK_REVEAL_SLIDE_DOWN, "fdk_revealer_get_transition(rv)");
+    CHECK_EQ(fdk_revealer_get_transition_duration(rv), 160, "fdk_revealer_get_transition_duration(rv)");
     assert(!fdk_revealer_get_reveal_child(rv));
     assert(!fdk_revealer_get_child_revealed(rv));
 
@@ -745,7 +743,7 @@ static void test_revealer(void) {
     assert((content->flags & FDK_WF_VISIBLE) != 0);
     anim_at(80); /* mid-flight */
     fdk_widget_measure(rv, &nat);
-    assert(nat.width == 200);
+    CHECK_EQ(nat.width, 200, "nat.width");
     assert(nat.height > 0 && nat.height < 120);
     assert(!fdk_revealer_get_child_revealed(rv));
     anim_at(200); /* landed */
@@ -776,7 +774,7 @@ static void test_revealer(void) {
     fdk_revealer_set_reveal_child(rv, false);
     anim_at(490);
     fdk_widget_measure(rv, &nat);
-    assert(nat.height < half_h);
+    CHECK_LT(nat.height, half_h, "nat.height");
     anim_at(700); /* land the return flight before what follows */
 
     /* SLIDE_UP anchoring on a plain parent: the door's BOTTOM edge
@@ -798,7 +796,7 @@ static void test_revealer(void) {
      * synchronously — the duration-0 contract). */
     anim_at(1000);
     fdk_revealer_set_transition(rv, FDK_REVEAL_NONE);
-    assert(fdk_revealer_get_transition(rv) == FDK_REVEAL_NONE);
+    CHECK_EQ(fdk_revealer_get_transition(rv), FDK_REVEAL_NONE, "fdk_revealer_get_transition(rv)");
     g_reveal_events = 0;
     fdk_revealer_set_reveal_child(rv, false);
     assert(g_reveal_events == 1 && !g_reveal_last);
@@ -813,13 +811,13 @@ static void test_revealer(void) {
 
     /* The duration-0 snap behaves the same on a sliding door. */
     fdk_revealer_set_transition_duration(rv, 0);
-    assert(fdk_revealer_get_transition_duration(rv) == 0);
+    CHECK_EQ(fdk_revealer_get_transition_duration(rv), 0, "fdk_revealer_get_transition_duration(rv)");
     fdk_revealer_set_reveal_child(rv, false);
     assert(!fdk_revealer_get_child_revealed(rv));
 
     /* Duration bounds: > 10000 refused. */
     fdk_revealer_set_transition_duration(rv, 99999u);
-    assert(fdk_revealer_get_transition_duration(rv) == 0);
+    CHECK_EQ(fdk_revealer_get_transition_duration(rv), 0, "fdk_revealer_get_transition_duration(rv)");
 
     anim_at(0);
     fdk_widget_destroy(root);
@@ -854,11 +852,11 @@ static void test_stackswitcher(void) {
 
     /* Binding: the pill cache builds (visible through measure). */
     fdk_stackswitcher_set_stack(sw, st);
-    assert(fdk_stackswitcher_get_stack(sw) == st);
+    CHECK_EQ(fdk_stackswitcher_get_stack(sw), st, "fdk_stackswitcher_get_stack(sw)");
     fdk_size nat;
     fdk_widget_measure(sw, &nat);
-    assert(nat.width > 40); /* two titled pills + gap              */
-    assert(nat.height == 30);
+    CHECK_GT(nat.width, 40, "nat.width"); /* two titled pills + gap              */
+    CHECK_EQ(nat.height, 30, "nat.height");
     fdk_widget_arrange(sw, (fdk_rect){0, 0, nat.width, 30});
     fdk_widget_arrange(st, (fdk_rect){0, 40, 200, 80});
 
@@ -886,24 +884,24 @@ static void test_stackswitcher(void) {
      * switches; SELECTED rides the active page. */
     fdk_a11y_info info;
     assert(fdk_ok(fdk_a11y_describe(sw, &info)));
-    assert(info.role == FDK_A11Y_ROLE_TAB_LIST);
+    CHECK_EQ(info.role, FDK_A11Y_ROLE_TAB_LIST, "info.role");
     fdk_a11y_info_free(&info);
     assert(fdk_ok(fdk_a11y_virtual_describe(sw, 1, &info)));
-    assert(info.role == FDK_A11Y_ROLE_TAB);
+    CHECK_EQ(info.role, FDK_A11Y_ROLE_TAB, "info.role");
     assert(info.name != NULL && strcmp(info.name, "Second") == 0);
     assert((info.states & FDK_A11Y_SELECTED) == 0);
     fdk_a11y_info_free(&info);
     assert(fdk_ok(fdk_a11y_virtual_perform(sw, 1,
                                            FDK_A11Y_ACTION_ACTIVATE,
                                            0.0)));
-    assert(fdk_stack_get_visible_child(st) == pg2);
+    CHECK_EQ(fdk_stack_get_visible_child(st), pg2, "fdk_stack_get_visible_child(st)");
     assert(fdk_ok(fdk_a11y_virtual_describe(sw, 1, &info)));
     assert((info.states & FDK_A11Y_SELECTED) != 0);
     fdk_a11y_info_free(&info);
 
     /* Clicking a pill switches (the cached-name path). */
     click(root, (float)(w0 + 4 + w1 / 2), 15.0f);
-    assert(fdk_stack_get_visible_child(st) == pg2);
+    CHECK_EQ(fdk_stack_get_visible_child(st), pg2, "fdk_stack_get_visible_child(st)");
     /* Stack death by another hand: the switcher unbinds cleanly. */
     fdk_widget_destroy(st);
     assert(fdk_stackswitcher_get_stack(sw) == NULL);

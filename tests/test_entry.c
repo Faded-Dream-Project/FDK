@@ -30,6 +30,7 @@
  *     highlight band present, preedit underline inked
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
@@ -101,7 +102,7 @@ static void test_basics(void) {
     assert(fdk_ok(fdk_entry_create(root, g_font, "hello",
                                    &entry)));
     assert(strcmp(fdk_entry_get_text(entry), "hello") == 0);
-    assert(fdk_entry_get_cursor(entry) == 5); /* end after create */
+    CHECK_EQ(fdk_entry_get_cursor(entry), 5, "fdk_entry_get_cursor(entry)"); /* end after create */
 
     /* set_text resets caret to the end and fires changed. */
     static int changed = 0;
@@ -119,7 +120,7 @@ static void test_basics(void) {
     /* NULL text = "". */
     assert(fdk_ok(fdk_entry_set_text(entry, NULL)));
     assert(strcmp(fdk_entry_get_text(entry), "") == 0);
-    assert(fdk_entry_get_cursor(entry) == 0);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 0, "fdk_entry_get_cursor(entry)");
 
     /* get_text on a non-entry is refused. */
     fdk_widget *label = NULL;
@@ -127,7 +128,7 @@ static void test_basics(void) {
     assert(fdk_entry_get_text(label) == NULL);
     assert(fdk_entry_set_text(label, "x") == FDK_ERR_INVALID_ARGUMENT);
     assert(fdk_entry_set_cursor(label, 0) == FDK_ERR_INVALID_ARGUMENT);
-    assert(fdk_entry_get_cursor(label) == 0);
+    CHECK_EQ(fdk_entry_get_cursor(label), 0, "fdk_entry_get_cursor(label)");
 
     fdk_widget_destroy(root);
     printf("[ok] entry: create/get/set basics + type checks\n");
@@ -142,8 +143,8 @@ static void test_caret_boundaries(void) {
     assert(fdk_ok(fdk_entry_create(root, g_font, "a\xCE\x94\xF0\x9F\x98\x80",
                                    &entry)));
     size_t len = strlen("a\xCE\x94\xF0\x9F\x98\x80");
-    assert(len == 7);
-    assert(fdk_entry_get_cursor(entry) == len);
+    CHECK_EQ(len, 7, "len");
+    CHECK_EQ(fdk_entry_get_cursor(entry), len, "fdk_entry_get_cursor(entry)");
 
     /* Mid-codepoint offsets are refused. */
     assert(fdk_entry_set_cursor(entry, 2) == FDK_ERR_INVALID_ARGUMENT);
@@ -151,9 +152,9 @@ static void test_caret_boundaries(void) {
     assert(fdk_entry_set_cursor(entry, len + 1) == FDK_ERR_INVALID_ARGUMENT);
     /* Boundaries land exactly. */
     assert(fdk_ok(fdk_entry_set_cursor(entry, 1)));
-    assert(fdk_entry_get_cursor(entry) == 1);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 1, "fdk_entry_get_cursor(entry)");
     assert(fdk_ok(fdk_entry_set_cursor(entry, 3)));
-    assert(fdk_entry_get_cursor(entry) == 3);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 3, "fdk_entry_get_cursor(entry)");
 
     /* select_range enforces the same discipline. */
     assert(fdk_entry_select_range(entry, 2, 5) ==
@@ -183,23 +184,23 @@ static void test_editing(void) {
     type(root, 'D');
     type(root, 'K');
     assert(strcmp(fdk_entry_get_text(entry), "FDK") == 0);
-    assert(fdk_entry_get_cursor(entry) == 3);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 3, "fdk_entry_get_cursor(entry)");
 
     /* Multi-byte typing: Greek Delta (U+0394) and emoji (U+1F600). */
     type(root, 0x0394);
     type(root, 0x1F600);
     const char *t = fdk_entry_get_text(entry);
     assert(strcmp(t, "FDK\xCE\x94\xF0\x9F\x98\x80") == 0);
-    assert(fdk_entry_get_cursor(entry) == 9); /* 3 + 2 + 4 bytes */
+    CHECK_EQ(fdk_entry_get_cursor(entry), 9, "fdk_entry_get_cursor(entry)"); /* 3 + 2 + 4 bytes */
 
     /* Backspace consumes the whole 4-byte emoji (not one byte). */
     press(root, FDK_KEY_BACKSPACE, 0);
     assert(strcmp(fdk_entry_get_text(entry), "FDK\xCE\x94") == 0);
-    assert(fdk_entry_get_cursor(entry) == 5);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 5, "fdk_entry_get_cursor(entry)");
 
     /* Left moves over the 2-byte Delta as one unit. */
     press(root, FDK_KEY_LEFT, 0);
-    assert(fdk_entry_get_cursor(entry) == 3);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 3, "fdk_entry_get_cursor(entry)");
 
     /* Delete forward consumes the Delta. */
     press(root, FDK_KEY_DELETE, 0);
@@ -213,13 +214,13 @@ static void test_editing(void) {
     assert(a == 3 && c == 1);
     type(root, 'X');
     assert(strcmp(fdk_entry_get_text(entry), "FX") == 0);
-    assert(fdk_entry_get_cursor(entry) == 2);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 2, "fdk_entry_get_cursor(entry)");
 
     /* HOME / END. */
     press(root, FDK_KEY_HOME, 0);
-    assert(fdk_entry_get_cursor(entry) == 0);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 0, "fdk_entry_get_cursor(entry)");
     press(root, FDK_KEY_END, 0);
-    assert(fdk_entry_get_cursor(entry) == 2);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 2, "fdk_entry_get_cursor(entry)");
 
     /* Shift+HOME extends from the caret. */
     press(root, FDK_KEY_HOME, FDK_MOD_SHIFT);
@@ -227,7 +228,7 @@ static void test_editing(void) {
     assert(a == 2 && c == 0);
     press(root, FDK_KEY_ESC, 0); /* collapse */
     assert(fdk_ok(fdk_entry_get_selection(entry, &a, &c)));
-    assert(a == c);
+    CHECK_EQ(a, c, "a");
 
     /* Backspace at 0 and delete at end are no-ops. */
     press(root, FDK_KEY_HOME, 0);
@@ -251,7 +252,7 @@ static void test_words_and_clicks(void) {
                                    &entry)));
     assert(fdk_widget_focus(entry));
     press(root, FDK_KEY_END, 0);
-    assert(fdk_entry_get_cursor(entry) == 17);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 17, "fdk_entry_get_cursor(entry)");
 
     /* Ctrl+Left: to the start of "gamma", over the run of two
      * spaces, to the start of "beta", to the single space before
@@ -259,13 +260,13 @@ static void test_words_and_clicks(void) {
     press(root, FDK_KEY_LEFT, FDK_MOD_CTRL);
     assert(fdk_entry_get_cursor(entry) == 12); /* before "gamma" */
     press(root, FDK_KEY_LEFT, FDK_MOD_CTRL);
-    assert(fdk_entry_get_cursor(entry) == 10); /* before the spaces */
+    CHECK_EQ(fdk_entry_get_cursor(entry), 10, "fdk_entry_get_cursor(entry)"); /* before the spaces */
     press(root, FDK_KEY_LEFT, FDK_MOD_CTRL);
     assert(fdk_entry_get_cursor(entry) == 6); /* before "beta" */
     press(root, FDK_KEY_LEFT, FDK_MOD_CTRL);
-    assert(fdk_entry_get_cursor(entry) == 5); /* the single space */
+    CHECK_EQ(fdk_entry_get_cursor(entry), 5, "fdk_entry_get_cursor(entry)"); /* the single space */
     press(root, FDK_KEY_LEFT, FDK_MOD_CTRL);
-    assert(fdk_entry_get_cursor(entry) == 0);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 0, "fdk_entry_get_cursor(entry)");
 
     /* Ctrl+Right mirrors it. */
     press(root, FDK_KEY_RIGHT, FDK_MOD_CTRL);
@@ -281,7 +282,7 @@ static void test_words_and_clicks(void) {
     assert(fdk_widget_tree_handle_event(root, &down));
     /* Caret went to the offset nearest x=20 (roughly "al|pha"). */
     size_t after_click = fdk_entry_get_cursor(entry);
-    assert(after_click <= 3);
+    CHECK_LE(after_click, 3, "after_click");
     fdk_event_data motion = {
         .type = FDK_EVENT_POINTER_MOTION,
     };
@@ -289,7 +290,7 @@ static void test_words_and_clicks(void) {
     motion.pointer.position.y = 26.0f;
     assert(fdk_widget_tree_handle_event(root, &motion));
     size_t after_drag = fdk_entry_get_cursor(entry);
-    assert(after_drag > after_click);
+    CHECK_GT(after_drag, after_click, "after_drag");
     fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
                                   120.0f, 26.0f);
     assert(fdk_widget_tree_handle_event(root, &up));
@@ -327,23 +328,23 @@ static void test_signals(void) {
     g_changed_count = 0;
     type(root, 'a');
     type(root, 'b');
-    assert(g_changed_count == 2);
+    CHECK_EQ(g_changed_count, 2, "g_changed_count");
 
     g_activate_count = 0;
     press(root, FDK_KEY_ENTER, 0);
-    assert(g_activate_count == 1);
+    CHECK_EQ(g_activate_count, 1, "g_activate_count");
 
     /* set_text fires changed too. */
     g_changed_count = 0;
     assert(fdk_ok(fdk_entry_set_text(entry, "set")));
-    assert(g_changed_count == 1);
+    CHECK_EQ(g_changed_count, 1, "g_changed_count");
 
     /* select_all / preedit fire NOTHING (they are not edits). */
     g_changed_count = 0;
     fdk_entry_select_all(entry);
     assert(fdk_ok(fdk_entry_set_preedit(entry, "composing")));
     assert(fdk_ok(fdk_entry_set_preedit(entry, NULL)));
-    assert(g_changed_count == 0);
+    CHECK_EQ(g_changed_count, 0, "g_changed_count");
 
     fdk_widget_destroy(root);
     printf("[ok] entry: on_changed/on_activate fire exactly once per "
@@ -399,7 +400,7 @@ static void test_cap(void) {
     exact[64u * 1024u] = '\0';
     assert(fdk_ok(fdk_entry_set_text(entry, exact)));
     free(exact);
-    assert(fdk_entry_get_cursor(entry) == 64u * 1024u);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 64u * 1024u, "fdk_entry_get_cursor(entry)");
 
     fdk_widget_destroy(root);
     printf("[ok] entry: 64 KiB cap enforced (over refused, at-cap "
@@ -512,7 +513,7 @@ static void test_placeholder(void) {
            == 0);
     /* The placeholder never enters the buffer. */
     assert(strcmp(fdk_entry_get_text(entry), "") == 0);
-    assert(fdk_entry_get_cursor(entry) == 0);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 0, "fdk_entry_get_cursor(entry)");
 
     /* Pixel proof: an empty entry with a placeholder paints ink in
      * the text band; clearing the placeholder removes it. The blank
@@ -529,7 +530,7 @@ static void test_placeholder(void) {
             with_ink++;
         }
     }
-    assert(with_ink > 8); /* the placeholder glyphs are on screen */
+    CHECK_GT(with_ink, 8, "with_ink"); /* the placeholder glyphs are on screen */
 
     fdk_entry_set_placeholder(entry, NULL);
     assert(fdk_entry_get_placeholder(entry) == NULL);
@@ -542,7 +543,7 @@ static void test_placeholder(void) {
             bare_ink++;
         }
     }
-    assert(bare_ink == 0); /* nothing left in the empty field */
+    CHECK_EQ(bare_ink, 0, "bare_ink"); /* nothing left in the empty field */
 
     /* Text wins: with text present the placeholder is not painted
      * (a row through the band differs from the placeholder paint). */
@@ -557,7 +558,7 @@ static void test_placeholder(void) {
             text_ink++;
         }
     }
-    assert(text_ink > 8);
+    CHECK_GT(text_ink, 8, "text_ink");
 
     /* Empty string clears, same as NULL. */
     fdk_entry_set_placeholder(entry, "");
@@ -598,7 +599,7 @@ static void test_scroll(void) {
     for (int i = 0; i < 40; i++) {
         type(root, (fdk_u32)('0' + (i % 10)));
     }
-    assert(fdk_entry_get_cursor(entry) == 40);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 40, "fdk_entry_get_cursor(entry)");
     fdk_surface *s = NULL;
     assert(fdk_ok(fdk_surface_create(140, 60, &s)));
     fdk_surface_invalidate_all(s);
@@ -606,7 +607,7 @@ static void test_scroll(void) {
     fdk_surface_destroy(s);
     /* HOME scrolls back to the start: first char visible again. */
     press(root, FDK_KEY_HOME, 0);
-    assert(fdk_entry_get_cursor(entry) == 0);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 0, "fdk_entry_get_cursor(entry)");
 
     fdk_widget_destroy(root);
     printf("[ok] entry: horizontal scroll under long text (invariants "
@@ -678,13 +679,13 @@ static void ctrl_key(fdk_widget *root, fdk_u32 cp, fdk_u32 extra_mods) {
 static void test_undo_redo(void) {
     /* Argument discipline first. */
     assert(!fdk_entry_can_undo(NULL));
-    assert(fdk_entry_undo(NULL) == FDK_ERR_INVALID_ARGUMENT);
+    CHECK_EQ(fdk_entry_undo(NULL), FDK_ERR_INVALID_ARGUMENT, "fdk_entry_undo(NULL)");
     fdk_widget *root = fresh_root();
     fdk_widget *entry = NULL;
     assert(fdk_ok(fdk_entry_create(root, g_font, "", &entry)));
     assert(fdk_widget_focus(entry)); /* keys route to the focus */
     assert(!fdk_entry_can_undo(entry)); /* nothing recorded yet */
-    assert(fdk_entry_undo(entry) == FDK_ERR_INVALID_STATE);
+    CHECK_EQ(fdk_entry_undo(entry), FDK_ERR_INVALID_STATE, "fdk_entry_undo(entry)");
 
     /* -- typing coalesces: "abc" is ONE undo step -- */
     type(root, 'a');
@@ -692,11 +693,11 @@ static void test_undo_redo(void) {
     type(root, 'c');
     assert(strcmp(fdk_entry_get_text(entry), "abc") == 0);
     assert(fdk_entry_can_undo(entry));
-    assert(fdk_entry_undo(entry) == FDK_OK);
+    CHECK_EQ(fdk_entry_undo(entry), FDK_OK, "fdk_entry_undo(entry)");
     assert(strcmp(fdk_entry_get_text(entry), "") == 0); /* all three */
     assert(!fdk_entry_can_undo(entry));
     assert(fdk_entry_can_redo(entry));
-    assert(fdk_entry_redo(entry) == FDK_OK);
+    CHECK_EQ(fdk_entry_redo(entry), FDK_OK, "fdk_entry_redo(entry)");
     assert(strcmp(fdk_entry_get_text(entry), "abc") == 0);
 
     /* -- caret rides along: undo of a mid-string insert restores the
@@ -706,10 +707,10 @@ static void test_undo_redo(void) {
     press(root, FDK_KEY_LEFT, 0);
     type(root, 'X');
     assert(strcmp(fdk_entry_get_text(entry), "aXbc") == 0);
-    assert(fdk_entry_get_cursor(entry) == 2);
+    CHECK_EQ(fdk_entry_get_cursor(entry), 2, "fdk_entry_get_cursor(entry)");
     (void)fdk_entry_undo(entry);
     assert(strcmp(fdk_entry_get_text(entry), "abc") == 0);
-    assert(fdk_entry_get_cursor(entry) == 1); /* the pre-edit caret */
+    CHECK_EQ(fdk_entry_get_cursor(entry), 1, "fdk_entry_get_cursor(entry)"); /* the pre-edit caret */
 
     /* -- frontier rule: typing elsewhere does NOT merge -- */
     /* Fresh entry: "ab", arrow-left (frontier breaks), "9". */
@@ -808,12 +809,12 @@ static void test_undo_redo(void) {
     assert(fdk_ok(fdk_entry_set_text(entry, "reset")));
     assert(!fdk_entry_can_undo(entry));
     assert(!fdk_entry_can_redo(entry));
-    assert(fdk_entry_undo(entry) == FDK_ERR_INVALID_STATE);
+    CHECK_EQ(fdk_entry_undo(entry), FDK_ERR_INVALID_STATE, "fdk_entry_undo(entry)");
 
     /* -- read-only refuses everything undoable -- */
     fdk_entry_set_read_only(entry, true);
     assert(!fdk_entry_can_undo(entry));
-    assert(fdk_entry_undo(entry) == FDK_ERR_INVALID_STATE);
+    CHECK_EQ(fdk_entry_undo(entry), FDK_ERR_INVALID_STATE, "fdk_entry_undo(entry)");
     fdk_entry_set_read_only(entry, false);
     /* Read-only never RECORDED, so still nothing after re-enable. */
     assert(!fdk_entry_can_undo(entry));
@@ -827,9 +828,9 @@ static void test_undo_redo(void) {
     fdk_entry_set_on_changed(entry, on_changed_count, &changed);
     changed = 0;
     type(root, 'q');
-    assert(changed == 1);
+    CHECK_EQ(changed, 1, "changed");
     (void)fdk_entry_undo(entry);
-    assert(changed == 2); /* the undo application notified too */
+    CHECK_EQ(changed, 2, "changed"); /* the undo application notified too */
     assert(strcmp(fdk_entry_get_text(entry), "") == 0);
 
     fdk_widget_destroy(root);
@@ -857,7 +858,7 @@ static void test_search_entry(void) {
     fdk_widget *plain = NULL;
     assert(fdk_ok(fdk_entry_create(root, g_font, "", &plain)));
     assert(!fdk_entry_is_search(plain));
-    assert(fdk_entry_is_search(NULL) == false);
+    CHECK_EQ(fdk_entry_is_search(NULL), false, "fdk_entry_is_search(NULL)");
     assert(fdk_search_entry_create(NULL, g_font, NULL) ==
            FDK_ERR_INVALID_ARGUMENT);
 
@@ -869,9 +870,9 @@ static void test_search_entry(void) {
     fdk_size nat_se, nat_pl;
     fdk_widget_measure(se, &nat_se);
     fdk_widget_measure(plain, &nat_pl);
-    assert(nat_pl.width == 32); /* the empty minimum, clamped      */
-    assert(nat_se.width == 38); /* 8 + 22 glyph + 8, no clear zone */
-    assert(nat_se.height == nat_pl.height);
+    CHECK_EQ(nat_pl.width, 32, "nat_pl.width"); /* the empty minimum, clamped      */
+    CHECK_EQ(nat_se.width, 38, "nat_se.width"); /* 8 + 22 glyph + 8, no clear zone */
+    CHECK_EQ(nat_se.height, nat_pl.height, "nat_se.height");
     /* Arrange at a KNOWN 24-px field (an empty entry's natural
      * height collapses to the 16 floor; the pixel geometry below is
      * calibrated for 24). */
@@ -889,7 +890,7 @@ static void test_search_entry(void) {
     type(root, 'a');
     type(root, 'b');
     type(root, 'c');
-    assert(fdk_entry_get_cursor(se) == 3);
+    CHECK_EQ(fdk_entry_get_cursor(se), 3, "fdk_entry_get_cursor(se)");
     /* Second click in the glyph zone, displaced past the double-
      * click slop (a same-position pair would word-select instead). */
     fdk_event_data click1 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
@@ -898,7 +899,7 @@ static void test_search_entry(void) {
                                    24.0f, 5.0f);
     (void)fdk_widget_tree_handle_event(root, &click1); /* glyph zone */
     (void)fdk_widget_tree_handle_event(root, &up1);
-    assert(fdk_entry_get_cursor(se) == 0);
+    CHECK_EQ(fdk_entry_get_cursor(se), 0, "fdk_entry_get_cursor(se)");
 
     /* The clear button: a press in the reserved right zone empties
      * the field through the honest edit path — on_changed fires and
@@ -913,7 +914,7 @@ static void test_search_entry(void) {
     (void)fdk_widget_tree_handle_event(root, &clear);
     (void)fdk_widget_tree_handle_event(root, &clear_up);
     assert(strcmp(fdk_entry_get_text(se), "") == 0);
-    assert(fired == 1);
+    CHECK_EQ(fired, 1, "fired");
     assert(fdk_ok(fdk_entry_undo(se)));
     assert(strcmp(fdk_entry_get_text(se), "abc") == 0);
 
@@ -986,7 +987,7 @@ static void test_search_entry(void) {
     fdk_widget_invalidate_all(root);
     fdk_widget_tree_paint(root, s);
     fdk_u32 with_x_mid = px_at(s, 284, 12);
-    assert(with_x_mid != no_x_mid); /* the X stroke crossed it      */
+    CHECK_NE(with_x_mid, no_x_mid, "with_x_mid"); /* the X stroke crossed it      */
     fdk_surface_destroy(s);
 
     fdk_widget_destroy(root);
@@ -1057,7 +1058,7 @@ static void test_icon_slots(void) {
      * appears too. */
     fdk_size nat = {0, 0};
     fdk_widget_measure(e, &nat);
-    assert(nat.width == 38); /* 8 pad + 22 glyph + 8 pad: no floor  */
+    CHECK_EQ(nat.width, 38, "nat.width"); /* 8 pad + 22 glyph + 8 pad: no floor  */
     (void)fdk_entry_set_text(e, "abcd");
     fdk_widget_measure(e, &nat);
     fdk_i32 tw_abcd = 0, th = 0;
@@ -1092,7 +1093,7 @@ static void test_icon_slots(void) {
     (void)fdk_widget_tree_handle_event(root, &clr);
     (void)fdk_widget_tree_handle_event(root, &clr_up);
     assert(strcmp(fdk_entry_get_text(e), "abcd") == 0);
-    assert(g_icon_presses == 0);
+    CHECK_EQ(g_icon_presses, 0, "g_icon_presses");
     assert(fdk_entry_set_icon_sensitive(e, FDK_ENTRY_SLOT_TRAILING,
                                         true) == FDK_OK);
 
@@ -1104,18 +1105,18 @@ static void test_icon_slots(void) {
                                        10.0f, 5.0f);
     (void)fdk_widget_tree_handle_event(root, &lead);
     (void)fdk_widget_tree_handle_event(root, &lead_up);
-    assert(fdk_entry_get_cursor(e) == 0);
+    CHECK_EQ(fdk_entry_get_cursor(e), 0, "fdk_entry_get_cursor(e)");
     /* With a callback: consumed, fired, caret untouched at 0. */
     fdk_entry_set_on_icon_press(e, FDK_ENTRY_SLOT_LEADING,
                                 on_icon_press, NULL);
     type(root, 'x'); /* caret to 1 */
-    assert(fdk_entry_get_cursor(e) == 1);
+    CHECK_EQ(fdk_entry_get_cursor(e), 1, "fdk_entry_get_cursor(e)");
     g_icon_presses = 0;
     assert(fdk_widget_tree_handle_event(root, &lead) == true);
     (void)fdk_widget_tree_handle_event(root, &lead_up);
     assert(g_icon_presses == 1 &&
            g_icon_slot == FDK_ENTRY_SLOT_LEADING);
-    assert(fdk_entry_get_cursor(e) == 1); /* untouched             */
+    CHECK_EQ(fdk_entry_get_cursor(e), 1, "fdk_entry_get_cursor(e)"); /* untouched             */
 
     /* Custom painter: replaces the built-in glyph (called at paint
      * with the box geometry), NULL reverts to the built-in. */
@@ -1126,16 +1127,16 @@ static void test_icon_slots(void) {
     assert(fdk_ok(fdk_surface_create(320, 64, &s)));
     fdk_surface_invalidate_all(s);
     fdk_widget_tree_paint(root, s);
-    assert(g_icon_paints == 1); /* leading only; trailing is built-in */
-    assert(g_icon_paint_box == 16);
-    assert(g_icon_paint_x == 8 - 2); /* PAD_X - 2 like the search   */
-    assert(g_icon_paint_enabled == true);
+    CHECK_EQ(g_icon_paints, 1, "g_icon_paints"); /* leading only; trailing is built-in */
+    CHECK_EQ(g_icon_paint_box, 16, "g_icon_paint_box");
+    CHECK_EQ(g_icon_paint_x, 8 - 2, "g_icon_paint_x"); /* PAD_X - 2 like the search   */
+    CHECK_EQ(g_icon_paint_enabled, true, "g_icon_paint_enabled");
     g_icon_paints = 0;
     assert(fdk_entry_set_icon_paint(e, FDK_ENTRY_SLOT_LEADING, NULL,
                                     NULL) == FDK_OK);
     fdk_surface_invalidate_all(s);
     fdk_widget_tree_paint(root, s);
-    assert(g_icon_paints == 0);
+    CHECK_EQ(g_icon_paints, 0, "g_icon_paints");
     fdk_surface_destroy(s);
 
     /* The search preset is BUILT on the slots (regression: the
@@ -1148,7 +1149,7 @@ static void test_icon_slots(void) {
            FDK_ENTRY_ICON_CLEAR);
     fdk_size snat = {0, 0};
     fdk_widget_measure(se, &snat);
-    assert(snat.width == 38); /* 8 + 22 + 8, the 1.4.2 number      */
+    CHECK_EQ(snat.width, 38, "snat.width"); /* 8 + 22 + 8, the 1.4.2 number      */
 
     fdk_widget_destroy(root);
     printf("[ok] entry icon slots: set/get + width accounting (the "

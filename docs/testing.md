@@ -2581,3 +2581,66 @@ use-after-free on the trace's borrowed args, and fontconfig's
 cold-cache 320 B. The id parser's own trap is documented in the
 rig: gdbus prints `(uint32 N,)` — extracting "the first number"
 yields 32, from the TYPE NAME, every time.
+
+## 1.1.0 — the hermetic environment pin (the owner's-desktop red)
+
+`test_progress` red on the owner's real machine while CI was
+green: `filled50 >= 96 && filled50 <= 104` failed, and the bare
+assertion said nothing about why. The chain: the owner's
+`~/.config/fdk.prefs` carried `theme.name` (they had run the
+shell apps), the global-settings boot resolved a real theme face,
+the accent stopped matching the test's `is_accent()`, and the
+fill counted zero. Same class, other channels: `ui.font_size` /
+`ui.scale` in the store, `$FDK_THEME` exported in a shell, a
+dark color scheme flipping variant faces, XSETTINGS `Gtk/
+FontName` reaching the UI metrics on a real DISPLAY.
+
+The suite's answer is `tests/hermetic_env.h`, included by EVERY
+test binary. A constructor (it runs before main — before any lazy
+first-getter can fire, which a main()-time call cannot promise:
+tests query palettes from helpers long before any setup line)
+pins the whole desktop out:
+
+- `FDK_UI_FONT_SIZE=14`, `FDK_UI_SCALE=1` — the catalog's
+  REFERENCE size: every `fdk__ui_derived_px(N)` resolves to
+  exactly N. The env override also short-circuits the settings
+  store, XSETTINGS, and the portal in `resolve()` — the "no
+  portal influence" guarantee in disguise.
+- `FDK_COLOR_SCHEME=none` — no variant faces, no scheme
+  following, even when the XSETTINGS poll runs on a real display.
+- `XDG_CONFIG_HOME` → `build/tests/hermetic-home/config` (an
+  empty directory, created best-effort) — the owner's real
+  `fdk.prefs` / app prefs cannot leak a theme or `ui.*` keys in.
+  HOME is deliberately NOT sandboxed (fontconfig discovery is
+  part of what the tests exercise; XDG set means the HOME/.config
+  prefs fallback never runs anyway).
+- `$FDK_THEME` and `$FDK_PREFS_FILE` unset.
+
+Tests that are the SUBJECT of the resolution (test_ui_metrics:
+the 16 px default legs) `#define FDK_TEST_NO_METRICS_PIN` before
+the include and keep only the sandbox half. Tests with their own
+fixtures setenv their own XDG values in main() — theirs lands
+later and wins. The old per-binary discipline (pin
+FDK_PREFS_FILE + FDK_THEME at the top of main()) is superseded:
+the constructor does it for every binary, before main.
+
+Proven by running the whole suite twice — once clean, once with a
+simulated dirty desktop (`[theme] name = daylight`, `ui.font_size
+= 20`, `ui.scale = 1.5`, `$FDK_THEME`, `$FDK_THEME_DIR`, dark
+scheme): identical greens. That dirty run red exactly like the
+owner's machine before the pin — the reproduction that proved the
+chain.
+
+The second half of the same lesson: assertions must PRINT their
+values. `assert(filled50 >= 96 && filled50 <= 104)` failing says
+nothing about which channel moved; the CHECK_EQ / CHECK_GE /
+CHECK_RANGE / ... macros in the same header print actual vs
+expected (with file:line and a `what` label) before aborting —
+unconditionally, never compiled out. The pixel-count and
+geometry-measurement files (test_controls, test_containers,
+test_render, test_layout, test_scroll, test_entry — ~320 sites)
+are converted; the macros are available suite-wide for new code.
+The one warning that started this ("ink_right set but not used" —
+GCC 15 flags increment-only variables GCC 14 does not) was
+removed; a scanner over the whole tree confirmed it was the only
+real case.

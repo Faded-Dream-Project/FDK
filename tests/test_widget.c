@@ -14,6 +14,7 @@
  * tests exercise is exactly what a real display exercises.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widget.h"
 

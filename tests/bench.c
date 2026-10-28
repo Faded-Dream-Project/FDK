@@ -24,6 +24,7 @@
  * locale-free formatters. Clock is CLOCK_MONOTONIC.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_i18n.h"
 #include "fdk/fdk_theme.h"

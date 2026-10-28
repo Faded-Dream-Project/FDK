@@ -8,6 +8,7 @@
  * getters report NULL rather than inventing content.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_clipboard.h"
 

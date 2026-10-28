@@ -13,6 +13,7 @@
  * dbus-run-session) is tests/test_dbus_live.c — `make test-dbus`.
  */
 
+#include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_dbus.h"
 

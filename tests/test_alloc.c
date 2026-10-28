@@ -4,6 +4,7 @@
  * not public API. Built and run alongside the public-API tests to
  * exercise the same allocation path fdk_init() itself uses. */
 
+#include "hermetic_env.h"
 #include "core/alloc_internal.h"
 
 #include <assert.h>

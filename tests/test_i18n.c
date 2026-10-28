@@ -11,6 +11,7 @@
  * placement, date patterns), the test documents it — the pins define
  * what FDK ships, and regressions are any change to them. */
 
+#include "hermetic_env.h"
 #include "fdk/fdk_i18n.h"
 
 #include <assert.h>
