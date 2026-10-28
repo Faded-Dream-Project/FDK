@@ -49,9 +49,13 @@ static const char *g_urw = NULL;   /* name-keyed CFF (required)   */
 static const char *g_noto = NULL;  /* CID-keyed CFF (optional)    */
 
 static const char *urw_candidates[] = {
+    /* Debian/Ubuntu (fonts-urw-base35) and Void */
     "/usr/share/fonts/opentype/urw-base35/NimbusSans-Regular.otf",
     "/usr/share/fonts/opentype/urw-base35/C059-Roman.otf",
-    "/usr/share/fonts/URW-base35/NimbusSans-Regular.otf",
+    /* Alpine (font-urw-base35) and Fedora (urw-base35-fonts) */
+    "/usr/share/fonts/urw-base35/NimbusSans-Regular.otf",
+    "/usr/share/fonts/urw-base35/C059-Roman.otf",
+    /* Arch (gsfonts) */
     "/usr/share/fonts/gsfonts/NimbusSans-Regular.otf",
     NULL,
 };
