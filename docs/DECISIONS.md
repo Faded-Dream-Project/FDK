@@ -614,3 +614,56 @@ refuses non-"y" element signatures (reading ints as bytes is the
 silent all-zero icon again). The image-data field order is the
 spec's SEVEN fields with the data at index 6 — an off-by-one there
 is the same invisible-icon symptom.
+
+## D-015 — X11 multi-monitor: the add-on's own X connection for output events, the core's table for placement (M-6 / A-03 / B-05)
+
+**2026-10-29 (the last MUST item before the release gate: X11 knew
+exactly one output — the whole screen — so per-monitor docks were
+impossible and maximize filled the screen regardless of which
+monitor held the window. The split that closes it follows the
+existing architecture instead of inventing a core output API.)**
+
+**1. The core's table is internal, like Wayland's.** FDK's Wayland
+backend tracks outputs without an app-facing output API; the X11
+backend now has the same shape: `src/platform/x11/x11_randr.c`
+probes per-CRTC geometry at connect (XRRGetScreenResourcesCurrent,
+sorted into reading order), RRNotify-masked on the root, refreshed
+in the dispatch loop. Its consumer is window placement — the
+bare-X maximize/fullscreen fallbacks fill the CONTAINING monitor
+(the window's center), not the screen. No public API appears: the
+append-only discipline would allow one, but parity with the Wayland
+core's posture is the honest architecture (an app needing outputs
+binds fdk-shell, exactly as the audit's fix wording assumed).
+
+**2. fdk-shell owns a SECOND X connection for the events.** The
+extension boundary has no generic X-event hook, and it should not
+grow one: on Wayland fdk-shell binds its own wl_registry and gets
+output events on its own protocol objects — the X11 twin is
+XOpenDisplay(the same server) + XRRSelectInput + the extension
+loop's fd source (the documented add-on-socket pattern). The
+output table, the ADDED/CHANGED/REMOVED diffing, the gone-records
+enumeration contract, and per-output layer anchoring (output-local
+geometry offset into root coordinates) all live add-on-side. Two
+probes on one server is one round trip each; the boundary stays
+clean.
+
+**3. The fallback is the regression pin.** No RandR (or a failed
+own connection) = ONE output, the whole screen, real metrics, no
+events — byte-identical to the pre-M-6 behavior, so every
+single-monitor rig (the bar rig, both desktop rigs, the whole X11
+suite) doubles as the no-regression proof. Xvfb reports one fixed
+output ("screen"), which pins the probed-table identity; the
+multi-output ORIGIN math runs through an internal test seam that
+injects a synthetic two-monitor table (window geometry read back
+through the protocol — the same end-to-end standard, minus the
+second physical monitor). True output hotplug (ADDED/REMOVED,
+per-monitor maximize on real hardware) is the owner's
+TESTING-ON-DESKTOP step.
+
+**4. Struts stay root-relative — the honest X11 residue.**
+_NET_WM_STRUT_PARTIAL is screen-global by specification; an
+exclusive-zone layer on a secondary monitor reserves space the way
+the running WM interprets per-monitor struts (modern WMs clamp to
+the window's monitor; simpler ones apply it screen-wide). That
+limit is documented, not faked — the one place the X11 and Wayland
+output stories legitimately diverge.

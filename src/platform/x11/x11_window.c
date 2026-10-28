@@ -1203,9 +1203,16 @@ fdk_result fdk_x11_window_set_maximized(fdk_platform_window *pwindow,
         pwindow->saved_w = pwindow->last_size.width;
         pwindow->saved_h = pwindow->last_size.height;
         pwindow->has_saved = 1;
-        XMoveResizeWindow(dpy, pwindow->xwindow, 0, 0,
-                          (unsigned int)DisplayWidth(dpy, pwindow->conn->screen),
-                          (unsigned int)DisplayHeight(dpy, pwindow->conn->screen));
+        /* M-6: maximize fills the CONTAINING monitor (the window's
+         * center), not the whole screen — the multi-monitor break
+         * the audit named. Whole-screen fallback when RandR is
+         * absent or reports nothing (the single-monitor identity). */
+        int mx = 0, my = 0, mw = 0, mh = 0;
+        fdk__x11_randr_monitor_containing(
+            pwindow->conn, x + (int)pwindow->last_size.width / 2,
+            y + (int)pwindow->last_size.height / 2, &mx, &my, &mw, &mh);
+        XMoveResizeWindow(dpy, pwindow->xwindow, mx, my,
+                          (unsigned int)mw, (unsigned int)mh);
     } else {
         if (!pwindow->has_saved) {
             return FDK_OK; /* nothing to restore to; leave as-is */
@@ -1523,11 +1530,14 @@ fdk_result fdk_x11_window_set_fullscreen(fdk_platform_window *pwindow,
             pwindow->saved_h = pwindow->last_size.height;
             pwindow->has_saved = 1;
         }
-        XMoveResizeWindow(dpy, pwindow->xwindow, 0, 0,
-                          (unsigned int)DisplayWidth(dpy,
-                                                     pwindow->conn->screen),
-                          (unsigned int)DisplayHeight(
-                              dpy, pwindow->conn->screen));
+        /* M-6: fullscreen fills the CONTAINING monitor — same
+         * discipline as the maximize fallback above. */
+        int mx = 0, my = 0, mw = 0, mh = 0;
+        fdk__x11_randr_monitor_containing(
+            pwindow->conn, x + (int)pwindow->last_size.width / 2,
+            y + (int)pwindow->last_size.height / 2, &mx, &my, &mw, &mh);
+        XMoveResizeWindow(dpy, pwindow->xwindow, mx, my,
+                          (unsigned int)mw, (unsigned int)mh);
     } else {
         if (!pwindow->has_saved) {
             return FDK_OK; /* nothing to restore to */

@@ -45,16 +45,18 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 21 (T-B both sides landed 2026-10-29; S-2 and S-1
-pending owner verification; M-4, M-3, M-1, and S-3 landed
-2026-10-28) · PARTIAL 8 · IN PROGRESS 1 (M-9) · MISSING 25 ·
-DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
-Re-verified 2026-10-29 (post-T-B-side-2): the full dual-backend
-fdk-shell build zero warnings, core make test + test-x11 +
-test-dbus, fdk-shell test-x11 + the NEW test-desktop (26 legs),
-and BOTH desktop rigs unchanged-and-green (notifyd 68, trayhost
-103 — the split's behavior-preservation proof), verify-exports
-802.
+**Counts:** DONE 24 (M-6/A-03/B-05 landed 2026-10-29; T-B both
+sides 2026-10-29; S-2 and S-1 pending owner verification; M-4,
+M-3, M-1, and S-3 landed 2026-10-28) · PARTIAL 8 · IN PROGRESS 1
+(M-9) · MISSING 22 · DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX
+0 — of 62 items. Re-verified 2026-10-29 (post-M-6): the full
+dual-backend fdk-shell build zero warnings, core make test +
+test-x11 + test-dbus + verify-exports (802), fdk-shell test-x11
+(incl. the NEW RandR legs: probed-table identity, synthetic
+two-monitor origin math, stale-index fallback), the bar rig
+unchanged-and-green, and the notifyd rig (the dispatch-loop change
+under a real WM). Earlier: post-T-B-side-2 — both desktop rigs
+unchanged-and-green (notifyd 68, trayhost 103).
 Re-verified 2026-10-27 (post-trayhost): the full battery plus the
 notifyd rig and the trayhost rig (all three phases green each).
 Re-verified 2026-10-28 (post-M-4/M-3): full dual-backend build zero
@@ -76,8 +78,8 @@ unaffected):
 | id | item | status | evidence | remaining |
 |----|------|--------|----------|-----------|
 | A-01 | output events | **DONE** | `fdk_shell_output_*` + live sway hotplug legs (tests/test_wl.c: "hotplug ADDED fired", "mode change -> CHANGED", "unplug -> REMOVED") — d2bc0de | — |
-| A-02 | output metrics | **DONE** | `fdk_shell_output_get_info`; "initial set enumerable, metrics 1024x768 scale 1" (wl) + "the screen as one output, metrics exact" (x11) | X11 per-output metrics ride M-6's RandR |
-| A-03 | X11 multi-monitor | **MISSING** | fdk-shell/src/x11/x11.c: "X11 without RandR probing (0.1.0 posture): ONE output" | M-6: RandR 1.3 enumeration + CRTCs + RRNotify |
+| A-02 | output metrics | **DONE** | `fdk_shell_output_get_info`; "initial set enumerable, metrics 1024x768 scale 1" (wl) + "the screen as one output, metrics exact" (x11); X11 per-output metrics landed with M-6 (the RandR table, real CRTC geometry + mm) | — |
+| A-03 | X11 multi-monitor | **DONE** | 0.3.0 (M-6): fdk-shell's own X connection carries the RandR watch (XRRSelectInput + the extension loop's fd source — D-015); real per-output records (connector names, per-CRTC geometry), output events (ADDED/CHANGED/REMOVED with gone-records enumeration), and per-output layer anchoring (output-local geometry offset into root coordinates; tests/test_x11.c's synthetic two-monitor seam reads window geometry back through the protocol); no RandR = the screen fallback (the regression pin the unchanged rigs re-proved) | owner's real multi-monitor desktop (hotplug + per-monitor struts) |
 | A-04 | namespace | **DONE** | configurable namespace; "namespace -> WM_CLASS res_class" (x11 tests) + "wl namespace layer" (wl tests) | — |
 | A-05 | runtime parameter changes | **MISSING** | create-time desc only; no `fdk_shell_layer_set_*` runtime API | C-5 |
 | A-06 | input regions / click-through | **PARTIAL** | full-transparency popups: `input_transparent` (fdk_window_options), XShape + `wl_surface_set_input_region` empty (1.3.2); no arbitrary partial regions | S-4: region API on windows + ext surfaces |
@@ -92,7 +94,7 @@ unaffected):
 | B-02 | text shaping | **DONE (level 1)** | M-2 shipped: the dlopen'd HarfBuzz + FriBidi + charset-filtered fontconfig fallback pipeline (src/text/shaping.c, docs/text.md "Complex-script shaping"); every text consumer reads shaped placements; tests/test_shaping.c pins both postures incl. the Latin compatibility re-exec; level 2 (paragraph bidi, RTL caret granularity, justification) stays open. FOLLOW-UP SHIPPED: CFF-flavored OpenType ('OTTO') renders through the native Type 2 module (src/text/cff.c, D-011) — the Arch tofu report closed; tests/test_cff.c pins dual-decoder vertex agreement, seac, and the fuzz fence | — |
 | B-03 | touch | **DONE** | M-3 shipped: FDK_EVENT_TOUCH_* slots + the core tap/two-finger-scroll engine (src/window/touch.c, the policy pinned headless by tests/test_touch.c); wl_touch on Wayland (id→window map); XI2 touch via dlopen'd libXi on X11 ($FDK_NO_XI2 opts out); both translate paths driven through the test_touch ops seam; real touch hardware = TESTING-ON-DESKTOP.md | — |
 | B-04 | window icons + PID | **DONE** | fdk_window_set_icon + fdk_window_set_role (fdk_window.h); X11: _NET_WM_ICON byte-exact round-trip pinned by the integration rig (second raw-Xlib connection), _NET_WM_PID + WM_CLIENT_MACHINE + WM_WINDOW_ROLE at create ("main"/"popup" defaults, set_role rewrites); Wayland: xdg-toplevel-icon-v1 bound where offered (square-buffer letterbox, frozen-pool discipline, icon+buffer pair owned by the window), manager-absent = the documented no-op; sway rig proves connection health both worlds | real-desktop taskbars/docks (TESTING-ON-DESKTOP.md) |
-| B-05 | X11 RandR (core) | **MISSING** | x11_connection.c: one screen, no output model | M-6 |
+| B-05 | X11 RandR (core) | **DONE** | 0.3.0 (M-6): src/platform/x11/x11_randr.c — the internal per-CRTC table (reading-order sorted) probed at connect, RRNotify-masked, refreshed in the dispatch loop; the bare-X maximize/fullscreen fallbacks fill the CONTAINING monitor (was: the whole screen). No public API (the Wayland core's no-output-API parity — D-015) | — |
 | B-06 | dark mode following | **DONE** [VERIFIED-CHANGED: audit said partial] | XSETTINGS `Gtk/ColorScheme` (x11_xsettings.c) + `org.freedesktop.appearance` portal on the native client; live: "SettingChanged flips the scheme + theme live" — d2a253f | — |
 | B-07 | X11 DPI awareness | **DONE** [VERIFIED-CHANGED: audit said missing] | shipped 1.4.5: Xft.dpi + physical-size fallback, integer scale [1,3]; `test_x11_hidpi_gui` end-to-end on a private 192-dpi Xvfb | — (RandR scale is N/A: X11 has no scale protocol) |
 | B-08 | D-Bus foundation | **DONE** [VERIFIED-CHANGED: audit said missing] | M-7's native client (src/dbus/, 112 exported fdk_dbus_* of 757 total, commit 4d42c8c): live daemon battery incl. the ported libdbus cross-implementation leg; 20k-mutation fuzz + prefix-exhaustive truncation in `make test` | — |
@@ -112,7 +114,7 @@ unaffected):
 | M-3 | touch basics | **DONE** | = B-03 (slots, tap→click, two-finger scroll; both backends; policy battery + seams) | — |
 | M-4 | window identity | **DONE** | = B-04 (icons/PID part); activation rides S-6 | — |
 | M-5 | fdk-shell outputs | **DONE** (rc2, 0.2.0) | live sway output hotplug/metrics legs + namespace + `_FDK_WM_LAYER` — d2bc0de | — |
-| M-6 | X11 multi-monitor | **MISSING** | = A-03/B-05 | the whole item |
+| M-6 | X11 multi-monitor | **DONE** | = A-03/B-05 (both halves; D-015) | owner's real-desktop check |
 | M-7 | D-Bus foundation + dark mode | **DONE** (foundation 4d42c8c; dark mode d2a253f) | live-bus battery green incl. cross-implementation; wire bytes pinned vs captured reference output; fuzzed; CI makes skips fatal | — [VERIFIED-CHANGED: the row's "rides on top (next)" is stale — dark mode landed] |
 | M-8 | popup cascades | **DONE** (rc2, 0.2.0) | 3-deep x11 + 2-deep wl family sweeps — d2bc0de | — |
 | M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags beyond v1.0.0, rc line held, per-push CI, per-item docs | owner's real-desktop sign-off before any tag |

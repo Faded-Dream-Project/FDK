@@ -104,6 +104,12 @@ extern struct fdk_shell_layer *fdkshell__pending_layer;
 /* shell.c: backends report output lifecycle changes through this;
  * it routes to the app callback. index is the backend's STABLE
  * record index. */
+/* The M-6 test seam (x11.c; internal linkage — the multi-output
+ * origin math proven without a multi-output headless server). */
+void fdkshell__x11_test_inject_output(fdk_shell *shell, int index,
+                                      int x, int y, int w, int h);
+void fdkshell__x11_test_clear_outputs(fdk_shell *shell);
+
 void fdkshell__fire_output_event(fdk_shell *shell,
                                  fdk_shell_output_event_type type,
                                  uint32_t index);

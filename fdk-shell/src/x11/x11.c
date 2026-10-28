@@ -56,10 +56,12 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h> /* XSizeHints / XSetWMNormalHints (self-positioning) */
+#include <X11/extensions/Xrandr.h> /* the output model (0.3.0, M-6) */
 
 #include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* ---- atoms (interned once per shell) -------------------------------------- */
 
@@ -103,6 +105,18 @@ static void x11_intern_atoms(Display *dpy, x11_atoms *a) {
 
 /* ---- per-shell state ------------------------------------------------------ */
 
+/* One RandR output record (0.3.0, M-6/A-03): a connected output's
+ * CRTC geometry, probed on the shell's OWN connection and refreshed
+ * on RRNotify. GONE outputs keep their records (the enumeration
+ * contract the Wayland side defines: stable slots, REMOVED events,
+ * records until shutdown). */
+typedef struct {
+    int x, y, width, height;  /* root coordinates                 */
+    int mm_width, mm_height;  /* the output's physical size        */
+    char name[32];            /* the connector name               */
+    int gone;                 /* was REMOVED; the record stays     */
+} x11_output_rec;
+
 typedef struct x11_shell_state {
     Display *dpy; /* borrowed: FDK's connection, its lifetime  */
     int screen;
@@ -110,7 +124,22 @@ typedef struct x11_shell_state {
                       * server-global, but interning is a round trip
                       * per call — one set per shell keeps layer
                       * creation off that path) */
+
+    /* The output model (0.3.0): the shell's OWN X connection —
+     * the add-on's own channel, the same posture as the Wayland
+     * side's own wl_registry (D-015). FDK's core connection
+     * carries its own internal RandR table for window placement;
+     * this one exists so output EVENTS reach the add-on without a
+     * core API (the extension boundary stays clean). */
+    Display *watch_dpy;   /* NULL when the own connection failed  */
+    int randr_event_base; /* -1 when the extension is absent      */
+    void *watch_src;      /* fdk_ext_fd_source*, the loop hook    */
+    x11_output_rec outputs[16];
+    int output_count;
 } x11_shell_state;
+
+/* The output table cap. */
+#define X11_OUTPUT_CAP 16
 
 /* ---- per-layer state ------------------------------------------------------ */
 
@@ -121,26 +150,222 @@ typedef struct x11_layer_state {
     int grabbed;    /* keyboard grab active (EXCLUSIVE mode) */
 } x11_layer_state;
 
-/* ---- the output face (0.2.0) -----------------------------------------------
+/* ---- the output model (0.3.0, M-6/A-03) ------------------------------------
  *
- * X11 without RandR probing (0.1.0 posture): ONE output — the whole
- * screen of this connection, at the FDK-detected scale. 0.2.0's
- * RandR work adds real per-output records + events; until then the
- * honest single screen is the truth. */
+ * The shell's OWN X connection carries the RandR watch: XRRSelectInp
+ * on the root + an fd source on the extension API's loop (the
+ * documented add-on-socket pattern). The core's connection runs its
+ * own internal table for window placement — the two probes are one
+ * round trip each, and the extension boundary stays clean (no core
+ * output API, matching the Wayland side's own-registry posture).
+ *
+ * Absent RandR (or a failed own connection): ONE output, the whole
+ * screen, no events — the pre-RandR truth, kept as the fallback so
+ * single-monitor correctness is a regression pin.
+ */
+
+/* Probes the CURRENT table into fresh (gone outputs preserved from
+ * the old table by name — the enumeration contract). Returns the
+ * number of LIVE (non-gone) records. */
+static int x11_randr_probe(x11_shell_state *st) {
+    Display *dpy = st->watch_dpy != NULL ? st->watch_dpy : st->dpy;
+    Window root = RootWindow(dpy, st->screen);
+    XRRScreenResources *res = XRRGetScreenResourcesCurrent(dpy, root);
+    if (res == NULL) {
+        res = XRRGetScreenResources(dpy, root);
+    }
+    if (res == NULL) {
+        return -1;
+    }
+    x11_output_rec fresh[X11_OUTPUT_CAP];
+    int n = 0;
+    for (int c = 0; c < res->ncrtc && n < X11_OUTPUT_CAP; c++) {
+        XRRCrtcInfo *crtc = XRRGetCrtcInfo(dpy, res, res->crtcs[c]);
+        if (crtc == NULL) {
+            continue;
+        }
+        if (crtc->width == 0 || crtc->height == 0 || crtc->noutput == 0) {
+            XRRFreeCrtcInfo(crtc);
+            continue;
+        }
+        XRROutputInfo *out = XRRGetOutputInfo(dpy, res, crtc->outputs[0]);
+        if (out == NULL || out->connection != RR_Connected) {
+            XRRFreeOutputInfo(out);
+            XRRFreeCrtcInfo(crtc);
+            continue;
+        }
+        x11_output_rec *o = &fresh[n++];
+        o->x = (int)crtc->x;
+        o->y = (int)crtc->y;
+        o->width = (int)crtc->width;
+        o->height = (int)crtc->height;
+        o->mm_width = (int)out->mm_width;
+        o->mm_height = (int)out->mm_height;
+        snprintf(o->name, sizeof(o->name), "%s", out->name);
+        o->gone = 0;
+        XRRFreeOutputInfo(out);
+        XRRFreeCrtcInfo(crtc);
+    }
+    XRRFreeScreenResources(res);
+
+    /* Reading order (x, y) — the same rule the core's table uses. */
+    for (int i = 1; i < n; i++) {
+        x11_output_rec key = fresh[i];
+        int j = i - 1;
+        while (j >= 0 && (fresh[j].x > key.x ||
+                          (fresh[j].x == key.x && fresh[j].y > key.y))) {
+            fresh[j + 1] = fresh[j];
+            j--;
+        }
+        fresh[j + 1] = key;
+    }
+
+    /* The DIFF: new table vs old, by name. GONE records persist
+     * (appended when the cap allows) so their indices stay stable. */
+    int live = 0;
+    x11_output_rec merged[X11_OUTPUT_CAP];
+    int merged_n = 0;
+    /* every live old record: gone if absent from fresh */
+    for (int i = 0; i < st->output_count && merged_n < X11_OUTPUT_CAP;
+         i++) {
+        int found = -1;
+        for (int j = 0; j < n; j++) {
+            if (strcmp(st->outputs[i].name, fresh[j].name) == 0) {
+                found = j;
+                break;
+            }
+        }
+        x11_output_rec *m = &merged[merged_n++];
+        if (found < 0) {
+            *m = st->outputs[i];
+            m->gone = 1;
+        } else {
+            *m = fresh[found];
+            fresh[found].name[0] = '\0'; /* consumed */
+        }
+    }
+    /* every unconsumed fresh record: a new output */
+    for (int j = 0; j < n && merged_n < X11_OUTPUT_CAP; j++) {
+        if (fresh[j].name[0] != '\0') {
+            merged[merged_n++] = fresh[j];
+        }
+    }
+    memcpy(st->outputs, merged, sizeof(merged));
+    st->output_count = merged_n;
+    for (int i = 0; i < merged_n; i++) {
+        if (!st->outputs[i].gone) {
+            live++;
+        }
+    }
+    return live;
+}
+
+
+/* Fired with the post-change table to emit the event set. */
+static void x11_randr_emit_diff(fdk_shell *shell, int old_live) {
+    x11_shell_state *st = shell->x11;
+    int live = 0;
+    for (int i = 0; i < st->output_count; i++) {
+        if (!st->outputs[i].gone) {
+            live++;
+        }
+    }
+    if (live > old_live) {
+        /* Every still-live index is a candidate; the ADDED one is
+         * the last live index (the merge appends new outputs). The
+         * coarse event contract (the app re-enumerates) makes the
+         * precise index informational. */
+        for (int i = 0; i < st->output_count; i++) {
+            if (!st->outputs[i].gone) {
+                fdkshell__fire_output_event(
+                    shell, FDK_SHELL_OUTPUT_ADDED, (uint32_t)i);
+            }
+        }
+    } else if (live < old_live) {
+        for (int i = 0; i < st->output_count; i++) {
+            if (st->outputs[i].gone) {
+                fdkshell__fire_output_event(
+                    shell, FDK_SHELL_OUTPUT_REMOVED, (uint32_t)i);
+            } else {
+                fdkshell__fire_output_event(
+                    shell, FDK_SHELL_OUTPUT_CHANGED, (uint32_t)i);
+            }
+        }
+    } else {
+        /* same count: geometry/renumber churn -> CHANGED per live
+         * output (the app re-reads with get_info) */
+        for (int i = 0; i < st->output_count; i++) {
+            if (!st->outputs[i].gone) {
+                fdkshell__fire_output_event(
+                    shell, FDK_SHELL_OUTPUT_CHANGED, (uint32_t)i);
+            }
+        }
+    }
+}
+
+/* ---- the output face (0.3.0: the RandR table) ------------------------------ */
+
+static int x11_output_live_count(const x11_shell_state *st) {
+    if (st->watch_dpy == NULL || st->output_count == 0) {
+        return -1; /* the fallback posture: the screen */
+    }
+    int live = 0;
+    for (int i = 0; i < st->output_count; i++) {
+        if (!st->outputs[i].gone) {
+            live++;
+        }
+    }
+    return live;
+}
+
+/* The record for ENUMERATION index i (live outputs only, in table
+ * order); NULL when the table is not in use. */
+static const x11_output_rec *x11_output_live_at(const x11_shell_state *st,
+                                                uint32_t index) {
+    if (st->watch_dpy == NULL) {
+        return NULL;
+    }
+    uint32_t live = 0;
+    for (int i = 0; i < st->output_count; i++) {
+        if (st->outputs[i].gone) {
+            continue;
+        }
+        if (live == index) {
+            return &st->outputs[i];
+        }
+        live++;
+    }
+    return NULL;
+}
 
 uint32_t fdkshell__x11_output_count(fdk_shell *shell) {
-    (void)shell;
-    return 1; /* the screen */
+    x11_shell_state *st = shell->x11;
+    if (st == NULL) {
+        return 0;
+    }
+    int live = x11_output_live_count(st);
+    if (live < 0) {
+        return 1; /* the screen: the no-RandR fallback */
+    }
+    return (uint32_t)live;
 }
 
 fdk_result fdkshell__x11_output_name(fdk_shell *shell, uint32_t index,
                                      char *buf, size_t buflen) {
-    (void)shell;
-    if (index != 0) {
-        return FDK_ERR_NOT_FOUND;
+    x11_shell_state *st = shell->x11;
+    if (st == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    const x11_output_rec *o = x11_output_live_at(st, index);
+    if (o != NULL) {
+        snprintf(buf, buflen, "%s", o->name);
+        return FDK_OK;
+    }
+    if (st->watch_dpy != NULL || index != 0) {
+        return FDK_ERR_NOT_FOUND; /* the table is authoritative    */
     }
     snprintf(buf, buflen, "screen-0");
-    return FDK_OK;
+    return FDK_OK; /* the no-RandR fallback */
 }
 
 fdk_result fdkshell__x11_output_get_info(fdk_shell *shell, uint32_t index,
@@ -149,22 +374,161 @@ fdk_result fdkshell__x11_output_get_info(fdk_shell *shell, uint32_t index,
     if (st == NULL) {
         return FDK_ERR_UNSUPPORTED;
     }
-    if (index != 0) {
-        return FDK_ERR_NOT_FOUND;
+    const x11_output_rec *o = x11_output_live_at(st, index);
+    if (o != NULL) {
+        out->x = o->x;
+        out->y = o->y;
+        out->width = o->width;
+        out->height = o->height;
+        out->scale = 1; /* FDK's X11 scale applies INSIDE the
+                         * window's paint path (logical x scale
+                         * physical); the output's own geometry
+                         * stays physical pixels */
+        out->physical_width = o->mm_width;
+        out->physical_height = o->mm_height;
+        return FDK_OK;
     }
+    if (st->watch_dpy != NULL || index != 0) {
+        return FDK_ERR_NOT_FOUND; /* the table is authoritative    */
+    }
+    /* The no-RandR fallback: the whole screen. */
     out->x = 0;
     out->y = 0;
     out->width = DisplayWidth(st->dpy, st->screen);
     out->height = DisplayHeight(st->dpy, st->screen);
-    out->scale = 1; /* FDK's X11 scale applies INSIDE the window's
-                     * paint path (logical x scale physical); the
-                     * output's own geometry stays physical pixels */
+    out->scale = 1;
     out->physical_width = 0; /* the server's screen mm is at the
                               * DisplayWidthMM granularity and rarely
                               * meaningful under Xvfb/EMU — zeros are
                               * the honest no-statement */
     out->physical_height = 0;
     return FDK_OK;
+}
+
+/* ---- the test seam (internal linkage, tests/test_x11.c only) ---------------
+ *
+ * The multi-output ORIGIN math needs a multi-output server; the
+ * headless rigs run on Xvfb, which reports ONE fixed output. The
+ * seam injects a synthetic table (the same records the probe would
+ * have written) so the per-output anchoring is proven end to end —
+ * window geometry read back through the protocol — without a
+ * second monitor. Not exported (the version script keeps it local
+ * to the static library's test links). */
+
+void fdkshell__x11_test_inject_output(fdk_shell *shell, int index,
+                                      int x, int y, int w, int h) {
+    x11_shell_state *st = shell->x11;
+    if (st == NULL || index < 0 || index >= X11_OUTPUT_CAP) {
+        return;
+    }
+    if (index >= st->output_count) {
+        st->output_count = index + 1;
+    }
+    x11_output_rec *o = &st->outputs[index];
+    memset(o, 0, sizeof(*o));
+    o->x = x;
+    o->y = y;
+    o->width = w;
+    o->height = h;
+    snprintf(o->name, sizeof(o->name), "test-%d", index);
+    o->gone = 0;
+    /* The seam implies the watch exists (the fallback posture would
+     * ignore the table). */
+    if (st->watch_dpy == NULL) {
+        st->watch_dpy = st->dpy; /* pretend: borrowed, never closed */
+    }
+}
+
+void fdkshell__x11_test_clear_outputs(fdk_shell *shell) {
+    x11_shell_state *st = shell->x11;
+    if (st == NULL) {
+        return;
+    }
+    if (st->watch_dpy == st->dpy) {
+        st->watch_dpy = NULL; /* undo the seam's pretend          */
+    }
+    x11_randr_probe(st);
+}
+
+/* ---- the own-connection watch (the event half) ----------------------------- */
+
+static void x11_watch_readable(fdk_ext_fd_source *source, uint32_t revents,
+                               void *user) {
+    (void)source;
+    fdk_shell *shell = user;
+    x11_shell_state *st = shell->x11;
+    if (st == NULL || st->watch_dpy == NULL) {
+        return;
+    }
+    if ((revents & (FDK_EXT_FD_ERR | FDK_EXT_FD_HUP)) != 0) {
+        /* The own connection died (the server went away): the table
+         * freezes at its last truth; the watch stops. The layers
+         * ride FDK's (separate) connection. */
+        return;
+    }
+    if ((revents & FDK_EXT_FD_IN) == 0) {
+        return;
+    }
+    int old_live = x11_output_live_count(st);
+    int fired = 0;
+    while (XPending(st->watch_dpy) > 0) {
+        XEvent ev;
+        XNextEvent(st->watch_dpy, &ev);
+        if (st->randr_event_base >= 0 &&
+            (ev.type == st->randr_event_base + RRScreenChangeNotify ||
+             ev.type == st->randr_event_base + RRNotify)) {
+            if (ev.type == st->randr_event_base + RRScreenChangeNotify) {
+                XRRUpdateConfiguration(&ev);
+            }
+            fired = 1;
+        }
+    }
+    if (fired) {
+        int new_live = x11_randr_probe(st);
+        (void)new_live;
+        x11_randr_emit_diff(shell, old_live);
+    }
+}
+
+/* Starts the watch: the own connection + the probe + the fd source.
+ * Failure at any step leaves the screen fallback in place (the
+ * table stays empty and watch_dpy NULL). */
+static void x11_output_watch_start(fdk_shell *shell) {
+    x11_shell_state *st = shell->x11;
+    const char *dpy_name = XDisplayString(st->dpy);
+    Display *own = XOpenDisplay(dpy_name != NULL ? dpy_name : NULL);
+    if (own == NULL) {
+        /* The own channel is unavailable: the screen fallback. */
+        return;
+    }
+    int event_base = 0, error_base = 0;
+    if (!XRRQueryExtension(own, &event_base, &error_base)) {
+        XCloseDisplay(own);
+        return;
+    }
+    st->watch_dpy = own;
+    st->randr_event_base = event_base;
+    XRRSelectInput(own, RootWindow(own, st->screen),
+                   RRScreenChangeNotifyMask | RRCrtcChangeNotifyMask |
+                       RROutputChangeNotifyMask);
+    XSync(own, False);
+    if (x11_randr_probe(st) < 0) {
+        /* The probe itself failed: keep the watch (events may still
+         * arrive) but the table stays empty — count falls back to
+         * the screen until the first refresh populates it. */
+        st->output_count = 0;
+    }
+    st->watch_src = fdk_ext_loop_add_fd(
+        shell->ctx, ConnectionNumber(own), FDK_EXT_FD_IN,
+        x11_watch_readable, shell);
+    if (st->watch_src == NULL) {
+        /* No loop hook: close the own channel, keep the table's
+         * initial probe (the app still sees correct outputs, just
+         * no live events — the honest degradation). */
+        XCloseDisplay(own);
+        st->watch_dpy = NULL;
+        st->randr_event_base = -1;
+    }
 }
 
 /* The EWMH "all desktops" value for _NET_WM_DESKTOP. */
@@ -307,12 +671,28 @@ fdk_result fdkshell__x11_init(fdk_shell *shell) {
     }
     st->dpy = (Display *)nd.display;
     st->screen = DefaultScreen(st->dpy);
+    st->randr_event_base = -1;
     x11_intern_atoms(st->dpy, &st->atoms);
     shell->x11 = st;
+
+    /* The output model (0.3.0): the own-connection RandR watch. Any
+     * failure inside leaves the whole-screen fallback. */
+    x11_output_watch_start(shell);
     return FDK_OK;
 }
 
 void fdkshell__x11_shutdown(fdk_shell *shell) {
+    x11_shell_state *st = shell->x11;
+    if (st != NULL) {
+        if (st->watch_src != NULL) {
+            fdk_ext_loop_remove_fd(st->watch_src);
+            st->watch_src = NULL;
+        }
+        if (st->watch_dpy != NULL) {
+            XCloseDisplay(st->watch_dpy);
+            st->watch_dpy = NULL;
+        }
+    }
     free(shell->x11);
     shell->x11 = NULL;
 }
@@ -327,6 +707,26 @@ fdk_result fdkshell__x11_layer_create(fdk_shell *shell,
     int screen_w = DisplayWidth(dpy, st->screen);
     int screen_h = DisplayHeight(dpy, st->screen);
 
+    /* Per-output anchoring (0.3.0, M-6): output_index >= 0 anchors
+     * against THAT output's geometry and offsets the result into
+     * root coordinates (X11 windows live in the root's space);
+     * -1 (every output) keeps the whole-screen math — the
+     * historical behavior. The screen fallback posture applies when
+     * the index is out of range (the honest degradation: an app
+     * holding a stale index across a removal gets the screen, not
+     * a crash). */
+    int out_x = 0, out_y = 0;
+    if (desc->output_index >= 0) {
+        const x11_output_rec *o =
+            x11_output_live_at(st, (uint32_t)desc->output_index);
+        if (o != NULL) {
+            out_x = o->x;
+            out_y = o->y;
+            screen_w = o->width;
+            screen_h = o->height;
+        }
+    }
+
     /* Geometry from the anchoring math. */
     int x = 0, y = 0, w = 0, h = 0;
     x11_axis_geometry(screen_w, desc->margin_left, desc->margin_right,
@@ -337,6 +737,8 @@ fdk_result fdkshell__x11_layer_create(fdk_shell *shell,
                       desc->anchors & FDK_SHELL_ANCHOR_TOP,
                       desc->anchors & FDK_SHELL_ANCHOR_BOTTOM,
                       desc->height, &y, &h);
+    x += out_x; /* output-local -> root coordinates               */
+    y += out_y;
 
     /* The native surface: an UNMAPPED dock-typed window (the adopt
      * contract — properties before the map, FDK installs the event

@@ -388,3 +388,35 @@ commit may also arrive as a normal keypress — that is the
 compatibility rule, not a bug.
 
 **Status: DONE (should work; owner verification pending).**
+
+## 12. Multi-monitor X11 (M-6 — needs your real monitors)
+
+The headless rigs pin the single-monitor identity and the origin
+math (a synthetic two-monitor table through the internal test
+seam); what only your desktop can prove is REAL output hotplug and
+a WM's per-monitor strut interpretation.
+
+```sh
+# What the toolkit sees (real connector names, per-CRTC geometry):
+xrandr                       # compare against:
+fdk-shell/build/examples/bar --anchor tr          # output 0
+fdk-shell/build/examples/bar --anchor tr --output 1
+```
+
+Expectations:
+
+- `bar` with `--output 1` docks against THAT monitor's top-right
+  corner (its own edges, not the screen's).
+- `xrandr --output <second> --off` fires the REMOVED output event
+  (the bar's logs); `--auto` re-adds it with ADDED. A layer on the
+  removed output is the app's business — the enumeration keeps the
+  gone output's record until shutdown.
+- A bar with an exclusive zone on a SECONDARY monitor: how much
+  space it reserves is the WM's per-monitor strut interpretation
+  (modern WMs clamp to the window's monitor; simpler ones reserve
+  screen-wide) — the documented EWMH limit, not a bug.
+- Maximize/fullscreen (bare-X, no WM path): fill the monitor the
+  window is ON. Under a real EWMH WM the WM owns the outcome —
+  compare against what it does for other clients.
+
+**Status: DONE (should work; owner verification pending).**

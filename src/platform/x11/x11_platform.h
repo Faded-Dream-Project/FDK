@@ -23,6 +23,42 @@
 /* 1.4.5: HiDPI detection (x11_connection.c) + the scale query op
  * (x11_window.c, registered in the ops table). */
 int fdk__x11_detect_scale(Display *display);
+
+/* 1.1.0 M-6/B-05: the RandR output model (x11_randr.c) — per-CRTC
+ * geometry probed at connect, refreshed on RRNotify. Internal only
+ * (the Wayland core tracks outputs without an app-facing output
+ * API too; fdk-shell drives its OWN X connection for output
+ * events). Consumers: window placement (maximize/fullscreen to the
+ * containing monitor). */
+typedef struct fdk_x11_output {
+    int x, y;             /* the CRTC's geometry, root coordinates  */
+    int width, height;
+    int mm_width, mm_height; /* the output's physical size           */
+    char name[32];        /* the output's connector name            */
+    int connected;        /* RRIsConnected at probe time            */
+} fdk_x11_output;
+
+typedef struct fdk_x11_randr {
+    int present;          /* the extension answered the query       */
+    int event_base;       /* -1 when absent                         */
+    int count;
+    fdk_x11_output outputs[16];
+} fdk_x11_randr;
+
+void fdk__x11_randr_init(fdk_platform_connection *conn);
+void fdk__x11_randr_refresh(fdk_platform_connection *conn);
+/* Returns 1 when the event was an RRNotify/RRScreenChange (and was
+ * consumed by refreshing the table). */
+int fdk__x11_randr_handle(fdk_platform_connection *conn,
+                          const XEvent *ev);
+int fdk__x11_randr_output_count(const fdk_platform_connection *conn);
+const fdk_x11_output *fdk__x11_randr_output_at(
+    const fdk_platform_connection *conn, int index);
+/* The monitor containing (or nearest to) a point; the whole screen
+ * when RandR is absent or reports nothing. */
+void fdk__x11_randr_monitor_containing(const fdk_platform_connection *conn,
+                                       int x, int y, int *out_x, int *out_y,
+                                       int *out_w, int *out_h);
 /* XSETTINGS follow (x11_xsettings.c): look up the settings daemon's
  * manager window and select PropertyChangeMask on it (our
  * connection's per-client mask — the owner window is untouched);
@@ -56,6 +92,12 @@ struct fdk_platform_connection {
      * detection at connect — see x11_connection.c for the two
      * conventions (Xft.dpi resource, screen physical metric). */
     int scale;
+
+    /* The RandR output table (M-6/B-05): probed at connect,
+     * refreshed on RRNotify (x11_randr.c). Absent extension = count
+     * 0 and every placement query falls back to the whole screen —
+     * the pre-RandR behavior. */
+    fdk_x11_randr randr;
 
     Atom wm_delete_window;
     Atom wm_protocols;

@@ -224,6 +224,16 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
          * connect); handled BEFORE the window-table lookup — the
          * root is deliberately not a registered window. Other root
          * property churn (the WM's own bookkeeping) is ignored. */
+        /* RandR (1.1.0 M-6): screen changes and output/CRTC
+         * notifications refresh the internal output table (the
+         * maximize/placement substrate). Consumed here — no public
+         * event rides it (the Wayland-core parity posture; the
+         * add-on that needs output events owns its own X
+         * connection). */
+        if (fdk__x11_randr_handle(conn, &xevent)) {
+            continue;
+        }
+
         if (xevent.type == PropertyNotify &&
             xevent.xproperty.window == conn->root &&
             xevent.xproperty.atom == conn->net_current_desktop) {

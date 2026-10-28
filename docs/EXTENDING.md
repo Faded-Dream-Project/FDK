@@ -398,8 +398,14 @@ trip is harmless at any time.
   through FDK's translated events and the public clipboard API. An
   add-on needing RAW seat access would need a new accessor — raise
   it as an API proposal, never work around it.
-- No per-output geometry on X11 (the honest single screen; RandR is
-  a possible future capability).
+- X11 per-output geometry exists since 1.1.0 (M-6: RandR
+  enumeration, per-output anchoring, output events through
+  fdk-shell's own connection). The X11 residue is the EWMH one:
+  _NET_WM_STRUT_PARTIAL is screen-global, so an exclusive-zone
+  layer on a SECONDARY monitor reserves space the way the running
+  WM interprets per-monitor struts (modern WMs clamp to the
+  window's monitor; simpler ones apply it screen-wide) — the
+  honest limit of the X11 protocol, documented rather than faked.
 - Layer stacking LEVELS are protocol truth on Wayland; on X11 they
   ride whatever the WM gives dock-typed windows (fdk-shell documents
   this delta instead of faking fidelity).

@@ -442,7 +442,7 @@ static void test_top_bar_auto_zone(void) {
     assert(outputs == 1);
     char name[64];
     assert(fdk_ok(fdk_shell_output_name(shell, 0, name, sizeof(name))));
-    assert(strcmp(name, "screen-0") == 0);
+    assert(name[0] != '\0');
 
     fdk_shell_layer_desc desc;
     memset(&desc, 0, sizeof(desc));
@@ -1708,7 +1708,11 @@ static void test_output_info_x11(void) {
 
     char name[64];
     assert(fdk_ok(fdk_shell_output_name(shell, 0, name, sizeof(name))));
-    assert(strcmp(name, "screen-0") == 0);
+    /* The RandR connector name (Xvfb's single output is "screen";
+     * the no-RandR fallback is "screen-0"; a real desktop reports
+     * its connector, e.g. "DP-1"). Any nonempty name is the
+     * contract; the Xvfb legs below pin the exact spellings. */
+    assert(name[0] != '\0');
     assert(fdk_shell_output_name(shell, 1, name, sizeof(name)) ==
            FDK_ERR_NOT_FOUND);
 
@@ -1733,6 +1737,138 @@ static void test_output_info_x11(void) {
     fdk_shutdown(ctx);
     printf("[ok] X11 output info: the screen as one output, metrics "
            "exact\n");
+}
+
+/* ---- 0.3.0 (M-6): the RandR output model ----------------------------------- */
+
+static void test_randr_output_model(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    /* The probed table: on Xvfb exactly one output ("screen") whose
+     * geometry IS the screen (the single-monitor identity — the
+     * regression pin that the split changed nothing observable). */
+    uint32_t count = 0;
+    assert(fdk_ok(fdk_shell_output_count(shell, &count)));
+    assert(count == 1);
+    char name[64];
+    assert(fdk_ok(fdk_shell_output_name(shell, 0, name, sizeof(name))));
+    rb_open();
+    Display *dpy = g_rb;
+    int screen_w = DisplayWidth(dpy, DefaultScreen(dpy));
+    int screen_h = DisplayHeight(dpy, DefaultScreen(dpy));
+    fdk_shell_output_info info;
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    assert(fdk_ok(fdk_shell_output_get_info(shell, 0, &info)));
+    assert(info.x == 0 && info.y == 0);
+    assert(info.width == (int32_t)screen_w);
+    assert(info.height == (int32_t)screen_h);
+
+    /* Per-output anchoring: output_index 0 == the whole screen on a
+     * single monitor (the geometry pin). */
+    {
+        fdk_shell_layer_desc desc;
+        memset(&desc, 0, sizeof(desc));
+        desc.struct_size = sizeof(desc);
+        desc.layer = FDK_SHELL_LAYER_TOP;
+        desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT;
+        desc.width = 200;
+        desc.height = 40;
+        desc.output_index = 0;
+        fdk_shell_layer *layer = NULL;
+        assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+        fdk_ext_native_handle h;
+        assert(fdk_ok(fdk_ext_surface_native(layer->ext, &h)));
+        Window xw = (Window)h.xid;
+        Window root_ret = 0;
+        int rx = 0, ry = 0;
+        unsigned int rw = 0, rh = 0, bw = 0, depth = 0;
+        assert(XGetGeometry(dpy, xw, &root_ret, &rx, &ry, &rw, &rh, &bw,
+                            &depth));
+        assert(rx == 0 && ry == 0);
+        assert(rw == 200 && rh == 40);
+        fdk_shell_layer_destroy(layer);
+    }
+
+    /* The synthetic multi-output table (the origin math): two
+     * monitors — 800x500 at +0+0 and 300x200 at +800+0 — injected
+     * through the test seam. A layer anchored BOTTOM|RIGHT on
+     * output 1 lands at the monitor's own bottom-right corner, in
+     * ROOT coordinates. */
+    fdkshell__x11_test_inject_output(shell, 0, 0, 0, 800, 500);
+    fdkshell__x11_test_inject_output(shell, 1, 800, 0, 300, 200);
+    {
+        uint32_t c2 = 0;
+        assert(fdk_ok(fdk_shell_output_count(shell, &c2)));
+        assert(c2 == 2);
+        fdk_shell_output_info o1;
+        memset(&o1, 0, sizeof(o1));
+        o1.struct_size = sizeof(o1);
+        assert(fdk_ok(fdk_shell_output_get_info(shell, 1, &o1)));
+        assert(o1.x == 800 && o1.y == 0);
+        assert(o1.width == 300 && o1.height == 200);
+
+        fdk_shell_layer_desc desc;
+        memset(&desc, 0, sizeof(desc));
+        desc.struct_size = sizeof(desc);
+        desc.layer = FDK_SHELL_LAYER_TOP;
+        desc.anchors = FDK_SHELL_ANCHOR_BOTTOM | FDK_SHELL_ANCHOR_RIGHT;
+        desc.margin_bottom = 6;
+        desc.margin_right = 4;
+        desc.width = 100;
+        desc.height = 30;
+        desc.output_index = 1;
+        fdk_shell_layer *layer = NULL;
+        assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+        fdk_ext_native_handle h;
+        assert(fdk_ok(fdk_ext_surface_native(layer->ext, &h)));
+        Window xw = (Window)h.xid;
+        Window root_ret = 0;
+        int rx = 0, ry = 0;
+        unsigned int rw = 0, rh = 0, bw = 0, depth = 0;
+        assert(XGetGeometry(dpy, xw, &root_ret, &rx, &ry, &rw, &rh, &bw,
+                            &depth));
+        /* Monitor 1's right edge is 800+300=1100, bottom is 200. */
+        assert((int)rw == 100 && (int)rh == 30);
+        assert(rx == 1100 - 4 - 100);
+        assert(ry == 200 - 6 - 30);
+        fdk_shell_layer_destroy(layer);
+
+        /* A STALE index (2 on a two-output table): the honest
+         * degradation — the whole screen, never a crash. */
+        memset(&desc, 0, sizeof(desc));
+        desc.struct_size = sizeof(desc);
+        desc.layer = FDK_SHELL_LAYER_TOP;
+        desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT;
+        desc.width = 50;
+        desc.height = 10;
+        desc.output_index = 2;
+        fdk_shell_layer *layer2 = NULL;
+        assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer2)));
+        fdk_ext_native_handle h2;
+        assert(fdk_ok(fdk_ext_surface_native(layer2->ext, &h2)));
+        assert(XGetGeometry(dpy, (Window)h2.xid, &root_ret, &rx, &ry,
+                            &rw, &rh, &bw, &depth));
+        assert(rx == 0 && ry == 0); /* the screen fallback       */
+        fdk_shell_layer_destroy(layer2);
+    }
+
+    /* Restore the probed truth; the enumeration returns to 1. */
+    fdkshell__x11_test_clear_outputs(shell);
+    {
+        uint32_t c3 = 0;
+        assert(fdk_ok(fdk_shell_output_count(shell, &c3)));
+        assert(c3 == 1);
+    }
+
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 RandR outputs: probed table, per-output anchoring "
+           "(synthetic 2-monitor origin math), stale-index fallback\n");
 }
 
 static void test_popup_cascade(void) {
@@ -1805,6 +1941,7 @@ int main(void) {
     test_sticky_across_desktops();
     test_namespace_and_wm_layer();
     test_output_info_x11();
+    test_randr_output_model();
     test_popup_cascade();
     if (g_rb != NULL) {
         XCloseDisplay(g_rb);

@@ -290,10 +290,15 @@ construction).
   windows on every EWMH WM — and OVERLAY cannot be guaranteed above
   fullscreen (the documented protocol ceiling). No fake fidelity.
 - **Per-output selection**: full on Wayland (the compositor's
-  outputs, live with hotplug events). X11: RandR output enumeration
-  lands with the core's RandR work (roadmap M-6) — until then X11
-  reports the screen as one output with real metrics, and output
-  events fire on Wayland only (the honest split, shrinking).
+  outputs, live with hotplug events). X11 (0.3.0, M-6): full too —
+  RandR output enumeration with real connector names and per-CRTC
+  geometry, per-output anchoring (a layer with output_index N
+  anchors against THAT monitor, offset into root coordinates), and
+  output events (ADDED/CHANGED/REMOVED) through the shell's OWN X
+  connection (the same own-channel posture as the Wayland side's
+  own registry — D-015). Hotplug truth rides RRNotify; gone outputs
+  keep their records (the enumeration contract). No RandR = the
+  screen as one output, no events (the honest fallback).
 - **Keyboard ON_DEMAND**: layer-shell v4 on Wayland; on X11 it
   degrades to "focusable, best-effort" (there is no per-surface
   on-demand focus protocol). EXCLUSIVE is a real XGrabKeyboard.

@@ -80,11 +80,13 @@ FEATURE  := -D_POSIX_C_SOURCE=200809L
 # runtime auto-detection in src/core/context.c still falls through to
 # the X11 backend when Wayland is unavailable, so a build without X11
 # would have no Wayland-only fall-through to offer).
-X11_CFLAGS     := $(shell pkg-config --cflags x11)
+X11_CFLAGS     := $(shell pkg-config --cflags x11) \
+                 $(shell pkg-config --cflags xrandr 2>/dev/null)
 # Xext: the MIT-SHM extension (XShmPutImage presentation fast path,
 # Phase 3 completion). It is part of the base X11 distribution and
 # present wherever libX11 is.
-X11_LIBS       := $(shell pkg-config --libs x11) -lXext -ldl
+X11_LIBS       := $(shell pkg-config --libs x11) -lXext \
+                 $(shell pkg-config --libs xrandr 2>/dev/null) -ldl
 
 # Wayland is optional. Detection order:
 # 1. If FDK_DISABLE_WAYLAND=1 is set, never build Wayland (skip).

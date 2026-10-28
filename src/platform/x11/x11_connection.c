@@ -193,6 +193,11 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
      * integer-only rule. */
     conn->scale = fdk__x11_detect_scale(display);
 
+    /* The RandR output model (1.1.0 M-6/B-05): per-CRTC geometry at
+     * connect, RRNotify-masked on the root for the dispatch-side
+     * refresh. Absent extension = the whole-screen fallback. */
+    fdk__x11_randr_init(conn);
+
     conn->dispatch = dispatch;
     conn->dispatch_user_data = dispatch_user_data;
     conn->windows = NULL;

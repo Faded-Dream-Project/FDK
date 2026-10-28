@@ -123,7 +123,7 @@ FDK_SO_LIBS ?= -L$(FDK_ROOT)/build -lfdk
 # The backends' native dependencies (fdk-shell's OWN — see README's
 # dependency note: the extension API's native accessors hand out the
 # connection; speaking the native protocol is this package's right).
-X11_DEPS    := $(shell pkg-config --cflags --libs x11 2>/dev/null || echo -lX11)
+X11_DEPS    := $(shell pkg-config --cflags --libs x11 2>/dev/null || echo -lX11) $(shell pkg-config --cflags --libs xrandr 2>/dev/null || echo -lXrandr)
 # XTest (the popup-grab test's fake-input channel; test-link only
 # would suffice, but the discovery is shared and harmless). The HEADER
 # ships only with the Xtst dev package — libxtst-dev (deb/apk),

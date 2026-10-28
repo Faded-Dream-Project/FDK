@@ -14,6 +14,33 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — X11 multi-monitor: the RandR output model (M-6 / A-03 / B-05, fdk-shell 0.3.0)
+
+- **The core's internal table** (`src/platform/x11/x11_randr.c`):
+  per-CRTC geometry probed at connect (reading-order sorted),
+  RRNotify-masked on the root, refreshed in the dispatch loop. The
+  bare-X maximize/fullscreen fallbacks now fill the CONTAINING
+  monitor (the window's center) instead of the whole screen. No
+  public API — the Wayland core's no-output-API parity (D-015).
+- **fdk-shell's own X connection** (the add-on's event channel, the
+  X11 twin of its own wl_registry): XRRSelectInput + the extension
+  loop's fd source; the output table with real connector names,
+  per-CRTC geometry and mm sizes; ADDED/CHANGED/REMOVED events
+  with gone-records enumeration (the contract the Wayland side
+  defines); per-output layer anchoring — output_index N anchors
+  against THAT monitor, offset into root coordinates; a stale index
+  degrades to the whole screen, never a crash.
+- **The fallback is the pin**: no RandR = one output, the screen,
+  real metrics, no events — byte-identical to the pre-M-6 behavior
+  (every unchanged single-monitor rig re-proves it). Xvfb's fixed
+  single output ("screen") pins the probed table; the multi-output
+  origin math runs through an internal test seam (a synthetic
+  two-monitor table, window geometry read back through the
+  protocol). Struts stay root-relative — the documented EWMH
+  per-monitor interpretation limit.
+
+## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
+
 ### Added — the desktop host models: the T-B side 2 split (fdk-shell 0.3.0)
 
 - **`include/fdk-shell/fdk-shell-desktop.h` (public API)**: the
