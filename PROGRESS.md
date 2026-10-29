@@ -808,6 +808,14 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **The xdg-desktop-portal FileChooser: SHIPPED (1.1.0, C-1 / B-09)**
+  — fdk_dialog_open_file/save_file consult the desktop's own picker
+  first (org.freedesktop.portal.FileChooser on the native D-Bus
+  client; the spec's race-free request dance) and fall back to the
+  toolkit's own browser on any failure; $FDK_FILE_DIALOG_PORTAL=0/1/
+  auto. The fallback's re-entry guard (no second flight; the UAF the
+  rig caught) and the null parent. 848 exports. D-022; rig: 5 live-
+  bus legs against the mock portal.
 - **Drag icons + widget-level drop targets: SHIPPED (1.1.0, S-9)**
   — `fdk_drag_begin_ex` (the icon: Wayland start_drag's own surface /
   X11's override-redirect tracker window, alpha-shaped) +

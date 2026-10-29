@@ -34,10 +34,13 @@
 #include "fdk/fdk_dbus.h"
 #include "fdk/fdk_theme.h"
 #include "fdk/fdk_idle.h"
+#include "fdk/fdk_dialog.h"
 
 /* The scheme-engine seam (the mock-portal scenario drives the same
  * recheck a real portal's SettingChanged fires). */
 #include "theme/theme_internal.h"
+/* ctx->window_count for the portal-fallback leg's own-browser proof. */
+#include "core/context_internal.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -524,6 +527,218 @@ static void name_event_cb(fdk_dbus_connection *c, const char *name,
 }
 
 /* ---- the suite ------------------------------------------------------ */
+
+/* ---- The mock FileChooser portal (1.1.0, C-1 / B-09) --------------------
+ *
+ * A becomes org.freedesktop.portal.Desktop serving
+ * org.freedesktop.portal.FileChooser: OpenFile/SaveFile parse the
+ * options dict (handle_token, directory, multiple, current_name,
+ * current_folder, filters), answer a REQUEST PATH built exactly the
+ * spec's way (/org/freedesktop/portal/desktop/request/<sender-with-
+ * colons-and-dots-rewritten>/<token>), then emit the Response
+ * signal on it with the chosen outcome (accepted-with-uris or
+ * dismissed). FDK's portal client is pinned end to end against it:
+ * the call shape, the subscription ordering, the response decode,
+ * and the fallback path (a refusal hands the pick to the toolkit's
+ * own browser). */
+static int g_fc_calls;
+static int g_fc_refuse; /* answer an error reply instead of a handle */
+static struct {
+    int done;
+    fdk_file_dialog_outcome outcome;
+    char paths[2][256];
+    size_t count;
+} g_fc_result;
+
+static void fc_done_cb(const fdk_file_dialog_result *r, void *user) {
+    (void)user;
+    g_fc_result.done = 1;
+    g_fc_result.outcome = r->outcome;
+    g_fc_result.count = r->count;
+    for (size_t i = 0; i < r->count && i < 2; i++) {
+        snprintf(g_fc_result.paths[i], sizeof g_fc_result.paths[i],
+                 "%s", r->paths[i]);
+    }
+}
+
+static int g_fc_last_directory;
+static int g_fc_last_multiple;
+static char g_fc_last_title[128];
+static char g_fc_last_current_name[128];
+static char g_fc_last_current_folder[256];
+static int g_fc_last_filters; /* count of filter structs seen */
+static char g_fc_last_token[64];
+
+static void filechooser_handler(fdk_dbus_connection *c,
+                                fdk_dbus_message *call, void *user) {
+    (void)user;
+    const char *iface = fdk_dbus_message_interface(call);
+    const char *member = fdk_dbus_message_member(call);
+    if (iface == NULL ||
+        strcmp(iface, "org.freedesktop.portal.FileChooser") != 0 ||
+        (strcmp(member, "OpenFile") != 0 &&
+         strcmp(member, "SaveFile") != 0)) {
+        return;
+    }
+    g_fc_calls++;
+
+    /* Args: (parent_window, title, options a(sv)). Read them and
+     * the options dict. */
+    fdk_dbus_value **args = NULL;
+    size_t n = 0;
+    char token[64] = "default";
+    int directory = 0, multiple = 0;
+    const char *cur_name = NULL;
+    const uint8_t *cur_folder = NULL;
+    size_t cur_folder_len = 0;
+    int filters_seen = 0;
+    if (fdk_dbus_message_read_args(call, &args, &n) == FDK_OK && n >= 3) {
+        const char *title = fdk_dbus_value_string(args[1]);
+        snprintf(g_fc_last_title, sizeof g_fc_last_title, "%s",
+                 title != NULL ? title : "");
+        if (fdk_dbus_value_type(args[2]) == FDK_DBUS_ARRAY) {
+            size_t entries = fdk_dbus_value_array_count(args[2]);
+            for (size_t e = 0; e < entries; e++) {
+                const fdk_dbus_value *entry =
+                    fdk_dbus_value_array_item(args[2], e);
+                if (entry == NULL ||
+                    fdk_dbus_value_struct_count(entry) < 2) {
+                    continue;
+                }
+                const char *key = fdk_dbus_value_string(
+                    fdk_dbus_value_struct_item(entry, 0));
+                const fdk_dbus_value *val =
+                    fdk_dbus_value_struct_item(entry, 1);
+                if (key == NULL || val == NULL) {
+                    continue;
+                }
+                if (strcmp(key, "handle_token") == 0) {
+                    const char *t = fdk_dbus_value_string(
+                        fdk_dbus_value_variant_value(val));
+                    snprintf(token, sizeof token, "%s",
+                             t != NULL ? t : "default");
+                } else if (strcmp(key, "directory") == 0) {
+                    directory = fdk_dbus_value_boolean(
+                        fdk_dbus_value_variant_value(val));
+                } else if (strcmp(key, "multiple") == 0) {
+                    multiple = fdk_dbus_value_boolean(
+                        fdk_dbus_value_variant_value(val));
+                } else if (strcmp(key, "current_name") == 0) {
+                    cur_name = fdk_dbus_value_string(
+                        fdk_dbus_value_variant_value(val));
+                } else if (strcmp(key, "current_folder") == 0) {
+                    cur_folder = fdk_dbus_value_array_flat_bytes(
+                        fdk_dbus_value_variant_value(val),
+                        &cur_folder_len);
+                } else if (strcmp(key, "filters") == 0) {
+                    const fdk_dbus_value *arr =
+                        fdk_dbus_value_variant_value(val);
+                    if (arr != NULL &&
+                        fdk_dbus_value_type(arr) == FDK_DBUS_ARRAY) {
+                        filters_seen =
+                            (int)fdk_dbus_value_array_count(arr);
+                    }
+                }
+            }
+        }
+    }
+    /* Copy the borrowed strings OUT first — every one of them points
+     * into the args tree that the free below releases (the UAF the
+     * first cut of this handler hit at exactly the memcpy). */
+    g_fc_last_directory = directory;
+    g_fc_last_multiple = multiple;
+    g_fc_last_filters = filters_seen;
+    snprintf(g_fc_last_current_name, sizeof g_fc_last_current_name,
+             "%s", cur_name != NULL ? cur_name : "");
+    if (cur_folder != NULL && cur_folder_len > 0) {
+        size_t take = cur_folder_len < 255 ? cur_folder_len : 255;
+        memcpy(g_fc_last_current_folder, cur_folder, take);
+        g_fc_last_current_folder[take] = '\0';
+    } else {
+        g_fc_last_current_folder[0] = '\0';
+    }
+    snprintf(g_fc_last_token, sizeof g_fc_last_token, "%s", token);
+    fdk_dbus_values_free_array(args, n);
+
+    /* The request path (the spec's sender rule: ':1.5' -> '_1_5'). */
+    const char *unique = fdk_dbus_message_sender(call);
+    char sender_seg[96] = "_";
+    if (unique != NULL) {
+        size_t o = 0;
+        for (const char *q = unique;
+             *q != '\0' && o + 1 < sizeof sender_seg; q++) {
+            sender_seg[o++] = (*q == ':' || *q == '.') ? '_' : *q;
+        }
+        sender_seg[o] = '\0';
+    }
+    char request_path[192];
+    snprintf(request_path, sizeof request_path,
+             "/org/freedesktop/portal/desktop/request/%s/%s",
+             sender_seg, token);
+
+    /* The refusal leg: an error reply INSTEAD of the handle — the
+     * portal-missing failure mode every client must survive. */
+    if (g_fc_refuse) {
+        fdk_dbus_message *err = fdk_dbus_message_new_error(
+            call, "org.freedesktop.portal.Error.NotFound",
+            "no file chooser backend");
+        if (err != NULL) {
+            (void)fdk_dbus_connection_send(c, err);
+        }
+        return;
+    }
+
+    /* Reply the handle... */
+    fdk_dbus_message *reply =
+        fdk_dbus_message_new_method_return(call);
+    if (reply == NULL) {
+        return;
+    }
+    (void)fdk_dbus_message_append_object_path(reply, request_path);
+    (void)fdk_dbus_connection_send(c, reply);
+
+    /* ...then the Response signal on it: response=1 for the
+     * "fdk-dismiss" sentinel (the cancelled leg), response=0 with
+     * the uris otherwise. */
+    fdk_dbus_message *sig = fdk_dbus_message_new_signal(
+        request_path, "org.freedesktop.portal.Request", "Response");
+    if (sig == NULL) {
+        return;
+    }
+    (void)fdk_dbus_message_append_uint32(
+        sig, strcmp(g_fc_last_title, "fdk-dismiss") == 0 ? 1u : 0u);
+    /* results: one section with the uris array */
+    fdk_dbus_value *uris[2];
+    uris[0] = fdk_dbus_value_new_string(
+        "file:///etc/hostname");
+    uris[1] = fdk_dbus_value_new_string(
+        "file:///etc/os%2Drelease"); /* percent-encoded '-' */
+    fdk_dbus_value *uri_arr =
+        fdk_dbus_value_new_array("s", uris, 2);
+    /* The results: a(sa{sv}) — one section ("", {"uris": [...]}).
+     * The dict's VALUE must be a VARIANT wrapping the uri array (the
+     * {sv} grammar; the tray-hint precedent's shape). */
+    fdk_dbus_value *uris_var = fdk_dbus_value_new_variant(uri_arr);
+    fdk_dbus_value_free(uri_arr); /* new_variant copies its child */
+    fdk_dbus_value *uris_entry = fdk_dbus_value_new_dict_entry(
+        fdk_dbus_value_new_string("uris"), uris_var);
+    fdk_dbus_value *dict =
+        fdk_dbus_value_new_array("{sv}",
+                                  (fdk_dbus_value *[]){uris_entry}, 1);
+    fdk_dbus_value *section_items[2];
+    section_items[0] = fdk_dbus_value_new_string("");
+    section_items[1] = dict;
+    fdk_dbus_value *section = fdk_dbus_value_new_struct(
+        section_items, 2);
+    fdk_dbus_value *sections[1] = {section};
+    fdk_dbus_value *results_arr =
+        fdk_dbus_value_new_array("(sa{sv})", sections, 1);
+    if (results_arr != NULL) {
+        (void)fdk_dbus_message_append(sig, results_arr);
+        fdk_dbus_value_free(results_arr);
+    }
+    (void)fdk_dbus_connection_send(c, sig);
+}
 
 int main(void) {
     /* Skip discipline: no dbus-run-session / no display → skip. */
@@ -1089,6 +1304,180 @@ int main(void) {
         fdk_idle_uninhibit(inh3);
         assert(g_ss_inhibits == 2); /* the refusal issued no cookie */
         printf("[ok] idle: service refusal degrades to UNSUPPORTED\n");
+    }
+
+    /* ---- The FileChooser portal (1.1.0, C-1 / B-09) ----------------------
+     *
+     * A already owns org.freedesktop.portal.Desktop (the color-scheme
+     * section took it; one name, two interfaces — exactly how the
+     * real portal multiplexes). The handler swaps to the FileChooser
+     * one and the legs run:
+     *
+     *   LEG 1 (the happy path, forced): OPEN_FILES with title /
+     *        start_dir / filters — the mock asserts the call's OPTION
+     *        SHAPE (directory/multiple off, the current_folder hint,
+     *        two filter structs) and answers a handle + Response(0,
+     *        uris[hostname, os%2Drelease]); FDK delivers ACCEPTED
+     *        with the two POSIX paths (the percent-decode proven).
+     *   LEG 2 (dismissed): response=1 -> CANCELLED, no paths.
+     *   LEG 3 (OPEN_FOLDER): the directory choice ON in the call the
+     *        mock sees.
+     *   LEG 4 (auto-mode fallback): FDK_FILE_DIALOG_PORTAL unset and
+     *        the mock REFUSING (an error reply) — the pick falls back
+     *        to the toolkit's own browser (which under this bare
+     *        harness creates its real window: assert the fallback
+     *        produced an FDK window / a browser-side result, i.e. the
+     *        callback fired from the OWN dialog, by watching the
+     *        window count through a pumped idle).
+     */
+    {
+        fdk_dbus_connection_set_method_handler(
+            a, filechooser_handler, NULL);
+        setenv("FDK_FILE_DIALOG_PORTAL", "1", 1);
+
+        /* LEG 1 */
+        memset(&g_fc_result, 0, sizeof g_fc_result);
+        g_fc_calls = 0;
+        fdk_file_dialog_options fcopts = {0};
+        fcopts.title = "Pick files";
+        fcopts.start_dir = "/etc";
+        fcopts.filters = "*.conf;*.cfg";
+        fcopts.kind = FDK_FILE_DIALOG_OPEN_FILES;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &fcopts, fc_done_cb,
+                                           NULL, NULL)));
+        int got = 0;
+        for (int i = 0; i < 200 && !got; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            got = (g_fc_result.done != 0);
+        }
+        assert(got);
+        assert(g_fc_result.outcome == FDK_FILE_DIALOG_ACCEPTED);
+        assert(g_fc_result.count == 2);
+        assert(strcmp(g_fc_result.paths[0], "/etc/hostname") == 0);
+        assert(strcmp(g_fc_result.paths[1], "/etc/os-release") == 0);
+        /* The call shape the mock saw. */
+        assert(g_fc_calls == 1);
+        assert(strcmp(g_fc_last_title, "Pick files") == 0);
+        assert(g_fc_last_directory == 0);
+        assert(g_fc_last_multiple == 1);
+        assert(strcmp(g_fc_last_current_folder, "/etc") == 0);
+        assert(g_fc_last_filters == 2);
+        assert(g_fc_last_token[0] != '\0');
+        printf("[ok] portal file chooser: OPEN_FILES -> options shape "
+               "(multiple on, folder hint, 2 filters), Response "
+               "decoded, percent-decoded POSIX paths\n");
+
+        /* LEG 2: dismissed. */
+        memset(&g_fc_result, 0, sizeof g_fc_result);
+        g_fc_calls = 0;
+        fdk_file_dialog_options dfopts = {0};
+        dfopts.title = "fdk-dismiss";
+        dfopts.kind = FDK_FILE_DIALOG_OPEN_FILE;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &dfopts, fc_done_cb,
+                                           NULL, NULL)));
+        got = 0;
+        for (int i = 0; i < 200 && !got; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            got = (g_fc_result.done != 0);
+        }
+        assert(got);
+        assert(g_fc_result.outcome == FDK_FILE_DIALOG_CANCELLED);
+        assert(g_fc_result.count == 0);
+        printf("[ok] portal file chooser: Response(1) -> CANCELLED, "
+               "no paths\n");
+
+        /* LEG 3: the folder kind sets the directory choice. */
+        memset(&g_fc_result, 0, sizeof g_fc_result);
+        g_fc_calls = 0;
+        fdk_file_dialog_options folopts = {0};
+        folopts.title = "Pick a folder";
+        folopts.kind = FDK_FILE_DIALOG_OPEN_FOLDER;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &folopts, fc_done_cb,
+                                           NULL, NULL)));
+        got = 0;
+        for (int i = 0; i < 200 && !got; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            got = (g_fc_result.done != 0);
+        }
+        assert(got);
+        assert(g_fc_last_directory == 1);
+        assert(g_fc_last_multiple == 0);
+        printf("[ok] portal file chooser: OPEN_FOLDER -> the "
+               "directory choice in the call\n");
+
+        /* LEG 4: auto mode + the portal REFUSING (error reply) — the
+         * fallback hands the pick to the toolkit's own browser. The
+         * own browser under this harness really runs (it creates a
+         * window and browses /); the assert is that the callback
+         * fires AT ALL with a result whose origin is the own
+         * browser: the mock saw the call, refused it, and the dialog
+         * machinery produced a REAL FDK window (fdk_window_count > 0
+         * while the browser is up, before any answer). */
+        unsetenv("FDK_FILE_DIALOG_PORTAL");
+        g_fc_refuse = 1; /* the mock answers an error reply */
+        memset(&g_fc_result, 0, sizeof g_fc_result);
+        g_fc_calls = 0;
+        fdk_file_dialog_options rfopts = {0};
+        rfopts.title = "Refuse me";
+        rfopts.start_dir = "/etc";
+        rfopts.kind = FDK_FILE_DIALOG_OPEN_FILE;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &rfopts, fc_done_cb,
+                                           NULL, NULL)));
+        int browser_up = 0;
+        int answered = 0;
+        for (int i = 0; i < 400 && !answered; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            if (!browser_up && ctx->window_count > 0) {
+                browser_up = 1;
+            }
+            answered = (g_fc_result.done != 0);
+        }
+        assert(g_fc_calls == 1); /* the portal WAS consulted first */
+        assert(browser_up); /* the own browser took over */
+        printf("[ok] portal file chooser: refusal in auto mode -> the "
+               "toolkit's own browser took the pick\n");
+        g_fc_refuse = 0;
+
+        /* The browser window from LEG 4 is still up (nobody
+         * answered it): destroy it directly — the dialog's window
+         * dies, the done callback fires CANCELLED (the early-destroy
+         * contract). */
+        while (ctx->window_count > 0) {
+            fdk_window_destroy(ctx->windows[0]);
+        }
+        for (int i = 0; i < 100 && g_fc_result.done == 0; i++) {
+            (void)fdk_pump_events(ctx, 20);
+        }
+        /* (LEG 4's callback was already satisfied by the destroy;
+         * LEG 5 resets the state — no assert needed here beyond the
+         * clean window count.) */
+
+        /* LEG 5 (the forced-mode refusal): FDK_FILE_DIALOG_PORTAL=1
+         * and the portal refusing — the dialog must FAIL the call
+         * (no fallback), and the async refusal delivers the ERROR
+         * outcome (the callback contract). */
+        setenv("FDK_FILE_DIALOG_PORTAL", "1", 1);
+        g_fc_refuse = 1;
+        memset(&g_fc_result, 0, sizeof g_fc_result);
+        g_fc_calls = 0;
+        fdk_file_dialog_options fropts = {0};
+        fropts.title = "Refuse forced";
+        fropts.start_dir = "/etc";
+        fropts.kind = FDK_FILE_DIALOG_OPEN_FILE;
+        assert(fdk_ok(fdk_dialog_open_file(ctx, &fropts, fc_done_cb,
+                                           NULL, NULL)));
+        got = 0;
+        for (int i = 0; i < 200 && !got; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            got = (g_fc_result.done != 0);
+        }
+        assert(got);
+        assert(g_fc_result.outcome == FDK_FILE_DIALOG_ERROR);
+        assert(ctx->window_count == 0); /* no fallback window */
+        g_fc_refuse = 0;
+        unsetenv("FDK_FILE_DIALOG_PORTAL");
+        printf("[ok] portal file chooser: forced-mode refusal -> the "
+               "ERROR outcome, no fallback\n");
     }
 
     /* ---- teardown --------------------------------------------------------- */

@@ -74,6 +74,7 @@
  */
 
 #include "widgets_internal.h"
+#include "dialog_portal_internal.h"
 #include "../theme/theme_internal.h"
 #include "../window/window_internal.h"
 #include "fdk/fdk_dialog.h"
@@ -3204,6 +3205,68 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 out_window);
 }
 
+/* The portal-flight's saved options (the fallback reconstructs the
+ * fdk_file_dialog_options the application handed fdk_dialog_open_file
+ * — the original was borrowed and may be gone by the time a portal
+ * failure arrives). Owned by the flight (portal_file_chooser.c),
+ * read here. */
+extern fdk_file_dialog_options fdk__portal_saved_options;
+extern int fdk__portal_saved_valid;
+fdk_file_dialog_options fdk__portal_saved_options;
+int fdk__portal_saved_valid;
+
+/* The flight's callback/context (set by show_impl below, read by
+ * the fallback): the portal module reads these through the same
+ * externs it declares for the saved options. */
+fdk_context *g_flight_ctx;
+fdk_file_dialog_done_fn g_flight_on_done;
+void *g_flight_user;
+
+/* The fallback guard: fdk__dialog_fallback_own_browser re-enters
+ * fdk_dialog_show_impl, which must NOT consult the portal again (it
+ * just failed) — without this, every fallback would start a NEW
+ * flight whose portal_try memsets the OLD flight (freeing the very
+ * strings the fallback's saved options point at: the UAF the LEG-4
+ * rig caught). */
+static int g_in_portal_fallback;
+
+/* The fallback entry (see dialog_portal_internal.h): the portal
+ * failed at any point — re-issue the whole dialog through THIS
+ * browser with the flight's saved options. Runs inside the D-Bus
+ * callback, i.e. inside fdk_pump_events — legal exactly like every
+ * other show-from-callback (the dialog machinery creates its window
+ * through the ordinary context APIs). */
+void fdk__dialog_fallback_own_browser(void) {
+    if (!fdk__portal_saved_valid) {
+        /* Nothing saved (a call failure before the copy?): deliver
+         * the honest CANCELLED so the callback contract holds. */
+        fdk__portal_saved_valid = 0;
+        if (g_flight_on_done != NULL) {
+            fdk_file_dialog_result r = {FDK_FILE_DIALOG_CANCELLED,
+                                        NULL, 0};
+            g_flight_on_done(&r, g_flight_user);
+        }
+        return;
+    }
+    fdk_file_dialog_options opts = fdk__portal_saved_options;
+    fdk_file_dialog_done_fn on_done = g_flight_on_done;
+    void *user = g_flight_user;
+    fdk__portal_saved_valid = 0;
+    /* The saved option STRINGS pointed into the flight's copies,
+     * which the caller (portal flight clear) frees AFTER this runs —
+     * re-copy them into the show_impl's own copies by simply passing
+     * through: show_impl copies every string it keeps. But the
+     * flight clear happens AFTER fallback returns, so the pointers
+     * are still valid HERE. The modal parent is borrowed and may be
+     * destroyed by then: null it (a stale parent would crash the
+     * anchoring). */
+    opts.parent = NULL;
+    g_in_portal_fallback = 1;
+    (void)fdk_dialog_show_impl(g_flight_ctx, &opts, on_done, user,
+                               NULL);
+    g_in_portal_fallback = 0;
+}
+
 static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
                                        const fdk_file_dialog_options *options,
                                        fdk_file_dialog_done_fn on_done,
@@ -3219,6 +3282,43 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
         kind > FDK_FILE_DIALOG_SAVE_FILE) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
+
+    /* ---- The portal first (1.1.0, C-1 / B-09) ----------------------
+     *
+     * Save the flight's callback/context and a full options copy
+     * BEFORE the try: a portal failure can arrive inside the very
+     * call (no bus), and the fallback needs everything. FDK_OK from
+     * the try = the portal took the pick; UNSUPPORTED = we build the
+     * own browser below; anything else propagates. */
+    if (!g_in_portal_fallback) {
+        g_flight_ctx = ctx;
+        g_flight_on_done = on_done;
+        g_flight_user = user_data;
+        memset(&fdk__portal_saved_options, 0,
+               sizeof fdk__portal_saved_options);
+        if (options != NULL) {
+            fdk__portal_saved_options = *options;
+        }
+        fdk__portal_saved_options.kind = kind;
+        fdk__portal_saved_valid = 1;
+        fdk_result pr = fdk__dialog_portal_try(ctx, options, on_done,
+                                                user_data);
+        if (fdk_ok(pr)) {
+            if (out_window != NULL) {
+                *out_window = NULL; /* no FDK window in portal mode */
+            }
+            return FDK_OK;
+        }
+        if (pr != FDK_ERR_UNSUPPORTED) {
+            fdk__portal_saved_valid = 0;
+            return pr;
+        }
+        /* UNSUPPORTED: portal off/unavailable — clear any partial
+         * flight state and build the own browser. */
+        fdk__dialog_portal_flight_clear();
+        fdk__portal_saved_valid = 0;
+    }
+
     const char *title = (options != NULL && options->title != NULL)
                             ? options->title
                             : fdlg_default_title(kind);

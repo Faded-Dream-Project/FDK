@@ -303,6 +303,44 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
                                 void *user_data,
                                 fdk_window **out_window);
 
+/* ---- The xdg-desktop-portal FileChooser fallback (1.1.0, C-1 / B-09) -
+ *
+ * On a desktop that runs xdg-desktop-portal (Flatpak-style sandboxes
+ * and most modern sessions), the DESKTOP'S OWN file picker is
+ * available over D-Bus at org.freedesktop.portal.FileChooser — a
+ * system-styled, sandbox-aware chooser the application cannot draw
+ * itself. fdk_dialog_open_file / fdk_dialog_save_file now consult
+ * it FIRST when the desktop provides it:
+ *
+ *   - $FDK_FILE_DIALOG_PORTAL=1 forces the portal path (a missing
+ *     portal/bus then fails the dialog with FDK_ERR_PLATFORM, and a
+ *     portal-side refusal after the call delivers the ERROR outcome
+ *     — no fallback in forced mode; useful for testing);
+ *   - $FDK_FILE_DIALOG_PORTAL=0 disables it entirely (the toolkit's
+ *     own browser, always);
+ *   - the default: the portal when a portal service answers, the
+ *     toolkit's own browser otherwise — the fallback runs on ANY
+ *     failure (no bus, no portal, the OpenFile call refused, the
+ *     user dismissing the portal's own error) so the application
+ *     always gets a picker, exactly the GTK posture.
+ *
+ * The portal path honors options->kind (OPEN_FILE/OPEN_FILES/
+ * OPEN_FOLDER/OPEN_FOLDERS/SAVE_FILE — multiple kinds set the
+ * directory/multiple-select choices), title, start_dir, start_name
+ * (the current-file/current-folder/current-name hints), filters
+ * (the glob list translates to portal filters), and modal (as the
+ * parent-window handle). The result model is IDENTICAL: the same
+ * callback, the same fdk_file_dialog_result (portal URIs decoded
+ * to POSIX paths), the same self-contained lifecycle — no FDK
+ * window exists in the portal mode, so *out_window receives NULL
+ * and early destruction is simply not applicable (the request's
+ * lifetime is the portal's).
+ *
+ * SAVE_FILE's overwrite confirmation is the DESKTOP's in portal
+ * mode (the portal's own "replace file?" question) — FDK's nested
+ * confirmation belongs to the own-browser path only. */
+int fdk__dialog_portal_pref(void); /* internal: 1 force / 0 off / -1 auto */
+
 /* ---- Icon themes (the picker's iconography, 1.5.1 + 1.5.2 + 1.5.3) --
  *
  * The dialog's rows wear the DESKTOP's icons, resolved through an

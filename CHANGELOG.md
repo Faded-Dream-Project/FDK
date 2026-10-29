@@ -14,6 +14,37 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — the xdg-desktop-portal FileChooser (C-1 / B-09)
+
+- **The desktop's own file picker, when the desktop has one**:
+  `fdk_dialog_open_file` / `fdk_dialog_save_file` now consult
+  `org.freedesktop.portal.FileChooser` on the session bus FIRST and
+  fall back to the toolkit's own browser on ANY failure (no bus, no
+  portal, refused call, timeout) — the application always gets a
+  picker; on a portal desktop it gets the system-styled,
+  sandbox-aware, recents-integrated one. `$FDK_FILE_DIALOG_PORTAL=0`
+  disables; `=1` forces (a missing portal then fails honestly —
+  `FDK_ERR_PLATFORM` / the ERROR outcome — instead of falling back).
+- The full kind contract rides the call: directory/multiple from the
+  dialog kind, `current_folder` (the spec's byte-array form) from
+  start_dir, `current_name` for SAVE, the filters glob list as
+  portal `(sa(us))` filters, the title verbatim. The spec's
+  race-free ordering throughout: handle_token + the predictable
+  request path, the Response subscription armed before the call.
+- The result model is unchanged — the same callback, the same
+  `fdk_file_dialog_result` with portal URIs percent-decoded to POSIX
+  paths. Response 0 = ACCEPTED, 1 = CANCELLED, a portal refusal in
+  forced mode = ERROR.
+- Tests: five live-bus legs against a mock FileChooser portal (the
+  call-shape asserts, the decoded paths, the dismissed response, the
+  folder kind, the auto-mode refusal -> the own browser's real
+  window, the forced-mode refusal -> ERROR). Two real defects the
+  rig caught and closed: the fallback's re-entry would start a NEW
+  portal flight whose state reset freed the strings the fallback was
+  reading (a UAF — now guarded), and the modal parent is nulled at
+  fallback time (it may be destroyed by then). 847 -> 848 exports.
+  docs/DECISIONS.md D-022; owner steps TESTING-ON-DESKTOP.md §15.
+
 ### Added — drag icons + widget-level drop targets (S-9 / B-13)
 
 - **`fdk_drag_begin_ex`** (fdk_dnd.h): `fdk_drag_begin` with a drag

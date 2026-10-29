@@ -515,7 +515,10 @@ DBUS_TRAY_BIN := $(BUILD_DIR)/tests/test_tray_item
 # One session, every live test: each binary skips individually when it
 # must, and REQUIRE knobs (FDK_DBUS_TEST_REQUIRE / FDK_TRAY_TEST_REQUIRE)
 # make the skips failures where CI demands it.
-DBUS_LIVE_ALL := "$(DBUS_LIVE_BIN) && $(DBUS_NOTIFY_BIN) && $(DBUS_TRAY_BIN)"
+# 1.1.0, C-1: the live test's portal-fallback leg opens the toolkit's
+# own browser window — the GL lane's exit-time Mesa allocations ride
+# it, same as the X11 suite (the suppression file is shared).
+DBUS_LIVE_ALL := "LSAN_OPTIONS=\"suppressions=$(CURDIR)/tests/data/lsan-gl.supp\" $(DBUS_LIVE_BIN) && $(DBUS_NOTIFY_BIN) && $(DBUS_TRAY_BIN)"
 
 test-dbus: $(DBUS_LIVE_BIN) $(DBUS_NOTIFY_BIN) $(DBUS_TRAY_BIN)
 	@if ! command -v dbus-run-session >/dev/null 2>&1; then \

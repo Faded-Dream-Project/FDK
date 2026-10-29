@@ -1058,3 +1058,65 @@ pointer to (11,22) on EVERY invocation — mid-drag, that retargets
 the drag to wherever the warp lands (the enter/leave churn + the
 release on the wrong window); the check is now opt-in
 (XTEST_SELFCHECK=1), the extension query alone proving XTEST works.
+
+## D-022 — the portal FileChooser: the desktop's picker when the desktop has one, the toolkit's own otherwise (C-1 / B-09)
+
+2026-10-29. The audit's B-09: "own dialogs everywhere; fdk_dialog.h
+says 'no portal'". D-002 moved it to CORE on the native D-Bus client
+— not a Flatpak-only nicety, because the portal's picker is the
+DESKTOP'S picker (system-styled, sandbox-aware, recents integrated)
+and every GTK/Qt app on a portal desktop uses it.
+
+**1. The posture is fallback-FIRST-TRY, fallback-ALWAYS.** The
+dialog entry points consult org.freedesktop.portal.FileChooser before
+building the own browser; ANY failure anywhere — no session bus, no
+portal service, the OpenFile call refused or timed out — hands the
+pick back to the toolkit's own browser (file_dialog.c), so the
+application always gets a picker. $FDK_FILE_DIALOG_PORTAL=0 disables
+the portal entirely; =1 forces it (a missing portal then surfaces as
+FDK_ERR_PLATFORM / the ERROR outcome — no fallback — the testing
+posture). Auto is the default.
+
+**2. The request dance follows the spec's race-free ordering.** The
+options dict carries handle_token; the request path is PREDICTABLE
+from our unique name + the token (the ':'/'.' -> '_' rewrite), so
+the Response subscription is armed BEFORE the OpenFile call goes out
+— no window between subscribe and trigger. The call's reply returns
+the handle; a portal that chose its own token anyway gets the
+subscription re-armed on the REAL handle (the spec's degraded path).
+
+**3. The fallback is a RE-ENTRY with saved state.** The application's
+options were borrowed; the flight copies everything (title, dir,
+name, filters, kind) at try time, and the fallback re-points the
+saved options at THOSE copies before re-issuing through
+fdk_dialog_show_impl. Two traps the rig caught: (a) the fallback's
+re-entry into show_impl would consult the portal AGAIN — the new
+flight's memset freed the old flight's strings under the fallback's
+feet (a genuine UAF); a fallback guard makes re-entry portal-skip;
+(b) the modal PARENT may be destroyed by the time an async refusal
+lands — the fallback nulls it (a stale parent would crash the
+anchoring).
+
+**4. The options shape is the full kind contract.** directory/
+multiple from the kind, current_folder (as the byte-array the spec
+defines) from start_dir, current_name for SAVE, the filters glob
+list translated to portal (sa(us)) filters, the title verbatim. The
+Response decode rides the a{sv} dict_lookup (the value is a VARIANT
+wrapping the uri array — the unwrap the first cut missed) with
+percent-decoding through a local URI codec (the dnd_uri rules:
+file:// stripped, %XX decoded, non-file URIs passed through).
+Response 0 + uris = ACCEPTED; response 1 (or a zero-uri accept) =
+CANCELLED; a portal error after the call in forced mode = the ERROR
+outcome.
+
+**5. One flight at a time.** A second dialog while a portal request
+flies answers UNSUPPORTED (the window-scoped own-browser never needed
+the limit; the portal request is context-global). The flight's state
+is one static block — the same singleton posture every desktop
+module (color_scheme, idle) uses.
+
+Fences: no portal-on-X11-connector business (the parent_window
+argument is "" — the portal's own heuristics place the dialog; the
+x11:xid form is future polish for multi-window apps); the overwrite
+confirmation in portal mode is the DESKTOP's (the portal's own
+question), FDK's nested one belongs to the own-browser path only.

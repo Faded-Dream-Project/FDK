@@ -504,3 +504,34 @@ Expectations:
   hotspot would hide it).
 
 **Status: DONE (should work; owner verification pending).**
+
+## 15. The portal FileChooser on your desktop (C-1 — needs your eyes)
+
+What the rig proved: the whole protocol dance against a mock portal
+(the call's option shape, the race-free subscription, the Response
+decode with percent-encoded URIs) and both fallback postures (auto
+mode's refusal -> the own browser; forced mode's refusal -> ERROR).
+What only your desktop shows is the REAL portal backend's picker.
+
+```sh
+# With xdg-desktop-portal running (most modern sessions):
+# any FDK app's file dialog should open the DESKTOP'S picker.
+# To compare the toolkit's own browser:
+FDK_FILE_DIALOG_PORTAL=0 <your-fdk-app>
+```
+
+Expectations:
+
+- The desktop's picker appears (GTK-styled on GNOME, Qt-styled on
+  KDE, the file chooser your other apps use) with your title, your
+  filters, and — for OPEN kinds — your start_dir as the initial
+  folder.
+- Accepting files returns POSIX paths exactly like the own browser
+  (including percent-decoding); Cancel returns CANCELLED.
+- Kill the portal (`systemctl --user stop xdg-desktop-portal`) and
+  open a dialog: the toolkit's own browser appears instead — the
+  fallback. That resilience is the feature.
+- Flatpak-style sandboxes: the picker works where the own browser
+  cannot even see the filesystem — the portal's whole point.
+
+**Status: DONE (should work; owner verification pending).**

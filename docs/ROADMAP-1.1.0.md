@@ -46,14 +46,14 @@ integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
 **Counts** (recounted 2026-10-29 against every register row — the
-earlier line's arithmetic was coarser than the table): DONE 42
-(S-9/B-13, 2026-10-29; S-6/B-04-activation, 2026-10-29; C-4/B-14,
-2026-10-29; S-10/B-18, 2026-10-29; S-4/A-06 + A-07 folded,
-2026-10-29; S-5/B-12, 2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B
-both sides, 2026-10-29; S-2 and S-1 pending owner verification; M-4,
-M-3, M-1, and S-3, 2026-10-28) · PARTIAL 1 (B-19) · IN PROGRESS 1
-(M-9) · MISSING 13 · DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX
-0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
+earlier line's arithmetic was coarser than the table): DONE 43
+(C-1/B-09, 2026-10-29; S-9/B-13, 2026-10-29; S-6/B-04-activation,
+2026-10-29; C-4/B-14, 2026-10-29; S-10/B-18, 2026-10-29; S-4/A-06 +
+A-07 folded, 2026-10-29; S-5/B-12, 2026-10-29; M-6/A-03/B-05,
+2026-10-29; T-B both sides, 2026-10-29; S-2 and S-1 pending owner
+verification; M-4, M-3, M-1, and S-3, 2026-10-28) · PARTIAL 1
+(B-19) · IN PROGRESS 1 (M-9) · MISSING 12 · DEFERRED (by design) 5
+· BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +
@@ -77,6 +77,20 @@ two-monitor origin math, stale-index fallback), the bar rig
 unchanged-and-green, and the notifyd rig (the dispatch-loop change
 under a real WM). Earlier: post-T-B-side-2 — both desktop rigs
 unchanged-and-green (notifyd 68, trayhost 103).
+Re-verified 2026-10-29 (post-C-1): the dual-backend rebuild zero
+warnings (debug AND release — the truncation-prone buffers widened),
+core make test, make test-dbus (41 [ok] incl. the five NEW portal
+FileChooser legs against the mock portal: the happy path's call-
+shape asserts + decoded paths incl. a percent-encoded URI, the
+dismissed response, the folder kind's directory choice, the auto-
+mode refusal -> the own browser's real window, the forced-mode
+refusal -> ERROR with no fallback), make test-x11 (205 [ok], the
+file-dialog legs unchanged-and-green — no portal on a dbus-less
+Xvfb, the auto fallback engages silently), FDK_SANITIZE=0 test,
+release + examples + verify-exports (848, +1 — the fdk__dialog_
+portal_pref env knob declared in the public header), the sway suite
+(56 [ok], unchanged), and fdk-shell build + test-x11 + test-desktop
++ the notifyd and trayhost rigs (ALL PASS both).
 Re-verified 2026-10-29 (post-S-9): the dual-backend rebuild zero
 warnings, core make test, make test-x11 (205 [ok] incl. the seven
 NEW S-9 legs: the drag-icon window's existence/hotspot-offset/
@@ -152,7 +166,7 @@ unaffected):
 | B-06 | dark mode following | **DONE** [VERIFIED-CHANGED: audit said partial] | XSETTINGS `Gtk/ColorScheme` (x11_xsettings.c) + `org.freedesktop.appearance` portal on the native client; live: "SettingChanged flips the scheme + theme live" — d2a253f | — |
 | B-07 | X11 DPI awareness | **DONE** [VERIFIED-CHANGED: audit said missing] | shipped 1.4.5: Xft.dpi + physical-size fallback, integer scale [1,3]; `test_x11_hidpi_gui` end-to-end on a private 192-dpi Xvfb | — (RandR scale is N/A: X11 has no scale protocol) |
 | B-08 | D-Bus foundation | **DONE** [VERIFIED-CHANGED: audit said missing] | M-7's native client (src/dbus/, 112 exported fdk_dbus_* of 757 total, commit 4d42c8c): live daemon battery incl. the ported libdbus cross-implementation leg; 20k-mutation fuzz + prefix-exhaustive truncation in `make test` | — |
-| B-09 | portal FileChooser fallback | **MISSING** | own dialogs everywhere (fdk_dialog.h: "no portal") | C-1 — **moved to CORE** on the native client (D-002) |
+| B-09 | portal FileChooser fallback | **DONE** | C-1 shipped (2026-10-29): the org.freedesktop.portal.FileChooser client on the native D-Bus client (src/desktop/portal_file_chooser.c; 848 exports) — fdk_dialog_open_file/save_file consult the portal FIRST and fall back to the toolkit's own browser on ANY failure (no bus, no portal, refused call, timeout: the GTK posture); the spec's race-free ordering (handle_token + the predictable request path, subscription armed before the call); the options dict carries the full kind contract (directory/multiple/current_folder as bytes/current_name/filters as (sa(us))); the Response decode rides the a{sv} dict lookup with the variant unwrap, percent-decoding to POSIX paths; $FDK_FILE_DIALOG_PORTAL=0/1/-auto. Tests: 5 new live-bus legs against a mock FileChooser portal (the happy path with the call-shape asserts — multiple on, the folder hint, 2 filters — and the decoded paths incl. a percent-encoded one; response=1 -> CANCELLED; the folder kind's directory choice; the AUTO-mode refusal -> the own browser really took the pick; the FORCED-mode refusal -> ERROR with no fallback). D-022 | owner's real portal desktop (TESTING-ON-DESKTOP.md §15) |
 | B-10 | AT-SPI interop | **MISSING** | internal a11y tree only; comments state the no-daemon posture | S-8 — **CORE** on the native client (D-002) |
 | B-11 | idle/screensaver inhibition | **DONE** | S-3 shipped: fdk_idle.h (fdk_idle_inhibit/uninhibit/status — one handle, either mechanism); Wayland zwp_idle_inhibit_manager_v1 through the window-scoped platform op (window-owned engagement, sever-at-destroy); org.freedesktop.ScreenSaver on the native D-Bus client with the DEFERRED release (uninhibit-before-cookie still sends the matching UnInhibit — no orphaned inhibition); the window-dies-inhibited release; tests/test_idle.c + the mock-ScreenSaver legs in the live D-Bus rig (cookie round trip, deferred release, refusal) + the sway rig (engage/release/destroy-while-inhibited) + the X11 no-bus fallback | GNOME's org.gnome.ScreenSaver variant not probed (documented); owner's real-desktop check |
 | B-12 | cursor shape set | **DONE** | S-5 shipped (2026-10-29): `fdk_cursor_shape` 2 -> 22 shapes (the cursor-shape-v1 semantic space, append-only; 802 exports unchanged); ONE resolution point (`fdk__cursor_resolve`: app request > widget hover (Entry/TextView/Spin I-beam) > compass > arrow) with the transition cache; Wayland: set_shape when the manager exists (the sway suite pins the full enum table row by row) + the shared XCursor theme loader fallback (src/platform/cursor_theme.c, extracted from the 1.1.4 Wayland parser); X11: the dlopen'd libXrender.so.1 RENDER lane (theme images, no new build dep) over the core font glyph table with the documented substitutions (D-016); fdk-shell 0.4.0 mirrors the set | — |
@@ -182,7 +196,7 @@ unaffected):
 | S-8 | AT-SPI2 level 1 | **MISSING** | = B-10 | roles/states/focus over the D-Bus client |
 | S-9 | drag icon + drop targets | **DONE** | = B-13 (both halves; the rigs' standard on each backend; D-021) | owner's real-desktop check |
 | S-10 | widget residue | **DONE** | = B-18 (the calendar family, D-018) | — |
-| C-1 | portal FileChooser | **MISSING** | = B-09; **CORE** per D-002 | the fallback |
+| C-1 | portal FileChooser | **DONE** | = B-09 (the client + the fallback; D-022) | owner's real portal desktop |
 | C-2 | AT-SPI text interfaces | **MISSING** | = B-10 | after S-8 |
 | C-3 | color emoji | **MISSING** | no COLRv0/v1 | after M-2 |
 | C-4 | animated images | **DONE** | = B-14 (GIF; D-019) | — |
@@ -325,7 +339,7 @@ has an API surface, tests, and docs in the tree):
 | B-06 | **Dark mode / system theme following — icon theme only.** XSETTINGS reads exactly `Net/IconThemeName`; no `Gtk/ColorScheme` (X11), no org.freedesktop.appearance color-scheme (Wayland). | partial | apps don't follow the desktop's light/dark preference — a visible polish break on every themed desktop | S–M | none **[VERIFIED-CHANGED: CLOSED - XSETTINGS Gtk/ColorScheme AND the org.freedesktop.appearance portal via the native D-Bus client shipped; live-proven by the portal color-scheme legs in make test-dbus]** |
 | B-07 | **X11 DPI/HiDPI awareness — none.** No Xft.dpi, no RandR scale awareness; text renders at 1x. (Wayland is fully covered.) | missing | HiDPI X11/XLibre users get tiny UI | M | none **[VERIFIED-CHANGED: the audit row was WRONG - Xft.dpi + physical-size detection with integer scale shipped in 1.4.5; test_x11_hidpi_gui proves it end to end on a 192-dpi Xvfb]** |
 | B-08 | **The D-Bus foundation.** No D-Bus client of any kind (by design, zero-dependency). Blocks: dark mode on Wayland (B-06), tray (A-11), notifications (A-12), portals (B-09), AT-SPI (B-10), idle inhibition on X11 (B-11). | missing | one architectural decision gates five features | L | none — new module, dlopen posture like GLX/fontconfig (libdbus-1.so.3 present in the target sandbox) **[VERIFIED-CHANGED: CLOSED by M-7 - implemented NATIVELY in raw C from the spec; no libdbus dlopen at all, no new dependency of any kind (docs/DECISIONS.md D-001); the dlopen speculation above predates the decision and never applied]** |
-| B-09 | **Portal dialogs** — own widgets everywhere; no xdg-desktop-portal FileChooser fallback. | partial | functionally fine everywhere; required only under Flatpak-style sandboxes | M | none **[VERIFIED-CHANGED: the fallback is CORE work on the native D-Bus client per the 2026-10-27 owner decision (D-002), not a Flatpak-only nicety; verdict stays MISSING until it lands]** |
+| B-09 | **Portal dialogs** — own widgets everywhere; no xdg-desktop-portal FileChooser fallback. | **DONE** [VERIFIED-CHANGED: C-1 shipped the client + the fallback — see the B-09 verified-status row] | functionally fine everywhere; required only under Flatpak-style sandboxes | M | none **[superseded: D-002's CORE-on-native-client decision; landed as C-1]** |
 | B-10 | **AT-SPI2 interop** — internal a11y tree exists; Orca and other OS screen readers cannot see FDK apps (no D-Bus). Deliberate no-daemon-dependency posture so far. | missing | blind users on real desktops get nothing from FDK apps even though the internal tree is rich | L | none |
 | B-11 | **Idle/screensaver inhibition** — no org.freedesktop.ScreenSaver, no idle-inhibit-unstable-v1. | missing | video players keep the screen blanking mid-play | S–M | none | **[DONE 2026-10-28: S-3 — both mechanisms, the deferred-release lifecycle]** |
 | B-12 | **Cursor shape set** — 2 shapes (arrow/hand) + per-edge resize cursors; Wayland rides cursor-shape-v1 (all names available), X11 uses core `XCreateFontCursor` (no themes). | partial | standard shapes (text beam, wait, crosshair, grab) missing from the public surface | S | none |
@@ -382,7 +396,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 
 | # | item | gaps closed |
 |---|------|-------------|
-| C-1 | Portal FileChooser fallback | B-09 |
+| C-1 | Portal FileChooser fallback | B-09 | **[DONE 2026-10-29 — see the B-09 verified-status row; D-022]** |
 | C-2 | AT-SPI text interfaces + relations export | B-10 |
 | C-3 | Color emoji (COLRv0/v1 after HarfBuzz lands) | B-02 |
 | C-4 | Animated images (GIF first, WebP via dlopen) | B-14 | **[DONE 2026-10-29 — GIF native, no dlopen; see the B-14 verified-status row]** |
