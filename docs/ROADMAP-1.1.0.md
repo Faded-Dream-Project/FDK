@@ -113,7 +113,12 @@ jobs green; void's clean-container install-test then died at
 fdk-theme's missing libXrandr.so.2 — the hermetic pre-install set
 (the 0d9d4de xbps lesson) predated M-6; libXrandr joined it in both
 void install-tests. The other families resolve the dependency
-through their package managers and passed. Re-verified 2026-10-29 (post-S-5): the clean
+through their package managers and passed. Round five: the debian
+container then flaked a run-to-run race in fdk-shell's passive-grab
+test — xtest_super_digit's single XSync ordered only the watcher's
+own requests while the XTEST injections raced the server's socket
+read order; the count now polls bounded (a second, early exit on
+arrival). Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +

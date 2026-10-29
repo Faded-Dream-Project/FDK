@@ -14,6 +14,20 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Fixed — fdk-shell's passive-grab test: the XTEST key count raced the server's read order
+
+- `xtest_super_digit` injected the Super+digit keys through one
+  connection and counted the passive grab's KeyPress deliveries on
+  the fake WM's connection after a single `XSync` — but that round
+  trip only orders the WATCHER's own request stream; the server
+  reads its sockets in its own order, and on a slow container the
+  XTEST requests can be processed microseconds after the count
+  already ran and read zero (the debian CI container lost exactly
+  that race — a run-to-run flake, green the round before). The count
+  now polls, bounded to a second and exiting the moment the press
+  arrives; a healthy grab fires in microseconds, so the retry budget
+  is three orders of magnitude past any real latency.
+
 ### Fixed — the void install-test's hermetic set: libXrandr was missing from the clean container
 
 - The last red job of the repair series: five of six green, and

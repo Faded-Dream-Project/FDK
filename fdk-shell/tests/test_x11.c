@@ -1181,15 +1181,29 @@ static int xtest_super_digit(Display *fake_dpy, Display *watch_dpy,
     XFlush(fake_dpy);
     XTestFakeKeyEvent(fake_dpy, super_kc, False, CurrentTime);
     XFlush(fake_dpy);
-    XSync(watch_dpy, False);
 
+    /* The injected keys land asynchronously: the server reads its
+     * sockets in its own order, and ONE XSync round trip on
+     * watch_dpy does not guarantee fake_dpy's XTEST requests have
+     * been processed yet — the round trip can win the read order on
+     * a slow container (the debian CI container lost exactly that
+     * race: the passive grab fired microseconds AFTER the count ran
+     * and read zero). Poll, bounded: the grab fires in microseconds
+     * once the server sees the keys, so a second of retrying is
+     * three orders of magnitude past any healthy latency. */
     int presses = 0;
-    while (XPending(watch_dpy) > 0) {
-        XEvent ev;
-        (void)XNextEvent(watch_dpy, &ev);
-        if (ev.type == KeyPress && ev.xkey.window == root &&
-            ev.xkey.keycode == digit_kc) {
-            presses++;
+    for (int wait_ms = 0; wait_ms < 1000 && presses == 0; wait_ms += 10) {
+        XSync(watch_dpy, False);
+        while (XPending(watch_dpy) > 0) {
+            XEvent ev;
+            (void)XNextEvent(watch_dpy, &ev);
+            if (ev.type == KeyPress && ev.xkey.window == root &&
+                ev.xkey.keycode == digit_kc) {
+                presses++;
+            }
+        }
+        if (presses == 0) {
+            sleep_ms(10);
         }
     }
     return presses;
