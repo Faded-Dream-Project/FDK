@@ -14,6 +14,23 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Fixed — fdk-shell's test link: the XShape readback legs need -lXext on the container path
+
+- The ubuntu job went green with the bus-present fixes, which let
+  the four distro containers get far enough to hit the next layer:
+  `fdk-shell/tests/test_x11.c`'s S-4 input-region legs call
+  `XShapeGetRectangles` (shape.h — a libXext symbol), and the test
+  link line carried no `-lXext`. The sibling-tree default FDK_LIBS
+  includes it for the static `libfdk.a`, which masked the gap on
+  the development sandbox and the ubuntu runner — but the container
+  pipelines link against the INSTALLED `libfdk.so`, whose .pc hands
+  out `-lfdk` alone by design ("a dynamically linked application
+  needs NONE of them"), and there the linker's verdict was the
+  honest one: `DSO missing from command line`. The dependency is
+  the test code's OWN, so it now rides X11_TEST_DEPS (xtst + xext,
+  with the same fallback spelling) — the line whose comment exists
+  exactly to disclose each test-link dependency.
+
 ### Fixed — the bus-present host: the pump, three test races, and the font ladder (the CI runners' session bus)
 
 - **`fdk_pump_events` no longer returns early on FDK's own D-Bus

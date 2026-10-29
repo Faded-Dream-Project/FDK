@@ -133,7 +133,15 @@ X11_DEPS    := $(shell pkg-config --cflags --libs x11 2>/dev/null || echo -lX11)
 # activates a passive grab, and XSendEvent delivery cannot — so
 # without the header the test build fails at <X11/extensions/XTest.h>,
 # naming its own remedy.
-X11_TEST_DEPS := $(shell pkg-config --cflags --libs xtst 2>/dev/null || echo -lXtst)
+# Xext: the S-4 input-region legs read the region back through
+# XShapeGetRectangles (shape.h, a libXext symbol — the test's OWN
+# direct dependency, so it belongs on THIS line, not on the backend
+# set: the sibling-tree default FDK_LIBS happens to carry -lXext for
+# the static libfdk.a, which masked the gap locally and on the
+# ubuntu runner, but the container pipelines link against the
+# INSTALLED libfdk.so whose .pc hands out -lfdk alone by design —
+# and there "DSO missing from command line" is the honest verdict).
+X11_TEST_DEPS := $(shell pkg-config --cflags --libs xtst xext 2>/dev/null || echo -lXtst -lXext)
 WL_DEPS_C   := $(shell pkg-config --cflags wayland-client 2>/dev/null)
 WL_DEPS_L   := $(shell pkg-config --libs wayland-client 2>/dev/null || echo -lwayland-client)
 

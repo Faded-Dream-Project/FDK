@@ -99,7 +99,16 @@ Alpine/Arch layouts (extents legs ran fontless — now the calendar
 suite's candidate ladder, with an honest skip when nothing loads).
 The debian anim leg and the ubuntu ext leg both reproduced locally
 under dbus-run-session and pass; the full battery above re-ran green,
-plus two consecutive dbus-mode test-x11 passes. Re-verified 2026-10-29 (post-S-5): the clean
+plus two consecutive dbus-mode test-x11 passes. Round three (same
+day): the ubuntu job GREEN, and the four distro containers then hit
+fdk-shell's own test link — the S-4 XShape readback legs call
+XShapeGetRectangles (libXext) and X11_TEST_DEPS carried only Xtst;
+the sibling-tree FDK_LIBS' -lXext (for the static archive) masked it
+wherever the sibling stack was used, but the containers link the
+INSTALLED libfdk.so whose .pc is deliberately bare. The dependency
+moved to the test-deps line where it belongs; the fdk-shell battery
+(build zero warnings, test-x11 incl. the region legs, test-desktop,
+isolation, both desktop rigs) re-ran green. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +
