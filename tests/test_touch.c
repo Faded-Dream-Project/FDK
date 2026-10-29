@@ -75,6 +75,28 @@ static void rig_feed(fdk_touch_engine *eng, fdk_event_data e) {
     fdk__touch_engine_feed(eng, &e, rig_emit, NULL);
 }
 
+/* C-6: the engine now emits GESTURE events alongside the classic
+ * synthesis — the finder/count helpers keep the assertions about
+ * ONE stream honest (count scrolls, find the first pinch, ...). */
+static int rig_count_of(fdk_event_type type) {
+    int n = 0;
+    for (int i = 0; i < g_rig.count; i++) {
+        if (g_rig.events[i].type == type) {
+            n++;
+        }
+    }
+    return n;
+}
+
+static const fdk_event_data *rig_first(fdk_event_type type) {
+    for (int i = 0; i < g_rig.count; i++) {
+        if (g_rig.events[i].type == type) {
+            return &g_rig.events[i];
+        }
+    }
+    return NULL;
+}
+
 static void test_tap_synthesizes_click(void) {
     rig_reset(); g_rig.now_ms = 1000;
     fdk_touch_engine *eng = fdk__touch_engine_create();
@@ -162,13 +184,18 @@ static void test_two_finger_scroll_natural_deltas(void) {
      * delta-accumulating consumer like the scroll widget sees.) */
     rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 10, 120.0f, 140.0f));
 
-    assert(g_rig.count == 1);
-    assert(g_rig.events[0].type == FDK_EVENT_POINTER_SCROLL);
-    assert(g_rig.events[0].scroll.delta_x == -10.0f);
-    assert(g_rig.events[0].scroll.delta_y == -20.0f);
+    /* (the motion ALSO changed the span 60 -> ~72: one PINCH rides
+     * along — the coexistence C-6 documents. The scroll assertions
+     * filter by type.) */
+    assert(rig_count_of(FDK_EVENT_POINTER_SCROLL) == 1);
+    const fdk_event_data *sc = rig_first(FDK_EVENT_POINTER_SCROLL);
+    assert(sc != NULL);
+    assert(sc->scroll.delta_x == -10.0f);
+    assert(sc->scroll.delta_y == -20.0f);
     /* Scroll position = the centroid. */
-    assert(g_rig.events[0].scroll.position.x == 140.0f);
-    assert(g_rig.events[0].scroll.position.y == 120.0f);
+    assert(sc->scroll.position.x == 140.0f);
+    assert(sc->scroll.position.y == 120.0f);
+    assert(rig_count_of(FDK_EVENT_GESTURE_PINCH) == 1);
 
     /* Re-arm without a jump: one finger lifts, comes back down, and
      * moves — the FIRST motion after re-entry is measured from the
@@ -177,11 +204,18 @@ static void test_two_finger_scroll_natural_deltas(void) {
     rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 11, 160.0f, 100.0f));
     /* Centroid re-arms at ((120+160)/2, (140+100)/2) = (140, 120). */
     rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 11, 161.0f, 101.0f));
-    /* One finger by (1,1): centroid (+0.5, +0.5) -> delta (-0.5, -0.5). */
-    assert(g_rig.count == 2);
-    assert(g_rig.events[1].type == FDK_EVENT_POINTER_SCROLL);
-    assert(g_rig.events[1].scroll.delta_x == -0.5f);
-    assert(g_rig.events[1].scroll.delta_y == -0.5f);
+    /* One finger by (1,1): centroid (+0.5, +0.5) -> delta (-0.5, -0.5).
+     * (Plus the re-armed pinch — the span moved 40 -> ~41.4.) */
+    assert(rig_count_of(FDK_EVENT_POINTER_SCROLL) == 2);
+    const fdk_event_data *sc2 = NULL;
+    for (int i = 0; i < g_rig.count; i++) {
+        if (g_rig.events[i].type == FDK_EVENT_POINTER_SCROLL) {
+            sc2 = &g_rig.events[i];
+        }
+    }
+    assert(sc2 != NULL);
+    assert(sc2->scroll.delta_x == -0.5f);
+    assert(sc2->scroll.delta_y == -0.5f);
 
     fdk__touch_engine_destroy(eng);
     printf("[ok] touch: two-finger scroll emits natural deltas, re-arm is jump-free\n");
@@ -285,6 +319,235 @@ static void test_engine_lifecycle(void) {
     printf("[ok] touch: engine create/reset/destroy lifecycle\n");
 }
 
+/* ---- 1.1.0, C-6: the gestures ------------------------------------------- */
+
+/* PINCH: the span arithmetic. Two contacts 60 apart spread to 120
+ * apart: ONE pinch with scale 2.0 (cumulative), delta 2.0 (the
+ * first span change). A further motion to 90 apart: scale 1.5,
+ * delta 0.75 (90/120). The focus is the centroid. */
+static void test_pinch_span_arithmetic(void) {
+    rig_reset(); g_rig.now_ms = 100;
+    fdk_touch_engine *eng = fdk__touch_engine_create();
+
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 30, 100.0f, 100.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 31, 160.0f, 100.0f));
+    /* spread: 100 -> 160 (span 60 -> 60: same distance, y equal) */
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 30, 70.0f, 100.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 31, 190.0f, 100.0f));
+
+    assert(rig_count_of(FDK_EVENT_GESTURE_PINCH) == 2);
+    const fdk_event_data *p1 = rig_first(FDK_EVENT_GESTURE_PINCH);
+    assert(p1 != NULL);
+    /* the first motion (finger 30 to 70): span 60 -> 90 */
+    assert(p1->gesture.scale > 1.49f && p1->gesture.scale < 1.51f);
+    assert(p1->gesture.delta > 1.49f && p1->gesture.delta < 1.51f);
+    assert(p1->gesture.fingers == 2);
+    assert(p1->gesture.focus.x > 114.9f && p1->gesture.focus.x < 115.1f);
+    assert(p1->gesture.focus.y == 100.0f);
+    /* the second motion (finger 31 to 190): span 90 -> 120 */
+    const fdk_event_data *p2 = NULL;
+    for (int i = 0; i < g_rig.count; i++) {
+        if (g_rig.events[i].type == FDK_EVENT_GESTURE_PINCH) {
+            p2 = &g_rig.events[i];
+        }
+    }
+    assert(p2 != NULL);
+    assert(p2->gesture.scale > 1.99f && p2->gesture.scale < 2.01f);
+    assert(p2->gesture.delta > 1.32f && p2->gesture.delta < 1.34f);
+    /* The scroll coexisted (the centroid moved too). */
+    assert(rig_count_of(FDK_EVENT_POINTER_SCROLL) >= 1);
+
+    fdk__touch_engine_destroy(eng);
+    printf("[ok] gesture: pinch span arithmetic (scale cumulative, "
+           "delta incremental, centroid focus, scroll coexistence)\n");
+}
+
+/* PINCH: the re-arm baseline. A finger swap mid-gesture re-baselines
+ * the scale to the NEW posture's span at re-entry — the numbers
+ * prove it: posture 1 spans 60 (100..160), spreads to 80 (scale
+ * 4/3); the finger swaps at 80; the spread continues to 160 — the
+ * scale is 2.0 (160/80, the NEW baseline), NOT 8/3 (160/60, the
+ * stale one). No phantom jump. */
+static void test_pinch_rebaseline_on_reentry(void) {
+    rig_reset(); g_rig.now_ms = 200;
+    fdk_touch_engine *eng = fdk__touch_engine_create();
+
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 40, 100.0f, 100.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 41, 160.0f, 100.0f));
+    /* spread 60 -> 80: one pinch, scale 4/3 */
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 41, 180.0f, 100.0f));
+    assert(rig_count_of(FDK_EVENT_GESTURE_PINCH) == 1);
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 41, 180.0f, 100.0f));
+    /* the replacement finger lands at the SAME place (span 80) */
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 42, 180.0f, 100.0f));
+    /* spread 80 -> 160: the re-baselined scale is 2.0 */
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 42, 260.0f, 100.0f));
+    assert(rig_count_of(FDK_EVENT_GESTURE_PINCH) == 2);
+    const fdk_event_data *last = NULL;
+    for (int i = 0; i < g_rig.count; i++) {
+        if (g_rig.events[i].type == FDK_EVENT_GESTURE_PINCH) {
+            last = &g_rig.events[i];
+        }
+    }
+    assert(last != NULL);
+    assert(last->gesture.scale > 1.99f && last->gesture.scale < 2.01f);
+    assert(last->gesture.delta > 1.99f && last->gesture.delta < 2.01f);
+
+    fdk__touch_engine_destroy(eng);
+    printf("[ok] gesture: pinch re-baselines on posture re-entry "
+           "(the numbers: 2.0, not 8/3)\n");
+}
+
+/* SWIPE: the accept case. Two fingers land, BOTH travel +100px on x
+ * (right), both lift within the window: one SWIPE(RIGHT, 2). */
+static void test_swipe_two_finger_right(void) {
+    rig_reset(); g_rig.now_ms = 1000;
+    fdk_touch_engine *eng = fdk__touch_engine_create();
+
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 50, 100.0f, 200.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 51, 120.0f, 300.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 50, 180.0f, 200.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 51, 200.0f, 300.0f));
+    g_rig.now_ms = 1100;
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 50, 200.0f, 200.0f));
+    g_rig.now_ms = 1150;
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 51, 200.0f, 300.0f));
+
+    assert(rig_count_of(FDK_EVENT_GESTURE_SWIPE) == 1);
+    const fdk_event_data *sw = rig_first(FDK_EVENT_GESTURE_SWIPE);
+    assert(sw != NULL);
+    assert(sw->gesture.direction == FDK_SWIPE_RIGHT);
+    assert(sw->gesture.fingers == 2);
+
+    fdk__touch_engine_destroy(eng);
+    printf("[ok] gesture: two-finger horizontal travel -> "
+           "SWIPE(RIGHT, 2)\n");
+}
+
+/* SWIPE: three fingers, vertical (UP — negative y travel). */
+static void test_swipe_three_finger_up(void) {
+    rig_reset(); g_rig.now_ms = 5000;
+    fdk_touch_engine *eng = fdk__touch_engine_create();
+
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 60, 100.0f, 400.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 61, 150.0f, 400.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 62, 200.0f, 400.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 60, 100.0f, 300.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 61, 150.0f, 290.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 62, 200.0f, 300.0f));
+    g_rig.now_ms = 5100;
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 60, 100.0f, 300.0f));
+    g_rig.now_ms = 5150;
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 61, 150.0f, 290.0f));
+    g_rig.now_ms = 5200;
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 62, 200.0f, 300.0f));
+
+    assert(rig_count_of(FDK_EVENT_GESTURE_SWIPE) == 1);
+    const fdk_event_data *sw = rig_first(FDK_EVENT_GESTURE_SWIPE);
+    assert(sw != NULL);
+    assert(sw->gesture.direction == FDK_SWIPE_UP);
+    assert(sw->gesture.fingers == 3);
+
+    fdk__touch_engine_destroy(eng);
+    printf("[ok] gesture: three-finger vertical travel -> "
+           "SWIPE(UP, 3)\n");
+}
+
+/* SWIPE: the rejects. (a) too-slow lifts (the lift window); (b) the
+ * travel under the minimum; (c) ONE finger only (never a swipe);
+ * (d) opposing travels on the dominant axis (disagreement). */
+static void test_swipe_rejects(void) {
+    /* (a) the lift window */
+    {
+        rig_reset(); g_rig.now_ms = 1000;
+        fdk_touch_engine *eng = fdk__touch_engine_create();
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 70, 100.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 71, 120.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 70, 200.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 71, 220.0f, 100.0f));
+        g_rig.now_ms = 1100;
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 70, 200.0f, 100.0f));
+        g_rig.now_ms = 1100 + FDK_GESTURE_SWIPE_MS + 1;
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 71, 220.0f, 100.0f));
+        assert(rig_count_of(FDK_EVENT_GESTURE_SWIPE) == 0);
+        fdk__touch_engine_destroy(eng);
+    }
+    /* (b) under the travel minimum */
+    {
+        rig_reset(); g_rig.now_ms = 100;
+        fdk_touch_engine *eng = fdk__touch_engine_create();
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 72, 100.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 73, 120.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 72, 130.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 73, 140.0f, 100.0f));
+        g_rig.now_ms = 150;
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 72, 130.0f, 100.0f));
+        g_rig.now_ms = 180;
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 73, 140.0f, 100.0f));
+        assert(rig_count_of(FDK_EVENT_GESTURE_SWIPE) == 0);
+        fdk__touch_engine_destroy(eng);
+    }
+    /* (c) one finger: a fast fling is NOT a swipe (fingers >= 2) */
+    {
+        rig_reset(); g_rig.now_ms = 100;
+        fdk_touch_engine *eng = fdk__touch_engine_create();
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 74, 100.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 74, 300.0f, 100.0f));
+        g_rig.now_ms = 200;
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 74, 300.0f, 100.0f));
+        assert(rig_count_of(FDK_EVENT_GESTURE_SWIPE) == 0);
+        fdk__touch_engine_destroy(eng);
+    }
+    /* (d) disagreement: the fingers travel OPPOSITE ways on x */
+    {
+        rig_reset(); g_rig.now_ms = 100;
+        fdk_touch_engine *eng = fdk__touch_engine_create();
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 75, 100.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 76, 300.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 75, 200.0f, 100.0f));
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 76, 200.0f, 100.0f));
+        g_rig.now_ms = 200;
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 75, 200.0f, 100.0f));
+        g_rig.now_ms = 250;
+        rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 76, 200.0f, 100.0f));
+        /* aggregate x travel: +100 - 100 = 0 -> no dominant axis */
+        assert(rig_count_of(FDK_EVENT_GESTURE_SWIPE) == 0);
+        fdk__touch_engine_destroy(eng);
+    }
+    printf("[ok] gesture: swipe rejects (slow lift window, short "
+           "travel, single finger, disagreement)\n");
+}
+
+/* CANCEL: the gestures die with the slots (a revoked gesture
+ * synthesizes nothing — pinch, swipe, scroll, click). */
+static void test_cancel_kills_gestures(void) {
+    rig_reset(); g_rig.now_ms = 100;
+    fdk_touch_engine *eng = fdk__touch_engine_create();
+
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 80, 100.0f, 100.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_DOWN, 81, 160.0f, 100.0f));
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_MOTION, 80, 70.0f, 100.0f));
+    fdk_event_data cancel = { .type = FDK_EVENT_TOUCH_CANCEL };
+    rig_feed(eng, cancel);
+    /* anything after the cancel is a fresh gesture; nothing from the
+     * revoked one ever fires. (The pre-cancel motion legitimately
+     * synthesized BOTH a scroll and a pinch — the coexistence; the
+     * post-cancel UP synthesized NOTHING: no swipe, no click.) */
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 81, 190.0f, 100.0f));
+    /* the UPs after the cancel synthesize nothing (no swipe, no
+     * click — the slots are gone; the engine never saw these ids) */
+    int pre_cancel = g_rig.count;
+    rig_feed(eng, touch_evt(FDK_EVENT_TOUCH_UP, 80, 190.0f, 100.0f));
+    assert(g_rig.count == pre_cancel);
+    assert(pre_cancel == 2); /* the scroll + the pinch */
+    assert(g_rig.events[0].type == FDK_EVENT_POINTER_SCROLL);
+    assert(g_rig.events[1].type == FDK_EVENT_GESTURE_PINCH);
+
+    fdk__touch_engine_destroy(eng);
+    printf("[ok] gesture: CANCEL wipes the gesture state — no swipe "
+           "from a revoked gesture\n");
+}
+
 int main(void) {
     /* The clock reads the file-scope rig; binding once is enough. */
     fdk__touch_set_test_clock(rig_clock, NULL);
@@ -299,6 +562,12 @@ int main(void) {
     test_cancel_wipes_and_disarms();
     test_protocol_noise_is_quiet();
     test_engine_lifecycle();
+    test_pinch_span_arithmetic();
+    test_pinch_rebaseline_on_reentry();
+    test_swipe_two_finger_right();
+    test_swipe_three_finger_up();
+    test_swipe_rejects();
+    test_cancel_kills_gestures();
 
     /* Restore production time for any later user of this process. */
     fdk__touch_set_test_clock(NULL, NULL);

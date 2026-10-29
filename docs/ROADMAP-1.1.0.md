@@ -46,15 +46,15 @@ integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
 **Counts** (recounted 2026-10-29 against every register row — the
-earlier line's arithmetic was coarser than the table): DONE 46
-(C-5/A-05 + A-08, 2026-10-29; S-8/B-10, 2026-10-29; C-1/B-09,
-2026-10-29; S-9/B-13, 2026-10-29; S-6/B-04-activation, 2026-10-29;
-C-4/B-14, 2026-10-29; S-10/B-18, 2026-10-29; S-4/A-06 + A-07
-folded, 2026-10-29; S-5/B-12, 2026-10-29; M-6/A-03/B-05, 2026-10-29;
-T-B both sides, 2026-10-29; S-2 and S-1 pending owner verification;
-M-4, M-3, M-1, and S-3, 2026-10-28) · PARTIAL 1 (B-19) · IN
-PROGRESS 1 (M-9) · MISSING 9 · DEFERRED (by design) 5 · BLOCKED-BY-
-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
+earlier line's arithmetic was coarser than the table): DONE 47
+(C-6/B-17-gestures, 2026-10-29; C-5/A-05 + A-08, 2026-10-29;
+S-8/B-10, 2026-10-29; C-1/B-09, 2026-10-29; S-9/B-13, 2026-10-29;
+S-6/B-04-activation, 2026-10-29; C-4/B-14, 2026-10-29; S-10/B-18,
+2026-10-29; S-4/A-06 + A-07 folded, 2026-10-29; S-5/B-12,
+2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B both sides, 2026-10-29;
+S-2 and S-1 pending owner verification; M-4, M-3, M-1, and S-3,
+2026-10-28) · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 8 ·
+DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +
@@ -78,6 +78,17 @@ two-monitor origin math, stale-index fallback), the bar rig
 unchanged-and-green, and the notifyd rig (the dispatch-loop change
 under a real WM). Earlier: post-T-B-side-2 — both desktop rigs
 unchanged-and-green (notifyd 68, trayhost 103).
+Re-verified 2026-10-29 (post-C-6): the dual-backend rebuild zero
+warnings, core make test (incl. the SIX new gesture legs in
+tests/test_touch.c: the pinch span arithmetic with the coexisting
+scroll, the re-baseline numbers, SWIPE(RIGHT,2) + SWIPE(UP,3), the
+four rejects, the CANCEL wipe), make test-x11 205 [ok], test-dbus
+46 [ok], FDK_SANITIZE=0, release + examples + verify-exports (848,
+unchanged — the gesture events are payload additions to the numbered
+enum, the ABI append policy), the sway suite 56 [ok], and fdk-shell
+build + test-x11 + test-desktop + the notifyd/trayhost rigs ALL
+PASS (the tap/scroll tests re-asserted type-filtered — the pinch
+coexistence).
 Re-verified 2026-10-29 (post-C-5): fdk-shell 0.5.0 build zero
 warnings, its X11 suite (incl. the NINE new C-5 legs: the four
 re-anchor legs — set_margin/zone/anchor/level with geometry + strut
@@ -198,7 +209,7 @@ unaffected):
 | B-14 | image formats | **DONE** [animated GIF shipped] | C-4 landed (2026-10-29): fdk_gif + fdk_gif_player + fdk_picture_set_animated_file — the spec-native decoder (LZW incl. KwKwK, disposal 1/2/3, interlace, NETSCAPE loops, the PIL embedded-stream resync), the one-frame-at-a-time player, the Picture delay-paced timer with pause; tests/test_gif.c + the X11 GUI leg (real-encoder fixtures in tests/data/gifgen/); D-019. Static raster + SVG were already present. Fenced: animated WebP/APNG stay future families on the same shape | — |
 | B-15 | GPU on Wayland | **MISSING** | CPU SHM only; GL lane is X11/GLX | D-1 (deferred by design) |
 | B-16 | subsurfaces | **MISSING** | no wl_subsurface | D-2 |
-| B-17 | tablets / gestures | **MISSING** | no zwp_tablet, no pinch/swipe | D-3 / C-6 |
+| B-17 | tablets / gestures | **DONE** (gestures; tablets stay D-3) | C-6 shipped (2026-10-29): FDK_EVENT_GESTURE_PINCH + FDK_EVENT_GESTURE_SWIPE (fdk_gesture_event: focus/scale/delta/fingers/direction) on the pure touch engine — the pinch rides the two-slot posture the scroll uses (scale cumulative since the posture began, delta incremental, the centroid focus; coexists with the scroll — centroid vs span; a finger swap re-baselines), the swipe is an END-gesture verdict (every lift within FDK_GESTURE_SWIPE_MS, EVERY finger's dominant-axis travel >= FDK_GESTURE_SWIPE_MIN_PX — the per-finger minimum the rig caught: two lazy fingers do not sum into a swipe — opposing travels reject, fingers = the peak membership). No backend moved: the emissions ride the engine's emit sink; both backends identical by construction. Tests: 6 engine legs (the span arithmetic incl. the coexisting scroll + the re-baseline numbers 2.0-not-8/3; SWIPE(RIGHT,2) + SWIPE(UP,3); the four rejects — slow lift window, short travel, single finger, disagreement; CANCEL wipes the gesture state). D-025 | tablets remain D-3 |
 | B-18 | widget residue | **DONE** | editable combo (`fdk_combo_set_editable`) + S-10 shipped (2026-10-29): fdk_calendar (the month grid — Monday-lead, six rows, adjacent-month cells, keyboard walking, today marker), fdk_date_picker (formatted field + popup calendar, the combo guard discipline), fdk_time_picker (segmented stepper with wraparound + 12/24h cycle); the i18n calendar math underneath; D-018 records the posture (no clock reads, no parse). tests/test_calendar.c + the X11 GUI leg + the sway leg (real-seat day pick through the compositor); 825 exports | — |
 | B-19 | session restore protocols | **PARTIAL** | typed prefs store; no WM_SAVE_YOURSELF / xdg session | D-5 |
 | M-1 | IME both backends | **DONE** | = B-01 (both backends; the sway rig's two-way protocol proof) | — |
@@ -225,7 +236,7 @@ unaffected):
 | C-3 | color emoji | **MISSING** | no COLRv0/v1 | after M-2 |
 | C-4 | animated images | **DONE** | = B-14 (GIF; D-019) | — |
 | C-5 | re-anchor + auto-hide | **DONE** | = A-05/A-08 (both halves, both backends; D-024) | — |
-| C-6 | basic gestures | **MISSING** | = B-17 | after M-3 |
+| C-6 | basic gestures | **DONE** | = B-17 (the pinch/swipe half; D-025) | — |
 | D-1 | EGL/GPU Wayland | **DEFERRED** | by scope discipline (1.2.0) | — |
 | D-2 | subsurfaces | **DEFERRED** | by scope discipline | — |
 | D-3 | tablets / stylus | **DEFERRED** | by scope discipline | — |
@@ -371,7 +382,7 @@ has an API surface, tests, and docs in the tree):
 | B-14 | **Image formats** — stb_image decode (JPEG/PNG/BMP/TGA/PSD/GIF-static/HDR/PIC/PNM) + PNG encode + nanosvg. No animated GIF/WebP/APNG/AVIF; SVG without filters/masks/text. | partial | static raster + SVG solid; animated content missing | S–M | none **[DONE 2026-10-29 — animated GIF shipped (C-4, D-019); WebP/APNG fenced as future families; SVG filters/masks/text unchanged]** |
 | B-15 | **GPU rendering on Wayland** — CPU SHM only; the GL lane is X11/GLX. | partial | Wayland renders software (the toolkit's design center; the GL lane was an X11 perf answer) | L | none |
 | B-16 | **Subsurfaces** — no wl_subsurface; no X11 child-window compositing. | missing | video-in-UI, offscreen compositing overlays | M | none — would ride extension API v2 |
-| B-17 | **Tablets / stylus / gestures** — no zwp_tablet, no pinch/swipe anywhere. | missing | drawing tablets dead; pinch-zoom absent | M–L | none |
+| B-17 | **Tablets / stylus / gestures** — no zwp_tablet, no pinch/swipe anywhere. | **DONE (gestures)** [VERIFIED-CHANGED: C-6 shipped pinch+swipe on the touch engine — see the B-17 verified-status row; tablets/stylus remain D-3 by scope discipline] | drawing tablets dead; pinch-zoom absent | M–L | none |
 | B-18 | **Widget-set residue** — no date/time picker, no editable combo; everything else on the GTK4 checklist has an FDK counterpart (menus, lists, trees, tables via grid/tree, text editing with selection and undo, tooltips, pickers, scroll views, tabs). | partial | small, visible gaps | S each | none **[DONE 2026-10-29 — see the B-18 verified-status row; S-10]** |
 | B-19 | **Session restore protocols** — prefs cover app state; no xdg_session/WM_SAVE_YOURSELF. | partial | niche on the Linux desktop today | M | none |
 
@@ -425,7 +436,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | C-3 | Color emoji (COLRv0/v1 after HarfBuzz lands) | B-02 |
 | C-4 | Animated images (GIF first, WebP via dlopen) | B-14 | **[DONE 2026-10-29 — GIF native, no dlopen; see the B-14 verified-status row]** |
 | C-5 | fdk-shell runtime re-anchoring + auto-hide/reveal mode | A-05, A-08 | **[DONE 2026-10-29 — see the A-05/A-08 verified-status rows; D-024]** |
-| C-6 | Basic gestures (pinch/swipe) on the touch event model | B-17 |
+| C-6 | Basic gestures (pinch/swipe) on the touch event model | B-17 | **[DONE 2026-10-29 — see the B-17 verified-status row; D-025]** |
 
 ### DEFER — 1.2.0, by scope discipline
 

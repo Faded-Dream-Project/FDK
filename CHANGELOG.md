@@ -14,6 +14,33 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — basic gestures: pinch + swipe (C-6 / B-17)
+
+- **`FDK_EVENT_GESTURE_PINCH`** (fdk_event.h): while exactly two
+  touch slots are active, every span change emits a pinch with
+  `scale` (the cumulative fingers-spread ratio since the two-finger
+  posture began — 1.0 at its start), `delta` (the incremental ratio
+  since the previous event), and `focus` (the centroid). Pinch
+  coexists with the two-finger scroll — they read different geometry
+  (span vs centroid), exactly GTK's posture. A finger swap
+  mid-gesture re-baselines the scale.
+- **`FDK_EVENT_GESTURE_SWIPE`**: a one-shot verdict when the last
+  finger of an N>=2 gesture lifts — every lift within
+  `FDK_GESTURE_SWIPE_MS` of the first, EVERY finger's dominant-axis
+  travel beyond `FDK_GESTURE_SWIPE_MIN_PX` (the per-finger minimum:
+  two lazy fingers do not sum into a swipe), opposing travels
+  rejecting; `fingers` carries the gesture's peak membership and
+  `direction` the compass (FDK_SWIPE_LEFT/RIGHT/UP/DOWN). A fast
+  fling whose span also changed has already fired its pinches — both
+  firing is by design.
+- The recognition lives in the PURE core touch engine (identical on
+  both backends by construction; no backend code moved — wl_touch
+  and XI2 already deliver the raw slots). Tests: six engine legs
+  (span arithmetic + re-baseline numbers, both swipe directions, the
+  four rejects, the CANCEL wipe); the classic tap/scroll tests
+  re-asserted type-filtered (the pinch coexistence).
+  docs/DECISIONS.md D-025.
+
 ### Added — fdk-shell runtime re-anchoring + auto-hide (C-5 / A-05 / A-08)
 
 - **The layer's placement is LIVE** (fdk-shell 0.5.0):

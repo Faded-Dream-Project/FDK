@@ -163,6 +163,31 @@ typedef enum fdk_event_type {
                                     * gesture: all slots die, nothing
                                     * is synthesized afterwards */
 
+    /* ---- Gestures (1.1.0, C-6 / B-17) ----
+     *
+     * The two-finger PINCH and the N-finger SWIPE, recognized by
+     * the same core touch engine that owns the tap/scroll policy
+     * (identical on both backends, by construction). PINCH rides
+     * the two-slot posture the scroll already uses: while exactly
+     * two slots are active, every span change emits a PINCH whose
+     * `scale` is the cumulative fingers-spread ratio since the
+     * two-finger posture began (1.0 at its start) and `delta` the
+     * incremental ratio since the previous PINCH (scale/delta = 1.0
+     * when nothing moved). The scroll and the pinch coexist — GTK's
+     * posture — because they read different geometry (centroid vs
+     * span). SWIPE fires ONCE, when the LAST finger of an N >= 2
+     * finger gesture lifts: all fingers must have lifted within
+     * FDK_GESTURE_SWIPE_MS of the FIRST lift, each finger's travel
+     * must exceed FDK_GESTURE_SWIPE_MIN_PX in a consistent
+     * direction (the dominant axis wins; the travel directions must
+     * not disagree on that axis), and the gesture must have lasted
+     * under FDK_GESTURE_SWIPE_MS * 2 overall. `fingers` carries the
+     * gesture's peak membership. Pinch and swipe CAN both fire on
+     * one two-finger gesture (a fast fling whose span also changed)
+     * — consumers pick by intent. */
+    FDK_EVENT_GESTURE_PINCH  = 44,
+    FDK_EVENT_GESTURE_SWIPE  = 45,
+
     /* ---- IME (1.1.0, M-1) ----
      *
      * Input-method events: the composition (preedit) text an IME
@@ -362,6 +387,40 @@ typedef struct fdk_touch_event {
     fdk_pointf position;   /* window-local, logical coordinates */
 } fdk_touch_event;
 
+/* ---- Gesture payloads (1.1.0, C-6 / B-17) ----------------------------- */
+
+/* Tap-recognition constants' gesture siblings: the swipe's time and
+ * distance budgets (monotonic ms, logical px). */
+#define FDK_GESTURE_SWIPE_MS 350
+#define FDK_GESTURE_SWIPE_MIN_PX 48.0f
+
+typedef struct fdk_gesture_event {
+    /* PINCH: the midpoint of the two contacts (the gesture's focus —
+     * what a zoom UI anchors on). SWIPE: the centroid of the lifted
+     * fingers at the last lift. Window-local logical coordinates. */
+    fdk_pointf focus;
+    /* PINCH: the cumulative span ratio since the two-finger posture
+     * began (> 1 spread, < 1 pinch); SWIPE: unused (1.0). */
+    float scale;
+    /* PINCH: the incremental ratio since the previous PINCH event;
+     * SWIPE: unused (1.0). */
+    float delta;
+    /* SWIPE: the gesture's peak finger count (>= 2); PINCH: 2. */
+    int fingers;
+    /* SWIPE: the dominant-axis direction as an FDK_KEY-based compass:
+     * 1 = left, 2 = right, 3 = up, 4 = down (see FDK_SWIPE_*).
+     * PINCH: unused (0). */
+    int direction;
+} fdk_gesture_event;
+
+/* SWIPE direction values (fdk_gesture_event.direction). */
+enum {
+    FDK_SWIPE_LEFT  = 1,
+    FDK_SWIPE_RIGHT = 2,
+    FDK_SWIPE_UP    = 3,
+    FDK_SWIPE_DOWN  = 4,
+};
+
 /* ---- IME payloads (1.1.0, M-1) ---------------------------------------- */
 
 typedef struct fdk_ime_event {
@@ -421,6 +480,7 @@ typedef struct fdk_event_data {
         fdk_scroll_event scroll;
         fdk_drag_event drag;
         fdk_touch_event touch;
+        fdk_gesture_event gesture;
         fdk_ime_event ime;
     };
 } fdk_event_data;

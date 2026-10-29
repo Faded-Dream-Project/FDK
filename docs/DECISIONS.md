@@ -1241,3 +1241,48 @@ the contract; animation is future polish); centered/both-anchored
 layers have no slide direction (set_auto_hide refuses them);
 auto-hide is per-layer (a multi-output panel on every output hides
 each layer independently — each has its own pointer state).
+
+## D-025 — basic gestures: the pure engine grows pinch + swipe, per-finger honesty (C-6 / B-17)
+
+2026-10-29. B-17's gesture half (tablets stay D-3): pinch and swipe
+on the M-3 touch-slot engine — the same PURE state machine that owns
+tap/scroll, so the policy is identical on both backends by
+construction and headless-testable through the same recording sink.
+
+**1. PINCH rides the posture the scroll already uses.** While
+exactly two slots are active, the SPAN (contact distance) drives
+FDK_EVENT_GESTURE_PINCH: scale = span/span0 (cumulative since the
+posture began), delta = span/last_span (incremental), focus = the
+centroid. Pinch and scroll COEXIST (GTK's posture) because they read
+different geometry — centroid vs span; a two-finger drag that also
+spreads fires both streams. A finger swap mid-gesture re-baselines
+the span (scale 1.0-relative at re-entry — the rig pins the numbers:
+2.0 after the swap where the stale baseline would read 8/3).
+
+**2. SWIPE is an END-gesture verdict, per-finger honest.** When the
+LAST finger of an N>=2 gesture lifts: every lift within
+FDK_GESTURE_SWIPE_MS of the first, the overall gesture under 2x
+that, and — the rig's caught rule — EVERY finger's travel on the
+dominant axis beyond FDK_GESTURE_SWIPE_MIN_PX (the AGGREGATE alone
+let two lazy 30px fingers sum into a "swipe"; per-lift travels are
+captured at each UP and the minimum is the threshold). The dominant
+axis decides the compass direction; opposing travels sum toward
+zero and reject (the disagreement rule). fingers carries the
+gesture's PEAK membership. A fast fling whose span also changed has
+already fired its PINCHes — both firing is by design; consumers pick
+by intent.
+
+**3. No backend moved.** The gestures live entirely in the engine;
+wl_touch and XI2 already deliver the raw slots. The emissions ride
+the same emit sink the synthesized clicks use (window.c's recursive
+dispatch), so a PINCH/SWIPE reaches the app callback exactly like
+any other event. The classic tap/scroll tests were updated to
+type-filter their assertions (a two-finger motion that changes the
+span now legitimately emits BOTH a scroll and a pinch — the
+coexistence C-6 documents).
+
+Fences: pinch BEGIN/END phases (apps derive them: first event =
+begin, the posture's end = end — GTK does the same for
+GdkEventTouchPinch without extra events); tablets/stylus remain D-3;
+three-finger pinch (the span of the outermost pair) is future
+polish.

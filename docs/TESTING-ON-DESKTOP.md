@@ -598,3 +598,23 @@ Expectations:
   report, not an fdk-shell bug).
 
 **Status: DONE (should work; owner verification pending).**
+
+## 18. Gestures on your touchscreen (C-6 — needs your fingers)
+
+What the rig proved: the engine's whole gesture policy headless
+(span arithmetic, both swipe directions, every reject, the CANCEL
+wipe). What only your touchscreen shows is real hardware's event
+cadence.
+
+Expectations:
+
+- Two fingers spreading/pinching over any FDK window delivers
+  GESTURE_PINCH with scale > 1 / < 1 at the centroid; a two-finger
+  drag scrolls AND pinches simultaneously when the span changes.
+- A fast two/three-finger fling delivers GESTURE_SWIPE with the
+  compass direction and the finger count; slow lifts, short travel,
+  or fingers disagreeing do not.
+- The compositor may take some gestures itself (edge swipes) — those
+  arrive as TOUCH_CANCEL (nothing synthesized, by design).
+
+**Status: DONE (should work; owner verification pending).**

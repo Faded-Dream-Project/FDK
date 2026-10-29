@@ -808,6 +808,11 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **Basic gestures (pinch + swipe): SHIPPED (1.1.0, C-6 / B-17)** —
+  FDK_EVENT_GESTURE_PINCH (span arithmetic on the two-slot posture,
+  scroll coexistence, re-baseline) + FDK_EVENT_GESTURE_SWIPE (the
+  per-finger end-gesture verdict) on the pure touch engine; no
+  backend moved. D-025; rig: 6 engine legs.
 - **fdk-shell runtime re-anchoring + auto-hide: SHIPPED (1.1.0,
   C-5 / A-05 / A-08, fdk-shell 0.5.0)** — the LIVE desc (anchor/
   margin/zone/size/keyboard/level on a shown surface; the Wayland
