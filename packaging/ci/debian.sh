@@ -39,7 +39,8 @@ RUN debian:bookworm '
         libx11-dev libxext-dev libxtst-dev zlib1g-dev \
         libwayland-dev libxkbcommon-dev \
         xvfb fonts-dejavu-core \
-        libharfbuzz0b libfribidi0 fonts-wqy-zenhei fonts-urw-base35
+        libharfbuzz0b libfribidi0 fonts-wqy-zenhei fonts-urw-base35 \
+        libxrandr-dev
     sh packaging/debian/build-deb.sh
     sh fdk-shell/packaging/debian/build-deb.sh
 '

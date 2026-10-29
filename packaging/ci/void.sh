@@ -46,6 +46,7 @@ RUN "$VOID_IMAGE" '
         echo "NOTE: full container upgrade failed — continuing with the image state (disclosed)"
     xbps-install -Sy base-devel pkgconf findutils zstd \
         libX11-devel libXext-devel libXtst-devel zlib-devel \
+        libXrandr-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-fonts-ttf tar \
         harfbuzz fribidi

@@ -31,6 +31,7 @@ BuildRequires:  gcc
 BuildRequires:  make
 BuildRequires:  pkgconf-pkg-config
 BuildRequires:  libX11-devel
+BuildRequires:  libXrandr-devel
 BuildRequires:  wayland-devel
 # The installed FDK this package builds against (provided by the
 # pipeline: fdk-devel's own Requires pull libfdk1 in).

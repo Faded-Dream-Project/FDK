@@ -27,7 +27,7 @@ url="https://github.com/Faded-Dream-Project/FDK"
 arch="x86_64"
 license="Proprietary"
 depends="fdk>=@MINVER@"
-makedepends="build-base pkgconf libx11-dev wayland-dev"
+makedepends="build-base pkgconf libx11-dev libxrandr-dev wayland-dev"
 subpackages="$pkgname-dev"
 source="fdk-shell-$pkgver.tar.gz"
 # Filled in by `abuild checksum` at build time (the entry must carry

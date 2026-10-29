@@ -3443,6 +3443,25 @@ static void write_cursor_fixture(const char *path, int w, int h) {
     fclose(f);
 }
 
+/* The protocol-error fence for the named-cursor stretch (the S-5
+ * defect's regression pin). The RENDER lane once spelled
+ * PictStandardARGB32 as 4 — A1's value — so every depth-32 pixmap
+ * picture request died with an async BadMatch that the non-None
+ * asserts below COULD NOT see: Xlib generates XIDs client-side,
+ * and the garbage pictures passed for real cursors all the way
+ * into the cache. A counting handler plus an XSync at the end of
+ * the stretch makes the SERVER's verdict part of the test — the
+ * honest fence for every wire value the toolkit spells locally. */
+static int g_fence_errors = 0;
+static int fence_error_handler(Display *d, XErrorEvent *ev) {
+    (void)d;
+    g_fence_errors++;
+    fprintf(stderr, "FENCE X Error: major=%d minor=%d error=%d "
+            "(serial %lu)\n", ev->request_code, ev->minor_code,
+            ev->error_code, (unsigned long)ev->serial);
+    return 0; /* counted, not fatal — the assert below decides */
+}
+
 static void test_named_cursor_set(void) {
     /* 1. The hermetic fixture theme: the glyph-0 shapes' files only
      * (the shapes with font twins prove tier 2 on their own). */
@@ -3475,6 +3494,13 @@ static void test_named_cursor_set(void) {
     fdk_widget *wroot = NULL;
     assert(fdk_ok(fdk_window_get_root(win, &wroot)));
 
+    /* The fence goes up before the first cursor request: every
+     * request the stretch below issues — the factory's pixmap/
+     * picture/cursor rounds, the 22 XDefineCursor applications, the
+     * font-glyph tier — must be answered CLEANLY. */
+    XErrorHandler prev_handler = XSetErrorHandler(fence_error_handler);
+    g_fence_errors = 0;
+
     /* 2. Every public shape applies, in order, with transitions. */
     for (int v = 0; v < (int)FDK_CURSOR__COUNT; v++) {
         fdk_window_set_cursor(win, (fdk_cursor_shape)v);
@@ -3498,6 +3524,13 @@ static void test_named_cursor_set(void) {
     for (int i = 0; i < FDK_PLATFORM_CURSOR_NAMED_COUNT; i++) {
         assert(conn->named_cursors[i] != None);
     }
+    /* 3b. The fence's verdict: the async round trips flushed, the
+     * error count must be ZERO. With the A1 transcription bug this
+     * is where the test fails — one BadMatch per theme-first shape
+     * — even though every XID assert above passed. */
+    XSync(conn->display, False);
+    assert(g_fence_errors == 0);
+    XSetErrorHandler(prev_handler);
     /* The cache holds: re-applying a shape is a pure transition
      * (the factory must not rebuild). COPY = public 7 -> idx 5. */
     unsigned long before = conn->named_cursors[5];

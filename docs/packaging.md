@@ -95,8 +95,9 @@ Debian 12 (bookworm, glibc 2.36); install-tested on Debian 12,
 Debian 13, Ubuntu 24.04, and Ubuntu 22.04 (glibc 2.35 — verified by
 the pipeline's informational probe, which passes). Anything older
 (glibc < 2.35) is below the build floor — build from source there.
-`apt` resolves the runtime dependencies (libx11-6, libxext6, zlib1g,
-libwayland-client0, libxkbcommon0) automatically.
+`apt` resolves the runtime dependencies (libx11-6, libxext6,
+libxrandr2, zlib1g, libwayland-client0, libxkbcommon0)
+automatically.
 
 ### RHEL 10 family / Fedora (.rpm)
 
@@ -154,8 +155,9 @@ Run `fdk-theme list` to see the shipped theme faces and
 
 ## Runtime dependencies
 
-`libX11`, `libXext`, `zlib`, and — when the Wayland backend is
-compiled in, which the published packages always do —
+`libX11`, `libXext`, `libXrandr` (the multi-monitor output model —
+a direct link dependency since M-6), `zlib`, and — when the Wayland
+backend is compiled in, which the published packages always do —
 `libwayland-client` and `libxkbcommon`. Every package manager above
 resolves them automatically. The GPU present lane loads `libGL`
 dynamically when a hardware GL renderer exists and silently stays on

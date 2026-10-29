@@ -10,6 +10,13 @@
   `xorg-x11proto-devel`/`libX11-devel` on Arch/Fedora, etc.) —
   always required; X11 is FDK's baseline backend and the runtime
   auto-detection's fall-through when Wayland is unavailable
+- XRandR development headers (`libxrandr-dev` on Debian/Ubuntu,
+  `libxrandr` on Arch, `libXrandr-devel` on Fedora, `libXrandr-devel`
+  on Void) — always required since the multi-monitor output model
+  (M-6): libfdk links libXrandr directly for per-CRTC geometry and
+  RRNotify hotplug. The runtime fallback when the SERVER has no
+  RandR extension is one output (the whole screen) — but the library
+  itself is a hard link dependency
 - Optional: Wayland development headers (`libwayland-dev`,
   `wayland-protocols`, `libxkbcommon-dev` on Debian/Ubuntu and most
   others) — auto-detected at build time; if absent, FDK builds as

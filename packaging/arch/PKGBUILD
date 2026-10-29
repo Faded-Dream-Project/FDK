@@ -28,7 +28,7 @@ license=('LicenseRef-Proprietary')
 # !debug: makepkg's default OPTIONS can split a -debug package that
 # the artifact collection does not expect.
 options=(!lto !debug)
-depends=(libx11 libxext zlib wayland libxkbcommon)
+depends=(libx11 libxext libxrandr zlib wayland libxkbcommon)
 optdepends=('harfbuzz: complex-script text shaping'
             'fribidi: right-to-left text support')
 makedepends=(pkgconf)

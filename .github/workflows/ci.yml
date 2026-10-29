@@ -53,13 +53,18 @@ jobs:
           # keys through the XTEST extension (the passive-grab
           # passthrough test) — test infrastructure, the same class
           # as libx11-dev (nothing in the package chain ships it).
+          # libxrandr-dev: a REAL build dependency since M-6 — the
+          # core's RandR output model links libXrandr directly (the
+          # packaging metadata in all five families declares it; this
+          # line is the runner-side twin, missed when M-6 landed).
           sudo apt-get install -y --no-install-recommends \
             pkg-config \
             libx11-dev libxext-dev libxtst-dev libxi-dev zlib1g-dev \
             libwayland-dev libxkbcommon-dev \
             dbus libglib2.0-bin \
             libgl1 xvfb fonts-dejavu-core python3-pil \
-            libharfbuzz0b libfribidi0 fonts-wqy-zenhei fonts-urw-base35
+            libharfbuzz0b libfribidi0 fonts-wqy-zenhei fonts-urw-base35 \
+            libxrandr-dev
 
       - name: Build (debug, sanitizers)
         run: make

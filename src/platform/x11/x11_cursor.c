@@ -34,6 +34,8 @@
 #include "core/log_internal.h"
 
 #include <X11/cursorfont.h>
+#include <X11/Xutil.h> /* XCreateImage/XDestroyImage — the include the
+                        * removed Xrender.h used to carry transitively */
 #include <dlfcn.h>
 #include <string.h>
 
@@ -232,8 +234,7 @@ static Cursor render_theme_cursor(fdk_platform_connection *conn,
     XDestroyImage(image);
     fdk_free(pixels);
 
-    XRenderPictFormat *fmt =
-        lane->find_std(conn->display, FDK_X11_PICT_STANDARD_ARGB32);
+    void *fmt = lane->find_std(conn->display, FDK_X11_PICT_STANDARD_ARGB32);
     Cursor cursor = None;
     if (fmt != NULL) {
         Picture pic = lane->create_pic(conn->display, pixmap, fmt, 0, NULL);

@@ -4,7 +4,8 @@
 # Runs INSIDE a Debian-family environment (a debian:bookworm container
 # in CI, or any Debian/Ubuntu host with the build dependencies
 # installed: gcc, make, pkg-config, libx11-dev, libxext-dev,
-# zlib1g-dev, optionally libwayland-dev + libxkbcommon-dev, and Xvfb +
+# libxrandr-dev, zlib1g-dev, optionally libwayland-dev +
+# libxkbcommon-dev, and Xvfb +
 # fonts-dejavu-core for the X11 test). Does not require root when
 # building: staging is done via make install DESTDIR and
 # dpkg-deb --root-owner-group.
@@ -80,6 +81,7 @@ RUNTIME_DEPS="$(for soname in $NEEDED; do
         libgcc_s.so.1)                        pkg="libgcc-s1" ;;
         libX11.so.6)                          pkg="libx11-6" ;;
         libXext.so.6)                         pkg="libxext6" ;;
+        libXrandr.so.2)                       pkg="libxrandr2" ;;
         libz.so.1)                            pkg="zlib1g" ;;
         libwayland-client.so.0)               pkg="libwayland-client0" ;;
         libxkbcommon.so.0)                    pkg="libxkbcommon0" ;;

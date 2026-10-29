@@ -45,6 +45,7 @@ RUN almalinux:10 '
         gcc make pkgconf-pkg-config rpm-build cpio \
         libasan libubsan \
         libX11-devel libXext-devel libXtst-devel zlib-devel \
+        libXrandr-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-sans-fonts dejavu-sans-mono-fonts \
         harfbuzz fribidi

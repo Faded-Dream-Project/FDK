@@ -14,6 +14,59 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Fixed — the RENDER cursor lane: the build dep that wasn't, and the wire value it hid (S-5's two defects)
+
+- **The CI-red streak ends (15 consecutive pushes).** S-5 added
+  `#include <X11/extensions/Xrender.h>` to `src/platform/x11/x11_platform.h`
+  — a header no CI runner and no packaging container installs
+  (libXrender is dlopen'd; the dev package was never a declared
+  dependency, because the lane's own design says it must not be).
+  Every job in every run since has failed at the same compile line.
+  The include is gone: the three wire types the lane needs are
+  spelled in the platform header (`typedef XID Picture` — Xrender.h's
+  own — plus the opaque `void*` handles, the x11_xi2.c posture), and
+  `x11_cursor.c` includes `X11/Xutil.h` directly for the image calls
+  the removed header used to carry transitively. The build now
+  honors S-5's own claim: dlopen'd RENDER, no new build or CI
+  dependency.
+- **The bug the include was hiding — `PictStandardARGB32` was
+  spelled 4.** The RENDER protocol's enum is ARGB32=0, RGB24=1, A8=2,
+  A4=3, A1=4; 4 is A1. Every theme-first named cursor was built from
+  a depth-1 format against a depth-32 pixmap — an async BadMatch on
+  every `XRenderCreatePicture`, then garbage pictures and garbage
+  cursors cached as real ones. The hermetic X11 legs could not see
+  it: Xlib generates XIDs client-side, so the non-None asserts passed
+  on the phantom handles. A probe against Xvfb pins the pair
+  (find_std(0) answers a depth-32 format; find_std(4) a depth-1 one
+  plus BadMatch), and the constant is now 0 with the reference
+  values in the comment. On a real desktop this was "themed cursors
+  are black silhouettes or the plain arrow" — invisible to any
+  protocol-level test, exactly the class of defect the project's
+  spell-the-wire-values discipline exists to prevent.
+- **The regression fence**: the named-cursor X11 leg now runs behind
+  a counting Xlib error handler with an XSync at the end — the
+  server's verdict is part of the test. With the A1 value the fence
+  fails on ~20 async errors; with the fix, zero. Verified both ways
+  before landing.
+- **M-6's undeclared link dependency: `libXrandr` everywhere.** The
+  RandR output model links `-lXrandr` directly (a real build dep,
+  unlike the dlopen'd lanes), but no CI environment declared it: the
+  ubuntu runner's apt list, and the alpine/debian/fedora/void
+  containers' install sets all missed the dev package (arch had it
+  transitively). The deb family additionally had a hard failure
+  waiting past the compile: the NEEDED-soname map in
+  `build-deb.sh` has no `libXrandr.so.2` row, and its catch-all is a
+  deliberate BUILD FAIL. Declared now: ci.yml, all five packaging
+  scripts, APKBUILD makedepends, PKGBUILD depends, rpm
+  BuildRequires, void template, the two deb soname maps, and the
+  fdk-shell packaging family in full (its own X11 source includes
+  the same header). docs/build.md and docs/packaging.md carry the
+  requirement; docs/dependencies.md gained the missing libXext/
+  libXrandr rows and the 1.1.0 dlopen-lane table, and its stale
+  no-bus section is reconciled to the shipped native-client posture
+  (never any D-Bus client library — the wire protocol is spoken
+  in-house).
+
 ### Added — the AT-SPI Text interface + relations export (C-2 / B-10, level 2)
 
 - **Screen readers can read and drive text.** The accessibility

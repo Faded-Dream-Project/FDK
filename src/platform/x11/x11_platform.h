@@ -14,8 +14,21 @@
 #include "platform/x11/x11_gl.h"
 
 #include <X11/Xlib.h>
-#include <X11/extensions/Xrender.h> /* RENDER cursor lane (S-5) — types
-                                     * only; the functions are dlopen'd */
+/* The RENDER wire types the cursor lane needs, spelled here — the
+ * x11_xi2.c posture (that file deliberately does not require
+ * XInput2.h either; its select_events pointer types the event-mask
+ * struct as void*, and this lane types the pict-format handle the
+ * same way): libXrender.so.1 is dlopen'd, so the BUILD must not
+ * require Xrender.h. The include that sat here since S-5 broke
+ * every CI runner and all five packaging containers (none installs
+ * libxrender-dev — the "no new build dependency" claim was false
+ * as compiled) and HID the constant transcription bug pinned below.
+ * Picture is Xrender.h's own `typedef XID Picture` — identical, so
+ * a TU that also sees the real header (Xrandr.h includes it)
+ * re-defines the same type, which C11 blesses; the pict-format
+ * struct itself is anonymous in the modern header, so it stays an
+ * opaque void* through the lane instead of a mirrored name. */
+typedef XID Picture;
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <X11/extensions/XShm.h>
@@ -744,17 +757,36 @@ struct fdk_x11_cursor_render {
     int ok;                           /* extension + symbols won    */
     int tried;                        /* sticky after one attempt   */
     int (*query_ext)(Display *, int *, int *);
-    XRenderPictFormat *(*find_std)(Display *, int);
-    Picture (*create_pic)(Display *, Drawable, XRenderPictFormat *,
-                          unsigned long, const XRenderPictureAttributes *);
+    void *(*find_std)(Display *, int); /* XRenderFindStandardFormat:
+                                        * the pict-format handle is
+                                        * opaque to this lane (void*,
+                                        * the XI2 select_events
+                                        * posture — the modern
+                                        * Xrender.h typedefs it as an
+                                        * anonymous struct, so no
+                                        * mirrored name exists)      */
+    Picture (*create_pic)(Display *, Drawable, void *, unsigned long,
+                          const void *); /* XRenderCreatePicture: the
+                                         * attributes pointer is NULL
+                                         * in every call this lane
+                                         * makes — void* keeps the
+                                         * signature header-free     */
     void (*free_pic)(Display *, Picture);
     Cursor (*create_cursor)(Display *, Picture, unsigned int,
                             unsigned int);
 };
 
-/* PictStandardARGB32 (Xrender.h's enum value, spelled here because
- * the header's name is only visible where it is included). */
-#define FDK_X11_PICT_STANDARD_ARGB32 4
+/* PictStandard values — the RENDER protocol's own enum, mirrored
+ * from Xrender.h (the reference: ARGB32 0, RGB24 1, A8 2, A4 3,
+ * A1 4 — same numbers on the wire). Spelled and pinned here because
+ * the build does not include Xrender.h; a probe against Xvfb holds
+ * the pair that matters: find_std(0) answers a depth-32 format,
+ * find_std(4) a depth-1 one, and a depth-32 pixmap picture request
+ * through it dies with BadMatch. S-5 shipped 4 — A1's value — so
+ * every theme-first cursor was built from a 1-bit format behind an
+ * async error the hermetic legs could not see (Xlib generates XIDs
+ * client-side; the non-None assert passed on garbage pictures). */
+#define FDK_X11_PICT_STANDARD_ARGB32 0
 
 /* XI2 touch (1.1.0, M-3; src/platform/x11/x11_xi2.c): dlopen'd
  * libXi behind the touch event model. try_load pins the library

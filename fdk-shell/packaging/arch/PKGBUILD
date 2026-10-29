@@ -24,9 +24,11 @@ license=('LicenseRef-Proprietary')
 # THE REAL DEPENDENCY: the FDK runtime, with the version that
 # introduced the extension API fdk-shell is built against
 # (extension API v1 first shipped in @MINVER@ — Arch's pre-release
-# grammar). libx11/wayland are fdk-shell's own native protocol
-# dependencies (the extension API's documented accessors).
-depends=("fdk>=@MINVER@" 'libx11' 'wayland')
+# grammar). libx11/libxrandr/wayland are fdk-shell's own native
+# protocol dependencies (the extension API's documented accessors;
+# libxrandr is the output model's second-connection probe, the
+# 0.3.0 RandR work).
+depends=("fdk>=@MINVER@" 'libx11' 'libxrandr' 'wayland')
 makedepends=('pkgconf')
 options=(!lto !debug)
 source=("fdk-shell-$pkgver.tar.gz")

@@ -115,6 +115,7 @@ for soname in $NEEDED; do
     case "$soname" in
         libfdk.so.1)  RUNTIME_DEPS="$RUNTIME_DEPS, $(fdkshell_fdk_runtime_pkg deb) (>= $MINVER)" ;;
         libX11.so.6)  RUNTIME_DEPS="$RUNTIME_DEPS, libx11-6" ;;
+        libXrandr.so.2) RUNTIME_DEPS="$RUNTIME_DEPS, libxrandr2" ;;
         libwayland-client.so.0) RUNTIME_DEPS="$RUNTIME_DEPS, libwayland-client0" ;;
         libc.so.6|libm.so.6|libdl.so.2|libpthread.so.0|ld-linux-*.so.*) ;; # libc6, implicit
         libgcc_s.so.1) RUNTIME_DEPS="$RUNTIME_DEPS, libgcc-s1" ;;

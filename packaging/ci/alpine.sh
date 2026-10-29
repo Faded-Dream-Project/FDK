@@ -36,7 +36,8 @@ RUN alpine:3.22 '
         libx11-dev libxext-dev libxtst-dev zlib-dev \
         wayland-dev libxkbcommon-dev \
         font-dejavu \
-        harfbuzz fribidi font-wqy-zenhei
+        harfbuzz fribidi font-wqy-zenhei \
+        libxrandr-dev
     # A name-keyed CFF font for the CFF suites real-font legs.
     # Optional and disclosed: the crafted-font legs always run.
     apk add --no-cache font-urw-base35 2>/dev/null || \

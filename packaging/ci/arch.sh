@@ -31,7 +31,8 @@ RUN archlinux:base '
     pacman -Sy --noconfirm --needed \
         base-devel pkgconf libx11 libxext libxtst zlib wayland libxkbcommon \
         xorg-server-xvfb ttf-dejavu tar \
-        harfbuzz fribidi wqy-zenhei
+        harfbuzz fribidi wqy-zenhei \
+        libxrandr
     # A name-keyed CFF font for the CFF suites real-font legs.
     # Optional and disclosed: the crafted-font legs always run.
     pacman -Sy --noconfirm --needed gsfonts 2>/dev/null || \

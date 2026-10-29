@@ -19,6 +19,8 @@ unnecessarily enormous or fragile?"
 | `wayland-protocols` (specifically `stable/xdg-shell/xdg-shell.xml`) | Protocol description used to generate `src/platform/wayland/generated/xdg-shell-client-protocol.h` / `xdg-shell-protocol.c` via `wayland-scanner` at development time; the XML itself is vendored into `third_party/wayland-protocols/` and the *generated* C files are committed/built as part of FDK, not fetched at build time | MIT-style — see the `<copyright>` block in the XML itself, preserved in `third_party/wayland-protocols/xdg-shell.xml` | Build-time only (code generation); no runtime dependency on `wayland-protocols` itself, only on the generated C output and `libwayland-client` | No — xdg-shell is the standard, required protocol for any Wayland toplevel window | N/A — protocol description, not a library |
 | `wayland-scanner` (part of `libwayland-dev`'s tooling) | Generates the xdg-shell C bindings from the XML above | MIT | Build-time only | N/A | N/A |
 | `libxkbcommon` | XKB keymap compilation and keysym resolution for the Wayland backend's keyboard handling (`src/platform/wayland/wayland_seat.c`) — Wayland delivers a raw keymap over a fd and expects the client to compile it itself, unlike X11 where the server does layout resolution | MIT | Runtime, build (headers) | Yes, only used when Wayland backend + keyboard capability are both active | No — the standard, effectively only correct way to do XKB keymap handling on Linux; reimplementing an XKB compiler internally would be a large, security-sensitive undertaking directly contrary to the project's minimalism goal |
+| `libXext` | The MIT-SHM extension (`XShmPutImage`, the presentation fast path) | MIT-style | Runtime, build (headers) | No — part of the base X11 distribution wherever libX11 is | Yes in principle (plain PutImage); kept for the fast path |
+| `libXrandr` | The multi-monitor output model (M-6, `src/platform/x11/x11_randr.c`): per-CRTC geometry probed at connect, RRNotify-masked, refreshed in the dispatch loop; fdk-shell's own output-event channel rides its own X connection with the same library | MIT-style | Runtime, build (headers) — a DIRECT link dependency (`-lXrandr` on the link line, declared in the packaging metadata of all five families) | Runtime-optional at the SERVER level: no RandR extension = one output (the whole screen), the documented fallback — but the library itself is always linked when the X11 backend is built | Yes in principle (raw RandR wire requests over Xlib); not pursued — XRRGetScreenResourcesCurrent's cached form and the free-list discipline are exactly what a hand-rolled path would reimplement worse |
 
 **Note on X11 provenance:** Xlib's copyright headers include a Red
 Hat, Inc. copyright line among several others (X Consortium, MIT,
@@ -67,28 +69,51 @@ desktop-stack dependencies FDK's minimalism goal excludes (Cairo/Pango
 are typically paired with GLib, which pulls in a much larger
 dependency surface than FDK wants). See `docs/licensing-policy.md`.
 
-## The no-bus policy (1.1.0, permanent)
+## The no-libdbus policy (1.1.0, permanent — reconciled 2026-10-30)
 
-**FDK never links, dlopens, spawns, or requires D-Bus — or any
-daemon, bus, or activation infrastructure of the Freedesktop/Red Hat
-desktop stack — for any functionality of the toolkit itself.** Where
-GTK and Qt delegate to bus services, FDK implements the job
-in-process and publishes the seam for the application to wire:
+**This section's 1.0-era text said FDK "never links, dlopens, spawns,
+or requires D-Bus — or any daemon, bus, or activation
+infrastructure" — and M-7's native client then changed the second
+half of that sentence without this file following (the doc policy
+below demands same-change updates; that slipped, and this is the
+catch-up). The posture that SURVIVED, and is permanent:**
 
-| The bus "job" elsewhere | FDK's in-process answer |
-|---|---|
-| Screen reader access (AT-SPI2 over D-Bus: registry daemon + session bus + bridge process) | The embedded narrator (`fdk_a11y_set_speaker` + `fdk_a11y_narrator_start`, 1.1.0): an ordinary subscriber of the public a11y notifications that composes utterances in-process and speaks through an application-wired sink — a TTS engine, a braille device, a subtitle bar, a log. No registry, no bus, no bridge process; verified headless. An application that wants to drive an external assistive technology uses the same public seam (`fdk_a11y_describe` / subscribe / perform) — the bridging becomes the application's choice, never the toolkit's requirement. |
-| Portal dialogs, notifications, session inhibitors, `org.freedesktop.appearance` settings, StatusNotifierItem tray icons | Not implemented as bus calls, and they will not be: X11/Wayland-protocol-native paths (EWMH, XSettings-when-present-as-plain-X-properties, the XEmbed tray, `zwp_text_input`) or in-toolkit widgets (FDK's own dialogs) are the routes FDK takes. Any future feature follows the same rule — if it would need a bus, it gets implemented in-process or not shipped. |
+**FDK never links, dlopens, spawns, or requires libdbus, sd-bus,
+GLib/GIO, or any D-Bus CLIENT LIBRARY of any kind.** Where the
+desktop's integration surfaces need a bus (the portal FileChooser,
+StatusNotifier tray, org.freedesktop.Notifications, AT-SPI2, the
+appearance portal, ScreenSaver inhibition), FDK speaks the D-Bus
+wire protocol ITSELF — `src/dbus/` is a complete client
+implementation written from the public specification in raw C
+(docs/dbus.md, DECISIONS D-001). No bus present, no portal, no
+screen reader: every one of those surfaces degrades to its
+documented in-toolkit fallback (the own file browser, the embedded
+narrator, the core cursor font) — the application never fails
+because a daemon is absent. The embedded narrator
+(`fdk_a11y_set_speaker`) remains the no-daemon a11y answer; the
+AT-SPI bridge is the OPT-IN desktop-interop side, not a requirement.
 
-The audit trail: zero D-Bus references in `src/` and `include/`
-(the two comments that once named "a future AT-SPI2 bridge" as an
-expected consumer were corrected in 1.1.0 when the bridge idea was
-replaced by the in-process narrator); the link line is
-`-lX11 -lXext -lwayland-client -lxkbcommon -lm -ldl` and nothing
-else; `libatspi`/`libdbus` appear nowhere in the build. The
-1.0.1-era fontconfig note above is the same policy applied to
-discovery — runtime-optional with a full in-toolkit fallback chain,
-never a requirement.
+**Added in 1.1.0 — runtime-optional, dlopen'd, never build deps**
+(the fontconfig posture, applied to the text/input/cursor lanes;
+none of them appears in the link line, and a build without any of
+them is unchanged — absent library means the documented fallback,
+never an error):
+
+| Library | Purpose | Fallback when absent |
+|---|---|---|
+| `libharfbuzz.so.0` + `libfribidi.so.1` | Complex-script shaping + bidi (M-2) | The legacy codepoint-at-a-time LTR shaper (FDK_SHAPING=0's own path) |
+| `libXi.so.6` | XI2 touch events (M-3) | No touch events; the pointer/keyboard streams unchanged ($FDK_NO_XI2 pins it off) |
+| `libXrender.so.1` | The RENDER cursor lane — themed ARGB cursors (S-5) | The core cursor font's nearest-glyph table (every shape keeps an honest twin) |
+| `libGL.so.1` | The X11 GPU present lane | The CPU present path (always the design center) |
+
+The audit trail sentence below was also stale: the link line has
+carried `-lXrandr` since M-6 (see the table above) and `-lz` since
+the PNG encoder — it is `-lX11 -lXext -lXrandr -lwayland-client
+-lxkbcommon -lm -ldl -lz` (Wayland half only when the backend is
+built). `libatspi`/`libdbus` still appear nowhere in the build;
+the wire bytes FDK's own client emits are pinned against captured
+libdbus reference output in `make test` (tests/test_dbus.c) — the
+cross-implementation proof, not a dependency.
 
 ## Policy reminders
 

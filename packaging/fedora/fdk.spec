@@ -31,6 +31,7 @@ BuildRequires:  make
 BuildRequires:  pkgconf-pkg-config
 BuildRequires:  libX11-devel
 BuildRequires:  libXext-devel
+BuildRequires:  libXrandr-devel
 BuildRequires:  zlib-devel
 BuildRequires:  wayland-devel
 BuildRequires:  libxkbcommon-devel
