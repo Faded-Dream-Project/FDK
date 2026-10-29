@@ -209,6 +209,13 @@ typedef enum fdk_a11y_event_kind {
     FDK_A11Y_RELATIONS_CHANGED = 7, /* a relation edge was added or
                                        removed (see the relations
                                        section below)                */
+    /* 1.1.0 append (C-2, the AT-SPI text level): fired by editors at
+     * every caret/selection move (the Entry/TextView selection
+     * chokepoints — one event whatever moved the caret: keys, mouse,
+     * IME, programmatic). Subscribers read the new offsets through
+     * the text interface at receipt. Append-only, like the rest of
+     * this enum. */
+    FDK_A11Y_CARET_MOVED = 8,
 } fdk_a11y_event_kind;
 
 typedef struct fdk_a11y_event {

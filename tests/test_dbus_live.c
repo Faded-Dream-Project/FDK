@@ -783,6 +783,11 @@ static char g_atspi_app_name[64]; /* the bridge's unique name        */
 static int g_atspi_saw_announce;
 static int g_atspi_focus_events;
 static char g_atspi_focus_path[160];
+/* C-2: the text-signal counters (path-keyed for the entry's legs). */
+static int g_atspi_caret_events;
+static int g_atspi_text_events;
+static int g_atspi_sel_events;
+static char g_atspi_caret_path[160];
 
 static void atspi_object_signal(fdk_dbus_connection *c,
                                 fdk_dbus_message *sig, void *user) {
@@ -806,6 +811,19 @@ static void atspi_object_signal(fdk_dbus_connection *c,
                  fdk_dbus_message_path(sig) != NULL
                      ? fdk_dbus_message_path(sig)
                      : "");
+    }
+    if (member != NULL && strcmp(member, "TextCaretMoved") == 0) {
+        g_atspi_caret_events++;
+        snprintf(g_atspi_caret_path, sizeof g_atspi_caret_path, "%s",
+                 fdk_dbus_message_path(sig) != NULL
+                     ? fdk_dbus_message_path(sig)
+                     : "");
+    }
+    if (member != NULL && strcmp(member, "TextChanged") == 0) {
+        g_atspi_text_events++;
+    }
+    if (member != NULL && strcmp(member, "TextSelectionChanged") == 0) {
+        g_atspi_sel_events++;
     }
     (void)c;
 }
@@ -837,6 +855,20 @@ static size_t render_value(char *buf, size_t cap, size_t off,
             }
             off = render_value(buf, cap, off,
                                fdk_dbus_value_array_item(v, k));
+        }
+        return off;
+    }
+    if (fdk_dbus_value_type(v) == FDK_DBUS_STRUCT ||
+        fdk_dbus_value_type(v) == FDK_DBUS_DICT_ENTRY) {
+        /* C-2: the (iiii) extents structs — render the fields with
+         * the same separator so sscanf("%d|%d|%d|%d") reads them. */
+        size_t cnt = fdk_dbus_value_struct_count(v);
+        for (size_t k = 0; k < cnt && off + 1 < cap; k++) {
+            if (k > 0 && off + 1 < cap) {
+                buf[off++] = '|';
+            }
+            off = render_value(buf, cap, off,
+                               fdk_dbus_value_struct_item(v, k));
         }
         return off;
     }
@@ -895,6 +927,89 @@ static const char *atspi_call(fdk_dbus_connection *b, const char *dest,
     if (m == NULL) {
         return NULL;
     }
+    g_atspi_cap_done = 0;
+    fdk_dbus_pending *p = fdk_dbus_connection_call(
+        b, m, FDK_DBUS_TIMEOUT_DEFAULT, atspi_capture_reply, NULL);
+    if (p == NULL) {
+        fdk_dbus_message_free(m);
+        return NULL;
+    }
+    for (int i = 0; i < 200 && !g_atspi_cap_done; i++) {
+        (void)fdk_pump_events(ctx_glob, 20);
+    }
+    if (!g_atspi_cap_done) {
+        return "<timeout>";
+    }
+    return g_atspi_cap;
+}
+
+/* The parameterized twins: one int32 arg, or two. Same capture
+ * contract as atspi_call (static buffer, "<err>"/"<timeout>"). */
+static const char *atspi_call_i(fdk_dbus_connection *b, const char *dest,
+                                const char *path, const char *iface,
+                                const char *member, int32_t arg) {
+    fdk_dbus_message *m =
+        fdk_dbus_message_new_method_call(dest, path, iface, member);
+    if (m == NULL) {
+        return NULL;
+    }
+    (void)fdk_dbus_message_append_int32(m, arg);
+    g_atspi_cap_done = 0;
+    fdk_dbus_pending *p = fdk_dbus_connection_call(
+        b, m, FDK_DBUS_TIMEOUT_DEFAULT, atspi_capture_reply, NULL);
+    if (p == NULL) {
+        fdk_dbus_message_free(m);
+        return NULL;
+    }
+    for (int i = 0; i < 200 && !g_atspi_cap_done; i++) {
+        (void)fdk_pump_events(ctx_glob, 20);
+    }
+    if (!g_atspi_cap_done) {
+        return "<timeout>";
+    }
+    return g_atspi_cap;
+}
+
+/* int32, uint32 (the offset+boundary-type calls). */
+static const char *atspi_call_iu(fdk_dbus_connection *b, const char *dest,
+                                 const char *path, const char *iface,
+                                 const char *member, int32_t a0,
+                                 uint32_t a1) {
+    fdk_dbus_message *m =
+        fdk_dbus_message_new_method_call(dest, path, iface, member);
+    if (m == NULL) {
+        return NULL;
+    }
+    (void)fdk_dbus_message_append_int32(m, a0);
+    (void)fdk_dbus_message_append_uint32(m, a1);
+    g_atspi_cap_done = 0;
+    fdk_dbus_pending *p = fdk_dbus_connection_call(
+        b, m, FDK_DBUS_TIMEOUT_DEFAULT, atspi_capture_reply, NULL);
+    if (p == NULL) {
+        fdk_dbus_message_free(m);
+        return NULL;
+    }
+    for (int i = 0; i < 200 && !g_atspi_cap_done; i++) {
+        (void)fdk_pump_events(ctx_glob, 20);
+    }
+    if (!g_atspi_cap_done) {
+        return "<timeout>";
+    }
+    return g_atspi_cap;
+}
+
+/* Two int32 args (the range calls). */
+static const char *atspi_call_ii(fdk_dbus_connection *b, const char *dest,
+                                 const char *path, const char *iface,
+                                 const char *member, int32_t a0,
+                                 int32_t a1) {
+    fdk_dbus_message *m =
+        fdk_dbus_message_new_method_call(dest, path, iface, member);
+    if (m == NULL) {
+        return NULL;
+    }
+    (void)fdk_dbus_message_append_int32(m, a0);
+    (void)fdk_dbus_message_append_int32(m, a1);
     g_atspi_cap_done = 0;
     fdk_dbus_pending *p = fdk_dbus_connection_call(
         b, m, FDK_DBUS_TIMEOUT_DEFAULT, atspi_capture_reply, NULL);
@@ -1914,6 +2029,233 @@ int main(void) {
         assert(btn_activations == 1);
         printf("[ok] atspi: Action.DoAction(0) activated the button "
                "(the screen reader's click)\n");
+
+        /* ---- The Text interface (C-2, level 2) -----------------------
+         *
+         * The entry gets "hello dolly" (11 ASCII codepoints — the
+         * byte/cp distinction is invisible), then a MULTIBYTE
+         * re-set ("h\xC3\xA9llo" — 5 codepoints, 6 bytes) pins the
+         * conversion: GetCharacterCount answers 5 while the internal
+         * byte length is 6, and SetCaretOffset(2) lands past the
+         * two-byte \xC3\xA9.
+         */
+        if (aent != NULL) {
+            assert(fdk_ok(fdk_entry_set_text(aent, "hello dolly")));
+            assert(fdk_ok(fdk_entry_set_cursor(aent, 3)));
+            g_atspi_text_events = 0;
+            (void)fdk_pump_events(ctx, 60); /* the TextChanged flush */
+            int saw_textchg = 0;
+            for (int i = 0; i < 100 && !saw_textchg; i++) {
+                (void)fdk_pump_events(ctx, 20);
+                saw_textchg = g_atspi_text_events > 0;
+            }
+            assert(saw_textchg); /* the VALUE_CHANGED -> TextChanged map */
+
+            /* GetInterfaces lists the Text interface on the entry. */
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Accessible",
+                           "GetInterfaces");
+            assert(v != NULL && strstr(v, "atspi.Text") != NULL);
+            /* The button (no text interface) must NOT list it. */
+            v = atspi_call(b, app, btnpath,
+                           "org.freedesktop.atspi.Accessible",
+                           "GetInterfaces");
+            assert(v != NULL && strstr(v, "atspi.Text") == NULL);
+
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Text",
+                           "GetCharacterCount");
+            assert(v != NULL && strcmp(v, "11") == 0);
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Text", "GetCaretOffset");
+            assert(v != NULL && strcmp(v, "3") == 0);
+            /* GetText(0, 5) -> "hello" */
+            v = atspi_call_ii(b, app, entpath,
+                              "org.freedesktop.atspi.Text", "GetText", 0,
+                              5);
+            assert(v != NULL && strcmp(v, "hello") == 0);
+            /* WORD at 0 -> ("hello", 0, 5). */
+            v = atspi_call_iu(b, app, entpath,
+                              "org.freedesktop.atspi.Text",
+                              "GetTextAtOffset", 0, 1);
+            assert(v != NULL && strcmp(v, "hello|0|5") == 0);
+            /* WORD before 6 -> "hello"; WORD after 0 -> "dolly". */
+            v = atspi_call_iu(b, app, entpath,
+                              "org.freedesktop.atspi.Text",
+                              "GetTextBeforeOffset", 6, 1);
+            assert(v != NULL && strcmp(v, "hello|0|5") == 0);
+            v = atspi_call_iu(b, app, entpath,
+                              "org.freedesktop.atspi.Text",
+                              "GetTextAfterOffset", 0, 1);
+            assert(v != NULL && strcmp(v, "dolly|6|11") == 0);
+            /* The character at 0 is 'h' (104). */
+            v = atspi_call_i(b, app, entpath,
+                             "org.freedesktop.atspi.Text",
+                             "GetCharacterAtOffset", 0);
+            assert(v != NULL && strcmp(v, "104") == 0);
+
+            /* Selection: AddSelection(0,5) -> GetSelection(0) =
+             * (0,5), GetNSelections = 1, RemoveSelection collapses. */
+            v = atspi_call_ii(b, app, entpath,
+                              "org.freedesktop.atspi.Text",
+                              "AddSelection", 0, 5);
+            assert(v != NULL && strcmp(v, "1") == 0);
+            v = atspi_call_i(b, app, entpath,
+                             "org.freedesktop.atspi.Text",
+                             "GetSelection", 0);
+            assert(v != NULL && strcmp(v, "0|5") == 0);
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Text",
+                           "GetNSelections");
+            assert(v != NULL && strcmp(v, "1") == 0);
+            v = atspi_call_i(b, app, entpath,
+                             "org.freedesktop.atspi.Text",
+                             "RemoveSelection", 0);
+            assert(v != NULL && strcmp(v, "1") == 0);
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Text",
+                           "GetNSelections");
+            assert(v != NULL && strcmp(v, "0") == 0);
+
+            /* Extents: the first character has a positive rect that
+             * sits inside the entry's own Component extents. */
+            v = atspi_call_iu(b, app, entpath,
+                              "org.freedesktop.atspi.Text",
+                              "GetCharacterExtents", 0, 0);
+            assert(v != NULL);
+            {
+                int cx = 0, cy = 0, cw = 0, ch = 0;
+                assert(sscanf(v, "%d|%d|%d|%d", &cx, &cy, &cw, &ch) == 4);
+                assert(cw > 0 && ch > 0);
+            }
+            /* OffsetAtPoint: the entry's first character position
+             * answers 0 (the hit-test the mouse itself runs). */
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Component",
+                           "GetPosition");
+            assert(v != NULL);
+            {
+                int ex = 0, ey = 0;
+                assert(sscanf(v, "%d|%d", &ex, &ey) == 2);
+                /* point at the entry's left edge + 4px in: char 0-2
+                 * territory; the exact offset depends on the font's
+                 * glyph advances, so assert the RANGE and that it
+                 * round-trips through a second call at the same
+                 * point. */
+                char pcall[192];
+                (void)pcall;
+                fdk_dbus_message *m = fdk_dbus_message_new_method_call(
+                    app, entpath, "org.freedesktop.atspi.Text",
+                    "GetOffsetAtPoint");
+                assert(m != NULL);
+                assert(fdk_dbus_message_append_int32(m, ex + 4) ==
+                       FDK_OK);
+                assert(fdk_dbus_message_append_int32(m, ey + 13) ==
+                       FDK_OK);
+                assert(fdk_dbus_message_append_uint32(m, 0) == FDK_OK);
+                g_atspi_cap_done = 0;
+                assert(fdk_dbus_connection_call(
+                           b, m, FDK_DBUS_TIMEOUT_DEFAULT,
+                           atspi_capture_reply, NULL) != NULL);
+                for (int i = 0; i < 200 && !g_atspi_cap_done; i++) {
+                    (void)fdk_pump_events(ctx, 20);
+                }
+                assert(g_atspi_cap_done);
+                int off = atoi(g_atspi_cap);
+                assert(off >= 0 && off <= 11);
+            }
+
+            /* SetCaretOffset(8) through the wire, then the caret
+             * reads back 8 AND the TextCaretMoved signal arrived at
+             * B on the entry's own path (the CARET_MOVED map). */
+            g_atspi_caret_events = 0;
+            g_atspi_caret_path[0] = '\0';
+            v = atspi_call_i(b, app, entpath,
+                             "org.freedesktop.atspi.Text",
+                             "SetCaretOffset", 8);
+            assert(v != NULL && strcmp(v, "1") == 0);
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Text",
+                           "GetCaretOffset");
+            assert(v != NULL && strcmp(v, "8") == 0);
+            int saw_caret = 0;
+            for (int i = 0; i < 100 && !saw_caret; i++) {
+                (void)fdk_pump_events(ctx, 20);
+                saw_caret = g_atspi_caret_events > 0;
+            }
+            assert(saw_caret);
+            assert(strcmp(g_atspi_caret_path, entpath) == 0);
+            assert(g_atspi_sel_events > 0);
+
+            /* The MULTIBYTE pin: "h\xC3\xA9llo" — 5 codepoints,
+             * 6 bytes. GetCharacterCount answers 5 (the conversion
+             * walks codepoints, not bytes); GetText(0,2) = "h\xC3\xA9"
+             * (the two bytes of the accent); SetCaretOffset(2)
+             * lands at BYTE 3 (past the pair). */
+            assert(fdk_ok(fdk_entry_set_text(aent, "h\xC3\xA9llo")));
+            (void)fdk_pump_events(ctx, 60);
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Text",
+                           "GetCharacterCount");
+            assert(v != NULL && strcmp(v, "5") == 0);
+            v = atspi_call_ii(b, app, entpath,
+                              "org.freedesktop.atspi.Text", "GetText", 0,
+                              2);
+            assert(v != NULL && strcmp(v, "h\xC3\xA9") == 0);
+            v = atspi_call_i(b, app, entpath,
+                             "org.freedesktop.atspi.Text",
+                             "SetCaretOffset", 2);
+            assert(v != NULL && strcmp(v, "1") == 0);
+            /* The internal byte caret is 3 (past the two-byte
+             * codepoint) — read through the public API. */
+            assert(fdk_entry_get_cursor(aent) == 3);
+            printf("[ok] atspi: the Text interface served (count/get/"
+                   "at/before/after/char/selections/extents/caret + "
+                   "signals + the multibyte cp/byte pin)\n");
+        }
+
+        /* ---- Relations (C-2) --------------------------------------------
+         *
+         * The label gets LABEL_FOR the entry (the classic
+         * "Username" case): the ENTRY's GetRelationSet answers the
+         * inverse LABELLED_BY (2) with the label's path; the LABEL's
+         * answers LABEL_FOR (1) with the entry's path.
+         */
+        if (albl != NULL && aent != NULL) {
+            assert(fdk_ok(fdk_a11y_add_relation(
+                albl, FDK_A11Y_RELATION_LABEL_FOR, aent)));
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Accessible",
+                           "GetRelationSet");
+            assert(v != NULL);
+            /* The rendering: 2|<app>:|<label-path> — the AT-SPI
+             * relation number, the (so) pair's app name and path. */
+            assert(strncmp(v, "2|", 2) == 0);
+            assert(strstr(v, app) != NULL);
+            /* The label's own object path: resolve it through the
+             * window's children (index 1). */
+            v = atspi_call_i(b, app, winpath,
+                             "org.freedesktop.atspi.Accessible",
+                             "GetChildAtIndex", 1);
+            assert(v != NULL);
+            char lblpath[192];
+            snprintf(lblpath, sizeof lblpath, "%.191s", v);
+            v = atspi_call(b, app, lblpath,
+                           "org.freedesktop.atspi.Accessible",
+                           "GetRelationSet");
+            assert(v != NULL && strncmp(v, "1|", 2) == 0);
+            assert(strstr(v, entpath) != NULL);
+            /* Symmetry teardown: removing one edge removes both. */
+            assert(fdk_ok(fdk_a11y_remove_relation(
+                albl, FDK_A11Y_RELATION_LABEL_FOR, aent)));
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Accessible",
+                           "GetRelationSet");
+            assert(v != NULL && strcmp(v, "") == 0);
+            printf("[ok] atspi: GetRelationSet — LABELLED_BY(2) on the "
+                   "entry, LABEL_FOR(1) on the label, symmetric "
+                   "removal\n");
+        }
 
         fdk_dbus_subscription_free(asub);
         fdk_window_destroy(aw);

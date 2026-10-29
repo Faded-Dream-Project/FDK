@@ -10,6 +10,9 @@
 #include "fdk/fdk_a11y.h"
 
 #include "widget/menu_internal.h"
+#include "widget/widgets_internal.h" /* the C-2 text-extents seam */
+
+#include "core/alloc_internal.h" /* fdk_free (the seam's copies) */
 
 #include <stdio.h>
 #include <string.h>
@@ -1211,6 +1214,150 @@ static void test_relations_limit(void) {
           "relations limit: exactly 16 stored");
     fdk_widget_destroy(root);
 }
+/* ---- The C-2 legs: the CARET_MOVED notification + the text-extents
+ * seam (the per-character rects + hit-test the AT-SPI bridge serves
+ * desktop coordinates from). ------------------------------------------ */
+
+static int g_caret_events;
+static fdk_widget *g_caret_widget;
+
+static void caret_notify(const fdk_a11y_event *ev, void *user) {
+    (void)user;
+    if (ev->kind == FDK_A11Y_CARET_MOVED) {
+        g_caret_events++;
+        g_caret_widget = ev->widget;
+    }
+}
+
+static void test_caret_notification(void) {
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){0, 0, 400, 300},
+                                   &root)),
+          "caret: root created");
+    fdk_widget *entry = NULL;
+    CHECK(fdk_ok(fdk_entry_create(root, g_font, "hello world",
+                                  &entry)),
+          "caret: entry created");
+    g_caret_events = 0;
+    g_caret_widget = NULL;
+    CHECK(fdk_ok(fdk_a11y_subscribe(NULL, caret_notify, NULL)),
+          "caret: subscribed");
+    /* Caret moves fire exactly one event each, whatever moved them:
+     * the programmatic setter, the a11y seam, a selection. */
+    CHECK(fdk_ok(fdk_a11y_text_set_caret(entry, 5)),
+          "caret: set caret 5");
+    CHECK(g_caret_events == 1, "caret: one event for the move");
+    CHECK(g_caret_widget == entry, "caret: the entry's event");
+    CHECK(fdk_ok(fdk_entry_set_cursor(entry, 2)),
+          "caret: public setter");
+    CHECK(g_caret_events == 2, "caret: one event for the public move");
+    CHECK(fdk_ok(fdk_a11y_text_set_selection(entry, 0, 5)),
+          "caret: selection");
+    CHECK(g_caret_events == 3, "caret: one event for the selection");
+    /* Collapsing the selection (anchor 0 -> 5) fires; repeating the
+     * SAME state fires nothing — the no-op rule. */
+    CHECK(fdk_ok(fdk_a11y_text_set_selection(entry, 5, 5)),
+          "caret: collapse");
+    CHECK(g_caret_events == 4, "caret: one event for the collapse");
+    CHECK(fdk_ok(fdk_a11y_text_set_selection(entry, 5, 5)),
+          "caret: same state");
+    CHECK(g_caret_events == 4, "caret: no event for a no-op");
+    CHECK(fdk_ok(fdk_a11y_unsubscribe(NULL, caret_notify, NULL)),
+          "caret: unsubscribed");
+    fdk_widget_destroy(root);
+    printf("[ok] caret: the CARET_MOVED notification (the signal "
+           "source)\n");
+}
+
+static void test_text_extents_seam(void) {
+    fdk_widget *root = NULL;
+    CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
+                                   (fdk_rect){100, 50, 400, 300},
+                                   &root)),
+          "extents: root created");
+    fdk_widget *entry = NULL;
+    CHECK(fdk_ok(fdk_entry_create(root, g_font, "hi there", &entry)),
+          "extents: entry created");
+    fdk_widget_arrange(entry, (fdk_rect){10, 10, 200, 26});
+    CHECK(1, "extents: entry arranged");
+
+    /* The content seam: the whole text, byte length honest. */
+    size_t len = 0;
+    char *content = fdk__widget_text_content(entry, &len);
+    CHECK(content != NULL, "extents: content borrowed");
+    CHECK(len == 8 && strcmp(content, "hi there") == 0,
+          "extents: content matches");
+    fdk_free(content);
+    /* A no-text widget answers NULL. */
+    fdk_widget *plain = NULL;
+    CHECK(fdk_ok(fdk_button_create(root, g_font, "Go", &plain)),
+          "extents: button created");
+    CHECK(fdk__widget_text_content(plain, &len) == NULL,
+          "extents: button has no content");
+
+    /* The char rects: every character gets a positive rect INSIDE
+     * the entry's own bounds, in root-absolute space; monotonically
+     * advancing x. */
+    fdk_rect eb = fdk_widget_get_absolute_bounds(entry);
+    fdk_i32 prev_x = -1;
+    bool all_ok = true;
+    for (size_t i = 0; i < 8; i++) {
+        fdk_rect r = {0, 0, 0, 0};
+        if (!fdk__widget_text_char_rect(entry, i, &r)) {
+            all_ok = false;
+            break;
+        }
+        if (r.width <= 0 || r.height <= 0 ||
+            r.x < eb.x || r.x + r.width > eb.x + eb.width + 1 ||
+            r.y < eb.y || r.y + r.height > eb.y + eb.height + 1 ||
+            r.x < prev_x) {
+            all_ok = false;
+            break;
+        }
+        prev_x = r.x;
+    }
+    CHECK(all_ok, "extents: char rects advance inside the entry");
+    /* Out of range -> false. */
+    fdk_rect r = {0, 0, 0, 0};
+    CHECK(!fdk__widget_text_char_rect(entry, 8, &r),
+          "extents: out-of-range refused");
+    /* The read-only fallback (a Label): the whole widget's bounds. */
+    fdk_widget *lbl = NULL;
+    CHECK(fdk_ok(fdk_label_create(root, g_font, "Hello", &lbl)),
+          "extents: label created");
+    fdk_widget_arrange(lbl, (fdk_rect){10, 60, 120, 20});
+    CHECK(1, "extents: label arranged");
+    fdk_rect lr = {0, 0, 0, 0};
+    CHECK(fdk__widget_text_char_rect(lbl, 0, &lr),
+          "extents: label char rect");
+    fdk_rect lb = fdk_widget_get_absolute_bounds(lbl);
+    CHECK(lr.x == lb.x && lr.y == lb.y && lr.width == lb.width &&
+          lr.height == lb.height,
+          "extents: label fallback is the whole bounds");
+
+    /* The hit-test seam: the entry's own coordinates answer the
+     * offsets its geometry implies (round-trips: point -> offset ->
+     * char rect contains the point, modulo the boundary midpoints).
+     * Out of the widget -> false. */
+    size_t off = 0;
+    fdk_rect c0 = {0, 0, 0, 0};
+    CHECK(fdk__widget_text_char_rect(entry, 0, &c0),
+          "extents: char 0 rect for the hit-test");
+    CHECK(fdk__widget_text_offset_at(entry, c0.x + c0.width / 2,
+                                     c0.y + c0.height / 2, &off),
+          "extents: offset at char 0's center");
+    CHECK(off == 0 || off == 1,
+          "extents: char 0's center hits offset 0 (or its edge)");
+    CHECK(!fdk__widget_text_offset_at(entry, eb.x - 50, eb.y - 50,
+                                      &off),
+          "extents: outside refused");
+
+    fdk_widget_destroy(root);
+    printf("[ok] extents: the text-extents seam (content, char rects, "
+           "hit-test, fallback)\n");
+}
+
 int main(void) {
     load_font();
     test_role_names();
@@ -1226,6 +1373,8 @@ int main(void) {
     test_text_interface_utf8();
     test_relationships();
     test_relations_limit();
+    test_caret_notification();
+    test_text_extents_seam();
     if (g_font != NULL) {
         fdk_font_destroy(g_font);
     }

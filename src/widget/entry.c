@@ -155,6 +155,10 @@ static fdk_entry *entry_of(fdk_widget *w) {
     return (fdk_entry *)(void *)w;
 }
 
+static const fdk_entry *entry_of_const(const fdk_widget *w) {
+    return (const fdk_entry *)(const void *)w;
+}
+
 /* ---- caret blink (1.3.1) ---- */
 
 static void entry_blink_tick(fdk_timer *timer, void *user) {
@@ -523,6 +527,86 @@ static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
         at += (size_t)n;
     }
     return e->len;
+}
+
+/* The AT-SPI text-content seam (C-2): an owned copy of the whole
+ * text — the bridge converts AT-SPI codepoint offsets to FDK byte
+ * offsets, which needs the full string. */
+char *fdk__entry_text_content(const fdk_widget *w, size_t *out_len) {
+    if (w == NULL || w->klass != &fdk_entry_class_def || out_len == NULL) {
+        return NULL;
+    }
+    const fdk_entry *e = entry_of_const(w);
+    char *copy = fdk_alloc(e->len + 1u);
+    if (copy == NULL) {
+        return NULL;
+    }
+    memcpy(copy, e->text, e->len + 1u);
+    *out_len = e->len;
+    return copy;
+}
+
+/* The AT-SPI text-extents seam (C-2): the rect of the codepoint at
+ * byte `offset`, in the widget's LOCAL space (the bridge adds the
+ * root-absolute translation — the same space the paint walk uses,
+ * so the numbers the screen reader highlights are the numbers the
+ * caret renders at). Password mode reports bullet widths. Returns
+ * false when the offset is out of range or there is no font. */
+bool fdk__entry_text_char_rect(const fdk_widget *w, size_t offset,
+                               fdk_rect *out) {
+    if (w == NULL || w->klass != &fdk_entry_class_def || out == NULL) {
+        return false;
+    }
+    const fdk_entry *e = entry_of_const(w);
+    if (e->font == NULL || offset >= e->len) {
+        return false;
+    }
+    fdk_u32 cp = 0;
+    int step = fdk_text_utf8_next(e->text, e->len, offset, &cp);
+    if (step <= 0) {
+        return false;
+    }
+    size_t next = offset + (size_t)step; /* the STEP, not the offset */
+    fdk_i32 x0 = entry_width_to(e, offset);
+    fdk_i32 x1 = entry_width_to(e, next);
+    fdk_rect b = fdk_widget_get_absolute_bounds(w);
+    fdk_i32 baseline = fdk__center_baseline(e->font, b.y, b.height);
+    out->x = b.x + entry_text_inset(e) - e->x_offset + x0;
+    out->width = x1 - x0;
+    out->y = baseline - e->font->metrics.ascent;
+    out->height = e->font->metrics.ascent + e->font->metrics.descent;
+    return out->width >= 0 && out->height > 0;
+}
+
+/* The inverse: the byte offset whose caret boundary sits at local
+ * (x, y) — the same hit-test a mouse click runs, so the screen
+ * reader's "what's under the magnifier" answers exactly what a
+ * click would target. y selects nothing (single line); it is
+ * accepted for signature parity with the TextView seam. */
+bool fdk__entry_text_offset_at(const fdk_widget *w, fdk_i32 x, fdk_i32 y,
+                               size_t *out) {
+    if (w == NULL || w->klass != &fdk_entry_class_def || out == NULL) {
+        return false;
+    }
+    const fdk_entry *e = entry_of_const(w);
+    if (e->font == NULL) {
+        return false;
+    }
+    /* The seam's coordinates are ROOT-ABSOLUTE (the space the char
+     * rects report); the hit-test itself is widget-local — and a
+     * point outside the widget is refused outright. */
+    fdk_rect b = fdk_widget_get_absolute_bounds(w);
+    if (x < b.x || x >= b.x + b.width || y < b.y ||
+        y >= b.y + b.height) {
+        return false;
+    }
+    /* offset_at_x is const-honest in behavior (it shapes the text
+     * read-only) but warms the glyph cache through the font's
+     * const-laundering seam; route the cast through the ONE blessed
+     * helper instead of a raw cast here. */
+    *out = offset_at_x((fdk_entry *)(uintptr_t)e,
+                       (fdk_f32)(x - b.x));
+    return true;
 }
 
 /* Scroll so the caret (or the preedit end, when active) is visible;
@@ -1167,6 +1251,11 @@ static void entry_set_selection(fdk_entry *e, size_t anchor, size_t caret) {
     if (e->caret != old_caret || e->anchor != old_anchor) {
         fdk_widget_invalidate(&e->base);
         entry_primary_sync(e);
+        /* C-2: the AT-SPI text level's caret/selection signal source —
+         * every caret move (keys, mouse, IME, programmatic) and every
+         * selection change funnels through here, so ONE notify point
+         * covers them all. */
+        fdk__a11y_notify(&e->base, FDK_A11Y_CARET_MOVED, 0);
     }
 }
 

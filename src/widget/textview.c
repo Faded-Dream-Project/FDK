@@ -436,6 +436,115 @@ static size_t tv_offset_at_x(const fdk_textview *tv, size_t i,
     return off;
 }
 
+static size_t tv_offset_at(const fdk_textview *tv, fdk_f32 x,
+                           fdk_f32 y);
+
+/* The AT-SPI text-content seam (C-2): an owned copy of the whole
+ * text — the bridge's codepoint/byte conversion substrate. */
+char *fdk__textview_text_content(const fdk_widget *w, size_t *out_len) {
+    if (w == NULL || w->klass != &fdk_textview_class_def ||
+        out_len == NULL) {
+        return NULL;
+    }
+    const fdk_textview *tv = (const fdk_textview *)
+        (const void *)w;
+    char *copy = fdk_alloc(tv->len + 1u);
+    if (copy == NULL) {
+        return NULL;
+    }
+    memcpy(copy, tv->text, tv->len + 1u);
+    *out_len = tv->len;
+    return copy;
+}
+
+/* The AT-SPI text-extents seam (C-2): the rect of the codepoint at
+ * byte `offset`, root-absolute (the page child's bounds + the line
+ * geometry — the same numbers the paint walk draws at). Returns
+ * false when the offset is out of range or the view has no font. */
+bool fdk__textview_text_char_rect(const fdk_widget *w, size_t offset,
+                                  fdk_rect *out) {
+    if (w == NULL || w->klass != &fdk_textview_class_def ||
+        out == NULL) {
+        return false;
+    }
+    const fdk_textview *tv = (const fdk_textview *)
+        (const void *)w;
+    if (tv->font == NULL || tv->line_count == 0 || offset >= tv->len) {
+        return false;
+    }
+    size_t line = tv_line_of_offset(tv, offset);
+    const fdk_text_line *ln = &tv->lines[line];
+    if (offset < ln->byte_offset) {
+        return false;
+    }
+    /* The prefix width within the line: the same forward advance
+     * walk tv_offset_at_x runs backward. */
+    fdk_f32 pen = (fdk_f32)tv->pad;
+    size_t at = ln->byte_offset;
+    while (at < offset) {
+        fdk_u32 cp = 0;
+        int n = fdk_text_utf8_next(tv->text, tv->len, at, &cp);
+        if (n <= 0 || at + (size_t)n > offset) {
+            break;
+        }
+        fdk_text_metrics m;
+        if (!fdk_ok(fdk_font_measure_utf8(tv->font, tv->text + at,
+                                          (size_t)n, &m))) {
+            break;
+        }
+        pen += (fdk_f32)m.advance_width;
+        at += (size_t)n;
+    }
+    /* The codepoint's own width. */
+    fdk_f32 cpw = 1.0f;
+    if (at < ln->byte_offset + ln->byte_len) {
+        fdk_u32 cp = 0;
+        int n = fdk_text_utf8_next(tv->text, tv->len, at, &cp);
+        if (n > 0) {
+            fdk_text_metrics m;
+            if (fdk_ok(fdk_font_measure_utf8(tv->font, tv->text + at,
+                                             (size_t)n, &m))) {
+                cpw = (fdk_f32)m.advance_width;
+            }
+        }
+    }
+    fdk_rect page = fdk_widget_get_absolute_bounds(
+        tv->page != NULL ? tv->page : w);
+    out->x = page.x + (fdk_i32)(pen + 0.5f);
+    out->y = page.y + tv->pad + (fdk_i32)line * tv->line_h;
+    out->width = (fdk_i32)(cpw + 0.5f);
+    out->height = tv->line_h;
+    return out->width >= 0 && out->height > 0;
+}
+
+/* The inverse: the byte offset at root-absolute (x, y) — the same
+ * hit-test a mouse click runs (page-local coordinates through the
+ * page's absolute bounds). */
+bool fdk__textview_text_offset_at(const fdk_widget *w, fdk_i32 x,
+                                  fdk_i32 y, size_t *out) {
+    if (w == NULL || w->klass != &fdk_textview_class_def ||
+        out == NULL) {
+        return false;
+    }
+    const fdk_textview *tv = (const fdk_textview *)
+        (const void *)w;
+    if (tv->font == NULL || tv->line_count == 0) {
+        return false;
+    }
+    fdk_rect page = fdk_widget_get_absolute_bounds(
+        tv->page != NULL ? tv->page : w);
+    /* Outside the VIEW's own bounds (the visible text area) is
+     * refused; inside, the page-local hit-test answers. */
+    fdk_rect vb = fdk_widget_get_absolute_bounds(w);
+    if (x < vb.x || x >= vb.x + vb.width || y < vb.y ||
+        y >= vb.y + vb.height) {
+        return false;
+    }
+    *out = tv_offset_at(tv, (fdk_f32)(x - page.x),
+                        (fdk_f32)(y - page.y));
+    return true;
+}
+
 /* The byte offset at content (x, y): line from y, offset from x. */
 static size_t tv_offset_at(const fdk_textview *tv, fdk_f32 x,
                            fdk_f32 y) {
@@ -582,6 +691,10 @@ static void tv_set_selection(fdk_textview *tv, size_t anchor,
     tv->have_goal = false; /* an explicit selection clears the goal */
     tv_primary_sync(tv);
     fdk_widget_invalidate(&tv->base);
+    /* C-2: the caret/selection signal source — every motion and
+     * selection change funnels through here (the Entry's
+     * chokepoint discipline). */
+    fdk__a11y_notify(&tv->base, FDK_A11Y_CARET_MOVED, 0);
 }
 
 /* Caret move without selection change (motions): the Entry's

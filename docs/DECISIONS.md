@@ -1379,3 +1379,86 @@ Fences: CPAL palettes beyond 0 are not selectable (level-1 posture);
 the HSL blend quartet is implemented but unexercised by the shipped
 fixtures (no real-world font uses them for emoji); animated bitmap
 strikes do not exist; variable color fonts render at default.
+
+## D-027 — the AT-SPI text interface + relations export: level 2 of the bridge (C-2 / B-10)
+
+Date: 2026-10-29
+
+**The substrate was already there.** Level 1 (D-023) shipped the
+wire — roles, names, states, Component, Action — over the internal
+a11y tree, and the internal tree itself had carried the full text
+interface since 1.4.x (text_length/caret/selection/at through the
+class descriptor, Entry/TextView/Label/Spin implementing it) plus
+the symmetric relations API. C-2 is therefore mostly WIRE: what the
+bridge serves, what it converts, and the one internal notification
+the signals needed.
+
+**1. Offsets are CODEPOINTS on the wire, BYTES in the toolkit.** The
+AT-SPI Text interface's own documentation says "character offset...
+may differ from the number of bytes"; FDK's text interface is
+byte-based (the whole editor stack keys on byte offsets). Every Text
+method converts both ways through a whole-text copy
+(fdk__widget_text_content — an owned copy, dispatched per class, the
+read-only single-line classes served by their LINE run), and the
+conversion walks live only in the bridge's two helpers. The rig pins
+the one case that can silently rot: "h\xC3\xA9llo" answers
+GetCharacterCount = 5 while the byte length is 6, and SetCaretOffset
+(2) lands at byte 3.
+
+**2. The method surface.** GetCharacterCount, GetCaretOffset,
+SetCaretOffset, GetText, GetTextAt/Before/AfterOffset,
+GetCharacterAtOffset, GetStringAtOffset, the selection quartet
+(GetNSelections/GetSelection/AddSelection/SetSelection/
+RemoveSelection — one selection, the editor's own), the attribute
+family (empty dicts with honest run bounds — FDK's model has no text
+attributes at this level), GetCharacterExtents/GetRangeExtents,
+GetOffsetAtPoint, and the scroll pair answered honestly-false (the
+editors keep the caret visible themselves). GetBoundedRanges (the
+magnifier's clip-type matrix) and sentence boundaries are the
+documented fences.
+
+**3. Extents and the hit-test are REAL, not approximated** — through
+a new internal seam (fdk__widget_text_char_rect /
+fdk__widget_text_offset_at, dispatched in a11y.c): Entry serves the
+caret-width arithmetic it renders with (entry_width_to both sides of
+the codepoint, the center-baseline, the scroll offset), TextView the
+line cache and the page child's origin, and the read-only classes
+(Label, Spin) fall back to the widget's whole bounds — exact where
+the toolkit owns the geometry, honest where it does not. The
+hit-test is the SAME walk a mouse click runs, refused outside the
+widget. The offset_at coordinate space is root-absolute (the space
+the char rects report); the entry's own hit-test is widget-local —
+the seam subtracts.
+
+**4. Word runs and whitespace.** The internal WORD granularity
+returns the whitespace DELIMITED run — which for "hello dolly" means
+the run AT the space between the words IS the space. AT-SPI's
+GetTextBefore/AfterOffset semantics want the neighboring WORD, so
+the bridge hops across whitespace-only runs (back-first for AT, the
+direction of travel for BEFORE/AFTER, 4 hops capped). The rig pins
+Before(6) = "hello" and After(0) = "dolly" — the exact pair that
+fails without the hop.
+
+**5. Signals.** A new internal notification kind,
+FDK_A11Y_CARET_MOVED (append-only, public enum), fires from the
+Entry's and TextView's selection chokepoints — one notify point
+whatever moved the caret: keys, mouse, IME, programmatic, the a11y
+seam itself. The bridge maps it to TextCaretMoved +
+TextSelectionChanged; text EDITS arrive as VALUE_CHANGED on
+text-interface widgets and map to TextChanged with the generic
+"change" detail (insert/delete detail precision is a level-3 fence).
+The no-op rule is pinned: repeating the same caret/anchor state
+fires nothing.
+
+**6. Relations.** GetRelationSet serves the internal relations as
+a(ua(so)) — the AT-SPI numbers pinned against at-spi2-core's
+atspi-constants.h (LABEL_FOR 1, LABELLED_BY 2, CONTROLLER_FOR 3,
+CONTROLLED_BY 4, DESCRIPTION_FOR 17, DESCRIBED_BY 18), the targets
+as (app-unique-name, object-path) pairs resolved through the same
+ensure_widget_object registry every other method uses. The rig pins
+the classic case — label LABEL_FOR entry — in BOTH directions plus
+the symmetric removal.
+
+The interface-name prefix stays org.freedesktop.atspi.* (the level-1
+posture; at-spi2 accepts both prefixes, and the mock rig pins this
+one).

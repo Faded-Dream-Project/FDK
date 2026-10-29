@@ -762,3 +762,85 @@ void fdk__a11y_relations_destroyed(fdk_widget *widget) {
     widget->a11y_relation_count = 0;
     widget->a11y_relation_cap = 0;
 }
+
+/* ---- The AT-SPI text-extents seam dispatch (C-2, 1.1.0) -----------------
+ *
+ * Exact geometry where the toolkit owns the drawing (Entry: the
+ * caret-width arithmetic; TextView: the line cache + page origin);
+ * the whole widget's bounds as the documented fallback for read-only
+ * text classes (Label, Spin) and third-party text implementers. */
+
+bool fdk__widget_text_char_rect(const fdk_widget *w, size_t offset,
+                                fdk_rect *out) {
+    if (w == NULL || out == NULL ||
+        !fdk_a11y_has_text_interface(w)) {
+        return false;
+    }
+    if (w->klass == &fdk_entry_class_def) {
+        return fdk__entry_text_char_rect(w, offset, out);
+    }
+    if (w->klass == &fdk_textview_class_def) {
+        return fdk__textview_text_char_rect(w, offset, out);
+    }
+    /* Fallback: the widget's own bounds — a whole-control rect per
+     * character (the screen reader highlights the control; exact
+     * per-character geometry needs the class's own drawing math). */
+    size_t len = fdk_a11y_text_length(w);
+    if (offset >= len) {
+        return false;
+    }
+    *out = fdk_widget_get_absolute_bounds(w);
+    return true;
+}
+
+bool fdk__widget_text_offset_at(const fdk_widget *w, fdk_i32 root_x,
+                                fdk_i32 root_y, size_t *out) {
+    if (w == NULL || out == NULL ||
+        !fdk_a11y_has_text_interface(w)) {
+        return false;
+    }
+    if (w->klass == &fdk_entry_class_def) {
+        return fdk__entry_text_offset_at(w, root_x, root_y, out);
+    }
+    if (w->klass == &fdk_textview_class_def) {
+        return fdk__textview_text_offset_at(w, root_x, root_y, out);
+    }
+    /* Fallback: inside the bounds -> the caret offset (the honest
+     * point-target answer without class geometry). */
+    fdk_rect b = fdk_widget_get_absolute_bounds(w);
+    if (root_x < b.x || root_x >= b.x + b.width || root_y < b.y ||
+        root_y >= b.y + b.height) {
+        return false;
+    }
+    *out = fdk_a11y_text_caret(w);
+    return true;
+}
+
+char *fdk__widget_text_content(const fdk_widget *w, size_t *out_len) {
+    if (w == NULL || out_len == NULL ||
+        !fdk_a11y_has_text_interface(w)) {
+        return NULL;
+    }
+    if (w->klass == &fdk_entry_class_def) {
+        return fdk__entry_text_content(w, out_len);
+    }
+    if (w->klass == &fdk_textview_class_def) {
+        return fdk__textview_text_content(w, out_len);
+    }
+    /* Read-only single-line classes (Label, Spin): the LINE run at
+     * offset 0 IS the whole text. Sized by the reported length. */
+    size_t len = fdk_a11y_text_length(w);
+    char *buf = fdk_alloc(len + 1u);
+    if (buf == NULL) {
+        return NULL;
+    }
+    size_t start = 0, end = 0;
+    if (!fdk_a11y_text_at_offset(w, 0, FDK_A11Y_TEXT_LINE, buf,
+                                 len + 1u, &start, &end)) {
+        fdk_free(buf);
+        return NULL;
+    }
+    buf[end < len ? end : len] = '\0';
+    *out_len = strlen(buf);
+    return buf;
+}

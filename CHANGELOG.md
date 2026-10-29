@@ -14,6 +14,30 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — the AT-SPI Text interface + relations export (C-2 / B-10, level 2)
+
+- **Screen readers can read and drive text.** The accessibility
+  bridge now serves `org.freedesktop.atspi.Text` on every
+  text-bearing widget (Entry, TextView, Label, SpinButton): the full
+  method surface — text content and runs at character/word/line
+  granularity, the caret (read AND set), the selection, per-character
+  extents in desktop coordinates, and the point hit-test (the same
+  walk a mouse click runs).
+- **AT-SPI offsets are codepoints; FDK's are bytes** — every method
+  converts both ways, pinned by the multibyte rig leg ("héllo"
+  answers 5 characters over a 6-byte buffer).
+- **The text signals**: `TextCaretMoved` and `TextSelectionChanged`
+  fire on every caret/selection move (whatever moved it — keys,
+  mouse, IME, programmatic, the screen reader itself); `TextChanged`
+  fires on edits.
+- **`GetRelationSet`**: the internal relations export to AT-SPI's
+  relation numbers (pinned against at-spi2-core's own constants) —
+  a Label's `LABEL_FOR` an Entry, discoverable from either side.
+- One internal notification kind appended to the public a11y event
+  enum (`FDK_A11Y_CARET_MOVED`); no other public API change (848
+  exports). Tests: 3 new live-bus legs + 2 headless legs.
+  docs/DECISIONS.md D-027.
+
 ### Added — color glyphs: emoji in every family the desktop meets (C-3 / B-02)
 
 - **Color emoji render** in `fdk_surface_draw_utf8` and every widget

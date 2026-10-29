@@ -808,6 +808,18 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **The AT-SPI text interface + relations export: SHIPPED (1.1.0,
+  C-2 / B-10 level 2)** — org.freedesktop.atspi.Text on the bridge
+  (the full method surface; CODEPOINT<->BYTE conversion with the
+  multibyte pin; per-character extents + hit-test through the
+  internal fdk__widget_text_char_rect/offset_at seam — Entry's caret
+  arithmetic, TextView's line cache, whole-bounds fallback for
+  read-only classes; the whitespace hop for word runs);
+  FDK_A11Y_CARET_MOVED (the public enum append) as the signal source
+  -> TextCaretMoved/TextSelectionChanged, VALUE_CHANGED-on-text ->
+  TextChanged; GetRelationSet with the AT-SPI relation numbers pinned
+  against at-spi2-core's constants. D-027; rigs: 3 live-bus legs + 2
+  headless legs (incl. the no-op rule).
 - **Color glyphs (emoji): SHIPPED (1.1.0, C-3 / B-02)** —
   COLRv0/v1 + CPAL, CBDT/CBLC, and sbix, all parsed natively
   (src/text/emoji.c) with layouts pinned against fontTools; the RGBA

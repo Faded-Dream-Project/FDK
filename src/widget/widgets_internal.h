@@ -652,3 +652,38 @@ extern const fdk_widget_class fdk_spin_class_def;
  * The window layer rides it BELOW an explicit app request and ABOVE
  * the resize compass (fdk__cursor_resolve, window_internal.h). */
 int fdk__widget_tree_hover_cursor(fdk_widget *root);
+
+/* ---- The AT-SPI text-extents seam (C-2, 1.1.0) ------------------------
+ *
+ * Per-character geometry for the text-interface widgets, in the same
+ * root-absolute space fdk_a11y_describe's bounds use — the bridge
+ * (src/desktop/atspi.c) adds the window origin for desktop
+ * coordinates. The fallback for read-only text classes (Label, Spin)
+ * and third-party text implementers is the widget's whole bounds:
+ * exact where the toolkit owns the geometry, honest where it does
+ * not. offset_at is the same hit-test a mouse click runs. */
+
+bool fdk__widget_text_char_rect(const fdk_widget *w, size_t offset,
+                                fdk_rect *out);
+bool fdk__widget_text_offset_at(const fdk_widget *w, fdk_i32 root_x,
+                                fdk_i32 root_y, size_t *out);
+
+/* The class-specific implementations the dispatch routes to
+ * (entry.c / textview.c; both root-absolute). */
+bool fdk__entry_text_char_rect(const fdk_widget *w, size_t offset,
+                               fdk_rect *out);
+bool fdk__entry_text_offset_at(const fdk_widget *w, fdk_i32 x,
+                               fdk_i32 y, size_t *out);
+bool fdk__textview_text_char_rect(const fdk_widget *w, size_t offset,
+                                  fdk_rect *out);
+bool fdk__textview_text_offset_at(const fdk_widget *w, fdk_i32 x,
+                                  fdk_i32 y, size_t *out);
+char *fdk__entry_text_content(const fdk_widget *w, size_t *out_len);
+char *fdk__textview_text_content(const fdk_widget *w, size_t *out_len);
+
+/* The dispatch: an fdk_alloc'd NUL-terminated copy of the widget's
+ * whole text (free with fdk_free); *out_len receives the byte
+ * length. NULL when the widget has no text interface or on
+ * allocation failure. Read-only single-line classes fall back to
+ * the LINE run at offset 0. */
+char *fdk__widget_text_content(const fdk_widget *w, size_t *out_len);
