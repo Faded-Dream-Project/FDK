@@ -325,39 +325,69 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key,
     int glyph_index = key / FDK_TEXT_KEY_STRIDE;
     int phase = (key % FDK_TEXT_KEY_STRIDE) % FDK_TEXT_SUBPIXEL_PHASES;
 
-    /* Rasterize with stb at the font's baked-in scale, shifted by the
-     * subpixel phase (Phase 6 completion): the bitmap lands where the
-     * float pen actually is (within 1/8 px) instead of snapping to
-     * whole pixels. The returned xoff already includes the shift, so
-     * callers keep placing at pen_x + xoff with pen_x = floor(pen).
-     * CFF faces route through the native interpreter but the
-     * same stb rasterizer — the bitmap contract is identical. */
+    /* C-3: color glyphs rasterize through the emoji module — the
+     * bitmap is straight RGBA8 carrying its own colors, so neither
+     * the outline rasterizer (which would draw the reference outline
+     * glyph mono) nor the synthetic style pass (bold dilation and
+     * oblique shear are outline concepts; an emoji is an image — the
+     * style flags still KEY the cache entry so a styled run cannot
+     * collide with an unstyled one) applies. The subpixel phase is
+     * ignored for images (whole-pixel placement is correct for
+     * bitmaps). */
+    bool color = font->emoji != NULL &&
+                 fdk__emoji_is_color_glyph(font->emoji, glyph_index);
     int w = 0, h = 0;
     fdk_i32 xoff = 0, yoff = 0;
-    fdk_u8 *bits = font->cff != NULL
+    fdk_u8 *bits = NULL;
+    if (color) {
+        bits = fdk__emoji_rasterize(font->emoji, &font->info, font->cff,
+                                    glyph_index, font->scale, &w, &h,
+                                    &xoff, &yoff);
+        if (bits == NULL) {
+            color = false; /* no color ink after all: fall through */
+        }
+    }
+    int advance_raw = 0;
+    stbtt_GetGlyphHMetrics(&font->info, glyph_index, &advance_raw, NULL);
+    fdk_f32 advance = (fdk_f32)advance_raw * font->scale;
+
+    if (!color) {
+        /* Rasterize with stb at the font's baked-in scale, shifted by
+         * the subpixel phase (Phase 6 completion): the bitmap lands
+         * where the float pen actually is (within 1/8 px) instead of
+         * snapping to whole pixels. The returned xoff already includes
+         * the shift, so callers keep placing at pen_x + xoff with
+         * pen_x = floor(pen). CFF faces route through the native
+         * interpreter but the same stb rasterizer — the bitmap
+         * contract is identical. A bitmap-only face has no outlines:
+         * every glyph it cannot serve from its strikes is ink-less
+         * (the advance still stands). */
+        if (!font->bitmap_only) {
+            bits = font->cff != NULL
                        ? cff_glyph_bitmap(font, glyph_index, phase,
                                           &w, &h, &xoff, &yoff)
                        : stbtt_GetGlyphBitmapSubpixel(
                              &font->info, 0, font->scale,
                              (fdk_f32)phase * 0.25f, 0.0f, glyph_index,
                              &w, &h, &xoff, &yoff);
-    int advance_raw = 0;
-    stbtt_GetGlyphHMetrics(&font->info, glyph_index, &advance_raw, NULL);
-    fdk_f32 advance = (fdk_f32)advance_raw * font->scale;
-
-    /* Synthetic styles — applied to the bitmap and (for bold) the
-     * advance, before the entry is cached, so measure and draw agree
-     * by construction. 1.4.11: the REQUESTED style is baked in, not
-     * the font's current one — the key's variant component keeps
-     * regular/bold/italic rasters of the same glyph distinct. */
-    if (bits != NULL && w > 0 && h > 0) {
-        if ((style_flags & FDK_FONT_STYLE_BOLD) != 0) {
-            int stem = fdk__text_bold_stem(font);
-            bits = synthesize_bold(bits, w, h, stem, &w);
-            advance += (fdk_f32)stem;
         }
-        if ((style_flags & FDK_FONT_STYLE_ITALIC) != 0) {
-            bits = synthesize_italic(bits, w, h, yoff, xoff, &w, &xoff);
+
+        /* Synthetic styles — applied to the bitmap and (for bold) the
+         * advance, before the entry is cached, so measure and draw
+         * agree by construction. 1.4.11: the REQUESTED style is baked
+         * in, not the font's current one — the key's variant
+         * component keeps regular/bold/italic rasters of the same
+         * glyph distinct. */
+        if (bits != NULL && w > 0 && h > 0) {
+            if ((style_flags & FDK_FONT_STYLE_BOLD) != 0) {
+                int stem = fdk__text_bold_stem(font);
+                bits = synthesize_bold(bits, w, h, stem, &w);
+                advance += (fdk_f32)stem;
+            }
+            if ((style_flags & FDK_FONT_STYLE_ITALIC) != 0) {
+                bits = synthesize_italic(bits, w, h, yoff, xoff, &w,
+                                         &xoff);
+            }
         }
     }
 
@@ -367,6 +397,7 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key,
     slot->xoff = xoff;
     slot->yoff = yoff;
     slot->advance = advance;
+    slot->color = color;
     slot->bits = bits; /* stb malloc'd (routed to fdk_alloc); may be NULL */
     font->clock++;
     slot->last_used = font->clock;
@@ -765,12 +796,27 @@ fdk_font *fdk_text_font_load_face(const char *path, long face_index,
     }
 
     if (!stbtt_InitFont(&font->info, data, (int)face_offset)) {
-        FDK_ERROR("fdk_font_load: %s rejected by the font parser",
-                  path);
-        fdk__cff_destroy(cff);
-        fdk_free(font);
-        fdk_free(data);
-        return NULL;
+        /* C-3: a bitmap-only color face (no glyf, no CFF — the
+         * fonts-noto-color-emoji posture) has no outlines for stb's
+         * init to require, but its cmap/hmtx/hhea/head/maxp are all
+         * present and the CBDT strikes carry the ink. Fill the info
+         * by hand; the outline rasterizer is fenced off
+         * (font->bitmap_only) and every glyph routes through the
+         * emoji module. */
+        if (cff == NULL &&
+            fdk__emoji_bitmap_only_face(data, size,
+                                        (size_t)face_offset) &&
+            fdk__emoji_fill_info(&font->info, data, size,
+                                 (size_t)face_offset)) {
+            font->bitmap_only = true;
+        } else {
+            FDK_ERROR("fdk_font_load: %s rejected by the font parser",
+                      path);
+            fdk__cff_destroy(cff);
+            fdk_free(font);
+            fdk_free(data);
+            return NULL;
+        }
     }
 
     if (cff != NULL) {
@@ -790,6 +836,11 @@ fdk_font *fdk_text_font_load_face(const char *path, long face_index,
             return NULL;
         }
     }
+
+    /* C-3: attach the color-table view (COLR/CPAL, CBDT/CBLC, sbix)
+     * — NULL for the plain outline faces every text font is. Borrows
+     * `data`; destroyed in fdk_font_destroy BEFORE the bytes go. */
+    font->emoji = fdk__emoji_parse(data, size, (size_t)face_offset);
 
     font->file_data = data;
     font->file_size = size;
@@ -824,9 +875,11 @@ void fdk_font_destroy(fdk_font *font) {
     }
     /* The HarfBuzz blob references file_data READ-ONLY and the
      * fallback fonts are owned by this font — both must go before
-     * the bytes do. The CFF view also borrows the bytes. */
+     * the bytes do. The CFF view and the emoji view also borrow the
+     * bytes. */
     fdk__shaping_font_destroy(font);
     fdk__cff_destroy(font->cff);
+    fdk__emoji_destroy(font->emoji);
     for (int i = 0; i < font->glyph_count; i++) {
         fdk_free(font->glyphs[i].bits);
     }
@@ -1014,8 +1067,15 @@ fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
             glyph->w,
             glyph->h,
         };
-        fdk_surface_blend_mask(surface, dst, glyph->bits, glyph->w,
-                               color);
+        if (glyph->color) {
+            /* C-3: the glyph carries its own pixels — composite the
+             * RGBA straight-over; the run color tints nothing. */
+            fdk_surface_blend_rgba(surface, dst, glyph->bits,
+                                   glyph->w * 4);
+        } else {
+            fdk_surface_blend_mask(surface, dst, glyph->bits, glyph->w,
+                                   color);
+        }
         if (!any) {
             ux0 = dst.x;
             uy0 = dst.y;

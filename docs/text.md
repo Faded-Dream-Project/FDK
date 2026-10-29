@@ -380,8 +380,62 @@ Recorded on the roadmap, in rough dependency order:
   module above; CFF2 renders at the default instance — variation
   instances are roadmap material with the rest of variable-font
   support).
-- Colored glyphs (emoji), SDF rendering, hinting, variable-font
-  instances beyond the default.
+- ~~Colored glyphs (emoji)~~ — SHIPPED (the color-glyph module
+  below; SDF rendering, hinting, and variable-font instances beyond
+  the default stay roadmap material).
+
+## Color glyphs — emoji (C-3, 1.1.0)
+
+`src/text/emoji.c` parses the three color-glyph families the Linux
+desktop actually meets — all natively from the public OpenType
+specifications, every field layout pinned against fontTools (the
+reference implementation; it generated the test fixtures):
+
+- **COLRv0 + CPAL** — the layer-list format. A base glyph maps to
+  layer records (outline glyph + palette index); the layers
+  composite source-over bottom-to-top through the SAME stb
+  rasterizer mono text uses (color and mono coverage are
+  pixel-identical by construction).
+- **COLRv1 + CPAL** — the paint-graph format. The engine evaluates
+  the graph per pixel into depth-indexed scratch buffers: glyph
+  clips, solid/linear/radial/sweep fills (evaluated in the paint's
+  own coordinate space through the inverse accumulated transform),
+  every transform flavor (rotate/skew route through a supersampled
+  nonzero-winding rasterizer; axis-aligned transforms ride stb's own
+  rasterizer), PaintColrGlyph reuse, clip boxes, and the 28 W3C
+  blend modes. Variable (PaintVar*) paints render at the DEFAULT
+  instance — the deltas are skipped, matching the toolkit's
+  no-variable-fonts posture. Palette index 0xFFFF ("the foreground
+  color") renders opaque black: the glyph cache has no per-draw
+  color context to thread a foreground through (FreeType's own
+  default), and only palette 0 is read.
+- **CBDT/CBLC and sbix** — bitmap strikes (PNG payloads decoded
+  through the same stb_image path the clipboard rides). Strike
+  selection by log-ratio against the requested pixels-per-em;
+  downscaling is a box filter with exact fractional coverage, upscaling
+  bilinear.
+
+A color glyph's cache entry carries straight-RGBA8 pixels and
+composites through `fdk_surface_blend_rgba` (internal) — the run
+color tints nothing. The public API is unchanged. Synthetic
+bold/italic do not apply (they are outline concepts; an emoji is an
+image). `$FDK_NO_COLOR_GLYPHS=1` disables the color path for OUTLINE
+faces (the reference glyph draws mono, tinted); bitmap-only faces
+ignore it.
+
+**The bitmap-only loader gate**: a face with no glyf and no CFF but
+a real CBDT/CBLC pair — the fonts-noto-color-emoji posture, 10.5 MB
+of PNG strikes and zero outlines — loads. stbtt_InitFont's outline
+requirement is bypassed and the stbtt_fontinfo hand-filled (cmap
+subtable selection walks stb's own preference order), so glyph ids,
+advances, and metrics answer exactly as for an outline face; the
+outline rasterizer is fenced off (`font->bitmap_only`).
+
+The shaping pipeline routes emoji to an emoji font through the script
+table's Zsye bucket (Extended_Pictographic ranges; fontconfig
+`und-zsye` ranking with a charset probe doing the decisive filter) —
+a text-presentation symbol the primary font covers still resolves to
+the primary. `tests/test_emoji.c` is the rig.
 
 ## Testing
 

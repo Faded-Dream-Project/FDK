@@ -88,14 +88,70 @@ bool fdk__cff_glyph_box(fdk_cff_font *f, int gid, int *x0, int *y0,
 #define FDK_TEXT_KEY_STRIDE \
     (FDK_TEXT_SUBPIXEL_PHASES * FDK_TEXT_STYLE_VARIANTS)
 
+/* ---- Color glyphs (src/text/emoji.c — C-3, 1.1.0) --------------------
+ *
+ * COLRv0/v1 + CPAL, CBDT/CBLC, and sbix, parsed natively from the
+ * public specifications. A glyph the FACE marks as color rasterizes
+ * to a straight-alpha RGBA8 bitmap (fdk_glyph.color set) instead of
+ * an alpha mask; the draw path composites it with the pixels' own
+ * colors. Borrowed-file view: destroyed before file_data. */
+
+typedef struct fdk_emoji_font fdk_emoji_font;
+
+/* Parses the color tables of an sfnt face. Returns NULL when the
+ * face has none (the normal case — every text font in existence).
+ * $FDK_NO_COLOR_GLYPHS=1 returns an inert view (see emoji.c). */
+fdk_emoji_font *fdk__emoji_parse(const fdk_u8 *file, size_t file_size,
+                                 size_t face_off);
+
+/* NULL-safe; the views borrow the file bytes. */
+void fdk__emoji_destroy(fdk_emoji_font *e);
+
+/* Does this glyph id carry color in this face? */
+bool fdk__emoji_is_color_glyph(const fdk_emoji_font *e, int glyph);
+
+/* Rasterizes a color glyph to an fdk_alloc'd straight-RGBA8 w*h*4
+ * bitmap (or NULL when the glyph has no color ink after all).
+ * `info` supplies hmtx/cmap context (and outlines for COLR layer
+ * glyphs on glyf faces); `cff` the outlines on CFF faces. */
+fdk_u8 *fdk__emoji_rasterize(const fdk_emoji_font *e,
+                             const stbtt_fontinfo *info,
+                             fdk_cff_font *cff, int glyph, fdk_f32 scale,
+                             int *out_w, int *out_h, fdk_i32 *out_xoff,
+                             fdk_i32 *out_yoff);
+
+/* The glyph's ink box in FONT units (HarfBuzz extents for
+ * bitmap-only faces; COLR clip boxes for color outline faces).
+ * False when there is no box. */
+bool fdk__emoji_glyph_box(const fdk_emoji_font *e,
+                          const stbtt_fontinfo *info, fdk_cff_font *cff,
+                          int glyph, int *x0, int *y0, int *x1, int *y1);
+
+/* The bitmap-only gate: no glyf AND no CFF but a CBDT/CBLC pair —
+ * the Noto Color Emoji posture (10 MB of PNG strikes, zero outlines).
+ * Such a face skips stbtt_InitFont's outline requirement and gets a
+ * hand-filled stbtt_fontinfo (cmap/hmtx/hhea/head from the emoji
+ * module's own directory walk). */
+bool fdk__emoji_bitmap_only_face(const fdk_u8 *file, size_t file_size,
+                                 size_t face_off);
+
+/* Hand-fills a stbtt_fontinfo for a bitmap-only face (the companion
+ * to the gate above): stb's cmap/hmtx/hhea/head machinery with the
+ * outline tables zeroed. No outline operation may run against the
+ * result. */
+bool fdk__emoji_fill_info(stbtt_fontinfo *info, const fdk_u8 *file,
+                          size_t file_size, size_t face_off);
+
 /* A rasterized glyph, cached. `xoff`/`yoff` are stb's bitmap-box
  * offsets: where the bitmap's top-left sits relative to the pen
  * position (xoff) and the baseline (yoff; <= 0 means above it).
  * `advance` is the scaled horizontal advance in pixels (float —
  * rounding happens once per glyph placement, never inside the
  * accumulation). `bits` is the w*h alpha bitmap (row-major, 1 byte
- * per pixel, stride == w); NULL when the glyph has no ink (space,
- * combining marks with empty bitmaps) — such glyphs still advance. */
+ * per pixel, stride == w) — or the w*h*4 straight-RGBA bitmap when
+ * `color` is set (C-3: color glyphs carry their own pixels); NULL
+ * when the glyph has no ink (space, combining marks with empty
+ * bitmaps) — such glyphs still advance. */
 typedef struct fdk_glyph {
     int key;              /* cache key: glyph*STRIDE + variant*PHASES
                                  + phase (see FDK_TEXT_KEY_STRIDE) */
@@ -103,6 +159,7 @@ typedef struct fdk_glyph {
     fdk_i32 xoff, yoff;
     fdk_f32 advance;
     fdk_u8 *bits;         /* fdk_alloc'd; NULL iff w*h == 0 */
+    bool color;           /* C-3: bits is RGBA8, not an alpha mask */
     fdk_u64 last_used;    /* LRU clock; bumped on every hit */
 } fdk_glyph;
 
@@ -114,6 +171,14 @@ struct fdk_font {
     fdk_cff_font *cff;         /* the parsed CFF/CFF2 view for
                                    'OTTO' faces; NULL for glyf faces.
                                    Borrows file_data (destroyed first). */
+    fdk_emoji_font *emoji;     /* the parsed color-table view (C-3);
+                                   NULL for plain outline faces.
+                                   Borrows file_data (destroyed first). */
+    bool bitmap_only;          /* CBDT-only face: no glyf, no CFF —
+                                   stbtt_InitFont was skipped and the
+                                   info hand-filled. Glyph ink comes
+                                   from the strikes alone; the outline
+                                   rasterizer must never run. */
     fdk_f32 scale;              /* font units -> pixels (pixel size) */
     fdk_i32 pixel_size;
     unsigned style;             /* fdk_font_style flags (synthetic) */

@@ -1247,6 +1247,86 @@ void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
     }
 }
 
+/* RGBA blit — the color-glyph compositing primitive (C-3). See
+ * surface_internal.h's contract comment. Straight source-over with
+ * the same integer rounding discipline blend_mask's ARGB branch
+ * uses; fully transparent pixels skip the write (the sparse case in
+ * emoji bitmaps — the padding around the drawn image). */
+void fdk_surface_blend_rgba(fdk_surface *surface, fdk_rect rect,
+                            const fdk_u8 *rgba, fdk_i32 rgba_stride) {
+    if (surface == NULL || rgba == NULL || rect.width <= 0 ||
+        rect.height <= 0 || rgba_stride < rect.width * 4) {
+        return;
+    }
+    if (!fdk_ok(surface_acquire(surface))) {
+        return;
+    }
+
+    int x0, y0, x1, y1;
+    if (!clip_rect(surface, rect, &x0, &y0, &x1, &y1)) {
+        return;
+    }
+
+    bool argb = surface->format == FDK_SURFACE_FORMAT_ARGB8888;
+    for (int y = y0; y < y1; y++) {
+        const fdk_u8 *srow =
+            rgba + (size_t)(y - rect.y) * (size_t)rgba_stride +
+            (size_t)(x0 - rect.x) * 4u;
+        fdk_u32 *drow = surface->fb.pixels +
+                        (size_t)y * (size_t)surface->fb.stride +
+                        (size_t)x0;
+        int n = x1 - x0;
+        for (int i = 0; i < n; i++) {
+            const fdk_u8 *s = srow + (size_t)i * 4u;
+            fdk_u32 sa = s[3];
+            if (sa == 0) {
+                continue;
+            }
+            if (sa == 255 && argb) {
+                drow[i] = ((fdk_u32)sa << 24) | ((fdk_u32)s[0] << 16) |
+                          ((fdk_u32)s[1] << 8) | (fdk_u32)s[2];
+                continue;
+            }
+            fdk_u32 d = drow[i];
+            if (argb) {
+                fdk_u32 da = (d >> 24) & 0xFFu;
+                fdk_u32 out_a = sa + da * (255u - sa) / 255u;
+                if (out_a == 0) {
+                    drow[i] = 0;
+                    continue;
+                }
+                fdk_u32 dr = (d >> 16) & 0xFFu;
+                fdk_u32 dg = (d >> 8) & 0xFFu;
+                fdk_u32 db = d & 0xFFu;
+                fdk_u32 r = ((fdk_u32)s[0] * sa +
+                             dr * da * (255u - sa) / 255u) /
+                            out_a;
+                fdk_u32 g = ((fdk_u32)s[1] * sa +
+                             dg * da * (255u - sa) / 255u) /
+                            out_a;
+                fdk_u32 b = ((fdk_u32)s[2] * sa +
+                             db * da * (255u - sa) / 255u) /
+                            out_a;
+                drow[i] = (out_a << 24) | (r << 16) | (g << 8) | b;
+            } else {
+                /* XRGB: opaque destination — blend channels, keep
+                 * the alpha byte opaque (the blend_mask posture). */
+                fdk_u32 dr = (d >> 16) & 0xFFu;
+                fdk_u32 dg = (d >> 8) & 0xFFu;
+                fdk_u32 db = d & 0xFFu;
+                fdk_u32 r = ((fdk_u32)s[0] * sa +
+                             dr * (255u - sa) + 127u) / 255u;
+                fdk_u32 g = ((fdk_u32)s[1] * sa +
+                             dg * (255u - sa) + 127u) / 255u;
+                fdk_u32 b = ((fdk_u32)s[2] * sa +
+                             db * (255u - sa) + 127u) / 255u;
+                drow[i] = ((fdk_u32)r << 16) | ((fdk_u32)g << 8) |
+                          (fdk_u32)b;
+            }
+        }
+    }
+}
+
 fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
                             fdk_surface *src, fdk_rect src_rect) {
     if (dst == NULL || src == NULL || src_rect.width <= 0 ||

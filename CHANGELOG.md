@@ -14,6 +14,43 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — color glyphs: emoji in every family the desktop meets (C-3 / B-02)
+
+- **Color emoji render** in `fdk_surface_draw_utf8` and every widget
+  that draws text: a glyph the FACE marks as color (COLR table entry,
+  CBDT bitmap strike, or sbix strike) rasterizes as a straight-RGBA8
+  bitmap carrying its own colors instead of a tinted alpha mask.
+  Three wire families, all parsed natively from the public OpenType
+  specifications: **COLRv0 + CPAL** (layer lists — Twemoji-COLR and
+  the older Noto builds), **COLRv1 + CPAL** (the full paint graph:
+  solid/linear/radial/sweep fills, every transform flavor including
+  rotate/skew, the 28 W3C blend modes, PaintColrGlyph reuse, clip
+  boxes), and **CBDT/CBLC + sbix** (bitmap strikes — PNG payloads
+  decoded through the same stb_image path the clipboard rides,
+  log-ratio strike selection, box-filter downscale, bilinear
+  upscale).
+- **`fonts-noto-color-emoji` loads and draws.** That font — the
+  default emoji font across the Linux desktop — has no outline
+  tables at all (10.5 MB of PNG strikes, no glyf), which the font
+  loader previously rejected outright. The loader now recognizes the
+  bitmap-only posture, hand-fills the glyph/cmap/metrics machinery,
+  and serves every glyph from its strikes.
+- **Emoji fallback routing**: the shaping pipeline's script table
+  grows the emoji bucket (Extended_Pictographic ranges, fontconfig
+  `und-zsye` + a charset probe), so an emoji in a plain text run
+  pulls the emoji font the way CJK pulls a CJK font. Palette index
+  0xFFFF (foreground) renders opaque black; variable color fonts
+  render at the default instance.
+- **`$FDK_NO_COLOR_GLYPHS=1`** disables the color path for outline
+  faces (the escape hatch: the reference outline draws mono, tinted
+  with the run color). Bitmap-only faces ignore it — their strikes
+  are the only ink there is.
+- Public API: **unchanged** (848 exports) — the feature is internal
+  to the text pipeline by design. Tests: `tests/test_emoji.c` against
+  fontTools-generated fixtures (the reference implementation wrote
+  every wire byte the C parser reads), plus a smoke leg against the
+  real Noto Color Emoji. docs/DECISIONS.md D-026.
+
 ### Added — basic gestures: pinch + swipe (C-6 / B-17)
 
 - **`FDK_EVENT_GESTURE_PINCH`** (fdk_event.h): while exactly two

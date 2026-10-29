@@ -374,6 +374,11 @@ static const sh_script_def sh_scripts[] = {
     {"Khmr", "km", "Khmer"},     {"Hani", "zh", "Han"},
     {"Hira", "ja", "Hiragana"},  {"Kana", "ja", "Katakana"},
     {"Hang", "ko", "Hangul"},
+    {"Zsye", "und-zsye", "Emoji"}, /* C-3: the color-glyph bucket —
+                                       fontconfig's registered emoji
+                                       lang; the charset filter (probe
+                                       codepoint) does the decisive
+                                       work, the lang only ranks */
 };
 #define SH_N_SCRIPTS ((int)(sizeof sh_scripts / sizeof sh_scripts[0]))
 #define SH_SCRIPT_COMMON (-1)
@@ -409,6 +414,13 @@ static const sh_range sh_ranges[] = {
     {0x30A0, 0x30FF, 27}, {0x31F0, 0x31FF, 27},
     {0x1100, 0x11FF, 28}, {0x3130, 0x318F, 28}, {0xA960, 0xA97F, 28},
     {0xAC00, 0xD7FF, 28},
+    /* Emoji (script 29): the Extended_Pictographic core — the
+     * blocks the emoji presentation sequences live in. Symbols in
+     * 2600-27BF whose default is TEXT presentation still resolve to
+     * the primary font when it covers them (the fdk__font_covers
+     * gate); VS16 (FE0F) stays "common" and inherits its segment. */
+    {0x2600, 0x27BF, 29}, {0x2B00, 0x2B55, 29},
+    {0x1F000, 0x1FAFF, 29}, {0x1FB00, 0x1FBFF, 29},
 };
 
 static int sh_script_of(fdk_u32 cp) {
@@ -547,11 +559,26 @@ static hb_bool_t sh_fn_extents(hb_font_t *font, void *font_data,
     /* CFF-flavored faces have no glyf table, so stbtt_GetGlyphBox
      * cannot answer for them — the native box (same ink fields a
      * glyf xMin..yMax box covers) steps in (src/text/cff.c). */
-    bool have = f->cff != NULL
-                    ? fdk__cff_glyph_box(f->cff, (int)glyph, &x0, &y0,
-                                         &x1, &y1)
-                    : stbtt_GetGlyphBox(&f->info, (int)glyph, &x0, &y0,
-                                        &x1, &y1);
+    bool have;
+    if (f->bitmap_only ||
+        (f->emoji != NULL &&
+         fdk__emoji_is_color_glyph(f->emoji, (int)glyph))) {
+        /* C-3: color glyphs (and every glyph of a bitmap-only face)
+         * take their box from the emoji module — strikes or clip
+         * boxes, in font units like every other box here. */
+        have = fdk__emoji_glyph_box(f->emoji, &f->info, f->cff,
+                                    (int)glyph, &x0, &y0, &x1, &y1);
+    } else if (f->cff != NULL) {
+        /* CFF-flavored faces have no glyf table, so
+         * stbtt_GetGlyphBox cannot answer for them — the native box
+         * (same ink fields a glyf xMin..yMax box covers) steps in
+         * (src/text/cff.c). */
+        have = fdk__cff_glyph_box(f->cff, (int)glyph, &x0, &y0, &x1,
+                                  &y1);
+    } else {
+        have = stbtt_GetGlyphBox(&f->info, (int)glyph, &x0, &y0, &x1,
+                                 &y1) != 0;
+    }
     if (!have) {
         memset(extents, 0, sizeof *extents);
         return 0;

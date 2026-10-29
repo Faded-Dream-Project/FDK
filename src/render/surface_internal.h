@@ -135,6 +135,17 @@ void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
                             const fdk_u8 *mask, fdk_i32 mask_stride,
                             fdk_color color);
 
+/* RGBA blit (internal, C-3) — the color-glyph twin of blend_mask:
+ * composites a straight-alpha RGBA8 buffer (4 bytes per pixel,
+ * `rgba_stride` in bytes) source-over across `rect` (also the
+ * buffer's coordinate frame). Same clip discipline, same
+ * no-damage-bookkeeping contract (the text layer unions glyph boxes).
+ * XRGB destinations get the opaque-result arithmetic (source alpha
+ * still blends the channels; the destination alpha bit stays opaque).
+ * Implemented in surface.c. */
+void fdk_surface_blend_rgba(fdk_surface *surface, fdk_rect rect,
+                            const fdk_u8 *rgba, fdk_i32 rgba_stride);
+
 /* Global-alpha blit (1.4.3) — source-over compositing of a WHOLE
  * source surface at (dst_x, dst_y) with every source pixel's alpha
  * scaled by `alpha` (0..1): the paint-group atom the widget layer

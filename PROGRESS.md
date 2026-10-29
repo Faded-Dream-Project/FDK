@@ -808,6 +808,18 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **Color glyphs (emoji): SHIPPED (1.1.0, C-3 / B-02)** —
+  COLRv0/v1 + CPAL, CBDT/CBLC, and sbix, all parsed natively
+  (src/text/emoji.c) with layouts pinned against fontTools; the RGBA
+  glyph cache entry (fdk_surface_blend_rgba composites it; the public
+  API unchanged at 848); THE BITMAP-ONLY LOADER GATE —
+  fonts-noto-color-emoji (no glyf at all) loads and draws; the
+  COLRv1 paint engine (gradients in paint space, affine coverage for
+  rotate/skew, all 28 W3C blend modes); strike selection + box-filter
+  downscale; the Zsye shaping fallback bucket;
+  $FDK_NO_COLOR_GLYPHS=1 escape hatch. D-026; rig: test_emoji
+  (COLRv0 math, every v1 paint family, CBDT strikes, the real-Noto
+  smoke leg, the truncation sweep).
 - **Basic gestures (pinch + swipe): SHIPPED (1.1.0, C-6 / B-17)** —
   FDK_EVENT_GESTURE_PINCH (span arithmetic on the two-slot posture,
   scroll coexistence, re-baseline) + FDK_EVENT_GESTURE_SWIPE (the

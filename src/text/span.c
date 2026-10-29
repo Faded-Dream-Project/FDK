@@ -387,8 +387,16 @@ fdk_result fdk__draw_runs(fdk_surface *surface, fdk_font *font,
             glyph->w,
             glyph->h,
         };
-        fdk_surface_blend_mask(surface, dst, glyph->bits, glyph->w,
-                               color);
+        if (glyph->color) {
+            /* C-3: color glyphs composite their own RGBA — the run's
+             * color/decoration logic still ran for the bar pass, but
+             * the bitmap itself needs no tint. */
+            fdk_surface_blend_rgba(surface, dst, glyph->bits,
+                                   glyph->w * 4);
+        } else {
+            fdk_surface_blend_mask(surface, dst, glyph->bits,
+                                   glyph->w, color);
+        }
         if (!any) {
             ux0 = dst.x;
             uy0 = dst.y;
