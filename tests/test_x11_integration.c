@@ -31,7 +31,8 @@
 #include "platform/x11/x11_gl.h" /* fdk__x11_gl_test_reset (self-check
                                     * stamp cleanup after the poison test) */
 #include "window/window_internal.h"
-#include "widget/widgets_internal.h" /* fdk__text_extent (tab math) */
+#include "widget/widgets_internal.h"
+#include "test_gif_fixtures.h" /* the C-4 animated-GIF fixture */ /* fdk__text_extent (tab math) */
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h> /* XGetImage / XGetPixel / XDestroyImage */
@@ -6845,6 +6846,88 @@ static void test_date_picker_gui(void) {
            "input\n");
 }
 
+/* ---- the animated Picture through a real window (C-4) ---------- */
+
+static void test_picture_anim_gui(void) {
+    /* The fixture: PIL's disposal-matrix GIF (5 frames, delays
+     * 100/50/100/200/20ms after the compatibility floor). */
+    char path[] = "/tmp/fdk-gif-x11-XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0) {
+        printf("[skip] picture anim GUI (mkstemp failed)\n");
+        return;
+    }
+    FILE *f = fdopen(fd, "wb");
+    assert(f != NULL);
+    assert(fwrite(matrix_gif, 1, MATRIX_GIF_LEN, f) == MATRIX_GIF_LEN);
+    fclose(f);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK gif test",
+                                 .width = 120, .height = 120 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+
+    fdk_widget *pic = NULL;
+    assert(fdk_ok(fdk_picture_create(root, &pic)));
+    fdk_widget_arrange(pic, (fdk_rect){4, 4, 64, 64});
+    assert(fdk_ok(fdk_picture_set_animated_file(pic, path)));
+    assert(fdk_picture_get_playing(pic));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 150);
+    fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 50);
+
+    Display *rb = NULL;
+    Window xid = (Window)fdk_window_xid(win);
+    /* Content is on screen (frame 0 or an early successor — the
+     * timer runs at the file's own 100ms pace, so a fixed sleep
+     * cannot promise WHICH frame; the invariant is painted pixels,
+     * not the frame identity). */
+    unsigned long a = x11_readback_pixel(&rb, xid, 10, 10);
+    assert((a & 0x00FFFFFFu) != 0);
+
+    /* Pump through the animation: the timer advances frames and the
+     * invalidation repaints the window — at some point the center
+     * block (frame 1) differs from the ring. */
+    bool saw_diff = false;
+    for (int i = 0; i < 80 && !saw_diff; i++) {
+        (void)fdk_pump_events(ctx, 50);
+        unsigned long ring = x11_readback_pixel(&rb, xid, 10, 10);
+        unsigned long center = x11_readback_pixel(&rb, xid, 50, 50);
+        if (ring != center) {
+            saw_diff = true;
+        }
+    }
+    assert(saw_diff);
+    printf("[ok] picture anim: the timer drove frame changes onto "
+           "the window\n");
+
+    /* Pause freezes the frames. */
+    fdk_picture_set_playing(pic, false);
+    assert(!fdk_picture_get_playing(pic));
+    unsigned long fa = x11_readback_pixel(&rb, xid, 10, 10);
+    unsigned long fb = x11_readback_pixel(&rb, xid, 50, 50);
+    for (int i = 0; i < 16; i++) {
+        (void)fdk_pump_events(ctx, 50);
+    }
+    assert(x11_readback_pixel(&rb, xid, 10, 10) == fa);
+    assert(x11_readback_pixel(&rb, xid, 50, 50) == fb);
+    printf("[ok] picture anim: paused frames hold across the pump\n");
+
+    XCloseDisplay(rb);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    remove(path);
+    printf("[ok] picture anim GUI: timer-driven repaint through a "
+           "real window\n");
+}
+
 static void test_dialog_gui(void) {
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
@@ -12057,6 +12140,7 @@ int main(void) {
     test_menu_gui();
     test_combo_gui();
     test_date_picker_gui();
+    test_picture_anim_gui();
     test_dialog_gui();
     test_a11y_gui();
     test_list_activation_gui();

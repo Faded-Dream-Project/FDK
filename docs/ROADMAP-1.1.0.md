@@ -46,13 +46,13 @@ integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
 **Counts** (recounted 2026-10-29 against every register row — the
-earlier line's arithmetic was coarser than the table): DONE 37
-(S-10/B-18, 2026-10-29; S-4/A-06 + A-07 folded, 2026-10-29;
-S-5/B-12, 2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B both sides,
-2026-10-29; S-2 and S-1 pending owner verification; M-4, M-3, M-1,
-and S-3, 2026-10-28) · PARTIAL 4 (B-13, B-14, B-19, S-9) ·
-IN PROGRESS 1 (M-9) · MISSING 15 · DEFERRED (by design) 5 ·
-BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
+earlier line's arithmetic was coarser than the table): DONE 39
+(C-4/B-14, 2026-10-29; S-10/B-18, 2026-10-29; S-4/A-06 + A-07
+folded, 2026-10-29; S-5/B-12, 2026-10-29; M-6/A-03/B-05,
+2026-10-29; T-B both sides, 2026-10-29; S-2 and S-1 pending owner
+verification; M-4, M-3, M-1, and S-3, 2026-10-28) · PARTIAL 3
+(B-13, B-19, S-9) · IN PROGRESS 1 (M-9) · MISSING 14 · DEFERRED
+(by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +
@@ -122,7 +122,7 @@ unaffected):
 | B-11 | idle/screensaver inhibition | **DONE** | S-3 shipped: fdk_idle.h (fdk_idle_inhibit/uninhibit/status — one handle, either mechanism); Wayland zwp_idle_inhibit_manager_v1 through the window-scoped platform op (window-owned engagement, sever-at-destroy); org.freedesktop.ScreenSaver on the native D-Bus client with the DEFERRED release (uninhibit-before-cookie still sends the matching UnInhibit — no orphaned inhibition); the window-dies-inhibited release; tests/test_idle.c + the mock-ScreenSaver legs in the live D-Bus rig (cookie round trip, deferred release, refusal) + the sway rig (engage/release/destroy-while-inhibited) + the X11 no-bus fallback | GNOME's org.gnome.ScreenSaver variant not probed (documented); owner's real-desktop check |
 | B-12 | cursor shape set | **DONE** | S-5 shipped (2026-10-29): `fdk_cursor_shape` 2 -> 22 shapes (the cursor-shape-v1 semantic space, append-only; 802 exports unchanged); ONE resolution point (`fdk__cursor_resolve`: app request > widget hover (Entry/TextView/Spin I-beam) > compass > arrow) with the transition cache; Wayland: set_shape when the manager exists (the sway suite pins the full enum table row by row) + the shared XCursor theme loader fallback (src/platform/cursor_theme.c, extracted from the 1.1.4 Wayland parser); X11: the dlopen'd libXrender.so.1 RENDER lane (theme images, no new build dep) over the core font glyph table with the documented substitutions (D-016); fdk-shell 0.4.0 mirrors the set | — |
 | B-13 | drag icons + drop targets | **PARTIAL** | DnD window-level both backends; drag icon explicitly absent ("start_drag with NO icon surface") | S-9 |
-| B-14 | image formats | **PARTIAL** | stb static raster + nanosvg; no animated | C-4 |
+| B-14 | image formats | **DONE** [animated GIF shipped] | C-4 landed (2026-10-29): fdk_gif + fdk_gif_player + fdk_picture_set_animated_file — the spec-native decoder (LZW incl. KwKwK, disposal 1/2/3, interlace, NETSCAPE loops, the PIL embedded-stream resync), the one-frame-at-a-time player, the Picture delay-paced timer with pause; tests/test_gif.c + the X11 GUI leg (real-encoder fixtures in tests/data/gifgen/); D-019. Static raster + SVG were already present. Fenced: animated WebP/APNG stay future families on the same shape | — |
 | B-15 | GPU on Wayland | **MISSING** | CPU SHM only; GL lane is X11/GLX | D-1 (deferred by design) |
 | B-16 | subsurfaces | **MISSING** | no wl_subsurface | D-2 |
 | B-17 | tablets / gestures | **MISSING** | no zwp_tablet, no pinch/swipe | D-3 / C-6 |
@@ -150,7 +150,7 @@ unaffected):
 | C-1 | portal FileChooser | **MISSING** | = B-09; **CORE** per D-002 | the fallback |
 | C-2 | AT-SPI text interfaces | **MISSING** | = B-10 | after S-8 |
 | C-3 | color emoji | **MISSING** | no COLRv0/v1 | after M-2 |
-| C-4 | animated images | **MISSING** | = B-14 | GIF first |
+| C-4 | animated images | **DONE** | = B-14 (GIF; D-019) | — |
 | C-5 | re-anchor + auto-hide | **MISSING** | = A-05/A-08 | both |
 | C-6 | basic gestures | **MISSING** | = B-17 | after M-3 |
 | D-1 | EGL/GPU Wayland | **DEFERRED** | by scope discipline (1.2.0) | — |
@@ -295,7 +295,7 @@ has an API surface, tests, and docs in the tree):
 | B-11 | **Idle/screensaver inhibition** — no org.freedesktop.ScreenSaver, no idle-inhibit-unstable-v1. | missing | video players keep the screen blanking mid-play | S–M | none | **[DONE 2026-10-28: S-3 — both mechanisms, the deferred-release lifecycle]** |
 | B-12 | **Cursor shape set** — 2 shapes (arrow/hand) + per-edge resize cursors; Wayland rides cursor-shape-v1 (all names available), X11 uses core `XCreateFontCursor` (no themes). | partial | standard shapes (text beam, wait, crosshair, grab) missing from the public surface | S | none |
 | B-13 | **Drag icons + widget-level drop targets** — DnD is window-level (apps hit-test); no drag icon on either backend. | partial | usable but visibly rough; file managers do manual hit-testing today | S (icon) / M (targets) | none |
-| B-14 | **Image formats** — stb_image decode (JPEG/PNG/BMP/TGA/PSD/GIF-static/HDR/PIC/PNM) + PNG encode + nanosvg. No animated GIF/WebP/APNG/AVIF; SVG without filters/masks/text. | partial | static raster + SVG solid; animated content missing | S–M | none |
+| B-14 | **Image formats** — stb_image decode (JPEG/PNG/BMP/TGA/PSD/GIF-static/HDR/PIC/PNM) + PNG encode + nanosvg. No animated GIF/WebP/APNG/AVIF; SVG without filters/masks/text. | partial | static raster + SVG solid; animated content missing | S–M | none **[DONE 2026-10-29 — animated GIF shipped (C-4, D-019); WebP/APNG fenced as future families; SVG filters/masks/text unchanged]** |
 | B-15 | **GPU rendering on Wayland** — CPU SHM only; the GL lane is X11/GLX. | partial | Wayland renders software (the toolkit's design center; the GL lane was an X11 perf answer) | L | none |
 | B-16 | **Subsurfaces** — no wl_subsurface; no X11 child-window compositing. | missing | video-in-UI, offscreen compositing overlays | M | none — would ride extension API v2 |
 | B-17 | **Tablets / stylus / gestures** — no zwp_tablet, no pinch/swipe anywhere. | missing | drawing tablets dead; pinch-zoom absent | M–L | none |
@@ -350,7 +350,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | C-1 | Portal FileChooser fallback | B-09 |
 | C-2 | AT-SPI text interfaces + relations export | B-10 |
 | C-3 | Color emoji (COLRv0/v1 after HarfBuzz lands) | B-02 |
-| C-4 | Animated images (GIF first, WebP via dlopen) | B-14 |
+| C-4 | Animated images (GIF first, WebP via dlopen) | B-14 | **[DONE 2026-10-29 — GIF native, no dlopen; see the B-14 verified-status row]** |
 | C-5 | fdk-shell runtime re-anchoring + auto-hide/reveal mode | A-05, A-08 |
 | C-6 | Basic gestures (pinch/swipe) on the touch event model | B-17 |
 

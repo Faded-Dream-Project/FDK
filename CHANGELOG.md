@@ -14,6 +14,36 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — animated GIF images (C-4 / B-14)
+
+- **`fdk_gif`** (fdk_surface.h): a spec-native animated GIF loader
+  — the full GIF87a/89a parser, the LZW variant (code sizes 3..12,
+  clear/EOI, the KwKwK case), per-frame color tables, transparency,
+  the disposal methods, interlacing, and the NETSCAPE loop count,
+  all bounded per docs/security.md (canvas 1..16384, <= 4096
+  frames, LZW output capped at exactly w*h). PIL save_all
+  embedded-stream quirk (a second GIF89a header mid-file, no
+  trailer) is resynced like browsers do. 825 -> 841 exports.
+- **`fdk_gif_player`**: one-frame-at-a-time compositing onto an
+  app-owned ARGB8888 surface — the previous frame disposal applied
+  first (method 2 clears to TRANSPARENT, the interoperable reading;
+  method 3 restores the saved canvas). The clock is the app own: a
+  timer, a game loop, anything.
+- **`fdk_picture_set_animated_file`**: the zero-code consumer — a
+  repeating timer re-paced to each frame own delay (with the
+  100 ms compatibility floor for 0/<20 ms values), invalidation-
+  driven repaints, `fdk_picture_set_playing` to pause on the
+  current frame, static sets dropping the animation and its clock.
+  Detached trees show frame 0 and never tick (the Spinner rule).
+- Tests: tests/test_gif.c — the disposal matrix against PIL REAL
+  encoder output (keep / clear-to-transparent / restore-to-
+  previous, loop wrap, reset), the interlace four-pass pin, exact
+  delays + the floor, the loader error matrix, and the Picture
+  headless half; the X11 GUI leg proves the timer drives real
+  repaints through a live window and pausing freezes them.
+  Fixtures + their generators: tests/test_gif_fixtures.h,
+  tests/data/gifgen/.
+
 ### Added — the calendar and the date/time pickers (S-10 / B-18)
 
 - **`fdk_calendar`**: the month grid (the GtkCalendar counterpart) —

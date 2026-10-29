@@ -830,3 +830,65 @@ popup dismissal) close it; the combo_guard pattern covers a picker
 destroyed while open. Picking applies, formats the field, fires
 on_changed once, and closes — the app pumps events and never
 learns the popup exists.
+
+## D-019 — animated GIF: a spec-native decoder, the player owns the clock, PIL's embedded streams tolerated (C-4 / B-14)
+
+2026-10-29. The image-format residue item: static raster + SVG
+shipped, animated content did not. The close is GIF first (the
+roadmap's own scoping) — a self-contained GIF87a/89a parser +
+LZW decoder + compositor in src/render/gif.c, written from the
+published specification rather than threaded out of stb_image's
+internals (whose public surface is first-frame-only; coupling a
+multi-frame API to undocumented structure is a dependency in
+disguise).
+
+**1. The public shape splits decode from playback.** fdk_gif is a
+fully-decoded object (canvas, frames with per-frame color tables /
+delays / disposal / transparency, the NETSCAPE loop count); the
+PLAYER composites one frame at a time onto an app-owned ARGB8888
+surface. The clock is deliberately NOT in the decoder — fdk_gif
+never starts a thread or a timer; a game loop can drive it as
+easily as fdk_timer. The Picture widget is the zero-code consumer
+(fdk_picture_set_animated_file): a repeating timer re-paced to each
+frame's own delay, invalidation, pause parks the frame (the
+Spinner's rule). The same fdk_gif + player pair serves render-to-
+surface uses (a canvas painting an animated sprite) with no widget
+in sight.
+
+**2. The LZW decoder is bounded and spec-faithful.** Code size
+3..12, clear/EOI, the KwKwK case (a real defect the PIL interop
+fixture caught in the first cut: the emission must append the
+previous sequence's OWN first byte), output bounded to exactly
+w*h indices — a hostile file cannot allocate past its declared
+geometry. Canvas 1..16384, frames <= 4096, sub-block concatenation
+capped, frames outside the canvas refused.
+
+**3. Disposal 2 clears to TRANSPARENT.** The spec's "restore to
+background color" reading would paint a solid rectangle on
+transparent-capable surfaces; every browser and giflib-based tool
+implements the clear, and so does FDK (documented in the header).
+Disposal 3 restores the snapshot taken before the frame drew —
+the player owns exactly one saved canvas.
+
+**4. Delays carry the compatibility floor.** 0 or < 20 ms reads
+as 100 ms — the historic "no delay" meaning "as fast as
+displayable" on a modern display is a 100 ms floor, not a 60 fps
+flicker. The file's own values otherwise (centiseconds x 10).
+
+**5. Embedded data streams are tolerated.** PIL's save_all writes a
+second complete GIF89a header + logical screen + global table into
+the same FILE without a trailer between them — browsers accept the
+resync, and so does the parser (same canvas required; the new
+global table replaces the old; frames own COPIES of the tables they
+reference so a replaced global cannot dangle an earlier frame).
+Anything else unknown is a hard error. This is a real interop
+requirement, not speculation: the disposal-matrix fixture IS such a
+file.
+
+**6. GCT-referencing frames own table copies.** One allocation of
+<= 768 bytes per frame; the alternative (borrowed pointers) dangles
+the moment an embedded stream replaces the global table. Bounded,
+simple, honest.
+
+Fences named in fdk_surface.h: animated WebP/APNG are the future
+families on the same shape; the fdk_gif NAME says what loads today.

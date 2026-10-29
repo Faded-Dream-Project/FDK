@@ -28,6 +28,7 @@
 #include "widgets_internal.h"
 #include "../render/surface_internal.h"
 #include "../theme/theme_internal.h"
+#include "../window/window_internal.h" /* timer lifecycle via context */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -41,6 +42,13 @@ typedef struct fdk_picture {
     fdk_i32 img_w;
     fdk_i32 img_h;
     fdk_picture_fit fit;
+    /* 1.1.0 (C-4): the animated source. The composited canvas IS
+     * p->image (the fit machinery is format-agnostic); the player
+     * mutates it in place on every tick. */
+    fdk_gif *gif;             /* owned; NULL = static image    */
+    fdk_gif_player *player;   /* owned; borrows gif + image    */
+    fdk_timer *anim_timer;    /* owned; NULL = stopped/absent  */
+    bool playing;
 } fdk_picture;
 
 static fdk_picture *pic_of(fdk_widget *w) {
@@ -124,6 +132,18 @@ static void pic_measure(fdk_widget *w, fdk_size *out) {
 
 static void pic_destroy(fdk_widget *w) {
     fdk_picture *p = pic_of(w);
+    if (p->anim_timer != NULL) {
+        fdk_timer_remove(p->anim_timer);
+        p->anim_timer = NULL;
+    }
+    if (p->player != NULL) {
+        fdk_gif_player_destroy(p->player);
+        p->player = NULL;
+    }
+    if (p->gif != NULL) {
+        fdk_gif_destroy(p->gif);
+        p->gif = NULL;
+    }
     if (p->image != NULL) {
         fdk_surface_destroy(p->image);
         p->image = NULL;
@@ -178,10 +198,17 @@ fdk_result fdk_picture_create(fdk_widget *parent,
     p->img_w = 0;
     p->img_h = 0;
     p->fit = FDK_PICTURE_FIT_CONTAIN;
+    p->gif = NULL;
+    p->player = NULL;
+    p->anim_timer = NULL;
+    p->playing = false;
     fdk_widget_child_layout_changed(w->parent);
     *out_picture = w;
     return FDK_OK;
 }
+
+/* Drops the animated source entirely (a new image is coming). */
+static void pic_anim_clear(fdk_widget *w);
 
 /* The shared content-replace core. */
 static void pic_set_image(fdk_widget *w, fdk_surface *image,
@@ -204,6 +231,7 @@ fdk_result fdk_picture_set_from_file(fdk_widget *picture,
         path == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
+    pic_anim_clear(picture); /* a static set drops the animation */
     fdk_surface *image = NULL;
     fdk_result r = fdk_surface_create_from_image(path, &image);
     if (!fdk_ok(r)) {
@@ -228,6 +256,7 @@ void fdk_picture_set_surface(fdk_widget *picture, fdk_surface *surface) {
         }
         return;
     }
+    pic_anim_clear(picture); /* a static set drops the animation */
     if (surface == NULL) {
         pic_set_image(picture, NULL, 0, 0);
         return;
@@ -271,4 +300,148 @@ fdk_i32 fdk_picture_image_height(fdk_widget *picture) {
         return 0;
     }
     return pic_of(picture)->img_h;
+}
+
+/* ---- the animated half (1.1.0 / C-4) ---- */
+
+/* The tick: advance one frame, re-pace the timer to the NEW frame's
+ * delay, repaint. The widget may be destroyed between ticks — the
+ * klass check (and the destroy hook removing the timer first) keeps
+ * the callback from touching freed memory. */
+static void pic_anim_tick(fdk_timer *timer, void *user) {
+    (void)timer;
+    fdk_widget *w = user;
+    if (w == NULL || w->klass != &fdk_picture_class_def) {
+        return;
+    }
+    fdk_picture *p = pic_of(w);
+    if (p->player == NULL || p->gif == NULL) {
+        return;
+    }
+    fdk_u32 idx = fdk_gif_player_next(p->player);
+    if (idx == UINT32_MAX) {
+        return;
+    }
+    fdk_u32 delay = fdk_gif_frame_delay_ms(p->gif, idx);
+    if (p->anim_timer != NULL && delay != 0) {
+        fdk_timer_reset(p->anim_timer, delay);
+    }
+    fdk_widget_invalidate(w);
+}
+
+/* Stops the clock without dropping the composited canvas (a paused
+ * picture keeps showing the frame it paused on). */
+static void pic_anim_stop(fdk_widget *w) {
+    fdk_picture *p = pic_of(w);
+    if (p->anim_timer != NULL) {
+        fdk_timer_remove(p->anim_timer);
+        p->anim_timer = NULL;
+    }
+    p->playing = false;
+}
+
+/* Drops the animated source entirely (a new image is coming). */
+static void pic_anim_clear(fdk_widget *w) {
+    pic_anim_stop(w);
+    fdk_picture *p = pic_of(w);
+    if (p->player != NULL) {
+        fdk_gif_player_destroy(p->player);
+        p->player = NULL;
+    }
+    if (p->gif != NULL) {
+        fdk_gif_destroy(p->gif);
+        p->gif = NULL;
+    }
+}
+
+fdk_result fdk_picture_set_animated_file(fdk_widget *picture,
+                                         const char *path) {
+    if (picture == NULL || picture->klass != &fdk_picture_class_def ||
+        path == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_gif *gif = NULL;
+    fdk_result r = fdk_gif_load(path, &gif);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fdk_i32 cw = 0, chh = 0;
+    fdk_gif_canvas_size(gif, &cw, &chh);
+    fdk_surface *canvas = NULL;
+    r = fdk_surface_create_format(cw, chh, FDK_SURFACE_FORMAT_ARGB8888,
+                                  &canvas);
+    if (!fdk_ok(r)) {
+        fdk_gif_destroy(gif);
+        return r;
+    }
+    fdk_gif_player *player = fdk_gif_player_create(gif, canvas);
+    if (player == NULL) {
+        fdk_surface_destroy(canvas);
+        fdk_gif_destroy(gif);
+        return FDK_ERR_PLATFORM;
+    }
+
+    /* Swap the content: clear the old animated state FIRST (the old
+     * player borrows the old surface), then take ownership. */
+    pic_anim_clear(picture);
+    (void)fdk_gif_player_next(player); /* frame 0 onto the canvas */
+    fdk_picture *p = pic_of(picture);
+    p->gif = gif;
+    p->player = player;
+    pic_set_image(picture, canvas, cw, chh);
+
+    /* Start the clock. A single-frame GIF has nothing to animate
+     * (the composited canvas IS the image); a detached tree has no
+     * context (the Spinner's honesty rule: the frame-0 canvas shows
+     * and nothing ticks). */
+    if (fdk_gif_frame_count(gif) > 1) {
+        fdk_context *ctx = fdk__window_context(
+            fdk__widget_window_owner(picture));
+        if (ctx != NULL) {
+            fdk_u32 delay = fdk_gif_frame_delay_ms(
+                gif, fdk_gif_player_frame(player));
+            p->anim_timer =
+                fdk_timer_add(ctx, delay, true, pic_anim_tick, picture);
+            p->playing = (p->anim_timer != NULL);
+        }
+    }
+    return FDK_OK;
+}
+
+bool fdk_picture_is_animated(fdk_widget *picture) {
+    if (picture == NULL || picture->klass != &fdk_picture_class_def) {
+        return false;
+    }
+    return pic_of(picture)->gif != NULL;
+}
+
+void fdk_picture_set_playing(fdk_widget *picture, bool playing) {
+    if (picture == NULL || picture->klass != &fdk_picture_class_def) {
+        return;
+    }
+    fdk_picture *p = pic_of(picture);
+    if (p->gif == NULL || fdk_gif_frame_count(p->gif) <= 1) {
+        return; /* nothing to play */
+    }
+    if (playing && !p->playing) {
+        fdk_context *ctx = fdk__window_context(
+            fdk__widget_window_owner(picture));
+        if (ctx == NULL) {
+            return; /* detached: no clock exists to start */
+        }
+        fdk_u32 delay = fdk_gif_frame_delay_ms(
+            p->gif, fdk_gif_player_frame(p->player));
+        p->anim_timer =
+            fdk_timer_add(ctx, delay, true, pic_anim_tick, picture);
+        p->playing = (p->anim_timer != NULL);
+    } else if (!playing && p->playing) {
+        pic_anim_stop(picture);
+    }
+}
+
+bool fdk_picture_get_playing(fdk_widget *picture) {
+    if (picture == NULL || picture->klass != &fdk_picture_class_def) {
+        return false;
+    }
+    return pic_of(picture)->playing;
 }

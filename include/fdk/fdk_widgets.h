@@ -966,6 +966,29 @@ fdk_picture_fit fdk_picture_get_fit(fdk_widget *picture);
 fdk_i32 fdk_picture_image_width(fdk_widget *picture);
 fdk_i32 fdk_picture_image_height(fdk_widget *picture);
 
+/* ---- The animated half (1.1.0 / C-4) ----
+ *
+ * fdk_picture_set_animated_file loads an animated GIF (the fdk_gif
+ * API in fdk_surface.h — WebP/APNG are the future families),
+ * composites frame 0 onto a canvas the widget owns, and starts a
+ * repeating timer paced by the FILE's per-frame delays (with the
+ * 100 ms compatibility floor). The fit policies treat the canvas
+ * exactly like a static image. A static set_from_file/set_surface
+ * later drops the animation and its clock; destroying the widget
+ * stops everything.
+ *
+ * Pausing keeps the current frame on screen (a paused spinner
+ * parks its arc; a paused picture parks its frame). A detached
+ * tree (no window, no context) shows frame 0 and never ticks —
+ * the Spinner's honesty rule, verbatim. Single-frame GIFs load
+ * and render; there is simply nothing to animate. */
+
+fdk_result fdk_picture_set_animated_file(fdk_widget *picture,
+                                         const char *path);
+bool fdk_picture_is_animated(fdk_widget *picture);
+void fdk_picture_set_playing(fdk_widget *picture, bool playing);
+bool fdk_picture_get_playing(fdk_widget *picture);
+
 /* ---- Tree (Phase 9) ----
  *
  * A hierarchical expandable tree on the ScrollView: nodes hold text,

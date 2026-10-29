@@ -539,6 +539,87 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
  */
 bool fdk_surface_frame_ready(fdk_surface *surface);
 
+/* ---- Animated images (1.1.0 / C-4: GIF first) ----
+ *
+ * fdk_gif is a fully-decoded animated GIF: the canvas size, the
+ * frame list (delays, disposal methods, transparency, per-frame
+ * color tables, de-interlaced index data), and the NETSCAPE loop
+ * count. Animated WebP/APNG are the future families on this same
+ * shape — the name says what loads today.
+ *
+ * Security posture (docs/security.md, the image rules): the file is
+ * statted before any decode (regular files only, 512 MiB cap),
+ * canvas dimensions are bounded to the surface limits
+ * (1..16384), the frame count to 4096, and the LZW decode is
+ * bounded to exactly the frame's w*h indices — a hostile file
+ * cannot make FDK allocate past its declared geometry.
+ *
+ * Playback is the PLAYER's job (fdk_gif_player): it composites one
+ * frame at a time onto an app-owned ARGB8888 surface, applying the
+ * PREVIOUS frame's disposal method first (the spec's model: none /
+ * restore-to-background-clears-to-transparent — the interoperable
+ * reading every browser implements — / restore-to-previous via the
+ * saved snapshot), so the surface always holds the canvas as of
+ * the frame fdk_gif_player_frame() reports. Delays are the file's
+ * per-frame values with the compatibility rule below; the clock is
+ * YOURS (a timer, a game loop) — FDK never starts a thread or a
+ * hidden timer for a decode-level object. The Picture widget is
+ * the zero-code consumer (fdk_picture_set_animated_file). */
+
+typedef struct fdk_gif fdk_gif;
+
+/* Loads and fully decodes. FDK_ERR_NOT_FOUND / INVALID_ARGUMENT /
+ * UNSUPPORTED (not a GIF) / LIMIT (geometry out of bounds) /
+ * SURFACE_CREATE (allocation). A file with a single frame loads
+ * fine (frame_count == 1) — animation is not required. */
+fdk_result fdk_gif_load(const char *path, fdk_gif **out_gif);
+/* The in-memory twin (same format family as
+ * fdk_surface_create_from_image_bytes). */
+fdk_result fdk_gif_load_bytes(const void *data, size_t size,
+                              fdk_gif **out_gif);
+void fdk_gif_destroy(fdk_gif *gif);
+
+fdk_u32 fdk_gif_frame_count(const fdk_gif *gif);
+void fdk_gif_canvas_size(const fdk_gif *gif, fdk_i32 *out_w,
+                         fdk_i32 *out_h);
+/* The NETSCAPE2.0 loop count: 0 = loop forever (also the default
+ * when the file carries no loop block — the interoperable reading;
+ * a play-once file says loop count 1... which browsers also treat
+ * as "loop", so the WIDGET loops and the count is informational). */
+fdk_u32 fdk_gif_loop_count(const fdk_gif *gif);
+/* Frame delay in milliseconds: the file's centiseconds x 10, with
+ * the compatibility rule every browser applies — 0 or < 20 ms
+ * reads as 100 ms (historic files encode "no delay" meaning
+ * "as fast as displayable", which on a modern display means a
+ * 100 ms floor, not a 60 fps flicker). */
+fdk_u32 fdk_gif_frame_delay_ms(const fdk_gif *gif, fdk_u32 index);
+
+/* ---- The player: one frame at a time onto your surface ----
+ *
+ * The surface must be ARGB8888 and exactly the canvas size (the
+ * picture widget creates it; fdk_gif_load + two
+ * fdk_surface_create_format calls is the manual path). The player
+ * is stateful: it remembers which frame the surface holds and the
+ * restore-to-previous snapshot. It borrows BOTH the gif and the
+ * surface — destroy order is yours, but the surface must outlive
+ * the player and the gif must outlive both. */
+
+typedef struct fdk_gif_player fdk_gif_player;
+
+fdk_gif_player *fdk_gif_player_create(const fdk_gif *gif,
+                                      fdk_surface *dest);
+void fdk_gif_player_destroy(fdk_gif_player *player);
+/* Resets the surface to fully transparent and rewinds to "nothing
+ * drawn" (the next _next() composites frame 0). */
+void fdk_gif_player_reset(fdk_gif_player *player);
+/* Composites the next frame (disposing the current one per its
+ * method first; looping back to frame 0 after the last). Returns
+ * the new frame index; UINT32_MAX on a bad player. */
+fdk_u32 fdk_gif_player_next(fdk_gif_player *player);
+/* The index the surface currently holds (UINT32_MAX before the
+ * first _next()). */
+fdk_u32 fdk_gif_player_frame(const fdk_gif_player *player);
+
 #ifdef __cplusplus
 }
 #endif
