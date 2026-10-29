@@ -809,6 +809,27 @@ int main(int argc, char **argv) {
         spinner, "A busy indicator — the arc rotates while work is "
                  "happening with no known fraction");
 
+    /* --- the 1.1.0 pickers row (S-10) --- */
+    fdk_widget *prow = NULL;
+    (void)fdk_box_create(content, FDK_HORIZONTAL, &prow);
+    fdk_box_set_spacing(prow, 10);
+    fdk_widget *dpick = NULL;
+    (void)fdk_date_picker_create(prow, font16, NULL, &dpick);
+    fdk_date demo_date = {2026, 10, 29};
+    (void)fdk_date_picker_set_date(dpick, &demo_date);
+    (void)fdk_widget_set_tooltip(
+        dpick, "The date picker — press the field (or Enter) to open "
+               "the popup calendar; picking a day formats the field "
+               "and fires on_changed");
+    fdk_widget *tpick = NULL;
+    (void)fdk_time_picker_create(prow, font16, NULL, &tpick);
+    fdk_time demo_time = {14, 30, 0};
+    (void)fdk_time_picker_set_time(tpick, &demo_time);
+    (void)fdk_widget_set_tooltip(
+        tpick, "The time picker — click a segment to activate it, "
+               "step with the arrows or Up/Down (wraparound), "
+               "PageUp/PageDown for the big steps");
+
     /* --- progress + status --- */
     (void)fdk_progress_create(content, &progress);
     fdk_widget_set_natural_size(progress, 0, 14);

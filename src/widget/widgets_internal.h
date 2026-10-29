@@ -138,6 +138,7 @@ fdk_color fdk__pal_link(void);
 fdk_color fdk__pal_entry(void);
 fdk_color fdk__pal_entry_border(void);
 fdk_color fdk__pal_row_hover(void);
+fdk_color fdk__pal_selection_text(void);
 
 /* ---- 1.4.16: the themed button SHAPE (controls.c) ------------------
  *

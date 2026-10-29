@@ -53,6 +53,8 @@
 #include "fdk_widget.h"
 #include "fdk_layout.h"
 #include "fdk_text.h"
+#include "fdk_i18n.h" /* 1.1.0 (S-10): fdk_date/fdk_time/locale, the
+                         calendar + pickers' substrate */
 
 #ifdef __cplusplus
 extern "C" {
@@ -1948,6 +1950,150 @@ fdk_tree_selection_mode fdk_tree_get_selection_mode(fdk_widget *tree);
 size_t fdk_tree_get_selected_nodes(fdk_widget *tree,
                                    fdk_tree_node *out_nodes,
                                    size_t max_nodes);
+
+/* ---- The calendar and the date/time pickers (1.1.0 / S-10) ----
+ *
+ * The widget-set residue item: everything on the GTK4 checklist had
+ * an FDK counterpart except a date/time picker. This is the close:
+ * fdk_calendar is the month grid (the GtkCalendar counterpart),
+ * fdk_date_picker pairs a formatted field with a popup calendar
+ * (the combo's discipline: a toolkit-owned popup window, outside
+ * click dismisses, the app pumps events), and fdk_time_picker is a
+ * segmented stepper field (hour : minute [: second] [AM/PM], one
+ * active segment, chevron zones step it with wraparound).
+ *
+ * Posture (the i18n module's, kept here): the widgets NEVER read the
+ * wall clock or the environment. "Today" is app-injected
+ * (fdk_calendar_set_today); a picker starts dateless / at 00:00:00
+ * and the app sets the initial value. Weeks lead on MONDAY (ISO
+ * 8601, matching fdk_date_weekday's 0 = Monday); the locale names
+ * table drives month and weekday headers (15 languages, English
+ * fallback — the formatters' rule). Locale is a copy set at create
+ * or by the setters below; there is no ambient locale to follow.
+ *
+ * Level-1 fences, honest and named: the pickers do not parse typed
+ * text (no fdk_format_parse exists; the date field opens on press
+ * and keyboard, the time field has no text mode), the calendar
+ * always lays out six week rows (stable geometry; trailing cells
+ * show the next month's opening days), and selecting a day from
+ * another month moves the browse month with the selection (the
+ * grid "scrolls"). All date math is the i18n module's validated
+ * proleptic Gregorian (fdk_date_to_days/from_days); out-of-range
+ * input fails with FDK_ERR_INVALID_ARGUMENT.
+ *
+ * Threading: UI-thread-only, like every widget. */
+
+/* Fires on every selection change — user clicks and keyboard moves
+ * AND programmatic fdk_calendar_select / cross-month navigation
+ * that lands on a new date (the combo's on_changed policy). `date`
+ * points at the widget's internal value, valid for the callback's
+ * duration. */
+typedef void (*fdk_calendar_selected_fn)(fdk_widget *calendar,
+                                         const fdk_date *date, void *user);
+
+/* Creates the grid browsing 1970-01 with no selection and no
+ * "today" marker (the no-clock-read posture above). The font is
+ * borrowed (the combo's rule) and sizes every row; a NULL font
+ * degenerates to a zero-size widget that paints nothing (the
+ * Label's contract). */
+fdk_result fdk_calendar_create(fdk_widget *parent, fdk_font *font,
+                               fdk_widget **out_calendar);
+/* Locale whose names the header rows render. NULL = the root
+ * locale (English). The struct is copied; the caller's lifetime is
+ * irrelevant. */
+void fdk_calendar_set_locale(fdk_widget *calendar, const fdk_locale *locale);
+/* Selects a validated date and follows it (the browse month moves
+ * to the date's month). Same-date re-select is a no-op (no
+ * callback). FDK_ERR_INVALID_ARGUMENT on a bad date or widget. */
+fdk_result fdk_calendar_select(fdk_widget *calendar, const fdk_date *date);
+/* The current selection; false (and *out_date untouched) when none
+ * has ever been set. */
+bool fdk_calendar_get_date(fdk_widget *calendar, fdk_date *out_date);
+/* Browses a month without touching the selection (1..12; invalid
+ * fails FDK_ERR_INVALID_ARGUMENT). The selected date's highlight
+ * still paints if it falls in the browsed month. */
+fdk_result fdk_calendar_set_month(fdk_widget *calendar, fdk_i32 year,
+                                  fdk_i32 month);
+/* The browsed month (0 on a bad widget). */
+void fdk_calendar_get_month(fdk_widget *calendar, fdk_i32 *out_year,
+                            fdk_i32 *out_month);
+/* The "today" marker (accent underline on the matching day). NULL
+ * clears it. The widget never derives it — see the posture note. */
+void fdk_calendar_set_today(fdk_widget *calendar, const fdk_date *today);
+void fdk_calendar_set_on_selected(fdk_widget *calendar,
+                                  fdk_calendar_selected_fn on_selected,
+                                  void *user);
+
+/* ---- The date picker ----
+ *
+ * A field showing the selected date formatted per locale + style,
+ * a chevron zone, and the popup calendar. Press (or Enter/Space/
+ * Down, the combo's openers) opens the popup at the field's
+ * bottom-left; picking a day applies it, formats the field, fires
+ * on_changed, and closes. Outside click / Esc / focus loss dismiss
+ * without change (the menu popup's grab contract). Destroying the
+ * picker while the popup is open is safe (the combo guard
+ * discipline). */
+
+typedef void (*fdk_date_picker_changed_fn)(fdk_widget *picker,
+                                           const fdk_date *date,
+                                           void *user);
+
+/* Starts DATELESS: the field renders an em dash until
+ * fdk_date_picker_set_date. locale may be NULL (root/English). */
+fdk_result fdk_date_picker_create(fdk_widget *parent, fdk_font *font,
+                                  const fdk_locale *locale,
+                                  fdk_widget **out_picker);
+void fdk_date_picker_set_locale(fdk_widget *picker,
+                                const fdk_locale *locale);
+/* Sets/changes the date (validated) and fires on_changed; the
+ * DATELESS state is reachable only through create (there is no
+ * "no date" setter — a picker that has ever had a date keeps one;
+ * recreating is the honest reset, documented). */
+fdk_result fdk_date_picker_set_date(fdk_widget *picker,
+                                    const fdk_date *date);
+/* False (and *out_date untouched) while dateless. */
+bool fdk_date_picker_get_date(fdk_widget *picker, fdk_date *out_date);
+/* How the field renders the date; FDK_DATE_MEDIUM by default. */
+void fdk_date_picker_set_style(fdk_widget *picker, fdk_date_style style);
+void fdk_date_picker_set_on_changed(fdk_widget *picker,
+                                    fdk_date_picker_changed_fn on_changed,
+                                    void *user);
+/* True while the popup calendar is open. */
+bool fdk_date_picker_popup_open(fdk_widget *picker);
+
+/* ---- The time picker ----
+ *
+ * A segmented stepper: [HH] : [MM] [: SS] [AM/PM], one ACTIVE
+ * segment (press to activate; the active segment paints the
+ * selection colors), chevron zones at the right edge stepping the
+ * active segment with wraparound (23 -> 0, 59 -> 0, 12h hours
+ * 12 -> 1, AM <-> PM). Keyboard: Left/Right move the active
+ * segment, Up/Down step it, PageUp/PageDown step minutes/seconds
+ * by ten and hours by six. No text mode (the level-1 fence). */
+
+typedef void (*fdk_time_picker_changed_fn)(fdk_widget *picker,
+                                           const fdk_time *time,
+                                           void *user);
+
+/* Starts at 00:00:00 rendering in the locale's default cycle
+ * (rules hour12; style setters override). */
+fdk_result fdk_time_picker_create(fdk_widget *parent, fdk_font *font,
+                                  const fdk_locale *locale,
+                                  fdk_widget **out_picker);
+void fdk_time_picker_set_locale(fdk_widget *picker,
+                                const fdk_locale *locale);
+/* Sets/changes the time (validated: 0..23 / 0..59 / 0..59) and
+ * fires on_changed. */
+fdk_result fdk_time_picker_set_time(fdk_widget *picker,
+                                    const fdk_time *time);
+void fdk_time_picker_get_time(fdk_widget *picker, fdk_time *out_time);
+/* FDK_TIME_MEDIUM adds the seconds segment. The 12/24H styles
+ * force the cycle; SHORT/MEDIUM follow the locale. */
+void fdk_time_picker_set_style(fdk_widget *picker, fdk_time_style style);
+void fdk_time_picker_set_on_changed(fdk_widget *picker,
+                                    fdk_time_picker_changed_fn on_changed,
+                                    void *user);
 
 #ifdef __cplusplus
 }

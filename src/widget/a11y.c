@@ -68,6 +68,8 @@ static const struct {
     {FDK_A11Y_ROLE_FONT_CHOOSER, "font chooser"},
     {FDK_A11Y_ROLE_TEXT_VIEW, "text view"},
     {FDK_A11Y_ROLE_IMAGE, "image"},
+    {FDK_A11Y_ROLE_CALENDAR, "calendar"},
+    {FDK_A11Y_ROLE_DATE_EDITOR, "date editor"},
 };
 
 const char *fdk_a11y_role_name(fdk_a11y_role role) {

@@ -14,6 +14,46 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — the calendar and the date/time pickers (S-10 / B-18)
+
+- **`fdk_calendar`**: the month grid (the GtkCalendar counterpart) —
+  month/year header with chevron navigation from the locale names
+  table (15 languages, English fallback), a Monday-lead weekday row,
+  six week rows with adjacent-month days in the disabled color,
+  selection highlight, an app-injected "today" accent underline, and
+  full keyboard walking (arrows cross month edges, PageUp/PageDown
+  step months with day clamping, Home jumps to today, End to the
+  month's last day). No clock reads — see docs/DECISIONS.md D-018.
+- **`fdk_date_picker`**: a formatted field (fdk_format_date, locale
+  + style held in the widget) that opens a POPUP calendar at the
+  field's edge (flipping above when the owner clips it); picking a
+  day applies, fires on_changed once, and closes; Esc and outside
+  click dismiss unchanged; destroying the picker while open is
+  guarded (the combo's discipline). Starts DATELESS (an em dash).
+- **`fdk_time_picker`**: the segmented stepper — [HH] : [MM]
+  [: SS] [AM/PM], one active segment (click or Left/Right), chevron
+  zones and Up/Down stepping with wraparound (12h hours walk
+  1..12 keeping the daypart; AM/PM toggles), PageUp/PageDown step
+  minutes/seconds by ten and hours by six. Seconds arrive with
+  FDK_TIME_MEDIUM; the 12/24-hour cycle follows the locale unless
+  forced.
+- New a11y roles CALENDAR and DATE_EDITOR (append-only); the
+  calendar's 42 day cells enumerate as virtual children with
+  ACTIVATE performing the selection; the pickers report the value
+  interface (day-number space / seconds-of-day) with formatted
+  value_text. 804 -> 825 exports.
+- Tests: tests/test_calendar.c (model validation, the grid math
+  pinned through the a11y virtual children across normal/leap/
+  edge months, click + keyboard semantics, pixel pins for the
+  selection blend and today underline) + the X11 GUI leg (popup
+  lifecycle, day pick, Esc dismissal, the destroyed-while-open
+  guard through a REAL XTEST outside click) + the sway leg (REAL
+  seat clicks opening the popup and picking the day through the
+  compositor, the orphan-popup dismissal).
+- Level-1 fences named in fdk_widgets.h: no typed-text parsing
+  (no parse API exists), no week numbers, no time zones (the i18n
+  module has none, deliberately).
+
 ### Added — input regions: partial click-through (S-4 / A-06 / A-07)
 
 - **`fdk_window_set_input_region`** and

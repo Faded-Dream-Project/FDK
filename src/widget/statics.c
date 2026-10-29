@@ -163,6 +163,9 @@ fdk_color fdk__pal_entry_border(void) {
 fdk_color fdk__pal_row_hover(void) {
     return fdk_theme_get_color(NULL, FDK_TK_ROW_HOVER);
 }
+fdk_color fdk__pal_selection_text(void) {
+    return fdk_theme_get_color(NULL, FDK_TK_SELECTION_TEXT);
+}
 
 /* ---- 1.4.1: the shared symbolic row glyphs ----------------------
  *

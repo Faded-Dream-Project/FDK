@@ -6681,6 +6681,170 @@ static void test_a11y_gui(void) {
     printf("[ok] a11y GUI: describe/notify layer against a live window\n");
 }
 
+
+/* ---- the date picker's popup calendar (S-10) ----------------------- */
+
+static int dp_changed_hits = 0;
+static fdk_date dp_changed_got;
+
+static void dp_changed_cb(fdk_widget *picker, const fdk_date *d,
+                          void *user) {
+    (void)picker;
+    (void)user;
+    dp_changed_hits++;
+    dp_changed_got = *d;
+}
+
+static void test_date_picker_gui(void) {
+    static const char *font_candidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        NULL,
+    };
+    const char *font_path = font_candidates[0];
+    FILE *f = fopen(font_path, "rb");
+    if (f == NULL) {
+        printf("[skip] X11 date picker GUI (no system TrueType font)\n");
+        return;
+    }
+    fclose(f);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    fdk_font *font = fdk_font_load(font_path, 16);
+    assert(font != NULL);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK date picker test",
+                                 .width = 360, .height = 320 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+
+    fdk_widget *picker = NULL;
+    assert(fdk_ok(fdk_date_picker_create(root, font, NULL, &picker)));
+    fdk_date start = {1970, 1, 8};
+    assert(fdk_ok(fdk_date_picker_set_date(picker, &start)));
+    fdk_date_picker_set_on_changed(picker, dp_changed_cb, NULL);
+    fdk_size nat = {0, 0};
+    fdk_widget_measure(picker, &nat);
+    fdk_widget_arrange(picker, (fdk_rect){10, 10, nat.width, nat.height});
+
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 150);
+    fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 100);
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Window xid = (Window)fdk_window_xid(win);
+    Window root_scr = DefaultRootWindow(send);
+    Window before[16], now[16];
+    int n_before = x11_child_windows(send, root_scr, before, 16);
+
+    /* Click the field: the popup calendar maps below it. */
+    dp_changed_hits = 0;
+    x11_click(send, xid, 40, 10 + nat.height / 2);
+    (void)fdk_pump_events(ctx, 200);
+    int n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    Window pop = x11_new_child(before, n_before, now, n_now);
+    assert(pop != 0);
+
+    /* The popup paints the calendar box (CONTROL_BACKGROUND fill,
+     * sampled top-center — clear of the rounded arcs and above the
+     * month header text). */
+    {
+        Window root_ret;
+        int gx, gy;
+        unsigned int pw, ph, bw, dep;
+        assert(XGetGeometry(send, pop, &root_ret, &gx, &gy, &pw, &ph,
+                            &bw, &dep));
+        Display *rb = NULL;
+        unsigned long px =
+            x11_readback_pixel(&rb, (unsigned long)pop,
+                               (int)(pw / 2), 4);
+        fdk_color ctl =
+            fdk_theme_get_color(NULL, FDK_TK_CONTROL_BACKGROUND);
+        assert((int)((px >> 16) & 0xFFu) ==
+                   (int)(ctl.r * 255.0f + 0.5f) &&
+               (int)((px >> 8) & 0xFFu) ==
+                   (int)(ctl.g * 255.0f + 0.5f) &&
+               (int)(px & 0xFFu) == (int)(ctl.b * 255.0f + 0.5f));
+        XCloseDisplay(rb);
+    }
+    printf("[ok] date picker: click opens the auto-painted calendar "
+           "popup\n");
+
+    /* Click a day: Jan 15 1970 (cell 17 — the third week, same
+     * column as Jan 1). The popup-local geometry is the calendar's
+     * own layout, replicated from the widget's font-derived math
+     * (the pin: the popup hosts a full-size calendar). */
+    fdk_i32 tw = 0, th = 0;
+    fdk__text_extent(font, "00", &tw, &th);
+    fdk_i32 cell_w = tw + 10;
+    fdk_i32 cell_h = th + 8;
+    fdk_i32 grid_y = 6 + (th + 10) + 4 + (th + 6);
+    int cell = 17; /* Jan 1 = cell 3 (Thursday lead); +14 days */
+    fdk_i32 cx = 6 + (cell % 7) * cell_w + cell_w / 2;
+    fdk_i32 cy = grid_y + (cell / 7) * cell_h + cell_h / 2;
+    x11_click(send, pop, cx, cy);
+    (void)fdk_pump_events(ctx, 200);
+    assert(dp_changed_hits == 1);
+    assert(dp_changed_got.year == 1970 && dp_changed_got.month == 1 &&
+           dp_changed_got.day == 15);
+    fdk_date got;
+    assert(fdk_date_picker_get_date(picker, &got));
+    assert(got.day == 15);
+    assert(!fdk_date_picker_popup_open(picker));
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] date picker: picking a day applies + fires + closes\n");
+
+    /* Reopen + Escape: dismissed without change. */
+    dp_changed_hits = 0;
+    x11_click(send, xid, 40, 10 + nat.height / 2);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    pop = x11_new_child(before, n_before, now, n_now);
+    assert(pop != 0);
+    x11_send_key_event(send, pop, KeyPress, 9);
+    x11_send_key_event(send, pop, KeyRelease, 9);
+    (void)fdk_pump_events(ctx, 200);
+    assert(dp_changed_hits == 0);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] date picker: Escape dismisses without change\n");
+
+    /* The guard: destroy the PICKER while its popup is open, then
+     * dismiss the popup with a REAL XTEST outside click (XSendEvent
+     * bypasses the pointer grab and proves nothing — the S-4
+     * lesson). The main window sits at the root origin under bare
+     * Xvfb; (300, 300) is inside it, outside the popup. */
+    x11_click(send, xid, 40, 10 + nat.height / 2);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before + 1);
+    fdk_widget_destroy(picker); /* the field dies, the popup lives */
+    (void)fdk_pump_events(ctx, 150);
+    XTestFakeMotionEvent(send, 0, 300, 300, CurrentTime);
+    XTestFakeButtonEvent(send, 1, True, CurrentTime);
+    XTestFakeButtonEvent(send, 1, False, CurrentTime);
+    XSync(send, False);
+    (void)fdk_pump_events(ctx, 200);
+    n_now = x11_child_windows(send, root_scr, now, 16);
+    assert(n_now == n_before);
+    printf("[ok] date picker: field destroyed while open unwinds "
+           "cleanly\n");
+
+    XCloseDisplay(send);
+    fdk_window_destroy(win);
+    fdk_font_destroy(font);
+    fdk_shutdown(ctx);
+    printf("[ok] date picker GUI: popup lifecycle through real "
+           "input\n");
+}
+
 static void test_dialog_gui(void) {
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
@@ -11892,6 +12056,7 @@ int main(void) {
     test_popup_window();
     test_menu_gui();
     test_combo_gui();
+    test_date_picker_gui();
     test_dialog_gui();
     test_a11y_gui();
     test_list_activation_gui();

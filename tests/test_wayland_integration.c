@@ -263,6 +263,18 @@ static void pump_and_paint(fdk_context *ctx, fdk_window *win, int ms) {
     }
 }
 
+/* S-10: the date picker's changed capture. */
+static int g_wl_dp_hits = 0;
+static fdk_date g_wl_dp_got;
+
+static void wayland_dp_changed_cb(fdk_widget *picker, const fdk_date *d,
+                                  void *user) {
+    (void)picker;
+    (void)user;
+    g_wl_dp_hits++;
+    g_wl_dp_got = *d;
+}
+
 static void wayland_menu_item_cb(fdk_menu_item *item, void *user) {
     (void)item;
     (*(int *)user)++;
@@ -1471,6 +1483,121 @@ int main(void) {
                g_wayland_dlg_last == FDK_DIALOG_CANCEL);
         printf("[ok] wayland dialog: mapped + auto-painted, early "
                "destroy answers Cancel, clean teardown\n");
+    }
+
+
+    /* ---- S-10: the date picker's popup calendar ----
+     *
+     * The same interactive discipline as the menu block: REAL seat
+     * clicks carry REAL grab serials. A click on the field opens the
+     * popup calendar below it; a click on a day cell applies the
+     * date, fires on_changed, and closes; the destroy-while-open
+     * guard unwinds when the outside click dismisses the orphaned
+     * popup. */
+    {
+        fdk_font *font = fdk_font_load(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16);
+        if (font == NULL) {
+            printf("[skip] wayland date picker (no system font)\n");
+        } else {
+            int dp_hits0 = g_wl_dp_hits;
+            fdk_widget *picker = NULL;
+            assert(fdk_ok(fdk_date_picker_create(root, font, NULL,
+                                                 &picker)));
+            fdk_date start = {1970, 1, 8};
+            assert(fdk_ok(fdk_date_picker_set_date(picker, &start)));
+            fdk_date_picker_set_on_changed(picker,
+                                            wayland_dp_changed_cb,
+                                            NULL);
+            fdk_size nat = {0, 0};
+            fdk_widget_measure(picker, &nat);
+            fdk_widget_arrange(picker, (fdk_rect){20, 90, nat.width,
+                                                  nat.height});
+            fdk_window_paint(win);
+            (void)fdk_pump_events(ctx, 300);
+
+            if (wayland_injector_start()) {
+                pump_and_paint(ctx, win, 1500);
+
+                /* The field's center (window at (100,60), field at
+                 * (20,90)): absolute (120 + w/2, 150 + h/2). */
+                int fx = 100 + 20 + nat.width / 2;
+                int fy = 60 + 90 + nat.height / 2;
+                char cmd[64];
+                snprintf(cmd, sizeof cmd, "move %d %d", fx, fy);
+                wayland_inject(cmd);
+                pump_and_paint(ctx, win, 500);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 600);
+                assert(fdk_date_picker_popup_open(picker));
+                printf("[ok] wayland date picker: REAL click opened "
+                       "the popup calendar\n");
+
+                /* Jan 15 1970 = grid cell 17 (col 3, row 2). The
+                 * popup anchors at the field's bottom-left, flipping
+                 * ABOVE the field when the owner's bottom edge would
+                 * clip it (the tooltip dance, replicated here — the
+                 * 240px window forces the flip). Cell metrics
+                 * replicate the widget's font-derived math (the
+                 * pin). */
+                fdk_font_metrics fm;
+                fdk_font_get_metrics(font, &fm);
+                fdk_text_metrics tm;
+                assert(fdk_ok(fdk_font_measure_utf8(font, "00", 2,
+                                                     &tm)));
+                int th = fm.ascent + fm.descent;
+                int cell_w = tm.advance_width + 10;
+                int cell_h = th + 8;
+                int grid_y = 6 + (th + 10) + 4 + (th + 6);
+                int cal_h = 6 * 2 + (th + 10) + 4 + (th + 6) +
+                            6 * cell_h;
+                int pop_x = 100 + 20;
+                int pop_y = 60 + 90 + (int)nat.height;
+                if (pop_y + cal_h > 60 + 240) {
+                    pop_y = 60 + 90 - cal_h; /* flip above the field */
+                    if (pop_y < 60) {
+                        pop_y = 60;
+                    }
+                }
+                int px = pop_x + 6 + 3 * cell_w + cell_w / 2;
+                int py = pop_y + grid_y + 2 * cell_h + cell_h / 2;
+                snprintf(cmd, sizeof cmd, "move %d %d", px, py);
+                wayland_inject(cmd);
+                pump_and_paint(ctx, win, 500);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 600);
+                assert(g_wl_dp_hits == dp_hits0 + 1);
+                assert(g_wl_dp_got.year == 1970 &&
+                       g_wl_dp_got.month == 1 && g_wl_dp_got.day == 15);
+                assert(!fdk_date_picker_popup_open(picker));
+                printf("[ok] wayland date picker: day picked THROUGH "
+                       "the compositor, applied + closed\n");
+
+                /* The guard: reopen, destroy the field, dismiss the
+                 * orphaned popup with an outside click. */
+                snprintf(cmd, sizeof cmd, "move %d %d", fx, fy);
+                wayland_inject(cmd);
+                pump_and_paint(ctx, win, 400);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 600);
+                assert(fdk_date_picker_popup_open(picker));
+                fdk_widget_destroy(picker);
+                (void)fdk_pump_events(ctx, 200);
+                wayland_inject("move 400 400");
+                pump_and_paint(ctx, win, 400);
+                wayland_inject("tap 1");
+                pump_and_paint(ctx, win, 500);
+                printf("[ok] wayland date picker: field destroyed "
+                       "while open, orphaned popup dismissed "
+                       "cleanly\n");
+                wayland_injector_stop();
+            } else {
+                printf("[skip] wayland date picker INTERACTIVE "
+                       "section (injector unavailable)\n");
+                fdk_widget_destroy(picker);
+            }
+            fdk_font_destroy(font);
+        }
     }
 
     /* ---- 1.1.6: buffer starvation / frame pacing ----

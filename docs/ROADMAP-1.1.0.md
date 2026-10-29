@@ -46,12 +46,13 @@ integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
 **Counts** (recounted 2026-10-29 against every register row — the
-earlier line's arithmetic was coarser than the table): DONE 35
-(S-4/A-06 + A-07 folded, 2026-10-29; S-5/B-12, 2026-10-29;
-M-6/A-03/B-05, 2026-10-29; T-B both sides, 2026-10-29; S-2 and S-1
-pending owner verification; M-4, M-3, M-1, and S-3, 2026-10-28) ·
-PARTIAL 6 · IN PROGRESS 1 (M-9) · MISSING 15 · DEFERRED (by
-design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
+earlier line's arithmetic was coarser than the table): DONE 37
+(S-10/B-18, 2026-10-29; S-4/A-06 + A-07 folded, 2026-10-29;
+S-5/B-12, 2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B both sides,
+2026-10-29; S-2 and S-1 pending owner verification; M-4, M-3, M-1,
+and S-3, 2026-10-28) · PARTIAL 4 (B-13, B-14, B-19, S-9) ·
+IN PROGRESS 1 (M-9) · MISSING 15 · DEFERRED (by design) 5 ·
+BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +
@@ -125,7 +126,7 @@ unaffected):
 | B-15 | GPU on Wayland | **MISSING** | CPU SHM only; GL lane is X11/GLX | D-1 (deferred by design) |
 | B-16 | subsurfaces | **MISSING** | no wl_subsurface | D-2 |
 | B-17 | tablets / gestures | **MISSING** | no zwp_tablet, no pinch/swipe | D-3 / C-6 |
-| B-18 | widget residue | **PARTIAL** [VERIFIED-CHANGED: better than audited] | **editable combo DONE** (`fdk_combo_set_editable`); date/time picker MISSING | S-10: the picker |
+| B-18 | widget residue | **DONE** | editable combo (`fdk_combo_set_editable`) + S-10 shipped (2026-10-29): fdk_calendar (the month grid — Monday-lead, six rows, adjacent-month cells, keyboard walking, today marker), fdk_date_picker (formatted field + popup calendar, the combo guard discipline), fdk_time_picker (segmented stepper with wraparound + 12/24h cycle); the i18n calendar math underneath; D-018 records the posture (no clock reads, no parse). tests/test_calendar.c + the X11 GUI leg + the sway leg (real-seat day pick through the compositor); 825 exports | — |
 | B-19 | session restore protocols | **PARTIAL** | typed prefs store; no WM_SAVE_YOURSELF / xdg session | D-5 |
 | M-1 | IME both backends | **DONE** | = B-01 (both backends; the sway rig's two-way protocol proof) | — |
 | M-2 | shaping level 1 | **DONE** | = B-02 (level 1; level 2 open) | — |
@@ -145,7 +146,7 @@ unaffected):
 | S-7 | X11 DPI awareness | **DONE** [VERIFIED-CHANGED: audit said missing] | = B-07 (1.4.5) | — |
 | S-8 | AT-SPI2 level 1 | **MISSING** | = B-10 | roles/states/focus over the D-Bus client |
 | S-9 | drag icon + drop targets | **MISSING** (icon) / **PARTIAL** (targets) | = B-13 | both halves |
-| S-10 | widget residue | **PARTIAL** | = B-18 (editable combo done) | the date picker |
+| S-10 | widget residue | **DONE** | = B-18 (the calendar family, D-018) | — |
 | C-1 | portal FileChooser | **MISSING** | = B-09; **CORE** per D-002 | the fallback |
 | C-2 | AT-SPI text interfaces | **MISSING** | = B-10 | after S-8 |
 | C-3 | color emoji | **MISSING** | no COLRv0/v1 | after M-2 |
@@ -298,7 +299,7 @@ has an API surface, tests, and docs in the tree):
 | B-15 | **GPU rendering on Wayland** — CPU SHM only; the GL lane is X11/GLX. | partial | Wayland renders software (the toolkit's design center; the GL lane was an X11 perf answer) | L | none |
 | B-16 | **Subsurfaces** — no wl_subsurface; no X11 child-window compositing. | missing | video-in-UI, offscreen compositing overlays | M | none — would ride extension API v2 |
 | B-17 | **Tablets / stylus / gestures** — no zwp_tablet, no pinch/swipe anywhere. | missing | drawing tablets dead; pinch-zoom absent | M–L | none |
-| B-18 | **Widget-set residue** — no date/time picker, no editable combo; everything else on the GTK4 checklist has an FDK counterpart (menus, lists, trees, tables via grid/tree, text editing with selection and undo, tooltips, pickers, scroll views, tabs). | partial | small, visible gaps | S each | none **[VERIFIED-CHANGED: the editable combo SHIPPED - fdk_combo_set_editable; only the date/time picker remains]** |
+| B-18 | **Widget-set residue** — no date/time picker, no editable combo; everything else on the GTK4 checklist has an FDK counterpart (menus, lists, trees, tables via grid/tree, text editing with selection and undo, tooltips, pickers, scroll views, tabs). | partial | small, visible gaps | S each | none **[DONE 2026-10-29 — see the B-18 verified-status row; S-10]** |
 | B-19 | **Session restore protocols** — prefs cover app state; no xdg_session/WM_SAVE_YOURSELF. | partial | niche on the Linux desktop today | M | none |
 
 Also checked and fine: fractional scaling plumbing for extension
@@ -340,7 +341,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | S-7 | **X11 DPI awareness** (Xft.dpi + RandR scale) | B-07 | M |
 | S-8 | **AT-SPI2 level 1** — roles/names/states/focus/activate over M-7's D-Bus; text interfaces later | B-10 | L |
 | S-9 | **Drag icon + widget-level drop targets** | B-13 | S+M |
-| S-10 | **Widget residue** — date picker, editable combo | B-18 | S each |
+| S-10 | **Widget residue** — date picker, editable combo | B-18 | S each | **[DONE 2026-10-29 — see the B-18 verified-status row]** |
 
 ### COULD — if the MUST/SHOULD tiers close early
 

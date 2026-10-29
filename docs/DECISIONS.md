@@ -772,3 +772,61 @@ mechanism). Wayland: the injector's real pointer — no enter into
 the hole, enter into the region, leave on exit, full input after
 the clear. The add-on twin (fdk_ext_surface_set_input_region) is
 pinned by fdk-shell's X11 suite through the same readback.
+
+## D-018 — the calendar family: no clock reads, Monday-lead weeks, six rows always, pickers that do not parse (S-10 / B-18)
+
+2026-10-29. The widget-set residue item: everything on the GTK4
+checklist had an FDK counterpart except a date/time picker. The
+close is three widgets in src/widget/calendar.c — fdk_calendar (the
+month grid), fdk_date_picker (a formatted field + popup calendar),
+fdk_time_picker (a segmented stepper) — riding the i18n module's
+validated proleptic-Gregorian math for every date operation.
+
+**1. The widgets NEVER read the wall clock or the environment.**
+This is the i18n posture ("FDK formats the calendar numbers it is
+given") applied to widget state: "today" is app-injected
+(fdk_calendar_set_today), a date picker starts DATELESS (an em dash
+until set), a time picker starts at 00:00:00. The alternative —
+GtkCalendar's auto-today — would put a hidden clock read into the
+toolkit's state, exactly the class of ambient-environment
+dependence the locale system was designed to avoid. The fence is
+named in fdk_widgets.h.
+
+**2. Monday-lead weeks (ISO 8601).** The rules table carries no
+CLDR first-day field, and fdk_date_weekday's 0 = Monday numbering
+is the toolkit's established week arithmetic — so the grid leads
+Monday and the weekday header reads days_abbr[0..6] in ISO order.
+A first_day rules column is the honest future extension (US
+Sunday-lead); until it exists the ISO default is the documented
+behavior, not an ambient locale read.
+
+**3. Six week rows, always.** A month spans 4..6 ISO weeks; the
+grid lays out 6 unconditionally (GtkCalendar's discipline) so the
+widget's measured size never changes as the month turns — layout
+stability over two rows of occasional emptiness. Leading and
+trailing cells carry the adjacent months' days in the disabled
+color; selecting one (click or keyboard walk across the edge) both
+selects the date and moves the browse month. The grid "scrolls."
+
+**4. The pickers do not parse text (level 1).** There is no
+fdk_format_parse; inventing a per-locale date parser inside a
+widget would be the toolkit's worst kind of hidden magic. The date
+field opens on press and the keyboard openers (the combo's set);
+the time picker has no text mode at all. The fence is named in the
+header; a future parse API is the level-2 path.
+
+**5. The time picker renders latn digits.** The date/time
+formatters emit latn numerals today (the digit-substitution tables
+drive the NUMBER formatters); the segments match that output so a
+time picker next to an fdk_format_time label never mixes digit
+systems. If date formatting ever grows digit substitution, the
+segments follow it in the same change.
+
+**6. The popup is the combo's discipline, minus the menu.** One
+toolkit-owned popup window (fdk_window_create_popup + auto-paint +
+destroy-notify) hosting one calendar; CLOSE_REQUEST (the grab's
+outside-click translation) and Esc (the window layer's universal
+popup dismissal) close it; the combo_guard pattern covers a picker
+destroyed while open. Picking applies, formats the field, fires
+on_changed once, and closes — the app pumps events and never
+learns the popup exists.

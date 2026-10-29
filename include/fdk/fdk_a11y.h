@@ -107,6 +107,13 @@ typedef enum fdk_a11y_role {
 
     /* 1.4.9 append — the image display. */
     FDK_A11Y_ROLE_IMAGE = 51,   /* a picture widget (GtkPicture)   */
+
+    /* 1.1.0 append (S-10) — the calendar family. Same append-only
+     * policy as ever. */
+    FDK_A11Y_ROLE_CALENDAR = 52, /* the month grid (GtkCalendar); the
+                                    * 42 day cells enumerate as virtual
+                                    * children                      */
+    FDK_A11Y_ROLE_DATE_EDITOR = 53, /* a date/time field (the pickers) */
 } fdk_a11y_role;
 
 /* Stable, human-readable name ("button", "check menu item"). Never
