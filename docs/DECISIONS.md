@@ -1120,3 +1120,62 @@ argument is "" — the portal's own heuristics place the dialog; the
 x11:xid form is future polish for multi-window apps); the overwrite
 confirmation in portal mode is the DESKTOP's (the portal's own
 question), FDK's nested one belongs to the own-browser path only.
+
+## D-023 — the AT-SPI bridge, level 1: the wire over the rich tree, the retry posture, the discovery announcement (S-8 / B-10)
+
+2026-10-29. The audit's B-10: "internal a11y tree only; Orca and
+other OS screen readers cannot see FDK apps". The internal tree has
+been rich since 1.4.x (roles, states, snapshots, actions, virtual
+children, relations, notifications) — the gap was pure WIRE. Level 1
+per the roadmap: roles/names/states/focus/activate; text interfaces
+and relations export are C-2's fence.
+
+**1. The two-bus handshake, retry-first.** The session bus carries
+org.a11y.Bus.GetAddress -> the accessibility bus's own address; the
+bridge connects THERE (fdk_dbus_connect_address) and serves the tree.
+Failures RETRY on a 2 s throttle instead of degrading permanently —
+a screen reader toggled on mid-session is a real case, and the rig
+itself exposed the premature-degradation bug (the bridge engaged
+before the mock owned the name and gave up forever). Only an explicit
+$FDK_ATSPI=0 never tries.
+
+**2. Discovery is the announcement.** at-spi2's registry learns apps
+from the signals they emit on the a11y bus (the sender's unique name
+is the probe address) — the atk-bridge emits Window events for
+exactly this. The bridge emits ChildrenChanged("add") on its root at
+attach; the rig's screen-reader side captures the sender from the
+signal and drives the whole surface against it.
+
+**3. The registry is pointer-keyed with a diff-and-backstop GC.**
+Exported objects are /org/freedesktop/atspi/accessible/<id> (id 0 =
+the application root). Virtual children (painted-row containers)
+get their own (container, index) entries — a screen reader sees list
+ROWS, not an empty box. Liveness: CHILDREN_CHANGED events re-diff
+and kill gone entries; every method call verifies reachability from
+a live root by ADDRESS-ONLY walk (dead pointers are compared, never
+dereferenced). The pointer-reuse alias is documented as the known
+rare hazard of pointer-keyed registries.
+
+**4. The served surface.** Accessible (Role in AtspiRole numbering,
+RoleName, State as the 64-bit au pair, ChildCount/GetChildren/
+GetChildAtIndex/GetIndexInParent/GetApplication/GetInterfaces/
+GetAttributes + Name/Description/Parent/ChildCount through
+org.freedesktop.DBus.Properties), Component (GetExtents/GetPosition/
+GetSize in desktop coordinates — the window's root position + the
+snapshot's window-absolute bounds), Action (DoAction(0) == the
+widget's ACTIVATE — the same programmatic path a keyboard activation
+takes; virtual rows through fdk_a11y_virtual_perform). Events:
+Event.Object Focus ("focus") + StateChanged on focus moves, and
+StateChanged/PropertyChange/ChildrenChanged for the rest.
+
+**5. The engagement point is the pump tick.** window.c's scheme tick
+calls fdk__atspi_tick — the same shape as the color-scheme portal
+(one throttled attach per context, no retry storm, silent on
+desktops without an a11y stack: the narrator still serves the
+internal tree). fdk_shutdown drops the subscription and both
+connections (ASan-clean).
+
+Fences: text interfaces, relations, and the value interface are
+C-2's (level 2); bounds events are emitted but not announced as
+AT-SPI BoundsChanged (screen readers re-query); the registry is
+bounded at 2048 objects (a WARN names the invisibility beyond).

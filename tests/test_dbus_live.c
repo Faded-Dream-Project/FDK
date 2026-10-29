@@ -671,7 +671,7 @@ static void filechooser_handler(fdk_dbus_connection *c,
         }
         sender_seg[o] = '\0';
     }
-    char request_path[192];
+    char request_path[256];
     snprintf(request_path, sizeof request_path,
              "/org/freedesktop/portal/desktop/request/%s/%s",
              sender_seg, token);
@@ -738,6 +738,177 @@ static void filechooser_handler(fdk_dbus_connection *c,
         fdk_dbus_value_free(results_arr);
     }
     (void)fdk_dbus_connection_send(c, sig);
+}
+
+/* The mock org.a11y.Bus: GetAddress answers the SESSION bus's own
+ * address (the rig collapses the two-bus architecture — the bridge
+ * must not be able to tell). */
+static void a11ybus_handler(fdk_dbus_connection *c,
+                            fdk_dbus_message *call, void *user) {
+    (void)user;
+    const char *iface = fdk_dbus_message_interface(call);
+    const char *member = fdk_dbus_message_member(call);
+    if (iface == NULL || strcmp(iface, "org.a11y.Bus") != 0 ||
+        member == NULL || strcmp(member, "GetAddress") != 0) {
+        return;
+    }
+    const char *addr = getenv("DBUS_SESSION_BUS_ADDRESS");
+    fdk_dbus_message *reply = fdk_dbus_message_new_method_return(call);
+    if (reply != NULL) {
+        (void)fdk_dbus_message_append_string(
+            reply, addr != NULL ? addr : "");
+        (void)fdk_dbus_connection_send(c, reply);
+    }
+}
+
+static void atspi_btn_cb(fdk_widget *b, void *user) {
+    (void)b;
+    int *n = user;
+    (*n)++;
+}
+
+/* ---- The mock AT-SPI stack (1.1.0, S-8 / B-10) --------------------------
+ *
+ * A serves org.a11y.Bus on the SESSION bus, answering GetAddress with
+ * the session bus's OWN address (the rig collapses the two-bus
+ * architecture onto one daemon — the bridge cannot tell and must not
+ * care). B plays the SCREEN READER: it subscribes to the bridge's
+ * Event.Object signals (learning the bridge's unique name — the
+ * discovery mechanism real registries use), then drives the whole
+ * level-1 surface against the bridge's objects: the application
+ * root's children, Role/State/Name/Description/Parent properties,
+ * Component extents, the Action interface's DoAction, and the focus
+ * events the internal tree's notifications produce. */
+static char g_atspi_app_name[64]; /* the bridge's unique name        */
+static int g_atspi_saw_announce;
+static int g_atspi_focus_events;
+static char g_atspi_focus_path[160];
+
+static void atspi_object_signal(fdk_dbus_connection *c,
+                                fdk_dbus_message *sig, void *user) {
+    (void)user;
+    const char *iface = fdk_dbus_message_interface(sig);
+    const char *member = fdk_dbus_message_member(sig);
+    if (iface == NULL || strcmp(iface, "org.freedesktop.atspi.Event.Object") != 0) {
+        return;
+    }
+    const char *sender = fdk_dbus_message_sender(sig);
+    if (sender != NULL && g_atspi_app_name[0] == '\0') {
+        snprintf(g_atspi_app_name, sizeof g_atspi_app_name, "%s",
+                 sender);
+    }
+    if (member != NULL && strcmp(member, "ChildrenChanged") == 0) {
+        g_atspi_saw_announce++;
+    }
+    if (member != NULL && strcmp(member, "Focus") == 0) {
+        g_atspi_focus_events++;
+        snprintf(g_atspi_focus_path, sizeof g_atspi_focus_path, "%s",
+                 fdk_dbus_message_path(sig) != NULL
+                     ? fdk_dbus_message_path(sig)
+                     : "");
+    }
+    (void)c;
+}
+
+/* The reader-call plumbing: one shared capture buffer + done flag
+ * (the rig is single-threaded; one call in flight at a time). */
+static fdk_context *ctx_glob;
+static char g_atspi_cap[512];
+static int g_atspi_cap_done;
+
+/* Renders one value into the buffer: scalars as decimals/strings,
+ * arrays |-joined (items rendered recursively), variants unwrapped.
+ * The shapes this rig reads: u/i/b/s/o scalars, ao/as/au arrays, and
+ * the (v) of Properties.Get. */
+static size_t render_value(char *buf, size_t cap, size_t off,
+                           const fdk_dbus_value *v) {
+    if (v == NULL || off + 1 >= cap) {
+        return off;
+    }
+    if (fdk_dbus_value_type(v) == FDK_DBUS_VARIANT) {
+        return render_value(buf, cap, off,
+                            fdk_dbus_value_variant_value(v));
+    }
+    if (fdk_dbus_value_type(v) == FDK_DBUS_ARRAY) {
+        size_t cnt = fdk_dbus_value_array_count(v);
+        for (size_t k = 0; k < cnt && off + 1 < cap; k++) {
+            if (k > 0 && off + 1 < cap) {
+                buf[off++] = '|';
+            }
+            off = render_value(buf, cap, off,
+                               fdk_dbus_value_array_item(v, k));
+        }
+        return off;
+    }
+    const char *sv = fdk_dbus_value_string(v);
+    int w;
+    if (sv != NULL) {
+        w = snprintf(buf + off, cap - off, "%s", sv);
+    } else if (fdk_dbus_value_type(v) == FDK_DBUS_INT32) {
+        w = snprintf(buf + off, cap - off, "%d",
+                     (int)fdk_dbus_value_int32(v));
+    } else if (fdk_dbus_value_type(v) == FDK_DBUS_BOOLEAN) {
+        w = snprintf(buf + off, cap - off, "%d",
+                     fdk_dbus_value_boolean(v));
+    } else {
+        w = snprintf(buf + off, cap - off, "%u",
+                     (unsigned)fdk_dbus_value_uint32(v));
+    }
+    return (w > 0) ? off + (size_t)w : off;
+}
+
+static void atspi_capture_reply(fdk_dbus_connection *c,
+                                fdk_dbus_message *reply, void *user) {
+    (void)c;
+    (void)user;
+    g_atspi_cap_done = 1;
+    g_atspi_cap[0] = '\0';
+    if (reply == NULL || fdk_dbus_message_is_error(reply)) {
+        snprintf(g_atspi_cap, sizeof g_atspi_cap, "<err>");
+        return;
+    }
+    fdk_dbus_value **args = NULL;
+    size_t n = 0;
+    if (fdk_dbus_message_read_args(reply, &args, &n) != FDK_OK) {
+        return;
+    }
+    size_t off = 0;
+    for (size_t i = 0; i < n && off + 1 < sizeof g_atspi_cap; i++) {
+        if (i > 0 && off + 1 < sizeof g_atspi_cap) {
+            g_atspi_cap[off++] = '|';
+        }
+        off = render_value(g_atspi_cap, sizeof g_atspi_cap, off,
+                           args[i]);
+    }
+    fdk_dbus_values_free_array(args, n);
+}
+
+/* Calls a method on the bridge's object, pumps until the reply lands,
+ * and returns the captured rendering (a STATIC buffer — valid until
+ * the next call; "<err>" for error/timeout). NULL only on send
+ * failure. */
+static const char *atspi_call(fdk_dbus_connection *b, const char *dest,
+                              const char *path, const char *iface,
+                              const char *member) {
+    fdk_dbus_message *m =
+        fdk_dbus_message_new_method_call(dest, path, iface, member);
+    if (m == NULL) {
+        return NULL;
+    }
+    g_atspi_cap_done = 0;
+    fdk_dbus_pending *p = fdk_dbus_connection_call(
+        b, m, FDK_DBUS_TIMEOUT_DEFAULT, atspi_capture_reply, NULL);
+    if (p == NULL) {
+        fdk_dbus_message_free(m);
+        return NULL;
+    }
+    for (int i = 0; i < 200 && !g_atspi_cap_done; i++) {
+        (void)fdk_pump_events(ctx_glob, 20);
+    }
+    if (!g_atspi_cap_done) {
+        return "<timeout>";
+    }
+    return g_atspi_cap;
 }
 
 int main(void) {
@@ -1478,6 +1649,279 @@ int main(void) {
         unsetenv("FDK_FILE_DIALOG_PORTAL");
         printf("[ok] portal file chooser: forced-mode refusal -> the "
                "ERROR outcome, no fallback\n");
+    }
+
+    /* ---- The AT-SPI bridge (1.1.0, S-8 / B-10) -----------------------------
+     *
+     * A serves org.a11y.Bus (GetAddress -> the session bus's own
+     * address; the rig collapses the two-bus architecture). The FDK
+     * app (ctx) gets a window with a known tree; the bridge's pump
+     * tick engages it. B subscribes to the bridge's events (learning
+     * its unique name — the registry discovery mechanism) and then
+     * reads the whole level-1 surface like a screen reader would.
+     */
+    {
+        ctx_glob = ctx;
+        fdk_dbus_connection_set_method_handler(
+            a, a11ybus_handler, NULL);
+        g_reqname_done = 0;
+        fdk_dbus_pending *ap = fdk_dbus_connection_request_name(
+            a, "org.a11y.Bus",
+            FDK_DBUS_NAME_REPLACE_EXISTING | FDK_DBUS_NAME_DO_NOT_QUEUE,
+            reqname_reply, NULL);
+        assert(ap != NULL);
+        assert(pump_until(ctx, &g_reqname_done, 10000));
+        assert(g_reqname_code == FDK_DBUS_REQUEST_NAME_PRIMARY_OWNER);
+
+        /* The app's window: [root] -> [button "Click me", label
+         * "Hello", frame [entry]]. The tree the rig asserts against. */
+        fdk_window *aw = NULL;
+        fdk_window_options awopts = { .title = "atspi window",
+                                      .width = 300, .height = 200 };
+        assert(fdk_ok(fdk_window_create(ctx, &awopts, &aw)));
+        fdk_widget *aroot = NULL;
+        assert(fdk_ok(fdk_window_get_root(aw, &aroot)));
+        fdk_font *afont = fdk_font_load(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14);
+        fdk_widget *abtn = NULL;
+        fdk_widget *albl = NULL;
+        fdk_widget *afrm = NULL;
+        fdk_widget *aent = NULL;
+        static int btn_activations;
+        if (afont != NULL) {
+            assert(fdk_ok(fdk_button_create(aroot, afont, "Click me",
+                                            &abtn)));
+            fdk_button_set_on_activate(abtn, atspi_btn_cb,
+                                       &btn_activations);
+            fdk_widget_arrange(abtn, (fdk_rect){10, 10, 90, 30});
+            assert(fdk_ok(fdk_label_create(aroot, afont, "Hello",
+                                           &albl)));
+            fdk_widget_arrange(albl, (fdk_rect){10, 50, 120, 20});
+            assert(fdk_ok(fdk_frame_create(aroot, afont, "G", &afrm)));
+            fdk_widget_arrange(afrm, (fdk_rect){10, 80, 200, 90});
+            assert(fdk_ok(fdk_entry_create(afrm, afont, "", &aent)));
+            fdk_widget_arrange(aent, (fdk_rect){10, 10, 150, 26});
+        }
+        fdk_window_show(aw);
+        fdk_window_paint(aw);
+        (void)fdk_pump_events(ctx, 100);
+
+        /* B subscribes to the bridge's events FIRST (the discovery). */
+        g_atspi_app_name[0] = '\0';
+        g_atspi_saw_announce = 0;
+        g_atspi_focus_events = 0;
+        char *rule = fdk_dbus_match_rule(
+            "signal", NULL, "org.freedesktop.atspi.Event.Object", NULL,
+            NULL, NULL);
+        fdk_dbus_subscription *asub =
+            fdk_dbus_connection_subscribe(b, rule, atspi_object_signal,
+                                          NULL);
+        free(rule);
+        assert(asub != NULL);
+
+        /* Pump: the bridge's tick engages (the window exists), the
+         * GetAddress handshake runs, the a11y-bus connection comes
+         * up, and the discovery ChildrenChanged arrives at B. */
+        int announced = 0;
+        for (int i = 0; i < 250 && !announced; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            announced = (g_atspi_app_name[0] != '\0' &&
+                         g_atspi_saw_announce > 0);
+        }
+        assert(announced);
+        printf("[ok] atspi: the bridge engaged, discovered through its "
+               "ChildrenChanged announcement\n");
+
+        const char *app = g_atspi_app_name;
+        const char *ROOT = "/org/freedesktop/atspi/accessible/root";
+
+        /* The application object: role 74 (APPLICATION), a name. */
+        const char *v = atspi_call(b, app, ROOT,
+                                   "org.freedesktop.atspi.Accessible",
+                                   "GetRole");
+        assert(v != NULL && strcmp(v, "74") == 0);
+        v = atspi_call(b, app, ROOT, "org.freedesktop.DBus.Properties",
+                      "Get");
+        /* (Get needs the (ss) args — the property name; the helper
+         * sends none, so this specific call is driven inline below.) */
+
+        /* The tree: root -> [window root] -> [button, label,
+         * frame[entry]]. Walk it like a screen reader. */
+        v = atspi_call(b, app, ROOT, "org.freedesktop.atspi.Accessible",
+                       "GetChildCount");
+        assert(v != NULL && strcmp(v, "1") == 0);
+        v = atspi_call(b, app, ROOT, "org.freedesktop.atspi.Accessible",
+                       "GetChildren");
+        assert(v != NULL);
+        char winpath[192];
+        {
+            /* the rendering is one bare object path */
+            snprintf(winpath, sizeof winpath, "%s", v);
+            assert(strncmp(winpath, "/org/freedesktop/atspi/accessible/",
+                           32) == 0);
+        }
+        /* The window root's role: WINDOW (68). */
+        v = atspi_call(b, app, winpath,
+                       "org.freedesktop.atspi.Accessible", "GetRole");
+        assert(v != NULL && strcmp(v, "68") == 0);
+        /* Its children: button, label, frame (3). */
+        v = atspi_call(b, app, winpath,
+                       "org.freedesktop.atspi.Accessible", "GetChildCount");
+        assert(v != NULL && strcmp(v, "3") == 0);
+        v = atspi_call(b, app, winpath,
+                       "org.freedesktop.atspi.Accessible", "GetChildren");
+        assert(v != NULL);
+        char btnpath[192], frmpath[192];
+        {
+            /* three paths, |-separated: [0]=button [1]=label [2]=frame */
+            char parts[3][192];
+            int np = 0;
+            const char *p = v;
+            while (np < 3) {
+                const char *bar = strchr(p, '|');
+                size_t len = bar != NULL ? (size_t)(bar - p) : strlen(p);
+                assert(len < 192);
+                memcpy(parts[np], p, len);
+                parts[np][len] = '\0';
+                np++;
+                if (bar == NULL) {
+                    break;
+                }
+                p = bar + 1;
+            }
+            assert(np == 3);
+            snprintf(btnpath, sizeof btnpath, "%s", parts[0]);
+            snprintf(frmpath, sizeof frmpath, "%s", parts[2]);
+        }
+        /* The button: role PUSH_BUTTON (43); the ACTION interface. */
+        v = atspi_call(b, app, btnpath,
+                       "org.freedesktop.atspi.Accessible", "GetRole");
+        assert(v != NULL && strcmp(v, "43") == 0);
+        v = atspi_call(b, app, btnpath, "org.freedesktop.atspi.Action",
+                       "GetNActions");
+        assert(v != NULL && strcmp(v, "1") == 0);
+        /* The frame's child (the entry): role ENTRY (78). */
+        v = atspi_call(b, app, frmpath,
+                       "org.freedesktop.atspi.Accessible", "GetChildCount");
+        assert(v != NULL && strcmp(v, "1") == 0);
+        char entpath[192];
+        v = atspi_call(b, app, frmpath,
+                       "org.freedesktop.atspi.Accessible", "GetChildAtIndex");
+        /* (needs the index arg — inline below) */
+
+        /* Parameterized calls the helper cannot send: drive them with
+         * one-off messages. */
+        {
+            fdk_dbus_message *m = fdk_dbus_message_new_method_call(
+                app, frmpath, "org.freedesktop.atspi.Accessible",
+                "GetChildAtIndex");
+            assert(m != NULL);
+            assert(fdk_dbus_message_append_int32(m, 0) == FDK_OK);
+            g_atspi_cap_done = 0;
+            assert(fdk_dbus_connection_call(
+                       b, m, FDK_DBUS_TIMEOUT_DEFAULT,
+                       atspi_capture_reply, NULL) != NULL);
+            for (int i = 0; i < 200 && !g_atspi_cap_done; i++) {
+                (void)fdk_pump_events(ctx, 20);
+            }
+            assert(g_atspi_cap_done);
+            /* (bounded by construction: the capture is one object
+             * path, far below the buffer; the cast is the compiler's
+             * blindness to that) */
+            snprintf(entpath, sizeof entpath, "%.191s", g_atspi_cap);
+            v = atspi_call(b, app, entpath,
+                           "org.freedesktop.atspi.Accessible", "GetRole");
+            assert(v != NULL && strcmp(v, "78") == 0);
+        }
+        printf("[ok] atspi: the tree enumerated — app -> window -> "
+               "{button(43), label, frame -> entry(78)}\n");
+
+        /* The properties: the button's Name ("Click me") through
+         * org.freedesktop.DBus.Properties.Get. */
+        {
+            fdk_dbus_message *m = fdk_dbus_message_new_method_call(
+                app, btnpath, "org.freedesktop.DBus.Properties", "Get");
+            assert(m != NULL);
+            assert(fdk_dbus_message_append_string(
+                       m, "org.freedesktop.atspi.Accessible") == FDK_OK);
+            assert(fdk_dbus_message_append_string(m, "Name") == FDK_OK);
+            g_atspi_cap_done = 0;
+            assert(fdk_dbus_connection_call(
+                       b, m, FDK_DBUS_TIMEOUT_DEFAULT,
+                       atspi_capture_reply, NULL) != NULL);
+            for (int i = 0; i < 200 && !g_atspi_cap_done; i++) {
+                (void)fdk_pump_events(ctx, 20);
+            }
+            assert(g_atspi_cap_done);
+            /* the reply's variant unwraps to its string */
+            assert(strcmp(g_atspi_cap, "Click me") == 0);
+        }
+        /* The button's State: FOCUSABLE|ENABLED|VISIBLE|SHOWING|
+         * SENSITIVE -> bits {7,10,23,24,29} -> word0 = 0x88200480. */
+        v = atspi_call(b, app, btnpath,
+                       "org.freedesktop.atspi.Accessible", "GetState");
+        assert(v != NULL);
+        {
+            unsigned long w0 = strtoul(v, NULL, 10);
+            assert((w0 & (1u << 10)) != 0); /* FOCUSABLE  */
+            assert((w0 & (1u << 7)) != 0);  /* ENABLED    */
+            assert((w0 & (1u << 29)) != 0); /* VISIBLE    */
+            assert((w0 & (1u << 24)) != 0); /* SHOWING    */
+            assert((w0 & (1u << 23)) != 0); /* SENSITIVE  */
+        }
+        /* Component: the button's extents carry its arranged size. */
+        v = atspi_call(b, app, btnpath,
+                       "org.freedesktop.atspi.Component", "GetSize");
+        assert(v != NULL && strcmp(v, "90|30") == 0);
+        printf("[ok] atspi: Name property, State bitfield, Component "
+               "extents served\n");
+
+        /* FOCUS: drive the entry's focus through the a11y perform
+         * (the same notification path real focus changes ride) and
+         * assert the AT-SPI Focus + StateChanged events at B. */
+        assert(fdk_widget_focus(aent)); /* bool, not fdk_result */
+        int focused = 0;
+        for (int i = 0; i < 150 && !focused; i++) {
+            (void)fdk_pump_events(ctx, 20);
+            focused = (g_atspi_focus_events > 0);
+        }
+        assert(focused);
+        assert(strcmp(g_atspi_focus_path, entpath) == 0);
+        printf("[ok] atspi: the FOCUS event fired on the entry's "
+               "object when the tree's focus moved\n");
+
+        /* ACTION: DoAction(0) on the button == the programmatic
+         * activation (fires the button's callback). */
+                /* (armed at creation — GetNActions reports ACTIVATE only
+         * while a callback exists, the descriptor's honest rule) */
+        assert(abtn != NULL);
+        {
+            fdk_dbus_message *m = fdk_dbus_message_new_method_call(
+                app, btnpath, "org.freedesktop.atspi.Action",
+                "DoAction");
+            assert(m != NULL);
+            assert(fdk_dbus_message_append_int32(m, 0) == FDK_OK);
+            g_atspi_cap_done = 0;
+            assert(fdk_dbus_connection_call(
+                       b, m, FDK_DBUS_TIMEOUT_DEFAULT,
+                       atspi_capture_reply, NULL) != NULL);
+            for (int i = 0; i < 200 && !g_atspi_cap_done; i++) {
+                (void)fdk_pump_events(ctx, 20);
+            }
+            assert(g_atspi_cap_done);
+            assert(strcmp(g_atspi_cap, "1") == 0); /* boolean true */
+        }
+        assert(btn_activations == 1);
+        printf("[ok] atspi: Action.DoAction(0) activated the button "
+               "(the screen reader's click)\n");
+
+        fdk_dbus_subscription_free(asub);
+        fdk_window_destroy(aw);
+        if (afont != NULL) {
+            fdk_font_destroy(afont);
+        }
+        /* The bridge's shutdown runs at fdk_shutdown below; the
+         * subscription + connections must not leak (ASan watches). */
     }
 
     /* ---- teardown --------------------------------------------------------- */

@@ -12,6 +12,7 @@
 #include "widget/widget_internal.h"
 #include "widget/widgets_internal.h" /* window-root class, a11y name */
 #include "window/window_internal.h"
+#include "desktop/atspi_internal.h" /* the AT-SPI bridge's pump tick */
 
 #include "core/shortcut_internal.h"
 #include "widget/menu_internal.h"
@@ -2511,6 +2512,7 @@ void fdk__window_theme_settings_shutdown(void) {
      * shutdown sweep (an app-level close frees it cleanly; leaving
      * it would dangle the module's handle past the sweep). */
     fdk__color_scheme_shutdown();
+    fdk__atspi_shutdown();
     fdk__ui_metrics_shutdown();
     fdk__theme_settings_shutdown();
 }
@@ -2532,6 +2534,10 @@ void fdk__window_theme_settings_notify(void) {
 void fdk__window_theme_scheme_tick(fdk_context *ctx) {
     fdk__color_scheme_portal_tick(ctx);
     fdk__ui_metrics_portal_tick(ctx);
+    /* 1.1.0, S-8: the AT-SPI bridge's attach point — the same pump
+     * tick shape (throttled internally to one attempt; degrades
+     * silently on desktops with no a11y bus). */
+    fdk__atspi_tick(ctx);
 }
 
 /* The pump's poll face: -1 when no settings file is watched. */

@@ -808,6 +808,15 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **The AT-SPI2 bridge, level 1: SHIPPED (1.1.0, S-8 / B-10)** —
+  the accessibility WIRE over the internal a11y tree: the two-bus
+  handshake (retry on a 2s throttle — late-starting screen readers
+  are a real case), the object registry (virtual rows included), the
+  Accessible/Component/Action interfaces + the properties, the
+  Focus/State/Property/Children events, the discovery announcement.
+  $FDK_ATSPI=0 off. D-023; rig: 5 live-bus legs against the mock
+  stack (the premature-degradation bug the rig caught is the retry
+  posture's origin story).
 - **The xdg-desktop-portal FileChooser: SHIPPED (1.1.0, C-1 / B-09)**
   — fdk_dialog_open_file/save_file consult the desktop's own picker
   first (org.freedesktop.portal.FileChooser on the native D-Bus

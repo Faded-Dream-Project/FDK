@@ -535,3 +535,35 @@ Expectations:
   cannot even see the filesystem — the portal's whole point.
 
 **Status: DONE (should work; owner verification pending).**
+
+## 16. The AT-SPI bridge against a real screen reader (S-8 — needs your eyes)
+
+What the rig proved: the whole level-1 surface against a mock stack
+(two-bus handshake, discovery, tree enumeration with virtual rows,
+roles/states/name/parent, component extents, the focus events, and
+DoAction activating a real button). What only your desktop shows is
+a REAL screen reader driving a real FDK app.
+
+```sh
+# With orca running (Wayland or X11):
+#   open any FDK app/example, tab around, listen.
+# On X11 you can also inspect with:
+busctl --user call org.a11y.Bus /org/a11y/bus org.a11y.Bus GetAddress
+# then, on THAT bus, enumerate /org/freedesktop/atspi/accessible/root
+```
+
+Expectations:
+
+- Orca announces the window, then widgets as you tab: "Click me,
+  push button, not pressed", the labels, "entry" for the text
+  fields — names and roles coming from the internal tree's snapshot.
+- Activating a focused widget through Orca's "click" fires the
+  widget's real callback (DoAction -> the programmatic ACTIVATE).
+- Lists/trees announce their rows (the virtual-children export).
+- A screen reader started AFTER the app still finds it (the retry
+  handshake — the rig's caught bug, fixed as the posture).
+- Nothing at all changes on desktops without an accessibility stack
+  (the bridge retries silently; the internal narrator still works).
+
+**Status: DONE level 1 (should work; owner verification pending;
+text interfaces are C-2's next tier).**

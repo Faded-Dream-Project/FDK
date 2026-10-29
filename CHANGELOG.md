@@ -14,6 +14,37 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — the AT-SPI2 accessibility bridge, level 1 (S-8 / B-10)
+
+- **OS screen readers can finally see FDK apps.** The internal a11y
+  tree (rich since 1.4.x — roles, states, actions, virtual children)
+  now has its WIRE: an AT-SPI2 bridge on the native D-Bus client
+  that serves the whole widget tree on the accessibility bus and
+  emits the events screen readers listen for. Orca, at-spi2 based
+  automation, and accessibility stacks enumerate FDK windows like any
+  other application's.
+- The full level-1 surface: `Accessible` (AtspiRole-numbered roles,
+  the 64-bit state set, tree enumeration with virtual children —
+  list ROWS are addressable objects), `Component` (extents/position/
+  size in desktop coordinates), `Action` (`DoAction(0)` is the
+  screen reader's "click" — the same programmatic path a keyboard
+  activation takes), and the `Name`/`Description`/`Parent`
+  properties. Events: `Focus` + `StateChanged` on focus moves,
+  `PropertyChange`/`ChildrenChanged` for tree edits.
+- The two-bus handshake with a RETRY posture (a screen reader
+  toggled on mid-session still finds running apps; failures retry on
+  a 2 s throttle, never degrade permanently). `$FDK_ATSPI=0`
+  disables; discovery rides the announcement signal the at-spi2
+  registry itself uses.
+- Tests: five live-bus legs against a mock AT-SPI stack (the mock
+  org.a11y.Bus, the discovery, the tree walk, the properties/state/
+  extents, the focus event, and the action round trip). The rig
+  caught the premature-degradation bug (the bridge gave up before
+  the mock owned the name) — the retry posture is the fix, and it is
+  the right behavior for real desktops too. 848 exports (the tree
+  was already public; the bridge is internal). docs/DECISIONS.md
+  D-023; owner steps TESTING-ON-DESKTOP.md §16.
+
 ### Added — the xdg-desktop-portal FileChooser (C-1 / B-09)
 
 - **The desktop's own file picker, when the desktop has one**:
