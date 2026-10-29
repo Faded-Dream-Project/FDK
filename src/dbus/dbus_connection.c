@@ -1436,8 +1436,14 @@ static fdk_dbus_connection *connect_common(fdk_context *ctx,
         fdk_free(c);
         return NULL;
     }
-    c->io = fdk_ext_loop_add_fd(ctx, fd, FDK_EXT_FD_IN | FDK_EXT_FD_OUT,
-                                io_callback, c);
+    /* The INTERNAL source twin: the socket's traffic is FDK-own
+     * bookkeeping, not application activity — the pump runs the io
+     * callback but keeps waiting instead of returning on it (the
+     * MIT-SHM rule). The public add_fd is the ADD-ON contract; this
+     * is the FDK-module one. */
+    c->io = fdk__extfd_add_internal(ctx, fd,
+                                    FDK_EXT_FD_IN | FDK_EXT_FD_OUT,
+                                    io_callback, c);
     if (c->io == NULL) {
         conn_free(c);
         return NULL;

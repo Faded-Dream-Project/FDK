@@ -92,9 +92,17 @@ static fdk_widget *find_by_role(fdk_widget *root, fdk_a11y_role role,
 }
 
 static void load_font(void) {
+    /* The distro layouts DejaVu actually installs (the same
+     * candidate ladder tests/test_calendar.c rides — Debian/Ubuntu
+     * under truetype/, Fedora and Alpine flat under dejavu/, Arch
+     * and Void under TTF/; one of them exists wherever the suite
+     * runs, and the fontless posture below covers the rest). */
     const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
     };
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]);
          i++) {
@@ -1271,6 +1279,15 @@ static void test_caret_notification(void) {
 }
 
 static void test_text_extents_seam(void) {
+    /* The extents/hit-test math rides the Entry's caret-width
+     * arithmetic — glyph advances, so a loaded font is a HARD
+     * precondition (the fontless posture covers names and roles,
+     * not geometry). Honest skip, the calendar suite's rule. */
+    if (g_font == NULL) {
+        printf("[skip] a11y extents seam: no system font — the "
+               "geometry legs need glyph advances\n");
+        return;
+    }
     fdk_widget *root = NULL;
     CHECK(fdk_ok(fdk_widget_create(NULL, NULL,
                                    (fdk_rect){100, 50, 400, 300},

@@ -74,8 +74,32 @@ FDK_DBUS_TEST_REQUIRE=1 test-dbus (ALL PASS), make test-x11 (205
 [ok] incl. the fence — zero protocol errors), FDK_SANITIZE=0 test,
 release + examples + verify-exports (848, unchanged), the sway suite
 (56 [ok]), fdk-shell build + test-x11 + test-desktop + isolation +
-the notifyd and trayhost rigs (ALL PASS). CI verified green per-push
-from here. Re-verified 2026-10-29 (post-S-5): the clean
+the notifyd and trayhost rigs (ALL PASS). That push then exposed the
+NEXT layer the compile error had hidden (every job failed before the
+tests even ran): the CI runners carry a session bus the sandbox never
+had, and three defects surfaced only there. All fixed and re-verified
+2026-10-30 (round two): (1) the PUMP returned early on FDK's own
+D-Bus socket traffic — the extfd sources the native client rides
+counted as activity, so one round of bridge handshake returned the
+pump out from under an X event still in flight (fired extension fd
+sources now split: application sources keep the counted contract,
+FDK-internal ones run their callbacks but are the pump's keep-waiting
+class, the MIT-SHM rule — fdk__extfd_add_internal); (2) three test
+races that only the bus-present timing could lose — the ext
+notify_configure leg asserted "the LAST event is the configure" (a
+trailing Expose legitimately follows it; now ordering-safe: the
+configure WAS delivered, with the size), the animated-Picture GUI leg
+relied on the first paint landing after the first frame tick instead
+of following the documented pump;paint; cadence (now it does), and
+the file-dialog GUI legs drove a real FDK window that portal mode
+never hands out (OK + NULL handle is C-1's contract; the legs pin
+$FDK_FILE_DIALOG_PORTAL=0 — the mock-portal legs in test-dbus own
+the portal path); (3) test_a11y's font ladder missed the Fedora/
+Alpine/Arch layouts (extents legs ran fontless — now the calendar
+suite's candidate ladder, with an honest skip when nothing loads).
+The debian anim leg and the ubuntu ext leg both reproduced locally
+under dbus-run-session and pass; the full battery above re-ran green,
+plus two consecutive dbus-mode test-x11 passes. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +

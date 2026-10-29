@@ -727,9 +727,16 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
         /* Extension fd sources (1.1.0): dispatched AFTER the backend
          * and theme watch, in registration order, with the timer
          * fire discipline (a callback may remove/add sources,
-         * destroy windows, quit). A fired source counts toward the
-         * return value exactly like a fired timer — the pump's caller
-         * repaints or re-polls as its own loop sees fit. */
+         * destroy windows, quit). An APPLICATION source's firing
+         * counts toward the return value exactly like a fired timer
+         * — the pump's caller repaints or re-polls as its own loop
+         * sees fit. FDK-INTERNAL sources (the D-Bus client's
+         * sockets, fdk__extfd_add_internal) run their callbacks here
+         * too but do NOT count: their traffic is the pump's own
+         * keep-waiting class (the MIT-SHM completion rule), so a
+         * bus-present host's bridge handshake can no longer return
+         * this pump early out from under an X event still in
+         * flight. */
         if (extfd_n > 0) {
             int extfired = fdk__extfd_dispatch(ctx, pfds, extfd_base,
                                                extfd_n);

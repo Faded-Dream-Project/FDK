@@ -19,6 +19,8 @@
 #define FDK_CONTEXT_INTERNAL_H
 
 #include "fdk/fdk_core.h"
+#include "fdk/fdk_extend.h" /* fdk_ext_fd_fn — the internal add_fd twin
+                             * below takes the same callback type */
 
 #include "platform/platform_internal.h"
 
@@ -120,6 +122,19 @@ struct fdk_context {
  * in fdk_extend.h): the poll-set builder and the reentrancy-safe
  * fire loop the pump calls after poll() reports activity. */
 struct pollfd; /* <poll.h> lives in the .c files */
+struct fdk_ext_fd_source; /* the record is extfd.c-private */
+
+/* The internal twin of fdk_ext_loop_add_fd: FDK's OWN module
+ * sockets (the D-Bus client) ride this. Same callbacks, same
+ * removal discipline — the one semantic difference is in the
+ * pump's return value: an internal source's firing is INTERNAL
+ * traffic (the MIT-SHM completion rule), so the pump keeps
+ * waiting for its remaining timeout instead of returning to the
+ * caller. Application add-on sources keep the counted contract
+ * fdk_extend.h documents. */
+struct fdk_ext_fd_source *fdk__extfd_add_internal(
+    fdk_context *ctx, int fd, uint32_t flags, fdk_ext_fd_fn fn,
+    void *user_data);
 
 /* Writes this context's ext fd sources' poll entries at
  * pfds[base .. base+count) — the pump lays its own fds (backend,

@@ -31,7 +31,16 @@
 /* The public record. `active` is the removal flag, the timer
  * discipline: remove marks inactive (never fires again); the fire
  * loop performs the actual unlink+free — inside a callback that
- * means AFTER it returns. */
+ * means AFTER it returns. `internal` marks FDK's OWN module
+ * sources (the D-Bus client's socket): their callbacks run like
+ * any other's, but their firings are INTERNAL traffic — the pump
+ * keeps waiting for the remaining timeout instead of returning
+ * (the MIT-SHM completion rule, generalized to every FDK-owned
+ * fd; an application's add-on sources keep the counted contract
+ * fdk_extend.h documents). Without the distinction, one round of
+ * bridge handshake traffic returned the pump early and the X
+ * events still in flight missed their pump window — the CI-red
+ * class the S-8 bus introduced. */
 struct fdk_ext_fd_source {
     fdk_context *ctx;
     int fd;
@@ -39,6 +48,7 @@ struct fdk_ext_fd_source {
     fdk_ext_fd_fn fn;
     void *user_data;
     bool active;
+    bool internal;
 };
 
 /* FDK_EXT_FD_* are numerically poll(2)'s bits (fdk_extend.h), so the
@@ -50,9 +60,9 @@ struct fdk_ext_fd_source {
 #error "FDK_EXT_FD_* bits have diverged from poll(2) — fix one of them"
 #endif
 
-fdk_ext_fd_source *fdk_ext_loop_add_fd(fdk_context *ctx, int fd,
-                                       uint32_t flags, fdk_ext_fd_fn fn,
-                                       void *user_data) {
+static fdk_ext_fd_source *extfd_add(fdk_context *ctx, int fd,
+                                    uint32_t flags, fdk_ext_fd_fn fn,
+                                    void *user_data, bool internal) {
     if (ctx == NULL || fd < 0 || fn == NULL) {
         return NULL;
     }
@@ -92,8 +102,26 @@ fdk_ext_fd_source *fdk_ext_loop_add_fd(fdk_context *ctx, int fd,
     src->fn = fn;
     src->user_data = user_data;
     src->active = true;
+    src->internal = internal;
     ctx->extfds[ctx->extfd_count++] = src;
     return src;
+}
+
+fdk_ext_fd_source *fdk_ext_loop_add_fd(fdk_context *ctx, int fd,
+                                       uint32_t flags, fdk_ext_fd_fn fn,
+                                       void *user_data) {
+    return extfd_add(ctx, fd, flags, fn, user_data, false);
+}
+
+/* The internal twin (context_internal.h): same machinery, one
+ * semantic difference — the firings do not count toward the pump's
+ * return value. FDK's own D-Bus sockets ride this; an add-on's
+ * sources ride the public one. */
+fdk_ext_fd_source *fdk__extfd_add_internal(fdk_context *ctx, int fd,
+                                           uint32_t flags,
+                                           fdk_ext_fd_fn fn,
+                                           void *user_data) {
+    return extfd_add(ctx, fd, flags, fn, user_data, true);
 }
 
 /* Unlinks a dead source from the array and frees it. Only called
@@ -255,7 +283,10 @@ int fdk__extfd_dispatch(fdk_context *ctx, const struct pollfd *pfds,
         ctx->extfd_firing = src;
         src->fn(src, due[i].revents, src->user_data);
         ctx->extfd_firing = prev_firing;
-        fired++;
+        if (!src->internal) {
+            fired++; /* application sources count; FDK-internal ones
+                      * are the pump's keep-waiting class */
+        }
         if (!src->active) {
             /* Self-removal inside its callback (or remove called on
              * the firing handle): the record is still allocated —

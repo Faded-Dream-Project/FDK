@@ -7178,12 +7178,20 @@ static void test_picture_anim_gui(void) {
     unsigned long a = x11_readback_pixel(&rb, xid, 10, 10);
     assert((a & 0x00FFFFFFu) != 0);
 
-    /* Pump through the animation: the timer advances frames and the
-     * invalidation repaints the window — at some point the center
-     * block (frame 1) differs from the ring. */
+    /* Pump through the animation: the canonical `pump; paint;`
+     * cadence the core documents — "a fired timer counts toward the
+     * return value" so the APP repaints timer-driven damage (an
+     * application-owned window never auto-repaints; that pacing is
+     * the owner's, per fdk_window_set_auto_paint's contract). The
+     * first paint above may land before OR after the first frame
+     * tick — whichever the map-event batch race decides — so THIS
+     * loop is where the frames must reach the screen. */
     bool saw_diff = false;
     for (int i = 0; i < 80 && !saw_diff; i++) {
-        (void)fdk_pump_events(ctx, 50);
+        int fired = fdk_pump_events(ctx, 50);
+        if (fired > 0) {
+            fdk_window_paint(win);
+        }
         unsigned long ring = x11_readback_pixel(&rb, xid, 10, 10);
         unsigned long center = x11_readback_pixel(&rb, xid, 50, 50);
         if (ring != center) {
@@ -7587,6 +7595,17 @@ static void drop_dialog_scratch(const char *dir) {
 static void test_file_dialog_gui(void) {
     char want_file[512];
     char *dir = make_dialog_scratch(want_file, sizeof(want_file));
+
+    /* Pin the OWN browser: these legs drive a real FDK window with
+     * real keys, and in portal mode there IS no FDK window (C-1's
+     * contract: OK + a NULL out_handle). The sandbox's Xvfb has no
+     * bus, so the auto fallback used to engage SYNCHRONOUSLY and
+     * hand back the browser's window — but a bus-present host (the
+     * CI runners run one) arms the portal flight instead and the
+     * handle stays NULL. The portal path has its own dedicated
+     * mock-portal legs in test-dbus; the GUI legs are the
+     * own-browser contract. */
+    setenv("FDK_FILE_DIALOG_PORTAL", "0", 1);
 
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
@@ -8057,6 +8076,7 @@ static void test_file_dialog_gui(void) {
     XCloseDisplay(send_dpy);
     fdk_shutdown(ctx); /* any dialog window left dies here safely */
     drop_dialog_scratch(dir);
+    unsetenv("FDK_FILE_DIALOG_PORTAL");
     printf("[ok] file dialog GUI: accept/cancel paths, folder kind "
            "returns a real directory\n");
 }
@@ -8313,6 +8333,10 @@ static unsigned long icon_row_color(fdk_context *ctx, Display *send_dpy,
 static void test_file_dialog_icons_gui(void) {
     icon_fixture_build();
 
+    /* The own-browser pin (test_file_dialog_gui's comment): these
+     * legs drive the dialog's real window — portal mode has none. */
+    setenv("FDK_FILE_DIALOG_PORTAL", "0", 1);
+
     /* Save + swap the icon environment; reset both ways. */
     const char *saved_data = getenv("XDG_DATA_HOME");
     const char *saved_cfg = getenv("XDG_CONFIG_HOME");
@@ -8523,6 +8547,7 @@ static void test_file_dialog_icons_gui(void) {
     }
     fdk__icon_theme_reset();
     icon_fixture_drop();
+    unsetenv("FDK_FILE_DIALOG_PORTAL");
 }
 
 /* ---- 1.5.3: XSETTINGS live icon-theme detection -------------------
@@ -10603,6 +10628,12 @@ static void test_modern_batch_gui(void) {
     }
     fclose(ff);
 
+    /* The own-browser pin (test_file_dialog_gui's comment): the
+     * color-chooser leg at the end drives the file dialog's real
+     * window — portal mode has none. Set after the skip so an early
+     * exit never leaks the pin to later tests. */
+    setenv("FDK_FILE_DIALOG_PORTAL", "0", 1);
+
     fdk_context *ctx = NULL;
     fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
     assert(fdk_ok(init_with_retry(&ctx, &opts)));
@@ -11010,6 +11041,7 @@ static void test_modern_batch_gui(void) {
     XCloseDisplay(send);
     fdk_font_destroy(font);
     fdk_shutdown(ctx);
+    unsetenv("FDK_FILE_DIALOG_PORTAL");
     printf("[ok] modern batch GUI: all five 1.4.4 features through "
            "real X input\n");
 }
@@ -12206,6 +12238,9 @@ static void ext_test_popup_attached(fdk_ext_surface *surface,
 static fdk_event_type g_ext_last_event;
 static int g_ext_events;
 static fdk_i32 g_ext_last_w, g_ext_last_h;
+static int g_ext_saw_configure; /* any CONFIGURE seen (the ordering-
+                                * safe record — "last event" is a race
+                                * against trailing server traffic) */
 
 static void ext_test_event(fdk_ext_surface *surface,
                            const fdk_event_data *event, void *user) {
@@ -12214,6 +12249,7 @@ static void ext_test_event(fdk_ext_surface *surface,
     g_ext_events++;
     g_ext_last_event = event->type;
     if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
+        g_ext_saw_configure = 1;
         g_ext_last_w = event->configure.size.width;
         g_ext_last_h = event->configure.size.height;
     }
@@ -12427,6 +12463,8 @@ static void test_ext_notify_configure(void) {
 
     g_ext_events = 0;
     g_ext_last_w = g_ext_last_h = 0;
+    g_ext_last_event = 0;
+    g_ext_saw_configure = 0;
     fdk_ext_surface_set_event_callback(surf, ext_test_event, NULL);
 
     /* The add-on reports a compositor-assigned size (the Wayland
@@ -12434,7 +12472,15 @@ static void test_ext_notify_configure(void) {
      * its own — but the mirror path must behave identically). */
     assert(fdk_ext_surface_notify_configure(surf, 300, 80) == FDK_OK);
     (void)fdk_pump_events(ctx, 100);
-    assert(g_ext_last_event == FDK_EVENT_WINDOW_CONFIGURE);
+    /* Ordering-safe: the assertion is that the configure WAS
+     * DELIVERED with the reported size — NOT that it is the last
+     * event on the surface. A trailing server event (an Expose from
+     * the map, whose delivery shifts across pump boundaries when
+     * the poll set carries a D-Bus member — the AT-SPI bridge holds
+     * a live connection on bus-present hosts, S-8) may legitimately
+     * follow it; the "last event" formulation raced exactly that
+     * and lost on the CI runners. */
+    assert(g_ext_saw_configure);
     assert(g_ext_last_w == 300 && g_ext_last_h == 80);
 
     fdk_size sz;

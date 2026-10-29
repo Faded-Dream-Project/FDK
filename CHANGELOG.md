@@ -14,6 +14,50 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Fixed — the bus-present host: the pump, three test races, and the font ladder (the CI runners' session bus)
+
+- **`fdk_pump_events` no longer returns early on FDK's own D-Bus
+  traffic.** The native client's sockets ride the extension fd-source
+  machinery, and a fired source counted as pump activity — so on a
+  host with a session bus (every CI runner; the development sandbox
+  has none, which is why the local battery was green while CI was
+  not), one round of AT-SPI bridge handshake returned the pump out
+  from under an X event still in flight. Sources now split:
+  application add-on sources keep the counted contract
+  (fdk_extend.h), while FDK-internal ones (the D-Bus client,
+  `fdk__extfd_add_internal`) run their callbacks and are otherwise
+  the pump's keep-waiting class — the same rule the backend's own
+  MIT-SHM completions already follow.
+- **Three test races only a bus-present host could lose.** The ext
+  `notify_configure` leg asserted the configure was the LAST event
+  on the surface (a trailing Expose from the map legitimately
+  follows it once bus traffic shifts delivery across pump
+  boundaries; the assert is now ordering-safe — the configure WAS
+  delivered, with the reported size). The animated-Picture GUI leg
+  relied on its one pre-loop paint landing after the first frame
+  tick, instead of following the documented `pump; paint;` cadence
+  for timer-driven damage on an application window (the loop now
+  paints when the pump reports fired timers — deterministic on
+  either side of the map-event race). The file-dialog GUI legs drove
+  a real FDK dialog window that portal mode never hands out (C-1's
+  contract: OK with a NULL out-handle; the legs now pin
+  `$FDK_FILE_DIALOG_PORTAL=0` — the portal path's own coverage is
+  the mock-portal battery in `make test-dbus`).
+- **test_a11y's font ladder missed three distro layouts.** The C-2
+  extents legs load a system font by path; the candidates list had
+  Debian's `truetype/dejavu` and liberation only, so Fedora
+  (flat `dejavu/`), Alpine (flat `dejavu/`) and Arch (`TTF/`)
+  ran the geometry legs fontless and failed. The ladder is now the
+  calendar suite's five-path list, and the extents seam skips
+  honestly (with a reason) when no system font exists anywhere.
+- Verification: the ubuntu and debian failures both reproduce under
+  `dbus-run-session` locally and now pass; two consecutive
+  dbus-mode `make test-x11` runs green; the full battery (make test,
+  FDK_DBUS_TEST_REQUIRE=1 test-dbus ALL PASS, test-x11, sanitize-0,
+  release + examples + verify-exports 848, the sway suite, fdk-shell
+  build + test-x11 + test-desktop + isolation + both desktop rigs)
+  re-ran green after the changes.
+
 ### Fixed — the RENDER cursor lane: the build dep that wasn't, and the wire value it hid (S-5's two defects)
 
 - **The CI-red streak ends (15 consecutive pushes).** S-5 added
