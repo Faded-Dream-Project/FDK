@@ -34,7 +34,10 @@ xbps-install -Sy gcc pkgconf make findutils >/dev/null 2>&1 || \
 # only against installed providers — without these lines the fdk-devel
 # transaction aborts "unresolvable shlib libXext.so.6 / libxkbcommon.so.0"
 # (the same hermetic lines FDK's own void install-test carries).
-xbps-install -Sy libX11 libXext zlib 2>/dev/null || true
+# libXrandr: libfdk.so.1 has NEEDED it since M-6 (the RandR
+# output model links it directly) — the same hermetic class
+# as libXext above; the clean container has no provider.
+xbps-install -Sy libX11 libXext libXrandr zlib 2>/dev/null || true
 xbps-install -Sy libxkbcommon 2>/dev/null || true
 # Void's wayland client runtime library ships in the package named
 # plainly 'wayland' (wayland-devel is its -devel sibling).

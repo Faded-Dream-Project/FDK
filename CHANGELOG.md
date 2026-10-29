@@ -14,6 +14,19 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Fixed — the void install-test's hermetic set: libXrandr was missing from the clean container
+
+- The last red job of the repair series: five of six green, and
+  void's clean-container install-test died at
+  `fdk-theme: error while loading shared libraries: libXrandr.so.2`.
+  The hermetic pre-install set (libX11, libXext, zlib, libxkbcommon,
+  wayland — the 0d9d4de lesson: xbps resolves declared
+  shlib-requires only against installed providers) predated M-6;
+  `libXrandr` joins it, in FDK's own and fdk-shell's install-tests.
+  The other families resolve the new dependency through their
+  package managers (the deb Depends row, rpm's auto-requires,
+  pacman's depends=) and passed.
+
 ### Fixed — fdk-shell's test link: the XShape readback legs need -lXext on the container path
 
 - The ubuntu job went green with the bus-present fixes, which let

@@ -108,7 +108,12 @@ wherever the sibling stack was used, but the containers link the
 INSTALLED libfdk.so whose .pc is deliberately bare. The dependency
 moved to the test-deps line where it belongs; the fdk-shell battery
 (build zero warnings, test-x11 incl. the region legs, test-desktop,
-isolation, both desktop rigs) re-ran green. Re-verified 2026-10-29 (post-S-5): the clean
+isolation, both desktop rigs) re-ran green. Round four: five of six
+jobs green; void's clean-container install-test then died at
+fdk-theme's missing libXrandr.so.2 — the hermetic pre-install set
+(the 0d9d4de xbps lesson) predated M-6; libXrandr joined it in both
+void install-tests. The other families resolve the dependency
+through their package managers and passed. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +

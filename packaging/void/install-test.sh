@@ -29,7 +29,10 @@ xbps-install -Sy gcc pkgconf 2>/dev/null || xbps-install -Sy gcc pkgconf
 # Runtime libraries the packages need in this fresh container. xbps
 # resolves the shlib-requires declared on the packages; installing them
 # explicitly keeps the test hermetic against repo metadata variance.
-xbps-install -Sy libX11 libXext zlib 2>/dev/null || true
+# libXrandr: libfdk.so.1 has NEEDED it since M-6 (the RandR
+# output model links it directly) — the same hermetic class
+# as libXext above; the clean container has no provider.
+xbps-install -Sy libX11 libXext libXrandr zlib 2>/dev/null || true
 xbps-install -Sy libxkbcommon 2>/dev/null || true
 # Void's wayland client runtime library ships in the package named
 # plainly 'wayland' (wayland-devel is its -devel sibling).
