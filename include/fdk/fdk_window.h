@@ -168,7 +168,7 @@ void fdk_window_set_icon(fdk_window *window, const fdk_u32 *pixels,
  * call this. Safe before or after fdk_window_show(). */
 void fdk_window_set_role(fdk_window *window, const char *role);
 
-/* ---- Cursor shape (1.1.0-rc1) -------------------------------------------
+/* ---- Cursor shape (1.1.0-rc1; the full named set 1.1.0-rc2, S-5) --------
  *
  * The shape the pointer takes while hovering this window. FDK's own
  * resize-edge affordances (directional cursors over a resizable
@@ -177,11 +177,56 @@ void fdk_window_set_role(fdk_window *window, const char *role);
  * every time the pointer enters (Wayland cursor state does not
  * survive leaving a surface; X11 tracks it as window state).
  *
+ * The resolution order when several actors want the cursor, most
+ * specific first:
+ *   1. an application-set shape (this call) — the explicit request
+ *      owns the whole window, edges included;
+ *   2. a widget hover shape — without an app request, hovering a
+ *      text-entry widget (Entry / TextView / Spin, or an editable
+ *      Combo's entry) shows the I-beam automatically;
+ *   3. FDK's resize-edge compass.
+ *
+ * The 1.1.0-rc2 set (S-5 / B-12) mirrors the cursor-shape-v1
+ * protocol's semantic space — the same names CSS, GTK4 and Qt6 use.
+ * Values 0 and 1 predate the set and are unchanged; everything after
+ * is appended (ABI note: enum append is the safe-add policy, and no
+ * existing value ever moves).
+ *
  * The shape is a HINT: a backend or platform without the needed
- * mechanism keeps its default arrow — never a wrong shape. */
+ * mechanism keeps its default arrow — never a wrong shape. Where a
+ * platform lacks an exact twin (the X core cursor font has no
+ * "copy", for instance) FDK substitutes the nearest core glyph
+ * AFTER first trying the XCursor theme through RENDER, so desktops
+ * with a cursor theme get the real shapes; the substitutions are
+ * documented in docs/platform-input.md's cursor table. */
 typedef enum fdk_cursor_shape {
-    FDK_CURSOR_DEFAULT = 0, /* the platform's standard arrow */
-    FDK_CURSOR_POINTER = 1, /* the pointing hand over clickable things */
+    FDK_CURSOR_DEFAULT = 0,   /* the platform's standard arrow */
+    FDK_CURSOR_POINTER = 1,   /* the pointing hand over clickable things */
+    FDK_CURSOR_TEXT = 2,      /* the I-beam over selectable text */
+    FDK_CURSOR_CROSSHAIR = 3, /* precise selection (image editors) */
+    FDK_CURSOR_WAIT = 4,      /* busy: the app cannot take input */
+    FDK_CURSOR_PROGRESS = 5,  /* busy but still interactive */
+    FDK_CURSOR_MOVE = 6,      /* an object moves with the pointer */
+    FDK_CURSOR_COPY = 7,      /* a drag would copy */
+    FDK_CURSOR_ALIAS = 8,     /* a drag would create a shortcut */
+    FDK_CURSOR_NO_DROP = 9,   /* a drop is refused here */
+    FDK_CURSOR_NOT_ALLOWED = 10, /* the action is not allowed */
+    FDK_CURSOR_GRAB = 11,     /* a thing can be grabbed (open hand) */
+    FDK_CURSOR_GRABBING = 12, /* a thing is grabbed (closed hand) */
+    FDK_CURSOR_ALL_SCROLL = 13,     /* free two-axis panning */
+    FDK_CURSOR_COL_RESIZE = 14,     /* a column separator drags */
+    FDK_CURSOR_ROW_RESIZE = 15,     /* a row separator drags */
+    FDK_CURSOR_ZOOM_IN = 16,  /* clicking zooms in */
+    FDK_CURSOR_ZOOM_OUT = 17, /* clicking zooms out */
+    FDK_CURSOR_HELP = 18,     /* a question-mark arrow: help here */
+    FDK_CURSOR_CELL = 19,     /* spreadsheet cell selection (plus) */
+    FDK_CURSOR_CONTEXT_MENU = 20,   /* a context menu is one click away */
+    FDK_CURSOR_VERTICAL_TEXT = 21,  /* the I-beam rotated for vertical scripts */
+
+    /* Sentinel: one past the last defined shape (NOT a shape). Lets
+     * code iterate/validate the set without hard-coding 22; unknown
+     * values in between are invalid, as ever. */
+    FDK_CURSOR__COUNT = 22,
 } fdk_cursor_shape;
 
 /* Sets the window's hover cursor shape (fdk_cursor_shape above).

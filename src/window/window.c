@@ -99,6 +99,7 @@ static void window_root_theme_changed(fdk_widget *root);
 static void window_update_cursor(fdk_window *window, fdk_i32 x,
                                  fdk_i32 y);
 static void window_reset_cursor(fdk_window *window);
+static void window_apply_cursor(fdk_window *window);
 static void window_revalidate_pointer(fdk_window *window);
 
 #define DECO_MIN_W 60
@@ -859,6 +860,8 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->deco_pressed = 0;
     window->cursor_edge = FDK_WRES_NONE;
     window->app_cursor_shape = -1; /* no app shape requested yet */
+    window->widget_hover_cursor = -1; /* no widget under the pointer */
+    window->cursor_applied = -1;     /* nothing sent to the backend yet */
     window->popup_motion_ms = 0;
     window->popup_button_ms = 0;
     window->popup_close_reason = FDK_POPUP_CLOSE_NONE;
@@ -1054,30 +1057,55 @@ void fdk_window_destroy(fdk_window *window) {
     fdk_free(window);
 }
 
+/* ---- Cursor resolution (1.1.0-rc2, S-5) --------------------------
+ *
+ * The op shape space is 0 (default), 1..8 (the resize compass),
+ * 9 (the hand), 32..51 (the named set). The mapping from the public
+ * enum lives HERE, once, as a pure function both the tests and the
+ * apply path pin. */
+static int cursor_public_to_op(int public_shape) {
+    if (public_shape == FDK_CURSOR_DEFAULT) {
+        return 0;
+    }
+    if (public_shape == FDK_CURSOR_POINTER) {
+        return FDK_PLATFORM_CURSOR_POINTER;
+    }
+    if (public_shape >= 2 && public_shape < (int)FDK_CURSOR__COUNT) {
+        return FDK_PLATFORM_CURSOR_NAMED_BASE + (public_shape - 2);
+    }
+    return -1; /* invalid: the callers keep the current shape */
+}
+
+/* The resolution order, as a pure function (the headless cursor
+ * suite pins every row): an explicit application request OWNS the
+ * window (edges included); without one, a widget hover shape (the
+ * Entry/TextView/Spin I-beam) rules; without either, the resize
+ * compass. -1/-1/0 inputs give the default arrow. */
+int fdk__cursor_resolve(int app_shape, int widget_hover, int edge) {
+    if (app_shape >= 0) {
+        return cursor_public_to_op(app_shape);
+    }
+    if (widget_hover >= 0) {
+        return cursor_public_to_op(widget_hover);
+    }
+    if (edge > 0) {
+        return edge; /* the compass is already op-space */
+    }
+    return 0;
+}
+
 void fdk_window_set_cursor(fdk_window *window, fdk_cursor_shape shape) {
     if (window == NULL) {
         return;
     }
-    if (shape != FDK_CURSOR_DEFAULT && shape != FDK_CURSOR_POINTER) {
+    if ((int)shape < 0 || (int)shape >= (int)FDK_CURSOR__COUNT) {
         return; /* unknown value: keep the current shape, no error */
     }
-    if (window->ops->window_set_cursor == NULL) {
-        return; /* backend cannot shape cursors: default arrow stays */
-    }
-    /* Map the public enum onto the op's shape space: DEFAULT is the
-     * shared 0; POINTER rides FDK_PLATFORM_CURSOR_POINTER. The
-     * application's explicit choice overrides the compass-based
-     * shape the resize affordance picked (window->cursor_edge caches
-     * that side; returning to DEFAULT clears the hand only — the
-     * compass re-evaluates on the next motion/enter). */
-    int op_shape = (shape == FDK_CURSOR_POINTER)
-                       ? FDK_PLATFORM_CURSOR_POINTER
-                       : 0;
     if (window->app_cursor_shape == (int)shape) {
         return; /* already applied */
     }
     window->app_cursor_shape = (int)shape;
-    window->ops->window_set_cursor(window->pwindow, op_shape);
+    window_apply_cursor(window);
 }
 
 void fdk_window_set_title(fdk_window *window, const char *title) {
@@ -1334,18 +1362,43 @@ static void window_apply_resize(fdk_window *window, fdk_i32 x, fdk_i32 y) {
     }
 }
 
-/* ---- Cursor shaping + hover revalidation (1.1.4) ----
+/* ---- Cursor shaping + hover revalidation (1.1.4; the resolution
+ * order + the named set 1.1.0-rc2) ----
  *
  * Two affordances a WM frame gives for free that FDK's chrome must
  * provide itself when it owns the window: the cursor that says
  * "this edge drags" BEFORE any button is held, and hover state that
- * survives the window's own geometry changes. */
+ * survives the window's own geometry changes.
+ *
+ * rc2 re-structured WHO decides the shape into one place: the state
+ * trio (app_cursor_shape, widget_hover_cursor, cursor_edge) +
+ * fdk__cursor_resolve decide, window_apply_cursor speaks. The op
+ * layer only ever sees TRANSITIONS (cursor_applied caches the last
+ * op value sent). */
+
+/* THE speak-path: resolves the trio and ships the transition. The
+ * backend-less case is a no-op (the default arrow stays — honest
+ * unsupported). Safe to call speculatively: an unchanged resolution
+ * costs one integer compare. */
+static void window_apply_cursor(fdk_window *window) {
+    if (window->ops->window_set_cursor == NULL) {
+        return;
+    }
+    int op = fdk__cursor_resolve(window->app_cursor_shape,
+                                 window->widget_hover_cursor,
+                                 window->cursor_edge);
+    if (op < 0 || op == window->cursor_applied) {
+        return;
+    }
+    window->cursor_applied = op;
+    window->ops->window_set_cursor(window->pwindow, op);
+}
 
 /* Applies the cursor shape for a window-local position: over an edge
  * zone (same hit-test the press path uses) the directional resize
  * cursor; anywhere else the default arrow. No-op when the backend
- * cannot shape cursors or the shape has not changed (the platform op
- * only ever sees transitions). */
+ * cannot shape cursors or the resolution has not changed (the
+ * platform op only ever sees transitions). */
 static void window_update_cursor(fdk_window *window, fdk_i32 x,
                                  fdk_i32 y) {
     if (window->ops->window_set_cursor == NULL) {
@@ -1370,19 +1423,15 @@ static void window_update_cursor(fdk_window *window, fdk_i32 x,
             edge = FDK_WRES_NONE;
         }
     }
-    /* An application-requested shape (fdk_window_set_cursor) OWNS the
-     * cursor: the resize affordance stands down entirely — a panel or
-     * kiosk surface asked for exactly the arrow or the hand, and
-     * border-hover resize cursors would fight it (1.1.0-rc1). */
-    if (window->app_cursor_shape >= 0) {
-        window->cursor_edge = (int)FDK_WRES_NONE; /* bookkeeping only */
-        return;
-    }
-    if ((int)edge == window->cursor_edge) {
-        return;
-    }
     window->cursor_edge = (int)edge;
-    window->ops->window_set_cursor(window->pwindow, (int)edge);
+    /* The resolution order (app request > widget hover > compass)
+     * decides whether the compass value is even VISIBLE — an
+     * application-set shape owns the window (a panel or kiosk asked
+     * for exactly the arrow or the hand; border-hover resize cursors
+     * would fight it, 1.1.0-rc1). The bookkeeping above stays exact
+     * either way, so the moment the owner releases, the right shape
+     * appears without a re-request. */
+    window_apply_cursor(window);
 }
 
 /* Restores the default arrow unconditionally (pointer left the
@@ -1390,15 +1439,21 @@ static void window_update_cursor(fdk_window *window, fdk_i32 x,
  * owns the shape, in which case only the compass bookkeeping clears
  * (the stored shape is re-applied on the next entry by the backend). */
 static void window_reset_cursor(fdk_window *window) {
-    if (window->ops->window_set_cursor == NULL ||
-        window->cursor_edge == FDK_WRES_NONE) {
+    if (window->ops->window_set_cursor == NULL) {
         return;
     }
-    window->cursor_edge = FDK_WRES_NONE;
     if (window->app_cursor_shape >= 0) {
-        return; /* keep the app's shape; bookkeeping only */
+        window->cursor_edge = (int)FDK_WRES_NONE; /* bookkeeping only */
+        return; /* keep the app's shape */
     }
-    window->ops->window_set_cursor(window->pwindow, (int)FDK_WRES_NONE);
+    if (window->cursor_edge == FDK_WRES_NONE &&
+        window->widget_hover_cursor < 0 &&
+        window->cursor_applied == 0) {
+        return; /* already neutral: no transition to send */
+    }
+    window->cursor_edge = (int)FDK_WRES_NONE;
+    window->widget_hover_cursor = -1; /* the pointer left: no hover */
+    window_apply_cursor(window);
 }
 
 /* Hover/cursor revalidation after a geometry change: when the window
@@ -1429,6 +1484,12 @@ static void window_revalidate_pointer(fdk_window *window) {
             motion.pointer.position.x = (fdk_f32)x;
             motion.pointer.position.y = (fdk_f32)y;
             (void)fdk_widget_tree_handle_event(window->root, &motion);
+            /* The synthetic motion bypasses the dispatch tail that
+             * normally refreshes the widget hover cursor (S-5) — do
+             * it here, exactly like the tail does. */
+            window->widget_hover_cursor =
+                fdk__widget_tree_hover_cursor(window->root);
+            window_apply_cursor(window);
         }
         return;
     }
@@ -1883,6 +1944,24 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * Re-verify registration before the auto-paint tail touches it. */
     if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
         return; /* destroyed by the event callback */
+    }
+
+    /* ---- Widget hover cursor (1.1.0-rc2, S-5) ----
+     *
+     * After the tree routed a pointer event the hovered widget is
+     * fresh (root->hovered); re-derive the widget's wanted shape and
+     * re-apply. Runs BELOW an app request (fdk__cursor_resolve) and
+     * costs one pointer-read + one integer compare when nothing
+     * changed. LEAVE clears the hover (nothing is under a pointer
+     * that left). */
+    if (event->type == FDK_EVENT_POINTER_MOTION ||
+        event->type == FDK_EVENT_POINTER_ENTER ||
+        event->type == FDK_EVENT_POINTER_LEAVE) {
+        window->widget_hover_cursor =
+            (event->type == FDK_EVENT_POINTER_LEAVE || window->root == NULL)
+                ? -1
+                : fdk__widget_tree_hover_cursor(window->root);
+        window_apply_cursor(window);
     }
 
     /* ---- Touch-slot engine (1.1.0, M-3) ----
@@ -2560,4 +2639,8 @@ int fdk__window_deco_hover(const fdk_window *window) {
 
 int fdk__window_cursor_edge(const fdk_window *window) {
     return (window != NULL) ? window->cursor_edge : FDK_WRES_NONE;
+}
+
+int fdk__window_cursor_applied(const fdk_window *window) {
+    return (window != NULL) ? window->cursor_applied : -1;
 }

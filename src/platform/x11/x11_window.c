@@ -1448,7 +1448,7 @@ static const unsigned int resize_cursor_glyphs[10] = {
 };
 
 void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
-    if (pwindow == NULL || edge < 0 || edge > 9) {
+    if (pwindow == NULL || !FDK_PLATFORM_CURSOR_OP_VALID(edge)) {
         return;
     }
     fdk_platform_connection *conn = pwindow->conn;
@@ -1456,7 +1456,11 @@ void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
                                    * backend; X11 re-applies window
                                    * cursors on entry by itself */
     Cursor cursor = None;
-    if (edge != 0) {
+    if (edge >= FDK_PLATFORM_CURSOR_NAMED_BASE) {
+        /* The named set (rc2, S-5): the RENDER/theme factory owns
+         * the tiers; None = keep the default arrow honestly. */
+        cursor = fdk__x11_named_cursor(conn, edge);
+    } else if (edge != 0) {
         if (conn->resize_cursors[edge] == None) {
             /* XCreateFontCursor reads the "cursor" font every X
              * server ships in core — no libXcursor, no theme lookup.
@@ -1468,8 +1472,9 @@ void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
         }
         cursor = conn->resize_cursors[edge];
     }
-    /* Cursor None (edge 0 or creation failure) reverts the window to
-     * its parent's cursor — the standard arrow on any desktop. */
+    /* Cursor None (edge 0, a failed factory, or creation failure)
+     * reverts the window to its parent's cursor — the standard
+     * arrow on any desktop. */
     XDefineCursor(conn->display, pwindow->xwindow, cursor);
 }
 
@@ -1477,6 +1482,7 @@ void fdk_x11_cursor_shutdown(fdk_platform_connection *conn) {
     if (conn == NULL) {
         return;
     }
+    fdk__x11_named_cursors_shutdown(conn, conn->display_dead);
     if (conn->display_dead) {
         /* Server gone: the cursors died with the connection. */
         for (int i = 0; i < 10; i++) {

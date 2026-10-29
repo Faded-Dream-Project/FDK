@@ -1451,6 +1451,25 @@ int fdk__widget_ime_context(fdk_widget *focused, const char **out_text,
     return fdk__textview_ime_context(focused, out_text, out_cursor);
 }
 
+/* Hover cursor (1.1.0-rc2, S-5): the hovered widget's wanted shape.
+ * The text-entry family wants the I-beam — pointer equality against
+ * the class defs (the same identity discipline the IME seams use;
+ * a subclass carries its own klass pointer simply does not match, the
+ * documented conservative rule). Everything else wants nothing;
+ * the window layer falls through to the resize compass. */
+int fdk__widget_tree_hover_cursor(fdk_widget *root) {
+    if (root == NULL || root->hovered == NULL) {
+        return -1;
+    }
+    const fdk_widget_class *klass = root->hovered->klass;
+    if (klass == &fdk_entry_class_def ||
+        klass == &fdk_textview_class_def ||
+        klass == &fdk_spin_class_def) {
+        return FDK_CURSOR_TEXT;
+    }
+    return -1;
+}
+
 void fdk_widget_tree_clear_focus(fdk_widget *any) {
     fdk_widget *root = find_root(any);
     if (root == NULL) {

@@ -82,9 +82,15 @@ if grep -rn --include='*.c' --include='*.h' -E '#include[[:space:]]+"(\.\./|.*FD
     echo "   (note: only the package's own ../src/shell_internal.h is permitted)"
     BAD=1
 fi
-# (b) no FDK internal header names anywhere.
+# (b) no FDK internal header names anywhere. The pattern matches
+#     FDK-the-library references (fdk_window_internal.h, fdk/src/...);
+#     the package's OWN paths spelled with the fdk-shell/ prefix
+#     (source comments cite fdk-shell/src/desktop/*.c since the
+#     desktop-model split) are excluded — they are this package, not
+#     a reach into FDK (the 6cb1aaa lesson: the audit tripped on its
+#     own package's comment prose).
 if grep -rn --include='*.c' --include='*.h' -E 'fdk.*(_internal\.h|/src/)' \
-        src include examples tests 2>/dev/null; then
+        src include examples tests 2>/dev/null | grep -v 'fdk-shell/'; then
     echo "FAIL: fdk-shell references an FDK internal header"
     BAD=1
 fi

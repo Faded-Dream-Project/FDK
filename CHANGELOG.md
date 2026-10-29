@@ -14,6 +14,32 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — the full named cursor set (S-5 / B-12, fdk-shell 0.4.0)
+
+- **`fdk_cursor_shape` grows from 2 to 22 shapes** (append-only;
+  values 0 and 1 unchanged): TEXT, CROSSHAIR, WAIT, PROGRESS, MOVE,
+  COPY, ALIAS, NO_DROP, NOT_ALLOWED, GRAB, GRABBING, ALL_SCROLL,
+  COL_RESIZE, ROW_RESIZE, ZOOM_IN, ZOOM_OUT, HELP, CELL,
+  CONTEXT_MENU, VERTICAL_TEXT — the cursor-shape-v1 semantic space,
+  the names CSS/GTK4/Qt6 use. No new symbols (the set rides the
+  existing `fdk_window_set_cursor`); 802 exports unchanged.
+- **A widget hover layer**: without an application request, hovering
+  an Entry / TextView / Spin (or an editable Combo's entry) shows
+  the I-beam automatically; an explicit app request still owns the
+  whole window; the resize compass stays last.
+- **Wayland**: cursor-shape-v1 when the compositor offers it (the
+  sway suite pins the whole enum table on the wire); the hand-parsed
+  XCursor theme fallback otherwise — now in the shared
+  src/platform/cursor_theme.c both backends load through.
+- **X11**: theme images through the dlopen'd libXrender.so.1 RENDER
+  lane (no new build dependency) for the shapes the core cursor font
+  lacks, the nearest core glyph otherwise, the documented
+  substitution table in docs/platform-input.md; a cursor the
+  platform cannot draw honestly keeps the default arrow.
+- **fdk-shell 0.4.0** mirrors the set (`fdk_shell_cursor`) for
+  panels (TEXT over a search entry, GRAB over drag handles, WAIT
+  while app lists load).
+
 ### Added — X11 multi-monitor: the RandR output model (M-6 / A-03 / B-05, fdk-shell 0.3.0)
 
 - **The core's internal table** (`src/platform/x11/x11_randr.c`):

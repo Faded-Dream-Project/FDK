@@ -263,12 +263,17 @@ after 5 seconds).
 desc struct field-by-field, including the per-backend notes.
 
 **The hover cursor** (`fdk_shell_layer_set_cursor` /
-`fdk_shell_popup_set_cursor`, 1.1.0-rc1): the arrow or the pointing
-hand while the pointer hovers the surface — re-applied automatically
-on every entry (Wayland cursor state does not survive leaving a
-surface; the W2 report was a bar that kept the resize cursor until
-the pointer left). The demo bar shows the worked example: the hand
-over its menu button, the arrow everywhere else.
+`fdk_shell_popup_set_cursor`, 1.1.0-rc1; the full named set
+0.4.0): the arrow or the pointing hand while the pointer hovers
+the surface — re-applied automatically on every entry (Wayland
+cursor state does not survive leaving a surface; the W2 report
+was a bar that kept the resize cursor until the pointer left).
+0.4.0 mirrors FDK's full `fdk_cursor_shape` set (S-5): TEXT over
+a launcher's search entry, GRAB over drag handles, WAIT while the
+app list loads — the values pass straight through to FDK, so
+every shape FDK can draw, a layer can ask for. The demo bar shows
+the worked example: the hand over its menu button, the arrow
+everywhere else.
 
 ## _FDK_WM_LAYER (0.2.0)
 

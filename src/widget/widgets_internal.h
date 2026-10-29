@@ -634,3 +634,20 @@ int fdk__textview_ime_context(fdk_widget *w, const char **out_text,
 /* widget.c — tries each: */
 int fdk__widget_ime_context(fdk_widget *focused, const char **out_text,
                             int *out_cursor);
+
+/* ---- Hover cursor (1.1.0-rc2, S-5) ---------------------------------
+ *
+ * The class identity of the text-entry widgets (the pointer-equality
+ * twins of the IME seams above): widget.c's hover-cursor derivation
+ * reads root->hovered->klass against these. Entry's def is static in
+ * entry.c — exposed here (non-static) for exactly this comparison;
+ * TextView's and Spin's already were. */
+extern const fdk_widget_class fdk_entry_class_def;
+extern const fdk_widget_class fdk_textview_class_def;
+extern const fdk_widget_class fdk_spin_class_def;
+
+/* widget.c — the hovered widget's wanted fdk_cursor_shape, -1 when
+ * the hovered widget wants nothing (every non-text widget today).
+ * The window layer rides it BELOW an explicit app request and ABOVE
+ * the resize compass (fdk__cursor_resolve, window_internal.h). */
+int fdk__widget_tree_hover_cursor(fdk_widget *root);

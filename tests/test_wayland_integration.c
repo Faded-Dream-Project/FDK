@@ -1677,6 +1677,89 @@ int main(void) {
         printf("[ok] wayland resize: top-edge press handed to the "
                "compositor (xdg_toplevel.resize, rig-verified)\n");
 
+        /* ---- 1.1.0-rc2, S-5: the full named cursor set ----
+         *
+         * Two proofs against the live compositor: (a) the window
+         * layer maps every public shape onto the op space and SENDS
+         * it (the injector's real serials satisfy the production
+         * op's guard); (b) the test seam drives the apply path per
+         * shape and returns the cursor-shape-v1 ENUM each
+         * set_shape request cited — the protocol's own numbering,
+         * pinned row by row. Compositors without the manager (or
+         * seats without a pointer) honestly skip. */
+        if (ctx->ops->test_cursor_apply != NULL) {
+            /* (a) the window layer: every public shape applies. */
+            for (int v = 0; v < (int)FDK_CURSOR__COUNT; v++) {
+                fdk_window_set_cursor(cw, (fdk_cursor_shape)v);
+                int want = (v == 0) ? 0
+                          : (v == 1) ? FDK_PLATFORM_CURSOR_POINTER
+                                     : FDK_PLATFORM_CURSOR_NAMED_BASE +
+                                       (v - 2);
+                assert(fdk__window_cursor_applied(cw) == want);
+            }
+            printf("[ok] wayland named cursors: all 22 public shapes "
+                   "applied through the production op (real serials)\n");
+
+            /* (b) the seam: the v1 enum table, row by row. The
+             * protocol's own numbering (cursor-shape-v1): the order
+             * is the public enum's. */
+            static const int named_v1[FDK_PLATFORM_CURSOR_NAMED_COUNT] = {
+                9,  /* TEXT             */
+                8,  /* CROSSHAIR        */
+                6,  /* WAIT             */
+                5,  /* PROGRESS         */
+                13, /* MOVE             */
+                12, /* COPY             */
+                11, /* ALIAS            */
+                14, /* NO_DROP          */
+                15, /* NOT_ALLOWED      */
+                16, /* GRAB             */
+                17, /* GRABBING         */
+                32, /* ALL_SCROLL       */
+                30, /* COL_RESIZE       */
+                31, /* ROW_RESIZE       */
+                33, /* ZOOM_IN          */
+                34, /* ZOOM_OUT         */
+                3,  /* HELP             */
+                7,  /* CELL             */
+                2,  /* CONTEXT_MENU     */
+                10, /* VERTICAL_TEXT    */
+            };
+            int sent = 0;
+            for (int i = 0; i < FDK_PLATFORM_CURSOR_NAMED_COUNT; i++) {
+                int op = FDK_PLATFORM_CURSOR_NAMED_BASE + i;
+                int v1 = ctx->ops->test_cursor_apply(ctx->conn,
+                                                     cw->pwindow, op);
+                if (v1 < 0) {
+                    break; /* no manager on this compositor: skip */
+                }
+                assert(v1 == named_v1[i]);
+                sent++;
+            }
+            if (sent == FDK_PLATFORM_CURSOR_NAMED_COUNT) {
+                /* The legacy trio + two compass rows, same seam. */
+                assert(ctx->ops->test_cursor_apply(
+                           ctx->conn, cw->pwindow, 0) == 1);  /* DEFAULT */
+                assert(ctx->ops->test_cursor_apply(
+                           ctx->conn, cw->pwindow,
+                           FDK_PLATFORM_CURSOR_POINTER) == 4);
+                assert(ctx->ops->test_cursor_apply(
+                           ctx->conn, cw->pwindow, FDK_WRES_E) == 18);
+                assert(ctx->ops->test_cursor_apply(
+                           ctx->conn, cw->pwindow, FDK_WRES_N) == 19);
+                printf("[ok] wayland named cursors: the v1 enum table "
+                       "pinned row by row (20 named + hand + arrow + "
+                       "compass, real set_shape requests on the wire)\n");
+            } else {
+                printf("[skip] wayland named cursors: compositor "
+                       "offers no cursor-shape-v1 manager (%d rows "
+                       "sent)\n", sent);
+            }
+        } else {
+            printf("[skip] wayland named cursors: library built "
+                   "without the test seam\n");
+        }
+
         fdk_window_destroy(cw);
 
         /* ---- 1.2.5: query_pointer hit-testing unification ----

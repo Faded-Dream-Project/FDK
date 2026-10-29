@@ -250,6 +250,15 @@ struct fdk_window {
      * applied shape on the pwindow (cursor_shape) for enter-time
      * re-application. */
     int app_cursor_shape;
+    /* The hovered WIDGET's wanted shape (rc2, S-5): -1 none, else the
+     * fdk_cursor_shape the Entry/TextView/Spin under the pointer asks
+     * for (the I-beam). Rides BELOW an app request and ABOVE the
+     * compass — see fdk__cursor_resolve. Refreshed after every routed
+     * pointer motion/enter and cleared on leave. */
+    int widget_hover_cursor;
+    /* The last op-space shape SENT to the backend (-1 = nothing sent
+     * yet; the transition cache — the op only sees changes). */
+    int cursor_applied;
 
     /* Popup trace stamps (FDK_POPUP_TRACE, 1.1.0-rc1): the last
      * pointer-motion time (for the motion-to-present latency), the
@@ -425,6 +434,18 @@ int fdk__window_ever_presented(const fdk_window *window);
  * motion clear it. */
 int fdk__window_deco_hover(const fdk_window *window);
 int fdk__window_cursor_edge(const fdk_window *window);
+
+/* The cursor resolution order as a pure function (rc2, S-5 — the
+ * headless cursor suite pins every row): app request > widget hover
+ * > compass > default. Inputs are the raw fdk_window fields; the
+ * return is the OP-space shape (0, 1..8, 9, 32..51) or -1 for an
+ * invalid app/widget value. */
+int fdk__cursor_resolve(int app_shape, int widget_hover, int edge);
+
+/* The last op-space shape the window layer sent to the backend
+ * (-1 = nothing yet). Test seam: the X cursor itself is not
+ * queryable, so the integration suite asserts on THIS. */
+int fdk__window_cursor_applied(const fdk_window *window);
 
 /* Destroy notification for borrowed-window holders (the menu
  * session): called at the very top of fdk_window_destroy, with the

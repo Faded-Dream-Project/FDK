@@ -3410,6 +3410,176 @@ static void test_resize_cursor_affordance(void) {
            "directional cursor (E, SE), interior/leave/edges-off "
            "restore the default\n");
 }
+
+/* The full named cursor set (1.1.0-rc2, S-5 / B-12): every public
+ * shape maps, applies, and resolves to a REAL server Cursor. The
+ * five shapes the core cursor font has no glyph for (copy, alias,
+ * zoom_in, zoom_out, context_menu) MUST build through the dlopen'd
+ * RENDER lane from a HERMETIC fixture theme — proving the whole
+ * pipeline (theme loader -> ARGB pixmap -> XRenderCreateCursor) on
+ * Xvfb, which always carries RENDER. The cache is observable on the
+ * connection (named_cursors[]), the decision layer through
+ * fdk__window_cursor_applied, and the widget-hover priority through
+ * the same XSendEvent motion rig the affordance test above uses. */
+static void write_cursor_fixture(const char *path, int w, int h) {
+    FILE *f = fopen(path, "wb");
+    assert(f != NULL);
+    const uint32_t header[4] = {0x72756358u, 16u, 1u, 1u};
+    const uint32_t pos = 16u + 12u;
+    const uint32_t toc[3] = {0xfffd0002u, 24u, pos};
+    const uint32_t chunk[9] = {36u, 0xfffd0002u, 24u, 1u,
+                               (uint32_t)w, (uint32_t)h, 1u, 1u, 0u};
+    fwrite(header, 4, 4, f);
+    fwrite(toc, 4, 3, f);
+    fwrite(chunk, 4, 9, f);
+    for (int i = 0; i < w * h; i++) {
+        const uint32_t px = (i == 0) ? 0xFF2020F0u : 0x80202020u;
+        fwrite(&px, 4, 1, f);
+    }
+    fclose(f);
+}
+
+static void test_named_cursor_set(void) {
+    /* 1. The hermetic fixture theme: the glyph-0 shapes' files only
+     * (the shapes with font twins prove tier 2 on their own). */
+    char root[128], theme_dir[192], cursors[256], file[320];
+    snprintf(root, sizeof root, "/tmp/fdk-cursor-x11-%ld", (long)getpid());
+    snprintf(theme_dir, sizeof theme_dir, "%s/hermetic", root);
+    snprintf(cursors, sizeof cursors, "%s/cursors", theme_dir);
+    (void)system("rm -rf /tmp/fdk-cursor-x11-* 2>/dev/null");
+    assert(mkdir(root, 0755) == 0);
+    assert(mkdir(theme_dir, 0755) == 0);
+    assert(mkdir(cursors, 0755) == 0);
+    static const char *const glyph0_names[] = {
+        "copy", "alias", "zoom_in", "zoom_out", "context_menu", NULL};
+    for (int i = 0; glyph0_names[i] != NULL; i++) {
+        snprintf(file, sizeof file, "%s/%s", cursors, glyph0_names[i]);
+        write_cursor_fixture(file, 5, 5);
+    }
+    setenv("XCURSOR_PATH", root, 1);
+    setenv("XCURSOR_THEME", "hermetic", 1);
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    struct fdk_platform_connection *conn = ctx->conn;
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK named cursor set",
+                                 .width = 240, .height = 160 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *wroot = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &wroot)));
+
+    /* 2. Every public shape applies, in order, with transitions. */
+    for (int v = 0; v < (int)FDK_CURSOR__COUNT; v++) {
+        fdk_window_set_cursor(win, (fdk_cursor_shape)v);
+        int want = (v == 0) ? 0
+                  : (v == 1) ? FDK_PLATFORM_CURSOR_POINTER
+                             : FDK_PLATFORM_CURSOR_NAMED_BASE + (v - 2);
+        assert(fdk__window_cursor_applied(win) == want);
+        (void)fdk_pump_events(ctx, 20); /* drain: no protocol errors */
+    }
+    /* Unknown values are honest no-ops (the last shape stays). */
+    fdk_window_set_cursor(win, (fdk_cursor_shape)999);
+    assert(fdk__window_cursor_applied(win) ==
+           FDK_PLATFORM_CURSOR_NAMED_BASE + FDK_PLATFORM_CURSOR_NAMED_COUNT - 1);
+
+    /* 3. The factory: EVERY named shape resolved to a real Cursor.
+     * The glyph-0 five prove the RENDER lane (only the fixture could
+     * have built them); the font-twin shapes prove tier 2; TEXT rode
+     * the theme because its glyph is XC_xterm (the deliberate tier-1
+     * trigger). Xvfb always has RENDER, so no skip logic here: if
+     * the RENDER lane broke, the five fail — that is the point. */
+    for (int i = 0; i < FDK_PLATFORM_CURSOR_NAMED_COUNT; i++) {
+        assert(conn->named_cursors[i] != None);
+    }
+    /* The cache holds: re-applying a shape is a pure transition
+     * (the factory must not rebuild). COPY = public 7 -> idx 5. */
+    unsigned long before = conn->named_cursors[5];
+    fdk_window_set_cursor(win, FDK_CURSOR_COPY);
+    assert((unsigned long)conn->named_cursors[5] == before);
+
+    fdk_window_destroy(win);
+
+    /* 4. The hover priority, on a window with NO app request: an
+     * Entry under the pointer shapes the I-beam; a plain static
+     * beside it does not; the east edge still shapes the compass;
+     * an explicit app request beats the Entry. */
+    fdk_window *win2 = NULL;
+    fdk_window_options wopts2 = { .title = "FDK hover cursor",
+                                  .width = 240, .height = 160 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts2, &win2)));
+    fdk_widget *root2 = NULL;
+    assert(fdk_ok(fdk_window_get_root(win2, &root2)));
+    fdk_widget *entry = NULL;
+    assert(fdk_ok(fdk_entry_create(root2, NULL, "", &entry)));
+    fdk_widget_set_bounds(entry, (fdk_rect){20, 20, 140, 32});
+    fdk_widget *label = NULL;
+    assert(fdk_ok(fdk_label_create(root2, NULL, "plain", &label)));
+    fdk_widget_set_bounds(label, (fdk_rect){20, 80, 140, 40});
+    /* Resizable so the compass participates in the priority test
+     * (windows default non-resizable; the affordance test's window
+     * got it from its decorations). */
+    fdk_window_set_resizable(win2, true);
+    fdk_window_show(win2);
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *dpy = XOpenDisplay(NULL);
+    assert(dpy != NULL);
+    unsigned long xid = fdk_window_xid(win2);
+
+    /* Over the Entry: the I-beam (widget hover). */
+    x11_send_pointer_event(dpy, xid, MotionNotify, PointerMotionMask,
+                           90, 36, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_applied(win2) ==
+           FDK_PLATFORM_CURSOR_NAMED_BASE); /* TEXT = first named op */
+
+    /* Over the plain label: the arrow. */
+    x11_send_pointer_event(dpy, xid, MotionNotify, PointerMotionMask,
+                           90, 100, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_applied(win2) == 0);
+
+    /* Over the east edge (past the Entry): the compass wins with no
+     * hover and no app shape. */
+    x11_send_pointer_event(dpy, xid, MotionNotify, PointerMotionMask,
+                           238, 100, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_applied(win2) == FDK_WRES_E);
+
+    /* Back over the Entry: the I-beam again. */
+    x11_send_pointer_event(dpy, xid, MotionNotify, PointerMotionMask,
+                           90, 36, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_applied(win2) ==
+           FDK_PLATFORM_CURSOR_NAMED_BASE);
+
+    /* An explicit app request beats the Entry's I-beam. */
+    fdk_window_set_cursor(win2, FDK_CURSOR_POINTER);
+    assert(fdk__window_cursor_applied(win2) == FDK_PLATFORM_CURSOR_POINTER);
+    x11_send_pointer_event(dpy, xid, MotionNotify, PointerMotionMask,
+                           90, 36, 0);
+    (void)fdk_pump_events(ctx, 100);
+    assert(fdk__window_cursor_applied(win2) == FDK_PLATFORM_CURSOR_POINTER);
+
+    XCloseDisplay(dpy);
+    fdk_window_destroy(win2);
+
+    /* 5. Cleanup: the env pins go away with the fixture (the suite
+     * is hermetic — later tests must not see the fixture theme). */
+    unsetenv("XCURSOR_PATH");
+    unsetenv("XCURSOR_THEME");
+    snprintf(file, sizeof file, "rm -rf '%s'", root);
+    (void)system(file);
+
+    fdk_shutdown(ctx); /* ASan proves the cursor cache + lane free */
+    printf("[ok] X11 named cursors: all 22 shapes applied, the "
+           "glyph-0 five built through RENDER from the hermetic "
+           "theme, font twins cached, Entry hover I-beam + priority "
+           "order proven\n");
+}
 /* ---- The EWMH fake window manager ----
  *
  * Xvfb runs with NO window manager, which is exactly right for the
@@ -11530,6 +11700,7 @@ int main(void) {
     test_resize_retains_pixels();
     test_hover_revalidation_on_geometry_change();
     test_resize_cursor_affordance();
+    test_named_cursor_set();
     test_ewmh_atom_spelling();
     test_ewmh_fake_wm();
     test_mitm_shm_and_double_buffer();

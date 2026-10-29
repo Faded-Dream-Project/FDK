@@ -742,6 +742,15 @@ int fdk_wayland_test_touch(fdk_platform_connection *conn,
                            fdk_platform_window *win, int phase,
                            uint32_t id, double x, double y);
 
+/* Cursor apply test seam (1.1.0-rc2, S-5; wayland_cursor.c): drives
+ * fdk_wayland_cursor_apply for any op shape with the newest input
+ * serial (1 when none arrived) and returns the cursor-shape-v1 enum
+ * the set_shape request cited — the suite's per-shape mapping pin.
+ * -1 = no cursor-shape manager / no seat pointer (honest skip). */
+int fdk_wayland_test_cursor_apply(fdk_platform_connection *conn,
+                                  fdk_platform_window *pwindow,
+                                  int op_shape);
+
 /* text-input-v3 (1.1.0, M-1; wayland_ime.c): called when BOTH the
  * manager and the seat exist (either binding order), and from the
  * surrounding push. teardown is part of disconnect;

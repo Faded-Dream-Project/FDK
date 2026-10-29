@@ -93,6 +93,47 @@ typedef struct fdk_platform_damage {
  * inside the window layer. */
 #define FDK_PLATFORM_CURSOR_POINTER 9
 
+/* The full named set (1.1.0-rc2, S-5 / B-12): public shapes 2..21
+ * (FDK_CURSOR_TEXT .. FDK_CURSOR_VERTICAL_TEXT) ride the op space at
+ * FDK_PLATFORM_CURSOR_NAMED_BASE + (public - 2), i.e. 32..51 — kept
+ * clear of the compass and the hand. The window layer maps; the
+ * backends own the per-platform encoding (cursor-shape-v1 enum /
+ * XCursor theme name / core cursor-font glyph, per-backend). */
+#define FDK_PLATFORM_CURSOR_NAMED_BASE 32
+#define FDK_PLATFORM_CURSOR_NAMED_COUNT 20
+
+/* True when `shape` is a valid window_set_cursor op value (the
+ * compass, the hand, or the named range). Used by both backends'
+ * argument guards so the ranges can never drift apart. */
+#define FDK_PLATFORM_CURSOR_OP_VALID(shape)                          \
+    (((shape) >= 0 && (shape) <= FDK_PLATFORM_CURSOR_POINTER) ||     \
+     ((shape) >= FDK_PLATFORM_CURSOR_NAMED_BASE &&                   \
+      (shape) < FDK_PLATFORM_CURSOR_NAMED_BASE +                     \
+                    FDK_PLATFORM_CURSOR_NAMED_COUNT))
+
+/* ---- Shared XCursor theme loader (src/platform/cursor_theme.c) ----
+ *
+ * Both backends need the same thing the 1.1.4 Wayland backend built:
+ * cursor images as ARGB pixels from the system's XCursor theme files,
+ * with no libxcursor dependency (the container format is small and
+ * documented — see cursor_theme.c's format block). Wayland uploads
+ * them to a wl_shm buffer for wl_pointer.set_cursor; X11 (rc2, S-5)
+ * wraps them into RENDER cursors for the shapes the core cursor font
+ * lacks. `names` is a NULL-terminated candidate list tried in order
+ * (modern CSS name first, legacy name second); the pixels are
+ * fdk_alloc'd and owned by the caller. FDK_ERR_UNSUPPORTED = no
+ * candidate found in any theme (the honest-degradation signal). */
+fdk_result fdk__cursor_theme_load(const char *const *names, int nominal,
+                                  uint32_t **out_pixels, int *out_w,
+                                  int *out_h, int *out_hx, int *out_hy);
+
+/* The candidate NAME list per NAMED shape (cursor_theme.c owns the
+ * table; both backends ride it — one source of truth for the
+ * modern/legacy spellings). Row i is public shape (i + 2), i.e. op
+ * FDK_PLATFORM_CURSOR_NAMED_BASE + i; NULL-terminated rows. */
+extern const char *const
+    fdk__cursor_named_names[FDK_PLATFORM_CURSOR_NAMED_COUNT][4];
+
 typedef struct fdk_platform_ops {
     /* Human-readable backend name for logging ("x11", "wayland"). */
     const char *name;
@@ -186,6 +227,19 @@ typedef struct fdk_platform_ops {
     int (*test_touch)(fdk_platform_connection *conn,
                       fdk_platform_window *pwin, int phase,
                       uint32_t id, double x, double y);
+
+    /* OPTIONAL test seam (1.1.0-rc2, S-5): drives the cursor APPLY
+     * path for any op shape against the live connection — the
+     * production window_set_cursor op needs a real input serial
+     * (a pointer enter), which the headless compositor only mints
+     * through the injector rig. Returns the cursor-shape-v1 ENUM
+     * actually cited in the wp_cursor_shape_device_v1.set_shape
+     * request (the suite's per-shape mapping pin), or -1 when this
+     * compositor/connection offers no cursor-shape manager or no
+     * seat pointer (the honest-skip signal). Only the Wayland
+     * backend implements it. */
+    int (*test_cursor_apply)(fdk_platform_connection *conn,
+                             fdk_platform_window *pwin, int op_shape);
 
     /* OPTIONAL (1.1.0, M-1 IME): push the focused text widget's
      * context (UTF-8 text + caret byte offset; NULL text = the focus
@@ -354,7 +408,10 @@ typedef struct fdk_platform_ops {
      * an application requests over clickable regions (1.1.0-rc1,
      * fdk_window_set_cursor / fdk_ext_surface_set_cursor — the
      * public fdk_cursor_shape enum maps onto this space; the backend
-     * owns the encoding). Called only on shape transitions (the
+     * owns the encoding), or a NAMED shape (1.1.0-rc2, S-5):
+     * FDK_PLATFORM_CURSOR_NAMED_BASE + (public - 2) for the full
+     * fdk_cursor_shape set (TEXT .. VERTICAL_TEXT). Called only on
+     * shape transitions (the
      * window layer caches the applied shape). NULL = the backend
      * cannot shape cursors; the platform default applies (documented
      * per-backend — honest unsupported, no lying fallback). */

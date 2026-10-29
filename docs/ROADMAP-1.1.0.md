@@ -45,11 +45,28 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 24 (M-6/A-03/B-05 landed 2026-10-29; T-B both
-sides 2026-10-29; S-2 and S-1 pending owner verification; M-4,
-M-3, M-1, and S-3 landed 2026-10-28) · PARTIAL 8 · IN PROGRESS 1
+**Counts:** DONE 26 (S-5/B-12 landed 2026-10-29; M-6/A-03/B-05
+landed 2026-10-29; T-B both sides 2026-10-29; S-2 and S-1 pending
+owner verification; M-4, M-3, M-1, and S-3 landed 2026-10-28) ·
+PARTIAL 6 · IN PROGRESS 1
 (M-9) · MISSING 22 · DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX
-0 — of 62 items. Re-verified 2026-10-29 (post-M-6): the full
+0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
+dual-backend rebuild zero warnings, core make test (incl. the NEW
+tests/test_cursor.c: the mapping table, the resolution order, the
+name-table grammar, the loader against a synthetic XCursor file) +
+test-x11 (incl. the NEW named-cursor legs: all 22 shapes applied,
+the no-twin five built through the dlopen'd RENDER lane from a
+hermetic fixture theme, the Entry-hover I-beam + the app > widget >
+compass priority through real XSendEvent motion) + the sway suite
+(incl. the NEW named-cursor legs: 22 shapes through the production
+op with real injector serials, the cursor-shape-v1 enum table
+pinned row by row) + FDK_SANITIZE=0 test + release + verify-exports
+(802, unchanged — the set rides the existing symbol), fdk-shell
+0.4.0 build zero warnings + test-desktop + test-x11 + test-wayland
++ the notifyd + trayhost rigs + the isolation proof (the audit now
+permits the package's own fdk-shell/ paths in comments — the
+6cb1aaa comment prose tripped it; caught and fixed here).
+Earlier, re-verified 2026-10-29 (post-M-6): the full
 dual-backend fdk-shell build zero warnings, core make test +
 test-x11 + test-dbus + verify-exports (802), fdk-shell test-x11
 (incl. the NEW RandR legs: probed-table identity, synthetic
@@ -101,7 +118,7 @@ unaffected):
 | B-09 | portal FileChooser fallback | **MISSING** | own dialogs everywhere (fdk_dialog.h: "no portal") | C-1 — **moved to CORE** on the native client (D-002) |
 | B-10 | AT-SPI interop | **MISSING** | internal a11y tree only; comments state the no-daemon posture | S-8 — **CORE** on the native client (D-002) |
 | B-11 | idle/screensaver inhibition | **DONE** | S-3 shipped: fdk_idle.h (fdk_idle_inhibit/uninhibit/status — one handle, either mechanism); Wayland zwp_idle_inhibit_manager_v1 through the window-scoped platform op (window-owned engagement, sever-at-destroy); org.freedesktop.ScreenSaver on the native D-Bus client with the DEFERRED release (uninhibit-before-cookie still sends the matching UnInhibit — no orphaned inhibition); the window-dies-inhibited release; tests/test_idle.c + the mock-ScreenSaver legs in the live D-Bus rig (cookie round trip, deferred release, refusal) + the sway rig (engage/release/destroy-while-inhibited) + the X11 no-bus fallback | GNOME's org.gnome.ScreenSaver variant not probed (documented); owner's real-desktop check |
-| B-12 | cursor shape set | **PARTIAL** | public surface exactly 2 shapes (fdk_window.h: DEFAULT/POINTER) + internal per-edge resize + enter re-apply (c58f5da W2) | S-5: full named set |
+| B-12 | cursor shape set | **DONE** | S-5 shipped (2026-10-29): `fdk_cursor_shape` 2 -> 22 shapes (the cursor-shape-v1 semantic space, append-only; 802 exports unchanged); ONE resolution point (`fdk__cursor_resolve`: app request > widget hover (Entry/TextView/Spin I-beam) > compass > arrow) with the transition cache; Wayland: set_shape when the manager exists (the sway suite pins the full enum table row by row) + the shared XCursor theme loader fallback (src/platform/cursor_theme.c, extracted from the 1.1.4 Wayland parser); X11: the dlopen'd libXrender.so.1 RENDER lane (theme images, no new build dep) over the core font glyph table with the documented substitutions (D-016); fdk-shell 0.4.0 mirrors the set | — |
 | B-13 | drag icons + drop targets | **PARTIAL** | DnD window-level both backends; drag icon explicitly absent ("start_drag with NO icon surface") | S-9 |
 | B-14 | image formats | **PARTIAL** | stb static raster + nanosvg; no animated | C-4 |
 | B-15 | GPU on Wayland | **MISSING** | CPU SHM only; GL lane is X11/GLX | D-1 (deferred by design) |
@@ -122,7 +139,7 @@ unaffected):
 | S-2 | notification display | **DONE (should work; owner verification pending)** | = A-12 (notifyd + the rig; D-006 records the shape decisions) | owner verification via docs/TESTING-ON-DESKTOP.md |
 | S-3 | idle inhibition | **DONE** | = B-11 (both mechanisms; the live-bus mock + the sway rig) | — |
 | S-4 | input regions | **PARTIAL** | = A-06 | the region API |
-| S-5 | cursor shape set | **PARTIAL** | = B-12 | the named set |
+| S-5 | cursor shape set | **DONE** | = B-12 (both backends; the hermetic RENDER proof on Xvfb, the enum-table pin on sway) | — |
 | S-6 | xdg_activation + startup notification | **MISSING** | no code | the whole item |
 | S-7 | X11 DPI awareness | **DONE** [VERIFIED-CHANGED: audit said missing] | = B-07 (1.4.5) | — |
 | S-8 | AT-SPI2 level 1 | **MISSING** | = B-10 | roles/states/focus over the D-Bus client |

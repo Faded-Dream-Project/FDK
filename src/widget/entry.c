@@ -1925,7 +1925,7 @@ static const fdk_a11y_class entry_a11y = {
     .text_set_selection = entry_text_set_selection,
 };
 
-static const fdk_widget_class fdk_entry_class_def = {
+const fdk_widget_class fdk_entry_class_def = { /* widgets_internal.h: hover-cursor identity */
     .size = sizeof(fdk_entry),
     .name = "entry",
     .handle_event = entry_handle_event,

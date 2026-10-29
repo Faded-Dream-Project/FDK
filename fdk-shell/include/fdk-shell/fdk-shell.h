@@ -51,9 +51,9 @@
 extern "C" {
 #endif
 
-#define FDKSHELL_VERSION_STRING "0.3.0"
+#define FDKSHELL_VERSION_STRING "0.4.0"
 
-/* Returns this package's version ("0.3.0"). */
+/* Returns this package's version ("0.4.0"). */
 const char *fdk_shell_version(void);
 
 /* ---- the per-context handle ---------------------------------------------- */
@@ -306,17 +306,44 @@ void fdk_shell_layer_set_event_callback(fdk_shell_layer *layer,
                                         fdk_shell_event_fn callback,
                                         void *user);
 
-/* ---- Cursor shape (0.1.0) ---------------------------------------------
+/* ---- Cursor shape (0.1.0; the full named set 0.4.0) -------------------
  *
  * The pointer's shape while it hovers the layer or popup. The shape
  * is re-applied automatically on every wl_pointer.enter (Wayland
  * cursor state does not survive leaving a surface); X11 tracks it as
  * window state. Typical panel usage: FDK_SHELL_CURSOR_DEFAULT at
  * creation, FDK_SHELL_CURSOR_POINTER while the pointer hovers a
- * clickable region. */
+ * clickable region.
+ *
+ * The values ARE FDK's fdk_cursor_shape values (the passthrough casts
+ * the int), so the full named set (FDK 1.1.0-rc2, S-5) rides through
+ * unchanged — a launcher may want TEXT over its search entry, GRAB
+ * over drag handles, WAIT while the app list loads. The mirrors below
+ * exist so fdk-shell code never needs FDK's header to spell one; see
+ * FDK's fdk_window.h (fdk_cursor_shape) for the per-shape semantics. */
 typedef enum fdk_shell_cursor {
     FDK_SHELL_CURSOR_DEFAULT = 0, /* the standard arrow */
     FDK_SHELL_CURSOR_POINTER = 1, /* the pointing hand */
+    FDK_SHELL_CURSOR_TEXT = 2,    /* the I-beam */
+    FDK_SHELL_CURSOR_CROSSHAIR = 3,
+    FDK_SHELL_CURSOR_WAIT = 4,
+    FDK_SHELL_CURSOR_PROGRESS = 5,
+    FDK_SHELL_CURSOR_MOVE = 6,
+    FDK_SHELL_CURSOR_COPY = 7,
+    FDK_SHELL_CURSOR_ALIAS = 8,
+    FDK_SHELL_CURSOR_NO_DROP = 9,
+    FDK_SHELL_CURSOR_NOT_ALLOWED = 10,
+    FDK_SHELL_CURSOR_GRAB = 11,
+    FDK_SHELL_CURSOR_GRABBING = 12,
+    FDK_SHELL_CURSOR_ALL_SCROLL = 13,
+    FDK_SHELL_CURSOR_COL_RESIZE = 14,
+    FDK_SHELL_CURSOR_ROW_RESIZE = 15,
+    FDK_SHELL_CURSOR_ZOOM_IN = 16,
+    FDK_SHELL_CURSOR_ZOOM_OUT = 17,
+    FDK_SHELL_CURSOR_HELP = 18,
+    FDK_SHELL_CURSOR_CELL = 19,
+    FDK_SHELL_CURSOR_CONTEXT_MENU = 20,
+    FDK_SHELL_CURSOR_VERTICAL_TEXT = 21,
 } fdk_shell_cursor;
 
 /* Sets the layer's hover cursor shape. No-op on an unknown value. */

@@ -667,3 +667,58 @@ the running WM interprets per-monitor struts (modern WMs clamp to
 the window's monitor; simpler ones apply it screen-wide). That
 limit is documented, not faked — the one place the X11 and Wayland
 output stories legitimately diverge.
+
+## D-016 — the cursor set: one resolution point, themes through RENDER by dlopen, the honest glyph substitutions (S-5 / B-12)
+
+**Context.** The audit left the public cursor surface at exactly
+two shapes (arrow, hand) while GTK4/Qt6/CSS all ship the full named
+set — a panel cannot say "wait" while its app list loads, an image
+editor cannot say "crosshair", a drag source cannot say "grab".
+The rc1 hand was already wired through both backends' apply paths;
+the question was how to grow the SET without growing the
+dependencies or lying about shapes the platform cannot draw.
+
+**1. One decision point, restructured.** The rc1 code had the
+application request short-circuit the compass inside
+window_update_cursor, with bookkeeping spread across three sites.
+rc2 collapses the WHO-decides into a pure function —
+`fdk__cursor_resolve(app, widget_hover, compass)` — with one
+speak-path (`window_apply_cursor`) that ships only TRANSITIONS
+(cursor_applied caches the last op sent). The priority: an explicit
+application request owns the window; a widget hover shape (the
+Entry/TextView/Spin I-beam, derived from root->hovered's class
+pointer — the IME seam's identity discipline) rides below it; the
+compass last. The headless suite pins every row of the table.
+
+**2. X11 themes through RENDER, dlopen'd.** The core cursor font
+has no copy/alias/zoom/context-menu glyphs at all, and its
+GRABBING is the POINTING hand. Rather than adding libXcursor (a
+new build+CI dependency for one call), the X11 backend dlopens
+libXrender.so.1 (the house pattern — the GL lane, HarfBuzz,
+FriBidi, libXi all went this way) and builds ARGB cursors from the
+SHARED XCursor theme loader — the same no-libxcursor parser the
+Wayland backend earned against Adwaita in 1.1.4, extracted to
+src/platform/cursor_theme.c when X11 needed it. Which shapes try
+the theme first is table-driven; shapes with exact font twins skip
+the theme entirely (faster, and pixel-identical to the desktop).
+
+**3. The substitutions are named, never silent.** Where both tiers
+fail (no theme anywhere, no RENDER) the shape keeps the default
+arrow — the no-lying-fallback posture the whole toolkit holds: a
+cursor that misadvertises what the press will do is worse than the
+plain arrow. The substitution table lives in docs/platform-input.md
+and in x11_cursor.c's own comments; XC_X_cursor's VALUE being
+literally 0 forced the -1 no-twin sentinel (the naive 0-sentinel
+silently dropped NOT_ALLOWED — the rig caught it).
+
+**4. The tests ride the real paths.** Headless: the mapping, the
+resolution order, the name-table grammar, and the loader against a
+synthetic XCursor file (the documented format written by hand —
+happy path, candidate walk, hostile refusals, closest-size pick).
+X11: all 22 shapes applied; the no-twin five built through RENDER
+from a hermetic fixture theme (Xvfb always has RENDER — no skip
+logic); the cache discipline; the Entry I-beam + priority order
+through real XSendEvent motion. Wayland: all 22 shapes through the
+production op with real injector serials, plus the full
+cursor-shape-v1 enum table pinned row by row through the
+test seam — real set_shape requests against sway 1.10.

@@ -259,10 +259,16 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
         }
     }
     /* fdk_alloc does not zero — None is 0 but be explicit anyway:
-     * no font cursor exists until window_set_cursor first needs one. */
+     * no font cursor exists until window_set_cursor first needs one.
+     * The named-set cache (rc2, S-5) carries the same discipline,
+     * and the RENDER lane starts un-pinned. */
     for (int i = 0; i < 10; i++) {
         conn->resize_cursors[i] = None;
     }
+    for (int i = 0; i < FDK_PLATFORM_CURSOR_NAMED_COUNT; i++) {
+        conn->named_cursors[i] = None;
+    }
+    conn->cursor_render = NULL;
 
     /* app_id (when set) rides along on the connection and becomes
      * every window's WM_CLASS — the X11 identity mechanism window

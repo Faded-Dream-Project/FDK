@@ -184,6 +184,60 @@ model expects, and the resize-edge cursor shaping runs in the
 window layer (see fdk_window.h's resize section) — the backends
 only translate cursor-shape requests.
 
+## Cursor shaping — the full named set (1.1.0-rc2, S-5 / B-12)
+
+`fdk_window_set_cursor` accepts the complete named set — 22 shapes
+mirroring cursor-shape-v1's semantic space (the names CSS, GTK4 and
+Qt6 use). The resolution order, most specific first: an explicit
+application request owns the window (edges included); without one,
+a widget hover shape rules (Entry / TextView / Spin — or an editable
+Combo's entry — show the I-beam); without either, the resize-edge
+compass. The mapping is a pure function the headless suite pins
+(`fdk__cursor_resolve`, tests/test_cursor.c).
+
+Per backend:
+
+- **Wayland**: `wp_cursor_shape_device_v1.set_shape` when the
+  compositor offers the manager (sway 1.10 does — the integration
+  suite pins the full enum table row by row through the test seam);
+  otherwise the XCursor THEME by hand — the shared no-libxcursor
+  loader (src/platform/cursor_theme.c) parses the documented
+  container format and uploads ARGB to a wl_shm cursor surface.
+- **X11**: two tiers per shape. Tier 1: the same shared theme loader
+  through the dlopen'd RENDER lane (libXrender.so.1 ->
+  XRenderCreateCursor from an ARGB depth-32 pixmap — no new build
+  dependency; absent library/extension falls through). Tier 2: the
+  nearest core cursor-font glyph. Which shapes prefer the theme is
+  table-driven (`named_theme_first`); the substitutions, honestly:
+
+| shape          | X11 core-font twin when no theme   |
+|----------------|------------------------------------|
+| TEXT           | xterm (the I-beam) — exact         |
+| CROSSHAIR      | crosshair — exact                  |
+| WAIT           | watch — exact                      |
+| PROGRESS       | exchange (GDK's own twin)          |
+| MOVE           | fleur — exact                      |
+| COPY           | none — theme or the plain arrow    |
+| ALIAS          | none — theme or the plain arrow    |
+| NO_DROP        | pirate (the skull)                 |
+| NOT_ALLOWED    | X_cursor (the refusal X)           |
+| GRAB           | hand1 (the open hand)              |
+| GRABBING       | hand2 (the pointing hand — the font has no fist) |
+| ALL_SCROLL     | fleur                              |
+| COL_RESIZE     | sb_h_double_arrow — exact          |
+| ROW_RESIZE     | sb_v_double_arrow — exact          |
+| ZOOM_IN/OUT    | none — theme or the plain arrow    |
+| HELP           | question_arrow — exact             |
+| CELL           | plus                               |
+| CONTEXT_MENU   | none — theme or the plain arrow    |
+| VERTICAL_TEXT  | xterm (no vertical glyph exists)   |
+
+The no-twin rows keep the DEFAULT ARROW when neither tier
+produces a cursor — the no-lying-fallback posture (a shape that
+lies about what the press does is worse than the plain arrow).
+fdk-shell mirrors the set (`fdk_shell_cursor`, 0.4.0) — its values
+are FDK's own, passed through unchanged.
+
 ## Touch input (1.1.0, M-3)
 
 Direct-touch contact tracking is a first-class event family:

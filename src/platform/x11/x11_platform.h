@@ -14,6 +14,8 @@
 #include "platform/x11/x11_gl.h"
 
 #include <X11/Xlib.h>
+#include <X11/extensions/Xrender.h> /* RENDER cursor lane (S-5) — types
+                                     * only; the functions are dlopen'd */
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <X11/extensions/XShm.h>
@@ -252,6 +254,30 @@ struct fdk_platform_connection {
      * state (which cursor is currently defined on which window)
      * lives in the X server per window and dies with the window. */
     Cursor resize_cursors[10];   /* 0..8 compass + 9 hand (W2) */
+
+    /* --- The named cursor set (1.1.0-rc2, S-5 / B-12) ---
+     *
+     * The public fdk_cursor_shape set beyond the hand: TEXT ..
+     * VERTICAL_TEXT, indexed by (op - FDK_PLATFORM_CURSOR_NAMED_BASE).
+     * Two tiers, per shape, first hit wins and is cached here:
+     *   1. an XCursor-theme image through RENDER (dlopen'd
+     *      libXrender.so.1 — XRenderCreateCursor from an ARGB
+     *      depth-32 pixmap; the SAME shared theme loader the Wayland
+     *      backend uses, cursor_theme.c) — real shapes wherever a
+     *      cursor theme exists;
+     *   2. the nearest core cursor-font glyph (x11_cursor.c's table)
+     *      — every X server since 1987, a few shapes honestly
+     *      approximated (the font has no "copy", no zoom, no
+     *      vertical-text).
+     * Entry None = not created yet (or the shape fell back to the
+     * default arrow deliberately: None defined on the window IS the
+     * default arrow). Freed by fdk__x11_named_cursors_shutdown. */
+    Cursor named_cursors[FDK_PLATFORM_CURSOR_NAMED_COUNT];
+
+    /* The dlopen'd RENDER lane (NULL until first named cursor
+     * request; stays NULL when libXrender.so.1 or the RENDER
+     * extension is absent — tier 2 then carries everything). */
+    struct fdk_x11_cursor_render *cursor_render;
 
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
@@ -624,13 +650,50 @@ fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
  * behind the same-named platform_internal.h entries).
  * fdk_x11_window_query_pointer returns nonzero only when the pointer
  * is inside the window's current bounds. fdk_x11_window_set_cursor
- * takes an fdk_window_resize_edge compass value (0 = default arrow;
- * out-of-range is ignored). fdk_x11_cursor_shutdown frees the
+ * takes an fdk_window_resize_edge compass value (0 = default arrow),
+ * FDK_PLATFORM_CURSOR_POINTER, or a NAMED op value (rc2, S-5);
+ * out-of-range is ignored. fdk_x11_cursor_shutdown frees the
  * connection's cached font cursors — called from disconnect. */
 int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
                                  fdk_i32 *out_x, fdk_i32 *out_y);
 void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge);
 void fdk_x11_cursor_shutdown(fdk_platform_connection *conn);
+
+/* The named cursor set (1.1.0-rc2, S-5; src/platform/x11/x11_cursor.c):
+ * fdk__x11_named_cursor returns the (cached) Cursor for a NAMED op
+ * value — tier 1 the XCursor theme through the dlopen'd RENDER lane,
+ * tier 2 the nearest core cursor-font glyph, None only when both
+ * tiers honestly failed (the default arrow). fdk__x11_named_cursors_
+ * shutdown frees the cache + dlclose's the RENDER lane (called from
+ * fdk_x11_cursor_shutdown; display-dead aware like it). */
+Cursor fdk__x11_named_cursor(fdk_platform_connection *conn, int op_shape);
+void fdk__x11_named_cursors_shutdown(fdk_platform_connection *conn,
+                                     int display_dead);
+
+/* ---- The dlopen'd RENDER cursor lane (x11_cursor.c) ----
+ *
+ * libXrender.so.1 pinned lazily on the first named-cursor request:
+ * XRenderCreateCursor turns an ARGB depth-32 pixmap (built from the
+ * shared XCursor theme loader's pixels) into a server Cursor — the
+ * same thing libXcursor itself does, without the dependency. Absent
+ * library or extension = NULL/sticky-off; the core cursor font
+ * carries every shape through its nearest-glyph table instead. */
+struct fdk_x11_cursor_render {
+    void *lib;                        /* dlopen("libXrender.so.1")  */
+    int ok;                           /* extension + symbols won    */
+    int tried;                        /* sticky after one attempt   */
+    int (*query_ext)(Display *, int *, int *);
+    XRenderPictFormat *(*find_std)(Display *, int);
+    Picture (*create_pic)(Display *, Drawable, XRenderPictFormat *,
+                          unsigned long, const XRenderPictureAttributes *);
+    void (*free_pic)(Display *, Picture);
+    Cursor (*create_cursor)(Display *, Picture, unsigned int,
+                            unsigned int);
+};
+
+/* PictStandardARGB32 (Xrender.h's enum value, spelled here because
+ * the header's name is only visible where it is included). */
+#define FDK_X11_PICT_STANDARD_ARGB32 4
 
 /* XI2 touch (1.1.0, M-3; src/platform/x11/x11_xi2.c): dlopen'd
  * libXi behind the touch event model. try_load pins the library

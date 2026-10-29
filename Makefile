@@ -242,6 +242,12 @@ else
   # break the wildcard that's active when Wayland IS enabled).
   PLATFORM_WAYLAND_SRCS := src/platform/wayland_disabled.c
 endif
+
+# Platform-common sources (explicitly listed; the src/platform root
+# has no wildcard — the wayland_disabled.c precedent). cursor_theme.c
+# is the shared XCursor theme loader both backends ride (1.1.0-rc2
+# S-5; needs neither backend's flags — plain libc).
+PLATFORM_COMMON_SRCS := src/platform/cursor_theme.c
 WINDOW_SRCS   := $(wildcard src/window/*.c)
 RENDER_SRCS   := $(wildcard src/render/*.c)
 WIDGET_SRCS   := $(wildcard src/widget/*.c)
@@ -251,7 +257,7 @@ THEME_SRCS    := $(wildcard src/theme/*.c)
 I18N_SRCS     := $(wildcard src/i18n/*.c)
 DBUS_SRCS     := $(wildcard src/dbus/*.c)
 DESKTOP_SRCS  := $(wildcard src/desktop/*.c)
-LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS) $(THEME_SRCS) $(I18N_SRCS) $(DBUS_SRCS) $(DESKTOP_SRCS)
+LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(PLATFORM_COMMON_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS) $(THEME_SRCS) $(I18N_SRCS) $(DBUS_SRCS) $(DESKTOP_SRCS)
 
 # Static and shared builds use separate object trees (obj/ vs obj-pic/)
 # since shared objects must be position-independent (-fPIC) and static
