@@ -27,11 +27,29 @@
  *   CANCELLED = released over nothing that accepts, or the source
  *   action was cancelled; FAILED = the backend could not start).
  *
+ *   DRAG ICON (1.1.0, S-9): fdk_drag_begin_ex attaches an image to
+ *   the drag itself — the picture under the cursor while it flies
+ *   (a file's thumbnail, a text snippet's preview). Wayland: the
+ *   protocol's own icon surface in wl_data_device.start_drag. X11,
+ *   where XDND has no icon protocol: a small override-redirect
+ *   window that tracks the pointer for the drag's life (the
+ *   classic GTK approach), shaped per the icon's alpha so
+ *   transparent icons are not black boxes.
+ *
+ *   WIDGET-LEVEL DROP TARGETS (1.1.0, S-9): fdk_widget_set_drop_target
+ *   registers a widget (or a container standing in for its subtree)
+ *   as the thing a drop lands on, and fdk_widget_set_drag_callback
+ *   receives the drag events scoped to it — ENTER when the drag
+ *   enters its bounds, MOTION inside, LEAVE when it exits, DROP on
+ *   release. Acceptance becomes PER-POSITION: over a registered
+ *   target the offered formats intersect THAT widget's mask; over
+ *   the rest of the window the window's own mask applies (the v1
+ *   behavior, unchanged). The window-level callback keeps seeing
+ *   every drag event regardless — widget routing is additive, not a
+ *   replacement.
+ *
  * Scope notes (documented rather than faked):
  *   - Formats are TEXT and URI_LIST; one drag may offer both.
- *   - Drop targets are WINDOW-level in v1: the callback hit-tests
- *     its own widgets (the capabilities example's drop panel does
- *     exactly this). Widget-level targets are future work.
  *   - Actions are COPY only — no move/link negotiation (XDND
  *     advertises XdndActionCopy; Wayland set_actions(copy)).
  *   - No intra-application drag-local "direct save" or fancy MIME
@@ -45,6 +63,7 @@
 #include "fdk_core.h"
 #include "fdk_types.h"
 #include "fdk_window.h"
+#include "fdk_event.h" /* the drag event payloads the widget routing delivers */
 
 #include <stdbool.h>
 
@@ -79,6 +98,56 @@ fdk_result fdk_window_set_drop_formats(fdk_window *window, int formats);
 
 /* The registered format mask (0 for NULL). */
 int fdk_window_get_drop_formats(const fdk_window *window);
+
+/* ---- Widget-level drop targets (1.1.0, S-9 / B-13) ----------------------
+ *
+ * Registration: a widget with a nonzero mask is a drop target. The
+ * window's drag routing hit-tests the tree at the drag's position
+ * and walks UP from the deepest hit widget — the first target on
+ * that chain owns the position (a registered CONTAINER receives
+ * drops anywhere in its subtree, exactly as an app would expect a
+ * drop zone to behave). Over a position with no target on the
+ * chain, the window's own mask governs — the pre-1.1.0 behavior
+ * where nothing registered.
+ *
+ * Acceptance is therefore per-position on BOTH backends: the XDND
+ * Status reply and the wl_data_offer accept are re-evaluated as the
+ * pointer moves, so the source's cursor feedback reflects the real
+ * answer under it (GTK's behavior). The negotiation never accepts
+ * MORE than the window did before — a widget target can only
+ * refine, not widen, what the position accepts (the window's mask
+ * still applies where no widget target exists; a drag whose
+ * formats match NO target at the drop position is refused at the
+ * protocol level, no event delivered). */
+
+/* Marks `widget` as a drop target accepting `formats` (0 clears the
+ * registration — the default). Fails with FDK_ERR_INVALID_ARGUMENT
+ * on NULL widget or unknown format bits. Changing the mask while a
+ * drag hovers is legal: the next motion re-evaluates. */
+fdk_result fdk_widget_set_drop_target(fdk_widget *widget, int formats);
+
+/* The registered mask (0 for NULL or unregistered). */
+int fdk_widget_get_drop_target(const fdk_widget *widget);
+
+/* Scoped drag delivery: fired for FDK_EVENT_DRAG_ENTER (the drag
+ * crossed into this target's scope), FDK_EVENT_DRAG_MOTION (inside
+ * it), FDK_EVENT_DRAG_LEAVE (crossed out — including the drag's
+ * end), and FDK_EVENT_DRAG_DROP (released inside it). The event
+ * pointer is the SAME payload the window callback receives (same
+ * lifetime rules: data valid for the callback only). Setting NULL
+ * clears the callback. A widget may be a target without a callback
+ * (it still participates in acceptance — useful for containers
+ * that only gate the drop); and a callback without a registration
+ * never fires. */
+typedef void (*fdk_widget_drag_fn)(fdk_widget *widget, fdk_event_type type,
+                                   const fdk_drag_event *event, void *user);
+
+/* Sets the scoped drag callback (and user data) on `widget`. The
+ * widget must ALSO be registered via fdk_widget_set_drop_target for
+ * the callback to fire. */
+fdk_result fdk_widget_set_drag_callback(fdk_widget *widget,
+                                        fdk_widget_drag_fn on_drag,
+                                        void *user);
 
 /* ---- Sending ---- */
 
@@ -124,6 +193,29 @@ fdk_result fdk_drag_begin(fdk_window *origin, int formats,
                           const char *text,
                           const char *const *uris, size_t uri_count,
                           fdk_drag_done_fn on_done, void *user_data);
+
+/* fdk_drag_begin with a DRAG ICON (1.1.0, S-9): `icon` is width x
+ * height ARGB8888 pixels (fdk_u32 packing A<<24|R<<16|G<<8|B — the
+ * same layout fdk_window_set_icon and _NET_WM_ICON carry), row-major,
+ * no padding, COPIED at call time. NULL icon or non-positive dims =
+ * no icon (identical to fdk_drag_begin). Dimensions are clamped to
+ * 256 — an icon is drag feedback, not a second framebuffer; larger
+ * images scale down (nearest-neighbor, alpha-preserving) by FDK
+ * itself.
+ *
+ * Per backend: Wayland commits the icon as the protocol's own drag
+ * surface (compositor-positioned, alpha-blended); X11 shows it in a
+ * small override-redirect window tracking the pointer, offset up-
+ * right of the cursor (the GTK convention), shaped by the alpha
+ * channel (>= 0x80 = opaque pixels own the shape) so rounded and
+ * transparent icons are not black boxes. In both cases the icon
+ * lives exactly as long as the drag. */
+fdk_result fdk_drag_begin_ex(fdk_window *origin, int formats,
+                             const char *text,
+                             const char *const *uris, size_t uri_count,
+                             const fdk_u32 *icon, fdk_i32 icon_w,
+                             fdk_i32 icon_h,
+                             fdk_drag_done_fn on_done, void *user_data);
 
 #ifdef __cplusplus
 }

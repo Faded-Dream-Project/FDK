@@ -31,6 +31,7 @@
 #include "platform/x11/x11_gl.h" /* fdk__x11_gl_test_reset (self-check
                                     * stamp cleanup after the poison test) */
 #include "window/window_internal.h"
+#include "widget/widget_internal.h" /* fdk__widget_at (S-9 diag) */
 #include "widget/widgets_internal.h"
 #include "test_gif_fixtures.h" /* the C-4 animated-GIF fixture */ /* fdk__text_extent (tab math) */
 
@@ -9406,6 +9407,487 @@ static void dnd_tx_done(fdk_drag_status status, void *user) {
     dnd_tx.reported = true;
 }
 
+/* ---- 1.1.0 S-9: the drag icon + widget-level drop targets --------------- */
+
+/* A 48x32 ARGB icon with a DISC of opacity (radius 15 centered at
+ * (24,16)) and transparent corners: distinctive geometry for the
+ * XShape assertion (a rectangular bounding box would mean the shape
+ * was never applied), and transparent corners prove alpha is the
+ * shape's source. */
+static fdk_u32 s9_icon[48 * 32];
+static void s9_icon_init(void) {
+    for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 48; x++) {
+            int dx = x - 24, dy = y - 16;
+            int inside = (dx * dx + dy * dy) <= 15 * 15;
+            fdk_u32 c = inside
+                            ? (0xFF000000u | ((fdk_u32)(x * 5) << 16) |
+                               ((fdk_u32)(y * 7) << 8) | 0x40u)
+                            : 0x00000000u;
+            s9_icon[(size_t)y * 48 + (size_t)x] = c;
+        }
+    }
+}
+
+/* The drag-icon leg: a source drag started WITH an icon must show an
+ * override-redirect window of the icon's size that tracks the
+ * pointer, carries the alpha-derived bounding shape, and dies with
+ * the drag. Verified against real server state (second connection):
+ * the tree walk, the geometry, XShapeGetRectangles, and the
+ * post-drop disappearance. */
+#define S9_ICON_W 48
+#define S9_ICON_H 32
+
+/* The drag-icon leg's arm callback: the SAME press-then-motion shape
+ * as dnd_tx_window_event, but the drag begins WITH the disc icon. */
+static void s9_icon_tx_window_event(fdk_window *w,
+                                    const fdk_event_data *ev, void *user) {
+    (void)user;
+    if (ev->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        dnd_tx.armed = true;
+    } else if (ev->type == FDK_EVENT_POINTER_MOTION && dnd_tx.armed) {
+        dnd_tx.armed = false;
+        const char *uris[2] = {"/etc/hostname", "/etc/os-release"};
+        fdk_result r = fdk_drag_begin_ex(
+            w, FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST,
+            "FDK icon drag to the outside", uris, 2, s9_icon,
+            S9_ICON_W, S9_ICON_H, dnd_tx_done, NULL);
+        dnd_tx.drag_started_ok = fdk_ok(r);
+    }
+}
+
+/* Finds the drag-icon window among the root's children: the
+ * override-redirect S9_ICON_W x S9_ICON_H mapped window. Returns its
+ * geometry through the out-params; None when absent. */
+static Window s9_find_icon_window(Display *d, int *out_x, int *out_y) {
+    Window r = None, p = None, *ch = NULL;
+    unsigned int n = 0;
+    Window found = None;
+    if (XQueryTree(d, DefaultRootWindow(d), &r, &p, &ch, &n)) {
+        for (unsigned int i = 0; i < n; i++) {
+            XWindowAttributes wa;
+            if (XGetWindowAttributes(d, ch[i], &wa) &&
+                wa.override_redirect && wa.map_state == IsViewable &&
+                wa.width == S9_ICON_W && wa.height == S9_ICON_H) {
+                found = ch[i];
+                if (out_x != NULL) {
+                    *out_x = wa.x;
+                }
+                if (out_y != NULL) {
+                    *out_y = wa.y;
+                }
+            }
+        }
+        XFree(ch);
+    }
+    return found;
+}
+
+static void test_dnd_drag_icon_gui(void) {
+    const char *sink_bin = getenv("FDK_XDND_SINK_BIN");
+    if (sink_bin == NULL) {
+        sink_bin = "/home/z/my-project/scripts/xdnd_sink";
+    }
+    const char *xtest = getenv("FDK_XTEST_BIN");
+    if (xtest == NULL) {
+        xtest = "/tmp/xtest_driver";
+    }
+    if (access(sink_bin, X_OK) != 0 || access(xtest, X_OK) != 0) {
+        printf("[skip] dnd drag icon: %s or %s not built (interop "
+               "rig)\n", sink_bin, xtest);
+        return;
+    }
+    s9_icon_init();
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "dnd icon source",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, s9_icon_tx_window_event, NULL);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 250);
+
+    /* The sink for the drop (the icon test still wants a real
+     * successful drag so the destruction path is the DRAG-END path,
+     * not a failure path). */
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "%s 420 20 280 180", sink_bin);
+    FILE *sink = popen(cmd, "r");
+    assert(sink != NULL);
+    int sink_fd = fileno(sink);
+    fcntl(sink_fd, F_SETFL, O_NONBLOCK);
+    char line[512];
+    char sink_out[4096] = {0};
+    unsigned long sink_xid = 0;
+    alarm(6);
+    for (;;) {
+        while (read(sink_fd, line, sizeof(line)) > 0) {
+            strncat(sink_out, line,
+                    sizeof(sink_out) - strlen(sink_out) - 1);
+            (void)sscanf(line, "SINK: ready 0x%lx", &sink_xid);
+        }
+        (void)fdk_pump_events(ctx, 50);
+        if (sink_xid != 0) {
+            break;
+        }
+    }
+    alarm(0);
+    assert(sink_xid != 0);
+
+    unsigned long xid = fdk_window_xid(win);
+    Display *probe = XOpenDisplay(NULL);
+    assert(probe != NULL);
+    int wx = 0, wy = 0;
+    Window junk = None;
+    XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
+                          60, 40, &wx, &wy, &junk);
+    const char *libprefix = getenv("FDK_XLIB_PREFIX");
+    if (libprefix == NULL) {
+        libprefix = "/home/z/apt/prefix/usr/lib/x86_64-linux-gnu";
+    }
+    setenv("LD_LIBRARY_PATH", libprefix, 1);
+
+    /* Press + first motion (the drag arms on motion under the
+     * press): the icon window must EXIST and sit near the pointer. */
+    memset(&dnd_tx, 0, sizeof(dnd_tx));
+    char drive[512];
+    snprintf(drive, sizeof(drive), "\"%s\" 0x%lx m:%d,%d w:60 d", xtest,
+             xid, wx, wy);
+    (void)system(drive);
+    snprintf(drive, sizeof(drive), "\"%s\" 0x%lx m:%d,%d", xtest, xid,
+             wx + 20, wy + 10);
+    (void)system(drive);
+    (void)fdk_pump_events(ctx, 300);
+    assert(dnd_tx.drag_started_ok);
+
+    int ix = -1, iy = -1;
+    Window icon = s9_find_icon_window(probe, &ix, &iy);
+    assert(icon != None);
+    /* Above-right of the pointer hotspot (px+1, py-h-1): the driver
+     * moved to (wx+20, wy+10) in ROOT terms; the icon's top-left
+     * must be within a small tolerance of that point offset by the
+     * convention. */
+    {
+        int px = wx + 20, py = wy + 10;
+        int want_x = px + 1, want_y = py - S9_ICON_H - 1;
+        if (want_y < 0) {
+            want_y = py + 1;
+        }
+        assert(ix > want_x - 4 && ix < want_x + 4);
+        assert(iy > want_y - 4 && iy < want_y + 4);
+    }
+    printf("[ok] dnd drag icon: override-redirect window exists at "
+           "the GTK hotspot offset while the drag is live\n");
+
+    /* The alpha shape: the disc's bounding shape is NOT the full
+     * 48x32 rectangle — XShapeGetRectangles must return a band list
+     * whose union is strictly narrower somewhere. */
+    {
+        int cnt = 0, ordering = 0;
+        XRectangle *rects = XShapeGetRectangles(
+            probe, icon, ShapeBounding, &cnt, &ordering);
+        assert(rects != NULL);
+        assert(cnt > 1); /* a full rectangle would be exactly 1 */
+        /* Row-band widths: the disc's cap rows are strictly narrower
+         * than the icon (int comparison — XRectangle.width is
+         * unsigned short and would truncate the sentinel). */
+        int min_w = 1 << 20;
+        for (int i = 0; i < cnt; i++) {
+            if ((int)rects[i].width < min_w) {
+                min_w = (int)rects[i].width;
+            }
+        }
+        assert(min_w < S9_ICON_W);
+        XFree(rects);
+    }
+    printf("[ok] dnd drag icon: alpha-derived bounding shape (the "
+           "disc, not the rectangle)\n");
+
+    /* Motion: the icon tracks. */
+    int sx = 420 + 100, sy = 20 + 60;
+    snprintf(drive, sizeof(drive), "\"%s\" 0x%lx m:%d,%d", xtest, xid,
+             (sx + wx) / 2, (wy + sy) / 2);
+    (void)system(drive);
+    (void)fdk_pump_events(ctx, 200);
+    int ix2 = -1, iy2 = -1;
+    Window icon2 = s9_find_icon_window(probe, &ix2, &iy2);
+    assert(icon2 == icon);
+    assert(ix2 != ix || iy2 != iy); /* it moved */
+    printf("[ok] dnd drag icon: window tracks the pointer through "
+           "the drag\n");
+
+    /* Complete the drag into the sink (release over it), let the
+     * handshake finish, then the icon must be GONE. */
+    snprintf(drive, sizeof(drive), "\"%s\" 0x%lx m:%d,%d", xtest, xid,
+             sx, sy);
+    (void)system(drive);
+    for (int p = 0; p < 6; p++) {
+        (void)fdk_pump_events(ctx, 60);
+        while (read(sink_fd, line, sizeof(line)) > 0) {
+            strncat(sink_out, line,
+                    sizeof(sink_out) - strlen(sink_out) - 1);
+        }
+    }
+    snprintf(drive, sizeof(drive), "\"%s\" 0x%lx u", xtest, xid);
+    (void)system(drive);
+    int spins = 0;
+    while (spins++ < 120) {
+        (void)fdk_pump_events(ctx, 50);
+        while (read(sink_fd, line, sizeof(line)) > 0) {
+            strncat(sink_out, line,
+                    sizeof(sink_out) - strlen(sink_out) - 1);
+        }
+        if (dnd_tx.reported) {
+            break;
+        }
+    }
+    alarm(0);
+    assert(dnd_tx.reported);
+    assert(dnd_tx.status == FDK_DRAG_SUCCEEDED);
+    assert(s9_find_icon_window(probe, NULL, NULL) == None);
+    printf("[ok] dnd drag icon: destroyed with the drag (gone after "
+           "the drop)\n");
+
+    (void)system("pkill -x xdnd_sink 2>/dev/null || true");
+    (void)pclose(sink);
+    XCloseDisplay(probe);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+}
+#undef S9_ICON_W
+#undef S9_ICON_H
+
+/* The widget-level drop-target leg. Layout: the window accepts TEXT
+ * only (the window-mask fallback region); a child "zone" widget
+ * registers URI_LIST. An external raw-Xlib source (the interop rig)
+ * drops files over the ZONE -> the widget callback receives
+ * ENTER/DROP with the decoded paths while the window callback still
+ * sees everything; a text drop over the fallback region -> NO widget
+ * events (no target owns that position), the window callback alone.
+ * Scoped transitions are driven by synthetic XDND Position messages
+ * from the probe connection (crossing zone -> empty -> zone -> out),
+ * asserting the synthesized ENTER/LEAVE pairs. */
+static struct {
+    int enters, motions, leaves, drops;
+    size_t uri_count;
+    char last_uris[2][512];
+} s9_widget_rx;
+
+static void s9_widget_drag_cb(fdk_widget *w, fdk_event_type type,
+                              const fdk_drag_event *ev, void *user) {
+    (void)w; (void)user;
+    switch (type) {
+    case FDK_EVENT_DRAG_ENTER: s9_widget_rx.enters++; break;
+    case FDK_EVENT_DRAG_MOTION: s9_widget_rx.motions++; break;
+    case FDK_EVENT_DRAG_LEAVE: s9_widget_rx.leaves++; break;
+    case FDK_EVENT_DRAG_DROP:
+        s9_widget_rx.drops++;
+        s9_widget_rx.uri_count = ev->uri_count;
+        for (size_t i = 0; i < ev->uri_count && i < 2; i++) {
+            snprintf(s9_widget_rx.last_uris[i],
+                     sizeof(s9_widget_rx.last_uris[i]), "%s",
+                     ev->uris[i]);
+        }
+        break;
+    default: break;
+    }
+}
+
+static void test_dnd_widget_targets_gui(void) {
+    const char *src_bin = getenv("FDK_XDND_SOURCE_BIN");
+    if (src_bin == NULL) {
+        src_bin = "/home/z/my-project/scripts/xdnd_source";
+    }
+    if (access(src_bin, X_OK) != 0) {
+        printf("[skip] dnd widget targets: %s not built\n", src_bin);
+        return;
+    }
+
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "dnd widget zone",
+                                 .width = 320, .height = 240 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    fdk_window_set_event_callback(win, dnd_count_window_event, NULL);
+    /* The WINDOW takes TEXT only: the rest of the window is the
+     * fallback region; the ZONE widget takes files. */
+    fdk_window_set_drop_formats(win, FDK_DRAG_FORMAT_TEXT);
+
+    fdk_font *font = fdk_font_load(
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14);
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget *zone = NULL;
+    assert(fdk_ok(fdk_frame_create(root, font, "Drop files here",
+                                   &zone)));
+    fdk_widget_arrange(zone, (fdk_rect){20, 40, 240, 120});
+    fdk_widget_set_background(zone,
+                              (fdk_color){0.25f, 0.45f, 0.25f, 1.0f});
+    assert(fdk_ok(fdk_widget_set_drop_target(
+        zone, FDK_DRAG_FORMAT_URI_LIST)));
+    assert(fdk_ok(fdk_widget_set_drag_callback(zone, s9_widget_drag_cb,
+                                               NULL)));
+    fdk_window_show(win);
+    fdk_window_paint(win);
+    (void)fdk_pump_events(ctx, 250);
+
+    unsigned long xid = fdk_window_xid(win);
+    Display *probe = XOpenDisplay(NULL);
+    assert(probe != NULL);
+
+    /* Root coordinates of the zone's center and of the fallback
+     * region (below the zone). */
+    int zone_rx = 0, zone_ry = 0, fall_rx = 0, fall_ry = 0;
+    Window junk = None;
+    XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
+                          140, 100, &zone_rx, &zone_ry, &junk);
+    XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
+                          140, 210, &fall_rx, &fall_ry, &junk);
+
+    char cmd[512];
+
+    /* --- files drop ON THE ZONE: the widget receives the scoped
+     * events and the decoded paths; the window sees everything. --- */
+    memset(&s9_widget_rx, 0, sizeof(s9_widget_rx));
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d files", src_bin, xid,
+             zone_rx, zone_ry);
+    FILE *child = popen(cmd, "r");
+    assert(child != NULL);
+    alarm(8);
+    int rc = pump_child_while_draining(ctx, child, 8);
+    alarm(0);
+    assert(rc == 0);
+    assert(s9_widget_rx.enters == 1);
+    assert(s9_widget_rx.drops == 1);
+    assert(s9_widget_rx.uri_count == 2);
+    assert(strcmp(s9_widget_rx.last_uris[0], "/etc/hostname") == 0);
+    assert(strcmp(s9_widget_rx.last_uris[1], "/etc/os-release") == 0);
+    /* The window callback saw the same drag (the additive contract). */
+    assert(dnd_rx.enters >= 1);
+    assert(dnd_rx.drops == 1);
+    assert(dnd_rx.uri_count == 2);
+    printf("[ok] dnd widget targets: files dropped ON the zone -> "
+           "scoped ENTER/DROP to the widget, window callback "
+           "unchanged\n");
+
+    /* --- text drop on the FALLBACK region: the window mask
+     * governs, the widget never hears about it. --- */
+    memset(&s9_widget_rx, 0, sizeof(s9_widget_rx));
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    snprintf(cmd, sizeof(cmd), "%s 0x%lx %d %d text", src_bin, xid,
+             fall_rx, fall_ry);
+    child = popen(cmd, "r");
+    assert(child != NULL);
+    alarm(8);
+    rc = pump_child_while_draining(ctx, child, 8);
+    alarm(0);
+    assert(rc == 0);
+    assert(s9_widget_rx.enters == 0);
+    assert(s9_widget_rx.drops == 0);
+    assert(dnd_rx.drops == 1);
+    assert(strcmp(dnd_rx.last_text, "Hello from an external client") == 0);
+    printf("[ok] dnd widget targets: text on the fallback region -> "
+           "window-mask acceptance, NO widget events\n");
+
+    /* --- Scoped transitions, synthetic XDND from the probe: zone
+     * -> empty -> zone -> leave, asserting the synthesized ENTER/
+     * LEAVE pairs. No drop (the data fetch needs a real source). --- */
+    memset(&s9_widget_rx, 0, sizeof(s9_widget_rx));
+    memset(&dnd_rx, 0, sizeof(dnd_rx));
+    {
+        Atom a_enter = XInternAtom(probe, "XdndEnter", False);
+        Atom a_pos = XInternAtom(probe, "XdndPosition", False);
+        Atom a_leave = XInternAtom(probe, "XdndLeave", False);
+        Atom a_utf8 = XInternAtom(probe, "UTF8_STRING", False);
+        Atom a_uri = XInternAtom(probe, "text/uri-list", False);
+        Window src_w = XCreateSimpleWindow(
+            probe, DefaultRootWindow(probe), -10, -10, 1, 1, 0, 0, 0);
+
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.xclient.type = ClientMessage;
+        ev.xclient.window = (Window)xid;
+        ev.xclient.format = 32;
+
+        /* Enter: source + version 5 + 2 types inline. */
+        ev.xclient.message_type = a_enter;
+        ev.xclient.data.l[0] = (long)src_w;
+        ev.xclient.data.l[1] = (5L << 24) | 2L;
+        ev.xclient.data.l[2] = (long)a_uri;
+        ev.xclient.data.l[3] = (long)a_utf8;
+        ev.xclient.data.l[4] = 0;
+        XSendEvent(probe, (Window)xid, False, NoEventMask, &ev);
+        XFlush(probe);
+        (void)fdk_pump_events(ctx, 150);
+
+        /* Position over the ZONE: accept=uri (widget target). */
+        unsigned long packed_zone =
+            (((unsigned long)(fdk_u16)(fdk_i16)zone_rx) << 16) |
+            ((unsigned long)(fdk_u16)(fdk_i16)zone_ry);
+        ev.xclient.message_type = a_pos;
+        ev.xclient.data.l[0] = (long)src_w;
+        ev.xclient.data.l[1] = 0;
+        ev.xclient.data.l[2] = (long)packed_zone;
+        ev.xclient.data.l[3] = 0;
+        ev.xclient.data.l[4] = 0;
+        XSendEvent(probe, (Window)xid, False, NoEventMask, &ev);
+        XFlush(probe);
+        (void)fdk_pump_events(ctx, 150);
+        assert(s9_widget_rx.enters == 1);
+
+        /* Position over the FALLBACK region: the offered uri-list
+         * matches nothing there (window mask is TEXT... but the
+         * offer ALSO carries UTF8 — the intersection is TEXT, so
+         * this position is still accepted, but by the WINDOW; the
+         * WIDGET must see its LEAVE). */
+        unsigned long packed_fall =
+            (((unsigned long)(fdk_u16)(fdk_i16)fall_rx) << 16) |
+            ((unsigned long)(fdk_u16)(fdk_i16)fall_ry);
+        ev.xclient.data.l[2] = (long)packed_fall;
+        XSendEvent(probe, (Window)xid, False, NoEventMask, &ev);
+        XFlush(probe);
+        (void)fdk_pump_events(ctx, 150);
+        assert(s9_widget_rx.leaves == 1);
+
+        /* Back over the ZONE: ENTER again (re-entered the scope). */
+        ev.xclient.data.l[2] = (long)packed_zone;
+        XSendEvent(probe, (Window)xid, False, NoEventMask, &ev);
+        XFlush(probe);
+        (void)fdk_pump_events(ctx, 150);
+        assert(s9_widget_rx.enters == 2);
+
+        /* Leave: the scope closes. */
+        ev.xclient.message_type = a_leave;
+        ev.xclient.data.l[0] = (long)src_w;
+        ev.xclient.data.l[1] = 0;
+        ev.xclient.data.l[2] = 0;
+        XSendEvent(probe, (Window)xid, False, NoEventMask, &ev);
+        XFlush(probe);
+        (void)fdk_pump_events(ctx, 150);
+        assert(s9_widget_rx.leaves == 2);
+        assert(s9_widget_rx.drops == 0);
+
+        XDestroyWindow(probe, src_w);
+        XFlush(probe);
+    }
+    printf("[ok] dnd widget targets: scoped ENTER/LEAVE synthesized "
+           "across zone boundaries (zone -> fallback -> zone -> out)\n");
+
+    fdk_font_destroy(font);
+    XCloseDisplay(probe);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+}
+
 static void test_dnd_source_gui(void) {
     const char *sink_bin = getenv("FDK_XDND_SINK_BIN");
     if (sink_bin == NULL) {
@@ -12405,6 +12887,8 @@ int main(void) {
     test_dnd_receiver_gtk_gui();
     test_dnd_receiver_incr_gui();
     test_dnd_source_gui();
+    test_dnd_drag_icon_gui();
+    test_dnd_widget_targets_gui();
     test_settings_live_follow_gui();
     test_window_shortcuts_and_accelerators_gui();
     test_menu_mnemonics_gui();

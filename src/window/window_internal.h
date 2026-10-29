@@ -137,6 +137,18 @@ struct fdk_window {
      * window_set_drop_formats) is what drives protocol negotiation. */
     int drop_formats;
 
+    /* ---- Widget-level drag routing (1.1.0, S-9 / B-13) ----
+     *
+     * The drop-target widget whose scope the drag is currently INSIDE
+     * (the ancestor-walk winner at the last ENTER/MOTION position),
+     * NULL when the drag is over no registered target. Used to
+     * synthesize the scoped ENTER/LEAVE transitions as the pointer
+     * crosses target boundaries; verified against the live tree on
+     * every use (a destroyed target is dropped silently — its LEAVE
+     * cannot be delivered, by construction). Cleared on the drag's
+     * end (window LEAVE / DROP). */
+    fdk_widget *drag_target_widget;
+
     /* Lazily created by fdk_window_get_surface() (src/render/surface.c),
      * destroyed by fdk_window_destroy(). NULL until the application
      * first asks to render into this window. */

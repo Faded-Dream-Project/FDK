@@ -46,14 +46,14 @@ integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
 **Counts** (recounted 2026-10-29 against every register row — the
-earlier line's arithmetic was coarser than the table): DONE 40
-(S-6/B-04-activation, 2026-10-29; C-4/B-14, 2026-10-29; S-10/B-18,
-2026-10-29; S-4/A-06 + A-07 folded, 2026-10-29; S-5/B-12,
-2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B both sides, 2026-10-29;
-S-2 and S-1 pending owner verification; M-4, M-3, M-1, and S-3,
-2026-10-28) · PARTIAL 3 (B-13, B-19, S-9) · IN PROGRESS 1 (M-9) ·
-MISSING 13 · DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62
-items. Re-verified 2026-10-29 (post-S-5): the clean
+earlier line's arithmetic was coarser than the table): DONE 42
+(S-9/B-13, 2026-10-29; S-6/B-04-activation, 2026-10-29; C-4/B-14,
+2026-10-29; S-10/B-18, 2026-10-29; S-4/A-06 + A-07 folded,
+2026-10-29; S-5/B-12, 2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B
+both sides, 2026-10-29; S-2 and S-1 pending owner verification; M-4,
+M-3, M-1, and S-3, 2026-10-28) · PARTIAL 1 (B-19) · IN PROGRESS 1
+(M-9) · MISSING 13 · DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX
+0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +
@@ -77,6 +77,25 @@ two-monitor origin math, stale-index fallback), the bar rig
 unchanged-and-green, and the notifyd rig (the dispatch-loop change
 under a real WM). Earlier: post-T-B-side-2 — both desktop rigs
 unchanged-and-green (notifyd 68, trayhost 103).
+Re-verified 2026-10-29 (post-S-9): the dual-backend rebuild zero
+warnings, core make test, make test-x11 (205 [ok] incl. the seven
+NEW S-9 legs: the drag-icon window's existence/hotspot-offset/
+alpha-shape/tracking/destruction through a real drag into the
+external sink; the zone's scoped delivery + the window callback
+unchanged; the fallback region's window-mask acceptance with NO
+widget events; the synthesized ENTER/LEAVE across zone boundaries)
+— plus the xtest_driver selfcheck fix (the startup warp corrupted
+every position-dependent flow; now opt-in), make test-dbus,
+FDK_SANITIZE=0 test, release + examples + verify-exports (847, +4
+— fdk_drag_begin_ex, fdk_widget_set_drop_target, fdk_widget_get_
+drop_target, fdk_widget_set_drag_callback), the sway suite (56 [ok]
+incl. the zone leg — a URI drag landing on a TEXT-only window
+through per-position acceptance — and the FDK-source drag-with-icon
+leg: the icon surface live during the drag, destroyed after, the
+zone received the drop WITH the full payload through the
+same-connection ::send fix, connection healthy), and fdk-shell
+build + test-x11 + test-desktop + the notifyd and trayhost rigs
+(ALL PASS both).
 Re-verified 2026-10-29 (post-S-6): the dual-backend rebuild zero
 warnings, core make test, make test-x11 (197 [ok] incl. the six NEW
 activation legs: the env-capture discipline, the _NET_STARTUP_ID
@@ -137,7 +156,7 @@ unaffected):
 | B-10 | AT-SPI interop | **MISSING** | internal a11y tree only; comments state the no-daemon posture | S-8 — **CORE** on the native client (D-002) |
 | B-11 | idle/screensaver inhibition | **DONE** | S-3 shipped: fdk_idle.h (fdk_idle_inhibit/uninhibit/status — one handle, either mechanism); Wayland zwp_idle_inhibit_manager_v1 through the window-scoped platform op (window-owned engagement, sever-at-destroy); org.freedesktop.ScreenSaver on the native D-Bus client with the DEFERRED release (uninhibit-before-cookie still sends the matching UnInhibit — no orphaned inhibition); the window-dies-inhibited release; tests/test_idle.c + the mock-ScreenSaver legs in the live D-Bus rig (cookie round trip, deferred release, refusal) + the sway rig (engage/release/destroy-while-inhibited) + the X11 no-bus fallback | GNOME's org.gnome.ScreenSaver variant not probed (documented); owner's real-desktop check |
 | B-12 | cursor shape set | **DONE** | S-5 shipped (2026-10-29): `fdk_cursor_shape` 2 -> 22 shapes (the cursor-shape-v1 semantic space, append-only; 802 exports unchanged); ONE resolution point (`fdk__cursor_resolve`: app request > widget hover (Entry/TextView/Spin I-beam) > compass > arrow) with the transition cache; Wayland: set_shape when the manager exists (the sway suite pins the full enum table row by row) + the shared XCursor theme loader fallback (src/platform/cursor_theme.c, extracted from the 1.1.4 Wayland parser); X11: the dlopen'd libXrender.so.1 RENDER lane (theme images, no new build dep) over the core font glyph table with the documented substitutions (D-016); fdk-shell 0.4.0 mirrors the set | — |
-| B-13 | drag icons + drop targets | **PARTIAL** | DnD window-level both backends; drag icon explicitly absent ("start_drag with NO icon surface") | S-9 |
+| B-13 | drag icons + drop targets | **DONE** | S-9 shipped (2026-10-29): fdk_drag_begin_ex (the icon rides the drag — Wayland: the protocol's own start_drag icon surface, ARGB8888 SHM, committed pre-start, destroyed at end; X11: the GTK-shaped override-redirect window tracking the pointer at the hotspot offset, alpha-shaped via XShape, skipped by the source's own target walk) + fdk_widget_set_drop_target / fdk_widget_get_drop_target / fdk_widget_set_drag_callback (widget-level targets with scoped ENTER/MOTION/LEAVE/DROP delivery; acceptance PER-POSITION through fdk__core_drag_accepts_at — the XDND Status and wl_data_offer.accept re-evaluate at every position, window-mask fallback where no target owns it; the window callback still sees everything). SAME-CONNECTION drags fixed (the ::send-served-by-our-own-dispatch read + the drag_drop_active fence against mid-read teardown); the 250 ms EOF never-arriving wart closed (our pipe write-end closed at the receive request); the X11 DROP event carries the last Position's coordinates; 847 exports (+4). Tests: X11 — 7 new legs (icon window exists/tracks/alpha-shapes/destroys through a REAL drag into the external sink; files ON the zone -> scoped widget delivery + window unchanged; text on the fallback -> window-mask acceptance with NO widget events; scoped ENTER/LEAVE across zone boundaries through synthetic XDND); Wayland — the interop leg's zone (a URI drag landing on a TEXT-only window through per-position acceptance) + the FDK-source drag-with-icon leg (icon surface live during / destroyed after, the zone received the drop with the full payload, connection healthy). D-021 | owner's real-desktop check (TESTING-ON-DESKTOP.md §14) |
 | B-14 | image formats | **DONE** [animated GIF shipped] | C-4 landed (2026-10-29): fdk_gif + fdk_gif_player + fdk_picture_set_animated_file — the spec-native decoder (LZW incl. KwKwK, disposal 1/2/3, interlace, NETSCAPE loops, the PIL embedded-stream resync), the one-frame-at-a-time player, the Picture delay-paced timer with pause; tests/test_gif.c + the X11 GUI leg (real-encoder fixtures in tests/data/gifgen/); D-019. Static raster + SVG were already present. Fenced: animated WebP/APNG stay future families on the same shape | — |
 | B-15 | GPU on Wayland | **MISSING** | CPU SHM only; GL lane is X11/GLX | D-1 (deferred by design) |
 | B-16 | subsurfaces | **MISSING** | no wl_subsurface | D-2 |
@@ -161,7 +180,7 @@ unaffected):
 | S-6 | xdg_activation + startup notification | **DONE** | fdk_window_activate + fdk_window_activation_token (fdk_window.h's activation section is the reference; 843 exports, +2): Wayland xdg-activation-v1 — the token mint through a PRIVATE event queue + wl_display_roundtrip_queue (reentrancy-safe from inside any handler — the buffer-release pattern applied to a protocol object), set_serial/set_app_id/set_surface attached, activate on the window; the XDG_ACTIVATION_TOKEN launch voucher captured at connect, unset immediately, spent by the first activate (one launch one token). X11 — _NET_ACTIVE_WINDOW with source indication 1 and the LAST USER EVENT timestamp (tracked in the dispatch pump from key/button/motion), bare-X raise+XSetInputFocus fallback; the full startup-notification wire CLIENT-SIDE (no D-Bus, no library): spec-format ids (TIMESTAMP-SCREEN-pid-seq-HOST), the chunked "new:" state on mint (_NET_STARTUP_INFO_BEGIN + continuations, 20 bytes each), _NET_STARTUP_ID on every window created while DESKTOP_STARTUP_ID is held, the one-shot "remove:" at the first show. Tests: X11 — 6 new legs (env capture unset, _NET_STARTUP_ID round-trip, spec-format id + chunked new: reassembled, unique re-mint, one-shot remove:, bare-X XGetInputFocus proof) + the fake-WM _NET_ACTIVE_WINDOW legs (app source, CurrentTime, then a REAL XTEST click's timestamp); Wayland — 5 new sway legs (capture-unset, compositor-minted unique tokens through the private queue, injected click focus state, bogus voucher REFUSED — focus-stealing prevention IS the assertion, and the full TWO-PROCESS launcher flow: held-button serial on the parent's surface, mint, re-exec'd child spends the voucher, sway flips focus to the child); the fake WM now handles MapRequest (windows actually map under it — a real WM's defining duty). D-020 | owner's real-desktop check (TESTING-ON-DESKTOP.md §13) |
 | S-7 | X11 DPI awareness | **DONE** [VERIFIED-CHANGED: audit said missing] | = B-07 (1.4.5) | — |
 | S-8 | AT-SPI2 level 1 | **MISSING** | = B-10 | roles/states/focus over the D-Bus client |
-| S-9 | drag icon + drop targets | **MISSING** (icon) / **PARTIAL** (targets) | = B-13 | both halves |
+| S-9 | drag icon + drop targets | **DONE** | = B-13 (both halves; the rigs' standard on each backend; D-021) | owner's real-desktop check |
 | S-10 | widget residue | **DONE** | = B-18 (the calendar family, D-018) | — |
 | C-1 | portal FileChooser | **MISSING** | = B-09; **CORE** per D-002 | the fallback |
 | C-2 | AT-SPI text interfaces | **MISSING** | = B-10 | after S-8 |
@@ -310,7 +329,7 @@ has an API surface, tests, and docs in the tree):
 | B-10 | **AT-SPI2 interop** — internal a11y tree exists; Orca and other OS screen readers cannot see FDK apps (no D-Bus). Deliberate no-daemon-dependency posture so far. | missing | blind users on real desktops get nothing from FDK apps even though the internal tree is rich | L | none |
 | B-11 | **Idle/screensaver inhibition** — no org.freedesktop.ScreenSaver, no idle-inhibit-unstable-v1. | missing | video players keep the screen blanking mid-play | S–M | none | **[DONE 2026-10-28: S-3 — both mechanisms, the deferred-release lifecycle]** |
 | B-12 | **Cursor shape set** — 2 shapes (arrow/hand) + per-edge resize cursors; Wayland rides cursor-shape-v1 (all names available), X11 uses core `XCreateFontCursor` (no themes). | partial | standard shapes (text beam, wait, crosshair, grab) missing from the public surface | S | none |
-| B-13 | **Drag icons + widget-level drop targets** — DnD is window-level (apps hit-test); no drag icon on either backend. | partial | usable but visibly rough; file managers do manual hit-testing today | S (icon) / M (targets) | none |
+| B-13 | **Drag icons + widget-level drop targets** — DnD is window-level (apps hit-test); no drag icon on either backend. | **DONE** [VERIFIED-CHANGED: S-9 shipped both halves — see the B-13 verified-status row] | usable but visibly rough; file managers do manual hit-testing today | S (icon) / M (targets) | none |
 | B-14 | **Image formats** — stb_image decode (JPEG/PNG/BMP/TGA/PSD/GIF-static/HDR/PIC/PNM) + PNG encode + nanosvg. No animated GIF/WebP/APNG/AVIF; SVG without filters/masks/text. | partial | static raster + SVG solid; animated content missing | S–M | none **[DONE 2026-10-29 — animated GIF shipped (C-4, D-019); WebP/APNG fenced as future families; SVG filters/masks/text unchanged]** |
 | B-15 | **GPU rendering on Wayland** — CPU SHM only; the GL lane is X11/GLX. | partial | Wayland renders software (the toolkit's design center; the GL lane was an X11 perf answer) | L | none |
 | B-16 | **Subsurfaces** — no wl_subsurface; no X11 child-window compositing. | missing | video-in-UI, offscreen compositing overlays | M | none — would ride extension API v2 |
@@ -356,7 +375,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | S-6 | **xdg_activation + startup notification** | B-04 (activation part) | M | **[DONE 2026-10-29 — see the S-6 verified-status row; D-020]** |
 | S-7 | **X11 DPI awareness** (Xft.dpi + RandR scale) | B-07 | M |
 | S-8 | **AT-SPI2 level 1** — roles/names/states/focus/activate over M-7's D-Bus; text interfaces later | B-10 | L |
-| S-9 | **Drag icon + widget-level drop targets** | B-13 | S+M |
+| S-9 | **Drag icon + widget-level drop targets** | B-13 | S+M | **[DONE 2026-10-29 — see the B-13 verified-status row; D-021]** |
 | S-10 | **Widget residue** — date picker, editable combo | B-18 | S each | **[DONE 2026-10-29 — see the B-18 verified-status row]** |
 
 ### COULD — if the MUST/SHOULD tiers close early

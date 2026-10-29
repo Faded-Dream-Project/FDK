@@ -385,6 +385,9 @@ struct fdk_platform_connection {
         fdk_platform_window *hover; /* window entered (LEAVE book-keeping) */
         int version;          /* negotiated min(peer, 5)              */
         int offered;          /* FDK_DRAG_FORMAT mask of the type list */
+        int last_lx, last_ly; /* last Position's window-LOCAL coords (S-9:
+                                  the per-position + drop-time acceptance
+                                  query — XdndDrop itself carries none) */
     } xdnd;
     struct {
         int active;
@@ -398,6 +401,14 @@ struct fdk_platform_connection {
         uint64_t drop_sent_ms;
         void (*on_done)(int status, void *user);
         void *on_done_user;
+        /* Drag icon (1.1.0, S-9): the override-redirect window that
+         * tracks the pointer for the drag's life — X11 has no XDND
+         * icon protocol, so the source paints its own feedback
+         * window (the GTK convention). None when the drag carries no
+         * icon. Created at begin, moved on every motion, destroyed
+         * at finish; shaped by the icon's alpha channel. */
+        Window icon_window;
+        int icon_w, icon_h;
     } xdnd_source;
 
     /* Simple open-addressed lookup from X11 Window ID -> our
@@ -960,6 +971,7 @@ void fdk_x11_window_set_drop_formats(fdk_platform_window *pwindow,
 fdk_result fdk_x11_drag_begin(fdk_platform_window *origin, int formats,
                               const char *text,
                               const char *const *uris, size_t uri_count,
+                              const fdk_u32 *icon, int icon_w, int icon_h,
                               void (*on_done)(int, void *), void *user);
 
 #endif /* FDK_X11_PLATFORM_H */

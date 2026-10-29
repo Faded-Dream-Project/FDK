@@ -266,8 +266,30 @@ struct fdk_platform_connection {
     char *drag_text;           /* owned; TEXT payload for ::send     */
     char *drag_uri_payload;    /* owned; uri-list payload for ::send */
     int drag_drop_performed;
+    /* Same-connection drags (1.1.0, S-9): the payload read inside
+     * fdk_wayland_dnd_device_drop DISPATCHES the queue to serve our
+     * own data_source's ::send — which can also deliver the
+     * compositor's post-drop ::leave / ::cancelled. Those handlers
+     * must not tear the drag state down MID-READ (the offer proxy
+     * would die under the read): drag_drop_active fences them, and
+     * the source-side report they would have fired is DEFERRED (with
+     * its status) to the drop handler's tail, which owns the state
+     * once the read is done. */
+    int drag_drop_active;
+    int drag_deferred_report;  /* a source-side end event arrived    */
+    int drag_deferred_status;  /* ... with this fdk_drag_status      */
     void (*drag_on_done)(int status, void *user);
     void *drag_on_done_user;
+    /* Drag icon (1.1.0, S-9): the wl_surface handed to start_drag as
+     * the icon — compositor-owned position/blend for the drag's
+     * life. Destroyed at drag end (the wl_data_source destroyed /
+     * cancelled / finished path): surface first, one roundtrip (the
+     * compositor releases its reference), then the buffer. The SHM
+     * mapping is already gone at creation (the cursor-upload rule:
+     * the server keeps its own mapping of the pool). NULL when the
+     * drag carries no icon. */
+    struct wl_surface *drag_icon;
+    struct wl_buffer *drag_icon_buffer;
 
     /* Bound from the seat's capabilities (wayland_seat.c). May be
      * NULL if the seat genuinely has no keyboard/pointer/touch —
@@ -663,6 +685,8 @@ void fdk_wayland_window_set_drop_formats(fdk_platform_window *pwindow,
 fdk_result fdk_wayland_drag_begin(fdk_platform_window *origin, int formats,
                                   const char *text,
                                   const char *const *uris, size_t uri_count,
+                                  const fdk_u32 *icon, int icon_w,
+                                  int icon_h,
                                   void (*on_done)(int, void *), void *user);
 fdk_result fdk_wayland_clipboard_set_text(fdk_platform_connection *conn,
                                            const char *text);

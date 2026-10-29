@@ -977,3 +977,84 @@ tokens are one-shot by specification); the X11 SN feedback loop is
 emission-only (no listener for _NET_STARTUP_INFO replies — no WM
 requires one); AT-SPI-style activation semantics (S-8's territory)
 are untouched.
+
+## D-021 — drag icons + widget-level drop targets: per-position acceptance, the GTK-shaped X11 icon window, the self-drag fence (S-9 / B-13)
+
+2026-10-29. DnD was window-level with no icon on either backend —
+"usable but visibly rough; file managers do manual hit-testing
+today". Both halves close as one public shape (fdk_dnd.h):
+
+**1. Acceptance became PER-POSITION, asked of the core.** The
+backends no longer read the window's format mask directly at their
+acceptance sites — they call fdk__core_drag_accepts_at
+(platform_internal.h), which resolves the fdk_window, hit-tests the
+widget tree, and walks UP from the deepest hit widget: the first
+registered drop target (fdk_widget_set_drop_target) owns the
+position, and where no target owns it the WINDOW's mask applies —
+the pre-S-9 rule, byte-identically, for windows that never register
+targets. X11 re-evaluates at every XdndPosition (the Status reply
+the source's cursor feedback rides); Wayland re-evaluates at every
+data_device motion AND refreshes wl_data_offer.accept — the request
+is DESIGNED for exactly that ("sent by the target during a drag,
+when the pointer moves"). The scoped delivery (fdk_widget_set_drag_
+callback) synthesizes ENTER/LEAVE at target boundaries; the window
+callback still sees every drag event (additive, not replacement).
+The stored target is verified against the LIVE tree before every
+use — a destroyed target's LEAVE is dropped, by construction (its
+memory is freed; only address comparison against live nodes is
+safe).
+
+**2. The X11 icon is a window, the Wayland icon is the protocol's
+own surface.** XDND has no icon protocol; the dragging client paints
+its own feedback — an override-redirect window the size of the icon
+tracking the pointer at the GTK hotspot offset (up-right), moved on
+every motion the drag consumes, destroyed at every finish path.
+Alpha shapes it (XShapeCombineRectangles from >= 0x80 runs; the S-4
+machinery) so transparent icons are not black boxes on depth-24
+screens. The SOURCE's own target walk skips it (not optional: the
+icon sits AT the pointer — without the skip every icon'd drag would
+find itself). Wayland passes the icon surface to start_drag itself:
+ARGB8888 into a dedicated SHM pool (the cursor-upload shape), an
+empty input region, committed BEFORE start_drag, destroyed (surface
+→ roundtrip → buffer) at drag end.
+
+**3. Same-connection drags are first-class — and were BROKEN twice.**
+An app dragging between its OWN windows is one process on both ends
+of the wire: the wl_data_source ::send that fills the drop's read
+pipe is addressed to the dragging client itself. (a) The read loop
+now polls the DISPLAY fd beside the pipe and dispatches through the
+canonical helper — a pipe-only poll stares at an empty pipe while
+the ::send sits in the kernel buffer. (b) The post-drop ::leave /
+::cancelled the compositor sends would tear the drag state down
+MID-READ (the offer proxy freed under the read — the crash the
+first cut of this hit): the drag_drop_active fence defers the
+source-side report to the drop handler's tail, which owns the state
+once the read is done.
+
+**4. The EOF fix (found by the same leg, pre-existing):** the read
+loop held ITS OWN pipe write-end open for the whole read, so EOF
+could never arrive — every Wayland drop read sat out its full
+250 ms budget with the complete payload already buffered (the WARN
+was in every prior rig log). Our write end closes at the receive
+request now; the writer's close — external peer's or our own ::send
+handler's — is the only close left, and EOF actually happens.
+
+**5. The X11 drop event finally carries a position.** XdndDrop has
+no coordinates; the receiver records the last Position's
+window-local station and the DROP event (and the drop-time
+acceptance re-query) uses it. Before S-9 the event's position was
+silently (0,0) — nothing could notice; the widget routing
+hit-tests it, so it is now the truth. The same fix class: the
+receiver's XQueryPointer for modifiers used to OVERWRITE the
+translated message coordinates — synthetic rig sources never move
+the real pointer, so the drag position was wherever the pointer
+idled.
+
+Fences: fdk_drag_begin (the v1 entry point) is the iconless wrapper
+— the ABI never moved; icons clamp to 256 and nearest-neighbor
+downscale in the frontend so both backends receive one contract.
+The X11 rig lesson: xtest_driver's startup self-check warped the
+pointer to (11,22) on EVERY invocation — mid-drag, that retargets
+the drag to wherever the warp lands (the enter/leave churn + the
+release on the wrong window); the check is now opt-in
+(XTEST_SELFCHECK=1), the extension query alone proving XTEST works.

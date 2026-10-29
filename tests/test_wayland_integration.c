@@ -397,6 +397,78 @@ static struct {
     char text[256];
 } wl_dnd_rx;
 
+/* S-9: the widget-level drop-target counters (the zone's scoped
+ * callback) + the drag-icon live counter (the internal seam). */
+static struct {
+    int enters, motions, leaves, drops;
+    size_t uri_count;
+    char uris[2][512];
+    char text[256];
+} wl_zone_rx;
+extern int fdk__wl_drag_icon_live;
+
+static void wl_zone_drag_cb(fdk_widget *w, fdk_event_type type,
+                            const fdk_drag_event *ev, void *user) {
+    (void)w; (void)user;
+    switch (type) {
+    case FDK_EVENT_DRAG_ENTER: wl_zone_rx.enters++; break;
+    case FDK_EVENT_DRAG_MOTION: wl_zone_rx.motions++; break;
+    case FDK_EVENT_DRAG_LEAVE: wl_zone_rx.leaves++; break;
+    case FDK_EVENT_DRAG_DROP:
+        wl_zone_rx.drops++;
+        wl_zone_rx.uri_count = ev->uri_count;
+        for (size_t i = 0; i < ev->uri_count && i < 2; i++) {
+            snprintf(wl_zone_rx.uris[i], sizeof(wl_zone_rx.uris[i]),
+                     "%s", ev->uris[i]);
+        }
+        if (ev->text != NULL) {
+            snprintf(wl_zone_rx.text, sizeof(wl_zone_rx.text), "%s",
+                     ev->text);
+        }
+        break;
+    default: break;
+    }
+}
+
+/* S-9: the FDK-source drag-with-icon leg's arm state (the
+ * press-then-motion shape every backend documents). */
+static int g_wl_icon_drag_armed;
+static int g_wl_icon_drag_started;
+static int g_wl_icon_drag_reported;
+static fdk_drag_status g_wl_icon_drag_status;
+
+static void wl_icon_drag_done(fdk_drag_status status, void *user) {
+    (void)user;
+    g_wl_icon_drag_status = status;
+    g_wl_icon_drag_reported = 1;
+}
+
+static void wl_icon_src_event(fdk_window *w, const fdk_event_data *ev,
+                              void *user) {
+    (void)user;
+    if (ev->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        g_wl_icon_drag_armed = 1;
+    } else if (ev->type == FDK_EVENT_POINTER_MOTION &&
+               g_wl_icon_drag_armed) {
+        g_wl_icon_drag_armed = 0;
+        static fdk_u32 disc[48 * 32];
+        for (int y = 0; y < 32; y++) {
+            for (int x = 0; x < 48; x++) {
+                int dx = x - 24, dy = y - 16;
+                disc[(size_t)y * 48 + (size_t)x] =
+                    (dx * dx + dy * dy) <= 225 ? 0xFF3366AAu
+                                               : 0x00000000u;
+            }
+        }
+        const char *uris[2] = {"/etc/hostname", "/etc/os-release"};
+        fdk_result r = fdk_drag_begin_ex(
+            w, FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST,
+            "FDK icon drag", uris, 2, disc, 48, 32,
+            wl_icon_drag_done, NULL);
+        g_wl_icon_drag_started = fdk_ok(r);
+    }
+}
+
 static void wl_dnd_rx_event(fdk_window *w, const fdk_event_data *ev,
                             void *user) {
     (void)w; (void)user;
@@ -1838,11 +1910,11 @@ int main(void) {
                     wayland_inject("down 1");
                     pump_and_paint(ctx, win, 500);
 
-                    char tok[512];
+                    char launch_tok[512];
                     assert(fdk_ok(fdk_window_activation_token(
-                        win, tok, sizeof tok)));
+                        win, launch_tok, sizeof launch_tok)));
 
-                    setenv("XDG_ACTIVATION_TOKEN", tok, 1);
+                    setenv("XDG_ACTIVATION_TOKEN", launch_tok, 1);
                     setenv("FDK_WL_ACT_CHILD", "1", 1);
                     int child_rc = system("/proc/self/exe > /dev/null 2>&1"
                                           " </dev/null");
@@ -2337,12 +2409,37 @@ int main(void) {
             fdk_window_options dopts = { .title = "FDK drop target",
                                          .width = 300, .height = 200 };
             assert(fdk_ok(fdk_window_create(ctx, &dopts, &dw)));
-            fdk_window_set_drop_formats(
-                dw, FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST);
+            /* S-9: the window mask is TEXT ONLY now — the URI half
+             * moved to the ZONE widget below, so the per-position
+             * acceptance is what lets the files drag land at all
+             * (over the zone). The fallback region still takes text. */
+            fdk_window_set_drop_formats(dw, FDK_DRAG_FORMAT_TEXT);
             fdk_widget *droot = NULL;
             assert(fdk_ok(fdk_window_get_root(dw, &droot)));
             fdk_widget_set_background(droot,
                                       (fdk_color){0.15f, 0.35f, 0.2f, 1.0f});
+            /* The zone: a drop-target widget covering the upper 2/3
+             * (the interop drag releases at window-local ~(150,100),
+             * inside it), accepting files. */
+            fdk_font *dfont = fdk_font_load(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14);
+            fdk_widget *dzone = NULL;
+            if (dfont != NULL) {
+                assert(fdk_ok(fdk_frame_create(droot, dfont,
+                                               "files zone", &dzone)));
+                fdk_widget_arrange(dzone, (fdk_rect){10, 10, 280, 150});
+                fdk_widget_set_background(
+                    dzone, (fdk_color){0.25f, 0.45f, 0.25f, 1.0f});
+                assert(fdk_ok(fdk_widget_set_drop_target(
+                    dzone, FDK_DRAG_FORMAT_URI_LIST)));
+                assert(fdk_ok(fdk_widget_set_drag_callback(
+                    dzone, wl_zone_drag_cb, NULL)));
+            } else {
+                /* No font: the window-level TEXT mask alone; the
+                 * zone legs below skip. */
+                fdk_window_set_drop_formats(
+                    dw, FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST);
+            }
             /* CSD so the surface sits exactly at the container's
              * (100,60) — no sway titlebar offset. */
             assert(fdk_ok(fdk_window_set_decorated(dw, true)));
@@ -2429,6 +2526,19 @@ int main(void) {
             assert(wl_dnd_rx.uri_count == 2);
             assert(strcmp(wl_dnd_rx.uris[0], "/etc/hostname") == 0);
             assert(strstr(src_out, "WL-SRC: send text/uri-list") != NULL);
+            /* S-9: the zone's scoped delivery — the drop position is
+             * inside the zone, so the widget callback saw the whole
+             * scoped stream and the SAME decoded payload. */
+            if (dzone != NULL) {
+                assert(wl_zone_rx.enters >= 1);
+                assert(wl_zone_rx.drops == 1);
+                assert(wl_zone_rx.uri_count == 2);
+                assert(strcmp(wl_zone_rx.uris[0], "/etc/hostname") == 0);
+                printf("[ok] wayland dnd widget targets: files over "
+                       "the zone -> scoped ENTER/DROP to the widget "
+                       "(per-position acceptance let a URI drag land "
+                       "on a TEXT-only window)\n");
+            }
             /* HONEST LIMITATION (wlroots 0.18): the drop is delivered,
              * the payload served, and FDK's protocol tail is clean
              * (receive -> finish -> destroy, protocol-trace verified
@@ -2445,7 +2555,100 @@ int main(void) {
                    "receive+finish+destroy protocol-clean\n");
 
             (void)pclose(src);
+
+            /* ---- S-9: the FDK-SOURCE drag with an icon ------------
+             *
+             * FDK as the dragging client this time: an injected
+             * press+motion on an FDK window arms fdk_drag_begin_ex
+             * with a 48x32 icon, the drag crosses onto the drop
+             * target (the zone takes its uri-list), and the release
+             * completes the transfer. Asserted: the icon surface is
+             * LIVE during the drag (the internal counter seam) and
+             * GONE after; the drag reports exactly once; the
+             * connection stays healthy (a protocol error on the icon
+             * surface would kill it); the zone receives the drop
+             * (which also proves the wl_data_offer.accept refresh —
+             * the drag entered over the zone from the start).
+             * wlroots' post-drop ::cancelled-instead-of-::finished
+             * quirk is honored (the documented wlroots 0.18 note). */
+            {
+                fdk_window *sw = NULL;
+                fdk_window_options sopts = { .title = "FDK icon src",
+                                             .width = 200,
+                                             .height = 100 };
+                assert(fdk_ok(fdk_window_create(ctx, &sopts, &sw)));
+                fdk_widget *sroot = NULL;
+                assert(fdk_ok(fdk_window_get_root(sw, &sroot)));
+                fdk_widget_set_background(
+                    sroot, (fdk_color){0.5f, 0.3f, 0.1f, 1.0f});
+                fdk_window_show(sw);
+                pump_and_paint(ctx, sw, 500);
+
+                /* The icon: the disc the arm callback mints
+                 * (wl_icon_src_event builds the same 48x32 disc as
+                 * the X11 suite's leg). */
+
+                memset(&wl_dnd_rx, 0, sizeof(wl_dnd_rx));
+                memset(&wl_zone_rx, 0, sizeof(wl_zone_rx));
+                g_wl_icon_drag_armed = 0;
+                g_wl_icon_drag_started = 0;
+                g_wl_icon_drag_reported = 0;
+                g_wl_icon_drag_status = FDK_DRAG_FAILED;
+                fdk_window_set_event_callback(sw, wl_icon_src_event,
+                                              NULL);
+
+                /* The source window floats at (100,60)?? — the rig
+                 * pins org.fdk.test windows there, but the DROP
+                 * TARGET also sits there. Float order: the LAST
+                 * created floats on top; sway stacks them at the
+                 * same spot. Press on the SOURCE (top of stack). */
+                assert(fdk__wl_drag_icon_live == 0);
+                wayland_inject("move 200 120"); /* over sw (top) */
+                pump_and_paint(ctx, sw, 300);
+                wayland_inject("down 1");
+                pump_and_paint(ctx, sw, 200);
+                wayland_inject("move 210 130"); /* motion arms drag */
+                pump_and_paint(ctx, sw, 300);
+                assert(g_wl_icon_drag_started);
+                assert(fdk__wl_drag_icon_live == 1);
+
+                /* Cross onto the drop target: both float at (100,60);
+                 * the target (created FIRST) is BELOW the source in
+                 * the stack, so hide the source to expose it. */
+                fdk_window_hide(sw);
+                pump_and_paint(ctx, dw, 300);
+                wayland_inject("move 250 160"); /* over dw's zone */
+                pump_and_paint(ctx, dw, 400);
+                wayland_inject("up 1");
+                for (int i = 0; i < 40 && !g_wl_icon_drag_reported;
+                     i++) {
+                    pump_and_paint(ctx, dw, 100);
+                }
+                assert(g_wl_icon_drag_reported);
+                assert(g_wl_icon_drag_status == FDK_DRAG_SUCCEEDED ||
+                       g_wl_icon_drag_status == FDK_DRAG_CANCELLED);
+                assert(fdk__wl_drag_icon_live == 0);
+                /* The zone took the drop (the per-position acceptance
+                 * refreshed the offer accept per motion). */
+                assert(wl_zone_rx.drops == 1);
+                assert(wl_zone_rx.uri_count == 2);
+                /* Health: the source window still paints — the
+                 * connection survived the icon surface's lifetime. */
+                fdk_window_show(sw);
+                assert(fdk_ok(fdk_window_paint(sw)));
+                pump_and_paint(ctx, sw, 200);
+                printf("[ok] wayland drag icon: start_drag carried the "
+                       "icon surface (live during, destroyed after), "
+                       "drag completed, zone received the drop, "
+                       "connection healthy\n");
+
+                fdk_window_destroy(sw);
+            }
+
             fdk_window_destroy(dw);
+            if (dfont != NULL) {
+                fdk_font_destroy(dfont);
+            }
             wayland_injector_stop();
             }
         } else {

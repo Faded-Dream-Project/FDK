@@ -694,6 +694,15 @@ static fdk_widget *hit_test(fdk_widget *root, fdk_pointf pos) {
     return hit_test_rec(root, 0.0f, 0.0f, pos);
 }
 
+/* S-9 / B-13: the drag routing's tree query — the deepest widget at a
+ * window-local position (root-relative like every pointer event),
+ * NULL outside the root. Exposed internally for window.c's
+ * fdk__core_drag_accepts_at and the scoped drag delivery; the same
+ * eligibility rule as pointer routing (visible + enabled subtrees). */
+fdk_widget *fdk__widget_at(fdk_widget *root, fdk_pointf pos) {
+    return hit_test(root, pos);
+}
+
 /* ---- lifecycle ---- */
 
 /* ---- Root registry ----
@@ -1086,6 +1095,37 @@ fdk_result fdk_widget_set_tooltip(fdk_widget *widget, const char *text) {
         }
         memcpy(widget->tooltip, text, len);
     }
+    return FDK_OK;
+}
+
+/* ---- Widget-level drop targets (1.1.0, S-9 / B-13) --------------------
+ *
+ * Pure registration state — the ROUTING lives in window.c's drag
+ * dispatch (hit-test + ancestor walk), and the ACCEPTANCE it drives
+ * lives in fdk__core_drag_accepts_at (same file). No widget-side
+ * geometry or event machinery: a target is data on the tree. */
+
+fdk_result fdk_widget_set_drop_target(fdk_widget *widget, int formats) {
+    if (widget == NULL ||
+        formats & ~(FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    widget->drag_formats = formats;
+    return FDK_OK;
+}
+
+int fdk_widget_get_drop_target(const fdk_widget *widget) {
+    return (widget != NULL) ? widget->drag_formats : 0;
+}
+
+fdk_result fdk_widget_set_drag_callback(fdk_widget *widget,
+                                        fdk_widget_drag_fn on_drag,
+                                        void *user) {
+    if (widget == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    widget->drag_fn = on_drag;
+    widget->drag_user = user;
     return FDK_OK;
 }
 

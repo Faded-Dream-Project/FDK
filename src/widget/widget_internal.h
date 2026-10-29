@@ -31,6 +31,7 @@
 #include "fdk/fdk_widget.h"
 #include "fdk/fdk_text.h" /* 1.4.11: fdk_span (tooltip/label/button markup) */
 #include "fdk/fdk_theme.h" /* 1.4.16: background_token (token-following bg) */
+#include "fdk/fdk_dnd.h"  /* 1.1.0, S-9: drag_formats/drag_fn fields */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -129,6 +130,16 @@ struct fdk_widget {
     char *tooltip;
     fdk_span *tooltip_spans;   /* owned; NULL when the tip is plain */
     size_t tooltip_span_count;
+
+    /* Widget-level drop target (1.1.0, S-9 / B-13): the accepted
+     * fdk_drag_format mask (0 = not a target) and the scoped drag
+     * callback. The window layer's drag routing hit-tests the tree,
+     * walks up from the deepest hit to the first registered target,
+     * and delivers ENTER/MOTION/LEAVE/DROP to ITS callback (the
+     * window callback still sees everything). See fdk_dnd.h. */
+    int drag_formats;
+    fdk_widget_drag_fn drag_fn;
+    void *drag_user;
 
     /* Accessibility overrides (Phase 10): when set, these beat the
      * class descriptor's computed name/description in
@@ -366,6 +377,11 @@ void fdk_widget_root_flush_deferred(fdk_widget *root);
  * every live root's tree in overflow mode. NULL when no roots exist.
  * Iterate with root->root_next. */
 fdk_widget *fdk__widget_roots_head(void);
+
+/* S-9 / B-13 (widget.c): the deepest visible+enabled widget at a
+ * root-relative position — the drag routing's tree query. NULL when
+ * the position is outside the root or the tree is empty. */
+fdk_widget *fdk__widget_at(fdk_widget *root, fdk_pointf pos);
 
 /* Notifies the layout engine that `parent`'s child set (or a child's
  * layout hints) changed — called by the widget core from create /

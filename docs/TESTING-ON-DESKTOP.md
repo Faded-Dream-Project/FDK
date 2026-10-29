@@ -469,3 +469,38 @@ Expectations, X11 (Openbox):
   out — the visible half of the protocol on a real WM.
 
 **Status: DONE (should work; owner verification pending).**
+
+## 14. Drag icons + widget drop targets on your desktop (S-9 — needs your eyes)
+
+What the rigs proved: the icon window's geometry/shape/tracking/
+destruction through a real X11 drag, the per-position acceptance
+(XDND Status + wl_data_offer.accept re-evaluated per motion), the
+scoped widget delivery, and — on sway — the FDK-source drag with
+icon end to end, including the same-connection payload fix. What
+only your desktop shows is the REAL compositor's icon compositing
+and a real WM's take on the override-redirect icon window.
+
+```sh
+# Any FDK app dragging with an icon (fdk_drag_begin_ex): watch the
+# icon follow the cursor — on X11 it is a real window (xwininfo can
+# find it), on Wayland compositor-blended.
+```
+
+Expectations:
+
+- The icon tracks the pointer at the up-right hotspot offset (the
+  GTK convention), never lags perceptibly, and vanishes the instant
+  the drag ends (drop OR cancel — Esc too).
+- Rounded/transparent icons are SHAPED (no black box) on X11; on
+  Wayland the alpha blends against whatever is under it.
+- A widget registered via `fdk_widget_set_drop_target` gets drops
+  only within its bounds; the source's cursor feedback changes as
+  the pointer crosses between the zone and the rest of the window
+  (per-position acceptance) — that flip is the feature.
+- Your WM may or may not keep the X11 icon window above other
+  windows (override-redirect stacking is WM-dependent; openbox
+  raises it, some WMs leave ordering alone — the icon follows the
+  pointer regardless, only z-fighting with a window at the exact
+  hotspot would hide it).
+
+**Status: DONE (should work; owner verification pending).**

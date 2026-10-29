@@ -808,6 +808,17 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **Drag icons + widget-level drop targets: SHIPPED (1.1.0, S-9)**
+  — `fdk_drag_begin_ex` (the icon: Wayland start_drag's own surface /
+  X11's override-redirect tracker window, alpha-shaped) +
+  `fdk_widget_set_drop_target`/`_get_drop_target`/`_set_drag_callback`
+  (scoped ENTER/MOTION/LEAVE/DROP; per-position acceptance on both
+  backends — XDND Status and wl_data_offer.accept re-evaluate per
+  position; the window callback still sees everything). Same-
+  connection drags fixed on Wayland (the ::send self-serve read +
+  the drag_drop_active fence); the 250 ms EOF wart and the X11
+  DROP-event position closed. 847 exports. D-021; rigs: 7 X11 legs
+  + 2 sway legs incl. the FDK-source drag-with-icon end to end.
 - **Window activation + startup notification: SHIPPED (1.1.0, S-6)**
   — `fdk_window_activate` (Wayland xdg-activation-v1 through a
   compositor token; X11 `_NET_ACTIVE_WINDOW` with the live

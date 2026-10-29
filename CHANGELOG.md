@@ -14,6 +14,45 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — drag icons + widget-level drop targets (S-9 / B-13)
+
+- **`fdk_drag_begin_ex`** (fdk_dnd.h): `fdk_drag_begin` with a drag
+  ICON — width x height ARGB8888 pixels (the `fdk_window_set_icon`
+  packing), clamped to 256, riding the drag itself. Wayland: the
+  protocol's own icon surface in `wl_data_device.start_drag`
+  (compositor-positioned, alpha-blended). X11, where XDND has no
+  icon protocol: a small override-redirect window tracking the
+  pointer at the GTK hotspot offset for the drag's life, shaped by
+  the icon's alpha channel so transparent icons are not black boxes.
+- **`fdk_widget_set_drop_target` + `fdk_widget_get_drop_target` +
+  `fdk_widget_set_drag_callback`** (fdk_dnd.h): widget-level drop
+  targets. The window's drag routing hit-tests the tree and walks up
+  from the deepest hit widget — the first registered target owns the
+  position (a registered CONTAINER receives drops anywhere in its
+  subtree); the scoped callback sees ENTER / MOTION / LEAVE / DROP
+  with synthesized boundary transitions. The window-level callback
+  still sees every drag event (additive, not a replacement).
+- **Per-position acceptance on both backends**: the XDND Status
+  reply and the `wl_data_offer.accept` refresh re-evaluate at every
+  position, so the source's cursor feedback reflects the real answer
+  under the pointer (GTK's behavior). Windows that never register
+  widget targets behave exactly as before.
+- Fixed (found by the S-9 rigs): SAME-CONNECTION drags — an app
+  dragging between its own windows — now work on Wayland (the drop
+  read serves the dragging client's own `::send` through the
+  canonical dispatch, with a fence against mid-read teardown);
+  every Wayland drop read used to sit out its full 250 ms budget
+  because our own pipe write-end made EOF impossible (closed at the
+  receive request now); the X11 DRAG_DROP event carried (0,0) as its
+  position since v1 (now the last XdndPosition's coordinates).
+- Tests: 7 new X11 legs (the icon window's existence, hotspot
+  offset, alpha-derived shape, tracking, and destruction through a
+  real drag; the zone's scoped delivery; the fallback region's
+  acceptance; boundary transitions) + 2 new sway legs (the
+  per-position zone proof; the FDK-source drag with icon end to
+  end). 843 -> 847 exports. docs/DECISIONS.md D-021; owner steps
+  TESTING-ON-DESKTOP.md §14.
+
 ### Added — window activation + startup notification (S-6 / B-04)
 
 - **`fdk_window_activate`** (fdk_window.h): ask the compositor/WM to

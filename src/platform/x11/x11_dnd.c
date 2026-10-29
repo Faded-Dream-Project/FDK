@@ -44,8 +44,11 @@
 #include "core/log_internal.h"
 
 #include <X11/Xatom.h>
+#include <X11/Xutil.h>          /* XCreateImage / XPutPixel (S-9 icon) */
+#include <X11/extensions/shape.h> /* XShapeCombine* (S-9 icon alpha) */
 #include <errno.h>
 #include <poll.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -303,26 +306,46 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
          * those layouts (1.3.0). */
         int rx = (fdk_i16)((msg->data.l[2] >> 16) & 0xFFFF);
         int ry = (fdk_i16)(msg->data.l[2] & 0xFFFF);
+        /* The MESSAGE's coordinates are the drag's position (S-9:
+        * this is what per-position acceptance must query — synthetic
+        * rig sources never move the REAL pointer, and even a real
+        * peer's pointer can lag the message stream). Kept in their
+        * own variables: the modifier query below used to overwrite
+        * lx/ly with the live pointer's position, silently moving the
+        * reported drag position (and now the acceptance query) to
+        * wherever the pointer happened to idle. */
         int lx = 0, ly = 0;
         Window child = None;
         XTranslateCoordinates(conn->display, conn->root,
                               pwindow->xwindow, rx, ry, &lx, &ly,
                               &child);
         /* The server-side modifier truth for drag.modifiers — same
-         * round-trip family XTranslateCoordinates already pays. */
+         * round-trip family XTranslateCoordinates already pays. The
+         * pointer coordinates it reports are deliberately DISCARDED
+         * (separate out-params): the drag's position is the
+         * message's, full stop. */
         fdk_u32 drag_mods = 0;
         {
             Window rret = None, cret = None;
-            int rx_now = 0, ry_now = 0;
+            int px_now = 0, py_now = 0, wx_now = 0, wy_now = 0;
             unsigned int state = 0;
             if (XQueryPointer(conn->display, pwindow->xwindow, &rret,
-                              &cret, &rx_now, &ry_now, &lx, &ly,
-                              &state)) {
+                              &cret, &px_now, &py_now,
+                              &wx_now, &wy_now, &state)) {
                 drag_mods = fdk__x11_translate_modifiers(state);
             }
         }
-        int accepted =
-            conn->xdnd.offered & pwindow->drop_formats;
+        /* Per-position acceptance (1.1.0, S-9): the widget tree's
+         * drop targets own the answer under the pointer — the core
+         * layer's query (hit-test + ancestor walk; window mask when
+         * no target owns the position, the pre-S-9 rule). Recorded
+         * for the drop-time re-query: XdndDrop carries no position
+         * of its own. */
+        conn->xdnd.last_lx = lx;
+        conn->xdnd.last_ly = ly;
+        int accepted = fdk__core_drag_accepts_at(
+            conn->dispatch_user_data, pwindow, conn->xdnd.offered,
+            lx, ly);
         conn->xdnd.dest_window = pwindow->xwindow;
         xdnd_send_status(conn, conn->xdnd.source, accepted != 0);
         if (accepted == 0) {
@@ -372,7 +395,13 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
     if (msg->message_type == conn->atom_xdnd_drop && pwindow != NULL &&
         conn->xdnd.source != None) {
         unsigned long timestamp = (unsigned long)msg->data.l[2];
-        int accepted = conn->xdnd.offered & pwindow->drop_formats;
+        /* Drop-time acceptance: XdndDrop has no coordinates — the
+         * last Position's window-local position is the pointer's
+         * last known station (the Status replies that matter were
+         * answered against it). */
+        int accepted = fdk__core_drag_accepts_at(
+            conn->dispatch_user_data, pwindow, conn->xdnd.offered,
+            conn->xdnd.last_lx, conn->xdnd.last_ly);
         if (accepted == 0 || conn->xdnd.hover != pwindow) {
             /* Dropped on a window that never entered acceptance: the
              * honest protocol answer is Finished(no-drop). */
@@ -464,7 +493,9 @@ static void xdnd_send_finished_ok(fdk_platform_connection *conn,
 static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
                                 fdk_platform_window *pwindow,
                                 unsigned long timestamp) {
-    int accepted = conn->xdnd.offered & pwindow->drop_formats;
+    int accepted = fdk__core_drag_accepts_at(
+        conn->dispatch_user_data, pwindow, conn->xdnd.offered,
+        conn->xdnd.last_lx, conn->xdnd.last_ly);
 
     /* Preference order: files over text (a file drop IS text, but
      * the app registered URI_LIST because it wants paths). */
@@ -523,6 +554,12 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
         ev.drag.offered_formats = conn->xdnd.offered;
         ev.drag.accepted_formats = accepted;
         ev.drag.modifiers = drop_modifiers_now(conn, pwindow);
+        /* S-9: the drop's position — the last Position's window-local
+         * station (XdndDrop carries none). Before S-9 this was
+         * silently (0,0), which nothing could notice; the widget
+         * routing hit-tests it, so it is now the truth. */
+        ev.drag.position.x = (fdk_f32)conn->xdnd.last_lx;
+        ev.drag.position.y = (fdk_f32)conn->xdnd.last_ly;
         conn->dispatch(pwindow, &ev, conn->dispatch_user_data);
         xdnd_send_finished_ok(conn, pwindow);
         conn->xdnd.source = None;
@@ -560,6 +597,9 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
     ev.drag.uri_count = uri_count;
     /* Drop-time modifiers: the shared server query. */
     ev.drag.modifiers = drop_modifiers_now(conn, pwindow);
+    /* S-9: the drop's position (see the empty-gesture path above). */
+    ev.drag.position.x = (fdk_f32)conn->xdnd.last_lx;
+    ev.drag.position.y = (fdk_f32)conn->xdnd.last_ly;
     conn->dispatch(pwindow, &ev, conn->dispatch_user_data);
 
     fdk__dnd_free_uri_list(uris, uri_count);
@@ -572,6 +612,185 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
     conn->xdnd.source = None;
 }
 
+/* ---- the drag icon window (1.1.0, S-9) -------------------------------------
+ *
+ * X11 has no XDND icon protocol — the dragging client paints its own
+ * feedback: an override-redirect window the size of the icon that
+ * tracks the pointer for the drag's life (the classic GTK approach;
+ * the cursor itself stays the source's own, and the icon floats
+ * above-right of the hotspot exactly where GTK puts it). The icon's
+ * ALPHA channel shapes the window (pixels < 0x80 are outside the
+ * bounding shape) so rounded and transparent icons are not black
+ * boxes on depth-24 screens. The window carries no event mask and
+ * the pointer is grabbed anyway — nothing routes to it; the SOURCE's
+ * own target walk (xdnd_window_under) skips it explicitly, exactly
+ * as it skips the clip_helper. */
+static void xdnd_icon_destroy(fdk_platform_connection *conn) {
+    if (conn->xdnd_source.icon_window != None) {
+        if (!conn->display_dead) {
+            XDestroyWindow(conn->display, conn->xdnd_source.icon_window);
+            XFlush(conn->display);
+        }
+        conn->xdnd_source.icon_window = None;
+        conn->xdnd_source.icon_w = 0;
+        conn->xdnd_source.icon_h = 0;
+    }
+}
+
+static int xdnd_icon_create(fdk_platform_connection *conn,
+                            const fdk_u32 *icon, int w, int h) {
+    Display *dpy = conn->display;
+    int scr = DefaultScreen(dpy);
+    Window root = RootWindow(dpy, scr);
+
+    /* Where the pointer is RIGHT NOW (the drag just began): the icon
+     * parks above-right of the hotspot, clamped to the screen. */
+    Window junk_root = None, junk_child = None;
+    int px = 0, py = 0, wx = 0, wy = 0;
+    unsigned int mask = 0;
+    if (!XQueryPointer(dpy, root, &junk_root, &junk_child, &px, &py,
+                       &wx, &wy, &mask)) {
+        return 0;
+    }
+    int ix = px + 1;
+    int iy = py - h - 1;
+    if (ix + w > DisplayWidth(dpy, scr)) {
+        ix = DisplayWidth(dpy, scr) - w;
+    }
+    if (ix < 0) {
+        ix = 0;
+    }
+    if (iy < 0) {
+        iy = py + 1; /* no room above: below the pointer instead */
+    }
+
+    XSetWindowAttributes attr;
+    memset(&attr, 0, sizeof attr);
+    attr.override_redirect = True;
+    attr.save_under = False;
+    attr.backing_store = NotUseful;
+    attr.event_mask = 0;
+    Window iw = XCreateWindow(
+        dpy, root, ix, iy, (unsigned int)w, (unsigned int)h, 0,
+        (int)DefaultDepth(dpy, scr), InputOutput,
+        DefaultVisual(dpy, scr), CWOverrideRedirect | CWSaveUnder |
+                                     CWBackingStore | CWEventMask,
+        &attr);
+    if (iw == None) {
+        return 0;
+    }
+
+    /* Paint the icon: one XPutImage over the whole window, ARGB
+     * unpacked through XPutPixel (the visual's masks are respected;
+     * alpha is dropped on depth-24 — the SHAPE below is what carries
+     * transparency). */
+    {
+        Visual *vis = DefaultVisual(dpy, scr);
+        /* XCreateImage's depth parameter is unsigned int — the
+         * variable is born unsigned, no conversion warning. */
+        unsigned int xdepth = (unsigned int)DefaultDepth(dpy, scr);
+        XImage *img = XCreateImage(dpy, vis, xdepth, ZPixmap, 0, NULL,
+                                   (unsigned int)w, (unsigned int)h,
+                                   32, 0);
+        if (img == NULL) {
+            XDestroyWindow(dpy, iw);
+            return 0;
+        }
+        /* libX11 requires a client buffer when data == NULL is not
+         * allowed for create; malloc + XDestroyImage frees it. */
+        img->data = malloc((size_t)(img->bytes_per_line) * (size_t)h);
+        if (img->data == NULL) {
+            XDestroyImage(img);
+            XDestroyWindow(dpy, iw);
+            return 0;
+        }
+        int any_clear = 0;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                fdk_u32 p = icon[(size_t)y * (size_t)w + (size_t)x];
+                if ((p >> 24) < 0x80) {
+                    any_clear = 1;
+                }
+                XPutPixel(img, x, y,
+                          (unsigned long)((p & 0x00FFFFFFu)));
+            }
+        }
+        GC gc = XCreateGC(dpy, iw, 0, NULL);
+        XPutImage(dpy, iw, gc, img, 0, 0, 0, 0, (unsigned int)w,
+                  (unsigned int)h);
+        XFreeGC(dpy, gc);
+        XDestroyImage(img);
+
+        /* The alpha shape: run-length rows of opaque pixels into
+         * XShapeCombineRectangles (the S-4 machinery's window form).
+         * All-opaque icons skip the call entirely. */
+        if (any_clear && conn->shape_ok) {
+            XRectangle rects[256];
+            int nrects = 0;
+            for (int y = 0; y < h && nrects < 256; y++) {
+                int run = 0;
+                for (int x = 0; x <= w; x++) {
+                    int opaque =
+                        x < w &&
+                        ((icon[(size_t)y * (size_t)w + (size_t)x] >>
+                          24) >= 0x80);
+                    if (opaque) {
+                        run++;
+                    } else if (run > 0) {
+                        rects[nrects].x = (short)(x - run);
+                        rects[nrects].y = (short)y;
+                        rects[nrects].width = (unsigned short)run;
+                        rects[nrects].height = 1;
+                        nrects++;
+                        run = 0;
+                    }
+                }
+            }
+            if (nrects > 0) {
+                XShapeCombineRectangles(dpy, iw, ShapeBounding, 0, 0,
+                                        rects, nrects, ShapeSet,
+                                        YXBanded);
+            } else {
+                /* Fully transparent icon: an empty bounding shape —
+                 * present but invisible (the caller asked for it). */
+                XShapeCombineRegion(dpy, iw, ShapeBounding, 0, 0,
+                                    XCreateRegion(), ShapeSet);
+            }
+        }
+    }
+
+    XMapWindow(dpy, iw);
+    XRaiseWindow(dpy, iw);
+    XFlush(dpy);
+    conn->xdnd_source.icon_window = iw;
+    conn->xdnd_source.icon_w = w;
+    conn->xdnd_source.icon_h = h;
+    return 1;
+}
+
+/* Moves the icon window with the pointer (the source state machine
+ * calls this on every motion it consumes). */
+static void xdnd_icon_move(fdk_platform_connection *conn, int rx, int ry) {
+    if (conn->xdnd_source.icon_window == None || conn->display_dead) {
+        return;
+    }
+    int w = conn->xdnd_source.icon_w;
+    int h = conn->xdnd_source.icon_h;
+    int scr = DefaultScreen(conn->display);
+    int ix = rx + 1;
+    int iy = ry - h - 1;
+    if (ix + w > DisplayWidth(conn->display, scr)) {
+        ix = DisplayWidth(conn->display, scr) - w;
+    }
+    if (ix < 0) {
+        ix = 0;
+    }
+    if (iy < 0) {
+        iy = ry + 1;
+    }
+    XMoveWindow(conn->display, conn->xdnd_source.icon_window, ix, iy);
+}
+
 /* ---- source ---- */
 
 void fdk_x11_dnd_source_finish(fdk_platform_connection *conn, int status) {
@@ -579,6 +798,7 @@ void fdk_x11_dnd_source_finish(fdk_platform_connection *conn, int status) {
         return;
     }
     conn->xdnd_source.active = 0;
+    xdnd_icon_destroy(conn);
     if (!conn->display_dead) {
         XUngrabPointer(conn->display, CurrentTime);
         XFlush(conn->display);
@@ -622,6 +842,12 @@ static Window xdnd_window_under(fdk_platform_connection *conn, int rx,
         for (int i = (int)nchildren - 1; i >= 0; i--) {
             Window child = children[i];
             if (child == conn->clip_helper) {
+                continue;
+            }
+            /* S-9: our own drag-icon window sits AT the pointer —
+             * skipping it is not optional: without this, every drag
+             * with an icon would find ITSELF as the target. */
+            if (child == conn->xdnd_source.icon_window) {
                 continue;
             }
             int cx = 0, cy = 0;
@@ -696,6 +922,7 @@ int fdk_x11_dnd_source_handle_event(fdk_platform_connection *conn,
         }
         int rx = xevent->xmotion.x_root;
         int ry = xevent->xmotion.y_root;
+        xdnd_icon_move(conn, rx, ry);
         Window target = xdnd_window_under(conn, rx, ry);
         FDK_DEBUG("dnd-src retarget: 0x%lx (old 0x%lx)",
                   (unsigned long)target,
@@ -880,6 +1107,7 @@ void fdk_x11_window_set_drop_formats(fdk_platform_window *pwindow,
 fdk_result fdk_x11_drag_begin(fdk_platform_window *origin, int formats,
                               const char *text,
                               const char *const *uris, size_t uri_count,
+                              const fdk_u32 *icon, int icon_w, int icon_h,
                               void (*on_done)(int, void *), void *user) {
     fdk_platform_connection *conn = origin->conn;
     if (conn->xdnd_source.active) {
@@ -939,6 +1167,15 @@ fdk_result fdk_x11_drag_begin(fdk_platform_window *origin, int formats,
     conn->xdnd_source.drop_pending = 0;
     conn->xdnd_source.on_done = on_done;
     conn->xdnd_source.on_done_user = user;
+    conn->xdnd_source.icon_window = None;
+    conn->xdnd_source.icon_w = 0;
+    conn->xdnd_source.icon_h = 0;
+    /* The icon window (S-9): best-effort by design — a failed
+     * creation logs and the drag proceeds WITHOUT feedback (the
+     * drag's function is the transfer, not the picture). */
+    if (icon != NULL && icon_w > 0 && icon_h > 0) {
+        (void)xdnd_icon_create(conn, icon, icon_w, icon_h);
+    }
     /* The first motion under the grab starts the handshake; nothing
      * sends Enter until the pointer actually moves. */
     return FDK_OK;

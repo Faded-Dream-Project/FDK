@@ -669,12 +669,18 @@ typedef struct fdk_platform_ops {
      * fdk_drag_status value as int. The drag runs INSIDE the normal
      * event dispatch — no nested loop, no blocking; pointer events
      * while the drag is active belong to it. NULL = backend cannot
-     * start drags (the frontend reports FDK_ERR_UNSUPPORTED). */
+     * start drags (the frontend reports FDK_ERR_UNSUPPORTED).
+     * 1.1.0, S-9: the icon triple (icon/icon_w/icon_h — ARGB8888,
+     * fdk_u32 packing, already clamped to 256 by the frontend) rides
+     * the drag; NULL icon = none. The buffer is TEMPORARY — the
+     * backend must finish its own copy (XImage / SHM upload) before
+     * returning; the frontend frees it at return. */
     void (*window_set_drop_formats)(fdk_platform_window *pwindow,
                                     int formats);
     fdk_result (*drag_begin)(fdk_platform_window *origin, int formats,
                              const char *text,
                              const char *const *uris, size_t uri_count,
+                             const fdk_u32 *icon, int icon_w, int icon_h,
                              void (*on_done)(int status, void *user),
                              void *user);
 
@@ -834,5 +840,26 @@ enum {
     FDK_POPUP_CLOSE_COMPOSITOR = 3,    /* Wayland: xdg_popup_done */
     FDK_POPUP_CLOSE_PARENT = 4,        /* the parent's destroy sweep */
 };
+
+/* ---- Per-position drag acceptance (1.1.0, S-9 / B-13) ---------------------
+ *
+ * The backends' acceptance query for a hovering drag, implemented in
+ * the CORE window layer (window.c): hit-test the widget tree at the
+ * window-local position, walk UP from the deepest hit widget to the
+ * first registered drop target (fdk_widget_set_drop_target), and
+ * intersect `offered` with THAT widget's mask — or with the WINDOW's
+ * own mask when no target owns the position (the pre-S-9 rule, so
+ * windows without widget targets behave byte-identically).
+ *
+ * `dispatch_user` is the fdk_context* the backend holds as
+ * conn->dispatch_user_data. Returns the accepted mask (0 = refuse);
+ * a missing window/context answers the pwindow's own mask (the
+ * backend's copy, kept in sync by window_set_drop_formats) — never a
+ * protocol stall. Call this at every acceptance decision site: XDND
+ * Status replies, wl_data_offer.accept, and the drop-time data
+ * reads. */
+int fdk__core_drag_accepts_at(void *dispatch_user,
+                              fdk_platform_window *pwindow,
+                              int offered, int x, int y);
 
 #endif /* FDK_PLATFORM_INTERNAL_H */

@@ -1742,6 +1742,147 @@ static void touch_synthesis_emit(void *user, const fdk_event_data *event) {
     fdk_window_dispatch_event(window, event);
 }
 
+/* ---- Widget-level drag routing + per-position acceptance (S-9) ----------
+ *
+ * The acceptance walk: hit-test the tree at the drag's window-local
+ * position, then walk UP from the deepest hit widget — the first
+ * registered drop target on that chain owns the position (a
+ * registered CONTAINER receives drops anywhere in its subtree). No
+ * target on the chain: the window's own mask (the pre-S-9 rule, so
+ * windows that never register widget targets behave identically). */
+static fdk_widget *drag_target_at(fdk_window *window, fdk_pointf pos) {
+    if (window->root == NULL) {
+        return NULL;
+    }
+    fdk_widget *hit = fdk__widget_at(window->root, pos);
+    for (fdk_widget *w = hit; w != NULL; w = w->parent) {
+        if (w->drag_formats != 0) {
+            return w;
+        }
+    }
+    return NULL;
+}
+
+/* Liveness check for a stored drag target: the pointer is searched
+ * for among the LIVE tree's nodes (never dereferenced if detached —
+ * a destroyed widget's memory is freed, so only address comparison
+ * against live nodes is safe). */
+static bool widget_in_live_tree(fdk_widget *root, fdk_widget *candidate) {
+    if (root == NULL || candidate == NULL) {
+        return false;
+    }
+    if (root == candidate) {
+        return true;
+    }
+    for (size_t i = 0; i < root->child_count; i++) {
+        if (widget_in_live_tree(root->children[i], candidate)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The backends' acceptance query (see platform_internal.h). Runs on
+ * the BACKEND's thread of control but the core's data — the same
+ * single-threaded world every dispatch lives in. */
+int fdk__core_drag_accepts_at(void *dispatch_user,
+                              fdk_platform_window *pwindow,
+                              int offered, int x, int y) {
+    fdk_context *ctx = dispatch_user;
+    if (ctx == NULL || pwindow == NULL) {
+        return 0;
+    }
+    fdk_window *window = fdk_context_find_window_by_pwindow(ctx, pwindow);
+    if (window == NULL) {
+        return 0; /* no core window: nothing to ask, refuse */
+    }
+    fdk_pointf pos = {(fdk_f32)x, (fdk_f32)y};
+    fdk_widget *target = drag_target_at(window, pos);
+    if (target != NULL) {
+        return offered & target->drag_formats;
+    }
+    return offered & window->drop_formats;
+}
+
+/* Scoped delivery: the widget callback with a locally-mutated event
+ * type (ENTER/LEAVE synthesis); the payload itself is the backend's
+ * own event, shared with the window callback (same lifetime). */
+static void deliver_drag_event(fdk_widget *target, fdk_event_type type,
+                               const fdk_event_data *event) {
+    if (target == NULL || target->drag_fn == NULL) {
+        return;
+    }
+    fdk_event_data local = *event;
+    local.type = type;
+    target->drag_fn(target, type, &local.drag, target->drag_user);
+}
+
+/* The routing step itself — called from fdk_window_dispatch_event
+ * for every drag event, BEFORE the window callback (the app still
+ * sees everything; this is additive). ENTER/MOTION recompute the
+ * target and synthesize the scoped transitions; LEAVE/DROP close
+ * the scope. Callbacks may destroy widgets (the liveness walk) or
+ * the WINDOW (the caller re-verifies registration). */
+static void window_route_drag_event(fdk_window *window,
+                                    const fdk_event_data *event) {
+    fdk_event_type t = event->type;
+    if (t != FDK_EVENT_DRAG_ENTER && t != FDK_EVENT_DRAG_MOTION &&
+        t != FDK_EVENT_DRAG_LEAVE && t != FDK_EVENT_DRAG_DROP) {
+        return;
+    }
+
+    /* A stored target may have been destroyed since the last event:
+     * verify liveness BEFORE delivering anything to it. */
+    if (window->drag_target_widget != NULL &&
+        !widget_in_live_tree(window->root, window->drag_target_widget)) {
+        window->drag_target_widget = NULL;
+    }
+
+    if (t == FDK_EVENT_DRAG_ENTER || t == FDK_EVENT_DRAG_MOTION) {
+        fdk_widget *target =
+            drag_target_at(window, event->drag.position);
+        fdk_widget *old = window->drag_target_widget;
+        if (target != old) {
+            /* Crossed a target boundary: the old scope gets its
+             * LEAVE, the new its ENTER. */
+            if (old != NULL && widget_in_live_tree(window->root, old)) {
+                deliver_drag_event(old, FDK_EVENT_DRAG_LEAVE, event);
+            }
+            window->drag_target_widget = target;
+            if (target != NULL) {
+                deliver_drag_event(target, FDK_EVENT_DRAG_ENTER, event);
+            }
+            return;
+        }
+        /* Same scope: forward as MOTION (an ENTER re-delivered as
+         * MOTION when the drag re-entered the same target after a
+         * window-level LEAVE/ENTER pair — the scoped stream stays
+         * meaningful). */
+        if (target != NULL) {
+            deliver_drag_event(target, FDK_EVENT_DRAG_MOTION, event);
+        }
+        return;
+    }
+
+    /* LEAVE (the drag left the window) and DROP (released): close
+     * whatever scope is open. DROP goes to the target that owns the
+     * RELEASE position (recomputed — the pointer may have crossed
+     * targets since the last motion without a further MOTION event
+     * on some backends). */
+    if (t == FDK_EVENT_DRAG_DROP) {
+        fdk_widget *target =
+            drag_target_at(window, event->drag.position);
+        if (target != NULL) {
+            window->drag_target_widget = target;
+            deliver_drag_event(target, FDK_EVENT_DRAG_DROP, event);
+        }
+    } else if (window->drag_target_widget != NULL) {
+        deliver_drag_event(window->drag_target_widget,
+                           FDK_EVENT_DRAG_LEAVE, event);
+    }
+    window->drag_target_widget = NULL;
+}
+
 void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) {
     /* Keep fdk_window_get_size() authoritative without requiring the
      * application to handle FDK_EVENT_WINDOW_CONFIGURE itself just to
@@ -1968,6 +2109,24 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
 
     if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
         return; /* destroyed by a widget handler: nothing left to do */
+    }
+
+    /* ---- Widget-level drag routing (1.1.0, S-9) ----
+     *
+     * Drag events are never consumed by the normal widget handlers
+     * (that contract is unchanged); the scoped delivery to drop
+     * targets runs BETWEEN the tree handling and the window callback,
+     * so the app's callback still sees every drag event. The routing
+     * may itself destroy widgets or the window (the callback's
+     * contract) — re-verify before the app callback below. */
+    if (event->type == FDK_EVENT_DRAG_ENTER ||
+        event->type == FDK_EVENT_DRAG_MOTION ||
+        event->type == FDK_EVENT_DRAG_LEAVE ||
+        event->type == FDK_EVENT_DRAG_DROP) {
+        window_route_drag_event(window, event);
+        if (fdk_context_find_window_by_pwindow(ctx, pwindow) != window) {
+            return; /* destroyed by a drag callback */
+        }
     }
 
     if (!handled_by_tree && !handled_by_accel &&
