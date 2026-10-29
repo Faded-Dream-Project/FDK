@@ -46,13 +46,14 @@ integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
 **Counts** (recounted 2026-10-29 against every register row — the
-earlier line's arithmetic was coarser than the table): DONE 39
-(C-4/B-14, 2026-10-29; S-10/B-18, 2026-10-29; S-4/A-06 + A-07
-folded, 2026-10-29; S-5/B-12, 2026-10-29; M-6/A-03/B-05,
-2026-10-29; T-B both sides, 2026-10-29; S-2 and S-1 pending owner
-verification; M-4, M-3, M-1, and S-3, 2026-10-28) · PARTIAL 3
-(B-13, B-19, S-9) · IN PROGRESS 1 (M-9) · MISSING 14 · DEFERRED
-(by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
+earlier line's arithmetic was coarser than the table): DONE 40
+(S-6/B-04-activation, 2026-10-29; C-4/B-14, 2026-10-29; S-10/B-18,
+2026-10-29; S-4/A-06 + A-07 folded, 2026-10-29; S-5/B-12,
+2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B both sides, 2026-10-29;
+S-2 and S-1 pending owner verification; M-4, M-3, M-1, and S-3,
+2026-10-28) · PARTIAL 3 (B-13, B-19, S-9) · IN PROGRESS 1 (M-9) ·
+MISSING 13 · DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62
+items. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +
@@ -76,6 +77,21 @@ two-monitor origin math, stale-index fallback), the bar rig
 unchanged-and-green, and the notifyd rig (the dispatch-loop change
 under a real WM). Earlier: post-T-B-side-2 — both desktop rigs
 unchanged-and-green (notifyd 68, trayhost 103).
+Re-verified 2026-10-29 (post-S-6): the dual-backend rebuild zero
+warnings, core make test, make test-x11 (197 [ok] incl. the six NEW
+activation legs: the env-capture discipline, the _NET_STARTUP_ID
+round-trip, the spec-format id + the chunked "new:" reassembled from
+the wire, the unique re-mint, the one-shot "remove:", the bare-X
+XGetInputFocus proof — plus the fake-WM _NET_ACTIVE_WINDOW legs with
+a REAL XTEST click's timestamp), make test-dbus, FDK_SANITIZE=0
+test, release + examples + verify-exports (843, +2 —
+fdk_window_activate, fdk_window_activation_token), the sway suite
+(54 [ok] incl. the five NEW activation legs: capture-unset, the
+private-queue mint with unique tokens, the injected-click focus
+state, the bogus voucher REFUSED, the two-process launcher flow with
+the held-button serial), and fdk-shell build + test-x11 + test-
+desktop + the notifyd and trayhost rigs (both ALL PASS — the
+behavior-preservation proof).
 Re-verified 2026-10-27 (post-trayhost): the full battery plus the
 notifyd rig and the trayhost rig (all three phases green each).
 Re-verified 2026-10-28 (post-M-4/M-3): full dual-backend build zero
@@ -131,7 +147,7 @@ unaffected):
 | M-1 | IME both backends | **DONE** | = B-01 (both backends; the sway rig's two-way protocol proof) | — |
 | M-2 | shaping level 1 | **DONE** | = B-02 (level 1; level 2 open) | — |
 | M-3 | touch basics | **DONE** | = B-03 (slots, tap→click, two-finger scroll; both backends; policy battery + seams) | — |
-| M-4 | window identity | **DONE** | = B-04 (icons/PID part); activation rides S-6 | — |
+| M-4 | window identity | **DONE** | = B-04 (icons/PID part); the activation half closed as S-6 | — |
 | M-5 | fdk-shell outputs | **DONE** (rc2, 0.2.0) | live sway output hotplug/metrics legs + namespace + `_FDK_WM_LAYER` — d2bc0de | — |
 | M-6 | X11 multi-monitor | **DONE** | = A-03/B-05 (both halves; D-015) | owner's real-desktop check |
 | M-7 | D-Bus foundation + dark mode | **DONE** (foundation 4d42c8c; dark mode d2a253f) | live-bus battery green incl. cross-implementation; wire bytes pinned vs captured reference output; fuzzed; CI makes skips fatal | — [VERIFIED-CHANGED: the row's "rides on top (next)" is stale — dark mode landed] |
@@ -142,7 +158,7 @@ unaffected):
 | S-3 | idle inhibition | **DONE** | = B-11 (both mechanisms; the live-bus mock + the sway rig) | — |
 | S-4 | input regions | **DONE** | = A-06 (fdk_window_set_input_region + fdk_ext_surface_set_input_region, both backends, XTEST + sway-injector proof; D-017) | — |
 | S-5 | cursor shape set | **DONE** | = B-12 (both backends; the hermetic RENDER proof on Xvfb, the enum-table pin on sway) | — |
-| S-6 | xdg_activation + startup notification | **MISSING** | no code | the whole item |
+| S-6 | xdg_activation + startup notification | **DONE** | fdk_window_activate + fdk_window_activation_token (fdk_window.h's activation section is the reference; 843 exports, +2): Wayland xdg-activation-v1 — the token mint through a PRIVATE event queue + wl_display_roundtrip_queue (reentrancy-safe from inside any handler — the buffer-release pattern applied to a protocol object), set_serial/set_app_id/set_surface attached, activate on the window; the XDG_ACTIVATION_TOKEN launch voucher captured at connect, unset immediately, spent by the first activate (one launch one token). X11 — _NET_ACTIVE_WINDOW with source indication 1 and the LAST USER EVENT timestamp (tracked in the dispatch pump from key/button/motion), bare-X raise+XSetInputFocus fallback; the full startup-notification wire CLIENT-SIDE (no D-Bus, no library): spec-format ids (TIMESTAMP-SCREEN-pid-seq-HOST), the chunked "new:" state on mint (_NET_STARTUP_INFO_BEGIN + continuations, 20 bytes each), _NET_STARTUP_ID on every window created while DESKTOP_STARTUP_ID is held, the one-shot "remove:" at the first show. Tests: X11 — 6 new legs (env capture unset, _NET_STARTUP_ID round-trip, spec-format id + chunked new: reassembled, unique re-mint, one-shot remove:, bare-X XGetInputFocus proof) + the fake-WM _NET_ACTIVE_WINDOW legs (app source, CurrentTime, then a REAL XTEST click's timestamp); Wayland — 5 new sway legs (capture-unset, compositor-minted unique tokens through the private queue, injected click focus state, bogus voucher REFUSED — focus-stealing prevention IS the assertion, and the full TWO-PROCESS launcher flow: held-button serial on the parent's surface, mint, re-exec'd child spends the voucher, sway flips focus to the child); the fake WM now handles MapRequest (windows actually map under it — a real WM's defining duty). D-020 | owner's real-desktop check (TESTING-ON-DESKTOP.md §13) |
 | S-7 | X11 DPI awareness | **DONE** [VERIFIED-CHANGED: audit said missing] | = B-07 (1.4.5) | — |
 | S-8 | AT-SPI2 level 1 | **MISSING** | = B-10 | roles/states/focus over the D-Bus client |
 | S-9 | drag icon + drop targets | **MISSING** (icon) / **PARTIAL** (targets) | = B-13 | both halves |
@@ -285,7 +301,7 @@ has an API surface, tests, and docs in the tree):
 | B-01 | **Wayland IME — no text-input-v3.** The seat binds pointer + keyboard only (`wayland_seat.c`). On X11, XIM runs `PreeditNothing\|StatusNothing` (compose keys work; no preedit). | partial (X11) / missing (Wayland) | CJK/input-method users cannot type on Wayland at all — the single largest population-level break in the toolkit | M | none — new `FDK_EVENT_IME_*` types append to the numbered enum; the union is delivered by pointer and never app-allocated | **[DONE 2026-10-28: M-1 — events + routing both backends; text-input-v3 with the v3 state machine and the stale-session self-heal; XIM preedit callbacks with the headless-tested splice; the sway rig plays a real input-method-v2 and proves the whole loop]** |
 | B-02 | **Text shaping — no HarfBuzz, no FriBidi, no per-script font fallback.** Shaping v1 is codepoint-at-a-time LTR with pair kerning (docs/text.md); unmapped codepoints render `.notdef`; one font per draw call. | **DONE (level 1)** [VERIFIED-CHANGED: M-2 shipped — the dlopen'd pipeline (shaping.c) with bidi reordering, GSUB/GPOS shaping, mark attachment, per-script charset-filtered fallback; Entry/TextView/Label/markup/Entry-caret all consume shaped placements; Latin metrics pinned identical across postures; `fdk_text_shaping_available()` + `fdk_font_has_glyph()` appended (797 exports)] | Arabic/Hebrew/Persian/Urdu now render in visual order with joining forms and ligatures; mixed-script strings pick fonts per segment; level 2 (paragraph bidi, RTL caret granularity, justification, emoji) open | M–L | none — as audited; 2 functions appended |
 | B-03 | **Touch input — entirely absent.** No `wl_touch` binding (Wayland), no XI2 touch (X11); the event stream has no touch types. | missing | touchscreen laptops: no tap, no scroll, no drag on Wayland (wlroots does not emulate a pointer); X11 survives only via the server's touch→pointer emulation | M | none — `FDK_EVENT_TOUCH_*` append; `fdk_pointer_button_event`-style appended fields |
-| B-04 | **Taskbar/window identity — no icons.** No `_NET_WM_ICON` (X11), no xdg-toplevel-icon-v1 (Wayland); no `_NET_WM_PID` / `WM_CLIENT_MACHINE` / `WM_WINDOW_ROLE`; no startup notification / xdg_activation. | missing | every FDK app shows a generic taskbar icon; docks/panels can't match windows to apps; no focus-stealing protection | S (icons/PID) / M (activation) | none |
+| B-04 | **Taskbar/window identity — no icons.** No `_NET_WM_ICON` (X11), no xdg-toplevel-icon-v1 (Wayland); no `_NET_WM_PID` / `WM_CLIENT_MACHINE` / `WM_WINDOW_ROLE`; no startup notification / xdg_activation. | **DONE** [VERIFIED-CHANGED: icons/PID as M-4; activation + startup notification as S-6 (2026-10-29) — see the S-6 verified-status row] | every FDK app shows a generic taskbar icon; docks/panels can't match windows to apps; no focus-stealing protection | S (icons/PID) / M (activation) | none |
 | B-05 | **X11 multi-monitor / RandR — absent in core too.** One screen; no output model, no RRNotify. (Wayland core: outputs tracked, scale follows; no app-facing output API.) | missing | multi-monitor X11 desktops: windows span/clamp to the whole screen; per-monitor behavior impossible | M | none |
 | B-06 | **Dark mode / system theme following — icon theme only.** XSETTINGS reads exactly `Net/IconThemeName`; no `Gtk/ColorScheme` (X11), no org.freedesktop.appearance color-scheme (Wayland). | partial | apps don't follow the desktop's light/dark preference — a visible polish break on every themed desktop | S–M | none **[VERIFIED-CHANGED: CLOSED - XSETTINGS Gtk/ColorScheme AND the org.freedesktop.appearance portal via the native D-Bus client shipped; live-proven by the portal color-scheme legs in make test-dbus]** |
 | B-07 | **X11 DPI/HiDPI awareness — none.** No Xft.dpi, no RandR scale awareness; text renders at 1x. (Wayland is fully covered.) | missing | HiDPI X11/XLibre users get tiny UI | M | none **[VERIFIED-CHANGED: the audit row was WRONG - Xft.dpi + physical-size detection with integer scale shipped in 1.4.5; test_x11_hidpi_gui proves it end to end on a 192-dpi Xvfb]** |
@@ -337,7 +353,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | S-3 | **Idle inhibition** — idle-inhibit-unstable-v1 (Wayland) + org.freedesktop.ScreenSaver (X11, rides M-7) | B-11 | S–M | **[DONE 2026-10-28 — see B-11's register row]** |
 | S-4 | **Input regions / click-through** — wl_surface.set_input_region + XShape, exposed on windows and extension surfaces | A-06, A-07 | S–M | **[DONE 2026-10-29 — see A-06's register row]** |
 | S-5 | **Cursor shape set** — full named set over cursor-shape-v1 + core font cursors | B-12 | S | **[DONE 2026-10-29 — see the B-12 verified-status row]** |
-| S-6 | **xdg_activation + startup notification** | B-04 (activation part) | M |
+| S-6 | **xdg_activation + startup notification** | B-04 (activation part) | M | **[DONE 2026-10-29 — see the S-6 verified-status row; D-020]** |
 | S-7 | **X11 DPI awareness** (Xft.dpi + RandR scale) | B-07 | M |
 | S-8 | **AT-SPI2 level 1** — roles/names/states/focus/activate over M-7's D-Bus; text interfaces later | B-10 | L |
 | S-9 | **Drag icon + widget-level drop targets** | B-13 | S+M |

@@ -1110,6 +1110,27 @@ fdk_result fdk_window_set_input_region(fdk_window *window,
     return FDK_OK;
 }
 
+fdk_result fdk_window_activate(fdk_window *window) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->window_activate == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->window_activate(window->pwindow);
+}
+
+fdk_result fdk_window_activation_token(fdk_window *window,
+                                       char *out, size_t cap) {
+    if (window == NULL || out == NULL || cap == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->window_activation_token == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->window_activation_token(window->pwindow, out, cap);
+}
+
 void fdk_window_set_cursor(fdk_window *window, fdk_cursor_shape shape) {
     if (window == NULL) {
         return;

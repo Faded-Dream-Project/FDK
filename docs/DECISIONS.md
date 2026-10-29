@@ -892,3 +892,88 @@ simple, honest.
 
 Fences named in fdk_surface.h: animated WebP/APNG are the future
 families on the same shape; the fdk_gif NAME says what loads today.
+
+## D-020 — activation + startup notification: two verbs, the private-queue mint, the client-side SN wire (S-6 / B-04)
+
+2026-10-29. The last MUST-tier gap: B-04's activation half (icons +
+PID landed as M-4) and the S-6 SHOULD row — the toolkit could
+neither ASK for focus nor hand a launched child a focus voucher.
+Both halves now ship as two public verbs (fdk_window.h's activation
+section is the reference):
+
+**1. fdk_window_activate is a REQUEST, not a guarantee — by
+protocol, not by policy.** Wayland xdg-activation-v1 exists precisely
+so compositors can REFUSE unfocused demands (focus-stealing
+prevention); X11's _NET_ACTIVE_WINDOW is advisory the same way (a WM
+weighs the timestamp against its own focus history). FDK reports
+FDK_OK for a well-formed request it has no reason to expect was
+honored-as-willed — the honest posture every desktop toolkit
+shares (GTK's gtk_window_present and Qt's activateWindow return
+void for the same reason). The one thing FDK adds to honesty: under
+BARE X (no WM at all) it raises and focuses directly — there is no
+authority to defer to, so the best-available answer is the answer.
+
+**2. The mint is a private-queue roundtrip.** The compositor answers
+xdg_activation_token_v1.commit with an async done(token), and the
+caller may be INSIDE an event handler (the launcher button that
+spawns the child). A plain wl_display_roundtrip would dispatch the
+main queue and re-enter FDK's own handlers; instead the token proxy
+moves to a private wl_event_queue and the exchange rides
+wl_display_roundtrip_queue — exactly one event is dispatched (the
+token's own done), and nothing else in the connection is disturbed.
+This is the buffer-release-queue pattern (1.1.6) applied to a
+protocol object for the first time, and it is the reason minting is
+reentrancy-safe with no flags, no locks, no deferred completion.
+
+**3. The X11 half speaks the startup-notification wire CLIENT-SIDE —
+no library, no D-Bus.** The SN spec's "new:"/"remove:" states ride
+_NET_STARTUP_INFO_BEGIN + _NET_STARTUP_INFO root ClientMessages, 20
+bytes each, format 8 — the chunked form openbox/metacity-family WMs
+listen for. Minting emits "new: ID=... SCREEN=... NAME=... BIN=..."
+(the launch feedback's BEGIN); the FIRST show of a window carrying
+the id emits "remove: ID=..." (its END). IDs follow the spec's
+common format (TIMESTAMP-SCREEN-UNIQUE-HOST; the unique portion
+embeds pid + a per-process sequence, so rapid re-mints cannot
+collide).
+
+**4. Vouchers are read-once at connect, unset immediately.** Both
+conventions (XDG_ACTIVATION_TOKEN on Wayland, DESKTOP_STARTUP_ID on
+X11) are captured in the platform connection and unset in the
+process environment the moment they are read — the protocols' own
+hygiene rule: a spent or stale token must never propagate to
+grandchildren. The Wayland voucher is spent by the FIRST activate
+(one launch, one token); the X11 id rides _NET_STARTUP_ID on every
+window created while held (the WM's match key) and the completion
+"remove:" is per-LAUNCH (one emission; a second window under the
+same id stays silent).
+
+**5. The timestamp is the last USER event, tracked in the dispatch
+pump.** _NET_ACTIVE_WINDOW's data.l[1] carries it; 0/CurrentTime
+means "caller does not know" and the WM decides by its own policy —
+the honest answer before any input arrives. Key, button, AND motion
+events refresh it (GTK's rule), recorded even when the motion
+coalescer collapses the event (the last motion's timestamp is the
+freshest truth either way).
+
+**6. The held-button rule is REAL and the rigs pin it.** wlroots
+validates a token's serial against the seat's LIVE grab — a pressed,
+not-yet-released button — AND the grab's origin surface must be the
+minting window's. The sway suite's launcher leg is therefore the
+full two-process contract: button DOWN on the parent's surface, mint
+rides that serial, the re-exec'd child spends the voucher as its
+launch token while the button is still held, and sway — vouched for
+by the live grab — flips the focus to the child. The bogus-voucher
+leg proves the other side: an unfocused demand is REFUSED, which is
+the entire point of the protocol. A same-process activate with a
+freshly minted token is honest-but-often-refused under wlroots (the
+serial's origin surface is the same window, the grab may not be
+held); the header documents the launcher flow as THE way to
+transfer activation between windows, and same-process activate()
+remains the correct verb for self-activation on compositors that
+honor recent-input serials (the set_serial the mint attaches).
+
+Fences: fdk_window_activation_token mints per-call (never caches —
+tokens are one-shot by specification); the X11 SN feedback loop is
+emission-only (no listener for _NET_STARTUP_INFO replies — no WM
+requires one); AT-SPI-style activation semantics (S-8's territory)
+are untouched.

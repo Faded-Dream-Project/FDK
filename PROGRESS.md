@@ -808,6 +808,20 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **Window activation + startup notification: SHIPPED (1.1.0, S-6)**
+  — `fdk_window_activate` (Wayland xdg-activation-v1 through a
+  compositor token; X11 `_NET_ACTIVE_WINDOW` with the live
+  last-user-event timestamp + the bare-X raise/focus fallback) and
+  `fdk_window_activation_token` (the launcher half: a minted token /
+  SN id handed to a spawned child via `XDG_ACTIVATION_TOKEN` /
+  `DESKTOP_STARTUP_ID`; the X11 mint emits the chunked "new:" SN
+  state client-side, the first show of an id-carrying window emits
+  the one-shot "remove:"). Both vouchers are captured once at
+  connect and unset immediately (the protocols' hygiene rule). The
+  Wayland mint is reentrancy-safe (private event queue +
+  roundtrip_queue). 843 exports. D-020; rigs: 6 X11 legs + 5 sway
+  legs incl. the two-process launcher flow (held-button serial,
+  re-exec'd child, focus flip through the voucher)
 - **GPU present lane: SHIPPED (1.4.18, X11)** — hybrid rendering:
   CPU rasterization unchanged (byte-identical, pinned by tests),
   GLX presentation via runtime-loaded libGL (dlopen, hand-declared

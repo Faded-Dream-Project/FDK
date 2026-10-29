@@ -8,6 +8,7 @@
 #include "generated/fractional-scale-v1-client-protocol.h"
 #include "generated/xdg-toplevel-icon-v1-client-protocol.h"
 #include "generated/idle-inhibit-unstable-v1-client-protocol.h"
+#include "generated/xdg-activation-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -2068,6 +2069,162 @@ fdk_result fdk_wayland_window_set_idle_inhibit(
         pwindow->idle_inhibitor = NULL;
     }
     return FDK_OK; /* release without engagement: idempotent */
+}
+
+/* ---- xdg-activation (1.1.0, S-6) ------------------------------------------
+ *
+ * The focus-stealing-prevention protocol, both halves. The token
+ * mint is the interesting part: the compositor answers commit()
+ * with an async done(token) event, and the caller may be sitting
+ * INSIDE an event handler (the launcher button that spawns a
+ * child) — a plain wl_display_roundtrip would dispatch the main
+ * queue and re-enter FDK's own handlers. So the token proxy is
+ * moved to a PRIVATE event queue and caught with
+ * wl_display_roundtrip_queue: the wait sees exactly one event —
+ * the token's own done — and nothing else in the connection is
+ * disturbed (the buffer-release-queue pattern, applied to a
+ * protocol object for the first time).
+ *
+ * The requests attach everything the compositor weighs when
+ * deciding whether a later activate() is honest: the serial of the
+ * last user input FDK saw (set_serial — wlroots compositors refuse
+ * tokens with no recent serial, which is exactly the point of the
+ * protocol), the app_id (launch feedback identity), and the
+ * REQUESTING surface (set_surface — this window vouches). */
+typedef struct {
+    char *token;
+    int done;
+} activation_wait;
+
+static void activation_token_done(void *data,
+                                  struct xdg_activation_token_v1 *tok,
+                                  const char *token) {
+    (void)tok;
+    activation_wait *w = data;
+    if (token != NULL && token[0] != '\0') {
+        size_t len = strlen(token) + 1;
+        w->token = fdk_alloc(len);
+        if (w->token != NULL) {
+            memcpy(w->token, token, len);
+        }
+    }
+    w->done = 1;
+}
+
+static const struct xdg_activation_token_v1_listener
+    activation_token_listener = {
+        .done = activation_token_done,
+};
+
+/* Mints a compositor token bound to this window's surface. Returns
+ * a heap copy (fdk_free by the caller) or NULL when the compositor
+ * is absent, the window has no surface yet, or the exchange fails
+ * (display error / done never arrived within the roundtrip — the
+ * sync the roundtrip sends AFTER commit forces done out first, so
+ * a live compositor always answers). */
+static char *mint_activation_token(fdk_platform_window *pwindow) {
+    fdk_platform_connection *conn = pwindow->conn;
+    if (conn->activation == NULL || pwindow->surface == NULL) {
+        return NULL;
+    }
+    struct xdg_activation_token_v1 *tok =
+        xdg_activation_v1_get_activation_token(conn->activation);
+    if (tok == NULL) {
+        return NULL;
+    }
+    struct wl_event_queue *q = wl_display_create_queue(conn->display);
+    if (q == NULL) {
+        xdg_activation_token_v1_destroy(tok);
+        return NULL;
+    }
+    /* Route the token's events to the private queue: done will be
+     * dispatched by roundtrip_queue below, never the main pump. */
+    wl_proxy_set_queue((struct wl_proxy *)tok, q);
+
+    activation_wait w;
+    memset(&w, 0, sizeof w);
+    xdg_activation_token_v1_add_listener(tok, &activation_token_listener,
+                                         &w);
+    if (conn->seat != NULL) {
+        xdg_activation_token_v1_set_serial(
+            tok, conn->last_input_serial, conn->seat);
+    }
+    if (conn->app_id != NULL && conn->app_id[0] != '\0') {
+        xdg_activation_token_v1_set_app_id(tok, conn->app_id);
+    }
+    xdg_activation_token_v1_set_surface(tok, pwindow->surface);
+    xdg_activation_token_v1_commit(tok);
+
+    int rc = wl_display_roundtrip_queue(conn->display, q);
+    /* Destroy only after the done event has been dispatched: the
+     * destructor does not invalidate the received string, but
+     * ordering here costs nothing and reads as the protocol's own
+     * lifecycle. */
+    xdg_activation_token_v1_destroy(tok);
+    wl_event_queue_destroy(q);
+    if (rc < 0) {
+        fdk_free(w.token);
+        return NULL;
+    }
+    return w.done ? w.token : (fdk_free(w.token), (char *)NULL);
+}
+
+fdk_result fdk_wayland_window_activate(fdk_platform_window *pwindow) {
+    if (pwindow == NULL || pwindow->conn == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    if (conn->activation == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (pwindow->surface == NULL) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    /* The launch voucher: whatever launched THIS process left a
+     * token in the environment (captured at connect, one shot).
+     * Spending it on the first activation is the entire launcher
+     * half of the protocol — the compositor then knows the user
+     * themselves asked for this window (they clicked the launcher)
+     * and focus-stealing-prevention steps aside. */
+    if (conn->launch_token != NULL) {
+        xdg_activation_v1_activate(conn->activation, conn->launch_token,
+                                   pwindow->surface);
+        fdk_free(conn->launch_token);
+        conn->launch_token = NULL;
+        return FDK_OK;
+    }
+    /* No voucher: mint fresh. The serial attached at mint time is
+     * the best self-vouch a client can make (recent user input in
+     * THIS window); compositors that demand more will ignore the
+     * activation — the honest refusal, never an error. */
+    char *tok = mint_activation_token(pwindow);
+    if (tok == NULL) {
+        return FDK_ERR_PLATFORM;
+    }
+    xdg_activation_v1_activate(conn->activation, tok, pwindow->surface);
+    fdk_free(tok);
+    return FDK_OK;
+}
+
+fdk_result fdk_wayland_window_activation_token(
+    fdk_platform_window *pwindow, char *out, size_t cap) {
+    if (pwindow == NULL || out == NULL || cap == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (pwindow->conn == NULL || pwindow->conn->activation == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    char *tok = mint_activation_token(pwindow);
+    if (tok == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (strlen(tok) + 1 > cap) {
+        fdk_free(tok);
+        return FDK_ERR_INVALID_ARGUMENT; /* caller's buffer too small */
+    }
+    memcpy(out, tok, strlen(tok) + 1);
+    fdk_free(tok);
+    return FDK_OK;
 }
 
 void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,

@@ -420,3 +420,52 @@ Expectations:
   compare against what it does for other clients.
 
 **Status: DONE (should work; owner verification pending).**
+
+## 13. Activation + startup notification on your desktop (S-6 — needs your eyes)
+
+What the headless rigs proved: the xdg-activation round trip (mint
+through the private-queue roundtrip, bogus voucher REFUSED, the full
+two-process launcher flow with a held-button serial — sway flipped
+focus to the child through the voucher), the X11 SN wire (the
+chunked "new:"/"remove:" root messages, the _NET_STARTUP_ID
+property, read-once env capture), and the bare-X raise+focus. What
+only your desktop can prove is the REAL compositor's and REAL WM's
+policy layer — focus-stealing prevention is a policy, not a
+mechanism.
+
+```sh
+# Wayland (labwc/sway): does a notification click jump you to the app?
+# (any FDK app calling fdk_window_activate on itself after user input)
+examples/build/03_windows   # then, from another terminal:
+swaymsg -t get_tree | jq -r '..|select(.focused? == true).name'
+```
+
+Expectations, Wayland:
+
+- An FDK app calling `fdk_window_activate()` after the user clicked
+  IN it: focus arrives (the serial vouches).
+- The launcher flow — your launcher mints with
+  `fdk_window_activation_token()` at button-press, the child spends
+  `XDG_ACTIVATION_TOKEN`: the child's first window arrives focused,
+  no focus steal. (Taskbar/launcher integration is the fdk-shell
+  consumer of this.)
+- A stale/bogus token: refused, focus unchanged — that refusal is
+  the feature.
+- labwc's `focus_on_window_activation` setting (smart/urgent/focus/
+  none) governs the outcome for UNvouched requests; urgent (the
+  taskbar flash) is the common default.
+
+Expectations, X11 (Openbox):
+
+- `fdk_window_activate()` sends `_NET_ACTIVE_WINDOW` with the last
+  user-event timestamp; Openbox honors it for a recently-active app
+  and may flash the taskbar otherwise (its own steal policy —
+  `xdg_activation` semantics do not exist on X11; the timestamp IS
+  the mechanism).
+- Launching an FDK app from a launcher that sets
+  `DESKTOP_STARTUP_ID`: the app's window carries `_NET_STARTUP_ID`,
+  and Openbox's startup-feedback (the launch bubble/cursor) ends at
+  the window's first map (the "remove:" state) instead of timing
+  out — the visible half of the protocol on a real WM.
+
+**Status: DONE (should work; owner verification pending).**

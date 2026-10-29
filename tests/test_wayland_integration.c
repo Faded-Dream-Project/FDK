@@ -229,6 +229,59 @@ static void wayland_injector_stop(void) {
     }
 }
 
+/* sway's own view of which window is focused (S-6): the compositor's
+ * tree, queried over the rig's IPC socket, walked for the focused
+ * toplevel and its title (the "name" node field). Returns a static
+ * buffer the caller must NOT free, or NULL when swaymsg / the
+ * socket / the parse is unavailable (the caller skips honestly).
+ *
+ * The python3 walker is the same shape the rig's geometry scripts
+ * use: recurse dicts/lists, print the focused node's name. Nothing
+ * client-side is trusted — focus truth belongs to the compositor. */
+static const char *sway_focused_window_name(void) {
+    static char name[128];
+    name[0] = '\0';
+    const char *py =
+        "python3 -c 'import json,sys\n"
+        "def walk(n):\n"
+        "  if isinstance(n, dict):\n"
+        "    if n.get(\"focused\") and n.get(\"app_id\"):\n"
+        "      print(n.get(\"name\", \"\"))\n"
+        "    for v in n.values(): walk(v)\n"
+        "  elif isinstance(n, list):\n"
+        "    for v in n: walk(v)\n"
+        "walk(json.load(sys.stdin))'";
+    char cmd[512];
+    (void)snprintf(cmd, sizeof cmd, "swaymsg -t get_tree 2>/dev/null | %s",
+                   py);
+    FILE *f = popen(cmd, "r");
+    if (f == NULL) {
+        return NULL;
+    }
+    size_t n = fread(name, 1, sizeof name - 1, f);
+    int rc = pclose(f);
+    if (rc != 0 || n == 0) {
+        return NULL;
+    }
+    while (n > 0 && (name[n - 1] == '\n' || name[n - 1] == '\r')) {
+        n--;
+    }
+    name[n] = '\0';
+    return name[0] != '\0' ? name : NULL;
+}
+
+/* One scoped sway configuration command (S-6): used to turn
+ * focus-follows-mouse off for the activation section so focus flips
+ * stay attributable to activation itself, restoring the default
+ * afterwards. Returns the swaymsg exit status (best-effort: callers
+ * treat failure as "the rig's default stands"). */
+static int swaymsg_config(const char *command) {
+    char cmd[256];
+    (void)snprintf(cmd, sizeof cmd,
+                   "swaymsg -q '%s' >/dev/null 2>&1", command);
+    return system(cmd);
+}
+
 /* Enter/leave counters for the input-region legs (S-4). */
 struct region_counts {
     int *enters;
@@ -658,8 +711,63 @@ static void ime_send(const char *preedit, const char *commit_text) {
     wl_display_flush(g_ime.disp);
 }
 
+/* The S-6 launcher-child leg (re-exec form, the --fc-fontconfig-leg
+ * precedent): the parent mints a token with the injector's button
+ * HELD on its own surface, re-executes this binary with the token as
+ * XDG_ACTIVATION_TOKEN, and this branch spends it — the exact
+ * two-process contract the API documents. Exit 0 = this process saw
+ * ITSELF focused through sway's own tree after the activation. */
+static int activation_child_leg(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_WAYLAND,
+                              .app_id = "org.fdk.test" };
+    fdk_result r = fdk_init(&ctx, &opts);
+    if (!fdk_ok(r)) {
+        printf("[child] no compositor\n");
+        return 2;
+    }
+    assert(getenv("XDG_ACTIVATION_TOKEN") == NULL);
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK activation child",
+                                 .width = 200, .height = 150 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(win, &root)));
+    fdk_widget_set_background(root, (fdk_color){0.5f, 0.2f, 0.8f, 1.0f});
+    fdk_window_show(win);
+    fdk_window_paint(win);
+    for (int i = 0; i < 20; i++) {
+        (void)fdk_pump_events(ctx, 50);
+    }
+    /* Spend the voucher: the FIRST activate rides the parent's
+     * token (the button is still held on the parent's surface — the
+     * window the compositor will vouch for). */
+    assert(fdk_ok(fdk_window_activate(win)));
+    for (int i = 0; i < 30; i++) {
+        (void)fdk_pump_events(ctx, 50);
+    }
+    const char *focused = sway_focused_window_name();
+    printf("[child] activation focus verdict: %s\n",
+           focused != NULL ? focused : "(unavailable)");
+    int ok = focused != NULL &&
+             strcmp(focused, "FDK activation child") == 0;
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    return ok ? 0 : 1;
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
+    if (getenv("FDK_WL_ACT_CHILD") != NULL) {
+        return activation_child_leg();
+    }
+    /* The S-6 launch voucher: a BOGUS token set before fdk_init — the
+     * connection captures it (and unsets it — asserted in the
+     * activation section below), and the first activate() spends it.
+     * sway must REFUSE it: focus-stealing prevention is the point of
+     * xdg-activation, and the refusal itself is the assertion. */
+    setenv("XDG_ACTIVATION_TOKEN", "rig-bogus-wayland-voucher", 1);
     fdk_context *ctx = NULL;
     /* app_id matters: the sway rig floats windows with this prefix,
      * so client-side resizes (the reflow test) actually take effect
@@ -1597,6 +1705,176 @@ int main(void) {
                 fdk_widget_destroy(picker);
             }
             fdk_font_destroy(font);
+        }
+    }
+
+    /* ---- Activation + startup notification (1.1.0, S-6) ----
+     *
+     * sway speaks xdg-activation-v1 (wlroots), so this is the REAL
+     * protocol round: the mint's private-queue roundtrip catches the
+     * compositor's done(token), and activate() flips sway's focus
+     * when — and only when — the token is honest.
+     *
+     * The focus-stealing-prevention proof is two-sided, by design:
+     *
+     *   1. the BOGUS launch voucher (XDG_ACTIVATION_TOKEN, set
+     *      before fdk_init, captured and unset per the spec) is
+     *      spent on the first activate and IGNORED by sway — the
+     *      focused window does not change; that is the protocol
+     *      REFUSING an unvouched demand, which is the entire point.
+     *
+     *   2. a FRESH mint — carrying the serial of a real injected
+     *      click — activates and sway DOES flip the focus to the
+     *      minting window.
+     *
+     * Focus truth comes from sway's own tree (swaymsg -t get_tree),
+     * queried through the rig's IPC socket: nothing client-side is
+     * trusted. The second window (the one focused first) shares the
+     * pinned floating spot with the main window and stacks above it
+     * (sway stacks floats in creation order), so a click inside the
+     * shared area focuses the SECOND window — the state activation
+     * must overwrite. */
+    {
+        /* The env-capture discipline FIRST: main() set the bogus
+         * voucher before fdk_init; the connection must have read it
+         * once and unset it (grandchildren never inherit a stale
+         * token — the protocol's hygiene rule). */
+        assert(getenv("XDG_ACTIVATION_TOKEN") == NULL);
+        printf("[ok] wayland activation: XDG_ACTIVATION_TOKEN captured "
+               "and unset at connect\n");
+
+        char tok[512];
+        fdk_result mr = fdk_window_activation_token(win, tok,
+                                                    sizeof tok);
+        if (!fdk_ok(mr)) {
+            printf("[skip] wayland activation token (this compositor "
+                   "offers no xdg-activation-v1)\n");
+        } else {
+            assert(tok[0] != '\0');
+            /* A second mint produces a DIFFERENT string — the
+             * compositor mints per-request. */
+            char tok2[512];
+            assert(fdk_ok(fdk_window_activation_token(win, tok2,
+                                                      sizeof tok2)));
+            assert(strcmp(tok, tok2) != 0);
+            printf("[ok] wayland activation token: compositor-minted "
+                   "through the private-queue roundtrip (unique per "
+                   "mint)\n");
+
+            if (wayland_injector_start()) {
+                pump_and_paint(ctx, win, 1200);
+
+                /* Focus-follows-mouse off, SCOPED to this section:
+                 * with sway's default, merely moving the pointer
+                 * into a window focuses it, and the activation flips
+                 * below could not be attributed to activation alone.
+                 * Restored to the default before the section ends. */
+                (void)swaymsg_config("seat * focus_follows_mouse no");
+
+                /* B: small, at the pinned spot, leaving the main
+                 * window's right side exposed (the launcher click
+                 * below must land on the MAIN window's own surface —
+                 * wlroots validates the token's origin surface
+                 * against the seat's grab). */
+                fdk_window *act_b = NULL;
+                fdk_window_options bopts = {
+                    .title = "FDK activation B", .width = 120,
+                    .height = 100
+                };
+                assert(fdk_ok(fdk_window_create(ctx, &bopts, &act_b)));
+                fdk_widget *broot = NULL;
+                assert(fdk_ok(fdk_window_get_root(act_b, &broot)));
+                fdk_widget_set_background(
+                    broot, (fdk_color){0.3f, 0.6f, 0.3f, 1.0f});
+                fdk_window_show(act_b);
+                pump_and_paint(ctx, act_b, 800);
+
+                const char *focused = sway_focused_window_name();
+                if (focused == NULL) {
+                    printf("[skip] wayland activation focus legs "
+                           "(swaymsg IPC unavailable)\n");
+                } else {
+                    /* A real click on B: focus lands on B (the
+                     * pre-activation state). */
+                    wayland_inject("move 150 100");
+                    pump_and_paint(ctx, win, 400);
+                    wayland_inject("tap 1");
+                    pump_and_paint(ctx, act_b, 600);
+                    focused = sway_focused_window_name();
+                    assert(focused != NULL);
+                    assert(strcmp(focused, "FDK activation B") == 0);
+                    printf("[ok] wayland activation: injected click "
+                           "focused window B (the pre-activation "
+                           "state)\n");
+
+                    /* (1) the bogus voucher, spent on the first
+                     * activate: sway ignores it — focus unchanged. */
+                    assert(fdk_ok(fdk_window_activate(win)));
+                    pump_and_paint(ctx, win, 600);
+                    focused = sway_focused_window_name();
+                    assert(focused != NULL);
+                    assert(strcmp(focused, "FDK activation B") == 0);
+                    printf("[ok] wayland activation: bogus launch "
+                           "voucher REFUSED by the compositor "
+                           "(focus-stealing prevention)\n");
+
+                    /* (2) THE LAUNCHER FLOW, two processes — the
+                     * exact contract fdk_window_activation_token
+                     * documents. The button goes DOWN on the MAIN
+                     * window's exposed area and STAYS down (wlroots
+                     * validates the mint's serial against the seat's
+                     * live grab AND its origin surface); the mint
+                     * rides that serial; the re-exec'd child spends
+                     * the token as its launch voucher while the
+                     * button is still held — and sway, vouched for
+                     * by the live grab on the launcher's surface,
+                     * flips the focus to the child. A plain tap
+                     * would release before the child activates and
+                     * the serial would be refused (the held-button
+                     * rule every real launcher satisfies by minting
+                     * at press time). */
+                    wayland_inject("move 300 200");
+                    pump_and_paint(ctx, win, 400);
+                    wayland_inject("down 1");
+                    pump_and_paint(ctx, win, 500);
+
+                    char tok[512];
+                    assert(fdk_ok(fdk_window_activation_token(
+                        win, tok, sizeof tok)));
+
+                    setenv("XDG_ACTIVATION_TOKEN", tok, 1);
+                    setenv("FDK_WL_ACT_CHILD", "1", 1);
+                    int child_rc = system("/proc/self/exe > /dev/null 2>&1"
+                                          " </dev/null");
+                    unsetenv("FDK_WL_ACT_CHILD");
+                    unsetenv("XDG_ACTIVATION_TOKEN");
+                    wayland_inject("up 1");
+                    pump_and_paint(ctx, win, 400);
+                    if (child_rc == 2) {
+                        printf("[skip] wayland activation launcher "
+                               "flow (child could not connect)\n");
+                    } else {
+                        assert(child_rc == 0);
+                        printf("[ok] wayland activation: LAUNCHER "
+                               "flow honored — held-button token, "
+                               "child process, focus flipped through "
+                               "the voucher\n");
+                    }
+
+                    /* Health: the parent connection survived the
+                     * whole exchange (a protocol error would have
+                     * killed it); the surface still presents. */
+                    assert(fdk_ok(fdk_window_paint(win)));
+                    pump_and_paint(ctx, win, 300);
+                }
+
+                (void)swaymsg_config("seat * focus_follows_mouse yes");
+                fdk_window_destroy(act_b);
+                wayland_injector_stop();
+            } else {
+                printf("[skip] wayland activation focus legs "
+                       "(injector unavailable)\n");
+            }
         }
     }
 

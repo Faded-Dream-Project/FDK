@@ -270,6 +270,75 @@ fdk_result fdk_window_set_input_region(fdk_window *window,
                                        const fdk_rect *rects,
                                        fdk_i32 count);
 
+/* ---- Activation + startup notification (1.1.0, S-6 / B-04) -------------
+ *
+ * "Activation" is the desktop's focus-stealing-prevention machinery:
+ * the difference between a window DEMANDING attention and a window
+ * the user just asked for. The two halves:
+ *
+ *   1. fdk_window_activate() — bring THIS window to the user (focus,
+ *      raise, unminimize as the platform allows): the "click this
+ *      notification to jump to the conversation" case. Both backends
+ *      ride their native protocol — Wayland xdg-activation-v1 (a
+ *      compositor-minted token vouches for the request; a tokenless
+ *      beg is exactly what the protocol exists to refuse), X11 the
+ *      EWMH _NET_ACTIVE_WINDOW message carrying the last USER event
+ *      timestamp (the number a WM weighs against its own focus
+ *      history — GTK's and Qt's exact posture).
+ *
+ *   2. fdk_window_activation_token() — the LAUNCHER half. An FDK
+ *      application spawning another program hands the child a token
+ *      through its environment so the child's first window arrives
+ *      pre-vouched: set XDG_ACTIVATION_TOKEN=<token> (Wayland) or
+ *      DESKTOP_STARTUP_ID=<token> (X11) in the child's environ.
+ *      The launched side needs no code: FDK captures both variables
+ *      at fdk_init (and unsets them in its own environment, per both
+ *      specifications, so grandchildren do not inherit a stale
+ *      token), X11 sets _NET_STARTUP_ID on every window created
+ *      while the id is held, Wayland spends it on the first
+ *      activate() — the one-launch-one-token contract.
+ *
+ * The X11 token carries the full startup-notification feedback loop
+ * client-side (no D-Bus, no dependencies): minting emits the
+ * "new:" state to the root window through _NET_STARTUP_INFO_BEGIN
+ * chunks (the message openbox/metacity-family WMs listen for), and
+ * the first SHOW of a window created under a captured id emits the
+ * matching "remove:" — the launch feedback ends when the app is up,
+ * the honest end of the protocol's story. Wayland tokens are
+ * compositor-minted (xdg_activation_token_v1.done) — sway, KDE and
+ * GNOME all implement the protocol; where a compositor does not,
+ * minting returns FDK_ERR_UNSUPPORTED and the launcher simply
+ * spawns without a token (the child's activate() then mints its
+ * own fresh token — the degraded-but-legal path).
+ *
+ * Tokens are one-shot by specification: the launcher mints, the
+ * child spends. fdk_window_activate() on the child side always
+ * works standalone — a self-minted token vouches for itself on
+ * compositors that honor recent-input serials (the set_serial the
+ * mint attaches), which is the best any client can do without a
+ * vouching parent. */
+
+/* Asks the compositor/WM to bring this window to the user — focus,
+ * raise, unminimize (the "present" verb in GTK/Qt terms). Safe any
+ * time after create; a no-op on a hidden window (it activates when
+ * shown). Returns FDK_ERR_INVALID_ARGUMENT on NULL window,
+ * FDK_ERR_UNSUPPORTED when the backend has no activation mechanism
+ * (a connection whose compositor offers neither xdg-activation nor
+ * a WM — rare; the honest answer rather than a silent no-op). */
+fdk_result fdk_window_activate(fdk_window *window);
+
+/* Mints an activation token tied to this window for a LAUNCHER: the
+ * string a parent process passes to the child it spawns (see the
+ * section above). Writes at most cap-1 bytes plus a NUL to out and
+ * returns FDK_OK; FDK_ERR_INVALID_ARGUMENT on bad arguments or a
+ * buffer too small (a 512-byte buffer always suffices — the X11 id
+ * is short, the Wayland token bounded well below), FDK_ERR_UNSUPPORTED
+ * when the platform cannot mint (no xdg-activation on Wayland).
+ * The token is spent by the CHILD (never by the minter); minting
+ * does not activate anything by itself. */
+fdk_result fdk_window_activation_token(fdk_window *window,
+                                       char *out, size_t cap);
+
 /* Requests a resize to (width, height). This is a request, not a
  * guarantee — the platform/compositor may clamp, ignore, or adjust it
  * (e.g. Wayland only actually resizes a toplevel in response to a

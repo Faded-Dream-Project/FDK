@@ -187,6 +187,34 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             }
         }
 
+        /* Activation timestamps (1.1.0, S-6): every USER input event
+         * refreshes the connection's last-event time — the number
+         * _NET_ACTIVE_WINDOW's data.l[1] carries (the WM's
+         * focus-stealing-prevention input; 0/CurrentTime when no
+         * input has been seen, which WMs treat as "caller does not
+         * know"). Key, button, AND motion all count (GTK's
+         * gdk_x11 window timestamps ride the same rule); motion is
+         * recorded even when the coalescer collapses the event,
+         * because the LAST motion's timestamp is the freshest
+         * truth either way. */
+        if (xevent.type == KeyPress || xevent.type == KeyRelease ||
+            xevent.type == ButtonPress ||
+            xevent.type == ButtonRelease ||
+            xevent.type == MotionNotify) {
+            Time t = 0;
+            if (xevent.type == MotionNotify) {
+                t = xevent.xmotion.time;
+            } else if (xevent.type == KeyPress ||
+                       xevent.type == KeyRelease) {
+                t = xevent.xkey.time;
+            } else {
+                t = xevent.xbutton.time;
+            }
+            if (t != 0) {
+                conn->last_event_time = t;
+            }
+        }
+
         /* IM filtering (1.3.1): Xlib requires EVERY event to pass
          * through XFilterEvent before normal processing when an input
          * method is active — the IM may consume composition traffic

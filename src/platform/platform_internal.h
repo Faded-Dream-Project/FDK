@@ -266,6 +266,25 @@ typedef struct fdk_platform_ops {
     fdk_result (*window_set_idle_inhibit)(fdk_platform_window *pwindow,
                                           int inhibit);
 
+    /* OPTIONAL (1.1.0, S-6 activation): bring this window to the
+     * user (Wayland: xdg-activation-v1 — a compositor-minted token,
+     * or the one captured from XDG_ACTIVATION_TOKEN at connect
+     * while unconsumed; X11: the _NET_ACTIVE_WINDOW root message
+     * with the last user event timestamp, XRaiseWindow +
+     * XSetInputFocus under bare X). FDK_ERR_UNSUPPORTED when the
+     * backend has no mechanism at all. */
+    fdk_result (*window_activate)(fdk_platform_window *pwindow);
+
+    /* OPTIONAL (1.1.0, S-6): mint an activation token tied to this
+     * window for a LAUNCHER to pass to a child process (Wayland:
+     * xdg_activation_token_v1 done string, fetched through a PRIVATE
+     * event queue + one bounded roundtrip — reentrancy-safe from
+     * inside an event handler, the clipboard precedent; X11: a
+     * startup-notification-format id + the "new:" root message).
+     * Writes cap-1 bytes + NUL. The token is spent by the child. */
+    fdk_result (*window_activation_token)(fdk_platform_window *pwindow,
+                                          char *out, size_t cap);
+
     /* --- Window operations --- */
 
     /* Creates a window. `parent` is NULL for top-levels; for popup

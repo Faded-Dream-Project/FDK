@@ -82,6 +82,18 @@ struct fdk_platform_connection {
      * answers FDK_ERR_UNSUPPORTED (the D-Bus fallback engages). */
     struct zwp_idle_inhibit_manager_v1 *idle_inhibit_manager;
 
+    /* xdg-activation (1.1.0, S-6): the OPTIONAL manager. Absent
+     * (rare — sway, KDE and GNOME all implement it) means activate
+     * and token minting answer FDK_ERR_UNSUPPORTED. The launch_token
+     * is the string captured from XDG_ACTIVATION_TOKEN at connect
+     * (a launcher vouched for us): it is spent by the FIRST
+     * activate() — one launch, one token, the specification's
+     * contract. The variable is unset in our own environment right
+     * after the read so a spawned grandchild cannot inherit a stale
+     * token (the protocol's own hygiene rule). */
+    struct xdg_activation_v1 *activation;
+    char *launch_token;
+
     /* text-input-v3 (1.1.0, M-1): the OPTIONAL IME manager + the
      * per-seat text input object (wayland_ime.c). enter/leave are
      * the focus gates; the latched pending strings + the showing
@@ -773,6 +785,13 @@ void fdk_wayland_ime_update_surrounding(fdk_platform_window *pwindow,
  * create/destroy the per-surface zwp_idle_inhibitor_v1. */
 fdk_result fdk_wayland_window_set_idle_inhibit(
     fdk_platform_window *pwindow, int inhibit);
+
+/* xdg-activation (1.1.0, S-6; wayland_window.c): activate this
+ * window through a compositor token, and mint a token for a
+ * launcher to hand a child process. */
+fdk_result fdk_wayland_window_activate(fdk_platform_window *pwindow);
+fdk_result fdk_wayland_window_activation_token(
+    fdk_platform_window *pwindow, char *out, size_t cap);
 void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 void fdk_wayland_window_set_size_limits(fdk_platform_window *pwindow,
                                          fdk_size min_size, fdk_size max_size);

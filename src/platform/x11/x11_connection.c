@@ -207,6 +207,31 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->display_dead = 0;
     conn->detectable_repeat = 0;
     memset(conn->key_down, 0, sizeof conn->key_down);
+
+    /* Activation + startup notification (1.1.0, S-6): the id a
+     * LAUNCHER handed us through the environment (the X11 form of
+     * the activation voucher). Read once, unset immediately — the
+     * startup-notification spec's own hygiene rule: a child must
+     * never propagate a spent id to grandchildren. Every window
+     * created while the id is held carries it as _NET_STARTUP_ID
+     * (x11_window.c), and the first show emits the matching
+     * "remove:" state (the launch feedback's honest end). The
+     * sequence counter makes OUR OWN minted ids unique within the
+     * process even under rapid re-mint. */
+    conn->last_event_time = 0; /* CurrentTime until a real event */
+    conn->sn_seq = 0;
+    conn->startup_id = NULL;
+    {
+        const char *sid = getenv("DESKTOP_STARTUP_ID");
+        if (sid != NULL && sid[0] != '\0') {
+            size_t len = strlen(sid) + 1;
+            conn->startup_id = fdk_alloc(len);
+            if (conn->startup_id != NULL) {
+                memcpy(conn->startup_id, sid, len);
+            }
+        }
+        unsetenv("DESKTOP_STARTUP_ID");
+    }
     g_io_conn = conn;
     (void)XSetIOErrorHandler(x11_io_error_handler);
     (void)XSetErrorHandler(x11_error_handler);
@@ -332,6 +357,19 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->net_wm_pid = XInternAtom(display, "_NET_WM_PID", False);
     conn->wm_client_machine = XInternAtom(display, "WM_CLIENT_MACHINE", False);
     conn->wm_window_role = XInternAtom(display, "WM_WINDOW_ROLE", False);
+    /* Activation + startup notification (1.1.0, S-6): the EWMH
+     * activation request type, the window property a launched app
+     * tags itself with, and the root-message pair carrying the
+     * startup-notification state protocol (openbox/metacity-family
+     * WMs listen for these — no D-Bus, no dependency). */
+    conn->net_active_window =
+        XInternAtom(display, "_NET_ACTIVE_WINDOW", False);
+    conn->net_startup_id =
+        XInternAtom(display, "_NET_STARTUP_ID", False);
+    conn->net_startup_info_begin =
+        XInternAtom(display, "_NET_STARTUP_INFO_BEGIN", False);
+    conn->net_startup_info =
+        XInternAtom(display, "_NET_STARTUP_INFO", False);
     conn->net_wm_state = XInternAtom(display, "_NET_WM_STATE", False);
     conn->net_wm_state_maximized_vert =
         XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);
@@ -481,6 +519,8 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
 
     free(conn->app_id);
     conn->app_id = NULL;
+    fdk_free(conn->startup_id);
+    conn->startup_id = NULL;
 
     if (conn->display_dead) {
         /* The server is gone: XCloseDisplay would walk straight back

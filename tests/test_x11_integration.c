@@ -3761,6 +3761,194 @@ static void test_input_region(void) {
            "(1 rect, 2 rects, empty, clear) + REAL XTEST "
            "click-through both ways\n");
 }
+
+/* ---- Activation + startup notification (1.1.0, S-6), bare X ---------------
+ *
+ * No WM is running (this leg runs before the fake WM installs), so
+ * this is the full BARE-X contract, verified against real server
+ * state through a second connection:
+ *
+ *   - DESKTOP_STARTUP_ID is captured at connect (read once, unset
+ *     immediately — the spec's hygiene rule) and every window
+ *     created while it is held carries it as _NET_STARTUP_ID;
+ *   - the launcher token mint returns a spec-format id AND emits the
+ *     chunked "new:" state to the root window
+ *     (_NET_STARTUP_INFO_BEGIN + continuations — the format-8
+ *     20-byte-per-message wire protocol the SN spec defines);
+ *   - the FIRST show of a startup-id window emits "remove: ID=..."
+ *     and never a second one;
+ *   - activate() under bare X raises and focuses directly —
+ *     XGetInputFocus from the second connection proves the focus.
+ *
+ * The EWMH half (_NET_ACTIVE_WINDOW with source indication and the
+ * last user timestamp) is proven by the fake WM below. */
+/* Drains the listener connection's queue reassembling the chunked
+ * startup-notification wire form: _NET_STARTUP_INFO_BEGIN carries
+ * the first 20 bytes, _NET_STARTUP_INFO the continuations, and a
+ * short chunk means the NUL landed inside it (message complete).
+ * Returns 1 when one full message was reassembled into
+ * out_message; a subsequent call drains the NEXT message (each
+ * mint/show emits its own). */
+static int sn_capture_next_message(Display *dpy,
+                                   char *out_message, size_t cap) {
+    XEvent ev;
+    char buf[256];
+    size_t used = 0;
+    int in_message = 0;
+    Atom begin = XInternAtom(dpy, "_NET_STARTUP_INFO_BEGIN", False);
+    Atom cont = XInternAtom(dpy, "_NET_STARTUP_INFO", False);
+    /* XSync FIRST (the fake_wm_pump lesson): it flushes this
+     * connection AND waits for the server, which by then has also
+     * processed every OTHER client's already-flushed requests —
+     * FDK's XSendEvent chunks are in our queue by the time XPending
+     * looks. Without it the capture races the server's forwarding. */
+    XSync(dpy, False);
+    while (XPending(dpy) > 0) {
+        XNextEvent(dpy, &ev);
+        if (ev.type != ClientMessage) {
+            continue;
+        }
+        if (ev.xclient.message_type == begin ||
+            (in_message && ev.xclient.message_type == cont)) {
+            if (ev.xclient.message_type == begin) {
+                used = 0;
+                in_message = 1;
+            }
+            size_t chunk = strnlen(ev.xclient.data.b, 20);
+            if (used + chunk < sizeof buf) {
+                memcpy(buf + used, ev.xclient.data.b, chunk);
+                used += chunk;
+            }
+            if (chunk < 20) {
+                buf[used] = '\0';
+                snprintf(out_message, cap, "%s", buf);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void test_activation_startup(void) {
+    /* The voucher: set BEFORE fdk_init — the capture is a connect-
+     * time discipline. A value no real launcher would produce makes
+     * the property readback unambiguous. */
+    setenv("DESKTOP_STARTUP_ID", "rig-998877-x11-voucher", 1);
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    /* Read-once: the variable is gone from our environment the
+     * moment the connection exists (grandchildren must never
+     * inherit a spent id). */
+    assert(getenv("DESKTOP_STARTUP_ID") == NULL);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "activation test",
+                                 .width = 200, .height = 150 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    unsigned long xid = fdk_window_xid(win);
+
+    /* The listener connection: SubstructureNotifyMask on root is
+     * shareable with anyone (unlike SubstructureRedirectMask) and
+     * receives the XSendEvent'd root client messages. */
+    Display *dpy = XOpenDisplay(NULL);
+    assert(dpy != NULL);
+    XSelectInput(dpy, DefaultRootWindow(dpy), SubstructureNotifyMask);
+    XSync(dpy, False);
+
+    /* --- _NET_STARTUP_ID on the window: the voucher, as UTF8 --- */
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid,
+                                                "_NET_STARTUP_ID",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(type == XInternAtom(dpy, "UTF8_STRING", False));
+        assert(fmt == 8);
+        assert(n == strlen("rig-998877-x11-voucher"));
+        assert(memcmp(data, "rig-998877-x11-voucher", n) == 0);
+        XFree(data);
+    }
+    printf("[ok] X11 startup id: DESKTOP_STARTUP_ID -> _NET_STARTUP_ID "
+           "(read once, env unset)\n");
+
+    /* --- the launcher mint: spec-format id + the "new:" state --- */
+    char token[128];
+    memset(token, 0, sizeof token);
+    assert(fdk_ok(fdk_window_activation_token(win, token,
+                                              sizeof token)));
+    assert(token[0] != '\0');
+    assert(strstr(token, "FDK") != NULL); /* the FDK-pid-seq portion */
+    {
+        /* TIMESTAMP-SCREEN-UNIQUE-HOST: >= 3 dashes */
+        int dashes = 0;
+        for (const char *p = token; *p != '\0'; p++) {
+            if (*p == '-') {
+                dashes++;
+            }
+        }
+        assert(dashes >= 3);
+    }
+    {
+        char msg[256];
+        assert(sn_capture_next_message(dpy, msg, sizeof msg));
+        assert(strncmp(msg, "new: ID=", 8) == 0);
+        assert(strstr(msg, token) == msg + 8); /* the id, verbatim */
+        assert(strstr(msg, "SCREEN=") != NULL);
+        assert(strstr(msg, "NAME=") != NULL);
+        assert(strstr(msg, "BIN=") != NULL);
+    }
+    /* Second mint: a DIFFERENT id (the sequence counter), and the
+     * env never reappears. */
+    {
+        char token2[128];
+        assert(fdk_ok(fdk_window_activation_token(win, token2,
+                                                  sizeof token2)));
+        assert(strcmp(token, token2) != 0);
+        char msg[256];
+        assert(sn_capture_next_message(dpy, msg, sizeof msg));
+        assert(strstr(msg, token2) != NULL);
+    }
+    printf("[ok] X11 activation token: spec-format id + chunked "
+           "\"new:\" state on the root window\n");
+
+    /* --- bare-X activate: raise + direct focus --- */
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+    {
+        char msg[256];
+        assert(sn_capture_next_message(dpy, msg, sizeof msg));
+        assert(strncmp(msg, "remove: ID=", 11) == 0);
+        assert(strstr(msg, "rig-998877-x11-voucher") != NULL);
+        /* The completion is one-shot: hide + show again emits
+         * nothing. */
+    }
+    fdk_window_hide(win);
+    (void)fdk_pump_events(ctx, 50);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+    {
+        char msg[256];
+        assert(!sn_capture_next_message(dpy, msg, sizeof msg));
+    }
+    printf("[ok] X11 startup completion: \"remove:\" on first show, "
+           "once per launch\n");
+
+    assert(fdk_ok(fdk_window_activate(win)));
+    XSync(dpy, False);
+    {
+        Window focus = None;
+        int revert = 0;
+        XGetInputFocus(dpy, &focus, &revert);
+        assert(focus == (Window)xid);
+    }
+    printf("[ok] X11 activate (bare X): raise + direct input focus\n");
+
+    XCloseDisplay(dpy);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+}
+
 /* ---- The EWMH fake window manager ----
  *
  * Xvfb runs with NO window manager, which is exactly right for the
@@ -3795,6 +3983,7 @@ typedef struct {
     Atom net_wm_state_maximized_horiz;
     Atom net_wm_moveresize;
     Atom wm_change_state;
+    Atom net_active_window;
     /* Last _NET_WM_STATE message fields. */
     long mr_action, mr_a1, mr_a2, mr_a3;
     int saw_net_wm_state;
@@ -3804,6 +3993,11 @@ typedef struct {
     /* Last WM_CHANGE_STATE (iconify) state. */
     long change_state;
     int saw_change_state;
+    /* Last _NET_ACTIVE_WINDOW message (S-6): the window field +
+     * data.l[0..2] — source indication, timestamp, active window. */
+    unsigned long aw_window;
+    long aw_source, aw_timestamp, aw_active_hint;
+    int saw_active;
     /* Saved pre-maximize geometry of the (single) managed window. */
     int has_saved, saved_x, saved_y;
     unsigned int saved_w, saved_h;
@@ -3842,7 +4036,11 @@ static void fake_wm_install(fake_wm *wm) {
         XInternAtom(wm->dpy, "_NET_WM_MOVERESIZE", False);
     wm->wm_change_state =
         XInternAtom(wm->dpy, "WM_CHANGE_STATE", False);
+    wm->net_active_window =
+        XInternAtom(wm->dpy, "_NET_ACTIVE_WINDOW", False);
     wm->change_state = -1;
+    wm->saw_active = 0;
+    wm->aw_timestamp = -1;
 
     /* Advertise exactly what we implement: FDK keys its EWMH
      * maximize path off both maximized atoms being listed. */
@@ -3959,6 +4157,17 @@ static void fake_wm_pump(fake_wm *wm) {
     while (XPending(wm->dpy) > 0) {
         XEvent ev;
         XNextEvent(wm->dpy, &ev);
+        if (ev.type == MapRequest) {
+            /* A real WM maps the window after the MapRequest (the
+             * server intercepted the client's map because this WM
+             * owns SubstructureRedirect on the root). Without this,
+             * every FDK window shown under the fake WM would stay
+             * UNMAPPED forever — invisible to XTEST-delivered input,
+             * which needs a viewable window under the pointer (the
+             * S-6 activation-timestamp leg caught exactly that). */
+            XMapWindow(wm->dpy, ev.xmaprequest.window);
+            continue;
+        }
         if (ev.type != ClientMessage) {
             continue;
         }
@@ -3986,6 +4195,12 @@ static void fake_wm_pump(fake_wm *wm) {
             if (wm->move_dir == 8 /* MOVE */) {
                 XMoveWindow(wm->dpy, ev.xclient.window, 30, 10);
             }
+        } else if (ev.xclient.message_type == wm->net_active_window) {
+            wm->aw_window = (unsigned long)ev.xclient.window;
+            wm->aw_source = ev.xclient.data.l[0];
+            wm->aw_timestamp = ev.xclient.data.l[1];
+            wm->aw_active_hint = ev.xclient.data.l[2];
+            wm->saw_active++;
         } else if (ev.xclient.message_type == wm->wm_change_state) {
             wm->change_state = ev.xclient.data.l[0];
             wm->saw_change_state++;
@@ -4218,6 +4433,43 @@ static void test_ewmh_fake_wm(void) {
         (void)fdk_pump_events(ctx, 300);
     }
     assert(!fdk_window_is_minimized(win));
+
+    /* ---- Activation under an EWMH WM (S-6): _NET_ACTIVE_WINDOW
+     * with source indication 1 (application), the last USER event
+     * timestamp in data.l[1] — the focus-stealing-prevention
+     * contract. First WITHOUT user input (timestamp 0 /
+     * CurrentTime, the honest "unknown"), then after a REAL XTEST
+     * click in the window (the timestamp becomes the click's
+     * server time — non-zero, the number a WM weighs). ---- */
+    wm.saw_active = 0;
+    assert(fdk_ok(fdk_window_activate(win)));
+    assert(fake_wm_wait(&wm, &wm.saw_active, 1));
+    assert(wm.saw_active == 1);
+    assert(wm.aw_window == xid);
+    assert(wm.aw_source == 1 /* application, not pager/unknown */);
+    assert(wm.aw_timestamp == 0 /* no user input yet: CurrentTime */);
+    assert(wm.aw_active_hint == 0 /* unknown active window */);
+    printf("[ok] X11 EWMH activate: _NET_ACTIVE_WINDOW(app source, "
+           "CurrentTime) received by the WM\n");
+
+    /* A real user click in the window: FDK records the event time,
+     * the NEXT activation carries it. */
+    {
+        XTestFakeMotionEvent(wm.dpy, 0, 150, 100, CurrentTime);
+        XTestFakeButtonEvent(wm.dpy, 1, True, CurrentTime);
+        XTestFakeButtonEvent(wm.dpy, 1, False, CurrentTime);
+        XSync(wm.dpy, False);
+        (void)fdk_pump_events(ctx, 150);
+    }
+    wm.saw_active = 0;
+    assert(fdk_ok(fdk_window_activate(win)));
+    assert(fake_wm_wait(&wm, &wm.saw_active, 1));
+    assert(wm.saw_active == 1);
+    assert(wm.aw_window == xid);
+    assert(wm.aw_source == 1);
+    assert(wm.aw_timestamp > 0 /* the click's real server time */);
+    printf("[ok] X11 EWMH activate: real user timestamp rides the "
+           "message after a live XTEST click\n");
 
     fdk_window_destroy(win);
     fdk_shutdown(ctx);
@@ -12129,6 +12381,7 @@ int main(void) {
     test_resize_cursor_affordance();
     test_named_cursor_set();
     test_input_region();
+    test_activation_startup();
     test_ewmh_atom_spelling();
     test_ewmh_fake_wm();
     test_mitm_shm_and_double_buffer();

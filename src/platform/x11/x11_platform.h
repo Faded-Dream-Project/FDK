@@ -120,6 +120,29 @@ struct fdk_platform_connection {
     Atom wm_client_machine;
     Atom wm_window_role;
 
+    /* Activation + startup notification atoms (1.1.0, S-6):
+     * _NET_ACTIVE_WINDOW (the EWMH focus request — data.l[1] is
+     * the last USER event timestamp, the number a WM weighs for
+     * focus-stealing prevention), _NET_STARTUP_ID (the UTF8
+     * property a launched app tags its windows with), and the
+     * _NET_STARTUP_INFO_BEGIN/_NET_STARTUP_INFO root-message pair
+     * (the chunked startup-notification state protocol — "new:"
+     * on mint, "remove:" on the launched app's first show). */
+    Atom net_active_window;
+    Atom net_startup_id;
+    Atom net_startup_info_begin;
+    Atom net_startup_info;
+
+    /* S-6 state: the captured DESKTOP_STARTUP_ID (a launcher's
+     * voucher for us — see x11_connection.c for the read-once,
+     * unset-immediately discipline), the per-process sequence for
+     * OUR minted ids, and the last user event timestamp (updated
+     * by the dispatch pump from key/button/motion events — 0 =
+     * CurrentTime, which WMs treat as "unknown, decide yourself"). */
+    char *startup_id;
+    unsigned long sn_seq;
+    unsigned long last_event_time;
+
     /* Phase 8 window management: EWMH atoms + what the running WM
      * actually supports, probed once at connect from the root's
      * _NET_SUPPORTED list (see x11_connection.c). ewmh_wm != 0 means
@@ -433,6 +456,17 @@ struct fdk_platform_window {
      * steals keyboard focus from the app that owns it. */
     int input_transparent;
 
+    /* Startup-notification state (1.1.0, S-6): a copy of the
+     * connection's captured DESKTOP_STARTUP_ID for windows created
+     * while the voucher is held — the window's _NET_STARTUP_ID
+     * property value AND the id whose "remove:" state ends the
+     * launch feedback at this window's FIRST show (the
+     * startup-notification protocol's completion step, emitted
+     * once). NULL for windows created without a voucher. Freed at
+     * destroy. */
+    char *startup_id;
+    int startup_remove_sent;
+
     /* Popup trace stamp (1.1.0-rc1, X3): the last IN-BOUNDS button
      * press time on this popup — the destroy-site fallback uses it to
      * tell "an item was selected" (app destroy right after a click)
@@ -674,6 +708,17 @@ void fdk__x11_named_cursors_shutdown(fdk_platform_connection *conn,
  * translation of the window_set_input_region op. */
 void fdk_x11_window_set_input_region(fdk_platform_window *pwindow,
                                      const fdk_rect *rects, int count);
+
+/* Activation + startup notification (1.1.0, S-6; x11_window.c):
+ * _NET_ACTIVE_WINDOW (EWMH) / raise+focus (bare X), the SN-token
+ * mint with its "new:" root message, and the chunked
+ * startup-notification state emitter ("new:" from the mint,
+ * "remove:" from the first show of a window carrying an id). */
+fdk_result fdk_x11_window_activate(fdk_platform_window *pwindow);
+fdk_result fdk_x11_window_activation_token(fdk_platform_window *pwindow,
+                                            char *out, size_t cap);
+void fdk_x11_send_startup_info(fdk_platform_connection *conn,
+                                const char *message);
 
 /* ---- The dlopen'd RENDER cursor lane (x11_cursor.c) ----
  *

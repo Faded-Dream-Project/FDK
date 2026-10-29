@@ -9,6 +9,7 @@
 #include "generated/xdg-toplevel-icon-v1-client-protocol.h"
 #include "generated/text-input-unstable-v3-client-protocol.h"
 #include "generated/idle-inhibit-unstable-v1-client-protocol.h"
+#include "generated/xdg-activation-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -156,6 +157,16 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->idle_inhibit_manager =
             wl_registry_bind(registry, name,
                              &zwp_idle_inhibit_manager_v1_interface, 1);
+    } else if (strcmp(interface,
+                      xdg_activation_v1_interface.name) == 0) {
+        /* OPTIONAL (1.1.0, S-6): xdg-activation — the
+         * focus-stealing-prevention protocol. Absent (rare: sway,
+         * KDE and GNOME all ship it) means activate() and token
+         * minting answer UNSUPPORTED. Version 1 is the whole
+         * protocol. */
+        conn->activation =
+            wl_registry_bind(registry, name,
+                             &xdg_activation_v1_interface, 1);
     }
     /* Other globals (wl_data_device_manager, etc.) are
      * intentionally not bound — out of current scope, see
@@ -276,6 +287,25 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
     conn->window_count = 0;
     conn->window_capacity = 0;
     conn->last_dispatch_errno = 0;
+    conn->activation = NULL;
+    conn->launch_token = NULL;
+    /* S-6: the launch token a LAUNCHER vouched for us with — read
+     * once and UNSET immediately (the protocol's own hygiene rule:
+     * never propagate a spent/stale token to children we spawn).
+     * Spent by the first fdk_window_activate() (wayland_window.c). */
+    {
+        const char *tok = getenv("XDG_ACTIVATION_TOKEN");
+        if (tok != NULL && tok[0] != '\0') {
+            size_t len = strlen(tok) + 1;
+            conn->launch_token = fdk_alloc(len);
+            if (conn->launch_token != NULL) {
+                memcpy(conn->launch_token, tok, len);
+                FDK_INFO("xdg-activation: launch token captured "
+                         "(spent by the first activate)");
+            }
+        }
+        unsetenv("XDG_ACTIVATION_TOKEN");
+    }
 
     /* Dedicated wl_buffer event queue (1.1.6) — created before the
      * first wl_buffer can exist (windows come later), so
@@ -403,6 +433,12 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
         zwp_idle_inhibit_manager_v1_destroy(conn->idle_inhibit_manager);
         conn->idle_inhibit_manager = NULL;
     }
+    if (conn->activation != NULL) {
+        xdg_activation_v1_destroy(conn->activation);
+        conn->activation = NULL;
+    }
+    fdk_free(conn->launch_token);
+    conn->launch_token = NULL;
     if (conn->fractional_manager) {
         wp_fractional_scale_manager_v1_destroy(conn->fractional_manager);
     }

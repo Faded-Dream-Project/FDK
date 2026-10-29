@@ -284,6 +284,26 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->popup_saved_revert = RevertToPointerRoot;
     pwindow->popup_grab_ms = 0;
     pwindow->popup_release_reason[0] = '\0';
+    /* Startup notification (1.1.0, S-6): windows created while the
+     * connection holds a captured DESKTOP_STARTUP_ID carry it —
+     * the property is the WM's match key between this window and
+     * the launch feedback the launcher began. Popups are excluded
+     * (they are not the app's face to the taskbar). The copy is
+     * spent by the FIRST show's "remove:" state — see
+     * fdk_x11_window_show. */
+    pwindow->startup_id = NULL;
+    pwindow->startup_remove_sent = 0;
+    if (!pwindow->popup && conn->startup_id != NULL) {
+        size_t slen = strlen(conn->startup_id) + 1;
+        pwindow->startup_id = fdk_alloc(slen);
+        if (pwindow->startup_id != NULL) {
+            memcpy(pwindow->startup_id, conn->startup_id, slen);
+            XChangeProperty(conn->display, xwindow, conn->net_startup_id,
+                            conn->utf8_string, 8, PropModeReplace,
+                            (const unsigned char *)pwindow->startup_id,
+                            (int)(slen - 1));
+        }
+    }
     if (pwindow->popup) {
         popup_trace("create 0x%lx parent 0x%lx %dx%d at (%d,%d)",
                     (unsigned long)xwindow,
@@ -445,6 +465,8 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
         XDestroyIC(pwindow->xic);
         pwindow->xic = NULL;
     }
+    fdk_free(pwindow->startup_id);
+    pwindow->startup_id = NULL;
     /* IME composition state (M-1): AFTER XDestroyIC — the IC may
      * still hold references into the callback array, so it dies
      * first; then the preedit buffer and the array itself. */
@@ -776,6 +798,158 @@ fdk_result fdk_x11_window_set_modal(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
+/* ---- Activation + startup notification (1.1.0, S-6) ------------------------
+ *
+ * The X11 half of the focus-stealing-prevention story. Activation
+ * itself is one EWMH root message — _NET_ACTIVE_WINDOW with the
+ * last USER event timestamp in data.l[1] (the number a WM weighs
+ * against its own focus history; GTK and Qt send exactly this) —
+ * with an honest bare-X fallback (raise + focus directly; no WM is
+ * listening, so we are the best authority available).
+ *
+ * The startup-notification protocol is the chunked root-message
+ * form — no D-Bus, no library: a "new: ID=... NAME=... BIN=..."
+ * state on token mint (the launcher's launch-feedback BEGIN), a
+ * "remove: ID=..." state on the launched app's first show (its
+ * END — see fdk_x11_window_show). Each state is a NUL-terminated
+ * string carried 20 bytes per ClientMessage: the first message
+ * types _NET_STARTUP_INFO_BEGIN, continuations _NET_STARTUP_INFO
+ * — the openbox/metacity-family wire format every SN-speaking WM
+ * listens for on the root window. */
+void fdk_x11_send_startup_info(fdk_platform_connection *conn,
+                                const char *message) {
+    if (conn == NULL || message == NULL || conn->display_dead) {
+        return;
+    }
+    size_t total = strlen(message) + 1; /* includes the NUL */
+    size_t off = 0;
+    int first = 1;
+    do {
+        XEvent ev;
+        memset(&ev, 0, sizeof ev);
+        ev.xclient.type = ClientMessage;
+        ev.xclient.window = conn->root;
+        ev.xclient.message_type =
+            first ? conn->net_startup_info_begin : conn->net_startup_info;
+        ev.xclient.format = 8;
+        size_t chunk = total - off;
+        if (chunk > 20) {
+            chunk = 20;
+        }
+        memcpy(ev.xclient.data.b, message + off, chunk);
+        XSendEvent(conn->display, conn->root, False,
+                   (long)(SubstructureNotifyMask |
+                          SubstructureRedirectMask),
+                   &ev);
+        off += chunk;
+        first = 0;
+    } while (off < total);
+    XFlush(conn->display);
+}
+
+fdk_result fdk_x11_window_activate(fdk_platform_window *pwindow) {
+    if (pwindow == NULL || pwindow->conn == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    if (conn->display_dead) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    if (conn->ewmh_wm) {
+        /* The sanctioned request. Source indication 1 = application
+         * (2 is a pager; 0 unknown); the timestamp is the last user
+         * event FDK saw (0/CurrentTime when none — a WM then decides
+         * by its own policy, which is the honest answer); data.l[2]
+         * would be the currently-active window, which we cannot
+         * know — 0/None per EWMH. The message itself carries the
+         * window to activate in its .window field (send_root_message
+         * hardcodes it from pwindow — same shape here). */
+        XEvent msg;
+        memset(&msg, 0, sizeof msg);
+        msg.type = ClientMessage;
+        msg.xclient.window = pwindow->xwindow;
+        msg.xclient.message_type = conn->net_active_window;
+        msg.xclient.format = 32;
+        msg.xclient.data.l[0] = 1; /* source: application */
+        msg.xclient.data.l[1] = (long)conn->last_event_time;
+        msg.xclient.data.l[2] = 0; /* currently-active: unknown */
+        msg.xclient.data.l[3] = 0;
+        msg.xclient.data.l[4] = 0;
+        XSendEvent(conn->display, conn->root, False,
+                   (long)(SubstructureNotifyMask |
+                          SubstructureRedirectMask),
+                   &msg);
+        XFlush(conn->display);
+        return FDK_OK;
+    }
+    /* Bare X: no WM to ask — raise and focus directly, the best
+     * authority available. Focus on an unviewable window would be
+     * a BadMatch, so a hidden window only raises (it takes focus
+     * through its own map under the EnterWindow/RevertToParent
+     * rules when shown). */
+    XRaiseWindow(conn->display, pwindow->xwindow);
+    XWindowAttributes wa;
+    if (XGetWindowAttributes(conn->display, pwindow->xwindow, &wa) &&
+        wa.map_state == IsViewable) {
+        XSetInputFocus(conn->display, pwindow->xwindow,
+                       RevertToPointerRoot, (Time)conn->last_event_time);
+    }
+    XFlush(conn->display);
+    return FDK_OK;
+}
+
+fdk_result fdk_x11_window_activation_token(fdk_platform_window *pwindow,
+                                           char *out, size_t cap) {
+    if (pwindow == NULL || pwindow->conn == NULL || out == NULL ||
+        cap == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    if (conn->display_dead) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    /* The SN id format (the spec's "common format"): TIMESTAMP-
+     * SCREEN-UNIQUE-HOST. The unique portion embeds the pid and a
+     * per-process sequence — two rapid mints from the same process
+     * can never collide, and the host disambiguates across
+     * machines sharing a display (XDMCP / ssh -X). 64 bytes is
+     * always enough; cap guards the caller's buffer. */
+    char hostname[64];
+    if (gethostname(hostname, sizeof hostname) != 0) {
+        snprintf(hostname, sizeof hostname, "localhost");
+    }
+    hostname[sizeof hostname - 1] = '\0';
+    for (char *p = hostname; *p != '\0'; p++) {
+        /* Hostnames with spaces would break the key=value grammar —
+         * snip at the first offender (spec tokens are space-born). */
+        if (*p == ' ' || *p == '\t') {
+            *p = '\0';
+            break;
+        }
+    }
+    char id[96];
+    snprintf(id, sizeof id, "%lu-%d-FDK%ldx%lu-%s",
+             (unsigned long)time(NULL), conn->screen, (long)getpid(),
+             conn->sn_seq++, hostname);
+    if (strlen(id) + 1 > cap) {
+        return FDK_ERR_INVALID_ARGUMENT; /* caller's buffer too small */
+    }
+    memcpy(out, id, strlen(id) + 1);
+
+    /* Emit the launch-feedback BEGIN: "new:" with the id, the
+     * screen, and the app identity WMs display while the child
+     * starts. NAME/BIN come from the connection's app_id (the same
+     * string WM_CLASS carries). */
+    char msg[256];
+    const char *app =
+        (conn->app_id != NULL && conn->app_id[0] != '\0') ? conn->app_id
+                                                           : "fdk-app";
+    snprintf(msg, sizeof msg, "new: ID=%s SCREEN=%d NAME=%s BIN=%s",
+             id, conn->screen, app, app);
+    fdk_x11_send_startup_info(conn, msg);
+    return FDK_OK;
+}
+
 void fdk_x11_window_show(fdk_platform_window *pwindow) {
     if (pwindow->popup) {
         /* Input-TRANSPARENT popups (tooltips) never grab: a grab
@@ -810,6 +984,21 @@ void fdk_x11_window_show(fdk_platform_window *pwindow) {
     }
     XMapWindow(pwindow->conn->display, pwindow->xwindow);
     XFlush(pwindow->conn->display);
+
+    /* Startup-notification completion (1.1.0, S-6): the FIRST show
+     * of the window carrying the launcher's id ends the launch
+     * feedback — "remove: ID=..." tells every listening WM the
+     * application is up (the hourglass/cursor feedback stops). One
+     * emission per id-holder; a second window under the same id
+     * (created before the first show) stays silent — the spec's
+     * remove is per-LAUNCH, and the launch is over. */
+    if (pwindow->startup_id != NULL && !pwindow->startup_remove_sent) {
+        char remove_msg[128];
+        snprintf(remove_msg, sizeof remove_msg, "remove: ID=%s",
+                 pwindow->startup_id);
+        fdk_x11_send_startup_info(pwindow->conn, remove_msg);
+        pwindow->startup_remove_sent = 1;
+    }
 }
 
 void fdk_x11_window_hide(fdk_platform_window *pwindow) {

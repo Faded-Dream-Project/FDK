@@ -14,6 +14,43 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — window activation + startup notification (S-6 / B-04)
+
+- **`fdk_window_activate`** (fdk_window.h): ask the compositor/WM to
+  bring a window to the user — focus, raise, unminimize as the
+  platform allows (GTK's "present" verb). Wayland: xdg-activation-v1
+  through a compositor-minted token (or the launch voucher below);
+  X11: the EWMH `_NET_ACTIVE_WINDOW` message carrying the last USER
+  event timestamp (tracked live in the dispatch pump — the number a
+  WM weighs for focus-stealing prevention), with an honest raise +
+  focus fallback under bare X. A request, not a guarantee — by
+  protocol, not policy.
+- **`fdk_window_activation_token`** (fdk_window.h): the LAUNCHER
+  half — mint a token tied to this window and hand it to a spawned
+  child through its environment (`XDG_ACTIVATION_TOKEN` on Wayland,
+  `DESKTOP_STARTUP_ID` on X11) so the child's first window arrives
+  pre-vouched. The Wayland mint rides a PRIVATE event queue +
+  `wl_display_roundtrip_queue` (reentrancy-safe from inside any
+  event handler); the X11 mint is a spec-format startup-notification
+  id plus the chunked "new:" state on the root window — the full SN
+  feedback loop CLIENT-SIDE, no D-Bus, no library.
+- The launched side needs no code: both variables are captured once
+  at `fdk_init` and unset immediately (the protocols' hygiene rule —
+  grandchildren never inherit a stale token); X11 windows created
+  under the id carry `_NET_STARTUP_ID`, and the first show emits the
+  matching "remove:" state (the launch feedback's honest end, once
+  per launch).
+- Tests: six new X11 legs (capture discipline, property round-trip,
+  chunked-wire reassembly, unique re-mints, the one-shot remove:,
+  the bare-X XGetInputFocus proof) + the fake-WM
+  `_NET_ACTIVE_WINDOW` legs with a real XTEST click's timestamp; five
+  new sway legs (capture-unset, the private-queue mint, the
+  injected-click focus state, the bogus voucher REFUSED — focus-
+  stealing prevention IS the assertion, and the full two-process
+  launcher flow: held-button serial, mint, re-exec'd child, sway
+  flips focus through the voucher). 841 -> 843 exports.
+  docs/DECISIONS.md D-020; owner steps TESTING-ON-DESKTOP.md §13.
+
 ### Added — animated GIF images (C-4 / B-14)
 
 - **`fdk_gif`** (fdk_surface.h): a spec-native animated GIF loader
