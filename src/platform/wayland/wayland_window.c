@@ -900,6 +900,47 @@ static void apply_window_scale(fdk_platform_window *pwindow) {
     pwindow->scale_applied = 1;
 }
 
+/* Input region (1.1.0-rc2, S-4 / A-06): wl_surface.set_input_region
+ * with a wl_compositor region built from the LOGICAL rects — the
+ * protocol's surface-local space is exactly FDK's logical space (the
+ * one pointer events deliver), so no scale conversion happens here
+ * (unlike X11's physical XShape). The region OBJECT is destroyed
+ * immediately: the request copies it into double-buffered surface
+ * state. Committed at once when the surface is already configured
+ * (so a region change takes effect without waiting for the app's
+ * next present); a not-yet-configured surface carries the state on
+ * its FIRST commit — committing here would be the
+ * unconfigured-surface protocol error the ext-popup gate prevents. */
+void fdk_wayland_window_set_input_region(fdk_platform_window *pwindow,
+                                         const fdk_rect *rects,
+                                         int count) {
+    if (pwindow == NULL || pwindow->surface == NULL || count < 0 ||
+        count > FDK_PLATFORM_INPUT_REGION_MAX) {
+        return;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    if (count > 0 && rects != NULL) {
+        struct wl_region *region =
+            wl_compositor_create_region(conn->compositor);
+        if (region == NULL) {
+            return; /* OOM: the previous region stays — honest */
+        }
+        for (int i = 0; i < count; i++) {
+            wl_region_add(region, rects[i].x, rects[i].y,
+                          rects[i].width, rects[i].height);
+        }
+        wl_surface_set_input_region(pwindow->surface, region);
+        wl_region_destroy(region);
+    } else {
+        /* The clear: a NULL region is the protocol's "whole
+         * surface" — full input again. */
+        wl_surface_set_input_region(pwindow->surface, NULL);
+    }
+    if (pwindow->configured) {
+        wl_surface_commit(pwindow->surface);
+    }
+}
+
 fdk_result fdk_wayland_window_get_scale(fdk_platform_window *pwindow,
                                         fdk_f32 *out_scale) {
     if (pwindow == NULL || out_scale == NULL) {

@@ -360,6 +360,18 @@ fdk_result fdk_ext_surface_get_surface(fdk_ext_surface *surface,
 void fdk_ext_surface_set_cursor(fdk_ext_surface *surface,
                                 int shape);
 
+/* Sets the surface's INPUT region (1.1.0-rc2, S-4): `count`
+ * window-local logical rectangles inside which the surface receives
+ * pointer input; input outside them falls through to whatever is
+ * beneath. rects may be NULL only when count is 0, which clears the
+ * region (full input). Semantics and limits as FDK's
+ * fdk_window_set_input_region (fdk_window.h: FDK_INPUT_REGION_MAX,
+ * the error codes, the zero-area = empty region rule). Available
+ * since extension API v1 (append-only addition). */
+fdk_result fdk_ext_surface_set_input_region(fdk_ext_surface *surface,
+                                            const fdk_rect *rects,
+                                            fdk_i32 count);
+
 /* Makes the surface visible. X11: maps the window. Wayland: a
  * documented no-op — a role-carrying surface maps when its own
  * protocol handshake and first buffer commit complete, both of

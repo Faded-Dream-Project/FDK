@@ -36,6 +36,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h> /* XGetImage / XGetPixel / XDestroyImage */
 #include <X11/Xatom.h> /* XA_ATOM / XA_INTEGER (fake-WM property work) */
+#include <X11/extensions/shape.h> /* XShapeGetRectangles (S-4) */
+#include <X11/extensions/XTest.h>  /* XTEST real pointer events (S-4) */
 
 #include <assert.h>
 #include <signal.h>
@@ -3579,6 +3581,184 @@ static void test_named_cursor_set(void) {
            "glyph-0 five built through RENDER from the hermetic "
            "theme, font twins cached, Entry hover I-beam + priority "
            "order proven\n");
+}
+
+/* Counts button presses for the click-through legs. */
+static void region_click_cb(fdk_window *w, const fdk_event_data *event,
+                            void *user) {
+    (void)w;
+    if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        int *n = user;
+        (*n)++;
+    }
+}
+
+/* The input region (1.1.0-rc2, S-4 / A-06): the region API sets
+ * XShape input rects that a second connection READS BACK through
+ * the protocol, and the click-through behavior is proven with REAL
+ * XTEST pointer events — a click on the window but outside its
+ * region lands on the window BENEATH it (XSendEvent bypasses shape
+ * hit-testing, so only the true input path proves the mechanism). */
+static void test_input_region(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* A bottom window (full input) and a top window whose region
+     * covers only its left half. Both stacked at the same place
+     * (no WM under Xvfb: create order = stacking order). */
+    fdk_window *bottom = NULL;
+    fdk_window_options bopts = { .title = "FDK region bottom",
+                                 .width = 200, .height = 120,
+                                 .x = 40, .y = 40 };
+    assert(fdk_ok(fdk_window_create(ctx, &bopts, &bottom)));
+    fdk_window_show(bottom);
+
+    fdk_window *top = NULL;
+    fdk_window_options topts = { .title = "FDK region top",
+                                 .width = 200, .height = 120,
+                                 .x = 40, .y = 40 };
+    assert(fdk_ok(fdk_window_create(ctx, &topts, &top)));
+    fdk_window_show(top);
+    (void)fdk_pump_events(ctx, 200);
+
+    Display *dpy = XOpenDisplay(NULL);
+    assert(dpy != NULL);
+    unsigned long top_xid = fdk_window_xid(top);
+
+    /* Validation first. */
+    assert(fdk_window_set_input_region(NULL, NULL, 0) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    {
+        const fdk_rect one = {0, 0, 10, 10};
+        assert(fdk_window_set_input_region(top, NULL, 1) ==
+               FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_window_set_input_region(top, &one, -1) ==
+               FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_window_set_input_region(
+                   top, &one, (fdk_i32)FDK_INPUT_REGION_MAX + 1) ==
+               FDK_ERR_INVALID_ARGUMENT);
+    }
+
+    /* One rect, left half (logical; Xvfb here is scale 1). */
+    {
+        const fdk_rect left = {0, 0, 100, 120};
+        assert(fdk_ok(fdk_window_set_input_region(top, &left, 1)));
+    }
+    (void)fdk_pump_events(ctx, 50);
+    {
+        int cnt = 0;
+        int ordering = 0;
+        XRectangle *got = XShapeGetRectangles(dpy, (Window)top_xid,
+                                              ShapeInput, &cnt,
+                                              &ordering);
+        assert(got != NULL && cnt == 1);
+        assert(got[0].x == 0 && got[0].y == 0 &&
+               got[0].width == 100 && got[0].height == 120);
+        XFree(got);
+    }
+
+    /* Two rects (multi-rect regions work). */
+    {
+        const fdk_rect two[2] = {{10, 10, 30, 20}, {60, 50, 40, 30}};
+        assert(fdk_ok(fdk_window_set_input_region(top, two, 2)));
+    }
+    (void)fdk_pump_events(ctx, 50);
+    {
+        int cnt = 0;
+        int ordering = 0;
+        XRectangle *got = XShapeGetRectangles(dpy, (Window)top_xid,
+                                              ShapeInput, &cnt,
+                                              &ordering);
+        assert(got != NULL && cnt == 2);
+        XFree(got);
+    }
+
+    /* The zero-area rect = the EMPTY region (fully click-through —
+     * input_transparent on demand). */
+    {
+        const fdk_rect empty = {0, 0, 0, 0};
+        assert(fdk_ok(fdk_window_set_input_region(top, &empty, 1)));
+    }
+    (void)fdk_pump_events(ctx, 50);
+    {
+        int cnt = 0;
+        int ordering = 0;
+        XRectangle *got = XShapeGetRectangles(dpy, (Window)top_xid,
+                                              ShapeInput, &cnt,
+                                              &ordering);
+        assert(got == NULL || cnt == 0); /* no input rect at all */
+        if (got != NULL) {
+            XFree(got);
+        }
+    }
+
+    /* THE CLICK-THROUGH PROOF: region = left half again; a real
+     * XTEST press on the RIGHT half lands on the BOTTOM window; a
+     * press on the LEFT half lands on the TOP window. */
+    {
+        const fdk_rect left = {0, 0, 100, 120};
+        assert(fdk_ok(fdk_window_set_input_region(top, &left, 1)));
+    }
+    (void)fdk_pump_events(ctx, 50);
+
+    int top_clicks = 0, bottom_clicks = 0;
+    fdk_window_set_event_callback(
+        top, region_click_cb, &top_clicks);
+    fdk_window_set_event_callback(
+        bottom, region_click_cb, &bottom_clicks);
+
+    /* XTEST moves to (140, 100) screen — inside BOTH windows, in
+     * the top's right half (outside its region). */
+    XTestFakeMotionEvent(dpy, 0, 140, 100, CurrentTime);
+    XTestFakeButtonEvent(dpy, 1, True, CurrentTime);
+    XTestFakeButtonEvent(dpy, 1, False, CurrentTime);
+    XSync(dpy, False);
+    (void)fdk_pump_events(ctx, 150);
+    assert(top_clicks == 0);
+    assert(bottom_clicks == 1); /* fell through the top's hole */
+
+    /* Inside the region: the top window takes the click. */
+    XTestFakeMotionEvent(dpy, 0, 60, 100, CurrentTime);
+    XTestFakeButtonEvent(dpy, 1, True, CurrentTime);
+    XTestFakeButtonEvent(dpy, 1, False, CurrentTime);
+    XSync(dpy, False);
+    (void)fdk_pump_events(ctx, 150);
+    assert(top_clicks == 1);
+    assert(bottom_clicks == 1); /* unchanged */
+
+    /* The clear: full input again — the top window takes clicks
+     * everywhere now. (The clear sets the full-window rect: libXext
+     * has no remove-the-shape request that does not dereference
+     * NULL.) */
+    assert(fdk_ok(fdk_window_set_input_region(top, NULL, 0)));
+    (void)fdk_pump_events(ctx, 50);
+    {
+        int cnt = 0;
+        int ordering = 0;
+        XRectangle *got = XShapeGetRectangles(dpy, (Window)top_xid,
+                                              ShapeInput, &cnt,
+                                              &ordering);
+        assert(got != NULL && cnt == 1);
+        assert(got[0].x == 0 && got[0].y == 0 &&
+               got[0].width == 200 && got[0].height == 120);
+        XFree(got);
+    }
+    XTestFakeMotionEvent(dpy, 0, 140, 100, CurrentTime);
+    XTestFakeButtonEvent(dpy, 1, True, CurrentTime);
+    XTestFakeButtonEvent(dpy, 1, False, CurrentTime);
+    XSync(dpy, False);
+    (void)fdk_pump_events(ctx, 150);
+    assert(top_clicks == 2);
+    assert(bottom_clicks == 1);
+
+    XCloseDisplay(dpy);
+    fdk_window_destroy(top);
+    fdk_window_destroy(bottom);
+    fdk_shutdown(ctx);
+    printf("[ok] X11 input region: set/read-back through XShape "
+           "(1 rect, 2 rects, empty, clear) + REAL XTEST "
+           "click-through both ways\n");
 }
 /* ---- The EWMH fake window manager ----
  *
@@ -11701,6 +11881,7 @@ int main(void) {
     test_hover_revalidation_on_geometry_change();
     test_resize_cursor_affordance();
     test_named_cursor_set();
+    test_input_region();
     test_ewmh_atom_spelling();
     test_ewmh_fake_wm();
     test_mitm_shm_and_double_buffer();

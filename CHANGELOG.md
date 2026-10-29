@@ -14,6 +14,25 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — input regions: partial click-through (S-4 / A-06 / A-07)
+
+- **`fdk_window_set_input_region`** and
+  **`fdk_ext_surface_set_input_region`**: pointer input restricted
+  to up to 64 window-local logical rectangles; clicks outside the
+  region fall through to whatever is beneath. NULL/0 clears (full
+  input); a zero-area rect is the empty region (fully
+  click-through). 802 -> 804 exports.
+- X11: XShape input rects (logical scaled to physical); the clear
+  sets a full-window rect (libXext has no NULL-region idiom).
+- Wayland: wl_surface.set_input_region — surface-local is already
+  the logical space; committed immediately when configured, riding
+  the first commit otherwise.
+- Proven end to end: XShape protocol readback + REAL XTEST
+  click-through both ways (X11); the injector pointer's
+  hole/region/leave/clear routing (sway); the add-on twin through
+  fdk-shell's suite. The substrate C-5's auto-hide reveal strips
+  build on.
+
 ### Added — the full named cursor set (S-5 / B-12, fdk-shell 0.4.0)
 
 - **`fdk_cursor_shape` grows from 2 to 22 shapes** (append-only;

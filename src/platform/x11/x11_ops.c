@@ -39,6 +39,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_begin_resize = fdk_x11_window_begin_resize,
     .window_query_pointer = fdk_x11_window_query_pointer,
     .window_set_cursor = fdk_x11_window_set_cursor,
+    .window_set_input_region = fdk_x11_window_set_input_region,
     .window_get_framebuffer = fdk_x11_window_get_framebuffer,
     .window_present = fdk_x11_window_present,
     .window_ever_presented = fdk_x11_window_ever_presented,

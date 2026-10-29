@@ -229,6 +229,22 @@ static void wayland_injector_stop(void) {
     }
 }
 
+/* Enter/leave counters for the input-region legs (S-4). */
+struct region_counts {
+    int *enters;
+    int *leaves;
+};
+static void region_count_cb(fdk_window *w, const fdk_event_data *event,
+                            void *user) {
+    (void)w;
+    struct region_counts *c = user;
+    if (event->type == FDK_EVENT_POINTER_ENTER) {
+        (*c->enters)++;
+    } else if (event->type == FDK_EVENT_POINTER_LEAVE) {
+        (*c->leaves)++;
+    }
+}
+
 /* Real-app loop shape: pump + paint each iteration. Painting matters
  * under sway's headless output — the surface stays live in the
  * compositor's tree while frames flow, and the interactive section
@@ -1758,6 +1774,56 @@ int main(void) {
         } else {
             printf("[skip] wayland named cursors: library built "
                    "without the test seam\n");
+        }
+
+        /* ---- 1.1.0-rc2, S-4 / A-06: the input region ----
+         *
+         * The rig floats org.fdk.test windows at (100,60): a 300x200
+         * window whose input region covers only its left half — the
+         * injector's REAL pointer (a wlr virtual device) moving into
+         * the right half must produce NO enter on this surface (the
+         * compositor routes by the input region; nothing is beneath
+         * in headless, so no events arrive anywhere), while the left
+         * half enters normally. The leave side: moving from inside
+         * the region to the hole synthesizes FDK's LEAVE. */
+        {
+            const fdk_rect left_half = {0, 0, 150, 200};
+            assert(fdk_ok(fdk_window_set_input_region(cw, &left_half,
+                                                      1)));
+            int enters = 0, leaves = 0;
+            fdk_window_set_event_callback(cw, region_count_cb,
+                                          &(struct region_counts){
+                                              &enters, &leaves});
+            /* Outside the window entirely first, then ZERO the
+             * counters (the previous section left the pointer inside
+             * this very window — its leave must not pollute). */
+            wayland_inject("move 700 400");
+            pump_and_paint(ctx, cw, 300);
+            enters = 0;
+            leaves = 0;
+            /* Into the RIGHT half (the hole): NO enter. Output
+             * (350,160) = window-local (250,100) — inside the
+             * window, outside the region. */
+            wayland_inject("move 350 160");
+            pump_and_paint(ctx, cw, 300);
+            assert(enters == 0);
+            /* Into the LEFT half (the region): enter. Output
+             * (150,160) = window-local (50,100). */
+            wayland_inject("move 150 160");
+            pump_and_paint(ctx, cw, 300);
+            assert(enters == 1);
+            /* Back into the hole: leave. */
+            wayland_inject("move 350 160");
+            pump_and_paint(ctx, cw, 300);
+            assert(leaves == 1);
+            /* The clear: full input again — the right half enters. */
+            assert(fdk_ok(fdk_window_set_input_region(cw, NULL, 0)));
+            wayland_inject("move 350 160");
+            pump_and_paint(ctx, cw, 300);
+            assert(enters == 2);
+            printf("[ok] wayland input region: the hole takes no "
+                   "pointer, the region does, leave on exit, clear "
+                   "restores full input\n");
         }
 
         fdk_window_destroy(cw);

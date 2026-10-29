@@ -1094,6 +1094,22 @@ int fdk__cursor_resolve(int app_shape, int widget_hover, int edge) {
     return 0;
 }
 
+fdk_result fdk_window_set_input_region(fdk_window *window,
+                                      const fdk_rect *rects,
+                                      fdk_i32 count) {
+    if (window == NULL || count < 0 ||
+        count > (fdk_i32)FDK_INPUT_REGION_MAX ||
+        (rects == NULL && count > 0)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->window_set_input_region == NULL) {
+        return FDK_ERR_UNSUPPORTED; /* backend lacks the mechanism */
+    }
+    window->ops->window_set_input_region(window->pwindow, rects,
+                                         (int)count);
+    return FDK_OK;
+}
+
 void fdk_window_set_cursor(fdk_window *window, fdk_cursor_shape shape) {
     if (window == NULL) {
         return;

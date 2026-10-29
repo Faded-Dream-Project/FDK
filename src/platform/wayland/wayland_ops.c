@@ -12,6 +12,7 @@ static const fdk_platform_ops g_wayland_ops = {
     .test_default_keymap = fdk_wayland_test_default_keymap,
     .test_touch = fdk_wayland_test_touch,
     .test_cursor_apply = fdk_wayland_test_cursor_apply,
+    .window_set_input_region = fdk_wayland_window_set_input_region,
     .ime_update_surrounding = fdk_wayland_ime_update_surrounding,
     .window_set_idle_inhibit = fdk_wayland_window_set_idle_inhibit,
     .window_create = fdk_wayland_window_create,

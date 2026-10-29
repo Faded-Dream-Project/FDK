@@ -234,6 +234,42 @@ typedef enum fdk_cursor_shape {
  * every subsequent entry. No-op on an unknown shape value. */
 void fdk_window_set_cursor(fdk_window *window, fdk_cursor_shape shape);
 
+/* ---- Input region (1.1.0-rc2, S-4 / A-06) -----------------------------
+ *
+ * The window's INPUT region: the set of rectangles (window-LOCAL,
+ * LOGICAL coordinates — the same space pointer events deliver)
+ * inside which the window receives pointer and touch input. Clicks
+ * on the window but OUTSIDE the region fall through to whatever is
+ * beneath it — the mechanism notification overlays, auto-hide
+ * reveal strips and shaped panels are built on (the 1.3.2
+ * input_transparent tooltip was the degenerate whole-window case).
+ *
+ * The region is a HINT shaped by the platform's native mechanism
+ * (XShape on X11, wl_surface.set_input_region on Wayland); a
+ * backend without the mechanism keeps the window fully interactive
+ * and the call returns FDK_ERR_UNSUPPORTED. The region persists
+ * across resizes (window-relative); clearing it (NULL / 0 rects)
+ * restores full input. A zero-area rect set (e.g. one {0,0,0,0}
+ * rect) yields the EMPTY region — fully click-through, the
+ * input_transparent behavior on demand.
+ *
+ * On extension surfaces use fdk_ext_surface_set_input_region()
+ * (fdk_extend.h) — the same semantics through the add-on API. */
+
+/* The maximum number of rectangles one input region may carry (the
+ * platform op's fixed working array; aligned with the damage cap). */
+#define FDK_INPUT_REGION_MAX 64
+
+/* Sets the window's input region from `count` window-local logical
+ * rectangles (inclusive of their edges). rects may be NULL only
+ * when count is 0, which CLEARS the region (full input again).
+ * FDK_ERR_INVALID_ARGUMENT on NULL window, negative count, count
+ * above FDK_INPUT_REGION_MAX, or NULL rects with count > 0.
+ * FDK_ERR_UNSUPPORTED when the backend lacks the mechanism. */
+fdk_result fdk_window_set_input_region(fdk_window *window,
+                                       const fdk_rect *rects,
+                                       fdk_i32 count);
+
 /* Requests a resize to (width, height). This is a request, not a
  * guarantee — the platform/compositor may clamp, ignore, or adjust it
  * (e.g. Wayland only actually resizes a toplevel in response to a

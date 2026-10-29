@@ -424,6 +424,18 @@ void fdk_ext_surface_set_cursor(fdk_ext_surface *surface, int shape) {
     fdk_window_set_cursor(surface->window, (fdk_cursor_shape)shape);
 }
 
+fdk_result fdk_ext_surface_set_input_region(fdk_ext_surface *surface,
+                                            const fdk_rect *rects,
+                                            fdk_i32 count) {
+    if (surface == NULL || surface->window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* The window layer owns validation + the op dispatch; the
+     * extension surface's internal window wrapper carries the region
+     * exactly like an application window's would. */
+    return fdk_window_set_input_region(surface->window, rects, count);
+}
+
 void fdk_ext_surface_show(fdk_ext_surface *surface) {
     if (surface == NULL || surface->window == NULL) {
         return;

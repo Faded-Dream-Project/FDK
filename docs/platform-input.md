@@ -238,6 +238,29 @@ lies about what the press does is worse than the plain arrow).
 fdk-shell mirrors the set (`fdk_shell_cursor`, 0.4.0) — its values
 are FDK's own, passed through unchanged.
 
+## Input regions — partial click-through (1.1.0-rc2, S-4 / A-06)
+
+`fdk_window_set_input_region` (and `fdk_ext_surface_set_input_region`
+on extension surfaces) restricts pointer input to a set of
+window-local LOGICAL rectangles. Clicks on the window outside the
+region fall through to whatever is beneath — the mechanism
+notification overlays, auto-hide reveal strips and shaped panels
+are built on. Rules:
+
+- `NULL`/0 rects CLEARS the region — full input again (on X11 the
+  clear is a full-window rect: libXext has no remove-the-shape
+  idiom that does not dereference NULL).
+- One zero-area rect is the EMPTY region — fully click-through
+  (the 1.3.2 input_transparent behavior on demand).
+- Up to `FDK_INPUT_REGION_MAX` (64) rects; invalid arguments
+  return FDK_ERR_INVALID_ARGUMENT.
+- The rects are logical and window-relative: they survive resizes,
+  and each backend owns the conversion (X11 scales to physical for
+  XShape; Wayland's surface-local space is already logical).
+- A backend without the mechanism returns FDK_ERR_UNSUPPORTED and
+  the window stays fully interactive — never a silently wrong
+  region.
+
 ## Touch input (1.1.0, M-3)
 
 Direct-touch contact tracking is a first-class event family:

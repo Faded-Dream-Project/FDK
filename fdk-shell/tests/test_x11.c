@@ -28,6 +28,7 @@
 #include <X11/Xatom.h>
 #include <X11/keysym.h> /* XKeysymToKeycode (the fake-key rig) */
 #include <X11/extensions/XTest.h> /* XTestFakeKeyEvent (B.3's input) */
+#include <X11/extensions/shape.h> /* XShapeGetRectangles (S-4) */
 
 #include <assert.h>
 #include <stdio.h>
@@ -1695,6 +1696,83 @@ static void test_namespace_and_wm_layer(void) {
            "names\n");
 }
 
+/* The input region through the ADD-ON API (1.1.0-rc2, S-4 /
+ * A-06): fdk_ext_surface_set_input_region on a layer — the XShape
+ * readback proves the region reached the server through the
+ * extension surface's internal window, exactly as an auto-hide
+ * panel's reveal strip will use it. */
+static void test_layer_input_region(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                    FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 30;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 60);
+
+    rb_open();
+    unsigned long xid = layer_xid(layer);
+
+    /* Validation parity with the core API. */
+    {
+        const fdk_rect one = {0, 0, 10, 10};
+        assert(fdk_ext_surface_set_input_region(NULL, &one, 1) ==
+               FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_ext_surface_set_input_region(layer->ext, NULL, 1) ==
+               FDK_ERR_INVALID_ARGUMENT);
+    }
+
+    /* A reveal-strip-shaped region: the left 40% of a 1000-wide bar
+     * (Xvfb screen 1024 wide; anchors L+R at height 30). */
+    {
+        const fdk_rect strip = {0, 0, 400, 30};
+        assert(fdk_ok(fdk_ext_surface_set_input_region(layer->ext,
+                                                       &strip, 1)));
+    }
+    pump(ctx, 60);
+    {
+        int cnt = 0;
+        int ordering = 0;
+        XRectangle *got = XShapeGetRectangles(g_rb, (Window)xid,
+                                              ShapeInput, &cnt,
+                                              &ordering);
+        assert(got != NULL && cnt == 1);
+        assert(got[0].x == 0 && got[0].y == 0 &&
+               got[0].width == 400 && got[0].height == 30);
+        XFree(got);
+    }
+
+    /* The clear restores full input (the full-window rect). */
+    assert(fdk_ok(fdk_ext_surface_set_input_region(layer->ext, NULL, 0)));
+    pump(ctx, 60);
+    {
+        int cnt = 0;
+        int ordering = 0;
+        XRectangle *got = XShapeGetRectangles(g_rb, (Window)xid,
+                                              ShapeInput, &cnt,
+                                              &ordering);
+        assert(got != NULL && cnt == 1);
+        assert(got[0].width == 1024 && got[0].height == 30);
+        XFree(got);
+    }
+
+    fdk_shell_layer_destroy(layer);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+    printf("[ok] layer input region: set + clear through the add-on "
+           "API, XShape readback both ways\n");
+}
+
 static void test_output_info_x11(void) {
     fdk_context *ctx = NULL;
     fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
@@ -1940,6 +2018,7 @@ int main(void) {
     test_popup_desktop_change_dismissal();
     test_sticky_across_desktops();
     test_namespace_and_wm_layer();
+    test_layer_input_region();
     test_output_info_x11();
     test_randr_output_model();
     test_popup_cascade();

@@ -722,3 +722,53 @@ through real XSendEvent motion. Wayland: all 22 shapes through the
 production op with real injector serials, plus the full
 cursor-shape-v1 enum table pinned row by row through the
 test seam — real set_shape requests against sway 1.10.
+
+## D-017 — input regions: logical rects at the window layer, the platform's native shape beneath (S-4 / A-06 / A-07)
+
+**Context.** The 1.3.2 input_transparent popups proved the
+whole-window degenerate case (an EMPTY input region); the audit's
+A-06 gap was arbitrary partial regions — what notification
+overlays with close buttons, auto-hide reveal strips (C-5's
+prerequisite), and shaped panels need. D-002 had already decided
+the seam: core-side, on windows AND extension surfaces, not an
+ext-API version bump.
+
+**1. Logical coordinates, one space.** The public API takes
+window-LOCAL LOGICAL rectangles — the same space pointer events
+deliver — and each backend converts once: X11 multiplies by the
+connection's HiDPI factor into XShape's physical space (the
+conversion ConfigureNotify applies in reverse); Wayland passes the
+rects straight through, because wl_surface.set_input_region's
+surface-local space IS the logical space (with integer buffer
+scales and fractional viewports alike). No region re-application
+machinery on resize: XShape regions are window-relative and
+stable, and the Wayland region rides surface state that scale
+changes do not move.
+
+**2. The clear is a full-window rect, not a removal.** libXext has
+no remove-the-shape idiom that does not dereference a NULL Region —
+XShapeCombineRegion(display, w, ShapeInput, 0, 0, None, ShapeSet)
+SEGVs (the XTEST rig caught it in the first cut). The clear
+therefore SETS one full-window rect: behaviorally identical to no
+shape (input everywhere the window draws), and protocol-observable
+on readback. The zero-area rect stays the honest "empty region"
+(fully click-through — input_transparent on demand).
+
+**3. Commits stay gated.** Wayland region state is
+double-buffered: the op commits immediately when the surface is
+already configured (so a region change takes effect without
+waiting for the app's next present) and rides the FIRST commit
+otherwise — never a bare commit on an unconfigured surface (the
+unconfigured-commit protocol error the ext-popup gate exists to
+prevent).
+
+**4. One proof per platform, at the wire.** X11: the region read
+back through XShapeGetRectangles from a second connection (1 rect,
+2 rects, empty, clear) and the click-through behavior driven with
+REAL XTEST pointer events — a press in the hole lands on the
+window beneath, a press in the region lands on top (XSendEvent
+bypasses shape hit-testing, so only the true input path proves the
+mechanism). Wayland: the injector's real pointer — no enter into
+the hole, enter into the region, leave on exit, full input after
+the clear. The add-on twin (fdk_ext_surface_set_input_region) is
+pinned by fdk-shell's X11 suite through the same readback.

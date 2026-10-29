@@ -1478,6 +1478,76 @@ void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
     XDefineCursor(conn->display, pwindow->xwindow, cursor);
 }
 
+/* Input region (1.1.0-rc2, S-4 / A-06): the XShape ShapeInput
+ * translation. Logical window rects are scaled to PHYSICAL by the
+ * connection's HiDPI factor (the space XShape works in — the same
+ * conversion ConfigureNotify applies in reverse); the clear case
+ * REMOVES the shape (XShapeCombineRegion with a NULL region — the
+ * documented removal idiom), restoring the window's natural full
+ * input. Servers without XSHAPE degrade honestly: the window stays
+ * fully interactive (the same posture the input-transparent popups
+ * documented in 1.3.2). */
+void fdk_x11_window_set_input_region(fdk_platform_window *pwindow,
+                                     const fdk_rect *rects, int count) {
+    if (pwindow == NULL || count < 0 ||
+        count > FDK_PLATFORM_INPUT_REGION_MAX) {
+        return;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    if (!conn->shape_ok) {
+        FDK_DEBUG("XSHAPE unavailable — input region ignored (the "
+                  "window stays fully interactive)");
+        return;
+    }
+    if (count > 0 && rects != NULL) {
+        /* XRectangle members are 16-bit: clamp each scaled edge into
+         * range (a region rect beyond 32k logical px is nonsense
+         * anyway, and saturating beats wrapping). */
+        XRectangle xr[FDK_PLATFORM_INPUT_REGION_MAX];
+        int scale = conn->scale > 0 ? conn->scale : 1;
+        for (int i = 0; i < count; i++) {
+            long x = (long)rects[i].x * scale;
+            long y = (long)rects[i].y * scale;
+            long w = (long)rects[i].width * scale;
+            long h = (long)rects[i].height * scale;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (w < 0) w = 0;
+            if (h < 0) h = 0;
+            if (x > 32767) x = 32767;
+            if (y > 32767) y = 32767;
+            if (w > 32767) w = 32767;
+            if (h > 32767) h = 32767;
+            xr[i].x = (short)x;
+            xr[i].y = (short)y;
+            xr[i].width = (unsigned short)w;
+            xr[i].height = (unsigned short)h;
+        }
+        XShapeCombineRectangles(conn->display, pwindow->xwindow,
+                                ShapeInput, 0, 0, xr, count, ShapeSet,
+                                YXBanded);
+    } else {
+        /* The clear: there is no remove-the-shape idiom in libXext
+         * (XShapeCombineRegion dereferences a NULL Region — the SEGV
+         * the XTEST rig caught), so the clear SETS the full-window
+         * rect: behaviorally identical to no shape (the window takes
+         * input everywhere it draws). last_size is PHYSICAL here —
+         * the X11 pwindow stores the framebuffer space. */
+        XRectangle full;
+        full.x = 0;
+        full.y = 0;
+        long w = (long)pwindow->last_size.width;
+        long h = (long)pwindow->last_size.height;
+        if (w > 32767) w = 32767;
+        if (h > 32767) h = 32767;
+        full.width = (unsigned short)w;
+        full.height = (unsigned short)h;
+        XShapeCombineRectangles(conn->display, pwindow->xwindow,
+                                ShapeInput, 0, 0, &full, 1, ShapeSet,
+                                YXBanded);
+    }
+}
+
 void fdk_x11_cursor_shutdown(fdk_platform_connection *conn) {
     if (conn == NULL) {
         return;

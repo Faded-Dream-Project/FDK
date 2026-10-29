@@ -78,6 +78,12 @@ typedef struct fdk_platform_framebuffer {
  * "nothing changed" (present should no-op). The struct is
  * value-copied / read-only from the backend's perspective. */
 #define FDK_PLATFORM_DAMAGE_RECTS 64
+
+/* The input-region op's working-array cap (S-4 / A-06, rc2) — the
+ * public twin is FDK_INPUT_REGION_MAX (fdk_window.h); keep the two
+ * numerically identical (the window layer validates against the
+ * public one before the op ever runs). */
+#define FDK_PLATFORM_INPUT_REGION_MAX 64
 typedef struct fdk_platform_damage {
     fdk_rect rects[FDK_PLATFORM_DAMAGE_RECTS];
     int count; /* valid rects, <= FDK_PLATFORM_DAMAGE_RECTS */
@@ -418,6 +424,21 @@ typedef struct fdk_platform_ops {
     int (*window_query_pointer)(fdk_platform_window *pwindow,
                                 fdk_i32 *out_x, fdk_i32 *out_y);
     void (*window_set_cursor)(fdk_platform_window *pwindow, int edge);
+
+    /* OPTIONAL (1.1.0-rc2, S-4 / A-06): sets the window's INPUT
+     * region — count window-LOCAL LOGICAL rectangles (0 <= count
+     * <= FDK_PLATFORM_INPUT_REGION_MAX; NULL rects with count 0 =
+     * clear, full input). Input on the window outside the rects
+     * falls through to whatever is beneath. X11: XShape ShapeInput,
+     * logical rects scaled to physical by the connection's scale.
+     * Wayland: wl_surface.set_input_region (surface-local == the
+     * logical space, so the rects pass through unscaled), committed
+     * when the surface is already configured (never before — the
+     * unconfigured-commit protocol error). NULL = the backend lacks
+     * the mechanism (the window stays fully interactive; the window
+     * layer reports FDK_ERR_UNSUPPORTED). */
+    void (*window_set_input_region)(fdk_platform_window *pwindow,
+                                    const fdk_rect *rects, int count);
 
     /* --- Software rendering ---
      *

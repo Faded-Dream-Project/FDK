@@ -751,6 +751,12 @@ int fdk_wayland_test_cursor_apply(fdk_platform_connection *conn,
                                   fdk_platform_window *pwindow,
                                   int op_shape);
 
+/* Input region (1.1.0-rc2, S-4 / A-06; wayland_window.c): the
+ * wl_surface.set_input_region translation of the op. */
+void fdk_wayland_window_set_input_region(fdk_platform_window *pwindow,
+                                         const fdk_rect *rects,
+                                         int count);
+
 /* text-input-v3 (1.1.0, M-1; wayland_ime.c): called when BOTH the
  * manager and the seat exist (either binding order), and from the
  * surrounding push. teardown is part of disconnect;

@@ -569,7 +569,9 @@ $(WL_TEST_BIN): $(WL_TEST_SRC) \
 
 $(X11_TEST_BIN): $(X11_TEST_SRC) $(STATIC_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+	# -lXtst: the input-region click-through legs drive REAL XTEST pointer
+	# events (S-4, rc2) — XSendEvent bypasses shapes and proves nothing.
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS) -lXtst
 
 # --- Examples ---------------------------------------------------------
 

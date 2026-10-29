@@ -45,12 +45,13 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts:** DONE 26 (S-5/B-12 landed 2026-10-29; M-6/A-03/B-05
-landed 2026-10-29; T-B both sides 2026-10-29; S-2 and S-1 pending
-owner verification; M-4, M-3, M-1, and S-3 landed 2026-10-28) ·
-PARTIAL 6 · IN PROGRESS 1
-(M-9) · MISSING 22 · DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX
-0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
+**Counts** (recounted 2026-10-29 against every register row — the
+earlier line's arithmetic was coarser than the table): DONE 35
+(S-4/A-06 + A-07 folded, 2026-10-29; S-5/B-12, 2026-10-29;
+M-6/A-03/B-05, 2026-10-29; T-B both sides, 2026-10-29; S-2 and S-1
+pending owner verification; M-4, M-3, M-1, and S-3, 2026-10-28) ·
+PARTIAL 6 · IN PROGRESS 1 (M-9) · MISSING 15 · DEFERRED (by
+design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +

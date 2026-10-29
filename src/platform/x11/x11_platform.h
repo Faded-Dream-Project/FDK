@@ -670,6 +670,11 @@ Cursor fdk__x11_named_cursor(fdk_platform_connection *conn, int op_shape);
 void fdk__x11_named_cursors_shutdown(fdk_platform_connection *conn,
                                      int display_dead);
 
+/* Input region (1.1.0-rc2, S-4 / A-06; x11_window.c): the XShape
+ * translation of the window_set_input_region op. */
+void fdk_x11_window_set_input_region(fdk_platform_window *pwindow,
+                                     const fdk_rect *rects, int count);
+
 /* ---- The dlopen'd RENDER cursor lane (x11_cursor.c) ----
  *
  * libXrender.so.1 pinned lazily on the first named-cursor request:
