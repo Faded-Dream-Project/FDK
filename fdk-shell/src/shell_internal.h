@@ -67,6 +67,16 @@ struct fdk_shell_layer {
     fdk_size size; /* most recent configure                   */
     fdk_shell_layer_desc desc;
 
+    /* Auto-hide (0.5.0, C-5 / A-08): the reveal-strip model. The
+     * effective placement the backends apply is desc OVERLAID with
+     * the hidden state: the primary edge's margin grown by (extent -
+     * reveal), the exclusive zone forced 0. dwell_ms is the
+     * leave-to-hide delay; ah_timer is that dwell. */
+    int32_t ah_reveal;      /* 0 = auto-hide off                   */
+    uint32_t ah_dwell_ms;
+    int ah_hidden;          /* the hidden state is applied          */
+    void *ah_timer;         /* fdk_timer*, opaque here              */
+
     struct fdk_shell_layer *next, *prev; /* the shell's list      */
 
     void *backend; /* x11_layer_state / wl_layer_state        */
@@ -84,6 +94,15 @@ struct fdk_shell_popup {
 
     struct fdk_shell_popup *next, *prev; /* the shell's list     */
 };
+
+/* ---- auto-hide helpers (shell.c; the backends apply the slide
+ * natively — a position offset on X11, a negative margin on Wayland,
+ * where zwlr margins are signed) ---- */
+
+/* The slide edge (the single-anchored axis), 0 when none. */
+uint32_t fdkshell__slide_edge(const fdk_shell_layer *layer);
+/* The hidden slide amount: extent - reveal (>= 0). */
+int32_t fdkshell__slide_amount(const fdk_shell_layer *layer);
 
 /* The pending-layer slot: fdk_shell_layer_create stages the layer
  * (with its desc) here before calling fdk_ext_surface_create — the
@@ -133,6 +152,11 @@ void fdkshell__x11_layer_destroy(fdk_shell *shell,
                                   fdk_shell_layer *layer);
 void fdkshell__x11_layer_show(fdk_shell_layer *layer);
 void fdkshell__x11_layer_hide(fdk_shell_layer *layer);
+/* 0.5.0, C-5: applies desc (the caller already folded the auto-hide
+ * overlay into it) to the live window: geometry recompute + move/
+ * resize + size hints + struts; level changes ride the state-atom
+ * exchange. */
+void fdkshell__x11_layer_reconfig(fdk_shell_layer *layer);
 #endif
 
 /* wl.c */
@@ -159,6 +183,11 @@ void fdkshell__wl_layer_destroy(fdk_shell *shell,
                                  fdk_shell_layer *layer);
 void fdkshell__wl_layer_show(fdk_shell_layer *layer);
 void fdkshell__wl_layer_hide(fdk_shell_layer *layer);
+/* 0.5.0, C-5: the zwlr double-buffered state — set_anchor/margin/
+ * zone/size/keyboard + commit. A LEVEL change rides the role swap
+ * (destroy + re-create on the target shell layer, same wl_surface). */
+void fdkshell__wl_layer_reconfig(fdk_shell_layer *layer,
+                                 int level_changed);
 #endif
 
 #endif /* FDKSHELL_INTERNAL_H */

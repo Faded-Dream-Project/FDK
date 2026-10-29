@@ -567,3 +567,34 @@ Expectations:
 
 **Status: DONE level 1 (should work; owner verification pending;
 text interfaces are C-2's next tier).**
+
+## 17. Runtime re-anchoring + auto-hide on your desktop (C-5 — needs your eyes)
+
+What the rigs proved: the live placement changes on both backends
+(geometry/strut readback on X11, configure-through on sway, the role
+swap, the auto-hide cycle with a REAL XTEST strip entry). What only
+your desktop shows is a real WM's take on a moving dock and a real
+compositor's slide.
+
+```sh
+# any fdk-shell layer, live:
+#   fdk_shell_layer_set_anchor(layer, ...)   # watch it slide
+#   fdk_shell_layer_set_auto_hide(layer, 3, 300)  # hover the edge
+```
+
+Expectations:
+
+- A top bar re-anchored BOTTOM moves to the floor; other windows
+  follow the strut change on their next layout (EWMH WMs re-flow on
+  _NET_WM_STRUT_PARTIAL changes — verify your WM does).
+- set_level to OVERLAY: the layer jumps above normal windows
+  (Wayland: a brief unconfigure/configure blink is legal; X11: no
+  blink).
+- Auto-hide: the bar slides off leaving 3px; windows maximize into
+  the freed space; touching the edge (or the strip) reveals; moving
+  away for the dwell hides it again. On X11 your WM must not fight
+  the off-screen move (USPosition claims it; some WMs clamp dock
+  windows to the screen — a visible clamp is a WM difference to
+  report, not an fdk-shell bug).
+
+**Status: DONE (should work; owner verification pending).**

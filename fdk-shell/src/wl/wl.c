@@ -604,10 +604,35 @@ fdk_result fdkshell__wl_layer_create(fdk_shell *shell,
         anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
     }
     zwlr_layer_surface_v1_set_anchor(lst->ls, anchor);
-    zwlr_layer_surface_v1_set_margin(lst->ls, desc->margin_top,
-                                     desc->margin_right,
-                                     desc->margin_bottom,
-                                     desc->margin_left);
+    /* The auto-hide slide (0.5.0, C-5): a NEGATIVE margin on the
+     * slide edge — zwlr margins are signed, and -(extent-reveal)
+     * parks the surface off-edge with exactly the reveal strip on
+     * screen (the protocol's own arithmetic; X11 does the same thing
+     * as a position offset). */
+    int32_t mt = desc->margin_top;
+    int32_t mr = desc->margin_right;
+    int32_t mb = desc->margin_bottom;
+    int32_t ml = desc->margin_left;
+    int32_t slide = fdkshell__slide_amount(layer);
+    if (slide > 0) {
+        switch (fdkshell__slide_edge(layer)) {
+        case FDK_SHELL_ANCHOR_TOP:
+            mt -= slide;
+            break;
+        case FDK_SHELL_ANCHOR_BOTTOM:
+            mb -= slide;
+            break;
+        case FDK_SHELL_ANCHOR_LEFT:
+            ml -= slide;
+            break;
+        case FDK_SHELL_ANCHOR_RIGHT:
+            mr -= slide;
+            break;
+        default:
+            break;
+        }
+    }
+    zwlr_layer_surface_v1_set_margin(lst->ls, mt, mr, mb, ml);
     zwlr_layer_surface_v1_set_exclusive_zone(lst->ls,
                                              desc->exclusive_zone);
 
@@ -699,6 +724,156 @@ void fdkshell__wl_layer_hide(fdk_shell_layer *layer) {
     (void)layer;
     /* Symmetric no-op: a layer surface unmaps by destroying and
      * re-creating its role (documented in fdk-shell.h). */
+}
+
+/* 0.5.0, C-5 / A-05: the live re-anchoring — the double-buffered
+ * zwlr state, re-issued + committed. The next configure confirms;
+ * the surface is never destroyed. A LEVEL change has no protocol
+ * form (zwlr has no set_layer request): the ROLE is swapped —
+ * destroyed and re-created on the target shell layer over the SAME
+ * wl_surface (one unconfigure/configure cycle, the surface identity
+ * intact; the create path's request block is re-run against the new
+ * role through the shared helper below).
+ */
+void fdkshell__wl_layer_reconfig(fdk_shell_layer *layer,
+                                 int level_changed) {
+    wl_layer_state *lst = layer->backend;
+    if (lst == NULL || lst->ls == NULL || lst->closed) {
+        return;
+    }
+    fdk_ext_native_handle nh;
+    if (!fdk_ok(fdk_ext_surface_native(layer->ext, &nh)) ||
+        nh.pointer == NULL) {
+        return;
+    }
+    struct wl_surface *surface = nh.pointer;
+    const fdk_shell_layer_desc *desc = &layer->desc;
+
+    if (level_changed) {
+        /* The role swap: same shell, same surface, same output, the
+         * NEW tier. The listener rides the new role (the old object
+         * is destroyed — its listener dies with it). */
+        wl_shell_state *st = layer->shell->wl;
+        static const uint32_t layer_ids[] = {
+            [FDK_SHELL_LAYER_BACKGROUND] =
+                ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
+            [FDK_SHELL_LAYER_BOTTOM] = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
+            [FDK_SHELL_LAYER_TOP] = ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+            [FDK_SHELL_LAYER_OVERLAY] = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
+        };
+        const char *ns =
+            (desc->struct_size >=
+                 offsetof(fdk_shell_layer_desc, namespace_) +
+                     sizeof(desc->namespace_) &&
+             desc->namespace_[0] != '\0')
+                ? desc->namespace_
+                : "fdk-shell";
+        /* WIRE ORDER (the protocol's own rule, learned from sway's
+         * "Cannot reassign role ... role object still exists"): the
+         * OLD role's destroy must be marshalled BEFORE the new
+         * get_layer_surface — both sit in the output buffer until
+         * the flush, and the compositor applies them in wire order.
+         * Creating first and destroying after (the "safe" order that
+         * keeps a role on failure) reassigns a role whose object
+         * still exists: a fatal protocol error. */
+        zwlr_layer_surface_v1_destroy(lst->ls);
+        lst->ls = NULL;
+        struct zwlr_layer_surface_v1 *new_ls =
+            zwlr_layer_shell_v1_get_layer_surface(
+                st->shell, surface, lst->output, layer_ids[desc->layer],
+                ns);
+        if (new_ls == NULL) {
+            FDKS_WARN("layer role swap failed — the surface is "
+                      "roleless until the next successful swap");
+            return;
+        }
+        lst->ls = new_ls;
+        /* The new role's listener: the create path's listener shape
+         * (find it through the static g_layer_listener). */
+        zwlr_layer_surface_v1_add_listener(lst->ls, &g_layer_listener,
+                                           layer);
+    }
+
+    /* The double-buffered requests (the create block's verbatim
+     * translation, re-issued). */
+    uint32_t anchor = 0;
+    if (desc->anchors & FDK_SHELL_ANCHOR_TOP) {
+        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
+    }
+    if (desc->anchors & FDK_SHELL_ANCHOR_BOTTOM) {
+        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
+    }
+    if (desc->anchors & FDK_SHELL_ANCHOR_LEFT) {
+        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
+    }
+    if (desc->anchors & FDK_SHELL_ANCHOR_RIGHT) {
+        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+    }
+    zwlr_layer_surface_v1_set_anchor(lst->ls, anchor);
+    /* The auto-hide slide (0.5.0, C-5): a NEGATIVE margin on the
+     * slide edge — zwlr margins are signed, and -(extent-reveal)
+     * parks the surface off-edge with exactly the reveal strip on
+     * screen (the protocol's own arithmetic; X11 does the same thing
+     * as a position offset). */
+    int32_t mt = desc->margin_top;
+    int32_t mr = desc->margin_right;
+    int32_t mb = desc->margin_bottom;
+    int32_t ml = desc->margin_left;
+    int32_t slide = fdkshell__slide_amount(layer);
+    if (slide > 0) {
+        switch (fdkshell__slide_edge(layer)) {
+        case FDK_SHELL_ANCHOR_TOP:
+            mt -= slide;
+            break;
+        case FDK_SHELL_ANCHOR_BOTTOM:
+            mb -= slide;
+            break;
+        case FDK_SHELL_ANCHOR_LEFT:
+            ml -= slide;
+            break;
+        case FDK_SHELL_ANCHOR_RIGHT:
+            mr -= slide;
+            break;
+        default:
+            break;
+        }
+    }
+    zwlr_layer_surface_v1_set_margin(lst->ls, mt, mr, mb, ml);
+    zwlr_layer_surface_v1_set_exclusive_zone(lst->ls,
+                                             desc->exclusive_zone);
+
+    static const uint32_t kbd_modes[] = {
+        [FDK_SHELL_KBD_NONE] =
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE,
+        [FDK_SHELL_KBD_EXCLUSIVE] =
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE,
+        [FDK_SHELL_KBD_ON_DEMAND] =
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND,
+    };
+    uint32_t kbd = kbd_modes[FDK_SHELL_KBD_NONE];
+    if (desc->keyboard == FDK_SHELL_KBD_EXCLUSIVE ||
+        desc->keyboard == FDK_SHELL_KBD_ON_DEMAND) {
+        kbd = kbd_modes[desc->keyboard];
+    }
+    if (desc->keyboard == FDK_SHELL_KBD_ON_DEMAND &&
+        zwlr_layer_surface_v1_get_version(lst->ls) <
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND_SINCE_VERSION) {
+        kbd = kbd_modes[FDK_SHELL_KBD_NONE];
+    }
+    zwlr_layer_surface_v1_set_keyboard_interactivity(lst->ls, kbd);
+
+    int horiz_anchored = (desc->anchors & FDK_SHELL_ANCHOR_LEFT) &&
+                         (desc->anchors & FDK_SHELL_ANCHOR_RIGHT);
+    int vert_anchored = (desc->anchors & FDK_SHELL_ANCHOR_TOP) &&
+                        (desc->anchors & FDK_SHELL_ANCHOR_BOTTOM);
+    int32_t w = horiz_anchored ? 0 : (desc->width > 0 ? desc->width : 1);
+    int32_t h = vert_anchored ? 0 : (desc->height > 0 ? desc->height : 1);
+    zwlr_layer_surface_v1_set_size(lst->ls, (uint32_t)w, (uint32_t)h);
+
+    /* The commit that applies it all (the double-buffered flip; the
+     * same empty-commit shape show() uses — a pre-configure buffer
+     * would be the protocol error layer-shell forbids). */
+    wl_surface_commit(surface);
 }
 
 /* ---- the kind's popup_attached hook ---------------------------------------- */

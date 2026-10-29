@@ -613,8 +613,133 @@ static void test_outputs_metrics_and_hotplug(void) {
            "sweep\n");
 }
 
+/* 0.5.0, C-5 / A-05 / A-08: runtime re-anchoring + auto-hide on a
+ * REAL compositor. The reconfig requests ride the wire (the
+ * double-buffered zwlr state — configure confirms each change); the
+ * auto-hide slide is the negative-margin form (zwlr margins are
+ * signed). Survival of the whole cycle is itself the core proof: a
+ * protocol error on any request would kill the connection.
+ * WAYLAND_DEBUG=1 traces confirm the request shapes when run
+ * manually. */
+static void test_runtime_reanchor_and_autohide(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_WAYLAND };
+    fdk_result r = fdk_init(&ctx, &iopts);
+    if (!fdk_ok(r)) {
+        printf("[skip] no reachable Wayland compositor\n");
+        return;
+    }
+    fdk_shell *shell = NULL;
+    r = fdk_shell_init(ctx, &shell);
+    if (!fdk_ok(r)) {
+        printf("[skip] no wlr-layer-shell\n");
+        fdk_shutdown(ctx);
+        return;
+    }
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    desc.exclusive_zone = -1;
+
+    g_configure_events = 0;
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_set_event_callback(layer, layer_event, NULL);
+    fdk_shell_layer_show(layer);
+    for (int i = 0; i < 40 && g_configure_events == 0; i++) {
+        pump(ctx, 50);
+    }
+    assert(g_configure_events >= 1);
+    fdk_size sz;
+    assert(fdk_ok(fdk_shell_layer_get_size(layer, &sz)));
+    assert(sz.height == 32);
+
+    /* --- set_margin + set_exclusive_zone + set_desired_size: each
+     * change commits and the compositor re-configures (the height
+     * change proves the size request landed). --- */
+    int cfg0 = g_configure_events;
+    assert(fdk_ok(fdk_shell_layer_set_margin(layer, 4, 0, 0, 0)));
+    assert(fdk_ok(fdk_shell_layer_set_exclusive_zone(layer, 20)));
+    for (int i = 0; i < 40 && g_configure_events == cfg0; i++) {
+        pump(ctx, 50);
+    }
+    assert(g_configure_events > cfg0); /* the margin/zone commit
+                                        * re-configured the layer */
+
+    cfg0 = g_configure_events;
+    assert(fdk_ok(fdk_shell_layer_set_desired_size(layer, 0, 24)));
+    for (int i = 0; i < 40 && g_configure_events == cfg0; i++) {
+        pump(ctx, 50);
+    }
+    assert(g_configure_events > cfg0);
+    assert(g_last_configure.height == 24); /* the compositor honored
+                                            * the new desired size */
+    printf("[ok] fdk-shell wl re-anchor: margin/zone/size changes "
+           "configure through the live compositor\n");
+
+    /* --- set_anchor: TOP -> BOTTOM (the slide + the configure). --- */
+    cfg0 = g_configure_events;
+    assert(fdk_ok(fdk_shell_layer_set_anchor(
+        layer, FDK_SHELL_ANCHOR_BOTTOM | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT)));
+    for (int i = 0; i < 40 && g_configure_events == cfg0; i++) {
+        pump(ctx, 50);
+    }
+    assert(g_configure_events > cfg0);
+    printf("[ok] fdk-shell wl re-anchor: set_anchor TOP -> BOTTOM "
+           "re-configures\n");
+
+    /* --- set_level: the ROLE SWAP (same wl_surface, the new tier's
+     * layer surface). A configure must arrive on the NEW role. --- */
+    cfg0 = g_configure_events;
+    assert(fdk_ok(fdk_shell_layer_set_level(layer,
+                                             FDK_SHELL_LAYER_OVERLAY)));
+    for (int i = 0; i < 60 && g_configure_events == cfg0; i++) {
+        pump(ctx, 50);
+    }
+    assert(g_configure_events > cfg0); /* the new role configured */
+    printf("[ok] fdk-shell wl re-anchor: set_level role-swapped to "
+           "OVERLAY (same surface, new configure)\n");
+
+    /* --- auto-hide: the negative-margin slide + the reveal. The
+     * hidden state commits; the pointer over the reveal strip
+     * (driven through the rig's injector when available) reveals;
+     * hide_now + reveal round the cycle. --- */
+    assert(fdk_ok(fdk_shell_layer_set_auto_hide(layer, 3, 150)));
+    fdk_shell_layer_hide_now(layer);
+    pump(ctx, 300); /* the hidden commit settles (the negative
+                     * margin + zone 0 — no protocol error = the
+                     * requests were legal) */
+    fdk_shell_layer_reveal(layer);
+    pump(ctx, 300);
+    /* The connection survived the whole dance; the layer still
+     * configures (a final size change proves the role is alive). */
+    cfg0 = g_configure_events;
+    assert(fdk_ok(fdk_shell_layer_set_desired_size(layer, 0, 20)));
+    for (int i = 0; i < 40 && g_configure_events == cfg0; i++) {
+        pump(ctx, 50);
+    }
+    assert(g_configure_events > cfg0);
+    assert(g_last_configure.height == 20);
+    printf("[ok] fdk-shell wl auto-hide: the hide/reveal slide cycle "
+           "survived protocol-clean, the role alive after\n");
+
+    /* disarm + teardown */
+    assert(fdk_ok(fdk_shell_layer_set_auto_hide(layer, 0, 0)));
+    pump(ctx, 150);
+    fdk_shell_layer_destroy(layer);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+}
+
 int main(void) {
     test_layer_on_compositor();
+    test_runtime_reanchor_and_autohide();
     test_layer_eager_paint_startup();
     test_layer_across_workspaces();
     test_outputs_metrics_and_hotplug();

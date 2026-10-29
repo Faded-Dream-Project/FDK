@@ -51,9 +51,9 @@
 extern "C" {
 #endif
 
-#define FDKSHELL_VERSION_STRING "0.4.0"
+#define FDKSHELL_VERSION_STRING "0.5.0"
 
-/* Returns this package's version ("0.4.0"). */
+/* Returns this package's version ("0.5.0"). */
 const char *fdk_shell_version(void);
 
 /* ---- the per-context handle ---------------------------------------------- */
@@ -362,6 +362,80 @@ fdk_result fdk_shell_layer_get_size(const fdk_shell_layer *layer,
  * documented idiom). X11: maps / unmaps the dock window. */
 void fdk_shell_layer_show(fdk_shell_layer *layer);
 void fdk_shell_layer_hide(fdk_shell_layer *layer);
+
+/* ---- Runtime re-anchoring + auto-hide (0.5.0, C-5 / A-05 / A-08) -----------
+ *
+ * The layer's placement parameters are LIVE: anchors, margins, the
+ * exclusive zone, the desired size, and the keyboard mode can change
+ * on a shown surface without destroying it.
+ *
+ *   Wayland: the zwlr requests (set_anchor / set_margin /
+ *     set_exclusive_zone / set_size / set_keyboard_interactivity)
+ *     are double-buffered state — one commit applies them, the next
+ *     configure confirms. The surface is NEVER destroyed.
+ *   X11: the anchoring math is recomputed and the window is moved /
+ *     resized in place; the struts are rewritten (a zone change
+ *     re-reserves immediately); USPosition keeps the WM from
+ *     "helping".
+ *
+ * set_level (the stacking tier) has no live protocol form on
+ * Wayland (zwlr has no set_layer request): the layer surface's ROLE
+ * is swapped — destroyed and re-created on the target shell layer
+ * over the same wl_surface (the same surface identity, one
+ * unconfigure/configure cycle). On X11 it is one _NET_WM_STATE
+ * exchange (REMOVE the old tier's atoms, ADD the new) plus the
+ * _FDK_WM_LAYER property rewrite.
+ *
+ * AUTO-HIDE (A-08): fdk_shell_layer_set_auto_hide arms the
+ * reveal-strip model — the classic hidden panel:
+ *
+ *   - HIDDEN: the surface slides off its PRIMARY anchored edge
+ *     (the edge whose axis it reserves — a top bar slides up),
+ *     leaving `reveal_px` pixels on screen as the reveal strip.
+ *     The exclusive zone is WITHDRAWN while hidden (other windows
+ *     take the space — that is the point of hiding).
+ *   - the pointer entering the strip (or the layer) REVEALS: the
+ *     surface slides back, the zone returns.
+ *   - the pointer LEAVING the revealed layer starts a `dwell_ms`
+ *     timer; its expiry hides again. reveal(0)/dwell(0) hide/reveal
+ *     instantly.
+ *   - fdk_shell_layer_reveal / _hide_now drive the states from
+ *     application code (menus that must not hide while open, for
+ *     instance — call reveal() on popup-open, hide_now() never: the
+ *     dwell restarts on the next leave).
+ *
+ * The slide itself is the platform's geometry change (instant on
+ * X11, compositor-paced on Wayland); an animated glide is future
+ * polish — the positions, the input strip, and the zone semantics
+ * are the contract. Layers with no single-anchor axis (a centered
+ * floating layer) have no slide direction: set_auto_hide answers
+ * FDK_ERR_INVALID_ARGUMENT for them. */
+
+fdk_result fdk_shell_layer_set_anchor(fdk_shell_layer *layer,
+                                      uint32_t anchors);
+fdk_result fdk_shell_layer_set_margin(fdk_shell_layer *layer,
+                                      int32_t top, int32_t right,
+                                      int32_t bottom, int32_t left);
+fdk_result fdk_shell_layer_set_exclusive_zone(fdk_shell_layer *layer,
+                                              int32_t zone);
+fdk_result fdk_shell_layer_set_desired_size(fdk_shell_layer *layer,
+                                            int32_t width, int32_t height);
+fdk_result fdk_shell_layer_set_keyboard_mode(fdk_shell_layer *layer,
+                                             fdk_shell_keyboard_mode mode);
+fdk_result fdk_shell_layer_set_level(fdk_shell_layer *layer,
+                                     fdk_shell_layer_level level);
+
+/* Arms auto-hide: reveal_px > 0 enables (the on-screen strip while
+ * hidden); 0 disables and reveals if hidden. dwell_ms is the
+ * leave-to-hide delay (0 = instant). FDK_ERR_INVALID_ARGUMENT on a
+ * layer with no slide direction or a negative reveal. */
+fdk_result fdk_shell_layer_set_auto_hide(fdk_shell_layer *layer,
+                                         int32_t reveal_px,
+                                         uint32_t dwell_ms);
+/* Forces the shown state (cancels a pending hide). */
+void fdk_shell_layer_reveal(fdk_shell_layer *layer);
+/* Forces the hidden state immediately (the reveal strip stays). */
+void fdk_shell_layer_hide_now(fdk_shell_layer *layer);
 
 /* ---- popups (dropdowns) ---------------------------------------------------- */
 

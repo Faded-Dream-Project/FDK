@@ -808,6 +808,13 @@ sidebar rhythm).
   viewport source rectangles, `fdk_window_get_scale`
 - **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
+- **fdk-shell runtime re-anchoring + auto-hide: SHIPPED (1.1.0,
+  C-5 / A-05 / A-08, fdk-shell 0.5.0)** — the LIVE desc (anchor/
+  margin/zone/size/keyboard/level on a shown surface; the Wayland
+  role swap with the wire-order lesson; the X11 state exchange) +
+  the reveal-strip auto-hide (backend-native slide, withdrawn zone,
+  the pointer state machine, reveal/hide_now). D-024; rigs: 9 X11
+  legs + 4 sway legs.
 - **The AT-SPI2 bridge, level 1: SHIPPED (1.1.0, S-8 / B-10)** —
   the accessibility WIRE over the internal a11y tree: the two-bus
   handshake (retry on a 2s throttle — late-starting screen readers

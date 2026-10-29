@@ -1179,3 +1179,65 @@ Fences: text interfaces, relations, and the value interface are
 C-2's (level 2); bounds events are emitted but not announced as
 AT-SPI BoundsChanged (screen readers re-query); the registry is
 bounded at 2048 objects (a WARN names the invisibility beyond).
+
+## D-024 — runtime re-anchoring + auto-hide: the live desc, the native slide, the role-swap wire order (C-5 / A-05 / A-08)
+
+2026-10-29. The audit's A-05 (create-time-only placement — "destroy
+and re-create is the documented idiom") and A-08 (no auto-hide API),
+roadmapped together as C-5: the panel toolkit's placement is LIVE.
+
+**1. The desc is mutable state; the backends apply it on demand.**
+set_anchor / set_margin / set_exclusive_zone / set_desired_size /
+set_keyboard_mode mutate the layer's desc and re-apply through the
+backend's reconfig: Wayland re-issues the double-buffered zwlr
+requests + one commit (the next configure confirms — the surface is
+NEVER destroyed); X11 recomputes the anchoring math and moves/
+resizes the live window (size hints + struts follow; USPosition
+keeps the WM from re-placing a dock it saw move).
+
+**2. set_level is the role swap on Wayland — and the wire order is
+the protocol's own lesson.** zwlr has no set_layer request; the tier
+changes by destroying the role object and creating a new one on the
+target shell layer over the SAME wl_surface. The RIG caught the
+order: marshalling get_layer_surface BEFORE the old role's destroy
+lands as "Cannot reassign role ... role object still exists" — a
+FATAL protocol error (the create-first order was the "safe" one that
+keeps a role on allocation failure; the destroy-first order is the
+only legal one). X11: one _NET_WM_STATE exchange (REMOVE the old
+tier's atoms, ADD the new) + the _FDK_WM_LAYER rewrite.
+
+**3. The auto-hide slide is backend-NATIVE, not a margin trick.**
+The reveal-strip model: hidden = the surface parked off its PRIMARY
+anchored edge (the single-anchored axis) with `reveal_px` on screen;
+the exclusive zone is WITHDRAWN while hidden (other windows take the
+space — the point of hiding). The first cut folded the slide into
+the desc's margins — which on X11 can only push a window INWARD
+(margins are gaps FROM the edge; the hidden bar moved down, not
+off). The backends now apply the slide themselves: X11 as a
+POSITION offset along the slide edge (the size kept — the strip is
+what stays on screen), Wayland as a NEGATIVE margin on the slide
+edge (zwlr margins are signed — the protocol's own way to park a
+surface off-edge).
+
+**4. The pointer IS the state machine.** The shell's event
+forwarder intercepts POINTER_ENTER/LEAVE (additively — the app
+callback still sees everything): enter reveals (cancelling a pending
+dwell — the classic race), leave arms the dwell timer (fdk_timer,
+one-shot; expiry hides). reveal() / hide_now() drive the states from
+application code; set_auto_hide(0) disarms and reveals. The dwell
+timer dies with the layer (the destroy path removes it — a live
+timer would fire into freed memory).
+
+**5. The trigger plumbing needed no new events.** The strip is
+ordinary window area — the pointer entering it generates the
+platform's native crossing event, which the existing
+FDK_EVENT_POINTER_ENTER already delivers. The rig drove it with REAL
+XTEST motion into the 3px strip of a hidden bar and watched the
+reveal land; the leave+dwelling hide and the disarm round the cycle.
+
+Fences: the slide is instant on X11 and compositor-paced on Wayland
+(no animated glide — positions, input strip, and zone semantics are
+the contract; animation is future polish); centered/both-anchored
+layers have no slide direction (set_auto_hide refuses them);
+auto-hide is per-layer (a multi-output panel on every output hides
+each layer independently — each has its own pointer state).

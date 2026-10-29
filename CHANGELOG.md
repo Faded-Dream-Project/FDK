@@ -14,6 +14,39 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
+### Added — fdk-shell runtime re-anchoring + auto-hide (C-5 / A-05 / A-08)
+
+- **The layer's placement is LIVE** (fdk-shell 0.5.0):
+  `fdk_shell_layer_set_anchor` / `_set_margin` / `_set_exclusive_
+  zone` / `_set_desired_size` / `_set_keyboard_mode` / `_set_level`
+  change a SHOWN surface without destroying it — Wayland re-issues
+  the double-buffered zwlr requests and commits (the surface is
+  never destroyed; the next configure confirms); X11 recomputes the
+  anchoring math and moves/resizes the live window with its size
+  hints and struts (a zone change re-reserves immediately).
+  `set_level` is the role swap on Wayland (destroy + re-create over
+  the same `wl_surface`, one unconfigure/configure cycle) and the
+  `_NET_WM_STATE` exchange on X11.
+- **Auto-hide, the reveal-strip model**:
+  `fdk_shell_layer_set_auto_hide(reveal_px, dwell_ms)` parks the
+  layer off its primary anchored edge leaving `reveal_px` on screen
+  and WITHDRAWS the exclusive zone (other windows take the space);
+  the pointer entering the strip (or the layer) reveals, leaving
+  arms a dwell timer whose expiry hides; `fdk_shell_layer_reveal` /
+  `_hide_now` drive the states from application code. The slide is
+  backend-native: a position offset on X11 (margins only push
+  inward), a negative margin on Wayland (zwlr margins are signed).
+- Tests: 9 new X11 legs (re-anchor geometry/strut readback; the
+  hidden slide at y=-37 with the size kept and the strut withdrawn;
+  reveal; a REAL XTEST motion into the 3px strip revealing; leave +
+  dwell hiding; disarm) + 4 new sway legs (configure-through for
+  margin/zone/size; the anchor flip; the role swap; the auto-hide
+  cycle). The rig caught two real defects: the role-swap WIRE ORDER
+  (the new role marshalled before the old destroy is a fatal
+  "Cannot reassign role" error) and the margin-trap (margins cannot
+  push a window off-screen on X11 — the slide became a native
+  offset). docs/DECISIONS.md D-024.
+
 ### Added — the AT-SPI2 accessibility bridge, level 1 (S-8 / B-10)
 
 - **OS screen readers can finally see FDK apps.** The internal a11y

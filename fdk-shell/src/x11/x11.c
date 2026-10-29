@@ -148,6 +148,8 @@ typedef struct x11_layer_state {
                      * strut/grab work below (it equals the ext
                      * surface's native handle) */
     int grabbed;    /* keyboard grab active (EXCLUSIVE mode) */
+    fdk_shell_layer_level level; /* the APPLIED tier (reconfig's
+                                  * REMOVE/ADD exchange keys on it) */
 } x11_layer_state;
 
 /* ---- the output model (0.3.0, M-6/A-03) ------------------------------------
@@ -852,6 +854,7 @@ fdk_result fdkshell__x11_layer_create(fdk_shell *shell,
     }
     lst->xwindow = xw;
     lst->grabbed = 0;
+    lst->level = desc->layer;
     layer->backend = lst;
     layer->size.width = (fdk_i32)w;
     layer->size.height = (fdk_i32)h;
@@ -968,6 +971,177 @@ void fdkshell__x11_layer_hide(fdk_shell_layer *layer) {
         XFlush(st->dpy);
         lst->grabbed = 0;
     }
+}
+
+/* 0.5.0, C-5 / A-05: the live re-anchoring. The same math create
+ * used, recomputed against the (possibly changed) desc, applied to
+ * the existing window: move + resize + size hints + struts. A level
+ * change additionally rides the _NET_WM_STATE exchange (REMOVE the
+ * old tier's atoms, ADD the new) and the _FDK_WM_LAYER rewrite.
+ * The keyboard mode is handled at show/grab level (the EXCLUSIVE
+ * grab engages at the next show, or now when armed).
+ */
+void fdkshell__x11_layer_reconfig(fdk_shell_layer *layer) {
+    fdk_shell *shell = layer->shell;
+    x11_shell_state *st = shell->x11;
+    x11_layer_state *lst = layer->backend;
+    if (st == NULL || lst == NULL) {
+        return;
+    }
+    Display *dpy = st->dpy;
+    const fdk_shell_layer_desc *desc = &layer->desc;
+    int screen_w = DisplayWidth(dpy, st->screen);
+    int screen_h = DisplayHeight(dpy, st->screen);
+
+    /* Per-output anchoring (the create path's rule, verbatim). */
+    int out_x = 0, out_y = 0;
+    if (desc->output_index >= 0) {
+        const x11_output_rec *o =
+            x11_output_live_at(st, (uint32_t)desc->output_index);
+        if (o != NULL) {
+            out_x = o->x;
+            out_y = o->y;
+            screen_w = o->width;
+            screen_h = o->height;
+        }
+    }
+
+    int x = 0, y = 0, w = 0, h = 0;
+    x11_axis_geometry(screen_w, desc->margin_left, desc->margin_right,
+                      desc->anchors & FDK_SHELL_ANCHOR_LEFT,
+                      desc->anchors & FDK_SHELL_ANCHOR_RIGHT, desc->width,
+                      &x, &w);
+    x11_axis_geometry(screen_h, desc->margin_top, desc->margin_bottom,
+                      desc->anchors & FDK_SHELL_ANCHOR_TOP,
+                      desc->anchors & FDK_SHELL_ANCHOR_BOTTOM,
+                      desc->height, &y, &h);
+    x += out_x;
+    y += out_y;
+
+    /* The auto-hide slide (0.5.0, C-5): a POSITION offset along the
+     * slide edge — X11 margins cannot push a window past its edge,
+     * so the hidden state is an off-screen move, the size kept (the
+     * reveal strip is what stays on screen). */
+    int32_t slide = fdkshell__slide_amount(layer);
+    if (slide > 0) {
+        uint32_t edge = fdkshell__slide_edge(layer);
+        switch (edge) {
+        case FDK_SHELL_ANCHOR_TOP:
+            y -= slide;
+            break;
+        case FDK_SHELL_ANCHOR_BOTTOM:
+            y += slide;
+            break;
+        case FDK_SHELL_ANCHOR_LEFT:
+            x -= slide;
+            break;
+        case FDK_SHELL_ANCHOR_RIGHT:
+            x += slide;
+            break;
+        default:
+            break;
+        }
+    }
+
+    XMoveResizeWindow(dpy, lst->xwindow, (int)x, (int)y,
+                      (unsigned)w, (unsigned)h);
+    layer->size.width = (fdk_i32)w;
+    layer->size.height = (fdk_i32)h;
+
+    /* The size hints follow (USPosition keeps the WM from
+     * re-placing a dock it saw move). */
+    {
+        XSizeHints hints;
+        memset(&hints, 0, sizeof(hints));
+        hints.flags = USPosition | USSize | PPosition | PSize;
+        hints.x = (int)x;
+        hints.y = (int)y;
+        hints.width = (int)w;
+        hints.height = (int)h;
+        XSetWMNormalHints(dpy, lst->xwindow, &hints);
+    }
+
+    /* Struts: the zone semantics re-reserve immediately (the
+     * auto-hide overlay's zone-0 withdrawal rides exactly this). */
+    x11_set_struts(dpy, &st->atoms, lst->xwindow, desc, (int)x, (int)y,
+                   (int)w, (int)h, screen_w, screen_h);
+
+    /* The level state exchange: REMOVE every atom of the OLD tier,
+     * ADD the new one's (both messages with source=application). The
+     * old tier's atoms are recomputed from the stored create-time
+     * level (x11_layer_state carries it — see below). */
+    if (lst->level != desc->layer) {
+        Window root = DefaultRootWindow(dpy);
+        Atom old_atoms[4];
+        int n_old =
+            x11_layer_state_atoms(&st->atoms, lst->level, old_atoms);
+        for (int i = 0; i < n_old; i += 2) {
+            XEvent msg;
+            memset(&msg, 0, sizeof(msg));
+            msg.type = ClientMessage;
+            msg.xclient.window = lst->xwindow;
+            msg.xclient.message_type = st->atoms.net_wm_state;
+            msg.xclient.format = 32;
+            msg.xclient.data.l[0] = 0; /* _NET_WM_STATE_REMOVE */
+            msg.xclient.data.l[1] = (long)old_atoms[i];
+            msg.xclient.data.l[2] =
+                (i + 1 < n_old) ? (long)old_atoms[i + 1] : 0;
+            msg.xclient.data.l[3] = 1;
+            XSendEvent(dpy, root, False,
+                       (long)(SubstructureNotifyMask |
+                              SubstructureRedirectMask),
+                       &msg);
+        }
+        Atom new_atoms[4];
+        int n_new =
+            x11_layer_state_atoms(&st->atoms, desc->layer, new_atoms);
+        for (int i = 0; i < n_new; i += 2) {
+            XEvent msg;
+            memset(&msg, 0, sizeof(msg));
+            msg.type = ClientMessage;
+            msg.xclient.window = lst->xwindow;
+            msg.xclient.message_type = st->atoms.net_wm_state;
+            msg.xclient.format = 32;
+            msg.xclient.data.l[0] = 1; /* _NET_WM_STATE_ADD */
+            msg.xclient.data.l[1] = (long)new_atoms[i];
+            msg.xclient.data.l[2] =
+                (i + 1 < n_new) ? (long)new_atoms[i + 1] : 0;
+            msg.xclient.data.l[3] = 1;
+            XSendEvent(dpy, root, False,
+                       (long)(SubstructureNotifyMask |
+                              SubstructureRedirectMask),
+                       &msg);
+        }
+        /* _FDK_WM_LAYER rewrite (the custom-WM contract). */
+        {
+            static const char *layer_names[] = {
+                "background", "bottom", "top", "overlay",
+            };
+            const char *lname =
+                (desc->layer <= FDK_SHELL_LAYER_OVERLAY)
+                    ? layer_names[desc->layer]
+                    : "top";
+            XChangeProperty(dpy, lst->xwindow, st->atoms.fdk_wm_layer,
+                            XA_STRING, 8, PropModeReplace,
+                            (const unsigned char *)lname,
+                            (int)strlen(lname));
+        }
+        lst->level = desc->layer;
+    }
+
+    /* The keyboard mode change: EXCLUSIVE arms the grab now (the
+     * window is mapped); leaving EXCLUSIVE releases it. */
+    if (desc->keyboard == FDK_SHELL_KBD_EXCLUSIVE && !lst->grabbed) {
+        if (XGrabKeyboard(dpy, lst->xwindow, True, GrabModeAsync,
+                          GrabModeAsync, CurrentTime) == GrabSuccess) {
+            lst->grabbed = 1;
+        }
+    } else if (desc->keyboard != FDK_SHELL_KBD_EXCLUSIVE && lst->grabbed) {
+        XUngrabKeyboard(dpy, CurrentTime);
+        lst->grabbed = 0;
+    }
+
+    XFlush(dpy);
 }
 
 #endif /* FDKSHELL_BUILD_X11 */

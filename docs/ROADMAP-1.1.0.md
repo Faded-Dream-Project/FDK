@@ -46,14 +46,15 @@ integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
 **Counts** (recounted 2026-10-29 against every register row — the
-earlier line's arithmetic was coarser than the table): DONE 44
-(S-8/B-10, 2026-10-29; C-1/B-09, 2026-10-29; S-9/B-13, 2026-10-29;
-S-6/B-04-activation, 2026-10-29; C-4/B-14, 2026-10-29; S-10/B-18,
-2026-10-29; S-4/A-06 + A-07 folded, 2026-10-29; S-5/B-12,
-2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B both sides, 2026-10-29;
-S-2 and S-1 pending owner verification; M-4, M-3, M-1, and S-3,
-2026-10-28) · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 11
-· DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
+earlier line's arithmetic was coarser than the table): DONE 46
+(C-5/A-05 + A-08, 2026-10-29; S-8/B-10, 2026-10-29; C-1/B-09,
+2026-10-29; S-9/B-13, 2026-10-29; S-6/B-04-activation, 2026-10-29;
+C-4/B-14, 2026-10-29; S-10/B-18, 2026-10-29; S-4/A-06 + A-07
+folded, 2026-10-29; S-5/B-12, 2026-10-29; M-6/A-03/B-05, 2026-10-29;
+T-B both sides, 2026-10-29; S-2 and S-1 pending owner verification;
+M-4, M-3, M-1, and S-3, 2026-10-28) · PARTIAL 1 (B-19) · IN
+PROGRESS 1 (M-9) · MISSING 9 · DEFERRED (by design) 5 · BLOCKED-BY-
+SANDBOX 0 — of 62 items. Re-verified 2026-10-29 (post-S-5): the clean
 dual-backend rebuild zero warnings, core make test (incl. the NEW
 tests/test_cursor.c: the mapping table, the resolution order, the
 name-table grammar, the loader against a synthetic XCursor file) +
@@ -77,6 +78,18 @@ two-monitor origin math, stale-index fallback), the bar rig
 unchanged-and-green, and the notifyd rig (the dispatch-loop change
 under a real WM). Earlier: post-T-B-side-2 — both desktop rigs
 unchanged-and-green (notifyd 68, trayhost 103).
+Re-verified 2026-10-29 (post-C-5): fdk-shell 0.5.0 build zero
+warnings, its X11 suite (incl. the NINE new C-5 legs: the four
+re-anchor legs — set_margin/zone/anchor/level with geometry + strut
+readback — and the five auto-hide legs — the hidden slide's
+geometry/size/strut, the reveal, the REAL XTEST strip entry, the
+leave+dwell, the disarm), its Wayland suite under sway (12 [ok]
+incl. the four new legs: the margin/zone/size configure, the anchor
+flip, the set_level role swap, the auto-hide cycle), the desktop
+model tests, the notifyd + trayhost rigs (ALL PASS), and the CORE
+regression battery (make test, test-dbus 46 [ok], test-x11 205
+[ok], verify-exports 848, the sway suite 56 [ok]) — unchanged and
+green (the layer changes are additive; the core never moved).
 Re-verified 2026-10-29 (post-S-8): the dual-backend rebuild zero
 warnings (debug AND release), core make test, make test-dbus (46
 [ok] incl. the five NEW AT-SPI legs against the mock stack: the
@@ -160,10 +173,10 @@ unaffected):
 | A-02 | output metrics | **DONE** | `fdk_shell_output_get_info`; "initial set enumerable, metrics 1024x768 scale 1" (wl) + "the screen as one output, metrics exact" (x11); X11 per-output metrics landed with M-6 (the RandR table, real CRTC geometry + mm) | — |
 | A-03 | X11 multi-monitor | **DONE** | 0.3.0 (M-6): fdk-shell's own X connection carries the RandR watch (XRRSelectInput + the extension loop's fd source — D-015); real per-output records (connector names, per-CRTC geometry), output events (ADDED/CHANGED/REMOVED with gone-records enumeration), and per-output layer anchoring (output-local geometry offset into root coordinates; tests/test_x11.c's synthetic two-monitor seam reads window geometry back through the protocol); no RandR = the screen fallback (the regression pin the unchanged rigs re-proved) | owner's real multi-monitor desktop (hotplug + per-monitor struts) |
 | A-04 | namespace | **DONE** | configurable namespace; "namespace -> WM_CLASS res_class" (x11 tests) + "wl namespace layer" (wl tests) | — |
-| A-05 | runtime parameter changes | **MISSING** | create-time desc only; no `fdk_shell_layer_set_*` runtime API | C-5 |
+| A-05 | runtime parameter changes | **DONE** | 0.5.0 (C-5): the LIVE desc — set_anchor/_margin/_exclusive_zone/_desired_size/_keyboard_mode/_level on a shown surface. Wayland: the double-buffered zwlr requests + one commit, the surface NEVER destroyed (the next configure confirms); set_level = the role swap (the WIRE ORDER the rig caught: the old role's destroy marshalled FIRST, or "Cannot reassign role" kills the connection). X11: the anchoring math recomputed + move/resize + hints + struts; set_level = the _NET_WM_STATE REMOVE/ADD exchange + _FDK_WM_LAYER rewrite. Tests: X11 4 legs (margin moves + auto strut follows; zone re-reserves; anchor TOP->BOTTOM slides with the strut edge flipping; level rewrites live); Wayland 3 legs under sway (margin/zone/size configure incl. the height honoring; the anchor flip; the role swap's new configure). D-024 | — |
 | A-06 | input regions / click-through | **DONE** | S-4 shipped (2026-10-29): `fdk_window_set_input_region` + `fdk_ext_surface_set_input_region` — up to 64 window-local LOGICAL rects receive pointer input, clicks outside fall through (both backends); NULL/0 clears, a zero-area rect = `input_transparent` on demand. X11: logical→physical scaling into XShape (the clear is a full-window rect — XShapeCombineRegion NULL-Region SEGV, pinned); Wayland: straight into `wl_surface.set_input_region` (surface-local IS logical, integer and fractional scales alike; configured-surface immediate commit, first-commit otherwise). Tests: X11 readback from a second connection + REAL XTEST click-through both ways; the sway injector's real pointer (no enter into the hole, enter into the region, leave, clear); fdk-shell add-on API pinned by XShape readback. D-017 | — |
 | A-07 | ext-API input+scale hooks | **DONE** (folded into S-4, core-side) | superseded by the core-side decision (D-002): the region API ships core-side on windows AND extension surfaces — `fdk_ext_surface_set_input_region` (the uniform surface the add-on-side-first judgment wanted, delivered the other way round); no ext-API version bump needed | — |
-| A-08 | auto-hide / reveal | **MISSING** | no API | C-5 (needs A-06) |
+| A-08 | auto-hide / reveal | **DONE** | 0.5.0 (C-5): set_auto_hide(reveal_px, dwell_ms) — the reveal-strip model. HIDDEN = parked off the PRIMARY anchored edge with reveal_px on screen, the zone WITHDRAWN; the pointer entering the strip reveals, leaving arms the dwell (fdk_timer) whose expiry hides; reveal()/hide_now() drive it from app code; 0 disarms. The slide is backend-NATIVE (X11: a position offset — margins only push inward; Wayland: a NEGATIVE margin — zwlr margins are signed); the zone-0 rides the reconfig. Tests: X11 5 legs (hidden y=-37/size kept/strut withdrawn; reveal restores; REAL XTEST into the 3px strip reveals; leave+dwell hides; disarm stays); Wayland: the cycle protocol-clean, the role alive after. D-024 | — |
 | A-09 | `_FDK_WM_LAYER` | **DONE** | set on every layer; "_FDK_WM_LAYER level names" test | — |
 | A-10 | cascading submenus | **DONE** | `fdk_shell_popup_create_child` any depth; "popup cascades: 3-deep create/render + family sweep" (x11) + "2-deep cascade popup + family sweep" (wl) | — |
 | A-11 | tray host | **DONE (should work; owner verification pending)** | trayhost (fdk-shell/examples/trayhost.c) — the full org.kde.StatusNotifierWatcher host on the native client: both registration dialects, the four properties (Get/GetAll/PropertiesChanged), item loading with the interface fallback chain and the a(iiay) decode, New* signal handling, vanished-item drops via NameOwnerChanged, and the complete dbusmenu round (GetLayout two-out-arg parse, AboutToShow, Event, mnemonic stripping, cascading submenus with edge flip); the rig (make -C fdk-shell test-tray) proves protocol (real dbus-daemon, libdbus+GLib cross-implementation callers, gdbus-monitor signal receipt), hostile registrations, the etiquette matrix, X11 pixels+XTEST-clicks+menu-cascade+Passive-fade/NeedsAttention under Xvfb+openbox, and sway layer-shell handshake+pixels. Owner steps: docs/TESTING-ON-DESKTOP.md §§5–7 | S-1 (D-007 records the shape decisions) |
@@ -211,7 +224,7 @@ unaffected):
 | C-2 | AT-SPI text interfaces | **MISSING** | = B-10 (level 2; the bridge's served surface is the substrate) | after S-8 (done — C-2 is next-tier) |
 | C-3 | color emoji | **MISSING** | no COLRv0/v1 | after M-2 |
 | C-4 | animated images | **DONE** | = B-14 (GIF; D-019) | — |
-| C-5 | re-anchor + auto-hide | **MISSING** | = A-05/A-08 | both |
+| C-5 | re-anchor + auto-hide | **DONE** | = A-05/A-08 (both halves, both backends; D-024) | — |
 | C-6 | basic gestures | **MISSING** | = B-17 | after M-3 |
 | D-1 | EGL/GPU Wayland | **DEFERRED** | by scope discipline (1.2.0) | — |
 | D-2 | subsurfaces | **DEFERRED** | by scope discipline | — |
@@ -262,10 +275,10 @@ What 0.1.0 already does (verified in `fdk-shell/src/`, pinned by
 | A-02 | **Output metrics** — no size / scale / position query per output. Apps need this to size panels per-output before the first configure, and it is the substrate A-06 (X11 multi-monitor) builds on. | missing | S | pair with A-01 |
 | A-03 | **X11 multi-monitor** — exactly one output (the screen); no RandR. Per-monitor docks are impossible; a top bar spans all monitors with one strut. | missing | M | RandR 1.3 output enumeration + CRTCs; hotplug = RRNotify; per-output geometry feeds the same anchoring math **[DONE 2026-10-29 — see the A-03 verified-status row; M-6]** |
 | A-04 | **Namespace** — hardcoded `"fdk-shell"`; the spec's namespace is what compositor rules (sway `for_window`-style layer criteria) match on. gtk-layer-shell exposes `set_namespace`. | partial | S | one desc field |
-| A-05 | **Runtime parameter changes** — `set_layer` / `set_anchor` / `set_margin` / `set_exclusive_zone` / `set_size` / `set_keyboard_interactivity` are all runtime-capable in the protocol (double-buffered state); fdk-shell exposes them create-time only (destroy + re-create is the documented idiom). | partial | M | the protocol allows live re-anchor without losing the surface; gtk-layer-shell allows pre-map changes of everything |
+| A-05 | **Runtime parameter changes** — `set_layer` / `set_anchor` / `set_margin` / `set_exclusive_zone` / `set_size` / `set_keyboard_interactivity` are all runtime-capable in the protocol (double-buffered state); fdk-shell exposes them create-time only (destroy + re-create is the documented idiom). | **DONE** [VERIFIED-CHANGED: 0.5.0/C-5 shipped the full runtime set — see the A-05 verified-status row] | M | the protocol allows live re-anchor without losing the surface; gtk-layer-shell allows pre-map changes of everything |
 | A-06 | **Input regions / click-through** — no `wl_surface.set_input_region` on Wayland, no XShape on X11. Transparent margins of a notification overlay eat clicks; auto-hide reveal strips are impossible without it. | missing | S–M | needs a small extension-API addition (A-07) or an fdk-shell-side call on the native handle **[DONE 2026-10-29 — see the A-06 verified-status row; S-4]** |
 | A-07 | **Extension-API surface hooks for input+scale region control** — the add-on can already do both itself through the native handle (documented accessors); an ext-API v2 helper would make it uniform. Judgment: do it add-on-side first. | missing | S | append-only ops fields **[VERIFIED-CHANGED: the add-on-side-first judgment is SUPERSEDED - S-4 owns input regions core-side (windows AND extension surfaces) per the 2026-10-27 owner decision, docs/DECISIONS.md D-002]** **[DONE 2026-10-29 — folded into S-4 core-side; see the A-07 verified-status row]** |
-| A-08 | **Auto-hide / reveal** — no API. Possible today only via destroy/recreate churn (Wayland) or hide (X11); a real answer needs A-06 plus zone animation. | missing | M | panels want it; gtk-layer-shell doesn't provide it either (it is panel-toolkit territory, and fdk-shell IS the panel toolkit here) |
+| A-08 | **Auto-hide / reveal** — no API. Possible today only via destroy/recreate churn (Wayland) or hide (X11); a real answer needs A-06 plus zone animation. | **DONE** [VERIFIED-CHANGED: 0.5.0/C-5 shipped the reveal-strip model on A-06's regions — see the A-08 verified-status row] | M | panels want it; gtk-layer-shell doesn't provide it either (it is panel-toolkit territory, and fdk-shell IS the panel toolkit here) |
 | A-09 | **`_FDK_WM_LAYER` property** — the README's custom-WM contract (option 2) says fdk-shell "would set it the day a WM adopts it"; setting it unconditionally is harmless on WMs that don't know it and lets the owner's WM adopt without an fdk-shell release. | partial | S | property + README note |
 | A-10 | **Cascading submenus** — core popups parent to any extension surface (verified: `fdk_ext_popup_create` → `fdk__window_create_popup_ex` accepts a popup parent), but fdk-shell's API only takes a LAYER parent, so bars can't build launcher menus with submenus. | partial | S | expose popup-of-popup in the fdk-shell API |
 | A-11 | **StatusNotifier tray host** — no StatusNotifierItem/Watcher. A panel without a tray is half a panel; this is the single most-requested panel feature after the bar itself. Rides the D-Bus foundation (B-08). | missing | M–L | fdk-shell add-on surface + fd sources is exactly the architecture for it | **[DONE 2026-10-27: trayhost — should work; owner verification pending (docs/TESTING-ON-DESKTOP.md)]** |
@@ -411,7 +424,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | C-2 | AT-SPI text interfaces + relations export | B-10 |
 | C-3 | Color emoji (COLRv0/v1 after HarfBuzz lands) | B-02 |
 | C-4 | Animated images (GIF first, WebP via dlopen) | B-14 | **[DONE 2026-10-29 — GIF native, no dlopen; see the B-14 verified-status row]** |
-| C-5 | fdk-shell runtime re-anchoring + auto-hide/reveal mode | A-05, A-08 |
+| C-5 | fdk-shell runtime re-anchoring + auto-hide/reveal mode | A-05, A-08 | **[DONE 2026-10-29 — see the A-05/A-08 verified-status rows; D-024]** |
 | C-6 | Basic gestures (pinch/swipe) on the touch event model | B-17 |
 
 ### DEFER — 1.2.0, by scope discipline

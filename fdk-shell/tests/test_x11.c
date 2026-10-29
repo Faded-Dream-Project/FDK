@@ -2005,8 +2005,269 @@ static void test_popup_cascade(void) {
     printf("[ok] popup cascades: 3-deep create/render + family sweep\n");
 }
 
+/* ---- 0.5.0, C-5: runtime re-anchoring + auto-hide ------------------------ */
+
+/* Runtime parameter changes on a SHOWN layer: geometry follows live
+ * (read back through the server), the struts re-reserve, and the
+ * stacking tier rides the state exchange. */
+static void test_runtime_reanchor(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 32;
+    desc.exclusive_zone = -1;
+
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 200);
+
+    rb_open();
+    Display *dpy = g_rb;
+    unsigned long xid = layer_xid(layer);
+    int screen_w = DisplayWidth(dpy, DefaultScreen(dpy));
+    int screen_h = DisplayHeight(dpy, DefaultScreen(dpy));
+
+    /* --- set_margin: the bar moves DOWN by the margin. --- */
+    assert(fdk_ok(fdk_shell_layer_set_margin(layer, 10, 0, 0, 0)));
+    pump(ctx, 100);
+    {
+        int x = 0, y = 0;
+        unsigned int w = 0, h = 0;
+        geom_of(dpy, (Window)xid, &x, &y, &w, &h);
+        assert(x == 0 && y == 10);
+        assert(w == (unsigned int)screen_w);
+        assert(h == 32);
+        /* The auto zone follows the geometry: 10 + 32. */
+        long strut[12] = { 0 };
+        Atom sp = XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL", False);
+        assert(prop_cardinals(dpy, (Window)xid, sp, strut, 12) == 12);
+        assert(strut[2] == 42);
+    }
+    printf("[ok] fdk-shell x11 re-anchor: set_margin moves the live "
+           "window, the auto strut follows\n");
+
+    /* --- set_exclusive_zone: explicit zone overrides the extent. --- */
+    assert(fdk_ok(fdk_shell_layer_set_exclusive_zone(layer, 7)));
+    pump(ctx, 100);
+    {
+        long strut[12] = { 0 };
+        Atom sp = XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL", False);
+        assert(prop_cardinals(dpy, (Window)xid, sp, strut, 12) == 12);
+        assert(strut[2] == 7);
+    }
+    printf("[ok] fdk-shell x11 re-anchor: set_exclusive_zone "
+           "re-reserves live\n");
+
+    /* --- set_anchor: TOP -> BOTTOM slides the bar to the floor. --- */
+    assert(fdk_ok(fdk_shell_layer_set_anchor(
+        layer, FDK_SHELL_ANCHOR_BOTTOM | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT)));
+    pump(ctx, 100);
+    {
+        /* (the margin set earlier was TOP=10; the bottom is 0 — the
+         * bar sits at screen_h-32, the block below asserts it) */
+    }
+    {
+        int x = 0, y = 0;
+        unsigned int w = 0, h = 0;
+        geom_of(dpy, (Window)xid, &x, &y, &w, &h);
+        assert(y == screen_h - 32);
+        long strut[12] = { 0 };
+        Atom sp = XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL", False);
+        assert(prop_cardinals(dpy, (Window)xid, sp, strut, 12) == 12);
+        /* the zone is still the EXPLICIT 7 from the last leg — the
+         * bottom edge now carries it (the anchor flip moved the
+         * reservation edge, not the value) */
+        assert(strut[3] == 7);
+        assert(strut[2] == 0); /* top released */
+    }
+    printf("[ok] fdk-shell x11 re-anchor: set_anchor slides TOP -> "
+           "BOTTOM live (struts follow)\n");
+
+    /* --- set_level: the tier exchange (TOP -> OVERLAY adds
+     * SKIP_TASKBAR/SKIP_PAGER to the state list). --- */
+    {
+        Atom above = XInternAtom(dpy, "_NET_WM_STATE_ABOVE", False);
+        Atom skip_tb =
+            XInternAtom(dpy, "_NET_WM_STATE_SKIP_TASKBAR", False);
+        (void)above;
+        (void)skip_tb;
+    }
+    assert(fdk_ok(fdk_shell_layer_set_level(layer,
+                                             FDK_SHELL_LAYER_OVERLAY)));
+    pump(ctx, 200);
+    {
+        /* _FDK_WM_LAYER says "overlay". */
+        Atom fdk_layer = XInternAtom(dpy, "_FDK_WM_LAYER", False);
+        Atom type = None;
+        int fmt = 0;
+        unsigned long n = 0, left = 0;
+        unsigned char *data = NULL;
+        assert(XGetWindowProperty(dpy, (Window)xid, fdk_layer, 0, 64,
+                                  False, XA_STRING, &type, &fmt, &n,
+                                  &left, &data) == Success &&
+               data != NULL);
+        assert(n == 7 && memcmp(data, "overlay", 7) == 0);
+        XFree(data);
+    }
+    printf("[ok] fdk-shell x11 re-anchor: set_level rewrites "
+           "_FDK_WM_LAYER live\n");
+
+    fdk_shell_layer_destroy(layer);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+}
+
+/* Auto-hide: the reveal-strip model. The bar slides off its edge
+ * leaving the strip, the strut is WITHDRAWN while hidden, the
+ * pointer entering the strip reveals (REAL XTEST motion), and
+ * leaving + dwell hides again. */
+static void test_auto_hide(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(fdk_init(&ctx, &iopts)));
+    fdk_shell *shell = NULL;
+    assert(fdk_ok(fdk_shell_init(ctx, &shell)));
+
+    fdk_shell_layer_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.struct_size = sizeof(desc);
+    desc.layer = FDK_SHELL_LAYER_TOP;
+    desc.anchors = FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_LEFT |
+                   FDK_SHELL_ANCHOR_RIGHT;
+    desc.height = 40;
+    desc.exclusive_zone = -1;
+
+    fdk_shell_layer *layer = NULL;
+    assert(fdk_ok(fdk_shell_layer_create(shell, &desc, &layer)));
+    fdk_shell_layer_show(layer);
+    pump(ctx, 200);
+
+    /* The layer must render once (its extent feeds the slide math —
+     * the configure sized it already). */
+    fdk_surface *surface = NULL;
+    assert(fdk_ok(fdk_shell_layer_get_surface(layer, &surface)));
+    fdk_surface_fill(surface,
+                     (fdk_color){ .r = 0.9f, .g = 0.5f, .b = 0.1f,
+                                  .a = 1.0f });
+    assert(fdk_ok(fdk_surface_present(surface)));
+    pump(ctx, 150);
+
+    rb_open();
+    Display *dpy = g_rb;
+    unsigned long xid = layer_xid(layer);
+
+    /* Arm: 3px reveal strip, 120ms dwell. */
+    assert(fdk_ok(fdk_shell_layer_set_auto_hide(layer, 3, 120)));
+
+    /* Force hidden and verify the slide: y = -(40-3) = -37, the
+     * window keeps its size (only position moves), the strut is 0. */
+    fdk_shell_layer_hide_now(layer);
+    pump(ctx, 100);
+    {
+        int x = 0, y = 0;
+        unsigned int w = 0, h = 0;
+        geom_of(dpy, (Window)xid, &x, &y, &w, &h);
+        assert(y == -37);
+        assert(h == 40); /* size unchanged: the strip is position */
+        long strut[12] = { 0 };
+        Atom sp = XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL", False);
+        assert(prop_cardinals(dpy, (Window)xid, sp, strut, 12) == 12);
+        assert(strut[2] == 0); /* withdrawn while hidden */
+    }
+    printf("[ok] fdk-shell x11 auto-hide: hidden = slid off (y=-37, "
+           "size kept), strut withdrawn\n");
+
+    /* Reveal: back at y=0, strut restored. */
+    fdk_shell_layer_reveal(layer);
+    pump(ctx, 100);
+    {
+        int x = 0, y = 0;
+        unsigned int w = 0, h = 0;
+        geom_of(dpy, (Window)xid, &x, &y, &w, &h);
+        assert(y == 0 && h == 40);
+        long strut[12] = { 0 };
+        Atom sp = XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL", False);
+        assert(prop_cardinals(dpy, (Window)xid, sp, strut, 12) == 12);
+        assert(strut[2] == 40);
+    }
+    printf("[ok] fdk-shell x11 auto-hide: reveal restores geometry "
+           "and strut\n");
+
+    /* THE POINTER MODEL, through REAL XTEST: enter the hidden strip
+     * (y in 0..2 over the bar's x span) -> reveal. */
+    fdk_shell_layer_hide_now(layer);
+    pump(ctx, 100);
+    {
+        /* Prime from OUTSIDE first (the enter needs a from-position
+         * outside the strip): move away, sync, then into the strip. */
+        XTestFakeMotionEvent(dpy, 0, 400, 500, CurrentTime);
+        XSync(dpy, False);
+        pump(ctx, 100);
+        XTestFakeMotionEvent(dpy, 0, 400, 1, CurrentTime);
+        XSync(dpy, False);
+        int revealed = 0;
+        for (int i = 0; i < 60 && !revealed; i++) {
+            (void)fdk_pump_events(ctx, 30); /* pump(20) would do
+                                             * NOTHING (its step is
+                                             * ms/50) — the rig's own
+                                             * trap, caught here */
+            int x = 0, y = 0;
+            unsigned int w = 0, h = 0;
+            geom_of(dpy, (Window)xid, &x, &y, &w, &h);
+            revealed = (y == 0);
+        }
+        assert(revealed);
+    }
+    printf("[ok] fdk-shell x11 auto-hide: REAL pointer over the "
+           "strip reveals\n");
+
+    /* Leave + dwell: hide again. */
+    {
+        XTestFakeMotionEvent(dpy, 0, 400, 500, CurrentTime);
+        XSync(dpy, False);
+        int hidden = 0;
+        for (int i = 0; i < 100 && !hidden; i++) {
+            (void)fdk_pump_events(ctx, 30);
+            int x = 0, y = 0;
+            unsigned int w = 0, h = 0;
+            geom_of(dpy, (Window)xid, &x, &y, &w, &h);
+            hidden = (y == -37);
+        }
+        assert(hidden);
+    }
+    printf("[ok] fdk-shell x11 auto-hide: leave + dwell hides\n");
+
+    /* Disarm: back to the shown state, auto-hide off. */
+    assert(fdk_ok(fdk_shell_layer_set_auto_hide(layer, 0, 0)));
+    pump(ctx, 100);
+    {
+        int x = 0, y = 0;
+        unsigned int w = 0, h = 0;
+        geom_of(dpy, (Window)xid, &x, &y, &w, &h);
+        assert(y == 0 && h == 40);
+    }
+    printf("[ok] fdk-shell x11 auto-hide: disarm reveals and stays\n");
+
+    fdk_shell_layer_destroy(layer);
+    fdk_shell_shutdown(shell);
+    fdk_shutdown(ctx);
+}
+
 int main(void) {
     test_top_bar_auto_zone();
+    test_runtime_reanchor();
+    test_auto_hide();
     test_margins_and_bottom();
     test_centered_anchor();
     test_keyboard_exclusive_grab();

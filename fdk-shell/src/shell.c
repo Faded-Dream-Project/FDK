@@ -14,6 +14,7 @@
  */
 
 #include "shell_internal.h"
+#include "fdk/fdk_core.h" /* fdk_timer — the auto-hide dwell */
 
 #include <stdio.h>
 
@@ -334,12 +335,27 @@ void fdkshell__fire_output_event(fdk_shell *shell,
 
 /* Event forwarding: the ext surface's stream, re-signed with the
  * layer handle. Configure sizes are cached for get_size. */
+/* Auto-hide state machine (defined with the C-5 setters below). */
+static void shell_autohide_reveal(fdk_shell_layer *layer);
+static void shell_autohide_arm_dwell(fdk_shell_layer *layer);
+
 static void shell_layer_event(fdk_ext_surface *ext,
                               const fdk_event_data *event, void *user) {
     (void)ext;
     fdk_shell_layer *layer = user;
     if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
         layer->size = event->configure.size;
+    }
+    /* Auto-hide (0.5.0, C-5): the pointer IS the state machine's
+     * input. Enter (over the strip or the revealed layer) reveals;
+     * leave arms the dwell. The app still sees every event — the
+     * interception is additive. */
+    if (layer->ah_reveal > 0) {
+        if (event->type == FDK_EVENT_POINTER_ENTER) {
+            shell_autohide_reveal(layer);
+        } else if (event->type == FDK_EVENT_POINTER_LEAVE) {
+            shell_autohide_arm_dwell(layer);
+        }
     }
     if (layer->cb != NULL) {
         layer->cb(layer, event, layer->cb_user);
@@ -423,6 +439,249 @@ fdk_result fdk_shell_layer_create(fdk_shell *shell,
     return FDK_OK;
 }
 
+/* ---- Runtime re-anchoring + auto-hide (0.5.0, C-5 / A-05 / A-08) ---------- */
+
+/* The primary slide edge: the axis with exactly ONE anchor (the
+ * reserved axis). Returns FDK_SHELL_ANCHOR_TOP/BOTTOM/LEFT/RIGHT, or
+ * 0 when the layer has no slide direction (centered/both-anchored
+ * axes). */
+uint32_t fdkshell__slide_edge(const fdk_shell_layer *layer) {
+    const fdk_shell_layer_desc *d = &layer->desc;
+    const int a_l = (d->anchors & FDK_SHELL_ANCHOR_LEFT) != 0;
+    const int a_r = (d->anchors & FDK_SHELL_ANCHOR_RIGHT) != 0;
+    const int a_t = (d->anchors & FDK_SHELL_ANCHOR_TOP) != 0;
+    const int a_b = (d->anchors & FDK_SHELL_ANCHOR_BOTTOM) != 0;
+    if (a_t && !a_b) {
+        return FDK_SHELL_ANCHOR_TOP;
+    }
+    if (a_b && !a_t) {
+        return FDK_SHELL_ANCHOR_BOTTOM;
+    }
+    if (a_l && !a_r) {
+        return FDK_SHELL_ANCHOR_LEFT;
+    }
+    if (a_r && !a_l) {
+        return FDK_SHELL_ANCHOR_RIGHT;
+    }
+    return 0;
+}
+
+/* The hidden slide amount: extent - reveal (the pixels that leave
+ * the screen; >= 0). The BACKENDS apply it natively — X11 as a
+ * position offset (margins cannot push past an edge there), Wayland
+ * as a NEGATIVE margin on the slide edge (zwlr margins are signed,
+ * the protocol's own way to park a surface off-edge). */
+int32_t fdkshell__slide_amount(const fdk_shell_layer *layer) {
+    if (layer->ah_reveal <= 0 || !layer->ah_hidden) {
+        return 0;
+    }
+    uint32_t edge = fdkshell__slide_edge(layer);
+    int32_t extent =
+        (edge == FDK_SHELL_ANCHOR_TOP || edge == FDK_SHELL_ANCHOR_BOTTOM)
+            ? layer->size.height
+            : layer->size.width;
+    int32_t slide = extent - layer->ah_reveal;
+    return slide > 0 ? slide : 0;
+}
+
+/* The EFFECTIVE desc the backends see: desc with the zone withdrawn
+ * while hidden (hidden docks reserve nothing — the point of
+ * hiding). The slide itself is backend-native. */
+static fdk_shell_layer_desc effective_desc(fdk_shell_layer *layer) {
+    fdk_shell_layer_desc d = layer->desc;
+    if (layer->ah_reveal > 0 && layer->ah_hidden) {
+        d.exclusive_zone = 0;
+    }
+    return d;
+}
+
+/* Applies the effective desc through the backend. level_changed
+ * tells the Wayland half the stacking tier moved (the role swap). */
+static void layer_apply(fdk_shell_layer *layer, int level_changed) {
+    fdk_shell_layer_desc saved = layer->desc;
+    layer->desc = effective_desc(layer);
+#if defined(FDKSHELL_BUILD_X11)
+    if (layer->shell->x11 != NULL) {
+        fdkshell__x11_layer_reconfig(layer);
+    }
+#endif
+#if defined(FDKSHELL_BUILD_WAYLAND)
+    if (layer->shell->wl != NULL) {
+        fdkshell__wl_layer_reconfig(layer, level_changed);
+    }
+#endif
+    layer->desc = saved; /* desc holds the USER state; the overlay
+                          * is recomputed per apply */
+}
+
+/* The dwell timer: leave -> (dwell) -> hide. */
+static void autohide_dwell_fire(fdk_timer *t, void *user) {
+    (void)t;
+    fdk_shell_layer *layer = user;
+    layer->ah_timer = NULL; /* one-shot: already freed itself */
+    if (layer->ah_reveal > 0 && !layer->ah_hidden) {
+        layer->ah_hidden = 1;
+        layer_apply(layer, 0);
+    }
+}
+
+static void shell_autohide_arm_dwell(fdk_shell_layer *layer) {
+    if (layer->ah_reveal <= 0 || layer->ah_hidden) {
+        return;
+    }
+    if (layer->ah_timer != NULL) {
+        fdk_timer_remove(layer->ah_timer);
+        layer->ah_timer = NULL;
+    }
+    if (layer->ah_dwell_ms == 0) {
+        layer->ah_hidden = 1;
+        layer_apply(layer, 0);
+        return;
+    }
+    layer->ah_timer = fdk_timer_add(layer->shell->ctx, layer->ah_dwell_ms,
+                                     false, autohide_dwell_fire, layer);
+}
+
+static void shell_autohide_reveal(fdk_shell_layer *layer) {
+    if (layer->ah_reveal <= 0 || !layer->ah_hidden) {
+        /* Shown already: cancel any pending hide (the pointer came
+         * back before the dwell expired — the classic race). */
+        if (layer->ah_timer != NULL) {
+            fdk_timer_remove(layer->ah_timer);
+            layer->ah_timer = NULL;
+        }
+        return;
+    }
+    layer->ah_hidden = 0;
+    if (layer->ah_timer != NULL) {
+        fdk_timer_remove(layer->ah_timer);
+        layer->ah_timer = NULL;
+    }
+    layer_apply(layer, 0);
+}
+
+/* The public setters -------------------------------------------------------- */
+
+fdk_result fdk_shell_layer_set_anchor(fdk_shell_layer *layer,
+                                      uint32_t anchors) {
+    if (layer == NULL || anchors == 0 ||
+        (anchors & ~(FDK_SHELL_ANCHOR_TOP | FDK_SHELL_ANCHOR_BOTTOM |
+                     FDK_SHELL_ANCHOR_LEFT | FDK_SHELL_ANCHOR_RIGHT)) != 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    layer->desc.anchors = anchors;
+    layer_apply(layer, 0);
+    return FDK_OK;
+}
+
+fdk_result fdk_shell_layer_set_margin(fdk_shell_layer *layer,
+                                      int32_t top, int32_t right,
+                                      int32_t bottom, int32_t left) {
+    if (layer == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    layer->desc.margin_top = top;
+    layer->desc.margin_right = right;
+    layer->desc.margin_bottom = bottom;
+    layer->desc.margin_left = left;
+    layer_apply(layer, 0);
+    return FDK_OK;
+}
+
+fdk_result fdk_shell_layer_set_exclusive_zone(fdk_shell_layer *layer,
+                                              int32_t zone) {
+    if (layer == NULL || zone < -1) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    layer->desc.exclusive_zone = zone;
+    layer_apply(layer, 0);
+    return FDK_OK;
+}
+
+fdk_result fdk_shell_layer_set_desired_size(fdk_shell_layer *layer,
+                                            int32_t width, int32_t height) {
+    if (layer == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    layer->desc.width = width;
+    layer->desc.height = height;
+    layer_apply(layer, 0);
+    return FDK_OK;
+}
+
+fdk_result fdk_shell_layer_set_keyboard_mode(fdk_shell_layer *layer,
+                                             fdk_shell_keyboard_mode mode) {
+    if (layer == NULL || mode < FDK_SHELL_KBD_NONE ||
+        mode > FDK_SHELL_KBD_ON_DEMAND) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    layer->desc.keyboard = mode;
+    layer_apply(layer, 0);
+    return FDK_OK;
+}
+
+fdk_result fdk_shell_layer_set_level(fdk_shell_layer *layer,
+                                     fdk_shell_layer_level level) {
+    if (layer == NULL || level < FDK_SHELL_LAYER_BACKGROUND ||
+        level > FDK_SHELL_LAYER_OVERLAY) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (layer->desc.layer == level) {
+        return FDK_OK; /* idempotent */
+    }
+    fdk_shell_layer_level old = layer->desc.layer;
+    layer->desc.layer = level;
+    layer_apply(layer, 1);
+    (void)old;
+    return FDK_OK;
+}
+
+fdk_result fdk_shell_layer_set_auto_hide(fdk_shell_layer *layer,
+                                         int32_t reveal_px,
+                                         uint32_t dwell_ms) {
+    if (layer == NULL || reveal_px < 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (reveal_px > 0 && fdkshell__slide_edge(layer) == 0) {
+        return FDK_ERR_INVALID_ARGUMENT; /* no slide direction */
+    }
+    if (reveal_px == 0) {
+        /* Off: reveal if hidden, cancel the dwell. */
+        if (layer->ah_timer != NULL) {
+            fdk_timer_remove(layer->ah_timer);
+            layer->ah_timer = NULL;
+        }
+        layer->ah_reveal = 0;
+        if (layer->ah_hidden) {
+            layer->ah_hidden = 0;
+            layer_apply(layer, 0);
+        }
+        return FDK_OK;
+    }
+    layer->ah_reveal = reveal_px;
+    layer->ah_dwell_ms = dwell_ms;
+    return FDK_OK;
+}
+
+void fdk_shell_layer_reveal(fdk_shell_layer *layer) {
+    if (layer == NULL) {
+        return;
+    }
+    shell_autohide_reveal(layer);
+}
+
+void fdk_shell_layer_hide_now(fdk_shell_layer *layer) {
+    if (layer == NULL || layer->ah_reveal <= 0 || layer->ah_hidden) {
+        return;
+    }
+    if (layer->ah_timer != NULL) {
+        fdk_timer_remove(layer->ah_timer);
+        layer->ah_timer = NULL;
+    }
+    layer->ah_hidden = 1;
+    layer_apply(layer, 0);
+}
+
 static void shell_layer_unlink(fdk_shell *shell, fdk_shell_layer *layer) {
     if (layer->prev != NULL) {
         layer->prev->next = layer->next;
@@ -458,6 +717,13 @@ void fdk_shell_layer_destroy(fdk_shell_layer *layer) {
         p = next;
     }
 
+    /* The auto-hide dwell dies with the layer (the timer would fire
+     * into freed memory otherwise — the one-shot handle is nulled by
+     * its own callback, so a LIVE timer here is a pending dwell). */
+    if (layer->ah_timer != NULL) {
+        fdk_timer_remove(layer->ah_timer);
+        layer->ah_timer = NULL;
+    }
     /* The ext destroy chain runs the kind's role teardown FIRST —
      * shell_kind_destroy finds this layer through the shell's list,
      * so unlink only AFTER the destroy (the layer is the role's
