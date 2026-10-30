@@ -242,8 +242,19 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                  LeaveWindowMask | PropertyChangeMask);
 
     /* Register for WM_DELETE_WINDOW so close requests arrive as an
-     * event we can translate rather than killing the connection. */
-    XSetWMProtocols(conn->display, xwindow, &conn->wm_delete_window, 1);
+     * event we can translate rather than killing the connection.
+     * WM_SAVE_YOURSELF (1.1.0, D-5) rides the same WM_PROTOCOLS list:
+     * listing the atom is how a client volunteers for the ICCCM
+     * appendix-C save protocol — the WM relays the session
+     * manager's save request, FDK dispatches
+     * FDK_EVENT_SESSION_SAVE and rewrites WM_COMMAND as the ack
+     * (x11_dispatch.c). */
+    {
+        Atom protocols[2];
+        protocols[0] = conn->wm_delete_window;
+        protocols[1] = conn->wm_save_yourself;
+        XSetWMProtocols(conn->display, xwindow, protocols, 2);
+    }
 
     /* XI2 touch selection (1.1.0, M-3): harmless no-op where the
      * extension is absent; where present, the server routes
@@ -457,6 +468,8 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
          * pixel buffers leak here, a bounded one-time cost during
          * process teardown on a dead display (1.3.0). */
         fdk_x11_ime_window_cleanup(pwindow);
+        fdk_free(pwindow->command_argv);
+        pwindow->command_argv = NULL;
         fdk_x11_unregister_window(pwindow->conn, pwindow);
         fdk_free(pwindow);
         return;
@@ -467,6 +480,11 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
     }
     fdk_free(pwindow->startup_id);
     pwindow->startup_id = NULL;
+    /* WM_COMMAND storage (D-5): freed before the window dies — the
+     * property itself vanishes with the XID. */
+    fdk_free(pwindow->command_argv);
+    pwindow->command_argv = NULL;
+    pwindow->command_argc = 0;
     /* IME composition state (M-1): AFTER XDestroyIC — the IC may
      * still hold references into the callback array, so it dies
      * first; then the preedit buffer and the array itself. */
@@ -1083,6 +1101,99 @@ void fdk_x11_window_set_role(fdk_platform_window *pwindow,
                     XA_STRING, 8, PropModeReplace,
                     (const unsigned char *)role, (int)strlen(role));
     XFlush(dpy);
+}
+
+/* ---- WM_COMMAND / WM_SAVE_YOURSELF (1.1.0, D-5) -----------------------
+ *
+ * The X11 session lane. WM_COMMAND is the restart command a session
+ * manager re-executes at the next login (ICCCM 4.1.2.9: type STRING,
+ * the argv strings NUL-concatenated). The COPY lives in the platform
+ * window because of the ack: when WM_SAVE_YOURSELF arrives, the
+ * application handles FDK_EVENT_SESSION_SAVE (possibly updating the
+ * command through a fresh fdk_window_set_command call inside the
+ * handler), and FDK then REWRITES the property on the messaged window
+ * — ICCCM appendix C makes the PropertyNotify of that rewrite the
+ * "state saved" acknowledgment the session manager waits for, and
+ * mandates it fires even when the command did not change (a
+ * zero-length rewrite acks a window that never set one).
+ *
+ * Storage shape: ONE fdk_alloc block — the pointer array, then the
+ * string bytes back-to-back. command_argv points at the array's
+ * start; every string NUL-terminates. */
+
+/* Writes pwindow's current WM_COMMAND (zero-length when none is
+ * set) and flushes — the ack primitive. Called by set_command and
+ * by the dispatch-side WM_SAVE_YOURSELF handler. */
+void fdk_x11_window_write_command(fdk_platform_window *pwindow) {
+    if (pwindow == NULL) {
+        return;
+    }
+    Display *dpy = pwindow->conn->display;
+    if (pwindow->command_argv == NULL || pwindow->command_argc <= 0) {
+        /* The zero-length ack: a STRING of no bytes. PropertyNotify
+         * still fires — which is the entire point (appendix C: the
+         * manager polls the event, not the value). */
+        XChangeProperty(dpy, pwindow->xwindow, XA_WM_COMMAND,
+                        XA_STRING, 8, PropModeReplace,
+                        (const unsigned char *)"", 0);
+    } else {
+        /* The argv form: XSetCommand — the canonical setter (it
+         * builds the NUL-separated STRING property itself). */
+        XSetCommand(dpy, pwindow->xwindow, pwindow->command_argv,
+                    pwindow->command_argc);
+    }
+    XFlush(dpy);
+}
+
+void fdk_x11_window_set_command(fdk_platform_window *pwindow,
+                                 const char *const *argv, int argc) {
+    if (pwindow == NULL) {
+        return;
+    }
+    /* Free the previous block (the flat single-allocation shape —
+     * one fdk_free retires strings and array together). */
+    fdk_free(pwindow->command_argv);
+    pwindow->command_argv = NULL;
+    pwindow->command_argc = 0;
+
+    if (argv == NULL || argc <= 0) {
+        /* Clear: rewrite zero-length (a live clear should still
+         * notify — a session manager watching the window would
+         * otherwise keep the stale command). */
+        fdk_x11_window_write_command(pwindow);
+        return;
+    }
+
+    /* Validate + measure first: a NULL element would crash
+     * XSetCommand deep in Xlib — treat the whole call as a clear. */
+    size_t bytes = 0;
+    for (int i = 0; i < argc; i++) {
+        if (argv[i] == NULL) {
+            fdk_x11_window_write_command(pwindow);
+            return;
+        }
+        bytes += strlen(argv[i]) + 1;
+    }
+
+    /* One block: array of `argc` pointers, then the strings. */
+    char **block = fdk_alloc(sizeof(char *) * (size_t)argc + bytes);
+    if (block == NULL) {
+        /* Out of memory: keep the cleared state, still ack — the
+         * session manager must not hang waiting for a notify. */
+        fdk_x11_window_write_command(pwindow);
+        return;
+    }
+    char *cursor = (char *)(block + argc);
+    for (int i = 0; i < argc; i++) {
+        size_t len = strlen(argv[i]) + 1;
+        memcpy(cursor, argv[i], len);
+        block[i] = cursor;
+        cursor += len;
+    }
+    pwindow->command_argv = block;
+    pwindow->command_argc = argc;
+
+    fdk_x11_window_write_command(pwindow);
 }
 
 void fdk_x11_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height) {

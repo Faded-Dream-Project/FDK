@@ -116,6 +116,12 @@ struct fdk_platform_connection {
 
     Atom wm_delete_window;
     Atom wm_protocols;
+    /* WM_SAVE_YOURSELF (1.1.0, D-5): the ICCCM appendix-C save
+     * request — every FDK window lists it in WM_PROTOCOLS alongside
+     * WM_DELETE_WINDOW, and the ClientMessage dispatches
+     * FDK_EVENT_SESSION_SAVE then rewrites WM_COMMAND (the
+     * PropertyNotify ack a session manager waits for). */
+    Atom wm_save_yourself;
     Atom net_wm_name;
     Atom utf8_string;
     Atom motif_wm_hints; /* _MOTIF_WM_HINTS, Phase 8 decorations */
@@ -607,6 +613,17 @@ struct fdk_platform_window {
      * the re-engagement attempt in get_framebuffer checks it. */
     struct fdk_x11_gl_window *gl_win;
     int gl_downgraded;
+
+    /* WM_COMMAND (1.1.0, D-5): the ICCCM restart command, argv form,
+     * fdk_alloc'd (one flat block: the string bytes + the pointer
+     * array — see x11_window.c's set_command). NULL/argc 0 = none
+     * set. STORED (unlike the role, which only ever rides the
+     * property) because the WM_SAVE_YOURSELF ack must REWRITE the
+     * current command after the save event's handler returns —
+     * the PropertyNotify a session manager waits for (ICCCM
+     * appendix C). */
+    char **command_argv;
+    int command_argc;
 };
 
 /* Implemented in x11_events.c, used by x11_dispatch.c. Not part of
@@ -725,6 +742,18 @@ void fdk_x11_window_set_icon(fdk_platform_window *pwindow,
                              int width, int height);
 void fdk_x11_window_set_role(fdk_platform_window *pwindow,
                              const char *role);
+
+/* The session lane (1.1.0, D-5): set_command is the public
+ * window_set_command op (WM_COMMAND, argv form, stored for the
+ * ack); write_command is the ack primitive itself — it rewrites
+ * the CURRENT WM_COMMAND (zero-length when none) and flushes, the
+ * PropertyNotify being what a session manager waits for. The
+ * WM_SAVE_YOURSELF dispatch in x11_dispatch.c calls write_command
+ * AFTER the FDK_EVENT_SESSION_SAVE handler returns (an updated
+ * command set inside the handler is what gets acked). */
+void fdk_x11_window_set_command(fdk_platform_window *pwindow,
+                                 const char *const *argv, int argc);
+void fdk_x11_window_write_command(fdk_platform_window *pwindow);
 
 void fdk_x11_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
 fdk_result fdk_x11_window_set_wm_decorations(fdk_platform_window *pwindow,

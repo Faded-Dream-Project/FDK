@@ -1240,6 +1240,20 @@ void fdk_window_set_role(fdk_window *window, const char *role) {
     window->ops->window_set_role(window->pwindow, role);
 }
 
+void fdk_window_set_command(fdk_window *window,
+                            const char *const *argv, int argc) {
+    if (window == NULL) {
+        return;
+    }
+    if (window->ops->window_set_command == NULL) {
+        /* Wayland: no WM_COMMAND equivalent exists — the public
+         * header documents this no-op (the Wayland session lane is
+         * the fdk_session.h object protocol instead). */
+        return;
+    }
+    window->ops->window_set_command(window->pwindow, argv, argc);
+}
+
 void fdk_window_resize(fdk_window *window, fdk_i32 width, fdk_i32 height) {
     if (window == NULL || width <= 0 || height <= 0) {
         return;

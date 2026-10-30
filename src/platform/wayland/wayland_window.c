@@ -9,6 +9,7 @@
 #include "generated/xdg-toplevel-icon-v1-client-protocol.h"
 #include "generated/idle-inhibit-unstable-v1-client-protocol.h"
 #include "generated/xdg-activation-v1-client-protocol.h"
+#include "generated/xdg-session-management-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -2160,6 +2161,13 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         wp_viewport_destroy(pwindow->viewport);
         pwindow->viewport = NULL;
     }
+    /* Session join record (D-5): the tracker-side helper retires the
+     * record WITHOUT remove_toplevel — the window dying is not the
+     * app asking the compositor to FORGET the window's stored state
+     * (a relaunch may want it back); fdk_window_leave_session is the
+     * explicit forget — and unregisters from the tracker's join
+     * table so its own sweep never meets a freed window. */
+    fdk__wayland_session_window_destroyed(pwindow);
     fdk_free(pwindow->entered_outputs);
     pwindow->entered_outputs = NULL;
     pwindow->entered_count = 0;
@@ -2293,6 +2301,11 @@ void fdk_wayland_window_show(fdk_platform_window *pwindow) {
      * — see attach_background_buffer(). This commit just starts the
      * handshake; the window becomes visible a few events later. */
     wl_surface_commit(pwindow->surface);
+    /* D-5 session gate: this is the surface's FIRST commit — from
+     * here on a session join can only take the fresh-add path (the
+     * protocol's restore_toplevel must precede the first commit;
+     * wayland_session.c reads this flag). */
+    pwindow->xdg_shown = 1;
 }
 
 void fdk_wayland_window_hide(fdk_platform_window *pwindow) {

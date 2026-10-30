@@ -38,6 +38,7 @@
 #include "fdk_tray.h"
 #include "fdk_idle.h"
 #include "fdk_toplevel.h"
+#include "fdk_session.h"
 
 /* Widget, layout, and theme public headers are added here as their
  * respective phases land (see docs/roadmap.md). Phase 2 added window

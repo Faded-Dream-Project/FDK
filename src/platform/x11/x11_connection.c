@@ -350,6 +350,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
      * is the standard ICCCM mechanism, not a desktop-specific hack. */
     conn->wm_protocols = XInternAtom(display, "WM_PROTOCOLS", False);
     conn->wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", False);
+    conn->wm_save_yourself = XInternAtom(display, "WM_SAVE_YOURSELF", False);
     conn->net_wm_name = XInternAtom(display, "_NET_WM_NAME", False);
     conn->utf8_string = XInternAtom(display, "UTF8_STRING", False);
     conn->motif_wm_hints = XInternAtom(display, "_MOTIF_WM_HINTS", False);

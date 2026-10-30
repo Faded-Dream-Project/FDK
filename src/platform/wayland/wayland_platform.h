@@ -19,6 +19,7 @@
 #include "platform/wayland/generated/xdg-shell-client-protocol.h"
 #include "platform/wayland/generated/xdg-decoration-unstable-v1-client-protocol.h"
 #include "platform/wayland/generated/primary-selection-unstable-v1-client-protocol.h"
+#include "platform/wayland/generated/xdg-session-management-v1-client-protocol.h"
 
 #include <stddef.h>
 #include <wayland-client.h>
@@ -164,6 +165,18 @@ struct fdk_platform_connection {
     uint32_t foreign_toplevel_name;
     struct zwlr_foreign_toplevel_manager_v1 *foreign_toplevel_manager;
     int foreign_toplevels_live;
+
+    /* OPTIONAL (1.1.0, D-5): xdg-session-management-v1 — the
+     * save/restore object lane (wayland_session.c). NAME-only at
+     * registry time; the manager is bound lazily at
+     * fdk_session_open (get_session is client-initiated, so the
+     * D-031 "initial burst meets a listener" hazard does not apply
+     * — but the lazy bind keeps a compositor-less feature off the
+     * wire entirely). Absent (name 0 — sway 1.10/labwc at the time
+     * of writing, early adopters only) = open answers NULL, the
+     * honest degradation. session_objects counts OPEN trackers so
+     * window joins can refuse a session whose teardown raced. */
+    uint32_t session_manager_name;
 
     /* OPTIONAL global (Phase 8): zxdg_decoration_manager_v1 — absent
      * means the compositor offers no xdg-decoration protocol, and
@@ -706,6 +719,28 @@ struct fdk_platform_window {
                                  has been acked — required before the first
                                  wl_surface.commit per xdg-shell protocol */
 
+    /* --- Session participation (1.1.0, D-5, wayland_session.c) ---------
+     *
+     * The per-toplevel join record: session_proxy is the
+     * xdg_toplevel_session_v1 wrapper minted by
+     * fdk_wayland_window_join_session (NULL = not joined),
+     * session_name the join name (fdk_alloc'd copy — remove_toplevel
+     * names the WINDOW by string, not by object), session_wire the
+     * owning xdg_session_v1 (leave's remove_toplevel request rides
+     * it), session_tracker the owning tracker (the join table the
+     * tracker sweeps at its own teardown — window destroy calls
+     * fdk__wayland_session_window_destroyed to unregister instead of
+     * leaving a stale back-pointer). xdg_shown gates the join path:
+     * the protocol's restore_toplevel must precede the surface's
+     * first commit, and FDK's first commit is the show()'s handshake
+     * starter — pre-show joins take RESTORE, post-show the fresh
+     * ADD. */
+    struct xdg_toplevel_session_v1 *session_proxy;
+    char *session_name;
+    struct xdg_session_v1 *session_wire;
+    struct fdk_platform_session *session_tracker;
+    int xdg_shown;
+
     /* --- Phase 8: window-state + decoration bookkeeping ---
      *
      * maximized is derived from xdg_toplevel::configure's states
@@ -938,6 +973,36 @@ fdk_result fdk_wayland_toplevels_activate(
     struct fdk_platform_toplevels *t, fdk_u32 index);
 fdk_result fdk_wayland_toplevels_close_window(
     struct fdk_platform_toplevels *t, fdk_u32 index);
+/* Session participation (1.1.0, D-5) — wayland_session.c: the
+ * xdg-session-management-v1 object lane (open/destroy/remove/id/
+ * state) + the window join/leave ops. fdk__wayland_session_window_
+ * destroyed is the window-destroy unregistration (the tracker's
+ * join table must never hold a freed window); the fdk__wayland_
+ * session_test_* family is the D-3-style seam — no released
+ * compositor offers the protocol yet, so the suite drives the REAL
+ * listener bodies on a rig-minted tracker. */
+fdk_result fdk_wayland_session_open(
+    fdk_platform_connection *conn, int reason, const char *restore_id,
+    fdk_platform_session_notify_fn on_notify, void *user,
+    struct fdk_platform_session **out);
+void fdk_wayland_session_destroy(struct fdk_platform_session *session);
+void fdk_wayland_session_remove(struct fdk_platform_session *session);
+const char *fdk_wayland_session_id(const struct fdk_platform_session *session);
+int fdk_wayland_session_state(const struct fdk_platform_session *session);
+fdk_result fdk_wayland_window_join_session(
+    fdk_platform_window *pwindow, struct fdk_platform_session *session,
+    const char *name);
+void fdk_wayland_window_leave_session(fdk_platform_window *pwindow);
+void fdk__wayland_session_window_destroyed(fdk_platform_window *pwindow);
+struct fdk_platform_session *fdk__wayland_session_test_mint(
+    fdk_platform_connection *conn,
+    fdk_platform_session_notify_fn on_notify, void *user);
+void fdk__wayland_session_test_created(struct fdk_platform_session *s,
+                                       const char *id);
+void fdk__wayland_session_test_restored(struct fdk_platform_session *s);
+void fdk__wayland_session_test_replaced(struct fdk_platform_session *s);
+void fdk__wayland_session_test_toplevel_restored(
+    fdk_platform_window *pwindow);
 int fdk_wayland_test_tablet(fdk_platform_connection *conn,
                             fdk_platform_window *win, int phase,
                             uint32_t tool_type, double x, double y,

@@ -62,6 +62,13 @@ static const fdk_platform_ops g_wayland_ops = {
     .toplevels_at = fdk_wayland_toplevels_at,
     .toplevels_activate = fdk_wayland_toplevels_activate,
     .toplevels_close_window = fdk_wayland_toplevels_close_window,
+    .session_open = fdk_wayland_session_open,
+    .session_destroy = fdk_wayland_session_destroy,
+    .session_remove = fdk_wayland_session_remove,
+    .session_id = fdk_wayland_session_id,
+    .session_state = fdk_wayland_session_state,
+    .window_join_session = fdk_wayland_window_join_session,
+    .window_leave_session = fdk_wayland_window_leave_session,
 };
 
 const fdk_platform_ops *fdk_platform_wayland_ops(void) {

@@ -235,7 +235,8 @@ ifeq ($(BUILD_WAYLAND),1)
                            src/platform/wayland/generated/idle-inhibit-unstable-v1-protocol.c \
                            src/platform/wayland/generated/xdg-activation-v1-protocol.c \
                            src/platform/wayland/generated/tablet-unstable-v2-protocol.c \
-                           src/platform/wayland/generated/wlr-foreign-toplevel-management-unstable-v1-protocol.c
+                           src/platform/wayland/generated/wlr-foreign-toplevel-management-unstable-v1-protocol.c \
+                           src/platform/wayland/generated/xdg-session-management-v1-protocol.c
 else
   # Stub providing fdk_platform_wayland_ops() returning NULL and
   # fdk_platform_wayland_display_present() returning 0, so

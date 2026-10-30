@@ -168,6 +168,32 @@ void fdk_window_set_icon(fdk_window *window, const fdk_u32 *pixels,
  * call this. Safe before or after fdk_window_show(). */
 void fdk_window_set_role(fdk_window *window, const char *role);
 
+/* Sets the ICCCM WM_COMMAND — the command a session manager
+ * re-executes to restart this application in its current state
+ * (1.1.0, D-5; the X11 session lane, see fdk_session.h). `argv` is
+ * an argv-style array of NUL-terminated strings (argv[0] the
+ * program, then its arguments); all strings are copied, the array
+ * need only live for the call. X11 writes the WM_COMMAND property
+ * (type STRING, NUL-separated argv); on Wayland there is no
+ * equivalent — the call is a documented no-op, no error.
+ *
+ * ICCCM's multi-window rule is the application's to keep: exactly
+ * ONE top-level window of the client should carry a nonzero
+ * WM_COMMAND (the "main" window); FDK writes the property on
+ * whichever window it is called for and never second-guesses.
+ * NULL `argv` or argc <= 0 CLEARS the command.
+ *
+ * The property is ALSO the WM_SAVE_YOURSELF ack: when the session
+ * manager asks the client to save (FDK_EVENT_SESSION_SAVE), FDK
+ * rewrites this window's WM_COMMAND after the event callback
+ * returns — with the CURRENT command (zero-length when none was
+ * set) — because the PropertyNotify that rewrite generates is the
+ * acknowledgment the session manager waits for (ICCCM appendix C).
+ * Calling this INSIDE the FDK_EVENT_SESSION_SAVE handler with the
+ * updated restart arguments is the intended pattern. */
+void fdk_window_set_command(fdk_window *window,
+                            const char *const *argv, int argc);
+
 /* ---- Cursor shape (1.1.0-rc1; the full named set 1.1.0-rc2, S-5) --------
  *
  * The shape the pointer takes while hovering this window. FDK's own

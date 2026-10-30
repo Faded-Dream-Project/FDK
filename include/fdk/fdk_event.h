@@ -252,6 +252,40 @@ typedef enum fdk_event_type {
                                             * fdk_tablet_event.button's
                                             * high bit (0x8000_0000u)
                                             * marks the release */
+
+    /* ---- Session participation (1.1.0, D-5 / B-19) ----
+     *
+     * FDK_EVENT_SESSION_SAVE — the desktop wants this application's
+     * state on disk NOW. X11: the session manager's WM_SAVE_YOURSELF
+     * (relayed by the WM; every FDK window lists the atom in
+     * WM_PROTOCOLS, so the event arrives on whatever window the
+     * message named — save regardless of which one). The handler
+     * should persist state (fdk_prefs_save() and whatever else),
+     * update fdk_window_set_command() if the restart arguments
+     * changed, and per ICCCM appendix C: no user interaction, and
+     * change nothing until the next input event arrives. FDK
+     * performs the protocol ack itself — the WM_COMMAND rewrite
+     * (and its PropertyNotify) — after the handler returns, on the
+     * window that received the message; a zero-length command acks
+     * just as spec'd. Wayland never sends this event: the session
+     * protocols there update state continuously (nothing to save
+     * on cue) — the application saves whenever it likes.
+     *
+     * FDK_EVENT_SESSION_RESTORED — this window's session state came
+     * back. Wayland xdg-session-management-v1 (fdk_session.h): the
+     * toplevel-session's restored event, delivered immediately
+     * BEFORE the window's first FDK_EVENT_CONFIGURE — the
+     * compositor is restoring the remembered window-management
+     * state with that configure, and the application may skip its
+     * own first-show placement. A window joined after show, or
+     * added fresh, never receives it. X11 never sends this event
+     * (restart re-executes WM_COMMAND from scratch — there is
+     * nothing in-flight to announce). */
+    FDK_EVENT_SESSION_SAVE     = 58, /* X11: WM_SAVE_YOURSELF — save
+                                      * now; FDK acks on return   */
+    FDK_EVENT_SESSION_RESTORED = 59, /* Wayland: this window's state
+                                      * is being restored, right
+                                      * before its first configure */
 } fdk_event_type;
 
 typedef struct fdk_configure_event {

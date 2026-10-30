@@ -1726,3 +1726,74 @@ release + examples + verify-exports (861, +6); the sway suite with
 the LIVE section (own windows listed, activation through sway's
 own tree, the close REQUEST round trip); fdk-shell build + test-x11
 + test-desktop.
+
+## D-032 — session save/restore: the objectless X11 lane, the join table, and a protocol no compositor speaks yet (D-5 / B-19)
+
+**Date**: 2026-10-30 · **Status**: shipped, both backends, rigs green
+
+B-19's session half (D-5) split cleanly along the desktop's own
+seam — and the split drove every design call.
+
+**1. X11 IS OBJECTLESS BY SPEC, NOT BY LAZINESS.** The ICCCM's
+modern session protocol is XSMP (SMlib, the ICE wire,
+SM_CLIENT_ID on a WM_CLIENT_LEADER window). FDK ships the OTHER
+lane: WM_COMMAND (the restart command, argv form) plus
+WM_SAVE_YOURSELF (the save request) with the PropertyNotify ack
+that appendix C defines. Judgment: full XSMP is a protocol family
+of its own (auth, byte order, the whole ICE stack) for a niche the
+light sessions FDK targets do not exercise — the obsolete lane is
+what actually gets spoken, and GTK4 dropped XSMP for the same
+reason. So `fdk_session_open` answers NULL on X11 BY DESIGN (the
+WM_SAVE_YOURSELF lane needs no per-session state) and the header
+says so in prose; the fence is here, not hidden.
+
+**2. THE ACK ORDERING IS THE FEATURE.** The X11 test's central leg
+is not "the event fires" but "the handler's NEW argv is what got
+acked": FDK dispatches FDK_EVENT_SESSION_SAVE, the application
+calls `fdk_window_set_command` INSIDE the handler, and only then
+does the dispatch tail rewrite WM_COMMAND — the PropertyNotify the
+session manager polls. The zero-length rewrite (a window with no
+command) is not a degenerate case but the spec's own two-step
+reply for multi-window clients; FDK emits it unconditionally after
+every save event.
+
+**3. THE JOIN TABLE.** The Wayland protocol leaves join ownership
+to clients: `xdg_session_v1.remove_toplevel` names windows by
+STRING (not object), and the toplevel-session proxies go inert when
+the session dies. FDK's tracker therefore owns a back-pointer table
+of joined windows — its teardown retires every record (the app that
+leaks a session does not leave stale proxies), window destroy
+UNREGISTERS through the reverse pointer (the tracker's sweep never
+meets a freed window) and pointedly does NOT send remove_toplevel
+(a window dying is not the application asking the compositor to
+forget its state — a relaunch may want it back;
+`fdk_window_leave_session` is the explicit forget).
+
+**4. A PROTOCOL NO COMPOSITOR SPEAKS (YET).** xdg-session-
+management-v1 landed in wayland-protocols 1.48 — weeks old. Probed
+live before writing a line of "should work": sway 1.10/wlroots
+0.18 (the rig) and sway 1.12/wlroots 0.20 (Debian sid) both lack
+the global. The honest shape: implement the client against the
+vendored generated code, prove the REAL listener bodies through the
+D-3 seam (the tracker minted exactly as a live open leaves it),
+prove the degradation LIVE (open answers NULL under today's sway —
+that leg is green), and mark the live object path "implemented —
+should work (no compositor to test against)". The suite keeps a
+live-compositor branch ready so the first adopter flips one
+`if` instead of writing a test.
+
+**5. THE RIG'S OWN LESSON — check order.** The join op originally
+checked session liveness (INVALID_STATE) before window kind
+(INVALID_ARGUMENT), so a POPUP under a dead session answered
+STATE, not ARGUMENT — semantically wrong (a popup can never join
+regardless of any session's health) and caught by the popup leg.
+Argument validation precedes state validation, the rule now
+written into the op's comment.
+
+Battery at the landing: dual-backend rebuild zero warnings;
+`make test`; `make test-x11` (the NEW session legs green); `make
+test-dbus`; `FDK_SANITIZE=0` test + test-x11; release + examples +
+verify-exports (869, +8); the FULL sway suite green (the session
+section: live degradation + the seam bodies + join validation);
+fdk-shell build + test + test-x11 + test-desktop + its Wayland
+suite.

@@ -69,6 +69,25 @@ struct fdk_platform_toplevel {
 /* Opaque backend-owned tracker (one per open list). */
 struct fdk_platform_toplevels;
 
+/* ---- Session participation types (1.1.0, D-5) -------------------------
+ *
+ * The backend half of include/fdk/fdk_session.h (the save/restore
+ * desktop contract). Wayland owns the object lane: the tracker is
+ * the xdg_session_v1 wrapper (state machine + id storage + the
+ * coarse notify), and windows carry the per-toplevel
+ * xdg_toplevel_session_v1 join records. X11 owns the objectLESS
+ * lane instead — WM_COMMAND (fdk_window_set_command) plus the
+ * WM_SAVE_YOURSELF ClientMessage → FDK_EVENT_SESSION_SAVE dispatch
+ * with the WM_COMMAND ack rewrite after the handler returns — so
+ * it fills NONE of these ops (session_open NULL ⇒ the public open
+ * answers the documented NULL; join/leave NULL ⇒ UNSUPPORTED).
+ * The desktop module (src/desktop/session.c) is the thin public
+ * wrapper, the toplevel.c discipline. */
+typedef void (*fdk_platform_session_notify_fn)(void *user);
+
+/* Opaque backend-owned session tracker (one per open session). */
+struct fdk_platform_session;
+
 /* One implementation of this struct exists per backend
  * (g_fdk_x11_backend, g_fdk_wayland_backend — see each backend's .c
  * file). fdk_init() (src/core/context.c) selects one based on
@@ -782,6 +801,42 @@ typedef struct fdk_platform_ops {
         struct fdk_platform_toplevels *toplevels, fdk_u32 index);
     fdk_result (*toplevels_close_window)(
         struct fdk_platform_toplevels *toplevels, fdk_u32 index);
+
+    /* ---- OPTIONAL session participation (1.1.0, D-5) -------------------
+     * (the types live just above this struct). Wayland only: the
+     * xdg-session-management-v1 object lane. X11's session half is
+     * the objectLESS WM_COMMAND / WM_SAVE_YOURSELF lane (the
+     * window_set_command op below + the dispatch-side save event). */
+    fdk_result (*session_open)(
+        fdk_platform_connection *conn,
+        int reason,               /* fdk_session_reason, wire 1..3   */
+        const char *restore_id,  /* NULL = mint a fresh session     */
+        fdk_platform_session_notify_fn on_notify, void *user,
+        struct fdk_platform_session **out);
+    void (*session_destroy)(struct fdk_platform_session *session);
+    void (*session_remove)(struct fdk_platform_session *session);
+    const char *(*session_id)(const struct fdk_platform_session *session);
+    int (*session_state)(const struct fdk_platform_session *session);
+
+    /* OPTIONAL (D-5): the ICCCM WM_COMMAND restart command (X11;
+     * Wayland leaves it NULL — the public API documents the no-op).
+     * argv strings are copied by the backend; NULL argv / argc <= 0
+     * clears. ALSO the WM_SAVE_YOURSELF ack target — see the
+     * fdk_x11 dispatch half. */
+    void (*window_set_command)(fdk_platform_window *pwindow,
+                                const char *const *argv, int argc);
+
+    /* OPTIONAL (D-5): attach/detach a window to/from a session
+     * (Wayland only). join: NULL/empty name = INVALID_ARGUMENT, no
+     * xdg_toplevel (popup/subsurface/ext) = INVALID_ARGUMENT, the
+     * window already joined = INVALID_STATE; pre-show joins take
+     * the protocol's RESTORE path, post-show the fresh-add path.
+     * leave: detach, forgetting the compositor's stored state for
+     * this window (no-op when not joined). */
+    fdk_result (*window_join_session)(
+        fdk_platform_window *pwindow,
+        struct fdk_platform_session *session, const char *name);
+    void (*window_leave_session)(fdk_platform_window *pwindow);
 
     /* ---- OPTIONAL subsurface operations (1.1.0, D-2) ---------------
      *

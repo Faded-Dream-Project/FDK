@@ -14,6 +14,68 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-30 (on the rc2 line)
 
+### Added — session save/restore: the desktop remembers your app (D-5 / B-19)
+
+- **`include/fdk/fdk_session.h` (5 new functions) +
+  `fdk_window_set_command` / `fdk_window_join_session` /
+  `fdk_window_leave_session` (fdk_window.h; 869 exports, +8) +
+  `FDK_EVENT_SESSION_SAVE` / `FDK_EVENT_SESSION_RESTORED` (enum 58/59,
+  appended — no payload member, the union is untouched)**. The B-19
+  session half: the protocols by which a desktop saves an
+  application's state at logout and restarts it in the same place.
+- **X11 — the ICCCM lane, automatic on every FDK window, no session
+  object**: `fdk_window_set_command` writes WM_COMMAND (argv form,
+  type STRING, NUL-separated — the command a session manager
+  re-executes at the next login; the stored copy is one flat
+  allocation); every FDK window now lists WM_SAVE_YOURSELF in
+  WM_PROTOCOLS, and the WM's relay dispatches
+  FDK_EVENT_SESSION_SAVE — save state, update the command INSIDE
+  the handler, and FDK performs the protocol's own ack after the
+  handler returns: the WM_COMMAND rewrite whose PropertyNotify is
+  the "state saved" signal the session manager polls for (ICCCM
+  appendix C; a zero-length rewrite acks a window that never set a
+  command — the spec's own two-step reply). Deliberately NOT here:
+  full XSMP (SM_CLIENT_ID / WM_CLIENT_LEADER / the ICE wire) — the
+  obsolete lane is what light sessions actually speak; XSMP is
+  fenced as a future family (D-032).
+- **Wayland — xdg-session-management-v1** (staging,
+  wayland-protocols 1.48+; the generated client code vendored, zero
+  new build deps): `fdk_session_open` (reason launch/recover/
+  restore + the persisted id to restore — NULL mints fresh), the
+  coarse notify + `fdk_session_get_state` (PENDING → CREATED [an id
+  to persist] / RESTORED / REPLACED [another client took it over]),
+  `fdk_session_destroy` (state PRESERVED — the relaunch path) vs
+  `fdk_session_remove` (the compositor forgets), and
+  `fdk_window_join_session` — pre-show joins take the protocol's
+  restore path (restore_toplevel before the surface's first commit;
+  FDK_EVENT_SESSION_RESTORED arrives right before the first
+  configure when the compositor remembered the window), post-show
+  joins the fresh-add path (the already_mapped protocol error is
+  structurally impossible). Ownership: the tracker keeps a join
+  table — its teardown retires every window's toplevel-session
+  proxy; window destroy unregisters WITHOUT remove_toplevel (a
+  dying window is not the app asking the compositor to forget).
+- **The honest platform truth**: NO released compositor advertises
+  the protocol yet (probed live: sway 1.10/wlroots 0.18 and
+  1.12/wlroots 0.20 both lack the global) — open answers the
+  documented NULL everywhere today, the translation bodies are
+  seam-proven (the D-3 discipline), and X11's WM_SAVE_YOURSELF lane
+  is fully rig-proven end to end. X11 also answers NULL from
+  `fdk_session_open` BY DESIGN (its lane needs no object) and
+  UNSUPPORTED from join/leave.
+- **Tests**: X11 — five legs (the WM_PROTOCOLS volunteer bit; the
+  WM_COMMAND argv round trip; the full save round trip with the
+  probe playing the session manager: ClientMessage in, event
+  delivered, handler's NEW argv acked via PropertyNotify — the
+  dispatch-before-ack ordering; the zero-length ack; the clear).
+  Wayland — the live degradation leg (open answers NULL under sway
+  1.10) + the seam legs (created/restored/replaced drive the REAL
+  listeners: state, id, notify count, clean teardown; the
+  toplevel-restored body dispatches FDK_EVENT_SESSION_RESTORED
+  through the real conn->dispatch to a real window; the join
+  validation matrix incl. the popup's no-toplevel refusal — the rig
+  caught the argument-vs-state check order and it was fixed).
+
 ### Added — the foreign toplevel list: the taskbar substrate, both backends (D-4)
 
 - **`include/fdk/fdk_toplevel.h` (6 new functions, 861 exports, +6)**:

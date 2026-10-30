@@ -26,6 +26,10 @@ static const fdk_platform_ops g_x11_ops = {
     .window_set_title = fdk_x11_window_set_title,
     .window_set_icon = fdk_x11_window_set_icon,
     .window_set_role = fdk_x11_window_set_role,
+    .window_set_command = fdk_x11_window_set_command, /* D-5: X11's
+        session lane is WM_COMMAND + WM_SAVE_YOURSELF; the session
+        object ops (session_*, window_join/leave_session) stay NULL
+        — the public open answers the documented NULL on X11. */
     .window_resize = fdk_x11_window_resize,
     .window_set_size_limits = fdk_x11_window_set_size_limits,
     .window_set_wm_decorations = fdk_x11_window_set_wm_decorations,

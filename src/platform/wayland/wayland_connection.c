@@ -12,6 +12,7 @@
 #include "generated/xdg-activation-v1-client-protocol.h"
 #include "generated/tablet-unstable-v2-client-protocol.h"
 #include "generated/wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
+#include "generated/xdg-session-management-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -169,6 +170,20 @@ static void registry_global(void *data, struct wl_registry *registry,
          * Absent (GNOME, KDE pre-5.x, kiosk shells) = open answers
          * NULL — the honest degradation, never an error. */
         conn->foreign_toplevel_name = name;
+    } else if (strcmp(interface,
+                      xdg_session_manager_v1_interface.name) == 0) {
+        /* OPTIONAL (1.1.0, D-5): xdg-session-management-v1 — the
+         * save/restore object lane's factory (wayland_session.c).
+         * NAME-only, manager bound lazily at fdk_session_open:
+         * unlike foreign-toplevel there is no bind-time burst to
+         * lose (get_session is client-initiated), but the lazy
+         * shape keeps the feature entirely off the wire for the
+         * apps that never open a session. Absent (every wlroots
+         * compositor at the time of writing — the protocol is
+         * weeks old in wayland-protocols 1.48) = open answers NULL,
+         * the documented degradation. Version 1 is the whole
+         * protocol. */
+        conn->session_manager_name = name;
     } else if (strcmp(interface,
                       zwp_tablet_manager_v2_interface.name) == 0) {
         /* OPTIONAL (1.1.0, D-3): the tablet family's factory — the

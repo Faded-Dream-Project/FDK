@@ -478,24 +478,19 @@ Real, observable behavior against a live X server (see
   verified server-side at a coordinate that only exists in the new
   geometry.
 
-**Known, honest gap:** `WM_DELETE_WINDOW` (the close-request path,
-`FDK_EVENT_WINDOW_CLOSE_REQUEST`) is not exercised by `make test-x11`.
-Triggering it requires a window manager actually running to send the
-`ClientMessage` — bare Xvfb has no window manager by default. The test
-says so explicitly (`[skip]` line) rather than silently omitting
-coverage. Closing this gap would mean either running a minimal WM
-(e.g. a scripted `xdotool`/synthetic `XSendEvent` from a second
-process) inside `make test-x11`, or a separate `make test-x11-wm`
-target — deferred rather than half-implemented; the underlying
-`WM_DELETE_WINDOW` registration and `ClientMessage` handling in
-`src/platform/x11/x11_connection.c` and `x11_dispatch.c` is real code,
-just not exercised by an automated test yet.
-
-(This is exactly the technique the Phase 4 widget input tests DO use
-for pointer/key/focus events — `XSendEvent` from a second connection —
-so the remaining close-request gap is purely about the ClientMessage
-shape a window manager produces, which is equally synthesizable when
-someone picks this up.)
+**Closed gap (2026-10-30, with D-5):** `WM_DELETE_WINDOW` (the
+close-request path, `FDK_EVENT_WINDOW_CLOSE_REQUEST`) spent the
+whole project as this file's one documented hole — triggering it
+needs the `WM_PROTOCOLS` ClientMessage a window manager relays, and
+bare Xvfb has no WM. The D-5 session battery proved a PROBE
+connection can deliver exactly that shape (`XSendEvent` with
+`NoEventMask` addresses the window's creator — the same technique
+the Phase 4 widget input tests use for pointer/key/focus), so the
+close-request leg now synthesizes the message, asserts the event,
+and proves the connection survives the polite close: the technique
+this note used to say "someone should pick this up" for, picked up.
+`WM_SAVE_YOURSELF` (the session lane's save request) rides the same
+delivery shape — five more legs in the same battery.
 
 ## Advanced widget tests (Phase 9)
 

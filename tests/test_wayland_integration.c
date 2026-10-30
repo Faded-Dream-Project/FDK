@@ -910,6 +910,35 @@ static void wl_tablet_evt_cb(fdk_window *window,
 }
 
 /* ---- Foreign toplevel capture (1.1.0, D-4) ----------------------------- */
+static int g_wl_session_notifies = 0;
+/* The BACKEND-shaped notify (void* closure) — the seam drives the
+ * tracker's own callback slot, which is the one the platform fills
+ * (the public fdk_session_notify_fn is the core wrapper's shape). */
+static void wl_session_notify(void *user) {
+    (void)user;
+    g_wl_session_notifies++;
+}
+
+/* The PUBLIC-shaped notify for fdk_session_open (the wrapper's own
+ * callback shape — exercised on the live-object branch; the NULL
+ * degradation branch never fires it). */
+static void wl_session_public_notify(fdk_session *session, void *user) {
+    (void)session;
+    (void)user;
+    g_wl_session_notifies++;
+}
+
+static int g_wl_session_restored_events = 0;
+static void wl_session_window_cb(fdk_window *window,
+                                 const fdk_event_data *event,
+                                 void *user) {
+    (void)window;
+    (void)user;
+    if (event->type == FDK_EVENT_SESSION_RESTORED) {
+        g_wl_session_restored_events++;
+    }
+}
+
 static int g_tl_changes = 0;
 static void wl_tl_changed(fdk_toplevel_list *list, void *user) {
     (void)list;
@@ -4260,6 +4289,169 @@ int main(void) {
                    "tree, the close REQUEST round trip (the window's own "
                    "close event), membership removal, id stability, "
                    "single-list rule, reopen after close\n");
+        }
+    }
+
+    /* ---- Session participation (1.1.0, D-5) ----------------------------
+     *
+     * The Wayland object lane against the desktop that exists: the
+     * protocol (xdg-session-management-v1, staging in
+     * wayland-protocols 1.48) is weeks old and NO released
+     * compositor advertises it — sway 1.10 in this rig among them —
+     * so the LIVE leg is the degradation contract itself (open
+     * answers the documented NULL), and the translation bodies are
+     * proven through the seam (the D-3 tablet discipline: the
+     * listeners are the real functions a live compositor's events
+     * would call; the seam mints the tracker those events carry).
+     * When a compositor adopts the protocol, the open below stops
+     * returning NULL and the bodies keep running unchanged — that
+     * is the seam's whole point. */
+    {
+        g_wl_session_notifies = 0;
+        fdk_session *sess = fdk_session_open(ctx, FDK_SESSION_REASON_LAUNCH,
+                                             NULL, wl_session_public_notify,
+                                             NULL);
+        /* Validation of the public pair regardless of the desktop. */
+        assert(fdk_window_join_session(win, NULL, "main") ==
+               FDK_ERR_INVALID_ARGUMENT);
+        fdk_window_leave_session(win); /* not joined: a clean no-op */
+        if (sess == NULL) {
+            printf("[ok] wayland session: open answers NULL without the "
+                   "protocol — the documented degradation (sway 1.10 has "
+                   "no xdg_session_manager_v1 global)\n");
+
+            /* The seam legs (only meaningful while no live object
+             * path exists — with a live compositor the same bodies
+             * run from the proxy dispatch instead). */
+            {
+                struct fdk_platform_session *s =
+                    fdk__wayland_session_test_mint(ctx->conn,
+                                                   wl_session_notify,
+                                                   NULL);
+                assert(s != NULL);
+                assert(fdk_wayland_session_state(s) ==
+                       FDK_SESSION_STATE_PENDING);
+                assert(fdk_wayland_session_id(s) == NULL);
+
+                /* created: the id lands, the state flips, the notify
+                 * fires with the tracker as the closure. */
+                fdk__wayland_session_test_created(s, "rig-id-7f3a");
+                assert(fdk_wayland_session_state(s) ==
+                       FDK_SESSION_STATE_CREATED);
+                assert(strcmp(fdk_wayland_session_id(s), "rig-id-7f3a") ==
+                       0);
+                assert(g_wl_session_notifies == 1);
+
+                /* restored: same id (it IS the same session), the
+                 * state the relaunch path waits for. */
+                fdk__wayland_session_test_restored(s);
+                assert(fdk_wayland_session_state(s) ==
+                       FDK_SESSION_STATE_RESTORED);
+                assert(strcmp(fdk_wayland_session_id(s), "rig-id-7f3a") ==
+                       0);
+                assert(g_wl_session_notifies == 2);
+
+                /* replaced: the takeover verdict — inert, notify. */
+                fdk__wayland_session_test_replaced(s);
+                assert(fdk_wayland_session_state(s) ==
+                       FDK_SESSION_STATE_REPLACED);
+                assert(g_wl_session_notifies == 3);
+
+                /* The REAL teardown on the rig-minted tracker (no
+                 * proxies: a clean free — ASan's whole point). */
+                fdk_wayland_session_destroy(s);
+                printf("[ok] wayland session bodies: created/restored/"
+                       "replaced drive the REAL listeners — state, id, "
+                       "notify count, clean teardown\n");
+            }
+            {
+                /* The per-window body: a REAL window under sway, a
+                 * transient join record, the real dispatch — the
+                 * event an adopted compositor would deliver before
+                 * the first configure. */
+                fdk_window *sw = NULL;
+                fdk_window_options swopts = { .title = "FDK session seam",
+                                              .width = 210, .height = 110 };
+                assert(fdk_ok(fdk_window_create(ctx, &swopts, &sw)));
+                g_wl_session_restored_events = 0;
+                fdk_window_set_event_callback(sw, wl_session_window_cb,
+                                              NULL);
+                fdk_platform_window *sp = sw->pwindow;
+                assert(sp->xdg_toplevel != NULL);
+                /* The transient record (the mint a live join would
+                 * have written): proxy non-NULL is the body's own
+                 * staleness guard, so a sentinel stands in. */
+                sp->session_proxy = (struct xdg_toplevel_session_v1 *)1;
+                fdk__wayland_session_test_toplevel_restored(sp);
+                sp->session_proxy = NULL;
+                assert(g_wl_session_restored_events == 1);
+                fdk_window_destroy(sw);
+                printf("[ok] wayland session toplevel body: FDK_EVENT_"
+                       "SESSION_RESTORED dispatched to the window "
+                       "through the real conn->dispatch\n");
+            }
+            {
+                /* The join validation bodies (the op's own guards —
+                 * the rig-minted tracker has no wire session, which
+                 * is exactly the INVALID_STATE leg). */
+                struct fdk_platform_session *s =
+                    fdk__wayland_session_test_mint(ctx->conn, NULL, NULL);
+                assert(s != NULL);
+                fdk_window *jw = NULL;
+                fdk_window_options jopts = { .title = "FDK session join",
+                                             .width = 200, .height = 90 };
+                assert(fdk_ok(fdk_window_create(ctx, &jopts, &jw)));
+                fdk_platform_window *jp = jw->pwindow;
+                assert(fdk_wayland_window_join_session(jp, s, NULL) ==
+                       FDK_ERR_INVALID_ARGUMENT);
+                assert(fdk_wayland_window_join_session(jp, s, "") ==
+                       FDK_ERR_INVALID_ARGUMENT);
+                assert(fdk_wayland_window_join_session(NULL, s, "main") ==
+                       FDK_ERR_INVALID_ARGUMENT);
+                assert(fdk_wayland_window_join_session(jp, NULL, "main") ==
+                       FDK_ERR_INVALID_ARGUMENT);
+                /* The tracker is minted (session wire object NULL):
+                 * joining is INVALID_STATE, refused before the wire. */
+                assert(fdk_wayland_window_join_session(jp, s, "main") ==
+                       FDK_ERR_INVALID_STATE);
+                /* The popup refusal: popups carry no xdg_toplevel. */
+                fdk_window *pw = NULL;
+                assert(fdk_ok(fdk_window_create_popup(
+                    ctx, jw, 10, 10, 120, 80, &pw)));
+                assert(fdk_wayland_window_join_session(pw->pwindow, s,
+                                                       "pop") ==
+                       FDK_ERR_INVALID_ARGUMENT);
+                fdk_window_destroy(pw);
+                fdk_window_destroy(jw);
+                fdk_wayland_session_destroy(s);
+                printf("[ok] wayland session join validation: NULL/empty "
+                       "name, NULL window/session, dead-session state, "
+                       "the popup's no-toplevel refusal\n");
+            }
+        } else {
+            /* A live compositor with the protocol: the object path
+             * itself. Mint-then-destroy (the round trip to a REAL id
+             * is the desktop sign-off's job — TESTING-ON-DESKTOP.md). */
+            (void)fdk_pump_events(ctx, 200);
+            printf("[info] wayland session: the compositor offers "
+                   "xdg-session-management — object state %d, id %s\n",
+                   (int)fdk_session_get_state(sess),
+                   fdk_session_id(sess) != NULL ? fdk_session_id(sess)
+                                                : "(pending)");
+            fdk_window *jw = NULL;
+            fdk_window_options jopts = { .title = "FDK session join",
+                                         .width = 200, .height = 90 };
+            assert(fdk_ok(fdk_window_create(ctx, &jopts, &jw)));
+            /* Pre-show: the RESTORE path (restore_toplevel before
+             * the first commit). */
+            assert(fdk_ok(fdk_window_join_session(jw, sess, "main")));
+            fdk_window_show(jw);
+            pump_and_paint(ctx, jw, 400);
+            fdk_window_leave_session(jw);
+            fdk_window_destroy(jw);
+            fdk_session_destroy(sess);
+            printf("[ok] wayland session: live object path — join "
+                   "(pre-show restore), leave, destroy\n");
         }
     }
 

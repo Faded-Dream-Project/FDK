@@ -799,3 +799,66 @@ Expectations (Wayland: sway, labwc; X11: any EWMH WM):
   Wayland retitles arrive immediately.
 - GNOME (no wlr-foreign-toplevel) answers NULL from open — the
   documented degradation; treat NULL as "no taskbar substrate".
+
+## 23. Session save/restore on your desktop (D-5 / B-19 — needs your
+logout)
+
+What the rigs proved: the X11 lane end to end — a second connection
+playing the session manager sent WM_SAVE_YOURSELF, the window's
+callback received FDK_EVENT_SESSION_SAVE, and the WM_COMMAND
+rewrite it demanded came back as the PropertyNotify the protocol
+defines as the "state saved" ack (the handler's NEW argv is what
+got acked — dispatch-before-ack ordering pinned); the zero-length
+reply for a command-less window; the argv round trip. The Wayland
+half: no released compositor offers xdg-session-management-v1 yet
+(sway 1.10 AND 1.12/wlroots 0.20 were probed live), so the object
+lane is seam-proven (the real listener bodies) plus the live
+degradation (open answers NULL). What only your desktop shows is
+the actual logout/login round.
+
+X11 (openbox + your session manager — xsm, lxsession, or your DE's):
+
+```c
+/* once, after fdk_init, on the app's MAIN window: */
+const char *argv[] = { "my-app", "--restore", "~/.cache/my.state" };
+fdk_window_set_command(win, argv, 3);
+
+/* the save handler — same callback as everything else: */
+if (event->type == FDK_EVENT_SESSION_SAVE) {
+    save_state();                 /* fdk_prefs_save() + your own files */
+    fdk_window_set_command(win, argv, 3);  /* updated restart args */
+}
+```
+
+- `xprop -id <window> WM_COMMAND` shows the argv, and
+  `xprop -id <window> WM_PROTOCOLS` lists WM_SAVE_YOURSELF (on
+  every FDK window).
+- Log out of a session that saves clients (a classic Xsession /
+  xsm flow): the session manager asks FDK apps to save, the ack
+  arrives (watch `xev -id <window>` while logging out — the
+  PropertyNotify on WM_COMMAND right after the save request), and
+  the next login re-executes your WM_COMMAND. Your app starts with
+  `--restore ~/.cache/my.state` and puts its windows back.
+
+Wayland (a compositor with xdg-session-management — when yours
+grows it; sway/labwc today answer NULL and that IS the documented
+degradation):
+
+```c
+fdk_session *s = fdk_session_open(ctx, FDK_SESSION_REASON_LAUNCH,
+                                  saved_id_or_NULL, on_notify, &app);
+/* in on_notify, state FDK_SESSION_STATE_CREATED: persist
+ * fdk_session_id(s) (prefs) — that string is the whole round trip. */
+fdk_window_join_session(win, s, "main");   /* BEFORE fdk_window_show() */
+fdk_window_show(win);
+/* FDK_EVENT_SESSION_RESTORED arrives before the first configure
+ * when the compositor remembered the window. At exit:
+ * fdk_session_destroy(s)  (state preserved for the next launch). */
+```
+
+- Relaunch with the persisted id: the notify fires RESTORED, and
+  windows joined pre-show come back where the compositor remembers
+  them (workspace, stacking, size) — FDK_EVENT_SESSION_RESTORED
+  precedes the first configure on each restored window.
+- `fdk_session_remove(s)` is the "forget me" call — the next launch
+  with the old id mints a fresh session instead.

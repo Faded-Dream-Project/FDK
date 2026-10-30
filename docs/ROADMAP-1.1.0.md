@@ -45,16 +45,42 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts** (recounted 2026-10-30 at the D-4 landing against every
+**Counts** (recounted 2026-10-30 at the D-5 landing against every
 register row — the arithmetic is the table's, item for item):
-DONE 57 · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 0 ·
-DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. The
-62 = 13 A + 19 B + 9 M + 10 S + 6 C + 5 D. Per the owner's Phase 2
-directive ("DEFER D-1 to D-5: do these too"), the D tier is now the
-active queue: ~~D-1 (B-15)~~ **SHIPPED**, ~~D-2 (B-16)~~
-**SHIPPED**, ~~D-3 (tablets)~~ **SHIPPED**, ~~D-4
-(foreign-toplevel)~~ **SHIPPED**, D-5 (B-19's session-restore
-half).
+DONE 60 · PARTIAL 0 · IN PROGRESS 1 (M-9) · MISSING 0 ·
+DEFERRED 0 · BLOCKED-BY-SANDBOX 0 — of 62 items. The
+62 = 13 A + 19 B + 9 M + 10 S + 6 C + 5 D, all 62 now DONE except
+M-9 (the release gate, which only the owner's real-desktop
+sign-off can close — no code remains). Per the owner's Phase 2
+directive ("DEFER D-1 to D-5: do these too"), the D tier shipped in
+full: ~~D-1 (B-15)~~ **SHIPPED**, ~~D-2 (B-16)~~ **SHIPPED**,
+~~D-3 (tablets)~~ **SHIPPED**, ~~D-4 (foreign-toplevel)~~
+**SHIPPED**, ~~D-5 (B-19's session-restore half)~~ **SHIPPED**.
+(Count correction, recorded honestly: the D-4-era counts line read
+"DONE 57 · DEFERRED (by design) 5" — an arithmetic slip that
+double-counted the D tier's original designation while its rows
+were already DONE. The register rows were always the truth; the
+line now is.)
+Re-verified 2026-10-30 (post-D-5, the final roadmap item): the
+dual-backend rebuild zero warnings; core `make test`; `make
+test-x11` (the NEW session legs green: the WM_PROTOCOLS volunteer
+bit, the WM_COMMAND argv round trip, the full save round trip with
+the probe playing the session manager — the handler's NEW argv
+acked through the PropertyNotify the protocol defines as the ack,
+the zero-length reply, the clear); `make test-dbus` (ALL PASS);
+`FDK_SANITIZE=0` test + test-x11; release + examples +
+verify-exports (869, +8); the FULL sway suite green with the NEW
+session section (open answers NULL under sway 1.10 — the
+degradation contract, LIVE; the created/restored/replaced listener
+bodies through the seam with state/id/notify assertions; the
+toplevel-restored body dispatching FDK_EVENT_SESSION_RESTORED
+through the real conn->dispatch; the join validation matrix whose
+popup leg caught the argument-vs-state check order); fdk-shell
+build + test + test-x11 + test-desktop + its Wayland suite (ALL
+PASS). The landing's design record is DECISIONS D-032: the
+objectless X11 lane (XSMP fenced), the ack-ordering feature, the
+join-table ownership, and the probed-live "no compositor speaks
+it yet" honesty.
 Re-verified 2026-10-30 (post-D-4): the dual-backend rebuild zero
 warnings; core `make test`; `make test-x11` TWICE consecutive (the
 foreign-toplevel leg green both runs — the fake-WM round trip with
@@ -345,7 +371,7 @@ unaffected):
 | B-16 | subsurfaces | **DONE** | = D-2 (both halves: wl_subsurface + X11 child windows; D-029 records the parent-managed tree-state lesson) | — |
 | B-17 | tablets / gestures | **DONE** (gestures + tablets) | C-6 shipped (2026-10-29): FDK_EVENT_GESTURE_PINCH + FDK_EVENT_GESTURE_SWIPE (fdk_gesture_event: focus/scale/delta/fingers/direction) on the pure touch engine — the pinch rides the two-slot posture the scroll uses (scale cumulative since the posture began, delta incremental, the centroid focus; coexists with the scroll — centroid vs span; a finger swap re-baselines), the swipe is an END-gesture verdict (every lift within FDK_GESTURE_SWIPE_MS, EVERY finger's dominant-axis travel >= FDK_GESTURE_SWIPE_MIN_PX — the per-finger minimum the rig caught: two lazy fingers do not sum into a swipe — opposing travels reject, fingers = the peak membership). No backend moved: the emissions ride the engine's emit sink; both backends identical by construction. Tests: 6 engine legs (the span arithmetic incl. the coexisting scroll + the re-baseline numbers 2.0-not-8/3; SWIPE(RIGHT,2) + SWIPE(UP,3); the four rejects — slow lift window, short travel, single finger, disagreement; CANCEL wipes the gesture state). D-025 | tablets remain D-3 |
 | B-18 | widget residue | **DONE** | editable combo (`fdk_combo_set_editable`) + S-10 shipped (2026-10-29): fdk_calendar (the month grid — Monday-lead, six rows, adjacent-month cells, keyboard walking, today marker), fdk_date_picker (formatted field + popup calendar, the combo guard discipline), fdk_time_picker (segmented stepper with wraparound + 12/24h cycle); the i18n calendar math underneath; D-018 records the posture (no clock reads, no parse). tests/test_calendar.c + the X11 GUI leg + the sway leg (real-seat day pick through the compositor); 825 exports | — |
-| B-19 | session restore protocols | **PARTIAL** | typed prefs store; no WM_SAVE_YOURSELF / xdg session | D-5 |
+| B-19 | session restore protocols | **DONE** | D-5 shipped (2026-10-30): the X11 ICCCM lane (fdk_window_set_command + WM_SAVE_YOURSELF → FDK_EVENT_SESSION_SAVE with the WM_COMMAND/PropertyNotify ack, automatic on every window; XSMP deliberately fenced, D-032) + the Wayland object lane (fdk_session.h: xdg-session-management-v1, the vendored generated code, join/leave with the restore-before-first-commit path, the join-table ownership; seam-proven — no released compositor offers the protocol yet, probed live on sway 1.10 and 1.12; open answers NULL today, the documented degradation); 869 exports (+8), enum 58/59 appended. Tests: the X11 five-leg battery (the probe plays the session manager — the full ClientMessage→event→ack round trip) + the Wayland seam/degradation legs | — (the owner's logout/login round: TESTING-ON-DESKTOP.md §23) |
 | M-1 | IME both backends | **DONE** | = B-01 (both backends; the sway rig's two-way protocol proof) | — |
 | M-2 | shaping level 1 | **DONE** | = B-02 (level 1; level 2 open) | — |
 | M-3 | touch basics | **DONE** | = B-03 (slots, tap→click, two-finger scroll; both backends; policy battery + seams) | — |
@@ -375,7 +401,7 @@ unaffected):
 | D-2 | subsurfaces | **DONE** (2026-10-30) | fdk_ext_subsurface_create/_ex + set_position/resize/set_desync/place_above/place_below (extension API v2, 855 exports, +7): X11 — real child windows (server-clipped, XConfigureWindow sibling restack, XTEST-routed input, XDND aware, themed pre-paint background, the creation XSync barrier); Wayland — wl_subsurface DESYNC by default, the ext-adopt field set + output-enter scale tracking + fractional preference, configured from birth (no handshake exists). THE protocol lesson (D-029): position/stacking/tree-membership are PARENT-managed state — a desync child of a quiet parent is invisible (sway never answers its frame callback; the rig caught it in the first run); FDK issues the applying EMPTY ancestor commit (gated on configured) at create/set_position/place so moves are immediate on both backends. Keyboard follows the parent's focus, pointer routes to the child (child-local coords, both backends by construction); popups on subsurfaces: X11 yes, Wayland the loud UNSUPPORTED (xdg_popup's parent rule); nesting legal on both, sweep depth-first; resize dispatches CONFIGURE (client owns the size). Tests: the X11 leg (second-connection window-tree truth, pixel readback over-parent, real XTEST click, the counting error fence around both sweep orders) + the sway section (injected clicks, hit-testing-proven move/resize/stacking-flip, grim+PIL desync pixel proof) | — |
 | D-3 | tablets / stylus | **DONE** (2026-10-30) | FDK_EVENT_TABLET_PROXIMITY_IN/OUT/DOWN/MOTION/UP/BUTTON (enum 52-57, appended — zero new symbols, 855 unchanged) + fdk_tablet_event (position/pressure 0..1/tilt degrees/tool id/tool_type/button with the high-bit release marker) + fdk_tablet_tool_type (pen..totem): NO synthesis layer — a stylus is never a pointer click. Wayland: zwp_tablet_v2 (vendored generated code, zero new build deps) — manager bind when offered, per-seat tablet seat, the tool stream with the protocol's frame batching absorbed (one frame = one event); tablets/pads tracked-but-inert (the D-030 pad gap). X11: the valuator path through dlopen'd libXi — the XIQueryDevice scan (label-matched pressure axis, positional fallbacks), motion/button events from tablet sourceids translate with pressure (65535 clamp)/tilt, button 1 = the TIP -> DOWN/UP, buttons 2+ -> BUTTON; core pointer untouched (additive, X11's own model). The honest platform gap: XI2 has no proximity for clients — IN synthesized at a session's first event, no OUT (the tool goes silent; D-030). Tests: both seams drive the REAL bodies (the M-3 discipline — no rig can mint a tablet) + the live halves (the sway manager bind + tablet seat; the X11 scan against a real Xvfb). Real hardware: implemented — should work (untested on real hardware) | — |
 | D-4 | foreign-toplevel | **DONE** (2026-10-30) | fdk_toplevel_list_open/close/count/get_info/activate/close (include/fdk/fdk_toplevel.h, 861 exports +6) — the taskbar substrate, both backends: Wayland wlr-foreign-toplevel-management (LAZY manager bind at open — the initial burst needs an attached listener; the empty set's change fires from open itself) + X11 EWMH (_NET_CLIENT_LIST snapshot with WM_NAME/WM_CLASS/_NET_WM_STATE/_NET_ACTIVE_WINDOW, live on root PropertyNotify, activate = the S-6 message shape, close = _NET_CLOSE_WINDOW). The coarse changed-callback model (D-014's shape); the honest X11 retitle gap documented (D-031). Tests: the X11 fake-WM round trip (messages RECEIVED at the WM, the load-bearing XSync) + the sway LIVE section (own window listed, activation via sway's tree, the close REQUEST round trip) | — |
-| D-5 | xdg session save/restore | **DEFERRED** | by scope discipline | — |
+| D-5 | xdg session save/restore | **DONE** (2026-10-30) | the session half of B-19, both lanes: X11 — the ICCCM objectless lane, automatic (WM_COMMAND argv storage + WM_SAVE_YOURSELF in every window's WM_PROTOCOLS; the ClientMessage dispatches FDK_EVENT_SESSION_SAVE and the dispatch tail rewrites WM_COMMAND AFTER the handler returns — the PropertyNotify IS the ack, zero-length for command-less windows, the two-step reply verbatim; fdk_window_set_command). Wayland — xdg-session-management-v1 (staging, wayland-protocols 1.48; XML + scanner output vendored, zero new build deps; lazy manager bind at open, get_session with the wire reason enum 1:1): fdk_session_open/destroy (state preserved)/remove (forgotten)/id/get_state + the coarse notify; fdk_window_join_session picks restore_toplevel (pre-show, pre-first-commit — FDK_EVENT_SESSION_RESTORED before the first configure) or add_toplevel (post-show; the already_mapped error structurally impossible) by the window's own xdg_shown gate; the tracker's join table sweeps at teardown, window destroy unregisters WITHOUT remove_toplevel (dying ≠ forgetting); popups/subsurfaces/ext surfaces refuse INVALID_ARGUMENT, argument checks before state checks (the rig caught the order — D-032). The honest gap, probed live BEFORE writing: no released compositor advertises the protocol (sway 1.10/wlroots 0.18 and 1.12/wlroots 0.20 both lack the global) — open answers the documented NULL everywhere today; the bodies are seam-proven (D-3 discipline) and the live-compositor branch is ready in the suite. Tests: X11 — the five-leg battery (WM_PROTOCOLS volunteer bit; argv round trip; the full save round trip with the probe AS the session manager: ClientMessage in → event delivered → the handler's NEW argv acked via PropertyNotify, the dispatch-before-ack ordering; zero-length ack; clear); Wayland — the live degradation leg + the created/restored/replaced listener bodies + the toplevel-restored dispatch through the real conn->dispatch + the join validation matrix incl. the popup refusal | the owner's real-desktop round (§23): a real X11 logout/login, and the first compositor that grows the protocol |
 
 ---
 
@@ -580,7 +606,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | ~~D-2~~ | Subsurfaces (needs extension API v2 parent-surface kinds) — **SHIPPED 2026-10-30 as the v2 subsurface API** | B-16 |
 | ~~D-3~~ | Tablets / stylus — **SHIPPED 2026-10-30 (both backends + the seams)** | B-17 |
 | ~~D-4~~ | foreign-toplevel management — **SHIPPED 2026-10-30 (fdk_toplevel.h, both backends)** | — |
-| D-5 | xdg session save/restore protocols | B-19 |
+| ~~D-5~~ | xdg session save/restore — **SHIPPED 2026-10-30 (both lanes + the seam proofs; the full account is the D-5 register row)** | B-19 |
 
 ---
 

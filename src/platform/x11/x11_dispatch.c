@@ -364,6 +364,28 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
+        /* WM_SAVE_YOURSELF (1.1.0, D-5): the ICCCM appendix-C save
+         * request — same ClientMessage shape as WM_DELETE_WINDOW,
+         * the atom in data.l[0] instead. Dispatch
+         * FDK_EVENT_SESSION_SAVE (the application saves state and
+         * may call fdk_window_set_command with updated restart
+         * arguments INSIDE the handler), then ack on return: the
+         * WM_COMMAND rewrite below generates the PropertyNotify the
+         * session manager polls as "state saved" — mandated even
+         * when nothing changed, which is why the write is
+         * unconditional (zero-length for a window that never set a
+         * command — exactly the two-step reply appendix C spells
+         * out for multi-window clients). */
+        if (xevent.type == ClientMessage &&
+            xevent.xclient.message_type == conn->wm_protocols &&
+            (Atom)xevent.xclient.data.l[0] == conn->wm_save_yourself) {
+            fdk_event_data event = { .type = FDK_EVENT_SESSION_SAVE };
+            conn->dispatch(pwindow, &event, conn->dispatch_user_data);
+            fdk_x11_window_write_command(pwindow);
+            processed++;
+            continue;
+        }
+
         /* XDND receiver traffic (1.2.0): the Enter/Position/Leave/
          * Drop handshake for drags arriving at THIS window, from any
          * external client (or another FDK process). */

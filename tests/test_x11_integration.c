@@ -263,17 +263,72 @@ static void test_resize_delivers_configure_event(void) {
     printf("[ok] X11 resize delivers FDK_EVENT_WINDOW_CONFIGURE with correct size\n");
 }
 
+/* The suite's XID helper is defined below (line ~411); this test
+ * sits before it in the file. */
+static unsigned long fdk_window_xid(fdk_window *win);
+
+static int close_request_events = 0;
+static void close_request_callback(fdk_window *window,
+                                   const fdk_event_data *event,
+                                   void *user_data) {
+    (void)window;
+    (void)user_data;
+    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        close_request_events++;
+    }
+}
+
 static void test_close_request_delivered(void) {
-    /* WM_DELETE_WINDOW can't be triggered from inside this process
-     * without a window manager actually running (Xvfb has none by
-     * default) to send the ClientMessage — that requires either a
-     * real WM in the CI image or a synthetic XSendEvent from a
-     * separate test harness process. Documented as a known gap rather
-     * than faked: see docs/testing.md, "X11 integration test
-     * coverage", for exactly this limitation and what would close it. */
-    printf("[skip] X11 close-request event (needs a running window "
-           "manager to send WM_DELETE_WINDOW; not present under bare "
-           "Xvfb) — see docs/testing.md\n");
+    /* WM_DELETE_WINDOW is a WM_PROTOCOLS ClientMessage — the exact
+     * shape a window manager relays. The D-5 session test proved a
+     * PROBE connection can deliver that shape under bare Xvfb
+     * (XSendEvent with NoEventMask addresses the window's creator),
+     * which is the technique docs/testing.md said would close this
+     * long-documented gap — so the gap is closed, not skipped: send
+     * the message, assert the CLOSE_REQUEST event, prove the
+     * connection survives (the whole point of registering the
+     * protocol: without WM_DELETE_WINDOW in WM_PROTOCOLS the WM
+     * would KILL the client instead of asking). */
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK close request",
+                                 .width = 220, .height = 110 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+    unsigned long xid = fdk_window_xid(win);
+
+    close_request_events = 0;
+    fdk_window_set_event_callback(win, close_request_callback, NULL);
+
+    Display *probe = XOpenDisplay(NULL);
+    assert(probe != NULL);
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xclient.type = ClientMessage;
+    ev.xclient.window = (Window)xid;
+    ev.xclient.message_type = XInternAtom(probe, "WM_PROTOCOLS", False);
+    ev.xclient.format = 32;
+    ev.xclient.data.l[0] =
+        (long)XInternAtom(probe, "WM_DELETE_WINDOW", False);
+    assert(XSendEvent(probe, (Window)xid, False, NoEventMask, &ev));
+    XFlush(probe);
+    XCloseDisplay(probe);
+
+    (void)fdk_pump_events(ctx, 300);
+    assert(close_request_events == 1);
+
+    /* The connection is healthy after the polite close (the window
+     * is the app's to destroy now). */
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] close-request: WM_DELETE_WINDOW ClientMessage "
+           "delivered as FDK_EVENT_WINDOW_CLOSE_REQUEST (the gap "
+           "docs/testing.md carried since Phase 2 — closed with the "
+           "session test's own technique)\n");
 }
 
 /* ---- Renderer (fdk_surface) tests ----
@@ -13648,6 +13703,260 @@ static void test_idle_fallback_gui(void) {
            "early release is clean (ASan-clean)\n");
 }
 
+/* ---- Session participation (1.1.0, D-5) ---------------------------------
+ *
+ * The X11 session lane end-to-end, the way a session manager sees
+ * it: a PROBE connection plays the manager's two duties —
+ * delivering the WM_SAVE_YOURSELF ClientMessage (XSendEvent with
+ * NoEventMask: exactly how a WM relays it) and polling for the
+ * PropertyNotify on WM_COMMAND that IS the "state saved" ack
+ * (ICCCM appendix C's whole acknowledgment design). The handler
+ * sets a NEW command inside the event; the acked property must
+ * carry the new argv — proving FDK dispatches the event BEFORE
+ * writing the ack (the intended fdk_window_set_command-in-handler
+ * pattern). A command-less window must still ack: the zero-length
+ * WM_COMMAND rewrite is the spec's own reply for clients that have
+ * nothing to restart. The public object lane degrades honestly on
+ * X11: fdk_session_open answers NULL (the WM_SAVE_YOURSELF lane
+ * needs no object), documented in fdk_session.h. */
+typedef struct {
+    int save_events;
+    fdk_window *save_window;
+} session_capture;
+
+static void session_event_callback(fdk_window *window,
+                                   const fdk_event_data *event,
+                                   void *user_data) {
+    (void)window;
+    session_capture *cap = user_data;
+    if (event->type == FDK_EVENT_SESSION_SAVE) {
+        cap->save_events++;
+        cap->save_window = window;
+        /* The in-handler pattern: the restart command changes as
+         * part of SAVING (the app recorded its state file). */
+        const char *argv[3] = { "fdk-session-app", "--restore",
+                                "/tmp/fdk-session.state" };
+        fdk_window_set_command(window, argv, 3);
+    }
+}
+
+/* Splits a WM_COMMAND property (type STRING, NUL-separated argv)
+ * into its strings. Returns the count; out_argv[i] point into
+ * `buffer` (NULs replaced by separators kept — safe strdup'd). */
+static int wm_command_split(const unsigned char *value, size_t nitems,
+                            char out_argv[8][256]) {
+    int count = 0;
+    size_t start = 0;
+    for (size_t i = 0; i <= nitems && count < 8; i++) {
+        if (i == nitems || value[i] == '\0') {
+            size_t len = i - start;
+            if (len >= 256) {
+                len = 255;
+            }
+            memcpy(out_argv[count], value + start, len);
+            out_argv[count][len] = '\0';
+            count++;
+            start = i + 1;
+        }
+    }
+    /* Trailing NUL produces a final empty element — ICCCM's argv
+     * form ends with one; drop an empty TAIL only. */
+    if (count > 0 && out_argv[count - 1][0] == '\0') {
+        count--;
+    }
+    return count;
+}
+
+/* Waits (bounded) for a PropertyNotify on `atom` for `xid` on the
+ * probe connection — the session manager's ack poll. */
+static int wait_property_notify(Display *probe, Window xid, Atom atom,
+                                int timeout_ms) {
+    XSync(probe, False);
+    for (int waited = 0; waited < timeout_ms; waited += 10) {
+        XEvent ev;
+        while (XPending(probe) > 0) {
+            XNextEvent(probe, &ev);
+            if (ev.type == PropertyNotify &&
+                ev.xproperty.window == xid &&
+                ev.xproperty.atom == atom) {
+                return 1;
+            }
+        }
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+    }
+    return 0;
+}
+
+static void test_session_save_yourself_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK session test",
+                                 .width = 260, .height = 140 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* The object lane's X11 posture: no session mechanism, ever —
+     * the WM_SAVE_YOURSELF lane below is the whole X11 half. */
+    assert(fdk_session_open(ctx, FDK_SESSION_REASON_LAUNCH, NULL,
+                            NULL, NULL) == NULL);
+    {
+        /* NULL-arg validation for the join/leave pair (the object
+         * lane exists on no X11 desktop, but the argument checks
+         * must not crash regardless). */
+        assert(fdk_window_join_session(win, NULL, "main") ==
+               FDK_ERR_INVALID_ARGUMENT);
+        fdk_window_leave_session(win); /* no-op, must not crash */
+    }
+
+    Display *probe = XOpenDisplay(NULL);
+    assert(probe != NULL);
+    Atom wm_save_yourself = XInternAtom(probe, "WM_SAVE_YOURSELF", False);
+
+    /* (1) The volunteer bit: WM_PROTOCOLS lists WM_SAVE_YOURSELF on
+     *     every FDK window (this is what makes a session manager
+     *     send the save request at all). */
+    {
+        Atom *protocols = NULL;
+        int count = 0;
+        assert(XGetWMProtocols(probe, (Window)xid, &protocols, &count));
+        int has_save = 0;
+        for (int i = 0; i < count; i++) {
+            if (protocols[i] == wm_save_yourself) {
+                has_save = 1;
+            }
+        }
+        XFree(protocols);
+        assert(has_save);
+        printf("[ok] session: WM_SAVE_YOURSELF listed in WM_PROTOCOLS "
+               "(the volunteer bit)\n");
+    }
+
+    /* (2) WM_COMMAND, argv round trip: the property is type STRING,
+     *     NUL-separated, exactly the argv FDK was given. */
+    {
+        const char *argv[2] = { "fdk-session-app", "--fresh" };
+        fdk_window_set_command(win, argv, 2);
+
+        XTextProperty tp;
+        assert(XGetTextProperty(probe, (Window)xid, &tp, XA_WM_COMMAND));
+        assert(tp.encoding == XA_STRING);
+        assert(tp.format == 8);
+        char parts[8][256];
+        int n = wm_command_split(tp.value, tp.nitems, parts);
+        XFree(tp.value);
+        assert(n == 2);
+        assert(strcmp(parts[0], "fdk-session-app") == 0);
+        assert(strcmp(parts[1], "--fresh") == 0);
+        printf("[ok] session: WM_COMMAND argv round trip "
+               "(STRING, NUL-separated)\n");
+    }
+
+    /* (3) The save round trip — the probe IS the session manager:
+     *     deliver WM_SAVE_YOURSELF, FDK dispatches the event (the
+     *     handler sets a NEW command), then the ack: PropertyNotify
+     *     on WM_COMMAND, carrying the handler's argv (dispatch
+     *     BEFORE ack — the ordering the in-handler pattern needs). */
+    session_capture cap = { .save_events = 0, .save_window = NULL };
+    fdk_window_set_event_callback(win, session_event_callback, &cap);
+    {
+        /* Select PropertyChangeMask on the FDK window FROM THE PROBE
+         * — a session manager's own read of the wire. */
+        XSelectInput(probe, (Window)xid, PropertyChangeMask);
+
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.xclient.type = ClientMessage;
+        ev.xclient.window = (Window)xid;
+        ev.xclient.message_type = XInternAtom(probe, "WM_PROTOCOLS", False);
+        ev.xclient.format = 32;
+        ev.xclient.data.l[0] = (long)wm_save_yourself;
+        Status s = XSendEvent(probe, (Window)xid, False, NoEventMask, &ev);
+        assert(s != 0);
+        XFlush(probe);
+
+        /* FDK must DISPATCH the message (the event fires, the
+         * handler sets the new command, the dispatch tail writes
+         * the ack) before the probe can see any PropertyNotify. */
+        (void)fdk_pump_events(ctx, 300);
+
+        assert(wait_property_notify(probe, (Window)xid,
+                                    XA_WM_COMMAND, 2000));
+        assert(cap.save_events == 1);
+        assert(cap.save_window == win);
+
+        XTextProperty tp;
+        assert(XGetTextProperty(probe, (Window)xid, &tp, XA_WM_COMMAND));
+        char parts[8][256];
+        int n = wm_command_split(tp.value, tp.nitems, parts);
+        XFree(tp.value);
+        assert(n == 3);
+        assert(strcmp(parts[0], "fdk-session-app") == 0);
+        assert(strcmp(parts[1], "--restore") == 0);
+        assert(strcmp(parts[2], "/tmp/fdk-session.state") == 0);
+        printf("[ok] session: WM_SAVE_YOURSELF round trip — event "
+               "delivered, handler's NEW command acked via "
+               "PropertyNotify\n");
+    }
+
+    /* (4) The zero-length ack: a window that never set a command
+     *     still replies — appendix C mandates the notify even when
+     *     the value did not change (or never existed). */
+    {
+        fdk_window *win2 = NULL;
+        fdk_window_options wopts2 = { .title = "FDK session mute",
+                                      .width = 200, .height = 90 };
+        assert(fdk_ok(fdk_window_create(ctx, &wopts2, &win2)));
+        fdk_window_show(win2);
+        (void)fdk_pump_events(ctx, 100);
+        unsigned long xid2 = fdk_window_xid(win2);
+
+        XSelectInput(probe, (Window)xid2, PropertyChangeMask);
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.xclient.type = ClientMessage;
+        ev.xclient.window = (Window)xid2;
+        ev.xclient.message_type = XInternAtom(probe, "WM_PROTOCOLS", False);
+        ev.xclient.format = 32;
+        ev.xclient.data.l[0] = (long)wm_save_yourself;
+        assert(XSendEvent(probe, (Window)xid2, False, NoEventMask, &ev));
+        XFlush(probe);
+        (void)fdk_pump_events(ctx, 300);
+
+        assert(wait_property_notify(probe, (Window)xid2,
+                                    XA_WM_COMMAND, 2000));
+        XTextProperty tp;
+        assert(XGetTextProperty(probe, (Window)xid2, &tp, XA_WM_COMMAND));
+        assert(tp.nitems == 0); /* zero-length: the reply itself */
+        XFree(tp.value);
+        fdk_window_destroy(win2);
+        printf("[ok] session: command-less window acks zero-length "
+               "WM_COMMAND (the appendix-C reply)\n");
+    }
+
+    /* (5) Clearing: NULL argv removes the restart command — a live
+     *     clear still notifies (the property goes to zero length). */
+    {
+        fdk_window_set_command(win, NULL, 0);
+        XTextProperty tp;
+        assert(XGetTextProperty(probe, (Window)xid, &tp, XA_WM_COMMAND));
+        assert(tp.nitems == 0);
+        XFree(tp.value);
+    }
+
+    XSelectInput(probe, (Window)xid, 0);
+    XCloseDisplay(probe);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] session: the X11 lane end-to-end (protocols bit, argv "
+           "round trip, save+ack ordering, zero-length ack, clear)\n");
+}
+
 int main(void) {
     /* Hermeticity (1.4.13): pin the global-settings boot (the "fdk"
      * prefs store + $FDK_THEME) to nothing so this suite's pixel
@@ -13749,6 +14058,7 @@ int main(void) {
     test_gl_lane_selfcheck_real_failure_gui();
     test_gl_lane_resize_gui();
     test_idle_fallback_gui();
+    test_session_save_yourself_gui();
 
     printf("\nall X11 integration tests passed\n");
     return 0;

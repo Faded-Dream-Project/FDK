@@ -1,5 +1,24 @@
 # FDK — Progress Ledger (READ THIS FIRST)
 
+Last audited: 2026-10-30, at milestone **1.7.9** (D-5 session
+save/restore, both lanes: include/fdk/fdk_session.h + fdk_window_
+set_command/join_session/leave_session + FDK_EVENT_SESSION_SAVE/
+RESTORED (enum 58/59), 869 exports (+8) — the X11 ICCCM lane
+(WM_COMMAND argv + WM_SAVE_YOURSELF with the PropertyNotify ack,
+automatic on every window; XSMP deliberately fenced, D-032) and
+the Wayland xdg-session-management-v1 object lane (vendored
+generated code, the join-table ownership, restore-before-first-
+commit; no released compositor offers the protocol yet — probed
+live on sway 1.10 AND 1.12/wlroots 0.20 — so open answers the
+documented NULL today and the bodies are seam-proven). With this
+landing EVERY roadmap item of docs/ROADMAP-1.1.0.md is DONE except
+M-9 (the release gate: the owner's real-desktop sign-off; no code
+remains). The full battery green: core, X11 (the five-leg session
+battery with the probe playing the session manager), D-Bus,
+sanitize-off, release+examples+verify-exports (869), the FULL sway
+suite (the session section: live degradation + seam bodies + join
+validation), fdk-shell's four suites. Prior state below.)
+
 Last audited: 2026-10-30, at milestone **1.7.8** (D-4 foreign
 toplevels: include/fdk/fdk_toplevel.h, 861 exports (+6) — the
 taskbar substrate on wlr-foreign-toplevel-management (lazy bind)
@@ -942,6 +961,59 @@ sidebar rhythm).
   (untested on real hardware; the rig runs it through Mesa's
   swrast under FDK_GL_FORCE).
 
+- **Tablets / stylus: SHIPPED (1.1.0, D-3 / B-17)** —
+  FDK_EVENT_TABLET_PROXIMITY_IN/OUT/DOWN/MOTION/UP/BUTTON (enum
+  52-57, appended) + fdk_tablet_event (position/pressure/tilt/
+  tool id/type/button, the high-bit release marker); NO synthesis
+  layer (a stylus is never a click). Wayland zwp_tablet_v2
+  (vendored generated code, manager bound when offered, frame
+  batching absorbed); X11 the valuator path through dlopen'd libXi
+  (XIQueryDevice scan, 65535 clamps); the honest XI2 gap: no
+  proximity for clients (IN at first event, no OUT — D-030).
+  Seams drive the real bodies (the M-3 discipline) + the live
+  halves (sway manager bind; the Xvfb device scan). 855 exports
+  unchanged (enum + payload only).
+- **Subsurfaces: SHIPPED (1.1.0, D-2 / B-16, extension API v2)** —
+  fdk_ext_subsurface_create/_create_ex + set_position/resize/
+  set_desync/place_above/place_below (855 exports, +7): the
+  FDK-owned child surface, X11 real child windows (server-clipped,
+  XTEST-routed input, XDND aware) + Wayland wl_subsurface DESYNC.
+  THE protocol lesson (D-029): tree state is PARENT-managed — FDK
+  issues the applying EMPTY ancestor commit at create/set_position/
+  place so moves are immediate. Keyboard follows the parent; popups
+  on subsurfaces: X11 yes, Wayland the loud UNSUPPORTED.
+- **The foreign toplevel list: SHIPPED (1.1.0, D-4)** —
+  include/fdk/fdk_toplevel.h (open/close/count/get_info/activate/
+  close, 861 exports +6): the taskbar substrate, Wayland
+  wlr-foreign-toplevel-management (LAZY manager bind at open — the
+  initial burst meets a listener; the empty set fires its change
+  from open) + X11 EWMH _NET_CLIENT_LIST (live on root
+  PropertyNotify). The coarse changed-callback model (D-014's
+  shape); the X11 retitle gap documented (D-031). Rigs: the X11
+  fake-WM round trip + sway's LIVE section.
+- **Session save/restore: SHIPPED (1.1.0, D-5 / B-19)** —
+  include/fdk/fdk_session.h (open/destroy[state preserved]/remove
+  [forgotten]/id/get_state + the coarse notify) +
+  fdk_window_set_command (X11 WM_COMMAND, argv form, type STRING)
+  + fdk_window_join_session/leave_session +
+  FDK_EVENT_SESSION_SAVE/RESTORED (enum 58/59). X11: the ICCCM
+  objectless lane — WM_SAVE_YOURSELF in every window's
+  WM_PROTOCOLS, the ClientMessage dispatches the SAVE event and
+  the dispatch tail rewrites WM_COMMAND after the handler returns
+  (the PropertyNotify IS the ack; zero-length for command-less
+  windows; XSMP fenced, D-032). Wayland: xdg-session-management-v1
+  (staging, wayland-protocols 1.48; vendored generated code, lazy
+  bind; restore_toplevel pre-show vs add_toplevel post-show by the
+  window's own gate — the already_mapped error is structurally
+  impossible; the tracker's join table sweeps at teardown; window
+  destroy unregisters WITHOUT remove_toplevel). No released
+  compositor offers the protocol yet (probed live: sway 1.10 +
+  1.12/wlroots 0.20) — open answers the documented NULL today;
+  the bodies are seam-proven and the live-compositor branch is
+  ready in the suite. Rigs: the X11 five-leg battery (the probe
+  plays the session manager, the full ClientMessage→event→ack
+  round trip) + the Wayland degradation/seam/validation legs.
+
 ### Infrastructure (SHIPPED)
 
 - **The AA chrome pass (1.4.17)**: every themed control paints
@@ -1073,9 +1145,17 @@ toolkit.
 ### OUT (deliberate policy — do not chase)
 
 GLArea (software renderer is the product) · CSS-like styling (`.fdk`
-is the surface) · icon-theme loading (vector glyphs + app surfaces) ·
-printing · a11y bus bridges (in-process narrator) · touch/gestures ·
-Assistant/wizard · D-Bus anything.
+is the surface) · printing · Assistant/wizard · full XSMP/ICE
+session management (the ICCCM obsolete lane + the Wayland protocol
+are the shipped surface — D-032's fence) · animated WebP/APNG
+(B-14's fence: future families on the GIF player's shape).
+
+(History note, kept honest: this list is the 1.0-era policy. The
+1.1.0 roadmap — owner-directed — then shipped icon-theme loading,
+the D-Bus foundation and everything it rides (tray, notifications,
+portals, AT-SPI), touch AND gestures; those lines are gone from
+OUT because the roadmap overrode them, not because policy drifted.
+What remains above is still policy.)
 
 ## Verification protocol (run before claiming anything is done)
 
