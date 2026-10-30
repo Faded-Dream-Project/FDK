@@ -629,33 +629,69 @@ static void test_script_matrix(void) {
         }
 
         /* 2. the premise: the machine HAS a covering fallback font.
-         * The DECISIVE check is fontconfig's own answer for the
-         * script's language: a machine that CAN resolve a face but
-         * produced a fallback-free shape is not a skip — it is the
-         * §10 bug signature (the script was misclassified, the
-         * fallback never REQUESTED). Only a machine fontconfig
-         * cannot answer for skips honestly. */
+         * The DECISIVE check is whether a LOADABLE face that actually
+         * COVERS the probe exists — the same candidate walk the
+         * shaper would do. A raw resolve is NOT enough: the
+         * charset-filtered sort still returns non-covering faces on
+         * a pin-hinted fontconfig (DejaVu ranked first for zh on the
+         * Han-less el10 builder — found live by this very assert),
+         * and "the resolver returned a string" is not "a glyph
+         * exists". A machine with a covering face that produced a
+         * fallback-free shape is not a skip — it is the §10 bug
+         * signature (the script was misclassified, the fallback
+         * never REQUESTED). */
         size_t len = strlen(leg->word);
         fdk__shaped *sh = fdk__shape_range(primary, leg->word, len, 0,
                                            len, NULL, 0);
         assert(sh != NULL);
         if (!used_fallback(sh, primary)) {
-            char *fc_path = NULL;
-            long fc_face = 0;
-            bool fc_answers = fdk_text_resolve_fallback_font(
-                leg->fc_lang, leg->probe, NULL, 0, &fc_path, &fc_face);
-            if (fc_answers) {
+            const char *skip[4] = {NULL, NULL, NULL, NULL};
+            int n_skip = 0;
+            bool covered = false;
+            char *cover_path = NULL;
+            for (int attempt = 0; attempt < 4 && !covered; attempt++) {
+                char *p = NULL;
+                long face = 0;
+                if (!fdk_text_resolve_fallback_font(
+                        leg->fc_lang, leg->probe, skip, n_skip, &p,
+                        &face)) {
+                    break;
+                }
+                fdk_font *cand = fdk_text_font_load_face(p, face, 16);
+                if (cand != NULL && fdk_font_has_glyph(cand,
+                                                       leg->probe)) {
+                    covered = true;
+                    cover_path = p; /* printed, freed below */
+                }
+                if (cand != NULL) {
+                    fdk_font_destroy(cand);
+                }
+                if (!covered) {
+                    if (n_skip < 4) {
+                        skip[n_skip++] = p; /* freed with the walk */
+                    } else {
+                        fdk_free(p);
+                    }
+                }
+            }
+            for (int i = 0; i < n_skip; i++) {
+                fdk_free((void *)(uintptr_t)skip[i]);
+            }
+            if (covered) {
                 fprintf(stderr,
-                        "FAIL %s: fontconfig CAN resolve a fallback "
-                        "face (%s) but the shaped run used NONE — "
+                        "FAIL %s: a loadable face COVERING the script "
+                        "exists (%s) but the shaped run used NONE — "
                         "the script was never classified as needing "
                         "one (the sh_ranges sort broke again?)\n",
-                        leg->name, fc_path);
-                fdk_free(fc_path);
-                assert(!fc_answers);
+                        leg->name, cover_path);
+                fdk_free(cover_path);
+                fdk__shaped_free(sh);
+                fdk_font_destroy(primary);
+                assert(!covered);
             }
-            printf("[skip] %s: no fallback font available on this "
-                   "machine (primary %s, honest .notdef posture)\n",
+            printf("[skip] %s: no fallback font covering the script "
+                   "on this machine (primary %s, honest .notdef "
+                   "posture)\n",
                    leg->name, prim_path);
             fdk__shaped_free(sh);
             fdk_font_destroy(primary);
