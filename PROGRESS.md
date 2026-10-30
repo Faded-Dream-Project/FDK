@@ -1116,7 +1116,10 @@ sidebar rhythm).
 
 ### NEXT — nothing
 
-The backlog is EMPTY. The widget families shipped across the
+The backlog is EMPTY (and as of 2026-10-30, the 1.1.0 roadmap is
+fully landed too: every register row DONE except M-9, the release
+gate — no code remains there, only the owner's real-desktop
+sign-off before any tag; see docs/ROADMAP-1.1.0.md's counts line). The widget families shipped across the
 board; rich text shipped in 1.4.11; INCR transfers shipped in
 1.4.12; the command-line face shipped in 1.4.13; the live settings
 desktop shipped in 1.4.14 (per-app themes, live re-theming, the

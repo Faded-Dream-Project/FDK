@@ -114,9 +114,38 @@ suite (`docs/testing.md`).
   to the WM/compositor where protocols exist.
 - **Platform services** — clipboard (X11 CLIPBOARD and PRIMARY,
   Wayland data-device and primary-selection, including images), drag
-  and drop (text, files, and folders), keyboard shortcuts, menu
-  accelerators and mnemonics, tooltips, undo/redo, and an atomically
-  saved application preferences store.
+  and drop (text, files, and folders — with drag icons and
+  widget-level drop targets), keyboard shortcuts, menu accelerators
+  and mnemonics, tooltips, undo/redo, and an atomically saved
+  application preferences store.
+- **Desktop integration (1.1.0)** — the services a desktop
+  application actually needs, all on FDK's own zero-dependency
+  implementations: a native D-Bus client (raw C from the wire
+  spec, no libdbus) riding a StatusNotifier **tray host** and a
+  full **notification server** (both as fdk-shell examples with
+  their own rigs); **dark mode** following the desktop's setting
+  on every channel that exists (color-scheme portal, XSETTINGS,
+  the settings daemon, a fallback file); **portal dialogs** — the
+  xdg-desktop-portal FileChooser where the portal exists, the
+  built-in file dialog where it doesn't; **idle inhibition** (the
+  Wayland protocol or org.freedesktop.ScreenSaver, whichever the
+  desktop speaks); **window activation + startup notification**
+  (xdg-activation-v1, the X11 EWMH lane, launch vouchers); the
+  **foreign toplevel list** (the taskbar substrate —
+  wlr-foreign-toplevel-management and EWMH _NET_CLIENT_LIST);
+  **session save/restore** (X11's ICCCM WM_SAVE_YOURSELF /
+  WM_COMMAND lane, and Wayland's xdg-session-management-v1 where
+  a compositor offers it); multi-monitor placement (X11 RandR,
+  Wayland output events) with HiDPI on both; the full **cursor
+  shape set** themed from the desktop's own cursor theme; input
+  regions for click-through overlays; **IME** (text-input-v3 and
+  XIM preedit — CJK input works), **touch** with tap/scroll and
+  pinch/swipe gestures, and **drawing-tablet** input; AT-SPI2
+  accessibility (level 1 + the Text interface) for real screen
+  readers; color **emoji** (COLRv0/v1, CBDT, sbix); and animated
+  GIF. Where a desktop lacks a mechanism FDK degrades honestly
+  and says so — never an error loop (`docs/TESTING-ON-DESKTOP.md`
+  is the per-feature sign-off checklist).
 - **Internationalization** — explicit-locale formatting (number
   groupings including Indian and Arabic-Indic, currency, dates),
   CLDR plural rules for 33 languages, and strict `.fmo` translation

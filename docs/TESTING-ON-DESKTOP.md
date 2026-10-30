@@ -862,3 +862,74 @@ fdk_window_show(win);
   precedes the first configure on each restored window.
 - `fdk_session_remove(s)` is the "forget me" call — the next launch
   with the old id mints a fresh session instead.
+
+## 24. Idle inhibition on your desktop (S-3 / B-11 — needs your
+screensaver)
+
+The rigs proved both mechanisms: the live D-Bus battery's mock
+ScreenSaver (the cookie round trip, the deferred release, the
+refusal) and the sway rig's compositor inhibitor (engage/release/
+destroy-while-inhibited). What only your desktop shows is the real
+blanker actually staying off.
+
+```c
+#include <fdk/fdk_idle.h>
+/* while a video is playing: */
+fdk_idle_inhibitor *inh = NULL;
+fdk_idle_inhibit(ctx, win, "my-player", "playing a movie", &inh);
+/* check: FDK_IDLE_INHIBIT_ACTIVE — the mechanism the desktop chose */
+/* when playback stops: */
+fdk_idle_uninhibit(inh);
+```
+
+- X11 (any desktop with org.freedesktop.ScreenSaver — GNOME, KDE,
+  Xfce, MATE): start a video in your FDK app, wait past your usual
+  blank timeout with no input: the screen stays on. Stop playback:
+  the next idle times out and blanks as usual.
+- Wayland (sway, labwc — zwp_idle_inhibit-manager-v1): same shape;
+  sway's `swaymsg -t get_outputs` shows nothing special — the
+  compositor simply holds the idle timer.
+- No bus and no protocol: the handle answers
+  FDK_IDLE_INHIBIT_UNSUPPORTED — honest, never an error loop.
+- GNOME's org.gnome.ScreenSaver variant is not probed (documented
+  in the B-11 row); on a GNOME X11 session the freedesktop name
+  carries it.
+
+## 25. The cursor shape set on your desktop (S-5 / B-12 — needs your
+pointer)
+
+The rigs pinned the set both sides (the sway suite's enum-table row
+by row; the hermetic RENDER proof on Xvfb; the themed fallback's
+XCursor parse). What only your desktop shows is your CURSOR THEME's
+own artwork for each shape.
+
+- In any FDK app with entries (the settings example is ideal):
+  hover an Entry / TextView / Spin — the I-beam; hover a link-ish
+  widget or drag a slider — the hand; resize a window from an edge
+  — the directional arrows; plain background — the arrow.
+- `fdk_window_set_cursor(win, FDK_CURSOR_TEXT)` (or WAIT, CROSSHAIR,
+  GRAB, ...) applies window-wide and survives re-entering the
+  window.
+- X11 with a cursor theme installed (breeze, Adwaita, whatever your
+  desktop sets): the shapes come from YOUR theme via RENDER; the
+  handful the core cursor font cannot spell are the documented
+  nearest-glyph substitutions (D-016). Wayland with cursor-shape-v1
+  (sway, labwc): the compositor's own themed shapes.
+
+## 26. Touch basics on your touchscreen (M-3 / B-03 — needs your
+fingers)
+
+The engine (tap→click, two-finger scroll, the slot model) is pinned
+headless by tests/test_touch.c and both backends' translation paths
+run through the ops seam; §18 covers the gestures above it. What
+only your touchscreen shows is the real feel.
+
+- Tap any FDK button: one click (the tap synthesis is the ONLY
+  click a touch produces — no double-firing with emulated pointer
+  events).
+- Two fingers and drag: the ScrollView under your fingers scrolls
+  (the page follows the average delta; lift both and it settles).
+- A drag that starts as a touch press on a draggable band moves the
+  window on X11; on Wayland the compositor takes over.
+- Press-drag-release inside a List or Tree selects exactly as the
+  mouse does (the same hit tests, no touch-only surprises).
