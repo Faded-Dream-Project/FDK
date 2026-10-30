@@ -134,9 +134,18 @@ against an older header keep working as fields are APPENDED — the
 input-struct rule, made executable.
 
 The 1.1.0 additions are append-only against 1.0.0: new functions
-(620 -> 641 exported symbols), new opaque types, no layout change to
-any existing public struct — the SONAME stays `libfdk.so.1`, only
-the file name moves (the numeric `libfdk.so.1.1.0`; pre-release
-suffixes never appear in the .so file name — Alpine's abuild derives
-apk so:provides versions from the filename tail, which rejected a
-suffixed name outright).
+(620 -> 641 exported symbols at rc1, 855 at the D-2 landing), new
+opaque types, no layout change to any existing public struct — the
+SONAME stays `libfdk.so.1`, only the file name moves (the numeric
+`libfdk.so.1.1.0`; pre-release suffixes never appear in the .so file
+name — Alpine's abuild derives apk so:provides versions from the
+filename tail, which rejected a suffixed name outright).
+
+The extension API's own version moved 1 -> 2 with the D-2
+subsurfaces (the seven `fdk_ext_subsurface_*` functions): a pure
+addition — no existing symbol, type, or field changed — so an add-on
+compiled against v1 links and runs unchanged against a v2 library
+(the runtime number only grows); an add-on that USES a subsurface
+function compiles against the v2 header and refuses to run against
+a v1 library at its own startup check. This is the version bump's
+documented first use.

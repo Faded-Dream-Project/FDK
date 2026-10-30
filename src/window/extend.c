@@ -558,6 +558,244 @@ fdk_result fdk_ext_popup_create(fdk_ext_surface *parent, fdk_i32 x,
     return FDK_OK;
 }
 
+/* ---- subsurfaces (extension API v2, 1.1.0 D-2) ---------------------------
+ *
+ * The FDK-owned child-surface primitive (fdk_extend.h's Subsurfaces
+ * section). The create flow mirrors fdk_ext_popup_create's wrapper
+ * pattern exactly — the backend's subsurface_create op builds the
+ * native child (X11 child window / wl_subsurface), the window layer
+ * wraps it in an fdk_window with the event trampoline and destroy
+ * notify, and links it onto the parent's child list so the parent's
+ * destroy sweeps it (the popup contract, the sub_* fields). */
+
+static fdk_result subsurface_create_full(fdk_context *ctx,
+                                         fdk_window *parent, fdk_i32 x,
+                                         fdk_i32 y, fdk_i32 width,
+                                         fdk_i32 height,
+                                         fdk_ext_surface **out_surface) {
+    if (out_surface == NULL || parent == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (width <= 0 || height <= 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx == NULL || ctx->ops == NULL || ctx->conn == NULL) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+    if (ctx->ops->subsurface_create == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+
+    fdk_ext_surface *ext = fdk_alloc(sizeof(*ext));
+    if (ext == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    ext->window = NULL;
+    ext->kind = NULL; /* FDK-owned: no kind callbacks ever fire   */
+    ext->event_cb = NULL;
+    ext->event_cb_user = NULL;
+
+    /* The backend builds the native child parented to the PARENT's
+     * platform window (the tagged-native indirection the kind path
+     * needs does not apply — FDK creates this surface itself). */
+    fdk_platform_window *pwindow = NULL;
+    fdk_result r = ctx->ops->subsurface_create(ctx->conn, parent->pwindow,
+                                               x, y, width, height,
+                                               &pwindow);
+    if (!fdk_ok(r)) {
+        fdk_free(ext);
+        return r;
+    }
+
+    fdk_window *window = fdk_alloc(sizeof(*window));
+    if (window == NULL) {
+        /* The native child was created — ownership says it dies here
+         * (the backend's window_destroy is the sanctioned destroyer,
+         * the same ordering every other create-failure path takes). */
+        ctx->ops->window_destroy(pwindow);
+        fdk_free(ext);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    fdk__window_init_fields(window, ctx, NULL);
+    window->pwindow = pwindow;
+    window->ext = ext;
+    window->is_subsurface = true;
+    /* The client-chosen size (window_create_full's options->width
+     * equivalent — the ext wrapper has no options, and get_size
+     * answers the window layer's last_size). */
+    window->last_size.width = width;
+    window->last_size.height = height;
+    ext->window = window;
+
+    window->event_callback = ext_event_trampoline;
+    window->event_callback_user_data = ext;
+    fdk__window_set_destroy_notify(window, ext_destroy_notify, ext);
+
+    r = fdk_context_register_window(ctx, window);
+    if (!fdk_ok(r)) {
+        /* ext_destroy_notify runs inside (wrapper free — no kind),
+         * window_destroy releases the platform child. */
+        fdk_window_destroy(window);
+        return r;
+    }
+
+    /* The child list: the parent's destroy sweeps children first
+     * (window.c), and place_above/below validates same-parent
+     * siblings through these links. */
+    window->sub_parent = parent;
+    window->sub_prev = NULL;
+    window->sub_next = parent->sub_first;
+    if (parent->sub_first != NULL) {
+        parent->sub_first->sub_prev = window;
+    }
+    parent->sub_first = window;
+
+    FDK_DEBUG("subsurface extension surface created");
+    *out_surface = ext;
+    return FDK_OK;
+}
+
+fdk_result fdk_ext_subsurface_create(fdk_window *parent, fdk_i32 x,
+                                     fdk_i32 y, fdk_i32 width,
+                                     fdk_i32 height,
+                                     fdk_ext_surface **out_surface) {
+    if (parent == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    return subsurface_create_full(parent->ctx, parent, x, y, width, height,
+                                  out_surface);
+}
+
+fdk_result fdk_ext_subsurface_create_ex(fdk_ext_surface *parent,
+                                        fdk_i32 x, fdk_i32 y,
+                                        fdk_i32 width, fdk_i32 height,
+                                        fdk_ext_surface **out_surface) {
+    if (parent == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (parent->window == NULL) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    return subsurface_create_full(parent->window->ctx, parent->window, x, y,
+                                  width, height, out_surface);
+}
+
+/* The subsurface op dispatch shape shared by every mutator below:
+ * validate the handle, refuse anything that is not a subsurface
+ * (INVALID_STATE — the handle is real but the operation belongs to
+ * another kind of surface), then let a backend without the op
+ * answer UNSUPPORTED. */
+static fdk_result subsurface_dispatch(fdk_ext_surface *surface,
+                                      fdk_window **out_window) {
+    if (surface == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (surface->window == NULL) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    if (!surface->window->is_subsurface) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    *out_window = surface->window;
+    return FDK_OK;
+}
+
+fdk_result fdk_ext_subsurface_set_position(fdk_ext_surface *surface,
+                                           fdk_i32 x, fdk_i32 y) {
+    fdk_window *window = NULL;
+    fdk_result r = subsurface_dispatch(surface, &window);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    if (window->ops->subsurface_set_position == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    window->ops->subsurface_set_position(window->pwindow, x, y);
+    return FDK_OK;
+}
+
+fdk_result fdk_ext_subsurface_resize(fdk_ext_surface *surface,
+                                     fdk_i32 width, fdk_i32 height) {
+    fdk_window *window = NULL;
+    fdk_result r = subsurface_dispatch(surface, &window);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    if (width <= 0 || height <= 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->subsurface_resize == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    window->ops->subsurface_resize(window->pwindow, width, height);
+    /* The resize is a client-owned fact on both backends — no server
+     * configure will arrive for the Wayland child (and X11's own
+     * ConfigureNotify races this dispatch), so the surface layer
+     * dispatches the CONFIGURE itself: the documented event the
+     * child's callback repaints on. */
+    fdk_event_data event;
+    memset(&event, 0, sizeof(event));
+    event.type = FDK_EVENT_WINDOW_CONFIGURE;
+    event.configure.size.width = width;
+    event.configure.size.height = height;
+    fdk_window_dispatch_event(window, &event);
+    return FDK_OK;
+}
+
+fdk_result fdk_ext_subsurface_set_desync(fdk_ext_surface *surface,
+                                         int desync) {
+    fdk_window *window = NULL;
+    fdk_result r = subsurface_dispatch(surface, &window);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    if (window->ops->subsurface_set_desync == NULL) {
+        /* No commit transaction exists — the documented hint-answer
+         * (X11 declares the op, so this arm is for future backends). */
+        return FDK_OK;
+    }
+    window->ops->subsurface_set_desync(window->pwindow, desync);
+    return FDK_OK;
+}
+
+static fdk_result subsurface_place(fdk_ext_surface *surface,
+                                   fdk_ext_surface *sibling, int above) {
+    fdk_window *window = NULL;
+    fdk_result r = subsurface_dispatch(surface, &window);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    if (sibling == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (sibling->window == NULL || !sibling->window->is_subsurface) {
+        return FDK_ERR_INVALID_STATE;
+    }
+    if (sibling->window == window) {
+        return FDK_ERR_INVALID_ARGUMENT; /* self-relative is meaningless */
+    }
+    if (sibling->window->sub_parent != window->sub_parent) {
+        /* The protocol's own rule (both backends): stack siblings
+         * must share a parent. */
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (window->ops->subsurface_place == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->subsurface_place(window->pwindow,
+                                         sibling->window->pwindow, above);
+}
+
+fdk_result fdk_ext_subsurface_place_above(fdk_ext_surface *surface,
+                                          fdk_ext_surface *sibling) {
+    return subsurface_place(surface, sibling, 1);
+}
+
+fdk_result fdk_ext_subsurface_place_below(fdk_ext_surface *surface,
+                                          fdk_ext_surface *sibling) {
+    return subsurface_place(surface, sibling, 0);
+}
+
 /* ---- the backend hook (platform_internal.h) ------------------------------ */
 
 void fdk__ext_popup_attached(fdk_context *ctx,

@@ -14,6 +14,75 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-30 (on the rc2 line)
 
+### Added — subsurfaces: the FDK-owned child-surface primitive, both backends (D-2 / B-16; extension API v2)
+
+- **`include/fdk/fdk_extend.h` (7 new functions, `FDK_EXT_API_VERSION`
+  1 -> 2)**: `fdk_ext_subsurface_create` (parent = an application
+  `fdk_window*`) and `fdk_ext_subsurface_create_ex` (parent = any
+  extension surface — a layer-shell bar carrying an inset video
+  region, an overlay on a notification card), plus
+  `fdk_ext_subsurface_set_position`, `fdk_ext_subsurface_resize`,
+  `fdk_ext_subsurface_set_desync`, `fdk_ext_subsurface_place_above`,
+  `fdk_ext_subsurface_place_below`. The returned handle is a normal
+  `fdk_ext_surface`: renders through the public `fdk_surface` path,
+  receives the translated event stream, parents popups (X11),
+  answers `fdk_ext_surface_native`. 855 exports, +7 (verified).
+- **X11: real child-window compositing** — a child Window of the
+  parent's X window (server-clipped, stacked within the parent, the
+  standard FDK event mask + XI2 touch routing + XDND awareness at
+  create, created UNMAPPED with the themed background and NorthWest
+  bit gravity), positioned in parent PHYSICAL coordinates (logical x
+  conn->scale — the HiDPI rule). Moves are server-side immediate
+  (XMoveWindow/XResizeWindow + flush); stacking is the core
+  protocol's sibling restack (XConfigureWindow with
+  CWSibling/CWStackMode); the commit-mode vocabulary is the
+  documented no-op hint. Popups anchor to subsurfaces naturally.
+- **Wayland: the wl_subsurface role, DESYNC by default** — a fresh
+  wl_surface given the role against the parent's surface, the
+  output-enter/leave scale tracking + fractional-scale preference an
+  adopted surface gets, `configured` from birth (no handshake exists
+  to wait for), independent frame updates (the feature's point:
+  buffer commits apply without the parent presenting). The GPU
+  present lane (D-1) engages for large children like for any
+  surface. Popups on subsurfaces are refused loudly and early
+  (`FDK_ERR_UNSUPPORTED`) — xdg_popup cannot anchor to a
+  wl_subsurface; anchor menus on the parent window.
+- **The parent-managed tree-state rule, absorbed** (found live
+  against sway 1.10 — the first rig run's lesson, DECISIONS D-029):
+  a subsurface's position, stacking, and very PRESENCE in the
+  parent's surface tree are parent-applied state per the core
+  protocol, regardless of the child's sync/desync mode. A desync
+  child of a quiet parent is invisible and unhittable — sway never
+  answers its frame callback. FDK's create/set_position/place each
+  issue an empty attach-less commit on the topmost CONFIGURED
+  ancestor (pure state application, invisible to the app's frame
+  pacing; an ancestor mid-handshake is left to its own commit), so
+  moves are immediate exactly like X11's. The API contract documents
+  the rule instead of hiding it.
+- **Keyboard stays with the parent's focus, pointer goes to the
+  child** (both backends, by construction): a subsurface is an input
+  region, not a focus target — clicks in the region belong to the
+  region (child-local coordinates), keys keep flowing to the
+  toplevel. The size is client-owned (no configure handshake);
+  `resize` dispatches the documented CONFIGURE event on both
+  backends. Nesting is legal on both (the sweep is depth-first);
+  destroy discipline is the popup contract verbatim (children must
+  not outlive the parent — the parent's destroy sweeps them).
+- **Tests**: the X11 suite's `test_ext_subsurface_x11` (the server's
+  window tree through a second Xlib connection — real child both
+  XQueryTree directions, geometry/position, over-parent pixel
+  readback, move/resize + CONFIGURE, sibling restack both ways
+  through the server's stack order, REAL XTEST click routed to the
+  child with child-local coordinates, popup-on-sub, solo destroy +
+  recursive nested sweep, parent sweep behind the counting
+  protocol-error fence) and the sway suite's subsurface section
+  (injected clicks routed to the child, move/resize proven by
+  hit-testing the new geometry, the place_below stacking flip by
+  which surface takes the click, the popup refusal, nested create,
+  parent sweep protocol-clean, grim+PIL pixel readback of the desync
+  compositing). Zero new build dependencies (wl_subcompositor is
+  core Wayland; the X11 child windows are core Xlib).
+
 ### Added — the Wayland GPU present lane, EGL (D-1 / B-15): FDK_RENDER_PATH_GL on both backends
 
 - **`src/platform/wayland/wayland_egl.c` + `wayland_egl.h`** (new):

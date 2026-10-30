@@ -1526,3 +1526,87 @@ xdg configure gate — a present before the first configure rides
 lane_frame_deferred and the configure handler flushes it, mirroring
 the CPU path's deferred render_pending commit (a single-present app
 must still map with its first frame).
+
+## D-029 — subsurfaces: the parent-managed tree-state rule, DESYNC by default, and the FDK-owned wrapper (D-2 / B-16)
+
+**Date**: 2026-10-30 · **Status**: shipped, both backends, rigs green
+
+`fdk_ext_subsurface_create` (extension API v2) had four shape
+decisions worth recording, and one protocol lesson the rig taught
+within the first ten minutes of its existence.
+
+**1. FDK-owned, not a kind.** The roadmap's D-2 line said "extension
+API v2 parent-surface kinds", and an add-on CAN still build its own
+subsurface through the v1 native accessors (bind wl_subcompositor on
+the shared display, `get_subsurface(parent_wl_surface, ...)`, adopt
+the surface). But the VIDEO-IN-UI use case belongs to applications,
+and the primitive needs no add-on callbacks to build the native
+object — the backend creates it. So the surface is FDK-owned from
+birth (kind == NULL, the popup pattern), wrapped in the internal
+`fdk_window` the ext API always builds, and linked onto the parent's
+child list for the destroy sweep. The "parent-surface kinds" reading
+survives as `create_ex` (a subsurface OF a kind surface — the
+layer-shell bar with an inset video region), which needs zero extra
+machinery.
+
+**2. DESYNC at birth.** The protocol default is sync — child state
+applies with the parent's commits. That default is wrong for the
+feature's own use case: an independently-updating region is the
+point, and a sync child of a quiet parent never shows a frame. FDK
+creates desync and exposes the switch (`set_desync(0)`) for the
+atomic-update discipline. On X11 the call is the documented no-op
+hint — there is no commit transaction to switch.
+
+**3. THE LESSON: position/stacking/tree-membership are
+PARENT-managed state.** The first implementation did the textbook
+thing — `get_subsurface`, `set_desync`, `set_position(x, y)`, child
+attaches a buffer and commits (desync: "applies directly") — and the
+sway rig showed a child that was invisible AND unhittable: sway
+never answered the child's frame callback, and injected clicks in
+the region fell through to the parent. The protocol text
+(wayland.xml, verbatim): set_position's "scheduled coordinates take
+effect whenever the state of the parent surface is applied" — and a
+new subsurface's entry into the parent's surface tree rides the same
+parent-applied state. The child's own desync commit covers its
+BUFFER state only. A parent that had painted once and never again
+never applied the child. The fix: FDK issues the applying commit
+itself — an empty, attach-less `wl_surface_commit` on the TOPMOST
+CONFIGURED ancestor — at create/set_position/place. Empty commits
+are pure state application (legal on any surface, invisible to the
+app's frame pacing); the CONFIGURED gate keeps an ancestor mid-role-
+handshake (layer-shell pre-configure, an unshown window) untouched —
+its own handshake commit carries the child in, correct by
+construction. The API contract then documents the rule instead of
+hiding it (fdk_extend.h's section note), because a native-access
+add-on will meet the same wall.
+
+**4. Sibling-only stacking.** `place_above`/`place_below` take a
+sibling sharing the parent (mixed parents refused loudly — it is the
+X protocol's own BadMatch rule and the Wayland protocol error, so
+the window layer refuses before any backend sees it).
+Restacking relative to the PARENT surface (the Wayland protocol
+allows a child UNDER the parent's buffer) is deliberately NOT
+exposed: an X11 child always renders over the parent's pixels, and
+the API keeps one cross-backend truth instead of a fidelity lie on
+one backend. The native accessors remain the escape hatch for the
+exotic shape.
+
+**5. The one Wayland popup refusal.** `fdk_ext_popup_create` on a
+subsurface parent answers UNSUPPORTED: xdg_popup's parent must be an
+xdg_surface or a role object that adopts it, and an FDK-owned
+subsurface is neither. X11 parents the popup to the child window
+naturally and the same call succeeds — the asymmetry is protocol
+truth, documented at the refusal, not papered over.
+
+**Verification**: the full local battery — dual-backend rebuild
+zero warnings; core `make test`; `make test-x11` (the new leg: the
+server's own window tree, XTEST-routed clicks, the counting
+protocol-error fence around both sweep orders); `make test-dbus`
+(ALL PASS); `FDK_SANITIZE=0`; release + examples + verify-exports
+(855, +7); the sway suite (the new section: injected clicks on the
+child, geometry proven by hit-testing, the stacking flip, grim+PIL
+pixels of the desync compositing); fdk-shell build + test-x11 +
+test-desktop + its Wayland suite. The rig debug also left a small
+war story in the pixel leg: a single white pixel inside a perfect
+red field was sway's CURSOR SPRITE parked on the sample point — the
+leg parks the pointer before the screenshot now.

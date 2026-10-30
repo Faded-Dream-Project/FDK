@@ -75,6 +75,7 @@ struct fdk_window {
     fdk_context *ctx;                 /* owning context, not owned by us */
     const fdk_platform_ops *ops;      /* same as ctx's ops, cached for convenience */
     bool is_popup;                    /* Phase 9: grabbed dismissal window */
+    bool is_subsurface;               /* 1.1.0 D-2: FDK-owned child surface (ext) */
     fdk_platform_window *pwindow;     /* backend-owned handle */
 
     /* ---- Extension surfaces (1.1.0, include/fdk/fdk_extend.h) ----
@@ -122,6 +123,21 @@ struct fdk_window {
     struct fdk_window *popup_first;
     struct fdk_window *popup_prev;
     struct fdk_window *popup_next;
+
+    /* Subsurface family (1.1.0, D-2): FDK-owned child surfaces —
+     * the fdk_ext_subsurface_create* handles — link onto their
+     * parent's list the same way popups do, and the same contract
+     * applies word for word: children must not outlive the parent,
+     * the parent's destroy sweeps them first (subs before popups —
+     * on Wayland a live wl_subsurface must die before the parent's
+     * wl_surface, and on X11 the sweep must beat the server's own
+     * subtree destroy so no destroy request references a dead
+     * window), and a child's own children hang off IT, so the
+     * sweep recurses. */
+    struct fdk_window *sub_parent;
+    struct fdk_window *sub_first;
+    struct fdk_window *sub_prev;
+    struct fdk_window *sub_next;
 
     fdk_size last_size;
 

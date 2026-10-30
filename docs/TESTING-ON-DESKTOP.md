@@ -655,3 +655,56 @@ session — labwc, sway, KDE, GNOME all qualify):
 
 **Status: DONE (should work; owner verification pending on real
 hardware — the rig's coverage is the Mesa swrast path).**
+
+## 20. Subsurfaces on your desktop (D-2 / B-16 — needs your eyes)
+
+What the rigs proved: the X11 child-window half against a real Xvfb
+server (the child is a REAL X child — XQueryTree both directions,
+server-side geometry and stacking, XTEST clicks routed to the child,
+pixel readback of the child compositing over the parent, both
+destroy orders behind a counting protocol-error fence) and the
+Wayland half against sway headless (injected clicks on the
+subsurface with child-local coordinates, moves and resizes proven by
+hit-testing the new geometry, the place_below stacking flip, grim
+pixel proof of the DESYNC commits, the popup refusal, the parent
+sweep). What only your desktop can show is the feature's actual use
+— a video region inside a UI, on your compositor and your GPU.
+
+There is no shipped subsurface example yet (the API is add-on and
+application surface, not a widget), so the fastest sign-off is a
+ten-line snippet inside any example's window — e.g. in
+`examples/08_canvas.c` after the window exists:
+
+```c
+#include <fdk/fdk_extend.h>
+fdk_ext_surface *sub = NULL;
+fdk_ext_subsurface_create(win, 40, 40, 200, 150, &sub);
+fdk_surface *s = NULL;
+fdk_ext_surface_get_surface(sub, &s);
+fdk_surface_fill(s, (fdk_color){1, 0, 0, 1});   /* a red region */
+fdk_surface_present(s);
+/* click inside the red region: your window's callback must NOT see
+ * the button — set one on the sub to see it land child-local:
+ *   fdk_ext_surface_set_event_callback(sub, cb, NULL);
+ */
+```
+
+Expectations, both backends (labwc or sway on Wayland; any WM on
+X11):
+
+- The red region appears INSIDE the window at (40, 40) — over the
+  window's own pixels — without the window repainting.
+- Re-filling and re-presenting ONLY the sub updates the region while
+  the window's UI underneath stays untouched (the desync contract).
+- Clicks inside the region belong to the SUB (child-local
+  coordinates); the window's own areas keep their clicks. Keyboard
+  input stays with the window — that is the documented contract, not
+  a bug.
+- `fdk_ext_subsurface_set_position(sub, 100, 80)` + a re-present
+  moves the region immediately on both backends (Wayland rides an
+  internal applying commit — the API's contract, you do nothing).
+- On X11 only: a menu/popup can anchor to the sub. On Wayland that
+  call answers `FDK_ERR_UNSUPPORTED` by design — parent menus on the
+  window.
+- Tearing the window down (or the app quitting) with the sub alive
+  is clean — no protocol errors on either backend (the sweep).

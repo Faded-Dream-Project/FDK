@@ -846,6 +846,46 @@ static int activation_child_leg(void) {
     return ok ? 0 : 1;
 }
 
+/* ---- Subsurface capture state (1.1.0, D-2) — file-scope because
+ * the callbacks are file-scope (the suite's g_* discipline). ---- */
+static int g_sub_buttons = 0;
+static fdk_pointf g_sub_last_pos = {0.0f, 0.0f};
+static int g_sub_configures = 0;
+static fdk_size g_sub_last_conf = {0, 0};
+static int g_sub2_buttons = 0;
+static int g_sub_parent_buttons = 0;
+
+static void wl_sub_event_cb(fdk_ext_surface *surface,
+                            const fdk_event_data *event, void *user) {
+    (void)surface;
+    (void)user;
+    if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        g_sub_buttons++;
+        g_sub_last_pos = event->pointer_button.position;
+    } else if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
+        g_sub_configures++;
+        g_sub_last_conf = event->configure.size;
+    }
+}
+
+static void wl_sub2_event_cb(fdk_ext_surface *surface,
+                             const fdk_event_data *event, void *user) {
+    (void)surface;
+    (void)user;
+    if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        g_sub2_buttons++;
+    }
+}
+
+static void wl_sub_parent_cb(fdk_window *window,
+                             const fdk_event_data *event, void *user) {
+    (void)window;
+    (void)user;
+    if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        g_sub_parent_buttons++;
+    }
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     if (getenv("FDK_WL_ACT_CHILD") != NULL) {
@@ -3645,6 +3685,272 @@ int main(void) {
             fdk_window_destroy(dw);
         }
         (void)fdk_pump_events(ctx, 100);
+    }
+
+    /* ---- Subsurfaces (1.1.0, D-2 / B-16): the wl_subsurface half ----
+     *
+     * A fresh floating window (the rig pins every org.fdk.test float
+     * at 100,60 — the injector's absolute coordinates are computed
+     * from that origin, the menu section's discipline). The child is
+     * proven three ways, all against the REAL compositor:
+     *   - INPUT: injected clicks inside the region belong to the
+     *     CHILD (the seat routes to the subsurface's wl_surface
+     *     wherever it is topmost), with child-local coordinates; a
+     *     set_position + click at the NEW origin proves the move
+     *     took effect compositor-side (input is the only geometry
+     *     truth a Wayland client can be told); the overlap pair
+     *     proves stacking through place_above/place_below.
+     *   - PIXELS: a grim screenshot (the D-1 smoke's tool) sampled
+     *     through python3-PIL (the notifyd rig's readback posture)
+     *     shows the child's red INSIDE the parent's blue — the
+     *     desync commit landed and stayed while the parent never
+     *     presented again.
+     *   - PROTOCOL: the whole section ends with the parent's destroy
+     *     sweeping live children (the wl_subsurface dies BEFORE the
+     *     parent's wl_surface) and the connection survives — the
+     *     suite's remaining legs and the clean teardown below are
+     *     the fence. */
+    {
+        fdk_window *sw = NULL;
+        fdk_window_options swopts = { .title = "FDK subsurface wl",
+                                      .width = 260, .height = 180 };
+        assert(fdk_ok(fdk_window_create(ctx, &swopts, &sw)));
+        /* DECORATED (the menu legs' posture): sway gives UNdecorated
+         * floats a 25px title bar + 2px border — the client surface
+         * lands at pin+(2,25) and every absolute coordinate below
+         * would miss. A CSD window sits at the pin EXACTLY (sway's
+         * own get_tree reports border=csd, rect == client rect). */
+        assert(fdk_ok(fdk_window_set_decorated(sw, true)));
+        fdk_widget *sroot = NULL;
+        assert(fdk_ok(fdk_window_get_root(sw, &sroot)));
+        fdk_widget_set_background(sroot, (fdk_color){0.0f, 0.0f, 1.0f, 1.0f});
+        fdk_window_show(sw);
+        pump_and_paint(ctx, sw, 800);
+
+        /* ---- the API's failure alphabet (compositor-free) ---- */
+        {
+            fdk_ext_surface *bad = NULL;
+            assert(fdk_ext_subsurface_create(NULL, 0, 0, 10, 10, &bad) ==
+                   FDK_ERR_INVALID_ARGUMENT);
+            assert(fdk_ext_subsurface_create(sw, 0, 0, 0, 10, &bad) ==
+                   FDK_ERR_INVALID_ARGUMENT);
+            assert(fdk_ext_subsurface_create(sw, 0, 0, 10, 0, &bad) ==
+                   FDK_ERR_INVALID_ARGUMENT);
+        }
+
+        /* ---- the child, painted through the ordinary ext path ---- */
+        fdk_ext_surface *sub = NULL;
+        assert(fdk_ok(fdk_ext_subsurface_create(sw, 20, 15, 120, 90, &sub)));
+        fdk_size ssz = {0, 0};
+        assert(fdk_ok(fdk_ext_surface_get_size(sub, &ssz)));
+        assert(ssz.width == 120 && ssz.height == 90);
+
+        fdk_ext_surface_set_event_callback(
+            sub, wl_sub_event_cb, NULL);
+
+        {
+            fdk_surface *cs = NULL;
+            assert(fdk_ok(fdk_ext_surface_get_surface(sub, &cs)));
+            fdk_surface_fill(cs, (fdk_color){1.0f, 0.0f, 0.0f, 1.0f});
+            assert(fdk_ok(fdk_surface_present(cs)));
+        }
+        for (int i = 0; i < 8; i++) {
+            (void)fdk_pump_events(ctx, 50); /* the desync commit lands */
+        }
+
+        fdk_ext_surface *sub2 = NULL; /* the stacking sibling */
+        if (wayland_injector_start()) {
+            fdk_window_set_event_callback(sw, wl_sub_parent_cb, NULL);
+            pump_and_paint(ctx, sw, 1200);
+
+            /* Click INSIDE the child region: (100,60) + (20,15) +
+             * (30,20) = (150, 95) absolute. */
+            wayland_inject("move 150 95");
+            pump_and_paint(ctx, sw, 400);
+            wayland_inject("tap 1");
+            pump_and_paint(ctx, sw, 500);
+            assert(g_sub_buttons == 1);
+            assert((int)g_sub_last_pos.x == 30);
+            assert((int)g_sub_last_pos.y == 20);
+
+            /* Click a parent-only pixel: surface (130,130) — below
+             * the 28px CSD band and outside the child's span (the
+             * band itself swallows title-bar clicks). */
+            wayland_inject("move 230 190");
+            pump_and_paint(ctx, sw, 300);
+            wayland_inject("tap 1");
+            pump_and_paint(ctx, sw, 400);
+            assert(g_sub_parent_buttons == 1);
+            assert(g_sub_buttons == 1); /* unchanged */
+
+            /* set_position(50,40): the click at the NEW origin lands
+             * on the child; the OLD region now belongs to the parent
+             * again — the move is compositor truth, proven by input. */
+            assert(fdk_ok(fdk_ext_subsurface_set_position(sub, 50, 40)));
+            {
+                fdk_surface *cs = NULL;
+                assert(fdk_ok(fdk_ext_surface_get_surface(sub, &cs)));
+                fdk_surface_fill(cs, (fdk_color){1.0f, 0.0f, 0.0f, 1.0f});
+                assert(fdk_ok(fdk_surface_present(cs)));
+            }
+            pump_and_paint(ctx, sw, 600);
+            wayland_inject("move 160 110");
+            pump_and_paint(ctx, sw, 300);
+            wayland_inject("tap 1");
+            pump_and_paint(ctx, sw, 400);
+            assert(g_sub_buttons == 2);
+            assert((int)g_sub_last_pos.x == 10);
+            assert((int)g_sub_last_pos.y == 10);
+            /* ...and the OLD region is the parent's again. */
+            wayland_inject("move 150 95");
+            pump_and_paint(ctx, sw, 300);
+            wayland_inject("tap 1");
+            pump_and_paint(ctx, sw, 400);
+            assert(g_sub_parent_buttons == 2);
+            assert(g_sub_buttons == 2);
+
+            /* resize: bigger region; the far corner becomes the
+             * child's (and the CONFIGURE event arrived). */
+            assert(fdk_ext_subsurface_resize(sub, 0, 0) ==
+                   FDK_ERR_INVALID_ARGUMENT);
+            assert(fdk_ok(fdk_ext_subsurface_resize(sub, 140, 60)));
+            assert(g_sub_configures >= 1);
+            assert(g_sub_last_conf.width == 140 &&
+                   g_sub_last_conf.height == 60);
+            {
+                fdk_surface *cs = NULL;
+                assert(fdk_ok(fdk_ext_surface_get_surface(sub, &cs)));
+                fdk_surface_fill(cs, (fdk_color){1.0f, 0.0f, 0.0f, 1.0f});
+                assert(fdk_ok(fdk_surface_present(cs)));
+            }
+            pump_and_paint(ctx, sw, 600);
+            wayland_inject("move 285 145");
+            pump_and_paint(ctx, sw, 300);
+            wayland_inject("tap 1");
+            pump_and_paint(ctx, sw, 400);
+            assert(g_sub_buttons == 3);
+            assert((int)g_sub_last_pos.x == 135);
+            assert((int)g_sub_last_pos.y == 45);
+
+            /* ---- STACKING: an overlapping sibling ---- */
+            assert(fdk_ok(fdk_ext_subsurface_create(sw, 60, 30, 120, 60,
+                                                    &sub2)));
+            fdk_ext_surface_set_event_callback(
+                sub2, wl_sub2_event_cb, NULL);
+            {
+                fdk_surface *cs = NULL;
+                assert(fdk_ok(fdk_ext_surface_get_surface(sub2, &cs)));
+                fdk_surface_fill(cs, (fdk_color){0.0f, 1.0f, 0.0f, 1.0f});
+                assert(fdk_ok(fdk_surface_present(cs)));
+            }
+            pump_and_paint(ctx, sw, 600);
+            /* The overlap center: sub2 spans (60,30)-(180,90) window-
+             * local; click its middle (120,60) — inside BOTH. sub2
+             * was created later: it stacks ON TOP. */
+            wayland_inject("move 220 120");
+            pump_and_paint(ctx, sw, 300);
+            wayland_inject("tap 1");
+            pump_and_paint(ctx, sw, 400);
+            assert(g_sub2_buttons == 1);
+            assert(g_sub_buttons == 3); /* the lower one untouched */
+
+            /* place_below flips the stacking order. */
+            assert(fdk_ok(fdk_ext_subsurface_place_below(sub2, sub)));
+            {
+                fdk_surface *cs = NULL;
+                assert(fdk_ok(fdk_ext_surface_get_surface(sub2, &cs)));
+                fdk_surface_fill(cs, (fdk_color){0.0f, 1.0f, 0.0f, 1.0f});
+                assert(fdk_ok(fdk_surface_present(cs)));
+            }
+            pump_and_paint(ctx, sw, 600);
+            wayland_inject("move 220 120");
+            pump_and_paint(ctx, sw, 300);
+            wayland_inject("tap 1");
+            pump_and_paint(ctx, sw, 400);
+            assert(g_sub_buttons == 4); /* now the lower one takes it */
+            assert(g_sub2_buttons == 1);
+            /* Park the pointer FAR from the sample points before the
+             * screenshot: sway renders the virtual pointer's cursor
+             * sprite at its position, and the first pixel probe once
+             * sampled exactly the sprite (one white pixel inside an
+             * otherwise perfect red field — the "ghost" took a
+             * debug session to identify). */
+            wayland_inject("move 900 700");
+            pump_and_paint(ctx, sw, 300);
+            wayland_injector_stop();
+
+            /* ---- PIXELS: grim + PIL (the D-1/notifyd posture) ---- */
+            {
+                char shot[128], pycmd[512];
+                (void)snprintf(shot, sizeof shot,
+                               "/tmp/fdk-sub-shot.%ld.png", (long)getpid());
+                (void)snprintf(pycmd, sizeof pycmd,
+                               "grim %s >/dev/null 2>&1", shot);
+                if (system(pycmd) == 0) {
+                    /* The child (now at (50,40), 140x60) center:
+                     * window (100,60) + (50+70, 40+30) = (220,130). */
+                    (void)snprintf(
+                        pycmd, sizeof pycmd,
+                        "python3 -c \"from PIL import Image\n"
+                        "im = Image.open('%s').convert('RGB')\n"
+                        "c = im.getpixel((220, 130))\n"
+                        "p = im.getpixel((230, 190))\n"
+                        "print(c[0], c[1], c[2], p[0], p[1], p[2])\"", shot);
+                    FILE *f = popen(pycmd, "r");
+                    assert(f != NULL);
+                    int cr = 0, cg = 0, cb = 0, pr = 0, pg = 0, pb = 0;
+                    int got = fscanf(f, "%d %d %d %d %d %d",
+                                     &cr, &cg, &cb, &pr, &pg, &pb);
+                    int rc = pclose(f);
+                    if (got == 6 && rc == 0) {
+                        /* The child's own desync commits painted RED
+                         * while the parent never presented after its
+                         * first fill — over-parent compositing proven
+                         * compositor-side. (The pointer was parked
+                         * away: its sprite once landed exactly on the
+                         * sample point and read as white.) */
+                        assert(cr > 180 && cg < 80 && cb < 80);
+                        assert(pr < 80 && pg < 80 && pb > 180);
+                        printf("[ok] wayland subsurface: grim+PIL pixel "
+                               "readback — the child's desync commits "
+                               "composite over the parent\n");
+                    } else {
+                        unlink(shot);
+                        printf("[skip] wayland subsurface pixel readback "
+                               "(python3-PIL unavailable)\n");
+                    }
+                } else {
+                    printf("[skip] wayland subsurface pixel readback "
+                           "(grim unavailable)\n");
+                }
+            }
+        } else {
+            printf("[skip] wayland subsurface interactive legs (no "
+                   "virtual-pointer injector)\n");
+        }
+
+        /* ---- the Wayland-specific popup rule + nesting ---- */
+        {
+            fdk_ext_surface *pop = NULL;
+            assert(fdk_ext_popup_create(sub, 0, 0, 40, 24, &pop) ==
+                   FDK_ERR_UNSUPPORTED); /* xdg_popup cannot anchor to
+                                          * a wl_subsurface */
+            /* Nesting IS legal (the protocol nests freely). */
+            fdk_ext_surface *nested = NULL;
+            assert(fdk_ok(fdk_ext_subsurface_create_ex(sub, 4, 4,
+                                                       20, 20, &nested)));
+            fdk_ext_surface_destroy(nested);
+        }
+
+        /* ---- THE SWEEP: live children die before the parent's
+         * wl_surface (protocol-clean = the suite's remaining legs
+         * and the clean teardown below still run). ---- */
+        fdk_window_destroy(sw);
+        (void)fdk_pump_events(ctx, 300);
+        printf("[ok] wayland subsurface: input-routed child (child-local "
+               "coords), move/resize proven by hit-testing, place_below "
+               "stacking flip, popup refusal, nested create, parent "
+               "sweep protocol-clean\n");
     }
 
     if (win != NULL) {

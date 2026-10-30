@@ -51,6 +51,11 @@ static const fdk_platform_ops g_wayland_ops = {
     .native_display = fdk_wayland_native_display,
     .ext_surface_native = fdk_wayland_ext_surface_native,
     .ext_surface_resized = fdk_wayland_ext_surface_resized,
+    .subsurface_create = fdk_wayland_subsurface_create,
+    .subsurface_set_position = fdk_wayland_subsurface_set_position,
+    .subsurface_resize = fdk_wayland_subsurface_resize,
+    .subsurface_set_desync = fdk_wayland_subsurface_set_desync,
+    .subsurface_place = fdk_wayland_subsurface_place,
 };
 
 const fdk_platform_ops *fdk_platform_wayland_ops(void) {

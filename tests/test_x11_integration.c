@@ -12839,6 +12839,456 @@ static void test_ext_fd_sources(void) {
            "defers to the next pump, validation\n");
 }
 
+/* ---- Subsurfaces (1.1.0, D-2 / B-16) -------------------------------------
+ *
+ * The X11 half's proof posture is the SERVER's window tree, read
+ * back through a second raw-Xlib connection (the M-4/S-9 rig
+ * discipline): the child is a REAL X child of the parent's window,
+ * clipped to it (the geometry hangs off no edge here — that is a
+ * server fact no FDK bookkeeping can fake), positioned in parent
+ * coordinates, restackable against a sibling, painted through the
+ * ordinary fdk_surface path (pixel readback), and swept before the
+ * parent's destroy (the protocol-error fence: no request may
+ * reference a dead window). Real XTEST input proves the event
+ * routing — a click in the region belongs to the CHILD. */
+
+typedef struct {
+    int button_downs;
+    int configures;
+    fdk_size last_configure;
+    fdk_pointf last_button_pos;
+} sub_capture;
+
+static void sub_event_cb(fdk_ext_surface *surface,
+                         const fdk_event_data *event, void *user) {
+    (void)surface;
+    sub_capture *cap = user;
+    if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        cap->button_downs++;
+        cap->last_button_pos = event->pointer_button.position;
+    } else if (event->type == FDK_EVENT_WINDOW_CONFIGURE) {
+        cap->configures++;
+        cap->last_configure = event->configure.size;
+    }
+}
+
+static int sub_button_cb_count = 0;
+static void sub_parent_button_cb(fdk_window *window,
+                                 const fdk_event_data *event, void *user) {
+    (void)window;
+    (void)user;
+    if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        sub_button_cb_count++;
+    }
+}
+
+static void test_ext_subsurface_x11(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* ---- Validation first (the API's failure alphabet) ---- */
+    {
+        fdk_ext_surface *dummy = NULL;
+        assert(fdk_ext_subsurface_create(NULL, 0, 0, 10, 10, &dummy) ==
+               FDK_ERR_INVALID_ARGUMENT);
+    }
+    {
+        fdk_window *win = NULL;
+        fdk_window_options wopts = { .title = "sub validation",
+                                     .width = 100, .height = 80 };
+        assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+        fdk_ext_surface *sub = NULL;
+        assert(fdk_ext_subsurface_create(win, 0, 0, 0, 10, &sub) ==
+               FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_ext_subsurface_create(win, 0, 0, 10, -4, &sub) ==
+               FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_ext_subsurface_create(win, 0, 0, 10, 10, NULL) ==
+               FDK_ERR_INVALID_ARGUMENT);
+        /* A NON-subsurface ext surface (a popup) refuses the
+         * subsurface ops: INVALID_STATE, the wrong-kind-of-handle
+         * answer. */
+        assert(fdk_ok(fdk_ext_subsurface_create(win, 2, 2, 10, 10, &sub)));
+        fdk_ext_surface *pop = NULL;
+        assert(fdk_ok(fdk_ext_popup_create(sub, 0, 0, 10, 10, &pop)));
+        assert(fdk_ext_subsurface_set_position(pop, 1, 2) ==
+               FDK_ERR_INVALID_STATE);
+        assert(fdk_ext_subsurface_resize(pop, 5, 5) ==
+               FDK_ERR_INVALID_STATE);
+        assert(fdk_ext_subsurface_set_desync(pop, 1) ==
+               FDK_ERR_INVALID_STATE);
+        assert(fdk_ext_subsurface_place_above(pop, pop) ==
+               FDK_ERR_INVALID_STATE);
+        fdk_ext_surface_destroy(pop);
+        fdk_ext_surface_destroy(sub);
+        fdk_window_destroy(win);
+    }
+
+    /* ---- The real rig ---- */
+    fdk_window *parent = NULL;
+    fdk_window_options popts = { .title = "FDK subsurface parent",
+                                 .width = 260, .height = 180 };
+    assert(fdk_ok(fdk_window_create(ctx, &popts, &parent)));
+    fdk_window_show(parent);
+    (void)fdk_pump_events(ctx, 150);
+    unsigned long parent_xid = fdk_window_xid(parent);
+
+    sub_capture cap = {0, 0, {0, 0}, {0.0f, 0.0f}};
+    sub_button_cb_count = 0;
+
+    fdk_ext_surface *sub = NULL;
+    assert(fdk_ok(fdk_ext_subsurface_create(parent, 20, 15, 120, 90, &sub)));
+    fdk_ext_surface_set_event_callback(sub, sub_event_cb, &cap);
+    fdk_ext_surface_show(sub);
+    (void)fdk_pump_events(ctx, 100);
+
+    fdk_ext_native_handle nh;
+    assert(fdk_ok(fdk_ext_surface_native(sub, &nh)));
+    assert(nh.backend == FDK_EXT_BACKEND_X11);
+    unsigned long sub_xid = (unsigned long)nh.xid;
+    assert(sub_xid != 0 && sub_xid != parent_xid);
+
+    /* The child's own size query answers the CLIENT-chosen size. */
+    {
+        fdk_size sz = {0, 0};
+        assert(fdk_ok(fdk_ext_surface_get_size(sub, &sz)));
+        assert(sz.width == 120 && sz.height == 90);
+    }
+
+    Display *own_dpy = XOpenDisplay(NULL);
+    assert(own_dpy != NULL);
+
+    /* 1. THE TREE FACT: the child's parent IS the parent window
+     * (XQueryTree both directions — the "X11 child-window
+     * compositing" the B-16 row named, proven server-side). */
+    {
+        Window root_ret = None, parent_ret = None;
+        Window *kids = NULL;
+        unsigned int nkids = 0;
+        assert(XQueryTree(own_dpy, (Window)sub_xid, &root_ret, &parent_ret,
+                          &kids, &nkids));
+        assert(parent_ret == (Window)parent_xid);
+        if (kids != NULL) {
+            XFree(kids);
+        }
+        /* And from the parent's side: the child is in its list. */
+        Window *pkids = NULL;
+        unsigned int pnkids = 0;
+        assert(XQueryTree(own_dpy, (Window)parent_xid, &root_ret,
+                          &parent_ret, &pkids, &pnkids));
+        int found = 0;
+        for (unsigned int i = 0; i < pnkids; i++) {
+            if (pkids[i] == (Window)sub_xid) {
+                found = 1;
+            }
+        }
+        if (pkids != NULL) {
+            XFree(pkids);
+        }
+        assert(found);
+    }
+
+    /* 2. Geometry + position (scale 1 under Xvfb): exact. */
+    {
+        Window root_ret = None;
+        int gx = 0, gy = 0;
+        unsigned int gw = 0, gh = 0, gb = 0, gd = 0;
+        assert(XGetGeometry(own_dpy, (Window)sub_xid, &root_ret, &gx, &gy,
+                            &gw, &gh, &gb, &gd));
+        assert(gw == 120 && gh == 90);
+        Window child_ret = None;
+        int lx = 0, ly = 0;
+        assert(XTranslateCoordinates(own_dpy, (Window)sub_xid,
+                                     (Window)parent_xid, 0, 0, &lx, &ly,
+                                     &child_ret));
+        assert(lx == 20 && ly == 15);
+    }
+
+    /* 3. Rendering through the ordinary surface path: paint the
+     * child red, the parent blue; the child's pixels read back RED
+     * through the SECOND connection, the parent's own area BLUE —
+     * the child composites OVER the parent's pixels (the documented
+     * stacking truth). */
+    {
+        fdk_surface *ps = NULL;
+        assert(fdk_ok(fdk_window_get_surface(parent, &ps)));
+        fdk_surface_fill(ps, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+        assert(fdk_ok(fdk_surface_present(ps)));
+
+        fdk_surface *cs = NULL;
+        assert(fdk_ok(fdk_ext_surface_get_surface(sub, &cs)));
+        fdk_surface_info cinfo;
+        assert(fdk_ok(fdk_surface_get_info(cs, &cinfo)));
+        assert(cinfo.width == 120 && cinfo.height == 90);
+        fdk_surface_fill(cs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+        assert(fdk_ok(fdk_surface_present(cs)));
+        x11_frame_settle(ctx);
+
+        Display *rb_dpy = NULL;
+        /* Inside the child (child-local 60, 45): red. */
+        assert(x11_readback_pixel(&rb_dpy, sub_xid, 60, 45) ==
+               0x00FF0000u);
+        /* The parent's own pixels, OUTSIDE the child region: blue —
+         * read through the PARENT's window (the child clips there). */
+        assert(x11_readback_pixel(&rb_dpy, parent_xid, 5, 5) ==
+               0x000000FFu);
+        /* ...and where the child SITS, the parent window's pixels
+         * are COVERED: the readback through the parent at the child's
+         * position shows the child's red (children render over the
+         * parent's own content — the API's documented limit, proven
+         * from the server's side). */
+        assert(x11_readback_pixel(&rb_dpy, parent_xid, 20 + 60,
+                                  15 + 45) == 0x00FF0000u);
+        XCloseDisplay(rb_dpy);
+    }
+
+    /* 4. set_position: server-side move, exact readback. The sync
+     * rides FDK's OWN display — a round-trip there guarantees the
+     * move was processed, where a second-connection sync could race
+     * it (the alpine readback-flake lesson). */
+    assert(fdk_ok(fdk_ext_subsurface_set_position(sub, 50, 40)));
+    XSync(((struct fdk_platform_connection *)ctx->conn)->display, False);
+    {
+        Window child_ret = None;
+        int lx = 0, ly = 0;
+        assert(XTranslateCoordinates(own_dpy, (Window)sub_xid,
+                                     (Window)parent_xid, 0, 0, &lx, &ly,
+                                     &child_ret));
+        assert(lx == 50 && ly == 40);
+    }
+
+    /* 5. resize: the child window + the dispatched CONFIGURE event. */
+    assert(fdk_ext_subsurface_resize(sub, 0, 30) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_ok(fdk_ext_subsurface_resize(sub, 140, 60)));
+    XSync(((struct fdk_platform_connection *)ctx->conn)->display, False);
+    {
+        Window root_ret = None;
+        int gx = 0, gy = 0;
+        unsigned int gw = 0, gh = 0, gb = 0, gd = 0;
+        assert(XGetGeometry(own_dpy, (Window)sub_xid, &root_ret, &gx, &gy,
+                            &gw, &gh, &gb, &gd));
+        assert(gw == 140 && gh == 60);
+        (void)fdk_pump_events(ctx, 50);
+        assert(cap.configures >= 1);
+        assert(cap.last_configure.width == 140);
+        assert(cap.last_configure.height == 60);
+        fdk_size sz = {0, 0};
+        assert(fdk_ok(fdk_ext_surface_get_size(sub, &sz)));
+        assert(sz.width == 140 && sz.height == 60);
+    }
+
+    /* 6. Stacking: a NESTED child (create_ex on an FDK-owned ext
+     * surface — nesting is legal on X11, children compose naturally)
+     * proves the mixed-parent refusal (a parent/child pair is not a
+     * sibling pair: sub's parent is `parent`, the nested one's is
+     * `sub`), and the same-parent pair below proves the real
+     * restack through the server's own stack order. */
+    fdk_ext_surface *sibling = NULL;
+    assert(fdk_ok(fdk_ext_subsurface_create_ex(sub, 10, 5, 60, 40,
+                                               &sibling)));
+    fdk_ext_native_handle snh;
+    assert(fdk_ok(fdk_ext_surface_native(sibling, &snh)));
+    unsigned long sib_xid = (unsigned long)snh.xid;
+
+    {
+        fdk_ext_surface *third = NULL;
+        assert(fdk_ok(fdk_ext_subsurface_create(parent, 1, 1, 8, 8,
+                                                &third)));
+        assert(fdk_ext_subsurface_place_above(third, sibling) ==
+               FDK_ERR_INVALID_ARGUMENT); /* different parents */
+        assert(fdk_ext_subsurface_place_above(sub, sibling) ==
+               FDK_ERR_INVALID_ARGUMENT); /* parent/child, not siblings */
+        assert(fdk_ext_subsurface_place_above(sub, sub) ==
+               FDK_ERR_INVALID_ARGUMENT); /* self */
+        fdk_ext_surface_destroy(third);
+    }
+
+    /* The same-parent pair (sub + a fresh child of `parent`):
+     * place_above/place_below restack EXACTLY (XQueryTree lists
+     * children bottom-to-top — "above the mate" = a higher index). */
+    {
+        fdk_ext_surface *mate = NULL;
+        assert(fdk_ok(fdk_ext_subsurface_create(parent, 100, 100, 30, 30,
+                                                &mate)));
+        fdk_ext_native_handle mnh;
+        assert(fdk_ok(fdk_ext_surface_native(mate, &mnh)));
+        unsigned long mate_xid = (unsigned long)mnh.xid;
+
+        /* mate on top (created later = higher in the initial stack). */
+        assert(fdk_ok(fdk_ext_subsurface_place_above(sub, mate)));
+        XSync(((struct fdk_platform_connection *)ctx->conn)->display,
+              False); /* round-trip on FDK's connection: processed */
+        Window root_ret = None, parent_ret = None;
+        Window *kids = NULL;
+        unsigned int nkids = 0;
+        assert(XQueryTree(own_dpy, (Window)parent_xid, &root_ret,
+                          &parent_ret, &kids, &nkids));
+        int sub_idx = -1, mate_idx = -1;
+        for (unsigned int i = 0; i < nkids; i++) {
+            if (kids[i] == (Window)sub_xid) sub_idx = (int)i;
+            if (kids[i] == (Window)mate_xid) mate_idx = (int)i;
+        }
+        if (kids != NULL) {
+            XFree(kids);
+        }
+        assert(sub_idx >= 0 && mate_idx >= 0);
+        /* XQueryTree children are listed bottom-to-top: "above the
+         * mate" means sub's index EXCEEDS the mate's. */
+        assert(sub_idx > mate_idx);
+
+        /* And the mirror: place_below flips the order. */
+        assert(fdk_ok(fdk_ext_subsurface_place_below(sub, mate)));
+        XSync(((struct fdk_platform_connection *)ctx->conn)->display,
+              False);
+        assert(XQueryTree(own_dpy, (Window)parent_xid, &root_ret,
+                          &parent_ret, &kids, &nkids));
+        sub_idx = -1;
+        mate_idx = -1;
+        for (unsigned int i = 0; i < nkids; i++) {
+            if (kids[i] == (Window)sub_xid) sub_idx = (int)i;
+            if (kids[i] == (Window)mate_xid) mate_idx = (int)i;
+        }
+        if (kids != NULL) {
+            XFree(kids);
+        }
+        assert(sub_idx >= 0 && mate_idx >= 0);
+        assert(sub_idx < mate_idx);
+        fdk_ext_surface_destroy(mate);
+    }
+
+    /* 7. The commit-mode hint: a no-op that answers OK (the
+     * documented X11 contract — there is no commit transaction). */
+    assert(fdk_ok(fdk_ext_subsurface_set_desync(sub, 0)));
+    assert(fdk_ok(fdk_ext_subsurface_set_desync(sub, 1)));
+
+    /* 8. INPUT ROUTING: a REAL XTEST click inside the child region
+     * belongs to the CHILD (button event, child-local coordinates);
+     * the parent's callback sees no button. Screen position = the
+     * parent window's origin + the child's (50, 40) + an inner
+     * offset (30, 20). */
+    {
+        Window root_ret = None, child_ret = None;
+        int px = 0, py = 0;
+        assert(XTranslateCoordinates(own_dpy, (Window)parent_xid,
+                                     DefaultRootWindow(own_dpy), 0, 0, &px,
+                                     &py, &child_ret));
+        (void)root_ret; /* only the translated origin matters here */
+        int click_x = px + 50 + 30;
+        int click_y = py + 40 + 20;
+        fdk_window_set_event_callback(parent, sub_parent_button_cb, NULL);
+        XTestFakeMotionEvent(own_dpy, 0, click_x, click_y, CurrentTime);
+        XTestFakeButtonEvent(own_dpy, 1, True, CurrentTime);
+        XTestFakeButtonEvent(own_dpy, 1, False, CurrentTime);
+        XSync(own_dpy, False);
+        (void)fdk_pump_events(ctx, 200);
+        assert(cap.button_downs == 1);
+        assert((int)cap.last_button_pos.x == 30);
+        assert((int)cap.last_button_pos.y == 20);
+        assert(sub_button_cb_count == 0); /* the parent saw no press */
+    }
+
+    /* 9. A POPUP on a subsurface parent: legal on X11 (the X tree
+     * parents it to the child window naturally). */
+    {
+        fdk_ext_surface *pop = NULL;
+        assert(fdk_ok(fdk_ext_popup_create(sub, 4, 4, 40, 24, &pop)));
+        fdk_ext_surface_show(pop);
+        (void)fdk_pump_events(ctx, 150);
+        fdk_ext_surface_destroy(pop);
+        (void)fdk_pump_events(ctx, 50);
+    }
+
+    /* 10. Destroy the child ALONE: gone from the parent's tree, the
+     * connection healthy (the fence catches any request against a
+     * dead window). */
+    {
+        XErrorHandler prev = XSetErrorHandler(fence_error_handler);
+        g_fence_errors = 0;
+        fdk_ext_surface_destroy(sub);
+        XSync(((struct fdk_platform_connection *)ctx->conn)->display,
+              False);
+        assert(g_fence_errors == 0);
+        XSetErrorHandler(prev);
+        Window root_ret = None, parent_ret = None;
+        Window *kids = NULL;
+        unsigned int nkids = 0;
+        assert(XQueryTree(own_dpy, (Window)parent_xid, &root_ret,
+                          &parent_ret, &kids, &nkids));
+        int found = 0;
+        for (unsigned int i = 0; i < nkids; i++) {
+            if (kids[i] == (Window)sub_xid) found = 1;
+        }
+        if (kids != NULL) {
+            XFree(kids);
+        }
+        assert(!found);
+        /* The nested sibling died with its parent (sub): the sweep
+         * is recursive. Server-side, a geometry query on the dead
+         * nested XID must answer BadWindow — through the counting
+         * handler, proving the window is truly gone. */
+        XErrorHandler prev2 = XSetErrorHandler(fence_error_handler);
+        g_fence_errors = 0;
+        Window root_ret2 = None;
+        int gx = 0, gy = 0;
+        unsigned int gw = 0, gh = 0, gb = 0, gd = 0;
+        (void)XGetGeometry(own_dpy, (Window)sib_xid, &root_ret2, &gx, &gy,
+                           &gw, &gh, &gb, &gd);
+        XSync(own_dpy, False);
+        assert(g_fence_errors == 1); /* BadWindow: swept with the parent */
+        XSetErrorHandler(prev2);
+    }
+
+    /* 11. THE SWEEP: fresh children (one direct, one nested), then
+     * destroy the PARENT — children die first (the fence proves no
+     * request raced the server's own subtree teardown), and every
+     * child XID is gone server-side. */
+    {
+        fdk_ext_surface *c1 = NULL, *c2 = NULL;
+        assert(fdk_ok(fdk_ext_subsurface_create(parent, 8, 8, 50, 50,
+                                                &c1)));
+        assert(fdk_ok(fdk_ext_subsurface_create_ex(c1, 4, 4, 20, 20,
+                                                   &c2)));
+        fdk_ext_native_handle h1, h2;
+        assert(fdk_ok(fdk_ext_surface_native(c1, &h1)));
+        assert(fdk_ok(fdk_ext_surface_native(c2, &h2)));
+        unsigned long c1_xid = (unsigned long)h1.xid;
+        unsigned long c2_xid = (unsigned long)h2.xid;
+
+        XErrorHandler prev = XSetErrorHandler(fence_error_handler);
+        g_fence_errors = 0;
+        fdk_window_destroy(parent);
+        XSync(((struct fdk_platform_connection *)ctx->conn)->display,
+              False);
+        assert(g_fence_errors == 0); /* the sweep beat the teardown */
+        XSetErrorHandler(prev);
+
+        /* Both children are dead server-side (BadWindow through the
+         * counting handler on the second connection). */
+        XErrorHandler prev2 = XSetErrorHandler(fence_error_handler);
+        g_fence_errors = 0;
+        Window root_ret = None;
+        int gx = 0, gy = 0;
+        unsigned int gw = 0, gh = 0, gb = 0, gd = 0;
+        (void)XGetGeometry(own_dpy, (Window)c1_xid, &root_ret, &gx, &gy,
+                           &gw, &gh, &gb, &gd);
+        (void)XGetGeometry(own_dpy, (Window)c2_xid, &root_ret, &gx, &gy,
+                           &gw, &gh, &gb, &gd);
+        XSync(own_dpy, False);
+        assert(g_fence_errors == 2);
+        XSetErrorHandler(prev2);
+    }
+
+    XCloseDisplay(own_dpy);
+    fdk_shutdown(ctx);
+    printf("[ok] ext subsurface (X11): real X child (both XQueryTree "
+           "directions), geometry+position, over-parent pixel "
+           "readback, move/resize+CONFIGURE, sibling restack both "
+           "ways, XTEST click routed to the child with child-local "
+           "coords, popup-on-sub, solo destroy + recursive nested "
+           "sweep, parent sweep with the error fence\n");
+}
+
 /* Idle inhibition (1.1.0, S-3): X11 has no platform op — the D-Bus
  * fallback engages. This rig runs under Xvfb WITHOUT a session bus,
  * so the inhibitor degrades to UNSUPPORTED (a connect failure or
@@ -12903,6 +13353,7 @@ int main(void) {
     test_ext_notify_configure();
     test_ext_popup_x11();
     test_ext_fd_sources();
+    test_ext_subsurface_x11();
     test_init_with_app_id();
     test_quit_before_run_is_safe();
     test_run_returns_when_no_windows_open();

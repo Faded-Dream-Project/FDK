@@ -451,6 +451,14 @@ struct fdk_platform_window {
      * (WM_DELETE_WINDOW, XDndAware, WM_CLASS, titles) were left to
      * the add-on's own X calls. */
     int ext;
+    /* Subsurface marker (1.1.0, D-2): nonzero when this wrapper is
+     * an FDK-created CHILD window of another FDK window (x11_ext.c's
+     * subsurface_create) — the video-in-UI/offscreen-overlay
+     * primitive behind fdk_ext_subsurface_create. Carries `ext`'s
+     * meaning for the WM-chrome conveniences (none apply: the WM
+     * never manages a subwindow) and gates the popup-anchor and
+     * stacking ops to subsurface-only callers. */
+    int is_subsurface;
     /* Per-window X Input Context (1.3.1): created at window create
      * when the connection has an XIM; Xutf8LookupString resolves
      * full-Unicode text through it. NULL = ASCII fallback. Destroyed
@@ -666,6 +674,33 @@ fdk_result fdk_x11_ext_surface_native(fdk_platform_window *pwindow,
 /* fdk_ext_surface_notify_configure()'s op: buffer-side resize. */
 void fdk_x11_ext_surface_resized(fdk_platform_window *pwindow,
                                  fdk_i32 width, fdk_i32 height);
+
+/* Subsurfaces (1.1.0, D-2) — x11_ext.c. The FDK-owned child-window
+ * primitive behind fdk_ext_subsurface_create: a real X child of the
+ * parent's window (clipped to it, stacked within it), created
+ * unmapped with FDK's standard event mask, positioned in parent
+ * PHYSICAL coordinates (logical x conn->scale, the HiDPI rule every
+ * other window path applies). See platform_internal.h's subsurface
+ * op block for the full contract. */
+fdk_result fdk_x11_subsurface_create(fdk_platform_connection *conn,
+                                     fdk_platform_window *parent,
+                                     fdk_i32 x, fdk_i32 y,
+                                     fdk_i32 width, fdk_i32 height,
+                                     fdk_platform_window **out_pwindow);
+void fdk_x11_subsurface_set_position(fdk_platform_window *pwindow,
+                                     fdk_i32 x, fdk_i32 y);
+void fdk_x11_subsurface_resize(fdk_platform_window *pwindow,
+                               fdk_i32 width, fdk_i32 height);
+void fdk_x11_subsurface_set_desync(fdk_platform_window *pwindow,
+                                   int desync);
+fdk_result fdk_x11_subsurface_place(fdk_platform_window *pwindow,
+                                     fdk_platform_window *sibling,
+                                     int above);
+
+/* The themed window-background pixel (R<<16|G<<8|B — x11_window.c):
+ * the fill a subsurface/child window shows before its first paint,
+ * same channel packing the renderer assumes. */
+unsigned long fdk_x11_theme_window_pixel(void);
 void fdk_x11_window_destroy(fdk_platform_window *pwindow);
 void fdk_x11_window_show(fdk_platform_window *pwindow);
 void fdk_x11_window_hide(fdk_platform_window *pwindow);

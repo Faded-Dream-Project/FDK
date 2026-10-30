@@ -1,5 +1,15 @@
 # FDK — Progress Ledger (READ THIS FIRST)
 
+Last audited: 2026-10-30, at milestone **1.7.6** (D-2 subsurfaces,
+extension API v2: `fdk_ext_subsurface_create`/`_create_ex` +
+set_position/resize/set_desync/place_above/place_below — the
+FDK-owned child-surface primitive, X11 child windows + Wayland
+wl_subsurface DESYNC, the parent-managed tree-state rule absorbed
+as the empty applying ancestor commit (DECISIONS D-029, the sway
+rig's first-run lesson); 855 exports (+7); the full local battery
+green incl. the new X11 leg and the sway suite's subsurface
+section. Prior state below.)
+
 **This file is the anti-duplication contract.** Before implementing
 *anything*, check the "Implemented" inventory below and grep the public
 headers — if a feature is listed here as SHIPPED, it exists in the tree;

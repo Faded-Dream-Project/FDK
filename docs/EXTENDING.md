@@ -666,3 +666,103 @@ historically-fixed size re-derived at
 `round(ref * fdk_ui_font_px() / 14)` (the design baseline), so
 `FDK_UI_FONT_SIZE=14` lands every value on its historical pixel
 size — the backward-compatible escape hatch.
+
+---
+
+## 18. Subsurfaces — an FDK-owned child surface (1.1.0, extension API v2, D-2)
+
+The video-in-UI / offscreen-overlay primitive: a rectangular region
+of an existing window (or extension surface) that renders, moves,
+and receives pointer events on its own. GTK4 calls it a subsurface;
+X11 calls it a child window. FDK speaks it through the extension
+API's **v2** (the first v2 additions — bump your add-on's
+`FDK_EXT_API_VERSION` check to 2):
+
+```c
+#include <fdk/fdk.h>
+#include <fdk/fdk_extend.h>
+
+/* A self-updating region inside an application window. */
+fdk_ext_surface *video = NULL;
+fdk_ext_subsurface_create(win, 20, 15, 640, 360, &video);
+fdk_ext_surface_set_event_callback(video, region_event, NULL);
+
+fdk_surface *s = NULL;
+fdk_ext_surface_get_surface(video, &s);
+/* ...fill/blit each frame at the region's own pace... */
+fdk_surface_present(s);          /* DESYNC: applies NOW, no parent repaint */
+fdk_ext_surface_destroy(video);  /* or just destroy win — the sweep covers it */
+```
+
+The surface is **FDK-owned** (no kind, no callbacks to build the
+native object): X11 gets a real child Window of the parent (clipped
+to it, stacked within it); Wayland gets a `wl_subsurface` role on a
+fresh `wl_surface`. Everything an extension surface gets applies:
+the public `fdk_surface` render path, the translated event stream
+with the same callbacks, popup parenting (X11; Wayland refuses —
+below), `fdk_ext_surface_native`, `set_cursor`, input regions.
+
+**What the events tell you:** pointer events route to the child
+wherever it is the topmost surface, with child-local coordinates —
+a click in the region belongs to the region. Keyboard events stay
+with the parent's focus (the child is an input region, not a focus
+target) — deliver keys from the parent's callback. There is no
+configure handshake: the client owns the size; `resize()` answers
+with a dispatched `FDK_EVENT_WINDOW_CONFIGURE` on both backends.
+
+**The commit-mode vocabulary (Wayland only):** DESYNC (the default;
+create-time) applies the child's buffer commits immediately — the
+independently-updating region works without touching the parent;
+SYNC (set_desync(0)) locks the child's updates to the parent's
+commits, the atomic-update discipline. X11 has no commit
+transaction — the call is the documented no-op hint.
+
+**The protocol truth worth knowing** (found live against sway,
+recorded as DECISIONS D-029): a subsurface's POSITION, stacking, and
+very presence in the parent's surface tree are PARENT-managed state
+in Wayland — applied only when the parent's state is applied,
+whatever the child's mode. The first implementation shipped the raw
+protocol shape and the child was INVISIBLE under a quiet parent
+(sway never even answered its frame callback). FDK hides the rule
+today: every create / set_position / place call also issues an empty
+attach-less commit on the topmost CONFIGURED ancestor — the applying
+commit — so a move is immediate exactly like X11's. An ancestor
+still in its role handshake is left alone; its own handshake commit
+carries the child in.
+
+**Stacking between children:** `place_above` / `place_below` against
+a sibling sharing the same parent (mixed parents are refused loudly).
+Restacking relative to the PARENT is deliberately not in the API: an
+X11 child always renders over the parent's own pixels, and the API
+keeps one cross-backend truth rather than a Wayland-only
+under-parent mode. Use the native accessors if you truly need the
+exotic shape.
+
+**The one Wayland refusal:** `fdk_ext_popup_create` on a subsurface
+parent answers `FDK_ERR_UNSUPPORTED` — the xdg_popup protocol
+requires a toplevel/popup/role parent, and a `wl_subsurface` is none
+of those. Anchor menus on the parent WINDOW (its xdg_surface is
+right there); X11 parents popups to subsurfaces naturally and the
+same call succeeds there.
+
+**Nesting is legal on both backends** (`fdk_ext_subsurface_
+create_ex` on a subsurface, a popup, a kind surface — a layer-shell
+bar carrying an inset video region works). The destroy sweep is
+depth-first: destroying a parent sweeps its subsurfaces (and their
+children, recursively) before its own native surface — the popup
+contract, verbatim.
+
+**Test coverage**: tests/test_x11_integration.c
+(`test_ext_subsurface_x11`: the server's window tree read back
+through a second Xlib connection — real X child both directions,
+geometry + position, over-parent pixel readback, move/resize +
+CONFIGURE, sibling restack both ways through the server's own stack
+order, REAL XTEST click routed to the child with child-local
+coordinates, popup-on-sub, solo destroy + recursive nested sweep,
+and the parent sweep behind a counting protocol-error fence) and
+the sway suite's subsurface section (injected clicks routed to the
+child, move/resize proven by hit-testing the NEW geometry, the
+place_below stacking flip by which surface takes the click, the
+popup refusal, nested create, the parent sweep protocol-clean, and
+a grim+PIL pixel readback proving the child's DESYNC commits
+composite over the parent). 855 exports, +7.

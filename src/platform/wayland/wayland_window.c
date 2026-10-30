@@ -1859,6 +1859,13 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
         (options != NULL && options->input_transparent != 0);
     pwindow->drop_formats = 0; /* fdk_window_set_drop_formats fills it */
     pwindow->xdg_popup = NULL;
+    /* Subsurface markers (1.1.0, D-2): never set on THIS path —
+     * subsurfaces come through wayland_ext.c's subsurface_create,
+     * which builds the pwindow itself (no xdg objects at all).
+     * Stated explicitly for the same reason every other field is:
+     * the create path's field set is the auditable inventory. */
+    pwindow->subsurface = NULL;
+    pwindow->is_subsurface = 0;
 
     if (is_popup) {
         /* Phase 9 popup: xdg_positioner anchored at the parent-
@@ -1892,6 +1899,22 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
             wl_surface_destroy(pwindow->surface);
             fdk_free(pwindow);
             return FDK_ERR_INVALID_ARGUMENT;
+        }
+        if (parent->is_subsurface) {
+            /* 1.1.0, D-2: xdg_popup cannot anchor to a wl_subsurface
+             * — the xdg-shell protocol requires the popup's parent to
+             * be an xdg_surface (toplevel/popup) or a role object
+             * that adopts it (the kind's popup_attached hook). An
+             * FDK-owned subsurface is neither: refuse loudly and
+             * early (fdk_extend.h documents this as the one Wayland
+             * popup-parent rule). Anchor menus on the parent WINDOW
+             * instead — its xdg_surface is right there. */
+            FDK_ERROR("popup window cannot anchor to a subsurface "
+                      "(parent the popup on the window itself)");
+            xdg_surface_destroy(pwindow->xdg_surface);
+            wl_surface_destroy(pwindow->surface);
+            fdk_free(pwindow);
+            return FDK_ERR_UNSUPPORTED;
         }
         const int parent_is_ext = (parent->ext != 0);
         if (!parent_is_ext && parent->xdg_toplevel == NULL &&
@@ -2225,11 +2248,28 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         xdg_surface_destroy(pwindow->xdg_surface);
         pwindow->xdg_surface = NULL;
     }
+    if (pwindow->subsurface != NULL) {
+        /* Subsurfaces (1.1.0, D-2): the role object dies BEFORE the
+         * wl_surface — destroying it removes the parent/child
+         * association cleanly (a wl_surface_destroy with the
+         * subsurface role still attached is a protocol error on
+         * strict compositors). The window layer's sweep guarantees
+         * the parent outlives this call. */
+        wl_subsurface_destroy(pwindow->subsurface);
+        pwindow->subsurface = NULL;
+    }
     wl_surface_destroy(pwindow->surface);
     fdk_free(pwindow);
 }
 
 void fdk_wayland_window_show(fdk_platform_window *pwindow) {
+    /* Subsurfaces (1.1.0, D-2): show() is a no-op — a subsurface
+     * becomes visible with its FIRST PRESENT (the buffer attach is
+     * the map; nothing maps a role-free child otherwise). Until
+     * then the parent's pixels simply show through the region. */
+    if (pwindow->is_subsurface) {
+        return;
+    }
     /* Extension surfaces (1.1.0): no commit here. A role-carrying
      * surface (layer-shell above all) maps when its own protocol
      * handshake completes — committing before the role's initial
@@ -2256,12 +2296,18 @@ void fdk_wayland_window_show(fdk_platform_window *pwindow) {
 }
 
 void fdk_wayland_window_hide(fdk_platform_window *pwindow) {
+    /* Subsurfaces (1.1.0, D-2): the ONE ext class whose hide is
+     * FDK's own to perform — the role is FDK-owned (unlike a kind
+     * surface's), so the NULL-buffer unmap below is exactly right:
+     * desync mode applies it on this commit, sync defers it to the
+     * parent's next one. Falls through to the buffer-clear branch
+     * (the ext gate below excludes subsurfaces for that reason). */
     /* Extension surfaces (1.1.0): no NULL-buffer commit — unmapping
      * a role-carrying surface is the ROLE's operation (a layer
      * surface unmaps by destroying and re-creating its role object,
      * the add-on's business), not a surface-state commit. Symmetric
      * with show()'s no-op above and documented in fdk_extend.h. */
-    if (pwindow->ext) {
+    if (pwindow->ext && !pwindow->is_subsurface) {
         return;
     }
     /* Unmap the surface by committing a NULL buffer — the documented

@@ -61,6 +61,11 @@ static const fdk_platform_ops g_x11_ops = {
     .native_display = fdk_x11_native_display,
     .ext_surface_native = fdk_x11_ext_surface_native,
     .ext_surface_resized = fdk_x11_ext_surface_resized,
+    .subsurface_create = fdk_x11_subsurface_create,
+    .subsurface_set_position = fdk_x11_subsurface_set_position,
+    .subsurface_resize = fdk_x11_subsurface_resize,
+    .subsurface_set_desync = fdk_x11_subsurface_set_desync,
+    .subsurface_place = fdk_x11_subsurface_place,
 };
 
 const fdk_platform_ops *fdk_platform_x11_ops(void) {

@@ -45,16 +45,40 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts** (recounted 2026-10-30 at the D-1 landing against every
+**Counts** (recounted 2026-10-30 at the D-2 landing against every
 register row — the arithmetic is the table's, item for item):
-DONE 54 · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 1
-(B-16 — DEFER-tier work: D-2) · DEFERRED (by design) 5 ·
-BLOCKED-BY-SANDBOX 0 — of 62 items. The 62 = 13 A + 19 B + 9 M +
-10 S + 6 C + 5 D. Per the owner's Phase 2 directive ("DEFER
-D-1 to D-5: do these too"), the D tier is now the active queue:
-~~D-1 (B-15)~~ **SHIPPED**, D-2 (B-16), D-3 (tablets — B-17's
-fenced half), D-4 (foreign-toplevel), D-5 (B-19's session-restore
-half).
+DONE 55 · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 0 ·
+DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. The
+62 = 13 A + 19 B + 9 M + 10 S + 6 C + 5 D. Per the owner's Phase 2
+directive ("DEFER D-1 to D-5: do these too"), the D tier is now the
+active queue: ~~D-1 (B-15)~~ **SHIPPED**, ~~D-2 (B-16)~~
+**SHIPPED**, D-3 (tablets — B-17's fenced half), D-4
+(foreign-toplevel), D-5 (B-19's session-restore half).
+Re-verified 2026-10-30 (post-D-2): the dual-backend rebuild zero
+warnings; core `make test`; `make test-x11` (the NEW subsurface leg
+green alongside the full 201: the second-connection window-tree
+truth both XQueryTree directions, geometry+position, over-parent
+pixel readback, move/resize + CONFIGURE, sibling restack both ways
+through the server's own stack order, REAL XTEST click routed to
+the child with child-local coordinates, popup-on-sub, solo destroy +
+recursive nested sweep, and the parent sweep behind the counting
+protocol-error fence — zero X errors both sweep orders);
+`FDK_DBUS_TEST_REQUIRE`-shaped `make test-dbus` (ALL PASS);
+`FDK_SANITIZE=0` test; release + examples + verify-exports (855,
++7 — the seven v2 subsurface symbols); the FULL sway suite green
+with the NEW subsurface section (injected clicks routed to the
+child with child-local coords; the move proven by hit-testing the
+NEW origin AND the vacated old region; resize by the far-corner
+click; the place_below stacking flip by which surface takes the
+click; the popup refusal; nested create; the parent sweep
+protocol-clean; grim+PIL pixel readback of the child's DESYNC
+commits compositing over the parent — with the pointer parked away,
+the sprite was the white pixel that cost a debug session); and
+fdk-shell build zero warnings + test-x11 + test-desktop + its
+Wayland suite (ALL PASS). The one protocol lesson of the landing is
+recorded as DECISIONS D-029: parent-managed tree state, absorbed
+into create/set_position/place as the empty applying ancestor
+commit.
 Re-verified 2026-10-30 (post-D-1): the dual-backend rebuild zero
 warnings; the FULL sway suite green WITH the new GL-lane group
 (policy matrix incl. the deterministic small-surface gate;
@@ -287,7 +311,7 @@ unaffected):
 | B-13 | drag icons + drop targets | **DONE** | S-9 shipped (2026-10-29): fdk_drag_begin_ex (the icon rides the drag — Wayland: the protocol's own start_drag icon surface, ARGB8888 SHM, committed pre-start, destroyed at end; X11: the GTK-shaped override-redirect window tracking the pointer at the hotspot offset, alpha-shaped via XShape, skipped by the source's own target walk) + fdk_widget_set_drop_target / fdk_widget_get_drop_target / fdk_widget_set_drag_callback (widget-level targets with scoped ENTER/MOTION/LEAVE/DROP delivery; acceptance PER-POSITION through fdk__core_drag_accepts_at — the XDND Status and wl_data_offer.accept re-evaluate at every position, window-mask fallback where no target owns it; the window callback still sees everything). SAME-CONNECTION drags fixed (the ::send-served-by-our-own-dispatch read + the drag_drop_active fence against mid-read teardown); the 250 ms EOF never-arriving wart closed (our pipe write-end closed at the receive request); the X11 DROP event carries the last Position's coordinates; 847 exports (+4). Tests: X11 — 7 new legs (icon window exists/tracks/alpha-shapes/destroys through a REAL drag into the external sink; files ON the zone -> scoped widget delivery + window unchanged; text on the fallback -> window-mask acceptance with NO widget events; scoped ENTER/LEAVE across zone boundaries through synthetic XDND); Wayland — the interop leg's zone (a URI drag landing on a TEXT-only window through per-position acceptance) + the FDK-source drag-with-icon leg (icon surface live during / destroyed after, the zone received the drop with the full payload, connection healthy). D-021 | owner's real-desktop check (TESTING-ON-DESKTOP.md §14) |
 | B-14 | image formats | **DONE** [animated GIF shipped] | C-4 landed (2026-10-29): fdk_gif + fdk_gif_player + fdk_picture_set_animated_file — the spec-native decoder (LZW incl. KwKwK, disposal 1/2/3, interlace, NETSCAPE loops, the PIL embedded-stream resync), the one-frame-at-a-time player, the Picture delay-paced timer with pause; tests/test_gif.c + the X11 GUI leg (real-encoder fixtures in tests/data/gifgen/); D-019. Static raster + SVG were already present. Fenced: animated WebP/APNG stay future families on the same shape | — |
 | B-15 | GPU on Wayland | **DONE** | EGL present lane shipped (2026-10-30, D-1) — see the B-15 register row | — (D-1 closed it) |
-| B-16 | subsurfaces | **MISSING** | no wl_subsurface | D-2 |
+| B-16 | subsurfaces | **DONE** | = D-2 (both halves: wl_subsurface + X11 child windows; D-029 records the parent-managed tree-state lesson) | — |
 | B-17 | tablets / gestures | **DONE** (gestures; tablets stay D-3) | C-6 shipped (2026-10-29): FDK_EVENT_GESTURE_PINCH + FDK_EVENT_GESTURE_SWIPE (fdk_gesture_event: focus/scale/delta/fingers/direction) on the pure touch engine — the pinch rides the two-slot posture the scroll uses (scale cumulative since the posture began, delta incremental, the centroid focus; coexists with the scroll — centroid vs span; a finger swap re-baselines), the swipe is an END-gesture verdict (every lift within FDK_GESTURE_SWIPE_MS, EVERY finger's dominant-axis travel >= FDK_GESTURE_SWIPE_MIN_PX — the per-finger minimum the rig caught: two lazy fingers do not sum into a swipe — opposing travels reject, fingers = the peak membership). No backend moved: the emissions ride the engine's emit sink; both backends identical by construction. Tests: 6 engine legs (the span arithmetic incl. the coexisting scroll + the re-baseline numbers 2.0-not-8/3; SWIPE(RIGHT,2) + SWIPE(UP,3); the four rejects — slow lift window, short travel, single finger, disagreement; CANCEL wipes the gesture state). D-025 | tablets remain D-3 |
 | B-18 | widget residue | **DONE** | editable combo (`fdk_combo_set_editable`) + S-10 shipped (2026-10-29): fdk_calendar (the month grid — Monday-lead, six rows, adjacent-month cells, keyboard walking, today marker), fdk_date_picker (formatted field + popup calendar, the combo guard discipline), fdk_time_picker (segmented stepper with wraparound + 12/24h cycle); the i18n calendar math underneath; D-018 records the posture (no clock reads, no parse). tests/test_calendar.c + the X11 GUI leg + the sway leg (real-seat day pick through the compositor); 825 exports | — |
 | B-19 | session restore protocols | **PARTIAL** | typed prefs store; no WM_SAVE_YOURSELF / xdg session | D-5 |
@@ -317,7 +341,7 @@ unaffected):
 | C-5 | re-anchor + auto-hide | **DONE** | = A-05/A-08 (both halves, both backends; D-024) | — |
 | C-6 | basic gestures | **DONE** | = B-17 (the pinch/swipe half; D-025) | — |
 | D-1 | EGL/GPU Wayland | **DONE** (2026-10-30) | the GLX lane's contract on EGL: CPU rasterization unchanged, the lane replaces only present()'s "pixels → compositor" half — texture upload (BGRA/UNSIGNED_BYTE, the staging buffer's little-endian XRGB8888 bytes in place) + fullscreen NEAREST quad + eglSwapBuffers through a wl_egl_window-backed EGL surface; dlopen("libEGL.so.1") + dlopen("libwayland-egl.so.1"), ZERO new build deps, hand-declared EGL/GLES2 subset through eglGetProcAddress (GLVND does not promise dlsym for core GLES); policy mirrors x11_gl.c (hardware yes, llvmpipe/softpipe/swrast no, FDK_GL_FORCE overrides, FDK_NO_GL opts out); the ALPHA decision is correctness not style — the staging buffer's X byte is ZERO, so the quad shader pins alpha 1.0 and the config prefers an alpha-less EGLConfig (an XRGB8888 swap buffer, opaque by protocol like wl_shm's; passthrough alpha would be a fully transparent window — the pre-merge review caught it); first-frame self-check glReadPixels (RGBA/UNSIGNED_BYTE — the ONLY GLES2-guaranteed default-framebuffer readback) vs the staging buffer, mismatch = REAL failure, process-wide refusal, FORCE overrides on a fresh connection, fdk__wayland_egl_test_reset() seam; failure = DOWNGRADE never a broken frame (any lane error or FDK_GL_FAIL_AT poison salvages the staging frame into a wl_shm slot and re-presents it NOW, permanent — fdk__wayland_surface_downgrade_from_lane); deferred first frame rides lane_frame_deferred and the configure handler flushes it (the CPU path's deferred render_pending contract mirrored); small-surface gate FDK_WL_GL_MIN_PIXELS = the X11 value; lazy per-connection load at the FIRST acquisition of ANY window (no-window apps never touch EGL). Tests (test_wayland_integration.c, the x11_gl group's shape): the policy matrix (FDK_NO_GL strict CPU; small windows CPU by the size gate — deterministic; large default OBSERVED), present + health under FORCE (two windows, one connection, full + partial damage frames, interleaved, connection healthy after every one), the downgrade leg (poisoned present #2 salvaged, permanent, frames keep flowing), the self-check REAL-failure leg (per-connection refusal, one warning per connection, the FRESH-connection FORCE override, the reset seam). Client-side pixel fidelity pinned by the self-check itself; compositor-side has no XGetImage equivalent a client may call — pinned by the sway rig's screenshot smoke (byte-exact probes through grim, passed) + the desktop sign-off recipe (TESTING-ON-DESKTOP.md). Real hardware GPUs: implemented — should work (untested on real hardware; the rig exercises it through Mesa's swrast/WL-SHM EGL path under FDK_GL_FORCE) | — |
-| D-2 | subsurfaces | **DEFERRED** | by scope discipline | — |
+| D-2 | subsurfaces | **DONE** (2026-10-30) | fdk_ext_subsurface_create/_ex + set_position/resize/set_desync/place_above/place_below (extension API v2, 855 exports, +7): X11 — real child windows (server-clipped, XConfigureWindow sibling restack, XTEST-routed input, XDND aware, themed pre-paint background, the creation XSync barrier); Wayland — wl_subsurface DESYNC by default, the ext-adopt field set + output-enter scale tracking + fractional preference, configured from birth (no handshake exists). THE protocol lesson (D-029): position/stacking/tree-membership are PARENT-managed state — a desync child of a quiet parent is invisible (sway never answers its frame callback; the rig caught it in the first run); FDK issues the applying EMPTY ancestor commit (gated on configured) at create/set_position/place so moves are immediate on both backends. Keyboard follows the parent's focus, pointer routes to the child (child-local coords, both backends by construction); popups on subsurfaces: X11 yes, Wayland the loud UNSUPPORTED (xdg_popup's parent rule); nesting legal on both, sweep depth-first; resize dispatches CONFIGURE (client owns the size). Tests: the X11 leg (second-connection window-tree truth, pixel readback over-parent, real XTEST click, the counting error fence around both sweep orders) + the sway section (injected clicks, hit-testing-proven move/resize/stacking-flip, grim+PIL desync pixel proof) | — |
 | D-3 | tablets / stylus | **DEFERRED** | by scope discipline | — |
 | D-4 | foreign-toplevel | **DEFERRED** | by scope discipline | — |
 | D-5 | xdg session save/restore | **DEFERRED** | by scope discipline | — |
@@ -460,7 +484,7 @@ has an API surface, tests, and docs in the tree):
 | B-13 | **Drag icons + widget-level drop targets** — DnD is window-level (apps hit-test); no drag icon on either backend. | **DONE** [VERIFIED-CHANGED: S-9 shipped both halves — see the B-13 verified-status row] | usable but visibly rough; file managers do manual hit-testing today | S (icon) / M (targets) | none |
 | B-14 | **Image formats** — stb_image decode (JPEG/PNG/BMP/TGA/PSD/GIF-static/HDR/PIC/PNM) + PNG encode + nanosvg. No animated GIF/WebP/APNG/AVIF; SVG without filters/masks/text. | partial | static raster + SVG solid; animated content missing | S–M | none **[DONE 2026-10-29 — animated GIF shipped (C-4, D-019); WebP/APNG fenced as future families; SVG filters/masks/text unchanged]** |
 | B-15 | **GPU rendering on Wayland** — CPU SHM only; the GL lane is X11/GLX. | **DONE** [VERIFIED-CHANGED: D-1 shipped the EGL present lane (2026-10-30) — see the D-1 register row for the full account] | Wayland renders software (the toolkit's design center; the GL lane was an X11 perf answer) | L | none |
-| B-16 | **Subsurfaces** — no wl_subsurface; no X11 child-window compositing. | missing | video-in-UI, offscreen compositing overlays | M | none — would ride extension API v2 |
+| B-16 | **Subsurfaces** — no wl_subsurface; no X11 child-window compositing. | **DONE** [VERIFIED-CHANGED: D-2 shipped both halves (2026-10-30) — see the B-16 verified-status row] | video-in-UI, offscreen compositing overlays | M | none — rides extension API v2 (shipped: FDK_EXT_API_VERSION 2, +7 exports) |
 | B-17 | **Tablets / stylus / gestures** — no zwp_tablet, no pinch/swipe anywhere. | **DONE (gestures)** [VERIFIED-CHANGED: C-6 shipped pinch+swipe on the touch engine — see the B-17 verified-status row; tablets/stylus remain D-3 by scope discipline] | drawing tablets dead; pinch-zoom absent | M–L | none |
 | B-18 | **Widget-set residue** — no date/time picker, no editable combo; everything else on the GTK4 checklist has an FDK counterpart (menus, lists, trees, tables via grid/tree, text editing with selection and undo, tooltips, pickers, scroll views, tabs). | partial | small, visible gaps | S each | none **[DONE 2026-10-29 — see the B-18 verified-status row; S-10]** |
 | B-19 | **Session restore protocols** — prefs cover app state; no xdg_session/WM_SAVE_YOURSELF. | partial | niche on the Linux desktop today | M | none |
@@ -522,7 +546,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | # | item | gaps closed |
 |---|------|-------------|
 | D-1 | **EGL/GPU lane on Wayland** (SHIPPED 2026-10-30 — the full account is the D-1 verified-status row) | B-15 |
-| D-2 | Subsurfaces (needs extension API v2 parent-surface kinds) | B-16 |
+| ~~D-2~~ | Subsurfaces (needs extension API v2 parent-surface kinds) — **SHIPPED 2026-10-30 as the v2 subsurface API** | B-16 |
 | D-3 | Tablets / stylus | B-17 |
 | D-4 | foreign-toplevel management | — |
 | D-5 | xdg session save/restore protocols | B-19 |

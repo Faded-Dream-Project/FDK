@@ -744,6 +744,68 @@ typedef struct fdk_platform_ops {
     void (*ext_surface_resized)(fdk_platform_window *pwindow,
                                 fdk_i32 width, fdk_i32 height);
 
+    /* ---- OPTIONAL subsurface operations (1.1.0, D-2) ---------------
+     *
+     * The machinery behind fdk_ext_subsurface_create() (see
+     * fdk_extend.h's Subsurfaces section): an FDK-OWNED child
+     * surface of an existing platform window. The create op builds
+     * the native child itself — X11: a child Window parented to the
+     * parent's X window (clipped to it, stacked within it, input
+     * events routed through the same XID registry); Wayland: a
+     * fresh wl_surface given a wl_subsurface role against the
+     * parent's surface, created DESYNC (independent commits), with
+     * position set — and registers it in the window table so seat
+     * routing, the render slots, and present all treat it like any
+     * other surface. last_size is the CLIENT-chosen logical size
+     * (there is no configure handshake); `configured` starts 1 on
+     * Wayland (nothing to wait for before the first present).
+     *
+     * The window layer (extend.c) owns the parent/child linkage and
+     * the destroy sweep; these ops only build/mutate the native
+     * child. Returns FDK_ERR_INVALID_ARGUMENT for a NULL parent,
+     * FDK_ERR_UNSUPPORTED when the backend/connection cannot (no
+     * wl_subcompositor), FDK_ERR_WINDOW_CREATE on native failure. */
+    fdk_result (*subsurface_create)(fdk_platform_connection *conn,
+                                    fdk_platform_window *parent,
+                                    fdk_i32 x, fdk_i32 y,
+                                    fdk_i32 width, fdk_i32 height,
+                                    fdk_platform_window **out_pwindow);
+
+    /* OPTIONAL (1.1.0, D-2): move the child to parent-relative
+     * LOGICAL (x, y) — negative legal. X11 applies it server-side
+     * now; Wayland applies the parent-managed tree state itself (an
+     * empty commit on the topmost configured ancestor — the
+     * protocol's position rule, made immediate; see wayland_ext.c's
+     * subsurface_apply_tree_state). NULL op = no position mutation
+     * (the surface layer answers UNSUPPORTED). */
+    void (*subsurface_set_position)(fdk_platform_window *pwindow,
+                                    fdk_i32 x, fdk_i32 y);
+
+    /* OPTIONAL (1.1.0, D-2): change the child's logical size. X11
+     * resizes the child window now (next framebuffer acquisition
+     * follows); Wayland records it for the next present's buffer. */
+    void (*subsurface_resize)(fdk_platform_window *pwindow,
+                              fdk_i32 width, fdk_i32 height);
+
+    /* OPTIONAL (1.1.0, D-2): the child's commit mode — nonzero
+     * desync (independent updates; the create-time default), 0
+     * sync (updates apply with the parent's commit). X11 has no
+     * commit transaction: the op exists there as the documented
+     * no-op so the capability probe stays uniform. */
+    void (*subsurface_set_desync)(fdk_platform_window *pwindow,
+                                  int desync);
+
+    /* OPTIONAL (1.1.0, D-2): restack the child immediately above
+     * (above != 0) or below the sibling — the window layer already
+     * validated both are subsurfaces of the SAME parent. X11:
+     * XConfigureWindow with CWSibling/CWStackMode; Wayland:
+     * wl_subsurface place_above/place_below + the applying ancestor
+     * commit (stacking is parent-managed state like position).
+     * Returns FDK_ERR_* on native failure. */
+    fdk_result (*subsurface_place)(fdk_platform_window *pwindow,
+                                   fdk_platform_window *sibling,
+                                   int above);
+
     /* OPTIONAL (1.1.0): the backend's native display connection
      * handle, borrowed for the connection's lifetime — the
      * documented accessor behind fdk_ext_get_native_display()

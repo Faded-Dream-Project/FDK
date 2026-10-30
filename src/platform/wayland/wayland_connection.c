@@ -157,6 +157,18 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->idle_inhibit_manager =
             wl_registry_bind(registry, name,
                              &zwp_idle_inhibit_manager_v1_interface, 1);
+    } else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
+        /* OPTIONAL (1.1.0, D-2): wl_subcompositor — the subsurface
+         * factory, CORE protocol (ships with libwayland itself, no
+         * generated code needed) but still a per-compositor global.
+         * Every compositor that offers wl_compositor offers this one
+         * too; absent (never seen in practice) means
+         * fdk_ext_subsurface_create answers FDK_ERR_UNSUPPORTED.
+         * Version 1 is the whole protocol. */
+        uint32_t subv = version < 1 ? version : 1;
+        conn->subcompositor =
+            wl_registry_bind(registry, name, &wl_subcompositor_interface,
+                             subv);
     } else if (strcmp(interface,
                       xdg_activation_v1_interface.name) == 0) {
         /* OPTIONAL (1.1.0, S-6): xdg-activation — the
@@ -354,6 +366,9 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
         if (conn->wm_base) xdg_wm_base_destroy(conn->wm_base);
         if (conn->seat) wl_seat_destroy(conn->seat);
         if (conn->shm) wl_shm_destroy(conn->shm);
+        if (conn->subcompositor) {
+            wl_subcompositor_destroy(conn->subcompositor);
+        }
         if (conn->compositor) wl_compositor_destroy(conn->compositor);
         wl_registry_destroy(conn->registry);
         wl_event_queue_destroy(conn->release_queue);
@@ -460,6 +475,9 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     fdk_wayland_destroy_outputs(conn);
     if (conn->wm_base) xdg_wm_base_destroy(conn->wm_base);
     if (conn->shm) wl_shm_destroy(conn->shm);
+    if (conn->subcompositor) {
+        wl_subcompositor_destroy(conn->subcompositor);
+    }
     if (conn->compositor) wl_compositor_destroy(conn->compositor);
     if (conn->registry) wl_registry_destroy(conn->registry);
 

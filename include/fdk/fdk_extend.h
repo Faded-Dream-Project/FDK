@@ -70,16 +70,19 @@ extern "C" {
  * against and refuses to run against an older FDK — the compile-time
  * and run-time pair:
  *
- *     #if !defined(FDK_EXT_API_VERSION) || FDK_EXT_API_VERSION < 1
- *     #error "this add-on needs FDK's extension API v1 (FDK 1.1.0)"
+ *     #if !defined(FDK_EXT_API_VERSION) || FDK_EXT_API_VERSION < 2
+ *     #error "this add-on needs FDK's extension API v2 (FDK 1.1.0)"
  *     #endif
  *     ...
- *     if (fdk_ext_api_version() < 1) { ...refuse to run... }
+ *     if (fdk_ext_api_version() < 2) { ...refuse to run... }
  *
  * A newer FDK keeps old add-ons working: the runtime number only
- * grows.
+ * grows. Version history: v1 (FDK 1.1.0-rc1) — kinds, surfaces,
+ * popups, fd sources; v2 (FDK 1.1.0, D-2) — subsurfaces: the
+ * FDK-owned child-surface primitive and its position/stacking/mode
+ * operations (see the Subsurfaces section below).
  */
-#define FDK_EXT_API_VERSION 1
+#define FDK_EXT_API_VERSION 2
 
 /* Returns the RUNTIME extension-API version of the loaded FDK
  * library (>= 1). Add-ons call this once at startup and compare
@@ -451,6 +454,144 @@ void fdk_ext_surface_set_event_callback(fdk_ext_surface *surface,
 fdk_result fdk_ext_popup_create(fdk_ext_surface *parent, fdk_i32 x,
                                 fdk_i32 y, fdk_i32 width, fdk_i32 height,
                                 fdk_ext_surface **out_surface);
+
+/* ---- Subsurfaces (extension API v2, FDK 1.1.0 D-2) -----------------------
+ *
+ * An FDK-OWNED CHILD SURFACE of an existing window or extension
+ * surface: a rectangular region of the parent that renders, moves,
+ * and receives pointer events on its own — the video-in-UI and
+ * offscreen-overlay primitive GTK4 calls a subsurface and X11 calls
+ * a child window. Unlike a kind surface, no add-on callback builds
+ * the native object: FDK creates it (X11: a real child Window of the
+ * parent, clipped to it and stacked within it; Wayland: a
+ * wl_subsurface role on a fresh wl_surface), and the returned
+ * handle behaves like any other extension surface — render through
+ * fdk_ext_surface_get_surface, events through
+ * fdk_ext_surface_set_event_callback, destroy with
+ * fdk_ext_surface_destroy.
+ *
+ * What lands where, per backend, by construction:
+ *   - Rendering: the ordinary fdk_surface path on both (identical
+ *     pixels; the region composites OVER the parent's own pixels —
+ *     a child can never render UNDER the parent's content on X11,
+ *     and the API exposes only that same top-of-parent stacking).
+ *   - Pointer events: they route to the child wherever it is the
+ *     topmost surface (both backends); coordinates are child-local,
+ *     exactly like a window's.
+ *   - Keyboard events: they follow the PARENT's focus (the
+ *     toplevel on Wayland; the focused top-level on X11) — a child
+ *     is an input region, not a focus target. Deliver keys from the
+ *     parent's callback.
+ *   - Sizing and position: the CLIENT owns both (there is no
+ *     configure handshake — nothing assigns a subsurface its size).
+ *     Set them at create, then fdk_ext_subsurface_set_position /
+ *     fdk_ext_subsurface_resize any time.
+ *
+ * The commit-mode contract (the one real Wayland/X11 delta): a
+ * Wayland subsurface's BUFFER updates either ride the PARENT's next
+ * commit (sync mode — the protocol default) or apply on the child's
+ * own presents (desync). FDK creates subsurfaces in DESYNC mode —
+ * an independently-updating region is the feature's point, and a
+ * sync-mode child of a quiet parent would never show a frame.
+ * fdk_ext_subsurface_set_desync() switches either way when a parent
+ * -locked update discipline is wanted. X11 child windows update on
+ * their own always (there is no commit transaction); the call is a
+ * harmless no-op there and returns FDK_OK — a mode hint, never an
+ * error, the same contract fdk_ext_surface_set_cursor carries.
+ *
+ * One Wayland protocol truth worth knowing (it bit the first
+ * implementation, found live against sway): a subsurface's POSITION,
+ * stacking, and very presence in the parent's surface tree are
+ * PARENT-managed state — applied only when the parent's state is
+ * applied, whatever the child's mode. FDK hides this: every
+ * create/set_position/place call also issues an EMPTY commit on the
+ * topmost configured ancestor (an attach-less commit — pure state
+ * application, invisible to the app's frame pacing), so the move
+ * takes effect immediately exactly like X11's. An ancestor still in
+ * its role handshake (an unconfigured layer surface) is left alone —
+ * its own handshake commit carries the child in.
+ *
+ * Popups ON a subsurface: X11 parents them naturally (any window
+ * can anchor a popup); Wayland REFUSES (FDK_ERR_UNSUPPORTED) — the
+ * xdg_popup protocol requires a toplevel/popup/role parent, and a
+ * wl_subsurface is none of those. Anchor menus on the parent
+ * window or a kind surface instead; the failure is loud and early.
+ *
+ * Lifetime: a subsurface must not outlive its parent — destroying
+ * the parent sweeps its subsurfaces first (the popup contract,
+ * verbatim). After that sweep the child handle is dangling; keep
+ * the same discipline popups demand (destroy children first when
+ * you want their destroy callbacks to run).
+ *
+ * Can fail with:
+ *   FDK_ERR_INVALID_ARGUMENT - parent/out NULL, or width/height <= 0
+ *   FDK_ERR_NOT_INITIALIZED  - parent's context has no connection
+ *   FDK_ERR_OUT_OF_MEMORY
+ *   FDK_ERR_UNSUPPORTED      - backend lacks the op, or the Wayland
+ *                              compositor offers no wl_subcompositor
+ *   FDK_ERR_WINDOW_CREATE    - the platform refused the child
+ */
+fdk_result fdk_ext_subsurface_create(fdk_window *parent, fdk_i32 x,
+                                     fdk_i32 y, fdk_i32 width,
+                                     fdk_i32 height,
+                                     fdk_ext_surface **out_surface);
+
+/* The same primitive parented to an EXTENSION surface (an add-on's
+ * role surface — a layer shell bar carrying an inset video region,
+ * an overlay on a notification card). Both kind surfaces and FDK-
+ * owned ones (popups, other subsurfaces — nesting is legal on both
+ * backends: the protocol nests Wayland subsurfaces freely, and X11
+ * child windows compose naturally) may parent; the parent sweep is
+ * depth-first through the same child lists. Identical failure codes
+ * to fdk_ext_subsurface_create.
+ */
+fdk_result fdk_ext_subsurface_create_ex(fdk_ext_surface *parent,
+                                        fdk_i32 x, fdk_i32 y,
+                                        fdk_i32 width, fdk_i32 height,
+                                        fdk_ext_surface **out_surface);
+
+/* Moves the child to (x, y) — parent-relative LOGICAL coordinates
+ * (the same space the create call used; negative values are legal,
+ * the region hangs off the parent's edge). IMMEDIATE on both
+ * backends: X11 moves the child window now; Wayland applies the
+ * protocol's parent-managed state by issuing the applying commit
+ * itself (see the section note above — the position never waits for
+ * the parent's next present). FDK_ERR_INVALID_ARGUMENT on a
+ * NULL/non-subsurface surface, FDK_ERR_UNSUPPORTED with no backend
+ * op. */
+fdk_result fdk_ext_subsurface_set_position(fdk_ext_surface *surface,
+                                           fdk_i32 x, fdk_i32 y);
+
+/* Resizes the child (positive w/h required). X11 resizes the child
+ * window now and the next framebuffer acquisition follows; Wayland
+ * records the size and the next present commits a buffer of it. An
+ * FDK_EVENT_WINDOW_CONFIGURE is dispatched to the child's callback
+ * on both (the repaint obligation the event carries applies).
+ * Failure codes as above. */
+fdk_result fdk_ext_subsurface_resize(fdk_ext_surface *surface,
+                                     fdk_i32 width, fdk_i32 height);
+
+/* Selects the child's commit mode: nonzero = desync (independent
+ * updates; the create-time default), 0 = sync (updates apply with
+ * the parent's next commit). X11: documented no-op, FDK_OK. */
+fdk_result fdk_ext_subsurface_set_desync(fdk_ext_surface *surface,
+                                         int desync);
+
+/* Restacks the child immediately ABOVE the sibling — both must be
+ * subsurfaces of the SAME parent (mixed parents fail
+ * FDK_ERR_INVALID_ARGUMENT; a non-subsurface argument fails
+ * FDK_ERR_INVALID_STATE). IMMEDIATE on both backends (Wayland: the
+ * applying ancestor commit, as set_position). Relative-to-PARENT
+ * stacking is deliberately not exposed: an X11 child always renders
+ * over the parent's own pixels, and the API keeps one cross-backend
+ * truth instead of a Wayland-only under-parent mode.
+ * FDK_ERR_UNSUPPORTED with no backend op. */
+fdk_result fdk_ext_subsurface_place_above(fdk_ext_surface *surface,
+                                          fdk_ext_surface *sibling);
+
+/* The mirror: BELOW the sibling. Same validation, same failures. */
+fdk_result fdk_ext_subsurface_place_below(fdk_ext_surface *surface,
+                                          fdk_ext_surface *sibling);
 
 /* ---- Event-loop file-descriptor sources ----------------------------------
  *

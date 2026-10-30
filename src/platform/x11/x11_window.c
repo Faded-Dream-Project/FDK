@@ -27,7 +27,7 @@ static void popup_trace(const char *fmt, ...);
  * (the root default background, fdk_window_get_root) instead of
  * flashing white→dark. Same channel packing the renderer assumes
  * everywhere (R<<16 | G<<8 | B — the visual FDK requires). */
-static unsigned long x11_theme_window_pixel(void) {
+unsigned long fdk_x11_theme_window_pixel(void) {
     fdk_color c = fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
     unsigned long r = (unsigned long)(c.r * 255.0f + 0.5f);
     unsigned long g = (unsigned long)(c.g * 255.0f + 0.5f);
@@ -117,7 +117,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     }
 
     unsigned long black = BlackPixel(conn->display, conn->screen);
-    unsigned long bg_pixel = x11_theme_window_pixel();
+    unsigned long bg_pixel = fdk_x11_theme_window_pixel();
 
     /* Popups (Phase 9): override-redirect children positioned at the
      * parent's client-area origin + (x, y) in ROOT coordinates —

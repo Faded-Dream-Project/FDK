@@ -826,6 +826,10 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->popup_first = NULL;
     window->popup_prev = NULL;
     window->popup_next = NULL;
+    window->sub_parent = NULL; /* 1.1.0 D-2: linked by extend.c at   */
+    window->sub_first = NULL;  /* subsurface create; swept at destroy */
+    window->sub_prev = NULL;
+    window->sub_next = NULL;
     window->decorated = false;
     window->deco_bar = NULL;
     window->deco_title = NULL;
@@ -867,6 +871,10 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->popup_button_ms = 0;
     window->popup_close_reason = FDK_POPUP_CLOSE_NONE;
     window->is_popup = (options != NULL && options->popup != 0);
+    window->is_subsurface = false; /* 1.1.0 D-2: set by extend.c's
+                                      subsurface create (options never
+                                      carry it — the public options
+                                      struct is ABI-frozen) */
     window->ext = NULL;
     window->shortcuts = NULL;
     window->shortcut_count = 0;
@@ -990,6 +998,28 @@ void fdk_window_destroy(fdk_window *window) {
      * NOT destroy this window again (it is already dying). */
     if (window->destroy_notify != NULL) {
         window->destroy_notify(window, window->destroy_notify_user);
+    }
+    /* Subsurface children FIRST (1.1.0, D-2), then popups — both
+     * "must not outlive their parent", both swept deepest-first via
+     * recursion (each child's own sweep runs inside its destroy).
+     * Subs before popups: on Wayland a live wl_subsurface must die
+     * before the parent's wl_surface_destroy (the parent's backend
+     * destroy runs at this function's tail, after both sweeps), and
+     * on X11 the explicit child destroys must beat the server's own
+     * subtree teardown so no request references a dead window. */
+    while (window->sub_first != NULL) {
+        fdk_window_destroy(window->sub_first);
+    }
+    /* Unlink from OUR subsurface parent (if we are somebody's child). */
+    if (window->sub_parent != NULL) {
+        if (window->sub_prev != NULL) {
+            window->sub_prev->sub_next = window->sub_next;
+        } else {
+            window->sub_parent->sub_first = window->sub_next;
+        }
+        if (window->sub_next != NULL) {
+            window->sub_next->sub_prev = window->sub_prev;
+        }
     }
     /* Popups must not outlive their parent (fdk_window.h): sweep
      * them first, deepest-first via recursion (each popup's own

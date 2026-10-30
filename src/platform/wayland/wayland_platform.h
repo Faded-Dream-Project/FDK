@@ -143,6 +143,14 @@ struct fdk_platform_connection {
     struct wl_seat *seat;
     struct xdg_wm_base *wm_base;
 
+    /* OPTIONAL global (1.1.0, D-2): wl_subcompositor — the factory
+     * for wl_subsurface roles (CORE protocol, but a compositor
+     * still has to advertise the global). Mandatory in practice
+     * (every compositor that offers wl_compositor offers this too);
+     * absent means fdk_ext_subsurface_create answers
+     * FDK_ERR_UNSUPPORTED — the honest refusal, never a fake. */
+    struct wl_subcompositor *subcompositor;
+
     /* OPTIONAL global (Phase 8): zxdg_decoration_manager_v1 — absent
      * means the compositor offers no xdg-decoration protocol, and
      * fdk_window_set_decorated() then honestly returns
@@ -482,6 +490,19 @@ struct fdk_platform_window {
     int ext;
     int popup;                    /* Phase 9: xdg_popup window      */
     struct xdg_popup *xdg_popup;  /* set when popup                */
+    /* Subsurface role (1.1.0, D-2 / B-16): set when this wrapper
+     * carries an FDK-CREATED child surface (wayland_ext.c's
+     * subsurface_create) — the wl_subsurface proxy that owns the
+     * parent/child relationship. The role must die BEFORE the
+     * wl_surface (destroy order in window_destroy); position/stack
+     * /mode requests ride it. `is_subsurface` (the flag) gates the
+     * ext-surface ops that assume a ROLE-FREE surface and the
+     * popup-parent refusal (xdg_popup cannot anchor to a
+     * wl_subsurface). `sub_parent` links the child to its parent
+     * wrapper — the ancestor walk that applies tree state. */
+    struct wl_subsurface *subsurface;
+    struct fdk_platform_window *sub_parent;
+    int is_subsurface;            /* 1.1.0 D-2: FDK-owned child    */
     /* Input-transparent popup (1.3.2, tooltips): set at CREATE from
      * fdk_window_options.input_transparent — empty input region on
      * the surface before the first commit, and NO xdg_popup.grab:
@@ -798,6 +819,27 @@ void fdk_wayland_ext_surface_resized(fdk_platform_window *pwindow,
  * Returns 1 when a frame was committed. Defined in wayland_window.c. */
 int fdk__wayland_commit_deferred_first_frame(
     fdk_platform_window *pwindow);
+
+/* Subsurfaces (1.1.0, D-2 / B-16) — wayland_ext.c. The FDK-owned
+ * wl_subsurface child behind fdk_ext_subsurface_create: a fresh
+ * wl_surface given the subsurface role against the parent's surface,
+ * DESYNC by default (independent commits — the feature's point),
+ * positioned in parent SURFACE-LOCAL (= FDK logical) coordinates,
+ * `configured` from the start (no handshake exists to wait for).
+ * See platform_internal.h's subsurface op block. */
+fdk_result fdk_wayland_subsurface_create(
+    fdk_platform_connection *conn, fdk_platform_window *parent,
+    fdk_i32 x, fdk_i32 y, fdk_i32 width, fdk_i32 height,
+    fdk_platform_window **out_pwindow);
+void fdk_wayland_subsurface_set_position(fdk_platform_window *pwindow,
+                                         fdk_i32 x, fdk_i32 y);
+void fdk_wayland_subsurface_resize(fdk_platform_window *pwindow,
+                                   fdk_i32 width, fdk_i32 height);
+void fdk_wayland_subsurface_set_desync(fdk_platform_window *pwindow,
+                                       int desync);
+fdk_result fdk_wayland_subsurface_place(fdk_platform_window *pwindow,
+                                        fdk_platform_window *sibling,
+                                        int above);
 
 /* Shared wl_surface/fractional-scale listeners (defined in
  * wayland_window.c, non-static since 1.1.0): the adoption path
