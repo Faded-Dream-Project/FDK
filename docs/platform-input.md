@@ -326,3 +326,66 @@ headless against the engine itself (tests/test_touch.c: tap, slop,
 timeout, drag, natural deltas, re-arm, phantom-tap latch, cancel,
 protocol noise). Real touch HARDWARE remains the owner's desktop
 check (TESTING-ON-DESKTOP.md).
+
+## Tablet / stylus input (1.1.0, D-3 / B-17)
+
+Drawing-tablet input is a first-class event family, the touch
+model's sibling: `FDK_EVENT_TABLET_PROXIMITY_IN/OUT` announce a
+tool entering or leaving sensing range (carrying the tool's
+identity — type, and an opaque per-tool id that distinguishes
+simultaneous tools), `FDK_EVENT_TABLET_DOWN/MOTION/UP` carry the
+tip's window-local position with PRESSURE (normalized 0..1) and
+TILT (degrees), and `FDK_EVENT_TABLET_BUTTON` reports the tool's
+side buttons (the TIP itself is DOWN/UP, never a BUTTON; the
+high bit of `button` marks the release). There is NO synthesis
+layer — a stylus event is never turned into a pointer click; a
+drawing application consumes these directly, and a plain widget
+application simply never sees them.
+
+Per backend:
+
+- **Wayland**: the zwp_tablet_v2 family — the manager bound when
+  the compositor offers it (absent = no tablet events, never an
+  error), the per-seat tablet seat, and the TOOL event stream
+  (proximity, down/up, motion with pressure, tilt, buttons).
+  The protocol's frame batching is absorbed: motion/pressure/
+  tilt/down/up ride the record until the FRAME commits them, so
+  one compositor frame = one FDK event, exactly like the wire
+  batches. Tablets (the slabs) and pads (the button strips) are
+  protocol-tracked but inert — no fdk_event carries pad state
+  (pad programmability is the D-030 honest gap, not a half-API).
+  PROXIMITY_OUT carries zeros (the protocol names no surface and
+  no coordinates on leave — the record's window is the target).
+- **X11**: there is no tablet protocol — stylus input arrives as
+  ordinary XI2 motion/button events from the master pointer,
+  CARRYING the tablet slave's valuator state (pressure, tilt).
+  At XI2 load FDK scans the device list (XIQueryDevice through
+  dlopen'd libXi) for slaves with a pressure axis (label-matched
+  against "Abs Pressure" / "Abs Tilt X" / "Abs Tilt Y", with
+  positional fallbacks for unlabeled drivers), and translates
+  motion/button events whose sourceid is such a device: motion
+  with pressure+tilt, button 1 (the driver-mapped TIP) as
+  DOWN/UP, buttons 2+ as BUTTON. Pressure normalizes through the
+  65535 clamp (raw Wacom units) or passes through when already
+  0..1. Core pointer events are NOT suppressed by any of this —
+  a stylus-as-pointer moves the cursor AND streams tablet events;
+  apps pick the stream to consume (X11's own model).
+  **PROXIMITY is the honest platform gap**: XI2 has no proximity
+  events for clients (X Input 1.x's ProximityIn/Out never crossed
+  into XI2), so FDK synthesizes PROXIMITY_IN before a tablet's
+  first event of a session and delivers no OUT — the tool simply
+  goes silent on X11 (D-030 records it; apps treat "the events
+  stopped" as the session end).
+
+Testing (the reachability problem, the touch discipline again):
+no rig can mint a tablet — sway headless binds the manager (and
+wlroots implements the whole family) but no virtual-tablet
+protocol exists, and Xvfb has no tablet device while XTEST cannot
+fake valuator state. So both suites drive the REAL translation
+bodies through the test seams (fdk_wayland_test_tablet /
+fdk_x11_xi2_test_tablet — the listener bodies, plain arguments),
+and the live halves prove what a rig can: the manager bind +
+tablet seat creation survive under sway, the device scan runs
+against a real X server (Xvfb's answer: no tablets, the honest
+no-op posture). Real hardware status: implemented — should work
+(untested on real hardware).

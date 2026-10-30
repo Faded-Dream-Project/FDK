@@ -708,3 +708,46 @@ X11):
   window.
 - Tearing the window down (or the app quitting) with the sub alive
   is clean — no protocol errors on either backend (the sweep).
+
+## 21. Your drawing tablet (D-3 / B-17 — needs your pen)
+
+What the rigs proved: both translation layers end to end through
+the test seams (no rig can mint a tablet — sway headless binds the
+zwp_tablet_v2 manager but wlroots has no virtual-tablet protocol;
+Xvfb has no tablet device and XTEST cannot fake valuator state) —
+the full event alphabet, the Wayland frame batching, distinct
+simultaneous tool ids, the pressure normalization. What only your
+hardware shows is a real driver's stream.
+
+The API is event-only (no example yet), so the fastest sign-off is
+a callback on any example's window:
+
+```c
+static void evt(fdk_window *w, const fdk_event_data *e, void *u) {
+    if (e->type == FDK_EVENT_TABLET_PROXIMITY_IN)
+        printf("pen in (type %u)\n", e->tablet.tool_type);
+    if (e->type == FDK_EVENT_TABLET_MOTION)
+        printf("%.0f,%.0f  pressure %.2f  tilt %.0f/%.0f\n",
+               e->tablet.position.x, e->tablet.position.y,
+               e->tablet.pressure, e->tablet.tilt_x, e->tablet.tilt_y);
+    if (e->type == FDK_EVENT_TABLET_DOWN) printf("tip down\n");
+    if (e->type == FDK_EVENT_TABLET_UP)   printf("tip up\n");
+}
+fdk_window_set_event_callback(win, evt, NULL);
+```
+
+Expectations (Wayland: labwc, sway, KDE, GNOME; X11: any WM):
+
+- Hovering the pen over the tablet fires PROXIMITY_IN, then
+  MOTION streams while the pen is in range — with pressure rising
+  from 0 as you press, tilt following the pen's lean.
+- Tip contact fires DOWN, lift fires UP (at the last position);
+  the side buttons fire BUTTON with the release marked by the high
+  bit. A second tool (the eraser end) carries a different tool id
+  and tool_type.
+- Pressure reads 0..1 (drivers reporting raw 0..65535 units are
+  normalized). If pressure looks stuck at 0 or 1, that is a bug
+  worth reporting — include the backend and driver.
+- On X11 there is no PROXIMITY_OUT (the X Input protocol has no
+  proximity for XI2 clients — the events simply stop when the pen
+  leaves range). On Wayland PROXIMITY_OUT arrives with zeros.

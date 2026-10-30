@@ -10,6 +10,7 @@
 #include "generated/text-input-unstable-v3-client-protocol.h"
 #include "generated/idle-inhibit-unstable-v1-client-protocol.h"
 #include "generated/xdg-activation-v1-client-protocol.h"
+#include "generated/tablet-unstable-v2-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -157,6 +158,21 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->idle_inhibit_manager =
             wl_registry_bind(registry, name,
                              &zwp_idle_inhibit_manager_v1_interface, 1);
+    } else if (strcmp(interface,
+                      zwp_tablet_manager_v2_interface.name) == 0) {
+        /* OPTIONAL (1.1.0, D-3): the tablet family's factory — the
+         * manager is the bind point; the per-seat tablet seat (and
+         * with it every tool stream) materializes once the SEAT also
+         * exists (fdk_wayland_tablet_seat_ready, called from the
+         * seat's own bind and its capabilities round). Absent
+         * manager (GNOME before 42-class compositors, kiosk shells)
+         * means no tablet events — never an error. Version 1 is the
+         * whole protocol. */
+        uint32_t tv = version < 1 ? version : 1;
+        conn->tablet_manager =
+            wl_registry_bind(registry, name,
+                             &zwp_tablet_manager_v2_interface, tv);
+        fdk_wayland_tablet_seat_ready(conn);
     } else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
         /* OPTIONAL (1.1.0, D-2): wl_subcompositor — the subsurface
          * factory, CORE protocol (ships with libwayland itself, no
@@ -463,6 +479,13 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     if (conn->activation != NULL) {
         xdg_activation_v1_destroy(conn->activation);
         conn->activation = NULL;
+    }
+    /* Tablets (1.1.0, D-3): the tool records + the tablet seat die
+     * with the connection; the manager proxy below. Idempotent. */
+    fdk_wayland_tablet_shutdown(conn);
+    if (conn->tablet_manager != NULL) {
+        zwp_tablet_manager_v2_destroy(conn->tablet_manager);
+        conn->tablet_manager = NULL;
     }
     fdk_free(conn->launch_token);
     conn->launch_token = NULL;

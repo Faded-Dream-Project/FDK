@@ -327,6 +327,17 @@ struct fdk_platform_connection {
     struct wl_pointer *pointer;
     struct wl_touch *touch; /* M-3: wl_touch, direct contact slots */
 
+    /* --- Tablets / stylus (1.1.0, D-3, wayland_tablet.c) -----------
+     *
+     * The zwp_tablet_v2 family: the manager (optional global), the
+     * per-seat tablet seat, and the tool records. Tools are tracked
+     * (not tablets/pads — no fdk_event needs the slabs, and pad
+     * programmability is the D-030 honest gap). The pending_* flags
+     * are the protocol's frame batching: down/up/motion/pressure/
+     * tilt arrive as individual events, the FRAME commits them. */
+    struct zwp_tablet_manager_v2 *tablet_manager;
+    struct zwp_tablet_seat_v2 *tablet_seat;
+
     /* wl_touch slot routing (M-3): DOWN carries the surface; UP and
      * MOTION carry only the id — this table maps id → the window
      * the contact went down on, so the whole contact's events land
@@ -340,6 +351,33 @@ struct fdk_platform_connection {
         uint32_t id;
         fdk_platform_window *win;
     } touch_ids[FDK_WL_TOUCH_IDS];
+
+    /* --- Tablet tool table (1.1.0, D-3) -----------------------------
+     *
+     * Bounded like the touch id table; the FDK `tool` id handed to
+     * applications is the slot index + 1. proxy == NULL && id != 0
+     * marks the TEST SEAM's record (no compositor proxy behind it). */
+#define FDK_WL_TABLET_TOOLS 8
+    struct fdk_wl_tablet_tool {
+        struct zwp_tablet_tool_v2 *proxy;
+        fdk_u32 id;
+        fdk_u32 type; /* fdk_tablet_tool_type (the `type` event) */
+        fdk_platform_window *prox;
+        fdk_pointf last;
+        float pressure;
+        float tilt_x;
+        float tilt_y;
+    } tablet_tools[FDK_WL_TABLET_TOOLS];
+    int tablet_pending_down;   /* frame-batched tip transitions     */
+    int tablet_pending_up;
+    int tablet_pending_motion;
+    int tablet_seam_current;   /* the TEST SEAM's active tool slot
+                                 * (-1 = none): the seam mints records
+                                 * without proxies, and this index
+                                 * says which one the event phases
+                                 * target (tests only, but it rides
+                                 * the connection so multiple
+                                 * contexts stay independent). */
 
     /* xkbcommon keymap state, populated from the compositor-supplied
      * keymap (wl_keyboard::keymap event) rather than FDK guessing at
@@ -866,6 +904,19 @@ void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
  * ignored for up/cancel; `win` = the target surface's platform
  * window for the down phase. Returns 1 when a down was deliverable
  * (0 = dropped: unknown surface). */
+/* Tablets / stylus (1.1.0, D-3) — wayland_tablet.c. Manager bind +
+ * the seat-ready tablet seat attach + the shutdown sweep + the test
+ * seam (the touch discipline: the listener bodies driven directly —
+ * wlroots has no virtual-tablet protocol, so the rig cannot mint a
+ * real tool). */
+void fdk_wayland_tablet_seat_ready(fdk_platform_connection *conn);
+void fdk_wayland_tablet_shutdown(fdk_platform_connection *conn);
+int fdk_wayland_test_tablet(fdk_platform_connection *conn,
+                            fdk_platform_window *win, int phase,
+                            uint32_t tool_type, double x, double y,
+                            double pressure, double tilt_x,
+                            double tilt_y, uint32_t button);
+
 int fdk_wayland_test_touch(fdk_platform_connection *conn,
                            fdk_platform_window *win, int phase,
                            uint32_t id, double x, double y);

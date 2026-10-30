@@ -840,6 +840,17 @@ int fdk_x11_xi2_handle_cookie(fdk_platform_connection *conn,
 int fdk_x11_xi2_test_touch(fdk_platform_connection *conn,
                           fdk_platform_window *pwindow, int phase,
                           uint32_t id, double x, double y);
+/* Tablet seam (1.1.0, D-3 — x11_xi2.c): drives the REAL stylus
+ * translation body. phase: 0=proximity_in 1=down 2=motion 3=up
+ * 4=button (button_release for phase 4 only); x/y PHYSICAL
+ * window-local pixels; pressure > 1 normalizes through the 65535
+ * scale (part of what is under test). */
+int fdk_x11_xi2_test_tablet(fdk_platform_connection *conn,
+                            fdk_platform_window *pwindow, int phase,
+                            uint32_t tool_type, double x, double y,
+                            double pressure, double tilt_x,
+                            double tilt_y, uint32_t button,
+                            int button_release);
 
 /* XIM IME (1.1.0, M-1; src/platform/x11/x11_ime.c): the preedit
  * callback machinery behind FDK_EVENT_IME_PREEDIT. attach_cbs builds
@@ -865,13 +876,41 @@ size_t fdk__x11_preedit_apply(char *buf, size_t cap, long chg_first,
  * the 2.2-touch verdict, and the libXi function table). Only the
  * opcode is read outside the module (the dispatch loop's cookie
  * match). */
+/* One detected tablet device (1.1.0, D-3): a slave pointer (or
+ * floating slave) whose valuator classes include a pressure axis.
+ * The axis indices interpret the XIValuatorState that rides events
+ * from this device's sourceid; labels are matched against the
+ * server's axis-label atoms ("Abs Pressure" etc.), with positional
+ * fallbacks for unlabeled drivers. tool_type is the axis-shape
+ * guess (pen unless the name says eraser). */
+#define FDK_X11_TABLETS 8
+struct fdk_x11_tablet {
+    int deviceid; /* the slave's id (events carry it as sourceid) */
+    int pressure_axis;  /* -1 when the device reports none */
+    int tilt_x_axis;    /* -1 = unsupported */
+    int tilt_y_axis;    /* -1 = unsupported */
+    unsigned int tool_type; /* fdk_tablet_tool_type */
+    int in_range; /* synthesized proximity session state           */
+};
+
 struct fdk_x11_xi2 {
     void *lib; /* dlopen handle; pinned for the process lifetime */
     int opcode; /* the X Input extension's major opcode on this server */
     int touch_ok; /* server speaks XI >= 2.2 (touch events exist) */
     int warned_once; /* one INFO line per connection, not per window */
+    /* Tablets (1.1.0, D-3): the detected device table + the axis
+     * label atoms resolved once per connection. */
+    struct fdk_x11_tablet tablets[FDK_X11_TABLETS];
+    int tablet_count;
+    unsigned long atom_pressure; /* None = match by position       */
+    unsigned long atom_tilt_x;
+    unsigned long atom_tilt_y;
     Status (*query_version)(Display *, int *, int *);
     Status (*select_events)(Display *, Window, void *, int);
+    /* XIQueryDevice/XIFreeDeviceInfo (D-3): the tablet scan at load
+     * (and the valuator-class parse). */
+    void *(*query_device)(Display *, int, int *);
+    void (*free_device_info)(void *);
 };
 
 /* Phase 8 state helpers (x11_window.c), shared with x11_events.c's

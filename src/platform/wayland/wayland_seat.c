@@ -829,9 +829,15 @@ void fdk_wayland_bind_seat_listeners(fdk_platform_connection *conn) {
      * registry order is legal) — create the text input now if both
      * halves exist; the manager's own handler calls the same thing. */
     fdk_wayland_ime_seat_ready(conn);
+    /* Tablets (1.1.0, D-3): the same either-order rule — the manager
+     * may have bound before the seat; its handler called this too. */
+    fdk_wayland_tablet_seat_ready(conn);
 }
 
 void fdk_wayland_teardown_seat(fdk_platform_connection *conn) {
+    /* Tablets (1.1.0, D-3): the tablet seat rides the seat — tear it
+     * down with it (wayland_tablet.c's shutdown is idempotent). */
+    fdk_wayland_tablet_shutdown(conn);
     if (conn->cursor_shape_device != NULL) {
         wp_cursor_shape_device_v1_destroy(conn->cursor_shape_device);
         conn->cursor_shape_device = NULL;

@@ -220,6 +220,38 @@ typedef enum fdk_event_type {
      * every change. */
     FDK_EVENT_IME_COMMIT   = 50, /* the IME delivered final text   */
     FDK_EVENT_IME_PREEDIT  = 51, /* composition text changed       */
+
+    /* ---- Tablets / stylus (1.1.0, D-3 / B-17) ----
+     *
+     * Drawing-tablet input as a first-class event family, the touch
+     * model's sibling: PROXIMITY_IN/OUT announce a tool entering or
+     * leaving the tablet's sensing range (carrying the tool's
+     * identity), DOWN/MOTION/UP carry the tip's window-local
+     * position with PRESSURE and TILT, and BUTTON reports the
+     * tool's side buttons (the tip itself is DOWN/UP, never a
+     * BUTTON). One `tool` id distinguishes simultaneous tools
+     * (stable across a proximity session); `tool_type` says what
+     * kind of tip it is. There is NO synthesis layer — a stylus
+     * event is never turned into a pointer click (a drawing
+     * application consumes these directly; a plain widget app
+     * simply never sees them). Both backends translate 1:1; the
+     * payloads arrive as they came, normalized (pressure 0..1,
+     * tilt in degrees, 0 where the backend reports none).
+     *
+     * Wayland: zwp_tablet_v2 through the tablet seat (manager bound
+     * when the compositor offers it; absent manager = no tablet
+     * events, never an error). X11: XI2 device events from the
+     * tablet's slaves (valuator axes for pressure/tilt), through
+     * dlopen'd libXi — the touch lane's load discipline. */
+    FDK_EVENT_TABLET_PROXIMITY_IN  = 52,
+    FDK_EVENT_TABLET_PROXIMITY_OUT = 53,
+    FDK_EVENT_TABLET_DOWN          = 54,
+    FDK_EVENT_TABLET_MOTION        = 55,
+    FDK_EVENT_TABLET_UP            = 56,
+    FDK_EVENT_TABLET_BUTTON        = 57, /* button press AND release:
+                                            * fdk_tablet_event.button's
+                                            * high bit (0x8000_0000u)
+                                            * marks the release */
 } fdk_event_type;
 
 typedef struct fdk_configure_event {
@@ -387,6 +419,51 @@ typedef struct fdk_touch_event {
     fdk_pointf position;   /* window-local, logical coordinates */
 } fdk_touch_event;
 
+/* ---- Tablet payloads (1.1.0, D-3 / B-17) ------------------------------ */
+
+/* What kind of tip is in range. The values are FDK's own (stable
+ * ABI); the backends map their platform enumerations onto them —
+ * Wayland's zwp_tablet_v2 type set is these verbatim, X11 reports
+ * whatever the driver labels the device (grouped by axis shape). */
+typedef enum fdk_tablet_tool_type {
+    FDK_TABLET_TOOL_PEN      = 1,
+    FDK_TABLET_TOOL_ERASER   = 2,
+    FDK_TABLET_TOOL_BRUSH    = 3,
+    FDK_TABLET_TOOL_PENCIL   = 4,
+    FDK_TABLET_TOOL_AIRBRUSH = 5,
+    FDK_TABLET_TOOL_MOUSE    = 6, /* the puck */
+    FDK_TABLET_TOOL_LENS     = 7,
+    FDK_TABLET_TOOL_TOTEM    = 8,
+} fdk_tablet_tool_type;
+
+/* The BUTTON release marker (fdk_tablet_event.button's high bit).
+ * The index is the low bits: button & 0x7FFF_FFFFu. */
+#define FDK_TABLET_BUTTON_RELEASE_BIT 0x80000000u
+
+typedef struct fdk_tablet_event {
+    /* Window-local logical position — MOTION/DOWN (UP carries the
+     * last known position; PROXIMITY_OUT carries zeros: the protocol
+     * gives no coordinates on leave, exactly wl_touch's up shape). */
+    fdk_pointf position;
+    /* Normalized tip pressure, 0.0..1.0 (0 when the tool or backend
+     * reports none). PROXIMITY events carry the last-seen value. */
+    float pressure;
+    /* Tilt from vertical, degrees (positive = toward +x/+y), 0.0
+     * when unsupported. */
+    float tilt_x;
+    float tilt_y;
+    /* Opaque per-tool id: distinguishes simultaneous tools, stable
+     * across one proximity session (a re-entering tool may mint a
+     * fresh id — treat it as a new stroke). */
+    fdk_u32 tool;
+    /* An fdk_tablet_tool_type value (0 = unknown). */
+    fdk_u32 tool_type;
+    /* BUTTON only: the 1-indexed tool button. The high bit
+     * (0x8000_0000u) marks the RELEASE (clear it for the index:
+     * button & 0x7FFF_FFFFu). Unused on every other event. */
+    fdk_u32 button;
+} fdk_tablet_event;
+
 /* ---- Gesture payloads (1.1.0, C-6 / B-17) ----------------------------- */
 
 /* Tap-recognition constants' gesture siblings: the swipe's time and
@@ -480,6 +557,7 @@ typedef struct fdk_event_data {
         fdk_scroll_event scroll;
         fdk_drag_event drag;
         fdk_touch_event touch;
+        fdk_tablet_event tablet;
         fdk_gesture_event gesture;
         fdk_ime_event ime;
     };

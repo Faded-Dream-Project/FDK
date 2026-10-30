@@ -13289,6 +13289,147 @@ static void test_ext_subsurface_x11(void) {
            "sweep, parent sweep with the error fence\n");
 }
 
+/* ---- Tablets / stylus (1.1.0, D-3 / B-17) -------------------------------
+ *
+ * The X11 tablet translation is seam-driven (the M-3 discipline:
+ * Xvfb carries no tablet device and XTEST cannot mint valuator
+ * state, so the REAL translation body is driven directly — the
+ * fdk_x11_xi2_test_tablet twin of the touch seam). What the rig
+ * ALSO proves live: the device scan runs against a real server
+ * (Xvfb's device list has no pressure axis — the no-tablet path),
+ * the connection survives the selection, and every event-shape
+ * rule the API documents holds through the real dispatch path. */
+static int g_tablet_events = 0;
+static fdk_event_data g_tablet_last;
+
+static void tablet_event_cb(fdk_window *window,
+                            const fdk_event_data *event, void *user) {
+    (void)window;
+    (void)user;
+    if (event->type >= FDK_EVENT_TABLET_PROXIMITY_IN &&
+        event->type <= FDK_EVENT_TABLET_BUTTON) {
+        g_tablet_events++;
+        g_tablet_last = *event;
+    }
+}
+
+static void test_xi2_tablet(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    struct fdk_platform_connection *conn = ctx->conn;
+
+    /* The live half: the scan ran at XI2 load (XIQueryDevice against
+     * THIS server). Xvfb's stock devices have no pressure axis, so
+     * the honest expectation is ZERO detected tablets — the no-op
+     * posture. (A machine with a real tablet reports >= 1; the
+     * translation below is what those events ride.) */
+    assert(conn->xi2 != NULL);
+    assert(conn->xi2->tablet_count == 0);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK tablet seam",
+                                 .width = 200, .height = 150 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+    fdk_window_set_event_callback(win, tablet_event_cb, NULL);
+
+    /* --- the event-shape alphabet through the REAL body --- */
+
+    /* PROXIMITY_IN: tool identity + zeros until the first motion. */
+    g_tablet_events = 0;
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 0,
+                                   FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                   0, 0) == 1);
+    assert(g_tablet_events == 1);
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_PROXIMITY_IN);
+    assert(g_tablet_last.tablet.tool_type == FDK_TABLET_TOOL_PEN);
+    assert(g_tablet_last.tablet.position.x == 0.0f);
+
+    /* MOTION: physical->logical (scale 1 on Xvfb), pressure and tilt
+     * carried verbatim. */
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 2,
+                                   FDK_TABLET_TOOL_PEN, 40.0, 60.0,
+                                   0.5, 12.0, -8.0, 0, 0) == 1);
+    assert(g_tablet_events == 2);
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_MOTION);
+    assert((int)g_tablet_last.tablet.position.x == 40);
+    assert((int)g_tablet_last.tablet.position.y == 60);
+    assert(g_tablet_last.tablet.pressure > 0.49f &&
+           g_tablet_last.tablet.pressure < 0.51f);
+    assert((int)g_tablet_last.tablet.tilt_x == 12);
+    assert((int)g_tablet_last.tablet.tilt_y == -8);
+
+    /* DOWN at the same geometry. */
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 1,
+                                   FDK_TABLET_TOOL_PEN, 42.0, 61.0,
+                                   0.75, 12.0, -8.0, 0, 0) == 1);
+    assert(g_tablet_events == 3);
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_DOWN);
+    assert(g_tablet_last.tablet.pressure > 0.74f);
+
+    /* BUTTON: index + the release bit; UP keeps the last position. */
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 4,
+                                   FDK_TABLET_TOOL_PEN, 42.0, 61.0,
+                                   0.75, 12.0, -8.0, 2, 0) == 1);
+    assert(g_tablet_events == 4);
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_BUTTON);
+    assert((g_tablet_last.tablet.button & ~FDK_TABLET_BUTTON_RELEASE_BIT) == 2);
+    assert((g_tablet_last.tablet.button & FDK_TABLET_BUTTON_RELEASE_BIT) == 0);
+
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 3,
+                                   FDK_TABLET_TOOL_PEN, 42.0, 61.0,
+                                   0.0, 12.0, -8.0, 0, 0) == 1);
+    assert(g_tablet_events == 5);
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_UP);
+    assert((int)g_tablet_last.tablet.position.x == 42);
+
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 4,
+                                   FDK_TABLET_TOOL_PEN, 42.0, 61.0,
+                                   0.75, 12.0, -8.0, 2, 1) == 1);
+    assert(g_tablet_events == 6);
+    assert((g_tablet_last.tablet.button & FDK_TABLET_BUTTON_RELEASE_BIT) != 0);
+
+    /* The pressure normalization shapes: raw Wacom 65535-scale
+     * values normalize to 1.0; negatives clamp to 0. */
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 2,
+                                   FDK_TABLET_TOOL_PEN, 50.0, 50.0,
+                                   32767.5, 0, 0, 0, 0) == 1);
+    assert(g_tablet_last.tablet.pressure > 0.499f &&
+           g_tablet_last.tablet.pressure < 0.501f);
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 2,
+                                   FDK_TABLET_TOOL_PEN, 50.0, 50.0,
+                                   -5.0, 0, 0, 0, 0) == 1);
+    assert(g_tablet_last.tablet.pressure == 0.0f);
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 2,
+                                   FDK_TABLET_TOOL_PEN, 50.0, 50.0,
+                                   65535.0, 0, 0, 0, 0) == 1);
+    assert(g_tablet_last.tablet.pressure == 1.0f);
+
+    /* The eraser tool type rides every event. */
+    assert(fdk_x11_xi2_test_tablet(conn, win->pwindow, 2,
+                                   FDK_TABLET_TOOL_ERASER, 10.0, 10.0,
+                                   0.25, 0, 0, 0, 0) == 1);
+    assert(g_tablet_last.tablet.tool_type == FDK_TABLET_TOOL_ERASER);
+
+    /* Refusal shapes: NULL handles answer 0, nothing dispatched. */
+    int before = g_tablet_events;
+    assert(fdk_x11_xi2_test_tablet(conn, NULL, 2,
+                                   FDK_TABLET_TOOL_PEN, 1, 1, 0, 0, 0,
+                                   0, 0) == 0);
+    assert(g_tablet_events == before);
+
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] xi2 tablet: device scan live (Xvfb = the honest "
+           "no-tablet posture), the full event alphabet through the "
+           "real translation body (proximity identity, motion with "
+           "pressure+tilt, tip down/up at last position, side "
+           "buttons with the release bit, 65535-scale + clamp "
+           "normalization, tool types), seam refusals\n");
+}
+
 /* Idle inhibition (1.1.0, S-3): X11 has no platform op — the D-Bus
  * fallback engages. This rig runs under Xvfb WITHOUT a session bus,
  * so the inhibitor degrades to UNSUPPORTED (a connect failure or
@@ -13354,6 +13495,7 @@ int main(void) {
     test_ext_popup_x11();
     test_ext_fd_sources();
     test_ext_subsurface_x11();
+    test_xi2_tablet();
     test_init_with_app_id();
     test_quit_before_run_is_safe();
     test_run_returns_when_no_windows_open();

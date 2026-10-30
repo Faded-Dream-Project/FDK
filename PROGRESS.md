@@ -1,5 +1,13 @@
 # FDK — Progress Ledger (READ THIS FIRST)
 
+Last audited: 2026-10-30, at milestone **1.7.7** (D-3 tablets/stylus,
+both backends: FDK_EVENT_TABLET_* (enum 52-57) + fdk_tablet_event —
+Wayland zwp_tablet_v2 (vendored generated protocol code) + the X11
+valuator path through dlopen'd libXi (the XIQueryDevice scan); the
+frame batching absorbed, the XI2-no-proximity gap documented (D-030);
+855 exports unchanged; the full battery green incl. both suites' new
+seam-driven legs. Prior state below.)
+
 Last audited: 2026-10-30, at milestone **1.7.6** (D-2 subsurfaces,
 extension API v2: `fdk_ext_subsurface_create`/`_create_ex` +
 set_position/resize/set_desync/place_above/place_below — the

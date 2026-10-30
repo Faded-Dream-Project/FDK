@@ -14,6 +14,49 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-30 (on the rc2 line)
 
+### Added — tablets / stylus input, both backends (D-3 / B-17)
+
+- **6 new event types + the `fdk_tablet_event` payload**
+  (`FDK_EVENT_TABLET_PROXIMITY_IN/OUT/DOWN/MOTION/UP/BUTTON`,
+  appended enum values 52-57 — the ABI append rule, zero new
+  symbols, 855 exports unchanged): drawing-tablet input as a
+  first-class family, the touch model's sibling. PROXIMITY carries
+  the tool's identity (`fdk_tablet_tool_type`: pen/eraser/brush/
+  pencil/airbrush/mouse/lens/totem, plus an opaque per-tool id
+  that distinguishes simultaneous tools); DOWN/MOTION/UP carry the
+  tip's window-local position with pressure (normalized 0..1) and
+  tilt (degrees); BUTTON reports side buttons with the high-bit
+  release marker. NO synthesis layer — a stylus event is never a
+  pointer click.
+- **Wayland: the zwp_tablet_v2 family** (generated protocol code
+  vendored, zero new build deps): manager bound when offered
+  (absent = no tablet events, never an error), the per-seat tablet
+  seat, the full tool event stream with the protocol's frame
+  batching absorbed (one compositor frame = one FDK event).
+  Tablets and pads are protocol-tracked but inert — no fdk_event
+  carries pad state (the D-030 honest gap).
+- **X11: the valuator path through dlopen'd libXi** (the touch
+  lane's load discipline): the XIQueryDevice scan finds slaves
+  with a pressure axis (label-matched, positional fallbacks), and
+  motion/button events from those sourceids translate with their
+  valuator state (button 1 = the driver-mapped TIP -> DOWN/UP,
+  buttons 2+ -> BUTTON, pressure through the 65535 clamp). Core
+  pointer events are untouched — a stylus-as-pointer moves the
+  cursor AND streams tablet events, X11's own model.
+- **The one honest platform gap, documented**: XI2 has no
+  proximity events for clients, so the X11 half synthesizes
+  PROXIMITY_IN at a session's first event and delivers no OUT —
+  the tool goes silent. DECISIONS D-030 records it.
+- **Tests**: both suites drive the REAL translation bodies through
+  the seams (sway headless binds the manager but wlroots has no
+  virtual-tablet protocol; Xvfb has no tablet device and XTEST
+  cannot fake valuator state) — the full event alphabet, the frame
+  batching, distinct simultaneous tool ids, out-of-proximity noise
+  dropped, the pressure normalization shapes — plus the live
+  halves (the sway bind + tablet seat survive; the X11 device scan
+  runs against a real server). Real hardware: implemented — should
+  work (untested on real hardware).
+
 ### Added — subsurfaces: the FDK-owned child-surface primitive, both backends (D-2 / B-16; extension API v2)
 
 - **`include/fdk/fdk_extend.h` (7 new functions, `FDK_EXT_API_VERSION`

@@ -1610,3 +1610,62 @@ test-desktop + its Wayland suite. The rig debug also left a small
 war story in the pixel leg: a single white pixel inside a perfect
 red field was sway's CURSOR SPRITE parked on the sample point — the
 leg parks the pointer before the screenshot now.
+
+## D-030 — tablets: the frame batching, the valuator path, and the two honest gaps (D-3 / B-17)
+
+**Date**: 2026-10-30 · **Status**: shipped, both backends, seams green
+
+**1. Events, not an engine.** The touch model has a core policy
+engine (tap synthesis, scroll, gestures); tablets have none — there
+is nothing to synthesize (a stylus event is never a pointer click)
+and no policy beyond normalization. The backends translate 1:1 into
+six appended event types (52-57) + `fdk_tablet_event`. The API
+surface therefore grew by exactly zero symbols: 855 exports,
+unchanged — the ABI append rule's cheapest landing yet.
+
+**2. Wayland: absorb the frame batching.** zwp_tablet_v2 batches —
+motion, pressure, tilt, down, up arrive as individual events and
+the FRAME commits them. FDK records the batch and commits one FDK
+event per frame: one compositor frame = one event, exactly like the
+wire batches (and DOWN/UP — which carry no coordinates in the
+protocol — fire at the position the same frame's motion recorded).
+The listener bodies are plain-argument statics so the test seam
+drives them directly (the M-3 discipline: wlroots has no
+virtual-tablet protocol, so no rig can mint a real tool; sway DOES
+implement the family — the manager bind and the tablet seat are
+live protocol under the rig).
+
+**3. X11: the valuator path, no tablet protocol.** XI2 has no
+tablet interface — a stylus is a slave pointer whose valuator state
+(pressure, tilt) rides ordinary motion/button events. FDK scans the
+device list at XI2 load (XIQueryDevice, two more dlsym'd symbols,
+the mirrored-struct discipline) for slaves with a pressure axis —
+label-matched against the server's "Abs Pressure"/"Abs Tilt X"/
+"Abs Tilt Y" atoms, positional fallbacks (axis 2 of >= 3) for
+unlabeled drivers — and translates events whose sourceid matches:
+button 1 is the driver-mapped TIP (DOWN/UP), buttons 2+ are side
+buttons, pressure normalizes through the 65535 clamp. Selecting
+motion+buttons on the master does NOT suppress core pointer events
+(only XI 2.2 touch does that) — the streams are additive, which is
+X11's own model of a stylus-as-pointer; apps pick what to consume.
+
+**4. The two honest gaps, recorded rather than faked.** (a) Pads
+(the button strips/rings) are protocol-tracked but inert: no
+fdk_event carries pad state, because pad programmability is a
+separate feature with no consumer in this toolkit — a half-API
+would be worse than the documented gap. (b) XI2 has NO proximity
+events for clients (X Input 1.x's ProximityIn/Out never crossed
+into XI2): the X11 half synthesizes PROXIMITY_IN before a
+session's first event and delivers no OUT — the tool simply goes
+silent. An XInput-1.x select could recover real proximity on
+drivers that still emit it, at the cost of a second input API
+wired in; deferred with the reasoning here as the record.
+
+**Verification**: dual-backend rebuild zero warnings; core test;
+test-x11 (the seam leg + the live scan — Xvfb answers "no
+tablets", the honest no-op); test-dbus; FDK_SANITIZE=0; release +
+examples + verify-exports (855); the sway suite (the seam section +
+the live manager bind); fdk-shell build + test-x11 + test-desktop.
+Real hardware: implemented — should work (untested on real
+hardware) — the seams pin the translation, the rigs pin the
+lifecycle, and no sandbox can hold a pen.

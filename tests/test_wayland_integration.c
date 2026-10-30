@@ -51,6 +51,7 @@
  * x11_gl.h discipline test_x11_integration.c uses for its own GL
  * group. */
 #include "platform/wayland/wayland_egl.h"
+#include "platform/wayland/wayland_platform.h" /* the D-3 tablet seam */
 
 #include <assert.h>
 #include <stdio.h>
@@ -883,6 +884,27 @@ static void wl_sub_parent_cb(fdk_window *window,
     (void)user;
     if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
         g_sub_parent_buttons++;
+    }
+}
+
+/* ---- Tablet capture state (1.1.0, D-3) --------------------------------- */
+static int g_tablet_events = 0;
+static fdk_event_data g_tablet_last;
+static int g_tablet_prox_in = 0, g_tablet_prox_out = 0;
+
+static void wl_tablet_evt_cb(fdk_window *window,
+                             const fdk_event_data *event, void *user) {
+    (void)window;
+    (void)user;
+    if (event->type >= FDK_EVENT_TABLET_PROXIMITY_IN &&
+        event->type <= FDK_EVENT_TABLET_BUTTON) {
+        g_tablet_events++;
+        g_tablet_last = *event;
+        if (event->type == FDK_EVENT_TABLET_PROXIMITY_IN) {
+            g_tablet_prox_in++;
+        } else if (event->type == FDK_EVENT_TABLET_PROXIMITY_OUT) {
+            g_tablet_prox_out++;
+        }
     }
 }
 
@@ -3951,6 +3973,136 @@ int main(void) {
                "coords), move/resize proven by hit-testing, place_below "
                "stacking flip, popup refusal, nested create, parent "
                "sweep protocol-clean\n");
+    }
+
+    /* ---- Tablets / stylus (1.1.0, D-3 / B-17): the zwp_tablet_v2 half --
+     *
+     * The live half: sway (wlroots) IMPLEMENTS zwp_tablet_v2, so the
+     * manager bind + the tablet seat creation ride the real protocol
+     * (the connection log carries them; the suite's survival is the
+     * protocol-clean proof). No virtual-tablet protocol exists in
+     * wlroots — the headless seat never mints a tool — so the event
+     * stream is driven through the test seam (the M-3 discipline:
+     * the REAL listener bodies, plain arguments). */
+    {
+        /* A fresh window so the dispatch target is unambiguous. */
+        fdk_window *tw = NULL;
+        fdk_window_options twopts = { .title = "FDK tablet",
+                                      .width = 200, .height = 150 };
+        assert(fdk_ok(fdk_window_create(ctx, &twopts, &tw)));
+        fdk_window_show(tw);
+        pump_and_paint(ctx, tw, 400);
+        g_tablet_events = 0;
+        g_tablet_prox_in = 0;
+        g_tablet_prox_out = 0;
+        fdk_window_set_event_callback(tw, wl_tablet_evt_cb, NULL);
+        struct fdk_platform_connection *conn = ctx->conn;
+
+        /* The tool mints (the seam's phase 0) + the identity event. */
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 0,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 1);
+        /* PROXIMITY_IN: tool type rides, coordinates zero. */
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 1,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 1);
+        assert(g_tablet_prox_in == 1);
+        assert(g_tablet_last.type == FDK_EVENT_TABLET_PROXIMITY_IN);
+        assert(g_tablet_last.tablet.tool_type == FDK_TABLET_TOOL_PEN);
+        assert(g_tablet_last.tablet.tool != 0);
+        uint32_t tool_id = g_tablet_last.tablet.tool;
+
+        /* Motion + pressure/tilt into the pending record, then the
+         * FRAME commits it — the protocol's batching, one event. */
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 2,
+                                       FDK_TABLET_TOOL_PEN, 40.0, 60.0,
+                                       0.5, 12.0, -8.0, 0) == 1);
+        assert(g_tablet_events == 1); /* nothing before the frame */
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 3,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 1);
+        assert(g_tablet_events == 2);
+        assert(g_tablet_last.type == FDK_EVENT_TABLET_MOTION);
+        assert((int)g_tablet_last.tablet.position.x == 40);
+        assert((int)g_tablet_last.tablet.position.y == 60);
+        assert(g_tablet_last.tablet.pressure > 0.49f &&
+               g_tablet_last.tablet.pressure < 0.51f);
+        assert((int)g_tablet_last.tablet.tilt_x == 12);
+        assert((int)g_tablet_last.tablet.tilt_y == -8);
+        assert(g_tablet_last.tablet.tool == tool_id);
+
+        /* A down + frame commits at the recorded position. */
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 6,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 1);
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 3,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 1);
+        assert(g_tablet_last.type == FDK_EVENT_TABLET_DOWN);
+        assert((int)g_tablet_last.tablet.position.x == 40);
+        assert(g_tablet_last.tablet.pressure > 0.49f);
+
+        /* Side button press + release (the high-bit release marker
+         * round-trips through the seam). */
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 5,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       2) == 1);
+        assert(g_tablet_last.type == FDK_EVENT_TABLET_BUTTON);
+        assert((g_tablet_last.tablet.button &
+                ~FDK_TABLET_BUTTON_RELEASE_BIT) == 2);
+        assert((g_tablet_last.tablet.button &
+                FDK_TABLET_BUTTON_RELEASE_BIT) == 0);
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 5,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       2 | FDK_TABLET_BUTTON_RELEASE_BIT) ==
+               1);
+        assert((g_tablet_last.tablet.button &
+                FDK_TABLET_BUTTON_RELEASE_BIT) != 0);
+
+        /* UP + frame: last position, then PROXIMITY_OUT zeros. */
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 7,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 1);
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 3,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 1);
+        assert(g_tablet_last.type == FDK_EVENT_TABLET_UP);
+        assert((int)g_tablet_last.tablet.position.x == 40);
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 4,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 1);
+        assert(g_tablet_prox_out == 1);
+        assert(g_tablet_last.type == FDK_EVENT_TABLET_PROXIMITY_OUT);
+        assert(g_tablet_last.tablet.position.x == 0.0f);
+
+        /* Events without proximity are protocol noise (dropped). */
+        int noise_before = g_tablet_events;
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 2,
+                                       FDK_TABLET_TOOL_PEN, 5, 5, 0, 0, 0,
+                                       0) == 1);
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 3,
+                                       FDK_TABLET_TOOL_PEN, 0, 0, 0, 0, 0,
+                                       0) == 0); /* frame: nothing in prox */
+        assert(g_tablet_events == noise_before);
+
+        /* A second tool mints a DISTINCT id (simultaneous tools). */
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 0,
+                                       FDK_TABLET_TOOL_ERASER, 0, 0, 0, 0,
+                                       0, 0) == 1);
+        assert(fdk_wayland_test_tablet(conn, tw->pwindow, 1,
+                                       FDK_TABLET_TOOL_ERASER, 0, 0, 0, 0,
+                                       0, 0) == 1);
+        assert(g_tablet_last.tablet.tool != tool_id);
+        assert(g_tablet_last.tablet.tool_type == FDK_TABLET_TOOL_ERASER);
+
+        fdk_window_destroy(tw);
+        (void)fdk_pump_events(ctx, 200);
+        printf("[ok] wayland tablet: zwp_tablet_v2 manager + tablet seat "
+               "live under sway, the frame-batched event alphabet through "
+               "the real listener bodies (proximity identity, motion with "
+               "pressure+tilt at frame commit, down/up at the recorded "
+               "position, side buttons with the release bit, distinct "
+               "simultaneous tool ids, out-of-proximity noise dropped)\n");
     }
 
     if (win != NULL) {
