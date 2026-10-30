@@ -39,15 +39,33 @@ RUN alpine:3.22 '
         harfbuzz fribidi font-wqy-zenhei \
         libxrandr-dev
     # The per-script Noto faces (Arabic, Devanagari, Hebrew, Thai,
-    # Bengali, ...) for the shaping suite's six-script fallback
-    # matrix — the §10 desktop report's root cause (an unsorted
-    # script table) was invisible on machines that only had the one
-    # CJK font. Alpine splits font-noto per script; a repo without
-    # the split is DISCLOSED (the matrix's legs skip honestly).
+    # Bengali, ...) for the shaping suite six-script fallback
+    # matrix — the unsorted-table root cause behind the §10 desktop
+    # report was invisible on machines that only had the one CJK
+    # font. Alpine splits font-noto per script; a repo without
+    # the split is DISCLOSED (the matrix legs skip honestly).
     apk add --no-cache font-noto-arabic font-noto-hebrew \
         font-noto-devanagari font-noto-thai font-noto-bengali \
         2>/dev/null || \
         echo "SCRIPT-FONT-SKIP: no per-script font-noto packages in this repo — the six-script matrix legs skip honestly (disclosed)"
+    # The default sans-serif stays DejaVu Sans (the fontconfig pin
+    # below): the GUI geometry tests are calibrated against its
+    # metrics, and a base Noto face would otherwise win the default
+    # ranking; the per-script faces serve the FALLBACK channel,
+    # which is queried by language, not by the default family.
+    # (Heredoc delimiter deliberately UNQUOTED and the block free of
+    # apostrophes: this whole RUN argument is single-quoted shell —
+    # the quoting bug class commit 2537955 fixed once already.)
+    cat > /etc/fonts/local.conf <<XMLCONF
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <match target="pattern">
+    <test qual="any" name="family"><string>sans-serif</string></test>
+    <edit name="family" mode="prepend" binding="strong"><string>DejaVu Sans</string></edit>
+  </match>
+</fontconfig>
+XMLCONF
     # A name-keyed CFF font for the CFF suites real-font legs.
     # Optional and disclosed: the crafted-font legs always run.
     apk add --no-cache font-urw-base35 2>/dev/null || \

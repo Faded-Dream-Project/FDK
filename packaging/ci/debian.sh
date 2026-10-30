@@ -43,10 +43,28 @@ RUN debian:bookworm '
         libxrandr-dev \
         fonts-noto-core
     # fonts-noto-core: the per-script faces (Arabic, Devanagari,
-    # Hebrew, Thai, Bengali, ...) the shaping suite's six-script
-    # fallback matrix needs — the §10 desktop report's root cause
-    # (an unsorted script table) was invisible on machines that only
+    # Hebrew, Thai, Bengali, ...) the shaping suite six-script
+    # fallback matrix needs — the unsorted-table root cause behind
+    # the §10 desktop report was invisible on machines that only
     # had the one CJK font.
+    # The default sans-serif stays DejaVu Sans (a fontconfig pin
+    # below): the GUI geometry tests are calibrated against its
+    # metrics, and fonts-noto-core would otherwise win the default
+    # ranking; the per-script faces serve the FALLBACK channel,
+    # which is queried by language, not by the default family.
+    # (Heredoc delimiter deliberately UNQUOTED and the block free of
+    # apostrophes: this whole RUN argument is single-quoted shell —
+    # the quoting bug class commit 2537955 fixed once already.)
+    cat > /etc/fonts/local.conf <<XMLCONF
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <match target="pattern">
+    <test qual="any" name="family"><string>sans-serif</string></test>
+    <edit name="family" mode="prepend" binding="strong"><string>DejaVu Sans</string></edit>
+  </match>
+</fontconfig>
+XMLCONF
     sh packaging/debian/build-deb.sh
     sh fdk-shell/packaging/debian/build-deb.sh
 '

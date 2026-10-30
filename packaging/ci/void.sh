@@ -63,13 +63,31 @@ RUN "$VOID_IMAGE" '
         xbps-install -Sy wqy-zenhei-font 2>/dev/null || \
         echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping fallback leg skips honestly (disclosed)"
     # The per-script Noto faces (Arabic, Devanagari, Hebrew, Thai,
-    # Bengali, ...) for the shaping suite's six-script fallback
-    # matrix — the §10 desktop report's root cause (an unsorted
-    # script table) was invisible on machines that only had the one
-    # CJK font. Void's noto-fonts-ttf carries the per-script set;
+    # Bengali, ...) for the shaping suite six-script fallback
+    # matrix — the unsorted-table root cause behind the §10 desktop
+    # report was invisible on machines that only had the one CJK
+    # font. Void noto-fonts-ttf carries the per-script set;
     # a repo without it is DISCLOSED (the legs skip honestly).
     xbps-install -Sy noto-fonts-ttf 2>/dev/null || \
         echo "SCRIPT-FONT-SKIP: no noto-fonts-ttf in this repo — the six-script matrix legs skip honestly (disclosed)"
+    # The default sans-serif stays DejaVu Sans (the fontconfig pin
+    # below): the GUI geometry tests are calibrated against its
+    # metrics, and a base Noto face would otherwise win the default
+    # ranking; the per-script faces serve the FALLBACK channel,
+    # which is queried by language, not by the default family.
+    # (Heredoc delimiter deliberately UNQUOTED and the block free of
+    # apostrophes: this whole RUN argument is single-quoted shell —
+    # the quoting bug class commit 2537955 fixed once already.)
+    cat > /etc/fonts/local.conf <<XMLCONF
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <match target="pattern">
+    <test qual="any" name="family"><string>sans-serif</string></test>
+    <edit name="family" mode="prepend" binding="strong"><string>DejaVu Sans</string></edit>
+  </match>
+</fontconfig>
+XMLCONF
     # A name-keyed CFF font for the CFF suites real-font legs.
     # Optional and disclosed: the crafted-font legs always run.
     xbps-install -Sy urw-base35-fonts 2>/dev/null || \

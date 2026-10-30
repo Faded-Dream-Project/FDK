@@ -70,6 +70,18 @@ candidates are marked until the owner promotes them.
   noto-fonts-ttf) so the matrix's legs RUN; `make test-textdemo`
   is a named CI step. Where a family's repo lacks the package the
   legs skip with a disclosed message (the CJK-font discipline).
+  Two CI-environment stabilizers landed with them: the runners pin
+  the default sans-serif to DejaVu Sans via /etc/fonts/local.conf
+  (a base Noto face would otherwise win fontconfig's default
+  ranking and shift every text-metric-dependent layout the GUI
+  geometry tests are calibrated against — the color-chooser
+  OK-button click is the known case; the per-script faces serve
+  the FALLBACK channel, which the charset-filtered query resolves
+  independently of the default family, verified), and the packaging
+  scripts' new comments are apostrophe-free — the quoting bug class
+  commit 2537955 fixed once already terminated five RUN blocks
+  mid-install on the first push of this change (the build died at
+  a missing X11/Xlib.h with the whole apt line truncated).
 - **What the owner should see now**: `text_demo "مرحبا" "नमस्ते"`
   renders joined Arabic and the स्ते conjunct from the fallback
   faces, with `shaping: fallback font ... for Arabic` /

@@ -35,10 +35,29 @@ RUN archlinux:base '
         libxrandr \
         noto-fonts
     # noto-fonts (the base set): the per-script faces (Arabic,
-    # Devanagari, Hebrew, Thai, Bengali, ...) the shaping suite's
-    # six-script fallback matrix needs — the §10 desktop report's
-    # root cause (an unsorted script table) was invisible on machines
+    # Devanagari, Hebrew, Thai, Bengali, ...) the shaping suite
+    # six-script fallback matrix needs — the unsorted-table root
+    # cause behind the §10 desktop report was invisible on machines
     # that only had the one CJK font.
+    # The default sans-serif stays DejaVu Sans (the fontconfig pin
+    # below): the GUI geometry tests are calibrated against its
+    # metrics, and the noto-fonts base face would otherwise win the
+    # default ranking; the per-script faces serve the FALLBACK
+    # channel, which is queried by language, not by the default
+    # family. (Heredoc delimiter deliberately UNQUOTED and the block
+    # free of apostrophes: this whole RUN argument is single-quoted
+    # shell — the quoting bug class commit 2537955 fixed once
+    # already.)
+    cat > /etc/fonts/local.conf <<XMLCONF
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <match target="pattern">
+    <test qual="any" name="family"><string>sans-serif</string></test>
+    <edit name="family" mode="prepend" binding="strong"><string>DejaVu Sans</string></edit>
+  </match>
+</fontconfig>
+XMLCONF
     # A name-keyed CFF font for the CFF suites real-font legs.
     # Optional and disclosed: the crafted-font legs always run.
     pacman -Sy --noconfirm --needed gsfonts 2>/dev/null || \

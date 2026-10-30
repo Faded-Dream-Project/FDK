@@ -73,6 +73,23 @@ jobs:
           # (an unsorted script table) was invisible to tests whose
           # machines only had the one CJK font; the matrix now demands
           # real per-script answers.
+          # The default sans-serif stays DejaVu Sans: fonts-noto-core
+          # would otherwise win fontconfig's default ranking and shift
+          # every text-metric-dependent layout the GUI geometry tests
+          # are calibrated against (the color-chooser OK-button click
+          # is the known case). The per-script faces serve the FALLBACK
+          # channel, which is queried by language, not by the default
+          # family — the pin does not touch it.
+          sudo tee /etc/fonts/local.conf > /dev/null <<'XMLCONF'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <match target="pattern">
+              <test qual="any" name="family"><string>sans-serif</string></test>
+              <edit name="family" mode="prepend" binding="strong"><string>DejaVu Sans</string></edit>
+            </match>
+          </fontconfig>
+          XMLCONF
 
       - name: Build (debug, sanitizers)
         run: make
