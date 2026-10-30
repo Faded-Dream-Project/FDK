@@ -1669,3 +1669,60 @@ the live manager bind); fdk-shell build + test-x11 + test-desktop.
 Real hardware: implemented — should work (untested on real
 hardware) — the seams pin the translation, the rigs pin the
 lifecycle, and no sandbox can hold a pen.
+
+## D-031 — the foreign toplevel list: the lazy bind, the empty set, and the retitle gap (D-4)
+
+**Date**: 2026-10-30 · **Status**: shipped, both backends, rigs green
+
+`include/fdk/fdk_toplevel.h` (the taskbar substrate) landed with
+two protocol lessons the rig taught within one debugging session,
+and one honest platform gap.
+
+**1. THE LAZY BIND.** The natural shape binds the
+zwlr_foreign_toplevel_manager global at registry time like every
+other optional protocol. WRONG: the manager sends its INITIAL
+toplevel burst the moment the manager object exists — a
+registry-time bind sends the whole roster into a proxy with no
+listener (FDK opens the list much later, on the application's
+demand), and the burst is lost forever. The fix: the registry
+records only the global's NAME; `fdk_toplevel_list_open` binds,
+attaches the listener, THEN returns. The burst meets a listener by
+construction.
+
+**2. THE EMPTY SET.** The coarse model's changed callback fired
+only on protocol events (a handle's `done` delimiter). An EMPTY
+desktop sends nothing at all — no handles, no done, no event — so a
+taskbar opening its list on an empty workspace would never learn
+"the initial set is here (and it is empty)". The fix: open itself
+fires one change (the header already promised "may fire during
+open" — now the Wayland half keeps that promise in both shapes).
+The rig caught this twice: once with a genuinely empty late-suite
+roster (every suite window torn down by then), once with the
+self-contained section's own window — the fix covers both.
+
+**3. THE X11 RETITLE GAP.** X11 title edits on OTHER clients'
+windows are not notified to a taskbar: clients own their
+PropertyNotify selection, and selecting it on foreign windows means
+fighting the WM for event masks. FDK re-snapshots titles on every
+membership/focus churn; a mid-session retitle lands at the next
+churn. Wayland has no such gap (the protocol pushes titles).
+Recorded here rather than papered over with a mask-grabbing hack.
+
+**4. The model itself is D-014's shape**, applied to the
+compositor's window set instead of the bus's tray items: ONE coarse
+changed callback, re-snapshot semantics, struct_size read APIs with
+stable ids, actions through the same indices. The single-list rule
+(one tracker per context) falls out of libwayland's
+one-listener-per-proxy and the X11 hook's single slot — enforced
+with a loud INVALID_STATE/NULL, not silent orphaning.
+
+**Verification**: the full local battery — dual-backend rebuild
+zero warnings; core test; test-x11 TWICE consecutive (the fake-WM
+round trip: the roster read against real server state, the
+activate/close messages RECEIVED at the WM — the post-selection
+XSync is load-bearing, the second run's race; membership churn
+live; the bare-X empty posture); test-dbus; FDK_SANITIZE=0;
+release + examples + verify-exports (861, +6); the sway suite with
+the LIVE section (own windows listed, activation through sway's
+own tree, the close REQUEST round trip); fdk-shell build + test-x11
++ test-desktop.

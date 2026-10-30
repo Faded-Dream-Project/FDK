@@ -1,5 +1,13 @@
 # FDK — Progress Ledger (READ THIS FIRST)
 
+Last audited: 2026-10-30, at milestone **1.7.8** (D-4 foreign
+toplevels: include/fdk/fdk_toplevel.h, 861 exports (+6) — the
+taskbar substrate on wlr-foreign-toplevel-management (lazy bind)
++ EWMH _NET_CLIENT_LIST; the coarse changed-callback model; the
+X11 retitle gap documented (D-031); the full battery green incl.
+the X11 fake-WM round trip and sway's LIVE section. Prior state
+below.)
+
 Last audited: 2026-10-30, at milestone **1.7.7** (D-3 tablets/stylus,
 both backends: FDK_EVENT_TABLET_* (enum 52-57) + fdk_tablet_event —
 Wayland zwp_tablet_v2 (vendored generated protocol code) + the X11

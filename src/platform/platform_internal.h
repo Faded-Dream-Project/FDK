@@ -45,6 +45,30 @@ typedef void (*fdk_platform_dispatch_fn)(fdk_platform_window *pwindow,
                                           const fdk_event_data *event,
                                           void *dispatch_user_data);
 
+/* ---- Foreign-toplevel management types (1.1.0, D-4) ---------------
+ *
+ * The backend half of include/fdk/fdk_toplevel.h (the taskbar
+ * substrate). The backend owns the LIVE SET of foreign toplevels
+ * — Wayland: wlr-foreign-toplevel-management handles; X11: the
+ * EWMH _NET_CLIENT_LIST snapshot + root property watching — and
+ * fires the coarse CHANGED callback (re-snapshot semantics, the
+ * tray-host pattern). The desktop module (src/desktop/toplevel.c)
+ * is the thin public wrapper: validation, buffer copies, the
+ * degradation posture. The record's strings are owned by the
+ * backend's CURRENT snapshot (valid until the next change fires)
+ * — the wrapper copies before the application ever sees them. */
+typedef void (*fdk_platform_toplevels_changed_fn)(void *user);
+
+struct fdk_platform_toplevel {
+    fdk_u64 id;          /* stable for the toplevel's lifetime  */
+    fdk_u32 states;      /* FDK_TOPLEVEL_* bits                */
+    const char *title;   /* "" when the platform reports none  */
+    const char *app_id;  /* "" ditto (X11: WM_CLASS res_class) */
+};
+
+/* Opaque backend-owned tracker (one per open list). */
+struct fdk_platform_toplevels;
+
 /* One implementation of this struct exists per backend
  * (g_fdk_x11_backend, g_fdk_wayland_backend — see each backend's .c
  * file). fdk_init() (src/core/context.c) selects one based on
@@ -743,6 +767,21 @@ typedef struct fdk_platform_ops {
      * backend has no buffer bookkeeping to update. */
     void (*ext_surface_resized)(fdk_platform_window *pwindow,
                                 fdk_i32 width, fdk_i32 height);
+
+    /* ---- OPTIONAL foreign-toplevel management (1.1.0, D-4) ------
+     * (the types live just above this struct) */
+    fdk_result (*toplevels_open)(
+        fdk_platform_connection *conn,
+        fdk_platform_toplevels_changed_fn on_change, void *user,
+        struct fdk_platform_toplevels **out);
+    void (*toplevels_close)(struct fdk_platform_toplevels *toplevels);
+    fdk_u32 (*toplevels_count)(struct fdk_platform_toplevels *toplevels);
+    const struct fdk_platform_toplevel *(*toplevels_at)(
+        struct fdk_platform_toplevels *toplevels, fdk_u32 index);
+    fdk_result (*toplevels_activate)(
+        struct fdk_platform_toplevels *toplevels, fdk_u32 index);
+    fdk_result (*toplevels_close_window)(
+        struct fdk_platform_toplevels *toplevels, fdk_u32 index);
 
     /* ---- OPTIONAL subsurface operations (1.1.0, D-2) ---------------
      *

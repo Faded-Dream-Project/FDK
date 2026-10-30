@@ -151,6 +151,20 @@ struct fdk_platform_connection {
      * FDK_ERR_UNSUPPORTED — the honest refusal, never a fake. */
     struct wl_subcompositor *subcompositor;
 
+    /* OPTIONAL (1.1.0, D-4): wlr-foreign-toplevel-management — the
+     * taskbar substrate (wayland_toplevel.c). The global's NAME is
+     * recorded at registry time; the MANAGER is bound lazily at
+     * fdk_toplevel_list_open — the protocol sends the initial
+     * toplevel burst the moment the manager object exists, and a
+     * bind without a listener attached would lose it forever (the
+     * sway rig caught this in the first run). Absent (name 0, GNOME,
+     * KDE pre-5.x) = open answers NULL, the honest degradation.
+     * foreign_toplevels_live enforces the one-list rule (libwayland's
+     * one-listener-per-proxy). */
+    uint32_t foreign_toplevel_name;
+    struct zwlr_foreign_toplevel_manager_v1 *foreign_toplevel_manager;
+    int foreign_toplevels_live;
+
     /* OPTIONAL global (Phase 8): zxdg_decoration_manager_v1 — absent
      * means the compositor offers no xdg-decoration protocol, and
      * fdk_window_set_decorated() then honestly returns
@@ -911,6 +925,19 @@ void fdk_wayland_window_set_icon(fdk_platform_window *pwindow,
  * real tool). */
 void fdk_wayland_tablet_seat_ready(fdk_platform_connection *conn);
 void fdk_wayland_tablet_shutdown(fdk_platform_connection *conn);
+/* Foreign toplevels (1.1.0, D-4) — wayland_toplevel.c. */
+fdk_result fdk_wayland_toplevels_open(
+    fdk_platform_connection *conn,
+    fdk_platform_toplevels_changed_fn on_change, void *user,
+    struct fdk_platform_toplevels **out);
+void fdk_wayland_toplevels_close(struct fdk_platform_toplevels *t);
+fdk_u32 fdk_wayland_toplevels_count(struct fdk_platform_toplevels *t);
+const struct fdk_platform_toplevel *fdk_wayland_toplevels_at(
+    struct fdk_platform_toplevels *t, fdk_u32 index);
+fdk_result fdk_wayland_toplevels_activate(
+    struct fdk_platform_toplevels *t, fdk_u32 index);
+fdk_result fdk_wayland_toplevels_close_window(
+    struct fdk_platform_toplevels *t, fdk_u32 index);
 int fdk_wayland_test_tablet(fdk_platform_connection *conn,
                             fdk_platform_window *win, int phase,
                             uint32_t tool_type, double x, double y,

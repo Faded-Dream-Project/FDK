@@ -751,3 +751,51 @@ Expectations (Wayland: labwc, sway, KDE, GNOME; X11: any WM):
 - On X11 there is no PROXIMITY_OUT (the X Input protocol has no
   proximity for XI2 clients — the events simply stop when the pen
   leaves range). On Wayland PROXIMITY_OUT arrives with zeros.
+
+## 22. The foreign toplevel list on your desktop (D-4 — needs your apps)
+
+What the rigs proved: both halves end to end — the X11 leg as a
+full fake-WM round trip (the roster read from real server state,
+the activate/close client messages arriving at the "WM"), the sway
+section against the live compositor (the client's own windows
+listed, activation verified through sway's own tree, the close
+REQUEST landing as the window's own close-request event). What
+only your desktop shows is the feature's actual job: a real
+desktop's window list.
+
+Fastest sign-off (any example, plus a terminal beside it):
+
+```c
+#include <fdk/fdk_toplevel.h>
+static void tl_changed(fdk_toplevel_list *l, void *u) {
+    printf("--- %u toplevels ---\n", fdk_toplevel_count(l));
+    for (fdk_u32 i = 0; i < fdk_toplevel_count(l); i++) {
+        fdk_toplevel_info info = { .struct_size = sizeof(info) };
+        fdk_toplevel_get_info(l, i, &info);
+        printf("%u: %-30s %s %s%s%s%s\n", i, info.title, info.app_id,
+               info.states & FDK_TOPLEVEL_ACTIVATED ? "[active] " : "",
+               info.states & FDK_TOPLEVEL_MAXIMIZED ? "[max] " : "",
+               info.states & FDK_TOPLEVEL_MINIMIZED ? "[min] " : "",
+               info.states & FDK_TOPLEVEL_FULLSCREEN ? "[full] " : "");
+    }
+}
+/* after fdk_init: */
+fdk_toplevel_list *tl = fdk_toplevel_list_open(ctx, tl_changed, NULL);
+```
+
+Expectations (Wayland: sway, labwc; X11: any EWMH WM):
+
+- Your terminal and every other window appear with title + app_id
+  (X11 shows WM_CLASS — usually the program's generic name). Opening
+  and closing windows fires the callback and the list follows.
+- `fdk_toplevel_activate(tl, i)` focuses window i (the platform's
+  focus-stealing rules apply — on a normal desktop a user-triggered
+  click on your taskbar button is exactly the "user action" the
+  rules want). `fdk_toplevel_close(tl, i)` asks the window to close
+  politely — an unsaved-document app may still ask its user first.
+- On X11, a mid-session retitle (renaming a terminal tab) shows up
+  at the next window open/close/focus change, not immediately — the
+  documented X11 limit (clients own their PropertyNotify). On
+  Wayland retitles arrive immediately.
+- GNOME (no wlr-foreign-toplevel) answers NULL from open — the
+  documented degradation; treat NULL as "no taskbar substrate".

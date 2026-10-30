@@ -45,15 +45,30 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts** (recounted 2026-10-30 at the D-3 landing against every
+**Counts** (recounted 2026-10-30 at the D-4 landing against every
 register row — the arithmetic is the table's, item for item):
-DONE 56 · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 0 ·
+DONE 57 · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 0 ·
 DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items. The
 62 = 13 A + 19 B + 9 M + 10 S + 6 C + 5 D. Per the owner's Phase 2
 directive ("DEFER D-1 to D-5: do these too"), the D tier is now the
 active queue: ~~D-1 (B-15)~~ **SHIPPED**, ~~D-2 (B-16)~~
-**SHIPPED**, ~~D-3 (tablets)~~ **SHIPPED**, D-4
-(foreign-toplevel), D-5 (B-19's session-restore half).
+**SHIPPED**, ~~D-3 (tablets)~~ **SHIPPED**, ~~D-4
+(foreign-toplevel)~~ **SHIPPED**, D-5 (B-19's session-restore
+half).
+Re-verified 2026-10-30 (post-D-4): the dual-backend rebuild zero
+warnings; core `make test`; `make test-x11` TWICE consecutive (the
+foreign-toplevel leg green both runs — the fake-WM round trip with
+the load-bearing post-selection XSync the second run's race taught);
+`make test-dbus` (ALL PASS); `FDK_SANITIZE=0` test; release +
+examples + verify-exports (861, +6); the FULL sway suite green with
+the LIVE foreign-toplevel section (the section's own window in the
+roster with title+app_id+activation, the second window appearing,
+activation through sway's own tree, the close REQUEST landing as
+the window's own close-request, membership removal, id stability);
+and fdk-shell build + test-x11 + test-desktop (ALL PASS). The two
+rig lessons of the landing are recorded as DECISIONS D-031: the
+LAZY manager bind (the initial burst meets a listener) and the
+empty-set change from open (an empty desktop emits nothing).
 Re-verified 2026-10-30 (post-D-3): the dual-backend rebuild zero
 warnings; core `make test`; `make test-x11` (the NEW tablet leg
 green: the live device scan against Xvfb — the honest no-tablet
@@ -359,7 +374,7 @@ unaffected):
 | D-1 | EGL/GPU Wayland | **DONE** (2026-10-30) | the GLX lane's contract on EGL: CPU rasterization unchanged, the lane replaces only present()'s "pixels → compositor" half — texture upload (BGRA/UNSIGNED_BYTE, the staging buffer's little-endian XRGB8888 bytes in place) + fullscreen NEAREST quad + eglSwapBuffers through a wl_egl_window-backed EGL surface; dlopen("libEGL.so.1") + dlopen("libwayland-egl.so.1"), ZERO new build deps, hand-declared EGL/GLES2 subset through eglGetProcAddress (GLVND does not promise dlsym for core GLES); policy mirrors x11_gl.c (hardware yes, llvmpipe/softpipe/swrast no, FDK_GL_FORCE overrides, FDK_NO_GL opts out); the ALPHA decision is correctness not style — the staging buffer's X byte is ZERO, so the quad shader pins alpha 1.0 and the config prefers an alpha-less EGLConfig (an XRGB8888 swap buffer, opaque by protocol like wl_shm's; passthrough alpha would be a fully transparent window — the pre-merge review caught it); first-frame self-check glReadPixels (RGBA/UNSIGNED_BYTE — the ONLY GLES2-guaranteed default-framebuffer readback) vs the staging buffer, mismatch = REAL failure, process-wide refusal, FORCE overrides on a fresh connection, fdk__wayland_egl_test_reset() seam; failure = DOWNGRADE never a broken frame (any lane error or FDK_GL_FAIL_AT poison salvages the staging frame into a wl_shm slot and re-presents it NOW, permanent — fdk__wayland_surface_downgrade_from_lane); deferred first frame rides lane_frame_deferred and the configure handler flushes it (the CPU path's deferred render_pending contract mirrored); small-surface gate FDK_WL_GL_MIN_PIXELS = the X11 value; lazy per-connection load at the FIRST acquisition of ANY window (no-window apps never touch EGL). Tests (test_wayland_integration.c, the x11_gl group's shape): the policy matrix (FDK_NO_GL strict CPU; small windows CPU by the size gate — deterministic; large default OBSERVED), present + health under FORCE (two windows, one connection, full + partial damage frames, interleaved, connection healthy after every one), the downgrade leg (poisoned present #2 salvaged, permanent, frames keep flowing), the self-check REAL-failure leg (per-connection refusal, one warning per connection, the FRESH-connection FORCE override, the reset seam). Client-side pixel fidelity pinned by the self-check itself; compositor-side has no XGetImage equivalent a client may call — pinned by the sway rig's screenshot smoke (byte-exact probes through grim, passed) + the desktop sign-off recipe (TESTING-ON-DESKTOP.md). Real hardware GPUs: implemented — should work (untested on real hardware; the rig exercises it through Mesa's swrast/WL-SHM EGL path under FDK_GL_FORCE) | — |
 | D-2 | subsurfaces | **DONE** (2026-10-30) | fdk_ext_subsurface_create/_ex + set_position/resize/set_desync/place_above/place_below (extension API v2, 855 exports, +7): X11 — real child windows (server-clipped, XConfigureWindow sibling restack, XTEST-routed input, XDND aware, themed pre-paint background, the creation XSync barrier); Wayland — wl_subsurface DESYNC by default, the ext-adopt field set + output-enter scale tracking + fractional preference, configured from birth (no handshake exists). THE protocol lesson (D-029): position/stacking/tree-membership are PARENT-managed state — a desync child of a quiet parent is invisible (sway never answers its frame callback; the rig caught it in the first run); FDK issues the applying EMPTY ancestor commit (gated on configured) at create/set_position/place so moves are immediate on both backends. Keyboard follows the parent's focus, pointer routes to the child (child-local coords, both backends by construction); popups on subsurfaces: X11 yes, Wayland the loud UNSUPPORTED (xdg_popup's parent rule); nesting legal on both, sweep depth-first; resize dispatches CONFIGURE (client owns the size). Tests: the X11 leg (second-connection window-tree truth, pixel readback over-parent, real XTEST click, the counting error fence around both sweep orders) + the sway section (injected clicks, hit-testing-proven move/resize/stacking-flip, grim+PIL desync pixel proof) | — |
 | D-3 | tablets / stylus | **DONE** (2026-10-30) | FDK_EVENT_TABLET_PROXIMITY_IN/OUT/DOWN/MOTION/UP/BUTTON (enum 52-57, appended — zero new symbols, 855 unchanged) + fdk_tablet_event (position/pressure 0..1/tilt degrees/tool id/tool_type/button with the high-bit release marker) + fdk_tablet_tool_type (pen..totem): NO synthesis layer — a stylus is never a pointer click. Wayland: zwp_tablet_v2 (vendored generated code, zero new build deps) — manager bind when offered, per-seat tablet seat, the tool stream with the protocol's frame batching absorbed (one frame = one event); tablets/pads tracked-but-inert (the D-030 pad gap). X11: the valuator path through dlopen'd libXi — the XIQueryDevice scan (label-matched pressure axis, positional fallbacks), motion/button events from tablet sourceids translate with pressure (65535 clamp)/tilt, button 1 = the TIP -> DOWN/UP, buttons 2+ -> BUTTON; core pointer untouched (additive, X11's own model). The honest platform gap: XI2 has no proximity for clients — IN synthesized at a session's first event, no OUT (the tool goes silent; D-030). Tests: both seams drive the REAL bodies (the M-3 discipline — no rig can mint a tablet) + the live halves (the sway manager bind + tablet seat; the X11 scan against a real Xvfb). Real hardware: implemented — should work (untested on real hardware) | — |
-| D-4 | foreign-toplevel | **DEFERRED** | by scope discipline | — |
+| D-4 | foreign-toplevel | **DONE** (2026-10-30) | fdk_toplevel_list_open/close/count/get_info/activate/close (include/fdk/fdk_toplevel.h, 861 exports +6) — the taskbar substrate, both backends: Wayland wlr-foreign-toplevel-management (LAZY manager bind at open — the initial burst needs an attached listener; the empty set's change fires from open itself) + X11 EWMH (_NET_CLIENT_LIST snapshot with WM_NAME/WM_CLASS/_NET_WM_STATE/_NET_ACTIVE_WINDOW, live on root PropertyNotify, activate = the S-6 message shape, close = _NET_CLOSE_WINDOW). The coarse changed-callback model (D-014's shape); the honest X11 retitle gap documented (D-031). Tests: the X11 fake-WM round trip (messages RECEIVED at the WM, the load-bearing XSync) + the sway LIVE section (own window listed, activation via sway's tree, the close REQUEST round trip) | — |
 | D-5 | xdg session save/restore | **DEFERRED** | by scope discipline | — |
 
 ---
@@ -564,7 +579,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | D-1 | **EGL/GPU lane on Wayland** (SHIPPED 2026-10-30 — the full account is the D-1 verified-status row) | B-15 |
 | ~~D-2~~ | Subsurfaces (needs extension API v2 parent-surface kinds) — **SHIPPED 2026-10-30 as the v2 subsurface API** | B-16 |
 | ~~D-3~~ | Tablets / stylus — **SHIPPED 2026-10-30 (both backends + the seams)** | B-17 |
-| D-4 | foreign-toplevel management | — |
+| ~~D-4~~ | foreign-toplevel management — **SHIPPED 2026-10-30 (fdk_toplevel.h, both backends)** | — |
 | D-5 | xdg session save/restore protocols | B-19 |
 
 ---

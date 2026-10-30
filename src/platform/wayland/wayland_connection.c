@@ -11,6 +11,7 @@
 #include "generated/idle-inhibit-unstable-v1-client-protocol.h"
 #include "generated/xdg-activation-v1-client-protocol.h"
 #include "generated/tablet-unstable-v2-client-protocol.h"
+#include "generated/wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -158,6 +159,16 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->idle_inhibit_manager =
             wl_registry_bind(registry, name,
                              &zwp_idle_inhibit_manager_v1_interface, 1);
+    } else if (strcmp(interface,
+                      zwlr_foreign_toplevel_manager_v1_interface.name) == 0) {
+        /* OPTIONAL (1.1.0, D-4): wlr-foreign-toplevel-management —
+         * the taskbar substrate's factory. Only the NAME is taken
+         * here: the manager is bound at fdk_toplevel_list_open
+         * (wayland_toplevel.c) so the protocol's initial toplevel
+         * burst meets an attached listener instead of the void.
+         * Absent (GNOME, KDE pre-5.x, kiosk shells) = open answers
+         * NULL — the honest degradation, never an error. */
+        conn->foreign_toplevel_name = name;
     } else if (strcmp(interface,
                       zwp_tablet_manager_v2_interface.name) == 0) {
         /* OPTIONAL (1.1.0, D-3): the tablet family's factory — the
@@ -501,6 +512,12 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     if (conn->subcompositor) {
         wl_subcompositor_destroy(conn->subcompositor);
     }
+    if (conn->foreign_toplevel_manager) {
+        zwlr_foreign_toplevel_manager_v1_destroy(
+            conn->foreign_toplevel_manager);
+        conn->foreign_toplevel_manager = NULL;
+    }
+    conn->foreign_toplevel_name = 0;
     if (conn->compositor) wl_compositor_destroy(conn->compositor);
     if (conn->registry) wl_registry_destroy(conn->registry);
 

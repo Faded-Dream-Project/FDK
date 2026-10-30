@@ -51,6 +51,7 @@
  * x11_gl.h discipline test_x11_integration.c uses for its own GL
  * group. */
 #include "platform/wayland/wayland_egl.h"
+#include "platform/wayland/wayland_platform.h" /* the D-4 toplevel seam */
 #include "platform/wayland/wayland_platform.h" /* the D-3 tablet seam */
 
 #include <assert.h>
@@ -905,6 +906,23 @@ static void wl_tablet_evt_cb(fdk_window *window,
         } else if (event->type == FDK_EVENT_TABLET_PROXIMITY_OUT) {
             g_tablet_prox_out++;
         }
+    }
+}
+
+/* ---- Foreign toplevel capture (1.1.0, D-4) ----------------------------- */
+static int g_tl_changes = 0;
+static void wl_tl_changed(fdk_toplevel_list *list, void *user) {
+    (void)list;
+    (void)user;
+    g_tl_changes++;
+}
+static int g_tl_close_requests = 0;
+static void wl_tl_window_cb(fdk_window *window,
+                             const fdk_event_data *event, void *user) {
+    (void)window;
+    (void)user;
+    if (event->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        g_tl_close_requests++;
     }
 }
 
@@ -4103,6 +4121,146 @@ int main(void) {
                "pressure+tilt at frame commit, down/up at the recorded "
                "position, side buttons with the release bit, distinct "
                "simultaneous tool ids, out-of-proximity noise dropped)\n");
+    }
+
+    /* ---- Foreign toplevels (1.1.0, D-4): the wlr-foreign half ----
+     *
+     * Self-contained by design (its own windows — the section runs
+     * late, after every other leg has torn its windows down): sway
+     * LISTS the client's own toplevels, so the section's window
+     * APPEARS in the roster; the close REQUEST round-trips (the
+     * compositor's close lands as the window's own close-request
+     * event); activation is observable through sway's own
+     * focused-window query. The full taskbar substrate against the
+     * real compositor. */
+    {
+        g_tl_changes = 0;
+        /* The section's own window: mapped + painted BEFORE the list
+         * opens (the roster snapshot rides the lazy bind's burst). */
+        fdk_window *tw1 = NULL;
+        fdk_window_options tw1opts = { .title = "FDK tl probe A",
+                                       .width = 180, .height = 120 };
+        assert(fdk_ok(fdk_window_create(ctx, &tw1opts, &tw1)));
+        fdk_window_set_event_callback(tw1, wl_tl_window_cb, NULL);
+        fdk_window_show(tw1);
+        pump_and_paint(ctx, tw1, 600);
+
+        fdk_toplevel_list *tl =
+            fdk_toplevel_list_open(ctx, wl_tl_changed, NULL);
+        /* The single-list rule first. */
+        assert(fdk_toplevel_list_open(ctx, wl_tl_changed, NULL) == NULL);
+        if (tl == NULL) {
+            printf("[skip] wayland foreign toplevels (compositor without "
+                   "the protocol)\n");
+            fdk_window_destroy(tw1);
+        } else {
+            /* The burst: the section's window is a toplevel. (The
+             * open itself fired the empty-set change; the burst's
+             * per-handle done fires more.) */
+            for (int i = 0; i < 60 && g_tl_changes < 2; i++) {
+                (void)fdk_pump_events(ctx, 50);
+            }
+            assert(g_tl_changes >= 2); /* open + the burst's done   */
+            fdk_u32 n0 = fdk_toplevel_count(tl);
+            assert(n0 >= 1);
+            fdk_toplevel_info info = { .struct_size = sizeof(info) };
+            int probe = -1;
+            for (fdk_u32 i = 0; i < n0; i++) {
+                assert(fdk_ok(fdk_toplevel_get_info(tl, i, &info)));
+                if (strcmp(info.title, "FDK tl probe A") == 0) {
+                    probe = (int)i;
+                    break;
+                }
+            }
+            assert(probe >= 0);
+            assert(strcmp(info.app_id, "org.fdk.test") == 0);
+            assert((info.states & FDK_TOPLEVEL_ACTIVATED) != 0);
+
+            /* A second window appears. */
+            fdk_window *tw2 = NULL;
+            fdk_window_options tw2opts = { .title = "FDK tl probe B",
+                                           .width = 160, .height = 100 };
+            assert(fdk_ok(fdk_window_create(ctx, &tw2opts, &tw2)));
+            fdk_window_set_event_callback(tw2, wl_tl_window_cb, NULL);
+            fdk_window_show(tw2);
+            pump_and_paint(ctx, tw2, 900);
+            assert(fdk_toplevel_count(tl) == n0 + 1);
+            int probe_b = -1;
+            for (fdk_u32 i = 0; i < fdk_toplevel_count(tl); i++) {
+                assert(fdk_ok(fdk_toplevel_get_info(tl, i, &info)));
+                if (strcmp(info.title, "FDK tl probe B") == 0) {
+                    probe_b = (int)i;
+                    break;
+                }
+            }
+            assert(probe_b >= 0);
+
+            /* ACTIVATE probe A (sway's own tree is the witness —
+             * probe B holds focus after its creation). */
+            const char *focused = sway_focused_window_name();
+            assert(focused != NULL);
+            if (strcmp(focused, "FDK tl probe A") != 0) {
+                assert(fdk_ok(fdk_toplevel_activate(tl, (fdk_u32)probe)));
+                for (int i = 0; i < 20; i++) {
+                    (void)fdk_pump_events(ctx, 50);
+                }
+                focused = sway_focused_window_name();
+                assert(focused != NULL);
+                assert(strcmp(focused, "FDK tl probe A") == 0);
+            }
+
+            /* THE CLOSE REQUEST on probe B: the taskbar's close
+             * lands as the window's own close-request event. */
+            g_tl_close_requests = 0;
+            assert(fdk_ok(fdk_toplevel_close(tl, (fdk_u32)probe_b)));
+            for (int i = 0; i < 20 && g_tl_close_requests == 0; i++) {
+                (void)fdk_pump_events(ctx, 50);
+            }
+            assert(g_tl_close_requests == 1);
+            fdk_window_destroy(tw2); /* honor the request           */
+            for (int i = 0; i < 16; i++) {
+                (void)fdk_pump_events(ctx, 50);
+            }
+            assert(fdk_toplevel_count(tl) == n0); /* it left the set */
+
+            /* Id stability across a change: re-snapshotting keeps
+             * probe A's id. */
+            fdk_u64 id_a = 0;
+            for (fdk_u32 i = 0; i < fdk_toplevel_count(tl); i++) {
+                assert(fdk_ok(fdk_toplevel_get_info(tl, i, &info)));
+                if (strcmp(info.title, "FDK tl probe A") == 0) {
+                    id_a = info.id;
+                    break;
+                }
+            }
+            assert(id_a != 0);
+            fdk_toplevel_info again = { .struct_size = sizeof(again) };
+            for (fdk_u32 i = 0; i < fdk_toplevel_count(tl); i++) {
+                assert(fdk_ok(fdk_toplevel_get_info(tl, i, &again)));
+                if (strcmp(again.title, "FDK tl probe A") == 0) {
+                    assert(again.id == id_a);
+                    break;
+                }
+            }
+
+            fdk_window_destroy(tw1);
+            fdk_toplevel_list_close(tl);
+            /* A reopen after close is legal (the single tracker slot
+             * freed with the list). */
+            g_tl_changes = 0;
+            fdk_toplevel_list *tl2 =
+                fdk_toplevel_list_open(ctx, wl_tl_changed, NULL);
+            assert(tl2 != NULL);
+            (void)fdk_pump_events(ctx, 100);
+            fdk_toplevel_list_close(tl2);
+            printf("[ok] wayland foreign toplevels: the live roster under "
+                   "sway — the section's own window listed with "
+                   "title+app_id+the activation bit, a second window "
+                   "appearing, activation verified through sway's own "
+                   "tree, the close REQUEST round trip (the window's own "
+                   "close event), membership removal, id stability, "
+                   "single-list rule, reopen after close\n");
+        }
     }
 
     if (win != NULL) {

@@ -173,6 +173,9 @@ struct fdk_platform_connection {
     Atom net_wm_state_maximized_vert;
     Atom net_wm_state_maximized_horiz;
     Atom net_wm_state_fullscreen; /* 1.4.10 */
+    Atom net_wm_state_hidden; /* 1.1.0 D-4: minimized (iconic)     */
+    Atom net_client_list;     /* 1.1.0 D-4: the taskbar roster     */
+    Atom net_close_window;    /* 1.1.0 D-4: the polite close       */
     Atom net_wm_moveresize;
     Atom wm_state;         /* ICCCM WM_STATE (iconic/normal tracking) */
     Atom wm_change_state;  /* ICCCM iconify request message type      */
@@ -277,6 +280,10 @@ struct fdk_platform_connection {
      * selection, and touch events never arrive (the honest
      * degradation; core input is unaffected). */
     struct fdk_x11_xi2 *xi2;
+
+    /* Foreign toplevels (1.1.0, D-4): the single tracker the root
+     * PropertyNotify hook notifies (x11_toplevel.c). */
+    struct fdk_platform_toplevels *x11_toplevels;
 
     /* --- Resize cursors (1.1.4) ---
      *
@@ -851,6 +858,23 @@ int fdk_x11_xi2_test_tablet(fdk_platform_connection *conn,
                             double pressure, double tilt_x,
                             double tilt_y, uint32_t button,
                             int button_release);
+
+/* Foreign toplevels (1.1.0, D-4) — x11_toplevel.c. */
+fdk_result fdk_x11_toplevels_open(
+    fdk_platform_connection *conn,
+    fdk_platform_toplevels_changed_fn on_change, void *user,
+    struct fdk_platform_toplevels **out);
+void fdk_x11_toplevels_close(struct fdk_platform_toplevels *t);
+fdk_u32 fdk_x11_toplevels_count(struct fdk_platform_toplevels *t);
+const struct fdk_platform_toplevel *fdk_x11_toplevels_at(
+    struct fdk_platform_toplevels *t, fdk_u32 index);
+fdk_result fdk_x11_toplevels_activate(
+    struct fdk_platform_toplevels *t, fdk_u32 index);
+fdk_result fdk_x11_toplevels_close_window(
+    struct fdk_platform_toplevels *t, fdk_u32 index);
+/* The dispatch loop's root-PropertyNotify hook (D-4). */
+int fdk__x11_toplevels_root_notify(fdk_platform_connection *conn,
+                                   const XPropertyEvent *ev);
 
 /* XIM IME (1.1.0, M-1; src/platform/x11/x11_ime.c): the preedit
  * callback machinery behind FDK_EVENT_IME_PREEDIT. attach_cbs builds

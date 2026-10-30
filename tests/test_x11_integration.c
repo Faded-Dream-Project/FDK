@@ -13430,6 +13430,176 @@ static void test_xi2_tablet(void) {
            "normalization, tool types), seam refusals\n");
 }
 
+/* ---- Foreign toplevels (1.1.0, D-4) --------------------------------------
+ *
+ * The fake-WM posture (the EWMH rig's own discipline): a second
+ * Xlib connection IS the window manager — it mints client windows,
+ * publishes _NET_CLIENT_LIST/_NET_ACTIVE_WINDOW on the root, and
+ * RECEIVES the activate/close client messages FDK's taskbar API
+ * sends. Every read the API makes is verified against real server
+ * state; every request it sends lands at the fake WM. */
+static int g_tl_changes = 0;
+static void tl_changed(fdk_toplevel_list *list, void *user) {
+    (void)list;
+    (void)user;
+    g_tl_changes++;
+}
+
+static void test_foreign_toplevels(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    /* 1. The bare-X posture: no WM answering means an EMPTY list —
+     * the documented degradation (NULL list would also be legal;
+     * Xvfb has the atoms interned, so open succeeds and the roster
+     * reads empty). */
+    g_tl_changes = 0;
+    fdk_toplevel_list *list =
+        fdk_toplevel_list_open(ctx, tl_changed, NULL);
+    assert(list != NULL);
+    assert(g_tl_changes >= 1); /* the initial (empty) set lands */
+    assert(fdk_toplevel_count(list) == 0);
+    {
+        fdk_toplevel_info info = { .struct_size = sizeof(info) };
+        assert(fdk_toplevel_get_info(list, 0, &info) ==
+               FDK_ERR_INVALID_ARGUMENT); /* out of range          */
+        assert(fdk_toplevel_activate(list, 0) == FDK_ERR_INVALID_ARGUMENT);
+        assert(fdk_toplevel_close(list, 0) == FDK_ERR_INVALID_ARGUMENT);
+    }
+
+    /* 2. The single-list rule: a second open answers NULL. */
+    assert(fdk_toplevel_list_open(ctx, tl_changed, NULL) == NULL);
+
+    /* 3. THE FAKE WM: mint two client windows with the properties
+     * a taskbar reads, publish the roster. */
+    Display *wm = XOpenDisplay(NULL);
+    assert(wm != NULL);
+    Window root = DefaultRootWindow(wm);
+    Window c1 = XCreateSimpleWindow(wm, root, 10, 10, 100, 80, 0, 0, 0);
+    Window c2 = XCreateSimpleWindow(wm, root, 200, 10, 100, 80, 0, 0, 0);
+    XStoreName(wm, c1, "Client One");
+    XStoreName(wm, c2, "Client Two");
+    {
+        XClassHint hint = {0};
+        hint.res_name = (char *)"one";
+        hint.res_class = (char *)"ClientOne";
+        XSetClassHint(wm, c1, &hint);
+        hint.res_name = (char *)"two";
+        hint.res_class = (char *)"ClientTwo";
+        XSetClassHint(wm, c2, &hint);
+    }
+    /* c2 maximized: both _NET_WM_STATE atoms on it. */
+    Atom net_wm_state = XInternAtom(wm, "_NET_WM_STATE", False);
+    Atom max_v = XInternAtom(wm, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+    Atom max_h = XInternAtom(wm, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+    Atom state_atoms[2] = { max_v, max_h };
+    XChangeProperty(wm, c2, net_wm_state, XA_ATOM, 32, PropModeReplace,
+                    (const unsigned char *)state_atoms, 2);
+    Atom client_list = XInternAtom(wm, "_NET_CLIENT_LIST", False);
+    Window roster[2] = { c1, c2 };
+    XChangeProperty(wm, root, client_list, XA_WINDOW, 32, PropModeReplace,
+                    (const unsigned char *)roster, 2);
+    /* c1 active. */
+    Atom active_atom = XInternAtom(wm, "_NET_ACTIVE_WINDOW", False);
+    Window active = c1;
+    XChangeProperty(wm, root, active_atom, XA_WINDOW, 32, PropModeReplace,
+                    (const unsigned char *)&active, 1);
+    XFlush(wm);
+
+    int before = g_tl_changes;
+    (void)fdk_pump_events(ctx, 300);
+    assert(g_tl_changes > before); /* the roster churn notified    */
+    assert(fdk_toplevel_count(list) == 2);
+
+    /* 4. The snapshot reads: titles (WM_NAME fallback — the fake WM
+     * set no _NET_WM_NAME), app_ids (WM_CLASS res_class), states
+     * (c2 maximized), focus (c1 ACTIVATED). */
+    fdk_toplevel_info info = { .struct_size = sizeof(info) };
+    assert(fdk_ok(fdk_toplevel_get_info(list, 0, &info)));
+    assert(strcmp(info.title, "Client One") == 0);
+    assert(strcmp(info.app_id, "ClientOne") == 0);
+    assert(info.id == (fdk_u64)c1);
+    assert(info.states == FDK_TOPLEVEL_ACTIVATED);
+    assert(fdk_ok(fdk_toplevel_get_info(list, 1, &info)));
+    assert(strcmp(info.title, "Client Two") == 0);
+    assert(strcmp(info.app_id, "ClientTwo") == 0);
+    assert(info.states == FDK_TOPLEVEL_MAXIMIZED);
+    assert(info.id == (fdk_u64)c2);
+    /* The struct_size discipline: a mismatched struct refuses. */
+    {
+        fdk_toplevel_info bad = { .struct_size = 8 };
+        assert(fdk_toplevel_get_info(list, 0, &bad) ==
+               FDK_ERR_INVALID_ARGUMENT);
+    }
+
+    /* 5. THE REQUESTS: the fake WM receives the client messages.
+     * (It selects SubstructureRedirect on the root — a real WM's
+     * defining duty — so ClientMessages reach its event queue. The
+     * XSync is LOAD-BEARING: without it the selection can still be
+     * in the WM's output buffer when FDK's message arrives at the
+     * server, and the routed-to-nobody message is gone — the race
+     * the first CI-shaped run of this leg caught.) */
+    XSelectInput(wm, root, SubstructureRedirectMask |
+                               SubstructureNotifyMask);
+    XSync(wm, False); /* the selection is IN before any message   */
+    assert(fdk_ok(fdk_toplevel_activate(list, 1))); /* activate c2 */
+    assert(fdk_ok(fdk_toplevel_close(list, 0)));    /* close c1    */
+    {
+        XEvent ev;
+        int got_active = 0, got_close = 0;
+        for (int i = 0; i < 40 && !(got_active && got_close); i++) {
+            while (XCheckTypedEvent(wm, ClientMessage, &ev)) {
+                if (ev.xclient.message_type == active_atom &&
+                    ev.xclient.window == c2 && ev.xclient.data.l[0] == 1) {
+                    got_active = 1;
+                }
+                Atom close_atom =
+                    XInternAtom(wm, "_NET_CLOSE_WINDOW", False);
+                if (ev.xclient.message_type == close_atom &&
+                    ev.xclient.window == c1) {
+                    got_close = 1;
+                }
+            }
+            (void)fdk_pump_events(ctx, 25);
+        }
+        assert(got_active);
+        assert(got_close);
+    }
+
+    /* 6. Membership churn: drop c1 from the roster — the change
+     * fires and the snapshot follows. */
+    Window roster2[1] = { c2 };
+    XChangeProperty(wm, root, client_list, XA_WINDOW, 32, PropModeReplace,
+                    (const unsigned char *)roster2, 1);
+    XFlush(wm);
+    before = g_tl_changes;
+    (void)fdk_pump_events(ctx, 300);
+    assert(g_tl_changes > before);
+    assert(fdk_toplevel_count(list) == 1);
+    assert(fdk_ok(fdk_toplevel_get_info(list, 0, &info)));
+    assert(info.id == (fdk_u64)c2);
+
+    /* 7. Teardown: list close, then a REOPEN works (the single-slot
+     * rule frees with the close), and shutdown is clean. */
+    fdk_toplevel_list_close(list);
+    fdk_toplevel_list *list2 = fdk_toplevel_list_open(ctx, tl_changed, NULL);
+    assert(list2 != NULL);
+    assert(fdk_toplevel_count(list2) == 1); /* the roster persists  */
+    fdk_toplevel_list_close(list2);
+
+    XDestroyWindow(wm, c1);
+    XDestroyWindow(wm, c2);
+    XCloseDisplay(wm);
+    fdk_shutdown(ctx);
+    printf("[ok] foreign toplevels (X11): the fake-WM roster round trip "
+           "— client list + titles (WM_NAME fallback) + WM_CLASS app_ids "
+           "+ maximized state + focus bit, activate/close client "
+           "messages RECEIVED at the WM, membership churn live, "
+           "single-list rule, reopen after close, the bare-X empty "
+           "posture\n");
+}
+
 /* Idle inhibition (1.1.0, S-3): X11 has no platform op — the D-Bus
  * fallback engages. This rig runs under Xvfb WITHOUT a session bus,
  * so the inhibitor degrades to UNSUPPORTED (a connect failure or
@@ -13496,6 +13666,7 @@ int main(void) {
     test_ext_fd_sources();
     test_ext_subsurface_x11();
     test_xi2_tablet();
+    test_foreign_toplevels();
     test_init_with_app_id();
     test_quit_before_run_is_safe();
     test_run_returns_when_no_windows_open();

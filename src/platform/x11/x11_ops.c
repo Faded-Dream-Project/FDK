@@ -66,6 +66,12 @@ static const fdk_platform_ops g_x11_ops = {
     .subsurface_resize = fdk_x11_subsurface_resize,
     .subsurface_set_desync = fdk_x11_subsurface_set_desync,
     .subsurface_place = fdk_x11_subsurface_place,
+    .toplevels_open = fdk_x11_toplevels_open,
+    .toplevels_close = fdk_x11_toplevels_close,
+    .toplevels_count = fdk_x11_toplevels_count,
+    .toplevels_at = fdk_x11_toplevels_at,
+    .toplevels_activate = fdk_x11_toplevels_activate,
+    .toplevels_close_window = fdk_x11_toplevels_close_window,
 };
 
 const fdk_platform_ops *fdk_platform_x11_ops(void) {

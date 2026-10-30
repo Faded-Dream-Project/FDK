@@ -384,6 +384,11 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
      * pins the spec spelling against this. */
     conn->net_wm_state_maximized_horiz =
         XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+    conn->net_client_list = XInternAtom(display, "_NET_CLIENT_LIST", False);
+    conn->net_close_window =
+        XInternAtom(display, "_NET_CLOSE_WINDOW", False);
+    conn->net_wm_state_hidden =
+        XInternAtom(display, "_NET_WM_STATE_HIDDEN", False);
     conn->net_wm_state_fullscreen =
         XInternAtom(display, "_NET_WM_STATE_FULLSCREEN", False);
     conn->net_wm_moveresize = XInternAtom(display, "_NET_WM_MOVERESIZE", False);

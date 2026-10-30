@@ -268,6 +268,11 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             conn->desktop_changed = 1;
             continue;
         }
+        /* Foreign toplevels (1.1.0, D-4): membership/focus churn on
+         * the root re-snapshots the taskbar roster. */
+        if (fdk__x11_toplevels_root_notify(conn, &xevent.xproperty)) {
+            continue;
+        }
 
         /* XSETTINGS live follow (1.1.0): a settings-daemon property
          * rewrite — color-scheme, icon theme, whatever the daemon

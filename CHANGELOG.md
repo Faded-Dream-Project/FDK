@@ -14,6 +14,48 @@ candidates are marked until the owner promotes them.
 
 ## [Unreleased-candidate features] — 2026-10-30 (on the rc2 line)
 
+### Added — the foreign toplevel list: the taskbar substrate, both backends (D-4)
+
+- **`include/fdk/fdk_toplevel.h` (6 new functions, 861 exports, +6)**:
+  `fdk_toplevel_list_open/_close/_count/_get_info/_activate/_close`
+  — the OTHER applications' top-level windows, enumerated and live,
+  with the two actions a panel takes. The model is deliberately
+  COARSE (the tray-host pattern, D-014): ONE changed callback — a
+  window opened, closed, retitled, changed state, focus moved — and
+  the consumer re-snapshots (count + get_info, struct_size copies
+  with stable ids). Degradation everywhere: a compositor without
+  the protocol or a bare X server answers NULL/empty — the
+  taskbar-absent branch, never an error.
+- **Wayland: wlr-foreign-toplevel-management** (vendored generated
+  protocol code, zero new build deps) — the manager LAZILY bound at
+  list-open (the initial burst rides the bind; a registry-time bind
+  would send it into a listenerless proxy — lost forever, the rig's
+  lesson), handle streams folded into the coarse model (every `done`
+  fires one change), the empty set fires its change from open (an
+  empty desktop never sends events at all — the rig's second
+  lesson, now the header's documented "may fire during open").
+  activate = handle.activate(seat); close = handle.close().
+- **X11: EWMH** — the root's _NET_CLIENT_LIST snapshot
+  (_NET_WM_NAME/WM_NAME titles, WM_CLASS res_class as the app_id
+  analog, _NET_WM_STATE bits, _NET_ACTIVE_WINDOW focus), live on
+  the root's PropertyNotify (membership/focus churn), activate =
+  the S-6 _NET_ACTIVE_WINDOW message shape pointed at the foreign
+  window, close = _NET_CLOSE_WINDOW (the polite path, never
+  XKillClient). THE honest X11 gap (D-031): title edits on OTHER
+  clients' windows are not notified (clients own their PropertyNotify
+  selection) — a retitle lands at the next membership/focus churn.
+- **Tests**: the X11 leg is a full fake-WM round trip (the roster
+  with titles/app_ids/states/focus, the activate/close client
+  messages RECEIVED at the WM — with the load-bearing XSync after
+  the redirect selection, the race the second run caught —
+  membership churn live, single-list rule, reopen after close, the
+  bare-X empty posture) and the sway section is the LIVE substrate
+  (the section's own window listed with title+app_id+the activation
+  bit, a second window appearing, activation verified through
+  sway's own tree, the close REQUEST landing as the window's own
+  close-request event, membership removal, id stability, the
+  single-list rule, reopen after close).
+
 ### Added — tablets / stylus input, both backends (D-3 / B-17)
 
 - **6 new event types + the `fdk_tablet_event` payload**
