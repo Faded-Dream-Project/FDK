@@ -575,6 +575,7 @@ static void matrix_init_primaries(void) {
         "/usr/share/fonts/opentype/urw-base35/NimbusSans-Regular.otf",
         "/usr/share/fonts/urw-base35/NimbusSans-Regular.otf",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
         "/usr/share/fonts/wqy/wqy-zenhei.ttc",
     };
     k_matrix_n_primaries = 0;
@@ -748,10 +749,31 @@ static void test_script_matrix(void) {
         fdk__shaped_free(sh);
         fdk_font_destroy(primary);
     }
-    /* At least the Han leg must have RUN wherever this suite runs
-     * (the CJK font is a disclosed CI dependency everywhere the
-     * shaping suite runs at all) — a machine where NOTHING ran has
-     * no fallback channel worth testing. */
+    /* The liveness floor: fontconfig must at least answer for
+     * Latin, or no fallback channel exists to exercise at all — an
+     * environment property (the el10 and arch CI containers ship no
+     * libfontconfig unless the pipeline installs it), not a
+     * regression, so the matrix DISCLOSES the skip instead of
+     * failing. Everywhere fontconfig is alive, at least one leg
+     * must have RUN — a machine where NOTHING ran has no fallback
+     * channel worth testing. */
+    {
+        char *probe_path = NULL;
+        long probe_face = 0;
+        bool fc_alive = fdk_text_resolve_fallback_font(
+            "en", 'A', NULL, 0, &probe_path, &probe_face);
+        if (probe_path != NULL) {
+            fdk_free(probe_path);
+        }
+        if (!fc_alive) {
+            printf("[skip] the six-script fallback matrix: "
+                   "fontconfig is not available on this machine — "
+                   "the dlopen fallback channel does not exist "
+                   "(disclosed; the CI images install it where the "
+                   "suite must run)\n");
+            return;
+        }
+    }
     if (ran == 0) {
         fprintf(stderr, "FAIL: every script leg skipped — no fallback "
                         "channel exercised at all\n");

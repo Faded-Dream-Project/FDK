@@ -243,7 +243,11 @@ fi
 
 # ---- Han: the dense full-width ideograph --------------------------------------
 if font_present zh; then
-    rig_leg "R4 Han (漢字)" zh "漢字" 0 15
+    # dense-delta 8: measured margins are +11 (wqy-zenhei on the
+    # ubuntu runner) to +25 (NotoSansSC here); a .notdef pair sits
+    # at ~0-5 (the differential below carries the leg if a lighter
+    # face ever shaves the margin).
+    rig_leg "R4 Han (漢字)" zh "漢字" 0 8
 else
     echo "R4 SKIP: no CJK font on this machine (disclosed)"
 fi

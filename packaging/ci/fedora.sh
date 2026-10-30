@@ -48,7 +48,12 @@ RUN almalinux:10 '
         libXrandr-devel \
         wayland-devel libxkbcommon-devel \
         dejavu-sans-fonts dejavu-sans-mono-fonts \
+        fontconfig \
         harfbuzz fribidi
+    # fontconfig: the el10 image does NOT pull it in with the font
+    # packages — without libfontconfig.so.1 the whole dlopen fallback
+    # channel is absent and the shaping matrix liveness floor skips
+    # every leg (found live on CI: the WARN said it plainly).
     # RHEL 10 ships no standalone Xorg server: Xvfb is absent even
     # from CRB. The build container then skips the X11 suite
     # (disclosed by the build script); the Fedora 42 install-test

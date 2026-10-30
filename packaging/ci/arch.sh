@@ -33,7 +33,13 @@ RUN archlinux:base '
         xorg-server-xvfb ttf-dejavu tar \
         harfbuzz fribidi wqy-zenhei \
         libxrandr \
+        fontconfig \
         noto-fonts
+    # fontconfig: the ARCH font packages do not pull it in (their
+    # optdepends, not depends) — without the library the whole
+    # dlopen fallback channel is absent and every matrix leg would
+    # skip (found live by the matrix liveness floor on CI: the
+    # build died at the fontconfig-less /etc/fonts pin write).
     # noto-fonts (the base set): the per-script faces (Arabic,
     # Devanagari, Hebrew, Thai, Bengali, ...) the shaping suite
     # six-script fallback matrix needs — the unsorted-table root
