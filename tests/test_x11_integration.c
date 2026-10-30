@@ -15381,6 +15381,21 @@ static void color_done_cb(const fdk_color_dialog_result *result,
     color_last = *result;
 }
 
+/* Bounded state poll for the menu button's open flag (the choosers
+ * group): dispatch latency on the slower CI containers can exceed
+ * one fixed pump budget — poll the STATE, assert at the call site.
+ * `want` is the desired fdk_menu_button_is_open() answer. */
+static int wait_menu_state(fdk_context *ctx, fdk_widget *mb,
+                           int want, int attempts) {
+    for (int i = 0; i < attempts; i++) {
+        if (!!fdk_menu_button_is_open(mb) == !!want) {
+            return 1;
+        }
+        (void)fdk_pump_events(ctx, 100);
+    }
+    return !!fdk_menu_button_is_open(mb) == !!want;
+}
+
 static void test_choosers_gui(void) {
     static const char *font_candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -15446,12 +15461,17 @@ static void test_choosers_gui(void) {
             x11_child_windows(send, root_scr, before, 16);
 
         /* Click: the popup maps, the button reports open + paints
-         * pressed (a11y EXPANDED). */
+         * pressed (a11y EXPANDED). The open/close waits POLL the
+         * state (bounded) instead of assuming one 200 ms pump
+         * suffices — the debian install-test's slower runner lost
+         * that fixed-budget race once (release-branch CI, same
+         * commit green on ubuntu and locally); the assertion itself
+         * is unchanged, only the wait is honest about dispatch
+         * latency. */
         mb_hits = 0;
         x11_click(send, xid, 10 + nat.width / 2,
                   10 + nat.height / 2);
-        (void)fdk_pump_events(ctx, 200);
-        assert(fdk_menu_button_is_open(mb));
+        assert(wait_menu_state(ctx, mb, 1, 20));
         int n_now = x11_child_windows(send, root_scr, now, 16);
         assert(n_now == n_before + 1);
         Window pop = x11_new_child(before, n_before, now, n_now);
@@ -15467,9 +15487,8 @@ static void test_choosers_gui(void) {
          * closes, the model SURVIVES (it is the app's). */
         fdk_i32 row_h = fdk__menu_row_height(NULL);
         x11_click(send, pop, 30, row_h / 2);
-        (void)fdk_pump_events(ctx, 200);
+        assert(wait_menu_state(ctx, mb, 0, 20));
         assert(mb_hits == 1);
-        assert(!fdk_menu_button_is_open(mb));
         n_now = x11_child_windows(send, root_scr, now, 16);
         assert(n_now == n_before);
         assert(strcmp(fdk_menu_item_text(it), "Do it") == 0);
@@ -15484,8 +15503,7 @@ static void test_choosers_gui(void) {
          * produces — x11_events turns it into a close request). */
         x11_click(send, xid, 10 + nat.width / 2,
                   10 + nat.height / 2);
-        (void)fdk_pump_events(ctx, 200);
-        assert(fdk_menu_button_is_open(mb));
+        assert(wait_menu_state(ctx, mb, 1, 20));
         n_now = x11_child_windows(send, root_scr, now, 16);
         pop = x11_new_child(before, n_before, now, n_now);
         assert(pop != 0);
@@ -15504,8 +15522,7 @@ static void test_choosers_gui(void) {
                               &ev));
             XFlush(send);
         }
-        (void)fdk_pump_events(ctx, 200);
-        assert(!fdk_menu_button_is_open(mb));
+        assert(wait_menu_state(ctx, mb, 0, 20));
         assert(mb_hits == 1);
         printf("[ok] menu button: outside press dismisses\n");
 
