@@ -47,6 +47,10 @@
  * listener state machine through the ops test seams (see
  * platform_internal.h) — same internal-seam discipline. */
 #include "core/context_internal.h"
+/* GPU-lane group (1.2.0 / D-1): the test-reset seam — the exact
+ * x11_gl.h discipline test_x11_integration.c uses for its own GL
+ * group. */
+#include "platform/wayland/wayland_egl.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -85,6 +89,19 @@ typedef struct {
     fdk_pointf click_pos;
 } wl_touch_capture;
 static wl_touch_capture g_wl_touch;
+
+/* GPU-lane self-check leg (1.2.0 / D-1): counts the lane's
+ * REAL-failure warnings — the contract is one per CONNECTION, never
+ * one per window (the x11_gl.c leg's counting-sink shape). */
+static void wlgl_sc_counting_sink(fdk_log_level level, const char *tag,
+                                   const char *message, void *user) {
+    (void)tag;
+    int *warn = (int *)user;
+    if (level >= FDK_LOG_WARN && strstr(message, "self-check") != NULL &&
+        strstr(message, "persistent mismatch") != NULL) {
+        (*warn)++;
+    }
+}
 
 static void wl_touch_evt_cb(fdk_window *w, const fdk_event_data *ev,
                             void *user) {
@@ -3099,6 +3116,473 @@ int main(void) {
         }
         ime_client_stop();
     }
+    }
+
+    /* ---- GPU present lane (1.2.0 / D-1) --------------------------------
+     *
+     * The EGL mirror of test_x11_integration.c's GL-lane group,
+     * same contract, platform-appropriate proofs:
+     *
+     *   - POLICY: FDK_NO_GL is a strict CPU answer; small windows
+     *     are CPU by the size gate (deterministic everywhere — the
+     *     gate runs before any dlopen); a large default window is
+     *     renderer-driven (software = CPU) and therefore OBSERVED.
+     *
+     *   - PRESENT + HEALTH: under FDK_GL_FORCE the lane engages
+     *     wherever EGL exists (this rig: sway headless + Mesa's
+     *     swrast via wl_shm-backed EGL surfaces — exactly what FORCE
+     *     was designed to exercise), two presents go through (full
+     *     damage + a partial-damage texSubImage frame), and the
+     *     CONNECTION stays protocol-healthy after them. Pixel
+     *     fidelity on the GL side is pinned INSIDE the lane by the
+     *     first-frame self-check (glReadPixels of the drawn back
+     *     buffer vs the staging buffer — see wayland_egl.c); the
+     *     compositor-side end of the pipeline has no XGetImage
+     *     equivalent a client may call, so it is verified by the
+     *     screenshot rig (scripts/wl_gl_lane_smoke.c under sway +
+     *     grim; the byte-exact red/green/yellow probes passed there)
+     *     and documented for real-desktop sign-off in
+     *     TESTING-ON-DESKTOP.md.
+     *
+     *   - DOWNGRADE: FDK_GL_FAIL_AT poisons present #2; the salvage
+     *     path reverts the window to wl_shm permanently with the
+     *     frame intact (rendered_ever stays set, presents keep
+     *     flowing, a LATER window on the same connection may still
+     *     use the lane — the refusal is per-window).
+     *
+     *   - SELF-CHECK REAL FAILURE: FDK_GL_SELFCHECK_POISON forces the
+     *     readback mismatch; the verdict is process-wide (one warning
+     *     per connection), later windows on the connection refuse
+     *     without probing, a FRESH connection under FDK_GL_FORCE
+     *     overrides the verdict (the documented escape hatch), and
+     *     the test seam resets the process state afterwards.
+     *
+     * Every leg runs on its OWN connection (init + shutdown), the
+     * x11_gl.c group's shape — Wayland allows sequential client
+     * connections in one process, and the policy cache's env-knob
+     * keying (wayland_egl.c) makes cross-leg verdict reuse the
+     * designed behavior, asserted by the poison leg's fresh-connect
+     * branch. */
+    {
+        /* ---- policy: FDK_NO_GL is strictly CPU, small windows are
+         * CPU by the size gate (both deterministic, no EGL needed) */
+        {
+            setenv("FDK_NO_GL", "1", 1);
+            unsetenv("FDK_GL_FORCE");
+            fdk_context *gctx = NULL;
+            fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                       .app_id = "org.fdk.test" };
+            assert(fdk_ok(fdk_init(&gctx, &gopts)));
+            fdk_window *gwin = NULL;
+            fdk_window_options gwopts = { .title = "wl gl no-gl",
+                                          .width = 512, .height = 384 };
+            assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+            fdk_window_show(gwin);
+            (void)fdk_pump_events(gctx, 150);
+            fdk_surface *gs = NULL;
+            assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+            fdk_surface_info ginfo;
+            assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+            fdk_render_path gpath = (fdk_render_path)-1;
+            assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+            assert(gpath == FDK_RENDER_PATH_CPU);
+            /* API sanity while here: the query refuses NULLs. */
+            assert(fdk_window_get_render_path(NULL, NULL) ==
+                   FDK_ERR_INVALID_ARGUMENT);
+            fdk_window_destroy(gwin);
+            fdk_shutdown(gctx);
+            unsetenv("FDK_NO_GL");
+        }
+        {
+            /* Default knobs, SMALL window (96x72 << the lane's
+             * FDK_WL_GL_MIN_PIXELS): the size gate answers CPU before
+             * any dlopen — deterministic on every machine, GPU or
+             * not. The whole panel/popup class rides this answer. */
+            fdk_context *gctx = NULL;
+            fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                       .app_id = "org.fdk.test" };
+            assert(fdk_ok(fdk_init(&gctx, &gopts)));
+            fdk_window *gwin = NULL;
+            fdk_window_options gwopts = { .title = "wl gl small",
+                                          .width = 96, .height = 72 };
+            assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+            fdk_window_show(gwin);
+            (void)fdk_pump_events(gctx, 150);
+            fdk_surface *gs = NULL;
+            assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+            fdk_surface_info ginfo;
+            assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+            fdk_render_path gpath = (fdk_render_path)-1;
+            assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+            assert(gpath == FDK_RENDER_PATH_CPU);
+            fdk_window_destroy(gwin);
+            fdk_shutdown(gctx);
+        }
+        {
+            /* Default knobs, LARGE window: renderer-driven —
+             * OBSERVED, not asserted (the machine running this may
+             * have a real GPU; the rig's llvmpipe answers CPU). */
+            fdk_context *gctx = NULL;
+            fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                       .app_id = "org.fdk.test" };
+            assert(fdk_ok(fdk_init(&gctx, &gopts)));
+            fdk_window *gwin = NULL;
+            fdk_window_options gwopts = { .title = "wl gl default large",
+                                          .width = 512, .height = 384 };
+            assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+            fdk_window_show(gwin);
+            (void)fdk_pump_events(gctx, 150);
+            fdk_surface *gs = NULL;
+            assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+            fdk_surface_info ginfo;
+            assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+            fdk_render_path gpath = (fdk_render_path)-1;
+            assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+            printf("    wl gl default/large: render path %s\n",
+                   gpath == FDK_RENDER_PATH_GL ? "GL" : "CPU");
+            fdk_window_destroy(gwin);
+            fdk_shutdown(gctx);
+        }
+        printf("[ok] wayland gl lane policy: FDK_NO_GL strictly CPU; "
+               "small windows CPU by the size gate; large default "
+               "observed (renderer-driven)\n");
+
+        /* ---- present + protocol health under FDK_GL_FORCE -------- */
+        setenv("FDK_GL_FORCE", "1", 1);
+        unsetenv("FDK_NO_GL");
+        unsetenv("FDK_GL_FAIL_AT");
+        unsetenv("FDK_GL_SELFCHECK_POISON");
+        {
+            fdk_context *gctx = NULL;
+            fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                       .app_id = "org.fdk.test" };
+            assert(fdk_ok(fdk_init(&gctx, &gopts)));
+            fdk_window *gwin = NULL;
+            fdk_window_options gwopts = { .title = "wl gl present",
+                                          .width = 512, .height = 384 };
+            assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+            fdk_window_show(gwin);
+            /* The loop shape the deferred-first-frame contract
+             * documents: pump until the window's first frame landed
+             * (the configure flushes a present-before-configure). */
+            for (int i = 0; i < 40; i++) {
+                (void)fdk_pump_events(gctx, 50);
+                if (fdk__window_ever_presented(gwin) != 0) {
+                    break;
+                }
+            }
+            fdk_surface *gs = NULL;
+            assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+            fdk_surface_info ginfo;
+            assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+            fdk_render_path gpath = (fdk_render_path)-1;
+            assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+            if (gpath != FDK_RENDER_PATH_GL) {
+                /* Honest environment answer (no libEGL, no GLES2
+                 * window config, headless weston without EGL): the
+                 * lane's contract is a silent CPU fallback, and that
+                 * fallback is itself worth asserting. */
+                printf("[skip] wayland gl lane not engageable on this "
+                       "compositor — present legs degenerate to the "
+                       "CPU fallback\n");
+                fdk_surface_fill(
+                    gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                (void)fdk_pump_events(gctx, 100);
+                assert(fdk__window_ever_presented(gwin) != 0);
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_CPU);
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+            } else {
+                /* Frame 1 — full damage: the texture upload path +
+                 * the first-completed-frame self-check (its mismatch
+                 * would downgrade BEFORE the swap; staying on the
+                 * lane IS the pixel-fidelity verdict for this frame).
+                 */
+                fdk_surface_fill(
+                    gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                fdk_surface_fill_rect(
+                    gs, (fdk_rect){ .x = 64, .y = 64, .width = 192,
+                                    .height = 128 },
+                    (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 20; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk__window_ever_presented(gwin) != 0);
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_GL);
+
+                /* Frame 2 — partial damage: the texSubImage lane
+                 * (a 64x64 yellow block rides the red field). */
+                assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+                fdk_surface_fill_rect(
+                    gs, (fdk_rect){ .x = 256, .y = 192, .width = 64,
+                                    .height = 64 },
+                    (fdk_color){ .r = 1, .g = 1, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 20; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_GL);
+
+                /* A second window on the SAME connection: the shared
+                 * program/texture state must survive the interleaved
+                 * surface (context rebind per present). */
+                fdk_window *gwin2 = NULL;
+                fdk_window_options gwopts2 = {
+                    .title = "wl gl present 2", .width = 512,
+                    .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts2, &gwin2)));
+                fdk_window_show(gwin2);
+                (void)fdk_pump_events(gctx, 150);
+                fdk_surface *gs2 = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin2, &gs2)));
+                fdk_surface_info ginfo2;
+                assert(fdk_ok(fdk_surface_get_info(gs2, &ginfo2)));
+                fdk_render_path gpath2 = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin2,
+                                                         &gpath2)));
+                assert(gpath2 == FDK_RENDER_PATH_GL);
+                fdk_surface_fill(
+                    gs2, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs2)));
+                /* Interleaved: window 1 presents again after 2. */
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 20; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk__window_ever_presented(gwin2) != 0);
+                assert(fdk_ok(fdk_window_get_render_path(gwin,
+                                                         &gpath)));
+                assert(gpath == FDK_RENDER_PATH_GL);
+                fdk_window_destroy(gwin2);
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+                printf("[ok] wayland gl lane present: two windows, "
+                       "full + partial damage frames, self-check "
+                       "clean, connection healthy after every "
+                       "present\n");
+            }
+        }
+
+        /* ---- downgrade: a poisoned present salvages through wl_shm */
+        setenv("FDK_GL_FAIL_AT", "2", 1);
+        {
+            fdk_context *gctx = NULL;
+            fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                       .app_id = "org.fdk.test" };
+            assert(fdk_ok(fdk_init(&gctx, &gopts)));
+            fdk_window *gwin = NULL;
+            fdk_window_options gwopts = { .title = "wl gl downgrade",
+                                          .width = 512, .height = 384 };
+            assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+            fdk_window_show(gwin);
+            for (int i = 0; i < 40; i++) {
+                (void)fdk_pump_events(gctx, 50);
+                if (fdk__window_ever_presented(gwin) != 0) {
+                    break;
+                }
+            }
+            fdk_surface *gs = NULL;
+            assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+            fdk_surface_info ginfo;
+            assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+            fdk_render_path gpath = (fdk_render_path)-1;
+            assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+            if (gpath == FDK_RENDER_PATH_GL) {
+                /* Frame 1 through the lane: red. */
+                fdk_surface_fill(
+                    gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 10; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_GL);
+
+                /* Frame 2 — POISONED (FDK_GL_FAIL_AT=2): the lane
+                 * reports failure; the salvage path presents the
+                 * SAME frame through wl_shm. The yellow fill must
+                 * land (ever_presented already set, but the PRESENT
+                 * RETURN is the health signal) and the path must
+                 * flip to CPU, permanently. */
+                assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+                fdk_surface_fill(
+                    gs, (fdk_color){ .r = 1, .g = 1, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 10; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_CPU);
+
+                /* Frame 3 (CPU path): partial damage keeps flowing. */
+                assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+                fdk_surface_fill_rect(
+                    gs, (fdk_rect){ .x = 10, .y = 10, .width = 50,
+                                    .height = 50 },
+                    (fdk_color){ .r = 0, .g = 1, .b = 1, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 10; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_CPU);
+                printf("[ok] wayland gl lane downgrade: poisoned "
+                       "present salvaged through the CPU path, "
+                       "permanent, frames keep flowing\n");
+            } else {
+                printf("[skip] wayland gl lane not engageable — "
+                       "downgrade leg degenerates (policy already "
+                       "asserted CPU)\n");
+            }
+            fdk_window_destroy(gwin);
+            fdk_shutdown(gctx);
+        }
+        unsetenv("FDK_GL_FAIL_AT");
+
+        /* ---- self-check REAL failure (poisoned readback) --------- */
+        setenv("FDK_GL_SELFCHECK_POISON", "1", 1);
+        {
+            /* Counting sink: the REAL-failure warning is logged once
+             * per CONNECTION, never once per window. */
+            int sc_warn = 0;
+            fdk_log_set_sink(wlgl_sc_counting_sink, &sc_warn);
+
+            fdk_context *gctx = NULL;
+            fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                       .app_id = "org.fdk.test" };
+            assert(fdk_ok(fdk_init(&gctx, &gopts)));
+
+            /* Window 1: engages, presents, the poisoned readback
+             * declares a REAL failure — the window downgrades with
+             * the frame salvaged (the present still returns OK). */
+            fdk_window *gwin = NULL;
+            fdk_window_options gwopts = { .title = "wl gl scfail 1",
+                                          .width = 512, .height = 384 };
+            assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+            fdk_window_show(gwin);
+            for (int i = 0; i < 40; i++) {
+                (void)fdk_pump_events(gctx, 50);
+                if (fdk__window_ever_presented(gwin) != 0) {
+                    break;
+                }
+            }
+            fdk_surface *gs = NULL;
+            assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+            fdk_surface_info ginfo;
+            assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+            fdk_render_path gpath = (fdk_render_path)-1;
+            assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+            if (gpath == FDK_RENDER_PATH_GL) {
+                fdk_surface_fill(
+                    gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 10; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_CPU);
+
+                /* Window 2, SAME connection: the lane refuses
+                 * outright (the connection's refused flag) — CPU
+                 * from the first acquisition, no second warning. */
+                fdk_window *gwin2 = NULL;
+                fdk_window_options gwopts2 = {
+                    .title = "wl gl scfail 2", .width = 512,
+                    .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts2, &gwin2)));
+                fdk_window_show(gwin2);
+                (void)fdk_pump_events(gctx, 150);
+                fdk_surface *gs2 = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin2, &gs2)));
+                assert(fdk_ok(fdk_surface_get_info(gs2, &ginfo)));
+                fdk_render_path gpath2 = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin2,
+                                                         &gpath2)));
+                assert(gpath2 == FDK_RENDER_PATH_CPU);
+                fdk_surface_fill(
+                    gs2, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs2)));
+                for (int i = 0; i < 10; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                fdk_window_destroy(gwin2);
+
+                /* A FRESH connection (same knobs, poison still set):
+                 * FDK_GL_FORCE overrides the process-wide failure
+                 * verdict — the new connection engages the lane again
+                 * and the poison re-declares the REAL failure,
+                 * proving the verdict is decided per connection,
+                 * never silently inherited across one. */
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+                gctx = NULL;
+                assert(fdk_ok(fdk_init(&gctx, &gopts)));
+                fdk_window *gwin3 = NULL;
+                fdk_window_options gwopts3 = {
+                    .title = "wl gl scfail 3", .width = 512,
+                    .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts3, &gwin3)));
+                fdk_window_show(gwin3);
+                for (int i = 0; i < 40; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                    if (fdk__window_ever_presented(gwin3) != 0) {
+                        break;
+                    }
+                }
+                fdk_surface *gs3 = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin3, &gs3)));
+                fdk_surface_info ginfo3;
+                assert(fdk_ok(fdk_surface_get_info(gs3, &ginfo3)));
+                fdk_render_path gpath3 = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin3,
+                                                         &gpath3)));
+                assert(gpath3 == FDK_RENDER_PATH_GL); /* the override */
+                fdk_surface_fill(
+                    gs3, (fdk_color){ .r = 1, .g = 1, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs3)));
+                for (int i = 0; i < 10; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk_ok(fdk_window_get_render_path(gwin3,
+                                                         &gpath3)));
+                assert(gpath3 == FDK_RENDER_PATH_CPU);
+                fdk_window_destroy(gwin3);
+                fdk_shutdown(gctx);
+
+                /* Log contract: one warning for the first connection
+                 * (both its windows), one more for the fresh forced
+                 * connection — never one per window. */
+                fdk_log_set_sink(NULL, NULL);
+                assert(sc_warn >= 1);
+                assert(sc_warn <= 2);
+                printf("[ok] wayland gl lane self-check: persistent "
+                       "mismatch is a REAL failure — lane refused for "
+                       "the connection, one warning per connection, "
+                       "FDK_GL_FORCE overrides across connections\n");
+            } else {
+                fdk_log_set_sink(NULL, NULL);
+                printf("[skip] wayland gl lane not engageable — "
+                       "self-check failure leg degenerates (FDK_GL_"
+                       "FORCE override branch not exercised)\n");
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+            }
+        }
+        /* The poison was a TEST artifact, not a driver truth: clear
+         * the process-wide verdicts so anything after this group
+         * (and real-hardware runs of the suite) start from an honest
+         * UNVERIFIED state. */
+        fdk__wayland_egl_test_reset();
+        unsetenv("FDK_GL_SELFCHECK_POISON");
+        unsetenv("FDK_GL_FORCE");
     }
 
     /* ---- Idle inhibition (1.1.0, S-3) ----

@@ -15,6 +15,8 @@
 #include "theme/theme_internal.h"
 
 #include <stdint.h>
+#include <stdlib.h> /* getenv — the GL lane's FDK_GL_FORCE gate */
+#include <string.h> /* memcpy — the lane downgrade's frame salvage */
 #include <sys/mman.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -173,6 +175,12 @@ static const struct zxdg_toplevel_decoration_v1_listener
 static fdk_result commit_render_pending(fdk_platform_window *pwindow,
                                         const fdk_platform_damage *damage);
 
+/* Defined below (GPU lane path, 1.2.0 / D-1): the EGL lane's
+ * permanent downgrade + salvage. The deferred-first-frame flush above
+ * needs it before its definition point. */
+fdk_result fdk__wayland_surface_downgrade_from_lane(
+    fdk_platform_window *pwindow);
+
 /* THE deferred-first-frame commit, shared by xdg_surface_configure()
  * and the extension path (wayland_ext.c's resized op — the add-on's
  * role configure). Mirrors the 1.1.0 fix: an application that painted
@@ -194,6 +202,31 @@ int fdk__wayland_commit_deferred_first_frame(
     fdk_platform_window *pwindow) {
     if (pwindow == NULL ||
         pwindow->render_pending == NULL || pwindow->rendered_ever) {
+        /* The GPU lane's deferred frame rides a different flag: the
+         * lane path never sets render_pending. A lane present that
+         * returned before the configure left its drawn pixels in the
+         * STAGING buffer; flush them here (full damage) so a
+         * single-present application still maps with its first
+         * frame — the exact contract the CPU branch below gives a
+         * deferred render_pending. */
+        if (pwindow != NULL && pwindow->egl_win != NULL &&
+            pwindow->lane_frame_deferred && !pwindow->rendered_ever) {
+            pwindow->lane_frame_deferred = 0;
+            fdk_platform_damage full;
+            memset(&full, 0, sizeof(full));
+            full.full = 1;
+            if (fdk_wayland_egl_window_present(
+                    pwindow->egl_win, &full,
+                    pwindow->render_size.width,
+                    pwindow->render_size.height) == 0) {
+                pwindow->rendered_ever = 1;
+                FDK_DEBUG("deferred EGL first frame committed at "
+                          "configure");
+                return 1;
+            }
+            return fdk__wayland_surface_downgrade_from_lane(pwindow) ==
+                   FDK_OK;
+        }
         return 0;
     }
     fdk_size want = {
@@ -971,6 +1004,65 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                                    : pwindow->last_size.height,
                                pwindow->scale_x120);
 
+    /* --- GPU present lane (1.2.0 / D-1, wayland_egl.c) ----------------
+     *
+     * The EGL mirror of x11_surface.c's engagement block, same
+     * decisions: engage once per window (never after a downgrade),
+     * run the SMALL-SURFACE policy BEFORE any dlopen (a process whose
+     * windows are all small never loads the GL stack at all), draw
+     * into the lane's STAGING buffer instead of a wl_shm slot, and
+     * treat staging allocation failure as the classic path's own OOM.
+     * FDK_GL_FORCE overrides the size gate exactly as on X11. */
+    if (pwindow->egl_win == NULL && !pwindow->egl_downgraded) {
+        int lane_eligible =
+            ((fdk_i64)size.width * (fdk_i64)size.height >
+                 FDK_WL_GL_MIN_PIXELS ||
+             getenv("FDK_GL_FORCE") != NULL);
+        if (!lane_eligible) {
+            /* Sticky per window (the whole panel/popup class — same
+             * rationale as x11_surface.c's copy of this policy); one
+             * INFO per process. */
+            pwindow->egl_downgraded = 1;
+            static int small_policy_logged = 0;
+            if (!small_policy_logged) {
+                small_policy_logged = 1;
+                FDK_INFO("GL lane: small surfaces (<= %d px) present on "
+                         "the CPU path (FDK_GL_FORCE=1 overrides)",
+                         FDK_WL_GL_MIN_PIXELS);
+            }
+        } else {
+            if (pwindow->conn->egl == NULL && !pwindow->conn->egl_tried) {
+                pwindow->conn->egl = fdk_wayland_egl_try_load(pwindow->conn);
+                pwindow->conn->egl_tried = 1;
+            }
+            if (pwindow->conn->egl != NULL) {
+                /* render_size feeds the lane's sizing (wl_egl_window
+                 * needs the size at CREATION time; the SHM path derives
+                 * sizes from the slots themselves). */
+                pwindow->render_size = size;
+                pwindow->egl_win = fdk_wayland_egl_window_try_init(
+                    pwindow->conn->egl, pwindow);
+            }
+        }
+    }
+    if (pwindow->egl_win != NULL) {
+        fdk_u32 *staging = fdk_wayland_egl_window_staging(
+            pwindow->egl_win, size.width, size.height);
+        if (staging != NULL) {
+            pwindow->render_size = size;
+            out_fb->pixels = staging;
+            out_fb->width = size.width;
+            out_fb->height = size.height;
+            out_fb->stride = size.width;
+            return FDK_OK;
+        }
+        FDK_WARN("GPU lane staging allocation failed — reverting to the "
+                 "CPU present path");
+        fdk_wayland_egl_window_destroy(pwindow->conn->egl, pwindow->egl_win);
+        pwindow->egl_win = NULL;
+        pwindow->egl_downgraded = 1;
+    }
+
     /* Reuse the pending buffer when the size still matches — apps
      * that draw in several passes (or call get_info more than once
      * per frame) don't allocate a buffer per call. */
@@ -1424,6 +1516,45 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
         return FDK_ERR_INVALID_ARGUMENT;
     }
 
+    /* --- GPU present lane (1.2.0 / D-1) ------------------------------
+     *
+     * Fast path: upload the damaged rects into the window's GL
+     * texture, composite the fullscreen quad, eglSwapBuffers (the
+     * swap's internal attach+commit IS the wl_surface commit —
+     * libwayland-egl does it). A nonzero return is the lane's
+     * PERMANENT downgrade verdict — handled by the shared downgrade
+     * helper (salvage + wl_shm re-present; the window never shows a
+     * broken or stale frame because of the downgrade itself).
+     *
+     * render_pending stays NULL on the lane path (no wl_shm buffer
+     * was acquired), so the classic no-op checks below do not apply;
+     * the "nothing changed" no-op DOES — a no-damage present through
+     * the lane is equally free to skip. */
+    if (pwindow->egl_win != NULL) {
+        if (!damage->full && damage->count == 0) {
+            return FDK_OK;
+        }
+        if (!pwindow->configured) {
+            /* The xdg-shell first-commit gate applies to EGL buffers
+             * exactly as it does to wl_shm ones (a commit is a
+             * commit); defer to the configure path. The lane's
+             * staging buffer holds the frame; the configure handler
+             * flushes it (lane_frame_deferred — the symmetric branch
+             * of the CPU path's deferred render_pending commit). */
+            FDK_DEBUG("EGL present deferred until first configure");
+            pwindow->lane_frame_deferred = 1;
+            return FDK_OK;
+        }
+        fdk_i32 gw = pwindow->render_size.width;
+        fdk_i32 gh = pwindow->render_size.height;
+        if (fdk_wayland_egl_window_present(pwindow->egl_win, damage, gw,
+                                           gh) == 0) {
+            pwindow->rendered_ever = 1;
+            return FDK_OK;
+        }
+        return fdk__wayland_surface_downgrade_from_lane(pwindow);
+    }
+
     /* Documented no-op when nothing was ever acquired/drawn. */
     if (pwindow->render_pending == NULL) {
         return FDK_OK;
@@ -1509,6 +1640,130 @@ int fdk_wayland_window_ever_presented(fdk_platform_window *pwindow) {
     return pwindow != NULL && pwindow->rendered_ever != 0;
 }
 
+/* The render_path op (1.2.0 / D-1): 1 while this window presents
+ * through the EGL lane, 0 on the classic wl_shm path (including
+ * never-engaged and downgraded windows — the honest, current
+ * answer, read live off the backend's own state). The exact mirror
+ * of fdk_x11_window_render_path. */
+int fdk_wayland_window_render_path(fdk_platform_window *pwindow) {
+    return (pwindow != NULL && pwindow->egl_win != NULL) ? 1 : 0;
+}
+
+/* The GPU-lane downgrade path (1.2.0 / D-1) — the mirror of
+ * fdk__x11_surface_downgrade_from_lane: salvage the staging frame
+ * into a fresh wl_shm slot, destroy the lane state, mark the window
+ * downgraded (sticky), and re-present through the classic path with
+ * full damage so the salvaged frame goes out NOW. The staging
+ * buffer holds exactly (last-presented + the drawing since), so the
+ * window never shows a broken or stale frame because of the
+ * downgrade itself. */
+fdk_result fdk__wayland_surface_downgrade_from_lane(
+    fdk_platform_window *pwindow) {
+    if (pwindow == NULL || pwindow->egl_win == NULL) {
+        return FDK_OK;
+    }
+    fdk_platform_connection *conn = pwindow->conn;
+    fdk_i32 gw = pwindow->render_size.width;
+    fdk_i32 gh = pwindow->render_size.height;
+
+    FDK_WARN("GPU present lane failed — reverting this window to "
+             "the CPU present path (permanent)");
+
+    /* A classic slot at the current size, pre-filled from the
+     * staging buffer: the same shape prefetch_visible_frame gives a
+     * recycled slot, built directly because no render slot exists on
+     * the lane path (render_pending was never set). */
+    const fdk_u32 *src =
+        fdk_wayland_egl_window_staging(pwindow->egl_win, gw, gh);
+    if (src == NULL || gw < 1 || gh < 1) {
+        /* No staging to salvage (degenerate sizes): plain teardown,
+         * full-damage classic present, done. */
+        fdk_wayland_egl_window_destroy(conn->egl, pwindow->egl_win);
+        pwindow->egl_win = NULL;
+        pwindow->egl_downgraded = 1;
+        static const fdk_platform_damage fallback_full = {
+            {{0, 0, 0, 0}}, 0, 1
+        };
+        return fdk_wayland_window_present(pwindow, &fallback_full);
+    }
+
+    /* Find (or make) a slot at this size. The classic path's
+     * acquisition owns slot bookkeeping; the direct form here
+     * reuses its primitives: take an empty slot, create the buffer,
+     * copy the frame, set it pending. A full acquisition path runs
+     * when the next present happens anyway — this present must go
+     * out through the classic path NOW. */
+    int slot = -1;
+    for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+        if (pwindow->render_slots[i].buffer == NULL) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        /* Reap an unreleased wrong-size slot (the destroy-order
+         * argument: the lane path never allocated wl_shm slots, so
+         * all four are either free or wrong-size strays from before
+         * the lane engaged). */
+        for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
+            if (pwindow->render_slots[i].buffer != NULL &&
+                pwindow->render_slots[i].buffer != pwindow->buffer) {
+                wl_buffer_destroy(pwindow->render_slots[i].buffer);
+                munmap(pwindow->render_slots[i].pixels,
+                       pwindow->render_slots[i].length);
+                pwindow->render_slots[i].buffer = NULL;
+                pwindow->render_slots[i].pixels = NULL;
+                pwindow->render_slots[i].length = 0;
+                pwindow->render_slots[i].size.width = 0;
+                pwindow->render_slots[i].size.height = 0;
+                pwindow->render_slots[i].released = 0;
+                slot = i;
+                break;
+            }
+        }
+    }
+    fdk_result rc = FDK_OK;
+    if (slot >= 0) {
+        struct wl_buffer *buffer = NULL;
+        uint32_t *pixels = NULL;
+        size_t length = 0;
+        fdk_size size = { .width = gw, .height = gh };
+        fdk_result r = create_shm_buffer(conn, size, &buffer, &pixels,
+                                         &length);
+        if (fdk_ok(r)) {
+            wl_buffer_add_listener(buffer, &g_render_buffer_listener,
+                                   pwindow);
+            pwindow->render_slots[slot].buffer = buffer;
+            pwindow->render_slots[slot].pixels = pixels;
+            pwindow->render_slots[slot].length = length;
+            pwindow->render_slots[slot].size = size;
+            pwindow->render_slots[slot].released = 0;
+            memcpy(pixels, src, sizeof(fdk_u32) * (size_t)gw * (size_t)gh);
+            pwindow->render_pending = buffer;
+        } else {
+            rc = r; /* no classic slot: the damage stays set, the next
+                     * present retries (acquisition's own story) */
+        }
+    }
+
+    fdk_wayland_egl_window_destroy(conn->egl, pwindow->egl_win);
+    pwindow->egl_win = NULL;
+    pwindow->egl_downgraded = 1;
+
+    if (!fdk_ok(rc)) {
+        return rc;
+    }
+
+    /* The salvaged frame goes out through the classic path NOW, full
+     * damage — by recursing into the (egl_win == NULL) present,
+     * which owns the configure gate, damage conversion, the frame
+     * callback, and live-buffer bookkeeping. */
+    static const fdk_platform_damage fallback_full = {
+        {{0, 0, 0, 0}}, 0, 1
+    };
+    return fdk_wayland_window_present(pwindow, &fallback_full);
+}
+
 fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
                                       const fdk_window_options *options,
                                       fdk_platform_window *parent,
@@ -1553,6 +1808,13 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->render_pending = NULL;
     pwindow->rendered_ever = 0;
     pwindow->last_refuse_warn_ms = 0;
+    /* GPU lane (1.2.0 / D-1): engaged at the first framebuffer
+     * acquisition, never here (fdk_alloc does not zero). */
+    pwindow->egl_win = NULL;
+    pwindow->egl_downgraded = 0;
+    pwindow->render_size.width = 0;
+    pwindow->render_size.height = 0;
+    pwindow->lane_frame_deferred = 0;
     pwindow->scale_x120 = 120;    /* 1x until an output says otherwise */
     pwindow->buffer_scale = 1;
     pwindow->scale_applied = 0;   /* applied on the first commit      */
@@ -1833,6 +2095,14 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
 void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
     if (pwindow == NULL) {
         return;
+    }
+    /* GPU lane first (1.2.0 / D-1): the EGL surface wraps this
+     * wl_surface, so it must die BEFORE wl_surface_destroy below —
+     * the lane's own destroy path (context, surface, wl_egl_window,
+     * staging) runs against a still-live surface. */
+    if (pwindow->egl_win != NULL) {
+        fdk_wayland_egl_window_destroy(pwindow->conn->egl, pwindow->egl_win);
+        pwindow->egl_win = NULL;
     }
     /* Render buffers first: this may destroy the live buffer if it is
      * a render one (clearing pwindow->buffer), so the background

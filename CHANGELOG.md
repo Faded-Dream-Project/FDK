@@ -12,6 +12,91 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and in-development release
 candidates are marked until the owner promotes them.
 
+## [Unreleased-candidate features] — 2026-10-30 (on the rc2 line)
+
+### Added — the Wayland GPU present lane, EGL (D-1 / B-15): FDK_RENDER_PATH_GL on both backends
+
+- **`src/platform/wayland/wayland_egl.c` + `wayland_egl.h`** (new):
+  the GLX lane's exact hybrid contract carried to Wayland — CPU
+  rasterization unchanged (the same rasterizer, the same bytes),
+  the lane replaces only present()'s "pixels -> compositor" half:
+  the damaged rects upload into a per-window GL texture
+  (BGRA/UNSIGNED_BYTE — the staging buffer's little-endian XRGB8888
+  bytes read in place), one fullscreen NEAREST quad composites the
+  frame, `eglSwapBuffers` publishes it through a `wl_egl_window`-
+  backed EGL surface. **`fdk_window_get_render_path` answers
+  `FDK_RENDER_PATH_GL` on Wayland now** — the public API is
+  unchanged (the lane rides the existing symbol; 848 exports,
+  verified) and the X11/GLX lane is untouched by construction.
+- **Zero new build dependencies** (the documented baseline —
+  libwayland-client + libxkbcommon — is unchanged):
+  `dlopen("libEGL.so.1")` + `dlopen("libwayland-egl.so.1")` with a
+  hand-declared EGL/GLES2 subset, every entry point through
+  `eglGetProcAddress` (THE documented EGL loader path; GLVND does
+  not promise dlsym for core GLES symbols). Libraries load lazily
+  at the FIRST framebuffer acquisition of ANY window — headless
+  apps and no-window apps never touch EGL. Absent libraries are
+  the documented fallback (the CPU path), never an error.
+- **Policy (mirrors x11_gl.c)**: hardware renderers engage; Mesa's
+  software rasterizers (llvmpipe/softpipe/swrast) refuse — the CPU
+  path is faster there — unless `FDK_GL_FORCE=1` (what the test rig
+  uses under swrast); `FDK_NO_GL=1` opts out entirely; windows at
+  or below `FDK_WL_GL_MIN_PIXELS` (the X11 lane's value) stay on
+  wl_shm before any dlopen (the panel/popup class never loads the
+  GL stack).
+- **The alpha decision is correctness, not style**: the staging
+  buffer is XRGB8888, so its top byte — the byte a BGRA upload
+  reads as ALPHA — is ZERO. The quad's fragment shader PINS alpha
+  1.0 and the config prefers an alpha-less EGLConfig (an XRGB8888
+  swap buffer, opaque by protocol exactly like the wl_shm path's);
+  a passthrough shader would hand the compositor a fully
+  transparent window. Caught in pre-merge review — the GLX lane's
+  "the X byte rides along" reasoning does not cross to Wayland's
+  ARGB compositing.
+- **First-frame self-check**: `glReadPixels` of the drawn back
+  buffer, probed against the staging buffer
+  (RGBA/UNSIGNED_BYTE — the only readback GLES2 guarantees for the
+  default framebuffer; the GLX lane's BGRA read is a desktop-GL
+  guarantee that does not cross over). A mismatch is a REAL
+  failure: the lane refuses for the connection AND the process
+  (one warning, logged once — the x11_gl.c verdict discipline),
+  and `FDK_GL_FORCE` explicitly overrides the process verdict on a
+  fresh connection. `FDK_GL_SELFCHECK_POISON` is the test seam;
+  `fdk__wayland_egl_test_reset()` clears the verdicts between test
+  groups.
+- **Failure = downgrade, never a broken frame**: any lane error
+  (GL error, lost context, the `FDK_GL_FAIL_AT` poison) salvages
+  the current staging frame into a fresh wl_shm slot, re-presents
+  it immediately through the CPU path, and the window stays there
+  permanently (`fdk__wayland_surface_downgrade_from_lane` — the
+  `fdk__x11_surface_downgrade_from_lane` mirror). A present that
+  arrives before the window's first xdg configure rides
+  `lane_frame_deferred` and the configure handler flushes it — the
+  CPU path's deferred-first-frame contract, mirrored, so a
+  single-present application still maps with its first frame.
+- **Tests** (`tests/test_wayland_integration.c`, the x11_gl
+  group's shape): the policy matrix (FDK_NO_GL strictly CPU; small
+  windows CPU by the size gate — deterministic on every machine;
+  large default OBSERVED, renderer-driven); present + protocol
+  health under FDK_GL_FORCE (two windows on one connection, full
+  and partial-damage frames, interleaved presents, connection
+  healthy after every one); the downgrade leg (poisoned present #2
+  salvaged through wl_shm, permanent, frames keep flowing); the
+  self-check real-failure leg (per-connection refusal, one warning
+  per connection, the fresh-connection FORCE override, the reset
+  seam). Client-side pixel fidelity is pinned by the self-check
+  itself; the compositor-side half has no XGetImage equivalent a
+  client may call on Wayland, so it is pinned by the rig's
+  screenshot smoke (byte-exact red/green/yellow probes through
+  grim under sway headless — passed) and the desktop sign-off
+  recipe in TESTING-ON-DESKTOP.md.
+- **Docs**: docs/rendering.md's GPU-lane section now covers both
+  backends; docs/dependencies.md's runtime-optional table gains
+  libEGL.so.1 + libwayland-egl.so.1; fdk_window.h's render-path
+  doc and README updated. Real hardware GPUs: implemented — should
+  work (untested on real hardware; the rig exercises the lane
+  through Mesa's swrast path under FDK_GL_FORCE).
+
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
 ### Fixed — fdk-shell's passive-grab test: the XTEST key count raced the server's read order

@@ -45,15 +45,31 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts** (recounted 2026-10-30 at `e4b9fd2` against every register
-row — the arithmetic is the table's, item for item): DONE 53 ·
-PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 2 (B-15, B-16 —
-both are DEFER-tier work: D-1 and D-2) · DEFERRED (by design) 5 ·
+**Counts** (recounted 2026-10-30 at the D-1 landing against every
+register row — the arithmetic is the table's, item for item):
+DONE 54 · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 1
+(B-16 — DEFER-tier work: D-2) · DEFERRED (by design) 5 ·
 BLOCKED-BY-SANDBOX 0 — of 62 items. The 62 = 13 A + 19 B + 9 M +
 10 S + 6 C + 5 D. Per the owner's Phase 2 directive ("DEFER
 D-1 to D-5: do these too"), the D tier is now the active queue:
-D-1 (B-15), D-2 (B-16), D-3 (tablets — B-17's fenced half),
-D-4 (foreign-toplevel), D-5 (B-19's session-restore half).
+~~D-1 (B-15)~~ **SHIPPED**, D-2 (B-16), D-3 (tablets — B-17's
+fenced half), D-4 (foreign-toplevel), D-5 (B-19's session-restore
+half).
+Re-verified 2026-10-30 (post-D-1): the dual-backend rebuild zero
+warnings; the FULL sway suite green WITH the new GL-lane group
+(policy matrix incl. the deterministic small-surface gate;
+present + health under FDK_GL_FORCE — two windows, one connection,
+full + partial damage frames, interleaved presents; the
+FDK_GL_FAIL_AT downgrade leg; the SELFCHECK_POISON real-failure leg
+with the one-warning-per-connection log contract and the
+fresh-connection FORCE override) — all four legs exercising the
+REAL lane (the rig's Mesa swrast EGL through libEGL dlopen +
+GLVND's vendor ICD); plus the standalone screenshot smoke proving
+the compositor-side end: the GL-lane window's red/green/yellow
+probes read back byte-exact through grim on the sway headless
+output. Core `make test` + `test-x11` re-run green after the
+change (the X11 GLX lane untouched by construction — the new code
+is Wayland-only files plus the gated engagement block).
 Re-verified 2026-10-30 (post-CI-repair — the 15-push red streak's
 root causes): S-5's Xrender.h include (a build dep the lane's own
 design forbids — every job on every runner failed at that compile
@@ -270,7 +286,7 @@ unaffected):
 | B-12 | cursor shape set | **DONE** | S-5 shipped (2026-10-29; CORRECTED 2026-10-30 — see the post-CI-repair re-verification above: the shipped Xrender.h include was a forbidden build dep that broke every CI job for 15 pushes, and it hid PictStandardARGB32 spelled as A1's 4 — the themed cursors were garbage pictures behind async BadMatch; both fixed, the wire values pinned, the error-counting fence added): `fdk_cursor_shape` 2 -> 22 shapes (the cursor-shape-v1 semantic space, append-only; 802 exports unchanged); ONE resolution point (`fdk__cursor_resolve`: app request > widget hover (Entry/TextView/Spin I-beam) > compass > arrow) with the transition cache; Wayland: set_shape when the manager exists (the sway suite pins the full enum table row by row) + the shared XCursor theme loader fallback (src/platform/cursor_theme.c, extracted from the 1.1.4 Wayland parser); X11: the dlopen'd libXrender.so.1 RENDER lane (theme images, no new build dep — TRUE after the correction: the wire types are spelled in the platform header) over the core font glyph table with the documented substitutions (D-016); fdk-shell 0.4.0 mirrors the set | — |
 | B-13 | drag icons + drop targets | **DONE** | S-9 shipped (2026-10-29): fdk_drag_begin_ex (the icon rides the drag — Wayland: the protocol's own start_drag icon surface, ARGB8888 SHM, committed pre-start, destroyed at end; X11: the GTK-shaped override-redirect window tracking the pointer at the hotspot offset, alpha-shaped via XShape, skipped by the source's own target walk) + fdk_widget_set_drop_target / fdk_widget_get_drop_target / fdk_widget_set_drag_callback (widget-level targets with scoped ENTER/MOTION/LEAVE/DROP delivery; acceptance PER-POSITION through fdk__core_drag_accepts_at — the XDND Status and wl_data_offer.accept re-evaluate at every position, window-mask fallback where no target owns it; the window callback still sees everything). SAME-CONNECTION drags fixed (the ::send-served-by-our-own-dispatch read + the drag_drop_active fence against mid-read teardown); the 250 ms EOF never-arriving wart closed (our pipe write-end closed at the receive request); the X11 DROP event carries the last Position's coordinates; 847 exports (+4). Tests: X11 — 7 new legs (icon window exists/tracks/alpha-shapes/destroys through a REAL drag into the external sink; files ON the zone -> scoped widget delivery + window unchanged; text on the fallback -> window-mask acceptance with NO widget events; scoped ENTER/LEAVE across zone boundaries through synthetic XDND); Wayland — the interop leg's zone (a URI drag landing on a TEXT-only window through per-position acceptance) + the FDK-source drag-with-icon leg (icon surface live during / destroyed after, the zone received the drop with the full payload, connection healthy). D-021 | owner's real-desktop check (TESTING-ON-DESKTOP.md §14) |
 | B-14 | image formats | **DONE** [animated GIF shipped] | C-4 landed (2026-10-29): fdk_gif + fdk_gif_player + fdk_picture_set_animated_file — the spec-native decoder (LZW incl. KwKwK, disposal 1/2/3, interlace, NETSCAPE loops, the PIL embedded-stream resync), the one-frame-at-a-time player, the Picture delay-paced timer with pause; tests/test_gif.c + the X11 GUI leg (real-encoder fixtures in tests/data/gifgen/); D-019. Static raster + SVG were already present. Fenced: animated WebP/APNG stay future families on the same shape | — |
-| B-15 | GPU on Wayland | **MISSING** | CPU SHM only; GL lane is X11/GLX | D-1 (deferred by design) |
+| B-15 | GPU on Wayland | **DONE** | EGL present lane shipped (2026-10-30, D-1) — see the B-15 register row | — (D-1 closed it) |
 | B-16 | subsurfaces | **MISSING** | no wl_subsurface | D-2 |
 | B-17 | tablets / gestures | **DONE** (gestures; tablets stay D-3) | C-6 shipped (2026-10-29): FDK_EVENT_GESTURE_PINCH + FDK_EVENT_GESTURE_SWIPE (fdk_gesture_event: focus/scale/delta/fingers/direction) on the pure touch engine — the pinch rides the two-slot posture the scroll uses (scale cumulative since the posture began, delta incremental, the centroid focus; coexists with the scroll — centroid vs span; a finger swap re-baselines), the swipe is an END-gesture verdict (every lift within FDK_GESTURE_SWIPE_MS, EVERY finger's dominant-axis travel >= FDK_GESTURE_SWIPE_MIN_PX — the per-finger minimum the rig caught: two lazy fingers do not sum into a swipe — opposing travels reject, fingers = the peak membership). No backend moved: the emissions ride the engine's emit sink; both backends identical by construction. Tests: 6 engine legs (the span arithmetic incl. the coexisting scroll + the re-baseline numbers 2.0-not-8/3; SWIPE(RIGHT,2) + SWIPE(UP,3); the four rejects — slow lift window, short travel, single finger, disagreement; CANCEL wipes the gesture state). D-025 | tablets remain D-3 |
 | B-18 | widget residue | **DONE** | editable combo (`fdk_combo_set_editable`) + S-10 shipped (2026-10-29): fdk_calendar (the month grid — Monday-lead, six rows, adjacent-month cells, keyboard walking, today marker), fdk_date_picker (formatted field + popup calendar, the combo guard discipline), fdk_time_picker (segmented stepper with wraparound + 12/24h cycle); the i18n calendar math underneath; D-018 records the posture (no clock reads, no parse). tests/test_calendar.c + the X11 GUI leg + the sway leg (real-seat day pick through the compositor); 825 exports | — |
@@ -300,7 +316,7 @@ unaffected):
 | C-4 | animated images | **DONE** | = B-14 (GIF; D-019) | — |
 | C-5 | re-anchor + auto-hide | **DONE** | = A-05/A-08 (both halves, both backends; D-024) | — |
 | C-6 | basic gestures | **DONE** | = B-17 (the pinch/swipe half; D-025) | — |
-| D-1 | EGL/GPU Wayland | **DEFERRED** | by scope discipline (1.2.0) | — |
+| D-1 | EGL/GPU Wayland | **DONE** (2026-10-30) | the GLX lane's contract on EGL: CPU rasterization unchanged, the lane replaces only present()'s "pixels → compositor" half — texture upload (BGRA/UNSIGNED_BYTE, the staging buffer's little-endian XRGB8888 bytes in place) + fullscreen NEAREST quad + eglSwapBuffers through a wl_egl_window-backed EGL surface; dlopen("libEGL.so.1") + dlopen("libwayland-egl.so.1"), ZERO new build deps, hand-declared EGL/GLES2 subset through eglGetProcAddress (GLVND does not promise dlsym for core GLES); policy mirrors x11_gl.c (hardware yes, llvmpipe/softpipe/swrast no, FDK_GL_FORCE overrides, FDK_NO_GL opts out); the ALPHA decision is correctness not style — the staging buffer's X byte is ZERO, so the quad shader pins alpha 1.0 and the config prefers an alpha-less EGLConfig (an XRGB8888 swap buffer, opaque by protocol like wl_shm's; passthrough alpha would be a fully transparent window — the pre-merge review caught it); first-frame self-check glReadPixels (RGBA/UNSIGNED_BYTE — the ONLY GLES2-guaranteed default-framebuffer readback) vs the staging buffer, mismatch = REAL failure, process-wide refusal, FORCE overrides on a fresh connection, fdk__wayland_egl_test_reset() seam; failure = DOWNGRADE never a broken frame (any lane error or FDK_GL_FAIL_AT poison salvages the staging frame into a wl_shm slot and re-presents it NOW, permanent — fdk__wayland_surface_downgrade_from_lane); deferred first frame rides lane_frame_deferred and the configure handler flushes it (the CPU path's deferred render_pending contract mirrored); small-surface gate FDK_WL_GL_MIN_PIXELS = the X11 value; lazy per-connection load at the FIRST acquisition of ANY window (no-window apps never touch EGL). Tests (test_wayland_integration.c, the x11_gl group's shape): the policy matrix (FDK_NO_GL strict CPU; small windows CPU by the size gate — deterministic; large default OBSERVED), present + health under FORCE (two windows, one connection, full + partial damage frames, interleaved, connection healthy after every one), the downgrade leg (poisoned present #2 salvaged, permanent, frames keep flowing), the self-check REAL-failure leg (per-connection refusal, one warning per connection, the FRESH-connection FORCE override, the reset seam). Client-side pixel fidelity pinned by the self-check itself; compositor-side has no XGetImage equivalent a client may call — pinned by the sway rig's screenshot smoke (byte-exact probes through grim, passed) + the desktop sign-off recipe (TESTING-ON-DESKTOP.md). Real hardware GPUs: implemented — should work (untested on real hardware; the rig exercises it through Mesa's swrast/WL-SHM EGL path under FDK_GL_FORCE) | — |
 | D-2 | subsurfaces | **DEFERRED** | by scope discipline | — |
 | D-3 | tablets / stylus | **DEFERRED** | by scope discipline | — |
 | D-4 | foreign-toplevel | **DEFERRED** | by scope discipline | — |
@@ -443,7 +459,7 @@ has an API surface, tests, and docs in the tree):
 | B-12 | **Cursor shape set** — 2 shapes (arrow/hand) + per-edge resize cursors; Wayland rides cursor-shape-v1 (all names available), X11 uses core `XCreateFontCursor` (no themes). | partial | standard shapes (text beam, wait, crosshair, grab) missing from the public surface | S | none |
 | B-13 | **Drag icons + widget-level drop targets** — DnD is window-level (apps hit-test); no drag icon on either backend. | **DONE** [VERIFIED-CHANGED: S-9 shipped both halves — see the B-13 verified-status row] | usable but visibly rough; file managers do manual hit-testing today | S (icon) / M (targets) | none |
 | B-14 | **Image formats** — stb_image decode (JPEG/PNG/BMP/TGA/PSD/GIF-static/HDR/PIC/PNM) + PNG encode + nanosvg. No animated GIF/WebP/APNG/AVIF; SVG without filters/masks/text. | partial | static raster + SVG solid; animated content missing | S–M | none **[DONE 2026-10-29 — animated GIF shipped (C-4, D-019); WebP/APNG fenced as future families; SVG filters/masks/text unchanged]** |
-| B-15 | **GPU rendering on Wayland** — CPU SHM only; the GL lane is X11/GLX. | partial | Wayland renders software (the toolkit's design center; the GL lane was an X11 perf answer) | L | none |
+| B-15 | **GPU rendering on Wayland** — CPU SHM only; the GL lane is X11/GLX. | **DONE** [VERIFIED-CHANGED: D-1 shipped the EGL present lane (2026-10-30) — see the D-1 register row for the full account] | Wayland renders software (the toolkit's design center; the GL lane was an X11 perf answer) | L | none |
 | B-16 | **Subsurfaces** — no wl_subsurface; no X11 child-window compositing. | missing | video-in-UI, offscreen compositing overlays | M | none — would ride extension API v2 |
 | B-17 | **Tablets / stylus / gestures** — no zwp_tablet, no pinch/swipe anywhere. | **DONE (gestures)** [VERIFIED-CHANGED: C-6 shipped pinch+swipe on the touch engine — see the B-17 verified-status row; tablets/stylus remain D-3 by scope discipline] | drawing tablets dead; pinch-zoom absent | M–L | none |
 | B-18 | **Widget-set residue** — no date/time picker, no editable combo; everything else on the GTK4 checklist has an FDK counterpart (menus, lists, trees, tables via grid/tree, text editing with selection and undo, tooltips, pickers, scroll views, tabs). | partial | small, visible gaps | S each | none **[DONE 2026-10-29 — see the B-18 verified-status row; S-10]** |
@@ -505,7 +521,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 
 | # | item | gaps closed |
 |---|------|-------------|
-| D-1 | EGL/GPU lane on Wayland | B-15 |
+| D-1 | **EGL/GPU lane on Wayland** (SHIPPED 2026-10-30 — the full account is the D-1 verified-status row) | B-15 |
 | D-2 | Subsurfaces (needs extension API v2 parent-surface kinds) | B-16 |
 | D-3 | Tablets / stylus | B-17 |
 | D-4 | foreign-toplevel management | — |

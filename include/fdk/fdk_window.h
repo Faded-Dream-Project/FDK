@@ -402,14 +402,15 @@ fdk_result fdk_window_get_scale(const fdk_window *window,
  *       travel to the server through shared memory (MIT-SHM/XPutImage
  *       on X11, wl_shm on Wayland).
  *
- *   FDK_RENDER_PATH_GL — the GPU present lane (X11 today). The
+ *   FDK_RENDER_PATH_GL — the GPU present lane (both backends:
+ *       X11/GLX since 1.4.18, Wayland/EGL since 1.2.0). The
  *       damaged rects upload into a GL texture and one fullscreen
- *       composite carries the frame to the screen through GLX —
- *       byte-identical pixels, hardware-accelerated blit.
+ *       composite carries the frame to the screen through GLX or
+ *       EGL — byte-identical pixels, hardware-accelerated blit.
  *
  * Which path a window uses is decided by the backend at the first
- * framebuffer acquisition, from real capabilities (libGL loadable,
- * GLX present, a matching FBConfig, a hardware renderer — Mesa's
+ * framebuffer acquisition, from real capabilities (the GL libraries
+ * loadable, a matching visual/config, a hardware renderer — Mesa's
  * software rasterizers stay on the CPU path because it is faster
  * there). It is not a request: applications cannot force a path,
  * they can only observe it (and rely on the guaranteed fallback:
@@ -427,7 +428,8 @@ fdk_result fdk_window_get_scale(const fdk_window *window,
 typedef enum fdk_render_path {
     /* Software present: CPU rasterization + SHM/copy transport. */
     FDK_RENDER_PATH_CPU = 0,
-    /* Hybrid present: CPU rasterization + GPU composite (GLX). */
+    /* Hybrid present: CPU rasterization + GPU composite
+     * (GLX on X11, EGL on Wayland). */
     FDK_RENDER_PATH_GL = 1
 } fdk_render_path;
 

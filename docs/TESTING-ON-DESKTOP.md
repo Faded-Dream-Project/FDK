@@ -618,3 +618,40 @@ Expectations:
   arrive as TOUCH_CANCEL (nothing synthesized, by design).
 
 **Status: DONE (should work; owner verification pending).**
+
+## 19. The Wayland GPU present lane on your hardware (D-1 / B-15 — needs your GPU)
+
+What the rig proved: the lane's whole state machine against a REAL
+compositor (sway headless, through Mesa's software EGL under
+FDK_GL_FORCE) — policy, engagement, full + partial-damage presents,
+two windows interleaved on one connection, the permanent downgrade
+with frame salvage, the self-check's real-failure refusal — plus
+the compositor-side bytes: the rig's screenshot smoke read the
+GL-lane window's probe colors back byte-exact through grim. What
+only your machine shows is a HARDWARE renderer's side of it.
+
+Expectations (run any example or your own app on your Wayland
+session — labwc, sway, KDE, GNOME all qualify):
+
+- With a hardware GL driver, a window larger than 512x256 presents
+  through EGL automatically — nothing to enable. Verify with the
+  log line `GPU present lane active on Wayland (renderer "...")`
+  (FDK_LOG_DEBUG), or call `fdk_window_get_render_path` and expect
+  `FDK_RENDER_PATH_GL`.
+- Pixels are byte-identical to the CPU path — if anything looks
+  tinted, ghosted, or transparent, that is a bug (the lane's
+  self-check should have caught it; if it did not, report the
+  renderer string).
+- Small windows (the panel/popup class) stay on wl_shm by design —
+  render path CPU there is correct, not a failure.
+- `FDK_NO_GL=1` must force wl_shm everywhere; `FDK_GL_FORCE=1`
+  must engage the lane even on llvmpipe (useful to compare the
+  two paths' output on the same machine).
+- NVIDIA's Wayland EGL driver is the interesting case the rig
+  cannot cover: if the self-check refuses it you will see one
+  warning line and every window silently stays on the CPU path —
+  the app must keep working perfectly either way. That graceful
+  silence is the contract; a crash or a black window is not.
+
+**Status: DONE (should work; owner verification pending on real
+hardware — the rig's coverage is the Mesa swrast path).**

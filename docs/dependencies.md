@@ -105,6 +105,7 @@ never an error):
 | `libXi.so.6` | XI2 touch events (M-3) | No touch events; the pointer/keyboard streams unchanged ($FDK_NO_XI2 pins it off) |
 | `libXrender.so.1` | The RENDER cursor lane — themed ARGB cursors (S-5) | The core cursor font's nearest-glyph table (every shape keeps an honest twin) |
 | `libGL.so.1` | The X11 GPU present lane | The CPU present path (always the design center) |
+| `libEGL.so.1` + `libwayland-egl.so.1` | The Wayland GPU present lane (1.2.0 / D-1) | The CPU present path — wl_shm, the platform's own design center |
 
 The audit trail sentence below was also stale: the link line has
 carried `-lXrandr` since M-6 (see the table above) and `-lz` since

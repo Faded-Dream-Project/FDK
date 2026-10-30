@@ -1462,3 +1462,67 @@ the symmetric removal.
 The interface-name prefix stays org.freedesktop.atspi.* (the level-1
 posture; at-spi2 accepts both prefixes, and the mock rig pins this
 one).
+
+## D-028 — the Wayland GPU present lane: the GLX contract on EGL, the alpha byte nobody owns (D-1 / B-15)
+
+2026-10-30. The DEFER tier's first shipped item (the owner's Phase 2
+directive): X11's hybrid present lane crossed to Wayland. The DESIGN
+question was never "how" — x11_gl.c's contract documents itself as
+portable — but which of the GLX lane's implicit guarantees silently
+fail on EGL, and three did.
+
+**1. The platform difference that matters is the BUFFER FORMAT.**
+GLX chose an RGB visual: the X byte of every XRGB8888 pixel was
+discarded by the server, and the lane could upload the framebuffer
+as BGRA and let the alpha channel carry garbage. Wayland EGL window
+surfaces are ARGB8888 by default, and the compositor READS that
+alpha under premultiplied blending — the staging buffer's top byte
+is ZERO, so a passthrough shader would present a fully TRANSPARENT
+window: every GL-lane window invisible, the self-check green
+(both sides of its comparison carry the same zero), the CPU path
+untouched. The lane pins opacity at TWO levels instead: the quad's
+fragment shader forces alpha 1.0, and the config prefers an
+alpha-less EGLConfig (EGL_ALPHA_SIZE 0 — an XRGB8888 swap buffer,
+opaque by protocol exactly like the wl_shm path's; the ARGB8 form
+is the fallback and the shader keeps it correct there too). The
+self-check masks the alpha byte off both sides of its comparison:
+the X byte is nobody's pixel contract on either path.
+
+**2. GLES2 is not desktop GL where the specs differ.** The GLX
+lane's self-check reads back BGRA — legal there, ILLEGAL for a
+default framebuffer under GLES2 (BGRA pairs ride the
+implementation-color-read query). The Wayland probe reads
+RGBA/UNSIGNED_BYTE (the only guaranteed pair) and compares
+channel-wise against the little-endian staging u32. Same discipline
+for symbol resolution: core GLES entry points come through
+eglGetProcAddress exclusively (GLVND does not promise dlsym for
+them — the documented EGL loader path), where GLX mixed
+glXGetProcAddress with dlsym.
+
+**3. The rig made the lane REAL, not simulated.** The sway headless
+rig has no GPU, but Mesa's EGL Wayland platform falls back to a
+swrast path that wl_shm-backs the EGL window surfaces — a complete
+client-side EGL stack (dlopen, display, config, context, surface,
+texture, shaders, swap) through llvmpipe, engaged under
+FDK_GL_FORCE exactly the way the Xvfb rig exercises GLX. The rig's
+GLVND needed the Mesa ICD pointed at the user prefix
+(__EGL_VENDOR_LIBRARY_DIRS — the sandbox's system egl_vendor.d is
+empty; real distros ship the JSON with libegl-mesa0). The
+compositor-side pixel proof is a grim screenshot of the headless
+output with the lane's probe colors read back byte-exact — Wayland
+gives a client no XGetImage equivalent against another surface, so
+the screenshot rig owns that half and TESTING-ON-DESKTOP.md §19 is
+the real-GPU recipe.
+
+The rest is the x11_gl.c discipline carried over verbatim (and it
+held): the process-wide verdict cache keyed on the env knobs; the
+self-check's REAL-failure stamp with FDK_GL_FORCE's fresh-connection
+override and the fdk__wayland_egl_test_reset seam; failure =
+permanent per-window downgrade with the frame salvaged into a wl_shm
+slot NOW (fdk__wayland_surface_downgrade_from_lane); the
+small-surface gate before any dlopen; lazy per-connection load at
+the first acquisition of ANY window. One Wayland-only addition: the
+xdg configure gate — a present before the first configure rides
+lane_frame_deferred and the configure handler flushes it, mirroring
+the CPU path's deferred render_pending commit (a single-present app
+must still map with its first frame).

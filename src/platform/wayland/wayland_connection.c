@@ -287,6 +287,10 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
     conn->window_count = 0;
     conn->window_capacity = 0;
     conn->last_dispatch_errno = 0;
+    /* GPU lane (1.2.0 / D-1): lazy — created at the first framebuffer
+     * acquisition, never here (no-window apps never touch EGL). */
+    conn->egl = NULL;
+    conn->egl_tried = 0;
     conn->activation = NULL;
     conn->launch_token = NULL;
     /* S-6: the launch token a LAUNCHER vouched for us with — read
@@ -416,6 +420,14 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
     fdk_free(conn->windows);
 
     fdk_wayland_clipboard_teardown(conn);
+
+    /* GPU lane (1.2.0 / D-1): windows were force-destroyed above, so
+     * their per-window lane state is gone; the shared state dies
+     * here (libraries stay pinned — wayland_egl.h's note). */
+    if (conn->egl != NULL) {
+        fdk_wayland_egl_shutdown(conn->egl);
+        conn->egl = NULL;
+    }
 
     fdk_wayland_teardown_seat(conn);
 

@@ -76,10 +76,11 @@ suite (`docs/testing.md`).
   poll()-based event loop you can either own or hand to `fdk_run()`.
 - **Rendering** — a damage-tracked software rasterizer (gradients,
   antialiased shapes, alpha compositing, transforms, image decode and
-  PNG encode), plus a hybrid GPU present lane (1.4.18): where a
-  hardware GL renderer exists, frames reach the screen through
-  GLX — byte-identical to the CPU path, with a guaranteed mid-frame
-  fallback (`FDK_NO_GL` / `FDK_GL_FORCE` knobs, `docs/rendering.md`).
+  PNG encode), plus a hybrid GPU present lane (X11/GLX since 1.4.18,
+  Wayland/EGL since 1.2.0): where a hardware GL renderer exists,
+  frames reach the screen through GLX or EGL — byte-identical to the
+  CPU path, with a guaranteed mid-frame fallback (`FDK_NO_GL` /
+  `FDK_GL_FORCE` knobs, `docs/rendering.md`).
 - **Widgets** — a full catalog: buttons (with role vocabulary),
   entries (password / read-only / max-length), TextView editor, List,
   Tree, IconView, Notebook with drag-reorderable tabs, menus and

@@ -896,8 +896,25 @@ sidebar rhythm).
   `fdk_window_get_render_path()` introspection (621st export);
   `tests/data/lsan-gl.supp` for Mesa's exit-time allocations. See
   docs/rendering.md "The GPU present lane (1.4.18)". The Wayland/EGL
-  sibling is DESIGNED (same shape) but deliberately unshipped — no
-  EGL runtime to verify against in this tree.
+  sibling SHIPPED 2026-10-30 (D-1 / B-15): src/platform/wayland/
+  wayland_egl.c — the same contract on dlopen'd libEGL.so.1 +
+  libwayland-egl.so.1 (eglGetProcAddress for the GLES2 subset;
+  zero new build deps), the quad shader pinning alpha 1.0 + the
+  alpha-less EGLConfig (the staging XRGB8888 buffer's zero top
+  byte would otherwise composite as a fully transparent window —
+  the GLX lane's "X byte rides along" reasoning does NOT cross to
+  Wayland's ARGB compositing), the RGBA-readback self-check (the
+  only GLES2-guaranteed default-framebuffer readback) with the
+  process-wide refusal + FORCE override + fdk__wayland_egl_test_reset
+  seam, the permanent downgrade with frame salvage
+  (fdk__wayland_surface_downgrade_from_lane), the deferred
+  first-frame flush (lane_frame_deferred), the same knobs and
+  small-surface gate; test_wayland_integration.c's GL-lane group
+  (policy / present+health / downgrade / self-check poison), the
+  sway-rig screenshot smoke proving compositor-side bytes, exports
+  unchanged at 848. Real hardware GPUs: implemented — should work
+  (untested on real hardware; the rig runs it through Mesa's
+  swrast under FDK_GL_FORCE).
 
 ### Infrastructure (SHIPPED)
 

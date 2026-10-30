@@ -681,6 +681,24 @@ all under ASan+UBSan with leak checking:
   runs (the xdg-decoration object ordering, and a leaked
   wl_surface.frame callback proxy when a window died before
   `done` arrived).
+- The GPU present lane's whole state machine (1.2.0 / D-1): the
+  policy matrix (FDK_NO_GL strict CPU; the small-surface size
+  gate, deterministic on every machine; the large-window default
+  OBSERVED because it is renderer-driven), engagement + presents
+  under FDK_GL_FORCE (the rig's lane is REAL — Mesa's software
+  EGL through the dlopen'd libEGL + libwayland-egl, the swrast
+  path wl_shm-backing the EGL surfaces; the rig's GLVND finds the
+  Mesa ICD through the prefix's egl_vendor.d), full and
+  partial-damage frames, two windows interleaved on one
+  connection, the FDK_GL_FAIL_AT downgrade with its frame
+  salvage, and the SELFCHECK_POISON real-failure verdict
+  (per-connection refusal, one warning per connection, the
+  fresh-connection FORCE override). The compositor-side pixel
+  proof lives in the rig's screenshot smoke — the sway headless
+  output captured through grim, the lane's probe colors read
+  back byte-exact — because Wayland gives a client no XGetImage
+  equivalent against another surface; TESTING-ON-DESKTOP.md §19
+  is the real-GPU sign-off recipe.
 
 Three real bugs were found and fixed by Wayland-side testing
 during Phase 3, all of which would have reproduced on any

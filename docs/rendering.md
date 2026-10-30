@@ -332,25 +332,45 @@ frame** takes one of two paths:
 - **CPU path** (`FDK_RENDER_PATH_CPU`): the damaged rects travel to
   the server through shared memory — the MIT-SHM double-buffer
   machinery above on X11, `wl_shm` on Wayland.
-- **GPU path** (`FDK_RENDER_PATH_GL`, X11 today): the damaged rects
-  upload into a per-window GL texture and one fullscreen composite
-  carries the frame to the screen through GLX — `glTexSubImage2D`
+- **GPU path** (`FDK_RENDER_PATH_GL`, both backends): the damaged
+  rects upload into a per-window GL texture and one fullscreen
+  composite carries the frame to the screen — `glTexSubImage2D`
   (BGRA/UNSIGNED_BYTE, the framebuffer's little-endian XRGB8888
-  bytes read in place, zero conversion), a NEAREST 1:1 quad, and
-  `glXSwapBuffers`. **Byte-identical to the CPU path by
-  construction** — pinned, not assumed: the integration suite draws
-  the same scene through both paths and `memcmp`s the server-side
-  captures (`test_gl_lane_pixel_equivalence_gui`), and the examples
-  rig re-proves it at the app level (four static examples' captures
-  are byte-identical between `FDK_GL_FORCE=1` and `FDK_NO_GL=1`).
+  bytes read in place, zero conversion), a NEAREST 1:1 quad, and the
+  platform's swap: `glXSwapBuffers` on X11 (1.4.18),
+  `eglSwapBuffers` through a `wl_egl_window`-backed EGL surface on
+  Wayland (1.2.0 / D-1 — `src/platform/wayland/wayland_egl.c`, the
+  exact contract of the GLX lane carried over: CPU rasterization
+  unchanged, the lane replaces only the "pixels → compositor" half
+  of present(), with the quad's fragment shader pinning alpha 1.0
+  and an alpha-less EGLConfig preferred so the swap buffer is
+  opaque exactly like the wl_shm path's XRGB8888 buffers).
+  **Byte-identical to the CPU path by construction** — pinned, not
+  assumed: on X11 the integration suite draws the same scene
+  through both paths and `memcmp`s the server-side captures
+  (`test_gl_lane_pixel_equivalence_gui`), and the examples rig
+  re-proves it at the app level; on Wayland the client-side half is
+  pinned by the lane's first-frame self-check (a `glReadPixels`
+  probe of the drawn back buffer against the staging buffer — a
+  mismatch refuses the lane before the first swap) and the
+  compositor-side half by the sway rig's screenshot smoke
+  (`scripts/`-side, byte-exact color probes through `grim`) plus
+  the desktop sign-off recipe in TESTING-ON-DESKTOP.md (Wayland has
+  no XGetImage equivalent a client may call against another
+  surface).
 
-The lane lives in `src/platform/x11/x11_gl.c` and is **loaded at
-runtime** — `dlopen("libGL.so.1")` with a hand-declared API subset
-(no GL headers, no new build dependencies; GLX entry points resolve
-through `glXGetProcAddress`, core GL through `dlsym`, which on GLVND
-is the dependable path for core symbols). It engages lazily at a
-window's FIRST framebuffer acquisition — headless apps and apps that
-open no window never touch libGL at all.
+The lane lives in `src/platform/x11/x11_gl.c` (GLX) and
+`src/platform/wayland/wayland_egl.c` (EGL) and is **loaded at
+runtime** — `dlopen("libGL.so.1")` on X11, `dlopen("libEGL.so.1")`
++ `dlopen("libwayland-egl.so.1")` on Wayland, each with a
+hand-declared API subset (no GL/EGL headers, no new build
+dependencies; GLX entry points resolve through
+`glXGetProcAddress`, core GL through `dlsym`, which on GLVND is the
+dependable path for core symbols; EGL/GLES2 entry points resolve
+through `eglGetProcAddress` — THE documented EGL loader path, since
+GLVND does not promise dlsym for core GLES symbols). It engages
+lazily at a window's FIRST framebuffer acquisition — headless apps
+and apps that open no window never touch libGL or libEGL at all.
 
 The hybrid's texture plays the role the SHM front slot plays: the
 retained "what the screen shows" copy. Damage rects make the texture
@@ -427,6 +447,8 @@ rendering is `src/text/`'s AA glyph masks — Subpixel RGB glyph
 rasterization is a possible later refinement); fractional HiDPI is
 exercised by the code paths but the sway test rig runs integer scale 2
 (headless outputs with true fractional scales are a compositor-config
-matter); the GPU present lane covers X11/GLX only (a Wayland/EGL
-sibling is designed-for but unshipped, per the section above). None of
+matter); the GPU present lane covers both backends since 1.2.0
+(X11/GLX since 1.4.18, Wayland/EGL per the section above — hardware
+renderers only; Mesa's software rasterizers stay on wl_shm, where
+the CPU path is faster, unless FDK_GL_FORCE=1). None of
 these reshape this layer's contracts.

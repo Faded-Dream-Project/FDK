@@ -12,6 +12,10 @@
 
 #include "platform/platform_internal.h"
 
+/* GPU present lane (1.2.0 / D-1) — the EGL counterpart of
+ * x11_platform.h's x11_gl.h include. */
+#include "platform/wayland/wayland_egl.h"
+
 #include "platform/wayland/generated/xdg-shell-client-protocol.h"
 #include "platform/wayland/generated/xdg-decoration-unstable-v1-client-protocol.h"
 #include "platform/wayland/generated/primary-selection-unstable-v1-client-protocol.h"
@@ -111,6 +115,23 @@ struct fdk_platform_connection {
     int ime_enabled;                     /* v3 session open (no leave) */
     char *ime_surrounding;               /* last pushed context (copy) */
     int ime_surrounding_cursor;
+
+    /* --- GPU present lane (1.2.0 / D-1, wayland_egl.c) -------------
+     *
+     * egl: the per-connection lane state — the dlopen'd libEGL +
+     * libwayland-egl handles, the EGLDisplay for this connection's
+     * wl_display, the shared quad program, and the renderer-policy
+     * verdict. Loaded LAZILY at the first framebuffer acquisition
+     * of any window (never at connect: headless apps and no-window
+     * apps must not touch EGL at all). NULL = the lane is not
+     * available on this connection (no libEGL, no libwayland-egl,
+     * EGL init failure, software renderer without FDK_GL_FORCE) or
+     * the policy refused it. egl_tried makes the attempt one-shot
+     * — NULL is sticky, windows never re-attempt. The exact
+     * X11/GLX shape (x11_platform.h's gl/gl_tried), carried over
+     * wholesale. */
+    struct fdk_wayland_egl *egl;
+    int egl_tried;
 
     /* Globals discovered during the initial registry roundtrip
      * (see wayland_registry.c). All required for Phase 2's
@@ -369,6 +390,15 @@ struct fdk_platform_connection {
 
 #define FDK_WL_RENDER_SLOTS 4
 
+/* The GPU lane's small-surface gate (1.2.0 / D-1) — the same value
+ * and rationale as x11_surface.c's FDK_GL_MIN_PIXELS: a window at or
+ * below this many pixels stays on wl_shm (the whole panel/popup
+ * class; their presents are a few hundred KB of memcpy while the
+ * lane's per-window fixed costs — EGL context + surface + program
+ * setup — cost milliseconds). FDK_GL_FORCE overrides, exactly as on
+ * X11. */
+#define FDK_WL_GL_MIN_PIXELS 131072
+
 /* Bounded release wait (1.1.6; reworked 1.1.0-rc1): when every render
  * slot is in flight and the application still wants a framebuffer,
  * FDK waits this long — READING the display socket (queue-scoped
@@ -523,6 +553,26 @@ struct fdk_platform_window {
     } render_slots[FDK_WL_RENDER_SLOTS];
     struct wl_buffer *render_pending; /* acquired but not yet presented */
     int rendered_ever;                /* first render present() completed */
+
+    /* --- GPU present lane (1.2.0 / D-1, wayland_egl.c) --------------
+     *
+     * egl_win: the per-window lane state (EGL surface + context +
+     * wl_egl_window + texture + staging buffer) while this window
+     * presents through the GPU lane; NULL on the CPU/wl_shm path.
+     * egl_downgraded: sticky per-window refusal — a window that
+     * downgraded (lane failure, or the small-surface policy) never
+     * re-engages; the connection-wide policy refusal (software
+     * renderer without FDK_GL_FORCE, no usable config) is sticky on
+     * the lane state itself. The exact X11 shape (gl_win /
+     * gl_downgraded). */
+    struct fdk_wayland_egl_window *egl_win;
+    int egl_downgraded;
+    fdk_size render_size;  /* the lane's current staging size (the SHM
+                            * path derives sizes from the slots)     */
+    int lane_frame_deferred; /* a lane present returned before the
+                              * first configure; the configure handler
+                              * flushes it (see
+                              * fdk__wayland_commit_deferred_first_frame) */
 
     /* --- HiDPI (Phase 3 completion) --------------------------------
      *
@@ -871,6 +921,12 @@ void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
 /* Software rendering (fdk_surface machinery) — see the render_slots
  * comment in struct fdk_platform_window above for the recycling
  * lifecycle. */
+/* GPU lane (1.2.0 / D-1) — see wayland_egl.h; the render_path op
+ * and the shared downgrade helper live in wayland_window.c. */
+int fdk_wayland_window_render_path(fdk_platform_window *pwindow);
+fdk_result fdk__wayland_surface_downgrade_from_lane(
+    fdk_platform_window *pwindow);
+
 fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                                                fdk_platform_framebuffer *out_fb);
 
