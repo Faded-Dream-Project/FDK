@@ -266,9 +266,18 @@ since the native Type 2 module landed — before it, a CJK font set
 made only of CFF faces, as on Arch, left every fallback candidate
 unloadable and CJK text rendered as `.notdef` boxes — the tofu
 report that closed with this item); a fallback that loads but does
-not cover the segment's probe codepoint is discarded before it can
-poison the cache. On a CJK-less machine the primary's `.notdef`
-renders, honestly.
+not cover the segment's probe codepoint is DISCARDED AND THE WALK
+RETRIES the next fontconfig candidate (up to four — a bad ranking
+is a next-candidate event, not a dead script). On a machine where
+no candidate answers, the primary's `.notdef` renders, honestly AND
+LOUDLY: a WARN names the script, the probe codepoint, and the reason
+(no fontconfig answer / load failure / no coverage) once per font+
+script, and the chosen face is INFO-logged per script. Script
+classification itself (the codepoint→script table the segmenter
+binary-searches) is order-sensitive by construction: the table is
+sorted by `lo`, a probe-time self-check ERRORs if a future edit
+breaks that, and the six-script matrix pins it from the request
+side.
 
 ## CFF outlines — OpenType 'OTTO' faces (1.1.0)
 
@@ -448,12 +457,19 @@ and a deterministic mutation fuzz over the CFF table region.
 
 `tests/test_shaping.c` (M-2): the complex-script suite — RTL visual
 order, mixed bidi, per-script fallback selection (the charset-
-filtered fontconfig query), cluster/byte mapping, caret monotonicity,
+filtered fontconfig query), the six-script fallback matrix
+(Arabic, Devanagari, Hebrew, Thai, Bengali, Han: fallback resolved,
+no glyph 0, Arabic contextual joining, Devanagari conjunct merging —
+a fontconfig answer without a shaped fallback is the unsorted-table
+failure signature, a FAILURE not a skip), cluster/byte mapping, caret monotonicity,
 Arabic wrap and ellipsize agreement, draw/measure agreement on a
 trilingual string, and the Latin compatibility pin (the suite
-re-execs itself under the other posture and compares metrics). Both
+re-executes itself under the other posture and compares metrics). Both
 postures run in CI (the ubuntu job runs the auto probe and an
-explicit `FDK_SHAPING=0` leg).
+explicit `FDK_SHAPING=0` leg). `make test-textdemo`
+(tests/textdemo_rig.sh) adds the §10 pixel rig: text_demo
+screenshots compared shaped-vs-legacy with join anchors and a
+negative control.
 
 `tests/test_text.c` (11 cases, ASan+UBSan): lifecycle and failure
 modes, metrics sanity and 2× scale proportionality, measurement

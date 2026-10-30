@@ -32,7 +32,13 @@ RUN archlinux:base '
         base-devel pkgconf libx11 libxext libxtst zlib wayland libxkbcommon \
         xorg-server-xvfb ttf-dejavu tar \
         harfbuzz fribidi wqy-zenhei \
-        libxrandr
+        libxrandr \
+        noto-fonts
+    # noto-fonts (the base set): the per-script faces (Arabic,
+    # Devanagari, Hebrew, Thai, Bengali, ...) the shaping suite's
+    # six-script fallback matrix needs — the §10 desktop report's
+    # root cause (an unsorted script table) was invisible on machines
+    # that only had the one CJK font.
     # A name-keyed CFF font for the CFF suites real-font legs.
     # Optional and disclosed: the crafted-font legs always run.
     pacman -Sy --noconfirm --needed gsfonts 2>/dev/null || \

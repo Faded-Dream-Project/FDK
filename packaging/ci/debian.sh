@@ -40,7 +40,13 @@ RUN debian:bookworm '
         libwayland-dev libxkbcommon-dev \
         xvfb fonts-dejavu-core \
         libharfbuzz0b libfribidi0 fonts-wqy-zenhei fonts-urw-base35 \
-        libxrandr-dev
+        libxrandr-dev \
+        fonts-noto-core
+    # fonts-noto-core: the per-script faces (Arabic, Devanagari,
+    # Hebrew, Thai, Bengali, ...) the shaping suite's six-script
+    # fallback matrix needs — the §10 desktop report's root cause
+    # (an unsorted script table) was invisible on machines that only
+    # had the one CJK font.
     sh packaging/debian/build-deb.sh
     sh fdk-shell/packaging/debian/build-deb.sh
 '

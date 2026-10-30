@@ -62,6 +62,14 @@ RUN "$VOID_IMAGE" '
     xbps-install -Sy noto-fonts-cjk 2>/dev/null || \
         xbps-install -Sy wqy-zenhei-font 2>/dev/null || \
         echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping fallback leg skips honestly (disclosed)"
+    # The per-script Noto faces (Arabic, Devanagari, Hebrew, Thai,
+    # Bengali, ...) for the shaping suite's six-script fallback
+    # matrix — the §10 desktop report's root cause (an unsorted
+    # script table) was invisible on machines that only had the one
+    # CJK font. Void's noto-fonts-ttf carries the per-script set;
+    # a repo without it is DISCLOSED (the legs skip honestly).
+    xbps-install -Sy noto-fonts-ttf 2>/dev/null || \
+        echo "SCRIPT-FONT-SKIP: no noto-fonts-ttf in this repo — the six-script matrix legs skip honestly (disclosed)"
     # A name-keyed CFF font for the CFF suites real-font legs.
     # Optional and disclosed: the crafted-font legs always run.
     xbps-install -Sy urw-base35-fonts 2>/dev/null || \

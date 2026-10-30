@@ -12,6 +12,71 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and in-development release
 candidates are marked until the owner promotes them.
 
+## [Unreleased-candidate features] — 2026-10-31 (on the rc2 line)
+
+### Fixed — the §10 desktop report: Arabic and Devanagari drew .notdef while Han worked (the unsorted script table)
+
+- **The owner's test**: `text_demo "مرحبا" "नमस्ते"` under labwc —
+  Han fell back to the CJK face (the log said so), Arabic and
+  Devanagari drew .notdef rectangles with NO fallback log line at
+  all: the resolver was never even ASKED for those scripts.
+- **The root cause** (candidate 1 of the report's own list): the
+  script range table in src/text/shaping.c — the table
+  `sh_script_of()` binary-searches to classify every codepoint —
+  was grouped by script, NOT sorted by `lo`. A binary search over a
+  misordered table silently misclassifies whole blocks as COMMON
+  (inheriting no script, requesting no fallback, drawing .notdef).
+  The original M-2 table already lost Greek, Cyrillic, Kana and
+  Hangul this way; when C-3 appended the four emoji ranges at the
+  end, the shifted midpoints ate Arabic, Devanagari, Hebrew, most
+  Indic, Ethiopic and more — leaving Han (and Thai, Lao, Khmer,
+  a few others) working purely by the luck of the search path.
+  That luck is why the shipped tests passed: the CJK fallback leg
+  probed the one script that still resolved.
+- **The fix, at the root**: the table is now sorted by `lo` (65
+  disjoint ranges, every boundary and midpoint verified to resolve),
+  with the ordering requirement documented at the table itself.
+- **Failures are LOUD now** (the report's explicit ask): a script
+  run that needs a fallback and gets none WARNs once per (font,
+  script) with the reason — no fontconfig answer, face failed to
+  load, or face does not map the probe — plus the chosen face stays
+  INFO per script, and an uncovered codepoint that no script bucket
+  claims WARNs once per font instead of silently tofu-ing. A
+  process-lifetime self-check in `sh_probe()` ERRORs on any future
+  ordering violation.
+- **Candidate 3 hardened at the root**: `fdk_text_resolve_fallback_font`
+  (internal) takes a skip list, and `sh_fallback_for` retries up to
+  four fontconfig candidates — a ranking that hands back a
+  non-covering or unloadable face now means NEXT candidate, not a
+  dead script.
+- **The rigs**: tests/test_shaping.c gains the six-script fallback
+  matrix (Arabic, Devanagari, Hebrew, Thai, Bengali, Han) — a
+  primary that covers none of the script must come back with a
+  resolved fallback, no glyph 0 anywhere in the run, Arabic joining
+  (contextual glyph ids differ from the isolated cmap hits) and
+  Devanagari conjunct merging (fewer glyphs than codepoints); a
+  machine whose fontconfig CAN answer a script but whose shape
+  used no fallback is a FAILURE, not a skip — that is exactly the
+  §10 signature. tests/textdemo_rig.sh (+ `make test-textdemo`)
+  is §10's hand-equivalent under Xvfb: text_demo --screenshot
+  analyzed shaped-vs-legacy (a broken channel renders .notdef in
+  both postures — delta collapses), with the Devanagari
+  shirorekha-width anchor, the Han density anchor, and a legacy
+  negative control proving the detector sees the failure. Both
+  rigs were verified to FAIL against the original unsorted table.
+- **CI**: the ubuntu job and all five family build containers
+  install the per-script Noto faces (fonts-noto-core /
+  google-noto-sans-*-fonts / noto-fonts / font-noto-* /
+  noto-fonts-ttf) so the matrix's legs RUN; `make test-textdemo`
+  is a named CI step. Where a family's repo lacks the package the
+  legs skip with a disclosed message (the CJK-font discipline).
+- **What the owner should see now**: `text_demo "مرحبا" "नमस्ते"`
+  renders joined Arabic and the स्ते conjunct from the fallback
+  faces, with `shaping: fallback font ... for Arabic` /
+  `... for Devanagari` INFO lines naming the faces — and on a
+  machine missing a script's fonts, a WARN that says exactly which
+  script and which codepoint found no face.
+
 ## [Unreleased-candidate features] — 2026-10-30 (on the rc2 line)
 
 ### Added — session save/restore: the desktop remembers your app (D-5 / B-19)

@@ -62,6 +62,20 @@ RUN almalinux:10 '
     dnf install -y -q google-noto-sans-cjk-ttc-fonts 2>/dev/null || \
         dnf install -y -q wqy-zenhei-fonts 2>/dev/null || \
         echo "CJK-FONT-SKIP: no CJK font package in this repo — the shaping fallback leg skips honestly (disclosed)"
+    # The per-script Noto faces (Arabic, Devanagari, Hebrew, Thai,
+    # Bengali, ...) for the shaping suite's six-script fallback
+    # matrix — the §10 desktop report's root cause (an unsorted
+    # script table) was invisible on machines that only had the one
+    # CJK font. The per-script packages are the split Fedora ships;
+    # a repo without them falls back to the meta and, failing that,
+    # is DISCLOSED (the matrix's legs skip honestly).
+    dnf install -y -q google-noto-sans-arabic-fonts \
+        google-noto-sans-hebrew-fonts \
+        google-noto-sans-devanagari-fonts \
+        google-noto-sans-thai-fonts \
+        google-noto-sans-bengali-fonts 2>/dev/null || \
+        dnf install -y -q google-noto-fonts 2>/dev/null || \
+        echo "SCRIPT-FONT-SKIP: no per-script Noto packages in this repo — the six-script matrix legs skip honestly (disclosed)"
     # A name-keyed CFF font for the CFF suites real-font legs (the
     # loader now takes OTTO faces; the vertex-agreement sweep and the
     # fuzz battery want real Type 2 data). Optional and disclosed: the

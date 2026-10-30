@@ -348,7 +348,7 @@ SHIPPED_THEMES := .FDKThemes/faded-dream.fdk
 # library object did.
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
-.PHONY: all release static shared test test-x11 test-dbus test-wayland bench examples tools install uninstall clean verify-exports
+.PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools install uninstall clean verify-exports
 
 all: static shared tools
 
@@ -548,6 +548,22 @@ test-dbus: $(DBUS_LIVE_BIN) $(DBUS_NOTIFY_BIN) $(DBUS_TRAY_BIN)
 $(DBUS_LIVE_BIN): $(DBUS_LIVE_SRC) $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+# text_demo screenshot rig (the §10 hand-equivalent, 1.1.0): what the
+# owner's eyes verify on the real desktop — complex-script ink, joined
+# Arabic, the Devanagari shirorekha, dense Han ideographs — proven
+# mechanically under a throwaway Xvfb against examples/text_demo
+# --screenshot. The glyph-level truth (fallback resolved, no glyph 0,
+# contextual forms) is test_shaping.c's six-script matrix (plain
+# `make test`); this target pins the PIXELS (shaped-vs-legacy
+# differential + join anchors + a legacy negative control). Skips
+# honestly (exit 0) when Xvfb/python3-PIL are absent or a script's
+# font is not installed; the CI images install the per-script Noto
+# packages so every leg runs there.
+TEXTDEMO_BIN := $(BUILD_DIR)/examples/text_demo
+
+test-textdemo: $(TEXTDEMO_BIN)
+	@sh tests/textdemo_rig.sh
 
 # Wayland platform integration test — NOT part of plain `make test`.
 # Requires a RUNNING Wayland compositor reachable via $WAYLAND_DISPLAY

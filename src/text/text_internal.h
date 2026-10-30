@@ -189,13 +189,17 @@ struct fdk_font {
     /* M-2 shaping state (src/text/shaping.c): the per-font HarfBuzz
      * objects (opaque here — a sh_hb_font_cache *) and the per-script
      * fallback fonts this font owns. Fallback fonts set is_fallback
-     * and never get fallbacks of their own (two levels, no cycles). */
+     * and never get fallbacks of their own (two levels, no cycles).
+     * warned_uncovered: the one-shot gate on the "no script bucket,
+     * no fallback, .notdef" WARN — one line per font, not per
+     * codepoint per frame. */
     void *shaper;
 #define FDK_TEXT_FALLBACK_MAX 8
     fdk_font *fallbacks[FDK_TEXT_FALLBACK_MAX];
     int fallback_script[FDK_TEXT_FALLBACK_MAX];
     int n_fallbacks;
     bool is_fallback;
+    bool warned_uncovered;
 
     fdk_font_metrics metrics;
 
@@ -508,11 +512,15 @@ void fdk_text_font_discovery_reject(const char *path);
 
 /* M-2 fallback resolution (fontscan.c): fontconfig's answer for "a
  * font covering this language" — the per-script fallback font when
- * the primary font has no glyphs for a script. On success *out_path
- * is a fdk_alloc'd string the CALLER frees and *out_face is the
- * collection face index. Returns false when fontconfig is absent or
- * has no answer (the caller caches the miss). */
+ * the primary font has no glyphs for a script. `skip` (NULL/0 when
+ * none) names candidates the caller already tried and rejected this
+ * run (failed load, no probe coverage); the walk steps past them so
+ * a bad ranking yields the NEXT candidate, not a dead script. On
+ * success *out_path is a fdk_alloc'd string the CALLER frees and
+ * *out_face is the collection face index. Returns false when
+ * fontconfig is absent or has no (unskipped) answer. */
 bool fdk_text_resolve_fallback_font(const char *lang, fdk_u32 probe_cp,
+                                    const char *const *skip, int n_skip,
                                     char **out_path, long *out_face);
 
 #endif /* FDK_TEXT_INTERNAL_H */

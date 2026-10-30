@@ -38,6 +38,16 @@ RUN alpine:3.22 '
         font-dejavu \
         harfbuzz fribidi font-wqy-zenhei \
         libxrandr-dev
+    # The per-script Noto faces (Arabic, Devanagari, Hebrew, Thai,
+    # Bengali, ...) for the shaping suite's six-script fallback
+    # matrix — the §10 desktop report's root cause (an unsorted
+    # script table) was invisible on machines that only had the one
+    # CJK font. Alpine splits font-noto per script; a repo without
+    # the split is DISCLOSED (the matrix's legs skip honestly).
+    apk add --no-cache font-noto-arabic font-noto-hebrew \
+        font-noto-devanagari font-noto-thai font-noto-bengali \
+        2>/dev/null || \
+        echo "SCRIPT-FONT-SKIP: no per-script font-noto packages in this repo — the six-script matrix legs skip honestly (disclosed)"
     # A name-keyed CFF font for the CFF suites real-font legs.
     # Optional and disclosed: the crafted-font legs always run.
     apk add --no-cache font-urw-base35 2>/dev/null || \

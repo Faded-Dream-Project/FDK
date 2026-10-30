@@ -23,6 +23,7 @@
 #include "fdk/fdk_text.h"
 
 #include "text/text_internal.h"
+#include "core/alloc_internal.h" /* fdk_free (the resolver's path) */
 
 #include <assert.h>
 #include <stdio.h>
@@ -506,6 +507,261 @@ static void test_fallback_lifecycle(void) {
            "clean under ASan)\n");
 }
 
+/* ---- 9. The six-script fallback matrix (the §10 regression) ----------
+ *
+ * The owner's desktop report (TESTING-ON-DESKTOP §10): Han fell back
+ * to the CJK face while Arabic and Devanagari drew .notdef with NO
+ * fallback log line at all. Root cause: the script range table was
+ * not sorted by lo, so the binary search silently misclassified most
+ * scripts as COMMON — the fallback was never even REQUESTED for them
+ * (and Han survived only by the luck of the search midpoints). The
+ * sort fix is pinned here from the REQUEST side: for every script the
+ * level-1 table claims, a run whose primary covers NOTHING must come
+ * back with (a) a fallback face resolved, (b) no glyph 0 anywhere in
+ * the shaped run, (c) the script's shaping semantics actually applied
+ * — Arabic contextual joining (the shaped glyph ids differ from the
+ * isolated cmap hits), Devanagari conjunct/cluster merging (fewer
+ * glyphs than codepoints), Hebrew's RTL visual flag.
+ *
+ * The primary for each leg is chosen from the installed stock as a
+ * face that covers NONE of the leg's script (URW Nimbus Sans, WQY
+ * Zen Hei, DejaVu Sans — tried in that order per script); when the
+ * environment has neither a clean primary nor a covering fallback
+ * font, the leg SKIPS HONESTLY with its reason (the CJK leg's
+ * discipline). The CI images install the per-script Noto packages so
+ * every leg RUNS there. */
+
+typedef struct {
+    const char *name;
+    const char *word;    /* UTF-8 literal, no spaces (one joined run) */
+    fdk_u32 probe;       /* first codepoint (the coverage probe)     */
+    const char *fc_lang; /* the script's fontconfig language         */
+    int want_rtl;        /* Hebrew/Arabic: rtl_visual expected        */
+    int want_join;       /* Arabic: contextual forms != isolated ids */
+    int want_merge;      /* Devanagari: conjuncts merge clusters     */
+} script_leg;
+
+static const script_leg k_script_legs[] = {
+    {"Arabic", "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7", 0x0645,
+     "ar", 1, 1, 0},
+    {"Devanagari",
+     "\xE0\xA4\xA8\xE0\xA4\xAE\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\xA4"
+     "\xE0\xA5\x87",
+     0x0928, "hi", 0, 0, 1},
+    {"Hebrew", "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", 0x05E9, "he", 1,
+     0, 0},
+    {"Thai",
+     "\xE0\xB8\xAA\xE0\xB8\xA7\xE0\xB8\xB1\xE0\xB8\xAA\xE0\xB8\x94"
+     "\xE0\xB8\xB5",
+     0x0E2A, "th", 0, 0, 0},
+    {"Bengali",
+     "\xE0\xA6\xAC\xE0\xA6\xBE\xE0\xA6\x82\xE0\xA6\xB2\xE0\xA6\xBE",
+     0x09AC, "bn", 0, 0, 0},
+    {"Han", "\xE6\xBC\xA2\xE5\xAD\x97", 0x6F22, "zh", 0, 0, 0},
+};
+#define N_SCRIPT_LEGS \
+    ((int)(sizeof k_script_legs / sizeof k_script_legs[0]))
+
+/* Candidate primaries whose coverage the environment defines; the
+ * first one NOT covering the leg's probe wins the leg. URW Nimbus
+ * Sans covers none of the six; WQY Zen Hei covers Han only; DejaVu
+ * covers Arabic and Hebrew but none of the Indic/Thai/Han set.
+ * (g_sans joins at RUN time — find_fonts() owns it.) */
+static const char *k_matrix_primaries[8];
+static int k_matrix_n_primaries;
+
+static void matrix_init_primaries(void) {
+    static const char *const fixed[] = {
+        "/usr/share/fonts/opentype/urw-base35/NimbusSans-Regular.otf",
+        "/usr/share/fonts/urw-base35/NimbusSans-Regular.otf",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/wqy/wqy-zenhei.ttc",
+    };
+    k_matrix_n_primaries = 0;
+    for (size_t i = 0;
+         i < sizeof fixed / sizeof fixed[0] &&
+         k_matrix_n_primaries < 8;
+         i++) {
+        k_matrix_primaries[k_matrix_n_primaries++] = fixed[i];
+    }
+    if (g_sans != NULL && k_matrix_n_primaries < 8) {
+        k_matrix_primaries[k_matrix_n_primaries++] = g_sans;
+    }
+}
+
+static void test_script_matrix(void) {
+    if (!fdk_text_shaping_available()) {
+        printf("[ok] legacy: the script matrix is a fallback-font "
+               "assertion — the legacy walk has none by design\n");
+        return;
+    }
+    matrix_init_primaries();
+    int ran = 0;
+    for (int l = 0; l < N_SCRIPT_LEGS; l++) {
+        const script_leg *leg = &k_script_legs[l];
+
+        /* 1. the primary: first candidate that covers nothing of the
+         * leg (a covering primary cannot test the fallback). */
+        fdk_font *primary = NULL;
+        const char *prim_path = NULL;
+        for (int i = 0; i < k_matrix_n_primaries && primary == NULL;
+             i++) {
+            if (access(k_matrix_primaries[i], R_OK) != 0) {
+                continue;
+            }
+            fdk_font *cand = fdk_font_load(k_matrix_primaries[i], 16);
+            if (cand == NULL) {
+                continue;
+            }
+            if (fdk_font_has_glyph(cand, leg->probe)) {
+                fdk_font_destroy(cand);
+                continue; /* it covers the script — useless here */
+            }
+            primary = cand;
+            prim_path = k_matrix_primaries[i];
+        }
+        if (primary == NULL) {
+            printf("[skip] %s: no installed face lacking the script "
+                   "(every candidate covers it) — nothing to prove\n",
+                   leg->name);
+            continue;
+        }
+
+        /* 2. the premise: the machine HAS a covering fallback font.
+         * The DECISIVE check is fontconfig's own answer for the
+         * script's language: a machine that CAN resolve a face but
+         * produced a fallback-free shape is not a skip — it is the
+         * §10 bug signature (the script was misclassified, the
+         * fallback never REQUESTED). Only a machine fontconfig
+         * cannot answer for skips honestly. */
+        size_t len = strlen(leg->word);
+        fdk__shaped *sh = fdk__shape_range(primary, leg->word, len, 0,
+                                           len, NULL, 0);
+        assert(sh != NULL);
+        if (!used_fallback(sh, primary)) {
+            char *fc_path = NULL;
+            long fc_face = 0;
+            bool fc_answers = fdk_text_resolve_fallback_font(
+                leg->fc_lang, leg->probe, NULL, 0, &fc_path, &fc_face);
+            if (fc_answers) {
+                fprintf(stderr,
+                        "FAIL %s: fontconfig CAN resolve a fallback "
+                        "face (%s) but the shaped run used NONE — "
+                        "the script was never classified as needing "
+                        "one (the sh_ranges sort broke again?)\n",
+                        leg->name, fc_path);
+                fdk_free(fc_path);
+                assert(!fc_answers);
+            }
+            printf("[skip] %s: no fallback font available on this "
+                   "machine (primary %s, honest .notdef posture)\n",
+                   leg->name, prim_path);
+            fdk__shaped_free(sh);
+            fdk_font_destroy(primary);
+            continue;
+        }
+        ran++;
+
+        /* 3. no glyph 0 anywhere: every placement must carry a real
+         * glyph id of a real fallback font (glyph 0 is .notdef by
+         * the loader's contract). */
+        fdk_font *fb = NULL;
+        for (size_t i = 0; i < sh->n_places; i++) {
+            assert(sh->places[i].font != primary);
+            assert(sh->places[i].raster != NULL);
+            assert(sh->places[i].font != NULL);
+            fb = sh->places[i].font;
+            int gid = fdk_text_key_glyph(sh->places[i].raster->key);
+            if (gid == 0) {
+                fprintf(stderr,
+                        "FAIL %s: placement %zu is glyph 0 (.notdef) "
+                        "— fallback resolved a face that still does "
+                        "not cover the run\n",
+                        leg->name, i);
+                assert(gid != 0);
+            }
+        }
+
+        /* 4. the script's shaping semantics. */
+        if (leg->want_rtl) {
+            assert(sh->rtl_visual);
+        }
+        if (leg->want_merge) {
+            /* Conjunct/cluster merging: स्ते must come back as fewer
+             * glyphs than codepoints (the virama merges into the
+             * conjunct — ligation or the killed form, either way the
+             * count drops). */
+            if (sh->n_places >= sh->n_cp) {
+                fprintf(stderr,
+                        "FAIL %s: %zu glyphs for %zu codepoints — no "
+                        "cluster merging happened\n",
+                        leg->name, sh->n_places, sh->n_cp);
+                assert(sh->n_places < sh->n_cp);
+            }
+        }
+        int joined = 0;
+        if (leg->want_join) {
+            /* Contextual joining: a shaped medial/initial form is a
+             * DIFFERENT glyph than the isolated cmap hit for the same
+             * codepoint. Count the placements whose glyph id differs
+             * from the fallback font's nominal mapping. A joined word
+             * has every letter in a contextual form; require at least
+             * half (fonts vary on the edge letters). */
+            for (size_t i = 0; i < sh->n_places; i++) {
+                size_t c = sh->places[i].cluster;
+                fdk_u32 cp = 0;
+                int found = 0;
+                for (size_t k = 0; k < sh->n_cp; k++) {
+                    if (sh->cp_byte[k] == c) {
+                        cp = sh->cp[k];
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found) {
+                    continue;
+                }
+                int nominal = stbtt_FindGlyphIndex(
+                    &sh->places[i].font->info, (int)cp);
+                int shaped = fdk_text_key_glyph(
+                    sh->places[i].raster->key);
+                if (shaped != nominal) {
+                    joined++;
+                }
+            }
+            if (joined * 2 < (int)sh->n_places) {
+                fprintf(stderr,
+                        "FAIL %s: only %d/%zu glyphs are contextual "
+                        "forms — the run did not join\n",
+                        leg->name, joined, sh->n_places);
+                assert(joined * 2 >= (int)sh->n_places);
+            }
+        }
+
+        printf("[ok] %s: fallback %s, %zu glyphs, no .notdef%s%s\n",
+               leg->name,
+               fb != NULL && fb->source_path != NULL ? fb->source_path
+                                                     : "(face)",
+               sh->n_places,
+               leg->want_join ? ", contextual joining confirmed" : "",
+               leg->want_merge ? ", conjunct clusters merged" : "");
+        fdk__shaped_free(sh);
+        fdk_font_destroy(primary);
+    }
+    /* At least the Han leg must have RUN wherever this suite runs
+     * (the CJK font is a disclosed CI dependency everywhere the
+     * shaping suite runs at all) — a machine where NOTHING ran has
+     * no fallback channel worth testing. */
+    if (ran == 0) {
+        fprintf(stderr, "FAIL: every script leg skipped — no fallback "
+                        "channel exercised at all\n");
+    }
+    assert(ran > 0);
+    printf("[ok] the six-script fallback matrix: %d/%d legs ran, "
+           "all asserted\n",
+           ran, N_SCRIPT_LEGS);
+}
+
 /* ---- main -------------------------------------------------------------- */
 
 int main(int argc, char **argv) {
@@ -525,6 +781,7 @@ int main(int argc, char **argv) {
     test_caret_and_wrap();
     test_draw_agrees();
     test_fallback_lifecycle();
+    test_script_matrix();
 
     printf("all shaping tests passed (%s posture)\n",
            fdk_text_shaping_available() ? "full pipeline" : "legacy");

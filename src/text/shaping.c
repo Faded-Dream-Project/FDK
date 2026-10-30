@@ -57,6 +57,7 @@
 
 #include <dlfcn.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -231,6 +232,16 @@ static bool sh_dlsym_all(void *lib, const char *const *names,
     return true;
 }
 
+static void sh_probe(void);
+
+/* One-shot ordering self-check (defined after the table): the
+ * binary search is only correct on a table sorted by lo, and the
+ * failure mode when it is not is SILENT misclassification — a
+ * script's whole block reads as "common", no fallback is ever
+ * requested, and its text paints .notdef with no log line to say
+ * why. That exact silence is the §10 bug this guards against. */
+static void sh_ranges_selfcheck(void);
+
 static void sh_probe(void) {
     if (g_shaping_state != 0) {
         return;
@@ -329,6 +340,7 @@ static void sh_probe(void) {
         return;
     }
     g_shaping_state = 1;
+    sh_ranges_selfcheck();
     FDK_INFO("shaping: harfbuzz + fribidi active — full complex-script "
              "pipeline (bidi, ligatures, per-script fallback)");
 }
@@ -345,7 +357,10 @@ int fdk_text_shaping_available(void) {
  * its HarfBuzz tag and a BCP-47-ish language string for both the
  * shaper and fontconfig's FC_LANG fallback query. Codepoints in no
  * range are "common" (punctuation, spaces, digits) — they inherit
- * the surrounding segment's script and never force a boundary. */
+ * the surrounding segment's script and never force a boundary.
+ *
+ * THE TABLE IS SORTED BY lo (see the in-table comment): the lookup
+ * is a binary search, so ordering is correctness, not style. */
 
 typedef struct {
     fdk_u32 lo, hi;
@@ -385,42 +400,46 @@ static const sh_script_def sh_scripts[] = {
 #define SH_SCRIPT_UNKNOWN (-2)
 
 static const sh_range sh_ranges[] = {
+    /* SORTED BY lo — a hard requirement: sh_script_of() binary-
+     * searches this table, so any range appended out of order
+     * silently misclassifies every codepoint whose search path
+     * crosses it as COMMON (no fallback font, .notdef ink). The
+     * owner's §10 report (Arabic + Devanagari as tofu while Han
+     * worked) was exactly this: the C-3 emoji entries were appended
+     * at the end, and the shifted midpoints ate Arabic, Devanagari,
+     * Hebrew, Greek, Cyrillic, and most Indic. sh_probe() verifies
+     * the ordering once per process and fails LOUD if a future
+     * edit breaks it again; test_shaping.c pins representative
+     * codepoints of every script. */
     {0x0041, 0x005A, 0},  {0x0061, 0x007A, 0},  {0x00AA, 0x00AA, 0},
     {0x00BA, 0x00BA, 0},  {0x00C0, 0x00FF, 0},  {0x0100, 0x02AF, 0},
-    {0x1E00, 0x1EFF, 0},  {0x2C60, 0x2C7F, 0},  {0xA720, 0xA7FF, 0},
-    {0x0370, 0x03FF, 1},  {0x1F00, 0x1FFF, 1},
-    {0x0400, 0x052F, 2},  {0x2DE0, 0x2DFF, 2},  {0xA640, 0xA69F, 2},
-    {0x0530, 0x058F, 3},
-    {0x0590, 0x05FF, 4},  {0xFB1D, 0xFB4F, 4},
-    {0x0600, 0x06FF, 5},  {0x0750, 0x077F, 5},  {0x08A0, 0x08FF, 5},
-    {0xFB50, 0xFDFF, 5},  {0xFE70, 0xFEFF, 5},
-    {0x0700, 0x074F, 6},
-    {0x0780, 0x07BF, 7},
+    {0x0370, 0x03FF, 1},  {0x0400, 0x052F, 2},  {0x0530, 0x058F, 3},
+    {0x0590, 0x05FF, 4},  {0x0600, 0x06FF, 5},  {0x0700, 0x074F, 6},
+    {0x0750, 0x077F, 5},  {0x0780, 0x07BF, 7},  {0x08A0, 0x08FF, 5},
     {0x0900, 0x097F, 8},  {0x0980, 0x09FF, 9},  {0x0A00, 0x0A7F, 10},
     {0x0A80, 0x0AFF, 11}, {0x0B00, 0x0B7F, 12}, {0x0B80, 0x0BFF, 13},
     {0x0C00, 0x0C7F, 14}, {0x0C80, 0x0CFF, 15}, {0x0D00, 0x0D7F, 16},
-    {0x0D80, 0x0DFF, 17},
-    {0x0E00, 0x0E7F, 18}, {0x0E80, 0x0EFF, 19},
-    {0x0F00, 0x0FFF, 20}, {0x1000, 0x109F, 21},
-    {0x10A0, 0x10FF, 22}, {0x2D00, 0x2D2F, 22},
-    {0x1200, 0x137F, 23},
-    {0x1780, 0x17FF, 24},
-    {0x2E80, 0x2FDF, 25}, {0x3004, 0x3004, 25}, {0x3006, 0x3007, 25},
-    {0x3021, 0x3029, 25}, {0x3038, 0x303B, 25},
-    {0x3400, 0x4DBF, 25}, {0x4E00, 0x9FFF, 25}, {0xF900, 0xFAFF, 25},
+    {0x0D80, 0x0DFF, 17}, {0x0E00, 0x0E7F, 18}, {0x0E80, 0x0EFF, 19},
+    {0x0F00, 0x0FFF, 20}, {0x1000, 0x109F, 21}, {0x10A0, 0x10FF, 22},
+    {0x1100, 0x11FF, 28}, {0x1200, 0x137F, 23}, {0x1780, 0x17FF, 24},
+    {0x1E00, 0x1EFF, 0},  {0x1F00, 0x1FFF, 1},  {0x2600, 0x27BF, 29},
+    {0x2B00, 0x2B55, 29}, {0x2C60, 0x2C7F, 0},  {0x2D00, 0x2D2F, 22},
+    {0x2DE0, 0x2DFF, 2},  {0x2E80, 0x2FDF, 25}, {0x3004, 0x3004, 25},
+    {0x3006, 0x3007, 25}, {0x3021, 0x3029, 25}, {0x3038, 0x303B, 25},
+    {0x3041, 0x309F, 26}, {0x30A0, 0x30FF, 27}, {0x3130, 0x318F, 28},
+    {0x31F0, 0x31FF, 27}, {0x3400, 0x4DBF, 25}, {0x4E00, 0x9FFF, 25},
+    {0xA640, 0xA69F, 2},  {0xA720, 0xA7FF, 0},  {0xA960, 0xA97F, 28},
+    {0xAC00, 0xD7FF, 28}, {0xF900, 0xFAFF, 25}, {0xFB1D, 0xFB4F, 4},
+    {0xFB50, 0xFDFF, 5},  {0xFE70, 0xFEFF, 5},  {0x1B001, 0x1B0FF, 26},
+    {0x1F000, 0x1FAFF, 29}, {0x1FB00, 0x1FBFF, 29},
     {0x20000, 0x2A6DF, 25}, {0x2A700, 0x2EBEF, 25},
     {0x2F800, 0x2FA1F, 25},
-    {0x3041, 0x309F, 26}, {0x1B001, 0x1B0FF, 26},
-    {0x30A0, 0x30FF, 27}, {0x31F0, 0x31FF, 27},
-    {0x1100, 0x11FF, 28}, {0x3130, 0x318F, 28}, {0xA960, 0xA97F, 28},
-    {0xAC00, 0xD7FF, 28},
-    /* Emoji (script 29): the Extended_Pictographic core — the
-     * blocks the emoji presentation sequences live in. Symbols in
-     * 2600-27BF whose default is TEXT presentation still resolve to
-     * the primary font when it covers them (the fdk__font_covers
-     * gate); VS16 (FE0F) stays "common" and inherits its segment. */
-    {0x2600, 0x27BF, 29}, {0x2B00, 0x2B55, 29},
-    {0x1F000, 0x1FAFF, 29}, {0x1FB00, 0x1FBFF, 29},
+    /* Emoji (script 29) rides the same sort: 2600-27BF and
+     * 2B00-2B55 sit between the Greek and Latin-ext blocks above.
+     * Symbols in 2600-27BF whose default is TEXT presentation still
+     * resolve to the primary font when it covers them (the
+     * fdk__font_covers gate); VS16 (FE0F) stays "common" and
+     * inherits its segment. */
 };
 
 static int sh_script_of(fdk_u32 cp) {
@@ -437,6 +456,21 @@ static int sh_script_of(fdk_u32 cp) {
         }
     }
     return SH_SCRIPT_COMMON;
+}
+
+static void sh_ranges_selfcheck(void) {
+    const size_t n = sizeof sh_ranges / sizeof sh_ranges[0];
+    for (size_t i = 1; i < n; i++) {
+        if (sh_ranges[i].lo <= sh_ranges[i - 1].hi) {
+            FDK_ERROR("shaping: sh_ranges[%zu] (U+%04X) is out of "
+                      "order or overlaps sh_ranges[%zu] — the script "
+                      "lookup is a binary search and silently "
+                      "misclassifies misordered ranges as COMMON "
+                      "(no fallback, .notdef ink). Sort the table "
+                      "by lo before shipping.",
+                      i, (unsigned)sh_ranges[i].lo, i - 1);
+        }
+    }
 }
 
 /* ---- 4. Bracket mirroring -----------------------------------------
@@ -730,36 +764,89 @@ static fdk_font *sh_fallback_for(fdk_font *primary, int script,
         }
     }
 
-    char *path = NULL;
-    long face = 0;
-    if (!fdk_text_resolve_fallback_font(
-            sh_scripts[script].fc_lang, probe_cp, &path, &face)) {
-        /* Remember the miss (negative cache) so a CJK-less machine
-         * does not re-query fontconfig for every codepoint. */
-        primary->fallback_script[primary->n_fallbacks] = script;
-        primary->fallbacks[primary->n_fallbacks] = NULL;
-        primary->n_fallbacks++;
-        return NULL;
+    /* The candidate loop (the §10 root-hardening): fontconfig's sort
+     * is a RANKING, not a guarantee — the top candidate can fail the
+     * loader or lack the probe glyph. A rejection means NEXT
+     * candidate (up to four), and only the exhaustion of the list
+     * means "no fallback for this script". Every failure is LOUD;
+     * the negative cache rate-limits the whole conversation to one
+     * round per (font, script). */
+    const char *skip[4];
+    int n_skip = 0;
+    fdk_font *f = NULL;
+    char *winner = NULL;
+    for (int attempt = 0; attempt < 4 && f == NULL; attempt++) {
+        char *path = NULL;
+        long face = 0;
+        if (!fdk_text_resolve_fallback_font(
+                sh_scripts[script].fc_lang, probe_cp, skip, n_skip,
+                &path, &face)) {
+            /* Remember the miss (negative cache) so a script-less
+             * machine does not re-query fontconfig for every
+             * codepoint. LOUD by contract (the §10 lesson): a run
+             * that needs a fallback and gets none used to vanish
+             * without a log line — the tofu looked like a font
+             * problem when it was a resolution problem. */
+            if (attempt == 0) {
+                FDK_WARN("shaping: no fallback font for %s "
+                         "(fontconfig has no loadable face mapping "
+                         "U+%04X for lang=%s) — its codepoints will "
+                         "draw .notdef on %s; install a font for the "
+                         "script (e.g. the script's Noto face)",
+                         sh_scripts[script].name, (unsigned)probe_cp,
+                         sh_scripts[script].fc_lang,
+                         primary->source_path != NULL
+                             ? primary->source_path
+                             : "(the primary font)");
+            } else {
+                FDK_WARN("shaping: no further fallback candidate for "
+                         "%s after %d rejection(s) — its codepoints "
+                         "will draw .notdef",
+                         sh_scripts[script].name, n_skip);
+            }
+            break;
+        }
+        fdk_font *cand = fdk_text_font_load_face(path, face,
+                                                 primary->pixel_size);
+        if (cand == NULL) {
+            FDK_WARN("shaping: fallback candidate %s for %s failed to "
+                     "load — stepping to the next candidate",
+                     path, sh_scripts[script].name);
+            if (n_skip < 4) {
+                skip[n_skip++] = path; /* ownership: kept until loop end */
+            } else {
+                fdk_free(path);
+            }
+            continue;
+        }
+        /* Coverage verification BEFORE the slot is taken: a loaded
+         * font that does not map the probe is the same as no answer —
+         * but not the same as no NEXT answer. */
+        if (!fdk__font_covers(cand, probe_cp)) {
+            FDK_WARN("shaping: fallback candidate %s for %s does not "
+                     "map U+%04X (fontconfig ranked it first) — "
+                     "stepping to the next candidate",
+                     path, sh_scripts[script].name, (unsigned)probe_cp);
+            fdk_font_destroy(cand);
+            if (n_skip < 4) {
+                skip[n_skip++] = path; /* ownership: kept until loop end */
+            } else {
+                fdk_free(path);
+            }
+            continue;
+        }
+        f = cand;
+        winner = path;
     }
-    fdk_font *f = fdk_text_font_load_face(path, face,
-                                          primary->pixel_size);
+
+    for (int i = 0; i < n_skip; i++) {
+        /* skip[] holds the resolver's fdk_alloc'd strings; the
+         * (uintptr_t) dance is the project's warning-clean
+         * const-away idiom (notify_client.c). */
+        fdk_free((void *)(uintptr_t)skip[i]);
+    }
+
     if (f == NULL) {
-        fdk_free(path);
-        primary->fallback_script[primary->n_fallbacks] = script;
-        primary->fallbacks[primary->n_fallbacks] = NULL;
-        primary->n_fallbacks++;
-        return NULL;
-    }
-    /* Coverage verification BEFORE the slot is taken: fontconfig's
-     * sort ranks charset-covering fonts first, but it is a ranking,
-     * not a guarantee — on the tofu machine (all CJK fonts CFF and
-     * rejected by the old loader) the first LOADABLE candidate was a
-     * Latin-only font, and caching it for the script would have
-     * poisoned every later codepoint of that script. A loaded font
-     * that does not map the probe is the same as no answer. */
-    if (!fdk__font_covers(f, probe_cp)) {
-        fdk_font_destroy(f);
-        fdk_free(path);
         primary->fallback_script[primary->n_fallbacks] = script;
         primary->fallbacks[primary->n_fallbacks] = NULL;
         primary->n_fallbacks++;
@@ -769,14 +856,17 @@ static fdk_font *sh_fallback_for(fdk_font *primary, int script,
     primary->fallback_script[primary->n_fallbacks] = script;
     primary->fallbacks[primary->n_fallbacks] = f;
     primary->n_fallbacks++;
-    FDK_INFO("shaping: fallback font %s for %s", path,
+    FDK_INFO("shaping: fallback font %s for %s", winner,
              sh_scripts[script].name);
-    fdk_free(path);
+    fdk_free(winner);
     return f;
 }
 
 /* The font for a codepoint: the primary when it covers it, else the
- * script's fallback, else the primary (a .notdef, honestly drawn). */
+ * script's fallback, else the primary (a .notdef, honestly drawn).
+ * An uncovered cp that no script bucket claims gets ONE WARN per
+ * font — the honest "your machine has no glyph for this, anywhere"
+ * line, instead of silent tofu. */
 static fdk_font *sh_font_for_cp(fdk_font *primary, fdk_u32 cp,
                                 int script) {
     if (fdk__font_covers(primary, cp)) {
@@ -787,6 +877,13 @@ static fdk_font *sh_font_for_cp(fdk_font *primary, fdk_u32 cp,
         if (fb != NULL && fdk__font_covers(fb, cp)) {
             return fb;
         }
+    } else if (!primary->warned_uncovered) {
+        primary->warned_uncovered = true;
+        FDK_WARN("shaping: no script bucket and no fallback for "
+                 "U+%04X — it will draw .notdef on %s",
+                 (unsigned)cp,
+                 primary->source_path != NULL ? primary->source_path
+                                              : "(the primary font)");
     }
     return primary;
 }

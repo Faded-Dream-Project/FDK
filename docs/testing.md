@@ -33,6 +33,16 @@ when `$WAYLAND_DISPLAY` is unset, so plain CI never fails on it;
 point it at a live compositor (the rig starts sway headless) and it
 runs the real suite. See "Wayland test coverage" below.
 
+**`make test-textdemo`** — the §10 hand-equivalent pixel rig
+(tests/textdemo_rig.sh): screenshots `examples/text_demo` under a
+throwaway Xvfb with the complex-script strings, in both the shaped
+and the legacy (`$FDK_SHAPING=0`) posture, and asserts the
+differential plus the join anchors (the Devanagari shirorekha width,
+the Han ideograph density) with a legacy negative control. Needs
+Xvfb + python3-PIL and fontconfig answers for the scripts' fonts
+(the CI images install the per-script Noto faces); every leg skips
+honestly with a disclosed message when its font is absent.
+
 ## Why the split
 
 Per project requirement: ordinary `make test` must not depend on the

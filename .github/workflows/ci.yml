@@ -64,7 +64,15 @@ jobs:
             dbus libglib2.0-bin \
             libgl1 xvfb fonts-dejavu-core python3-pil \
             libharfbuzz0b libfribidi0 fonts-wqy-zenhei fonts-urw-base35 \
-            libxrandr-dev
+            libxrandr-dev \
+            fonts-noto-core
+          # fonts-noto-core: the per-script faces (Arabic, Devanagari,
+          # Hebrew, Thai, Bengali, ...) that the shaping suite's
+          # six-script fallback matrix and the text_demo screenshot
+          # rig assert against — the §10 desktop report's root cause
+          # (an unsorted script table) was invisible to tests whose
+          # machines only had the one CJK font; the matrix now demands
+          # real per-script answers.
 
       - name: Build (debug, sanitizers)
         run: make
@@ -74,6 +82,15 @@ jobs:
 
       - name: Text shaping — the legacy posture (FDK_SHAPING=0)
         run: FDK_SHAPING=0 ./build/tests/test_shaping
+
+      - name: text_demo screenshot rig (§10 hand-equivalent, Xvfb)
+        # The owner's desktop check (TESTING-ON-DESKTOP §10) made
+        # mechanical: joined Arabic, the Devanagari shirorekha, dense
+        # Han ideographs, each verified shaped-vs-legacy under Xvfb
+        # with a negative control. The per-script Noto faces are
+        # installed above so every leg RUNS here (a skip would be a
+        # regression on this runner).
+        run: make test-textdemo
 
       - name: X11 integration suite (throwaway Xvfb)
         run: make test-x11

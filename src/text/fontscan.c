@@ -415,17 +415,28 @@ static bool fs_fontconfig_walk(char **out_path, long *out_face) {
  * default-font resolver, but the pattern is FC_LANG instead of the
  * sans-serif family — fontconfig ranks every font whose charset
  * covers the language, and the first TrueType-flavored candidate
- * through the same loadable-face gate wins. The LSan bracket and
- * the process-lifetime fontconfig posture are fs_try_fontconfig's
- * (the same reasoning applies verbatim). */
+ * through the same loadable-face gate wins. `skip` (may be NULL/0)
+ * names candidates the CALLER already tried and rejected (failed
+ * load, no coverage of the probe) — the walk steps past them so one
+ * bad ranking cannot negative-cache a whole script (the §10 lesson:
+ * a rejection must mean "next candidate", not "no fallback exists").
+ * The LSan bracket and the process-lifetime fontconfig posture are
+ * fs_try_fontconfig's (the same reasoning applies verbatim). */
 bool fdk_text_resolve_fallback_font(const char *lang, fdk_u32 probe_cp,
+                                    const char *const *skip, int n_skip,
                                     char **out_path, long *out_face) {
     if (lang == NULL || out_path == NULL || out_face == NULL) {
         return false;
     }
     if (!fs_fc_load()) {
+        FDK_WARN("fallback resolve: fontconfig unavailable (dlopen "
+                 "failed) — cannot resolve lang=%s",
+                 lang);
         return false;
     }
+    FDK_DEBUG("fallback resolve: querying fontconfig lang=%s "
+              "probe=U+%04X (%d prior candidate(s) skipped)",
+              lang, (unsigned)probe_cp, n_skip);
     fs_lsan_off();
     bool found = false;
     if (g_fc.FcInit()) {
@@ -466,6 +477,9 @@ bool fdk_text_resolve_fallback_font(const char *lang, fdk_u32 probe_cp,
                 if (n > 32) {
                     n = 32; /* the same pathological-sort cap */
                 }
+                FDK_DEBUG("fallback resolve: lang=%s sort returned %d "
+                          "candidates",
+                          lang, n);
                 for (int i = 0; i < n && !found; i++) {
                     fs_FcChar8 *file = NULL;
                     int index = 0;
@@ -475,8 +489,26 @@ bool fdk_text_resolve_fallback_font(const char *lang, fdk_u32 probe_cp,
                         file == NULL) {
                         continue;
                     }
+                    bool skipped = false;
+                    for (int s = 0; s < n_skip; s++) {
+                        if (skip[s] != NULL &&
+                            strcmp(skip[s], (const char *)file) == 0) {
+                            skipped = true;
+                            break;
+                        }
+                    }
+                    if (skipped) {
+                        FDK_DEBUG("fallback resolve: lang=%s "
+                                  "candidate[%d] %s already rejected "
+                                  "this run — stepping past",
+                                  lang, i, (const char *)file);
+                        continue;
+                    }
                     (void)g_fc.FcPatternGetInteger(view->fonts[i],
                                                    "index", 0, &index);
+                    FDK_DEBUG("fallback resolve: lang=%s candidate[%d] "
+                              "%s (index %d)",
+                              lang, i, (const char *)file, index);
                     long face = 0;
                     if (fs_file_has_face((const char *)file,
                                          (long)index, &face)) {
@@ -486,9 +518,17 @@ bool fdk_text_resolve_fallback_font(const char *lang, fdk_u32 probe_cp,
                             *out_face = face;
                             found = true;
                         }
+                    } else {
+                        FDK_DEBUG("fallback resolve: lang=%s candidate[%d] "
+                                  "rejected by the flavor/face gate",
+                                  lang, i);
                     }
                 }
                 g_fc.FcFontSetDestroy(set);
+            } else {
+                FDK_WARN("fallback resolve: FcFontSort failed for "
+                         "lang=%s — no candidate list",
+                         lang);
             }
         }
     }

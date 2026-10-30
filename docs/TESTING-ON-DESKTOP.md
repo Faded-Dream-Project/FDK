@@ -343,11 +343,31 @@ DISPLAY=:94 ./build/examples/text_demo "مرحبا 漢字" "नमस्ते" 
 ```
 
 Expected: `[screenshot] out.png (720xNNN, 2 blocks)` and a PNG
-whose frames hold joined Arabic, wide CJK, and shaped Devanagari
-(the sandbox rig verifies ink presence + a contiguous joined
-Arabic run; the EYE checks above are yours).
+whose frames hold joined Arabic, wide CJK, and shaped Devanagari.
+The sandbox rig that proves this mechanically is
+`make test-textdemo` (tests/textdemo_rig.sh): it screenshots the
+same strings in the shaped and the legacy (`$FDK_SHAPING=0`)
+posture and asserts the differential (a broken fallback channel
+renders .notdef in both — the delta collapses), the Devanagari
+shirorekha width anchor, the Han ideograph density, and a legacy
+negative control. The glyph-level truth (fallback face resolved,
+no .notdef glyph ids, contextual joining forms, conjunct cluster
+merging) is tests/test_shaping.c's six-script matrix, which runs
+in plain `make test`. The EYE checks above are still yours.
 
-**Status: DONE (should work; owner verification pending).**
+**The 2026-10-31 fix this section's first report produced**: your
+"Arabic and Devanagari as .notdef while Han worked, no fallback
+log line" was an unsorted script-classification table — the
+binary search silently classified most scripts as "common", so the
+fallback was never requested (Han survived by search-path luck).
+The table is sorted now, failures WARN with their reason, and the
+chosen fallback face is INFO-logged per script — if you ever see
+tofu again, the log now names the script, the codepoint, and
+whether fontconfig had no answer, the face failed to load, or the
+face did not map the codepoint.
+
+**Status: DONE (should work; owner verification pending — re-run
+after the 2026-10-31 fallback fix).**
 
 ## 11. IME against a real input method (M-1 — needs your eyes)
 
