@@ -45,16 +45,15 @@ all examples verify-exports` at 757 exports, the sway-rig Wayland
 integration suite, fdk-shell unit + X11 + Wayland suites, the
 bar rig on BOTH sway and labwc, and the prefix-isolation proof).
 
-**Counts** (recounted 2026-10-29 against every register row — the
-earlier line's arithmetic was coarser than the table): DONE 47
-(C-6/B-17-gestures, 2026-10-29; C-5/A-05 + A-08, 2026-10-29;
-S-8/B-10, 2026-10-29; C-1/B-09, 2026-10-29; S-9/B-13, 2026-10-29;
-S-6/B-04-activation, 2026-10-29; C-4/B-14, 2026-10-29; S-10/B-18,
-2026-10-29; S-4/A-06 + A-07 folded, 2026-10-29; S-5/B-12,
-2026-10-29; M-6/A-03/B-05, 2026-10-29; T-B both sides, 2026-10-29;
-S-2 and S-1 pending owner verification; M-4, M-3, M-1, and S-3,
-2026-10-28) · PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 8 ·
-DEFERRED (by design) 5 · BLOCKED-BY-SANDBOX 0 — of 62 items.
+**Counts** (recounted 2026-10-30 at `e4b9fd2` against every register
+row — the arithmetic is the table's, item for item): DONE 53 ·
+PARTIAL 1 (B-19) · IN PROGRESS 1 (M-9) · MISSING 2 (B-15, B-16 —
+both are DEFER-tier work: D-1 and D-2) · DEFERRED (by design) 5 ·
+BLOCKED-BY-SANDBOX 0 — of 62 items. The 62 = 13 A + 19 B + 9 M +
+10 S + 6 C + 5 D. Per the owner's Phase 2 directive ("DEFER
+D-1 to D-5: do these too"), the D tier is now the active queue:
+D-1 (B-15), D-2 (B-16), D-3 (tablets — B-17's fenced half),
+D-4 (foreign-toplevel), D-5 (B-19's session-restore half).
 Re-verified 2026-10-30 (post-CI-repair — the 15-push red streak's
 root causes): S-5's Xrender.h include (a build dep the lane's own
 design forbids — every job on every runner failed at that compile
