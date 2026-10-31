@@ -419,6 +419,28 @@ never shows a stale or torn frame because of the downgrade itself.
 `fdk_window_get_render_path()` reads the live answer (including a
 mid-session downgrade) so applications and tests can observe it.
 
+**LANE OWNERSHIP (the §20 single-owner rule, Wayland).** While the
+lane owns a wl_surface, that surface's BUFFER STATE BELONGS TO EGL:
+FDK's own queue sends no attaching commit on it — the background
+buffer attach refuses at the configure and resize seams, the classic
+wl_shm commit path refuses defensively, and `hide()` sends no
+NULL-buffer commit. The window maps through its own first present
+instead. Why this is load-bearing: a driver may wrap the surface in
+the explicit-sync role at `eglCreateWindowSurface` time (NVIDIA's
+EGL does, against compositors that advertise
+`wp_linux_drm_syncobj_manager_v1`), after which every attaching
+commit needs an acquire point — EGL's carries one, a plain wl_shm
+attach does not, and the compositor kills the connection. The
+DOWNGRADE order above is half of the same rule: the EGL surface is
+destroyed BEFORE the salvaging wl_shm attach (the classic commit
+path's refusal makes that order mechanical). Pinned by the
+attach-count rig (test_wayland_integration.c: with the lane forced,
+ZERO `wl_surface.attach` requests from FDK's Default Queue on the
+toplevel — verified against the pre-fix tree, which sent exactly
+one, at the first configure). FDK implements no client-side
+syncobj — the design is recorded and rejected in docs/DECISIONS.md
+(D-036).
+
 libGL is pinned for process lifetime (never `dlclose`d): Mesa/GLVND
 register process-global state that does not survive unload cleanly,
 and FDK apps may create and destroy contexts repeatedly (every test

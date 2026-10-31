@@ -8,7 +8,13 @@
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
 
-Last audited: 2026-10-30, at milestone **1.7.9** (D-5 session
+Last audited: 2026-10-31, on the rc2 line after the history rewrite
+(the tablet-crash round [D-033], the upload-contract re-land
+[D-034], the f64 shaped pen [D-035], and the second round: the
+§20 single-owner rule [D-036], the extreme-scale re-land's
+completion [D-037], and the shaped-selection geometry [D-038] —
+see the Implemented inventory's "2026-10-31 rounds" subsection).
+Before those: 2026-10-30, at milestone **1.7.9** (D-5 session
 save/restore, both lanes: include/fdk/fdk_session.h + fdk_window_
 set_command/join_session/leave_session + FDK_EVENT_SESSION_SAVE/
 RESTORED (enum 58/59), 869 exports (+8) — the X11 ICCCM lane
@@ -1122,6 +1128,44 @@ sidebar rhythm).
 - Shortcuts/accelerators/mnemonics (1.3.3 / 1.3.6)
 - Versioned shared-library export surface (version script +
   verify-exports gate)
+
+### The 2026-10-31 rounds (post-rewrite re-lands + the desktop
+report fixes — CHANGELOG "Unreleased-candidate features")
+
+- **The XI2 tablet crash fix** (D-033): the missing XIDeviceEvent
+  `flags` field (every valuator tail field read 8 bytes early —
+  the owner's SEGV in xi2_valuator with 0xbebebebe as a pointer),
+  the off-by-one touch/gesture constants, the unvalidated tail;
+  hostile-cookie + classification + XTEST-cookie rigs.
+- **The Wayland EGL upload contract** (D-034, the strict-ES2
+  NVIDIA fix, re-landed): extension detection with the RGBA-twin
+  and packed-row fallbacks; FDK_GL_CORE_ONLY pins the shapes.
+- **The f64 shaped pen** (D-035) + **the O(n) attribution boundary
+  table and the f64 wrap pen** (D-037): the extreme-scale
+  quadratics are gone (128 KB took ~19 s pre-fix; 1 MB now ~1.5 s
+  under ASan) and a 20k-line document's deep lines no longer
+  drift; tests/test_stress.c is a PERMANENT make-test member (10k
+  list, 20k document, 1200 fps full-screen animation + scrolling,
+  1 MB mixed-direction single line).
+- **The §20 single-owner rule** (D-036): while the GL lane owns a
+  wl_surface its buffer state belongs to EGL — FDK's queue sends
+  no attaching commit (background-buffer refusal at the configure
+  and resize seams, defensive classic-commit refusal, hide()
+  inert); the load-bearing downgrade order; every
+  dead-connection mark logs the protocol error's
+  interface/object/code + errno; the attach-count rig pins zero
+  FDK-queue attaches (verified both directions on sway/llvmpipe);
+  the activation re-exec rig lies no more (fork+execl, not
+  system()).
+- **The shaped-selection geometry** (D-038):
+  fdk_font_selection_spans_utf8() (the cluster-snapped visual
+  spans — the rectangle IS the clusters' advance boxes, zero-width
+  marks never widen, bidi selections are several rectangles); the
+  Entry paints them and draws its text WHOLE (the old
+  three-segment draw cut clusters and moved the glyphs);
+  pixel-level pins in tests/test_selection_pixels.c.
+- **The D-Bus once-notice** (the unavailable line fires once per
+  process).
 
 ## What's left (the authoritative backlog)
 

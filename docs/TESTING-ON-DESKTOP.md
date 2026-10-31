@@ -987,3 +987,81 @@ only your touchscreen shows is the real feel.
   window on X11; on Wayland the compositor takes over.
 - Press-drag-release inside a List or Tree selects exactly as the
   mouse does (the same hit tests, no touch-only surprises).
+
+## 27. The GTX 1050 Ti acceptance: the GL lane under the proprietary
+NVIDIA driver on labwc (the §20 report's hardware — needs your GPU)
+
+**Status: implemented — should work (untested on real hardware).**
+The §20 crash (two presenters on one wl_surface) is fixed and the
+fix is pinned on the sway/llvmpipe rig by the attach-count
+assertion; what that rig CANNOT show is the explicit-sync role
+itself (no DRM render node in the sandbox). This is the recipe for
+confirming the whole chain on your machine.
+
+Run `text_demo "مرحبا" $'\u0928\u092e\u0938\u094d\u0924\u0947'`
+under labwc and look for, in order:
+
+- `GPU present lane active on Wayland (renderer "NVIDIA GeForce
+  GTX 1050 Ti/PCIe/SSE2")` — the lane engaged.
+- `compositor advertises wp_linux_drm_syncobj_manager_v1 (explicit
+  buffer synchronization) — ...` — your compositor offers the
+  explicit-sync protocol (ONE line, at connect).
+- `GL lane: compositor advertises wp_linux_drm_syncobj_manager_v1 —
+  a driver wrapping this surface in the explicit-sync role makes
+  FDK's wl_shm-commit refusal load-bearing (the single-owner rule)`
+  — the relevance note at lane engagement.
+- `GPU lane upload path: BGRA texture + UNPACK_ROW_LENGTH sub-rects`
+  (or the RGBA-twin / packed-row spelling) — the upload contract
+  detected your driver's extensions.
+- **THE ACCEPTANCE**: `FDK_RENDER_PATH_GL` persists on every window
+  (`fdk_window_get_render_path`, or just: no "reverting to the CPU
+  present path" WARN), NO `backend dispatch_pending failed (-101)`,
+  and NO protocol error across several minutes of resizing, moving
+  and typing into text_demo. Before the §20 fix this exact run died
+  within the first configure: FDK's own wl_shm background attach hit
+  the EGL-wrapped surface without an acquire point — protocol error
+  4, dead connection, "exited cleanly after 0 frames".
+- If the lane ever DOES fail on your machine, the dead-connection
+  line now names the interface, object id and protocol error code
+  (`wl_display_get_protocol_error`) plus errno — the line the old
+  build silently omitted. Send that line; it correlates 1:1 with
+  the compositor's own log.
+
+Optional, decisive variant: `WAYLAND_DEBUG=1` the same run and
+count `wl_surface.attach` on the toplevel across a handful of
+presents — every attach should come from the driver's queue (a
+`{... egl ...}` queue name), and NONE from libwayland's
+`{Default Queue}`. That count is exactly what the sandbox rig
+asserts.
+
+## 28. The Wayland/NVIDIA sign-off round (the desktop's answer, not
+the rig's)
+
+The §27 recipe is the single-window acceptance; this is the
+half-hour round that says "the lane is fine on this desktop" as a
+property, not an anecdote. All of it on your real session
+(labwc/sway + the proprietary driver):
+
+- **Sustained lane**: run 01_hello_world and 04_widgets side by
+  side for a few minutes (both float at different sizes — the lane
+  policy engages both). No `WARN` lines, no `-101`, both stay
+  `FDK_RENDER_PATH_GL`.
+- **Resize storm**: drag text_demo's edges for ~30 s (continuous
+  configures at many sizes). The resize seam's background-buffer
+  refusal is exercised here — the pre-fix tree attached at every
+  configure-before-first-present. No protocol errors, no flicker
+  beyond the compositor's own frame pacing.
+- **Hide/show and destroy**: hide and re-show a window, destroy a
+  lane-owned window and open a new one. FDK's queue never attaches
+  while the lane owns the surface; the EGL teardown is the lane's
+  own (context → surface → wl_egl_window, one MakeCurrent(nil)).
+- **The downgrade path** (if you can force it):
+  `FDK_GL_FAIL_AT=2 ./build/examples/text_demo …` — the second
+  present is poisoned, the window reverts to the CPU path with the
+  frame salvaged, and the connection must stay alive (the load-
+  bearing order: EGL surface released BEFORE the first wl_shm
+  attach).
+- **A clean exit**: LeakSanitizer's exit report on a healthy run
+  is expected to name third-party modules (NVIDIA/libwayland
+  internals); FDK-owned allocations report zero. If an FDK frame
+  appears in the report, that is a real bug — file it.

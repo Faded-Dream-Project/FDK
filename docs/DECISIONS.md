@@ -1924,3 +1924,158 @@ placement and pen geometry. The four extreme-scale stress tests
 the lost commit carried were never recovered (their content is
 gone with the repository deletion); this leg is the re-landed
 core of what they pinned.
+
+## D-036 — one presenter per wl_surface: the single-owner rule under the GL lane (the §20 re-land)
+
+**Date**: 2026-10-31 · **Status**: shipped (re-landed from the lost pre-rewrite fix; root cause re-derived from the owner's GTX 1050 Ti report)
+
+**1. The rule.** While the GL present lane owns a wl_surface (an
+EGL window surface wraps it), the surface's BUFFER STATE BELONGS TO
+EGL. FDK's own queue sends no attaching commit on it:
+`attach_background_buffer()` refuses (a successful no-op, logged
+once per window) at the configure seam, the resize seam and any
+future caller; `commit_render_pending()` refuses defensively (one
+WARN + `FDK_ERR_INVALID_STATE`, unreachable by construction — the
+refusal exists so a future reorder of the downgrade path cannot
+silently resurrect the bug); `hide()` sends no NULL-buffer commit.
+A lane-owned window maps through its OWN first present — the
+deferred EGL first frame at configure, or the next present.
+
+**2. Why (the whole chain, not just the symptom).** A driver may
+wrap the wl_surface in the explicit-sync role at
+eglCreateWindowSurface time — NVIDIA's EGL does, when the
+compositor advertises wp_linux_drm_syncobj_manager_v1. The lane
+engages at the first framebuffer acquire, which PRECEDES the first
+xdg configure for every app that paints before pumping (all of
+FDK's examples). After the wrap, every attaching commit needs an
+acquire point; EGL's commits carry them, a plain wl_shm
+attach+commit does not — protocol error 4, dead connection, "exited
+cleanly after 0 frames". The rule is compositor-agnostic on
+purpose: one presenter per surface is correct even where nothing
+enforces it (the sandbox's sway/pixman rig proved the COUNT: with
+the fix stashed, exactly one Default-Queue attach at the first
+configure; with the fix, zero — N presents -> N attaches, all from
+the driver's queue).
+
+**3. The load-bearing order.** A window that downgrades from the
+lane to wl_shm must release the EGL surface BEFORE any wl_shm
+attach. The salvage path already had that order; the comment now
+immortalizes it, and `commit_render_pending()`'s refusal makes it
+MECHANICAL — reorder the destroy after the attach and the present
+refuses instead of double-presenting.
+
+**4. REJECTED: client-side syncobj.** FDK will not implement
+wp_linux_drm_syncobj_v1. The toolkit's render model is "one
+presenter per surface"; the sync protocol is the driver's business
+(EGL carries the acquire/release points), and a client-side
+implementation would couple FDK to a staging protocol for zero
+capability it needs. The registry GLOBAL is observed (one INFO
+line, string-matched, never bound) purely as a diagnostic: it
+tells the owner WHY the rule is load-bearing on their machine.
+
+**5. The pins.** The attach-count rig (test_wayland_integration.c):
+re-exec under WAYLAND_DEBUG=1 with the lane forced, toplevel
+surface identified by its xdg role request, attaches classified by
+queue; asserts zero FDK-queue attaches and N driver attaches for N
+presents; [skip] where no EGL driver exists. The registry
+diagnostic and the lane-engagement relevance line are the
+real-hardware breadcrumbs (TESTING-ON-DESKTOP §27/§28). The
+dead-connection reporting was fixed alongside: every mark routes
+through `fdk__wayland_connection_dead()` (the present path used to
+flip display_dead QUIETLY — the reason the owner's run showed no
+protocol-error detail line while context.c promised one), and a
+guarded never-blocking read surfaces an error event that EPIPE
+beat out of the socket.
+
+## D-037 — the extreme-scale re-land's completion: the O(n) boundary table, the f64 wrap pen, and the four permanent stress legs
+
+**Date**: 2026-10-31 · **Status**: shipped (re-landed; D-035 fixed the accumulator, this closes the two attribution sites D-035 could not see)
+
+**1. The attribution is a boundary table, not a sort.** The
+per-codepoint advance attribution (which cp a glyph's advance lands
+on) used an insertion sort of the distinct cluster ids plus a
+per-glyph linear scan of the sorted array — O(n_glyphs x
+n_clusters), quadratic on RTL fragments where harfbuzz emits
+DESCENDING ids (128 KB took ~19 s under ASan). The replacement is
+indexed BY the cluster id (a cp index < n): mark the seen ids,
+sweep high-to-low carrying the next-seen id, and each glyph's
+landing cp falls out in O(1). Byte-identical output by construction
+— the same `clusters[slot+1] or n` arithmetic, just computed
+without the sort.
+
+**2. The wrap pen differences EXACT sums.** The wrap engine walks
+TEXT-ABSOLUTE prefix pens; differencing two f32 snapshots (each
+narrowed once from the f64 accumulator D-035 added) carries both
+snapshots' quantization once past 2^21 px — a 20k-line document's
+deep lines drifted by whole pixels (identical lines reported
+different advance_widths by depth). The shaped result now carries
+the un-narrowed f64 prefix sums (`cp_pen_exact`); the wrap engine
+differences those. The legacy walk keeps its f32 metrics
+bit-compatible (the D-035 scoping rule: the no-libs path is
+deliberately untouched).
+
+**3. The stress legs are permanent, not a campaign.**
+tests/test_stress.c runs in every `make test`: the 10k-row List
+(growth-ratio pin — quadratic appends land at ~9x for 3x the rows
+and fail), the 20k-line document (every identical line reports the
+identical advance at any depth — the f64 wrap pin), the 1200 fps
+full-screen animation with interleaved scrolling (1200
+1920x1080 frames + 150 wheel events; a per-frame leak is an
+ASan/LSan report long before the budget), and the 1 MB single-line
+MIXED-direction text (the RTL fragments are load-bearing — the
+quadratic attribution would turn this leg into a timeout, which is
+exactly how it fails a regression). Budgets are generous on
+purpose: they exist to fail LOUDLY on complexity regressions, not
+to benchmark.
+
+**4. The honest header.** fdk_animation.h's zombie grace window
+is now stated in its real units — roughly 64 pump passes
+(GRACE_PUMPS), ~1 s of display cadence — because the stress leg
+queried a handle across exactly that window and "roughly a second
+of animation traffic" was not a contract you could test against.
+
+## D-038 — the selection rectangle is the clusters' boxes: the shaped span seam
+
+**Date**: 2026-10-31 · **Status**: shipped
+
+**1. The rule.** A selection highlight is drawn from the SHAPED
+result, never from a byte-prefix measurement. `fdk_font_selection_
+spans_utf8()` returns the visual x-ranges of every grapheme cluster
+the logical byte range touches: a cluster is selected when its byte
+range intersects the selection (cutting it selects it WHOLE — snap
+outward), its box is its ADVANCE span ([pen entering its first
+glyph, pen after its last] — zero-width marks never widen it), and
+a bidi range yields SEVERAL spans (the logical range maps to
+discontiguous visual runs; the gap is unhighlighted). The Entry and
+TextView paint exactly those spans.
+
+**2. Why prefixes were wrong twice over.** A prefix that CUTS a
+cluster shapes differently than the whole cluster (a half-form
+consonant's advance is not the cluster's own advance) — the
+highlight landed mid-glyph, spilled onto neighbours, and grew as
+the selection moved (the owner's स्ते report). And the Entry's own
+text drawing split at the selection edges into three
+NUL-terminated segments — the same cut, applied to the INK: the
+glyphs themselves moved when the user selected mid-cluster, and
+kerning reset at the selection edges. All three segments were the
+same color (the accent rect says "selected"); the entry now draws
+the whole line in one pass, so the ink is identical whether or not
+anything is selected.
+
+**3. The pins are pixel-level.** tests/test_selection_pixels.c:
+API-level (mid-cluster span == whole-cluster span, exactly;
+Hebrew logical->visual mapping — the halves meet at the exact
+midpoint; the bidi two-span split with a real gap) and paint-level
+(the scanned band extent equals the span geometry ±1 px of
+antialiasing; the mid-cluster band IS the whole-cluster band; the
+TextView bidi selection paints two separated bands on one line).
+Devanagari legs skip honestly without an Indic face — the
+cluster-snap property needs real conjunct shaping, not .notdef
+boxes.
+
+**4. Level-1 honesty.** Without the shaping libraries the legacy
+per-codepoint walk makes every codepoint its own cluster, so the
+spans degrade to prefix measures — single-direction exact,
+mixed-direction approximate — the same documented class as the
+caret geometry. The contract lives in fdk_text.h next to the
+function.

@@ -17,6 +17,134 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-10-31 (on the rc2 line)
 
+### Fixed — TWO PRESENTERS ON ONE wl_surface: the Wayland connection death on NVIDIA (the §20 report, re-landed)
+
+- **The owner's report**: `text_demo "مرحبا" "नमस्ते"` on
+  Arch/labwc/NVIDIA GTX 1050 Ti (proprietary driver) — the GL lane
+  engaged ("GPU present lane active", "GPU lane upload path: BGRA
+  texture + UNPACK_ROW_LENGTH sub-rects"), then
+  "WARN GL error during GPU present — downgrading",
+  "ERROR backend dispatch_pending failed (-101)", "exited cleanly
+  after 0 frames".
+- **The root cause**: FDK put a SECOND presenter on the toplevel
+  wl_surface. The lane engages at the first framebuffer acquire —
+  BEFORE the first xdg configure — and NVIDIA's EGL wraps the
+  surface in the explicit-sync role at eglCreateWindowSurface time
+  (the compositor advertises wp_linux_drm_syncobj_manager_v1). After
+  the wrap, every attaching commit needs an acquire point; FDK's own
+  wl_shm background-buffer attach at configure (and at resizes)
+  carries none — protocol error 4, dead connection.
+- **THE SINGLE-OWNER RULE**: while the GL lane owns a surface, its
+  buffer state belongs to EGL. `attach_background_buffer()` REFUSES
+  (returns without attaching) for lane-owned windows — at the
+  configure seam, the resize seam, and any future caller; the
+  classic wl_shm commit path (`commit_render_pending`) refuses
+  defensively (one WARN + FDK_ERR_INVALID_STATE — unreachable by
+  construction); `hide()` sends no NULL-buffer commit either. A
+  lane-owned window maps via its own first present (the deferred EGL
+  first frame at configure, or the next present). The DOWNGRADE
+  ORDER is documented as load-bearing: the wl_shm slot is created
+  (no attach), the EGL surface/context are destroyed, and only then
+  does the classic present attach — the commit-path refusal makes
+  that order mechanical. REJECTED DESIGN (recorded in
+  docs/DECISIONS.md D-036): implementing linux-drm-syncobj on the
+  client side.
+- **The registry diagnostic**: one INFO line when the compositor
+  advertises wp_linux_drm_syncobj_manager_v1 (detected by string
+  match — never bound), and the lane-engagement line now states
+  whether the flag was seen and why the single-owner rule matters
+  there.
+- **The dead-connection detail line**: context.c promises "the
+  backend logged its one detail line" — the owner's run printed
+  NONE. Two fixes: (1) the present path's trailing flush marked the
+  connection dead QUIETLY (a hand-rolled display_dead flip), so the
+  pump's circuit breaker then returned -101 without any backend
+  line — every dead-connection mark now routes through the shared
+  `fdk__wayland_connection_dead()` helper; (2) the flush/EPIPE
+  paths can beat the compositor's wl_display.error event out of the
+  socket — one guarded, never-blocking read surfaces it so the line
+  still names the interface, object id and protocol error code (and
+  says so honestly when nothing was recorded).
+- **The rig lie**: tests/test_wayland_integration.c re-executed the
+  activation child through `system("/proc/self/exe …")` — under a
+  shell /proc/self/exe is the SHELL's own image, the child never
+  ran, and the "[ok]" was dash reading empty stdin. fork()+execl
+  now; the launcher-flow leg exercises a REAL child process (its
+  focus verdict flips through the voucher, observed live).
+- **The attach-count rig** (test_wayland_integration.c): re-execs
+  the binary under WAYLAND_DEBUG=1 with FDK_GL_FORCE=1 and counts
+  the toplevel's wl_surface.attach requests BY QUEUE. Verified both
+  directions on sway + llvmpipe: with the fix stashed, exactly ONE
+  Default-Queue attach lands at the first configure; with the fix,
+  ZERO — N presents -> N attaches, all from the driver's queue. The
+  sandbox has no DRM render node (no explicit-sync role to enforce
+  the rule), so the COUNT is the proof there; the role itself needs
+  the owner's hardware (TESTING-ON-DESKTOP §27/§28). The §19
+  core-only leg now forces the lane so it exercises on swrast.
+
+### Fixed — the four extreme-scale stress legs, their two defects, and the wrap pen (the re-land's completion)
+
+- tests/test_stress.c is back as a PERMANENT `make test` member:
+  the 10k-row List (append/measure/scroll/select/paint, growth
+  linear), the 20k-line document (wrap exactness at depth), the
+  1200 fps full-screen 1920x1080 animation with interleaved
+  scrolling (1200 frames + 150 wheel events, per-frame leaks would
+  LSan-fail), and the 1 MB single-line MIXED-direction text
+  (shaped in ~1.5 s under ASan; the RTL fragments are load-bearing).
+- **The shaped attribution was O(n_glyphs x n_clusters)** — an
+  insertion sort of the distinct cluster ids (quadratic on RTL
+  fragments, where harfbuzz emits DESCENDING ids) plus a per-glyph
+  linear scan of the sorted array. Replaced with the O(n) boundary
+  table (indexed BY the cluster id): byte-identical output by
+  construction; 128 KB took ~19 s before, 1 MB now takes ~1.5 s
+  under ASan.
+- **The wrap engine differenced TEXT-ABSOLUTE f32 prefix sums**:
+  past 2^21 px an f32 snapshot's ulp is a fraction of a pixel, and a
+  20k-line document's deep lines carried that quantization into
+  their advance_width (identical lines, different widths by depth).
+  The shaped result now carries the UN-narrowed f64 prefix sums
+  (`cp_pen_exact`); the wrap engine differences those (the legacy
+  walk keeps its 1.4.x f32 metrics bit-exact). Pinned: every one of
+  20k identical lines reports the identical advance.
+- **The animation-handle contract now states the grace window in
+  its real units**: roughly 64 pump passes (GRACE_PUMPS in
+  src/widget/animation.c), ~1 s of display cadence — the header
+  used to say only "roughly a second of animation traffic".
+
+### Fixed — the selection highlight cut grapheme clusters (shaped Devanagari; the rectangle grew and spilled)
+
+- Selecting the cluster "स्ते" drew a highlight that spilled onto
+  neighbours and grew as the selection moved, and a bidi selection
+  was one wrong rectangle. Two stacked causes:
+- **The highlight geometry**: the Entry/TextView selection rect was
+  computed from byte-PREFIX measurements ("width of text[0..lo)" to
+  "width of text[0..hi)") — a prefix that CUTS a cluster shapes
+  differently than the whole cluster (a half-form consonant's
+  advance is not the cluster's own). New public seam
+  `fdk_font_selection_spans_utf8()`: the visual spans of a logical
+  byte range read straight off the shaped result — a cluster is
+  selected when its byte range intersects the selection (cutting it
+  selects it WHOLE), its box is its ADVANCE span (zero-width marks
+  never widen it), and a bidi range yields SEVERAL spans (one per
+  visual run). The Entry and TextView highlights paint exactly
+  those spans; the TextView keeps the classic full-line hair for
+  whole-line selections.
+- **The entry's own text drawing**: it drew the text as THREE
+  NUL-terminated segments split at the selection edges — a boundary
+  inside a cluster made the segments reshape (a lone half-form, a
+  leading virama), so the glyphs themselves MOVED when the user
+  selected mid-cluster, and kerning reset at the selection edges.
+  All three segments were the same color (the accent rect says
+  "selected"); the entry now draws the whole line in ONE pass —
+  identical ink whether or not anything is selected.
+- **Pixel-level pins** (tests/test_selection_pixels.c): API-level
+  (cluster snap — a mid-cluster selection equals the whole-cluster
+  box; Hebrew logical->visual mapping; the bidi two-span split with
+  a real gap) and paint-level (the scanned band extent equals the
+  span geometry; the mid-cluster band IS the whole-cluster band;
+  the TextView bidi selection paints two separated bands on one
+  line). Devanagari legs skip honestly without an Indic face.
+
 ### Fixed — the tablet crash on the owner's desktop: three stacked root causes in D-3's X11 translation (the §21 report)
 
 - **The owner's report**: the ASan+UBSan debug build of

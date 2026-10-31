@@ -2728,3 +2728,66 @@ pins the re-landed f64 shaped pen.
 Also new: the D-Bus unavailable notice is pinned once-per-process
 (three connection attempts, one log line, through a counting sink)
 — the fix for the owner's triple startup line.
+
+## 1.1.0-rc2 (2026-10-31, second round) — the §20 attach-count rig, the permanent stress legs, and the selection-geometry pixels
+
+Three new suites, one per concern of the round (the narratives are
+in docs/DECISIONS.md D-036/D-037/D-038):
+
+- **The single-owner attach-count rig**
+  (test_wayland_integration.c, the §20 re-land): the suite re-execs
+  ITSELF under `WAYLAND_DEBUG=1` with the lane forced
+  (`FDK_GL_FORCE=1`), presents three frames, and the parent parses
+  the child's protocol trace: the toplevel's wl_surface is
+  identified by its `get_xdg_surface` role request, and every
+  `wl_surface.attach` on it is classified by the queue that sent
+  it. THE assertion: FDK's own queue (libwayland's Default Queue)
+  sends ZERO attaches on a lane-owned toplevel, and N presents
+  produce N attaches from the driver's queue (Mesa names it "mesa
+  egl surface queue"; other drivers name it differently, so the
+  classifier is "any queue that is not the Default Queue"). Skips
+  honestly where no EGL driver exists (the child reports its
+  render path). Verified BOTH directions during development on
+  sway + llvmpipe: with the fix stashed the pre-fix tree sent
+  exactly ONE Default-Queue attach, at the first configure — the
+  second presenter that killed the owner's GTX 1050 Ti connection.
+  The same round fixed the suite's oldest rig lie: the activation
+  launcher leg re-executed through `system("/proc/self/exe …")`,
+  where /proc/self/exe is the SHELL's image — the child never ran
+  and its "[ok]" was dash reading empty stdin. fork()+execl now;
+  the child's focus verdict is real and asserted. The §19
+  core-only leg forces the lane too, so it exercises on swrast
+  (it used to skip in software-only environments).
+
+- **The permanent extreme-stress legs** (tests/test_stress.c,
+  plain `make test`): the 10k-row List (append/measure/scroll/
+  select/paint with a growth-ratio pin — quadratic appends land at
+  ~9x for 3x the rows and fail it), the 20k-line document (wrap
+  EXACTNESS AT DEPTH: all 20k identical lines report the identical
+  advance_width, the f64 wrap-pen pin), the 1200 fps full-screen
+  animation with interleaved scrolling (1200 1920x1080 frames +
+  150 wheel events on the pinned test clock — a per-frame leak is
+  an ASan/LSan report long before the wall-clock budget), and the
+  1 MB single-line MIXED-direction text (Latin + Arabic fragments
+  in one line: the RTL runs are load-bearing — the pre-fix
+  quadratic attribution would turn this leg into a timeout, which
+  is exactly how it fails a regression; ~1.5 s under ASan). Budgets
+  are generous on purpose: they exist to fail LOUDLY on complexity
+  regressions, not to benchmark.
+
+- **The selection-geometry pixels** (tests/test_selection_pixels.c,
+  plain `make test`): API-level pins over
+  `fdk_font_selection_spans_utf8` — a mid-cluster selection equals
+  the whole-cluster span EXACTLY (the Devanagari cluster-snap), the
+  Hebrew logical->visual mapping (the halves' spans meet at the
+  exact midpoint, flush left/right), and the bidi two-span split
+  (a logical range ending inside an RTL run yields two rectangles
+  with a real gap). Paint-level pins: the Entry's scanned selection
+  band equals the span geometry (±1 px of antialiasing) and the
+  mid-cluster band IS the whole-cluster band (the pre-fix tree
+  painted a wider, spilling one — the glyphs themselves moved,
+  because its three-segment text draw cut the cluster); the
+  TextView's bidi selection paints two separated bands on one
+  line. Devanagari legs skip honestly without an Indic face (the
+  cluster-snap property needs real conjunct shaping, not .notdef
+  boxes — the script-matrix resolution walk finds the font).
