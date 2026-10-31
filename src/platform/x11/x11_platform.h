@@ -939,6 +939,10 @@ size_t fdk__x11_preedit_apply(char *buf, size_t cap, long chg_first,
 #define FDK_X11_TABLETS 8
 struct fdk_x11_tablet {
     int deviceid; /* the slave's id (events carry it as sourceid) */
+    int n_axes;   /* the device's REAL valuator count (1.1.0-rc2: the
+                   * valuator read's hard upper bound — an axis index
+                   * at or above this is rejected before any mask or
+                   * values arithmetic runs) */
     int pressure_axis;  /* -1 when the device reports none */
     int tilt_x_axis;    /* -1 = unsupported */
     int tilt_y_axis;    /* -1 = unsupported */
@@ -951,13 +955,17 @@ struct fdk_x11_xi2 {
     int opcode; /* the X Input extension's major opcode on this server */
     int touch_ok; /* server speaks XI >= 2.2 (touch events exist) */
     int warned_once; /* one INFO line per connection, not per window */
-    /* Tablets (1.1.0, D-3): the detected device table + the axis
-     * label atoms resolved once per connection. */
+    /* Tablets (1.1.0, D-3; classification hardened 1.1.0-rc2): the
+     * detected device table + the axis-label atoms resolved once per
+     * connection (None = the server labels nothing: the positional
+     * fallback carries the scan). */
     struct fdk_x11_tablet tablets[FDK_X11_TABLETS];
     int tablet_count;
     unsigned long atom_pressure; /* None = match by position       */
     unsigned long atom_tilt_x;
     unsigned long atom_tilt_y;
+    unsigned long atom_abs_x; /* 1.1.0-rc2: stylus evidence           */
+    unsigned long atom_abs_y;
     Status (*query_version)(Display *, int *, int *);
     Status (*select_events)(Display *, Window, void *, int);
     /* XIQueryDevice/XIFreeDeviceInfo (D-3): the tablet scan at load
@@ -965,6 +973,33 @@ struct fdk_x11_xi2 {
     void *(*query_device)(Display *, int, int *);
     void (*free_device_info)(void *);
 };
+
+/* Tablet test seams (1.1.0-rc2 — the D-3 crash's regression rigs):
+ * inject/clear a synthetic tablet record so REAL cookies (XTEST
+ * through the dispatch loop) and hostile synthetic cookies can
+ * drive the cookie handler, and drive the pure classification with
+ * synthetic (number, label, mode) axes. These ride the STATIC
+ * archive only — never the .so's exported set. */
+void fdk_x11_xi2_test_inject_tablet(fdk_platform_connection *conn,
+                                    int deviceid, int n_axes,
+                                    int pressure_axis, int tilt_x_axis,
+                                    int tilt_y_axis);
+void fdk_x11_xi2_test_clear_tablets(fdk_platform_connection *conn);
+/* Synthetic axis-label atom values for fdk_x11_xi2_test_classify —
+ * never resolved against a Display, just distinct constants. */
+#define FDK_XI2_TEST_ATOM_ABS_X 0xF0D0A000ul
+#define FDK_XI2_TEST_ATOM_ABS_Y 0xF0D0A001ul
+#define FDK_XI2_TEST_ATOM_PRESSURE 0xF0D0A002ul
+#define FDK_XI2_TEST_ATOM_TILT_X 0xF0D0A003ul
+#define FDK_XI2_TEST_ATOM_TILT_Y 0xF0D0A004ul
+/* Drives xi2_axis_shape_add + xi2_classify_tablet over n synthetic
+ * axes. Returns 0 = not a tablet, 1 = tablet (Abs Pressure label),
+ * 2 = tablet (unlabeled positional shape); *out's axis fields are
+ * filled on 1/2. */
+int fdk_x11_xi2_test_classify(const int *numbers,
+                              const unsigned long *labels,
+                              const int *modes, int n,
+                              struct fdk_x11_tablet *out);
 
 /* Phase 8 state helpers (x11_window.c), shared with x11_events.c's
  * PropertyNotify translation: */
