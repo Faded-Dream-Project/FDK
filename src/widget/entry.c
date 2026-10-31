@@ -1737,16 +1737,48 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
     size_t hi = (e->anchor < e->caret) ? e->caret : e->anchor;
     bool has_sel = (lo != hi) && (w->flags & FDK_WF_ENABLED) != 0;
 
-    /* Selection highlight behind the selected segment. */
+    /* Selection highlight behind the selected segment — the shaped
+     * CLUSTER-SNAPPED spans (the Devanagari fix): the rectangle
+     * equals the selected grapheme clusters' advance boxes, never a
+     * byte-prefix measurement (a prefix that cuts a cluster shapes
+     * differently than the whole cluster, which is how the highlight
+     * used to spill onto neighbours and grow). A bidi selection
+     * paints one rectangle per visual run. Password mode keeps the
+     * bullet-based single rect (its geometry is the bullet ladder's
+     * own, monospace-exact). */
     if (has_sel) {
-        fdk_i32 sel_x = text_x + entry_width_to(e, lo);
-        fdk_i32 sel_w = entry_width_to(e, hi) - entry_width_to(e, lo);
-        fdk_rect sel = {sel_x, bounds.y + 2, sel_w,
-                        bounds.height - 4};
-        if (sel_w > 0 && sel.height > 0) {
-            /* The 1.3.2 SELECTION_BACKGROUND token, wired in 1.4.0
-             * (the hardcoded accent-alpha is gone). */
-            fdk_surface_fill_rect(surface, sel, fdk__pal_selection());
+        if (e->password) {
+            fdk_i32 sel_x = text_x + entry_width_to(e, lo);
+            fdk_i32 sel_w = entry_width_to(e, hi) - entry_width_to(e, lo);
+            fdk_rect sel = {sel_x, bounds.y + 2, sel_w,
+                            bounds.height - 4};
+            if (sel_w > 0 && sel.height > 0) {
+                fdk_surface_fill_rect(surface, sel, fdk__pal_selection());
+            }
+        } else {
+            fdk_text_span spans[16];
+            size_t n_spans = 0;
+            if (fdk_ok(fdk_font_selection_spans_utf8(
+                    e->font, e->text, e->len, lo, hi, spans, 16,
+                    &n_spans))) {
+                if (n_spans > 16) {
+                    n_spans = 16; /* >16 visual runs in a single-line
+                                   * field is beyond pathological; the
+                                   * count contract caps the copy */
+                }
+                for (size_t i = 0; i < n_spans; i++) {
+                    fdk_rect sel = {text_x + spans[i].x0, bounds.y + 2,
+                                    spans[i].x1 - spans[i].x0,
+                                    bounds.height - 4};
+                    if (sel.width > 0 && sel.height > 0) {
+                        /* The 1.3.2 SELECTION_BACKGROUND token, wired
+                         * in 1.4.0 (the hardcoded accent-alpha is
+                         * gone). */
+                        fdk_surface_fill_rect(surface, sel,
+                                              fdk__pal_selection());
+                    }
+                }
+            }
         }
     }
 
@@ -1773,24 +1805,19 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
                            text_x + w_hi + (fdk_i32)i * bw, baseline);
         }
     } else if (e->len > 0) {
-    /* Text in three segments — [0,lo) [lo,hi) [hi,len) — drawn by
-     * temporarily NUL-terminating at each boundary. The selected
-     * middle keeps the plain text color: the accent highlight rect
-     * already says "selected" (no inverted text in the v1 theme). */
-        char saved_lo = e->text[lo];
-        char saved_hi = e->text[hi];
-        fdk_i32 w_lo = text_width_to(e->font, e->text, e->len, lo);
-        fdk_i32 w_hi = text_width_to(e->font, e->text, e->len, hi);
-        e->text[lo] = '\0';
+    /* Text drawn WHOLE, in ONE pass (the shaped-cluster fix's second
+     * half): the old code drew [0,lo) [lo,hi) [hi,len) as three
+     * NUL-terminated segments — a segment boundary that CUTS a
+     * grapheme cluster shapes the fragment differently than the
+     * whole cluster (a lone half-form consonant, a leading virama),
+     * so the very act of selecting mid-cluster MOVED the glyphs and
+     * the highlight "grew"; the segmentation also reset kerning at
+     * the selection edges. All three segments were the same color
+     * anyway (the accent rect says "selected"; no inverted text in
+     * the v1 theme), so the single whole-line draw is strictly more
+     * correct: identical ink whether or not anything is selected. */
         fdk__draw_text(surface, e->font, e->text, text_col, text_x,
                        baseline);
-        e->text[lo] = saved_lo;
-        e->text[hi] = '\0';
-        fdk__draw_text(surface, e->font, e->text + lo, text_col,
-                       text_x + w_lo, baseline);
-        e->text[hi] = saved_hi;
-        fdk__draw_text(surface, e->font, e->text + hi, text_col,
-                       text_x + w_hi, baseline);
     }
 
     /* Placeholder (1.4.0): shown only when there is nothing else to

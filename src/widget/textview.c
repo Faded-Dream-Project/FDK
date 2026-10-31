@@ -1528,30 +1528,54 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
         baseline += fm.ascent;
 
         /* Selection fill on this line: [sel_lo, sel_hi) intersected
-         * with the line's byte range. A selection spanning the line
-         * fills its full width (the classic full-row highlight for
-         * wrapped lines). */
+         * with the line's byte range, painted as the shaped
+         * CLUSTER-SNAPPED spans (the Devanagari fix — the rectangles
+         * equal the selected clusters' advance boxes; a bidi range
+         * yields several rectangles, one per visual run; zero-width
+         * marks never widen one). A selection spanning the whole
+         * line still gets the classic full-row look: the advance
+         * plus a hair. */
         if (has_sel) {
             size_t lstart = line->byte_offset;
             size_t lend = line->byte_offset + line->byte_len;
-            if (sel_lo < lend && sel_hi > lstart) {
-                fdk_i32 x1 = tv->pad;
-                fdk_i32 x2 = tv->pad + line->advance_width;
-                if (sel_lo > lstart) {
-                    x1 += tv_line_width_to(tv, (size_t)i, sel_lo);
+            if (sel_lo < lend && sel_hi > lstart && line->byte_len > 0) {
+                size_t lo = sel_lo > lstart ? sel_lo : lstart;
+                size_t hi = sel_hi < lend ? sel_hi : lend;
+                fdk_text_span spans[16];
+                size_t n_spans = 0;
+                if (fdk_ok(fdk_font_selection_spans_utf8(
+                        tv->font, tv->text + lstart, line->byte_len,
+                        lo - lstart, hi - lstart, spans, 16,
+                        &n_spans))) {
+                    if (n_spans > 16) {
+                        n_spans = 16; /* one span per bidi run; 16
+                                       * runs in one wrapped line is
+                                       * beyond pathological */
+                    }
+                    bool whole_line = (sel_lo <= lstart &&
+                                       sel_hi >= lend);
+                    for (size_t sp = 0; sp < n_spans; sp++) {
+                        fdk_i32 x0 = tv->pad + spans[sp].x0;
+                        fdk_i32 x1 = tv->pad + spans[sp].x1;
+                        if (whole_line && sp + 1 == n_spans) {
+                            x1 += 4; /* full line: extend past the text
+                                      * for the classic editor look (a
+                                      * hair past the advance) */
+                        }
+                        if (x1 > x0 && tv->line_h > 0) {
+                            fdk_rect r = {x0, tv->pad + i * tv->line_h,
+                                          x1 - x0, tv->line_h};
+                            fdk_surface_fill_rect(surface, r,
+                                                  fdk__pal_selection());
+                        }
+                    }
                 }
-                if (sel_hi < lend) {
-                    x2 = tv->pad + tv_line_width_to(tv, (size_t)i,
-                                                    sel_hi);
-                }
-                if (sel_hi >= lend && sel_lo <= lstart) {
-                    /* full line: extend past the text for the classic
-                     * editor look (a hair past the advance) */
-                    x2 += 4;
-                }
-                if (x2 > x1) {
-                    fdk_rect r = {x1, tv->pad + i * tv->line_h,
-                                  x2 - x1, tv->line_h};
+            } else if (sel_lo < lend && sel_hi > lstart) {
+                /* An empty line inside the selection (a lone hard
+                 * break): the classic empty full-row highlight. */
+                fdk_rect r = {tv->pad, tv->pad + i * tv->line_h,
+                              line->advance_width, tv->line_h};
+                if (r.width > 0) {
                     fdk_surface_fill_rect(surface, r,
                                           fdk__pal_selection());
                 }

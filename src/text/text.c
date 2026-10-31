@@ -1009,6 +1009,67 @@ fdk_result fdk_font_measure_utf8(const fdk_font *font,
     return FDK_OK;
 }
 
+/* The selection-geometry seam (the shaped-cluster highlight
+ * contract — see fdk_text.h's full documentation): shape the line
+ * once, read the visual spans of the logical range off the shaped
+ * result. The callers (Entry/TextView highlight painting) used to
+ * measure byte PREFIXES, which cuts clusters mid-glyph — the
+ * Devanagari spill bug this replaces. */
+fdk_result fdk_font_selection_spans_utf8(const fdk_font *font,
+                                         const char *utf8,
+                                         size_t byte_len,
+                                         size_t sel_lo, size_t sel_hi,
+                                         fdk_text_span *out_spans,
+                                         size_t max_spans,
+                                         size_t *out_n_spans) {
+    fdk_font *f = fdk_text_font_mutable(font);
+    if (f == NULL || utf8 == NULL || out_n_spans == NULL ||
+        (out_spans == NULL && max_spans > 0)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    *out_n_spans = 0;
+    if (byte_len == 0 || sel_lo >= sel_hi) {
+        return FDK_OK; /* empty text or empty selection: no spans */
+    }
+    fdk__shaped *s = fdk__shape_range(f, utf8, byte_len, 0, byte_len,
+                                      NULL, 0);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    /* One span per bidi run is the practical bound; a place per
+     * codepoint is the absolute one. The stack array covers any
+     * realistic line; the heap path covers the pathological rest. */
+    fdk__sel_span stack_spans[64];
+    fdk__sel_span *spans = stack_spans;
+    size_t cap = sizeof stack_spans / sizeof stack_spans[0];
+    if (s->n_places > cap) {
+        spans = fdk_alloc_array(s->n_places, sizeof *spans);
+        if (spans == NULL) {
+            fdk__shaped_free(s);
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        cap = s->n_places;
+    }
+    /* The internal walk returns the TRUE span count and writes at
+     * most cap entries; the caller sees the same count (its own
+     * max_spans bounds only what was copied out). */
+    size_t n = fdk__shaped_selection_spans(s, sel_lo, sel_hi, spans,
+                                           cap);
+    *out_n_spans = n;
+    if (n > max_spans) {
+        n = max_spans;
+    }
+    for (size_t i = 0; i < n; i++) {
+        out_spans[i].x0 = spans[i].x0;
+        out_spans[i].x1 = spans[i].x1;
+    }
+    if (spans != stack_spans) {
+        fdk_free(spans);
+    }
+    fdk__shaped_free(s);
+    return FDK_OK;
+}
+
 /* Rect union on i64 coordinates (glyph boxes can poke far outside a
  * small surface when fonts are big; the clip intersect afterwards
  * brings them back into range). */

@@ -188,6 +188,59 @@ fdk_result fdk_font_measure_utf8(const fdk_font *font,
                                  const char *utf8, size_t byte_len,
                                  fdk_text_metrics *out);
 
+/* ---- Selection geometry (the shaped-cluster highlight contract) ---- */
+
+/* One highlighted x-range of a selection: [x0, x1) in text-local
+ * pixels (relative to the same origin fdk_surface_draw_utf8 would
+ * draw at). */
+typedef struct fdk_text_span {
+    fdk_i32 x0, x1; /* [x0, x1), x1 >= x0 */
+} fdk_text_span;
+
+/* The visual rectangles of a LOGICAL selection [sel_lo, sel_hi) over
+ * one line of text: one span per contiguous VISUAL run of the
+ * selected grapheme clusters, sorted by x0.
+ *
+ * The contract (what the Entry/TextView highlight is drawn from):
+ *   - CLUSTER SNAP: a selection that begins or ends inside a
+ *     grapheme cluster highlights that WHOLE cluster — the span
+ *     equals the cluster's advance box, never a mid-glyph edge (a
+ *     byte-prefix measurement cannot promise this: shaping the
+ *     truncated fragment produces different advances than the full
+ *     cluster, which is how highlights used to spill onto
+ *     neighbours on Devanagari and Arabic).
+ *   - ZERO-WIDTH MARKS never widen a span: the box is the cluster's
+ *     ADVANCE span, not its ink box.
+ *   - BIDI: a logical range over mixed-direction text yields
+ *     SEVERAL spans (the range maps to discontiguous visual runs);
+ *     each span is drawn as its own rectangle.
+ *   - SPACES between selected words are selected (they are clusters
+ *     of their own); the gap between two spans is not.
+ *
+ * out_spans receives at most max_spans entries; *out_n_spans always
+ * receives the true count (when it exceeds max_spans, only the first
+ * max_spans are stored — size for your worst line, or call once to
+ * count and again to fill). An empty selection (sel_lo >= sel_hi)
+ * yields 0 spans. sel_lo/sel_hi are clamped to the text; like every
+ * byte-range API in this header they are byte offsets and need not
+ * fall on codepoint boundaries (the cluster snap makes that safe).
+ *
+ * Level-1 note: without the shaping libraries the legacy per-
+ * codepoint walk produces one placement per codepoint, so the spans
+ * degrade to per-codepoint prefix measures — single-direction exact,
+ * mixed-direction approximate — the same documented class as the
+ * caret geometry.
+ *
+ * Can fail with FDK_ERR_INVALID_ARGUMENT (NULL font/utf8/out_n) or
+ * FDK_ERR_OUT_OF_MEMORY. */
+fdk_result fdk_font_selection_spans_utf8(const fdk_font *font,
+                                         const char *utf8,
+                                         size_t byte_len,
+                                         size_t sel_lo, size_t sel_hi,
+                                         fdk_text_span *out_spans,
+                                         size_t max_spans,
+                                         size_t *out_n_spans);
+
 /* ---- Drawing ---- */
 
 /* Draws one line of UTF-8 text onto `surface`.
