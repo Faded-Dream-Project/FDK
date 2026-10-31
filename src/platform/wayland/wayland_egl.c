@@ -105,7 +105,11 @@ enum {
     EGLC_NONE = 0x3038,
     EGLC_CONTEXT_CLIENT_VERSION = 0x3098,
     EGLC_VENDOR = 0x3053,
-    EGLC_RENDERER = 0x3054,
+    EGLC_VERSION = 0x3054,
+    EGLC_EXTENSIONS = 0x3055,
+    EGLC_CLIENT_APIS = 0x308D,
+    EGLC_CONFIG_ID = 0x3028,
+    EGLC_CONTEXT_CLIENT_TYPE = 0x3097,
     EGLC_WIDTH = 0x3056,
     EGLC_HEIGHT = 0x3057,
     EGLC_SUCCESS = 0x3000,
@@ -138,7 +142,11 @@ enum {
     GLC_ARRAY_BUFFER = 0x8892,
     GLC_STATIC_DRAW = 0x88E4,
     GLC_TRIANGLES = 0x0004,
-    GLC_COLOR_BUFFER_BIT = 0x4000
+    GLC_COLOR_BUFFER_BIT = 0x4000,
+    GLC_VERSION = 0x1F02,
+    GLC_FRAMEBUFFER = 0x8D40,
+    GLC_FRAMEBUFFER_COMPLETE = 0x8CD5,
+    GLC_FRAMEBUFFER_UNSUPPORTED = 0x8CDD
 };
 
 /* The quad program: a_pos carries NORMALIZED [0,1]² coordinates (the
@@ -195,6 +203,10 @@ struct fdk_wl_gl_fns {
     EGLBoolean (*eglDestroySurface)(EGLDisplay, EGLSurface);
     EGLBoolean (*eglMakeCurrent)(EGLDisplay, EGLSurface, EGLSurface,
                                  EGLContext);
+    EGLBoolean (*eglGetConfigAttrib)(EGLDisplay, EGLConfig,
+                                     unsigned int, EGLint *);
+    EGLBoolean (*eglQueryContext)(EGLDisplay, EGLContext, unsigned int,
+                                  EGLint *);
     EGLBoolean (*eglSwapBuffers)(EGLDisplay, EGLSurface);
     EGLBoolean (*eglSwapInterval)(EGLDisplay, EGLint);
     const char *(*eglQueryString)(EGLDisplay, unsigned int);
@@ -230,6 +242,8 @@ struct fdk_wl_gl_fns {
                          unsigned int, unsigned int, const void *);
     void (*glTexSubImage2D)(unsigned int, int, int, int, int, int,
                             unsigned int, unsigned int, const void *);
+    void (*glDeleteTextures)(int, const unsigned int *);
+    unsigned int (*glCheckFramebufferStatus)(unsigned int);
     void (*glTexParameteri)(unsigned int, unsigned int, int);
     void (*glPixelStorei)(unsigned int, int);
     const unsigned char *(*glGetString)(unsigned int);
@@ -249,6 +263,10 @@ struct wl_egl_window *(*wl_egl_window_create)(struct wl_surface *, int,
                                               int);
 void (*wl_egl_window_resize)(struct wl_egl_window *, int, int, int, int);
 void (*wl_egl_window_destroy)(struct wl_egl_window *);
+/* Optional (libwayland-egl >= 1.15): the attached-size query the
+ * first-present trace uses to name a size mismatch. NULL-tolerant. */
+int (*wl_egl_window_get_attached_size)(struct wl_egl_window *, int *,
+                                        int *);
 
 /* Extension tokens (substring match against the ES2 extension
  * string — ES2's glGetString(GL_EXTENSIONS) form; the token spellings
@@ -277,6 +295,8 @@ struct fdk_wayland_egl {
     int has_rowlen_ext;            /* GL_EXT_unpack_subimage             */
     int syncobj_note_logged;       /* §20: the registry-relevance note
                                     * has fired once for this process    */
+    int engaged_dumped;            /* FDK_GL_TRACE: the engagement dump
+                                    * fired once per connection          */
     char renderer[80];
 };
 
@@ -306,6 +326,20 @@ struct fdk_wayland_egl_window {
     int tex_ok;
     int presents;
     long fail_at;                 /* FDK_GL_FAIL_AT test seam            */
+    /* ---- TASK-1 visibility (the GTX 1050 Ti report: the WARN named
+     * neither the call nor the error code) --------------------
+     *
+     * lane_op names the lane's LAST GL call (with its shape-defining
+     * arguments) so a present failure is attributed to the call that
+     * really raised it; lane_checked is true while every call is
+     * error-drained individually (the first present at a size — first
+     * frame AND every resize — or the whole early window under
+     * FDK_GL_TRACE), false once the lane is trusted (one drain per
+     * present then, attributed to lane_op). */
+    char lane_op[160];            /* "glTexImage2D(512x384, fmt=BGRA)"    */
+    int lane_checked;             /* per-call drains active this present  */
+    int lane_tracing;             /* FDK_GL_TRACE covers this present     */
+    const char *lane_stage;       /* stage name for this present's report */
 };
 
 /* ---- small utilities (shared policy with x11_gl.c) --------------------- */
@@ -336,6 +370,129 @@ static int renderer_is_software(const char *renderer) {
     return fdk_wlgl_strcasestr(renderer, "llvmpipe") != NULL ||
            fdk_wlgl_strcasestr(renderer, "softpipe") != NULL ||
            fdk_wlgl_strcasestr(renderer, "swrast") != NULL;
+}
+
+/* ---- TASK-1 visibility: error names, the trace, the drains ----------
+ *
+ * The GTX 1050 Ti report (2026-10-31): the lane failed its FIRST
+ * present and the WARN named neither the failing call nor the error
+ * code — on a driver the sandbox cannot reproduce, an unnamed
+ * failure is undebuggable. Every error the lane raises now arrives
+ * as a NAME (GL_INVALID_ENUM, EGL_BAD_ALLOC, ...), attributed to the
+ * call that raised it, with the upload shape, the texture format,
+ * the rect and the stage in the same line. */
+
+static const char *lane_gl_err_name(unsigned int err) {
+    switch (err) {
+    case 0x0500: return "GL_INVALID_ENUM";
+    case 0x0501: return "GL_INVALID_VALUE";
+    case 0x0502: return "GL_INVALID_OPERATION";
+    case 0x0503: return "GL_STACK_OVERFLOW";
+    case 0x0504: return "GL_STACK_UNDERFLOW";
+    case 0x0505: return "GL_OUT_OF_MEMORY";
+    case 0x0506: return "GL_INVALID_FRAMEBUFFER_OPERATION";
+    default: return "unknown GL error";
+    }
+}
+
+static const char *lane_egl_err_name(unsigned int err) {
+    switch (err) {
+    case 0x3000: return "EGL_SUCCESS";
+    case 0x3001: return "EGL_NOT_INITIALIZED";
+    case 0x3002: return "EGL_BAD_ACCESS";
+    case 0x3003: return "EGL_BAD_ALLOC";
+    case 0x3004: return "EGL_BAD_ATTRIBUTE";
+    case 0x3005: return "EGL_BAD_CONFIG";
+    case 0x3006: return "EGL_BAD_CONTEXT";
+    case 0x3007: return "EGL_BAD_CURRENT_SURFACE";
+    case 0x3008: return "EGL_BAD_DISPLAY";
+    case 0x3009: return "EGL_BAD_MATCH";
+    case 0x300A: return "EGL_BAD_NATIVE_PIXMAP";
+    case 0x300B: return "EGL_BAD_NATIVE_WINDOW";
+    case 0x300C: return "EGL_BAD_PARAMETER";
+    case 0x300D: return "EGL_BAD_SURFACE";
+    case 0x300E: return "EGL_CONTEXT_LOST";
+    default: return "unknown EGL error";
+    }
+}
+
+static const char *lane_fmt_name(unsigned int fmt) {
+    return fmt == GLC_BGRA ? "GL_BGRA_EXT (0x80e1)"
+                           : "GL_RGBA (0x1908)";
+}
+
+/* FDK_GL_TRACE=1 (read once per process): the lane's calls log at
+ * INFO for the first presents — every GL/EGL call with its result,
+ * plus the one-time engagement dump (EGL vendor/version/client APIs,
+ * the chosen config's attributes, the context's API+version, the GL
+ * strings, the extension flags, the wl_egl_window's attached size).
+ * INFO (not DEBUG) on purpose: the default level shows it, so the
+ * recipe for a desktop report is one env var, no log-level dance. */
+static int wlgl_trace_enabled(void) {
+    static int trace = -1;
+    if (trace < 0) {
+        trace = getenv("FDK_GL_TRACE") != NULL;
+    }
+    return trace;
+}
+
+/* How many presents per window the trace covers: the first four (a
+ * first present, a partial-damage follow-up, room for a ladder
+ * retry) and EVERY present that reallocates the texture (resizes —
+ * the other risky first). */
+static int lane_trace_this_present(const struct fdk_wayland_egl_window *ewin) {
+    return wlgl_trace_enabled() &&
+           (ewin->presents < 4 || !ewin->tex_ok);
+}
+
+/* Drains the GL error flag and returns the FIRST error raised since
+ * the last drain (0 = clean). Bounded: a driver stuck raising errors
+ * cannot spin this loop. */
+static unsigned int lane_first_gl_error(
+    const struct fdk_wayland_egl *egl) {
+    unsigned int first = 0;
+    for (int i = 0; i < 4; i++) {
+        const unsigned int err = egl->fn.glGetError();
+        if (err == 0) {
+            break;
+        }
+        if (first == 0) {
+            first = err;
+        }
+    }
+    return first;
+}
+
+/* The loud per-call verdict: names the error, the call, the shape,
+ * the format, the rect and the stage — ONE line a desktop report
+ * can be built from. */
+static void lane_report_call_error(
+    const struct fdk_wayland_egl_window *ewin, unsigned int err,
+    const char *stage) {
+    const struct fdk_wayland_egl *egl = ewin->egl;
+    FDK_WARN("GL error 0x%x (%s) at %s during %s — upload shape "
+             "%s texture + %s, texture %dx%d, presents so far %d — "
+             "downgrading this window to the CPU path",
+             err, lane_gl_err_name(err), ewin->lane_op, stage,
+             egl->has_bgra_ext ? "BGRA" : "RGBA (CPU-swizzled twin)",
+             egl->has_rowlen_ext ? "UNPACK_ROW_LENGTH sub-rects"
+                                 : "per-rect row packing",
+             ewin->w, ewin->h, ewin->presents);
+}
+
+/* A setup-stage drain (TASK 1c): an error left over from SETUP must
+ * be named and consumed BEFORE the first present, so the present's
+ * verdict can only blame calls the present itself made. A stale
+ * error here is WARNed, not swallowed silently. */
+static void lane_stale_drain(struct fdk_wayland_egl *egl,
+                             const char *stage) {
+    const unsigned int err = lane_first_gl_error(egl);
+    if (err != 0) {
+        FDK_WARN("stale GL error 0x%x (%s) drained at %s — raised by "
+                 "earlier setup, not blamed on the present that "
+                 "follows",
+                 err, lane_gl_err_name(err), stage);
+    }
 }
 
 /* POSIX dlsym/eglGetProcAddress return void*; ISO C (pedantic)
@@ -464,8 +621,10 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     egl->has_bgra_ext = 0;
     egl->has_rowlen_ext = 0;
     egl->syncobj_note_logged = 0;
+    egl->engaged_dumped = 0;
     egl->renderer[0] = '\0';
     memset(&egl->fn, 0, sizeof(egl->fn));
+    wl_egl_window_get_attached_size = NULL;
 
     /* wl_egl_window trio — dlsym on libwayland-egl (its only symbols). */
 #define WL_RESOLVE(field, name) \
@@ -481,6 +640,14 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     WL_RESOLVE(wl_egl_window_create, "wl_egl_window_create");
     WL_RESOLVE(wl_egl_window_resize, "wl_egl_window_resize");
     WL_RESOLVE(wl_egl_window_destroy, "wl_egl_window_destroy");
+    /* Optional (libwayland-egl 1.15+): the attached-size query. A
+     * missing symbol only costs the trace that one line. */
+    {
+        void *sym_ = dlsym(lib_wl_egl, "wl_egl_window_get_attached_size");
+        if (sym_ != NULL) {
+            FDK_WLGL_STORE_FN(wl_egl_window_get_attached_size, sym_);
+        }
+    }
 #undef WL_RESOLVE
 
     /* EGL core — dlsym on libEGL (these ARE guaranteed exports of the
@@ -504,6 +671,8 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     EGL_RESOLVE(eglCreateWindowSurface, "eglCreateWindowSurface");
     EGL_RESOLVE(eglDestroySurface, "eglDestroySurface");
     EGL_RESOLVE(eglMakeCurrent, "eglMakeCurrent");
+    EGL_RESOLVE(eglGetConfigAttrib, "eglGetConfigAttrib");
+    EGL_RESOLVE(eglQueryContext, "eglQueryContext");
     EGL_RESOLVE(eglSwapBuffers, "eglSwapBuffers");
     EGL_RESOLVE(eglSwapInterval, "eglSwapInterval");
     EGL_RESOLVE(eglQueryString, "eglQueryString");
@@ -603,6 +772,8 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     GLES_RESOLVE(glBindTexture, "glBindTexture");
     GLES_RESOLVE(glTexImage2D, "glTexImage2D");
     GLES_RESOLVE(glTexSubImage2D, "glTexSubImage2D");
+    GLES_RESOLVE(glDeleteTextures, "glDeleteTextures");
+    GLES_RESOLVE(glCheckFramebufferStatus, "glCheckFramebufferStatus");
     GLES_RESOLVE(glTexParameteri, "glTexParameteri");
     GLES_RESOLVE(glPixelStorei, "glPixelStorei");
     GLES_RESOLVE(glGetString, "glGetString");
@@ -780,22 +951,41 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
         return NULL;
     }
     if (!egl->fn.eglMakeCurrent(egl->egl_display, surface, surface, ctx)) {
-        FDK_WARN("eglMakeCurrent failed (0x%x) — CPU present path for "
+        const unsigned int me = (unsigned)egl->fn.eglGetError();
+        FDK_WARN("eglMakeCurrent failed (0x%x, %s) — CPU present path for "
                   "this connection",
-                 (unsigned)egl->fn.eglGetError());
+                 me, lane_egl_err_name(me));
         (void)egl->fn.eglDestroyContext(egl->egl_display, ctx);
         (void)egl->fn.eglDestroySurface(egl->egl_display, surface);
         wl_egl_window_destroy(wl_win);
         egl->refused = 1;
         return NULL;
     }
+    /* Setup-stage drain #1: the context's error flag at birth plus
+     * anything the renderer/extension reads raised — consumed BEFORE
+     * the program build so later stages only see their own errors. */
+    lane_stale_drain(egl, "lane engagement (first makeCurrent)");
 
     /* Renderer policy: the FIRST context decides for the connection
      * (driver-wide string). Software rasterizers stay on wl_shm. */
+    char gl_vendor[96] = { 0 };
+    char gl_version[96] = { 0 };
     if (egl->renderer[0] == '\0') {
         const unsigned char *r = egl->fn.glGetString(GLC_RENDERER);
         if (r != NULL) {
             (void)snprintf(egl->renderer, sizeof(egl->renderer), "%s", r);
+        }
+    }
+    if (wlgl_trace_enabled()) {
+        /* The engagement dump's GL strings — read NOW (the context
+         * unbinds before the dump is emitted below). */
+        const unsigned char *v = egl->fn.glGetString(GLC_VENDOR);
+        const unsigned char *ver = egl->fn.glGetString(GLC_VERSION);
+        if (v != NULL) {
+            (void)snprintf(gl_vendor, sizeof(gl_vendor), "%s", v);
+        }
+        if (ver != NULL) {
+            (void)snprintf(gl_version, sizeof(gl_version), "%s", ver);
         }
     }
 
@@ -849,6 +1039,10 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
         return NULL;
     }
 
+    /* Setup-stage drain #2: the extension/string reads are done —
+     * whatever they raised stays here. */
+    lane_stale_drain(egl, "lane engagement (extension detection)");
+
     /* The shared program rides the first context. */
     if (!lane_build_program(egl)) {
         (void)egl->fn.eglMakeCurrent(egl->egl_display, EGLC_NO_SURFACE,
@@ -859,6 +1053,10 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
         egl->refused = 1;
         return NULL;
     }
+    /* Setup-stage drain #3: the program build's errors (shader
+     * compile failures log their own INFOLOG lines; any stray flag
+     * is named here, not blamed on the first present). */
+    lane_stale_drain(egl, "lane engagement (quad program build)");
 
     struct fdk_wayland_egl_window *ewin =
         fdk_alloc(sizeof(struct fdk_wayland_egl_window));
@@ -884,6 +1082,10 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
     ewin->tex_ok = 0;
     ewin->presents = 0;
     ewin->fail_at = 0;
+    ewin->lane_op[0] = '\0';
+    ewin->lane_checked = 0;
+    ewin->lane_tracing = 0;
+    ewin->lane_stage = "present";
 
     const char *fail_at = getenv("FDK_GL_FAIL_AT");
     if (fail_at != NULL && fail_at[0] != '\0') {
@@ -894,7 +1096,9 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
     egl->fn.glGenTextures(1, &ewin->tex);
     lane_setup_texture(egl, ewin->tex);
     egl->fn.glPixelStorei(GLC_UNPACK_ALIGNMENT, 1);
-    (void)egl->fn.glGetError();
+    /* Setup-stage drain #4: texture mint + sampler state + the
+     * alignment pixelstore — the last setup calls before unbind. */
+    lane_stale_drain(egl, "lane engagement (texture mint)");
 
     /* Unbind: another window's init/present rebinds as needed. */
     (void)egl->fn.eglMakeCurrent(egl->egl_display, EGLC_NO_SURFACE,
@@ -907,6 +1111,87 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
              egl->has_bgra_ext ? "BGRA" : "RGBA (CPU-swizzled twin)",
              egl->has_rowlen_ext ? "UNPACK_ROW_LENGTH sub-rects"
                                 : "per-rect row packing");
+    /* FDK_GL_TRACE's one-per-connection engagement dump (TASK 1b):
+     * everything a desktop report needs to interpret a lane failure
+     * — the EGL stack's identity, the config the lane rides, the
+     * context's API+version, the GL strings, the extension flags,
+     * and the wl_egl_window's attached size at engagement (the
+     * first-present size mismatch is a classic NVIDIA-era failure
+     * shape; the attached size vs the present size is named again
+     * per traced present). */
+    if (wlgl_trace_enabled() && !egl->engaged_dumped) {
+        egl->engaged_dumped = 1;
+        const char *ev = egl->fn.eglQueryString(egl->egl_display,
+                                                 EGLC_VENDOR);
+        const char *ever = egl->fn.eglQueryString(egl->egl_display,
+                                                  EGLC_VERSION);
+        const char *ecap = egl->fn.eglQueryString(egl->egl_display,
+                                                  EGLC_CLIENT_APIS);
+        FDK_INFO("GL trace: engagement — EGL vendor \"%s\", version "
+                 "\"%s\", client APIs \"%s\"",
+                 ev != NULL ? ev : "(null)",
+                 ever != NULL ? ever : "(null)",
+                 ecap != NULL ? ecap : "(null)");
+        const char *eext = egl->fn.eglQueryString(egl->egl_display,
+                                                  EGLC_EXTENSIONS);
+        FDK_INFO("GL trace: engagement — EGL display extensions: "
+                 "surfaceless_context=%d, bind_wayland_display=%d",
+                 eext != NULL &&
+                         fdk_wlgl_strcasestr(eext,
+                                             "EGL_KHR_surfaceless_context")
+                     ? 1
+                     : 0,
+                 eext != NULL &&
+                         fdk_wlgl_strcasestr(eext,
+                                             "EGL_WL_bind_wayland_display")
+                     ? 1
+                     : 0);
+        EGLint cid = 0, rs = 0, gs = 0, bs = 0, as = 0, st = 0, rt = 0;
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_CONFIG_ID, &cid);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_RED_SIZE, &rs);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_GREEN_SIZE, &gs);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_BLUE_SIZE, &bs);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_ALPHA_SIZE, &as);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_SURFACE_TYPE, &st);
+        (void)egl->fn.eglGetConfigAttrib(egl->egl_display, egl->config,
+                                         EGLC_RENDERABLE_TYPE, &rt);
+        FDK_INFO("GL trace: engagement — EGLConfig id=%d "
+                 "R%d G%d B%d A%d surface_type=0x%x renderable=0x%x",
+                 cid, rs, gs, bs, as, (unsigned)st, (unsigned)rt);
+        EGLint ctype = 0, cver = 0;
+        (void)egl->fn.eglQueryContext(egl->egl_display, ctx,
+                                      EGLC_CONTEXT_CLIENT_TYPE, &ctype);
+        (void)egl->fn.eglQueryContext(egl->egl_display, ctx,
+                                      EGLC_CONTEXT_CLIENT_VERSION, &cver);
+        FDK_INFO("GL trace: engagement — context client type 0x%x "
+                 "(0x30A0 = EGL_OPENGL_ES_API), client version %d",
+                 (unsigned)ctype, cver);
+        FDK_INFO("GL trace: engagement — GL vendor \"%s\", renderer "
+                 "\"%s\", version \"%s\"",
+                 gl_vendor[0] != '\0' ? gl_vendor : "(null)",
+                 egl->renderer[0] != '\0' ? egl->renderer : "(null)",
+                 gl_version[0] != '\0' ? gl_version : "(null)");
+        FDK_INFO("GL trace: engagement — upload extensions: "
+                 "BGRA8888=%d, unpack_subimage=%d (FDK_GL_CORE_ONLY=%d)",
+                 egl->has_bgra_ext, egl->has_rowlen_ext,
+                 getenv("FDK_GL_CORE_ONLY") != NULL);
+        if (wl_egl_window_get_attached_size != NULL) {
+            int aw = 0, ah = 0;
+            if (wl_egl_window_get_attached_size(wl_win, &aw, &ah) != 0) {
+                aw = -1;
+                ah = -1;
+            }
+            FDK_INFO("GL trace: engagement — wl_egl_window created "
+                     "%dx%d, attached size now %dx%d",
+                     (int)w, (int)h, aw, ah);
+        }
+    }
     /* §20 relevance note (once per process): whether the compositor
      * advertises wp_linux_drm_syncobj_manager_v1 decides how much the
      * single-owner rule is load-bearing HERE. Advertised + a driver
@@ -1016,6 +1301,39 @@ fdk_u32 *fdk_wayland_egl_window_staging(struct fdk_wayland_egl_window *ewin,
     return fresh;
 }
 
+/* LANE_GL_OP (the TASK-1 attribution macro): runs one lane GL call
+ * with its description recorded in lane_op (the "at <call>" of the
+ * failure report), the FDK_GL_TRACE line when this present is
+ * traced, and — while this present is checked call-by-call (the
+ * first present at a size, or any traced present) — an immediate
+ * error drain so a failure is attributed to the exact call that
+ * raised it, never to the present as a whole. Requires `ewin` in
+ * scope; returns -1 from the enclosing function on the first error
+ * after the loud report. */
+#define LANE_GL_OP(desc, expr)                                           \
+    do {                                                                 \
+        (void)snprintf(ewin->lane_op, sizeof(ewin->lane_op), "%s",       \
+                       desc);                                            \
+        (expr);                                                          \
+        if (ewin->lane_checked) {                                        \
+            const unsigned int lane_err_ =                               \
+                lane_first_gl_error(ewin->egl);                          \
+            if (ewin->lane_tracing) {                                    \
+                FDK_INFO("GL trace: present#%d %s -> %s (0x%x)",         \
+                         ewin->presents + 1, desc,                       \
+                         lane_err_ == 0                                  \
+                             ? "clean"                                    \
+                             : lane_gl_err_name(lane_err_),              \
+                         lane_err_);                                     \
+            }                                                            \
+            if (lane_err_ != 0) {                                        \
+                lane_report_call_error(ewin, lane_err_,                  \
+                                       ewin->lane_stage);                \
+                return -1;                                              \
+            }                                                            \
+        }                                                                \
+    } while (0)
+
 /* The draw: program + quad + 1:1 texture. The quad's texture must
  * be bound on unit 0 at DRAW time (not just at upload time) — the
  * program's sampler is unit 0, and glBindTexture at upload leaves
@@ -1027,18 +1345,40 @@ fdk_u32 *fdk_wayland_egl_window_staging(struct fdk_wayland_egl_window *ewin,
  * initial value also leaves the draw at the mercy of a driver's
  * first-binding bookkeeping. One explicit call pins the viewport to
  * this frame's size; it is free and it is what every real engine
- * does. */
-static void draw_fullscreen_quad(struct fdk_wayland_egl *egl, int w, int h) {
-    egl->fn.glViewport(0, 0, w, h);
-    egl->fn.glUseProgram(egl->program);
-    egl->fn.glUniform2f(egl->program_u_size, (float)w, (float)h);
-    egl->fn.glUniform1i(egl->program_u_tex, 0);
-    egl->fn.glActiveTexture(GLC_TEXTURE0);
-    egl->fn.glBindBuffer(GLC_ARRAY_BUFFER, egl->quad_vbo);
-    egl->fn.glEnableVertexAttribArray((unsigned int)egl->program_a_pos);
-    egl->fn.glVertexAttribPointer((unsigned int)egl->program_a_pos, 2,
-                                  GLC_FLOAT, 0, 0, NULL);
-    egl->fn.glDrawArrays(GLC_TRIANGLES, 0, 6);
+ * does.
+ *
+ * Every call rides LANE_GL_OP (the TASK-1 attribution) so a draw-time
+ * failure names its own call — the GTX 1050 Ti report's unnamed
+ * "GL error during GPU present" is this function's calls as often
+ * as the upload's. */
+static int draw_fullscreen_quad(struct fdk_wayland_egl_window *ewin,
+                                 int w, int h) {
+    struct fdk_wayland_egl *egl = ewin->egl;
+    char desc[128];
+    (void)snprintf(desc, sizeof(desc), "glViewport(0, 0, %d, %d)", w, h);
+    LANE_GL_OP(desc, egl->fn.glViewport(0, 0, w, h));
+    LANE_GL_OP("glUseProgram(quad program)",
+               egl->fn.glUseProgram(egl->program));
+    (void)snprintf(desc, sizeof(desc), "glUniform2f(u_size, %d, %d)", w, h);
+    LANE_GL_OP(desc,
+               egl->fn.glUniform2f(egl->program_u_size, (float)w,
+                                   (float)h));
+    LANE_GL_OP("glUniform1i(u_tex, 0)",
+               egl->fn.glUniform1i(egl->program_u_tex, 0));
+    LANE_GL_OP("glActiveTexture(TEXTURE0)",
+               egl->fn.glActiveTexture(GLC_TEXTURE0));
+    LANE_GL_OP("glBindBuffer(quad VBO)",
+               egl->fn.glBindBuffer(GLC_ARRAY_BUFFER, egl->quad_vbo));
+    LANE_GL_OP("glEnableVertexAttribArray(a_pos)",
+               egl->fn.glEnableVertexAttribArray(
+                   (unsigned int)egl->program_a_pos));
+    LANE_GL_OP("glVertexAttribPointer(a_pos, 2, FLOAT)",
+               egl->fn.glVertexAttribPointer(
+                   (unsigned int)egl->program_a_pos, 2, GLC_FLOAT, 0, 0,
+                   NULL));
+    LANE_GL_OP("glDrawArrays(TRIANGLES, 0, 6)",
+               egl->fn.glDrawArrays(GLC_TRIANGLES, 0, 6));
+    return 0;
 }
 
 /* The RGBA twin's swizzle pass (the no-BGRA upload path): pure —
@@ -1122,13 +1462,96 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
         return -1;
     }
 
+    /* The stage name every failure report of this present carries
+     * (TASK 1a): the first present, the first present at a NEW size
+     * (every resize — tex_ok resets with the staging realloc), or a
+     * steady-state present. */
+    ewin->lane_stage = ewin->presents == 0
+                           ? "the first present"
+                           : (!ewin->tex_ok
+                                  ? "the first present at the new size "
+                                    "(resize)"
+                                  : "a steady-state present");
+    const int trace = lane_trace_this_present(ewin);
+    /* Per-call error attribution (TASK 1a/1c): while this present is
+     * a "first" (first frame, first frame at a new size) or traced,
+     * every GL call is drained individually — the failure names the
+     * exact call. Once the lane is trusted, one drain at the present
+     * tail (attributed to the last lane call) keeps the steady-state
+     * cost at a single glGetError. */
+    ewin->lane_checked = ewin->presents == 0 || !ewin->tex_ok || trace;
+    ewin->lane_tracing = trace;
+
     if (!egl->fn.eglMakeCurrent(egl->egl_display, ewin->surface,
                                 ewin->surface, ewin->ctx)) {
-        return -1; /* context lost: permanent downgrade */
+        const unsigned int me = (unsigned)egl->fn.eglGetError();
+        FDK_WARN("eglMakeCurrent failed (0x%x, %s) at %s — context "
+                 "lost, permanent CPU-path downgrade for this window",
+                 me, lane_egl_err_name(me), ewin->lane_stage);
+        return -1;
     }
-    (void)egl->fn.glGetError();
+    /* TASK 1c — the pre-present stale drain: an error left over from
+     * setup (or the previous present's tail) is named and consumed
+     * BEFORE the first present, so this present's verdict can only
+     * blame calls this present made. The risky firsts drain LOUDLY
+     * (a stale error is a bug worth a WARN); steady state drains
+     * silently, exactly the old single glGetError. */
+    if (ewin->presents == 0 || !ewin->tex_ok) {
+        lane_stale_drain(egl, ewin->lane_stage);
+    } else {
+        (void)lane_first_gl_error(egl);
+    }
 
-    egl->fn.glBindTexture(GLC_TEXTURE_2D, ewin->tex);
+    if (trace) {
+        FDK_INFO("GL trace: present#%d begins — %dx%d, damage %s, "
+                 "texture %s, stage %s",
+                 ewin->presents + 1, w, h,
+                 damage->full ? "full"
+                              : "partial (see glTexSubImage2D lines)",
+                 ewin->tex_ok ? "established" : "fresh (glTexImage2D)",
+                 ewin->lane_stage);
+        if (wl_egl_window_get_attached_size != NULL && !ewin->tex_ok) {
+            int aw = 0, ah = 0;
+            if (wl_egl_window_get_attached_size(ewin->wl_win, &aw, &ah) ==
+                0) {
+                FDK_INFO("GL trace: present#%d wl_egl_window attached "
+                         "%dx%d, presenting %dx%d%s",
+                         ewin->presents + 1, aw, ah, w, h,
+                         (aw == w && ah == h) ? "" : " — MISMATCH");
+            }
+        }
+    }
+
+    /* The default framebuffer's completeness, checked once per
+     * texture lifecycle (the ES2-spec statuses for the default
+     * framebuffer): a diagnostic query whose own error is traced but
+     * not fatal (drivers disagree on querying the default fb), while
+     * an explicit GL_FRAMEBUFFER_UNSUPPORTED is a real present
+     * failure — there is nothing to draw into. */
+    if (!ewin->tex_ok) {
+        (void)snprintf(ewin->lane_op, sizeof(ewin->lane_op),
+                       "glCheckFramebufferStatus(default)");
+        const unsigned int fbstat =
+            egl->fn.glCheckFramebufferStatus(GLC_FRAMEBUFFER);
+        const unsigned int qerr = lane_first_gl_error(egl);
+        if (trace) {
+            FDK_INFO("GL trace: present#%d default framebuffer status "
+                     "0x%x (query error 0x%x, %s)",
+                     ewin->presents + 1, fbstat, qerr,
+                     qerr == 0 ? "clean"
+                               : lane_gl_err_name(qerr));
+        }
+        if (fbstat == GLC_FRAMEBUFFER_UNSUPPORTED) {
+            FDK_WARN("default framebuffer reports "
+                     "GL_FRAMEBUFFER_UNSUPPORTED at %s — GPU present "
+                     "lane downgrading this window to the CPU path",
+                     ewin->lane_stage);
+            return -1;
+        }
+    }
+
+    LANE_GL_OP("glBindTexture(TEXTURE_2D, window texture)",
+               egl->fn.glBindTexture(GLC_TEXTURE_2D, ewin->tex));
 
     /* === the UPLOAD CONTRACT (the §19 NVIDIA fix, re-landed 1.1.0-rc2) ==
      *
@@ -1166,12 +1589,22 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
         src_buf = ewin->rgba_twin;
     }
     const unsigned int src_fmt = egl->has_bgra_ext ? GLC_BGRA : GLC_RGBA;
-    egl->fn.glPixelStorei(GLC_UNPACK_ROW_LENGTH,
-                          egl->has_rowlen_ext ? w : 0);
+    char desc[128];
+    (void)snprintf(desc, sizeof(desc),
+                   "glPixelStorei(UNPACK_ROW_LENGTH, %d)",
+                   egl->has_rowlen_ext ? w : 0);
+    LANE_GL_OP(desc,
+               egl->fn.glPixelStorei(GLC_UNPACK_ROW_LENGTH,
+                                     egl->has_rowlen_ext ? w : 0));
 
     if (!ewin->tex_ok) {
-        egl->fn.glTexImage2D(GLC_TEXTURE_2D, 0, GLC_RGBA, w, h, 0,
-                             src_fmt, GLC_UNSIGNED_BYTE, src_buf);
+        (void)snprintf(desc, sizeof(desc),
+                       "glTexImage2D(%dx%d, internal=GL_RGBA, fmt=%s)",
+                       w, h, lane_fmt_name(src_fmt));
+        LANE_GL_OP(desc,
+                   egl->fn.glTexImage2D(GLC_TEXTURE_2D, 0, GLC_RGBA, w, h,
+                                        0, src_fmt, GLC_UNSIGNED_BYTE,
+                                        src_buf));
         ewin->tex_ok = 1;
     } else {
         long long area = 0;
@@ -1203,8 +1636,13 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
         if (damage->full || area * 4 >= (long long)w * h * 3) {
             /* Full image: width == stride, so the upload is correct
              * with or without UNPACK_ROW_LENGTH support. */
-            egl->fn.glTexSubImage2D(GLC_TEXTURE_2D, 0, 0, 0, w, h,
-                                    src_fmt, GLC_UNSIGNED_BYTE, src_buf);
+            (void)snprintf(desc, sizeof(desc),
+                           "glTexSubImage2D(full %dx%d, fmt=%s)", w, h,
+                           lane_fmt_name(src_fmt));
+            LANE_GL_OP(desc,
+                       egl->fn.glTexSubImage2D(GLC_TEXTURE_2D, 0, 0, 0, w,
+                                               h, src_fmt, GLC_UNSIGNED_BYTE,
+                                               src_buf));
         } else {
             for (int i = 0; i < live; i++) {
                 int rw = (int)(rx1[i] - rx0[i]);
@@ -1225,19 +1663,39 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
                                     * downgrade, frame intact */
                     }
                 }
-                egl->fn.glTexSubImage2D(GLC_TEXTURE_2D, 0, (int)rx0[i],
-                                        (int)ry0[i], rw, rh, src_fmt,
-                                        GLC_UNSIGNED_BYTE, src);
+                (void)snprintf(desc, sizeof(desc),
+                               "glTexSubImage2D(rect %dx%d at %lld,%lld, "
+                               "fmt=%s)",
+                               rw, rh, rx0[i], ry0[i],
+                               lane_fmt_name(src_fmt));
+                LANE_GL_OP(desc,
+                           egl->fn.glTexSubImage2D(
+                               GLC_TEXTURE_2D, 0, (int)rx0[i], (int)ry0[i],
+                               rw, rh, src_fmt, GLC_UNSIGNED_BYTE, src));
             }
         }
     }
 
-    draw_fullscreen_quad(egl, w, h);
-
-    if (egl->fn.glGetError() != 0) {
-        FDK_WARN("GL error during GPU present — downgrading this window "
-                 "to the CPU path");
+    if (draw_fullscreen_quad(ewin, w, h) != 0) {
         return -1;
+    }
+
+    /* The steady-state tail drain (the risky firsts drained per call
+     * above): one glGetError per present, attributed to the last
+     * lane call — an error raised anywhere since the last drain lands
+     * here, named, with the shape/format/stage context attached. */
+    {
+        const unsigned int tail_err = lane_first_gl_error(egl);
+        if (tail_err != 0) {
+            lane_report_call_error(ewin, tail_err,
+                                   ewin->presents > 0 && ewin->tex_ok
+                                       ? "a steady-state present "
+                                         "(end-of-present drain — "
+                                         "attributed to the last lane "
+                                         "call)"
+                                       : ewin->lane_stage);
+            return -1;
+        }
     }
 
     /* First-completed-frame self-verification (the Wayland form —
@@ -1267,8 +1725,11 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
              * over). Bytes land [R,G,B,A]; the staging u32 is
              * [B,G,R,X] little-endian — compare channel-wise. */
             unsigned char rgba[4] = { 0, 0, 0, 0 };
-            egl->fn.glReadPixels(sx, h - 1 - sy, 1, 1, GLC_RGBA,
-                                 GLC_UNSIGNED_BYTE, rgba);
+            (void)snprintf(desc, sizeof(desc),
+                           "glReadPixels(self-check probe %d,%d)", sx, sy);
+            LANE_GL_OP(desc,
+                       egl->fn.glReadPixels(sx, h - 1 - sy, 1, 1, GLC_RGBA,
+                                            GLC_UNSIGNED_BYTE, rgba));
             got = (fdk_u32)rgba[0] << 16 | (fdk_u32)rgba[1] << 8 |
                   (fdk_u32)rgba[2];
             fdk_u32 want = ewin->staging[(size_t)sy * (size_t)w +
@@ -1298,6 +1759,10 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
     }
 
     if (!egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface)) {
+        const unsigned int se = (unsigned)egl->fn.eglGetError();
+        FDK_WARN("eglSwapBuffers failed (0x%x, %s) at %s after a clean "
+                 "draw — downgrading this window to the CPU path",
+                 se, lane_egl_err_name(se), ewin->lane_stage);
         return -1;
     }
     ewin->presents++;
