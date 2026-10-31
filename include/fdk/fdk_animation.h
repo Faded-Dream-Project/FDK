@@ -45,15 +45,16 @@
  * before retargeting; that is the right layer for that policy).
  *
  * HANDLE LIFETIME. A finished (or canceled) animation's handle
- * stays a valid QUERY object for a grace period of roughly a
- * second of animation traffic (running() = false, widget()
- * answers, cancel() is a no-op) — long enough for every
- * reasonable read-after-done pattern — and is then reclaimed.
- * Handles are not keepsakes: keep long-term state in done(), not
- * in the handle. When the LAST widget root in the process is
- * destroyed the engine shuts down and every handle becomes dead
- * memory — do not touch animation handles after tearing down your
- * final tree (this is what keeps a clean app exit leak-free).
+ * stays a valid QUERY object for a grace period of roughly 64 pump
+ * passes (GRACE_PUMPS in src/widget/animation.c — ~1 s of display
+ * cadence; running() = false, widget() answers, cancel() is a
+ * no-op) — long enough for every reasonable read-after-done
+ * pattern — and is then reclaimed. Handles are not keepsakes: keep
+ * long-term state in done(), not in the handle. When the LAST
+ * widget root in the process is destroyed the engine shuts down
+ * and every handle becomes dead memory — do not touch animation
+ * handles after tearing down your final tree (this is what keeps a
+ * clean app exit leak-free).
  *
  * REPETITION is application policy: re-arm in done(). The engine
  * does not know about loops, ping-pong, or delays — a settings
