@@ -128,6 +128,7 @@ enum {
     GLC_UNPACK_ALIGNMENT = 0x0CF5,
     GLC_VENDOR = 0x1F00,
     GLC_RENDERER = 0x1F01,
+    GLC_EXTENSIONS = 0x1F03,
     GLC_TEXTURE0 = 0x84C0,
     GLC_COMPILE_STATUS = 0x8B81,
     GLC_LINK_STATUS = 0x8B82,
@@ -249,6 +250,12 @@ struct wl_egl_window *(*wl_egl_window_create)(struct wl_surface *, int,
 void (*wl_egl_window_resize)(struct wl_egl_window *, int, int, int, int);
 void (*wl_egl_window_destroy)(struct wl_egl_window *);
 
+/* Extension tokens (substring match against the ES2 extension
+ * string — ES2's glGetString(GL_EXTENSIONS) form; the token spellings
+ * are unique, none is a prefix of another). */
+#define WLGL_EXT_BGRA "GL_EXT_texture_format_BGRA8888"
+#define WLGL_EXT_ROWLEN "GL_EXT_unpack_subimage"
+
 struct fdk_wayland_egl {
     fdk_platform_connection *conn; /* owner */
     void *lib_egl;                 /* libEGL.so.1 handle; never dlclose'd */
@@ -263,6 +270,11 @@ struct fdk_wayland_egl {
     unsigned int quad_vbo;         /* the fullscreen-quad vertex buffer    */
     int refused;                   /* policy verdict: stop offering       */
     int selfcheck;                 /* 0 unverified / 1 passed             */
+    /* Upload-path capabilities (the 1.0.0 NVIDIA fix — see the
+     * UPLOAD CONTRACT block in present()): decided once per
+     * connection off the FIRST context's extension string. */
+    int has_bgra_ext;              /* GL_EXT_texture_format_BGRA8888     */
+    int has_rowlen_ext;            /* GL_EXT_unpack_subimage             */
     char renderer[80];
 };
 
@@ -279,6 +291,16 @@ struct fdk_wayland_egl_window {
     unsigned int tex;
     int w, h;
     fdk_u32 *staging;
+    /* The RGBA twin (the no-BGRA upload path's swizzled copy — the
+     * UPLOAD CONTRACT block in present()): same w/h as staging,
+     * reallocated with it, byte-swapped R<->B per pixel. NULL while
+     * the BGRA extension serves the upload. */
+    fdk_u32 *rgba_twin;
+    /* Tightly-packed row scratch for sub-rect uploads when
+     * UNPACK_ROW_LENGTH is unavailable: capacity in fdk_u32 units,
+     * grown on demand to the largest single damaged rect. */
+    fdk_u32 *pack_scratch;
+    size_t pack_capacity;
     int tex_ok;
     int presents;
     long fail_at;                 /* FDK_GL_FAIL_AT test seam            */
@@ -437,6 +459,8 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     egl->quad_vbo = 0;
     egl->refused = 0;
     egl->selfcheck = WL_GL_SELFCHECK_UNVERIFIED;
+    egl->has_bgra_ext = 0;
+    egl->has_rowlen_ext = 0;
     egl->renderer[0] = '\0';
     memset(&egl->fn, 0, sizeof(egl->fn));
 
@@ -771,6 +795,42 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
             (void)snprintf(egl->renderer, sizeof(egl->renderer), "%s", r);
         }
     }
+
+    /* UPLOAD PATH capabilities (the 1.0.0 NVIDIA fix): decided once
+     * per connection, off this first context's ES2 extension string.
+     *
+     * The GTX 1050 Ti report (2026-10-31, labwc + the proprietary
+     * driver): the lane engaged (renderer string read fine, program
+     * linked) and the FIRST present failed with a GL error — the
+     * upload used GL_BGRA + GL_UNPACK_ROW_LENGTH, which are NOT
+     * core GLES2: BGRA needs GL_EXT_texture_format_BGRA8888 and
+     * ROW_LENGTH needs GL_EXT_unpack_subimage (or ES3). Mesa's
+     * swrast exposes both, which is exactly why every rig passed;
+     * the NVIDIA ES2 context rejects them (GL_INVALID_ENUM et al).
+     * The fix is the honest core-legal form: detect the extensions,
+     * fall back to an RGBA twin (CPU R<->B swizzle) and per-rect row
+     * packing when they are absent — present() implements all four
+     * combinations. FDK_GL_CORE_ONLY=1 pins the fallback shapes on
+     * any driver (the rig's deterministic leg). */
+    if (!egl->has_bgra_ext && !egl->has_rowlen_ext &&
+        egl->renderer[0] != '\0') {
+        const unsigned char *ext = egl->fn.glGetString(GLC_EXTENSIONS);
+        if (ext != NULL) {
+            if (fdk_wlgl_strcasestr((const char *)ext, WLGL_EXT_BGRA) !=
+                NULL) {
+                egl->has_bgra_ext = 1;
+            }
+            if (fdk_wlgl_strcasestr((const char *)ext, WLGL_EXT_ROWLEN) !=
+                NULL) {
+                egl->has_rowlen_ext = 1;
+            }
+        }
+        if (getenv("FDK_GL_CORE_ONLY") != NULL) {
+            egl->has_bgra_ext = 0;
+            egl->has_rowlen_ext = 0;
+        }
+    }
+
     const int forced = getenv("FDK_GL_FORCE") != NULL;
     if (renderer_is_software(egl->renderer) && !forced) {
         FDK_INFO("GL renderer is software (\"%s\") — staying on the CPU "
@@ -815,6 +875,9 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
     ewin->w = 0;
     ewin->h = 0;
     ewin->staging = NULL;
+    ewin->rgba_twin = NULL;
+    ewin->pack_scratch = NULL;
+    ewin->pack_capacity = 0;
     ewin->tex_ok = 0;
     ewin->presents = 0;
     ewin->fail_at = 0;
@@ -836,6 +899,11 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
 
     FDK_INFO("GPU present lane active on Wayland (renderer \"%s\")",
              egl->renderer[0] != '\0' ? egl->renderer : "unknown");
+    FDK_INFO("GPU lane upload path: %s texture + %s (extension-detected, "
+             "core-GLES2 fallbacks otherwise)",
+             egl->has_bgra_ext ? "BGRA" : "RGBA (CPU-swizzled twin)",
+             egl->has_rowlen_ext ? "UNPACK_ROW_LENGTH sub-rects"
+                                : "per-rect row packing");
     return ewin;
 }
 
@@ -844,15 +912,44 @@ void fdk_wayland_egl_window_destroy(struct fdk_wayland_egl *egl,
     if (ewin == NULL) {
         return;
     }
+    /* The CANONICAL teardown order (the 1.0.0 NVIDIA fix — the old
+     * code bound the doomed surface's context with a makeCurrent
+     * pair purely as a ritual and THEN destroyed things; binding a
+     * context whose driver state is mid-failure is exactly the kind
+     of driver edge an EGL teardown must never poke):
+     *
+     *   1. ONE eglMakeCurrent(NO_SURFACE, NO_CONTEXT) — releases the
+     *      binding present() may have left (a current context/surface
+     *      pair must be unbound before its objects are destroyed —
+     *      and destroying objects that are still bound is undefined
+     *      territory on some drivers).
+     *   2. eglDestroySurface — BEFORE wl_egl_window_destroy: the
+     *      EGLSurface references the wl_egl_window (the platform's
+     *      documented lifetime rule).
+     *   3. eglDestroyContext — the context shares nothing FDK owns
+     *      (program/VBO are deleted by eglTerminate/shutdown).
+     *   4. wl_egl_window_destroy — frees the client-side wrapper;
+     *      no protocol request is involved at any step, so the
+     *      wl_surface's committed/pending state stays exactly what
+     *      the wl_shm downgrade path expects to inherit.
+     *
+     * No GLES entry point runs here: the texture is deleted with the
+     * context, and calling GL without a current context is undefined.
+     * All shutdown paths (normal, downgrade, dead connection) go
+     * through this one order. */
     if (egl != NULL && egl->egl_display != EGLC_NO_DISPLAY) {
-        (void)egl->fn.eglMakeCurrent(egl->egl_display, ewin->surface,
-                                     ewin->surface, ewin->ctx);
         (void)egl->fn.eglMakeCurrent(egl->egl_display, EGLC_NO_SURFACE,
                                      EGLC_NO_SURFACE, EGLC_NO_CONTEXT);
-        (void)egl->fn.eglDestroyContext(egl->egl_display, ewin->ctx);
         (void)egl->fn.eglDestroySurface(egl->egl_display, ewin->surface);
+        (void)egl->fn.eglDestroyContext(egl->egl_display, ewin->ctx);
     }
     wl_egl_window_destroy(ewin->wl_win);
+    if (ewin->rgba_twin != NULL) {
+        fdk_free(ewin->rgba_twin);
+    }
+    if (ewin->pack_scratch != NULL) {
+        fdk_free(ewin->pack_scratch);
+    }
     if (ewin->staging != NULL) {
         fdk_free(ewin->staging);
     }
@@ -874,6 +971,12 @@ fdk_u32 *fdk_wayland_egl_window_staging(struct fdk_wayland_egl_window *ewin,
     if (ewin->staging != NULL) {
         fdk_free(ewin->staging);
     }
+    /* The RGBA twin rides the same size lifecycle (the no-BGRA
+     * upload path's swizzle target — see present()). */
+    if (ewin->rgba_twin != NULL) {
+        fdk_free(ewin->rgba_twin);
+        ewin->rgba_twin = NULL;
+    }
     ewin->staging = fresh;
     ewin->w = w;
     ewin->h = h;
@@ -888,8 +991,17 @@ fdk_u32 *fdk_wayland_egl_window_staging(struct fdk_wayland_egl_window *ewin,
 /* The draw: program + quad + 1:1 texture. The quad's texture must
  * be bound on unit 0 at DRAW time (not just at upload time) — the
  * program's sampler is unit 0, and glBindTexture at upload leaves
- * the right texture bound there; this re-asserts it defensively. */
+ * the right texture bound there; this re-asserts it defensively.
+ *
+ * glViewport at EVERY draw (the 1.0.0 fix): GLES2's initial viewport
+ * comes from the surface size at the context's first makeCurrent —
+ * it does NOT follow wl_egl_window resizes, and relying on the
+ * initial value also leaves the draw at the mercy of a driver's
+ * first-binding bookkeeping. One explicit call pins the viewport to
+ * this frame's size; it is free and it is what every real engine
+ * does. */
 static void draw_fullscreen_quad(struct fdk_wayland_egl *egl, int w, int h) {
+    egl->fn.glViewport(0, 0, w, h);
     egl->fn.glUseProgram(egl->program);
     egl->fn.glUniform2f(egl->program_u_size, (float)w, (float)h);
     egl->fn.glUniform1i(egl->program_u_tex, 0);
@@ -899,6 +1011,73 @@ static void draw_fullscreen_quad(struct fdk_wayland_egl *egl, int w, int h) {
     egl->fn.glVertexAttribPointer((unsigned int)egl->program_a_pos, 2,
                                   GLC_FLOAT, 0, 0, NULL);
     egl->fn.glDrawArrays(GLC_TRIANGLES, 0, 6);
+}
+
+/* The RGBA twin's swizzle pass (the no-BGRA upload path): pure —
+ * exposed through fdk__wayland_egl_test_swizzle for the fallback
+ * unit test (no EGL driver needed to verify the byte math). */
+static void lane_swizzle_rgba(fdk_u32 *dst, const fdk_u32 *src,
+                              size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        const fdk_u32 p = src[i];
+        dst[i] = (p & 0xFF00FF00u) | ((p >> 16) & 0x000000FFu) |
+                 ((p & 0x000000FFu) << 16);
+    }
+}
+
+/* The tightly-packed row copy for one damaged rect (the no-ROW_LENGTH
+ * sub-rect path): pure — exposed through
+ * fdk__wayland_egl_test_pack_rows. */
+static void lane_pack_rows(fdk_u32 *dst, const fdk_u32 *src, int stride,
+                           int x, int y, int rw, int rh) {
+    for (int j = 0; j < rh; j++) {
+        memcpy(dst + (size_t)j * (size_t)rw,
+               src + (size_t)(y + j) * (size_t)stride + (size_t)x,
+               sizeof(fdk_u32) * (size_t)rw);
+    }
+}
+
+/* The RGBA twin (the no-BGRA upload path): swizzles the whole
+ * staging buffer R<->B into the twin — a memcpy-class pass the CPU
+ * rasterizer that just produced the frame dwarfs. Returns 0 on
+ * success, -1 on allocation failure (the caller downgrades; the
+ * staging buffer itself is untouched, so the salvage path still
+ * holds the frame). */
+static int lane_ensure_rgba_twin(struct fdk_wayland_egl_window *ewin) {
+    if (ewin->rgba_twin == NULL) {
+        ewin->rgba_twin =
+            fdk_alloc(sizeof(fdk_u32) * (size_t)ewin->w * (size_t)ewin->h);
+        if (ewin->rgba_twin == NULL) {
+            return -1;
+        }
+    }
+    lane_swizzle_rgba(ewin->rgba_twin, ewin->staging,
+                      (size_t)ewin->w * (size_t)ewin->h);
+    return 0;
+}
+
+/* Tightly packs one damaged rect's rows into the scratch buffer
+ * (the no-ROW_LENGTH sub-rect path): GL receives a buffer whose rows
+ * are contiguous — the exact layout glTexSubImage2D requires when
+ * UNPACK_ROW_LENGTH cannot express the window stride. Returns NULL
+ * on allocation failure. */
+static const fdk_u32 *lane_pack_rect(struct fdk_wayland_egl_window *ewin,
+                                     const fdk_u32 *src, int w, int x, int y,
+                                     int rw, int rh) {
+    const size_t need = (size_t)rw * (size_t)rh;
+    if (ewin->pack_scratch == NULL || ewin->pack_capacity < need) {
+        fdk_u32 *fresh = fdk_alloc(sizeof(fdk_u32) * need);
+        if (fresh == NULL) {
+            return NULL;
+        }
+        if (ewin->pack_scratch != NULL) {
+            fdk_free(ewin->pack_scratch);
+        }
+        ewin->pack_scratch = fresh;
+        ewin->pack_capacity = need;
+    }
+    lane_pack_rows(ewin->pack_scratch, src, w, x, y, rw, rh);
+    return ewin->pack_scratch;
 }
 
 int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
@@ -922,11 +1101,49 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
     (void)egl->fn.glGetError();
 
     egl->fn.glBindTexture(GLC_TEXTURE_2D, ewin->tex);
-    egl->fn.glPixelStorei(GLC_UNPACK_ROW_LENGTH, w);
+
+    /* === the UPLOAD CONTRACT (the §19 NVIDIA fix, re-landed 1.1.0-rc2) ==
+     *
+     * The GTX 1050 Ti report (2026-10-31, labwc + the proprietary
+     * driver): the lane engaged (renderer string read fine, program
+     * linked) and the FIRST present failed with a GL error — the
+     * upload used GL_BGRA + GL_UNPACK_ROW_LENGTH, which are NOT core
+     * GLES2: BGRA needs GL_EXT_texture_format_BGRA8888, ROW_LENGTH
+     * needs GL_EXT_unpack_subimage (or ES3). Mesa's stacks expose
+     * both, which is exactly why every rig passed; NVIDIA's ES2
+     * context rejects them. The honest core-legal form, decided once
+     * per connection off the first context's extension string
+     * (FDK_GL_CORE_ONLY=1 pins the fallbacks on any driver — the
+     * rig's deterministic leg):
+     *
+     *   BGRA + ROW_LENGTH   the fast path (the Mesa shape)
+     *   BGRA, no ROW_LENGTH full-width uploads are stride-free;
+     *                       sub-rects pack rows tightly first
+     *   RGBA + ROW_LENGTH   a CPU-swizzled RGBA twin uploads in the
+     *                       core format, sub-rects stride straight
+     *   neither             twin + per-rect row packing — the
+     *                       NVIDIA shape, pure core GLES2
+     *
+     * The twin is byte-identical INK (swizzling [B,G,R,X] to
+     * [R,G,B,X] makes the RGBA upload produce the same texel the
+     * BGRA upload of the original would), so the self-check, the
+     * equivalence rigs, and the readback all see one unchanged
+     * pipeline. */
+    const fdk_u32 *src_buf = ewin->staging;
+    if (!egl->has_bgra_ext) {
+        if (lane_ensure_rgba_twin(ewin) != 0) {
+            return -1; /* allocation failure: downgrade — the frame
+                        * is intact in staging for the CPU salvage */
+        }
+        src_buf = ewin->rgba_twin;
+    }
+    const unsigned int src_fmt = egl->has_bgra_ext ? GLC_BGRA : GLC_RGBA;
+    egl->fn.glPixelStorei(GLC_UNPACK_ROW_LENGTH,
+                          egl->has_rowlen_ext ? w : 0);
 
     if (!ewin->tex_ok) {
-        egl->fn.glTexImage2D(GLC_TEXTURE_2D, 0, GLC_RGBA, w, h, 0, GLC_BGRA,
-                             GLC_UNSIGNED_BYTE, ewin->staging);
+        egl->fn.glTexImage2D(GLC_TEXTURE_2D, 0, GLC_RGBA, w, h, 0,
+                             src_fmt, GLC_UNSIGNED_BYTE, src_buf);
         ewin->tex_ok = 1;
     } else {
         long long area = 0;
@@ -956,17 +1173,33 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
             }
         }
         if (damage->full || area * 4 >= (long long)w * h * 3) {
-            egl->fn.glTexSubImage2D(GLC_TEXTURE_2D, 0, 0, 0, w, h, GLC_BGRA,
-                                    GLC_UNSIGNED_BYTE, ewin->staging);
+            /* Full image: width == stride, so the upload is correct
+             * with or without UNPACK_ROW_LENGTH support. */
+            egl->fn.glTexSubImage2D(GLC_TEXTURE_2D, 0, 0, 0, w, h,
+                                    src_fmt, GLC_UNSIGNED_BYTE, src_buf);
         } else {
             for (int i = 0; i < live; i++) {
-                const fdk_u32 *src = ewin->staging +
-                                     (size_t)ry0[i] * (size_t)w +
-                                     (size_t)rx0[i];
-                egl->fn.glTexSubImage2D(
-                    GLC_TEXTURE_2D, 0, (int)rx0[i], (int)ry0[i],
-                    (int)(rx1[i] - rx0[i]), (int)(ry1[i] - ry0[i]),
-                    GLC_BGRA, GLC_UNSIGNED_BYTE, src);
+                int rw = (int)(rx1[i] - rx0[i]);
+                int rh = (int)(ry1[i] - ry0[i]);
+                const fdk_u32 *src = src_buf;
+                if (egl->has_rowlen_ext) {
+                    /* Stride straight out of the full buffer —
+                     * ROW_LENGTH carries the window stride. */
+                    src = src_buf + (size_t)ry0[i] * (size_t)w +
+                          (size_t)rx0[i];
+                } else {
+                    /* No ROW_LENGTH: rows must arrive tightly packed
+                     * — one memcpy pass per damaged rect. */
+                    src = lane_pack_rect(ewin, src_buf, w, (int)rx0[i],
+                                         (int)ry0[i], rw, rh);
+                    if (src == NULL) {
+                        return -1; /* scratch allocation failure:
+                                    * downgrade, frame intact */
+                    }
+                }
+                egl->fn.glTexSubImage2D(GLC_TEXTURE_2D, 0, (int)rx0[i],
+                                        (int)ry0[i], rw, rh, src_fmt,
+                                        GLC_UNSIGNED_BYTE, src);
             }
         }
     }
@@ -1048,4 +1281,17 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
      * outside the pump still reaches the compositor promptly. */
     (void)wl_display_flush(egl->conn->display);
     return 0;
+}
+
+/* ---- §19 test seams (1.1.0-rc2): the driverless fallback-shape pins ---- */
+
+void fdk__wayland_egl_test_swizzle(fdk_u32 *dst, const fdk_u32 *src,
+                                   int n) {
+    lane_swizzle_rgba(dst, src, (size_t)n);
+}
+
+void fdk__wayland_egl_test_pack_rows(fdk_u32 *dst, const fdk_u32 *src,
+                                     int stride, int x, int y, int rw,
+                                     int rh) {
+    lane_pack_rows(dst, src, stride, x, y, rw, rh);
 }

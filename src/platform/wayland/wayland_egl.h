@@ -129,4 +129,14 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
  * never calls it. */
 void fdk__wayland_egl_test_reset(void);
 
+/* TEST SEAMS (1.1.0-rc2, the §19 upload-contract re-land): the fallback
+ * CPU machinery is pure and driverless — the RGBA-twin swizzle and
+ * the tight row packing are verified by unit tests WITHOUT any EGL
+ * driver (this sandbox has none; the shapes still get pinned). */
+void fdk__wayland_egl_test_swizzle(fdk_u32 *dst, const fdk_u32 *src,
+                                   int n);
+void fdk__wayland_egl_test_pack_rows(fdk_u32 *dst, const fdk_u32 *src,
+                                     int stride, int x, int y, int rw,
+                                     int rh);
+
 #endif /* FDK_WAYLAND_EGL_H */
