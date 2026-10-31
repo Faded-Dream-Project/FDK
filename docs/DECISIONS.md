@@ -1797,3 +1797,130 @@ verify-exports (869, +8); the FULL sway suite green (the session
 section: live degradation + the seam bodies + join validation);
 fdk-shell build + test + test-x11 + test-desktop + its Wayland
 suite.
+
+## D-033 — the XI2 mirror discipline gets teeth, and a tablet is stylus evidence, not an axis count (D-3's crash)
+
+**Date**: 2026-10-31 · **Status**: shipped; the crash reproduced, fixed, and pinned
+
+**1. The incident.** The owner's stylus-less desktop (Arch/Openbox/
+NVIDIA) reported "4 tablet device(s) detected" and crashed in
+`xi2_valuator` on first window use: signed overflow on garbage
+(`-708600696 * 4`), then a SEGV reading a wild pointer
+(`0xbebebebe00000008` — ASan's heap fill reinterpreted as an
+address). Three defects stacked: the XIDeviceEvent mirror was
+missing the struct's `flags` field, so every valuator tail field
+was read eight bytes early ("mask_len" was really half of a heap
+pointer, "mask" was really `{length, uninit pad}`); the event-type
+constants were off by one against the protocol (3/4/5 where
+KeyRelease/ButtonPress/ButtonRelease/Motion are 3/4/5/6 — the
+window selected KeyRelease where it wanted Motion); and the
+device scan called every >=3-axis slave pointer a tablet, so mouse
+traffic fed the misaligned reader. D-3 shipped "should work, no rig
+can fake a tablet" — the rig now can (three ways), and the honest
+answer was that it did not work.
+
+**2. Mirror discipline with teeth (supersedes the D-3 posture in
+D-030 §3).** The mirrored-struct discipline claimed compile-time
+verification against XInput2.h "where the header exists" and never
+implemented it. It now does: `__has_include` gates an include of
+the real header, and static asserts prove sizeof, every offset the
+code reads, and every constant the code switches on. The check is
+opportunistic (images without libxi-dev build the same, just
+unverified) — but wherever a header IS present, a drift is a
+compile error, not a crash on someone's desktop. The library-level
+`XIValuatorState.mask_len` is BYTES (libXi converts the wire's
+4-byte units — verified empirically; the old `* 4` was a 4x
+over-read hiding behind the same bug).
+
+**3. A tablet is stylus evidence.** The classification rule: a
+device qualifies ONLY with (a) an ABSOLUTE axis labeled "Abs
+Pressure" on an all-absolute device — every modern stack labels
+tablet axes; or (b) the unlabeled-tablet shape: no relative axes
+at all, >= 3 absolute axes, and "Abs X"/"Abs Y" present (pressure
+at the third absolute axis, tilt at the fourth and fifth). Any
+device with a relative axis is never a tablet — wheel mice,
+XTEST pointers, touchpads, KVM virtual pointers: the entire
+population the old >=3-axes rule swallowed. Every verdict logs its
+evidence at INFO, once per connection; a no-stylus machine now
+says "no tablet device (no stylus evidence among N pointer
+device(s)) — tablet events disabled" instead of inventing four.
+
+**4. Untrusted-input posture for the cookie tail.** The valuator
+read treats the cookie as hostile: the axis is bounded by the
+device's REAL axis count (recorded at the scan) before any
+arithmetic; the mask length is sanity-bounded and NULL-checked;
+the packed values indexing is bounded by the mask's own bits; the
+arithmetic is size_t; NaN and absurd values normalize to absent;
+button details outside 1..255 are consumed untranslated. The one
+undefendable shape — a cookie whose values array is SHORTER than
+its mask claims — is a libXi contract violation (the event carries
+no values length; popcount IS the length by the marshalling
+contract) and is documented as such at the read.
+
+**5. The rigs.** A hostile-cookie rig drives the real handler with
+the crash's exact values plus the hostile-tail table; a
+classification regression drives the pure verdict function over
+synthetic axes (the owner's wheel mouse among them); and a REAL
+XTEST cookie leg runs the full dispatch pipeline with an injected
+tablet record — Xvfb cannot mint valuator values, but it mints
+genuine cookies, and the crash lived in the cookie reading, not
+the values. Real-tablet hardware remains the owner's §21 check.
+
+## D-034 — the Wayland GPU lane's upload contract: core-legal by detection, not by luck (the §19 re-land)
+
+**Date**: 2026-10-31 · **Status**: shipped (re-landed from the lost 1.0.0-era fix; the surviving WIP patch completed)
+
+**1. What the lost fix knew.** The GTX 1050 Ti + labwc + NVIDIA
+proprietary report: the lane engaged (renderer string, linked
+program) and the FIRST present failed with a GL error. The upload
+used `GL_BGRA` + `GL_UNPACK_ROW_LENGTH` — neither is core GLES2
+(BGRA wants `GL_EXT_texture_format_BGRA8888`, ROW_LENGTH wants
+`GL_EXT_unpack_subimage` or ES3). Mesa exposes both, which is why
+every rig passed; the strict ES2 context rejects them. The lost
+commit's work-in-progress patch survived the repository deletion;
+its missing half (the present() rewrite) is reconstructed here.
+
+**2. The contract: four shapes, decided once per connection off
+the first context's extension string.** BGRA + ROW_LENGTH (the
+Mesa fast path, unchanged); BGRA with tightly packed sub-rects; a
+CPU-swizzled RGBA twin with ROW_LENGTH; the twin with packed
+sub-rects — the pure core-GLES2 NVIDIA shape. The twin is
+ink-identical by construction (swizzling [B,G,R,X] to [R,G,B,X]
+makes the RGBA upload produce the same texel the BGRA upload of
+the original would), so the self-check and the equivalence rigs
+see one unchanged pipeline. `FDK_GL_CORE_ONLY=1` pins the fallback
+shapes on ANY driver — the deterministic rig leg the sandbox
+lacks an EGL vendor for: the fallback byte math (the swizzle, the
+row packing) is extracted into pure functions and pinned
+DRIVERLESS in tests/test_gl_lane_fallback.c, and the full-lane
+core-only leg engages wherever a Wayland EGL stack exists (the
+owner's §19 check). The same lost fix's teardown order (one
+MakeCurrent(NO_SURFACE, NO_CONTEXT), surface before context before
+wl_egl_window, no GL calls without a context) and the per-draw
+glViewport ride along.
+
+## D-035 — the shaped pen accumulates in f64 (the re-landed extreme-scale fix)
+
+**Date**: 2026-10-31 · **Status**: shipped (re-landed from the lost stress-test commit)
+
+**1. The rule.** The pen that sums a line's glyph advances
+accumulates in f64 (both the visual pen in `sh_shape_segment` and
+the logical per-cp prefix sums); the f32 fields the consumers read
+(`pen_after`, `cp_pen`, `total`) are snapshots narrowed once each,
+never compounded. An f32 accumulator takes one rounding per glyph
+and at extreme scale the drift moved measure, wrap and caret
+geometry by whole pixels.
+
+**2. The legacy walk keeps 1.4.x metrics.** The bit-compatibility
+contract pins the no-libs path; its f32 arithmetic is deliberately
+untouched, and the extreme-scale leg is shaped-posture-only — the
+same scoping the lost fix had.
+
+**3. The pin.** 3000 glyphs through the real shaper:
+block-repetition linearity to the snapshot ulp (repetition j
+places at the first repetition's pen plus j whole-block totals),
+total == the last placement's snapshot bit-exact, monotone
+placement and pen geometry. The four extreme-scale stress tests
+the lost commit carried were never recovered (their content is
+gone with the repository deletion); this leg is the re-landed
+core of what they pinned.

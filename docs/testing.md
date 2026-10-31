@@ -2667,3 +2667,64 @@ The one warning that started this ("ink_right set but not used" —
 GCC 15 flags increment-only variables GCC 14 does not) was
 removed; a scanner over the whole tree confirmed it was the only
 real case.
+
+## 1.1.0-rc2 (2026-10-31) — the tablet-crash rigs: hostile cookies, the stylus-evidence classification, and REAL XTEST cookies
+
+The owner's desktop report (ASan+UBSan build dying in
+`xi2_valuator` with garbage fields and a wild pointer) was the
+first real-hardware exercise of D-3's X11 translation — and it
+crashed. Three rigs now pin the fix (test_x11_integration.c; the
+root-cause narrative is in docs/DECISIONS.md D-033):
+
+- **The hostile-cookie rig** drives the REAL cookie handler
+  (`fdk_x11_xi2_handle_cookie`) with synthetic XIDeviceEvent blobs
+  poked at the wire offsets: the crash's exact values (the garbage
+  mask length whose *4 overflowed int and wrapped past the bounds
+  check; the 0xbebebebe wild pointer from the report's register
+  dump), then the hostile-tail table (empty, negative, INT_MAX,
+  NULL, absurd lengths), mask bits set beyond the device's axis
+  count, axis indices at/beyond the device's real count, wrong
+  evtypes (KeyRelease must never reach the tablet cast — the
+  off-by-one constants bug), unknown device sourceids, and NULL
+  cookie data. Every case: consumed or translated correctly, zero
+  sanitizer reports. The one undefendable shape — a values array
+  shorter than the mask's popcount claims — is a libXi contract
+  violation (the event carries no values length) and is documented
+  at the read rather than pretend-defended.
+- **The classification regression** drives the pure verdict
+  function over synthetic (number, label, mode) axes: the owner's
+  wheel mouse (four relative axes) rejected, XTEST pointers
+  rejected, KVM/virtual pointers rejected, mixed-mode touchpads
+  rejected, labeled tablets accepted with exact axis numbers,
+  sparse and non-contiguous axis layouts accepted (the positional
+  fallback sorts the absolute axes instead of assuming literal
+  indices), descending input order handled.
+- **The REAL XTEST cookie leg** injects a tablet record for the
+  XTEST pointer and drives genuine XI_Motion/ButtonPress cookies
+  through the full dispatch loop — XGetEventData, the evtype gate,
+  the sourceid match, the valuator tail read from a real
+  unmarshalled cookie, the translation, the additive core-pointer
+  stream. Xvfb cannot mint valuator values, but it mints genuine
+  cookies — and the crash lived in the cookie READING, not the
+  values.
+- **The compile-time mirror verification** (`__has_include` +
+  static asserts against the real XInput2.h wherever it exists)
+  turned the file's always-claimed, never-implemented discipline
+  into a compile error on drift. The local verification build
+  passes `-I` at the extracted libxi-dev headers specifically to
+  keep this check ACTIVE (images without the header build the
+  same, just unverified).
+
+Two more re-landed rigs from the lost commits of the former
+repository: **test_gl_lane_fallback.c** pins the Wayland GPU lane's
+fallback upload byte math (the RGBA-twin swizzle, the tight row
+packing) DRIVERLESS — the sandbox has no EGL vendor, so the
+fallback shapes are verified as pure functions, and the full-lane
+`FDK_GL_CORE_ONLY=1` leg in the Wayland suite engages wherever a
+Wayland EGL stack exists; and the **extreme-scale shaping leg**
+(3000 glyphs, block-repetition linearity to the snapshot ulp)
+pins the re-landed f64 shaped pen.
+
+Also new: the D-Bus unavailable notice is pinned once-per-process
+(three connection attempts, one log line, through a counting sink)
+— the fix for the owner's triple startup line.

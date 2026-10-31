@@ -731,13 +731,40 @@ X11):
 
 ## 21. Your drawing tablet (D-3 / B-17 — needs your pen)
 
-What the rigs proved: both translation layers end to end through
-the test seams (no rig can mint a tablet — sway headless binds the
-zwp_tablet_v2 manager but wlroots has no virtual-tablet protocol;
-Xvfb has no tablet device and XTEST cannot fake valuator state) —
-the full event alphabet, the Wayland frame batching, distinct
-simultaneous tool ids, the pressure normalization. What only your
-hardware shows is a real driver's stream.
+What the rigs proved: the full event alphabet through the test
+seams, the Wayland frame batching, distinct simultaneous tool ids,
+the pressure normalization — AND, since the 1.1.0-rc2 crash fix, the
+X11 cookie pipeline three ways: a hostile-cookie rig that feeds
+the REAL handler the crash's exact garbage (the owner's desktop
+died in it — the mirror was misaligned eight bytes, the constants
+were off by one, and a stylus-less machine had classified its
+mouse as four tablets), a classification regression over synthetic
+devices (your wheel mouse is NOT a tablet, whatever its axis
+count), and REAL XTEST cookies end-to-end through the dispatch
+loop with a tablet record injected for the XTEST pointer. What
+only your hardware shows is a real driver's stream — and on X11,
+the honest verdict that no phantom tablets get classified
+(the 1.1.0-rc2 log lines below are the tell).
+
+**The 1.1.0-rc2 log contract — what startup must say.** On a machine
+with NO tablet (your crash machine, before the fix, said "X Input:
+4 tablet device(s) detected"):
+
+```
+[x11] X Input: no tablet device (no stylus evidence among N pointer device(s)) — tablet events disabled
+```
+
+On a machine WITH a tablet, one line per accepted device, each
+with its evidence:
+
+```
+[x11] X Input: tablet 'Wacom Intuos S Pen' (id 12): Abs Pressure label — pressure axis 2, tilt 3/4, 5 axes
+[x11] X Input: 1 tablet device(s) — stylus events available
+```
+
+If a machine with no stylus reports tablet devices, that is a
+classification bug — report it with the full startup log and the
+output of `xinput list`.
 
 The API is event-only (no example yet), so the fastest sign-off is
 a callback on any example's window:
@@ -758,6 +785,13 @@ fdk_window_set_event_callback(win, evt, NULL);
 
 Expectations (Wayland: labwc, sway, KDE, GNOME; X11: any WM):
 
+- **First, the crash check**: use the window with the mouse —
+  move it, click, type. The pre-1.1.0-rc2 build died on exactly that
+  (the misclassified mouse fed the broken valuator reader). The
+  fixed build must stay up with zero sanitizer reports, on both a
+  stylus-less machine (tablet events simply absent) and a tablet
+  machine (the mouse never produces tablet events — only the pen
+  does; the streams are additive by design).
 - Hovering the pen over the tablet fires PROXIMITY_IN, then
   MOTION streams while the pen is in range — with pressure rising
   from 0 as you press, tilt following the pen's lean.

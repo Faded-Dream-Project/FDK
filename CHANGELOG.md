@@ -17,6 +17,107 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-10-31 (on the rc2 line)
 
+### Fixed — the tablet crash on the owner's desktop: three stacked root causes in D-3's X11 translation (the §21 report)
+
+- **The owner's report**: the ASan+UBSan debug build of
+  `text_demo "مرحبا" "नमस्ते"` on Arch/Openbox/X11/NVIDIA started
+  fine — RandR 1.6, XI 2.2 touch, "X Input: 4 tablet device(s)
+  detected" (a desktop with no stylus at all), GPU lane active,
+  HarfBuzz+FriBidi, XIM — then died the moment the window was used:
+  `x11_xi2.c:589: signed integer overflow: -708600696 * 4`, followed
+  by `SEGV on unknown address` in `xi2_valuator`, with `r12 =
+  0xbebebebe00000008` (ASan's uninitialized-heap fill as a pointer).
+  Reproduced against Xvfb with the pre-fix code
+  (scripts/xi2_crash_repro.c, the evidence rig): the same SEGV, the
+  same garbage, byte for byte.
+- **Root cause 1 — the mirror was missing XIDeviceEvent's `flags`
+  field** (the int between `event_y` and `buttons`): every valuator
+  tail field was read EIGHT BYTES EARLY. "valuators_mask_len" was
+  really the low half of `buttons.mask`'s heap pointer (arbitrary
+  garbage: -708600696 on the owner's machine, -1631266776 on the
+  rig's); "valuators_mask" was really `{valuators.mask_len,
+  uninitialized pad}` reinterpreted as a pointer — the exact
+  0xbebebebe00000008 the register dump showed. The old `* 4` (the
+  mask length was treated as 4-byte units where libXi hands out
+  BYTES) overflowed signed int, wrapped to a huge positive, and
+  defeated the bounds check — then the wild pointer dereferenced.
+- **Root cause 2 — the event-type constants were off by one**: the
+  protocol numbers DeviceChanged=1, KeyPress=2, KeyRelease=3,
+  ButtonPress=4, ButtonRelease=5, Motion=6; the file carried 3/4/5.
+  The window was selecting KeyRelease instead of Motion, and every
+  button event arrived under the wrong arm.
+- **Root cause 3 — the scan classified any slave pointer with >= 3
+  valuator axes as a "tablet"**: wheel mice, XTEST pointers,
+  touchpads — hence "4 tablet device(s)" on a stylus-less desktop,
+  feeding ordinary mouse clicks into the broken reader. The 1.1.0-rc2
+  rule requires STYLUS EVIDENCE: an absolute axis labeled "Abs
+  Pressure", or the unlabeled-tablet shape (no relative axes, >= 3
+  absolute, "Abs X"/"Abs Y" present). Every verdict now logs its
+  evidence at INFO, once (see docs/DECISIONS.md D-033).
+- **The fix, layered**: the corrected mirror is verified against
+  the real XInput2.h AT BUILD TIME wherever the header exists
+  (`__has_include` + static asserts on layout and constants — the
+  discipline the file header always promised and never had; the
+  missing `flags` would have been caught by exactly this check);
+  the constants are the protocol's; the valuator read is bounded by
+  the device's real axis count, the mask's byte length and the
+  packed values indexing, all in size_t, with NaN/absurd-value
+  guards; the module record is zeroed at allocation; buttons
+  outside 1..255 are consumed untranslated.
+- **The regression pins** (test_x11_integration.c): a
+  hostile-cookie rig feeding the REAL cookie handler the crash's
+  exact values (garbage mask_len + the 0xbebebebe pointer) plus
+  empty/negative/INT_MAX/NULL/absurd tails, out-of-range axes,
+  wrong evtypes (KeyRelease must never reach the tablet cast) and
+  unknown device ids — no crash, correct semantics; a
+  classification regression (the stylus-evidence rule over
+  synthetic axes — the owner's wheel mouse rejected, labeled and
+  unlabeled tablets accepted with exact axis numbers); and REAL
+  XTEST cookies end-to-end through the dispatch loop with a tablet
+  record injected for the XTEST pointer — the exact pipeline the
+  crash died in, now sanitizer-clean.
+
+### Fixed — the Wayland GPU lane's upload contract on strict-ES2 drivers (the §19 report, re-landed)
+
+- The 1.0.0-era NVIDIA fix (GTX 1050 Ti + labwc + the proprietary
+  driver: the lane engaged, the FIRST present failed with a GL
+  error) was lost with the deleted repository's last commits; the
+  surviving work-in-progress patch is re-landed and completed.
+- **The root cause**: the upload used `GL_BGRA` +
+  `GL_UNPACK_ROW_LENGTH`, which are NOT core GLES2 — BGRA needs
+  `GL_EXT_texture_format_BGRA8888`, ROW_LENGTH needs
+  `GL_EXT_unpack_subimage` (or ES3). Mesa's stacks expose both,
+  which is why every rig passed; NVIDIA's ES2 context rejects
+  them.
+- **The fix**: the upload contract is decided once per connection
+  off the ES2 extension string and has four shapes — BGRA +
+  ROW_LENGTH (the fast path), BGRA with tightly packed sub-rects,
+  a CPU-swizzled RGBA twin with ROW_LENGTH, and the twin with
+  packed sub-rects (pure core GLES2 — the NVIDIA shape).
+  `FDK_GL_CORE_ONLY=1` pins the fallbacks on any driver (the rig's
+  deterministic leg). The teardown order and the per-draw viewport
+  from the same lost fix ride along. The fallback byte math (the
+  R<->B twin swizzle, the tight row packing) is pinned DRIVERLESS
+  in tests/test_gl_lane_fallback.c — no EGL driver needed.
+
+### Fixed — the shaped pen accumulated in f32 (extreme-scale drift), re-landed
+
+- The pen that sums a line's glyph advances took one f32 rounding
+  per glyph; at thousands of glyphs the drift moved measure, wrap
+  and caret geometry. The accumulator is now f64 (the f32 snapshots
+  the consumers see are each narrowed once, never compounded; the
+  legacy walk keeps its 1.4.x bit-compatibility). Pinned by an
+  extreme-scale leg (3000 glyphs, block-repetition linearity to the
+  snapshot ulp) in tests/test_shaping.c.
+
+### Fixed — the D-Bus startup notice printed three times
+
+- "D-Bus unavailable (no endpoint accepted a connection …)" fired
+  once per subsystem at startup (notifications, the tray watcher,
+  the settings bridge). The verdict belongs to the machine, not the
+  caller: the whole process reports it exactly once. Pinned by a
+  counting-sink test (three connection attempts, one line).
+
 ### Fixed — the §10 desktop report: Arabic and Devanagari drew .notdef while Han worked (the unsorted script table)
 
 - **The owner's test**: `text_demo "مرحبا" "नमस्ते"` under labwc —
