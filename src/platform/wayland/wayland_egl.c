@@ -274,6 +274,47 @@ int (*wl_egl_window_get_attached_size)(struct wl_egl_window *, int *,
 #define WLGL_EXT_BGRA "GL_EXT_texture_format_BGRA8888"
 #define WLGL_EXT_ROWLEN "GL_EXT_unpack_subimage"
 
+/* The UPLOAD CONTRACT's four shapes (fastest first — the probe's
+ * preference order and the present ladder's rotation order):
+ *
+ *   0 BGRA + ROW_LENGTH   zero CPU cost per upload (the Mesa shape)
+ *   1 BGRA + packed rows  sub-rects memcpy'd tightly per damaged rect
+ *   2 RGBA twin + ROWLEN  a CPU R<->B swizzle of the whole staging
+ *                         buffer, then strided sub-rects
+ *   3 RGBA twin + packed  pure core GLES2 — no extension assumed
+ *
+ * The shape is CONNECTION state: the probe decides it once off what
+ * the driver actually accepts (a real 4x4 upload per shape, not the
+ * extension string), and the present ladder may rotate it downward
+ * at runtime if a present fails with the chosen shape. */
+enum {
+    WLGL_SHAPE_BGRA_ROWLEN = 0,
+    WLGL_SHAPE_BGRA_PACKED = 1,
+    WLGL_SHAPE_TWIN_ROWLEN = 2,
+    WLGL_SHAPE_TWIN_PACKED = 3,
+    WLGL_SHAPE_COUNT = 4
+};
+
+static int lane_shape_uses_bgra(int shape) {
+    return shape == WLGL_SHAPE_BGRA_ROWLEN ||
+           shape == WLGL_SHAPE_BGRA_PACKED;
+}
+
+static int lane_shape_uses_rowlen(int shape) {
+    return shape == WLGL_SHAPE_BGRA_ROWLEN ||
+           shape == WLGL_SHAPE_TWIN_ROWLEN;
+}
+
+static const char *lane_shape_name(int shape) {
+    switch (shape) {
+    case WLGL_SHAPE_BGRA_ROWLEN: return "BGRA + UNPACK_ROW_LENGTH";
+    case WLGL_SHAPE_BGRA_PACKED: return "BGRA + packed sub-rects";
+    case WLGL_SHAPE_TWIN_ROWLEN: return "RGBA twin + UNPACK_ROW_LENGTH";
+    case WLGL_SHAPE_TWIN_PACKED: return "RGBA twin + packed sub-rects";
+    default: return "(invalid shape)";
+    }
+}
+
 struct fdk_wayland_egl {
     fdk_platform_connection *conn; /* owner */
     void *lib_egl;                 /* libEGL.so.1 handle; never dlclose'd */
@@ -281,6 +322,7 @@ struct fdk_wayland_egl {
     struct fdk_wl_gl_fns fn;
     EGLDisplay egl_display;
     EGLConfig config;
+    EGLContext root_ctx;           /* the share-root (never current)      */
     unsigned int program;          /* the quad program (shared by windows) */
     int program_u_size;
     int program_u_tex;
@@ -293,6 +335,31 @@ struct fdk_wayland_egl {
      * connection off the FIRST context's extension string. */
     int has_bgra_ext;              /* GL_EXT_texture_format_BGRA8888     */
     int has_rowlen_ext;            /* GL_EXT_unpack_subimage             */
+    /* The UPLOAD CONTRACT's operative state (the probe + ladder,
+     * 1.1.1): `shape` is the connection's current upload shape —
+     * the probe picks the first shape the DRIVER accepts (a real
+     * 4x4 upload, not the extension string), and the present
+     * ladder can rotate it at runtime when a present fails.
+     * `shape_rejected` bit i marks shape i unavailable (extension
+     * illegal, probe-rejected, or FDK_GL_PROBE_SKIP-forced).
+     * `bgra_internal_rgba` records which internalformat spelling
+     * the probe validated for the BGRA shapes: 0 = GL_BGRA_EXT as
+     * internalformat (the EXT_texture_format_BGRA8888 table's own
+     * row — the NVIDIA-legal spelling), 1 = GL_RGBA internal with
+     * GL_BGRA_EXT format (the ES2-lenient spelling some stacks
+     * accept). */
+    int shape;                     /* WLGL_SHAPE_* currently in use       */
+    unsigned int shape_rejected;   /* bit per shape                        */
+    int bgra_internal_rgba;        /* probe-validated BGRA triple          */
+    int probe_done;                /* the probe ran for this connection    */
+    /* The texture graveyard (the share-group consequence): a dead
+     * window's texture object outlives its context (share-group
+     * members die with the GROUP, not the context), so destroys
+     * queue the id here and the NEXT present on any window of the
+     * connection — a context is current right then — deletes it.
+     * Bounded ring; eglTerminate sweeps whatever remains. */
+    unsigned int graveyard[16];
+    int graveyard_count;
     int syncobj_note_logged;       /* §20: the registry-relevance note
                                     * has fired once for this process    */
     int engaged_dumped;            /* FDK_GL_TRACE: the engagement dump
@@ -326,6 +393,7 @@ struct fdk_wayland_egl_window {
     int tex_ok;
     int presents;
     long fail_at;                 /* FDK_GL_FAIL_AT test seam            */
+    int poison_first;             /* FDK_GL_POISON_FIRST test seam       */
     /* ---- TASK-1 visibility (the GTX 1050 Ti report: the WARN named
      * neither the call nor the error code) --------------------
      *
@@ -471,12 +539,10 @@ static void lane_report_call_error(
     const char *stage) {
     const struct fdk_wayland_egl *egl = ewin->egl;
     FDK_WARN("GL error 0x%x (%s) at %s during %s — upload shape "
-             "%s texture + %s, texture %dx%d, presents so far %d — "
-             "downgrading this window to the CPU path",
+             "%s, texture %dx%d, presents so far %d — the ladder "
+             "decides whether this downgrades",
              err, lane_gl_err_name(err), ewin->lane_op, stage,
-             egl->has_bgra_ext ? "BGRA" : "RGBA (CPU-swizzled twin)",
-             egl->has_rowlen_ext ? "UNPACK_ROW_LENGTH sub-rects"
-                                 : "per-rect row packing",
+             lane_shape_name(egl->shape),
              ewin->w, ewin->h, ewin->presents);
 }
 
@@ -611,6 +677,7 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     egl->lib_wl_egl = lib_wl_egl;
     egl->egl_display = EGLC_NO_DISPLAY;
     egl->config = NULL;
+    egl->root_ctx = EGLC_NO_CONTEXT;
     egl->program = 0;
     egl->program_u_size = -1;
     egl->program_u_tex = -1;
@@ -620,6 +687,11 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     egl->selfcheck = WL_GL_SELFCHECK_UNVERIFIED;
     egl->has_bgra_ext = 0;
     egl->has_rowlen_ext = 0;
+    egl->shape = WLGL_SHAPE_BGRA_ROWLEN;
+    egl->shape_rejected = 0;
+    egl->bgra_internal_rgba = 0;
+    egl->probe_done = 0;
+    egl->graveyard_count = 0;
     egl->syncobj_note_logged = 0;
     egl->engaged_dumped = 0;
     egl->renderer[0] = '\0';
@@ -734,6 +806,37 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
         }
     }
 
+    /* The SHARE-ROOT context (the 1.1.1 fix, live-caught by the §19
+     * trace rig): one context that is never made current — it exists
+     * only to anchor the share GROUP every per-window context joins
+     * at creation (eglCreateContext's share parameter). The quad
+     * program and VBO are minted ONCE under the first window's
+     * context and must be valid objects in EVERY window's context:
+     * without a shared group the names live in the first context's
+     * private namespace and every LATER window's glUseProgram fails
+     * with GL_INVALID_VALUE — exactly what the trace caught on the
+     * rig (every second window silently downgrading since the lane
+     * landed). The root is "surfaceless" by construction: it never
+     * needs a surface because it is never current, so no
+     * EGL_KHR_surfaceless_context is required. It dies LAST, in
+     * fdk_wayland_egl_shutdown, after every window context is gone —
+     * the group's objects (the program, the VBO, any graveyard
+     * leftovers) are swept with it or by eglTerminate. */
+    const EGLint root_attr[] = { EGLC_CONTEXT_CLIENT_VERSION, 2,
+                                 EGLC_NONE };
+    egl->root_ctx = egl->fn.eglCreateContext(ed, egl->config,
+                                             EGLC_NO_CONTEXT, root_attr);
+    if (egl->root_ctx == EGLC_NO_CONTEXT) {
+        const unsigned int ce = (unsigned)egl->fn.eglGetError();
+        FDK_DEBUG("share-root eglCreateContext failed (0x%x, %s) — CPU "
+                  "present path only",
+                  ce, lane_egl_err_name(ce));
+        (void)egl->fn.eglTerminate(ed);
+        egl->egl_display = EGLC_NO_DISPLAY;
+        fdk_free(egl);
+        return NULL;
+    }
+
     /* GLES2 entry points — eglGetProcAddress exclusively (the
      * documented EGL loader path; GLVND does not promise dlsym). */
 #define GLES_RESOLVE(field, name) \
@@ -800,11 +903,19 @@ void fdk_wayland_egl_shutdown(struct fdk_wayland_egl *egl) {
      * teardown has no current context (every window's context died
      * with its window), and calling GLES entry points with none is
      * undefined — eglTerminate marks the display's resources for
-     * deletion, which is the honest process-teardown answer. */
+     * deletion, which is the honest process-teardown answer. The
+     * share-root context dies HERE, after the windows: destroying it
+     * earlier would still be legal (the group outlives any one
+     * member) but this order keeps the invariant obvious. */
     if (egl == NULL) {
         return;
     }
     if (egl->egl_display != EGLC_NO_DISPLAY) {
+        if (egl->root_ctx != EGLC_NO_CONTEXT) {
+            (void)egl->fn.eglDestroyContext(egl->egl_display,
+                                            egl->root_ctx);
+            egl->root_ctx = EGLC_NO_CONTEXT;
+        }
         (void)egl->fn.eglTerminate(egl->egl_display);
     }
     fdk_free(egl);
@@ -898,6 +1009,205 @@ static void lane_setup_texture(struct fdk_wayland_egl *egl,
                             GLC_CLAMP_TO_EDGE);
 }
 
+/* ---- THE PROBE (the 1.1.1 fix): ask the driver, not the string ----
+ *
+ * The GTX 1050 Ti report proved extension strings are not truth: both
+ * extensions advertised, the fast path chosen, the first present
+ * still failed with an unnamed GL error. The ES2 spec itself explains
+ * how that happens — GL_EXT_texture_format_BGRA8888's table adds the
+ * (internalformat GL_BGRA_EXT, format GL_BGRA_EXT, UNSIGNED_BYTE)
+ * row, while internalformat GL_RGBA paired with format GL_BGRA_EXT is
+ * in NO table (ES2's unsized-format table pairs GL_RGBA with GL_RGBA
+ * only); Mesa accepts the mixed pair, NVIDIA's strict validator
+ * rejects it. The same class of trap hides in GL_UNPACK_ROW_LENGTH:
+ * setting it AT ALL (even to 0) is GL_INVALID_ENUM on a context
+ * without GL_EXT_unpack_subimage.
+ *
+ * So the lane now PROBES: with the first context current, each shape
+ * gets a real 4x4 upload (both internalformat spellings tried for the
+ * BGRA shapes — spec-legal first), a 2x2 sub-rect update, and the
+ * ROW_LENGTH pixelstore where the shape needs it; every call drained.
+ * The first shape whose every call drains clean becomes the
+ * connection's shape, and the validated internalformat spelling is
+ * the one present() uses. A readback is NOT possible on the probe
+ * (core GLES2 has no glGetTexImage; an FBO round-trip would assume
+ * ES3/EXT_framebuffer_object) — the first-frame self-check already
+ * proves the rendered pixels end-to-end, so the probe's job is only
+ * the driver's format/enum ACCEPTANCE, which is exactly what raises
+ * the unnamed error.
+ *
+ * FDK_GL_PROBE_SKIP=<n> (test seam) rejects the first n shapes as if
+ * the driver refused them; FDK_GL_CORE_ONLY pins the pure-core shape
+ * as before. If every shape is rejected the lane refuses for the
+ * connection — after logging each probe's verdict. */
+static int lane_probe_shape(struct fdk_wayland_egl *egl, int shape,
+                            int *internal_rgba_out) {
+    if (lane_shape_uses_bgra(shape) && !egl->has_bgra_ext) {
+        return 0; /* extension not advertised: not even tryable */
+    }
+    if (lane_shape_uses_rowlen(shape) && !egl->has_rowlen_ext) {
+        return 0;
+    }
+    const int core_only = getenv("FDK_GL_CORE_ONLY") != NULL;
+    if (core_only && shape != WLGL_SHAPE_TWIN_PACKED) {
+        return 0;
+    }
+
+    /* Known patch bytes: BGRA uploads read them as [B,G,R,X]; the
+     * twin path swizzles first — the probe only cares that the CALL
+     * is accepted, and these bytes are what a follow-up readback (the
+     * first-frame self-check) can attribute. */
+    static const fdk_u32 patch[16] = {
+        0x00FF0000u, 0x0000FF00u, 0x000000FFu, 0x00FFFFFFu,
+        0x0000FF00u, 0x00FF0000u, 0x00FFFFFFu, 0x000000FFu,
+        0x000000FFu, 0x00FFFFFFu, 0x00FF0000u, 0x0000FF00u,
+        0x00FFFFFFu, 0x000000FFu, 0x0000FF00u, 0x00FF0000u
+    };
+    /* The twin form of the patch (R<->B swizzled) for the RGBA
+     * shapes — lane_swizzle_rgba's byte math, pinned driverless in
+     * test_gl_lane_fallback.c. */
+    fdk_u32 twin[16];
+    for (int i = 0; i < 16; i++) {
+        const fdk_u32 p = patch[i];
+        twin[i] = (p & 0xFF00FF00u) | ((p >> 16) & 0x000000FFu) |
+                  ((p & 0x000000FFu) << 16);
+    }
+
+    unsigned int tex = 0;
+    egl->fn.glGenTextures(1, &tex);
+    lane_setup_texture(egl, tex);
+    egl->fn.glPixelStorei(GLC_UNPACK_ALIGNMENT, 1);
+    (void)lane_first_gl_error(egl); /* the probe starts from a clean
+                                     * error flag */
+
+    char op[96];
+    int ok = 1;
+    unsigned int err = 0;
+
+    /* The ROW_LENGTH pixelstore: only touched when the extension
+     * exists (the ES2 spec makes the pname itself illegal without
+     * GL_EXT_unpack_subimage — the pre-probe code set it to 0
+     * unconditionally, raising GL_INVALID_ENUM on strict drivers
+     * even on the fallback shapes). */
+    if (egl->has_rowlen_ext) {
+        (void)snprintf(op, sizeof(op), "glPixelStorei(UNPACK_ROW_LENGTH, %d)",
+                       lane_shape_uses_rowlen(shape) ? 4 : 0);
+        egl->fn.glPixelStorei(GLC_UNPACK_ROW_LENGTH,
+                              lane_shape_uses_rowlen(shape) ? 4 : 0);
+        err = lane_first_gl_error(egl);
+        if (err != 0) {
+            FDK_INFO("GPU lane upload probe: %s rejected by the driver — "
+                     "0x%x (%s) at %s",
+                     lane_shape_name(shape), err, lane_gl_err_name(err), op);
+            ok = 0;
+        }
+    }
+
+    if (ok) {
+        const fdk_u32 *data = lane_shape_uses_bgra(shape) ? patch : twin;
+        const unsigned int fmt =
+            lane_shape_uses_bgra(shape) ? GLC_BGRA : GLC_RGBA;
+        /* The BGRA shapes try both internalformat spellings — the
+         * spec row first (GL_BGRA_EXT/GL_BGRA_EXT), the ES2-lenient
+         * mixed pair second (GL_RGBA internal + GL_BGRA_EXT format):
+         * which one the driver accepts is THE NVIDIA question, and
+         * only the driver can answer it. */
+        const unsigned int internals[2] = { GLC_BGRA, GLC_RGBA };
+        const int n_internals = lane_shape_uses_bgra(shape) ? 2 : 1;
+        int accepted = -1;
+        for (int i = 0; i < n_internals && accepted < 0; i++) {
+            (void)snprintf(op, sizeof(op),
+                           "glTexImage2D(4x4, internal=%s, fmt=%s)",
+                           internals[i] == GLC_BGRA ? "GL_BGRA_EXT"
+                                                    : "GL_RGBA",
+                           lane_fmt_name(fmt));
+            egl->fn.glTexImage2D(GLC_TEXTURE_2D, 0,
+                                 (int)internals[i], 4, 4, 0, fmt,
+                                 GLC_UNSIGNED_BYTE, data);
+            err = lane_first_gl_error(egl);
+            if (err == 0) {
+                accepted = i;
+            } else {
+                FDK_INFO("GPU lane upload probe: %s rejected the triple "
+                         "internal=%s + fmt=%s — 0x%x (%s) at %s",
+                         lane_shape_name(shape),
+                         internals[i] == GLC_BGRA ? "GL_BGRA_EXT"
+                                                  : "GL_RGBA",
+                         lane_fmt_name(fmt), err, lane_gl_err_name(err), op);
+            }
+        }
+        if (accepted < 0) {
+            ok = 0;
+        } else {
+            *internal_rgba_out = (accepted == 1);
+            /* The sub-rect update (the partial-damage path's call):
+             * same format through glTexSubImage2D. */
+            (void)snprintf(op, sizeof(op), "glTexSubImage2D(2x2 at 1,1)");
+            egl->fn.glTexSubImage2D(GLC_TEXTURE_2D, 0, 1, 1, 2, 2, fmt,
+                                    GLC_UNSIGNED_BYTE, data + 5);
+            err = lane_first_gl_error(egl);
+            if (err != 0) {
+                FDK_INFO("GPU lane upload probe: %s rejected the sub-rect "
+                         "update — 0x%x (%s) at %s",
+                         lane_shape_name(shape), err,
+                         lane_gl_err_name(err), op);
+                ok = 0;
+            }
+        }
+    }
+
+    /* The probe's texture dies now (the context is current; a clean
+     * glDeleteTextures under the very state we just validated). */
+    egl->fn.glDeleteTextures(1, &tex);
+    (void)lane_first_gl_error(egl);
+    return ok;
+}
+
+/* Runs the probe ladder once per connection (first window's
+ * engagement): fills egl->shape / shape_rejected / bgra_internal_rgba.
+ * Returns 0 when some shape is available, -1 when every shape was
+ * rejected (the caller refuses the lane — the honest answer when a
+ * driver accepts NO core-legal upload at all). */
+static int lane_probe_upload_shapes(struct fdk_wayland_egl *egl) {
+    long skip = 0;
+    const char *sk = getenv("FDK_GL_PROBE_SKIP");
+    if (sk != NULL && sk[0] != '\0') {
+        skip = strtol(sk, NULL, 10);
+        if (skip < 0) {
+            skip = 0;
+        }
+    }
+    for (int s = 0; s < WLGL_SHAPE_COUNT; s++) {
+        if (s < skip) {
+            egl->shape_rejected |= (unsigned int)1u << s;
+            FDK_INFO("GPU lane upload probe: %s skipped "
+                     "(FDK_GL_PROBE_SKIP)",
+                     lane_shape_name(s));
+            continue;
+        }
+        int internal_rgba = 0;
+        if (lane_probe_shape(egl, s, &internal_rgba)) {
+            egl->shape = s;
+            egl->bgra_internal_rgba = internal_rgba;
+            return 0;
+        }
+        egl->shape_rejected |= (unsigned int)1u << s;
+    }
+    egl->shape = -1;
+    return -1;
+}
+
+/* The next un-rejected shape above `from` (the present ladder's
+ * rotation), or -1 when the ladder is exhausted. */
+static int lane_next_shape(const struct fdk_wayland_egl *egl, int from) {
+    for (int s = from + 1; s < WLGL_SHAPE_COUNT; s++) {
+        if ((egl->shape_rejected & ((unsigned int)1u << s)) == 0) {
+            return s;
+        }
+    }
+    return -1;
+}
+
 /* ---- per-window lane ------------------------------------------------------ */
 
 struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
@@ -939,8 +1249,13 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
     }
     const EGLint ctx_attr[] = { EGLC_CONTEXT_CLIENT_VERSION, 2,
                                 EGLC_NONE };
+    /* Share the ROOT: this window's context joins the connection's
+     * share group, so the quad program/VBO (minted once, under the
+     * first window's context) are valid objects here — the 1.1.1
+     * fix for the every-second-window glUseProgram failure the trace
+     * rig caught (see the try_load root comment). */
     EGLContext ctx = egl->fn.eglCreateContext(egl->egl_display, egl->config,
-                                              EGLC_NO_CONTEXT, ctx_attr);
+                                              egl->root_ctx, ctx_attr);
     if (ctx == EGLC_NO_CONTEXT) {
         FDK_DEBUG("eglCreateContext failed (0x%x) — CPU present path for "
                   "this connection",
@@ -1018,10 +1333,6 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
                 egl->has_rowlen_ext = 1;
             }
         }
-        if (getenv("FDK_GL_CORE_ONLY") != NULL) {
-            egl->has_bgra_ext = 0;
-            egl->has_rowlen_ext = 0;
-        }
     }
 
     const int forced = getenv("FDK_GL_FORCE") != NULL;
@@ -1042,6 +1353,35 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
     /* Setup-stage drain #2: the extension/string reads are done —
      * whatever they raised stays here. */
     lane_stale_drain(egl, "lane engagement (extension detection)");
+
+    /* THE PROBE (the 1.1.1 fix): once per connection, with this
+     * first context current — every shape's upload calls tried for
+     * real, and the first the DRIVER accepts becomes the
+     * connection's shape. Extension strings are input, not verdict
+     * (the GTX 1050 Ti report: both extensions advertised, the fast
+     * path chosen, the first present still failed). All shapes
+     * rejected = the lane refuses for this connection — honestly,
+     * with every probe's verdict already logged above. */
+    if (!egl->probe_done) {
+        egl->probe_done = 1;
+        if (lane_probe_upload_shapes(egl) != 0) {
+            FDK_WARN("GPU lane upload probe: every upload shape was "
+                     "rejected by the driver (see each probe line) — "
+                     "refusing the GPU present lane for this "
+                     "connection");
+            (void)egl->fn.eglMakeCurrent(egl->egl_display, EGLC_NO_SURFACE,
+                                         EGLC_NO_SURFACE, EGLC_NO_CONTEXT);
+            (void)egl->fn.eglDestroyContext(egl->egl_display, ctx);
+            (void)egl->fn.eglDestroySurface(egl->egl_display, surface);
+            wl_egl_window_destroy(wl_win);
+            egl->refused = 1;
+            wlgl_policy_stamp(1, getenv("FDK_NO_GL") != NULL, forced);
+            return NULL;
+        }
+    }
+    /* Setup-stage drain #2b: the probe drained per call, but the
+     * round trip is a stage of its own. */
+    lane_stale_drain(egl, "lane engagement (upload probe)");
 
     /* The shared program rides the first context. */
     if (!lane_build_program(egl)) {
@@ -1082,6 +1422,7 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
     ewin->tex_ok = 0;
     ewin->presents = 0;
     ewin->fail_at = 0;
+    ewin->poison_first = getenv("FDK_GL_POISON_FIRST") != NULL;
     ewin->lane_op[0] = '\0';
     ewin->lane_checked = 0;
     ewin->lane_tracing = 0;
@@ -1106,11 +1447,12 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
 
     FDK_INFO("GPU present lane active on Wayland (renderer \"%s\")",
              egl->renderer[0] != '\0' ? egl->renderer : "unknown");
-    FDK_INFO("GPU lane upload path: %s texture + %s (extension-detected, "
-             "core-GLES2 fallbacks otherwise)",
-             egl->has_bgra_ext ? "BGRA" : "RGBA (CPU-swizzled twin)",
-             egl->has_rowlen_ext ? "UNPACK_ROW_LENGTH sub-rects"
-                                : "per-rect row packing");
+    FDK_INFO("GPU lane upload path: %s — driver-probed (a real 4x4 "
+             "upload picked this shape; extensions BGRA8888=%d "
+             "unpack_subimage=%d, BGRA internalformat=%s)",
+             lane_shape_name(egl->shape), egl->has_bgra_ext,
+             egl->has_rowlen_ext,
+             egl->bgra_internal_rgba ? "GL_RGBA" : "GL_BGRA_EXT");
     /* FDK_GL_TRACE's one-per-connection engagement dump (TASK 1b):
      * everything a desktop report needs to interpret a lane failure
      * — the EGL stack's identity, the config the lane rides, the
@@ -1177,10 +1519,14 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
                  gl_vendor[0] != '\0' ? gl_vendor : "(null)",
                  egl->renderer[0] != '\0' ? egl->renderer : "(null)",
                  gl_version[0] != '\0' ? gl_version : "(null)");
-        FDK_INFO("GL trace: engagement — upload extensions: "
-                 "BGRA8888=%d, unpack_subimage=%d (FDK_GL_CORE_ONLY=%d)",
+        FDK_INFO("GL trace: engagement — upload shape %d (%s) "
+                 "probe-validated; extensions: BGRA8888=%d, "
+                 "unpack_subimage=%d (FDK_GL_CORE_ONLY=%d), "
+                 "rejected-mask 0x%x",
+                 egl->shape, lane_shape_name(egl->shape),
                  egl->has_bgra_ext, egl->has_rowlen_ext,
-                 getenv("FDK_GL_CORE_ONLY") != NULL);
+                 getenv("FDK_GL_CORE_ONLY") != NULL,
+                 egl->shape_rejected);
         if (wl_egl_window_get_attached_size != NULL) {
             int aw = 0, ah = 0;
             if (wl_egl_window_get_attached_size(wl_win, &aw, &ah) != 0) {
@@ -1249,7 +1595,21 @@ void fdk_wayland_egl_window_destroy(struct fdk_wayland_egl *egl,
      * No GLES entry point runs here: the texture is deleted with the
      * context, and calling GL without a current context is undefined.
      * All shutdown paths (normal, downgrade, dead connection) go
-     * through this one order. */
+     * through this one order.
+     *
+     * THE SHARE-GROUP CORRECTION (1.1.1): with every context sharing
+     * the connection's root, the texture does NOT die with this
+     * context (share-group members die with the GROUP) — it is queued
+     * in the connection's graveyard and deleted by the next present
+     * on any window, when a context is legitimately current. A full
+     * ring simply drops to eglTerminate's sweep (bounded staleness,
+     * never unbounded growth); 16 slots cover any realistic window
+     * churn between presents. */
+    if (egl != NULL && ewin->tex != 0 &&
+        egl->graveyard_count < (int)(sizeof(egl->graveyard) /
+                                     sizeof(egl->graveyard[0]))) {
+        egl->graveyard[egl->graveyard_count++] = ewin->tex;
+    }
     if (egl != NULL && egl->egl_display != EGLC_NO_DISPLAY) {
         (void)egl->fn.eglMakeCurrent(egl->egl_display, EGLC_NO_SURFACE,
                                      EGLC_NO_SURFACE, EGLC_NO_CONTEXT);
@@ -1300,6 +1660,19 @@ fdk_u32 *fdk_wayland_egl_window_staging(struct fdk_wayland_egl_window *ewin,
     wl_egl_window_resize(ewin->wl_win, w, h, 0, 0);
     return fresh;
 }
+
+/* The present attempt's verdict classes (the ladder's input): a GL
+ * error at a named call and a swap failure are LADDER-able (rotate
+ * the upload shape, recreate the texture, retry once per shape);
+ * everything else (the self-check's persistent mismatch — a process
+ * verdict; a staging/twin allocation failure — OOM; an unsupported
+ * default framebuffer) is fatal: no shape can fix it. */
+enum {
+    LANE_PRESENT_OK = 0,
+    LANE_PRESENT_GL = 1,
+    LANE_PRESENT_SWAP = 2,
+    LANE_PRESENT_FATAL = 3
+};
 
 /* LANE_GL_OP (the TASK-1 attribution macro): runs one lane GL call
  * with its description recorded in lane_op (the "at <call>" of the
@@ -1378,7 +1751,7 @@ static int draw_fullscreen_quad(struct fdk_wayland_egl_window *ewin,
                    NULL));
     LANE_GL_OP("glDrawArrays(TRIANGLES, 0, 6)",
                egl->fn.glDrawArrays(GLC_TRIANGLES, 0, 6));
-    return 0;
+    return LANE_PRESENT_OK;
 }
 
 /* The RGBA twin's swizzle pass (the no-BGRA upload path): pure —
@@ -1447,6 +1820,10 @@ static const fdk_u32 *lane_pack_rect(struct fdk_wayland_egl_window *ewin,
     lane_pack_rows(ewin->pack_scratch, src, w, x, y, rw, rh);
     return ewin->pack_scratch;
 }
+
+static int lane_present_attempt(struct fdk_wayland_egl_window *ewin,
+                                const fdk_platform_damage *damage, int w,
+                                int h);
 
 int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
                                    const fdk_platform_damage *damage, int w,
@@ -1522,6 +1899,93 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
         }
     }
 
+    /* The graveyard drain (the share-group consequence): delete the
+     * queued textures of destroyed windows — a context is current
+     * right now, which is the whole point of the queue. */
+    if (egl->graveyard_count > 0) {
+        egl->fn.glDeleteTextures(egl->graveyard_count, egl->graveyard);
+        (void)lane_first_gl_error(egl);
+        egl->graveyard_count = 0;
+    }
+
+    /* === THE RETRY LADDER (the 1.1.1 fix) ==============================
+     *
+     * A failed present is not a verdict until every shape has had its
+     * chance: the probe validated the shape against 4x4 uploads, but
+     * the first REAL present can still fail (a size- or state-dependent
+     * rejection the probe could not see — exactly the GTX 1050 Ti
+     * report's shape). On a GL error or a swap failure the ladder
+     * rotates to the next un-rejected shape, recreates the texture
+     * (fresh GL object + sampler state + a full texImage2D), and
+     * retries ONCE per shape. Only when the ladder is exhausted does
+     * the window take the permanent downgrade — with the full trace
+     * already in the log.
+     *
+     * §20 legality (the single-owner rule): the ladder never touches
+     * wl_surface state — no attach, no commit, no wl_shm buffer while
+     * the EGL surface owns this wl_surface. The only protocol traffic
+     * is eglSwapBuffers' own driver-issued attach+commit (on success);
+     * a FAILED swap leaves nothing to clean up, and the texture
+     * recreation is GL-object state, invisible to the compositor. The
+     * downgrade path (ladder exhausted) is unchanged: slot create ->
+     * EGL destroy -> wl_shm attach, the load-bearing order. */
+    for (int attempt = 0;; attempt++) {
+        if (attempt > 0) {
+            ewin->lane_stage = "a ladder retry (rotated upload shape)";
+            ewin->lane_checked = ewin->presents == 0 || !ewin->tex_ok ||
+                                 ewin->lane_tracing;
+        }
+        const int rc = lane_present_attempt(ewin, damage, w, h);
+        if (rc == LANE_PRESENT_OK) {
+            ewin->presents++;
+            /* The wl_surface commit that publishes the EGL buffer
+             * happens inside eglSwapBuffers (libwayland-egl attaches
+             * the new buffer and commits) — the flush discipline the
+             * SHM path applies after commit_render_pending applies
+             * here too, so an app presenting outside the pump still
+             * reaches the compositor promptly. */
+            (void)wl_display_flush(egl->conn->display);
+            return 0;
+        }
+        if (rc == LANE_PRESENT_FATAL) {
+            return -1; /* already reported; no retry can fix it */
+        }
+        const int next = lane_next_shape(egl, egl->shape);
+        if (next < 0) {
+            FDK_WARN("GPU present ladder exhausted — every upload shape "
+                     "failed (last: %s, %d presents on this window) — "
+                     "permanent CPU-path downgrade for this window",
+                     lane_shape_name(egl->shape), ewin->presents);
+            return -1;
+        }
+        FDK_WARN("GPU present ladder: shape %d (%s) failed — rotating "
+                 "the connection to shape %d (%s) with a fresh texture, "
+                 "one retry",
+                 egl->shape, lane_shape_name(egl->shape), next,
+                 lane_shape_name(next));
+        egl->shape = next;
+        /* The fresh texture: a driver that choked on the old object's
+         * state gets a clean one (mint + sampler params), and tex_ok
+         * resets so the retry re-establishes the full image. */
+        egl->fn.glDeleteTextures(1, &ewin->tex);
+        (void)lane_first_gl_error(egl);
+        egl->fn.glGenTextures(1, &ewin->tex);
+        lane_setup_texture(egl, ewin->tex);
+        ewin->tex_ok = 0;
+    }
+}
+
+/* One present attempt: the completeness check, the shape-driven
+ * upload, the draw, the tail drain, the self-check, the swap. All
+ * failure WARNs are emitted here (with the full TASK-1 attribution),
+ * so a ladder retry's log reads as one coherent story. Requires the
+ * context CURRENT (present() made it so) and ewin->lane_* prepared. */
+static int lane_present_attempt(struct fdk_wayland_egl_window *ewin,
+                                const fdk_platform_damage *damage, int w,
+                                int h) {
+    struct fdk_wayland_egl *egl = ewin->egl;
+    const int trace = ewin->lane_tracing;
+
     /* The default framebuffer's completeness, checked once per
      * texture lifecycle (the ES2-spec statuses for the default
      * framebuffer): a diagnostic query whose own error is traced but
@@ -1546,65 +2010,87 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
                      "GL_FRAMEBUFFER_UNSUPPORTED at %s — GPU present "
                      "lane downgrading this window to the CPU path",
                      ewin->lane_stage);
-            return -1;
+            return LANE_PRESENT_FATAL;
         }
     }
 
     LANE_GL_OP("glBindTexture(TEXTURE_2D, window texture)",
                egl->fn.glBindTexture(GLC_TEXTURE_2D, ewin->tex));
 
-    /* === the UPLOAD CONTRACT (the §19 NVIDIA fix, re-landed 1.1.0-rc2) ==
+    /* === the UPLOAD CONTRACT (§19 + the 1.1.1 probe/ladder) ==========
      *
-     * The GTX 1050 Ti report (2026-10-31, labwc + the proprietary
-     * driver): the lane engaged (renderer string read fine, program
-     * linked) and the FIRST present failed with a GL error — the
-     * upload used GL_BGRA + GL_UNPACK_ROW_LENGTH, which are NOT core
-     * GLES2: BGRA needs GL_EXT_texture_format_BGRA8888, ROW_LENGTH
-     * needs GL_EXT_unpack_subimage (or ES3). Mesa's stacks expose
-     * both, which is exactly why every rig passed; NVIDIA's ES2
-     * context rejects them. The honest core-legal form, decided once
-     * per connection off the first context's extension string
-     * (FDK_GL_CORE_ONLY=1 pins the fallbacks on any driver — the
-     * rig's deterministic leg):
-     *
-     *   BGRA + ROW_LENGTH   the fast path (the Mesa shape)
-     *   BGRA, no ROW_LENGTH full-width uploads are stride-free;
-     *                       sub-rects pack rows tightly first
-     *   RGBA + ROW_LENGTH   a CPU-swizzled RGBA twin uploads in the
-     *                       core format, sub-rects stride straight
-     *   neither             twin + per-rect row packing — the
-     *                       NVIDIA shape, pure core GLES2
+     * The four shapes (fastest first): BGRA + ROW_LENGTH, BGRA with
+     * tightly packed sub-rects, a CPU-swizzled RGBA twin + ROW_LENGTH,
+     * and the twin with packed sub-rects — pure core GLES2. The
+     * OPERATIVE shape is egl->shape: the PROBE picked it off real 4x4
+     * uploads the driver accepted (not the extension string — the GTX
+     * 1050 Ti report: both extensions advertised, the fast path chosen,
+     * the first present still failed, because internalformat GL_RGBA
+     * paired with format GL_BGRA_EXT is in no ES2 table while Mesa
+     * tolerates it and NVIDIA does not), and the ladder can rotate it
+     * DOWN at runtime when a present fails.
      *
      * The twin is byte-identical INK (swizzling [B,G,R,X] to
      * [R,G,B,X] makes the RGBA upload produce the same texel the
      * BGRA upload of the original would), so the self-check, the
      * equivalence rigs, and the readback all see one unchanged
-     * pipeline. */
+     * pipeline — whichever shape serves the upload. */
+    const int use_bgra = lane_shape_uses_bgra(egl->shape);
+    const int use_rowlen = lane_shape_uses_rowlen(egl->shape);
     const fdk_u32 *src_buf = ewin->staging;
-    if (!egl->has_bgra_ext) {
+    if (!use_bgra) {
         if (lane_ensure_rgba_twin(ewin) != 0) {
-            return -1; /* allocation failure: downgrade — the frame
-                        * is intact in staging for the CPU salvage */
+            return LANE_PRESENT_FATAL; /* allocation failure: OOM —
+                                        * the frame is intact in
+                                        * staging for the CPU salvage */
         }
         src_buf = ewin->rgba_twin;
     }
-    const unsigned int src_fmt = egl->has_bgra_ext ? GLC_BGRA : GLC_RGBA;
+    const unsigned int src_fmt = use_bgra ? GLC_BGRA : GLC_RGBA;
+    /* The probe-validated internalformat: the BGRA shapes ride the
+     * spelling the driver accepted (GL_BGRA_EXT's own table row by
+     * default; the ES2-lenient GL_RGBA internal + BGRA format when
+     * that was what the driver took). */
+    const unsigned int internal =
+        (use_bgra && !egl->bgra_internal_rgba) ? GLC_BGRA : GLC_RGBA;
     char desc[128];
-    (void)snprintf(desc, sizeof(desc),
-                   "glPixelStorei(UNPACK_ROW_LENGTH, %d)",
-                   egl->has_rowlen_ext ? w : 0);
-    LANE_GL_OP(desc,
-               egl->fn.glPixelStorei(GLC_UNPACK_ROW_LENGTH,
-                                     egl->has_rowlen_ext ? w : 0));
+    /* ROW_LENGTH is touched ONLY when the extension exists — on a
+     * context without GL_EXT_unpack_subimage the pname itself is
+     * GL_INVALID_ENUM (value 0 included; the pre-1.1.1 code set it
+     * unconditionally, poisoning strict drivers on the fallback
+     * shapes too). With the extension, it carries the window stride
+     * for rowlen shapes and resets to 0 (tight) for packed ones. */
+    if (egl->has_rowlen_ext) {
+        (void)snprintf(desc, sizeof(desc),
+                       "glPixelStorei(UNPACK_ROW_LENGTH, %d)",
+                       use_rowlen ? w : 0);
+        LANE_GL_OP(desc,
+                   egl->fn.glPixelStorei(GLC_UNPACK_ROW_LENGTH,
+                                         use_rowlen ? w : 0));
+    }
+
+    /* TEST SEAM (FDK_GL_POISON_FIRST): the first present's first
+     * attempt performs one guaranteed-invalid upload call (a format
+     * enum no conformant driver accepts) BEFORE the real one, so the
+     * real upload's drain reports a driver-style failure — the rig's
+     * deterministic proof that the ladder recovers a poisoned first
+     * present. Error-state-only: rejected calls change nothing. */
+    if (ewin->presents == 0 && ewin->poison_first) {
+        ewin->poison_first = 0;
+        egl->fn.glTexImage2D(GLC_TEXTURE_2D, 0, GLC_RGBA, 4, 4, 0,
+                             0x9999u, GLC_UNSIGNED_BYTE, NULL);
+    }
 
     if (!ewin->tex_ok) {
         (void)snprintf(desc, sizeof(desc),
-                       "glTexImage2D(%dx%d, internal=GL_RGBA, fmt=%s)",
-                       w, h, lane_fmt_name(src_fmt));
+                       "glTexImage2D(%dx%d, internal=%s, fmt=%s)",
+                       w, h,
+                       internal == GLC_BGRA ? "GL_BGRA_EXT" : "GL_RGBA",
+                       lane_fmt_name(src_fmt));
         LANE_GL_OP(desc,
-                   egl->fn.glTexImage2D(GLC_TEXTURE_2D, 0, GLC_RGBA, w, h,
-                                        0, src_fmt, GLC_UNSIGNED_BYTE,
-                                        src_buf));
+                   egl->fn.glTexImage2D(GLC_TEXTURE_2D, 0, (int)internal,
+                                        w, h, 0, src_fmt,
+                                        GLC_UNSIGNED_BYTE, src_buf));
         ewin->tex_ok = 1;
     } else {
         long long area = 0;
@@ -1648,7 +2134,7 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
                 int rw = (int)(rx1[i] - rx0[i]);
                 int rh = (int)(ry1[i] - ry0[i]);
                 const fdk_u32 *src = src_buf;
-                if (egl->has_rowlen_ext) {
+                if (use_rowlen) {
                     /* Stride straight out of the full buffer —
                      * ROW_LENGTH carries the window stride. */
                     src = src_buf + (size_t)ry0[i] * (size_t)w +
@@ -1659,8 +2145,9 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
                     src = lane_pack_rect(ewin, src_buf, w, (int)rx0[i],
                                          (int)ry0[i], rw, rh);
                     if (src == NULL) {
-                        return -1; /* scratch allocation failure:
-                                    * downgrade, frame intact */
+                        return LANE_PRESENT_FATAL; /* scratch allocation
+                                                    * failure: OOM,
+                                                    * frame intact */
                     }
                 }
                 (void)snprintf(desc, sizeof(desc),
@@ -1676,8 +2163,11 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
         }
     }
 
-    if (draw_fullscreen_quad(ewin, w, h) != 0) {
-        return -1;
+    {
+        const int drawrc = draw_fullscreen_quad(ewin, w, h);
+        if (drawrc != 0) {
+            return drawrc; /* already reported with attribution */
+        }
     }
 
     /* The steady-state tail drain (the risky firsts drained per call
@@ -1694,7 +2184,7 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
                                          "attributed to the last lane "
                                          "call)"
                                        : ewin->lane_stage);
-            return -1;
+            return LANE_PRESENT_GL;
         }
     }
 
@@ -1753,7 +2243,8 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
                                                           * below */
             egl->refused = 1;
             wlgl_selfcheck_stamp_failed();
-            return -1; /* this window downgrades, later ones refuse */
+            return LANE_PRESENT_FATAL; /* this window downgrades,
+                                       * later ones refuse */
         }
         egl->selfcheck = WL_GL_SELFCHECK_PASSED;
     }
@@ -1761,19 +2252,12 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
     if (!egl->fn.eglSwapBuffers(egl->egl_display, ewin->surface)) {
         const unsigned int se = (unsigned)egl->fn.eglGetError();
         FDK_WARN("eglSwapBuffers failed (0x%x, %s) at %s after a clean "
-                 "draw — downgrading this window to the CPU path",
+                 "draw — the ladder gives the next upload shape one "
+                 "chance before any downgrade",
                  se, lane_egl_err_name(se), ewin->lane_stage);
-        return -1;
+        return LANE_PRESENT_SWAP;
     }
-    ewin->presents++;
-
-    /* The wl_surface commit that publishes the EGL buffer happens
-     * inside eglSwapBuffers (libwayland-egl attaches the new buffer
-     * and commits) — the flush discipline the SHM path applies after
-     * commit_render_pending applies here too, so an app presenting
-     * outside the pump still reaches the compositor promptly. */
-    (void)wl_display_flush(egl->conn->display);
-    return 0;
+    return LANE_PRESENT_OK;
 }
 
 /* ---- §19 test seams (1.1.0-rc2): the driverless fallback-shape pins ---- */
