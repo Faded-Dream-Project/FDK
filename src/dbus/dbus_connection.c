@@ -67,6 +67,15 @@ static void hello_reply_cb(fdk_dbus_connection *c, fdk_dbus_message *m,
                            void *user);
 static void sweep_dead_watchers(fdk_dbus_connection *c);
 
+/* The process-wide "D-Bus unavailable" once-flag (1.1.0-rc2 — the
+ * owner's triple-startup-line report; see connect_common). */
+static int fdk__dbus_unavailable_logged = 0;
+
+void fdk__dbus_test_reset_unavailable_notice(void) {
+    /* TEST SEAM: never called by the library itself. */
+    fdk__dbus_unavailable_logged = 0;
+}
+
 /* ---- small helpers ---------------------------------------------------------- */
 
 static char *dup_str(const char *s) {
@@ -1407,10 +1416,19 @@ static fdk_dbus_connection *connect_common(fdk_context *ctx,
     int fd = fdk__dbus_connect_first(addrs, n_addrs, &chosen);
     if (fd < 0) {
         /* One line, once — the no-bus posture every feature above
-         * this layer keys off. */
-        FDK_INFO("D-Bus unavailable (no endpoint accepted a connection "
-                 "for '%s')",
-                 address_owned);
+         * this layer keys off. (1.1.0-rc2: startup connects the session
+         * bus up to three times — notifications, the tray watcher,
+         * the settings bridge — and each failure used to repeat this
+         * line; the verdict is a property of the machine, not of the
+         * caller, so the whole process reports it exactly once. The
+         * test seam fdk__dbus_test_reset_unavailable_notice() lets a
+         * test pin that deterministically.) */
+        if (!fdk__dbus_unavailable_logged) {
+            fdk__dbus_unavailable_logged = 1;
+            FDK_INFO("D-Bus unavailable (no endpoint accepted a "
+                     "connection for '%s')",
+                     address_owned);
+        }
         fdk_free(address_owned);
         return NULL;
     }

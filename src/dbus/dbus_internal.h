@@ -326,6 +326,13 @@ char *fdk__dbus_bus_address(fdk_dbus_bus bus);
 int fdk__dbus_connect_first(const fdk__dbus_addr *addrs, int count,
                             struct fdk__dbus_addr *chosen);
 
+/* TEST SEAM (1.1.0-rc2): resets the process-wide "D-Bus unavailable"
+ * once-flag so a test can pin the exactly-one-line behavior
+ * deterministically regardless of test order or environment (any
+ * earlier no-bus leg legitimately consumes the notice first). Never
+ * called by the library itself. */
+void fdk__dbus_test_reset_unavailable_notice(void);
+
 /* Reads a nonce-tcp endpoint's nonce file into out (hex → raw).
  * Returns the byte count (0 when the endpoint has no nonce), or
  * -1 on an unreadable/ill-formed file. */
