@@ -221,6 +221,29 @@ static void registry_global(void *data, struct wl_registry *registry,
         conn->activation =
             wl_registry_bind(registry, name,
                              &xdg_activation_v1_interface, 1);
+    } else if (strcmp(interface, "wp_linux_drm_syncobj_manager_v1") == 0) {
+        /* §20 diagnostic (the rc2-line re-land), deliberately NOT a
+         * bind: string-matched only, so it needs no protocol XML, no
+         * generated code, and no minimum wayland-protocols version —
+         * and FDK has nothing to SAY on this interface anyway (the
+         * rejected design: no client-side syncobj). Its presence
+         * still matters enormously to the present lane: compositors
+         * that advertise it let a DRIVER wrap a wl_surface in the
+         * explicit-sync role (NVIDIA's EGL does, inside
+         * eglCreateWindowSurface), after which every attaching
+         * commit on that surface must carry an acquire point — the
+         * single-owner rule in wayland_window.c exists precisely so
+         * FDK's own wl_shm commits never collide with that. One
+         * INFO line, once per process, at registry time. */
+        if (!conn->syncobj_manager_advertised) {
+            conn->syncobj_manager_advertised = 1;
+            FDK_INFO("compositor advertises "
+                     "wp_linux_drm_syncobj_manager_v1 (explicit buffer "
+                     "synchronization) — a driver may wrap a wl_surface "
+                     "in the explicit-sync role; the GL lane keeps its "
+                     "EGL-side commits, FDK's wl_shm commits stay off "
+                     "lane-owned surfaces (the single-owner rule)");
+        }
     }
     /* Other globals (wl_data_device_manager, etc.) are
      * intentionally not bound — out of current scope, see
@@ -345,6 +368,9 @@ fdk_result fdk_wayland_connect(fdk_platform_dispatch_fn dispatch,
      * acquisition, never here (no-window apps never touch EGL). */
     conn->egl = NULL;
     conn->egl_tried = 0;
+    /* §20 diagnostic flag: filled by the registry pass below (a
+     * string match, not a bind). */
+    conn->syncobj_manager_advertised = 0;
     conn->activation = NULL;
     conn->launch_token = NULL;
     /* S-6: the launch token a LAUNCHER vouched for us with — read

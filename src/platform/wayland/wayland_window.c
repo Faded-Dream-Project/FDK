@@ -574,6 +574,35 @@ static const struct wl_buffer_listener g_background_buffer_listener = {
  * acking the first configure before the first real commit), on
  * resizes, and from fdk_window_resize().
  *
+ * THE §20 SINGLE-OWNER RULE (the GTX 1050 Ti fix, re-landed): when
+ * the GPU lane owns this surface (egl_win != NULL — an EGL window
+ * surface wraps it), the surface's BUFFER STATE BELONGS TO EGL.
+ * This function REFUSES: it returns without attaching anything,
+ * at this seam (the configure), at the resize seam, and at any
+ * future caller. The reasoning, end to end:
+ *   - A driver may wrap the wl_surface in the explicit-sync role at
+ *     eglCreateWindowSurface time (NVIDIA's EGL does exactly this
+ *     when the compositor advertises wp_linux_drm_syncobj_manager_v1
+ *     — see the registry diagnostic in wayland_connection.c); the
+ *     wrap happens at the FIRST FRAMEBUFFER ACQUIRE, which precedes
+ *     the first xdg configure for every application that paints
+ *     before pumping (all of FDK's examples, text_demo included).
+ *   - After that wrap, EVERY attaching commit on the surface must
+ *     carry an acquire point — EGL's own attaches do; a plain
+ *     wl_shm attach+commit from FDK's queue does NOT. The
+ *     compositor answers with protocol error 4 and the connection
+ *     dies (the owner's report: "dispatch_pending failed (-101)
+ *     ... exited cleanly after 0 frames").
+ *   - A lane-owned window therefore maps via ITS OWN first present
+ *     — the deferred EGL first frame at configure
+ *     (fdk__wayland_commit_deferred_first_frame) or the next
+ *     present — never via a background buffer. On the rigs this is
+ *     directly observable: with the lane forced, FDK's Default
+ *     Queue sends ZERO wl_surface.attach on the toplevel (the
+ *     attach-count rig in test_wayland_integration.c).
+ * The refusal is sticky per window (logged once, DEBUG) — but not
+ * an error: it is the CORRECT present for a lane-owned surface.
+ *
  * Protocol-correctness notes (checked against the wl_shm spec):
  *  - The pool is destroyed immediately after creating the buffer:
  *    "the mmapped memory will be released when all buffers that have
@@ -587,10 +616,24 @@ static const struct wl_buffer_listener g_background_buffer_listener = {
  *    listener above destroys it then.
  *  - WL_SHM_FORMAT_XRGB8888 needs no format-event negotiation: the
  *    wl_shm spec guarantees every compositor supports it.
- * Returns FDK_OK, or an error code logged at WARN level (the caller
- * degrades to "window stays invisible", never crashes). */
+ * Returns FDK_OK (including the single-owner refusal — a successful
+ * no-op), or an error code logged at WARN level (the caller degrades
+ * to "window stays invisible", never crashes). */
 static fdk_result attach_background_buffer(fdk_platform_window *pwindow, fdk_size size) {
     fdk_platform_connection *conn = pwindow->conn;
+
+    /* THE §20 SINGLE-OWNER RULE, enforced here so no caller seam can
+     * bypass it: the EGL lane owns this surface's buffer state. See
+     * the block comment above for the full chain of reasoning. */
+    if (pwindow->egl_win != NULL) {
+        if (!pwindow->bg_refused_logged) {
+            pwindow->bg_refused_logged = 1;
+            FDK_DEBUG("background buffer refused: the GPU lane owns "
+                      "this surface's buffer state (single-owner "
+                      "rule — the EGL first frame maps it)");
+        }
+        return FDK_OK;
+    }
 
     struct wl_buffer *buffer = NULL;
     uint32_t *pixels = NULL;
@@ -1386,9 +1429,28 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
  * commit, frame-callback registration, live-buffer bookkeeping.
  * Shared by fdk_wayland_window_present() and the deferred-first-frame
  * path in xdg_surface_configure() (which commits the buffer a present
- * deferred BEFORE the first configure was ever able to). */
+ * deferred BEFORE the first configure was ever able to).
+ *
+ * §20 defensive refusal: this is the CLASSIC wl_shm commit path. If
+ * the GPU lane owns the surface (egl_win != NULL), this path has no
+ * business running at all — the state machine keeps render_pending
+ * and egl_win mutually exclusive (the lane engages at acquisition,
+ * renders through staging, and the only code that sets render_pending
+ * with the lane ever engaged is the downgrade salvage — which NULLs
+ * egl_win FIRST; that ORDER is load-bearing, see
+ * fdk__wayland_surface_downgrade_from_lane). Refusing here (rather
+ * than attaching) makes that order MECHANICAL: a future reordering
+ * of the downgrade path would hit this refusal — one honest WARN —
+ * instead of silently sending FDK's second presenter onto a
+ * lane-owned surface (the GTX 1050 Ti protocol error 4). */
 static fdk_result commit_render_pending(fdk_platform_window *pwindow,
                                         const fdk_platform_damage *damage) {
+    if (pwindow->egl_win != NULL) {
+        FDK_WARN("classic wl_shm commit refused: the GPU lane owns this "
+                 "surface's buffer state (single-owner rule violated "
+                 "by an internal state machine bug — report this)");
+        return FDK_ERR_INVALID_STATE;
+    }
     fdk_size size = { .width = 0, .height = 0 };
     for (int i = 0; i < FDK_WL_RENDER_SLOTS; i++) {
         if (pwindow->render_slots[i].buffer == pwindow->render_pending) {
@@ -1504,9 +1566,21 @@ static fdk_result commit_render_pending(fdk_platform_window *pwindow,
      * release. EPIPE here means the compositor is gone; the dispatch
      * layer's circuit breaker owns the reporting, so this is a quiet
      * mark-dead. EAGAIN (send buffer full) is not an error: the
-     * request stays queued and rides the next flush. */
+     * request stays queued and rides the next flush.
+     *
+     * §20 (the GTX 1050 Ti lesson): "quiet" meant TOO quiet — this
+     * hand-rolled display_dead flip was the reason the owner's run
+     * printed NO protocol-error detail line: the breaker was already
+     * set when the pump called in, so dispatch_pending returned -101
+     * without logging anything, while context.c promised "the backend
+     * logged its one detail line". The mark now routes through the
+     * shared fdk__wayland_connection_dead() — same circuit-breaker
+     * semantics, but the one detail line (protocol error
+     * interface/object/code when there is one) always fires. */
     if (wl_display_flush(pwindow->conn->display) < 0 && errno != EAGAIN) {
-        pwindow->conn->display_dead = 1;
+        (void)fdk__wayland_connection_dead(pwindow->conn,
+                                           "wl_display_flush (present)",
+                                           errno);
     }
     return FDK_OK;
 }
@@ -1657,7 +1731,24 @@ int fdk_wayland_window_render_path(fdk_platform_window *pwindow) {
  * full damage so the salvaged frame goes out NOW. The staging
  * buffer holds exactly (last-presented + the drawing since), so the
  * window never shows a broken or stale frame because of the
- * downgrade itself. */
+ * downgrade itself.
+ *
+ * THE §20 LOAD-BEARING ORDER (the GTX 1050 Ti fix, re-landed):
+ * the wl_shm slot is CREATED first (no attach — buffer creation is
+ * not surface state), then the EGL surface/context/wl_egl_window
+ * are DESTROYED, and only THEN does the recursive classic present
+ * attach. On a compositor with wp_linux_drm_syncobj_manager_v1 the
+ * driver's EGL window surface may hold the explicit-sync role; the
+ * role must be released (eglDestroySurface tears down the driver's
+ * wrapper) BEFORE the first wl_shm attach, or that attach takes
+ * down the connection exactly like the background-buffer attach
+ * did (protocol error 4). Reordering this — wl_shm attach before
+ * the EGL destroy — resurrects the crash; commit_render_pending's
+ * §20 refusal exists precisely so such a reordering cannot slip in
+ * silently. (What a driver does inside eglDestroySurface is its
+ * own business; destroying first is the best a client can do, and
+ * the order is what the protocol's own role-release semantics
+ * demand.) */
 fdk_result fdk__wayland_surface_downgrade_from_lane(
     fdk_platform_window *pwindow) {
     if (pwindow == NULL || pwindow->egl_win == NULL) {
@@ -1816,6 +1907,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->render_size.width = 0;
     pwindow->render_size.height = 0;
     pwindow->lane_frame_deferred = 0;
+    pwindow->bg_refused_logged = 0;
     pwindow->scale_x120 = 120;    /* 1x until an output says otherwise */
     pwindow->buffer_scale = 1;
     pwindow->scale_applied = 0;   /* applied on the first commit      */
@@ -2328,7 +2420,19 @@ void fdk_wayland_window_hide(fdk_platform_window *pwindow) {
      * buffer gets wl_buffer::release'd by the compositor, which
      * destroys it via the release listener; the next
      * fdk_window_show() → configure cycle re-attaches a fresh one.
-     * Title, size limits and all other window state survive. */
+     * Title, size limits and all other window state survive.
+     *
+     * §20 single-owner rule: while the GPU lane owns the surface, its
+     * buffer state — including the unmap — belongs to EGL; FDK's
+     * queue sends no attaching commit (a pure-lane window never sets
+     * buffer_attached, so this branch is naturally inert for it; the
+     * guard covers the background-then-lane legacy state where it
+     * would otherwise fire). Unmapping a lane-owned surface is the
+     * lane's teardown's business (fdk_window_destroy →
+     * fdk_wayland_egl_window_destroy). */
+    if (pwindow->egl_win != NULL) {
+        return;
+    }
     if (pwindow->buffer_attached) {
         wl_surface_attach(pwindow->surface, NULL, 0, 0);
         wl_surface_commit(pwindow->surface);

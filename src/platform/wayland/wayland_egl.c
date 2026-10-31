@@ -275,6 +275,8 @@ struct fdk_wayland_egl {
      * connection off the FIRST context's extension string. */
     int has_bgra_ext;              /* GL_EXT_texture_format_BGRA8888     */
     int has_rowlen_ext;            /* GL_EXT_unpack_subimage             */
+    int syncobj_note_logged;       /* §20: the registry-relevance note
+                                    * has fired once for this process    */
     char renderer[80];
 };
 
@@ -461,6 +463,7 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     egl->selfcheck = WL_GL_SELFCHECK_UNVERIFIED;
     egl->has_bgra_ext = 0;
     egl->has_rowlen_ext = 0;
+    egl->syncobj_note_logged = 0;
     egl->renderer[0] = '\0';
     memset(&egl->fn, 0, sizeof(egl->fn));
 
@@ -904,6 +907,31 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
              egl->has_bgra_ext ? "BGRA" : "RGBA (CPU-swizzled twin)",
              egl->has_rowlen_ext ? "UNPACK_ROW_LENGTH sub-rects"
                                 : "per-rect row packing");
+    /* §20 relevance note (once per process): whether the compositor
+     * advertises wp_linux_drm_syncobj_manager_v1 decides how much the
+     * single-owner rule is load-bearing HERE. Advertised + a driver
+     * that wraps (NVIDIA): every attaching commit on this surface
+     * needs an acquire point — EGL's commits carry them, FDK's own
+     * wl_shm commits are refused (wayland_window.c). Not advertised
+     * (this sandbox's sway/pixman, most VM rigs): the rule still
+     * holds — one presenter per surface is correct independent of
+     * the sync protocol — but nothing would kill the connection over
+     * it. pwindow carries the connection for the flag. */
+    if (!egl->syncobj_note_logged) {
+        egl->syncobj_note_logged = 1;
+        FDK_INFO("GL lane: compositor %s wp_linux_drm_syncobj_manager_v1 "
+                 "— %s",
+                 pwindow->conn->syncobj_manager_advertised
+                     ? "advertises"
+                     : "does not advertise",
+                 pwindow->conn->syncobj_manager_advertised
+                     ? "a driver wrapping this surface in the "
+                       "explicit-sync role makes FDK's wl_shm-commit "
+                       "refusal load-bearing (the single-owner rule)"
+                     : "the single-owner rule still holds (one "
+                       "presenter per surface), but no explicit-sync "
+                       "role can enforce it");
+    }
     return ewin;
 }
 

@@ -48,6 +48,18 @@ struct fdk_platform_connection {
      * to their console logs). */
     int display_dead;
 
+    /* §20 diagnostic (the rc2-line re-land): set when the registry
+     * saw the compositor advertise wp_linux_drm_syncobj_manager_v1.
+     * NEVER bound — FDK implements no client-side syncobj (the
+     * rejected design; see DECISIONS D-036) — it only feeds the
+     * one-line diagnostic at connect time and the lane-engagement
+     * note: on such compositors a driver that wraps the wl_surface
+     * in the explicit-sync role (NVIDIA's EGL does, at
+     * eglCreateWindowSurface) makes EVERY attaching commit need an
+     * acquire point, which is exactly why the single-owner rule
+     * below exists. */
+    int syncobj_manager_advertised;
+
     /* Dedicated event queue for wl_buffer events (1.1.6). Every
      * wl_buffer created through create_shm_buffer() is moved here
      * via wl_proxy_set_queue, so wl_buffer::release — often the ONLY
@@ -659,6 +671,9 @@ struct fdk_platform_window {
                               * first configure; the configure handler
                               * flushes it (see
                               * fdk__wayland_commit_deferred_first_frame) */
+    int bg_refused_logged;  /* §20: the single-owner refusal's one
+                             * DEBUG line has fired for this window
+                             * (see attach_background_buffer)          */
 
     /* --- HiDPI (Phase 3 completion) --------------------------------
      *
@@ -906,6 +921,16 @@ void fdk_wayland_ext_surface_resized(fdk_platform_window *pwindow,
  * Returns 1 when a frame was committed. Defined in wayland_window.c. */
 int fdk__wayland_commit_deferred_first_frame(
     fdk_platform_window *pwindow);
+
+/* THE §20 SINGLE-OWNER RULE's shared dead-connection mark (defined in
+ * wayland_dispatch.c, called from every file that owns a path which
+ * can kill the connection): marks the circuit breaker ONCE and logs
+ * the one detail line — the failing call, its errno, and, whenever
+ * libwayland has one (or a guarded read can surface one), the
+ * protocol error's interface, object id and code. Returns
+ * FDK_ERR_NO_DISPLAY. Never call this for a RECOVERABLE error. */
+int fdk__wayland_connection_dead(fdk_platform_connection *conn,
+                                 const char *what, int err);
 
 /* Subsurfaces (1.1.0, D-2 / B-16) — wayland_ext.c. The FDK-owned
  * wl_subsurface child behind fdk_ext_subsurface_create: a fresh

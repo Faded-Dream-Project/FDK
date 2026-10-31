@@ -6,7 +6,6 @@
 
 #include <errno.h>
 #include <poll.h>
-
 /* Flush libwayland's output buffer after listener callbacks have run.
  *
  * Requests marshalled by a listener (or by any window-op call made
@@ -33,15 +32,50 @@
  * facts a compositor's own log correlates ("zwlr_layer_surface_v1#
  * 23: error 2: ..."). The compositor's human message rides only the
  * WAYLAND_DEBUG=1 stream (libwayland does not store it client-side);
- * the code + interface + id are the complete client-side truth. */
-static int connection_dead(fdk_platform_connection *conn, const char *what,
-                           int err) {
+ * the code + interface + id are the complete client-side truth.
+ *
+ * THE §20 LESSON (the GTX 1050 Ti report, 2026-10-31): the detail
+ * line was only as good as the paths that reached this helper. The
+ * present path's own trailing flush marked the connection dead
+ * QUIETLY (wayland_window.c flipped display_dead by hand), so the
+ * pump's circuit breaker then returned -101 without ANY backend
+ * line — while context.c's report promised "the backend logged its
+ * one detail line". A lie by omission. Two fixes, both here:
+ *   1. EVERY dead-connection mark routes through this helper (the
+ *      present path calls it now; the release-queue dispatch failure
+ *      below calls it too) — the circuit breaker's silence is then
+ *      always a second silence, never the only one.
+ *   2. The flush/EPIPE paths mark the connection dead BEFORE the
+ *      compositor's wl_display.error event has necessarily been
+ *      READ. One guarded, never-blocking read attempt picks it up
+ *      so the detail line below can still name the interface,
+ *      object and code — the case the owner's report actually hit
+ *      (the error event sat in the socket while EPIPE beat it to
+ *      us). When nothing is readable, or no error was ever sent,
+ *      the line says so honestly instead of silently omitting the
+ *      detail. */
+int fdk__wayland_connection_dead(fdk_platform_connection *conn,
+                                 const char *what, int err) {
     if (!conn->display_dead) {
         conn->display_dead = 1;
         const struct wl_interface *iface = NULL;
         uint32_t id = 0;
         uint32_t code = wl_display_get_protocol_error(conn->display,
                                                       &iface, &id);
+        if (iface == NULL) {
+            /* The error event may still be sitting in the socket
+             * (EPIPE can beat its delivery). Read it — never
+             * blocking: only when the fd polls readable right now.
+             * A successful read that stores a protocol error makes
+             * the second query below the one that names names. */
+            struct pollfd pfd = { .fd = wl_display_get_fd(conn->display),
+                                  .events = POLLIN };
+            if (poll(&pfd, 1, 0) > 0) {
+                (void)wl_display_read_events(conn->display);
+                code = wl_display_get_protocol_error(conn->display,
+                                                     &iface, &id);
+            }
+        }
         if (iface != NULL) {
             FDK_ERROR("%s failed (errno=%d) — Wayland protocol error %u "
                       "on %s#%u; the connection is dead (compositor "
@@ -52,12 +86,20 @@ static int connection_dead(fdk_platform_connection *conn, const char *what,
                       (unsigned)id);
         } else {
             FDK_ERROR("%s failed (errno=%d) — the Wayland connection is "
-                      "dead (compositor gone?); subsequent pumps return "
-                      "FDK_ERR_NO_DISPLAY without further logging",
+                      "dead; no protocol error was recorded client-side "
+                      "(interface/object/code unavailable — the "
+                      "compositor closed the socket without a word). "
+                      "Subsequent pumps return FDK_ERR_NO_DISPLAY "
+                      "without further logging",
                       what, err);
         }
     }
     return (int)FDK_ERR_NO_DISPLAY;
+}
+
+static int connection_dead(fdk_platform_connection *conn, const char *what,
+                           int err) {
+    return fdk__wayland_connection_dead(conn, what, err);
 }
 
 static int flush_output(fdk_platform_connection *conn) {
@@ -82,8 +124,12 @@ int fdk_wayland_release_queue_dispatch(fdk_platform_connection *conn) {
     int dispatched = wl_display_dispatch_queue_pending(conn->display,
                                                        conn->release_queue);
     if (dispatched < 0) {
-        FDK_ERROR("wl_display_dispatch_queue_pending(release) failed "
-                  "(errno=%d)", errno);
+        /* §20: a queue-dispatch failure is a dead connection too
+         * (EPROTO/EOF land here) — route it through the shared
+         * one-line helper so this path also logs the protocol
+         * error's interface/object/code, and marks the breaker. */
+        (void)fdk__wayland_connection_dead(
+            conn, "wl_display_dispatch_queue_pending(release)", errno);
         return -1;
     }
     return dispatched;
