@@ -29,11 +29,16 @@
  * an array of PLACEMENTS — one per output glyph, in visual order,
  * each carrying its rasterized glyph (the same styled, subpixel-
  * phase-baked cache the legacy walk uses), its left-edge x, its
- * cumulative float pen, and the byte cluster it came from. Measure
+ * cumulative pen, and the byte cluster it came from. Measure
  * sums placements; draw blends them; the wrap/ellipsize engines and
  * the Entry caret read the per-codepoint logical pen attribution.
  * There is still exactly ONE rounding rule in the text stack: the
- * pen floors per glyph and rounds once at the end.
+ * pen floors per glyph and rounds once at the end. The pen itself
+ * accumulates in f64 (1.1.0-rc2, the re-landed f64 shaped-pen fix): an
+ * f32 accumulator takes one rounding per glyph and at extreme scale
+ * (thousands of glyphs) the drift moved measure, wrap and caret
+ * geometry by whole pixels; the f32 snapshots the consumers see are
+ * each narrowed once, never compounded.
  *
  * Level-1 scope, honestly stated:
  *   - line breaking stays LOGICAL (spaces and hard breaks); each
@@ -1074,7 +1079,7 @@ static bool sh_make_segments(sh_bidi *b, const fdk__text_run *runs,
 static bool sh_shape_segment(sh_segment *seg, sh_bidi *b,
                              const fdk_u32 *seg_cps,
                              fdk__placement *places, size_t *io_n,
-                             size_t max_places, fdk_f32 *pen,
+                             size_t max_places, fdk_f64 *pen,
                              fdk_f32 *acc) {
     hb_font_t *hbfont = sh_hb_font_for(seg->font);
     if (hbfont == NULL) {
@@ -1135,13 +1140,20 @@ static bool sh_shape_segment(sh_segment *seg, sh_bidi *b,
     }
 
     for (unsigned int i = 0; i < n_glyphs; i++) {
-        fdk_f32 x_off = (fdk_f32)poss[i].x_offset / 64.0f;
-        fdk_f32 y_off = (fdk_f32)poss[i].y_offset / 64.0f;
-        fdk_f32 adv = (fdk_f32)poss[i].x_advance / 64.0f;
+        fdk_f64 x_off = (fdk_f64)poss[i].x_offset / 64.0;
+        fdk_f64 y_off = (fdk_f64)poss[i].y_offset / 64.0;
+        fdk_f64 adv = (fdk_f64)poss[i].x_advance / 64.0;
 
-        fdk_f32 left = *pen + x_off;
-        fdk_i32 gx = (fdk_i32)floorf(left);
-        fdk_f32 frac = left - (fdk_f32)gx;
+        /* The pen accumulates in f64 (1.1.0-rc2, the re-landed f64
+         * shaped-pen fix): a long line's cumulative advance in f32
+         * picks up one rounding per glyph — at extreme scale
+         * (thousands of glyphs) the drift moved measure, wrap and
+         * caret geometry by whole pixels. The snapshots the
+         * consumers see (pen_after, cp_pen, total) stay f32 — one
+         * narrowing each, never compounded. */
+        fdk_f64 left = *pen + x_off;
+        fdk_i32 gx = (fdk_i32)floor(left);
+        fdk_f32 frac = (fdk_f32)(left - (fdk_f64)gx);
         int phase = (int)(frac * (fdk_f32)FDK_TEXT_SUBPIXEL_PHASES);
         if (phase >= FDK_TEXT_SUBPIXEL_PHASES) {
             phase = FDK_TEXT_SUBPIXEL_PHASES - 1;
@@ -1156,15 +1168,15 @@ static bool sh_shape_segment(sh_segment *seg, sh_bidi *b,
 
         if (synth_stem != 0 && raster->bits != NULL &&
             raster->w > 0 && raster->h > 0) {
-            adv += (fdk_f32)synth_stem; /* inked only — glyph_slot's rule */
+            adv += (fdk_f64)synth_stem; /* inked only — glyph_slot's rule */
         }
         fdk__placement *p = &places[(*io_n)++];
         p->raster = raster;
         p->font = seg->font;
         p->x = gx;
-        p->y_shift = (fdk_i32)sh_round_half(y_off);
+        p->y_shift = (fdk_i32)sh_round_half((fdk_f32)y_off);
         *pen += adv;
-        p->pen_after = *pen;
+        p->pen_after = (fdk_f32)*pen;
         p->cluster =
             b->cp_byte[seg->cp_lo + (size_t)infos[i].cluster];
     }
@@ -1335,7 +1347,7 @@ static fdk__shaped *sh_shape_range_impl(fdk_font *font,
         }
     }
 
-    fdk_f32 pen = 0.0f;
+    fdk_f64 pen = 0.0; /* f64 accumulator — see sh_shape_segment */
     bool ok = true;
     for (size_t vi = 0; vi < n_visual && ok; vi++) {
         sh_segment *seg = &segs[visual_order[vi]];
@@ -1399,12 +1411,19 @@ static fdk__shaped *sh_shape_range_impl(fdk_font *font,
         }
     }
 
-    /* logical per-cp pen: prefix sums of the attribution */
+    /* logical per-cp pen: prefix sums of the attribution. The
+     * running sum is f64 (the same re-landed pen discipline — an
+     * f32 prefix sum over thousands of cps re-introduces exactly
+     * the drift the f64 pen removed); each slot is narrowed once. */
     s->cp_pen[0] = 0.0f;
-    for (size_t k = 0; k < b.n_cp; k++) {
-        s->cp_pen[k + 1] = s->cp_pen[k] + acc[k];
+    {
+        fdk_f64 cp_run = 0.0;
+        for (size_t k = 0; k < b.n_cp; k++) {
+            cp_run += (fdk_f64)acc[k];
+            s->cp_pen[k + 1] = (fdk_f32)cp_run;
+        }
     }
-    s->total = pen;
+    s->total = (fdk_f32)pen;
     fdk_free(acc);
     return s;
 }
