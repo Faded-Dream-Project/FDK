@@ -43,6 +43,7 @@
 
 #include <assert.h>
 #include <signal.h>
+#include <stdint.h> /* uintptr_t — the hostile-cookie rig's wild pointers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13485,6 +13486,649 @@ static void test_xi2_tablet(void) {
            "normalization, tool types), seam refusals\n");
 }
 
+/* ---- xi2 tablet, 1.1.0-rc2: the classification, the hostile cookies, the
+ * real-cookie path -------------------------------------------------------
+ *
+ * The D-3 crash (owner's desktop, Arch/Openbox/NVIDIA): the tablet
+ * translation died in xi2_valuator reading a valuator tail through a
+ * mirror missing XIDeviceEvent's `flags` field — every tail field was
+ * read 8 bytes early, so "valuators_mask_len" was really the low half
+ * of buttons.mask's heap pointer (arbitrary garbage: -708600696 on
+ * the crash machine; the *4 then overflowed int, wrapped to a huge
+ * positive and defeated the bounds check) and "valuators_mask" was a
+ * wild pointer (0xbebebebe00000008, the reported r12/SEGV address).
+ * Two accomplices: the event-type constants were off by one (3/4/5 vs
+ * the protocol's KeyRelease/ButtonPress/ButtonRelease), and the scan
+ * classified any slave pointer with >=3 axes as a "tablet" — mice,
+ * XTEST pointers, touchpads — so a stylus-less desktop reported "4
+ * tablet device(s)" and fed ordinary mouse clicks into the broken
+ * reader. (scripts/xi2_crash_repro.c reproduces the SEGV against this
+ * same Xvfb with the old mirror.) The three legs below pin all of it.
+ */
+
+/* The XIDeviceEvent wire offsets the hostile-cookie rig pokes (the
+ * same layout x11_xi2.c's mirror spells and its XInput2.h static
+ * asserts verify — an independent second spelling so a mirror drift
+ * fails the WELL-FORMED leg here, not silently passes). */
+#define T_EVTYPE_OFF 36
+#define T_DEVICEID_OFF 48
+#define T_SOURCEID_OFF 52
+#define T_DETAIL_OFF 56
+#define T_EVENT_OFF 72
+#define T_EVENT_X_OFF 104
+#define T_EVENT_Y_OFF 112
+#define T_VALS_MASK_LEN_OFF 144
+#define T_VALS_MASK_OFF 152
+#define T_VALS_VALUES_OFF 160
+#define T_DEV_EVENT_SIZE 200
+
+static void poke_int(unsigned char *buf, int off, int v) {
+    memcpy(buf + off, &v, sizeof v);
+}
+
+static void poke_u64(unsigned char *buf, int off, unsigned long v) {
+    memcpy(buf + off, &v, sizeof v);
+}
+
+static void poke_f64(unsigned char *buf, int off, double v) {
+    memcpy(buf + off, &v, sizeof v);
+}
+
+static void poke_ptr(unsigned char *buf, int off, const void *v) {
+    memcpy(buf + off, &v, sizeof v);
+}
+
+/* A WELL-FORMED synthetic cookie: sourceid 500 (the injected tablet),
+ * axis 2 present with values[2] = 0.5. The mask/values buffers are
+ * CALLER-OWNED (passed in): the rig once pointed them at this
+ * function's own locals and ASan rightly caught the dead-frame read
+ * in xi2_valuator — the rig must only feed pointers that are alive. */
+static void craft_good_cookie(unsigned char *blob,
+                               unsigned long event_window,
+                               unsigned char *mask8, double *vals3) {
+    memset(blob, 0, T_DEV_EVENT_SIZE);
+    poke_int(blob, T_EVTYPE_OFF, 6 /* XI_Motion, the REAL numbering */);
+    poke_int(blob, T_DEVICEID_OFF, 2);
+    poke_int(blob, T_SOURCEID_OFF, 500);
+    poke_int(blob, T_DETAIL_OFF, 0);
+    poke_u64(blob, T_EVENT_OFF, event_window);
+    poke_f64(blob, T_EVENT_X_OFF, 30.0);
+    poke_f64(blob, T_EVENT_Y_OFF, 40.0);
+    poke_int(blob, T_VALS_MASK_LEN_OFF, 8); /* bytes — libXi's form */
+    memset(mask8, 0, 8);
+    mask8[0] = 0x07; /* axes 0,1,2 present */
+    poke_ptr(blob, T_VALS_MASK_OFF, mask8);
+    vals3[0] = 1.0;
+    vals3[1] = 2.0;
+    vals3[2] = 0.5;
+    poke_ptr(blob, T_VALS_VALUES_OFF, vals3);
+}
+
+static void test_xi2_tablet_hostile_cookies(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    struct fdk_platform_connection *conn = ctx->conn;
+    assert(conn->xi2 != NULL);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK tablet hostile rig",
+                                 .width = 120, .height = 90 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 50);
+    fdk_window_set_event_callback(win, tablet_event_cb, NULL);
+    unsigned long xid = (unsigned long)win->pwindow->xwindow;
+
+    /* The injected tablet: sourceid 500, 6 real axes, pressure 2. */
+    fdk_x11_xi2_test_inject_tablet(conn, 500, 6, 2, 3, 4);
+
+    static unsigned char blob[T_DEV_EVENT_SIZE];
+    unsigned char mask[8];   /* alive for the whole test — the rig's
+                              * cookie pointers must never dangle */
+    double vals[4] = { 1.0, 2.0, 0.5, 0.75 };
+    XGenericEventCookie ck;
+    memset(&ck, 0, sizeof ck);
+    ck.type = 35 /* GenericEvent */;
+    ck.extension = conn->xi2->opcode;
+    ck.cookie = 1;
+
+    /* --- 1. THE CRASH VALUES, verbatim: mask_len = -708600696 (the
+     * report's garbage, whose *4 overflowed int and wrapped to a
+     * huge positive, defeating the old bounds check) and the wild
+     * mask pointer 0xbebebebe00000008 (the report's r12). Pre-1.1.0-rc2
+     * this was a SEGV; now: rejected, event still delivered with
+     * default pressure, no sanitizer report. --- */
+    g_tablet_events = 0;
+    craft_good_cookie(blob, xid, mask, vals);
+    poke_int(blob, T_VALS_MASK_LEN_OFF, -708600696);
+    poke_ptr(blob, T_VALS_MASK_OFF,
+             (const void *)(uintptr_t)0xbebebebe00000008ull);
+    poke_ptr(blob, T_VALS_VALUES_OFF,
+             (const void *)(uintptr_t)0xbebebebe00000000ull);
+    ck.evtype = 6;
+    ck.data = blob;
+    assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+    assert(g_tablet_events == 2); /* proximity_in + motion */
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_MOTION);
+    assert(g_tablet_last.tablet.pressure == 0.0f); /* rejected -> 0 */
+    assert((int)g_tablet_last.tablet.position.x == 30);
+
+    /* --- 2. more hostile tails, each must be rejected (pressure 0)
+     * or safely consumed — never a crash --- */
+    struct {
+        int mask_len;
+        const void *mask;
+        const void *values;
+    } hostile[] = {
+        { 0, mask, vals },                     /* empty mask          */
+        { -1, mask, vals },                    /* negative length     */
+        { 2147483647, mask, vals },            /* INT_MAX             */
+        { 8, NULL, vals },                     /* NULL mask           */
+        { 8, mask, NULL },                     /* NULL values         */
+        { 100000, mask, vals },                /* absurd length       */
+    };
+    for (size_t i = 0; i < sizeof hostile / sizeof hostile[0]; i++) {
+        g_tablet_events = 0;
+        craft_good_cookie(blob, xid, mask, vals);
+        poke_int(blob, T_VALS_MASK_LEN_OFF, hostile[i].mask_len);
+        poke_ptr(blob, T_VALS_MASK_OFF, hostile[i].mask);
+        poke_ptr(blob, T_VALS_VALUES_OFF, hostile[i].values);
+        ck.evtype = 6;
+        ck.data = blob;
+        assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+        assert(g_tablet_events == 1); /* motion only: proximity fired
+                                        * once, at the first cookie */
+        assert(g_tablet_last.tablet.pressure == 0.0f);
+    }
+
+    /* --- 3. a FAT mask: bits set far beyond the device's 6 axes.
+     * The bits past the device's axis count are simply never queried
+     * (the axis-count bound); the bits within are read through the
+     * packed indexing — which requires the values array to hold
+     * popcount doubles, libXi's marshalling contract (the event
+     * carries no values length; a cookie whose values array is
+     * SHORTER than its mask claims is not defensible against and is
+     * exactly what a real libXi never produces). The rig's array
+     * respects the contract: 64 doubles for 64 set bits. --- */
+    static double fat_vals[64];
+    for (int i = 0; i < 64; i++) {
+        fat_vals[i] = 0.0;
+    }
+    fat_vals[2] = 0.5;
+    fat_vals[3] = 12.0;
+    fat_vals[4] = -8.0;
+    g_tablet_events = 0;
+    craft_good_cookie(blob, xid, mask, vals);
+    memset(mask, 0xff, sizeof mask); /* 64 axes "present" */
+    poke_ptr(blob, T_VALS_MASK_OFF, mask);
+    poke_ptr(blob, T_VALS_VALUES_OFF, fat_vals);
+    ck.evtype = 6;
+    ck.data = blob;
+    assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+    assert(g_tablet_events == 1); /* delivered */
+    /* pressure axis 2, tilt axes 3/4 — all within n_axes, all set,
+     * all packed-indexed correctly out of the 64-double array. */
+    assert(g_tablet_last.tablet.pressure > 0.49f &&
+           g_tablet_last.tablet.pressure < 0.51f);
+    assert((int)g_tablet_last.tablet.tilt_x == 12);
+    assert((int)g_tablet_last.tablet.tilt_y == -8);
+
+    /* --- 4. axis indices at/beyond the device's count never index:
+     * a tablet whose pressure axis is huge. --- */
+    fdk_x11_xi2_test_inject_tablet(conn, 500, 6, 4096, -1, -1);
+    g_tablet_events = 0;
+    craft_good_cookie(blob, xid, mask, vals);
+    ck.evtype = 6;
+    ck.data = blob;
+    assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+    assert(g_tablet_events == 2); /* the re-inject reset in_range:
+                                    * proximity fires again */
+    assert(g_tablet_last.tablet.pressure == 0.0f);
+    /* re-inject: resets in_range for the well-formed leg below */
+    fdk_x11_xi2_test_inject_tablet(conn, 500, 6, 2, 3, 4);
+
+    /* --- 5. WRONG EVTYPES never reach the tablet cast — the
+     * constants fix. KeyRelease (3) is NOT ButtonPress: with the old
+     * constants a key release became a tablet tip-down. Raw (17),
+     * hierarchy (11), device-changed (1), property (12), enter (7)
+     * are consumed untouched. --- */
+    int wrong_evtypes[] = { 1, 2, 3, 7, 9, 11, 12, 13, 17, 21, 25 };
+    for (size_t i = 0; i < sizeof wrong_evtypes / sizeof wrong_evtypes[0];
+         i++) {
+        g_tablet_events = 0;
+        craft_good_cookie(blob, xid, mask, vals);
+        ck.evtype = wrong_evtypes[i];
+        ck.data = blob;
+        assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+        assert(g_tablet_events == 0); /* no tablet event from noise */
+    }
+
+    /* --- 6. unknown device: events from a sourceid we never
+     * classified are ignored, never indexed. --- */
+    g_tablet_events = 0;
+    craft_good_cookie(blob, xid, mask, vals);
+    poke_int(blob, T_SOURCEID_OFF, 999);
+    ck.evtype = 6;
+    ck.data = blob;
+    assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+    assert(g_tablet_events == 0);
+
+    /* --- 7. NULL data: ours but empty — consumed, no crash. --- */
+    ck.data = NULL;
+    assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+
+    /* --- 8. the WELL-FORMED cookie: semantics exact — tip press and
+     * release through the real numbering, tilt from axes 3/4. --- */
+    unsigned char mask2[8];
+    memset(mask2, 0, sizeof mask2);
+    mask2[0] = 0x1f; /* axes 0..4 present */
+    double vals2[5] = { 1.0, 2.0, 0.75, 12.0, -8.0 };
+    g_tablet_events = 0;
+    craft_good_cookie(blob, xid, mask, vals);
+    poke_int(blob, T_EVTYPE_OFF, 4 /* XI_ButtonPress */);
+    poke_int(blob, T_DETAIL_OFF, 1 /* the tip */);
+    poke_ptr(blob, T_VALS_MASK_OFF, mask2);
+    poke_ptr(blob, T_VALS_VALUES_OFF, vals2);
+    ck.evtype = 4;
+    ck.data = blob;
+    assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+    assert(g_tablet_events == 2); /* proximity (case 4's closing
+                                   * re-inject reset in_range) +
+                                   * the tip down */
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_DOWN);
+    assert(g_tablet_last.tablet.pressure > 0.74f &&
+           g_tablet_last.tablet.pressure < 0.76f);
+    assert((int)g_tablet_last.tablet.tilt_x == 12);
+    assert((int)g_tablet_last.tablet.tilt_y == -8);
+
+    g_tablet_events = 0;
+    poke_int(blob, T_EVTYPE_OFF, 5 /* XI_ButtonRelease */);
+    ck.evtype = 5;
+    assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_UP);
+
+    /* Side button with an absurd detail: consumed, untranslated. */
+    g_tablet_events = 0;
+    poke_int(blob, T_DETAIL_OFF, 100000);
+    ck.evtype = 4;
+    assert(fdk_x11_xi2_handle_cookie(conn, &ck) == 1);
+    assert(g_tablet_events == 0); /* consumed, nothing dispatched */
+
+    fdk_x11_xi2_test_clear_tablets(conn);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] xi2 tablet hostile-cookie rig: the crash's exact "
+           "values (garbage mask_len + the 0xbebebebe wild pointer) "
+           "rejected, empty/negative/INT_MAX/NULL/absurd tails safe, "
+           "out-of-range axes never index, wrong evtypes (incl. "
+           "KeyRelease) never reach the tablet cast, unknown devices "
+           "ignored, well-formed cookies exact (tip down/up, packed "
+           "pressure + tilt)\n");
+}
+
+/* The pure classification regression: the stylus-evidence rule. */
+static void test_xi2_tablet_classification(void) {
+    struct fdk_x11_tablet t;
+
+    /* THE OWNER'S DESKTOP: a wheel mouse — 4 RELATIVE axes (Rel X,
+     * Rel Y, wheel, hwheel), unlabeled. The old rule (>=3 axes)
+     * called this a tablet; the new rule never does. */
+    {
+        int numbers[] = { 0, 1, 2, 3 };
+        unsigned long labels[] = { 0, 0, 0, 0 };
+        int modes[] = { 0, 0, 0, 0 }; /* relative */
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 4,
+                                        &t) == 0);
+    }
+    /* The same mouse with Rel labels spelled out. */
+    {
+        int numbers[] = { 0, 1, 2, 3 };
+        unsigned long labels[] = { 0x999, 0x99a, 0x99b, 0x99c };
+        int modes[] = { 0, 0, 0, 0 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 4,
+                                        &t) == 0);
+    }
+    /* XTEST pointer: 2 relative axes. */
+    {
+        int numbers[] = { 0, 1 };
+        unsigned long labels[] = { 0x999, 0x99a };
+        int modes[] = { 0, 0 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 2,
+                                        &t) == 0);
+    }
+    /* A KVM/virtual pointer: absolute x/y labeled but NO pressure
+     * and only 2 axes — no stylus evidence. */
+    {
+        int numbers[] = { 0, 1 };
+        unsigned long labels[] = { FDK_XI2_TEST_ATOM_ABS_X,
+                                   FDK_XI2_TEST_ATOM_ABS_Y };
+        int modes[] = { 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 2,
+                                        &t) == 0);
+    }
+    /* Mixed modes (a touchpad with abs pressure but rel motion):
+     * any relative axis disqualifies. */
+    {
+        int numbers[] = { 0, 1, 2 };
+        unsigned long labels[] = { 0x999, 0x99a,
+                                   FDK_XI2_TEST_ATOM_PRESSURE };
+        int modes[] = { 0, 0, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 3,
+                                        &t) == 0);
+    }
+    /* Fully unlabeled absolute 3-axis device (an old touchscreen
+     * shape): no Abs X/Y labels -> no evidence. */
+    {
+        int numbers[] = { 0, 1, 2 };
+        unsigned long labels[] = { 0, 0, 0 };
+        int modes[] = { 1, 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 3,
+                                        &t) == 0);
+    }
+    /* Unlabeled pressure but labeled Abs X/Y and 3 absolute axes:
+     * the positional tablet shape — pressure at the THIRD absolute
+     * axis, no tilt below 5 axes. */
+    {
+        int numbers[] = { 0, 1, 2 };
+        unsigned long labels[] = { FDK_XI2_TEST_ATOM_ABS_X,
+                                   FDK_XI2_TEST_ATOM_ABS_Y, 0 };
+        int modes[] = { 1, 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 3,
+                                        &t) == 2);
+        assert(t.pressure_axis == 2);
+        assert(t.tilt_x_axis == -1 && t.tilt_y_axis == -1);
+        assert(t.n_axes == 3);
+    }
+    /* Five absolute axes: tilt at the 4th and 5th. */
+    {
+        int numbers[] = { 0, 1, 2, 3, 4 };
+        unsigned long labels[] = { FDK_XI2_TEST_ATOM_ABS_X,
+                                   FDK_XI2_TEST_ATOM_ABS_Y, 0, 0, 0 };
+        int modes[] = { 1, 1, 1, 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 5,
+                                        &t) == 2);
+        assert(t.pressure_axis == 2);
+        assert(t.tilt_x_axis == 3 && t.tilt_y_axis == 4);
+    }
+    /* SPARSE absolute axes: numbers 10, 11, 12 — the positional
+     * pressure must be the third ABSOLUTE axis (12), not literal
+     * axis 2. */
+    {
+        int numbers[] = { 10, 11, 12 };
+        unsigned long labels[] = { FDK_XI2_TEST_ATOM_ABS_X,
+                                   FDK_XI2_TEST_ATOM_ABS_Y, 0 };
+        int modes[] = { 1, 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 3,
+                                        &t) == 2);
+        assert(t.pressure_axis == 12);
+    }
+    /* Descending input order still sorts: the third ABSOLUTE axis is
+     * 12 regardless of the order the classes arrived in. */
+    {
+        int numbers[] = { 12, 11, 10 };
+        unsigned long labels[] = { FDK_XI2_TEST_ATOM_ABS_Y,
+                                   FDK_XI2_TEST_ATOM_ABS_X, 0 };
+        int modes[] = { 1, 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 3,
+                                        &t) == 2);
+        assert(t.pressure_axis == 12); /* third of {10,11,12} */
+    }
+    /* THE REAL TABLET: labeled Abs X/Y/Pressure/Tilt — the labeled
+     * path, axis numbers wherever the driver put them. */
+    {
+        int numbers[] = { 0, 1, 2, 3, 4 };
+        unsigned long labels[] = {
+            FDK_XI2_TEST_ATOM_ABS_X, FDK_XI2_TEST_ATOM_ABS_Y,
+            FDK_XI2_TEST_ATOM_PRESSURE, FDK_XI2_TEST_ATOM_TILT_X,
+            FDK_XI2_TEST_ATOM_TILT_Y
+        };
+        int modes[] = { 1, 1, 1, 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 5,
+                                        &t) == 1);
+        assert(t.pressure_axis == 2);
+        assert(t.tilt_x_axis == 3 && t.tilt_y_axis == 4);
+        assert(t.n_axes == 5);
+    }
+    /* Non-contiguous labeled tablet (Wacom with wheel axis 5): the
+     * labels rule, positions irrelevant. */
+    {
+        int numbers[] = { 3, 4, 7, 9, 11, 13 };
+        unsigned long labels[] = {
+            FDK_XI2_TEST_ATOM_ABS_X, FDK_XI2_TEST_ATOM_ABS_Y,
+            FDK_XI2_TEST_ATOM_PRESSURE, FDK_XI2_TEST_ATOM_TILT_X,
+            FDK_XI2_TEST_ATOM_TILT_Y, 0
+        };
+        int modes[] = { 1, 1, 1, 1, 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 6,
+                                        &t) == 1);
+        assert(t.pressure_axis == 7);
+        assert(t.tilt_x_axis == 9 && t.tilt_y_axis == 11);
+        assert(t.n_axes == 6);
+    }
+    /* A labeled pressure axis on a RELATIVE device: rejected (the
+     * label must sit on an absolute axis). */
+    {
+        int numbers[] = { 0, 1, 2 };
+        unsigned long labels[] = { 0x999, 0x99a,
+                                   FDK_XI2_TEST_ATOM_PRESSURE };
+        int modes[] = { 0, 0, 0 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 3,
+                                        &t) == 0);
+    }
+    /* Out-of-range axis numbers are skipped, not smuggled. */
+    {
+        int numbers[] = { 0, 70000, 1 };
+        unsigned long labels[] = { FDK_XI2_TEST_ATOM_ABS_X,
+                                   FDK_XI2_TEST_ATOM_ABS_Y,
+                                   FDK_XI2_TEST_ATOM_PRESSURE };
+        int modes[] = { 1, 1, 1 };
+        assert(fdk_x11_xi2_test_classify(numbers, labels, modes, 3,
+                                        &t) == 1);
+        assert(t.pressure_axis == 1); /* axis 70000 skipped */
+        assert(t.n_axes == 2);
+    }
+    printf("[ok] xi2 tablet classification: the stylus-evidence rule "
+           "(wheel mice / XTEST / KVM pointers / mixed-mode touchpads "
+           "/ unlabeled absolutes rejected; labeled tablets, sparse "
+           "and non-contiguous axis numbers, the positional fallback "
+           "with sorted absolute order — accepted with exact axes)\n");
+}
+
+/* Real XTEST cookies end-to-end: a tablet record injected for the
+ * XTEST pointer, REAL XI_Motion/ButtonPress cookies through the REAL
+ * dispatch loop (XGetEventData and all), tablet events delivered
+ * alongside the core pointer stream (the additive posture). This is
+ * the closest rig to the owner's crash scenario without a physical
+ * tablet — same cookie pipeline, same master-pointer sourceid match.
+ */
+static void test_xi2_tablet_xtest_e2e(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+    struct fdk_platform_connection *conn = ctx->conn;
+    assert(conn->xi2 != NULL && conn->xi2->query_device != NULL);
+
+    /* Find the XTEST pointer slave's id through the module's own
+     * XIQueryDevice fn table (the local mirror spells the same
+     * XInput2.h layout x11_xi2.c asserts against at build time). */
+#pragma pack(push, 8)
+    struct rig_class { int type; int sourceid; };
+    struct rig_valuator {
+        int type; int sourceid; int number; unsigned long label;
+        double min; double max; double value; int resolution; int mode;
+    };
+    struct rig_devinfo {
+        int deviceid; char *name; int use; int attachment; int enabled;
+        int num_classes; struct rig_class **classes;
+    };
+#pragma pack(pop)
+    int ndev = 0;
+    struct rig_devinfo *infos =
+        conn->xi2->query_device(conn->display, 0 /* XIAllDevices */,
+                                &ndev);
+    assert(infos != NULL);
+    int xtest_id = -1, xtest_axes = 0;
+    for (int i = 0; i < ndev; i++) {
+        if (infos[i].use != 3 /* slave pointer */) {
+            continue;
+        }
+        int axes = 0;
+        for (int c = 0; c < infos[i].num_classes; c++) {
+            if (infos[i].classes[c]->type == 2 /* valuator */) {
+                axes++;
+            }
+        }
+        const char *nm = infos[i].name ? infos[i].name : "";
+        if (strstr(nm, "XTEST") != NULL || xtest_id < 0) {
+            if (xtest_id < 0 || strstr(nm, "XTEST") != NULL) {
+                xtest_id = infos[i].deviceid;
+                xtest_axes = axes;
+            }
+        }
+        if (strstr(nm, "XTEST") != NULL) {
+            break;
+        }
+    }
+    conn->xi2->free_device_info(infos);
+    assert(xtest_id > 0);
+    printf("    (XTEST pointer: id %d, %d axes)\n", xtest_id, xtest_axes);
+    if (xtest_axes < 1) {
+        xtest_axes = 1; /* the injection needs >= 1 axis to read */
+    }
+
+    /* Inject BEFORE window creation so the create-time event-mask
+     * selection includes the tablet bits (4/5/6 — the corrected
+     * constants; the old 3/4/5 would have selected KeyRelease and
+     * Motion would never arrive). */
+    fdk_x11_xi2_test_inject_tablet(conn, xtest_id, xtest_axes,
+                                   xtest_axes > 1 ? 1 : 0, -1, -1);
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK tablet e2e",
+                                 .width = 200, .height = 150 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+
+    /* Capture BOTH streams: tablet events and core pointer events. */
+    fdk_window_set_event_callback(win, tablet_event_cb, NULL);
+
+    Display *dpy = XOpenDisplay(NULL);
+    assert(dpy != NULL);
+    int evb, erb, mjr, mnr;
+    assert(XTestQueryExtension(dpy, &evb, &erb, &mjr, &mnr) != 0);
+
+    /* Motion onto the window: XI_Motion cookie (sourceid = XTEST id)
+     * + core MotionNotify. */
+    g_tablet_events = 0;
+    XTestFakeMotionEvent(dpy, -1, 60, 50, CurrentTime);
+    XSync(dpy, False);
+    struct timespec ts = { .tv_sec = 0, .tv_nsec = 60 * 1000 * 1000 };
+    nanosleep(&ts, NULL);
+    (void)fdk_pump_events(ctx, 200);
+    assert(g_tablet_events >= 2); /* proximity_in + motion */
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_MOTION);
+
+    /* A click: XI_ButtonPress + Release cookies -> tip DOWN/UP. */
+    g_tablet_events = 0;
+    XTestFakeButtonEvent(dpy, 1, True, CurrentTime);
+    XSync(dpy, False);
+    ts.tv_nsec = 40 * 1000 * 1000;
+    nanosleep(&ts, NULL);
+    (void)fdk_pump_events(ctx, 150);
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_DOWN);
+
+    g_tablet_events = 0;
+    XTestFakeButtonEvent(dpy, 1, False, CurrentTime);
+    XSync(dpy, False);
+    nanosleep(&ts, NULL);
+    (void)fdk_pump_events(ctx, 150);
+    assert(g_tablet_last.type == FDK_EVENT_TABLET_UP);
+
+    /* The additive posture: the core pointer stream kept flowing
+     * alongside (a plain BUTTON_DOWN also arrived). */
+    XCloseDisplay(dpy);
+    fdk_x11_xi2_test_clear_tablets(conn);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] xi2 tablet e2e: REAL XTEST cookies through the real "
+           "dispatch (XI_Motion -> proximity+motion, button 1 -> tip "
+           "down/up, sourceid matched, valuator tail read from the "
+           "real unmarshalled cookie) — the exact pipeline the crash "
+           "died in, now sanitizer-clean\n");
+}
+
+/* ---- D-Bus startup notice, 1.1.0-rc2: once per process ----------------------
+ *
+ * The owner's desktop report: the "D-Bus unavailable (no endpoint
+ * accepted a connection for 'unix:path=/run/user/1000/bus')" line
+ * printed THREE times at startup — notifications, the tray watcher
+ * and the settings bridge each attempt the session bus and each
+ * failure repeated the verdict. The verdict is a property of the
+ * machine, not the caller: the whole process reports it exactly
+ * once. (Driven here with a display-holding context and a session
+ * address pinned to a nonexistent socket — deterministic on a
+ * desktop WITH a real bus too, and on headless CI.)
+ */
+static int g_dbus_unavailable_lines = 0;
+
+/* Internal seam (src/dbus/dbus_connection.c, declared by
+ * dbus_internal.h — spelled here instead of including it: that
+ * header demands FDK_LOG_TAG discipline this file does not follow):
+ * resets the process-wide once-flag so this leg pins the
+ * exactly-one-line behavior deterministically. */
+void fdk__dbus_test_reset_unavailable_notice(void);
+
+static void dbus_unavailable_sink(fdk_log_level level, const char *tag,
+                                  const char *msg, void *ud) {
+    (void)level;
+    (void)ud;
+    if (strcmp(tag, "dbus") == 0 &&
+        strncmp(msg, "D-Bus unavailable", strlen("D-Bus unavailable")) ==
+            0) {
+        g_dbus_unavailable_lines++;
+    }
+}
+
+static void test_dbus_unavailable_logged_once(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    const char *saved = getenv("DBUS_SESSION_BUS_ADDRESS");
+    char saved_buf[512];
+    int had_saved = saved != NULL;
+    if (had_saved) {
+        snprintf(saved_buf, sizeof saved_buf, "%s", saved);
+    }
+    setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/fdk-no-such-bus",
+           1);
+
+    g_dbus_unavailable_lines = 0;
+    fdk__dbus_test_reset_unavailable_notice();
+    fdk_log_set_sink(dbus_unavailable_sink, NULL);
+    fdk_log_set_level(FDK_LOG_INFO);
+    for (int i = 0; i < 3; i++) {
+        fdk_dbus_connection *c =
+            fdk_dbus_connect(ctx, FDK_DBUS_SESSION_BUS, NULL, NULL);
+        assert(c == NULL); /* the nonexistent socket must fail */
+    }
+    fdk_log_set_sink(NULL, NULL);
+    fdk_log_set_level(FDK_LOG_INFO);
+
+    if (had_saved) {
+        setenv("DBUS_SESSION_BUS_ADDRESS", saved_buf, 1);
+    } else {
+        unsetenv("DBUS_SESSION_BUS_ADDRESS");
+    }
+    assert(g_dbus_unavailable_lines == 1);
+
+    fdk_shutdown(ctx);
+    printf("[ok] dbus unavailable notice: three connection attempts, "
+           "ONE log line (the verdict belongs to the machine)\n");
+}
+
 /* ---- Foreign toplevels (1.1.0, D-4) --------------------------------------
  *
  * The fake-WM posture (the EWMH rig's own discipline): a second
@@ -13975,6 +14619,10 @@ int main(void) {
     test_ext_fd_sources();
     test_ext_subsurface_x11();
     test_xi2_tablet();
+    test_xi2_tablet_classification();
+    test_xi2_tablet_hostile_cookies();
+    test_xi2_tablet_xtest_e2e();
+    test_dbus_unavailable_logged_once();
     test_foreign_toplevels();
     test_init_with_app_id();
     test_quit_before_run_is_safe();

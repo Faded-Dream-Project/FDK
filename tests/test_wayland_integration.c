@@ -3478,6 +3478,73 @@ int main(void) {
             }
         }
 
+        /* ---- §19 (1.1.0-rc2): the core-GLES2 upload shapes -----------
+         * FDK_GL_CORE_ONLY=1 pins has_bgra_ext/has_rowlen_ext OFF on
+         * ANY driver: the lane must present full AND partial damage
+         * through the RGBA twin + tight row packing — pure core
+         * GLES2, the NVIDIA proprietary-driver shape (GL_BGRA and
+         * GL_UNPACK_ROW_LENGTH are extensions a strict ES2 context
+         * rejects; the 1.0.0-era fix's deterministic leg, re-landed).
+         * The byte math itself is pinned driverless in
+         * test_gl_lane_fallback.c. */
+        setenv("FDK_GL_CORE_ONLY", "1", 1);
+        {
+            fdk_context *gctx = NULL;
+            fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                       .app_id = "org.fdk.test" };
+            assert(fdk_ok(fdk_init(&gctx, &gopts)));
+            fdk_window *gwin = NULL;
+            fdk_window_options gwopts = { .title = "wl gl core-only",
+                                          .width = 512, .height = 384 };
+            assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+            fdk_window_show(gwin);
+            for (int i = 0; i < 40; i++) {
+                (void)fdk_pump_events(gctx, 50);
+                if (fdk__window_ever_presented(gwin) != 0) {
+                    break;
+                }
+            }
+            fdk_surface *gs = NULL;
+            assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+            fdk_render_path gpath = (fdk_render_path)-1;
+            assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+            if (gpath == FDK_RENDER_PATH_GL) {
+                /* Full-damage frame through the RGBA twin (the
+                 * texImage2D leg of the fallback). */
+                fdk_surface_fill(
+                    gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 20; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_GL);
+                /* Partial damage through the PACKED sub-rect leg. */
+                fdk_surface_fill_rect(
+                    gs, (fdk_rect){ .x = 96, .y = 64, .width = 160,
+                                    .height = 96 },
+                    (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+                assert(fdk_ok(fdk_surface_present(gs)));
+                for (int i = 0; i < 20; i++) {
+                    (void)fdk_pump_events(gctx, 50);
+                }
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                assert(gpath == FDK_RENDER_PATH_GL);
+                printf("[ok] wayland gl lane core-only: full + partial "
+                       "damage through the RGBA twin and packed "
+                       "sub-rects — the strict-ES2 (NVIDIA) upload "
+                       "shape stays on the lane\n");
+            } else {
+                printf("[skip] wayland gl lane not engageable — "
+                       "core-only (§19) leg degenerates; the fallback "
+                       "byte math is pinned in "
+                       "test_gl_lane_fallback.c\n");
+            }
+            fdk_window_destroy(gwin);
+            fdk_shutdown(gctx);
+        }
+        unsetenv("FDK_GL_CORE_ONLY");
+
         /* ---- downgrade: a poisoned present salvages through wl_shm */
         setenv("FDK_GL_FAIL_AT", "2", 1);
         {

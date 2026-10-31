@@ -820,6 +820,94 @@ static void test_script_matrix(void) {
            ran, N_SCRIPT_LEGS);
 }
 
+/* ---- extreme scale: the f64 shaped pen (1.1.0-rc2, the re-landed fix) -------
+ *
+ * The pen that accumulates a line's advances ran in f32 until the
+ * 1.1.0-rc2 re-land: each glyph took one f32 rounding, and at thousands
+ * of glyphs the drift moved measure, wrap and caret geometry by
+ * whole pixels. The pin: a 100-glyph block repeated 30x must place
+ * every repetition EXACTLY like the first one offset by whole-block
+ * pen totals — the f64 accumulator holds the error to the f32
+ * snapshot's single ulp; an f32 accumulator drifts across the 3000
+ * additions. (The legacy walk keeps the 1.4.x f32 arithmetic by its
+ * bit-compatibility contract, so this leg is shaped-posture-only —
+ * honestly the same scoping the original fix had.) */
+static void test_extreme_scale_pen(void) {
+    if (!fdk_text_shaping_available()) {
+        printf("[ok] legacy: extreme-scale pen is shaped-posture "
+               "arithmetic — the legacy walk keeps 1.4.x metrics by "
+               "contract\n");
+        return;
+    }
+    static char block[101];
+    static char big[3001];
+    const char *alphabet = "abcdefghij";
+    for (int i = 0; i < 100; i++) {
+        block[i] = alphabet[i % 10];
+    }
+    block[100] = '\0';
+    for (int j = 0; j < 30; j++) {
+        memcpy(big + j * 100, block, 100);
+    }
+    big[3000] = '\0';
+
+    fdk_font *f = fdk_font_load(g_sans, 16);
+    assert(f != NULL);
+    fdk__shaped *one = shape_str(f, block);
+    fdk__shaped *many = shape_str(f, big);
+
+    assert(many->n_places >= 3000);
+    assert(many->n_cp == 3000);
+
+    /* The structural invariants at scale: the total IS the last
+     * placement's snapshot (bit-exact), x monotone, the logical pen
+     * monotone, nothing overflowed or wrapped. */
+    assert(many->total == many->places[many->n_places - 1].pen_after);
+    for (size_t i = 1; i < many->n_places; i++) {
+        assert(many->places[i].x >= many->places[i - 1].x);
+    }
+    for (size_t k = 1; k <= many->n_cp; k++) {
+        assert(many->cp_pen[k] >= many->cp_pen[k - 1]);
+    }
+    assert(many->total > 0.0f);
+
+    /* THE f64 PIN: repetition j of the block places at the first
+     * repetition's pen plus j block-totals, within the f32
+     * snapshot's single-ulp slack (0.02px at these widths). An f32
+     * accumulator takes 3000 roundings and walks away from this. */
+    const fdk_f32 block_total = one->total;
+    int checked = 0;
+    for (int j = 1; j < 30; j += 7) { /* sample repetitions */
+        for (int i = 0; i < 100; i += 25) { /* sample glyphs */
+            size_t idx = (size_t)(j * 100 + i);
+            fdk_f32 want = one->places[i].pen_after +
+                           (fdk_f32)j * block_total;
+            fdk_f32 got = many->places[idx].pen_after;
+            fdk_f32 err = got - want;
+            if (err < 0.0f) {
+                err = -err;
+            }
+            assert(err <= 0.02f);
+            checked++;
+        }
+    }
+    assert(checked > 0);
+
+    /* The whole-line measure stays an integer pixel count the wrap
+     * engine can trust: no NaN, no inf, sane magnitude. */
+    assert(many->total == many->total); /* not NaN */
+    assert(many->total < 1.0e6f);
+
+    fdk__shaped_free(one);
+    fdk__shaped_free(many);
+    fdk_font_destroy(f);
+    printf("[ok] extreme scale (3000 glyphs): the f64 shaped pen "
+           "holds block-repetition linearity to the snapshot ulp "
+           "(%d probes), total == last pen bit-exact, monotone "
+           "geometry\n",
+           checked);
+}
+
 /* ---- main -------------------------------------------------------------- */
 
 int main(int argc, char **argv) {
@@ -840,6 +928,7 @@ int main(int argc, char **argv) {
     test_draw_agrees();
     test_fallback_lifecycle();
     test_script_matrix();
+    test_extreme_scale_pen();
 
     printf("all shaping tests passed (%s posture)\n",
            fdk_text_shaping_available() ? "full pipeline" : "legacy");
