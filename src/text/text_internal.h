@@ -386,6 +386,15 @@ typedef struct fdk__shaped {
     fdk_f32 *cp_pen;         /* [n_cp + 1]: logical cumulative pen
                                 (per-cp advance attribution; the
                                 wrap/ellipsize/caret consumers)     */
+    fdk_f64 *cp_pen_exact;   /* [n_cp + 1]: the UN-NARROWED prefix
+                                sums (NULL on the legacy walk, which
+                                keeps 1.4.x f32 metrics bit-exact).
+                                The WRAP engine differences these:
+                                text-absolute f32 snapshots quantize
+                                past 2^21 px (a 20k-line document's
+                                deep lines drifted by whole pixels;
+                                the re-landed extreme-scale fix's
+                                second half).                        */
     int rtl_visual;          /* any RTL segment present             */
     size_t range_end;        /* off + count of the shaped range     */
 } fdk__shaped;
@@ -404,6 +413,28 @@ void fdk__shaped_free(fdk__shaped *s);
  * Entry caret's mapping. Exact for single-direction text; segment
  * granularity for mixed-direction text (documented level-1). */
 fdk_i32 fdk__shaped_caret_x(const fdk__shaped *s, size_t byte);
+
+/* THE SELECTION SPANS (the shaped-Devanagari highlight fix): the
+ * VISUAL x-ranges of every grapheme cluster the LOGICAL byte range
+ * [lo, hi) touches. The rectangle EQUALS the clusters' advance-span
+ * boxes — a selection that cuts a cluster highlights that WHOLE
+ * cluster (snap outward), zero-width marks never widen a span (the
+ * box is the advance span, not the ink box), and a bidi selection
+ * yields SEVERAL spans (the logical range maps to discontiguous
+ * visual runs). Spans are [x0, x1) in text-local pixels, sorted by
+ * x0, adjacent spans NOT merged across unselected gaps; the number
+ * of spans is returned (writing at most max_out — the caller sizes
+ * the array; one span per bidi run is the practical bound). The
+ * legacy (no-libs) walk has one placement per codepoint, so its
+ * spans degrade to the per-cp prefix measures — the documented
+ * level-1 semantics, same class as fdk__shaped_caret_x. */
+typedef struct fdk__sel_span {
+    fdk_i32 x0, x1; /* [x0, x1), text-local pixels */
+} fdk__sel_span;
+
+size_t fdk__shaped_selection_spans(const fdk__shaped *s, size_t lo,
+                                   size_t hi, fdk__sel_span *out,
+                                   size_t max_out);
 
 /* Releases the font's HarfBuzz objects and its fallback fonts —
  * fdk_font_destroy() calls this BEFORE freeing file_data (the hb

@@ -1183,33 +1183,50 @@ static bool sh_shape_segment(sh_segment *seg, sh_bidi *b,
 
     /* Per-cp attribution (logical): a glyph's advance lands on the
      * LAST cp of its cluster. Clusters are segment-local cp indices
-     * here, so the arithmetic is index math, not byte hunting. */
+     * here, so the arithmetic is index math, not byte hunting.
+     *
+     * THE O(n) BOUNDARY TABLE (the re-landed extreme-scale fix): the
+     * old form insertion-SORTED the distinct cluster ids and then
+     * linear-searched the sorted array PER GLYPH — O(n_glyphs x
+     * n_clusters), and worse: harfbuzz emits DESCENDING cluster ids
+     * on RTL fragments, so the insertion sort itself went quadratic
+     * (a 128 KB line took ~19 s under ASan; the 1 MB stress leg is
+     * the leg that caught it). The boundary table computes the same
+     * attribution in three linear passes, indexed BY the cluster id
+     * (a cp index < n, so the table is n+1 wide):
+     *   1. mark every id a glyph actually named;
+     *   2. sweep high -> low carrying `nxt` = the smallest seen id
+     *      strictly above the current position: next_of[c] is then
+     *      exactly the old clusters[slot+1] (or n at the top);
+     *   3. per glyph, last_cp = cp_lo + next_of[c] - 1 — identical
+     *      arithmetic, IDENTICAL acc[] output (byte-identical by
+     *      construction; pinned by test_stress.c's 1 MB leg and the
+     *      shaped snapshots in test_shaping.c). */
     {
-        size_t *clusters = fdk_alloc_array(n_glyphs, sizeof *clusters);
-        if (clusters == NULL) {
+        size_t *next_of = fdk_alloc_array(n + 1, sizeof *next_of);
+        unsigned char *seen = fdk_alloc_array(n + 1, sizeof *seen);
+        if (next_of == NULL || seen == NULL) {
+            fdk_free(next_of);
+            fdk_free(seen);
             g_hb.hb_buffer_destroy(buf);
             return false;
         }
-        size_t n_cl = 0;
         for (unsigned int i = 0; i < n_glyphs; i++) {
             size_t c = (size_t)infos[i].cluster;
-            size_t j = n_cl;
-            while (j > 0 && clusters[j - 1] > c) {
-                clusters[j] = clusters[j - 1];
-                j--;
+            if (c < n) {
+                seen[c] = 1; /* defensive: harfbuzz guarantees < n */
             }
-            if (j == 0 || clusters[j - 1] != c) {
-                clusters[j] = c;
-                n_cl++;
+        }
+        size_t nxt = n;
+        for (size_t c = n; c-- > 0;) {
+            next_of[c] = nxt;
+            if (seen[c]) {
+                nxt = c;
             }
         }
         for (unsigned int i = 0; i < n_glyphs; i++) {
             size_t c = (size_t)infos[i].cluster;
-            size_t slot = 0;
-            while (slot < n_cl && clusters[slot] != c) {
-                slot++;
-            }
-            size_t next_c = slot + 1 < n_cl ? clusters[slot + 1] : n;
+            size_t next_c = c < n ? next_of[c] : n;
             if (next_c == 0) {
                 next_c = 1; /* defensive: never underflow */
             }
@@ -1231,7 +1248,8 @@ static bool sh_shape_segment(sh_segment *seg, sh_bidi *b,
                 acc[last_cp] += adv;
             }
         }
-        fdk_free(clusters);
+        fdk_free(next_of);
+        fdk_free(seen);
     }
 
     g_hb.hb_buffer_destroy(buf);
@@ -1277,7 +1295,10 @@ static fdk__shaped *sh_shape_range_impl(fdk_font *font,
     s->places = fdk_alloc_array(max_places, sizeof *s->places);
     fdk_f32 *acc = fdk_alloc_array(b.n_cp + 1, sizeof *acc);
     s->cp_pen = fdk_alloc_array(b.n_cp + 1, sizeof *s->cp_pen);
-    if (s->places == NULL || acc == NULL || s->cp_pen == NULL) {
+    s->cp_pen_exact = fdk_alloc_array(b.n_cp + 1,
+                                       sizeof *s->cp_pen_exact);
+    if (s->places == NULL || acc == NULL || s->cp_pen == NULL ||
+        s->cp_pen_exact == NULL) {
         fdk_free(acc);
         fdk_free(b.levels);
         fdk_free(b.v2l);
@@ -1291,6 +1312,7 @@ static fdk__shaped *sh_shape_range_impl(fdk_font *font,
         fdk_free(b.levels);
         fdk_free(b.v2l);
         s->cp_pen[0] = 0.0f;
+        s->cp_pen_exact[0] = 0.0;
         return s; /* empty range: zero placements, zero total */
     }
 
@@ -1414,13 +1436,20 @@ static fdk__shaped *sh_shape_range_impl(fdk_font *font,
     /* logical per-cp pen: prefix sums of the attribution. The
      * running sum is f64 (the same re-landed pen discipline — an
      * f32 prefix sum over thousands of cps re-introduces exactly
-     * the drift the f64 pen removed); each slot is narrowed once. */
+     * the drift the f64 pen removed); each slot is narrowed once.
+     * The UN-narrowed sums are kept too (cp_pen_exact): the wrap
+     * engine differences TEXT-ABSOLUTE prefix values, and a
+     * difference of two f32 snapshots each past 2^21 px carries
+     * their quantization — a 20k-line document's deep lines drifted
+     * by whole pixels before the exact array existed. */
     s->cp_pen[0] = 0.0f;
+    s->cp_pen_exact[0] = 0.0;
     {
         fdk_f64 cp_run = 0.0;
         for (size_t k = 0; k < b.n_cp; k++) {
             cp_run += (fdk_f64)acc[k];
             s->cp_pen[k + 1] = (fdk_f32)cp_run;
+            s->cp_pen_exact[k + 1] = cp_run;
         }
     }
     s->total = (fdk_f32)pen;
@@ -1565,6 +1594,7 @@ void fdk__shaped_free(fdk__shaped *s) {
     fdk_free(s->cp);
     fdk_free(s->cp_byte);
     fdk_free(s->cp_pen);
+    fdk_free(s->cp_pen_exact);
     fdk_free(s);
 }
 
@@ -1590,6 +1620,120 @@ fdk_i32 fdk__shaped_caret_x(const fdk__shaped *s, size_t byte) {
         pen = s->places[i].pen_after;
     }
     return (fdk_i32)(pen + 0.5f);
+}
+
+/* ---- 8b. The selection spans (the shaped-Devanagari highlight fix) ---
+ *
+ * The bug this replaces (found on shaped Devanagari): the widgets
+ * drew ONE rectangle per line from "width of the byte prefix up to
+ * lo" to "width of the byte prefix up to hi" — a prefix measurement
+ * that CUTS a grapheme cluster shapes the fragment differently than
+ * the full cluster (a half-form consonant's advance is not the
+ * cluster's own advance), so the highlight landed mid-glyph, spilled
+ * onto neighbours, and grew as the selection moved. On bidi lines
+ * the single rectangle was flat-out wrong: a logical range maps to
+ * discontiguous visual runs.
+ *
+ * The fix computes the rectangles FROM THE SHAPED RESULT: a cluster
+ * is selected when its BYTE range intersects [lo, hi) — cutting a
+ * cluster selects it WHOLE (snap outward) — and its box is its
+ * ADVANCE SPAN in the visual walk ([pen entering its first glyph,
+ * pen after its last]): zero-width marks contribute no width (the
+ * box is the advance span, never the ink box), and consecutive
+ * selected places in VISUAL order merge into one span while
+ * unselected gaps stay unhighlighted — which is exactly what makes
+ * bidi selections come out as several rectangles. */
+
+size_t fdk__shaped_selection_spans(const fdk__shaped *s, size_t lo,
+                                   size_t hi, fdk__sel_span *out,
+                                   size_t max_out) {
+    if (s == NULL || s->n_places == 0 ||
+        lo >= hi || lo >= s->range_end) {
+        return 0;
+    }
+    if (hi > s->range_end) {
+        hi = s->range_end;
+    }
+    /* 1. Distinct cluster origins, sorted ascending = logical
+     * order: cluster o spans bytes [o, next distinct origin) (the
+     * last one to range_end). Built from the placements' own
+     * .cluster fields — harfbuzz's cluster truth for this range.
+     * n_places here is ONE LINE's worth (tens — the widgets call
+     * the span seam per line), the same scale the caret walk has
+     * always run at; the extreme-scale text legs drive measure, not
+     * selection (test_stress.c's 1 MB leg). */
+    size_t *origins = fdk_alloc_array(s->n_places, sizeof *origins);
+    unsigned char *sel = fdk_alloc_array(s->n_places, sizeof *sel);
+    if (origins == NULL || sel == NULL) {
+        fdk_free(origins);
+        fdk_free(sel);
+        return 0;
+    }
+    size_t n_origins = 0;
+    for (size_t i = 0; i < s->n_places; i++) {
+        size_t o = s->places[i].cluster;
+        size_t j = n_origins;
+        while (j > 0 && origins[j - 1] > o) {
+            origins[j] = origins[j - 1];
+            j--;
+        }
+        if (j == 0 || origins[j - 1] != o) {
+            origins[j] = o;
+            n_origins++;
+        }
+    }
+
+    /* 2. Per-place selection flag: the place's cluster is selected
+     * iff its byte range [o, next_o) intersects [lo, hi). Cutting a
+     * cluster mid-way therefore selects it WHOLE — the snap-outward
+     * rule, straight from the definition. */
+    for (size_t i = 0; i < s->n_places; i++) {
+        size_t o = s->places[i].cluster;
+        size_t a = 0, b = n_origins;
+        while (a < b) {
+            size_t mid = a + (b - a) / 2;
+            if (origins[mid] <= o) {
+                a = mid + 1;
+            } else {
+                b = mid;
+            }
+        }
+        size_t next_o = a < n_origins ? origins[a] : s->range_end;
+        sel[i] = (unsigned char)(o < hi && next_o > lo);
+    }
+
+    /* 3. Visual runs of selected places -> spans. The run's box is
+     * its ADVANCE SPAN: [pen entering the first selected place, pen
+     * after the last] — zero-width marks add nothing (the box is the
+     * advance span, never the ink box), and an unselected gap ends
+     * the run (which is what makes bidi selections several
+     * rectangles). Rounded with the caret's own rule (+0.5). */
+    size_t n_spans = 0;
+    size_t i = 0;
+    while (i < s->n_places) {
+        if (!sel[i]) {
+            i++;
+            continue;
+        }
+        size_t j = i;
+        while (j < s->n_places && sel[j]) {
+            j++;
+        }
+        fdk_f32 enter = (i == 0) ? 0.0f : s->places[i - 1].pen_after;
+        fdk_f32 exit_pen = s->places[j - 1].pen_after;
+        if (n_spans < max_out) {
+            out[n_spans].x0 = (fdk_i32)(enter + 0.5f);
+            out[n_spans].x1 = (fdk_i32)(exit_pen + 0.5f);
+            if (out[n_spans].x1 < out[n_spans].x0) {
+                out[n_spans].x1 = out[n_spans].x0; /* degenerate but ordered */
+            }
+        }
+        n_spans++;
+        i = j;
+    }
+    fdk_free(origins);
+    fdk_free(sel);
+    return n_spans;
 }
 
 /* ---- 9. Lifecycle --------------------------------------------------- */

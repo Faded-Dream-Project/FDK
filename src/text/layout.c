@@ -35,8 +35,8 @@ static bool is_wrap_space(fdk_u32 cp) {
 }
 
 /* A line's reported advance uses the same rounding as measure. */
-static fdk_i32 pen_round(fdk_f32 pen) {
-    return (fdk_i32)(pen + 0.5f);
+static fdk_i32 pen_round(fdk_f64 pen) {
+    return (fdk_i32)(pen + 0.5);
 }
 
 /* ---- line breaking ---- */
@@ -59,27 +59,43 @@ typedef struct wrap_state {
     /* byte bookmarks (emission) and cp-index twins (pen math): the
      * per-codepoint attribution pen is TEXT-absolute, so every
      * line-relative value is a difference against the line-start
-     * cp's pen. */
+     * cp's pen. The pens are f64 and difference the EXACT prefix
+     * sums (sh->cp_pen_exact) on the shaped path — the re-landed
+     * extreme-scale fix's second half: text-absolute f32 snapshots
+     * quantize past 2^21 px, and a 20k-line document's deep lines
+     * carried that quantization into their advance_width (identical
+     * lines reported different widths by depth — pinned by
+     * test_stress.c's 20k-line leg). The legacy walk (no exact
+     * array) keeps its f32 metrics bit-compatible, so it narrows
+     * through the same helper unchanged. */
     size_t line_start;
     size_t line_start_k;
     size_t nonspace_end;
     size_t nonspace_end_k;
-    fdk_f32 pen_after_nonspace;
+    fdk_f64 pen_after_nonspace;
     size_t committed_end;
     size_t committed_end_k;
-    fdk_f32 pen_after_committed;
+    fdk_f64 pen_after_committed;
     size_t break_at;
 } wrap_state;
+
+/* The text-absolute pen at cp index k, as f64: the exact prefix
+ * sum where the shaped path provides it, the legacy f32 snapshot
+ * narrowed otherwise. */
+static fdk_f64 wrap_pen_at(const fdk__shaped *sh, size_t k) {
+    return sh->cp_pen_exact != NULL ? sh->cp_pen_exact[k]
+                                    : (fdk_f64)sh->cp_pen[k];
+}
 
 static void wrap_reset(wrap_state *ws, size_t start, size_t start_k) {
     ws->line_start = start;
     ws->line_start_k = start_k;
     ws->nonspace_end = start;
     ws->nonspace_end_k = start_k;
-    ws->pen_after_nonspace = 0.0f;
+    ws->pen_after_nonspace = 0.0;
     ws->committed_end = start;
     ws->committed_end_k = start_k;
-    ws->pen_after_committed = 0.0f;
+    ws->pen_after_committed = 0.0;
     ws->break_at = start;
 }
 
@@ -89,7 +105,7 @@ static void wrap_reset(wrap_state *ws, size_t start, size_t start_k) {
  * (max_lines == 0) never drop. */
 static bool wrap_emit(fdk_text_line *out_lines, size_t max_lines,
                       size_t *io_count, size_t line_start, size_t end,
-                      fdk_f32 advance) {
+                      fdk_f64 advance) {
     if (max_lines == 0) {
         *io_count += 1; /* counting only */
         return true;
@@ -140,7 +156,6 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
     const size_t n_cp = sh->n_cp;
     const fdk_u32 *cp = sh->cp;
     const size_t *cp_byte = sh->cp_byte;
-    const fdk_f32 *cp_pen = sh->cp_pen;
 
     size_t count = 0;
     bool dropped = false;
@@ -154,9 +169,14 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
         size_t next_byte =
             k + 1 < n_cp ? cp_byte[k + 1] : byte_len;
         /* LINE-RELATIVE pens: the attribution is text-absolute, the
-         * greedy walk restarts at every line. */
-        fdk_f32 pen = cp_pen[k + 1] - cp_pen[ws.line_start_k];
-        fdk_f32 pen_before = cp_pen[k] - cp_pen[ws.line_start_k];
+         * greedy walk restarts at every line. wrap_pen_at carries
+         * the exact (f64) prefix sums on the shaped path — see the
+         * wrap_state block comment for why the difference must not
+         * ride f32 snapshots. */
+        fdk_f64 pen = wrap_pen_at(sh, k + 1) -
+                     wrap_pen_at(sh, ws.line_start_k);
+        fdk_f64 pen_before = wrap_pen_at(sh, k) -
+                            wrap_pen_at(sh, ws.line_start_k);
         bool space = is_wrap_space(c);
 
         /* Hard break: '\n', '\r', or a "\r\n" pair (one break). The
