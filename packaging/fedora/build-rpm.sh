@@ -70,7 +70,7 @@ rpmbuild -bb \
 # --define "dist %{nil}" drops the .fc42/.el10 suffix on purpose: the
 # artifact is built on AlmaLinux 10 and verified on Fedora 42 as well;
 # a neutral name states exactly what is true (no per-distro rebuild
-# claims). The build container is recorded in the release notes.
+# claims). The build container is recorded in the CI job log.
 
 RPMS="$(find build-rpm/RPMS -name '*.rpm' -type f)"
 echo "== built: =="

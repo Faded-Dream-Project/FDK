@@ -1,6 +1,7 @@
-# distro-packages.yml — the reusable cross-distribution packaging job.
+# distro-packages.yml — the reusable cross-distribution packaging
+# validation job.
 #
-# Called by ci.yml (validation, no upload) and release.yml (upload).
+# Called by ci.yml as a CI check (no upload of any release asset).
 # Each matrix entry runs on its own GitHub-hosted Ubuntu runner and
 # drives the whole pipeline through the pinned target-distribution
 # container image via docker:
@@ -13,10 +14,14 @@
 #      the shipped CLI tool, a compile+run smoke test under Xvfb,
 #      and removal verification)
 #
+# The project is in development with no published releases; this
+# workflow exists so the packaging recipes can never silently rot —
+# it proves the recipes still build and install, nothing more.
+#
 # alpine and void are marked optional until their pipelines have
-# proven stable: a failure there does not block a release, and the
-# release notes are generated from the artifacts that actually
-# exist — a missing target is reported as unavailable, never claimed.
+# proven stable: a failure there does not block the rest of the
+# matrix, and a missing target is reported as unavailable, never
+# claimed.
 #
 # All steps run with the ephemeral GITHUB_TOKEN (contents: read
 # only); artifact upload uses the runner's runtime token, not a
@@ -28,7 +33,7 @@ on:
   workflow_call:
     inputs:
       upload:
-        description: Upload the built packages as workflow artifacts
+        description: Upload the built packages as workflow artifacts (CI debugging aid — never a release)
         required: false
         type: boolean
         default: false

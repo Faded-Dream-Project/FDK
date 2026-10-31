@@ -14,7 +14,7 @@ developed as part of the
 [![Built with C](https://img.shields.io/badge/built%20with-C-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Standard: C17](https://img.shields.io/badge/standard-C17-orange?style=flat-square&logo=c)](https://www.open-std.org/jtc1/sc22/wg14/)
 [![Backends: X11 and Wayland](https://img.shields.io/badge/backends-X11%20%7C%20Wayland-blueviolet?style=flat-square)](docs/architecture.md)
-[![Version: 1.1.0-rc2](https://img.shields.io/badge/version-1.1.0--rc2-blueviolet?style=flat-square)](docs/versioning.md)
+[![Status: in development](https://img.shields.io/badge/status-in%20development-orange?style=flat-square)](docs/versioning.md)
 [![Part of Faded Dream](https://img.shields.io/badge/part%20of-Faded%20Dream-purple?style=flat-square)](https://github.com/Faded-Dream-Project/Faded-Dream-dotfiles)
 
 </div>
@@ -29,33 +29,27 @@ layout, text, and theme engines, and FDK-drawn window decorations —
 with no GTK/Qt dependency and a minimal, always-justified dependency
 set (`docs/dependencies.md`).
 
-> **Which branch should I use?** `main` is **unstable by design** —
-> it is where development happens, commit by commit. To build or
-> package FDK, use the [`release`](https://github.com/Faded-Dream-Project/FDK/tree/release)
-> branch (a fast-forward-only pointer that moves only at approved,
-> tagged, CI-green releases — see `docs/RELEASING.md`) or the latest
-> [GitHub release](https://github.com/Faded-Dream-Project/FDK/releases).
+> **Building FDK:** `main` is the development branch — the only
+> branch, and the one to build from. The project is **in development,
+> no stable release yet**: every push to `main` is CI-gated, but
+> "green on main" means "not broken", not "released".
 
-**Status:** **v1.0.0 released; v1.1.0-rc2 in the tree** — the
-deliberate, recorded 1.0.0 decision of 2026-10-12
-(`docs/versioning.md`), then the 2026-10-25 candidate adding the
-public **extension API** (`fdk/extend.h`, `docs/EXTENDING.md`): a
-small, documented, stable, versioned surface that add-on packages
-build on so FDK stays simple and becomes the root other libraries
-grow from. The first add-on, **fdk-shell** (layer-shell surfaces —
-panels, docks, overlays — on wlr-layer-shell and EWMH dock hints,
-behind one API), lives in `fdk-shell/` as a separate package that
-compiles against FDK's installed public headers and library only
-(the `fdk-shell/tests/isolation.sh` proof). The v1.0.0 release and
-its tag are untouched; no tag exists for the candidate (the owner
-decides the final 1.1.0). ABI append-only, SONAME unchanged:
-`libfdk.so.1` (`docs/abi-policy.md`). All roadmap phases complete,
-license finalized, and a cross-distribution packaging + CI pipeline
-built and validated (`docs/packaging.md`). Binary packages (.deb /
-.rpm / .pkg.tar.zst / .apk / .xbps) and the pristine source archive
-ship on the
-[releases page](https://github.com/Faded-Dream-Project/FDK/releases).
-The phase-by-phase account of what is and isn't covered lives in
+**Status:** **in development — no stable release yet.** The public
+**extension API** (`fdk/extend.h`, `docs/EXTENDING.md`) is the
+landmark of the current tree: a small, documented, stable, versioned
+surface that add-on packages build on so FDK stays simple and becomes
+the root other libraries grow from. The first add-on, **fdk-shell**
+(layer-shell surfaces — panels, docks, overlays — on wlr-layer-shell
+and EWMH dock hints, behind one API), lives in `fdk-shell/` as a
+separate package that compiles against FDK's installed public headers
+and library only (the `fdk-shell/tests/isolation.sh` proof). The
+versioning policy and the SONAME scheme (`libfdk.so.1`, ABI
+append-only) are development-time policy — they govern how the tree
+evolves as it heads toward a first stable release, which the owner
+will cut when it is genuinely ready. A cross-distribution packaging
++ CI pipeline is built and kept green on every push as a validation
+check (`docs/packaging.md`); nothing is published anywhere. The
+phase-by-phase account of what is and isn't covered lives in
 `docs/roadmap.md` and `PROGRESS.md`.
 
 FDK is **distro-agnostic**: it builds and runs on any modern Linux
@@ -171,16 +165,9 @@ suite (`docs/testing.md`).
 
 ## Installation
 
-Binary packages (`.deb`, `.rpm`, `.pkg.tar.zst`, `.apk`, `.xbps`)
-for x86_64 are published on the
-[releases page](https://github.com/Faded-Dream-Project/FDK/releases)
-and install with each distribution's own package manager — Debian
-12/13 and Ubuntu 24.04+, the RHEL 10 family and Fedora 42+, Arch,
-Alpine 3.22 (musl), and Void (glibc). Exact per-distribution
-commands, supported-environment matrix, and troubleshooting:
-[`docs/packaging.md`](docs/packaging.md).
-
-Everything else builds from source (below).
+There are no published packages — the project is in development.
+Build from source (below); the packaging recipes in `docs/packaging.md`
+exist and are exercised by CI on every push, as validation checks.
 
 ## Building
 
@@ -323,8 +310,8 @@ Real captured frames from the test rigs — not mockups
 | `docs/threading.md` | UI-thread affinity, worker-thread rules |
 | `docs/performance.md` | The performance baseline harness |
 | `docs/abi-policy.md` | The ABI freeze, struct classification, subclassing decision |
-| `docs/versioning.md` | The 1.0.0 decision, the 0.0.1 joke era, the 2026-10-11 retraction record, and the active SONAME scheme |
-| `docs/packaging.md` | Binary packages per distribution, reproducing builds, the release runbook |
+| `docs/versioning.md` | The versioning policy, the version-history record, and the active SONAME scheme |
+| `docs/packaging.md` | The per-distribution packaging recipes, and how CI validates them |
 | `docs/dependencies.md` | Every current and anticipated dependency, justified |
 | `docs/licensing-policy.md` | What licenses are/aren't allowed in, and the audit procedure |
 | `docs/fdk-theme-format.md` | The `.fdk` theme file grammar |

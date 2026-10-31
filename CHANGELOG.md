@@ -2,15 +2,18 @@
 
 FDK's public version moves only by a recorded project-owner decision
 (docs/versioning.md — the rule, the enforcement, the full history
-including the 2026-10-11 retraction of a premature 1.0.0). This file
-is the consumer-facing summary of what each version changed; the
-engineering narrative lives in docs/roadmap.md and PROGRESS.md.
+including the 2026-10-11 retraction of a premature 1.0.0). The
+project is **in development — no stable release yet**: the entries
+below are the development tree's own change record (version-marked
+where the tree carried a numbered version), not a catalogue of
+published releases; the engineering narrative lives in
+docs/roadmap.md and PROGRESS.md.
 
 The format follows Keep-a-Changelog conventions adapted to this
-project: releases are chronological, each entry carries the public
+project: entries are chronological, each carries the public
 API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
-makes that the contract that matters), and in-development release
-candidates are marked until the owner promotes them.
+makes that the contract that matters), and version-marked entries
+note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-10-31 (on the rc2 line)
 
@@ -1361,13 +1364,14 @@ routing, and error-name discipline sections in the headless battery.
 
 ### The repository
 
-- A `release` branch now exists (fast-forward-only pointer at
-  approved, tagged, CI-green releases — docs/RELEASING.md; created
-  at the v1.0.0 tag commit). CI runs on both `main` and `release`;
-  the README and packaging docs point consumers there.
+- A `release` branch existed in the project's former repository (a
+  fast-forward-only pointer at approved, tagged, CI-green versions —
+  documented then in docs/RELEASING.md; created at the v1.0.0 tag
+  commit), with CI running on both `main` and `release`. It is gone:
+  the project returned to in-development status (2026-10-31) with
+  one branch, `main`, zero tags, and no published releases.
 
-## [1.1.0-rc2] — 2026-10-26 (release candidate; no tag — the owner
-                 decides the final 1.1.0)
+## [1.1.0-rc2] — 2026-10-26 (development candidate — no tag, no release)
 
 ### Added — the native D-Bus client (`include/fdk/fdk_dbus.h`)
 
@@ -1424,8 +1428,7 @@ byte from the socket is treated as untrusted input.
   additive function, no ops-table growth, old add-on binaries keep
   working.
 
-## [1.1.0-rc1] — 2026-10-25 (release candidate; no tag — the owner
-                 decides the final 1.1.0)
+## [1.1.0-rc1] — 2026-10-25 (development candidate — no tag, no release)
 
 ### Added — the extension API (`include/fdk/fdk_extend.h`)
 
@@ -1888,14 +1891,21 @@ lines always carried.
 ### Unreleased-candidate notes
 
 - No git tag, no GitHub release for rc1 (owner's instruction). The
-  v1.0.0 release and its tag are untouched. CI still builds and
-  install-tests all five package families on every push to main —
-  that is pipeline validation, not a release, and it is exactly how
-  the rc-version defect above was caught.
+  v1.0.0-era release material belonged to the project's former
+  repository; with the 2026-10-31 return to in-development status it
+  no longer exists — nothing anywhere is published today. CI still
+  builds and install-tests all five package families on every push
+  to main — that is pipeline validation, not a release, and it is
+  exactly how the rc-version defect above was caught.
 
-## [1.0.0] — 2026-10-12 (re-cut same day as the one-face alignment)
+## [1.0.0] — 2026-10-12 (historical: belonged to the former repository;
+                re-cut same day as the one-face alignment)
 
-The first public release. The versioned-SONAME scheme activated with
+The 1.0.0-era version record. It was the first public release of
+the project's former repository; with the 2026-10-31 return to
+in-development status there are no published releases of any
+version — this entry remains as the engineering record of what the
+1.0.0 tree contained. The versioned-SONAME scheme activated with
 it (`libfdk.so.1`). Highlights of the surface as shipped:
 
 - Dual-backend core (Wayland via xdg-shell; X11/XLibre), software
@@ -1912,5 +1922,7 @@ it (`libfdk.so.1`). Highlights of the surface as shipped:
   package content; the Makefile's `SHIPPED_THEMES` is pinned to the
   single file so a stray face cannot ride into a release.
 - Five package families built and install-tested in CI (deb, rpm,
-  pacman, apk, xbps), source archive + SHA256SUMS, all published on
-  the main repository's v1.0.0 release.
+  pacman, apk, xbps), source archive + SHA256SUMS — the v1.0.0-era
+  publishing of these artifacts on the former repository's release
+  page no longer exists; the recipes remain, CI-validated on every
+  push.

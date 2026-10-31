@@ -5,8 +5,9 @@
 # Runs INSIDE a fresh alpine container (root) with dist/ mounted.
 # apk resolves the packages' automatic so: dependencies from the
 # enabled repositories; unsigned upstream packages need
-# --allow-untrusted (integrity is provided by the release-page
-# SHA256SUMS over HTTPS — see docs/packaging.md "Signing").
+# --allow-untrusted (should artifacts ever be published, integrity
+# would come from SHA256SUMS over HTTPS — see
+# docs/packaging.md "Signing").
 
 set -eu
 . "$(dirname "$0")/../ci/common.sh"

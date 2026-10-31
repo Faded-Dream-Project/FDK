@@ -74,8 +74,8 @@ APKS="$(find /home/builder/packages -name '*.apk' -type f 2>/dev/null)"
 mkdir -p dist
 for a in $APKS; do
     # Alpine artifacts carry no arch in the filename; add it for a
-    # self-describing release page (apk installs by content, the
-    # filename is presentation only).
+    # self-describing artifact listing (apk installs by content,
+    # the filename is presentation only).
     base="$(basename "$a" .apk)"
     case "$base" in
         *-$ARCH) cp "$a" "dist/$base.apk" ;;

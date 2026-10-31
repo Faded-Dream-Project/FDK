@@ -1,7 +1,9 @@
-# ROADMAP-1.1.0 — the gap audit and the proposed release scope
+# ROADMAP-1.1.0 — the gap audit and the proposed scope
 
-**Status:** IN IMPLEMENTATION (Phase 2, owner-approved). Version is
-`-rc2`. Per-item status is marked inline as work lands; the
+**Status:** IN IMPLEMENTATION (Phase 2, owner-approved). The tree
+carries a `1.1.0-rcN` development version — **the project is in
+development, no stable release yet, no tags, nothing published**.
+Per-item status is marked inline as work lands; the
 owner's Phase 2 directive: implement every tier (MUST, SHOULD,
 COULD, DEFER), re-audit when done, keep going until nothing
 meaningful remains or the sandbox blocks it.
@@ -51,7 +53,9 @@ DONE 60 · PARTIAL 0 · IN PROGRESS 1 (M-9) · MISSING 0 ·
 DEFERRED 0 · BLOCKED-BY-SANDBOX 0 — of 62 items. The
 62 = 13 A + 19 B + 9 M + 10 S + 6 C + 5 D, all 62 now DONE except
 M-9 (the release gate, which only the owner's real-desktop
-sign-off can close — no code remains). Per the owner's Phase 2
+sign-off can close — no code remains; the gate any future
+release would have to pass, with none existing or planned today).
+Per the owner's Phase 2
 directive ("DEFER D-1 to D-5: do these too"), the D tier shipped in
 full: ~~D-1 (B-15)~~ **SHIPPED**, ~~D-2 (B-16)~~ **SHIPPED**,
 ~~D-3 (tablets)~~ **SHIPPED**, ~~D-4 (foreign-toplevel)~~
@@ -380,7 +384,7 @@ unaffected):
 | M-6 | X11 multi-monitor | **DONE** | = A-03/B-05 (both halves; D-015) | owner's real-desktop check |
 | M-7 | D-Bus foundation + dark mode | **DONE** (foundation 4d42c8c; dark mode d2a253f) | live-bus battery green incl. cross-implementation; wire bytes pinned vs captured reference output; fuzzed; CI makes skips fatal | — [VERIFIED-CHANGED: the row's "rides on top (next)" is stale — dark mode landed] |
 | M-8 | popup cascades | **DONE** (rc2, 0.2.0) | 3-deep x11 + 2-deep wl family sweeps — d2bc0de | — |
-| M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags beyond v1.0.0, rc line held, per-push CI, per-item docs | owner's real-desktop sign-off before any tag |
+| M-9 | the release gate | **IN PROGRESS** | discipline verified: no tags exist in this repository and none are created, the rc line is held as a development version, per-push CI, per-item docs | owner's real-desktop sign-off — the gate any future release would have to pass |
 | S-1 | tray host | **DONE (should work; owner verification pending)** | = A-11 (trayhost + the rig; D-007 records the shape decisions) | owner verification via docs/TESTING-ON-DESKTOP.md |
 | S-2 | notification display | **DONE (should work; owner verification pending)** | = A-12 (notifyd + the rig; D-006 records the shape decisions) | owner verification via docs/TESTING-ON-DESKTOP.md |
 | S-3 | idle inhibition | **DONE** | = B-11 (both mechanisms; the live-bus mock + the sway rig) | — |
@@ -570,7 +574,7 @@ and CI matrix; security posture (bounded reads, validated fonts,
 | M-6 | **X11 multi-monitor**: RandR output enumeration + change events in core (app-facing output API, shared with M-5's fdk-shell surface) + per-output docks in fdk-shell. | A-03, B-05 | M | **[DONE 2026-10-29 — see the A-03 verified-status row]** |
 | M-7 | **The D-Bus foundation + dark mode**: **DONE (the foundation, rc2)** — a native client in raw C from the public specification (src/dbus/, 115 exported symbols), zero new dependencies of any kind, riding the FDK event loop; wire bytes pinned against captured reference-implementation output; fuzzed in `make test`; live-bus suite `make test-dbus` (real dbus-daemon: calls, errors, timeouts, match rules/signals, properties, name watching, introspection, close-from-callback reentrancy; CI makes skips fatal). Dark-mode following rides on top (next). **[VERIFIED-CHANGED: it no longer rides on top - dark mode (B-06) LANDED at d2a253f; M-7 is complete]** | B-08, B-06 | L |
 | M-8 | **fdk-shell popup cascades**: **DONE (rc2, fdk-shell 0.2.0)** — fdk_shell_popup_create_child, any depth (xdg_popup-on-xdg_popup / the X window tree), family teardown sweeps children with their parent (the re-scan sweep — a saved-next chain dangles). | A-10 | S |
-| M-9 | **The release gate**: every MUST lands with its rigs in this repo's style (in-test compositors/WMs, pixel readbacks, protocol traces), CHANGELOG + EXTENDING.md + README updates, extension API v2 bump if ops grow, five-family packaging version bumps, full local battery + CI green — and the owner's sign-off before any tag. | — | S |
+| M-9 | **The release gate**: every MUST lands with its rigs in this repo's style (in-test compositors/WMs, pixel readbacks, protocol traces), CHANGELOG + EXTENDING.md + README updates, extension API v2 bump if ops grow, five-family packaging version bumps, full local battery + CI green — and the owner's sign-off. A gate for a future release only: none exists or is planned today, and no tag may be created for one without the owner. | — | S |
 
 ### SHOULD — the polish tier (land if the schedule holds after MUST)
 

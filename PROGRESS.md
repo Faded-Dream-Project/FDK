@@ -1,5 +1,13 @@
 # FDK — Progress Ledger (READ THIS FIRST)
 
+> **Repository posture (2026-10-31):** the project is **in
+> development — no stable release yet.** One branch (`main`), zero
+> tags, no GitHub releases, no published packages. The v1.0.0-era
+> release material referenced throughout the historical entries
+> below belonged to the project's former repository and no longer
+> exists; the packaging pipeline and CI survive as validation
+> checks on every push. See `docs/versioning.md` for the record.
+
 Last audited: 2026-10-30, at milestone **1.7.9** (D-5 session
 save/restore, both lanes: include/fdk/fdk_session.h + fdk_window_
 set_command/join_session/leave_session + FDK_EVENT_SESSION_SAVE/
@@ -125,7 +133,9 @@ paint-then-readback sites [1373329]; the void reposync outage got
 real mirror rotation before every remote install [c42418d]; the
 release branch policy landed: a fast-forward-only consumer ref at
 the v1.0.0 commit, RELEASING.md, CI on both branches, README +
-packaging pointers [c8568ef]; and the alt/dbus-client test port
+packaging pointers [c8568ef] — all since removed by the 2026-10-31
+return to in-development status (one branch, no RELEASING.md, no
+release triggers in CI); and the alt/dbus-client test port
 closed three genuinely-unique coverage gaps and found TWO real
 accessor defects — fdk_dbus_message_signature and read_args were
 builder-blind for locally built messages — both fixed at the root,
@@ -715,15 +725,16 @@ the retraction is the next ledger entry.
   templates + build-deb.sh + install-test.sh), fedora/ (fdk.spec +
   scripts), arch/ (PKGBUILD + scripts), alpine/ (APKBUILD +
   scripts), void/ (xbps template + scripts), ci/ (host-side docker
-  orchestrators per distro + release-notes.sh + common.sh),
+  orchestrators per distro + common.sh),
   common/smoke.c (the public-API package smoke test). Do not create
   packaging metadata anywhere else.
 - **.github/workflows/** — ci.yml (push/PR validation), distro-
-  packages.yml (the reusable docker packaging matrix), release.yml
-  (v-tag → draft GitHub Release via the ephemeral GITHUB_TOKEN,
-  minimal permissions, SHA-pinned actions).
-- **docs/packaging.md** — the packaging/release reference (install
-  per distro, reproduce, runbook, troubleshooting, signing posture).
+  packages.yml (the reusable docker packaging matrix, run by ci.yml
+  as a validation check). No release workflow exists: the project
+  is in development, and no workflow may publish, upload, tag, or
+  create a release or asset.
+- **docs/packaging.md** — the packaging reference (what the recipes
+  produce per distro, reproduce, troubleshooting, signing posture).
 
 ### Widget catalog (all SHIPPED, class names from `src/widget/*.c`)
 

@@ -3,11 +3,15 @@
 **Versioning convention:** every version-like label in this file
 (Phase numbers, and the `1.0.0` / `1.1.x` milestone labels) is an
 **internal engineering milestone** — a history marker for when work
-landed. None of them is the public version. The public version of
-FDK is `1.0.0` — the deliberate, recorded decision of 2026-10-12
-(`docs/versioning.md`), which for the project's whole earlier life
-was the `0.0.1` joke. See `docs/versioning.md` before touching
-`include/fdk/fdk_version.h`.
+landed. None of them is the public version. The project is **in
+development — no stable release yet**: no tags, no GitHub releases,
+no published packages; the version the tree carries lives in
+`include/fdk/fdk_version.h` under the owner-gated policy of
+`docs/versioning.md` (see that file before touching the header).
+References throughout the historical sections below to a published
+v1.0.0, its tag, its release assets, or its `release` branch
+describe the project's **former repository** — all of that material
+was removed with the 2026-10-31 return to in-development status.
 
 Work proceeds in phases. Each phase should compile, pass its tests,
 and leave the tree in a working state before the next begins — no
@@ -5231,12 +5235,15 @@ ground battery + the full matrix on every push/PR), a reusable
 distro-packages.yml (docker-driven per-distro pipelines on GitHub-
 hosted runners — build, native package, clean-container install-
 test: package manager, ldconfig, pkg-config, fdk-theme, a public-
-API smoke app under Xvfb, and removal verification), and release.yml
-(v-tag → same matrix with upload + pristine git-archive source +
-SHA256SUMS + generated notes → **draft** release via the ephemeral
-GITHUB_TOKEN, contents:write granted to the release job alone;
-required targets failing skips the release entirely, optional
-targets failing just shows up as an honestly-missing artifact).
+API smoke app under Xvfb, and removal verification), and a
+release.yml (v-tag → same matrix with upload + pristine git-archive
+source + SHA256SUMS + generated notes → **draft** release via the
+ephemeral GITHUB_TOKEN, contents:write granted to the release job
+alone; required targets failing skips the release entirely,
+optional targets failing just shows up as an honestly-missing
+artifact) — that workflow and its release channel were removed
+when the project returned to in-development status (2026-10-31);
+the validation half of the matrix lives on in ci.yml.
 Actions pinned to full commit SHAs; no caching (a green check must
 mean "this exact source built"), no secrets, fork PRs get the read-
 only token.
@@ -5678,21 +5685,23 @@ including native Wayland under labwc, and only then demanded the
 number move. Component quality gated the release, exactly the lesson
 the retraction recorded.
 
-**The pipeline the release rides.** ci.yml (every push to main)
+**The pipeline the release rode.** ci.yml (every push to main)
 runs the full battery plus the cross-distribution packaging matrix —
-at 1.0.0 the `fdk_require_release_posture` guard passes every
+at 1.0.0 the `fdk_require_release_posture` guard passed every
 family through for real builds again (the PACKAGING-SKIP era, honest
-while it lasted, is over). release.yml (a `v*` tag push) runs the
-same matrix with upload, produces the pristine `git archive` source
-tarball, generates SHA256SUMS and the notes from the artifacts that
-actually exist, and stages a DRAFT release — published only after
-every family's artifacts are verified present. The v1.0.0 tag was
-re-created on this decision commit and pushed to the main
+while it lasted, was over). A release.yml (a `v*` tag push) ran the
+same matrix with upload, produced the pristine `git archive` source
+tarball, generated SHA256SUMS and the notes from the artifacts that
+actually existed, and staged a DRAFT release — published only after
+every family's artifacts were verified present. The v1.0.0 tag was
+re-created on that decision commit and pushed to the then-main
 repository; the Void Linux family whose CI bootstrap failed during
 the retracted attempt had been fixed and proven green in the interim
-(matrix fully green at 1.5.0-era commit 83a997e), so the release
-carries all five families: deb, rpm, pkg.tar.zst, apk, xbps, plus
-the source archive.
+(matrix fully green at 1.5.0-era commit 83a997e), so that release
+carried all five families: deb, rpm, pkg.tar.zst, apk, xbps, plus
+the source archive. All of that — tag, workflow, assets — belonged
+to the former repository and is gone; the matrix survives as a CI
+validation check with no upload, no tags, no releases.
 
 ## 1.6.1 — the one-face alignment (the 1.0.0 re-cut)
 
@@ -5772,10 +5781,11 @@ already exists and is tested.
 The owner directive that opened this milestone: *add an extension
 API to FDK so add-on packages can be built on top of it, and prove
 it by building a layer-shell add-on as a SEPARATE package that uses
-only that public API* — the next release after 1.0.0, versioned
+only that public API* — the next version after 1.0.0, versioned
 1.1.0-rc1 (the owner chose the minor bump over 1.0.1 because public
-API is added, and kept the final-tag decision; no tag exists for
-the candidate and the v1.0.0 release is untouched).
+API is added, and kept the final-tag decision; no tag existed for
+the candidate, and none exists today — the project is in development
+with no tags and no releases at all).
 
 **The extension API** (`include/fdk/fdk_extend.h`,
 `docs/EXTENDING.md`): versioned (FDK_EXT_API_VERSION + the runtime

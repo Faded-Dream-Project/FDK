@@ -2,23 +2,24 @@
 
 ## The rule
 
-The public version of FDK is **1.1.0-rc1** — a release candidate,
-not a final release: the 2026-10-25 owner directive that FDK grow a
-public **extension API** (add-on packages building on `fdk/extend.h`)
-lands as the next MINOR release after 1.0.0, and the owner explicitly
-chose `1.1.0-rc1` over `1.0.1` because new public API is a minor bump
-("not 1.0.1, since this adds public API"). The `-rc1` suffix is the
-owner's brake: **no git tag is created for it and the live v1.0.0
-release is untouched** — the owner decides when the candidate becomes
-1.1.0. Before this, 1.0.0 was the deliberate, recorded decision of
-2026-10-12; for the entire life before it the number was a project
-joke (`0.0.1` — *this absurdly capable toolkit is still called
-0.0.1*), and every move was made exactly the way this document
-demands: by the project owner, explicitly — not by autonomy, feature
-accumulation, or semver pressure.
+FDK is **in development — no stable release yet.** The public version
+is whatever `include/fdk/fdk_version.h` says — currently a `1.1.0`
+pre-release iteration (`rcN`) carrying the owner's 2026-10-25
+directive that FDK grow a public **extension API** (add-on packages
+building on `fdk/extend.h`); the owner explicitly chose `1.1.0-rc1`
+over `1.0.1` because new public API is a minor bump ("not 1.0.1,
+since this adds public API"). The `-rcN` suffix is the owner's
+brake: **no git tag exists and nothing is published** — the project
+has no releases page, no release branch, and no tags; the owner
+decides if and when a first stable release is ever cut, and how it
+is numbered. Every version move is made exactly the way this
+document demands: by the project owner, explicitly — not by
+autonomy, feature accumulation, or semver pressure. (For the entire
+life before the 1.0.0 era the number was a project joke (`0.0.1` —
+*this absurdly capable toolkit is still called 0.0.1*.)
 
 ```
-Public version:       1.1.0-rc1     (release candidate; owner decides the final tag)
+Public version:       1.1.0-rcN     (development iteration; no tag, no release)
 Engineering standard: extremely high (unchanged by the number)
 ```
 
@@ -35,7 +36,7 @@ name is always numeric MAJOR.MINOR.PATCH — pre-release suffixes
 never appear in it; they live in the version string, pkg-config,
 and package metadata).
 
-## What the 1.0.0 decision rested on
+## What the 1.0.0 decision rested on (historical)
 
 The 2026-10-11 retraction named its blockers precisely: the file
 and folder pickers were not release-ready (unfinished file-type
@@ -49,15 +50,19 @@ crash fix (CSS-class SVGs — 1.5.4) — are recorded in
 project owner then tested the result on real hardware (native
 Wayland under labwc included) and demanded the release. Component
 closed the gate, not pipeline greenness — the lesson the retraction
-taught, applied.
+taught, applied. That decision, and the 1.0.0 releases that followed
+it, belonged to the project's former repository; when the project
+returned to in-development status (2026-10-31, below), all of that
+release material went with it. What remains true is the lesson:
+component quality, not pipeline greenness, gates any future number.
 
-With this decision the **SONAME scheme activates** (`libfdk.so.1`),
-the packaging pipeline leaves its disclosed `PACKAGING-SKIP`
-posture, and binary distribution (deb / rpm / pkg.tar.zst / apk /
-xbps plus the pristine source archive) becomes a published
-artifact set rather than dormant infrastructure.
+With the 1.0.0-era decision the **SONAME scheme activated**
+(`libfdk.so.1`) and the packaging pipeline left its disclosed
+`PACKAGING-SKIP` posture; both survive as development-time policy —
+the recipes are exercised by CI on every push as validation checks,
+with nothing published anywhere.
 
-## What 1.0.0 does NOT mean
+## What a version number does NOT mean
 
 - It does **not** soften any audit: dependency, license, security,
   API, memory, DPI, accessibility, theme, installation,
@@ -65,12 +70,14 @@ artifact set rather than dormant infrastructure.
   regression, and sanitizer testing all remain fully in force.
 - It does **not** license fake completion or marketing language
   beyond what is verified.
-- It **does** mean: FDK now makes stable-distribution promises. The
-  ABI contract is `docs/abi-policy.md` (`FDK_ABI_STABLE`, the
-  SONAME, append-only rules); the from-source build (`make`, `make
-  install`) remains the fully supported consumption path, with
-  binary packaging (`packaging/`, `docs/packaging.md`) as the
-  published channel alongside it.
+- In the current, in-development posture it does **not** imply any
+  stable-distribution promise: there is no published release to
+  promise with. The ABI contract (`docs/abi-policy.md`,
+  `FDK_ABI_STABLE`, the SONAME, append-only rules) is maintained
+  as development-time discipline, and the from-source build
+  (`make`, `make install`) is the supported consumption path; the
+  packaging recipes (`packaging/`, `docs/packaging.md`) are kept
+  buildable by CI, nothing more.
 
 ## Internal milestones are not versions
 
@@ -93,11 +100,11 @@ Exactly one source of truth: `include/fdk/fdk_version.h`
 - `fdk_get_version()` / `fdk_get_version_string()` (runtime)
 - `fdk.pc` via the Makefile's `sed` extraction (`FDK_PC_VERSION`)
 - example/banner output, the benchmark harness header
-- release archives and all packaging metadata
+- all packaging metadata built by the CI packaging checks
   (`docs/packaging.md`) — every recipe substitutes `@VERSION@`
   from the header; nothing hand-edits a version string.
 
-## The SONAME policy (active since 1.0.0)
+## The SONAME policy (the active development-time scheme)
 
 The shared library builds and installs under the versioned scheme:
 the real file carries the full version (`libfdk.so.<major.minor.patch>`),
@@ -113,8 +120,9 @@ and packaging pipeline derive both from the header.
 
 ## Enforcement
 
-`tests/test_core.c::test_version` pins the public version (currently
-`1.1.0-rc1`). A change to the version macros without the matching
+`tests/test_core.c::test_version` pins the public version (it
+asserts against the `fdk_version.h` macros themselves). A change to
+the version macros without the matching
 test change fails the suite. Changing both is a deliberate act that
 requires:
 
@@ -132,7 +140,9 @@ The 1.1.0-rc1 bump of 2026-10-25 satisfies both again: the owner set
 the release target and the number in the same breath as the feature
 directive ("Bump FDK to 1.1.0-rc1 (not 1.0.1, since this adds public
 API)... Do NOT create or move any git tag and do NOT touch the 1.0.0
-release. I'll decide on the final tag.").
+release. I'll decide on the final tag.") — that directive's tag
+embargo posture is the one the project still keeps today: no tags,
+no releases, until the owner says otherwise.
 
 ## History
 
@@ -189,14 +199,13 @@ release. I'll decide on the final tag.").
   and the `v1.0.0` tag re-created on the alignment commit with the
   release assets replaced on the main repository.
 - 2026-10-25: **1.1.0-rc1 — the extension API candidate.** The owner
-  directed the next release to add a public extension API
+  directed the next version to add a public extension API
   (`include/fdk/fdk_extend.h`) so add-on packages can be built on top
   of FDK — proved by fdk-shell, a separate layer-shell package that
   compiles against FDK's installed public headers and library only —
   and set the number explicitly: 1.1.0-rc1, a MINOR bump because the
   change ADDS public API (the owner's own words ruled out 1.0.1).
-  The candidate carries no tag; the v1.0.0 release, its tag, and its
-  assets are untouched. The additions are ABI-append-only (new
+  The additions are ABI-append-only (new
   functions, opaque types, no layout changes to existing public
   structs), so the SONAME stays `libfdk.so.1`.
 - 2026-10-26: **1.1.0-rc1 → 1.1.0-rc2 (rcN bump, same candidate).**
@@ -205,5 +214,13 @@ release. I'll decide on the final tag.").
   D-Bus client (the M-7 foundation): 115 new append-only public
   symbols in include/fdk/fdk_dbus.h, plus the additive
   fdk_ext_loop_update_fd() (FDK_EXT_API_VERSION stays 1 — no
-  ops-table growth). SONAME stays libfdk.so.1. Still no tag, no
-  release; the candidate remains the owner's to promote.
+  ops-table growth). SONAME stays libfdk.so.1.
+- 2026-10-31: **back to in development — the clean re-publish.** The
+  project owner returned FDK to in-development status: the former
+  repository (with its v1.0.0 tag, its GitHub releases, and its
+  `release` branch) was retired, and the history was re-published
+  fresh — one branch, `main`, zero tags, no releases, no published
+  artifacts of any kind. The version macros are untouched (still the
+  1.1.0 rcN iteration); they describe the development tree, not a
+  release. This document, the README, and the CI workflows were
+  reworded to match: nothing anywhere claims a published release.

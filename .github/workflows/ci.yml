@@ -1,13 +1,16 @@
-# ci.yml — validation builds for pushes to main and release, and
-# pull requests.
+# ci.yml — validation builds for pushes to main, and pull
+# requests.
 #
 # Two jobs:
 #   build-test       — the project's home-ground full battery on an
 #                      ubuntu runner (both backends compiled, both
-#                      test suites, release + examples, export check)
+#                      test suites, optimized -O2 build + examples,
+#                      export check)
 #   distro-packages  — the full cross-distribution packaging matrix
 #                      (debian/rpm/arch/alpine/void, build + clean
-#                      install-tests inside pinned containers)
+#                      install-tests inside pinned containers) — kept
+#                      as a CI check that the packaging recipes stay
+#                      buildable, not as a release channel
 #
 # No secrets are used anywhere in this workflow: everything runs on
 # the ephemeral GITHUB_TOKEN with contents: read. Pull requests from
@@ -23,11 +26,9 @@ name: ci
 
 on:
   push:
-    # main is the development branch (unstable by design); release is
-    # the consumer-facing fast-forward pointer (docs/RELEASING.md) -
-    # both are validated identically so a consumer who pins the
-    # branch always sees green on exactly what they built.
-    branches: [main, release]
+    # main is the development branch — the only branch, and the one
+    # to build from; every push is validated identically.
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -123,10 +124,10 @@ jobs:
       - name: Wayland integration suite (self-skips without a compositor)
         run: make test-wayland
 
-      - name: Release build + examples + export surface
-        # One invocation, one config: `make release` followed by plain
-        # `make examples` would silently flip the config stamp back to
-        # debug (sanitizer builds). FDK_CONFIG pinned throughout.
+      - name: Optimized build (-O2) + examples + export surface
+        # One invocation, one config: an optimized-config build followed
+        # by plain `make examples` would silently flip the config stamp
+        # back to debug (sanitizer builds). FDK_CONFIG pinned throughout.
         run: make FDK_CONFIG=release all examples verify-exports
 
       - name: fdk-shell (the first add-on package) — build + X11 suite

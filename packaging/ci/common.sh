@@ -22,7 +22,7 @@ fdk_expected_version() {
 
 # The PACKAGE-METADATA version for one distro family: fdk_packver <family>
 # [raw-version]. The raw version defaults to fdk_expected_version; callers
-# that only have a tag (release-notes.sh) pass it explicitly.
+# that only have an explicit version string pass it directly.
 #
 # WHY THIS EXISTS (found live by CI on 1.1.0-rc1, 2026-10-25): while a
 # release candidate is in the tree the raw version carries a hyphenated

@@ -1,43 +1,35 @@
-# FDK Packaging and Release
+# FDK Packaging
 
 This document covers everything around distributing FDK: building it
-from source, installing the binary packages the project publishes,
-what those packages contain, how the release pipeline produces and
-validates them, and how a maintainer cuts a release.
+from source, what the per-distribution packaging recipes produce, and
+how CI keeps those recipes proven on every push. **The project is in
+development — nothing is published**: there are no binary packages,
+no releases page, no tags; the packaging pipeline exists as a
+validation check so the recipes can never silently rot.
 
-> **Which ref should I package from?** Tags and the
-> [`release`](https://github.com/Faded-Dream-Project/FDK/tree/release)
-> branch, never `main` — `main` is the development branch and moves
-> commit by commit (`docs/RELEASING.md`). `release` is a
-> fast-forward-only pointer that sits exactly on approved, tagged,
-> CI-green releases, so a pinned build is reproducible.
+> **What should I build from?** `main` — the only branch. The
+> project is in development with no stable release yet; build from
+> source (`docs/build.md`, the authoritative reference) at whatever
+> commit you care to pin.
 
-> **v1.0.0 is released.** The public version is `1.0.0` — the
-> deliberate, recorded decision of 2026-10-12 (`docs/versioning.md`),
-> made after the picker overhaul closed the 2026-10-11 retraction's
-> named blockers and after the project owner's real-hardware
-> validation. The packaging pipeline is live: a `v*` tag push runs
-> the full cross-distribution matrix (build + native package +
-> clean-container install-tests per family) and stages a draft
-> GitHub Release with every validated artifact plus `SHA256SUMS`.
-> The release-posture guard (`fdk_require_release_posture`) keeps
-> its place as infrastructure: if the public version ever returns
-> to a pre-1.0 posture, packaging discloses a `PACKAGING-SKIP`
-> rather than staging an inconsistent payload.
+> **The release-posture guard** (`fdk_require_release_posture`) stays
+> as infrastructure: while the public version carries a pre-release
+> suffix (as it does now), packaging discloses a `PACKAGING-SKIP`
+rather than staging an inconsistent payload — the posture the whole
+> project is in.
 
 - Repository home: https://github.com/Faded-Dream-Project/FDK
-- Releases: https://github.com/Faded-Dream-Project/FDK/releases
 - Build from source: `docs/build.md` (the authoritative reference)
 
-## The release model in one paragraph
+## The packaging pipeline in one paragraph
 
-FDK is released as **source archives plus native binary packages**
-(.deb, .rpm, .pkg.tar.zst, .apk, .xbps) built by GitHub Actions on
-GitHub-hosted runners, each target built **inside its own pinned
-distribution container** and **install-tested in clean containers**
-of every supported target before the artifacts are attached to a
-draft GitHub Release. The release is published by a human after
-review — nothing goes public automatically.
+FDK's packaging recipes build **native binary packages** (.deb, .rpm,
+.pkg.tar.zst, .apk, .xbps) on GitHub-hosted runners, each target built
+**inside its own pinned distribution container** and **install-tested
+in clean containers** of every supported target — as a CI validation
+check on every push to `main`, never as a publish step. Nothing is
+uploaded as a release; the artifacts exist to prove the recipes still
+work.
 
 ## Building from source
 
@@ -75,14 +67,15 @@ Optional Wayland backend: install `libwayland-dev` +
 `libxkbcommon-dev` first and the build picks both backends up
 automatically (`docs/build.md` "Optional Wayland").
 
-## Installing binary packages
+## What the packages install (per-family reference)
 
-*(Forward-looking: applies to the first published release and every
-one after it — see the note above for why none exists yet.)* All
-commands below assume you downloaded the artifacts from the
-[releases page](https://github.com/Faded-Dream-Project/FDK/releases)
-and verified them (`sha256sum -c SHA256SUMS`). `<ver>` below is the
-release's version (the file names on the page carry it).
+*(No published packages exist — this section is the reference for
+what the CI-validated recipes in `packaging/` produce and what a
+from-source `make install` lays down. Should a release ever be cut,
+the same layout applies to it.)* The per-family install commands, for
+completeness, assuming locally built artifacts in `dist/` verified
+against a `SHA256SUMS` you generated yourself; `<ver>` is the
+version the artifacts carry.
 
 ### Debian / Ubuntu (.deb)
 
@@ -157,7 +150,7 @@ Run `fdk-theme list` to see the shipped theme faces and
 
 `libX11`, `libXext`, `libXrandr` (the multi-monitor output model —
 a direct link dependency since M-6), `zlib`, and — when the Wayland
-backend is compiled in, which the published packages always do —
+backend is compiled in, which the packaging recipes always do —
 `libwayland-client` and `libxkbcommon`. Every package manager above
 resolves them automatically. The GPU present lane loads `libGL`
 dynamically when a hardware GL renderer exists and silently stays on
@@ -168,11 +161,11 @@ similar default UI font is picked up automatically; override with
 
 ## Pre-release versions in package metadata
 
-While a release candidate is in the tree, the library's version
-string carries a hyphenated pre-release suffix — `1.1.0-rc1` today.
-The five package grammars disagree about that suffix, and four of
-them reject it outright, so the pipeline translates it once, at the
-metadata layer (`fdk_packver` in `packaging/ci/common.sh`):
+While the version string carries a hyphenated pre-release suffix —
+`1.1.0-rc2` today — the five package grammars disagree about that
+suffix, and four of them reject it outright, so the pipeline
+translates it once, at the metadata layer (`fdk_packver` in
+`packaging/ci/common.sh`):
 
 | Family | Raw `1.1.0-rc1` becomes | Why |
 | --- | --- | --- |
@@ -196,9 +189,8 @@ pkg-config `Version` and the smoke test keep the **raw** string,
 byte-identical to what `fdk_get_version_string()` reports — a
 package must never claim a version the library itself does not.
 Second, a plain numeric version passes through every grammar
-unchanged, so at final releases all five spellings are identical and
-the mapping is inert — the 1.0.0 artifacts are byte-for-byte what
-they were before this translation existed.
+unchanged, so were a final numeric release ever cut, all five
+spellings would be identical and the mapping would be inert.
 
 ## What the packages contain (and deliberately omit)
 
@@ -226,11 +218,12 @@ authorization — shipping the archive in every `-devel` package would
 invite exactly that. Build from source when you legitimately need
 the static archive for local, non-distributed development.
 
-Licensing note: the binary packages are built and published **by the
-Licensor** in the official repository — the distribution channel
-authorized under the license's Section 4(d). Applications built with
-FDK remain their authors' property (license Section 5); nothing in
-the packaging claims otherwise.
+Licensing note: the packaging recipes exist so that, should the
+Licensor ever publish binary packages through the official
+repository, the channel is the one authorized under the license's
+Section 4(d) — built and published by the Licensor. Applications
+built with FDK remain their authors' property (license Section 5);
+nothing in the packaging claims otherwise.
 
 ## Supported distributions and architectures
 
@@ -245,11 +238,10 @@ the packaging claims otherwise.
 arm64 is **not** produced: the pipeline is
 architecture-parameterized end to end (the scripts use `uname -m`
 and the images are multi-arch), but no arm64 build has been
-validated, so none is claimed or shipped. Do not assume the x86_64
-packages run anywhere other than the distributions listed above —
+validated, so none is claimed or produced. Do not assume the x86_64
+builds run anywhere other than the distributions listed above —
 the glibc/musl floors are real (the Debian packages need glibc ≥
-2.36; the RPMs glibc ≥ 2.38) and the release notes state them per
-release.
+2.36; the RPMs glibc ≥ 2.38).
 
 ## Reproducing the package builds
 
@@ -281,7 +273,7 @@ only program that opens a real window, runs the theme/font path, and
 verifies the runtime version.
 
 The GitHub Actions workflows (`.github/workflows/`) run exactly
-these scripts — `ci.yml` on pushes/PRs, `release.yml` on `v*` tags —
+these scripts — `ci.yml` on pushes/PRs, as validation checks —
 so the CI artifacts and anything you reproduce locally are produced
 by the same code.
 
@@ -309,47 +301,30 @@ container pipelines:
 Nothing FDK-owned is ever exempted: a leak or UB report with FDK
 frames fails everywhere it can run.
 
-## How maintainers create and publish a release
+## Version bumps (the discipline, for completeness)
 
-1. **Version bump** — an explicit owner decision recorded first in
-   `docs/versioning.md`: update `include/fdk/fdk_version.h`
-   (major/minor/patch + string) and the pin in
-   `tests/test_core.c::test_version`. The Makefile, pkg-config file,
-   package versions, and SONAME all derive from the header
-   automatically. If the ABI broke, the SONAME major moves with
-   `FDK_VERSION_MAJOR` — nothing else to do.
-2. **Full battery locally** — `make && make test && make test-x11 &&
-   make release && make examples && make verify-exports` (plus
-   Wayland where a compositor rig exists).
-3. **Commit and push to `main`** — CI runs the full packaging matrix
-   on the push. Let it go green.
-4. **Tag** — `git tag -a v<version> -m "FDK <version>" && git push
-   origin v<version>`. The release workflow builds every package
-   from the exact tagged revision, then creates a **draft** GitHub
-   Release with the artifacts, SHA256SUMS, and generated notes.
-5. **Review and publish** — check the draft's artifacts and notes
-   (they are generated from the artifacts that actually built:
-   a failed optional target appears as "not in this release", never
-   as a claim), then publish it from the Releases page.
-
-Required checks: the Debian, RPM, Arch, and source-archive jobs must
-all pass or the release job is skipped entirely. Alpine and Void are
-allowed to fail without blocking the release (they are the newest
-pipelines) — their artifacts are then simply absent and the notes
-say so.
+A version bump remains an explicit owner decision recorded first in
+`docs/versioning.md`: update `include/fdk/fdk_version.h`
+(major/minor/patch + string) and the pin in
+`tests/test_core.c::test_version`. The Makefile, pkg-config file,
+package versions, and SONAME all derive from the header
+automatically. If the ABI breaks, the SONAME major moves with
+`FDK_VERSION_MAJOR` — nothing else to do. There is no release
+runbook because there are no releases: publishing one would be a
+new owner decision, recorded in `docs/versioning.md` first, and
+would come with its own process written then.
 
 Workflow permissions are minimal: everything runs on the ephemeral
-`GITHUB_TOKEN`; only the final release job holds `contents: write`
-and only for creating the draft. No personal token is stored
+`GITHUB_TOKEN` with `contents: read`. No personal token is stored
 anywhere in the repository or workflows.
 
 ## Signing
 
-Release packages are **not GPG-signed**. Integrity is provided by
-the `SHA256SUMS` file on the release page served over HTTPS, plus
-the release's provenance (the CI run that built it, linked from the
-release). Per-distribution signing (a Debian apt repository, an RPM
-repository with GPG keys, apk keys) would require maintained
+Packages are **not GPG-signed** — nothing is published, and should a
+release ever exist it would carry a `SHA256SUMS` file served over
+HTTPS alongside the CI provenance (the run that built it) as its
+integrity story. Per-distribution signing (a Debian apt repository,
+an RPM repository with GPG keys, apk keys) would require maintained
 repository infrastructure and is future work — noted honestly here
 rather than half-implemented.
 
@@ -367,8 +342,9 @@ rather than half-implemented.
   RPMs: 2.38). Build from source instead; do not force-install.
 - **apk refuses the package** — upstream packages are unsigned:
   `apk add --allow-untrusted ./fdk-...apk` (see *Signing*).
-- **Wrong architecture** — releases ship x86_64 only; on arm64 build
-  from source (`make FDK_CONFIG=release install PREFIX=/usr`).
+- **Wrong architecture** — the packaging matrix builds x86_64 only;
+  on arm64 build from source (`make FDK_CONFIG=release install
+  PREFIX=/usr`).
 - **Theme not found after install** — the faces live in
   `/usr/share/fdk/.FDKThemes` and are discovered through the default
   `$XDG_DATA_DIRS`; check yours still includes `/usr/share`.
