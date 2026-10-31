@@ -489,19 +489,20 @@ static const char *lane_fmt_name(unsigned int fmt) {
                            : "GL_RGBA (0x1908)";
 }
 
-/* FDK_GL_TRACE=1 (read once per process): the lane's calls log at
- * INFO for the first presents — every GL/EGL call with its result,
- * plus the one-time engagement dump (EGL vendor/version/client APIs,
- * the chosen config's attributes, the context's API+version, the GL
- * strings, the extension flags, the wl_egl_window's attached size).
- * INFO (not DEBUG) on purpose: the default level shows it, so the
- * recipe for a desktop report is one env var, no log-level dance. */
+/* FDK_GL_TRACE=1: the lane's calls log at INFO for the first
+ * presents — every GL/EGL call with its result, plus the one-time
+ * engagement dump (EGL vendor/version/client APIs, the chosen
+ * config's attributes, the context's API+version, the GL strings,
+ * the extension flags, the wl_egl_window's attached size). INFO
+ * (not DEBUG) on purpose: the default level shows it, so the recipe
+ * for a desktop report is one env var, no log-level dance.
+ *
+ * Deliberately UNCACHED (a getenv per present): the §21 suite's
+ * trace leg toggles the knob mid-process, and one lookup against
+ * the environment block is nothing next to the upload that follows
+ * it. */
 static int wlgl_trace_enabled(void) {
-    static int trace = -1;
-    if (trace < 0) {
-        trace = getenv("FDK_GL_TRACE") != NULL;
-    }
-    return trace;
+    return getenv("FDK_GL_TRACE") != NULL;
 }
 
 /* How many presents per window the trace covers: the first four (a

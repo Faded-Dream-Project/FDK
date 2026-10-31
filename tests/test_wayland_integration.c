@@ -110,6 +110,42 @@ static void wlgl_sc_counting_sink(fdk_log_level level, const char *tag,
     }
 }
 
+/* §21 (1.1.1): the GL-lane legs' capture sink — records every INFO+
+ * lane line into a big buffer (probe verdicts, ladder rotations,
+ * FDK_GL_TRACE lines) so the legs can assert on the exact wording,
+ * WHILE still teeing to stderr (a failing leg's console output keeps
+ * the full story; the timestamps differ from the default sink's,
+ * nothing else does). */
+static char gl_probe_capture[65536];
+static size_t gl_probe_capture_len;
+
+static void gl_lane_capture_sink(fdk_log_level level, const char *tag,
+                                 const char *message, void *user) {
+    (void)user;
+    const char *lname = "INFO";
+    if (level == FDK_LOG_WARN) {
+        lname = "WARN";
+    } else if (level == FDK_LOG_DEBUG) {
+        lname = "DEBUG";
+    }
+    fprintf(stderr, "[%s] (%s) %s\n", lname, tag, message);
+    if (level < FDK_LOG_INFO || gl_probe_capture_len >=
+                                     sizeof(gl_probe_capture) - 2) {
+        return;
+    }
+    const size_t room =
+        sizeof(gl_probe_capture) - 1 - gl_probe_capture_len;
+    const size_t n = strlen(message);
+    (void)snprintf(gl_probe_capture + gl_probe_capture_len, room + 1,
+                   "%s\n", message);
+    gl_probe_capture_len += n < room ? n + 1 : room;
+}
+
+static void gl_lane_capture_reset(void) {
+    gl_probe_capture[0] = '\0';
+    gl_probe_capture_len = 0;
+}
+
 static void wl_touch_evt_cb(fdk_window *w, const fdk_event_data *ev,
                             void *user) {
     (void)w;
@@ -3735,6 +3771,17 @@ int main(void) {
                 fdk_surface_fill(
                     gs2, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
                 assert(fdk_ok(fdk_surface_present(gs2)));
+                /* The share-group verdict: window 2 must still be ON
+                 * the lane after its own first present. The 1.0.x code
+                 * minted the quad program in window 1's context and
+                 * created window 2's context with share=NULL, so this
+                 * present failed at glUseProgram (GL_INVALID_VALUE)
+                 * and silently downgraded — every second window, on
+                 * every driver, since the lane landed; the assert
+                 * below is the one that was missing. */
+                assert(fdk_ok(fdk_window_get_render_path(gwin2,
+                                                         &gpath2)));
+                assert(gpath2 == FDK_RENDER_PATH_GL);
                 /* Interleaved: window 1 presents again after 2. */
                 assert(fdk_ok(fdk_surface_present(gs)));
                 for (int i = 0; i < 20; i++) {
@@ -3791,6 +3838,14 @@ int main(void) {
             }
             fdk_surface *gs = NULL;
             assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+            /* The acquisition (get_info's framebuffer) is what engages
+             * the lane — without it this leg checked a path that had
+             * never been decided and vacuously skipped since the §19
+             * re-land (found 2026-11-01 while proving the probe: the
+             * rig's CORE_ONLY window never painted through the surface
+             * before the check). */
+            fdk_surface_info ginfo;
+            assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
             fdk_render_path gpath = (fdk_render_path)-1;
             assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
             if (gpath == FDK_RENDER_PATH_GL) {
@@ -3830,7 +3885,415 @@ int main(void) {
         }
         unsetenv("FDK_GL_CORE_ONLY");
 
+        /* ---- §21 (1.1.1): the probe's shape ladder -------------------
+         * FDK_GL_PROBE_SKIP=<n> makes the probe reject the first n
+         * shapes as if the driver refused them, so EVERY shape gets a
+         * deterministic live-EGL leg on any stack: skip=1 -> BGRA +
+         * packed sub-rects, skip=2 -> the RGBA twin + ROW_LENGTH,
+         * skip=3 pins the pure-core twin+packed shape (the CORE_ONLY
+         * spelling), and skip=4 rejects everything — the lane must
+         * REFUSE for the connection (the honest all-shapes-failed
+         * verdict, each probe line logged). Where the rig has no EGL
+         * driver at all the legs skip, as the lane's own fallback. */
+        {
+            static const struct {
+                const char *skip;   /* FDK_GL_PROBE_SKIP value      */
+                const char *expect; /* the shape name the lane picks */
+            } probe_cases[] = {
+                { "1", "BGRA + packed sub-rects" },
+                { "2", "RGBA twin + UNPACK_ROW_LENGTH" }
+            };
+            int probe_done = 0;
+            fdk_log_set_sink(gl_lane_capture_sink, NULL);
+            for (size_t ci = 0;
+                 ci < sizeof(probe_cases) / sizeof(probe_cases[0]);
+                 ci++) {
+                setenv("FDK_GL_PROBE_SKIP", probe_cases[ci].skip, 1);
+                setenv("FDK_GL_FORCE", "1", 1);
+                fdk_context *gctx = NULL;
+                fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                           .app_id = "org.fdk.test" };
+                assert(fdk_ok(fdk_init(&gctx, &gopts)));
+                fdk_window *gwin = NULL;
+                fdk_window_options gwopts = {
+                    .title = "wl gl probe", .width = 512, .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+                fdk_widget *proot = NULL;
+                assert(fdk_ok(fdk_window_get_root(gwin, &proot)));
+                fdk_widget_set_background(
+                    proot, (fdk_color){0.3f, 0.3f, 0.8f, 1.0f});
+                fdk_window_show(gwin);
+                (void)fdk_pump_events(gctx, 150);
+                fdk_surface *gs = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+                fdk_surface_info ginfo;
+                assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+                fdk_render_path gpath = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                if (gpath == FDK_RENDER_PATH_GL) {
+                    /* The probe's verdict line names the picked shape:
+                     * the deterministic pin that skip=n landed on the
+                     * expected rung of the ladder. */
+                    char verdict[160];
+                    (void)snprintf(verdict, sizeof(verdict),
+                                   "GPU lane upload path: %s",
+                                   probe_cases[ci].expect);
+                    if (strstr(gl_probe_capture, verdict) == NULL) {
+                        printf("    probe verdict missing: %s\n",
+                               gl_probe_capture[0] != '\0'
+                                   ? gl_probe_capture
+                                   : "(no capture)");
+                    }
+                    assert(strstr(gl_probe_capture, verdict) != NULL);
+                    /* Full + partial damage through the pinned shape. */
+                    fdk_surface_fill(
+                        gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                    assert(fdk_ok(fdk_surface_present(gs)));
+                    fdk_surface_fill_rect(
+                        gs, (fdk_rect){ .x = 128, .y = 96, .width = 160,
+                                        .height = 96 },
+                        (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+                    assert(fdk_ok(fdk_surface_present(gs)));
+                    for (int i = 0; i < 15; i++) {
+                        (void)fdk_pump_events(gctx, 50);
+                    }
+                    assert(fdk_ok(fdk_window_get_render_path(gwin,
+                                                             &gpath)));
+                    assert(gpath == FDK_RENDER_PATH_GL);
+                    probe_done++;
+                }
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+                unsetenv("FDK_GL_PROBE_SKIP");
+                unsetenv("FDK_GL_FORCE");
+                fdk__wayland_egl_test_reset();
+                gl_lane_capture_reset();
+            }
+            if (probe_done ==
+                (int)(sizeof(probe_cases) / sizeof(probe_cases[0]))) {
+                printf("[ok] wayland gl lane probe: FDK_GL_PROBE_SKIP "
+                       "pinned the shape ladder — BGRA+packed and the "
+                       "RGBA twin+ROW_LENGTH each served full + "
+                       "partial damage and stayed on the lane\n");
+            } else {
+                printf("[skip] wayland gl lane probe: no EGL driver — "
+                       "the shape-ladder legs degenerate\n");
+            }
+
+            /* skip=4: every shape rejected — the lane must REFUSE the
+             * connection (CPU path), after logging each probe's
+             * verdict. The per-process policy stamp means the refusal
+             * is also cached for the same knobs; the reset seam
+             * clears it for the legs that follow. */
+            setenv("FDK_GL_PROBE_SKIP", "4", 1);
+            setenv("FDK_GL_FORCE", "1", 1);
+            fdk__wayland_egl_test_reset();
+            {
+                fdk_context *gctx = NULL;
+                fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                           .app_id = "org.fdk.test" };
+                assert(fdk_ok(fdk_init(&gctx, &gopts)));
+                fdk_window *gwin = NULL;
+                fdk_window_options gwopts = {
+                    .title = "wl gl probe exhausted", .width = 512,
+                    .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+                fdk_widget *proot = NULL;
+                assert(fdk_ok(fdk_window_get_root(gwin, &proot)));
+                fdk_widget_set_background(
+                    proot, (fdk_color){0.8f, 0.3f, 0.3f, 1.0f});
+                fdk_window_show(gwin);
+                (void)fdk_pump_events(gctx, 150);
+                fdk_surface *gs = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+                fdk_surface_info ginfo;
+                assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+                fdk_render_path gpath = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                /* CPU either way (no EGL driver also answers CPU);
+                 * the discriminator is the probe-refusal line, which
+                 * only a live EGL stack can produce. */
+                const int refused =
+                    strstr(gl_probe_capture,
+                           "every upload shape was rejected") != NULL;
+                if (refused) {
+                    assert(gpath == FDK_RENDER_PATH_CPU);
+                    printf("[ok] wayland gl lane probe: all four shapes "
+                           "rejected -> the lane refuses the connection "
+                           "(honest verdict, every probe line logged)\n");
+                } else {
+                    printf("[skip] wayland gl lane probe: no EGL driver "
+                           "— the all-rejected leg degenerates\n");
+                }
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+            }
+            unsetenv("FDK_GL_PROBE_SKIP");
+            unsetenv("FDK_GL_FORCE");
+            fdk_log_set_sink(NULL, NULL);
+            fdk__wayland_egl_test_reset();
+            gl_lane_capture_reset();
+        }
+
+        /* ---- §21 (1.1.1): the present ladder -------------------------
+         * FDK_GL_POISON_FIRST=1 injects a REAL driver error (a
+         * guaranteed-invalid format enum) at the first present's
+         * first upload attempt: the lane must ROTATE to the next
+         * shape, recreate the texture, retry, and still deliver
+         * present #1 — the window stays on the lane (a probe-passed
+         * shape failing at real size is exactly the GTX 1050 Ti
+         * report's shape). With FDK_GL_CORE_ONLY the ladder starts
+         * at the LAST shape, so the same poison must end in the
+         * permanent downgrade — salvage intact, frames keep flowing
+         * on the CPU path. */
+        {
+            setenv("FDK_GL_POISON_FIRST", "1", 1);
+            setenv("FDK_GL_FORCE", "1", 1);
+            fdk_log_set_sink(gl_lane_capture_sink, NULL);
+            fdk__wayland_egl_test_reset();
+            gl_lane_capture_reset();
+            {
+                fdk_context *gctx = NULL;
+                fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                           .app_id = "org.fdk.test" };
+                assert(fdk_ok(fdk_init(&gctx, &gopts)));
+                fdk_window *gwin = NULL;
+                fdk_window_options gwopts = {
+                    .title = "wl gl ladder", .width = 512, .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+                fdk_widget *proot = NULL;
+                assert(fdk_ok(fdk_window_get_root(gwin, &proot)));
+                fdk_widget_set_background(
+                    proot, (fdk_color){0.3f, 0.8f, 0.3f, 1.0f});
+                fdk_window_show(gwin);
+                (void)fdk_pump_events(gctx, 150);
+                fdk_surface *gs = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+                fdk_surface_info ginfo;
+                assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+                fdk_render_path gpath = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                if (gpath == FDK_RENDER_PATH_GL) {
+                    /* Present #1: the poisoned first attempt fails with
+                     * a REAL GL_INVALID_ENUM at the upload; the ladder
+                     * rotates BGRA+ROW_LENGTH -> BGRA+packed and the
+                     * RETRY delivers the frame — present returns OK and
+                     * the path stays GL. */
+                    fdk_surface_fill(
+                        gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                    assert(fdk_ok(fdk_surface_present(gs)));
+                    for (int i = 0; i < 10; i++) {
+                        (void)fdk_pump_events(gctx, 50);
+                    }
+                    assert(fdk__window_ever_presented(gwin) != 0);
+                    assert(fdk_ok(fdk_window_get_render_path(gwin,
+                                                             &gpath)));
+                    assert(gpath == FDK_RENDER_PATH_GL);
+                    /* The ladder's rotation line is in the log. */
+                    assert(strstr(gl_probe_capture,
+                                  "rotating the connection to shape 1") !=
+                           NULL);
+                    /* Partial damage through the rotated shape, plus a
+                     * second full frame: steady state holds. */
+                    fdk_surface_fill_rect(
+                        gs, (fdk_rect){ .x = 128, .y = 96, .width = 160,
+                                        .height = 96 },
+                        (fdk_color){ .r = 0, .g = 1, .b = 0, .a = 1 });
+                    assert(fdk_ok(fdk_surface_present(gs)));
+                    fdk_surface_fill(
+                        gs, (fdk_color){ .r = 0, .g = 0, .b = 1, .a = 1 });
+                    assert(fdk_ok(fdk_surface_present(gs)));
+                    for (int i = 0; i < 10; i++) {
+                        (void)fdk_pump_events(gctx, 50);
+                    }
+                    assert(fdk_ok(fdk_window_get_render_path(gwin,
+                                                             &gpath)));
+                    assert(gpath == FDK_RENDER_PATH_GL);
+                    printf("[ok] wayland gl lane ladder: a poisoned "
+                           "first present rotated the shape and "
+                           "DELIVERED — the window stays on the lane, "
+                           "steady state holds\n");
+                } else {
+                    printf("[skip] wayland gl lane ladder: no EGL "
+                           "driver — the ladder legs degenerate\n");
+                }
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+            }
+            /* The exhausted ladder: CORE_ONLY pins the LAST shape, so
+             * the same poison has nowhere to rotate — the permanent
+             * downgrade, salvage intact. */
+            setenv("FDK_GL_CORE_ONLY", "1", 1);
+            fdk__wayland_egl_test_reset();
+            gl_lane_capture_reset();
+            {
+                fdk_context *gctx = NULL;
+                fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                           .app_id = "org.fdk.test" };
+                assert(fdk_ok(fdk_init(&gctx, &gopts)));
+                fdk_window *gwin = NULL;
+                fdk_window_options gwopts = {
+                    .title = "wl gl ladder exhausted", .width = 512,
+                    .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+                fdk_widget *proot = NULL;
+                assert(fdk_ok(fdk_window_get_root(gwin, &proot)));
+                fdk_widget_set_background(
+                    proot, (fdk_color){0.8f, 0.8f, 0.3f, 1.0f});
+                fdk_window_show(gwin);
+                (void)fdk_pump_events(gctx, 150);
+                fdk_surface *gs = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+                fdk_surface_info ginfo;
+                assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+                fdk_render_path gpath = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                /* The poison can fire on EITHER first present: the
+                 * configure-tail's synchronous auto-repaint (the
+                 * window's real first frame — it already took the
+                 * exhausted ladder and downgraded by the time we read
+                 * the path) or this leg's explicit fill+present. Both
+                 * routes prove the same contract; the discriminator
+                 * between "ladder exhausted" and "no EGL driver" is
+                 * the exhaustion line in the capture. */
+                const int already_exhausted =
+                    strstr(gl_probe_capture, "ladder exhausted") != NULL;
+                if (gpath == FDK_RENDER_PATH_GL || already_exhausted) {
+                    if (gpath == FDK_RENDER_PATH_GL) {
+                        /* The poisoned first present: exhausted ladder
+                         * -> permanent downgrade with the frame
+                         * salvaged (the present call itself must still
+                         * succeed — the salvage delivers the frame
+                         * through wl_shm). */
+                        fdk_surface_fill(
+                            gs,
+                            (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                        assert(fdk_ok(fdk_surface_present(gs)));
+                        for (int i = 0; i < 10; i++) {
+                            (void)fdk_pump_events(gctx, 50);
+                        }
+                    }
+                    assert(fdk__window_ever_presented(gwin) != 0);
+                    assert(fdk_ok(fdk_window_get_render_path(gwin,
+                                                             &gpath)));
+                    assert(gpath == FDK_RENDER_PATH_CPU);
+                    assert(strstr(gl_probe_capture,
+                                  "ladder exhausted") != NULL);
+                    /* Frames keep flowing on the CPU path. */
+                    fdk_surface_fill_rect(
+                        gs, (fdk_rect){ .x = 10, .y = 10, .width = 50,
+                                        .height = 50 },
+                        (fdk_color){ .r = 0, .g = 1, .b = 1, .a = 1 });
+                    assert(fdk_ok(fdk_surface_present(gs)));
+                    for (int i = 0; i < 10; i++) {
+                        (void)fdk_pump_events(gctx, 50);
+                    }
+                    assert(fdk_ok(fdk_window_get_render_path(gwin,
+                                                             &gpath)));
+                    assert(gpath == FDK_RENDER_PATH_CPU);
+                    printf("[ok] wayland gl lane ladder: exhausted "
+                           "ladder (CORE_ONLY + poison) -> the permanent "
+                           "downgrade, frame salvaged, frames keep "
+                           "flowing\n");
+                } else {
+                    printf("[skip] wayland gl lane ladder: no EGL "
+                           "driver — the exhausted-ladder leg "
+                           "degenerates\n");
+                }
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+            }
+            unsetenv("FDK_GL_CORE_ONLY");
+            unsetenv("FDK_GL_POISON_FIRST");
+            unsetenv("FDK_GL_FORCE");
+            fdk_log_set_sink(NULL, NULL);
+            fdk__wayland_egl_test_reset();
+            gl_lane_capture_reset();
+        }
+
+        /* ---- §21 (1.1.1): FDK_GL_TRACE -------------------------------
+         * One present under the trace: the engagement dump and the
+         * per-call lines must appear (counted through the capture
+         * sink), and the lane must still deliver the frame — the
+         * trace is observation, never behavior. */
+        {
+            setenv("FDK_GL_TRACE", "1", 1);
+            setenv("FDK_GL_FORCE", "1", 1);
+            fdk_log_set_sink(gl_lane_capture_sink, NULL);
+            fdk__wayland_egl_test_reset();
+            gl_lane_capture_reset();
+            {
+                fdk_context *gctx = NULL;
+                fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                           .app_id = "org.fdk.test" };
+                assert(fdk_ok(fdk_init(&gctx, &gopts)));
+                fdk_window *gwin = NULL;
+                fdk_window_options gwopts = {
+                    .title = "wl gl trace", .width = 512, .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+                fdk_widget *proot = NULL;
+                assert(fdk_ok(fdk_window_get_root(gwin, &proot)));
+                fdk_widget_set_background(
+                    proot, (fdk_color){0.5f, 0.5f, 0.5f, 1.0f});
+                fdk_window_show(gwin);
+                (void)fdk_pump_events(gctx, 150);
+                fdk_surface *gs = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+                fdk_surface_info ginfo;
+                assert(fdk_ok(fdk_surface_get_info(gs, &ginfo)));
+                fdk_render_path gpath = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                if (gpath == FDK_RENDER_PATH_GL) {
+                    fdk_surface_fill(
+                        gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                    assert(fdk_ok(fdk_surface_present(gs)));
+                    for (int i = 0; i < 10; i++) {
+                        (void)fdk_pump_events(gctx, 50);
+                    }
+                    assert(fdk_ok(fdk_window_get_render_path(gwin,
+                                                             &gpath)));
+                    assert(gpath == FDK_RENDER_PATH_GL);
+                    /* The trace's engagement dump + per-call lines are
+                     * all in the capture (a big buffer: the whole
+                     * first present, every call). */
+                    assert(strstr(gl_probe_capture,
+                                  "GL trace: engagement") != NULL);
+                    assert(strstr(gl_probe_capture,
+                                  "GL trace: present#1 begins") != NULL);
+                    assert(strstr(gl_probe_capture,
+                                  "glTexImage2D(") != NULL);
+                    assert(strstr(gl_probe_capture,
+                                  "glDrawArrays(TRIANGLES, 0, 6)") !=
+                           NULL);
+                    printf("[ok] wayland gl lane trace: FDK_GL_TRACE "
+                           "logged the engagement dump and every call of "
+                           "the first present — and the lane still "
+                           "delivered it\n");
+                } else {
+                    printf("[skip] wayland gl lane trace: no EGL "
+                           "driver — the trace leg degenerates\n");
+                }
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+            }
+            unsetenv("FDK_GL_TRACE");
+            unsetenv("FDK_GL_FORCE");
+            fdk_log_set_sink(NULL, NULL);
+            fdk__wayland_egl_test_reset();
+            gl_lane_capture_reset();
+        }
+
         /* ---- downgrade: a poisoned present salvages through wl_shm */
+        /* FDK_GL_FORCE is set HERE, not leaked: this leg's premise is a
+         * lane window to poison (llvmpipe refuses the lane without
+         * FORCE), and the §21 legs before it clean up after themselves
+         * — the 1.0.x code silently rode the core-only leg's leak. */
+        setenv("FDK_GL_FORCE", "1", 1);
         setenv("FDK_GL_FAIL_AT", "2", 1);
         {
             fdk_context *gctx = NULL;
@@ -3905,8 +4368,10 @@ int main(void) {
             fdk_shutdown(gctx);
         }
         unsetenv("FDK_GL_FAIL_AT");
+        unsetenv("FDK_GL_FORCE");
 
         /* ---- self-check REAL failure (poisoned readback) --------- */
+        setenv("FDK_GL_FORCE", "1", 1);
         setenv("FDK_GL_SELFCHECK_POISON", "1", 1);
         {
             /* Counting sink: the REAL-failure warning is logged once
