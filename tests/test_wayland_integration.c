@@ -62,6 +62,11 @@
 #include <fcntl.h>
 #include <unistd.h> /* access() — the injector-availability probe */
 #include <poll.h>
+#include <sys/types.h>
+#include <sys/wait.h> /* fork/waitpid — the §20 re-exec rigs (never
+                       * system(): /proc/self/exe under a shell is the
+                       * SHELL's exe, so the child never ran — see the
+                       * activation launcher leg) */
 
 /* IME end-to-end (1.1.0, M-1): this test ALSO plays the input
  * method — a second wl_display connection binding
@@ -955,10 +960,261 @@ static void wl_tl_window_cb(fdk_window *window,
     }
 }
 
+/* ---- §20: the single-owner attach-count rig (the re-land) -------------
+ *
+ * THE BUG (the owner's GTX 1050 Ti report, labwc + the proprietary
+ * driver, compositor advertising wp_linux_drm_syncobj_manager_v1):
+ * with the GL lane engaged, FDK's own background-buffer attach at
+ * the first configure put a SECOND presenter on the toplevel
+ * wl_surface. NVIDIA's EGL wraps the surface in the explicit-sync
+ * role at eglCreateWindowSurface; the wl_shm attach carried no
+ * acquire point -> protocol error 4 -> dead connection ->
+ * "dispatch_pending failed (-101), exited cleanly after 0 frames".
+ *
+ * THE PROPERTY THIS RIG PINS, compositor-agnostically: with the lane
+ * active, FDK's own queue (libwayland's "Default Queue") sends ZERO
+ * wl_surface.attach requests on the toplevel — every attach belongs
+ * to the driver's queue (Mesa names it "mesa egl surface queue";
+ * other drivers name it differently, so the classifier is "any
+ * queue that is not the Default Queue"). N presents -> N
+ * driver-queue attaches, all from EGL. Pre-fix, the rig observes
+ * exactly ONE Default-Queue attach, landing at the first configure
+ * (verified live with the fix stashed, sway + llvmpipe:
+ * "{Default Queue} -> wl_surface#23.attach(wl_buffer#36)" before
+ * the first "{mesa egl surface queue}" attach).
+ *
+ * HONEST LIMIT: this sandbox's sway has no DRM render node, so it
+ * does NOT advertise wp_linux_drm_syncobj_manager_v1 and no
+ * explicit-sync role exists to enforce the rule — the attach COUNT
+ * is the proof here. The role itself (and the fix's effect on the
+ * GTX 1050 Ti) can only be confirmed on the owner's hardware; see
+ * TESTING-ON-DESKTOP §27.
+ *
+ * The child re-execs THIS BINARY under WAYLAND_DEBUG=1 (trace ->
+ * stderr capture) with FDK_GL_FORCE=1 (swrast refuses the lane
+ * without it), presenting 3 frames; the parent parses the capture.
+ * fork()+execl("/proc/self/exe"), never system(): under a shell,
+ * /proc/self/exe is the SHELL's own image, and the child never ran
+ * (the rig-lie this file's activation leg used to carry). */
+
+#define ATTACH_RIG_PRESENTS 3
+
+static int attach_rig_child_leg(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_WAYLAND,
+                              .app_id = "org.fdk.test" };
+    fdk_result r = fdk_init(&ctx, &opts);
+    if (!fdk_ok(r)) {
+        printf("[rig-child] no compositor\n");
+        return 2;
+    }
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "FDK attach rig",
+                                 .width = 400, .height = 300 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_show(win);
+    /* Present BEFORE the first pump — exactly the owner's
+     * text_demo shape: the lane engages at the first acquire and
+     * the first present defers to the configure. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_window_get_surface(win, &s)));
+    for (int i = 0; i < ATTACH_RIG_PRESENTS; i++) {
+        fdk_surface_fill(s, (fdk_color){ .r = (float)(i + 1) /
+                                               ATTACH_RIG_PRESENTS,
+                                         .g = 0.25f, .b = 0.5f,
+                                         .a = 1.0f });
+        assert(fdk_ok(fdk_surface_present(s)));
+        printf("[rig-child] present %d ok\n", i + 1);
+        for (int k = 0; k < 10; k++) {
+            (void)fdk_pump_events(ctx, 40);
+        }
+    }
+    fdk_render_path path = (fdk_render_path)-1;
+    assert(fdk_ok(fdk_window_get_render_path(win, &path)));
+    printf("[rig-child] render-path %s\n",
+           path == FDK_RENDER_PATH_GL ? "gl" : "cpu");
+    int presented = fdk__window_ever_presented(win) != 0;
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    if (path != FDK_RENDER_PATH_GL) {
+        /* No EGL driver / lane refused in this environment — the
+         * parent turns this into a [skip] (the rig needs the lane). */
+        return 3;
+    }
+    return presented ? 0 : 1;
+}
+
+/* Parses the child's WAYLAND_DEBUG capture: returns the toplevel's
+ * wl_surface id (0 when the role handshake was never traced). */
+static unsigned attach_rig_toplevel_surface(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        return 0;
+    }
+    char line[1024];
+    unsigned surface = 0;
+    while (fgets(line, sizeof line, f) != NULL) {
+        /* -> xdg_wm_base#9.get_xdg_surface(new id xdg_surface#24,
+         *    wl_surface#23) */
+        const char *req = strstr(line, "get_xdg_surface(");
+        if (req == NULL) {
+            continue;
+        }
+        const char *surf = strstr(req, "wl_surface#");
+        if (surf == NULL) {
+            continue;
+        }
+        unsigned id = 0;
+        if (sscanf(surf, "wl_surface#%u", &id) == 1 && id > 0) {
+            surface = id;
+            break; /* the FIRST xdg surface is the rig's toplevel */
+        }
+    }
+    fclose(f);
+    return surface;
+}
+
+/* Counts attach requests on wl_surface#<surface> in the capture,
+ * split by queue: *out_default for libwayland's Default Queue (the
+ * FDK side), *out_driver for every other queue (the EGL side). */
+static void attach_rig_count(const char *path, unsigned surface,
+                             int *out_default, int *out_driver) {
+    *out_default = 0;
+    *out_driver = 0;
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        return;
+    }
+    char line[1024];
+    char want[64];
+    (void)snprintf(want, sizeof want, "wl_surface#%u.attach(", surface);
+    while (fgets(line, sizeof line, f) != NULL) {
+        if (strstr(line, want) == NULL) {
+            continue;
+        }
+        if (strstr(line, "{Default Queue}") != NULL) {
+            (*out_default)++;
+        } else {
+            (*out_driver)++;
+        }
+    }
+    fclose(f);
+}
+
+/* The parent leg: re-exec, capture, classify, assert. Returns 1 when
+ * the rig ran (assertions inside), 0 when it must [skip]. */
+static int attach_rig_parent_leg(void) {
+    char trace_path[128], marker_path[128];
+    (void)snprintf(trace_path, sizeof trace_path,
+                   "/tmp/fdk-wl-attach-rig-%ld.trace", (long)getpid());
+    (void)snprintf(marker_path, sizeof marker_path,
+                   "/tmp/fdk-wl-attach-rig-%ld.mark", (long)getpid());
+
+    fflush(stdout);
+    pid_t kid = fork();
+    if (kid < 0) {
+        printf("[skip] wayland §20 attach rig (fork failed)\n");
+        return 0;
+    }
+    if (kid == 0) {
+        /* Child: stdout -> markers, stderr -> WAYLAND_DEBUG trace. */
+        int out = open(marker_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        int err = open(trace_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (out < 0 || err < 0) {
+            _exit(4);
+        }
+        dup2(out, STDOUT_FILENO);
+        dup2(err, STDERR_FILENO);
+        if (out > STDERR_FILENO) {
+            close(out);
+        }
+        if (err > STDERR_FILENO) {
+            close(err);
+        }
+        setenv("WAYLAND_DEBUG", "1", 1);
+        setenv("FDK_GL_FORCE", "1", 1);
+        setenv("FDK_WL_ATTACH_RIG", "1", 1);
+        execl("/proc/self/exe", "test_wayland_integration", (char *)NULL);
+        _exit(4); /* exec failed */
+    }
+    int wstatus = 0;
+    int rc = 5;
+    if (waitpid(kid, &wstatus, 0) == kid && WIFEXITED(wstatus)) {
+        rc = WEXITSTATUS(wstatus);
+    }
+    if (rc == 3) {
+        printf("[skip] wayland §20 attach-count rig (no EGL driver — "
+               "the GL lane never engaged; the single-owner rule is "
+               "exercised only where a lane exists)\n");
+        (void)unlink(trace_path);
+        (void)unlink(marker_path);
+        return 0;
+    }
+    if (rc == 2) {
+        printf("[skip] wayland §20 attach-count rig (child could not "
+               "connect)\n");
+        (void)unlink(trace_path);
+        (void)unlink(marker_path);
+        return 0;
+    }
+    if (rc != 0) {
+        printf("[FAIL] wayland §20 attach rig: child rc=%d\n", rc);
+        (void)unlink(trace_path);
+        (void)unlink(marker_path);
+        return 1;
+    }
+
+    /* The child presented ATTACH_RIG_PRESENTS frames through the
+     * lane (its markers prove it). Count the toplevel's attaches. */
+    unsigned surface = attach_rig_toplevel_surface(trace_path);
+    assert(surface != 0);
+    int fdk_attaches = 0, driver_attaches = 0;
+    attach_rig_count(trace_path, surface, &fdk_attaches, &driver_attaches);
+
+    /* Count the child's successful presents from the markers. */
+    int presents = 0;
+    FILE *m = fopen(marker_path, "r");
+    if (m != NULL) {
+        char line[256];
+        while (fgets(line, sizeof line, m) != NULL) {
+            if (strstr(line, "[rig-child] present ") != NULL) {
+                presents++;
+            }
+        }
+        fclose(m);
+    }
+    (void)unlink(trace_path);
+    (void)unlink(marker_path);
+
+    assert(presents == ATTACH_RIG_PRESENTS);
+    /* THE SINGLE-OWNER ASSERTION: FDK's own queue never attaches on
+     * the lane-owned toplevel. Pre-fix this count was exactly 1
+     * (the background buffer at the first configure) — the rig that
+     * would have caught the §20 crash before the owner's hardware
+     * did. */
+    assert(fdk_attaches == 0);
+    /* N presents -> N attaches, all from the driver's queue: the
+     * driver owns the surface's buffer state, lock, stock and
+     * barrel. */
+    assert(driver_attaches == presents);
+
+    printf("[ok] wayland §20 single-owner: %d presents -> %d attaches, "
+           "all from the driver's queue; FDK's own queue sent ZERO "
+           "wl_surface.attach on the toplevel (the background-buffer "
+           "refusal; explicit-sync enforcement itself needs the "
+           "owner's NVIDIA hardware)\n",
+           presents, driver_attaches);
+    return 1;
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     if (getenv("FDK_WL_ACT_CHILD") != NULL) {
         return activation_child_leg();
+    }
+    if (getenv("FDK_WL_ATTACH_RIG") != NULL) {
+        return attach_rig_child_leg();
     }
     /* The S-6 launch voucher: a BOGUS token set before fdk_init — the
      * connection captures it (and unsets it — asserted in the
@@ -2042,8 +2298,28 @@ int main(void) {
 
                     setenv("XDG_ACTIVATION_TOKEN", launch_tok, 1);
                     setenv("FDK_WL_ACT_CHILD", "1", 1);
-                    int child_rc = system("/proc/self/exe > /dev/null 2>&1"
-                                          " </dev/null");
+                    /* fork()+execl of /proc/self/exe — NEVER
+                     * system(): a shell's /proc/self/exe is the
+                     * SHELL's own image, so the "child" never ran
+                     * and the [ok] below used to be dash reading an
+                     * empty stdin (exit 0) — the rig lie the §20
+                     * round swept out of this file. A forked child
+                     * keeps THIS binary as /proc/self/exe. */
+                    fflush(stdout);
+                    pid_t kid = fork();
+                    int child_rc = 2;
+                    if (kid == 0) {
+                        execl("/proc/self/exe",
+                              "test_wayland_integration", (char *)NULL);
+                        _exit(2); /* exec failed: skip, not fail */
+                    }
+                    if (kid > 0) {
+                        int wstatus = 0;
+                        if (waitpid(kid, &wstatus, 0) == kid &&
+                            WIFEXITED(wstatus)) {
+                            child_rc = WEXITSTATUS(wstatus);
+                        }
+                    }
                     unsetenv("FDK_WL_ACT_CHILD");
                     unsetenv("XDG_ACTIVATION_TOKEN");
                     wayland_inject("up 1");
@@ -3486,8 +3762,17 @@ int main(void) {
          * GL_UNPACK_ROW_LENGTH are extensions a strict ES2 context
          * rejects; the 1.0.0-era fix's deterministic leg, re-landed).
          * The byte math itself is pinned driverless in
-         * test_gl_lane_fallback.c. */
+         * test_gl_lane_fallback.c.
+         *
+         * §20 round note: FDK_GL_FORCE rides along so the leg
+         * actually ENGAGES on a software renderer (llvmpipe refuses
+         * the lane without it) — the rig's swrast/Mesa path is the
+         * whole point of "wherever an EGL stack exists", and a
+         * swrast context rejects the extension-shaped uploads just
+         * like a strict ES2 driver would not (it exposes both, so
+         * CORE_ONLY is what pins the shapes). */
         setenv("FDK_GL_CORE_ONLY", "1", 1);
+        setenv("FDK_GL_FORCE", "1", 1);
         {
             fdk_context *gctx = NULL;
             fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
@@ -3759,6 +4044,21 @@ int main(void) {
         fdk__wayland_egl_test_reset();
         unsetenv("FDK_GL_SELFCHECK_POISON");
         unsetenv("FDK_GL_FORCE");
+    }
+
+    /* ---- §20 (the re-land): the single-owner attach-count rig ------
+     *
+     * Re-execs this binary under WAYLAND_DEBUG=1 with the lane
+     * forced, and pins the single-owner rule on the toplevel: FDK's
+     * own queue sends ZERO wl_surface.attach requests while the GL
+     * lane owns the surface (the pre-fix tree sent exactly one, at
+     * the first configure — the second presenter that killed the
+     * owner's GTX 1050 Ti connection). See the rig block above
+     * attach_rig_child_leg() for the full story and the honest
+     * limits (no DRM node here: the attach COUNT is the proof, the
+     * explicit-sync role itself needs real hardware). */
+    {
+        (void)attach_rig_parent_leg();
     }
 
     /* ---- Idle inhibition (1.1.0, S-3) ----
