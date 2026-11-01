@@ -94,6 +94,10 @@ char *fdk__a11y_valuef(const char *fmt, double v);
  * the targets — so dangling relation targets cannot exist. */
 void fdk__a11y_relations_destroyed(fdk_widget *widget);
 
+/* §26/G-6 (model_bind.c): teardown hook — a model-bound widget
+ * unbinds before the registry can hold a stale pointer. */
+void fdk__model_bind_widget_destroyed(fdk_widget *widget);
+
 /* The text's advance width and line extent (ascent + descent) in px,
  * or {0,0} when font or text is missing. Line extent (not ink) is
  * what layout wants: two labels with different glyphs align. */

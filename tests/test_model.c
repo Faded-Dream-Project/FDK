@@ -247,6 +247,55 @@ static void test_filter(void) {
     printf("[ok] model filter: predicate, mapping, clear\n");
 }
 
+/* §26/G-6: a destroyed bound widget must DETACH from the model.
+ * The binding registry keyed by widget pointer had no destroy hook,
+ * so destroying a bound List left a stale entry — the next model
+ * mutation rebuilt into freed memory (found live by fdk-files'
+ * pane_remove_last: the second pane's list died, the binding stayed,
+ * and pane_reload's filter change walked it). Written RED first. */
+static void test_binding_detaches_on_destroy(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
+                                    (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+    fdk_model_value_type types[1] = {FDK_MODEL_TEXT};
+    fdk_model *m = fdk_model_create(types, 1);
+    assert(m != NULL);
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, NULL, &list)));
+    assert(fdk_ok(fdk_list_bind_model(list, m, 0)));
+    fdk_model_row a = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, a, 0, "one")));
+    assert(fdk_list_row_count(list) == 1);
+
+    /* destroy the list (the tree walk frees it) */
+    fdk_widget_destroy(root);
+
+    /* the model mutation that used to walk the freed binding */
+    fdk_model_row b = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, b, 0, "two")));
+    fdk_model_row c = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, c, 0, "three")));
+    assert(fdk_model_row_remove(m, a) == FDK_OK);
+
+    /* a NEW bound list mirrors the LIVING model correctly after
+     * the dead binding is gone (the registry slot is reusable) */
+    fdk_widget *root2 = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
+                                    (fdk_rect){0, 0, 400, 300},
+                                    &root2)));
+    fdk_widget *list2 = NULL;
+    assert(fdk_ok(fdk_list_create(root2, NULL, &list2)));
+    assert(fdk_ok(fdk_list_bind_model(list2, m, 0)));
+    assert(fdk_list_row_count(list2) == 2);
+    assert(strcmp(fdk_list_row_text(list2, 0), "two") == 0);
+
+    fdk_widget_destroy(root2);
+    fdk_model_destroy(m);
+    printf("[ok] model: a destroyed bound widget detaches (no stale "
+           "binding walks freed memory; the slot is reusable)\n");
+}
+
 static void test_list_binding(void) {
     fdk_widget *root = NULL;
     assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
@@ -379,6 +428,7 @@ int main(void) {
     test_sort();
     test_filter();
     test_list_binding();
+    test_binding_detaches_on_destroy();
     test_tree_binding();
     printf("all model tests passed\n");
     return 0;

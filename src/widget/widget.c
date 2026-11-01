@@ -380,6 +380,10 @@ static void teardown_free(fdk_widget *w) {
      * dangling relation target can outlive the widget. (The list is
      * NULL for the overwhelming majority of widgets; one branch.) */
     fdk__a11y_relations_destroyed(w);
+    /* §26/G-6: a model-bound widget detaches here — the binding
+     * registry is keyed by widget pointer and must never hold one
+     * past its death (found live: fdk-files' pane_remove_last). */
+    fdk__model_bind_widget_destroyed(w);
     fdk_free(w);
 }
 

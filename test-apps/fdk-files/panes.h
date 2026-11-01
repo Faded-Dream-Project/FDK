@@ -74,6 +74,12 @@ void pane_up(pane *p);
 
 /* Tab management. */
 void pane_new_tab(pane *p, const char *start_dir);
+/* §26/3a: the split view. pane_add() appends the second pane (opens
+ * at the active pane's location, becomes active); returns the new
+ * pane count or -1 at the two-pane cap. pane_remove_last() closes
+ * it (and is a no-op with one pane). */
+int pane_add(void);
+void pane_remove_last(void);
 void pane_close_tab(pane *p, size_t index);
 
 /* The view modes (each rebuilds the current tab's view host). */

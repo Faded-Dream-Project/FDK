@@ -4,6 +4,7 @@
 #include "panes.h"
 #include "fsops.h"
 #include "mime.h"
+#include "bookmarks.h"
 #include "menus.h"
 #include "ops_dialogs.h"
 #include "teardown.h"
@@ -31,6 +32,94 @@ static void thumb_ready_cb(const char *path, fdk_surface *thumb,
                            void *user);
 
 /* forward decls (the build order below crosses them) */
+/* ---- the split view (§26/3a) ----------------------------------------
+ *
+ * fwd decls: the drop handler and crumb free live below the build
+ * order this file grew with. */
+static void pane_drop(fdk_widget *w, fdk_event_type type,
+                      const fdk_drag_event *ev, void *user);
+static void pane_crumbs_free(pane *p);
+
+/*
+ *
+ * pane_add() appends a second (or third, capped at 2 — the §24 APP 1
+ * spec says TWO panes; more is a tabs job) pane: a horizontal box
+ * holding a notebook with its own tabs, drop target, and breadcrumb.
+ * The active pane switches on click (focus follows the pointer into
+ * a pane). pane_remove_last() closes the split. */
+static fdk_widget *g_panes_box;
+
+static bool pane_pointer_focus(fdk_widget *w,
+                              const fdk_widget_event *ev,
+                              void *user) {
+    (void)w;
+    if (ev->type == FDK_WIDGET_POINTER_DOWN) {
+        pane *p = user;
+        for (int i = 0; i < fapp.pane_count; i++) {
+            if (fapp.panes[i] == p) {
+                fapp.active_pane = i;
+                break;
+            }
+        }
+    }
+    return false;
+}
+
+int pane_add(void) {
+    if (fapp.pane_count >= 2) {
+        return -1; /* the spec's two panes; tabs carry the rest */
+    }
+    pane *p = calloc(1, sizeof *p);
+    if (p == NULL) {
+        return -1;
+    }
+    p->watch_fd = -1;
+    fdk_widget *pn_box = NULL;
+    (void)fdk_box_create(g_panes_box, FDK_VERTICAL, &pn_box);
+    fdk_widget_set_expand(pn_box, true, true);
+    p->notebook_host = pn_box;
+    (void)fdk_notebook_create(pn_box, fapp.base.font_ui,
+                              &p->notebook);
+    fdk_widget_set_expand(p->notebook, true, true);
+    /* the drop target + focus switch */
+    (void)fdk_widget_set_drop_target(p->notebook_host,
+                                     FDK_DRAG_FORMAT_URI_LIST);
+    fdk_widget_set_drag_callback(p->notebook_host, pane_drop, p);
+    fdk_widget_set_event_callback(p->notebook_host,
+                                  pane_pointer_focus, p);
+
+    fapp.panes[fapp.pane_count++] = p;
+    /* the new pane opens where the active one is (the classic
+     * "duplicate view" split) */
+    pane_new_tab(p, active_tab(active_pane())->dir);
+    fapp.active_pane = fapp.pane_count - 1;
+    return fapp.pane_count;
+}
+
+void pane_remove_last(void) {
+    if (fapp.pane_count <= 1) {
+        return;
+    }
+    pane *p = fapp.panes[fapp.pane_count - 1];
+    if (p != NULL) {
+        if (fapp.active_pane == fapp.pane_count - 1) {
+            fapp.active_pane = 0;
+        }
+        if (p->notebook_host != NULL) {
+            fdk_widget_destroy(p->notebook_host);
+        }
+        pane_crumbs_free(p);
+        if (p->watch_fd >= 0) {
+            fs_watch_stop(p->watch_fd);
+        }
+        for (size_t t = 0; t < p->tab_count; t++) {
+            free(p->tabs[t]);
+        }
+        free(p);
+    }
+    fapp.pane_count--;
+}
+
 static void mount_activated(fdk_widget *list, size_t row, void *user);
 static void trash_open_clicked(fdk_widget *btn, void *user);
 static const char *strcasestr_f(const char *hay, const char *needle);
@@ -1109,30 +1198,14 @@ int panes_build(files_app *a) {
 
     /* the right side: the pane stack (single pane first; the split
      * toggle clones the structure) */
-    fdk_widget *panes_box = NULL;
-    (void)fdk_box_create(paned, FDK_VERTICAL, &panes_box);
-    fdk_widget_set_expand(panes_box, true, true);
+    (void)fdk_box_create(paned, FDK_VERTICAL, &g_panes_box);
+    fdk_widget_set_expand(g_panes_box, true, true);
 
-    pane *p = calloc(1, sizeof *p);
-    p->watch_fd = -1;
-    fdk_widget *pn_box = NULL;
-    (void)fdk_box_create(panes_box, FDK_VERTICAL, &pn_box);
-    fdk_widget_set_expand(pn_box, true, true);
-    p->notebook_host = pn_box;
-    (void)fdk_notebook_create(pn_box, a->base.font_ui,
-                              &p->notebook);
-    fdk_widget_set_expand(p->notebook, true, true);
+    /* §26/3a: the bookmarks section (between mounts and trash) */
+    bookmarks_build(sidebar_box);
 
-    fapp.panes[0] = p;
-    fapp.pane_count = 1;
-    fapp.active_pane = 0;
+    pane_add();
 
-    pane_new_tab(p, fi_home());
-
-    /* the drop target: the whole pane box accepts uri drops */
-    (void)fdk_widget_set_drop_target(p->notebook_host,
-                                     FDK_DRAG_FORMAT_URI_LIST);
-    fdk_widget_set_drag_callback(p->notebook_host, pane_drop, p);
     (void)fdk_window_set_drop_formats(fapp.base.window,
                                       FDK_DRAG_FORMAT_URI_LIST);
 
