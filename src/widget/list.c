@@ -84,6 +84,14 @@ typedef struct fdk_list {
     size_t selected_count; /* O(1) selection queries + batch diffing */
     fdk_list_selection_fn on_selection_changed;
     void *on_selection_data;
+    /* §25/G-3: the bounds-carrying twin. When set, it REPLACES the
+     * plain callback (one signal slot). The span accumulates across
+     * the multi-row mutations the API performs, so one fire reports
+     * every row it touched. */
+    fdk_list_selection_bounds_fn on_selection_bounds;
+    void *on_selection_bounds_data;
+    bool span_active;        /* a mutation is accumulating           */
+    size_t span_first, span_last;
     /* ---- Row activation (1.2.0) ----
      *
      * Double-click and Enter both fire on_row_activate — the
@@ -268,9 +276,17 @@ static void list_place_appended(fdk_list *l) {
 /* ---- selection plumbing ---- */
 
 static void list_fire_changed(fdk_list *l) {
-    if (l->on_selection_changed != NULL) {
+    if (l->on_selection_bounds != NULL) {
+        fdk_list_selection_bounds b;
+        b.valid = l->span_active;
+        b.first = l->span_active ? l->span_first : 0;
+        b.last = l->span_active ? l->span_last : 0;
+        l->on_selection_bounds(&l->base, &b,
+                               l->on_selection_bounds_data);
+    } else if (l->on_selection_changed != NULL) {
         l->on_selection_changed(&l->base, l->on_selection_data);
     }
+    l->span_active = false; /* the span is per-fire                */
 }
 
 static fdk_i64 list_now_ms(void) {
@@ -302,6 +318,19 @@ static void list_set_row(fdk_list *l, size_t index, bool selected) {
         /* A11y: the row's selected state flipped. */
         fdk__a11y_notify(&row->base, FDK_A11Y_STATE_CHANGED,
                          FDK_A11Y_SELECTED);
+        /* §25/G-3: widen the accumulating change span. */
+        if (!l->span_active) {
+            l->span_active = true;
+            l->span_first = index;
+            l->span_last = index;
+        } else {
+            if (index < l->span_first) {
+                l->span_first = index;
+            }
+            if (index > l->span_last) {
+                l->span_last = index;
+            }
+        }
     }
 }
 
@@ -392,6 +421,64 @@ fdk_result fdk_list_select(fdk_widget *list, size_t row) {
     list_set_row(l, row, true);
     l->anchor = row;
     l->key_cursor = row;
+    list_fire_changed(l);
+    return FDK_OK;
+}
+
+fdk_result fdk_list_deselect(fdk_widget *list, size_t row) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list *l = list_of(list);
+    if (row >= l->count) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (l->mode == FDK_LIST_SELECTION_NONE) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (l->row_widgets[row]->selected) {
+        list_set_row(l, row, false);
+        /* the anchor/cursor survive a deselect they do not point at;
+         * one pointing AT the row moves to it conceptually (the next
+         * shift-click re-anchors anyway) — no state to fix here */
+        list_fire_changed(l);
+    }
+    return FDK_OK; /* the no-op contract: no signal when unchanged */
+}
+
+fdk_result fdk_list_select_range(fdk_widget *list, size_t first,
+                                 size_t last, bool additive) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list *l = list_of(list);
+    if (l->mode == FDK_LIST_SELECTION_NONE) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (l->count == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* clamp + order */
+    size_t lo = first, hi = last;
+    if (lo > hi) {
+        size_t t = lo;
+        lo = hi;
+        hi = t;
+    }
+    if (lo >= l->count) {
+        lo = l->count - 1; /* both ends past the end: the last row */
+    }
+    if (hi >= l->count) {
+        hi = l->count - 1;
+    }
+    if (!additive) {
+        list_clear_selection(l);
+    }
+    for (size_t i = lo; i <= hi; i++) {
+        list_set_row(l, i, true);
+    }
+    l->anchor = lo;
+    l->key_cursor = hi;
     list_fire_changed(l);
     return FDK_OK;
 }
@@ -1443,6 +1530,21 @@ fdk_result fdk__list_row_set_icon_image(fdk_widget *list, size_t row,
     list_relayout(l);
     fdk_widget_invalidate(&r->base);
     return FDK_OK;
+}
+
+void fdk_list_set_on_selection_changed_bounds(
+    fdk_widget *list, fdk_list_selection_bounds_fn fn,
+    void *user_data) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return;
+    }
+    fdk_list *l = list_of(list);
+    l->on_selection_bounds = fn;
+    l->on_selection_bounds_data = user_data;
+    /* one signal slot: setting the bounds twin retires the plain
+     * callback (the documented replacement) */
+    l->on_selection_changed = NULL;
+    l->on_selection_data = NULL;
 }
 
 void fdk_list_set_on_selection_changed(fdk_widget *list,

@@ -84,6 +84,17 @@ static fdk_u32 px_at(fdk_surface *s, int x, int y) {
 }
 
 static int g_changes = 0;
+static fdk_list_selection_bounds g_last_bounds;
+static void on_changed_bounds(fdk_widget *w,
+                              const fdk_list_selection_bounds *bounds,
+                              void *user) {
+    (void)w;
+    (void)user;
+    if (bounds != NULL) {
+        g_last_bounds = *bounds;
+    }
+}
+
 static void on_changed(fdk_widget *w, void *user) {
     (void)w;
     (void)user;
@@ -252,6 +263,92 @@ static void test_multiple(void) {
 }
 
 /* ---- NONE mode ---- */
+
+/* §25/G-3: selection API completeness. A file manager's
+ * Edit menu needs: deselect ONE row (invert-selection without the
+ * rebuild-everything dance), select a RANGE programmatically (the
+ * shift-click equivalent), and the changed signal must say WHICH
+ * rows moved so a status bar can update without rescanning. The
+ * §24 app worked around the absence by clearing + re-selecting
+ * (N fires, and no range info at all).
+ *
+ * Written RED first: fdk_list_deselect / fdk_list_select_range /
+ * fdk_list_selection_changed_bounds did not exist.
+ */
+static void test_selection_completeness(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &list)));
+    fdk_rect r = { 0, 0, 200, 260 };
+    fdk_widget_set_bounds(list, r);
+    for (int i = 0; i < 8; i++) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "item %d", i);
+        assert(fdk_ok(fdk_list_append(list, buf, NULL)));
+    }
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    g_changes = 0;
+    fdk_list_set_on_selection_changed(list, on_changed, NULL);
+
+    /* --- deselect one row (two rows selected first: additive
+     * range select, then deselect one of them) --- */
+    assert(fdk_ok(fdk_list_select_range(list, 0, 3, false)));
+    assert(fdk_list_selected_count(list) == 4);
+    assert(fdk_ok(fdk_list_deselect(list, 1)));
+    assert(fdk_ok(fdk_list_deselect(list, 2)));
+    assert(fdk_list_selected_count(list) == 2);
+    assert(fdk_ok(fdk_list_deselect(list, 0)));
+    assert(fdk_list_selected_count(list) == 1);
+    assert(fdk_list_is_selected(list, 3));
+    assert(!fdk_list_is_selected(list, 0));
+    /* deselecting an unselected row: OK, no signal */
+    int before = g_changes;
+    assert(fdk_ok(fdk_list_deselect(list, 1)));
+    assert(g_changes == before);
+    /* bad index refused */
+    assert(fdk_list_deselect(list, 99) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_list_deselect(NULL, 0) == FDK_ERR_INVALID_ARGUMENT);
+
+    /* --- select_range: the programmatic shift-click --- */
+    assert(fdk_ok(fdk_list_select_range(list, 2, 5, false)));
+    assert(fdk_list_selected_count(list) == 4);
+    assert(fdk_list_is_selected(list, 2));
+    assert(fdk_list_is_selected(list, 5));
+    assert(!fdk_list_is_selected(list, 1));
+    /* additive keeps the old selection */
+    assert(fdk_ok(fdk_list_select_range(list, 6, 7, true)));
+    assert(fdk_list_selected_count(list) == 6);
+    /* inverted span works (5,2) */
+    assert(fdk_ok(fdk_list_select_range(list, 5, 2, false)));
+    assert(fdk_list_selected_count(list) == 4);
+    assert(fdk_list_is_selected(list, 3));
+    /* out-of-range ends are clamped, not fatal (6..7 after the
+     * clamp to the 8-row count) */
+    assert(fdk_ok(fdk_list_select_range(list, 6, 60, false)));
+    assert(fdk_list_is_selected(list, 6));
+    assert(fdk_list_is_selected(list, 7));
+    assert(fdk_list_selected_count(list) == 2);
+
+    /* --- the changed signal carries the affected range --- */
+    fdk_list_set_on_selection_changed_bounds(list,
+                                         on_changed_bounds, NULL);
+    /* replacing {6,7} with 0..3 touches rows 0..7 (the clear of 6,7
+     * is part of the same settled change) */
+    g_last_bounds.valid = false;
+    assert(fdk_ok(fdk_list_select_range(list, 0, 3, false)));
+    assert(g_last_bounds.valid);
+    assert(g_last_bounds.first == 0 && g_last_bounds.last == 7);
+    /* a deselect reports exactly its own row */
+    g_last_bounds.valid = false;
+    assert(fdk_ok(fdk_list_deselect(list, 2)));
+    assert(g_last_bounds.valid);
+    assert(g_last_bounds.first == 2 && g_last_bounds.last == 2);
+
+    fdk_widget_destroy(root);
+    printf("[ok] list: selection completeness (deselect one, "
+           "select_range additive/clamped/inverted, changed signal "
+           "carries the affected range)\n");
+}
 
 static void test_none(void) {
     fdk_widget *root = fresh_root();
@@ -550,6 +647,7 @@ int main(void) {
     test_crud();
     test_single();
     test_multiple();
+    test_selection_completeness();
     test_none();
     test_keyboard();
     test_scrolling();
