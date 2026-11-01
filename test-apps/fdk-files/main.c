@@ -466,6 +466,15 @@ static void rig_copy_done(bool ok, const char *err, void *user) {
     (void)err;
     (void)user;
     g_rig_copy_ok = ok ? 1 : 0;
+    /* the tray-bus rig's T3: the long-op notification (the same
+     * rule the progress dialog applies — >2 MB means "long") */
+    if (ok && fapp.notify != NULL) {
+        fdk_notify_request req = {0};
+        req.summary = "File operation finished";
+        req.body = "The smoke rig's worker copy completed.";
+        req.urgency = FDK_NOTIFY_URGENCY_LOW;
+        (void)fdk_notify_send(fapp.notify, &req, NULL);
+    }
 }
 
 /* ---- the window-configure relay -------------------------------------- */
@@ -510,10 +519,26 @@ static void rig_script(void) {
                fdk_list_row_text(t->list, 0));
         fflush(stdout);
     }
-    /* a real mkdir + rename + trash round in a scratch dir */
+    /* a real mkdir + rename + trash round in a scratch dir. The
+     * tree gets one >2 MB file so the worker-copy finish fires the
+     * long-operation NOTIFICATION (the >2 MB rule the progress
+     * dialog applies) — the tray-bus rig's T3 depends on it. */
     char scratch[FI_PATH_MAX];
     snprintf(scratch, sizeof scratch, "/tmp/ffs-%d", (int)getpid());
     mkdir(scratch, 0755);
+    {
+        char big[TA_JOIN_MAX];
+        ta_join_suf(big, sizeof big, scratch, "payload.bin", "");
+        FILE *bf = fopen(big, "wb");
+        if (bf != NULL) {
+            char chunk[65536];
+            memset(chunk, 7, sizeof chunk);
+            for (int i = 0; i < 40; i++) { /* ~2.6 MB */
+                fwrite(chunk, 1, sizeof chunk, bf);
+            }
+            fclose(bf);
+        }
+    }
     fi_new_folder(fapp.panes[0], scratch);
     pane_navigate(fapp.panes[0], scratch);
     mkdir("/tmp/ffs-inner", 0755);
