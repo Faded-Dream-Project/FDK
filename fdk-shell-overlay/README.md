@@ -16,7 +16,7 @@ both of FDK's backends:
   `SKIP_PAGER`) — the EWMH world's equivalent layering semantics,
   honored by OpenBox, fluxbox, IceWM and friends.
 
-Version 0.2.0. Own build, own version, own pkg-config file — a
+Version 0.5.0. Own build, own version, own pkg-config file — a
 separate package that happens to live in FDK's tree for now, ready
 to move to its own repository unchanged.
 
@@ -237,13 +237,13 @@ click and Escape dismissal — is `examples/bar.c`
 (`./build/examples/bar`, or `./build/examples/bar 5` to auto-quit
 after 5 seconds).
 
-## API surface (0.2.0)
+## API surface (0.5.0)
 
 - `fdk_shell_init` / `fdk_shell_shutdown` / `fdk_shell_version`
   / `fdk_shell_backend_supported`
 - Outputs: `fdk_shell_output_count`, `fdk_shell_output_name`,
   `fdk_shell_output_get_info` (position, logical size, scale,
-  physical mm — 0.2.0), and LIVE output events:
+  physical mm — since 0.2.0), and LIVE output events:
   `fdk_shell_set_output_event_callback` (ADDED / REMOVED / CHANGED —
   Wayland hotplug and mode changes proven against sway's
   `create_output` / mode / `unplug` IPC; enumerate the initial set
@@ -251,11 +251,11 @@ after 5 seconds).
 - Layers: `fdk_shell_layer_create` / `destroy` / `get_surface` /
   `set_event_callback` / `get_size` / `show` / `hide` /
   `set_cursor` (desc: layer, anchors, margins, exclusive zone,
-  keyboard mode, desired size, output index, and 0.2.0's
+  keyboard mode, desired size, output index, and since 0.2.0 the
   **namespace** — what compositor rules match on; Wayland's
   zwlr namespace, X11's WM_CLASS res_class; "fdk-shell-overlay" default)
 - Popups: `fdk_shell_popup_create` / `destroy` / `get_surface` /
-  `set_event_callback` / `show` / `hide` / `set_cursor`, and 0.2.0's
+  `set_event_callback` / `show` / `hide` / `set_cursor`, and since 0.2.0
   **cascades**: `fdk_shell_popup_create_child` — submenus, any
   depth, family teardown (destroying a parent sweeps its children)
 
@@ -275,7 +275,7 @@ every shape FDK can draw, a layer can ask for. The demo bar shows
 the worked example: the hand over its menu button, the arrow
 everywhere else.
 
-## _FDK_WM_LAYER (0.2.0)
+## _FDK_WM_LAYER (0.5.0)
 
 Every layer window now carries `_FDK_WM_LAYER` (type STRING):
 "background" / "bottom" / "top" / "overlay" — the level's own name,
@@ -286,7 +286,7 @@ from the EWMH soup, and fdk-shell-overlay needed no release on their side to
 start speaking it. Unknown-property WMs ignore it (harmless by
 construction).
 
-## Honest limits (0.2.0)
+## Honest limits (0.5.0)
 
 - **Layer levels**: background / bottom / top / overlay are
   protocol truth on Wayland; on X11 they ride the stacking state of
@@ -425,7 +425,7 @@ models headlessly. One model per bus connection; name acquisition is
 asynchronous (the HOST_STATE / SERVER_STATE event + serving()).
 docs/DECISIONS.md D-014 records the shape decisions.
 
-## notifyd — the notification daemon example (0.2.0)
+## notifyd — the notification daemon example (0.5.0)
 
 `examples/notifyd.c` is a complete **org.freedesktop.Notifications
 server** on FDK's native D-Bus client, displaying its cards as
