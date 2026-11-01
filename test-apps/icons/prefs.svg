@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- FDK test-apps icon, original artwork, prefs. currentColor-styled. -->
+  <g stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+<circle cx="12" cy="12" r="3"/><path d="M12 3 V6"/><path d="M12 18 V21"/><path d="M3 12 H6"/><path d="M18 12 H21"/><path d="M5.6 5.6 L7.8 7.8"/><path d="M16.2 16.2 L18.4 18.4"/><path d="M5.6 18.4 L7.8 16.2"/><path d="M16.2 7.8 L18.4 5.6"/>
+  </g>
+</svg>
