@@ -415,6 +415,14 @@ struct fdk_dbus_connection {
 
     fdk_dbus_message **deferred; /* pre-ready sends, in order      */
     size_t deferred_count, deferred_cap;
+    /* §23 follow-up: app sends made BEFORE the bus finished its
+     * Hello round trip. The single deferred queue let a signal
+     * overtake Hello — dbus-daemon disconnects any connection
+     * whose first non-Hello traffic precedes Hello (the admission
+     * rule), which killed tray items whose setters fire at open.
+     * Hello now rides `deferred` ALONE; these wait for the reply. */
+    fdk_dbus_message **post_ready; /* app sends, flushed at ready   */
+    size_t post_ready_count, post_ready_cap;
 
     struct fdk_dbus_match_ref *matches;
     size_t match_count, match_cap;
