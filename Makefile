@@ -216,6 +216,7 @@ extra_flags = $(if $(findstring src/platform/x11/,$(1)),$(X11_CFLAGS)) \
               $(if $(findstring src/text/,$(1)),-Ithird_party/stb) \
               $(if $(findstring src/widget/,$(1)),-Ithird_party/stb) \
               $(if $(findstring src/render/,$(1)),-Ithird_party/stb) \
+              $(if $(findstring src/print/,$(1)),-Ithird_party/stb) \
               $(if $(findstring src/theme/,$(1)),-Ithird_party/nanosvg)
 
 # --- Sources ------------------------------------------------------------
@@ -261,7 +262,8 @@ THEME_SRCS    := $(wildcard src/theme/*.c)
 I18N_SRCS     := $(wildcard src/i18n/*.c)
 DBUS_SRCS     := $(wildcard src/dbus/*.c)
 DESKTOP_SRCS  := $(wildcard src/desktop/*.c)
-LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(PLATFORM_COMMON_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS) $(THEME_SRCS) $(I18N_SRCS) $(DBUS_SRCS) $(DESKTOP_SRCS)
+PRINT_SRCS    := $(wildcard src/print/*.c)
+LIB_SRCS      := $(CORE_SRCS) $(PLATFORM_X11_SRCS) $(PLATFORM_WAYLAND_SRCS) $(PLATFORM_COMMON_SRCS) $(WINDOW_SRCS) $(RENDER_SRCS) $(WIDGET_SRCS) $(LAYOUT_SRCS) $(TEXT_SRCS) $(THEME_SRCS) $(I18N_SRCS) $(DBUS_SRCS) $(DESKTOP_SRCS) $(PRINT_SRCS)
 
 # Static and shared builds use separate object trees (obj/ vs obj-pic/)
 # since shared objects must be position-independent (-fPIC) and static

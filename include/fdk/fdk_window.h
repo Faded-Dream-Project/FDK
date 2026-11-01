@@ -66,6 +66,10 @@ typedef struct fdk_window_options {
  *
  * The window is NOT shown on the screen until fdk_window_show() is
  * called. On any failure, *out_window is left unchanged. */
+/* The context this window lives on (the print dialog and other
+ * window-spawned helpers need it; the accessor is the clean seam). */
+fdk_context *fdk_window_get_context(fdk_window *window);
+
 fdk_result fdk_window_create(fdk_context *ctx,
                               const fdk_window_options *options,
                               fdk_window **out_window);
