@@ -17,6 +17,69 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-01 (on the rc2 line)
 
+### Fixed — THE EXIT-LEAK ROUND (§22): the canonical teardown tail, and the NVIDIA exit reports made clean with proof
+
+- **The second GTX 1050 Ti exit report**: the app itself is fine
+  ("exited cleanly after 645 frames", zero WARN lines), but
+  LeakSanitizer's exit report names 256 B in 4 allocations with
+  every frame inside `libEGL_nvidia.so.0+0xc94e1` — and ASan's fast
+  unwinder cannot walk the stripped NVIDIA library, so "no FDK
+  frame" was not yet proof of anything.
+- **THE AUDIT (before any suppression was written)**: the lane's
+  whole teardown was read call-by-call, per window AND at connection
+  shutdown, including every early-return/error/downgrade path. The
+  verdict: the destroy ladder was already canonical (MakeCurrent(nil)
+  first, eglDestroySurface BEFORE wl_egl_window_destroy, the share
+  root dying last before eglTerminate, single-window connections
+  included) — but the sequence's TAIL CALL was missing everywhere:
+  **`eglReleaseThread` was never resolved and never called**. That
+  call is the documented way (EGL 1.5 §3.2) a thread that used the
+  display retires its per-thread driver state — and per-thread state
+  that only a tail call frees is EXACTLY the shape of a small
+  always-there exit allocation on a driver that mallocs its thread
+  record. `fdk_wayland_egl_shutdown` now resolves eglReleaseThread
+  (optional, EGL 1.2+) and calls it once after eglTerminate — FDK
+  touches EGL from one thread by contract, so one call retires it.
+- **THE RIG LEG THAT FAILS WITHOUT IT**: the sway suite's GL-lane
+  group gains the §22 teardown leg — FDK_GL_TRACE now logs the
+  window ladder (MakeCurrent(nil) -> DestroySurface ->
+  DestroyContext -> wl_egl_window_destroy) and the connection ladder
+  (share root -> eglTerminate -> eglReleaseThread) in order, and a
+  new test seam
+  (`fdk__wayland_egl_test_teardown_calls`, counting shutdowns and
+  reached tails) lets the leg assert counters equality. A/B-verified
+  in the rig: with the tail call compiled out the leg ABORTS at
+  `rel_calls == tears`; with it, green.
+- **THE SANDBOX PROOFS**: the sanitized exit probe (lane engaged on
+  llvmpipe, presents, clean shutdown) exits with a ZERO-byte LSan
+  report — under the suppression file AND under the slow unwinder
+  (`fast_unwind_on_malloc=0:malloc_context_size=40`, full stacks) —
+  so FDK's own EGL teardown leaves nothing on Mesa. The negative
+  control: a one-line guarded `malloc(137)` in the probe's `main`,
+  run WITH the suppression file active, is still reported (exit 1,
+  the frame named) — per-module suppressions cannot hide an FDK
+  leak. The no-tail A/B on Mesa also exits clean: Mesa keeps no
+  per-thread malloc the tail would free, which is why the 256 B is
+  NVIDIA-only and only the owner's machine can observe whether the
+  fixed tail already retires it.
+- **THE SUPPRESSION (with its proof)**: `leak:libEGL_nvidia` joins
+  `tests/data/lsan-gl.supp`, documented with the audit verdict, the
+  fix, and the remaining unknown (if the 256 B disappears from an
+  unsuppressed owner run, the fix closed it; if it stays, the driver
+  allocates at engagement and never frees). The libdbus entry's
+  comment block carries the round's other finding: the leak's stack
+  runs through the SAME recurring driver site, and the owner's
+  `LD_DEBUG=libs` line ("RUNPATH from file /usr/lib/libasan.so.8")
+  names whose RUNPATH the loader consulted, NOT who requested the
+  load — Arch's package closure rules out every candidate this
+  sandbox could check (nvidia-utils, wlroots, labwc,
+  libnvidia-egl-wayland, libnvidia-glcore: no libdbus anywhere), so
+  the pull is a runtime dlopen inside the proprietary chain and the
+  decisive owner-side command is now `LD_DEBUG=files ... | grep -B2
+  -A2 libdbus` (its "needed by" names the requester). Both entries
+  stay per-library: any leak whose stack contains an FDK frame fails
+  the run — that is the negative control's whole point.
+
 ### Fixed — THE GL LANE'S REAL NVIDIA ANSWER: probe the driver, ladder the failures, share the group (§21, the GTX 1050 Ti follow-up)
 
 - **The owner's report after the §20 fix**: the crash is gone

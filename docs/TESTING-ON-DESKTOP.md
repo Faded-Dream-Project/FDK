@@ -1063,11 +1063,25 @@ asserts.
 
 A clean exit under the sanitizers: pass
 `LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp` so the
-third-party modules (Mesa caches, and on your machine the NVIDIA
-chain's libdbus-1 one-time state — see the suppression file's own
-proof block for the `LD_DEBUG=libs` one-liner that names the exact
-puller) stay quiet while every FDK allocation remains accounted.
-If an FDK frame appears in the report, that is a real bug — file it.
+third-party modules stay quiet while every FDK allocation remains
+accounted. On your machine that is now TWO known NVIDIA-side exit
+reports, both suppressed with proof: the NVIDIA chain's `libdbus-1`
+one-time state (~670-766 B in 3 allocations, frames entirely inside
+libdbus) and `libEGL_nvidia`'s per-thread state (256 B in 4
+allocations, every frame inside `libEGL_nvidia.so.0+0xc94e1` — the
+§22 round audited FDK's teardown call-by-call before suppressing,
+fixed the one missing canonical call (eglReleaseThread, now the
+connection shutdown's tail), and left the question "does the fix
+already retire the 256 B?" to your next UNSUPPRESSED run: if it
+still appears, the driver allocates and never frees and the
+suppression stands; if it vanished, the fix closed it). The
+suppression file's own proof blocks carry both stories plus the
+decisive commands — `LD_DEBUG=files ./build/examples/text_demo
+"test" 2>&1 | grep -B2 -A2 libdbus` (the "needed by" line names the
+libdbus puller; the earlier `LD_DEBUG=libs` RUNPATH line only
+names whose search path the loader used). If an FDK frame appears
+in any leak report, that is a real bug — file it; the negative
+control in the §22 record proves the suppressions cannot hide one.
 
 ## 28. The Wayland/NVIDIA sign-off round (the desktop's answer, not
 the rig's)
@@ -1097,6 +1111,9 @@ property, not an anecdote. All of it on your real session
   bearing order: EGL surface released BEFORE the first wl_shm
   attach).
 - **A clean exit**: LeakSanitizer's exit report on a healthy run
-  is expected to name third-party modules (NVIDIA/libwayland
-  internals); FDK-owned allocations report zero. If an FDK frame
-  appears in the report, that is a real bug — file it.
+  is expected to name third-party modules — on the NVIDIA chain
+  specifically the two known ones (libdbus-1's one-time state and
+  libEGL_nvidia's per-thread 256 B; both suppressed with proof in
+  `tests/data/lsan-gl.supp`, see §27's clean-exit note); FDK-owned
+  allocations report zero. If an FDK frame appears in the report,
+  that is a real bug — file it.

@@ -1805,16 +1805,35 @@ same file.
 
 **LSan and libdbus** (2026-11-01, the GTX 1050 Ti report): a
 sanitized desktop run may end with LeakSanitizer naming
-`libdbus-1.so.3` (~754 bytes, frames entirely inside the module).
+`libdbus-1.so.3` (~670-766 bytes, frames entirely inside the module).
 FDK is provably not the puller — its D-Bus is the native wire client
 in `src/dbus/` (libdbus is neither linked nor dlopen'd), and the
 full sandbox stack loads no libdbus under `LD_DEBUG=libs`. The
-puller is a third-party library on the reporting machine (the
-NVIDIA driver chain is the prime suspect — see the suppression
-file's own proof block for the one-liner that names it). The same
+puller is a third-party library on the reporting machine; the §22
+round narrowed it (the leak's stack runs through the same recurring
+`libEGL_nvidia.so.0+0xc94e1` site as the EGL entry below, and Arch's
+package closure rules out every non-proprietary candidate) but only
+the reporting machine can NAME it — `LD_DEBUG=files ./build/
+examples/text_demo "test" 2>&1 | grep -B2 -A2 libdbus` (the
+"needed by" line names the requester). The same
 `tests/data/lsan-gl.supp` carries the module-scoped suppression;
 desktop debug runs get the clean exit with
 `LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp`.
+
+**LSan and libEGL_nvidia** (2026-11-01, the §22 exit-leak round):
+a sanitized NVIDIA desktop run may also end with 256 B in 4
+allocations whose frames are all inside `libEGL_nvidia.so.0`. FDK's
+teardown was audited call-by-call BEFORE suppressing (the §22
+record, D-040): the destroy ladder was already canonical, the one
+missing call — `eglReleaseThread`, the canonical tail — was fixed
+(wayland_egl.c's shutdown), and the sway suite's teardown leg fails
+without it. The sandbox's Mesa stack exits with ZERO bytes leaked
+over the same probe, so the 256 B is the proprietary driver's own
+per-thread state; `leak:libEGL_nvidia` suppresses it per-module
+with that proof in the file. Any leak whose stack carries an FDK
+frame still fails the run — the §22 negative control (an injected
+one-line FDK malloc reported THROUGH the active suppression file)
+proves that property directly.
 
 **The examples-level proof** (`scripts/verify_gl_examples.sh` in the
 staging environment, outside the repo): every example runs twice —

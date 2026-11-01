@@ -2188,3 +2188,77 @@ ladder exhaustion downgrading with salvage; the trace leg; the
 FAIL_AT downgrade; the self-check round; the §20 attach-count rig
 with the lane actually engaged); the sanitized GL repro exits clean
 under the suppression file; exports verified.
+
+## D-040 — the exit-leak round: the canonical teardown tail, suppression only after proof (§22)
+
+**Date**: 2026-11-01 · **Status**: shipped (the second GTX 1050 Ti
+exit report's answer)
+
+**1. THE REPORT.** A clean run (645 frames, zero WARNs, exit line
+normal) whose LeakSanitizer exit report names 256 B in 4 allocations
+with every frame inside `libEGL_nvidia.so.0+0xc94e1` — and ASan's
+fast unwinder cannot walk the stripped NVIDIA library, so the
+absence of an FDK frame proved nothing yet. The discipline this
+round: prove first, suppress second.
+
+**2. THE AUDIT.** The lane's teardown was read call-by-call before
+any suppression was written — per window, at connection shutdown,
+and on every early-return/error/downgrade path
+(wayland_egl.c + wayland_window.c + wayland_connection.c). The
+destroy ladder was already canonical everywhere: MakeCurrent(nil)
+first, eglDestroySurface BEFORE wl_egl_window_destroy (the
+platform's lifetime rule), eglDestroyContext after, the share-root
+context dying LAST at connection shutdown (single-window
+connections included — it is never skipped), eglTerminate once
+after the last window. ONE canonical call was missing everywhere:
+**eglReleaseThread** — never resolved, never called. EGL 1.5 §3.2's
+teardown tail; per-thread driver state is exactly the class of
+small always-there allocation the report showed, and a driver that
+mallocs its thread record frees it only when the tail runs.
+
+**3. THE FIX AND ITS PROOF.** `fdk_wayland_egl_shutdown` resolves
+eglReleaseThread (optional — pre-1.2 loaders only lose a trace
+line) and calls it once after eglTerminate; FDK touches EGL from
+one thread by contract. FDK_GL_TRACE now logs both teardown
+ladders (window: MakeCurrent(nil) -> DestroySurface ->
+DestroyContext -> wl_egl_window_destroy; connection: share root ->
+eglTerminate -> eglReleaseThread), and the seam
+`fdk__wayland_egl_test_teardown_calls` counts shutdowns vs reached
+tails. The sway suite's §22 teardown leg asserts the ladder order
+from the trace AND counters equality — A/B-verified in the rig:
+tail compiled out, the leg aborts at `rel_calls == tears`; tail
+in, eleven-plus-one green legs.
+
+**4. THE SUPPRESSION AND ITS LIMITS.** `leak:libEGL_nvidia` joined
+tests/data/lsan-gl.supp with the audit verdict recorded in its
+comment block. The sandbox's Mesa stack runs the same probe and
+exits with ZERO bytes leaked — under the suppression file AND under
+the slow unwinder — so FDK's own EGL teardown is provably clean;
+the 256 B is the proprietary driver's state on hardware this
+sandbox cannot load. The remaining question only the owner's
+machine answers: an UNSUPPRESSED next run either still shows the
+256 B (driver allocates at engagement, never frees — suppression
+stands) or shows it gone (the fixed tail retired it — entry stays
+as belt-and-braces for older drivers). The negative control pins
+the suppression's honesty: a one-line guarded malloc in FDK code,
+run WITH the suppression file active, is still reported with its
+frame named — per-module suppression cannot hide an FDK leak.
+
+**5. THE LIBDBUS PULLER, NARROWED BUT NOT NAMED.** The same driver
+site appears under the libdbus leak in unsuppressed runs; the
+owner's LD_DEBUG=libs line ("RUNPATH from file /usr/lib/libasan.so.8")
+names whose RUNPATH the LOADER consulted, not who requested the
+load. Arch package closures rule out every candidate this sandbox
+could check (nvidia-utils, wlroots, labwc, libnvidia-egl-wayland,
+libnvidia-glcore — no libdbus dependency anywhere), so the pull is
+a runtime dlopen inside the proprietary chain. The decisive
+owner-side command is now LD_DEBUG=files (its "needed by" line
+names the requester; the suppression file's libdbus block carries
+it). No guessing recorded as fact.
+
+Battery at the landing: zero-warning rebuild; `make test`;
+`make test-x11`; the FULL sway suite green (the §22 teardown leg
+included, A/B-verified both ways); the sanitized exit probe clean
+under the suppression file and under the slow unwinder; the
+negative control reported through the suppression file; exports
+verified.
