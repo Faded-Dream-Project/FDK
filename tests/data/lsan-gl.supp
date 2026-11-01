@@ -32,3 +32,25 @@ leak:libdrm
 # above: third-party process-lifetime state, suppressed by module so
 # everything FDK allocates stays under strict accounting.
 leak:libfontconfig
+
+# libdbus-1.so.3 (added 2026-11-01, the GTX 1050 Ti report's exit
+# report): the owner's sanitized run ends with 754 bytes in 3
+# allocations whose frames are ENTIRELY inside libdbus-1.so.3 —
+# module-internal one-time state libdbus never frees. FDK is
+# provably not the puller: FDK's D-Bus is its own native wire client
+# (src/dbus/ — socket, AUTH, marshal; libdbus is never dlopen'd,
+# never linked — `ldd libfdk.so` and every tool show no libdbus),
+# and the sandbox's full stack (sway + Mesa/llvmpipe EGL + GL lane +
+# fontconfig + HarfBuzz + FriBidi) loads no libdbus under
+# LD_DEBUG=libs. The puller is a third-party library on the owner's
+# machine — most plausibly the NVIDIA driver chain (libEGL_nvidia /
+# its Wayland platform library), which this sandbox cannot load.
+# Only the owner's machine can name it, with:
+#   LD_DEBUG=libs ./build/examples/text_demo "test" 2>&1 \
+#     | grep -B4 'libdbus-1.so.3' | head -20
+# (the "calling init:" block above the first libdbus line names the
+# puller). Suppressed by MODULE so LeakSanitizer stays strict for
+# everything FDK owns; if an FDK frame ever appears in a libdbus
+# allocation's stack, that is a real bug — the suppression only
+# matches the third-party module's own frames.
+leak:libdbus-1

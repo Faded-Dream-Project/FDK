@@ -992,40 +992,67 @@ only your touchscreen shows is the real feel.
 NVIDIA driver on labwc (the §20 report's hardware — needs your GPU)
 
 **Status: implemented — should work (untested on real hardware).**
-The §20 crash (two presenters on one wl_surface) is fixed and the
-fix is pinned on the sway/llvmpipe rig by the attach-count
-assertion; what that rig CANNOT show is the explicit-sync role
-itself (no DRM render node in the sandbox). This is the recipe for
-confirming the whole chain on your machine.
+The §20 crash (two presenters on one wl_surface) is fixed and pinned
+on the sway/llvmpipe rig by the attach-count assertion; the §21 round
+then made the lane pick its upload shape by PROBING the driver (a
+real 4x4 upload per shape, both BGRA internalformat spellings tried —
+the spec row first) instead of trusting the extension string, added a
+retry ladder (a failed present rotates to the next shape and retries
+once per shape before any permanent downgrade), and fixed a real
+every-driver bug (the quad program lived in the first window's
+context namespace; every later window silently downgraded). What that
+rig CANNOT show is the explicit-sync role itself (no DRM render node
+in the sandbox) or a driver that rejects the mixed BGRA pair. This is
+the recipe for confirming the whole chain on your machine.
 
-Run `text_demo "مرحبا" $'\u0928\u092e\u0938\u094d\u0924\u0947'`
-under labwc and look for, in order:
+First, the trace — one command, everything the lane knows:
+
+```
+FDK_GL_TRACE=1 ./build/examples/text_demo "test" 2>&1 | tee fdk-gl.log
+```
+
+The trace logs the engagement dump (EGL vendor/version/client APIs,
+the chosen config's attributes, the context's API+version, the GL
+vendor/renderer/version, the upload-extension flags, the
+wl_egl_window's attached size) and every GL/EGL call of the first
+presents with each call's result. Then run the real text demo:
+
+```
+./build/examples/text_demo "مرحبا" $'\u0928\u092e\u0938\u094d\u0924\u0947'
+```
+
+and look for, in order:
 
 - `GPU present lane active on Wayland (renderer "NVIDIA GeForce
   GTX 1050 Ti/PCIe/SSE2")` — the lane engaged.
-- `compositor advertises wp_linux_drm_syncobj_manager_v1 (explicit
-  buffer synchronization) — ...` — your compositor offers the
-  explicit-sync protocol (ONE line, at connect).
 - `GL lane: compositor advertises wp_linux_drm_syncobj_manager_v1 —
-  a driver wrapping this surface in the explicit-sync role makes
-  FDK's wl_shm-commit refusal load-bearing (the single-owner rule)`
-  — the relevance note at lane engagement.
-- `GPU lane upload path: BGRA texture + UNPACK_ROW_LENGTH sub-rects`
-  (or the RGBA-twin / packed-row spelling) — the upload contract
-  detected your driver's extensions.
-- **THE ACCEPTANCE**: `FDK_RENDER_PATH_GL` persists on every window
-  (`fdk_window_get_render_path`, or just: no "reverting to the CPU
-  present path" WARN), NO `backend dispatch_pending failed (-101)`,
-  and NO protocol error across several minutes of resizing, moving
-  and typing into text_demo. Before the §20 fix this exact run died
-  within the first configure: FDK's own wl_shm background attach hit
-  the EGL-wrapped surface without an acquire point — protocol error
-  4, dead connection, "exited cleanly after 0 frames".
+  ...` — the relevance note (ONE line, at connect, plus the §20 note
+  at engagement).
+- `GPU lane upload path: <shape> — driver-probed (a real 4x4 upload
+  picked this shape; ...)` — **THE PROBE'S VERDICT**. If this says
+  `BGRA + UNPACK_ROW_LENGTH` with `BGRA internalformat=GL_BGRA_EXT`,
+  the strict-spelling fix alone closed your report; if it says a
+  TWIN shape, your driver rejected every BGRA spelling and the lane
+  stayed on the GPU through the pure-core fallback — either way the
+  window keeps hardware presentation.
+- **THE ACCEPTANCE**: NO `GL error ... at <call>` WARN line (any
+  lane error now names the call, the error code as a name, the
+  shape, the texture format, the rect and the stage — if one ever
+  appears, that single line is the bug report), NO "GPU present
+  ladder ... rotating" line (the ladder fired and recovered — send
+  the trace), NO "reverting this window to the CPU present path",
+  NO `backend dispatch_pending failed (-101)`, and
+  `FDK_RENDER_PATH_GL` persists on every window across several
+  minutes of resizing, moving and typing into text_demo.
+- **A resize after minutes of run**: resize the window and keep
+  typing — the first present at the new size re-runs the per-call
+  attribution (a resize-time failure names its call exactly like
+  the first-present one).
 - If the lane ever DOES fail on your machine, the dead-connection
-  line now names the interface, object id and protocol error code
+  line names the interface, object id and protocol error code
   (`wl_display_get_protocol_error`) plus errno — the line the old
-  build silently omitted. Send that line; it correlates 1:1 with
-  the compositor's own log.
+  build silently omitted. Send that line plus fdk-gl.log; the trace
+  correlates 1:1 with the compositor's own log.
 
 Optional, decisive variant: `WAYLAND_DEBUG=1` the same run and
 count `wl_surface.attach` on the toplevel across a handful of
@@ -1033,6 +1060,14 @@ presents — every attach should come from the driver's queue (a
 `{... egl ...}` queue name), and NONE from libwayland's
 `{Default Queue}`. That count is exactly what the sandbox rig
 asserts.
+
+A clean exit under the sanitizers: pass
+`LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp` so the
+third-party modules (Mesa caches, and on your machine the NVIDIA
+chain's libdbus-1 one-time state — see the suppression file's own
+proof block for the `LD_DEBUG=libs` one-liner that names the exact
+puller) stay quiet while every FDK allocation remains accounted.
+If an FDK frame appears in the report, that is a real bug — file it.
 
 ## 28. The Wayland/NVIDIA sign-off round (the desktop's answer, not
 the rig's)

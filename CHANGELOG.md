@@ -15,6 +15,81 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-01 (on the rc2 line)
+
+### Fixed — THE GL LANE'S REAL NVIDIA ANSWER: probe the driver, ladder the failures, share the group (§21, the GTX 1050 Ti follow-up)
+
+- **The owner's report after the §20 fix**: the crash is gone
+  (3327 frames, no -101), but the GPU lane still fails its FIRST
+  present on the GTX 1050 Ti and the window runs on the CPU path —
+  and the WARN named neither the failing call nor the error code.
+- **THE SHARE GROUP (a real bug on every driver, caught by the new
+  trace on its first live run)**: the quad program and VBO were
+  minted under the FIRST window's context while per-window contexts
+  were created with `share=NULL` — object names are per share
+  group, so every LATER window's `glUseProgram` referenced a name
+  invalid in its own context (`GL_INVALID_VALUE`) and silently
+  downgraded to the CPU path, since the lane landed. One share-ROOT
+  context (never current — surfaceless by construction) now anchors
+  a group every window context joins; dead windows' textures queue
+  into a graveyard the next present drains.
+- **THE PROBE**: extension strings are input, not verdict. With the
+  first context current, each of the four upload shapes gets a real
+  4x4 upload — both BGRA internalformat spellings tried,
+  spec-legal row first — plus the sub-rect update and the
+  ROW_LENGTH pixelstore; the first shape whose every call drains
+  clean becomes the connection's shape. This is the honest answer
+  to the report's signature (both extensions advertised, the fast
+  path chosen, the first present still failed):
+  `internalformat=GL_RGBA` paired with `format=GL_BGRA_EXT` is in
+  NO ES2 table — the EXT_texture_format_BGRA8888 row is
+  BGRA/BGRA/UNSIGNED_BYTE — and Mesa tolerates the mixed pair
+  while NVIDIA's strict validator rejects it.
+  `glPixelStorei(GL_UNPACK_ROW_LENGTH)` is now touched ONLY when
+  `GL_EXT_unpack_subimage` exists (the pname itself is
+  GL_INVALID_ENUM without it — the old code set it unconditionally,
+  poisoning strict drivers even on the fallback shapes).
+- **THE RETRY LADDER**: a present that fails with a GL error or a
+  swap failure is no longer an instant permanent downgrade — the
+  ladder rotates to the next un-rejected shape, recreates the
+  texture, retries once per shape; only the exhausted ladder
+  downgrades (self-check mismatch, OOM and unsupported framebuffer
+  stay fatal). The §20 single-owner rule is untouched: the ladder
+  never attaches or commits while the EGL surface owns the
+  wl_surface.
+- **THE VISIBILITY**: every lane error now arrives as a NAME
+  (`GL_INVALID_ENUM`, `EGL_BAD_ALLOC`, ...) with the exact call, the
+  upload shape, the texture format, the rect and the stage in one
+  WARN line; `FDK_GL_TRACE=1` logs every GL/EGL call of the first
+  presents plus a one-per-connection engagement dump (EGL
+  vendor/version/client APIs, config attributes, context API and
+  version, GL strings, extension flags, wl_egl_window attached
+  size); stale setup errors are drained and WARNed at every setup
+  stage and immediately before the first present, so the present's
+  verdict can only blame the present's own calls.
+- **Test seams**: `FDK_GL_PROBE_SKIP=<n>` (reject the first n shapes
+  at the probe), `FDK_GL_POISON_FIRST=1` (a guaranteed-invalid
+  upload call at the first present — a REAL driver error the ladder
+  must recover from). Tests: the Mesa-side proof runs eleven green
+  GL-lane legs under sway/llvmpipe, including two formerly VACUOUS
+  legs (the core-only leg never acquired a framebuffer before
+  checking the path; the two-window leg asserted window 2's path
+  only before its first present) and two that silently rode the
+  FDK_GL_FORCE leaked by a neighbor.
+
+### Fixed — the libdbus-1 exit leak is third-party, now suppressed with proof
+
+- The owner's sanitized run ends with LeakSanitizer naming
+  `libdbus-1.so.3` (754 bytes, 3 allocations, frames entirely inside
+  the module). FDK's D-Bus is its own native wire client
+  (src/dbus/) and dlopens no D-Bus library; the sandbox's
+  sway/Mesa/fontconfig stack provably never loads libdbus either.
+  The puller is a third-party library on the owner's machine;
+  `tests/data/lsan-gl.supp` now carries the module-scoped
+  suppression (documented with the diagnostic command that names
+  the puller: `LD_DEBUG=libs`), so debug runs end clean while
+  everything FDK allocates stays under strict accounting.
+
 ## [Unreleased-candidate features] — 2026-10-31 (on the rc2 line)
 
 ### Fixed — TWO PRESENTERS ON ONE wl_surface: the Wayland connection death on NVIDIA (the §20 report, re-landed)

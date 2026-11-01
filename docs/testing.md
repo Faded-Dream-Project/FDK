@@ -1803,6 +1803,19 @@ third-party allocations, not FDK leaks — `make test-x11` exports
 code). Any sanitized run that exercises the lane should pass the
 same file.
 
+**LSan and libdbus** (2026-11-01, the GTX 1050 Ti report): a
+sanitized desktop run may end with LeakSanitizer naming
+`libdbus-1.so.3` (~754 bytes, frames entirely inside the module).
+FDK is provably not the puller — its D-Bus is the native wire client
+in `src/dbus/` (libdbus is neither linked nor dlopen'd), and the
+full sandbox stack loads no libdbus under `LD_DEBUG=libs`. The
+puller is a third-party library on the reporting machine (the
+NVIDIA driver chain is the prime suspect — see the suppression
+file's own proof block for the one-liner that names it). The same
+`tests/data/lsan-gl.supp` carries the module-scoped suppression;
+desktop debug runs get the clean exit with
+`LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp`.
+
 **The examples-level proof** (`scripts/verify_gl_examples.sh` in the
 staging environment, outside the repo): every example runs twice —
 `FDK_GL_FORCE=1` and `FDK_NO_GL=1` — asserting clean exits and

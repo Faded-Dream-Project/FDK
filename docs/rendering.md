@@ -359,6 +359,28 @@ frame** takes one of two paths:
   no XGetImage equivalent a client may call against another
   surface).
 
+**The Wayland lane's upload contract (1.1.1, the §21 round) is
+decided by the DRIVER, not the extension string**: at engagement
+each of the four upload shapes (BGRA + UNPACK_ROW_LENGTH, BGRA with
+tightly packed sub-rects, a CPU-swizzled RGBA twin + ROW_LENGTH,
+the twin with packed sub-rects) gets a real 4x4 upload — both BGRA
+internalformat spellings tried, spec row first — and the first
+shape whose every call drains clean becomes the connection's shape
+(the GTX 1050 Ti report: both extensions advertised, the fast path
+chosen, the first present still failed, because internalformat
+GL_RGBA paired with format GL_BGRA_EXT is in no ES2 table — Mesa
+tolerates the mixed pair, NVIDIA's strict validator rejects it). A
+present that fails anyway is not a verdict: the lane rotates to the
+next un-rejected shape, recreates the texture and retries once per
+shape before any permanent downgrade — and every failure names the
+call, the error, the shape and the stage, with `FDK_GL_TRACE=1`
+logging every call of the first presents plus a one-per-connection
+engagement dump. The per-window EGL contexts all share one root
+context (the program and VBO live in the share group), and
+`glPixelStorei(GL_UNPACK_ROW_LENGTH)` is only touched when
+`GL_EXT_unpack_subimage` exists — the pname itself is an error
+without it.
+
 The lane lives in `src/platform/x11/x11_gl.c` (GLX) and
 `src/platform/wayland/wayland_egl.c` (EGL) and is **loaded at
 runtime** — `dlopen("libGL.so.1")` on X11, `dlopen("libEGL.so.1")`

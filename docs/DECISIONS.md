@@ -2079,3 +2079,112 @@ spans degrade to prefix measures — single-direction exact,
 mixed-direction approximate — the same documented class as the
 caret geometry. The contract lives in fdk_text.h next to the
 function.
+
+## D-039 — the upload contract closes: probe the driver, ladder the failures, share the group (§21, the GTX 1050 Ti follow-up)
+
+**Date**: 2026-11-01 · **Status**: shipped, rigs green; the NVIDIA-side confirmation needs the owner's GPU
+
+The §20 round killed the crash but left the report's second half
+open: the lane engages, the FIRST present fails with an unnamed GL
+error, and the window spends its life on the CPU path. Three root
+causes fell out of taking that report seriously — only one of them
+NVIDIA-specific.
+
+**1. THE SHARE GROUP — a real bug on EVERY driver, caught by the
+trace on its first live run.** The quad program and VBO were minted
+once, under the FIRST window's context, while every per-window
+context was created with `share=NULL`. Object names are per share
+group: every LATER window's `glUseProgram(program)` referenced a
+name invalid in its own context — `GL_INVALID_VALUE`, silent
+downgrade, on every driver, since the lane landed. Two test blind
+spots kept it invisible: the two-window leg asserted window 2's
+path only BEFORE its first present, and its `ever_presented` check
+passed through the downgrade's own salvage. The fix is the classic
+share-root pattern: ONE context created at lane load, never made
+current (surfaceless by construction — current-ness, not creation,
+is what needs a surface), every window context created sharing it,
+the root destroyed last at shutdown. The share-group consequence —
+a dead window's texture outlives its context — is handled by a
+graveyard queue the next present drains under a legitimately
+current context (no GL calls in teardown, the canonical order
+untouched).
+
+**2. THE PROBE — extension strings are input, not verdict.** The
+report's signature (both extensions advertised, the fast path
+chosen, the first present still failed) is the ES2 spec's own trap:
+`GL_EXT_texture_format_BGRA8888` adds the
+(internalformat `GL_BGRA_EXT`, format `GL_BGRA_EXT`, UNSIGNED_BYTE)
+row, while internalformat `GL_RGBA` paired with format `GL_BGRA_EXT`
+is in NO table — Mesa tolerates the mixed pair, NVIDIA's strict
+validator rejects it. Judgment: stop guessing spellings per driver
+folklore. At engagement, with the first context current, each of
+the four upload shapes gets a REAL 4x4 upload (both internalformat
+spellings tried for the BGRA shapes, spec row first), the sub-rect
+update, and the ROW_LENGTH pixelstore; the first shape whose every
+call drains clean becomes the connection's shape. A readback is not
+possible on the probe (core ES2 has no `glGetTexImage`; an FBO
+round-trip would assume ES3 or EXT_framebuffer_object) — the
+first-frame self-check already proves the rendered pixels
+end-to-end, so the probe's job is exactly the acceptance behavior
+that raises the unnamed error. Same class: `glPixelStorei(UNPACK_
+ROW_LENGTH)` is now touched only when `GL_EXT_unpack_subimage`
+exists — the pname itself is GL_INVALID_ENUM without it, and the
+old code set it unconditionally, poisoning strict drivers on the
+fallback shapes too. An ES3 context (ROW_LENGTH as core) was
+considered and rejected: the lane's contract is the wire-stable
+ES2 subset, and the probe adapts to the driver instead of asking
+the driver to adapt to us.
+
+**3. THE LADDER — a failed present is not a verdict until every
+shape had its chance.** The probe validates at 4x4; the first REAL
+present can still fail (size- or state-dependent rejection — the
+report's exact shape). On a GL error or a swap failure the lane now
+rotates to the next un-rejected shape, recreates the texture, and
+retries once per shape; only the exhausted ladder downgrades
+permanently. The self-check mismatch (a process verdict), OOM and
+GL_FRAMEBUFFER_UNSUPPORTED stay fatal — no shape fixes those.
+§20 stays load-bearing: the ladder never attaches or commits while
+the EGL surface owns the wl_surface (only eglSwapBuffers'
+driver-issued attach exists), and the downgrade path's
+slot-create → EGL-destroy → wl_shm-attach order is byte-for-byte
+unchanged.
+
+**4. THE TRACE as a diagnostic contract.** Every lane error now
+arrives as a NAME with the exact call, shape, format, rect and
+stage; FDK_GL_TRACE=1 logs every call of the first presents plus
+the one-per-connection engagement dump (EGL vendor/version/client
+APIs, config attributes, context API+version, GL strings,
+extension flags, wl_egl_window attached size); stale setup errors
+are drained and WARNed at every setup stage and immediately before
+the first present. The trace paid for itself before it was a day
+old: it caught the share-group bug on its first live rig run. Two
+rig hardening notes for the record: FDK_GL_TRACE is re-read per
+present (a static cache made the flag un-testable mid-process), and
+the §21 legs set their own FDK_GL_FORCE premise — the downgrade and
+self-check legs had been silently riding the core-only leg's leak.
+
+**5. WHAT ONLY THE GTX 1050 Ti CAN CONFIRM.** The sandbox's
+Mesa/llvmpipe stack accepts every spec-legal shape, so the rigs
+prove the machinery (probe selection, ladder rotation, exhaustion,
+refusal, the trace) but cannot reproduce a driver that rejects the
+mixed BGRA pair. The probe makes the tree correct either way — if
+NVIDIA accepts BGRA/BGRA the lane takes shape 0 with the spec
+spelling; if it rejects every BGRA upload the lane takes the pure-
+core twin and stays on the GPU anyway. The one line that settles
+which happened on the owner's machine:
+`FDK_GL_TRACE=1 ./build/examples/text_demo "test" 2>&1 | tee fdk-gl.log`
+— the engagement dump's shape line and the first present's call
+lines are the whole answer. Same for the explicit-sync role itself
+(no DRM render node in the sandbox) and for the libdbus exit leak
+(the suppression carries the proof and the one-liner that names
+the puller: LD_DEBUG=libs).
+
+Battery at the landing: zero-warning rebuild (both configs);
+`make test`; `make test-x11`; the FULL sway suite with eleven green
+GL-lane legs (policy; two windows with the share-group assert;
+core-only finally non-vacuous; probe shape-ladder ×2; probe
+all-rejected refusal; ladder rotation delivering present #1;
+ladder exhaustion downgrading with salvage; the trace leg; the
+FAIL_AT downgrade; the self-check round; the §20 attach-count rig
+with the lane actually engaged); the sanitized GL repro exits clean
+under the suppression file; exports verified.
