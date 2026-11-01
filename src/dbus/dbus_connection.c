@@ -66,6 +66,8 @@ static void io_callback(fdk_ext_fd_source *src, uint32_t revents,
 static void hello_reply_cb(fdk_dbus_connection *c, fdk_dbus_message *m,
                            void *user);
 static void sweep_dead_watchers(fdk_dbus_connection *c);
+static void handshake_queue_advance(fdk_context *ctx,
+                                    const char *address);
 
 /* The process-wide "D-Bus unavailable" once-flag (1.1.0-rc2 — the
  * owner's triple-startup-line report; see connect_common). */
@@ -519,6 +521,7 @@ static void hello_reply_cb(fdk_dbus_connection *c, fdk_dbus_message *m,
         return;
     }
     c->state = DBUS_ST_READY;
+    handshake_queue_advance(c->ctx, c->address);
     if (c->handshake_timer != NULL) {
         fdk_timer_remove(c->handshake_timer);
         c->handshake_timer = NULL;
@@ -1267,6 +1270,7 @@ static void conn_die(fdk_dbus_connection *c, const char *why) {
     int was_ready = (c->state == DBUS_ST_READY);
     c->state = DBUS_ST_DEAD;
     c->dead = 1;
+    handshake_queue_advance(c->ctx, c->address);
 
     /* Deliver failure to the app: pending NULLs first. Firing
      * pendings are skipped (their own wrappers complete them). */
@@ -1429,6 +1433,92 @@ static void conn_free(fdk_dbus_connection *c) {
  * Public API — connections
  * ========================================================================*/
 
+/* ---- the serialized-connect queue (§27/G-8) --------------------------
+ *
+ * One in-flight handshake per ADDRESS: a connect that arrives while
+ * another connection to the same address is still in its
+ * connect/auth/hello phase gets a live handle whose SOCKET opens
+ * only when the predecessor settles (ready or dead). This kills the
+ * simultaneous-SASL burst that dbus-daemon punishes (it closed the
+ * app's FIRST of five concurrent handshakes — the notification
+ * client's connection, found live in fdk-files). */
+static bool conn_in_handshake(fdk_dbus_connection *c) {
+    return c->queued_handshake == 0 && c->fd >= 0 &&
+           (c->state == DBUS_ST_CONNECTING || c->state == DBUS_ST_AUTH ||
+            c->state == DBUS_ST_HELLO_WAIT);
+}
+
+static bool address_in_handshake(fdk_context *ctx, const char *address) {
+    for (size_t i = 0; i < ctx->dbus_conn_count; i++) {
+        fdk_dbus_connection *c = ctx->dbus_conns[i];
+        if (c != NULL && conn_in_handshake(c) && c->address != NULL &&
+            strcmp(c->address, address) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Opens the socket + io + timer for one parked connection. Mirrors
+ * connect_common's tail (the part after the address resolves). */
+static bool conn_open_socket(fdk_dbus_connection *c) {
+    fdk__dbus_addr addrs[8];
+    int n = fdk__dbus_resolve_addresses(c->address, addrs, 8);
+    if (n <= 0) {
+        return false;
+    }
+    struct fdk__dbus_addr chosen;
+    int fd = fdk__dbus_connect_first(addrs, n, &chosen);
+    if (fd < 0) {
+        return false;
+    }
+    c->fd = fd;
+    c->endpoint = chosen;
+    c->state = DBUS_ST_CONNECTING;
+    c->io = fdk__extfd_add_internal(c->ctx, fd,
+                                    FDK_EXT_FD_IN | FDK_EXT_FD_OUT,
+                                    io_callback, c);
+    if (c->io == NULL) {
+        c->fd = -1;
+        return false;
+    }
+    c->handshake_timer = fdk_timer_add(c->ctx, 15000, 0,
+                                       handshake_timeout_cb, c);
+    if (c->handshake_timer == NULL) {
+        c->io = NULL; /* add_internal ownership: remove below */
+        fdk_ext_loop_remove_fd(c->io);
+        c->fd = -1;
+        return false;
+    }
+    return true;
+}
+
+/* Called whenever a connection settles (ready or dead): the next
+ * parked connection to the same address, if any, opens now. */
+static void handshake_queue_advance(fdk_context *ctx,
+                                    const char *address) {
+    if (ctx == NULL || address == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < ctx->dbus_conn_count; i++) {
+        fdk_dbus_connection *c = ctx->dbus_conns[i];
+        if (c == NULL || !c->queued_handshake || c->fd >= 0) {
+            continue;
+        }
+        if (c->address == NULL || strcmp(c->address, address) != 0) {
+            continue;
+        }
+        c->queued_handshake = 0;
+        if (!conn_open_socket(c)) {
+            /* The socket refused: report it exactly like a
+             * connect-phase failure and keep advancing. */
+            conn_die(c, "queued connect refused");
+            handshake_queue_advance(ctx, address);
+        }
+        return; /* one at a time — the point of the queue */
+    }
+}
+
 static fdk_dbus_connection *connect_common(fdk_context *ctx,
                                            char *address_owned,
                                            fdk_dbus_ready_fn on_ready,
@@ -1443,6 +1533,32 @@ static fdk_dbus_connection *connect_common(fdk_context *ctx,
         FDK_INFO("no usable D-Bus endpoint in '%s'", address_owned);
         fdk_free(address_owned);
         return NULL;
+    }
+    /* §27/G-8: serialize per-address handshakes. Parked connections
+     * get a handle NOW (sends queue; the public contract is
+     * unchanged) and their socket when the predecessor settles. */
+    if (address_in_handshake(ctx, address_owned)) {
+        fdk_dbus_connection *parked = fdk_alloc(sizeof(*parked));
+        if (parked == NULL) {
+            fdk_free(address_owned);
+            return NULL;
+        }
+        memset(parked, 0, sizeof(*parked));
+        parked->ctx = ctx;
+        parked->address = address_owned; /* ownership moves */
+        parked->fd = -1;
+        parked->state = DBUS_ST_CONNECTING;
+        parked->next_serial = 1;
+        parked->max_message = FDK_DBUS_MAX_MESSAGE_DEFAULT;
+        parked->queued_handshake = 1;
+        parked->ready_fn = on_ready;
+        parked->ready_user = user;
+        if (fdk__dbus_conn_register(parked) != FDK_OK) {
+            fdk_free(parked->address);
+            fdk_free(parked);
+            return NULL;
+        }
+        return parked;
     }
     struct fdk__dbus_addr chosen;
     int fd = fdk__dbus_connect_first(addrs, n_addrs, &chosen);
