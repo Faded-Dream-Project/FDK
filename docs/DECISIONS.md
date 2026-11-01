@@ -2302,3 +2302,39 @@ it, and Mesa needs nothing more. The clean-exit contract is
 unchanged: with tests/data/lsan-gl.supp active, the owner's run
 exits 0 with an empty report, and any leak whose stack carries an
 FDK frame still fails (the negative control proved that property).
+
+**7. THE SIGN-OFF RUN AND THE FOOTER'S SEMANTICS (same day, the
+round closed clean).** The owner's run with the suppression active
+ended "exited cleanly after 587 frames" (full stack engaged: GL
+lane, driver-probed upload path, HarfBuzz+FriBidi, atspi) with
+LSan's closing footer:
+
+    Suppressions used:
+      count      bytes template
+          3        754 libdbus-1
+
+Before recording that as evidence, the footer's semantics were
+verified directly with a controlled 4-allocation probe (direct and
+indirect classes) run three ways — no suppression file, a
+fully-matching one, and the repo's own: the table lists ONLY the
+templates that actually matched (a silent entry matched nothing
+this run); its count/bytes are the suppressed allocations summed
+across direct and indirect classes; a fully-suppressed run prints
+the footer and exits 0; a nothing-matched run prints no footer;
+and any unsuppressed leak still exits 1 regardless of what else
+matched. The footer is therefore a per-run audit, and this one
+says: the run retired libdbus-1's 3-allocation block (754 B) and
+NOTHING ELSE — no libEGL_nvidia row, no leak report, exit 0. That
+absence also refines §6's 256 B verdict: the unsuppressed 1022 B
+run and this sign-off run are both post-fix on the same machine
+and lane, and one saw the 256 B block while the other did not —
+INTERMITTENT run-to-run on this driver, not deterministic state
+the eglReleaseThread fix failed to retire. The entry stays for the
+runs where the block appears; the fix stays because it is the
+canonical sequence. The verification also re-proved the file's
+honesty both ways in this sandbox: an executable-owned 137 B leak
+is fully reported THROUGH the active file (the negative control,
+re-created for this round), and the canonical rig passes
+end-to-end on the same file — `make test-x11` (sanitized build,
+throwaway Xvfb, the Makefile's own LSAN wiring) with every X11
+integration test passing and no leak report.

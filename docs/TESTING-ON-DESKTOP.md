@@ -1065,28 +1065,56 @@ A clean exit under the sanitizers: pass
 `LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp` so the
 third-party modules stay quiet while every FDK allocation remains
 accounted. On your machine that is TWO known NVIDIA-side exit
-reports, both suppressed with proof and BOTH now fully explained:
-the driver's `libdbus-1` one-time state (670-766 B in 3
-allocations — 184 B direct at libdbus+0x276d7, 582 B indirect at
-+0x3774d) and `libEGL_nvidia`'s state (256 B in 4 allocations, every
-frame inside `libEGL_nvidia.so.0+0xc94e1`). The §22 round audited
-FDK's teardown call-by-call before suppressing and fixed the one
-missing canonical call (eglReleaseThread, now the connection
-shutdown's tail); your post-fix UNSUPPRESSED run then closed the
-last question — 1022 B in 7 allocations = the 766 B libdbus block
-plus the SAME 256 B, so the driver allocates at engagement and
-never frees and the suppression is the honest answer for this
-driver generation. Your LD_DEBUG=files trace also NAMED the libdbus
-puller: `libnvidia-eglcore.so.580.196.07` (its "dynamically loaded
-by libasan.so.8" line is the ASan dlopen-interceptor artifact, and
+reports, both suppressed with proof and BOTH fully explained: the
+driver's `libdbus-1` one-time state (670-766 B in 3 allocations —
+184 B direct at libdbus+0x276d7, 582 B indirect at +0x3774d) and
+`libEGL_nvidia`'s state (256 B in 4 allocations, every frame
+inside `libEGL_nvidia.so.0+0xc94e1`). The §22 round audited FDK's
+teardown call-by-call before suppressing and fixed the one missing
+canonical call (eglReleaseThread, now the connection shutdown's
+tail). Your two post-fix runs then closed the last question from
+opposite sides: the UNSUPPRESSED run totaled 1022 B in 7
+allocations = the 766 B libdbus block plus the SAME 256 B, while
+the sign-off run below (suppression active) printed a footer
+naming libdbus-1 alone — so the 256 B is INTERMITTENT run-to-run
+on this driver, the entry is there for the runs where it appears,
+and the fix stays because it is the canonical sequence (and
+Mesa-side runs leak zero bytes without it). Your LD_DEBUG=files
+trace also NAMED the libdbus puller:
+`libnvidia-eglcore.so.580.196.07` (its "dynamically loaded by
+libasan.so.8" line is the ASan dlopen-interceptor artifact, and
 the driver's failed non-handle dlsym of dbus_bus_get carries the
 requester's path; confirmed against the driver binary itself —
-libnvidia-eglcore dlopens "libdbus-1.so.3" and dlsyms the full dbus
-API with no DT_NEEDED, and the GLX twin libnvidia-glcore carries
-the same client). The suppression file's proof blocks carry the
-full stories. If an FDK frame appears in any leak report, that is a
-real bug — file it; the negative control in the §22 record proves
-the suppressions cannot hide one.
+libnvidia-eglcore dlopens "libdbus-1.so.3" and dlsyms the full
+dbus API with no DT_NEEDED, and the GLX twin libnvidia-glcore
+carries the same client). The suppression file's proof blocks
+carry the full stories. If an FDK frame appears in any leak
+report, that is a real bug — file it; the negative control in the
+§22 record proves the suppressions cannot hide one.
+
+THE SIGN-OFF RUN (2026-11-01, GTX 1050 Ti, this recipe on
+text_demo): "exited cleanly after 587 frames", and LSan ended the
+run with exactly this footer:
+
+    Suppressions used:
+      count      bytes template
+          3        754 libdbus-1
+
+Read that footer as the run's own audit, not decoration: LSan
+lists ONLY the templates that actually matched (a silent entry
+matched nothing this run), and the count/bytes are the suppressed
+allocations summed across direct and indirect classes (verified
+directly with a controlled probe; see docs/testing.md's
+"Reading the Suppressions-used footer"). So this run retired
+libdbus-1's 3-allocation block and NOTHING ELSE — no
+libEGL_nvidia row (that block did not appear this run), no leak
+report above the footer, exit 0. That is the §22 clean-exit
+contract delivered on the driver desktop: the full stack (GL
+lane engaged, driver-probed upload path, HarfBuzz+FriBidi,
+atspi) runs, exits cleanly, and the footer accounts for every
+byte LSan would otherwise have reported. A future run that
+prints a different template set or a leak report above the
+footer is telling you something changed — read it the same way.
 
 ## 28. The Wayland/NVIDIA sign-off round (the desktop's answer, not
 the rig's)
