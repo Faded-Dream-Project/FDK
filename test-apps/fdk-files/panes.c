@@ -365,6 +365,9 @@ static void pane_watch(pane *p, const char *dir) {
 
 void pane_navigate(pane *p, const char *abs_path) {
     tab *t = active_tab(p);
+    if (t == NULL || abs_path == NULL) {
+        return;
+    }
 
     /* history (skip pushing a duplicate of the top) */
     if (p->back_count == 0 ||
@@ -374,16 +377,21 @@ void pane_navigate(pane *p, const char *abs_path) {
                     sizeof p->back[0] * 63);
             p->back_count--;
         }
-        snprintf(p->back[p->back_count++], FI_PATH_MAX,
-                 "%.4000s", t->dir);
+        char *slot = p->back[p->back_count];
+        if (slot != NULL && p->back_count < 64) {
+            snprintf(slot, FI_PATH_MAX, "%.4000s", t->dir);
+            p->back_count++;
+        }
     }
     p->fwd_count = 0;
 
-    snprintf(t->dir, sizeof t->dir, "%.3800s", abs_path);
-    const char *base = strrchr(t->dir, '/');
-    base = (base != NULL) ? base + 1 : t->dir;
-    snprintf(t->title, sizeof t->title, "%.60s",
-             (base[0] != '\0') ? base : "/");
+    snprintf(t->dir, sizeof t->dir, "%.400s", abs_path);
+    const char *slash = strrchr(t->dir, '/');
+    const char *base = (slash != NULL) ? slash + 1 : t->dir;
+    if (base[0] == '\0') {
+        base = "/";
+    }
+    snprintf(t->title, sizeof t->title, "%.60s", base);
 
     long n = fmodel_load(t->dir, fapp.show_hidden);
     if (n < 0) {
