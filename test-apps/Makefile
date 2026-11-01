@@ -49,9 +49,9 @@ BINS := $(APP_DIRS:%=$(BUILD)/%)
 all: $(BINS)
 
 define APP_RULE
-$(BUILD)/$(1): $(wildcard $(1)/*.c) $(COMMON_SRCS) $(wildcard common/*.h) $(FDK_LIB)
+$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
 	@mkdir -p $(BUILD)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $(wildcard $(1)/*.c) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
@@ -87,6 +87,17 @@ test-apps-smoke:
 	    echo "=== smoke: $$app NOT BUILT"; rc=1; \
 	  fi; \
 	done; exit $$rc
+
+# §26/3b: the fdk-files app-icon generator (FDK draws it, FDK saves it)
+build/gen-fdk-files-icon: fdk-files/gen_app_icon.c $(FDK_LIB)
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/gen_app_icon.c $(FDK_LIB) -o $@ $(LIBS)
+
+.PHONY: fdk-files-icon
+fdk-files-icon: build/gen-fdk-files-icon
+	@mkdir -p fdk-files/desktop/icons/hicolor/48x48/apps fdk-files/desktop/icons/hicolor/128x128/apps
+	./build/gen-fdk-files-icon fdk-files/desktop/icons/hicolor/48x48/apps/org.fdk.testapps.fdk-files.png 48
+	./build/gen-fdk-files-icon fdk-files/desktop/icons/hicolor/128x128/apps/org.fdk.testapps.fdk-files.png 128
 
 clean:
 	rm -rf $(BUILD)

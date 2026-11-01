@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=FDK Files
+GenericName=File Manager
+Comment=Browse, copy, move and organize your files (the FDK validation-suite file manager)
+Exec=fdk-files %f
+Icon=org.fdk.testapps.fdk-files
+Terminal=false
+Categories=Utility;FileTools;FileManager;Core;
+StartupWMClass=org.fdk.testapps.fdk-files
+StartupNotify=false
+MimeType=inode/directory;
