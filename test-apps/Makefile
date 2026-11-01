@@ -51,7 +51,7 @@ all: $(BINS)
 define APP_RULE
 $(BUILD)/$(1): $(wildcard $(1)/*.c) $(COMMON_SRCS) $(wildcard common/*.h) $(FDK_LIB)
 	@mkdir -p $(BUILD)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -o $$@ $(wildcard $(1)/*.c) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $(wildcard $(1)/*.c) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
