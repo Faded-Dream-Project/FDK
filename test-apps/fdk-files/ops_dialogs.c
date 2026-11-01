@@ -3,6 +3,7 @@
  * The stock message/prompt dialogs cover confirm/ask; the custom
  * windows (progress, properties, app-chooser, trash) are plain FDK
  * windows on the same context, driven by the same pump. */
+#include "ops.h"
 #include "ops_dialogs.h"
 #include "mime.h"
 #include "model.h"
@@ -392,7 +393,13 @@ void ops_open_with(pane *p, const file_info *fi) {
     ops_choose_app(p, fi);
 }
 
-/* ---- the progress dialog + the sliced engine drive ----------------- */
+/* ---- the progress dialog (observing the WORKER engine, §25/4b) -----
+ *
+ * §24 drove the sliced engine from a 16ms timer ON THE MAIN LOOP.
+ * The G-2 facility moved the work to a real thread; this dialog now
+ * only OBSERVES: ops.c posts progress fractions and the completion
+ * through fdk_post, these callbacks update the bar, and cancel is
+ * ops_cancel() (cooperative between payload slices). */
 
 typedef struct progress_ctx {
     fdk_window *win;
@@ -400,71 +407,63 @@ typedef struct progress_ctx {
     fdk_widget *bar;
     fdk_widget *label_stats;
     fdk_widget *cancel;
-    fi_op *op;
-    fdk_timer *timer;
     pane *pane;
     char dst_dir[FI_PATH_MAX];
-    conflict_answer policy;
-    bool policy_set;
+    bool was_big; /* >2 MB: the finish notification's rule        */
     bool finished;
 } progress_ctx;
 
 static progress_ctx *g_progress;
 
-static void progress_tick(fdk_timer *timer, void *user) {
+/* UI-thread: the engine's progress reports */
+static void progress_observe(double fraction, const char *current,
+                             void *user) {
     progress_ctx *pc = user;
     if (pc->finished) {
         return;
     }
-    /* a slice of the operation */
-    bool more = fi_op_step(pc->op);
-    char cur[FI_NAME_MAX];
-    const char *slash = strrchr(pc->op->cur_file, '/');
-    snprintf(cur, sizeof cur, "%.250s",
-             (slash != NULL) ? slash + 1 : pc->op->cur_file);
-    (void)fdk_label_set_text(pc->label_file, cur);
+    (void)fdk_label_set_text(pc->label_file, current);
+    (void)fdk_progress_set_fraction(pc->bar, (fdk_f32)fraction);
     char stats[128];
-    char done_s[48], total_s[48];
-    fi_fmt_size(pc->op->done_bytes, done_s, sizeof done_s);
-    fi_fmt_size(pc->op->total_bytes, total_s, sizeof total_s);
-    snprintf(stats, sizeof stats, "%.30s of %.30s - %zu files",
-             done_s, total_s, pc->op->done_files);
+    snprintf(stats, sizeof stats, "%.0f%% — %s",
+             fraction * 100.0, current);
     (void)fdk_label_set_text(pc->label_stats, stats);
-    fdk_f32 frac = pc->op->total_bytes > 0
-                       ? (fdk_f32)((double)pc->op->done_bytes /
-                                   (double)pc->op->total_bytes)
-                       : 0.0f;
-    (void)fdk_progress_set_fraction(pc->bar, frac);
+}
 
-    if (!more || pc->op->failed || pc->op->cancelled) {
-        pc->finished = true;
-        fdk_timer_remove(timer);
-        if (pc->op->failed) {
-            fi_set_status("Operation failed: %s", pc->op->err);
-        } else {
-            fi_set_status("Operation finished");
-        }
-        /* a notification when it was long (> 2 MB) */
-        if (pc->op->total_bytes > 2 * 1024 * 1024) {
-            fdk_notify_request req = {0};
-            req.summary = "File operation finished";
-            req.body = pc->op->failed ? pc->op->err
-                                      : "The operation completed.";
-            req.urgency = FDK_NOTIFY_URGENCY_LOW;
-            (void)fdk_notify_send(fapp.notify, &req, NULL);
-        }
-        pane_reload(pc->pane);
-        fdk_window_destroy(pc->win);
-        fi_op_free(pc->op);
-        free(pc);
-        g_progress = NULL;
+/* UI-thread: the engine's completion */
+static void progress_finished(bool ok, const char *err, void *user) {
+    progress_ctx *pc = user;
+    if (pc->finished) {
+        return;
     }
+    pc->finished = true;
+    if (ok) {
+        fi_set_status("Operation finished");
+    } else {
+        fi_set_status("Operation %s",
+                      (err != NULL && err[0] != 0) ? err
+                                                   : "failed");
+    }
+    if (pc->was_big) {
+        fdk_notify_request req = {0};
+        req.summary = "File operation finished";
+        req.body = ok ? "The operation completed."
+                      : ((err != NULL && err[0] != 0) ? err
+                                                       : "It failed.");
+        req.urgency = FDK_NOTIFY_URGENCY_LOW;
+        (void)fdk_notify_send(fapp.notify, &req, NULL);
+    }
+    pane_reload(pc->pane);
+    fdk_window_destroy(pc->win);
+    free(pc);
+    g_progress = NULL;
 }
 
 static void progress_cancel(fdk_widget *btn, void *user) {
     (void)btn;
-    progress_ctx *pc = user;
-    pc->op->cancelled = true; /* the next tick unwinds */
+    (void)user;
+    ops_cancel(); /* cooperative: the worker unwinds at the next
+                     payload slice, then done() fires */
 }
 
 static void progress_window_event(fdk_window *w,
@@ -511,21 +510,22 @@ void ops_begin_paste_into(pane *p, const char *const *paths,
                             &pc->cancel);
     fdk_button_set_on_activate(pc->cancel, progress_cancel, pc);
 
-    /* the first (and typically only) item: per-item conflict ask */
-    pc->op = fi_op_start(kind, paths[0], NULL);
     /* the destination path: dst_dir/basename */
     const char *base = strrchr(paths[0], '/');
     base = (base != NULL) ? base + 1 : paths[0];
     char dst[FI_PATH_MAX];
-    snprintf(dst, sizeof dst, "%s/%s", dst_dir, base);
+    snprintf(dst, sizeof dst, "%.3800s/%.190s", dst_dir, base);
+
+    struct stat src_st;
+    pc->was_big = (stat(paths[0], &src_st) == 0 &&
+                   (src_st.st_size > 2 * 1024 * 1024 ||
+                    S_ISDIR(src_st.st_mode)));
 
     bool dst_dir_f = false;
     if (fi_conflict(dst, &dst_dir_f)) {
-        conflict_answer a =
-            ops_ask_conflict(dst, count > 1, NULL);
+        conflict_answer a = ops_ask_conflict(dst, count > 1, NULL);
         if (a == CONFLICT_SKIP || a == CONFLICT_ABORT) {
             fdk_window_destroy(pc->win);
-            fi_op_free(pc->op);
             free(pc);
             if (a == CONFLICT_ABORT) {
                 return;
@@ -545,7 +545,6 @@ void ops_begin_paste_into(pane *p, const char *const *paths,
                     "Replacing a directory is refused — rename it "
                     "first (honest limit, see README)");
                 fdk_window_destroy(pc->win);
-                fi_op_free(pc->op);
                 free(pc);
                 return;
             }
@@ -553,19 +552,21 @@ void ops_begin_paste_into(pane *p, const char *const *paths,
         } else {
             char unique[FI_PATH_MAX];
             fi_unique_sibling(dst, unique, sizeof unique);
-            snprintf(dst, sizeof dst, "%s", unique);
+            snprintf(dst, sizeof dst, "%.4000s", unique);
         }
-        /* rebuild the op with the (possibly new) destination */
-        fi_op_free(pc->op);
-        pc->op = fi_op_start(kind, paths[0], dst);
-    } else {
-        fi_op_free(pc->op);
-        pc->op = fi_op_start(kind, paths[0], dst);
     }
 
+    /* the WORKER engine (§25/4b): the copy/move runs on a thread;
+     * progress + completion arrive through fdk_post */
+    if (!ops_start_copy(paths[0], dst, kind == FI_OP_MOVE,
+                        progress_observe, progress_finished, pc)) {
+        fi_set_status("The engine is busy — try again when the "
+                      "current operation finishes");
+        fdk_window_destroy(pc->win);
+        free(pc);
+        return;
+    }
     g_progress = pc;
-    pc->timer = fdk_timer_add(fapp.base.ctx, 16, true,
-                              progress_tick, pc);
     fdk_window_show(pc->win);
 }
 
@@ -575,6 +576,7 @@ typedef struct props_ctx {
     fdk_window *win;
     const file_info *fi;
     bool *done_flag;
+    fdk_widget *size_label; /* filled by the worker's answer      */
 } props_ctx;
 
 static void props_close(fdk_window *w, const fdk_event_data *ev,
@@ -586,6 +588,20 @@ static void props_close(fdk_window *w, const fdk_event_data *ev,
         td_untrack(pc);
         free(pc);
     }
+}
+
+static void props_size_done(bool ok, off_t size, void *user) {
+    props_ctx *pc = user;
+    if (pc->size_label == NULL) {
+        return;
+    }
+    char buf[48];
+    if (ok) {
+        fi_fmt_size(size, buf, sizeof buf);
+    } else {
+        snprintf(buf, sizeof buf, "size unknown");
+    }
+    (void)fdk_label_set_text(pc->size_label, buf);
 }
 
 void ops_properties(pane *p, const file_info *fi) {
@@ -617,9 +633,16 @@ void ops_properties(pane *p, const file_info *fi) {
     (void)fdk_label_create(box, fapp.base.font_ui, fi->name, &l);
     (void)fdk_label_create(box, fapp.base.font_ui, fi->mime, &l);
 
-    off_t total = fi->is_dir ? fs_tree_size(fi->path) : fi->size;
-    fi_fmt_size(total, buf, sizeof buf);
-    (void)fdk_label_create(box, fapp.base.font_ui, buf, &l);
+    /* the recursive size runs on the WORKER (§25/4b); the label
+     * starts as "computing…" and is filled by the reply */
+    if (fi->is_dir) {
+        (void)fdk_label_create(box, fapp.base.font_ui,
+                               "Computing size…", &pc->size_label);
+        ops_start_size(fi->path, NULL, props_size_done, pc);
+    } else {
+        fi_fmt_size(fi->size, buf, sizeof buf);
+        (void)fdk_label_create(box, fapp.base.font_ui, buf, &l);
+    }
 
     snprintf(buf, sizeof buf, "Location: %.200s", fi->path);
     (void)fdk_label_create(box, fapp.base.font_ui, buf, &l);

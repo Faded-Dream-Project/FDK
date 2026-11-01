@@ -15,8 +15,10 @@
 #include "fsops.h"
 #include "menus.h"
 #include "model.h"
+#include "ops.h"
 #include "ops_dialogs.h"
 #include "panes.h"
+#include "../common/ta_buf.h"
 #include "teardown.h"
 #include "trash.h"
 
@@ -87,6 +89,8 @@ void fi_rename(pane *p, size_t row, const char *new_name) {
     }
 }
 
+static void delete_engine_done(bool ok, const char *err, void *user);
+
 void fi_delete_selection(pane *p, bool to_trash) {
     const file_info *sel[512];
     size_t n = fmodel_selected(p, sel, 512);
@@ -95,6 +99,31 @@ void fi_delete_selection(pane *p, bool to_trash) {
     }
     if (!to_trash && !ops_confirm_delete(n)) {
         return;
+    }
+    /* permanent delete of DIRECTORIES goes to the worker engine
+     * (recursive unlink must not freeze the UI — §25/4b) */
+    if (!to_trash) {
+        const file_info *dirs[64];
+        size_t nd = 0;
+        for (size_t i = 0; i < n && nd < 64; i++) {
+            if (sel[i]->is_dir) {
+                dirs[nd++] = sel[i];
+            }
+        }
+        if (nd > 0) {
+            size_t started = 0;
+            for (size_t i = 0; i < nd; i++) {
+                if (ops_start_delete(
+                        dirs[i]->path, NULL,
+                        delete_engine_done, NULL)) {
+                    started++;
+                }
+            }
+            printf("PHASE: trash %zu %zu\n", n, started);
+            fflush(stdout);
+            pane_reload(p);
+            return;
+        }
     }
     size_t ok = 0;
     char err[256];
@@ -128,9 +157,10 @@ void fi_delete_selection(pane *p, bool to_trash) {
                                    .destroy = fi_undo_free});
             }
         } else {
+            /* single files unlink directly (fast); a DIRECTORY
+             * would block — the §25 rule is the worker for those,
+             * handled by the caller below */
             if (unlink(sel[i]->path) == 0) {
-                ok++;
-            } else if (rmdir(sel[i]->path) == 0) {
                 ok++;
             } else {
                 snprintf(err, sizeof err, "%s", strerror(errno));
@@ -390,6 +420,13 @@ void rename_cb(fdk_dialog_response response,
  * callback; our prompt wrappers copy it to g_prompt_answer first */
 static void dialog_ok_cb(fdk_dialog_response response, void *user);
 
+static void delete_engine_done(bool ok, const char *err, void *user) {
+    (void)user;
+    fi_set_status("%s", ok ? "Deleted" : ((err && err[0]) ? err
+                                                          : "Delete failed"));
+    pane_reload(active_pane());
+}
+
 /* ---- the i18n catalogs ----------------------------------------------- */
 
 static const char *CATALOG_EN = "en";
@@ -414,6 +451,19 @@ static void i18n_setup(void) {
     /* the catalogs load from test-apps/fdk-files/po (RO only; EN
      * is the msgid language) */
     (void)ta_i18n_load(&fapp.base, PO_DIR, "ui.language");
+}
+
+static volatile int g_rig_copy_ok;
+static void rig_copy_progress(double frac, const char *cur,
+                              void *user) {
+    (void)frac;
+    (void)cur;
+    (void)user;
+}
+static void rig_copy_done(bool ok, const char *err, void *user) {
+    (void)err;
+    (void)user;
+    g_rig_copy_ok = ok ? 1 : 0;
 }
 
 /* ---- the window-configure relay -------------------------------------- */
@@ -475,6 +525,33 @@ static void rig_script(void) {
     fflush(stdout);
     /* the undo of it */
     fdk_undo_stack_undo(fapp.undo);
+
+    /* a WORKER-engine copy round trip (§25/4b): copy the scratch
+     * tree, wait for the done callback, verify the copy exists */
+    {
+        char copy_dst[TA_JOIN_MAX];
+        snprintf(copy_dst, sizeof copy_dst, "/tmp/ffs-copy-%d",
+                 (int)getpid());
+        g_rig_copy_ok = -1;
+        if (ops_start_copy(scratch, copy_dst, false,
+                           rig_copy_progress, rig_copy_done, NULL)) {
+            while (g_rig_copy_ok == -1 && !fapp.base.quit) {
+                if (fdk_pump_events(fapp.base.ctx, 20) < 0) {
+                    break;
+                }
+                if (fdk_widget_tree_has_damage(fapp.base.root)) {
+                    (void)fdk_window_paint(fapp.base.window);
+                }
+            }
+        }
+        printf("PHASE: workercopy %d\n", g_rig_copy_ok);
+        fflush(stdout);
+        /* clean both scratch trees */
+        char cmd[256];
+        snprintf(cmd, sizeof cmd, "rm -rf /tmp/ffs-%d /tmp/ffs-copy-%d",
+                 (int)getpid(), (int)getpid());
+        (void)system(cmd);
+    }
 }
 
 /* ---- main --------------------------------------------------------------- */
@@ -517,6 +594,7 @@ int main(int argc, char **argv) {
 
     panes_build(&fapp);
     menus_build(&fapp);
+    ops_init(); /* the worker engine (§25/4b)                   */
 
     /* the initial navigation */
     printf("PHASE: boot\n");
@@ -554,6 +632,7 @@ int main(int argc, char **argv) {
     printf("PHASE: quit\n");
     fflush(stdout);
 
+    ops_shutdown(); /* joins the engine before the UI dies      */
     menus_ctx_shutdown();
     panes_shutdown();
     td_sweep(); /* the payloads + menu models the registry owns   */
