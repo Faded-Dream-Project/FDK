@@ -611,6 +611,37 @@ packaging tree, the CI/release workflows, and all source commits
 remain on main. The picker + icon-theme overhaul that motivated
 the retraction is the next ledger entry.
 
+## The §23 round (2026-11-01 — the layout fix + the every-gap sweep)
+
+- **Part A**: `fdk-shell/` -> `fdk-shell-overlay/` (git mv, history
+  kept; the weaker duplicate `shell/` DELETED — the tree already
+  had the mature package). 73 files updated; zero stale refs.
+- **B2c** fdk_attr.h: range attributes (size/family/bg/underline
+  styles+colors/rise/letter-spacing/links) through the shaping
+  pipeline; markup <span>/<sub>/<sup>/<big>/<small>/<a>.
+- **B2b** fdk_gesture.h: seven recognizers (click 1/2/3,
+  long-press, drag, pan, swipe, zoom, rotate), GTK4's thresholds.
+- **B2e** fdk_model.h: the model/view split (store + sort/filter
+  proxies with model faces + live List/Tree bindings + selection
+  by row id + reorder write-back).
+- **B2f** fdk_print.h: printing — the own PDF 1.4 writer
+  (pdfinfo-verified), the native IPP client (RFC 8010/8011, no
+  libcups — the OUT-by-policy line the owner's directive
+  overrode), the dialog, the preview.
+- **B2a-close** fdk_clipboard_set_uris/get_uris: the uri-list
+  clipboard on both backends (the rig caught the have_content
+  refusal bug before landing).
+- **B1 verified in-sandbox**: the package's full X11 suite — live
+  re-anchoring (margin/zone/anchor/level), auto-hide end to end,
+  outputs+RandR, popup cascades, zero warnings; the v4 keyboard
+  bind with the honest below-v4 degrade is in src/wl/wl.c.
+- Tests: 748 headless [ok] + the X11 battery 215 [ok] (incl. the
+  two-process uri rig); exports 963, verify-exports green both
+  configs; every new feature has tests AND a runnable example
+  (13 rich text, 14 gestures, 15 model/view, 16 printing).
+- docs/PARITY.md: the gap list is now a status TABLE (7 of 10
+  closed) + the §23 audit pass's remaining catalog tail named.
+
 ## Current state (verified this audit)
 
 - **HEAD:** milestone **1.4.19** (the drop that landed — the XDND
