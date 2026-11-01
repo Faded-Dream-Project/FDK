@@ -33,6 +33,7 @@
 
 #include "core/alloc_internal.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* ---- shared growable output ---- */
@@ -243,7 +244,146 @@ typedef struct tag_scan {
     fdk_color color;   /* valid when recognized && !closing &&
                           is_color                                  */
     size_t consumed;   /* bytes of markup eaten when recognized     */
+
+    /* ---- §23/B2c: the attribute tags --------------------------------
+     * is_attr: this open/close pair rides the ATTRIBUTE stack, not
+     * the span stack. The payload carries the flattened attribute
+     * the tag contributes; the scanner interns family/href strings
+     * through fdk__attr_intern (the parse's arena). */
+    bool is_attr;
+    fdk_attr_kind kind;
+    fdk_f32 num;         /* SIZE_PT / SIZE_DELTA / RISE /
+                            LETTER_SPACING value                     */
+    fdk_attr_kind kind2; /* the shortcut tags' second attribute
+                            (<sub>/<sup> = rise + shrink)            */
+    fdk_f32 num2;
+    bool num2_valid;
+    fdk_i32 integer;     /* UNDERLINE style                           */
+    fdk_color at_color;  /* BACKGROUND / *_COLOR                      */
+    bool color_valid;
+    const char *str;     /* FAMILY / LINK (interned)                  */
+    bool span_color_valid; /* a <span color=...> riding the SPAN stack */
+    fdk_color span_color;
 } tag_scan;
+
+/* The attribute interner (attr.c): copies [s, s+n) into the parse's
+ * arena; NULL on OOM. */
+const char *fdk__attr_intern(const char *s, size_t n);
+
+/* ---- the attribute stack (§23/B2c) ---------------------------------
+ * One level per open attribute tag; each level carries the range's
+ * START and its payload. On close, an fdk_attr is appended for the
+ * level's [start, now) range. Nesting composes by construction:
+ * each open level emits its own range when it closes. */
+typedef struct attr_level2 {
+    bool open;
+    size_t start;
+    fdk_attr_kind kind;
+    fdk_f32 num;
+    fdk_attr_kind kind2;
+    fdk_f32 num2;
+    bool num2_valid;
+    fdk_i32 integer;
+    fdk_color at_color;
+    bool color_valid;
+    const char *str;
+    bool span_color_valid;
+    fdk_color span_color;
+} attr_level2;
+
+#define ATTR_STACK_MAX 16
+
+typedef struct attr_stack2 {
+    attr_level2 levels[ATTR_STACK_MAX];
+    size_t depth;
+} attr_stack2;
+
+static void attr2_push(attr_stack2 *as, const tag_scan *tag,
+                       size_t at) {
+    if (as->depth >= ATTR_STACK_MAX) {
+        return; /* over-deep: the deepest level just extends */
+    }
+    attr_level2 *l = &as->levels[as->depth++];
+    l->open = true;
+    l->start = at;
+    l->kind = tag->kind;
+    l->num = tag->num;
+    l->kind2 = tag->kind2;
+    l->num2 = tag->num2;
+    l->num2_valid = tag->num2_valid;
+    l->integer = tag->integer;
+    l->at_color = tag->at_color;
+    l->color_valid = tag->color_valid;
+    l->str = tag->str;
+    l->span_color_valid = tag->span_color_valid;
+    l->span_color = tag->span_color;
+}
+
+static void attr2_emit_one(fdk_attr_list *out, fdk_attr_kind kind,
+                           size_t start, size_t end, fdk_f32 num,
+                           fdk_i32 integer, fdk_color color,
+                           const char *str) {
+    fdk_attr a;
+    memset(&a, 0, sizeof a);
+    a.byte_start = start;
+    a.byte_end = end;
+    a.kind = kind;
+    switch (kind) {
+    case FDK_ATTR_SIZE_PT:
+    case FDK_ATTR_SIZE_DELTA:
+    case FDK_ATTR_RISE:
+    case FDK_ATTR_LETTER_SPACING:
+        a.v.f = num;
+        break;
+    case FDK_ATTR_UNDERLINE:
+        a.v.i = integer;
+        break;
+    case FDK_ATTR_BACKGROUND:
+    case FDK_ATTR_UNDERLINE_COLOR:
+    case FDK_ATTR_STRIKETHROUGH_COLOR:
+        a.v.color = color;
+        break;
+    case FDK_ATTR_FAMILY:
+    case FDK_ATTR_LINK:
+        a.v.s = str;
+        break;
+    default:
+        return;
+    }
+    (void)fdk_attr_list_add(out, &a);
+}
+
+/* Pops the TOP level (closing tags pop the nearest matching one —
+ * for attribute tags, unmatched closes are literal, same as the
+ * span stack's rule; here we pop by kind match). Returns the
+ * popped level or NULL when nothing matched. */
+static attr_level2 *attr2_pop(attr_stack2 *as, size_t end,
+                              fdk_attr_list *out) {
+    for (size_t d = as->depth; d > 0; d--) {
+        attr_level2 *l = &as->levels[d - 1];
+        if (!l->open) {
+            continue;
+        }
+        if (l->start < end) {
+            if (l->kind != 0) {
+                attr2_emit_one(out, l->kind, l->start, end, l->num,
+                               l->integer,
+                               l->color_valid ? l->at_color
+                                              : (fdk_color){0, 0, 0, 0},
+                               l->str);
+            }
+            if (l->num2_valid && l->kind2 != 0) {
+                attr2_emit_one(out, l->kind2, l->start, end, l->num2, 0,
+                               (fdk_color){0, 0, 0, 0}, NULL);
+            }
+        }
+        as->depth = d - 1;
+        return l;
+    }
+    return NULL;
+}
+
+
 
 /* Scans one tag starting at s[i] (s[i] == '<'). Fills *out;
  * out->recognized false means "not our vocabulary" — the caller
@@ -279,7 +419,9 @@ static void scan_tag(const char *s, size_t len, size_t i, tag_scan *out) {
     }
     size_t name_len = p - name_start;
 
-    if (name_len == 1) {
+    if (name_len == 1 && !ci_eq(s[name_start], 'a')) {
+        /* (the single-letter <a> is the LINK tag — the attribute
+         * block below owns it; b/i/u/s stay the span letters) */
         char name = s[name_start];
         if (!ci_eq(name, 'b') && !ci_eq(name, 'i') && !ci_eq(name, 'u') &&
             !ci_eq(name, 's')) {
@@ -305,6 +447,383 @@ static void scan_tag(const char *s, size_t len, size_t i, tag_scan *out) {
         }
         out->consumed = p - i;
         return;
+    }
+
+    /* ---- §23/B2c: the attribute tags ---------------------------------
+     * <span attr=...>, <sub>, <sup>, <big>, <small>, <a href=...>:
+     * open/close pairs on the ATTRIBUTE stack (each contributes a
+     * ranged attribute over its text). All-close forms
+     * (</span>, </a>, ...) pop their level. The attribute VALUE
+     * grammar follows Pango's markup reference
+     * (docs.gtk.org/Pango/pango_markup.html): sizes in points or
+     * px, colors #rrggbb[aa], underline keywords, numbers in px
+     * (FDK's logical pixels — FDK has no points). */
+    {
+        static const struct {
+            const char *name;
+            size_t nlen;
+        } attr_tags[] = {
+            {"span", 4}, {"sub", 3}, {"sup", 3},
+            {"big", 3}, {"small", 5}, {"a", 1},
+        };
+        for (size_t t = 0; t < sizeof attr_tags / sizeof attr_tags[0];
+             t++) {
+            if (name_len != attr_tags[t].nlen) {
+                continue;
+            }
+            bool match = true;
+            for (size_t q = 0; q < name_len; q++) {
+                if (!ci_eq(s[name_start + q], attr_tags[t].name[q])) {
+                    match = false;
+                    break;
+                }
+            }
+            if (!match) {
+                continue;
+            }
+            char which = attr_tags[t].name[0];
+
+            /* The closing forms: </span> </a> </sub> ... — no
+             * values expected. */
+            if (closing) {
+                while (p < len && (s[p] == ' ' || s[p] == '\t')) {
+                    p++;
+                }
+                if (p < len && s[p] == '>') {
+                    out->recognized = true;
+                    out->closing = true;
+                    out->is_attr = true;
+                    out->kind = 0;
+                    out->consumed = p + 1 - i;
+                }
+                return;
+            }
+
+            /* <a href=...> needs its href; the rest take optional
+             * attributes up to '>'. A bare <a> with no href is
+             * literal (nothing to link to). */
+            if (which == 'a') {
+                size_t q = p;
+                while (q < len && (s[q] == ' ' || s[q] == '\t')) {
+                    q++;
+                }
+                if (q < len && s[q] == 'h') {
+                    size_t an = q;
+                    size_t anlen = 0;
+                    while (q < len && s[q] != '=' && s[q] != '>' &&
+                           s[q] != ' ') {
+                        q++;
+                        anlen++;
+                    }
+                    if (anlen == 4 && ci_eq(s[an], 'h') &&
+                        ci_eq(s[an + 1], 'r') &&
+                        ci_eq(s[an + 2], 'e') &&
+                        ci_eq(s[an + 3], 'f') && q < len && s[q] == '=') {
+                        q++;
+                        while (q < len && (s[q] == ' ' || s[q] == '\t')) {
+                            q++;
+                        }
+                        char quote = 0;
+                        if (q < len && (s[q] == '\'' || s[q] == '"')) {
+                            quote = s[q];
+                            q++;
+                        }
+                        size_t vs = q;
+                        while (q < len &&
+                               (quote ? s[q] != quote
+                                      : (s[q] != '>' && s[q] != ' '))) {
+                            q++;
+                        }
+                        if (q > vs) {
+                            const char *href = fdk__attr_intern(s + vs,
+                                                                q - vs);
+                            if (href == NULL) {
+                                return; /* OOM: literal, parse still
+                                          * fails loudly at the end */
+                            }
+                            if (quote && q < len) {
+                                q++;
+                            }
+                            while (q < len && (s[q] == ' ' || s[q] == '\t')) {
+                                q++;
+                            }
+                            if (q < len && s[q] == '>') {
+                                out->recognized = true;
+                                out->is_attr = true;
+                                out->kind = FDK_ATTR_LINK;
+                                out->str = href;
+                                out->consumed = q + 1 - i;
+                            }
+                        }
+                    }
+                }
+                return; /* <a> without a parseable href: literal */
+            }
+
+            /* <span ...>: parse the attribute list up to '>'.
+             * The grammar (Pango's spellings; values in FDK's
+             * logical pixels — FDK has no points):
+             *   size="20" | size="smaller" | size="larger"
+             *   bgcolor|background="#rrggbb[aa]"
+             *   underline="single|double|low|error|none"
+             *   underline_color="#rrggbb[aa]"
+             *   rise="3"  letter_spacing="1"
+             *   font|font_family|face="Family Name"
+             *   color|fgcolor="#rrggbb[aa]"  (the SPAN-stack color)
+             * ONE non-color attribute is carried per tag (the
+             * stack opens a level per tag; a second attribute
+             * composes by nesting — the documented v1 shape); a
+             * color attribute rides the SPAN stack in the SAME tag
+             * and takes precedence in its role. An unknown
+             * attribute name makes the whole tag LITERAL (lenient,
+             * the scanner's rule). */
+            if (which == 's' && name_len == 4) {
+                bool got_any = false;
+                bool got_color = false;
+                fdk_color span_color = {0, 0, 0, 0};
+                size_t q = p;
+                fdk_attr_kind kind = (fdk_attr_kind)0;
+                fdk_f32 num = 0;
+                fdk_i32 integer = 0;
+                fdk_color at_color = {0, 0, 0, 0};
+                bool color_valid = false;
+                const char *str = NULL;
+                while (q < len) {
+                    while (q < len && (s[q] == ' ' || s[q] == '\t')) {
+                        q++;
+                    }
+                    if (q >= len) {
+                        return; /* unterminated: literal */
+                    }
+                    if (s[q] == '>') {
+                        q++;
+                        break;
+                    }
+                    size_t as = q;
+                    while (q < len && s[q] != '=' && s[q] != '>' &&
+                           s[q] != ' ' && s[q] != '\t') {
+                        q++;
+                    }
+                    size_t alen = q - as;
+                    while (q < len && (s[q] == ' ' || s[q] == '\t')) {
+                        q++;
+                    }
+                    if (q >= len || s[q] != '=') {
+                        return; /* attr without a value: literal */
+                    }
+                    q++;
+                    while (q < len && (s[q] == ' ' || s[q] == '\t')) {
+                        q++;
+                    }
+                    char quote = 0;
+                    if (q < len && (s[q] == '\'' || s[q] == '"')) {
+                        quote = s[q];
+                        q++;
+                    }
+                    size_t vs = q;
+                    while (q < len &&
+                           (quote ? s[q] != quote
+                                  : (s[q] != '>' && s[q] != ' '))) {
+                        q++;
+                    }
+                    size_t vlen = q - vs;
+                    if (quote && q < len) {
+                        q++;
+                    }
+                    if (vlen == 0) {
+                        return;
+                    }
+
+                    bool known = true;
+                    if (alen == 4 && memcmp(s + as, "size", 4) == 0) {
+                        if (vlen == 7 &&
+                            memcmp(s + vs, "smaller", 7) == 0) {
+                            kind = FDK_ATTR_SIZE_DELTA;
+                            num = -2;
+                        } else if (vlen == 6 &&
+                                   memcmp(s + vs, "larger", 6) == 0) {
+                            kind = FDK_ATTR_SIZE_DELTA;
+                            num = 2;
+                        } else {
+                            fdk_f32 v = 0;
+                            int used = 0;
+                            if (sscanf(s + vs, "%f%n", &v, &used) == 1 &&
+                                (size_t)used == vlen && v >= 1.0f &&
+                                v <= 512.0f) {
+                                kind = FDK_ATTR_SIZE_PT;
+                                num = v;
+                            } else {
+                                return;
+                            }
+                        }
+                    } else if ((alen == 7 &&
+                                memcmp(s + as, "bgcolor", 7) == 0) ||
+                               (alen == 10 &&
+                                memcmp(s + as, "background", 10) == 0)) {
+                        if (s[vs] == '#') {
+                            size_t hp = vs + 1;
+                            if (!parse_hex_color(s, len, &hp, &at_color)) {
+                                return;
+                            }
+                            kind = FDK_ATTR_BACKGROUND;
+                            color_valid = true;
+                        } else {
+                            return;
+                        }
+                    } else if ((alen == 7 &&
+                                memcmp(s + as, "fgcolor", 7) == 0) ||
+                               (alen == 5 &&
+                                memcmp(s + as, "color", 5) == 0)) {
+                        if (s[vs] == '#') {
+                            size_t hp = vs + 1;
+                            if (!parse_hex_color(s, len, &hp, &span_color)) {
+                                return;
+                            }
+                            got_color = true;
+                        } else {
+                            return;
+                        }
+                    } else if (alen == 9 &&
+                               memcmp(s + as, "underline", 9) == 0) {
+                        if (vlen == 6 &&
+                            memcmp(s + vs, "single", 6) == 0) {
+                            integer = FDK_UNDERLINE_SINGLE;
+                        } else if (vlen == 6 &&
+                                   memcmp(s + vs, "double", 6) == 0) {
+                            integer = FDK_UNDERLINE_DOUBLE;
+                        } else if (vlen == 3 &&
+                                   memcmp(s + vs, "low", 3) == 0) {
+                            integer = FDK_UNDERLINE_LOW;
+                        } else if (vlen == 5 &&
+                                   memcmp(s + vs, "error", 5) == 0) {
+                            integer = FDK_UNDERLINE_ERROR;
+                        } else if (vlen == 4 &&
+                                   memcmp(s + vs, "none", 4) == 0) {
+                            integer = FDK_UNDERLINE_NONE;
+                        } else {
+                            return;
+                        }
+                        kind = FDK_ATTR_UNDERLINE;
+                    } else if (alen == 14 &&
+                               memcmp(s + as, "underline_color", 14) == 0) {
+                        if (s[vs] == '#') {
+                            size_t hp = vs + 1;
+                            if (!parse_hex_color(s, len, &hp, &at_color)) {
+                                return;
+                            }
+                            kind = FDK_ATTR_UNDERLINE_COLOR;
+                            color_valid = true;
+                        } else {
+                            return;
+                        }
+                    } else if (alen == 4 &&
+                               memcmp(s + as, "rise", 4) == 0) {
+                        fdk_f32 v = 0;
+                        int used = 0;
+                        if (sscanf(s + vs, "%f%n", &v, &used) == 1 &&
+                            (size_t)used == vlen) {
+                            kind = FDK_ATTR_RISE;
+                            num = v;
+                        } else {
+                            return;
+                        }
+                    } else if (alen == 14 &&
+                               memcmp(s + as, "letter_spacing", 14) == 0) {
+                        fdk_f32 v = 0;
+                        int used = 0;
+                        if (sscanf(s + vs, "%f%n", &v, &used) == 1 &&
+                            (size_t)used == vlen) {
+                            kind = FDK_ATTR_LETTER_SPACING;
+                            num = v;
+                        } else {
+                            return;
+                        }
+                    } else if ((alen == 10 &&
+                                memcmp(s + as, "font_family", 10) == 0) ||
+                               (alen == 6 &&
+                                memcmp(s + as, "family", 6) == 0) ||
+                               (alen == 4 &&
+                                memcmp(s + as, "font", 4) == 0) ||
+                               (alen == 4 &&
+                                memcmp(s + as, "face", 4) == 0)) {
+                        const char *fam = fdk__attr_intern(s + vs, vlen);
+                        if (fam == NULL) {
+                            return; /* OOM: literal; parse fails below */
+                        }
+                        kind = FDK_ATTR_FAMILY;
+                        str = fam;
+                    } else {
+                        known = false;
+                    }
+                    if (!known) {
+                        return; /* unknown attribute: literal */
+                    }
+                    got_any = true;
+                }
+                if (!got_any) {
+                    return; /* <span> with nothing: literal */
+                }
+                out->recognized = true;
+                out->is_attr = (kind != 0);
+                out->kind = kind;
+                out->num = num;
+                out->integer = integer;
+                out->at_color = at_color;
+                out->color_valid = color_valid;
+                out->str = str;
+                out->num2_valid = false;
+                /* The color rides the SPAN stack through the same
+                 * tag: the main loop reads is_color_color below. */
+                out->span_color_valid = got_color;
+                out->span_color = span_color;
+                out->consumed = q - i;
+                return;
+            }
+
+            /* The shortcuts: <sub> and <sup> rise below/above the
+             * baseline AND shrink (Pango's tags do both; a pure rise
+             * would collide with the neighbors' ink); <big> and
+             * <small> are pure size deltas. sub/sup's rise is
+             * proportional to the base size — expressed as a delta
+             * fraction through the SIZE_DELTA the flattener adds to
+             * the base, so the shortcut stays font-size relative. */
+            while (p < len && (s[p] == ' ' || s[p] == '\t')) {
+                p++;
+            }
+            if (p >= len || s[p] != '>') {
+                return;
+            }
+            p++;
+            out->recognized = true;
+            out->is_attr = true;
+            out->num2_valid = true;
+            if (which == 's' && name_len == 3 &&
+                s[name_start + 1] == 'u' && s[name_start + 2] == 'b') {
+                out->kind = FDK_ATTR_RISE;      /* <sub>            */
+                out->num = -2;
+                out->kind2 = FDK_ATTR_SIZE_DELTA;
+                out->num2 = -2;
+            } else if (which == 's' && name_len == 3 &&
+                       s[name_start + 1] == 'u' &&
+                       s[name_start + 2] == 'p') {
+                out->kind = FDK_ATTR_RISE;      /* <sup>            */
+                out->num = 2;
+                out->kind2 = FDK_ATTR_SIZE_DELTA;
+                out->num2 = -2;
+            } else if (which == 'b') {          /* <big>            */
+                out->kind = FDK_ATTR_SIZE_DELTA;
+                out->num = 2;
+                out->num2_valid = false;
+            } else if (which == 's' && name_len == 5) { /* <small>  */
+                out->kind = FDK_ATTR_SIZE_DELTA;
+                out->num = -2;
+                out->num2_valid = false;
+            } else {
+                out->num2_valid = false;
+            }
+            out->consumed = p - i;
+            return;
+        }
     }
 
     /* <color=...> / </color>: the one multi-letter name. */
@@ -380,9 +899,11 @@ static const char *entity_text(const char *name, size_t name_len,
 
 /* ---- the scanner ---- */
 
-fdk_result fdk_markup_parse(const char *markup, char **out_plain,
-                            fdk_span **out_spans,
-                            size_t *out_span_count) {
+static fdk_result markup_parse_impl(const char *markup,
+                                    char **out_plain,
+                                    fdk_span **out_spans,
+                                    size_t *out_span_count,
+                                    fdk_attr_list *out_attrs) {
     if (markup == NULL || out_plain == NULL || out_spans == NULL ||
         out_span_count == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
@@ -397,6 +918,7 @@ fdk_result fdk_markup_parse(const char *markup, char **out_plain,
                                        false},
                    0, false};
     attr_stack st = {{{0, false, {0, 0, 0, 0}, false, false}}, 0};
+    attr_stack2 astk = {{{0}}, 0};
 
     /* Seed the run tracker with the (empty) base attributes so the
      * first change — or the end — emits correctly. */
@@ -409,6 +931,50 @@ fdk_result fdk_markup_parse(const char *markup, char **out_plain,
         if (c == '<') {
             tag_scan tag;
             scan_tag(markup, len, i, &tag);
+            if (tag.recognized && tag.is_attr && !tag.is_color) {
+                /* The attribute tags: their own stack. */
+                bool acted = true;
+                if (!tag.closing) {
+                    if (tag.kind != 0 || tag.num2_valid ||
+                        tag.str != NULL) {
+                        attr2_push(&astk, &tag, text.len);
+                    } else {
+                        acted = false; /* a bare recognized attr tag
+                                        * with no payload: literal */
+                    }
+                } else {
+                    attr_level2 *popped =
+                        attr2_pop(&astk, text.len, out_attrs);
+                    acted = popped != NULL;
+                }
+                if (acted) {
+                    /* A <span color=...> opens a SPAN level too. */
+                    if (!tag.closing && tag.span_color_valid) {
+                        attr_level lvl = {0, true, tag.span_color,
+                                          false, false};
+                        if (st.depth < MARKUP_STACK_MAX) {
+                            st.levels[st.depth++] = lvl;
+                        }
+                    }
+                    i += tag.consumed;
+                    continue;
+                }
+                /* Unmatched close or empty payload: literal '<'. */
+            }
+            if (tag.recognized && tag.span_color_valid &&
+                !tag.closing) {
+                /* A <span color=...> with no other attribute: the
+                 * span stack alone (is_attr was false in that case
+                 * only when kind==0; the color still opens a level
+                 * and consumes the tag). */
+                attr_level lvl = {0, true, tag.span_color, false,
+                                  false};
+                if (st.depth < MARKUP_STACK_MAX) {
+                    st.levels[st.depth++] = lvl;
+                }
+                i += tag.consumed;
+                continue;
+            }
             if (tag.recognized) {
                 bool acted = true;
                 if (!tag.closing) {
@@ -512,6 +1078,9 @@ fdk_result fdk_markup_parse(const char *markup, char **out_plain,
     /* Unclosed tags close implicitly: the final run ends at the
      * plain text's end. */
     span_close(&so, text.len);
+    while (astk.depth > 0) {
+        attr2_pop(&astk, text.len, out_attrs);
+    }
 
     if (text.oom || so.oom) {
         fdk_free(text.buf);
@@ -532,6 +1101,24 @@ fdk_result fdk_markup_parse(const char *markup, char **out_plain,
     *out_spans = so.items; /* NULL when no run ever emitted */
     *out_span_count = so.count;
     return FDK_OK;
+}
+
+fdk_result fdk_markup_parse(const char *markup, char **out_plain,
+                            fdk_span **out_spans,
+                            size_t *out_span_count) {
+    return markup_parse_impl(markup, out_plain, out_spans,
+                             out_span_count, NULL);
+}
+
+fdk_result fdk_markup_parse_ex(const char *markup, char **out_plain,
+                               fdk_span **out_spans,
+                               size_t *out_span_count,
+                               fdk_attr_list *out_attrs) {
+    if (out_attrs != NULL) {
+        fdk_attr_list_init(out_attrs);
+    }
+    return markup_parse_impl(markup, out_plain, out_spans,
+                             out_span_count, out_attrs);
 }
 
 void fdk_markup_free(char *plain, fdk_span *spans) {

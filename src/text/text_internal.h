@@ -10,6 +10,7 @@
 #define FDK_TEXT_INTERNAL_H
 
 #include "fdk/fdk_text.h"
+#include "fdk/fdk_attr.h"
 
 #include "stb_truetype.h"
 
@@ -313,7 +314,67 @@ typedef struct fdk__text_run {
     fdk_color color;   /* valid only when color_set                   */
     bool underline;    /* decoration flags, drawn by the span passes  */
     bool strikethrough;
+
+    /* ---- §23/B2c range attributes (2026-11-01, fdk_attr.h) -------
+     * Everything below defaults to zero/false/NULL: a run built only
+     * from spans (the 1.4.11 path) is identical to before — the
+     * span flattener memsets the whole struct first. The attr
+     * flattener (src/text/attr.c) fills them. */
+    fdk_i32 size_px;   /* 0: the base font's size; else an absolute
+                          pixel size for this run                     */
+    fdk_i32 size_delta;/* added to size_px (px); 0 = none             */
+    const char *family; /* NULL: the base font; else a family name to
+                          resolve ONCE per base font (the resolver
+                          caches on it; the pointer must outlive the
+                          run array — the attr flatten COPIES into
+                          its own arena)                               */
+    bool bg_set;       /* draw the highlight box                      */
+    fdk_color bg;      /* valid when bg_set                           */
+    unsigned char underline_style; /* fdk_underline_style; 0 = none;
+                                       1 = the classic single bar   */
+    bool ul_color_set; /* underline bar's own color                   */
+    fdk_color ul_color;
+    bool st_color_set; /* strikethrough bar's own color               */
+    fdk_color st_color;
+    fdk_f32 rise;      /* px up (+) / down (-)                        */
+    fdk_f32 letter_spacing; /* extra px between this run's glyphs    */
+    const char *link;  /* NULL: not a link; the href for hit-testing  */
 } fdk__text_run;
+
+/* The attribute flattener (src/text/attr.c, §23/B2c): merges the
+ * caller's span array AND attribute list into one run stream —
+ * spans first, attributes layered on top (an attribute wins where
+ * both would set the same property). Family/link strings are
+ * copied into an arena the caller frees (fdk_free(*out_arena))
+ * AFTER the run array is done. Zero spans AND zero attributes
+ * flattens to zero runs, the plain-text path. */
+/* The decoration pass's font hint (attr.c): the run's resolved
+ * font for metrics (underline/strike geometry) when the run carries
+ * a family/size, the BASE font otherwise. NULL = base. */
+fdk_font *sh_run_font_hint(fdk_font *base, const fdk__text_run *run);
+
+/* The attributed paint engine (span.c): the span draw's twin with
+ * per-run backgrounds, styled underlines, rise, and letter
+ * spacing. The run font (family/size) arrives through the shaping
+ * layer's placements. */
+fdk_result fdk__draw_attrs_runs(fdk_surface *surface, fdk_font *font,
+                                const char *utf8, size_t byte_len,
+                                const fdk__text_run *runs,
+                                size_t n_runs, size_t off, size_t count,
+                                fdk_i32 pen_x, fdk_i32 baseline_y,
+                                fdk_color base_color);
+
+/* fontscan.c's family resolver (the attr layer's per-run fonts). */
+bool fdk__fontscan_resolve_family(const char *family, char **out_path,
+                                  long *out_face);
+
+fdk_result fdk__attr_flatten(const char *utf8, size_t byte_len,
+                             const fdk_span *spans, size_t n_spans,
+                             const fdk_attr_list *attrs,
+                             unsigned default_style,
+                             fdk__text_run **out_runs,
+                             size_t *out_run_count,
+                             char **out_arena);
 
 /* Flattens `n` spans (later array entries win wholesale on overlap —
  * the documented fdk_span contract) over the plain text

@@ -66,16 +66,21 @@ separator, frame, expander, notebook, stack + stackswitcher,
 paned, toolbar, statusbar, list (single/multi/none selection),
 tree, iconview, calendar, date picker, time picker, combo, canvas.
 
-**GTK4 widget inventory diff**: missing are `GtkAssistant`,
-`GtkActionBar` (toolbar + custom containers cover the layout),
-`GtkFixed` (FDK containers position explicitly — same role),
-`GtkGrid`-as-widget (FDK has no grid container; box + tables cover
-most UIs), `GtkColorChooserWidget`/`GtkFontChooserWidget` (the
-DIALOGS exist — `fdk_dialog_choose_color/font` — the inline widget
-form does not), `GtkScaleButton`, `GtkVolumeButton`,
-`GtkRecentChooser`, `GtkAppChooserWidget`. **PARTIAL** — the
-every-application set is complete; the chooser-widget forms and
-grid container are the honest missing tail.
+**GTK4 widget inventory diff**: missing are `GtkAssistant`
+(deliberate policy: OUT), `GtkActionBar` (toolbar + custom
+containers cover the layout), `GtkFixed` (FDK containers position
+explicitly — same role), `GtkColorChooserWidget`/
+`GtkFontChooserWidget` (the DIALOGS exist —
+`fdk_dialog_choose_color/font` — the inline widget form does
+not; choosers.c ships some inline chooser machinery),
+`GtkScaleButton`, `GtkVolumeButton`, `GtkRecentChooser`,
+`GtkAppChooserWidget`. The GRID container exists (1.4.x:
+`fdk_grid_create/_attach` with colspan/rowspan,
+row/column expand, homogeneous, spacing, padding — the GtkGrid
+feature set; corrected 2026-11-01, an earlier revision of this
+document wrongly listed grid as a gap). **PARTIAL** — the
+every-application set is complete; the chooser-widget forms are
+the honest missing tail.
 
 **Qt6 Widgets diff**: Qt's ~180 classes include a rich
 item-view/MVC layer (QTableView, QHeaderView, QDataWidgetMapper,
@@ -101,9 +106,11 @@ deep model tooling is not.
 letter-spacing, rise, baseline, per-run fonts, and full attribute
 lists; FDK's markup covers styles/decorations/color only.
 **PARTIAL** — complex-script SHAPING is at parity (the hard part);
-the long tail of run attributes is not exposed. Attribute-list
+the long tail of run attributes is not exposed (a font is one
+face at one pixel size — the documented tradeoff). Attribute-list
 API (pango_attr_list) has no FDK twin: markup is the only inline
-styling route.
+styling route. **This is the §23/B2c work item** (see the gap
+list).
 
 ## 5. Styling and theming
 
@@ -123,27 +130,36 @@ needs arbitrary restyling cannot express it in a theme file.
 
 ## 6. Layout containers
 
-Box (H/V), flow containers, scrollview, notebook, stack, paned,
-frame, expander, toolbar, plus explicit positioning.
-**GTK4 diff**: no GtkGrid, no GtkConstraintLayout/Baseline grid,
-no natural-size negotiation beyond what containers implement.
-**PARTIAL.**
+Box (H/V), GRID (attach with colspan/rowspan, row/column expand,
+homogeneous, spacing, padding), flow containers, scrollview,
+notebook, stack, paned, frame, expander, toolbar, plus explicit
+positioning. **GTK4 diff**: no GtkConstraintLayout (the grid and
+box cover the practical layouts). **PARTIAL** (corrected
+2026-11-01: grid has shipped since 1.4.x — an earlier revision of
+this document wrongly listed it as missing).
 
 ## 7. Input
 
 Pointer (enter/leave/motion/button, multi-button), keyboard
-(keymap, keysyms, per-window shortcuts), wheel, touch (single
-surface), text-input-v3 IME (preedit + commit, both backends),
-drag-and-drop (begin/begin_ex, per-widget drop targets, per-window
-format masks), clipboard (UTF-8 text, ownership semantics per
-platform), XTEST-grade synthetic input in the test rig, per-window
-input regions with click-through.
+(keymap, keysyms, per-window shortcuts), wheel, TOUCH with slot
+tracking (TOUCH_DOWN/MOTION/UP/CANCEL per contact), synthesized
+tap + two-finger scroll, PINCH and N-finger SWIPE gesture events
+(the touch engine, identical on both backends), text-input-v3 IME
+(preedit + commit, both backends), drag-and-drop (begin/begin_ex
+with drag icons, per-widget drop targets, per-window format
+masks, TEXT + URI_LIST with decoded POSIX-path payloads, INCR-
+capable drops), clipboard (UTF-8 text, image PNG with INCR for
+large payloads, PRIMARY selection on both backends), tablets/
+stylus (proximity, pressure, tilt), XTEST-grade synthetic input
+in the test rig, per-window input regions with click-through.
 
-**Diffs**: clipboard is text-only (no image/URI lists — GTK/Qt
-have rich paste). No gesture recognizers (GTK4's GtkGesture* /
-Qt6's QGestureRecognizer: swipe, pinch, rotate, long-press).
-Multi-touch tracking (touch slots) is not exposed (single-pointer
-events). **PARTIAL.**
+**Diffs**: the gesture surface is raw EVENTS (pinch scale/delta,
+swipe direction), not RECOGNIZERS (no long-press, double-tap,
+drag/pan, rotate with angle — GTK4's GtkGesture* /
+Qt6's QGestureRecognizer shape). Clipboard offers are one-
+content-at-a-time (set_text replaces set_image; no simultaneous
+multi-target offer, no URI-list clipboard API — DnD has URIs,
+the clipboard does not). **PARTIAL.**
 
 ## 8. Accessibility
 
@@ -171,19 +187,18 @@ application doing heavy per-frame vector work draws on CPU.
 - D-Bus: a NATIVE wire client (fdk_dbus.h, 105 decls — bus,
   calls, signals, properties, watch; no libdbus linkage).
 - Notifications (org.freedesktop.Notifications: send/withdraw/
-  capabilities/status), system tray (StatusNotifierItem, both
+  capabilities/status) plus the SERVER side (fdk-shell-overlay's
+  notifyd), system tray host AND item (StatusNotifierItem, both
   directions), toplevel control (foreign-toplevel-management:
   list/activate/close), session manager (session save/restore,
   join/leave, command), idle inhibit, portal prefs (theme/scheme/
-  text scale), activation tokens, drag-and-drop (both), window
-  icons, app_id.
+  text scale) and the xdg-desktop-portal FileChooser, activation
+  tokens, drag-and-drop (both), window icons, app_id.
 
 **Diffs**: no print dialog (GTK/Qt embed CUPS; FDK has nothing —
-save-PNG + the file dialog is the workaround), no
-recent-files/app-chooser portals, no on-screen-display or
-notifications-server side (client only). **PARTIAL — the
-desktop-shell client surface is deep; printing is the one whole
-absent category.**
+save-PNG + the file dialog is the workaround), no recent-files/
+app-chooser portals. **PARTIAL — the desktop-shell client surface
+is deep; printing is the one whole absent category.**
 
 ## 11. i18n
 

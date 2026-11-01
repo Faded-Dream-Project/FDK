@@ -1013,6 +1013,47 @@ static bool sh_bidi_analyze(sh_bidi *b, const char *utf8,
  * (segments are contiguous, so [byte_lo, byte_hi) covers exactly
  * [cp_lo, cp_hi)'s bytes). Returns the array + count, or false on
  * OOM. */
+/* ---- §23/B2c: per-run fonts ------------------------------------------ */
+
+/* The attr layer's font resolver (src/text/attr.c owns the cache):
+ * resolves the run's family at the run's effective size. Returns
+ * `fallback` (the script-resolved font, usually the primary) when
+ * the run carries no family/size or when resolution failed — the
+ * caller's degradation is honest by construction. */
+fdk_font *fdk__attr_font_for(const fdk_font *base, const char *family,
+                             fdk_i32 size_px, fdk_i32 size_delta,
+                             fdk_font *fallback);
+
+static fdk_font *sh_attr_font(fdk_font *primary, const fdk__text_run *run,
+                              fdk_font *script_font) {
+    fdk_i32 size = run->size_px != 0
+                       ? run->size_px
+                       : primary->pixel_size + run->size_delta;
+    if (size < 1) {
+        size = 1;
+    }
+    if (size > 512) {
+        size = 512;
+    }
+    if (run->family != NULL) {
+        fdk_font *f = fdk__attr_font_for(primary, run->family, size,
+                                         0, script_font);
+        if (f != NULL) {
+            return f;
+        }
+        return script_font;
+    }
+    if (size != primary->pixel_size) {
+        /* Same face, different size: the base font's own path. */
+        fdk_font *f = fdk__attr_font_for(primary, NULL, size, 0,
+                                         script_font);
+        if (f != NULL) {
+            return f;
+        }
+    }
+    return script_font;
+}
+
 static bool sh_make_segments(sh_bidi *b, const fdk__text_run *runs,
                        size_t n_runs, fdk_font *primary,
                        size_t range_end, sh_segment **out,
@@ -1030,9 +1071,24 @@ static bool sh_make_segments(sh_bidi *b, const fdk__text_run *runs,
         if (eff == SH_SCRIPT_COMMON) {
             eff = prev_script;
         }
-        unsigned style =
-            fdk__run_style_at(runs, n_runs, b->cp_byte[k], primary->style);
+        const fdk__text_run *run = NULL;
+        for (size_t q = 0; q < n_runs; q++) {
+            if (runs[q].start <= b->cp_byte[k] && runs[q].end > b->cp_byte[k]) {
+                run = &runs[q];
+                break;
+            }
+        }
+        unsigned style = run != NULL ? run->style : primary->style;
         fdk_font *font = sh_font_for_cp(primary, b->cp[k], eff);
+        /* §23/B2c: a run with a family/size attribute shapes on its
+         * OWN font (the attr resolver's cache; the base font when
+         * resolution failed — the honest degradation, warned once
+         * inside the resolver). The segment still participates in
+         * script fallback THROUGH that font. */
+        if (run != NULL && (run->family != NULL || run->size_px != 0 ||
+                            run->size_delta != 0)) {
+            font = sh_attr_font(primary, run, font);
+        }
         sh_fb_level level = b->levels[k];
         bool boundary = n == 0;
         if (!boundary) {
