@@ -265,6 +265,32 @@ void fdk_list_unbind_model(fdk_widget *list) {
     }
 }
 
+/* §26/G-6 — the destroy hook. teardown_free (widget.c) calls this
+ * for every dying widget; a bound one releases its slot HERE so the
+ * registry never holds a stale pointer.
+ *
+ * Deliberately NOT the public unbind's full path: set_on_change on
+ * the model is unsafe at this point because the MODEL may already
+ * be freed (an application that shuts its models down before its
+ * window — fdk-files does exactly that). The model's on_change may
+ * keep pointing at binding_changed with this dead widget as user
+ * data; that call is already guarded (binding_of(w) returns NULL
+ * for a cleared slot) and the next binder overwrites it. */
+void fdk__model_bind_widget_destroyed(fdk_widget *w) {
+    if (w == NULL) {
+        return;
+    }
+    for (int i = 0; i < BIND_MAX; i++) {
+        if (g_bindings[i].widget == w) {
+            binding *b = &g_bindings[i].b;
+            fdk_free(b->ids);
+            fdk_free(b->nodes);
+            g_bindings[i].widget = NULL;
+            return;
+        }
+    }
+}
+
 /* ---- public: the Tree binding ---------------------------------------------- */
 
 fdk_result fdk_tree_bind_model(fdk_widget *tree, fdk_model *model,

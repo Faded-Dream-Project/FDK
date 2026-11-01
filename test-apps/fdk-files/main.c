@@ -15,6 +15,7 @@
 #include "fsops.h"
 #include "menus.h"
 #include "model.h"
+#include "bookmarks.h"
 #include "ops.h"
 #include "thumbs.h"
 #include "ops_dialogs.h"
@@ -527,6 +528,52 @@ static void rig_script(void) {
     /* the undo of it */
     fdk_undo_stack_undo(fapp.undo);
 
+    /* the §26/3a steps: split view on/off, bookmark add + reorder
+     * + remove + persistence */
+    {
+        int n = pane_add();
+        printf("PHASE: split %d\n", n >= 2 ? 1 : 0);
+        fflush(stdout);
+        if (n >= 2) {
+            /* the second pane navigated to the same dir */
+            tab *t2 = active_tab(fapp.panes[1]);
+            printf("PHASE: splitdir %s\n",
+                   (t2 != NULL) ? t2->dir : "(null)");
+            fflush(stdout);
+            pane_remove_last();
+            printf("PHASE: splitoff %d\n", fapp.pane_count);
+            fflush(stdout);
+        }
+        /* bookmark the scratch dir + /tmp (both exist), reorder, drop */
+        char b2[TA_JOIN_MAX];
+        ta_copy(b2, sizeof b2, "/tmp");
+        int bi = bookmarks_add(scratch);
+        int b2i = bookmarks_add(b2);
+        bookmarks_refresh();
+        printf("PHASE: bookmark %d %d %zu\n", bi >= 0 ? 1 : 0,
+               b2i >= 0 ? 1 : 0, bookmarks_count());
+        fflush(stdout);
+        /* reorder: swap them */
+        bool moved = bookmarks_move(0, 1);
+        printf("PHASE: bookmarkmove %d %s\n", moved ? 1 : 0,
+               (bookmarks_count() > 0) ? bookmarks_at(0)->path
+                                       : "(none)");
+        fflush(stdout);
+        /* remove one; persistence round-trip */
+        (void)bookmarks_remove(scratch);
+        bookmarks_refresh();
+        bookmarks_save();
+        size_t before = bookmarks_count();
+        bookmarks_load();
+        bookmarks_refresh();
+        printf("PHASE: bookmarkpersist %zu %zu\n", before,
+               bookmarks_count());
+        fflush(stdout);
+        (void)bookmarks_remove(b2);
+        bookmarks_refresh();
+        bookmarks_save();
+    }
+
     /* a WORKER-engine copy round trip (§25/4b): copy the scratch
      * tree, wait for the done callback, verify the copy exists */
     {
@@ -593,6 +640,7 @@ int main(int argc, char **argv) {
                                   "The FDK validation file manager");
     }
 
+    bookmarks_load(); /* before the sidebar builds (§26/3a) */
     panes_build(&fapp);
     menus_build(&fapp);
     ops_init(); /* the worker engine (§25/4b)                   */

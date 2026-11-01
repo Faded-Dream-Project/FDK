@@ -1,6 +1,7 @@
 /* menus.c — the menu bar (File/Edit/View/Go/Help), the context
  * menus (file/folder/multi/empty/sidebar), the icon toolbar, and
  * the window shortcuts + the shortcut list dialog. */
+#include "bookmarks.h"
 #include "menus.h"
 #include "fsops.h"
 #include "model.h"
@@ -101,6 +102,29 @@ static void act_location(void) {
 static void act_go_trash(void) { ops_open_trash(); }
 
 static void act_shortcut_list(void) { menus_open_shortcut_list(&fapp); }
+
+/* §26/3a: bookmark the active tab's folder. */
+static void act_bookmark(void) {
+    const char *dir = active_tab(active_pane())->dir;
+    if (bookmarks_add(dir) >= 0) {
+        bookmarks_refresh();
+        bookmarks_save();
+        fi_set_status("Bookmarked %s", dir);
+    } else {
+        fi_set_status("Already bookmarked (or not a folder)");
+    }
+}
+
+/* §26/3a: the split view. F3 toggles (the two-pane convention —
+ * Norton/Midnight/Total all use it). */
+static void act_split_toggle(void) {
+    if (fapp.pane_count >= 2) {
+        pane_remove_last();
+        fi_set_status("Split view off");
+    } else if (pane_add() > 0) {
+        fi_set_status("Split view on — drag files between panes");
+    }
+}
 
 /* ---- the menu model ------------------------------------------------- */
 
@@ -226,6 +250,8 @@ void menus_build(files_app *a) {
         {NULL, NULL, NULL},
         {"&Hidden files", "Ctrl+H", act_hidden},
         {"&Location bar", "Ctrl+L", act_location},
+        {NULL, NULL, NULL},
+        {"&Split view", "F3", act_split_toggle},
     };
     menu_build_actions(m_view, view_acts,
                        sizeof view_acts / sizeof view_acts[0]);
@@ -239,6 +265,7 @@ void menus_build(files_app *a) {
         {"&Up", "Alt+Up", act_up},
         {"&Home", "Alt+Home", act_home},
         {NULL, NULL, NULL},
+        {"&Bookmark this folder", "Ctrl+D", act_bookmark},
         {"&Trash", "", act_go_trash},
     };
     menu_build_actions(m_go, go_acts,
@@ -276,6 +303,8 @@ void menus_build(files_app *a) {
         {"Alt+Left", act_back},    {"Alt+Right", act_forward},
         {"Alt+Up", act_up},        {"Alt+Home", act_home},
         {"F5", act_refresh},       {"Ctrl+Q", act_quit},
+        {"F3", act_split_toggle},
+        {"Ctrl+D", act_bookmark},
         {"Ctrl+question", act_shortcut_list},
     };
     for (size_t i = 0; i < sizeof sc / sizeof sc[0]; i++) {
@@ -437,6 +466,18 @@ static void menus_ctx_track(fdk_menu *m) {
     } else {
         fdk_menu_destroy(m); /* full: honest immediate destroy */
     }
+}
+
+/* §26: pop + track an app-built context menu (bookmarks' remove).
+ * Same lifetime rule as every popup here: the model is parked in
+ * the ctx registry and freed when the chain closes. */
+void menus_ctx_popup(fdk_menu *m, fdk_widget *anchor, fdk_i32 x,
+                     fdk_i32 y) {
+    if (m == NULL) {
+        return;
+    }
+    (void)fdk_menu_popup_at(m, anchor, x, y);
+    menus_ctx_track(m);
 }
 
 void menus_ctx_shutdown(void) {
