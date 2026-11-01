@@ -1822,27 +1822,56 @@ came up empty; the GLX twin libnvidia-glcore carries the same
 client). One-time driver state held NODELETE for the process; the
 same `tests/data/lsan-gl.supp` carries the module-scoped
 suppression; desktop debug runs get the clean exit with
-`LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp`.
+`LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp`. The §22
+sign-off run (same day, GTX 1050 Ti) delivered that contract and
+was recorded as the round's closing evidence: "exited cleanly
+after 587 frames" with the Suppressions-used footer reading
+exactly 3 / 754 B / libdbus-1 — the same 3-allocation block, the
+only template matched that run, and no leak report above it.
 
 **LSan and libEGL_nvidia** (2026-11-01, the §22 exit-leak round):
-a sanitized NVIDIA desktop run also ends with 256 B in 4
+a sanitized NVIDIA desktop run may also end with 256 B in 4
 allocations whose frames are all inside `libEGL_nvidia.so.0`. FDK's
 teardown was audited call-by-call BEFORE suppressing (the §22
 record, D-040): the destroy ladder was already canonical, the one
 missing call — `eglReleaseThread`, the canonical tail — was fixed
 (wayland_egl.c's shutdown), and the sway suite's teardown leg fails
 without it. The open question "does the fix retire the 256 B?" was
-then closed by the owner's post-fix UNSUPPRESSED run: 1022 B in 7
-allocations = the 766 B libdbus block + the SAME 256 B in 4
-objects — the tail call did not retire it (the driver allocates at
-engagement and never frees), so the `leak:libEGL_nvidia` entry is
-NECESSARY for this driver generation (it stops matching on its own
-if a future driver frees the state). The sandbox's Mesa stack exits
-with ZERO bytes leaked over the same probe, so the 256 B is the
-proprietary driver's own state. Any leak whose stack carries an FDK
-frame still fails the run — the §22 negative control (an injected
-one-line FDK malloc reported THROUGH the active suppression file)
-proves that property directly.
+then closed by the owner's two post-fix runs: the UNSUPPRESSED one
+totaled 1022 B in 7 allocations = the 766 B libdbus block + the
+SAME 256 B in 4 objects, while the §22 sign-off run (suppression
+active, clean exit) printed a footer naming libdbus-1 ALONE. Both
+runs are post-fix on the same machine and lane, so the block is
+INTERMITTENT run-to-run on this driver rather than deterministic
+state the fix failed to retire; the `leak:libEGL_nvidia` entry is
+NECESSARY for the runs where it does appear (it stops matching on
+its own whenever the driver retires or never allocates the state).
+The sandbox's Mesa stack exits with ZERO bytes leaked over the
+same probe, so the 256 B is the proprietary driver's own state.
+Any leak whose stack carries an FDK frame still fails the run —
+the §22 negative control (a one-line FDK-stand-in malloc reported
+THROUGH the active suppression file) proves that property
+directly.
+
+**Reading the Suppressions-used footer** (verified directly with a
+controlled 4-allocation probe — direct and indirect classes, run
+with no file, a fully-matching file, and the repo's own file):
+when any suppression matches, LSan ends the run with a
+"Suppressions used:" table (count, bytes, template), and that
+table is a per-run audit. It lists ONLY the templates that
+actually matched — an entry that stays silent matched nothing this
+run — and its count/bytes are the suppressed allocations summed
+across direct and indirect classes. A fully-suppressed run prints
+the footer and exits 0; a run where nothing matched prints no
+footer; a run with any unsuppressed leak prints the leak report
+and exits 1 regardless of what else matched. So on a driver
+desktop the footer's template column names exactly which
+third-party modules' state that run retired (the sign-off run
+above: libdbus-1 alone, 3 allocations / 754 B), and the absence of
+a leak report above the footer is the proof that nothing else
+leaked. The repo's file also parses clean under LSan with no
+warnings and over-suppresses nothing: the probe's own allocations
+were fully reported through it.
 
 **The examples-level proof** (`scripts/verify_gl_examples.sh` in the
 staging environment, outside the repo): every example runs twice —

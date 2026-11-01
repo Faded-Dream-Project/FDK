@@ -14,6 +14,22 @@
 #
 # Applied by `make test-x11` automatically; pass the same file to any
 # sanitized run that exercises the lane (see docs/testing.md).
+#
+# READING THE RUN: when a suppression in this file matches, LSan's
+# report ends with a "Suppressions used:" footer table (count, bytes,
+# template). That footer is a PER-RUN AUDIT and its semantics were
+# verified directly (a controlled 4-allocation probe, direct and
+# indirect, run with no file / a fully-matching file / this file):
+# the table lists ONLY the templates that actually matched (an entry
+# that stays silent matched nothing this run), and its count/bytes
+# are the suppressed allocations SUMMED across direct and indirect
+# classes. A fully-suppressed run prints the footer and exits 0; a
+# run with nothing matched prints NO footer; a run with any
+# unsuppressed leak prints the leak report and exits 1 regardless of
+# what else matched. So on a driver desktop the footer's template
+# column names exactly which third-party modules' state the run
+# retired, and the absence of a leak report above it is the proof
+# that nothing else leaked.
 leak:libGLX_mesa
 leak:libGLdispatch
 leak:libgallium
@@ -73,11 +89,18 @@ leak:libfontconfig
 # lane runs see it too; libEGL_nvidia and libnvidia-egl-wayland
 # have zero dbus references. Sizes observed: 670-766 B in 3
 # allocations (the post-fix report: 184 B direct at
-# libdbus+0x276d7 + 582 B indirect at +0x3774d). Suppressed by
-# MODULE so LeakSanitizer stays strict for everything FDK owns; if
-# an FDK frame ever appears in a libdbus allocation's stack, that
-# is a real bug — the suppression only matches the third-party
-# module's own frames.
+# libdbus+0x276d7 + 582 B indirect at +0x3774d). The §22 sign-off
+# run (same day, GTX 1050 Ti, suppression active) then closed the
+# loop from the CLEAN side: "exited cleanly after 587 frames" and
+# the Suppressions-used footer read exactly 3 / 754 B /
+# libdbus-1 — the same 3-allocation block, nothing else matched,
+# no leak report: the clean-exit contract delivered on the driver
+# desktop, and the footer naming libdbus-1 ALONE (no libEGL_nvidia
+# row that run) is the per-run proof of what was retired.
+# Suppressed by MODULE so LeakSanitizer stays strict for
+# everything FDK owns; if an FDK frame ever appears in a libdbus
+# allocation's stack, that is a real bug — the suppression only
+# matches the third-party module's own frames.
 leak:libdbus-1
 
 # libEGL_nvidia.so.0 (added 2026-11-01, the §22 exit-leak round):
@@ -101,14 +124,19 @@ leak:libdbus-1
 # ANSWERED by measurement: the owner's post-fix UNSUPPRESSED run
 # totals 1022 B in 7 allocations = the 766 B libdbus block PLUS the
 # SAME 256 B in 4 objects at libEGL_nvidia.so.0+0xc94e1. The tail
-# call did NOT retire it: the driver allocates at engagement and
-# never frees (the lane pins its libraries by design, so the only
-# candidate frees are a dlclose that never happens — or none at
-# all). This entry is therefore NECESSARY, not belt-and-braces; the
-# fix itself stays because it is the canonical sequence, the rig
-# leg still guards it, and Mesa provably needs nothing more. If a
-# future driver generation frees the state, the entry simply stops
-# matching — it hides nothing FDK owns either way. Per-library as
+# call did NOT retire it: that run's 256 B co-existed with the
+# libdbus block, and the §22 sign-off run (suppression active,
+# clean exit after 587 frames) printed a footer naming libdbus-1
+# ALONE — 3 / 754 B, no libEGL_nvidia row. Together the two runs
+# say the 256 B is INTERMITTENT run-to-run on this driver (both
+# runs are post-fix, same machine, same lane; the 1022 B run saw
+# the block, the sign-off run did not), not deterministic state
+# the fix failed to retire. The entry is therefore NECESSARY for
+# the runs where the block does appear (it stops matching on its
+# own whenever the driver retires or never allocates the state);
+# the fix itself stays because it is the canonical sequence, the
+# rig leg still guards it, and Mesa provably needs nothing more.
+# It hides nothing FDK owns either way. Per-library as
 # always: any leak whose stack contains an FDK frame still fails
 # the run.
 leak:libEGL_nvidia

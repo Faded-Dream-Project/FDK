@@ -93,12 +93,33 @@ note their development-candidate status.
   libnvidia-glcore carries the same client. And the 256 B question
   is closed by arithmetic: the owner's post-fix unsuppressed run
   totals 1022 B in 7 allocations = 766 B libdbus + the SAME 256 B
-  in 4 objects — the eglReleaseThread tail call did NOT retire it
-  (the driver allocates at engagement and never frees), so the
-  `leak:libEGL_nvidia` entry is NECESSARY, not belt-and-braces; the
-  fix stays (canonical sequence, rig-guarded). Clean-exit contract
-  unchanged: with the suppression file active the run exits 0 with
-  an empty report.
+  in 4 objects. Read together with the sign-off run (below), the two
+  post-fix runs say the 256 B is INTERMITTENT run-to-run on this
+  driver rather than deterministic state the fix failed to retire,
+  so the `leak:libEGL_nvidia` entry is NECESSARY for the runs where
+  the block appears; the fix stays (canonical sequence,
+  rig-guarded). Clean-exit contract unchanged: with the suppression
+  file active the run exits 0 with an empty report.
+- **THE SIGN-OFF RUN (§22 closed clean)**: the owner's run with the
+  suppression active — "exited cleanly after 587 frames", full
+  stack engaged (GL lane, driver-probed upload path, HarfBuzz+
+  FriBidi, atspi) — ended with LSan's Suppressions-used footer
+  reading exactly 3 / 754 B / libdbus-1 and no leak report: the
+  clean-exit contract delivered on the driver desktop. The footer's
+  semantics were verified directly before recording it (a controlled
+  4-allocation probe run with no file, a fully-matching file, and
+  the repo's own file): the table lists ONLY matched templates,
+  count/bytes sum direct+indirect, a fully-suppressed run exits 0,
+  a nothing-matched run prints no footer, and any unsuppressed
+  leak still exits 1 — so the footer is a per-run audit naming
+  which third-party modules' state that run retired (this run:
+  libdbus-1 alone — no libEGL_nvidia row, closing the intermittence
+  reading above). The repo's file also parses clean and
+  over-suppresses nothing (an executable-owned 137 B leak is fully
+  reported through it — the negative control, re-run for this
+  round), and the sandbox's canonical rig re-verified end-to-end on
+  the same file: `make test-x11` (sanitized build, throwaway Xvfb,
+  the Makefile's own LSAN wiring) passes with no leak report.
 
 ### Fixed — THE GL LANE'S REAL NVIDIA ANSWER: probe the driver, ladder the failures, share the group (§21, the GTX 1050 Ti follow-up)
 
