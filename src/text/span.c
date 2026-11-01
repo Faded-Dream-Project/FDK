@@ -41,6 +41,7 @@
 #include "core/alloc_internal.h"
 #include "render/surface_internal.h"
 
+#include <math.h>
 #include <string.h>
 
 /* ---- flattening ---- */
@@ -496,4 +497,257 @@ fdk_result fdk_surface_draw_spans_utf8(fdk_surface *surface,
                        byte_len, pen_x, baseline_y, base_color);
     fdk_free(runs);
     return r;
+}
+
+/* ---- §23/B2c: the attributed paint engine --------------------------- */
+
+/* The styled underline geometry (Pango's set; see fdk_attr.h):
+ * SINGLE/LOW/DOUBLE are bars at metrics-derived offsets; ERROR is
+ * the squiggle — a sine walked over the run's extent at the bar
+ * thickness. All draw in the run's underline color when set, the
+ * text color otherwise (the 1.4.11 rule). */
+static void attrs_paint_underline(fdk_surface *surface,
+                                  const fdk__text_run *run,
+                                  fdk_font *rfont, fdk_i32 x, fdk_i32 w,
+                                  fdk_i32 baseline_y, fdk_color color) {
+    if (w <= 0) {
+        return;
+    }
+    fdk_font_metrics fm;
+    fdk_font_get_metrics(rfont, &fm);
+    fdk_i32 thick = deco_thickness(rfont->pixel_size);
+    fdk_i32 uly = underline_y(rfont, baseline_y);
+    fdk_i32 low_y = baseline_y + fm.descent - thick;
+
+    switch ((fdk_underline_style)run->underline_style) {
+    case FDK_UNDERLINE_SINGLE:
+    default:
+        fdk_surface_fill_rect(surface, (fdk_rect){x, uly, w, thick},
+                              color);
+        break;
+    case FDK_UNDERLINE_DOUBLE:
+        fdk_surface_fill_rect(surface, (fdk_rect){x, uly, w, thick},
+                              color);
+        fdk_surface_fill_rect(surface,
+                              (fdk_rect){x, uly + 2 * thick, w, thick},
+                              color);
+        break;
+    case FDK_UNDERLINE_LOW:
+        fdk_surface_fill_rect(surface, (fdk_rect){x, low_y, w, thick},
+                              color);
+        break;
+    case FDK_UNDERLINE_ERROR: {
+        /* The squiggle: half-period 3 px, amplitude thick. */
+        fdk_i32 y0 = uly + thick / 2;
+        for (fdk_i32 dx = 0; dx < w; dx++) {
+            fdk_i32 dy = (fdk_i32)((fdk_f32)(thick / 2) *
+                                   sinf((fdk_f32)dx * 3.14159265f /
+                                        3.0f));
+            fdk_surface_fill_rect(
+                surface, (fdk_rect){x + dx, y0 + dy, 1, thick}, color);
+        }
+        break;
+    }
+    }
+}
+
+fdk_result fdk__draw_attrs_runs(fdk_surface *surface, fdk_font *font,
+                                const char *utf8, size_t byte_len,
+                                const fdk__text_run *runs,
+                                size_t n_runs, size_t off, size_t count,
+                                fdk_i32 pen_x, fdk_i32 baseline_y,
+                                fdk_color base_color) {
+    if (surface == NULL || font == NULL || utf8 == NULL ||
+        off > byte_len || count > byte_len - off) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (count == 0) {
+        return FDK_OK;
+    }
+    if (runs == NULL || n_runs == 0) {
+        return fdk_surface_draw_utf8(surface, font, utf8 + off, count,
+                                     pen_x, baseline_y, base_color);
+    }
+
+    fdk_i64 bx0 = (fdk_i64)surface->clip_x0;
+    fdk_i64 by0 = (fdk_i64)surface->clip_y0;
+    fdk_i64 bx1 = (fdk_i64)surface->clip_x1;
+    fdk_i64 by1 = (fdk_i64)surface->clip_y1;
+
+    fdk__shaped *s = fdk__shape_range(font, utf8, byte_len, off, count,
+                                      runs, n_runs);
+    if (s == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+
+    const size_t end = off + count;
+    fdk_i64 ux0 = 0, uy0 = 0, ux1 = -1, uy1 = -1;
+    int any = 0;
+
+    /* The letter-spacing budget: the shaped pen walked WITHOUT it
+     * (spacing is a paint/measure attribute, not a shaping input);
+     * the draw walk adds it per glyph of a spacing run, keeping its
+     * own cumulative x so the run's ink lands where its measure
+     * said (measure adds the same budget per glyph — see
+     * fdk__measure_runs's note). */
+    fdk_f32 spacing_x = (fdk_f32)pen_x;
+    fdk_i32 prev_spaced_cp = -1;
+    fdk_f32 carry = 0.0f;
+
+    /* 1. The background boxes FIRST (under everything). */
+    for (size_t k = 0; k < n_runs; k++) {
+        if (!runs[k].bg_set) {
+            continue;
+        }
+        size_t r_start = runs[k].start > off ? runs[k].start : off;
+        size_t r_end = runs[k].end < end ? runs[k].end : end;
+        if (r_start >= r_end) {
+            continue;
+        }
+        fdk_f32 x0f = shaped_pen_at_byte(s, r_start) + carry;
+        fdk_f32 x1f = shaped_pen_at_byte(s, r_end) + carry;
+        fdk_font_metrics fm;
+        fdk_font_get_metrics(font, &fm);
+        fdk_i32 x = pen_x + (fdk_i32)(x0f + 0.5f);
+        fdk_i32 w = (fdk_i32)(x1f + 0.5f) - (fdk_i32)(x0f + 0.5f);
+        fdk_i32 top = baseline_y - fm.ascent - 1;
+        fdk_i32 h = fm.ascent + fm.descent + 2;
+        if (w > 0 && h > 0) {
+            fdk_surface_fill_rect(surface, (fdk_rect){x, top, w, h},
+                                  runs[k].bg);
+        }
+    }
+
+    /* 2. The glyphs. The placement's font is the run's resolved
+     * font (the shaping layer resolved family/size); rise offsets
+     * the glyph box vertically. */
+    for (size_t i = 0; i < s->n_places; i++) {
+        const fdk__placement *p = &s->places[i];
+        const fdk_glyph *glyph = p->raster;
+        if (glyph == NULL || glyph->bits == NULL || glyph->w <= 0 ||
+            glyph->h <= 0) {
+            continue;
+        }
+        const fdk__text_run *run = NULL;
+        for (size_t k = 0; k < n_runs; k++) {
+            if (p->cluster >= runs[k].start && p->cluster < runs[k].end) {
+                run = &runs[k];
+                break;
+            }
+        }
+        fdk_color color =
+            (run != NULL && run->color_set) ? run->color : base_color;
+
+        /* Letter spacing: added before each glyph after the first
+         * of its spacing run. */
+        fdk_f32 gx = (fdk_f32)p->x;
+        if (run != NULL && run->letter_spacing != 0.0f) {
+            if (prev_spaced_cp >= 0) {
+                carry += run->letter_spacing;
+            }
+            prev_spaced_cp = (fdk_i32)i;
+            gx += carry;
+        } else {
+            prev_spaced_cp = -1;
+            gx += carry;
+        }
+
+        fdk_i32 rise = run != NULL ? (fdk_i32)(run->rise + 0.5f) : 0;
+        fdk_rect dst = {
+            pen_x + (fdk_i32)gx + glyph->xoff,
+            baseline_y - rise + glyph->yoff + p->y_shift,
+            glyph->w,
+            glyph->h,
+        };
+        (void)spacing_x;
+        if (glyph->color) {
+            fdk_surface_blend_rgba(surface, dst, glyph->bits,
+                                   glyph->w * 4);
+        } else {
+            fdk_surface_blend_mask(surface, dst, glyph->bits,
+                                   glyph->w, color);
+        }
+        if (!any) {
+            ux0 = dst.x;
+            uy0 = dst.y;
+            ux1 = (fdk_i64)dst.x + dst.width;
+            uy1 = (fdk_i64)dst.y + dst.height;
+            any = 1;
+        } else {
+            if (dst.x < ux0) {
+                ux0 = dst.x;
+            }
+            if (dst.y < uy0) {
+                uy0 = dst.y;
+            }
+            if ((fdk_i64)dst.x + dst.width > ux1) {
+                ux1 = (fdk_i64)dst.x + dst.width;
+            }
+            if ((fdk_i64)dst.y + dst.height > uy1) {
+                uy1 = (fdk_i64)dst.y + dst.height;
+            }
+        }
+    }
+
+    /* 3. The decorations per run: styled underlines, the colored
+     * strike bar. */
+    for (size_t k = 0; k < n_runs; k++) {
+        size_t r_start = runs[k].start > off ? runs[k].start : off;
+        size_t r_end = runs[k].end < end ? runs[k].end : end;
+        if (r_start >= r_end) {
+            continue;
+        }
+        fdk_f32 x0f = shaped_pen_at_byte(s, r_start);
+        fdk_f32 x1f = shaped_pen_at_byte(s, r_end);
+        fdk_i32 x = pen_x + (fdk_i32)(x0f + 0.5f);
+        fdk_i32 w = (fdk_i32)(x1f + 0.5f) - (fdk_i32)(x0f + 0.5f);
+        fdk_color tcolor =
+            runs[k].color_set ? runs[k].color : base_color;
+
+        if (runs[k].underline && w > 0) {
+            fdk_color uc = runs[k].ul_color_set ? runs[k].ul_color
+                                                : tcolor;
+            /* The decoration font: the run's own (its size set the
+             * metrics); the base font when the run is on it. */
+            fdk_font *rfont = font;
+            if (runs[k].family != NULL || runs[k].size_px != 0 ||
+                runs[k].size_delta != 0) {
+                fdk_font *rf = sh_run_font_hint(font, &runs[k]);
+                if (rf != NULL) {
+                    rfont = rf;
+                }
+            }
+            fdk_i32 rise = (fdk_i32)(runs[k].rise + 0.5f);
+            attrs_paint_underline(surface, &runs[k], rfont, x, w,
+                                  baseline_y - rise, uc);
+        }
+        if (runs[k].strikethrough && w > 0) {
+            fdk_color sc = runs[k].st_color_set ? runs[k].st_color
+                                                : tcolor;
+            fdk_i32 thick = deco_thickness(font->pixel_size);
+            fdk_i32 sty = strike_y(font, baseline_y) -
+                          (fdk_i32)(runs[k].rise + 0.5f);
+            fdk_surface_fill_rect(surface, (fdk_rect){x, sty, w, thick},
+                                  sc);
+        }
+    }
+    fdk__shaped_free(s);
+
+    if (any) {
+        fdk_i64 dx0 = ux0 > bx0 ? ux0 : bx0;
+        fdk_i64 dy0 = uy0 > by0 ? uy0 : by0;
+        fdk_i64 dx1 = ux1 < bx1 ? ux1 : bx1;
+        fdk_i64 dy1 = uy1 < by1 ? uy1 : by1;
+        if (dx1 > dx0 && dy1 > dy0 &&
+            dx0 <= (fdk_i64)INT32_MAX && dx1 >= (fdk_i64)INT32_MIN &&
+            dy0 <= (fdk_i64)INT32_MAX && dy1 >= (fdk_i64)INT32_MIN) {
+            fdk_surface_invalidate(surface,
+                                   (fdk_rect){
+                                       (fdk_i32)dx0, (fdk_i32)dy0,
+                                       (fdk_i32)(dx1 - dx0),
+                                       (fdk_i32)(dy1 - dy0),
+                                   });
+        }
+    }
+    return FDK_OK;
 }

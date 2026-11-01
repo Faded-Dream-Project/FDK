@@ -956,3 +956,83 @@ void fdk_text_font_discovery_reset_for_tests(void) {
     }
     g_reject_count = 0;
 }
+
+/* ---- §23/B2c: the FAMILY resolver ------------------------------------- */
+
+/* Declared in text_internal.h (attr.c's resolver). */
+
+/* fontconfig's answer for "a loadable face of this FAMILY" — the
+ * same pattern/sort walk as fs_fontconfig_walk, with the caller's
+ * family instead of the generic sans-serif. The walk is capped at
+ * the same 32 candidates; the first face through the TrueType-flavor
+ * gate wins (the CFF-skip rationale is fs_try_fontconfig's). With
+ * no fontconfig the resolver answers false and the attribute run
+ * degrades to the base font (the loud, honest WARN is the caller's).
+ *
+ * The generic aliases ("sans-serif", "serif", "monospace") are
+ * fontconfig's own answers — the pattern carries them directly. */
+bool fdk__fontscan_resolve_family(const char *family, char **out_path,
+                                  long *out_face) {
+    if (family == NULL || family[0] == '\0' || out_path == NULL ||
+        out_face == NULL) {
+        return false;
+    }
+    if (!fs_fc_load()) {
+        return false;
+    }
+
+    fs_lsan_off();
+    bool found = false;
+    if (g_fc.FcInit()) {
+        fs_FcPattern *pat = g_fc.FcPatternCreate();
+        if (pat != NULL) {
+            (void)g_fc.FcPatternAddString(pat, "family",
+                                          (const fs_FcChar8 *)family);
+            (void)g_fc.FcPatternAddBool(pat, "scalable", 1);
+            (void)g_fc.FcConfigSubstitute(NULL, pat,
+                                           FS_FC_MATCH_PATTERN);
+            g_fc.FcDefaultSubstitute(pat);
+
+            int result = 0;
+            fs_FcFontSet *set = g_fc.FcFontSort(NULL, pat, 1, NULL,
+                                                &result);
+            g_fc.FcPatternDestroy(pat);
+            if (set != NULL) {
+                const fs_FcFontSetView *view =
+                    (const fs_FcFontSetView *)set;
+                int n = view->nfont;
+                if (n < 0) {
+                    n = 0;
+                }
+                if (n > 32) {
+                    n = 32;
+                }
+                for (int i = 0; i < n && !found; i++) {
+                    fs_FcChar8 *file = NULL;
+                    int index = 0;
+                    if (g_fc.FcPatternGetString(view->fonts[i], "file",
+                                                0, &file) !=
+                            FS_FC_RESULT_MATCH ||
+                        file == NULL) {
+                        continue;
+                    }
+                    (void)g_fc.FcPatternGetInteger(view->fonts[i],
+                                                   "index", 0, &index);
+                    long face = 0;
+                    if (fs_file_has_face((const char *)file, (long)index,
+                                         &face)) {
+                        char *dup = fs_strdup((const char *)file);
+                        if (dup != NULL) {
+                            *out_path = dup;
+                            *out_face = face;
+                            found = true;
+                        }
+                    }
+                }
+                g_fc.FcFontSetDestroy(set);
+            }
+        }
+    }
+    fs_lsan_on();
+    return found;
+}
