@@ -135,9 +135,9 @@ BUILD_DIR   := build
 # sanitized and an unsanitized build can never mix objects.
 FDK_SANITIZE ?= 1
 ifeq ($(FDK_SANITIZE),0)
-  DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1
+  DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1 -DFDK_DEBUG_THREAD_CHECKS=1
 else
-  DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1 -fsanitize=address,undefined
+  DEBUG_FLAGS := -g -O0 -DFDK_DEBUG_BUILD=1 -DFDK_DEBUG_THREAD_CHECKS=1 -fsanitize=address,undefined
 endif
 REL_FLAGS   := -O2 -DNDEBUG
 
@@ -187,7 +187,7 @@ CPPFLAGS:= -Iinclude -Isrc
 # glibc >= 2.34 where dlopen lives in libc; required for static
 # linking on older glibc. Project -l flags precede the environment's
 # so a distro-exported -Wl,--as-needed cannot drop them.
-LDFLAGS := $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz $(ENV_LDFLAGS)
+LDFLAGS := $(X11_LIBS) $(WAYLAND_LIBS) -lm -ldl -lz -pthread $(ENV_LDFLAGS)
 
 # pkg-config exposure (fdk.pc): private deps are the ones the .so
 # already links (apps need nothing); Requires.private lets static
@@ -313,6 +313,56 @@ X11_TEST_BIN := $(BUILD_DIR)/tests/test_x11_integration
 # §23/B2a: the uri-list clipboard rig (needs a display; runs in
 # test-x11's Xvfb).
 X11_URI_TEST_BIN := $(BUILD_DIR)/tests/test_clip_uris
+
+# §25/G-2: the threading suite. Runs under test-x11's throwaway Xvfb
+# (it needs a real context + pump), AND under ThreadSanitizer via
+# test-threads-tsan below — TSan must instrument every translation
+# unit including the library, so it rebuilds its own object lane.
+THREAD_TEST_SRC := tests/test_threads.c
+THREAD_TEST_BIN := $(BUILD_DIR)/tests/test_threads
+
+$(THREAD_TEST_BIN): $(THREAD_TEST_SRC) $(STATIC_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -pthread $(THREAD_TEST_SRC) $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+# The TSan lane: a dedicated object tree (like the release lane),
+# library included, the thread suite on top. Not part of plain
+# `make test` (TSan slows everything by an order of magnitude) — an
+# on-demand gate for threading work, run before pushing it.
+THREAD_TSAN_DIR := $(BUILD_DIR)/obj-tsan
+THREAD_TSAN_LIB := $(BUILD_DIR)/libfdk-tsan.a
+
+$(THREAD_TSAN_DIR)/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(STD) $(WARN) $(FEATURE) -fsanitize=thread -g -O1 -pthread \
+	    $(X11_CFLAGS) $(WAYLAND_CFLAGS) $(call extra_flags,$<) -c $< -o $@
+
+$(THREAD_TSAN_LIB): $(patsubst src/%.c,$(THREAD_TSAN_DIR)/%.o,$(LIB_SRCS))
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+$(BUILD_DIR)/tests/test_threads-tsan: $(THREAD_TEST_SRC) $(THREAD_TSAN_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(STD) $(WARN) $(FEATURE) -fsanitize=thread -g -O1 -pthread $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $(THREAD_TEST_SRC) $(THREAD_TSAN_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-threads-tsan
+test-threads-tsan: $(BUILD_DIR)/tests/test_threads-tsan
+	@if [ -n "$$DISPLAY" ]; then \
+	    TSAN_OPTIONS="halt_on_error=1" "$(BUILD_DIR)/tests/test_threads-tsan"; \
+	else \
+	    XVFB_NUM=$$((90 + ($$$$ % 400))); \
+	    XVFB_DISP=":$$XVFB_NUM"; \
+	    rm -f "/tmp/.X11-unix/X$$XVFB_NUM"; \
+	    Xvfb "$$XVFB_DISP" -screen 0 1024x768x24 >/tmp/fdk-xvfb-tsan.log 2>&1 & \
+	    XVFB_PID=$$!; \
+	    sleep 1.5; \
+	    echo "== running the thread suite under TSan (Xvfb :$$XVFB_NUM) =="; \
+	    DISPLAY="$$XVFB_DISP" TSAN_OPTIONS="halt_on_error=1" "$(BUILD_DIR)/tests/test_threads-tsan"; \
+	    TEST_RESULT=$$?; \
+	    kill "$$XVFB_PID" 2>/dev/null; wait "$$XVFB_PID" 2>/dev/null; \
+	    rm -f "/tmp/.X11-unix/X$$XVFB_NUM"; \
+	    exit $$TEST_RESULT; \
+	fi
 
 EXAMPLE_SRCS := $(wildcard examples/*.c)
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
@@ -491,12 +541,14 @@ $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
 # what this test does and does not cover (window-manager-dependent
 # behavior like WM_DELETE_WINDOW delivery is skipped under bare Xvfb,
 # not faked — the test says so when it runs).
-test-x11: $(X11_TEST_BIN) $(X11_URI_TEST_BIN)
+test-x11: $(X11_TEST_BIN) $(X11_URI_TEST_BIN) $(THREAD_TEST_BIN)
 	@if [ -n "$$DISPLAY" ]; then \
 		echo "== running X11 integration test against DISPLAY=$$DISPLAY =="; \
 		LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_TEST_BIN)" || exit 1; \
 		echo "== running the uri-list clipboard rig =="; \
 		LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_URI_TEST_BIN)" || exit 1; \
+		echo "== running the G-2 thread suite =="; \
+		LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(THREAD_TEST_BIN)" || exit 1; \
 	else \
 		echo "== no DISPLAY set, starting a throwaway Xvfb =="; \
 		XVFB_NUM=$$((90 + ($$$$ % 400))); \
@@ -512,6 +564,11 @@ test-x11: $(X11_TEST_BIN) $(X11_URI_TEST_BIN)
 			echo "== running the uri-list clipboard rig =="; \
 			DISPLAY="$$XVFB_DISP" LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_URI_TEST_BIN)"; \
 			TEST_RESULT=$$?; \
+			if [ $$TEST_RESULT -eq 0 ]; then \
+				echo "== running the G-2 thread suite (Xvfb) =="; \
+				DISPLAY="$$XVFB_DISP" LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(THREAD_TEST_BIN)"; \
+				TEST_RESULT=$$?; \
+			fi; \
 		fi; \
 		kill "$$XVFB_PID" 2>/dev/null; \
 		wait "$$XVFB_PID" 2>/dev/null; \

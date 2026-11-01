@@ -62,6 +62,12 @@ typedef enum fdk_result {
 
     /* Text / fonts */
     FDK_ERR_FONT_LOAD          = -500, /* not a usable TrueType/OpenType file */
+
+    /* Threading (§25/G-2): a main-thread-only call made from another
+     * thread. Refused (with one log line) when FDK_DEBUG_THREAD_CHECKS
+     * is compiled in — the debug build's default; the release build
+     * keeps the historical undefined-if-you-race behavior. */
+    FDK_ERR_WRONG_THREAD       = -600,
 } fdk_result;
 
 /* Returns a short, static, human-readable, English description of a
