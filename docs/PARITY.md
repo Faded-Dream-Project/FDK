@@ -84,11 +84,17 @@ the honest missing tail.
 
 **Qt6 Widgets diff**: Qt's ~180 classes include a rich
 item-view/MVC layer (QTableView, QHeaderView, QDataWidgetMapper,
-proxies/sorting-filtering models). FDK's tree/list/iconview are
-widget-owned (no model/view split). **PARTIAL — the known
-deliberate trade**: FDK binds views to caller-fed row callbacks;
-no pluggable model layer. Everything displayable is displayable;
-deep model tooling is not.
+proxies/sorting-filtering models). **§23/B2e CLOSED the model
+half**: fdk_model.h ships the row store (stable ids, change
+signals, forests), the SORT and FILTER proxies with model faces,
+and live List/Tree bindings whose selection maps by row id
+(reading through sort/filter keeps what was selected selected)
+plus the reorder write-back. **PARTIAL** on the remaining tail:
+no table-widget with per-column headers (a List per column and
+the model cover it), no QDataWidgetMapper (form-to-model
+binding), no drag-reorder GESTURE on the widget (the
+fdk_list_bound_reorder_selected API is the model-side half the
+app wires to its drag handler).
 
 ## 4. Text and fonts
 
@@ -102,15 +108,18 @@ deep model tooling is not.
 - Layout: measure/shaping spans, layout.c (line layout), entry
   preedit (IME inline composition).
 
-**GTK4 (Pango) diff**: Pango attributes cover font-size runs,
-letter-spacing, rise, baseline, per-run fonts, and full attribute
-lists; FDK's markup covers styles/decorations/color only.
-**PARTIAL** — complex-script SHAPING is at parity (the hard part);
-the long tail of run attributes is not exposed (a font is one
-face at one pixel size — the documented tradeoff). Attribute-list
-API (pango_attr_list) has no FDK twin: markup is the only inline
-styling route. **This is the §23/B2c work item** (see the gap
-list).
+**GTK4 (Pango) diff — §23/B2c CLOSED the named set**: fdk_attr.h
+ships the attribute layer (size_pt/delta, per-run FONT FAMILY
+resolved through fontconfig, background, the five Pango underline
+styles each in its own color, strikethrough color, rise,
+letter-spacing, links with hit-testing) + the attribute-list API
+(fdk_attr_list) applied over ranges, flowing through the SAME
+HarfBuzz/FriBidi pipeline (per-run fonts shape, kern, and
+fallback correctly). Markup: `<span ...>`, `<sub>`, `<sup>`,
+`<big>`, `<small>`, `<a href>` parse into it. **PARITY** on the
+attribute set this round targeted; the remaining Pango tail
+(baseline-shift, gravity, OpenType feature settings, font
+stretch) is unexposed — stated, not hidden.
 
 ## 5. Styling and theming
 
@@ -153,13 +162,20 @@ large payloads, PRIMARY selection on both backends), tablets/
 stylus (proximity, pressure, tilt), XTEST-grade synthetic input
 in the test rig, per-window input regions with click-through.
 
-**Diffs**: the gesture surface is raw EVENTS (pinch scale/delta,
-swipe direction), not RECOGNIZERS (no long-press, double-tap,
-drag/pan, rotate with angle — GTK4's GtkGesture* /
-Qt6's QGestureRecognizer shape). Clipboard offers are one-
-content-at-a-time (set_text replaces set_image; no simultaneous
-multi-target offer, no URI-list clipboard API — DnD has URIs,
-the clipboard does not). **PARTIAL.**
+**§23 closed both named diffs.** Gestures: fdk_gesture.h ships
+the RECOGNIZER layer (click with 1/2/3 counting, long-press with
+delay_factor, drag begin/update/end, pan with the orientation
+latch, swipe velocity+direction, zoom, rotate) fed the event
+stream a window already receives, with claim semantics — on top
+of the raw PINCH/SWIPE events the touch engine keeps
+synthesizing. Clipboard: fdk_clipboard_set_uris/get_uris added
+the text/uri-list surface on BOTH backends (the wire format, the
+TARGETS/mime negotiation, a two-process verified rig). The
+one-content-at-a-time model stands BY DESIGN (the documented
+clipboard semantics — text, image, or uri-list, each replacing
+the last), not as a gap. **PARITY** (different shape on the
+multi-target point: GTK's simultaneous offers vs FDK's replace
+model — stated, not hidden).
 
 ## 8. Accessibility
 
@@ -223,44 +239,45 @@ toolkit's spine; see docs/threading.md).
 
 ---
 
-## The prioritized gap list
+## The prioritized gap list — the §23 final status
 
-1. **fdk-shell-overlay (shell surfaces)** — CLOSED: the
-   `fdk-shell-overlay/` package ships the layer-shell/EWMH-dock
-   add-on on the extension API (formerly `fdk-shell/`, renamed
-   2026-11-01; see the section below). Its X11 suite is verified
-   in this sandbox.
-2. **Clipboard: image + URI-list formats** — HIGH (the most
-   user-visible everyday gap; text-only paste is 1995).
-3. **Gestures + multi-touch** — MEDIUM-HIGH (tablets/touch UIs).
-4. **Text on extension surfaces** — MEDIUM-HIGH: widgets and text
-   live in FDK's window layer; an extension surface draws through
-   the raw fdk_surface API, which has no text primitive. A shell
-   bar must either host a window or draw glyphs itself. Hosting
-   widgets on fdk_ext_surface is the natural next
-   extension-API version.
-5. **Pango-grade run attributes (size/rise/letter-spacing/per-run
-   fonts) in markup** — MEDIUM.
-6. **Grid container** — MEDIUM (the most-requested layout
-   primitive still missing).
-7. **Inline chooser widgets (color/font)** — LOW-MED (dialogs
-   exist).
-8. **Model/view split for tree/list** — LOW (large redesign; the
-   callback-fed views cover display).
-9. **Print dialog / CUPS** — LOW by usage, HIGH by effort; the
-   only wholly absent end-user category.
-10. **Windows/macOS backends** — out of scope for this project by
-    charter.
+| # | Gap (as this document last stated it) | Status |
+|---|---|---|
+| 1 | fdk-shell-overlay (shell surfaces) | **CLOSED** — the package (formerly `fdk-shell/`, renamed this round); X11 suite green in-sandbox, live re-anchoring + auto-hide + outputs + popups verified on Xvfb |
+| 2 | Clipboard: image + URI-list formats | **CLOSED** — image since 1.4.9 + INCR 1.4.12; text/uri-list set/get added this round (§23/B2a-close), both backends, two-process verified |
+| 3 | Gestures + multi-touch | **CLOSED** — touch slots + PINCH/SWIPE events since 1.1.0; the RECOGNIZER layer (click/long-press/drag/pan/swipe/zoom/rotate) added this round (§23/B2b) |
+| 4 | Text on extension surfaces | OPEN (the next extension-API version: hosting widgets on fdk_ext_surface) |
+| 5 | Pango-grade run attributes in markup | **CLOSED** this round (§23/B2c) — the named set; the deeper tail (gravity, features, stretch) stated above |
+| 6 | Grid container | **CLOSED** (shipped 1.4.x; this document's earlier revision wrongly listed it — corrected this round) |
+| 7 | Inline chooser widgets (color/font) | OPEN (dialogs exist; the widget forms do not) |
+| 8 | Model/view split for tree/list | **CLOSED** this round (§23/B2e) — model + sort/filter proxies + live bindings + selection-by-id + reorder write-back |
+| 9 | Print dialog / CUPS | **CLOSED** this round (§23/B2f) — own PDF writer (pdfinfo-verified), native IPP client (RFC 8010/8011, no libcups), dialog + preview |
+| 10 | Windows/macOS backends | OUT by charter |
+
+**The §23 audit pass** (the GTK4 4.24 widget catalog, fetched from
+https://docs.gtk.org/gtk4/widget-gallery.html — the round's final
+webfetch-driven sweep): against the catalog the remaining honest
+tail is — InfoBar, CenterBox, SearchBar, ActionBar, StackSidebar,
+EditableLabel, LockButton, EmojiChooser, DropDown, Video/
+MediaControls, AppChooser/RecentChooser widgets, ShortcutsWindow.
+Each is a composition of primitives FDK ships (InfoBar = a label
++ button row; SearchBar = an entry in a revealer; CenterBox/
+Overlay semantics live in set_bounds' explicit positioning), so
+they are CATALOG gaps, not capability gaps — but they are named
+here rather than left for the next audit to rediscover. GLArea
+and Assistant remain OUT by policy (PROGRESS.md's fence).
 
 **Verdict in one paragraph.** FDK is at honest parity for the
-application core — windows, input, 36 widgets, complex-script
-text, AT-SPI accessibility, theming, D-Bus/tray/notifications/
-session, i18n, undo, animation — with the deliberate shape
-differences (no GObject/moc, token themes, immediate-mode
-rendering) documented above. The shell-surface gap is closed
-(`fdk-shell-overlay/`); the real remaining gaps are clipboard
-richness, gestures, text-on-extension-surfaces, markup attribute
-depth, and printing.
+application core — windows, input, 36+ widget classes,
+complex-script text WITH range attributes, gesture recognizers,
+the model/view split, AT-SPI accessibility, theming,
+D-Bus/tray/notifications/session, i18n, undo, animation, shell
+surfaces (the fdk-shell-overlay package), and now printing —
+with the deliberate shape differences (no GObject/moc, token
+themes, immediate-mode rendering, one-clipboard-content-at-a-
+time) documented above. What remains open is stated in the table:
+text-on-extension-surfaces, the inline chooser widget forms, the
+deeper Pango attribute tail.
 
 ---
 
@@ -300,3 +317,25 @@ per-output anchoring, RandR probing with stale-index fallback,
 distro builds are exercised in CI (should work here — no
 compositor in the sandbox). See its own README and
 fdk-shell-overlay/packaging for the full inventory.
+
+---
+
+## Sources (the §23 round's research — fetched, not remembered)
+
+- Pango markup attribute reference (the B2c vocabulary):
+  https://docs.gtk.org/Pango/pango_markup.html
+- GTK4 gesture model + long-press default (the B2b thresholds):
+  https://docs.gtk.org/gtk4/class.Gesture.html
+  https://docs.gtk.org/gtk4/property.Settings.gtk-long-press-time.html
+- wlr-layer-shell-unstable-v1 (requests/events/enums — the B1
+  verification):
+  https://wayland.app/protocols/wlr-layer-shell-unstable-v1
+- IPP encoding + transport (the B2f wire):
+  RFC 8010 https://www.rfc-editor.org/rfc/rfc8010.txt
+  RFC 8011 https://www.rfc-editor.org/rfc/rfc8011.txt
+- PDF structure (the B2f writer): Adobe's published PDF 32000-1,
+  https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf
+  (fetched through secondary references; the 22 MB primary was
+  over the fetch budget — the structure written follows the
+  xref/trailer/object model every PDF tool verifies, and the
+  output is machine-verified by poppler's pdfinfo in the suite)
