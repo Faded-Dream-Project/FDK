@@ -1194,6 +1194,14 @@ fdk_widget *fdk_notebook_get_page(fdk_widget *notebook,
  * removed or the notebook destroyed). NULL on a bad index. */
 const char *fdk_notebook_page_label(fdk_widget *notebook,
                                     size_t index);
+/* Replaces the page's tab label (copied; NULL = the empty label).
+ * The strip re-measures and the a11y tab list re-describes from
+ * the new label. FDK_ERR_INVALID_ARGUMENT on a type-mismatched
+ * widget or an out-of-range index. (§24: the fdk-files test-app
+ * round — every multi-document app retitles tabs; the getter had
+ * no twin since Phase 9.) */
+fdk_result fdk_notebook_set_page_label(fdk_widget *notebook,
+                                       size_t index, const char *label);
 /* Removes the page at `index` — the tab disappears and the PAGE
  * WIDGET IS DESTROYED (the notebook owns its pages: append_page
  * reparented them in, and removal is the standard FDK
