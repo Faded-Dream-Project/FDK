@@ -310,6 +310,9 @@ struct fdk_platform_connection {
     struct wl_data_offer *selection_offer;
     int selection_offer_has_text;
     int selection_offer_has_image; /* 1.4.9: image/png in the MIME list */
+    int selection_offer_has_uris; /* §23/B2a: text/uri-list offered  */
+    char *clip_owned_uris; /* §23/B2a: our selection's uri-list (the
+                            * freedesktop wire format, CRLF lines) */
     struct wl_data_offer *pending_offer;
     int pending_offer_has_text;
     int pending_offer_has_uris; /* 1.2.0: text/uri-list in the pending
@@ -1157,3 +1160,9 @@ int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow);
 int fdk_wayland_window_ever_presented(fdk_platform_window *pwindow);
 
 #endif /* FDK_WAYLAND_PLATFORM_H */
+
+/* §23/B2a: the clipboard's text/uri-list surface. */
+fdk_result fdk_wayland_clipboard_set_uris(fdk_platform_connection *conn,
+                                          const char *const *uris,
+                                          size_t count);
+char *fdk_wayland_clipboard_get_uris(fdk_platform_connection *conn);

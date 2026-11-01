@@ -647,6 +647,23 @@ typedef struct fdk_platform_ops {
     unsigned char *(*clipboard_get_image)(
         fdk_platform_connection *conn, size_t *out_len);
 
+    /* ---- §23/B2a: the clipboard's text/uri-list surface ----
+     *
+     * clipboard_set_uris copies the URI list (NULL entries are
+     * skipped; count 0 clears the uri content) and serves the
+     * text/uri-list target. The WIRE format is the freedesktop
+     * list (CRLF lines; bare POSIX paths file://-percent-encoded).
+     * One clipboard content at a time, as ever.
+     *
+     * clipboard_get_uris reads the current text/uri-list (the
+     * clipboard manager / a file manager may own it) and returns
+     * it as a NUL-terminated, LF-separated string (fdk_free), or
+     * NULL when none/unreadable. */
+    fdk_result (*clipboard_set_uris)(
+        fdk_platform_connection *conn, const char *const *uris,
+        size_t count);
+    char *(*clipboard_get_uris)(fdk_platform_connection *conn);
+
     /* ---- OPTIONAL popup/dialog grab operations (Phase 9
      * completion — the menu machinery) ----
      *
