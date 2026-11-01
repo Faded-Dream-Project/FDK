@@ -34,7 +34,7 @@ leak:libdrm
 leak:libfontconfig
 
 # libdbus-1.so.3 (added 2026-11-01, the GTX 1050 Ti report's exit
-# report): the owner's sanitized run ends with 754 bytes in 3
+# report): the owner's sanitized run ends with 670-766 bytes in 3
 # allocations whose frames are ENTIRELY inside libdbus-1.so.3 —
 # module-internal one-time state libdbus never frees. FDK is
 # provably not the puller: FDK's D-Bus is its own native wire client
@@ -42,15 +42,51 @@ leak:libfontconfig
 # never linked — `ldd libfdk.so` and every tool show no libdbus),
 # and the sandbox's full stack (sway + Mesa/llvmpipe EGL + GL lane +
 # fontconfig + HarfBuzz + FriBidi) loads no libdbus under
-# LD_DEBUG=libs. The puller is a third-party library on the owner's
-# machine — most plausibly the NVIDIA driver chain (libEGL_nvidia /
-# its Wayland platform library), which this sandbox cannot load.
-# Only the owner's machine can name it, with:
-#   LD_DEBUG=libs ./build/examples/text_demo "test" 2>&1 \
-#     | grep -B4 'libdbus-1.so.3' | head -20
-# (the "calling init:" block above the first libdbus line names the
-# puller). Suppressed by MODULE so LeakSanitizer stays strict for
-# everything FDK owns; if an FDK frame ever appears in a libdbus
-# allocation's stack, that is a real bug — the suppression only
-# matches the third-party module's own frames.
+# LD_DEBUG=libs.
+#
+# The 2026-11-01 follow-up round narrowed the puller WITHOUT naming
+# it: on the owner's machine the leak's stack runs through
+# libEGL_nvidia.so.0+0xc94e1 (the same recurring driver site as the
+# 256 B entry below), and LD_DEBUG=libs showed the library search
+# riding "RUNPATH from file /usr/lib/libasan.so.8" — which names
+# whose RUNPATH the LOADER consulted, not who requested the load.
+# Arch package evidence rules out the declared link-time closure of
+# every candidate this sandbox could check (nvidia-utils, wlroots,
+# labwc, libnvidia-egl-wayland, libnvidia-glcore: none Depends on
+# libdbus), so the pull is a runtime dlopen inside the proprietary
+# chain — only the owner's machine can name it, with:
+#   LD_DEBUG=files ./build/examples/text_demo "test" 2>&1 \
+#     | grep -B2 -A2 libdbus
+# (look for "needed by" — THAT names the requester; libs' first
+# libdbus block only names the search path). Suppressed by MODULE so
+# LeakSanitizer stays strict for everything FDK owns; if an FDK
+# frame ever appears in a libdbus allocation's stack, that is a real
+# bug — the suppression only matches the third-party module's own
+# frames.
 leak:libdbus-1
+
+# libEGL_nvidia.so.0 (added 2026-11-01, the §22 exit-leak round):
+# 256 bytes in 4 allocations, every stack frame inside
+# libEGL_nvidia.so.0+0xc94e1 — the driver's per-THREAD EGL state.
+# FDK's teardown was audited call-by-call BEFORE this entry was
+# written (the §22 record): every destroy path runs the canonical
+# ladder — eglMakeCurrent(NO_SURFACE, NO_CONTEXT) ->
+# eglDestroySurface -> wl_egl_window_destroy -> eglDestroyContext ->
+# (last window gone) eglDestroyContext(share root) -> eglTerminate
+# -> eglReleaseThread — and the ONE missing call that round found
+# (eglReleaseThread, the canonical tail, whose absence is exactly
+# the class that leaves NVIDIA's thread record allocated) was FIXED
+# and committed, with a rig leg that fails without it
+# (tests/test_wayland_integration.c, the §22 teardown leg). The
+# allocation site is driver-internal either way: the sandbox's Mesa
+# stack runs the same probe and exits with ZERO bytes leaked (deep
+# stacks, fast_unwind_on_malloc=0), so the 256 B is the proprietary
+# driver's own state on a machine this sandbox cannot load. The
+# remaining unknown is only whether the fixed tail call already
+# retires it — the owner's next run answers that: if the 256 B still
+# appears with this suppression REMOVED, the driver allocates at
+# engagement and never frees (suppression stands); if it disappears,
+# the fix closed it (entry stays as belt-and-braces for older
+# drivers). Per-library as always: any leak whose stack contains an
+# FDK frame still fails the run.
+leak:libEGL_nvidia
