@@ -766,6 +766,10 @@ static fdk_result window_create_full(fdk_context *ctx,
                                      fdk_window *parent,
                                      fdk_window **out_window);
 
+fdk_context *fdk_window_get_context(fdk_window *window) {
+    return window != NULL ? window->ctx : NULL;
+}
+
 fdk_result fdk_window_create(fdk_context *ctx,
                               const fdk_window_options *options,
                               fdk_window **out_window) {
