@@ -766,3 +766,37 @@ place_below stacking flip by which surface takes the click, the
 popup refusal, nested create, the parent sweep protocol-clean, and
 a grim+PIL pixel readback proving the child's DESYNC commits
 composite over the parent). 855 exports, +7.
+
+---
+
+## The reference consumer: shell/ (fdk-shell, 2026-11-01)
+
+The model this document describes now has its proof: `shell/` is
+the first surface add-on package, built on exactly the API above
+and nothing else — the shell-surface substrate (panels, docks,
+notification shells, OSDs) that fdk_extend.h was designed for.
+
+- `shell/fdk_shell.h` — the whole add-on API: one configuration
+  struct (layer, anchors, margins, exclusive zone, keyboard mode)
+  and one entry point, `fdk_shell_overlay_create()`, returning an
+  `fdk_ext_surface*` that renders, receives events, sets input
+  regions, and anchors popups through the extension API unchanged.
+- Wayland: a `zwlr_layer_surface_v1` client (the protocol code
+  hand-vendored in the repo's committed-pre-generated style — no
+  wayland-scanner dependency), speaking through its OWN registry on
+  the shared display, acking every configure and reporting it via
+  `fdk_ext_surface_notify_configure()` (so FDK's present gate
+  owns the never-commit-before-configure rule), and adopting
+  popups via `get_popup` in the `popup_attached` hook.
+- X11: an EWMH dock (override-redirect + `_NET_WM_WINDOW_TYPE_
+  DOCK` + `_NET_WM_STRUT[_PARTIAL]` + `_NET_WM_STATE_ABOVE`,
+  placed by anchor against the screen geometry) — verified live on
+  Xvfb (scripts' s28 probe: a 1280x32 top bar at +0+0 with top
+  strut 32, exactly as configured).
+- `make shell` builds `build/libfdk_shell.a`; `make shell-example`
+  builds `shell/example.c` (a working bar with a popup menu).
+
+Reading `shell/fdk_shell.c` after this document is the intended
+path for every future add-on author: it is ~100 lines of dispatch
+plus two backend files, and it never touches an FDK private
+struct.

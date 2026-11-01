@@ -17,6 +17,46 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-01 (on the rc2 line)
 
+### Added — fdk-shell: the shell-surface add-on (fdk-shell-overlay), and the GTK4/Qt6 parity audit
+
+- **The owner's requirement**: developers must be able to build
+  ANY app with FDK — shell surfaces included — and the API
+  coverage against GTK4/Qt6 needed a real audit, not a feeling.
+  docs/PARITY.md is that audit: category by category (797
+  exported symbols, 36 widget classes, both backends), verdicts
+  per category (PARITY / different-shape / PARTIAL / GAP), and a
+  prioritized gap list. Headline: honest parity for the
+  application core (windows, input, complex-script text,
+  AT-SPI-grade accessibility, theming, D-Bus/tray/notifications/
+  session, i18n); real gaps = clipboard richness, gestures,
+  text-on-extension-surfaces, markup attribute depth, printing.
+- **shell/ — the first surface add-on package** (the
+  docs/EXTENDING.md model's reference consumer): panels, docks,
+  notification shells, OSDs. One configuration struct + one entry
+  point returning an fdk_ext_surface* — rendering, events, input
+  regions, popups, subsurfaces all ride the extension API.
+  - Wayland: a zwlr_layer_surface_v1 client — its OWN registry on
+    the shared display, layer/anchor/margin/exclusive-zone/
+    keyboard set before the first commit, every configure acked
+    then reported (FDK's present gate owns the
+    never-commit-before-configure rule), popups adopted via
+    get_popup. The protocol code is hand-vendored in the repo's
+    committed-pre-generated style (no wayland-scanner dependency).
+  - X11: an EWMH dock — override-redirect,
+    _NET_WM_WINDOW_TYPE_DOCK, _NET_WM_STRUT + _STRUT_PARTIAL,
+    _NET_WM_STATE_ABOVE, anchor-placed against the screen
+    geometry, class hints set. VERIFIED LIVE on Xvfb: the example
+    bar runs, and the s28 probe confirms 1280x32 at +0+0,
+    override-redirect, top strut 32 — exactly the configuration.
+  - `make shell` → build/libfdk_shell.a; `make shell-example` →
+    a working bar with a popup menu. The X11-only build compiles
+    one leg; the wayland-enabled build compiles both (verified:
+    53 unit suites + the X11 integration suite pass in the full
+    configuration).
+  - v1 limits stated in the docs: create-time configuration
+    (reconfigure returns UNSUPPORTED), first-output binding,
+    keyboard on-demand needs layer-shell v4.
+
 ### Verified — THE "FIX RATHER THAN SUPPRESS" ROUND: every suppression entry re-tested for fixability by experiment
 
 - **The owner's question**: leaks that CAN be fixed should be fixed,
