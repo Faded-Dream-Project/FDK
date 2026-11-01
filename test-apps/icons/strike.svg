@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- FDK test-apps icon, original artwork, strike. currentColor-styled. -->
+  <g stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+<path d="M7 4 V10 M17 4 V10 A5 5 0 0 1 12 15"/><path d="M7 12 A5 5 0 0 0 12 15"/><path d="M4 19 H20"/>
+  </g>
+</svg>

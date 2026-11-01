@@ -355,7 +355,7 @@ SHIPPED_THEMES := .FDKThemes/faded-dream.fdk
 # library object did.
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
-.PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools install uninstall clean verify-exports
+.PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools test-apps test-apps-smoke install uninstall clean verify-exports
 
 all: static shared tools
 
@@ -640,6 +640,21 @@ tools: $(TOOL_BINS)
 $(BUILD_DIR)/tools/%: tools/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+# --- Test applications (§24) --------------------------------------------
+#
+# The validation suite under test-apps/ — four real applications
+# built ONLY against the public API (no -Isrc, no internal headers;
+# enforced by their own Makefile). Not part of `all` or `test`:
+# an on-demand audit surface, like examples.
+
+test-apps:
+	$(MAKE) -C test-apps
+
+test-apps-smoke:
+	$(MAKE) -C test-apps test-apps-smoke
+
+.PHONY: test-apps test-apps-smoke
 
 # --- Install ------------------------------------------------------------
 
