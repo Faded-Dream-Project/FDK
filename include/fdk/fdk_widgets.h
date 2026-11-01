@@ -1022,6 +1022,18 @@ fdk_result fdk_tree_create(fdk_widget *parent, fdk_font *font,
 /* Adds `text` as the last child of `parent` (FDK_TREE_NODE_NONE =
  * a root-level node). Writes the new handle to *out_node when
  * non-NULL. */
+/* ---- The model-bound Tree (§23/B2e; fdk_model.h) ------------------
+ * Mirrors a model's forest into the tree: parent links map to node
+ * nesting, the text column to labels, and every model change
+ * applies live. The node handle behind a model id survives
+ * rebuilds only until the next change — hold IDS, not handles. */
+struct fdk_model;
+fdk_result fdk_tree_bind_model(fdk_widget *tree, struct fdk_model *model,
+                               size_t text_column);
+void fdk_tree_unbind_model(fdk_widget *tree);
+/* The node handle currently behind a model id. */
+fdk_tree_node fdk_tree_bound_node_of(fdk_widget *tree, fdk_u64 id);
+
 fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
                              const char *text,
                              fdk_tree_node *out_node);
