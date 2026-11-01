@@ -5,7 +5,7 @@
  * and refreshed on RRNotify. INTERNAL ONLY by design — the core's
  * Wayland backend tracks outputs without an app-facing output API
  * too (the audit's parity note), and the add-on that needs output
- * EVENTS (fdk-shell) drives its OWN X connection for them (the
+ * EVENTS (fdk-shell-overlay) drives its OWN X connection for them (the
  * same own-channel posture as its own wl_registry on Wayland —
  * docs/DECISIONS.md D-015).
  *

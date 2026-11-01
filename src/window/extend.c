@@ -192,7 +192,7 @@ fdk_result fdk_ext_register_kind(fdk_context *ctx, const char *name,
     }
 
     /* Duplicate-name check: kinds are diagnosable by name, and a
-     * silent second registration of "fdk-shell.layer" would hide a
+     * silent second registration of "fdk-shell-overlay.layer" would hide a
      * library double-init. Re-registration AFTER a destroy is legal
      * (the old kind is gone from the registry). */
     fdk_ext_surface_kind *scan = ctx->ext_kinds_head;

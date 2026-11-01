@@ -29,7 +29,7 @@ docker pull -q almalinux:10
 
 RUN almalinux:10 '
     set -eu
-    # libXtst-devel: the fdk-shell X11 suite drives its passive-grab
+    # libXtst-devel: the fdk-shell-overlay X11 suite drives its passive-grab
     # passthrough test with XTEST-synthesized keys — test
     # infrastructure, the same class as the X11 dev headers. (On
     # this el10 builder the suite still self-skips without Xvfb;
@@ -106,14 +106,14 @@ XMLCONF
     dnf install -y -q urw-base35-fonts 2>/dev/null || \
         echo "URW-FONT-SKIP: no urw-base35-fonts in this repo — the CFF real-font legs skip honestly (disclosed)"
     sh packaging/fedora/build-rpm.sh
-    sh fdk-shell/packaging/fedora/build-rpm.sh
+    sh fdk-shell-overlay/packaging/fedora/build-rpm.sh
 '
 
 for img in almalinux:10 fedora:42; do
     docker pull -q "$img"
     RUN "$img" 'sh packaging/fedora/install-test.sh'
-    RUN "$img" 'sh fdk-shell/packaging/fedora/install-test.sh'
+    RUN "$img" 'sh fdk-shell-overlay/packaging/fedora/install-test.sh'
 done
 
-echo "===== FDK rpm pipeline OK (FDK + fdk-shell) ====="
+echo "===== FDK rpm pipeline OK (FDK + fdk-shell-overlay) ====="
 ls -la dist/

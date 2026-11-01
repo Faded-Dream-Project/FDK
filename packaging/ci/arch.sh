@@ -24,7 +24,7 @@ docker pull -q archlinux:base
 
 RUN archlinux:base '
     set -eu
-    # libxtst: the fdk-shell X11 suite drives its passive-grab
+    # libxtst: the fdk-shell-overlay X11 suite drives its passive-grab
     # passthrough test with XTEST-synthesized keys — test
     # infrastructure, the same class as the X11 headers (the arch
     # libx11 is unsplit; libxtst carries both header and library).
@@ -69,11 +69,11 @@ XMLCONF
     pacman -Sy --noconfirm --needed gsfonts 2>/dev/null || \
         echo "URW-FONT-SKIP: no gsfonts in this repo — the CFF real-font legs skip honestly (disclosed)"
     sh packaging/arch/build-pkg.sh
-    sh fdk-shell/packaging/arch/build-pkg.sh
+    sh fdk-shell-overlay/packaging/arch/build-pkg.sh
 '
 
 RUN archlinux:base 'sh packaging/arch/install-test.sh'
-RUN archlinux:base 'sh fdk-shell/packaging/arch/install-test.sh'
+RUN archlinux:base 'sh fdk-shell-overlay/packaging/arch/install-test.sh'
 
-echo "===== FDK arch pipeline OK (FDK + fdk-shell) ====="
+echo "===== FDK arch pipeline OK (FDK + fdk-shell-overlay) ====="
 ls -la dist/

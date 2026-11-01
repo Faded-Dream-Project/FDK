@@ -5776,7 +5776,7 @@ faces remain one `git checkout` away from a future "theme pack"
 distribution — the `.FDKThemes` drop-in mechanism they will ride
 already exists and is tested.
 
-## 1.7.0 — the extension API + fdk-shell (the 1.1.0-rc1 candidate, 2026-10-25)
+## 1.7.0 — the extension API + fdk-shell-overlay (the 1.1.0-rc1 candidate, 2026-10-25)
 
 The owner directive that opened this milestone: *add an extension
 API to FDK so add-on packages can be built on top of it, and prove
@@ -5817,7 +5817,7 @@ adoption-path defects (the wayland destroy marshaled
 xdg_surface_destroy on the adopted surface's NULL proxy; the ext
 show-gate swallowed the extension POPUP's xdg handshake commit).
 
-**fdk-shell 0.1.0** (`fdk-shell/` — own build, own version, own
+**fdk-shell-overlay 0.1.0** (`fdk-shell-overlay/` — own build, own version, own
 pkg-config file, ready to move to its own repo): layers (background
 / bottom / top / overlay), edge anchors, margins, exclusive zone,
 keyboard interactivity, per-output selection, popups — one desc
@@ -5826,12 +5826,12 @@ wayland-scanner bindings (xdg-shell vendored too — the generated
 code cites xdg_popup_interface, which FDK keeps private; an add-on
 vendors what it speaks). X11/XLibre: _NET_WM_WINDOW_TYPE_DOCK +
 _NET_WM_STRUT_PARTIAL with the exclusive-zone math mirroring
-wlroots' XOR-anchoring rule. The demo (`fdk-shell/examples/bar.c`):
+wlroots' XOR-anchoring rule. The demo (`fdk-shell-overlay/examples/bar.c`):
 a colored top bar with one working dropdown.
 
-**The proof the requirement demanded**: `fdk-shell/tests/
+**The proof the requirement demanded**: `fdk-shell-overlay/tests/
 isolation.sh` installs FDK into a throwaway prefix, rebuilds
-fdk-shell against that prefix ALONE (the include path contains
+fdk-shell-overlay against that prefix ALONE (the include path contains
 nothing else — a private reach is a compile error), links and RUNS
 the demo from the installed stack, and verifies all 14 imported
 fdk_* symbols resolve from libfdk.so.1 while the package's shared
@@ -5843,7 +5843,7 @@ proven by a property roundtrip through a second connection; the
 adopt lifecycle with server-side dock-property, pixel-readback,
 real-input and teardown-ordering verification; notify_configure;
 popup positioning + dismissal + parent sweep; fd sources with
-IN/HUP/self-removal/removal semantics); fdk-shell's own Xvfb suite
+IN/HUP/self-removal/removal semantics); fdk-shell-overlay's own Xvfb suite
 (strut math, anchor geometry, the EXCLUSIVE grab proven by a second
 client's grab failing, popup on a layer) and sway-headless Wayland
 suite (layer handshake, configure-driven size, present, popup

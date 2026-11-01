@@ -17,7 +17,42 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-01 (on the rc2 line)
 
-### Added — fdk-shell: the shell-surface add-on (fdk-shell-overlay), and the GTK4/Qt6 parity audit
+### Changed — §23 Part A: the add-on package renamed fdk-shell -> fdk-shell-overlay (the owner's layout fix)
+
+- **The folder is `fdk-shell-overlay/`, not `shell/` and not
+  `fdk-shell/`.** What actually happened this round, honestly:
+  the round began by discovering that the `shell/` directory
+  added earlier duplicated a package the tree ALREADY had —
+  `fdk-shell/`, a complete v0.5.0 add-on (its own build, tests,
+  packaging for five distros, the prefix-isolation proof) that a
+  sloppy search had missed. The duplicate `shell/` is DELETED,
+  and the real package is renamed in place:
+  - `fdk-shell/` -> `fdk-shell-overlay/` (git mv — history
+    preserved; no rewrite of pushed history)
+  - headers: `include/fdk-shell/fdk-shell.h` ->
+    `include/fdk-shell-overlay/fdk-shell-overlay.h` (same for
+    the desktop header)
+  - artifacts: libfdk-shell.so -> libfdk-shell-overlay.so (+
+    SONAME/.a), fdk-shell.pc -> fdk-shell-overlay.pc, exports
+    map, the fedora spec, the debian control files, every
+    APKBUILD/PKGBUILD/template entry, all CI scripts
+    (packaging/ci/*.sh, .github/workflows), the isolation proof
+    and the rigs — 73 files updated, zero stale `fdk-shell`
+    (bare) or `shell/` references remain (grep-verified).
+  - the root Makefile's own add-on build rules are GONE (they
+    built the duplicate); `make fdk-shell-overlay` /
+    `make fdk-shell-overlay-example` now delegate to the
+    package's own Makefile, which is the one true build.
+  - Public API names (`fdk_shell_layer_*` etc.) are UNCHANGED —
+    the package's API is its own namespace, and renaming
+    functions would break its consumers for no layout gain.
+- **Verified after the rename**: the package builds warning-clean
+  and its full X11 suite passes (output info, per-output
+  anchoring, RandR probing with stale-index fallback, 3-deep
+  popup cascades, family sweep). FDK's own suites unaffected
+  (the root rules never built them together).
+
+### Added — fdk-shell-overlay: the shell-surface add-on, and the GTK4/Qt6 parity audit
 
 - **The owner's requirement**: developers must be able to build
   ANY app with FDK — shell surfaces included — and the API
@@ -30,32 +65,15 @@ note their development-candidate status.
   AT-SPI-grade accessibility, theming, D-Bus/tray/notifications/
   session, i18n); real gaps = clipboard richness, gestures,
   text-on-extension-surfaces, markup attribute depth, printing.
-- **shell/ — the first surface add-on package** (the
-  docs/EXTENDING.md model's reference consumer): panels, docks,
-  notification shells, OSDs. One configuration struct + one entry
-  point returning an fdk_ext_surface* — rendering, events, input
-  regions, popups, subsurfaces all ride the extension API.
-  - Wayland: a zwlr_layer_surface_v1 client — its OWN registry on
-    the shared display, layer/anchor/margin/exclusive-zone/
-    keyboard set before the first commit, every configure acked
-    then reported (FDK's present gate owns the
-    never-commit-before-configure rule), popups adopted via
-    get_popup. The protocol code is hand-vendored in the repo's
-    committed-pre-generated style (no wayland-scanner dependency).
-  - X11: an EWMH dock — override-redirect,
-    _NET_WM_WINDOW_TYPE_DOCK, _NET_WM_STRUT + _STRUT_PARTIAL,
-    _NET_WM_STATE_ABOVE, anchor-placed against the screen
-    geometry, class hints set. VERIFIED LIVE on Xvfb: the example
-    bar runs, and the s28 probe confirms 1280x32 at +0+0,
-    override-redirect, top strut 32 — exactly the configuration.
-  - `make shell` → build/libfdk_shell.a; `make shell-example` →
-    a working bar with a popup menu. The X11-only build compiles
-    one leg; the wayland-enabled build compiles both (verified:
-    53 unit suites + the X11 integration suite pass in the full
-    configuration).
-  - v1 limits stated in the docs: create-time configuration
-    (reconfigure returns UNSUPPORTED), first-output binding,
-    keyboard on-demand needs layer-shell v4.
+- **The shell-surface add-on** (now `fdk-shell-overlay/`):
+  panels, docks, notification shells, OSDs — layers with LIVE
+  setters (level/anchor/margin/exclusive-zone/size/keyboard),
+  output enumeration + hotplug + per-output surfaces, popup
+  cascades, a notification server, a tray host. Rendering,
+  events, input regions, popups, subsurfaces ride FDK's
+  extension API unchanged (the docs/EXTENDING.md reference
+  consumer). See the package's own README for the complete
+  inventory and its five-distro packaging.
 
 ### Verified — THE "FIX RATHER THAN SUPPRESS" ROUND: every suppression entry re-tested for fixability by experiment
 
@@ -872,7 +890,7 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
-### Fixed — fdk-shell's passive-grab test: the XTEST key count raced the server's read order
+### Fixed — fdk-shell-overlay's passive-grab test: the XTEST key count raced the server's read order
 
 - `xtest_super_digit` injected the Super+digit keys through one
   connection and counted the passive grab's KeyPress deliveries on
@@ -894,16 +912,16 @@ note their development-candidate status.
   The hermetic pre-install set (libX11, libXext, zlib, libxkbcommon,
   wayland — the 0d9d4de lesson: xbps resolves declared
   shlib-requires only against installed providers) predated M-6;
-  `libXrandr` joins it, in FDK's own and fdk-shell's install-tests.
+  `libXrandr` joins it, in FDK's own and fdk-shell-overlay's install-tests.
   The other families resolve the new dependency through their
   package managers (the deb Depends row, rpm's auto-requires,
   pacman's depends=) and passed.
 
-### Fixed — fdk-shell's test link: the XShape readback legs need -lXext on the container path
+### Fixed — fdk-shell-overlay's test link: the XShape readback legs need -lXext on the container path
 
 - The ubuntu job went green with the bus-present fixes, which let
   the four distro containers get far enough to hit the next layer:
-  `fdk-shell/tests/test_x11.c`'s S-4 input-region legs call
+  `fdk-shell-overlay/tests/test_x11.c`'s S-4 input-region legs call
   `XShapeGetRectangles` (shape.h — a libXext symbol), and the test
   link line carried no `-lXext`. The sibling-tree default FDK_LIBS
   includes it for the static `libfdk.a`, which masked the gap on
@@ -956,7 +974,7 @@ note their development-candidate status.
   `dbus-run-session` locally and now pass; two consecutive
   dbus-mode `make test-x11` runs green; the full battery (make test,
   FDK_DBUS_TEST_REQUIRE=1 test-dbus ALL PASS, test-x11, sanitize-0,
-  release + examples + verify-exports 848, the sway suite, fdk-shell
+  release + examples + verify-exports 848, the sway suite, fdk-shell-overlay
   build + test-x11 + test-desktop + isolation + both desktop rigs)
   re-ran green after the changes.
 
@@ -1005,7 +1023,7 @@ note their development-candidate status.
   deliberate BUILD FAIL. Declared now: ci.yml, all five packaging
   scripts, APKBUILD makedepends, PKGBUILD depends, rpm
   BuildRequires, void template, the two deb soname maps, and the
-  fdk-shell packaging family in full (its own X11 source includes
+  fdk-shell-overlay packaging family in full (its own X11 source includes
   the same header). docs/build.md and docs/packaging.md carry the
   requirement; docs/dependencies.md gained the missing libXext/
   libXrandr rows and the 1.1.0 dlopen-lane table, and its stale
@@ -1101,9 +1119,9 @@ note their development-candidate status.
   re-asserted type-filtered (the pinch coexistence).
   docs/DECISIONS.md D-025.
 
-### Added — fdk-shell runtime re-anchoring + auto-hide (C-5 / A-05 / A-08)
+### Added — fdk-shell-overlay runtime re-anchoring + auto-hide (C-5 / A-05 / A-08)
 
-- **The layer's placement is LIVE** (fdk-shell 0.5.0):
+- **The layer's placement is LIVE** (fdk-shell-overlay 0.5.0):
   `fdk_shell_layer_set_anchor` / `_set_margin` / `_set_exclusive_
   zone` / `_set_desired_size` / `_set_keyboard_mode` / `_set_level`
   change a SHOWN surface without destroying it — Wayland re-issues
@@ -1358,10 +1376,10 @@ note their development-candidate status.
 - Proven end to end: XShape protocol readback + REAL XTEST
   click-through both ways (X11); the injector pointer's
   hole/region/leave/clear routing (sway); the add-on twin through
-  fdk-shell's suite. The substrate C-5's auto-hide reveal strips
+  fdk-shell-overlay's suite. The substrate C-5's auto-hide reveal strips
   build on.
 
-### Added — the full named cursor set (S-5 / B-12, fdk-shell 0.4.0)
+### Added — the full named cursor set (S-5 / B-12, fdk-shell-overlay 0.4.0)
 
 - **`fdk_cursor_shape` grows from 2 to 22 shapes** (append-only;
   values 0 and 1 unchanged): TEXT, CROSSHAIR, WAIT, PROGRESS, MOVE,
@@ -1383,11 +1401,11 @@ note their development-candidate status.
   lacks, the nearest core glyph otherwise, the documented
   substitution table in docs/platform-input.md; a cursor the
   platform cannot draw honestly keeps the default arrow.
-- **fdk-shell 0.4.0** mirrors the set (`fdk_shell_cursor`) for
+- **fdk-shell-overlay 0.4.0** mirrors the set (`fdk_shell_cursor`) for
   panels (TEXT over a search entry, GRAB over drag handles, WAIT
   while app lists load).
 
-### Added — X11 multi-monitor: the RandR output model (M-6 / A-03 / B-05, fdk-shell 0.3.0)
+### Added — X11 multi-monitor: the RandR output model (M-6 / A-03 / B-05, fdk-shell-overlay 0.3.0)
 
 - **The core's internal table** (`src/platform/x11/x11_randr.c`):
   per-CRTC geometry probed at connect (reading-order sorted),
@@ -1395,7 +1413,7 @@ note their development-candidate status.
   bare-X maximize/fullscreen fallbacks now fill the CONTAINING
   monitor (the window's center) instead of the whole screen. No
   public API — the Wayland core's no-output-API parity (D-015).
-- **fdk-shell's own X connection** (the add-on's event channel, the
+- **fdk-shell-overlay's own X connection** (the add-on's event channel, the
   X11 twin of its own wl_registry): XRRSelectInput + the extension
   loop's fd source; the output table with real connector names,
   per-CRTC geometry and mm sizes; ADDED/CHANGED/REMOVED events
@@ -1414,9 +1432,9 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-10-29 (on the rc2 line)
 
-### Added — the desktop host models: the T-B side 2 split (fdk-shell 0.3.0)
+### Added — the desktop host models: the T-B side 2 split (fdk-shell-overlay 0.3.0)
 
-- **`include/fdk-shell/fdk-shell-desktop.h` (public API)**: the
+- **`include/fdk-shell-overlay/fdk-shell-overlay-desktop.h` (public API)**: the
   StatusNotifierWatcher host model (`fdk_shell_tray_host`) and the
   org.freedesktop.Notifications server model
   (`fdk_shell_notify_server`) — DATA AND EVENTS ONLY. Snapshot APIs
@@ -1442,7 +1460,7 @@ note their development-candidate status.
   rigs re-proved both pairs end to end (notifyd 68, trayhost 103
   checks, all three phases each): the split's
   behavior-preservation proof.
-- **`tests/test_desktop_model.c` (`make -C fdk-shell
+- **`tests/test_desktop_model.c` (`make -C fdk-shell-overlay
   test-desktop`)**: the models headlessly on a private
   dbus-run-session bus — an in-test mock item and client; snapshot
   fields byte-exact, the pixmap copy, the menu round, interaction
@@ -1725,7 +1743,7 @@ note their development-candidate status.
 
 ### Added — the StatusNotifier tray host (S-1 / A-11)
 
-- **`trayhost` (fdk-shell example, S-1 / A-11)**: a complete
+- **`trayhost` (fdk-shell-overlay example, S-1 / A-11)**: a complete
   org.kde.StatusNotifierWatcher host on FDK's native D-Bus client,
   rendering the registered StatusNotifierItems as a floating
   top-right TOP-layer strip on both backends. The full protocol
@@ -1752,7 +1770,7 @@ note their development-candidate status.
   accent marker strip, left/middle/right clicks drive
   Activate/SecondaryActivate/the menu. Hostile-input posture and
   the polite bus-name etiquette match notifyd's. Env trace:
-  FDK_TRAYHOST_TRACE=1. Rig: `make -C fdk-shell test-tray` (62
+  FDK_TRAYHOST_TRACE=1. Rig: `make -C fdk-shell-overlay test-tray` (62
   checks; D-007 records the shape decisions).
 
 ### Added — the notification daemon (S-2 / A-12) and its substrate
@@ -1765,7 +1783,7 @@ note their development-candidate status.
   pixmaps), rasterizes themed SVG at the requested size, tints
   `-symbolic` names, and hands back a fresh ARGB8888 surface; NULL
   on a miss is the caller's cue to draw its own glyph.
-- **`notifyd` (fdk-shell example, S-2 / A-12)**: a complete
+- **`notifyd` (fdk-shell-overlay example, S-2 / A-12)**: a complete
   org.freedesktop.Notifications server on FDK's native D-Bus client,
   displaying cards as overlay layers on both backends. The full
   specification surface (Notify with replaces_id/actions/hints,
@@ -1780,7 +1798,7 @@ note their development-candidate status.
   click-through shape until input regions land), stacking that
   self-heals across output changes, and an env-gated trace
   (FDK_NOTIFYD_TRACE=1). The rig
-  (`make -C fdk-shell test-notifyd`) proves it against a real
+  (`make -C fdk-shell-overlay test-notifyd`) proves it against a real
   dbus-daemon with libdbus and GLib as cross-implementation callers,
   plus pixel, XTEST-click, EWMH, and layer-shell legs.
 - **`docs/TESTING-ON-DESKTOP.md`**: the numbered owner-verification
@@ -1800,10 +1818,10 @@ note their development-candidate status.
 
 ### Fixed — CI and packaging truth
 
-- **The five-family packaging red at 0.2.0**: fdk-shell's Makefile
+- **The five-family packaging red at 0.2.0**: fdk-shell-overlay's Makefile
   carried its own hand-maintained version (0.1.0) next to the
   header's single source of truth (0.2.0) — the staged library was
-  `libfdk-shell.so.0.1.0` and the generated `.pc` said `Version:
+  `libfdk-shell-overlay.so.0.1.0` and the generated `.pc` said `Version:
   0.1.0`, and every distro install-test caught the mismatch. The
   Makefile now derives the version from the header (FDK's own
   established pattern).
@@ -1949,7 +1967,7 @@ docs/EXTENDING.md.
   (Wayland or X11/XLibre) and `fdk_ext_has_capability()` (SHM
   rendering, popup grabs, EWMH dock hints, compositor frame pacing).
 
-### Added — fdk-shell, the first add-on package (separate directory,
+### Added — fdk-shell-overlay, the first add-on package (separate directory,
              own build, own version — ready to move to its own repo)
 
 - Layer-shell-style surfaces behind one API: layers (background /
@@ -1968,26 +1986,26 @@ docs/EXTENDING.md.
   carry `_NET_WM_STATE_ABOVE`, OVERLAY adds SKIP_TASKBAR/SKIP_PAGER
   (the strongest EWMH stacking behavior; the fullscreen-over-docks
   protocol ceiling and what a custom WM would need to honor a true
-  overlay layer are documented in fdk-shell's README); and the demo
+  overlay layer are documented in fdk-shell-overlay's README); and the demo
   bar repaints on `FDK_EVENT_WINDOW_EXPOSE` — the content-loss
   contract that fixes the ghost-bar bug (a desktop round-trip left
   the bar showing whatever was underneath).
-- fdk-shell's shared library links FDK's shared library (a real
+- fdk-shell-overlay's shared library links FDK's shared library (a real
   `NEEDED: libfdk.so.1` entry — the whole chain resolves through
   the loader and the distro dependency tooling), and its release
   config drops the sanitizer runtimes like FDK's does.
 - Popups built on the Part-1 popup API; a demo bar (top-docked,
   one working dropdown); Xvfb strut/dock verification test and a
-  prefix-isolation build test proving fdk-shell compiles against
+  prefix-isolation build test proving fdk-shell-overlay compiles against
   FDK's installed public headers and library ONLY.
-- fdk-shell packages in all five distribution families
+- fdk-shell-overlay packages in all five distribution families
   (deb/rpm/arch/apk/xbps), each declaring a real, versioned
   dependency on the FDK runtime pinned at the extension-API floor;
   every family's install-test proves the dependency is enforced by
-  the native package manager (installing fdk-shell alone is
+  the native package manager (installing fdk-shell-overlay alone is
   REFUSED), and the build itself compiles against the INSTALLED FDK
   packages — the isolation proof re-run inside every packaging
-  container (fdk-shell/packaging/).
+  container (fdk-shell-overlay/packaging/).
 
 ### Packaging / build
 
@@ -2123,7 +2141,7 @@ before the fix and measured before/after where a number exists:
    XCursor-theme image. New public surface at every layer —
    `fdk_window_set_cursor()`/`fdk_cursor_shape` (core),
    `fdk_ext_surface_set_cursor()` (extension), and
-   `fdk_shell_{layer,popup}_set_cursor()` (fdk-shell) — two shapes:
+   `fdk_shell_{layer,popup}_set_cursor()` (fdk-shell-overlay) — two shapes:
    the arrow and the pointing hand (the demo bar shows the hand over
    its button). Rig-verified at the protocol level (every enter
    serial cited by a `set_shape`) and the pixel level (hand over the
@@ -2185,10 +2203,10 @@ before the fix and measured before/after where a number exists:
 
 The round's own push then exposed its build defect, closed before
 the next: the cross-package prerequisites that keep sibling-tree
-builds honest (an FDK rebuild must invalidate fdk-shell's binaries —
+builds honest (an FDK rebuild must invalidate fdk-shell-overlay's binaries —
 the rigs' three-patch-old bar) had landed as UNCONDITIONAL make
 prerequisites on `../build/libfdk.a`/`../build/libfdk.so`, and the
-pristine fdk-shell-only tarball families (rpm/alpine/arch) died at
+pristine fdk-shell-overlay-only tarball families (rpm/alpine/arch) died at
 `No rule to make target '../build/libfdk.so'` — their link inputs
 point at the installed FDK and their trees carry no sibling checkout
 at all (debian/void survived only because their build contexts still
@@ -2199,13 +2217,13 @@ ALONE into a scratch directory, the containers' exact condition —
 that would have caught it before CI did.
 
 KNOWN FLAKE (once, not reproduced in 5 runs including under load):
-fdk-shell's passive-grab test asserted `presses >= 1` zero-times
+fdk-shell-overlay's passive-grab test asserted `presses >= 1` zero-times
 during a rig-teardown-heavy window — watched for in CI, no code
 path connects it to this round.
 
 ### Fixed — the live-desktop bar findings (2026-10-26; sway/labwc + Openbox)
 
-Four root causes found by running the fdk-shell demo bar on real
+Four root causes found by running the fdk-shell-overlay demo bar on real
 desktops, each reproduced in this environment first (headless sway
 AND labwc 0.8.3 for the Wayland legs; a real Openbox 3.6.1 under
 Xvfb for the X11 legs) and each pinned by a permanent test:
@@ -2259,7 +2277,7 @@ Xvfb for the X11 legs) and each pinned by a permanent test:
 4. **X11: the layer's self-positioning** — a dock-typed window with
    no position hints is "unplaced", and Openbox ran its placement
    policy: the panel centered mid-screen (confirmed in its debug
-   log). fdk-shell now sets USPosition/USSize WM_NORMAL_HINTS with
+   log). fdk-shell-overlay now sets USPosition/USSize WM_NORMAL_HINTS with
    the anchoring math; popups raise on map (an override-redirect
    window created under a raised window stays under it otherwise).
    Pinned by reading the hints back server-side.
@@ -2269,7 +2287,7 @@ diagnosis: create/map/raise, grab verdicts + focus takeover, first
 present (with the lane), unmap/destroy, and the REASON each release
 happened with the grab-held duration.
 
-### Fixed — the fdk-shell packaging matrix's first live CI pass
+### Fixed — the fdk-shell-overlay packaging matrix's first live CI pass
 
 Six defect classes, all packaging/build-environment script defects
 (none in library code), all invisible to the sandbox battery — three
@@ -2296,18 +2314,18 @@ along):
    its base. It now selects FDK's own rpms by name; arch's
    equivalent `head -1` sort-order landmine is now a deterministic
    `fdk-[0-9]*` glob.
-3. **The fdk-shell apk build hand-fed a bare sha512 into the
+3. **The fdk-shell-overlay apk build hand-fed a bare sha512 into the
    APKBUILD** — abuild's checksum array must carry the FILENAME
    (`abuild checksum` writes the correct form; FDK's own apk
    pipeline already used exactly that sequence). The rewrite also
    fixed the artifact collection (abuild writes to REPODEST, not
    the build dir) and dropped the `abuild -r -F` cargo cult.
-4. **The fdk-shell xbps build checked `dist/` while xbps-create
+4. **The fdk-shell-overlay xbps build checked `dist/` while xbps-create
    wrote into the current directory** — both packages had built
    successfully; the collection line FDK's own void build carries
    (`mv ./*.xbps dist/`) was missing.
 
-5. **The generated fdk-shell.pc carried the library's platform link
+5. **The generated fdk-shell-overlay.pc carried the library's platform link
    deps in Libs** (`pkg-config --libs x11 wayland-client` appended —
    every consumer forced to install the X11 AND Wayland dev
    packages; the clean-container smokes died at
@@ -2316,7 +2334,7 @@ along):
    (`${libdir}`/`${includedir}` undefined — empty expansion that
    only worked because /usr/include and the default linker path
    need no flags). The .pc now matches fdk.pc's contract: variables
-   defined, `Libs: -lfdk-shell` + `Requires: fdk`, platform flags
+   defined, `Libs: -lfdk-shell-overlay` + `Requires: fdk`, platform flags
    in `Libs.private`. The smoke's own second Xlib connection now
    carries `-lX11` on its link line (modern ld refuses to resolve a
    binary's own symbols through a shared library's transitive
@@ -2325,7 +2343,7 @@ along):
    swallowing it.
 
 The same run closed void: the corrected .pc made the build-phase
-smoke discover and link the installed fdk-shell (the old
+smoke discover and link the installed fdk-shell-overlay (the old
 "cannot find" never recurred to fire its new diagnostic), and the
 remaining void failure was the install-test's missing runtime
 shlibs — xbps resolves a package's declared shlib-requires only
@@ -2334,7 +2352,7 @@ aborted on fdk-devel's libXext.so.6/libxkbcommon.so.0; the
 install-test now pre-installs the same runtime shlibs FDK's own
 void install-test carries.
 
-Also: the fdk-shell distro build scripts restored the explaining
+Also: the fdk-shell-overlay distro build scripts restored the explaining
 comment for FDK's `LSAN_OPTIONS=exitcode=0` distro-container leak
 policy (the copy had dropped it), the inert copies of that flag
 where the sanitizer toolchain is off (alpine/void, musl/minimal)
@@ -2345,7 +2363,7 @@ on images with no Xorg server.
 
 A fourth push (the live-desktop bar fixes, 2026-10-26) added the
 sixth class: **the XTEST dev header is test infrastructure too — for
-the BUILDERS this time.** fdk-shell's new passive-grab passthrough
+the BUILDERS this time.** fdk-shell-overlay's new passive-grab passthrough
 test synthesizes Super+number keys through the XTEST extension, and
 five of six CI jobs died at the same line — `tests/test_x11.c:
 fatal error: X11/extensions/XTest.h: No such file or directory` —

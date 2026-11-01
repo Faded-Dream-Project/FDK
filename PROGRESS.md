@@ -31,7 +31,7 @@ remains). The full battery green: core, X11 (the five-leg session
 battery with the probe playing the session manager), D-Bus,
 sanitize-off, release+examples+verify-exports (869), the FULL sway
 suite (the session section: live degradation + seam bodies + join
-validation), fdk-shell's four suites. Prior state below.)
+validation), fdk-shell-overlay's four suites. Prior state below.)
 
 Last audited: 2026-10-30, at milestone **1.7.8** (D-4 foreign
 toplevels: include/fdk/fdk_toplevel.h, 861 exports (+6) — the
@@ -71,7 +71,7 @@ authoritative index of that ledger.
 Last audited: 2026-10-25, at milestone **1.7.2** (the rc1
 packaging matrix's first live CI pass — the 1.7.1 commits were
 pushed and four of the six CI jobs failed, every defect a
-packaging-script defect, none in library code: the fdk-shell
+packaging-script defect, none in library code: the fdk-shell-overlay
 install-test smoke needs X11 DEV headers as test infrastructure
 [libx11-dev/libX11-devel now pre-installed by the deb/rpm
 install-tests, the class of gcc/pkg-config/xvfb — the .pc chain
@@ -82,13 +82,13 @@ add-on's packages swept into a test whose removal step was then
 CORRECTLY refused by rpm — a working dependency blocking removal
 of its base [now FDK's own rpms by name; arch's sort-order
 `head -1` landmine made the deterministic `fdk-[0-9]*` glob]; the
-fdk-shell apk build hand-fed a bare sha512 into sha512sums, but
+fdk-shell-overlay apk build hand-fed a bare sha512 into sha512sums, but
 abuild's verify needs the FILENAME in the array [now FDK's proven
 `abuild checksum` sequence; the rewrite also fixed REPODEST
 artifact collection and dropped the `abuild -r -F` cargo cult];
-the fdk-shell xbps build checked dist/ while xbps-create wrote
+the fdk-shell-overlay xbps build checked dist/ while xbps-create wrote
 into the CWD [the `mv ./*.xbps dist/` line restored]. Audited
-alongside: the fdk-shell distro builds had copied FDK's
+alongside: the fdk-shell-overlay distro builds had copied FDK's
 LSAN_OPTIONS=exitcode=0 leak policy without its comment [restored
 with the observed numbers; the inert alpine/void copies removed —
 those images run no sanitizer toolchain], and the rpm/alpine/void
@@ -96,7 +96,7 @@ install-tests' `fdk_start_xvfb || exit 1` turned the el10
 honest-skip into a hard failure [now the helper's disclosed-skip
 if/else contract, the same shape as FDK's own install-tests].
 A second push exposed the fifth and deepest class: the GENERATED
-fdk-shell.pc was wrong twice over — its Libs line carried the
+fdk-shell-overlay.pc was wrong twice over — its Libs line carried the
 library's own platform link deps (-lX11 -lwayland-client, forcing
 every consumer to install the X11+Wayland dev packages and baking
 build-machine -L paths into the artifact; the deb/rpm smokes died
@@ -104,7 +104,7 @@ at 'ld: cannot find -lwayland-client') and it referenced
 ${libdir}/${includedir} without defining them [undefined .pc
 variables expand empty — it only worked because /usr/include and
 the default linker path need no flags]. The .pc now mirrors
-fdk.pc's contract [variables defined; Libs: -lfdk-shell +
+fdk.pc's contract [variables defined; Libs: -lfdk-shell-overlay +
 Requires: fdk; platform flags in Libs.private], the smoke's own
 Xlib readback carries -lX11 on its link line [modern ld refuses
 transitive resolution: 'DSO missing from command line', reproduced
@@ -113,7 +113,7 @@ diagnostic [2>/dev/null swallowed the void failure's evidence;
 pkgconf 3.0.7 was built from source locally and PROVEN to accept
 the old bytes, so the void cause is pending its diagnostic].
 The third push closed void: the corrected .pc made the build-phase
-smoke discover/link the installed fdk-shell (the old 'cannot find'
+smoke discover/link the installed fdk-shell-overlay (the old 'cannot find'
 never recurred — the diagnostic never fired), and the remaining
 failure was the void install-test's missing RUNTIME shlibs [xbps
 resolves declared shlib-requires only against installed providers —
@@ -128,7 +128,7 @@ full narratives. Prior state below.)
 
 Last audited: 2026-10-27, at milestone **1.7.5** (the owner-directed
 verification pass + the CI-red day: the 0.2.0 packaging red's root
-cause was fdk-shell's Makefile carrying its own hand-maintained
+cause was fdk-shell-overlay's Makefile carrying its own hand-maintained
 0.1.0 next to the header's 0.2.0 — every install-test caught the
 staged .so.0.1.0 / Version: 0.1.0; the Makefile now derives the
 version from the header like FDK's own [4d86464]; the alpine flake
@@ -152,7 +152,7 @@ state below.)
 
 Last audited: 2026-10-26, at milestone **1.7.4** (the push of the
 1.7.3 fixes + the sixth CI defect class it exposed: the live-desktop
-commits landed on origin [three commits, core 1041 lines / fdk-shell
+commits landed on origin [three commits, core 1041 lines / fdk-shell-overlay
 947 / docs 247] and five of six CI jobs went red at the identical
 line — `tests/test_x11.c: fatal error:
 X11/extensions/XTest.h: No such file or directory`. Root cause: the
@@ -177,7 +177,7 @@ mirror [an outage, not a code defect; the code was green on the five
 other families] — so the critical xbps line now retries once after
 10s, the tolerance the later lines already carried. Docs:
 testing.md's sixth-class lesson, CHANGELOG's matrix section
-[now "six defect classes"], fdk-shell/Makefile. No tags, no
+[now "six defect classes"], fdk-shell-overlay/Makefile. No tags, no
 releases; 1.0.0 untouched. Prior state below.)
 
 Last audited: 2026-10-26, at milestone **1.7.3** (the live-desktop
@@ -208,13 +208,13 @@ dismissal], the popup pixel-stays test, and the desktop-change
 test; the GPU self-check retry budget became timer-based [fired
 from the dispatch tail; the pump wakes via the X11 backend's new
 next_wakeup_ms — both existing self-check tests still pass]; [4]
-fdk-shell's layer windows now set USPosition/USSize hints [an
+fdk-shell-overlay's layer windows now set USPosition/USSize hints [an
 unpositioned dock is "unplaced" — Openbox centered the panel
 mid-screen; confirmed in its debug log] and popups raise on map;
 FDK_POPUP_TRACE=1 documents the popup lifecycle with reasons and
 grab-held durations. make test, test-x11 [incl. both self-check
 tests], FDK_SANITIZE=0 test, release+verify-exports [641],
-examples, fdk-shell's 11-test X11 suite [twice], the Wayland suite
+examples, fdk-shell-overlay's 11-test X11 suite [twice], the Wayland suite
 + bar rig [sway+labwc+kill legs], and the isolation proof all
 green. Prior state below.)
 
@@ -224,23 +224,23 @@ desktop-integration hardening, found live on a real NVIDIA GTX
 INCONCLUSIVE vs PASS vs REAL-FAILURE per connection with a
 present-latency retry budget [not-viewable windows and XGetImage
 BadMatch never downgrade; the verdict is process-wide and logged
-once — FDK_GL_SELFCHECK_POISON is the test seam]; fdk-shell's X11
+once — FDK_GL_SELFCHECK_POISON is the test seam]; fdk-shell-overlay's X11
 backend is sticky across workspaces [_NET_WM_DESKTOP 0xFFFFFFFF +
 _NET_WM_STATE_STICKY, pre-map properties + post-map client
 messages] with per-level stacking state [ABOVE for TOP/OVERLAY,
 SKIP_* for OVERLAY; the fullscreen-over-docks EWMH ceiling and the
-custom-WM contract documented in fdk-shell's README]; the demo bar
-repaints on EXPOSE [the ghost-content fix]; fdk-shell's shared
+custom-WM contract documented in fdk-shell-overlay's README]; the demo bar
+repaints on EXPOSE [the ghost-content fix]; fdk-shell-overlay's shared
 library carries NEEDED libfdk.so.1 and its release config drops
-sanitizers; fdk-shell is PACKAGED in all five families with a real
-versioned FDK dependency [fdk-shell/packaging/, the install-tests
+sanitizers; fdk-shell-overlay is PACKAGED in all five families with a real
+versioned FDK dependency [fdk-shell-overlay/packaging/, the install-tests
 prove the dependency is enforced by each native package manager,
 and every build compiles against the INSTALLED FDK — the isolation
 proof re-run per packaging container; CI's ubuntu job runs the
-fdk-shell suites + the isolation proof]. Prior state below.)
+fdk-shell-overlay suites + the isolation proof]. Prior state below.)
 
 Last audited: 2026-10-25, at milestone **1.7.0** (the extension API
-+ fdk-shell — the 1.1.0-rc1 candidate: the owner directed FDK to
++ fdk-shell-overlay — the 1.1.0-rc1 candidate: the owner directed FDK to
 grow a public extension API ["add an extension API to FDK so
 add-on packages can be built on top of it, and prove it by building
 a layer-shell add-on as a SEPARATE package that uses only that
@@ -259,14 +259,14 @@ capability queries; docs/EXTENDING.md is the contract narrative];
 src/window/extend.c + src/core/extfd.c + the ext_surface_adopt /
 ext_surface_native / ext_surface_resized / native_display platform
 ops wired into BOTH backends; 20 new exported symbols, 641 total,
-SONAME unchanged (append-only). fdk-shell 0.1.0 [the first add-on
-package: fdk-shell/ — own build, own version, own pc file, ready to
+SONAME unchanged (append-only). fdk-shell-overlay 0.1.0 [the first add-on
+package: fdk-shell-overlay/ — own build, own version, own pc file, ready to
 move repo; wlr-layer-shell v4 via vendored scanner bindings on
 Wayland, _NET_WM_WINDOW_TYPE_DOCK + _NET_WM_STRUT_PARTIAL on
 X11/XLibre, the XOR-anchoring zone math, popups, the bar demo;
 tests/isolation.sh is the prefix-isolation PROOF]. Tests:
 test_extend.c headless + five X11-integration sections + the two
-fdk-shell suites, all ASan/UBSan green; two latent FDK bugs found
+fdk-shell-overlay suites, all ASan/UBSan green; two latent FDK bugs found
 by the rigs on the way (uninitialized fullscreen/geo_repaint fields
 on the create path; the wayland NULL-proxy destroy + the ext-popup
 handshake commit). CHANGELOG.md created [1.0.0 + the candidate].
@@ -899,8 +899,8 @@ sidebar rhythm).
   scroll coexistence, re-baseline) + FDK_EVENT_GESTURE_SWIPE (the
   per-finger end-gesture verdict) on the pure touch engine; no
   backend moved. D-025; rig: 6 engine legs.
-- **fdk-shell runtime re-anchoring + auto-hide: SHIPPED (1.1.0,
-  C-5 / A-05 / A-08, fdk-shell 0.5.0)** — the LIVE desc (anchor/
+- **fdk-shell-overlay runtime re-anchoring + auto-hide: SHIPPED (1.1.0,
+  C-5 / A-05 / A-08, fdk-shell-overlay 0.5.0)** — the LIVE desc (anchor/
   margin/zone/size/keyboard/level on a shown surface; the Wayland
   role swap with the wire-order lesson; the X11 state exchange) +
   the reveal-strip auto-hide (backend-native slide, withdrawn zone,

@@ -2342,7 +2342,7 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
         /* NULL for EXTENSION surfaces (1.1.0): an adopted surface's
          * role belongs to the add-on and was torn down by the kind's
          * destroy callback BEFORE this — there is no xdg object here
-         * to destroy (found live by the fdk-shell sway rig: the NULL
+         * to destroy (found live by the fdk-shell-overlay sway rig: the NULL
          * proxy marshaled through wl_proxy_get_version and killed
          * the process). */
         xdg_surface_destroy(pwindow->xdg_surface);
@@ -2382,7 +2382,7 @@ void fdk_wayland_window_show(fdk_platform_window *pwindow) {
      * xdg role (created through the normal popup path), so the
      * initial empty commit below IS their handshake starter — the
      * gate keys on the popup flag, not ext alone (found live by the
-     * fdk-shell sway rig: the popup's configure never arrived). */
+     * fdk-shell-overlay sway rig: the popup's configure never arrived). */
     if (pwindow->ext && !pwindow->popup) {
         return;
     }
