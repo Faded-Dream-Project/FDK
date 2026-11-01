@@ -222,6 +222,27 @@ fdk_result fdk_surface_create_from_image_bytes(const void *data,
 fdk_result fdk_surface_create_from_image(const char *path,
                                          fdk_surface **out_surface);
 
+/* §25/G-4 — the ANY-THREAD pixel decoder. Decodes an image file to
+ * a plain RGBA8888 buffer: NO fdk_surface, NO context, NO FDK
+ * state — pure malloc + stb, exactly like fdk_surface_create_
+ * from_image's internals but without the (UI-thread-only) surface
+ * object. Worker threads decode with this; the UI thread wraps the
+ * pixels into a surface (write them through get_info().pixels) or
+ * blits them itself. RGBA byte order, width*4 stride, row-major.
+ *
+ * fdk_image_pixels_free releases the buffer (and zeroes the struct
+ * — a freed struct is safely reusable and assertable). */
+typedef struct fdk_image_pixels {
+    unsigned char *pixels; /* RGBA8888, malloc'd; NULL when empty */
+    fdk_i32 width;
+    fdk_i32 height;
+    size_t stride;         /* == width * 4                       */
+} fdk_image_pixels;
+
+fdk_result fdk_image_decode_pixels(const char *path,
+                                   fdk_image_pixels *out_pixels);
+void fdk_image_pixels_free(fdk_image_pixels *pixels);
+
 /* Destroys an offscreen surface created by fdk_surface_create,
  * releasing its pixel memory. Passing a WINDOW surface here is an
  * application bug — window surfaces belong to their window; this

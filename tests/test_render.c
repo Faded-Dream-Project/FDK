@@ -753,6 +753,44 @@ static void test_image_decode(void) {
            "failure codes, compositing\n");
 }
 
+/* §25/G-4: the any-thread pixel decoder. Worker-side thumbnail
+ * pipelines must decode images WITHOUT creating an fdk_surface
+ * (surfaces are documented UI-thread-only, docs/threading.md); the
+ * honest API is a pure malloc'd RGBA buffer with no FDK state —
+ * decode on the worker, wrap on the UI thread. */
+static void test_image_decode_pixels(void) {
+    fdk_image_pixels px = {0};
+    const char *fixture = "build/test_image_decode_pixels.png";
+    FILE *fx = fopen(fixture, "wb");
+    assert(fx != NULL);
+    assert(fwrite(test_png_bytes, 1, TEST_PNG_LEN, fx) == TEST_PNG_LEN);
+    fclose(fx);
+
+    fdk_result r = fdk_image_decode_pixels(fixture, &px);
+    assert(fdk_ok(r));
+    assert(px.width == 8 && px.height == 8);
+    assert(px.pixels != NULL);
+    assert(px.stride == (size_t)px.width * 4);
+    /* known pixels, same as the surface path: red at (0,0) */
+    assert(px.pixels[0] == 0xFFu && px.pixels[1] == 0x00u &&
+           px.pixels[2] == 0x00u && px.pixels[3] == 0xFFu);
+    fdk_image_pixels_free(&px);
+    assert(px.pixels == NULL && px.width == 0);
+
+    /* the error paths mirror create_from_image exactly */
+    assert(fdk_image_decode_pixels(NULL, &px) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_image_decode_pixels("build/no_such.png", &px) ==
+           FDK_ERR_NOT_FOUND);
+    assert(fdk_image_decode_pixels(".", &px) == FDK_ERR_NOT_A_FILE);
+    assert(fdk_image_decode_pixels("Makefile", &px) ==
+           FDK_ERR_UNSUPPORTED);
+
+    remove(fixture);
+    printf("[ok] render: fdk_image_decode_pixels (any-thread RGBA "
+           "decode, known pixels, error paths, free)\n");
+}
+
 static void test_matrix_algebra(void) {
     /* identity / mul / invert round trips on non-trivial transforms */
     fdk_matrix t = fdk_matrix_translate(13.0f, -7.0f);
@@ -1227,6 +1265,7 @@ int main(void) {
     test_argb_surface_and_blending();
     test_blit_blend();
     test_image_decode();
+    test_image_decode_pixels();
     test_matrix_algebra();
     test_blit_transformed();
     test_transformed_alpha();
