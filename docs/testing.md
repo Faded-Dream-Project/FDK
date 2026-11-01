@@ -1873,6 +1873,68 @@ leaked. The repo's file also parses clean under LSan with no
 warnings and over-suppresses nothing: the probe's own allocations
 were fully reported through it.
 
+**The fixability verdict — fix rather than suppress, re-examined by
+experiment** (2026-11-01, the owner's round; the probes live in the
+staging environment's `scripts/s26_glx_teardown_probe.c` and
+`scripts/s27_fc_fini_probe.c`, ASan-instrumented, unsuppressed,
+`LSAN_OPTIONS=exitcode=88`): every entry in
+`tests/data/lsan-gl.supp` was re-tested for whether an FDK-side fix
+could retire it. The answer, per block, with the measurements:
+
+- **The GLX/Mesa block (libGLX_mesa, libGLdispatch, libgallium,
+  libgbm, libdrm): INHERENT — no fix exists.** A probe that opens
+  the display, chooses a visual, and creates NO context still ends
+  with 108764 B / 482 allocations — the pile is the per-Display
+  driver screen state, present before any GL usage FDK controls.
+  Running the complete canonical context lifecycle on top
+  (make-current, glGetString, make-current(None, NULL),
+  glXDestroyContext, XCloseDisplay) retires ZERO bytes of it
+  (identical 108764 B / 482); adding FBConfig enumeration and a
+  compile-link-delete shader pass adds only 1920 B / 1 allocation,
+  and the ladder retires that increment's tracked objects too. The
+  stack exports no public release entry point — glXReleaseThread,
+  glXReleaseThreadMESA, glXTerminate, glXDestroyScreenMESA are all
+  absent (dlsym-probed at runtime); the only symbols that could
+  release the state are PRIVATE ABI (__glDispatchFini in
+  libGLdispatch, driDestroyScreen in libgallium — double-underscore
+  and driver-internal respectively), which a toolkit must not call.
+  FDK's real runs pile up more (660772 B / 2938 in the X11
+  integration suite) only because they exercise many windows,
+  contexts, and shader passes — every per-context piece of that is
+  already retired by the ladder; the residue is the same inherent
+  screen state. FDK's teardown is maximal.
+- **The fontconfig block: CONTRACT-BOUND — the only fix is unsafe
+  for an embeddable toolkit.** Measured: appending one FcFini()
+  call to a probe that mirrors fontscan.c's exact usage (dlopen,
+  FcInit, the substitute/sort walk, keep the library pinned)
+  retires exactly 320 B / 3 allocations — precisely the
+  256 B + 2x32 B cold-cache FcAtomic pools this block documents.
+  But FcFini destroys fontconfig's process-GLOBAL state with no
+  refcount to consult: the host application may be using
+  fontconfig through the same shared library (the coexistence rule
+  in src/text/fontscan.c's header — the reason FDK never calls it).
+  A toolkit that calls FcFini at teardown can take down the host's
+  font rendering. The remaining ~6.6 KB of fontconfig's init state
+  is equally FcFini-gated (measured: still leaked WITH FcFini), so
+  there is no partial-fix shape either.
+- **The libdbus-1 block: PULLER-SIDE — the allocating code is not
+  FDK's and not open.** The puller is libnvidia-eglcore (proven in
+  the §22 follow-up), a proprietary driver library that dlopens
+  libdbus behind the application's back with RTLD_NODELETE. No FDK
+  code path allocates or could free this state.
+- **The libEGL_nvidia block: AUDITED AND INTERMITTENT — covered by
+  the §22 round.** FDK's EGL teardown was audited call-by-call, its
+  one real defect (the missing eglReleaseThread canonical tail) was
+  fixed and rig-guarded, and the 256 B block is intermittent
+  driver-side state (the two post-fix runs disagreed on its
+  presence) at an allocation site internal to the driver.
+
+So the file is exactly as small as it can honestly be: one entry
+block per third-party module, each backed by a measurement of why
+no FDK-side fix can retire it. If a future entry is ever added, it
+carries the same burden of proof — the experiment that shows the
+fix is impossible, not merely inconvenient.
+
 **The examples-level proof** (`scripts/verify_gl_examples.sh` in the
 staging environment, outside the repo): every example runs twice —
 `FDK_GL_FORCE=1` and `FDK_NO_GL=1` — asserting clean exits and

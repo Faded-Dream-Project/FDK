@@ -12,6 +12,26 @@
 # The suppressions match by MODULE so LeakSanitizer remains strict for
 # everything FDK owns.
 #
+# FIXABILITY VERDICT (2026-11-01, the owner's "fix rather than
+# suppress" round — every entry below was re-examined by experiment,
+# not assertion; the probes are scripts/s26_glx_teardown_probe.c and
+# scripts/s27_fc_fini_probe.c): the GLX block is INHERENT — a probe
+# that opens the display and creates NO context still ends with
+# 108764 B / 482 allocations on this Mesa stack, the full canonical
+# context ladder (make-current, destroy, close) retires ZERO bytes of
+# it, and the stack exports no public release entry point at all
+# (glXReleaseThread / glXTerminate absent; the only candidates are
+# private ABI: __glDispatchFini, driDestroyScreen — not callable from
+# a toolkit). The fontconfig block is CONTRACT-BOUND: FcFini measurably
+# retires exactly the 320 B this file covers (256 + 2x32) but destroys
+# process-global state with no refcount, which an embeddable toolkit
+# must not do to a library the host app may share. The libdbus and
+# libEGL_nvidia blocks are proprietary-driver-internal state (see
+# their proof blocks; §22 audited FDK's EGL teardown call-by-call and
+# fixed its one real defect). Conclusion: FDK's teardown is already
+# maximal on every entry; there is nothing left to fix on this side
+# of the module boundary.
+#
 # Applied by `make test-x11` automatically; pass the same file to any
 # sanitized run that exercises the lane (see docs/testing.md).
 #

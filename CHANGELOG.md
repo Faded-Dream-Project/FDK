@@ -17,6 +17,35 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-01 (on the rc2 line)
 
+### Verified — THE "FIX RATHER THAN SUPPRESS" ROUND: every suppression entry re-tested for fixability by experiment
+
+- **The owner's question**: leaks that CAN be fixed should be fixed,
+  and only the truly unfixable stay suppressed. Every entry in
+  `tests/data/lsan-gl.supp` was therefore re-examined with measured
+  probes (unsuppressed, `LSAN_OPTIONS=exitcode=88`), not assertion.
+- **The GLX/Mesa block is INHERENT**: a probe that opens the display
+  and creates NO context still ends with 108764 B / 482 allocations
+  — the pile is the per-Display driver screen state. The complete
+  canonical context lifecycle on top retires ZERO bytes of it
+  (identical totals), FBConfig + shader work adds only 1 tracked
+  allocation, and the stack exports no public release symbol at all
+  (glXReleaseThread/glXTerminate absent at runtime; the only
+  candidates are private ABI — __glDispatchFini, driDestroyScreen).
+  FDK's X11 GL teardown was already maximal.
+- **The fontconfig block is CONTRACT-BOUND**: appending one FcFini()
+  to a probe mirroring fontscan.c's exact usage retires exactly the
+  320 B this block covers — but FcFini destroys process-global state
+  with no refcount while the host app may share the library (the
+  coexistence rule), and the remaining ~6.6 KB of init state is
+  equally FcFini-gated, so no partial-fix shape exists either.
+- **libdbus-1 is PULLER-SIDE** (libnvidia-eglcore, proprietary, §22)
+  and **libEGL_nvidia is AUDITED AND INTERMITTENT** (§22: teardown
+  audited call-by-call, its one real defect fixed and rig-guarded).
+- **The verdict, in one line**: the suppression file is exactly as
+  small as it can honestly be — every block now carries the
+  measurement of why no FDK-side fix can retire it
+  (docs/testing.md's fixability-verdict section has the full data).
+
 ### Fixed — THE EXIT-LEAK ROUND (§22): the canonical teardown tail, and the NVIDIA exit reports made clean with proof
 
 - **The second GTX 1050 Ti exit report**: the app itself is fine
