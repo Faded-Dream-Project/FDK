@@ -85,6 +85,34 @@ NOT started (the repo's wl injector exists: scripts/fdk-wl-inject).
 All suites green at cut-off: make test, test-dbus ALL PASS, test-x11
 3/3, verify-exports OK, Wayland suite PASS, fdk-files smoke clean.
 
+## §27 FINAL STATUS (round cut off at STEP 2b; read this first)
+DONE + PUSHED:
+- STEP 1 baseline: green on X11 AND Wayland at 56c3072 (start).
+- STEP 2a → f57cd7c: G-8 serialized per-address D-Bus handshakes
+  (tests/test_dbus_serialize.c: 5 no-pump connects all ready) +
+  G-7 extfd dispatch hardening (tests/test_extfd_race.c). The notify
+  CLIENT path verified end-to-end (tray-bus run-1: card placed on
+  notifyd). OPEN: the --smoke boot's first notify connection still
+  gets closed by dbus-daemon in some runs — evidence + the
+  model_bind rows=0 lead in the §27 status block above.
+- STEP 2b rig → 5331da2: drag_rig.c + run_drig.sh + FDK_FILES_DRIG
+  gate committed WIP; D1/D2 NOT VERIFIED (blocked by the same
+  rows=0 binding question — THE next chase: a freshly bound list on
+  the shared singleton model shows 0 rows though fmodel_load
+  returned 2; prime suspect model_bind.c:183's single on_change
+  slot overwritten by the second pane's bind).
+
+NOT DONE (budget ended): STEP 3 fdk-edit (§24 full spec), STEP 4
+fdk-monitor, STEP 5 fdk-notes, STEP 6 PRE-1.0-CHECKLIST + GTK4/Qt6
+re-audit, STEP 7 housekeeping (test-apps/README index). The four
+apps' §24 specs live in the §24 round brief; fdk-edit/fdk-monitor/
+fdk-notes exist as smoke-clean §25-era skeletons in test-apps/ —
+they need the full feature work per spec.
+
+All suites green at cut-off (5331da2): make test, test-dbus ALL
+PASS, test-x11 3/3, verify-exports OK, Wayland suite PASS, all four
+app smokes clean (§27 STEP 1 run).
+
 ## NOT done (next round, in order)
 - STEP 4d: split view (two panes), sidebar bookmarks (add/remove/reorder
   by drag — fdk_list_bound_reorder_selected exists), DnD between
