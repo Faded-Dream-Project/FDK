@@ -400,6 +400,19 @@ struct fdk_dbus_connection {
     fdk__dbus_auth auth;
     int auth_started;
 
+    /* §27/G-8: the serialized-connect queue. A connection whose
+     * handshake is waiting for a same-address predecessor to finish
+     * has no socket yet (fd < 0, no io, no timer); connect_common
+     * parked it here and the predecessor's ready/death opens it.
+     * Rationale: dbus-daemon treats a burst of simultaneous SASL
+     * handshakes from one uid badly (observed live: the app's first
+     * of five connections-in-auth got closed mid-handshake — the
+     * fdk-files notification round-trip, §27/2a). Serializing the
+     * AUTH phase per address removes the burst; sockets still open
+     * eagerly one at a time and every public behavior (immediate
+     * handle, queued sends) is unchanged. */
+    int queued_handshake;
+
     /* CONNECTING → AUTH → HELLO_WAIT → READY; DEAD after. */
     int state;
     uint32_t next_serial;
