@@ -80,7 +80,7 @@ update-mask call. Took (b): `fdk_ext_loop_update_fd` appends to
 the extension API without touching the ops table — FDK_EXT_API_
 VERSION stays 1 (a purely additive function, no struct growth;
 the version bump is reserved for ops-table growth per the ABI
-policy). fdk-shell 0.1.0 binaries keep working unchanged.
+policy). fdk-shell-overlay 0.1.0 binaries keep working unchanged.
 
 ## D-003 — fdk_shutdown() sweeps D-Bus connections BEFORE timers/extfds
 **2026-10-26 (Phase 2).**
@@ -121,14 +121,14 @@ what serialize() puts on the wire. The alt's recon probe
 wire facts are byte-pinned in main's tests and it duplicates
 diagnostics the live battery already gives.
 
-## D-005 — the desktop-integration split: what is core vs what is fdk-shell
+## D-005 — the desktop-integration split: what is core vs what is fdk-shell-overlay
 **2026-10-27 (owner decision, recorded verbatim in intent).**
 
 Dark-mode following (B-06), the portal FileChooser fallback (B-09),
 and AT-SPI interop (B-10) belong in FDK CORE, built on the native
 D-Bus client — anything every FDK app needs to behave like a native
 app. The tray host (A-11/S-1), notification display (A-12/S-2), and
-media controls (MPRIS) belong in fdk-shell or add-on packages —
+media controls (MPRIS) belong in fdk-shell-overlay or add-on packages —
 anything a shell or panel provides TO other apps, which is exactly
 the add-on surface fdk/extend.h exists for. docs/dbus.md carries
 the split table; the roadmap's A-07/B-09 notes are annotated
@@ -170,7 +170,7 @@ urgency with the server-default timeout never expires (the spec's
 recommendation); explicit timeouts are always honored. The rate
 limit (25 Notify/s) and live cap (32) drop content but still answer
 every call — a flooding client must never block or spin the daemon.
-The rig (fdk-shell/tests/notifyd_rig.sh) pins all of this with
+The rig (fdk-shell-overlay/tests/notifyd_rig.sh) pins all of this with
 dbus-send (libdbus) and gdbus (GLib) as the cross-implementation
 callers and gdbus monitor as the signal receiver.
 
@@ -242,7 +242,7 @@ will rub against — recorded here, honestly.
   its own socket and is served by its own handler — exactly as a
   third party's registration would be (no shortcut).
 
-The rig (fdk-shell/tests/trayhost_rig.sh, 62 checks) pins all of
+The rig (fdk-shell-overlay/tests/trayhost_rig.sh, 62 checks) pins all of
 this with dbus-send (libdbus) and gdbus (GLib) as the
 cross-implementation callers, gdbus monitor as the signal
 receiver, and the probe — a synthetic item with the
@@ -252,7 +252,7 @@ bar, the fade blend (0.45·icon + 0.55·bg), the amber attention
 swap, and the cascade's edge flip under XTEST input; Wayland legs
 prove the layer-shell handshake under headless sway.
 
-## D-008 — the reusable notification/tray split: app-facing API in core, host-side model in fdk-shell
+## D-008 — the reusable notification/tray split: app-facing API in core, host-side model in fdk-shell-overlay
 
 **2026-10-27 (TASK B, the owner's directive).**
 
@@ -269,7 +269,7 @@ provides TO other apps):
   against in-test mocks on a REAL bus (make test-dbus) — the
   mock daemon/watcher validates every marshaled field, including
   the flat byte-array image-data.
-- **The HOST side stays in fdk-shell** (notifyd, trayhost — the
+- **The HOST side stays in fdk-shell-overlay** (notifyd, trayhost — the
   reference UIs). The model/drawing split (the protocol and
   state machinery extracted from the renderers) is the next
   slice; the current examples remain the executable spec.
@@ -558,8 +558,8 @@ library, the rendering stays in the examples, and the UNCHANGED rigs
 are the proof the split changed nothing observable.)**
 
 **1. Data and events, never pixels.** The two models
-(fdk-shell/src/desktop/tray_model.c, notify_model.c;
-include/fdk-shell/fdk-shell-desktop.h) own exactly what the roadmap
+(fdk-shell-overlay/src/desktop/tray_model.c, notify_model.c;
+include/fdk-shell-overlay/fdk-shell-overlay-desktop.h) own exactly what the roadmap
 worded: the watcher service, the item registry, the per-item state,
 the dbusmenu client; the Notifications server, the etiquette matrix,
 the flood gate, the live-set cap, the expiration timers, the record
@@ -633,11 +633,11 @@ bare-X maximize/fullscreen fallbacks fill the CONTAINING monitor
 (the window's center), not the screen. No public API appears: the
 append-only discipline would allow one, but parity with the Wayland
 core's posture is the honest architecture (an app needing outputs
-binds fdk-shell, exactly as the audit's fix wording assumed).
+binds fdk-shell-overlay, exactly as the audit's fix wording assumed).
 
-**2. fdk-shell owns a SECOND X connection for the events.** The
+**2. fdk-shell-overlay owns a SECOND X connection for the events.** The
 extension boundary has no generic X-event hook, and it should not
-grow one: on Wayland fdk-shell binds its own wl_registry and gets
+grow one: on Wayland fdk-shell-overlay binds its own wl_registry and gets
 output events on its own protocol objects — the X11 twin is
 XOpenDisplay(the same server) + XRRSelectInput + the extension
 loop's fd source (the documented add-on-socket pattern). The
@@ -771,7 +771,7 @@ bypasses shape hit-testing, so only the true input path proves the
 mechanism). Wayland: the injector's real pointer — no enter into
 the hole, enter into the region, leave on exit, full input after
 the clear. The add-on twin (fdk_ext_surface_set_input_region) is
-pinned by fdk-shell's X11 suite through the same readback.
+pinned by fdk-shell-overlay's X11 suite through the same readback.
 
 ## D-018 — the calendar family: no clock reads, Monday-lead weeks, six rows always, pickers that do not parse (S-10 / B-18)
 
@@ -1605,7 +1605,7 @@ protocol-error fence around both sweep orders); `make test-dbus`
 (ALL PASS); `FDK_SANITIZE=0`; release + examples + verify-exports
 (855, +7); the sway suite (the new section: injected clicks on the
 child, geometry proven by hit-testing, the stacking flip, grim+PIL
-pixels of the desync compositing); fdk-shell build + test-x11 +
+pixels of the desync compositing); fdk-shell-overlay build + test-x11 +
 test-desktop + its Wayland suite. The rig debug also left a small
 war story in the pixel leg: a single white pixel inside a perfect
 red field was sway's CURSOR SPRITE parked on the sample point — the
@@ -1665,7 +1665,7 @@ wired in; deferred with the reasoning here as the record.
 test-x11 (the seam leg + the live scan — Xvfb answers "no
 tablets", the honest no-op); test-dbus; FDK_SANITIZE=0; release +
 examples + verify-exports (855); the sway suite (the seam section +
-the live manager bind); fdk-shell build + test-x11 + test-desktop.
+the live manager bind); fdk-shell-overlay build + test-x11 + test-desktop.
 Real hardware: implemented — should work (untested on real
 hardware) — the seams pin the translation, the rigs pin the
 lifecycle, and no sandbox can hold a pen.
@@ -1724,7 +1724,7 @@ XSync is load-bearing, the second run's race; membership churn
 live; the bare-X empty posture); test-dbus; FDK_SANITIZE=0;
 release + examples + verify-exports (861, +6); the sway suite with
 the LIVE section (own windows listed, activation through sway's
-own tree, the close REQUEST round trip); fdk-shell build + test-x11
+own tree, the close REQUEST round trip); fdk-shell-overlay build + test-x11
 + test-desktop.
 
 ## D-032 — session save/restore: the objectless X11 lane, the join table, and a protocol no compositor speaks yet (D-5 / B-19)
@@ -1795,7 +1795,7 @@ Battery at the landing: dual-backend rebuild zero warnings;
 test-dbus`; `FDK_SANITIZE=0` test + test-x11; release + examples +
 verify-exports (869, +8); the FULL sway suite green (the session
 section: live degradation + the seam bodies + join validation);
-fdk-shell build + test + test-x11 + test-desktop + its Wayland
+fdk-shell-overlay build + test + test-x11 + test-desktop + its Wayland
 suite.
 
 ## D-033 — the XI2 mirror discipline gets teeth, and a tablet is stylus evidence, not an axis count (D-3's crash)

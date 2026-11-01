@@ -348,7 +348,7 @@ SHIPPED_THEMES := .FDKThemes/faded-dream.fdk
 # library object did.
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
-.PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools shell shell-example install uninstall clean verify-exports
+.PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools install uninstall clean verify-exports
 
 all: static shared tools
 
@@ -604,48 +604,20 @@ $(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
-# --- fdk-shell (the shell-surface add-on, 2026-11-01) -------------------
+# --- fdk-shell-overlay (the shell-surface add-on package) ----------------
 #
-# The first surface add-on package (docs/EXTENDING.md's model):
-# layer-shell surfaces on Wayland, EWMH docks on X11 — a separate
-# artifact from the core library, built on FDK's public +
-# extension API only. The Wayland leg additionally needs
-# wayland-client (like the platform backend); the X11 leg uses
-# the same X11_LIBS the examples use. A Wayland-disabled build
-# compiles only the X11 leg (the add-on degrades exactly like
-# FDK itself).
-SHELL_SRCS := shell/fdk_shell.c shell/fdk_shell_x11.c \
-              shell/wlr-layer-shell-unstable-v1-protocol.c
-ifeq ($(BUILD_WAYLAND),1)
-  SHELL_SRCS += shell/fdk_shell_wayland.c
-endif
-SHELL_OBJS := $(SHELL_SRCS:%.c=$(BUILD_DIR)/obj/%.o)
-SHELL_LIB  := $(BUILD_DIR)/libfdk_shell.a
-SHELL_LIBS := $(X11_LIBS)
-ifeq ($(BUILD_WAYLAND),1)
-  SHELL_LIBS += $(WAYLAND_LIBS)
-endif
+# The add-on lives in its own directory with its own build (own
+# version, own pkg-config, own tests, own packaging) — it is a
+# SEPARATE package that only needs FDK's installed public +
+# extension API. These root targets are thin delegating aliases;
+# the real build is fdk-shell-overlay/Makefile (see its README).
+fdk-shell-overlay:
+	$(MAKE) -C fdk-shell-overlay
 
-shell: $(SHELL_LIB)
+fdk-shell-overlay-example:
+	$(MAKE) -C fdk-shell-overlay examples
 
-$(SHELL_LIB): $(SHELL_OBJS)
-	$(AR) rcs $@ $(SHELL_OBJS)
-
-$(BUILD_DIR)/obj/shell/%.o: shell/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Iinclude -Ishell -Wno-cast-qual \
-		$(if $(findstring 1,$(BUILD_WAYLAND)),-DFDK_SHELL_WAYLAND=1,) \
-		$(X11_CFLAGS) $(WAYLAND_CFLAGS) -c $< -o $@
-
-shell-example: $(BUILD_DIR)/shell/example
-
-$(BUILD_DIR)/shell/example: shell/example.c $(SHELL_LIB) $(STATIC_LIB)
-	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Iinclude -Ishell -Wno-cast-qual \
-		$(X11_CFLAGS) $(WAYLAND_CFLAGS) $< $(SHELL_LIB) $(STATIC_LIB) \
-		-o $@ $(LDFLAGS) $(SHELL_LIBS)
-
-.PHONY: shell shell-example
+.PHONY: fdk-shell-overlay fdk-shell-overlay-example
 
 # --- Tools (1.4.13) ------------------------------------------------------
 

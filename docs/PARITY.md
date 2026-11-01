@@ -210,20 +210,20 @@ toolkit's spine; see docs/threading.md).
 
 ## The prioritized gap list
 
-1. **fdk-shell-overlay (shell surfaces)** — CLOSED THIS ROUND:
-   `shell/` (the section below) ships the layer-shell/EWMH-dock
-   add-on on the extension API, with the X11 dock verified live on
-   Xvfb (s28: correct geometry, override-redirect, strut) and both
-   legs compiling in the repo's own warning-clean profile.
+1. **fdk-shell-overlay (shell surfaces)** — CLOSED: the
+   `fdk-shell-overlay/` package ships the layer-shell/EWMH-dock
+   add-on on the extension API (formerly `fdk-shell/`, renamed
+   2026-11-01; see the section below). Its X11 suite is verified
+   in this sandbox.
 2. **Clipboard: image + URI-list formats** — HIGH (the most
    user-visible everyday gap; text-only paste is 1995).
 3. **Gestures + multi-touch** — MEDIUM-HIGH (tablets/touch UIs).
-4. **Text on extension surfaces** — MEDIUM-HIGH (newly visible
-   with shell/): widgets and text live in FDK's window layer; an
-   extension surface draws through the raw fdk_surface API, which
-   has no text primitive. A shell bar must either host a window or
-   draw glyphs itself. Hosting widgets on fdk_ext_surface is the
-   natural next extension-API version.
+4. **Text on extension surfaces** — MEDIUM-HIGH: widgets and text
+   live in FDK's window layer; an extension surface draws through
+   the raw fdk_surface API, which has no text primitive. A shell
+   bar must either host a window or draw glyphs itself. Hosting
+   widgets on fdk_ext_surface is the natural next
+   extension-API version.
 5. **Pango-grade run attributes (size/rise/letter-spacing/per-run
    fonts) in markup** — MEDIUM.
 6. **Grid container** — MEDIUM (the most-requested layout
@@ -242,47 +242,46 @@ application core — windows, input, 36 widgets, complex-script
 text, AT-SPI accessibility, theming, D-Bus/tray/notifications/
 session, i18n, undo, animation — with the deliberate shape
 differences (no GObject/moc, token themes, immediate-mode
-rendering) documented above. The shell-surface gap closed today
-(`shell/`); the real remaining gaps are clipboard richness,
-gestures, text-on-extension-surfaces, markup attribute depth, and
-printing.
+rendering) documented above. The shell-surface gap is closed
+(`fdk-shell-overlay/`); the real remaining gaps are clipboard
+richness, gestures, text-on-extension-surfaces, markup attribute
+depth, and printing.
 
 ---
 
-## shell/ — the fdk-shell-overlay add-on (this round)
+## fdk-shell-overlay/ — the shell-surface add-on package
 
-`shell/` is the first surface add-on package (the
-docs/EXTENDING.md model's reference consumer): a
-`zwlr_layer_surface_v1` client for Wayland shells and an EWMH
-dock client for X11, in one small API:
+`fdk-shell-overlay/` (formerly `fdk-shell/`) is the first surface
+add-on package — the docs/EXTENDING.md model's reference consumer:
+a `zwlr_layer_surface_v1` client for Wayland shells and an EWMH
+dock client for X11, with its own build, version, pkg-config
+file, packaging for five distros, and test suites.
 
-- `fdk_shell_overlay_create(ctx, cfg, &overlay)` — creates the
-  layer surface (Wayland: binds zwlr_layer_shell_v1 itself,
-  sets layer/anchors/margins/exclusive-zone, keyboard interactivity;
-  X11: an override-redirect dock window with _NET_WM_WINDOW_TYPE_
-  DOCK and strut hints) and returns an `fdk_ext_surface*` —
-  rendering, events, input regions, popups, subsurfaces all ride
-  the extension API unchanged.
-- The present gate (never commit before the first configure) and
-  the popup adoption callback (zwlr_layer_surface_v1.get_popup)
-  are handled inside the add-on, per the fdk_extend.h contracts.
+- `fdk_shell_layer_create()` with a description struct (level,
+  anchors, margins, exclusive zone, keyboard mode, desired size,
+  output index), then LIVE setters — `fdk_shell_layer_set_level/
+  set_anchor/set_margin/set_exclusive_zone/set_desired_size/
+  set_keyboard_mode`, show/hide/reveal, auto-hide with edge
+  behavior — an `fdk_ext_surface*` back, so rendering, events,
+  input regions, popups and subsurfaces ride the extension API
+  unchanged.
+- Output enumeration (`fdk_shell_output_count/name/get_info`)
+  plus a hotplug callback; per-output layer surfaces (the
+  shell-panel shape) or one output pinned by index. X11 reads the
+  RandR monitor table.
+- Keyboard modes NONE/EXCLUSIVE/ON_DEMAND (ON_DEMAND is the
+  layer-shell v4 semantic; the package binds the highest version
+  the compositor offers and degrades with documented behavior
+  below v4).
+- Popup surfaces (`fdk_shell_popup_create/_create_child`), a
+  notification server (`fdk_shell_notify_*`), a tray host
+  (`fdk_shell_tray_*`) — the add-on is itself a small desktop
+  shell stack.
 
-**Verified**: the Wayland leg compiles clean in the repo's
-warning-profile against wayland-client 1.23 (the protocol code
-hand-vendored in the committed-pre-generated style, no
-wayland-scanner dependency); the X11 leg is verified LIVE on
-Xvfb — the example bar runs, and an external probe (the staging
-environment's s28) confirms the dock window is 1280x32 at +0+0,
-override-redirect, `_NET_WM_WINDOW_TYPE_DOCK`, with the top strut
-reserved at 32 px exactly as configured.
-
-**v1 limits, stated**: `fdk_shell_overlay_reconfigure()` exists
-but returns FDK_ERR_UNSUPPORTED (create-time configuration only;
-a shape change is a destroy+create away); output selection binds
-the FIRST wl_output (a named-output selector needs the output's
-own name event — a v2 addition); keyboard on-demand needs
-layer-shell v4 (compositors on v1+ honor none/exclusive).
-
-See `shell/fdk_shell.h` for the full API and `shell/example.c`
-for a working bar. The add-on depends ONLY on fdk_extend.h — it
-is the proof the extension API is enough to build a shell.
+**Verified in this sandbox**: the package builds warning-clean
+after the rename and its full X11 suite passes (output info and
+per-output anchoring, RandR probing with stale-index fallback,
+3-deep popup cascades, family sweep). The Wayland suite and the
+distro builds are exercised in CI (should work here — no
+compositor in the sandbox). See its own README and
+fdk-shell-overlay/packaging for the full inventory.

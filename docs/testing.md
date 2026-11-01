@@ -2303,9 +2303,9 @@ not "MY server is serving" — verify ownership by a property only
 your server can have (here: the screen geometry), and never manage
 another process's resources by path (the socket unlink).
 
-## 1.1.0-rc1 — the fdk-shell packaging matrix's first live CI pass
+## 1.1.0-rc1 — the fdk-shell-overlay packaging matrix's first live CI pass
 
-Task 63's four commits (the fdk-shell hardening + five-family
+Task 63's four commits (the fdk-shell-overlay hardening + five-family
 packaging) exposed four defect classes on their first push, every
 one a packaging-script defect rather than a library defect, and
 every one invisible to the sandbox battery — three of them because
@@ -2316,14 +2316,14 @@ and the fourth because the local deb verification EXTRACTS packages
 resolution and the clean-container header set never ran locally.
 
 1. **The X11 dev headers are test infrastructure, not a package
-   dependency.** The fdk-shell install-test smoke reads server-side
+   dependency.** The fdk-shell-overlay install-test smoke reads server-side
    truth (dock type, `_NET_WM_DESKTOP`, the strut) through a second
    Xlib connection — `#include <X11/Xlib.h>` — and the CLEAN
    install container had libx11-6 (pulled by Xvfb) but not the
    headers. Nothing in the package chain ships them, correctly:
    `fdk.pc` deliberately carries no `x11` Requires (its documented
    posture — `pkg-config --cflags fdk` must work on machines
-   without the X11 development packages), and fdk-shell's public
+   without the X11 development packages), and fdk-shell-overlay's public
    header includes no X11 header either. The fix declares the
    headers where the other three families already had them —
    `libx11-dev` / `libX11-devel` pre-installed by the deb/rpm
@@ -2336,20 +2336,20 @@ resolution and the clean-container header set never ran locally.
    inside the deb BUILD container, where the headers existed.
 2. **A dependency that works is a dependency that blocks removal.**
    FDK's own rpm install-test did `ls dist/*.rpm` — harmless before
-   fdk-shell existed, fatal after: the add-on's rpms landed in
-   dist/ first (the orchestrator builds fdk-shell before the
+   fdk-shell-overlay existed, fatal after: the add-on's rpms landed in
+   dist/ first (the orchestrator builds fdk-shell-overlay before the
    install-tests), so FDK's install-test installed the COMBINED set
    and its removal step (`rpm -e fdk-devel libfdk1`) was then
-   refused — correctly! — because `fdk-shell-devel` depends on
+   refused — correctly! — because `fdk-shell-overlay-devel` depends on
    `fdk-devel`. The removal-refusal is the dependency declaration
    WORKING; the test's package selection was wrong. It now selects
    FDK's own rpms by name (`libfdk1-*.rpm fdk-devel-*.rpm`), the
    per-package shape the deb/alpine/void families always had. Arch
    had the same landmine hiding behind sort order (`ls dist/fdk-*`
-   matches `fdk-shell-*` too; `head -1` picked FDK's only because
+   matches `fdk-shell-overlay-*` too; `head -1` picked FDK's only because
    digits sort before `s`) — now `fdk-[0-9]*` excludes the add-on
    deterministically.
-3. **abuild's checksum array carries filenames.** The fdk-shell
+3. **abuild's checksum array carries filenames.** The fdk-shell-overlay
    apk build hand-computed the tarball's sha512 and sed'ed the bare
    hash into `sha512sums=` — but abuild's verify looks for the
    FILENAME as a word in the array (`list_has ${i##*/}
@@ -2362,16 +2362,16 @@ resolution and the clean-container header set never ran locally.
    $WORK` would have come up empty even with correct checksums —
    and `abuild -r -F`'s `-F` is "force run as root", pure cargo
    cult next to the builder `su`.
-4. **xbps-create writes into the current directory.** Both fdk-shell
+4. **xbps-create writes into the current directory.** Both fdk-shell-overlay
    .xbps packages built successfully, then the script checked
    `dist/` and found nothing — FDK's own void build carries the
    line the copy dropped: `mv ./*.xbps dist/`.
 
-Plus two silent-mask cleanups: the fdk-shell distro build scripts
+Plus two silent-mask cleanups: the fdk-shell-overlay distro build scripts
 copied FDK's `LSAN_OPTIONS=exitcode=0` leak policy but dropped its
 explaining comment (restored, with the observed numbers: this
 bookworm container reports 1696 bytes/20 allocations on FDK's own
-suite and one 128-byte object on fdk-shell's — all stacks
+suite and one 128-byte object on fdk-shell-overlay's — all stacks
 stripped-distro frames, zero first-party; not reproducible outside
 the container by swapping bookworm's libX11/libxcb/libxkbcommon/
 libasan under a newer glibc, and absent on libX11 1.8.7 (ubuntu,
@@ -2385,7 +2385,7 @@ return-1-with-disclosure, and the callers now gate `if/else` like
 FDK's own fedora/alpine/void install-tests.
 
 The SECOND push exposed a fifth class, the deepest one: **the
-generated fdk-shell.pc was wrong twice over, and only its luck held
+generated fdk-shell-overlay.pc was wrong twice over, and only its luck held
 it together.** Its Libs line appended `pkg-config --libs x11
 wayland-client` — the library's own platform link deps — so every
 consumer was forced to have the X11 AND Wayland dev packages
@@ -2397,12 +2397,12 @@ referenced `${libdir}`/`${includedir}` without DEFINING them —
 undefined .pc variables expand empty, which "worked" only because
 headers in /usr/include and libraries in the default linker path
 need no -I/-L at all. The .pc now carries the same contract as
-fdk.pc: prefix/libdir/includedir defined, `Libs: -lfdk-shell` +
+fdk.pc: prefix/libdir/includedir defined, `Libs: -lfdk-shell-overlay` +
 `Requires: fdk`, platform flags in `Libs.private` (—static
 consumers only). The companion lesson: **modern ld does NOT resolve
 a binary's own undefined symbols through a shared library's
 transitive NEEDED entries** ("DSO missing from command line",
-reproduced locally: linking the smoke with just -lfdk-shell -lfdk
+reproduced locally: linking the smoke with just -lfdk-shell-overlay -lfdk
 fails on XGrabKeyboard) — so the smoke's own second Xlib connection
 carries `-lX11` on ITS link line, and the X11 dev packages stay
 test infrastructure. Proven locally end-to-end: a mini installed
@@ -2413,14 +2413,14 @@ discovery failures now print the REAL diagnostic instead of
 swallowing it with 2>/dev/null — a bare "not found" cost this whole
 round (the void failure mode closed itself empirically: the next run,
 with the corrected .pc, discovered and linked the installed
-fdk-shell cleanly — the diagnostic never fired; the lite pkgconf
+fdk-shell-overlay cleanly — the diagnostic never fired; the lite pkgconf
 3.0.7 build used for the local proof evidently lacks whatever
 strictness void's full build applies to the OLD .pc shape). The
 same run then exposed the LAST defect, void's shlib resolution:
 xbps resolves a package's DECLARED shlib-requires only against
-INSTALLED providers, so installing the combined FDK + fdk-shell set
+INSTALLED providers, so installing the combined FDK + fdk-shell-overlay set
 in a fresh container aborted on fdk-devel's libXext.so.6 /
-libxkbcommon.so.0 — fdk-shell's void install-test now pre-installs
+libxkbcommon.so.0 — fdk-shell-overlay's void install-test now pre-installs
 the same runtime shlibs FDK's own void install-test always has
 (libX11 libXext zlib, libxkbcommon, wayland — hermetic against repo
 metadata variance), plus libX11-devel for the smoke's readback and
@@ -2465,7 +2465,7 @@ that drive the API exactly the way a real add-on would:
   fires again (deferred free, ASan-clean); plain removal; the
   argument-validation ladder.
 
-**fdk-shell's own suites** (`make -C fdk-shell test` /
+**fdk-shell-overlay's own suites** (`make -C fdk-shell-overlay test` /
 `test-wayland` / `isolation`): the X11 backend's strut and dock
 semantics verified server-side (auto/explicit zones, margins, every
 anchored edge, the XOR rule; anchor geometry stretching, cornering,
@@ -2478,7 +2478,7 @@ minimal EWMH window manager running INSIDE the test (root
 substructure redirect, `_NET_SUPPORTED`, per-window
 `_NET_WM_DESKTOP`, pager-shaped `_NET_CURRENT_DESKTOP` client
 messages; the WM deliberately deletes `_NET_WM_STATE` at map time so
-only fdk-shell's post-map state messages can restore it) — proving
+only fdk-shell-overlay's post-map state messages can restore it) — proving
 the layer is NEVER unmapped across switches while a control window
 is, the post-map messages work, and the EXPOSE repaint returns the
 bar's pixels after the round trip (the ghost-bar fix's mechanism);
@@ -2490,24 +2490,24 @@ level and keyboard mode, and the workspace-switch confirmation
 (swaying workspaces through the compositor's IPC: no close, no
 reconfigure, presenting continues — the per-output, per-workspace
 truth); and the prefix-isolation build proof (`tests/isolation.sh`)
-— FDK installed into a throwaway prefix, fdk-shell rebuilt against
+— FDK installed into a throwaway prefix, fdk-shell-overlay rebuilt against
 that prefix ALONE, the demo run from the installed stack, and the
 dynamic boundary audited (the shared library's real `NEEDED:
 libfdk.so.1` entry; all imported `fdk_*` symbols resolve from
 libfdk.so.1; the package exports only its own namespace).
 
-**fdk-shell's packaging dependency proofs** (fdk-shell/packaging/):
+**fdk-shell-overlay's packaging dependency proofs** (fdk-shell-overlay/packaging/):
 every distribution family's install-test proves the FDK dependency
-is REAL in the native package manager — installing fdk-shell's
+is REAL in the native package manager — installing fdk-shell-overlay's
 runtime package ALONE is refused (unmet `libfdk1` / `fdk` /
 `fdk-libs`), the full set installs together with resolution,
-pkg-config discovers the `fdk-shell` -> `fdk` chain, and the
+pkg-config discovers the `fdk-shell-overlay` -> `fdk` chain, and the
 graphical smoke (a layer created, shown, presented, and verified
 server-side for dock type + sticky + strut) runs from the installed
 stack. The build legs compile against the INSTALLED FDK packages —
 the isolation proof re-run inside every packaging container (and
 the rpm/arch/apk builds take it further: their pristine
-fdk-shell-only tarballs mean no sibling FDK checkout exists in the
+fdk-shell-overlay-only tarballs mean no sibling FDK checkout exists in the
 build chroot AT ALL).
 
 **The X11 WM-rig lessons (found live, 2026-10-25)**: (1) Xlib
@@ -2585,7 +2585,7 @@ owner's machines, each now a permanent test.
 4. *The self-positioned dock* (found while building the Openbox
    reproduction): a dock-typed window with NO position hints is
    "unplaced" — Openbox runs its placement policy and CENTERS the
-   panel mid-screen (its debug log says so verbatim). fdk-shell now
+   panel mid-screen (its debug log says so verbatim). fdk-shell-overlay now
    sets USPosition/USSize WM_NORMAL_HINTS; the suite reads the hints
    back and pins the anchoring math.
 
@@ -2661,11 +2661,11 @@ later lines (mesa/Xvfb) always carried.
 The second round's own push taught the next lesson, and a different
 genus — not missing builder infrastructure but a build-graph
 contract. The round's cross-package prerequisites (an FDK rebuild
-must invalidate fdk-shell's binaries; the rigs had measured a bar
+must invalidate fdk-shell-overlay's binaries; the rigs had measured a bar
 three patch-sets old) landed as UNCONDITIONAL make prerequisites on
 `../build/libfdk.a` and `../build/libfdk.so`. The isolation proof
 and every packaging family override `FDK_LIBS`/`FDK_SO_LIBS` to an
-INSTALLED FDK — and the pristine fdk-shell-only tarball families
+INSTALLED FDK — and the pristine fdk-shell-overlay-only tarball families
 (rpm/alpine/arch) carry no sibling tree at all, so CI run 40298760190
 died at `No rule to make target '../build/libfdk.so'`; debian/void
 passed only because their build contexts still contain the sibling
@@ -2679,7 +2679,7 @@ EXPANDED link inputs (`FDK_LINK_PREREQS`/`FDK_SO_PREREQ` — deferred
 `=` on purpose: a `:=` placed above `FDK_SO_LIBS`'s `?=` silently
 expanded an empty variable and dropped the shared library's
 prerequisite entirely, caught by the touch-relink check — touching
-`../build/libfdk.so` must relink `libfdk-shell.so`, touching the
+`../build/libfdk.so` must relink `libfdk-shell-overlay.so`, touching the
 archive must relink the demo), and the isolation proof grew the leg
 that would have caught the whole thing — the pristine-tree build,
 the package copied ALONE into a scratch directory with no sibling
@@ -2688,8 +2688,8 @@ families' exact condition, now a permanent test.
 
 ## 1.1.0 — the notifyd rig (S-2 / A-12)
 
-`make -C fdk-shell test-notifyd` — the notification daemon's full
-integration rig (fdk-shell/tests/notifyd_rig.sh), three phases:
+`make -C fdk-shell-overlay test-notifyd` — the notification daemon's full
+integration rig (fdk-shell-overlay/tests/notifyd_rig.sh), three phases:
 
 - **Protocol** (a real dbus-daemon via dbus-run-session + bare
   Xvfb): GetServerInformation/GetCapabilities/Notify through

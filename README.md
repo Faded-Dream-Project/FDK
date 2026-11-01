@@ -38,11 +38,11 @@ set (`docs/dependencies.md`).
 **extension API** (`fdk/extend.h`, `docs/EXTENDING.md`) is the
 landmark of the current tree: a small, documented, stable, versioned
 surface that add-on packages build on so FDK stays simple and becomes
-the root other libraries grow from. The first add-on, **fdk-shell**
+the root other libraries grow from. The first add-on, **fdk-shell-overlay**
 (layer-shell surfaces — panels, docks, overlays — on wlr-layer-shell
-and EWMH dock hints, behind one API), lives in `fdk-shell/` as a
+and EWMH dock hints, behind one API), lives in `fdk-shell-overlay/` as a
 separate package that compiles against FDK's installed public headers
-and library only (the `fdk-shell/tests/isolation.sh` proof). The
+and library only (the `fdk-shell-overlay/tests/isolation.sh` proof). The
 versioning policy and the SONAME scheme (`libfdk.so.1`, ABI
 append-only) are development-time policy — they govern how the tree
 evolves as it heads toward a first stable release, which the owner
@@ -116,7 +116,7 @@ suite (`docs/testing.md`).
   application actually needs, all on FDK's own zero-dependency
   implementations: a native D-Bus client (raw C from the wire
   spec, no libdbus) riding a StatusNotifier **tray host** and a
-  full **notification server** (both as fdk-shell examples with
+  full **notification server** (both as fdk-shell-overlay examples with
   their own rigs); **dark mode** following the desktop's setting
   on every channel that exists (color-scheme portal, XSETTINGS,
   the settings daemon, a fallback file); **portal dialogs** — the

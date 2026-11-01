@@ -31,7 +31,7 @@ RUN debian:bookworm '
     set -eu
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    # libxtst-dev: the fdk-shell X11 suite drives its passive-grab
+    # libxtst-dev: the fdk-shell-overlay X11 suite drives its passive-grab
     # passthrough test with XTEST-synthesized keys — test
     # infrastructure, the same class as the X11 dev headers.
     apt-get install -y --no-install-recommends \
@@ -66,7 +66,7 @@ RUN debian:bookworm '
 </fontconfig>
 XMLCONF
     sh packaging/debian/build-deb.sh
-    sh fdk-shell/packaging/debian/build-deb.sh
+    sh fdk-shell-overlay/packaging/debian/build-deb.sh
 '
 # The container writes dist/ as root; take it back for the runner user
 # so the verdict marker below (and artifact upload) can write it.
@@ -75,7 +75,7 @@ sudo chown -R "$(id -u):$(id -g)" dist 2>/dev/null || true
 for img in debian:bookworm debian:trixie ubuntu:24.04; do
     docker pull -q "$img"
     RUN "$img" 'sh packaging/debian/install-test.sh'
-    RUN "$img" 'sh fdk-shell/packaging/debian/install-test.sh'
+    RUN "$img" 'sh fdk-shell-overlay/packaging/debian/install-test.sh'
 done
 
 # Informational older-glibc probe: reported, never gating. The verdict
@@ -92,5 +92,5 @@ else
     echo "== INFO: ubuntu:22.04 (glibc 2.35) install-test did NOT pass — documented as unsupported; NOT a release blocker =="
 fi
 
-echo "===== FDK debian pipeline OK (FDK + fdk-shell) ====="
+echo "===== FDK debian pipeline OK (FDK + fdk-shell-overlay) ====="
 ls -la dist/

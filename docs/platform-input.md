@@ -235,7 +235,7 @@ Per backend:
 The no-twin rows keep the DEFAULT ARROW when neither tier
 produces a cursor — the no-lying-fallback posture (a shape that
 lies about what the press does is worse than the plain arrow).
-fdk-shell mirrors the set (`fdk_shell_cursor`, 0.4.0) — its values
+fdk-shell-overlay mirrors the set (`fdk_shell_cursor`, 0.4.0) — its values
 are FDK's own, passed through unchanged.
 
 ## Input regions — partial click-through (1.1.0-rc2, S-4 / A-06)
