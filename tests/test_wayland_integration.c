@@ -1830,25 +1830,50 @@ int main(void) {
             int delivered = 0;
             /* sway/pixman headless takes ~1.5-2 s from map to
              * wl_keyboard.enter (the same slow frame pacing the
-             * tooltip rig documented) — the probe must outlast it. */
+             * tooltip rig documented) — the probe must outlast it.
+             *
+             * §26 fix: `delivered` only proves SOME window holds
+             * keyboard focus. Under sway headless without an
+             * injector running, the enter may land on an EARLIER
+             * section's window (sway auto-focuses the newest MAP,
+             * but a slow frame can leave it on the previous one) —
+             * then this section's rep_window_cb sees nothing and
+             * the very first assert dies. The probe therefore counts
+             * DOWNS ON rw (the window under test), and only treats
+             * focus as established when the event actually landed
+             * here; otherwise the tap fallback re-focuses. */
             for (int i = 0; i < 35 && delivered == 0; i++) {
                 (void)fdk_pump_events(ctx, 100);
+                g_rep_downs = 0;
                 delivered = ctx->ops->test_key(ctx->conn, 30, 1);
                 if (delivered) {
                     ctx->ops->test_key(ctx->conn, 30, 0); /* release the
                                                             probe press */
+                    if (g_rep_downs == 0) {
+                        /* focus exists but is NOT ours: refocus */
+                        delivered = 0;
+                    }
                 }
             }
             if (delivered == 0 && wayland_injector_start()) {
                 /* The tap fallback (same discipline as the menu
                  * section: a real click with a real serial). The
                  * window floats at (100,60) per the rig configs;
-                 * 300x150 -> center (250,135). */
-                wayland_inject("move 250 135");
-                pump_and_paint(ctx, rw, 400);
-                wayland_inject("tap 1");
-                pump_and_paint(ctx, rw, 1200);
-                delivered = ctx->ops->test_key(ctx->conn, 30, 1);
+                 * 300x150 -> center (250,135). §26: the tap can be
+                 * eaten by the injector's keyboard-churn focus
+                 * re-evaluation, so retry, and only a DOWN counted
+                 * by THIS window's callback establishes focus. */
+                for (int t = 0; t < 3 && delivered == 0; t++) {
+                    wayland_inject("move 250 135");
+                    pump_and_paint(ctx, rw, 400);
+                    wayland_inject("tap 1");
+                    pump_and_paint(ctx, rw, 1200);
+                    g_rep_downs = 0;
+                    delivered = ctx->ops->test_key(ctx->conn, 30, 1);
+                    if (delivered != 0 && g_rep_downs == 0) {
+                        delivered = 0; /* focus landed elsewhere */
+                    }
+                }
                 if (delivered == 0) {
                     ctx->ops->test_key(ctx->conn, 30, 0);
                 }
@@ -1863,9 +1888,26 @@ int main(void) {
              * busy-spin. */
             ctx->ops->test_repeat_info(ctx->conn, 50, 200);
             g_rep_press_ms = rep_now_ms();
-            if (delivered) {
-                /* the press that starts the held key */
+            /* §26: the injector's second virtual keyboard can
+             * churn sway's focus AFTER the tap landed (the churn
+             * note above, now observed live under sway/pixman: the
+             * tap's focus was silently re-taken by the previous
+             * window during the settle pump). Hold the key with a
+             * bounded re-focus retry; only a DOWN counted by THIS
+             * window's callback counts. */
+            for (int t = 0; t < 4 && delivered != 0; t++) {
+                g_rep_downs = 0;
                 delivered = ctx->ops->test_key(ctx->conn, 30, 1);
+                if (delivered != 0 && g_rep_downs > 0) {
+                    break; /* rw holds the key: assert below         */
+                }
+                if (delivered != 0) {
+                    ctx->ops->test_key(ctx->conn, 30, 0); /* release */
+                    wayland_inject("move 250 135");
+                    pump_and_paint(ctx, rw, 300);
+                    wayland_inject("tap 1");
+                    pump_and_paint(ctx, rw, 800);
+                }
             }
             if (delivered == 0) {
                 printf("[skip] key repeat: no keyboard focus/keymap "

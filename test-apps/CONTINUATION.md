@@ -57,6 +57,24 @@ CONTINUATION commit below.
 50k folder open/scroll, 250ms monitor refresh, 50MB editor, 2000-note
 search — all pending their apps' verification rounds.
 
+## §26 Wayland verification (DONE, verified in-sandbox)
+The §25 "should work" items are now verified: sway 1.10 headless
+(WLR_BACKENDS=headless, pixman renderer) via the repo's canonical
+scripts/run_wayland_suite.sh rig (its floating/pinning sway config is
+LOAD-BEARING — windows must float at (100,60) for focus/click tests).
+Results: make test-wayland == WAYLAND SUITE: PASS (65 [ok]); the G-2
+thread suite on the Wayland backend green under ASan AND TSan (blocked-
+poll wake 0.1-0.3 ms — the eventfd path works against wlroots);
+fdk-files --smoke 3/3 rc=0 zero-leak; fdk-monitor/fdk-notes/fdk-edit
+smoke clean on Wayland too. One fix landed (test-side, not an FDK API
+gap): the key-repeat probe assumed `test_key delivered` meant focus on
+THE test's window; under sway headless the enter can sit on an earlier
+section's window and the injector's second virtual keyboard churns
+focus after the tap. The probe now counts downs on the window under
+test, with a bounded tap-retry. (A first "hang" during bring-up was my
+own dying compositor instance, not an FDK bug — reproducibly clean
+once sway runs persistently via setsid.)
+
 ## Environment notes (re-setup each round)
 source /home/z/my-project/scripts/s25-env.sh; dev debs: apt-get download
 libxrandr-dev libxtst-dev libxi-dev (+libxrandr2/libxtst6/libxi6) into
