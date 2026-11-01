@@ -1,4 +1,4 @@
-#include "ta_buf.h"
+#include "ta_buf.h"  /* the helper under test */
 #include <assert.h>
 #include <string.h>
 
