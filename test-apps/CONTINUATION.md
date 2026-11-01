@@ -35,6 +35,24 @@ CONTINUATION commit below.
   thread-legal worker pipeline: pixels on worker, surface on UI);
   wired into the icons view.
 
+## §26 progress (this round)
+DONE+PUSHED: 1cefea0 Wayland verification (rig PASS 65; G-2 ASan+TSan
+on wl 0.1-0.3ms wake; fdk-files 3/3 zero-leak; probe fix) · d995c7a
+split view + bookmarks + G-6 (model-binding detach on widget destroy;
+UAF found live, test-first) · 86b5965 .desktop + FDK-drawn icon +
+tray-bus rig (T1/T2 PASS; T3 should-work — see below). The 50k gate
+MEASURED (perf_50k.c: open 105ms, fill 102ms batched, scroll avg
+2.55ms worst 76.92ms, RSS 541MB under ASan); screenshots in
+test-apps/screenshots/ (main, dark, smoke-split); fdk-files README
+with the §24 checklist verdicts. fdk-files PASSES its own checklist
+per README → fdk-edit (STEP 4) may start next round.
+KNOWN ISSUE to chase (fdk-files T3, recorded in run_files_tray_bus.sh
+comments): the notify client's LAZY connect path fails in the
+fresh-app-after-daemon order ("session bus connect failed",
+src/desktop/notify_client.c on_ready) — app boots fine BEFORE the
+daemon appears. Reproduce: dbus-daemon + notifyd first, then fdk-files
+--smoke. Likely a first-send-vs-async-connect race in the client.
+
 ## NOT done (next round, in order)
 - STEP 4d: split view (two panes), sidebar bookmarks (add/remove/reorder
   by drag — fdk_list_bound_reorder_selected exists), DnD between

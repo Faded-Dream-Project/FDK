@@ -99,6 +99,14 @@ fdk-files-icon: build/gen-fdk-files-icon
 	./build/gen-fdk-files-icon fdk-files/desktop/icons/hicolor/48x48/apps/org.fdk.testapps.fdk-files.png 48
 	./build/gen-fdk-files-icon fdk-files/desktop/icons/hicolor/128x128/apps/org.fdk.testapps.fdk-files.png 128
 
+build/gen-perf-50k: fdk-files/perf_50k.c $(FDK_LIB)
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/perf_50k.c $(FDK_LIB) -o $@ $(LIBS)
+
+.PHONY: fdk-files-perf-50k
+fdk-files-perf-50k: build/gen-perf-50k
+	./build/gen-perf-50k
+
 clean:
 	rm -rf $(BUILD)
 
