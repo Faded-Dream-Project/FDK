@@ -137,6 +137,79 @@ fdk_result fdk_surface_create_from_image(const char *path,
  * Same validation ladder as the file variant minus the stat checks;
  * a documented hard cap on input length keeps hostile "images" from
  * claiming unbounded allocations. */
+/* §25/G-4 — the any-thread pixel decoder. Same reject-first,
+ * size-bounded, 4-channel stb path as fdk_surface_create_from_image,
+ * minus the (UI-thread-only) surface object: the result is a plain
+ * malloc'd RGBA buffer a worker thread can produce and the UI thread
+ * can wrap. Thread-safety by construction: no FDK state is touched
+ * (stb_image is thread-safe; the log macro below is the one shared
+ * facility and fdk_log is documented any-thread-safe). */
+fdk_result fdk_image_decode_pixels(const char *path,
+                                   fdk_image_pixels *out_pixels) {
+    if (path == NULL || out_pixels == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    out_pixels->pixels = NULL;
+    out_pixels->width = 0;
+    out_pixels->height = 0;
+    out_pixels->stride = 0;
+
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        if (errno == ENOENT) {
+            return FDK_ERR_NOT_FOUND;
+        }
+        return FDK_ERR_NOT_A_FILE;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        return FDK_ERR_NOT_A_FILE;
+    }
+    if (st.st_size <= 0) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if ((unsigned long long)st.st_size >
+        (unsigned long long)FDK_IMAGE_MAX_FILE_BYTES) {
+        FDK_WARN("image file too large to decode (%lld bytes, max %u): %s",
+                 (long long)st.st_size, FDK_IMAGE_MAX_FILE_BYTES, path);
+        return FDK_ERR_UNSUPPORTED;
+    }
+
+    int w = 0, h = 0, channels = 0;
+    unsigned char *data = stbi_load(path, &w, &h, &channels, 4);
+    if (data == NULL) {
+        FDK_WARN("image decode failed: %s: %s", path,
+                 stbi_failure_reason() != NULL ? stbi_failure_reason()
+                                               : "unknown reason");
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (w <= 0 || h <= 0 || w > 16384 || h > 16384) {
+        FDK_WARN("image dimensions out of range (%dx%d): %s", w, h, path);
+        stbi_image_free(data);
+        return FDK_ERR_UNSUPPORTED;
+    }
+
+    out_pixels->pixels = data; /* stb's buffer IS the malloc'd RGBA  */
+    out_pixels->width = w;
+    out_pixels->height = h;
+    out_pixels->stride = (size_t)w * 4;
+    return FDK_OK;
+}
+
+void fdk_image_pixels_free(fdk_image_pixels *pixels) {
+    if (pixels == NULL) {
+        return;
+    }
+    /* stbi_image_free is the allocator's pair (free() on the usual
+     * platforms, but the pair is the contract) */
+    if (pixels->pixels != NULL) {
+        stbi_image_free(pixels->pixels);
+    }
+    pixels->pixels = NULL;
+    pixels->width = 0;
+    pixels->height = 0;
+    pixels->stride = 0;
+}
+
 fdk_result fdk_surface_create_from_image_bytes(const void *data,
                                                size_t len,
                                                fdk_surface **out_surface) {

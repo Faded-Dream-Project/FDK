@@ -7,6 +7,7 @@
 #include "menus.h"
 #include "ops_dialogs.h"
 #include "teardown.h"
+#include "thumbs.h"
 #include "trash.h"
 
 #include "fdk/fdk_dialog.h"
@@ -25,6 +26,9 @@
 #include <unistd.h>
 
 void pane_build_view(pane *p, tab *t);
+
+static void thumb_ready_cb(const char *path, fdk_surface *thumb,
+                           void *user);
 
 /* forward decls (the build order below crosses them) */
 static void mount_activated(fdk_widget *list, size_t row, void *user);
@@ -332,6 +336,26 @@ static bool view_event(fdk_widget *w, const fdk_widget_event *ev,
     return false;
 }
 
+/* the thumbnails' ready delivery (UI thread): match the row by
+ * name and swap its glyph for the pixmap */
+static void thumb_ready_cb(const char *path, fdk_surface *thumb,
+                           void *user) {
+    fdk_widget *iv = user;
+    if (iv == NULL || thumb == NULL) {
+        return;
+    }
+    size_t n = fdk_iconview_item_count(iv);
+    const char *base = strrchr(path, '/');
+    base = (base != NULL) ? base + 1 : path;
+    for (size_t i = 0; i < n; i++) {
+        const char *label = fdk_iconview_item_label(iv, i);
+        if (label != NULL && strcmp(label, base) == 0) {
+            (void)fdk_iconview_set_item_pixmap(iv, i, thumb);
+            return;
+        }
+    }
+}
+
 void pane_build_view(pane *p, tab *t) {
     fdk_widget *host = t->view_host;
     size_t children = fdk_widget_child_count(host);
@@ -350,6 +374,7 @@ void pane_build_view(pane *p, tab *t) {
         fdk_widget *iv = NULL;
         (void)fdk_iconview_create(host, fapp.base.font_ui, &iv);
         fdk_widget_set_expand(iv, true, true);
+        fdk_iconview_begin_batch(iv);
         for (size_t i = 0; i < fmodel.info_count; i++) {
             const file_info *fi = fmodel.infos[i];
             if (fi == NULL) {
@@ -358,7 +383,18 @@ void pane_build_view(pane *p, tab *t) {
             fdk_row_icon glyph = fi->is_dir ? FDK_ROW_ICON_FOLDER
                                             : FDK_ROW_ICON_FILE;
             (void)fdk_iconview_append(iv, fi->name, glyph);
+            /* thumbnails: cache hit paints now; a miss starts the
+             * worker and the ready callback sets the pixmap */
+            if (thumbs_wanted(fi)) {
+                fdk_surface *thumb = NULL;
+                if (thumbs_get(fi, &thumb, thumb_ready_cb, iv) &&
+                    thumb != NULL) {
+                    (void)fdk_iconview_set_item_pixmap(
+                        iv, fdk_iconview_item_count(iv) - 1, thumb);
+                }
+            }
         }
+        fdk_iconview_end_batch(iv);
         fdk_widget_set_accessible_name(iv, "Files");
         vc->view = iv;
         vc->is_list = false;

@@ -56,6 +56,11 @@ static void press_key(fdk_widget *root, fdk_scancode sc, fdk_u32 mods) {
     (void)fdk_widget_tree_handle_event(root, &e);
 }
 
+static fdk_color rgb(int r, int g, int b) {
+    return (fdk_color){(fdk_f32)r / 255.0f, (fdk_f32)g / 255.0f,
+                       (fdk_f32)b / 255.0f, 1.0f};
+}
+
 static fdk_u32 px_at(fdk_surface *s, int x, int y) {
     fdk_surface_info info;
     assert(fdk_ok(fdk_surface_get_info(s, &info)));
@@ -412,6 +417,74 @@ static void test_paint_and_a11y(void) {
            "LIST_ITEM children with SELECTED state\n");
 }
 
+/* §25/G-5: per-item PIXMAPS. IconView items are glyph+label pairs;
+ * a file manager's thumbnail mode needs real images per item (the
+ * §24 app showed a generic FILE glyph for every image — the icon
+ * view is where thumbnails must land). Written RED first: the
+ * set_item_pixmap family did not exist. */
+static void test_item_pixmaps(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *iv = make_view(root, NULL);
+
+    /* use the view's own first-row items (0 and 1): the paint scan
+     * below addresses the row-0 cell bands */
+    size_t a = 0, b = 1;
+    (void)fdk_iconview_set_item_label(iv, a, "plain");
+    (void)fdk_iconview_set_item_label(iv, b, "photo");
+
+    fdk_surface *pix = NULL;
+    assert(fdk_ok(fdk_surface_create(24, 24, &pix)));
+    fdk_surface_fill(pix, rgb(200, 30, 30)); /* unmistakable red */
+
+    assert(fdk_ok(fdk_iconview_set_item_pixmap(iv, b, pix)));
+    assert(fdk_iconview_item_pixmap(iv, b) == pix);
+    assert(fdk_iconview_item_pixmap(iv, a) == NULL);
+
+    /* PAINT: item b's cell shows the red pixmap — a scan of its
+     * icon band finds red pixels; item a's band has none. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(240, 420, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    int red_b = 0, red_a = 0;
+    for (int y = 4; y < 80; y += 2) {
+        for (int x = 4; x < 92; x += 2) {
+            fdk_u32 pa = px_at(s, x, y);
+            fdk_u32 pb = px_at(s, 104 + x - 4, y);
+            /* the offscreen canvas starts transparent; the pixmap's
+             * RGB lands regardless of the destination alpha */
+            if ((pa >> 16 & 0xff) > 150 && (pa & 0xff) < 120) {
+                red_a++;
+            }
+            if ((pb >> 16 & 0xff) > 150 && (pb & 0xff) < 120) {
+                red_b++;
+            }
+        }
+    }
+    assert(red_b > 40);   /* the pixmap paints, scaled to the cell */
+    assert(red_a == 0);   /* the glyph item shows no red           */
+
+    /* clearing returns to the glyph */
+    assert(fdk_ok(fdk_iconview_set_item_pixmap(iv, b, NULL)));
+    assert(fdk_iconview_item_pixmap(iv, b) == NULL);
+
+    /* bad index refused; NULL view refused */
+    assert(fdk_iconview_set_item_pixmap(iv, 99, pix) ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_iconview_set_item_pixmap(NULL, 0, pix) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    /* removal clears the pixmap slot without touching the surface
+     * (the app owns it) */
+    assert(fdk_ok(fdk_iconview_set_item_pixmap(iv, b, pix)));
+    assert(fdk_ok(fdk_iconview_remove_item(iv, b)));
+    fdk_surface_destroy(pix); /* still valid: the view never owns it */
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] iconview pixmaps: set/get/clear, painted pixels in "
+           "the cell, glyph fallback, ownership stays with the app\n");
+}
+
 /* ---- the rubber-band sweep (1.4.6) ---- */
 
 static void test_rubber_band(void) {
@@ -599,6 +672,7 @@ int main(void) {
     test_keyboard();
     test_mutation();
     test_paint_and_a11y();
+    test_item_pixmaps();
     test_rubber_band();
     test_double_click_activation();
 

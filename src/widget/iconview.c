@@ -1077,6 +1077,28 @@ fdk_result fdk_iconview_set_item_icon(fdk_widget *iconview,
     return FDK_OK;
 }
 
+fdk_result fdk_iconview_set_item_pixmap(fdk_widget *iconview,
+                                        size_t index,
+                                        fdk_surface *pixmap) {
+    /* the public face of the borrowed-image slot: same semantics,
+     * documented for applications (the internal twin is what the
+     * icon-theme engine calls; both funnel through the same paint
+     * order — image wins, glyph is the fallback) */
+    return fdk__iconview_item_set_icon_image(iconview, index, pixmap);
+}
+
+fdk_surface *fdk_iconview_item_pixmap(fdk_widget *iconview,
+                                      size_t index) {
+    if (iconview == NULL || iconview->klass != &fdk_iconview_class_def) {
+        return NULL;
+    }
+    fdk_iconview *iv = iv_of(iconview);
+    if (index >= iv->count) {
+        return NULL;
+    }
+    return iv->items[index].image;
+}
+
 fdk_result fdk__iconview_item_set_icon_image(fdk_widget *iconview,
                                              size_t index,
                                              fdk_surface *image) {

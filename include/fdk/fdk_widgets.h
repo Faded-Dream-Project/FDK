@@ -866,6 +866,19 @@ fdk_result fdk_iconview_set_item_label(fdk_widget *iconview,
                                        size_t index, const char *label);
 fdk_result fdk_iconview_set_item_icon(fdk_widget *iconview,
                                       size_t index, fdk_row_icon icon);
+/* §25/G-5 — per-item PIXMAPS: a raster image (an fdk_surface the
+ * APPLICATION owns; the view borrows it for as long as it is set —
+ * destroy it only after clearing the slot or destroying the view).
+ * A non-NULL pixmap paints INSTEAD of the symbolic glyph, fit into
+ * the icon band (the thumbnail path; the icon-theme engine's
+ * internal variant shares the same paint order). NULL restores the
+ * glyph. FDK_ERR_INVALID_ARGUMENT on a bad index or a non-view. */
+fdk_result fdk_iconview_set_item_pixmap(fdk_widget *iconview,
+                                        size_t index,
+                                        fdk_surface *pixmap);
+/* The item's pixmap (NULL = the symbolic glyph is in use). */
+fdk_surface *fdk_iconview_item_pixmap(fdk_widget *iconview,
+                                      size_t index);
 /* Removes one item (indices shift down; the selection follows the
  * List's survivor rules). */
 fdk_result fdk_iconview_remove_item(fdk_widget *iconview, size_t index);

@@ -16,6 +16,7 @@
 #include "menus.h"
 #include "model.h"
 #include "ops.h"
+#include "thumbs.h"
 #include "ops_dialogs.h"
 #include "panes.h"
 #include "../common/ta_buf.h"
@@ -633,6 +634,7 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     ops_shutdown(); /* joins the engine before the UI dies      */
+    thumbs_shutdown();
     menus_ctx_shutdown();
     panes_shutdown();
     td_sweep(); /* the payloads + menu models the registry owns   */
