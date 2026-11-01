@@ -665,15 +665,62 @@ int main(int argc, char **argv) {
                                   "The FDK validation file manager");
     }
 
+    /* §27/2b: the deterministic drag-rig layout. FDK_FILES_DRIG=1
+     * builds a split view with both panes in /tmp/fdk-drig (left
+     * with alpha.txt + a folder, right empty), points the bookmark
+     * store at a fresh file, and parks the window at (40,40) with
+     * a known 1000x700 size — drag_rig.c drives REAL XTEST drags
+     * against exactly these coordinates. */
+    const bool drig = getenv("FDK_FILES_DRIG") != NULL;
+    if (drig && getenv("FDK_TESTAPP_FRAMES") == NULL) {
+        setenv("FDK_TESTAPP_FRAMES", "20000", 1);
+    }
+    if (drig) {
+        (void)system("rm -rf /tmp/fdk-drig && mkdir -p "
+                     "/tmp/fdk-drig/left /tmp/fdk-drig/right");
+        FILE *af = fopen("/tmp/fdk-drig/left/alpha.txt", "w");
+        if (af != NULL) { fputs("alpha\n", af); fclose(af); }
+        (void)system("mkdir -p /tmp/fdk-drig/left/beta-dir");
+        setenv("XDG_CONFIG_HOME", "/tmp/fdk-drig-cfg", 1);
+        (void)system("rm -rf /tmp/fdk-drig-cfg && mkdir -p "
+                     "/tmp/fdk-drig-cfg/fdk-files");
+        FILE *bf = fopen("/tmp/fdk-drig-bookmarks", "w");
+        if (bf != NULL) {
+            fputs("# fdk-files bookmarks (order = display order)\n"
+                  "/tmp/fdk-drig\n", bf);
+            fclose(bf);
+        }
+        /* the bookmarks loader reads XDG_CONFIG_HOME; copy the seed
+         * into place before load */
+        (void)system("cp /tmp/fdk-drig-bookmarks "
+                     "/tmp/fdk-drig-cfg/fdk-files/bookmarks");
+    }
+
     bookmarks_load(); /* before the sidebar builds (§26/3a) */
     panes_build(&fapp);
     menus_build(&fapp);
     ops_init(); /* the worker engine (§25/4b)                   */
 
+    if (drig) {
+        (void)system("cp /tmp/fdk-drig-bookmarks "
+                     "/tmp/fdk-drig-cfg/fdk-files/bookmarks");
+        bookmarks_load();
+        bookmarks_refresh();
+        pane_navigate(fapp.panes[0], "/tmp/fdk-drig/left");
+        (void)pane_add();
+        pane_navigate(fapp.panes[1], "/tmp/fdk-drig/right");
+        fapp.active_pane = 0;
+        (void)fdk_window_resize(fapp.base.window, 1000, 700);
+        printf("DRIG-READY\n");
+        fflush(stdout);
+    }
+
     /* the initial navigation */
     printf("PHASE: boot\n");
     fflush(stdout);
-    pane_navigate(fapp.panes[0], fi_home());
+    if (!drig) {
+        pane_navigate(fapp.panes[0], fi_home());
+    }
 
     if (smoke) {
         rig_script();

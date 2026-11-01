@@ -53,6 +53,38 @@ src/desktop/notify_client.c on_ready) — app boots fine BEFORE the
 daemon appears. Reproduce: dbus-daemon + notifyd first, then fdk-files
 --smoke. Likely a first-send-vs-async-connect race in the client.
 
+## §27 status (this round, pushed)
+PUSHED: f57cd7c — STEP 2a: G-8 (serialized per-address D-Bus
+handshakes; tests/test_dbus_serialize.c green: five no-pump connects
+all reach ready) + G-7 (extfd dispatch bounded by the filled count;
+tests/test_extfd_race.c). The notification CLIENT path is verified
+end-to-end (tray-bus rig run-1: notify → daemon → card placed on
+notifyd). STILL OPEN, with evidence: the fdk-files --smoke boot gets
+its first notify connection closed by dbus-daemon in some runs even
+serialized — wire trace via scripts/busproxy.py shows the connection
+auths OK then dies as the module burst opens; the exact daemon-side
+trigger is NOT pinned. Debugging aids built: the byte-proxy, the
+DRIG deterministic layout (below). NEXT ROUND: the strongest untested
+hypothesis is the model/list binding: with the DRIG gate, a pane
+whose dir HAS files shows rows=0 in a freshly bound list (fmodel_load
+returns 2; the bound list shows 0) — chase THAT in model_bind's
+initial-mirror path with two bound lists on the singleton model (the
+second bind's set_on_change overwrites the first's handler — the
+single-slot design in src/widget/model_bind.c:183 is suspect).
+
+STEP 2b (drag rig) BUILT but NOT GREEN — committed as WIP: the XTEST
+driver (fdk-files/drag_rig.c + run_drig.sh + the FDK_FILES_DRIG=1
+gate in main.c: split view, deterministic /tmp/fdk-drig layout,
+1000x700 window; Xvfb must run -dpi 96 or FDK's X11 scale detection
+divides the rig's coordinates). The blocker is the same rows=0
+binding question above (the rig's clicks find no rows to select, so
+no drag arms). NOT VERIFIED: D1 (drag-between-panes), D2
+(drag-to-bookmark), drag-reorder. The Wayland leg of the drag rig is
+NOT started (the repo's wl injector exists: scripts/fdk-wl-inject).
+
+All suites green at cut-off: make test, test-dbus ALL PASS, test-x11
+3/3, verify-exports OK, Wayland suite PASS, fdk-files smoke clean.
+
 ## NOT done (next round, in order)
 - STEP 4d: split view (two panes), sidebar bookmarks (add/remove/reorder
   by drag — fdk_list_bound_reorder_selected exists), DnD between

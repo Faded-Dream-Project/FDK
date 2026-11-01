@@ -49,9 +49,9 @@ BINS := $(APP_DIRS:%=$(BUILD)/%)
 all: $(BINS)
 
 define APP_RULE
-$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
+$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
 	@mkdir -p $(BUILD)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
@@ -98,6 +98,14 @@ fdk-files-icon: build/gen-fdk-files-icon
 	@mkdir -p fdk-files/desktop/icons/hicolor/48x48/apps fdk-files/desktop/icons/hicolor/128x128/apps
 	./build/gen-fdk-files-icon fdk-files/desktop/icons/hicolor/48x48/apps/org.fdk.testapps.fdk-files.png 48
 	./build/gen-fdk-files-icon fdk-files/desktop/icons/hicolor/128x128/apps/org.fdk.testapps.fdk-files.png 128
+
+# §27/2b: the XTEST drag rig (Xlib + XTest only, no FDK)
+build/drag-rig: fdk-files/drag_rig.c
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/drag_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/x11dev/usr/lib/x86_64-linux-gnu -lXtst
+
+.PHONY: drag-rig
+drag-rig: build/drag-rig
 
 build/gen-perf-50k: fdk-files/perf_50k.c $(FDK_LIB)
 	@mkdir -p build
