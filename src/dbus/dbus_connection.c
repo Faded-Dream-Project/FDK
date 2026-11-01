@@ -190,6 +190,21 @@ static void pending_unlink_free(fdk_dbus_connection *c,
 }
 
 /* Appends to the pre-ready send queue (FIFO). */
+static int post_ready_push(fdk_dbus_connection *c, fdk_dbus_message *m) {
+    if (c->post_ready_count == c->post_ready_cap) {
+        size_t cap = c->post_ready_cap ? c->post_ready_cap * 2 : 8;
+        fdk_dbus_message **grown =
+            fdk_realloc(c->post_ready, cap * sizeof(*grown));
+        if (grown == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        c->post_ready = grown;
+        c->post_ready_cap = cap;
+    }
+    c->post_ready[c->post_ready_count++] = m;
+    return FDK_OK;
+}
+
 static int deferred_push(fdk_dbus_connection *c, fdk_dbus_message *m) {
     if (c->deferred_count == c->deferred_cap) {
         size_t cap = c->deferred_cap ? c->deferred_cap * 2 : 8;
@@ -509,7 +524,15 @@ static void hello_reply_cb(fdk_dbus_connection *c, fdk_dbus_message *m,
         c->handshake_timer = NULL;
     }
     FDK_DEBUG("D-Bus ready on %s as %s", c->address, c->unique_name);
-    flush_deferred(c);
+    /* The app sends queued behind the handshake, in order, now
+     * that Hello has been answered. */
+    while (c->post_ready_count > 0 && !c->dead) {
+        fdk_dbus_message *deferred_msg = c->post_ready[0];
+        memmove(&c->post_ready[0], &c->post_ready[1],
+                (c->post_ready_count - 1) * sizeof(*c->post_ready));
+        c->post_ready_count--;
+        (void)send_built(c, deferred_msg, NULL); /* consumes       */
+    }
     if (c->dead) {
         return;
     }
@@ -1363,6 +1386,15 @@ static void conn_teardown(fdk_dbus_connection *c, int fire_callbacks) {
     fdk_free(c->deferred);
     c->deferred = NULL;
     c->deferred_cap = 0;
+    /* The post-ready queue's messages are owned solely by it (they
+     * carry no pending) — free them with it. */
+    for (size_t i = 0; i < c->post_ready_count; i++) {
+        fdk_dbus_message_free(c->post_ready[i]);
+    }
+    fdk_free(c->post_ready);
+    c->post_ready = NULL;
+    c->post_ready_count = 0;
+    c->post_ready_cap = 0;
     for (size_t i = c->match_count; i > 0; i--) {
         fdk_free(c->matches[i - 1].rule);
     }
@@ -1644,9 +1676,13 @@ fdk_result fdk_dbus_connection_send(fdk_dbus_connection *connection,
     if (c->state == DBUS_ST_READY) {
         return send_built(c, message, NULL);
     }
-    /* Defer behind the handshake (this message has no pending —
-     * the array itself is its only reference). */
-    return deferred_push(c, message);
+    /* Defer behind the handshake — on the POST-READY queue: Hello
+     * must be this connection's first message (the daemon's
+     * admission rule; a signal sent before Hello is answered with
+     * a disconnect — the tray-item open+setters rig caught it).
+     * This message has no pending — the array itself is its only
+     * reference. */
+    return post_ready_push(c, message);
 }
 
 void fdk_dbus_pending_cancel(fdk_dbus_pending *pending) {

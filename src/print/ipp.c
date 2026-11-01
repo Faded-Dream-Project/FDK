@@ -396,8 +396,8 @@ size_t fdk_print_enumerate_printers(fdk_printer_info *out,
         for (size_t i = 0; i < n && i < cap; i++) {
             if (out[i].uri[0] == '\0') {
                 snprintf(out[i].uri, sizeof out[i].uri,
-                         "ipp://%s:%d/printers/%s", host, port,
-                         out[i].name);
+                         "ipp://%.64s:%d/printers/%.100s", host,
+                         port, out[i].name);
             }
         }
     }

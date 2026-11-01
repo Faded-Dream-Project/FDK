@@ -86,7 +86,8 @@ X11_CFLAGS     := $(shell pkg-config --cflags x11) \
 # Phase 3 completion). It is part of the base X11 distribution and
 # present wherever libX11 is.
 X11_LIBS       := $(shell pkg-config --libs x11) -lXext \
-                 $(shell pkg-config --libs xrandr 2>/dev/null) -ldl
+                 $(shell pkg-config --libs xrandr 2>/dev/null) \
+                 -lXrender -ldl
 
 # Wayland is optional. Detection order:
 # 1. If FDK_DISABLE_WAYLAND=1 is set, never build Wayland (skip).

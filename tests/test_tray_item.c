@@ -846,10 +846,75 @@ int main(void) {
         assert(hosted);
         assert(g_app.host_count == 1 && g_app.hosted_now == 1);
         assert(g_mock.registrations == 1);
-        /* The registration argument is the item's unique bus name. */
-        snprintf(g_item_bus, sizeof(g_item_bus), "%s",
+        /* The registration argument is the item's unique bus name —
+         * captured NOW: phase 1b's side item replaces
+         * registered_service and then releases it. */
+        snprintf(g_item_bus, sizeof g_item_bus, "%s",
                  g_mock.registered_service);
         assert(g_item_bus[0] == ':');
+        char saved_service[64];
+        snprintf(saved_service, sizeof saved_service, "%s",
+                 g_mock.registered_service);
+
+        /* 1b. THE HELLO-OVERTAKE REGRESSION (§23 follow-up): a
+         * SECOND item whose setters fire between open and the FIRST
+         * pump. Those signals used to ride the same deferred queue
+         * as Hello and were sent FIRST — dbus-daemon disconnects a
+         * connection whose pre-Hello traffic isn't Hello, so the
+         * item died unhosted (the desktop-services example rig
+         * caught it). The two-queue fix (Hello alone on `deferred`,
+         * app sends on `post_ready` flushed at the Hello reply)
+         * must keep this item alive and hosted. */
+        {
+            fdk_tray_item_options o2 = {
+                .id = "fdk-tray-test-pre-ready",
+                .title = "Pre-ready",
+            };
+            fdk_tray_item *item2 = fdk_tray_item_open(ctx, &o2, NULL,
+                                                      NULL);
+            assert(item2 != NULL);
+            /* Setters IMMEDIATELY — no pump in between: each one
+             * queues a New* signal + PropertiesChanged pre-ready. */
+            fdk_tray_item_set_icon_name(item2, "dialog-information");
+            fdk_tray_item_set_title(item2, "Pre-ready titled");
+            fdk_tray_item_set_tooltip(item2, NULL, "T", "D");
+            fdk_tray_item_set_status(item2, FDK_TRAY_STATUS_ACTIVE);
+            int hosted2 = 0;
+            struct timespec s2;
+            clock_gettime(CLOCK_MONOTONIC, &s2);
+            while (!hosted2) {
+                (void)fdk_pump_events(ctx, 20);
+                if (fdk_tray_item_hosted(item2)) {
+                    hosted2 = 1;
+                }
+                struct timespec n2;
+                clock_gettime(CLOCK_MONOTONIC, &n2);
+                long long ms2 = (n2.tv_sec - s2.tv_sec) * 1000LL +
+                                (n2.tv_nsec - s2.tv_nsec) / 1000000LL;
+                if (ms2 > 15000) {
+                    break;
+                }
+            }
+            assert(hosted2); /* the setters must not kill the item */
+            printf("[ok] tray pre-ready setters: signals defer behind "
+                   "Hello — item still hosted\n");
+            fdk_tray_item_close(item2);
+            /* Let the mock's unhost event drain before phase 2, then
+             * rebalance the phase-scoped counters this side item
+             * moved (one extra registration; its GetAll answered
+             * into the same capture). */
+            for (int i = 0; i < 10; i++) {
+                (void)fdk_pump_events(ctx, 20);
+            }
+            /* Rebalance the phase-scoped mock state: our
+             * registration counted, and registered_service now
+             * names the dead side item — restore the live one. */
+            g_mock.registrations = 1;
+            g_mock.got_getall = 0;
+            snprintf(g_mock.registered_service,
+                     sizeof g_mock.registered_service, "%s",
+                     saved_service);
+        }
         printf("[ok] registration with the watcher (unique name, "
                "on_host(1))\n");
     }
