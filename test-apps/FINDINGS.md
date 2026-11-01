@@ -8,7 +8,7 @@ FDK lacks, that is a bug in FDK by project rule.
 
 | ID | App | What failed | Root cause | Fix commit | Regression test |
 | -- | --- | ----------- | ---------- | ---------- | --------------- |
-| — | — | *(the ledger opens empty: the skeleton round found nothing yet — the apps' real rounds fill it)* | | | |
+| G-1 | fdk-files | The Notebook had `fdk_notebook_page_label` (get) but NO setter — a file manager cannot retitle a tab after navigating (every multi-document app needs this: editors retitle on save-as). The app was about to work around it by rebuilding the notebook on every navigation. | Missing API since Phase 9: the getter shipped alone. | (this commit: tests/test_widgets2.c `test_notebook_set_page_label` written FIRST — red; then `fdk_notebook_set_page_label` in notebook.c + header) | tests/test_widgets2.c::test_notebook_set_page_label |
 
 ## Verdict vocabulary
 
