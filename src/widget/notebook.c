@@ -669,6 +669,38 @@ const char *fdk_notebook_page_label(fdk_widget *notebook, size_t index) {
     return nb->pages[index].label;
 }
 
+/* §24 (the fdk-files test-app round): the tab-label SETTER. Every
+ * multi-document application renames tabs as state changes — a file
+ * manager retitles on navigation, an editor on save-as — and the
+ * getter had no twin since Phase 9. Semantics mirror append_page's
+ * label handling: the string is COPIED (NULL = the empty label),
+ * the strip re-measures on the next layout pass (tab widths are
+ * paint-time text extents), and the a11y tab list re-describes from
+ * the new label. A type-mismatched widget or an out-of-range index
+ * is FDK_ERR_INVALID_ARGUMENT, matching remove_page/reorder_page. */
+fdk_result fdk_notebook_set_page_label(fdk_widget *notebook,
+                                       size_t index, const char *label) {
+    if (notebook == NULL || notebook->klass != &fdk_notebook_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_notebook *nb = nb_of(notebook);
+    if (index >= nb->count) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    char *copy = fdk__strdup(label != NULL ? label : "");
+    if (copy == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    fdk_free(nb->pages[index].label);
+    nb->pages[index].label = copy;
+    nb_sync_pages(nb);
+    fdk_widget_invalidate(notebook);
+    /* The virtual tab's NAME changed (the a11y re-describe rule the
+     * drag-reorder path follows). */
+    fdk__a11y_notify(notebook, FDK_A11Y_NAME_CHANGED, 0);
+    return FDK_OK;
+}
+
 fdk_result fdk_notebook_remove_page(fdk_widget *notebook, size_t index) {
     if (notebook == NULL || notebook->klass != &fdk_notebook_class_def) {
         return FDK_ERR_INVALID_ARGUMENT;

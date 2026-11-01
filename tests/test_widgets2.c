@@ -9,6 +9,7 @@
 #include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
+#include "fdk/fdk_a11y.h"
 
 #include "widget/widgets_internal.h" /* fdk__text_extent (tab rect math) */
 
@@ -616,6 +617,47 @@ static void on_canvas_paint(fdk_widget *canvas, fdk_surface *surface,
                           (fdk_color){0, 0, 0, 1});
 }
 
+/* §24/fdk-files: the tab-label SETTER. A file manager renames the
+ * tab when the folder changes; every multi-document app (editors!)
+ * renames on save-as. The getter existed since Phase 9; the setter
+ * did not — GAP #1 of the test-apps round. */
+static void test_notebook_set_page_label(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *nb = NULL;
+    assert(fdk_notebook_create(root, g_font, &nb) == FDK_OK);
+    fdk_widget_set_bounds(nb, (fdk_rect){0, 0, 400, 200});
+
+    fdk_widget *p1 = NULL, *p2 = NULL;
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){0, 0, 10, 10}, &p1)));
+    assert(fdk_ok(fdk_widget_create(root, NULL,
+                                    (fdk_rect){0, 0, 10, 10}, &p2)));
+    assert(fdk_notebook_append_page(nb, p1, "First") == FDK_OK);
+    assert(fdk_notebook_append_page(nb, p2, "Second") == FDK_OK);
+
+    /* the setter: renames the tab, the getter reads it back */
+    assert(fdk_notebook_set_page_label(nb, 0, "Renamed") == FDK_OK);
+    assert(strcmp(fdk_notebook_page_label(nb, 0), "Renamed") == 0);
+    assert(strcmp(fdk_notebook_page_label(nb, 1), "Second") == 0);
+
+    /* NULL clears to the empty label; the getter reads "" */
+    assert(fdk_notebook_set_page_label(nb, 1, NULL) == FDK_OK);
+    assert(fdk_notebook_page_label(nb, 1) != NULL &&
+           fdk_notebook_page_label(nb, 1)[0] == '\0');
+
+    /* a11y re-describes from the new label */
+    fdk_a11y_info info;
+    assert(fdk_ok(fdk_a11y_describe(nb, &info)));
+    (void)info;
+    fdk_a11y_info_free(&info);
+
+    /* bad index refused */
+    assert(fdk_notebook_set_page_label(nb, 2, "X") ==
+           FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_notebook_set_page_label(NULL, 0, "X") ==
+           FDK_ERR_INVALID_ARGUMENT);
+}
+
 static void test_canvas(void) {
     fdk_widget *root = fresh_root();
     fdk_widget *cv = NULL;
@@ -693,6 +735,7 @@ int main(void) {
     test_toolbar();
     test_notebook();
     test_notebook_reorder();
+    test_notebook_set_page_label();
     test_canvas();
 
     fdk_font_destroy(g_font);
