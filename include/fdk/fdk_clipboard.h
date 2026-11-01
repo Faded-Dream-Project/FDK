@@ -136,6 +136,25 @@ fdk_result fdk_clipboard_set_primary_text(fdk_context *ctx,
                                           const char *text);
 char *fdk_clipboard_get_primary_text(fdk_context *ctx);
 
+/* ---- Clipboard URI lists (§23/B2a) ----------------------------------
+ *
+ * The file-copy half of the clipboard: a text/uri-list content
+ * (what a file manager copies). SET copies the list (entries are
+ * POSIX paths — file://-percent-encoded on the wire — or URIs,
+ * passed through as-is; NULL entries are skipped; count 0 clears
+ * the uri content). GET reads the current uri-list (the owner may
+ * be any application) as one NUL-terminated, LF-separated string
+ * (fdk_free); NULL when none/unreadable. On Wayland the eventual-
+ * consistency note of get_text applies (a pump may be needed).
+ *
+ * One clipboard content at a time, as ever: setting uris replaces
+ * text/image and vice versa.
+ */
+fdk_result fdk_clipboard_set_uris(fdk_context *ctx,
+                                  const char *const *uris,
+                                  size_t count);
+char *fdk_clipboard_get_uris(fdk_context *ctx);
+
 #ifdef __cplusplus
 }
 #endif

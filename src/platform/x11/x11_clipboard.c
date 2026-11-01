@@ -66,6 +66,8 @@
 
 #include <X11/Xatom.h>
 #include <errno.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <poll.h>
 #include <stdlib.h>
@@ -158,6 +160,8 @@ fdk_result fdk_x11_clipboard_init(fdk_platform_connection *conn) {
         XInternAtom(conn->display, "text/plain;charset=utf-8", False);
     conn->atom_fdk_selection =
         XInternAtom(conn->display, "_FDK_SELECTION", False);
+    conn->atom_uri_list = XInternAtom(conn->display, "text/uri-list",
+                                       False);
     conn->atom_image_png = XInternAtom(conn->display, "image/png",
                                        False);
     conn->clip_owned_text = NULL;
@@ -210,6 +214,8 @@ void fdk_x11_clipboard_shutdown(fdk_platform_connection *conn) {
     fdk_free(conn->clip_owned_png);
     conn->clip_owned_png = NULL;
     conn->clip_owned_png_len = 0;
+    fdk_free(conn->clip_owned_uris);
+    conn->clip_owned_uris = NULL;
 }
 
 /* One ownership+store, parameterized over the selection. verify:
@@ -264,6 +270,8 @@ fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
     fdk_free(conn->clip_owned_png);
     conn->clip_owned_png = NULL;
     conn->clip_owned_png_len = 0;
+    fdk_free(conn->clip_owned_uris);
+    conn->clip_owned_uris = NULL;
     return selection_set_text(conn, sel_of_clipboard(conn), text, true);
 }
 
@@ -533,7 +541,8 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
         bool have_content =
             (sel.owned != NULL && *sel.owned != NULL) ||
             (req->selection == conn->atom_clipboard &&
-             conn->clip_owned_png != NULL);
+             (conn->clip_owned_png != NULL ||
+              conn->clip_owned_uris != NULL));
         if (!have_content) {
             /* Not the owner anymore (a stale request raced our
              * SelectionClear), or an unknown selection: refuse per the
@@ -558,6 +567,24 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
                                 conn->atom_image_png, 8, PropModeReplace,
                                 conn->clip_owned_png,
                                 (int)conn->clip_owned_png_len);
+            }
+        } else if (req->target == conn->atom_uri_list &&
+                   conn->clip_owned_uris != NULL) {
+            /* §23/B2a: serve the owned uri-list verbatim (stored in
+             * the wire format: one URI per line, CRLF). */
+            size_t ulen = strlen(conn->clip_owned_uris);
+            if (ulen > FDK_CLIP_ATOMIC_MAX_BYTES) {
+                incr_serve_begin(conn, req->requestor, property,
+                                 conn->atom_uri_list,
+                                 (const unsigned char *)
+                                     conn->clip_owned_uris,
+                                 ulen);
+            } else {
+                XChangeProperty(conn->display, req->requestor, property,
+                                conn->atom_uri_list, 8, PropModeReplace,
+                                (const unsigned char *)
+                                    conn->clip_owned_uris,
+                                (int)ulen);
             }
         } else if (req->target == conn->utf8_string ||
                    req->target == conn->atom_text_plain ||
@@ -1171,4 +1198,130 @@ unsigned char *fdk_x11_clipboard_get_image(fdk_platform_connection *conn,
         return NULL;
     }
     return raw;
+}
+
+/* ---- clipboard URI lists (§23/B2a) ---------------------------------- */
+
+/* Builds the text/uri-list wire format: one URI per line, lines
+ * CRLF-terminated, # comments allowed (we emit none). Bare paths
+ * are file://-encoded per the freedesktop convention (the same
+ * encoding the DnD read path decodes). */
+static char *uri_list_build(const char *const *uris, size_t count) {
+    size_t cap = 64;
+    for (size_t i = 0; i < count; i++) {
+        cap += strlen(uris[i]) * 3 + 4;
+    }
+    char *out = fdk_alloc(cap);
+    if (out == NULL) {
+        return NULL;
+    }
+    size_t len = 0;
+    for (size_t i = 0; i < count; i++) {
+        const char *u = uris[i];
+        if (u == NULL) {
+            continue;
+        }
+        /* file://-encode a bare POSIX path; pass a URI through. */
+        int is_uri = 0;
+        for (const char *p = u; *p != '\0'; p++) {
+            if (*p == ':') {
+                is_uri = 1;
+                break;
+            }
+            if (*p == '/') {
+                break; /* a path slash before any colon = a path */
+            }
+        }
+        if (!is_uri && u[0] != '/') {
+            is_uri = 1; /* a bare word is passed through as-is    */
+        }
+        if (is_uri) {
+            len += (size_t)snprintf(out + len, cap - len, "%s\r\n", u);
+        } else {
+            len += (size_t)snprintf(out + len, cap - len, "file://");
+            for (const char *p = u; *p != '\0'; p++) {
+                unsigned char c = (unsigned char)*p;
+                bool safe = (c >= 'a' && c <= 'z') ||
+                            (c >= 'A' && c <= 'Z') ||
+                            (c >= '0' && c <= '9') ||
+                            c == '/' || c == '-' || c == '_' ||
+                            c == '.' || c == '~';
+                if (safe) {
+                    out[len++] = (char)c;
+                } else {
+                    len += (size_t)snprintf(out + len, cap - len,
+                                            "%%%02X", c);
+                }
+            }
+            len += (size_t)snprintf(out + len, cap - len, "\r\n");
+        }
+    }
+    out[len] = '\0';
+    return out;
+}
+
+fdk_result fdk_x11_clipboard_set_uris(fdk_platform_connection *conn,
+                                      const char *const *uris,
+                                      size_t count) {
+    if (conn == NULL || (uris == NULL && count > 0)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (count == 0) {
+        /* Clearing: drop the ownership's uri content. */
+        fdk_free(conn->clip_owned_uris);
+        conn->clip_owned_uris = NULL;
+        return FDK_OK;
+    }
+    char *built = uri_list_build(uris, count);
+    if (built == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    XSetSelectionOwner(conn->display, conn->atom_clipboard,
+                       conn->clip_helper, CurrentTime);
+    if (XGetSelectionOwner(conn->display, conn->atom_clipboard) !=
+        conn->clip_helper) {
+        fdk_free(built);
+        FDK_WARN("clipboard: uri-list ownership did not take effect");
+        return FDK_ERR_PLATFORM;
+    }
+    fdk_free(conn->clip_owned_text);
+    conn->clip_owned_text = NULL;
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = NULL;
+    conn->clip_owned_png_len = 0;
+    fdk_free(conn->clip_owned_uris);
+    conn->clip_owned_uris = NULL;
+    conn->clip_owned_uris = built;
+    XFlush(conn->display);
+    return FDK_OK;
+}
+
+char *fdk_x11_clipboard_get_uris(fdk_platform_connection *conn) {
+    if (conn == NULL) {
+        return NULL;
+    }
+    Atom type = None;
+    size_t len = 0;
+    unsigned char *raw = convert_selection_bytes(
+        conn, sel_of_clipboard(conn), conn->atom_uri_list, &type, &len);
+    if (raw == NULL || len == 0) {
+        fdk_free(raw);
+        return NULL;
+    }
+    /* NUL-terminate a scratch copy, strip the CRLFs to LFs. */
+    char *text = fdk_alloc(len + 1);
+    if (text == NULL) {
+        fdk_free(raw);
+        return NULL;
+    }
+    size_t o = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (raw[i] == '\r') {
+            continue;
+        }
+        text[o++] = (char)raw[i];
+    }
+    text[o] = '\0';
+    fdk_free(raw);
+    return text;
 }

@@ -130,6 +130,7 @@ static void device_selection(void *data, struct wl_data_device *device,
         conn->selection_offer = NULL;
         conn->selection_offer_has_text = 0;
         conn->selection_offer_has_image = 0;
+        conn->selection_offer_has_uris = 0;
         return;
     }
     /* Promote the pending offer (per protocol ordering the ::offer
@@ -139,16 +140,20 @@ static void device_selection(void *data, struct wl_data_device *device,
      * text-less rather than dereferencing untracked state. */
     int has_text = 0;
     int has_image = 0;
+    int has_uris = 0;
     if (conn->pending_offer == offer) {
         has_text = conn->pending_offer_has_text;
         has_image = conn->pending_offer_has_image;
+        has_uris = conn->pending_offer_has_uris;
         conn->pending_offer = NULL;
         conn->pending_offer_has_text = 0;
         conn->pending_offer_has_image = 0;
+        conn->pending_offer_has_uris = 0;
     }
     conn->selection_offer = offer;
     conn->selection_offer_has_text = has_text;
     conn->selection_offer_has_image = has_image;
+    conn->selection_offer_has_uris = has_uris;
 
     /* 1.2.4: this event does NOT mean our own source was replaced.
      * wlroots 0.18 echoes the freshly-set selection back to the
@@ -233,9 +238,30 @@ static void source_send(void *data, struct wl_data_source *source,
         close(fd);
         return;
     }
+    if (strcmp(mime_type, "text/uri-list") == 0 &&
+        conn->clip_owned_uris != NULL) {
+        /* §23/B2a: the owned uri-list, served verbatim (the wire
+         * format is stored: CRLF lines). */
+        size_t ulen = strlen(conn->clip_owned_uris);
+        size_t uoff = 0;
+        while (uoff < ulen) {
+            ssize_t n = write(fd, conn->clip_owned_uris + uoff,
+                              ulen - uoff);
+            if (n < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            uoff += (size_t)n;
+        }
+        close(fd);
+        return;
+    }
     if (strcmp(mime_type, "text/plain;charset=utf-8") != 0 &&
         strcmp(mime_type, "text/plain") != 0) {
-        /* We only ever offer text and image MIMes; be strict anyway. */
+        /* We offer text, image, and uri-list MIMEs; be strict
+         * anyway. */
         close(fd);
         return;
     }
@@ -275,6 +301,8 @@ static void source_cancelled(void *data, struct wl_data_source *source) {
     fdk_free(conn->clip_owned_png);
     conn->clip_owned_png = NULL;
     conn->clip_owned_png_len = 0;
+    fdk_free(conn->clip_owned_uris);
+    conn->clip_owned_uris = NULL;
     if (conn->selection_offer != NULL) {
         wl_data_offer_destroy(conn->selection_offer);
         conn->selection_offer = NULL;
@@ -483,6 +511,8 @@ void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn) {
     fdk_free(conn->clip_owned_png);
     conn->clip_owned_png = NULL;
     conn->clip_owned_png_len = 0;
+    fdk_free(conn->clip_owned_uris);
+    conn->clip_owned_uris = NULL;
     if (conn->pending_offer != NULL &&
         conn->pending_offer != conn->selection_offer) {
         wl_data_offer_destroy(conn->pending_offer);
@@ -985,4 +1015,166 @@ unsigned char *fdk_wayland_clipboard_get_image(
     conn->selection_offer_has_text = 0;
     conn->selection_offer_has_image = 0;
     return png;
+}
+
+
+/* ---- clipboard URI lists (§23/B2a) ---------------------------------- */
+
+/* The same builder as the X11 side (the freedesktop wire format is
+ * backend-neutral: CRLF lines, file:// percent-encoding). */
+static char *wl_uri_list_build(const char *const *uris, size_t count) {
+    size_t cap = 64;
+    for (size_t i = 0; i < count; i++) {
+        cap += strlen(uris[i]) * 3 + 4;
+    }
+    char *out = fdk_alloc(cap);
+    if (out == NULL) {
+        return NULL;
+    }
+    size_t len = 0;
+    for (size_t i = 0; i < count; i++) {
+        const char *u = uris[i];
+        if (u == NULL) {
+            continue;
+        }
+        int is_uri = 0;
+        for (const char *p = u; *p != '\0'; p++) {
+            if (*p == ':') {
+                is_uri = 1;
+                break;
+            }
+            if (*p == '/') {
+                break;
+            }
+        }
+        if (!is_uri && u[0] != '/') {
+            is_uri = 1;
+        }
+        if (is_uri) {
+            len += (size_t)snprintf(out + len, cap - len, "%s\r\n", u);
+        } else {
+            len += (size_t)snprintf(out + len, cap - len, "file://");
+            for (const char *p = u; *p != '\0'; p++) {
+                unsigned char c = (unsigned char)*p;
+                int safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                           (c >= '0' && c <= '9') || c == '/' || c == '-' ||
+                           c == '_' || c == '.' || c == '~';
+                if (safe) {
+                    out[len++] = (char)c;
+                } else {
+                    len += (size_t)snprintf(out + len, cap - len,
+                                            "%%%02X", c);
+                }
+            }
+            len += (size_t)snprintf(out + len, cap - len, "\r\n");
+        }
+    }
+    out[len] = '\0';
+    return out;
+}
+
+fdk_result fdk_wayland_clipboard_set_uris(fdk_platform_connection *conn,
+                                          const char *const *uris,
+                                          size_t count) {
+    if (conn->data_device == NULL) {
+        return FDK_ERR_UNSUPPORTED;
+    }
+    if (count == 0) {
+        fdk_free(conn->clip_owned_uris);
+        conn->clip_owned_uris = NULL;
+        return FDK_OK;
+    }
+    char *built = wl_uri_list_build(uris, count);
+    if (built == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    struct wl_data_source *source =
+        wl_data_device_manager_create_data_source(conn->data_device_manager);
+    if (source == NULL) {
+        fdk_free(built);
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    wl_data_source_add_listener(source, &g_source_listener, conn);
+    wl_data_source_offer(source, "text/uri-list");
+
+    if (conn->clip_source != NULL) {
+        wl_data_source_destroy(conn->clip_source);
+    }
+    conn->clip_source = source;
+    /* One content at a time: the uris replace text and image. */
+    fdk_free(conn->clip_owned_text);
+    conn->clip_owned_text = NULL;
+    fdk_free(conn->clip_owned_png);
+    conn->clip_owned_png = NULL;
+    conn->clip_owned_png_len = 0;
+    conn->clip_owned_uris = built;
+
+    wl_data_device_set_selection(conn->data_device, source,
+                                 conn->last_input_serial);
+    wl_display_flush(conn->display);
+    return FDK_OK;
+}
+
+char *fdk_wayland_clipboard_get_uris(fdk_platform_connection *conn) {
+    /* The compositor pushes offers during dispatch; the eventual-
+     * consistency contract is get_text's (a pump may be needed). */
+    if (conn->selection_offer == NULL ||
+        !conn->selection_offer_has_uris) {
+        return NULL;
+    }
+    int fds[2];
+    if (pipe(fds) != 0) {
+        return NULL;
+    }
+    wl_data_offer_receive(conn->selection_offer, "text/uri-list",
+                          fds[1]);
+    close(fds[1]);
+    wl_display_flush(conn->display);
+
+    /* Read the pipe to EOF (bounded). */
+    size_t cap = 4096, len = 0;
+    char *buf = fdk_alloc(cap);
+    if (buf == NULL) {
+        close(fds[0]);
+        return NULL;
+    }
+    for (;;) {
+        if (len + 1024 > cap) {
+            size_t cap2 = cap * 2;
+            char *grown = fdk_realloc(buf, cap2);
+            if (grown == NULL) {
+                fdk_free(buf);
+                close(fds[0]);
+                return NULL;
+            }
+            buf = grown;
+            cap = cap2;
+        }
+        ssize_t n = read(fds[0], buf + len, cap - len - 1);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if (n == 0) {
+            break;
+        }
+        len += (size_t)n;
+    }
+    close(fds[0]);
+    if (len == 0) {
+        fdk_free(buf);
+        return NULL;
+    }
+    /* CRLF -> LF, NUL-terminate. */
+    size_t o = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (buf[i] == '\r') {
+            continue;
+        }
+        buf[o++] = buf[i];
+    }
+    buf[o] = '\0';
+    return buf;
 }

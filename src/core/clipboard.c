@@ -129,3 +129,36 @@ fdk_surface *fdk_clipboard_get_image(fdk_context *ctx) {
     }
     return surface;
 }
+
+
+/* ---- clipboard URI lists (§23/B2a) ---------------------------------- */
+
+fdk_result fdk_clipboard_set_uris(fdk_context *ctx,
+                                  const char *const *uris,
+                                  size_t count) {
+    if (ctx == NULL || (uris == NULL && count > 0)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (ctx->conn == NULL || ctx->ops == NULL) {
+        return FDK_ERR_NOT_INITIALIZED;
+    }
+    if (ctx->ops->clipboard_set_uris == NULL) {
+        FDK_WARN("clipboard: backend \"%s\" has no uri-list support",
+                 ctx->ops->name);
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return ctx->ops->clipboard_set_uris(ctx->conn, uris, count);
+}
+
+char *fdk_clipboard_get_uris(fdk_context *ctx) {
+    if (ctx == NULL || ctx->conn == NULL || ctx->ops == NULL ||
+        ctx->ops->clipboard_get_uris == NULL) {
+        if (ctx != NULL && ctx->conn != NULL && ctx->ops != NULL) {
+            FDK_WARN("clipboard: backend \"%s\" has no uri-list "
+                     "support",
+                     ctx->ops->name);
+        }
+        return NULL;
+    }
+    return ctx->ops->clipboard_get_uris(ctx->conn);
+}

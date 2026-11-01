@@ -360,6 +360,10 @@ struct fdk_platform_connection {
     unsigned char *clip_owned_png; /* fdk_alloc'd, NULL when no image  */
     size_t clip_owned_png_len;
     Atom atom_image_png;      /* image/png                            */
+    char *clip_owned_uris;    /* §23/B2a: text/uri-list, NUL-terminated
+                               * (one URI per line, \r\n per the
+                               * spec); NULL when none             */
+    Atom atom_uri_list;       /* text/uri-list                        */
 
     /* 1.4.12: the INCR (incremental) transfer machinery — both
      * directions ride the helper window. TX is an in-flight SERVE of
@@ -1110,6 +1114,11 @@ fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
                                        size_t len);
 unsigned char *fdk_x11_clipboard_get_image(
     fdk_platform_connection *conn, size_t *out_len);
+/* §23/B2a: the clipboard's text/uri-list surface. */
+fdk_result fdk_x11_clipboard_set_uris(fdk_platform_connection *conn,
+                                      const char *const *uris,
+                                      size_t count);
+char *fdk_x11_clipboard_get_uris(fdk_platform_connection *conn);
 
 /* THE selection-read engine (1.4.14, x11_clipboard.c): convert
  * `selection`/`target` onto `requestor`'s atom_fdk_selection

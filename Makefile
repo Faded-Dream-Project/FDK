@@ -303,11 +303,15 @@ SHARED_LIB := $(BUILD_DIR)/libfdk.so
 # lists may wrap freely). Every header already follows this.
 EXPORT_MAP := $(BUILD_DIR)/libfdk.exports.map
 
-TEST_SRCS := $(filter-out tests/test_x11_integration.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/bench.c,$(wildcard tests/*.c))
+TEST_SRCS := $(filter-out tests/test_x11_integration.c tests/test_wayland_integration.c tests/test_dbus_live.c tests/test_notify_client.c tests/test_tray_item.c tests/test_clip_uris.c tests/bench.c,$(wildcard tests/*.c))
 TEST_BINS := $(patsubst tests/%.c,$(BUILD_DIR)/tests/%,$(TEST_SRCS))
 
 X11_TEST_SRC := tests/test_x11_integration.c
 X11_TEST_BIN := $(BUILD_DIR)/tests/test_x11_integration
+
+# §23/B2a: the uri-list clipboard rig (needs a display; runs in
+# test-x11's Xvfb).
+X11_URI_TEST_BIN := $(BUILD_DIR)/tests/test_clip_uris
 
 EXAMPLE_SRCS := $(wildcard examples/*.c)
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
@@ -486,10 +490,12 @@ $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
 # what this test does and does not cover (window-manager-dependent
 # behavior like WM_DELETE_WINDOW delivery is skipped under bare Xvfb,
 # not faked — the test says so when it runs).
-test-x11: $(X11_TEST_BIN)
+test-x11: $(X11_TEST_BIN) $(X11_URI_TEST_BIN)
 	@if [ -n "$$DISPLAY" ]; then \
 		echo "== running X11 integration test against DISPLAY=$$DISPLAY =="; \
 		LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_TEST_BIN)" || exit 1; \
+		echo "== running the uri-list clipboard rig =="; \
+		LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_URI_TEST_BIN)" || exit 1; \
 	else \
 		echo "== no DISPLAY set, starting a throwaway Xvfb =="; \
 		XVFB_NUM=$$((90 + ($$$$ % 400))); \
@@ -501,6 +507,11 @@ test-x11: $(X11_TEST_BIN)
 		echo "== running X11 integration test against DISPLAY=$$XVFB_DISP (Xvfb pid $$XVFB_PID) =="; \
 		DISPLAY="$$XVFB_DISP" LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_TEST_BIN)"; \
 		TEST_RESULT=$$?; \
+		if [ $$TEST_RESULT -eq 0 ]; then \
+			echo "== running the uri-list clipboard rig =="; \
+			DISPLAY="$$XVFB_DISP" LSAN_OPTIONS="$${LSAN_OPTIONS:+$$LSAN_OPTIONS }suppressions=$(CURDIR)/tests/data/lsan-gl.supp" "$(X11_URI_TEST_BIN)"; \
+			TEST_RESULT=$$?; \
+		fi; \
 		kill "$$XVFB_PID" 2>/dev/null; \
 		wait "$$XVFB_PID" 2>/dev/null; \
 		rm -f "/tmp/.X11-unix/X$$XVFB_NUM"; \
