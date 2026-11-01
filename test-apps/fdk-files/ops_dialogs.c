@@ -7,6 +7,7 @@
 #include "mime.h"
 #include "model.h"
 #include "panes.h"
+#include "teardown.h"
 #include "trash.h"
 
 #include "fdk/fdk_dialog.h"
@@ -313,6 +314,7 @@ static void chooser_row(fdk_widget *list, size_t row, void *user) {
         launch_desktop(&c->apps[row], c->fi->path);
     }
     fdk_window_destroy(c->win);
+    td_untrack(c);
     free(c->apps);
     free(c);
     (void)list;
@@ -322,6 +324,7 @@ static void chooser_close(fdk_window *w, const fdk_event_data *ev,
                           void *user) {
     chooser_ctx *c = user;
     if (ev->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
+        td_untrack(c);
         free(c->apps);
         free(c);
         fdk_window_destroy(w);
@@ -342,6 +345,7 @@ void ops_choose_app(pane *p, const file_info *fi) {
     c->fi = fi;
     c->apps = apps;
     c->count = n;
+    td_track(c, TD_RAW);
 
     fdk_window_options wo = {0};
     wo.title = "Open with";
@@ -579,6 +583,7 @@ static void props_close(fdk_window *w, const fdk_event_data *ev,
     if (ev->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
         fdk_window_destroy(w);
         *pc->done_flag = true;
+        td_untrack(pc);
         free(pc);
     }
 }
@@ -587,6 +592,7 @@ void ops_properties(pane *p, const file_info *fi) {
     (void)p;
     bool done = false;
     props_ctx *pc = calloc(1, sizeof *pc);
+    td_track(pc, TD_RAW);
     pc->fi = fi;
     pc->done_flag = &done;
 
@@ -648,6 +654,7 @@ void ops_properties(pane *p, const file_info *fi) {
         fdk_widget *r, *w, *x;
         const file_info *fi;
     } *perm = calloc(1, sizeof *perm);
+    td_track(perm, TD_RAW);
     perm->r = rw;
     perm->w = ww;
     perm->x = ex;
@@ -707,6 +714,7 @@ static void trash_close(fdk_window *w, const fdk_event_data *ev,
     trash_ctx *tc = user;
     if (ev->type == FDK_EVENT_WINDOW_CLOSE_REQUEST) {
         fdk_window_destroy(w);
+        td_untrack(tc);
         trash_list_free(tc->entries);
         free(tc);
     }
@@ -767,6 +775,7 @@ static void trash_refresh(trash_ctx *tc) {
 
 void ops_open_trash(void) {
     trash_ctx *tc = calloc(1, sizeof *tc);
+    td_track(tc, TD_RAW);
     fdk_window_options wo = {0};
     wo.title = "Trash";
     wo.width = 560;

@@ -49,6 +49,11 @@ typedef struct pane {
 
     /* the inotify watch on the current tab's dir (-1 = none) */
     int watch_fd;
+
+    /* the breadcrumb payloads of the CURRENT bar (rebuilt with it;
+     * freed by pane_crumbs_free at rebuild + teardown) */
+    struct crumb **crumbs;
+    size_t crumb_count, crumb_cap;
 } pane;
 
 /* The active pane/tab helpers (panes.c). */
