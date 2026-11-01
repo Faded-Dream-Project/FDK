@@ -31,6 +31,8 @@ const char *fdk_result_to_string(fdk_result result) {
 
         case FDK_ERR_FONT_LOAD:          return "font load failed (not a usable font)";
 
+        case FDK_ERR_WRONG_THREAD:       return "called from the wrong thread (main-thread-only)";
+
         default:                         return "unknown error";
     }
 }

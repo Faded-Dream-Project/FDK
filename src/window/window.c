@@ -12,6 +12,7 @@
 #include "widget/widget_internal.h"
 #include "widget/widgets_internal.h" /* window-root class, a11y name */
 #include "window/window_internal.h"
+#include "core/thread_internal.h"
 #include "desktop/atspi_internal.h" /* the AT-SPI bridge's pump tick */
 
 #include "core/shortcut_internal.h"
@@ -773,6 +774,7 @@ fdk_context *fdk_window_get_context(fdk_window *window) {
 fdk_result fdk_window_create(fdk_context *ctx,
                               const fdk_window_options *options,
                               fdk_window **out_window) {
+    FDK_MAIN_THREAD_GUARD(ctx, "fdk_window_create");
     return window_create_full(ctx, options, NULL, out_window);
 }
 

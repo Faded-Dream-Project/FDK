@@ -3,6 +3,7 @@
 #include "fdk/fdk_core.h"
 
 #include "core/alloc_internal.h"
+#include "core/thread_internal.h"
 #include "core/context_internal.h"
 #include "core/log_internal.h"
 #include "window/window_internal.h"
@@ -64,6 +65,12 @@ fdk_timer *fdk_timer_add(fdk_context *ctx, fdk_u32 interval_ms,
     if (ctx == NULL || fn == NULL) {
         return NULL;
     }
+#if defined(FDK_DEBUG_THREAD_CHECKS)
+    if (!fdk__on_main_thread(ctx)) {
+        (void)fdk__wrong_thread_refused("fdk_timer_add");
+        return NULL;
+    }
+#endif
     if (ctx->timer_count == ctx->timer_capacity) {
         size_t cap = (ctx->timer_capacity == 0) ? 8
                                                 : ctx->timer_capacity * 2;
@@ -483,6 +490,19 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     fdk__window_theme_settings_init(ctx->app_id);
     fdk__startup_trace("theme settings");
 
+    /* The G-2 post queue + wake fd (§25): allocated last so a
+     * failure above never leaves a half-wired thread state. */
+    fdk__startup_trace_begin("thread state");
+    r = fdk__thread_init(ctx);
+    if (!fdk_ok(r)) {
+        fdk__startup_trace("thread state");
+        ctx->ops->disconnect(ctx->conn);
+        fdk_free(ctx->app_id);
+        fdk_free(ctx);
+        return r;
+    }
+    fdk__startup_trace("thread state");
+
     FDK_INFO("initialized (backend=%s, app_id=%s)",
              ops->name ? ops->name : "?",
              ctx->app_id ? ctx->app_id : "(none)");
@@ -667,6 +687,22 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
          * at most once per 30 s and only when the portal is the
          * applicable source. */
         fdk__window_theme_scheme_tick(ctx);
+        /* The G-2 wake fd (§25): entry 2 when a thread state exists
+         * (after the theme watch, before the extfd sources). A post
+         * from any thread makes it readable; the drain below runs
+         * the queued callbacks with the timers' fire discipline. */
+        int has_wake = 0;
+        int wake_slot = nfds;
+        {
+            int wfd = fdk__thread_wake_fd(ctx);
+            if (wfd >= 0) {
+                pfds[nfds].fd = wfd;
+                pfds[nfds].events = POLLIN;
+                pfds[nfds].revents = 0;
+                nfds++;
+                has_wake = 1;
+            }
+        }
         size_t extfd_base = (size_t)nfds;
         size_t extfd_n = fdk__extfd_fill_poll(ctx, pfds, extfd_base);
         nfds += (int)extfd_n;
@@ -697,6 +733,18 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             if (fdk__window_theme_watch_pump(ctx) != 0) {
                 fdk__window_flush_geo_repaints(ctx);
                 return 1;
+            }
+        }
+
+        if (has_wake && (pfds[wake_slot].revents & (POLLIN | POLLERR)) != 0) {
+            /* Posts from other threads (§25/G-2). Counted like fired
+             * timers: the caller repaints or re-polls. Run BEFORE the
+             * backend dispatch so a post that quits or destroys is
+             * not pre-empted by later input this batch. */
+            int posted = fdk__thread_drain(ctx);
+            if (posted > 0) {
+                fdk__window_flush_geo_repaints(ctx);
+                return posted;
             }
         }
 
@@ -821,6 +869,12 @@ void fdk_shutdown(fdk_context *ctx) {
     }
 
     FDK_INFO("shutting down");
+
+    /* The G-2 post queue FIRST (§25): flip dead + drop queued posts
+     * + close the wake fd before anything else dies, so a worker
+     * still posting lands on FDK_ERR_NOT_INITIALIZED instead of a
+     * freed widget. */
+    fdk__thread_shutdown(ctx);
 
     /* Destroy any windows the application leaked — mirrors each
      * backend's own disconnect() safety net but at the FDK window

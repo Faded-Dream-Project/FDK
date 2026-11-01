@@ -30,6 +30,13 @@ struct fdk_context {
     fdk_platform_backend backend;
     char *app_id;           /* owned, heap-allocated copy */
 
+    /* The G-2 post queue + wake fd (§25, src/core/thread.c).
+     * Allocated by fdk__thread_init at the end of a successful
+     * connect, freed by fdk__thread_shutdown at teardown. NULL
+     * before init/after shutdown: fdk_post then answers
+     * FDK_ERR_NOT_INITIALIZED instead of crashing a dying worker. */
+    struct fdk_thread_state *thread_state;
+
     int running;            /* nonzero while inside fdk_run() */
     int quit_requested;     /* set by fdk_quit() */
 
