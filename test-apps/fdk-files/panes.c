@@ -6,6 +6,7 @@
 #include "mime.h"
 #include "menus.h"
 #include "ops_dialogs.h"
+#include "teardown.h"
 #include "trash.h"
 
 #include "fdk/fdk_dialog.h"
@@ -85,6 +86,32 @@ typedef struct crumb {
     char path[FI_PATH_MAX];
 } crumb;
 
+/* The pane's crumb payloads (rebuilt on every navigation; the
+ * widgets die with the bar's children, the payloads die HERE). */
+static void pane_crumbs_free(pane *p) {
+    for (size_t i = 0; i < p->crumb_count; i++) {
+        free(p->crumbs[i]);
+    }
+    free(p->crumbs);
+    p->crumbs = NULL;
+    p->crumb_count = 0;
+    p->crumb_cap = 0;
+}
+
+static void pane_crumb_add(pane *p, crumb *c) {
+    if (p->crumb_count == p->crumb_cap) {
+        p->crumb_cap = p->crumb_cap ? p->crumb_cap * 2 : 8;
+        crumb **g = realloc(p->crumbs,
+                            p->crumb_cap * sizeof *p->crumbs);
+        if (g == NULL) {
+            free(c);
+            return;
+        }
+        p->crumbs = g;
+    }
+    p->crumbs[p->crumb_count++] = c;
+}
+
 static void crumb_clicked(fdk_widget *btn, void *user) {
     (void)btn;
     crumb *c = user;
@@ -157,6 +184,7 @@ static void path_entry_setup(pane *p, fdk_widget *entry) {
 
 void pane_refresh_breadcrumb(pane *p) {
     tab *t = active_tab(p);
+    pane_crumbs_free(p); /* the old bar's payloads die with it */
     fdk_widget *host = t->breadcrumb_host;
     size_t children = fdk_widget_child_count(host);
     for (size_t i = children; i > 0; i--) {
@@ -180,6 +208,7 @@ void pane_refresh_breadcrumb(pane *p) {
         if (c != NULL) {
             c->pane = p;
             snprintf(c->path, sizeof c->path, "/");
+            pane_crumb_add(p, c);
             fdk_widget *btn = NULL;
             if (fdk_ok(fdk_button_create(host, fapp.base.font_ui,
                                          "/", &btn))) {
@@ -210,6 +239,7 @@ void pane_refresh_breadcrumb(pane *p) {
             if (c != NULL) {
                 c->pane = p;
                 snprintf(c->path, sizeof c->path, "%.4000s", acc);
+                pane_crumb_add(p, c);
                 fdk_widget *btn = NULL;
                 if (fdk_ok(fdk_button_create(
                         host, fapp.base.font_ui, label, &btn))) {
@@ -314,6 +344,7 @@ void pane_build_view(pane *p, tab *t) {
     }
     vc->pane = p;
     vc->tab = t;
+    td_track(vc, TD_RAW); /* freed at teardown (td_sweep)         */
 
     if (t->view_mode == VIEW_ICONS) {
         fdk_widget *iv = NULL;
@@ -1096,6 +1127,7 @@ void panes_shutdown(void) {
     for (int i = 0; i < fapp.pane_count; i++) {
         pane *p = fapp.panes[i];
         if (p != NULL) {
+            pane_crumbs_free(p);
             if (p->watch_fd >= 0) {
                 fs_watch_stop(p->watch_fd);
                 p->watch_fd = -1;

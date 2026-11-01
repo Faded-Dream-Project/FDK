@@ -6,6 +6,7 @@
 #include "model.h"
 #include "ops_dialogs.h"
 #include "panes.h"
+#include "teardown.h"
 #include "trash.h"
 
 #include "fdk/fdk_dialog.h"
@@ -184,6 +185,7 @@ void menus_build(files_app *a) {
 
     fdk_menu *m_file = NULL;
     (void)fdk_menu_create(font, &m_file);
+    td_track(m_file, TD_MENU_MODEL);
     static const menu_action file_acts[] = {
         {"&New tab", "Ctrl+T", act_new_tab},
         {"Close &tab", "Ctrl+W", act_close_tab},
@@ -200,6 +202,7 @@ void menus_build(files_app *a) {
 
     fdk_menu *m_edit = NULL;
     (void)fdk_menu_create(font, &m_edit);
+    td_track(m_edit, TD_MENU_MODEL);
     static const menu_action edit_acts[] = {
         {"Cu&t", "Ctrl+X", act_cut},
         {"&Copy", "Ctrl+C", act_copy},
@@ -215,6 +218,7 @@ void menus_build(files_app *a) {
 
     fdk_menu *m_view = NULL;
     (void)fdk_menu_create(font, &m_view);
+    td_track(m_view, TD_MENU_MODEL);
     static const menu_action view_acts[] = {
         {"&Details", "Ctrl+1", act_view_detail},
         {"&Icons", "Ctrl+2", act_view_icons},
@@ -228,6 +232,7 @@ void menus_build(files_app *a) {
 
     fdk_menu *m_go = NULL;
     (void)fdk_menu_create(font, &m_go);
+    td_track(m_go, TD_MENU_MODEL);
     static const menu_action go_acts[] = {
         {"&Back", "Alt+Left", act_back},
         {"&Forward", "Alt+Right", act_forward},
@@ -241,6 +246,7 @@ void menus_build(files_app *a) {
 
     fdk_menu *m_help = NULL;
     (void)fdk_menu_create(font, &m_help);
+    td_track(m_help, TD_MENU_MODEL);
     static const menu_action help_acts[] = {
         {"&Shortcuts", "Ctrl+question", act_shortcut_list},
         {"&About", "", act_about},
@@ -414,12 +420,22 @@ void menus_popup_context(pane *p, int for_what, fdk_i32 x,
  * rides the menu's own activate; without activation the model is
  * freed at app teardown) */
 #define MAX_CTX_MENUS 8
-static fdk_menu *g_ctx_menus[MAX_CTX_MENUS];
+static fdk_menu **g_ctx_menus; /* heap so the sweep can free it    */
 static size_t g_ctx_menu_count;
 
 static void menus_ctx_track(fdk_menu *m) {
+    if (g_ctx_menus == NULL) {
+        g_ctx_menus = calloc(MAX_CTX_MENUS, sizeof *g_ctx_menus);
+        if (g_ctx_menus == NULL) {
+            fdk_menu_destroy(m); /* cannot track: die now, not leak */
+            return;
+        }
+        td_track(g_ctx_menus, TD_CTX_MENUS);
+    }
     if (g_ctx_menu_count < MAX_CTX_MENUS) {
         g_ctx_menus[g_ctx_menu_count++] = m;
+    } else {
+        fdk_menu_destroy(m); /* full: honest immediate destroy */
     }
 }
 
@@ -428,6 +444,9 @@ void menus_ctx_shutdown(void) {
         fdk_menu_destroy(g_ctx_menus[i]);
     }
     g_ctx_menu_count = 0;
+    td_untrack(g_ctx_menus);
+    free(g_ctx_menus);
+    g_ctx_menus = NULL;
 }
 
 /* ---- the shortcut list ---------------------------------------------- */

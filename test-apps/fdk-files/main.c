@@ -17,6 +17,7 @@
 #include "model.h"
 #include "ops_dialogs.h"
 #include "panes.h"
+#include "teardown.h"
 #include "trash.h"
 
 #include "fdk/fdk_dialog.h"
@@ -555,6 +556,7 @@ int main(int argc, char **argv) {
 
     menus_ctx_shutdown();
     panes_shutdown();
+    td_sweep(); /* the payloads + menu models the registry owns   */
     model_shutdown();
     if (fapp.tray != NULL) {
         fdk_tray_item_close(fapp.tray);
