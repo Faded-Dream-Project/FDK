@@ -705,6 +705,19 @@ fdk_result fdk_list_selected_at(fdk_widget *list, size_t position,
                                 size_t *out_row);
 /* Programmatic select per the current mode. */
 fdk_result fdk_list_select(fdk_widget *list, size_t row);
+/* §25/G-3 — programmatic DEselect of one row (MULTIPLE mode; in
+ * SINGLE it is the same as clear+nothing-left, in NONE refused).
+ * FDK_ERR_INVALID_ARGUMENT on a bad row; FDK_OK (and NO signal)
+ * when the row was already unselected — the no-op contract
+ * fdk_list_select_range follows too. */
+fdk_result fdk_list_deselect(fdk_widget *list, size_t row);
+/* §25/G-3 — programmatic range select, the shift-click equivalent
+ * for menus and scripts. Selects every row in [first, last] (either
+ * order; ends clamped to the row count). `additive` keeps the
+ * current selection (the ctrl+shift-click shape); false clears
+ * first (the shift-click shape). ONE on_selection_changed fire. */
+fdk_result fdk_list_select_range(fdk_widget *list, size_t first,
+                                 size_t last, bool additive);
 /* Clears every selected row (any mode). Fires on_selection_changed
  * once when anything was actually selected — the List's counterpart
  * of fdk_tree_select(FDK_TREE_NODE_NONE) / fdk_combo_set_active(-1). */
@@ -714,6 +727,32 @@ void fdk_list_clear_selection(fdk_widget *list);
 void fdk_list_set_on_selection_changed(fdk_widget *list,
                                        fdk_list_selection_fn fn,
                                        void *user_data);
+
+/* §25/G-3 — the bounds-carrying selection signal. Same fire
+ * discipline as on_selection_changed (once per settled change), but
+ * the callback also learns WHICH contiguous row span the change
+ * touched — the information a file manager's status bar ("3 of 481
+ * selected, 2.1 MB") needs to update without rescanning the model.
+ * The span is the SMALLEST contiguous range covering every row that
+ * changed; when the whole selection was cleared it is the previous
+ * selection's span (valid=true, the cleared rows). valid=false only
+ * for the no-change fires that cannot happen through the public API
+ * (defensive). Setting this REPLACES the plain on_selection_changed
+ * callback (one signal slot — a bounds-aware app does not need the
+ * uninformative one). */
+typedef struct fdk_list_selection_bounds {
+    size_t first; /* the smaller changed row                */
+    size_t last;  /* the larger changed row                 */
+    bool valid;   /* false = no known span (defensive)     */
+} fdk_list_selection_bounds;
+
+typedef void (*fdk_list_selection_bounds_fn)(
+    fdk_widget *list, const fdk_list_selection_bounds *bounds,
+    void *user_data);
+
+void fdk_list_set_on_selection_changed_bounds(
+    fdk_widget *list, fdk_list_selection_bounds_fn fn,
+    void *user_data);
 
 /* ---- Bulk-mutation batching (1.3.0) ----
  *
