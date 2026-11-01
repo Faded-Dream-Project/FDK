@@ -212,6 +212,11 @@ struct fdk_wl_gl_fns {
     const char *(*eglQueryString)(EGLDisplay, unsigned int);
     EGLint (*eglGetError)(void);
     void *(*eglGetProcAddress)(const char *);
+    /* eglReleaseThread (EGL 1.2+): the per-thread state cleanup the
+     * canonical teardown sequence ends with — NVIDIA keeps a small
+     * malloc'd thread-state record alive per thread that touched the
+     * display until this call runs (see fdk_wayland_egl_shutdown). */
+    EGLBoolean (*eglReleaseThread)(void);
     /* GLES2 (through eglGetProcAddress — GLVND does not promise the
      * core symbols exist as dlsym-able libEGL exports). */
     unsigned int (*glCreateShader)(unsigned int);
@@ -581,6 +586,10 @@ static int wlgl_policy_refused = 0;
 static int wlgl_policy_no_gl = 0;
 static int wlgl_policy_force = 0;
 static int wlgl_policy_selfcheck_failed = 0;
+/* §22's teardown counters (the test seam below): connections shut
+ * down, and how many of them reached the eglReleaseThread tail. */
+static int wlgl_teardown_count = 0;
+static int wlgl_release_thread_count = 0;
 
 void fdk__wayland_egl_test_reset(void) {
     /* TEST SEAM (mirrors fdk__x11_gl_test_reset): clear the
@@ -592,6 +601,20 @@ void fdk__wayland_egl_test_reset(void) {
     wlgl_policy_no_gl = 0;
     wlgl_policy_force = 0;
     wlgl_policy_selfcheck_failed = 0;
+    wlgl_teardown_count = 0;
+    wlgl_release_thread_count = 0;
+}
+
+/* TEST SEAM (§22, the exit-leak round): the rig asserts the
+ * canonical teardown tail call fired once per connection —
+ * eglReleaseThread is the one step whose absence nothing else in
+ * the log would name (the windows' destroys are already traced).
+ * Counters are process-wide and never reset by the library. */
+int fdk__wayland_egl_test_teardown_calls(int *release_thread) {
+    if (release_thread != NULL) {
+        *release_thread = wlgl_release_thread_count;
+    }
+    return wlgl_teardown_count;
 }
 
 static void wlgl_policy_stamp(int refused, int no_gl, int force) {
@@ -751,6 +774,14 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     EGL_RESOLVE(eglQueryString, "eglQueryString");
     EGL_RESOLVE(eglGetError, "eglGetError");
     EGL_RESOLVE(eglGetProcAddress, "eglGetProcAddress");
+    /* Optional (EGL 1.2+, present everywhere real; a stub without it
+     * only costs the shutdown tail call — see shutdown's note). */
+    {
+        void *sym_ = dlsym(lib_egl, "eglReleaseThread");
+        if (sym_ != NULL) {
+            FDK_WLGL_STORE_FN(egl->fn.eglReleaseThread, sym_);
+        }
+    }
 #undef EGL_RESOLVE
 
     /* The Wayland EGLDisplay over OUR wl_display. */
@@ -907,17 +938,49 @@ void fdk_wayland_egl_shutdown(struct fdk_wayland_egl *egl) {
      * deletion, which is the honest process-teardown answer. The
      * share-root context dies HERE, after the windows: destroying it
      * earlier would still be legal (the group outlives any one
-     * member) but this order keeps the invariant obvious. */
+     * member) but this order keeps the invariant obvious.
+     *
+     * THE TAIL CALL (the 2026-11-01 exit-leak report): eglTerminate
+     * alone is NOT the end of the canonical sequence — EGL keeps
+     * PER-THREAD state (the current binding, a driver thread record)
+     * alive after it, and libEGL_nvidia allocates that thread record
+     * (256 B in 4 allocations on the GTX 1050 Ti, frames entirely
+     * inside libEGL_nvidia.so.0+0xc94e1) and frees it only when
+     * eglReleaseThread runs. FDK called EGL from exactly one thread
+     * (the main thread — the platform's own threading contract), so
+     * ONE release here retires that state before the leak checker
+     * runs; the call is also the textbook tail of the teardown
+     * sequence (EGL 1.5 §3.2: after eglTerminate, a thread that used
+     * the display should call eglReleaseThread). */
     if (egl == NULL) {
         return;
     }
+    wlgl_teardown_count++;
+    const int trace = wlgl_trace_enabled();
     if (egl->egl_display != EGLC_NO_DISPLAY) {
         if (egl->root_ctx != EGLC_NO_CONTEXT) {
+            if (trace) {
+                FDK_INFO("GL trace: teardown — eglDestroyContext(share "
+                         "root)");
+            }
             (void)egl->fn.eglDestroyContext(egl->egl_display,
                                             egl->root_ctx);
             egl->root_ctx = EGLC_NO_CONTEXT;
         }
+        if (trace) {
+            FDK_INFO("GL trace: teardown — eglTerminate");
+        }
         (void)egl->fn.eglTerminate(egl->egl_display);
+    }
+    if (egl->fn.eglReleaseThread != NULL) {
+        wlgl_release_thread_count++;
+        if (trace) {
+            FDK_INFO("GL trace: teardown — eglReleaseThread");
+        }
+        (void)egl->fn.eglReleaseThread();
+    } else if (trace) {
+        FDK_INFO("GL trace: teardown — eglReleaseThread unavailable "
+                 "(pre-EGL-1.2 loader) — skipped");
     }
     fdk_free(egl);
 }
@@ -1567,6 +1630,16 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
     return ewin;
 }
 
+/* FDK_GL_TRACE: the teardown ladder of one window's lane state —
+ * the same observation contract the present trace holds (the §22
+ * exit-leak report: a teardown question must be answerable from the
+ * log alone, without a debugger on the owner's machine). */
+static void lane_trace_teardown(const char *what) {
+    if (wlgl_trace_enabled()) {
+        FDK_INFO("GL trace: window teardown — %s", what);
+    }
+}
+
 void fdk_wayland_egl_window_destroy(struct fdk_wayland_egl *egl,
                                     struct fdk_wayland_egl_window *ewin) {
     if (ewin == NULL) {
@@ -1612,11 +1685,15 @@ void fdk_wayland_egl_window_destroy(struct fdk_wayland_egl *egl,
         egl->graveyard[egl->graveyard_count++] = ewin->tex;
     }
     if (egl != NULL && egl->egl_display != EGLC_NO_DISPLAY) {
+        lane_trace_teardown("eglMakeCurrent(NO_SURFACE, NO_CONTEXT)");
         (void)egl->fn.eglMakeCurrent(egl->egl_display, EGLC_NO_SURFACE,
                                      EGLC_NO_SURFACE, EGLC_NO_CONTEXT);
+        lane_trace_teardown("eglDestroySurface(window)");
         (void)egl->fn.eglDestroySurface(egl->egl_display, ewin->surface);
+        lane_trace_teardown("eglDestroyContext(window)");
         (void)egl->fn.eglDestroyContext(egl->egl_display, ewin->ctx);
     }
+    lane_trace_teardown("wl_egl_window_destroy");
     wl_egl_window_destroy(ewin->wl_win);
     if (ewin->rgba_twin != NULL) {
         fdk_free(ewin->rgba_twin);

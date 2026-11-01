@@ -4288,6 +4288,117 @@ int main(void) {
             gl_lane_capture_reset();
         }
 
+        /* ---- §22 (the exit-leak round): the teardown ladder ------
+         * FDK_GL_TRACE observes the shutdown too, and the connection
+         * must reach the canonical tail call: the window destroy's
+         * four steps in order, the connection shutdown's three
+         * (share root, eglTerminate, eglReleaseThread — the one the
+         * 2026-11-01 report caught missing: eglTerminate alone
+         * leaves the driver's per-thread state allocated), and the
+         * seam's counters must agree. This leg FAILS without the
+         * eglReleaseThread fix (the counter stays behind and the
+         * trace line is absent) — the in-rig proof that no shutdown
+         * path skips the tail. */
+        {
+            setenv("FDK_GL_TRACE", "1", 1);
+            setenv("FDK_GL_FORCE", "1", 1);
+            fdk_log_set_sink(gl_lane_capture_sink, NULL);
+            fdk__wayland_egl_test_reset();
+            gl_lane_capture_reset();
+            {
+                fdk_context *gctx = NULL;
+                fdk_init_options gopts = { .backend = FDK_PLATFORM_WAYLAND,
+                                           .app_id = "org.fdk.test" };
+                assert(fdk_ok(fdk_init(&gctx, &gopts)));
+                fdk_window *gwin = NULL;
+                fdk_window_options gwopts = {
+                    .title = "wl gl teardown", .width = 512, .height = 384
+                };
+                assert(fdk_ok(fdk_window_create(gctx, &gwopts, &gwin)));
+                fdk_widget *proot = NULL;
+                assert(fdk_ok(fdk_window_get_root(gwin, &proot)));
+                fdk_widget_set_background(
+                    proot, (fdk_color){0.4f, 0.6f, 0.7f, 1.0f});
+                fdk_window_show(gwin);
+                (void)fdk_pump_events(gctx, 150);
+                fdk_surface *gs = NULL;
+                assert(fdk_ok(fdk_window_get_surface(gwin, &gs)));
+                fdk_render_path gpath = (fdk_render_path)-1;
+                assert(fdk_ok(fdk_window_get_render_path(gwin, &gpath)));
+                if (gpath == FDK_RENDER_PATH_GL) {
+                    /* One present, then a clean shutdown. */
+                    fdk_surface_fill(
+                        gs, (fdk_color){ .r = 1, .g = 0, .b = 0, .a = 1 });
+                    assert(fdk_ok(fdk_surface_present(gs)));
+                    for (int i = 0; i < 10; i++) {
+                        (void)fdk_pump_events(gctx, 50);
+                    }
+                }
+                fdk_window_destroy(gwin);
+                fdk_shutdown(gctx);
+                if (gpath == FDK_RENDER_PATH_GL) {
+                    /* The window teardown ladder, in order. */
+                    assert(strstr(gl_probe_capture,
+                                  "window teardown — "
+                                  "eglMakeCurrent(NO_SURFACE, "
+                                  "NO_CONTEXT)") != NULL);
+                    assert(strstr(gl_probe_capture,
+                                  "window teardown — "
+                                  "eglDestroySurface(window)") != NULL);
+                    assert(strstr(gl_probe_capture,
+                                  "window teardown — "
+                                  "eglDestroyContext(window)") != NULL);
+                    assert(strstr(gl_probe_capture,
+                                  "window teardown — "
+                                  "wl_egl_window_destroy") != NULL);
+                    /* The connection teardown ladder, in order: the
+                     * string compare over the whole capture proves
+                     * presence; ORDER is proven by the offsets (the
+                     * window lines precede the connection's). */
+                    const char *win_last = strstr(gl_probe_capture,
+                                                  "wl_egl_window_destroy");
+                    const char *root_ctx = strstr(
+                        gl_probe_capture,
+                        "teardown — eglDestroyContext(share root)");
+                    const char *term = strstr(gl_probe_capture,
+                                              "teardown — eglTerminate");
+                    const char *rel = strstr(gl_probe_capture,
+                                             "teardown — "
+                                             "eglReleaseThread");
+                    assert(win_last != NULL && root_ctx != NULL &&
+                           term != NULL && rel != NULL);
+                    assert(win_last < root_ctx && root_ctx < term &&
+                           term < rel);
+                    /* The seam's counters: exactly one connection
+                     * shutdown, and it reached the tail call (this
+                     * is the assert that fails without the fix). */
+                    int rel_calls = -1;
+                    const int tears =
+                        fdk__wayland_egl_test_teardown_calls(&rel_calls);
+                    assert(tears >= 1);
+                    assert(rel_calls == tears);
+                    printf("[ok] wayland gl lane teardown: the shutdown "
+                           "ladder traced in order and the connection "
+                           "reached eglReleaseThread (the canonical "
+                           "tail)\n");
+                } else {
+                    /* No EGL driver: the counters must BOTH be zero
+                     * (no lane, no shutdown, no tail). */
+                    int rel_calls = -1;
+                    const int tears =
+                        fdk__wayland_egl_test_teardown_calls(&rel_calls);
+                    assert(tears == 0 && rel_calls == 0);
+                    printf("[skip] wayland gl lane teardown: no EGL "
+                           "driver — counters agree at zero\n");
+                }
+            }
+            unsetenv("FDK_GL_TRACE");
+            unsetenv("FDK_GL_FORCE");
+            fdk_log_set_sink(NULL, NULL);
+            fdk__wayland_egl_test_reset();
+            gl_lane_capture_reset();
+        }
+
         /* ---- downgrade: a poisoned present salvages through wl_shm */
         /* FDK_GL_FORCE is set HERE, not leaked: this leg's premise is a
          * lane window to poison (llvmpipe refuses the lane without

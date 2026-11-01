@@ -129,6 +129,13 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
  * never calls it. */
 void fdk__wayland_egl_test_reset(void);
 
+/* TEST SEAM (§22, the exit-leak round): returns how many lane
+ * connections were shut down, and (through the out-param, NULL
+ * tolerated) how many of them reached the canonical teardown tail
+ * call — eglReleaseThread. The rig asserts the two counts match,
+ * which fails the moment a shutdown path skips the tail. */
+int fdk__wayland_egl_test_teardown_calls(int *release_thread);
+
 /* TEST SEAMS (1.1.0-rc2, the §19 upload-contract re-land): the fallback
  * CPU machinery is pure and driverless — the RGBA-twin swizzle and
  * the tight row packing are verified by unit tests WITHOUT any EGL
