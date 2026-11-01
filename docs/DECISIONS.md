@@ -2262,3 +2262,43 @@ included, A/B-verified both ways); the sanitized exit probe clean
 under the suppression file and under the slow unwinder; the
 negative control reported through the suppression file; exports
 verified.
+
+**6. THE FOLLOW-UP'S ANSWERS (the owner's LD_DEBUG=files run, same
+day).** Two open questions closed, both by measurement:
+
+*THE PULLER IS NAMED: libnvidia-eglcore.so.580.196.07.* The trace's
+three signature lines, read correctly: "dynamically loaded by
+/usr/lib/libasan.so.8" is an ARTIFACT — ASan interposes dlopen, so
+the loader attributes the open to the interceptor; reproduced
+in-sandbox (an identical dlopen attributed to the puller in a plain
+build, to libasan.so.8 under -fsanitize=address). "activating
+NODELETE for libdbus-1.so.3" is the driver's RTLD_NODELETE flag.
+And the third line names the requester outright: the driver's
+non-handle dlsym for dbus_bus_get fails (libdbus is RTLD_LOCAL) and
+the loader's error carries the requester's path —
+libnvidia-eglcore.so.580.196.07. Confirmed against the exact driver
+binary from NVIDIA's official installer: libnvidia-eglcore contains
+"libdbus-1.so.3" as a dlopen target, the full dbus API as dlsym
+names (dbus_bus_get[_private], request_name/add_match/remove_match,
+14x dbus_connection_*, 18x dbus_message_*, dbus_watch_*,
+dbus_pending_call_*, dbus_error_*, dbus_shutdown) and
+"org.freedesktop.DBus", with NO DT_NEEDED on libdbus — which is why
+every package's declared closure came up empty. The GLX twin
+(libnvidia-glcore) carries the same client; libEGL_nvidia and
+libnvidia-egl-wayland have zero dbus references. The libdbus leak
+itself: 766 B in 3 allocations (184 B direct at libdbus+0x276d7,
+582 B indirect at +0x3774d), one-time state the driver never frees
+because it holds the library NODELETE.
+
+*THE 256 B PERSISTS — THE SUPPRESSION IS NECESSARY.* The owner's
+post-fix UNSUPPRESSED run totals 1022 B in 7 allocations = the
+766 B libdbus block + the same 256 B in 4 objects at
+libEGL_nvidia.so.0+0xc94e1. The eglReleaseThread tail call did not
+retire it: the driver allocates at engagement and never frees. The
+entry stays as the honest answer for this driver generation (it
+stops matching on its own if a future driver frees the state); the
+fix stays because it is the canonical sequence, the rig leg guards
+it, and Mesa needs nothing more. The clean-exit contract is
+unchanged: with tests/data/lsan-gl.supp active, the owner's run
+exits 0 with an empty report, and any leak whose stack carries an
+FDK frame still fails (the negative control proved that property).

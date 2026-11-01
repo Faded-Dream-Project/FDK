@@ -44,25 +44,40 @@ leak:libfontconfig
 # fontconfig + HarfBuzz + FriBidi) loads no libdbus under
 # LD_DEBUG=libs.
 #
-# The 2026-11-01 follow-up round narrowed the puller WITHOUT naming
-# it: on the owner's machine the leak's stack runs through
-# libEGL_nvidia.so.0+0xc94e1 (the same recurring driver site as the
-# 256 B entry below), and LD_DEBUG=libs showed the library search
-# riding "RUNPATH from file /usr/lib/libasan.so.8" — which names
-# whose RUNPATH the LOADER consulted, not who requested the load.
-# Arch package evidence rules out the declared link-time closure of
-# every candidate this sandbox could check (nvidia-utils, wlroots,
-# labwc, libnvidia-egl-wayland, libnvidia-glcore: none Depends on
-# libdbus), so the pull is a runtime dlopen inside the proprietary
-# chain — only the owner's machine can name it, with:
-#   LD_DEBUG=files ./build/examples/text_demo "test" 2>&1 \
-#     | grep -B2 -A2 libdbus
-# (look for "needed by" — THAT names the requester; libs' first
-# libdbus block only names the search path). Suppressed by MODULE so
-# LeakSanitizer stays strict for everything FDK owns; if an FDK
-# frame ever appears in a libdbus allocation's stack, that is a real
-# bug — the suppression only matches the third-party module's own
-# frames.
+# The 2026-11-01 follow-up NAMED the puller: libnvidia-eglcore.
+# The owner's LD_DEBUG=files run (the command this block used to
+# request) printed three signature lines; read correctly they are a
+# full confession:
+#   file=libdbus-1.so.3 [0]; dynamically loaded by /usr/lib/libasan.so.8
+#   activating NODELETE for /usr/lib/../lib/libdbus-1.so.3
+#   /usr/lib/../lib/libnvidia-eglcore.so.580.196.07: error: symbol
+#   lookup error: undefined symbol: dbus_bus_get (fatal)
+# The FIRST line's "loaded by libasan.so.8" is an artifact, not a
+# requester: ASan interposes dlopen, so the loader attributes the
+# open to the interceptor — reproduced in-sandbox (the identical
+# dlopen attributed to the puller in a plain build, to libasan.so.8
+# under -fsanitize=address). The SECOND line is the driver's
+# RTLD_NODELETE flag (libdbus stays mapped for the process). The
+# THIRD line is the puller naming itself: the driver's non-handle
+# dlsym for dbus_bus_get fails (libdbus is RTLD_LOCAL) and the
+# loader's error carries the requester's PATH. Confirmed against
+# the exact driver binary (NVIDIA's official 580.196.07 installer):
+# libnvidia-eglcore contains "libdbus-1.so.3" as a dlopen target
+# and the full dbus API as dlsym names (dbus_bus_get[_private],
+# dbus_bus_request_name/add_match/remove_match, 14x
+# dbus_connection_*, 18x dbus_message_*, dbus_watch_*,
+# dbus_pending_call_*, dbus_error_*, dbus_shutdown) plus
+# "org.freedesktop.DBus" — and NO DT_NEEDED on libdbus, which is
+# why every package's declared dependency closure came up empty.
+# The GLX twin (libnvidia-glcore) carries the same client, so X11
+# lane runs see it too; libEGL_nvidia and libnvidia-egl-wayland
+# have zero dbus references. Sizes observed: 670-766 B in 3
+# allocations (the post-fix report: 184 B direct at
+# libdbus+0x276d7 + 582 B indirect at +0x3774d). Suppressed by
+# MODULE so LeakSanitizer stays strict for everything FDK owns; if
+# an FDK frame ever appears in a libdbus allocation's stack, that
+# is a real bug — the suppression only matches the third-party
+# module's own frames.
 leak:libdbus-1
 
 # libEGL_nvidia.so.0 (added 2026-11-01, the §22 exit-leak round):
@@ -82,11 +97,18 @@ leak:libdbus-1
 # stack runs the same probe and exits with ZERO bytes leaked (deep
 # stacks, fast_unwind_on_malloc=0), so the 256 B is the proprietary
 # driver's own state on a machine this sandbox cannot load. The
-# remaining unknown is only whether the fixed tail call already
-# retires it — the owner's next run answers that: if the 256 B still
-# appears with this suppression REMOVED, the driver allocates at
-# engagement and never frees (suppression stands); if it disappears,
-# the fix closed it (entry stays as belt-and-braces for older
-# drivers). Per-library as always: any leak whose stack contains an
-# FDK frame still fails the run.
+# open question — does the fixed tail call retire it? — is now
+# ANSWERED by measurement: the owner's post-fix UNSUPPRESSED run
+# totals 1022 B in 7 allocations = the 766 B libdbus block PLUS the
+# SAME 256 B in 4 objects at libEGL_nvidia.so.0+0xc94e1. The tail
+# call did NOT retire it: the driver allocates at engagement and
+# never frees (the lane pins its libraries by design, so the only
+# candidate frees are a dlclose that never happens — or none at
+# all). This entry is therefore NECESSARY, not belt-and-braces; the
+# fix itself stays because it is the canonical sequence, the rig
+# leg still guards it, and Mesa provably needs nothing more. If a
+# future driver generation frees the state, the entry simply stops
+# matching — it hides nothing FDK owns either way. Per-library as
+# always: any leak whose stack contains an FDK frame still fails
+# the run.
 leak:libEGL_nvidia

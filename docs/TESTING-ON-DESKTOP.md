@@ -1064,24 +1064,29 @@ asserts.
 A clean exit under the sanitizers: pass
 `LSAN_OPTIONS=suppressions=tests/data/lsan-gl.supp` so the
 third-party modules stay quiet while every FDK allocation remains
-accounted. On your machine that is now TWO known NVIDIA-side exit
-reports, both suppressed with proof: the NVIDIA chain's `libdbus-1`
-one-time state (~670-766 B in 3 allocations, frames entirely inside
-libdbus) and `libEGL_nvidia`'s per-thread state (256 B in 4
-allocations, every frame inside `libEGL_nvidia.so.0+0xc94e1` — the
-§22 round audited FDK's teardown call-by-call before suppressing,
-fixed the one missing canonical call (eglReleaseThread, now the
-connection shutdown's tail), and left the question "does the fix
-already retire the 256 B?" to your next UNSUPPRESSED run: if it
-still appears, the driver allocates and never frees and the
-suppression stands; if it vanished, the fix closed it). The
-suppression file's own proof blocks carry both stories plus the
-decisive commands — `LD_DEBUG=files ./build/examples/text_demo
-"test" 2>&1 | grep -B2 -A2 libdbus` (the "needed by" line names the
-libdbus puller; the earlier `LD_DEBUG=libs` RUNPATH line only
-names whose search path the loader used). If an FDK frame appears
-in any leak report, that is a real bug — file it; the negative
-control in the §22 record proves the suppressions cannot hide one.
+accounted. On your machine that is TWO known NVIDIA-side exit
+reports, both suppressed with proof and BOTH now fully explained:
+the driver's `libdbus-1` one-time state (670-766 B in 3
+allocations — 184 B direct at libdbus+0x276d7, 582 B indirect at
++0x3774d) and `libEGL_nvidia`'s state (256 B in 4 allocations, every
+frame inside `libEGL_nvidia.so.0+0xc94e1`). The §22 round audited
+FDK's teardown call-by-call before suppressing and fixed the one
+missing canonical call (eglReleaseThread, now the connection
+shutdown's tail); your post-fix UNSUPPRESSED run then closed the
+last question — 1022 B in 7 allocations = the 766 B libdbus block
+plus the SAME 256 B, so the driver allocates at engagement and
+never frees and the suppression is the honest answer for this
+driver generation. Your LD_DEBUG=files trace also NAMED the libdbus
+puller: `libnvidia-eglcore.so.580.196.07` (its "dynamically loaded
+by libasan.so.8" line is the ASan dlopen-interceptor artifact, and
+the driver's failed non-handle dlsym of dbus_bus_get carries the
+requester's path; confirmed against the driver binary itself —
+libnvidia-eglcore dlopens "libdbus-1.so.3" and dlsyms the full dbus
+API with no DT_NEEDED, and the GLX twin libnvidia-glcore carries
+the same client). The suppression file's proof blocks carry the
+full stories. If an FDK frame appears in any leak report, that is a
+real bug — file it; the negative control in the §22 record proves
+the suppressions cannot hide one.
 
 ## 28. The Wayland/NVIDIA sign-off round (the desktop's answer, not
 the rig's)

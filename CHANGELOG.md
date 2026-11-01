@@ -79,6 +79,26 @@ note their development-candidate status.
   -A2 libdbus` (its "needed by" names the requester). Both entries
   stay per-library: any leak whose stack contains an FDK frame fails
   the run — that is the negative control's whole point.
+- **THE FOLLOW-UP'S ANSWERS (the owner's LD_DEBUG=files run, same
+  day)**: the puller is NAMED — `libnvidia-eglcore.so.580.196.07`.
+  The trace's "dynamically loaded by libasan.so.8" line is an
+  artifact (ASan interposes dlopen, so the loader attributes the
+  open to the interceptor — reproduced in-sandbox both ways), the
+  NODELETE activation is the driver's RTLD_NODELETE flag, and the
+  driver's failed non-handle dlsym names the requester by path in
+  the loader's error. Confirmed against the exact driver binary
+  from NVIDIA's installer: libnvidia-eglcore dlopens
+  "libdbus-1.so.3" and dlsyms the full dbus API (no DT_NEEDED —
+  why every package closure came up empty); the GLX twin
+  libnvidia-glcore carries the same client. And the 256 B question
+  is closed by arithmetic: the owner's post-fix unsuppressed run
+  totals 1022 B in 7 allocations = 766 B libdbus + the SAME 256 B
+  in 4 objects — the eglReleaseThread tail call did NOT retire it
+  (the driver allocates at engagement and never frees), so the
+  `leak:libEGL_nvidia` entry is NECESSARY, not belt-and-braces; the
+  fix stays (canonical sequence, rig-guarded). Clean-exit contract
+  unchanged: with the suppression file active the run exits 0 with
+  an empty report.
 
 ### Fixed — THE GL LANE'S REAL NVIDIA ANSWER: probe the driver, ladder the failures, share the group (§21, the GTX 1050 Ti follow-up)
 
