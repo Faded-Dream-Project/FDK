@@ -41,6 +41,27 @@ FDK lacks, that is a bug in FDK by project rule.
   CONTINUATION.md §29.
 - G-12 (x11 dnd): ButtonRelease can beat the target's last XDndStatus;
   release now drains queued status replies first (419431f).
+  §30/STEP-1d: the DEDICATED regression test exists and is red-without-
+  fix / green-with-fix: tests/test_x11_integration.c::test_dnd_release_
+  drain_gui — the race is CONSTRUCTED (release queued ahead of the
+  accepting Status via two SendEvents, no timing involved), asserts the
+  drag stays alive awaiting XDndFinished instead of cancelling on the
+  spot (the state machine G-12 owns), then finishes SUCCEEDED. Verified:
+  drain disabled -> RED at `!reported` (immediate CANCELLED); drain
+  restored -> GREEN (suite x11 219 ok, 0 skips).
+  OPEN MYSTERY (recorded, not chased further this round): inside the
+  FULL suite, a ClientMessage FDK XSendEvents to this test's target
+  window was traced SENT+flushed yet never appeared in the receiving
+  connection's queue (post-race XPending=0); the identical construction
+  as a standalone probe sees it every time. The test therefore asserts
+  FDK's own state machine, not cross-client delivery — G-12's contract
+  either way. Next lead if ever chased: Xlib per-connection event
+  queue state after 130 prior GUI tests in one process (XUnsynced
+  counter? destroyed-client window IDs recycled into the target's?).
+  Also: the drag's target discovery is z-ORDER dependent — the test
+  re-raises its target and retries the motion (8 attempts, matches
+  the Position's packed root coords) instead of assuming an empty
+  screen; that is a TEST-harness need, not an FDK defect.
 - ENV (not FDK): xtest_driver's unconditional selfcheck moved the pointer
   to (11,22) between every invocation — the §28 rig's four dead legs.
   Fixed in scripts/xtest_driver.c (selfcheck opt-in).
