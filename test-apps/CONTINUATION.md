@@ -1,3 +1,44 @@
+# §31 continuation — UPDATE (owner round 4: the Adwaita crash + invisible file-row icons + the per-entry API)
+
+## Remote proof
+origin/main == `b21d109` ("the round-4 trio"). Working tree = that commit, clean.
+
+## Round 4's three fixes
+1. **CRASH (ASAN stack-use-after-scope, icons.c:233)** — round-3's plain-before-symbolic
+   lookup declared `sym` inside the fallback `if`; `which` borrowed it past the block and
+   was strdup'd at the cache store. Fires ONLY when the plain name misses: Papirus ships
+   plains (rig never fell in), the owner's Adwaita is symbolic-only (every boot). `sym`
+   now lives at iteration scope.
+2. **FILE-ROW ICONS** — the bound list carried text only; no icons in any view on any
+   theme (his words: "the folder dont even have a folder icon at all"). The list branch
+   decorates after bind_model on every rebuild path (navigate/back/fwd/up/inotify/filter
+   all funnel through pane_build_view); iconview resolves the same way. Surfaces are
+   caller-owned clones tracked in a registry, freed when the view rebuilds.
+3. **PUBLIC API** — `fdk_icon_theme_file_surface(dir, name, is_dir, size)` in
+   fdk_theme.h: the file dialog's per-entry resolution exported (extension table, folder
+   chains, one-stat executable split). Answers whatever the INSTALLED theme ships.
+
+## Theme-genericity (the "not just one theme" concern — it never was theme-specific,
+   but now it is PROVEN on two): Adwaita via gtk-ini 18/20 system hits (2 misses are
+   names Debian's Adwaita doesn't ship — verified against its file tree); Papirus via
+   ~/.icons+default/index.theme 20/20. Both self-quit cleanly; leak report has zero
+   engine frames (libGLX_mesa's 108124-byte globals only, unchanged since round 2).
+
+## 16px Papirus note (do not "fix" this): Papirus's small-size SVGs are currentColor +
+.ColorScheme-Text (#444444) BY DESIGN — the colored artwork is 32px+ (icon view shows
+color; list rows show the theme's own monochrome small set, same as GTK managers).
+
+## Rig map: /tmp/hisbox (Papirus shape), /tmp/adwaitabox (gtk-ini shape), both with
+populated HOME (Documents/Downloads/…, .txt/.c/.png/.zip). X11 dev at /tmp/x11dev2
+(.pc prefixes repointed); wayland via scripts/restore_wayland_toolchain.sh; make test
+needs FDK_ENABLE_WAYLAND=1 + `make tools` FIRST (test_cli_tools asserts fdk-theme).
+
+## Owner re-test: ./build/fdk-files →
+- no ASAN abort; sidebar icons themed; FILE rows now carry icons (16px themed set);
+  icon view (View menu) shows colored 32px themed artwork
+- on quit: `icons: N system hits / M lookups` (Adwaita box: N≈18, M=20 is a PASS —
+  view-compact/view-hidden are not in Debian's Adwaita)
+
 # §31 continuation — UPDATE (owner round 3: "icons even in the side bar aren't using system themes")
 
 ## Remote proof
