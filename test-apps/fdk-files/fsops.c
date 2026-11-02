@@ -84,7 +84,13 @@ file_info *fs_list_dir(const char *dir, bool hidden, size_t *count) {
         }
     }
 
-    qsort(v, n, sizeof *v, fi_cmp);
+    /* an EMPTY directory leaves v == NULL (nothing was ever
+     * allocated) and n == 0 — qsort(NULL, 0, ...) is UB by the
+     * library contract even though it is a no-op in practice; the
+     * §31 rig caught it booting into a fresh empty $HOME. */
+    if (n > 0) {
+        qsort(v, n, sizeof *v, fi_cmp);
+    }
     *count = n;
     return v;
 }

@@ -91,8 +91,18 @@ int pane_add(void) {
 
     fapp.panes[fapp.pane_count++] = p;
     /* the new pane opens where the active one is (the classic
-     * "duplicate view" split) */
-    pane_new_tab(p, active_tab(active_pane())->dir);
+     * "duplicate view" split). The BOOT pane has no tabs yet (and a
+     * torn-down app may have none either), so the "where the active
+     * one is" is the HOME directory then — the §31/S5 crash was this
+     * NULL deref at first boot: active_tab(active_pane()) is NULL
+     * until the first tab exists. */
+    {
+        pane *src = active_pane();
+        tab *t = (src != NULL && src->tab_count > 0)
+                     ? active_tab(src)
+                     : NULL;
+        pane_new_tab(p, t != NULL ? t->dir : fi_home());
+    }
     fapp.active_pane = fapp.pane_count - 1;
     return fapp.pane_count;
 }
