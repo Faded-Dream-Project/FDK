@@ -950,6 +950,31 @@ int fdk_x11_dnd_source_handle_event(fdk_platform_connection *conn,
     }
 
     if (xevent->type == ButtonRelease) {
+        /* §29/G-12: the release may arrive BEFORE the target's last
+         * XDndStatus (both were in flight: the Status answers the
+         * final Position, the release races it across the wire). A
+         * release-time one-shot drain of queued ClientMessages on
+         * the helper re-reads that Status BEFORE deciding — without
+         * it, a drag that hovered an accepting target for its whole
+         * last hop cancels on a technicality (the live rig caught
+         * it: sink accepted, drop never sent, drag_done=CANCELLED).
+         * Bounded to the messages ALREADY on our connection — no
+         * round trip, no wait: anything not here yet stays the
+         * target's answer to the drop itself. */
+        if (conn->xdnd_source.target != None &&
+            !conn->xdnd_source.target_accepts) {
+            while (XPending(conn->display) > 0) {
+                XEvent queued;
+                XPeekEvent(conn->display, &queued);
+                if (queued.type != ClientMessage ||
+                    queued.xclient.window != conn->clip_helper) {
+                    break; /* not a status reply: leave it queued */
+                }
+                XNextEvent(conn->display, &queued);
+                (void)fdk_x11_dnd_source_handle_helper_message(
+                    conn, &queued);
+            }
+        }
         if (conn->xdnd_source.target != None &&
             conn->xdnd_source.target_accepts) {
             xdnd_send(conn, conn->xdnd_source.target,

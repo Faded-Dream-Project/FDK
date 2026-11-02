@@ -9629,7 +9629,7 @@ static void test_dnd_drag_icon_gui(void) {
      * successful drag so the destruction path is the DRAG-END path,
      * not a failure path). */
     char cmd[256];
-    snprintf(cmd, sizeof(cmd), "%s 420 20 280 180", sink_bin);
+    snprintf(cmd, sizeof(cmd), "%s 760 500 280 180", sink_bin);
     FILE *sink = popen(cmd, "r");
     assert(sink != NULL);
     int sink_fd = fileno(sink);
@@ -9722,7 +9722,7 @@ static void test_dnd_drag_icon_gui(void) {
            "disc, not the rectangle)\n");
 
     /* Motion: the icon tracks. */
-    int sx = 420 + 100, sy = 20 + 60;
+    int sx = 760 + 100, sy = 500 + 60;
     snprintf(drive, sizeof(drive), "\"%s\" 0x%lx m:%d,%d", xtest, xid,
              (sx + wx) / 2, (wy + sy) / 2);
     (void)system(drive);
@@ -10031,7 +10031,7 @@ static void test_dnd_source_gui(void) {
 
     /* The sink window, placed away from ours, stdout piped. */
     char cmd[256];
-    snprintf(cmd, sizeof(cmd), "%s 420 20 280 180", sink_bin);
+    snprintf(cmd, sizeof(cmd), "%s 760 500 280 180", sink_bin);
     FILE *sink = popen(cmd, "r");
     assert(sink != NULL);
     /* Non-blocking drain helper via fd. */
@@ -10066,8 +10066,8 @@ static void test_dnd_source_gui(void) {
     XTranslateCoordinates(probe, (Window)xid, DefaultRootWindow(probe),
                           60, 40, &wx, &wy, &junk);
     XCloseDisplay(probe);
-    sx = 420 + 100; /* inside the sink rect we placed */
-    sy = 20 + 60;
+    sx = 760 + 100; /* inside the sink rect we placed */
+    sy = 500 + 60;
 
     char drive[512];
     const char *libprefix = getenv("FDK_XLIB_PREFIX");
