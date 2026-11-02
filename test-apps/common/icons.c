@@ -216,11 +216,17 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
              * toolbar came out flat monochrome and looked like
              * "not using my theme" while the resolver was hitting
              * it on every lookup. Symbolic stays the fallback for
-             * the monochrome-only themes. */
+             * the monochrome-only themes (Adwaita's actions are
+             * symbolic-only — owner round 4's box). */
+            /* sym sits at ITERATION scope, not inside the fallback
+             * if: `which` borrows it and is strdup'd at the store
+             * below, after that block closes. The round-3 nested
+             * declaration was a stack-use-after-scope — ASAN on
+             * owner round 4's log, on every Adwaita boot. */
+            char sym[128];
             fdk_surface *themed = fdk_icon_theme_surface(alts[a], px);
             const char *which = alts[a];
             if (themed == NULL) {
-                char sym[128];
                 snprintf(sym, sizeof sym, "%s-symbolic", alts[a]);
                 themed = fdk_icon_theme_surface(sym, px);
                 which = sym;

@@ -550,6 +550,24 @@ int fdk_ui_font_px(void);
  */
 fdk_surface *fdk_icon_theme_surface(const char *icon_name, fdk_i32 size);
 
+/* §31/owner-round-4: the FILE-ENTRY composition made public — the
+ * exact resolution the toolkit's own file dialog uses for every
+ * row it shows. `name` is matched case-insensitively against the
+ * extension table (image / audio / video / archive / document /
+ * font / source / system), a directory resolves to the folder
+ * chain, and an unknown extensionless file pays ONE stat to split
+ * on the executable bit. The first chain entry the theme actually
+ * serves wins, so the answer is whatever the INSTALLED theme
+ * ships — Adwaita's, Papirus's, any freedesktop-compliant theme —
+ * never a name list of our own. Returns a freshly allocated
+ * surface owned by the caller (fdk_surface_destroy), or NULL when
+ * the whole chain misses: fall back to your own glyph then, never
+ * to a wrong-type icon. `dir` may be NULL for a bare-name lookup.
+ * UI-thread only, like the rest of themes. */
+fdk_surface *fdk_icon_theme_file_surface(const char *dir,
+                                         const char *name, bool is_dir,
+                                         fdk_i32 size);
+
 /* ---- Themed icon lookup, §31 additions ------------------------------------
  *
  * WHERE the live theme name came from — the --diag contract: a

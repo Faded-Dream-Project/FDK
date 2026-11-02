@@ -28,32 +28,25 @@
 
 void pane_build_view(pane *p, tab *t);
 
-/* §31/owner-round-3: the app's short category names → the
- * freedesktop icon names real themes ship (the icon-view rows were
- * procedural glyphs only, like the sidebar was). */
-static const char *fi_theme_icon(const file_info *fi) {
-    if (fi->is_dir) {
-        return "folder";
+/* §31/owner-round-4: the row-icon registry — fdk_icon_theme_file_
+ * surface hands out caller-OWNED clones and the list/iconview rows
+ * only BORROW them, so the app owns their lifetime: tracked here,
+ * freed in one batch when a view rebuild replaces them. */
+#define FI_ROW_ICONS_MAX 8192
+static fdk_surface *g_row_icons[FI_ROW_ICONS_MAX];
+static size_t g_row_icon_count;
+
+static void fi_track_row_icon(fdk_surface *s) {
+    if (s != NULL && g_row_icon_count < FI_ROW_ICONS_MAX) {
+        g_row_icons[g_row_icon_count++] = s;
     }
-    if (strcmp(fi->icon, "image") == 0) {
-        return "image-x-generic";
+}
+
+static void fi_free_row_icons(void) {
+    for (size_t i = 0; i < g_row_icon_count; i++) {
+        fdk_surface_destroy(g_row_icons[i]);
     }
-    if (strcmp(fi->icon, "audio") == 0) {
-        return "audio-x-generic";
-    }
-    if (strcmp(fi->icon, "video") == 0) {
-        return "video-x-generic";
-    }
-    if (strcmp(fi->icon, "archive") == 0) {
-        return "package-x-generic";
-    }
-    if (strcmp(fi->icon, "code") == 0) {
-        return "text-x-script";
-    }
-    if (strcmp(fi->icon, "doc") == 0) {
-        return "text-x-generic";
-    }
-    return "text-x-generic";
+    g_row_icon_count = 0;
 }
 
 static void thumb_ready_cb(const char *path, fdk_surface *thumb,
@@ -520,13 +513,17 @@ void pane_build_view(pane *p, tab *t) {
                     continue;
                 }
             }
-            /* §31/owner-round-3: no thumbnail — the themed type
-             * icon (the app cache owns it), same floor contract as
-             * the sidebar rows. */
+            /* §31/owner-round-4: no thumbnail — the themed type
+             * icon through the PUBLIC per-entry API (the same
+             * resolution the toolkit's own file dialog uses —
+             * whatever the installed theme ships). Caller-owned
+             * surface: the iconview keeps the pointer, freed with
+             * the item. */
             {
-                fdk_surface *img =
-                    icons_get(fi_theme_icon(fi), 32, 1.0f);
+                fdk_surface *img = fdk_icon_theme_file_surface(
+                    t->dir, fi->name, fi->is_dir, 32);
                 if (img != NULL) {
+                    fi_track_row_icon(img);
                     (void)fdk_iconview_set_item_pixmap(
                         iv, fdk_iconview_item_count(iv) - 1, img);
                 }
@@ -547,6 +544,39 @@ void pane_build_view(pane *p, tab *t) {
                                   FM_COL_NAME);
         fdk_list_set_on_row_activate(list, row_activated, vc);
         fdk_widget_set_accessible_name(list, "Files");
+        /* §31/owner-round-4: the bound mirror carries text only —
+         * the rows had NO icons at all (the owner's report: "the
+         * folder dont even have a folder icon"). Decorate after the
+         * bind: the glyph floor first, then the themed raster
+         * through the PUBLIC per-entry API when the installed theme
+         * serves one. Runs on every rebuild path — navigate,
+         * back/forward/up, the inotify reload, the filter change
+         * (all of them funnel through pane_build_view). The API
+         * returns CALLER-OWNED clones; the registry frees the
+         * previous batch when the view rebuilds (the rows only
+         * borrow the pointers). */
+        {
+            fi_free_row_icons();
+            size_t n = fdk_list_row_count(list);
+            for (size_t i = 0; i < n; i++) {
+                fdk_u64 id = fdk_list_bound_row_id(list, i);
+                const file_info *fi = fmodel_info_of(id);
+                if (fi == NULL) {
+                    continue;
+                }
+                (void)fdk_list_row_set_icon(
+                    list, i,
+                    fi->is_dir ? FDK_ROW_ICON_FOLDER
+                               : FDK_ROW_ICON_FILE);
+                fdk_surface *img = fdk_icon_theme_file_surface(
+                    t->dir, fi->name, fi->is_dir, 16);
+                if (img != NULL) {
+                    fi_track_row_icon(img);
+                    (void)fdk_list_row_set_icon_surface(list, i,
+                                                        img);
+                }
+            }
+        }
         vc->view = list;
         vc->is_list = true;
         t->list = list;

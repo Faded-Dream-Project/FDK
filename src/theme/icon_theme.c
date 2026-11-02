@@ -1604,6 +1604,53 @@ fdk_surface *fdk__icon_theme_surface(const char *icon_name, fdk_i32 size) {
     return NULL; /* total miss, negative result now cached */
 }
 
+
+/* §31/owner-round-4: the file-dialog's per-entry resolution, made
+ * public. Same contract as fdk_icon_theme_surface (fresh surface,
+ * caller owns) over the entry-classification chain — see
+ * fdk_theme.h for the full doc. */
+fdk_surface *fdk_icon_theme_file_surface(const char *dir,
+                                         const char *name, bool is_dir,
+                                         fdk_i32 size) {
+    if (name == NULL || name[0] == '\0' ||
+        size < 1 || size > 4096) {
+        return NULL;
+    }
+    const char *const *chain =
+        fdk__icon_chain_for_entry(dir != NULL ? dir : "", name,
+                                  is_dir);
+    if (chain == NULL) {
+        return NULL;
+    }
+    fdk_surface *cached =
+        fdk__icon_theme_surface_chain(chain, size);
+    if (cached == NULL) {
+        return NULL;
+    }
+    /* The chain hands out its CACHED surface (borrowed); the public
+     * contract is a caller-owned clone — the same clone idiom the
+     * single-name fdk_icon_theme_surface uses. */
+    fdk_surface_info info;
+    if (fdk_surface_get_info(cached, &info) != FDK_OK) {
+        return NULL;
+    }
+    fdk_surface *clone = NULL;
+    if (fdk_surface_create_format(info.width, info.height,
+                                  FDK_SURFACE_FORMAT_ARGB8888,
+                                  &clone) != FDK_OK) {
+        return NULL;
+    }
+    if (fdk_surface_blit(clone, 0, 0, cached,
+                         (fdk_rect){ .x = 0, .y = 0,
+                                     .width = info.width,
+                                     .height = info.height }) !=
+        FDK_OK) {
+        fdk_surface_destroy(clone);
+        return NULL;
+    }
+    return clone;
+}
+
 fdk_surface *fdk__icon_theme_surface_chain(const char *const *names,
                                            fdk_i32 size) {
     if (names == NULL) {
