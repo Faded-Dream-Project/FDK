@@ -497,6 +497,9 @@ typedef struct sc_list_row {
     const char *keys;
 } sc_list_row;
 
+static void sc_list_window_event(fdk_window *window,
+                                 const fdk_event_data *ev, void *user);
+
 void menus_open_shortcut_list(files_app *a) {
     static const sc_list_row rows[] = {
         {"New tab", "Ctrl+T"},
@@ -545,8 +548,22 @@ void menus_open_shortcut_list(files_app *a) {
     }
     fdk_widget_set_accessible_name(list, "Keyboard shortcuts");
     fdk_window_show(win);
-    /* auto-managed: closing it just destroys the window (FDK owns
-     * the toplevel; no callback needed for a read-only list) */
+    /* §31/owner-round-2: FDK does NOT destroy a window on a close
+     * request (fdk_event.h: "the application decides") — the old
+     * "auto-managed" comment was wrong, and this window could not be
+     * closed at all (the WM's close button and Alt+F4 just drained).
+     * Same pattern as props_close: WM close or Escape destroys it. */
+    fdk_window_set_event_callback(win, sc_list_window_event, NULL);
+}
+
+static void sc_list_window_event(fdk_window *window,
+                                 const fdk_event_data *ev, void *user) {
+    (void)user;
+    if (ev->type == FDK_EVENT_WINDOW_CLOSE_REQUEST ||
+        (ev->type == FDK_EVENT_KEY_DOWN &&
+         ev->key.scancode == FDK_KEY_ESC)) {
+        fdk_window_destroy(window);
+    }
 }
 
 /* ---- selection-dependent actions (context menus' targets) ---------- */
