@@ -1,3 +1,58 @@
+# §31 continuation — UPDATE (owner round 3: "icons even in the side bar aren't using system themes")
+
+## Remote proof
+origin/main == `77be5c7` ("icons/sidebar: the app never asked the theme — now every icon surface does").
+
+## The finding that mattered
+His round-3 log carried our round-2 verdict line: `icons: theme
+'Papirus-Nordic' via search-path default` — DETECTION WORKS. The rig
+repro with the REAL Papirus package in his exact box shape resolved
+12/12 toolbar names SYSTEM tier. **The engine was never broken — the
+app never asked.** The places sidebar, devices, bookmarks, trash and
+icon-view rows drew procedural `FDK_ROW_ICON_*` glyphs / plain
+buttons; no `icons_get` existed for any of them. FDK's own file
+dialog had the themed-raster pattern since 1.5.x, but the seam was
+engine-internal so an app COULDN'T copy it.
+
+## What changed
+1. `fdk_list_row_set_icon_surface()` is now public API (wraps the
+   internal seam). The app's places/mounts/bookmarks rows carry real
+   freedesktop names and resolve 16px themed rasters, glyph floor
+   kept. Icon-view file rows resolve themed type icons (folder,
+   image-x-generic, ...). His-box rig: **20/20 system hits**.
+2. Toolbar lookup is PLAIN-FIRST, symbolic only as fallback (the old
+   symbolic-first order tinted everything flat monochrome — "looks
+   like not my theme" while hitting it every time). NOTE: Papirus's
+   16px ACTION icons are near-monochrome by design (currentColor +
+   .ColorScheme-Text); the colored ones are the places/folder icons,
+   which now render colored (pixel-verified on the rig).
+3. Self-diagnosing logs: WARN when the detected theme has no
+   index.theme on the search path (dangling Inherits — the case that
+   silently served hicolor), and a shutdown one-liner
+   `icons: N system hits / M lookups` via public `fdk_log`.
+
+## Rig notes (post-sandbox-recycle rebuild)
+- X11 dev prefix now /tmp/x11dev2 (debs + .pc prefixes repointed);
+  scripts/hisbox_run.sh reproduces the owner's box shape; real
+  Papirus from apt (22.6 MB) parked at /tmp/pkg/papirus-root.
+- Wayland toolchain restored via scripts/restore_wayland_toolchain.sh
+  (make test needs FDK_ENABLE_WAYLAND=1 + `make tools` first —
+  test_cli_tools asserts the fdk-theme binary exists).
+- A GLM-authored divergent line was found on the local tree
+  (c1f27e9 + dirty wayland_egl.c): preserved on branch `glm-line`
+  + stash; DO NOT git add -A on this tree — untracked fdk-shell/
+  leftovers from that line will be swallowed.
+
+## Owner re-test
+`./build/fdk-files` and look for:
+- `icons: theme 'Papirus-Nordic via ...` (detection verdict)
+- the sidebar rows now carrying Papirus artwork (colored folder /
+  house / drive icons), toolbar buttons the theme's own glyphs
+- on quit: `icons: N system hits / M lookups` (N > 0 = the desktop
+  theme is being served)
+- if a WARN about a missing index.theme appears, the theme name is
+  dangling — install it or fix the setting it came from.
+
 # §31 continuation — UPDATE (owner round 2: "still not used" + unclosable Help window + the 2.4 MB ASAN leak)
 
 ## Remote proof
