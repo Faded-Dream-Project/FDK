@@ -1203,6 +1203,39 @@ const char *fdk__icon_theme_current_name(void) {
         return g_current;
     }
     const char *answer = it_detect_icon_theme();
+    /* §31/owner-round-3: the detection said a NAME; is the theme
+     * actually installed anywhere on the search path? A dangling
+     * name (a settings file or default/index.theme pointing at an
+     * uninstalled theme) silently fell through to hicolor before
+     * this — every app icon came out "not my theme" with nothing in
+     * the log saying why. */
+    {
+        it_base bases[16];
+        size_t nb = it_collect_bases(bases, 16);
+        bool present = false;
+        for (size_t b = 0; b < nb && !present; b++) {
+            if (bases[b].flat) {
+                continue;
+            }
+            char p[IT_PATH_MAX];
+            if (snprintf(p, sizeof(p), "%s/%s/index.theme",
+                         bases[b].path, answer) <
+                (int)sizeof(p)) {
+                struct stat st;
+                if (stat(p, &st) == 0 && S_ISREG(st.st_mode)) {
+                    present = true;
+                }
+            }
+        }
+        if (!present && strcmp(answer, "hicolor") != 0) {
+            FDK_WARN("icons: theme '%s' is named by the desktop but "
+                     "has no index.theme on the search path "
+                     "(~/.icons, ~/.local/share/icons, "
+                     "XDG_DATA_DIRS/icons) — falling back to the "
+                     "inheritance chain; install the theme or fix "
+                     "the setting", answer);
+        }
+    }
     /* §31/owner-round-2: the detection verdict, ONE line per
      * process — "which icon theme, through which channel" is the
      * first question when icons look wrong on a real desktop. */

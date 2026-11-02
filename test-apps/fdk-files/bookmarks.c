@@ -354,6 +354,12 @@ void bookmarks_refresh(void) {
         (void)fdk_list_append(g_list, g_marks[i].label, &idx);
         (void)fdk_list_row_set_icon(g_list, idx,
                                     FDK_ROW_ICON_FOLDER);
+        /* §31/owner-round-3: the themed folder (the cache owns it),
+         * same as the places rows above. */
+        fdk_surface *img = icons_get("folder", 16, 1.0f);
+        if (img != NULL) {
+            (void)fdk_list_row_set_icon_surface(g_list, idx, img);
+        }
     }
     fdk_list_end_batch(g_list);
 }

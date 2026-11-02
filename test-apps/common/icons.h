@@ -53,6 +53,11 @@ const char *icons_available(void);
  * when told, for HiDPI crispness. */
 fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale);
 
+/* §31/owner-round-3: the tier verdict for the shutdown log line —
+ * how many lookups, how many were served by the system theme. */
+long icons_system_hits(void);
+long icons_lookups(void);
+
 /* Which tier answered the LAST icons_get on this thread — the --diag
  * contract. Strings are static; NONE means "the caller's glyph". */
 typedef enum icons_tier {
