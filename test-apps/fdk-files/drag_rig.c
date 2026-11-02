@@ -9,11 +9,25 @@
  *   D2  drag-to-bookmark: press on a folder row, motion to the
  *       sidebar's bookmark list, release — the bookmark count in
  *       the app's config file must grow by one.
+ *   D3  bookmark reorder: drag bookmark row 1 below row 3 in the
+ *       sidebar's own list — the saved order must change.
+ *   D4  drag-out: drag a file onto the EXTERNAL xdnd_sink window
+ *       (scripts/xdnd_sink, a raw-Xlib XDND peer started by
+ *       run_drig.sh) — the sink must print the URI payload.
  *
  * The app must run with FDK_FILES_DRIG=1 (a §27 gate in main.c that
  * arranges a deterministic layout: split view ON, both panes in
  * /tmp/fdk-drig with known filenames, one bookmark pre-seeded) and
  * FDK_TESTAPP_FRAMES high enough to stay alive for the rig.
+ *
+ * Coordinates (measured against the DRIG screenshot, 1000x700 at
+ * 96dpi, window parked at (0,0) — run_drig.sh verifies the origin):
+ *   toolbar           y  8..19
+ *   sidebar           x  7..149  (bookmarks list)
+ *   left pane rows    x 153..369; row 1 (alpha.txt) y 124..138,
+ *                      beta-dir's band y 377..436
+ *   right pane        x 520..950 (empty dir: the drop target)
+ *   bookmark rows     ~30px apart from y 113 (row 0 = the seed)
  *
  * Usage: drag_rig <display> <app-window-xid-decimal>
  */
@@ -105,6 +119,55 @@ static int count_lines(const char *path) {
     return n;
 }
 
+/* the line at `index' (1-based among non-comment lines), or NULL */
+static char *line_at(const char *path, int index) {
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        return NULL;
+    }
+    static char buf[512];
+    int n = 0;
+    char line[512];
+    while (fgets(line, sizeof line, f) != NULL) {
+        if (line[0] != '#' && line[0] != '\n') {
+            n++;
+            if (n == index) {
+                snprintf(buf, sizeof buf, "%s", line);
+                /* trim */
+                size_t l = strlen(buf);
+                while (l > 0 && (buf[l - 1] == '\n' ||
+                                 buf[l - 1] == ' ')) {
+                    buf[--l] = '\0';
+                }
+                fclose(f);
+                return buf;
+            }
+        }
+    }
+    fclose(f);
+    return NULL;
+}
+
+/* waits for `path' to contain a line with `needle'; up to secs */
+static int wait_line_contains(const char *path, const char *needle,
+                              int secs) {
+    for (int i = 0; i < secs * 4; i++) {
+        FILE *f = fopen(path, "r");
+        if (f != NULL) {
+            char line[512];
+            while (fgets(line, sizeof line, f) != NULL) {
+                if (strstr(line, needle) != NULL) {
+                    fclose(f);
+                    return 1;
+                }
+            }
+            fclose(f);
+        }
+        msleep(250);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 3) {
         fprintf(stderr, "usage: %s <display> <app-xid>\n", argv[0]);
@@ -131,26 +194,25 @@ int main(int argc, char **argv) {
     XTranslateCoordinates(dpy, app, root, 0, 0, &tx, &ty, &child);
     int win_x = tx, win_y = ty;
     printf("window at (%d,%d) %ux%u\n", win_x, win_y, pw, ph);
-    int pane1_x = win_x + 190 + 40;   /* inside the left pane  */
-    int pane2_x = win_x + 190 + 300;  /* inside the right pane */
-    int row1_y = win_y + 160;         /* first file row        */
-    int sidebar_y = win_y + 300;      /* the bookmarks list    */
+
+    /* calibrated against the DRIG screenshot (see the file head):
+     * alpha.txt's text band is y 124..138 at x 153..369. */
+    int row1_x = win_x + 250;
+    int row1_y = win_y + 131;
+    int folder_x = win_x + 250;
+    int folder_y = win_y + 400; /* beta-dir's band 377..436 */
+    int pane2_x = win_x + 700;  /* the right pane (empty) */
+    int bookmark_x = win_x + 75;
+    int bookmark_y = win_y + 119; /* row 0 = the seed */
 
     int rc = 0;
 
     /* ---- D1: drag-between-panes ---------------------------------- */
     /* the drag source arms only on a press over a SELECTED row:
-     * click-select first, then press-and-move. The row scan covers
-     * the toolbar/breadcrumb offsets of the real layout. */
-    int sel_y = 0;
-    for (int y = 150; y <= 260 && sel_y == 0; y += 22) {
-        click(pane1_x, y);
-        sel_y = y; /* any click selects SOME row in the list view;
-                    * the alpha.txt row is the first — the scan's
-                    * first hit inside the list area is it */
-    }
+     * click-select alpha.txt first, then press-and-move. */
+    click(row1_x, row1_y);
     int before = dir_has("/tmp/fdk-drig/right", "alpha.txt");
-    drag(pane1_x, sel_y, pane2_x, sel_y);
+    drag(row1_x, row1_y, pane2_x, row1_y);
     int tries = 0;
     int after = 0;
     while (tries++ < 40) { /* the drop's copy may ride a worker */
@@ -171,8 +233,7 @@ int main(int argc, char **argv) {
 
     /* ---- D2: drag-to-bookmark ------------------------------------ */
     int marks_before = count_lines("/tmp/fdk-drig-bookmarks");
-    drag(pane1_x, row1_y + 24 /* the second row: a folder */,
-         win_x + 95, sidebar_y);
+    drag(folder_x, folder_y, bookmark_x, bookmark_y);
     msleep(800);
     int marks_after = count_lines("/tmp/fdk-drig-bookmarks");
     if (marks_after == marks_before + 1) {
@@ -181,6 +242,52 @@ int main(int argc, char **argv) {
     } else {
         printf("FAIL D2: bookmark count %d -> %d\n",
                marks_before, marks_after);
+        rc = 1;
+    }
+
+    /* ---- D3: bookmark reorder ------------------------------------ */
+    /* the sidebar's own list drag: press bookmark row 0 (the seed
+     * /tmp/fdk-drig), drag onto row 2's band (below the just-added
+     * bookmark), release. The saved file's line order must change:
+     * /tmp/fdk-drig was line 1; afterwards it must NOT be line 1. */
+    char *first_before = line_at("/tmp/fdk-drig-bookmarks", 1);
+    int n_marks = count_lines("/tmp/fdk-drig-bookmarks");
+    if (n_marks >= 2) {
+        /* re-select row 0 (a drag from the bookmarks list needs the
+         * row selected first, same arming rule) */
+        click(bookmark_x, bookmark_y);
+        drag(bookmark_x, bookmark_y, bookmark_x,
+             bookmark_y + 2 * 30); /* row 2's band */
+        msleep(800);
+        char *first_after = line_at("/tmp/fdk-drig-bookmarks", 1);
+        if (first_before != NULL && first_after != NULL &&
+            strcmp(first_before, first_after) != 0) {
+            printf("PASS D3: bookmark reorder moved '%s' off the "
+                   "head (now '%s')\n", first_before, first_after);
+        } else {
+            printf("FAIL D3: first bookmark still '%s' (was '%s')\n",
+                   first_after ? first_after : "(none)",
+                   first_before ? first_before : "(none)");
+            rc = 1;
+        }
+    } else {
+        printf("FAIL D3: need >=2 bookmarks to reorder, have %d\n",
+               n_marks);
+        rc = 1;
+    }
+
+    /* ---- D4: drag out to an external application ------------------ */
+    /* run_drig.sh starts scripts/xdnd_sink at (1020,100) 200x200 and
+     * tees its stdout to /tmp/drig-sink.log; drag alpha.txt onto it
+     * and the sink must print the URI payload. */
+    drag(row1_x, row1_y, 1100, 180);
+    if (wait_line_contains("/tmp/drig-sink.log", "payload uri-list",
+                           20)) {
+        printf("PASS D4: drag-out delivered the URI list to the "
+               "external xdnd_sink window\n");
+    } else {
+        printf("FAIL D4: xdnd_sink never reported a payload "
+               "(see /tmp/drig-sink.log)\n");
         rc = 1;
     }
 

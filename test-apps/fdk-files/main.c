@@ -709,6 +709,11 @@ int main(int argc, char **argv) {
         pane_navigate(fapp.panes[0], "/tmp/fdk-drig/left");
         (void)pane_add();
         pane_navigate(fapp.panes[1], "/tmp/fdk-drig/right");
+        /* the drag rig's coordinates assume the DETAIL list; the
+         * app's real prefs may say icons (drag arming is list-only)
+         */
+        pane_set_view_mode(fapp.panes[0], VIEW_DETAIL);
+        pane_set_view_mode(fapp.panes[1], VIEW_DETAIL);
         fapp.active_pane = 0;
         (void)fdk_window_resize(fapp.base.window, 1000, 700);
         printf("DRIG-READY\n");
