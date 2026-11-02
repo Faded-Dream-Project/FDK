@@ -72,6 +72,18 @@ void fdk__scrollview_layout_changed(fdk_widget *w);
 void fdk__scrollview_viewport(fdk_widget *w, fdk_i32 *out_w,
                               fdk_i32 *out_h);
 
+/* scroll.c (1.5.1, list columns' anchor math): the HORIZONTAL
+ * viewport width — bounds minus the v-bar's reserved strip under
+ * CLASSIC bars, full width under OVERLAY ones. */
+fdk_i32 fdk__scrollview_viewport_width(fdk_widget *w);
+
+/* list.c TEST SEAM (1.5.1): the resolved column geometry —
+ * col_x[c], column c's width (col 0 = the expanded name column),
+ * and the list's content_width. Tests only. */
+void fdk__list_test_column_x(fdk_widget *list, size_t col,
+                             fdk_i32 *out_x, fdk_i32 *out_w,
+                             fdk_i32 *out_content_width);
+
 /* ---- shared helpers ---- */
 
 /* fdk_alloc'd copy of s (NULL -> NULL). The catalog's owned text. */

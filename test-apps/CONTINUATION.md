@@ -1,3 +1,44 @@
+# §31 continuation — UPDATE (owner round 8: the columns' far-end anchor + the folder type)
+
+## Remote proof
+origin/main == this round's code commit + docs commit. Tree clean at that commit.
+
+## Round 8 delivered (the owner's three reports)
+1. **THE COLUMNS HUG THE FAR END + FOLLOW RESIZES (engine, 1.5.1)** — round 7 summed widths from
+   the left, so the fixed columns clustered right after the shortest filename and never moved on
+   resize. The layout is now RESOLVED, not summed: `list_columns_layout()` runs on every viewport
+   change (arrange / the app's set_bounds / the paint self-heal — all funneled through one sync)
+   and picks one of two modes. ANCHORED: the last fixed column's right edge sits at the viewport's
+   end (clear of the v-scrollbar's reserved strip), the name column stretches across ALL the slack.
+   CONTENT (window narrower than the natural spread): natural widths, one separator apart, with the
+   h-scroll floored at the spread — narrow windows degrade into a scrollable pane instead of
+   colliding with the names. The header gained vertical divider hairs between the fixed columns.
+   ENGINE BUG this round exposed + fixed: the paint-tail self-heal had its own inline scroll
+   set_bounds that BYPASSED the shared sync — the anchor never re-resolved on a direct set_bounds
+   resize; it now routes through list_sync_scroll_bounds like every other path.
+   Tested: right-edge anchor == viewport, widen-to-600 re-anchors, narrow-to-160 flips to content
+   mode with the spread floor, re-widen re-anchors, selection under columns, clear-to-plain.
+   Rig-verified on BOTH backends: name→Modified gap 571px (X11 1080px window) / 767px (Wayland
+   1280px window) vs round 7's ~150px; right edges at the window end minus scrollbar+pad.
+2. **THE FOLDER TYPE (app fix)** — mime_category had no inode branch: "inode/directory" fell
+   through every category and returned "File". Directories now read "Folder" (and other inode/*
+   entries "System"). Rig-verified: the folder row shows no Size (dirs) and a distinct Type cell.
+3. **WAYLAND SUPPORT CONFIRMED** — fdk-files runs the Wayland backend natively (the owner's own
+   logs have always been backend=wayland); this round adds the proof rig: headless sway + grim
+   screenshot (attached to the report) showing the same far-end column geometry on Wayland, and
+   the Wayland self-quit under LSan is STILL zero-leak exit-0. X11 self-quit: only the documented
+   Mesa/GLVND ~108KB rig class (round 7) — unchanged, third-party, absent on the owner's NVIDIA X11.
+
+## Rig index (additions)
+grim lives at /home/z/apt/prefix/usr/bin/grim (restore_wayland_toolchain.sh); run it while the app
+is ALIVE (a compositor screenshot is of live surfaces), with LD_LIBRARY_PATH to the prefix.
+NOTE for the X11 rig: `env -u WAYLAND_DISPLAY` when a sway session is running in the same shell,
+or the app will prefer the Wayland backend (the backend picker prefers WAYLAND_DISPLAY).
+
+## Next round candidates
+- His X11 boot-slowness report (round-6 item C) — STILL OPEN.
+- The E2E XTest self-drop proof (round-6 leftover).
+
 # §31 continuation — UPDATE (owner round 7: the list-view columns + the exit leaks)
 
 ## Remote proof
