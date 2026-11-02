@@ -113,21 +113,10 @@ static fdk_result it_svg_read_all(const char *path, char **out_buf,
     return FDK_OK;
 }
 
-fdk_result fdk__icon_svg_raster(const char *path, fdk_i32 size,
-                                fdk_surface **out_surface) {
-    if (path == NULL || out_surface == NULL || size <= 0 ||
-        size > 16384) {
-        return FDK_ERR_INVALID_ARGUMENT;
-    }
-    *out_surface = NULL;
-
-    char *buf = NULL;
-    size_t len = 0;
-    fdk_result r = it_svg_read_all(path, &buf, &len);
-    if (r != FDK_OK) {
-        return r;
-    }
-
+/* §31/PART-2: the bytes core both entries share. buf must be
+ * NUL-terminated and is CONSUMED (nsvgParse modifies it in place). */
+static fdk_result svg_raster_core(char *buf, fdk_i32 size,
+                                  fdk_surface **out_surface) {
     /* Parse. nsvgParse modifies the buffer in place — fine, it is
      * ours. units="px" with dpi 96 keeps document coordinates in
      * CSS pixels (the unit icon themes author in). */
@@ -177,8 +166,7 @@ fdk_result fdk__icon_svg_raster(const char *path, fdk_i32 size,
     }
     if (covered < FDK_SVG_MIN_COVERAGE) {
         FDK_INFO("icon SVG has no drawable coverage (unsupported "
-                 "features?): treated as a miss: %s",
-                 path);
+                 "features?): treated as a miss");
         fdk_free(rgba);
         return FDK_ERR_UNSUPPORTED;
     }
@@ -216,4 +204,42 @@ fdk_result fdk__icon_svg_raster(const char *path, fdk_i32 size,
     fdk_free(rgba);
     *out_surface = surf;
     return FDK_OK;
+}
+
+
+/* The file-based entry (unchanged contract). */
+fdk_result fdk__icon_svg_raster(const char *path, fdk_i32 size,
+                                fdk_surface **out_surface) {
+    if (path == NULL || out_surface == NULL || size <= 0 ||
+        size > 16384) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    *out_surface = NULL;
+    char *buf = NULL;
+    size_t len = 0;
+    fdk_result r = it_svg_read_all(path, &buf, &len);
+    if (r != FDK_OK) {
+        return r;
+    }
+    return svg_raster_core(buf, size, out_surface);
+}
+
+/* §31/PART-2: the public MEMORY entry — embedded icons rasterize
+ * from the bytes the executable carries. */
+fdk_result fdk_surface_create_from_svg_bytes(const char *svg_document,
+                                             fdk_i32 size,
+                                             fdk_surface **out_surface) {
+    if (svg_document == NULL || out_surface == NULL || size <= 0 ||
+        size > 4096) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    *out_surface = NULL;
+    /* the parse mutates: hand it a private copy */
+    size_t len = strlen(svg_document);
+    char *buf = fdk_alloc(len + 1);
+    if (buf == NULL) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(buf, svg_document, len + 1);
+    return svg_raster_core(buf, size, out_surface);
 }

@@ -698,6 +698,10 @@ int main(int argc, char **argv) {
     bookmarks_load(); /* before the sidebar builds (§26/3a) */
     panes_build(&fapp);
     menus_build(&fapp);
+    /* §31/S1: one relayout pass AFTER the tree exists — the canvas
+     * bounds are also set at creation now, but this keeps them true
+     * to the final laid-out button sizes even at boot. */
+    ta_icon_buttons_relayout();
     ops_init(); /* the worker engine (§25/4b)                   */
 
     if (drig) {

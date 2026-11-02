@@ -204,6 +204,9 @@ void ta_icon_buttons_free(void) {
 }
 
 void ta_icon_buttons_relayout(void) {
+    if (getenv("FDK_ICONS_TRACE") != NULL) {
+        fprintf(stderr, "icons: relayout pass over %d button(s)\n", 0);
+    }
     for (iconbtn *ib = g_icon_buttons; ib != NULL; ib = ib->next) {
         fdk_rect b = fdk_widget_get_bounds(ib->button);
         /* the canvas rides AT the button's origin, filling it; the
@@ -216,6 +219,10 @@ void ta_icon_buttons_relayout(void) {
 static void iconbtn_paint(fdk_widget *w, fdk_surface *surface,
                           fdk_rect bounds, fdk_rect clip, void *user) {
     iconbtn *ib = user;
+    if (getenv("FDK_ICONS_TRACE") != NULL) {
+        fprintf(stderr, "icons: PAINT btn=%dx%d\n", bounds.width,
+                bounds.height);
+    }
     (void)w;
     (void)clip;
     fdk_color ink = fdk_theme_get_color(NULL, FDK_TK_TEXT);
@@ -307,6 +314,18 @@ bool ta_icon_button_add(fdk_widget *bar, ta_app *app,
         free(ib);
         return false;
     }
+    /* §31/S1 ROOT-CAUSE FIX: the canvas is a CHILD of the button, and
+     * the paint walk only visits children with non-empty bounds. The
+     * old code set those bounds ONLY in ta_icon_buttons_relayout(),
+     * which runs on FDK_EVENT_WINDOW_CONFIGURE — an event that never
+     * arrives after the callback is registered (the initial map
+     * happens before). The canvas kept its creation-time empty
+     * bounds, paint_rec() early-outed on rect_empty, and the button
+     * showed only its background: THE BLANK TOOLBAR. Bounds are set
+     * HERE now, to the button's own natural size; the configure relay
+     * remains for any later resize. */
+    fdk_widget_set_bounds(ib->canvas,
+                          (fdk_rect){0, 0, 32, 28});
     ib->next = g_icon_buttons;
     g_icon_buttons = ib;
 

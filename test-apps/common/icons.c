@@ -145,25 +145,64 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
      * tried before the full-color one — symbolic comes back already
      * tinted with the theme ink, which is exactly what a toolbar
      * wants. THIS LOOKUP IS NOT CACHED HERE: FDK's icon-theme engine
-     * owns its own three-layer cache, and a theme switch resets it. */
+     * owns its own three-layer cache, and a theme switch resets it.
+     *
+     * The FALLBACK-NAME chain (the Icon Naming Specification's own
+     * recommendation for names a theme may lack): view-hidden's
+     * alternates, view-compact's, each tried symbolic-then-plain
+     * through the system tier BEFORE the bundled set answers. A
+     * theme that has NONE of them falls to the embedded SVG — never
+     * a blank button. */
+    static const struct {
+        const char *name;
+        const char *const alts[3]; /* NULL-terminated */
+    } alt_names[] = {
+        {"view-hidden", {"visibility", NULL, NULL}},
+        {"view-compact", {"view-list-compact", "view-list-details",
+                          NULL}},
+        {"view-grid", {"view-list-icons", NULL, NULL}},
+        {"system-search", {"edit-find", NULL, NULL}},
+        {"user-trash-full", {"user-trash", NULL, NULL}},
+        {"folder-documents", {"folder", NULL, NULL}},
+        {"folder-download", {"folder", NULL, NULL}},
+        {"folder-music", {"folder", NULL, NULL}},
+        {"folder-pictures", {"folder", NULL, NULL}},
+        {"folder-videos", {"folder", NULL, NULL}},
+    };
     const char *std = standard_name(name);
     if (std != NULL) {
-        char sym[128];
-        snprintf(sym, sizeof sym, "%s-symbolic", std);
-        fdk_surface *themed = fdk_icon_theme_surface(sym, px);
-        const char *which = sym;
-        if (themed == NULL) {
-            themed = fdk_icon_theme_surface(std, px);
-            which = std;
-        }
-        if (themed != NULL) {
-            g_last_tier = ICONS_TIER_SYSTEM;
-            snprintf(g_last_path, sizeof g_last_path, "%s", which);
-            if (getenv("FDK_ICONS_TRACE") != NULL) {
-                fprintf(stderr, "icons: '%s' -> SYSTEM '%s'\n",
-                        name, which);
+        /* a small mutable copy: [0]=std, then the alternates */
+        const char *alts[4] = {std, NULL, NULL, NULL};
+        size_t alts_n = 1;
+        for (size_t i = 0;
+             i < sizeof alt_names / sizeof alt_names[0]; i++) {
+            if (strcmp(alt_names[i].name, std) == 0) {
+                for (size_t k = 0; k < 3 && alt_names[i].alts[k] != NULL;
+                     k++) {
+                    alts[alts_n++] = alt_names[i].alts[k];
+                }
+                break;
             }
-            return themed; /* borrowed from the engine's cache */
+        }
+        for (size_t a = 0; a < alts_n; a++) {
+            char sym[128];
+            snprintf(sym, sizeof sym, "%s-symbolic", alts[a]);
+            fdk_surface *themed = fdk_icon_theme_surface(sym, px);
+            const char *which = sym;
+            if (themed == NULL) {
+                themed = fdk_icon_theme_surface(alts[a], px);
+                which = alts[a];
+            }
+            if (themed != NULL) {
+                g_last_tier = ICONS_TIER_SYSTEM;
+                snprintf(g_last_path, sizeof g_last_path, "%s",
+                         which);
+                if (getenv("FDK_ICONS_TRACE") != NULL) {
+                    fprintf(stderr, "icons: '%s' -> SYSTEM '%s'\n",
+                            name, which);
+                }
+                return themed; /* borrowed from the engine's cache */
+            }
         }
     }
     if (getenv("FDK_ICONS_TRACE") != NULL) {
@@ -198,8 +237,13 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
             memcpy(buf, svg, len + 1);
             tint_current_color(buf, len, ink);
             fdk_surface *s = NULL;
-            if (fdk_ok(fdk_surface_create_from_image_bytes(
-                    buf, len + 1, &s)) &&
+            /* §31/FIX-E: SVG BYTES need the SVG rasterizer —
+             * fdk_surface_create_from_image_bytes is stbi (raster
+             * formats only) and WARN-failed every embedded icon;
+             * the bundled tier never rendered anything until this
+             * call was routed to the new SVG-from-memory API. */
+            if (fdk_ok(fdk_surface_create_from_svg_bytes(
+                    buf, px, &s)) &&
                 s != NULL) {
                 free(buf);
                 cached_icon *c = malloc(sizeof *c);
@@ -211,6 +255,9 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
                         g_cache = c;
                         g_last_tier = ICONS_TIER_BUNDLED;
                         g_last_path[0] = '\0';
+                        if (getenv("FDK_ICONS_TRACE") != NULL) {
+                            fprintf(stderr, "icons: '%s' -> BUNDLED (embedded SVG, tinted)\n", name);
+                        }
                         return s;
                     }
                     free(c);
