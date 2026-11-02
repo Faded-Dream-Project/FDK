@@ -1,185 +1,91 @@
-# §30 continuation state (ONE document — written 2026-11-02, applies until superseded)
+# §31 continuation state — FIX fdk-files (round cut; read this first)
 
-This file replaced the stacked per-round status blocks (§25–§29).
-Their durable facts survive in the SHORT HISTORY at the bottom; the
-detail lives in git history. Read this top to bottom to resume.
+## Remote proof
+origin/main == `91e2b94` (the §31/PART-5 sidebar model). `git ls-remote origin main` is the authority.
 
-## Remote proof at write time
-origin/main == `2429103` (fdk-edit PASS A). Round commits this far:
-7dfc015 (rig scripts + setup-sandbox.sh) · 16133af (CONTINUATION
-rewrite) · 80e3c36 (G-12 dedicated regression test + FDK_DND_TRACE
-diagnostics) · 2b29273 (TextView EDITOR surface: caret I/O,
-line:col geometry, range attrs, gutter — test-first) · 2429103
-(fdk-edit PASS A).
-`git ls-remote origin main` is the authority; if you lack commits,
-fetch + rebase. Identity: Faded Dream Project
-<242450780+FemBoyGamerTechGuy@users.noreply.github.com> for author,
-committer, tagger; NO trailers ever (hooks in .git/hooks enforce,
-reinstalled by scripts/setup-sandbox.sh).
+## The real-conditions rig (PART V) — rebuild after a sandbox recycle
+/tmp is wiped on recycle. Rebuild:
+1. `bash scripts/setup-sandbox.sh` (x11dev, wayland prefix, rigs, hooks).
+2. User-space desktop stack (apt-get download + dpkg -x <deb> root):
+   openbox libobrender32v5 libobt2v5 libstartup-notification0 libimlib2t64
+   libxcb-util1 adwaita-icon-theme papirus-icon-theme breeze-icon-theme
+   hicolor-icon-theme → /tmp/iconsroot/root; netpbm libnetpbm11t64
+   x11-apps → /tmp/pbroot.
+3. Runners (in /home/z/my-project/scripts, survive recycles):
+   realui-run.sh = Xvfb 1920x1080x24 + openbox (EWMH) + private
+   HOME/XDG_DATA_DIRS with the chosen theme + no D-Bus + UBSAN
+   halt_on_error + the log gate. /tmp/shotapp.sh (recreate on
+   recycle): same stack, FDK_TESTAPP_FRAMES=10000, sleep 6, xwd -root
+   | xwdtopnm | pnmtopng (netpbm from /tmp/pbroot, LD_LIBRARY_PATH
+   /tmp/pbroot/usr/lib/x86_64-linux-gnu and
+   /tmp/iconsroot/root/usr/lib/x86_64-linux-gnu for openbox).
 
-## Environment (ONE step after any sandbox recycle)
-```
-bash scripts/setup-sandbox.sh     # x11dev debs, wayland prefix, rig
-                                  # binaries (RPATH'd), identity hooks
-source scripts/env.sh             # PKG_CONFIG_PATH + LD_LIBRARY_PATH
-make -j4 && make tools
-```
-The script is idempotent. Gotchas it already encodes: deb .pc files
-need `prefix=/tmp/x11dev/usr` rewritten; the non-PIC `.a` archives
-must be deleted from both prefixes (they break the libfdk.so link);
-the driver's selfcheck is opt-in via XTEST_SELFCHECK (it MOVES the
-pointer — that bug was the §28 drag-rig mystery); the x11
-integration suite spawns /home/z/my-project/scripts/xdnd_sink
-(abs path) — setup-sandbox.sh builds it there.
+## DONE and verified this round (commit → what)
+- 0b9bed6 — S5 root cause: the first pane "duplicates the active
+  tab's dir" but AT BOOT there is no tab → NULL deref; falls back to
+  HOME now. Bonus: fsops.c:87 qsort(NULL,0) UB on an EMPTY $HOME
+  (guarded, n==0). Log gate clean since (UBSAN halt + WARN scan).
+- c028275 — S6: FDK's shortcut parser grew the xkb keysym names
+  (question, semicolon, apostrophe, grave, backslash, bracketleft/
+  right, equal), Prior/Next, F13–F24, KP_*, and the LITERAL-SYMBOL
+  grammar ("Ctrl+?" = Ctrl+Shift+slash, the US shifted-glyph rule,
+  documented in-code; trailing "Ctrl++" = the plus key). Test-first;
+  272 format round-trips; make test + dbus GREEN.
+- be56c5f — S9: fdk-edit's warnings fixed PROPERLY (unsigned-domain
+  clamp files.c:259; (void) fixed-signature params; dead
+  on_pref_toggle removed). test-apps Makefile: -Werror ON. Verified
+  ZERO warnings gcc+clang19 × -O0/1/2 × 4 apps.
+- e0b059d + e463248 — S3 / PART-2 core: icon priority INVERTED —
+  system theme FIRST (bundled stems → freedesktop standard names,
+  -symbolic preferred, comes back tinted), EMBEDDED bundled SVG
+  second, glyph floor third. FDK gained fdk_icon_theme_name()/
+  source()/set() (the --diag channel report; exports 992→995),
+  test-first. Rig proof: 13 toolbar icon clusters under EVERY theme
+  (Papirus/Adwaita/breeze/hicolor). Specs webfetched+recorded:
+  http://specifications.freedesktop.org/icon-theme/latest/ and
+  http://specifications.freedesktop.org/icon-naming/latest/
+- 91e2b94 — S4 / PART-5 MODEL half: sidebar.c/.h (XDG places
+  exist-checked, Trash IN Places w/ full-empty icon; bookmarks own +
+  shared gtk-3.0 format merged; devices from /proc/self/mountinfo
+  with the full exclusion table, /run/media + /run/mount exceptions,
+  by-label→by-partlabel labels with lexical dot-dot normalization,
+  statvfs usage, removable incl. nvme suffix strip, correct icons).
+  `make build/sidebar-test` GREEN on the spec's fixture. make test
+  GREEN; zero warnings.
 
-## What is DONE and verified (per area)
+## NEXT ACTIONS (exact order)
+1. sidebar_view.c — the VIEW half (API in sidebar.h: sb_build/
+   sb_refresh/sb_highlight_path/sb_bookmark_add): one scrollable
+   column, 220px + splitter + persisted width; 11px dim bold headers
+   (12px above except first, 4px below, nothing else); 32px rows,
+   20px icon @ pad 8, 8px gap, ellipsized + full tooltip; accent +
+   current-folder highlight; Up/Down/Enter; context menus; 3px usage
+   bar (5s + on mount change); mountinfo POLL (POLLPRI|POLLERR) →
+   sb_refresh. Then DELETE panes.c build_places, wire panes_build →
+   sb_build. Geometry test (DRIG-GEO style): 32px pitch, margins.
+2. PART-3 toolbar: 24px in 36x36, separators nav|view|fileops|search,
+   disabled dimmed Back/Forward/Up, the Icons/Icons+text/Text pref.
+3. PART-4 artifacts (S2): search entry's magnifier + conditional
+   clear icon — canvas transparent-clear, damage covers the icon,
+   pixel test outside-glyph == button background.
+4. S7 modal grab bounded retry (MapNotify, ~100ms, WARN only on
+   final failure); S8 idle ≤2 frames/2s (8381-frames bug; damage-
+   limit caret blink; find the always-invalidate source) + time-to-
+   first-frame (~2s pre-GPU-lane); S10 D-Bus endpoint chain (env →
+   $XDG_RUNTIME_DIR/bus → X11 root property → ~/.dbus/session-bus,
+   log candidates tried, no-bus stays INFO).
+5. PART-1 --diag in all 4 apps (uses icons_last_tier +
+   fdk_icon_theme_source; idle-frame counter; VIOLATION lines) +
+   RUN-ON-YOUR-DESKTOP.md + the log gate (log-allowlist.txt, per-line
+   reasons) in the smoke targets.
+6. PART-8 widget-tree audit (a11y, tooltips, NONE-tier, contrast
+   ≥3:1 per FDK theme × state incl. Solar Flare, clipped labels,
+   spacing, 24px minimums, Tab reachability) in smoke + --diag.
+7. Only then the §30 backlog (fdk-monitor, fdk-notes, PASS B,
+   PRE-1.0 audit, chases).
 
-**FDK core** — all suites green at §29 cut (make test, test-dbus,
-verify-exports 985, test-x11 227, TSan, Wayland PASS, 4-app smoke):
-- G-2 threads (fdk_post/worker pool, ASan+TSan) · G-3 list
-  selection spans · G-4 image decode any-thread · G-5 iconview
-  borrowed pixmaps · G-8 app notifications · G-9 N-views-one-model
-  (per-model listener list; proxies read the public row API) ·
-  G-10 widget drag-source controller
-  (`fdk_widget_set_drag_source`; tests/test_widget_drag_source.c;
-  example 18 twin pad) · G-12 release-time XDndStatus drain in the
-  X11 drag source (419431f).
-- The §28 drag-rig four dead legs were an ENVIRONMENT bug (the
-  driver selfcheck), pinned and fixed in the driver — NOT an FDK
-  bug. The dedicated G-12 regression test status: see FINDINGS.md
-  (test-dnd_source_gui remains the live interop leg; a
-  deterministic red-without-fix test may be impossible — the exact
-  reasoning is recorded there).
-
-**fdk-files (DONE through §29)** — dual panes with PER-PANE listing
-models (a605cec; the singleton made pane B show pane A's directory —
-the split view was fake), tabs, breadcrumbs, detail/icons/compact
-views, sort/filter, search-as-you-type with typeahead, copy/move/
-delete/trash on the worker engine with progress, thumbnails (LRU +
-XDG cache, thread-legal pipeline), bookmarks, prefs, i18n EN+RO,
-a11y, session restore (§28: app + both lanes), file watch, --smoke
-LSan-clean, drag-out via the G-10 controller, DRIG-GEO export for
-the rig.
-
-**fdk-shell / overlay** — done in earlier rounds (taskbar, launcher,
-overlays; see test-apps/fdk-shell/).
-
-## What is OPEN (with evidence and the exact next action)
-
-**O-1 (chase, ≤8 experiments): G-11 self-drop.** A drag FDK starts
-and drops on THE SAME window (drag-between-panes) delivers an empty
-payload or no drop at all. Repro: test-apps/g11_self_drop_test_parked.c
-(failed at `g11.dropped` — the drop event never arrives). Evidence
-from §29's instrumented runs: the drag source SAW the motion and the
-sink's XDndStatus (accept) arrived before the release; the release
-drain works; the failure is on the RECEIVE side of a self-drag.
-Leads, in order: (a) print whether FDK_EVENT_DRAG_DROP is dispatched
-at all (the g11 test's callback); (b) the drop's selection fetch —
-owner is FDK's own clip_helper, so the SelectionRequest must be
-served by the SAME connection that is waiting; my §29 pump attempt
-in wait_selection_notify_on stayed red and was REVERTED — before
-retrying it, check (c) whether XCheckTypedEvent in the pump steals
-the ButtonRelease that ends the drag (breaks the handshake), and (d)
-whether the drop acceptance path re-enters dispatch (deadlock).
-Master rule applies: fix in FDK test-first (unpark the test into
-tests/ first, watch it fail, then fix).
-
-**O-2 (chase): drag-rig legs D1–D4 verdicts.** The rig (test-apps/
-fdk-files/run_drig.sh) now reads DRIG-GEO geometry the app exports.
-D4 (drag OUT to the external sink) should pass since the driver fix;
-D1/D2 are blocked by O-1 (the drop lands on the app's own window).
-Re-run and record verdicts; if O-1 is fixed the legs should follow.
-
-**O-3 (chase, 0/8 experiments used): notify --smoke boot race.**
-The §27 evidence: G-8 notifications are done (the app API, the
-fdk-notifyd helper, the desktop-file action buttons); the OPEN item
-is a boot race when the daemon is cold — the app's notify --smoke
-sometimes misses. Plan: strace -f -tt the daemon and the app; check
-the daemon's limits in session.conf; the ordering of
-Hello/RequestName/AddMatch on the first connection; whether the
-closed connection sent anything before Hello completed.
-
-**O-4: fdk-edit — PASS A DONE (2429103).** Built on the TextView
-editor surface (2b29273): tabs+modified indicator, open/save/save-as
-(ASYNC dialogs — the toolkit owns them, the response callbacks
-finish the flows), undo/redo, find/replace plain+POSIX-regex
-(libc regex.h, no new deps), 48px line-number gutter (the widget's
-band hook), syntax highlight C/shell/MD/JSON/Makefile (attr lists,
-theme-palette colors), icon toolbar (10 buttons), menu bar
-(File/Edit/View/Help + recents), status bar (Ln/Col + encoding +
-CRLF/LF + language), word wrap toggle, recent files (8, prefs),
-session restore (tabs+carets+booleans), drag-file-to-open,
-UTF-8/BOM/UTF-16LE/BE read (surrogates joined) + CRLF/LF preserved.
-Xvfb smoke: 40 frames clean, LSan clean. REMAINING for fdk-edit:
-Wayland smoke lane, RO i18n strings via po/, a11y names/roles,
-light+dark verification, screenshots, README, then PASS B (the §24
-spec PASS A: tabs with modified indicator, open/save/save-as,
-undo/redo, find/replace plain+regex, line-number gutter, syntax
-highlighting (C/shell/Markdown/JSON/Makefile) via the
-range-attribute engine with theme-aware colors, icon toolbar,
-status bar (line:col, encoding, line endings, language), word wrap,
-recent files, session restore, drag-file-to-open, UTF-8/BOM/UTF-16
-+ CRLF/LF. PASS B (§24): 50 MB open/scroll/search MEASURED,
-find-in-files, block/multi-selection, go-to-line, bracket matching,
-auto-indent, comment toggle, grouped undo, RTL/mixed-script
-(HarfBuzz/FriBidi), IME (text-input-v3 + X11), command palette,
-preferences dialog, print, markdown preview, external-change
-detection with reload prompt.
-
-**O-5: fdk-monitor — NOT STARTED.** PASS A: reads /proc and /sys
-ITSELF; Overview tab with live CPU/memory/network graphs on the FDK
-canvas; Processes tab (model/view table, sort/filter, kill/terminate
-with confirmation); tray icon with a live CPU pixmap, tooltip and
-menu; refresh timer with pause; worker threads for anything that
-can block. PASS B: Resources/Disks/Network tabs, per-core CPU,
-disk IO, hwmon temps/fans, battery, process tree + column chooser +
-renice, threshold notifications with action buttons, pinch/zoom/pan
-on graphs, compact always-on-top widget mode, the fdk-shell-overlay
-bar variant on the same model code, own-CPU-use at 250 ms refresh
-MEASURED.
-
-**O-6: fdk-notes — NOT STARTED.** PASS A: sidebar tree (model/view),
-rich text (bold/italic/underline/strike, headings, lists,
-checkboxes, links), live search, tags, crash-safe atomic storage
-with autosave, clipboard rich+plain, trash. PASS B: inline images
-(paste + drag-drop), code blocks, color/size attributes, pinned
-notes, PDF export (paginated), plain-text and Markdown export, print
-preview + dialog, reminders with notification snooze + tray badge,
-zoom, distraction-free mode, focus timer with fdk_animation, full
-a11y, RTL text, 2,000-note search MEASURED.
-
-**O-7: STEP 4 audit — NOT STARTED.** test-apps/PRE-1.0-CHECKLIST.md
-(every FDK API area: used-and-solid / used-had-bugs-fixed /
-NOT exercised; remaining 1.0 blockers; ranked to-do), the GTK4/Qt6
-widget-index re-audit via webfetch (repeat until nothing new),
-test-apps/README.md (index of all four apps, build/run on a real
-desktop, what to try, how to report).
-
-## Rules of engagement (unchanged)
-APPS FIRST, chases LAST. Master rule: when an app needs a feature,
-API, widget, behavior or fix FDK lacks — add it to FDK, failing test
-FIRST, then public API + docs + example + export check, recorded in
-test-apps/FINDINGS.md. No in-app workarounds, no loosened warnings,
-no weakened tests. All suites green at every push (make test,
-test-x11, test-dbus, test-wayland, test-threads-tsan,
-verify-exports). ta_buf for bounded strings. No D-Bus library
-dependency in FDK. No version bumps, tags or releases. Push a WIP:
-checkpoint after EVERY step that changes code, even red. Use
-webfetch for specs and record URLs.
-
-## SHORT HISTORY (durable facts from §25–§29)
-- §25: ta_buf.h (ta_copy/ta_join/ta_fmt + truncated flag) is the
-  bounded-string rule; teardown registry (4a) and the worker-engine
-  ops (4b) are the patterns for app cleanup and blocking work.
-- §26: Wayland lane verified (rig PASS 65; G-2 ASan+TSan on wl).
-- §27: G-8 notifications (app API + fdk-notifyd + desktop-file
-  action buttons); the notify boot race evidence is in the §27
-  block of git history (O-3 above carries it forward).
-- §28: G-9 (N views on one model — per-model LISTENER LIST;
-  proxies must read the PUBLIC row API; face children recurse;
-  schema_of walks to the bottom store) — fdk-files' rows=0 was
-  this, FIXED, never revisit. The drag-rig dead legs were the
-  driver selfcheck bug (see Environment above).
-- §29: sandbox recycle mid-round; per-pane models in fdk-files;
-  G-10 + G-12 pushed; G-11 parked (O-1); the apps-first order was
-  adopted because the rounds before lost everything to drag chases.
+## Rules unchanged
+Master rule; zero warnings (-Werror on); no D-Bus library in FDK;
+ta_buf in apps; 8-experiment timebox; identity ONLY
+Faded Dream Project <242450780+FemBoyGamerTechGuy@users.noreply.github.com>;
+WIP push every step; webfetch specs, record URLs.
