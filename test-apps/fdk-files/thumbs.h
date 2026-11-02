@@ -41,8 +41,15 @@ bool thumbs_wanted(const file_info *fi);
 typedef void (*thumb_ready_fn)(const char *path,
                                fdk_surface *thumb, void *user);
 
+/* `out_submitted` (optional, §31/owner-round-5): TRUE when a
+ * worker job took the request — the READY callback WILL fire and
+ * owns `user` from here (false-return + submitted means "pending",
+ * not "failed"; the caller must NOT free user). FALSE/absent on
+ * every path that will never call on_ready, where `user` stays the
+ * caller's problem. */
 bool thumbs_get(const file_info *fi, fdk_surface **out_surface,
-                thumb_ready_fn on_ready, void *user);
+                thumb_ready_fn on_ready, void *user,
+                bool *out_submitted);
 
 /* Drops the in-memory LRU (a live re-theme: the next get re-tints
  * through the icon ladder — thumbnails are photos, NOT tinted). */

@@ -28,27 +28,6 @@
 
 void pane_build_view(pane *p, tab *t);
 
-/* §31/owner-round-4: the row-icon registry — fdk_icon_theme_file_
- * surface hands out caller-OWNED clones and the list/iconview rows
- * only BORROW them, so the app owns their lifetime: tracked here,
- * freed in one batch when a view rebuild replaces them. */
-#define FI_ROW_ICONS_MAX 8192
-static fdk_surface *g_row_icons[FI_ROW_ICONS_MAX];
-static size_t g_row_icon_count;
-
-static void fi_track_row_icon(fdk_surface *s) {
-    if (s != NULL && g_row_icon_count < FI_ROW_ICONS_MAX) {
-        g_row_icons[g_row_icon_count++] = s;
-    }
-}
-
-static void fi_free_row_icons(void) {
-    for (size_t i = 0; i < g_row_icon_count; i++) {
-        fdk_surface_destroy(g_row_icons[i]);
-    }
-    g_row_icon_count = 0;
-}
-
 static void thumb_ready_cb(const char *path, fdk_surface *thumb,
                            void *user);
 
@@ -454,14 +433,41 @@ static bool view_event(fdk_widget *w, const fdk_widget_event *ev,
     return false;
 }
 
+/* §31/owner-round-5: the thumbnail delivery's identity. The worker
+ * captured the iconview pointer; pane_build_view destroys and
+ * recreates views freely, so the pointer alone proves nothing by
+ * delivery time. The (tab, generation) pair does: a stale
+ * delivery's generation no longer matches the tab's current view
+ * and drops before touching any widget. */
+typedef struct thumb_target {
+    tab *tab;
+    unsigned gen;
+    fdk_widget *iv;
+} thumb_target;
+
 /* the thumbnails' ready delivery (UI thread): match the row by
  * name and swap its glyph for the pixmap */
 static void thumb_ready_cb(const char *path, fdk_surface *thumb,
                            void *user) {
-    fdk_widget *iv = user;
-    if (iv == NULL || thumb == NULL) {
+    thumb_target *tt = user;
+    if (tt == NULL) {
         return;
     }
+    if (thumb == NULL) {
+        free(tt);
+        return;
+    }
+    tab *t = tt->tab;
+    fdk_widget *iv = tt->iv;
+    /* the view this request was made against is GONE (rebuilt,
+     * switched, closed) — drop the thumbnail; nothing references
+     * iv anymore. The surface belongs to the thumbs LRU either
+     * way (lru_put ran before the post), so no leak either. */
+    if (t == NULL || t->view_gen != tt->gen || iv == NULL) {
+        free(tt);
+        return;
+    }
+    free(tt);
     size_t n = fdk_iconview_item_count(iv);
     const char *base = strrchr(path, '/');
     base = (base != NULL) ? base + 1 : path;
@@ -475,6 +481,9 @@ static void thumb_ready_cb(const char *path, fdk_surface *thumb,
 }
 
 void pane_build_view(pane *p, tab *t) {
+    /* everything captured below (thumbnail requests) dies with
+     * this bump: a stale delivery checks view_gen and drops. */
+    t->view_gen++;
     fdk_widget *host = t->view_host;
     size_t children = fdk_widget_child_count(host);
     for (size_t i = children; i > 0; i--) {
@@ -506,24 +515,43 @@ void pane_build_view(pane *p, tab *t) {
              * worker and the ready callback sets the pixmap */
             if (thumbs_wanted(fi)) {
                 fdk_surface *thumb = NULL;
-                if (thumbs_get(fi, &thumb, thumb_ready_cb, iv) &&
-                    thumb != NULL) {
+                thumb_target *tt = malloc(sizeof *tt);
+                if (tt != NULL) {
+                    tt->tab = t;
+                    tt->gen = t->view_gen;
+                    tt->iv = iv;
+                }
+                bool submitted = false;
+                const bool readyp = thumbs_get(fi, &thumb,
+                                               thumb_ready_cb, tt,
+                                               &submitted);
+                if (readyp && thumb != NULL) {
+                    /* the sync hit never calls on_ready — the
+                     * wrapper is ours to free here */
+                    free(tt);
                     (void)fdk_iconview_set_item_pixmap(
                         iv, fdk_iconview_item_count(iv) - 1, thumb);
                     continue;
                 }
+                if (!submitted) {
+                    /* nothing will deliver (unwritable cache, a
+                     * full pool): the wrapper stays ours */
+                    free(tt);
+                }
+                /* submitted: the delivery's generation check frees
+                 * it on the UI thread */
             }
-            /* §31/owner-round-4: no thumbnail — the themed type
-             * icon through the PUBLIC per-entry API (the same
-             * resolution the toolkit's own file dialog uses —
-             * whatever the installed theme ships). Caller-owned
-             * surface: the iconview keeps the pointer, freed with
-             * the item. */
+            /* §31/owner-round-5: no thumbnail — the themed type
+             * icon through the app cache's file-entry twin (the
+             * engine's own per-entry resolution underneath). The
+             * CACHE owns the surface for the process lifetime; the
+             * item BORROWS it — round 4's per-rebuild frees were a
+             * use-after-free the moment one pane rebuilt while
+             * another still painted (the owner's round-5 log). */
             {
-                fdk_surface *img = fdk_icon_theme_file_surface(
+                fdk_surface *img = icons_get_file(
                     t->dir, fi->name, fi->is_dir, 32);
                 if (img != NULL) {
-                    fi_track_row_icon(img);
                     (void)fdk_iconview_set_item_pixmap(
                         iv, fdk_iconview_item_count(iv) - 1, img);
                 }
@@ -551,12 +579,12 @@ void pane_build_view(pane *p, tab *t) {
          * through the PUBLIC per-entry API when the installed theme
          * serves one. Runs on every rebuild path — navigate,
          * back/forward/up, the inotify reload, the filter change
-         * (all of them funnel through pane_build_view). The API
-         * returns CALLER-OWNED clones; the registry frees the
-         * previous batch when the view rebuilds (the rows only
-         * borrow the pointers). */
+         * (all of them funnel through pane_build_view). The cache
+         * owns every surface for the process lifetime — rows BORROW
+         * (the round-4 registry freed them per rebuild, which a
+         * second pane's rebuild turned into a use-after-free on the
+         * first pane's rows: the owner's round-5 ASAN log). */
         {
-            fi_free_row_icons();
             size_t n = fdk_list_row_count(list);
             for (size_t i = 0; i < n; i++) {
                 fdk_u64 id = fdk_list_bound_row_id(list, i);
@@ -568,10 +596,9 @@ void pane_build_view(pane *p, tab *t) {
                     list, i,
                     fi->is_dir ? FDK_ROW_ICON_FOLDER
                                : FDK_ROW_ICON_FILE);
-                fdk_surface *img = fdk_icon_theme_file_surface(
+                fdk_surface *img = icons_get_file(
                     t->dir, fi->name, fi->is_dir, 16);
                 if (img != NULL) {
-                    fi_track_row_icon(img);
                     (void)fdk_list_row_set_icon_surface(list, i,
                                                         img);
                 }
