@@ -32,8 +32,9 @@
  *                        model (or proxy) — the binding is live
  *                        (change signals update the view), the
  *                        selection maps back to model rows, and
- *                        the data is PULLED per visible row (the
- *                        widget never copies the model).
+ *                        any NUMBER of views may bind the same
+ *                        model (the split-view shape; one view's
+ *                        unbind or destroy spares the rest).
  *   fdk_tree_bind_model  the same for a Tree over the model's
  *                        parent column.
  *
@@ -238,11 +239,15 @@ fdk_model *fdk_model_filter_model(fdk_model_filter *filter);
 
 /* ---- The view bindings (src/widget/model_bind.c) ---------------------------
  * A bound List/Tree MIRRORS the model: row changes apply to the
- * widget live (the binding installs the model's change handler).
- * The List materializes its row widgets as ever (the widget's
- * architecture); the model + proxies are the scalable half. The
- * selection mapping is BY ROW ID: an app holding ids keeps its
- * selection across a re-sort or re-filter. */
+ * widget live (the binding subscribes a per-model listener — the
+ * N-views design; the single public on_change slot stays free for
+ * the app). ANY NUMBER of views may bind the same model or the
+ * same proxy face (the split-view shape): every bound view
+ * mirrors, and unbinding or destroying one leaves the others
+ * live. The List materializes its row widgets as ever (the
+ * widget's architecture); the model + proxies are the scalable
+ * half. The selection mapping is BY ROW ID: an app holding ids
+ * keeps its selection across a re-sort or re-filter. */
 
 /* Binds the List to the model's TOP-LEVEL rows, mirroring
  * `text_column' into each row. Rebinding the same widget replaces

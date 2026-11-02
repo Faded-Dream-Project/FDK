@@ -17,6 +17,7 @@
 
 #include "fdk/fdk_a11y.h"
 #include "fdk/fdk_widgets.h"
+#include "fdk/fdk_model.h" /* §28/G-9: the listener-list decls    */
 #include "fdk/fdk_dialog.h" /* 1.4.4: the colorbutton test seam    */
 #include "fdk/fdk_animation.h" /* 1.4.1: the Expander's reveal anim */
 #include "fdk/fdk_core.h"      /* 1.4.1: fdk_timer (the Spinner)    */
@@ -97,6 +98,15 @@ void fdk__a11y_relations_destroyed(fdk_widget *widget);
 /* §26/G-6 (model_bind.c): teardown hook — a model-bound widget
  * unbinds before the registry can hold a stale pointer. */
 void fdk__model_bind_widget_destroyed(fdk_widget *widget);
+
+/* §28/G-9 (model.c): the per-model LISTENER list — the single
+ * public on_change slot stays the app's simple path; the binding
+ * layer subscribes N views through these so any number of views
+ * can mirror one model. */
+fdk_result fdk__model_add_listener(fdk_model *model,
+                                   fdk_model_change_fn fn, void *user);
+void fdk__model_remove_listener(fdk_model *model,
+                                fdk_model_change_fn fn, void *user);
 
 /* The text's advance width and line extent (ascent + descent) in px,
  * or {0,0} when font or text is missing. Line extent (not ink) is
