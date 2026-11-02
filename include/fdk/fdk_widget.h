@@ -112,6 +112,24 @@ typedef enum fdk_widget_event_type {
      * custom text widgets that want composition implement these. */
     FDK_WIDGET_IME_PREEDIT   = 11, /* .ime: composition text changed */
     FDK_WIDGET_IME_COMMIT    = 12, /* .ime: final text delivered     */
+
+    /* The implicit pointer grab ended WITHOUT its release (1.5.0).
+     * Delivered to the grabbed widget only, when FDK hands the
+     * pointer to something that owns it from then on — today that
+     * is fdk_drag_begin_ex: the backend drag's own pointer grab
+     * takes every motion and THE RELEASE, so the tree's press will
+     * never be answered by an UP. Widgets that hold per-press state
+     * (a list's rubber band and its auto-scroll timer, a scrollbar
+     * being dragged, a press-armed toggle) MUST treat this as their
+     * release: end the gesture, free its snapshot, stop its timers,
+     * repaint. The position union member is the LAST known pointer
+     * position (root coordinates, like every pointer event).
+     *
+     * Window-level code can also observe it through the window
+     * callback as a grab-broken on the tree (the event is consumed
+     * by the tree's own routing; the window callback does not see
+     * it — the widget contract is the whole surface). */
+    FDK_WIDGET_GRAB_BROKEN   = 13, /* .position: last known pointer   */
 } fdk_widget_event_type;
 
 typedef struct fdk_widget_event {

@@ -195,6 +195,32 @@ fdk_result fdk_widget_set_drag_source(fdk_widget *widget,
 /* True when `widget` carries an armed drag-source controller. */
 bool fdk_widget_get_drag_source(const fdk_widget *widget);
 
+/* Per-press drag veto (1.5.0): when set, a press that reaches THIS
+ * widget (the hit target itself, not merely its subtree) disarms
+ * every drag source for that press — the gesture belongs to the
+ * widget's own press handling, and a drag-source begin riding the
+ * same motion would fire two gestures at once.
+ *
+ * The shape it closes (the owner's round-6 report): a list in
+ * MULTIPLE selection mode starts a rubber band on ANY press that
+ * reaches it — including the press on a ROW, which is the only
+ * press a fully-populated list has (wall-to-wall rows leave no
+ * empty space to start a sweep from). Without the veto the drag
+ * source armed by that same press fires at the threshold WHILE the
+ * band is mid-flight: the drag's backend grab then eats the
+ * release, the band never ends, and the widget keeps its stale
+ * grab + its auto-scroll timer until the next press — the
+ * "selection froze the window" symptom.
+ *
+ * The veto is re-evaluated per press: clear it at any time (a
+ * different selection mode, a rebuilt view) and the next press
+ * re-arms sources normally. Sources ARMED on a press whose hit
+ * target vetoes never fire for that press. */
+void fdk_widget_set_drag_veto(fdk_widget *widget, bool veto);
+
+/* True when this widget vetoes drag arming for presses on it. */
+bool fdk_widget_get_drag_veto(const fdk_widget *widget);
+
 /* ---- Sending ---- */
 
 /* How an fdk_drag_begin-ended drag concluded. */

@@ -50,6 +50,17 @@
 
 typedef struct fdk_list_row {
     fdk_widget base;
+    bool drag_armed; /* 1.5.0: a selected-row press may arm a drag
+                      * source (see fdk_list_row_set_drag_armed)   */
+    /* 1.5.0: the pending-band press (the wall-to-wall-rows case).
+     * The press on an unselected plain row is remembered, not
+     * consumed; when the pointer moves past the slop the ROW
+     * forwards the gesture to the LIST as a rubber band (the row
+     * keeps the tree grab — it forwards motions, the release, and
+     * any grab-broken). A release inside the slop was a CLICK: the
+     * row consumes it as the classic select. */
+    bool pending_band;
+    fdk_f32 pending_x, pending_y;
     char *text;   /* owned */
     bool selected;
     fdk_row_icon icon; /* 1.4.1: the vector glyph before the text */
@@ -596,6 +607,27 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
                    text_x, baseline);
 }
 
+static bool list_handle_event(fdk_widget *w,
+                              const fdk_widget_event *ev);
+
+/* 1.5.0: the row-press-to-band slop (px, root space) — a press on
+ * an unselected row becomes a rubber band only past this distance;
+ * inside it, the release is the classic click-select. */
+#define BAND_SLOP 6
+
+/* list-local absolute-origin twin (widget.c's abs_pos is static to
+ * this translation unit's sibling) — the row-to-list re-localizer
+ * below needs both widgets' absolute origins. */
+static fdk_point row_abs_pos(const fdk_widget *w) {
+    fdk_i32 x = 0, y = 0;
+    for (const fdk_widget *cur = w; cur->parent != NULL;
+         cur = cur->parent) {
+        x += cur->bounds.x;
+        y += cur->bounds.y;
+    }
+    return (fdk_point){x, y};
+}
+
 static bool row_handle_event(fdk_widget *w,
                              const fdk_widget_event *ev) {
     switch (ev->type) {
@@ -614,6 +646,28 @@ static bool row_handle_event(fdk_widget *w,
         fdk_list *l = list_of(list_w);
         for (size_t i = 0; i < l->count; i++) {
             if (&l->row_widgets[i]->base == w) {
+                /* MULTIPLE-mode press on an UNSELECTED row with no
+                 * range modifier is a POTENTIAL rubber band (1.5.0):
+                 * a full directory view is wall-to-wall rows — there
+                 * is no empty space to start a sweep from, and the
+                 * press users actually make is ON a row (the round-6
+                 * report: the sweep was unreachable in practice).
+                 * Remember it; a sweep past the slop hands the
+                 * gesture to the list's band, a release inside the
+                 * slop is the classic click-select. Selected rows
+                 * keep the arm-a-drag press; modifier presses keep
+                 * their range semantics. */
+                fdk_list_row *row = l->row_widgets[i];
+                if (l->mode == FDK_LIST_SELECTION_MULTIPLE &&
+                    !row->selected && !row->drag_armed &&
+                    (ev->pointer.modifiers &
+                     (FDK_MOD_CTRL | FDK_MOD_SHIFT)) == 0) {
+                    row->pending_band = true;
+                    row->pending_x = ev->pointer.position.x;
+                    row->pending_y = ev->pointer.position.y;
+                    return true; /* consumed: the ROW owns the press
+                                  * now (click or band, its call) */
+                }
                 list_row_clicked(l, i, ev->pointer.modifiers);
                 /* Double-click = activation (1.2.0). Same row, same
                  * press semantics as the title bar's dblclick window
@@ -645,6 +699,124 @@ static bool row_handle_event(fdk_widget *w,
             }
         }
         return false;
+    }
+    case FDK_WIDGET_POINTER_MOTION: {
+        fdk_list *l = NULL;
+        fdk_widget *list_w = NULL;
+        for (fdk_widget *cur = w->parent; cur != NULL;
+             cur = cur->parent) {
+            if (cur->klass == &fdk_list_class_def) {
+                list_w = cur;
+                break;
+            }
+        }
+        if (list_w != NULL) {
+            l = list_of(list_w);
+        }
+        /* pending press + past the slop: the press becomes the
+         * band's anchor. The band's coordinates are LIST-local; the
+         * press's were row-local — the same absolute point, so
+         * translating is just the row's origin within the list. */
+        if (l != NULL && row_of(w)->pending_band) {
+            fdk_point origin_row = row_abs_pos(w);
+            fdk_point origin_list = row_abs_pos(list_w);
+            fdk_f32 dx = (fdk_f32)(origin_row.x - origin_list.x);
+            fdk_f32 dy = (fdk_f32)(origin_row.y - origin_list.y);
+            fdk_f32 mx = ev->position.x + dx;
+            fdk_f32 my = ev->position.y + dy;
+            fdk_f32 px = row_of(w)->pending_x + dx;
+            fdk_f32 py = row_of(w)->pending_y + dy;
+            fdk_f32 ddx = mx - px, ddy = my - py;
+                if (ddx * ddx + ddy * ddy > BAND_SLOP * BAND_SLOP) {
+                row_of(w)->pending_band = false;
+                /* synthesize the band's press at the LIST */
+                fdk_widget_event press;
+                memset(&press, 0, sizeof press);
+                press.type = FDK_WIDGET_POINTER_DOWN;
+                press.widget = list_w;
+                press.pointer.button = FDK_POINTER_BUTTON_LEFT;
+                press.pointer.position.x = px;
+                press.pointer.position.y = py;
+                (void)list_handle_event(list_w, &press);
+                /* then the motion that tripped the slop */
+                fdk_widget_event fwd = *ev;
+                fwd.widget = list_w;
+                fwd.position.x = mx;
+                fwd.position.y = my;
+                return list_handle_event(list_w, &fwd);
+            }
+            return true; /* inside the slop: still maybe a click */
+        }
+        /* a live band owned by the list: forward the motion */
+        if (l != NULL && l->banding) {
+            fdk_point origin_row = row_abs_pos(w);
+            fdk_point origin_list = row_abs_pos(list_w);
+            fdk_widget_event fwd = *ev;
+            fwd.widget = list_w;
+            fwd.position.x =
+                ev->position.x + (fdk_f32)(origin_row.x - origin_list.x);
+            fwd.position.y =
+                ev->position.y + (fdk_f32)(origin_row.y - origin_list.y);
+            return list_handle_event(list_w, &fwd);
+        }
+        return false;
+    }
+    case FDK_WIDGET_POINTER_UP: {
+        fdk_widget *list_w = NULL;
+        for (fdk_widget *cur = w->parent; cur != NULL;
+             cur = cur->parent) {
+            if (cur->klass == &fdk_list_class_def) {
+                list_w = cur;
+                break;
+            }
+        }
+        fdk_list *l = (list_w != NULL) ? list_of(list_w) : NULL;
+        /* pending press released inside the slop: it was a CLICK —
+         * the classic select (the press was consumed by the row, so
+         * the click logic runs NOW, at the release). */
+        if (l != NULL && row_of(w)->pending_band) {
+            row_of(w)->pending_band = false;
+            fdk_list_row *row = row_of(w);
+            for (size_t i = 0; i < l->count; i++) {
+                if (l->row_widgets[i] == row) {
+                    list_row_clicked(l, i, 0);
+                    return true;
+                }
+            }
+            return true;
+        }
+        /* a live band: forward the release (the gesture's end) */
+        if (l != NULL && l->banding) {
+            fdk_point origin_row = row_abs_pos(w);
+            fdk_point origin_list = row_abs_pos(list_w);
+            fdk_widget_event fwd = *ev;
+            fwd.widget = list_w;
+            fwd.pointer = ev->pointer;
+            fwd.pointer.position.x +=
+                (fdk_f32)(origin_row.x - origin_list.x);
+            fwd.pointer.position.y +=
+                (fdk_f32)(origin_row.y - origin_list.y);
+            return list_handle_event(list_w, &fwd);
+        }
+        return false;
+    }
+    case FDK_WIDGET_GRAB_BROKEN: {
+        fdk_widget *list_w = NULL;
+        for (fdk_widget *cur = w->parent; cur != NULL;
+             cur = cur->parent) {
+            if (cur->klass == &fdk_list_class_def) {
+                list_w = cur;
+                break;
+            }
+        }
+        fdk_list *l = (list_w != NULL) ? list_of(list_w) : NULL;
+        row_of(w)->pending_band = false;
+        if (l != NULL && l->banding) {
+            fdk_widget_event fwd = *ev;
+            fwd.widget = list_w;
+            return list_handle_event(list_w, &fwd);
+        }
+        return true;
     }
     default:
         break;
@@ -906,6 +1078,21 @@ static bool list_handle_event(fdk_widget *w,
         /* The sweep is ONE gesture: the callback fires here (and it
          * fired at the press — motions never spam it). */
         list_fire_changed(l);
+        return true;
+    case FDK_WIDGET_GRAB_BROKEN:
+        /* The pointer was handed to a backend gesture (a drag began
+         * mid-sweep — the round-6 report): end the band NOW, or the
+         * auto-scroll timer outlives the gesture and the stale
+         * banding flag captures the next press (the frozen-window
+         * symptom). Same cleanup as the release. */
+        if (l->banding) {
+            l->banding = false;
+            list_band_scroll_disarm(l);
+            fdk_free(l->band_base);
+            l->band_base = NULL;
+            l->band_base_cap = 0;
+            fdk_widget_invalidate(w);
+        }
         return true;
     default:
         break;
@@ -1247,6 +1434,20 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
     return FDK_OK;
 }
 
+bool fdk_list_row_set_drag_armed(fdk_widget *list, size_t row,
+                                 bool armed) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return false;
+    }
+    fdk_list *l = list_of(list);
+    if (row >= l->count) {
+        return false;
+    }
+    bool was = l->row_widgets[row]->drag_armed;
+    l->row_widgets[row]->drag_armed = armed;
+    return was;
+}
+
 void fdk_list_set_selection_mode(fdk_widget *list,
                                  fdk_list_selection_mode mode) {
     if (list == NULL || list->klass != &fdk_list_class_def) {
@@ -1254,6 +1455,13 @@ void fdk_list_set_selection_mode(fdk_widget *list,
     }
     fdk_list *l = list_of(list);
     l->mode = mode;
+    /* 1.5.0: MULTIPLE owns the plain press (the rubber band — any
+     * press that reaches the list can start one, rows included), so
+     * the widget vetoes drag-source arming for its own presses. A
+     * drag from list content then begins only from a row the app
+     * armed (fdk_list_row_set_drag_armed — a SELECTED row), which
+     * is the desktop-standard gesture. */
+    fdk_widget_set_drag_veto(list, mode == FDK_LIST_SELECTION_MULTIPLE);
     if (mode == FDK_LIST_SELECTION_NONE) {
         list_clear_selection(l);
         list_fire_changed(l);

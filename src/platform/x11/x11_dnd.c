@@ -810,6 +810,15 @@ void fdk_x11_dnd_source_finish(fdk_platform_connection *conn, int status) {
         }
     }
     conn->xdnd_source.target = None;
+    /* The payload copies were OURS from drag_begin to here (the
+     * owner's round-6 leak report: the 256-byte dnd_uri list lived
+     * past every drag — freed only at connection shutdown, and a
+     * SECOND drag overwrote the pointers without freeing the
+     * first). The drag is over; nothing references them. */
+    fdk_free(conn->xdnd_source.text);
+    conn->xdnd_source.text = NULL;
+    fdk_free(conn->xdnd_source.uri_payload);
+    conn->xdnd_source.uri_payload = NULL;
     void (*on_done)(int, void *) = conn->xdnd_source.on_done;
     void *user = conn->xdnd_source.on_done_user;
     conn->xdnd_source.on_done = NULL;
