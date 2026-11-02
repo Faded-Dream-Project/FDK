@@ -665,6 +665,16 @@ typedef void (*fdk_list_selection_fn)(fdk_widget *list,
 fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
                            fdk_widget **out_list);
 
+/* Arms this row as a drag-source launch point (1.5.0). In
+ * MULTIPLE selection mode a plain press on an UNSELECTED row starts
+ * the rubber band instead (the wall-to-wall-rows case — see
+ * fdk_widget_set_drag_veto); a drag therefore begins from a row the
+ * app explicitly armed, the same gesture users know from every
+ * desktop list: press a selected row, move, drag. Returns the row's
+ * previous state. */
+bool fdk_list_row_set_drag_armed(fdk_widget *list, size_t row,
+                                 bool armed);
+
 /* Switches modes; clears the selection. */
 void fdk_list_set_selection_mode(fdk_widget *list,
                                  fdk_list_selection_mode mode);

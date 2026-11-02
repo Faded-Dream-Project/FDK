@@ -18,6 +18,7 @@
 #include "core/context_internal.h"
 #include "core/log_internal.h"
 #include "window_internal.h"
+#include "widget/widget_internal.h"
 
 fdk_result fdk_window_set_drop_formats(fdk_window *window, int formats) {
     if (window == NULL) {
@@ -123,6 +124,18 @@ fdk_result fdk_drag_begin_ex(fdk_window *origin, int formats,
     fdk_free(icon_copy); /* the backend copied what it needs (or failed) */
     if (!fdk_ok(r)) {
         fdk_free(c);
+        return r;
+    }
+    /* The drag's backend grab now owns the pointer: every motion and
+     * THE RELEASE from here are the drag's. The tree's implicit grab
+     * (the press that armed this source) would otherwise wait for a
+     * release that never comes — the round-6 report's frozen
+     * selection: a list's rubber band and its 100 Hz auto-scroll
+     * timer survived the drag and captured the NEXT press. Tell the
+     * grabbed widget its gesture is over (FDK_WIDGET_GRAB_BROKEN),
+     * before the first drag motion can interleave. */
+    if (origin->root != NULL) {
+        fdk__widget_tree_grab_broken(origin->root);
     }
     return r;
 }

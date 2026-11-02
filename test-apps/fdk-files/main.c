@@ -754,7 +754,11 @@ int main(int argc, char **argv) {
     printf("PHASE: boot\n");
     fflush(stdout);
     if (!drig) {
-        pane_navigate(fapp.panes[0], fi_home());
+        const char *startdir = getenv("FDK_FILES_STARTUP_DIR");
+        pane_navigate(fapp.panes[0],
+                      (startdir != NULL && startdir[0] != '\0')
+                          ? startdir
+                          : fi_home());
     }
 
     if (smoke) {

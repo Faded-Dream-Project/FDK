@@ -1,3 +1,60 @@
+# §31 continuation — UPDATE (owner round 6: DnD self-drop, drag leaks, multi-select freeze)
+
+## Remote proof
+origin/main == this round's code commit + docs commit (see git log). Working tree = clean at that commit.
+
+## What round 6 fixed (ALL ENGINE-LEVEL, no app hardcoding)
+1. **X11 self-drop deadlock**: the drop's selection read (wait_selection_notify_on) waited for
+   SelectionNotify but never ANSWERED the SelectionRequest our own drag source received on the
+   clip_helper — same-process drops timed out at 1000ms and delivered an empty payload (his two
+   "owner did not answer" WARNs). FIX: the wait loop now peels SelectionRequests off the wire and
+   serves them (fdk_x11_dnd_serve_selection → clipboard fallback), XPutBackEvent for everything
+   else. THE E2E XTEST PROOF IS STILL PENDING (rig issue, see below).
+2. **Drag payload leaks (both backends)**: x11 dnd_source_finish and wayland drag_source_report
+   now free text/uri_payload at drag END (before: freed only at teardown; a second drag
+   overwrote the pointers — his 256-byte LSan report). Code-verified; 2-drag LSan gate pending.
+3. **Multi-select freeze/never-works**: THREE interacting causes, all engine:
+   a. The rubber band only started on EMPTY-space presses; a full directory is wall-to-wall rows
+      → unreachable. FIX: row_handle_event now holds a plain press on an UNSELECTED row as a
+      "pending band"; motion past 6px slop converts it to the list's band (row keeps the tree
+      grab and forwards motions/release/grab-broken, re-localized); release inside slop = the
+      classic click-select. PROVEN: new headless test (test_row_press_band) + E2E rig: S1 sweep
+      selects 5 rows (12336 selection px vs 2700 on HEAD).
+   b. The widget drag-source controller armed at press BEFORE delivery, so a band press ALSO
+      fired a drag at 6px → the X11 drag's grab ate the release → banding + 100Hz autoscroll
+      timer stuck → next press dead = THE FREEZE. FIX: new public API fdk_widget_set_drag_veto()
+      (a widget owning press gestures vetoes arm-at-press); List sets it automatically in
+      MULTIPLE mode; drag-from-content now starts only from rows the app arms via the new
+      fdk_list_row_set_drag_armed (fdk-files arms SELECTED rows on every selection change — the
+      desktop-standard press-selected-row-and-move gesture).
+   c. No notification when a drag stole the pointer: new public event FDK_WIDGET_GRAB_BROKEN,
+      delivered by fdk_drag_begin_ex to the tree's grabbed widget (root->last_pointer_pos added);
+      List ends the band + timer on it. HEAD E2E proof: after a drag attempt, S3's press did
+      nothing (frozen, 2916→2916 px); FIXED: S3 selects fresh (12336→2789 px = responsive).
+4. Exports: 998 → 1001 (+set_drag_veto +get_drag_veto +fdk_list_row_set_drag_armed). make test
+   ALL GREEN including the new band test (note: the suite's lists need a paint pass for layout —
+   the new test does fdk_widget_tree_paint first; the OLD band test worked because 0x0 scroll
+   made presses hit the list directly — it never exercised row hit-testing).
+
+## NOT FINISHED (next round's first jobs)
+1. **E2E self-drop XTest proof**: the stepped-motion rig (scripts/repro_s4.sh) produced NO dnd
+   trace at all (not even the release line) — the rig or window-finder is flaky, the fix itself
+   is compiled and unit-sound. Debug the rig: check WID, check the app is pumping, one motion
+   per driver call with w:40 spacing, then verify folder receives the file + no WARN lines.
+2. **2-drag LSan gate** for the leak fix (run the s4 rig twice + exit, expect NO 256-byte
+   dnd_uri leak).
+3. **FIX C — X11 boot slowness**: NOT STARTED. His log: ~2s gap before "GPU present lane
+   active" (=GLX/NVIDIA context creation) + ~1s to self-check pass. Plan: strace -ttt -e
+   trace=openat,poll,recvfrom,sendto the boot, diff against wayland; suspects: dlopen of
+   libGLX_nvidia + first glXMakeCurrent + any XSync roundtrips in x11_gl bring-up; the
+   self-check itself is 9ms timer-paced (NOT the stall).
+4. The icons-mode smoke + both-theme self-quits were NOT re-run after round-6 engine changes
+   (make test covers the widget layer; re-run them next round before closing).
+
+## Rig index: scripts/repro_r6.sh (band+freeze E2E), scripts/repro_s4.sh (self-drop, flaky),
+scripts/xtest_driver (built, needs LD_LIBRARY_PATH=/tmp/x11dev2/root/usr/lib/x86_64-linux-gnu),
+scripts/x11_find_window.py (ctypes XQueryTree finder).
+
 # §31 continuation — UPDATE (owner round 5: the round-4 registry's use-after-frees)
 
 ## Remote proof

@@ -702,6 +702,34 @@ static int wait_selection_notify_on(fdk_platform_connection *conn,
              * to guard. */
             continue;
         }
+        /* Same-process ownership (the owner's round-6 report): the
+         * owner of the selection we are converting may be OUR OWN
+         * drag source — a self-drop. Its answer travels as a
+         * SelectionRequest ON OUR HELPER, and nothing else in this
+         * single-threaded process will service it while we sit
+         * here: the request must be answered from INSIDE the wait,
+         * or the convert times out after the full window and the
+         * drop delivers an empty payload (the exact two WARNs the
+         * report carried). Peel everything readable off the wire,
+         * serve what names our helper, put the rest back untouched
+         * — queued order preserved for the dispatcher. */
+        while (XCheckTypedEvent(conn->display, SelectionRequest,
+                                &ev)) {
+            if (ev.xselectionrequest.owner == conn->clip_helper) {
+                if (!fdk_x11_dnd_serve_selection(
+                        conn, &ev.xselectionrequest) &&
+                    !fdk_x11_clipboard_handle_event(conn, &ev)) {
+                    XPutBackEvent(conn->display, &ev);
+                    XFlush(conn->display);
+                    goto wait; /* re-scan: the putback is on the
+                                  queue, not the wire */
+                }
+            } else {
+                XPutBackEvent(conn->display, &ev);
+                XFlush(conn->display);
+                goto wait;
+            }
+        }
         uint64_t now = now_ms();
         if (now >= deadline) {
             return 0;
@@ -717,6 +745,7 @@ static int wait_selection_notify_on(fdk_platform_connection *conn,
          * rescan. QueuedAfterReading flushes output first, which also
          * keeps our convert request moving. */
         XEventsQueued(conn->display, QueuedAfterReading);
+    wait:;
     }
 }
 

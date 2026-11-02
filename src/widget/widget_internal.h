@@ -153,6 +153,10 @@ struct fdk_widget {
     bool drag_source_armed;
     fdk_f32 drag_source_x, drag_source_y;
     bool drag_source_fired;
+    /* 1.5.0: a press whose HIT TARGET vetoes disarms every source
+     * for that press (the widget owns the gesture — e.g. a list's
+     * rubber band; see fdk_widget_set_drag_veto). */
+    bool drag_veto;
 
     /* Accessibility overrides (Phase 10): when set, these beat the
      * class descriptor's computed name/description in
@@ -250,6 +254,12 @@ struct fdk_widget {
      * the pointer leaves its bounds. NULL when no button is held. */
     fdk_widget *grab;
 
+    /* The last pointer position seen in root coordinates (motion,
+     * press, release, scroll, drag events all refresh it) — the
+     * position GRAB_BROKEN reports, since the real pointer has
+     * been handed to a backend gesture by then. */
+    fdk_pointf last_pointer_pos;
+
     /* Damage bounding box since the last tree paint, in root coords.
      * `has_damage` false means "nothing pending". A single bounding
      * box (not a rect list): the Phase 3 surface already narrows what
@@ -303,6 +313,12 @@ void fdk__widget_roots_invalidate_all(void);
  * only in-tree widget that does) keeps no per-press state on that
  * path. Safe with NULL. */
 void fdk__widget_tree_cancel_grab(fdk_widget *any);
+
+/* Delivers FDK_WIDGET_GRAB_BROKEN to the tree's currently grabbed
+ * widget (then clears the grab) — called when FDK hands the pointer
+ * to a backend-owned gesture (drag begin) whose grab eats the
+ * release the tree is waiting for. */
+void fdk__widget_tree_grab_broken(fdk_widget *any);
 
 /* Internal theme-change notification (see struct fdk_widget's
  * theme_hook field). NULL clears. Safe with NULL widget. */

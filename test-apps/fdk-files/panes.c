@@ -480,6 +480,22 @@ static void thumb_ready_cb(const char *path, fdk_surface *thumb,
     }
 }
 
+/* §31/owner-round-6: the drag-launch rows track the selection.
+ * The engine's MULTIPLE-mode list owns the plain press (the rubber
+ * band — the wall-to-wall-rows case), so a drag starts only from a
+ * row the app armed: SELECTED rows, re-armed on every settled
+ * selection change. This is the desktop gesture every file manager
+ * ships: press a selected row, move, drag. */
+static void list_selection_changed(fdk_widget *list, void *user) {
+    view_ctx *vc = user;
+    (void)vc;
+    size_t n = fdk_list_row_count(list);
+    for (size_t i = 0; i < n; i++) {
+        (void)fdk_list_row_set_drag_armed(
+            list, i, fdk_list_is_selected(list, i));
+    }
+}
+
 void pane_build_view(pane *p, tab *t) {
     /* everything captured below (thumbnail requests) dies with
      * this bump: a stale delivery checks view_gen and drops. */
@@ -571,6 +587,12 @@ void pane_build_view(pane *p, tab *t) {
         (void)fdk_list_bind_model(list, model_pane_of(p)->view,
                                   FM_COL_NAME);
         fdk_list_set_on_row_activate(list, row_activated, vc);
+        fdk_list_set_on_selection_changed(list,
+                                          list_selection_changed,
+                                          vc);
+        list_selection_changed(list, vc); /* arm the restored
+                                            * selection (navigate
+                                            * keeps it) */
         fdk_widget_set_accessible_name(list, "Files");
         /* §31/owner-round-4: the bound mirror carries text only —
          * the rows had NO icons at all (the owner's report: "the

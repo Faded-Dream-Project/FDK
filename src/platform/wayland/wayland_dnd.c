@@ -483,6 +483,15 @@ static void drag_source_report(fdk_platform_connection *conn, int status) {
         conn->drag_source = NULL;
     }
     drag_icon_destroy(conn);
+    /* The payload copies are spent with the drag (the owner's
+     * round-6 leak report: they lived until teardown, and a second
+     * drag overwrote them without freeing). The compositor holds
+     * its own fd-transferred copies; nothing here references
+     * ours anymore. */
+    fdk_free(conn->drag_text);
+    conn->drag_text = NULL;
+    fdk_free(conn->drag_uri_payload);
+    conn->drag_uri_payload = NULL;
     if (on_done != NULL) {
         on_done(status, user);
     }

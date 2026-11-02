@@ -514,6 +514,84 @@ static void test_paint(void) {
            "(pixel-diff verified)\n");
 }
 
+/* ---- the row-press band start (1.5.0, the round-6 wall-to-wall case) ---- */
+
+static void test_row_press_band(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &list)));
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    /* Nine 30-px rows = 270 px of content in a 280-px field: 10 px
+     * of empty space ONLY — the wall-to-wall shape of a real
+     * directory view. The press must start on a ROW. */
+    for (int i = 0; i < 9; i++) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "row %d", i);
+        assert(fdk_ok(fdk_list_append(list, buf, NULL)));
+    }
+    fdk_widget_set_bounds(list, (fdk_rect){10, 10, 200, 280});
+    /* LAY THE TREE OUT (a paint pass runs measure/arrange): the
+     * press must HIT a row, and hit-testing needs real bounds. */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(300, 400, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    const fdk_i32 rh = fdk_list_get_row_height(list);
+    assert(rh > 0);
+
+    /* Press row 0 (unselected, plain): the ROW holds the press as a
+     * potential band; the sweep crosses rows 0..4; release. The
+     * rows sit at list-y rh*i; the list itself is at root (10,10). */
+    fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    50.0f,
+                                    (float)(10 + rh / 2), 0);
+    fdk_event_data move = ev_motion_evt(
+        50.0f, (float)(10 + rh * 4 + rh / 2));
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 50.0f,
+                                  (float)(10 + rh * 4 + rh / 2), 0);
+    int hd = fdk_widget_tree_handle_event(root, &down);
+    assert(hd); /* the row consumed it (pending band) */
+    int hm = fdk_widget_tree_handle_event(root, &move);
+    assert(hm); /* the slop converted it: the band owns the sweep */
+    int hu = fdk_widget_tree_handle_event(root, &up);
+    assert(hu);
+    fdk_surface_destroy(s); /* the layout probe surface */
+    assert(fdk_list_selected_count(list) == 5);
+    assert(fdk_list_is_selected(list, 0));
+    assert(fdk_list_is_selected(list, 4));
+    assert(!fdk_list_is_selected(list, 5));
+
+    /* A drag-armed (selected) row keeps the classic press: the row
+     * consumes it (no band, no re-selection churn). */
+    (void)fdk_list_row_set_drag_armed(list, 2, true);
+    fdk_event_data down2 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     100.0f, 85.0f, 0);
+    assert(fdk_widget_tree_handle_event(root, &down2));
+    /* still selected, still exactly the armed row's click semantics:
+     * plain click on a selected+armed row re-selects just it */
+    assert(fdk_list_is_selected(list, 2));
+
+    /* GRAB_BROKEN mid-band: the auto-scroll timer and the banding
+     * state must die with the gesture (the round-6 freeze). */
+    fdk_event_data down3 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     100.0f, 45.0f, 0);
+    (void)fdk_widget_tree_handle_event(root, &down3);
+    fdk__widget_tree_grab_broken(root); /* the drag-begin path */
+    /* the NEXT press is a fresh gesture (the frozen state is gone):
+     * it starts its own band and lands where it lands — a stale
+     * banding flag would have made this press a no-op (the round-6
+     * freeze's exact symptom). */
+    fdk_event_data down4 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     100.0f, 45.0f, 0);
+    fdk_event_data up4 = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 100.0f,
+                                   45.0f, 0);
+    (void)fdk_widget_tree_handle_event(root, &down4);
+    (void)fdk_widget_tree_handle_event(root, &up4);
+    assert(fdk_list_selected_count(list) == 1);
+    assert(fdk_list_is_selected(list, 1));
+    printf("[ok] list: row-press band, armed rows, grab-broken\n");
+}
+
 /* ---- the rubber-band sweep (1.4.2) ---- */
 
 static int g_band_changes;
@@ -652,6 +730,7 @@ int main(void) {
     test_keyboard();
     test_scrolling();
     test_paint();
+    test_row_press_band();
     test_rubber_band();
 
     fdk_font_destroy(g_font);

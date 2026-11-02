@@ -771,6 +771,34 @@ static void subtree_theme_notify(fdk_widget *w) {
     }
 }
 
+void fdk__widget_tree_grab_broken(fdk_widget *any) {
+    /* Called the moment FDK hands the pointer to a backend-owned
+     * gesture (fdk_drag_begin_ex's drag grab): the tree's pending
+     * release will never arrive — the drag consumed it. Same
+     * mid-dispatch discipline as fdk__widget_tree_cancel_grab: run
+     * under the active guard, deliver the synthetic end first (the
+     * widget's handler may end timers and repaint), then clear the
+     * grab. .position is the last known pointer position in ROOT
+     * coordinates, matching every pointer event's contract. */
+    fdk_widget *root = find_root(any);
+    if (root == NULL) {
+        return;
+    }
+    fdk_widget *grabbed = root->grab;
+    if (grabbed == NULL || (grabbed->flags & FDK_WF_DESTROYING) != 0) {
+        root->grab = NULL;
+        return;
+    }
+    fdk_widget_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = FDK_WIDGET_GRAB_BROKEN;
+    ev.widget = grabbed;
+    ev.position = grabbed->last_pointer_pos;
+    root->grab = NULL; /* clear FIRST: the handler's repaints must
+                        * not re-enter a dead grab */
+    (void)deliver_bubbling(root, grabbed, &ev);
+}
+
 void fdk__widget_tree_cancel_grab(fdk_widget *any) {
     /* Called from the decoration-band press path (window.c) at the
      * moment the drag is handed to the WM/compositor. The tree is
@@ -1174,6 +1202,16 @@ bool fdk_widget_get_drag_source(const fdk_widget *widget) {
     return (widget != NULL && widget->drag_source_fn != NULL);
 }
 
+void fdk_widget_set_drag_veto(fdk_widget *widget, bool veto) {
+    if (widget != NULL) {
+        widget->drag_veto = veto;
+    }
+}
+
+bool fdk_widget_get_drag_veto(const fdk_widget *widget) {
+    return (widget != NULL && widget->drag_veto);
+}
+
 /* The press's chain (target..root) — the DEEPEST source on it owns
  * the gesture (the same ownership rule as drop targets). NULL when
  * none. */
@@ -1215,6 +1253,11 @@ static void drag_source_note_press(fdk_widget *root,
     fdk_pointf pos = event->pointer_button.position;
     drag_sources_stand_down(root);
     fdk_widget *hit = hit_test(root, pos);
+    if (hit != NULL && hit->drag_veto) {
+        /* The press belongs to the hit widget's own gesture (the
+         * rubber-band rule): NO source arms for this press. */
+        return;
+    }
     fdk_widget *source = drag_source_on_chain(hit != NULL ? hit : root);
     if (source == NULL) {
         return;
@@ -2048,6 +2091,20 @@ bool fdk_widget_tree_handle_event(fdk_widget *any,
 }
 
 static bool route_event(fdk_widget *root, const fdk_event_data *event) {
+    switch (event->type) {
+        case FDK_EVENT_POINTER_MOTION:
+            root->last_pointer_pos = event->pointer.position;
+            break;
+        case FDK_EVENT_POINTER_BUTTON_DOWN:
+        case FDK_EVENT_POINTER_BUTTON_UP:
+            root->last_pointer_pos = event->pointer_button.position;
+            break;
+        case FDK_EVENT_POINTER_SCROLL:
+            root->last_pointer_pos = event->scroll.position;
+            break;
+        default:
+            break;
+    }
     switch (event->type) {
         case FDK_EVENT_POINTER_MOTION: {
             fdk_pointf pos = event->pointer.position;
