@@ -53,6 +53,17 @@ const char *icons_available(void);
  * when told, for HiDPI crispness. */
 fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale);
 
+/* §31/owner-round-5: the FILE-ENTRY twin — a themed icon for a
+ * filesystem entry (extension/type classification, folder chains),
+ * cached by TYPE (directory / extension) so a 10k-row directory
+ * costs a handful of resolutions, not 10k. Same ownership rule:
+ * the cache owns the surface for the process lifetime; rows and
+ * iconview items BORROW it — never destroy, never free on view
+ * rebuilds. NULL = the theme serves nothing for that type; the
+ * caller keeps its glyph floor. */
+fdk_surface *icons_get_file(const char *dir, const char *name,
+                            bool is_dir, fdk_i32 size);
+
 /* §31/owner-round-3: the tier verdict for the shutdown log line —
  * how many lookups, how many were served by the system theme. */
 long icons_system_hits(void);

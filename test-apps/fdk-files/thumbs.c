@@ -290,8 +290,12 @@ static void *thumb_job_fn(void *user, void (*report)(double, void *),
 }
 
 bool thumbs_get(const file_info *fi, fdk_surface **out_surface,
-                thumb_ready_fn on_ready, void *user) {
+                thumb_ready_fn on_ready, void *user,
+                bool *out_submitted) {
     *out_surface = NULL;
+    if (out_submitted != NULL) {
+        *out_submitted = false;
+    }
     if (!thumbs_wanted(fi)) {
         return false;
     }
@@ -335,7 +339,10 @@ bool thumbs_get(const file_info *fi, fdk_surface **out_surface,
     spec.user_data = j;
     if (!fdk_ok(fdk_worker_submit(thumb_pool(), &spec, NULL))) {
         free(j);
-        return false;
+        return false; /* refused: on_ready will NOT fire */
+    }
+    if (out_submitted != NULL) {
+        *out_submitted = true;
     }
     return false; /* not ready yet — the row keeps its icon */
 }

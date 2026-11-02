@@ -133,6 +133,55 @@ const char *icons_available(void) {
     return g_available;
 }
 
+/* §31/owner-round-5: the FILE-ENTRY twin. Round 4 wired rows to
+ * fdk_icon_theme_file_surface() directly and freed the clones on
+ * every pane_build_view — but the list/iconview rows only BORROW
+ * their images, and a rebuild of ONE pane (pane_add, the smoke
+ * rig's split round) freed the surfaces the OTHER pane's rows were
+ * still painting (ASAN heap-use-after-free, the owner's round-5
+ * log). Same ownership model as every other icons_get entry: the
+ * CACHE owns the surface for the process lifetime, rows borrow. */
+fdk_surface *icons_get_file(const char *dir, const char *name,
+                            bool is_dir, fdk_i32 size) {
+    if (name == NULL || name[0] == '\0' || size <= 0) {
+        return NULL;
+    }
+    char key[256];
+    if (is_dir) {
+        snprintf(key, sizeof key, "F|dir|%d", (int)size);
+    } else {
+        const char *dot = strrchr(name, '.');
+        snprintf(key, sizeof key, "F|%s|%d",
+                 dot != NULL ? dot : "", (int)size);
+    }
+    for (cached_icon *c = g_cache; c != NULL; c = c->next) {
+        if (strcmp(c->key, key) == 0) {
+            return c->surface; /* may be NULL: a cached miss */
+        }
+    }
+    /* resolve by the entry's identity, cache by its TYPE — a
+     * directory is a directory anywhere, and two files sharing an
+     * extension share the icon; the executable-bit split lives in
+     * the engine chain and costs its one stat either way. */
+    fdk_surface *s = fdk_icon_theme_file_surface(dir, name, is_dir,
+                                                 size);
+    cached_icon *c = malloc(sizeof *c);
+    if (c == NULL) {
+        fdk_surface_destroy(s);
+        return NULL;
+    }
+    c->key = strdup(key);
+    c->path = NULL;
+    c->surface = s;
+    c->next = g_cache;
+    g_cache = c;
+    g_stat_lookups++;
+    if (s != NULL) {
+        g_stat_system_hits++;
+    }
+    return s;
+}
+
 fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
     if (name == NULL || name[0] == '\0' || size <= 0) {
         g_last_tier = ICONS_TIER_FALLBACK;

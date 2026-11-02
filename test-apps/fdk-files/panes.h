@@ -17,6 +17,16 @@ typedef struct tab {
     fdk_widget *breadcrumb_host;
     int view_mode;         /* VIEW_DETAIL / VIEW_ICONS / COMPACT   */
     fdk_widget *list;      /* the model-bound list (detail/compact)*/
+    /* §31/owner-round-5: this tab's VIEW GENERATION. Every
+     * pane_build_view destroys and recreates the view widgets; a
+     * worker thumbnail (or anything else that captured the view
+     * pointer) must check it against the CURRENT generation before
+     * touching the widget — a delivery for a superseded generation
+     * drops on the floor (the new view re-requests what it needs).
+     * Without this, the smoke rig's iconview rebuild raced a
+     * worker delivery into the destroyed widget (ASAN
+     * heap-use-after-free, the owner's round-5 log shape). */
+    unsigned view_gen;
     /* §29/G-10: the drag-source arm state is gone — FDK's
      * widget-level drag source owns the gesture now. */
 } tab;
