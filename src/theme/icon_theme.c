@@ -1195,10 +1195,23 @@ char *fdk__icon_theme_lookup(const char *icon_name, fdk_i32 size) {
     return path;
 }
 
+static const char *it_channel_name(fdk_icon_theme_channel c);
+static const char *it_detect_icon_theme(void);
+
 const char *fdk__icon_theme_current_name(void) {
     if (g_current_read) {
         return g_current;
     }
+    const char *answer = it_detect_icon_theme();
+    /* §31/owner-round-2: the detection verdict, ONE line per
+     * process — "which icon theme, through which channel" is the
+     * first question when icons look wrong on a real desktop. */
+    FDK_INFO("icons: theme '%s' via %s",
+             answer, it_channel_name(g_current_channel));
+    return answer;
+}
+
+static const char *it_detect_icon_theme(void) {
     g_current_read = true;
     g_current[0] = '\0';
     g_current_channel = FDK_ICON_THEME_FALLBACK; /* unless a channel answers */
@@ -1425,6 +1438,27 @@ const char *fdk__icon_theme_current_name(void) {
     return g_current;
 }
 
+static const char *it_channel_name(fdk_icon_theme_channel c) {
+    switch (c) {
+    case FDK_ICON_THEME_APP_PREFS:
+        return "app preference";
+    case FDK_ICON_THEME_XSETTINGS:
+        return "XSETTINGS (live)";
+    case FDK_ICON_THEME_PORTAL:
+        return "portal/gsettings";
+    case FDK_ICON_THEME_GTK_INI:
+        return "gtk settings.ini";
+    case FDK_ICON_THEME_KDE_GLOBALS:
+        return "kdeglobals";
+    case FDK_ICON_THEME_ENV:
+        return "environment";
+    case FDK_ICON_THEME_FALLBACK:
+        return "search-path default";
+    default:
+        return "none";
+    }
+}
+
 /* Symbolic tint: the alpha mask kept, the color replaced with the
  * current FDK theme's text ink — the renderer-correct reading of
  * the spec's symbolic intent. */
@@ -1549,6 +1583,20 @@ fdk_surface *fdk__icon_theme_surface_chain(const char *const *names,
         }
     }
     return NULL;
+}
+
+/* §31/owner-round-2: the color theme changed. ONLY the surface
+ * cache is stale (symbolic tints bake the ink at decode); the
+ * detection caches, lookup paths, and the theme name stay valid. */
+void fdk__icon_theme_retheme(void) {
+    for (size_t i = 0; i < IT_SURFACE_CACHE; i++) {
+        if (g_surface_cache[i].used &&
+            g_surface_cache[i].surf != NULL) {
+            fdk_surface_destroy(g_surface_cache[i].surf);
+        }
+        g_surface_cache[i].used = false;
+        g_surface_cache[i].surf = NULL;
+    }
 }
 
 void fdk__icon_theme_reset(void) {

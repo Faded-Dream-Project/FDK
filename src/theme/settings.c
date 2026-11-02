@@ -317,6 +317,11 @@ static void install_theme(fdk_theme *t, const char *name,
     snprintf(g_installed_name, sizeof g_installed_name, "%s",
              name != NULL ? name : "");
     fdk__theme_set_default_settings(t);
+    /* §31/owner-round-2: symbolic icons bake the OLD theme's ink at
+     * decode time (it_tint_symbolic runs on the cached surface), so
+     * a color-theme switch must drop the icon decode cache — the
+     * next lookup re-rasterizes and re-tints with the new ink. */
+    fdk__icon_theme_retheme();
     if (old != NULL) {
         fdk_theme_destroy(old); /* no longer current: plain free */
     }
@@ -334,6 +339,7 @@ static void uninstall_theme(void) {
     g_installed = NULL;
     g_installed_name[0] = '\0';
     fdk__theme_set_default_settings(NULL); /* built-in + repaint */
+    fdk__icon_theme_retheme(); /* re-tint symbolics (above) */
     fdk_theme_destroy(old);
     FDK_INFO("theme: setting cleared — back to the built-in theme");
 }

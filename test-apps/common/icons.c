@@ -11,6 +11,7 @@
 #include "icons_data.h"
 
 typedef struct cached_icon {
+    char *path; /* system tier: the name that answered */
     char *key; /* "name|size|ink" */
     fdk_surface *surface;
     struct cached_icon *next;
@@ -169,8 +170,26 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
         {"folder-pictures", {"folder", NULL, NULL}},
         {"folder-videos", {"folder", NULL, NULL}},
     };
+    /* §31/owner-round-2: the SYSTEM tier is cached HERE as well.
+     * fdk_icon_theme_surface() hands out a fresh OWNED clone per
+     * call (its documented contract) — the old code returned it
+     * borrowed-style, never cached it, never freed it, and every
+     * repaint allocated a new surface: 925 leaked clones (2.4 MB)
+     * on the owner's machine. Cached under "S|name|px" (the engine
+     * bakes the symbolic tint at decode; the app's ink is not part
+     * of a system icon's identity). */
     const char *std = standard_name(name);
     if (std != NULL) {
+        char skey[160];
+        snprintf(skey, sizeof skey, "S|%s|%d", name, px);
+        for (cached_icon *c = g_cache; c != NULL; c = c->next) {
+            if (strcmp(c->key, skey) == 0) {
+                g_last_tier = ICONS_TIER_SYSTEM;
+                snprintf(g_last_path, sizeof g_last_path, "%s",
+                         c->path);
+                return c->surface;
+            }
+        }
         /* a small mutable copy: [0]=std, then the alternates */
         const char *alts[4] = {std, NULL, NULL, NULL};
         size_t alts_n = 1;
@@ -194,14 +213,32 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
                 which = alts[a];
             }
             if (themed != NULL) {
-                g_last_tier = ICONS_TIER_SYSTEM;
-                snprintf(g_last_path, sizeof g_last_path, "%s",
-                         which);
-                if (getenv("FDK_ICONS_TRACE") != NULL) {
-                    fprintf(stderr, "icons: '%s' -> SYSTEM '%s'\n",
-                            name, which);
+                cached_icon *c = malloc(sizeof *c);
+                if (c != NULL) {
+                    snprintf(skey, sizeof skey, "S|%s|%d", name, px);
+                    c->key = strdup(skey);
+                    c->path = strdup(which);
+                    c->surface = themed;
+                    if (c->key != NULL && c->path != NULL) {
+                        c->next = g_cache;
+                        g_cache = c;
+                        g_last_tier = ICONS_TIER_SYSTEM;
+                        snprintf(g_last_path, sizeof g_last_path,
+                                 "%s", which);
+                        if (getenv("FDK_ICONS_TRACE") != NULL) {
+                            fprintf(stderr, "icons: '%s' -> SYSTEM "
+                                            "'%s'\n", name, which);
+                        }
+                        return c->surface;
+                    }
+                    free(c->key);
+                    free(c->path);
+                    free(c);
                 }
-                return themed; /* borrowed from the engine's cache */
+                fdk_surface_destroy(themed);
+                g_last_tier = ICONS_TIER_FALLBACK;
+                g_last_path[0] = '\0';
+                return NULL;
             }
         }
     }
@@ -249,6 +286,7 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
                 cached_icon *c = malloc(sizeof *c);
                 if (c != NULL) {
                     c->key = strdup(key);
+                    c->path = NULL;
                     c->surface = s;
                     c->next = g_cache;
                     if (c->key != NULL) {
@@ -289,6 +327,7 @@ void icons_theme_changed(void) {
     while (c != NULL) {
         cached_icon *next = c->next;
         free(c->key);
+        free(c->path);
         fdk_surface_destroy(c->surface);
         free(c);
         c = next;

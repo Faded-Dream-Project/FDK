@@ -181,6 +181,11 @@ typedef enum {
  * stale from a previous session. */
 void fdk__icon_theme_reset(void);
 
+/* §31/owner-round-2: the COLOR theme changed — drop only the icon
+ * decode cache (symbolic tints bake the old theme's ink at decode
+ * time); detection, lookup, and name caches stay valid. */
+void fdk__icon_theme_retheme(void);
+
 /* The user's selected icon theme name (static storage, cached until
  * reset). Detection, no bus: $FDK_ICON_THEME > XSETTINGS live (the
  * X11 channel the desktop's own GTK apps obey — see
