@@ -67,8 +67,32 @@ static inline size_t ta_join(char *out, size_t cap, const char *a,
         ta_buf_truncated_ = 1;
         return 0;
     }
-    size_t n = (size_t)snprintf(out, cap, "%.4000s/%.200s",
-                                a != NULL ? a : "", b != NULL ? b : "");
+    size_t alen = a != NULL ? strnlen(a, 4000) : 0;
+    size_t blen = b != NULL ? strnlen(b, 200) : 0;
+    size_t n = alen + 1 + blen;
+    if (n >= cap) {
+        ta_buf_truncated_ = 1;
+        size_t keep = (cap > 0) ? cap - 1 : 0;
+        if (keep > 0) {
+            size_t akeep = alen < keep ? alen : keep - 1;
+            memcpy(out, a != NULL ? a : "", akeep);
+            out[akeep] = '/';
+            if (keep > akeep + 1) {
+                memcpy(out + akeep + 1, b != NULL ? b : "",
+                       keep - akeep - 1);
+            }
+            out[keep] = '\0';
+        }
+        return cap > 0 ? cap - 1 : 0;
+    }
+    if (alen > 0) {
+        memcpy(out, a, alen);
+    }
+    out[alen] = '/';
+    if (blen > 0) {
+        memcpy(out + alen + 1, b, blen);
+    }
+    out[alen + 1 + blen] = '\0';
     if (n >= cap) {
         ta_buf_truncated_ = 1;
         return cap - 1;
