@@ -1,3 +1,67 @@
+# §31 continuation — UPDATE (owner round: "icon theme not working at all" + sidebar.c:344 warning)
+
+## Remote proof
+origin/main == `238ccc4` ("icons: the THREE real reasons the toolbar was blank on a real desktop").
+
+## What the owner's report exposed (all fixed in 238ccc4)
+1. **-Werror had NOT actually landed** in test-apps/Makefile — the
+   scripted edit silently missed; the owner's build line proved it.
+   Really applied now; a canary (injected unused function) FAILS the
+   build. The rig now re-greps the MAKE OUTPUT, not the file, for
+   "warning:".
+2. **sidebar.c:344 -Wformat-truncation**: newer gcc computes the
+   array-SPANNING bound of g_bms[i].path. All fixed-buffer copies in
+   sidebar.c go through ta_copy/ta_join now.
+3. **The icon claim was FALSE, and here is why my verification lied**:
+   - openbox was silently EXITING ("Unable to load a theme") in the
+     rig — every "openbox" run was BARE Xvfb. It now gets a working
+     Clearlooks theme in a fake HOME; EWMH verified up first.
+   - The "13 clusters" in the old screenshots were menubar TEXT, not
+     icons: FDK_ICONS_TRACE printed ZERO lines because
+     icons_get was NEVER CALLED — the icon button's canvas child had
+     EMPTY bounds (sized only in ta_icon_buttons_relayout, which
+     runs on FDK_EVENT_WINDOW_CONFIGURE, an event that never arrives
+     after the callback is registered) → paint_rec early-outs on
+     rect_empty → THE BLANK TOOLBAR (S1's true root cause). Fixed:
+     bounds set AT CREATION (the button's natural 32x28) + one boot
+     relayout pass after menus_build.
+   - The BUNDLED tier never rendered either: the embedded SVGs went
+     to fdk_surface_create_from_image_bytes (stbi = raster only) →
+     "image decode failed" WARNs. FDK gained the public API
+     fdk_surface_create_from_svg_bytes() (nanosvg core factored from
+     fdk__icon_svg_raster; test-first tests/test_svg_bytes.c;
+     exports 995→996); icons.c routes SVG bytes to it.
+   - Fallback-name chain added per Part 2.2 (view-hidden→visibility,
+     view-compact→view-list-compact/view-list-details, view-grid→
+     view-list-icons, system-search→edit-find, user-trash-full→
+     user-trash, folder-*→folder): themes legitimately lack names
+     (Adwaita has NO view-hidden/view-compact at any size; breeze has
+     no view-list).
+
+## The honest verification now (rerun these commands after any change)
+- Rig = /tmp/shotapp.sh (recreate after /tmp wipe; it needs openbox
+  debs in /tmp/iconsroot/root with a WORKING theme in fake HOME,
+  netpbm+x11-apps in /tmp/pbroot, RIG_DATA for the icon dir,
+  gtk-3.0/settings.ini in the fake HOME declares the theme — that is
+  how a real desktop states it when no XSETTINGS daemon runs).
+- Trace gate: `FDK_ICONS_TRACE=1` → expect 12 "icons: PAINT" and
+  tier lines; Papirus = 12/12 SYSTEM; breeze = 11 SYSTEM + 1 BUNDLED
+  (view-list); Adwaita-only = 10 + 2 (eye, view-compact). NO
+  "decode failed" WARNs, no runtime errors.
+- Pixel gate: toolbar band at window-top+30 must contain ≥8 runs of
+  icon width (8..20 px); pre-fix shots have ZERO. Cross-theme cell
+  hashes differ where the themes' glyph art differs.
+- make test GREEN; make verify-exports = 996; apps -Werror clean;
+  build/sidebar-test GREEN.
+
+## Still open from §31 (unchanged except S10/S8 data point)
+The rig logs show a "no D-Bus address resolves" INFO every ~2 s for
+the app's lifetime (the notify client's try_connect re-arms; find
+what ticks it every 2 s — that is ALSO the S8 idle-frame suspect).
+Then: sidebar_view.c, PART-3 toolbar polish (24 px in 36×36 — the
+buttons currently paint 16 px icons in 32×28), PART-4 artifacts,
+S7 grab, S8 idle, S10 endpoint chain, --diag, PART-8 audit.
+
 # §31 continuation state — FIX fdk-files (round cut; read this first)
 
 ## Remote proof
