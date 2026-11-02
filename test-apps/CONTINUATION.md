@@ -161,3 +161,62 @@ identity + hooks already in .git/hooks (pre-commit/commit-msg). No xauth
 → use the throwaway-Xvfb pattern. sway/weston binaries live in
 /home/z/apt/prefix/usr/bin (WAYLAND suite was NOT run this round —
 sandbox had no compositor session; run make test-wayland next round).
+
+## §28 status (round cut; read this first)
+DONE + PUSHED (164f70e): STEP 2a-2c — G-9, FOUR defects fixed
+test-first (tests/test_model.c: test_multiple_views_one_model RED
+first — view 1 froze at 2 rows on the second bind, the exact
+fdk-files rows=0 symptom):
+1. model_bind used the model's SINGLE on_change slot → second
+   pane's bind overwrote the first's handler. Fix: per-model
+   LISTENER LIST (m_listener + internal fdk__model_add/remove_
+   listener in model.c, declared in widgets_internal.h); binding
+   subscribes through it; fire_change runs the app's slot THEN
+   every listener; unbind/destroy of one view spares the others.
+2. Proxies read the CHILD'S RAW ROW ARRAY — but fdk-files chains
+   store→filter→sort, so the sort's child is the filter's FACE
+   (rows[] empty). Fix: proxy_rebuild collect, the sort comparator
+   (proxy_cmp_keys), and the filter predicate all read through
+   the PUBLIC row API; cell_row RECURSES through face children;
+   schema_of WALKS to the chain's bottom store.
+3. The filter predicate ran only in set_predicate — a store
+   mutation rebuilt the permutation UNFILTERED. Fix: the rule
+   re-applies inside proxy_rebuild.
+4. sort_set_key's refire never reached an upstream proxy. Fix:
+   fire_face (slot+listeners) is the one refire path in
+   child_changed/set_key/set_predicate.
+Plus: listeners freed in fdk_model_destroy + both proxy destroys
+(LSan caught); proxy multi-view test + two-view a11y LIST_ITEM
+exposure test; example 15 binds TWO lists to the same proxy face;
+fdk_model.h docs state the N-views contract. ALL suites green
+after (make test, test-dbus, test-x11 222, TSan, verify-exports
+983, Wayland PASS, smoke 4/4).
+
+STEP 2e (drag rig) — NOT GREEN, committed WIP (dcced0d): the app
+now boots into the DETAIL list (the DRIG gate forces VIEW_DETAIL
+— the app's real prefs said icons, and drag arming is list-only);
+the calibrated click at (250,131) SELECTS (probe evidence:
+fdk-files-drig-detail.png + pixel diff shows status bar + column
+changes). But all four legs still FAIL on the DROP side: D1
+between panes, D2 to-bookmark, D3 bookmark reorder, D4 drag-out
+to scripts/xdnd_sink (started by run_drig.sh at (1020,100), log
+/tmp/drig-sink.log never gets the payload).
+NEXT LEAD (the strongest, untested): the click selects, so
+POINTER_DOWN reaches the row, but the DRAG never starts — check
+whether FDK_WIDGET_POINTER_MOTION events are DELIVERED to
+view_event while the button is HELD (the arming path needs
+motion-past-threshold: panes.c:413). One XTEST experiment with
+FDK's x11_events.c motion delivery during a held button (does the
+pointer grab swallow them? does the LIST widget consume them
+before the event callback?) pins it. If FDK lacks motion
+delivery during a press → that is a G-10 FDK bug, fix test-first.
+
+STEP 3 (notify chase) — NOT STARTED this round (budget went to
+the drag rig; the timebox was not consumed — 0 of 10 experiments
+used). The §27 evidence stands (G-8 committed; see §27 block).
+
+ROUND SCOPE NOTE: per the §28 brief, fdk-edit (STEP 4) was NOT
+started — the round was limited to Steps 1-3 + the drag rig.
+
+All suites green at cut-off (after dcced0d): make test, test-dbus,
+test-x11 3/3, TSan, verify-exports, Wayland PASS, smoke 4/4.
