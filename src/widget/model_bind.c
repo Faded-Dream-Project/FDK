@@ -2,8 +2,8 @@
  * model_bind.c — the model/view binding (§23/B2e; fdk_model.h's
  * view half).
  *
- * A bound List or Tree MIRRORS the model: the binding installs a
- * change handler on the model (or a proxy's face) and applies every
+ * A bound List or Tree MIRRORS the model: the binding subscribes a
+ * change listener on the model (or a proxy's face) and applies every
  * row change to the widget's own row CRUD — the widget stays the
  * presentation it always was, the model becomes the data's single
  * home, and sorting/filtering happen by REBINDING to a proxy (the
@@ -21,6 +21,8 @@
 #include "fdk/fdk_model.h"
 #include "fdk/fdk_widgets.h"
 
+#include "widgets_internal.h" /* §28/G-9: the listener decls + the
+                               * G-6 destroy-hook prototype        */
 #include "core/alloc_internal.h"
 
 #include <string.h>
@@ -31,11 +33,6 @@ typedef struct {
     fdk_model *model;      /* borrowed; NULL = unbound             */
     size_t text_column;
     bool tree;             /* list or tree binding                  */
-
-    /* the model change handler */
-    fdk_model_change_fn prev_child_fn; /* the model's own handler,
-                                        * chained after ours        */
-    void *prev_child_user;
 
     /* id <-> view index (list) / id <-> node handle (tree)        */
     fdk_u64 *ids;          /* per view row: the model row id        */
@@ -243,7 +240,16 @@ fdk_result fdk_list_bind_model(fdk_widget *list, fdk_model *model,
     b->model = model;
     b->text_column = text_column;
     b->tree = false;
-    fdk_model_set_on_change(model, binding_changed, list);
+    /* §28/G-9: subscribe through the model's LISTENER LIST (not
+     * the single public on_change slot) so a second bound view
+     * cannot overwrite the first's handler — N views on one model
+     * is the model/view contract's basic case. */
+    fdk_result rc = fdk__model_add_listener(model, binding_changed,
+                                            list);
+    if (!fdk_ok(rc)) {
+        fdk_list_unbind_model(list);
+        return rc;
+    }
     rebuild_list(list, b);
     return FDK_OK;
 }
@@ -254,7 +260,9 @@ void fdk_list_unbind_model(fdk_widget *list) {
         return;
     }
     if (b->model != NULL) {
-        fdk_model_set_on_change(b->model, NULL, NULL);
+        /* remove THIS widget's listener only — the model's other
+         * bound views (and the app's own on_change) stay live */
+        fdk__model_remove_listener(b->model, binding_changed, list);
     }
     fdk_free(b->ids);
     fdk_free(b->nodes);
@@ -269,13 +277,15 @@ void fdk_list_unbind_model(fdk_widget *list) {
  * for every dying widget; a bound one releases its slot HERE so the
  * registry never holds a stale pointer.
  *
- * Deliberately NOT the public unbind's full path: set_on_change on
- * the model is unsafe at this point because the MODEL may already
- * be freed (an application that shuts its models down before its
- * window — fdk-files does exactly that). The model's on_change may
- * keep pointing at binding_changed with this dead widget as user
- * data; that call is already guarded (binding_of(w) returns NULL
- * for a cleared slot) and the next binder overwrites it. */
+ * Deliberately NOT the public unbind's full path: touching the
+ * model is unsafe at this point because the MODEL may already be
+ * freed (an application that shuts its models down before its
+ * window — fdk-files does exactly that). The model's listener list
+ * may keep pointing at binding_changed with this dead widget as
+ * user data; that call is already guarded (binding_of(w) returns
+ * NULL for a cleared slot — the mirror no-ops) and the listener
+ * dies with the model or is removed by a later unbind of a view
+ * that shares it. */
 void fdk__model_bind_widget_destroyed(fdk_widget *w) {
     if (w == NULL) {
         return;
@@ -305,7 +315,12 @@ fdk_result fdk_tree_bind_model(fdk_widget *tree, fdk_model *model,
     b->model = model;
     b->text_column = text_column;
     b->tree = true;
-    fdk_model_set_on_change(model, binding_changed, tree);
+    fdk_result rc = fdk__model_add_listener(model, binding_changed,
+                                            tree);
+    if (!fdk_ok(rc)) {
+        fdk_list_unbind_model(tree);
+        return rc;
+    }
     rebuild_tree(tree, b);
     return FDK_OK;
 }

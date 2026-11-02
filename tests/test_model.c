@@ -28,6 +28,7 @@
 
 #include "hermetic_env.h"
 #include "fdk/fdk.h"
+#include "fdk/fdk_a11y.h"
 #include "fdk/fdk_model.h"
 #include "fdk/fdk_widgets.h"
 
@@ -383,6 +384,115 @@ static void test_list_binding(void) {
            "id, reorder, unbind\n");
 }
 
+/* §28/G-9: ONE model, N bound views — the basic model/view promise.
+ * model_bind.c installed the binding through the model's SINGLE
+ * on_change slot, so a second bind on the same model overwrote the
+ * first view's handler: the first pane froze at its old rows while
+ * fmodel_load's clear+fill rebuilt only the last binder (fdk-files'
+ * split view: a pane whose dir HAD files showed 0 rows). Unbinding
+ * one view silenced the other the same way. Written RED first: a
+ * model must keep a LISTENER LIST, not one slot. */
+static void test_multiple_views_one_model(void) {
+    fdk_widget *root1 = NULL;
+    fdk_widget *root2 = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
+                                    (fdk_rect){0, 0, 400, 300},
+                                    &root1)));
+    assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
+                                    (fdk_rect){0, 0, 400, 300},
+                                    &root2)));
+    fdk_model_value_type types[1] = {FDK_MODEL_TEXT};
+    fdk_model *m = fdk_model_create(types, 1);
+    assert(m != NULL);
+
+    /* the fdk-files boot order: the model is POPULATED before any
+     * view binds (fmodel_load fills the store, then panes_build
+     * binds each pane's list). */
+    fdk_model_row a = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, a, 0, "alpha")));
+    fdk_model_row b = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, b, 0, "beta")));
+    fdk_u64 id_a = fdk_model_row_id(m, a);
+    fdk_u64 id_b = fdk_model_row_id(m, b);
+
+    fdk_widget *list1 = NULL;
+    assert(fdk_ok(fdk_list_create(root1, NULL, &list1)));
+    fdk_widget *list2 = NULL;
+    assert(fdk_ok(fdk_list_create(root2, NULL, &list2)));
+
+    /* the initial mirror must survive the SECOND bind: both views
+     * show the rows that were already there. */
+    assert(fdk_ok(fdk_list_bind_model(list1, m, 0)));
+    assert(fdk_list_row_count(list1) == 2);
+    assert(fdk_ok(fdk_list_bind_model(list2, m, 0)));
+    assert(fdk_list_row_count(list2) == 2);
+    assert(fdk_list_row_count(list1) == 2); /* RED: first view froze */
+    assert(strcmp(fdk_list_row_text(list1, 0), "alpha") == 0);
+    assert(strcmp(fdk_list_row_text(list2, 0), "alpha") == 0);
+    assert(strcmp(fdk_list_row_text(list1, 1), "beta") == 0);
+    assert(fdk_list_bound_row_id(list1, 0) == id_a);
+    assert(fdk_list_bound_row_id(list2, 1) == id_b);
+
+    /* insert reaches BOTH views */
+    fdk_model_row c = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, c, 0, "gamma")));
+    fdk_u64 id_c = fdk_model_row_id(m, c);
+    assert(fdk_list_row_count(list1) == 3);
+    assert(fdk_list_row_count(list2) == 3);
+
+    /* remove reaches both */
+    assert(fdk_ok(fdk_model_row_remove(m, b)));
+    assert(fdk_list_row_count(list1) == 2);
+    assert(fdk_list_row_count(list2) == 2);
+    assert(strcmp(fdk_list_row_text(list1, 1), "gamma") == 0);
+    assert(strcmp(fdk_list_row_text(list2, 1), "gamma") == 0);
+
+    /* move reaches both */
+    fdk_model_row gam;
+    assert(fdk_ok(fdk_model_row_resolve(m, id_c, &gam)));
+    assert(fdk_ok(fdk_model_row_move(m, gam, FDK_MODEL_ROW_NONE, 0)));
+    assert(strcmp(fdk_list_row_text(list1, 0), "gamma") == 0);
+    assert(strcmp(fdk_list_row_text(list2, 0), "gamma") == 0);
+
+    /* data change reaches both */
+    fdk_model_row al;
+    assert(fdk_ok(fdk_model_row_resolve(m, id_a, &al)));
+    assert(fdk_ok(fdk_model_set_text(m, al, 0, "ALPHA")));
+    assert(strcmp(fdk_list_row_text(list1, 1), "ALPHA") == 0);
+    assert(strcmp(fdk_list_row_text(list2, 1), "ALPHA") == 0);
+
+    /* clear reaches both (the fmodel_load shape: clear + refill) */
+    fdk_model_clear(m);
+    assert(fdk_list_row_count(list1) == 0);
+    assert(fdk_list_row_count(list2) == 0);
+    fdk_model_row d = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, d, 0, "delta")));
+    fdk_model_row e = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, e, 0, "eps")));
+    assert(fdk_list_row_count(list1) == 2);
+    assert(fdk_list_row_count(list2) == 2);
+
+    /* unbind ONE view: the other keeps mirroring */
+    fdk_list_unbind_model(list1);
+    fdk_model_row f = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, f, 0, "zeta")));
+    assert(fdk_list_row_count(list1) == 2); /* unbound: frozen */
+    assert(fdk_list_row_count(list2) == 3); /* RED: silenced too */
+
+    /* destroy ONE view's tree: the survivor keeps mirroring (G-6) */
+    fdk_widget_destroy(root1);
+    fdk_model_row g = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, g, 0, "eta")));
+    assert(fdk_list_row_count(list2) == 4);
+    assert(strcmp(fdk_list_row_text(list2, 3), "eta") == 0);
+
+    fdk_widget_destroy(root2);
+    fdk_model_destroy(m);
+    printf("[ok] model: one model, N bound views — mirror + live "
+           "changes reach both, unbind/destroy of one spares the "
+           "other\n");
+}
+
 static void test_tree_binding(void) {
     fdk_widget *root = NULL;
     assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
@@ -423,12 +533,174 @@ static void test_tree_binding(void) {
     printf("[ok] tree binding: nested mirror, node_of\n");
 }
 
+/* §28/G-9c: N views through the PROXY chain — fdk-files binds both
+ * panes to a sort>filter FACE; the proxies used to refire through
+ * the face's single on_change slot (the same single-slot defect one
+ * layer up), and a proxy's child-hook used to STEAL the store's
+ * slot (a view bound to the STORE went silent the moment a proxy
+ * was created). Both views must mirror through the proxies, and a
+ * store-bound view must survive proxy creation. */
+static void test_multiple_views_through_proxies(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
+                                    (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+    fdk_model_value_type types[2] = {FDK_MODEL_TEXT, FDK_MODEL_INT};
+    fdk_model *m = fdk_model_create(types, 2);
+    assert(m != NULL);
+    const char *names[] = {"delta", "alpha", "charlie", "bravo"};
+    for (int i = 0; i < 4; i++) {
+        fdk_model_row r = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+        assert(fdk_ok(fdk_model_set_text(m, r, 0, names[i])));
+        assert(fdk_ok(fdk_model_set_int(m, r, 1, i)));
+    }
+
+    /* a view bound to the STORE before any proxy exists */
+    fdk_widget *store_view = NULL;
+    assert(fdk_ok(fdk_list_create(root, NULL, &store_view)));
+    assert(fdk_ok(fdk_list_bind_model(store_view, m, 0)));
+    assert(fdk_list_row_count(store_view) == 4);
+
+    /* the fdk-files chain: store -> sort -> filter; BOTH panes bind
+     * to the filter's face */
+    fdk_model_sort *s = fdk_model_sort_new(m);
+    assert(s != NULL);
+    fdk_model_filter *f = fdk_model_filter_new(
+        fdk_model_sort_model(s));
+    assert(f != NULL);
+    fdk_model *face = fdk_model_filter_model(f);
+    assert(fdk_model_row_child_count(face, FDK_MODEL_ROW_NONE) == 4);
+
+    /* the store-bound view must STILL mirror after the proxies
+     * subscribed (the proxy child-hook used to overwrite it). */
+    fdk_model_row extra = fdk_model_row_append(m,
+                                               FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, extra, 0, "zulu")));
+    assert(fdk_list_row_count(store_view) == 5);
+
+    fdk_widget *pane1 = NULL;
+    assert(fdk_ok(fdk_list_create(root, NULL, &pane1)));
+    fdk_widget *pane2 = NULL;
+    assert(fdk_ok(fdk_list_create(root, NULL, &pane2)));
+    assert(fdk_ok(fdk_list_bind_model(pane1, face, 0)));
+    assert(fdk_list_row_count(pane1) == 5);
+    assert(fdk_ok(fdk_list_bind_model(pane2, face, 0)));
+    assert(fdk_list_row_count(pane2) == 5);
+    assert(fdk_list_row_count(pane1) == 5); /* not silenced */
+
+    /* a store mutation fans out through the chain to BOTH panes
+     * AND the store view */
+    fdk_model_row two = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, two, 0, "hotel")));
+    assert(fdk_ok(fdk_model_set_int(m, two, 1, 10))); /* even */
+    assert(fdk_list_row_count(pane1) == 6);
+    assert(fdk_list_row_count(pane2) == 6);
+    assert(fdk_list_row_count(store_view) == 6);
+
+    /* a live re-key of the sort reaches both panes in the NEW
+     * order (the set_key refire fans out too). */
+    fdk_model_sort_set_key(s, 0, false, NULL, NULL);
+    assert(strcmp(fdk_list_row_text(pane1, 0), "alpha") == 0);
+    assert(strcmp(fdk_list_row_text(pane2, 0), "alpha") == 0);
+
+    /* a predicate change reaches both panes. Ints: delta=0,
+     * alpha=1, charlie=2, bravo=3, zulu=0 (appended; even),
+     * hotel=10 — keep_ints_even keeps delta, charlie, zulu,
+     * hotel = 4 rows. */
+    fdk_model_filter_set_predicate(f, keep_ints_even, NULL);
+    assert(fdk_list_row_count(pane1) == 4);
+    assert(fdk_list_row_count(pane2) == 4);
+
+    /* unbinding one pane leaves the other mirroring through the
+     * chain */
+    fdk_list_unbind_model(pane1);
+    fdk_model_row three = fdk_model_row_append(m,
+                                               FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, three, 0, "golf")));
+    assert(fdk_ok(fdk_model_set_int(m, three, 1, 7))); /* odd */
+    /* golf is hidden by the predicate — but the store view sees
+     * it; pane2 must still be ALIVE (4 rows, not crashed) */
+    assert(fdk_list_row_count(store_view) == 7);
+    assert(fdk_list_row_count(pane2) == 4);
+
+    fdk_list_unbind_model(pane2);
+    fdk_list_unbind_model(store_view);
+    fdk_model_filter_destroy(f);
+    fdk_model_sort_destroy(s);
+    fdk_model_destroy(m);
+    fdk_widget_destroy(root);
+    printf("[ok] model: N views through sort>filter proxies — fan "
+           "out on child change, re-key and predicate; the store "
+           "view survives proxy creation\n");
+}
+
+/* §28/G-9c: the a11y exposure of a bound view — the binding
+ * mirrors into real row widgets, so each view's AT-SPI tree must
+ * show its own LIST_ITEM set with the right names, and a model
+ * mutation must grow BOTH views' exposures (two panes, one
+ * model — the screen reader must not see one pane's rows go
+ * stale). */
+static size_t a11y_count_items(const fdk_widget *w) {
+    size_t n = 0;
+    fdk_a11y_info info;
+    if (fdk_ok(fdk_a11y_describe(w, &info))) {
+        if (info.role == FDK_A11Y_ROLE_LIST_ITEM) {
+            n++;
+        }
+        fdk_a11y_info_free(&info);
+    }
+    for (size_t i = 0; i < fdk_widget_child_count(w); i++) {
+        n += a11y_count_items(fdk_widget_child_at(w, i));
+    }
+    return n;
+}
+
+static void test_bound_views_a11y_exposure(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
+                                    (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+    fdk_model_value_type types[1] = {FDK_MODEL_TEXT};
+    fdk_model *m = fdk_model_create(types, 1);
+    assert(m != NULL);
+    for (int i = 0; i < 3; i++) {
+        fdk_model_row r = fdk_model_row_append(m,
+                                               FDK_MODEL_ROW_NONE);
+        char t[16];
+        snprintf(t, sizeof t, "row-%d", i);
+        assert(fdk_ok(fdk_model_set_text(m, r, 0, t)));
+    }
+    fdk_widget *l1 = NULL;
+    fdk_widget *l2 = NULL;
+    assert(fdk_ok(fdk_list_create(root, NULL, &l1)));
+    assert(fdk_ok(fdk_list_create(root, NULL, &l2)));
+    assert(fdk_ok(fdk_list_bind_model(l1, m, 0)));
+    assert(fdk_ok(fdk_list_bind_model(l2, m, 0)));
+    assert(a11y_count_items(l1) == 3);
+    assert(a11y_count_items(l2) == 3);
+
+    fdk_model_row r = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, r, 0, "added")));
+    assert(a11y_count_items(l1) == 4);
+    assert(a11y_count_items(l2) == 4);
+
+    fdk_list_unbind_model(l1);
+    fdk_list_unbind_model(l2);
+    fdk_model_destroy(m);
+    fdk_widget_destroy(root);
+    printf("[ok] model: two bound views each expose their own "
+           "a11y LIST_ITEM rows, growing with the model\n");
+}
+
 int main(void) {
     test_store();
     test_sort();
     test_filter();
     test_list_binding();
     test_binding_detaches_on_destroy();
+    test_multiple_views_one_model();
+    test_multiple_views_through_proxies();
+    test_bound_views_a11y_exposure();
     test_tree_binding();
     printf("all model tests passed\n");
     return 0;

@@ -1,19 +1,23 @@
 /* 15_model_view.c — the §23/B2e model/view split, live.
  *
- * One window, three rows:
+ * One window, four rows:
  *   top      a toolbar: Sort A-Z / Z-A / by size, a filter entry
  *            (rows whose text contains it), an Add button, and a
  *            Remove-selected button
- *   middle   a List BOUND to a sort>filter proxy chain over one
+ *   upper    a List BOUND to a sort>filter proxy chain over one
  *            model (the app never touches the widget's row API)
+ *   lower    a SECOND List bound to the SAME proxy face — the
+ *            §28/G-9 point: one model, N views, all mirroring
+ *            (what a split view is)
  *   bottom   a status label mirroring the selection BY MODEL ID
  *
  * The point being demonstrated: the data lives in the MODEL (+
- * proxies); the view is a mirror. Sorting re-keys the proxy (the
+ * proxies); the views are mirrors. Sorting re-keys the proxy (the
  * selection follows by id); typing in the filter re-predicates;
- * Add/Remove mutate the model and the view updates through the
+ * Add/Remove mutate the model and every view updates through the
  * change signals alone. The reorder button moves the SELECTED
- * model rows to the end — through the model, view follows.
+ * model rows (of the first view) to the end — through the model,
+ * all views follow.
  */
 
 #include "example_window.h"
@@ -33,15 +37,19 @@ static struct {
     fdk_model_sort *sort;   /* the sort proxy                   */
     fdk_model_filter *filter; /* the filter proxy              */
     fdk_widget *list;
+    fdk_widget *list2;      /* the second view (§28/G-9)        */
     fdk_widget *filter_entry;
     fdk_font *font;
     int sort_dir;           /* 0 = insertion, 1 = asc, 2 = desc */
 } g;
 
 static void refresh_binding(void) {
-    /* Re-bind the list to the filter's FACE (the head of the
-     * proxy chain). The rebuild reads through both proxies. */
+    /* Re-bind BOTH lists to the filter's FACE (the head of the
+     * proxy chain). The rebuild reads through both proxies; the
+     * listener list keeps both mirrors live. */
     fdk_list_bind_model(g.list,
+                        fdk_model_filter_model(g.filter), 0);
+    fdk_list_bind_model(g.list2,
                         fdk_model_filter_model(g.filter), 0);
 }
 
@@ -237,17 +245,23 @@ int main(void) {
     fdk_entry_set_on_changed(g.filter_entry, on_filter_changed,
                              NULL);
 
-    /* the bound list */
+    /* the two bound views (the same model, the same proxy face —
+     * the split-view shape) */
     g.list = NULL;
     assert(fdk_ok(fdk_list_create(root, g.font, &g.list)));
     fdk_list_set_selection_mode(g.list, FDK_LIST_SELECTION_MULTIPLE);
     fdk_list_set_on_selection_changed(g.list, on_selection, NULL);
+    g.list2 = NULL;
+    assert(fdk_ok(fdk_list_create(root, g.font, &g.list2)));
+    fdk_list_set_selection_mode(g.list2, FDK_LIST_SELECTION_MULTIPLE);
+    fdk_widget_set_expand(g.list2, true, true);
     refresh_binding();
 
     fdk_window_show(app.window);
     fdk_example_run(&app);
 
     fdk_list_unbind_model(g.list);
+    fdk_list_unbind_model(g.list2);
     fdk_model_filter_destroy(g.filter);
     fdk_model_sort_destroy(g.sort);
     fdk_model_destroy(g.store);
