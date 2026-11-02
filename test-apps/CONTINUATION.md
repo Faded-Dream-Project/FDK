@@ -1,3 +1,44 @@
+# §31 continuation — UPDATE (owner round 2: "still not used" + unclosable Help window + the 2.4 MB ASAN leak)
+
+## Remote proof
+origin/main == `ea020af` ("icons+app: the unclosable Shortcuts window, the 2.4 MB icon-surface leak, and the one-line detection verdict").
+
+## The three findings, each with its broken assumption
+1. **The unclosable Shortcuts window** — fdk_event.h says FDK does NOT
+   destroy on close request (the app decides); menus.c believed a
+   comment claiming "auto-managed". Now sc_list_window_event destroys
+   on CLOSE_REQUEST or Escape (the props_close pattern). This was also
+   the "shutdown with 1 window(s) still open" WARN.
+2. **The 2.4 MB icon leak** (owner ASAN: 925 surfaces via icons.c:190/193)
+   — fdk_icon_theme_surface() returns a FRESH OWNED CLONE per call;
+   the app treated it as borrowed. The app cache now holds system hits
+   under "S|name|px" and frees them at teardown. Self-quit under
+   detect_leaks=1: ZERO FDK leaks (only libGLX_mesa's 108 KB one-time
+   globals — inside libGL, not ours).
+3. **"Still not used"** — the resolver WAS working on his machine (925
+   system surfaces allocated); the verdict was invisible because
+   FDK_ICONS_TRACE was not set. The chain now logs ONE INFO line:
+   `icons: theme '<name>' via <channel>` on first detection. ALSO:
+   the symbolic tint bakes the color theme's ink at decode time and
+   the surface cache never expired on a color-theme switch —
+   install/uninstall now call fdk__icon_theme_retheme() (surface-cache-
+   only reset; detection/lookup/name caches stay).
+
+## Owner re-test (one command each)
+- `./build/fdk-files` → the log must now contain
+  `icons: theme '…' via …` (which theme, which channel).
+- Help > Shortcuts → the WM close button / Alt+F4 / Escape all close it.
+- Quit under ASAN → no LeakSanitizer block (or only the libGLX_mesa
+  108 KB system-library globals).
+
+## Rig notes
+- /tmp/shotapp.sh now honors RIG_ASAN (default detect_leaks=0), RIG_FRAMES,
+  RIG_WAIT, FDK_ICONS_TRACE, RIG_DATA. THE LEAK GATE IS detect_leaks=1 +
+  A SELF-QUIT (small FDK_TESTAPP_FRAMES) — a rig-timeout kill hides
+  nothing anymore but the self-quit is the proof.
+- The remaining non-FDK leak (libGLX_mesa globals) is expected on this
+  image; note it in reports so it is not chased as ours.
+
 # §31 continuation — UPDATE (owner round: "icon theme not working at all" + sidebar.c:344 warning)
 
 ## Remote proof
