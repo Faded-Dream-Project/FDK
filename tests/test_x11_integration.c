@@ -10002,6 +10002,261 @@ static void test_dnd_widget_targets_gui(void) {
     fdk_shutdown(ctx);
 }
 
+
+/* §30/STEP-1d: G-12's DEDICATED regression test — the release-time
+ * status drain. Deterministic, single-threaded, no rig binaries:
+ * every queue ordering is explicit (XSendEvent from the test's own
+ * second connection), so the race is CONSTRUCTED, not hoped for.
+ *
+ * The race G-12 fixes: the drag source's ButtonRelease can sit in
+ * the queue AHEAD of the target's last XDndStatus (the Status
+ * answers the final Position; the release raced it across the
+ * wire). FIFO dispatch would process the release first and cancel
+ * a drag whose target had accepted. The drain re-reads the Status
+ * that is ALREADY queued behind the release BEFORE deciding.
+ *
+ * Construction: FDK drags onto a raw-Xlib target this test owns.
+ * The target gets Enter/Position but never replies (accepts stays
+ * 0). Then, in ONE breath with no pump between them: the test
+ * SendEvents the ButtonRelease (queued first) and the target's
+ * accepting Status (queued second, behind it). The next pump must
+ * send XdndDrop (drain reads the queued Status) — without the
+ * drain it sends XdndLeave and reports CANCELLED. The target then
+ * answers XdndFinished and the drag must report SUCCEEDED. */
+static struct {
+    bool armed;
+    bool drag_started_ok;
+    bool reported;
+    fdk_drag_status status;
+} g12_tx;
+
+static void g12_drag_done(fdk_drag_status status, void *user) {
+    (void)user;
+    g12_tx.status = status;
+    g12_tx.reported = true;
+}
+
+static void g12_window_event(fdk_window *w, const fdk_event_data *ev,
+                             void *user) {
+    (void)user;
+    if (ev->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        g12_tx.armed = true;
+    } else if (ev->type == FDK_EVENT_POINTER_MOTION && g12_tx.armed) {
+        g12_tx.armed = false;
+        const char *uris[1] = {"/etc/hostname"};
+        fdk_result r = fdk_drag_begin(
+            w, FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST,
+            "g12 payload", uris, 1, g12_drag_done, NULL);
+        g12_tx.drag_started_ok = fdk_ok(r);
+    }
+}
+
+/* SendEvents a ClientMessage from `from' to `to' (the sink's exact
+ * pattern: format 32, NoEventMask). */
+static void g12_clientmsg(Display *from, Window to, Atom type, long l0,
+                          long l1, long l2, long l3, long l4) {
+    XClientMessageEvent m;
+    memset(&m, 0, sizeof(m));
+    m.type = ClientMessage;
+    m.display = from;
+    m.window = to;
+    m.message_type = type;
+    m.format = 32;
+    m.data.l[0] = l0;
+    m.data.l[1] = l1;
+    m.data.l[2] = l2;
+    m.data.l[3] = l3;
+    m.data.l[4] = l4;
+    XSendEvent(from, to, False, NoEventMask, (XEvent *)&m);
+    XFlush(from);
+}
+
+static void test_dnd_release_drain_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *win = NULL;
+    fdk_window_options wopts = { .title = "g12 drain",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &wopts, &win)));
+    fdk_window_set_event_callback(win, g12_window_event, NULL);
+    fdk_window_show(win);
+    (void)fdk_pump_events(ctx, 100);
+    unsigned long xid = fdk_window_xid(win);
+
+    /* the target: a second connection the test owns */
+    Display *td = XOpenDisplay(NULL);
+    assert(td != NULL);
+    /* far corner: earlier tests leave mapped windows around the
+     * middle of the screen; this test must own the top of the
+     * z-order at the drag's landing point. */
+    Window target = XCreateSimpleWindow(td, DefaultRootWindow(td),
+                                        1000, 780, 200, 200, 1, 0,
+                                        0x30A0F0);
+    Atom ver = 5;
+    Atom a_aware = XInternAtom(td, "XdndAware", False);
+    XChangeProperty(td, target, a_aware, XA_ATOM, 32, PropModeReplace,
+                    (const unsigned char *)&ver, 1);
+    XMapWindow(td, target);
+    XFlush(td);
+    Atom a_enter = XInternAtom(td, "XdndEnter", False);
+    Atom a_position = XInternAtom(td, "XdndPosition", False);
+    Atom a_status = XInternAtom(td, "XdndStatus", False);
+    Atom a_drop = XInternAtom(td, "XdndDrop", False);
+    Atom a_leave = XInternAtom(td, "XdndLeave", False);
+    Atom a_finished = XInternAtom(td, "XdndFinished", False);
+    Atom a_copy = XInternAtom(td, "XdndActionCopy", False);
+
+    /* the press + arming motion + the motion onto the target, all
+     * SendEvent'd to the FDK window (the drag's pointer grab does
+     * not affect SendEvent delivery; the handler reads x_root and
+     * the Button1Mask state, both of which we set). */
+    memset(&g12_tx, 0, sizeof g12_tx);
+    {
+        XEvent e;
+        memset(&e, 0, sizeof(e));
+        e.type = ButtonPress;
+        e.xbutton.window = (Window)xid;
+        e.xbutton.button = 1;
+        e.xbutton.state = 0;
+        e.xbutton.x_root = 50;
+        e.xbutton.y_root = 50;
+        XSendEvent(td, (Window)xid, False, NoEventMask, &e);
+        e.type = MotionNotify;
+        e.xmotion.window = (Window)xid;
+        e.xmotion.state = Button1Mask;
+        e.xmotion.x_root = 50;
+        e.xmotion.y_root = 60;
+        XSendEvent(td, (Window)xid, False, NoEventMask, &e);
+        XFlush(td);
+    }
+    (void)fdk_pump_events(ctx, 100);
+    assert(g12_tx.drag_started_ok);
+
+    /* The motion onto the target: root coords inside its rect.
+     * Earlier tests in this suite leave mapped windows anywhere on
+     * the screen, and xdnd_window_under resolves the drag's target
+     * by z-ORDER — a leftover window stacked over the landing point
+     * steals the drag (the first version of this test was a coin
+     * flip: got_enter passing one run and failing the next). The
+     * deterministic answer is to LOWER everything else to the bottom
+     * of the stack: with the target the only window in the top
+     * group, the walk finds it every time. */
+    {
+        Window root_ret, parent_ret;
+        Window *children = NULL;
+        unsigned int nch = 0;
+        if (XQueryTree(td, DefaultRootWindow(td), &root_ret,
+                       &parent_ret, &children, &nch)) {
+            for (unsigned int i = 0; i < nch; i++) {
+                if (children[i] != target) {
+                    XLowerWindow(td, children[i]);
+                }
+            }
+            XFree(children);
+        }
+        XRaiseWindow(td, target);
+        XFlush(td);
+    }
+    /* Retarget with retries: ~130 GUI tests before this one leave
+     * mapped windows all over the screen and the drag's target
+     * resolution is z-ORDER dependent; a single motion may hit a
+     * leftover. Re-raise + re-send until OUR target answers (the
+     * drag sends Enter to whatever it lands on; the poll keeps only
+     * the Enter whose data.l[0] is addressed FROM the helper but
+     * whose arrival implies the walk found a window — we match on
+     * the POSITION's root coords, which carry the landing point
+     * packed by FDK: x<<16|y of (1100,880)). Bounded attempts. */
+    Window source = None;
+    bool got_enter = false, got_position = false;
+    for (int attempt = 0; attempt < 8 &&
+                            (!got_enter || !got_position);
+         attempt++) {
+        XRaiseWindow(td, target);
+        XSync(td, False);
+        XEvent e;
+        memset(&e, 0, sizeof(e));
+        e.type = MotionNotify;
+        e.xmotion.window = (Window)xid;
+        e.xmotion.state = Button1Mask;
+        e.xmotion.x_root = 1100;
+        e.xmotion.y_root = 880;
+        XSendEvent(td, (Window)xid, False, NoEventMask, &e);
+        XFlush(td);
+        (void)fdk_pump_events(ctx, 60);
+        XEvent ev;
+        while (XCheckTypedEvent(td, ClientMessage, &ev)) {
+            if (ev.xclient.message_type == a_enter) {
+                source = (Window)ev.xclient.data.l[0];
+                got_enter = true;
+            } else if (ev.xclient.message_type == a_position) {
+                unsigned long packed =
+                    (unsigned long)ev.xclient.data.l[2];
+                int prx = (int)((packed >> 16) & 0xFFFF);
+                int pry = (int)(packed & 0xFFFF);
+                /* the position FDK re-sent for OUR landing point */
+                if (prx == 1100 && pry == 880) {
+                    got_position = true;
+                }
+            }
+        }
+    }
+    assert(got_enter);
+    assert(got_position);
+    assert(source != None);
+
+    /* THE RACE, constructed: release first, Status second — both
+     * queued before the next pump. No real timing involved. */
+    {
+        XEvent e;
+        memset(&e, 0, sizeof(e));
+        e.type = ButtonRelease;
+        e.xbutton.window = (Window)xid;
+        e.xbutton.button = 1;
+        e.xbutton.state = Button1Mask;
+        e.xbutton.x_root = 1100;
+        e.xbutton.y_root = 880;
+        XSendEvent(td, (Window)xid, False, NoEventMask, &e);
+    }
+    /* the target's accepting Status — sent TO the drag's helper,
+     * FROM the target (l0 = the target window, exactly the message
+     * a real target sends; it lands BEHIND the release). */
+    g12_clientmsg(td, source, a_status, (long)target, 0x5, 0, 0,
+                  (long)a_copy);
+
+    (void)fdk_pump_events(ctx, 200);
+
+    /* The G-12 CONTRACT, asserted through the drag's OWN fate: a
+     * released drag whose (queued-behind) Status accepted must NOT
+     * cancel — it drops. The observable: the drag stays ALIVE
+     * awaiting XDndFinished (the cancel path would have finished it
+     * CANCELLED on the spot). 130 GUI tests before this one leave
+     * the display's clients in states where a SENT ClientMessage's
+     * arrival in THIS test's second queue could not be asserted
+     * deterministically (the §30 chase: the drop was traced SENT to
+     * the right window, flushed, and the receiving queue stayed
+     * empty — only inside the full suite; the standalone probe of
+     * the same construction sees it every time). So the Finished
+     * reply is sent BLIND (the target may or may not have seen the
+     * drop) and the assertion is on FDK's state machine, which is
+     * what G-12 owns. */
+    assert(!g12_tx.reported);
+    g12_clientmsg(td, source, a_finished, (long)target, 0x1, 0, 0, 0);
+    for (int i = 0; i < 40 && !g12_tx.reported; i++) {
+        (void)fdk_pump_events(ctx, 25);
+    }
+    assert(g12_tx.reported);
+    assert(g12_tx.status == FDK_DRAG_SUCCEEDED);
+
+    XDestroyWindow(td, target);
+    XCloseDisplay(td);
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] dnd release-drain: a Status queued BEHIND the "
+           "release still produces the drop (G-12)\n");
+}
+
 static void test_dnd_source_gui(void) {
     const char *sink_bin = getenv("FDK_XDND_SINK_BIN");
     if (sink_bin == NULL) {
@@ -14683,6 +14938,7 @@ int main(void) {
     test_file_dialog_icons_gui();
     test_xsettings_detection_gui();
     test_color_scheme_xsettings_gui();
+    test_dnd_release_drain_gui();
     test_dnd_receiver_gui();
     test_dnd_receiver_gtk_gui();
     test_dnd_receiver_incr_gui();

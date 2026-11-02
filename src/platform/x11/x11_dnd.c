@@ -49,6 +49,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <stdlib.h>
+#include <stdio.h>  /* FDK_DND_TRACE diagnostics (§30) */
 #include <string.h>
 #include <time.h>
 
@@ -924,6 +925,12 @@ int fdk_x11_dnd_source_handle_event(fdk_platform_connection *conn,
         int ry = xevent->xmotion.y_root;
         xdnd_icon_move(conn, rx, ry);
         Window target = xdnd_window_under(conn, rx, ry);
+        if (getenv("FDK_DND_TRACE") != NULL) {
+            fprintf(stderr, "dnd-g12: retarget 0x%lx (old 0x%lx) "
+                            "at %d,%d\n",
+                    (unsigned long)target,
+                    (unsigned long)conn->xdnd_source.target, rx, ry);
+        }
         FDK_DEBUG("dnd-src retarget: 0x%lx (old 0x%lx)",
                   (unsigned long)target,
                   (unsigned long)conn->xdnd_source.target);
@@ -950,6 +957,14 @@ int fdk_x11_dnd_source_handle_event(fdk_platform_connection *conn,
     }
 
     if (xevent->type == ButtonRelease) {
+        if (getenv("FDK_DND_TRACE") != NULL) {
+            fprintf(stderr,
+                    "dnd-g12: release target=0x%lx accepts=%d "
+                    "qdepth=%d\n",
+                    (unsigned long)conn->xdnd_source.target,
+                    (int)conn->xdnd_source.target_accepts,
+                    (int)XPending(conn->display));
+        }
         /* §29/G-12: the release may arrive BEFORE the target's last
          * XDndStatus (both were in flight: the Status answers the
          * final Position, the release races it across the wire). A
@@ -971,12 +986,27 @@ int fdk_x11_dnd_source_handle_event(fdk_platform_connection *conn,
                     break; /* not a status reply: leave it queued */
                 }
                 XNextEvent(conn->display, &queued);
+                if (getenv("FDK_DND_TRACE") != NULL) {
+                    fprintf(stderr,
+                            "dnd-g12: drain type=%lu win=0x%lx "
+                            "l0=0x%lx cur=0x%lx\n",
+                            (unsigned long)queued.xclient.message_type,
+                            (unsigned long)queued.xclient.window,
+                            (unsigned long)queued.xclient.data.l[0],
+                            (unsigned long)conn->xdnd_source.target);
+                }
                 (void)fdk_x11_dnd_source_handle_helper_message(
                     conn, &queued);
             }
         }
         if (conn->xdnd_source.target != None &&
             conn->xdnd_source.target_accepts) {
+            if (getenv("FDK_DND_TRACE") != NULL) {
+                fprintf(stderr, "dnd-g12: DROP being sent to 0x%lx "
+                                "(accepts=%d)\n",
+                        (unsigned long)conn->xdnd_source.target,
+                        (int)conn->xdnd_source.target_accepts);
+            }
             xdnd_send(conn, conn->xdnd_source.target,
                       conn->atom_xdnd_drop, (long)conn->clip_helper, 0,
                       (long)xevent->xbutton.time, 0, 0);
