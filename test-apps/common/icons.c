@@ -16,6 +16,72 @@ typedef struct cached_icon {
     struct cached_icon *next;
 } cached_icon;
 
+/* §31/PART-2: the tier that answered the last lookup (the --diag
+ * contract) and the system-theme path when that tier won. */
+static icons_tier g_last_tier = ICONS_TIER_NONE;
+static char g_last_path[512];
+
+/* The bundled set's legacy short names -> the freedesktop standard
+ * names (the Icon Naming Specification's exact spellings; the ones
+ * the spec does not define — view-list/view-grid/view-hidden — are
+ * the names GNOME's own file manager uses and every major theme
+ * ships). A "-symbolic" probe is tried FIRST for toolbar/sidebars. */
+static const struct {
+    const char *legacy;    /* test-apps/icons/ stem            */
+    const char *standard;  /* the freedesktop name             */
+} g_name_map[] = {
+    {"back", "go-previous"},       {"forward", "go-next"},
+    {"up", "go-up"},               {"home", "go-home"},
+    {"refresh", "view-refresh"},   {"folder-new", "folder-new"},
+    {"search", "system-search"},   {"clear", "edit-clear"},
+    {"eye", "view-hidden"},        {"open", "document-open"},
+    {"save", "document-save"},     {"undo", "edit-undo"},
+    {"redo", "edit-redo"},         {"cut", "edit-cut"},
+    {"copy", "edit-copy"},         {"paste", "edit-paste"},
+    {"delete", "edit-delete"},     {"trash", "user-trash"},
+    {"folder", "folder"},          {"doc", "text-x-generic"},
+    {"image", "image-x-generic"},  {"audio", "audio-x-generic"},
+    {"video", "video-x-generic"},  {"archive", "package-x-generic"},
+    {"code", "text-x-script"},     {"disk", "drive-harddisk"},
+    {"usb", "drive-removable-media"},
+    {"network", "network-server"}, {"star", "emblem-favorite"},
+    {"close", "window-close"},     {"add", "list-add"},
+    {"remove", "list-remove"},     {"prefs", "preferences-system"},
+    {"about", "help-about"},       {"book", "user-bookmarks"},
+    {"clock", "document-open-recent"},
+    {"battery", "battery"},        {"cpu", "applications-engineering"},
+    {"chart", "x-office-spreadsheet"},
+    {"app", "system-file-manager"},
+    {"check", "object-select"},    {"bold", "format-text-bold"},
+    {"italic", "format-text-italic"},
+    {"underline", "format-text-underline"},
+    {"strike", "format-text-strikethrough"},
+    {"bullets", "format-list-unordered"},
+    {"numbers", "format-list-ordered"},
+    {"link", "insert-link"},       {"left", "go-previous"},
+    {"right", "go-next"},          {"down", "go-down"},
+    {"trash-full", "user-trash-full"},
+    {"desktop", "user-desktop"},
+    {"documents", "folder-documents"},
+    {"downloads", "folder-download"},
+    {"music", "folder-music"},     {"pictures", "folder-pictures"},
+    {"videos", "folder-videos"},
+};
+
+static const char *standard_name(const char *legacy) {
+    if (legacy == NULL) {
+        return NULL;
+    }
+    /* already-standard names pass through untouched */
+    for (size_t i = 0;
+         i < sizeof(g_name_map) / sizeof(g_name_map[0]); i++) {
+        if (strcmp(g_name_map[i].legacy, legacy) == 0) {
+            return g_name_map[i].standard;
+        }
+    }
+    return legacy;
+}
+
 static cached_icon *g_cache;
 static char *g_available;
 
@@ -64,6 +130,8 @@ const char *icons_available(void) {
 
 fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
     if (name == NULL || name[0] == '\0' || size <= 0) {
+        g_last_tier = ICONS_TIER_FALLBACK;
+        g_last_path[0] = '\0';
         return NULL;
     }
     fdk_i32 px = size;
@@ -72,17 +140,50 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
     }
     fdk_color ink = fdk_theme_get_color(NULL, FDK_TK_TEXT);
 
+    /* §31/PART-2: THE SYSTEM THEME FIRST (S3). The freedesktop name
+     * (mapped from any legacy bundled stem), the -symbolic variant
+     * tried before the full-color one — symbolic comes back already
+     * tinted with the theme ink, which is exactly what a toolbar
+     * wants. THIS LOOKUP IS NOT CACHED HERE: FDK's icon-theme engine
+     * owns its own three-layer cache, and a theme switch resets it. */
+    const char *std = standard_name(name);
+    if (std != NULL) {
+        char sym[128];
+        snprintf(sym, sizeof sym, "%s-symbolic", std);
+        fdk_surface *themed = fdk_icon_theme_surface(sym, px);
+        const char *which = sym;
+        if (themed == NULL) {
+            themed = fdk_icon_theme_surface(std, px);
+            which = std;
+        }
+        if (themed != NULL) {
+            g_last_tier = ICONS_TIER_SYSTEM;
+            snprintf(g_last_path, sizeof g_last_path, "%s", which);
+            if (getenv("FDK_ICONS_TRACE") != NULL) {
+                fprintf(stderr, "icons: '%s' -> SYSTEM '%s'\n",
+                        name, which);
+            }
+            return themed; /* borrowed from the engine's cache */
+        }
+    }
+    if (getenv("FDK_ICONS_TRACE") != NULL) {
+        fprintf(stderr, "icons: '%s' -> system MISS, trying "
+                        "bundled\n", name);
+    }
+
     char key[128];
     snprintf(key, sizeof key, "%s|%d|%02x%02x%02x", name, px,
              (unsigned)(ink.r * 255.0f), (unsigned)(ink.g * 255.0f),
              (unsigned)(ink.b * 255.0f));
     for (cached_icon *c = g_cache; c != NULL; c = c->next) {
         if (strcmp(c->key, key) == 0) {
+            g_last_tier = ICONS_TIER_BUNDLED;
+            g_last_path[0] = '\0';
             return c->surface;
         }
     }
 
-    /* 1. the bundled SVG, tinted */
+    /* 2. the bundled SVG, tinted (EMBEDDED — icons_data.h) */
     const char *svg = NULL;
     for (size_t i = 0; i < ICONS_DATA_COUNT; i++) {
         if (strcmp(ICONS_DATA[i][0], name) == 0) {
@@ -108,25 +209,32 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
                     c->next = g_cache;
                     if (c->key != NULL) {
                         g_cache = c;
+                        g_last_tier = ICONS_TIER_BUNDLED;
+                        g_last_path[0] = '\0';
                         return s;
                     }
                     free(c);
                 }
                 fdk_surface_destroy(s);
+                g_last_tier = ICONS_TIER_FALLBACK;
+                g_last_path[0] = '\0';
                 return NULL;
             }
             free(buf);
         }
     }
 
-    /* 2. the desktop's icon theme (real Adwaita/breeze beats nothing) */
-    fdk_surface *themed = fdk_icon_theme_surface(name, px);
-    if (themed != NULL) {
-        return themed; /* not cached: icon-theme has its own cache */
-    }
-
     /* 3. NULL — the caller falls back to fdk_row_icon glyphs */
+    g_last_tier = ICONS_TIER_FALLBACK;
+    g_last_path[0] = '\0';
     return NULL;
+}
+
+icons_tier icons_last_tier(char *out_path, size_t path_cap) {
+    if (out_path != NULL && path_cap > 0) {
+        snprintf(out_path, path_cap, "%s", g_last_path);
+    }
+    return g_last_tier;
 }
 
 void icons_theme_changed(void) {

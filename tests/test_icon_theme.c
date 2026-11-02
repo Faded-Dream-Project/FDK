@@ -1077,9 +1077,66 @@ static void test_classification(void) {
            "compound exts, exec-bit split, place chains)\n");
 }
 
+/* §31/PART-2: the SOURCE report and the APP OVERRIDE — the --diag
+ * contract. The chain must say WHICH channel answered, and the app
+ * override must outrank every desktop channel. */
+static void test_source_and_override(void) {
+    env_point_at_fixture();
+
+    /* nothing set: the fallback channel, hicolor */
+    unsetenv("FDK_ICON_THEME");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk_icon_theme_name(), "hicolor") == 0,
+          "name(): bare chain lands on hicolor");
+    CHECK(fdk_icon_theme_source() == FDK_ICON_THEME_FALLBACK,
+          "source(): no channels -> FALLBACK");
+
+    /* the env seam answers -> the ENV source */
+    setenv("FDK_ICON_THEME", "fdktest", 1);
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk_icon_theme_name(), "fdktest") == 0,
+          "name(): env seam detected");
+    CHECK(fdk_icon_theme_source() == FDK_ICON_THEME_ENV,
+          "source(): env seam -> ENV");
+
+    /* the APP OVERRIDE outranks the env seam and reports itself */
+    CHECK(fdk_ok(fdk_icon_theme_set("fdkparent")),
+          "set(): valid name accepted");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk_icon_theme_name(), "fdkparent") == 0,
+          "name(): the app override outranks the env seam");
+    CHECK(fdk_icon_theme_source() == FDK_ICON_THEME_APP_PREFS,
+          "source(): the app override -> APP_PREFS");
+
+    /* clearing restores desktop detection */
+    CHECK(fdk_ok(fdk_icon_theme_set(NULL)),
+          "set(): NULL accepted (clears)");
+    fdk__icon_theme_reset();
+    CHECK(strcmp(fdk_icon_theme_name(), "fdktest") == 0,
+          "name(): cleared override falls back to the env seam");
+    CHECK(fdk_icon_theme_source() == FDK_ICON_THEME_ENV,
+          "source(): cleared override -> ENV again");
+
+    /* a hostile override is refused (INVALID_ARGUMENT), state kept */
+    CHECK(!fdk_ok(fdk_icon_theme_set("../../etc")),
+          "set(): hostile name refused");
+    CHECK(strcmp(fdk_icon_theme_name(), "fdktest") == 0,
+          "name(): refused set() changes nothing");
+
+    CHECK(fdk_icon_theme_set(NULL) == FDK_ERR_INVALID_ARGUMENT,
+          "set(): NULL name and NULL-clear ambiguity resolved: NULL "
+          "clears; a bad STRING refuses");
+
+    unsetenv("FDK_ICON_THEME");
+    fdk__icon_theme_reset();
+    printf("[ok] icon theme: the source report + the app override "
+           "(--diag contract)\n");
+}
+
 int main(void) {
     build_fixture();
     test_current_name();
+    test_source_and_override();
     test_lookup();
     test_reset();
     test_surfaces();
