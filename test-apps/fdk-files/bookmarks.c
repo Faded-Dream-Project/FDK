@@ -287,17 +287,29 @@ static bool bookmark_event(fdk_widget *w, const fdk_widget_event *ev,
             return true;
         }
     }
-    if (ev->type == FDK_WIDGET_POINTER_DOWN &&
-        ev->pointer.button == 1) {
-        /* the drag source arm: a plain left press on a row starts a
-         * URI drag of the folder (press-then-move; the list's own
-         * activation still fires on a press WITHOUT motion). */
-        size_t row = bookmark_row_at(ev->pointer.position);
-        if (row < g_mark_count) {
-            bookmark_drag_out(row);
+    /* §29/G-10: the drag-out moved to FDK's widget-level drag
+     * source (registered below) — the old immediate drag on press
+     * was wrong-shaped (a real drag is press-then-move) and starved
+     * by the row's own press consumption anyway. */
+    return false;
+}
+
+/* the drag-source begin fn: the press (which selected the row)
+ * moved past the slop — drag the bookmarked folder itself. */
+static void *bookmark_drag_source_begin(fdk_widget *source,
+                                        void *user) {
+    (void)source;
+    (void)user;
+    if (g_list == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < g_mark_count; i++) {
+        if (fdk_list_is_selected(g_list, i)) {
+            bookmark_drag_out(i);
+            return NULL;
         }
     }
-    return false;
+    return NULL;
 }
 
 /* the drag SOURCE: a left press on a row starts a URI drag of the
@@ -362,6 +374,9 @@ void bookmarks_build(fdk_widget *parent) {
                                      FDK_DRAG_FORMAT_URI_LIST);
     fdk_widget_set_drag_callback(g_list, bookmark_drag, NULL);
     fdk_widget_set_event_callback(g_list, bookmark_event, NULL);
+    /* §29/G-10: press-then-move drag-out of a bookmark row */
+    (void)fdk_widget_set_drag_source(g_list, 6,
+                                     bookmark_drag_source_begin, NULL);
 
     bookmarks_refresh();
 }
