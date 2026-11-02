@@ -649,6 +649,12 @@ static it_surface_entry g_surface_cache[IT_SURFACE_CACHE];
 /* The detected current theme name (empty until first read). */
 static char g_current[IT_NAME_MAX];
 static bool g_current_read = false;
+/* §31/PART-2: which channel answered (the --diag contract) and the
+ * application override (fdk_icon_theme_set — the Preferences
+ * drop-down; outranks every desktop channel, cleared by NULL/""). */
+static fdk_icon_theme_channel g_current_channel =
+    FDK_ICON_THEME_NONE;
+static char g_app_override[IT_NAME_MAX]; /* "" = no override */
 
 static size_t g_surface_refused = 0; /* logged-once latch when full */
 
@@ -1195,12 +1201,22 @@ const char *fdk__icon_theme_current_name(void) {
     }
     g_current_read = true;
     g_current[0] = '\0';
+    g_current_channel = FDK_ICON_THEME_FALLBACK; /* unless a channel answers */
+
+    /* 0. The APPLICATION override (§31/PART-2): the Preferences
+     *    drop-down — the app's own choice outranks the desktop. */
+    if (g_app_override[0] != '\0') {
+        it_name_copy(g_current, sizeof(g_current), g_app_override);
+        g_current_channel = FDK_ICON_THEME_APP_PREFS;
+        return g_current;
+    }
 
     /* 1. The explicit override — power users and the hermetic test
      *    seam (fixtures point XDG_* at a scratch tree and name the
      *    fixture theme here). */
     const char *env = getenv("FDK_ICON_THEME");
     if (env != NULL && it_name_copy(g_current, sizeof(g_current), env)) {
+        g_current_channel = FDK_ICON_THEME_ENV;
         return g_current;
     }
 
@@ -1218,6 +1234,7 @@ const char *fdk__icon_theme_current_name(void) {
         if (fdk__x11_xsettings_string("Net/IconThemeName", live,
                                       sizeof(live)) &&
             it_name_copy(g_current, sizeof(g_current), live)) {
+            g_current_channel = FDK_ICON_THEME_XSETTINGS;
             return g_current;
         }
     }
@@ -1239,6 +1256,7 @@ const char *fdk__icon_theme_current_name(void) {
      *    desktop's statement. */
     if (cfg[0] != '\0' &&
         it_read_gtk_ini_theme(cfg, g_current, sizeof(g_current))) {
+        g_current_channel = FDK_ICON_THEME_GTK_INI;
         return g_current;
     }
 
@@ -1274,6 +1292,8 @@ const char *fdk__icon_theme_current_name(void) {
                                 it_name_copy(g_current, sizeof(g_current),
                                               it_trim(eq + 1))) {
                                 fdk_free(buf);
+                                g_current_channel =
+                                    FDK_ICON_THEME_KDE_GLOBALS;
                                 return g_current;
                             }
                         }
@@ -1831,4 +1851,33 @@ fdk_surface *fdk_icon_theme_surface(const char *icon_name, fdk_i32 size) {
         return NULL;
     }
     return clone;
+}
+
+
+/* ---- the §31/PART-2 public surface ----------------------------------- */
+
+const char *fdk_icon_theme_name(void) {
+    return fdk__icon_theme_current_name();
+}
+
+fdk_icon_theme_channel fdk_icon_theme_source(void) {
+    (void)fdk__icon_theme_current_name(); /* run the chain if needed */
+    return g_current_channel;
+}
+
+fdk_result fdk_icon_theme_set(const char *theme_name) {
+    if (theme_name == NULL || theme_name[0] == '\0') {
+        g_app_override[0] = '\0';
+        fdk__icon_theme_reset();
+        return FDK_OK;
+    }
+    if (!it_name_ok(theme_name, IT_NAME_MAX)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (!it_name_copy(g_app_override, sizeof(g_app_override),
+                      theme_name)) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk__icon_theme_reset();
+    return FDK_OK;
 }

@@ -550,6 +550,39 @@ int fdk_ui_font_px(void);
  */
 fdk_surface *fdk_icon_theme_surface(const char *icon_name, fdk_i32 size);
 
+/* ---- Themed icon lookup, §31 additions ------------------------------------
+ *
+ * WHERE the live theme name came from — the --diag contract: a
+ * serious app tells its user which channel won, because "wrong
+ * icons" debugging starts there. The enum order is the DETECTION
+ * ORDER; fdk_icon_theme_source() reports the channel that actually
+ * answered after fdk_icon_theme_name() ran its chain. */
+typedef enum fdk_icon_theme_channel {
+    FDK_ICON_THEME_NONE = 0,     /* not detected yet                 */
+    FDK_ICON_THEME_APP_PREFS,    /* fdk_icon_theme_set(): the app's
+                                    own override, highest rank       */
+    FDK_ICON_THEME_XSETTINGS,    /* X11 Net/IconThemeName (live)     */
+    FDK_ICON_THEME_PORTAL,       /* GSettings/portal over FDK's own
+                                    D-Bus client — only when a bus
+                                    answers                          */
+    FDK_ICON_THEME_GTK_INI,      /* gtk-3.0/4.0 settings.ini         */
+    FDK_ICON_THEME_KDE_GLOBALS,  /* kdeglobals [Icons] Theme         */
+    FDK_ICON_THEME_ENV,          /* $XDG_ICON_THEME (weak)           */
+    FDK_ICON_THEME_FALLBACK,     /* hicolor / the default theme      */
+} fdk_icon_theme_channel;
+
+/* The live theme name (the chain's answer, "hicolor" at worst) and
+ * the channel that produced it. Both read the SAME cached detection
+ * fdk_icon_theme_surface uses — call name() first, then source(). */
+const char *fdk_icon_theme_name(void);
+fdk_icon_theme_channel fdk_icon_theme_source(void);
+
+/* The application override: wins over every desktop channel (the
+ * Preferences drop-down). Process-lifetime — the app stores the
+ * user's pick in its own prefs and re-applies it at boot; NULL or
+ * "" clears it back to desktop detection. */
+fdk_result fdk_icon_theme_set(const char *theme_name);
+
 #ifdef __cplusplus
 }
 #endif
