@@ -141,6 +141,19 @@ struct fdk_widget {
     fdk_widget_drag_fn drag_fn;
     void *drag_user;
 
+    /* Widget-level drag SOURCE (§29/G-10): the press/motion/release
+     * controller. Non-NULL begin fn = armed; the armed_* fields hold
+     * the gesture's origin (ROOT coordinates) while a press rides a
+     * chain this widget is on. Checked beside the dispatch in
+     * fdk_widget_tree_handle_event, so a child's consumption of the
+     * press does not starve it. */
+    fdk_widget_drag_begin_fn drag_source_fn;
+    void *drag_source_user;
+    int drag_source_threshold;
+    bool drag_source_armed;
+    fdk_f32 drag_source_x, drag_source_y;
+    bool drag_source_fired;
+
     /* Accessibility overrides (Phase 10): when set, these beat the
      * class descriptor's computed name/description in
      * fdk_a11y_describe(). Owned copies, NULL when unset; freed by

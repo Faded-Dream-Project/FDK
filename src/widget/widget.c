@@ -1133,6 +1133,138 @@ fdk_result fdk_widget_set_drag_callback(fdk_widget *widget,
     return FDK_OK;
 }
 
+/* ---- Widget-level drag SOURCES (§29/G-10) ---------------------------
+ *
+ * The controller's ride: fdk_widget_tree_handle_event checks the
+ * sources BESIDE the delivery (see its body), so a child that
+ * consumes the press cannot starve them. The per-gesture state lives
+ * on the SOURCE widget; at most one source is armed per press (the
+ * deepest one on the press's own chain — armed at press, stood down
+ * at release). A begun drag takes the pointer from the backend
+ * (fdk_drag_begin's own grab), so after `fired' the controller
+ * ignores motion until the release. */
+
+fdk_result fdk_widget_set_drag_source(fdk_widget *widget,
+                                      int threshold_px,
+                                      fdk_widget_drag_begin_fn on_begin,
+                                      void *user) {
+    if (widget == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (on_begin == NULL) {
+        /* disarm: the gesture state dies with it */
+        widget->drag_source_fn = NULL;
+        widget->drag_source_user = NULL;
+        widget->drag_source_armed = false;
+        widget->drag_source_fired = false;
+        return FDK_OK;
+    }
+    if (threshold_px <= 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    widget->drag_source_fn = on_begin;
+    widget->drag_source_user = user;
+    widget->drag_source_threshold = threshold_px;
+    widget->drag_source_armed = false;
+    widget->drag_source_fired = false;
+    return FDK_OK;
+}
+
+bool fdk_widget_get_drag_source(const fdk_widget *widget) {
+    return (widget != NULL && widget->drag_source_fn != NULL);
+}
+
+/* The press's chain (target..root) — the DEEPEST source on it owns
+ * the gesture (the same ownership rule as drop targets). NULL when
+ * none. */
+static fdk_widget *drag_source_on_chain(fdk_widget *target) {
+    for (fdk_widget *cur = target; cur != NULL; cur = cur->parent) {
+        if (cur->drag_source_fn != NULL) {
+            return cur;
+        }
+    }
+    return NULL;
+}
+
+/* Disarms every source in the tree: a new press re-arms exactly the
+ * chain's deepest one, so a stale arm from an aborted gesture can
+ * never fire. */
+static void drag_sources_stand_down(fdk_widget *w) {
+    if (w == NULL) {
+        return;
+    }
+    if (w->drag_source_armed || w->drag_source_fired) {
+        w->drag_source_armed = false;
+        w->drag_source_fired = false;
+    }
+    for (size_t i = 0; i < w->child_count; i++) {
+        drag_sources_stand_down(w->children[i]);
+    }
+}
+
+/* The controller's three checkpoints, called from
+ * fdk_widget_tree_handle_event with the event in ROOT coordinates.
+ * The controller never consumes: the gesture the app begins inside
+ * on_begin takes over the pointer; before that, everything stays an
+ * ordinary click. */
+static void drag_source_note_press(fdk_widget *root,
+                                   const fdk_event_data *event) {
+    if (event->pointer_button.button != FDK_POINTER_BUTTON_LEFT) {
+        return;
+    }
+    fdk_pointf pos = event->pointer_button.position;
+    drag_sources_stand_down(root);
+    fdk_widget *hit = hit_test(root, pos);
+    fdk_widget *source = drag_source_on_chain(hit != NULL ? hit : root);
+    if (source == NULL) {
+        return;
+    }
+    source->drag_source_armed = true;
+    source->drag_source_fired = false;
+    source->drag_source_x = pos.x;
+    source->drag_source_y = pos.y;
+}
+
+/* Finds the tree's one armed source (the press-time stand_down keeps
+ * the invariant: at most one). NULL when the press rode no source. */
+static fdk_widget *drag_source_find_armed(fdk_widget *w) {
+    if (w == NULL) {
+        return NULL;
+    }
+    if (w->drag_source_armed && !w->drag_source_fired) {
+        return w;
+    }
+    for (size_t i = 0; i < w->child_count; i++) {
+        fdk_widget *hit = drag_source_find_armed(w->children[i]);
+        if (hit != NULL) {
+            return hit;
+        }
+    }
+    return NULL;
+}
+
+static void drag_source_note_motion(fdk_widget *root,
+                                    const fdk_event_data *event) {
+    fdk_widget *armed = drag_source_find_armed(root);
+    if (armed == NULL) {
+        return;
+    }
+    fdk_pointf pos = event->pointer.position;
+    fdk_f32 dx = pos.x - armed->drag_source_x;
+    fdk_f32 dy = pos.y - armed->drag_source_y;
+    fdk_f32 th = (fdk_f32)armed->drag_source_threshold;
+    if (dx * dx + dy * dy <= th * th) {
+        return; /* still inside the slop: a click so far */
+    }
+    armed->drag_source_fired = true;
+    armed->drag_source_armed = false;
+    (void)armed->drag_source_fn(armed, armed->drag_source_user);
+}
+
+static void drag_source_note_release(fdk_widget *root) {
+    drag_sources_stand_down(root);
+}
+
 /* fdk_widget_set_tooltip_markup (1.4.11): the tooltip's markup twin —
  * tags parse to plain text + spans, get_tooltip reports the PLAIN
  * text, and the tooltip module wraps and paints through the
@@ -1886,6 +2018,21 @@ bool fdk_widget_tree_handle_event(fdk_widget *any,
     fdk_widget *root = find_root(any);
     if (root == NULL) {
         return false;
+    }
+
+    /* §29/G-10: the drag-source controller rides BESIDE the
+     * delivery — a press consumed by a child (a list row selecting
+     * itself) still arms a source on the press's chain, which is
+     * the entire point of the controller. Before route_event
+     * because a handler may destroy or rebuild the hit chain, and
+     * the controller keeps only root-space coordinates and the
+     * source widget — both stable across that. */
+    if (event->type == FDK_EVENT_POINTER_BUTTON_DOWN) {
+        drag_source_note_press(root, event);
+    } else if (event->type == FDK_EVENT_POINTER_MOTION) {
+        drag_source_note_motion(root, event);
+    } else if (event->type == FDK_EVENT_POINTER_BUTTON_UP) {
+        drag_source_note_release(root);
     }
 
     /* ONE guard spans the entire routing: hover transitions, hit

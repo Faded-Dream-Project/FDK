@@ -164,6 +164,26 @@ static void on_drag_done(fdk_drag_status status, void *user) {
 static bool g_source_down;
 static fdk_pointf g_source_at;
 
+/* §29/G-10: the controller-API twin of the manual source above — the
+ * begin fn the widget-level drag source fires past the slop. Same
+ * payload, one line of app code instead of the hand-rolled
+ * press/motion/release state machine. */
+static void *controller_begin(fdk_widget *source, void *user) {
+    (void)user;
+    const char *uris[1] = {"/tmp/dragged by the controller.txt"};
+    fdk_u32 icon[4] = {0x80FFFFFFu, 0x80FF0000u,
+                       0x8000FF00u, 0x800000FFu};
+    fdk_result r = fdk_drag_begin_ex(
+        ex.window, FDK_DRAG_FORMAT_TEXT | FDK_DRAG_FORMAT_URI_LIST,
+        "dragged by the G-10 controller", uris, 1, icon, 2, 2,
+        on_drag_done, NULL);
+    log_line("[dnd] controller begin: %s",
+             fdk_ok(r) ? "started — drop it on the pad"
+                       : "refused");
+    (void)source;
+    return NULL;
+}
+
 static bool source_event(fdk_widget *w,
                          const fdk_widget_event *ev, void *user) {
     (void)user;
@@ -455,6 +475,14 @@ int main(void) {
     (void)fdk_button_create(row3, font,
                             "DRAG SOURCE (press + move)", &src);
     fdk_widget_set_event_callback(src, source_event, NULL);
+    /* §29/G-10: the SAME gesture through the widget-level drag-source
+     * controller — FDK arms it on the press wherever the press lands
+     * in this widget's subtree and calls the begin fn past the slop,
+     * so the app never hand-rolls press/motion/release tracking. */
+    fdk_widget *src2 = NULL;
+    (void)fdk_button_create(row3, font,
+                            "DRAG SOURCE (controller API)", &src2);
+    (void)fdk_widget_set_drag_source(src2, 6, controller_begin, NULL);
     fdk_widget *dst = NULL;
     (void)fdk_button_create(row3, font, "DROP TARGET", &dst);
     (void)fdk_widget_set_drop_target(
