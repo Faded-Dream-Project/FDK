@@ -149,6 +149,52 @@ fdk_result fdk_widget_set_drag_callback(fdk_widget *widget,
                                         fdk_widget_drag_fn on_drag,
                                         void *user);
 
+/* ---- Widget-level drag SOURCES (§29/G-10) ----------------------------------
+ *
+ * The SOURCE-side counterpart of the drop-target registration above
+ * — the GTK4 GtkDragSource shape, restated for FDK.
+ *
+ * WHY A CONTROLLER: fdk_drag_begin must be called from a pointer
+ * press context, but in any list-shaped UI the press lands on a ROW
+ * whose own handler consumes it (selection) — bubbling stops there,
+ * so an ancestor's event callback NEVER SEES the press and can never
+ * arm a drag (the §28 drag rig's legs were all dead for exactly this
+ * reason). A drag source is therefore not a callback an app wires
+ * around its tree; it is a controller FDK rides ON the dispatch
+ * itself: it observes the press wherever it lands in the widget's
+ * subtree, the motion while the button is held, and the release.
+ *
+ * THE CONTRACT:
+ *   - press on the source widget OR ANY descendant arms the
+ *     controller (the press's own consumption by a child does not
+ *     matter — the controller is checked beside the delivery, not
+ *     after it);
+ *   - motion past `threshold_px' while held fires `on_begin' EXACTLY
+ *     ONCE per press, at the SOURCE widget (the app calls
+ *     fdk_drag_begin_ex there with its real payload — the threshold
+ *     in fdk_drag_begin's "press-then-motion handler" contract is
+ *     satisfied by construction);
+ *   - release before the threshold never fires (a click stays a
+ *     click); after a begin the controller stands down until the
+ *     next press (the running drag consumes the pointer itself);
+ *   - multiple sources in one tree scope independently: the deepest
+ *     source on the press's chain owns the gesture;
+ *   - NULL on_begin disarms.
+ *
+ * threshold_px is the drag-start slop in root coordinates (the
+ * square-distance rule); values <= 0 are refused (with a non-NULL
+ * callback). Can fail with FDK_ERR_INVALID_ARGUMENT. */
+typedef void *(*fdk_widget_drag_begin_fn)(fdk_widget *source,
+                                          void *user);
+
+fdk_result fdk_widget_set_drag_source(fdk_widget *widget,
+                                      int threshold_px,
+                                      fdk_widget_drag_begin_fn on_begin,
+                                      void *user);
+
+/* True when `widget` carries an armed drag-source controller. */
+bool fdk_widget_get_drag_source(const fdk_widget *widget);
+
 /* ---- Sending ---- */
 
 /* How an fdk_drag_begin-ended drag concluded. */
