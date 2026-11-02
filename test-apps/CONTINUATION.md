@@ -5,7 +5,12 @@ Their durable facts survive in the SHORT HISTORY at the bottom; the
 detail lives in git history. Read this top to bottom to resume.
 
 ## Remote proof at write time
-origin/main == `7dfc015` (scripts: the test rigs move INTO the repo).
+origin/main == `2429103` (fdk-edit PASS A). Round commits this far:
+7dfc015 (rig scripts + setup-sandbox.sh) · 16133af (CONTINUATION
+rewrite) · 80e3c36 (G-12 dedicated regression test + FDK_DND_TRACE
+diagnostics) · 2b29273 (TextView EDITOR surface: caret I/O,
+line:col geometry, range attrs, gutter — test-first) · 2429103
+(fdk-edit PASS A).
 `git ls-remote origin main` is the authority; if you lack commits,
 fetch + rebase. Identity: Faded Dream Project
 <242450780+FemBoyGamerTechGuy@users.noreply.github.com> for author,
@@ -94,7 +99,20 @@ the daemon's limits in session.conf; the ordering of
 Hello/RequestName/AddMatch on the first connection; whether the
 closed connection sent anything before Hello completed.
 
-**O-4: fdk-edit — NOT STARTED (code: nothing exists yet).** The §24
+**O-4: fdk-edit — PASS A DONE (2429103).** Built on the TextView
+editor surface (2b29273): tabs+modified indicator, open/save/save-as
+(ASYNC dialogs — the toolkit owns them, the response callbacks
+finish the flows), undo/redo, find/replace plain+POSIX-regex
+(libc regex.h, no new deps), 48px line-number gutter (the widget's
+band hook), syntax highlight C/shell/MD/JSON/Makefile (attr lists,
+theme-palette colors), icon toolbar (10 buttons), menu bar
+(File/Edit/View/Help + recents), status bar (Ln/Col + encoding +
+CRLF/LF + language), word wrap toggle, recent files (8, prefs),
+session restore (tabs+carets+booleans), drag-file-to-open,
+UTF-8/BOM/UTF-16LE/BE read (surrogates joined) + CRLF/LF preserved.
+Xvfb smoke: 40 frames clean, LSan clean. REMAINING for fdk-edit:
+Wayland smoke lane, RO i18n strings via po/, a11y names/roles,
+light+dark verification, screenshots, README, then PASS B (the §24
 spec PASS A: tabs with modified indicator, open/save/save-as,
 undo/redo, find/replace plain+regex, line-number gutter, syntax
 highlighting (C/shell/Markdown/JSON/Makefile) via the
