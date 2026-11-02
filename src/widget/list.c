@@ -166,6 +166,37 @@ typedef struct fdk_list {
     char **col_titles;          /* owned title copies, parallel      */
     fdk_i32 *col_widths;        /* resolved widths, parallel        */
     fdk_i32 columns_width;      /* sum(col_widths) + separators     */
+    /* ---- 1.5.1: the ADAPTIVE column geometry (owner round 8) ----
+     *
+     * The round-7 layout summed widths from the LEFT — the fixed
+     * columns clustered right after the shortest filename, nowhere
+     * near the window's far end, and never moved on resize. The
+     * desktop contract is the opposite: the fixed columns are
+     * RIGHT-ANCHORED to the viewport's end, and the name column
+     * absorbs all the slack between the names and them.
+     *
+     * name_nat caches the natural width of the name column's
+     * content (widest row text + icon band + padding) so the
+     * layout can re-run cheaply on every resize. The resolved
+     * geometry lives in col_x[] / col_name_width, recomputed by
+     * list_columns_layout() whenever the viewport width changes
+     * (the arrange/sync/paint self-heal paths all call it), in one
+     * of two modes:
+     *
+     *   ANCHORED — viewport >= the natural spread (name_nat +
+     *   every fixed column + separators): the fixed columns hug
+     *   the far end (minus the v-scrollbar's reserved strip), the
+     *   name column stretches across the slack. No h-scroll.
+     *
+     *   CONTENT — viewport too narrow: everything lays out at its
+     *   natural width in content space (names left, cells right of
+     *   them, exactly one LIST_COL_SEP apart) and content_width
+     *   floors at the spread so the horizontal scroll reaches the
+     *   last column — narrow windows degrade into a scrollable
+     *   pane instead of colliding with the name column.          */
+    fdk_i32 name_nat;           /* the name column's natural width   */
+    fdk_i32 *col_x;             /* resolved x per column (incl. 0)   */
+    fdk_i32 col_name_width;     /* the name column's resolved width  */
     /* ---- Rubber-band drag-select (1.4.2) ----
      *
      * A press on the list's EMPTY space (below the rows / outside
@@ -260,16 +291,92 @@ static fdk_i32 list_header_height(const fdk_list *l) {
     return h + 6;
 }
 
+/* 1.5.1: the resolved column geometry — see the struct block. The
+ * name column's natural width comes from the widest row (text +
+ * icon band + padding, the v1 measure). Must be re-run whenever
+ * col_widths, the row content, or the viewport width changes; every
+ * such path funnels through here so the two modes are one rule. */
+static void list_columns_layout(fdk_list *l) {
+    if (l->column_count == 0 || l->col_x == NULL) {
+        return;
+    }
+    /* The name column's natural width: widest row, v1 measure. */
+    fdk_i32 name_nat = 80;
+    for (size_t i = 0; i < l->count; i++) {
+        fdk_i32 tw = 0, th = 0;
+        fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
+        tw += row_icon_band(l->row_widgets[i]);
+        if (tw + LIST_ROW_PAD_X * 2 > name_nat) {
+            name_nat = tw + LIST_ROW_PAD_X * 2;
+        }
+    }
+    l->name_nat = name_nat;
+
+    /* The fixed columns' natural spread (their resolved widths +
+     * separators). */
+    fdk_i32 fixed_nat = 0;
+    for (size_t c = 1; c < l->column_count; c++) {
+        fixed_nat += LIST_COL_SEP + l->col_widths[c];
+    }
+
+    /* The viewport: the scrollview's content width — full width
+     * under OVERLAY bars, minus the v-bar's reserved strip under
+     * CLASSIC ones (the default). Anchoring INTO the reserved strip
+     * would slide the last column under the scrollbar. */
+    fdk_i32 vw = (l->scroll != NULL)
+                     ? fdk__scrollview_viewport_width(l->scroll)
+                     : l->base.bounds.width;
+    if (vw <= 0) {
+        vw = l->base.bounds.width; /* not arranged yet: the list's
+                                    * own width is the best truth */
+    }
+
+    if (vw >= name_nat + fixed_nat) {
+        /* ANCHORED: the last fixed column's RIGHT edge sits at the
+         * viewport's end; the name column takes everything left of
+         * the first fixed one. */
+        fdk_i32 fixed_w = 0;
+        for (size_t c = 1; c < l->column_count; c++) {
+            fixed_w += LIST_COL_SEP + l->col_widths[c];
+        }
+        l->col_x[l->column_count - 1] = vw - l->col_widths[
+            l->column_count - 1];
+        for (size_t c = l->column_count - 1; c > 1; c--) {
+            l->col_x[c - 1] = l->col_x[c] - LIST_COL_SEP -
+                              l->col_widths[c - 1];
+        }
+        if (l->column_count > 1) {
+            l->col_x[0] = 0;
+            l->col_name_width = l->col_x[1] - LIST_COL_SEP;
+        } else {
+            l->col_x[0] = 0;
+            l->col_name_width = vw;
+        }
+    } else {
+        /* CONTENT: natural widths in content space; the name column
+         * keeps its natural width (col_name_width), the fixed
+         * columns sit one separator after it / each other. */
+        l->col_x[0] = 0;
+        l->col_name_width = name_nat;
+        fdk_i32 x = name_nat;
+        for (size_t c = 1; c < l->column_count; c++) {
+            x += LIST_COL_SEP;
+            l->col_x[c] = x;
+            x += l->col_widths[c];
+        }
+    }
+}
+
 /* The x where column `col` starts, in CONTENT space (list-local +
  * the scroll offset applied by the caller). Column 0 starts at 0
  * (it IS the primary text column; its icon band and padding are the
- * row's own). */
+ * row's own). 1.5.1: reads the RESOLVED geometry — anchored or
+ * content mode, whatever the last list_columns_layout() decided. */
 static fdk_i32 list_col_x(const fdk_list *l, size_t col) {
-    fdk_i32 x = 0;
-    for (size_t i = 0; i < col && i < l->column_count; i++) {
-        x += l->col_widths[i] + LIST_COL_SEP;
+    if (col < l->column_count && l->col_x != NULL) {
+        return l->col_x[col];
     }
-    return x;
+    return 0;
 }
 
 /* The resolved width floor for a fixed column: its declared width,
@@ -324,6 +431,29 @@ static void list_sync_scroll_bounds(fdk_list *l) {
     fdk_rect inner = { 0, top, l->base.bounds.width,
                        l->base.bounds.height - top };
     fdk_widget_set_bounds(l->scroll, inner);
+    /* 1.5.1: the viewport just moved (resize, or the list's first
+     * arrangement) — the right-anchored columns re-resolve here.
+     * This is the RESIZE ADAPTATION: every path that changes the
+     * scrollview's bounds (arrange, the app's set_bounds, the
+     * self-heal in paint) funnels through this sync, so the anchor
+     * follows the window live. */
+    if (l->column_count > 0) {
+        list_columns_layout(l);
+        fdk_i32 spread = l->col_x[l->column_count - 1] +
+                         l->col_widths[l->column_count - 1];
+        if (spread > l->content_width && l->rows != NULL) {
+            l->content_width = spread;
+            fdk_i32 rh = list_row_height(l);
+            for (size_t i = 0; i < l->count; i++) {
+                fdk_rect r = { 0, (fdk_i32)(i * (size_t)rh),
+                               l->content_width, rh };
+                fdk_widget_set_bounds(&l->row_widgets[i]->base, r);
+            }
+            fdk_widget_set_natural_size(
+                l->rows, l->content_width,
+                (fdk_i32)(l->count * (size_t)rh));
+        }
+    }
 }
 
 static void list_relayout(fdk_list *l) {
@@ -342,11 +472,16 @@ static void list_relayout(fdk_list *l) {
             w = tw + LIST_ROW_PAD_X * 2;
         }
     }
-    /* Columns floor the content width: the horizontal scroll must
-     * reach the last column's end even when every filename is short
-     * (the whole point of the far-end columns). */
-    if (l->column_count > 0 && l->columns_width > w) {
-        w = l->columns_width;
+    /* 1.5.1: the adaptive column geometry runs FIRST — the
+     * content-mode floor below reads the resolved col_x[] tail. */
+    if (l->column_count > 0) {
+        list_columns_layout(l);
+        fdk_i32 spread = l->col_x[l->column_count - 1] +
+                         l->col_widths[l->column_count - 1];
+        if (spread > w) {
+            w = spread; /* content mode: the h-scroll must reach
+                         * the last column's right edge */
+        }
     }
     l->content_width = w;
     for (size_t i = 0; i < l->count; i++) {
@@ -390,6 +525,22 @@ static void list_place_appended(fdk_list *l) {
         fdk_rect r = { 0, (fdk_i32)((l->count - 1) * (size_t)rh),
                        l->content_width, rh };
         fdk_widget_set_bounds(&row->base, r);
+    }
+    /* 1.5.1: a widening append can flip content mode (the name
+     * column's natural width grew) — re-resolve the anchor before
+     * the natural size lands. */
+    if (l->column_count > 0) {
+        list_columns_layout(l);
+        fdk_i32 spread = l->col_x[l->column_count - 1] +
+                         l->col_widths[l->column_count - 1];
+        if (spread > l->content_width) {
+            l->content_width = spread;
+            for (size_t i = 0; i < l->count; i++) {
+                fdk_rect r = { 0, (fdk_i32)(i * (size_t)rh),
+                               l->content_width, rh };
+                fdk_widget_set_bounds(&l->row_widgets[i]->base, r);
+            }
+        }
     }
     fdk_widget_set_natural_size(l->rows, l->content_width,
                                 (fdk_i32)(l->count * (size_t)rh));
@@ -1371,6 +1522,8 @@ static void list_destroy(fdk_widget *w) {
     l->columns = NULL;
     fdk_free(l->col_widths);
     l->col_widths = NULL;
+    fdk_free(l->col_x);
+    l->col_x = NULL;
     l->column_count = 0;
     fdk_free(l->row_widgets);
     l->row_widgets = NULL;
@@ -1397,10 +1550,16 @@ static void list_measure(fdk_widget *w, fdk_size *out) {
         }
     }
     size_t shown = (l->count < 8) ? l->count : 8;
-    if (l->column_count > 0 && l->columns_width > width) {
-        width = l->columns_width; /* the columns floor the natural
-                                   * width too (the header strip
-                                   * must fit without scrolling) */
+    if (l->column_count > 0) {
+        /* 1.5.1: the natural size is the CONTENT-mode spread — the
+         * anchored mode's whole point is that it fits the viewport,
+         * so the natural (unanchored) answer is the fallback one. */
+        list_columns_layout(l);
+        fdk_i32 spread = l->col_x[l->column_count - 1] +
+                         l->col_widths[l->column_count - 1];
+        if (spread > width) {
+            width = spread;
+        }
     }
     out->width = width;
     out->height = (fdk_i32)(shown * (size_t)rh);
@@ -1532,6 +1691,15 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
                 fdk__draw_text(surface, l->font, title,
                                fdk__pal_text_disabled(), tx,
                                baseline);
+                /* the column divider: a vertical hair the strip's
+                 * height, at the separator's center — the desktop
+                 * pane-header look (1.5.1) */
+                fdk_i32 dx = bounds.x + cx - LIST_COL_SEP / 2 - off_x;
+                if (dx >= bounds.x && dx < bounds.x + bounds.width) {
+                    fdk_rect div = { dx, bounds.y, 1, hh };
+                    fdk_surface_fill_rect(surface, div,
+                                          fdk__pal_border());
+                }
             }
         }
     }
@@ -1598,9 +1766,11 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
         l->scroll->bounds.x != 0 ||
         l->scroll->bounds.width != w->bounds.width ||
         l->scroll->bounds.height != w->bounds.height - top) {
-        fdk_rect inner = { 0, top, w->bounds.width,
-                           w->bounds.height - top };
-        fdk_widget_set_bounds(l->scroll, inner);
+        list_sync_scroll_bounds(l); /* 1.5.1: the shared sync — the
+                                     * column anchor re-resolves
+                                     * here too (this is the paint
+                                     * self-heal path a direct
+                                     * set_bounds relies on) */
         fdk_widget_child_layout_changed(l->scroll);
     }
 }
@@ -1657,6 +1827,9 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
     l->column_count = 0;
     l->col_titles = NULL;
     l->col_widths = NULL;
+    l->name_nat = 80;       /* 1.5.1: until rows/callers widen it  */
+    l->col_x = NULL;
+    l->col_name_width = 80;
     l->columns_width = 0;
     l->banding = false;
     l->band_ctrl = false;
@@ -1687,6 +1860,41 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
 
 /* ---- columns (1.5.0) ---- */
 
+/* TEST SEAM (1.5.1): the resolved column geometry — col_x[c] and
+ * the width of column c — so the rig can assert the right-edge
+ * anchor and the resize adaptation without pixel-divining. Also
+ * hands back content_width (the h-scroll floor). Never called by
+ * the library itself. */
+void fdk__list_test_column_x(fdk_widget *list, size_t col,
+                             fdk_i32 *out_x, fdk_i32 *out_w,
+                             fdk_i32 *out_content_width) {
+    if (out_x != NULL) {
+        *out_x = 0;
+    }
+    if (out_w != NULL) {
+        *out_w = 0;
+    }
+    if (out_content_width != NULL) {
+        *out_content_width = 0;
+    }
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return;
+    }
+    fdk_list *l = list_of(list);
+    if (col < l->column_count) {
+        if (out_x != NULL) {
+            *out_x = l->col_x != NULL ? l->col_x[col] : 0;
+        }
+        if (out_w != NULL) {
+            *out_w = (col == 0) ? l->col_name_width
+                                : l->col_widths[col];
+        }
+    }
+    if (out_content_width != NULL) {
+        *out_content_width = l->content_width;
+    }
+}
+
 fdk_result fdk_list_set_columns(fdk_widget *list,
                                 const fdk_list_column *columns,
                                 size_t count) {
@@ -1703,6 +1911,7 @@ fdk_result fdk_list_set_columns(fdk_widget *list,
     fdk_list_column *cols = NULL;
     char **titles = NULL;
     fdk_i32 *widths = NULL;
+    fdk_i32 *xs = NULL;
     if (count > 0) {
         cols = fdk_alloc_array(count, sizeof(*cols));
         if (cols == NULL) {
@@ -1719,6 +1928,13 @@ fdk_result fdk_list_set_columns(fdk_widget *list,
             fdk_free(titles);
             return FDK_ERR_OUT_OF_MEMORY;
         }
+        xs = fdk_alloc_array(count, sizeof(*xs));
+        if (xs == NULL) {
+            fdk_free(cols);
+            fdk_free(titles);
+            fdk_free(widths);
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
         for (size_t i = 0; i < count; i++) {
             if (columns[i].title != NULL) {
                 titles[i] = fdk__strdup(columns[i].title);
@@ -1729,6 +1945,7 @@ fdk_result fdk_list_set_columns(fdk_widget *list,
                     fdk_free(titles);
                     fdk_free(cols);
                     fdk_free(widths);
+                    fdk_free(xs);
                     return FDK_ERR_OUT_OF_MEMORY;
                 }
             } else {
@@ -1762,9 +1979,11 @@ fdk_result fdk_list_set_columns(fdk_widget *list,
     fdk_free(l->col_titles);
     fdk_free(l->columns);
     fdk_free(l->col_widths);
+    fdk_free(l->col_x);
     l->columns = cols;
     l->col_titles = titles;
     l->col_widths = widths;
+    l->col_x = xs;
     size_t old_count = l->column_count;
     l->column_count = count;
 
@@ -2081,6 +2300,7 @@ void fdk_list_clear(fdk_widget *list) {
             l->col_widths[c] = list_col_title_width(l, c);
         }
         list_columns_recompute(l);
+        l->name_nat = 80; /* rows gone: the name column resets */
     }
     if (l->batch_depth > 0) {
         l->batch_dirty = true;

@@ -17,6 +17,7 @@
 #include "hermetic_env.h"
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
+#include "../src/widget/widgets_internal.h" /* the test seams */
 
 #include "widget/widget_internal.h" /* animation test seam (1.3.8) */
 
@@ -578,12 +579,70 @@ static void test_columns(void) {
     assert(fdk_widget_tree_handle_event(root, &up));
     assert(fdk_list_selected_count(list) == 3);
 
+    /* ---- 1.5.1: the right-edge anchor (the owner's round-8
+     * report: the columns clustered at the LEFT, must hug the far
+     * end and follow resizes) ---- */
+    assert(fdk_list_get_column_count(list) == 3);
+    fdk_widget_tree_paint(root, s); /* the self-heal sync ran */
+    fdk_i32 cxL = 0, cwL = 0, cwid = 0; /* the LAST column (idx 2) */
+    fdk_i32 cx1 = 0, cw1 = 0;
+    fdk__list_test_column_x(list, 2, &cxL, &cwL, &cwid);
+    /* anchored: the LAST column's right edge == the viewport (the
+     * list is 400 wide at x=10; 4 rows of "file N" fit far inside,
+     * so this is the anchored mode) */
+    assert(cxL + cwL == 400);
+    /* the name column stretched across the slack: its width is the
+     * first fixed column's x minus the separator */
+    fdk__list_test_column_x(list, 1, &cx1, &cw1, NULL);
+    fdk_i32 cnx = 0, cnw = 0;
+    fdk__list_test_column_x(list, 0, &cnx, &cnw, NULL);
+    assert(cnx == 0);
+    assert(cnw == cx1 - 24); /* LIST_COL_SEP — the name column
+                              * fills everything left of the first
+                              * fixed column (the EXPANSION, made
+                              * concrete: 116 px for "file N" rows
+                              * whose natural width is ~60) */
+    assert(cnw >= 80);       /* at least the v1 minimum          */
+
+    /* resize: WIDER window — the anchor follows */
+    fdk_widget_set_bounds(list, (fdk_rect){10, 10, 600, 200});
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    fdk__list_test_column_x(list, 2, &cxL, &cwL, &cwid);
+    assert(cxL + cwL == 600);
+    fdk_i32 cnw_wide = 0;
+    fdk__list_test_column_x(list, 0, &cnx, &cnw_wide, NULL);
+    assert(cnw_wide > cnw); /* grew with the window             */
+    assert(cnw_wide >= cnw + 190); /* ~the full delta (600-400,
+                                     * minus nothing: the fixed
+                                     * spread did not change)   */
+
+    /* resize: NARROW window — content mode: natural widths, the
+     * spread floors content_width, the name column keeps its
+     * natural width */
+    fdk_widget_set_bounds(list, (fdk_rect){10, 10, 160, 200});
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    fdk__list_test_column_x(list, 2, &cxL, &cwL, &cwid);
+    assert(cxL + cwL <= cwid); /* inside the scrolled content */
+    assert(cwid > 160);        /* the floor: the spread          */
+    fdk__list_test_column_x(list, 0, &cnx, &cnw, NULL);
+    assert(cnw < 160); /* natural, not the squeezed viewport */
+
+    /* and back wide — re-anchors */
+    fdk_widget_set_bounds(list, (fdk_rect){10, 10, 500, 200});
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    fdk__list_test_column_x(list, 2, &cxL, &cwL, &cwid);
+    assert(cxL + cwL == 500);
+
     /* clearing the column set returns the plain v1 list */
     assert(fdk_ok(fdk_list_set_columns(list, NULL, 0)));
     assert(fdk_list_get_column_count(list) == 0);
     fdk_surface_destroy(s);
-    printf("[ok] list: columns (set/cells/geometry floor, selection "
-           "under columns, clear-to-plain)\n");
+    printf("[ok] list: columns (set/cells, right-edge anchor + "
+           "resize adaptation + narrow fallback, selection under "
+           "columns, clear-to-plain)\n");
 }
 
 /* ---- the row-press band start (1.5.0, the round-6 wall-to-wall case) ---- */

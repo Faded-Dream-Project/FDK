@@ -646,6 +646,15 @@ const char *mime_category(const char *mime_type) {
     if (mime_type == NULL) {
         return "Unknown";
     }
+    /* The filesystem entries first (the owner's round-8 report:
+     * directories fell through every branch and read "File" — the
+     * Type column must distinguish folders from files). */
+    if (strcmp(mime_type, "inode/directory") == 0) {
+        return "Folder";
+    }
+    if (strncmp(mime_type, "inode/", 6) == 0) {
+        return "System"; /* symlinks, sockets, devices            */
+    }
     if (strncmp(mime_type, "image/", 6) == 0) {
         return "Image";
     }

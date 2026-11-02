@@ -1107,6 +1107,32 @@ fdk_result fdk_scrollview_set_bar_mode(fdk_widget *scrollview,
     return FDK_OK;
 }
 
+/* Internal (list columns' anchor math, 1.5.1): the viewport width
+ * the scrollview actually reserves for content in its CURRENT bar
+ * mode — full width under OVERLAY bars, minus the v-bar's strip
+ * under CLASSIC ones (when a v-bar is showing). */
+fdk_i32 fdk__scrollview_viewport_width(fdk_widget *scrollview) {
+    if (scrollview == NULL) {
+        return 0;
+    }
+    fdk_scrollview *sv = scroll_of(scrollview);
+    fdk_i32 w = scrollview->bounds.width;
+    if (sv->mode != FDK_SCROLL_BARS_OVERLAY) {
+        /* CLASSIC: the v-bar reserves a right strip while it is
+         * showing (scrollview_layout's need_v). The list re-runs
+         * its column anchor at its own layout points, so reading
+         * the CURRENT arrangement is exactly right. */
+        if (sv->vbar != NULL &&
+            (sv->vbar->flags & FDK_WF_VISIBLE) != 0) {
+            fdk_i32 bw = bar_width();
+            if (bw > 0 && bw < w) {
+                w -= bw;
+            }
+        }
+    }
+    return w;
+}
+
 fdk_scroll_bar_mode fdk_scrollview_get_bar_mode(fdk_widget *scrollview) {
     if (scrollview == NULL ||
         scrollview->klass != &fdk_scrollview_class_def) {

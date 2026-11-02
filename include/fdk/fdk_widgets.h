@@ -857,7 +857,19 @@ fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
  * scrolling keeps it aligned with the rows — the classic pane
  * header). Cells are drawn by the row's own paint at the column
  * offsets, in text-disabled color; selection/hover fills span the
- * full row width as before. */
+ * full row width as before.
+ *
+ * 1.5.1 (the owner's round-8 report): the fixed columns are
+ * RIGHT-ANCHORED — they hug the viewport's far end (clear of the
+ * v-scrollbar's reserved strip), and the name column stretches
+ * across the slack between the names and them; the anchor re-solves
+ * on every resize (that is the point of the feature). When the
+ * window is narrower than the natural spread, the list falls back
+ * to content mode: natural widths, one separator apart, with the
+ * horizontal scroll reaching the last column's right edge — a
+ * narrow window degrades into a scrollable pane instead of
+ * colliding with the names. The header carries vertical divider
+ * hairs between the fixed columns. */
 typedef struct fdk_list_column {
     const char *title;   /* header + a11y label (copied; NULL = "") */
     fdk_i32 min_width;   /* px; column 0: minimum (it expands),
