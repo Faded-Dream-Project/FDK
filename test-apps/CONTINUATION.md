@@ -1,3 +1,36 @@
+# §31 continuation — UPDATE (owner round 5: the round-4 registry's use-after-frees)
+
+## Remote proof
+origin/main == `82435e2` ("the round-5 use-after-frees"). Working tree = that commit, clean.
+
+## Round 5's two fixes (both bugs were MINE, introduced in round 4)
+1. **ROW-ICON OWNERSHIP** — list/iconview rows BORROW images; my round-4 registry freed
+   the clones per pane_build_view. A rebuild of ONE pane (pane_add / split view) freed
+   what the OTHER pane still painted. Repro: `--smoke` on HEAD (the split round) → ASAN
+   heap-use-after-free in row_paint. Fix: `icons_get_file()` in the app icon cache
+   (resolves via the round-4 public engine API, caches by TYPE = directory/extension);
+   cache owns surfaces for the process lifetime. Registry deleted.
+2. **STALE THUMBNAIL DELIVERY** — the icons-mode smoke then died in thumb_ready_cb: a
+   worker thumbnail delivered into a destroyed iconview (smoke navigates mid-flight; the
+   request captured the widget pointer). Fix: `tab.view_gen` bumped by every
+   pane_build_view; requests carry (tab, gen, iv) in a heap thumb_target; deliveries
+   drop on stale generation BEFORE touching widgets. `thumbs_get` grew `out_submitted`
+   so the caller knows if the worker owns its user pointer.
+
+## Rig note (do NOT re-add): single-pane self-quit rigs CANNOT see either bug — the
+smoke rig (`--smoke`) is the regression test that catches both (detail mode = bug 1,
+icons mode = bug 2). The temp FDK_TEST_VIEW_ICONS override was reverted; to test icons
+mode use the prefs quirk knowledge: view.mode is saved but never applied on boot (app
+quirk, line ~641 discards the read) — the menu is the only way in the shipped app.
+
+## Verification state: smoke (detail+icons) → PHASE:quit zero ASAN; make test GREEN;
+exports 998; Papirus self-quit 22/22, Adwaita 19/21 (the 2 = names Debian's Adwaita
+lacks); icons-mode screenshot 6830 saturated px (#5294e2 cluster); leaks = libGLX only.
+
+## Owner re-test: ./build/fdk-files — boot, split view (F9 or the split toolbar button),
+switch to icons view, navigate around while thumbnails load, close. No ASAN abort; both
+panes keep themed icons through each other's rebuilds.
+
 # §31 continuation — UPDATE (owner round 4: the Adwaita crash + invisible file-row icons + the per-entry API)
 
 ## Remote proof
