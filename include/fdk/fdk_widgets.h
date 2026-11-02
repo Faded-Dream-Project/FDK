@@ -833,6 +833,58 @@ typedef enum fdk_row_icon {
  * FDK_ERR_INVALID_ARGUMENT. */
 fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
                                  fdk_row_icon icon);
+
+/* ---- List columns (1.5.0) ------------------------------------------
+ *
+ * The file-manager list view: a header strip and per-row cells in
+ * additional columns, laid out right of the primary text — the
+ * "Name | Date Modified | Size | Type" shape every desktop ships.
+ *
+ * A column set is a LAYOUT PRESCRIPTION, not a data model: the app
+ * still owns its data and fills each row's cells by row index
+ * (fdk_list_row_set_cell), exactly the discipline the row-icon API
+ * uses. Column 0 is special — it IS the primary text column: its
+ * declared width is a MINIMUM (the row's text measurement still
+ * widens it), it carries the row's icon band, and it expands to
+ * fill any leftover list width. Columns 1..N are fixed-width
+ * (>= 48 px; 0 is refused), right-aligned by default — numbers and
+ * dates read right-aligned; pass a left-aligned column by setting
+ * align_left. With no columns set (the default) the list is exactly
+ * the v1 widget: this feature is pure addition, zero regression.
+ *
+ * The header is a paint-time strip pinned ABOVE the internal
+ * scrollview's viewport (it does not scroll vertically; horizontal
+ * scrolling keeps it aligned with the rows — the classic pane
+ * header). Cells are drawn by the row's own paint at the column
+ * offsets, in text-disabled color; selection/hover fills span the
+ * full row width as before. */
+typedef struct fdk_list_column {
+    const char *title;   /* header + a11y label (copied; NULL = "") */
+    fdk_i32 min_width;   /* px; column 0: minimum (it expands),
+                          * columns 1+: exact width                  */
+    bool align_left;     /* false = right-aligned (dates, sizes)    */
+} fdk_list_column;
+
+/* Declares the column set (copied; `count` 0 clears it back to the
+ * plain list). `columns[0]` is the primary column (see above); a
+ * count >= 1 with a NULL `columns` array is INVALID_ARGUMENT.
+ * Re-layouts; existing rows keep their cell texts (a shrinking
+ * column count drops the cells beyond it). */
+fdk_result fdk_list_set_columns(fdk_widget *list,
+                                const fdk_list_column *columns,
+                                size_t count);
+
+/* The column count (0 = the plain no-columns list). */
+size_t fdk_list_get_column_count(fdk_widget *list);
+
+/* Sets one row's cell text for column `col` (1..count-1; column 0
+ * is the row's primary text — use fdk_list_set_row_text). UTF-8,
+ * copied; NULL or "" clears. Re-measures (a wide cell can widen
+ * the fixed column to fit — the "November 12 2025, 18:20" case —
+ * never narrower than the declared width, and the header title is
+ * measured into the same floor). */
+fdk_result fdk_list_row_set_cell(fdk_widget *list, size_t row,
+                                 size_t col, const char *text);
 /* The row's icon (NONE for non-lists / out-of-range rows). */
 fdk_row_icon fdk_list_row_get_icon(fdk_widget *list, size_t row);
 

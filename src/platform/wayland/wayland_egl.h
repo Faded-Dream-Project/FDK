@@ -90,6 +90,10 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
  * survive unload cleanly). */
 void fdk_wayland_egl_shutdown(struct fdk_wayland_egl *egl);
 
+/* Round-7 exit-leak companion: dlcloses the pinned libEGL. MUST run
+ * only AFTER the connection's wl_display_disconnect. */
+void fdk_wayland_egl_libraries_release(void);
+
 /* Tries to engage the lane for one window: creates the
  * wl_egl_window + EGL surface + context, applies the renderer
  * policy, initializes GL state. Returns NULL (and logs why) when

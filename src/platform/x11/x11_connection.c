@@ -533,6 +533,7 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
          * into the fatal IO path. The socket dies with the process
          * or the close-on-exit — leak the Display handle honestly. */
         FDK_INFO("disconnecting (display already dead)");
+        fdk_x11_gl_libraries_release(NULL); /* no live display: safe */
         g_io_conn = NULL;
         fdk_free(conn);
         return;
@@ -543,6 +544,11 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
     }
     FDK_INFO("disconnecting");
     XCloseDisplay(conn->display);
+    /* Round-7: past XCloseDisplay, libGL's GLX extension caches are
+     * unwalked — release the pinned library NOW (the Mesa/NVIDIA
+     * per-display driver objects only free at its destructors; the
+     * exit-leak report's class). */
+    fdk_x11_gl_libraries_release(NULL);
     g_io_conn = NULL;
     fdk_free(conn);
 }

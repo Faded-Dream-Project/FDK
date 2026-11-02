@@ -52,6 +52,12 @@ typedef struct fdk_list_row {
     fdk_widget base;
     bool drag_armed; /* 1.5.0: a selected-row press may arm a drag
                       * source (see fdk_list_row_set_drag_armed)   */
+    char **cells;    /* 1.5.0: columns 1..N's text (owned, parallel
+                      * to the list's column set; NULL when the list
+                      * has no columns)                            */
+    size_t cells_cap; /* slots in `cells' — the row frees its own
+                       * cells at destroy WITHOUT the list (the
+                       * parent chain is already unlinked by then) */
     /* 1.5.0: the pending-band press (the wall-to-wall-rows case).
      * The press on an unselected plain row is remembered, not
      * consumed; when the pointer moves past the slop the ROW
@@ -137,6 +143,29 @@ typedef struct fdk_list {
      * the new row (the common bulk-fill shape) instead of re-placing
      * the whole list. 80 = the v1 minimum content width. */
     fdk_i32 content_width;
+    /* ---- List columns (1.5.0) ----------------------------------
+     *
+     * The file-manager list view: a header strip + per-row cells
+     * right of the primary text, all PAINT-TIME geometry on the
+     * existing row widgets (no per-cell children — the row count,
+     * hit-testing, the implicit grab, and the rubber band are all
+     * untouched). columns[0] is the PRIMARY column: a minimum width
+     * (row text still widens it) that expands into leftover list
+     * width; columns 1..N are fixed-width, right-aligned by
+     * default. col_widths is resolved at set_columns time: the
+     * declared width, widened to fit the header title, and widened
+     * again per cell as rows fill (never narrower than declared).
+     * columns_width is the sum of the resolved widths — the FLOOR
+     * under content_width so the horizontal scroll reaches the last
+     * column's end. */
+    fdk_list_column *columns;   /* the set (titles borrowed from
+                                  * col_titles — the public struct's
+                                  * const field is read-only to
+                                  * callers, owned here)            */
+    size_t column_count;
+    char **col_titles;          /* owned title copies, parallel      */
+    fdk_i32 *col_widths;        /* resolved widths, parallel        */
+    fdk_i32 columns_width;      /* sum(col_widths) + separators     */
     /* ---- Rubber-band drag-select (1.4.2) ----
      *
      * A press on the list's EMPTY space (below the rows / outside
@@ -209,6 +238,94 @@ static fdk_i32 list_row_height(const fdk_list *l) {
 /* Re-places every row inside the rows container + refreshes the
  * container's natural size (so the scrollview's bars/clamps follow).
  * Called after any non-batched mutation (and once at end_batch). */
+/* The column geometry (1.5.0). Separators double as the horizontal
+ * gutters between columns: PAD on each side of the divider keeps
+ * dense right-aligned cells off each other's pixels. */
+#define LIST_COL_SEP 24
+#define LIST_COL_MIN 48
+
+/* The header strip's height: a text row's height, floored at the
+ * row height so the band-aligned geometry stays honest. Paint-only
+ * metric; computed per paint (the font can change). */
+static fdk_i32 list_header_height(const fdk_list *l) {
+    (void)l;
+    fdk_i32 h = 0;
+    if (l->font != NULL) {
+        fdk_i32 tw = 0;
+        fdk__text_extent(l->font, "Xg", &tw, &h);
+    }
+    if (h < 20) {
+        h = 20;
+    }
+    return h + 6;
+}
+
+/* The x where column `col` starts, in CONTENT space (list-local +
+ * the scroll offset applied by the caller). Column 0 starts at 0
+ * (it IS the primary text column; its icon band and padding are the
+ * row's own). */
+static fdk_i32 list_col_x(const fdk_list *l, size_t col) {
+    fdk_i32 x = 0;
+    for (size_t i = 0; i < col && i < l->column_count; i++) {
+        x += l->col_widths[i] + LIST_COL_SEP;
+    }
+    return x;
+}
+
+/* The resolved width floor for a fixed column: its declared width,
+ * widened to fit its header title (+ padding) — cell text widens it
+ * further per row (see list_row_set_cell). */
+static fdk_i32 list_col_title_width(const fdk_list *l, size_t col) {
+    fdk_i32 w = l->columns[col].min_width;
+    if (l->font != NULL && l->columns[col].title != NULL) {
+        fdk_i32 tw = 0, th = 0;
+        fdk__text_extent(l->font, l->columns[col].title, &tw, &th);
+        if (tw + LIST_ROW_PAD_X * 2 > w) {
+            w = tw + LIST_ROW_PAD_X * 2;
+        }
+    }
+    return w;
+}
+
+/* Recomputes columns_width from the resolved widths. The PRIMARY
+ * column contributes its current width floor — the row text can
+ * exceed every declared width, and content_width carries that;
+ * columns_width only has to FLOOR the scrollable content. */
+static void list_columns_recompute(fdk_list *l) {
+    fdk_i32 w = 0;
+    for (size_t i = 0; i < l->column_count; i++) {
+        if (i > 0) {
+            w += LIST_COL_SEP;
+        }
+        w += l->col_widths[i];
+    }
+    l->columns_width = w;
+}
+
+/* The scrollview's inner bounds for the CURRENT list bounds: the
+ * full list, or inset below the header strip when columns are set.
+ * Every site that self-syncs the scrollview goes through here so
+ * the header pinning is one rule, not four drifting copies. */
+static void list_sync_scroll_bounds(fdk_list *l) {
+    if (l->scroll == NULL || l->base.bounds.width <= 0 ||
+        l->base.bounds.height <= 0) {
+        return;
+    }
+    fdk_i32 top = 0;
+    if (l->column_count > 0) {
+        top = list_header_height(l);
+        if (top >= l->base.bounds.height) {
+            top = l->base.bounds.height - 1;
+            if (top < 0) {
+                top = 0;
+            }
+        }
+    }
+    fdk_rect inner = { 0, top, l->base.bounds.width,
+                       l->base.bounds.height - top };
+    fdk_widget_set_bounds(l->scroll, inner);
+}
+
 static void list_relayout(fdk_list *l) {
     if (l->rows == NULL) {
         return;
@@ -225,6 +342,12 @@ static void list_relayout(fdk_list *l) {
             w = tw + LIST_ROW_PAD_X * 2;
         }
     }
+    /* Columns floor the content width: the horizontal scroll must
+     * reach the last column's end even when every filename is short
+     * (the whole point of the far-end columns). */
+    if (l->column_count > 0 && l->columns_width > w) {
+        w = l->columns_width;
+    }
     l->content_width = w;
     for (size_t i = 0; i < l->count; i++) {
         fdk_rect r = { 0, (fdk_i32)(i * (size_t)rh), w, rh };
@@ -237,12 +360,7 @@ static void list_relayout(fdk_list *l) {
      * fdk_widget_set_bounds() path (set_bounds does not run arrange
      * hooks — fdk_widget_arrange is the layout engine's entry, and
      * applications positioning a list by hand use set_bounds). */
-    if (l->scroll != NULL && l->base.bounds.width > 0 &&
-        l->base.bounds.height > 0) {
-        fdk_rect inner = { 0, 0, l->base.bounds.width,
-                           l->base.bounds.height };
-        fdk_widget_set_bounds(l->scroll, inner);
-    }
+    list_sync_scroll_bounds(l);
     fdk_widget_child_layout_changed(l->rows->parent);
 }
 
@@ -275,12 +393,7 @@ static void list_place_appended(fdk_list *l) {
     }
     fdk_widget_set_natural_size(l->rows, l->content_width,
                                 (fdk_i32)(l->count * (size_t)rh));
-    if (l->scroll != NULL && l->base.bounds.width > 0 &&
-        l->base.bounds.height > 0) {
-        fdk_rect inner = { 0, 0, l->base.bounds.width,
-                           l->base.bounds.height };
-        fdk_widget_set_bounds(l->scroll, inner);
-    }
+    list_sync_scroll_bounds(l);
     fdk_widget_child_layout_changed(l->rows->parent);
 }
 
@@ -549,10 +662,18 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     if (bounds.width <= 0 || bounds.height <= 0) {
         return;
     }
-    fdk_list *l = list_of(w->parent && w->parent->parent
-                              ? w->parent->parent
-                              : NULL);
-    (void)l;
+    /* The owning list: rows -> scrollview -> list (the chain the
+     * row's own DOWN handler walks). The old one-liner stopped at
+     * the scrollview and cast IT — harmless while nothing read it
+     * ((void)l), fatal the day the columns code did. */
+    fdk_list *l = NULL;
+    for (fdk_widget *cur = w->parent; cur != NULL;
+         cur = cur->parent) {
+        if (cur->klass == &fdk_list_class_def) {
+            l = list_of(cur);
+            break;
+        }
+    }
 
     fdk_color fill;
     if (row->selected) {
@@ -605,6 +726,40 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     }
     fdk__draw_text(surface, font, row->text, fdk__pal_text(),
                    text_x, baseline);
+
+    /* 1.5.0 columns: the fixed cells right of the primary text,
+     * drawn at the column offsets in the ROW's local space (the row
+     * spans the full content width, so content x == row x). Cells
+     * render in the muted text color — the primary text stays the
+     * row's identity, the cells are metadata. */
+    if (l != NULL && l->column_count > 1 && row->cells != NULL) {
+        fdk_i32 off_x = 0, off_y = 0;
+        if (l->scroll != NULL) {
+            fdk_scrollview_get_scroll_offset(l->scroll, &off_x,
+                                             &off_y);
+        }
+        for (size_t c = 1; c < l->column_count; c++) {
+            const char *cell = row->cells[c - 1];
+            if (cell == NULL || cell[0] == '\0') {
+                continue;
+            }
+            fdk_i32 cx = list_col_x(l, c) - off_x;
+            fdk_i32 cw = l->col_widths[c];
+            fdk_i32 tw2 = 0, th2 = 0;
+            fdk__text_extent(font, cell, &tw2, &th2);
+            fdk_i32 cell_x;
+            if (l->columns[c].align_left) {
+                cell_x = bounds.x + cx;
+            } else {
+                cell_x = bounds.x + cx + (cw - tw2) - LIST_ROW_PAD_X;
+                if (cell_x < bounds.x + cx) {
+                    cell_x = bounds.x + cx;
+                }
+            }
+            fdk__draw_text(surface, font, cell, fdk__pal_text_disabled(),
+                           cell_x, baseline);
+        }
+    }
 }
 
 static bool list_handle_event(fdk_widget *w,
@@ -827,6 +982,24 @@ static bool row_handle_event(fdk_widget *w,
 static void row_destroy(fdk_widget *w) {
     fdk_list_row *row = row_of(w);
     fdk_free(row->text);
+    if (row->cells != NULL) {
+        /* The cells array is ALL NULL-terminated string slots —
+         * freeing needs no column count: destroy unlinks the widget
+         * from its parent AT ENTRY (the tree walker's rule), so the
+         * parent-chain walk to the owning list is ALREADY BROKEN
+         * here (the round-7 rig caught exactly that: cells leaked
+         * on every rebuild). The array's allocation size is the
+         * slot count; a NULL slot is the terminator-free marker —
+         * walk until the allocation's end is unknown... it is NOT:
+         * so free EVERY non-NULL slot by capacity, which
+         * insert_internal recorded as column_count-1 at alloc time.
+         * Since the list is unreachable, remember the capacity ON
+         * THE ROW (cells_cap) — set at alloc and at set_columns. */
+        for (size_t i = 0; i < row->cells_cap; i++) {
+            fdk_free(row->cells[i]);
+        }
+        fdk_free(row->cells);
+    }
 }
 
 /* ---- a11y ---- */
@@ -1187,6 +1360,18 @@ static bool list_handle_event(fdk_widget *w,
 static void list_destroy(fdk_widget *w) {
     fdk_list *l = list_of(w);
     list_band_scroll_disarm(l);
+    if (l->col_titles != NULL) {
+        for (size_t i = 0; i < l->column_count; i++) {
+            fdk_free(l->col_titles[i]);
+        }
+    }
+    fdk_free(l->col_titles);
+    l->col_titles = NULL;
+    fdk_free(l->columns);
+    l->columns = NULL;
+    fdk_free(l->col_widths);
+    l->col_widths = NULL;
+    l->column_count = 0;
     fdk_free(l->row_widgets);
     l->row_widgets = NULL;
     l->count = 0;
@@ -1212,6 +1397,11 @@ static void list_measure(fdk_widget *w, fdk_size *out) {
         }
     }
     size_t shown = (l->count < 8) ? l->count : 8;
+    if (l->column_count > 0 && l->columns_width > width) {
+        width = l->columns_width; /* the columns floor the natural
+                                   * width too (the header strip
+                                   * must fit without scrolling) */
+    }
     out->width = width;
     out->height = (fdk_i32)(shown * (size_t)rh);
     if (out->height == 0) {
@@ -1223,8 +1413,7 @@ static void list_arrange(fdk_widget *w, fdk_rect assigned) {
     fdk_widget_set_bounds(w, assigned);
     fdk_list *l = list_of(w);
     if (l->scroll != NULL) {
-        fdk_rect inner = { 0, 0, assigned.width, assigned.height };
-        fdk_widget_set_bounds(l->scroll, inner);
+        list_sync_scroll_bounds(l);
         fdk_widget_child_layout_changed(l->scroll);
     }
 }
@@ -1291,6 +1480,61 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
                        fdk_rect bounds, fdk_rect clip) {
     (void)clip;
     fdk_list *l = list_of(w);
+    /* 1.5.0: the header strip. Painted FIRST (under everything the
+     * scrollview draws over it — the strip is pinned above the
+     * viewport, and the scrollview's inset below keeps the rows out
+     * of its pixels; the pinning is the arrangement in
+     * list_arrange/list_relayout, this is just the pixels). The
+     * titles ride the horizontal scroll (off_x) exactly like the
+     * rows do, so header and cells stay aligned; the strip itself
+     * never scrolls vertically. */
+    if (l->column_count > 0 && l->font != NULL &&
+        bounds.width > 0 && bounds.height > 0) {
+        fdk_i32 hh = list_header_height(l);
+        fdk_i32 off_x = 0, off_y = 0;
+        if (l->scroll != NULL) {
+            fdk_scrollview_get_scroll_offset(l->scroll, &off_x,
+                                             &off_y);
+        }
+        fdk_rect strip = {bounds.x, bounds.y, bounds.width, hh};
+        fdk_surface_fill_rect(surface, strip, fdk__pal_sidebar());
+        fdk_color line = fdk__pal_border();
+        fdk_rect rule = {bounds.x, bounds.y + hh - 1, bounds.width, 1};
+        fdk_surface_fill_rect(surface, rule, line);
+        fdk_i32 baseline = fdk__center_baseline(
+            l->font, bounds.y, hh);
+        for (size_t c = 0; c < l->column_count; c++) {
+            const char *title = l->columns[c].title;
+            if (title == NULL || title[0] == '\0') {
+                continue;
+            }
+            fdk_i32 cx = list_col_x(l, c) - off_x;
+            if (cx >= bounds.width) {
+                break; /* fully scrolled out */
+            }
+            fdk_i32 cw = l->col_widths[c];
+            if (c == 0) {
+                /* the primary column: left, beside the row padding */
+                fdk__draw_text(surface, l->font, title,
+                               fdk__pal_text_disabled(),
+                               bounds.x + cx + LIST_ROW_PAD_X,
+                               baseline);
+            } else {
+                fdk_i32 tw = 0, th = 0;
+                fdk__text_extent(l->font, title, &tw, &th);
+                fdk_i32 tx = bounds.x + cx;
+                if (!l->columns[c].align_left) {
+                    tx += (cw - tw) - LIST_ROW_PAD_X;
+                    if (tx < bounds.x + cx) {
+                        tx = bounds.x + cx;
+                    }
+                }
+                fdk__draw_text(surface, l->font, title,
+                               fdk__pal_text_disabled(), tx,
+                               baseline);
+            }
+        }
+    }
     /* The rubber band (1.4.2), painted UNDER the rows (the list's
      * paint runs before its scrollview subtree): selection fills
      * draw over the tint, which reads exactly as GTK's translucent
@@ -1349,14 +1593,16 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
         w->bounds.height <= 0) {
         return;
     }
-    if (l->scroll->bounds.x == 0 && l->scroll->bounds.y == 0 &&
-        l->scroll->bounds.width == w->bounds.width &&
-        l->scroll->bounds.height == w->bounds.height) {
-        return; /* in sync */
+    fdk_i32 top = (l->column_count > 0) ? list_header_height(l) : 0;
+    if (top < l->scroll->bounds.y ||
+        l->scroll->bounds.x != 0 ||
+        l->scroll->bounds.width != w->bounds.width ||
+        l->scroll->bounds.height != w->bounds.height - top) {
+        fdk_rect inner = { 0, top, w->bounds.width,
+                           w->bounds.height - top };
+        fdk_widget_set_bounds(l->scroll, inner);
+        fdk_widget_child_layout_changed(l->scroll);
     }
-    fdk_rect inner = { 0, 0, w->bounds.width, w->bounds.height };
-    fdk_widget_set_bounds(l->scroll, inner);
-    fdk_widget_child_layout_changed(l->scroll);
 }
 
 static void list_a11y_describe(const fdk_widget *w, fdk_a11y_info *out) {
@@ -1407,6 +1653,11 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
     l->batch_dirty = false;
     l->batch_sel_at_start = 0;
     l->content_width = 80; /* the v1 minimum, until a row widens it */
+    l->columns = NULL;      /* 1.5.0: the plain list until set_columns */
+    l->column_count = 0;
+    l->col_titles = NULL;
+    l->col_widths = NULL;
+    l->columns_width = 0;
     l->banding = false;
     l->band_ctrl = false;
     l->band_x = l->band_y = 0.0f;
@@ -1431,6 +1682,206 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
 
     fdk_widget_child_layout_changed(w->parent);
     *out_list = w;
+    return FDK_OK;
+}
+
+/* ---- columns (1.5.0) ---- */
+
+fdk_result fdk_list_set_columns(fdk_widget *list,
+                                const fdk_list_column *columns,
+                                size_t count) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list *l = list_of(list);
+    if (count > 0 && columns == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Build the owned copies + resolved widths first (OOM leaves
+     * the old column set untouched). */
+    fdk_list_column *cols = NULL;
+    char **titles = NULL;
+    fdk_i32 *widths = NULL;
+    if (count > 0) {
+        cols = fdk_alloc_array(count, sizeof(*cols));
+        if (cols == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        titles = fdk_alloc_array(count, sizeof(*titles));
+        if (titles == NULL) {
+            fdk_free(cols);
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        widths = fdk_alloc_array(count, sizeof(*widths));
+        if (widths == NULL) {
+            fdk_free(cols);
+            fdk_free(titles);
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        for (size_t i = 0; i < count; i++) {
+            if (columns[i].title != NULL) {
+                titles[i] = fdk__strdup(columns[i].title);
+                if (titles[i] == NULL) {
+                    for (size_t j = 0; j < i; j++) {
+                        fdk_free(titles[j]);
+                    }
+                    fdk_free(titles);
+                    fdk_free(cols);
+                    fdk_free(widths);
+                    return FDK_ERR_OUT_OF_MEMORY;
+                }
+            } else {
+                titles[i] = NULL;
+            }
+            cols[i].title = titles[i]; /* borrowed (col_titles owns) */
+            cols[i].align_left = columns[i].align_left;
+            fdk_i32 w = columns[i].min_width;
+            if (i == 0) {
+                if (w < 80) {
+                    w = 80; /* the primary column keeps the v1
+                             * minimum — the plain-list contract
+                             * must survive under columns */
+                }
+            } else if (w < LIST_COL_MIN) {
+                w = LIST_COL_MIN;
+            }
+            widths[i] = w;
+        }
+    }
+
+    /* Swap in. Existing rows keep their cell TEXTS where the new
+     * set still has the column (index-parity, the same rule the
+     * row array uses); cells beyond the new count are dropped, and
+     * a newly-widened set gets fresh (empty) cell slots. */
+    if (l->col_titles != NULL) {
+        for (size_t i = 0; i < l->column_count; i++) {
+            fdk_free(l->col_titles[i]);
+        }
+    }
+    fdk_free(l->col_titles);
+    fdk_free(l->columns);
+    fdk_free(l->col_widths);
+    l->columns = cols;
+    l->col_titles = titles;
+    l->col_widths = widths;
+    size_t old_count = l->column_count;
+    l->column_count = count;
+
+    /* Resolve the fixed columns' title floors now that the set is
+     * live (list_col_title_width reads the list's font + set). */
+    for (size_t i = 1; i < count; i++) {
+        fdk_i32 w = list_col_title_width(l, i);
+        if (w > l->col_widths[i]) {
+            l->col_widths[i] = w;
+        }
+    }
+    /* Re-measure every existing row's cells into the new widths —
+     * a rebuilt column set on a populated list (the navigate case)
+     * must land with the widths the data demands. */
+    for (size_t r = 0; r < l->count; r++) {
+        fdk_list_row *row = l->row_widgets[r];
+        if (row->cells == NULL && count > 1) {
+            row->cells = fdk_alloc_array(count - 1, sizeof(char *));
+            if (row->cells == NULL) {
+                continue; /* the row renders without cells */
+            }
+            row->cells_cap = count - 1;
+        } else if (row->cells != NULL && count <= 1) {
+            for (size_t c = 0; c < row->cells_cap; c++) {
+                fdk_free(row->cells[c]);
+            }
+            fdk_free(row->cells);
+            row->cells = NULL;
+            row->cells_cap = 0;
+            continue;
+        } else if (row->cells != NULL && count < old_count) {
+            for (size_t c = count - 1; c + 1 < old_count; c++) {
+                fdk_free(row->cells[c]);
+                row->cells[c] = NULL;
+            }
+        }
+        /* a WIDENED set: grow the array (existing texts keep their
+         * slots; the new tail is NULL) and refresh the capacity */
+        if (row->cells != NULL && row->cells_cap < count - 1) {
+            char **grown = fdk_alloc_array(count - 1,
+                                            sizeof(char *));
+            if (grown != NULL) {
+                for (size_t c = 0; c < row->cells_cap; c++) {
+                    grown[c] = row->cells[c];
+                }
+                for (size_t c = row->cells_cap; c + 1 < count; c++) {
+                    grown[c] = NULL;
+                }
+                fdk_free(row->cells);
+                row->cells = grown;
+                row->cells_cap = count - 1;
+            }
+        }
+        if (row->cells == NULL) {
+            continue;
+        }
+        for (size_t c = 1; c < count; c++) {
+            const char *cell = row->cells[c - 1];
+            if (cell != NULL && cell[0] != '\0' &&
+                l->font != NULL) {
+                fdk_i32 tw = 0, th = 0;
+                fdk__text_extent(l->font, cell, &tw, &th);
+                fdk_i32 want = tw + LIST_ROW_PAD_X * 2;
+                if (want > l->col_widths[c]) {
+                    l->col_widths[c] = want;
+                }
+            }
+        }
+    }
+    list_columns_recompute(l);
+    list_relayout(l);
+    fdk_widget_invalidate(list);
+    return FDK_OK;
+}
+
+size_t fdk_list_get_column_count(fdk_widget *list) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return 0;
+    }
+    return list_of(list)->column_count;
+}
+
+fdk_result fdk_list_row_set_cell(fdk_widget *list, size_t row,
+                                 size_t col, const char *text) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list *l = list_of(list);
+    if (row >= l->count || col == 0 || col >= l->column_count) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list_row *r = l->row_widgets[row];
+    if (r->cells == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT; /* set_columns raced a clear */
+    }
+    char *copy = NULL;
+    if (text != NULL && text[0] != '\0') {
+        copy = fdk__strdup(text);
+        if (copy == NULL) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+    }
+    fdk_free(r->cells[col - 1]);
+    r->cells[col - 1] = copy;
+    /* Widen the column to fit (never narrower than declared): a
+     * right-aligned cell must not clip its own tail. */
+    if (copy != NULL && l->font != NULL) {
+        fdk_i32 tw = 0, th = 0;
+        fdk__text_extent(l->font, copy, &tw, &th);
+        fdk_i32 want = tw + LIST_ROW_PAD_X * 2;
+        if (want > l->col_widths[col]) {
+            l->col_widths[col] = want;
+            list_columns_recompute(l);
+            list_relayout(l);
+        }
+    }
+    fdk_widget_invalidate(&r->base);
     return FDK_OK;
 }
 
@@ -1519,6 +1970,17 @@ static fdk_result list_insert_internal(fdk_list *l, size_t index,
     if (row->text == NULL) {
         fdk_widget_destroy(row_w);
         return FDK_ERR_OUT_OF_MEMORY;
+    }
+    /* 1.5.0: the row's cell array parallels the list's column set
+     * (NULL when there are no fixed columns — the common v1 list). */
+    if (l->column_count > 1) {
+        row->cells = fdk_alloc_array(l->column_count - 1,
+                                     sizeof(char *));
+        if (row->cells == NULL) {
+            fdk_widget_destroy(row_w);
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+        row->cells_cap = l->column_count - 1;
     }
     /* Shift the widget array (widget z-order follows row order). */
     memmove(&l->row_widgets[index + 1], &l->row_widgets[index],
@@ -1611,6 +2073,15 @@ void fdk_list_clear(fdk_widget *list) {
     l->key_cursor = (size_t)-1;
     l->have_last_click = false;
     l->content_width = 80;
+    /* 1.5.0: the fixed columns' cell-driven widening resets with
+     * the rows (the widths' floors are the declared + title
+     * minimums — recompute from the set). */
+    if (l->column_count > 0) {
+        for (size_t c = 1; c < l->column_count; c++) {
+            l->col_widths[c] = list_col_title_width(l, c);
+        }
+        list_columns_recompute(l);
+    }
     if (l->batch_depth > 0) {
         l->batch_dirty = true;
         return; /* relayout + one fire at end_batch */

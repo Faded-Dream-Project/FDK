@@ -322,7 +322,9 @@ static const char *lane_shape_name(int shape) {
 
 struct fdk_wayland_egl {
     fdk_platform_connection *conn; /* owner */
-    void *lib_egl;                 /* libEGL.so.1 handle; never dlclose'd */
+    void *lib_egl;                 /* libEGL.so.1 handle; pinned for the
+                                    * connection, dlclosed at its teardown
+                                    * (the round-7 NVIDIA exit-leak) */
     void *lib_wl_egl;              /* libwayland-egl.so.1 handle; pinned  */
     struct fdk_wl_gl_fns fn;
     EGLDisplay egl_display;
@@ -581,6 +583,10 @@ static void lane_stale_drain(struct fdk_wayland_egl *egl,
  * discipline: it refuses later default-knob connections for the
  * whole process (one decision, one log line) while FDK_GL_FORCE
  * explicitly overrides it — the test seam's escape hatch. */
+/* The pinned libEGL handle (round-7): process-static so the release
+ * can run after wl_display_disconnect (the fdk_wayland_egl state is
+ * freed before that point). */
+static void *g_wlgl_library = NULL;
 static int wlgl_policy_decided = 0;
 static int wlgl_policy_refused = 0;
 static int wlgl_policy_no_gl = 0;
@@ -698,6 +704,7 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
     }
     egl->conn = conn;
     egl->lib_egl = lib_egl;
+    g_wlgl_library = lib_egl; /* the release hook's copy */
     egl->lib_wl_egl = lib_wl_egl;
     egl->egl_display = EGLC_NO_DISPLAY;
     egl->config = NULL;
@@ -982,7 +989,30 @@ void fdk_wayland_egl_shutdown(struct fdk_wayland_egl *egl) {
         FDK_INFO("GL trace: teardown — eglReleaseThread unavailable "
                  "(pre-EGL-1.2 loader) — skipped");
     }
+    /* NOTE: the LIBRARY release is NOT here — it runs from the
+     * connection's post-wl_display_disconnect tail
+     * (fdk_wayland_egl_libraries_release): the EGL dlclose is only
+     * safe once the wl_display is dead, mirroring the X11 lane's
+     * XCloseDisplay rule (see wayland_connection.c). */
     fdk_free(egl);
+}
+
+void fdk_wayland_egl_libraries_release(void) {
+    /* Round-7 exit-leak companion: NVIDIA's per-display driver
+     * objects (the 4x256 B at +0xc94e1) survive eglTerminate +
+     * eglReleaseThread; they free at the library's dlclose
+     * destructors. Called by the connection AFTER
+     * wl_display_disconnect — the EGL Wayland-platform caches are
+     * keyed to the (now dead) display, so unwalking them is
+     * impossible. dlopen refcounting makes a later re-load correct
+     * (a re-created context re-resolves the whole table). GLVND
+     * note: libEGL.so.1 is the vendor dispatcher; its refs to
+     * libEGL_nvidia drop with it — which is what retires the
+     * libdbus-1 allocations NVIDIA pulls in transitively too. */
+    if (g_wlgl_library != NULL) {
+        (void)dlclose(g_wlgl_library);
+        g_wlgl_library = NULL;
+    }
 }
 
 /* ---- shader helpers ------------------------------------------------------ */
