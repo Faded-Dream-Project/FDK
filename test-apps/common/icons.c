@@ -84,6 +84,10 @@ static const char *standard_name(const char *legacy) {
 }
 
 static cached_icon *g_cache;
+static long g_stat_system_hits, g_stat_lookups;
+
+long icons_system_hits(void) { return g_stat_system_hits; }
+long icons_lookups(void) { return g_stat_lookups; }
 static char *g_available;
 
 /* Rewrites `currentColor` to a concrete #rrggbb ink, in place (the
@@ -178,6 +182,7 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
      * on the owner's machine. Cached under "S|name|px" (the engine
      * bakes the symbolic tint at decode; the app's ink is not part
      * of a system icon's identity). */
+    g_stat_lookups++;
     const char *std = standard_name(name);
     if (std != NULL) {
         char skey[160];
@@ -185,6 +190,7 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
         for (cached_icon *c = g_cache; c != NULL; c = c->next) {
             if (strcmp(c->key, skey) == 0) {
                 g_last_tier = ICONS_TIER_SYSTEM;
+                g_stat_system_hits++;
                 snprintf(g_last_path, sizeof g_last_path, "%s",
                          c->path);
                 return c->surface;
@@ -204,13 +210,20 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
             }
         }
         for (size_t a = 0; a < alts_n; a++) {
-            char sym[128];
-            snprintf(sym, sizeof sym, "%s-symbolic", alts[a]);
-            fdk_surface *themed = fdk_icon_theme_surface(sym, px);
-            const char *which = sym;
+            /* §31/owner-round-3: PLAIN first. The symbolic-first
+             * order tinted every hit through the alpha mask — on
+             * themes that ship colored plains (Papirus et al) the
+             * toolbar came out flat monochrome and looked like
+             * "not using my theme" while the resolver was hitting
+             * it on every lookup. Symbolic stays the fallback for
+             * the monochrome-only themes. */
+            fdk_surface *themed = fdk_icon_theme_surface(alts[a], px);
+            const char *which = alts[a];
             if (themed == NULL) {
-                themed = fdk_icon_theme_surface(alts[a], px);
-                which = alts[a];
+                char sym[128];
+                snprintf(sym, sizeof sym, "%s-symbolic", alts[a]);
+                themed = fdk_icon_theme_surface(sym, px);
+                which = sym;
             }
             if (themed != NULL) {
                 cached_icon *c = malloc(sizeof *c);
@@ -223,6 +236,7 @@ fdk_surface *icons_get(const char *name, fdk_i32 size, fdk_f32 scale) {
                         c->next = g_cache;
                         g_cache = c;
                         g_last_tier = ICONS_TIER_SYSTEM;
+                        g_stat_system_hits++;
                         snprintf(g_last_path, sizeof g_last_path,
                                  "%s", which);
                         if (getenv("FDK_ICONS_TRACE") != NULL) {

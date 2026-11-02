@@ -826,6 +826,18 @@ fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
 /* The row's icon (NONE for non-lists / out-of-range rows). */
 fdk_row_icon fdk_list_row_get_icon(fdk_widget *list, size_t row);
 
+/* §31/owner-round-3: the raster twin — a themed icon surface drawn
+ * INSTEAD of the vector glyph when set (image wins the paint order;
+ * the 16-px band geometry is shared, so switching never re-flows
+ * text). BORROWED: the caller (typically the icon-theme engine's
+ * cache, or the app's own icon cache) owns the surface for the
+ * row's lifetime; NULL clears back to the procedural glyph. The
+ * toolkit's own file dialog has used this seam internally since
+ * 1.5.x — a places sidebar that resolves the desktop's icon theme
+ * is the normal app pattern, not an exception. */
+fdk_result fdk_list_row_set_icon_surface(fdk_widget *list, size_t row,
+                                         fdk_surface *image);
+
 /* ---- IconView (1.4.5) ----------------------------------------------
  *
  * The canvas-based item GRID the parity ledger parked since its

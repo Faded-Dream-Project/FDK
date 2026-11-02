@@ -1532,6 +1532,11 @@ fdk_result fdk__list_row_set_icon_image(fdk_widget *list, size_t row,
     return FDK_OK;
 }
 
+fdk_result fdk_list_row_set_icon_surface(fdk_widget *list, size_t row,
+                                         fdk_surface *image) {
+    return fdk__list_row_set_icon_image(list, row, image);
+}
+
 void fdk_list_set_on_selection_changed_bounds(
     fdk_widget *list, fdk_list_selection_bounds_fn fn,
     void *user_data) {

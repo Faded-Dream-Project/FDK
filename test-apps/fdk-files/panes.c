@@ -28,6 +28,34 @@
 
 void pane_build_view(pane *p, tab *t);
 
+/* §31/owner-round-3: the app's short category names → the
+ * freedesktop icon names real themes ship (the icon-view rows were
+ * procedural glyphs only, like the sidebar was). */
+static const char *fi_theme_icon(const file_info *fi) {
+    if (fi->is_dir) {
+        return "folder";
+    }
+    if (strcmp(fi->icon, "image") == 0) {
+        return "image-x-generic";
+    }
+    if (strcmp(fi->icon, "audio") == 0) {
+        return "audio-x-generic";
+    }
+    if (strcmp(fi->icon, "video") == 0) {
+        return "video-x-generic";
+    }
+    if (strcmp(fi->icon, "archive") == 0) {
+        return "package-x-generic";
+    }
+    if (strcmp(fi->icon, "code") == 0) {
+        return "text-x-script";
+    }
+    if (strcmp(fi->icon, "doc") == 0) {
+        return "text-x-generic";
+    }
+    return "text-x-generic";
+}
+
 static void thumb_ready_cb(const char *path, fdk_surface *thumb,
                            void *user);
 
@@ -489,6 +517,18 @@ void pane_build_view(pane *p, tab *t) {
                     thumb != NULL) {
                     (void)fdk_iconview_set_item_pixmap(
                         iv, fdk_iconview_item_count(iv) - 1, thumb);
+                    continue;
+                }
+            }
+            /* §31/owner-round-3: no thumbnail — the themed type
+             * icon (the app cache owns it), same floor contract as
+             * the sidebar rows. */
+            {
+                fdk_surface *img =
+                    icons_get(fi_theme_icon(fi), 32, 1.0f);
+                if (img != NULL) {
+                    (void)fdk_iconview_set_item_pixmap(
+                        iv, fdk_iconview_item_count(iv) - 1, img);
                 }
             }
         }
@@ -1112,18 +1152,21 @@ static void build_places(void) {
     g_place_count = 0;
     struct {
         const char *label;
-        const char *icon;
+        const char *icon; /* the freedesktop icon name (§31/r3) */
         fdk_row_icon glyph;
         const char *sub;
     } fixed[] = {
-        {"Home", "home", FDK_ROW_ICON_HOME, NULL},
-        {"Desktop", "home", FDK_ROW_ICON_HOME, "Desktop"},
-        {"Documents", "doc", FDK_ROW_ICON_FOLDER, "Documents"},
-        {"Downloads", "down", FDK_ROW_ICON_FOLDER, "Downloads"},
-        {"Pictures", "image", FDK_ROW_ICON_FOLDER, "Pictures"},
-        {"Music", "audio", FDK_ROW_ICON_FOLDER, "Music"},
-        {"Videos", "video", FDK_ROW_ICON_FOLDER, "Videos"},
-        {"Filesystem", "disk", FDK_ROW_ICON_DRIVE, NULL},
+        {"Home", "user-home", FDK_ROW_ICON_HOME, NULL},
+        {"Desktop", "user-desktop", FDK_ROW_ICON_HOME, "Desktop"},
+        {"Documents", "folder-documents", FDK_ROW_ICON_FOLDER,
+         "Documents"},
+        {"Downloads", "folder-download", FDK_ROW_ICON_FOLDER,
+         "Downloads"},
+        {"Pictures", "folder-pictures", FDK_ROW_ICON_FOLDER,
+         "Pictures"},
+        {"Music", "folder-music", FDK_ROW_ICON_FOLDER, "Music"},
+        {"Videos", "folder-videos", FDK_ROW_ICON_FOLDER, "Videos"},
+        {"Filesystem", "drive-harddisk", FDK_ROW_ICON_DRIVE, NULL},
     };
     for (size_t i = 0;
          i < sizeof fixed / sizeof fixed[0] && g_place_count < 32;
@@ -1189,6 +1232,16 @@ int panes_build(files_app *a) {
         (void)fdk_list_append(places, g_places[i].label, &idx);
         (void)fdk_list_row_set_icon(places, idx,
                                     g_places[i].glyph);
+        /* §31/owner-round-3: the SIDEBAR was the report — every row
+         * wore the procedural vector glyph and never asked the
+         * desktop's icon theme. The themed raster (16 px, app cache
+         * owns it) sits on the row the same way FDK's own file
+         * dialog's places do; the glyph stays underneath as the
+         * themeless floor. */
+        fdk_surface *img = icons_get(g_places[i].icon, 16, 1.0f);
+        if (img != NULL) {
+            (void)fdk_list_row_set_icon_surface(places, idx, img);
+        }
     }
     fdk_list_set_on_row_activate(places, place_activated, NULL);
     a->sidebar = places;
@@ -1215,6 +1268,11 @@ int panes_build(files_app *a) {
         (void)fdk_list_append(mounts_list, label, &idx);
         (void)fdk_list_row_set_icon(mounts_list, idx,
                                     FDK_ROW_ICON_DRIVE);
+        fdk_surface *img = icons_get("drive-harddisk", 16, 1.0f);
+        if (img != NULL) {
+            (void)fdk_list_row_set_icon_surface(mounts_list, idx,
+                                                img);
+        }
     }
     fs_mounts_free(mi);
     fdk_list_set_on_row_activate(

@@ -3,6 +3,7 @@
 #include "icons.h"
 
 #include "fdk/fdk_i18n.h"
+#include "fdk/fdk_log.h"
 #include "fdk/fdk_theme.h"
 
 #include <stdarg.h>
@@ -162,6 +163,11 @@ void ta_close(ta_app *app) {
         fdk_prefs_destroy(app->prefs);
         app->prefs = NULL;
     }
+    /* §31/owner-round-3: the one-line tier verdict — answers "was
+     * the desktop theme actually used" without any env var. */
+    fdk_log(FDK_LOG_INFO, "icons",
+            "icons: %ld system hits / %ld lookups",
+            icons_system_hits(), icons_lookups());
     icons_shutdown();
     if (app->ctx != NULL) {
         fdk_shutdown(app->ctx);
