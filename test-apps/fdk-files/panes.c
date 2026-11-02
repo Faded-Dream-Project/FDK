@@ -480,6 +480,48 @@ static void thumb_ready_cb(const char *path, fdk_surface *thumb,
     }
 }
 
+/* §31/owner-round-7: the list-view columns. The ENGINE owns the
+ * geometry (fdk_list_set_columns / fdk_list_row_set_cell — the
+ * header, alignment, widths); the APP owns its data, filled right
+ * beside the icon loop on every rebuild path. These are the three
+ * formatters a file manager's list view needs. */
+static void fi_human_size(off_t bytes, char *out, size_t cap) {
+    if (bytes < 1024) {
+        snprintf(out, cap, "%ld B", (long)bytes);
+        return;
+    }
+    static const char *unit[] = {"KB", "MB", "GB", "TB"};
+    double v = (double)bytes;
+    size_t u = 0;
+    while (v >= 1024.0 && u + 1 < 4) {
+        v /= 1024.0;
+        u++;
+    }
+    snprintf(out, cap, "%.1f %s", v, unit[u]);
+}
+
+static void fi_date_modified(time_t t, char *out, size_t cap) {
+    struct tm tmv;
+    localtime_r(&t, &tmv);
+    /* The file-manager convention: time+date within the current
+     * year, bare date for older files. */
+    time_t now = time(NULL);
+    struct tm tmn;
+    localtime_r(&now, &tmn);
+    /* One build, both forms: "Nov 12, 18:20" this year,
+     * "Nov 12, 2024" older. Cap must hold the worst case
+     * (3 month + 1 space + 11 day + 2 + 4 year + NUL = 22). */
+    char mon[8];
+    strftime(mon, sizeof mon, "%b", &tmv);
+    if (tmv.tm_year == tmn.tm_year) {
+        snprintf(out, cap, "%s %d, %02d:%02d", mon, tmv.tm_mday,
+                 tmv.tm_hour, tmv.tm_min);
+    } else {
+        snprintf(out, cap, "%s %d, %d", mon, tmv.tm_mday,
+                 tmv.tm_year + 1900);
+    }
+}
+
 /* §31/owner-round-6: the drag-launch rows track the selection.
  * The engine's MULTIPLE-mode list owns the plain press (the rubber
  * band — the wall-to-wall-rows case), so a drag starts only from a
@@ -584,6 +626,19 @@ void pane_build_view(pane *p, tab *t) {
         fdk_list_set_selection_mode(list,
                                     FDK_LIST_SELECTION_MULTIPLE);
         fdk_widget_set_expand(list, true, true);
+        /* §31/owner-round-7: the file-manager list view — Name
+         * (primary, expands) | Modified | Size | Type, the columns
+         * every desktop file manager ships. Declared BEFORE the
+         * bind so the bound appends allocate their cell arrays. */
+        {
+            fdk_list_column cols[4] = {
+                {"Name", 220, true},
+                {"Modified", 130, false},
+                {"Size", 80, false},
+                {"Type", 110, false},
+            };
+            (void)fdk_list_set_columns(list, cols, 4);
+        }
         (void)fdk_list_bind_model(list, model_pane_of(p)->view,
                                   FM_COL_NAME);
         fdk_list_set_on_row_activate(list, row_activated, vc);
@@ -624,6 +679,21 @@ void pane_build_view(pane *p, tab *t) {
                     (void)fdk_list_row_set_icon_surface(list, i,
                                                         img);
                 }
+                /* The columns' cells, through the same PUBLIC
+                 * per-row API the icons use (round-7): directories
+                 * show no size (the desktop convention), the type
+                 * is the mime category. */
+                char cell[64];
+                fi_date_modified(fi->mtime, cell, sizeof cell);
+                (void)fdk_list_row_set_cell(list, i, 1, cell);
+                if (fi->is_dir) {
+                    (void)fdk_list_row_set_cell(list, i, 2, "");
+                } else {
+                    fi_human_size(fi->size, cell, sizeof cell);
+                    (void)fdk_list_row_set_cell(list, i, 2, cell);
+                }
+                (void)fdk_list_row_set_cell(
+                    list, i, 3, mime_category(fi->mime));
             }
         }
         vc->view = list;

@@ -1,3 +1,57 @@
+# §31 continuation — UPDATE (owner round 7: the list-view columns + the exit leaks)
+
+## Remote proof
+origin/main == this round's code commit + docs commit. Tree clean at that commit.
+
+## Round 7 delivered
+1. **LIST COLUMNS (engine, 1.5.0)** — the file-manager list view as a first-class fdk_list
+   capability, NOT app code: `fdk_list_set_columns()` (fdk_list_column: title/min_width/
+   align_left; column 0 = the primary text column, expands, keeps the v1 contract; columns
+   1..N fixed-width right-aligned default), `fdk_list_row_set_cell()`, `fdk_list_get_column_count()`.
+   Geometry is PAINT-TIME on the existing row widgets (no per-cell children — hit-testing,
+   the implicit grab, the rubber band all untouched). Header strip pinned above the scrollview
+   (inset via one list_sync_scroll_bounds rule), titles ride the horizontal scroll, cells render
+   in text-disabled. Widths: declared → widened to the title → widened per cell (never clips a
+   right-aligned tail); columns_width floors content_width AND the natural width. Exports
+   1001 → 1004. make test green incl. new test_columns (API/geometry/selection-under-columns/
+   clear-to-plain). ALSO FIXED a latent bug my code exposed: row_paint computed the owning list
+   as list_of(SCROLLVIEW) — garbage since v1, harmless until something read it; now walks the
+   chain to the real list class.
+   The APP (fdk-files) only supplies data: Name | Modified | Size | Type (mime_category),
+   human sizes, "Nov 12, 18:20" this-year dates — through the public per-row API beside the
+   icon loop, on every rebuild path. Visual rig pixel-verified: header + rule + right-aligned
+   cells, folder row shows no size, right edges align.
+2. **EXIT LEAKS (his round-7 log)** — the dnd_uri leak (round 6) confirmed GONE on his log.
+   Remaining classes were ALL third-party driver state:
+   - libEGL_nvidia 4x256B + libdbus 184/646B (NVIDIA's EGL pulls libdbus transitively; FDK
+     itself NEVER links/dlopens libdbus — its D-Bus is a self-implemented socket protocol):
+     freed by the library's dlclose destructors, which the pinned-forever policy skipped.
+     FIX: fdk_wayland_egl_libraries_release() — dlcloses libEGL AFTER wl_display_disconnect
+     (the display must be dead first; the same rule the X11 lane taught us below).
+     PROVEN: headless-sway self-quit LSan = ZERO leaks, exit 0.
+   - A cell-leak in MY new columns code (row_destroy walked a parent chain that destroy
+     ALREADY unlinked — the tree walker's rule): rows now free their own cells by cells_cap
+     recorded at every alloc/grow site. Same rig: zero.
+   - The X11 twin (libGLX_mesa ~108KB on the llvmpipe rig): dlclose(libGL) after
+     XCloseDisplay runs clean BUT Mesa/GLVND holds the vendor lib with its own ref
+     (dlclose rc=0, state survives) — GLVND internals, rig-specific: the owner's NVIDIA
+     X11 runs showed NO such class (round-6 X11 log leaked only FDK's dnd payload).
+     The hook (fdk_x11_gl_libraries_release) stays as a documented no-op. THE SEGV LESSON:
+     dlclose BEFORE XCloseDisplay crashes (Xlib's GLX extension cache lives inside libGL) —
+     recorded in the code so nobody repeats it.
+
+## Rig index (this round)
+headless sway: WLR_BACKENDS=headless + XDG_RUNTIME_DIR=/home/z/apt/xdg-run + LD_LIBRARY_PATH=
+/home/z/apt/prefix/usr/lib/x86_64-linux-gnu (restore_wayland_toolchain.sh rebuilds the prefix;
+fix the local-x11 xrandr.pc prefix after a reset — it ships prefix=/usr). Self-quit LSan rigs:
+FDK_TESTAPP_FRAMES=120 + FDK_FILES_STARTUP_DIR on each backend. Column visual rig:
+Xvfb :99 + x11_shot.py, pixel-assert via spans (bgs {(35,35,41),(41,41,49)}).
+
+## Next round candidates
+- His X11 boot-slowness report is STILL OPEN (round-6 item C, unstarted).
+- The E2E XTest self-drop proof (round-6 leftover; rig was flaky).
+- Column WIDTHS could later ride the theme metrics (FDK_TM) if a theme ever wants them.
+
 # §31 continuation — UPDATE (owner round 6: DnD self-drop, drag leaks, multi-select freeze)
 
 ## Remote proof

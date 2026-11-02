@@ -69,6 +69,11 @@ struct fdk_x11_gl *fdk_x11_gl_try_load(fdk_platform_connection *conn);
  * dlclose libGL — see the pinning note in x11_gl.c's header comment. */
 void fdk_x11_gl_shutdown(struct fdk_x11_gl *gl);
 
+/* Round-7 exit-leak companion: dlcloses the pinned libGL. MUST run
+ * only AFTER the connection's XCloseDisplay (Xlib's GLX extension
+ * cache lives inside libGL; the display close walks it). */
+void fdk_x11_gl_libraries_release(struct fdk_x11_gl *gl);
+
 /* The renderer string the lane saw (for diagnostics/tests), or NULL
  * when the lane never got far enough to query one. */
 const char *fdk_x11_gl_renderer(const struct fdk_x11_gl *gl);

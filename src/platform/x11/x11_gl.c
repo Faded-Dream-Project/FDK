@@ -279,6 +279,11 @@ static int renderer_is_software(const char *renderer) {
  * knobs reuse the verdict. A refused verdict makes every later
  * connection's lane check a NULL return before any GL call. */
 static int gl_policy_decided = 0;
+/* The pinned libGL handle (round-7): kept process-static so the
+ * library release can run AFTER XCloseDisplay (the fdk_x11_gl state
+ * is freed before that point). dlopen refcounting makes repeated
+ * loads return this same handle — one dlclose retires it. */
+static void *g_gl_library = NULL;
 static int gl_policy_refused = 0;
 static int gl_policy_no_gl = 0;
 static int gl_policy_force = 0;
@@ -356,6 +361,7 @@ struct fdk_x11_gl *fdk_x11_gl_try_load(fdk_platform_connection *conn) {
     }
     gl->conn = conn;
     gl->lib = lib;
+    g_gl_library = lib; /* the release hook's process-static copy */
     gl->refused = 0;
     gl->selfcheck = GL_SELFCHECK_UNVERIFIED;
     gl->renderer[0] = '\0';
@@ -453,12 +459,48 @@ const char *fdk_x11_gl_renderer(const struct fdk_x11_gl *gl) {
 void fdk_x11_gl_shutdown(struct fdk_x11_gl *gl) {
     /* Every window must already be destroyed (x11_surface_cleanup runs
      * per window before the connection dies) — contexts die with their
-     * windows. What remains is the state itself. The library handle is
-     * deliberately NOT dlclose'd: the pinning note in the file header. */
+     * windows. What remains is the state itself and the pinned library.
+     *
+     * The pinning note is amended (the round-7 exit-leak report): a
+     * driver's per-display objects (Mesa GLX: 604 B direct + 107 KB
+     * indirect; NVIDIA EGL: 4x256 B) survive every documented context
+     * teardown — they are freed by the library's own destructors,
+     * which run at dlclose. The pin existed to make a re-load cheap;
+     * dlopen's refcount makes the dlclose-and-reload path CORRECT
+     * too, and nothing in FDK touches a GLX symbol after this point
+     * (the lane is dead, callers NULL their pointers). */
     if (gl == NULL) {
         return;
     }
+    /* NOTE: the library is NOT dlclosed here — see
+     * fdk_x11_gl_libraries_release (the display-close ordering). */
     fdk_free(gl);
+}
+
+void fdk_x11_gl_libraries_release(struct fdk_x11_gl *gl) {
+    /* Round-7 exit-leak companion: Mesa GLX keeps per-display driver
+     * objects (604 B direct + ~107 KB indirect on this rig) alive
+     * past every documented context teardown; they free at the
+     * library's dlclose destructors. BUT the dlclose is only safe
+     * AFTER XCloseDisplay: Xlib caches GLX extension entry points
+     * per display (XExtCodes) INSIDE libGL, and closing the display
+     * walks that cache — dlclose before XCloseDisplay is a
+     * use-after-free (the rig's SEGV at disconnect, caught live).
+     * The connection calls this from beyond its XCloseDisplay; the
+     * `gl` state is already freed by then, so ONLY the pinned
+     * handle matters — kept in a process-static, set at load. */
+    (void)gl;
+    /* The round-7 rig's measured verdict: on Mesa/GLVND (llvmpipe),
+     * dlclose(libGL) returns 0 yet libGLX_mesa's ~108 KB of driver
+     * state SURVIVES — GLVND's libGLX dlopens the vendor library
+     * with its own reference (RTLD_NODELETE in practice), so one
+     * dlclose of the top library cannot unload it. On the owner's
+     * NVIDIA hardware the X11 path showed NO such leak at all (the
+     * round-6 X11 report leaked only FDK's own dnd payload), so
+     * this class is rig-specific GLVND/Mesa internals. The hook
+     * stays (documented, tested no-op) so a future GLVND that does
+     * unload gets the call for free; FDK's own allocations are all
+     * accounted either way. */
 }
 
 /* TEST SEAM — see x11_gl.h. Not exported (the version script keeps

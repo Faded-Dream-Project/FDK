@@ -575,6 +575,18 @@ void fdk_wayland_disconnect(fdk_platform_connection *conn) {
 
     FDK_INFO("disconnecting");
     wl_display_disconnect(conn->display);
+    /* Round-7 ordering mirror of the X11 lane's rule: libEGL's
+     * Wayland-platform caches are keyed to the wl_display — the
+     * dlclose inside fdk_wayland_egl_shutdown (which already ran,
+     * with the display still live, for the eglTerminate ordering)
+     * is COMPLEMENTED here by nothing: the EGL dlclose happened
+     * BEFORE wl_display_disconnect in the current flow and the rig
+     * exited clean, but the safe order is display-dead-first. The
+     * lane's shutdown is therefore split the same way as the X11
+     * lane: the EGL teardown runs above (terminate + releaseThread
+     * while the display is alive — eglTerminate needs it), and the
+     * LIBRARY release runs here, past the disconnect. */
+    fdk_wayland_egl_libraries_release();
     fdk_free(conn);
 }
 
