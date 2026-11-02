@@ -53,6 +53,7 @@
 #include "fdk_widget.h"
 #include "fdk_layout.h"
 #include "fdk_text.h"
+#include "fdk_attr.h" /* §30: the textview editor surface takes attr lists */
 #include "fdk_i18n.h" /* 1.1.0 (S-10): fdk_date/fdk_time/locale, the
                          calendar + pickers' substrate */
 
@@ -974,6 +975,65 @@ fdk_result fdk_textview_set_preedit(fdk_widget *textview,
 /* The Entry's undo surface, verbatim (Ctrl+Z / Ctrl+Shift+Z / Y). */
 fdk_result fdk_textview_undo(fdk_widget *textview);
 fdk_result fdk_textview_redo(fdk_widget *textview);
+
+/* ---- TextView's EDITOR surface (§30/STEP-2a; the fdk-edit round)
+ * ----------------------------------------------------------------------
+ * The four things every real text editor needs and the 1.4.8
+ * TextView never grew. GTK4's GtkTextView/GtkSourceView shape, so
+ * the APP builds the rest (tabs, find bar, the highlighting rules).
+ *
+ * Caret I/O: byte offsets, codepoint-boundary forward-snapped on
+ * set, clamped to [0, len]. set_caret COLLAPSES the selection
+ * (anchor = caret — the documented reset; a programmatic caret move
+ * has no anchor to keep).
+ *
+ * Caret geometry: the caret's (line, column) where line counts
+ * PARAGRAPHS (logical lines) and column counts CODEPOINTS — the
+ * status bar's numbers, not the byte math. line_col_byte is the
+ * inverse (goto-line); both clamp out-of-range inputs to the
+ * document's real geometry, and line_col_byte returns (size_t)-1
+ * only for a bad widget. */
+
+fdk_result fdk_textview_get_caret(fdk_widget *textview,
+                                  size_t *out_byte);
+fdk_result fdk_textview_set_caret(fdk_widget *textview,
+                                  size_t byte);
+fdk_result fdk_textview_caret_line_col(fdk_widget *textview,
+                                       size_t *out_line,
+                                       size_t *out_column);
+size_t fdk_textview_line_col_byte(fdk_widget *textview,
+                                  size_t line, size_t column);
+
+/* Range attributes: the SYNTAX-HIGHLIGHT substrate. The widget
+ * COPIES the list (the app may destroy its own immediately);
+ * painting flattens the attributes over the text exactly like the
+ * attributed draw entry points (later entries win on overlap — the
+ * fdk_span contract). NULL clears. The list is NOT part of the undo
+ * stack: highlighting is a VIEW of the text, derived state the app
+ * recomputes on change. */
+fdk_result fdk_textview_set_attrs(fdk_widget *textview,
+                                  const fdk_attr_list *attrs);
+
+/* The line-number GUTTER: a reserved band `width` px wide at the
+ * widget's left edge. The widget owns the band's geometry (the
+ * text's x origin shifts right by the width; hit-testing,
+ * selection, and the caret's goal-column math all start after it);
+ * the PAINT is the app's hook — it receives the band's rect and
+ * the first visible logical line + count, so it draws its own
+ * numbers (or breakpoints, or diff markers). width 0 + NULL hook
+ * clears. The hook must not draw outside the band (the clip stack
+ * enforces it, but a well-behaved app does not try). */
+typedef void (*fdk_textview_gutter_fn)(fdk_widget *textview,
+                                       fdk_surface *surface,
+                                       fdk_rect band,
+                                       size_t first_line,
+                                       size_t line_count,
+                                       void *user);
+fdk_result fdk_textview_set_gutter(fdk_widget *textview,
+                                   fdk_i32 width,
+                                   fdk_textview_gutter_fn paint,
+                                   void *user);
+fdk_i32 fdk_textview_get_gutter_width(fdk_widget *textview);
 
 /* ---- Picture (1.4.9) ----
  *

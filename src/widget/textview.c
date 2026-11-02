@@ -107,6 +107,15 @@ typedef struct fdk_textview {
     bool undo_group_pending;
     /* PRIMARY ownership politeness (the Entry's flag). */
     bool primary_pushed;
+    /* ---- the EDITOR surface (§30/STEP-2a, the fdk-edit round) ----
+     * Range attributes (syntax highlighting) and the line-number
+     * gutter. attrs is a deep COPY the widget owns (the app's list
+     * may die immediately after set); the gutter band is geometry
+     * the widget owns and content the app paints. */
+    fdk_attr_list attrs;  /* items==NULL: none applied            */
+    fdk_i32 gutter_w;     /* 0: no gutter                         */
+    fdk_textview_gutter_fn gutter_fn;
+    void *gutter_user;
 } fdk_textview;
 
 static fdk_textview *tv_of(fdk_widget *w) {
@@ -249,11 +258,19 @@ static size_t tv_word_backward(const char *s, size_t len, size_t i) {
 
 /* ---- the wrap cache ---- */
 
+/* The text's x origin: the themed inset PLUS the gutter band
+ * (§30/STEP-2a). The gutter is geometry the widget owns; every
+ * content-space consumer of the text origin goes through here. */
+static fdk_i32 tv_text_x(const fdk_textview *tv) {
+    return tv->pad + tv->gutter_w;
+}
+
 static void tv_rebreak(fdk_textview *tv) {
-    /* The width to break at: the viewport minus insets in WORD mode;
-     * unbounded in NONE mode (one horizontal field). */
+    /* The width to break at: the viewport minus insets (and the
+     * gutter band) in WORD mode; unbounded in NONE mode. */
     fdk_i32 max_w = (tv->wrap == FDK_TEXTVIEW_WRAP_WORD)
-                        ? tv->wrap_width - tv->pad * 2
+                        ? tv->wrap_width - tv->pad * 2 -
+                              tv->gutter_w
                         : 1 << 20;
     if (max_w < 16) {
         max_w = 16;
@@ -297,7 +314,7 @@ static void tv_rebreak(fdk_textview *tv) {
             widest = tv->lines[i].advance_width;
         }
     }
-    tv->doc_w = widest + tv->pad * 2;
+    tv->doc_w = widest + tv->pad * 2 + tv->gutter_w;
     if (tv->doc_w < TV_MIN_W) {
         tv->doc_w = TV_MIN_W;
     }
@@ -415,7 +432,7 @@ static size_t tv_offset_at_x(const fdk_textview *tv, size_t i,
         return line->byte_offset;
     }
     size_t off = line->byte_offset;
-    fdk_f32 pen = (fdk_f32)tv->pad;
+    fdk_f32 pen = (fdk_f32)tv_text_x(tv);
     while (off < line->byte_offset + line->byte_len) {
         fdk_u32 cp = 0;
         int n = fdk_text_utf8_next(tv->text, tv->len, off, &cp);
@@ -574,7 +591,8 @@ static void tv_scroll_to_caret(fdk_textview *tv) {
         return;
     }
     size_t line = tv_line_of_offset(tv, tv->caret);
-    fdk_i32 caret_x = tv->pad + tv_line_width_to(tv, line, tv->caret);
+    fdk_i32 caret_x =
+        tv_text_x(tv) + tv_line_width_to(tv, line, tv->caret);
     fdk_i32 preedit_w = 0;
     if (tv->preedit != NULL && tv->preedit[0] != '\0' &&
         tv->font != NULL) {
@@ -1507,6 +1525,34 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
         sel_hi = (tv->anchor < tv->caret) ? tv->caret : tv->anchor;
     }
 
+    /* §30/STEP-2a: the GUTTER band — painted FIRST (under nothing,
+     * over the field), the app's hook with the band rect and the
+     * visible logical lines. The line numbers an editor draws are
+     * PARAGRAPHS: soft-wrapped visual lines share their paragraph's
+     * number, so the hook receives the first visible VISUAL line's
+     * index and count and maps through the line table when it wants
+     * paragraphs (fdk-edit draws the paragraph index of each visual
+     * line; a hook that wants pure paragraphs walks the same table).
+     * The band is the full clip height — sticky like a real gutter. */
+    if (tv->gutter_fn != NULL && tv->gutter_w > 0) {
+        fdk_rect band = {0, clip.y, tv->gutter_w, clip.height};
+        fdk_i32 g_first = (clip.y - tv->pad) /
+                          (tv->line_h > 0 ? tv->line_h : 1);
+        if (g_first < 0) {
+            g_first = 0;
+        }
+        fdk_i32 g_last = (clip.y + clip.height - tv->pad - 1) /
+                         (tv->line_h > 0 ? tv->line_h : 1);
+        if (g_last >= (fdk_i32)tv->line_count) {
+            g_last = (fdk_i32)tv->line_count - 1;
+        }
+        if (g_last >= g_first) {
+            tv->gutter_fn(tv_w, surface, band, (size_t)g_first,
+                          (size_t)(g_last - g_first + 1),
+                          tv->gutter_user);
+        }
+    }
+
     /* First/last line intersecting the clip (content space). */
     fdk_i32 first = (clip.y - tv->pad) / (tv->line_h > 0 ? tv->line_h : 1);
     if (first < 0) {
@@ -1583,17 +1629,22 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
         }
 
         if (line->byte_len > 0) {
-            (void)fdk_surface_draw_utf8(surface, tv->font,
-                                        tv->text + line->byte_offset,
-                                        line->byte_len, tv->pad,
-                                        baseline, text_col);
+            /* §30/STEP-2a: range attributes ride the attributed
+             * draw twin (the flattener merges them over the plain
+             * text; zero attributes = exactly the span-free twin). */
+            const fdk_attr_list *attrs =
+                (tv->attrs.count > 0) ? &tv->attrs : NULL;
+            (void)fdk_surface_draw_attrs_utf8(
+                surface, tv->font,
+                tv->text + line->byte_offset, line->byte_len, NULL,
+                0, attrs, tv_text_x(tv), baseline, text_col);
         }
 
         /* The caret: on the caret's line, at its x, when blinking
          * on (focus + timer discipline). */
         if (tv->caret_on &&
             tv_line_of_offset(tv, tv->caret) == (size_t)i) {
-            fdk_i32 cx = tv->pad +
+            fdk_i32 cx = tv_text_x(tv) +
                          tv_line_width_to(tv, (size_t)i, tv->caret);
             fdk_rect c = {cx, tv->pad + i * tv->line_h, 1,
                           tv->line_h};
@@ -2066,4 +2117,194 @@ fdk_result fdk_textview_redo(fdk_widget *textview) {
         return FDK_OK;
     }
     return fdk_undo_stack_redo(tv->undo);
+}
+
+/* ---- the EDITOR surface (§30/STEP-2a) ----------------------------
+ *
+ * Caret I/O + geometry, range attributes, the gutter. The caret
+ * field already exists (byte offset, codepoint-snapped) — these are
+ * its public doors. The geometry pair (line, column) counts
+ * PARAGRAPHS and CODEPOINTS: the status bar's numbers. */
+
+/* The byte offset of the start of logical line `want` (paragraph
+ * index). Walks the buffer counting '\n'. */
+static size_t tv_line_start(const fdk_textview *tv, size_t want) {
+    if (want == 0 || tv->len == 0) {
+        return 0;
+    }
+    size_t line = 0;
+    for (size_t i = 0; i < tv->len; i++) {
+        if (tv->text[i] == '\n') {
+            line++;
+            if (line == want) {
+                return i + 1;
+            }
+        }
+    }
+    return tv->len; /* want >= paragraph count: the end */
+}
+
+fdk_result fdk_textview_get_caret(fdk_widget *textview,
+                                  size_t *out_byte) {
+    if (textview == NULL || out_byte == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    *out_byte = tv_of(textview)->caret;
+    return FDK_OK;
+}
+
+fdk_result fdk_textview_set_caret(fdk_widget *textview, size_t byte) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    if (byte > tv->len) {
+        byte = tv->len;
+    }
+    /* codepoint forward-snap (the Entry's rule): while the byte at
+     * `byte' is a continuation byte, step in */
+    while (byte < tv->len &&
+           (tv->text[byte] & 0xC0) == 0x80) {
+        byte++;
+    }
+    tv->caret = byte;
+    tv->anchor = byte; /* a programmatic move collapses the selection */
+    tv->have_goal = false;
+    tv->caret_on = true; /* restart the blink phase — visible now */
+    /* the caret may have left the viewport: the same scroll-to-caret
+     * the keyboard path runs (page->damage via the widget's own
+     * layout pass is enough headless; scrolling happens in paint) */
+    fdk_widget_invalidate(textview);
+    return FDK_OK;
+}
+
+/* (line, col) of a byte offset — paragraphs and codepoints. */
+static void tv_byte_to_line_col(const fdk_textview *tv, size_t byte,
+                                size_t *out_line, size_t *out_col) {
+    size_t line = 0, col = 0;
+    if (byte > tv->len) {
+        byte = tv->len;
+    }
+    for (size_t i = 0; i < byte; i++) {
+        if (tv->text[i] == '\n') {
+            line++;
+            col = 0;
+        } else if ((tv->text[i] & 0xC0) != 0x80) {
+            col++; /* codepoint head */
+        }
+    }
+    *out_line = line;
+    *out_col = col;
+}
+
+fdk_result fdk_textview_caret_line_col(fdk_widget *textview,
+                                       size_t *out_line,
+                                       size_t *out_column) {
+    if (textview == NULL || out_line == NULL || out_column == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    tv_byte_to_line_col(tv, tv->caret, out_line, out_column);
+    return FDK_OK;
+}
+
+size_t fdk_textview_line_col_byte(fdk_widget *textview,
+                                  size_t line, size_t column) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return (size_t)-1;
+    }
+    fdk_textview *tv = tv_of(textview);
+    size_t start = tv_line_start(tv, line);
+    if (start >= tv->len) {
+        return tv->len; /* clamped: past the last line */
+    }
+    /* walk `column' codepoints forward, stopping at this line's end.
+     * A codepoint advances by its WHOLE length (head + continuation
+     * bytes) — stopping mid-codepoint would hand back an offset the
+     * caret snapping would move anyway. */
+    size_t byte = start, col = 0;
+    while (byte < tv->len && tv->text[byte] != '\n' &&
+           col < column) {
+        col++; /* the head we are standing on */
+        byte++;
+        while (byte < tv->len &&
+               (tv->text[byte] & 0xC0) == 0x80) {
+            byte++; /* the continuation bytes */
+        }
+    }
+    /* byte sits ON the codepoint AFTER the column-th (or the line's
+     * '\n' / the buffer end): that IS the offset of (line, column)
+     * — column clamps to the line's own length. */
+    return byte;
+}
+
+fdk_result fdk_textview_set_attrs(fdk_widget *textview,
+                                  const fdk_attr_list *attrs) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    /* out with the old (deep copy semantics: the widget owns its
+     * list; FAMILY/LINK strings are flattened copies per the attr
+     * engine's contract, so free is a single items free) */
+    fdk_attr_list_destroy(&tv->attrs);
+    tv->attrs.items = NULL;
+    tv->attrs.count = 0;
+    tv->attrs.cap = 0;
+    if (attrs == NULL || attrs->count == 0) {
+        fdk_widget_invalidate(textview);
+        return FDK_OK;
+    }
+    if (fdk_attr_list_init(&tv->attrs) != FDK_OK) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < attrs->count; i++) {
+        fdk_result r = fdk_attr_list_add(&tv->attrs,
+                                         &attrs->items[i]);
+        if (r != FDK_OK) {
+            fdk_attr_list_destroy(&tv->attrs);
+            tv->attrs.items = NULL;
+            tv->attrs.count = 0;
+            tv->attrs.cap = 0;
+            return r;
+        }
+    }
+    fdk_widget_invalidate(textview);
+    return FDK_OK;
+}
+
+fdk_result fdk_textview_set_gutter(fdk_widget *textview,
+                                   fdk_i32 width,
+                                   fdk_textview_gutter_fn paint,
+                                   void *user) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    if (width < 0) {
+        width = 0;
+    }
+    if (width == 0) {
+        paint = NULL; /* a width of 0 means no band to paint */
+    }
+    tv->gutter_w = width;
+    tv->gutter_fn = paint;
+    tv->gutter_user = user;
+    /* the text origin moved: re-break at the new width and repaint */
+    fdk_widget_invalidate(textview);
+    return FDK_OK;
+}
+
+fdk_i32 fdk_textview_get_gutter_width(fdk_widget *textview) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return 0;
+    }
+    return tv_of(textview)->gutter_w;
 }
