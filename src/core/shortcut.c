@@ -83,6 +83,7 @@
 
 /* Digits: '1'..'9' = 2..10, '0' = 11. */
 #define EV_DIGIT0 11
+#define EV_DIGIT1 2
 
 /* Punctuation the grammar names. */
 #define EV_MINUS 12
@@ -90,6 +91,30 @@
 #define EV_COMMA 51
 #define EV_DOT 52
 #define EV_SLASH 53
+/* §31/S6: the xkb keysym spellings of the remaining QWERTY
+ * punctuation (evdev standard positions). */
+#define EV_SEMICOLON 39
+#define EV_APOSTROPHE 40
+#define EV_GRAVE 41
+#define EV_BACKSLASH 43
+#define EV_BRACKETLEFT 26
+#define EV_BRACKETRIGHT 27
+#define EV_RO 4 /* obsolete; not in the grammar — reserved        */
+#define EV_KPADD 78
+#define EV_KPSUBTRACT 83
+#define EV_KPMULTIPLY 55
+#define EV_KPDIVIDE 98
+#define EV_KPENTER 96
+#define EV_KP0 82
+#define EV_KP1 79
+#define EV_KP2 80
+#define EV_KP3 81
+#define EV_KP4 75
+#define EV_KP5 76
+#define EV_KP6 77
+#define EV_KP7 71
+#define EV_KP8 72
+#define EV_KP9 73
 
 /* Named non-printing keys (same values as the FDK_KEY_* defines). */
 #define EV_TAB 15
@@ -112,6 +137,9 @@
 #define EV_F1 59
 #define EV_F11 87
 #define EV_F12 88
+/* §31/S6: F13..F24 (evdev 183..194, contiguous). */
+#define EV_F13 183
+#define EV_F24 194
 
 /* ---- tokenizing ------------------------------------------------------- */
 
@@ -167,11 +195,66 @@ static void trim(char *seg) {
 }
 
 /* Single-character key names. */
-static bool letter_scan(const char *seg, fdk_scancode *out) {
+/* Returns: 0 = not a single-char key, 1 = parsed, 2 = parsed AND
+ * the symbol is the shifted US glyph (the caller ORs in Shift). */
+static int letter_scan(const char *seg, fdk_scancode *out) {
     if (seg[0] == '\0' || seg[1] != '\0') {
-        return false; /* not a single character */
+        return 0; /* not a single character */
     }
     char c = seg[0];
+    /* §31/S6: literal punctuation — "Ctrl+?" means Ctrl+Shift+slash
+     * on a US layout. The mapping is US QWERTY's shifted glyphs; on
+     * other layouts the physical base key keeps working (X11/Wayland
+     * report scancodes by position, so "?" still lands on the slash
+     * key's code; a layout where ? is unshifted simply needs no
+     * Shift for the same binding — the MENU LABEL shows the spec
+     * verbatim either way). */
+    if (c == '?' || c == '/' || c == ';' || c == ':' || c == '\'' ||
+        c == '"' || c == ',' || c == '<' || c == '.' || c == '>' ||
+        c == '[' || c == '{' || c == ']' || c == '}' || c == '\\' ||
+        c == '|' || c == '`' || c == '~' || c == '-' || c == '_' ||
+        c == '=' || c == '+' || c == '!' || c == '@' || c == '#' ||
+        c == '$' || c == '%' || c == '^' || c == '&' || c == '*' ||
+        c == '(' || c == ')') {
+        static const struct {
+            char sym;
+            fdk_scancode base;
+            bool shifted;
+        } punct[] = {
+            {'?', EV_SLASH, true},     {'/', EV_SLASH, false},
+            {';', EV_SEMICOLON, false}, {':', EV_SEMICOLON, true},
+            {'\'', EV_APOSTROPHE, false},
+            {'"', EV_APOSTROPHE, true},
+            {',', EV_COMMA, false},    {'<', EV_COMMA, true},
+            {'.', EV_DOT, false},      {'>', EV_DOT, true},
+            {'[', EV_BRACKETLEFT, false},
+            {'{', EV_BRACKETLEFT, true},
+            {']', EV_BRACKETRIGHT, false},
+            {'}', EV_BRACKETRIGHT, true},
+            {'\\', EV_BACKSLASH, false},
+            {'|', EV_BACKSLASH, true},
+            {'`', EV_GRAVE, false},    {'~', EV_GRAVE, true},
+            {'-', EV_MINUS, false},    {'_', EV_MINUS, true},
+            {'=', EV_EQUAL, false},    {'+', EV_EQUAL, false},
+            {'!', EV_DIGIT1, true},
+            {'@', (fdk_scancode)3, true},   /* shift+2 */
+            {'#', (fdk_scancode)4, true},   /* shift+3 */
+            {'$', (fdk_scancode)5, true},   /* shift+4 */
+            {'%', (fdk_scancode)6, true},   /* shift+5 */
+            {'^', (fdk_scancode)7, true},   /* shift+6 */
+            {'&', (fdk_scancode)8, true},   /* shift+7 */
+            {'*', (fdk_scancode)9, true},   /* shift+8 */
+            {'(', (fdk_scancode)10, true},  /* shift+9 */
+            {')', EV_DIGIT0, true},         /* shift+0 */
+        };
+        for (size_t i = 0; i < sizeof(punct) / sizeof(punct[0]);
+             i++) {
+            if (punct[i].sym == c) {
+                *out = punct[i].base;
+                return punct[i].shifted ? 2 : 1;
+            }
+        }
+    }
     if (c >= 'a' && c <= 'z') {
         /* ALPHABETICAL index -> that letter's evdev code (KEY_A=30,
          * KEY_B=48, ... — evdev letter codes are NOT alphabetical;
@@ -182,13 +265,13 @@ static bool letter_scan(const char *seg, fdk_scancode *out) {
             EV_S, EV_T, EV_U, EV_V, EV_W, EV_X, EV_Y, EV_Z,
         };
         *out = letters[c - 'a'];
-        return true;
+        return 1;
     }
     if (c >= '0' && c <= '9') {
         *out = (fdk_scancode)(c == '0' ? EV_DIGIT0 : (unsigned)(c - '1') + 2u);
-        return true;
+        return 1;
     }
-    return false;
+    return 0;
 }
 
 static bool name_scan(const char *seg, fdk_scancode *out) {
@@ -210,6 +293,30 @@ static bool name_scan(const char *seg, fdk_scancode *out) {
         {"minus", EV_MINUS},   {"comma", EV_COMMA},
         {"period", EV_DOT},    {"dot", EV_DOT},
         {"slash", EV_SLASH},
+        /* §31/S6: the xkb keysym names — an app that copies the
+         * keysym spelling from xkbcommon's header (the question of
+         * "Ctrl+question") must not get a parse warning. */
+        {"question", EV_SLASH},        /* Shift+slash on US       */
+        {"semicolon", EV_SEMICOLON},
+        {"apostrophe", EV_APOSTROPHE},
+        {"grave", EV_GRAVE},
+        {"backslash", EV_BACKSLASH},
+        {"bracketleft", EV_BRACKETLEFT},
+        {"bracketright", EV_BRACKETRIGHT},
+        {"equal", EV_EQUAL},
+        {"equals", EV_EQUAL},
+        {"prior", EV_PAGEUP},          /* the xkb PageUp spelling */
+        {"next", EV_PAGEDOWN},
+        /* KP_ keysyms */
+        {"kp_add", EV_KPADD},
+        {"kp_subtract", EV_KPSUBTRACT},
+        {"kp_multiply", EV_KPMULTIPLY},
+        {"kp_divide", EV_KPDIVIDE},
+        {"kp_enter", EV_KPENTER},
+        {"kp_0", EV_KP0}, {"kp_1", EV_KP1}, {"kp_2", EV_KP2},
+        {"kp_3", EV_KP3}, {"kp_4", EV_KP4}, {"kp_5", EV_KP5},
+        {"kp_6", EV_KP6}, {"kp_7", EV_KP7}, {"kp_8", EV_KP8},
+        {"kp_9", EV_KP9},
     };
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
         if (strcmp(seg, table[i].name) == 0) {
@@ -233,6 +340,21 @@ static bool name_scan(const char *seg, fdk_scancode *out) {
     }
     if (strcmp(seg, "f12") == 0) {
         *out = (fdk_scancode)EV_F12;
+        return true;
+    }
+    /* F13..F24 (§31/S6): two-digit, contiguous evdev codes. */
+    if (seg[0] == 'f' && seg[1] == '1' && seg[2] >= '3' &&
+        seg[2] <= '9' && seg[3] == '\0') {
+        *out = (fdk_scancode)(EV_F13 + (seg[2] - '3'));
+        return true;
+    }
+    if (strcmp(seg, "f20") == 0) {
+        *out = (fdk_scancode)(EV_F13 + 7);
+        return true;
+    }
+    if (seg[0] == 'f' && seg[1] == '2' && seg[2] >= '1' &&
+        seg[2] <= '4' && seg[3] == '\0') {
+        *out = (fdk_scancode)(EV_F13 + 8 + (seg[2] - '1'));
         return true;
     }
     return false;
@@ -263,7 +385,23 @@ fdk_result fdk_shortcut_parse(const char *spec, fdk_u32 *out_modifiers,
     if (spec == NULL || out_modifiers == NULL || out_key == NULL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    scan_t s = {spec, false};
+    /* "Ctrl++" — a LITERAL plus as the key. The splitter eats '+'
+     * as a separator, so rewrite the trailing "++" to the plus
+     * name once, up front (bounded spec, stack copy). Any other
+     * doubled plus stays an error ("Ctrl++S" is still garbage). */
+    char fixed[96];
+    const char *use = spec;
+    size_t len = strlen(spec);
+    if (len >= 2 && len + 4 < sizeof fixed &&
+        spec[len - 1] == '+' && spec[len - 2] == '+') {
+        /* "Ctrl++" -> "Ctrl+plus": drop ONE trailing '+', append
+         * the plus NAME. "Ctrl++S" keeps its inner "++" (still an
+         * error); only the TRAILING double-plus is the literal. */
+        memcpy(fixed, spec, len - 1);
+        memcpy(fixed + len - 1, "plus", 5);
+        use = fixed;
+    }
+    scan_t s = {use, false};
     char seg[24];
     fdk_u32 mods = 0;
     fdk_scancode key = 0;
@@ -287,8 +425,12 @@ fdk_result fdk_shortcut_parse(const char *spec, fdk_u32 *out_modifiers,
         if (have_key) {
             return FDK_ERR_INVALID_ARGUMENT; /* two key segments */
         }
-        if (!letter_scan(seg, &key) && !name_scan(seg, &key)) {
+        int letter = letter_scan(seg, &key);
+        if (letter == 0 && !name_scan(seg, &key)) {
             return FDK_ERR_INVALID_ARGUMENT; /* unknown name */
+        }
+        if (letter == 2) {
+            mods |= FDK_MOD_SHIFT; /* the shifted US glyph ("Ctrl+?") */
         }
         have_key = true;
     }
@@ -353,6 +495,11 @@ static bool key_name(fdk_scancode code, char *out, size_t cap) {
         {EV_DOWN, "down"},     {EV_EQUAL, "plus"},
         {EV_MINUS, "minus"},   {EV_COMMA, "comma"},
         {EV_DOT, "period"},    {EV_SLASH, "slash"},
+        {EV_SEMICOLON, "semicolon"},
+        {EV_APOSTROPHE, "apostrophe"},
+        {EV_GRAVE, "grave"},   {EV_BACKSLASH, "backslash"},
+        {EV_BRACKETLEFT, "bracketleft"},
+        {EV_BRACKETRIGHT, "bracketright"},
         {EV_F11, "f11"},       {EV_F12, "f12"},
         {(fdk_scancode)(EV_F1 + 9), "f10"},
     };
@@ -362,6 +509,18 @@ static bool key_name(fdk_scancode code, char *out, size_t cap) {
      * '1' + 9 would be ':', not "10". */
     if (code >= EV_F1 && code < (fdk_scancode)(EV_F1 + 9)) {
         char f[3] = {'f', (char)('1' + (code - EV_F1)), '\0'};
+        return append_str(out, cap, &used, f);
+    }
+    if (code >= EV_F13 && code <= EV_F24) {
+        char f[4] = {'f', '1' + (char)(code - EV_F13) / 10,
+                     '3' + (char)(code - EV_F13) % 10, '\0'};
+        if (code == EV_F13 + 7) { /* 20: the only one ending in 0 */
+            f[1] = '2';
+            f[2] = '0';
+        } else if (code >= EV_F13 + 8) { /* 21..24 */
+            f[1] = '2';
+            f[2] = (char)('1' + (code - (EV_F13 + 8)));
+        }
         return append_str(out, cap, &used, f);
     }
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {

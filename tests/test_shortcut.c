@@ -92,6 +92,56 @@ static void test_parse_valid(void) {
         /* Bottom row. */
         {"X", 0, 45}, {"C", 0, 46}, {"V", 0, 47}, {"B", 0, 48},
         {"N", 0, 49},
+        /* §31/S6: the xkb keysym names for the punctuation grammar
+         * (an app writing "Ctrl+question" — xkbcommon's keysym
+         * spelling — must parse, not warn). Equal/equal-sign and
+         * bracket families share the QWERTY code of their base
+         * key; the SEMICOLON/APOSTROPHE/GRAVE/BACKSLASH/BRACKET
+         * codes are the evdev standard positions. */
+        {"question", 0, 53},        /* Shift+slash on US         */
+        {"semicolon", 0, 39},
+        {"apostrophe", 0, 40},
+        {"grave", 0, 41},
+        {"backslash", 0, 43},
+        {"bracketleft", 0, 26},
+        {"bracketright", 0, 27},
+        {"equal", 0, 13},
+        {"equals", 0, 13},
+        {"Ctrl+question", 2, 53},   /* the S6 spec itself        */
+        {"Ctrl+Shift+question", 3, 53},
+        {"Alt+bracketleft", 4, 26},
+        /* literal symbols: "?" is Shift+slash (US), "!" Shift+1,
+         * "@" Shift+2 ... the SHIFTED-GRAMMAR: the parser resolves
+         * the symbol to its base key + adds Shift when the symbol
+         * is the shifted glyph on US QWERTY. */
+        {"Ctrl+?", 3, 53},
+        {"Ctrl+!", 2 | 1, 2},
+        {"Ctrl+@", 2 | 1, 3},
+        {"Ctrl+:", 2 | 1, 39},
+        {"Ctrl+<", 2 | 1, 51},
+        {"Ctrl+>", 2 | 1, 52},
+        {"Ctrl+{", 2 | 1, 26},
+        {"Ctrl+}", 2 | 1, 27},
+        {"Ctrl+|", 2 | 1, 43},
+        {"Ctrl+~", 2 | 1, 41},
+        {"Ctrl+\"", 3, 40},              /* " is the shifted glyph */
+        {"Ctrl+'", 2, 40},               /* ' is the BASE glyph    */
+        {"Ctrl+_", 2 | 1, 12},
+        {"Ctrl++", 2, 13},          /* bare plus: the base key   */
+        {"Ctrl+-", 2, 12},
+        {"Ctrl+=", 2, 13},
+        {"Ctrl+,", 2, 51},
+        {"Ctrl+.", 2, 52},
+        {"Ctrl+/", 2, 53},
+        {"Ctrl+;", 2, 39},
+        /* F13..F24 (the spec's F1-F24) */
+        {"F13", 0, 183}, {"F24", 0, 194},
+        /* KP_ family (the numeric keypad) */
+        {"KP_Add", 0, 78}, {"KP_Subtract", 0, 83},
+        {"KP_Multiply", 0, 55}, {"KP_Divide", 0, 98},
+        {"KP_Enter", 0, 96}, {"KP_0", 0, 82}, {"KP_9", 0, 73},
+        /* Prior/Next — the xkb keysym spellings of PageUp/Down */
+        {"Prior", 0, 104}, {"Next", 0, 109},
     };
     for (size_t i = 0; i < sizeof(ok) / sizeof(ok[0]); i++) {
         fdk_u32 mods = 0;
@@ -114,9 +164,9 @@ static void test_parse_valid(void) {
 
 static void test_parse_invalid(void) {
     const char *bad[] = {
-        "", " ", "+", "Ctrl", "ctrl+", "+S", "S+", "Ctrl++S",
+        "", " ", "+", "Ctrl", "ctrl+", "+S", "S+", "Ctrl++S", /* F13 now VALID (F1-F24 grammar, §31/S6) */
         "Ctrl+Ctrl+S", "Ctrl+Alt+Ctrl+S", "Ctrl+S+S", "S+Ctrl",
-        "Ctrl+Hello", "F13", "F0", "ff5", "5F",
+        "Ctrl+Hello", "F0", "ff5", "5F",
         "Ctrl+Shift+", "Shift+Shift+S", "control", "CTRL",
         "Ctrl+backspace2", "Ctrl+ß", "Ctrl+Page", "Ctrl+Updown",
         "Ctrl+ ", "  ",
