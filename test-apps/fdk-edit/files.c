@@ -254,9 +254,14 @@ void ed_session_save(void) {
             (void)fdk_textview_get_caret(d->view, &caret);
         }
         snprintf(key, sizeof key, "tab.%zu.caret", i);
-        (void)fdk_prefs_set_int(p, key,
-                                caret > 0x7FFFFFFFu ? 0x7FFFFFFFu
-                                                    : (int)caret);
+        /* fdk_prefs_set_int takes long; clamp in the UNSIGNED domain
+         * (the caret is size_t) and convert exactly once — the
+         * mixed-domain conditional was the S9 sign warning. */
+        size_t clamped = caret;
+        if (clamped > 0x7FFFFFFFu) {
+            clamped = 0x7FFFFFFFu;
+        }
+        (void)fdk_prefs_set_int(p, key, (long)clamped);
     }
 }
 
