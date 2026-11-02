@@ -28,3 +28,19 @@ FDK lacks, that is a bug in FDK by project rule.
   gap is a deliberate v1 boundary (docs/PARITY.md), in which case
   it is recorded here and the app states the limit honestly.
 - **DOC** — the headers/docs misdescribed behavior. Docs fixed.
+
+## §29 findings
+- G-10 (fdk-files, §28 rig): drag arming starved — a press on a List ROW is
+  consumed by the row's selection handler, bubbling stops, the ancestor's
+  event callback never sees the press. FIX: widget-level drag-source
+  controller, fdk_widget_set_drag_source (7af865b); regression
+  tests/test_widget_drag_source.c; example 18 twin pad.
+- G-11 (fdk-files, drag rig D1/D2): drag onto the app's OWN window delivers
+  an empty payload (self-drop). OPEN — repro parked at
+  test-apps/g11_self_drop_test_parked.c; evidence + next leads in
+  CONTINUATION.md §29.
+- G-12 (x11 dnd): ButtonRelease can beat the target's last XDndStatus;
+  release now drains queued status replies first (419431f).
+- ENV (not FDK): xtest_driver's unconditional selfcheck moved the pointer
+  to (11,22) between every invocation — the §28 rig's four dead legs.
+  Fixed in scripts/xtest_driver.c (selfcheck opt-in).
