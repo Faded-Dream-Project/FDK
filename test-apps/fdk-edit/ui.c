@@ -121,43 +121,6 @@ static void act_wrap(fdk_widget *b, void *u) {
 
 /* ---- preferences (the wrap/highlight/gutter toggles) -------------- */
 
-static void on_pref_toggle(fdk_widget *b, void *u) {
-    (void)b;
-    int which = (int)(intptr_t)u;
-    switch (which) {
-        case 0:
-            eapp.wrap = !eapp.wrap;
-            for (size_t i = 0; i < eapp.doc_count; i++) {
-                fdk_textview_set_wrap(
-                    eapp.docs[i].view,
-                    eapp.wrap ? FDK_TEXTVIEW_WRAP_WORD
-                              : FDK_TEXTVIEW_WRAP_NONE);
-            }
-            break;
-        case 1:
-            eapp.highlight = !eapp.highlight;
-            for (size_t i = 0; i < eapp.doc_count; i++) {
-                ed_highlight(&eapp.docs[i]);
-            }
-            break;
-        case 2:
-            eapp.show_gutter = !eapp.show_gutter;
-            for (size_t i = 0; i < eapp.doc_count; i++) {
-                if (eapp.show_gutter) {
-                    /* re-arm the gutter (doc.c's painter) */
-                    extern void ed_arm_gutter(ed_doc *d);
-                    ed_arm_gutter(&eapp.docs[i]);
-                } else {
-                    (void)fdk_textview_set_gutter(
-                        eapp.docs[i].view, 0, NULL, NULL);
-                }
-            }
-            break;
-        default:
-            break;
-    }
-    ed_ui_status();
-}
 
 static void act_prefs(fdk_widget *b, void *u) {
     (void)b; (void)u;
@@ -391,10 +354,10 @@ void ed_ui_build(void) {
 
 /* the shortcut shims' bodies */
 static void sh_new(fdk_window *w, void *u) { (void)w; (void)u; ed_doc_new(); }
-static void sh_open(fdk_window *w, void *u) { (void)w; act_open(NULL, NULL); }
-static void sh_save(fdk_window *w, void *u) { (void)w; act_save(NULL, NULL); }
-static void sh_find(fdk_window *w, void *u) { (void)w; act_find(NULL, NULL); }
-static void sh_replace(fdk_window *w, void *u) { (void)w; act_replace(NULL, NULL); }
+static void sh_open(fdk_window *w, void *u) { (void)w; (void)u; act_open(NULL, NULL); }
+static void sh_save(fdk_window *w, void *u) { (void)w; (void)u; act_save(NULL, NULL); }
+static void sh_find(fdk_window *w, void *u) { (void)w; (void)u; act_find(NULL, NULL); }
+static void sh_replace(fdk_window *w, void *u) { (void)w; (void)u; act_replace(NULL, NULL); }
 
 /* the quit shortcut (bound in ed_ui_build) */
 void quit_from_shortcut(fdk_window *w, void *user) {
