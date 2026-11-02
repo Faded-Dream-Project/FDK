@@ -1123,9 +1123,11 @@ static void test_source_and_override(void) {
     CHECK(strcmp(fdk_icon_theme_name(), "fdktest") == 0,
           "name(): refused set() changes nothing");
 
-    CHECK(fdk_icon_theme_set(NULL) == FDK_ERR_INVALID_ARGUMENT,
-          "set(): NULL name and NULL-clear ambiguity resolved: NULL "
-          "clears; a bad STRING refuses");
+    /* NULL is the documented CLEAR (returns OK, not INVALID_ARGUMENT —
+     * the earlier draft of this test asserted both and could not pass);
+     * a bad STRING is the refusal. */
+    CHECK(fdk_ok(fdk_icon_theme_set(NULL)),
+          "set(): NULL is the clear, not an error");
 
     unsetenv("FDK_ICON_THEME");
     fdk__icon_theme_reset();
