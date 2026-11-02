@@ -74,6 +74,7 @@ int pane_add(void) {
         return -1;
     }
     p->watch_fd = -1;
+    model_pane_init(p); /* §29: this pane's own listing chain   */
     fdk_widget *pn_box = NULL;
     (void)fdk_box_create(g_panes_box, FDK_VERTICAL, &pn_box);
     fdk_widget_set_expand(pn_box, true, true);
@@ -112,6 +113,7 @@ void pane_remove_last(void) {
         if (p->watch_fd >= 0) {
             fs_watch_stop(p->watch_fd);
         }
+        model_pane_shutdown(p); /* §29: the pane's chain dies too */
         for (size_t t = 0; t < p->tab_count; t++) {
             free(p->tabs[t]);
         }
@@ -367,10 +369,11 @@ static void row_activated(fdk_widget *view, size_t row, void *user) {
     const file_info *fi = NULL;
     if (vc->is_list) {
         fdk_u64 id = fdk_list_bound_row_id(view, row);
-        fi = fmodel_info_of(id);
+        fi = fmodel_info_in(model_pane_of(vc->pane)->store, id);
     } else {
-        if (row < fmodel.info_count) {
-            fi = fmodel.infos[row];
+        listing_model *lm = model_pane_of(vc->pane);
+        if (lm != NULL && row < lm->info_count) {
+            fi = lm->infos[row];
         }
     }
     if (fi == NULL) {
@@ -381,6 +384,20 @@ static void row_activated(fdk_widget *view, size_t row, void *user) {
     } else {
         ops_open_with(vc->pane, fi);
     }
+}
+
+/* §29/G-10: the drag-source controller's begin fn — called by FDK
+ * when a press anywhere in the view's subtree moved past the slop
+ * while held (the row already consumed the press for selection; the
+ * controller still saw it). */
+static void *view_drag_begin(fdk_widget *source, void *user) {
+    view_ctx *vc = user;
+    (void)source;
+    if (vc->tab != active_tab(vc->pane)) {
+        return NULL; /* a stale view in an old tab's page       */
+    }
+    pane_begin_drag(vc->pane);
+    return NULL;
 }
 
 static bool view_event(fdk_widget *w, const fdk_widget_event *ev,
@@ -398,30 +415,11 @@ static bool view_event(fdk_widget *w, const fdk_widget_event *ev,
                             (fdk_i32)ev->pointer.position.y);
         return true;
     }
-    /* the drag source: a left press on a selected row arms it; a
-     * motion past the threshold starts the URI drag. FDK's DnD
-     * begins from a pointer-press handler on the WINDOW, so we
-     * record the press and let the drag start on motion. */
-    if (ev->type == FDK_WIDGET_POINTER_DOWN &&
-        ev->pointer.button == 1 && vc->is_list &&
-        fdk_list_selected_count(vc->view) > 0) {
-        vc->tab->drag_armed = true;
-        vc->tab->drag_x = (fdk_i32)ev->pointer.position.x;
-        vc->tab->drag_y = (fdk_i32)ev->pointer.position.y;
-        return false; /* let the list keep the selection click */
-    }
-    if (ev->type == FDK_WIDGET_POINTER_MOTION && vc->tab->drag_armed) {
-        fdk_i32 dx = (fdk_i32)ev->pointer.position.x - vc->tab->drag_x;
-        fdk_i32 dy = (fdk_i32)ev->pointer.position.y - vc->tab->drag_y;
-        if (dx * dx + dy * dy > 36) {
-            vc->tab->drag_armed = false;
-            pane_begin_drag(vc->pane);
-            return true;
-        }
-    }
-    if (ev->type == FDK_WIDGET_POINTER_UP) {
-        vc->tab->drag_armed = false;
-    }
+    /* §29/G-10: the drag arming lives in FDK's widget-level drag
+     * source (registered on the view in pane_build_view) — the press
+     * on a ROW is consumed by the row's selection handler, so this
+     * callback never saw it and the old manual arming never ran (the
+     * §28 drag rig's dead legs). */
     return false;
 }
 
@@ -464,8 +462,9 @@ void pane_build_view(pane *p, tab *t) {
         (void)fdk_iconview_create(host, fapp.base.font_ui, &iv);
         fdk_widget_set_expand(iv, true, true);
         fdk_iconview_begin_batch(iv);
-        for (size_t i = 0; i < fmodel.info_count; i++) {
-            const file_info *fi = fmodel.infos[i];
+        listing_model *lm = model_pane_of(p);
+        for (size_t i = 0; lm != NULL && i < lm->info_count; i++) {
+            const file_info *fi = lm->infos[i];
             if (fi == NULL) {
                 continue;
             }
@@ -494,7 +493,8 @@ void pane_build_view(pane *p, tab *t) {
         fdk_list_set_selection_mode(list,
                                     FDK_LIST_SELECTION_MULTIPLE);
         fdk_widget_set_expand(list, true, true);
-        (void)fdk_list_bind_model(list, fmodel.view, FM_COL_NAME);
+        (void)fdk_list_bind_model(list, model_pane_of(p)->view,
+                                  FM_COL_NAME);
         fdk_list_set_on_row_activate(list, row_activated, vc);
         fdk_widget_set_accessible_name(list, "Files");
         vc->view = list;
@@ -502,6 +502,11 @@ void pane_build_view(pane *p, tab *t) {
         t->list = list;
     }
     fdk_widget_set_event_callback(vc->view, view_event, vc);
+    /* §29/G-10: the drag source rides the dispatch (a press on a
+     * row is consumed by the row; a callback here would never see
+     * it). 6px slop, the classic drag-start distance. */
+    (void)fdk_widget_set_drag_source(vc->view, 6, view_drag_begin,
+                                     vc);
     pane_report_status(p);
 }
 
@@ -549,7 +554,14 @@ void pane_navigate(pane *p, const char *abs_path) {
     }
     snprintf(t->title, sizeof t->title, "%.60s", base);
 
-    long n = fmodel_load(t->dir, fapp.show_hidden);
+    long n = -1;
+    {
+        listing_model *lm = model_pane_of(p);
+        if (lm != NULL) {
+            fmodel_load(p, t->dir, fapp.show_hidden);
+            n = (long)lm->info_count;
+        }
+    }
     if (n < 0) {
         fi_set_status("Cannot open %s", t->dir);
         n = 0;
@@ -574,8 +586,7 @@ void pane_back(pane *p) {
     char target[FI_PATH_MAX];
     snprintf(target, sizeof target, "%.4000s", p->back[--p->back_count]);
     snprintf(t->dir, sizeof t->dir, "%.4000s", target);
-    long n = fmodel_load(t->dir, fapp.show_hidden);
-    (void)n;
+    fmodel_load(p, t->dir, fapp.show_hidden);
     (void)fdk_notebook_set_page_label(p->notebook, p->current, t->title);
     pane_refresh_breadcrumb(p);
     pane_build_view(p, t);
@@ -594,8 +605,7 @@ void pane_forward(pane *p) {
     char target[FI_PATH_MAX];
     snprintf(target, sizeof target, "%.4000s", p->fwd[--p->fwd_count]);
     snprintf(t->dir, sizeof t->dir, "%.4000s", target);
-    long n = fmodel_load(t->dir, fapp.show_hidden);
-    (void)n;
+    fmodel_load(p, t->dir, fapp.show_hidden);
     (void)fdk_notebook_set_page_label(p->notebook, p->current, t->title);
     pane_refresh_breadcrumb(p);
     pane_build_view(p, t);
@@ -940,22 +950,30 @@ static void search_tick(fdk_timer *timer, void *user) {
                     snprintf(fi->path, sizeof fi->path, "%.3700s/%.190s",
                              dir, de->d_name);
                     fs_stat_entry(fi);
+                    listing_model *lm = model_pane_of(s->pane);
+                    if (lm == NULL) {
+                        free(fi);
+                        continue;
+                    }
                     fdk_model_row row = fdk_model_row_append(
-                        fmodel.store, FDK_MODEL_ROW_NONE);
-                    (void)fdk_model_set_text(fmodel.store, row,
+                        lm->store, FDK_MODEL_ROW_NONE);
+                    (void)fdk_model_set_text(lm->store, row,
                                              FM_COL_NAME, fi->name);
                     (void)fdk_model_set_int(
-                        fmodel.store, row, FM_COL_SIZE,
+                        lm->store, row, FM_COL_SIZE,
                         (fdk_i64)fi->size);
                     (void)fdk_model_set_int(
-                        fmodel.store, row, FM_COL_MTIME,
+                        lm->store, row, FM_COL_MTIME,
                         (fdk_i64)fi->mtime);
                     (void)fdk_model_set_text(
-                        fmodel.store, row, FM_COL_TYPE,
+                        lm->store, row, FM_COL_TYPE,
                         fi->is_dir ? "Folder"
                                    : mime_category(fi->mime));
-                    (void)fdk_model_set_ptr(fmodel.store, row,
+                    (void)fdk_model_set_ptr(lm->store, row,
                                             FM_COL_PTR, fi);
+                    if (lm->info_count < lm->info_cap) {
+                        lm->infos[lm->info_count++] = fi;
+                    }
                     s->found++;
                 }
             }
@@ -1013,11 +1031,16 @@ static int tolower_f(int c) {
 void pane_start_search(pane *p, const char *root, const char *needle) {
     pane_stop_search(p);
     tab *t = active_tab(p);
-    fdk_model_clear(fmodel.store);
-    for (size_t i = 0; i < fmodel.info_count; i++) {
-        free(fmodel.infos[i]);
+    {
+        listing_model *lm = model_pane_of(p);
+        if (lm != NULL) {
+            fdk_model_clear(lm->store);
+            for (size_t i = 0; i < lm->info_count; i++) {
+                free(lm->infos[i]);
+            }
+            lm->info_count = 0;
+        }
     }
-    fmodel.info_count = 0;
 
     g_search.pane = p;
     snprintf(g_search.needle, sizeof g_search.needle, "%s", needle);
@@ -1241,6 +1264,7 @@ void panes_shutdown(void) {
                 fs_watch_stop(p->watch_fd);
                 p->watch_fd = -1;
             }
+            model_pane_shutdown(p); /* §29 */
             for (size_t t = 0; t < p->tab_count; t++) {
                 free(p->tabs[t]);
             }

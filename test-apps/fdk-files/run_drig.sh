@@ -4,8 +4,10 @@
 # finds the app window, runs build/drag-rig against it, reports verdicts.
 set -u
 cd /home/z/my-project/work/FDK/test-apps
-source /home/z/my-project/scripts/s25-env.sh
+# (the sandbox's env script changed names across rounds; the rig
+# only needs the X11 extraction prefix on its paths)
 export CPATH="/tmp/x11dev/usr/include:/home/z/apt/prefix/usr/include"
+export LD_LIBRARY_PATH="/tmp/x11dev/usr/lib/x86_64-linux-gnu:/home/z/apt/prefix/usr/lib/x86_64-linux-gnu"
 SINK=/home/z/my-project/scripts/xdnd_sink
 
 XVFB_NUM=$((90 + RANDOM % 400)); XVFB_DISP=":$XVFB_NUM"
@@ -26,10 +28,10 @@ grep -q 'SINK: ready' /tmp/drig-sink.log || echo "WARN: sink not ready yet"
 
 FDK_FILES_DRIG=1 timeout 180 ./build/fdk-files > /tmp/drig-app.log 2>&1 & APID=$!
 for _ in $(seq 1 60); do
-    grep -q 'DRIG-READY' /tmp/drig-app.log && break
+    grep -q 'DRIG-GEO bookmarks' /tmp/drig-app.log && break
     sleep 0.5
 done
-if ! grep -q 'DRIG-READY' /tmp/drig-app.log; then
+if ! grep -q 'DRIG-GEO bookmarks' /tmp/drig-app.log; then
     echo "FAIL: app never reached DRIG-READY"; tail -5 /tmp/drig-app.log
     kill $APID $SPID $XP 2>/dev/null; rm -f "/tmp/.X11-unix/X$XVFB_NUM"
     exit 1
@@ -66,7 +68,7 @@ fi
 echo "app window id: $WID"
 
 RC=0
-DISPLAY="$XVFB_DISP" timeout 120 ./build/drag-rig "$XVFB_DISP" "$WID" || RC=$?
+DISPLAY="$XVFB_DISP" timeout 120 ./build/drag-rig "$XVFB_DISP" "$WID" /tmp/drig-app.log || RC=$?
 
 kill $APID 2>/dev/null
 kill $SPID 2>/dev/null

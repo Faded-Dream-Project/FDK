@@ -220,3 +220,73 @@ started — the round was limited to Steps 1-3 + the drag rig.
 
 All suites green at cut-off (after dcced0d): make test, test-dbus,
 test-x11 3/3, TSan, verify-exports, Wayland PASS, smoke 4/4.
+
+## §29 status (round cut by budget — READ THIS FIRST)
+
+### DONE + PUSHED this round
+- env re-setup after a sandbox recycle (x11dev debs re-extracted,
+  wayland prefix restored, xtest_driver + xdnd_sink rebuilt WITH
+  RPATH; pc files' prefixes rewritten to /tmp/x11dev/usr).
+- **THE §28 DRAG-RIG MYSTERY, PINNED**: the xtest_driver source's
+  unconditional self-check MOVES THE POINTER to (11,22) on EVERY
+  invocation — every multi-call drag sequence had its pointer reset
+  between steps, so every leg left its target and cancelled. Fixed
+  in scripts/xtest_driver.c (selfcheck now opt-in via
+  XTEST_SELFCHECK env) — NOT in the FDK repo; rebuild the driver
+  from that source when the sandbox resets.
+- **G-12** (419431f): the release-time status drain in the X11 drag
+  source (ButtonRelease may beat the target's last XDndStatus);
+  interop sink relocated to 760,500 (was inside the dnd-receiver
+  test's window footprint). test-x11 GREEN 227 after.
+- **G-10** (7af865b): fdk_widget_set_drag_source / get — the
+  widget-level drag-source controller (press on ANY descendant,
+  incl. consumed-by-row presses; motion past slop fires on_begin
+  once; click stays a click). tests/test_widget_drag_source.c GREEN,
+  example 18 has the controller twin pad, exports 985, all suites
+  green (make test, dbus, x11 227, TSan, Wayland PASS).
+
+### COMMITTED IN THE FINAL BATCH (this commit, unverified-on-origin)
+- fdk-files: PER-PANE listing models (model_pane_init/shutdown,
+  fmodel_load(p,dir,hidden), model_pane_of/model_active) — the
+  singleton made pane B show pane A's directory (the split view was
+  fake); views bind their own pane's chain; panes.c/bookmarks.c use
+  the G-10 controller for drag-out; DRIG-GEO geometry export in the
+  DRIG gate (the rig no longer assumes pixels); drag_rig parses
+  DRIG-GEO (usage: drag-rig <disp> <xid> <geo-log>); run_drig.sh
+  env fixed + waits for GEO. make test GREEN, exports 985, apps
+  build, fdk-files builds. **The rig legs D1-D4 still FAIL — see the
+  G-11 lead below. THE RIG WAS NOT RE-RUN after the last rebuild.**
+
+### THE G-11 LEAD (self-drop, PARKED — test parked in
+### test-apps/g11_self_drop_test_parked.c, NOT in the suite)
+A drag FDK starts and drops on THE SAME window (drag-between-panes)
+delivers an EMPTY payload or no drop at all: g11 test failed at
+`g11.dropped` (assertion at tests/test_x11_integration.c:9594 in the
+parked copy). Root cause HYPOTHESIS (strong, not fully pinned): the
+receiver's drop fetch calls fdk__x11_read_selection(requestor=the
+drop-target window); the XdndSelection's owner is FDK's OWN
+clip_helper — the SelectionRequest that must be served for the
+SelectionNotify to arrive sits in FDK's own queue and the wait loop
+(wait_selection_notify_on in src/platform/x11/x11_clipboard.c) never
+dispatches it. I implemented the pump (drain queued
+SelectionRequests via fdk_x11_dnd_serve_selection /
+fdk_x11_clipboard_handle_event + helper ClientMessages via
+fdk_x11_dnd_source_handle_helper_message, XPutBackEvent for
+not-ours) — the test STAYED RED (same assertion), so the patch was
+REVERTED before commit; the pump may still be right but incomplete
+(next suspects: (a) the requestor is an APP window whose
+atom_fdk_selection property the serving path writes correctly? (b)
+the drop acceptance at fd fdk__core_drag_accepts_at re-enters and
+deadlocks so no drop event is dispatched — instrument by printing
+whether FDK_EVENT_DRAG_DROP is dispatched at all; (c) XCheckTypedEvent
+steals the ButtonRelease that ends the drag). The parked test file
+has the full repro; run it from tests/ by re-adding it to the suite.
+
+### STEP 3 (notify --smoke boot race): NOT STARTED (0 experiments).
+### STEPS 4-8 (fdk-edit/monitor/notes PASS A+B, final audit): NOT
+### STARTED — the budget went to the env rebuild (sandbox recycled
+### MID-ROUND, /tmp wiped, stale-clone reset) + the drag chase.
+
+All suites green at cut-off: make test, test-dbus, verify-exports
+985, test-x11 227, TSan, Wayland PASS, apps build, smoke 4/4
+(earlier in the round; not re-run after the final app rebuild).

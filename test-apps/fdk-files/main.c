@@ -647,7 +647,6 @@ int main(int argc, char **argv) {
     fdk_window_set_event_callback(fapp.base.window,
                                   app_window_event, NULL);
 
-    model_init();
     i18n_setup();
 
     fdk_undo_stack_create(128, &fapp.undo);
@@ -718,6 +717,33 @@ int main(int argc, char **argv) {
         (void)fdk_window_resize(fapp.base.window, 1000, 700);
         printf("DRIG-READY\n");
         fflush(stdout);
+        /* DRIG-GEO: the rig's coordinates come from the REAL layout
+         * (measured, not assumed): each pane's list bounds + row
+         * count and the bookmarks bounds, in window coordinates.
+         * The rig parses these lines from the app's log. */
+        for (int pi = 0; pi < fapp.pane_count; pi++) {
+            pane *p = fapp.panes[pi];
+            if (p == NULL) {
+                continue;
+            }
+            tab *t = active_tab(p);
+            fdk_widget *v = (t != NULL) ? t->list : NULL;
+            if (v != NULL) {
+                fdk_rect ab = fdk_widget_get_absolute_bounds(v);
+                printf("DRIG-GEO pane%d list %d %d %d %d rows=%zu\n",
+                       pi, ab.x, ab.y, ab.width, ab.height,
+                       fdk_list_row_count(v));
+            }
+        }
+        {
+            fdk_widget *bw = bookmarks_widget();
+            if (bw != NULL) {
+                fdk_rect ab = fdk_widget_get_absolute_bounds(bw);
+                printf("DRIG-GEO bookmarks %d %d %d %d\n", ab.x,
+                       ab.y, ab.width, ab.height);
+            }
+        }
+        fflush(stdout);
     }
 
     /* the initial navigation */
@@ -763,7 +789,6 @@ int main(int argc, char **argv) {
     menus_ctx_shutdown();
     panes_shutdown();
     td_sweep(); /* the payloads + menu models the registry owns   */
-    model_shutdown();
     if (fapp.tray != NULL) {
         fdk_tray_item_close(fapp.tray);
     }

@@ -102,7 +102,7 @@ fdk-files-icon: build/gen-fdk-files-icon
 # §27/2b: the XTEST drag rig (Xlib + XTest only, no FDK)
 build/drag-rig: fdk-files/drag_rig.c
 	@mkdir -p build
-	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/drag_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/x11dev/usr/lib/x86_64-linux-gnu -lXtst
+	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/drag_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/x11dev/usr/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/x11dev/usr/lib/x86_64-linux-gnu
 
 .PHONY: drag-rig
 drag-rig: build/drag-rig

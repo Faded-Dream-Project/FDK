@@ -17,9 +17,8 @@ typedef struct tab {
     fdk_widget *breadcrumb_host;
     int view_mode;         /* VIEW_DETAIL / VIEW_ICONS / COMPACT   */
     fdk_widget *list;      /* the model-bound list (detail/compact)*/
-    /* the drag-source arm state */
-    bool drag_armed;
-    fdk_i32 drag_x, drag_y;
+    /* §29/G-10: the drag-source arm state is gone — FDK's
+     * widget-level drag source owns the gesture now. */
 } tab;
 
 enum { VIEW_DETAIL = 0, VIEW_ICONS = 1, VIEW_COMPACT = 2 };

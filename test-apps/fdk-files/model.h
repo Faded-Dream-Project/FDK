@@ -1,4 +1,8 @@
-/* model.h — the listing store: fdk_model + sort/filter proxies. */
+/* model.h — the listing model: fdk_model + sort/filter proxies.
+ * §29: PER-PANE (the singleton served every pane one store — a
+ * navigation in pane A erased pane B's rows; the split view could
+ * never show two directories, and the drag-between-panes leg was
+ * testing an impossibility). */
 #ifndef FILES_MODEL_H
 #define FILES_MODEL_H
 
@@ -10,13 +14,13 @@
 enum {
     FM_COL_NAME = 0, /* TEXT: display name                      */
     FM_COL_SIZE,     /* INT: st_size (dirs: 0)                  */
-    FM_COL_MTIME,    /* INT: st_mtime                           */
+    FM_COL_MTIME,    /* INT: st_mtime                            */
     FM_COL_TYPE,     /* TEXT: the category ("Folder", "Image")  */
     FM_COL_PTR,      /* PTR: the file_info* (app-owned)         */
     FM_COL_COUNT,
 };
 
-/* The per-app singleton chain: store -> filter -> sort -> view. */
+/* One chain per pane: store -> filter -> sort -> view. */
 typedef struct listing_model {
     fdk_model *store;
     fdk_model_filter *filter;
@@ -34,18 +38,28 @@ typedef struct listing_model {
     bool include_hidden;
 } listing_model;
 
-/* One global model serves every pane/tab (a navigation repopulates
- * it; the panes each bind their own list to the same view). */
-extern listing_model fmodel;
+#define FILES_MAX_PANES 4
 
-/* Reloads `dir' into the store (clear + fill in one batch; rows
- * carry infos[i]). Returns the entry count; -1 when unreadable. */
-long fmodel_load(const char *dir, bool include_hidden);
+struct pane;
 
-/* The row id -> payload lookup (NULL when the id is stale). */
+/* The per-pane chains (model.c owns them). model_active() is the
+ * focused pane's chain — the menus and the status bar read it. */
+listing_model *model_pane_of(const struct pane *p);
+listing_model *model_active(void);
+
+/* The pane's lifecycle (panes.c calls these at add/remove). */
+void model_pane_init(struct pane *p);
+void model_pane_shutdown(struct pane *p);
+
+/* Reloads `dir' into PANE'S store (clear + fill in one batch). */
+void fmodel_load(struct pane *p, const char *dir,
+                 bool include_hidden);
+
+/* the id -> payload lookups (against one store / the active pane) */
+const file_info *fmodel_info_in(fdk_model *store, fdk_u64 id);
 const file_info *fmodel_info_of(fdk_u64 id);
 
-/* Sort/filter setters (each re-applies the proxy). */
+/* Sort/filter setters (each re-applies the ACTIVE pane's proxy). */
 void fmodel_set_sort(int col, bool desc);
 void fmodel_set_filter(const char *text);
 void fmodel_set_hidden(bool include);

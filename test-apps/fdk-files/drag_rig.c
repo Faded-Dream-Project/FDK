@@ -29,7 +29,12 @@
  *   right pane        x 520..950 (empty dir: the drop target)
  *   bookmark rows     ~30px apart from y 113 (row 0 = the seed)
  *
- * Usage: drag_rig <display> <app-window-xid-decimal>
+ * Usage: drag_rig <display> <app-window-xid-decimal> <geo-log>
+ *
+ * The geometry comes from the app itself: main.c's DRIG gate prints
+ * DRIG-GEO lines (each pane's list bounds + row count, the bookmarks
+ * bounds) in WINDOW coordinates; the rig parses <geo-log> and adds
+ * the window origin. No more assumed pixels.
  */
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -44,6 +49,36 @@
 
 static Display *dpy;
 static Window app;
+
+/* parsed from the app's DRIG-GEO output (window coordinates) */
+static int pane0_y, pane0_rows;
+static int pane1_y;
+static int book_y, book_h;
+
+static void parse_geo(const char *log) {
+    FILE *f = fopen(log, "r");
+    if (f == NULL) {
+        return;
+    }
+    char line[256];
+    while (fgets(line, sizeof line, f) != NULL) {
+        int x, y, w, h, rows;
+        if (sscanf(line, "DRIG-GEO pane0 list %d %d %d %d rows=%d",
+                   &x, &y, &w, &h, &rows) == 5) {
+            pane0_y = y;
+            pane0_rows = rows;
+        } else if (sscanf(line,
+                          "DRIG-GEO pane1 list %d %d %d %d rows=%d",
+                          &x, &y, &w, &h, &rows) == 5) {
+            pane1_y = y;
+        } else if (sscanf(line, "DRIG-GEO bookmarks %d %d %d %d",
+                          &x, &y, &w, &h) == 4) {
+            book_y = y;
+            book_h = h;
+        }
+    }
+    fclose(f);
+}
 
 static void msleep(int ms) {
     struct timespec ts = {(time_t)(ms / 1000),
@@ -169,8 +204,9 @@ static int wait_line_contains(const char *path, const char *needle,
 }
 
 int main(int argc, char **argv) {
-    if (argc < 3) {
-        fprintf(stderr, "usage: %s <display> <app-xid>\n", argv[0]);
+    if (argc < 4) {
+        fprintf(stderr, "usage: %s <display> <app-xid> <geo-log>\n",
+                argv[0]);
         return 2;
     }
     dpy = XOpenDisplay(argv[1]);
@@ -179,6 +215,12 @@ int main(int argc, char **argv) {
         return 1;
     }
     app = (Window)strtoul(argv[2], NULL, 0);
+    parse_geo(argv[3]);
+    if (pane0_y == 0 || book_y == 0) {
+        fprintf(stderr, "FAIL: no DRIG-GEO geometry in %s\n",
+                argv[3]);
+        return 1;
+    }
 
     /* the window's REAL position (WM-less Xvfb places it wherever
      * the create request said; ask the server, don't assume) */
@@ -195,15 +237,18 @@ int main(int argc, char **argv) {
     int win_x = tx, win_y = ty;
     printf("window at (%d,%d) %ux%u\n", win_x, win_y, pw, ph);
 
-    /* calibrated against the DRIG screenshot (see the file head):
-     * alpha.txt's text band is y 124..138 at x 153..369. */
-    int row1_x = win_x + 250;
-    int row1_y = win_y + 131;
-    int folder_x = win_x + 250;
-    int folder_y = win_y + 400; /* beta-dir's band 377..436 */
-    int pane2_x = win_x + 700;  /* the right pane (empty) */
-    int bookmark_x = win_x + 75;
-    int bookmark_y = win_y + 119; /* row 0 = the seed */
+    /* the app-reported geometry (DRIG-GEO): the panes are stacked
+     * vertically; each list starts below its ~28px column header,
+     * rows step ~30px. The bookmarks rows start at the list top. */
+    int row1_x = win_x + 300; /* safely inside the pane's list    */
+    int row1_y = win_y + pane0_y + 42; /* row 0 below the header   */
+    int folder_x = win_x + 300;
+    int folder_y = win_y + pane0_y + 72; /* row 1 = beta-dir       */
+    int pane2_x = win_x + 300; /* pane1's list (the lower pane)    */
+    int pane2_y = win_y + pane1_y + 42;
+    int bookmark_x = win_x + 60;
+    int bookmark_y = win_y + book_y + 15; /* row 0 = the seed      */
+    (void)pane0_rows; (void)book_h;
 
     int rc = 0;
 
@@ -212,7 +257,7 @@ int main(int argc, char **argv) {
      * click-select alpha.txt first, then press-and-move. */
     click(row1_x, row1_y);
     int before = dir_has("/tmp/fdk-drig/right", "alpha.txt");
-    drag(row1_x, row1_y, pane2_x, row1_y);
+    drag(row1_x, row1_y, pane2_x, pane2_y);
     int tries = 0;
     int after = 0;
     while (tries++ < 40) { /* the drop's copy may ride a worker */
@@ -280,6 +325,7 @@ int main(int argc, char **argv) {
     /* run_drig.sh starts scripts/xdnd_sink at (1020,100) 200x200 and
      * tees its stdout to /tmp/drig-sink.log; drag alpha.txt onto it
      * and the sink must print the URI payload. */
+    click(row1_x, row1_y); /* re-select after the earlier gestures */
     drag(row1_x, row1_y, 1100, 180);
     if (wait_line_contains("/tmp/drig-sink.log", "payload uri-list",
                            20)) {

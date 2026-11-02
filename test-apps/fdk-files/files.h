@@ -159,8 +159,6 @@ void fi_new_folder(struct pane *p, const char *name);
 void fi_rename(struct pane *p, size_t row, const char *new_name);
 
 /* model.c */
-void model_init(void);
-void model_shutdown(void);
 
 /* main.c's ops surfaces shared with menus/panes */
 void ops_clipboard_set(char op);
