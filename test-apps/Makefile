@@ -26,7 +26,10 @@ WARN     := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
             -Wcast-qual -Wpointer-arith -Wundef -Wwrite-strings
 FEATURE  := -D_POSIX_C_SOURCE=200809L
 CPPFLAGS := -I$(ROOT)/include -Icommon
-CFLAGS   := $(STD) $(WARN) $(FEATURE) -g -O1 -MMD -MP \
+# §31/S9: ZERO warnings is the project rule. -Werror makes a warning
+# anywhere fail the build (never loosened, only ever satisfied) — the
+# owner's newer gcc flags truncation paths this sandbox's gcc misses.
+CFLAGS   := $(STD) $(WARN) $(FEATURE) -g -O1 -MMD -MP -Werror \
            -fsanitize=address,undefined -DFDK_DEBUG_BUILD=1
 
 # Backends: the in-tree FDK links X11 (+ Xrender via libfdk) and

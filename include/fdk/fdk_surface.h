@@ -219,6 +219,19 @@ fdk_result fdk_surface_create_from_image_bytes(const void *data,
                                                size_t len,
                                                fdk_surface **out_surface);
 
+/* §31/PART-2: SVG from MEMORY — the embedded-icon tier's decoder.
+ * Same contract as the icon engine's file-based SVG rasterizer
+ * (aspect-fit into the size x size cell, straight-alpha ARGB8888,
+ * the coverage gate that turns an undrawable SVG into an honest
+ * FDK_ERR_UNSUPPORTED instead of a blank cell), but the document
+ * arrives as bytes: embedded assets have no filesystem path, and
+ * stbi_load_from_memory cannot parse SVG (the test-apps' embedded
+ * icon tier hit exactly that WARN before this API existed).
+ * `size` is the rasterized edge in pixels (1..4096). */
+fdk_result fdk_surface_create_from_svg_bytes(const char *svg_document,
+                                             fdk_i32 size,
+                                             fdk_surface **out_surface);
+
 fdk_result fdk_surface_create_from_image(const char *path,
                                          fdk_surface **out_surface);
 

@@ -63,9 +63,9 @@ static bool xdg_user_dir(const char *name, char *out, size_t cap) {
             v++;
         }
         if (strncmp(v, "$HOME/", 6) == 0 && home != NULL) {
-            snprintf(out, cap, "%s/%s", home, v + 6);
+            ta_join(out, cap, home, v + 6);
         } else if (v[0] == '/') {
-            snprintf(out, cap, "%s", v);
+            ta_copy(out, cap, v);
         } else {
             continue;
         }
@@ -91,7 +91,7 @@ void sb_model_places(sb_model *m) {
     memset(r, 0, sizeof *r);
     r->section = SB_SECTION_PLACES;
     snprintf(r->label, sizeof r->label, "Home");
-    snprintf(r->path, sizeof r->path, "%s", home);
+    ta_copy(r->path, sizeof r->path, home);
     snprintf(r->icon, sizeof r->icon, "user-home");
 
     /* the XDG dirs: shown ONLY when they exist (the spec's rule) */
@@ -121,9 +121,9 @@ void sb_model_places(sb_model *m) {
         r = &m->rows[m->count++];
         memset(r, 0, sizeof *r);
         r->section = SB_SECTION_PLACES;
-        snprintf(r->label, sizeof r->label, "%s", dirs[i].label);
-        snprintf(r->path, sizeof r->path, "%s", path);
-        snprintf(r->icon, sizeof r->icon, "%s", dirs[i].icon);
+        ta_copy(r->label, sizeof r->label, dirs[i].label);
+        ta_copy(r->path, sizeof r->path, path);
+        ta_copy(r->icon, sizeof r->icon, dirs[i].icon);
     }
 
     /* Trash lives HERE (not under Devices — S4's misplacement). */
@@ -337,12 +337,17 @@ void sb_model_bookmarks(sb_model *m) {
         sb_row *r = &m->rows[m->count++];
         memset(r, 0, sizeof *r);
         r->section = SB_SECTION_BOOKMARKS;
-        snprintf(r->label, sizeof r->label, "%s",
-                 g_bms[i].label[0] != '\0'
-                     ? g_bms[i].label
-                     : bm_basename(g_bms[i].path));
-        snprintf(r->path, sizeof r->path, "%s", g_bms[i].path);
-        snprintf(r->icon, sizeof r->icon, "%s", "folder");
+        /* ta_copy (memcpy-bounded), NOT snprintf "%s": newer gcc
+         * computes the ARRAY-SPANNING bound of g_bms[i].path (32
+         * structs of 640 bytes -> "up to 20479 bytes into 512") and
+         * warns where older gccs stayed quiet — the owner's build
+         * flagged exactly this (§31/S9 follow-up). */
+        ta_copy(r->label, sizeof r->label,
+                g_bms[i].label[0] != '\0'
+                    ? g_bms[i].label
+                    : bm_basename(g_bms[i].path));
+        ta_copy(r->path, sizeof r->path, g_bms[i].path);
+        snprintf(r->icon, sizeof r->icon, "folder");
     }
 }
 
@@ -523,7 +528,7 @@ static void device_label(const char *source, const char *mountpoint,
                 }
             }
             if (strcmp(norm, source) == 0) {
-                snprintf(out, cap, "%s", de->d_name);
+                ta_copy(out, cap, de->d_name);
                 closedir(d);
                 return;
             }
