@@ -241,6 +241,18 @@ void fdk__list_cancel_bands_all_roots(void);
  * band's repaint seam; public API stays whole-widget. */
 void fdk__widget_invalidate_rect(fdk_widget *widget, fdk_rect local);
 
+/* widget.c (round 14, the scroll blit): REPLACES the root's pending
+ * damage with one exact ROOT-coordinate rect — the scrollview's
+ * exposed strips, after its same-surface blit moved the preserved
+ * rows. Anything invalidating afterwards unions on top and clears
+ * the exactness (conservative default). scroll.c only. */
+void fdk__widget_set_damage(fdk_widget *any, fdk_rect root_rect);
+
+/* widget.c (round 14): reads the root's pending damage box (false
+ * when none). The snapshot half of the strip path's contract — see
+ * fdk__widget_set_damage above. scroll.c only. */
+bool fdk__widget_pending_damage(fdk_widget *any, fdk_rect *out);
+
 /* IconView items: the same seam, grid-shaped. */
 fdk_result fdk__iconview_item_set_icon_image(fdk_widget *iconview,
                                              size_t index,

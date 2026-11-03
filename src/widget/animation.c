@@ -121,6 +121,11 @@ struct fdk_animation {
     void *user;
     long long start_ms; /* monotonic */
     bool finished;      /* completed, canceled, or detached */
+    /* Round 14 (the scroll blit): the tick owns this widget's damage
+     * precisely — see fdk__animation_set_self_damage (widget_internal.h)
+     * for the contract. The pump's blanket post-tick invalidate is
+     * skipped for such animations. */
+    bool self_damage;
     /* Zombie reaping (see the lifetime block below): the pump
      * number at which this finished handle may be freed. */
     unsigned long long reap_at;
@@ -255,6 +260,7 @@ fdk_animation *fdk_widget_animate(fdk_widget *widget,
     a->user = user_data;
     a->start_ms = anim_now_ms();
     a->finished = false;
+    a->self_damage = false;
     a->prev = NULL;
     a->next = g_list;
     if (g_list != NULL) {
@@ -263,6 +269,12 @@ fdk_animation *fdk_widget_animate(fdk_widget *widget,
     g_list = a;
     ticker_start(widget);
     return a;
+}
+
+void fdk__animation_set_self_damage(fdk_animation *anim) {
+    if (anim != NULL && !anim->finished) {
+        anim->self_damage = true;
+    }
 }
 
 void fdk_animation_cancel(fdk_animation *anim) {
@@ -314,8 +326,13 @@ void fdk__animation_pump(long long now_ms) {
         if (!a->finished && a->widget != NULL) {
             /* The damage lands AFTER the callback moved whatever it
              * moves — one region per frame, coalesced by the
-             * tracker. (tick may have canceled a: finished, skip.) */
-            fdk_widget_invalidate(a->widget);
+             * tracker. (tick may have canceled a: finished, skip.)
+             * Round 14: a self-damaging tick already reported its
+             * own precise damage (the scroll flight's strips) —
+             * the blanket invalidate would coarsen it away. */
+            if (!a->self_damage) {
+                fdk_widget_invalidate(a->widget);
+            }
             if (t >= 1.0) {
                 a->finished = true;
                 if (a->done != NULL) {

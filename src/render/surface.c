@@ -9,6 +9,7 @@
 #include "window/window_internal.h"
 
 #include <math.h>
+#include <stdio.h> /* printf (FDK_PRESENT_TRACE, round 14) */
 #include <string.h>
 
 /* ---- clip-stack maintenance ---- */
@@ -291,6 +292,30 @@ fdk_result fdk_surface_present(fdk_surface *surface) {
     surface->damage_count = 0;
     surface->damage_full = 0;
     surface->has_fb = 0;
+
+    /* Round 14 (the scroll-perf rigs): one line per real present.
+     * full=1 means whole-surface (or degraded bookkeeping); rects
+     * reports the bounded list the platform actually shipped. The
+     * damaged-area sum is post-clamp (what really went over the
+     * wire). Off by default — see fdk__present_trace_enabled. */
+    if (fdk__present_trace_enabled()) {
+        long long area = 0;
+        if (!damage.full) {
+            for (int i = 0; i < damage.count; i++) {
+                area += (long long)damage.rects[i].width *
+                        (long long)damage.rects[i].height;
+            }
+        } else {
+            area = (long long)surface->fb.width *
+                   (long long)surface->fb.height;
+        }
+        printf("PRESENT-TRACE %lld %s %lld %lld %d\n",
+               fdk__window_now_ms(), damage.full ? "full" : "rects",
+               area, (long long)surface->fb.width *
+                         (long long)surface->fb.height,
+               damage.full ? 0 : damage.count);
+        fflush(stdout);
+    }
     return FDK_OK;
 }
 
@@ -1415,6 +1440,90 @@ fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
     return FDK_OK;
 }
 
+/* Round 14 (the scroll blit): same-surface opaque region copy. This
+ * is the preserved-pixel mover behind delta-strip scroll damage — the
+ * scrollview shifts its already-painted rows within one framebuffer
+ * and only the exposed strip needs repainting. Two contracts differ
+ * from fdk_surface_blit:
+ *   - source and destination are the SAME surface, so the copy is
+ *     done through a single memmove-safe walk: upward shifts walk
+ *     top-to-bottom, downward shifts bottom-to-top, so no row is
+ *     read after being overwritten (a plain memcpy loop would smear
+ *     for overlapping shifts);
+ *   - the copy is NOT damage-tracked — the caller (the scrollview)
+ *     is moving pixels the damage model already knows about; it adds
+ *     its own strip damage. Tracking here too would double-report
+ *     and coarsen back to whole-widget damage (exactly what this
+ *     primitive exists to avoid). The clip stack is honored on read
+ *     and write (the scrollview blits outside its own paint, so the
+ *     stack is empty in practice — kept for safety). */
+fdk_result fdk__surface_self_blit(fdk_surface *s, fdk_i32 dst_x,
+                                  fdk_i32 dst_y, fdk_i32 src_x,
+                                  fdk_i32 src_y, fdk_i32 w, fdk_i32 h) {
+    if (s == NULL || w <= 0 || h <= 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_result r = surface_acquire(s);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+
+    /* Clip the source rect to the framebuffer first. */
+    long long sx0 = src_x, sy0 = src_y;
+    long long sx1 = (long long)src_x + w;
+    long long sy1 = (long long)src_y + h;
+    if (sx0 < 0) sx0 = 0;
+    if (sy0 < 0) sy0 = 0;
+    if (sx1 > s->fb.width) sx1 = s->fb.width;
+    if (sy1 > s->fb.height) sy1 = s->fb.height;
+    if (sx0 >= sx1 || sy0 >= sy1) {
+        return FDK_OK; /* source entirely outside */
+    }
+
+    /* Map onto the destination, clip to the effective clip. The
+     * source-clip trims above do NOT trim the destination (the pair
+     * keeps its size; a partially outside source just produces a
+     * correspondingly smaller copy, same as fdk_surface_blit). */
+    long long dx0 = (long long)dst_x + (sx0 - src_x);
+    long long dy0 = (long long)dst_y + (sy0 - src_y);
+    long long dx1 = dx0 + (sx1 - sx0);
+    long long dy1 = dy0 + (sy1 - sy0);
+    if (dx1 <= s->clip_x0 || dy1 <= s->clip_y0 ||
+        dx0 >= s->clip_x1 || dy0 >= s->clip_y1) {
+        return FDK_OK;
+    }
+    if (dx0 < s->clip_x0) {
+        sx0 += s->clip_x0 - dx0;
+        dx0 = s->clip_x0;
+    }
+    if (dy0 < s->clip_y0) {
+        sy0 += s->clip_y0 - dy0;
+        dy0 = s->clip_y0;
+    }
+    if (dx1 > s->clip_x1) dx1 = s->clip_x1;
+    if (dy1 > s->clip_y1) dy1 = s->clip_y1;
+    if (dx0 >= dx1 || dy0 >= dy1) {
+        return FDK_OK;
+    }
+
+    long long rows = dy1 - dy0;
+    size_t copy_len = (size_t)(dx1 - dx0);
+    /* Overlap-safe direction: shift content up (dy0 < sy0) must walk
+     * from the top; shift down walks from the bottom. Equal rows
+     * (dx0 == sx0) can still overlap horizontally — the row-wise
+     * walk with memmove covers every case. */
+    for (long long i = 0; i < rows; i++) {
+        long long row = (dy0 < sy0) ? i : (rows - 1 - i);
+        fdk_u32 *dst_row =
+            s->fb.pixels + (size_t)(dy0 + row) * (size_t)s->fb.stride +
+            (size_t)dx0;
+        const fdk_u32 *src_row =
+            s->fb.pixels + (size_t)(sy0 + row) * (size_t)s->fb.stride +
+            (size_t)sx0;
+        memmove(dst_row, src_row, copy_len * sizeof(fdk_u32));
+    }
+    return FDK_OK;
+}
 fdk_result fdk__surface_blit_alpha(fdk_surface *dst, fdk_i32 dst_x,
                                    fdk_i32 dst_y, fdk_surface *src,
                                    fdk_f32 alpha) {

@@ -36,7 +36,10 @@
 #include "widgets_internal.h"
 #include "fdk/fdk_animation.h"
 #include "../theme/theme_internal.h"
-#include "../window/window_internal.h" /* fdk__window_context (idle clock) */
+#include "../window/window_internal.h" /* fdk__window_context (idle clock),
+                                        * fdk__window_tree_paint_scale/_surface
+                                        * (round 14 strip gate) */
+#include "../render/surface_internal.h" /* fdk__surface_self_blit (round 14) */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -218,6 +221,160 @@ static bool scroll_clamp(fdk_scrollview *sv) {
     return changed;
 }
 
+/* Local bounding-box union (widget.c's is file-static). */
+static fdk_rect scroll_rect_union(fdk_rect a, fdk_rect b) {
+    if (a.width <= 0 || a.height <= 0) {
+        return b;
+    }
+    if (b.width <= 0 || b.height <= 0) {
+        return a;
+    }
+    int64_t x0 = (int64_t)a.x < (int64_t)b.x ? (int64_t)a.x : (int64_t)b.x;
+    int64_t y0 = (int64_t)a.y < (int64_t)b.y ? (int64_t)a.y : (int64_t)b.y;
+    int64_t ax1 = (int64_t)a.x + a.width;
+    int64_t bx1 = (int64_t)b.x + b.width;
+    int64_t ay1 = (int64_t)a.y + a.height;
+    int64_t by1 = (int64_t)b.y + b.height;
+    return (fdk_rect){(fdk_i32)x0, (fdk_i32)y0,
+                      (fdk_i32)((ax1 > bx1 ? ax1 : bx1) - x0),
+                      (fdk_i32)((ay1 > by1 ? ay1 : by1) - y0)};
+}
+
+/* ---- delta-strip scroll damage (round 14) ---------------------------
+ *
+ * THE scroll performance path: a pure offset change (same content,
+ * same geometry) repaints only what a blit cannot supply — the
+ * exposed strip(s) — instead of the whole viewport. The already-
+ * painted rows are MOVED inside the window surface by a same-surface
+ * blit (fdk__surface_self_blit), the tree damage is set — exactly,
+ * not unioned — to the strips, and the next tree paint renders only
+ * those. At a 1000-row list that is a 30-pixel band instead of a
+ * full-viewport repaint per wheel tick.
+ *
+ * Why this is safe only on the direct paint path: the blit operates
+ * on the WINDOW surface's pixels, so it requires that the next tree
+ * paint renders straight into that surface. fdk_window_paint
+ * guarantees that at scale 1 only — at scale > 1 the tree paints
+ * into a cleared logical intermediate (HiDPI compositing) whose
+ * pixels are NOT the screen's; a blit there would preserve nothing.
+ * fdk__window_tree_paint_scale is the gate. (The recorded follow-up:
+ * a physical-space blit under scaling. Correct, merely slower, is
+ * the round's contract with HiDPI.)
+ *
+ * When it runs: layout is called AFTER the offsets changed, with the
+ * OLD offsets passed in by every caller (scroll_to, flight_apply).
+ * The content arrange above already unioned its old+new bounds into
+ * the root damage — the strip path REPLACES that bounding box with
+ * the exact strips (fdk__widget_set_damage). Anything else that
+ * invalidates during the same frame (a hover highlight, a selection
+ * change) unions on top and silently widens the repaint: correct by
+ * construction, the exactness flag is just bookkeeping. */
+static bool scroll_strip_eligible(fdk_widget *w) {
+    if (w == NULL || w->parent == NULL) {
+        return false; /* detached tree: no window surface to blit */
+    }
+    /* HiDPI gate (window_internal.h): at scale > 1 the tree paints
+     * into a cleared intermediate, so the window surface's pixels
+     * are NOT the tree's paint target — a blit there preserves
+     * nothing the next paint would keep. */
+    if (fdk__window_tree_paint_scale(w) > 1.001f) {
+        return false;
+    }
+    return true;
+}
+
+/* Applies (or declines) delta-strip damage for the offset change
+ * old -> new at the CURRENT bounds, AFTER the content was arranged
+ * at the new offsets. Returns true when the strip path was taken
+ * (the caller skips its whole-viewport damage). */
+static bool scroll_apply_delta_damage(fdk_widget *w, fdk_scrollview *sv,
+                                      fdk_i32 old_x, fdk_i32 old_y,
+                                      fdk_rect pending) {
+    fdk_i32 dx = sv->scroll_x - old_x;
+    fdk_i32 dy = sv->scroll_y - old_y;
+    if (dx == 0 && dy == 0) {
+        return false; /* no movement: caller decides what to damage */
+    }
+    fdk_i32 vw = w->bounds.width;
+    fdk_i32 vh = w->bounds.height;
+    if (vw <= 0 || vh <= 0) {
+        return false;
+    }
+    fdk_i32 adx = (dx < 0) ? -dx : dx;
+    fdk_i32 ady = (dy < 0) ? -dy : dy;
+    if (ady >= vh || adx >= vw) {
+        return false; /* whole viewport exposed: full damage wins */
+    }
+    if (!scroll_strip_eligible(w)) {
+        return false;
+    }
+    fdk_surface *surface = fdk__window_tree_surface(w);
+    if (surface == NULL) {
+        return false;
+    }
+    fdk_rect abs = fdk_widget_get_absolute_bounds(w);
+
+    /* The preserved-pixel move, one axis at a time (a diagonal
+     * scroll is two independent blits — the corner square is
+     * exposed by BOTH strips, covered twice, harmless).
+     *
+     * Direction: scrolling DOWN (scroll_y grows, content moves up)
+     * means the surface's new row r must show old row r + dy —
+     * blit(dst=r, src=r+dy) over the rows that stay visible. */
+    if (dy != 0 && fdk__surface_self_blit(surface,
+                                          abs.x, abs.y,
+                                          abs.x, abs.y + dy,
+                                          vw, vh - ady) != FDK_OK) {
+        return false;
+    }
+    if (dx != 0 && fdk__surface_self_blit(surface,
+                                          abs.x, abs.y,
+                                          abs.x + dx, abs.y,
+                                          vw - adx, vh) != FDK_OK) {
+        return false;
+    }
+
+    /* The strips, in ROOT coordinates, UNIONED with whatever was
+     * already pending before this layout (bar wakes, hover). The
+     * union is exact enough: one bounding box of two strips + any
+     * prior damage — still far narrower than the viewport. */
+    fdk_rect strip = { .x = abs.x, .y = abs.y, .width = vw, .height = 0 };
+    if (dy != 0) {
+        strip.y = (dy > 0) ? abs.y + vh - ady : abs.y;
+        strip.height = ady;
+    }
+    if (dx != 0) {
+        fdk_rect hstrip = { .x = (dx > 0) ? abs.x + vw - adx : abs.x,
+                            .y = abs.y, .width = adx, .height = vh };
+        if (dy != 0) {
+            strip = scroll_rect_union(strip, hstrip);
+        } else {
+            strip = hstrip;
+        }
+    }
+    /* fdk__widget_pending_damage returned a box in the same ROOT
+     * frame (it WAS the root's damage box). */
+    if (pending.width > 0 && pending.height > 0) {
+        strip = scroll_rect_union(strip, pending);
+    }
+    fdk__widget_set_damage(w, strip);
+
+    /* Awake overlay bars repaint against the moved pixels (a few
+     * dozen pixels; CLASSIC bars are content-side and ride the
+     * ordinary layout damage — their thumbs move WITH the scroll). */
+    if (sv->mode == FDK_SCROLL_BARS_OVERLAY) {
+        if (dy != 0 && sv->vbar != NULL &&
+            fdk_widget_get_visible(sv->vbar)) {
+            fdk_widget_invalidate(sv->vbar);
+        }
+        if (dx != 0 && sv->hbar != NULL &&
+            fdk_widget_get_visible(sv->hbar)) {
+            fdk_widget_invalidate(sv->hbar);
+        }
+    }
+    return true;
+}
+
 /* ---- overlay fade machinery (1.4.4) --------------------------------
  *
  * A bar's VISIBILITY is two-ANDed facts: the axis overflows (the
@@ -348,14 +505,27 @@ static void bar_idle_elapsed(fdk_timer *timer, void *user) {
 
 /* (Re)arranges content + bars at the scrollview's CURRENT bounds —
  * the measure/arrange hooks, the layout notifier, and every scroll
- * all funnel through here. */
-static void scrollview_layout(fdk_widget *w) {
+ * all funnel through here. `old_x`/`old_y` are the offsets BEFORE
+ * this call's changes (pass the CURRENT sv->scroll_x/y when the
+ * caller changed nothing — the delta is zero and nothing special
+ * happens); a PURE offset change may be routed through the round-14
+ * delta-strip damage (see scroll_apply_delta_damage). Returns true
+ * when the strip path consumed the damage story. */
+static bool scrollview_layout_ex(fdk_widget *w, fdk_i32 old_x,
+                                 fdk_i32 old_y) {
     fdk_scrollview *sv = scroll_of(w);
     fdk_i32 w_ = w->bounds.width;
     fdk_i32 h_ = w->bounds.height;
     if (w_ <= 0 || h_ <= 0) {
-        return;
+        return false;
     }
+    /* Round 14: whatever was already pending BEFORE this layout's
+     * arrange coarsens the box (a bar wake from the same wheel
+     * event, a hover change) must survive the strip replacement —
+     * snapshot it now, scroll_apply_delta_damage unions it back. */
+    fdk_rect pending = {0, 0, 0, 0};
+    bool had_pending = fdk__widget_pending_damage(w, &pending);
+    (void)had_pending;
 
     fdk_i32 cw = 0, ch = 0;
     content_extent(sv, &cw, &ch);
@@ -433,6 +603,17 @@ static void scrollview_layout(fdk_widget *w) {
      * keep the input vetoes truthful (visible bar = gesture-owning,
      * hidden bar = input-transparent and no veto). */
     fdk__scrollview_veto_input(w);
+
+    /* Round 14: a pure offset change may take the strip path. This
+     * runs LAST — after the arrange's ordinary damage accumulated —
+     * because the strip story REPLACES that bounding box. */
+    return scroll_apply_delta_damage(w, sv, old_x, old_y, pending);
+}
+
+/* The every-where default: same offsets (no delta), full behavior. */
+static void scrollview_layout(fdk_widget *w) {
+    fdk_scrollview *sv = scroll_of(w);
+    (void)scrollview_layout_ex(w, sv->scroll_x, sv->scroll_y);
 }
 
 static void scrollview_measure(fdk_widget *w, fdk_size *out) {
@@ -479,11 +660,19 @@ static void flight_apply(fdk_widget *w, double e) {
     if (nx > mx) nx = mx;
     if (ny > my) ny = my;
     if (nx != sv->scroll_x || ny != sv->scroll_y) {
+        fdk_i32 ox = sv->scroll_x, oy = sv->scroll_y;
         sv->scroll_x = nx;
         sv->scroll_y = ny;
-        scrollview_layout(w);
-        /* The engine invalidates w after the tick returns; the
-         * layout call above only re-positions the content child. */
+        /* Round 14: the flight is self-damaging — when the strip
+         * path is taken the layout has already set the exact damage
+         * (strips + the blit's moved region). When it is declined
+         * (HiDPI, detached, blit failure, full-page jump) the
+         * fallback is the whole-widget invalidate this path always
+         * had. The animation pump's blanket invalidate is skipped
+         * for this flight (fdk__animation_set_self_damage). */
+        if (!scrollview_layout_ex(w, ox, oy)) {
+            fdk_widget_invalidate(w);
+        }
     }
 }
 
@@ -525,6 +714,10 @@ static void scroll_flight_to(fdk_widget *w, fdk_i32 tx, fdk_i32 ty) {
     sv->flight = fdk_widget_animate(w, SCROLL_FLIGHT_MS,
                                     FDK_EASE_CUBIC_OUT, flight_tick,
                                     flight_done, w);
+    /* Round 14: flight_tick owns its damage precisely (strips when
+     * eligible, whole-widget fallback otherwise) — see the pump's
+     * self_damage skip. */
+    fdk__animation_set_self_damage(sv->flight);
 }
 
 static bool scrollview_handle_event(fdk_widget *w,
@@ -764,13 +957,21 @@ static bool scrollbar_handle_event(fdk_widget *w,
             if (ns > max) {
                 ns = max;
             }
+            /* Round 14: thumb drags ride the strip path — a 60 Hz
+             * drag must not repaint the whole viewport per motion. */
             if (b->horizontal) {
+                fdk_i32 ox = sv->scroll_x;
                 sv->scroll_x = ns;
+                if (!scrollview_layout_ex(&sv->base, ox, sv->scroll_y)) {
+                    fdk_widget_invalidate(&sv->base);
+                }
             } else {
+                fdk_i32 oy = sv->scroll_y;
                 sv->scroll_y = ns;
+                if (!scrollview_layout_ex(&sv->base, sv->scroll_x, oy)) {
+                    fdk_widget_invalidate(&sv->base);
+                }
             }
-            scrollview_layout(&sv->base);
-            fdk_widget_invalidate(&sv->base);
         }
         return true;
     }
@@ -803,15 +1004,19 @@ static bool scrollbar_handle_event(fdk_widget *w,
         fdk_i32 ns = (want * max) / range;
         if (b->horizontal) {
             if (ns != sv->scroll_x) {
+                fdk_i32 ox = sv->scroll_x;
                 sv->scroll_x = ns;
-                scrollview_layout(&sv->base);
-                fdk_widget_invalidate(&sv->base);
+                if (!scrollview_layout_ex(&sv->base, ox, sv->scroll_y)) {
+                    fdk_widget_invalidate(&sv->base);
+                }
             }
         } else {
             if (ns != sv->scroll_y) {
+                fdk_i32 oy = sv->scroll_y;
                 sv->scroll_y = ns;
-                scrollview_layout(&sv->base);
-                fdk_widget_invalidate(&sv->base);
+                if (!scrollview_layout_ex(&sv->base, sv->scroll_x, oy)) {
+                    fdk_widget_invalidate(&sv->base);
+                }
             }
         }
         return true;
@@ -1016,8 +1221,11 @@ fdk_result fdk_scrollview_scroll_to(fdk_widget *scrollview, fdk_i32 x,
     sv->scroll_x = x;
     sv->scroll_y = y;
     bool clamped = scroll_clamp(sv);
-    scrollview_layout(scrollview);
-    fdk_widget_invalidate(scrollview);
+    /* Round 14: instant scrolls take the strip path too (thumb drags
+     * ride this path — a 60 Hz drag must not repaint the viewport). */
+    if (!scrollview_layout_ex(scrollview, ox, oy)) {
+        fdk_widget_invalidate(scrollview);
+    }
     (void)clamped; /* the GET reflects the clamped truth */
     if (sv->scroll_x != ox || sv->scroll_y != oy) {
         /* Overlay bars flash on programmatic scrolls too — the bar
