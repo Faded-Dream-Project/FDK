@@ -52,9 +52,9 @@ BINS := $(APP_DIRS:%=$(BUILD)/%)
 all: $(BINS)
 
 define APP_RULE
-$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
+$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
 	@mkdir -p $(BUILD)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
@@ -110,10 +110,23 @@ build/sidebar-test: fdk-files/sidebar.c fdk-files/sidebar_test.c fdk-files/sideb
 
 build/drag-rig: fdk-files/drag_rig.c
 	@mkdir -p build
-	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/drag_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/x11dev/usr/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/x11dev/usr/lib/x86_64-linux-gnu
+	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/drag_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu
 
 .PHONY: drag-rig
 drag-rig: build/drag-rig
+
+# Round 10: the wrong-row click rig (Xlib + XTest only, no FDK) —
+# clicks a line down pane0's list and reads the app's PHASE: sel
+# telemetry. Boots via run_clickrig.sh (private Xvfb + DRIG app).
+# (drag-rig's line above predates the sandbox recycles that wiped
+# /tmp/x11dev; the X11 dev tree now lives at /tmp/my-project/local-x11,
+# which survives them — both rigs point there now.)
+build/click-rig: fdk-files/click_rig.c
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/click_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu
+
+.PHONY: click-rig
+click-rig: build/click-rig
 
 build/gen-perf-50k: fdk-files/perf_50k.c $(FDK_LIB)
 	@mkdir -p build

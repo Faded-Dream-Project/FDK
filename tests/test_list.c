@@ -565,15 +565,20 @@ static void test_columns(void) {
     (void)rb;
     /* selection still works under columns (the row-press band from
      * round 6 must survive the new geometry): press row 0, sweep to
-     * row 2, release */
+     * row 2, release. Round 10: the positions are VISUAL row
+     * centers — content_top + N*rh + rh/2 — the header strip is no
+     * longer (wrongly) row 0's space. */
     const fdk_i32 rh = fdk_list_get_row_height(list);
+    const fdk_i32 ctop = fdk__list_test_content_top(list);
+    assert(ctop > 0);
     fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
                                     50.0f,
-                                    (float)(10 + rh / 2), 0);
+                                    (float)(10 + ctop + rh / 2), 0);
     fdk_event_data move = ev_motion_evt(
-        50.0f, (float)(10 + rh * 2 + rh / 2));
+        50.0f, (float)(10 + ctop + rh * 2 + rh / 2));
     fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 50.0f,
-                                  (float)(10 + rh * 2 + rh / 2), 0);
+                                  (float)(10 + ctop + rh * 2 + rh / 2),
+                                  0);
     assert(fdk_widget_tree_handle_event(root, &down));
     assert(fdk_widget_tree_handle_event(root, &move));
     assert(fdk_widget_tree_handle_event(root, &up));
@@ -905,11 +910,12 @@ static void test_round9_ports(void) {
     /* (3) The same gate under 1.5.x COLUMNS: a press right of the
      * name column's TEXT is still empty space even when columns are
      * declared and the name column has stretched wide — the row
-     * must not eat it. The press-time chase selects the row at the
-     * anchor's y (the round-6 semantics test_row_press_band pins),
-     * and the release keeps it — one gesture, one answer, and the
-     * ROW was never the press's owner (a row press would have run
-     * list_row_clicked and re-selected exactly row 1 from zero). */
+     * must not eat it. Round 10 correction: under columns the rows
+     * start BELOW the header strip, so a press at list-local y =
+     * rh+5 is on VISUAL row 0 (header ≈26, row 0 spans 26..56 with
+     * rh=30) — the chase must select row 0, never the row below.
+     * (The pre-round-10 build divided raw y by rh and asserted
+     * row 1 here — the wrong-row bug, enshrined.) */
     fdk_list_column cols[2] = {
         {"Name", 120, true},
         {"Size", 80, false},
@@ -929,7 +935,7 @@ static void test_round9_ports(void) {
     assert(fdk_widget_tree_handle_event(root, &down3));
     (void)fdk_widget_tree_handle_event(root, &up3);
     assert(fdk_list_selected_count(list) == 1); /* the chase row    */
-    assert(fdk_list_is_selected(list, 1));
+    assert(fdk_list_is_selected(list, 0)); /* the VISUAL row — 0    */
 
     fdk_surface_destroy(s);
     fdk_widget_destroy(root);
@@ -939,6 +945,176 @@ static void test_round9_ports(void) {
            "the menu-teardown cancel sweep ends swallowed gestures "
            "(redundant-safe, stray-UP-safe), the gate holds under "
            "columns\n");
+}
+
+/* ---- round 10 (the wrong-row report) ---- */
+
+/* The header-strip invariant: under columns, everything that maps a
+ * list-local y to a row must first cross out the header. Four
+ * observable contracts, all driven at REAL positions computed from
+ * the engine's own geometry (content_top seam + row height — no
+ * assumed pixels):
+ *   R1  a press on the HEADER strip itself selects NOTHING (it is
+ *       not row 0's space, and a zero-extent band over the header
+ *       covers no rows);
+ *   R2  a press right of the text on VISUAL row N (the round-9
+ *       gate's fall-through) chases to row N — never N+1;
+ *   R3  a real sweep from visual row 1 to visual row 3 selects
+ *       exactly rows 1..3 — both edges inclusive, none off by one;
+ *   R4  the same sweep at a NONZERO scroll offset — the path where
+ *       content↔viewport inversion lives (a sign error there only
+ *       shows scrolled).
+ * And the no-columns list is untouched: content_top == 0. */
+static void test_round10_header_strip(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 430, 290},
+                                    &root)));
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &list)));
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    fdk_list_column cols[2] = {
+        {"Name", 120, true},
+        {"Size", 80, false},
+    };
+    assert(fdk_ok(fdk_list_set_columns(list, cols, 2)));
+    for (int i = 0; i < 6; i++) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "row %d", i);
+        assert(fdk_ok(fdk_list_append(list, buf, NULL)));
+    }
+    fdk_widget_set_bounds(list, (fdk_rect){10, 10, 400, 260});
+    const fdk_i32 rh = fdk_list_get_row_height(list);
+    const fdk_i32 top = fdk__list_test_content_top(list);
+    assert(top > 0); /* columns declared: the strip exists          */
+
+    /* resolve the column geometry (the content gate needs col_x) */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(430, 290, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+
+    /* R1: a plain CLICK on the header strip (mid-strip, mid-width)
+     * selects nothing — and does not crash the gesture machinery
+     * either (the stray UP after must be a no-op). */
+    fdk_list_clear_selection(list);
+    fdk_event_data hd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                  200.0f, (float)(10 + top / 2), 0);
+    fdk_event_data hu = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 200.0f,
+                                  (float)(10 + top / 2), 0);
+    assert(fdk_widget_tree_handle_event(root, &hd)); /* band took it */
+    (void)fdk_widget_tree_handle_event(root, &hu);
+    assert(fdk_list_selected_count(list) == 0); /* NOT row 0        */
+
+    /* R2: a press right of the text on visual row 2 (y inside
+     * [top + 2*rh, top + 3*rh)) chases to row 2 — the report's
+     * exact shape was this selecting row 3. */
+    fdk_list_clear_selection(list);
+    fdk_f32 ry = (fdk_f32)(10 + top + 2 * rh + rh / 2);
+    fdk_event_data rd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                  300.0f, ry, 0);
+    fdk_event_data ru = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 300.0f,
+                                  ry, 0);
+    assert(fdk_widget_tree_handle_event(root, &rd));
+    (void)fdk_widget_tree_handle_event(root, &ru);
+    assert(fdk_list_selected_count(list) == 1);
+    assert(fdk_list_is_selected(list, 2)); /* visual row 2, not 3   */
+
+    /* R3: a real sweep from visual row 1's middle to visual row 3's
+     * middle selects exactly rows 1..3. */
+    fdk_list_clear_selection(list);
+    fdk_event_data sd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                  60.0f,
+                                  (float)(10 + top + rh + rh / 2), 0);
+    fdk_event_data sm = ev_motion_evt(
+        100.0f, (float)(10 + top + 3 * rh + rh / 2));
+    fdk_event_data su = ev_button(
+        FDK_EVENT_POINTER_BUTTON_UP, 100.0f,
+        (float)(10 + top + 3 * rh + rh / 2), 0);
+    assert(fdk_widget_tree_handle_event(root, &sd));
+    (void)fdk_widget_tree_handle_event(root, &sm);
+    (void)fdk_widget_tree_handle_event(root, &su);
+    assert(fdk_list_selected_count(list) == 3); /* exactly 1..3     */
+    assert(fdk_list_is_selected(list, 1));
+    assert(fdk_list_is_selected(list, 2));
+    assert(fdk_list_is_selected(list, 3));
+    assert(!fdk_list_is_selected(list, 0));
+    assert(!fdk_list_is_selected(list, 4));
+
+    /* R4: the same sweep at a NONZERO scroll offset — the path where
+     * content↔viewport inversion lives (a sign error here only shows
+     * scrolled; round 10's band_rect briefly carried one). A taller
+     * list, scrolled by a known offset, then a sweep whose viewport
+     * positions correspond to KNOWN rows. */
+    {
+        fdk_widget *tall = NULL;
+        assert(fdk_ok(fdk_list_create(root, g_font, &tall)));
+        fdk_list_set_selection_mode(tall,
+                                    FDK_LIST_SELECTION_MULTIPLE);
+        fdk_list_column tcols[1] = {{"Name", 120, true}};
+        assert(fdk_ok(fdk_list_set_columns(tall, tcols, 1)));
+        for (int i = 0; i < 20; i++) {
+            char buf[32];
+            snprintf(buf, sizeof buf, "tall %d", i);
+            assert(fdk_ok(fdk_list_append(tall, buf, NULL)));
+        }
+        fdk_widget_set_bounds(tall, (fdk_rect){10, 10, 400, 260});
+        fdk_widget_tree_paint(root, s); /* lay the tree out          */
+        const fdk_i32 ttop = fdk__list_test_content_top(tall);
+        fdk_widget *sv = fdk_widget_child_at(tall, 0);
+        assert(sv != NULL);
+        /* offset 3*rh: viewport y of row i = ttop + i*rh - 3*rh    */
+        assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 3 * rh)));
+        fdk_i32 got_offx = -1, got_off = -1;
+        assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &got_offx,
+                                                       &got_off)));
+        assert(got_off == 3 * rh);
+        /* sweep from visual row 4 to visual row 6 (both mid-row)   */
+        fdk_event_data td = ev_button(
+            FDK_EVENT_POINTER_BUTTON_DOWN, 60.0f,
+            (float)(10 + ttop + 4 * rh + rh / 2 - 3 * rh), 0);
+        fdk_event_data tm = ev_motion_evt(
+            100.0f, (float)(10 + ttop + 6 * rh + rh / 2 - 3 * rh));
+        fdk_event_data tu = ev_button(
+            FDK_EVENT_POINTER_BUTTON_UP, 100.0f,
+            (float)(10 + ttop + 6 * rh + rh / 2 - 3 * rh), 0);
+        assert(fdk_widget_tree_handle_event(root, &td));
+        (void)fdk_widget_tree_handle_event(root, &tm);
+        (void)fdk_widget_tree_handle_event(root, &tu);
+        assert(fdk_list_selected_count(tall) == 3); /* rows 4..6    */
+        assert(fdk_list_is_selected(tall, 4));
+        assert(fdk_list_is_selected(tall, 5));
+        assert(fdk_list_is_selected(tall, 6));
+        assert(!fdk_list_is_selected(tall, 3));
+        assert(!fdk_list_is_selected(tall, 7));
+        fdk_widget_destroy(tall);
+    }
+
+    /* And the no-columns list is unchanged: content_top == 0, a
+     * press at local y = rh+5 is row 1 (the pre-1.5.0 layout). */
+    fdk_widget *plain = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &plain)));
+    fdk_list_set_selection_mode(plain, FDK_LIST_SELECTION_MULTIPLE);
+    assert(fdk_ok(fdk_list_append(plain, "a", NULL)));
+    assert(fdk_ok(fdk_list_append(plain, "b", NULL)));
+    fdk_widget_set_bounds(plain, (fdk_rect){10, 150, 200, 100});
+    assert(fdk__list_test_content_top(plain) == 0);
+    fdk_event_data pd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                  150.0f, (float)(150 + rh + 5), 0);
+    fdk_event_data pu = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 150.0f,
+                                  (float)(150 + rh + 5), 0);
+    assert(fdk_widget_tree_handle_event(root, &pd));
+    (void)fdk_widget_tree_handle_event(root, &pu);
+    assert(fdk_list_selected_count(plain) == 1);
+    assert(fdk_list_is_selected(plain, 1)); /* row 1, as ever       */
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] list: round 10 — the header strip is not row 0 "
+           "(header click selects nothing), right-of-text presses "
+           "chase the VISUAL row (not +1), sweeps select exactly the "
+           "swept rows (zero and nonzero scroll), no-columns lists "
+           "unchanged\n");
 }
 
 int main(void) {
@@ -973,6 +1149,7 @@ int main(void) {
     test_row_press_band();
     test_rubber_band();
     test_round9_ports();
+    test_round10_header_strip();
 
     fdk_font_destroy(g_font);
     printf("all list tests passed\n");

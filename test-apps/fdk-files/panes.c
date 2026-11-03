@@ -536,6 +536,29 @@ static void list_selection_changed(fdk_widget *list, void *user) {
         (void)fdk_list_row_set_drag_armed(
             list, i, fdk_list_is_selected(list, i));
     }
+    /* Round-10 telemetry (FDK_FILES_DRIG-gated): the click rig's
+     * channel. main.c's header has promised "PHASE: sel" on every
+     * selection change since §26, but only the boot smoke script
+     * ever printed it — the rig must distinguish "nothing fired"
+     * from "fired with zero", so the EMPTY selection prints too,
+     * with the lowest selected row's text when there is one. */
+    if (getenv("FDK_FILES_DRIG") != NULL) {
+        const char *lowest = NULL;
+        for (size_t i = 0; i < n; i++) {
+            if (fdk_list_is_selected(list, i)) {
+                const char *txt = fdk_list_row_text(list, i);
+                lowest = (txt != NULL) ? txt : "";
+                break;
+            }
+        }
+        if (lowest != NULL) {
+            printf("PHASE: sel %zu %s\n",
+                   fdk_list_selected_count(list), lowest);
+        } else {
+            printf("PHASE: sel 0 (none)\n");
+        }
+        fflush(stdout);
+    }
 }
 
 void pane_build_view(pane *p, tab *t) {

@@ -601,6 +601,9 @@ struct fdk_platform_window {
     int presented_ever;     /* a present reached the server (the
                                window_ever_presented op — diagnostic/
                                regression seam, see platform_internal.h) */
+    long long last_present_ms; /* CLOCK_MONOTONIC ms of the LAST
+                                  present (the frame_ready pace, round
+                                  10); 0 before the first present    */
     int background_dropped; /* 1 once the app first acquired the
                                framebuffer: the creation-time white
                                background pixel was replaced by
@@ -1034,6 +1037,11 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
 /* The window_ever_presented ops entry (diagnostic seam — see
  * platform_internal.h). */
 int fdk_x11_window_ever_presented(fdk_platform_window *pwindow);
+
+/* The window_frame_ready ops entry (round 10): X11's present pacing
+ * — a minimum-interval gate mirroring Wayland's frame-callback
+ * semantics; see x11_surface.c. */
+int fdk_x11_window_frame_ready(fdk_platform_window *pwindow);
 void fdk_x11_surface_cleanup(fdk_platform_window *pwindow);
 
 /* Clears the in-flight flag of the slot owning `shmseg` on this

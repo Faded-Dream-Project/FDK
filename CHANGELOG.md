@@ -17,6 +17,44 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-03 (on the rc2 line)
 
+### Fixed — owner round 10: the wrong-row selection (and the X11 paint pace)
+
+- **List: every list-level press selected ONE ROW LOWER than the
+  pointer.** The 1.5.0 columns round inset the rows below the
+  header strip but left the rubber-band math dividing raw
+  list-local y by the row height — so a press on the header
+  selected row 0, a press in a row's empty right half (round 9's
+  gate falling through to the band) selected the row BELOW it, and
+  every sweep shifted one row down. The owner's reports — "clicking
+  a folder highlights the item below", the context menu acting on
+  the wrong file (it flavors from the live selection) — are all
+  this one offset. Fixed by routing every band↔content mapping
+  through a `list_content_top()` inset: anchor capture, apply-band
+  row math, band rect, paint anchor, and both auto-scroll edge
+  tests. No-columns lists are byte-for-byte unchanged
+  (`content_top == 0`). Round 9's own test had enshrined the bug
+  (a press at visual row 0 asserting row 1); it now asserts the
+  visual row, and the new round-10 regression test pins header
+  clicks selecting NOTHING, right-of-text chases landing on the
+  VISUAL row, sweep edges exact, and the same sweep at a NONZERO
+  scroll offset (where a sign error would hide until scrolled).
+- **X11: `fdk_surface_frame_ready()` was always-true.** The op
+  table entry existed only on Wayland, so the canonical
+  `pump; if (frame_ready && damage) paint` loop painted UNPACED on
+  X11 — one full acquire/raster/present per loop pass while damage
+  kept arriving (a drag damages every motion), which is the
+  "one core pegged during drags" report's mechanism. X11 now ships
+  `window_frame_ready`: a 17ms minimum present interval (both render
+  lanes stamp `last_present_ms`), the same capacity gate Wayland's
+  1.1.6 op uses (both SHM slots in flight → not ready, instead of
+  blocking inside the next acquire), and the two exceptions
+  (nothing presented yet; popup windows — first-present latency is
+  their correctness). Measured on the drag rig (250 injected
+  motions/s, fdk-files DRIG layout): steady-state app CPU 13.2% →
+  4.4% of one core; selection sweeps re-verified pixel-perfect
+  after. No public API change (the op slot was already in the
+  table's future).
+
 ### Fixed — owner round 9: the five interaction reports (ported onto the restored lineage)
 
 - **List: stuck rubber bands after menus close.** A dying popup

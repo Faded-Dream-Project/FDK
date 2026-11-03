@@ -294,6 +294,23 @@ static fdk_i32 list_header_height(const fdk_list *l) {
     return h + 6;
 }
 
+/* Round 10 (the wrong-row report): the CONTENT's top inset in the
+ * list's own coordinate space — the header strip when columns are
+ * declared, 0 otherwise. The band's content math (which rows a sweep
+ * covers, where the anchor sits in content space) MUST go through
+ * this: a list-local y includes the header, content-space y does
+ * not. The 1.5.0 columns round introduced the strip but left the
+ * band math dividing raw list-local y by the row height — every
+ * sweep and every empty-space press selected ONE ROW LOWER than the
+ * pointer (a press on the header itself selected row 0; a press
+ * right of a row's text — round 9's gate — selected the row BELOW).
+ * Same for the auto-scroll edge test: "pointer near the list's top
+ * edge" must be measured against the VIEWPORT (below the header),
+ * not the widget's 0. */
+static fdk_i32 list_content_top(const fdk_list *l) {
+    return (l->column_count > 0) ? list_header_height(l) : 0;
+}
+
 /* 1.5.1: the resolved column geometry — see the struct block. The
  * name column's natural width comes from the widest row (text +
  * icon band + padding, the v1 measure). Must be re-run whenever
@@ -1284,11 +1301,13 @@ static void list_band_scroll_tick(fdk_timer *timer, void *user) {
     fdk_i32 vw = 0, vh = 0;
     fdk__scrollview_viewport(l->scroll, &vw, &vh);
     (void)vw;
-    /* The pointer's viewport-space y decides the direction. */
+    /* The pointer's viewport-space y decides the direction (round
+     * 10: below the header strip — same inset rule as track()). */
+    fdk_f32 vy = l->band_now_y - (fdk_f32)list_content_top(l);
     fdk_i32 dy = 0;
-    if (l->band_now_y < (fdk_f32)LIST_BAND_EDGE) {
+    if (vy < (fdk_f32)LIST_BAND_EDGE) {
         dy = -LIST_BAND_SCROLL_STEP;
-    } else if (l->band_now_y > (fdk_f32)(vh - LIST_BAND_EDGE)) {
+    } else if (vy > (fdk_f32)(vh - LIST_BAND_EDGE)) {
         dy = LIST_BAND_SCROLL_STEP;
     }
     if (dy == 0) {
@@ -1350,8 +1369,14 @@ static void list_band_scroll_track(fdk_list *l) {
     fdk_i32 vw = 0, vh = 0;
     fdk__scrollview_viewport(l->scroll, &vw, &vh);
     (void)vw;
-    if (l->band_now_y < (fdk_f32)LIST_BAND_EDGE ||
-        l->band_now_y > (fdk_f32)(vh - LIST_BAND_EDGE)) {
+    /* Round 10: the edge test is VIEWPORT-space — the pointer's y
+     * inside the viewport (below the header strip), not the list
+     * widget's 0. With a header, a pointer at the first row's top
+     * edge is viewport-y 0; the raw band_now_y misread it as 26px
+     * from the edge and the auto-scroll never armed. */
+    fdk_f32 vy = l->band_now_y - (fdk_f32)list_content_top(l);
+    if (vy < (fdk_f32)LIST_BAND_EDGE ||
+        vy > (fdk_f32)(vh - LIST_BAND_EDGE)) {
         list_band_scroll_arm(l);
     } else {
         list_band_scroll_disarm(l);
@@ -1382,13 +1407,20 @@ static bool list_handle_event(fdk_widget *w,
         l->band_y = l->band_now_y = ev->pointer.position.y;
         /* The anchor is glued to the CONTENT it was pressed on: the
          * auto-scroll rule (the sweep grows as the view moves; the
-         * anchor row stays the anchor). */
+         * anchor row stays the anchor). Round 10: content space
+         * starts BELOW the header strip — subtract the viewport's
+         * top inset here, add it back wherever the anchor maps to
+         * viewport space (paint, band_rect, the tick's edge test).
+         * Leaving the header inside made every band select one row
+         * lower than the pointer (the wrong-row report). */
         {
             fdk_i32 ox = 0, oy = 0;
             if (l->scroll != NULL) {
                 fdk_scrollview_get_scroll_offset(l->scroll, &ox, &oy);
             }
-            l->band_anchor_cy = l->band_y + (fdk_f32)oy;
+            l->band_anchor_cy = l->band_y -
+                                (fdk_f32)list_content_top(l) +
+                                (fdk_f32)oy;
         }
         /* Ctrl-union snapshot: the selection as the sweep found it. */
         if (l->band_ctrl && l->count > 0) {
@@ -1639,7 +1671,10 @@ static fdk_rect list_band_rect(const fdk_list *l) {
         fdk_i32 axo = 0;
         fdk_scrollview_get_scroll_offset(l->scroll, &axo, &ay_off);
     }
-    fdk_f32 anchor_vy = l->band_anchor_cy - (fdk_f32)ay_off;
+    /* Round 10: viewport = content − offset + the header inset
+     * (the capture's inverse — same shape as list_paint's). */
+    fdk_f32 anchor_vy = l->band_anchor_cy - (fdk_f32)ay_off +
+                        (fdk_f32)list_content_top(l);
     fdk_f32 y1 = (anchor_vy < l->band_now_y) ? anchor_vy
                                               : l->band_now_y;
     fdk_f32 y2 = (anchor_vy < l->band_now_y) ? l->band_now_y
@@ -1683,8 +1718,11 @@ static void list_apply_band(fdk_list *l) {
     }
     /* The ANCHOR is content-space (captured at press); the moving
      * edge is the viewport-space pointer + the CURRENT offset —
-     * under auto-scroll the sweep grows, the anchor never moves. */
-    fdk_f32 now_cy = l->band_now_y + (fdk_f32)off_y;
+     * under auto-scroll the sweep grows, the anchor never moves.
+     * Round 10: BOTH in content space (header stripped), matching
+     * the capture — the rows start at content y 0. */
+    fdk_f32 now_cy = l->band_now_y -
+                     (fdk_f32)list_content_top(l) + (fdk_f32)off_y;
     fdk_f32 y1 = (l->band_anchor_cy < now_cy) ? l->band_anchor_cy
                                                : now_cy;
     fdk_f32 y2 = (l->band_anchor_cy < now_cy) ? now_cy
@@ -1830,13 +1868,16 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
                                                   : l->band_x;
         /* The anchor's on-screen y tracks the CONTENT it is glued
          * to (auto-scroll slides it off the top as the sweep grows
-         * downward); the moving edge is where the pointer is. */
+         * downward); the moving edge is where the pointer is.
+         * Round 10: viewport = content − offset + the header
+         * inset (the capture's inverse, band_rect's shape). */
         fdk_i32 ay_off = 0;
         if (l->scroll != NULL) {
             fdk_i32 axo = 0;
             fdk_scrollview_get_scroll_offset(l->scroll, &axo, &ay_off);
         }
-        fdk_f32 anchor_vy = l->band_anchor_cy - (fdk_f32)ay_off;
+        fdk_f32 anchor_vy = l->band_anchor_cy - (fdk_f32)ay_off +
+                            (fdk_f32)list_content_top(l);
         fdk_f32 y1 = (anchor_vy < l->band_now_y) ? anchor_vy
                                                  : l->band_now_y;
         fdk_f32 y2 = (anchor_vy < l->band_now_y) ? l->band_now_y
@@ -2008,6 +2049,17 @@ void fdk__list_test_column_x(fdk_widget *list, size_t col,
     if (out_content_width != NULL) {
         *out_content_width = l->content_width;
     }
+}
+
+/* TEST SEAM (round 10): the content's top inset — the header strip
+ * under columns, 0 otherwise. Tests compute real row positions from
+ * it (row i's top = content_top + i*row_height). Never called by
+ * the library itself. */
+fdk_i32 fdk__list_test_content_top(fdk_widget *list) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return 0;
+    }
+    return list_content_top(list_of(list));
 }
 
 fdk_result fdk_list_set_columns(fdk_widget *list,

@@ -84,6 +84,12 @@ void fdk__list_test_column_x(fdk_widget *list, size_t col,
                              fdk_i32 *out_x, fdk_i32 *out_w,
                              fdk_i32 *out_content_width);
 
+/* list.c TEST SEAM (round 10): the content's top inset — the
+ * header strip's height under columns, 0 otherwise. Tests compute
+ * real row positions from it (row i's top = content_top +
+ * i*row_height in list-local space). Tests only. */
+fdk_i32 fdk__list_test_content_top(fdk_widget *list);
+
 /* ---- shared helpers ---- */
 
 /* fdk_alloc'd copy of s (NULL -> NULL). The catalog's owned text. */

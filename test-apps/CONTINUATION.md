@@ -1,3 +1,130 @@
+# §31 continuation — UPDATE (owner round 10: the wrong-row offset, the pegged core, the GPU question)
+
+## Remote proof
+origin/main == this round's commit, normal fast-forward push (round 9's standing rule holds:
+never force-push). `git ls-remote origin main` is the authority.
+
+## Incident (the second one — read before trusting any sandbox snapshot)
+Round 10 was COMPLETED once already (code, tests, rigs, docs, all verified, commit cbc26fc)
+but the session ended before its push, and the next sandbox recycle handed back an ALIEN
+snapshot again: HEAD at the pre-round-8 force-push-era commit c1f27e9, with c71a7b0/9fc4fb1
+not even present as objects, plus one uncommitted 169-line wayland_egl.c edit that was never
+part of the true lineage. Recovery this time: the uncommitted edit is preserved as a patch
+(/home/z/my-project/download/alien-wayland-egl-uncommitted.patch — the owner decides whether
+any of it is wanted), the alien head is tagged locally as branch alien-snapshot-c1f27e9,
+origin was fetched and main reset --hard to c71a7b0 (the round-9 head, intact on the remote
+all along), and round 10 was REDONE on the true lineage and re-verified from scratch.
+The lesson both incidents teach, now standing practice: the REMOTE is the only lineage
+authority; a recycled sandbox's tree is untrusted until `git fetch origin && git status`
+says it matches, and any round whose push failed must be assumed LOST, not "pending".
+
+## The owner's three reports, one root cause + one architecture finding
+
+1. **"Selecting something in the context menu is not right"** and
+2. **"clicking a folder [in fdk-files] highlights the item below"** — SAME bug. The context
+   menu flavors itself from the pane's LIVE SELECTION (`view_event`: `sel > 1 → CTX_MULTI,
+   sel == 1 → CTX_FILE, else CTX_EMPTY`), so a selection that lands one row low makes the menu
+   act on the wrong file. The pointer coordinates were NEVER wrong — the platform layers
+   (X11 core + XI2 + Wayland seat, fractional viewporter) were audited first and are
+   scale-correct by design; the Xvfb event trace proved widget-local coordinates exact
+   (`row-DOWN local=(60,7)` for a click 7px into row 1's rect).
+   ROOT CAUSE, engine: the 1.5.0 columns round inset the rows 26px below the header strip but
+   left the rubber-band math dividing RAW list-local y by the row height. Every list-level
+   press mapped one row LOWER than the pointer: a header press "selected" row 0, a press right
+   of a row's text (round 9's gate falling through to the band) selected the row BELOW — the
+   owner's exact wording. FIX: `list_content_top()` (the header inset, 0 without columns) now
+   routes every band↔content mapping — anchor capture, apply-band row math, band rect, paint
+   anchor, both auto-scroll edge tests (which also mis-measured "near the top edge" against
+   the widget's 0 instead of the viewport). Six sites, one invariant: content space starts
+   below the strip.
+   Round 9's OWN test had enshrined the bug (part 3 pressed visual row 0 and asserted row 1 —
+   written against the offset's output). Corrected to assert the visual row; `test_columns`'
+   sweep coordinates (press at local y=15 = the header!) recomputed through the new
+   `fdk__list_test_content_top()` seam; NEW `test_round10_header_strip`: R1 header click
+   selects NOTHING, R2 right-of-text chase lands the VISUAL row, R3 sweep edges exact, R4 the
+   same sweep at a NONZERO scroll offset (offset 3*rh, rows 4..6 — the path where a sign
+   error would hide until scrolled; one lived briefly in band_rect and diff review caught it).
+3. **"One core pegged during drags; GPU idle"** — two findings:
+   a) X11 had NO `window_frame_ready` op (Wayland-only), so `fdk_surface_frame_ready()`
+      short-circuited to always-true and every canonical `pump; if (frame_ready && damage)
+      paint` loop painted UNPACED — one full acquire/raster/present per loop pass while a
+      drag kept damaging (every motion). X11 motion COALESCING already existed (1.1.0-rc1,
+      the XPeekIfEvent collapse) — the pegging was paint RATE, not event rate. FIX: X11 now
+      ships the op — 17ms minimum present interval stamped by both render lanes (GLX and
+      SHM/CPU), the 1.1.6 Wayland capacity gate's reasoning (both SHM slots in flight →
+      not-ready, so the next acquire doesn't block), and two exceptions (nothing presented
+      yet; popups — first-present latency is their correctness). Measured with the new
+      perf_drag rig (250 XTEST motions/s, 6s, /proc/<pid>/stat sampling): steady-state
+      13.2% → 4.4% of one core on the original run; 4.8% on the redo (same ballpark —
+      the sandbox's noise floor, not a regression). The click sweep re-verified
+      pixel-perfect on the paced build (a click is not a frame-rate event; no latency
+      regression is possible from a 17ms gate on a discrete gesture).
+   b) The GPU question — honest answer below, in "The GPU assessment".
+
+## The round's rigs (new, all survive recycles in-tree)
+- `test-apps/fdk-files/click_rig.c` + `run_clickrig.sh` — REAL XTest click sweep down a pane
+  (DRIG layout), reading the app's `PHASE: sel` telemetry. Two lessons baked in for whoever
+  extends it: (1) the telemetry itself had to be ADDED — main.c's header has promised
+  "PHASE: sel every selection change" since §26, but only the boot smoke script ever printed
+  it; the gated print now lives in `list_selection_changed` (panes.c, FDK_FILES_DRIG-gated,
+  prints the selected count + lowest row's text AND the empty selection as `sel 0 (none)` —
+  the rig must distinguish "nothing fired" from "fired with zero"). (2) the sweep must space
+  clicks ≥600ms: at ~330ms consecutive same-row clicks consume as DOUBLE-clicks
+  (FDK_WINDOW_DBLCLICK_MS=400) and the second of each pair activates (open/navigate) instead
+  of selecting — a rig artifact that perfectly impersonates an app bug. And a third, paid for
+  twice now: the sweep's FROM/TO are WINDOW coordinates — read them from the DRIG-GEO lines,
+  never from memory (pane0's list sits at y=152..377 in this layout).
+- `test-apps/perf_drag.sh` — the pegged-core prover: DRIG app under Xvfb, a 6-second
+  250-motion/s held-button drag, /proc/<pid>/stat sampled every 500ms, steady-state deltas
+  computed. Gotcha already paid for: `pgrep -f` matches the timeout(1) wrapper first — use
+  `pgrep -x fdk-files`.
+- Makefile: both rigs link against /tmp/my-project/local-x11 (the drag-rig line's old
+  /tmp/x11dev path died with a recycle; that prefix no longer exists).
+
+## Verification ladder this round (the REDO, on the true lineage)
+- `make tools && make test` (both backends, X11+Wayland lib): **826 ok / 0 fail** —
+  identical to the pre-recycle original run of this same round.
+- test_list round-10 regression green (R1–R4); round-9 test corrected-and-green.
+- End-to-end click sweep (Xvfb, XTest, 600ms-spaced): header 152–177 → nothing; row 0 rect
+  178–208 → alpha.txt; row 1 rect 208–238 → beta-dir; empty space 240+ → nothing.
+- perf_drag: 4.8% of one core steady-state (pre-pacing baseline 13.2%).
+
+## The GPU assessment (the owner's question, answered straight)
+"Shouldn't the GPU fans ramp when I hold-click-drag? The GPU does nothing; FDK files is not
+GPU accelerated; only one core is pegged." All three observations are correct and they all
+follow from one architecture fact: **FDK is a CPU rasterizer with a GPU present-only lane.**
+Every pixel — text glyphs, rounded rects, alpha blends, the rubber band — is computed by
+scalar C into a software framebuffer (src/render/surface.c; blend_pixel per-pixel
+source-over). The GPU's only job, when the lane engages at all, is the final composite: the
+damaged rects are uploaded as a texture and drawn on a fullscreen quad (GLX on X11 / EGL+GLES2
+on Wayland, `FDK_GL_MIN_PIXELS=131072` gate — panels and popups stay on the CPU memcpy path
+because a private context + vsync swap costs more than a few hundred KB of SHM). So during a
+drag: the CPU rasterizes band-sized rects at up to the loop rate (the pacing bug made that
+"unbounded"), and the GPU does one small texture upload + one quad per frame — single-digit
+watts, fans never move. That is not a misimplementation of acceleration; it is the design.
+Is it the RIGHT design? For this project's stage, yes: the retained-mode damage tracker +
+per-rect invalidation keeps most interactions touching a few thousand pixels, the whole
+renderer is portable and testable headlessly (the entire test suite runs under Xvfb),
+and no GPU state lives in the app's address space to leak or crash. What "GPU-accelerated
+FDK" would actually mean, in honest effort order: (1) SIMD rasterization (SSE/AVX2 blend
+and fill paths, or a skia-style scanline core) — the biggest win per week of work, no GPU
+required, helps the pegged core directly; (2) render-thread + damage batching — move the
+raster off the input thread so motion never queues behind paint; (3) GPU-side damage
+(two texture slots + scissored glTexSubImage2D, which the lane already half-owns) — cuts
+the upload but NOT the raster; (4) true GPU raster (glyph atlases, tessellated rects,
+MSAA) — a rewrite-class project, months, and it forfeits the headless test story. The
+recommendation recorded for the owner: (1)+(2) next; the GL lane as-is is fine for
+presenting. And on "one core": FDK is deliberately single-threaded for input+paint (the
+thread-safety story is documented in docs/architecture.md); the fix for a pegged core is
+doing LESS per event (this round's pacing: 3× less) and eventually the render thread —
+not more cores.
+
+## Rules unchanged
+Master rule; zero warnings (-Werror on); no D-Bus library in FDK; ta_buf in apps;
+8-experiment timebox; identity ONLY Faded Dream Project
+<242450780+FemBoyGamerTechGuy@users.noreply.github.com> (git config global+local set to it;
+.git/hooks/pre-commit enforces it and commit-msg strips any Co-Authored-By/Signed-off-by);
+WIP push every step; webfetch specs, record URLs; NEVER force-push (round 9's standing rule).
 # §31 continuation — UPDATE (owner round 9: the five reports, ported onto the restored lineage)
 
 ## Remote proof
