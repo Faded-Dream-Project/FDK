@@ -124,6 +124,16 @@ struct fdk_window {
     struct fdk_window *popup_prev;
     struct fdk_window *popup_next;
 
+    /* Round 9 (the black box after menus close): the popup's anchor
+     * rect in PARENT-CLIENT coordinates, captured at creation. X11
+     * popups are override-redirect children of the ROOT, so their
+     * unmap exposes the ROOT, not the parent window — the parent
+     * never receives the Expose and never repaints the region the
+     * menu covered (a permanent black rect on screen). The popup's
+     * destroy damages this rect in the PARENT's tree instead. */
+    fdk_i32 popup_anchor_x, popup_anchor_y;
+    bool popup_anchored;
+
     /* Subsurface family (1.1.0, D-2): FDK-owned child surfaces —
      * the fdk_ext_subsurface_create* handles — link onto their
      * parent's list the same way popups do, and the same contract

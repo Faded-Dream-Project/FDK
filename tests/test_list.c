@@ -833,6 +833,114 @@ static void test_rubber_band(void) {
            "SINGLE refuses\n");
 }
 
+/* ---- round 9 (the ported owner reports) ---- */
+
+static void test_round9_ports(void) {
+    /* A WIDER root than fresh_root()'s 300 px: the empty-space
+     * presses sit at x≈300, which must be INSIDE the root for the
+     * hit test to find the list at all. */
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 430, 290},
+                                    &root)));
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &list)));
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    /* Wide rows: "row N" keeps the content band well left of the
+     * 400-px field's right half, which is where the empty-space
+     * presses go. */
+    for (int i = 0; i < 6; i++) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "row %d", i);
+        assert(fdk_ok(fdk_list_append(list, buf, NULL)));
+    }
+    fdk_widget_set_bounds(list, (fdk_rect){10, 10, 400, 260});
+    const fdk_i32 rh = fdk_list_get_row_height(list);
+
+    /* (1) The row's interactive band: a press on the row's VERTICAL
+     * extent but RIGHT of the text is EMPTY LIST SPACE — the row
+     * declines it and the list starts the rubber band there. */
+    fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    300.0f, (float)(10 + rh / 2), 0);
+    fdk_event_data move = ev_motion_evt(320.0f,
+                                        (float)(10 + rh * 3));
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 320.0f,
+                                  (float)(10 + rh * 3), 0);
+    assert(fdk_widget_tree_handle_event(root, &down));
+    (void)fdk_widget_tree_handle_event(root, &move);
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(fdk_list_selected_count(list) == 4); /* rows 0..3 swept */
+
+    /* The row still owns a press ON its content (regression guard
+     * for the same gate): a press at x=50 (over the text) selects
+     * just that row. */
+    click(root, 50.0f, (float)(10 + rh / 2), 0);
+    assert(fdk_list_selected_count(list) == 1);
+    assert(fdk_list_is_selected(list, 0));
+
+    /* (2) The gesture-cancel sweep: a live band whose POINTER_UP was
+     * swallowed by a dying popup ends via the engine's cancel call
+     * (menu.c fires it at popup-chain teardown) — the highlight
+     * cannot stick. The list keeps NO public "is banding" accessor,
+     * so the observable contract is the selection persisting (the
+     * cancel changes nothing by itself), a late stray UP after the
+     * cancel being harmless, and the sweep still working after. */
+    fdk_event_data down2 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     300.0f, 230.0f, 0);
+    fdk_event_data move2 = ev_motion_evt(320.0f, 40.0f);
+    assert(fdk_widget_tree_handle_event(root, &down2));
+    (void)fdk_widget_tree_handle_event(root, &move2);
+    assert(fdk_list_selected_count(list) == 6); /* rows 0..5 swept  */
+    fdk__list_cancel_bands_all_roots(); /* the swallowed release    */
+    fdk__list_cancel_bands_all_roots(); /* redundant cancel: safe   */
+    assert(fdk_list_selected_count(list) == 6); /* cancel keeps it  */
+    /* a stray UP arriving AFTER the cancel (the tree's own eventual
+     * release): the list is no longer banding, nothing fires       */
+    fdk_event_data stray_up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                        320.0f, 40.0f, 0);
+    (void)fdk_widget_tree_handle_event(root, &stray_up);
+    assert(fdk_list_selected_count(list) == 6);
+    fdk_list_clear_selection(list);      /* cleanup for (3)         */
+
+    /* (3) The same gate under 1.5.x COLUMNS: a press right of the
+     * name column's TEXT is still empty space even when columns are
+     * declared and the name column has stretched wide — the row
+     * must not eat it. The press-time chase selects the row at the
+     * anchor's y (the round-6 semantics test_row_press_band pins),
+     * and the release keeps it — one gesture, one answer, and the
+     * ROW was never the press's owner (a row press would have run
+     * list_row_clicked and re-selected exactly row 1 from zero). */
+    fdk_list_column cols[2] = {
+        {"Name", 120, true},
+        {"Size", 80, false},
+    };
+    assert(fdk_ok(fdk_list_set_columns(list, cols, 2)));
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(430, 290, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s); /* resolves col_x (far anchor)  */
+    fdk_list_clear_selection(list);
+    assert(fdk_list_selected_count(list) == 0);
+    fdk_event_data down3 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     300.0f, (float)(10 + rh + 5), 0);
+    fdk_event_data up3 = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 300.0f,
+                                   (float)(10 + rh + 5), 0);
+    /* handled = the LIST took it as a band (the row declined)     */
+    assert(fdk_widget_tree_handle_event(root, &down3));
+    (void)fdk_widget_tree_handle_event(root, &up3);
+    assert(fdk_list_selected_count(list) == 1); /* the chase row    */
+    assert(fdk_list_is_selected(list, 1));
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] list: round 9 — presses right of the content are "
+           "empty space (band, not row; press-time chase keeps the "
+           "round-6 click semantics), content presses still select, "
+           "the menu-teardown cancel sweep ends swallowed gestures "
+           "(redundant-safe, stray-UP-safe), the gate holds under "
+           "columns\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -864,6 +972,7 @@ int main(void) {
     test_columns();
     test_row_press_band();
     test_rubber_band();
+    test_round9_ports();
 
     fdk_font_destroy(g_font);
     printf("all list tests passed\n");

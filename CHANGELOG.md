@@ -15,6 +15,49 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-03 (on the rc2 line)
+
+### Fixed — owner round 9: the five interaction reports (ported onto the restored lineage)
+
+- **List: stuck rubber bands after menus close.** A dying popup
+  chain swallows the POINTER_UP that would end a sweep, leaving the
+  band's highlight on screen. Menu teardown now calls
+  `fdk__list_cancel_bands_all_roots()` (internal seam), which ends
+  every live band in every root — and clears the rows' pending_band
+  arms, whose release was swallowed with it.
+- **List: presses right of a row's content are empty list space.**
+  A row accepts presses only over icon + name text + padding
+  (columns-aware); a press beyond starts the rubber band at the
+  list, exactly like the space below the rows. Round-6 press-time
+  chase semantics preserved (a no-motion click at a row's y selects
+  that row).
+- **Menu: context menus are single-session at the engine level.**
+  `fdk__menu_popup_open_full()` closes every other context session
+  first; N right-clicks can no longer stack N popups.
+- **Menu: the opening press's release cannot activate an item.**
+  Menu views press-arm; an UNARMED POINTER_UP is swallowed
+  (GTK/Qt behavior) — the "Properties acts like Delete" misfire
+  class.
+- **List: damage-limited band repaint.** The sweep invalidates the
+  union of the old + new band rects (new internal seam
+  `fdk__widget_invalidate_rect`) plus only the rows that flip;
+  previously every motion pixel repainted the whole list (the
+  large-directory CPU ramp).
+- **Window: popup destroy damages the parent over the popup's
+  anchor rect.** X11 override-redirect popups unmap off the root,
+  so the parent never received the Expose for the covered region —
+  a stale box where the menu was.
+
+### Incident record — the round-9 lineage restore
+
+A mid-session sandbox recycle produced a diverged working tree
+that was committed and force-pushed over origin/main, displacing
+round 8's head. The true head (9fc4fb1) was recovered from GitHub
+by full SHA and restored; the displaced work lives on
+backup/round-9-alien and was re-ported onto the true lineage this
+round (the five fixes above). Policy from the owner, permanent:
+no force-pushes — fast-forward only, divergences get reconciled.
+
 ## [Unreleased-candidate features] — 2026-11-01 (on the rc2 line)
 
 ### Changed — §23 Part A: the add-on package renamed fdk-shell -> fdk-shell-overlay (the owner's layout fix)

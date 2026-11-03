@@ -221,6 +221,9 @@ typedef struct fdk_list {
                               * chases the pointer)                  */
     bool *band_base;     /* pre-band snapshot (ctrl) or NULL         */
     size_t band_base_cap;
+    fdk_rect band_last_rect; /* round 9: the last painted band rect
+                              * (damage-limited invalidation — the
+                              * union of old+new repaints the sweep) */
     /* ---- Band auto-scroll (1.4.3) ----
      *
      * When the sweep's pointer leaves the viewport's visible band,
@@ -934,6 +937,31 @@ static fdk_point row_abs_pos(const fdk_widget *w) {
     return (fdk_point){x, y};
 }
 
+/* The row's INTERACTIVE band (the round-9 owner report): a row
+ * counts as a row only over its CONTENT — the icon band plus the
+ * name text plus the row's own padding. A press to the RIGHT of
+ * that is EMPTY LIST SPACE: the row declines it, the hit-test walk
+ * falls through to the list, and the rubber band starts there,
+ * exactly like the space below the rows. (The row's hit rect stays
+ * full-width for painting — selection/hover fills span the row and
+ * the 1.5.x column cells ride the same expanse — but presses
+ * outside the interactive band are not this row's.) */
+static bool row_press_on_content(const fdk_list *l,
+                                 const fdk_list_row *row,
+                                 fdk_f32 local_x) {
+    if (row == NULL) {
+        return false;
+    }
+    fdk_i32 tw = 0;
+    fdk_i32 th = 0;
+    if (l->font != NULL && row->text != NULL) {
+        fdk__text_extent(l->font, row->text, &tw, &th);
+    }
+    fdk_i32 band =
+        LIST_ROW_PAD_X + row_icon_band(row) + tw + LIST_ROW_PAD_X;
+    return local_x < (fdk_f32)band;
+}
+
 static bool row_handle_event(fdk_widget *w,
                              const fdk_widget_event *ev) {
     switch (ev->type) {
@@ -952,6 +980,14 @@ static bool row_handle_event(fdk_widget *w,
         fdk_list *l = list_of(list_w);
         for (size_t i = 0; i < l->count; i++) {
             if (&l->row_widgets[i]->base == w) {
+                /* The interactive band: icon + name text only. A
+                 * press right of the content is empty list space —
+                 * the row declines it, the hit-test walk falls to
+                 * the list, and the rubber band starts there. */
+                if (!row_press_on_content(l, l->row_widgets[i],
+                                          ev->pointer.position.x)) {
+                    return false;
+                }
                 /* MULTIPLE-mode press on an UNSELECTED row with no
                  * range modifier is a POTENTIAL rubber band (1.5.0):
                  * a full directory view is wall-to-wall rows — there
@@ -1374,6 +1410,10 @@ static bool list_handle_event(fdk_widget *w,
          * the ctrl sweep keeps the snapshot. A press that STARTS at
          * the edge chases immediately (the motion path's rule,
          * applied at the gesture's birth). */
+        l->band_last_rect = (fdk_rect){0, 0, 0, 0}; /* a fresh
+                                                     * gesture owes
+                                                     * no old-rect
+                                                     * damage     */
         list_apply_band(l);
         list_band_scroll_track(l);
         list_fire_changed(l);
@@ -1582,6 +1622,55 @@ static void list_arrange(fdk_widget *w, fdk_rect assigned) {
  * with the pre-band snapshot when Ctrl armed the sweep. Rows flip
  * through list_set_row so the a11y notifications ride the same
  * path shift-range clicks take. */
+/* The band's LIST-LOCAL rect (round 9): the same geometry the paint
+ * path draws — x from the press/pointer pair, y from the anchor's
+ * on-screen position (content-glued) and the pointer, clamped to the
+ * list's bounds. A zero rect means "nothing to repaint". */
+static fdk_rect list_band_rect(const fdk_list *l) {
+    if (!l->banding) {
+        return (fdk_rect){0, 0, 0, 0};
+    }
+    fdk_f32 x1 = (l->band_x < l->band_now_x) ? l->band_x
+                                              : l->band_now_x;
+    fdk_f32 x2 = (l->band_x < l->band_now_x) ? l->band_now_x
+                                              : l->band_x;
+    fdk_i32 ay_off = 0;
+    if (l->scroll != NULL) {
+        fdk_i32 axo = 0;
+        fdk_scrollview_get_scroll_offset(l->scroll, &axo, &ay_off);
+    }
+    fdk_f32 anchor_vy = l->band_anchor_cy - (fdk_f32)ay_off;
+    fdk_f32 y1 = (anchor_vy < l->band_now_y) ? anchor_vy
+                                              : l->band_now_y;
+    fdk_f32 y2 = (anchor_vy < l->band_now_y) ? l->band_now_y
+                                              : anchor_vy;
+    fdk_i32 bx1 = (fdk_i32)x1;
+    fdk_i32 by1 = (fdk_i32)y1;
+    fdk_i32 bx2 = (fdk_i32)x2;
+    fdk_i32 by2 = (fdk_i32)y2;
+    fdk_i32 w = l->base.bounds.width;
+    fdk_i32 h = l->base.bounds.height;
+    if (bx1 < 0) {
+        bx1 = 0;
+    }
+    if (by1 < 0) {
+        by1 = 0;
+    }
+    if (bx2 > w) {
+        bx2 = w;
+    }
+    if (by2 > h) {
+        by2 = h;
+    }
+    if (bx2 < bx1) {
+        bx2 = bx1;
+    }
+    if (by2 < by1) {
+        by2 = by1;
+    }
+    return (fdk_rect){bx1, by1, bx2 - bx1, by2 - by1};
+}
+
 static void list_apply_band(fdk_list *l) {
     if (l->count == 0) {
         return;
@@ -1611,13 +1700,39 @@ static void list_apply_band(fdk_list *l) {
     if (r_hi > (fdk_i64)l->count) {
         r_hi = (fdk_i64)l->count;
     }
+    /* Round 9 (the lag report): rows that keep their state are NOT
+     * invalidated — list_set_row already damages only the rows that
+     * FLIP. The whole-list invalidate that used to run here repainted
+     * every row (full-width selection fills, header strip and all) on
+     * every single motion pixel, which on a large directory pegged a
+     * core. What still must repaint every motion: the band TINT rect
+     * itself — the OLD band's rect and the NEW one. */
+    fdk_rect band = list_band_rect(l);
+    if (band.width > 0 && band.height > 0) {
+        fdk_rect prev = l->band_last_rect;
+        if (prev.width > 0 && prev.height > 0) {
+            if (prev.x < band.x) {
+                band.x = prev.x;
+            }
+            if (prev.y < band.y) {
+                band.y = prev.y;
+            }
+            if (prev.x + prev.width > band.x + band.width) {
+                band.width = prev.x + prev.width - band.x;
+            }
+            if (prev.y + prev.height > band.y + band.height) {
+                band.height = prev.y + prev.height - band.y;
+            }
+        }
+        l->band_last_rect = band;
+        fdk__widget_invalidate_rect(&l->base, band);
+    }
     for (size_t i = 0; i < l->count; i++) {
         bool want = ((fdk_i64)i >= r_lo && (fdk_i64)i < r_hi) ||
                     (l->band_ctrl && l->band_base != NULL &&
                      i < l->band_base_cap && l->band_base[i]);
-        list_set_row(l, i, want);
+        list_set_row(l, i, want); /* damages only flips */
     }
-    fdk_widget_invalidate(&l->base);
 }
 
 /* The lazy-sync half of the scrollview bookkeeping. fdk_widget_
@@ -2539,4 +2654,48 @@ void fdk_list_clear_selection(fdk_widget *list) {
     }
     list_clear_selection(l);
     list_fire_changed(l);
+}
+
+static void fdk__list_cancel_bands_subtree(fdk_widget *w);
+
+/* The gesture-cancel sweep (round 9): see widgets_internal.h. Walks
+ * every root, every widget; a list with a live band ends it exactly
+ * as a POINTER_UP would (minus the fire — nothing changed since the
+ * last apply; the callback already ran at the press/motions). */
+void fdk__list_cancel_bands_all_roots(void) {
+    for (fdk_widget *root = fdk__widget_roots_head(); root != NULL;
+         root = root->root_next) {
+        fdk__list_cancel_bands_subtree(root);
+    }
+}
+
+/* Recursive half: pre-order. A list's band lives on the list itself,
+ * and menus can be nowhere inside a list (popups are separate
+ * windows), so there is no ordering constraint with the subtree
+ * walk. The pending_band flags (1.5.0's row-born gestures) are
+ * cleared too: their POINTER_UP was swallowed with the popup's, and
+ * a stale armed row would synthesize a phantom band from stale
+ * coordinates on the next motion. */
+static void fdk__list_cancel_bands_subtree(fdk_widget *w) {
+    if (w == NULL || (w->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    if (w->klass == &fdk_list_class_def) {
+        fdk_list *l = list_of(w);
+        if (l->banding) {
+            l->banding = false;
+            list_band_scroll_disarm(l);
+            fdk_free(l->band_base);
+            l->band_base = NULL;
+            l->band_base_cap = 0;
+            fdk_widget_invalidate(w); /* the band rect disappears */
+        }
+    }
+    if (w->klass == &fdk_list_row_class_def) {
+        row_of(w)->pending_band = false; /* the swallowed release's
+                                          * arm dies with the chain */
+    }
+    for (size_t i = 0; i < w->child_count; i++) {
+        fdk__list_cancel_bands_subtree(w->children[i]);
+    }
 }

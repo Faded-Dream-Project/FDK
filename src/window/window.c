@@ -832,6 +832,9 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->popup_first = NULL;
     window->popup_prev = NULL;
     window->popup_next = NULL;
+    window->popup_anchor_x = 0;
+    window->popup_anchor_y = 0;
+    window->popup_anchored = false;
     window->sub_parent = NULL; /* 1.1.0 D-2: linked by extend.c at   */
     window->sub_first = NULL;  /* subsurface create; swept at destroy */
     window->sub_prev = NULL;
@@ -950,6 +953,17 @@ static fdk_result window_create_full(fdk_context *ctx,
             parent->popup_first->popup_prev = window;
         }
         parent->popup_first = window;
+        /* Round 9: remember WHERE we sat against the parent — the
+         * unmap exposes the X root, not the parent, so this rect is
+         * the only record of what the parent must repaint when we
+         * go. options->x/y are parent-client per the create
+         * contract (the popup entries set them before recursing
+         * here). */
+        window->popup_anchor_x =
+            (options != NULL) ? options->x : 0;
+        window->popup_anchor_y =
+            (options != NULL) ? options->y : 0;
+        window->popup_anchored = true;
     }
 
     FDK_DEBUG("window created");
@@ -1043,6 +1057,29 @@ void fdk_window_destroy(fdk_window *window) {
         }
         if (window->popup_next != NULL) {
             window->popup_next->popup_prev = window->popup_prev;
+        }
+        /* Round 9 (the black box): the popup covered this rect of
+         * the parent; the parent never gets the Expose for it (the
+         * X11 popup unmapped off the ROOT, Wayland's xdg_popup
+         * dismissal is compositor-side). Damage the parent's tree
+         * over the popup's anchor rect so the next paint re-blits
+         * real content where the menu was. Clamp: the popup may sit
+         * partly outside the parent (menus flip at screen edges). */
+        if (window->popup_anchored &&
+            window->popup_parent->root != NULL) {
+            fdk_rect r = { window->popup_anchor_x,
+                           window->popup_anchor_y,
+                           window->last_size.width,
+                           window->last_size.height };
+            if (r.x < 0) {
+                r.width += r.x;
+                r.x = 0;
+            }
+            if (r.y < 0) {
+                r.height += r.y;
+                r.y = 0;
+            }
+            fdk__widget_invalidate_rect(window->popup_parent->root, r);
         }
     }
     if (window->root != NULL) {

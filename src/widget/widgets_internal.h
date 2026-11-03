@@ -210,6 +210,19 @@ void fdk__row_icon_paint_image(fdk_surface *surface, fdk_surface *img,
 fdk_result fdk__list_row_set_icon_image(fdk_widget *list, size_t row,
                                         fdk_surface *image);
 
+/* List sweep (round 9): ends every live rubber-band selection in
+ * every root in this process — the "gesture cancel" the menu
+ * machinery fires when a popup chain dies (an outside click became
+ * a CLOSE_REQUEST at the popup, so the tree never sees the
+ * POINTER_UP that would have ended the band; without this the
+ * highlight sticks). Menu.c's teardown is the only caller. */
+void fdk__list_cancel_bands_all_roots(void);
+
+/* widget.c (round 9): the damage-limited invalidation — one
+ * widget-LOCAL rect, clipped to the widget's bounds. The list
+ * band's repaint seam; public API stays whole-widget. */
+void fdk__widget_invalidate_rect(fdk_widget *widget, fdk_rect local);
+
 /* IconView items: the same seam, grid-shaped. */
 fdk_result fdk__iconview_item_set_icon_image(fdk_widget *iconview,
                                              size_t index,
