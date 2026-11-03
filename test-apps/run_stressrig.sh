@@ -27,6 +27,7 @@ sleep 1.5
 export DISPLAY="$XVFB_DISP"
 export ASAN_OPTIONS=detect_leaks=0
 export FDK_PRESENT_TRACE=1
+[ -n "${STRESS_NOBLIT:-}" ] && export FDK_SCROLL_NOBLIT=1
 : > /tmp/stressrig-app.log
 FDK_FILES_DRIG=1 FDK_TESTAPP_FRAMES=0 FDK_DRIG_W=$((W - 40)) FDK_DRIG_H=$((H - 80)) "$BIN" > /tmp/stressrig-app.log 2>&1 &
 APID=$!

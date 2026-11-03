@@ -12580,7 +12580,11 @@ static void test_ext_api_basics(void) {
     assert(fdk_ext_has_capability(ctx, FDK_EXT_CAP_SHM_RENDER));
     assert(fdk_ext_has_capability(ctx, FDK_EXT_CAP_POPUP_GRAB));
     assert(fdk_ext_has_capability(ctx, FDK_EXT_CAP_EWMH_DOCK));
-    assert(!fdk_ext_has_capability(ctx, FDK_EXT_CAP_FRAME_PACING));
+    /* Round 10 gave X11 a real window_frame_ready (the 17 ms present
+     * interval + SHM-slot backpressure), so the pacing capability is
+     * true — the always-true era this assert was written against is
+     * gone. */
+    assert(fdk_ext_has_capability(ctx, FDK_EXT_CAP_FRAME_PACING));
     assert(!fdk_ext_has_capability(ctx, (fdk_ext_capability)999));
 
     /* The native display accessor hands out the REAL Display*: prove

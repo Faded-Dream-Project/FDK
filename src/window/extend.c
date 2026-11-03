@@ -142,9 +142,12 @@ int fdk_ext_has_capability(fdk_context *ctx, fdk_ext_capability cap) {
              * vouch for. */
             return fdk_ext_active_backend(ctx) == FDK_EXT_BACKEND_X11;
         case FDK_EXT_CAP_FRAME_PACING:
-            /* Compositor-driven pacing = the frame_ready op exists
-             * (Wayland); X11's always-ready semantics report false —
-             * there is nothing to pace against. */
+            /* Real pacing = the frame_ready op exists. Wayland:
+             * compositor frame callbacks. X11 (round 10): the 17 ms
+             * present-interval floor plus the both-SHM-slots-in-
+             * flight backpressure gate — self-imposed rather than
+             * compositor-driven, but fdk_surface_frame_ready()
+             * genuinely throttles a pump-paint loop there. */
             return ops->window_frame_ready != NULL;
         default:
             return 0; /* unknown capability: honestly absent */

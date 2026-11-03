@@ -1450,13 +1450,22 @@ fdk_result fdk_surface_blit(fdk_surface *dst, fdk_i32 dst_x, fdk_i32 dst_y,
  *     top-to-bottom, downward shifts bottom-to-top, so no row is
  *     read after being overwritten (a plain memcpy loop would smear
  *     for overlapping shifts);
- *   - the copy is NOT damage-tracked — the caller (the scrollview)
- *     is moving pixels the damage model already knows about; it adds
- *     its own strip damage. Tracking here too would double-report
- *     and coarsen back to whole-widget damage (exactly what this
- *     primitive exists to avoid). The clip stack is honored on read
- *     and write (the scrollview blits outside its own paint, so the
- *     stack is empty in practice — kept for safety). */
+ *   - the DESTINATION region IS damage-tracked, and must be: those
+ *     pixels are new content AT THOSE COORDINATES on the wire. The
+ *     X11 present's slot sync brings the next back slot up to date
+ *     by copying exactly the PRESENTED rects — an un-tracked blit
+ *     leaves the moved rows off the wire (the server's window keeps
+ *     the pre-scroll arrangement outside the strips) and stale in
+ *     the next back slot (the following blit reads two-frames-old
+ *     rows). Found live by the blit-check's pixel diff (36k
+ *     subpixels, list area; the FDK_SCROLL_NOBLIT control passed).
+ *     This is SURFACE damage (wire bytes), a different ledger from
+ *     the TREE damage the scrollview sets (repaint-walk bounds =
+ *     strips only): the paint cost stays strip-limited while the
+ *     wire cost honestly includes the moved band. The clip stack is
+ *     honored on read and write (the scrollview blits outside its
+ *     own paint, so the stack is empty in practice — kept for
+ *     safety). */
 fdk_result fdk__surface_self_blit(fdk_surface *s, fdk_i32 dst_x,
                                   fdk_i32 dst_y, fdk_i32 src_x,
                                   fdk_i32 src_y, fdk_i32 w, fdk_i32 h) {
@@ -1522,6 +1531,12 @@ fdk_result fdk__surface_self_blit(fdk_surface *s, fdk_i32 dst_x,
             (size_t)sx0;
         memmove(dst_row, src_row, copy_len * sizeof(fdk_u32));
     }
+    /* The moved band goes on the wire (see the header comment: the
+     * X11 slot sync and the Wayland buffer damage both key off the
+     * presented rect list). */
+    damage_add(s, (fdk_rect){ .x = (fdk_i32)dx0, .y = (fdk_i32)dy0,
+                             .width = (fdk_i32)(dx1 - dx0),
+                             .height = (fdk_i32)(dy1 - dy0) });
     return FDK_OK;
 }
 fdk_result fdk__surface_blit_alpha(fdk_surface *dst, fdk_i32 dst_x,
