@@ -129,10 +129,11 @@ typedef enum fdk_ext_capability {
      * this capability reports false there and the add-on binds the
      * protocol itself. */
     FDK_EXT_CAP_EWMH_DOCK    = 3,
-    /* The compositor drives frame pacing (frame-ready feedback):
-     * Wayland's frame callbacks. X11 has none in the core protocol
-     * (fdk_surface_frame_ready is always-true there), so it reports
-     * false — the add-on paces itself. */
+    /* Frame pacing through fdk_surface_frame_ready(): Wayland's
+     * compositor frame callbacks; X11's round-10 paint pace (a 17 ms
+     * present-interval floor plus SHM-slot backpressure —
+     * self-imposed, not compositor feedback, but a real throttle
+     * either way). */
     FDK_EXT_CAP_FRAME_PACING = 4,
 } fdk_ext_capability;
 

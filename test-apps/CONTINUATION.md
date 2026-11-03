@@ -1,3 +1,137 @@
+# §31 continuation — UPDATE (owner round 14: the scroll repaint — delta-strip damage, and the hover repaint gap)
+
+## The owner's brief and the round's shape
+The performance-audit thread's third round, aimed at the scroll path:
+the engine invalidated the WHOLE scrollview on every offset change
+(wheel flights, thumb drags, trough paging) and repainted the full
+viewport, though a pure offset change leaves nearly every row painted
+— just shifted. Fixed engine-level with a same-surface blit of the
+preserved region + exposed-strip-only tree damage; along the way the
+new rigs found and fixed a real HOVER repaint gap and two strip-path
+correctness bugs. A full sandbox recycle mid-round (the third
+incident) destroyed the round's first implementation; it was rebuilt
+from scratch on the true lineage (origin/main b2df84d) and every
+verification was re-run — nothing below cites a pre-recycle run.
+
+## What shipped (engine, all internal seams — API surface unchanged)
+1. **fdk__surface_self_blit** (render): overlap-safe same-surface
+   region copy (memmove row walk, direction by shift sign). The
+   DESTINATION is damage-tracked — deliberately and necessarily: the
+   X11 present's slot sync brings the next back slot up to date by
+   copying exactly the PRESENTED rects, so an untracked blit leaves
+   the moved rows off the wire (stale arrangement on screen outside
+   the strips) AND stale in the next back slot. SURFACE damage (wire
+   bytes) is a different ledger from TREE damage (repaint-walk
+   bounds): paint stays strip-limited, the wire honestly carries the
+   moved band. [This was blit-check bug #1 — 36k differing subpixels.]
+2. **scroll_apply_delta_damage** (widgets/scroll): pure offset
+   changes blit the preserved region and set EXACT strip damage
+   (fdk__widget_set_damage — replaces the root's box, unions the
+   layout-entry snapshot + the visible bars' thumb-precise old∪new
+   rects via bar_thumb_at/bar_thumb_damage). The flight is a
+   SELF-DAMAGING animation (fdk__animation_set_self_damage: the pump
+   skips its blanket post-tick invalidate); declined paths fall back
+   to the whole-widget invalidate. [Blit-check bug #2: the blit/strip
+   footprint must EXCLUDE a visible CLASSIC bar's strip — a
+   full-width blit smeared shifted content over the opaque trough.]
+3. **The HiDPI gate**: fdk__window_tree_paint_scale/_tree_surface
+   (window.c, the one-way-opaque owner back-edge). At scale > 1 the
+   tree paints into a cleared intermediate — preserved pixels do not
+   exist there — so the strip path declines. Recorded follow-up: a
+   physical-space blit under scaling (4K also honestly degrades to
+   full damage today via the 75% coarsening).
+4. **The hover repaint gap**: set_hovered flipped FDK_WF_HOVERED and
+   delivered ENTER/LEAVE but nothing guaranteed an invalidation —
+   and list rows handle neither event while row_paint renders hover
+   fills from the flag. Sweeps left stale highlights; the hover
+   storm measured 1 kHz zigzag → ZERO presents. The transition now
+   damages both sides at the choke point. [Found by the rig AFTER
+   fixing my own zigzag pattern bug — see rigs.]
+5. **Instrumentation**: FDK_PRESENT_TRACE=1 (one line per present:
+   monotonic ms, full|rects, damaged area, window area, rect count)
+   and FDK_SCROLL_NOBLIT=1 (the A/B kill-switch).
+
+## Measured (release build, 20k-row list, run_stressrig.sh)
+| storm | strips OFF | strips ON |
+|---|---|---|
+| wheel 20/s | 3.0% core, 53/53 fulls | **1.8% core, 2/49 fulls, ratio 0.66** |
+| wheel 250/s (freespin) | 15.7% core, 254/254 fulls | **8.8% core, 0/241 fulls, ratio 0.63** |
+| hover 1 kHz | 0 presents (the gap) | **43/s presents, ratio 0.311, 4.7% core** |
+| sbdrag 1 kHz | — | **ratio 0.141, 5.5% core** |
+Blit pixel-identity (run_blitcheck.sh, 200/500/2000 files): PASS —
+0 differing subpixels of 700,000, all three sizes.
+
+## The rigs (in-tree; the round's own lessons are baked into each)
+- `stress_rig.c` + `run_stressrig.sh` — real-rate input at last
+  (RIG_RATE_HZ wheels, 1 kHz hover, scrollbar drags). THREE rig bugs
+  found and fixed while building it, each of which first looked like
+  an engine bug: (a) the /proc/<pid>/stat parser skipped one field
+  too many — it read stime+cutime, so a pure-userspace worker
+  measured "0% CPU" and the settle gate released a 20k-row UI bind
+  straight into the storm (the "dead storm, burst at end" signature);
+  the comment in proc_cpu_ticks guards the field count. (b) the hover
+  zigzag reset its position per 16-event batch — the app's motion
+  coalescing (by design) kept only each batch's LAST motion, i.e.
+  the SAME row every batch: no hover change, a vacuous storm. Zigzag
+  state must persist across batches. (c) the settle gate needs
+  THREE consecutive quiet polls — the worker→bind pipeline has an
+  idle gap a single poll can land in.
+- `run_blitcheck.sh` + `scripts/xsnap.c` + `scripts/xexpose.c` —
+  the pixel-identity gate (blit-scrolled frame vs forced full
+  repaint must be byte-identical). XClearArea(exposures=True) is the
+  repaint twin; the tools select the window by title substring or id
+  (largest toplevel fallback under bare Xvfb).
+- Wayland suite rig note (cost me an hour): the sway config MUST pin
+  `org.fdk.wl-dnd-source` at `100 px 380 px` (the DnD legs' drag
+  coordinates assume it) and export SWAYSOCK — without them the
+  suite fails at wl_dnd_rx.enters / focused-window asserts that look
+  exactly like engine regressions. Full recipe: WLR_BACKENDS=
+  headless WLR_RENDERER=pixman, XDG_RUNTIME_DIR=/home/z/apt/xdg-run,
+  LD_LIBRARY_PATH=/home/z/apt/prefix/usr/lib/x86_64-linux-gnu, sway
+  -c with `xwayland disable` (no Xwayland binary on this image).
+
+## Verification ladder (all post-recycle, on the final code)
+- `make test` (ASan/UBSan): **762 [ok], all tests passed.**
+- `make test-x11`: **228 [ok]** — after fixing a PRE-EXISTING
+  round-10 leftover this round's runs tripped over: the test (and
+  extend.c's comment, fdk_extend.h's doc, EXTENDING.md's table)
+  still said X11 has no frame pacing, but round 10 shipped a real
+  window_frame_ready (17 ms interval + SHM backpressure). All four
+  flipped to the round-10 truth.
+- `make test-wayland` (headless sway): **65 [ok], all passed** (GL-
+  lane legs skip: no EGL driver on this image — documented).
+- A/B + blit-check numbers above; FDK_SCROLL_NOBLIT control run
+  confirms the OFF path still measures the old behavior exactly.
+
+## Incident (the third recycle — same lesson, now with a twist)
+Round 14 was completed once already when the sandbox recycled and
+handed back a tree WITHOUT the round's working dir at all (work/
+held an older clone at c1f27e9-era; FDK-r14 gone entirely; /tmp and
+/home/z/apt wiped). Recovery followed the standing practice: fetch
+origin (b2df84d was intact — the push-every-step rule would have
+made this free, and the round's code commit had NOT yet been pushed,
+so everything was rebuilt from the conversation's surviving
+artifacts), reset main to it, rebuild toolchains via
+scripts/setup-sandbox.sh (whose own cd bug — steps 2-4 stranded in
+/tmp/x11dev-debs when x11dev was already prepared — is fixed in the
+round's commit). The twist worth remembering: the recycled snapshot's
+/home/z/my-project/scripts/ still held the OLD session's rig binaries
+(fdk-wl-inject, wl_dnd_source — built Oct 7) — check there before
+re-deriving tools.
+
+## Next round candidates
+- The physical-space blit under HiDPI scaling (4K full-damage today).
+- fdk-files: the fs_stat_entry worker-pool threading (round-13
+  carry-over — the 20k-row UI-thread bind this round's rig kept
+  tripping over is exactly that candidate's business).
+- (existing list: S7/S8/S10, PART-1..8, §30 backlog.)
+
+## Rules unchanged
+Master rule; zero warnings (-Werror on); no D-Bus library in FDK;
+ta_buf in apps; 8-experiment timebox; identity ONLY
+Faded Dream Project <242450780+FemBoyGamerTechGuy@users.noreply.github.com>;
+WIP push every step; webfetch specs, record URLs; NEVER force-push.
+
 # §31 continuation — UPDATE (owner round 13: the core-of-FDK performance audit — the text path)
 
 ## The owner's report and what the audit found

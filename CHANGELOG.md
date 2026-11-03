@@ -17,6 +17,71 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-03 (on the rc2 line)
 
+### Performance — owner round 14: the scroll repaint (whole-viewport damage per offset change) + the hover repaint gap
+
+- **The scroll strip path.** Every scroll offset change — wheel
+  flights, thumb drags, trough paging, programmatic scrolls —
+  invalidated the whole scrollview and repainted the entire
+  viewport, even though a pure offset change leaves almost all
+  rows already painted, just shifted. `scroll_apply_delta_damage`
+  (scroll.c) now blits the preserved region inside the window
+  surface (`fdk__surface_self_blit` — a new render-layer
+  primitive: overlap-safe same-surface region copy, memmove
+  row-walk with the direction picked by shift sign) and sets
+  EXACT strip damage: the tree damage becomes the exposed strips
+  only (unioned with anything pending at layout entry and the
+  visible bars' thumb-precise old∪new rects), so the repaint
+  walk renders a few dozen rows' worth of pixels instead of the
+  viewport. The eased wheel flight is now a self-damaging
+  animation (`fdk__animation_set_self_damage`) — the pump skips
+  its blanket post-tick invalidate for it; declined paths (HiDPI,
+  detached trees, blit failure, full-page jumps) fall back to the
+  whole-widget invalidate the code always had.
+- **The HiDPI gate.** At paint scale > 1 the tree paints into a
+  cleared logical intermediate (the HiDPI compositing path), so
+  the window surface's "preserved pixels" are not the tree's
+  paint target — a blit there preserves nothing.
+  `fdk__window_tree_paint_scale` (the one-way-opaque owner
+  back-edge) gates the strip path off there: full-viewport damage
+  stays (correct, merely slower); a physical-space blit under
+  scaling is the recorded follow-up.
+- **The hover repaint gap (an engine bug the new rig found).**
+  `set_hovered` flipped `FDK_WF_HOVERED` and delivered ENTER/
+  LEAVE — but nothing guaranteed an invalidation, and the list
+  rows' class handles neither event while `row_paint` renders
+  hover fills from the flag. A pointer sweep across rows left
+  stale highlights wherever nothing else happened to invalidate
+  (the hover storm measured it starkly: 1 kHz zigzag, ZERO
+  presents). The transition now damages both sides at the single
+  choke point every hover change funnels through.
+- **Measured (release build, 20k-row list, the real-rate stress
+  rig):** wheel 20/s: CPU 3.0% → 1.8% of one core; wheel 250/s
+  (the freespin extreme): 15.7% → 8.8%; median damaged-area
+  ratio 1.000 → 0.63-0.66; full-window presents 254/254 →
+  0/241; scrollbar thumb drags: median ratio 0.141; hover at
+  1 kHz: 43 presents/s at ratio 0.311 where it was zero. 4K
+  honestly degrades to full damage (accumulated strips exceed
+  the 75% present coarsening at that scale) — correct, and the
+  recorded follow-up is the physical-space blit.
+- **PRESENT-TRACE** (`FDK_PRESENT_TRACE=1`): one line per real
+  present — monotonic ms, full|rects, damaged area, window area,
+  rect count — the instrument the rig's damage-ratio medians are
+  computed from. `FDK_SCROLL_NOBLIT=1` is the A/B kill-switch
+  the measurements were made against (the pre-round-14 damage
+  behavior, on demand).
+- **The rigs** (in-tree, recycle-proof): `stress_rig.c` +
+  `run_stressrig.sh` (real-rate input: wheel at RIG_RATE_HZ,
+  1 kHz hover zigzag, scrollbar drags; /proc CPU sampling and a
+  three-consecutive-quiet-poll settle gate) and
+  `run_blitcheck.sh` + `scripts/xsnap.c` + `scripts/xexpose.c`
+  (the pixel-identity gate: a blit-scrolled frame vs a forced
+  full repaint must be byte-identical; it caught two real
+  strip-path bugs this round).
+- **API surface: unchanged** (all new seams are internal:
+  fdk__surface_self_blit, fdk__widget_set_damage/_pending_damage,
+  fdk__window_tree_paint_scale/_tree_surface,
+  fdk__animation_set_self_damage).
+
 ### Performance — owner round 13: the core text path audit (shaping re-run per paint, the glyph-table linear scan)
 
 - **The audit.** The owner's report: "the filemanager still feels

@@ -718,7 +718,22 @@ int main(int argc, char **argv) {
         pane_set_view_mode(fapp.panes[0], VIEW_DETAIL);
         pane_set_view_mode(fapp.panes[1], VIEW_DETAIL);
         fapp.active_pane = 0;
-        (void)fdk_window_resize(fapp.base.window, 1000, 700);
+        /* Round 14: the stress rig sizes the window to the SCREEN it
+         * drives (FDK_DRIG_W/H) — a 1000x700 hardcode made 1920x1080
+         * and 4K runs measure a small window's proportions. Default
+         * unchanged for the older rigs. */
+        {
+            const char *rw = getenv("FDK_DRIG_W");
+            const char *rh = getenv("FDK_DRIG_H");
+            long ww = (rw != NULL) ? atol(rw) : 1000;
+            long wh = (rh != NULL) ? atol(rh) : 700;
+            if (ww < 200) ww = 200;
+            if (wh < 150) wh = 150;
+            if (ww > 4000) ww = 4000;
+            if (wh > 4000) wh = 4000;
+            (void)fdk_window_resize(fapp.base.window,
+                                    (fdk_i32)ww, (fdk_i32)wh);
+        }
         printf("DRIG-READY\n");
         fflush(stdout);
         /* DRIG-GEO: the rig's coordinates come from the REAL layout

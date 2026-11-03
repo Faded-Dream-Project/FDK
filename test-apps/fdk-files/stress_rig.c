@@ -75,8 +75,15 @@ static double proc_cpu_ticks(pid_t pid) {
         return -1.0;
     }
     long ut = 0, st = 0;
+    /* Fields after the ')' are: state ppid pgrp session tty_nr tpgid
+     * flags minflt cminflt majflt cmajflt | utime stime — ELEVEN
+     * skips, then utime. (Twelve skips — the bug this comment
+     * guards — reads stime+cutime instead: a pure-userspace worker
+     * measures "0% CPU", which once made the settle gate release a
+     * 20k-row bind straight into the storm and the whole storm
+     * measured its own backlog.) */
     if (sscanf(rp + 2, "%*s %*s %*s %*s %*s %*s %*s %*s %*s "
-                       "%*s %*s %*s %ld %ld", &ut, &st) != 2) {
+                       "%*s %*s %ld %ld", &ut, &st) != 2) {
         return -1.0;
     }
     long clk = sysconf(_SC_CLK_TCK);
@@ -129,7 +136,21 @@ int main(void) {
         click(dpy, px, py);
         msleep(30);
         click(dpy, px, py);
-        msleep(800); /* let the load + first paint settle */
+    }
+    /* Settle before the storm: the async listing pipeline is
+     * worker-loads-dir -> idle gap -> UI-thread BINDS N row widgets
+     * (synchronous; ~7 s at 20k rows). A single quiet poll can land
+     * in that idle gap and release the storm straight into the bind
+     * — every wheel then queues behind it and the storm measures
+     * nothing (found live: 20k files, 0.3% CPU, burst-at-end).
+     * THREE consecutive quiet 300 ms polls (0.05 CPU-s each) are
+     * required instead, so a ~15 ms gap can never satisfy the gate;
+     * the bind's own CPU keeps the polls hot until it is done. */
+    for (int i = 0, quiet = 0; i < 120 && quiet < 3; i++) {
+        double c0 = proc_cpu_ticks(app);
+        msleep(300);
+        double c1 = proc_cpu_ticks(app);
+        quiet = (c1 - c0 < 0.05) ? quiet + 1 : 0;
     }
 
     /* Storm markers on the RIG's stdout (NOT the app's log — the
@@ -158,11 +179,17 @@ int main(void) {
         XTestFakeMotionEvent(dpy, 0, lx + lw / 2, ly + lh / 2,
                              CurrentTime);
         XSync(dpy, False);
-        /* Continuous wheel at 4ms gaps — the freespin/trackpad rate.
-         * No bursts-and-rests: the owner's report is a pinned core
-         * DURING continuous scrolling. */
-        long c0 = (long)(proc_cpu_ticks(app) * 100.0); /* ticks*100/clk adj below */
-        (void)c0;
+        /* Continuous wheel at RIG_RATE_HZ (default 250/s = the
+         * freespin/trackpad extreme; ~20/s is a realistic fast
+         * flick). No bursts-and-rests: the owner's report is a
+         * pinned core DURING continuous scrolling. */
+        long gap_us = 4000;
+        if (rate_hz > 0) {
+            gap_us = (long)(1000000.0 / (double)rate_hz);
+            if (gap_us < 200) {
+                gap_us = 200;
+            }
+        }
         double cpu0 = proc_cpu_ticks(app);
         w0 = now_s();
         for (double until = now_s() + seconds; now_s() < until;) {
@@ -170,7 +197,7 @@ int main(void) {
                 const unsigned int wheel_btn = wheel_down ? 5u : 4u;
                 XTestFakeButtonEvent(dpy, wheel_btn, True, CurrentTime);
                 XTestFakeButtonEvent(dpy, wheel_btn, False, CurrentTime);
-                usleep_us(4000);
+                usleep_us(gap_us);
             }
             XSync(dpy, False);
         }
@@ -181,15 +208,30 @@ int main(void) {
     } else if (strcmp(mode, "hover") == 0) {
         /* 1kHz zigzag across the rows — the raw pointer rate. The
          * step is ~2 rows per event (a real fast sweep covers rows
-         * at exactly this scale). */
+         * at exactly this scale). The position STATE carries across
+         * batches on purpose: the app coalesces queued motions to
+         * the LATEST (XPeekIfEvent, by design), so a per-batch-
+         * reset pattern would hand it the SAME row every batch —
+         * no hover change, no damage, a vacuous storm (found live:
+         * 1.2% CPU, zero presents, and the tell was sbdrag working
+         * because its zigzag state persists). */
         double cpu0 = proc_cpu_ticks(app);
         w0 = now_s();
         int step = 30;
+        int span = (lh > 80) ? lh - 80 : 1;
+        int off = 0, dir = 1;
         double gap = 1.0 / (double)(rate_hz > 0 ? rate_hz : 1000);
         for (double until = now_s() + seconds; now_s() < until;) {
             for (int i = 0; i < 16 && now_s() < until; i++) {
-                int y = ly + 40 + ((i * step) % (lh > 80 ? lh - 80 : 1));
-                XTestFakeMotionEvent(dpy, 0, lx + lw / 2, y,
+                off += dir * step;
+                if (off > span) {
+                    off = span;
+                    dir = -1;
+                } else if (off < 0) {
+                    off = 0;
+                    dir = 1;
+                }
+                XTestFakeMotionEvent(dpy, 0, lx + lw / 2, ly + 40 + off,
                                      CurrentTime);
                 usleep_us((long)(gap * 1e6));
             }

@@ -47,6 +47,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h> /* getenv (FDK_SCROLL_NOBLIT) */
 
 #define SCROLL_WHEEL_STEP 48
 #define SCROLL_KEY_STEP 32
@@ -221,6 +222,77 @@ static bool scroll_clamp(fdk_scrollview *sv) {
     return changed;
 }
 
+/* The thumb rect at an ARBITRARY offset (round 14: the damage path
+ * needs the old-position thumb too). `scroll` is the axis offset in
+ * content px; callers pass the live offset for painting and the
+ * pre-change offset for the old∪new damage union. */
+static void bar_thumb_at(fdk_scrollbar *b, fdk_i32 scroll,
+                         fdk_i32 *out_pos, fdk_i32 *out_len) {
+    fdk_i32 view = 0, content = 0, max = 0;
+    axis_extents(b->owner, b->horizontal, &view, &content, &max);
+    fdk_i32 trough = b->horizontal ? b->base.bounds.width
+                                   : b->base.bounds.height;
+    fdk_i32 thumb = (content > 0)
+        ? (trough * view) / content
+        : trough;
+    if (thumb < SCROLL_MIN_THUMB) {
+        thumb = SCROLL_MIN_THUMB;
+    }
+    if (thumb > trough) {
+        thumb = trough;
+    }
+    fdk_i32 range = trough - thumb;
+    fdk_i32 pos = (max > 0) ? (range * scroll) / max : 0;
+    if (pos < 0) {
+        pos = 0;
+    }
+    if (pos > range) {
+        pos = range;
+    }
+    *out_pos = pos;
+    *out_len = thumb;
+}
+
+static void bar_thumb(fdk_scrollbar *b, fdk_i32 *out_pos,
+                      fdk_i32 *out_len) {
+    bar_thumb_at(b, b->horizontal ? b->owner->scroll_x
+                                  : b->owner->scroll_y,
+                 out_pos, out_len);
+}
+
+/* Round 14 (the strip path): the damage a pure offset change does to
+ * a VISIBLE bar — the thumb's old∪new rects, nothing else. The
+ * trough (CLASSIC) and the transparent background (OVERLAY) are
+ * offset-invariant; a whole-bar invalidate would coarsen the root
+ * damage right back to the full viewport, defeating the strips
+ * (found live: median ratio 0.52 where the strips themselves are
+ * ~7%). */
+static void bar_thumb_damage(fdk_widget *bar_w, fdk_i32 old_scroll) {
+    fdk_scrollbar *b = bar_of(bar_w);
+    fdk_i32 pos_now = 0, len = 0, pos_old = 0, len_old = 0;
+    bar_thumb_at(b, b->horizontal ? b->owner->scroll_x
+                                  : b->owner->scroll_y,
+                 &pos_now, &len);
+    bar_thumb_at(b, old_scroll, &pos_old, &len_old);
+    fdk_i32 lo = (pos_now < pos_old) ? pos_now : pos_old;
+    fdk_i32 hi_now = pos_now + len;
+    fdk_i32 hi_old = pos_old + len_old;
+    fdk_i32 hi = (hi_now > hi_old) ? hi_now : hi_old;
+    if (hi <= lo) {
+        return;
+    }
+    if (b->horizontal) {
+        fdk__widget_invalidate_rect(bar_w,
+                                    (fdk_rect){lo, 0, hi - lo,
+                                               bar_w->bounds.height});
+    } else {
+        fdk__widget_invalidate_rect(bar_w,
+                                    (fdk_rect){0, lo,
+                                               bar_w->bounds.width,
+                                               hi - lo});
+    }
+}
+
 /* Local bounding-box union (widget.c's is file-static). */
 static fdk_rect scroll_rect_union(fdk_rect a, fdk_rect b) {
     if (a.width <= 0 || a.height <= 0) {
@@ -273,6 +345,19 @@ static bool scroll_strip_eligible(fdk_widget *w) {
     if (w == NULL || w->parent == NULL) {
         return false; /* detached tree: no window surface to blit */
     }
+    /* FDK_SCROLL_NOBLIT=1: the A/B measurement switch for the stress
+     * rigs (the strip path off = the pre-round-14 whole-viewport
+     * damage). Read once. Never set in production. */
+    {
+        static int no_blit = -1;
+        if (no_blit < 0) {
+            const char *v = getenv("FDK_SCROLL_NOBLIT");
+            no_blit = (v != NULL && v[0] != '\0') ? 1 : 0;
+        }
+        if (no_blit) {
+            return false;
+        }
+    }
     /* HiDPI gate (window_internal.h): at scale > 1 the tree paints
      * into a cleared intermediate, so the window surface's pixels
      * are NOT the tree's paint target — a blit there preserves
@@ -305,6 +390,29 @@ static bool scroll_apply_delta_damage(fdk_widget *w, fdk_scrollview *sv,
     if (ady >= vh || adx >= vw) {
         return false; /* whole viewport exposed: full damage wins */
     }
+    /* The blit/strip footprint excludes a VISIBLE CLASSIC bar's
+     * strip: the bar is an opaque widget whose column shows the
+     * TROUGH, not content — a full-width blit smears shifted content
+     * over it and thumb-only damage leaves the smear (found live by
+     * the blit-check: the one lingering diff sat exactly in the v-
+     * bar's column). OVERLAY bars float over the content: the full
+     * width is correct there (the thumb repaints over the moved
+     * pixels via its old∪new rects). */
+    fdk_i32 bw = vw;
+    fdk_i32 bh = vh;
+    if (sv->mode == FDK_SCROLL_BARS_CLASSIC) {
+        if (sv->vbar != NULL && fdk_widget_get_visible(sv->vbar)) {
+            fdk_i32 w2 = vw - bar_thickness(sv);
+            bw = (w2 > 0) ? w2 : 0;
+        }
+        if (sv->hbar != NULL && fdk_widget_get_visible(sv->hbar)) {
+            fdk_i32 h2 = vh - bar_thickness(sv);
+            bh = (h2 > 0) ? h2 : 0;
+        }
+        if (bw <= 0 || bh <= 0) {
+            return false;
+        }
+    }
     if (!scroll_strip_eligible(w)) {
         return false;
     }
@@ -324,13 +432,13 @@ static bool scroll_apply_delta_damage(fdk_widget *w, fdk_scrollview *sv,
     if (dy != 0 && fdk__surface_self_blit(surface,
                                           abs.x, abs.y,
                                           abs.x, abs.y + dy,
-                                          vw, vh - ady) != FDK_OK) {
+                                          bw, bh - ady) != FDK_OK) {
         return false;
     }
     if (dx != 0 && fdk__surface_self_blit(surface,
                                           abs.x, abs.y,
                                           abs.x + dx, abs.y,
-                                          vw - adx, vh) != FDK_OK) {
+                                          bw - adx, bh) != FDK_OK) {
         return false;
     }
 
@@ -338,14 +446,14 @@ static bool scroll_apply_delta_damage(fdk_widget *w, fdk_scrollview *sv,
      * already pending before this layout (bar wakes, hover). The
      * union is exact enough: one bounding box of two strips + any
      * prior damage — still far narrower than the viewport. */
-    fdk_rect strip = { .x = abs.x, .y = abs.y, .width = vw, .height = 0 };
+    fdk_rect strip = { .x = abs.x, .y = abs.y, .width = bw, .height = 0 };
     if (dy != 0) {
-        strip.y = (dy > 0) ? abs.y + vh - ady : abs.y;
+        strip.y = (dy > 0) ? abs.y + bh - ady : abs.y;
         strip.height = ady;
     }
     if (dx != 0) {
-        fdk_rect hstrip = { .x = (dx > 0) ? abs.x + vw - adx : abs.x,
-                            .y = abs.y, .width = adx, .height = vh };
+        fdk_rect hstrip = { .x = (dx > 0) ? abs.x + bw - adx : abs.x,
+                            .y = abs.y, .width = adx, .height = bh };
         if (dy != 0) {
             strip = scroll_rect_union(strip, hstrip);
         } else {
@@ -359,18 +467,20 @@ static bool scroll_apply_delta_damage(fdk_widget *w, fdk_scrollview *sv,
     }
     fdk__widget_set_damage(w, strip);
 
-    /* Awake overlay bars repaint against the moved pixels (a few
-     * dozen pixels; CLASSIC bars are content-side and ride the
-     * ordinary layout damage — their thumbs move WITH the scroll). */
-    if (sv->mode == FDK_SCROLL_BARS_OVERLAY) {
-        if (dy != 0 && sv->vbar != NULL &&
-            fdk_widget_get_visible(sv->vbar)) {
-            fdk_widget_invalidate(sv->vbar);
-        }
-        if (dx != 0 && sv->hbar != NULL &&
-            fdk_widget_get_visible(sv->hbar)) {
-            fdk_widget_invalidate(sv->hbar);
-        }
+    /* The moved axes' visible bars: only the THUMB pixels differ
+     * between the old and new offsets (the trough and the overlay
+     * background are offset-invariant, and the bar's own bounds
+     * never move, so nothing rides the arrange damage). The old∪new
+     * thumb rects — a few dozen pixels — not the whole bar widget:
+     * a 12 x full-height bar invalidate would coarsen the root
+     * damage right back to the viewport and defeat the strips. */
+    if (dy != 0 && sv->vbar != NULL &&
+        fdk_widget_get_visible(sv->vbar)) {
+        bar_thumb_damage(sv->vbar, old_y);
+    }
+    if (dx != 0 && sv->hbar != NULL &&
+        fdk_widget_get_visible(sv->hbar)) {
+        bar_thumb_damage(sv->hbar, old_x);
     }
     return true;
 }
@@ -436,6 +546,8 @@ static void bar_activity(fdk_scrollview *sv, bool horizontal) {
         b->alpha = 1.0f;
         fdk__widget_set_paint_alpha(bar_w, 1.0f);
     }
+    bool was_visible_awake =
+        fdk_widget_get_visible(bar_w) && b->alpha >= 1.0f;
     fdk_widget_set_visible(bar_w, true);
     if (b->idle != NULL) {
         fdk_timer_reset(b->idle, BAR_IDLE_MS);
@@ -449,7 +561,15 @@ static void bar_activity(fdk_scrollview *sv, bool horizontal) {
         /* No context (detached tree): no clock, no fade — the bar
          * just stays visible. The headless-honesty rule. */
     }
-    fdk_widget_invalidate(bar_w);
+    if (!was_visible_awake) {
+        /* The wake itself changed pixels (appearance, alpha) — the
+         * whole bar repaints. But an ALREADY-visible full-alpha bar
+         * changes nothing here: the thumb movement is the offset's
+         * business, and the strip path damages it thumb-precisely
+         * (a whole-bar invalidate per wheel would coarsen the root
+         * damage back to the viewport — round 14's lesson). */
+        fdk_widget_invalidate(bar_w);
+    }
 }
 
 /* The fade-out flight's tick: alpha slides 1 -> 0 with the eased
@@ -831,36 +951,6 @@ static bool scrollview_handle_event(fdk_widget *w,
 }
 
 /* ---- scrollbar ---- */
-
-/* Thumb geometry in the bar's local coordinates. */
-static void bar_thumb(fdk_scrollbar *b, fdk_i32 *out_pos,
-                      fdk_i32 *out_len) {
-    fdk_i32 view = 0, content = 0, max = 0;
-    axis_extents(b->owner, b->horizontal, &view, &content, &max);
-    fdk_i32 trough = b->horizontal ? b->base.bounds.width
-                                   : b->base.bounds.height;
-    fdk_i32 scroll = b->horizontal ? b->owner->scroll_x
-                                   : b->owner->scroll_y;
-    fdk_i32 thumb = (content > 0)
-        ? (trough * view) / content
-        : trough;
-    if (thumb < SCROLL_MIN_THUMB) {
-        thumb = SCROLL_MIN_THUMB;
-    }
-    if (thumb > trough) {
-        thumb = trough;
-    }
-    fdk_i32 range = trough - thumb;
-    fdk_i32 pos = (max > 0) ? (range * scroll) / max : 0;
-    if (pos < 0) {
-        pos = 0;
-    }
-    if (pos > range) {
-        pos = range;
-    }
-    *out_pos = pos;
-    *out_len = thumb;
-}
 
 static void scrollbar_paint(fdk_widget *w, fdk_surface *surface,
                             fdk_rect bounds, fdk_rect clip) {

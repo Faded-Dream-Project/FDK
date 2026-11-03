@@ -337,7 +337,7 @@ if (fdk_ext_has_capability(ctx, FDK_EXT_CAP_EWMH_DOCK)) { ... }
 | `FDK_EXT_CAP_SHM_RENDER` | yes | yes | ext surfaces render via `fdk_surface` |
 | `FDK_EXT_CAP_POPUP_GRAB` | yes | yes* | popups grab input + dismiss properly |
 | `FDK_EXT_CAP_EWMH_DOCK` | yes | no | dock hints settable by the add-on |
-| `FDK_EXT_CAP_FRAME_PACING` | no | yes | compositor frame feedback exists |
+| `FDK_EXT_CAP_FRAME_PACING` | yes | yes | `fdk_surface_frame_ready()` really paces (Wayland: frame callbacks; X11: interval floor + slot backpressure) |
 
 \* the Wayland caveat every toolkit documents: compositors may
 refuse a grab whose serial predates all input (the popup still

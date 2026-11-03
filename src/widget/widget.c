@@ -697,6 +697,21 @@ static bool set_hovered(fdk_widget *root, fdk_widget *hit) {
         }
     }
 
+    /* Round 14 (the hover repaint): the flag flips above change what
+     * row_paint & co RENDER (hover fills read FDK_WF_HOVERED), but
+     * nobody else guarantees an invalidation — the list rows' class
+     * handles no ENTER/LEAVE, so a sweep across rows left stale
+     * highlights wherever nothing ELSE happened to invalidate (the
+     * hover-storm rig found it: zero presents under a full 1 kHz
+     * zigzag). Damage BOTH sides of every transition here, at the
+     * single choke point every hover change funnels through. */
+    if (old_hover != NULL && (old_hover->flags & FDK_WF_DESTROYING) == 0) {
+        fdk_widget_invalidate(old_hover);
+    }
+    if (hit != NULL && (hit->flags & FDK_WF_DESTROYING) == 0) {
+        fdk_widget_invalidate(hit);
+    }
+
     /* Tooltips (1.3.2): the hover transition is the module's single
      * trigger — every path that moves the pointer between widgets
      * funnels through here. Runs AFTER the events settle so a
