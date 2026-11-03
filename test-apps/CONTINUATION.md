@@ -1,3 +1,68 @@
+# §31 continuation — UPDATE (owner round 9: the five reports, ported onto the restored lineage)
+
+## Remote proof
+origin/main == this round's code commit + docs commit. Tree clean at that commit.
+
+## This round's first act: the lineage itself
+Round 9 began with an incident, recorded here because it shaped the round. A mid-session sandbox
+recycle handed the working tree a DIVERGED snapshot of the repo (a copy-fork whose HEAD had no
+test-apps/), and the session committed and FORCE-PUSHED that fork's head over origin/main,
+displacing round 8's head (9fc4fb1). The owner caught it. Recovery: the true head was re-fetched
+from GitHub by full SHA (the object was still servable), main was reset and force-pushed BACK to
+9fc4fb1, and the alien lineage's one commit (2263ee9 — the five fixes, already written against
+the wrong tree) was preserved on the local branch backup/round-9-alien. This round's real work
+was then PORTING those five fixes onto the true lineage. Standing rule from the owner, effective
+permanently: **never force-push again** — normal fast-forward pushes only; a remote/local
+divergence is a stop-and-reconcile event, never an overwrite.
+
+## Round 9 delivered (the owner's five reports, engine-level)
+1. **STUCK BANDS (gesture-cancel sweep)** — when a menu chain dies (outside-click CLOSE_REQUEST,
+   popup_done), the popup swallowed the POINTER_UP, so any live rubber band's highlight stuck on
+   screen. `fdk__list_cancel_bands_all_roots()` (list.c, seam in widgets_internal.h) now fires
+   from menu.c's teardown paths (session_close_above level-0, menu_popup_destroyed): walks every
+   root, ends every live band exactly as an UP would. PORT EXTRA beyond the alien version: it
+   also clears the rows' pending_band flags (1.5.0's row-born gestures) — a stale armed row
+   would have synthesized a phantom band from stale coordinates on the next motion.
+2. **ROW HIT BANDS (presses right of the content are empty space)** — a row now accepts presses
+   only over icon + name text + padding (`row_press_on_content`, columns-aware: the 1.5.x column
+   cells ride the row's full-width PAINT rect, but presses there are the LIST's). A press right
+   of the text falls through to the list and starts the rubber band there. The round-6
+   press-time chase semantics are PRESERVED (a no-motion click at a row's y still selects that
+   row — pinned by test_row_press_band and now by test_round9_ports).
+3. **MENU STORMS (single-session context menus)** — `fdk__menu_popup_open_full` closes every
+   other bar-less (context) session before opening; the 4-slot table can no longer be reached
+   from popups. MenuBar chains are a different gesture class and keep their own rules.
+4. **MENU MISFIRES (the opening-release guard)** — menu views now press-ARM: a POINTER_UP
+   without a press this view saw is swallowed without activating. This kills the
+   "Properties acts like Delete" class: the menu popped under the still-held button and the
+   release chose whatever row sat there (GTK/Qt swallow this exact release too).
+5. **REPAINT COST (damage-limited band)** — apply_band no longer invalidates the whole list per
+   motion pixel: `fdk__widget_invalidate_rect` (new widget.c seam, widget-local rect clipped to
+   bounds) carries the union of the old + new band rects; list_set_row already damages only the
+   rows that FLIP. Large directories no longer peg a core during sweeps.
+6. **POPUP TEARDOWN DAMAGE (the black box)** — popup windows now capture their anchor rect in
+   parent-client coords at creation (popup_anchor_x/y/anchored, window_internal.h) and
+   fdk_window_destroy damages that rect in the parent's tree: X11 popups unmap off the ROOT, so
+   the parent never got the Expose for the region the menu covered.
+
+What was NOT ported, deliberately: the alien commit's wayland_egl.c NVIDIA upload-path work
+(BGRA/UNPACK_ROW_LENGTH probing, RGBA twin, pack scratch) — the TRUE lineage already carries it
+(it originated here at 1.0.0 and evolved through the GLVND round-7 work; the alien fork's copy
+was a re-derivation). Same for its examples/10_file_manager.c demo: fdk-files' own menus.c has
+had the real context menu (Open / Open with… / Rename / trash / permanent delete, each wired)
+since the §26 rounds.
+
+## Tests
+test_round9_ports (tests/test_list.c): presses right of the content start bands not row-clicks
+(content presses still select), the cancel sweep ends swallowed gestures (redundant-safe,
+stray-UP-safe), the gate holds under 1.5.x columns with the far-end anchor active. Full suite
+green (`make test`, ASan/UBSan clean). fdk-files relinked and boots (app_id
+org.fdk.testapps.files, PHASE: boot).
+
+## Next round candidates
+- His X11 boot-slowness report (round-6 item C) — STILL OPEN.
+- The E2E XTest self-drop proof (round-6 leftover).
+
 # §31 continuation — UPDATE (owner round 8: the columns' far-end anchor + the folder type)
 
 ## Remote proof

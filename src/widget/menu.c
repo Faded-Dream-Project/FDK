@@ -744,6 +744,17 @@ typedef struct fdk_menu_view {
      * before the first paint binds the model's row count. */
     fdk_hover_fade *fades;
     size_t fade_count;
+    /* Round 9 (the "menu items fire by themselves" report): a
+     * POINTER_UP that arrives WITHOUT a press this view saw must
+     * NOT activate anything — it is the release of the press that
+     * OPENED the menu (the menu popped under the still-held
+     * button; the release lands wherever the menu happened to
+     * place its rows). GTK/Qt swallow this exact release; without
+     * the guard, right-clicking a file could "choose" Rename (the
+     * row under the release point) without the user ever clicking
+     * a menu item. Presses arm the view; only an armed release
+     * may activate. */
+    bool press_armed;
 } fdk_menu_view;
 
 /* The view's Alt-fallback routes Alt+letter naming ANOTHER bar
@@ -1260,6 +1271,7 @@ bool fdk__menu_view_handle_event(fdk_widget *w,
         return true;
     }
     case FDK_WIDGET_POINTER_DOWN: {
+        v->press_armed = true; /* the press this view saw           */
         int row = fdk__menu_row_at(w, ev->pointer.position.y);
         if (row < 0) {
             return true; /* inside the menu, between rows: swallow */
@@ -1284,6 +1296,11 @@ bool fdk__menu_view_handle_event(fdk_widget *w,
         return true;
     }
     case FDK_WIDGET_POINTER_UP:
+        /* Round 9: the opening press's release — UNARMED — is
+         * swallowed without activating (see the struct block). A
+         * fresh press+release on an item still activates through
+         * the DOWN arm above. */
+        v->press_armed = false;
         return true; /* consumed: no click-through to anything under */
     case FDK_WIDGET_POINTER_LEAVE:
         if (v->highlight != -1) {
@@ -1473,6 +1490,8 @@ static void menu_popup_destroyed(fdk_window *window, void *user) {
         s->bar = NULL;
         s->bar_index = -1;
         s->active = false;
+        fdk__list_cancel_bands_all_roots(); /* round 9: the gesture
+                                             * died with the chain */
         menu_session_fire_closed(s);
     }
 }
@@ -1558,6 +1577,13 @@ static void session_close_above(fdk_menu_session *s, int level) {
         s->bar = NULL;
         s->bar_index = -1;
         s->active = false;
+        /* Round 9 (the stuck-highlight report): the popup chain's
+         * death swallowed a pointer gesture — the outside click that
+         * dismissed it arrives as a CLOSE_REQUEST at the popup, and
+         * the tree never sees that POINTER_UP. Any live rubber-band
+         * in any list ends HERE, or its highlight sticks on screen
+         * until the next sweep. */
+        fdk__list_cancel_bands_all_roots();
         menu_session_fire_closed(s);
         return;
     }
@@ -1744,6 +1770,18 @@ fdk_result fdk__menu_popup_open_full(fdk_menu *menu, fdk_widget *anchor,
         fdk__window_of_owner(fdk__widget_window_owner(anchor));
     if (win == NULL) {
         return FDK_ERR_INVALID_ARGUMENT; /* standalone tree: no window */
+    }
+    /* Round 9 (the multiple-context-menus report): opening a
+     * context menu CLOSES every other context menu first — the
+     * desktop rule, as engine policy. Sessions owned by a MenuBar
+     * are left alone (a bar chain is a different gesture class;
+     * this is the CONTEXT path). Without this, N right-clicks
+     * stacked N popups until the 4-slot table evicted the oldest
+     * with a warning — four simultaneous menus on screen. */
+    for (int i = 0; i < FDK_MENU_MAX_SESSIONS; i++) {
+        if (g_sessions[i].active && g_sessions[i].bar == NULL) {
+            fdk__menu_session_close_all(&g_sessions[i]);
+        }
     }
     /* Window-relative anchor: the widget's absolute bounds + (x, y). */
     fdk_rect abs = fdk_widget_get_absolute_bounds(anchor);

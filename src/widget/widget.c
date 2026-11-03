@@ -1789,6 +1789,38 @@ void fdk_widget_invalidate(fdk_widget *widget) {
     damage_union(find_root(widget), absolute_bounds(widget));
 }
 
+/* Round 9 (the list band's damage-limited repaint): invalidate ONE
+ * widget-local rect — offset by the widget's absolute position and
+ * clipped to the widget's own bounds, so a moving 20-px-tall band
+ * costs a 20-px-tall repaint instead of the whole list. Internal
+ * seam (widgets_internal.h) — public API stays whole-widget. */
+void fdk__widget_invalidate_rect(fdk_widget *widget, fdk_rect local) {
+    if (widget == NULL || (widget->flags & FDK_WF_DESTROYING) != 0) {
+        return;
+    }
+    fdk_rect abs = absolute_bounds(widget);
+    fdk_rect r = { abs.x + local.x, abs.y + local.y,
+                   local.width, local.height };
+    if (r.x < abs.x) {
+        r.width -= abs.x - r.x;
+        r.x = abs.x;
+    }
+    if (r.y < abs.y) {
+        r.height -= abs.y - r.y;
+        r.y = abs.y;
+    }
+    if (r.x + r.width > abs.x + abs.width) {
+        r.width = abs.x + abs.width - r.x;
+    }
+    if (r.y + r.height > abs.y + abs.height) {
+        r.height = abs.y + abs.height - r.y;
+    }
+    if (r.width <= 0 || r.height <= 0) {
+        return;
+    }
+    damage_union(find_root(widget), r);
+}
+
 void fdk_widget_invalidate_all(fdk_widget *any) {
     fdk_widget *root = find_root(any);
     if (root == NULL) {
