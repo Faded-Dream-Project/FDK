@@ -734,6 +734,12 @@ void pane_build_view(pane *p, tab *t) {
          * first pane's rows: the owner's round-5 ASAN log). */
         {
             size_t n = fdk_list_row_count(list);
+            /* Round 12: ONE batch around the whole decoration pass —
+             * each set_cell/set_icon used to relayout the list
+             * (another full re-shape of every row, per row, per
+             * rebuild: the nav-storm's second O(N²)). The batch
+             * settles once at the end. */
+            fdk_list_begin_batch(list);
             for (size_t i = 0; i < n; i++) {
                 fdk_u64 id = fdk_list_bound_row_id(list, i);
                 const file_info *fi = fmodel_info_of(id);
@@ -766,6 +772,7 @@ void pane_build_view(pane *p, tab *t) {
                 (void)fdk_list_row_set_cell(
                     list, i, 3, mime_category(fi->mime));
             }
+            fdk_list_end_batch(list);
         }
         vc->view = list;
         vc->is_list = true;

@@ -142,6 +142,11 @@ void fmodel_load(struct pane *p, const char *dir,
         return;
     }
 
+    /* Round 12: ONE held batch around the whole rebuild — every
+     * append/cell-set fire below is coalesced into a single
+     * CLEARED the bound view answers with one replay (the
+     * navigation-storm's O(N²) lived exactly here). */
+    fdk_model_begin_batch(lm->store);
     fdk_model_clear(lm->store);
     infos_clear(lm);
 
@@ -178,6 +183,7 @@ void fmodel_load(struct pane *p, const char *dir,
     }
     lm->info_count = n;
     free(raw);
+    fdk_model_end_batch(lm->store);
 }
 
 void fmodel_set_sort(int col, bool desc) {

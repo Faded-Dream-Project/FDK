@@ -66,6 +66,20 @@ struct fdk_model {
     fdk_model *sort_face;
     fdk_model *filter_face;
     void *proxy_owner;
+
+    /* Round 12 — mutation batching. A store being rebuilt (a
+     * directory reload's clear + N append + 4N cell sets) fired
+     * every change as it happened; each fire walked the proxy
+     * chain and re-mirrored a bound view (the O(N²) the nav rig
+     * measured as a pegged core). Between begin/end_batch the
+     * fires are HELD; end_batch releases exactly ONE
+     * FDK_MODEL_CLEARED (the "everything changed" event a bound
+     * view answers with one replay). Proxies forward the batch
+     * discipline to their faces, so a batch on the STORE coalesces
+     * the whole chain. Zero public API change beyond the two calls
+     * (fdk_model_begin_batch / fdk_model_end_batch). */
+    unsigned batch_depth;
+    bool batch_pending;
 };
 
 /* ---- helpers --------------------------------------------------------------- */
@@ -105,6 +119,15 @@ static long row_find_id(fdk_model *m, fdk_u64 id) {
 
 static void fire_change(fdk_model *m, fdk_model_change change,
                         fdk_u64 parent, size_t index) {
+    if (m->batch_depth > 0) {
+        /* Held: the batch's end fires once for everything. (The
+         * suppressed events are not lost semantics for the only
+         * current listener class — the view bindings — because the
+         * batch's single CLEARED subsumes them: a replay reads the
+         * model's final state.) */
+        m->batch_pending = true;
+        return;
+    }
     fdk_model_row r = {parent, index};
     if (m->on_change != NULL) {
         m->on_change(m, change, r, m->change_user);
@@ -577,6 +600,55 @@ void fdk_model_clear(fdk_model *model) {
         free_cells(model, &model->rows[i]);
     }
     model->n_rows = 0;
+    fire_change(model, FDK_MODEL_CLEARED, FDK_MODEL_ROW_NONE, 0);
+}
+
+/* Round 12 — mutation batching. begin/end_batch bracket a store
+ * rebuild (a directory reload: clear + N appends + 4N cell sets).
+ * Between the calls, change fires are HELD (fire_change sets
+ * batch_pending and returns); end_batch releases exactly ONE
+ * FDK_MODEL_CLEARED — the everything-changed event a bound view
+ * answers with ONE full replay instead of N. Proxies forward the
+ * discipline: batching the STORE holds the whole chain's chatter,
+ * and the single CLEARED propagates through the faces at the end.
+ * Nesting counts depth (only the outer end releases). A proxy face
+ * passed to begin_batch batches ITS owner's child store — the
+ * honest reading of "batch this model". */
+void fdk_model_begin_batch(fdk_model *model) {
+    if (model == NULL) {
+        return;
+    }
+    if (is_proxy_face(model)) {
+        fdk_model_begin_batch(proxy_owner_of(model)->child);
+        return;
+    }
+    model->batch_depth++;
+}
+
+void fdk_model_end_batch(fdk_model *model) {
+    if (model == NULL) {
+        return;
+    }
+    if (is_proxy_face(model)) {
+        fdk_model_end_batch(proxy_owner_of(model)->child);
+        return;
+    }
+    if (model->batch_depth == 0) {
+        return; /* unbalanced end: the quiet-setter style */
+    }
+    model->batch_depth--;
+    if (model->batch_depth > 0) {
+        return; /* the outermost end settles */
+    }
+    if (!model->batch_pending) {
+        return; /* nothing was held */
+    }
+    model->batch_pending = false;
+    /* The single release rides the NORMAL fire path: the store's
+     * listeners include each attached proxy's child_changed, which
+     * rebuilds the permutation and refires on the face — so the
+     * whole chain sees exactly one CLEARED in its own
+     * coordinates. */
     fire_change(model, FDK_MODEL_CLEARED, FDK_MODEL_ROW_NONE, 0);
 }
 

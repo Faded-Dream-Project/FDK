@@ -692,6 +692,92 @@ static void test_bound_views_a11y_exposure(void) {
            "a11y LIST_ITEM rows, growing with the model\n");
 }
 
+/* Round 12 — mutation batching. A held batch coalesces every fire
+ * into ONE replay the bound view performs at end_batch; the counts
+ * (N appends + M cell sets) must not cost N+M replays (the nav
+ * storm's O(N²)), and the final mirror must be exactly the store. */
+static int g_batch_test_fires;
+static void batch_count_fn(fdk_model *m, fdk_model_change change,
+                           fdk_model_row row, void *user) {
+    (void)m;
+    (void)change;
+    (void)row;
+    (void)user;
+    g_batch_test_fires++;
+}
+
+static void test_mutation_batch(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, &fdk_box_class_def,
+                                    (fdk_rect){0, 0, 400, 300},
+                                    &root)));
+    fdk_model_value_type types[1] = {FDK_MODEL_TEXT};
+    fdk_model *m = fdk_model_create(types, 1);
+    assert(m != NULL);
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, NULL, &list)));
+    assert(fdk_ok(fdk_list_bind_model(list, m, 0)));
+
+    /* the fire counter rides the classic slot */
+    g_batch_test_fires = 0;
+    fdk_model_set_on_change(m, batch_count_fn, NULL);
+
+    /* unbatched baseline: 3 mutations = >= 3 fires */
+    fdk_model_row a = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    fdk_model_row b = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    fdk_model_row c = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    assert(fdk_ok(fdk_model_set_text(m, a, 0, "one")));
+    assert(fdk_ok(fdk_model_set_text(m, b, 0, "two")));
+    assert(fdk_ok(fdk_model_set_text(m, c, 0, "three")));
+    assert(g_batch_test_fires >= 6); /* 3 inserts + 3 changes */
+    assert(fdk_list_row_count(list) == 3);
+
+    /* THE BATCH: clear + 50 appends + 50 sets inside one hold —
+     * exactly ONE fire leaves the model (the release CLEARED), and
+     * the bound view's mirror is complete afterwards. */
+    g_batch_test_fires = 0;
+    fdk_model_begin_batch(m);
+    fdk_model_clear(m);
+    for (int i = 0; i < 50; i++) {
+        fdk_model_row r =
+            fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+        char buf[16];
+        snprintf(buf, sizeof buf, "b%d", i);
+        (void)fdk_model_set_text(m, r, 0, buf);
+    }
+    assert(g_batch_test_fires == 0); /* all held */
+    fdk_model_end_batch(m);
+    assert(g_batch_test_fires == 1); /* the single release */
+    assert(fdk_list_row_count(list) == 50);
+    assert(strcmp(fdk_list_row_text(list, 0), "b0") == 0);
+    assert(strcmp(fdk_list_row_text(list, 49), "b49") == 0);
+
+    /* nesting: only the outer end releases */
+    g_batch_test_fires = 0;
+    fdk_model_begin_batch(m);
+    fdk_model_begin_batch(m);
+    fdk_model_row r = fdk_model_row_append(m, FDK_MODEL_ROW_NONE);
+    (void)fdk_model_set_text(m, r, 0, "inner");
+    fdk_model_end_batch(m);
+    assert(g_batch_test_fires == 0); /* still held (depth 1) */
+    fdk_model_end_batch(m);
+    assert(g_batch_test_fires == 1);
+    assert(fdk_list_row_count(list) == 51);
+
+    /* an unbalanced end is the quiet no-op; a batch with no held
+     * change releases nothing */
+    fdk_model_end_batch(m);
+    g_batch_test_fires = 0;
+    fdk_model_begin_batch(m);
+    fdk_model_end_batch(m);
+    assert(g_batch_test_fires == 0);
+
+    fdk_model_destroy(m);
+    fdk_widget_destroy(root);
+    printf("[ok] model: mutation batching (held fires, single "
+           "release, one replay, nesting, quiet edges)\n");
+}
+
 int main(void) {
     test_store();
     test_sort();
@@ -702,6 +788,7 @@ int main(void) {
     test_multiple_views_through_proxies();
     test_bound_views_a11y_exposure();
     test_tree_binding();
+    test_mutation_batch();
     printf("all model tests passed\n");
     return 0;
 }

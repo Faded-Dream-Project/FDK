@@ -17,6 +17,69 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-03 (on the rc2 line)
 
+### Fixed — owner round 12: the navigation CPU peg (the model-binding O(N²)), a round-11 double-click regression, and the fixed_w warning
+
+- **fdk-files: one navigation into an N-entry directory cost
+  N full view rebuilds — O(N²) with per-row harfbuzz shaping.**
+  The owner's report: moving through folders fast pegs ONE core
+  at 100% (verified in btop). The nav rig reproduced it: a
+  6-loop storm into a 500-file dir = 96.4% of one core; the cost
+  was flat from 50 to 1000 files because the dominant term was
+  the binding layer, not the directory walk. gdb stacks caught it
+  live: fmodel_load appends N rows + sets 4 cells each with the
+  old view still bound, and EVERY mutation fired through the
+  pane's proxy chain into binding_changed → rebuild_list — a full
+  clear + N appends + one relayout (re-shaping every row text)
+  PER MUTATION. TWO engine fixes:
+  - **`fdk_model_begin_batch` / `fdk_model_end_batch` (new public
+    API)**: change fires are HELD between the calls; end_batch
+    releases exactly ONE FDK_MODEL_CLEARED through the normal fire
+    path, so a bound view performs ONE replay. fmodel_load wraps
+    its whole rebuild in one batch. Nestable (depth-counted),
+    quiet on unbalanced end, no-op with nothing held, and a proxy
+    FACE passed to it batches the proxy's child store.
+  - **binding_changed went incremental**: ROW_INSERTED at the
+    mirror's tail appends the one row (the fire runs from INSIDE
+    row_append, before the app sets cells — the append is empty,
+    the following ROW_CHANGED fills it in place);
+    ROW_REMOVED removes the one row and shifts the id array;
+    MOVED/CLEARED keep the full-rebuild fallback.
+  Measured, release build (what ships): 500-file directory, 6
+  rapid navigations = 96% → **14.9%** of one core; 1000-file =
+  ~30%, linear in entries; idle after navigation = 1 tick in 2s
+  (poll-asleep — the "forever" burn is gone entirely).
+- **List: the first-ever double-click on a row never activated**
+  (a round-11 regression the nav rig exposed immediately: its
+  storm "into the folder" legs silently did nothing). The
+  pending_band press path (an unselected row's press held as a
+  potential rubber band) ran its click logic at the RELEASE but
+  never armed the double-click window, so the second press of a
+  double-click read as a fresh first click — opening a folder
+  needed a THIRD press. The release now arms last_click_row/
+  last_click_ms exactly as the direct path does.
+- **List: one text-measure pass per relayout** (was two).
+  list_relayout measures every row for the content width, then
+  list_columns_layout re-measured every row again for the name
+  column's natural width — two harfbuzz/fribidi passes per row
+  per rebuild. The relayout now hands its measured width to the
+  columns layout (a `name_nat_hint` parameter; -1 = measure in
+  place for every other caller).
+- **fdk-files: the post-bind decoration pass is batched** (3
+  set_cell + icon per row used to relayout the whole list per
+  row, per rebuild — the second O(N²) of the storm).
+- **The `-Wunused-but-set-variable` warning the owner reported**
+  (list.c:358, `fixed_w`): a 1.5.1 leftover — a dead duplicate of
+  the `fixed_nat` sum computed above it (the anchored-branch math
+  derives positions from the viewport directly). Removed; the
+  zero-warnings rule holds again (full -Werror build clean).
+- **Public API: +2** (`fdk_model_begin_batch`,
+  `fdk_model_end_batch`). `make test` green — 762 [ok] checks
+  including a new mutation-batching regression test (held fires,
+  single release, one replay, nesting, quiet edges), and all
+  three rigs re-verified end-to-end (click sweep pixel-exact,
+  menu rig PASS, nav rig's new baseline recorded).
+
+
 ### Fixed — owner round 11: the dead rubber band, the Properties entry firing delete, the CPU peg, the wrong-row right-click
 
 - **Menus (fdk-files): every menu entry fired the action ONE SLOT

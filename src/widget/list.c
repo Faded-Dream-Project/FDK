@@ -315,19 +315,29 @@ static fdk_i32 list_content_top(const fdk_list *l) {
  * name column's natural width comes from the widest row (text +
  * icon band + padding, the v1 measure). Must be re-run whenever
  * col_widths, the row content, or the viewport width changes; every
- * such path funnels through here so the two modes are one rule. */
-static void list_columns_layout(fdk_list *l) {
+ * such path funnels through here so the two modes are one rule.
+ * Round 12: `name_nat_hint` (>= 0) is a CALLER-MEASURED natural
+ * width — list_relayout walks every row for its own content-width
+ * pass anyway, so it hands the result here instead of letting this
+ * re-shape every row a second time (the nav-storm profile: two
+ * harfbuzz passes per row per rebuild). -1 = measure here (every
+ * other caller). */
+static void list_columns_layout(fdk_list *l, fdk_i32 name_nat_hint) {
     if (l->column_count == 0 || l->col_x == NULL) {
         return;
     }
     /* The name column's natural width: widest row, v1 measure. */
-    fdk_i32 name_nat = 80;
-    for (size_t i = 0; i < l->count; i++) {
-        fdk_i32 tw = 0, th = 0;
-        fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
-        tw += row_icon_band(l->row_widgets[i]);
-        if (tw + LIST_ROW_PAD_X * 2 > name_nat) {
-            name_nat = tw + LIST_ROW_PAD_X * 2;
+    fdk_i32 name_nat = name_nat_hint;
+    if (name_nat < 0) {
+        name_nat = 80;
+        for (size_t i = 0; i < l->count; i++) {
+            fdk_i32 tw = 0, th = 0;
+            fdk__text_extent(l->font, l->row_widgets[i]->text,
+                             &tw, &th);
+            tw += row_icon_band(l->row_widgets[i]);
+            if (tw + LIST_ROW_PAD_X * 2 > name_nat) {
+                name_nat = tw + LIST_ROW_PAD_X * 2;
+            }
         }
     }
     l->name_nat = name_nat;
@@ -350,15 +360,16 @@ static void list_columns_layout(fdk_list *l) {
         vw = l->base.bounds.width; /* not arranged yet: the list's
                                     * own width is the best truth */
     }
+    (void)fixed_nat; /* the anchored branch derives from vw directly;
+                      * content mode from name_nat — the spread is
+                      * only a comment-level concept (round 12: the
+                      * dead `fixed_w` duplicate this replaced was
+                      * the -Wunused-but-set-variable warning) */
 
     if (vw >= name_nat + fixed_nat) {
         /* ANCHORED: the last fixed column's RIGHT edge sits at the
          * viewport's end; the name column takes everything left of
          * the first fixed one. */
-        fdk_i32 fixed_w = 0;
-        for (size_t c = 1; c < l->column_count; c++) {
-            fixed_w += LIST_COL_SEP + l->col_widths[c];
-        }
         l->col_x[l->column_count - 1] = vw - l->col_widths[
             l->column_count - 1];
         for (size_t c = l->column_count - 1; c > 1; c--) {
@@ -458,7 +469,7 @@ static void list_sync_scroll_bounds(fdk_list *l) {
      * self-heal in paint) funnels through this sync, so the anchor
      * follows the window live. */
     if (l->column_count > 0) {
-        list_columns_layout(l);
+        list_columns_layout(l, -1);
         fdk_i32 spread = l->col_x[l->column_count - 1] +
                          l->col_widths[l->column_count - 1];
         if (spread > l->content_width && l->rows != NULL) {
@@ -483,7 +494,11 @@ static void list_relayout(fdk_list *l) {
     fdk_i32 rh = list_row_height(l);
     fdk_i32 w = 80;
     /* Width: the widest row's text (min 80) — rows stretch to it.
-     * Iconed rows account for the glyph box + gap (1.4.1). */
+     * Iconed rows account for the glyph box + gap (1.4.1). Round
+     * 12: ONE measure pass — the width this loop computes IS the
+     * name column's natural width, handed to the columns layout
+     * (which used to re-shape every row for the same number; the
+     * nav-storm profile showed the doubled harfbuzz pass). */
     for (size_t i = 0; i < l->count; i++) {
         fdk_i32 tw = 0, th = 0;
         fdk__text_extent(l->font, l->row_widgets[i]->text, &tw, &th);
@@ -495,7 +510,7 @@ static void list_relayout(fdk_list *l) {
     /* 1.5.1: the adaptive column geometry runs FIRST — the
      * content-mode floor below reads the resolved col_x[] tail. */
     if (l->column_count > 0) {
-        list_columns_layout(l);
+        list_columns_layout(l, w);
         fdk_i32 spread = l->col_x[l->column_count - 1] +
                          l->col_widths[l->column_count - 1];
         if (spread > w) {
@@ -550,7 +565,7 @@ static void list_place_appended(fdk_list *l) {
      * column's natural width grew) — re-resolve the anchor before
      * the natural size lands. */
     if (l->column_count > 0) {
-        list_columns_layout(l);
+        list_columns_layout(l, -1);
         fdk_i32 spread = l->col_x[l->column_count - 1] +
                          l->col_widths[l->column_count - 1];
         if (spread > l->content_width) {
@@ -1151,6 +1166,18 @@ static bool row_handle_event(fdk_widget *w,
             for (size_t i = 0; i < l->count; i++) {
                 if (l->row_widgets[i] == row) {
                     list_row_clicked(l, i, 0);
+                    /* Round 12: arm the double-click window HERE —
+                     * the DOWN path's arming (which the pending_band
+                     * press skips) is what makes the SECOND press of
+                     * a double-click activate. Without this, the
+                     * first-ever double-click on a row consumed as
+                     * two plain clicks (activation needed a third
+                     * press): a round-11 regression the nav rig's
+                     * storm exposed — every "into the folder" leg of
+                     * the storm silently did nothing. */
+                    l->have_last_click = true;
+                    l->last_click_row = i;
+                    l->last_click_ms = list_now_ms();
                     return true;
                 }
             }
@@ -1638,7 +1665,7 @@ static void list_measure(fdk_widget *w, fdk_size *out) {
         /* 1.5.1: the natural size is the CONTENT-mode spread — the
          * anchored mode's whole point is that it fits the viewport,
          * so the natural (unanchored) answer is the fallback one. */
-        list_columns_layout(l);
+        list_columns_layout(l, -1);
         fdk_i32 spread = l->col_x[l->column_count - 1] +
                          l->col_widths[l->column_count - 1];
         if (spread > width) {
