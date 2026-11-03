@@ -30,7 +30,8 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_text.h"
 
-#include "text/text_internal.h" /* fdk_text_font_discovery_reset_for_tests */
+#include "text/text_internal.h" /* fdk_text_font_discovery_reset_for_tests,
+                                  * fdk__shaped_cache_invalidate_all */
 
 #include <assert.h>
 #include <dlfcn.h>
@@ -331,8 +332,12 @@ static void test_draw_ink_and_damage(void) {
     assert(dmg.x + dmg.width <= pen_x + m.advance_width);
 
     /* Re-draw the same text elsewhere: identical glyph pixels prove
-     * cache-hit determinism, and hits == the second run's glyph
-     * count. */
+     * cache-hit determinism. Round 13: the SECOND draw now hits the
+     * SHAPED-STRING cache (the placements, raster pointers already
+     * resolved, come back without touching the glyph table), so the
+     * glyph-layer hit counter no longer moves — the invariant that
+     * DOES hold: nothing was re-rasterized (misses flat) and the
+     * pixels are identical (the loop below). */
     fdk_font_cache_stats st0;
     fdk_font_get_cache_stats(f, &st0);
     int baseline2 = 80;
@@ -341,7 +346,7 @@ static void test_draw_ink_and_damage(void) {
     fdk_font_cache_stats st1;
     fdk_font_get_cache_stats(f, &st1);
     assert(st1.cache_misses == st0.cache_misses);
-    assert(st1.cache_hits > st0.cache_hits);
+    assert(st1.cache_hits >= st0.cache_hits);
     for (int x = pen_x; x < pen_x + m.advance_width; x++) {
         for (int dy = 0; dy < -m.ink_top + m.ink_bottom; dy++) {
             int y1 = baseline + m.ink_top + dy;
@@ -993,7 +998,12 @@ static void test_subpixel_positioning(void) {
 
     /* (2) Determinism: a second draw at another baseline is
      * pixel-identical row for row and served from the cache (no new
-     * rasterizations — the phase keys hit). */
+     * rasterizations — the phase keys hit). Round 13: the second
+     * draw is served by the SHAPED-STRING cache — the placements
+     * and their pre-resolved raster pointers come back without a
+     * glyph-table pass, so the glyph-layer counters only need to
+     * not REGRESS (no misses; the pixel loop below carries the
+     * determinism proof). */
     fdk_font_cache_stats st0;
     fdk_font_get_cache_stats(f, &st0);
     int baseline2 = 80;
@@ -1002,7 +1012,7 @@ static void test_subpixel_positioning(void) {
     fdk_font_cache_stats st1;
     fdk_font_get_cache_stats(f, &st1);
     assert(st1.cache_misses == st0.cache_misses);
-    assert(st1.cache_hits > st0.cache_hits);
+    assert(st1.cache_hits >= st0.cache_hits);
     for (int x = pen_x; x < pen_x + m.advance_width; x++) {
         for (int dy = 0; dy < -m.ink_top + m.ink_bottom; dy++) {
             int y1 = baseline + m.ink_top + dy;
@@ -1435,6 +1445,11 @@ int main(int argc, char **argv) {
     test_font_style();
     test_subpixel_positioning();
     test_system_font_discovery();
+    /* Round 13: the shaped-string cache holds borrowed results past
+     * the last use (g_sans intentionally lives to process exit);
+     * drain it so the exit state is clean under LSan — the same
+     * defensive-drain pattern test_choosers uses for animations. */
+    fdk__shaped_cache_invalidate_all();
     printf("all headless text tests passed\n");
     return 0;
 }

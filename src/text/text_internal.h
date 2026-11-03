@@ -64,6 +64,9 @@ bool fdk__cff_glyph_box(fdk_cff_font *f, int gid, int *x0, int *y0,
  * some permanently resident); runs that touch more distinct
  * (glyph,phase) pairs evict least-recently-used entries. */
 #define FDK_TEXT_GLYPH_CACHE_MAX 2048
+/* 2x the cache, power of two: open addressing stays sparse. */
+#define FDK_TEXT_GLYPH_INDEX_SIZE 4096
+#define FDK_TEXT_GLYPH_INDEX_EMPTY (-1)
 
 /* Subpixel positioning phases per axis (x only — y stays integer;
  * text lines sit on the baseline). Four phases (0, 1/4, 1/2, 3/4)
@@ -204,16 +207,19 @@ struct fdk_font {
 
     fdk_font_metrics metrics;
 
-    /* Glyph cache: fixed-capacity open-addressing-free linear table
-     * with LRU eviction. Lookup is a linear scan over live entries —
-     * fine at 2048 entries for a software renderer (rasterization and
-     * blending dominate); promoted to a hash when profiling says so.
-     * Entries are keyed (glyph, subpixel phase); the synthetic style
-     * is baked in at raster time and a style change flushes the
-     * whole cache (fdk_text_flush_cache). */
+    /* Glyph cache: fixed-capacity linear table with LRU eviction,
+     * INDEXED (round 13) by an open-addressing hash over the key —
+     * the old linear scan over up to 2048 entries ran once per
+     * glyph PLACEMENT (every shaped walk, every frame; the profile
+     * of a scrolling list had it all over the stacks). The index
+     * holds SLOT indices (-1 = empty); the table remains the owner
+     * and appends/evicts/flushes maintain the index. Entries are
+     * keyed (glyph, subpixel phase, style variant); a style change
+     * flushes the whole cache (fdk_text_flush_cache). */
     fdk_glyph glyphs[FDK_TEXT_GLYPH_CACHE_MAX];
     int glyph_count;            /* live entries in [0, glyph_count) */
     fdk_u64 clock;              /* monotonically bumped per use */
+    int glyph_index[FDK_TEXT_GLYPH_INDEX_SIZE]; /* -1 empty */
 
     fdk_font_cache_stats stats;
 };
@@ -469,6 +475,35 @@ fdk__shaped *fdk__shape_range(fdk_font *font, const char *utf8,
                               size_t byte_len, size_t off, size_t count,
                               const fdk__text_run *runs, size_t n_runs);
 void fdk__shaped_free(fdk__shaped *s);
+
+/* Round 13 — the shaped-string cache. A shaped result is a PURE
+ * function of (font, style, bytes) — the subpixel phase comes from
+ * the pen accumulated FROM ZERO inside the string, and every
+ * consumer offsets by whole pixels — so identical calls (a label
+ * painted every frame, a row measured then drawn) can share ONE
+ * shaped result instead of re-running FriBidi + HarfBuzz + the
+ * allocations per call per frame.
+ *
+ * THE BORROW CONTRACT: the returned pointer is owned by the cache.
+ * Borrow it, read it, return — do NOT free it, and do NOT hold it
+ * across anything that can shape a DIFFERENT string whose insert
+ * evicts this entry, or across a glyph-cache eviction/style flush
+ * (both wipe the whole shaped cache; the glyph rasters a shaped
+ * result points at are invalidated by those events — the wipe is
+ * the safety). Single-threaded UI discipline makes every current
+ * call site (measure/draw/spans in text.c, caret/geometry in
+ * entry.c) a flat shape-then-walk: safe by construction.
+ * runs != NULL bypasses the cache (span styles key the result). */
+fdk__shaped *fdk__shape_range_cached(fdk_font *font, const char *utf8,
+                                     size_t byte_len, size_t off,
+                                     size_t count,
+                                     const fdk__text_run *runs,
+                                     size_t n_runs);
+
+/* Wipes every font's shaped cache (glyph eviction, style flush,
+ * font destruction — the events that invalidate cached raster
+ * pointers). Safe to call from anywhere on the UI thread. */
+void fdk__shaped_cache_invalidate_all(void);
 
 /* The visual boundary x (rounded) for a LOGICAL byte boundary — the
  * Entry caret's mapping. Exact for single-direction text; segment

@@ -1826,3 +1826,293 @@ void fdk__shaping_font_destroy(fdk_font *font) {
 
 
 
+
+/* ---- the shaped-string cache (round 13) ---------------------------------------
+ *
+ * Every paint of a label, every measure of a row, re-ran the full
+ * pipeline — decode, FriBidi, itemize, HarfBuzz per segment, the
+ * placement walk, three allocations — for bytes that had not
+ * changed. The shaped result is a pure function of (font, style,
+ * bytes) because the subpixel phase is derived from a pen that
+ * starts at ZERO inside the string and every consumer offsets by
+ * whole pixels; identical calls can therefore share one result.
+ *
+ * The cache is keyed (font, off, count, bytes); style rides the
+ * font (the only styled callers pass runs, which bypass the cache
+ * — a run array has no cheap identity). Entries are LRU by a
+ * touch clock; a fixed capacity bounds memory; strings longer
+ * than SHAPED_CACHE_MAX_BYTES are never cached (a filename or
+ * label is a few dozen bytes; a whole paragraph is shaped once
+ * and scrolled by the surface, not re-shaped).
+ *
+ * INVALIDATION is deliberately coarse: any glyph-cache eviction
+ * or style flush on ANY font wipes every entry (a shaped result
+ * borrows raster pointers from the glyph tables — see the borrow
+ * contract in text_internal.h). Evictions happen only once the
+ * 2048-slot glyph table fills with NEW glyphs, which a warm UI
+ * essentially never does; a wipe then is one re-shape per visible
+ * string, i.e. one ordinary pre-round-13 frame. */
+
+#define SHAPED_CACHE_MAX_ENTRIES 256
+#define SHAPED_CACHE_MAX_BYTES 1024
+
+/* Adaptive admission (round 13, the churn fix): a directory load
+ * presents N brand-new strings at once; caching every first
+ * sighting fills the table with entries that are evicted before
+ * their second use (the release-build nav storm measurably
+ * REGRESSED: 14.9% -> 19.4% of a core — insert + copy + evict,
+ * per row, with no reuse to pay for it). A string is admitted
+ * only on its SECOND request within a short window: the steady
+ * state (a row measured then painted every frame) always hits the
+ * window; the bulk load (each string shaped exactly twice: once
+ * by measure, once by draw... still a hit!) — measured twice is
+ * exactly what the window wants, so what this really filters is
+ * the walk-once case (filters, sort keys, transient geometry). */
+#define SHAPED_REMEMBER_SLOTS 512u
+#define SHAPED_REMEMBER_MASK (SHAPED_REMEMBER_SLOTS - 1u)
+static fdk_u32 g_remember[SHAPED_REMEMBER_SLOTS]; /* fingerprints */
+static fdk_u32 g_remember_gen[SHAPED_REMEMBER_SLOTS];
+
+typedef struct shaped_entry {
+    fdk__shaped *shaped;
+    fdk_font *font;
+    size_t off;
+    size_t count;
+    size_t byte_len;
+    char *bytes; /* a COPY: callers' buffers are ephemeral       */
+    fdk_u64 last_used;
+} shaped_entry;
+
+static shaped_entry g_shaped_cache[SHAPED_CACHE_MAX_ENTRIES];
+static size_t g_shaped_cache_n;
+static fdk_u64 g_shaped_clock;
+
+/* The not-yet-admitted miss parks here (the admission protocol's
+ * holding slot — see the miss path). Same shape as an entry; the
+ * key fields valid only while bytes != NULL. */
+static shaped_entry g_pending;
+
+/* The one oversized string currently borrowed (see the miss path):
+ * >1KB strings skip the table entirely — shaped once and held
+ * until the next oversized request or an invalidation replaces
+ * it. One slot: repeated big measures hit; alternating big strings
+ * re-shape (the stress rhythm is a single line measured twice). */
+static shaped_entry g_big;
+
+/* FNV-1a fingerprint of the key fields (collision cost: an early
+ * admission — harmless). */
+static fdk_u32 shaped_fingerprint(fdk_font *font, const char *utf8,
+                                  size_t byte_len, size_t off,
+                                  size_t count) {
+    fdk_u32 h = 2166136261u;
+    h = (h ^ (fdk_u32)(uintptr_t)font) * 16777619u;
+    h = (h ^ (fdk_u32)byte_len) * 16777619u;
+    h = (h ^ (fdk_u32)off) * 16777619u;
+    h = (h ^ (fdk_u32)count) * 16777619u;
+    for (size_t i = 0; i < byte_len; i++) {
+        h = (h ^ (fdk_u8)utf8[i]) * 16777619u;
+    }
+    return h ? h : 1u;
+}
+
+void fdk__shaped_cache_invalidate_all(void) {
+    for (size_t i = 0; i < g_shaped_cache_n; i++) {
+        fdk__shaped_free(g_shaped_cache[i].shaped);
+        fdk_free(g_shaped_cache[i].bytes);
+    }
+    g_shaped_cache_n = 0;
+    if (g_pending.shaped != NULL) {
+        fdk__shaped_free(g_pending.shaped);
+        fdk_free(g_pending.bytes);
+    }
+    memset(&g_pending, 0, sizeof g_pending);
+    if (g_big.shaped != NULL) {
+        fdk__shaped_free(g_big.shaped);
+        fdk_free(g_big.bytes);
+    }
+    memset(&g_big, 0, sizeof g_big);
+    memset(g_remember, 0, sizeof g_remember);
+    memset(g_remember_gen, 0, sizeof g_remember_gen);
+}
+
+fdk__shaped *fdk__shape_range_cached(fdk_font *font, const char *utf8,
+                                     size_t byte_len, size_t off,
+                                     size_t count,
+                                     const fdk__text_run *runs,
+                                     size_t n_runs) {
+    /* Styled runs have no cheap identity: bypass, caller-owned (the
+     * span/attr callers still free — they kept the old contract). */
+    if (runs != NULL || n_runs != 0) {
+        return fdk__shape_range(font, utf8, byte_len, off, count, runs,
+                                n_runs);
+    }
+    /* Only the cases shape_range itself answers NULL (bad pointers,
+     * impossible geometry) may bypass: a bypassed result is
+     * CALLER-OWNED, which is only safe when it is NULL. The empty
+     * string (byte_len == 0) MUST flow into the cache paths —
+     * shape_range returns a real allocated (empty) result for it,
+     * and the borrow contract has to own that (the LSan report:
+     * measure("") and draw("") leaked through the old bypass). */
+    if (font == NULL || utf8 == NULL || off > byte_len ||
+        count > byte_len - off) {
+        return fdk__shape_range(font, utf8, byte_len, off, count, runs,
+                                n_runs);
+    }
+
+    /* Entries append in insertion order (the array doubles as the
+     * LRU list), so the lookup is a plain scan of the live region —
+     * at most 256 short memcmps, orders of magnitude under the
+     * FriBidi+HarfBuzz pass it saves. */
+    for (size_t i = 0; i < g_shaped_cache_n; i++) {
+        shaped_entry *e = &g_shaped_cache[i];
+        if (e->font == font && e->off == off && e->count == count &&
+            e->byte_len == byte_len &&
+            memcmp(e->bytes, utf8, byte_len) == 0) {
+            g_shaped_clock++;
+            e->last_used = g_shaped_clock;
+            return e->shaped;
+        }
+    }
+    /* The parked not-yet-admitted miss: a re-request within the
+     * generation window. ADMIT it now (this is the second
+     * sighting) and serve the borrow. */
+    if (g_pending.bytes != NULL && g_pending.font == font &&
+        g_pending.off == off && g_pending.count == count &&
+        g_pending.byte_len == byte_len &&
+        memcmp(g_pending.bytes, utf8, byte_len) == 0) {
+        shaped_entry *e;
+        if (g_shaped_cache_n < SHAPED_CACHE_MAX_ENTRIES) {
+            e = &g_shaped_cache[g_shaped_cache_n++];
+        } else {
+            fdk_u64 oldest = g_shaped_cache[0].last_used;
+            size_t oldest_i = 0;
+            for (size_t i = 1; i < g_shaped_cache_n; i++) {
+                if (g_shaped_cache[i].last_used < oldest) {
+                    oldest = g_shaped_cache[i].last_used;
+                    oldest_i = i;
+                }
+            }
+            e = &g_shaped_cache[oldest_i];
+            fdk__shaped_free(e->shaped);
+            fdk_free(e->bytes);
+        }
+        *e = g_pending; /* takes ownership of both allocations */
+        memset(&g_pending, 0, sizeof g_pending);
+        g_shaped_clock++;
+        e->last_used = g_shaped_clock;
+        return e->shaped;
+    }
+
+    /* Oversized strings (>1KB) never enter the table OR the park:
+     * they are shaped per call and would hold megabytes each (the
+     * stress leg's 1MB line parked twice = the LSan report). They
+     * ride the single big-slot below — owned, freed on replace and
+     * by every invalidation — so the borrow contract holds without
+     * a size ceiling's worth of memory. */
+    if (byte_len > SHAPED_CACHE_MAX_BYTES) {
+        if (g_big.font == font && g_big.off == off &&
+            g_big.count == count && g_big.byte_len == byte_len &&
+            g_big.bytes != NULL &&
+            memcmp(g_big.bytes, utf8, byte_len) == 0) {
+            return g_big.shaped; /* the repeated 1MB measure */
+        }
+        if (g_big.shaped != NULL) {
+            fdk__shaped_free(g_big.shaped);
+            fdk_free(g_big.bytes);
+        }
+        g_big.shaped = fdk__shape_range(font, utf8, byte_len, off,
+                                        count, runs, n_runs);
+        if (g_big.shaped == NULL) {
+            return NULL;
+        }
+        g_big.bytes = fdk_alloc_array(byte_len, 1);
+        if (g_big.bytes == NULL) {
+            fdk__shaped_free(g_big.shaped);
+            g_big.shaped = NULL;
+            return NULL;
+        }
+        memcpy(g_big.bytes, utf8, byte_len);
+        g_big.font = font;
+        g_big.off = off;
+        g_big.count = count;
+        g_big.byte_len = byte_len;
+        return g_big.shaped;
+    }
+
+    /* miss: shape, then MAYBE insert (second-sighting admission —
+     * see the remember-set block above; a walk-once string never
+     * pays the copy, and a bulk load of fresh names does not churn
+     * the table). */
+    fdk__shaped *s = fdk__shape_range(font, utf8, byte_len, off, count,
+                                      runs, n_runs);
+    if (s == NULL) {
+        return NULL;
+    }
+    fdk_u32 fp = shaped_fingerprint(font, utf8, byte_len, off, count);
+    fdk_u32 slot = fp & SHAPED_REMEMBER_MASK;
+    fdk_u32 gen = g_shaped_clock ? (fdk_u32)(g_shaped_clock & 0xffff)
+                                 : 1u;
+    bool second =
+        g_remember[slot] == fp && g_remember_gen[slot] == gen;
+    g_remember[slot] = fp;
+    g_remember_gen[slot] = gen;
+    if (!second) {
+        /* Not admitted: park the ONE result in the single
+         * pending slot (owned by the cache, returned to this
+         * caller as a normal borrow). A re-request within the
+         * generation window finds it here and admits it; anything
+         * else replaces it. No leak, no caller-visible ownership
+         * difference — one extra shape at worst. */
+        if (g_pending.shaped != NULL) {
+            fdk__shaped_free(g_pending.shaped);
+            fdk_free(g_pending.bytes);
+        }
+        g_pending.shaped = s;
+        g_pending.font = font;
+        g_pending.off = off;
+        g_pending.count = count;
+        g_pending.byte_len = byte_len;
+        g_pending.bytes = fdk_alloc_array(byte_len, 1);
+        if (g_pending.bytes != NULL) {
+            memcpy(g_pending.bytes, utf8, byte_len);
+        }
+        return s;
+    }
+    char *copy = fdk_alloc_array(byte_len, 1);
+    if (copy == NULL) {
+        /* OOM copying the key: the cache cannot own the result, and
+         * the borrow contract forbids handing out an unowned one —
+         * fail the call honestly (callers treat a NULL shape as
+         * out-of-memory already). */
+        fdk__shaped_free(s);
+        return NULL;
+    }
+    memcpy(copy, utf8, byte_len);
+
+    shaped_entry *e;
+    if (g_shaped_cache_n < SHAPED_CACHE_MAX_ENTRIES) {
+        e = &g_shaped_cache[g_shaped_cache_n++];
+    } else {
+        /* full: evict the least recently used */
+        fdk_u64 oldest = g_shaped_cache[0].last_used;
+        size_t oldest_i = 0;
+        for (size_t i = 1; i < g_shaped_cache_n; i++) {
+            if (g_shaped_cache[i].last_used < oldest) {
+                oldest = g_shaped_cache[i].last_used;
+                oldest_i = i;
+            }
+        }
+        e = &g_shaped_cache[oldest_i];
+        fdk__shaped_free(e->shaped);
+        fdk_free(e->bytes);
+    }
+    e->shaped = s;
+    e->font = font;
+    e->off = off;
+    e->count = count;
+    e->byte_len = byte_len;
+    e->bytes = copy;
+    g_shaped_clock++;
+    e->last_used = g_shaped_clock;
+    return s;
+}

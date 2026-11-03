@@ -52,9 +52,9 @@ BINS := $(APP_DIRS:%=$(BUILD)/%)
 all: $(BINS)
 
 define APP_RULE
-$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
+$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
 	@mkdir -p $(BUILD)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
@@ -145,6 +145,10 @@ menu-rig: build/menu-rig
 # Round 12: the navigation-storm CPU rig (Xlib + XTest, no FDK) —
 # double-clicks into a big directory and back, N times, while
 # sampling the app's CPU from /proc. Boots via run_navrig.sh.
+build/input-rig: fdk-files/input_rig.c
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I/tmp/my-project/local-x11/include fdk-files/input_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu
+
 build/nav-probe: fdk-files/nav_probe.c
 	@mkdir -p build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I/tmp/my-project/local-x11/include fdk-files/nav_probe.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu

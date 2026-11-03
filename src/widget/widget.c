@@ -466,6 +466,7 @@ void fdk_widget_root_flush_deferred(fdk_widget *root) {
                 /* The last root finished its DEFERRED teardown: same
                  * shutdown rule as the immediate path above. */
                 fdk__animation_drain_all();
+                fdk__shaped_cache_invalidate_all();
             }
             return;
         }
@@ -1045,8 +1046,11 @@ void fdk_widget_destroy(fdk_widget *widget) {
              * fdk_animation.h documents: handles are dead once the
              * last root is gone). This is what keeps process exit
              * ASan-clean when an app destroys its windows (the
-             * compositor-death rig checks exactly that). */
+             * compositor-death rig checks exactly that). Round 13:
+             * the shaped-string cache drains under the SAME rule —
+             * no widget, no text, nothing left to shape. */
             fdk__animation_drain_all();
+            fdk__shaped_cache_invalidate_all();
         }
     }
 }

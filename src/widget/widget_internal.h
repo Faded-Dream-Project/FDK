@@ -462,4 +462,11 @@ void fdk__animation_set_test_clock(long long fixed_now_ms);
  * defensively between groups. */
 void fdk__animation_drain_all(void);
 
+/* Round 13: drains the text shaping cache (shaped results, park and
+ * big slots). Runs beside the animation drain when the last widget
+ * root is destroyed — no widget exists, no text can be shaped
+ * again. Declared here (not text_internal.h) because the shutdown
+ * walk lives in widget.c; implemented in shaping.c. */
+void fdk__shaped_cache_invalidate_all(void);
+
 #endif /* FDK_WIDGET_INTERNAL_H */
