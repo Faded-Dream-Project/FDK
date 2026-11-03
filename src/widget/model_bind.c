@@ -167,11 +167,25 @@ static void rebuild_tree(fdk_widget *tree, binding *b) {
                           FDK_TREE_NODE_NONE);
 }
 
-/* The change handler: applies one change to the mirror. The
- * simplest CORRECT policy for the proxy reorder/move cases is a
- * full rebuild inside a batch (the widget's own end_batch settles
- * once — the O(N) mirror is the binding's contract; the model
- * stays the scalable half). */
+/* The change handler: applies one change to the mirror.
+ *
+ * Round 12 — the incremental cases. The old policy ran
+ * rebuild_list (a FULL clear + N appends + one relayout, with
+ * harfbuzz shaping of every row text) for ROW_CHANGED, ROW_
+ * INSERTED, ROW_REMOVED and CLEARED alike. fmodel_load mutates a
+ * bound model N times per navigation (append + set_text + set_int
+ * ×3 per entry), so ONE navigation cost N full rebuilds — O(N²)
+ * shapings on the main thread, which the nav rig measured as a
+ * pegged core (the owner's btop report) even for a 50-entry
+ * directory; gdb stacks caught rebuild_list under fmodel_load's
+ * set_text/set_int mid-storm. The cases are now incremental:
+ *   ROW_CHANGED  — the one row's text in place (index still maps)
+ *   ROW_INSERTED — append the one row at the mirror's tail
+ *   ROW_REMOVED  — remove the one row (the id array shifts)
+ *   ROW_MOVED / CLEARED / anything unmappable — the full rebuild
+ *                  (the honest fallback; reorder is rare, and the
+ *                  O(N) mirror is the binding's contract — the
+ *                  model stays the scalable half). */
 static void binding_changed(fdk_model *model, fdk_model_change change,
                             fdk_model_row row, void *user) {
     fdk_widget *w = user;
@@ -209,8 +223,56 @@ static void binding_changed(fdk_model *model, fdk_model_change change,
         rebuild_list(w, b);
         return;
     }
-    case FDK_MODEL_ROW_INSERTED:
-    case FDK_MODEL_ROW_REMOVED:
+    case FDK_MODEL_ROW_INSERTED: {
+        if (b->tree) {
+            rebuild_tree(w, b); /* children of a new parent etc. */
+            return;
+        }
+        /* Top-level, at the tail, index one-past-the-end: append
+         * the ONE row — the fmodel_load shape (N appends in a row
+         * now cost N appends, not N full rebuilds). */
+        if (row.parent != FDK_MODEL_ROW_NONE ||
+            row.index != b->n_ids) {
+            rebuild_list(w, b);
+            return;
+        }
+        /* fdk_model_value v = zeroed: a FAILED get (the fire runs
+         * from INSIDE row_append, before the app sets any cell —
+         * the row exists but its cells are NULL) leaves v
+         * untouched, and the trailing type check must not read
+         * garbage (the storm rig's ASAN crash: a garbage v.v.text
+         * free). */
+        fdk_model_value v;
+        memset(&v, 0, sizeof v);
+        bool got = fdk_ok(fdk_model_get(model, row, b->text_column,
+                                        &v));
+        const char *text = (got && v.v.text != NULL) ? v.v.text : "";
+        size_t idx = 0;
+        if (fdk_ok(fdk_list_append(w, text, &idx))) {
+            ids_push(b, fdk_model_row_id(model, row),
+                     FDK_TREE_NODE_NONE);
+        }
+        if (got && v.type == FDK_MODEL_TEXT) {
+            fdk_model_value_free(&v);
+        }
+        return;
+    }
+    case FDK_MODEL_ROW_REMOVED: {
+        if (b->tree || row.parent != FDK_MODEL_ROW_NONE ||
+            row.index >= b->n_ids) {
+            if (b->tree) {
+                rebuild_tree(w, b);
+            } else {
+                rebuild_list(w, b);
+            }
+            return;
+        }
+        (void)fdk_list_remove(w, row.index);
+        memmove(&b->ids[row.index], &b->ids[row.index + 1],
+                (b->n_ids - row.index - 1) * sizeof(*b->ids));
+        b->n_ids--;
+        return;
+    }
     case FDK_MODEL_ROW_MOVED:
     case FDK_MODEL_CLEARED:
     default:

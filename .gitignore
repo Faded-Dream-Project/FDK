@@ -27,3 +27,4 @@ compile_commands.json
 
 # Local rpmbuild tree (packaging/fedora) — build output, like /build/
 /build-rpm/
+test-apps/build-rel/

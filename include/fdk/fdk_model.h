@@ -151,6 +151,18 @@ fdk_result fdk_model_row_resolve(fdk_model *model, fdk_u64 id,
 /* Every row at once (a full clear). */
 void fdk_model_clear(fdk_model *model);
 
+/* Round 12 — mutation batching. Brackets a store rebuild (the
+ * canonical user: a directory reload's clear + N appends + cell
+ * sets). Change fires are HELD between the calls; end_batch
+ * releases exactly ONE FDK_MODEL_CLEARED through the normal fire
+ * path, so a bound view performs ONE replay instead of one per
+ * mutation (the navigation-storm fix: N mutations x N-row mirrors
+ * was the O(N²) that pegged a core). Nestable (depth-counted; the
+ * outermost end releases). A no-op without a held change. Passing
+ * a PROXY FACE batches the proxy's child store. */
+void fdk_model_begin_batch(fdk_model *model);
+void fdk_model_end_batch(fdk_model *model);
+
 /* ---- Cells ------------------------------------------------------------------ */
 
 /* Sets a text cell (copied). */
