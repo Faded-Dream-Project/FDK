@@ -1117,6 +1117,99 @@ static void test_round10_header_strip(void) {
            "unchanged\n");
 }
 
+/* ---- round 11: the public pointer-to-row map ----------------------- */
+
+static void test_round11_row_at(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &list)));
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    {
+        fdk_list_column cols[3] = {
+            {"Name", 200, true},
+            {"Modified", 110, false},
+            {"Size", 70, false},
+        };
+        (void)fdk_list_set_columns(list, cols, 3);
+    }
+    for (int i = 0; i < 6; i++) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "row %d", i);
+        assert(fdk_ok(fdk_list_append(list, buf, NULL)));
+    }
+    fdk_widget_set_bounds(list, (fdk_rect){0, 0, 240, 200});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(260, 240, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+
+    const fdk_i32 rh = fdk_list_get_row_height(list);
+    const fdk_i32 top = fdk__list_test_content_top(list);
+    assert(top > 0); /* the columns round's header strip */
+
+    /* mid-row points map to their own row — the same map the press
+     * and the band use, so a context menu cannot drift from the
+     * highlight the user already saw */
+    for (int i = 0; i < 6; i++) {
+        size_t row = 999;
+        assert(fdk_ok(fdk_list_row_at(
+            list, 60.0f, (float)(top + i * rh + rh / 2), &row)));
+        assert(row == (size_t)i);
+    }
+    /* the header strip is on no row */
+    size_t row = 999;
+    assert(fdk_list_row_at(list, 60.0f, (float)(top / 2), &row) ==
+           FDK_ERR_NOT_FOUND);
+    /* below the last row: empty space */
+    assert(fdk_list_row_at(list, 60.0f,
+                           (float)(top + 6 * rh + rh / 2), &row) ==
+           FDK_ERR_NOT_FOUND);
+    /* outside the widget entirely */
+    assert(fdk_list_row_at(list, -5.0f, 40.0f, &row) ==
+           FDK_ERR_NOT_FOUND);
+    assert(fdk_list_row_at(list, 500.0f, 40.0f, &row) ==
+           FDK_ERR_NOT_FOUND);
+
+    /* scrolled: the map follows the content (the header stays
+     * pinned, the rows slide under it). A tall list gives the
+     * scroll room (the round-10 test's shape). */
+    fdk_widget *tall = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &tall)));
+    fdk_list_set_selection_mode(tall, FDK_LIST_SELECTION_MULTIPLE);
+    {
+        fdk_list_column cols2[3] = {
+            {"Name", 200, true},
+            {"Modified", 110, false},
+            {"Size", 70, false},
+        };
+        (void)fdk_list_set_columns(tall, cols2, 3);
+    }
+    for (int i = 0; i < 30; i++) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "tall %d", i);
+        assert(fdk_ok(fdk_list_append(tall, buf, NULL)));
+    }
+    fdk_widget_set_bounds(tall, (fdk_rect){0, 0, 240, 200});
+    fdk_widget_tree_paint(root, s); /* lay the tree out */
+    const fdk_i32 ttop = fdk__list_test_content_top(tall);
+    fdk_widget *sv = fdk_widget_child_at(tall, 0);
+    assert(sv != NULL);
+    assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, rh * 2)));
+    fdk_i32 gx = -1, gy = -1;
+    (void)fdk_scrollview_get_scroll_offset(sv, &gx, &gy);
+    assert(gy == rh * 2); /* the scroll really happened */
+    size_t trow = 999;
+    assert(fdk_ok(fdk_list_row_at(
+        tall, 60.0f, (float)(ttop + rh / 2), &trow)));
+    assert(trow == 2); /* two rows scrolled away */
+    (void)fdk_scrollview_scroll_to(sv, 0, 0);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] list: row_at maps the pointer to the row (header "
+           "excluded, scroll included, NOT_FOUND off-rows)\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -1150,6 +1243,7 @@ int main(void) {
     test_rubber_band();
     test_round9_ports();
     test_round10_header_strip();
+    test_round11_row_at();
 
     fdk_font_destroy(g_font);
     printf("all list tests passed\n");

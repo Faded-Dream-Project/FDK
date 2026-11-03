@@ -77,6 +77,18 @@ void fdk__scrollview_viewport(fdk_widget *w, fdk_i32 *out_w,
  * CLASSIC bars, full width under OVERLAY ones. */
 fdk_i32 fdk__scrollview_viewport_width(fdk_widget *w);
 
+/* scroll.c (round 11): mark a scrollview's own chrome as
+ * gesture-owning input surfaces — every press that hit-tests into
+ * the scrollview itself or one of its currently-visible internal
+ * scrollbars disarms the widget drag-source controller for that
+ * press (fdk_widget_set_drag_veto). The CONTENT is deliberately
+ * left alone: its veto is the content's business (a list's rows
+ * veto dynamically per selection state; a plain label does not).
+ * Re-callable — internal bar visibility changes with scroll range,
+ * which is why this is a helper and not one-shot create-time
+ * setup. */
+void fdk__scrollview_veto_input(fdk_widget *scrollview);
+
 /* list.c TEST SEAM (1.5.1): the resolved column geometry —
  * col_x[c], column c's width (col 0 = the expanded name column),
  * and the list's content_width. Tests only. */

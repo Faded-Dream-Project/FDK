@@ -644,6 +644,65 @@ static void test_double_click_activation(void) {
            "re-arms)\n");
 }
 
+/* ---- round 11: the public pointer-to-item map ---------------------- */
+
+static void test_round11_item_at(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *iv = make_view(root, &iv);
+    /* 2 columns at 96+4 step, 84+4 row pitch: item i's cell is at
+     * ( (i%2)*100, (i/2)*88 ). Mid-cell points map to their item;
+     * the gutter between cells maps to nothing. */
+    for (int i = 0; i < 7; i++) {
+        fdk_i32 cx = (i % 2) * 100;
+        fdk_i32 cy = (i / 2) * 88;
+        size_t item = 999;
+        assert(fdk_ok(fdk_iconview_item_at(
+            iv, (float)(cx + 48), (float)(cy + 40), &item)));
+        assert(item == (size_t)i);
+    }
+    /* the column gutter (x=98 is past cell 0's right edge 96, before
+     * cell 1's left edge 100) */
+    size_t item = 999;
+    assert(fdk_iconview_item_at(iv, 98.0f, 40.0f, &item) ==
+           FDK_ERR_NOT_FOUND);
+    /* outside the view */
+    assert(fdk_iconview_item_at(iv, -3.0f, 40.0f, &item) ==
+           FDK_ERR_NOT_FOUND);
+    assert(fdk_iconview_item_at(iv, 40.0f, 500.0f, &item) ==
+           FDK_ERR_NOT_FOUND);
+    /* below the last item's row: the empty grid tail */
+    assert(fdk_iconview_item_at(iv, 48.0f, 4 * 88 + 40.0f, &item) ==
+           FDK_ERR_NOT_FOUND);
+
+    /* scrolled: the map follows the content. A tall grid gives the
+     * scroll room: a second view, 3 columns of 7 rows. */
+    fdk_widget *iv2 = NULL;
+    assert(fdk_ok(fdk_iconview_create(root, g_font, &iv2)));
+    fdk_iconview_begin_batch(iv2);
+    for (int i = 0; i < 21; i++) {
+        char label[32];
+        snprintf(label, sizeof label, "Scroll %d", i);
+        (void)fdk_iconview_append(iv2, label, FDK_ROW_ICON_FILE);
+    }
+    fdk_iconview_end_batch(iv2);
+    fdk_widget_arrange(iv2, (fdk_rect){0, 0, 200, 200});
+    fdk_widget *sv = fdk_widget_child_at(iv2, 0);
+    assert(sv != NULL);
+    assert(fdk_ok(fdk_scrollview_scroll_to(sv, 0, 88)));
+    fdk_i32 gx = -1, gy = -1;
+    (void)fdk_scrollview_get_scroll_offset(sv, &gx, &gy);
+    assert(gy == 88); /* the scroll really happened */
+    size_t sitem = 999;
+    assert(fdk_ok(fdk_iconview_item_at(iv2, 48.0f, 40.0f, &sitem)));
+    /* 2 columns at 200px (the step is 100): col 0, row 1 = item 2 */
+    assert(sitem == 2); /* one row scrolled away */
+    (void)fdk_scrollview_scroll_to(sv, 0, 0);
+
+    fdk_widget_destroy(root);
+    printf("[ok] iconview: item_at maps the pointer to the cell "
+           "(gutters and off-view are NOT_FOUND, scroll included)\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -675,6 +734,7 @@ int main(void) {
     test_item_pixmaps();
     test_rubber_band();
     test_double_click_activation();
+    test_round11_item_at();
 
     fdk_font_destroy(g_font);
     printf("all iconview tests passed\n");

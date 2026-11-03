@@ -220,10 +220,237 @@ static void test_drag_source_requires_press(void) {
            "never begins a drag\n");
 }
 
+/* ---- round 11: the veto interplay the owner's reports proved -------- */
+
+/* Builds the file-manager shape: MULTIPLE list, drag source on the
+ * LIST (fdk-files registers it on the view), rows that consume their
+ * presses. Layout must be real (a paint pass) so hit-testing works. */
+static fdk_widget *build_fm_list(fdk_widget *root, fdk_surface **s_out) {
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, NULL, &list)));
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    for (int i = 0; i < 8; i++) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "row %d", i);
+        (void)fdk_list_append(list, buf, NULL);
+    }
+    fdk_widget_set_bounds(list, (fdk_rect){0, 0, 300, 220});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(320, 260, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    if (s_out != NULL) {
+        *s_out = s;
+    } else {
+        fdk_surface_destroy(s);
+    }
+    g_begins = 0;
+    g_begin_widget = NULL;
+    assert(fdk_ok(fdk_widget_set_drag_source(list, 6, on_begin, NULL)));
+    return list;
+}
+
+/* An UNSELECTED row's press+move past the slop must NOT begin a
+ * drag — the press is a potential rubber band (the row vetoes), and
+ * the band (not the DnD grab) must own the gesture. The pre-round-11
+ * controller fired here: the DnD grab broke the band and the fast
+ * sweep cost a spurious drag gesture per press (the CPU report). */
+static void test_veto_row_selection_interplay(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 320, 260},
+                                    &root)));
+    fdk_surface *s = NULL;
+    fdk_widget *list = build_fm_list(root, &s);
+    const fdk_i32 rh = fdk_list_get_row_height(list);
+    assert(rh > 0);
+
+    /* press on unselected row 1, sweep DIAGONALLY past the slop
+     * (x AND y grow — a purely horizontal sweep stays inside row
+     * 1's height and bands only row 1): NO drag may fire */
+    fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    60.0f, (float)(rh + rh / 2));
+    assert(fdk_widget_tree_handle_event(root, &down));
+    for (int d = 4; d <= 40; d += 4) {
+        fdk_event_data m = ev_motion(60.0f + (float)d,
+                                     (float)(rh + rh / 2 + d));
+        (void)fdk_widget_tree_handle_event(root, &m);
+    }
+    assert(g_begins == 0);
+    /* and the sweep actually banded (rows 1..2 in the swept span) */
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                  100.0f, (float)(rh * 2 + rh / 2));
+    (void)fdk_widget_tree_handle_event(root, &up);
+    assert(fdk_list_is_selected(list, 1));
+    assert(fdk_list_is_selected(list, 2));
+    assert(!fdk_list_is_selected(list, 0));
+
+    /* now SELECT row 5 and arm it (fdk-files arms selected rows):
+     * its press+move past the slop DOES begin the drag */
+    (void)fdk_list_select(list, 5);
+    (void)fdk_list_row_set_drag_armed(list, 5, true);
+    fdk_event_data down2 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     60.0f, (float)(rh * 5 + rh / 2));
+    assert(fdk_widget_tree_handle_event(root, &down2));
+    fdk_event_data moved = ev_motion(100.0f,
+                                     (float)(rh * 5 + rh / 2));
+    (void)fdk_widget_tree_handle_event(root, &moved);
+    assert(g_begins == 1);
+    assert(g_begin_widget == list);
+    fdk_event_data up2 = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                   100.0f, (float)(rh * 5 + rh / 2));
+    (void)fdk_widget_tree_handle_event(root, &up2);
+
+    /* deselect everything again: row 5's press is back to band
+     * material (the veto follows the selection flip) */
+    fdk_list_clear_selection(list);
+    g_begins = 0;
+    fdk_event_data down3 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     60.0f, (float)(rh * 5 + rh / 2));
+    assert(fdk_widget_tree_handle_event(root, &down3));
+    fdk_event_data moved3 = ev_motion(100.0f,
+                                      (float)(rh * 5 + rh / 2));
+    (void)fdk_widget_tree_handle_event(root, &moved3);
+    assert(g_begins == 0);
+    fdk_event_data up3 = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                   100.0f, (float)(rh * 5 + rh / 2));
+    (void)fdk_widget_tree_handle_event(root, &up3);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] drag source: unselected rows band (no drag), armed "
+           "rows drag, the veto follows the selection flip\n");
+}
+
+/* The band's structural homes — the gutter below the last row and
+ * beside a row's text (round 9's gate), the scrollbar strip — must
+ * not arm the drag source either. */
+static void test_veto_list_gutter_and_scrollbar(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 320, 260},
+                                    &root)));
+    fdk_surface *s = NULL;
+    fdk_widget *list = build_fm_list(root, &s);
+    const fdk_i32 rh = fdk_list_get_row_height(list);
+
+    /* 8 rows * rh in a 220-px list: the gutter below row 7 */
+    fdk_i32 rows_bottom = rh * 8;
+    assert((fdk_i32)(rows_bottom) < 220); /* the gutter exists */
+    g_begins = 0;
+    fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    60.0f, (float)(rows_bottom + 8));
+    assert(fdk_widget_tree_handle_event(root, &down));
+    for (int dx = 4; dx <= 40; dx += 4) {
+        fdk_event_data m = ev_motion(60.0f + (float)dx,
+                                     (float)(rows_bottom + 8));
+        (void)fdk_widget_tree_handle_event(root, &m);
+    }
+    assert(g_begins == 0); /* the gutter press is a band start */
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                  100.0f, (float)(rows_bottom + 8));
+    (void)fdk_widget_tree_handle_event(root, &up);
+    /* a zero-row sweep in the gutter clears the selection */
+    assert(fdk_list_selected_count(list) == 0);
+
+    /* the scrollbar strip (CLASSIC bars: the v-bar reserves the
+     * right edge while the content overflows) — a press+drag there
+     * scrolls, never drags. The content must overflow for the bar:
+     * widen rows until the natural height exceeds 220. */
+    (void)rh;
+    fdk_widget_destroy(root);
+    fdk_surface_destroy(s);
+
+    root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 320, 260},
+                                    &root)));
+    list = build_fm_list(root, &s);
+    for (int i = 0; i < 40; i++) {
+        char buf[40];
+        snprintf(buf, sizeof buf, "long-row-%02d-pad-pad-pad", i);
+        (void)fdk_list_append(list, buf, NULL);
+    }
+    fdk_surface *s2 = NULL;
+    assert(fdk_ok(fdk_surface_create(320, 260, &s2)));
+    fdk_surface_invalidate_all(s2);
+    fdk_widget_tree_paint(root, s2); /* re-layout with the overflow */
+    fdk_surface_destroy(s2);
+    g_begins = 0;
+    /* the v-bar strip: the last 12 px of the list's width (the
+     * theme's classic bar width; probe the far right edge where
+     * the bar must be when it exists) */
+    fdk_event_data down2 = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                     299.0f, 100.0f);
+    (void)fdk_widget_tree_handle_event(root, &down2);
+    for (int dy = 4; dy <= 40; dy += 4) {
+        fdk_event_data m = ev_motion(299.0f, 100.0f + (float)dy);
+        (void)fdk_widget_tree_handle_event(root, &m);
+    }
+    fdk_event_data up2 = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                   299.0f, 140.0f);
+    (void)fdk_widget_tree_handle_event(root, &up2);
+    /* whether the bar is there or the content is: NO drag may fire
+     * from the list's interior either way (the gutter rule) */
+    assert(g_begins == 0);
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] drag source: gutter and scrollbar presses never "
+           "begin a drag (the band owns them)\n");
+}
+
+/* Round 11's O(1) armed-source lookup: destroying the armed source
+ * mid-press must not leave the root pointing at freed memory, and
+ * the next motion must simply do nothing. */
+static void test_armed_source_o1_lookup(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 320, 260},
+                                    &root)));
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, NULL, &list)));
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    (void)fdk_list_append(list, "row 0", NULL);
+    fdk_widget_set_bounds(list, (fdk_rect){0, 0, 300, 220});
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(320, 260, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+    fdk_surface_destroy(s);
+
+    /* select + arm the row so the press arms the source... */
+    (void)fdk_list_select(list, 0);
+    (void)fdk_list_row_set_drag_armed(list, 0, true);
+    g_begins = 0;
+    assert(fdk_ok(fdk_widget_set_drag_source(list, 6, on_begin, NULL)));
+    fdk_event_data down = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                    60.0f, 10.0f);
+    (void)fdk_widget_tree_handle_event(root, &down);
+
+    /* ...then destroy the whole list MID-PRESS (a view rebuild) and
+     * move: the cached armed pointer must be gone, no crash, no
+     * fire. ASAN guards the stale read; the asserts guard behavior. */
+    fdk_widget_destroy(list);
+    fdk_event_data m = ev_motion(120.0f, 60.0f);
+    (void)fdk_widget_tree_handle_event(root, &m);
+    assert(g_begins == 0);
+    fdk_event_data up = ev_button(FDK_EVENT_POINTER_BUTTON_UP,
+                                  120.0f, 60.0f);
+    (void)fdk_widget_tree_handle_event(root, &up);
+
+    fdk_widget_destroy(root);
+    printf("[ok] drag source: destroying the armed source mid-press "
+           "retires the arm (no stale pointer, no fire)\n");
+}
+
 int main(void) {
     test_drag_source_behind_consuming_child();
     test_drag_source_clear_and_isolation();
     test_drag_source_requires_press();
+    test_veto_row_selection_interplay();
+    test_veto_list_gutter_and_scrollbar();
+    test_armed_source_o1_lookup();
     printf("all drag-source tests passed\n");
     return 0;
 }

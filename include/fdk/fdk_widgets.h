@@ -685,6 +685,18 @@ void fdk_list_set_selection_mode(fdk_widget *list,
  * "how many rows fit" planning. 0 for a non-list. */
 fdk_i32 fdk_list_get_row_height(fdk_widget *list);
 
+/* Round 11 — the pointer-to-row map. Maps a point in LIST-local
+ * coordinates (the same space widget events carry, and the same
+ * geometry the rubber band and the row press use: the header strip
+ * is excluded, the scroll offset is included) to the row whose
+ * rectangle contains it. FDK_ERR_NOT_FOUND when the point is on no
+ * row (the header, the empty space below the last row, outside the
+ * list) — the caller's "the press was not on a file" answer.
+ * Typical use: the context-menu right-click that must select the
+ * row it points at before flavoring the menu. */
+fdk_result fdk_list_row_at(fdk_widget *list, fdk_f32 x, fdk_f32 y,
+                           size_t *out_row);
+
 /* Row CRUD. append writes the new row's index to *out_index when
  * non-NULL. Row text is copied. */
 fdk_result fdk_list_append(fdk_widget *list, const char *text,
@@ -981,6 +993,14 @@ bool fdk_iconview_is_selected(fdk_widget *iconview, size_t index);
 size_t fdk_iconview_selected_count(fdk_widget *iconview);
 fdk_result fdk_iconview_selected_at(fdk_widget *iconview, size_t position,
                                     size_t *out_index);
+/* Round 11 — the pointer-to-item map, the List's row_at twin: a
+ * point in ICONVIEW-local coordinates (widget-event space, scroll
+ * offset included) to the item whose cell contains it.
+ * FDK_ERR_NOT_FOUND when the point is in a grid gutter or outside
+ * the view. Typical use: the context-menu right-click selecting the
+ * item it points at before flavoring the menu. */
+fdk_result fdk_iconview_item_at(fdk_widget *iconview, fdk_f32 x,
+                                fdk_f32 y, size_t *out_index);
 fdk_result fdk_iconview_select(fdk_widget *iconview, size_t index);
 void fdk_iconview_clear_selection(fdk_widget *iconview);
 void fdk_iconview_set_on_selection_changed(fdk_widget *iconview,

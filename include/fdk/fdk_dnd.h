@@ -195,11 +195,15 @@ fdk_result fdk_widget_set_drag_source(fdk_widget *widget,
 /* True when `widget` carries an armed drag-source controller. */
 bool fdk_widget_get_drag_source(const fdk_widget *widget);
 
-/* Per-press drag veto (1.5.0): when set, a press that reaches THIS
- * widget (the hit target itself, not merely its subtree) disarms
- * every drag source for that press — the gesture belongs to the
- * widget's own press handling, and a drag-source begin riding the
- * same motion would fire two gestures at once.
+/* Per-press drag veto (1.5.0, round 11): when set, a press that
+ * hits THIS widget disarms every drag source for that press — the
+ * gesture belongs to the widget's own press handling, and a
+ * drag-source begin riding the same motion would fire two gestures
+ * at once. (Round 11: the veto is checked on the press's HIT
+ * TARGET — the widget hit-testing deepest — which is why the List
+ * now vetoes on its rows, its rows container, its scrollview and
+ * the scrollbars rather than only on itself: a press inside a list
+ * never hit-tests to the list, so a self-only veto was dead code.)
  *
  * The shape it closes (the owner's round-6 report): a list in
  * MULTIPLE selection mode starts a rubber band on ANY press that

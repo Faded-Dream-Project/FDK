@@ -52,9 +52,9 @@ BINS := $(APP_DIRS:%=$(BUILD)/%)
 all: $(BINS)
 
 define APP_RULE
-$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
+$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
 	@mkdir -p $(BUILD)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
@@ -110,7 +110,7 @@ build/sidebar-test: fdk-files/sidebar.c fdk-files/sidebar_test.c fdk-files/sideb
 
 build/drag-rig: fdk-files/drag_rig.c
 	@mkdir -p build
-	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/drag_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I/tmp/my-project/local-x11/include fdk-files/drag_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu
 
 .PHONY: drag-rig
 drag-rig: build/drag-rig
@@ -123,10 +123,24 @@ drag-rig: build/drag-rig
 # which survives them — both rigs point there now.)
 build/click-rig: fdk-files/click_rig.c
 	@mkdir -p build
-	$(CC) $(CPPFLAGS) $(CFLAGS) fdk-files/click_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I/tmp/my-project/local-x11/include fdk-files/click_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu
 
 .PHONY: click-rig
 click-rig: build/click-rig
+
+# Round 11: the context-menu rig (Xlib + XTest only, no FDK) —
+# right-clicks the folder row, finds the real popup window, clicks
+# its LAST entry (Properties), and reads the app's PHASE: act
+# telemetry: the action that runs must be Properties, not the
+# permanent-delete confirm the round-11 off-by-one fired.
+# Boots via run_menurig.sh (private Xvfb + DRIG app).
+build/menu-rig: fdk-files/menu_rig.c
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I/tmp/my-project/local-x11/include fdk-files/menu_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/my-project/local-x11/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/my-project/local-x11/lib/x86_64-linux-gnu
+
+.PHONY: menu-rig
+menu-rig: build/menu-rig
+	./run_menurig.sh
 
 build/gen-perf-50k: fdk-files/perf_50k.c $(FDK_LIB)
 	@mkdir -p build

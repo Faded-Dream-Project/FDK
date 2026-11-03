@@ -17,6 +17,76 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-03 (on the rc2 line)
 
+### Fixed — owner round 11: the dead rubber band, the Properties entry firing delete, the CPU peg, the wrong-row right-click
+
+- **Menus (fdk-files): every menu entry fired the action ONE SLOT
+  ABOVE it.** `item_activate` read the shared action registry at
+  `idx - 1` (a 1-based left-over) while the registration wrote at
+  `idx` — the same 0-based index the toolbar trampoline and the
+  shortcut dispatcher both use. "Properties" ran "Delete
+  permanently" (the delete-confirmation dialog the owner saw),
+  "Move to trash" ran "Rename", and the FIRST entry of every menu
+  fired nothing at all. Fixed to 0-based like its two siblings.
+  Second defect in the same file: the context menus re-registered
+  their entries into the shared 256-slot registry on EVERY popup —
+  ~25 right-clicks walked the count past the array into silent
+  memory corruption. Context menus now use a bounded 64-slot ring
+  (`ctx_menu_build_actions`), and both dispatchers print the
+  mnemonic-stripped "PHASE: act" telemetry under FDK_FILES_DRIG
+  (the new menu rig's channel).
+- **List/IconView: the rubber band was DEAD in a populated view —
+  the drag-source controller owned every press.** The 1.5.0 veto
+  (`fdk_widget_set_drag_veto`) is checked on the press's HIT
+  TARGET, but a press inside a list hit-tests to a ROW (or the
+  scrollview/scrollbar), never to the list — so the list's own
+  veto was dead code and the controller armed on every press; at
+  6px it fired `pane_begin_drag`, and the DnD backend grab broke
+  the band mid-sweep (the "hold and drag does not work" report).
+  The veto now lives where the presses land: every UNSELECTED row
+  vetoes (its press is a potential band; the veto flips with the
+  selection in `list_set_row`, so a SELECTED row keeps the classic
+  drag arming), the rows container and the scrollview chrome veto
+  (a new re-callable `fdk__scrollview_veto_input` keeps the
+  scrollbars' vetoes truthful as bar visibility changes with the
+  scroll range), and the iconview's grid does the same.
+- **Window/paint: fast highlight sweeps cost a full DnD gesture
+  and an O(widgets) walk per motion event.** Each fast
+  hold-and-move "began a drag" (the veto defect above) whose
+  X11 source loop walks the window tree per motion
+  (`xdnd_window_under`'s XQueryTree descent), and the controller
+  itself re-walked the whole widget tree on EVERY motion to find
+  its one armed source. The armed source is now a root-cached
+  pointer (set at press, cleared at fire/release/destroy — a
+  mid-press destroy retires it safely), and with the veto fixed
+  the spurious gestures are gone at the source. The iconview's
+  band apply also stopped invalidating the WHOLE view per motion
+  pixel (flipping cells damage only themselves; the band tint
+  damages old∪new rect, the List's round-9 discipline). Measured
+  on the drag rig: steady-state app CPU 4.8% → 4.0% of one core;
+  the fast-click sweep is now band-only work.
+- **fdk-files: the right-click selected NOTHING — the context
+  menu was flavored from the stale live selection.** A right-click
+  on a folder with nothing selected opened the EMPTY menu; with
+  something else selected, every entry acted on THAT file (the
+  "it asks me if I want to delete a file I never clicked" shape).
+  The engine grew the public pointer-to-row/item maps
+  (`fdk_list_row_at`, `fdk_iconview_item_at` — header strip
+  excluded, scroll offset included, FDK_ERR_NOT_FOUND off-rows),
+  and the right-click now selects the row it points at before the
+  menu opens (a right-click inside a multi-selection keeps it),
+  with the menu flavored from the CLICKED item (CTX_FOLDER vs
+  CTX_FILE). New menu rig (run_menurig.sh) proves it end-to-end:
+  right-click beta-dir → "PHASE: sel 1 beta-dir", click the last
+  entry → "PHASE: act Properties" (was "Delete permanently").
+- **Public API: +2** (`fdk_list_row_at`, `fdk_iconview_item_at`),
+  both additions in the widgets header's established pattern; no
+  signature changes. `make test` green (764 [ok] checks incl. 4
+  new tests: the veto interplay — unselected rows band, selected
+  rows drag, the veto follows the flip; gutter/scrollbar presses
+  never drag; the O(1) armed lookup's mid-press destroy; and the
+  two geometry maps).
+
+
 ### Fixed — owner round 10: the wrong-row selection (and the X11 paint pace)
 
 - **List: every list-level press selected ONE ROW LOWER than the

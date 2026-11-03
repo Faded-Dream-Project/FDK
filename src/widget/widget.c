@@ -964,6 +964,11 @@ void fdk_widget_destroy(fdk_widget *widget) {
     }
 
     fdk_widget *root = find_root(widget);
+    /* The armed drag source may die mid-press (a view rebuild inside
+     * a handler): the root's cached pointer must not outlive it. */
+    if (root != NULL && root->drag_armed_source == widget) {
+        root->drag_armed_source = NULL;
+    }
     widget->flags |= FDK_WF_DESTROYING;
     /* Layout batching: a dying widget must never receive a batched
      * flush (the notifier would relayout a detached subtree —
@@ -1181,6 +1186,14 @@ fdk_result fdk_widget_set_drag_source(fdk_widget *widget,
     }
     if (on_begin == NULL) {
         /* disarm: the gesture state dies with it */
+        /* Round 11: replacing the controller mid-press retires the
+         * old one's arm (the tree walk at the next press would have
+         * re-resolved it anyway; keeping the root pointer honest
+         * means the next motion consults the NEW one or none). */
+        fdk_widget *root = find_root(widget);
+        if (root != NULL && root->drag_armed_source == widget) {
+            root->drag_armed_source = NULL;
+        }
         widget->drag_source_fn = NULL;
         widget->drag_source_user = NULL;
         widget->drag_source_armed = false;
@@ -1189,6 +1202,14 @@ fdk_result fdk_widget_set_drag_source(fdk_widget *widget,
     }
     if (threshold_px <= 0) {
         return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* Round 11: same mid-press retirement as the disarm branch —
+     * replacing a source invalidates whatever arm it held. */
+    {
+        fdk_widget *root = find_root(widget);
+        if (root != NULL && root->drag_armed_source == widget) {
+            root->drag_armed_source = NULL;
+        }
     }
     widget->drag_source_fn = on_begin;
     widget->drag_source_user = user;
@@ -1252,6 +1273,7 @@ static void drag_source_note_press(fdk_widget *root,
     }
     fdk_pointf pos = event->pointer_button.position;
     drag_sources_stand_down(root);
+    root->drag_armed_source = NULL;
     fdk_widget *hit = hit_test(root, pos);
     if (hit != NULL && hit->drag_veto) {
         /* The press belongs to the hit widget's own gesture (the
@@ -1266,30 +1288,17 @@ static void drag_source_note_press(fdk_widget *root,
     source->drag_source_fired = false;
     source->drag_source_x = pos.x;
     source->drag_source_y = pos.y;
+    root->drag_armed_source = source;
 }
 
-/* Finds the tree's one armed source (the press-time stand_down keeps
- * the invariant: at most one). NULL when the press rode no source. */
-static fdk_widget *drag_source_find_armed(fdk_widget *w) {
-    if (w == NULL) {
-        return NULL;
-    }
-    if (w->drag_source_armed && !w->drag_source_fired) {
-        return w;
-    }
-    for (size_t i = 0; i < w->child_count; i++) {
-        fdk_widget *hit = drag_source_find_armed(w->children[i]);
-        if (hit != NULL) {
-            return hit;
-        }
-    }
-    return NULL;
-}
-
+/* The tree's one armed source is root->drag_armed_source (set at the
+ * press, cleared at release/fire/destroy — see widget_internal.h).
+ * Round 11: this used to re-walk the whole tree per motion, which a
+ * fast pointer over a large list turned into O(widgets) per event. */
 static void drag_source_note_motion(fdk_widget *root,
                                     const fdk_event_data *event) {
-    fdk_widget *armed = drag_source_find_armed(root);
-    if (armed == NULL) {
+    fdk_widget *armed = root->drag_armed_source;
+    if (armed == NULL || armed->drag_source_fired) {
         return;
     }
     fdk_pointf pos = event->pointer.position;
@@ -1301,10 +1310,12 @@ static void drag_source_note_motion(fdk_widget *root,
     }
     armed->drag_source_fired = true;
     armed->drag_source_armed = false;
+    root->drag_armed_source = NULL;
     (void)armed->drag_source_fn(armed, armed->drag_source_user);
 }
 
 static void drag_source_note_release(fdk_widget *root) {
+    root->drag_armed_source = NULL;
     drag_sources_stand_down(root);
 }
 

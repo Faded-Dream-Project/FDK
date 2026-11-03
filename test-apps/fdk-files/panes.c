@@ -416,10 +416,58 @@ static bool view_event(fdk_widget *w, const fdk_widget_event *ev,
     view_ctx *vc = user;
     if (ev->type == FDK_WIDGET_POINTER_DOWN &&
         ev->pointer.button == 3) {
+        /* Round 11: the right-click SELECTS what it points at
+         * before the menu opens — the desktop rule the app violated
+         * (it flavored from the LIVE selection, so a right-click on
+         * an unclicked folder opened the menu "about" whatever was
+         * selected before — with nothing selected, the EMPTY menu;
+         * and every menu entry then acted on that stale selection).
+         * The engine's new pointer-to-row/item maps carry exactly
+         * the geometry the press and the rubber band agree on, so
+         * this cannot drift from what the user sees highlighted. */
+        const file_info *clicked = NULL;
+        if (vc->is_list) {
+            size_t row = 0;
+            if (fdk_ok(fdk_list_row_at(
+                    vc->view, ev->pointer.position.x,
+                    ev->pointer.position.y, &row))) {
+                fdk_u64 id = fdk_list_bound_row_id(vc->view, row);
+                clicked = fmodel_info_in(
+                    model_pane_of(vc->pane)->store, id);
+                /* select it when it is not already part of the
+                 * selection (a right-click INSIDE a multi-selection
+                 * keeps the selection — that is the other desktop
+                 * rule; the menu below says CTX_MULTI) */
+                if (clicked != NULL &&
+                    !fdk_list_is_selected(vc->view, row)) {
+                    (void)fdk_list_select(vc->view, row);
+                }
+            } else {
+                /* the header strip or empty space: the click is not
+                 * on a file — keep the current selection (the menu
+                 * may still act on it, the desktop behavior) */
+            }
+        } else {
+            size_t item = 0;
+            if (fdk_ok(fdk_iconview_item_at(
+                    vc->view, ev->pointer.position.x,
+                    ev->pointer.position.y, &item))) {
+                listing_model *lm = model_pane_of(vc->pane);
+                if (lm != NULL && item < lm->info_count) {
+                    clicked = lm->infos[item];
+                }
+                if (clicked != NULL &&
+                    !fdk_iconview_is_selected(vc->view, item)) {
+                    (void)fdk_iconview_select(vc->view, item);
+                }
+            }
+        }
         size_t sel = fdk_list_selected_count(vc->view);
         int flavor = (sel > 1) ? CTX_MULTI
-                     : (sel == 1) ? CTX_FILE
-                                  : CTX_EMPTY;
+                     : (clicked != NULL && clicked->is_dir)
+                         ? CTX_FOLDER
+                         : (sel == 1) ? CTX_FILE
+                                      : CTX_EMPTY;
         menus_popup_context(vc->pane, flavor,
                             (fdk_i32)ev->pointer.position.x,
                             (fdk_i32)ev->pointer.position.y);
