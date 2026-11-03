@@ -289,6 +289,52 @@ static void damage_union(fdk_widget *root, fdk_rect r) {
     } else {
         root->damage = rect_union(root->damage, r);
     }
+    /* Round 14: any union coarsens an exact strip back to ordinary
+     * bounding-box semantics. (For the strip path this is the
+     * correctness escape hatch: anything else invalidating during
+     * the scroll frame simply widens the repaint.) */
+    root->damage_exact = false;
+}
+
+/* Round 14 (the scroll blit): REPLACES the root's pending damage
+ * with one exact rect — the scrollview's exposed strip(s), after its
+ * preserved-pixel blit has already moved the rest. Runs at LAYOUT
+ * time, i.e. AFTER the ordinary arrange damage accumulated (the
+ * content's old + new bounds union); that accumulation is discarded
+ * deliberately — the blit accounted for every moved pixel, and the
+ * strips cover the rest. rect is in ROOT coordinates (the caller
+ * computes absolute bounds; this function does not walk).
+ *
+ * The caller is CONTRACTUALLY responsible for anything invalidated
+ * BEFORE this frame's arrange (a bar wake, a hover change): read it
+ * with fdk__widget_pending_damage at LAYOUT ENTRY and union it into
+ * the rect passed here (scroll_apply_delta_damage does). */
+void fdk__widget_set_damage(fdk_widget *any, fdk_rect root_rect) {
+    fdk_widget *root = find_root(any);
+    if (root == NULL || rect_empty(root_rect)) {
+        return;
+    }
+    root->damage = root_rect;
+    root->has_damage = true;
+    root->damage_exact = true;
+}
+
+/* Round 14: reads the root's pending damage box (false when none).
+ * The snapshot seam the scroll strip path pairs with
+ * fdk__widget_set_damage — see the contract above. */
+bool fdk__widget_pending_damage(fdk_widget *any, fdk_rect *out) {
+    fdk_widget *root = find_root(any);
+    if (root == NULL || !root->has_damage || out == NULL) {
+        if (out != NULL) {
+            out->x = 0;
+            out->y = 0;
+            out->width = 0;
+            out->height = 0;
+        }
+        return false;
+    }
+    *out = root->damage;
+    return true;
 }
 
 /* ---- reentrancy guards + deferred destroy ---- */
@@ -1844,6 +1890,7 @@ void fdk_widget_invalidate_all(fdk_widget *any) {
     root->damage = (fdk_rect){0, 0, root->bounds.width,
                               root->bounds.height};
     root->has_damage = root->bounds.width > 0 && root->bounds.height > 0;
+    root->damage_exact = false;
 }
 
 bool fdk_widget_tree_has_damage(fdk_widget *any) {
@@ -2027,6 +2074,7 @@ void fdk_widget_tree_paint(fdk_widget *any, fdk_surface *surface) {
     fdk_rect damage = rect_intersect(root->damage, surface_bounds);
     if (rect_empty(damage)) {
         root->has_damage = false;
+        root->damage_exact = false;
         return;
     }
 
@@ -2039,6 +2087,7 @@ void fdk_widget_tree_paint(fdk_widget *any, fdk_surface *surface) {
     }
     root->paint_depth--;
     root->has_damage = false;
+    root->damage_exact = false;
 
     /* A paint hook may have destroyed widgets (deferred); free them
      * now that the walk is off the stack. */

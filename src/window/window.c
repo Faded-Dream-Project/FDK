@@ -132,6 +132,20 @@ static int popup_trace_enabled(void) {
     return fdk__popup_trace_enabled();
 }
 
+/* Round 14 (the scroll-perf rigs): the FDK_PRESENT_TRACE gate, read
+ * once. When on, surface.c's present tail prints one line per real
+ * present — monotonic ms, full-vs-rects, damaged area, window area,
+ * rect count — the numbers the stress rig's damage-ratio medians are
+ * computed from. Off by default; zero cost when off. */
+int fdk__present_trace_enabled(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *v = getenv("FDK_PRESENT_TRACE");
+        on = (v != NULL && v[0] != '\0') ? 1 : 0;
+    }
+    return on;
+}
+
 /* The single-slot close-request reason channel (see
  * window_internal.h). Single-threaded UI; set-consume pairs. */
 static int g_pending_popup_close_reason = FDK_POPUP_CLOSE_NONE;
@@ -2872,6 +2886,65 @@ fdk_context *fdk__window_context(void *window_owner) {
 
 fdk_window *fdk__window_of_owner(void *window_owner) {
     return (fdk_window *)window_owner;
+}
+
+/* Round 14: the paint scale a tree paint will use for this root.
+ * The scrollview's layout consults it before choosing delta-strip
+ * damage: at scale > 1 the tree paints into a cleared intermediate
+ * (see fdk_window_paint), so the "preserved pixels" a blit-scroll
+ * relies on do not exist in that buffer — strip damage would leave
+ * the un-repainted region showing the PRE-scroll content. Layout
+ * falls back to full-viewport damage there (correct, merely slower);
+ * the physical-space blit is the recorded follow-up. */
+fdk_f32 fdk__window_tree_paint_scale(fdk_widget *root) {
+    if (root == NULL) {
+        return 1.0f;
+    }
+    /* The one-way-opaque owner back-edge (see window_internal.h):
+     * widget layer exposes the owner pointer; the window layer
+     * resolves it back to its own kind. Standalone test roots have
+     * no owner — the direct paint path, scale 1. */
+    void *owner = fdk__widget_window_owner(root);
+    if (owner == NULL) {
+        return 1.0f;
+    }
+    fdk_context *ctx = fdk__window_context(owner);
+    if (ctx == NULL) {
+        return 1.0f;
+    }
+    for (size_t i = 0; i < ctx->window_count; i++) {
+        fdk_window *w = ctx->windows[i];
+        if (w != NULL && w->root == root) {
+            fdk_f32 scale = 1.0f;
+            (void)fdk_window_get_scale(w, &scale);
+            return scale;
+        }
+    }
+    return 1.0f;
+}
+
+/* Round 14: the window surface a tree paint for this root renders
+ * into (the scroll blit's destination). Lazily created by
+ * fdk_window_get_surface — same call fdk_window_paint makes — so a
+ * scroll arriving before the first paint still finds (or creates)
+ * the real surface. NULL for detached roots. */
+fdk_surface *fdk__window_tree_surface(fdk_widget *root) {
+    if (root == NULL) {
+        return NULL;
+    }
+    void *owner = fdk__widget_window_owner(root);
+    if (owner == NULL) {
+        return NULL;
+    }
+    fdk_window *w = fdk__window_of_owner(owner);
+    if (w == NULL) {
+        return NULL;
+    }
+    fdk_surface *surface = NULL;
+    if (!fdk_ok(fdk_window_get_surface(w, &surface))) {
+        return NULL;
+    }
+    return surface;
 }
 
 void fdk__window_set_auto_paint(fdk_window *window, bool auto_paint) {

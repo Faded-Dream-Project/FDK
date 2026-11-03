@@ -125,6 +125,16 @@ void fdk__surface_drop_framebuffer(fdk_surface *surface);
 void fdk__surface_blend_coverage(fdk_surface *surface, int x, int y,
                                  fdk_color color, fdk_f32 coverage);
 
+/* Round 14 (the scroll blit): same-surface opaque region copy — the
+ * preserved-pixel mover behind delta-strip scroll damage. Overlap-safe
+ * (memmove row walk, direction picked by shift sign), clip-stack
+ * honored, and deliberately NOT damage-tracked: the caller owns the
+ * damage story (it adds only the exposed strip; tracking here would
+ * double-report and coarsen away the win). See surface.c. */
+fdk_result fdk__surface_self_blit(fdk_surface *s, fdk_i32 dst_x,
+                                  fdk_i32 dst_y, fdk_i32 src_x,
+                                  fdk_i32 src_y, fdk_i32 w, fdk_i32 h);
+
 /* Alpha-mask blit (internal) — composites a 1-byte-per-pixel coverage
  * mask with a solid color, source-over, clip-stack-honoring, across
  * `rect` (also the mask's coordinate frame; `mask_stride` in bytes).

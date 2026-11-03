@@ -56,6 +56,12 @@ else
     cd "$(dirname "$0")" && cd ..
     echo "   x11dev prepared"
 fi
+# The x11dev branch may have been skipped (already prepared) — the
+# earlier cd into /tmp/x11dev-debs is NOT undone in that path. Re-pin
+# the working directory to the repo root by absolute path; every later
+# step (restore_wayland_toolchain.sh, rig compiles) runs from here.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
 
 echo "== 2/4: the Wayland toolchain =="
 if [ -f /home/z/apt/prefix/usr/lib/x86_64-linux-gnu/pkgconfig/wayland-client.pc ]; then

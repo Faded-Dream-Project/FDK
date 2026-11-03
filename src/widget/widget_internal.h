@@ -31,6 +31,7 @@
 #include "fdk/fdk_widget.h"
 #include "fdk/fdk_text.h" /* 1.4.11: fdk_span (tooltip/label/button markup) */
 #include "fdk/fdk_theme.h" /* 1.4.16: background_token (token-following bg) */
+#include "fdk/fdk_animation.h" /* round 14: fdk__animation_set_self_damage */
 #include "fdk/fdk_dnd.h"  /* 1.1.0, S-9: drag_formats/drag_fn fields */
 
 #include <stdbool.h>
@@ -279,6 +280,14 @@ struct fdk_widget {
     fdk_rect damage;
     bool has_damage;
 
+    /* Round 14 (the scroll blit): when set, the damage box above is
+     * EXACT (a scroll strip) — fdk__widget_set_damage put it there
+     * and nothing has unioned onto it since. Cleared by damage_union
+     * (any ordinary invalidation coarsens back to bounding-box
+     * semantics — the conservative default). The scroll strip path
+     * reads it once, at paint time. */
+    bool damage_exact;
+
     /* Reentrancy guards: while an event dispatch or paint walk is on
      * the stack, fdk_widget_destroy() defers the actual free into
      * `deferred_destroy` (unlinks still happen immediately). */
@@ -455,6 +464,18 @@ void fdk__animation_detach_subtree(fdk_widget *w);
  * start from it; -1 restores the real monotonic clock). Production
  * never calls this. */
 void fdk__animation_set_test_clock(long long fixed_now_ms);
+
+/* Round 14 (the scroll blit): marks an animation SELF-DAMAGING —
+ * its tick callback owns the widget's damage story precisely (the
+ * scrollview's flight damages only the exposed strips + the blit's
+ * moved region), so the pump skips its blanket post-tick
+ * fdk_widget_invalidate (which would coarsen the root damage back
+ * to the whole widget and defeat the strip path). The tick is then
+ * CONTRACTUALLY responsible for invalidating on every path where it
+ * changes visuals and the strip damage is not taken (flight_apply
+ * does: declined strips fall back to a whole-widget invalidate).
+ * The forward type keeps this header clear of the engine's own. */
+void fdk__animation_set_self_damage(fdk_animation *anim);
 
 /* Frees every animation (active and zombie) without callbacks.
  * Runs automatically when the last widget root is destroyed (the

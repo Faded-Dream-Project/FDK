@@ -415,6 +415,30 @@ fdk_context *fdk__window_context(void *window_owner);
  * dereferences the pointer, keeping the one-way-opaque discipline.) */
 fdk_window *fdk__window_of_owner(void *window_owner);
 
+/* Round 14 (the scroll blit's HiDPI gate): the paint scale a tree
+ * paint will use for this root. Resolved through the same one-way
+ * -opaque owner back-edge as fdk__window_context: the widget layer
+ * exposes the owner pointer, this layer resolves it back to its own
+ * kind. A detached/standalone root (no owner) answers 1.0 — the
+ * direct paint path. The scrollview consults this before choosing
+ * delta-strip scroll damage (see scroll.c): at scale > 1 the tree
+ * paints into a cleared logical intermediate (fdk_window_paint),
+ * so the "preserved pixels" a blit-scroll relies on do not exist
+ * in that buffer — the layout falls back to full-viewport damage
+ * there (correct, merely slower). */
+fdk_f32 fdk__window_tree_paint_scale(fdk_widget *root);
+
+/* Round 14 (the scroll blit): the window surface a tree paint for
+ * this root will render into — the same one-way-opaque owner
+ * back-edge. NULL when the root is detached (standalone test roots
+ * paint into caller-supplied surfaces; there is nothing to blit
+ * on). The scrollview uses this as the destination of its
+ * preserved-pixel blit; the surface is borrowed (owned by the
+ * window, may be re-created on resize — never cached by callers).
+ * The surface is returned UNACQUIRED: callers that draw through it
+ * run the normal acquire path (fdk__surface_self_blit does). */
+fdk_surface *fdk__window_tree_surface(fdk_widget *root);
+
 /* Toolkit-window integration (Phase 9 completion): marks a window the
  * toolkit owns (menu popup, dialog) so dispatch auto-paints it. */
 void fdk__window_set_auto_paint(fdk_window *window, bool auto_paint);
@@ -577,6 +601,12 @@ void fdk__window_note_popup_close(int reason);
  * surface.c's present tail, which owns the motion->present latency
  * line — every present path converges there. */
 int fdk__popup_trace_enabled(void);
+
+/* The FDK_PRESENT_TRACE gate (window.c; read-once, round 14). When
+ * on, surface.c's present tail prints one PRESENT-TRACE line per
+ * real present: monotonic ms, full|rects, damaged area, window
+ * area, rect count. The scroll-perf rigs' damage-ratio medians. */
+int fdk__present_trace_enabled(void);
 
 /* Monotonic milliseconds (window.c; shared for the same line). */
 long long fdk__window_now_ms(void);
