@@ -291,16 +291,76 @@ static fdk_u8 *cff_glyph_bitmap(const fdk_font *font, int glyph_index,
  * for the single-style entry points, the run's style for span walks
  * — the variant component of the key keeps the rasterizations from
  * colliding). */
+/* Round 13 — the glyph index. Open addressing over the key; the
+ * buckets hold SLOT indices into the linear table. The table stays
+ * the owner (LRU order is a scan over it when an eviction is
+ * needed — rare); the index turns the per-placement lookup from a
+ * 2048-entry scan into a couple of probes. */
+static fdk_u32 glyph_key_hash(int key) {
+    fdk_u32 h = (fdk_u32)key * 2654435761u; /* Knuth multiplicative */
+    h ^= h >> 15;
+    return h;
+}
+
+static void glyph_index_init(fdk_font *font) {
+    for (size_t i = 0; i < FDK_TEXT_GLYPH_INDEX_SIZE; i++) {
+        font->glyph_index[i] = FDK_TEXT_GLYPH_INDEX_EMPTY;
+    }
+}
+
+/* Removes slot `slot` (holding `key`) from the index — the classic
+ * open-addressing backward-shift deletion. */
+static void glyph_index_remove(fdk_font *font, int key, int slot) {
+    size_t i = glyph_key_hash(key) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
+    while (font->glyph_index[i] != slot) {
+        if (font->glyph_index[i] == FDK_TEXT_GLYPH_INDEX_EMPTY) {
+            return; /* not present: consistent already */
+        }
+        i = (i + 1) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
+    }
+    font->glyph_index[i] = FDK_TEXT_GLYPH_INDEX_EMPTY;
+    size_t j = (i + 1) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
+    while (font->glyph_index[j] != FDK_TEXT_GLYPH_INDEX_EMPTY) {
+        int s2 = font->glyph_index[j];
+        size_t home = glyph_key_hash(font->glyphs[s2].key) &
+                      (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
+        /* can s2 move back into the hole at i? */
+        if (((j - i) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1)) >
+            ((j - home) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1))) {
+            font->glyph_index[i] = s2;
+            font->glyph_index[j] = FDK_TEXT_GLYPH_INDEX_EMPTY;
+            i = j;
+        }
+        j = (j + 1) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
+    }
+}
+
+static void glyph_index_insert(fdk_font *font, int key, int slot) {
+    size_t i = glyph_key_hash(key) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
+    while (font->glyph_index[i] != FDK_TEXT_GLYPH_INDEX_EMPTY) {
+        if (font->glyphs[font->glyph_index[i]].key == key) {
+            return; /* already indexed (a re-raster of a same-key
+                     * slot must not double-insert) */
+        }
+        i = (i + 1) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
+    }
+    font->glyph_index[i] = slot;
+}
+
 static fdk_glyph *glyph_slot(fdk_font *font, int key,
                              unsigned style_flags) {
-    /* Hit? */
-    for (int i = 0; i < font->glyph_count; i++) {
-        if (font->glyphs[i].key == key) {
+    /* Hit? A couple of probes through the index (round 13; the old
+     * linear scan was per-placement, every frame). */
+    size_t i = glyph_key_hash(key) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
+    while (font->glyph_index[i] != FDK_TEXT_GLYPH_INDEX_EMPTY) {
+        int si = font->glyph_index[i];
+        if (font->glyphs[si].key == key) {
             font->clock++;
-            font->glyphs[i].last_used = font->clock;
+            font->glyphs[si].last_used = font->clock;
             font->stats.cache_hits++;
-            return &font->glyphs[i];
+            return &font->glyphs[si];
         }
+        i = (i + 1) & (FDK_TEXT_GLYPH_INDEX_SIZE - 1);
     }
 
     /* Miss: find a slot — a free one if the table has room, else the
@@ -310,17 +370,34 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key,
         slot = &font->glyphs[font->glyph_count++];
     } else {
         fdk_u64 oldest = font->glyphs[0].last_used;
-        slot = &font->glyphs[0];
-        for (int i = 1; i < font->glyph_count; i++) {
-            if (font->glyphs[i].last_used < oldest) {
-                oldest = font->glyphs[i].last_used;
-                slot = &font->glyphs[i];
+        int oldest_i = 0;
+        for (int k = 1; k < font->glyph_count; k++) {
+            if (font->glyphs[k].last_used < oldest) {
+                oldest = font->glyphs[k].last_used;
+                oldest_i = k;
             }
         }
+        slot = &font->glyphs[oldest_i];
+        glyph_index_remove(font, slot->key, oldest_i);
         fdk_free(slot->bits);
         slot->bits = NULL;
         font->stats.evictions++;
+        /* Round 13: the evicted slot's raster was borrowed by cached
+         * shaped results — and the slot is about to be REUSED for a
+         * different glyph (stale-but-valid pointers, the worst kind).
+         * Wipe the whole shaped cache; a warm UI never evicts. */
+        fdk__shaped_cache_invalidate_all();
     }
+    /* Index the new entry BEFORE the rasterizer can run (a
+     * fallback font's glyph_slot call must find THIS table
+     * consistent), and commit the key FIRST so the probes other
+     * calls run during rasterization never read a stale one. */
+    slot->key = key; /* the rasterizer below may not reach its own
+                      * slot->key commit (an early return on a
+                      * missing glyph would leave the index pointing
+                      * at an inconsistent entry) */
+    glyph_index_insert(font, key,
+                       (int)(slot - font->glyphs));
 
     int glyph_index = key / FDK_TEXT_KEY_STRIDE;
     int phase = (key % FDK_TEXT_KEY_STRIDE) % FDK_TEXT_SUBPIXEL_PHASES;
@@ -416,6 +493,10 @@ void fdk_text_flush_cache(fdk_font *font) {
     }
     font->glyph_count = 0;
     font->stats.cached_glyphs = 0;
+    glyph_index_init(font); /* slots are gone: empty the index */
+    /* Round 13: every cached shaped result borrows raster pointers
+     * from these tables — the style flush invalidates them all. */
+    fdk__shaped_cache_invalidate_all();
 }
 
 const fdk_glyph *fdk_text_glyph_for_styled(fdk_font *font,
@@ -760,6 +841,8 @@ fdk_font *fdk_text_font_load_face(const char *path, long face_index,
         return NULL;
     }
     memset(font, 0, sizeof(*font));
+    glyph_index_init(font); /* 0 is a VALID slot index: the index
+                             * must start EMPTY, not zeroed */
 
     /* Container gate BEFORE stb sees the bytes (see
      * validate_sfnt_face). */
@@ -880,6 +963,9 @@ void fdk_font_destroy(fdk_font *font) {
     fdk__shaping_font_destroy(font);
     fdk__cff_destroy(font->cff);
     fdk__emoji_destroy(font->emoji);
+    /* Round 13: this font's glyph tables (and every fallback's) are
+     * about to go — drop every cached shaped result first. */
+    fdk__shaped_cache_invalidate_all();
     for (int i = 0; i < font->glyph_count; i++) {
         fdk_free(font->glyphs[i].bits);
     }
@@ -990,11 +1076,12 @@ fdk_result fdk_font_measure_utf8(const fdk_font *font,
 
     /* M-2: the shaped placement pipeline — the same total and ink
      * bounds the legacy walk produced for pure-LTR text (and the
-     * correct visual total for everything else). The shaped result
-     * owns nothing the caller outlives: it is freed before return,
-     * after copying the metrics out. */
-    fdk__shaped *s = fdk__shape_range(f, utf8, byte_len, 0, byte_len,
-                                      NULL, 0);
+     * correct visual total for everything else). Round 13: the
+     * shaped result is the CACHE's — measure and draw share one
+     * entry per (font, bytes), so a row measured once and painted
+     * every frame never re-runs FriBidi + HarfBuzz. */
+    fdk__shaped *s = fdk__shape_range_cached(f, utf8, byte_len, 0,
+                                             byte_len, NULL, 0);
     if (s == NULL) {
         return FDK_ERR_OUT_OF_MEMORY;
     }
@@ -1004,8 +1091,7 @@ fdk_result fdk_font_measure_utf8(const fdk_font *font,
         m.ink_top = (fdk_i32)s->ink_top;
         m.ink_bottom = (fdk_i32)s->ink_bottom;
     }
-    *out = m;
-    fdk__shaped_free(s);
+    *out = m; /* borrowed: the shaped cache owns the result */
     return FDK_OK;
 }
 
@@ -1031,8 +1117,10 @@ fdk_result fdk_font_selection_spans_utf8(const fdk_font *font,
     if (byte_len == 0 || sel_lo >= sel_hi) {
         return FDK_OK; /* empty text or empty selection: no spans */
     }
-    fdk__shaped *s = fdk__shape_range(f, utf8, byte_len, 0, byte_len,
-                                      NULL, 0);
+    /* Round 13: borrowed from the shaped cache (selection geometry
+     * is computed on the SAME bytes draw paints — one entry). */
+    fdk__shaped *s = fdk__shape_range_cached(f, utf8, byte_len, 0,
+                                             byte_len, NULL, 0);
     if (s == NULL) {
         return FDK_ERR_OUT_OF_MEMORY;
     }
@@ -1045,8 +1133,7 @@ fdk_result fdk_font_selection_spans_utf8(const fdk_font *font,
     if (s->n_places > cap) {
         spans = fdk_alloc_array(s->n_places, sizeof *spans);
         if (spans == NULL) {
-            fdk__shaped_free(s);
-            return FDK_ERR_OUT_OF_MEMORY;
+            return FDK_ERR_OUT_OF_MEMORY; /* the cache still owns s */
         }
         cap = s->n_places;
     }
@@ -1066,8 +1153,7 @@ fdk_result fdk_font_selection_spans_utf8(const fdk_font *font,
     if (spans != stack_spans) {
         fdk_free(spans);
     }
-    fdk__shaped_free(s);
-    return FDK_OK;
+    return FDK_OK; /* borrowed: the shaped cache owns s */
 }
 
 /* Rect union on i64 coordinates (glyph boxes can poke far outside a
@@ -1105,9 +1191,10 @@ fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
     /* M-2: the shaped placement walk — glyphs in VISUAL order, each
      * at its floored pen position, marks riding their GPOS y_shift.
      * The legacy fallback path produces the identical walk for
-     * single-direction text. */
-    fdk__shaped *s = fdk__shape_range(font, utf8, byte_len, 0, byte_len,
-                                      NULL, 0);
+     * single-direction text. Round 13: borrowed from the shaped
+     * cache — a label painted every frame shapes once, ever. */
+    fdk__shaped *s = fdk__shape_range_cached(font, utf8, byte_len, 0,
+                                             byte_len, NULL, 0);
     if (s == NULL) {
         return FDK_ERR_OUT_OF_MEMORY;
     }
@@ -1149,7 +1236,7 @@ fdk_result fdk_surface_draw_utf8(fdk_surface *surface, fdk_font *font,
                            (fdk_i64)dst.y + dst.height);
         }
     }
-    fdk__shaped_free(s);
+    /* borrowed: the shaped cache owns the result */
 
     /* One damage rect per run, clipped to the pixels actually
      * reachable. Nothing drawn (all-whitespace run, empty string) ->

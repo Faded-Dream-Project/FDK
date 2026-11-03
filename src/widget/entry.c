@@ -426,13 +426,14 @@ static fdk_i32 text_width_to(fdk_font *font, const char *s, size_t len,
     if (font == NULL || i == 0) {
         return 0;
     }
-    fdk__shaped *sh = fdk__shape_range(font, s, len, 0, len, NULL, 0);
+    /* Round 13: borrowed from the shaped cache — the caret walk
+     * runs per paint; the bytes are the entry's, rarely changed. */
+    fdk__shaped *sh = fdk__shape_range_cached(font, s, len, 0, len,
+                                              NULL, 0);
     if (sh == NULL) {
         return 0;
     }
-    fdk_i32 x = fdk__shaped_caret_x(sh, i);
-    fdk__shaped_free(sh);
-    return x;
+    return fdk__shaped_caret_x(sh, i);
 }
 
 /* ---- password mode geometry ----
@@ -491,9 +492,10 @@ static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
         return 0;
     }
     if (!e->password) {
+        /* Round 13: borrowed from the shaped cache. */
         fdk__shaped *sh =
-            fdk__shape_range(e->font, e->text, e->len, 0, e->len,
-                             NULL, 0);
+            fdk__shape_range_cached(e->font, e->text, e->len, 0,
+                                    e->len, NULL, 0);
         if (sh == NULL) {
             return 0;
         }
@@ -508,8 +510,7 @@ static size_t offset_at_x(fdk_entry *e, fdk_f32 local_x) {
                 best = sh->cp_byte[k];
             }
         }
-        fdk__shaped_free(sh);
-        return best;
+        return best; /* borrowed: the shaped cache owns sh */
     }
     fdk_f32 acc = 0.0f;
     size_t at = 0;

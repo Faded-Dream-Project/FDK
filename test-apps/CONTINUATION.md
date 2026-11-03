@@ -1,3 +1,92 @@
+# §31 continuation — UPDATE (owner round 13: the core-of-FDK performance audit — the text path)
+
+## The owner's report and what the audit found
+"the filemanager feels slow — something is wrong in the core of
+FDK about performance, look through the code really carefully and
+find anywhere the performance can be increased." A deliberate
+full pass over the ENGINE core (src/text, src/render, src/widget
+paint paths, window paint walk), engine fixes only, measured with
+a NEW input rig (wheel storms + hover sweeps under Xvfb, CPU
+sampled from /proc) plus the round-12 nav rig.
+
+Audit verdict table (what was checked and what it found):
+
+| path | finding | verdict |
+|---|---|---|
+| paint walk (paint_rec) | damage-rect + bounds culling, clip stack | sound |
+| blend_mask/blend_rgba | integer source-over, transparent-skip | sound |
+| hb_font per font | created once, cached on the font | sound |
+| **glyph cache lookup** | **linear scan over 2048 slots, per glyph PER PLACEMENT** | **FIXED — hash index** |
+| **shaping (measure/draw/spans/caret)** | **FriBidi+HarfBuzz+3 allocs re-run per call per frame, freed, re-derived** | **FIXED — shaped-string cache** |
+| fdk-files fs_stat_entry | stat() per file ON THE UI THREAD (invisible on tmpfs; THE real-disk feels-slow) | recorded — next fdk-files round: the fdk_thread.h worker pool exists, mirror thumbs.c |
+
+## The two engine fixes
+1. **Shaped-string cache** (src/text/shaping.c, text.c, entry.c):
+   a shaped result is a pure function of (font, style, bytes) —
+   the subpixel phase derives from the in-string pen-from-zero,
+   consumers offset whole pixels — so measure/draw/spans/caret
+   BORROW one LRU-cached result (256 entries, <=1KB). Runs!=NULL
+   (styled spans) bypass. Invalidations: glyph eviction, style
+   flush, font destroy, last-root teardown (beside the animation
+   drain). THREE hard lessons baked in:
+   - **Churn**: naive first-sighting admission REGRESSED the nav
+     rig (14.9% -> 19.4% of a core): directory loads present N
+     fresh strings, evicted before reuse. Fix: second-sighting
+     admission (512-slot fingerprint remember-set + a park slot);
+     bulk loads never churn, steady state always admits. Final
+     nav: 13.6% (beats baseline).
+   - **Ownership**: a bypass that returned caller-owned results
+     into a borrow API leaked (LSan: the 1MB stress line, then
+     every measure("")/draw("")). Fix: only NULL-returning cases
+     bypass; empty strings flow through the cache; >1KB strings
+     ride a single owned big-slot.
+   - **Test layering**: two test_text assertions encoded the old
+     "second draw touches the glyph table" assumption; now the
+     shaped cache serves it pre-resolved. Invariants re-asserted:
+     rasterizations flat (misses) + pixel-identical output.
+2. **Glyph-cache hash index** (text.c): open addressing over the
+   key (4096 buckets), backward-shift delete, insert-before-
+   rasterize with key committed first (recursive fallback
+   glyph_slot calls must see consistency). Init-to-EMPTY on font
+   create (slot 0 is valid — memset(0) was the trap), reset on
+   flush.
+
+## Measurements (% of one core; release build; input rig + nav rig)
+| rig | baseline | final |
+|---|---|---|
+| hover sweep 1000-file dir | 1.3% | **0.7%** |
+| wheel scroll 1000-file dir | 6.2% | **5.5%** |
+| nav storm 500 files | 14.9% | **13.7%** |
+| (naive-cache nav detour) | 19.4% | the churn lesson above |
+ASan: scroll 14.2 -> 10.5%; hover/nav flat (instrumentation
+dominates). All rigs settle to 0.0 CPU after the storm.
+Hover halved, scroll -12%, nav -8% — and the steady-state
+re-shaping per frame (the actual "feels slow" mechanism for text
+everywhere, not just fdk-files) is gone at the engine level.
+
+## Verification this round
+- make tools && make test (both backends, ASan/UBSan, LSan):
+  GREEN — 762 [ok], zero leaks, zero warnings.
+- Rigs: menu rig PASS (Properties runs Properties); click sweep
+  over rows: header 160-175 -> sel 0 (none); rows 180-200 ->
+  sel 1 alpha.txt (interactive selection intact).
+- New rig survives in-tree: test-apps/input_rig.c +
+  run_inputrig.sh (RIG_MODE=scroll|hover, RIG_FILES,
+  RIG_SECONDS; build-rel for release numbers).
+
+## Next round candidates (unchanged + this round's additions)
+- fdk-files: thread the fs_stat_entry pass through the
+  fdk_thread.h worker pool (mirror thumbs.c's pattern) — the
+  real-disk directory-load latency, the remaining app-layer
+  "feels slow".
+- (existing list: S7/S8/S10, PART-1..8, §30 backlog.)
+
+## Rules unchanged
+Master rule; zero warnings (-Werror on); no D-Bus library in FDK;
+ta_buf in apps; 8-experiment timebox; identity ONLY
+Faded Dream Project <242450780+FemBoyGamerTechGuy@users.noreply.github.com>;
+WIP push every step; webfetch specs, record URLs.
+
 # §31 continuation — UPDATE (owner round 10: the wrong-row offset, the pegged core, the GPU question)
 
 # §31 continuation — UPDATE (owner round 11: the dead rubber band, the Properties-asks-delete, the pegged core, the unselecting right-click)

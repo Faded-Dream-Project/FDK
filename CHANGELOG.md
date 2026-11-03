@@ -17,6 +17,102 @@ note their development-candidate status.
 
 ## [Unreleased-candidate features] — 2026-11-03 (on the rc2 line)
 
+### Performance — owner round 13: the core text path audit (shaping re-run per paint, the glyph-table linear scan)
+
+- **The audit.** The owner's report: "the filemanager still feels
+  slow — something is wrong in the core of FDK about performance;
+  look through the code really carefully and find anywhere the
+  performance can be increased." A full pass over the core render
+  and text subsystems (src/text/*, src/render/*, src/widget paint
+  paths, the window paint walk) found the architecture sound —
+  the paint walk is damage-rect-culled with a clip stack, blend
+  loops are tight integer source-over, hb_font objects are cached
+  per font — but TWO core hotspots, both in the text path, plus
+  one app-layer finding recorded for the next fdk-files round:
+
+  | subsystem | finding | verdict |
+  |---|---|---|
+  | paint walk (widget.c paint_rec) | damage-rect + bounds culling | sound |
+  | blend_mask / blend_rgba (surface.c) | integer loops, transparent-pixel skip | sound |
+  | hb_font (shaping.c sh_hb_font_for) | created once per font, cached | sound |
+  | glyph raster cache (text.c) | lookup = LINEAR SCAN over up to 2048 entries, run once per glyph PER PLACEMENT (every frame) | **fixed (hash index)** |
+  | shaping itself (text.c measure/draw/spans) | FriBidi + HarfBuzz + 3 allocs re-run PER CALL PER FRAME; the result was freed and re-derived every time | **fixed (shaped-string cache)** |
+  | scroll/entry caret paths (entry.c) | same re-shape per paint | **fixed (same cache)** |
+  | fdk-files fs_stat_entry (app layer) | stat() per file ON THE UI THREAD — invisible on tmpfs, the real-disk "feels slow" | recorded for the fdk-files round (worker pool exists: fdk_thread.h) |
+
+- **Fix A — the shaped-string cache (`fdk__shape_range_cached`).**
+  A shaped result is a PURE function of (font, style, bytes): the
+  subpixel phase is derived from a pen accumulated from zero
+  INSIDE the string, and every consumer offsets by whole pixels —
+  so identical calls can share one result. measure/draw/spans
+  (text.c) and the Entry caret/geometry walks now borrow from an
+  LRU cache (256 entries, <=1KB strings, keyed font+offset+count+
+  bytes). Borrow contract documented in text_internal.h: no free,
+  no holding across a differently-shaped call or a glyph
+  eviction/style flush (both wipe the cache — a shaped result
+  borrows raster pointers from the glyph tables). Styled runs
+  (span/attr) bypass: no cheap identity, callers keep the owned
+  contract.
+- **The churn lesson (measured, then fixed).** The naive cache
+  made navigation WORSE (release nav rig 500 files: 14.9% of a
+  core baseline -> 19.4%): every directory load presents N
+  brand-new strings, and first-sighting insertion filled the
+  table with entries evicted before reuse — insert + copy +
+  evict-scan per row for nothing. Admission now requires a SECOND
+  sighting within a generation window (a 512-slot fingerprint
+  remember-set): first miss parks in a single owned slot; a
+  re-request admits it. Steady state (row measured then painted
+  every frame) always admits; bulk loads never churn. Nav: 19.4%
+  -> 13.6% (better than the 14.9% baseline — the second shape of
+  each row's measure+draw pair now hits).
+- **Oversized strings** (>1KB, e.g. the stress suite's 1MB line)
+  ride a separate single big-slot: owned, freed on replace and by
+  every invalidation, never admitted to the table. The empty
+  string flows through the cache paths too — shape_range returns
+  a real allocated result for it, and the borrow contract must
+  own that (the first draft leaked it through a bypass; LSan
+  caught it, the ownership rules are now explicit in the code).
+- **Fix B — the glyph-cache hash index.** glyph_slot's lookup was
+  a linear scan over up to 2048 entries, run once per glyph
+  placement — every shaped walk, every frame; the header itself
+  said "promoted to a hash when profiling says so". Open
+  addressing over the key (4096 buckets, slot indices), backward-
+  shift deletion on eviction, insert-before-rasterize with the key
+  committed first (a fallback font's recursive glyph_slot call
+  must find the table consistent). The table stays the owner; LRU
+  eviction unchanged.
+- **Invalidation discipline.** Glyph eviction, style flush, and
+  font destroy all wipe the shaped cache (the raster pointers a
+  shaped result borrows are invalidated by those events). The
+  last-widget-root teardown drains it beside the animation engine
+  (the same shutdown rule: no widget, no text, nothing left to
+  shape).
+- **Measurements** (the input rig — new this round: wheel-storm
+  and hover-sweep CPU under Xvfb, plus the round-12 nav rig; % of
+  one core, release build):
+
+  | rig | baseline | naive cache | final (A+B) |
+  |---|---|---|---|
+  | hover sweep, 1000-file dir | 1.3% | 0.5% | **0.7%** |
+  | wheel scroll, 1000-file dir | 6.2% | 5.3% | **5.5%** |
+  | navigation storm, 500 files | 14.9% | 19.4% (regression) | **13.7%** |
+
+  ASan build: scroll 14.2% -> 10.5%; hover and nav flat (the
+  per-access instrumentation dominates). Everything settles to
+  0.0 CPU after the storm stops (no leaked timers/work).
+- **Test-layer note.** Two test_text assertions ("a second draw
+  must increase glyph-cache hits") encoded the OLD layering; with
+  the shaped cache in front, a second draw returns pre-resolved
+  placements without touching the glyph table. The invariants
+  that still hold and are asserted: no new rasterizations
+  (misses flat) and pixel-identical output. test_text drains the
+  shaped cache at exit (its fonts intentionally live to process
+  exit; the defensive-drain precedent is test_choosers).
+- **New rig:** test-apps/fdk-files/input_rig.c + run_inputrig.sh
+  (wheel-storm / hover-sweep CPU sampling from /proc, both
+  builds, RIG_FILES/RIG_SECONDS/RIG_MODE knobs).
+
+
 ### Fixed — owner round 12: the navigation CPU peg (the model-binding O(N²)), a round-11 double-click regression, and the fixed_w warning
 
 - **fdk-files: one navigation into an N-entry directory cost
