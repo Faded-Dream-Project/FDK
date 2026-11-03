@@ -604,6 +604,7 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                                      gw, gh);
             }
             pwindow->presented_ever = 1;
+            pwindow->last_present_ms = (long long)fdk__x11_now_ms();
             return FDK_OK;
         }
 
@@ -695,6 +696,7 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
                              pwindow->render_size.height);
     }
     pwindow->presented_ever = 1;
+    pwindow->last_present_ms = (long long)fdk__x11_now_ms();
 
     /* Swap: the presented slot becomes front (its contents are now
      * what the server shows / is reading); the app draws the other
@@ -791,6 +793,43 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow) {
 
 int fdk_x11_window_ever_presented(fdk_platform_window *pwindow) {
     return pwindow != NULL && pwindow->presented_ever != 0;
+}
+
+/* The window_frame_ready op (round 10) — the X11 answer to Wayland's
+ * frame-callback pacing. The platform op table left it NULL before,
+ * so fdk_surface_frame_ready() short-circuited to "always ready" on
+ * X11 and every canonical `pump; if (frame_ready && damage) paint`
+ * loop painted UNPACED: one full acquire/raster/present per pump pass
+ * while damage kept arriving (a drag's rubber band damages every
+ * motion), which on real hardware pegged a core. X11 has no frame
+ * callbacks — the honest equivalent is a MINIMUM PRESENT INTERVAL:
+ * "ready" once 1000/60 ms passed since the last present, with the
+ * same two exceptions Wayland grants (nothing presented yet — always
+ * allowed; capacity — both SHM slots still awaiting ShmCompletion
+ * means a present would sync-wait inside acquire, so let the app
+ * spin its loop instead, exactly the 1.1.6 Wayland capacity gate's
+ * reasoning). Popup/override-redirect windows skip the pace: their
+ * first-present latency is their correctness (menus must appear in
+ * the frame they open), they present once or twice in a lifetime,
+ * and pacing them only added visible open delay. */
+#define X11_FRAME_INTERVAL_MS 17 /* ~60 fps floor, both render lanes */
+
+int fdk_x11_window_frame_ready(fdk_platform_window *pwindow) {
+    if (pwindow == NULL) {
+        return 1;
+    }
+    if (!pwindow->presented_ever || pwindow->popup) {
+        return 1;
+    }
+    if (pwindow->render_slots[0].in_flight &&
+        pwindow->render_slots[1].in_flight) {
+        return 0; /* both slots with the server: a present would
+                   * block inside wait_slot_completion — let the
+                   * app's loop come back when one lands (the
+                   * dispatch clears in_flight on ShmCompletion) */
+    }
+    return ((long long)fdk__x11_now_ms() - pwindow->last_present_ms) >=
+           X11_FRAME_INTERVAL_MS;
 }
 
 int fdk_x11_window_render_path(fdk_platform_window *pwindow) {

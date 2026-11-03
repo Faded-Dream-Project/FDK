@@ -49,6 +49,7 @@ static const fdk_platform_ops g_x11_ops = {
     .window_get_framebuffer = fdk_x11_window_get_framebuffer,
     .window_present = fdk_x11_window_present,
     .window_ever_presented = fdk_x11_window_ever_presented,
+    .window_frame_ready = fdk_x11_window_frame_ready,
     .window_get_scale = fdk_x11_window_get_scale,
     .window_render_path = fdk_x11_window_render_path,
     .clipboard_set_text = fdk_x11_clipboard_set_text,
