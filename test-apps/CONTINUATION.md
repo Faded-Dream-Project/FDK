@@ -1,5 +1,57 @@
 # §31 continuation — UPDATE (owner round 10: the wrong-row offset, the pegged core, the GPU question)
 
+# §31 continuation — UPDATE (owner round 11: the dead rubber band, the Properties-asks-delete, the pegged core, the unselecting right-click)
+
+## The four reports, four root causes (all fixed this round)
+
+1. **"hold and drag to highlight does not work / I want multi-file
+   selection"** — the 1.5.0 drag veto was checked on the press's HIT
+   TARGET, but a press inside a list hits a ROW, never the list: the
+   list's own veto (list.c:2301) was dead code. The controller fired
+   pane_begin_drag at 6px, the DnD grab broke the band. FIX: vetoes on
+   every UNSELECTED row (flipping with selection), the rows box, the
+   scrollview + dynamic scrollbars (new fdk__scrollview_veto_input,
+   re-run at every scrollview_layout), the iconview grid. Click-select
+   stays icon+text-only (round 9's gate is untouched).
+2. **"Properties asks me if I want to delete"** — item_activate read
+   g_menu_acts[idx-1] against a 1-based registration: every entry
+   fired the action ABOVE it. Plus: context menus re-registered into
+   the 256-slot shared registry per popup (silent corruption after
+   ~25 right-clicks). FIX: 0-based like the toolbar/shortcut twins;
+   bounded 64-slot ctx ring; "PHASE: act" telemetry.
+3. **"one core pegged when I hold-click fast"** — every fast sweep
+   "began" a spurious DnD (window-tree walk per motion on X11), and
+   the controller re-walked the whole widget tree per motion to find
+   its armed source; the iconview repainted the whole view per motion
+   pixel. FIX: root-cached armed source (O(1), destroy-safe), veto
+   kills the spurious gestures, iconview band damage is old∪new +
+   per-flip. perf_drag: 4.8% → 4.0% of one core.
+4. **"the row of selecting a folder is not right"** — the right-click
+   selected nothing; the menu flavored from the stale live selection.
+   FIX: new public fdk_list_row_at / fdk_iconview_item_at (the same
+   geometry the press/band use); the right-click selects the clicked
+   row (multi-selection kept), flavor from the CLICKED item
+   (CTX_FOLDER now reachable). menu rig proves: right-click beta-dir
+   → "sel 1 beta-dir"; last entry → "act Properties".
+
+## Verification this round
+- make tools && make test (BOTH backends, X11+Wayland lib, ASan/UBSan):
+  GREEN, 764 [ok] checks, incl. 4 new (veto interplay, gutter/
+  scrollbar never-drag, O(1) armed-lookup mid-press destroy,
+  row_at/item_at geometry).
+- Click sweep (Xvfb XTest, 600ms-spaced): header y 155-175 → nothing;
+  row 0 (180-205) → alpha.txt; row 1 (210-235) → beta-dir; 240+ →
+  nothing. Pixel-exact.
+- run_menurig.sh end-to-end: VERDICT PASS (Properties runs
+  Properties).
+- perf_drag: 4.0% of one core steady-state.
+- KNOWN OPEN: the §28 drag rig (run_drig.sh) D1-D4 fail IN THIS
+  SANDBOX (the sink process / app boot timing under ASAN Xvfb; no
+  dnd-g12 trace lines ever appear — the drag never starts here).
+  Engine-level drag-fires-from-selected-row IS covered by the new
+  test_veto_row_selection_interplay. NEXT ROUND: re-run run_drig.sh
+  in a clean boot; if it still fails, bisect against e092f17.
+
 ## Remote proof
 origin/main == this round's commit, normal fast-forward push (round 9's standing rule holds:
 never force-push). `git ls-remote origin main` is the authority.

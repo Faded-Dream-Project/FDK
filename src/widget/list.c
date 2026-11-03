@@ -610,6 +610,18 @@ static void list_set_row(fdk_list *l, size_t index, bool selected) {
             l->selected_count--;
         }
         fdk_widget_invalidate(&row->base);
+        /* Round 11: the row's press gesture follows its selection —
+         * an UNSELECTED row's press is a potential rubber band (it
+         * must veto the drag-source controller or the controller
+         * fires at the threshold and the DnD grab kills the band);
+         * a SELECTED row is drag material (fdk_list_row_set_drag_
+         * armed arms it for real drags — the desktop gesture). This
+         * is the flip point, so the veto flips here, with the state
+         * it mirrors. */
+        fdk_widget_set_drag_veto(&row->base,
+                                 !selected &&
+                                     l->mode ==
+                                         FDK_LIST_SELECTION_MULTIPLE);
         /* A11y: the row's selected state flipped. */
         fdk__a11y_notify(&row->base, FDK_A11Y_STATE_CHANGED,
                          FDK_A11Y_SELECTED);
@@ -2008,6 +2020,22 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
         return r;
     }
     (void)fdk_scrollview_set_content(l->scroll, l->rows);
+    /* Round 11: the rubber band's structural veto. The band can
+     * start on ANY press that reaches the list's interior — the
+     * rows box (press below the last row, or beside a row's text —
+     * round 9's gate), the scrollview's own surface, and the
+     * scrollbars. All of those hit-test to widgets that are NEVER
+     * the list itself, so the round-6 veto the list set on ITSELF
+     * never fired for them and the drag-source controller owned
+     * every such press instead: a 6px move "began a drag" that
+     * grabbed the pointer and killed the band — the owner's "hold
+     * and drag does not work" report, plus a spurious DnD gesture
+     * (window-under XQueryTree walk per motion) per fast sweep for
+     * the CPU report's share. The rows container and scrollview
+     * chrome now veto; each ROW's veto follows its selection state
+     * (list_set_row / insert). */
+    fdk_widget_set_drag_veto(l->rows, true);
+    fdk__scrollview_veto_input(l->scroll);
 
     fdk_widget_child_layout_changed(w->parent);
     *out_list = w;
@@ -2292,6 +2320,16 @@ void fdk_list_set_selection_mode(fdk_widget *list,
     }
     fdk_list *l = list_of(list);
     l->mode = mode;
+    /* Round 11: mode changes re-truth the per-row press vetoes —
+     * only MULTIPLE owns the plain press as a potential rubber band
+     * (SINGLE/NONE rows never band, so their presses may arm drag
+     * sources like any ordinary widget). */
+    for (size_t i = 0; i < l->count; i++) {
+        fdk_widget_set_drag_veto(
+            &l->row_widgets[i]->base,
+            !l->row_widgets[i]->selected &&
+                mode == FDK_LIST_SELECTION_MULTIPLE);
+    }
     /* 1.5.0: MULTIPLE owns the plain press (the rubber band — any
      * press that reaches the list can start one, rows included), so
      * the widget vetoes drag-source arming for its own presses. A
@@ -2315,6 +2353,50 @@ fdk_i32 fdk_list_get_row_height(fdk_widget *list) {
         return 0;
     }
     return list_row_height(list_of(list));
+}
+
+fdk_result fdk_list_row_at(fdk_widget *list, fdk_f32 x, fdk_f32 y,
+                           size_t *out_row) {
+    /* Round 11: the PUBLIC pointer-to-row map, header strip and
+     * scroll offset included — the geometry the rubber band and the
+     * row press already agree on, so an app's context menu (the
+     * right-click select) cannot drift from what the user sees
+     * highlighted. FDK_ERR_NOT_FOUND when the point is not on any
+     * row (the header, the empty space below, outside the list). */
+    if (list == NULL || list->klass != &fdk_list_class_def ||
+        out_row == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_list *l = list_of(list);
+    if (x < 0.0f || y < 0.0f ||
+        x >= (fdk_f32)l->base.bounds.width ||
+        y >= (fdk_f32)l->base.bounds.height || l->count == 0) {
+        return FDK_ERR_NOT_FOUND;
+    }
+    fdk_i32 off_y = 0;
+    if (l->scroll != NULL) {
+        fdk_i32 ox = 0;
+        fdk_scrollview_get_scroll_offset(l->scroll, &ox, &off_y);
+    }
+    /* Viewport y -> content y (round 10's inset rule: content starts
+     * below the header strip), then the row grid. FLOOR division:
+     * C's / truncates toward zero, so a negative cy (the header
+     * strip) must not enter it as -1/-rh == 0 (a header press
+     * "finding" row 0 — the debug probe caught exactly that). */
+    fdk_f32 cy = y - (fdk_f32)list_content_top(l) + (fdk_f32)off_y;
+    fdk_i32 rh = list_row_height(l);
+    if (rh <= 0) {
+        return FDK_ERR_NOT_FOUND;
+    }
+    if (cy < 0.0f) {
+        return FDK_ERR_NOT_FOUND; /* the header strip (or above) */
+    }
+    fdk_i64 idx = (fdk_i64)cy / rh;
+    if (idx < 0 || (fdk_u64)idx >= (fdk_u64)l->count) {
+        return FDK_ERR_NOT_FOUND;
+    }
+    *out_row = (size_t)idx;
+    return FDK_OK;
 }
 
 static fdk_result list_grow(fdk_list *l) {
@@ -2357,6 +2439,12 @@ static fdk_result list_insert_internal(fdk_list *l, size_t index,
         fdk_widget_destroy(row_w);
         return FDK_ERR_OUT_OF_MEMORY;
     }
+    /* Round 11: a fresh row is born unselected — in MULTIPLE mode
+     * its press is a potential rubber band, so it vetoes drag-source
+     * arming from birth (the selection flip in list_set_row keeps it
+     * truthful afterwards). */
+    fdk_widget_set_drag_veto(
+        row_w, l->mode == FDK_LIST_SELECTION_MULTIPLE);
     /* 1.5.0: the row's cell array parallels the list's column set
      * (NULL when there are no fixed columns — the common v1 list). */
     if (l->column_count > 1) {

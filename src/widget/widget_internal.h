@@ -254,6 +254,17 @@ struct fdk_widget {
      * the pointer leaves its bounds. NULL when no button is held. */
     fdk_widget *grab;
 
+    /* ROOT-ONLY: the drag source armed by the current press (NULL
+     * when the press rode no source, or after it fired / the button
+     * was released). Round 11: the controller used to re-walk the
+     * whole tree on EVERY motion to find the one armed source —
+     * O(widgets) per motion event, which a fast pointer over a
+     * large list turned into real CPU. The pointer is validated at
+     * destroy time (fdk_widget_destroy clears it when the armed
+     * source dies mid-press) and at fdk_widget_set_drag_source
+     * (disarming mid-press). */
+    fdk_widget *drag_armed_source;
+
     /* The last pointer position seen in root coordinates (motion,
      * press, release, scroll, drag events all refresh it) — the
      * position GRAB_BROKEN reports, since the real pointer has

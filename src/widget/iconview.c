@@ -97,6 +97,13 @@ typedef struct fdk_iconview {
     fdk_f32 band_now_x, band_now_y;
     bool *band_base;               /* ctrl-union snapshot         */
     size_t band_base_cap;
+    fdk_rect band_last_rect;       /* round 11: the last damaged
+                                    * band rect (viewport space),
+                                    * for the old∪new motion
+                                    * damage — the full-view
+                                    * invalidate this replaces
+                                    * repainted every cell every
+                                    * motion pixel */
     /* ---- band auto-scroll (1.4.7) ----
      *
      * The List's edge-chasing timer, grid-shaped: while the sweep
@@ -542,9 +549,46 @@ static void iv_apply_band(fdk_iconview *iv) {
             } else if (iv->selected_count > 0) {
                 iv->selected_count--;
             }
+            /* Round 11: the FLIPPING cell damages only itself —
+             * the full-view invalidate this replaces repainted
+             * every cell on every motion pixel (the icons view's
+             * share of the pegged-core report; the List got the
+             * same fix in round 9). */
+            fdk_widget_invalidate(iv->items[i].cell);
         }
     }
-    fdk_widget_invalidate(&iv->base);
+    /* Round 11: the band TINT rect itself — the old rect and the
+     * new one, unioned (a fast sweep's old tail must clear). The
+     * rect is viewport-space; cells that flipped damaged
+     * themselves above. */
+    {
+        fdk_i32 vx1 = (fdk_i32)x1 - off_x;
+        fdk_i32 vy1 = (fdk_i32)y1 - off_y;
+        fdk_i32 vx2 = (fdk_i32)x2 - off_x;
+        fdk_i32 vy2 = (fdk_i32)y2 - off_y;
+        fdk_rect band = {vx1, vy1,
+                         (vx2 > vx1) ? vx2 - vx1 : 0,
+                         (vy2 > vy1) ? vy2 - vy1 : 0};
+        if (band.width > 0 && band.height > 0) {
+            fdk_rect prev = iv->band_last_rect;
+            if (prev.width > 0 && prev.height > 0) {
+                if (prev.x < band.x) {
+                    band.x = prev.x;
+                }
+                if (prev.y < band.y) {
+                    band.y = prev.y;
+                }
+                if (prev.x + prev.width > band.x + band.width) {
+                    band.width = prev.x + prev.width - band.x;
+                }
+                if (prev.y + prev.height > band.y + band.height) {
+                    band.height = prev.y + prev.height - band.y;
+                }
+            }
+            iv->band_last_rect = band;
+            fdk__widget_invalidate_rect(&iv->base, band);
+        }
+    }
 }
 
 /* ---- band auto-scroll (1.4.7, grid-shaped) ---- */
@@ -668,6 +712,10 @@ static bool iv_handle_event(fdk_widget *w,
             return false;
         }
         iv->banding = true;
+        /* Round 11: a fresh gesture owes no old-rect damage (the
+         * List's rule) — the release's clearing invalidate covers
+         * the last rect, but a grab-broken death may not. */
+        iv->band_last_rect = (fdk_rect){0, 0, 0, 0};
         iv->band_ctrl =
             (ev->pointer.modifiers & FDK_MOD_CTRL) != 0;
         iv->band_x = iv->band_now_x = ev->pointer.position.x;
@@ -722,8 +770,15 @@ static bool iv_handle_event(fdk_widget *w,
         fdk_free(iv->band_base);
         iv->band_base = NULL;
         iv->band_base_cap = 0;
-        /* The band rect disappears with the gesture. */
-        fdk_widget_invalidate(w);
+        /* The band rect disappears with the gesture: clear exactly
+         * the last rect (round 11 — the whole-view invalidate this
+         * replaces was the icons view's pegged-core share). */
+        if (iv->band_last_rect.width > 0 &&
+            iv->band_last_rect.height > 0) {
+            fdk__widget_invalidate_rect(&iv->base,
+                                        iv->band_last_rect);
+            iv->band_last_rect = (fdk_rect){0, 0, 0, 0};
+        }
         /* One gesture: the callback fires here (and at the press —
          * motions never spam it). */
         iv_fire_selection_changed(iv);
@@ -975,6 +1030,14 @@ fdk_result fdk_iconview_create(fdk_widget *parent, fdk_font *font,
         return r;
     }
     (void)fdk_scrollview_set_content(iv->scroll, iv->grid);
+    /* Round 11: the band's structural veto, the List's rule — the
+     * grid (press between cells), the scrollview's own surface, and
+     * the scrollbars all own their presses as potential band starts
+     * / scroll gestures, so no drag source may arm from them. Cells
+     * consume their own presses (selection); a drag from a selected
+     * cell is the app's business via its own arming. */
+    fdk_widget_set_drag_veto(iv->grid, true);
+    fdk__scrollview_veto_input(iv->scroll);
 
     fdk_widget_child_layout_changed(w->parent);
     *out_iconview = w;
@@ -1277,6 +1340,40 @@ fdk_result fdk_iconview_selected_at(fdk_widget *iconview, size_t position,
         }
     }
     return FDK_ERR_INVALID_ARGUMENT;
+}
+
+fdk_result fdk_iconview_item_at(fdk_widget *iconview, fdk_f32 x,
+                                fdk_f32 y, size_t *out_index) {
+    /* Round 11: the pointer-to-item map, the List's row_at twin —
+     * viewport-local point (the widget-event space), scroll offset
+     * included, to the item whose CELL contains it. FDK_ERR_NOT_
+     * FOUND off-grid (the gutters, outside the view). */
+    if (iconview == NULL || iconview->klass != &fdk_iconview_class_def ||
+        out_index == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_iconview *iv = iv_of(iconview);
+    if (x < 0.0f || y < 0.0f ||
+        x >= (fdk_f32)iv->base.bounds.width ||
+        y >= (fdk_f32)iv->base.bounds.height || iv->count == 0) {
+        return FDK_ERR_NOT_FOUND;
+    }
+    fdk_i32 off_x = 0, off_y = 0;
+    if (iv->scroll != NULL) {
+        fdk_scrollview_get_scroll_offset(iv->scroll, &off_x, &off_y);
+    }
+    fdk_f32 cx = x + (fdk_f32)off_x;
+    fdk_f32 cy = y + (fdk_f32)off_y;
+    for (size_t i = 0; i < iv->count; i++) {
+        fdk_i32 sx = 0, sy = 0;
+        iv_cell_slot(iv, i, &sx, &sy);
+        if (cx >= (fdk_f32)sx && cx < (fdk_f32)(sx + iv->cell_w) &&
+            cy >= (fdk_f32)sy && cy < (fdk_f32)(sy + iv->cell_h)) {
+            *out_index = i;
+            return FDK_OK;
+        }
+    }
+    return FDK_ERR_NOT_FOUND;
 }
 
 fdk_result fdk_iconview_select(fdk_widget *iconview, size_t index) {

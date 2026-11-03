@@ -134,9 +134,33 @@ static size_t g_menu_act_count;
 static void item_activate(fdk_menu_item *item, void *user) {
     (void)item;
     size_t idx = (size_t)(uintptr_t)user;
-    if (idx > 0 && idx <= g_menu_act_count &&
-        g_menu_acts[idx - 1].fn != NULL) {
-        g_menu_acts[idx - 1].fn();
+    /* Round 11: 0-BASED, exactly like toolbar_trampoline and
+     * shortcut_fn (the same registration writes the index every
+     * dispatcher reads). The old `idx - 1` here — a 1-based
+     * left-over — fired the action ONE SLOT ABOVE the clicked entry:
+     * "Properties" ran "Delete permanently" (the delete-confirm
+     * dialog), "Move to trash" ran "Rename", and the FIRST entry of
+     * every menu (idx 0 → g_menu_acts[(size_t)-1], out of bounds
+     * by the guard) fired nothing at all. */
+    if (idx < g_menu_act_count && g_menu_acts[idx].fn != NULL) {
+        /* the menu rig's channel: which action ran (round 11).
+         * The label is the MNEMONIC form ("P&roperties") — print it
+         * stripped, the text the menu actually shows. */
+        if (getenv("FDK_FILES_DRIG") != NULL &&
+            g_menu_acts[idx].label != NULL) {
+            char stripped[64];
+            size_t o = 0;
+            for (const char *p = g_menu_acts[idx].label;
+                 *p != '\0' && o + 1 < sizeof stripped; p++) {
+                if (*p != '&') {
+                    stripped[o++] = *p;
+                }
+            }
+            stripped[o] = '\0';
+            printf("PHASE: act %.60s\n", stripped);
+            fflush(stdout);
+        }
+        g_menu_acts[idx].fn();
     }
 }
 
@@ -335,7 +359,16 @@ static void toolbar_trampoline(fdk_widget *btn, void *user) {
     }
 }
 
-/* builds items WITH actions+shortcuts, separators where label NULL */
+/* builds items WITH actions+shortcuts, separators where label NULL.
+ * Round 11: the SHARED registry is for the app's permanent entries
+ * (the bar menus and the toolbar, registered once at menus_build).
+ * Context menus are rebuilt per popup — they get the bounded CTX
+ * registry below, so a long session of right-clicks cannot walk
+ * g_menu_acts past its 256 slots (the old code re-registered the
+ * context entries into the shared array on EVERY popup: silent
+ * memory corruption after ~25 right-clicks, and every popup's
+ * indices shifted past the bar entries' — the action a context
+ * entry fired depended on how many menus had opened before it). */
 void menu_build_actions(fdk_menu *menu,
                         const menu_action *acts, size_t count) {
     for (size_t i = 0; i < count; i++) {
@@ -349,12 +382,72 @@ void menu_build_actions(fdk_menu *menu,
             (void)fdk_menu_item_set_shortcut(it,
                                              acts[i].shortcut);
         }
-        fdk_menu_item_set_on_activate(it, item_activate,
-                                      (void *)(uintptr_t)0);
         g_menu_acts[g_menu_act_count] = acts[i];
         fdk_menu_item_set_on_activate(it, item_activate,
                                       (void *)(uintptr_t)g_menu_act_count);
         g_menu_act_count++;
+    }
+}
+
+/* Round 11: the context menus' bounded twin — a fixed 64-slot ring
+ * that reuses slots as popups open (the popup chain closes before
+ * the next opens; the entries the registry holds are plain function
+ * pointers + string literals, all static). */
+static menu_action g_ctx_acts[64];
+static size_t g_ctx_act_count;
+static size_t g_ctx_ring_next;
+
+static void ctx_item_activate(fdk_menu_item *item, void *user) {
+    (void)item;
+    size_t idx = (size_t)(uintptr_t)user;
+    if (idx < g_ctx_act_count && g_ctx_acts[idx].fn != NULL) {
+        if (getenv("FDK_FILES_DRIG") != NULL &&
+            g_ctx_acts[idx].label != NULL) {
+            /* the mnemonic-stripped form, like item_activate's
+             * telemetry */
+            char stripped[64];
+            size_t o = 0;
+            for (const char *p = g_ctx_acts[idx].label;
+                 *p != '\0' && o + 1 < sizeof stripped; p++) {
+                if (*p != '&') {
+                    stripped[o++] = *p;
+                }
+            }
+            stripped[o] = '\0';
+            printf("PHASE: act %.60s\n", stripped);
+            fflush(stdout);
+        }
+        g_ctx_acts[idx].fn();
+    }
+}
+
+static void ctx_menu_build_actions(fdk_menu *menu,
+                                   const menu_action *acts,
+                                   size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (acts[i].label == NULL) {
+            (void)fdk_menu_append_separator(menu);
+            continue;
+        }
+        fdk_menu_item *it = NULL;
+        (void)fdk_menu_append(menu, ta_(acts[i].label), &it);
+        if (acts[i].shortcut != NULL && acts[i].shortcut[0] != '\0') {
+            (void)fdk_menu_item_set_shortcut(it, acts[i].shortcut);
+        }
+        size_t slot = g_ctx_act_count;
+        if (slot >= sizeof g_ctx_acts / sizeof g_ctx_acts[0]) {
+            /* ring reuse: overwrite the oldest slot's entry — the
+             * popup that referenced it is closed by now (opening a
+             * context menu closes every other one first) */
+            slot = g_ctx_ring_next %
+                   (sizeof g_ctx_acts / sizeof g_ctx_acts[0]);
+            g_ctx_ring_next++;
+        } else {
+            g_ctx_act_count++;
+        }
+        g_ctx_acts[slot] = acts[i];
+        fdk_menu_item_set_on_activate(it, ctx_item_activate,
+                                      (void *)(uintptr_t)slot);
     }
 }
 
@@ -391,7 +484,8 @@ void menus_popup_context(pane *p, int for_what, fdk_i32 x,
             {NULL, NULL, NULL},
             {"P&roperties", "Ctrl+I", act_properties},
         };
-        menu_build_actions(m, acts, sizeof acts / sizeof acts[0]);
+        ctx_menu_build_actions(m, acts,
+                                sizeof acts / sizeof acts[0]);
         break;
     }
     case CTX_FOLDER: {
@@ -407,7 +501,8 @@ void menus_popup_context(pane *p, int for_what, fdk_i32 x,
             {NULL, NULL, NULL},
             {"P&roperties", "Ctrl+I", act_properties},
         };
-        menu_build_actions(m, acts, sizeof acts / sizeof acts[0]);
+        ctx_menu_build_actions(m, acts,
+                                sizeof acts / sizeof acts[0]);
         break;
     }
     case CTX_MULTI: {
@@ -419,7 +514,8 @@ void menus_popup_context(pane *p, int for_what, fdk_i32 x,
             {"Delete permanently", "Shift+Delete",
              act_delete_permanent},
         };
-        menu_build_actions(m, acts, sizeof acts / sizeof acts[0]);
+        ctx_menu_build_actions(m, acts,
+                                sizeof acts / sizeof acts[0]);
         break;
     }
     case CTX_EMPTY:
@@ -431,7 +527,8 @@ void menus_popup_context(pane *p, int for_what, fdk_i32 x,
             {"Select &all", "Ctrl+A", act_select_all},
             {"&Refresh", "F5", act_refresh},
         };
-        menu_build_actions(m, acts, sizeof acts / sizeof acts[0]);
+        ctx_menu_build_actions(m, acts,
+                                sizeof acts / sizeof acts[0]);
         break;
     }
     }

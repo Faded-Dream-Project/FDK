@@ -429,6 +429,10 @@ static void scrollview_layout(fdk_widget *w) {
         }
         fdk_widget_raise(sv->hbar);
     }
+    /* Round 11: bar visibility just changed with the scroll range —
+     * keep the input vetoes truthful (visible bar = gesture-owning,
+     * hidden bar = input-transparent and no veto). */
+    fdk__scrollview_veto_input(w);
 }
 
 static void scrollview_measure(fdk_widget *w, fdk_size *out) {
@@ -1131,6 +1135,32 @@ fdk_i32 fdk__scrollview_viewport_width(fdk_widget *scrollview) {
         }
     }
     return w;
+}
+
+void fdk__scrollview_veto_input(fdk_widget *scrollview) {
+    if (scrollview == NULL ||
+        scrollview->klass != &fdk_scrollview_class_def) {
+        return;
+    }
+    /* The scrollview's own surface and its visible bars own their
+     * presses (scrolling, thumb drags); the drag-source controller
+     * must not fire from inside them (round 11: the controller
+     * previously armed on ANY press whose hit chain reached a
+     * source — a sweep begun in the gutter beside the rows armed
+     * the file manager's drag and the DnD grab killed the band).
+     * Bar visibility changes with the scroll range, so callers
+     * re-run this whenever layout may have flipped a bar (the
+     * scrollview does it for itself at the end of every
+     * scrollview_layout). */
+    fdk_widget_set_drag_veto(scrollview, true);
+    fdk_scrollview *sv = scroll_of(scrollview);
+    fdk_widget *bars[2] = { sv->vbar, sv->hbar };
+    for (size_t i = 0; i < 2; i++) {
+        if (bars[i] != NULL) {
+            fdk_widget_set_drag_veto(
+                bars[i], (bars[i]->flags & FDK_WF_VISIBLE) != 0);
+        }
+    }
 }
 
 fdk_scroll_bar_mode fdk_scrollview_get_bar_mode(fdk_widget *scrollview) {
