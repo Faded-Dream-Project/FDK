@@ -75,7 +75,20 @@ int main(int argc, char **argv) {
     }
 
     const char *k = argv[2];
-    if (strcmp(k, "space") == 0) {
+    if (strncmp(k, "ctrl+", 5) == 0) {
+        /* "ctrl+g": hold Ctrl, press the letter, release */
+        KeyCode ctl = XKeysymToKeycode(dpy, XK_Control_L);
+        XTestFakeKeyEvent(dpy, ctl, True, CurrentTime);
+        XSync(dpy, False);
+        msleep(20);
+        char buf[2] = {k[5], 0};
+        press(dpy, XStringToKeysym(buf));
+        XTestFakeKeyEvent(dpy, ctl, False, CurrentTime);
+        XSync(dpy, False);
+        msleep(30);
+    } else if (strcmp(k, "escape") == 0) {
+        press(dpy, XK_Escape);
+    } else if (strcmp(k, "space") == 0) {
         press(dpy, XK_space);
     } else if (strcmp(k, "enter") == 0) {
         press(dpy, XK_Return);

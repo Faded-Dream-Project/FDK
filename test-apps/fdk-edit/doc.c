@@ -235,9 +235,17 @@ bool ed_doc_save(ed_doc *d, bool save_as) {
     if (!save_as && d->path[0] != '\0') {
         return doc_write(d, d->path);
     }
+    /* Save on an untitled document IS Save As (the first save
+     * needs a name) — round 25 says so OUT LOUD instead of
+     * opening a dialog that looks like the other button mislabeled
+     * (the owner's "two buttons that do the same thing"). */
+    if (!save_as) {
+        ta_status(&eapp.base, "%s",
+                  ta_("Untitled — pick a name for the first save"));
+    }
     fdk_file_dialog_options o;
     memset(&o, 0, sizeof o);
-    o.title = ta_("Save As");
+    o.title = save_as ? ta_("Save As") : ta_("Save — name the file");
     o.kind = FDK_FILE_DIALOG_SAVE_FILE;
     o.parent = eapp.base.window;
     o.start_name = (d->path[0] != '\0') ? base_name(d->path)

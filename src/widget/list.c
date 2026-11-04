@@ -109,6 +109,13 @@ typedef struct fdk_list {
     void *on_selection_bounds_data;
     bool span_active;        /* a mutation is accumulating           */
     size_t span_first, span_last;
+    /* ---- Column-header clicks (round 25) -----------------------
+     * A press on the header strip fires on_header_click(column)
+     * instead of starting a rubber band — the sort-toggle gesture
+     * every columned list owes. column is the DECLARED index
+     * (0 = the primary/name column). */
+    fdk_list_header_click_fn on_header_click;
+    void *on_header_click_data;
     /* ---- Row activation (1.2.0) ----
      *
      * Double-click and Enter both fire on_row_activate — the
@@ -1443,6 +1450,30 @@ static bool list_handle_event(fdk_widget *w,
             l->mode != FDK_LIST_SELECTION_MULTIPLE ||
             (w->flags & FDK_WF_ENABLED) == 0) {
             return false;
+        }
+        /* Round 25: the header strip is a click target FIRST — a
+         * press there toggles the column's sort, it never starts a
+         * rubber band (a sweep born on the header selected a
+         * phantom row above the content). */
+        if (l->on_header_click != NULL && l->column_count > 0 &&
+            ev->pointer.position.y <
+                (fdk_f32)list_header_height(l)) {
+            size_t col = 0;
+            for (size_t c = 0; c < l->column_count; c++) {
+                if (ev->pointer.position.x >=
+                        (fdk_f32)(l->col_x != NULL
+                                      ? l->col_x[c] : 0) &&
+                    (c + 1 >= l->column_count ||
+                     ev->pointer.position.x <
+                         (fdk_f32)(l->col_x != NULL
+                                       ? l->col_x[c + 1] : 0))) {
+                    col = c;
+                    break;
+                }
+            }
+            l->on_header_click(&l->base, col,
+                               l->on_header_click_data);
+            return true; /* consumed: no band from the header    */
         }
         l->banding = true;
         l->band_ctrl = (ev->pointer.modifiers & FDK_MOD_CTRL) != 0;
@@ -2807,6 +2838,17 @@ void fdk_list_set_on_selection_changed(fdk_widget *list,
     fdk_list *l = list_of(list);
     l->on_selection_changed = fn;
     l->on_selection_data = user_data;
+}
+
+void fdk_list_set_on_header_click(fdk_widget *list,
+                                  fdk_list_header_click_fn fn,
+                                  void *user_data) {
+    if (list == NULL || list->klass != &fdk_list_class_def) {
+        return;
+    }
+    fdk_list *l = list_of(list);
+    l->on_header_click = fn;
+    l->on_header_click_data = user_data;
 }
 
 void fdk_list_set_on_row_activate(fdk_widget *list,

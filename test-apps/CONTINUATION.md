@@ -1,3 +1,52 @@
+# Round 25 — save/save-as split, editor+apps upgrades
+
+## Landed
+- fdk-edit: Save vs Save As untangled. Root cause of "two buttons
+  same thing": BOTH mapped to the document-save icon (the "save"
+  alias), and for an UNTITLED doc Save legitimately falls through
+  to the picker (first save needs a name) — so both opened the
+  same dialog. Now: Save As uses the drive icon + explicit
+  tooltip, and Save-on-untitled SAYS "Untitled — pick a name for
+  the first save" before opening the picker (titled "Save — name
+  the file"). Menu shows Ctrl+Shift+S on Save As.
+- fdk-edit: Go To Line (Ctrl+G, toolbar button, Edit menu) via the
+  prompt dialog; status bar now shows live words/chars/lines.
+- fdk-notes: live search box over titles AND bodies (tree narrows,
+  first match auto-selected, match count in the status bar).
+- fdk-monitor: uptime (Xd Xh Xm) + load averages (1/5/15) from
+  /proc/uptime + /proc/loadavg in the status bar.
+- fdk-files: column-header click sorting (Name/Modified/Size/Type,
+  click again to toggle asc/desc). Core gained
+  fdk_list_set_on_header_click (a header press fires the signal
+  and never starts a rubber band).
+- Core: fdk_textview_scroll_to_line (goto-line) + set_caret now
+  scrolls (consistency with its a11y twin). Unit test test_goto.
+
+## THE OPEN BUG (round 26's first job — found at 22:50)
+After ANY fdk_dialog_show_prompt closes, the fdk-edit MAIN WINDOW
+STOPS PAINTING ITS EDITOR: the region where the dialog sat stays
+black, the editor area never redraws (status bar still updates).
+The TEXT IS ALIVE (on_doc_changed tracer shows it growing), so
+this is a PAINT/EXPOSE bug: the modal dialog's unmap does not
+produce damage that repaints the parent, and later editor
+invalidates don't either. Repro: scripts/r25-edit-probe.sh —
+shot 2-two-lines fine, 4a/B2/C1 all blank editor + black band at
+the dialog's old rect. The SAVE file-picker dialog does NOT cause
+it (its flow was fine) — suspect the prompt dialog's teardown
+(x11_window.c unmap path / damage translation, cf. round 23's
+page-local damage work). Go To Line itself works when the dialog
+bug doesn't bite; keep the feature, fix the core.
+
+## Suites at commit time
+core 765 (incl. new test_goto + list header-click paths), X11 229,
+4-app smoke clean. Proof shots in download/: fdk-edit-wordcount /
+-goto-dialog / -save-dialog / fdk-files-columns / fdk-monitor-status.
+
+## Environment notes
+Sandbox was RECYCLED before this round (stale snapshot): recovery
+was fetch origin main (4637dc4) + `bash scripts/setup-sandbox.sh`
++ `source scripts/env.sh`. key_rig gained ctrl+<key> and escape.
+
 # Round 24 — the owner's follow-up: space/Enter invisible
 
 ## The report

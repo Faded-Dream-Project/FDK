@@ -46,6 +46,11 @@ typedef struct nt_app {
     fdk_widget *tree;
     fdk_widget *title_entry;
     fdk_widget *body_view;
+    /* round 25: the live search box (searches every note's title
+     * AND body; the tree narrows to matches, picking one opens
+     * it) */
+    fdk_widget *search_entry;
+    char search[128];     /* the current needle ("" = show all)   */
     fdk_widget *focus_label;
     fdk_timer *reminder_timer;
     fdk_timer *focus_timer;

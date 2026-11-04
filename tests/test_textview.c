@@ -330,6 +330,43 @@ static void test_vertical_nav(void) {
            "PageUp pages, shift extends across lines\n");
 }
 
+/* ---- round 25: programmatic goto (set_caret scrolls,
+ * scroll_to_line) ---- */
+
+static void test_goto(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *tv = make_view(root, NULL);
+
+    /* set_caret lands on the byte and moves the selection anchor
+     * with it (the documented collapse). */
+    size_t before = 0, after = 0;
+    assert(fdk_ok(fdk_textview_set_caret(tv, 44)));
+    assert(fdk_ok(fdk_textview_get_caret(tv, &before)));
+    assert(before == 44); /* the 's' of "second"                 */
+
+    /* line_col_byte: (paragraph, codepoint column) -> byte. */
+    size_t b = fdk_textview_line_col_byte(tv, 1, 0);
+    assert(b == 44);
+    size_t b2 = fdk_textview_line_col_byte(tv, 2, 0);
+    assert(b2 == 66); /* the EMPTY paragraph: starts right after
+                       * the "here\n" newline                    */
+
+    /* scroll_to_line: out-of-range clamps, in-range returns OK
+     * and puts the caret at the paragraph's start byte. */
+    assert(fdk_ok(fdk_textview_scroll_to_line(tv, 1)));
+    assert(fdk_ok(fdk_textview_get_caret(tv, &after)));
+    assert(after == 44);
+    assert(fdk_ok(fdk_textview_scroll_to_line(tv, 999)));
+    assert(fdk_ok(fdk_textview_get_caret(tv, &after)));
+    assert(after >= 67); /* clamped to the document end          */
+    assert(fdk_textview_scroll_to_line(NULL, 0) ==
+           FDK_ERR_INVALID_ARGUMENT);
+
+    fdk_widget_destroy(root);
+    printf("[ok] textview goto: set_caret collapses+lands, "
+           "line_col_byte inverts, scroll_to_line clamps\n");
+}
+
 /* ---- undo/redo ---- */
 
 static void test_undo(void) {
@@ -481,6 +518,7 @@ int main(void) {
     test_editing();
     test_selection();
     test_vertical_nav();
+    test_goto();
     test_undo();
     test_a11y();
     test_paint();

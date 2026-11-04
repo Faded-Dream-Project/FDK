@@ -2238,9 +2238,33 @@ fdk_result fdk_textview_set_caret(fdk_widget *textview, size_t byte) {
     tv->anchor = byte; /* a programmatic move collapses the selection */
     tv->have_goal = false;
     tv->caret_on = true; /* restart the blink phase — visible now */
-    /* the caret may have left the viewport: the same scroll-to-caret
-     * the keyboard path runs (page->damage via the widget's own
-     * layout pass is enough headless; scrolling happens in paint) */
+    /* Round 25: the caret may have left the viewport — the SAME
+     * scroll-to-caret the keyboard path and the a11y twin
+     * (tv_text_set_caret) run. goto-line and find-next now land
+     * visibly instead of scrolling only for typed keys. */
+    tv_scroll_to_caret(tv);
+    fdk_widget_invalidate(textview);
+    return FDK_OK;
+}
+
+/* Round 25 (the owner's goto-line ask): scroll a PARAGRAPH index
+ * into view. The line table is VISUAL (soft-wrapped) lines; the
+ * paragraph's first visual line is the first line whose byte range
+ * starts at/after the paragraph's start byte — the caret-style
+ * scroll then centers/clamps it like any keyboard motion. */
+fdk_result fdk_textview_scroll_to_line(fdk_widget *textview,
+                                       size_t line) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    size_t start = tv_line_start(tv, line);
+    tv->caret = start;
+    tv->anchor = start;
+    tv->have_goal = false;
+    tv->caret_on = true;
+    tv_scroll_to_caret(tv);
     fdk_widget_invalidate(textview);
     return FDK_OK;
 }

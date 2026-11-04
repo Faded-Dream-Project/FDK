@@ -170,9 +170,34 @@ static void sample_net(void) {
     (void)mo_series_push(&mapp.net.tx_kib, mapp.net.tx_rate / 1024.0);
 }
 
+/* round 25: /proc/uptime + /proc/loadavg (one line each, fixed
+ * format by the kernel). Uptime is a double; loads are three
+ * decimals. Failing reads leave the previous values alone. */
+static void sample_sys(void) {
+    FILE *f = fopen("/proc/uptime", "r");
+    if (f != NULL) {
+        double up = 0.0;
+        if (fscanf(f, "%lf", &up) == 1) {
+            mapp.sys.uptime_s = up;
+        }
+        fclose(f);
+    }
+    f = fopen("/proc/loadavg", "r");
+    if (f != NULL) {
+        double l1 = 0.0, l5 = 0.0, l15 = 0.0;
+        if (fscanf(f, "%lf %lf %lf", &l1, &l5, &l15) == 3) {
+            mapp.sys.load1 = l1;
+            mapp.sys.load5 = l5;
+            mapp.sys.load15 = l15;
+        }
+        fclose(f);
+    }
+}
+
 void mo_sample_all(void) {
     sample_cpu();
     sample_mem();
     sample_net();
+    sample_sys();
     mapp.samples++;
 }
