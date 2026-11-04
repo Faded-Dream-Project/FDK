@@ -131,6 +131,7 @@ void ed_menu_undo(fdk_widget *mi, void *u);
 void ed_menu_redo(fdk_widget *mi, void *u);
 void ed_menu_find(fdk_widget *mi, void *u);
 void ed_menu_replace(fdk_widget *mi, void *u);
+void ed_menu_goto_line(fdk_widget *mi, void *u);
 
 /* ui.c — toolbar/menus/statusbar/findbar */
 void ed_ui_build(void);

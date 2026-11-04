@@ -128,7 +128,8 @@ static void menus_build(void) {
                  eapp.recent[i]);
     }
     menu_add(m_file, ta_("&Save"), "Ctrl+S", menu_save, NULL);
-    menu_add(m_file, ta_("Save &As..."), NULL, menu_save_as, NULL);
+    menu_add(m_file, ta_("Save &As..."), "Ctrl+Shift+S",
+             menu_save_as, NULL);
     menu_add(m_file, ta_("&Close Tab"), NULL, menu_close_tab, NULL);
     menu_add(m_file, ta_("&Quit"), "Ctrl+Q", menu_quit, NULL);
     (void)fdk_menu_bar_append(bar, ta_("&File"), m_file);
@@ -147,6 +148,8 @@ static void menus_build(void) {
     menu_add(m_edit, ta_("&Find..."), "Ctrl+F", ed_menu_find, NULL);
     menu_add(m_edit, ta_("Rep&lace..."), "Ctrl+H", ed_menu_replace,
              NULL);
+    menu_add(m_edit, ta_("&Go To Line..."), "Ctrl+G",
+             ed_menu_goto_line, NULL);
     (void)fdk_menu_bar_append(bar, ta_("&Edit"), m_edit);
 
     fdk_menu *m_view = NULL;

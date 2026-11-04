@@ -374,6 +374,31 @@ typedef struct view_ctx {
     bool is_list;
 } view_ctx;
 
+/* round 25: header press -> sort toggle. pane-local, so a click
+ * sorts THE pane clicked (not the active one). */
+static void header_clicked_sort(fdk_widget *list, size_t column,
+                                void *user) {
+    (void)list;
+    pane *p = user;
+    listing_model *lm = model_pane_of(p);
+    if (lm == NULL) {
+        return;
+    }
+    /* declared: Name, Modified, Size, Type -> FM_COL_* */
+    static const int map[4] = {FM_COL_NAME, FM_COL_MTIME,
+                               FM_COL_SIZE, FM_COL_TYPE};
+    int col = (column < 4) ? map[column] : FM_COL_NAME;
+    bool desc = (lm->sort_col == col) ? !lm->sort_desc : false;
+    lm->sort_col = col; /* fmodel_set_sort targets model_active();
+                         * the active pane may differ — set both  */
+    lm->sort_desc = desc;
+    fdk_model_sort_set_key(lm->sort, (size_t)col, desc, NULL, NULL);
+    static const char *names[4] = {"name", "modified time", "size",
+                                   "type"};
+    fi_set_status("Sorted by %s (%s)", names[column],
+                  desc ? "descending" : "ascending");
+}
+
 static void row_activated(fdk_widget *view, size_t row, void *user) {
     view_ctx *vc = user;
     const file_info *fi = NULL;
@@ -712,6 +737,13 @@ void pane_build_view(pane *p, tab *t) {
         }
         (void)fdk_list_bind_model(list, model_pane_of(p)->view,
                                   FM_COL_NAME);
+        /* round 25: clicking a column header sorts by it (toggle
+         * asc/desc on the second click). The model's sort existed
+         * since round 7 but nothing ever called it. The header
+         * indices are the DECLARED order; FM_COL_* differs
+         * (Name,Size,MTime,Type vs Name,Modified,Size,Type) so
+         * they map here. */
+        fdk_list_set_on_header_click(list, header_clicked_sort, p);
         fdk_list_set_on_row_activate(list, row_activated, vc);
         fdk_list_set_on_selection_changed(list,
                                           list_selection_changed,

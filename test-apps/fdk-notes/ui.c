@@ -37,29 +37,88 @@ void nt_a11y_shutdown(void) {
 
 /* ---- the tree (notebooks + notes) ---------------------------------- */
 
+/* round 25: does this note match the search needle (title or
+ * body, case-insensitive ASCII like fdk-files' filter)? An empty
+ * needle matches everything. */
+static bool note_matches(const nt_note *n, const char *needle) {
+    if (needle == NULL || needle[0] == '\0') {
+        return true;
+    }
+    const char *hay[2] = {n->title, n->body};
+    size_t nl = strlen(needle);
+    for (int h = 0; h < 2; h++) {
+        const char *s = hay[h];
+        size_t sl = strlen(s);
+        for (size_t i = 0; i + nl <= sl; i++) {
+            size_t j = 0;
+            while (j < nl) {
+                char a = s[i + j];
+                char b = needle[j];
+                if (a >= 'A' && a <= 'Z') {
+                    a = (char)(a - 'A' + 'a');
+                }
+                if (b >= 'A' && b <= 'Z') {
+                    b = (char)(b - 'A' + 'a');
+                }
+                if (a != b) {
+                    break;
+                }
+                j++;
+            }
+            if (j == nl) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static void tree_rebuild(void) {
     fdk_tree_clear(napp.tree);
+    const char *needle = napp.search;
+    size_t shown = 0;
     for (size_t b = 0; b < napp.book_count; b++) {
         fdk_tree_node book = 0;
-        (void)fdk_tree_node_add(napp.tree, FDK_TREE_NODE_NONE,
-                                napp.books[b].name, &book);
         for (size_t i = 0; i < napp.books[b].note_count; i++) {
             const nt_note *n =
                 &napp.notes[napp.books[b].first_note + i];
+            if (!note_matches(n, needle)) {
+                continue;
+            }
+            if (book == 0) {
+                (void)fdk_tree_node_add(napp.tree,
+                                        FDK_TREE_NODE_NONE,
+                                        napp.books[b].name, &book);
+            }
             (void)fdk_tree_node_add(napp.tree, book, n->title,
                                     NULL);
+            shown++;
         }
+    }
+    if (needle != NULL && needle[0] != '\0') {
+        ta_status(&napp.base, ta_("%zu notes match \"%s\""),
+                  shown, needle);
     }
 }
 
 /* flatten a tree row index -> note index (the tree's row order is
  * the store's order: book, then its notes)                        */
 static bool row_to_note(size_t row, size_t *out) {
+    /* round 25: the walk mirrors tree_rebuild exactly — books
+     * only occupy a row when at least one of their notes matches
+     * the needle, and non-matching notes never occupy one. */
     size_t seen = 0;
     for (size_t b = 0; b < napp.book_count; b++) {
-        size_t book_row = seen++;
-        (void)book_row;
+        size_t book_row = SIZE_MAX;
         for (size_t i = 0; i < napp.books[b].note_count; i++) {
+            const nt_note *n =
+                &napp.notes[napp.books[b].first_note + i];
+            if (!note_matches(n, napp.search)) {
+                continue;
+            }
+            if (book_row == SIZE_MAX) {
+                book_row = seen++;
+            }
             if (seen == row) {
                 *out = napp.books[b].first_note + i;
                 return true;
@@ -402,6 +461,24 @@ void nt_tray_shutdown(void) {
 
 /* ---- the build ------------------------------------------------------- */
 
+/* the search box's live filter: copy the needle, rebuild the
+ * tree to the matches. The selection is dropped by the rebuild —
+ * pick the FIRST match so the pane shows something real. */
+static void on_search_changed(fdk_widget *entry, void *user) {
+    (void)user;
+    ta_copy(napp.search, sizeof napp.search,
+            fdk_entry_get_text(entry));
+    tree_rebuild();
+    if (napp.search[0] != '\0' && napp.note_count > 0) {
+        for (size_t i = 0; i < napp.note_count; i++) {
+            if (note_matches(&napp.notes[i], napp.search)) {
+                nt_focus_select(i);
+                break;
+            }
+        }
+    }
+}
+
 void nt_ui_build(void) {
     ta_app *a = &napp.base;
 
@@ -413,10 +490,17 @@ void nt_ui_build(void) {
     (void)fdk_box_create(a->content, FDK_HORIZONTAL, &row);
     fdk_widget_set_expand(row, true, true);
 
-    /* the left: the notebook tree */
+    /* the left: the search box (round 25) + the notebook tree */
     fdk_widget *tree_host = NULL;
     (void)fdk_box_create(row, FDK_VERTICAL, &tree_host);
     fdk_widget_set_expand(tree_host, false, true);
+    fdk_widget *se = NULL;
+    (void)fdk_entry_create(tree_host, a->font_ui, "", &se);
+    napp.search_entry = se;
+    fdk_widget_set_expand(se, true, false);
+    fdk_entry_set_placeholder(se, ta_("Search all notes"));
+    fdk_entry_set_on_changed(se, on_search_changed, NULL);
+    fdk_widget_set_accessible_name(se, ta_("Search all notes"));
     (void)fdk_tree_create(tree_host, a->font_ui, &napp.tree);
     fdk_widget_set_expand(napp.tree, false, true);
     fdk_widget_set_accessible_name(napp.tree,

@@ -48,6 +48,7 @@ static void act_replace(fdk_widget *b, void *u) {
     (void)b; (void)u;
     ed_ui_findbar_toggle(true);
 }
+static void act_goto_line(fdk_widget *b, void *u);
 static void act_wrap(fdk_widget *b, void *u);
 static void act_prefs(fdk_widget *b, void *u);
 
@@ -87,6 +88,60 @@ static void act_open(fdk_widget *b, void *u) {
                                      on_open_picked, NULL, NULL))) {
         ta_status(&eapp.base, "%s", ta_("Cannot open the file dialog"));
     }
+}
+
+/* Go To Line: the prompt dialog hands the answer; parse, clamp,
+ * scroll. The caret lands on the paragraph's first byte and the
+ * blink restarts (round 25's core scroll_to_line). */
+static void on_goto_answer(fdk_dialog_response response,
+                           const char *text, void *user) {
+    (void)user;
+    if (response != FDK_DIALOG_OK || text == NULL ||
+        text[0] == '\0') {
+        return;
+    }
+    ed_doc *d = ed_doc_current();
+    if (d == NULL) {
+        return;
+    }
+    char *end = NULL;
+    unsigned long n = strtoul(text, &end, 10);
+    if (end == text) {
+        ta_status(&eapp.base, "%s", ta_("Not a number"));
+        return;
+    }
+    size_t paras = fdk_textview_paragraph_count(d->view);
+    size_t line = (n >= 1) ? n - 1 : 0; /* 1-based, like every editor */
+    if (line >= paras) {
+        line = (paras > 0) ? paras - 1 : 0;
+        ta_status(&eapp.base, ta_("Past the end — line %zu"),
+                  paras);
+    } else {
+        ta_status(&eapp.base, ta_("Line %zu"), line + 1);
+    }
+    (void)fdk_textview_scroll_to_line(d->view, line);
+}
+
+static void act_goto_line(fdk_widget *b, void *u) {
+    (void)b; (void)u;
+    ed_doc *d = ed_doc_current();
+    if (d == NULL) {
+        return;
+    }
+    size_t line = 0, col = 0;
+    (void)fdk_textview_caret_line_col(d->view, &line, &col);
+    char cur[16];
+    snprintf(cur, sizeof cur, "%zu", line + 1);
+    fdk_prompt_dialog_options o;
+    memset(&o, 0, sizeof o);
+    o.title = ta_("Go To Line");
+    o.text = ta_("Line number:");
+    o.value = cur; /* selected: type replaces (the convention) */
+    o.modal = true;
+    o.font = eapp.base.font_ui;
+    o.parent = eapp.base.window;
+    (void)fdk_dialog_show_prompt(eapp.base.ctx, &o, on_goto_answer,
+                                 NULL, NULL);
 }
 
 /* the shared open-picker entry (toolbar + menu) */
@@ -236,8 +291,37 @@ void ed_menu_undo(fdk_widget *mi, void *u) { act_undo(mi, u); }
 void ed_menu_redo(fdk_widget *mi, void *u) { act_redo(mi, u); }
 void ed_menu_find(fdk_widget *mi, void *u) { act_find(mi, u); }
 void ed_menu_replace(fdk_widget *mi, void *u) { act_replace(mi, u); }
+void ed_menu_goto_line(fdk_widget *mi, void *u) {
+    act_goto_line(mi, u);
+}
 
 /* ---- the status bar ------------------------------------------------ */
+
+/* round 25: the document stats for the status bar — words,
+ * characters, paragraphs. Cheap enough to re-run per status
+ * update (one pass over the text, no allocation). */
+static void doc_stats(const char *t, size_t len, size_t *words,
+                      size_t *chars) {
+    size_t w = 0, c = 0;
+    bool in_word = false;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)t[i];
+        if ((ch & 0xC0) == 0x80) {
+            continue; /* continuation: same codepoint            */
+        }
+        c++; /* a codepoint head                                  */
+        bool sp = (ch == ' ' || ch == '\t' || ch == '\n' ||
+                   ch == '\r');
+        if (!sp && !in_word) {
+            w++;
+            in_word = true;
+        } else if (sp) {
+            in_word = false;
+        }
+    }
+    *words = w;
+    *chars = c;
+}
 
 void ed_ui_status(void) {
     ed_doc *d = ed_doc_current();
@@ -247,9 +331,21 @@ void ed_ui_status(void) {
     }
     size_t line = 0, col = 0;
     (void)fdk_textview_caret_line_col(d->view, &line, &col);
+    /* the view owns the freshest text (doc_write resyncs d->text,
+     * but between saves d->text can lag the view) */
+    const char *t = fdk_textview_get_text(d->view);
+    if (t == NULL) {
+        t = d->text;
+    }
+    size_t words = 0, chars = 0;
+    if (t != NULL) {
+        doc_stats(t, strlen(t), &words, &chars);
+    }
+    size_t paras = fdk_textview_paragraph_count(d->view);
     ta_status(&eapp.base,
-              ta_("Ln %zu, Col %zu   %s   %s   %s"),
-              line + 1, col + 1, d->encoding,
+              ta_("Ln %zu, Col %zu   %zu words, %zu chars, %zu "
+                  "lines   %s   %s   %s"),
+              line + 1, col + 1, words, chars, paras, d->encoding,
               d->crlf ? "CRLF" : "LF", ed_lang_name(d->lang));
 }
 
@@ -268,6 +364,7 @@ void ed_ui_tab_update(void) {
 static void sh_new(fdk_window *w, void *u);
 static void sh_open(fdk_window *w, void *u);
 static void sh_save(fdk_window *w, void *u);
+static void sh_goto_line(fdk_window *w, void *u);
 static void sh_find(fdk_window *w, void *u);
 static void sh_replace(fdk_window *w, void *u);
 void quit_from_shortcut(fdk_window *w, void *user);
@@ -290,14 +387,20 @@ void ed_ui_build(void) {
          act_open, NULL},
         {"document-save", FDK_ROW_ICON_FILE, "Save", "Ctrl+S", false,
          act_save, NULL},
-        {"save", FDK_ROW_ICON_FILE, "Save As", "Ctrl+Shift+S", false,
-         act_save_as, NULL},
+        /* round 25: Save As used the "save" alias, which resolves
+         * to the SAME document-save icon as Save — two identical
+         * buttons (the owner's report). The disk glyph sets it
+         * apart; the tooltips + Ctrl+Shift+S carry the rest. */
+        {"disk", FDK_ROW_ICON_DRIVE, "Save As (save a copy under a "
+         "new name)", "Ctrl+Shift+S", false, act_save_as, NULL},
         {"undo", FDK_ROW_ICON_FILE, "Undo", "Ctrl+Z", false, act_undo,
          NULL},
         {"redo", FDK_ROW_ICON_FILE, "Redo", "Ctrl+Shift+Z", false,
          act_redo, NULL},
         {"search", FDK_ROW_ICON_FILE, "Find", "Ctrl+F", false, act_find,
          NULL},
+        {"forward", FDK_ROW_ICON_FILE, "Go To Line", "Ctrl+G", false,
+         act_goto_line, NULL},
         {"doc", FDK_ROW_ICON_FILE, "Replace", "Ctrl+H", false,
          act_replace, NULL},
         {"link", FDK_ROW_ICON_FILE, "Word wrap", NULL, true, act_wrap,
@@ -363,6 +466,8 @@ void ed_ui_build(void) {
                                   NULL);
     (void)fdk_window_add_shortcut(a->window, "Ctrl+H",
                                   sh_replace, NULL);
+    (void)fdk_window_add_shortcut(a->window, "Ctrl+G",
+                                  sh_goto_line, NULL);
     (void)fdk_window_add_shortcut(a->window, "Ctrl+Q",
                                   quit_from_shortcut, NULL);
 }
@@ -373,6 +478,7 @@ static void sh_open(fdk_window *w, void *u) { (void)w; (void)u; act_open(NULL, N
 static void sh_save(fdk_window *w, void *u) { (void)w; (void)u; act_save(NULL, NULL); }
 static void sh_find(fdk_window *w, void *u) { (void)w; (void)u; act_find(NULL, NULL); }
 static void sh_replace(fdk_window *w, void *u) { (void)w; (void)u; act_replace(NULL, NULL); }
+static void sh_goto_line(fdk_window *w, void *u) { (void)w; (void)u; act_goto_line(NULL, NULL); }
 
 /* the quit shortcut (bound in ed_ui_build) */
 void quit_from_shortcut(fdk_window *w, void *user) {

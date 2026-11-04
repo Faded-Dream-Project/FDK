@@ -31,11 +31,20 @@ typedef struct mo_net {
     mo_series rx_kib, tx_kib;            /* KiB/s history          */
 } mo_net;
 
+/* round 25: the system context lines — /proc/uptime and
+ * /proc/loadavg, sampled once a tick and shown in the status
+ * bar. load1/5/15 are the kernel's own averages. */
+typedef struct mo_sys {
+    double uptime_s;        /* seconds since boot                    */
+    double load1, load5, load15;
+} mo_sys;
+
 typedef struct mo_app {
     ta_app base;
     mo_cpu cpu;
     mo_mem mem;
     mo_net net;
+    mo_sys sys;
     bool running;           /* the sampler timer's life            */
     unsigned interval_ms;   /* 250 default, prefs-persisted        */
     unsigned samples;

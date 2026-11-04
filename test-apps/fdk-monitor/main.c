@@ -50,11 +50,26 @@ static void on_tick(fdk_timer *timer, void *user) {
         snprintf(tx, sizeof tx, "%.0f KiB/s",
                  mapp.net.tx_rate / 1024.0);
     }
+    /* round 25: uptime as d/h/m + the load averages — the
+     * one-glance "how has this box been doing" line */
+    long up = (long)mapp.sys.uptime_s;
+    long ud = up / 86400, uh = (up % 86400) / 3600,
+         um = (up % 3600) / 60;
+    char up_s[32];
+    if (ud > 0) {
+        snprintf(up_s, sizeof up_s, "%ldd %ldh", ud, uh);
+    } else if (uh > 0) {
+        snprintf(up_s, sizeof up_s, "%ldh %ldm", uh, um);
+    } else {
+        snprintf(up_s, sizeof up_s, "%ldm", um);
+    }
     ta_status(&mapp.base,
               "CPU %.0f%%   RAM %.0f/%.0f MB   NET ↓%s ↑%s   "
-              "(%u samples)",
+              "load %.2f %.2f %.2f   up %s   (%u samples)",
               mapp.cpu.load.latest, mapp.mem.used_mb,
-              mapp.mem.total_mb, rx, tx, mapp.samples);
+              mapp.mem.total_mb, rx, tx, mapp.sys.load1,
+              mapp.sys.load5, mapp.sys.load15, up_s,
+              mapp.samples);
 }
 
 void mo_set_running(bool run) {

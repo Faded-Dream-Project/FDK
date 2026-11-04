@@ -898,6 +898,17 @@ fdk_result fdk_list_set_columns(fdk_widget *list,
                                 const fdk_list_column *columns,
                                 size_t count);
 
+/* Round 25 (the sort-toggle gesture): fired for a left-press on
+ * the column-header strip, with the DECLARED column index (0 = the
+ * primary/name column). The press is consumed by the list — no
+ * rubber band starts from the header. */
+typedef void (*fdk_list_header_click_fn)(fdk_widget *list,
+                                         size_t column,
+                                         void *user_data);
+void fdk_list_set_on_header_click(fdk_widget *list,
+                                  fdk_list_header_click_fn fn,
+                                  void *user_data);
+
 /* The column count (0 = the plain no-columns list). */
 size_t fdk_list_get_column_count(fdk_widget *list);
 
@@ -1109,6 +1120,11 @@ fdk_result fdk_textview_caret_line_col(fdk_widget *textview,
                                        size_t *out_column);
 size_t fdk_textview_line_col_byte(fdk_widget *textview,
                                   size_t line, size_t column);
+/* Round 25 (goto-line): scrolls the PARAGRAPH `line` (0-based,
+ * clamped) into view and drops a visible caret at its start —
+ * the app's Go To Line is this plus a prompt. */
+fdk_result fdk_textview_scroll_to_line(fdk_widget *textview,
+                                       size_t line);
 
 /* Range attributes: the SYNTAX-HIGHLIGHT substrate. The widget
  * COPIES the list (the app may destroy its own immediately);
