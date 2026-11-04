@@ -15,6 +15,50 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-05 (round 19: the disappearing-folder report)
+
+### Fixed — expose now repaints the SURFACE, not just the tree
+
+- **The report.** The owner's release-build profile session
+  (`sudo perf record -g -p $(pidof fdk-files) -- sleep 10`) leaves
+  the file list BLANK after the run: covering the window for the
+  recording (~10 s) and uncovering it lost the folder content until
+  the next input forced a repaint. The profile numbers themselves
+  are healthy (fill_rect_translucent 52% -> 10.3% after round 18;
+  the ~20% of libnvidia-eglcore is the GPU present lane doing its
+  job).
+- **The audit.** Not reproducible in the sandbox: a REAL-occluder
+  rig (override-redirect window stacked above the app — the
+  server-discards-pixels path, distinct from round 16's unmap test)
+  passes on the CPU lane, the forced GL lane, the bare server, AND
+  under a real reparenting WM (scripts/miniwm.c, new — the smallest
+  honest WM: substructure redirect, frame windows, synthetic
+  ConfigureNotify). The residue the sandbox cannot see: the NVIDIA
+  driver and a full EWMH WM.
+- **The hardening (window.c).** The expose handler invalidated the
+  widget TREE but never touched the window SURFACE's damage
+  bookkeeping — a re-present that shipped only new widget damage
+  left every untouched pixel relying on server-side pixels the
+  server may have discarded. Every expose now marks the window
+  surface full-damage, so the very next present re-sends the whole
+  frame regardless of how little the tree thinks changed — and
+  regardless of whether there IS a tree (apps that draw the surface
+  directly ride the same guarantee). Exactness-preserving on both
+  backends (X11's GL staging buffer and SHM back slot both hold the
+  last-presented frame; Wayland pre-fills fresh buffers with the
+  visible frame). The rig's PRESENT-TRACE confirms the shape: the
+  post-uncover present is now `full`.
+- **The regression rig (test-apps/run_covercheck.sh + scripts/
+  occlude.c + scripts/miniwm.c).** Baseline row count, a REAL 10 s
+  occlusion, gates for (a) content rows restored, (b) a present
+  actually happening with zero input, (c) pixel identity against a
+  forced full repaint, and (d) post-incident navigation sanity.
+  Four shapes: GL/CPU lane x WM/bare server (FDK_NOGL / FDK_NOWM).
+- **Verification**: core 763, X11 229, covercheck 4/4 shapes green
+  (the core-suite `test_cli_tools` abort on a clean checkout was a
+  build-order artifact — `make tools` before `make test`; the
+  Makefile's test target does not depend on tools and never has).
+
 ## [Unreleased-candidate features] — 2026-11-05 (round 18: the release-lane round)
 
 ### Performance — the XRGB table pass (round 17's follow-through)

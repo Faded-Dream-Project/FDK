@@ -1,3 +1,52 @@
+# Round 19 (2026-11-05) — the disappearing-folder report
+
+## The owner's brief
+Two things: (1) confirmation the perf work is in the CORE, not the
+app — yes: everything lives in src/render/surface.c inside libfdk;
+every app linking the library gets it, nothing is fdk-files-specific
+(the profile itself proves it: the symbols are libfdk's). (2) The
+remaining bug: `sudo perf record ... -- sleep 10` still makes the
+folder content disappear; everything else is fixed.
+
+## What the profile says
+Healthy. fill_rect_translucent 52.4% -> 10.3% (round 18 landed),
+~35% total blend work, ~20% libnvidia-eglcore (the GPU present
+lane — where a CPU-rendered toolkit SHOULD top out). No action.
+
+## The investigation
+- Traced the expose path end to end: x11_events.c translates
+  Expose -> FDK_EVENT_WINDOW_EXPOSE; window.c invalidates the tree;
+  every test app's shared loop (ta_pump) repaints on tree damage.
+- Round 16's stage D rig tested UNMAP, not occlusion — the real
+  cover path was never exercised. Built occlude.c (a REAL
+  override-redirect occluder stacked above the window) and
+  miniwm.c (a minimal reparenting WM: frames, synthetic
+  ConfigureNotify — the owner has an EWMH WM, bare Xvfb does not).
+- Result: NOT reproducible in the sandbox. All four shapes (GL
+  lane forced / CPU lane x miniwm / bare server) pass — rows
+  restored, a present happens with zero input, pixel-identical to
+  a forced full repaint.
+- Structural weakness found anyway: the expose handler never
+  touched the SURFACE's damage bookkeeping — only the tree's. A
+  re-present shipping only new widget damage relies on
+  server-side pixels the server may have discarded. The owner's
+  NVIDIA + WM combo is plausibly the case where that bites.
+
+## What shipped
+- window.c: every expose marks the window surface full-damage
+  (hoisted out of the root check — tree-less apps covered too).
+  PRESENT-TRACE confirms the post-uncover present is now `full`.
+- scripts/occlude.c + scripts/miniwm.c + test-apps/run_covercheck.sh
+  (the four-shape regression rig).
+- CHANGELOG entry.
+
+## The owner's next check
+Pull, rebuild, and repeat the perf-record session. If the folder
+still vanishes, run with FDK_PRESENT_TRACE=1 and check whether a
+`full` present follows the uncover — if it does and the screen is
+still blank, the pixels are being sent and LOST server-side (that
+would be a driver-level interaction: send the app log).
+
 # Round 18 (2026-11-05) — the release-lane round
 
 ## The owner's brief
