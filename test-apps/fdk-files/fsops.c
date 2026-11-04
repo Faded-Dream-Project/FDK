@@ -30,10 +30,13 @@ static int fi_cmp(const void *a, const void *b) {
     return strcasecmp(fa->name, fb->name);
 }
 
-file_info *fs_list_dir(const char *dir, bool hidden, size_t *count) {
+file_info *fs_list_dir(const char *dir, bool hidden, size_t *count,
+                       bool *unreadable) {
     *count = 0;
+    *unreadable = false;
     DIR *d = opendir(dir);
     if (d == NULL) {
+        *unreadable = true;
         return NULL;
     }
     file_info *v = NULL;

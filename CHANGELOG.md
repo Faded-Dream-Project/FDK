@@ -15,6 +15,55 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-05 (round 20: the disappearing folders — root cause found, proven, fixed)
+
+### Fixed — fdk-files wiped its own listing on every watch-fired reload
+
+- **The report.** Folders disappear when the owner covers the
+  window or switches to a terminal — with or without perf record
+  running, on X11 AND Wayland. Clicking a bookmark (Home) brings
+  the content back. The owner's PRESENT-TRACE showed the round-19
+  expose hardening working (full presents on uncover) yet the
+  content still vanished — and a growing per-row-removal damage
+  sequence at the trace's end: the MODEL was emptying, not the
+  paint.
+- **The root cause (proven twice).** `pane_reload()` and
+  `pane_new_tab()` both call `pane_navigate(p, t->dir)` — and
+  pane_navigate did `snprintf(t->dir, sizeof t->dir, "%.400s",
+  abs_path)` where abs_path IS t->dir: overlapping snprintf is
+  undefined behavior (C11 7.21.6.5) and this glibc EMPTIES the
+  string (scripts/overlap_repro.c isolates it in 8 lines). So every
+  watch-fired reload navigated to `""` → `opendir("")` fails →
+  fmodel_load's failure path **cleared the whole store** (also
+  unbatched — the per-row removal storm the owner's trace shows).
+  The inotify watch fires on ANY write in the viewed folder —
+  session noise in $HOME (.Xauthority and friends) is constant
+  during session switches, hence "more so when I switched to X11";
+  perf record was pure correlation (the terminal switch).
+- **The fix, three independent layers.**
+  (1) pane_navigate snapshots abs_path into a local before writing
+  t->dir (kills the UB for every aliasing caller) and refuses
+  empty/NULL paths outright.
+  (2) fs_list_dir now distinguishes `unreadable` (opendir failed)
+  from genuinely empty; fmodel_load KEEPS the current rows on a
+  read failure and reports it in the status bar instead of wiping
+  the view.
+  (3) The legitimate empty-directory clear is batched (one CLEARED
+  replay, not a per-row removal storm).
+- **The regression rig (test-apps/run_noisewatch.sh + scripts/
+  xfocus.c).** A background writer hammers a dotfile in the watched
+  directory every 150 ms (real session-noise shape) while the rig
+  drives focus loss, a REAL 10 s occlusion, and idle sits. Four
+  decisive gates: no model clear after baseline, the bound row
+  count never zero, pixel content identical across every stage,
+  and the watch actually exercised (>= 20 fires). Plus permanent
+  DRIG-gated telemetry (DRIG-WATCH / DRIG-ROWS / DRIG-CLEAR /
+  DRIG-UNREADABLE) for future field reports.
+- **Verification**: noisewatch 4/4 gates green under 229 watch
+  fires; covercheck 4/4 shapes (round 19's rig, no regression);
+  core 763; X11 229. The broken build fails the rig at the first
+  watch fire (DRIG-CLEAR prev_rows=2, DRIG-ROWS=0 forever).
+
 ## [Unreleased-candidate features] — 2026-11-05 (round 19: the disappearing-folder report)
 
 ### Fixed — expose now repaints the SURFACE, not just the tree

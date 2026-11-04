@@ -20,7 +20,11 @@
  * (free with free()); stat()ed lazily per row by the model (see
  * files.h — the parallel-arrays approach the example used is
  * replaced by file_info rows). */
-file_info *fs_list_dir(const char *dir, bool hidden, size_t *count);
+/* round 20: *unreadable distinguishes opendir() failure from a
+ * genuinely empty directory — the model layer must not wipe the
+ * view for a transient read failure. */
+file_info *fs_list_dir(const char *dir, bool hidden, size_t *count,
+                       bool *unreadable);
 
 /* stat()s one entry into fi (name/path prefilled by the caller). */
 void fs_stat_entry(file_info *fi);
