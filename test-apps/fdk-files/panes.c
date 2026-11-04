@@ -803,9 +803,19 @@ static void pane_watch(pane *p, const char *dir) {
 
 void pane_navigate(pane *p, const char *abs_path) {
     tab *t = active_tab(p);
-    if (t == NULL || abs_path == NULL) {
-        return;
+    if (t == NULL || abs_path == NULL || abs_path[0] == '\0') {
+        return; /* an empty path is never a real navigation */
     }
+
+    /* round 20: abs_path may ALIAS t->dir — pane_reload and
+     * pane_new_tab both pass the tab's own buffer, and the
+     * snprintf below wrote dst over src (overlapping snprintf is
+     * undefined behavior; this glibc EMPTIES the string — the
+     * disappearing-folder root cause: every watch-fired reload
+     * navigated to "" and the failure path wiped the model).
+     * Snapshot FIRST; every later write hits distinct storage. */
+    char path[FI_PATH_MAX];
+    snprintf(path, sizeof path, "%.4000s", abs_path);
 
     /* history (skip pushing a duplicate of the top) */
     if (p->back_count == 0 ||
@@ -823,7 +833,7 @@ void pane_navigate(pane *p, const char *abs_path) {
     }
     p->fwd_count = 0;
 
-    snprintf(t->dir, sizeof t->dir, "%.400s", abs_path);
+    snprintf(t->dir, sizeof t->dir, "%.400s", path);
     /* Round 15 (the delete rig): the DRIG telemetry the rig needs
      * to VERIFY arrival in the target directory — the nav-click
      * double-click can race the app's double-click window, and a

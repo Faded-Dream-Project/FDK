@@ -1,3 +1,57 @@
+# Round 20 (2026-11-05) — the disappearing folders: root cause
+
+## The owner's evidence
+The round-19 expose hardening WORKS (the log shows full presents on
+uncover) — yet folders still vanish, on X11 AND Wayland, WITHOUT
+perf running. The trace's ending is the tell: growing per-row
+removal damage (661k/29 -> 880k/38 -> 272k/13 px) = the file rows
+being REMOVED one by one while the app keeps painting. The model
+was emptying; the paint layer was never the bug.
+
+## The hunt
+1. Instrumented fmodel_load's clear path + the watch + the bound
+   row count (DRIG-CLEAR / DRIG-WATCH / DRIG-ROWS).
+2. Built the noisewatch rig: a background dotfile writer in the
+   watched dir (real session-noise shape) + focus loss + cover.
+3. CAUGHT IT: watch fire @frame 24 -> pane_reload -> PHASE: nav
+   (EMPTY) -> DRIG-CLEAR dir= prev_rows=2 -> DRIG-ROWS=0 forever.
+4. The empty path: pane_reload passes active_tab(p)->dir to
+   pane_navigate, which snprintf'd t->dir onto itself. Overlapping
+   snprintf = UB; this glibc empties the buffer. Proven in
+   isolation (scripts/overlap_repro.c): before [/tmp/fdk-drig/left]
+   len=18, after [] len=0.
+5. The wipe: fs_list_dir returned NULL/0 for BOTH an empty dir and
+   an opendir failure, and fmodel_load's failure path cleared the
+   store — unbatched, hence the per-row removal storm in the trace.
+
+Why the owner's symptoms fit exactly:
+- X11 AND Wayland: pure app logic, backend-independent.
+- No perf needed: any write in the viewed folder fires the watch;
+  session noise in $HOME is constant during session switches
+  ("more so when I switched to X11").
+- Click Home restores: a real path doesn't alias the buffer.
+
+## What shipped
+- panes.c: pane_navigate snapshots abs_path before writing t->dir
+  + refuses empty/NULL paths.
+- fsops.c/h: fs_list_dir's unreadable out-param.
+- model.c: keep-rows-on-read-failure (status bar message instead
+  of a wipe); the legit empty-dir clear is batched.
+- main.c: the DRIG telemetry stays (gated, for future rigs).
+- run_noisewatch.sh (4 decisive gates) + scripts/xfocus.c +
+  scripts/overlap_repro.c.
+
+## Verification
+noisewatch 4/4 gates under 229 watch fires; covercheck 4/4 shapes;
+core 763; X11 229. The pre-fix build fails the rig at the FIRST
+watch fire.
+
+## The owner's next check
+Pull, rebuild (release too), use normally. If a directory ever
+fails to read you now get "Cannot read <dir>" in the status bar
+with the view intact — if anything still vanishes, that message
+(or its absence) tells us which layer to look at next.
+
 # Round 19 (2026-11-05) — the disappearing-folder report
 
 ## The owner's brief

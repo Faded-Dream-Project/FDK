@@ -8,6 +8,7 @@
 #include "mime.h"
 #include "panes.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,11 +135,36 @@ void fmodel_load(struct pane *p, const char *dir,
     lm->filter_text[0] = '\0'; /* a navigation clears the filter */
 
     size_t n = 0;
-    file_info *raw = fs_list_dir(dir, include_hidden, &n);
+    bool unreadable = false;
+    file_info *raw = fs_list_dir(dir, include_hidden, &n, &unreadable);
+    if (unreadable) {
+        /* round 20: an unreadable directory KEEPS the current rows.
+         * The old shape treated opendir() failure and an empty
+         * directory identically (wipe the store) — a transient
+         * failure (a rename race, a permission blip, and the
+         * empty-string navigation the overlapping-snprintf bug in
+         * pane_navigate produced) erased the whole listing and the
+         * folder "disappeared" until the next navigation. The
+         * honest answer: say it in the status bar, keep the view. */
+        if (getenv("FDK_FILES_DRIG") != NULL) {
+            printf("DRIG-UNREADABLE dir=%s errno=%d (%s) kept_rows=%zu\n",
+                   dir, errno, strerror(errno), lm->info_count);
+            fflush(stdout);
+        }
+        fi_set_status("Cannot read %s", dir);
+        return;
+    }
     if (raw == NULL && n == 0) {
-        /* unreadable or empty: an empty store either way */
+        /* genuinely empty: one batched clear (the bound view sees
+         * ONE replay, not a per-row removal storm) */
+        if (getenv("FDK_FILES_DRIG") != NULL) {
+            printf("DRIG-CLEAR dir=%s (empty)\n", dir);
+            fflush(stdout);
+        }
+        fdk_model_begin_batch(lm->store);
         fdk_model_clear(lm->store);
         infos_clear(lm);
+        fdk_model_end_batch(lm->store);
         return;
     }
 

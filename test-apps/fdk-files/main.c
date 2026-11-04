@@ -806,7 +806,21 @@ int main(int argc, char **argv) {
         pane *p = active_pane();
         if (p->watch_fd >= 0 && (frame % 8) == 0) {
             if (fs_watch_poll(p->watch_fd) > 0) {
+                if (getenv("FDK_FILES_DRIG") != NULL) {
+                    printf("DRIG-WATCH fire @frame %ld\n", frame);
+                    fflush(stdout);
+                }
                 pane_reload(p);
+            }
+        }
+        /* round 20 telemetry: the active list's bound row count,
+         * once per second — catches the model emptying in the act */
+        if (getenv("FDK_FILES_DRIG") != NULL && (frame % 64) == 0) {
+            tab *t = active_tab(p);
+            if (t != NULL && t->list != NULL) {
+                printf("DRIG-ROWS frame=%ld rows=%zu\n", frame,
+                       fdk_list_row_count(t->list));
+                fflush(stdout);
             }
         }
     }
