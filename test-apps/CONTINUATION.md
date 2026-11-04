@@ -1,3 +1,61 @@
+# Round 17 (2026-11-04, evening) — the drag-highlight profile
+
+## The owner's brief
+"Very fast highlighting folders by using drag click": perf shows
+53.7% blend_pixel (45 of it via fill_rect under row_paint, 8 via
+list_paint), 15.5% fill_rect self, ASan still on the rig. "It feels
+like we are going in circles" — fair; see the command list below.
+
+## What shipped
+- surface.c: fill_rect_translucent — the hoisted, 4-wide-unrolled
+  translucent fill; EXACT vs blend_pixel on the 256-value sweep
+  (both formats); 1.17-1.22x on -O2 scalar. The bench harness is
+  #ifdef FDK_R17_BENCH inside surface.c (fdk__r17_bench; link any
+  main against libfdk.a).
+- list.c: the incremental band want-test (press = full window,
+  motions = prev∪current band window only). The FIRST version
+  seeded an empty window at press — test_row_press_band caught it
+  (a new gesture must re-evaluate every row: outside-band rows
+  clear). Lesson re-confirmed: never ship a band change without
+  that test.
+- run_scrollcheck.sh now uses the in-tree PPM xsnap (the sandbox's
+  PNG py-tool was lost to a recycle; the C tool is the permanent
+  one), and its stage-D unmap/map helper was rewritten (the ctypes
+  XQueryTree argtypes were wrong and segfaulted).
+
+## The owner's machine — the command list (BREAK THE CIRCLE)
+The recurring mistake: profiling the ASan build. ASan doubles
+raster costs and skews every ratio. On YOUR rig, run:
+
+  # 1. build + run the RELEASE binary
+  make release && FDK_FILES_STARTUP_DIR=$HOME test-apps/build-rel/fdk-files &
+  # 2. profile THE RELEASE BINARY this time:
+  sudo perf record -g -p $(pidof fdk-files) -- sleep 10
+  sudo perf report --stdio --no-children -g none | head -40
+
+  # 3. the present-volume counter (how many pixels per frame hit
+  #    the wire — tells us damage quality, not just CPU):
+  FDK_PRESENT_TRACE=1 test-apps/build-rel/fdk-files 2>&1 | grep PRESENT-TRACE | head
+
+  # 4. the A/B switch for the blit path (is the strip path even
+  #    active? FDK_SCROLL_NOBLIT=1 turns it OFF — if scrolling is
+  #    EQUALLY slow both ways, the bottleneck is elsewhere):
+  FDK_SCROLL_NOBLIT=1 test-apps/build-rel/fdk-files
+
+Send the outputs of 2 (both with and without the scroll storm) and
+3; if 4 shows no difference, the fill volume is damage-side, not
+raster-side, and round 18 goes after the caller, not the pixel.
+
+## NOT DONE (carried)
+- SSE2 / 8-bit-LUT translucent fill (the scalar 1.2x is honest but
+  modest; the LUT needs a rounding-proof against the float form).
+- The 4K / scale>1 physical-space strip blit (round-16 carry).
+- The release-config test_attr segfault + the sway button_hits
+  assertion (both reproduce on the CLEAN round-16 tree — a config
+  hygiene round of their own).
+- The up-storm geometry-flip residue (round-16 carry; the current
+  rig passes all stages on the PPM tool).
+
 # Round 16 (2026-11-04, later) — the profile, the storms, the no-op clear
 
 ## The owner's brief

@@ -224,6 +224,10 @@ typedef struct fdk_list {
     fdk_rect band_last_rect; /* round 9: the last painted band rect
                               * (damage-limited invalidation — the
                               * union of old+new repaints the sweep) */
+    /* Round 17: the previous apply's row window — the incremental
+     * want-test (the O(count)-per-motion loop this replaced). */
+    fdk_i64 band_prev_lo;
+    fdk_i64 band_prev_hi;
     /* ---- Band auto-scroll (1.4.3) ----
      *
      * When the sweep's pointer leaves the viewport's visible band,
@@ -1485,6 +1489,13 @@ static bool list_handle_event(fdk_widget *w,
                                                      * gesture owes
                                                      * no old-rect
                                                      * damage     */
+        l->band_prev_lo = 0; /* round 17: the press seeds a FULL
+                              * window — a new gesture re-evaluates
+                              * every row (outside-band rows clear
+                              * unless the ctrl-base holds them);
+                              * only the MOTIONS after it are
+                              * incremental */
+        l->band_prev_hi = (fdk_i64)l->count;
         list_apply_band(l);
         list_band_scroll_track(l);
         list_fire_changed(l);
@@ -1804,11 +1815,47 @@ static void list_apply_band(fdk_list *l) {
         l->band_last_rect = band;
         fdk__widget_invalidate_rect(&l->base, band);
     }
-    for (size_t i = 0; i < l->count; i++) {
-        bool want = ((fdk_i64)i >= r_lo && (fdk_i64)i < r_hi) ||
-                    (l->band_ctrl && l->band_base != NULL &&
-                     i < l->band_base_cap && l->band_base[i]);
-        list_set_row(l, i, want); /* damages only flips */
+    /* Round 17: the want-test loop was O(count) per MOTION (a
+     * 1000 Hz pointer against a 100k-row list = 100M iterations/s
+     * of pure testing). Only rows whose membership CAN have flipped
+     * since the previous apply need visiting: those entering or
+     * leaving [r_lo, r_hi) — the union of the previous and current
+     * band ranges (plus the ctrl-base rows, whose state never
+     * changes during the drag: the base is captured at press). */
+    {
+        fdk_i64 s_lo = r_lo, s_hi = r_hi;
+        if (l->band_prev_lo < 0 || l->band_prev_hi < 0) {
+            s_lo = 0;                 /* no window yet: full pass */
+            s_hi = (fdk_i64)l->count;
+        } else {
+            if (l->band_prev_lo < s_lo) {
+                s_lo = l->band_prev_lo;
+            }
+            if (l->band_prev_hi > s_hi) {
+                s_hi = l->band_prev_hi;
+            }
+        }
+        if (s_lo < 0) {
+            s_lo = 0;
+        }
+        if (s_hi > (fdk_i64)l->count) {
+            s_hi = (fdk_i64)l->count;
+        }
+        for (fdk_i64 i = s_lo; i < s_hi; i++) {
+            bool want = (i >= r_lo && i < r_hi) ||
+                        (l->band_ctrl && l->band_base != NULL &&
+                         (size_t)i < l->band_base_cap &&
+                         l->band_base[(size_t)i]);
+            list_set_row(l, (size_t)i, want); /* damages only flips */
+        }
+        /* Rows outside the swept window keep their state: band
+         * members were set by an earlier apply, ctrl-base rows by
+         * the press. (The FIRST apply after a press has
+         * band_prev_lo < 0 and s_*=the full band — the correct
+         * seed; a brand-new band far away is still fully covered
+         * because prev is reset on every PRESS, not every apply.) */
+        l->band_prev_lo = r_lo;
+        l->band_prev_hi = r_hi;
     }
 }
 

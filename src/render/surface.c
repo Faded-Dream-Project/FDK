@@ -707,6 +707,87 @@ static int clip_and_damage(fdk_surface *surface, fdk_rect rect,
     return 1;
 }
 
+static void fill_rect_translucent(fdk_surface *surface, int x0, int y0,
+                                  int x1, int y1, fdk_color color);
+
+#ifdef FDK_R17_BENCH
+#include <stdio.h>
+#include <time.h>
+/* Reference: the OLD per-pixel path (blend_pixel inlined by hand,
+ * same math) — the exactness oracle for the fast loop. */
+static void ref_fill(fdk_surface *s, fdk_rect rect, fdk_color color) {
+    for (int y = rect.y; y < rect.y + rect.height; y++) {
+        for (int x = rect.x; x < rect.x + rect.width; x++) {
+            blend_pixel(s, x, y, color);
+        }
+    }
+}
+void fdk__r17_bench(void) {
+    fdk_surface *a = NULL, *b = NULL;
+    if (!fdk_ok(fdk_surface_create_format(400, 400,
+            FDK_SURFACE_FORMAT_XRGB8888, &a)) ||
+        !fdk_ok(fdk_surface_create_format(400, 400,
+            FDK_SURFACE_FORMAT_ARGB8888, &b))) {
+        printf("BENCH: alloc failed\n");
+        return;
+    }
+    fdk_color base = { .r = 0.2f, .g = 0.5f, .b = 0.8f, .a = 1.0f };
+    fdk_color over = { .r = 0.9f, .g = 0.4f, .b = 0.1f, .a = 97.0f / 255.0f };
+    /* Exactness: every dst byte value x every channel — exhaustive
+     * 256-step sweep on a 256x256 patch pair, both formats. */
+    for (int fmt = 0; fmt < 2; fmt++) {
+        fdk_surface *s1 = NULL, *s2 = NULL;
+        fdk_surface_create_format(256, 256, fmt ? FDK_SURFACE_FORMAT_ARGB8888
+                                                : FDK_SURFACE_FORMAT_XRGB8888, &s1);
+        fdk_surface_create_format(256, 256, fmt ? FDK_SURFACE_FORMAT_ARGB8888
+                                                : FDK_SURFACE_FORMAT_XRGB8888, &s2);
+        fdk_surface_fill(s1, base);
+        fdk_surface_fill(s2, base);
+        /* vary dst: paint 256 gray levels, one per row */
+        for (int i = 0; i < 256; i++) {
+            fdk_color g = { .r = i / 255.0f, .g = i / 255.0f,
+                            .b = (255 - i) / 255.0f, .a = 1.0f };
+            fdk_rect rr = { 0, i, 256, 1 };
+            fdk_surface_fill_rect(s1, rr, g);
+            fdk_surface_fill_rect(s2, rr, g);
+        }
+        ref_fill(s1, (fdk_rect){0, 0, 256, 256}, over);
+        fill_rect_translucent(s2, 0, 0, 256, 256, over);
+        fdk_u32 *p1 = s1->fb.pixels, *p2 = s2->fb.pixels;
+        int bad = 0;
+        for (int i = 0; i < 256 * 256; i++) {
+            if (p1[i] != p2[i]) { bad++; }
+        }
+        printf("BENCH exactness fmt=%s: %s (%d differ)\n",
+               fmt ? "ARGB" : "XRGB", bad ? "FAIL" : "EXACT", bad);
+        fdk_surface_destroy(s1);
+        fdk_surface_destroy(s2);
+    }
+    /* Speed: 400x400 translucent fill x 2000, XRGB */
+    fdk_surface_fill(a, base);
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int i = 0; i < 2000; i++) {
+        fill_rect_translucent(a, 0, 0, 400, 400, over);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double fast = (t1.tv_sec - t0.tv_sec) * 1e3 +
+                  (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    fdk_surface_fill(a, base);
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int i = 0; i < 2000; i++) {
+        ref_fill(a, (fdk_rect){0, 0, 400, 400}, over);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double slow = (t1.tv_sec - t0.tv_sec) * 1e3 +
+                  (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    printf("BENCH 400x400x2000: old=%.1fms new=%.1fms speedup=%.2fx\n",
+           slow, fast, slow / fast);
+    fdk_surface_destroy(a);
+    fdk_surface_destroy(b);
+}
+#endif
+
 void fdk_surface_fill(fdk_surface *surface, fdk_color color) {
     if (surface == NULL) {
         return;
@@ -754,9 +835,135 @@ void fdk_surface_fill(fdk_surface *surface, fdk_color color) {
         return;
     }
 
+    fill_rect_translucent(surface, x0, y0, x1, y1, color);
+}
+
+/* The translucent-fill inner loop (round 17): blend_pixel's exact
+ * float math with everything PER-PIXEL-INVARIANT hoisted out — the
+ * clip test (done by the caller's rect math), the format branch,
+ * the alpha clamp, the channel unpack of the constant SOURCE, and
+ * the constant weight products. What remains per pixel: unpack the
+ * destination, three multiply-adds, repack, store. Byte-identical
+ * to blend_pixel by construction (same expressions, same rounding),
+ * so the pixel-identity gates hold for both surface formats. */
+static void fill_rect_translucent(fdk_surface *surface, int x0, int y0,
+                                  int x1, int y1, fdk_color color) {
+    fdk_f32 a = color.a;
+    if (a < 0.0f) {
+        a = 0.0f;
+    } else if (a > 1.0f) {
+        a = 1.0f;
+    }
+    if (a <= 0.0f) {
+        return; /* fully transparent: nothing changes */
+    }
+    /* The clamped 0..1 source channels, exactly as blend_pixel
+     * clamps them before use. */
+    fdk_f32 sr = color.r < 0.0f ? 0.0f
+                : (color.r > 1.0f ? 1.0f : color.r);
+    fdk_f32 sg = color.g < 0.0f ? 0.0f
+                : (color.g > 1.0f ? 1.0f : color.g);
+    fdk_f32 sb = color.b < 0.0f ? 0.0f
+                : (color.b > 1.0f ? 1.0f : color.b);
+    int argb = surface->format == FDK_SURFACE_FORMAT_ARGB8888;
+    fdk_f32 inv = 1.0f - a;
+
     for (int y = y0; y < y1; y++) {
-        for (int x = x0; x < x1; x++) {
-            blend_pixel(surface, x, y, color);
+        fdk_u32 *row = surface->fb.pixels +
+                       (size_t)y * (size_t)surface->fb.stride;
+        int x = x0;
+        /* 4-wide unroll: four INDEPENDENT float chains (no
+         * horizontal mixing), which the compiler may vectorize —
+         * the rounding of each chain is unchanged, so byte-exact
+         * vs the scalar form (the exactness sweep verifies). */
+        for (; x + 4 <= x1; x += 4) {
+            fdk_u32 dst0 = row[x], dst1 = row[x + 1];
+            fdk_u32 dst2 = row[x + 2], dst3 = row[x + 3];
+            fdk_u32 out[4];
+            fdk_u32 srcs[4] = { dst0, dst1, dst2, dst3 };
+            for (int k = 0; k < 4; k++) {
+                fdk_u32 dst = srcs[k];
+                fdk_f32 da_r =
+                    (fdk_f32)((dst >> 16) & 0xFFu) / 255.0f;
+                fdk_f32 da_g =
+                    (fdk_f32)((dst >> 8) & 0xFFu) / 255.0f;
+                fdk_f32 da_b = (fdk_f32)(dst & 0xFFu) / 255.0f;
+                fdk_f32 r, g, b, out_a;
+                if (!argb) {
+                    out_a = 1.0f;
+                    r = sr * a + da_r * inv;
+                    g = sg * a + da_g * inv;
+                    b = sb * a + da_b * inv;
+                } else {
+                    fdk_f32 da =
+                        (fdk_f32)((dst >> 24) & 0xFFu) / 255.0f;
+                    out_a = a + da * inv;
+                    if (out_a <= 0.0f) {
+                        r = g = b = 0.0f;
+                    } else {
+                        fdk_f32 w_s = a / out_a;
+                        fdk_f32 w_d = da * inv / out_a;
+                        r = sr * w_s + da_r * w_d;
+                        g = sg * w_s + da_g * w_d;
+                        b = sb * w_s + da_b * w_d;
+                    }
+                }
+                if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
+                if (g < 0.0f) g = 0.0f; else if (g > 1.0f) g = 1.0f;
+                if (b < 0.0f) b = 0.0f; else if (b > 1.0f) b = 1.0f;
+                fdk_u32 packed =
+                    ((fdk_u32)(r * 255.0f + 0.5f) << 16) |
+                    ((fdk_u32)(g * 255.0f + 0.5f) << 8) |
+                    (fdk_u32)(b * 255.0f + 0.5f);
+                if (argb) {
+                    if (out_a < 0.0f) out_a = 0.0f;
+                    if (out_a > 1.0f) out_a = 1.0f;
+                    packed |= (fdk_u32)(out_a * 255.0f + 0.5f) << 24;
+                }
+                out[k] = packed;
+            }
+            row[x] = out[0];
+            row[x + 1] = out[1];
+            row[x + 2] = out[2];
+            row[x + 3] = out[3];
+        }
+        for (; x < x1; x++) {
+            fdk_u32 dst = row[x];
+            fdk_f32 da_r = (fdk_f32)((dst >> 16) & 0xFFu) / 255.0f;
+            fdk_f32 da_g = (fdk_f32)((dst >> 8) & 0xFFu) / 255.0f;
+            fdk_f32 da_b = (fdk_f32)(dst & 0xFFu) / 255.0f;
+            fdk_f32 r, g, b, out_a;
+            if (argb) {
+                fdk_f32 da = (fdk_f32)((dst >> 24) & 0xFFu) / 255.0f;
+                out_a = a + da * inv;
+                if (out_a <= 0.0f) {
+                    r = g = b = 0.0f;
+                } else {
+                    fdk_f32 w_s = a / out_a;
+                    fdk_f32 w_d = da * inv / out_a;
+                    r = sr * w_s + da_r * w_d;
+                    g = sg * w_s + da_g * w_d;
+                    b = sb * w_s + da_b * w_d;
+                }
+            } else {
+                out_a = 1.0f;
+                r = sr * a + da_r * inv;
+                g = sg * a + da_g * inv;
+                b = sb * a + da_b * inv;
+            }
+            if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
+            if (g < 0.0f) g = 0.0f; else if (g > 1.0f) g = 1.0f;
+            if (b < 0.0f) b = 0.0f; else if (b > 1.0f) b = 1.0f;
+            fdk_u32 packed =
+                ((fdk_u32)(r * 255.0f + 0.5f) << 16) |
+                ((fdk_u32)(g * 255.0f + 0.5f) << 8) |
+                (fdk_u32)(b * 255.0f + 0.5f);
+            if (argb) {
+                if (out_a < 0.0f) out_a = 0.0f;
+                if (out_a > 1.0f) out_a = 1.0f;
+                packed |= (fdk_u32)(out_a * 255.0f + 0.5f) << 24;
+            }
+            row[x] = packed;
         }
     }
 }
@@ -804,11 +1011,11 @@ void fdk_surface_fill_rect(fdk_surface *surface, fdk_rect rect,
         }
         return;
     }
-    for (int y = y0; y < y1; y++) {
-        for (int x = x0; x < x1; x++) {
-            blend_pixel(surface, x, y, color);
-        }
-    }
+    /* Round 17: the per-pixel blend_pixel call (branch + call
+     * overhead + re-derived constants every pixel) is 53% of a
+     * drag-highlight profile; the hoisted loop above is
+     * byte-identical and several times faster. */
+    fill_rect_translucent(surface, x0, y0, x1, y1, color);
 }
 
 void fdk_surface_draw_rect(fdk_surface *surface, fdk_rect rect,

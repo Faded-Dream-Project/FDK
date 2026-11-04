@@ -56,14 +56,16 @@ print(f"text_rows={rows} {'BLANK!' if rows < 3 else 'ok'}")
 PY
 }
 
-snap() { python3 /home/z/my-project/scripts/xsnap.py "$D" "/tmp/sc-$1.png" >/dev/null 2>&1; }
+snap() {  # the in-tree PPM tool (xsnap.c): -d display, one toplevel
+    /home/z/my-project/scripts/xsnap -d "$D" "/tmp/sc-$1.ppm" >/dev/null 2>&1
+}
 
 identity() {  # $1 = stage: compare current screen vs forced full repaint
     snap "$1-blit"
     /home/z/my-project/scripts/xexpose "$D" >/dev/null 2>&1
     sleep 1.5
     snap "$1-full"
-    python3 - "/tmp/sc-$1-blit.png" "/tmp/sc-$1-full.png" <<'PY'
+    python3 - "/tmp/sc-$1-blit.ppm" "/tmp/sc-$1-full.ppm" <<'PY'
 import sys
 from PIL import Image, ImageChops
 b = Image.open(sys.argv[1]).convert('RGB')
@@ -79,20 +81,20 @@ PY
 }
 
 echo "--- stage 0: baseline"
-snap 0; check 0 /tmp/sc-0.png
+snap 0; check 0 /tmp/sc-0.ppm
 P0=$(grep -c PRESENT-TRACE /tmp/sc-app.log)
 
 echo "--- stage A: AGGRESSIVE down-storm (4s @ 30 Hz)"
 RIG_MODE=scroll RIG_SECONDS=4 RIG_NONAV=1 RIG_RATE_HZ=30 ./build/stress-rig >/dev/null 2>&1
 sleep 2.5
-snap A; check A /tmp/sc-A.png
+snap A; check A /tmp/sc-A.ppm
 PA=$(grep -c PRESENT-TRACE /tmp/sc-app.log); echo "presents: $P0 -> $PA"
 identity A
 
 echo "--- stage B: AGGRESSIVE up-storm (4s @ 30 Hz) — the overlap report"
 RIG_MODE=scroll RIG_SECONDS=4 RIG_NONAV=1 RIG_RATE_HZ=30 RIG_DIR=up ./build/stress-rig >/dev/null 2>&1
 sleep 2.5
-snap B; check B /tmp/sc-B.png
+snap B; check B /tmp/sc-B.ppm
 identity B
 
 echo "--- stage C: jitter (8 x 0.4s alternating)"
@@ -101,7 +103,7 @@ for i in 1 2 3 4; do
     RIG_MODE=scroll RIG_SECONDS=0.4 RIG_NONAV=1 RIG_RATE_HZ=40 RIG_DIR=up ./build/stress-rig >/dev/null 2>&1
 done
 sleep 2.5
-snap C; check C /tmp/sc-C.png
+snap C; check C /tmp/sc-C.ppm
 identity C
 
 echo "--- stage D: unfocused sit (unmap 6s, remap) — the other-window report"
@@ -112,36 +114,37 @@ X11.XOpenDisplay.restype = ctypes.c_void_p
 X11.XOpenDisplay.argtypes = [ctypes.c_char_p]
 d = X11.XOpenDisplay(os.environ["DISPLAY"].encode())
 X11.XDefaultRootWindow.restype = ctypes.c_ulong
-root = X11.XDefaultRootWindow(d)
-kids = (ctypes.c_ulong * 16)()
-n = ctypes.c_uint()
-X11.XQueryTree.restype = ctypes.c_int
 X11.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
                            ctypes.POINTER(ctypes.c_ulong),
                            ctypes.POINTER(ctypes.c_ulong),
                            ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)),
                            ctypes.POINTER(ctypes.c_uint)]
-kidsp = (ctypes.c_ulong * 16)()
-X11.XQueryTree(d, root, None, None, ctypes.byref(ctypes.cast(kidsp, ctypes.POINTER(ctypes.c_ulong))), ctypes.byref(n))
-wins = [kidsp[i] for i in range(min(n.value, 16))]
-for w in wins:
-    X11.XUnmapWindow(d, w)
-X11.XFlush(d)
-time.sleep(6)
-for w in wins:
-    X11.XMapWindow(d, w)
-X11.XFlush(d)
+X11.XQueryTree.restype = ctypes.c_int
+root = X11.XDefaultRootWindow(d)
+r = ctypes.c_ulong(); par = ctypes.c_ulong(); n = ctypes.c_uint()
+kids = ctypes.POINTER(ctypes.c_ulong)()
+if X11.XQueryTree(d, root, ctypes.byref(r), ctypes.byref(par),
+                  ctypes.byref(kids), ctypes.byref(n)) != 0 and n.value > 0:
+    wins = [kids[i] for i in range(n.value)]
+    for w in wins:
+        X11.XUnmapWindow(d, w)
+    X11.XFlush(d)
+    time.sleep(6)
+    for w in wins:
+        X11.XMapWindow(d, w)
+    X11.XFlush(d)
 PY
 sleep 2.5
-snap D; check D /tmp/sc-D.png
+snap D; check D /tmp/sc-D.ppm
 identity D
 
 echo "--- stage E: post-everything nav sanity (the owner's workaround: click home)"
 RIG_MODE=scroll RIG_SECONDS=0 ./build/stress-rig >/dev/null 2>&1
 sleep 1.0
-snap E; check E /tmp/sc-E.png
+snap E; check E /tmp/sc-E.ppm
 
 kill $APID 2>/dev/null; sleep 0.3; kill $XP 2>/dev/null
 rm -f "/tmp/.X11-unix/X${D#:}"
-echo "--- artifacts: /tmp/sc-*.png ; app log /tmp/sc-app.log"
-grep -cE "ERROR|WARN" /tmp/sc-app.log
+echo "--- artifacts: /tmp/sc-*.ppm ; app log /tmp/sc-app.log"
+WARN_N=$(grep -cE "ERROR|WARN" /tmp/sc-app.log || true)
+echo "app warnings: $WARN_N"
