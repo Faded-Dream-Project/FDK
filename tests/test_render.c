@@ -383,6 +383,66 @@ static void test_clip_stack(void) {
 
 /* ---- damage ---- */
 
+/* Round 22 (the owner's present-trace report): overlapping damage
+ * rects must MERGE, not accumulate. The trace showed 3.29M damaged
+ * pixels on a 2.07M-pixel window — 59% double-counting from
+ * overlapping per-primitive rects. Two real costs, not cosmetics:
+ * the X11 present's >=75% whole-image coarsening fires early on
+ * inflated area, and overlapping rects ship the same pixels twice
+ * in separate XPutImage calls. */
+static void test_damage_overlap_merges(void) {
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(200, 100, &s)));
+    assert(fdk_ok(fdk_surface_present(s))); /* consume full damage */
+
+    /* Two identical rects: ONE entry, not two. */
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 10, .y = 10,
+                                          .width = 50, .height = 40 });
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 10, .y = 10,
+                                          .width = 50, .height = 40 });
+    extern fdk_u32 fdk__test_damage_count(const fdk_surface *);
+    assert(fdk__test_damage_count(s) == 1);
+
+    /* Overlapping rect: absorbed into the union, still one entry. */
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 40, .y = 30,
+                                          .width = 60, .height = 50 });
+    assert(fdk__test_damage_count(s) == 1);
+    fdk_rect b;
+    assert(fdk_surface_get_damage_bounds(s, &b));
+    assert(b.x == 10 && b.y == 10 && b.width == 90 && b.height == 70);
+
+    /* Disjoint rect: a second entry. */
+    assert(fdk_ok(fdk_surface_present(s)));
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 10, .y = 10,
+                                          .width = 20, .height = 20 });
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 150, .y = 60,
+                                          .width = 20, .height = 20 });
+    assert(fdk__test_damage_count(s) == 2);
+
+    /* A rect adjacent to an existing one (touching edges): merged
+     * too — adjacency is the degenerate overlap, and a merged rect
+     * is always cheaper than two puts for the same pixel rows. */
+    assert(fdk_ok(fdk_surface_present(s)));
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 10, .y = 10,
+                                          .width = 20, .height = 20 });
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 30, .y = 10,
+                                          .width = 20, .height = 20 });
+    assert(fdk__test_damage_count(s) == 1);
+    assert(fdk_surface_get_damage_bounds(s, &b));
+    assert(b.x == 10 && b.y == 10 && b.width == 40 && b.height == 20);
+
+    /* A contained rect (subset): fully absorbed, count unchanged. */
+    assert(fdk_ok(fdk_surface_present(s)));
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 10, .y = 10,
+                                          .width = 40, .height = 40 });
+    fdk_surface_invalidate(s, (fdk_rect){ .x = 20, .y = 20,
+                                          .width = 10, .height = 10 });
+    assert(fdk__test_damage_count(s) == 1);
+
+    fdk_surface_destroy(s);
+    printf("[ok] damage overlap merges (no double-counted pixels)\n");
+}
+
 static void test_damage_bookkeeping(void) {
     fdk_surface *s = NULL;
     assert(fdk_ok(fdk_surface_create(200, 100, &s)));
@@ -440,10 +500,13 @@ static void test_damage_bookkeeping(void) {
     assert(fdk_surface_get_damage_bounds(s, &b));
     assert(b.width == 1 && b.height == 1);
 
-    /* Damage overflow degrades to full. */
+    /* Damage overflow degrades to full. (Round 22: the rects leave
+     * a 1px gap between them — adjacent rects MERGE now, and the
+     * old touching family collapsed into one rect before the list
+     * could overflow.) */
     assert(fdk_ok(fdk_surface_present(s)));
     for (int i = 0; i < FDK_SURFACE_MAX_DAMAGE + 5; i++) {
-        fdk_surface_invalidate(s, (fdk_rect){ .x = i, .y = 0,
+        fdk_surface_invalidate(s, (fdk_rect){ .x = 2 * i, .y = 0,
                                               .width = 1, .height = 1 });
     }
     assert(fdk_surface_get_damage_bounds(s, &b));
@@ -1260,6 +1323,7 @@ int main(void) {
     test_rounded_rect_fill_and_outline();
     test_clip_stack();
     test_damage_bookkeeping();
+    test_damage_overlap_merges();
     test_blit();
     test_frame_ready_offscreen();
     test_argb_surface_and_blending();

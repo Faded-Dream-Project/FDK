@@ -1,3 +1,49 @@
+# Round 22 — damage-rect overlap merging
+
+## The owner's evidence, re-read
+The present trace showed damaged-area sums EXCEEDING the window
+area (3.29M px on 2.07M — 1.59x). The trace sums per-rect areas
+WITHOUT dedup, and the rect list had no overlap control at all:
+every primitive's bbox appended blindly. Overlapping bboxes =
+double-counted trace area AND double-shipped pixels (two sub-image
+puts covering one region) AND premature whole-image coarsening
+(the >=75% threshold fired on inflated sums).
+
+## The fix (core, src/render/surface.c)
+`fdk__surface_damage_add` merges before appending: an incoming
+rect that overlaps OR TOUCHES an existing entry unions into it in
+place; a compaction pass then removes any neighbor the widened
+rect now contains (a merge can cascade). Bounded: one O(count)
+scan per add, count <= 64. The overflow->full degradation and the
+exact-strip path are untouched.
+
+## Test-first protocol held
+`test_damage_overlap_merges` written RED (identical rects = 2
+entries, failed at the first assert), then the fix, then green.
+One pre-existing test needed its FAMILY updated, not its contract:
+`test_damage_bookkeeping`'s overflow loop used 64 ADJACENT 1px
+rects, which now correctly merge into one — the loop leaves 1px
+gaps now (the overflow contract itself is unchanged and still
+asserted).
+
+## Proof under load (the round-14 stress rig, release build)
+- scroll storm (1000 files, 1000 Hz): 48 presents, ZERO over-area,
+  median 1 rect/present, damage median 0.927 (the full-height
+  scroll strip — genuinely most of the window), 0 full presents.
+- hover storm: 247 presents @ 49.2 fps, damage median 0.110.
+- scrollbar drag storm: 217 presents @ 43.2 fps, damage median
+  0.055, 0 full presents.
+- noisewatch (round 20's regression): 4/4 gates, 150 watch fires,
+  rows stable.
+- core 772 (was 771: +1 new test), X11 229, 4-app smoke clean.
+
+## The owner's next check
+Nothing new to do — this shipped inside libfdk. Any app linking
+the new library gets it. If you re-run your FDK_PRESENT_TRACE
+session, the damaged-area column should never exceed window area
+again, and rect counts per present should collapse to 1-2 for
+widget-typical frames.
+
 # Round 21 — the four-app suite complete
 
 ## What happened

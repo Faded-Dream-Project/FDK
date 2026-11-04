@@ -77,6 +77,59 @@ void fdk__surface_damage_add(fdk_surface *surface, fdk_rect rect) {
         return;
     }
 
+    /* Round 22 (the owner's present-trace report: 3.29M px damaged
+     * on a 2.07M window — 59% double-counting): MERGE the rect into
+     * any existing entry it overlaps or touches, instead of
+     * appending it. Overlapping rects made the present path ship
+     * the same pixels twice (two XPutImage sub-puts covering one
+     * region) and tripped the >=75% whole-image coarsening on
+     * inflated area. Merging keeps the list overlap-free; adjacency
+     * counts as overlap (a merged rect is always <= the two puts
+     * it replaces). The merge re-scans once — a merged rect can
+     * now overlap ANOTHER entry — bounded by the list size (64). */
+    for (int i = 0; i < surface->damage_count; i++) {
+        long long ex0 = surface->damage[i].x;
+        long long ey0 = surface->damage[i].y;
+        long long ex1 = (long long)surface->damage[i].x +
+                        surface->damage[i].width;
+        long long ey1 = (long long)surface->damage[i].y +
+                        surface->damage[i].height;
+        if (x0 <= ex1 && ex0 <= x1 && y0 <= ey1 && ey0 <= y1) {
+            /* union in place; <=/>= keep degenerate empty sides
+             * out (x0 < x1, y0 < y1 are already established)     */
+            if (ex0 > x0) surface->damage[i].x = (fdk_i32)x0;
+            if (ey0 > y0) surface->damage[i].y = (fdk_i32)y0;
+            if (ex1 < x1) ex1 = x1;
+            if (ey1 < y1) ey1 = y1;
+            surface->damage[i].width =
+                (fdk_i32)(ex1 - surface->damage[i].x);
+            surface->damage[i].height =
+                (fdk_i32)(ey1 - surface->damage[i].y);
+            /* the widened rect may now swallow neighbors: one
+             * compaction pass removes any entry it contains      */
+            for (int j = i + 1; j < surface->damage_count; j++) {
+                long long nx0 = surface->damage[j].x;
+                long long ny0 = surface->damage[j].y;
+                long long nx1 = (long long)surface->damage[j].x +
+                                surface->damage[j].width;
+                long long ny1 = (long long)surface->damage[j].y +
+                                surface->damage[j].height;
+                if (nx0 >= surface->damage[i].x &&
+                    ny0 >= surface->damage[i].y &&
+                    nx1 <= ex1 && ny1 <= ey1) {
+                    memmove(&surface->damage[j],
+                            &surface->damage[j + 1],
+                            sizeof(fdk_rect) *
+                                (size_t)(surface->damage_count -
+                                         j - 1));
+                    surface->damage_count--;
+                    j--; /* re-examine the shifted-in entry        */
+                }
+            }
+            return;
+        }
+    }
+
     if (surface->damage_count >= FDK_SURFACE_MAX_DAMAGE) {
         /* Bounded bookkeeping: degrade to "everything changed".
          * Correctness (present must cover every changed pixel) is
@@ -447,6 +500,19 @@ void fdk_surface_invalidate_all(fdk_surface *surface) {
     }
     surface->damage_full = 1;
     surface->damage_count = 0;
+}
+
+/* Round 22 test seam: the damage-list entry count (the overlap-
+ * merge test's assertion point). Not exported through fdk_surface.h
+ * — damage internals stay private; the test declares it extern. */
+fdk_u32 fdk__test_damage_count(const fdk_surface *surface);
+fdk_u32 fdk__test_damage_count(const fdk_surface *surface) {
+    if (surface == NULL || surface->damage_full) {
+        return (surface != NULL && surface->damage_full)
+                   ? FDK_SURFACE_MAX_DAMAGE + 1u
+                   : 0u;
+    }
+    return (fdk_u32)surface->damage_count;
 }
 
 bool fdk_surface_get_damage_bounds(fdk_surface *surface,

@@ -1,3 +1,21 @@
+
+### Fixed (round 22)
+- **Damage-rect overlap merging** (the owner's present-trace report:
+  3.29M damaged pixels on a 2.07M-pixel window — 59% double-counted).
+  `fdk__surface_damage_add` now merges an incoming rect into any
+  existing list entry it overlaps or touches (union in place, plus a
+  compaction pass for neighbors the widened rect swallows) instead
+  of appending it. Two real costs died: overlapping rects shipped
+  the same pixels twice in separate XPutImage sub-puts, and the
+  inflated area tripped the X11 present's >=75% whole-image
+  coarsening early. Regression: `test_damage_overlap_merges`
+  (identical/overlapping/adjacent/contained rect families). Verified
+  under load — the round-14 stress rig's scroll/hover/sbdrag storms:
+  0 over-area presents (was the signature), median 1 damage rect per
+  present, hover 49 fps @ 11% damage, sbdrag 43 fps @ 5.5%, scroll
+  full-height strips unchanged; noisewatch 4/4 gates; core 772,
+  X11 229, 4-app smoke clean.
+
 # Changelog
 
 FDK's public version moves only by a recorded project-owner decision
