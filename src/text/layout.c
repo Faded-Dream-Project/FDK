@@ -304,11 +304,34 @@ fdk_result fdk__break_lines_runs(const fdk_font *font,
         }
     }
 
-    /* Final line: only if visible bytes remain — a trailing pure
-     * space run produces no line. */
+    /* Final line: visible bytes, OR a line left OPEN by a hard
+     * break. Round 24 (the owner's "Enter shows nothing until I
+     * type"): "abc\n" ends with wrap_reset having advanced
+     * line_start past the newline while nonspace_end == line_start
+     * — the empty final line was dropped, the caret (at len, on
+     * that phantom line) painted on the PREVIOUS line, and the
+     * second line only appeared once a character re-broke the
+     * text. A hard break's contract is "always emits its line,
+     * empty or not" — the text's end must honor it too. A trailing
+     * pure space run still produces no line (that rule predates
+     * this and is correct). */
     if (ws.nonspace_end > ws.line_start) {
         if (!wrap_emit(out_lines, max_lines, &count, ws.line_start,
                        ws.nonspace_end, ws.pen_after_nonspace)) {
+            dropped = true;
+        }
+    } else if (count > 0 && ws.line_start <= byte_len &&
+               ws.line_start >= 1 &&
+               (utf8[ws.line_start - 1] == 0x0Au ||
+                utf8[ws.line_start - 1] == 0x0Du)) {
+        /* The last hard break left an empty line open at the end
+         * of the text: after a trailing '
+' the walk resets to
+         * line_start == byte_len (NOT <). The unit test caught
+         * the first draft of this guard; the app's "Hello \n"
+         * (a space before the newline) caught the second. */
+        if (!wrap_emit(out_lines, max_lines, &count, ws.line_start,
+                       ws.line_start, 0.0)) {
             dropped = true;
         }
     }

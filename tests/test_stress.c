@@ -176,9 +176,13 @@ static void stress_leg_document_20k(void) {
     fdk_result r = fdk_font_break_lines_utf8(g_font, text, text_len,
                                              10000, NULL, 0, &n_lines,
                                              &truncated);
-    /* max_width 10000px: no soft wrapping, one line per hard break. */
+    /* max_width 10000px: no soft wrapping, one line per hard break.
+     * Round 24: a trailing hard break opens ONE more (empty) line
+     * — "a\n" is two lines, the second empty, exactly like the
+     * editors' caret-after-Enter. The stress doc ends in '\n', so
+     * the count is N_LINES content lines + the empty tail. */
     assert(fdk_ok(r));
-    assert(n_lines == N_LINES);
+    assert(n_lines == N_LINES + 1);
     assert(!truncated);
 
     /* Second pass, materialized: assert the depth-exactness. */
@@ -187,7 +191,10 @@ static void stress_leg_document_20k(void) {
     r = fdk_font_break_lines_utf8(g_font, text, text_len, 10000, lines,
                                   n_lines, &n_lines, &truncated);
     assert(fdk_ok(r));
-    assert(n_lines == N_LINES);
+    assert(n_lines == N_LINES + 1);
+    /* the empty tail: zero bytes, zero advance, at the text end */
+    assert(lines[N_LINES].byte_len == 0);
+    assert(lines[N_LINES].byte_offset == text_len);
 
     fdk_i32 w0 = lines[0].advance_width;
     fdk_i32 w_first_half = lines[N_LINES / 2].advance_width;
@@ -232,12 +239,11 @@ static void stress_leg_document_20k(void) {
     memcpy(cap_text, text, cap_lines * unit_len);
     cap_text[cap_lines * unit_len] = '\0';
     fdk_textview_set_text(tv, cap_text);
-    /* Two honest counts over the same bytes: line_count follows
-     * break_lines (a TRAILING \n opens no extra empty line — N
-     * newlines at the end of the text are N lines), while
-     * paragraph_count is the editor model (N newlines = N+1
-     * paragraphs, the empty tail counts). Both asserted. */
-    assert(fdk_textview_line_count(tv) == cap_lines);
+    /* Two honest counts over the same bytes — BOTH now count the
+     * empty tail (round 24: a trailing \n opens one empty line,
+     * where the caret lands after Enter; the break engine and the
+     * paragraph model agree). */
+    assert(fdk_textview_line_count(tv) == cap_lines + 1);
     assert(fdk_textview_paragraph_count(tv) == cap_lines + 1);
     fdk_widget_destroy(root);
     free(cap_text);

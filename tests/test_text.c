@@ -638,6 +638,32 @@ static void test_break_lines(void) {
                                                  l, 4, &n, NULL)));
         assert(n == 2);
         assert(l[0].byte_len == 1 && l[1].byte_offset == 3);
+
+        /* Round 24 (the owner's Enter report): a TRAILING hard
+         * break leaves an empty final line open — "abc\n" is TWO
+         * lines (the second empty, where the caret sits). The
+         * engine used to drop it and the caret painted on line 1
+         * until the next keystroke re-broke the text. */
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "abc\n", 4, 100,
+                                                 l, 4, &n, NULL)));
+        assert(n == 2);
+        assert(l[0].byte_len == 3 && l[1].byte_len == 0 &&
+               l[1].byte_offset == 4);
+
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "a\n\n", 3, 100,
+                                                 l, 4, &n, NULL)));
+        assert(n == 3);
+        assert(l[1].byte_len == 0 && l[2].byte_len == 0 &&
+               l[2].byte_offset == 3);
+
+        /* The pre-existing trailing-SPACE rule must not regress:
+         * no hard break, just spaces -> still one line. */
+        n = 0;
+        assert(fdk_ok(fdk_font_break_lines_utf8(f, "word   ", 7, 100,
+                                                 l, 4, &n, NULL)));
+        assert(n == 1);
     }
 
     /* 3. Long word: mid-word breaks, every glyph preserved, lines

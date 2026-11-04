@@ -1,3 +1,52 @@
+# Round 24 — the owner's follow-up: space/Enter invisible
+
+## The report
+Space doesn't move the caret; Enter doesn't show the second line
+("1"/"2") until typing resumes. The buffer IS updated server-side
+(caret state advanced) — only the paint lagged.
+
+## Three stacked bugs (all core textview/text engine)
+1. BREAK ENGINE: the final-line emit required visible bytes, so
+   the empty line a trailing '\n' opens was dropped. "Hello\n"
+   = 1 line; the caret (offset 7) mapped to line 1. Fixed in
+   fdk__break_lines_runs (src/text/layout.c): emit the empty
+   final line when the last thing before the text's end was a
+   hard break. CAREFUL: after a trailing break line_start ==
+   byte_len (not <) — the first guard draft was wrong and the
+   unit test + the app's "Hello \n" caught it in sequence.
+2. tv_line_width_to clamped the caret offset to the line's
+   trimmed byte_len (src/widget/textview.c): a caret after a
+   trailing space painted at the last glyph. Now bounded by the
+   NEXT line's start (or the caret itself on the last line).
+3. doc_w (the page's natural width) used trimmed advances: the
+   caret column after a trailing space fell outside the page's
+   bounds clip and the fill was discarded. Now includes the
+   trimmed tail + one pad.
+
+## The rig lesson (IMPORTANT for future rounds)
+- scripts/edit-caret-repro.sh + scripts/key_rig.c: paced keys,
+  per-key screenshots, blink pairs. The FIRST key_rig re-clicked
+  the window before every key — a pointer-down in the textview
+  that YANKED the caret to offset 5 between keystrokes and made
+  the next key DELETE the space. key_rig now clicks only with
+  KEY_RIG_CLICK=1 (once, at rig start).
+- THE STALE-LINK TRAP: `make -C test-apps` did NOT relink when
+  only ../build/libfdk.a changed (the .d dep file pointed at a
+  removed binary; also grep -c returning 0 breaks && chains).
+  Symptom: "fixed" code showing old behavior. RULE: after any
+  core change, `rm -f test-apps/build/<app> test-apps/build/<app>.d`
+  before make, and verify with `strings <binary> | grep <new
+  marker>` when in doubt.
+- pkg-config: use
+  /tmp/my-project/local-x11/lib/x86_64-linux-gnu/pkgconfig (the
+  env.sh usr/lib path only has x11.pc; xrandr.pc lives in lib/...).
+
+## Suites
+core 772 (incl. 3 new break-engine tests + updated 20k stress
+expectations: the empty tail now counts, matching the paragraph
+model), X11 229, 4-app smoke clean, notes renders. Golden shots:
+download/fdk-edit-{space-caret,enter,line2}-FIXED.png.
+
 # Round 23 — the owner's fdk-edit report: three stacked bugs
 
 ## The report
