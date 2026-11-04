@@ -67,6 +67,43 @@ bool ta_open(ta_app *app, const char *display_name, fdk_i32 w,
     int ui_px = fdk_ui_font_px();
     app->font_ui = fdk_font_load_system_default(ui_px > 0 ? ui_px : 15);
 
+    /* Round 23 (the owner's "I can't see what I type"): font_mono
+     * was NEVER assigned — fdk-edit's textview got font==NULL,
+     * tv_relayout returned at its first guard, and typed text never
+     * laid out (keys arrived, the buffer grew, the editor stayed
+     * blank). Probe the common monospace families through the
+     * enumeration API, load the first hit, fall back to the UI
+     * font (borrowed — the shared-pointer guard in ta_close
+     * handles the double-free).                                 */
+    static const char *const mono_families[] = {
+        "DejaVu Sans Mono", "Liberation Mono", "Nimbus Mono PS",
+        "Noto Sans Mono", "Sarasa Mono SC", "Courier New", "monospace",
+    };
+    fdk_font_info *infos = NULL;
+    size_t n_infos = 0;
+    if (fdk_ok(fdk_font_enumerate(&infos, &n_infos))) {
+        for (size_t f = 0;
+             app->font_mono == NULL &&
+             f < sizeof mono_families / sizeof *mono_families;
+             f++) {
+            for (size_t i = 0; i < n_infos; i++) {
+                if (strcmp(infos[i].family, mono_families[f]) == 0) {
+                    app->font_mono =
+                        fdk_font_load(infos[i].path,
+                                      ui_px > 0 ? ui_px : 15);
+                    break;
+                }
+            }
+        }
+        fdk_font_info_list_free(infos, n_infos);
+    }
+    if (app->font_mono == NULL) {
+        fdk_log(FDK_LOG_WARN, "core",
+                "ta_open: no monospace face found; editors fall "
+                "back to the UI font");
+        app->font_mono = app->font_ui; /* borrowed pointer */
+    }
+
     /* root box: [menubar host][content][statusbar] */
     fdk_widget *frame = NULL;
     if (!fdk_ok(fdk_box_create(app->root, FDK_VERTICAL, &frame))) {
@@ -150,14 +187,19 @@ void ta_close(ta_app *app) {
         app->window = NULL;
     }
     ta_icon_buttons_free(); /* our tracked paint payloads           */
+    /* font_mono may BORROW font_ui (the no-monospace fallback in
+     * ta_open) — capture that BEFORE font_ui is destroyed+NULLed,
+     * or the borrowed pointer would be freed twice. */
+    bool mono_borrowed = (app->font_mono == app->font_ui &&
+                          app->font_mono != NULL);
     if (app->font_ui != NULL) {
         fdk_font_destroy(app->font_ui);
         app->font_ui = NULL;
     }
-    if (app->font_mono != NULL) {
+    if (!mono_borrowed && app->font_mono != NULL) {
         fdk_font_destroy(app->font_mono);
-        app->font_mono = NULL;
     }
+    app->font_mono = NULL;
     if (app->prefs != NULL) {
         fdk_prefs_save(app->prefs);
         fdk_prefs_destroy(app->prefs);

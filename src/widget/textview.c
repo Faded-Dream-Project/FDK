@@ -52,6 +52,7 @@
 
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -1502,8 +1503,25 @@ static const fdk_widget_class fdk_tv_page_class_def = {
  * intersects the clip. Content-space math (page-relative); the
  * scrollview already translated the page. */
 static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
-                          fdk_rect bounds, fdk_rect clip) {
-    (void)bounds;
+                          fdk_rect bounds, fdk_rect clip_in) {
+    /* Round 23 (the owner's blank fdk-edit editor): `clip` arrives
+     * in WINDOW coordinates (the surface clip stack's space), but
+     * every line/gutter computation below is CONTENT-SPACE (the
+     * comment said so; the math didn't). A page whose window
+     * origin sat at y=122 computed first=(122-8)/20=5 with
+     * line_count=1 — the loop never ran, no line ever painted, on
+     * ANY textview not at the window's top edge. Translate once,
+     * here, at the seam. */
+    fdk_rect clip = { clip_in.x - bounds.x, clip_in.y - bounds.y,
+                      clip_in.width, clip_in.height };
+    /* Round 23: the page's draws are content-local, but the paint
+     * pipeline (paint_rec -> the surface clip stack) works in
+     * window coordinates — a draw at (8, 8) landed at the window's
+     * top-left, outside the page's own bounds clip, and vanished.
+     * Every geometry below stays content-local; the ORIGIN is
+     * added at the actual draw calls (ox/oy). */
+    const fdk_i32 ox = bounds.x;
+    const fdk_i32 oy = bounds.y;
     /* Owner: page -> scrollview -> textview. */
     fdk_widget *scroll = w->parent;
     fdk_widget *tv_w = (scroll != NULL) ? scroll->parent : NULL;
@@ -1535,7 +1553,7 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
      * line; a hook that wants pure paragraphs walks the same table).
      * The band is the full clip height — sticky like a real gutter. */
     if (tv->gutter_fn != NULL && tv->gutter_w > 0) {
-        fdk_rect band = {0, clip.y, tv->gutter_w, clip.height};
+        fdk_rect band = {ox, oy + clip.y, tv->gutter_w, clip.height};
         fdk_i32 g_first = (clip.y - tv->pad) /
                           (tv->line_h > 0 ? tv->line_h : 1);
         if (g_first < 0) {
@@ -1609,7 +1627,8 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
                                       * hair past the advance) */
                         }
                         if (x1 > x0 && tv->line_h > 0) {
-                            fdk_rect r = {x0, tv->pad + i * tv->line_h,
+                            fdk_rect r = {ox + x0,
+                                          oy + tv->pad + i * tv->line_h,
                                           x1 - x0, tv->line_h};
                             fdk_surface_fill_rect(surface, r,
                                                   fdk__pal_selection());
@@ -1619,7 +1638,8 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
             } else if (sel_lo < lend && sel_hi > lstart) {
                 /* An empty line inside the selection (a lone hard
                  * break): the classic empty full-row highlight. */
-                fdk_rect r = {tv->pad, tv->pad + i * tv->line_h,
+                fdk_rect r = {ox + tv->pad,
+                              oy + tv->pad + i * tv->line_h,
                               line->advance_width, tv->line_h};
                 if (r.width > 0) {
                     fdk_surface_fill_rect(surface, r,
@@ -1637,7 +1657,7 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
             (void)fdk_surface_draw_attrs_utf8(
                 surface, tv->font,
                 tv->text + line->byte_offset, line->byte_len, NULL,
-                0, attrs, tv_text_x(tv), baseline, text_col);
+                0, attrs, ox + tv_text_x(tv), oy + baseline, text_col);
         }
 
         /* The caret: on the caret's line, at its x, when blinking
@@ -1646,7 +1666,7 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
             tv_line_of_offset(tv, tv->caret) == (size_t)i) {
             fdk_i32 cx = tv_text_x(tv) +
                          tv_line_width_to(tv, (size_t)i, tv->caret);
-            fdk_rect c = {cx, tv->pad + i * tv->line_h, 1,
+            fdk_rect c = {ox + cx, oy + tv->pad + i * tv->line_h, 1,
                           tv->line_h};
             fdk_surface_fill_rect(surface, c, text_col);
             /* The preedit: inline AFTER the caret, underlined (the
@@ -1656,9 +1676,11 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
                 fdk__text_extent(tv->font, tv->preedit, &pw, &ph);
                 (void)fdk_surface_draw_utf8(
                     surface, tv->font, tv->preedit,
-                    strlen(tv->preedit), cx + 1, baseline, text_col);
-                fdk_rect u = {cx + 1,
-                              tv->pad + i * tv->line_h + tv->line_h - 2,
+                    strlen(tv->preedit), ox + cx + 1, oy + baseline,
+                    text_col);
+                fdk_rect u = {ox + cx + 1,
+                              oy + tv->pad + i * tv->line_h +
+                                  tv->line_h - 2,
                               pw, 1};
                 fdk_surface_fill_rect(surface, u, fdk__pal_accent());
             }

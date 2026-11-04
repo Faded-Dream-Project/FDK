@@ -37,11 +37,13 @@ void ed_doc_retitle(ed_doc *d) {
         ta_copy(label, sizeof label, base_name(d->path));
     }
     if (d->modified) {
-        /* the mark adds 3 bytes ("● " is 2 + NUL) over label — the
-         * round-21 build caught marked[128] one strnlen short under
-         * -Wformat-truncation; sized from label, never truncated */
+        /* Round 23: '*' not '●' — U+25CF has no script bucket in
+         * the shaping fallback and drew .notdef on the system font
+         * (the owner's log). An ASCII asterisk rides the base font
+         * everywhere and reads fine at tab size; a drawn dot can
+         * come back when the shaping buckets grow U+25CF.       */
         char marked[128 + 4];
-        snprintf(marked, sizeof marked, "● %s", label);
+        snprintf(marked, sizeof marked, "* %s", label);
         ta_copy(d->display, sizeof d->display, marked);
     } else {
         ta_copy(d->display, sizeof d->display, label);
@@ -150,12 +152,15 @@ static void ed_doc_create(const char *path) {
         d->text_len = 0;
     }
 
-    /* the page: a plain box parent for the textview (the notebook
-     * adopts it) */
-    (void)fdk_widget_create(eapp.notebook, NULL,
-                            (fdk_rect){0, 0, 100, 100}, &d->page);
+    /* the page: a VERTICAL BOX (round 23 — a plain widget never
+     * resizes its children, so the textview stayed at its 100x100
+     * creation bounds inside it; the owner saw a cut-off box that
+     * typing disappeared into). The box fills the notebook's page
+     * area and the textview fills the box. */
+    (void)fdk_box_create(eapp.notebook, FDK_VERTICAL, &d->page);
+    fdk_widget_set_expand(d->page, true, true);
     (void)fdk_textview_create(d->page, eapp.base.font_mono, &d->view);
-    fdk_widget_set_bounds(d->view, (fdk_rect){0, 0, 100, 100});
+    fdk_widget_set_expand(d->view, true, true);
     fdk_textview_set_text(d->view, d->text);
     fdk_textview_set_wrap(
         d->view, eapp.wrap ? FDK_TEXTVIEW_WRAP_WORD
@@ -297,3 +302,4 @@ void ed_docs_shutdown(void) {
     }
     eapp.doc_count = 0;
 }
+

@@ -405,10 +405,18 @@ void nt_tray_shutdown(void) {
 void nt_ui_build(void) {
     ta_app *a = &napp.base;
 
+    /* Round 23 (the fdk-edit lesson, applied here): the content
+     * box is VERTICAL — two plain children stacked top-to-bottom
+     * pushed the editor pane below the window. A HORIZONTAL box
+     * lays [tree | pane] side by side and expands to fill.     */
+    fdk_widget *row = NULL;
+    (void)fdk_box_create(a->content, FDK_HORIZONTAL, &row);
+    fdk_widget_set_expand(row, true, true);
+
     /* the left: the notebook tree */
     fdk_widget *tree_host = NULL;
-    (void)fdk_widget_create(a->content, NULL,
-                            (fdk_rect){0, 0, 260, 400}, &tree_host);
+    (void)fdk_box_create(row, FDK_VERTICAL, &tree_host);
+    fdk_widget_set_expand(tree_host, false, true);
     (void)fdk_tree_create(tree_host, a->font_ui, &napp.tree);
     fdk_widget_set_expand(napp.tree, false, true);
     fdk_widget_set_accessible_name(napp.tree,
@@ -418,22 +426,21 @@ void nt_ui_build(void) {
 
     /* the right: title entry + body textview + focus label */
     fdk_widget *pane = NULL;
-    (void)fdk_widget_create(a->content, NULL,
-                            (fdk_rect){0, 0, 640, 400}, &pane);
+    (void)fdk_box_create(row, FDK_VERTICAL, &pane);
+    fdk_widget_set_expand(pane, true, true);
     fdk_widget *te = NULL;
     (void)fdk_entry_create(pane, a->font_ui, "", &te);
     napp.title_entry = te;
-    fdk_widget_set_bounds(te, (fdk_rect){8, 8, 500, 30});
+    fdk_widget_set_expand(te, true, false);
     fdk_entry_set_placeholder(te, ta_("Note title"));
     fdk_entry_set_on_changed(te, on_title_changed, NULL);
     fdk_widget *fl = NULL;
     (void)fdk_label_create(pane, a->font_ui, ta_("Focus"), &fl);
     napp.focus_label = fl;
-    fdk_widget_set_bounds(fl, (fdk_rect){520, 12, 110, 24});
     fdk_widget *bv = NULL;
     (void)fdk_textview_create(pane, a->font_ui, &bv);
     napp.body_view = bv;
-    fdk_widget_set_bounds(bv, (fdk_rect){8, 46, 620, 330});
+    fdk_widget_set_expand(bv, true, true);
     fdk_textview_set_on_changed(bv, on_body_changed, NULL);
     fdk_widget_set_accessible_name(bv, ta_("Note body"));
 

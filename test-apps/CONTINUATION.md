@@ -1,3 +1,50 @@
+# Round 23 — the owner's fdk-edit report: three stacked bugs
+
+## The report
+"Theres a box is cut off where i could type and it doesnt extend
+to the edge of the window" + square toolbar buttons + the U+25CF
+warning in the log. The present trace itself was GOOD news (the
+round-22 merge fix held: no over-area lines, rect counts 1-4).
+
+## The three bugs (all real, all fixed)
+1. LAYOUT: the doc page was a plain widget holding a textview at
+   its 100x100 creation bounds; the notebook never expanded. Fix:
+   page = vertical box + set_expand, notebook set_expand,
+   textview expand. (doc.c / ui.c)
+2. FONT: eapp.base.font_mono was NEVER assigned by ta_open —
+   font==NULL, tv_relayout's first guard, zero lines computed.
+   Fix: ta_open probes fdk_font_enumerate for the mono families.
+   (common/app.c — affects every app's font_mono user)
+3. PAINT (the deep one, found by instrumenting the paint path):
+   tv_page_paint drew content-local (x=pad+gutter, y=pad+i*line_h)
+   into a window-coordinate pipeline. The paint_rec clip stack
+   clips to the page's WINDOW bounds; content-local ink at (8,8)
+   is outside (0,122)+ — invisible. EVERY textview not at the
+   window's top-left rendered nothing (fdk-notes' body too).
+   Fix: ox/oy = bounds.x/y added at every draw call; the damage
+   clip translated to page-local at entry. Verified by XTEST
+   typing + screenshot pixel-diff: text rows 132-146 appear.
+
+## Also fixed while here
+- fdk-notes' tree/editor stacked vertically (editor below the
+  fold): horizontal row box + expanded pane children.
+- 7 NULL-icon toolbar buttons (the "squares"): real names.
+- U+25CF tab marker -> '*'.
+
+## The verification rig (reusable)
+- scripts/edit-repro.sh (sandbox): Xvfb + miniwm + xsnap + the
+  XTEST type_rig; screenshots boot/typed; pixel-diff verdicts.
+- scripts/notes-repro.sh: the notes control.
+- /home/z/my-project/work/FDK/scripts/type_rig.c: fake-keys.
+- NOTE: pkg-config needs
+  PKG_CONFIG_PATH=/tmp/my-project/local-x11/lib/x86_64-linux-gnu/pkgconfig
+  (the env.sh path points at usr/lib which only has x11.pc —
+  xrandr.pc lives in lib/x86_64-linux-gnu/pkgconfig).
+
+## Suites
+core 772, X11 229, 4-app smoke clean. Proof screenshots in
+download/: fdk-edit-typed-FIXED.png, fdk-notes-FIXED.png.
+
 # Round 22 — damage-rect overlap merging
 
 ## The owner's evidence, re-read

@@ -277,6 +277,12 @@ void ed_ui_build(void) {
 
     /* the toolbar */
     (void)fdk_toolbar_create(a->content, a->font_ui, &eapp.toolbar);
+    /* Round 23 (the owner's report): every button gets a REAL icon
+     * name — the NULLs drew the plain FILE-glyph floor (the
+     * "square buttons"). The names are the freedesktop stems the
+     * alias table maps to themed SVGs (document-save, edit-undo,
+     * edit-redo, system-search, preferences-system) or the
+     * wrap/replace stand-ins from the same vocabulary.           */
     const ta_icon_button specs[] = {
         {"document-new", FDK_ROW_ICON_FILE, "New", "Ctrl+N", false,
          act_new, NULL},
@@ -284,19 +290,19 @@ void ed_ui_build(void) {
          act_open, NULL},
         {"document-save", FDK_ROW_ICON_FILE, "Save", "Ctrl+S", false,
          act_save, NULL},
-        {NULL, FDK_ROW_ICON_FILE, "Save As", "Ctrl+Shift+S", false,
+        {"save", FDK_ROW_ICON_FILE, "Save As", "Ctrl+Shift+S", false,
          act_save_as, NULL},
-        {NULL, FDK_ROW_ICON_FILE, "Undo", "Ctrl+Z", false, act_undo,
+        {"undo", FDK_ROW_ICON_FILE, "Undo", "Ctrl+Z", false, act_undo,
          NULL},
-        {NULL, FDK_ROW_ICON_FILE, "Redo", "Ctrl+Shift+Z", false,
+        {"redo", FDK_ROW_ICON_FILE, "Redo", "Ctrl+Shift+Z", false,
          act_redo, NULL},
-        {NULL, FDK_ROW_ICON_FILE, "Find", "Ctrl+F", false, act_find,
+        {"search", FDK_ROW_ICON_FILE, "Find", "Ctrl+F", false, act_find,
          NULL},
-        {NULL, FDK_ROW_ICON_FILE, "Replace", "Ctrl+H", false,
+        {"doc", FDK_ROW_ICON_FILE, "Replace", "Ctrl+H", false,
          act_replace, NULL},
-        {NULL, FDK_ROW_ICON_FILE, "Word wrap", NULL, true, act_wrap,
+        {"link", FDK_ROW_ICON_FILE, "Word wrap", NULL, true, act_wrap,
          NULL},
-        {NULL, FDK_ROW_ICON_FILE, "Preferences", "Ctrl+,", false,
+        {"prefs", FDK_ROW_ICON_FILE, "Preferences", "Ctrl+,", false,
          act_prefs, NULL},
     };
     for (size_t i = 0; i < sizeof specs / sizeof *specs; i++) {
@@ -333,9 +339,11 @@ void ed_ui_build(void) {
     fdk_button_set_on_activate(ra, on_replace_all, NULL);
     fdk_widget_set_visible(eapp.findbar, false);
 
-    /* the notebook */
+    /* the notebook — expand, or it keeps its initial size and the
+     * editor page stays a 100x100 island (the owner's cut-off box) */
     (void)fdk_notebook_create(a->content, a->font_ui,
                               &eapp.notebook);
+    fdk_widget_set_expand(eapp.notebook, true, true);
     fdk_notebook_set_on_switch(eapp.notebook, on_switch, NULL);
 
     /* drag-file-to-open: the whole content is the target */
