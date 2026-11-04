@@ -15,6 +15,51 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-05 (round 18: the release-lane round)
+
+### Performance — the XRGB table pass (round 17's follow-through)
+
+- **fill_rect_translucent: per-fill tables + uniform runs.** The
+  owner's release-build profile (round 17 in place, ASan gone)
+  showed the fixed cost correctly concentrated: 52.4% in
+  fill_rect_translucent itself — the blend work, no longer the
+  per-pixel overhead. Window surfaces are XRGB8888 on every
+  backend, and for XRGB the blended byte depends on the
+  destination only through each channel's own 0..255 value — so
+  the fill now memoizes the exact float expressions into three
+  256-entry tables ONCE PER FILL (bit-exact by construction: the
+  same ops, same order, same rounding, evaluated 256 times
+  instead of per pixel), and detects runs of equal destination
+  words, storing one constant output word across the run. Measured
+  on the micro-benchmark: 22x on uniform backgrounds (the row
+  highlight over the plain list background), 12x on the anti-run
+  worst case (every pixel differing); exactness sweep still 0
+  pixels differ on both formats. The ARGB path (offscreen icon
+  surfaces) keeps the round-17 hoisted form — its output depends
+  on the destination alpha, which has no per-channel table.
+- **The owner's build friction, fixed.** Round 17's profiling
+  instructions referenced a test-apps release target that never
+  existed (the apps Makefile built only the ASan debug set; the
+  owner's `make release` inside test-apps failed with "no rule",
+  and the run landed on a release LIB linked against a DEBUG
+  app). test-apps now has a real `release` target (-O2, NDEBUG,
+  no sanitizers, into build-rel/) and the root `make release`
+  builds the apps too, so `make release` alone produces the
+  profiling binaries. Verified: zero ASan symbols in the output.
+- **-Wformat-truncation hygiene (the owner's gcc is newer than
+  the sandbox's).** discover.c's three snprintf path builders
+  (the stem pass, the two directory listings) now check the
+  return value — a name that cannot fit the buffer is skipped,
+  not truncated; fdk-edit's tab label assembles through ta_copy
+  (the pattern ta_buf.h prescribes for path-derived strings)
+  instead of an unbounded snprintf into a 160-byte stack buffer.
+  All compile clean at -O2 -Werror.
+- **Repo hygiene:** the 6MB `test-apps/core` core-dump that was
+  committed by mistake (it is even in .gitignore) is untracked.
+- **Verification**: core 763, X11 229, the scroll visual rig 4/4
+  byte-identical with zero warnings, and the release lane builds
+  end-to-end with zero warnings under the project's -Werror set.
+
 ## [Unreleased-candidate features] — 2026-11-04 (round 17: the drag-highlight profile)
 
 ### Performance — the 53% blend_pixel

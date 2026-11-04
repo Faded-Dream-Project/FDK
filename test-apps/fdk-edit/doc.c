@@ -24,15 +24,25 @@ void ed_doc_retitle(ed_doc *d) {
     if (d == NULL) {
         return;
     }
-    char label[160];
+    /* The label assembles through ta_copy twice (mark + final), the
+     * pattern ta_buf.h prescribes for path-derived strings: the
+     * snprintf GCC couldn't bound sat next to a fixed 160-byte sink
+     * and tripped -Wformat-truncation on the release -O2 build
+     * (round 18). display[128] is the real cap; ta_copy marks
+     * truncation rather than guessing at it. */
+    char label[128];
     if (d->path[0] == '\0') {
-        snprintf(label, sizeof label, "%s%s",
-                 d->modified ? "● " : "", ta_("Untitled"));
+        ta_copy(label, sizeof label, ta_("Untitled"));
     } else {
-        snprintf(label, sizeof label, "%s%s",
-                 d->modified ? "● " : "", base_name(d->path));
+        ta_copy(label, sizeof label, base_name(d->path));
     }
-    ta_copy(d->display, sizeof d->display, label);
+    if (d->modified) {
+        char marked[128];
+        snprintf(marked, sizeof marked, "● %s", label);
+        ta_copy(d->display, sizeof d->display, marked);
+    } else {
+        ta_copy(d->display, sizeof d->display, label);
+    }
     /* find the doc's page index (pages map 1:1 to docs in order) */
     for (size_t i = 0; i < eapp.doc_count; i++) {
         if (&eapp.docs[i] == d && eapp.notebook != NULL) {

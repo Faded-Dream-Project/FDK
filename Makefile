@@ -418,6 +418,7 @@ all: static shared tools
 # into later debug builds (and vice versa).
 release:
 	$(MAKE) FDK_CONFIG=release all
+	$(MAKE) -C test-apps release
 
 static: $(STATIC_LIB)
 shared: $(SHARED_LIB)
