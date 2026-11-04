@@ -763,7 +763,8 @@ void fdk__r17_bench(void) {
         fdk_surface_destroy(s1);
         fdk_surface_destroy(s2);
     }
-    /* Speed: 400x400 translucent fill x 2000, XRGB */
+    /* Speed 1: uniform-background fill (the row-highlight shape:
+     * one constant destination under the whole rect), XRGB. */
     fdk_surface_fill(a, base);
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -781,8 +782,40 @@ void fdk__r17_bench(void) {
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double slow = (t1.tv_sec - t0.tv_sec) * 1e3 +
                   (t1.tv_nsec - t0.tv_nsec) / 1e6;
-    printf("BENCH 400x400x2000: old=%.1fms new=%.1fms speedup=%.2fx\n",
-           slow, fast, slow / fast);
+    printf("BENCH uniform 400x400x2000: old=%.1fms new=%.1fms "
+           "speedup=%.2fx\n", slow, fast, slow / fast);
+    /* Speed 2: mixed destination (the anti-run worst case: every
+     * pixel differs — the run detector collapses nothing). */
+    for (int i = 0; i < 400; i++) {
+        for (int j = 0; j < 400; j++) {
+            fdk_u32 *px = a->fb.pixels +
+                          (size_t)i * (size_t)a->fb.stride + j;
+            *px = (fdk_u32)((i * 7 + j * 13) & 0xFFFFFF);
+        }
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int i = 0; i < 2000; i++) {
+        fill_rect_translucent(a, 0, 0, 400, 400, over);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double fast2 = (t1.tv_sec - t0.tv_sec) * 1e3 +
+                   (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    for (int i = 0; i < 400; i++) {
+        for (int j = 0; j < 400; j++) {
+            fdk_u32 *px = a->fb.pixels +
+                          (size_t)i * (size_t)a->fb.stride + j;
+            *px = (fdk_u32)((i * 7 + j * 13) & 0xFFFFFF);
+        }
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int i = 0; i < 2000; i++) {
+        ref_fill(a, (fdk_rect){0, 0, 400, 400}, over);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double slow2 = (t1.tv_sec - t0.tv_sec) * 1e3 +
+                   (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    printf("BENCH mixed  400x400x2000: old=%.1fms new=%.1fms "
+           "speedup=%.2fx\n", slow2, fast2, slow2 / fast2);
     fdk_surface_destroy(a);
     fdk_surface_destroy(b);
 }
@@ -868,6 +901,84 @@ static void fill_rect_translucent(fdk_surface *surface, int x0, int y0,
     int argb = surface->format == FDK_SURFACE_FORMAT_ARGB8888;
     fdk_f32 inv = 1.0f - a;
 
+    /* Round 18, the XRGB table pass. Window surfaces are XRGB
+     * everywhere (fdk_window_get_surface), so THIS is the drag-
+     * highlight path on real screens. Two structural wins, both
+     * BIT-EXACT because they only MOVE where the same float
+     * expressions are evaluated:
+     *
+     *  1. Per-fill tables: for XRGB the blended byte depends on
+     *     the destination only through each channel's own 0..255
+     *     value, so out = T_c[dst_c] where T_c[c] is EXACTLY the
+     *     old expression for destination channel value c — the
+     *     same float ops, same order, same rounding, evaluated
+     *     256 times per fill instead of once per pixel. The
+     *     per-pixel work collapses to three table loads, three
+     *     shifts, and two ORs — no float at all.
+     *  2. Uniform runs: a row over a constant destination is one
+     *     constant output word — the fill becomes an unrolled
+     *     store loop (the opaque path's shape). Selection over
+     *     the plain list background hits this for nearly every
+     *     pixel of every row.
+     *
+     * The 4-wide ARGB unroll below is unchanged: alpha-weighted
+     * blending has no per-channel table (out depends on the
+     * DESTINATION ALPHA too), so it keeps the hoisted-float form. */
+    if (!argb) {
+        fdk_u32 tr[256], tg[256], tb[256];
+        for (int c = 0; c < 256; c++) {
+            fdk_f32 dc = (fdk_f32)c / 255.0f;
+            fdk_f32 r = sr * a + dc * inv;
+            fdk_f32 g = sg * a + dc * inv;
+            fdk_f32 b = sb * a + dc * inv;
+            if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
+            if (g < 0.0f) g = 0.0f; else if (g > 1.0f) g = 1.0f;
+            if (b < 0.0f) b = 0.0f; else if (b > 1.0f) b = 1.0f;
+            tr[c] = (fdk_u32)(r * 255.0f + 0.5f) << 16;
+            tg[c] = (fdk_u32)(g * 255.0f + 0.5f) << 8;
+            tb[c] = (fdk_u32)(b * 255.0f + 0.5f);
+        }
+        for (int y = y0; y < y1; y++) {
+            fdk_u32 *row = surface->fb.pixels +
+                           (size_t)y * (size_t)surface->fb.stride;
+            int x = x0;
+            while (x < x1) {
+                /* run of one destination word */
+                fdk_u32 d = row[x];
+                int run = x + 1;
+                while (run < x1 && row[run] == d) {
+                    run++;
+                }
+                if (run - x >= 4) {
+                    fdk_u32 px = tr[(d >> 16) & 0xFFu] |
+                                 tg[(d >> 8) & 0xFFu] |
+                                 tb[d & 0xFFu];
+                    fdk_u32 *dst = row + x;
+                    size_t n = (size_t)(run - x);
+                    size_t i = 0;
+                    for (; i + 4 <= n; i += 4) {
+                        dst[i] = px;
+                        dst[i + 1] = px;
+                        dst[i + 2] = px;
+                        dst[i + 3] = px;
+                    }
+                    for (; i < n; i++) {
+                        dst[i] = px;
+                    }
+                    x = run;
+                } else {
+                    for (; x < run; x++) {
+                        fdk_u32 dd = row[x];
+                        row[x] = tr[(dd >> 16) & 0xFFu] |
+                                 tg[(dd >> 8) & 0xFFu] |
+                                 tb[dd & 0xFFu];
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     for (int y = y0; y < y1; y++) {
         fdk_u32 *row = surface->fb.pixels +
                        (size_t)y * (size_t)surface->fb.stride;
@@ -889,12 +1000,7 @@ static void fill_rect_translucent(fdk_surface *surface, int x0, int y0,
                     (fdk_f32)((dst >> 8) & 0xFFu) / 255.0f;
                 fdk_f32 da_b = (fdk_f32)(dst & 0xFFu) / 255.0f;
                 fdk_f32 r, g, b, out_a;
-                if (!argb) {
-                    out_a = 1.0f;
-                    r = sr * a + da_r * inv;
-                    g = sg * a + da_g * inv;
-                    b = sb * a + da_b * inv;
-                } else {
+                {
                     fdk_f32 da =
                         (fdk_f32)((dst >> 24) & 0xFFu) / 255.0f;
                     out_a = a + da * inv;
@@ -915,7 +1021,7 @@ static void fill_rect_translucent(fdk_surface *surface, int x0, int y0,
                     ((fdk_u32)(r * 255.0f + 0.5f) << 16) |
                     ((fdk_u32)(g * 255.0f + 0.5f) << 8) |
                     (fdk_u32)(b * 255.0f + 0.5f);
-                if (argb) {
+                {
                     if (out_a < 0.0f) out_a = 0.0f;
                     if (out_a > 1.0f) out_a = 1.0f;
                     packed |= (fdk_u32)(out_a * 255.0f + 0.5f) << 24;

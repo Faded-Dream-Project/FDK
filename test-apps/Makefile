@@ -47,9 +47,44 @@ COMMON_SRCS := common/icons.c common/app.c
 
 BINS := $(APP_DIRS:%=$(BUILD)/%)
 
-.PHONY: all clean test-apps-smoke
+.PHONY: all clean test-apps-smoke release
 
 all: $(BINS)
+
+# release (round 18): the profiling shape the owner was promised in
+# round 17's instructions but the Makefile never had — -O2, no
+# sanitizers, no FDK_DEBUG_BUILD, into build-rel/. The library it
+# links is whatever ../build/libfdk.a currently is, so the honest
+# invocation from the repo root is `make release && make -C test-apps
+# release` (the root release target rebuilds the LIB in release
+# config first). BUILD is re-pointed, not duplicated: one app set
+# per config directory, `make clean` still clears only `build/`
+# (build-rel/ is removed by `make clean-all`).
+REL_BUILD := build-rel
+REL_BINS  := $(APP_DIRS:%=$(REL_BUILD)/%)
+
+release: $(REL_BINS)
+
+define REL_APP_RULE
+$(REL_BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
+	@mkdir -p $(REL_BUILD)
+	$$(CC) $$(CPPFLAGS) $$(STD) $$(WARN) $$(FEATURE) -O2 -DNDEBUG -MMD -MP -Werror -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(REL_LIBS)
+endef
+
+$(foreach app,$(APP_DIRS),$(eval $(call REL_APP_RULE,$(app))))
+
+# The release link set: the archive's transitive backends, no
+# sanitizer runtime (the LIB must be release-config too — linking a
+# release app against the debug lib drags __asan_init in).
+REL_X11_LIBS := $(shell pkg-config --libs x11 2>/dev/null) -lXext \
+            $(shell pkg-config --libs xrandr 2>/dev/null) -lXrender
+REL_WL_LIBS  := $(shell pkg-config --libs wayland-client xkbcommon 2>/dev/null)
+REL_LIBS     := $(REL_X11_LIBS) $(REL_WL_LIBS) -lm -ldl -lz
+
+clean-all: clean
+	rm -rf $(REL_BUILD)
+
+.PHONY: clean-all
 
 define APP_RULE
 $(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)

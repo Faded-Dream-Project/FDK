@@ -262,8 +262,12 @@ fdk_theme *fdk_theme_find(const char *name, fdk_result *out_error) {
     if (theme_stem_ok(name)) {
         for (size_t i = 0; i < ndirs; i++) {
             char path[1024 + THEME_STEM_MAX + 8];
-            snprintf(path, sizeof path, "%s/%s%s", dirs[i], name,
-                     THEME_SUFFIX);
+            int plen = snprintf(path, sizeof path, "%s/%s%s", dirs[i],
+                                name, THEME_SUFFIX);
+            if (plen < 0 ||
+                (size_t)plen >= sizeof path) {
+                continue; /* unrepresentable: out of the search path */
+            }
             if (!theme_is_file(path)) {
                 continue;
             }
@@ -296,7 +300,12 @@ fdk_theme *fdk_theme_find(const char *name, fdk_result *out_error) {
                 continue;
             }
             char path[2048];
-            snprintf(path, sizeof path, "%s/%s", dirs[i], fn);
+            int plen = snprintf(path, sizeof path, "%s/%s", dirs[i],
+                                fn);
+            if (plen < 0 ||
+                (size_t)plen >= sizeof path) {
+                continue; /* unrepresentable: out of the search path */
+            }
             if (!theme_is_file(path)) {
                 continue;
             }
@@ -386,7 +395,12 @@ static void scan_available(void) {
                 continue;
             }
             char path[2048];
-            snprintf(path, sizeof path, "%s/%s", dirs[i], fn);
+            int plen = snprintf(path, sizeof path, "%s/%s", dirs[i],
+                                fn);
+            if (plen < 0 ||
+                (size_t)plen >= sizeof path) {
+                continue; /* unrepresentable: out of the search path */
+            }
             if (!theme_is_file(path)) {
                 continue;
             }

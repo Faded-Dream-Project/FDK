@@ -1,3 +1,62 @@
+# Round 18 (2026-11-05) — the release-lane round
+
+## The owner's brief
+Round 17's instructions said `make release` and pointed at
+test-apps/build-rel/fdk-files — which did not exist (the apps
+Makefile had no release target). The owner got there anyway: built
+the apps with their debug rule against the release lib, ran the
+profile on THAT, and the numbers were still clean enough to read.
+Also: the owner's newer gcc flags -Wformat-truncation paths this
+sandbox's gcc misses (discover.c x3), and the slow highlight is
+FELT-FIXED already ("it doesn't feel slow anymore").
+
+## The owner's data, read
+- 52.4% fill_rect_translucent: the blend work itself, no longer
+  per-pixel overhead — round 17 did its job, and this round's
+  table pass takes the remaining wall down 12-22x.
+- ~23% across .glXXXXXX (deleted): the NVIDIA GLX present shader
+  — the GPU upload lane doing its job. NOT CPU-side work of ours;
+  do not chase.
+- blend_pixel 0.38% (was 53.7%): the highlight fix, confirmed on
+  real hardware.
+- PRESENT-TRACE: ~146K px of 756K damaged per highlight motion —
+  sane damage for a multi-row sweep; no whole-window repaint.
+- "exited cleanly after 4001 frames" and the boot logs: no
+  anomalies. The 1591 vs 4001 frame counts are the two runs'
+  different session lengths.
+
+## What shipped
+- surface.c: the XRGB table pass (per-fill 3x256 LUT + uniform-run
+  store). 22x uniform / 12x anti-run, byte-exact. ARGB keeps the
+  round-17 form (dest-alpha coupling has no table).
+- test-apps/Makefile: the real `release` target (build-rel/, -O2,
+  no sanitizers); root `make release` reaches it.
+- discover.c x3 + fdk-edit doc.c: -Wformat-truncation bounded
+  properly (return checks / ta_copy).
+- test-apps/core (a 6MB core dump, tracked by mistake) untracked.
+
+## The owner's commands, corrected
+    make release                        # lib + apps, -O2, no sanitizers
+    FDK_FILES_STARTUP_DIR=$HOME test-apps/build-rel/fdk-files &
+    sudo perf record -g -p $(pidof fdk-files) -- sleep 10
+    sudo perf report --stdio --no-children -g none | head -40
+    FDK_PRESENT_TRACE=1 test-apps/build-rel/fdk-files 2>&1 | grep PRESENT-TRACE | head
+
+After this round, expect fill_rect_translucent to be GONE from the
+top of that profile (or single-digit); the top should be the GL
+present shader and the text shaper. If translucent fill is still
+top, send the report — that would mean the drag is not hitting the
+XRGB window surface and something else is going on.
+
+## NOT DONE (carried)
+- The 4K / scale>1 physical-space strip blit (round-16 carry).
+- The release-config test_attr segfault + sway button_hits
+  assertion (both reproduce on the CLEAN round-16 tree).
+- The up-storm geometry-flip residue (round-16 carry).
+- ARGB table pass would need a 64K dst-alpha-coupled table — not
+  worth it while window surfaces are XRGB; revisit only if the
+  offscreen composite profile ever says so.
+
 # Round 17 (2026-11-04, evening) — the drag-highlight profile
 
 ## The owner's brief
