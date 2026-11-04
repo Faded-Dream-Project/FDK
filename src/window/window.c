@@ -2512,6 +2512,13 @@ fdk_result fdk_window_paint(fdk_window *window) {
                 fdk_color transparent = { .r = 0.0f, .g = 0.0f, .b = 0.0f,
                                           .a = 0.0f };
                 fdk_surface_fill(inter, transparent);
+                /* Round 16: on ARGB a 0-alpha source-over blend is a
+                 * mathematical NO-OP (out = dst) — the old frame's
+                 * pixels survived the "clear" and every stale glyph
+                 * bled through wherever this frame's widgets drew
+                 * semi-transparently, plus the per-pixel float blend
+                 * burned ~23% of a core in the owner's 4K profile.
+                 * A 0-alpha fill now memsets in fdk_surface_fill. */
                 fdk_widget_tree_paint(window->root, inter);
                 if (fdk_context_find_window_by_pwindow(ctx, pwindow) !=
                     window) {

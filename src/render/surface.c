@@ -726,7 +726,20 @@ void fdk_surface_fill(fdk_surface *surface, fdk_color color) {
                                     .width = x1 - x0, .height = y1 - y0 });
 
     /* Opaque colors are the common case for fill() — a memset-fast
-     * path avoids per-pixel float math for them. */
+     * path avoids per-pixel float math for them. A 0-alpha fill on
+     * an ARGB surface is an exact CLEAR (source-over with a == 0
+     * leaves dst untouched, but the CLEAR intent is 0x00000000 —
+     * the HiDPI intermediate's per-frame reset, which previously
+     * blended nothing and left stale pixels; see window.c). */
+    if (color.a <= 0.0f &&
+        surface->format == FDK_SURFACE_FORMAT_ARGB8888) {
+        for (int y = y0; y < y1; y++) {
+            fdk_u32 *row =
+                surface->fb.pixels + (size_t)y * (size_t)surface->fb.stride;
+            memset(row + x0, 0, (size_t)(x1 - x0) * sizeof(fdk_u32));
+        }
+        return;
+    }
     if (color.a >= 1.0f) {
         fdk_u32 px = (surface->format == FDK_SURFACE_FORMAT_ARGB8888)
                          ? pack_opaque_argb(color)

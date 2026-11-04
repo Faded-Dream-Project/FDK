@@ -1,3 +1,80 @@
+# Round 16 (2026-11-04, later) — the profile, the storms, the no-op clear
+
+## The owner's brief
+A perf profile of fdk-files on real hardware (perf record during
+aggressive scrolling) + three live reports: the folder list
+disappears after aggressive scrolling (nav click restores it), the
+same after sitting on another window, and up-scrolling glitches
+text into overlapping. The profile itself: 39.6% fdk_surface_fill_rect
++ 22.9% blend_pixel + 4.1% blend_mask, libasan loaded (an ASan
+build on the rig!), libnvidia-eglcore present (the EGL GPU lane).
+
+## What shipped
+- tests/test_x11_integration.c: test_scroll_storm_identity_gui —
+  the deterministic aggressive-scroll regression (striped content,
+  two notches per pump, XGetImage identity vs forced full repaint;
+  the vbar column excluded — the thumb's animation timing is the
+  BAR's story, not the blit's).
+- scroll.c: two strip-path fixes (clipped translate of the pending
+  box; live re-read of the root box before the replace). See
+  CHANGELOG for the mechanism.
+- surface.c: 0-alpha fill on ARGB = memset clear (the HiDPI
+  intermediate no-op bug — also a big perf win at scale > 1).
+- scripts (sandbox, outside the repo): scrollcheck_r16.sh (the
+  Xvfb visual rig — stages: 30 Hz down-storm, up-storm, jitter,
+  unmap/remap sit, post-nav; pixel-identity after each), xsnap.py
+  TWO bug fixes (missing XImage.bits_per_pixel field; the channel-
+  shift formula computed the mask's top bit, not its shift — every
+  old screenshot had scrambled channels; identity checks were still
+  valid because both sides used the same deterministic tool),
+  fdk-wl-inject.c gained a `wheel <notches> <ms>` verb (real
+  axis + axis_discrete v120 events).
+- run_scrollcheck.sh (in-tree): the visual rig, for any future
+  scroll-path change.
+
+## The ASan guidance for the owner (IMPORTANT for perf numbers)
+The profiled fdk-files had libasan loaded — AddressSanitizer
+instruments every memory access and roughly doubles raster-loop
+cost. The 62% fill_rect+blend_pixel self-time is real work volume,
+but the absolute numbers are inflated. Daily-driving: use the
+release build (make release / build-rel); keep an ASan build for
+repro sessions only.
+
+## The rig's lessons (round 16's own four bugs)
+1. The Wayland injector path never delivered wheels to the app in
+   this rig (pointer/seat quirks under headless sway) — the Xvfb +
+   XTEST path (stress-rig) is the reliable one for scroll storms.
+2. My first "blank list" reading was a screenshot-tool channel bug
+   (xsnap.py), not an app bug — verify the TOOL against a known
+   color before trusting a blank verdict.
+3. The storm snapshot vs full-repaint snapshot must exclude the
+   CLASSIC bar column (thumb position differs by animation timing).
+4. A canvas as scrollview content measures 8x8 — no scroll range;
+   use a plain widget with real bounds (or set the canvas's min
+   size) when you need a long striped content.
+
+## Verification ladder
+- make test: 763 [ok]. make test-x11: 229 [ok] (+1 storm test).
+- make test-wayland (headless sway): 65 [ok].
+- scrollcheck_r16.sh: down-storm identity PASS, unmap/remap PASS,
+  jitter PASS; up-storm residue ~266 px (below).
+
+## NOT DONE (do not lose)
+- The up-storm 266 px residue: geometry changes mid-flight (the
+  hbar visibility flip resizes the viewport between ticks) can
+  still leave a stale band just below the list. Repro:
+  run_scrollcheck.sh stage B. The fixed-geometry storm is green.
+- The 4K / scale > 1 physical-space strip blit (P0 for the owner's
+  rig — the profile's fill volume lives there).
+- blend_pixel batch/hoist for translucent fills (22.9% self).
+
+## Next round candidates
+- The geometry-flip storm shape (fix the 266 px residue).
+- The physical-space blit at scale > 1 (design already recorded in
+  scroll.c's round-14 comment block).
+- The frame profiler env var + p50/p95/max present-interval stats
+  (round-15 carryovers).
+
 # Round 15 (2026-11-04) — delete stability, the scroll notch
 
 ## The owner's brief and the round's shape
