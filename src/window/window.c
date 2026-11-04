@@ -2067,6 +2067,29 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
             return; /* destroyed by the close handling */
         }
     } else if (event->type == FDK_EVENT_WINDOW_EXPOSE) {
+        /* Round 19 (the owner's perf-record report: cover the
+         * window ~10 s, uncover, the file list is gone until the
+         * next input). The server DISCARDS the obscured window's
+         * pixels (backing store off), and the tree invalidation
+         * alone is not the whole story: the surface layer still
+         * believes its damage bookkeeping is satisfied — a
+         * re-present that ships only NEW widget damage leaves
+         * every untouched pixel relying on a server-side copy
+         * that no longer exists. Mark the WINDOW SURFACE
+         * full-damage, so the very next present re-sends the whole
+         * frame regardless of how little the tree thinks changed —
+         * and regardless of whether there IS a tree (apps that
+         * draw the surface directly ride the same guarantee).
+         * Exactness-preserving on both backends (X11's GL staging
+         * and SHM back slot both still hold the last-presented
+         * frame; Wayland re-fills fresh buffers with the visible
+         * frame), and it costs nothing when the screen content
+         * was in fact preserved (one full present that redraws
+         * what the server still has). */
+        if (window->surface != NULL) {
+            window->surface->damage_full = 1;
+            window->surface->damage_count = 0;
+        }
         if (window->root != NULL) {
             fdk_widget_invalidate_all(window->root);
             /* First map, before anything was ever presented: the
