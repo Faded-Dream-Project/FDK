@@ -1,3 +1,60 @@
+# Round 21 — the four-app suite complete
+
+## What happened
+The sandbox recycled and took /tmp/x11dev, /tmp/my-project/local-x11
+and /home/z/apt with it. Rebuilt the toolchain (local-x11 from the
+debs, the wayland prefix, xauth). ONE trap: the surviving
+/home/z/my-project/scripts/xtest_driver was the PRE-§29 build with
+the UNCONDITIONAL selfcheck — it moved the pointer to (11,22)
+before every command and silently cancelled every XTEST drag (the
+dnd interop legs failed). Root-caused from the "selfcheck:" lines in
+the suite log; rebuilt both rig binaries from the repo's current
+sources -> X11 suite 229 ok / 0 skips.
+
+## fdk-edit finished (it was ~90% there)
+- doc.c marked[128] -> marked[132] (the release-build truncation).
+- The EDIT MENU WAS WIRED TO NULL (Undo/Redo/Find/Replace — the
+  toolbar and shortcuts worked, the menu items did nothing). Wired
+  through ed_menu_* twins in ui.c.
+- No catalog: po/ro.fmo written (46 msgids) + ta_i18n_load at boot.
+- Pixel-verified: menubar/toolbar/tabs/statusbar all render.
+
+## fdk-monitor BUILT (proc.c / graph.c / tray_notify.c / main.c)
+- /proc/stat aggregate CPU, /proc/meminfo, /proc/net/dev (busiest
+  non-lo interface), 960-sample rings, 250 ms timer (prefs-persisted
+  250/1000 toggle).
+- Canvas graphs (fdk_canvas paint callbacks): graticule + filled
+  area + line, CPU at 0..100 scale, NET dual-series (RX accent /
+  TX warning) on a shared max(16 KiB/s) scale.
+- Levelbars CPU/RAM/Swap (continuous mode).
+- Tray: live CPU sparkline PIXMAP (ARGB32 BE), tooltip with live
+  numbers, menu (pause/test/quit), activate = pause toggle.
+- Notifications: >=90% CPU alert (critical, re-arms under 70% or
+  via the "mute" action) + a test item.
+- Pixel-verified: levelbars fill, series lines drawn, TX activity
+  visible; LSan clean; timer retired at exit.
+
+## fdk-notes BUILT (store.c / ui.c / main.c)
+- Notebooks + notes in flat arrays, prefs-persisted per-field.
+- Tree (fdk_tree), title Entry + body TextView, whole-note rich
+  flags through fdk_attr_list (italic->underline, bold->size delta
+  — the honest v1 mapping; per-range spans need the selection-attr
+  editor, queued).
+- Reminders (5-min item, 60 s sweep, notification with an "open"
+  action), 25-min focus timer (label countdown, completion notify
+  + a11y announce), a11y NARRATION (fdk_a11y_set_speaker +
+  narrator_start; utterances mirrored in the status bar), tray.
+
+## Verified
+test-apps-smoke 4/4 green, zero leaks. Core 763 / X11 229 from the
+restored environment. Screenshots of all three apps in download/.
+
+## Not done (honest)
+- The damage-rect inflation (merged rects > window area in the
+  owner's PRESENT-TRACE) is NOT touched this round — round 22.
+- fdk-notes' per-range rich text (selection attributes) and
+  fdk-edit's print/PDF leg remain queued.
+
 # Round 20 (2026-11-05) — the disappearing folders: root cause
 
 ## The owner's evidence

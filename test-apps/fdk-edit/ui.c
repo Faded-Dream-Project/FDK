@@ -230,6 +230,13 @@ static void findbar_run(int dir, bool replace_all) {
     (void)dir;
 }
 
+/* ---- the menu-bar twins (main.c's Edit menu; round 21) ----------- */
+
+void ed_menu_undo(fdk_widget *mi, void *u) { act_undo(mi, u); }
+void ed_menu_redo(fdk_widget *mi, void *u) { act_redo(mi, u); }
+void ed_menu_find(fdk_widget *mi, void *u) { act_find(mi, u); }
+void ed_menu_replace(fdk_widget *mi, void *u) { act_replace(mi, u); }
+
 /* ---- the status bar ------------------------------------------------ */
 
 void ed_ui_status(void) {

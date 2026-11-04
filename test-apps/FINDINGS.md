@@ -65,3 +65,27 @@ FDK lacks, that is a bug in FDK by project rule.
 - ENV (not FDK): xtest_driver's unconditional selfcheck moved the pointer
   to (11,22) between every invocation — the §28 rig's four dead legs.
   Fixed in scripts/xtest_driver.c (selfcheck opt-in).
+
+## Round 21 findings (the two remaining apps built)
+
+- G-20 (fdk-edit, build): doc.c's "● " + label[128] into marked[128]
+  tripped -Wformat-truncation on the release -O2 build. App-side
+  fix (marked[132]); no FDK defect.
+- G-21 (fdk-monitor, API friction — recorded, not a core gap):
+  fdk_color channels are fdk_f32 0..1 while the SNI tray pixmap
+  contract wants ARGB32 BYTE order — every tray-pixmap app redoes
+  the float->byte conversion by hand. Candidate v1.1 helper
+  (fdk_color_to_argb32_be); recorded in DECISIONS, not shipped
+  (two call sites do not yet justify an export).
+- G-22 (both apps, leak discipline): app-owned fdk_menu models MUST
+  be destroyed by the app after the bar dies — the smoke target's
+  LSan leg caught both apps leaking them (fdk-files' td_ registry
+  existed for exactly this). Fixed app-side; the menu-ownership
+  contract is already documented in fdk_widgets.h.
+- fdk-monitor and fdk-notes are now COMPLETE against the README's
+  four-app standard: /proc sampling + canvas graphs + levelbars +
+  tray sparkline pixmap + threshold notifications with actions
+  (monitor); notebook tree + rich-text attrs + reminders + focus
+  timer + a11y narration sink + tray (notes). Both build warning-
+  free under the full -Wconversion battery, smoke clean under
+  ASan/LSan in EN + RO, and pixel-verified.

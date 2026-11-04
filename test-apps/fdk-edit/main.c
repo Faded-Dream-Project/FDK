@@ -11,6 +11,12 @@
 /* doc.c's gutter re-arm (the View/prefs toggles) */
 void ed_arm_gutter(ed_doc *d);
 
+/* ui.c's Edit-menu twins (round 21's menu wiring) */
+void ed_menu_undo(fdk_widget *mi, void *u);
+void ed_menu_redo(fdk_widget *mi, void *u);
+void ed_menu_find(fdk_widget *mi, void *u);
+void ed_menu_replace(fdk_widget *mi, void *u);
+
 /* ---- the menus ------------------------------------------------------ */
 
 static void menu_new(fdk_widget *mi, void *u) { (void)mi; (void)u; ed_doc_new(); }
@@ -72,6 +78,12 @@ typedef struct {
 static ed_menu_act g_acts[64];
 static size_t g_act_count;
 
+/* the menus are APP-OWNED (the menu contract): the handles live
+ * here and die after the bar at shutdown (round 21 — the smoke
+ * LSan leg caught the leak)                                    */
+static fdk_menu *g_menus[8];
+static size_t g_menu_count;
+
 static void act_trampoline(fdk_menu_item *it, void *user) {
     (void)it;
     size_t idx = (size_t)(uintptr_t)user;
@@ -106,6 +118,9 @@ static void menus_build(void) {
 
     fdk_menu *m_file = NULL;
     (void)fdk_menu_create(f, &m_file);
+    if (g_menu_count < 8) {
+        g_menus[g_menu_count++] = m_file;
+    }
     menu_add(m_file, ta_("&New"), "Ctrl+N", menu_new, NULL);
     menu_add(m_file, ta_("&Open..."), "Ctrl+O", menu_open, NULL);
     for (size_t i = 0; i < eapp.recent_count && i < 5; i++) {
@@ -120,14 +135,25 @@ static void menus_build(void) {
 
     fdk_menu *m_edit = NULL;
     (void)fdk_menu_create(f, &m_edit);
-    menu_add(m_edit, ta_("&Undo"), "Ctrl+Z", NULL, NULL);
-    menu_add(m_edit, ta_("&Redo"), "Ctrl+Shift+Z", NULL, NULL);
-    menu_add(m_edit, ta_("&Find..."), "Ctrl+F", NULL, NULL);
-    menu_add(m_edit, ta_("Rep&lace..."), "Ctrl+H", NULL, NULL);
+    if (g_menu_count < 8) {
+        g_menus[g_menu_count++] = m_edit;
+    }
+    /* round 21: the Edit menu was the one place the app's actions
+     * were not wired (toolbar + shortcuts worked, menu said NULL —
+     * the four-app standard says the menu is the discoverable twin
+     * of every shortcut). ui.c owns the real action bodies. */
+    menu_add(m_edit, ta_("&Undo"), "Ctrl+Z", ed_menu_undo, NULL);
+    menu_add(m_edit, ta_("&Redo"), "Ctrl+Shift+Z", ed_menu_redo, NULL);
+    menu_add(m_edit, ta_("&Find..."), "Ctrl+F", ed_menu_find, NULL);
+    menu_add(m_edit, ta_("Rep&lace..."), "Ctrl+H", ed_menu_replace,
+             NULL);
     (void)fdk_menu_bar_append(bar, ta_("&Edit"), m_edit);
 
     fdk_menu *m_view = NULL;
     (void)fdk_menu_create(f, &m_view);
+    if (g_menu_count < 8) {
+        g_menus[g_menu_count++] = m_view;
+    }
     menu_add(m_view, ta_("&Word wrap"), NULL, menu_wrap, NULL);
     menu_add(m_view, ta_("&Syntax highlighting"), NULL,
              menu_highlight, NULL);
@@ -136,8 +162,20 @@ static void menus_build(void) {
 
     fdk_menu *m_help = NULL;
     (void)fdk_menu_create(f, &m_help);
+    if (g_menu_count < 8) {
+        g_menus[g_menu_count++] = m_help;
+    }
     menu_add(m_help, ta_("&About"), NULL, menu_about, NULL);
     (void)fdk_menu_bar_append(bar, ta_("&Help"), m_help);
+}
+
+static void menus_shutdown(void) {
+    for (size_t i = 0; i < g_menu_count; i++) {
+        if (g_menus[i] != NULL) {
+            fdk_menu_destroy(g_menus[i]);
+        }
+    }
+    g_menu_count = 0;
 }
 
 /* the open menu item (shares the toolbar's picker path) */
@@ -232,6 +270,10 @@ int main(void) {
     }
     /* the prefs snapshot BEFORE the UI (the session booleans) */
     ed_session_load();
+    /* round 21: the Romanian catalog — fdk-files had one, fdk-edit
+     * booted catalog-less (the four-app standard: i18n-ready
+     * strings are not optional furniture) */
+    (void)ta_i18n_load(&eapp.base, PO_DIR, "ui.language");
     if (!ta_open(&eapp.base, "fdk-edit — Text Editor", 1000, 680)) {
         ta_close(&eapp.base);
         return 1;
@@ -284,5 +326,6 @@ int main(void) {
     ed_session_save();
     ed_docs_shutdown();
     ta_close(&eapp.base);
+    menus_shutdown();
     return 0;
 }
