@@ -308,14 +308,39 @@ static void tv_rebreak(fdk_textview *tv) {
     } else {
         tv->line_count = 0;
     }
-    /* The document extent (the page's natural size). */
+    /* The document extent (the page's natural size). Round 24
+     * (the owner's "space doesn't move the caret"): the line
+     * advances are TRAILING-SPACE-TRIMMED, so a caret sitting
+     * after the last space of the widest line painted OUTSIDE the
+     * page's own bounds clip — invisible until a wider glyph
+     * arrived. The extent must cover every caret position: add
+     * the trimmed tail's advance (the bytes from the line's
+     * trimmed end to the next line's start, or the document end).
+     */
     fdk_i32 widest = 0;
     for (size_t i = 0; i < tv->line_count; i++) {
         if (tv->lines[i].advance_width > widest) {
             widest = tv->lines[i].advance_width;
         }
+        size_t trimmed_end = tv->lines[i].byte_offset +
+                             tv->lines[i].byte_len;
+        size_t span_end = (i + 1 < tv->line_count)
+                              ? tv->lines[i + 1].byte_offset
+                              : tv->len;
+        if (span_end > trimmed_end && tv->font != NULL) {
+            fdk_text_metrics tm;
+            if (fdk_ok(fdk_font_measure_utf8(
+                    tv->font, tv->text + trimmed_end,
+                    span_end - trimmed_end, &tm))) {
+                fdk_i32 full = tv->lines[i].advance_width +
+                               tm.advance_width;
+                if (full > widest) {
+                    widest = full;
+                }
+            }
+        }
     }
-    tv->doc_w = widest + tv->pad * 2 + tv->gutter_w;
+    tv->doc_w = widest + tv->pad * 2 + tv->gutter_w + tv->pad;
     if (tv->doc_w < TV_MIN_W) {
         tv->doc_w = TV_MIN_W;
     }
@@ -404,8 +429,26 @@ static fdk_i32 tv_line_width_to(const fdk_textview *tv, size_t i,
     }
     const fdk_text_line *line = &tv->lines[i];
     size_t rel = off - line->byte_offset;
-    if (rel > line->byte_len) {
-        rel = line->byte_len;
+    /* Round 24 (the owner's "space doesn't move the caret"): the
+     * break engine TRIMS a trailing space run from a line's
+     * byte_len (nonspace_end), so a caret sitting AFTER the last
+     * space clamped to byte_len here and painted back at the last
+     * letter. Measure up to the caret, not to the trimmed end —
+     * the caller guarantees off is within [line start, next
+     * line's start). */
+    size_t line_cap = line->byte_len;
+    if (i + 1 < tv->line_count) {
+        size_t next_start = tv->lines[i + 1].byte_offset;
+        if (next_start - line->byte_offset > line_cap) {
+            line_cap = next_start - line->byte_offset;
+        }
+    } else if (off - line->byte_offset > line_cap) {
+        /* last line: the caret can sit past a trimmed trailing
+         * space run (and past a soft-break's swallowed space) */
+        line_cap = off - line->byte_offset;
+    }
+    if (rel > line_cap) {
+        rel = line_cap;
     }
     if (rel == 0) {
         return 0;
