@@ -19,7 +19,14 @@
 #
 # Usage:  bash scripts/setup-sandbox.sh
 set -u
-cd "$(dirname "$0")/.."
+# Pin the repo root ABSOLUTELY at script start, before ANY cd below:
+# step 1's else-branch cd's into /tmp/x11dev-debs, and a later
+# dirname-based re-pin resolves RELATIVE to that stranded cwd (it
+# failed exactly that way after the fourth recycle: steps 2-4 ran
+# from /tmp/x11dev-debs, the Wayland toolchain never installed, and
+# the link failed on the wayland_egl symbols).
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
 
 X11DEV=/tmp/x11dev
 X11LIB=$X11DEV/usr/lib/x86_64-linux-gnu
@@ -60,8 +67,7 @@ fi
 # earlier cd into /tmp/x11dev-debs is NOT undone in that path. Re-pin
 # the working directory to the repo root by absolute path; every later
 # step (restore_wayland_toolchain.sh, rig compiles) runs from here.
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
+cd "$ROOT_DIR" # re-pin (the x11dev branch may have cd'd to /tmp)
 
 echo "== 2/4: the Wayland toolchain =="
 if [ -f /home/z/apt/prefix/usr/lib/x86_64-linux-gnu/pkgconfig/wayland-client.pc ]; then

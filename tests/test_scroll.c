@@ -234,25 +234,27 @@ static void test_input(void) {
 
     fdk_i32 sx = -1, sy = -1;
 
-    /* Wheel down over the middle of the viewport: eases to 48.
-     * Nothing moves on the event itself (the first tick is the next
-     * frame); at exactly half the 140 ms flight cubic-out is
-     * 1 - (1 - 0.5)^3 = 0.875, so 48 * 0.875 = 42. */
+    /* Wheel down over the middle of the viewport: eases to the
+     * PROPORTIONAL notch (round 15) — this 150 px viewport gives
+     * 150/4 = 37, floored at the 40 px minimum. Nothing moves on
+     * the event itself (the first tick is the next frame); at
+     * exactly half the 140 ms flight cubic-out is
+     * 1 - (1 - 0.5)^3 = 0.875, so 40 * 0.875 = 35. */
     fdk_event_data wheel = ev_scroll(100, 75, 0, -1);
     assert(fdk_widget_tree_handle_event(root, &wheel));
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
     CHECK_EQ(sy, 0, "sy");
     pump_at(70);
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    CHECK_EQ(sy, 42, "sy");
+    CHECK_EQ(sy, 35, "sy");
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    CHECK_EQ(sy, 48, "sy");
+    CHECK_EQ(sy, 40, "sy");
 
     /* Gesture accumulation: a second notch while the first flight
-     * is airborne adds to the PENDING target — from the 48 rest
-     * position two fast notches are ONE glide of 96 more, landing
-     * on 144 (the alternative, retargeting from the stale live
+     * is airborne adds to the PENDING target — from the 40 rest
+     * position two fast notches are ONE glide of 80 more, landing
+     * on 120 (the alternative, retargeting from the stale live
      * offset, would replay the same 1-notch flight twice — the
      * fast-wheel bug found live by this very assertion). */
     wheel = ev_scroll(100, 75, 0, -1);
@@ -261,7 +263,7 @@ static void test_input(void) {
     assert(fdk_widget_tree_handle_event(root, &wheel));
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    CHECK_EQ(sy, 144, "sy");
+    CHECK_EQ(sy, 120, "sy");
 
     /* The programmatic path snaps INSTANTLY, mid-flight: scroll_to
      * cancels the gesture animation and sets the truth now (no
@@ -277,17 +279,19 @@ static void test_input(void) {
     CHECK_EQ(sy, 300, "sy");
 
     /* The wheel event over a CHILD bubbles up: scroll while the
-     * pointer is over the content's colored area (48 up, clamped
-     * back to 252 = 300 - 48). */
+     * pointer is over the content's colored area (40 up, clamped
+     * back to 260 = 300 - 40). */
     wheel = ev_scroll(100, 75, 0, 1);
     assert(fdk_widget_tree_handle_event(root, &wheel));
     settle();
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &sx, &sy)));
-    CHECK_EQ(sy, 252, "sy");
+    CHECK_EQ(sy, 260, "sy");
 
-    /* Wheel up five more notches: 252 - 5*48 = 12, then a sixth
-     * clamps to 0 (not negative) — the clamp rule unchanged. */
-    for (int i = 0; i < 6; i++) {
+    /* Wheel up eight more notches: 260 - 8*40 = -60 clamps to 0
+     * (not negative) — the clamp rule unchanged (six notches were
+     * enough at the old fixed 48; the smaller proportional notch
+     * needs eight to reach the floor). */
+    for (int i = 0; i < 8; i++) {
         wheel = ev_scroll(100, 75, 0, 1);
         assert(fdk_widget_tree_handle_event(root, &wheel));
     }
@@ -688,7 +692,9 @@ static void test_overlay_bars(void) {
     settle();
     fdk_i32 ox = 0, oy = 0;
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &ox, &oy)));
-    CHECK_EQ(oy, 48, "oy"); /* one notch, clamped far from the edges */
+    /* one proportional notch (this viewport's 150/4 = 37 floors at
+     * the 40 px minimum — round 15), clamped far from the edges */
+    CHECK_EQ(oy, 40, "oy");
     CHECK_EQ(ox, 0, "ox");
     assert(fdk_widget_get_visible(bars[0]));
 
@@ -698,7 +704,8 @@ static void test_overlay_bars(void) {
     fdk__scrollview_viewport(sv, &vw, &vh);
     assert(vw == 200 - 12 && vh == 150 - 12);
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &ox, &oy)));
-    CHECK_EQ(oy, 48, "oy"); /* unchanged: still in range */
+    CHECK_EQ(oy, 40, "oy"); /* unchanged: still in range (the
+                             * proportional notch floors at 40 here) */
 
     /* A fitting axis has no bar in either mode. */
     fdk_widget_destroy(root);

@@ -10734,7 +10734,8 @@ static void test_animation_gui(void) {
             moved = 1;
     }
     assert(moved);
-    assert(off < 48); /* strictly before the settle target */
+    assert(off < 42); /* strictly before the settle target (the
+                           * proportional notch: 168/4 = 42) */
     /* Settled: exactly the notch's target. NOTE the pump-count
      * arithmetic: ONE fdk_pump_events call fires the ticker ONCE
      * (a pump is a single poll cycle — it wakes at the timer
@@ -10745,7 +10746,10 @@ static void test_animation_gui(void) {
         (void)fdk_pump_events(ctx, 20);
     }
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
-    assert(off == 48);
+    assert(off == 42); /* the viewport-proportional notch (round
+                          * 15): the 180 px bounds minus the classic
+                          * bars' 12 px reservation = 168 px viewport,
+                          * 168/4 = 42 */
 
     /* A burst of three fast notches ACCUMULATES: 48 + 144 = 192 (the
      * pending-target rule; the stale-offset rule would land 96). */
@@ -10758,7 +10762,8 @@ static void test_animation_gui(void) {
         (void)fdk_pump_events(ctx, 20);
     }
     assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &dummy_x, &off)));
-    assert(off == 48 + 3 * 48);
+    assert(off == 42 + 3 * 42); /* 168: the pending-target rule
+                                    * under the proportional notch */
 
     XCloseDisplay(dpy);
     fdk_window_destroy(swin);

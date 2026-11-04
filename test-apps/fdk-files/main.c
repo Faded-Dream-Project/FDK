@@ -749,9 +749,14 @@ int main(int argc, char **argv) {
             fdk_widget *v = (t != NULL) ? t->list : NULL;
             if (v != NULL) {
                 fdk_rect ab = fdk_widget_get_absolute_bounds(v);
-                printf("DRIG-GEO pane%d list %d %d %d %d rows=%zu\n",
+                /* rowh: the real row pitch (the theme floor can
+                 * change it; round 15's rig first assumed 25 and
+                 * clicked f10 when it aimed at f3) */
+                printf("DRIG-GEO pane%d list %d %d %d %d rows=%zu "
+                       "rowh=%d\n",
                        pi, ab.x, ab.y, ab.width, ab.height,
-                       fdk_list_row_count(v));
+                       fdk_list_row_count(v),
+                       fdk_list_get_row_height(v));
             }
         }
         {
@@ -761,6 +766,17 @@ int main(int argc, char **argv) {
                 printf("DRIG-GEO bookmarks %d %d %d %d\n", ab.x,
                        ab.y, ab.width, ab.height);
             }
+        }
+        /* Round 15 (the delete rig): pane0's path entry — the rig
+         * navigates by TYPING the absolute path (deterministic,
+         * independent of the row order a remembered sort leaves
+         * behind), so it needs the entry's real bounds too. */
+        if (fapp.pane_count > 0 && fapp.panes[0] != NULL &&
+            fapp.panes[0]->path_entry != NULL) {
+            fdk_rect ab = fdk_widget_get_absolute_bounds(
+                fapp.panes[0]->path_entry);
+            printf("DRIG-GEO path %d %d %d %d\n", ab.x, ab.y,
+                   ab.width, ab.height);
         }
         fflush(stdout);
     }

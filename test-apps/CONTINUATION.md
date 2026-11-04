@@ -1,3 +1,86 @@
+# Round 15 (2026-11-04) — delete stability, the scroll notch
+
+## The owner's brief and the round's shape
+Priority one was STABILITY: "deleting a file leaves fdk-files broken"
+(real-hardware report). Then scroll feel (viewport-proportional notch,
+smooth handling, frame-time stats), the 4K physical-space blit, an
+opt-in frame profiler, and the full verification ladder.
+
+## What shipped
+- **The delete-stability fix**: fdk_list_remove now clamps
+  last_click_row and key_cursor like it always clamped anchor
+  (src/widget/list.c). Enter-activate after a delete was silently
+  dead — the stale past-end key_cursor read as "no cursor".
+- **tests/test_list_delete.c** — the regression test. Fails on the
+  pre-fix engine at the Enter leg (assertion at the "interaction
+  alive after removals" step), passes after. The fail-before proof
+  was run by temporarily rebuilding the engine without the clamp.
+- **The delete rig** (test-apps/fdk-files/delete_rig.c +
+  run_deleterig.sh): six XTEST shapes (Delete key, Shift+Delete +
+  modal-confirm OK, multi-select, last row, scrolled offset,
+  directory-via-async-engine) against the real app under
+  ASan+UBSan. ALL GREEN — the X11 trash/delete paths did not
+  reproduce the owner's breakage in this environment; the one real
+  engine bug (the stale indices above) was found by CODE READING
+  the removal path, not by the rig. The rig itself needed four
+  fixes before its greens meant anything (below).
+- **The scroll notch**: viewport-proportional wheel step
+  (viewport/4, clamped 40..160, per-axis from live extents;
+  fractional touchpad deltas multiply it directly) in
+  src/widget/scroll.c. test_scroll.c + the x11 animation-gui legs
+  re-pinned (150px viewport floors at 40; the x11 leg's
+  180px-bounds minus 12px classic bars = 168 viewport, 42/notch).
+- **App telemetry for rigs**: PHASE: nav <dir> (DRIG-gated),
+  DRIG-GEO path, rowh= on the list GEO lines.
+- **setup-sandbox.sh cwd bug fixed** (ROOT_DIR pinned absolutely at
+  start; the fourth recycle had steps 2-4 running from
+  /tmp/x11dev-debs and the Wayland toolchain never installing).
+
+## The rig's own four bugs (the round's real lessons)
+1. The DRIG boot WIPES /tmp/fdk-drig and rebuilds it — fixtures
+   created before boot are gone by the time the list populates.
+   Every shape was "green" deleting in an EMPTY directory until the
+   fixture moved post-boot. Verify the deletion actually happened
+   (files-left count) before trusting a green.
+2. List rows start ~22px below the columns header (round 10's
+   lesson, re-learned): raw list-local y lands on the header.
+3. An if/else chain meant the delscroll shape never ran its click
+   (the wheel block ate the branch) — no selection, Delete a no-op.
+4. Hand-rolled probe scripts passed KEYCODES where KEYCODES belong
+   but the nav probes passed raw keysyms via ord(ch) — the typed
+   path never landed. The runner (XKeysymToKeycode per char) works;
+   the quick probes were the broken ones. Lesson: use the rig, not
+   ad-hoc ctypes, for anything with key synthesis.
+
+## Verification ladder (post-recycle, final code)
+- `make test`: **763 [ok]** (762 + the new regression test).
+- `make test-x11`: **228 [ok]** (after re-pinning the animation-gui
+  wheel legs to the proportional step).
+- `make test-wayland` (headless sway, the pinned wl-dnd-source
+  recipe): **65 [ok], all passed**.
+- -Werror clean throughout (the suites build with it on).
+
+## NOT DONE this round (honest ledger, do not lose these)
+- **The 4K / scaled-display physical-space blit** (round 14
+  admitted it degrades to full damage at 4K; the walk-time
+  physical-space strip collapse is DESIGNED but NOT IMPLEMENTED).
+- **The opt-in frame profiler env var** (per-frame rasterized
+  pixels, damaged area, present time, frame interval — the owner
+  will run it on real hardware).
+- **Frame-time consistency stats** (inter-present p50/p95/max
+  during fast scrolling) — PRESENT-TRACE exists (round 14) but the
+  percentile report was not built.
+- **The owner's real-hardware breakage was NOT reproduced**: the
+  X11 sandbox paths are clean. If the hardware report persists
+  after this fix, suspect environment differences (the XDG trash on
+  a real disk with EXDEV, inotify storms on real folders) and add
+  shapes for those.
+
+## Next round candidates
+- The 4K physical-space blit + the frame profiler (the two
+  not-done items above, both spec'd).
+- His X11 boot-slowness report is STILL OPEN (round-6 item C).
+
 # §31 continuation — UPDATE (owner round 14: the scroll repaint — delta-strip damage, and the hover repaint gap)
 
 ## The owner's brief and the round's shape

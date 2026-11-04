@@ -824,6 +824,14 @@ void pane_navigate(pane *p, const char *abs_path) {
     p->fwd_count = 0;
 
     snprintf(t->dir, sizeof t->dir, "%.400s", abs_path);
+    /* Round 15 (the delete rig): the DRIG telemetry the rig needs
+     * to VERIFY arrival in the target directory — the nav-click
+     * double-click can race the app's double-click window, and a
+     * rig that deletes in the WRONG directory proves nothing. */
+    if (getenv("FDK_FILES_DRIG") != NULL) {
+        printf("PHASE: nav %s\n", t->dir);
+        fflush(stdout);
+    }
     const char *slash = strrchr(t->dir, '/');
     const char *base = (slash != NULL) ? slash + 1 : t->dir;
     if (base[0] == '\0') {

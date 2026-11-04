@@ -15,6 +15,56 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-04 (on the rc2 line)
+
+### Stability — owner round 15: "deleting a file leaves fdk-files broken" + the scroll notch feel
+
+- **The delete-stability fix (list.c).** `fdk_list_remove` clamped
+  the shift-click `anchor` after removing a row but left the OTHER
+  row-indexed fields past the end: `last_click_row` (the
+  double-click/triple-click bookkeeping) and `key_cursor` (the
+  keyboard's moving end). After deleting a row at or above the
+  cursor, Enter-activate silently died (the guarded read treated
+  the stale index as "no cursor") and the next click's
+  double-click compare could never match — the
+  delete-a-file-then-the-list-feels-dead report. Both fields are
+  now clamped exactly like the anchor (and `have_last_click` clears
+  on an emptied list). Regression test: `tests/test_list_delete.c`
+  (drives the cursor to row 5, removes every row above index 2,
+  then asserts Enter-activate and arrow keys still work — fails on
+  the pre-fix engine at the Enter leg).
+- **The delete reproduction rig (test-apps/fdk-files/delete_rig.c +
+  run_deleterig.sh).** Six XTEST-driven shapes against the real app
+  under ASan+UBSan: Delete key, Shift+Delete with the modal confirm
+  answered, multi-select, last row, scrolled offset, and a
+  directory delete riding the async ops engine (ops_start_delete +
+  delete_engine_done + pane_reload). All six green — no crash, no
+  hang, no sanitizer hit, the app stays interactive after each
+  delete. The rig taught the app four new telemetry lines:
+  `PHASE: nav <dir>` (verified navigation, FDK_FILES_DRIG-gated),
+  `DRIG-GEO path` (the location entry's bounds) and `rowh=` on the
+  list GEO lines (the real row pitch — the rig's first draft
+  assumed 25 px and clicked the wrong row).
+- **The scroll notch (scroll.c).** The wheel step was a fixed
+  48 px — glacial in a 1000 px list, violent in a 150 px sidebar.
+  The notch is now viewport-proportional (the axis' own viewport
+  divided by 4, clamped to 40..160 px — GTK3's rule), computed
+  per-axis from the live extents; fractional deltas
+  (high-resolution wheels, touchpads) multiply the step directly,
+  so sub-unit ticks move a fraction of it — smooth, no row
+  snapping. The ease-out flight and the gesture-accumulation rule
+  (a notch while airborne adds to the pending target) are
+  unchanged; test_scroll.c and the x11 suite's animation-gui legs
+  pin the new arithmetic (a 150 px viewport floors at 40; the x11
+  leg's 180 px bounds minus the classic bars' 12 px reservation =
+  168 px viewport, 168/4 = 42).
+- **Sandbox recovery (scripts/setup-sandbox.sh).** The fourth
+  recycle exposed the script's own cwd bug: the `ROOT_DIR` re-pin
+  resolved RELATIVE to the directory step 1 had cd'd into, so steps
+  2-4 ran from `/tmp/x11dev-debs` and the Wayland toolchain never
+  installed. The root is now pinned ABSOLUTELY at script start,
+  before any cd.
+
 ## [Unreleased-candidate features] — 2026-11-03 (on the rc2 line)
 
 ### Performance — owner round 14: the scroll repaint (whole-viewport damage per offset change) + the hover repaint gap
