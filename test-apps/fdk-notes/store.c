@@ -119,10 +119,18 @@ void nt_save_all(void) {
         snprintf(key, sizeof key, "note.%zu.body", i);
         esc(n->body, val, sizeof val);
         (void)fdk_prefs_set(napp.base.prefs, key, val);
-        snprintf(key, sizeof key, "note.%zu.flags", i);
+        snprintf(key, sizeof key, "note.%zu.spans", i);
         (void)fdk_prefs_set_int(napp.base.prefs, key,
-                                (n->bold ? 1 : 0) +
-                                    (n->italic ? 2 : 0));
+                                (int)n->span_count);
+        for (size_t sp = 0; sp < n->span_count; sp++) {
+            snprintf(key, sizeof key, "note.%zu.span.%zu", i, sp);
+            char sval[96];
+            snprintf(sval, sizeof sval, "%zu %zu %d %d",
+                     n->spans[sp].start, n->spans[sp].end,
+                     n->spans[sp].bold ? 1 : 0,
+                     n->spans[sp].italic ? 1 : 0);
+            (void)fdk_prefs_set(napp.base.prefs, key, sval);
+        }
         snprintf(key, sizeof key, "note.%zu.rem", i);
         (void)fdk_prefs_set_int(napp.base.prefs, key,
                                 (int)n->reminder_at);
@@ -169,10 +177,29 @@ void nt_load_all(void) {
         ta_pref_str(&napp.base, key, "", raw, sizeof raw);
         unesc(raw, n->body, sizeof n->body);
         n->body_len = strlen(n->body);
-        snprintf(key, sizeof key, "note.%d.flags", i);
-        int flags = ta_pref_int(&napp.base, key, 0);
-        n->bold = (flags & 1) != 0;
-        n->italic = (flags & 2) != 0;
+        snprintf(key, sizeof key, "note.%d.spans", i);
+        int spans = ta_pref_int(&napp.base, key, 0);
+        if (spans < 0) {
+            spans = 0;
+        }
+        if (spans > NT_MAX_SPANS) {
+            spans = NT_MAX_SPANS;
+        }
+        for (int sp = 0; sp < spans; sp++) {
+            snprintf(key, sizeof key, "note.%d.span.%d", i, sp);
+            char val[96];
+            ta_pref_str(&napp.base, key, "", val, sizeof val);
+            size_t st = 0, en = 0;
+            int b = 0, it = 0;
+            (void)sscanf(val, "%zu %zu %d %d", &st, &en, &b, &it);
+            if (en > st && en <= n->body_len) {
+                n->spans[n->span_count].start = st;
+                n->spans[n->span_count].end = en;
+                n->spans[n->span_count].bold = (b != 0);
+                n->spans[n->span_count].italic = (it != 0);
+                n->span_count++;
+            }
+        }
         snprintf(key, sizeof key, "note.%d.rem", i);
         n->reminder_at =
             (long)ta_pref_int(&napp.base, key, 0);

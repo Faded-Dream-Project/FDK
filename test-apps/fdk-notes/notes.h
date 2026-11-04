@@ -11,13 +11,19 @@
 #define NT_TITLE_MAX 96
 #define NT_BODY_MAX 8192
 
+typedef struct nt_span {
+    size_t start, end; /* byte range [start, end)                  */
+    bool bold, italic;
+} nt_span;
+
+#define NT_MAX_SPANS 64
+
 typedef struct nt_note {
     char title[NT_TITLE_MAX];
     char body[NT_BODY_MAX];
     size_t body_len;
-    bool bold, italic; /* the whole-note rich flags (round 21's
-                          honest scope: per-range spans come with
-                          the selection-attr editor)              */
+    nt_span spans[NT_MAX_SPANS]; /* round 22: per-range rich text  */
+    size_t span_count;
     long reminder_at;  /* unix seconds; 0 = none                   */
     bool reminder_fired;
     size_t notebook;  /* owner index                                */
@@ -76,6 +82,7 @@ void nt_tray_boot(void);
 void nt_tray_shutdown(void);
 void nt_focus_toggle(void);
 void nt_apply_attrs(void);
+bool nt_format_selection(bool bold, bool italic);
 void nt_focus_select(size_t index);
 void nt_notify(const char *summary, const char *body);
 

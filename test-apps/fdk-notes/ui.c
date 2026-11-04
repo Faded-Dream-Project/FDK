@@ -107,7 +107,10 @@ void nt_focus_select(size_t index) {
     ta_status(&napp.base, "%s", n->title);
 }
 
-/* the whole-note rich flags as range attributes over the body */
+/* Round 22: the per-range rich text. The note's spans become the
+ * textview's attribute list — italic maps to the underline the
+ * attr vocabulary offers, bold to a size delta (the honest v1
+ * mapping until the attr kinds grow weight/slant entries).     */
 void nt_apply_attrs(void) {
     nt_note *n = nt_note_current();
     if (n == NULL) {
@@ -118,24 +121,23 @@ void nt_apply_attrs(void) {
     if (!fdk_ok(fdk_attr_list_init(&list))) {
         return;
     }
-    if (n->bold || n->italic) {
-        /* BOLD/ITALIC ride the span kinds: the attr list models
-         * size/family/color/underline; weight and slant are span
-         * attributes — modeled here as the underline the attr
-         * vocabulary offers for italic, and a size delta for bold
-         * (the honest v1 mapping; per-range spans are queued)   */
-        if (n->italic) {
+    for (size_t i = 0; i < n->span_count; i++) {
+        const nt_span *sp = &n->spans[i];
+        if (sp->end <= sp->start) {
+            continue; /* collapsed by an edit: dead span          */
+        }
+        if (sp->italic) {
             fdk_attr a = {0};
-            a.byte_start = 0;
-            a.byte_end = n->body_len;
+            a.byte_start = sp->start;
+            a.byte_end = sp->end;
             a.kind = FDK_ATTR_UNDERLINE;
             a.v.i = 1;
             (void)fdk_attr_list_add(&list, &a);
         }
-        if (n->bold) {
+        if (sp->bold) {
             fdk_attr a = {0};
-            a.byte_start = 0;
-            a.byte_end = n->body_len;
+            a.byte_start = sp->start;
+            a.byte_end = sp->end;
             a.kind = FDK_ATTR_SIZE_DELTA;
             a.v.f = 1.5f;
             (void)fdk_attr_list_add(&list, &a);
@@ -143,6 +145,53 @@ void nt_apply_attrs(void) {
     }
     (void)fdk_textview_set_attrs(napp.body_view, &list);
     fdk_attr_list_destroy(&list);
+}
+
+/* Toggles `which` over the CURRENT SELECTION. A collapsed
+ * selection formats nothing (the caller tells the user).        */
+bool nt_format_selection(bool bold, bool italic) {
+    nt_note *n = nt_note_current();
+    if (n == NULL || napp.body_view == NULL) {
+        return false;
+    }
+    size_t anchor = 0, caret = 0;
+    if (!fdk_textview_get_selection(napp.body_view, &anchor,
+                                    &caret)) {
+        return false;
+    }
+    size_t lo = (anchor < caret) ? anchor : caret;
+    size_t hi = (anchor < caret) ? caret : anchor;
+    if (lo >= hi || hi > n->body_len) {
+        return false;
+    }
+    for (size_t i = 0; i < n->span_count; i++) {
+        nt_span *sp = &n->spans[i];
+        if (sp->start <= lo && lo < sp->end) {
+            if (bold) {
+                sp->bold = !sp->bold;
+            }
+            if (italic) {
+                sp->italic = !sp->italic;
+            }
+            if (!sp->bold && !sp->italic) {
+                memmove(&n->spans[i], &n->spans[i + 1],
+                        (n->span_count - i - 1) * sizeof(nt_span));
+                n->span_count--;
+            }
+            nt_apply_attrs();
+            return true;
+        }
+    }
+    if (n->span_count >= NT_MAX_SPANS) {
+        return false;
+    }
+    nt_span *sp = &n->spans[n->span_count++];
+    sp->start = lo;
+    sp->end = hi;
+    sp->bold = bold;
+    sp->italic = italic;
+    nt_apply_attrs();
+    return true;
 }
 
 static void on_title_changed(fdk_widget *entry, void *user) {
@@ -166,6 +215,22 @@ static void on_body_changed(fdk_widget *view, void *user) {
     const char *t = fdk_textview_get_text(napp.body_view);
     ta_copy(n->body, sizeof n->body, t != NULL ? t : "");
     n->body_len = strlen(n->body);
+    /* spans past the new end are dead; clamp then drop empties
+     * (the honest v1: ranges are byte-anchored, edits do not
+     * reflow them — interior edits keep the surrounding text)  */
+    size_t w = 0;
+    for (size_t i = 0; i < n->span_count; i++) {
+        if (n->spans[i].end > n->body_len) {
+            n->spans[i].end = n->body_len;
+        }
+        if (n->spans[i].start > n->spans[i].end) {
+            n->spans[i].start = n->spans[i].end;
+        }
+        if (n->spans[i].end > n->spans[i].start) {
+            n->spans[w++] = n->spans[i];
+        }
+    }
+    n->span_count = w;
 }
 
 /* ---- the focus timer (25 minutes) ---------------------------------- */

@@ -38,23 +38,21 @@ static void menu_new_book(fdk_widget *mi, void *u) {
     }
 }
 
+/* Round 22: Bold/Italic apply to the SELECTION (the per-range
+ * rich-text editor; the whole-note flags are gone) */
 static void menu_bold(fdk_widget *mi, void *u) {
     (void)mi;
     (void)u;
-    nt_note *n = nt_note_current();
-    if (n != NULL) {
-        n->bold = !n->bold;
-        nt_apply_attrs();
+    if (!nt_format_selection(true, false)) {
+        ta_status(&napp.base, "%s", ta_("Select text first"));
     }
 }
 
 static void menu_italic(fdk_widget *mi, void *u) {
     (void)mi;
     (void)u;
-    nt_note *n = nt_note_current();
-    if (n != NULL) {
-        n->italic = !n->italic;
-        nt_apply_attrs();
+    if (!nt_format_selection(false, true)) {
+        ta_status(&napp.base, "%s", ta_("Select text first"));
     }
 }
 
