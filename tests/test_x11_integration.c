@@ -2223,6 +2223,174 @@ static void test_widget_catalog_gui(void) {
 
 /* ---- Label modes + radio arrow keys, real X11 input ---- */
 
+static Display *rb_open(Display **rb) {
+    if (*rb == NULL) {
+        *rb = XOpenDisplay(NULL);
+        assert(*rb != NULL);
+    }
+    return *rb;
+}
+
+/* ---- round 16: the aggressive-scroll stale-strip regression ----
+ *
+ * The owner's live report: aggressive wheel scrolling leaves "things
+ * overlapping" — stale text glyphs where background belongs. The
+ * mechanism under test: the round-14 strip path blits at LAYOUT
+ * time, but two offset changes can land between two paints (a
+ * 30 Hz wheel against a ~24 Hz paint cadence); the second blit
+ * moves rows the first strip's damage still expects to repaint,
+ * and pixels go stale in bands. This test drives exactly that
+ * regime — TWO notches per pump, no settle between them — with
+ * striped content (every 8-px band a different shade, so ANY
+ * displaced row reads as a wrong shade), then forces the
+ * full-damage path and demands pixel equality. */
+static void test_scroll_storm_identity_gui(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options iopts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &iopts)));
+    fdk_window_options opts = { .title = "storm", .width = 240,
+                                .height = 220 };
+    fdk_window *win = NULL;
+    assert(fdk_ok(fdk_window_create(ctx, &opts, &win)));
+    fdk_window_show(win);
+    fdk_widget *root = NULL;
+    (void)fdk_window_get_root(win, &root);
+    fdk_widget *sv = NULL;
+    assert(fdk_ok(fdk_scrollview_create(root, &sv)));
+    fdk_widget_set_bounds(sv, (fdk_rect){0, 0, 200, 200});
+    /* CLASSIC bars: structurally ALWAYS visible, so both snapshots
+     * paint them identically. (OVERLAY bars fade with idle — the
+     * storm snapshot catches the thumb awake and the full-repaint
+     * snapshot catches it faded, and the diff measures the BAR,
+     * not the content.) */
+    assert(fdk_ok(fdk_scrollview_set_bar_mode(sv,
+                                              FDK_SCROLL_BARS_CLASSIC)));
+    /* Striped content: 250 band widgets of 8 px cycling three
+     * shades — the pixel at any viewport row identifies the content
+     * row that painted it, so ANY displaced row reads as a wrong
+     * shade. (A plain container sized 160x2000 gives the scrollview
+     * its natural extent — the canvas measures 8x8 and scrolls
+     * nothing.) */
+    fdk_widget *content = NULL;
+    assert(fdk_ok(fdk_widget_create(sv, NULL,
+                                    (fdk_rect){0, 0, 160, 2000},
+                                    &content)));
+    for (int i = 0; i < 250; i++) {
+        fdk_widget *band = NULL;
+        assert(fdk_ok(fdk_widget_create(content, NULL,
+                                        (fdk_rect){0, i * 8, 160, 8},
+                                        &band)));
+        fdk_color c = (i % 3 == 0)
+                          ? (fdk_color){ .r = 0.85f, .g = 0.30f, .b = 0.30f }
+                          : ((i % 3 == 1)
+                                 ? (fdk_color){ .r = 0.30f, .g = 0.85f,
+                                                .b = 0.30f }
+                                 : (fdk_color){ .r = 0.30f, .g = 0.30f,
+                                                .b = 0.85f });
+        fdk_widget_set_background(band, c);
+    }
+    assert(fdk_ok(fdk_scrollview_set_content(sv, content)));
+
+    unsigned long xid = fdk_window_xid(win);
+    Display *dpy = XOpenDisplay(NULL);
+    assert(dpy != NULL);
+    Display *rb = NULL; /* readback connection */
+
+    /* settle the initial paint */
+    for (int i = 0; i < 8; i++) {
+        (void)fdk_pump_events(ctx, 25);
+    }
+
+    /* THE STORM: 20 rounds of TWO notches per pump — the second
+     * notch always lands before the first strip's paint. */
+    for (int round = 0; round < 20; round++) {
+        for (int k = 0; k < 2; k++) {
+            x11_send_pointer_event(dpy, xid, ButtonPress,
+                                   ButtonPressMask, 100, 100, 5);
+            (void)fdk_pump_events(ctx, 4);
+        }
+        (void)fdk_pump_events(ctx, 12);
+    }
+    /* settle every flight */
+    for (int i = 0; i < 20; i++) {
+        (void)fdk_pump_events(ctx, 25);
+    }
+    fdk_i32 ox = -1, oy = -1;
+    assert(fdk_ok(fdk_scrollview_get_scroll_offset(sv, &ox, &oy)));
+    assert(oy > 100); /* the storm really scrolled */
+
+    /* Snapshot the storm-scrolled window (server-side). */
+    XImage *storm = XGetImage(rb_open(&rb), (Drawable)xid, 0, 0,
+                              240, 220, ~0UL, ZPixmap);
+    assert(storm != NULL);
+
+    /* Force the full-damage path at the SAME offset: resize +1 then
+     * back (geometry damage is the whole window), settle. */
+    fdk_window_resize(win, 241, 220);
+    for (int i = 0; i < 6; i++) {
+        (void)fdk_pump_events(ctx, 20);
+    }
+    fdk_window_resize(win, 240, 220);
+    for (int i = 0; i < 6; i++) {
+        (void)fdk_pump_events(ctx, 20);
+    }
+    XImage *full = XGetImage(rb, (Drawable)xid, 0, 0,
+                             240, 220, ~0UL, ZPixmap);
+    assert(full != NULL);
+
+    /* Pixel-exact demand over the viewport CONTENT area (x < 188 —
+     * the 12 px CLASSIC vbar column is excluded: the thumb's
+     * position differs between the snapshots by animation timing,
+     * which is the BAR's story, not the blit path's. Every content
+     * pixel must match exactly.) */
+    int bad = 0;
+    int first_y = -1;
+    for (int y = 0; y < 200; y++) {
+        for (int x = 0; x < 188; x++) {
+            unsigned long a = (unsigned long)XGetPixel(storm, x, y);
+            unsigned long b = (unsigned long)XGetPixel(full, x, y);
+            if (a != b) {
+                bad++;
+                if (first_y < 0) {
+                    first_y = y;
+                }
+            }
+        }
+    }
+    if (bad > 0) {
+        fprintf(stderr, "storm identity: %d px differ, first at "
+                        "y=%d\n", bad, first_y);
+        /* WHERE are they? dump a coarse map of differing rows/cols */
+        for (int y = 0; y < 220; y += 4) {
+            int n = 0, x0 = -1, x1 = -1;
+            for (int x = 0; x < 188; x++) {
+                if ((unsigned long)XGetPixel(storm, x, y) !=
+                    (unsigned long)XGetPixel(full, x, y)) {
+                    if (x0 < 0) x0 = x;
+                    x1 = x; n++;
+                }
+            }
+            if (n > 0) {
+                fprintf(stderr, "  row %d: %d px, x %d..%d\n",
+                        y, n, x0, x1);
+            }
+        }
+    }
+    XDestroyImage(storm);
+    XDestroyImage(full);
+    assert(bad == 0);
+
+    XCloseDisplay(dpy);
+    if (rb != NULL) {
+        XCloseDisplay(rb);
+    }
+    fdk_window_destroy(win);
+    fdk_shutdown(ctx);
+    printf("[ok] scroll storm: two-notch-per-frame blit path is "
+           "pixel-identical to the full repaint\n");
+}
+
+
 /* One-shot region capture: the whole rect in a single XGetImage.
  * Counts pixels differing from bg (0x00RRGGBB, alpha dropped). */
 static int x11_count_ink_in_region(Display **out_dpy, unsigned long xid,
@@ -14901,6 +15069,7 @@ int main(void) {
     test_pump_events_nonblocking();
     test_timers();
     test_animation_gui();
+    test_scroll_storm_identity_gui();
     test_tooltip_gui();
     test_surface_render_readback();
     test_mitm_shm_and_double_buffer();

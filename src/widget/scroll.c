@@ -390,6 +390,23 @@ static bool scroll_apply_delta_damage(fdk_widget *w, fdk_scrollview *sv,
     if (dx == 0 && dy == 0) {
         return false; /* no movement: caller decides what to damage */
     }
+    /* Round 16 (the up-storm residue): fdk__widget_set_damage
+     * REPLACES the root damage, and a LATER tick's strip can be
+     * SMALLER than an earlier one when the geometry changed
+     * mid-flight (the hbar flipping resizes the viewport between
+     * ticks). The caller's `pending` snapshot was taken at layout
+     * ENTRY — before this tick's own arrange — but a previous
+     * tick's strip may have been set (and not yet painted) after
+     * that snapshot. Re-read the live root box here and union it
+     * in as well, so no still-unpainted strip region is dropped
+     * by the replace below. */
+    {
+        fdk_rect live = {0, 0, 0, 0};
+        (void)fdk__widget_pending_damage(w, &live);
+        if (live.width > 0 && live.height > 0) {
+            pending = scroll_rect_union(pending, live);
+        }
+    }
     fdk_i32 vw = w->bounds.width;
     fdk_i32 vh = w->bounds.height;
     if (vw <= 0 || vh <= 0) {
@@ -471,9 +488,48 @@ static bool scroll_apply_delta_damage(fdk_widget *w, fdk_scrollview *sv,
         }
     }
     /* fdk__widget_pending_damage returned a box in the same ROOT
-     * frame (it WAS the root's damage box). */
+     * frame (it WAS the root's damage box). Round 16: the blit
+     * above moved every still-unpainted stale pixel by (-dx, -dy)
+     * — in the aggressive regime (two notches between paints) the
+     * pending box is stale content from an EARLIER tick of the
+     * same frame, and the box that describes it must follow the
+     * pixels. The cover is the union of THREE readings: the new
+     * strips, the box where it was (a pixel not touched by the
+     * blit stays stale in place), and the box where the blit took
+     * it — the last one translated by (-dx, -dy) and CLIPPED to
+     * the blit footprint: the part that left the viewport is gone
+     * for good (it re-enters as a freshly-painted strip when it
+     * scrolls back), and an UNCLIPPED translation compounds its
+     * own offset every tick — the storm trace showed the box
+     * descending to y = -1800 and the damage demand exploding.
+     * (Found live: 5 px of dead text glyphs mid-list after a
+     * 30 Hz down-storm; a 64 px displaced block after the up one.) */
     if (pending.width > 0 && pending.height > 0) {
         strip = scroll_rect_union(strip, pending);
+        if (dx != 0 || dy != 0) {
+            fdk_i32 mx0 = pending.x - dx;
+            fdk_i32 my0 = pending.y - dy;
+            fdk_i32 mx1 = mx0 + pending.width;
+            fdk_i32 my1 = my0 + pending.height;
+            if (mx0 < abs.x) {
+                mx0 = abs.x;
+            }
+            if (my0 < abs.y) {
+                my0 = abs.y;
+            }
+            if (mx1 > abs.x + bw) {
+                mx1 = abs.x + bw;
+            }
+            if (my1 > abs.y + bh) {
+                my1 = abs.y + bh;
+            }
+            if (mx1 > mx0 && my1 > my0) {
+                fdk_rect moved = { .x = mx0, .y = my0,
+                                   .width = mx1 - mx0,
+                                   .height = my1 - my0 };
+                strip = scroll_rect_union(strip, moved);
+            }
+        }
     }
     fdk__widget_set_damage(w, strip);
 

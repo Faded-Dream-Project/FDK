@@ -15,6 +15,55 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-04 (on the rc2 line, later the same day)
+
+### Stability + performance — owner round 16: the real-hardware profile, the aggressive-scroll residue
+
+- **The aggressive-scroll stale strips (scroll.c).** The owner's
+  perf-record session also reported the visual bugs: text
+  overlapping when scrolling up, the list blanking after hard
+  scrolling. Root cause (found with an in-suite deterministic
+  storm — two wheel notches per pump, striped content, XGetImage
+  readback vs forced full repaint): the strip path's damage REPLACES
+  the root damage box, and in the aggressive regime (a 30 Hz wheel
+  against a ~24 Hz paint cadence) two failure shapes appeared.
+  (a) A pending damage box from an earlier tick of the same frame
+  goes stale when the next blit moves its pixels: the cover is now
+  the union of the box where it was, the box where the blit took it
+  (translated by the delta, CLIPPED to the blit footprint — an
+  unclipped translate compounds its own offset every tick; the
+  storm trace showed the box descending to y = -1800). (b) A later
+  tick's smaller strip could DROP a still-unpainted region set by
+  an earlier tick: the live root box is now re-read and unioned at
+  strip time, not only at layout entry. Regression test:
+  `test_scroll_storm_identity_gui` (x11 suite) — 20 rounds of two
+  notches per pump, pixel-identity demanded against a forced full
+  repaint.
+- **The HiDPI intermediate "clear" that cleared nothing
+  (surface.c + window.c).** At scale > 1 the tree paints into an
+  ARGB intermediate that is "cleared" each frame with a 0-alpha
+  fill — but source-over with a == 0 is a mathematical NO-OP on
+  ARGB (out = dst): the old frame's pixels survived, and every
+  stale glyph bled through wherever this frame drew
+  semi-transparently. `fdk_surface_fill` now memsets a 0-alpha fill
+  on ARGB surfaces (an exact clear), which also deletes the
+  per-pixel float blend the owner's profile showed at 23%
+  (`blend_pixel`) for that fill.
+- **Verification**: core 763, X11 229 (+1), Wayland 65 — all green;
+  the Xvfb visual rig (scripts/scrollcheck_r16.sh) passes the
+  30 Hz down-storm and the unmap/remap sit pixel-identical.
+- **Known residue (honest)**: a ~266 px band can still differ after
+  a sustained UP-storm when the horizontal bar's visibility flips
+  mid-flight (the viewport resizes between ticks; the replace-shaped
+  damage drops the below-viewport stale region). The deterministic
+  fixed-geometry storm is green; the flipping-geometry shape is the
+  next round's first item, along with the two perf items below.
+- **NOT DONE (carried)**: the 4K/scale > 1 physical-space strip
+  blit (the strip path still declines at scale > 1 — the owner's
+  profile showed whole-viewport fills dominating: 39.6% fill_rect +
+  22.9% blend_pixel self time, partly the ASan build inflating it);
+  the blend_pixel batch/hoist for translucent fills.
+
 ## [Unreleased-candidate features] — 2026-11-04 (on the rc2 line)
 
 ### Stability — owner round 15: "deleting a file leaves fdk-files broken" + the scroll notch feel
