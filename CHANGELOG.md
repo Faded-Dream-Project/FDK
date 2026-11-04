@@ -15,6 +15,47 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-04 (round 17: the drag-highlight profile)
+
+### Performance — the 53% blend_pixel
+
+- **The translucent-fill fast path (surface.c).** The owner's
+  drag-select profile: 53.7% of all cycles inside blend_pixel, 45 of
+  those points arriving via fdk_surface_fill_rect under row_paint —
+  every selected (alpha 0.38) and hovered (alpha 0.35) row background
+  blended through the per-pixel float helper: a clip test, a format
+  branch, an alpha clamp, channel unpacking of the CONSTANT source,
+  and two constant weight products, per pixel. fill_rect and fill
+  now run a hoisted loop (fill_rect_translucent): everything
+  per-pixel-invariant is computed once per fill, the body is a
+  4-wide-unrolled blend, and the result is BYTE-IDENTICAL to
+  blend_pixel (verified by an exhaustive 256-value destination
+  sweep on both surface formats — 0 pixels differ; the pixel-
+  identity gates and the scroll rigs hold). Measured 1.17-1.22x on
+  the fill micro-benchmark (-O2, scalar codegen — the ARGB divide
+  chain blocks auto-vectorization; an SSE2/LUT pass is the recorded
+  follow-up). blend_pixel itself is unchanged for the shape/AA
+  callers.
+- **The rubber-band want-test is incremental (list.c).** Every
+  pointer motion ran list_apply_band's membership loop over ALL
+  rows — O(count) per motion pixel (a 1000 Hz pointer against a
+  100k-row list is 100M iterations/s of pure testing). The apply
+  now visits only the union of the previous and current band row
+  windows (rows that keep their state cannot flip); a PRESS seeds
+  the full window — a new gesture re-evaluates every row (the
+  outside-band rows must clear unless the ctrl-base holds them;
+  the row-press band regression test caught exactly this before
+  it shipped).
+- **Verification**: core 763, X11 229 — all green; the scroll
+  visual rig passes all four storms byte-identical (down, up,
+  jitter, unmap/remap sit) with zero app warnings.
+- **Known issues (pre-existing, reproduced on the clean round-16
+  tree — NOT this round's regressions)**: the release config
+  (NDEBUG) segfaults in test_attr; the headless-sway Wayland suite
+  trips a button_hits assertion (test_wayland_integration.c:2043)
+  under this container's sway. Both recorded for a dedicated
+  config-hygiene round.
+
 ## [Unreleased-candidate features] — 2026-11-04 (on the rc2 line, later the same day)
 
 ### Stability + performance — owner round 16: the real-hardware profile, the aggressive-scroll residue
