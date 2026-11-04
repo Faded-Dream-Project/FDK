@@ -37,7 +37,10 @@ void ed_doc_retitle(ed_doc *d) {
         ta_copy(label, sizeof label, base_name(d->path));
     }
     if (d->modified) {
-        char marked[128];
+        /* the mark adds 3 bytes ("● " is 2 + NUL) over label — the
+         * round-21 build caught marked[128] one strnlen short under
+         * -Wformat-truncation; sized from label, never truncated */
+        char marked[128 + 4];
         snprintf(marked, sizeof marked, "● %s", label);
         ta_copy(d->display, sizeof d->display, marked);
     } else {

@@ -1,0 +1,141 @@
+# fdk-edit — Romanian catalog (round 21)
+msgid "&New"
+msgstr "&Nou"
+
+msgid "&Open..."
+msgstr "&Deschide..."
+
+msgid "&Save"
+msgstr "&Salvează"
+
+msgid "Save &As..."
+msgstr "Salvează &ca..."
+
+msgid "&Close Tab"
+msgstr "În&chide fila"
+
+msgid "&Quit"
+msgstr "&Ieșire"
+
+msgid "&Undo"
+msgstr "Anulea&ză"
+
+msgid "&Redo"
+msgstr "&Refă"
+
+msgid "&Find..."
+msgstr "&Caută..."
+
+msgid "Rep&lace..."
+msgstr "Î&nlocuiește..."
+
+msgid "&Word wrap"
+msgstr "&Rupere de rând"
+
+msgid "&Syntax highlighting"
+msgstr "&Evidențiere de sintaxă"
+
+msgid "&Line numbers"
+msgstr "Numere de &rând"
+
+msgid "&File"
+msgstr "&Fișier"
+
+msgid "&Edit"
+msgstr "&Editare"
+
+msgid "&View"
+msgstr "&Vizualizare"
+
+msgid "&Help"
+msgstr "&Ajutor"
+
+msgid "&About"
+msgstr "&Despre"
+
+msgid "About fdk-edit"
+msgstr "Despre fdk-edit"
+
+msgid "Unsaved changes"
+msgstr "Modificări nesalvate"
+
+msgid "Save changes to %s before closing?"
+msgstr "Salvați modificările la %s înainte de închidere?"
+
+msgid "Preferences"
+msgstr "Preferințe"
+
+msgid "Word wrap: %s\nSyntax highlighting: %s\nLine numbers: %s"
+msgstr "Rupere de rând: %s\nEvidențiere de sintaxă: %s\nNumere de rând: %s"
+
+msgid "on"
+msgstr "activat"
+
+msgid "off"
+msgstr "dezactivat"
+
+msgid "Open"
+msgstr "Deschidere"
+
+msgid "Find"
+msgstr "Căutare"
+
+msgid "Replace with"
+msgstr "Înlocuiește cu"
+
+msgid "Replace all"
+msgstr "Înlocuiește tot"
+
+msgid "Regular expression"
+msgstr "Expresie regulată"
+
+msgid "No documents"
+msgstr "Niciun document"
+
+msgid "No matches"
+msgstr "Nicio potrivire"
+
+msgid "%zu replaced"
+msgstr "%zu înlocuiri"
+
+msgid "match at byte %zu"
+msgstr "potrivire la octetul %zu"
+
+msgid "Ln %zu, Col %zu   %s   %s   %s"
+msgstr "Rd %zu, Col %zu   %s   %s   %s"
+
+msgid "Ready"
+msgstr "Gata"
+
+msgid "Untitled"
+msgstr "Fără titlu"
+
+msgid "Too many tabs"
+msgstr "Prea multe file"
+
+msgid "Saved %s"
+msgstr "Salvat %s"
+
+msgid "Cannot open %s"
+msgstr "Nu se poate deschide %s"
+
+msgid "Cannot save %s"
+msgstr "Nu se poate salva %s"
+
+msgid "Cannot open the file dialog"
+msgstr "Dialogul de fișiere nu poate fi deschis"
+
+msgid "Cannot open the save dialog"
+msgstr "Dialogul de salvare nu poate fi deschis"
+
+msgid "Word wrap on"
+msgstr "Ruperea de rând e activată"
+
+msgid "Word wrap off"
+msgstr "Ruperea de rând e dezactivată"
+
+msgid "Save As"
+msgstr "Salvare ca"
+
+msgid "New"
+msgstr "Nou"

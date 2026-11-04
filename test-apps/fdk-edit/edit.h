@@ -126,6 +126,12 @@ void ed_prefs_dialog(void);
 void ed_ask_unsaved(size_t index);
 void on_doc_changed_external(ed_doc *d);
 
+/* ui.c — the Edit-menu twins (round 21's menu wiring) */
+void ed_menu_undo(fdk_widget *mi, void *u);
+void ed_menu_redo(fdk_widget *mi, void *u);
+void ed_menu_find(fdk_widget *mi, void *u);
+void ed_menu_replace(fdk_widget *mi, void *u);
+
 /* ui.c — toolbar/menus/statusbar/findbar */
 void ed_ui_build(void);
 void ed_ui_status(void);
