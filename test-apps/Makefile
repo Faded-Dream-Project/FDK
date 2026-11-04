@@ -52,9 +52,9 @@ BINS := $(APP_DIRS:%=$(BUILD)/%)
 all: $(BINS)
 
 define APP_RULE
-$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
+$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
 	@mkdir -p $(BUILD)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
@@ -159,6 +159,10 @@ build/nav-rig: fdk-files/nav_rig.c
 
 # Round 14: the REAL-RATE stress rig (wheel at 4ms gaps, 1kHz hover,
 # scrollbar thumb drags). Boots via run_stressrig.sh.
+build/delete-rig: fdk-files/delete_rig.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I/tmp/x11dev/usr/include fdk-files/delete_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/x11dev/usr/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/x11dev/usr/lib/x86_64-linux-gnu
+
 build/stress-rig: fdk-files/stress_rig.c
 	@mkdir -p build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I/tmp/x11dev/usr/include fdk-files/stress_rig.c -o $@ $(shell pkg-config --libs x11) -lXext -L/tmp/x11dev/usr/lib/x86_64-linux-gnu -lXtst -Wl,-rpath,/tmp/x11dev/usr/lib/x86_64-linux-gnu

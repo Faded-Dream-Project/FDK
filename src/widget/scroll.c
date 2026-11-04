@@ -50,6 +50,16 @@
 #include <stdlib.h> /* getenv (FDK_SCROLL_NOBLIT) */
 
 #define SCROLL_WHEEL_STEP 48
+/* Round 15 (the scroll-feel report): the classic wheel notch moves a
+ * viewport-PROPORTIONAL distance — GTK3's rule (a notch = ~1/4 of
+ * the visible area, clamped to sane bounds), not a fixed 48 px that
+ * feels glacial in a 1000 px list and violent in a 150 px sidebar.
+ * Sub-unit deltas (high-resolution wheels, touchpads) keep their
+ * fractional meaning: the delta MULTIPLIES the step, so 0.1-notch
+ * ticks move a tenth of it — direct, smooth, no row snapping. */
+#define SCROLL_NOTCH_MIN 40
+#define SCROLL_NOTCH_MAX 160
+#define SCROLL_NOTCH_NUM 4 /* one notch = viewport / 4 */
 #define SCROLL_KEY_STEP 32
 #define SCROLL_MIN_THUMB 24
 /* Overlay-mode rhythm (1.4.4): a bar holds ~800 ms after the last
@@ -845,12 +855,35 @@ static bool scrollview_handle_event(fdk_widget *w,
     fdk_scrollview *sv = scroll_of(w);
     switch (ev->type) {
     case FDK_WIDGET_SCROLL: {
-        fdk_i32 dx = (fdk_i32)(ev->scroll.delta_x * (fdk_f32)SCROLL_WHEEL_STEP);
-        fdk_i32 dy = (fdk_i32)(ev->scroll.delta_y * (fdk_f32)SCROLL_WHEEL_STEP);
         fdk_i32 vx = 0, cx = 0, mx = 0;
         fdk_i32 vy = 0, cy = 0, my = 0;
         axis_extents(sv, true, &vx, &cx, &mx);
         axis_extents(sv, false, &vy, &cy, &my);
+        /* Per-axis notch: the axis' own viewport, quartered and
+         * clamped (a 225 px sidebar pane notch = 56 px; a 1000 px
+         * list notch = 160 px at the cap). */
+        fdk_i32 step_y = SCROLL_WHEEL_STEP;
+        if (vy > 0) {
+            step_y = vy / SCROLL_NOTCH_NUM;
+            if (step_y < SCROLL_NOTCH_MIN) {
+                step_y = SCROLL_NOTCH_MIN;
+            }
+            if (step_y > SCROLL_NOTCH_MAX) {
+                step_y = SCROLL_NOTCH_MAX;
+            }
+        }
+        fdk_i32 step_x = SCROLL_WHEEL_STEP;
+        if (vx > 0) {
+            step_x = vx / SCROLL_NOTCH_NUM;
+            if (step_x < SCROLL_NOTCH_MIN) {
+                step_x = SCROLL_NOTCH_MIN;
+            }
+            if (step_x > SCROLL_NOTCH_MAX) {
+                step_x = SCROLL_NOTCH_MAX;
+            }
+        }
+        fdk_i32 dx = (fdk_i32)(ev->scroll.delta_x * (fdk_f32)step_x);
+        fdk_i32 dy = (fdk_i32)(ev->scroll.delta_y * (fdk_f32)step_y);
         /* Overlay bars: the scrolled axes wake. */
         if (dx != 0) {
             bar_activity(sv, true);

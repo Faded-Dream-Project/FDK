@@ -2546,6 +2546,24 @@ fdk_result fdk_list_remove(fdk_widget *list, size_t index) {
     if (l->anchor >= l->count && l->count > 0) {
         l->anchor = l->count - 1;
     }
+    /* Round 15: the OTHER row-indexed fields go stale the same way
+     * the anchor just did — a delete of a row AT OR ABOVE the last
+     * click's row leaves last_click_row past the end, and the next
+     * click's double-click compare (last_click_row == i) can never
+     * match while a TRIPLE-click sequence could wrap around into
+     * activating the WRONG row; key_cursor past the end silently
+     * kills Enter-activate (the guarded read treats it as none) and
+     * shift+arrows recompute from a bogus anchor range. Clamp both
+     * exactly like the anchor. */
+    if (l->have_last_click && l->last_click_row >= l->count) {
+        l->last_click_row = (l->count > 0) ? l->count - 1 : 0;
+        if (l->count == 0) {
+            l->have_last_click = false;
+        }
+    }
+    if (l->key_cursor != (size_t)-1 && l->key_cursor >= l->count) {
+        l->key_cursor = (l->count > 0) ? l->count - 1 : (size_t)-1;
+    }
     if (l->batch_depth > 0) {
         l->batch_dirty = true;
         return FDK_OK; /* relayout + one fire at end_batch */
