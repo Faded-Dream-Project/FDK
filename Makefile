@@ -374,6 +374,10 @@ EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 TOOL_SRCS := $(wildcard tools/*.c)
 TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/tools/%,$(TOOL_SRCS))
 
+# test_cli_tools stat()s the three tools next to itself; the test
+# binary therefore depends on them (a bare `make test` builds them).
+$(BUILD_DIR)/tests/test_cli_tools: $(TOOL_BINS)
+
 # Shipped themes: the source tree's .FDKThemes/ folder (1.4.16 —
 # the custom folder the maintainer asked for by name), installed
 # into $(DATADIR)/fdk/.FDKThemes, which the runtime discovery path
@@ -406,6 +410,14 @@ SHIPPED_THEMES := .FDKThemes/faded-dream.fdk
 DEPS := $(LIB_OBJS:.o=.d) $(LIB_OBJS_PIC:.o=.d)
 
 .PHONY: all release static shared test test-x11 test-dbus test-textdemo test-wayland bench examples tools test-apps test-apps-smoke install uninstall clean verify-exports
+
+# The default goal is `all` BY NAME, not by file position: the
+# thread-test rule moved above `all:` once (G-2, 4d06933) and a
+# bare `make` silently built only that binary + the archive —
+# CI's clean checkouts then failed test_cli_tools' stat() on the
+# never-built tools while every incremental sandbox (whose
+# build/tools/ already existed) stayed green.
+.DEFAULT_GOAL := all
 
 all: static shared tools
 

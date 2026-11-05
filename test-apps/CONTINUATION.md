@@ -1,3 +1,25 @@
+# Round 27 (partial) — the release-readiness audit + the CI repair
+
+The owner asked what's left for release. The answer is
+docs/RELEASE-READINESS.md (written this round): the feature work is
+done (ROADMAP 60/62, PARITY at parity for the app core); what
+remains is the round-25 prompt-dialog bug (round 27's code item),
+the small PARITY tail by choice, and the owner's 28-section
+desktop-verification walkthrough (TESTING-ON-DESKTOP.md), then the
+tag decision.
+
+**CI was RED on every push since 4d06933 (Nov 1)** and nobody
+noticed: the thread-test rule landed above `all:` in the Makefile,
+so CI's clean-checkout `make` built only that binary — never
+`shared`/`tools` — and `make test` died at test_cli_tools' stat()
+on the missing tools. Incremental sandboxes stayed green the whole
+time (their build/tools/ already existed). Fixed: `.DEFAULT_GOAL
+:= all` + test_cli_tools depends on $(TOOL_BINS); proven by a full
+clean-tree CI simulation (make -> static+shared+tools, make test ->
+all green). Process rule: read the CI run before the next push.
+
+---
+
 # Round 26 — fdk-monitor becomes a real system monitor
 
 ## Landed
