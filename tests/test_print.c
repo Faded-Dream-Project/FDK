@@ -30,6 +30,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -257,13 +258,21 @@ static void test_file_output(void) {
     assert(job != NULL);
     assert(fdk_ok(fdk_print_job_draw_text(job, 56, 60, 3, 10,
                                           "file output")));
-    assert(fdk_ok(fdk_print_job_finish_to_file(job,
-                                                "/tmp/fdk_print_out.pdf")));
-    FILE *f = fopen("/tmp/fdk_print_out.pdf", "rb");
+    /* A per-process path: the distro install-tests run the suite
+     * twice (root, then the package builder's unprivileged user)
+     * — a fixed /tmp name left by the first run is unwritable by
+     * the second and finish_to_file fails with IO (the alpine/
+     * arch CI failures). */
+    char path[64];
+    snprintf(path, sizeof path, "/tmp/fdk_print_out_%ld.pdf",
+             (long)getpid());
+    assert(fdk_ok(fdk_print_job_finish_to_file(job, path)));
+    FILE *f = fopen(path, "rb");
     assert(f != NULL);
     char head[10];
     size_t got = fread(head, 1, 9, f);
     fclose(f);
+    remove(path);
     assert(got == 9 && memcmp(head, "%PDF-1.4", 8) == 0);
     fdk_print_job_destroy(job);
     printf("[ok] print file output: bytes on disk\n");
