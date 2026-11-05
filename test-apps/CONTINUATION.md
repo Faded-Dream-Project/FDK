@@ -1,3 +1,48 @@
+# Round 26 — fdk-monitor becomes a real system monitor
+
+## Landed
+- **The process table** (proclist.c): every /proc/<pid> row —
+  name, CPU%, resident memory, PID — in a 4-column List, rebuilt
+  once a second (every 4th 250 ms tick) in ONE batch. CPU% is a
+  delta quotient against all cores' jiffy growth (first sample
+  reads 0 — no baseline yet, like every monitor). Click a column
+  header to sort (Name/CPU/Memory/PID; second click flips
+  asc/desc; CPU+RSS default biggest-first, name/pid ascending).
+  Selection survives the rebuild, re-anchored by PID.
+- **End process** (Ctrl+K / Monitor menu / the button): SIGTERM
+  after a Yes/No confirm naming the process and PID.
+- **Disk bar**: the 4th levelbar — statvfs("/") used/total with
+  the root-reserved blocks counted as used (df's rule).
+- **CORE FIX (round-25 regression)**: the list header-click
+  signal sat behind the POINTER_DOWN MULTIPLE-mode gate —
+  SINGLE-mode lists (the monitor's) never saw header presses;
+  fdk-files never noticed (its lists are MULTIPLE). The header
+  branch now runs in every mode; the rubber band stays
+  MULTIPLE-only (NONE/SINGLE still never band — test_none's
+  contract, now also asserted alongside new SINGLE/NONE
+  header-click regression cases).
+
+## Suites at commit time
+core 766 (new: header-click in SINGLE/NONE modes), X11 229,
+4-app smoke clean. Proof shots in download/: fdk-monitor-
+proclist / -sorted-by-name / -kill-confirm / -sort-before-after.
+
+## Still open (round 27 candidates)
+- The round-25 prompt-dialog repaint bug (CONTINUATION round 25)
+  — the fdk-edit goto dialog still kills the editor's paint.
+- Monitor next steps if wanted: per-core CPU rows, the disk/net
+  history graphs, a process search/filter box (fdk-files' live
+  filter pattern ports directly).
+
+## Environment notes
+Sandbox recycled AGAIN before this round (second time): recovery
+= fetch origin main (ef48660) + bash scripts/setup-sandbox.sh +
+source scripts/env.sh, then rebuild the rigs (miniwm/xsnap live
+in work/FDK/scripts/; key_rig + the r26 click/probe helpers
+compile against /tmp/x11dev). The r26 rigs:
+scripts/r26-verify.sh (boot+shot), scripts/r26-interact.sh
+(header sort + kill flow with XTEST clicks).
+
 # Round 25 — save/save-as split, editor+apps upgrades
 
 ## Landed

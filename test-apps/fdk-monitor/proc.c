@@ -4,6 +4,10 @@
  * latency), pushed into the rolling series the canvas plots. */
 #include "monitor.h"
 
+#include <dirent.h>
+#include <sys/statvfs.h>
+#include <time.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -200,4 +204,212 @@ void mo_sample_all(void) {
     sample_net();
     sample_sys();
     mapp.samples++;
+}
+
+/* ---- round 26: the root filesystem + the process table ---------- */
+
+void mo_sample_disk(void) {
+    struct statvfs st;
+    if (statvfs("/", &st) != 0 || st.f_blocks == 0) {
+        return; /* keep the previous sample on failure            */
+    }
+    double block = (double)st.f_frsize;
+    double total = (double)st.f_blocks * block;
+    /* free-to-everyone; the root-reserved blocks count as used
+     * (df's rule — a full-ish root disk should read high)      */
+    double free_b = (double)st.f_bavail * block;
+    if (total <= 0.0) {
+        return;
+    }
+    mapp.disk.total_gb = total / 1073741824.0;
+    mapp.disk.used_gb = (total - free_b) / 1073741824.0;
+    mapp.disk.used_frac = (total - free_b) / total;
+}
+
+/* the per-pid baseline (jiffies at the LAST proc sample) — the
+ * delta quotient is the CPU share. A plain array keyed by slot;
+ * procs churn, so each sample rebuilds it.                       */
+typedef struct proc_prev {
+    int pid;
+    unsigned long long jiffies;
+} proc_prev;
+
+static proc_prev g_prev[MO_PROC_MAX];
+static size_t g_prev_count;
+static double g_prev_mono;
+
+static unsigned long long prev_jiffies(int pid,
+                                       unsigned long long *seed) {
+    for (size_t i = 0; i < g_prev_count; i++) {
+        if (g_prev[i].pid == pid) {
+            return g_prev[i].jiffies;
+        }
+    }
+    return *seed; /* first sight: treat as "no delta yet"       */
+}
+
+void mo_sample_procs(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double mono = (double)now.tv_sec + (double)now.tv_nsec / 1e9;
+
+    DIR *d = opendir("/proc");
+    if (d == NULL) {
+        return;
+    }
+    /* the /proc/stat totals for the same window (the CPU share's
+     * denominator). mapp.cpu holds the LAST tick's counters —
+     * good enough at 1 Hz granularity.                          */
+    unsigned long long total_jiffies = 0;
+    {
+        FILE *f = fopen("/proc/stat", "r");
+        if (f != NULL) {
+            char line[256];
+            if (fgets(line, sizeof line, f) != NULL &&
+                line[0] == 'c' && line[1] == 'p' && line[2] == 'u') {
+                unsigned long long v = 0;
+                const char *p = line + 3;
+                while (*p != '\0' && *p != '\n') {
+                    while (*p == ' ') {
+                        p++;
+                    }
+                    if (*p < '0' || *p > '9') {
+                        break;
+                    }
+                    v = 0;
+                    while (*p >= '0' && *p <= '9') {
+                        v = v * 10u + (unsigned long long)(*p - '0');
+                        p++;
+                    }
+                    total_jiffies += v;
+                }
+            }
+            fclose(f);
+        }
+    }
+    /* the total-jiffies DELTA needs its own baseline            */
+    static unsigned long long g_total_prev;
+    unsigned long long total_delta = 0;
+    if (g_total_prev != 0 && total_jiffies > g_total_prev) {
+        total_delta = total_jiffies - g_total_prev;
+    }
+    g_total_prev = total_jiffies;
+
+    mo_proc out[MO_PROC_MAX];
+    proc_prev next[MO_PROC_MAX];
+    size_t n = 0, k = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        /* numeric names only (= pids)                            */
+        if (e->d_name[0] < '0' || e->d_name[0] > '9') {
+            continue;
+        }
+        /* 256 (NAME_MAX) + the /proc/ prefixes, truncation-proof */
+        char path[300];
+        snprintf(path, sizeof path, "/proc/%s/stat", e->d_name);
+        FILE *f = fopen(path, "r");
+        if (f == NULL) {
+            continue; /* raced with exit                          */
+        }
+        char buf[512];
+        if (fgets(buf, sizeof buf, f) == NULL) {
+            fclose(f);
+            continue;
+        }
+        fclose(f);
+        /* "pid (comm) state ..." — comm may hold spaces and
+         * parens; everything after the LAST ')' is fixed-field */
+        char *rp = strrchr(buf, ')');
+        if (rp == NULL) {
+            continue;
+        }
+        *rp = '\0';
+        int pid = atoi(buf);
+        const char *name_start = strchr(buf, '(');
+        if (name_start == NULL) {
+            continue;
+        }
+        name_start++;
+        if (n >= MO_PROC_MAX) {
+            break;
+        }
+        mo_proc *p = &out[n++];
+        p->pid = pid;
+        snprintf(p->name, MO_PROC_NAME, "%s", name_start);
+        /* fields after ')': state(3) ... utime(14) stime(15);
+         * rp+2 skips " S " — count whitespace-separated fields  */
+        unsigned long long utime = 0, stime = 0;
+        int field = 3; /* state is field 3                        */
+        const char *q = rp + 2;
+        while (*q != '\0' && field <= 15) {
+            while (*q == ' ') {
+                q++;
+            }
+            if (*q == '\0') {
+                break;
+            }
+            unsigned long long v = 0;
+            bool num = false;
+            while (*q >= '0' && *q <= '9') {
+                v = v * 10u + (unsigned long long)(*q - '0');
+                q++;
+                num = true;
+            }
+            if (num) {
+                if (field == 14) {
+                    utime = v;
+                } else if (field == 15) {
+                    stime = v;
+                }
+                field++;
+            } else {
+                /* a non-numeric token (the state letter, or a
+                 * comm remnant) still consumes its slot       */
+                while (*q != ' ' && *q != '\0') {
+                    q++;
+                }
+                field++;
+            }
+        }
+        unsigned long long jiffies = utime + stime;
+        /* the CPU share: this pid's jiffy growth over the
+         * window, as a percent of ALL cores' jiffy growth     */
+        unsigned long long zero = 0;
+        unsigned long long base = prev_jiffies(pid, &zero);
+        p->cpu_pct = 0.0;
+        if (total_delta > 0 && base != 0 && jiffies > base) {
+            p->cpu_pct = 100.0 * (double)(jiffies - base) /
+                         (double)total_delta;
+        }
+        /* seed the next baseline                                 */
+        if (k < MO_PROC_MAX) {
+            next[k].pid = pid;
+            next[k].jiffies = jiffies;
+            k++;
+        }
+        /* RSS from /proc/<pid>/status (VmRSS, kB)                */
+        p->rss_mb = 0.0;
+        snprintf(path, sizeof path, "/proc/%d/status", pid);
+        f = fopen(path, "r");
+        if (f != NULL) {
+            while (fgets(buf, sizeof buf, f) != NULL) {
+                if (buf[0] == 'V' && buf[1] == 'm' &&
+                    buf[2] == 'R' && buf[3] == 'S' && buf[4] == 'S') {
+                    p->rss_mb = (double)strtoll(buf + 5, NULL, 10) /
+                                1024.0;
+                    break;
+                }
+            }
+            fclose(f);
+        }
+    }
+    closedir(d);
+
+    memcpy(g_prev, next, k * sizeof(proc_prev));
+    g_prev_count = k;
+    g_prev_mono = mono;
+
+    (void)g_prev_mono;
+    memcpy(mapp.procs, out, n * sizeof(mo_proc));
+    mapp.proc_count = n;
 }

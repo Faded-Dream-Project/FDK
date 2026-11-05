@@ -1447,14 +1447,17 @@ static bool list_handle_event(fdk_widget *w,
     switch (ev->type) {
     case FDK_WIDGET_POINTER_DOWN: {
         if (ev->pointer.button != FDK_POINTER_BUTTON_LEFT ||
-            l->mode != FDK_LIST_SELECTION_MULTIPLE ||
             (w->flags & FDK_WF_ENABLED) == 0) {
             return false;
         }
-        /* Round 25: the header strip is a click target FIRST — a
-         * press there toggles the column's sort, it never starts a
-         * rubber band (a sweep born on the header selected a
-         * phantom row above the content). */
+        /* Round 26: the header strip is a click target in EVERY
+         * selection mode — fdk-monitor's SINGLE-mode process list
+         * was deaf to header presses (the round-25 branch sat
+         * behind the MULTIPLE-mode gate; fdk-files never noticed
+         * because its file lists are MULTIPLE). A press there
+         * toggles the column's sort, never starts a rubber band
+         * (a sweep born on the header selected a phantom row
+         * above the content). */
         if (l->on_header_click != NULL && l->column_count > 0 &&
             ev->pointer.position.y <
                 (fdk_f32)list_header_height(l)) {
@@ -1474,6 +1477,12 @@ static bool list_handle_event(fdk_widget *w,
             l->on_header_click(&l->base, col,
                                l->on_header_click_data);
             return true; /* consumed: no band from the header    */
+        }
+        /* the rubber band stays MULTIPLE-only (NONE and SINGLE
+         * lists never band; their empty-space press falls
+         * through to whoever wants it)                          */
+        if (l->mode != FDK_LIST_SELECTION_MULTIPLE) {
+            return false;
         }
         l->banding = true;
         l->band_ctrl = (ev->pointer.modifiers & FDK_MOD_CTRL) != 0;
