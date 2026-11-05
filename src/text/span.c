@@ -166,6 +166,16 @@ fdk_result fdk__span_flatten(const char *utf8, size_t byte_len,
             }
         }
         fdk__text_run r;
+        /* The whole struct MUST zero first: the §23/B2c fields
+         * (family/size/rise/link/letter-spacing/…) are appended to
+         * fdk__text_run and a span-built run has none of them —
+         * the header's contract says "the span flattener memsets
+         * the whole struct first". The memset was missing: the
+         * garbage family/size_px drove the notifyd hostile-markup
+         * crash (attr_font_for reading a garbage family pointer;
+         * garbage size_px clamped to 512 px, one font load per
+         * segment — the 22 x "loaded @ 512px" trace).             */
+        memset(&r, 0, sizeof r);
         r.start = seg_start;
         r.end = seg_end;
         if (winner != NULL) {

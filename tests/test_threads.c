@@ -42,6 +42,7 @@
 #include "fdk/fdk_thread.h"
 
 #include <assert.h>
+#include "core/thread_internal.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
