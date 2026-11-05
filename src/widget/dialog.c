@@ -35,6 +35,7 @@
 #include "fdk/fdk_dialog.h"
 
 #include "core/alloc_internal.h"
+#include "core/context_internal.h"
 #include "core/log_internal.h"
 
 #include <string.h>
@@ -72,6 +73,13 @@ typedef struct fdk_dialog {
     } *button_ctxs;          /* referenced by the buttons         */
     size_t button_ctx_count;
     bool responded;
+    /* The window whose covered pixels this dialog owes a repaint
+     * when it goes away (options->parent, borrowed). Only ever
+     * COMPARED against the context's live window list — never
+     * dereferenced — because the borrow has no outlive contract
+     * and the response callback may destroy the parent. See
+     * dialog_damage_parent. */
+    fdk_window *parent;
     /* Set right before fdk_window_show: a dialog that fails
      * CONSTRUCTION (the fail: paths destroy the window before it
      * was ever visible) must not deliver a destroy-notify answer —
@@ -110,11 +118,19 @@ static void dialog_body_a11y_describe(const fdk_widget *w,
 
 /* ---- response path ---- */
 
+static void dialog_damage_parent(fdk_dialog *d);
+
 static void dialog_respond(fdk_dialog *d, fdk_dialog_response response) {
     if (d->responded) {
         return;
     }
     d->responded = true;
+    /* The parent's repaint is owed BEFORE anything else this path
+     * does: the application callback below may destroy the parent
+     * (the response contract allows it), and the dialog window's
+     * own destroy releases the modal grab and unmaps it — the
+     * uncovered pixels must already be flagged by then. */
+    dialog_damage_parent(d);
     /* A prompt's affirmative answer carries the Entry's text (copied
      * NOW — the window is about to die with the Entry in it). */
     const char *answer = NULL;
@@ -137,6 +153,45 @@ static void dialog_respond(fdk_dialog *d, fdk_dialog_response response) {
         fdk_window *win = d->window;
         d->window = NULL;
         fdk_window_destroy(win); /* releases the modal grab too */
+    }
+}
+
+/* The parent-damage contract (the disappearing-editor report): a
+ * modal dialog is a normal toplevel, NOT a popup — so it gets none
+ * of the anchored parent damage popups deliver on destroy. Whether
+ * the parent ever hears about its uncovered pixels is then the
+ * window manager's choice: a reparenting WM's unmap path can simply
+ * not send the parent an Expose, and the region under the closed
+ * dialog never repaints while the widgets underneath stay alive
+ * (the report: the editor's text kept growing under a dead band).
+ * The popup fix damaged the parent over the popup's anchored rect;
+ * the dialog twin cannot do rect math portably (Wayland owns dialog
+ * placement; window positions are not uniformly queryable), so it
+ * invalidates the parent's whole tree — one full repaint, correct
+ * on every backend, and cheap next to the dialog that just closed.
+ *
+ * Lifetime safety: `parent` is borrowed with no outlive contract,
+ * and the response callback may destroy the parent — so this
+ * function never dereferences it. The scan compares the pointer's
+ * VALUE against the context's registered (live) windows only; a
+ * destroyed parent is absent from that list, matches nothing, and
+ * costs nothing. */
+static void dialog_damage_parent(fdk_dialog *d) {
+    if (d == NULL || d->parent == NULL || d->window == NULL) {
+        return;
+    }
+    fdk_context *ctx = d->window->ctx;
+    if (ctx == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < ctx->window_count; i++) {
+        if (ctx->windows[i] == d->parent) {
+            fdk_widget *root = ctx->windows[i]->root;
+            if (root != NULL) {
+                fdk_widget_invalidate_all(root);
+            }
+            return;
+        }
     }
 }
 
@@ -170,6 +225,11 @@ static void dialog_destroyed(fdk_window *window, void *user) {
         return; /* already answered, or never shown: nothing to say */
     }
     d->responded = true;
+    /* An unanswered destroy (early app destroy, teardown) uncovers
+     * the parent just the same — the damage is owed here too, and
+     * runs before the callbacks for the same lifetime reasons as
+     * in dialog_respond. */
+    dialog_damage_parent(d);
     if (d->on_prompt != NULL) {
         d->on_prompt(d->negative, NULL, d->on_response_user);
     } else if (d->on_response != NULL) {
@@ -473,6 +533,7 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
     }
     d->window = win;
     d->modal = modal;
+    d->parent = (options != NULL) ? options->parent : NULL;
     fdk__window_set_auto_paint(win, true);
     (void)fdk_window_set_decorated(win, true);
     fdk_window_set_resizable(win, false); /* fixed-content dialog */
@@ -689,6 +750,7 @@ fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
     }
     d->window = win;
     d->modal = modal;
+    d->parent = (options != NULL) ? options->parent : NULL;
     fdk__window_set_auto_paint(win, true);
     (void)fdk_window_set_decorated(win, true);
     fdk_window_set_resizable(win, false); /* fixed-content dialog */

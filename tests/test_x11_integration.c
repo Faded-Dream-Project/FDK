@@ -7118,6 +7118,12 @@ static void dialog_resp_cb(fdk_dialog_response response, void *user) {
     dialog_last = response;
 }
 
+static void prompt_resp_cb(fdk_dialog_response response,
+                           const char *text, void *user) {
+    (void)text;
+    dialog_resp_cb(response, user);
+}
+
 /* The a11y layer against a REAL window: the window root announces
  * the WINDOW role, its accessible name follows the title (and a
  * set_title updates it), bounds match the live window size, and a
@@ -7591,6 +7597,112 @@ static void test_dialog_gui(void) {
     fdk_shutdown(ctx);
     printf("[ok] dialog GUI: modal grab, Enter/Escape/click responses, "
            "early destroy, clean teardown\n");
+}
+
+/* ---- the modal dialog teardown parent-damage contract --------------
+ *
+ * The disappearing-editor report: after fdk_dialog_show_prompt
+ * closes, the parent's editor area never repaints while the text
+ * underneath stays alive. Root cause: a modal dialog is a normal
+ * toplevel, NOT a popup — so it never rode the anchored parent
+ * damage popups deliver on destroy; whether the parent ever sees
+ * an Expose for the uncovered pixels is then the window manager's
+ * choice (a reparenting WM's unmap path can simply not send one).
+ * The fix (dialog.c's dialog_damage_parent) invalidates the
+ * parent's whole tree at respond/destroy time. This test pins the
+ * CONTRACT directly: after the prompt answers and dies, the
+ * parent's tree must report damage, so any has_damage-gated paint
+ * loop repaints the covered region on its next turn — with or
+ * without a helpful Expose. */
+static void test_dialog_close_damages_parent(void) {
+    fdk_context *ctx = NULL;
+    fdk_init_options opts = { .backend = FDK_PLATFORM_X11 };
+    assert(fdk_ok(init_with_retry(&ctx, &opts)));
+
+    fdk_window *parent = NULL;
+    fdk_window_options popts = { .title = "FDK prompt-damage parent",
+                                 .width = 300, .height = 200 };
+    assert(fdk_ok(fdk_window_create(ctx, &popts, &parent)));
+    fdk_window_show(parent);
+    (void)fdk_pump_events(ctx, 150);
+
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_window_get_root(parent, &root)));
+
+    Display *send = XOpenDisplay(NULL);
+    assert(send != NULL);
+    Window root_win = DefaultRootWindow(send);
+    Window before[16], now[16];
+    int n_before = x11_child_windows(send, root_win, before, 16);
+
+    dialog_responses = 0;
+    fdk_prompt_dialog_options po = {
+        .title = "Go to line",
+        .text = "Line number:",
+        .modal = true,
+        .parent = parent,
+    };
+    fdk_window *dlg = NULL;
+    assert(fdk_ok(fdk_dialog_show_prompt(ctx, &po, prompt_resp_cb,
+                                         NULL, &dlg)));
+    (void)fdk_pump_events(ctx, 250);
+    int n_now = x11_child_windows(send, root_win, now, 16);
+    assert(n_now > n_before);
+    Window dlg_xid = x11_new_child(before, n_before, now, n_now);
+    assert(dlg_xid != 0);
+
+    /* Paint the parent clean first: the pre-dialog frame goes out,
+     * damage clears — the baseline for the assertion. */
+    while (fdk_widget_tree_has_damage(root)) {
+        (void)fdk_window_paint(parent);
+    }
+    (void)fdk_pump_events(ctx, 100);
+    assert(!fdk_widget_tree_has_damage(root));
+
+    /* Answer the prompt: type 2 + Enter (the entry holds focus). */
+    x11_send_key_event(send, dlg_xid, KeyPress, 11);   /* '2' */
+    x11_send_key_event(send, dlg_xid, KeyRelease, 11);
+    (void)fdk_pump_events(ctx, 100);
+    x11_send_key_event(send, dlg_xid, KeyPress, 36);   /* Enter */
+    x11_send_key_event(send, dlg_xid, KeyRelease, 36);
+    (void)fdk_pump_events(ctx, 250);
+
+    assert(dialog_responses == 1 && dialog_last == FDK_DIALOG_OK);
+    n_now = x11_child_windows(send, root_win, now, 16);
+    assert(n_now == n_before); /* the dialog self-destroyed */
+
+    /* THE CONTRACT: the parent's tree reports damage — a
+     * has_damage-gated loop repaints the covered region even when
+     * no Expose ever arrives. */
+    assert(fdk_widget_tree_has_damage(root));
+    printf("[ok] dialog: prompt close leaves the parent's tree "
+           "damaged\n");
+
+    /* And the paint consumes it — no permanently stuck flag. */
+    (void)fdk_window_paint(parent);
+    assert(!fdk_widget_tree_has_damage(root));
+    printf("[ok] dialog: parent repaint consumes the damage\n");
+
+    /* The parentless form must stay legal (nothing to damage). */
+    fdk_prompt_dialog_options po2 = {
+        .title = "Orphan",
+        .text = "No parent",
+        .modal = true,
+    };
+    fdk_window *dlg2 = NULL;
+    assert(fdk_ok(fdk_dialog_show_prompt(ctx, &po2, prompt_resp_cb,
+                                         NULL, &dlg2)));
+    (void)fdk_pump_events(ctx, 150);
+    fdk_window_destroy(dlg2);
+    (void)fdk_pump_events(ctx, 100);
+    assert(dialog_responses == 2);
+    printf("[ok] dialog: parentless prompt destroys clean\n");
+
+    XCloseDisplay(send);
+    fdk_window_destroy(parent);
+    fdk_shutdown(ctx);
+    printf("[ok] prompt-damage regression: modal close damages parent, "
+           "repaint consumes it\n");
 }
 
 /* ---- 1.2.0: list row activation ---------------------------------- */
@@ -15110,6 +15222,7 @@ int main(void) {
     test_date_picker_gui();
     test_picture_anim_gui();
     test_dialog_gui();
+    test_dialog_close_damages_parent();
     test_a11y_gui();
     test_list_activation_gui();
     test_file_dialog_gui();

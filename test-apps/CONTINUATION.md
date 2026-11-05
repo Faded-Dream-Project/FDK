@@ -1,3 +1,58 @@
+# Round 28 — the disappearing editor: the prompt-dialog teardown damages the parent
+
+Round 27's code item, RELEASE-READINESS blocker #2, and the one
+CONTINUATION-filed open bug a user hits in daily editor use —
+CLOSED this round.
+
+THE REPORT (round 25, 22:50): after ANY fdk_dialog_show_prompt
+closes, the fdk-edit main window stops painting its editor — the
+region where the dialog sat stays a dead band while the text
+underneath stays alive (on_doc_changed shows it growing). The save
+file-picker was unaffected.
+
+ROOT CAUSE: a modal dialog is a normal toplevel window, NOT a
+popup — so it gets NONE of the anchored parent damage the popup
+teardown delivers on destroy. Whether the parent ever hears about
+its uncovered pixels is then the WINDOW MANAGER's choice: a
+reparenting WM's unmap path can simply not send the parent an
+Expose for the region, and nothing else in the pipeline flags it.
+Under bare Xvfb (no WM — every CI run and sandbox rig) the
+server's own unmap Expose happens to arrive, which is exactly why
+the bug hid from every test-green run while the owner's real
+desktop showed it.
+
+THE FIX (src/widget/dialog.c): dialogs now store options->parent,
+and dialog_damage_parent() invalidates the parent's whole widget
+tree when the dialog goes away — on BOTH teardown paths:
+dialog_respond (the answered close — run at the TOP, before the
+application callbacks) and dialog_destroyed (the unanswered early
+destroy: app teardown, parent window teardown, shutdown).
+Whole-tree rather than the popup's rect math because Wayland owns
+dialog placement and window positions are not uniformly
+queryable — one full repaint of the parent is correct on every
+backend and cheap next to the dialog that just closed.
+
+LIFETIME DISCIPLINE (the subtle part): the parent pointer is
+BORROWED with no outlive contract, and the response callback may
+destroy the parent (the documented contract allows it; the file
+dialog's respond chain does exactly that). So dialog_damage_parent
+NEVER dereferences the stored pointer — it compares its VALUE
+against the context's registered live-window list and damages the
+match only. A destroyed parent is absent from the list, matches
+nothing, costs nothing. The damage also runs BEFORE the
+application callbacks on the respond path, so the repaint is
+flagged while the world is certainly still alive.
+
+REGRESSION FENCE (the repro r25-edit-probe.sh never got):
+test_dialog_close_damages_parent in the X11 suite — opens a modal
+prompt over a parent, paints the parent clean, answers the prompt,
+then asserts (1) the parent's tree reports damage immediately
+after the dialog dies — the contract any has_damage-gated paint
+loop relies on, WITH OR WITHOUT a helpful Expose, which is what
+makes it fire under bare Xvfb too; (2) the next paint consumes it
+(no permanently stuck damage flag); (3) the parentless form stays
+legal (nothing to damage, no crash).
+
 # Round 27 continued — the CI layer-2 fix
 
 After the Makefile repair exposed the next layer (the notifyd rig
@@ -72,8 +127,9 @@ core 766 (new: header-click in SINGLE/NONE modes), X11 229,
 proclist / -sorted-by-name / -kill-confirm / -sort-before-after.
 
 ## Still open (round 27 candidates)
-- The round-25 prompt-dialog repaint bug (CONTINUATION round 25)
-  — the fdk-edit goto dialog still kills the editor's paint.
+- ~~The round-25 prompt-dialog repaint bug~~ — CLOSED in round 28
+  (dialog_damage_parent on both teardown paths; regression test in
+  the X11 suite).
 - Monitor next steps if wanted: per-core CPU rows, the disk/net
   history graphs, a process search/filter box (fdk-files' live
   filter pattern ports directly).
@@ -111,7 +167,7 @@ scripts/r26-verify.sh (boot+shot), scripts/r26-interact.sh
 - Core: fdk_textview_scroll_to_line (goto-line) + set_caret now
   scrolls (consistency with its a11y twin). Unit test test_goto.
 
-## THE OPEN BUG (round 26's first job — found at 22:50)
+## THE BUG (CLOSED in round 28 — the prompt-dialog teardown damage fix; see the round 28 section)
 After ANY fdk_dialog_show_prompt closes, the fdk-edit MAIN WINDOW
 STOPS PAINTING ITS EDITOR: the region where the dialog sat stays
 black, the editor area never redraws (status bar still updates).
