@@ -565,10 +565,67 @@ static void test_window_identity(void) {
         XFree(data);
     }
 
+    /* --- _NET_WM_WINDOW_OPACITY (the terminal round): clamped to
+     * [0,1], scaled to the 32-bit fixed-point CARDINAL, round-tripped
+     * through the server. The default (never set) is fully opaque. */
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid,
+                                                "_NET_WM_WINDOW_OPACITY",
+                                                &type, &fmt, &n);
+        assert(data == NULL || n == 0); /* not set yet */
+        XFree(data);
+    }
+    assert(fdk_window_get_opacity(win) == 1.0);
+    assert(fdk_ok(fdk_window_set_opacity(win, 0.75)));
+    assert(fdk_window_get_opacity(win) == 0.75);
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid,
+                                                "_NET_WM_WINDOW_OPACITY",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        assert(type == XA_CARDINAL);
+        assert(fmt == 32);
+        assert(n == 1);
+        unsigned long card = ((unsigned long *)data)[0] & 0xFFFFFFFFL;
+        /* 0.75 of the 0xFFFFFFFF scale with the setter's +0.5
+         * rounding: 3221225471 = 0xBFFFFFFF (NOT 0xC0000000 — that
+         * would be 0.75 of 2^32; the EWMH scale tops at
+         * 0xFFFFFFFF). The raw long sign-extends (top bit set),
+         * hence the mask — the pid readback's documented Xlib
+         * behavior, same discipline here. */
+        assert(card == 0xBFFFFFFFUL);
+        XFree(data);
+    }
+    /* over/under-clamp: >1 pins to fully opaque, the getter agrees */
+    assert(fdk_ok(fdk_window_set_opacity(win, 3.0)));
+    assert(fdk_window_get_opacity(win) == 1.0);
+    {
+        Atom type = None; int fmt = 0; unsigned long n = 0;
+        unsigned char *data = x11_read_property(dpy, xid,
+                                                "_NET_WM_WINDOW_OPACITY",
+                                                &type, &fmt, &n);
+        assert(data != NULL);
+        unsigned long card = ((unsigned long *)data)[0] & 0xFFFFFFFFL;
+        assert(card == 0xFFFFFFFFul);
+        XFree(data);
+    }
+
+    /* --- the audible bell: XBell on X11 must at least SUCCEED (the
+     * server may have the bell disabled — that is the server's state
+     * and still FDK_OK); the percent clamp accepts the extremes. */
+    assert(fdk_ok(fdk_window_bell(win, 0)));
+    assert(fdk_ok(fdk_window_bell(win, 100)));
+    assert(fdk_ok(fdk_window_bell(win, -100)));
+    assert(fdk_window_bell(NULL, 0) == FDK_ERR_INVALID_ARGUMENT);
+    assert(fdk_window_set_opacity(NULL, 0.5) == FDK_ERR_INVALID_ARGUMENT);
+
     XCloseDisplay(dpy);
     fdk_window_destroy(win);
     fdk_shutdown(ctx);
-    printf("[ok] X11 window identity: PID + client machine + role + icon round-trip\n");
+    printf("[ok] X11 window identity: PID + client machine + role + icon round-trip "
+           "+ opacity CARDINAL + bell\n");
 }
 
 /* ---- Touch (1.1.0, M-3) -------------------------------------------------
