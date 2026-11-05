@@ -17,6 +17,20 @@ static void on_tick(fdk_timer *timer, void *user) {
     (void)timer;
     (void)user;
     mo_sample_all();
+    /* round 26: the process table resamples at ~1 Hz (every 4th
+     * 250 ms tick; every tick at the 1000 ms cadence) — /proc
+     * walks are heavier than the counters, and the CPU deltas
+     * need a window to be meaningful. The disk re-stats too. */
+    mapp.proc_tick++;
+    if (mapp.proc_tick >= (mapp.interval_ms >= 1000u ? 1u : 4u)) {
+        mapp.proc_tick = 0;
+        mo_sample_disk();
+        mo_proclist_refresh();
+    }
+    if (mapp.disk_level != NULL) {
+        fdk_levelbar_set_value(mapp.disk_level,
+                               mapp.disk.used_frac);
+    }
     /* the levelbars (0..1 fractions) */
     if (mapp.cpu_level != NULL) {
         fdk_levelbar_set_value(mapp.cpu_level,
@@ -109,6 +123,12 @@ static void menu_test_note(fdk_widget *mi, void *u) {
     mo_notify_test();
 }
 
+static void menu_kill(fdk_widget *mi, void *u) {
+    (void)mi;
+    (void)u;
+    mo_proclist_kill();
+}
+
 static void menu_interval(fdk_widget *mi, void *u);
 
 static void menu_about(fdk_widget *mi, void *u) {
@@ -191,6 +211,8 @@ static void menus_build(void) {
     menu_add(m_mon, ta_("&Pause/resume sampling"), "Ctrl+P",
              menu_pause);
     menu_add(m_mon, ta_("&Test notification"), NULL, menu_test_note);
+    menu_add(m_mon, ta_("&End process..."), "Ctrl+K",
+             menu_kill);
     menu_add(m_mon, ta_("&Quit"), "Ctrl+Q", menu_quit);
     (void)fdk_menu_bar_append(bar, ta_("&Monitor"), m_mon);
 
@@ -254,6 +276,12 @@ static void sh_pause(fdk_window *w, void *u) {
     mo_set_running(!mapp.running);
 }
 
+static void sh_kill(fdk_window *w, void *u) {
+    (void)w;
+    (void)u;
+    mo_proclist_kill();
+}
+
 int main(void) {
     memset(&mapp, 0, sizeof mapp);
     if (!ta_init(&mapp.base, "fdk-monitor")) {
@@ -266,7 +294,7 @@ int main(void) {
         mapp.interval_ms = 250;
     }
     if (!ta_open(&mapp.base, "fdk-monitor — System Monitor", 980,
-                 640)) {
+                 760)) {
         ta_close(&mapp.base);
         return 1;
     }
@@ -274,18 +302,25 @@ int main(void) {
     /* the levelbar rows (CPU / RAM / swap) */
     fdk_widget *rows = NULL;
     (void)fdk_widget_create(mapp.base.content, NULL,
-                            (fdk_rect){8, 6, 440, 96}, &rows);
+                            (fdk_rect){8, 6, 440, 128}, &rows);
     fdk_widget *r = level_row(rows, "CPU", &mapp.cpu_level);
     fdk_widget_set_bounds(r, (fdk_rect){0, 0, 436, 26});
     r = level_row(rows, "RAM", &mapp.mem_level);
     fdk_widget_set_bounds(r, (fdk_rect){0, 32, 436, 26});
     r = level_row(rows, "Swap", &mapp.swap_level);
     fdk_widget_set_bounds(r, (fdk_rect){0, 64, 436, 26});
+    /* round 26: the root filesystem's usage (statvfs) — the 4th
+     * levelbar; a full / is the classic server failure          */
+    r = level_row(rows, "Disk /", &mapp.disk_level);
+    fdk_widget_set_bounds(r, (fdk_rect){0, 96, 436, 26});
 
     mo_graphs_build();
+    mo_proclist_build();
     menus_build();
     (void)fdk_window_add_shortcut(mapp.base.window, "Ctrl+P",
                                   sh_pause, NULL);
+    (void)fdk_window_add_shortcut(mapp.base.window, "Ctrl+K",
+                                  sh_kill, NULL);
 
     mo_notify_boot();
     mo_tray_notify_boot();
@@ -293,6 +328,7 @@ int main(void) {
     /* the first sample now (so the graphs never start empty), the
      * timer carries it from here                                 */
     mo_sample_all();
+    mo_sample_disk();
     mo_set_running(true);
     on_tick(NULL, NULL);
 

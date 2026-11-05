@@ -1119,6 +1119,106 @@ static void test_round10_header_strip(void) {
 
 /* ---- round 11: the public pointer-to-row map ----------------------- */
 
+/* round 26: the header-click signal — the sort-toggle gesture */
+static int g_hdr_col = -1;
+static int g_hdr_fires = 0;
+static void on_hdr(fdk_widget *l, size_t col, void *user) {
+    (void)l;
+    (void)user;
+    g_hdr_col = (int)col;
+    g_hdr_fires++;
+}
+
+static void test_round26_header_click(void) {
+    fdk_widget *root = NULL;
+    assert(fdk_ok(fdk_widget_create(NULL, NULL,
+                                    (fdk_rect){0, 0, 430, 290},
+                                    &root)));
+    fdk_widget *list = NULL;
+    assert(fdk_ok(fdk_list_create(root, g_font, &list)));
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_MULTIPLE);
+    fdk_list_column cols[3] = {
+        {"Name", 120, true},
+        {"Size", 80, false},
+        {"PID", 60, false},
+    };
+    assert(fdk_ok(fdk_list_set_columns(list, cols, 3)));
+    for (int i = 0; i < 5; i++) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "row %d", i);
+        assert(fdk_ok(fdk_list_append(list, buf, NULL)));
+    }
+    fdk_widget_set_bounds(list, (fdk_rect){10, 10, 400, 260});
+    const fdk_i32 top = fdk__list_test_content_top(list);
+    assert(top > 0);
+
+    fdk_list_set_on_header_click(list, on_hdr, NULL);
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(430, 290, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_widget_tree_paint(root, s);
+
+    /* a press on the header fires with the column index and
+     * selects nothing (no band, no row) */
+    fdk_event_data hd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN,
+                                  200.0f, (float)(10 + top / 2), 0);
+    fdk_event_data hu = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 200.0f,
+                                  (float)(10 + top / 2), 0);
+    assert(fdk_widget_tree_handle_event(root, &hd));
+    (void)fdk_widget_tree_handle_event(root, &hu);
+    assert(g_hdr_fires == 1);
+    assert(fdk_list_selected_count(list) == 0);
+
+    /* the resolved geometry maps x to a column: near the left
+     * edge is column 0; way right is column 2 (300px wide list,
+     * col 2 anchored at the far end)                       */
+    g_hdr_col = -1;
+    hd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 20.0f,
+                   (float)(10 + top / 2), 0);
+    hu = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 20.0f,
+                   (float)(10 + top / 2), 0);
+    assert(fdk_widget_tree_handle_event(root, &hd));
+    (void)fdk_widget_tree_handle_event(root, &hu);
+    assert(g_hdr_fires == 2);
+    assert(g_hdr_col == 0);
+
+    /* a press BELOW the header (a row) must NOT fire it */
+    const fdk_i32 rh = fdk_list_get_row_height(list);
+    g_hdr_fires = 0;
+    hd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 200.0f,
+                   (float)(10 + top + rh / 2), 0);
+    (void)fdk_widget_tree_handle_event(root, &hd);
+    assert(g_hdr_fires == 0);
+
+    /* round 26's regression: SINGLE mode (fdk-monitor's process
+     * list) fires the header too — and never bands. NONE mode
+     * (test_none's contract) still selects nothing. */
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_SINGLE);
+    fdk_list_clear_selection(list);
+    g_hdr_fires = 0;
+    hd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 200.0f,
+                   (float)(10 + top / 2), 0);
+    hu = ev_button(FDK_EVENT_POINTER_BUTTON_UP, 200.0f,
+                   (float)(10 + top / 2), 0);
+    assert(fdk_widget_tree_handle_event(root, &hd));
+    (void)fdk_widget_tree_handle_event(root, &hu);
+    assert(g_hdr_fires == 1);
+    assert(fdk_list_selected_count(list) == 0);
+    fdk_list_set_selection_mode(list, FDK_LIST_SELECTION_NONE);
+    fdk_list_clear_selection(list);
+    g_hdr_fires = 0;
+    hd = ev_button(FDK_EVENT_POINTER_BUTTON_DOWN, 200.0f,
+                   (float)(10 + top / 2), 0);
+    (void)fdk_widget_tree_handle_event(root, &hd);
+    assert(g_hdr_fires == 1); /* the header is still clickable   */
+    assert(fdk_list_get_selected(list) == -1); /* nothing sel'd  */
+
+    fdk_surface_destroy(s);
+    fdk_widget_destroy(root);
+    printf("[ok] list header-click: fires with the column, no "
+           "band, rows never fire it\n");
+}
+
 static void test_round11_row_at(void) {
     fdk_widget *root = fresh_root();
     fdk_widget *list = NULL;
@@ -1243,6 +1343,7 @@ int main(void) {
     test_rubber_band();
     test_round9_ports();
     test_round10_header_strip();
+    test_round26_header_click();
     test_round11_row_at();
 
     fdk_font_destroy(g_font);
