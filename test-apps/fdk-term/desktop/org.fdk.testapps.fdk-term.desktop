@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=fdk-term
+GenericName=Terminal
+Comment=The FDK terminal emulator
+Exec=fdk-term
+Icon=org.fdk.testapps.fdk-term
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;commandline;cmd;
+StartupNotify=true
