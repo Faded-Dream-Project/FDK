@@ -412,6 +412,68 @@ static void test_wrap_twin(void) {
     printf("[ok] attr wrap: the big run wraps at its own width\n");
 }
 
+/* The span-flattener zeroing regression (the notifyd crash):
+ * fdk__span_flatten built fdk__text_run on the stack WITHOUT the
+ * documented memset, leaving the §23/B2c fields (family, size_px,
+ * rise, link...) as stack garbage. The garbage family pointer
+ * SEGV'd attr_font_for; garbage size_px clamped to 512 and loaded
+ * a font per segment. This test POISONS the stack first (a deep
+ * dirty_frame call), then flattens + draws spans and asserts the
+ * runs carry no family/size attributes at all. */
+static void dirty_frame(unsigned char *big) {
+    for (size_t i = 0; i < 4096; i++) {
+        big[i] = (unsigned char)(i * 31 + 7);
+    }
+}
+
+static void test_span_flatten_zeroes_appended_fields(void) {
+    assert(g_font != NULL);
+
+    /* Poison the stack so an un-memset struct CANNOT pass. */
+    unsigned char junk[4096];
+    dirty_frame(junk);
+    /* Keep junk alive past the flatten call. */
+    unsigned char sum = 0;
+    for (size_t i = 0; i < 4096; i += 512) {
+        sum ^= junk[i];
+    }
+
+    const char *text = "plain bold and more";
+    fdk_span spans[2] = {{6, 10, FDK_FONT_STYLE_BOLD, false,
+                          {0, 0, 0, 0}, false, false},
+                         {15, 20, FDK_FONT_STYLE_BOLD, false,
+                          {0, 0, 0, 0}, false, false}};
+    fdk__text_run *runs = NULL;
+    size_t n_runs = 0;
+    assert(fdk_ok(fdk__span_flatten(text, strlen(text), spans, 2,
+                                    FDK_FONT_STYLE_NORMAL, &runs,
+                                    &n_runs)));
+    assert(n_runs >= 1);
+    for (size_t k = 0; k < n_runs; k++) {
+        assert(runs[k].family == NULL);
+        assert(runs[k].size_px == 0);
+        assert(runs[k].size_delta == 0);
+        assert(runs[k].link == NULL);
+        assert(runs[k].bg_set == false);
+        assert(runs[k].ul_color_set == false);
+        assert(runs[k].st_color_set == false);
+    }
+    /* And the draw path survives the same poison (shape_range is
+     * where the garbage family reached attr_font_for). */
+    fdk_surface *s = NULL;
+    assert(fdk_ok(fdk_surface_create(400, 60, &s)));
+    fdk_surface_invalidate_all(s);
+    fdk_result dr = fdk_surface_draw_spans_utf8(
+        s, g_font, text, strlen(text), spans, 2, 4, 30,
+        (fdk_color){0, 0, 0, 255});
+    assert(fdk_ok(dr));
+    fdk_surface_destroy(s);
+    fdk_free(runs);
+    (void)sum;
+    printf("[ok] span flatten: appended fields zeroed (the notifyd "
+           "hostile-markup crash's regression fence)\n");
+}
+
 int main(void) {
     static const char *candidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -432,6 +494,7 @@ int main(void) {
         return 0;
     }
 
+    test_span_flatten_zeroes_appended_fields();
     test_flatten_ranges();
     test_markup_attrs();
     test_measure_twin();

@@ -1,3 +1,25 @@
+# Round 27 continued — the CI layer-2 fix
+
+After the Makefile repair exposed the next layer (the notifyd rig
+had not RUN since Nov 1), the rig crashed the daemon: SEGV
+attr.c:111 attr_font_for via sh_attr_font, reading a garbage
+`family` pointer, with 22x "loaded @ 512px" spam. ROOT CAUSE:
+fdk__span_flatten built fdk__text_run on the stack WITHOUT the
+memset its own header contract promises — the §23/B2c appended
+fields (family/size_px/rise/link/...) were raw stack garbage in
+every span-only flatten. The garbage family pointer crashed the
+attr resolver; garbage size_px clamped to 512 loaded a font per
+segment. One-line fix (memset in span.c) + a stack-poisoning
+regression test in test_attr.c (poison the stack, flatten, assert
+every appended field is zeroed, then draw through the same path).
+Full battery after: core, X11 229, dbus, 4-app smoke, notifyd rig
+ALL PASS. (Debugging detours worth remembering: the rig's
+daemon.log is truncated per phase — copy it inside phase_P to see
+the phase-P daemon's death; and a stale test binary after a
+library-only rebuild produces a phantom assertion failure.)
+
+---
+
 # Round 27 (partial) — the release-readiness audit + the CI repair
 
 The owner asked what's left for release. The answer is
