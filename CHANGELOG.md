@@ -33,6 +33,44 @@ API surface delta explicitly (FDK's ABI promise — docs/abi-policy.md —
 makes that the contract that matters), and version-marked entries
 note their development-candidate status.
 
+## [Unreleased-candidate features] — 2026-11-05 (round 28: the disappearing editor — prompt-dialog teardown damages the parent)
+
+### Fixed — after a prompt dialog closes, the parent's covered pixels never repaint
+
+**The report (the disappearing editor):** after
+`fdk_dialog_show_prompt` closes, the parent window's editor area
+never repaints — the region where the dialog sat stays a dead band
+while the text underneath stays alive. The save picker was
+unaffected. No public API change (internal to `src/widget/dialog.c`).
+
+- **Root cause**: a modal dialog is a normal toplevel window, NOT
+  a popup — so it gets none of the anchored parent damage the
+  popup teardown delivers on destroy. Whether the parent ever
+  hears about its uncovered pixels is then the window manager's
+  choice: a reparenting WM's unmap path can simply not send the
+  parent an Expose for the region, and nothing else flags it.
+  Under bare Xvfb (no WM) the server's own unmap Expose happens
+  to arrive — which is why every test-green run hid the bug while
+  real desktops showed it.
+- **The fix** (`src/widget/dialog.c`): dialogs store
+  `options->parent`; `dialog_damage_parent()` invalidates the
+  parent's whole widget tree when the dialog goes away, on BOTH
+  paths — `dialog_respond` (answered close, damage at the top,
+  before the application callbacks) and `dialog_destroyed`
+  (unanswered early destroy). Whole-tree because Wayland owns
+  dialog placement (rect math is not portable); one full repaint
+  is correct everywhere and cheap next to the dialog that closed.
+- **Lifetime discipline**: `parent` is borrowed with no outlive
+  contract and the response callback may destroy it — so the
+  stored pointer is never dereferenced. The helper compares its
+  value against the context's registered live-window list and
+  damages the match only; a destroyed parent matches nothing.
+- **Regression fence** (X11 suite):
+  `test_dialog_close_damages_parent` — prompt close leaves the
+  parent's tree damaged (the contract any has_damage-gated paint
+  loop relies on, with or without a helpful Expose), the next
+  paint consumes it, and the parentless form stays legal.
+
 ## [Unreleased-candidate features] — 2026-11-05 (round 20: the disappearing folders — root cause found, proven, fixed)
 
 ### Fixed — fdk-files wiped its own listing on every watch-fired reload
