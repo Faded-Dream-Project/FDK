@@ -358,6 +358,11 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->net_wm_pid = XInternAtom(display, "_NET_WM_PID", False);
     conn->wm_client_machine = XInternAtom(display, "WM_CLIENT_MACHINE", False);
     conn->wm_window_role = XInternAtom(display, "WM_WINDOW_ROLE", False);
+    /* The terminal round: EWMH whole-window opacity (CARDINAL, the
+     * 32-bit fixed-point 0..0xFFFFFFFF convention every compositing
+     * manager reads). */
+    conn->net_wm_window_opacity =
+        XInternAtom(display, "_NET_WM_WINDOW_OPACITY", False);
     /* Activation + startup notification (1.1.0, S-6): the EWMH
      * activation request type, the window property a launched app
      * tags itself with, and the root-message pair carrying the

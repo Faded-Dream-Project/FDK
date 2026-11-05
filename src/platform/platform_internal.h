@@ -360,6 +360,20 @@ typedef struct fdk_platform_ops {
      * create-time default. */
     void (*window_set_role)(fdk_platform_window *pwindow,
                             const char *role);
+    /* OPTIONAL (the terminal round): the EWMH _NET_WM_WINDOW_OPACITY
+     * CARDINAL (0..0xFFFFFFFF). X11 writes the property; Wayland has
+     * no per-toplevel-opacity protocol in xdg-shell, so it leaves the
+     * slot NULL and the public API returns FDK_ERR_UNSUPPORTED
+     * (documented honestly — no half-fake compositing). `opacity`
+     * arrives pre-clamped [0,1]; backends scale to their own units. */
+    fdk_result (*window_set_opacity)(fdk_platform_window *pwindow,
+                                     double opacity);
+    /* OPTIONAL (the terminal round): the AUDIBLE bell — X11's XBell
+     * on the window's screen at `percent` (already clamped [-100,
+     * 100]). Wayland has no bell protocol; a NULL slot means the
+     * public API reports FDK_ERR_UNSUPPORTED. */
+    fdk_result (*window_bell)(fdk_platform_window *pwindow,
+                              int percent);
     void (*window_resize)(fdk_platform_window *pwindow, fdk_i32 width, fdk_i32 height);
     void (*window_set_size_limits)(fdk_platform_window *pwindow,
                                     fdk_size min_size, fdk_size max_size);

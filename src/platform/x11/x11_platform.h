@@ -182,6 +182,9 @@ struct fdk_platform_connection {
     Atom net_wm_state_hidden; /* 1.1.0 D-4: minimized (iconic)     */
     Atom net_client_list;     /* 1.1.0 D-4: the taskbar roster     */
     Atom net_close_window;    /* 1.1.0 D-4: the polite close       */
+    Atom net_wm_window_opacity; /* the terminal round: EWMH whole-
+                                 * window alpha, honored by every
+                                 * compositing manager             */
     Atom net_wm_moveresize;
     Atom wm_state;         /* ICCCM WM_STATE (iconic/normal tracking) */
     Atom wm_change_state;  /* ICCCM iconify request message type      */
@@ -749,6 +752,12 @@ void fdk_x11_window_set_icon(fdk_platform_window *pwindow,
                              int width, int height);
 void fdk_x11_window_set_role(fdk_platform_window *pwindow,
                              const char *role);
+/* The terminal round: EWMH whole-window opacity (CARDINAL, the
+ * 32-bit fixed-point convention) + the server's audible bell. */
+fdk_result fdk_x11_window_set_opacity(fdk_platform_window *pwindow,
+                                      double opacity);
+fdk_result fdk_x11_window_bell(fdk_platform_window *pwindow,
+                               int percent);
 
 /* The session lane (1.1.0, D-5): set_command is the public
  * window_set_command op (WM_COMMAND, argv form, stored for the

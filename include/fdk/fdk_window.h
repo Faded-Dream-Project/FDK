@@ -172,6 +172,59 @@ void fdk_window_set_icon(fdk_window *window, const fdk_u32 *pixels,
  * call this. Safe before or after fdk_window_show(). */
 void fdk_window_set_role(fdk_window *window, const char *role);
 
+/* ---- Window opacity + audible bell (the terminal round) ----------------
+ *
+ * Two things every terminal emulator asks of its window that the
+ * catalog never grew. Both are documented-honest about the backend
+ * split: X11 speaks both natively, Wayland (as of the protocols FDK
+ * consumes — xdg-shell has neither) does not, and the calls are
+ * clean no-ops returning FDK_ERR_UNSUPPORTED there rather than
+ * half-fakes. FDK_ERR_UNSUPPORTED is a REPORT, not a failure to
+ * handle: an app that wants a translucent terminal on Wayland today
+ * composites its own background (fdk-term's profile opacity does
+ * exactly that per-backend). */
+
+/* Sets the whole-window OPACITY (the EWMH _NET_WM_WINDOW_OPACITY
+ * convention: 0.0 fully transparent, 1.0 fully opaque, the value
+ * clamped into [0,1] before it reaches the platform). This is the
+ * COMPOSITOR's per-window alpha — the WM/compositor blends the
+ * entire window, contents and decorations alike, over whatever is
+ * behind it; it is not a per-pixel alpha channel and no drawing
+ * API participates. Reading it back returns the clamped value last
+ * set (1.0 when never set).
+ *
+ * X11: the CARDINAL property is written on the window; a compositing
+ * manager honors it (a bare X server without one shows the window
+ * fully opaque — the property is then inert, which is the EWMH
+ * contract, not an FDK limitation). Wayland: FDK_ERR_UNSUPPORTED.
+ *
+ * A terminal asks for this with its "background opacity" profile
+ * setting; a media player with its mini-player fade; an app that
+ * never calls it pays nothing. Safe before or after
+ * fdk_window_show(); the property follows the window. */
+fdk_result fdk_window_set_opacity(fdk_window *window, double opacity);
+
+/* The clamped opacity last set (1.0 when never set; 1.0 on a NULL
+ * window, the defensive convention). */
+double fdk_window_get_opacity(const fdk_window *window);
+
+/* Rings the display's AUDIBLE bell on this window's screen — the
+ * classic terminal BEL (0x07) answer. X11: XBell on the context's
+ * connection at the given percent (0 = the server's default volume;
+ * negative inverts the pitch where the server supports it, per
+ * XSetBellPercent conventions — passed through clamped to [-100,
+ * 100]). Wayland: no bell protocol exists in xdg-shell, so
+ * FDK_ERR_UNSUPPORTED — a Wayland terminal answers BEL with its
+ * VISUAL bell (flash) and/or a notification, which is what every
+ * real Wayland terminal does.
+ *
+ * BEL is not a stream event: it is the terminal APPLICATION's job
+ * to call this when its parser sees 0x07 (FDK never listens to
+ * bytes it does not own). Returns FDK_OK on X11 even when the
+ * server has the bell disabled (that is the server's state, not a
+ * protocol failure). */
+fdk_result fdk_window_bell(fdk_window *window, int percent);
+
 /* Sets the ICCCM WM_COMMAND — the command a session manager
  * re-executes to restart this application in its current state
  * (1.1.0, D-5; the X11 session lane, see fdk_session.h). `argv` is

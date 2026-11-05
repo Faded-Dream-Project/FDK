@@ -260,6 +260,13 @@ struct fdk_window {
     fdk_i64 last_band_click_ms;
     fdk_i32 last_band_click_x, last_band_click_y;
 
+    /* The clamped whole-window opacity last set through
+     * fdk_window_set_opacity (1.0 until then) — the public getter's
+     * answer. The COMPOSITING itself is the platform's: X11's EWMH
+     * property, nothing on Wayland (the op is NULL there and the
+     * public setter answers FDK_ERR_UNSUPPORTED). */
+    double opacity;
+
     /* Hit rects of the band's window-management buttons (minimize /
      * maximize-restore / close), window-local, refreshed by
      * window_arrange_deco(). Which subset exists depends on the

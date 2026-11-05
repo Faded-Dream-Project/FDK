@@ -1103,6 +1103,53 @@ void fdk_x11_window_set_role(fdk_platform_window *pwindow,
     XFlush(dpy);
 }
 
+/* _NET_WM_WINDOW_OPACITY (EWMH): the CARDINAL the compositing manager
+ * blends the whole window by. The 32-bit fixed-point scale is the
+ * convention (0xFFFFFFFF = opaque); a bare X server without a
+ * compositing manager ignores the property — the honest EWMH
+ * contract, nothing FDK can do about it. `opacity` arrives already
+ * clamped to [0,1] from the public API. */
+fdk_result fdk_x11_window_set_opacity(fdk_platform_window *pwindow,
+                                      double opacity) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    /* Xlib's format-32 rule: the buffer is an array of LONG, each
+     * holding a 32-bit value (the server repacks; the extra bytes of
+     * a bare unsigned long on LP64 never travel — but a non-long
+     * buffer is exactly the kind of mismatch XChangeProperty cannot
+     * detect and Xvfb readback exposes). */
+    long card = (long)(opacity * 4294967295.0 + 0.5);
+    if (card > 0xFFFFFFFFL) {
+        card = 0xFFFFFFFFL;
+    }
+    if (card < 0) {
+        card = 0;
+    }
+    XChangeProperty(pwindow->conn->display, pwindow->xwindow,
+                    pwindow->conn->net_wm_window_opacity,
+                    XA_CARDINAL, 32, PropModeReplace,
+                    (const unsigned char *)&card, 1);
+    XFlush(pwindow->conn->display);
+    return FDK_OK;
+}
+
+/* XBell: the server's own audible bell on the window's screen. The
+ * percent is the XSetBellPercent convention (clamped by the caller
+ * to [-100, 100]; 0 = the server's default base volume). A server
+ * with the bell disabled simply stays silent — that is the server's
+ * state, reported as success because the protocol call itself
+ * worked. */
+fdk_result fdk_x11_window_bell(fdk_platform_window *pwindow,
+                               int percent) {
+    if (pwindow == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    XBell(pwindow->conn->display, percent);
+    XFlush(pwindow->conn->display);
+    return FDK_OK;
+}
+
 /* ---- WM_COMMAND / WM_SAVE_YOURSELF (1.1.0, D-5) -----------------------
  *
  * The X11 session lane. WM_COMMAND is the restart command a session

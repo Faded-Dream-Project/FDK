@@ -867,6 +867,7 @@ void fdk__window_init_fields(fdk_window *window, fdk_context *ctx,
     window->maximized = false;
     window->minimized = false;
     window->fullscreen = false;
+    window->opacity = 1.0;
     window->min_size = (fdk_size){0, 0};
     window->max_size = (fdk_size){0, 0};
     window->resizable = false;
@@ -1295,6 +1296,47 @@ void fdk_window_set_role(fdk_window *window, const char *role) {
         return;
     }
     window->ops->window_set_role(window->pwindow, role);
+}
+
+fdk_result fdk_window_set_opacity(fdk_window *window, double opacity) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (!(opacity >= 0.0)) {
+        opacity = 0.0; /* NaN folds to opaque-below, like the clamps */
+    }
+    if (opacity > 1.0) {
+        opacity = 1.0;
+    }
+    window->opacity = opacity;
+    if (window->ops->window_set_opacity == NULL) {
+        /* Wayland: xdg-shell has no per-toplevel opacity protocol.
+         * A REPORT, not a failure — the app decides (fdk-term's
+         * profile composites its own background instead). */
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->window_set_opacity(window->pwindow, opacity);
+}
+
+double fdk_window_get_opacity(const fdk_window *window) {
+    return window == NULL ? 1.0 : window->opacity;
+}
+
+fdk_result fdk_window_bell(fdk_window *window, int percent) {
+    if (window == NULL) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (percent > 100) {
+        percent = 100;
+    } else if (percent < -100) {
+        percent = -100;
+    }
+    if (window->ops->window_bell == NULL) {
+        /* Wayland: no bell protocol — the visual-bell/notify answer
+         * is the caller's (the public header documents this). */
+        return FDK_ERR_UNSUPPORTED;
+    }
+    return window->ops->window_bell(window->pwindow, percent);
 }
 
 void fdk_window_set_command(fdk_window *window,
