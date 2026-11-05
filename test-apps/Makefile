@@ -40,7 +40,7 @@ X11_LIBS := $(shell pkg-config --libs x11 2>/dev/null) -lXext \
 WL_LIBS  := $(shell pkg-config --libs wayland-client xkbcommon 2>/dev/null)
 LIBS     := $(X11_LIBS) $(WL_LIBS) -lm -ldl -lz -fsanitize=address,undefined
 
-APP_DIRS := fdk-files fdk-edit fdk-monitor fdk-notes
+APP_DIRS := fdk-files fdk-edit fdk-monitor fdk-notes fdk-term
 
 # each app: every .c in its dir + common/*.c
 COMMON_SRCS := common/icons.c common/app.c
@@ -66,9 +66,9 @@ REL_BINS  := $(APP_DIRS:%=$(REL_BUILD)/%)
 release: $(REL_BINS)
 
 define REL_APP_RULE
-$(REL_BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
+$(REL_BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/term_test.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
 	@mkdir -p $(REL_BUILD)
-	$$(CC) $$(CPPFLAGS) $$(STD) $$(WARN) $$(FEATURE) -O2 -DNDEBUG -MMD -MP -Werror -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(REL_LIBS)
+	$$(CC) $$(CPPFLAGS) $$(STD) $$(WARN) $$(FEATURE) -O2 -DNDEBUG -MMD -MP -Werror -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/term_test.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(REL_LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call REL_APP_RULE,$(app))))
@@ -86,10 +86,12 @@ clean-all: clean
 
 .PHONY: clean-all
 
+TERM_PTY_FLAGS := -D_GNU_SOURCE=1 -lutil
+
 define APP_RULE
-$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
+$(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/term_test.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(wildcard common/*.h) $$(FDK_LIB)
 	@mkdir -p $(BUILD)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/term_test.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
@@ -103,7 +105,7 @@ $(FDK_LIB):
 # painted, exited cleanly with rc 0 under the repo's LSan
 # suppressions" — not a feature verification (those are the apps' own
 # README checklists and the scripted rigs).
-SMOKE_APPS := fdk-files fdk-monitor fdk-notes fdk-edit
+SMOKE_APPS := fdk-files fdk-monitor fdk-notes fdk-edit fdk-term
 
 test-apps-smoke:
 	@rc=0; for app in $(SMOKE_APPS); do \
@@ -218,3 +220,19 @@ clean:
 	rm -rf $(BUILD)
 
 -include $(wildcard $(BUILD)/*.d)
+
+# fdk-term: forkpty (libutil) + _GNU_SOURCE for the PTY layer
+$(BUILD)/fdk-term: EXTRA_LIBS := -lutil
+$(BUILD)/fdk-term: CFLAGS := $(CFLAGS) -D_GNU_SOURCE=1
+$(BUILD)/fdk-term: LIBS := $(LIBS) -lutil
+
+build/fdk-term-test: fdk-term/term_test.c fdk-term/term.c \
+        fdk-term/vt.c fdk-term/wide.c fdk-term/colors.c $(FDK_LIB)
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(STD) $(WARN) $(FEATURE) -D_GNU_SOURCE=1 -g -O0 \
+	    -fsanitize=address,undefined -o $@ fdk-term/term_test.c fdk-term/term.c fdk-term/vt.c \
+	    fdk-term/wide.c fdk-term/colors.c $(FDK_LIB) $(LIBS) -lutil
+
+.PHONY: fdk-term-test
+fdk-term-test: build/fdk-term-test
+	ASAN_OPTIONS=detect_leaks=0 ./build/fdk-term-test
