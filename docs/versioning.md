@@ -201,7 +201,7 @@ no releases, until the owner says otherwise.
 - 2026-10-25: **1.1.0-rc1 — the extension API candidate.** The owner
   directed the next version to add a public extension API
   (`include/fdk/fdk_extend.h`) so add-on packages can be built on top
-  of FDK — proved by fdk-shell-overlay, a separate layer-shell package that
+  of FDK — proved by fdk-layer-shell, a separate layer-shell package that
   compiles against FDK's installed public headers and library only —
   and set the number explicitly: 1.1.0-rc1, a MINOR bump because the
   change ADDS public API (the owner's own words ruled out 1.0.1).

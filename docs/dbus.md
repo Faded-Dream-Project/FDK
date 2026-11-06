@@ -61,9 +61,9 @@ The desktop-integration features split by *who owns the surface*:
 | portal FileChooser fallback | **FDK core** | the native client |
 | AT-SPI interop (screen readers) | **FDK core** | the native client |
 | idle/screensaver inhibition (X11 side) | FDK core | `org.freedesktop.ScreenSaver` |
-| StatusNotifier **tray host** | **fdk-shell-overlay** / add-ons | the client + ext surfaces |
-| **notification display** | **fdk-shell-overlay** / add-ons | the client + the overlay layer — SHIPPED as `fdk-shell-overlay/examples/notifyd.c` (S-2/A-12; the rig is `make -C fdk-shell-overlay test-notifyd`) |
-| **media controls** (MPRIS) | **fdk-shell-overlay** / add-ons | the client |
+| StatusNotifier **tray host** | **fdk-layer-shell** / add-ons | the client + ext surfaces |
+| **notification display** | **fdk-layer-shell** / add-ons | the client + the overlay layer — SHIPPED as `fdk-layer-shell/examples/notifyd.c` (S-2/A-12; the rig is `make -C fdk-layer-shell test-notifyd`) |
+| **media controls** (MPRIS) | **fdk-layer-shell** / add-ons | the client |
 
 The rule behind the split: anything every FDK app needs to *behave
 like a native app* (theme, dialogs, accessibility) is core; anything

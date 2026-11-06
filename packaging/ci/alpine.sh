@@ -28,7 +28,6 @@ docker pull -q alpine:3.22
 # package names depending on the release.
 RUN alpine:3.22 '
     set -eu
-    # libxtst-dev: the fdk-shell-overlay X11 suite drives its passive-grab
     # passthrough test with XTEST-synthesized keys — test
     # infrastructure, the same class as the X11 dev headers.
     apk add --no-cache \
@@ -83,15 +82,13 @@ XMLCONF
         apk add --no-cache xorg-server-xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"
     sh packaging/alpine/build-apk.sh
-    sh fdk-shell-overlay/packaging/alpine/build-apk.sh
 '
 
 RUN alpine:3.22 '
     set -eu
     apk add --no-cache tar coreutils
     sh packaging/alpine/install-test.sh
-    sh fdk-shell-overlay/packaging/alpine/install-test.sh
 '
 
-echo "===== FDK alpine pipeline OK (FDK + fdk-shell-overlay) ====="
+echo "===== FDK alpine pipeline OK (FDK; the layer-shell add-on lives in FDK-Layer-Shell) ====="
 ls -la dist/

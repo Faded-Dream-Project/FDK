@@ -50,7 +50,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          # libxtst-dev: fdk-shell-overlay's X11 suite synthesizes Super+number
+          # libxtst-dev: the X11 integration rigs synthesize Super+number
           # keys through the XTEST extension (the passive-grab
           # passthrough test) — test infrastructure, the same class
           # as libx11-dev (nothing in the package chain ships it).
@@ -130,55 +130,12 @@ jobs:
         # back to debug (sanitizer builds). FDK_CONFIG pinned throughout.
         run: make FDK_CONFIG=release all examples verify-exports
 
-      - name: fdk-shell-overlay (the first add-on package) — build + X11 suite
-        # The add-on builds against the sibling checkout here; the
-        # ISOLATION proof (installed-prefix build, the no-internals
-        # boundary) is its own step below — the same proof the distro
-        # packaging jobs re-run against the dpkg/rpm/pacman/apk/xbps
-        # INSTALLED FDK inside their containers.
-        run: |
-          make -C fdk-shell-overlay clean
-          make -C fdk-shell-overlay static shared examples
-          make -C fdk-shell-overlay test-x11
-
-      - name: fdk-shell-overlay — the prefix-isolation proof
-        # THE add-on contract: FDK installed into a throwaway prefix,
-        # fdk-shell-overlay rebuilt against that prefix ALONE (no sibling-tree
-        # include path), the demo linked + run from the installed
-        # stack, and the dynamic boundary asserted (fdk_* imports all
-        # resolve from libfdk.so.1; exports are fdk_shell_* only).
-        run: make -C fdk-shell-overlay isolation
-
-      - name: fdk-shell-overlay — Wayland suite (self-skips without a compositor)
-        run: make -C fdk-shell-overlay test-wayland
-
-      - name: fdk-shell-overlay — notifyd rig (the notification daemon, end to end)
-        # S-2/A-12: the org.freedesktop.Notifications server on the
-        # native D-Bus client, proven against a REAL throwaway
-        # dbus-daemon — dbus-send (libdbus) and gdbus (GLib) as
-        # cross-implementation callers, gdbus monitor as the signal
-        # receiver; hostile-input and rate-limit batteries; the
-        # bus-name etiquette matrix; X11 pixel + XTEST-click + EWMH
-        # legs under Xvfb. (The Wayland layer-shell legs self-skip on
-        # runners without sway — the sandbox and TESTING-ON-DESKTOP
-        # cover them.) libxi-dev/libglib2.0-bin above are this step's
-        # test infrastructure, the same class as libxtst-dev.
-        run: NOTIFYD_RIG_REQUIRE=1 make -C fdk-shell-overlay test-notifyd
-
-      - name: fdk-shell-overlay — trayhost rig (the StatusNotifier tray host, end to end)
-        # S-1/A-11: org.kde.StatusNotifierWatcher served on the
-        # native D-Bus client, proven against a REAL throwaway
-        # dbus-daemon — both registration dialects (KDE bus-name and
-        # Ayatana object-path), the four watcher properties, hostile
-        # registration refusals, the drop-on-vanish path, the
-        # bus-name etiquette matrix, and the full dbusmenu round
-        # (GetLayout's two out-args, AboutToShow, Event) driven by a
-        # synthetic item; X11 pixel + XTEST-click + menu-cascade +
-        # Passive/NeedsAttention legs under Xvfb. (The Wayland
-        # layer-shell legs self-skip on runners without sway — the
-        # sandbox and TESTING-ON-DESKTOP cover them.) Same test-infra
-        # class as the notifyd step above.
-        run: TRAY_RIG_REQUIRE=1 make -C fdk-shell-overlay test-tray
+      - name: fdk-layer-shell (the add-on) — moved to its own repository
+        # The layer-shell add-on package now lives in
+        # Faded-Dream-Project/FDK-Layer-Shell (renamed fdk-layer-shell,
+        # C prefix fdk_layer_shell_*), with its own CI: build + X11
+        # suite + desktop models + the isolation proof against THIS
+        # tree's main. Nothing in FDK's own battery references it.
 
   distro-packages:
     name: distro packages

@@ -31,5 +31,5 @@ test-apps/build-rel/
 test-apps/*.deb
 
 # an old install tree from the pre-rename days (fdk-shell ->
-# fdk-shell-overlay); build debris only, never commit it
+# fdk-layer-shell, its own repository now); build debris only, never commit it
 /fdk-shell/
