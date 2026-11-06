@@ -114,6 +114,11 @@ typedef struct fdk_textview {
      * may die immediately after set); the gutter band is geometry
      * the widget owns and content the app paints. */
     fdk_attr_list attrs;  /* items==NULL: none applied            */
+    /* Streaming-append batching: the break cache goes dirty
+     * (wrap_width < 0) and one rebreak lands at the next reader
+     * (paint/hit-test); a tail append asks for one stick-to-end
+     * scroll when that rebreak happens. */
+    bool tail_scroll_pending;
     fdk_i32 gutter_w;     /* 0: no gutter                         */
     fdk_textview_gutter_fn gutter_fn;
     void *gutter_user;
@@ -370,6 +375,10 @@ static void tv_relayout(fdk_textview *tv) {
     if (want_wrap != tv->wrap_width) {
         tv->wrap_width = want_wrap;
         tv_rebreak(tv);
+        if (tv->tail_scroll_pending && tv->scroll != NULL) {
+            tv->tail_scroll_pending = false;
+            tv_scroll_to_caret(tv);
+        }
     }
     if (tv->scroll != NULL && tv->base.bounds.width > 0 &&
         tv->base.bounds.height > 0) {
@@ -385,6 +394,19 @@ static void tv_relayout(fdk_textview *tv) {
 /* Force a rebreak on the next relayout (text or wrap-mode change). */
 static void tv_lines_invalid(fdk_textview *tv) {
     tv->wrap_width = -1; /* never matches a real width */
+}
+
+/* The batched-append contract: a dirty break cache rebuilds the
+ * moment any reader needs the lines — the streaming log's N
+ * appends per frame cost ONE rebreak per frame, not N. */
+static void tv_ensure_lines(fdk_textview *tv) {
+    if (tv->wrap_width < 0) {
+        tv_relayout(tv);
+        if (tv->tail_scroll_pending) {
+            tv->tail_scroll_pending = false;
+            tv_scroll_to_caret(tv);
+        }
+    }
 }
 
 /* ---- geometry: visual line <-> byte offset ---- */
@@ -1737,6 +1759,7 @@ static void tv_page_paint(fdk_widget *w, fdk_surface *surface,
  * its page paint above it). */
 static void tv_view_paint(fdk_widget *w, fdk_surface *surface,
                           fdk_rect bounds, fdk_rect clip) {
+    tv_ensure_lines(tv_of(w));
     (void)clip;
     /* The Entry's field discipline: disabled keeps the control
      * fill; focus reads as the themed ring over the border. */
@@ -2111,10 +2134,15 @@ static fdk_result tv_stream_splice(fdk_textview *tv, size_t from,
     tv->caret = caret;
     tv->anchor = anchor;
 
-    tv_lines_invalid(tv);
-    tv_relayout(tv);
-    if (scroll) {
-        tv_scroll_to_caret(tv);
+    if (mode == TV_STREAM_APPEND) {
+        tv->wrap_width = -1; /* dirty: one rebreak per frame */
+        tv->tail_scroll_pending = scroll;
+    } else {
+        tv_lines_invalid(tv);
+        tv_relayout(tv);
+        if (scroll) {
+            tv_scroll_to_caret(tv);
+        }
     }
     fdk_widget_invalidate(&tv->base);
     fdk__a11y_notify(&tv->base, FDK_A11Y_VALUE_CHANGED, 0);
@@ -2187,6 +2215,7 @@ fdk_result fdk_textview_link_at(fdk_widget *textview, fdk_f32 x,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     fdk_textview *tv = tv_of(textview);
+    tv_ensure_lines(tv);
     if (tv->attrs.count == 0 || tv->font == NULL ||
         tv->line_count == 0) {
         return FDK_ERR_NOT_FOUND;
@@ -2225,6 +2254,7 @@ size_t fdk_textview_line_count(fdk_widget *textview) {
         textview->klass != &fdk_textview_class_def) {
         return 0;
     }
+    tv_ensure_lines(tv_of(textview));
     return tv_of(textview)->line_count;
 }
 
