@@ -76,6 +76,16 @@ typedef enum fdk_attr_kind {
     FDK_ATTR_RISE = 8,        /* f32: px up (positive) / down       */
     FDK_ATTR_LETTER_SPACING = 9, /* f32: extra px between glyphs    */
     FDK_ATTR_LINK = 10,       /* char *: the href                   */
+    FDK_ATTR_FOREGROUND = 11, /* color: the text color for the range
+                               * (the span engine's per-run color,
+                               * reachable from attr-only surfaces
+                               * like the streaming TextView)      */
+    FDK_ATTR_STYLE = 12,      /* i32: ABSOLUTE FDK_FONT_STYLE_* mask
+                               * for the range (the span engine's
+                               * per-run style — bold/italic for
+                               * text that arrives styled, chat's
+                               * mIRC bold being the canonical
+                               * case)                              */
 } fdk_attr_kind;
 
 typedef struct fdk_attr {

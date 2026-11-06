@@ -566,6 +566,18 @@ fdk_result fdk__attr_flatten(const char *utf8, size_t byte_len,
                 r2.bg_set = true;
                 r2.bg = at->v.color;
                 break;
+            case FDK_ATTR_FOREGROUND:
+                r2.color_set = true;
+                r2.color = at->v.color;
+                break;
+            case FDK_ATTR_STYLE:
+                /* ABSOLUTE: the attr names the run's style flags
+                 * (the same vocabulary the span engine's style
+                 * field speaks). Style attrs compose per-byte the
+                 * same way: a covering attr REPLACES the mask on
+                 * its range; later-wins on overlap. */
+                r2.style = (unsigned)at->v.i;
+                break;
             case FDK_ATTR_UNDERLINE:
                 r2.underline_style = (unsigned char)at->v.i;
                 /* The classic span flag keeps working: underline
@@ -685,11 +697,13 @@ fdk_result fdk_attr_list_add_range(fdk_attr_list *list,
         a.v.f = f;
         break;
     case FDK_ATTR_UNDERLINE:
+    case FDK_ATTR_STYLE:
         a.v.i = i;
         break;
     case FDK_ATTR_BACKGROUND:
     case FDK_ATTR_UNDERLINE_COLOR:
     case FDK_ATTR_STRIKETHROUGH_COLOR:
+    case FDK_ATTR_FOREGROUND:
         a.v.color = color;
         break;
     case FDK_ATTR_FAMILY:
