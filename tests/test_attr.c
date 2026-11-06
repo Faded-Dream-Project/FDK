@@ -137,6 +137,110 @@ static void test_flatten_ranges(void) {
     printf("[ok] attr flatten: ranges, gaps, later-wins\n");
 }
 
+/* The chat-log round: FDK_ATTR_FOREGROUND colors a range's text
+ * through the attr engine (the span engine's own color_set/color
+ * run fields; the textview only speaks attrs, a chat log with
+ * per-nick colors is the canonical case). */
+static void test_foreground_attr(void) {
+    const char *text = "nick: message";
+    fdk_color red = {1.0f, 0.2f, 0.2f, 1.0f};
+    fdk_color blue = {0.2f, 0.3f, 1.0f, 1.0f};
+    fdk_attr_list attrs;
+    assert(fdk_ok(fdk_attr_list_init(&attrs)));
+    assert(fdk_ok(fdk_attr_list_add_range(&attrs, 0, 5,
+                                          FDK_ATTR_FOREGROUND, 0, 0,
+                                          red, NULL)));
+    char *arena = NULL;
+    fdk__text_run *runs = NULL;
+    size_t n = 0;
+    assert(fdk_ok(fdk__attr_flatten(text, strlen(text), NULL, 0,
+                                    &attrs, 0, &runs, &n, &arena)));
+    assert(n == 2); /* colored nick, unstyled rest */
+    assert(runs[0].start == 0 && runs[0].end == 5);
+    assert(runs[0].color_set);
+    assert(runs[0].color.r == red.r && runs[0].color.g == red.g &&
+           runs[0].color.b == red.b);
+    assert(!runs[1].color_set);
+    fdk_free(runs);
+    fdk_free(arena);
+    fdk_attr_list_destroy(&attrs);
+
+    /* Later foreground wins on overlap (the attr contract). */
+    assert(fdk_ok(fdk_attr_list_init(&attrs)));
+    assert(fdk_ok(fdk_attr_list_add_range(&attrs, 0, 5,
+                                          FDK_ATTR_FOREGROUND, 0, 0,
+                                          red, NULL)));
+    assert(fdk_ok(fdk_attr_list_add_range(&attrs, 2, 7,
+                                          FDK_ATTR_FOREGROUND, 0, 0,
+                                          blue, NULL)));
+    assert(fdk_ok(fdk__attr_flatten(text, strlen(text), NULL, 0,
+                                    &attrs, 0, &runs, &n, &arena)));
+    /* [0,2) red · [2,5) blue (later wins) · [5,7) blue · [7,13)
+     * base — and the two adjacent blue segments MERGE into one run
+     * (the equal-run merge). */
+    assert(n == 3);
+    assert(runs[0].start == 0 && runs[0].end == 2 &&
+           runs[0].color_set && runs[0].color.r == red.r);
+    assert(runs[1].start == 2 && runs[1].end == 7 &&
+           runs[1].color_set && runs[1].color.b == blue.b);
+    assert(!runs[2].color_set);
+    fdk_free(runs);
+    fdk_free(arena);
+    fdk_attr_list_destroy(&attrs);
+
+    /* Style: the bold attr flips the run's style mask (chat's
+     * mIRC-bold case); later-wins on overlap like every attr. */
+    assert(fdk_ok(fdk_attr_list_init(&attrs)));
+    assert(fdk_ok(fdk_attr_list_add_range(&attrs, 0, 5,
+                                          FDK_ATTR_STYLE, 0, 1,
+                                          (fdk_color){0}, NULL)));
+    assert(fdk_ok(fdk__attr_flatten(text, strlen(text), NULL, 0,
+                                    &attrs, 0, &runs, &n, &arena)));
+    assert(n == 2);
+    assert(runs[0].style == 1u); /* FDK_FONT_STYLE_BOLD */
+    assert(runs[1].style == 0u);
+    fdk_free(runs);
+    fdk_free(arena);
+    fdk_attr_list_destroy(&attrs);
+
+    /* The draw path colors the glyphs: the same text over the same
+     * surface differs when the attr is applied (a red "nick" is
+     * not the base-ink "nick"). */
+    assert(fdk_ok(fdk_attr_list_init(&attrs)));
+    assert(fdk_ok(fdk_attr_list_add_range(&attrs, 0, 5,
+                                          FDK_ATTR_FOREGROUND, 0, 0,
+                                          red, NULL)));
+    fdk_surface *s = fresh_surface();
+    assert(fdk_ok(fdk_surface_draw_attrs_utf8(
+        s, g_font, text, strlen(text), NULL, 0, NULL, 4, 20,
+        (fdk_color){1, 1, 1, 1})));
+    fdk_surface_info info;
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    static unsigned char plain_pixels[256 * 64];
+    memcpy(plain_pixels, info.pixels,
+           (size_t)info.stride * 64 < sizeof plain_pixels
+               ? (size_t)info.stride * 64
+               : sizeof plain_pixels);
+    fdk_surface_destroy(s);
+
+    s = fresh_surface();
+    assert(fdk_ok(fdk_surface_draw_attrs_utf8(
+        s, g_font, text, strlen(text), NULL, 0, &attrs, 4, 20,
+        (fdk_color){1, 1, 1, 1})));
+    assert(fdk_ok(fdk_surface_get_info(s, &info)));
+    size_t diffs = 0;
+    for (size_t i = 0; i < sizeof plain_pixels; i++) {
+        if (plain_pixels[i] != info.pixels[i]) {
+            diffs++;
+        }
+    }
+    fdk_surface_destroy(s);
+    fdk_attr_list_destroy(&attrs);
+    assert(diffs > 16); /* the nick's glyphs changed color */
+    printf("[ok] attr foreground: run color, later-wins overlap, "
+           "the draw path colors the glyphs\n");
+}
+
 static void test_markup_attrs(void) {
     char *plain = NULL;
     fdk_span *spans = NULL;
@@ -496,6 +600,7 @@ int main(void) {
 
     test_span_flatten_zeroes_appended_fields();
     test_flatten_ranges();
+    test_foreground_attr();
     test_markup_attrs();
     test_measure_twin();
     test_draw_twin();
