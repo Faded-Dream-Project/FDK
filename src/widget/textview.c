@@ -1789,6 +1789,7 @@ static void tv_view_destroy(fdk_widget *w) {
     if (tv->undo != NULL) {
         fdk_undo_stack_destroy(tv->undo);
     }
+    fdk_attr_list_destroy(&tv->attrs);
     fdk_free(tv->lines);
     fdk_free(tv->text);
     fdk_free(tv->preedit);
@@ -2024,6 +2025,199 @@ const char *fdk_textview_get_text(fdk_widget *textview) {
         return "";
     }
     return tv_of(textview)->text;
+}
+
+/* ---- the streaming-log surface (append/insert/erase) ----
+ *
+ * The chat-log shape: the APP mutates the document programmatically
+ * while a user may be reading anywhere inside it. Distinct from the
+ * edit splice on three counts: no undo record (a log is not an
+ * edit history), a per-path caret policy that never yanks a reader,
+ * and read_only never refuses it (read_only gates USER input; the
+ * app's own document construction is set_text's family). The attrs
+ * list is NOT shifted: ranges are document bytes and the app owns
+ * their bookkeeping (the set_attrs "derived state" contract). */
+
+typedef enum tv_stream_mode {
+    TV_STREAM_APPEND = 0, /* the tail: caret rides along only from
+                           * the tail; a reader elsewhere keeps
+                           * their caret AND viewport */
+    TV_STREAM_INSERT,     /* the splice contract: caret to the
+                           * insert's end (typing continues there) */
+    TV_STREAM_ERASE,      /* the head trim: carets shift back by
+                           * the removed span, clamped into the
+                           * survivor; the viewport is untouched */
+} tv_stream_mode;
+
+static fdk_result tv_stream_splice(fdk_textview *tv, size_t from,
+                                   size_t to, const char *insert,
+                                   size_t insert_len,
+                                   tv_stream_mode mode) {
+    if (from > to || to > tv->len) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    if (insert == NULL) {
+        insert_len = 0;
+    }
+    size_t new_len = tv->len - (to - from) + insert_len;
+    if (new_len > TV_MAX_TEXT) {
+        FDK_WARN("textview: %d-byte limit reached; the streaming "
+                 "change refused", TV_MAX_TEXT);
+        return FDK_ERR_LIMIT;
+    }
+    if (insert_len == 0 && to == from) {
+        return FDK_OK; /* an empty change is a legal no-op */
+    }
+    if (!fdk_ok(tv_ensure_cap(tv, new_len + 1))) {
+        return FDK_ERR_OUT_OF_MEMORY;
+    }
+    size_t old_len = tv->len;
+    size_t caret = tv->caret;
+    size_t anchor = tv->anchor;
+    bool tail = (caret == old_len && anchor == old_len);
+    bool scroll = false;
+
+    memmove(tv->text + from + insert_len, tv->text + to,
+            old_len - to);
+    if (insert_len > 0) {
+        memcpy(tv->text + from, insert, insert_len);
+    }
+    tv->text[new_len] = '\0';
+    tv->len = new_len;
+
+    /* The caret policy lives HERE, on the post-mutation geometry,
+     * one branch per mode. */
+    if (mode == TV_STREAM_APPEND) {
+        if (tail) {
+            caret = anchor = new_len;
+            scroll = true; /* stick to the tail */
+        }
+        /* else: the reader keeps caret, anchor AND viewport. */
+    } else if (mode == TV_STREAM_INSERT) {
+        caret = anchor = from + insert_len;
+        scroll = true;
+    } else { /* TV_STREAM_ERASE */
+        caret = (caret <= to) ? ((caret < from) ? caret : from)
+                              : caret - (to - from);
+        anchor = (anchor <= to) ? ((anchor < from) ? anchor : from)
+                                : anchor - (to - from);
+        if (caret > new_len) {
+            caret = new_len;
+        }
+        if (anchor > new_len) {
+            anchor = new_len;
+        }
+    }
+    tv->caret = caret;
+    tv->anchor = anchor;
+
+    tv_lines_invalid(tv);
+    tv_relayout(tv);
+    if (scroll) {
+        tv_scroll_to_caret(tv);
+    }
+    fdk_widget_invalidate(&tv->base);
+    fdk__a11y_notify(&tv->base, FDK_A11Y_VALUE_CHANGED, 0);
+    if (tv->on_changed != NULL) {
+        tv->on_changed(&tv->base, tv->on_changed_data);
+    }
+    return FDK_OK;
+}
+
+fdk_result fdk_textview_append(fdk_widget *textview, const char *utf8) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    size_t n = (utf8 != NULL) ? strlen(utf8) : 0;
+    return tv_stream_splice(tv, tv->len, tv->len, utf8, n,
+                            TV_STREAM_APPEND);
+}
+
+fdk_result fdk_textview_insert(fdk_widget *textview, size_t byte,
+                               const char *utf8) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    size_t n = (utf8 != NULL) ? strlen(utf8) : 0;
+    return tv_stream_splice(tv, byte, byte, utf8, n,
+                            TV_STREAM_INSERT);
+}
+
+fdk_result fdk_textview_erase(fdk_widget *textview, size_t from,
+                              size_t to) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    return tv_stream_splice(tv, from, to, NULL, 0, TV_STREAM_ERASE);
+}
+
+fdk_result fdk_textview_add_attr(fdk_widget *textview,
+                                 const fdk_attr *attr) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def ||
+        attr == NULL || attr->byte_start > attr->byte_end) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    if (tv->attrs.items == NULL && tv->attrs.count == 0) {
+        if (!fdk_ok(fdk_attr_list_init(&tv->attrs))) {
+            return FDK_ERR_OUT_OF_MEMORY;
+        }
+    }
+    fdk_result r = fdk_attr_list_add(&tv->attrs, attr);
+    if (!fdk_ok(r)) {
+        return r;
+    }
+    fdk_widget_invalidate(textview);
+    return FDK_OK;
+}
+
+fdk_result fdk_textview_link_at(fdk_widget *textview, fdk_f32 x,
+                                fdk_f32 y, char *out_href,
+                                size_t cap) {
+    if (textview == NULL ||
+        textview->klass != &fdk_textview_class_def ||
+        out_href == NULL || cap == 0) {
+        return FDK_ERR_INVALID_ARGUMENT;
+    }
+    fdk_textview *tv = tv_of(textview);
+    if (tv->attrs.count == 0 || tv->font == NULL ||
+        tv->line_count == 0) {
+        return FDK_ERR_NOT_FOUND;
+    }
+    /* The byte under the point (the a11y hit-test's geometry: the
+     * view's bounds refuse, the page-local mapping answers). */
+    fdk_rect page = fdk_widget_get_absolute_bounds(
+        tv->page != NULL ? tv->page : textview);
+    fdk_rect vb = fdk_widget_get_absolute_bounds(textview);
+    fdk_f32 ax = (fdk_f32)vb.x + x;
+    fdk_f32 ay = (fdk_f32)vb.y + y;
+    if (x < 0.0f || x >= (fdk_f32)vb.width || y < 0.0f ||
+        y >= (fdk_f32)vb.height) {
+        return FDK_ERR_NOT_FOUND;
+    }
+    size_t byte = tv_offset_at(tv, ax - (fdk_f32)page.x,
+                               ay - (fdk_f32)page.y);
+    for (size_t i = 0; i < tv->attrs.count; i++) {
+        const fdk_attr *a = &tv->attrs.items[i];
+        if (a->kind == FDK_ATTR_LINK && byte >= a->byte_start &&
+            byte < a->byte_end && a->v.s != NULL) {
+            size_t n = strlen(a->v.s);
+            if (n >= cap) {
+                n = cap - 1;
+            }
+            memcpy(out_href, a->v.s, n);
+            out_href[n] = '\0';
+            return FDK_OK;
+        }
+    }
+    return FDK_ERR_NOT_FOUND;
 }
 
 size_t fdk_textview_line_count(fdk_widget *textview) {
