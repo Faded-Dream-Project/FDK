@@ -406,6 +406,218 @@ static void test_undo(void) {
            "replace composes one step, redo restores\n");
 }
 
+/* ---- the streaming log: append/insert/erase (the fdk-chat round) ----
+ *
+ * A chat log appends messages continuously and trims the head; the
+ * whole-document set_text loop is quadratic and yanks the user's
+ * scrollback selection. The streaming surface: append (tail, the
+ * caret follows only from the end), insert (programmatic splice),
+ * erase (the head trim) — all legal on read-only views (they are
+ * the APP's document construction; read_only gates USER input),
+ * none recorded in undo (a log is not an edit history).
+ */
+
+static void test_append_stream(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *tv = NULL;
+    assert(fdk_ok(fdk_textview_create(root, g_font, &tv)));
+    fdk_textview_set_text(tv, "");
+    fdk_widget_arrange(tv, (fdk_rect){0, 0, 240, 160});
+    fdk_textview_set_read_only(tv, true);
+    fdk_textview_set_on_changed(tv, on_changed, NULL);
+
+    /* 500 appends: the text is the exact concatenation, the
+     * paragraph count grows by one per trailing-newline message,
+     * and the end-cared position tracks the tail. */
+    static char expected[64 * 1024];
+    expected[0] = '\0';
+    size_t changes_before = (size_t)g_changes;
+    for (int i = 0; i < 500; i++) {
+        char msg[128];
+        int n = snprintf(msg, sizeof(msg),
+                         "<user%03d> message body %d\n", i, i);
+        assert(n > 0 && (size_t)n < sizeof(msg));
+        assert(fdk_ok(fdk_textview_append(tv, msg)));
+        strcat(expected, msg);
+    }
+    assert(strcmp(fdk_textview_get_text(tv), expected) == 0);
+    assert(fdk_textview_paragraph_count(tv) == 501);
+    size_t caret = 0;
+    assert(fdk_ok(fdk_textview_get_caret(tv, &caret)));
+    assert(caret == strlen(expected));
+    assert((size_t)g_changes - changes_before == 500);
+
+    /* Empty append: a legal no-op. */
+    size_t len_before = strlen(fdk_textview_get_text(tv));
+    assert(fdk_ok(fdk_textview_append(tv, "")));
+    assert(fdk_ok(fdk_textview_append(tv, NULL)));
+    assert(strlen(fdk_textview_get_text(tv)) == len_before);
+
+    /* A caret NOT at the end (the user reading scrollback) is not
+     * yanked by the app's tail appends. */
+    assert(fdk_ok(fdk_textview_set_caret(tv, 0)));
+    changes_before = (size_t)g_changes;
+    assert(fdk_ok(fdk_textview_append(tv, "<late> tail\n")));
+    assert(fdk_ok(fdk_textview_get_caret(tv, &caret)));
+    assert(caret == 0);
+    assert((size_t)g_changes - changes_before == 1);
+    assert(strstr(fdk_textview_get_text(tv), "<late> tail\n") !=
+           NULL);
+
+    /* Read-only gates USER input, not the app's own appends. */
+    size_t ro_len = strlen(fdk_textview_get_text(tv));
+    type_cp(root, (fdk_u32)'x');
+    assert(strlen(fdk_textview_get_text(tv)) == ro_len);
+    assert(fdk_ok(fdk_textview_append(tv, "<ro> still works\n")));
+    assert(strstr(fdk_textview_get_text(tv), "<ro> still works") !=
+           NULL);
+
+    /* Appends are NOT undo history: undo refuses and the text
+     * stands. */
+    (void)fdk_textview_undo(tv);
+    assert(strstr(fdk_textview_get_text(tv), "<ro> still works") !=
+           NULL);
+
+    /* The cap: an append that would push the doc past TV_MAX_TEXT
+     * (256 KB) refuses cleanly and changes nothing. The doc holds
+     * ~13 KB here; a 260 KB append crosses the cap. */
+    static char big[260 * 1024];
+    memset(big, 'a', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    size_t before = strlen(fdk_textview_get_text(tv));
+    assert(!fdk_ok(fdk_textview_append(tv, big)));
+    assert(strlen(fdk_textview_get_text(tv)) == before);
+
+    fdk_widget_destroy(root);
+    printf("[ok] textview append: 500-message stream exact, "
+           "caret follows the tail (only from the end), read-only "
+           "safe, not undoable, cap refuses cleanly\n");
+}
+
+static void test_insert_erase(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *tv = NULL;
+    assert(fdk_ok(fdk_textview_create(root, g_font, &tv)));
+    fdk_textview_set_text(tv, "hello world");
+    fdk_widget_arrange(tv, (fdk_rect){0, 0, 240, 160});
+    assert(fdk_widget_focus(tv)); /* keys route to the focused */
+
+    /* Mid-document insert: the splice contract — caret lands on
+     * the insert's end, the next typed char continues there. */
+    assert(fdk_ok(fdk_textview_insert(tv, 5, " brave")));
+    assert(strcmp(fdk_textview_get_text(tv), "hello brave world") ==
+           0);
+    size_t caret = 0;
+    assert(fdk_ok(fdk_textview_get_caret(tv, &caret)));
+    assert(caret == 11);
+    type_cp(root, (fdk_u32)'!');
+    assert(strcmp(fdk_textview_get_text(tv), "hello brave! world") ==
+           0);
+
+    /* Insert at 0 and at the end both legal; NULL inserts nothing
+     * (no crash). */
+    assert(fdk_ok(fdk_textview_insert(tv, 0, ">> ")));
+    assert(fdk_ok(fdk_textview_insert(tv, strlen(fdk_textview_get_text(tv)), "(end)")));
+    assert(strcmp(fdk_textview_get_text(tv),
+                  ">> hello brave! world(end)") == 0);
+    assert(fdk_ok(fdk_textview_insert(tv, 3, NULL)));
+    assert(strcmp(fdk_textview_get_text(tv),
+                  ">> hello brave! world(end)") == 0);
+
+    /* Bad offsets refuse without touching the doc. */
+    assert(!fdk_ok(fdk_textview_insert(tv, 10000, "x")));
+    assert(!fdk_ok(fdk_textview_erase(tv, 4, 2)));
+    assert(!fdk_ok(fdk_textview_erase(tv, 0, 10000)));
+    assert(strcmp(fdk_textview_get_text(tv),
+                  ">> hello brave! world(end)") == 0);
+
+    /* Erase: the head trim (a chat log's scrollback cap) — an
+     * exact byte range out. */
+    size_t len = strlen(fdk_textview_get_text(tv));
+    assert(fdk_ok(fdk_textview_erase(tv, 0, 3)));
+    assert(strcmp(fdk_textview_get_text(tv),
+                  "hello brave! world(end)") == 0);
+    assert(strlen(fdk_textview_get_text(tv)) == len - 3);
+    /* Erase to empty is legal. */
+    assert(fdk_ok(fdk_textview_erase(tv, 0,
+                                     strlen(fdk_textview_get_text(tv)))));
+    assert(strlen(fdk_textview_get_text(tv)) == 0);
+    assert(fdk_textview_paragraph_count(tv) == 1);
+
+    /* Erase is programmatic-only too: on a read-only view it still
+     * works (the app's trim), user typing stays refused. */
+    assert(fdk_ok(fdk_textview_append(tv, "keep\n")));
+    fdk_textview_set_read_only(tv, true);
+    type_cp(root, (fdk_u32)'z');
+    assert(strcmp(fdk_textview_get_text(tv), "keep\n") == 0);
+    assert(fdk_ok(fdk_textview_erase(tv, 0, strlen("keep\n"))));
+    assert(strlen(fdk_textview_get_text(tv)) == 0);
+
+    fdk_widget_destroy(root);
+    printf("[ok] textview insert/erase: splice contract, bad "
+           "offsets refuse, head-trim + clear on read-only views\n");
+}
+
+static void test_append_link(void) {
+    fdk_widget *root = fresh_root();
+    fdk_widget *tv = NULL;
+    assert(fdk_ok(fdk_textview_create(root, g_font, &tv)));
+    fdk_textview_set_text(tv, "");
+    fdk_widget_arrange(tv, (fdk_rect){0, 0, 300, 160});
+
+    /* A chat message with a URL: the app appends the text, adds a
+     * LINK attr over the URL's byte range, and link_at hands the
+     * href back for Ctrl+click. */
+    const char *msg = "see https://example.com/x and more\n";
+    assert(fdk_ok(fdk_textview_append(tv, msg)));
+    size_t ls = strlen("see ");
+    size_t le = ls + strlen("https://example.com/x");
+    static const char href[] = "https://example.com/x";
+    fdk_attr a;
+    memset(&a, 0, sizeof(a));
+    a.byte_start = ls;
+    a.byte_end = le;
+    a.kind = FDK_ATTR_LINK;
+    a.v.s = href;
+    assert(fdk_ok(fdk_textview_add_attr(tv, &a)));
+
+    /* Found on the link's own glyphs (first line; 100px is inside
+     * "https://example.com/x" — "see " ends ~31px in at 16px). */
+    char out[256];
+    assert(fdk_ok(fdk_textview_link_at(tv, 100.0f, 5.0f, out,
+                                       sizeof(out))));
+    assert(strcmp(out, "https://example.com/x") == 0);
+    /* The non-link tail of the same line: not a link. */
+    assert(!fdk_ok(fdk_textview_link_at(tv, 280.0f, 5.0f, out,
+                                        sizeof(out))));
+    /* The second line (16px line height): no link there. */
+    assert(!fdk_ok(fdk_textview_link_at(tv, 100.0f, 30.0f, out,
+                                        sizeof(out))));
+    /* Bad widget / bad buffer refuse. */
+    assert(!fdk_ok(fdk_textview_link_at(root, 5.0f, 5.0f, out,
+                                        sizeof(out))));
+
+    /* set_attrs and add_attr coexist: a background set through the
+     * classic surface, then another link added on a later append. */
+    const char *msg2 = "and https://fdk.example/y!\n";
+    assert(fdk_ok(fdk_textview_append(tv, msg2)));
+    fdk_attr b;
+    memset(&b, 0, sizeof(b));
+    b.byte_start = strlen(msg) + strlen("and ");
+    b.byte_end = b.byte_start + strlen("https://fdk.example/y");
+    b.kind = FDK_ATTR_LINK;
+    b.v.s = "https://fdk.example/y";
+    assert(fdk_ok(fdk_textview_add_attr(tv, &b)));
+    assert(fdk_ok(fdk_textview_link_at(tv, 100.0f, 30.0f, out,
+                                       sizeof(out))));
+    assert(strcmp(out, "https://fdk.example/y") == 0);
+
+    fdk_widget_destroy(root);
+    printf("[ok] textview link_at: href under the point, "
+           "non-link and other-line misses, add_attr after "
+           "append\n");
+}
+
 /* ---- a11y ---- */
 
 static void test_a11y(void) {
@@ -520,6 +732,9 @@ int main(void) {
     test_vertical_nav();
     test_goto();
     test_undo();
+    test_append_stream();
+    test_insert_erase();
+    test_append_link();
     test_a11y();
     test_paint();
 

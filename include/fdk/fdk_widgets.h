@@ -1157,6 +1157,64 @@ fdk_result fdk_textview_set_gutter(fdk_widget *textview,
                                    void *user);
 fdk_i32 fdk_textview_get_gutter_width(fdk_widget *textview);
 
+/* ---- TextView's STREAMING-LOG surface (the fdk-chat round) ----
+ *
+ * The chat-log shape: the application mutates the document while a
+ * user may be reading anywhere inside it. Unlike set_text (the
+ * whole-document reset) these are byte-range changes that keep the
+ * rest of the document — and the reader's place in it — intact.
+ *
+ * All three are PROGRAMMATIC writes: read_only never refuses them
+ * (read_only gates user input), and none are recorded in the undo
+ * stack (a log is not an edit history — set_text's contract
+ * family). The attrs list is NOT shifted by a change: ranges are
+ * document bytes and the app owns their bookkeeping (the set_attrs
+ * "derived state" contract; append-only logs never need to shift).
+ *
+ * Caret policy, per call:
+ *   append — a caret AND selection anchor both at the document's
+ *     end ride along to the new end (and the view sticks to the
+ *     tail); any other caret/anchor state is preserved untouched,
+ *     viewport included (a reader in the scrollback is not yanked
+ *     by the messages arriving below the fold).
+ *   insert — the splice contract: the caret collapses to the
+ *     insert's end (typing continues there).
+ *   erase  — carets inside the erased range clamp to `from`;
+ *     carets after it shift back by the removed span; the viewport
+ *     is untouched.
+ *
+ * The TV_MAX_TEXT cap (256 KB, the same limit the edit paths
+ * enforce) returns FDK_ERR_LIMIT and leaves the document
+ * unchanged. */
+fdk_result fdk_textview_append(fdk_widget *textview,
+                               const char *utf8);
+fdk_result fdk_textview_insert(fdk_widget *textview, size_t byte,
+                               const char *utf8);
+fdk_result fdk_textview_erase(fdk_widget *textview, size_t from,
+                              size_t to);
+
+/* Appends one range attribute to the widget's owned list (the
+ * add-only twin of set_attrs: a streaming log extends its
+ * decoration instead of re-copying the whole list per message).
+ * Same contract as set_attrs: the attr is COPIED, but FAMILY/LINK
+ * strings stay caller-owned and must outlive the widget (an app
+ * keeps its href arena). byte_start <= byte_end; ranges are
+ * document bytes as of NOW — add them after the text they
+ * decorate is in place. Later entries win on overlap (the attr
+ * contract). */
+fdk_result fdk_textview_add_attr(fdk_widget *textview,
+                                 const fdk_attr *attr);
+
+/* The href under a widget-local point (the same space pointer
+ * events deliver), for Ctrl+click-to-open: the byte under the
+ * point mapped through the applied attrs. FDK_OK + the (truncated,
+ * NUL-terminated) href when a LINK attr covers that byte;
+ * FDK_ERR_NOT_FOUND elsewhere (including outside the view);
+ * FDK_ERR_INVALID_ARGUMENT for a bad widget or buffer. */
+fdk_result fdk_textview_link_at(fdk_widget *textview, fdk_f32 x,
+                                fdk_f32 y, char *out_href,
+                                size_t cap);
+
 /* ---- Picture (1.4.9) ----
  *
  * The image display widget: one owned surface (decoded from a
