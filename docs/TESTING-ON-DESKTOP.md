@@ -28,9 +28,9 @@ Current open items:
 Build and run against your compositor session:
 
 ```sh
-make -C fdk-shell-overlay examples
+make -C fdk-layer-shell examples
 export FDK_NOTIFYD_TRACE=1     # one log line per bus call + placement
-./fdk-shell-overlay/build/examples/notifyd
+./fdk-layer-shell/build/examples/notifyd
 ```
 
 Expected first lines (stderr):
@@ -80,7 +80,7 @@ Same binary, from your X11 session (Openbox):
 
 ```sh
 export FDK_NOTIFYD_TRACE=1
-./fdk-shell-overlay/build/examples/notifyd
+./fdk-layer-shell/build/examples/notifyd
 ```
 
 Verify with the same gdbus call as above, plus:
@@ -101,7 +101,7 @@ Verify with the same gdbus call as above, plus:
 With dunst/mako/swaync already running:
 
 ```sh
-./fdk-shell-overlay/build/examples/notifyd
+./fdk-layer-shell/build/examples/notifyd
 ```
 
 Expected: ONE clear line naming the incumbent through its own
@@ -115,7 +115,7 @@ notifyd: ...it is dunst 1.9.2 (vendor knopwob); exiting (--replace to take over)
 Then the takeover dance:
 
 ```sh
-./fdk-shell-overlay/build/examples/notifyd --replace
+./fdk-layer-shell/build/examples/notifyd --replace
 ```
 
 Expected: notifyd takes the name (if the incumbent allowed
@@ -148,10 +148,10 @@ FDK's own client at it. Worth one round with the real world:
 The StatusNotifier tray host against your compositor session:
 
 ```sh
-make -C fdk-shell-overlay examples
+make -C fdk-layer-shell examples
 export FDK_TRAYHOST_TRACE=1    # one log line per registration,
                                # property fetch, menu transaction
-./fdk-shell-overlay/build/examples/trayhost
+./fdk-layer-shell/build/examples/trayhost
 ```
 
 Expected first lines (stderr):
@@ -203,7 +203,7 @@ Same binary, DISPLAY set:
 
 ```sh
 DISPLAY=:0 FDK_TRAYHOST_TRACE=1 \
-    ./fdk-shell-overlay/build/examples/trayhost
+    ./fdk-layer-shell/build/examples/trayhost
 ```
 
 1. Same steps 2-8 as above; on X11 the trace additionally logs
@@ -212,7 +212,7 @@ DISPLAY=:0 FDK_TRAYHOST_TRACE=1 \
 2. With a real WM: the strip is `_NET_WM_WINDOW_TYPE_DOCK` +
    sticky (visible on every workspace — switch and confirm).
 3. `xprop` on the strip window: WINDOW_TYPE_DOCK, state STICKY +
-   ABOVE (the fdk-shell-overlay TOP layer mapping).
+   ABOVE (the fdk-layer-shell TOP layer mapping).
 
 ## 7. trayhost against real incumbents
 
@@ -234,9 +234,9 @@ trayhost rendering at 16 px instead of the old 14.
 1. The default (nothing set anywhere):
 
 ```sh
-DISPLAY=:0 ./fdk-shell-overlay/build/examples/notifyd
+DISPLAY=:0 ./fdk-layer-shell/build/examples/notifyd
 notify-send "Default size" "should read comfortably at 16 px"
-DISPLAY=:0 ./fdk-shell-overlay/build/examples/trayhost   # bar taller than before
+DISPLAY=:0 ./fdk-layer-shell/build/examples/trayhost   # bar taller than before
 ```
 
 Expected: cards and the tray strip are ~14% larger than the old
@@ -248,12 +248,12 @@ body inside the card, menu rows inside the menu.
 ```sh
 for S in 12 16 24 32; do
   DISPLAY=:0 FDK_UI_FONT_SIZE=$S FDK_NOTIFYD_TRACE=1 \
-    ./fdk-shell-overlay/build/examples/notifyd &
+    ./fdk-layer-shell/build/examples/notifyd &
   notify-send "Size $S" "the card grows with the font; nothing clips"
   sleep 4; pkill -f 'examples/notifyd'
 done
 FDK_TRAYHOST_TRACE=1 FDK_UI_FONT_SIZE=32 \
-  DISPLAY=:0 ./fdk-shell-overlay/build/examples/trayhost
+  DISPLAY=:0 ./fdk-layer-shell/build/examples/trayhost
 ```
 
 Expected: each daemon's first trace line reads
@@ -419,8 +419,8 @@ a WM's per-monitor strut interpretation.
 ```sh
 # What the toolkit sees (real connector names, per-CRTC geometry):
 xrandr                       # compare against:
-fdk-shell-overlay/build/examples/bar --anchor tr          # output 0
-fdk-shell-overlay/build/examples/bar --anchor tr --output 1
+fdk-layer-shell/build/examples/bar --anchor tr          # output 0
+fdk-layer-shell/build/examples/bar --anchor tr --output 1
 ```
 
 Expectations:
@@ -467,7 +467,7 @@ Expectations, Wayland:
 - The launcher flow — your launcher mints with
   `fdk_window_activation_token()` at button-press, the child spends
   `XDG_ACTIVATION_TOKEN`: the child's first window arrives focused,
-  no focus steal. (Taskbar/launcher integration is the fdk-shell-overlay
+  no focus steal. (Taskbar/launcher integration is the fdk-layer-shell
   consumer of this.)
 - A stale/bogus token: refused, focus unchanged — that refusal is
   the feature.
@@ -597,9 +597,9 @@ your desktop shows is a real WM's take on a moving dock and a real
 compositor's slide.
 
 ```sh
-# any fdk-shell-overlay layer, live:
-#   fdk_shell_layer_set_anchor(layer, ...)   # watch it slide
-#   fdk_shell_layer_set_auto_hide(layer, 3, 300)  # hover the edge
+# any fdk-layer-shell layer, live:
+#   fdk_layer_shell_layer_set_anchor(layer, ...)   # watch it slide
+#   fdk_layer_shell_layer_set_auto_hide(layer, 3, 300)  # hover the edge
 ```
 
 Expectations:
@@ -615,7 +615,7 @@ Expectations:
   away for the dwell hides it again. On X11 your WM must not fight
   the off-screen move (USPosition claims it; some WMs clamp dock
   windows to the screen — a visible clamp is a WM difference to
-  report, not an fdk-shell-overlay bug).
+  report, not an fdk-layer-shell bug).
 
 **Status: DONE (should work; owner verification pending).**
 

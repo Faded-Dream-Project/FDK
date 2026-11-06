@@ -362,6 +362,8 @@ static void tv_rebreak(fdk_textview *tv) {
  * scrollview at the view's CURRENT bounds (the 1.4.7 rule —
  * set_bounds runs no hooks, dialogs place surfaces by hand) +
  * re-place the page. */
+static void tv_scroll_to_caret(fdk_textview *tv);
+
 static void tv_relayout(fdk_textview *tv) {
     if (tv->font == NULL) {
         return;

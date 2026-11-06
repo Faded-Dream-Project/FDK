@@ -6,7 +6,7 @@
  * package, and everything else — panel layers, notification shells,
  * custom surface roles, input methods — is a SEPARATE package that
  * depends on FDK and uses exactly what this header exposes. The
- * first such package is fdk-shell-overlay (wlr-layer-shell surfaces); its
+ * first such package is fdk-layer-shell (wlr-layer-shell surfaces; its
  * source is the reference consumer of every function here.
  *
  * The model in one paragraph: an add-on REGISTERS a surface KIND

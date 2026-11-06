@@ -688,20 +688,14 @@ $(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
-# --- fdk-shell-overlay (the shell-surface add-on package) ----------------
+# --- fdk-layer-shell (the shell-surface add-on) ---------------------------
 #
-# The add-on lives in its own directory with its own build (own
-# version, own pkg-config, own tests, own packaging) — it is a
-# SEPARATE package that only needs FDK's installed public +
-# extension API. These root targets are thin delegating aliases;
-# the real build is fdk-shell-overlay/Makefile (see its README).
-fdk-shell-overlay:
-	$(MAKE) -C fdk-shell-overlay
-
-fdk-shell-overlay-example:
-	$(MAKE) -C fdk-shell-overlay examples
-
-.PHONY: fdk-shell-overlay fdk-shell-overlay-example
+# The add-on package moved to its own repository:
+#   https://github.com/Faded-Dream-Project/FDK-Layer-Shell
+# (renamed from fdk-shell-overlay; C prefix fdk_layer_shell_*). It
+# builds against FDK's installed public API only — clone it beside
+# this checkout (../fdk is its default FDK_ROOT) and run its own
+# Makefile (make test / isolation).
 
 # --- Tools (1.4.13) ------------------------------------------------------
 

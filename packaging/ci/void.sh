@@ -26,7 +26,6 @@ docker pull -q "$VOID_IMAGE"
 
 RUN "$VOID_IMAGE" '
     set -eu
-    # libXtst-devel: the fdk-shell-overlay X11 suite drives its passive-grab
     # passthrough test with XTEST-synthesized keys — test
     # infrastructure, the same class as the X11 dev headers.
     # The round-robin mirror (repo-default.voidlinux.org) went
@@ -96,11 +95,9 @@ XMLCONF
         xbps-install -Sy xvfb 2>/dev/null || \
         echo "XVFB-SKIP (container-level): no Xvfb package found; the X11 suite and graphical smoke will be skipped and disclosed"
     sh packaging/void/build-xbps.sh
-    sh fdk-shell-overlay/packaging/void/build-xbps.sh
 '
 
 RUN "$VOID_IMAGE" 'sh packaging/void/install-test.sh'
-RUN "$VOID_IMAGE" 'sh fdk-shell-overlay/packaging/void/install-test.sh'
 
-echo "===== FDK void pipeline OK (FDK + fdk-shell-overlay) ====="
+echo "===== FDK void pipeline OK (FDK; the layer-shell add-on lives in FDK-Layer-Shell) ====="
 ls -la dist/
