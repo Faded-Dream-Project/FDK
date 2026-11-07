@@ -526,7 +526,7 @@ static void sgr(vt *v) {
                     }
                     if (j + 2 < 16 && v->pset[j] &&
                         v->pset[j + 1] && v->pset[j + 2]) {
-                        tc.index = -1;
+                        tc.index = TCOLOR_TRUECOLOR;
                         tc.r = (uint8_t)v->params[j];
                         tc.g = (uint8_t)v->params[j + 1];
                         tc.b = (uint8_t)v->params[j + 2];

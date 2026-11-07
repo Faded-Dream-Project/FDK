@@ -108,9 +108,6 @@ static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
             if (c->attr & TATTR_WIDE_CONT) {
                 continue;
             }
-            if (c->cp == 0) {
-                continue;
-            }
 
             /* fg/bg resolution (deferred colors) */
             fdk_color cfg = tcolor_resolve(c->fg, false);
@@ -120,7 +117,26 @@ static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
                 cfg = cbg;
                 cbg = tmp;
             }
+
+            /* the cell's own background — explicit bgs only, so the
+             * common all-default cell skips the fill. This used to
+             * be missing entirely: every 48;2/48;5 background (prompt
+             * segments, fastfetch blocks, \e[K-painted runs) fell
+             * through to the base fill and vanished. The bg fill
+             * must also happen for cp==0 cells: a segment paints its
+             * background by erasing cells with the pen bg set. */
+            if (c->bg.index != -1) {
+                fdk_rect bgr;
+                cell_rect(v, x, gy, &bgr);
+                bgr.x += ox;
+                bgr.y += oy;
+                fdk_surface_fill_rect(s, bgr, cbg);
+            }
+
             if (c->attr & TATTR_INVISIBLE) {
+                continue;
+            }
+            if (c->cp == 0) {
                 continue;
             }
 
