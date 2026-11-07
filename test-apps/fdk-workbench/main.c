@@ -338,8 +338,7 @@ static void bench_locale_refresh(bench *b) {
     fdk_locale_to_tag(&loc_current, tag, sizeof tag);
     ta_status(&b->ta, "locale: %s%s", tag,
               b->session == NULL
-                  ? "  ·  session: n/a on X11 (the documented "
-                    "degradation)"
+                  ? "  ·  session: n/a (the documented degradation)"
                   : "");
 }
 
@@ -631,7 +630,7 @@ int main(int argc, char **argv) {
            "prints=%d rows=%d session=%s banner_paints=%ld\n",
            B.undos_applied, B.redos_applied, B.drops, B.posts,
            B.prints, B.row_count,
-           B.session == NULL ? "n/a(x11)" : fdk_session_id(B.session),
+           B.session == NULL ? "n/a" : fdk_session_id(B.session),
            B.banner_paints);
     fdk_undo_stack_destroy(B.undo);
     if (B.session != NULL) {
