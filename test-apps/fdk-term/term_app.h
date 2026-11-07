@@ -38,6 +38,11 @@ typedef struct twindow {
     fdk_widget *statusbar;
     ttab *tabs[16];
     int ntabs;
+    /* the menu MODELS listed by this window's bar (fdk_menu_bar_append
+     * does not take ownership — the app destroys them, per the
+     * fdk_widgets.h contract, after the bar is gone) */
+    fdk_menu *menus[8];
+    int nmenus;
     int id;
     /* the pending-resize grid math */
     int cols, rows;

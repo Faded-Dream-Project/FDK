@@ -220,6 +220,7 @@ void tapp_build_menubar(twindow *w, fdk_widget *host) {
     fdk_menu_item_set_shortcut(it, "Ctrl+Q");
     fdk_menu_item_set_on_activate(it, act_quit, a);
     (void)fdk_menu_bar_append(bar, "&File", mfile);
+    w->menus[w->nmenus++] = mfile;
 
     /* Edit */
     fdk_menu *medit = NULL;
@@ -240,6 +241,7 @@ void tapp_build_menubar(twindow *w, fdk_widget *host) {
     (void)fdk_menu_append(medit, "Pr&eferences...", &it);
     fdk_menu_item_set_on_activate(it, act_prefs, a);
     (void)fdk_menu_bar_append(bar, "&Edit", medit);
+    w->menus[w->nmenus++] = medit;
 
     /* View */
     fdk_menu *mview = NULL;
@@ -256,6 +258,7 @@ void tapp_build_menubar(twindow *w, fdk_widget *host) {
     (void)fdk_menu_append(mview, "&Clear Scrollback + Screen", &it);
     fdk_menu_item_set_on_activate(it, act_clear, a);
     (void)fdk_menu_bar_append(bar, "&View", mview);
+    w->menus[w->nmenus++] = mview;
 
     /* Help */
     fdk_menu *mhelp = NULL;
@@ -263,6 +266,7 @@ void tapp_build_menubar(twindow *w, fdk_widget *host) {
     (void)fdk_menu_append(mhelp, "&About fdk-term", &it);
     fdk_menu_item_set_on_activate(it, act_about, a);
     (void)fdk_menu_bar_append(bar, "&Help", mhelp);
+    w->menus[w->nmenus++] = mhelp;
 }
 
 /* The focused view of a window: the notebook's current tab's LAST

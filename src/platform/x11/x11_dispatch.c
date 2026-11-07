@@ -364,6 +364,28 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
+        /* WM_TAKE_FOCUS (1.4.19): the ICCCM take-focus model — a WM
+         * hands keyboard focus over by sending this ClientMessage and
+         * EXPECTS the client to call XSetInputFocus itself (mutter /
+         * Muffin do this for activation and click-focus). data.l[1]
+         * carries the timestamp to use (0 = CurrentTime). Without
+         * this branch the WM never sets the X input focus on the
+         * window: the app renders, closes, and drops every key event
+         * (the "can't type anything" report). The resulting FocusIn
+         * drives the normal FDK_EVENT_WINDOW_FOCUS path — nothing
+         * else to do here. */
+        if (xevent.type == ClientMessage &&
+            xevent.xclient.message_type == conn->wm_protocols &&
+            (Atom)xevent.xclient.data.l[0] == conn->wm_take_focus) {
+            Time t = (Time)xevent.xclient.data.l[1];
+            XSetInputFocus(conn->display, pwindow->xwindow,
+                           RevertToParent,
+                           t != 0 ? t : CurrentTime);
+            XFlush(conn->display);
+            processed++;
+            continue;
+        }
+
         /* WM_SAVE_YOURSELF (1.1.0, D-5): the ICCCM appendix-C save
          * request — same ClientMessage shape as WM_DELETE_WINDOW,
          * the atom in data.l[0] instead. Dispatch
