@@ -28,6 +28,7 @@ struct vt {
     /* CSI accumulator */
     int params[16];
     bool pset[16];
+    bool psub[16];  /* slot was introduced by ':' (ITU sub-param) */
     bool ppriv;           /* the '?' private marker                */
     int nparams;
     int cur_param;        /* in-progress param (sub-params by ';') */
@@ -495,12 +496,31 @@ static void sgr(vt *v) {
                 if (mode == 5 && i + 2 < 16 && v->pset[i + 2]) {
                     tc.index = v->params[i + 2] & 0xFF;
                     i += 2;
-                } else if (mode == 2 && i + 4 < 16 && v->pset[i + 4]) {
-                    tc.index = -1;
-                    tc.r = (uint8_t)v->params[i + 2];
-                    tc.g = (uint8_t)v->params[i + 3];
-                    tc.b = (uint8_t)v->params[i + 4];
-                    i += 4;
+                } else if (mode == 2) {
+                    int j = i + 2;
+                    if (v->psub[i + 1]) {
+                        /* colon form: 38:2:R:G:B (ncurses),
+                         * 38:2::R:G:B (empty ITU colorspace) and
+                         * 38:2:CS:R:G:B all land here — with four
+                         * or more sub-slots the first one is the
+                         * colorspace, not red */
+                        int k = j;
+                        while (k < 16 && k < v->nparams &&
+                               v->psub[k]) {
+                            k++;
+                        }
+                        if (k - j >= 4) {
+                            j++;
+                        }
+                    }
+                    if (j + 2 < 16 && v->pset[j] &&
+                        v->pset[j + 1] && v->pset[j + 2]) {
+                        tc.index = -1;
+                        tc.r = (uint8_t)v->params[j];
+                        tc.g = (uint8_t)v->params[j + 1];
+                        tc.b = (uint8_t)v->params[j + 2];
+                        i = j + 2;
+                    }
                 }
             }
             if (p == 38) {
@@ -915,6 +935,7 @@ static void feed_codepoint(vt *v, uint32_t cp) {
                 v->nparams = 0;
                 v->ppriv = false;
                 memset(v->pset, 0, sizeof v->pset);
+                memset(v->psub, 0, sizeof v->psub);
             } else if (cp == 0x90) {
                 v->state = ST_DCS;
                 str_reset(v);
@@ -934,6 +955,7 @@ static void feed_codepoint(vt *v, uint32_t cp) {
             v->ppriv = false;
             v->cur_param = 0;
             memset(v->pset, 0, sizeof v->pset);
+            memset(v->psub, 0, sizeof v->psub);
             break;
         case ']':
             v->state = ST_OSC;
@@ -1029,9 +1051,11 @@ static void feed_codepoint(vt *v, uint32_t cp) {
             }
             v->cur_param = 0;
         } else if (cp == ':') {
-            /* sub-parameter: treat like ';' (SGR 38:5:... style) */
+            /* sub-parameter: a separate slot that the SGR 38/48
+             * handler must reassemble (the ITU 38:2::R:G:B form) */
             if (v->nparams < 15) {
                 v->nparams++;
+                v->psub[v->nparams] = true;
             }
             v->cur_param = 0;
         } else if (cp == '?') {
