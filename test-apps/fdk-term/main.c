@@ -430,6 +430,16 @@ static void load_fonts(tapp *app) {
             for (size_t i = 0; i < n; i++) {
                 if (strcmp(infos[i].family, families[f]) == 0) {
                     app->font = fdk_font_load(infos[i].path, (int)px);
+                    if (app->font != NULL &&
+                        !fdk_font_has_glyph(app->font, 'A')) {
+                        /* a face that loads but cannot draw Latin
+                         * (broken instance, symbol-only pick) would
+                         * render the whole terminal blank — skip it
+                         * like a failed load and try the next
+                         * family */
+                        fdk_font_destroy(app->font);
+                        app->font = NULL;
+                    }
                     break;
                 }
             }
