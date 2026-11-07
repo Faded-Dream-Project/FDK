@@ -26,6 +26,16 @@
 #include "core/alloc_internal.h" /* fdk_free (the resolver's path) */
 
 #include <assert.h>
+
+/* the private-use bucket (nerd icons): a misordered sh_ranges
+ * table silently ate E000-F8FF on the owner's box (rounds 6-8);
+ * pin the bucket and three representative codepoints */
+void test_sh_script_pua(void);
+void test_sh_script_pua(void) {
+    assert(fdk__sh_script_of_for_tests(0xE0B0) == 30); /* powerline   */
+    assert(fdk__sh_script_of_for_tests(0xF303) == 30); /* fa icon     */
+    assert(fdk__sh_script_of_for_tests(0x10FFFD) == 30); /* supp PUA  */
+}
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -929,6 +939,7 @@ int main(int argc, char **argv) {
     test_fallback_lifecycle();
     test_script_matrix();
     test_extreme_scale_pen();
+    test_sh_script_pua();
 
     printf("all shaping tests passed (%s posture)\n",
            fdk_text_shaping_available() ? "full pipeline" : "legacy");

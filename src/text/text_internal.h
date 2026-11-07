@@ -651,3 +651,6 @@ bool fdk_text_resolve_fallback_font(const char *lang, fdk_u32 probe_cp,
                                     char **out_path, long *out_face);
 
 #endif /* FDK_TEXT_INTERNAL_H */
+
+/* the classifier, exposed for the suite's PUA-bucket pin */
+int fdk__sh_script_of_for_tests(fdk_u32 cp);

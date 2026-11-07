@@ -573,12 +573,24 @@ fdk_font *fdk_font_load_terminal_default(
     if (!fdk_ok(fdk_font_enumerate(&infos, &n))) {
         return fdk_font_load_system_default(pixel_size);
     }
-    /* 1. the exact families, in the caller's priority order */
+    /* 1. the exact families, in the caller's priority order —
+     * preferring the Regular style when a family carries several
+     * faces (the enumerate order is directory order, which served
+     * DejaVuSansMono-Bold.ttf before DejaVuSansMono.ttf on the
+     * owner's box) */
     for (size_t f = 0; font == NULL && preferred != NULL && f < n_preferred;
          f++) {
-        for (size_t i = 0; i < n; i++) {
-            if (infos[i].family != NULL &&
-                strcmp(infos[i].family, preferred[f]) == 0) {
+        for (size_t pass = 0; pass < 2 && font == NULL; pass++) {
+            for (size_t i = 0; i < n; i++) {
+                if (infos[i].family == NULL ||
+                    strcmp(infos[i].family, preferred[f]) != 0) {
+                    continue;
+                }
+                bool regular = infos[i].style != NULL &&
+                    strcmp(infos[i].style, "Regular") == 0;
+                if ((pass == 0) != regular) {
+                    continue;
+                }
                 font = fdk__load_checked(infos[i].path, (int)pixel_size);
                 break;
             }

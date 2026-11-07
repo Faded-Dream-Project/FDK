@@ -444,8 +444,10 @@ static const sh_range sh_ranges[] = {
     {0x3041, 0x309F, 26}, {0x30A0, 0x30FF, 27}, {0x3130, 0x318F, 28},
     {0x31F0, 0x31FF, 27}, {0x3400, 0x4DBF, 25}, {0x4E00, 0x9FFF, 25},
     {0xA640, 0xA69F, 2},  {0xA720, 0xA7FF, 0},  {0xA960, 0xA97F, 28},
-    {0xAC00, 0xD7FF, 28}, {0xF900, 0xFAFF, 25}, {0xFB1D, 0xFB4F, 4},
-    {0xE000, 0xF8FF, 30}, /* private use: BMP — powerline/nerd v1-2 */
+    {0xAC00, 0xD7FF, 28},
+    {0xE000, 0xF8FF, 30}, /* private use: BMP — powerline/nerd
+                             * v1-2; D7FF < E000 < F900 */
+    {0xF900, 0xFAFF, 25}, {0xFB1D, 0xFB4F, 4},
     {0xFB50, 0xFDFF, 5},  {0xFE70, 0xFEFF, 5},  {0x1B001, 0x1B0FF, 26},
     {0x1F000, 0x1FAFF, 29}, {0x1FB00, 0x1FBFF, 29},
     {0x20000, 0x2A6DF, 25}, {0x2A700, 0x2EBEF, 25},
@@ -482,13 +484,21 @@ static void sh_ranges_selfcheck(void) {
     const size_t n = sizeof sh_ranges / sizeof sh_ranges[0];
     for (size_t i = 1; i < n; i++) {
         if (sh_ranges[i].lo <= sh_ranges[i - 1].hi) {
-            FDK_ERROR("shaping: sh_ranges[%zu] (U+%04X) is out of "
-                      "order or overlaps sh_ranges[%zu] — the script "
-                      "lookup is a binary search and silently "
-                      "misclassifies misordered ranges as COMMON "
-                      "(no fallback, .notdef ink). Sort the table "
-                      "by lo before shipping.",
-                      i, (unsigned)sh_ranges[i].lo, i - 1);
+            FDK_ERROR("shaping: sh_ranges[%zu] (U+%04X-U+%04X) is out "
+                      "of order against sh_ranges[%zu] "
+                      "(U+%04X-U+%04X) — the script lookup is a "
+                      "binary search and silently misclassifies "
+                      "misordered ranges as COMMON (no fallback, "
+                      ".notdef ink). Sort the table by lo before "
+                      "shipping.",
+                      i, (unsigned)sh_ranges[i].lo,
+                      (unsigned)sh_ranges[i].hi, i - 1,
+                      (unsigned)sh_ranges[i - 1].lo,
+                      (unsigned)sh_ranges[i - 1].hi);
+            /* a broken table poisons EVERY lookup silently; the
+             * legacy codepoint walk is slower but truthful */
+            g_shaping_state = -1;
+            return;
         }
     }
 }
@@ -2130,4 +2140,8 @@ fdk__shaped *fdk__shape_range_cached(fdk_font *font, const char *utf8,
     g_shaped_clock++;
     e->last_used = g_shaped_clock;
     return s;
+}
+
+int fdk__sh_script_of_for_tests(fdk_u32 cp) {
+    return sh_script_of(cp);
 }
