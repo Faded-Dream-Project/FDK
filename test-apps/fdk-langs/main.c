@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct {
     const char *script;
@@ -70,6 +71,19 @@ static ta_app TA;
 static struct { fdk_widget *label, *entry, *textview; } SW;
 static int fam_renders, fam_roundtrip, fam_bidi, fails;
 static char png_dir[280];
+
+/* How long each family stays on screen: the sweep used to flash all
+ * 13 in a couple of frames and exit — fine for a robot, useless for
+ * a human watching it. Default 5 seconds per language; --dwell=<s>
+ * overrides (0 = the old flash-through, what the automated runs
+ * use). */
+static long dwell_ms = 5000;
+
+static long now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+}
 
 static int ink_permille(void) {
     fdk_surface *s = NULL;
@@ -117,7 +131,7 @@ static int ink_permille(void) {
 static void run_family(int i) {
     const family *f = &FAMILIES[i];
     char title[128];
-    snprintf(title, sizeof title, "lang: %s", f->script);
+    snprintf(title, sizeof title, "lang: %s (%d/%d)", f->script, i + 1, NFAM);
     fdk_window_set_title(TA.window, title);
 
     fdk_widget *lab = SW.label, *ent = SW.entry, *tv = SW.textview;
@@ -174,7 +188,15 @@ static void run_family(int i) {
             fdk_surface_save_png(ps, path);
         }
     }
-}
+
+    /* the watchable dwell: keep pumping so the window stays live
+     * (paints, input, resize) while the family stays on screen */
+    if (dwell_ms > 0) {
+        long deadline = now_ms() + dwell_ms;
+        while (ta_pump(&TA)) {
+            if (now_ms() >= deadline) break;
+        }
+    }}
 
 static const struct { const char *tag; const char *cur; } LOCALES[] = {
     { "en-US", "USD" }, { "en-GB", "GBP" }, { "de-DE", "EUR" },
@@ -228,6 +250,10 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strncmp(argv[i], "--png=", 6) == 0) {
             snprintf(png_dir, sizeof png_dir, "%s", argv[i] + 6);
+        }
+        if (strncmp(argv[i], "--dwell=", 8) == 0) {
+            dwell_ms = strtol(argv[i] + 8, NULL, 10) * 1000L;
+            if (dwell_ms < 0) dwell_ms = 0;
         }
     }
     if (!ta_init(&TA, "fdk-langs") ||

@@ -185,7 +185,8 @@ test-apps-smoke:
 	    sleep 1.5; \
 	    DISPLAY="$$XVFB_DISP" FDK_TESTAPP_FRAMES=40 \
 	      LSAN_OPTIONS="suppressions=$(CURDIR)/$(ROOT)/tests/data/lsan-gl.supp" \
-	      $(BUILD)/$$app --smoke || rc=1; \
+	      $(BUILD)/$$app --smoke $$( [ "$$app" = fdk-langs ] && echo "--dwell=0" ) \
+      || rc=1; \
 	    kill "$$XVFB_PID" 2>/dev/null; \
 	    wait "$$XVFB_PID" 2>/dev/null; \
 	    rm -f "/tmp/.X11-unix/X$$XVFB_NUM"; \

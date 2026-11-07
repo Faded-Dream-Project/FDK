@@ -37,6 +37,20 @@
 > checks on every push. See `docs/versioning.md` for the record.
 
 
+## Round 34 (2026-11-07) — fdk-langs is watchable: 5 s per language
+
+The sweep flashed all 13 families in about a second and exited —
+fine for a robot, useless for a human. run_family now dwells: the
+window keeps pumping (paint/input/resize stay live) for a default
+of 5 SECONDS per language, the title shows the progress
+("lang: Latin (1/13)"), and --dwell=<seconds> overrides it
+(--dwell=0 is the old flash-through). Verified by wall clock:
+default full sweep 66 s (13 x 5 s + ~1 s overhead), --dwell=0 1 s,
+both receipts families=13 renders=13 entry=13 bidi=13 locales=24
+fails=0. The smoke matrix passes --dwell=0 to fdk-langs so the
+automated run keeps its speed; the release build of the app was
+rebuilt and verified (rc=0).
+
 ## Round 33 (2026-11-07) — the user machine's release build fixed; bug-rate: 1 real build-system bug, fixed
 
 **Found on a user machine, invisible in the sandbox's dev-only
