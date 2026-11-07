@@ -413,6 +413,45 @@ void tapp_quit(tapp *app) {
     }
 }
 
+/* normalized family key: lowercase, spaces and dashes dropped —
+ * "JetBrainsMono Nerd Font" must match a "JetBrains Mono" request */
+static void norm_family(const char *in, char *out, size_t cap) {
+    size_t o = 0;
+    for (const char *p = in; *p != '\0' && o + 1 < cap; p++) {
+        if (*p == ' ' || *p == '-') {
+            continue;
+        }
+        out[o++] = (char)(*p >= 'A' && *p <= 'Z' ? *p + 32 : *p);
+    }
+    out[o] = '\0';
+}
+
+/* the Nerd-Font-patched face of the requested mono families: the
+ * enumerate list only ever matched the plain names, so a box whose
+ * mono face IS its Nerd Font (the owner's Artix setup — their other
+ * terminals draw the prompt icons from it directly) fell through to
+ * the system default and the icons landed in .notdef */
+static fdk_font *load_nerd_variant(const fdk_font_info *infos,
+                                   size_t n, int px) {
+    fdk_font *f = NULL;
+    for (size_t i = 0; f == NULL && i < n; i++) {
+        char nf[128];
+        norm_family(infos[i].family, nf, sizeof nf);
+        size_t len = strlen(nf);
+        if (len < 8 || strcmp(nf + len - 8, "nerdfont") != 0) {
+            continue;
+        }
+        f = fdk_font_load(infos[i].path, px);
+        if (f != NULL && !fdk_font_has_glyph(f, 'A')) {
+            /* icon-only faces (Symbols Nerd Font) cannot be the
+             * terminal font — reject them like a failed load */
+            fdk_font_destroy(f);
+            f = NULL;
+        }
+    }
+    return f;
+}
+
 /* ---- main -------------------------------------------------------------------- */
 
 static void load_fonts(tapp *app) {
@@ -445,6 +484,13 @@ static void load_fonts(tapp *app) {
             }
         }
         fdk_font_info_list_free(infos, n);
+    }
+    if (app->font == NULL) {
+        /* no plain family matched — the box may only carry the
+         * Nerd-Font-patched faces; they cover Latin just fine and
+         * the owner's other terminals draw the prompt icons from
+         * them directly */
+        app->font = load_nerd_variant(infos, n, (int)px);
     }
     if (app->font == NULL) {
         app->font = fdk_font_load_system_default(px);

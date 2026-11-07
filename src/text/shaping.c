@@ -399,6 +399,16 @@ static const sh_script_def sh_scripts[] = {
                                        lang; the charset filter (probe
                                        codepoint) does the decisive
                                        work, the lang only ranks */
+    {"Qaae", "en", "PrivateUse"},  /* Nerd-Font / powerline icons live
+                                       in the private-use areas; no
+                                       Unicode script, so they used to
+                                       classify COMMON — no fallback,
+                                       .notdef ink (the "nerd fonts
+                                       don't work" report). The lang
+                                       only ranks; the candidate
+                                       loop's coverage check picks
+                                       whichever installed font
+                                       actually has the glyph. */
 };
 #define SH_N_SCRIPTS ((int)(sizeof sh_scripts / sizeof sh_scripts[0]))
 #define SH_SCRIPT_COMMON (-1)
@@ -436,6 +446,8 @@ static const sh_range sh_ranges[] = {
     {0xA640, 0xA69F, 2},  {0xA720, 0xA7FF, 0},  {0xA960, 0xA97F, 28},
     {0xAC00, 0xD7FF, 28}, {0xF900, 0xFAFF, 25}, {0xFB1D, 0xFB4F, 4},
     {0xFB50, 0xFDFF, 5},  {0xFE70, 0xFEFF, 5},  {0x1B001, 0x1B0FF, 26},
+    /* private use: BMP (powerline/nerd v1-2) + plane 14/16 (nerd v3) */
+    {0xE000, 0xF8FF, 30}, {0xF0000, 0xFFFFD, 30}, {0x100000, 0x10FFFD, 30},
     {0x1F000, 0x1FAFF, 29}, {0x1FB00, 0x1FBFF, 29},
     {0x20000, 0x2A6DF, 25}, {0x2A700, 0x2EBEF, 25},
     {0x2F800, 0x2FA1F, 25},

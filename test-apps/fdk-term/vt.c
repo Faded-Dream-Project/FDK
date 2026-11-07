@@ -370,6 +370,14 @@ static char *b64_decode_range(const char *s, size_t n, size_t *out_len) {
     return buf;
 }
 
+static bool vt_trace_on(void) {
+    static int on = -1;
+    if (on < 0) {
+        on = getenv("FDK_VT_TRACE") != NULL;
+    }
+    return on;
+}
+
 static void osc_dispatch(vt *v) {
     term *t = v->t;
     const char *s = v->str != NULL ? v->str : "";
@@ -379,6 +387,9 @@ static void osc_dispatch(vt *v) {
     while (s[i] >= '0' && s[i] <= '9') {
         num = num * 10 + (s[i] - '0');
         i++;
+    }
+    if (vt_trace_on()) {
+        fprintf(stderr, "[vt] OSC %d len=%zu\n", num, v->str_len);
     }
     const char *rest = s + i;
     if (*rest == ';') {
@@ -1071,6 +1082,15 @@ static void feed_codepoint(vt *v, uint32_t cp) {
                 v->nparams++;
             } else if (v->nparams == 0 && !v->pset[0]) {
                 /* no params at all: the default-1 crowd */
+            }
+            if (vt_trace_on()) {
+                fprintf(stderr,
+                        "[vt] CSI final='%c' priv=%d nparams=%d"
+                        " p0=%d p1=%d p2=%d\n",
+                        cp, v->ppriv, v->nparams,
+                        v->pset[0] ? v->params[0] : -1,
+                        v->pset[1] ? v->params[1] : -1,
+                        v->pset[2] ? v->params[2] : -1);
             }
             csi_dispatch(v, (uint8_t)cp);
             v->state = ST_GROUND;
