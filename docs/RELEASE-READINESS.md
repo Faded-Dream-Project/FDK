@@ -88,7 +88,41 @@ PARITY.md §1–12 states each of these with its trade-off. Anything
 outside those fences that an app needs is, by the project's own
 rule, "a bug in FDK" — file it and it goes on this list.
 
-## 5. Housekeeping done alongside this document
+## 6. The release gate G1–G7 (2026-11-07 — binary, scripted)
+
+The owner's question — "how can we be sure?" — gets a mechanical
+answer: every criterion below is binary, and `scripts/release-gate.sh`
+prints PASS/FAIL for each straight from the tree. **G1–G6 must be
+green before any tag. G7 never blocks a tag; it blocks the "total
+replacement" claim forever until it is earned.**
+
+- **G1 — Feature freeze, signed by the register.** ROADMAP.md's
+  Part 1 register at zero PARTIAL/MISSING with the only non-DONE
+  item being M-9, AND docs/PARITY.md's gap table carries no OPEN row
+  that is not an explicit OUT-by-policy decision.
+- **G2 — Zero open P0/P1 bugs.** PROGRESS.md's open-bug list is
+  empty, or every entry documents a shipped workaround/fence.
+- **G3 — The bug-rate plateau.** The two most recent PROGRESS.md
+  round entries both record `bug-rate: 0 new library bugs` and were
+  run in different environments (a compositor, a desktop, a
+  workload). This is the criterion last time's release lacked.
+- **G4 — The real-desktop walkthrough (M-9), signed.**
+  docs/REAL-DESKTOP-SIGNOFF.md exists, is dated, and lists the 28
+  TESTING-ON-DESKTOP.md sections with the owner's sign-off. The
+  sandbox cannot produce this; the gate stays red until the owner.
+- **G5 — Clean-checkout build + full battery.** The script builds
+  the tree from scratch (the CI-simulation: static + shared + tools)
+  and runs the complete unit suite green.
+- **G6 — Claim discipline.** No release-facing document claims a
+  "replacement for" GTK/Qt; the release posture is the PARITY.md
+  verdict verbatim. The script greps for the forbidden sentences.
+- **G7 — External evidence (informational).** Fleet dogfooding and
+  third-party beta users. Never blocks a tag; gates Claim B.
+
+Run it: `bash scripts/release-gate.sh`. Exit 0 only when G1–G6 pass.
+
+## 7. Housekeeping done alongside this document
+
 
 - `fdk-shell/` in the worktree is an old INSTALL tree (renamed to
   `fdk-shell-overlay/` long ago; sources live there) — gitignored so

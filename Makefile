@@ -542,7 +542,7 @@ test: $(TEST_BINS)
 
 $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
 # X11 platform integration test — NOT part of plain `make test` (see
 # docs/testing.md's headless-by-default policy). Requires a reachable
@@ -678,7 +678,7 @@ $(X11_TEST_BIN): $(X11_TEST_SRC) $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	# -lXtst: the input-region click-through legs drive REAL XTEST pointer
 	# events (S-4, rc2) — XSendEvent bypasses shapes and proves nothing.
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS) -lXtst
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS) -lXtst
 
 # --- Examples ---------------------------------------------------------
 

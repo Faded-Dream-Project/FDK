@@ -27,12 +27,15 @@
 
 #include "hermetic_env.h"
 #include "fdk/fdk.h"
+#ifndef FDK_DISABLE_WAYLAND
 #include "platform/wayland/wayland_egl.h"
+#endif
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
+#ifndef FDK_DISABLE_WAYLAND
 static void test_twin_swizzle(void) {
     /* Known bytes: B=0x11, G=0x22, R=0x33, X=0x44 -> u32 0x44332211;
      * the twin must be [R,G,B,X] -> 0x44112233. */
@@ -60,7 +63,9 @@ static void test_twin_swizzle(void) {
     printf("[ok] gl lane fallback: RGBA-twin swizzle byte math "
            "(known pixels, involution, G/X channels pinned)\n");
 }
+#endif /* FDK_DISABLE_WAYLAND */
 
+#ifndef FDK_DISABLE_WAYLAND
 static void test_row_packing(void) {
     /* A 8x4 stride-8 buffer; pixel (x, y) = 0x80000000 | y * 8 + x so
      * every position is distinguishable. */
@@ -99,10 +104,18 @@ static void test_row_packing(void) {
            "full-width, single pixel; stride honored, nothing extra "
            "written)\n");
 }
+#endif /* FDK_DISABLE_WAYLAND */
 
 int main(void) {
+#ifndef FDK_DISABLE_WAYLAND
     test_twin_swizzle();
     test_row_packing();
+#else
+    /* the whole contract lives in the Wayland EGL lane's CPU side;
+     * an X11-only build has no such lane to pin */
+    printf("[skip] gl lane fallback: Wayland backend disabled at "
+           "build time — nothing to pin\n");
+#endif
     printf("\nall gl lane fallback tests passed\n");
     return 0;
 }
