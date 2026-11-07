@@ -37,6 +37,37 @@
 > checks on every push. See `docs/versioning.md` for the record.
 
 
+## Round 33 (2026-11-07) — the user machine's release build fixed; bug-rate: 1 real build-system bug, fixed
+
+**Found on a user machine, invisible in the sandbox's dev-only
+builds: `make release` failed to link fdk-keys** (undefined rxkb_*)
+— the dev rule carries a dedicated per-target link set with
+libxkbregistry, the release generic rule did not, and the
+duplicate-recipe warning the user also saw was the dev side of the
+same shape. Fixed at both layers in test-apps/Makefile: fdk-keys is
+excluded from BOTH generic foreach rules and has one dedicated
+release rule mirroring the dev one (xkbcommon + xkbregistry via
+pkg-config, FEATURE included — the first cut dropped _POSIX_C_SOURCE
+and strdup went implicit under -std=c17/-Werror, caught here before
+pushing); pkg-config probes degrade: a machine with NO libxkbregistry
+builds fdk-keys with -DFDK_NO_XKBREGISTRY and the layout sweep
+prints the honest unavailable message instead of failing to
+compile/link — verified in THIS sandbox, which genuinely has no
+xkbregistry (the fallback path is the one that runs here).
+
+**Verified end to end on the fixed tree:** `make -C test-apps
+release` rc=0 — all ten apps including fdk-keys, zero overriding-
+recipe warnings; the dev battery 788/788; the language sweep
+13/13 + 24/24 locales on BOTH Xvfb and labwc again (26 fresh PNGs
+into download/fdk-langs-screenshots/); one render eyeballed
+(Latin label/entry/textview/mixed-bidi line correct).
+
+Also: the sandbox recycle wiped the previous round's screenshot
+copies from download/ (the /tmp sources died with it) — every PNG
+was regenerated from the fixed tree and re-verified with PIL
+before this commit. Setup after a recycle remains one command:
+`bash scripts/setup-sandbox.sh`.
+
 ## Round 32 (2026-11-07) — the language sweep green on BOTH backends; Wayland compose landed; bug-rate: 0 new library bugs
 
 **The language sweep (the owner's section-4 ask) is a shipped app:**

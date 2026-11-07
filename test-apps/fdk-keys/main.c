@@ -207,7 +207,9 @@ static void sweep_engine(void) {
 /* ---- the xkb layout sweep: every layout's letters -------------------- */
 
 #include <xkbcommon/xkbcommon.h>
+#ifndef FDK_NO_XKBREGISTRY
 #include <xkbcommon/xkbregistry.h>
+#endif
 
 static long lay_count;
 static long lay_letters;
@@ -215,13 +217,22 @@ static long lay_unique;
 /* the unique codepoints seen, bitset over planes 0-2 (U+0000..U+2FFFF) */
 static unsigned char seen[(0x30000) / 8];
 
+#ifndef FDK_NO_XKBREGISTRY
 static void mark_seen(unsigned int cp) {
     if (cp < 0x30000) {
         seen[cp >> 3] |= (unsigned char)(1u << (cp & 7));
     }
 }
+#endif
 
 static void sweep_layouts(void) {
+#ifdef FDK_NO_XKBREGISTRY
+    fdk_label_set_text(K.info, "--sweep-layouts: libxkbregistry not installed "
+                               "(this build found no pkg-config xkbregistry); "
+                               "the engine/keymap sweeps still run\n");
+    fdk_widget_invalidate(K.info);
+    return;
+#else
     /* the SYSTEM ruleset (default includes): the same xkeyboard-config
      * data both FDK backends read through libxkbcommon */
     struct rxkb_context *rc = rxkb_context_new(RXKB_CONTEXT_NO_FLAGS);
@@ -335,6 +346,7 @@ static void sweep_layouts(void) {
             lay_unique++;
         }
     }
+#endif /* FDK_NO_XKBREGISTRY */
 }
 
 /* the rigs (XTEST, the labwc virtual keyboard) finish by pressing
@@ -412,12 +424,14 @@ int main(int argc, char **argv) {
         memset(seen, 0, sizeof seen);
         lay_count = lay_letters = lay_unique = 0;
         sweep_layouts();
+#ifndef FDK_NO_XKBREGISTRY
         char show[160];
         snprintf(show, sizeof show,
                  "layout sweep done: layouts=%ld letters=%ld "
                  "unique=%ld",
                  lay_count, lay_letters, lay_unique);
         fdk_label_set_text(K.info, show);
+#endif
     }
     mirror_refresh();
 

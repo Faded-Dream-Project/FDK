@@ -72,7 +72,19 @@ $(REL_BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/te
 	$$(CC) $$(CPPFLAGS) $$(STD) $$(WARN) $$(FEATURE) -O2 -DNDEBUG -MMD -MP -Werror -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/term_test.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c %/chat_test.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(REL_LIBS)
 endef
 
-$(foreach app,$(APP_DIRS),$(eval $(call REL_APP_RULE,$(app))))
+$(foreach app,$(filter-out fdk-keys,$(APP_DIRS)),$(eval $(call REL_APP_RULE,$(app))))
+
+# fdk-keys' release link: the registry rides along exactly like the
+# dev rule (make release used to drop it and fail on rxkb_* — found
+# on a user machine, not in the sandbox's dev-only builds)
+XKBREGISTRY_LIBS := $(shell pkg-config --libs xkbregistry 2>/dev/null)
+XKBREGISTRY_CFLAGS := $(shell pkg-config --cflags xkbregistry 2>/dev/null)
+ifeq ($(strip $(XKBREGISTRY_LIBS)),)
+XKBREGISTRY_CFLAGS := -DFDK_NO_XKBREGISTRY
+endif
+$(REL_BUILD)/fdk-keys: $(filter-out %/gen_app_icon.c %/perf_50k.c,$(wildcard fdk-keys/*.c)) $(COMMON_SRCS) $(wildcard common/*.h) $(FDK_LIB)
+	@mkdir -p $(REL_BUILD)
+	$(CC) $(CPPFLAGS) $(shell pkg-config --cflags xkbcommon 2>/dev/null) $(XKBREGISTRY_CFLAGS) $(STD) $(WARN) $(FEATURE) -O2 -DNDEBUG -MMD -MP -Werror -DPO_DIR='"$(CURDIR)/fdk-keys/po"' -o $@ $(filter-out %/gen_app_icon.c %/perf_50k.c,$(wildcard fdk-keys/*.c)) $(COMMON_SRCS) $(FDK_LIB) $(REL_LIBS) $(XKBREGISTRY_LIBS)
 
 # The release link set: the archive's transitive backends, no
 # sanitizer runtime (the LIB must be release-config too — linking a
@@ -95,13 +107,16 @@ $(BUILD)/$(1): $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/term_t
 	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -DPO_DIR='"$(CURDIR)/$(1)/po"' -o $$@ $$(filter-out %/gen_app_icon.c %/perf_50k.c %/drag_rig.c %/term_test.c %/click_rig.c %/menu_rig.c %/nav_rig.c %/nav_probe.c %/input_rig.c %/stress_rig.c %/delete_rig.c %/sidebar_test.c %/sidebar_view.c %/chat_test.c,$$(wildcard $(1)/*.c)) $$(COMMON_SRCS) $$(FDK_LIB) $$(LIBS)
 endef
 
-$(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
+$(foreach app,$(filter-out fdk-keys,$(APP_DIRS)),$(eval $(call APP_RULE,$(app))))
 
 # fdk-keys' --sweep-layouts enumerates every xkb layout: the registry
 # + keymap libs ride along on top of LIBS (the entry model itself
 # stays on the public API only).
-$(BUILD)/fdk-keys: XKEYS_LIBS := $(shell pkg-config --libs xkbcommon xkbregistry 2>/dev/null)
-$(BUILD)/fdk-keys: XKEYS_CFLAGS := $(shell pkg-config --cflags xkbregistry xkbcommon 2>/dev/null)
+ifeq ($(strip $(XKBREGISTRY_LIBS)),)
+XKBREGISTRY_LIBS :=
+endif
+$(BUILD)/fdk-keys: XKEYS_LIBS := $(shell pkg-config --libs xkbcommon 2>/dev/null) $(XKBREGISTRY_LIBS)
+$(BUILD)/fdk-keys: XKEYS_CFLAGS := $(shell pkg-config --cflags xkbcommon 2>/dev/null) $(XKBREGISTRY_CFLAGS)
 $(BUILD)/fdk-keys: $(filter-out %/gen_app_icon.c %/perf_50k.c,$(wildcard fdk-keys/*.c)) $(COMMON_SRCS) $(wildcard common/*.h) $(FDK_LIB)
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(XKEYS_CFLAGS) $(CFLAGS) -DPO_DIR='"$(CURDIR)/fdk-keys/po"' -o $@ $(filter-out %/gen_app_icon.c %/perf_50k.c,$(wildcard fdk-keys/*.c)) $(COMMON_SRCS) $(FDK_LIB) $(LIBS) $(XKEYS_LIBS)
