@@ -913,6 +913,26 @@ static void apply_window_scale(fdk_platform_window *pwindow) {
     fdk_platform_connection *conn = pwindow->conn;
 
     int integer = (pwindow->scale_x120 % 120) == 0;
+    /* wl_surface.set_buffer_scale is since version 3 — a surface
+     * created from an OLDER compositor bind (an add-on's own
+     * registry, for instance) must never receive it: libwayland-
+     * server kills the connection with "invalid method 8 (since
+     * 1 < 3)" on the first commit (the layer-shell HUD kill, round
+     * 30). Scale 1 is the power-on default, so skipping is a no-op
+     * for the common case; k > 1 on an old surface is refused with
+     * an honest warning instead of a dead connection. */
+    if (wl_proxy_get_version((struct wl_proxy *)pwindow->surface) < 3) {
+        int k = pwindow->scale_x120 / 120;
+        if (k > 1) {
+            FDK_WARN("surface compositor version < 3: cannot apply "
+                     "integer buffer scale %d (wl_surface."
+                     "set_buffer_scale since v3); rendering at 1x",
+                     k);
+        }
+        pwindow->buffer_scale = 1;
+        pwindow->scale_applied = 1;
+        return;
+    }
     if (integer || conn->viewporter == NULL) {
         int k = pwindow->scale_x120 / 120;
         if (k < 1) {

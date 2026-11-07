@@ -86,6 +86,12 @@ int fdk__wayland_connection_dead(fdk_platform_connection *conn,
                     (void)wl_display_dispatch_pending(
                         conn->display);
                 }
+                /* get_protocol_error reports only DISPATCHED error
+                 * events — a freshly read event must be dispatched
+                 * once (non-blocking) before the query, or the detail
+                 * line below stays generic (found live: the layer-
+                 * shell kill printed no names until this landed) */
+                (void)wl_display_dispatch_pending(conn->display);
                 code = wl_display_get_protocol_error(conn->display,
                                                      &iface, &id);
             }

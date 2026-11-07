@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
         fdk_widget *intro = NULL;
         if (fdk_ok(fdk_label_create(
                 col, h.ta.font_ui,
-                "fdk-hud loaded via dlopen — the panel top-right is "
+                "fdk-hud loaded via dlopen — the panel top-left is "
                 "the add-on's own surface kind",
                 &intro))) {
             fdk_widget_set_expand(intro, true, false);
@@ -280,8 +280,11 @@ int main(int argc, char **argv) {
         printf("FAIL kind lifecycle\n");
         fails++;
     }
-    if (st.exposes == 0) {
-        printf("FAIL no expose repaints served\n");
+    if (st.exposes + st.repaints == 0) {
+        /* X11 serves repaints as exposes; wayland has no expose
+         * concept — the tick/configure path repaints instead */
+        printf("FAIL no repaints served (exposes=%d repaints=%d)\n",
+               st.exposes, st.repaints);
         fails++;
     }
     if (st.commands < 3) {

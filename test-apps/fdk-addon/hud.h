@@ -43,6 +43,9 @@ typedef struct fdk_hud_stats {
     int commands;           /* command-pipe lines processed          */
     int menu_opens;         /* popup menu openings                   */
     int menu_picks;         /* menu rows the user activated          */
+    int repaints;           /* every real paint — X11 serves repaints
+                             * as EXPOSEs, wayland has no expose concept
+                             * (the tick/configure/menu paths count here) */
 } fdk_hud_stats;
 
 /* Options (zero-initialize for defaults). */

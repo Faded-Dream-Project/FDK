@@ -54,9 +54,19 @@ for app in $SMOKE_APPS; do
     fi
     echo "=== smoke (wayland/labwc): $app"
     extra=""
-    [ "$app" = fdk-addon-host ] && extra="FDK_HUD_LIB=$BUILD/libfdk-hud.so"
+    # FDK_HUD_WAYLAND=1: the layer-shell role is no longer opt-in-only
+    # for the smoke — the round-30 version-gate fix closed the kill, so
+    # the smoke pins it (the host must PASS its full receipt here)
+    [ "$app" = fdk-addon-host ] && \
+        extra="FDK_HUD_LIB=$BUILD/libfdk-hud.so FDK_HUD_WAYLAND=1"
     # shellcheck disable=SC2086
-    env $extra FDK_TESTAPP_FRAMES=40 "$BUILD/$app" --smoke \
+    # the addon-host's scripted commands are timer-fed; the wayland
+    # pump is frame-callback-paced, so 40 frames (~0.7 s under pixman)
+    # served too few of them — give that leg a frame budget its feed
+    # timer can actually fill (X11's unhinged pump needs only 40)
+    frames=40
+    [ "$app" = fdk-addon-host ] && frames=600
+    env $extra FDK_TESTAPP_FRAMES=$frames "$BUILD/$app" --smoke \
         > "/tmp/labwc_smoke_$app.log" 2>&1 || rc=1
     grep -h "receipt\|PASS\|FAIL" "/tmp/labwc_smoke_$app.log" | tail -2
 done

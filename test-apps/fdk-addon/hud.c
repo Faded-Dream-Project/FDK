@@ -144,6 +144,7 @@ static void hud_arc_segment(fdk_surface *s, float cx, float cy,
 }
 
 static void hud_render(fdk_hud *h) {
+    h->st.repaints++;
     if (h->surf == NULL) {
         return;
     }
@@ -386,8 +387,16 @@ static void hud_wl_global(void *data, struct wl_registry *reg,
                           uint32_t version) {
     fdk_hud *h = data;
     if (strcmp(iface, wl_compositor_interface.name) == 0) {
+        /* min(offered, 5): pinning version 1 here made the surface a
+         * v1 wl_surface, and FDK's present path then sent
+         * wl_surface.set_buffer_scale (since v3) on it — labwc killed
+         * the client with "invalid method 8 (since 1 < 3), object
+         * wl_surface#31" on the first buffer commit (the round-30
+         * layer-shell kill, root cause). A version-gated request
+         * needs a version-gated bind. */
         h->wl_compositor = wl_registry_bind(
-            reg, name, &wl_compositor_interface, 1);
+            reg, name, &wl_compositor_interface,
+            version < 5 ? version : 5);
     } else if (strcmp(iface, zwlr_layer_shell_v1_interface.name) == 0) {
         h->wl_layer_shell = wl_registry_bind(
             reg, name, &zwlr_layer_shell_v1_interface,

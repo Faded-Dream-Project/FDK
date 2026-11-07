@@ -14,7 +14,7 @@ cd /tmp
 apt-get download \
     libwayland-dev libwayland-bin libwayland-client0 libwayland-cursor0 libwayland-server0 \
     libxkbcommon-dev libxkbcommon0 libxkbregistry0 \
-    sway weston grim \
+    sway weston grim labwc wtype xwayland libxcvt0 libsfdo0 \
     libevdev2 libinput10 libudev1 libseat1 libjson-c5 libpcre2-8-0 \
     libpng16-16t64 libfreetype6 libfontconfig1 libcairo2 libpixman-1-0 \
     libgbm1 libdrm2 libwlroots-0.18 libgdk-pixbuf-2.0-0 libglib2.0-0t64 \

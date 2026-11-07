@@ -476,6 +476,12 @@ $(STATIC_LIB): $(LIB_OBJS)
 $(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(FDK_SONAME) -Wl,--version-script=$(EXPORT_MAP) -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
+	@# the SONAME link in-tree: anything linking -lfdk needs
+	# libfdk.so.<major> at RUN time, not just at install time
+	# (the add-on host dlopens a plugin against the shared lib and
+	# could not start from a clean build without it — found live
+	# by the smoke matrix)
+	ln -sf libfdk.so $(BUILD_DIR)/$(FDK_SONAME)
 
 # Generates the export map: intersection of header-declared names and
 # archive-defined globals (see the EXPORT_MAP block above). Depends on

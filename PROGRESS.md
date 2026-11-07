@@ -13,25 +13,19 @@
 - **Batteries:** 784-check unit suite green (ASan/UBSan, both
   backends); the nine-app fleet receipts on Xvfb, sway AND labwc;
   the typing audit green (1,112,111 codepoints, 589 layouts).
-- **Release gate (G1–G7, docs/RELEASE-READINESS.md):** G1 open by
-  two small API tails; G2 open by ONE parked bug (below); G3 open —
-  the bug-rate plateau needs two clean rounds; G4 open — the
-  real-desktop walkthrough is the owner's hardware; G5 green in CI;
-  G6 pending the release-page text; G7 not started (external
-  evidence). **Do NOT tag until G1–G6 are green.**
-- **Open bug (top priority):** the hud add-on's Wayland layer-shell
-  role gets the client killed by wlroots compositors on the first
-  buffer commit ("error in client communication") with no
-  client-side protocol error readable. Opt-in behind
-  FDK_HUD_WAYLAND=1; the default path is the honest refusal. Full
-  evidence in the round-29 entry below and in
-  docs/RELEASE-READINESS.md's bug section.
-- **Next steps:** (1) close the layer-shell kill; (2) the language
-  sweep — every writing system the installed fonts cover, rendered
-  and typed, on X11 and labwc, table in this file; (3) environment
-  rounds (scales, fonts, layouts, compositors) logging the
-  bug-discovery rate per round until two consecutive rounds are
-  clean; (4) then the gate.
+- **Release gate (G1–G7, docs/RELEASE-READINESS.md):** G2 PASS
+  (no open bugs), G5 PASS, G6 PASS. G1 open by the two PARITY tails
+  (text-on-extension-surfaces, inline chooser widgets); G3 open —
+  the bug-rate plateau needs two clean environment rounds; G4 open —
+  the real-desktop walkthrough is the owner's hardware; G7 not
+  started (external evidence). **Do NOT tag until G1–G6 are green.**
+- **Open bugs: NONE.** The layer-shell kill is CLOSED (round 31,
+  root cause + fix below); every P0/P1 is resolved.
+- **Next steps:** (1) the language sweep — every writing system the
+  installed fonts cover, rendered and typed, on X11 and labwc, table
+  in this file; (2) environment rounds (scales, fonts, layouts,
+  compositors) logging the bug-discovery rate per round until two
+  consecutive rounds are clean; (3) then the gate.
 
 > **Repository posture (2026-10-31):** the project is **in
 > development — no stable release yet.** One branch (`main`), zero
@@ -40,6 +34,47 @@
 > below belonged to the project's former repository and no longer
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
+
+
+## Round 31 (2026-11-07) — the layer-shell kill CLOSED; bug-rate: 1 found, 1 fixed, 0 new after the fix
+
+**THE BUG (round 29's parked P1) — closed with the root cause and a
+named protocol error.** Evidence chain: (1) the minimal replay client
+(`scripts/layer_repro/`, six variants — plain, set_buffer_scale,
+ARGB, double-commit, max-damage, second-registry) SURVIVED on labwc,
+exonerating the raw request sequence; (2) the FDK-side dead-
+connection helper was taught to dispatch freshly-read events before
+querying, which finally NAMED the error:
+`wl_display#1.error(wl_display#1, 1, "invalid method 8 (since 1 < 3),
+object wl_surface#31")` — wl_surface.set_buffer_scale exists since
+version 3, but the hud add-on's own registry pinned wl_compositor at
+version 1, making its surface a v1 wl_surface; libwayland-server
+kills the connection on the first commit that carries the v3 request.
+**Fixes:** the add-on binds min(offered, 5) like FDK's own registry;
+FDK's apply_window_scale now refuses set_buffer_scale on any surface
+whose compositor negotiated < 3 (skip — scale 1 is the default —
+with an honest warning if k > 1). Result: the hud's layer-shell
+panel PAINTS on labwc (radial gauge live, screenshot-verified), the
+full ADDON-HOST receipt PASSES on Wayland (commands=99,
+menu_opens=1), and the labwc smoke runs ALL NINE APPS green for the
+first time — the addon-host leg pins the fix (FDK_HUD_WAYLAND=1).
+
+**Two library hardenings landed alongside:** the dead-connection
+helper dispatches a freshly-read error event before the protocol-
+error query (the detail line is no longer generic); the shared-lib
+link rule creates the in-tree SONAME symlink (an add-on host could
+not start from a clean build without it — found by the smoke).
+
+**New-found regressions this round (environment: clean checkout):**
+the single-shot compile rules omitted $(WAYLAND_DEFS) — an X11-only
+build never defined FDK_DISABLE_WAYLAND for tests and
+test_gl_lane_fallback failed to link (fixed at the rule; the
+wayland-only cases guarded with an explicit [skip] line). Both
+batteries green after: X11-only and X11+Wayland, 784 checks each.
+
+**Current battery:** 784 checks × 2 configurations; X11 smoke
+matrix rc=0; labwc smoke ALL APPS PASSED; release gate G2/G5/G6
+PASS, G1/G3/G4 open by design.
 
 Last audited: 2026-10-31, on the rc2 line after the history rewrite
 (the tablet-crash round [D-033], the upload-contract re-land
