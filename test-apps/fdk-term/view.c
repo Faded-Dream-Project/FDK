@@ -33,11 +33,19 @@ static void cell_rect(const tview *v, int x, int y, fdk_rect *out) {
 
 static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
     term *t = &v->t;
-    (void)bounds;
+    /* FDK paint hooks receive the widget's ABSOLUTE bounds and the
+     * surface is NOT translated (only clipped — widget.c's paint_rec
+     * pushes the abs rect as the clip). Every other widget paints
+     * with bounds.x/y; the terminal used to paint at local (0,0),
+     * which shifted the whole grid up by the menubar+tabbar height —
+     * the prompt landed inside the clipped chrome strip and never
+     * showed (the 1.4.20 "can't type" report: the keys were reaching
+     * the pty all along, the echo was drawn off the viewport). */
+    const fdk_i32 ox = bounds.x, oy = bounds.y;
 
     /* background */
     fdk_color bg = tcolor_default_bg();
-    fdk_surface_fill_rect(s, (fdk_rect){0, 0, t->cols * v->cell_w,
+    fdk_surface_fill_rect(s, (fdk_rect){ox, oy, t->cols * v->cell_w,
                                         t->rows * v->cell_h},
                           bg);
 
@@ -140,6 +148,8 @@ static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
                 sel_bg.a = 0.45f;
                 fdk_rect cr;
                 cell_rect(v, x, gy, &cr);
+                cr.x += ox;
+                cr.y += oy;
                 fdk_surface_fill_rect(s, cr, sel_bg);
             }
 
@@ -173,6 +183,8 @@ static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
 
             fdk_rect cr;
             cell_rect(v, x, gy, &cr);
+            cr.x += ox;
+            cr.y += oy;
 
             /* wide cells: the ink spans two columns */
             int span = 1;
@@ -228,6 +240,8 @@ static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
         if (blink_show) {
             fdk_rect cr;
             cell_rect(v, t->cx, t->cy, &cr);
+            cr.x += ox;
+            cr.y += oy;
             /* wide cursor over wide cells */
             if (t->cx + 1 < t->cols) {
                 const trow *r = t->on_alt ? &t->alt[t->cy]
@@ -273,10 +287,10 @@ static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
         fdk_color warn = fdk_theme_get_color(NULL, FDK_TK_WARNING);
         warn.a = 0.55f;
         fdk_i32 w = t->cols * v->cell_w, h = t->rows * v->cell_h;
-        fdk_surface_fill_rect(s, (fdk_rect){0, 0, w, 3}, warn);
-        fdk_surface_fill_rect(s, (fdk_rect){0, h - 3, w, 3}, warn);
-        fdk_surface_fill_rect(s, (fdk_rect){0, 0, 3, h}, warn);
-        fdk_surface_fill_rect(s, (fdk_rect){w - 3, 0, 3, h}, warn);
+        fdk_surface_fill_rect(s, (fdk_rect){ox, oy, w, 3}, warn);
+        fdk_surface_fill_rect(s, (fdk_rect){ox, oy + h - 3, w, 3}, warn);
+        fdk_surface_fill_rect(s, (fdk_rect){ox, oy, 3, h}, warn);
+        fdk_surface_fill_rect(s, (fdk_rect){ox + w - 3, oy, 3, h}, warn);
     }
 
     /* the scroll indicator: a thin bar on the right edge while
@@ -289,7 +303,8 @@ static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
         fdk_i32 bar_y = (fdk_i32)((h - bar_h) * frac);
         fdk_color ink = fdk_theme_get_color(NULL, FDK_TK_TEXT);
         ink.a = 0.4f;
-        fdk_surface_fill_rect(s, (fdk_rect){w - 4, bar_y, 3, bar_h}, ink);
+        fdk_surface_fill_rect(s, (fdk_rect){ox + w - 4, oy + bar_y, 3, bar_h},
+                              ink);
     }
 }
 

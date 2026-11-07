@@ -72,7 +72,12 @@ typedef struct term {
     int cx, cy;             /* cursor (col in cells, row in grid)   */
 
     trow *grid;             /* the primary grid: rows[]             */
-    int ngrid;              /* == rows                              */
+    int ngrid;
+    /* the alt array's own row count: term_resize's primary path
+     * regrids the main screen without touching alt, so ngrid and
+     * rows both drift away from the alt allocation — freeing it by
+     * t->rows overflowed the heap (ASan, the 1.4.20 close report) */
+    int nalt;              /* == rows                              */
 
     trow *alt;              /* the alternate grid                   */
     int alt_cursor_x, alt_cursor_y;

@@ -122,6 +122,7 @@ void term_init(term *t, int cols, int rows, size_t scrollback_lines) {
             free(r);
         }
     }
+    t->nalt = rows;
 
     if (scrollback_lines > 0) {
         t->back_cap = scrollback_lines;
@@ -134,7 +135,7 @@ void term_free(term *t) {
         free(t->grid[y].cells);
     }
     free(t->grid);
-    for (int y = 0; y < t->rows; y++) {
+    for (int y = 0; y < t->nalt; y++) {
         free(t->alt[y].cells);
     }
     free(t->alt);
@@ -193,6 +194,7 @@ void term_resize(term *t, int cols, int rows) {
             }
             t->alt = realloc(t->alt, (size_t)rows * sizeof(trow));
         }
+        t->nalt = rows;
         t->cols = cols;
         t->rows = rows;
         t->scroll_top = 0;
@@ -253,6 +255,31 @@ void term_resize(term *t, int cols, int rows) {
         }
     }
     free(all);
+
+    /* the alt screen tracks the primary's geometry (the alt branch
+     * does this for alt-screen resizes; the primary path used to
+     * leave alt at its ORIGINAL row count — an OOB the moment the
+     * app entered the alt screen, and the close-time overflow in
+     * term_free, which walks alt by t->rows) */
+    for (int y = 0; y < t->nalt && y < t->rows; y++) {
+        row_resize(&t->alt[y], cols);
+    }
+    if (rows > t->nalt) {
+        t->alt = realloc(t->alt, (size_t)rows * sizeof(trow));
+        for (int y = t->nalt; y < rows; y++) {
+            trow *r = row_alloc(cols);
+            if (r != NULL) {
+                t->alt[y] = *r;
+                free(r);
+            }
+        }
+    } else if (rows < t->nalt) {
+        for (int y = rows; y < t->nalt; y++) {
+            free(t->alt[y].cells);
+        }
+        t->alt = realloc(t->alt, (size_t)rows * sizeof(trow));
+    }
+    t->nalt = rows;
 
     t->ngrid = rows;
     t->cols = cols;
