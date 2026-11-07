@@ -100,6 +100,36 @@ $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
 $(FDK_LIB):
 	$(MAKE) -C $(ROOT) static
 
+# ---- the fdk-hud add-on + its dlopen host (the release proof) ----
+#
+# The host links the SHARED libfdk, never the archive: host and
+# dlopen'd add-on must resolve fdk_* from the ONE libfdk.so.1 in the
+# process (the soname dedup) — the model docs/EXTENDING.md §11
+# states and fdk-addon/isolated_build.sh proves against an installed
+# prefix. The .so builds with the same warning set; its exported
+# namespace is fdk_hud_* only (the version script).
+
+$(BUILD)/libfdk-hud.so: fdk-addon/hud.c fdk-addon/hud.h \
+                        fdk-addon/fdk-hud.exports.map
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -shared -o $@ fdk-addon/hud.c \
+	    -L$(ROOT)/build -lfdk -lX11 -lm \
+	    -Wl,--version-script=fdk-addon/fdk-hud.exports.map \
+	    -Wl,-rpath,$(CURDIR)/../build
+
+$(BUILD)/fdk-addon-host: fdk-addon-host/main.c $(COMMON_SRCS) \
+                         $(wildcard common/*.h)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) \
+	    -DPO_DIR='"$(CURDIR)/fdk-addon-host/po"' -o $@ \
+	    fdk-addon-host/main.c $(COMMON_SRCS) \
+	    -L$(ROOT)/build -lfdk -Wl,-rpath,$(CURDIR)/../build \
+	    $(LIBS)
+
+.PHONY: addon
+addon: $(BUILD)/libfdk-hud.so $(BUILD)/fdk-addon-host
+	sh fdk-addon/isolated_build.sh $(ISOLATE_STAGE)
+
 # Smoke: each app under a throwaway Xvfb (the repo Makefile's own
 # test-x11 pattern — xvfb-run needs xauth, which headless containers
 # lack), frame-budgeted exit. A smoke PASS is "opened a window,
@@ -107,7 +137,7 @@ $(FDK_LIB):
 # suppressions" — not a feature verification (those are the apps' own
 # README checklists and the scripted rigs).
 SMOKE_APPS := fdk-files fdk-monitor fdk-notes fdk-edit fdk-term \
-               fdk-chat
+               fdk-chat fdk-addon-host
 
 test-apps-smoke:
 	@rc=0; for app in $(SMOKE_APPS); do \
