@@ -523,16 +523,6 @@ static void sgr(vt *v) {
                         if (k - j >= 4) {
                             j++;
                         }
-                    } else if (i + 5 < 16 && v->pset[i + 5]) {
-                        /* semicolon form with SIX fields:
-                         * 38;2;CS;R;G;B — xterm disambiguates by
-                         * count and skips the colorspace field.
-                         * The owner's prompt theme emits exactly
-                         * this for its input segment; reading it
-                         * as R;G;B painted the typed text in a
-                         * near-background color ("the text is
-                         * typed but its invisible") */
-                        j++;
                     }
                     if (j + 2 < 16 && v->pset[j] &&
                         v->pset[j + 1] && v->pset[j + 2]) {
