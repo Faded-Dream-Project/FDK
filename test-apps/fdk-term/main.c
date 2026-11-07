@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void twindow_focus_active(twindow *w);
+
 void tview_regrid(tview *v);
 
 /* tapp's prefs int read (fdk_prefs raw; no ta_app cast games). */
@@ -246,6 +248,9 @@ static void window_event(fdk_window *win, const fdk_event_data *ev,
     case FDK_EVENT_WINDOW_FOCUS: {
         w->focused = ev->focus.focused != 0;
         if (ev->focus.focused) {
+            /* the WM can focus the window with no click: make sure
+             * the terminal canvas actually holds widget focus */
+            twindow_focus_active(w);
             /* clear the unread marks */
             for (int t = 0; t < w->ntabs; t++) {
                 for (int k = 0; k < w->tabs[t]->nviews; k++) {
@@ -260,6 +265,21 @@ static void window_event(fdk_window *win, const fdk_event_data *ev,
     }
     (void)win;
     (void)app;
+}
+
+/* Put keyboard focus on the active terminal view. fdk_widget_focus
+ * rejects widgets in a not-yet-visible window, so the focus request
+ * made while building tabs (tview_focus in tapp_new_tab) dies
+ * silently — the window was still unshown. Without this, NOTHING
+ * ever holds keyboard focus (a WM focuses the window on map without
+ * any click) and every keystroke is routed to no widget: the
+ * "can't type anything" report. Runs after fdk_window_show and on
+ * every WINDOW_FOCUS gain. */
+static void twindow_focus_active(twindow *w) {
+    size_t cur = fdk_notebook_get_current_page(w->notebook);
+    if (cur < (size_t)w->ntabs && w->tabs[cur]->nviews > 0) {
+        tview_focus(w->tabs[cur]->views[0]);
+    }
 }
 
 twindow *tapp_open_window(tapp *app, int cols, int rows) {
@@ -314,6 +334,7 @@ twindow *tapp_open_window(tapp *app, int cols, int rows) {
 
     fdk_window_show(w->window);
     (void)fdk_window_paint(w->window);
+    twindow_focus_active(w); /* the pre-show focus request died */
 
     app->windows[app->nwindows++] = w;
     return w;
