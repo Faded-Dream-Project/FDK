@@ -155,8 +155,21 @@ void fdk__x11_ensure_xim(fdk_platform_connection *conn) {
     if (cur == NULL || strcmp(cur, "C") == 0) {
         (void)setlocale(LC_CTYPE, "");
     }
-    XSetLocaleModifiers("");
-    conn->xim = XOpenIM(conn->display, NULL, NULL, NULL);
+    /* FDK_NO_XIM=1 (1.4.20): the escape hatch when a protocol IM
+     * server (ibus/fcitx over the XIM transport) misbehaves —
+     * XFilterEvent consults the server for every key event, and a
+     * wedged bridge can swallow them ALL. The diagnostic log stamps
+     * every filtered key with the XMODIFIERS value; this switch
+     * answers the question in one run without touching the session
+     * config. */
+    if (getenv("FDK_NO_XIM") != NULL) {
+        conn->xim = NULL;
+        FDK_INFO("FDK_NO_XIM set — the input method is bypassed "
+                 "entirely (keys go straight to the application)");
+    } else {
+        XSetLocaleModifiers("");
+        conn->xim = XOpenIM(conn->display, NULL, NULL, NULL);
+    }
     fdk__startup_trace("x11:XOpenIM (lazy)");
     if (conn->xim != NULL) {
         FDK_INFO("X input method opened — full-Unicode text entry "

@@ -251,6 +251,11 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                     XUnsetICFocus(pwindow->xic);
                 }
             }
+            FDK_INFO("window focus %s (detail=%d, win=0x%lx)",
+                     xevent->type == FocusIn ? "IN" : "OUT",
+                     xevent->xfocus.detail,
+                     pwindow != NULL
+                         ? (unsigned long)pwindow->xwindow : 0ul);
             return 1;
 
         case KeyPress:
@@ -265,6 +270,12 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
             out->type = (xevent->type == KeyPress) ? FDK_EVENT_KEY_DOWN : FDK_EVENT_KEY_UP;
             out->key.scancode = x11_keycode_to_scancode(xevent->xkey.keycode);
             out->key.modifiers = fdk__x11_translate_modifiers(xevent->xkey.state);
+            if (xevent->type == KeyPress) {
+                FDK_INFO("key code=%d state=0x%x arrived (win=0x%lx)",
+                         xevent->xkey.keycode, xevent->xkey.state,
+                         pwindow != NULL
+                             ? (unsigned long)pwindow->xwindow : 0ul);
+            }
             /* Popup dismissal reason (1.1.0-rc1): the window layer
              * consumes Escape for popups (its scancode check lives in
              * window.c, backend-neutral); stamping the reason HERE —

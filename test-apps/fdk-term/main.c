@@ -376,6 +376,7 @@ void tapp_close_window(twindow *w) {
     for (int i = 0; i < w->nmenus; i++) {
         fdk_menu_destroy(w->menus[i]);
     }
+    free(w->menu_ctx);
     free(w);
     if (app->nwindows == 0) {
         app->quit = true;
