@@ -430,6 +430,13 @@ struct fdk_platform_connection {
     struct xkb_keymap *xkb_keymap;
     struct xkb_state *xkb_state;
 
+    /* Dead-key / compose-key resolution (round 32): the compositor's
+     * keymap resolves ONE keysym per press; sequences (dead_acute +
+     * e -> é) need xkb_compose_state fed per press. Created per
+     * keymap from the process locale; NULL = no compose tables
+     * installed (keys resolve as before — honest degradation). */
+    struct xkb_compose_state *xkb_compose;
+
     /* Pointer focus tracking: Wayland delivers pointer button/motion
      * events against whichever surface last got a wl_pointer::enter,
      * not tagged per-event the way X11's XEvent carries .window. */

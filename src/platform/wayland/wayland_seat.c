@@ -7,6 +7,7 @@
 #include "core/log_internal.h"
 
 #include <sys/mman.h>
+#include <xkbcommon/xkbcommon-compose.h>
 #include <unistd.h>
 #include <stdlib.h> /* free() — the keymap seam's string */
 #include <string.h>
@@ -36,6 +37,76 @@ static void keyboard_keymap_apply_str(fdk_platform_connection *conn,
     if (conn->xkb_keymap) xkb_keymap_unref(conn->xkb_keymap);
     conn->xkb_keymap = new_keymap;
     conn->xkb_state = new_state;
+
+    /* compose state rides the keymap's context: rebuilt here so a
+     * keymap swap can never leave a stale sequence mid-flight */
+    if (conn->xkb_compose) {
+        xkb_compose_state_unref(conn->xkb_compose);
+        conn->xkb_compose = NULL;
+    }
+    const char *locale = getenv("LC_ALL");
+    if (locale == NULL) locale = getenv("LC_CTYPE");
+    if (locale == NULL) locale = getenv("LANG");
+    if (locale == NULL) locale = "C";
+    struct xkb_compose_table *table = xkb_compose_table_new_from_locale(
+        conn->xkb_context, locale, XKB_COMPOSE_COMPILE_NO_FLAGS);
+    if (table != NULL) {
+        conn->xkb_compose = xkb_compose_state_new(
+            table, XKB_COMPOSE_STATE_NO_FLAGS);
+        xkb_compose_table_unref(table);
+    }
+}
+
+/* Resolves a press's codepoint THROUGH the compose sequence state:
+ * feed the layout keysym, then translate the sequence status:
+ *   COMPOSED      the sequence completed — its glyph (dead_acute +
+ *                 e -> é; the common dead-key set is single-codepoint)
+ *   COMPOSING     mid-sequence — no codepoint yet (the next press
+ *                 continues the sequence)
+ *   CANCELLED     the sequence broke — no codepoint this press
+ *   NOT_COMPOSED  plain key — the layout's own glyph
+ * Returns the utf32 codepoint for FDK_EVENT_KEY_DOWN (0 = none).
+ * Repeats deliberately bypass this: a held key must not pump the
+ * sequence state (X11's server-side repeats behave the same). */
+static fdk_u32 wayland_compose_codepoint(
+    fdk_platform_connection *conn, xkb_keysym_t keysym) {
+    if (conn->xkb_compose == NULL) {
+        return xkb_keysym_to_utf32(keysym);
+    }
+    switch (xkb_compose_state_feed(conn->xkb_compose, keysym)) {
+    case XKB_COMPOSE_FEED_ACCEPTED:
+        break;
+    case XKB_COMPOSE_FEED_IGNORED:
+        return xkb_keysym_to_utf32(keysym);
+    default:
+        return 0;
+    }
+    switch (xkb_compose_state_get_status(conn->xkb_compose)) {
+    case XKB_COMPOSE_NOTHING:
+        return xkb_keysym_to_utf32(keysym);
+    case XKB_COMPOSE_COMPOSING:
+        return 0;
+    case XKB_COMPOSE_COMPOSED: {
+        xkb_keysym_t sym = xkb_compose_state_get_one_sym(
+            conn->xkb_compose);
+        if (sym != XKB_KEY_NoSymbol) {
+            return xkb_keysym_to_utf32(sym);
+        }
+        char buf[16];
+        int n = xkb_compose_state_get_utf8(conn->xkb_compose, buf,
+                                           sizeof buf);
+        if (n == 1) {
+            return (fdk_u32)(unsigned char)buf[0];
+        }
+        return 0; /* multi-codepoint sequences have no single
+                     KEY_DOWN codepoint channel — see
+                     docs/platform-input.md's honesty note */
+    }
+    case XKB_COMPOSE_CANCELLED:
+        return 0;
+    default:
+        return xkb_keysym_to_utf32(keysym);
+    }
 }
 
 static void keyboard_keymap(void *data, struct wl_keyboard *keyboard,
@@ -183,8 +254,7 @@ static int seat_key_event(fdk_platform_connection *conn, uint32_t serial,
 
     if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         xkb_keysym_t keysym = xkb_state_key_get_one_sym(conn->xkb_state, key + 8);
-        fdk_u32 cp = xkb_keysym_to_utf32(keysym);
-        event.key.codepoint = cp;
+        event.key.codepoint = wayland_compose_codepoint(conn, keysym);
     } else {
         event.key.codepoint = 0;
     }
@@ -847,6 +917,8 @@ void fdk_wayland_teardown_seat(fdk_platform_connection *conn) {
     if (conn->keyboard) wl_keyboard_destroy(conn->keyboard);
     if (conn->pointer) wl_pointer_destroy(conn->pointer);
     if (conn->seat) wl_seat_destroy(conn->seat);
+    if (conn->xkb_compose) xkb_compose_state_unref(conn->xkb_compose);
+    conn->xkb_compose = NULL;
     if (conn->xkb_state) xkb_state_unref(conn->xkb_state);
     if (conn->xkb_keymap) xkb_keymap_unref(conn->xkb_keymap);
     if (conn->xkb_context) xkb_context_unref(conn->xkb_context);

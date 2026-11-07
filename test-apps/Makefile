@@ -41,7 +41,7 @@ WL_LIBS  := $(shell pkg-config --libs wayland-client xkbcommon 2>/dev/null)
 LIBS     := $(X11_LIBS) $(WL_LIBS) -lm -ldl -lz -fsanitize=address,undefined
 
 APP_DIRS := fdk-files fdk-edit fdk-monitor fdk-notes fdk-term \
-            fdk-chat fdk-stress fdk-workbench fdk-keys
+            fdk-chat fdk-stress fdk-workbench fdk-keys fdk-langs
 
 # each app: every .c in its dir + common/*.c
 COMMON_SRCS := common/icons.c common/app.c
@@ -156,7 +156,7 @@ addon: $(BUILD)/libfdk-hud.so $(BUILD)/fdk-addon-host
 # README checklists and the scripted rigs).
 SMOKE_APPS := fdk-files fdk-monitor fdk-notes fdk-edit fdk-term \
                fdk-chat fdk-addon-host fdk-stress fdk-workbench \
-               fdk-keys
+               fdk-keys fdk-langs
 
 test-apps-smoke:
 	@rc=0; for app in $(SMOKE_APPS); do \

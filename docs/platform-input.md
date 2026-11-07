@@ -43,7 +43,18 @@ Resolution paths differ per backend:
   entry including compose-key sequences. Before 1.3.1 the plain
   XLookupString path was Latin-1-only.
 - **Wayland**: xkbcommon state (the wl_keyboard keymap) resolves
-  keysym → UTF-32 per key press.
+  keysym → UTF-32 per key press, and since round 32 a per-keymap
+  `xkb_compose_state` (locale from LC_ALL/LC_CTYPE/LANG) resolves
+  dead-key and compose sequences: the completed sequence's glyph is
+  the KEY_DOWN codepoint (dead_acute + e → é), a mid-sequence press
+  carries 0 (nothing yet), a broken sequence cancels to 0, and key
+  REPEATS bypass the sequence state (a held key must not pump it —
+  X11's server-side repeats behave the same). Multi-codepoint compose
+  results have no single-codepoint channel and fall back to 0 with
+  the sequence completing silently — the IME_COMMIT path is the
+  channel for multi-codepoint text. No compose tables installed
+  (xkb_compose_table_new_from_locale fails) degrades to the plain
+  per-press resolution.
 
 ## Input methods — IME composition (1.1.0, M-1)
 

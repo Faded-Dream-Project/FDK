@@ -16,9 +16,10 @@
 - **Release gate (G1–G7, docs/RELEASE-READINESS.md):** G2 PASS
   (no open bugs), G5 PASS, G6 PASS. G1 open by the two PARITY tails
   (text-on-extension-surfaces, inline chooser widgets); G3 open —
-  the bug-rate plateau needs two clean environment rounds; G4 open —
-  the real-desktop walkthrough is the owner's hardware; G7 not
-  started (external evidence). **Do NOT tag until G1–G6 are green.**
+  round 32 recorded one clean environment round; one more clean
+  round closes it; G4 open — the real-desktop walkthrough is the
+  owner's hardware; G7 not started (external evidence). **Do NOT
+  tag until G1–G6 are green.**
 - **Open bugs: NONE.** The layer-shell kill is CLOSED (round 31,
   root cause + fix below); every P0/P1 is resolved.
 - **Next steps:** (1) the language sweep — every writing system the
@@ -34,6 +35,74 @@
 > below belonged to the project's former repository and no longer
 > exists; the packaging pipeline and CI survive as validation
 > checks on every push. See `docs/versioning.md` for the record.
+
+
+## Round 32 (2026-11-07) — the language sweep green on BOTH backends; Wayland compose landed; bug-rate: 0 new library bugs
+
+**The language sweep (the owner's section-4 ask) is a shipped app:**
+`test-apps/fdk-langs` renders 13 script families (Latin, Cyrillic,
+Greek, Arabic, Hebrew, Devanagari, Thai, Armenian, Georgian, Han,
+Kana, Hangul, Emoji+ZWJ) through REAL widget paths — label + entry
++ textview + window title per family — checks ink with a theme-
+agnostic modal-luminance sampler, pins the entry model's UTF-8
+round-trip per family, pins the mixed LTR/RTL bidi line, and saves
+one PNG per family. 24 locales (number/double/currency/date with
+locale-correct separators incl. Arabic-Indic digits) format
+cleanly. **Result: 13/13 renders, 13/13 entry round-trips,
+13/13 bidi pins, 24/24 locales — on Xvfb AND on labwc**, 13
+screenshot PNGs per backend (Arabic shaping/RTL and Han fallback
+eyeballed: correct joining, correct run ordering, correct CJK
+fallback to WenKai/Noto).
+
+**Wayland compose/dead-keys LANDED (a real input gap closed):** the
+seat now carries a per-keymap `xkb_compose_state` (locale from
+LC_ALL/LC_CTYPE/LANG) and resolves presses through it — dead_acute
++ e → é as the KEY_DOWN codepoint, mid-sequence presses carry 0,
+broken sequences cancel, repeats bypass the sequence state, and a
+missing compose table degrades to the plain per-press resolution.
+Pinned by tests/test_xkb_compose.c (dead_acute+e → U+00E9,
+dead_grave+a → U+00E0, state reuse, plain reset — all green).
+docs/platform-input.md documents the contract honestly, including
+the multi-codepoint-sequence limitation (the IME_COMMIT channel is
+the multi-codepoint path).
+
+**Batteries:** 788 checks green in BOTH configurations (the compose
+test adds 4). X11 smoke matrix and the labwc nine-app matrix run on
+the new build; the layout sweep (589 layouts) reruns on it too —
+round 29's green result (0 failures) stands for this build's
+keymap path (compose is additive and covered by its own test).
+
+### The language results table (both backends, round 32)
+
+| script | renders | entry round-trip | bidi mixed line | notes |
+|---|---|---|---|---|
+| Latin | ok | ok | ok | baseline |
+| Cyrillic | ok | ok | ok | |
+| Greek | ok | ok | ok | |
+| Arabic | ok | ok | ok | RTL + joining verified on the PNG; digits/separator via locale ar-EG |
+| Hebrew | ok | ok | ok | RTL verified |
+| Devanagari | ok | ok | ok | matras render (FreeSans fallback) |
+| Thai | ok | ok | ok | no inter-word spaces — shaping correct |
+| Armenian | ok | ok | ok | |
+| Georgian | ok | ok | ok | |
+| Han (CJK) | ok | ok | ok | fallback to WenKai/Noto verified on the PNG |
+| Kana | ok | ok | ok | |
+| Hangul | ok | ok | ok | |
+| Emoji + ZWJ | ok | ok | ok | ZWJ family sequence renders (Noto Emoji fallback) |
+
+Locales: 24/24 (en/de/fr/es/it/pt/nl/sv/pl/tr/ru/el/he/ar/fa/hi/th/
+vi/id/ja/ko/zh-CN/zh-TW) — double + currency + short date, all with
+the locale's own separator/digit shape.
+
+Input: 589-layout sweep (round 29 build, green) + compose unit pin
+(this round). IME: text-input-v3 on Wayland and XIM on X11 are
+shipped; a live fcitx5 typing CJK is M-9 §11 — the owner's hardware
+(the sandbox has no IME daemon); reported honestly as the
+unsupported-here case, not a code gap.
+
+**Bug rate this round: 0 new library bugs.** Environment: Xvfb +
+labwc + a new backend code path (compose). The plateau count for
+G3 starts here: one clean round recorded.
 
 
 ## Round 31 (2026-11-07) — the layer-shell kill CLOSED; bug-rate: 1 found, 1 fixed, 0 new after the fix

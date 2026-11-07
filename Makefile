@@ -548,7 +548,7 @@ test: $(TEST_BINS)
 
 $(BUILD_DIR)/tests/%: tests/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_DEFS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual -Ithird_party/stb $< $(STATIC_LIB) $(shell pkg-config --cflags xkbcommon 2>/dev/null) -o $@ $(LDFLAGS) $(shell pkg-config --libs xkbcommon 2>/dev/null)
 
 # X11 platform integration test — NOT part of plain `make test` (see
 # docs/testing.md's headless-by-default policy). Requires a reachable
