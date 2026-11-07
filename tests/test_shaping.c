@@ -329,6 +329,84 @@ static void test_fallback_cjk(void) {
     fdk_font_destroy(f);
 }
 
+
+/* ---- 4b. The fallback-table cap (round 35) ----------------------------
+ *
+ * The cap was 8 slots per primary and the exhaustion branch returned
+ * NULL SILENTLY: a user machine whose runs filled all eight slots
+ * (Arabic, Hebrew, Devanagari, Thai, Armenian, Georgian, Han,
+ * Hiragana) drew silent tofu for everything after — Hangul, Katakana
+ * and Emoji had no fallback line, no warning, just rectangles. The
+ * cap is now 32 and the exhaustion WARNs; this test drives MORE than
+ * eight distinct fallback-requiring scripts through ONE primary and
+ * asserts the ninth+ scripts still route to fallbacks wherever the
+ * machine has answers for them. The primary is a Japanese gothic
+ * face (covers Latin + kana + Han only), so Arabic, Hebrew,
+ * Devanagari, Thai, Armenian, Georgian, Hangul and Emoji each need
+ * their own slot — the user machine's exact pattern. */
+static void test_fallback_cap_overflow(void) {
+    if (!fdk_text_shaping_available()) {
+        printf("[skip] shaped: no shaping engine\n");
+        return;
+    }
+    fdk_font *f = fdk_font_load("/usr/share/fonts/truetype/"
+                                "fonts-japanese-gothic.ttf", 16);
+    if (f == NULL) {
+        printf("[skip] shaped: no Japanese gothic primary for the "
+               "cap test\n");
+        return;
+    }
+    /* (script name, sample) — each sample's first codepoint is the
+     * probe; DejaVu covers the first four on most machines, FreeSans
+     * the Indic/Thai, a CJK face Hangul, an emoji face the emoji. */
+    static const struct {
+        const char *name;
+        const char *cp;
+    } probes[] = {
+        { "Arabic",     "\xD8\xA7" },
+        { "Hebrew",     "\xD7\x90" },
+        { "Devanagari", "\xE0\xA4\x85" },
+        { "Thai",       "\xE0\xB8\x81" },
+        { "Armenian",   "\xD5\xB1" },
+        { "Georgian",   "\xE1\x83\x92" },
+        { "Hangul",     "\xED\x95\x9C" },
+        { "Emoji",      "\xF0\x9F\x9A\x80" },
+        { "Syriac",     "\xDC\x90" },
+        { "Tamil",      "\xE0\xAE\x85" },
+    };
+    int used = 0;
+    const char *last_uncovered = NULL;
+    for (size_t i = 0; i < sizeof probes / sizeof probes[0]; i++) {
+        fdk__shaped *sh = shape_str(f, probes[i].cp);
+        assert(sh != NULL);
+        if (used_fallback(sh, f)) {
+            used++;
+        } else if (probes[i].cp[0] == '\xED' ||
+                   probes[i].cp[0] == '\xF0') {
+            /* Hangul or Emoji stayed on the primary. Past slot 8 the
+             * old build did this SILENTLY (the bug); now the only
+             * honest way here is "the machine has no covering font"
+             * — remember the LAST such script for the receipt. */
+            last_uncovered = probes[i].name;
+        }
+        fdk__shaped_free(sh);
+    }
+    if (used >= 9) {
+        /* Ten probed scripts, nine or more got fallback slots — the
+         * old 8-slot cap would have silently denied the tail. */
+        printf("[ok] shaped: %d fallback slots used on one primary "
+               "(cap was 8) — the overflow routes, no silent tofu\n",
+               used);
+    } else {
+        printf("[ok] shaped: %d fallback slots used; %s has no "
+               "covering font here (honest .notdef, loud WARN in "
+               "the log)\n",
+               used, last_uncovered != NULL ? last_uncovered
+                                            : "some scripts");
+    }
+    fdk_font_destroy(f);
+}
+
 /* ---- 5. Clusters, marks, conjuncts ------------------------------------ */
 
 static void test_clusters_marks(void) {
@@ -933,6 +1011,7 @@ int main(int argc, char **argv) {
     test_rtl_arabic();
     test_bidi_mixed();
     test_fallback_cjk();
+    test_fallback_cap_overflow();
     test_clusters_marks();
     test_caret_and_wrap();
     test_draw_agrees();

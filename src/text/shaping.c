@@ -781,8 +781,27 @@ bool fdk_font_has_glyph(const fdk_font *font, fdk_u32 codepoint) {
 static fdk_font *sh_fallback_for(fdk_font *primary, int script,
                                 fdk_u32 probe_cp) {
     if (primary == NULL || script < 0 || script >= SH_N_SCRIPTS ||
-        primary->is_fallback ||
-        primary->n_fallbacks >= FDK_TEXT_FALLBACK_MAX) {
+        primary->is_fallback) {
+        return NULL;
+    }
+    if (primary->n_fallbacks >= FDK_TEXT_FALLBACK_MAX) {
+        /* LOUD by contract: the cap used to return NULL silently and
+         * a script-heavy machine (11 distinct fallback scripts) drew
+         * tofu for everything past slot 8 with no line at all. One
+         * warn per process — the rate the cap fires at is once. */
+        static bool warned_cap = false;
+        if (!warned_cap) {
+            warned_cap = true;
+            FDK_WARN("shaping: the per-font fallback table is full "
+                     "(%d slots used, %s needs one more for %s) — "
+                     "further scripts will draw .notdef; this is a "
+                     "FDK bug, report it",
+                     primary->n_fallbacks,
+                     primary->source_path != NULL
+                         ? primary->source_path
+                         : "(the primary font)",
+                     sh_scripts[script].name);
+        }
         return NULL;
     }
     /* Already loaded? (One fallback per script: the first slot that

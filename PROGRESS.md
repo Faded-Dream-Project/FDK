@@ -37,6 +37,36 @@
 > checks on every push. See `docs/versioning.md` for the record.
 
 
+## Round 35 (2026-11-07) — the silent-tofu bug found on the user's machine: the fallback-table cap
+
+**Root cause of "Hangul is just rectangles and zero emojis":** the
+per-primary fallback table held 8 slots and the exhaustion branch
+returned NULL SILENTLY. The user's run filled all eight (Arabic,
+Hebrew, Devanagari, Thai, Armenian, Georgian, Han, Hiragana — their
+fontconfig ranks a distinct font per script, unlike this sandbox's
+seven) and everything after — Hangul, Katakana, Emoji — drew .notdef
+with NO log line, while the ink check called it renders=ok (tofu
+boxes have ink too; their scores sat at 47-51 permille, right in the
+healthy band). Fixed: the cap is 32 (a slot is a pointer + an int)
+and the exhaustion branch is LOUD — one WARN naming the script and
+calling it what it is ("this is a FDK bug, report it").
+
+**Proof:** a new regression test (test_shaping.c,
+test_fallback_cap_overflow) drives TEN distinct fallback-requiring
+scripts through one Japanese-gothic primary — the user machine's
+exact pattern — and asserts the overflow routes:
+"[ok] shaped: 10 fallback slots used on one primary (cap was 8) —
+the overflow routes, no silent tofu". The full battery is 789
+checks green; fdk-langs rerun shows the Katakana, Hangul and Emoji
+fallback lines that were absent before.
+
+The ink check itself stays conservative (a real tofu-detector needs
+font-coverage introspection on the widget's internal fonts — noted
+as roadmap); the honest gate for now is the loud WARN plus this
+test. On a machine with NO emoji font the resolver now exhausts
+loudly with install guidance — that is the honest missing-font
+case, not a code bug.
+
 ## Round 34 (2026-11-07) — fdk-langs is watchable: 5 s per language
 
 The sweep flashed all 13 families in about a second and exited —

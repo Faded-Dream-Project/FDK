@@ -198,7 +198,7 @@ struct fdk_font {
      * no fallback, .notdef" WARN — one line per font, not per
      * codepoint per frame. */
     void *shaper;
-#define FDK_TEXT_FALLBACK_MAX 8
+#define FDK_TEXT_FALLBACK_MAX 32
     fdk_font *fallbacks[FDK_TEXT_FALLBACK_MAX];
     int fallback_script[FDK_TEXT_FALLBACK_MAX];
     int n_fallbacks;
