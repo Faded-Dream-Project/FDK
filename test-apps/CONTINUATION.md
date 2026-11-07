@@ -1,3 +1,80 @@
+# Round 29 — labwc, the typing audit, and the out-of-loop present hang
+
+THE OWNER'S TWO ASKS this round: (1) the app fleet on a second,
+independent wlroots compositor — labwc, not just sway; (2) proof
+that EVERY letter, in every language, can be typed into FDK.
+
+## labwc (9/9 run, 8 receipts + 1 by-design refusal)
+
+labwc 0.8.x + libwlroots-0.18-dev + Xwayland + wtype all come from
+Debian trixie debs extracted into /home/z/apt/prefix (the restore
+script's recipe; wlroots' pkg-config needs libdrm-dev + libsfdo0 +
+wayland-protocols, Xwayland needs libxcvt — all fetched). Headless
+run: WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=
+pixman WLR_HEADLESS_OUTPUTS=1 WLR_XWAYLAND=<prefix>/usr/bin/Xwayland,
+with rc.xml's <core><xwayland>no</xwayland> (the xwayland errors are
+then non-fatal). scripts/labwc_smoke.sh runs the whole matrix;
+screenshots via grim verified fdk-files (full manager, menubar,
+toolbar, live directory), fdk-chat, fdk-workbench (server-side
+decorations from labwc, pixel-correct content).
+
+## the typing audit (fdk-keys, new app)
+
+Three layers, all ASan/UBSan clean:
+1. ENGINE SWEEP: 1,112,111 codepoints (all of Unicode minus
+   surrogates and C0/C1) set→read byte-identical through the entry
+   model; caret boundaries exact; mid-codepoint offsets snap to
+   boundaries; every combining mark 0x300-0x36F after 'e' round-
+   trips; font measure sampled — 0 failures. (fdk-keys receipt:
+   engine=1112111 rej=0 bad=0.)
+2. LAYOUT SWEEP: libxkbregistry enumerates 589 installed layouts;
+   every keycode × {none, Shift, AltGr, Shift+AltGr} goes through
+   xkb_state_key_get_utf8 (the exact call both FDK backends make)
+   into the same entry: 125,473 letters, 3,972 unique codepoints,
+   0 failures.
+3. END-TO-END: Xvfb + the extended xtest_driver (keyboard commands
+   k:/t:/bksp/cq added) types "Hello, FDK! 42 [ok]" + 8 backspaces +
+   "#1 (typed-for-real)" — the receipt's text matches the intent
+   exactly. On labwc, wtype (virtual-keyboard protocol) types
+   "Hi from labwc" and "Hello 你好Привет γεια שלום مرحبا" — the
+   screenshot shows the entry + the live mirror; the receipt holds
+   everything except one γ and one space that WTYPE's keymap
+   generator itself dropped (the layout sweep proves γ round-trips
+   — injector quirk, not FDK). Ctrl+Q (XTEST and wtype) quits the
+   app cleanly for the receipt.
+
+## THE BUG THE ROUND FOUND (library, FIXED)
+
+Presenting a surface from OUTSIDE the pump loop (the add-on's
+hud_render → fdk_surface_present from main) that hits a flush EPIPE
+lands in fdk__wayland_connection_dead, whose guarded read called
+wl_display_read_events BARE — and read_events cond-waits while any
+prepare_read reader is registered (the pump's prepare/dispatch
+pattern), hanging the process forever. FIXED in wayland_dispatch.c:
+prepare_read first (bare read → same line, now guarded), and when
+prepare returns EAGAIN (events already queued) dispatch_pending —
+the error event may be in the queue; the detail line then prints it.
+
+## OPEN BUG (parked, opt-in): the HUD's layer-shell role
+
+test-apps/fdk-addon now carries a full Wayland role (own registry,
+binds wl_compositor + zwlr_layer_shell_v1, overlay layer surface
+anchored top-left with the options' margins, configure → ack +
+fdk_ext_surface_notify_configure — including the create-callback
+ordering case where h->surf is still NULL). The kind registers,
+labwc logs "new layer_surface" + "interactive-none", BUT the first
+buffer commit gets the client killed by the compositor ("error in
+client communication") with NO client-side protocol error available
+(EPIPE wins the race; prepare_read EAGAIN meant the queued error
+could not be read even after the fix). Gated behind
+FDK_HUD_WAYLAND=1; the default stays the honest FDK_ERR_UNSUPPORTED
+refusal so the labwc smoke stays clean. Next round: WAYLAND_DEBUG
+the first commit (set_buffer_scale(1) + attach + damage(MAX) + frame
++ commit on a 240×200 XRGB buffer looks legal; suspicion: something
+in the ext-surface present path's buffer state that wlroots
+rejects), or reproduce against sway where the wlroots logs are
+familiar.
+
 # Round 28 — the disappearing editor: the prompt-dialog teardown damages the parent
 
 Round 27's code item, RELEASE-READINESS blocker #2, and the one

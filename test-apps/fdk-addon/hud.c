@@ -72,8 +72,30 @@ typedef struct fdk_hud {
 
     int user_x, user_y; /* the panel's screen position (options)   */
 
+    /* the Wayland role's own protocol objects (the display is
+     * borrowed from fdk_ext_get_native_display; the rest are ours) */
+    struct wl_registry *wl_registry;
+    struct wl_compositor *wl_compositor;
+    struct zwlr_layer_shell_v1 *wl_layer_shell;
+    struct wl_surface *wl_surface;
+    struct zwlr_layer_surface_v1 *wl_layer_surface;
+    /* the configure can arrive from inside the kind-create callback,
+     * before ext_surface_create has handed back h->surf — hold it */
+    bool wl_cfg_pending;
+    int wl_cfg_w, wl_cfg_h;
+
     fdk_hud_stats st;
 } fdk_hud;
+
+/* the wayland client headers cast away const inside their own
+ * interface macros — the one sanctioned exception in this file */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#include <wayland-client-core.h>
+#include <wayland-client-protocol.h>
+#include "gen/layer-shell.h"
+#include "gen/xdg-shell.h"
+#pragma GCC diagnostic pop
 
 /* ---- the palette (a HUD is self-colored; the accent follows the
  *      desktop theme so the panel never looks bolted on) ---- */
@@ -357,6 +379,54 @@ static void hud_panel_event(fdk_ext_surface *surface,
 
 /* ---- the kind callbacks (the role) ---- */
 
+/* the registry: bind compositor + layer-shell (the add-on's own
+ * registry on FDK's display — the documented wayland add-on shape) */
+static void hud_wl_global(void *data, struct wl_registry *reg,
+                          uint32_t name, const char *iface,
+                          uint32_t version) {
+    fdk_hud *h = data;
+    if (strcmp(iface, wl_compositor_interface.name) == 0) {
+        h->wl_compositor = wl_registry_bind(
+            reg, name, &wl_compositor_interface, 1);
+    } else if (strcmp(iface, zwlr_layer_shell_v1_interface.name) == 0) {
+        h->wl_layer_shell = wl_registry_bind(
+            reg, name, &zwlr_layer_shell_v1_interface,
+            version < 4 ? version : 4);
+    }
+}
+
+static void hud_wl_global_remove(void *data, struct wl_registry *reg,
+                                 uint32_t name) {
+    (void)data;
+    (void)reg;
+    (void)name;
+}
+
+/* the role's configure: the size we asked for comes back; report it
+ * into FDK so the present gate opens */
+static void hud_layer_configure(void *data,
+                                struct zwlr_layer_surface_v1 *lsurf,
+                                uint32_t serial, uint32_t w,
+                                uint32_t hgt) {
+    fdk_hud *h = data;
+    (void)w;
+    (void)hgt;
+    zwlr_layer_surface_v1_ack_configure(lsurf, serial);
+    if (h->surf != NULL) {
+        fdk_ext_surface_notify_configure(h->surf, HUD_W, HUD_H);
+    } else {
+        h->wl_cfg_pending = true; /* flushed after the create */
+        h->wl_cfg_w = HUD_W;
+        h->wl_cfg_h = HUD_H;
+    }
+}
+
+static void hud_layer_closed(void *data,
+                             struct zwlr_layer_surface_v1 *lsurf) {
+    (void)data;
+    (void)lsurf;
+}
+
 static fdk_result hud_kind_create(fdk_ext_surface *surface,
                                   fdk_ext_native_handle *out_native,
                                   void *user) {
@@ -367,9 +437,54 @@ static fdk_result hud_kind_create(fdk_ext_surface *surface,
     if (!fdk_ok(fdk_ext_get_native_display(ctx, &nd))) {
         return FDK_ERR_NOT_INITIALIZED;
     }
+    if (nd.backend == FDK_EXT_BACKEND_WAYLAND &&
+        getenv("FDK_HUD_WAYLAND") != NULL) {
+        /* the layer-shell role is LIVE CODE but its first buffer
+         * commit currently gets the client killed by wlroots
+         * compositors ("error in client communication" before any
+         * client-side diagnostic lands — see CONTINUATION.md's open
+         * bug). Opt-in until the buffer path is understood; the
+         * default stays the honest refusal. */
+        struct wl_display *dpy = nd.display;
+        h->wl_registry = wl_display_get_registry(dpy);
+        static struct wl_registry_listener reg_listener = {
+            hud_wl_global, hud_wl_global_remove};
+        wl_registry_add_listener(h->wl_registry, &reg_listener, h);
+        /* the host's main thread, before its loop pumps: safe */
+        wl_display_roundtrip(dpy);
+        if (h->wl_compositor == NULL || h->wl_layer_shell == NULL) {
+            return FDK_ERR_UNSUPPORTED; /* no layer-shell compositor */
+        }
+        h->wl_surface = wl_compositor_create_surface(h->wl_compositor);
+        h->wl_layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+            h->wl_layer_shell, h->wl_surface, NULL,
+            ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "fdk-hud");
+        zwlr_layer_surface_v1_set_anchor(
+            h->wl_layer_surface,
+            ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+                ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+        zwlr_layer_surface_v1_set_margin(h->wl_layer_surface,
+                                         (int32_t)h->user_y,
+                                         (int32_t)h->user_x, 0, 0);
+        zwlr_layer_surface_v1_set_size(h->wl_layer_surface, HUD_W,
+                                       HUD_H);
+        zwlr_layer_surface_v1_set_exclusive_zone(h->wl_layer_surface,
+                                                 -1);
+        zwlr_layer_surface_v1_set_keyboard_interactivity(
+            h->wl_layer_surface,
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+        static struct zwlr_layer_surface_v1_listener layer_listener = {
+            hud_layer_configure, hud_layer_closed};
+        zwlr_layer_surface_v1_add_listener(h->wl_layer_surface,
+                                           &layer_listener, h);
+        wl_surface_commit(h->wl_surface);
+        wl_display_roundtrip(dpy); /* the configure, usually */
+        out_native->backend = FDK_EXT_BACKEND_WAYLAND;
+        out_native->pointer = h->wl_surface;
+        h->st.kind_creates++;
+        return FDK_OK;
+    }
     if (nd.backend != FDK_EXT_BACKEND_X11) {
-        /* the honest refusal: this build speaks the X11 HUD role
-         * only; a Wayland build would bind its own protocol here */
         return FDK_ERR_UNSUPPORTED;
     }
     Display *dpy = (Display *)nd.display;
@@ -400,9 +515,26 @@ static fdk_result hud_kind_create(fdk_ext_surface *surface,
 static void hud_kind_destroy(fdk_ext_surface *surface, void *user) {
     (void)surface;
     fdk_hud *h = user;
-    /* the ROLE objects would be torn down here, against a live
-     * native surface; this role's objects are the X properties the
-     * server discards with the window, so the counter is the proof */
+    /* the ROLE objects tear down here, against a live native
+     * surface. Wayland: the layer_surface (FDK owns and destroys the
+     * wl_surface itself — the adopt contract). X11: the role lives
+     * in X properties the server discards with the window. */
+    if (h->wl_layer_surface != NULL) {
+        zwlr_layer_surface_v1_destroy(h->wl_layer_surface);
+        h->wl_layer_surface = NULL;
+    }
+    if (h->wl_layer_shell != NULL) {
+        zwlr_layer_shell_v1_destroy(h->wl_layer_shell);
+        h->wl_layer_shell = NULL;
+    }
+    if (h->wl_compositor != NULL) {
+        wl_compositor_destroy(h->wl_compositor);
+        h->wl_compositor = NULL;
+    }
+    if (h->wl_registry != NULL) {
+        wl_registry_destroy(h->wl_registry);
+        h->wl_registry = NULL;
+    }
     h->st.kind_destroys++;
 }
 
@@ -566,6 +698,11 @@ fdk_result fdk_hud_init(fdk_context *ctx, const fdk_hud_options *o,
         return r;
     }
     fdk_ext_surface_set_event_callback(h->surf, hud_panel_event, h);
+    if (h->wl_cfg_pending) {
+        h->wl_cfg_pending = false;
+        (void)fdk_ext_surface_notify_configure(
+            h->surf, h->wl_cfg_w, h->wl_cfg_h);
+    }
 
     /* the animation timer: the public timer API IS the add-on
      * timer surface (no extension twin, by design) */

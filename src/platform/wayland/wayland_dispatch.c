@@ -71,7 +71,21 @@ int fdk__wayland_connection_dead(fdk_platform_connection *conn,
             struct pollfd pfd = { .fd = wl_display_get_fd(conn->display),
                                   .events = POLLIN };
             if (poll(&pfd, 1, 0) > 0) {
-                (void)wl_display_read_events(conn->display);
+                /* prepare_read first: bare read_events cond-waits
+                 * while any reader is registered (the pump's classic
+                 * prepare/dispatch pattern), and an out-of-loop
+                 * present could then hang forever on a connection
+                 * that will never produce another event (the
+                 * layer-shell HUD hang) */
+                if (wl_display_prepare_read(conn->display) == 0) {
+                    (void)wl_display_read_events(conn->display);
+                } else {
+                    /* events are ALREADY QUEUED (prepare's EAGAIN):
+                     * dispatch them now — the error event may be in
+                     * there — without blocking */
+                    (void)wl_display_dispatch_pending(
+                        conn->display);
+                }
                 code = wl_display_get_protocol_error(conn->display,
                                                      &iface, &id);
             }

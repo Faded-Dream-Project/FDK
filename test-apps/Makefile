@@ -41,7 +41,7 @@ WL_LIBS  := $(shell pkg-config --libs wayland-client xkbcommon 2>/dev/null)
 LIBS     := $(X11_LIBS) $(WL_LIBS) -lm -ldl -lz -fsanitize=address,undefined
 
 APP_DIRS := fdk-files fdk-edit fdk-monitor fdk-notes fdk-term \
-            fdk-chat fdk-stress fdk-workbench
+            fdk-chat fdk-stress fdk-workbench fdk-keys
 
 # each app: every .c in its dir + common/*.c
 COMMON_SRCS := common/icons.c common/app.c
@@ -97,6 +97,15 @@ endef
 
 $(foreach app,$(APP_DIRS),$(eval $(call APP_RULE,$(app))))
 
+# fdk-keys' --sweep-layouts enumerates every xkb layout: the registry
+# + keymap libs ride along on top of LIBS (the entry model itself
+# stays on the public API only).
+$(BUILD)/fdk-keys: XKEYS_LIBS := $(shell pkg-config --libs xkbcommon xkbregistry 2>/dev/null)
+$(BUILD)/fdk-keys: XKEYS_CFLAGS := $(shell pkg-config --cflags xkbregistry xkbcommon 2>/dev/null)
+$(BUILD)/fdk-keys: $(filter-out %/gen_app_icon.c %/perf_50k.c,$(wildcard fdk-keys/*.c)) $(COMMON_SRCS) $(wildcard common/*.h) $(FDK_LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(XKEYS_CFLAGS) $(CFLAGS) -DPO_DIR='"$(CURDIR)/fdk-keys/po"' -o $@ $(filter-out %/gen_app_icon.c %/perf_50k.c,$(wildcard fdk-keys/*.c)) $(COMMON_SRCS) $(FDK_LIB) $(LIBS) $(XKEYS_LIBS)
+
 $(FDK_LIB):
 	$(MAKE) -C $(ROOT) static
 
@@ -109,11 +118,20 @@ $(FDK_LIB):
 # prefix. The .so builds with the same warning set; its exported
 # namespace is fdk_hud_* only (the version script).
 
+WL_CFLAGS := $(shell pkg-config --cflags wayland-client 2>/dev/null)
+
 $(BUILD)/libfdk-hud.so: fdk-addon/hud.c fdk-addon/hud.h \
+                        fdk-addon/gen/layer-shell.h \
+                        fdk-addon/gen/layer-shell-impl.c \
+                        fdk-addon/gen/xdg-shell.h \
+                        fdk-addon/gen/xdg-shell-impl.c \
                         fdk-addon/fdk-hud.exports.map
 	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -shared -o $@ fdk-addon/hud.c \
-	    -L$(ROOT)/build -lfdk -lX11 -lm \
+	$(CC) $(CPPFLAGS) $(WL_CFLAGS) $(CFLAGS) -fPIC -shared -o $@ \
+	    fdk-addon/gen/layer-shell-impl.c fdk-addon/gen/xdg-shell-impl.c \
+	    fdk-addon/hud.c \
+	    -L$(ROOT)/build -lfdk -lX11 \
+	    $(shell pkg-config --libs wayland-client 2>/dev/null) -lm \
 	    -Wl,--version-script=fdk-addon/fdk-hud.exports.map \
 	    -Wl,-rpath,$(CURDIR)/../build
 
@@ -137,7 +155,8 @@ addon: $(BUILD)/libfdk-hud.so $(BUILD)/fdk-addon-host
 # suppressions" — not a feature verification (those are the apps' own
 # README checklists and the scripted rigs).
 SMOKE_APPS := fdk-files fdk-monitor fdk-notes fdk-edit fdk-term \
-               fdk-chat fdk-addon-host fdk-stress fdk-workbench
+               fdk-chat fdk-addon-host fdk-stress fdk-workbench \
+               fdk-keys
 
 test-apps-smoke:
 	@rc=0; for app in $(SMOKE_APPS); do \
