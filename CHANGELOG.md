@@ -25,7 +25,7 @@ project is **in development — no stable release yet**: the entries
 below are the development tree's own change record (version-marked
 where the tree carried a numbered version), not a catalogue of
 published releases; the engineering narrative lives in
-docs/roadmap.md and PROGRESS.md.
+ROADMAP.md and PROGRESS.md.
 
 The format follows Keep-a-Changelog conventions adapted to this
 project: entries are chronological, each carries the public

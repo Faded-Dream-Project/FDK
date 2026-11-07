@@ -247,7 +247,7 @@ static void registry_global(void *data, struct wl_registry *registry,
     }
     /* Other globals (wl_data_device_manager, etc.) are
      * intentionally not bound — out of current scope, see
-     * docs/roadmap.md. Ignoring an unrecognized global is the correct
+     * ROADMAP.md. Ignoring an unrecognized global is the correct
      * behavior per the registry protocol, not a gap. */
 }
 

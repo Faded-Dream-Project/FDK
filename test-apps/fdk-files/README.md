@@ -2,7 +2,7 @@
 
 The §24 APP 1 test application: a real, feature-rich file manager
 written ONLY against FDK's public API. Every gap the app hit became
-an FDK bug: failing test first, fix, `test-apps/FINDINGS.md` entry
+an FDK bug: failing test first, fix, `PROGRESS.md (the bug/gap ledger)` entry
 (G-1…G-6 so far).
 
 ## The 50,000-entry performance gate (MEASURED, §26/3c)
@@ -47,7 +47,7 @@ fdk_image_decode_pixels (worker-side decode); fdk_surface (paint,
 save_png, create_from_image, ARGB format); notify + tray (the
 session-bus rig below); inotify through the ext-fd loop hook.
 
-## FDK issues found (full detail: test-apps/FINDINGS.md)
+## FDK issues found (full detail: PROGRESS.md (the bug/gap ledger))
 
 - G-1 notebook tab retitle API missing (§24)
 - G-2 the whole threading subsystem (§25): fdk_post, workers,

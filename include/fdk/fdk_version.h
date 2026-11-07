@@ -29,7 +29,7 @@
  * docs/versioning.md first — not because functionality accumulated,
  * a phase completed, a competitor's version is higher, or semver
  * expectations say so. Internal engineering milestones (the Phase
- * numbers and the 1.x labels used in docs/roadmap.md) are a
+ * numbers and the 1.x labels used in ROADMAP.md) are a
  * different axis entirely: they track work, never the public
  * version. The test suite pins this value (tests/test_core.c) so
  * accidental bumps fail the build instead of shipping quietly.
@@ -54,7 +54,7 @@
 
 /*
  * FDK's ABI is stable as of the Phase 11 stabilization pass (the
- * "1.0.0" of docs/roadmap.md — an internal engineering milestone,
+ * "1.0.0" of ROADMAP.md — an internal engineering milestone,
  * distinct from but now aligned with the public version): public
  * structs are classified and size-pinned (docs/abi-policy.md),
  * enums are append-only, input structs append-only, and the object

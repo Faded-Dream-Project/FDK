@@ -192,7 +192,7 @@ measure/arrange hooks — plus the window content glue), `src/widget/` (Phase
 event routing with hover/grab/bubbling, invalidation, damage-driven
 z-order painting on the clip stack, the subclass vtable, and the
 reentrancy machinery that makes destroy-from-callback safe; see
-`docs/roadmap.md`'s Phase 4 entry; the Phase 6 catalog — Label,
+`ROADMAP.md`'s Phase 4 entry; the Phase 6 catalog — Label,
 Button, Toggle, Checkbox, Radio, ProgressBar, Separator, Frame —
 and the Phase 6 text foundation that backs their labels live here
 and in `src/text/`), `src/theme/` (Phase 7: the theme API and
@@ -310,7 +310,7 @@ dialogs are TOOLKIT-OWNED windows: the window layer's
 owned-window path paints them itself instead of invoking the
 application's window callback — the widget→window back-edge that
 lets a widget open its own toplevel from inside an event handler.
-See `docs/roadmap.md`'s Phase 9 entry for the full inventory.
+See `ROADMAP.md`'s Phase 9 entry for the full inventory.
 `src/widget/a11y.c` + `include/fdk/fdk_a11y.h` (Phase 10 first
 slice: the accessibility core — the a11y tree IS the widget tree;
 `fdk_a11y_describe` snapshots role/name/description/states/bounds/
@@ -335,7 +335,7 @@ surface and present them — sending only what changed — on either
 backend (`examples/02_software_render.c`); and applications can now
 build widget trees that FDK itself hit-tests, focuses, repaints,
 and presents (`examples/03_widgets.c`).
-See `docs/roadmap.md`'s entries for the precise, honest lists of
+See `ROADMAP.md`'s entries for the precise, honest lists of
 what is and isn't covered — in particular i18n (the whole second
 half of Phase 10), per-item a11y nodes for painted-row containers
 (menu items, notebook tabs), and IME

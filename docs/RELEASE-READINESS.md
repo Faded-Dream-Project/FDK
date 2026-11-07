@@ -3,7 +3,7 @@
 **Written:** 2026-11-05, after round 26 (`7f83a00`) and the CI repair
 that follows it. This is the answer to the owner's question — "what's
 left to build so FDK can build any app without limit?" — read out of
-the tree, not out of memory: ROADMAP-1.1.0.md's 62-item register
+the tree, not out of memory: ROADMAP.md (Part 1)'s 62-item register
 (60 DONE, 1 open, 1 = this document's subject), PARITY.md's
 category-by-category GTK4/Qt6 audit, TESTING-ON-DESKTOP.md's 28
 owner-gate sections, the CI history, and the open bugs.

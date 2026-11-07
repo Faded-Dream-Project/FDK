@@ -1,4 +1,11 @@
-# ROADMAP-1.1.0 — the gap audit and the proposed scope
+# FDK — ROADMAP (the one register)
+
+> Merged 2026-11-07 from `docs/roadmap.md` and
+> `docs/ROADMAP-1.1.0.md` (both deleted by the merge). Statuses are
+> kept per item; milestone IDs (M-9 …) are preserved so existing
+> references keep working. Nothing that is still open was dropped.
+
+## Part 1 — the 1.1.0 register (current, from the old ROADMAP-1.1.0.md)
 
 **Status:** IN IMPLEMENTATION (Phase 2, owner-approved). The tree
 carries a `1.1.0-rcN` development version — **the project is in
@@ -685,3 +692,50 @@ the CHANGELOG reads like the audit above never had to say "missing"
 about anything a real application hits in daily use. Until then the
 version stays `1.1.0-rc2` (rcN bumps with the candidate's own
 history - docs/versioning.md), no tags, no releases.
+
+## Part 2 — the GTK/Qt parity gap list
+
+The category-by-category diff lives in `docs/PARITY.md` (the
+authoritative gap table with verdicts). Its still-open tail:
+text on extension surfaces, the inline chooser widget forms,
+the deeper Pango attribute tail (gravity/features/stretch),
+and the platform matrix (Windows/macOS OUT by charter).
+
+## Part 3 — the historical phase log (condensed)
+
+Every phase and milestone below is COMPLETE; the per-round detail
+lives in `PROGRESS.md` (the ledger) and in git history.
+
+- Phase 0 — Repository Audit ✅ (this milestone)
+- Phase 1 — Foundation ✅ (this milestone)
+- Phase 2 — Platform Layer ✅ (this milestone)
+- Phase 3 — Rendering ✅ (completion slice: images, alpha compositing,
+- transforms, antialiasing, MIT-SHM + double buffering, HiDPI)
+- Phase 4 — Widget Foundation ✅ (this milestone)
+- Phase 5 — Layout Engine — COMPLETE
+- Phase 6 — Core Widgets + Text Foundation — COMPLETE
+- Phase 7 — Theme Engine — COMPLETE (first slice)
+- Phase 8 — Window Decorations & Window Management — COMPLETE
+- Phase 9 — Advanced Widgets — COMPLETE
+- Phase 10 — Accessibility / Internationalization — COMPLETE
+- Phase 11 — Stabilization — COMPLETE
+- Post-1.0 maintenance
+- The GTK/Qt feature-parity ledger
+- 1.4.11 — the markup milestone (rich text everywhere)
+- 1.4.12 — INCR transfers (the clipboard's atomic cap lifted)
+- 1.4.13 — the command-line face (maintainer-requested)
+- 1.4.14 — the live settings desktop (maintainer-requested)
+- 1.4.15 — the chrome uniformity tail
+- 1.4.16 — the three faces
+- 1.4.17 — the smooth pass
+- 1.4.18 — the GPU present lane (hybrid rendering)
+- 1.4.19 — the drop that landed (XDND receiver faithfulness)
+- 1.5.0 — the release-engineering pass (public v1.0.0)
+- The 1.5.0 retraction (same-day, recorded honestly)
+- 1.5.1 — the picker stabilization (post-retraction)
+- 1.5.2 — the audit pass: the default channel, SVG, and the refusal set
+- 1.5.3 — the picker's polish pass: compositing and the live desktop
+- 1.5.4 — the picker's crash fix: CSS-class SVGs
+- 1.6.0 — the public 1.0.0 decision (the real release)
+- 1.6.1 — the one-face alignment (the 1.0.0 re-cut)
+- 1.7.0 — the extension API + fdk-shell-overlay (the 1.1.0-rc1 candidate, 2026-10-25)

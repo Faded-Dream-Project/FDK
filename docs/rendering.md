@@ -122,7 +122,7 @@ All helpers blend source-over with straight (non-premultiplied)
 alpha — `a = 1.0` replaces, `a < 1.0` tints. All are clipped to the
 clip stack and record damage automatically. All are crisp integer
 geometry (no antialiasing yet — that is deliberate, listed in
-`docs/roadmap.md` as future work).
+`ROADMAP.md` as future work).
 
 | Helper | Algorithm / notes |
 |---|---|

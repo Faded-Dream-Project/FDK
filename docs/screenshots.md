@@ -151,7 +151,7 @@ the X server when the chain closed:
 
 The embedded narrator demo (`08_narrator`): a scripted tour walks
 focus through a form while the narrator speaks each move through a
-subtitle bar (also referenced from `docs/roadmap.md`):
+subtitle bar (also referenced from `ROADMAP.md`):
 
 ![Narrator demo](screenshots/narrator_demo_460x400.png)
 

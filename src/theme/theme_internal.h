@@ -157,7 +157,7 @@ char *fdk__theme_strdup(const char *s);
  * every internal icon consumer (today: the file/folder pickers).
  * NOT public API and never installed: applications get themed icons
  * through the toolkit's own widgets; exposing a lookup API is a
- * deliberate future decision, recorded in docs/roadmap.md.
+ * deliberate future decision, recorded in ROADMAP.md.
  *
  * All functions are UI-thread-only (they stat, read small files,
  * and decode images synchronously — bounded work, but not

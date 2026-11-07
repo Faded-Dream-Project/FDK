@@ -45,7 +45,7 @@ encoder (see `screenshots/`).
 
 ## How results are reported
 
-- **`FINDINGS.md`** — the running ledger: every FDK bug or gap an
+- **`PROGRESS.md`** (root; its bug/gap-ledger section) — the running ledger: every FDK bug or gap an
   app found, its root cause, the fix commit, and the regression
   test that pins it. Protocol: a failing test lands in FDK's own
   suite FIRST, then the fix, then the app continues. Nothing is

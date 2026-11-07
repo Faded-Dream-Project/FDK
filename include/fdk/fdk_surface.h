@@ -37,7 +37,7 @@
  * compositing, affine-transformed blits, antialiased primitive
  * variants, and a frame-pacing query. The remaining Phase 3 work
  * (HiDPI scale handling is the last item) is tracked in
- * docs/roadmap.md and docs/rendering.md.
+ * ROADMAP.md and docs/rendering.md.
  */
 
 #ifndef FDK_SURFACE_H

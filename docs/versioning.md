@@ -46,7 +46,7 @@ defects). The milestones that closed them — picker stabilization
 rasterization, the refusal set — 1.5.2), the polish pass (per-pixel
 alpha compositing, the live XSETTINGS desktop — 1.5.3), and the
 crash fix (CSS-class SVGs — 1.5.4) — are recorded in
-`docs/roadmap.md`, each pixel-verified and regression-pinned. The
+`ROADMAP.md`, each pixel-verified and regression-pinned. The
 project owner then tested the result on real hardware (native
 Wayland under labwc included) and demanded the release. Component
 closed the gate, not pipeline greenness — the lesson the retraction
@@ -81,7 +81,7 @@ with nothing published anywhere.
 
 ## Internal milestones are not versions
 
-`docs/roadmap.md` tracks work with Phase numbers and internal
+`ROADMAP.md` tracks work with Phase numbers and internal
 milestone labels (`1.0.0`, `1.0.1`, `1.1.0`, …, `1.4.19`). These
 are **engineering milestones** — history markers for when work
 landed. **Disambiguation, which matters:** the *roadmap milestone

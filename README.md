@@ -50,7 +50,7 @@ will cut when it is genuinely ready. A cross-distribution packaging
 + CI pipeline is built and kept green on every push as a validation
 check (`docs/packaging.md`); nothing is published anywhere. The
 phase-by-phase account of what is and isn't covered lives in
-`docs/roadmap.md` and `PROGRESS.md`.
+`ROADMAP.md` and `PROGRESS.md`.
 
 FDK is **distro-agnostic**: it builds and runs on any modern Linux
 distribution where X11, Wayland, and POSIX are available.
@@ -298,7 +298,7 @@ Real captured frames from the test rigs — not mockups
 | Doc | Covers |
 |---|---|
 | `docs/architecture.md` | Layering, module boundaries, public/internal header split |
-| `docs/roadmap.md` | Phase-by-phase plan and current status |
+| `ROADMAP.md` | Phase-by-phase plan and current status |
 | `PROGRESS.md` | The fast, authoritative implemented-features ledger |
 | `docs/build.md` | Build system reference, release builds, install |
 | `docs/testing.md` | The two-tier test suite and environment quirks |
@@ -331,7 +331,7 @@ Real captured frames from the test rigs — not mockups
 - **No copyleft, anywhere in the dependency graph**
   (`docs/licensing-policy.md`).
 - **Correct over quick; architecture over feature-count**
-  (`docs/roadmap.md`).
+  (`ROADMAP.md`).
 - **No fake completion** — the roadmap lists what is *not* covered as
   carefully as what is.
 

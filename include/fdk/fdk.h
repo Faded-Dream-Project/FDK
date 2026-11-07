@@ -43,7 +43,7 @@
 #include "fdk_desktop.h"
 
 /* Widget, layout, and theme public headers are added here as their
- * respective phases land (see docs/roadmap.md). Phase 2 added window
+ * respective phases land (see ROADMAP.md). Phase 2 added window
  * lifecycle and the backend-neutral event model; Phase 3 added
  * fdk_surface.h (software rendering); Phase 4 added fdk_widget.h (the
  * retained-mode widget foundation); Phase 5 added fdk_layout.h (the

@@ -27,7 +27,7 @@ static void test_version(void) {
      * read docs/versioning.md (including the 2026-10-11 retraction
      * record: a premature 1.0.0 bump was reverted the same day)
      * before "fixing" either side of the assert. Internal milestones
-     * (docs/roadmap.md's Phase numbers and 1.x labels) are a
+     * (ROADMAP.md's Phase numbers and 1.x labels) are a
      * different axis and must never leak into these macros. Note the
      * ENCODED value carries no rc suffix — a candidate encodes as its
      * base triple (1.1.0), and the suffix rides the string only. */

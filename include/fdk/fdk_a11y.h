@@ -24,7 +24,7 @@
  * Roles and states follow the WAI-ARIA / ATK naming where a
  * concept exists there, so consumers map 1:1.
  *
- * See docs/roadmap.md's Phase 10 entry for scope and the honest
+ * See ROADMAP.md's Phase 10 entry for scope and the honest
  * list of what is NOT here yet.
  */
 
