@@ -351,6 +351,17 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->wm_protocols = XInternAtom(display, "WM_PROTOCOLS", False);
     conn->wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", False);
     conn->wm_save_yourself = XInternAtom(display, "WM_SAVE_YOURSELF", False);
+
+    /* WM_TAKE_FOCUS (1.4.19): the ICCCM take-focus model. WMs in the
+     * mutter/Muffin family hand keyboard focus to a window by sending
+     * this ClientMessage — the client is expected to call
+     * XSetInputFocus on receipt. Without LISTING the atom the WM may
+     * never set the X input focus at all: the window looks active,
+     * renders, closes fine — and swallows every keystroke (the
+     * "can't type anything" report on a real desktop; a bare Xvfb
+     * could never reproduce it — with no WM, nothing manages focus
+     * and the rig set it by hand). */
+    conn->wm_take_focus = XInternAtom(display, "WM_TAKE_FOCUS", False);
     conn->net_wm_name = XInternAtom(display, "_NET_WM_NAME", False);
     conn->utf8_string = XInternAtom(display, "UTF8_STRING", False);
     conn->motif_wm_hints = XInternAtom(display, "_MOTIF_WM_HINTS", False);

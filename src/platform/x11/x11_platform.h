@@ -122,6 +122,7 @@ struct fdk_platform_connection {
      * FDK_EVENT_SESSION_SAVE then rewrites WM_COMMAND (the
      * PropertyNotify ack a session manager waits for). */
     Atom wm_save_yourself;
+    Atom wm_take_focus; /* ICCCM take-focus model (1.4.19) */
     Atom net_wm_name;
     Atom utf8_string;
     Atom motif_wm_hints; /* _MOTIF_WM_HINTS, Phase 8 decorations */

@@ -250,10 +250,11 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
      * FDK_EVENT_SESSION_SAVE and rewrites WM_COMMAND as the ack
      * (x11_dispatch.c). */
     {
-        Atom protocols[2];
+        Atom protocols[3];
         protocols[0] = conn->wm_delete_window;
         protocols[1] = conn->wm_save_yourself;
-        XSetWMProtocols(conn->display, xwindow, protocols, 2);
+        protocols[2] = conn->wm_take_focus;
+        XSetWMProtocols(conn->display, xwindow, protocols, 3);
     }
 
     /* XI2 touch selection (1.1.0, M-3): harmless no-op where the

@@ -370,6 +370,12 @@ void tapp_close_window(twindow *w) {
         tsearch_close(w);
     }
     fdk_window_destroy(w->window); /* frees the tree */
+    /* the bar is gone (bar_destroy unattached the models): now the
+     * app-side menu models go — the fdk_widgets.h ownership contract
+     * (ASan counted every one of these as leaked at exit) */
+    for (int i = 0; i < w->nmenus; i++) {
+        fdk_menu_destroy(w->menus[i]);
+    }
     free(w);
     if (app->nwindows == 0) {
         app->quit = true;
