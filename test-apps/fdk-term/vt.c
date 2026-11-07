@@ -523,6 +523,16 @@ static void sgr(vt *v) {
                         if (k - j >= 4) {
                             j++;
                         }
+                    } else if (i + 5 < 16 && v->pset[i + 5]) {
+                        /* semicolon form with SIX fields:
+                         * 38;2;CS;R;G;B — xterm disambiguates by
+                         * count and skips the colorspace field.
+                         * The owner's prompt theme emits exactly
+                         * this for its input segment; reading it
+                         * as R;G;B painted the typed text in a
+                         * near-background color ("the text is
+                         * typed but its invisible") */
+                        j++;
                     }
                     if (j + 2 < 16 && v->pset[j] &&
                         v->pset[j + 1] && v->pset[j + 2]) {
@@ -1086,11 +1096,20 @@ static void feed_codepoint(vt *v, uint32_t cp) {
             if (vt_trace_on()) {
                 fprintf(stderr,
                         "[vt] CSI final='%c' priv=%d nparams=%d"
-                        " p0=%d p1=%d p2=%d\n",
+                        " p=[%d %d %d %d %d %d %d %d]"
+                        " sub=[%d%d%d%d%d%d%d%d]\n",
                         cp, v->ppriv, v->nparams,
                         v->pset[0] ? v->params[0] : -1,
                         v->pset[1] ? v->params[1] : -1,
-                        v->pset[2] ? v->params[2] : -1);
+                        v->pset[2] ? v->params[2] : -1,
+                        v->pset[3] ? v->params[3] : -1,
+                        v->pset[4] ? v->params[4] : -1,
+                        v->pset[5] ? v->params[5] : -1,
+                        v->pset[6] ? v->params[6] : -1,
+                        v->pset[7] ? v->params[7] : -1,
+                        v->psub[0], v->psub[1], v->psub[2],
+                        v->psub[3], v->psub[4], v->psub[5],
+                        v->psub[6], v->psub[7]);
             }
             csi_dispatch(v, (uint8_t)cp);
             v->state = ST_GROUND;

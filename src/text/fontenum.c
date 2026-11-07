@@ -515,3 +515,108 @@ void fdk_font_info_list_free(fdk_font_info *infos, size_t count) {
     }
     fdk_free(infos);
 }
+
+/* ---- The terminal-default face (post-Nerd-Font round) -----------
+ *
+ * The owner's report ("the nerd fonts are not working", fixed in
+ * 289a0ea) surfaced two core-level gaps, and the app-side patch that
+ * landed there lives here now, in the text stack, so every FDK
+ * application gets the same policy:
+ *
+ *  1. The enumerate list only ever matched PLAIN family names, so a
+ *     machine whose monospace face IS its Nerd-Font-patched face
+ *     ("JetBrainsMono Nerd Font" answering a "JetBrains Mono"
+ *     request) fell through to the system default and the prompt
+ *     icons could not render natively. The normalized compare below
+ *     (lowercase, spaces and dashes dropped) accepts the patched
+ *     variants of the requested families.
+ *  2. An icon-only face (Symbols Nerd Font) must never become a
+ *     terminal font: every candidate that cannot draw 'A' is
+ *     rejected like a failed load.
+ *
+ * Resolution order: exact family match (in the caller's priority
+ * order), then Nerd-Font-patched variants of the requested
+ * families, then fontconfig's system default. */
+static void fdk__norm_family(const char *in, char *out, size_t cap) {
+    size_t o = 0;
+    for (const char *p = in; *p != '\0' && o + 1 < cap; p++) {
+        if (*p == ' ' || *p == '-') {
+            continue;
+        }
+        out[o++] = (char)(*p >= 'A' && *p <= 'Z' ? *p + 32 : *p);
+    }
+    out[o] = '\0';
+}
+
+static bool fdk__font_draws_latin(const fdk_font *font) {
+    return fdk_font_has_glyph(font, 'A');
+}
+
+static fdk_font *fdk__load_checked(const char *path, int px) {
+    fdk_font *f = fdk_font_load(path, px);
+    if (f != NULL && !fdk__font_draws_latin(f)) {
+        FDK_WARN("font: %s cannot draw Latin (icon-only face?) — "
+                 "rejected as a terminal face",
+                 path != NULL ? path : "(null)");
+        fdk_font_destroy(f);
+        f = NULL;
+    }
+    return f;
+}
+
+fdk_font *fdk_font_load_terminal_default(
+    fdk_i32 pixel_size, const char *const *preferred,
+    size_t n_preferred) {
+    fdk_font_info *infos = NULL;
+    size_t n = 0;
+    fdk_font *font = NULL;
+    if (!fdk_ok(fdk_font_enumerate(&infos, &n))) {
+        return fdk_font_load_system_default(pixel_size);
+    }
+    /* 1. the exact families, in the caller's priority order */
+    for (size_t f = 0; font == NULL && preferred != NULL && f < n_preferred;
+         f++) {
+        for (size_t i = 0; i < n; i++) {
+            if (infos[i].family != NULL &&
+                strcmp(infos[i].family, preferred[f]) == 0) {
+                font = fdk__load_checked(infos[i].path, (int)pixel_size);
+                break;
+            }
+        }
+    }
+    /* 2. the Nerd-Font-patched variants of the requested families */
+    for (size_t f = 0; font == NULL && preferred != NULL && f < n_preferred;
+         f++) {
+        char want[128];
+        fdk__norm_family(preferred[f], want, sizeof want);
+        for (size_t i = 0; i < n; i++) {
+            char have[128];
+            fdk__norm_family(infos[i].family != NULL ? infos[i].family : "",
+                             have, sizeof have);
+            size_t len = strlen(have);
+            if (len < 8 || strcmp(have + len - 8, "nerdfont") != 0 ||
+                strncmp(have, want, strlen(want)) != 0) {
+                continue;
+            }
+            font = fdk__load_checked(infos[i].path, (int)pixel_size);
+        }
+    }
+    /* 3. any Nerd-Font-patched mono face (the box may carry ONLY
+     * patched faces) — the Latin gate above keeps the icon-only
+     * faces out */
+    for (size_t i = 0; font == NULL && i < n; i++) {
+        char have[128];
+        fdk__norm_family(infos[i].family != NULL ? infos[i].family : "",
+                         have, sizeof have);
+        size_t len = strlen(have);
+        if (len < 12 || strcmp(have + len - 12, "nerdfontmono") != 0) {
+            continue;
+        }
+        font = fdk__load_checked(infos[i].path, (int)pixel_size);
+    }
+    fdk_font_info_list_free(infos, n);
+    if (font == NULL) {
+        font = fdk_font_load_system_default(pixel_size);
+    }
+    return font;
+}

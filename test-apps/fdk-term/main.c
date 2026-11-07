@@ -413,88 +413,20 @@ void tapp_quit(tapp *app) {
     }
 }
 
-/* normalized family key: lowercase, spaces and dashes dropped —
- * "JetBrainsMono Nerd Font" must match a "JetBrains Mono" request */
-static void norm_family(const char *in, char *out, size_t cap) {
-    size_t o = 0;
-    for (const char *p = in; *p != '\0' && o + 1 < cap; p++) {
-        if (*p == ' ' || *p == '-') {
-            continue;
-        }
-        out[o++] = (char)(*p >= 'A' && *p <= 'Z' ? *p + 32 : *p);
-    }
-    out[o] = '\0';
-}
-
-/* the Nerd-Font-patched face of the requested mono families: the
- * enumerate list only ever matched the plain names, so a box whose
- * mono face IS its Nerd Font (the owner's Artix setup — their other
- * terminals draw the prompt icons from it directly) fell through to
- * the system default and the icons landed in .notdef */
-static fdk_font *load_nerd_variant(const fdk_font_info *infos,
-                                   size_t n, int px) {
-    fdk_font *f = NULL;
-    for (size_t i = 0; f == NULL && i < n; i++) {
-        char nf[128];
-        norm_family(infos[i].family, nf, sizeof nf);
-        size_t len = strlen(nf);
-        if (len < 8 || strcmp(nf + len - 8, "nerdfont") != 0) {
-            continue;
-        }
-        f = fdk_font_load(infos[i].path, px);
-        if (f != NULL && !fdk_font_has_glyph(f, 'A')) {
-            /* icon-only faces (Symbols Nerd Font) cannot be the
-             * terminal font — reject them like a failed load */
-            fdk_font_destroy(f);
-            f = NULL;
-        }
-    }
-    return f;
-}
-
 /* ---- main -------------------------------------------------------------------- */
 
 static void load_fonts(tapp *app) {
-    /* the mono font at the profile's px */
+    /* the mono font at the profile's px — the resolution policy
+     * (exact families, then their Nerd-Font-patched variants, then
+     * any Nerd Font Mono, then the system default, with the
+     * Latin-coverage gate) lives in the text stack */
     int px = app->active.font_px;
-    fdk_font_info *infos = NULL;
-    size_t n = 0;
     static const char *const families[] = {
         "DejaVu Sans Mono", "Liberation Mono", "Nimbus Mono PS",
         "Noto Sans Mono", "JetBrains Mono", "monospace",
     };
-    app->font = NULL;
-    if (fdk_ok(fdk_font_enumerate(&infos, &n))) {
-        for (size_t f = 0; app->font == NULL && f < 6; f++) {
-            for (size_t i = 0; i < n; i++) {
-                if (strcmp(infos[i].family, families[f]) == 0) {
-                    app->font = fdk_font_load(infos[i].path, (int)px);
-                    if (app->font != NULL &&
-                        !fdk_font_has_glyph(app->font, 'A')) {
-                        /* a face that loads but cannot draw Latin
-                         * (broken instance, symbol-only pick) would
-                         * render the whole terminal blank — skip it
-                         * like a failed load and try the next
-                         * family */
-                        fdk_font_destroy(app->font);
-                        app->font = NULL;
-                    }
-                    break;
-                }
-            }
-        }
-        fdk_font_info_list_free(infos, n);
-    }
-    if (app->font == NULL) {
-        /* no plain family matched — the box may only carry the
-         * Nerd-Font-patched faces; they cover Latin just fine and
-         * the owner's other terminals draw the prompt icons from
-         * them directly */
-        app->font = load_nerd_variant(infos, n, (int)px);
-    }
-    if (app->font == NULL) {
-        app->font = fdk_font_load_system_default(px);
-    }
+    app->font = fdk_font_load_terminal_default(
+        px, families, sizeof families / sizeof *families);
     int ui_px = fdk_ui_font_px();
     app->font_ui = fdk_font_load_system_default(ui_px > 0 ? ui_px : 15);
 }

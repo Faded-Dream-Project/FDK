@@ -404,6 +404,21 @@ fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
  * fdk_font_load() — see fdk_window_set_decoration_font(). */
 fdk_font *fdk_font_load_system_default(fdk_i32 pixel_size);
 
+/* ---- The terminal-default face (1.4.4) ----
+ *
+ * Terminal-shaped font resolution as core policy: the caller passes
+ * its preferred monospace families in priority order; the stack
+ * resolves an exact family first, then the Nerd-Font-patched
+ * variant of any requested family ("JetBrainsMono Nerd Font"
+ * answers "JetBrains Mono" — normalized compare), then any Nerd
+ * Font Mono face, then fontconfig's system default. Every candidate
+ * must draw 'A' — icon-only faces are rejected, so a box whose only
+ * patched face is Symbols Nerd Font still gets a text-capable font.
+ * NULL only when the system itself has no usable default. */
+fdk_font *fdk_font_load_terminal_default(
+    fdk_i32 pixel_size, const char *const *preferred,
+    size_t n_preferred);
+
 /* ---- Face loading with a collection index (1.4.3) ----
  *
  * fdk_font_load's twin for TrueType COLLECTIONS (.ttc): loads face
