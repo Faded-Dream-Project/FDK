@@ -43,6 +43,9 @@ typedef struct twindow {
      * fdk_widgets.h contract, after the bar is gone) */
     fdk_menu *menus[8];
     int nmenus;
+    /* the shared menu-activation context (mact) the bar's items
+     * borrow — freed with the menus at teardown */
+    void *menu_ctx;
     int id;
     /* the pending-resize grid math */
     int cols, rows;

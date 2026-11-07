@@ -186,6 +186,7 @@ void tapp_build_menubar(twindow *w, fdk_widget *host) {
         return;
     }
     a->w = w;
+    w->menu_ctx = a;
 
     fdk_widget *bar = NULL;
     fdk_menu_bar_create(host, app->font_ui, &bar);

@@ -10,6 +10,7 @@
 #include "window/window_internal.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 /* ---- the popup-grab watchdog + desktop-switch release (1.1.0-rc1) ---
  *
@@ -221,6 +222,14 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
          * (and dead-key sequences) entirely. Filtered events produce
          * no FDK event. */
         if (conn->xim != NULL && XFilterEvent(&xevent, None)) {
+            if (xevent.type == KeyPress) {
+                FDK_WARN("key code=%d state=0x%x FILTERED by the input "
+                         "method (XMODIFIERS='%s') — it never reaches "
+                         "the application",
+                         xevent.xkey.keycode, xevent.xkey.state,
+                         getenv("XMODIFIERS") != NULL
+                             ? getenv("XMODIFIERS") : "(unset)");
+            }
             continue;
         }
 
@@ -350,6 +359,30 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
+        /* Click-to-focus, app-side (1.4.20): if a click lands on a
+         * top-level that still does NOT hold the X input focus, the
+         * WM either never focused it (a take-focus-less manager, a
+         * broken hover-focus) or took it away — take it here rather
+         * than swallow a click. PointerRoot means the server routes
+         * keys by pointer position — nothing to do. Popups keep out:
+         * they are transient. */
+        if (xevent.type == ButtonPress && !pwindow->popup) {
+            Window focus_w = None;
+            int revert = 0;
+            XGetInputFocus(conn->display, &focus_w, &revert);
+            if (focus_w != pwindow->xwindow && focus_w != PointerRoot) {
+                FDK_INFO("click-focus: the X input focus was 0x%lx, "
+                         "taking it onto 0x%lx",
+                         (unsigned long)focus_w,
+                         (unsigned long)pwindow->xwindow);
+                XSetInputFocus(conn->display, pwindow->xwindow,
+                               RevertToParent,
+                               xevent.xbutton.time != 0
+                                   ? xevent.xbutton.time : CurrentTime);
+                XFlush(conn->display);
+            }
+        }
+
         /* WM_DELETE_WINDOW arrives as a ClientMessage, not a distinct
          * X event type — handled here rather than in
          * fdk_x11_translate_event() since it needs conn->wm_protocols/
@@ -378,6 +411,9 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             xevent.xclient.message_type == conn->wm_protocols &&
             (Atom)xevent.xclient.data.l[0] == conn->wm_take_focus) {
             Time t = (Time)xevent.xclient.data.l[1];
+            FDK_INFO("WM_TAKE_FOCUS (ts=%lu) — taking the X input "
+                     "focus on 0x%lx",
+                     (unsigned long)t, (unsigned long)pwindow->xwindow);
             XSetInputFocus(conn->display, pwindow->xwindow,
                            RevertToParent,
                            t != 0 ? t : CurrentTime);

@@ -371,6 +371,9 @@ static void feed_key(tview *v, const fdk_key_event *key) {
         const char *rp = vt_reply_peek(v->parser, &rl);
         if (rp != NULL && rl > 0) {
             (void)pty_write(&v->pt, rp, rl);
+            fprintf(stderr, "[term] key sc=%d cp=%d mod=%d -> pty "
+                    "(%zu bytes)\n", key->scancode, key->codepoint,
+                    key->modifiers, rl);
             vt_reply_consume(v->parser, rl);
         }
         return;
@@ -398,6 +401,8 @@ static void feed_key(tview *v, const fdk_key_event *key) {
             (void)pty_write(&v->pt, "\033", 1);
         }
         (void)pty_write(&v->pt, buf, (size_t)blen);
+        fprintf(stderr, "[term] key cp=%d mod=%d -> pty (%d bytes)\n",
+                key->codepoint, key->modifiers, blen);
         v->t.last_input_ms = now_ms();
     }
 }
