@@ -120,19 +120,24 @@ fdk_color tcolor_index(int index, bool is_bg) {
         c.r = (float)b[index][0] / 255.0f;
         c.g = (float)b[index][1] / 255.0f;
         c.b = (float)b[index][2] / 255.0f;
-        return c;
-    }
-    if (index < 232) {
+    } else if (index < 232) {
         int n = index - 16;
         int steps[6] = {0, 95, 135, 175, 215, 255};
         c.r = (float)steps[(n / 36) % 6] / 255.0f;
         c.g = (float)steps[(n / 6) % 6] / 255.0f;
         c.b = (float)steps[n % 6] / 255.0f;
-        return c;
+    } else {
+        int v = 8 + (index - 232) * 10;
+        c.r = c.g = c.b = (float)v / 255.0f;
     }
-    int v = 8 + (index - 232) * 10;
-    c.r = c.g = c.b = (float)v / 255.0f;
     (void)is_bg;
+    /* the struct starts zeroed — alpha included. Palette ink went to
+     * the screen with alpha 0: fully transparent. Truecolor text
+     * (which sets 1.0f explicitly in tcolor_resolve) rendered while
+     * every SGR 30-37/90-97/256-index glyph — the owner's typed
+     * buffer (bold red), zsh-autocomplete's suggestions, any ls
+     * coloring — drew NOTHING. */
+    c.a = 1.0f;
     return c;
 }
 
@@ -155,11 +160,15 @@ fdk_color tcolor_resolve(tcolor c, bool is_bg) {
     if (c.index >= 0) {
         return tcolor_index(c.index, is_bg);
     }
-    if (c.r == 0 && c.g == 0 && c.b == 0) {
-        /* unset: the defaults. Foreground unset on default bg is
-         * invisible; xterm's convention is fg-default (theme text). */
-        return is_bg ? tcolor_default_bg() : tcolor_default_fg();
+    if (c.index == TCOLOR_TRUECOLOR) {
+        /* an explicitly-set truecolor — INCLUDING true black
+         * (38;2;0;0;0), which the old all-zero-as-unset test
+         * silently turned into the default foreground */
+        fdk_color out = {(float)c.r / 255.0f, (float)c.g / 255.0f,
+                         (float)c.b / 255.0f, 1.0f};
+        return out;
     }
-    fdk_color out = {(float)c.r / 255.0f, (float)c.g / 255.0f, (float)c.b / 255.0f, 1.0f};
-    return out;
+    /* unset: the defaults. Foreground unset on default bg is
+     * invisible; xterm's convention is fg-default (theme text). */
+    return is_bg ? tcolor_default_bg() : tcolor_default_fg();
 }

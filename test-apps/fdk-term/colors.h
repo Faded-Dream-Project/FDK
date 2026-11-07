@@ -20,7 +20,11 @@ typedef struct {
     uint8_t r, g, b;
 } tcolor;
 
+/* index encodes the color's origin: >= 0 the palette slot, -1
+ * unset (resolve to the defaults), -2 an explicitly-set truecolor
+ * whose rgb bytes are valid — true black included */
 #define TCOLOR_UNSET ((tcolor){ .index = -1, .r = 0, .g = 0, .b = 0 })
+#define TCOLOR_TRUECOLOR (-2)
 
 /* The named schemes shipped (per-profile, prefs key "scheme"):
  * default (theme-following), plus the classics every terminal

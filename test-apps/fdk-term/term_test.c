@@ -90,16 +90,22 @@ static void test_sgr_colors(void) {
     /* 256-color */
     feed("\033[38;5;196mX");
     assert(t.grid[0].cells[2].fg.index == 196);
-    /* truecolor */
+    /* truecolor — -2, the explicitly-set-truecolor sentinel (an
+     * unset cell is -1; the split is what keeps true black from
+     * reading back as "unset") */
     feed("\033[48;2;10;20;30mY");
-    assert(t.grid[0].cells[3].bg.index == -1);
+    assert(t.grid[0].cells[3].bg.index == -2);
     assert(t.grid[0].cells[3].bg.r == 10);
     assert(t.grid[0].cells[3].bg.g == 20);
     assert(t.grid[0].cells[3].bg.b == 30);
+    /* true black stays true black (index -2, rgb 0,0,0) */
+    feed("\033[38;2;0;0;0mK");
+    assert(t.grid[0].cells[4].fg.index == -2);
+    assert(t.grid[0].cells[4].fg.r == 0);
     /* reset */
     feed("\033[0mZ");
-    assert(t.grid[0].cells[4].fg.index == -1);
-    assert(t.grid[0].cells[4].attr == 0);
+    assert(t.grid[0].cells[5].fg.index == -1);
+    assert(t.grid[0].cells[5].attr == 0);
     teardown();
     printf("[ok] SGR: named/256/truecolor/bold/reset\n");
 }
