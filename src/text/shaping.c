@@ -445,12 +445,15 @@ static const sh_range sh_ranges[] = {
     {0x31F0, 0x31FF, 27}, {0x3400, 0x4DBF, 25}, {0x4E00, 0x9FFF, 25},
     {0xA640, 0xA69F, 2},  {0xA720, 0xA7FF, 0},  {0xA960, 0xA97F, 28},
     {0xAC00, 0xD7FF, 28}, {0xF900, 0xFAFF, 25}, {0xFB1D, 0xFB4F, 4},
+    {0xE000, 0xF8FF, 30}, /* private use: BMP — powerline/nerd v1-2 */
     {0xFB50, 0xFDFF, 5},  {0xFE70, 0xFEFF, 5},  {0x1B001, 0x1B0FF, 26},
-    /* private use: BMP (powerline/nerd v1-2) + plane 14/16 (nerd v3) */
-    {0xE000, 0xF8FF, 30}, {0xF0000, 0xFFFFD, 30}, {0x100000, 0x10FFFD, 30},
     {0x1F000, 0x1FAFF, 29}, {0x1FB00, 0x1FBFF, 29},
     {0x20000, 0x2A6DF, 25}, {0x2A700, 0x2EBEF, 25},
     {0x2F800, 0x2FA1F, 25},
+    /* private use, supplementary: nerd fonts v3 moved a batch of
+     * icons up here; F0000-FFFFD and 100000-10FFFD sort after all
+     * the BMP/plane-2 blocks above */
+    {0xF0000, 0xFFFFD, 30}, {0x100000, 0x10FFFD, 30},
     /* Emoji (script 29) rides the same sort: 2600-27BF and
      * 2B00-2B55 sit between the Greek and Latin-ext blocks above.
      * Symbols in 2600-27BF whose default is TEXT presentation still
