@@ -37,10 +37,10 @@ Every key event carries both:
 
 Resolution paths differ per backend:
 
-- **X11 (1.3.1)**: an XIM input context (XCreateIC with
+- **X11 (1.0.0)**: an XIM input context (XCreateIC with
   XIMPreeditNothing | XIMStatusNothing) per window;
   Xutf8LookupString fills the codepoint, giving full-Unicode text
-  entry including compose-key sequences. Before 1.3.1 the plain
+  entry including compose-key sequences. Before 1.0.0 the plain
   XLookupString path was Latin-1-only.
 - **Wayland**: xkbcommon state (the wl_keyboard keymap) resolves
   keysym → UTF-32 per key press, and since round 32 a per-keymap
@@ -96,7 +96,7 @@ Backend machinery:
   engines never send it.
 - **X11 (1.0.0)**: the per-window XIC now asks for
   `XIMPreeditCallbacks | XIMStatusNothing` FIRST (falling back to
-  the 1.3.1 PreeditNothing posture when the input method refuses
+  the 1.0.0 PreeditNothing posture when the input method refuses
   the callback style): the IM hands composition to FDK through the
   preedit start/draw/done callbacks, the per-IC composition buffer
   is maintained by a pure, headless-tested UTF-8 splice
@@ -127,7 +127,7 @@ Wayland derives from xkbcommon's depressed-modifier set.
   keycode; `x11_events.c` tracks a 256-bit per-keycode down-set and
   marks those presses `is_repeat = 1`. Widgets that follow
   hold-to-repeat (Entry's Backspace runs, window shortcuts) work.
-- **Wayland** (1.3.5): `wl_keyboard::repeat_info` gives rate/delay
+- **Wayland** (1.0.0): `wl_keyboard::repeat_info` gives rate/delay
   and repeat is CLIENT-driven — the protocol never re-sends the
   press. FDK runs it: presses arm a deadline (now + delay), the
   pump's `next_wakeup_ms` cap (the platform timer analogue of the
@@ -143,7 +143,7 @@ Wayland derives from xkbcommon's depressed-modifier set.
   X11 server's repeats. `is_repeat` reaches widgets identically on
   both backends now.
 
-## The shortcut layer (1.3.3)
+## The shortcut layer (1.0.0)
 
 Two consumers parse shortcut SPECS ("Ctrl+S") into
 (modifier mask, scancode) pairs — `fdk_shortcut_parse` in
@@ -262,7 +262,7 @@ are built on. Rules:
   clear is a full-window rect: libXext has no remove-the-shape
   idiom that does not dereference NULL).
 - One zero-area rect is the EMPTY region — fully click-through
-  (the 1.3.2 input_transparent behavior on demand).
+  (the 1.0.0 input_transparent behavior on demand).
 - Up to `FDK_INPUT_REGION_MAX` (64) rects; invalid arguments
   return FDK_ERR_INVALID_ARGUMENT.
 - The rects are logical and window-relative: they survive resizes,
@@ -332,7 +332,7 @@ Testing (the reachability problem): sway headless's seat exposes
 no touch capability (wlroots has no virtual-touch protocol), and
 Xvfb has no touch injection facility — so each backend exposes the
 REAL translate path as a test seam (`test_touch` in the ops table,
-the 1.3.5 test_key discipline), and the full policy battery runs
+the 1.0.0 test_key discipline), and the full policy battery runs
 headless against the engine itself (tests/test_touch.c: tap, slop,
 timeout, drag, natural deltas, re-arm, phantom-tap latch, cancel,
 protocol noise). Real touch HARDWARE remains the owner's desktop

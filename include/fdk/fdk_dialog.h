@@ -103,7 +103,7 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
                                    void *user_data,
                                    fdk_window **out_window);
 
-/* ---- Prompt (text input) dialogs (1.2.1) ----
+/* ---- Prompt (text input) dialogs (1.0.0) ----
  *
  * The message dialog's twin for the other half of the ask-the-user
  * job: one question, one text box, OK / Cancel. Built from the same
@@ -145,7 +145,7 @@ fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
                                   void *user_data,
                                   fdk_window **out_window);
 
-/* ---- File / folder selection dialogs (1.2.0) ----
+/* ---- File / folder selection dialogs (1.0.0) ----
  *
  * FDK is a self-contained toolkit — there is no portal, no GTK, no
  * external dialog process to defer to. So the file dialog is a real
@@ -178,18 +178,18 @@ typedef enum fdk_file_dialog_kind {
     FDK_FILE_DIALOG_SAVE_FILE   = 4, /* one target path to WRITE      */
 } fdk_file_dialog_kind;
 
-/* The browsing surface (1.4.7): the classic List rows, or the
+/* The browsing surface (1.0.0): the classic List rows, or the
  * item GRID (the IconView — GTK's list/icon toggle). Both surfaces
  * carry the same entry indexes, the same selection model, and the
  * same activation gesture (double-click opens); the toolbar's
  * "Icons" checkbox flips between them at any time. Zero (LIST)
- * is the default and the pre-1.4.7 behavior. */
+ * is the default and the pre-1.0.0 behavior. */
 typedef enum fdk_file_dialog_view {
     FDK_FILE_DIALOG_VIEW_LIST = 0,
     FDK_FILE_DIALOG_VIEW_ICONS,
 } fdk_file_dialog_view;
 
-/* SAVE_FILE (1.2.3) differs from the OPEN kinds on one axis,
+/* SAVE_FILE (1.0.0) differs from the OPEN kinds on one axis,
  * honestly: paths[0] is where the application SHOULD write — the
  * file may not exist yet (the usual save-as case), so no existence
  * is promised, only that the PARENT directory existed and was a
@@ -214,7 +214,7 @@ typedef struct fdk_file_dialog_result {
 /* Releases a result's paths and the array itself. NULL is legal. */
 void fdk_file_dialog_result_free(fdk_file_dialog_result *result);
 
-/* Name filters (1.2.3): a ";"-separated list of glob patterns, e.g.
+/* Name filters (1.0.0): a ";"-separated list of glob patterns, e.g.
  * "*.png;*.jpg;*.jpeg". Matching is case-insensitive (the GTK file
  * chooser convention: *.png matches photo.PNG), '*' matches any run
  * of characters, '?' one character, everything else is literal.
@@ -234,7 +234,7 @@ typedef struct fdk_file_dialog_options {
                               copied; NULL = empty. Ignored by the
                               OPEN kinds.                            */
     const char *filters;   /* copied glob list, see above; NULL = all */
-    bool hide_recents;     /* 1.4.4: true = no "Recent" place in the
+    bool hide_recents;     /* 1.0.0: true = no "Recent" place in the
                               sidebar AND no recording of accepted
                               paths into the XDG recently-used file
                               (the shared ~/.local/share/
@@ -242,7 +242,7 @@ typedef struct fdk_file_dialog_options {
                               converges on — see the section below).
                               Zero (the default) shows the place and
                               records acceptances. Ignored by SAVE. */
-    fdk_file_dialog_view view; /* 1.4.7: the browsing surface —
+    fdk_file_dialog_view view; /* 1.0.0: the browsing surface —
                               FDK_FILE_DIALOG_VIEW_ICONS starts the
                               dialog on the item grid; zero (LIST)
                               keeps the classic rows. */
@@ -274,7 +274,7 @@ fdk_result fdk_dialog_open_file(fdk_context *ctx,
                                 void *user_data,
                                 fdk_window **out_window);
 
-/* ---- Save dialog (1.2.3) ----
+/* ---- Save dialog (1.0.0) ----
  *
  * fdk_dialog_save_file is the dedicated save-as entry point: it is
  * fdk_dialog_open_file with the kind forced to SAVE_FILE (any kind
@@ -341,7 +341,7 @@ fdk_result fdk_dialog_save_file(fdk_context *ctx,
  * confirmation belongs to the own-browser path only. */
 int fdk__dialog_portal_pref(void); /* internal: 1 force / 0 off / -1 auto */
 
-/* ---- Icon themes (the picker's iconography, 1.5.1 + 1.5.2 + 1.5.3) --
+/* ---- Icon themes (the picker's iconography, 1.0.0 + 1.0.0 + 1.0.0) --
  *
  * The dialog's rows wear the DESKTOP's icons, resolved through an
  * internal freedesktop icon-theme engine (src/theme/icon_theme.c):
@@ -371,7 +371,7 @@ int fdk__dialog_portal_pref(void); /* internal: 1 force / 0 off / -1 auto */
  * virtually every theme ships. Icon sizes are the real theme
  * directories' own: 16 px for list rows, 48 px for the icon grid.
  *
- * Icon COMPOSITING honors per-pixel alpha end to end (1.5.3): PNG
+ * Icon COMPOSITING honors per-pixel alpha end to end (1.0.0): PNG
  * and SVG assets decode to straight-alpha ARGB surfaces and
  * composite source-over on every blit path — exact 1:1, scaled, and
  * the HiDPI intermediate alike — so an icon's transparent surround
@@ -383,7 +383,7 @@ int fdk__dialog_portal_pref(void); /* internal: 1 force / 0 off / -1 auto */
  * icon-shaped SVG subset: paths, transforms, groups, gradients,
  * opacity, plus simple CSS <style>+class= rules carrying the
  * presentation properties — the authoring shape of Papirus/Breeze/
- * Tela, applied and pixel-pinned since 1.5.4). XPM assets are
+ * Tela, applied and pixel-pinned since 1.0.0). XPM assets are
  * honest misses (no decoder).
  *
  * Honest limitations, stated here rather than marketed around:
@@ -411,7 +411,7 @@ int fdk__dialog_portal_pref(void); /* internal: 1 force / 0 off / -1 auto */
  *     every dialog creation: a changed desktop icon theme is picked
  *     up by the NEXT dialog, never served stale. */
 
-/* ---- Recent files (1.4.4) ----------------------------------------
+/* ---- Recent files (1.0.0) ----------------------------------------
  *
  * The OPEN dialog's sidebar leads with a "Recent" place: the XDG
  * recently-used list ($XDG_DATA_HOME/recently-used.xbel, falling
@@ -430,7 +430,7 @@ int fdk__dialog_portal_pref(void); /* internal: 1 force / 0 off / -1 auto */
  * metadata survives byte-for-byte — and atomic: tmp + rename).
  * options->hide_recents opts out of both halves. */
 
-/* ---- About dialog (1.4.3) ----
+/* ---- About dialog (1.0.0) ----
  *
  * The application's identity card, built from the stock catalog:
  * program name, version line, wrap-text comments, copyright, and
@@ -475,7 +475,7 @@ fdk_result fdk_dialog_show_about(fdk_context *ctx,
                                  void *user_data,
                                  fdk_window **out_window);
 
-/* ---- Font chooser dialog (1.4.3) ----
+/* ---- Font chooser dialog (1.0.0) ----
  *
  * The font-scan surface as a picker: a scrolling family/style list
  * (one row per loadable system face, from fdk_font_enumerate), a
@@ -527,7 +527,7 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
                                   void *user_data,
                                   fdk_window **out_window);
 
-/* ---- Color chooser dialog (1.4.3) ----
+/* ---- Color chooser dialog (1.0.0) ----
  *
  * The HSV wheel on the canvas: a hue ring with an inscribed
  * saturation/value triangle (the classic Qt geometry), rasterized
@@ -569,12 +569,12 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
                                    void *user_data,
                                    fdk_window **out_window);
 
-/* ---- Color button (1.4.4) ----
+/* ---- Color button (1.0.0) ----
  *
  * The color-well swatch button (GTK's GtkColorButton / Qt's
  * QColorButton): a small button whose face is the current color,
  * with an alpha checkerboard underneath translucent picks. Pressing
- * it opens the 1.4.3 color chooser dialog (modal where the backend
+ * it opens the 1.0.0 color chooser dialog (modal where the backend
  * can grab) seeded with the current color; ACCEPTED writes the new
  * color into the button and fires on_color_set — CANCELLED changes
  * nothing. The chooser is anchored to the button's window where the

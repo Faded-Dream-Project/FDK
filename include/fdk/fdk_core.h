@@ -103,7 +103,7 @@ void fdk_run(fdk_context *ctx);
  * its loop on the same condition). */
 int fdk_pump_events(fdk_context *ctx, int timeout_ms);
 
-/* ---- Timers (1.3.1) ----
+/* ---- Timers (1.0.0) ----
  *
  * The event loop's clock: callbacks fired between event batches, in
  * deadline order, on the UI thread, from fdk_pump_events() (and

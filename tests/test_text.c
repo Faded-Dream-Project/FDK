@@ -20,7 +20,7 @@
  *     safety, advance contracts, cache flush + idempotence
  *   - subpixel positioning (Phase 6 completion): agreement,
  *     determinism, pen-shift invariance, phase fan-out
- *   - system font discovery (post-1.0.1): $FDK_FONT_FILE override
+ *   - system font discovery (post-1.0.0): $FDK_FONT_FILE override
  *     precedence and invalid-override fall-through, fontconfig
  *     end-to-end, the Arch variable-font filename scan, nested-dir
  *     scan, regular-beats-bold ranking, cache consistency
@@ -1103,7 +1103,7 @@ static void test_subpixel_positioning(void) {
            "(no re-rasterization), phase fan-out\n");
 }
 
-/* ---- system font discovery (post-1.0.1 rework) ----
+/* ---- system font discovery (post-1.0.0 rework) ----
  *
  * fdk_font_load_system_default() resolves through: $FDK_FONT_FILE,
  * $FDK_FONT_DIRS scan, fontconfig (dlopen'd), the known-path list,

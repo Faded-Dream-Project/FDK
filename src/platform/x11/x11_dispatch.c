@@ -135,14 +135,14 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
     if (conn->display_dead) {
         /* Dead connection: report the fatal negative result the
          * pump/fdk_run contract consumes (fdk_run exits its loop,
-         * the application tears down normally — the 1.3.0 fix for
+         * the application tears down normally — the 1.0.0 fix for
          * "X server death used to exit(1) the process via Xlib's
          * default IO handler"). */
         return FDK_ERR_NO_DISPLAY;
     }
     /* Arm the IO-error longjmp (see x11_connection.c): any Xlib
      * call below hitting a lost connection unwinds HERE instead of
-     * exiting the process. (1.4.14: the second, duplicated copy of
+     * exiting the process. (1.0.0: the second, duplicated copy of
      * both blocks below — a merge artifact — removed; one arm, one
      * disarm, in one place.) */
     if (sigsetjmp(fdk__x11_io_jmp, 1) != 0) {
@@ -216,7 +216,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             }
         }
 
-        /* IM filtering (1.3.1): Xlib requires EVERY event to pass
+        /* IM filtering (1.0.0): Xlib requires EVERY event to pass
          * through XFilterEvent before normal processing when an input
          * method is active — the IM may consume composition traffic
          * (and dead-key sequences) entirely. Filtered events produce
@@ -330,7 +330,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
          * the window-table lookup — the helper is intentionally not
          * in that table (it is not an application window).
          *
-         * 1.2.0: XDndStatus / XDndFinished replies to a drag WE
+         * 1.0.0: XDndStatus / XDndFinished replies to a drag WE
          * started arrive on the same helper (it is our XDND source
          * identity), and SelectionRequests naming the XDND selection
          * must reach the DnD serving path BEFORE the clipboard's
@@ -359,7 +359,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
-        /* Click-to-focus, app-side (1.4.20): if a click lands on a
+        /* Click-to-focus, app-side (1.0.0): if a click lands on a
          * top-level that still does NOT hold the X input focus, the
          * WM either never focused it (a take-focus-less manager, a
          * broken hover-focus) or took it away — take it here rather
@@ -397,7 +397,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
-        /* WM_TAKE_FOCUS (1.4.19): the ICCCM take-focus model — a WM
+        /* WM_TAKE_FOCUS (1.0.0): the ICCCM take-focus model — a WM
          * hands keyboard focus over by sending this ClientMessage and
          * EXPECTS the client to call XSetInputFocus itself (mutter /
          * Muffin do this for activation and click-focus). data.l[1]
@@ -444,7 +444,7 @@ int fdk_x11_dispatch_pending(fdk_platform_connection *conn) {
             continue;
         }
 
-        /* XDND receiver traffic (1.2.0): the Enter/Position/Leave/
+        /* XDND receiver traffic (1.0.0): the Enter/Position/Leave/
          * Drop handshake for drags arriving at THIS window, from any
          * external client (or another FDK process). */
         if (fdk_x11_dnd_handle_client_message(conn, &xevent)) {

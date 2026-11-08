@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "render"
 
 /*
- * png_encode.c — the PNG encoder (1.4.9)
+ * png_encode.c — the PNG encoder (1.0.0)
  *
  * A complete, honest PNG writer in ~150 lines over zlib: the
  * signature, IHDR (8-bit RGBA), one IDAT (zlib compress2 of

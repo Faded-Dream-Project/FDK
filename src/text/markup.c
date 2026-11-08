@@ -1,5 +1,5 @@
 /*
- * markup.c — the tiny tag scanner (1.4.11, the markup milestone).
+ * markup.c — the tiny tag scanner (1.0.0, the markup milestone).
  *
  * NOT an XML/HTML parser and deliberately never becoming one: a
  * fixed-vocabulary scanner over the markup string that emits PLAIN

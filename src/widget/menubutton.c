@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * menubutton.c — MenuButton widget (1.4.3)
+ * menubutton.c — MenuButton widget (1.0.0)
  *
  * GtkMenuButton's role: a button-shaped widget that pops up an
  * ATTACHED menu model when clicked — the hamburger, the toolbar
@@ -49,7 +49,7 @@ typedef struct fdk_menu_button {
     bool open;               /* our chain is up                     */
     bool pressed;            /* pointer down inside                 */
     bool hovering;
-    fdk_hover_fade fade;     /* the 1.4.1 hover paint blend        */
+    fdk_hover_fade fade;     /* the 1.0.0 hover paint blend        */
     struct mbtn_guard *guard; /* the live chain's lifetime guard    */
 } fdk_menu_button;
 
@@ -194,7 +194,7 @@ static void mbtn_paint(fdk_widget *w, fdk_surface *surface,
                            a.a + (hov.a - a.a) * ht};
         label_col = fdk__pal_text();
     }
-    /* Themed corner shape (1.4.16): the same shape story as the
+    /* Themed corner shape (1.0.0): the same shape story as the
      * catalog Button — ROUNDED/CIRCLE/SQUARE from the theme. */
     fdk_i32 radius = fdk__button_shape_radius(bounds.width,
                                               bounds.height);

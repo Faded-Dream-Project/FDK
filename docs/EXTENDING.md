@@ -317,7 +317,7 @@ Safe inside the source's own callback.
 
 **Timers need no extension twin**: the public
 `fdk_timer_add` / `fdk_timer_remove` / `fdk_timer_reset` API (fdk
-1.3.1) IS the loop's timer surface — callable by any library on top
+1.0.0) IS the loop's timer surface — callable by any library on top
 of FDK. One primitive, not two.
 
 ## 9. Backend + capability queries

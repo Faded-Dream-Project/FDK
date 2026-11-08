@@ -1,6 +1,6 @@
 /*
  * fdk-prefs.c — the generic settings face of the FDK command line
- * (1.4.13)
+ * (1.0.0)
  *
  *     fdk-prefs list                  every key with its value
  *     fdk-prefs get theme.name        one value (exit 2 if absent)

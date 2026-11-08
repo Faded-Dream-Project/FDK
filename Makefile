@@ -148,7 +148,7 @@ REL_FLAGS   := -O2 -DNDEBUG
 # config are always "up to date" and get silently linked in. That
 # exact mixing (release objects inside an ASan-linked binary) is
 # what made the compositor-death rig report fontconfig's
-# process-lifetime allocations as leaks in 1.3.4: the LSan bracket
+# process-lifetime allocations as leaks in 1.0.0: the LSan bracket
 # in fontscan.c compiles to NOTHING without -fsanitize. The config
 # stamp below forces a full rebuild whenever the configuration
 # changes, and is a no-op (one stat) when it hasn't.
@@ -161,7 +161,7 @@ CONFIG_FLAGS := $(if $(filter release,$(FDK_CONFIG)),$(REL_FLAGS),$(DEBUG_FLAGS)
 # different PKG_CONFIG_PATH flips BUILD_WAYLAND without touching any
 # source file, and without the stamp the stale objects/archive from
 # the other configuration remain "up to date" by timestamp (found
-# live in 1.3.7: the sway examples rig linked apps built against the
+# live in 1.0.0: the sway examples rig linked apps built against the
 # Wayland-disabled stub, which then ignored a perfectly valid
 # WAYLAND_DISPLAY and fell through to a dead X11). Both axes live in
 # ONE stamp name so a flip of either forces one full rebuild.
@@ -277,7 +277,7 @@ LIB_OBJS_PIC  := $(patsubst src/%.c,$(BUILD_DIR)/obj-pic/%.o,$(LIB_SRCS))
 STATIC_LIB := $(BUILD_DIR)/libfdk.a
 SHARED_LIB := $(BUILD_DIR)/libfdk.so
 
-# Shared-library export map (1.3.9). The .so must export EXACTLY the
+# Shared-library export map (1.0.0). The .so must export EXACTLY the
 # public API (include/fdk) — nothing else. Without a version script it
 # exports every global in the archive: backend internals (fdk_x11_*,
 # fdk_wayland_*), cross-module seams (fdk__*), the vendored stb symbols
@@ -367,7 +367,7 @@ test-threads-tsan: $(BUILD_DIR)/tests/test_threads-tsan
 EXAMPLE_SRCS := $(wildcard examples/*.c)
 EXAMPLE_BINS := $(patsubst examples/%.c,$(BUILD_DIR)/examples/%,$(EXAMPLE_SRCS))
 
-# Command-line tools (1.4.13). Built like tests and examples — against
+# Command-line tools (1.0.0). Built like tests and examples — against
 # the static archive, on the public headers only (tools/toolutil.h is
 # the one tools-local header). They link the full LDFLAGS set like
 # every other consumer of libfdk.a.
@@ -378,7 +378,7 @@ TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/tools/%,$(TOOL_SRCS))
 # binary therefore depends on them (a bare `make test` builds them).
 $(BUILD_DIR)/tests/test_cli_tools: $(TOOL_BINS)
 
-# Shipped themes: the source tree's .FDKThemes/ folder (1.4.16 —
+# Shipped themes: the source tree's .FDKThemes/ folder (1.0.0 —
 # the custom folder the maintainer asked for by name), installed
 # into $(DATADIR)/fdk/.FDKThemes, which the runtime discovery path
 # reaches through the default $XDG_DATA_DIRS (/usr/local/share and
@@ -463,9 +463,9 @@ $(BUILD_DIR)/obj-pic/%.o: src/%.c $(CONFIG_STAMP)
 # (Wayland on->off) left the stale wayland_*.o inside libfdk.a next
 # to the new wayland_disabled.o, and every link after that pulled
 # symbols from a backend the build no longer contains (found live in
-# 1.3.7 after an environment reset wiped the Wayland toolchain: the
+# 1.0.0 after an environment reset wiped the Wayland toolchain: the
 # link failed on wayland_seat.o's wl_proxy_get_version against a
-# system libwayland with no dev files). Same bug class as the 1.3.4
+# system libwayland with no dev files). Same bug class as the 1.0.0
 # obj/obj-pic mixing one directory over; the archive is now always
 # exactly the current member list.
 $(STATIC_LIB): $(LIB_OBJS)
@@ -703,7 +703,7 @@ $(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB)
 # this checkout (../fdk is its default FDK_ROOT) and run its own
 # Makefile (make test / isolation).
 
-# --- Tools (1.4.13) ------------------------------------------------------
+# --- Tools (1.0.0) ------------------------------------------------------
 
 tools: $(TOOL_BINS)
 

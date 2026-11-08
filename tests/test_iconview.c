@@ -1,5 +1,5 @@
 /*
- * test_iconview.c — headless tests for the 1.4.5 IconView
+ * test_iconview.c — headless tests for the 1.0.0 IconView
  *
  * Same discipline as the other catalog suites: standalone roots,
  * offscreen surfaces, synthetic window events through
@@ -485,7 +485,7 @@ static void test_item_pixmaps(void) {
            "the cell, glyph fallback, ownership stays with the app\n");
 }
 
-/* ---- the rubber-band sweep (1.4.6) ---- */
+/* ---- the rubber-band sweep (1.0.0) ---- */
 
 static void test_rubber_band(void) {
     fdk_widget *root = fresh_root();
@@ -600,9 +600,9 @@ static void test_rubber_band(void) {
            "present live and gone after release\n");
 }
 
-/* ---- 1.4.7: double-click activation ----
+/* ---- 1.0.0: double-click activation ----
  *
- * The cells deliver what the header claimed since 1.4.5: two rapid
+ * The cells deliver what the header claimed since 1.0.0: two rapid
  * presses on the SAME item activate; two presses on DIFFERENT
  * items select only; a triple press activates exactly once (the
  * re-arm rule). The window-less predicate is clock-driven — the

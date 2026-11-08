@@ -12,7 +12,7 @@
 
 #include "platform/platform_internal.h"
 
-/* GPU present lane (1.2.0 / D-1) — the EGL counterpart of
+/* GPU present lane (1.0.0 / D-1) — the EGL counterpart of
  * x11_platform.h's x11_gl.h include. */
 #include "platform/wayland/wayland_egl.h"
 
@@ -37,7 +37,7 @@ struct fdk_platform_connection {
     struct wl_display *display;
     struct wl_registry *registry;
 
-    /* 1.3.2 — dead-connection circuit breaker (the Wayland
+    /* 1.0.0 — dead-connection circuit breaker (the Wayland
      * counterpart of X11's display_dead): set the first time a
      * flush/read/dispatch fails terminally (EPIPE = the compositor
      * is gone). dispatch_pending() then returns FDK_ERR_NO_DISPLAY
@@ -60,7 +60,7 @@ struct fdk_platform_connection {
      * below exists. */
     int syncobj_manager_advertised;
 
-    /* Dedicated event queue for wl_buffer events (1.1.6). Every
+    /* Dedicated event queue for wl_buffer events (1.0.0). Every
      * wl_buffer created through create_shm_buffer() is moved here
      * via wl_proxy_set_queue, so wl_buffer::release — often the ONLY
      * event the render path needs to make progress — can be
@@ -129,7 +129,7 @@ struct fdk_platform_connection {
     char *ime_surrounding;               /* last pushed context (copy) */
     int ime_surrounding_cursor;
 
-    /* --- GPU present lane (1.2.0 / D-1, wayland_egl.c) -------------
+    /* --- GPU present lane (1.0.0 / D-1, wayland_egl.c) -------------
      *
      * egl: the per-connection lane state — the dlopen'd libEGL +
      * libwayland-egl handles, the EGLDisplay for this connection's
@@ -238,7 +238,7 @@ struct fdk_platform_connection {
      * in fdk_clipboard.h). */
     uint32_t last_input_serial;
 
-    /* --- Key repeat (1.3.5, wl_keyboard::repeat_info) -----------
+    /* --- Key repeat (1.0.0, wl_keyboard::repeat_info) -----------
      *
      * Wayland repeat is CLIENT-driven: the protocol hands us the
      * rate/delay and never re-sends the press. One key repeats at a
@@ -264,7 +264,7 @@ struct fdk_platform_connection {
     struct wl_data_device_manager *data_device_manager;
     struct wl_data_device *data_device;
 
-    /* --- PRIMARY selection (1.3.4, wp_primary_selection_unstable_v1)
+    /* --- PRIMARY selection (1.0.0, wp_primary_selection_unstable_v1)
      * ---
      *
      * A parallel little protocol to the data-device clipboard above
@@ -289,7 +289,7 @@ struct fdk_platform_connection {
      * stays for the source's lifetime). cancelled destroys both. */
     struct wl_data_source *clip_source;
     char *clip_owned_text;
-    /* 1.4.9: the image content (encoded PNG). One clipboard content
+    /* 1.0.0: the image content (encoded PNG). One clipboard content
      * at a time — owning an image clears owned text and vice versa;
      * the source offers image/png only. */
     unsigned char *clip_owned_png;
@@ -309,17 +309,17 @@ struct fdk_platform_connection {
      * its flags into the selection slot). */
     struct wl_data_offer *selection_offer;
     int selection_offer_has_text;
-    int selection_offer_has_image; /* 1.4.9: image/png in the MIME list */
+    int selection_offer_has_image; /* 1.0.0: image/png in the MIME list */
     int selection_offer_has_uris; /* §23/B2a: text/uri-list offered  */
     char *clip_owned_uris; /* §23/B2a: our selection's uri-list (the
                             * freedesktop wire format, CRLF lines) */
     struct wl_data_offer *pending_offer;
     int pending_offer_has_text;
-    int pending_offer_has_uris; /* 1.2.0: text/uri-list in the pending
+    int pending_offer_has_uris; /* 1.0.0: text/uri-list in the pending
                                    offer — drag offers carry it */
-    int pending_offer_has_image; /* 1.4.9 */
+    int pending_offer_has_image; /* 1.0.0 */
 
-    /* --- Drag and drop (1.2.0, wayland_dnd.c) ---
+    /* --- Drag and drop (1.0.0, wayland_dnd.c) ---
      *
      * Receiver: the drag the data_device currently tracks (enter/
      * motion/leave/drop in the device listener; wayland_clipboard.c
@@ -444,7 +444,7 @@ struct fdk_platform_connection {
     fdk_platform_window *keyboard_focus;
     double pointer_x, pointer_y; /* last known position, surface-local */
 
-    /* --- Cursor shaping (1.1.6, wayland_cursor.c) -----------------
+    /* --- Cursor shaping (1.0.0, wayland_cursor.c) -----------------
      *
      * Wayland clients own their cursor pixels: wl_pointer::enter must
      * be answered with wl_pointer.set_cursor(serial, surface, hx, hy)
@@ -458,7 +458,7 @@ struct fdk_platform_connection {
      * 1 = a theme file was found, -1 = themes were searched and none
      * was usable (every later shape request then degrades honestly
      * with a single DEBUG line — the compositor's default arrow
-     * stays, which is exactly the pre-1.1.6 behavior). */
+     * stays, which is exactly the pre-1.0.0 behavior). */
     struct wl_surface *cursor_surface;
     struct {
         char *name;              /* cursor name, e.g. "left_ptr"    */
@@ -485,7 +485,7 @@ struct fdk_platform_connection {
 
 #define FDK_WL_RENDER_SLOTS 4
 
-/* The GPU lane's small-surface gate (1.2.0 / D-1) — the same value
+/* The GPU lane's small-surface gate (1.0.0 / D-1) — the same value
  * and rationale as x11_surface.c's FDK_GL_MIN_PIXELS: a window at or
  * below this many pixels stays on wl_shm (the whole panel/popup
  * class; their presents are a few hundred KB of memcpy while the
@@ -494,11 +494,11 @@ struct fdk_platform_connection {
  * X11. */
 #define FDK_WL_GL_MIN_PIXELS 131072
 
-/* Bounded release wait (1.1.6; reworked 1.0.0-rc1): when every render
+/* Bounded release wait (1.0.0; reworked 1.0.0-rc1): when every render
  * slot is in flight and the application still wants a framebuffer,
  * FDK waits this long — READING the display socket (queue-scoped
  * prepare_read, see get_framebuffer) — for the compositor to release
- * a buffer before considering reaping or refusing. The 1.1.6 budget
+ * a buffer before considering reaping or refusing. The 1.0.0 budget
  * was 100ms of what turned out to be pure usleep under a busy default
  * queue (the W1 freeze: the dispatch loop collapsed to ~10 events/s
  * and wlroots killed clients whose 4096-byte server buffer backed
@@ -507,19 +507,19 @@ struct fdk_platform_connection {
  * the compositor will send at its next frame lands within ~16ms at
  * 60Hz; 25ms covers a slow compositor's release latency while never
  * blocking the event loop long enough to matter. Slow compositors
- * (Muffin's experimental Wayland session, the 1.1.6 report) see
+ * (Muffin's experimental Wayland session, the 1.0.0 report) see
  * delayed frames instead of dropped ones; the pacing gate in
  * fdk_window_paint's auto-paint tail keeps repaint attempts off the
  * refusal path in the first place. */
 #define FDK_WL_RELEASE_WAIT_MS 25
 
-/* Interactive-resize churn bound (1.1.7): when every busy slot holds
+/* Interactive-resize churn bound (1.0.0): when every busy slot holds
  * a buffer at the WRONG size (the interactive-resize state — every
  * configure step changes the target), waiting for a release at the
  * CURRENT size is provably futile: no release can ever match, so the
- * 1.1.6 full wait burned FDK_WL_RELEASE_WAIT_MS of idle polling per
+ * 1.0.0 full wait burned FDK_WL_RELEASE_WAIT_MS of idle polling per
  * frame before the wrong-size reaper fired anyway (~10fps resizing
- * with an idle CPU — the 1.1.7 live report: "still laggy when
+ * with an idle CPU — the 1.0.0 live report: "still laggy when
  * resize, the CPU is not being fully used"). The churn budget is one
  * bounded poll slice: fast compositors still get the chance to
  * release (recycle or reap-after-release, no in-flight destroy at
@@ -590,14 +590,14 @@ struct fdk_platform_window {
     struct wl_subsurface *subsurface;
     struct fdk_platform_window *sub_parent;
     int is_subsurface;            /* 1.0.0 D-2: FDK-owned child    */
-    /* Input-transparent popup (1.3.2, tooltips): set at CREATE from
+    /* Input-transparent popup (1.0.0, tooltips): set at CREATE from
      * fdk_window_options.input_transparent — empty input region on
      * the surface before the first commit, and NO xdg_popup.grab:
      * the hint is click-through and never takes keyboard ownership
      * from the owner (the create-time contract, see
      * platform_internal.h). */
-    int input_transparent;        /* 1.3.2: passive (tooltip) popup */
-    int drop_formats;             /* 1.2.0 DnD: accepted drop formats */
+    int input_transparent;        /* 1.0.0: passive (tooltip) popup */
+    int drop_formats;             /* 1.0.0 DnD: accepted drop formats */
 
     /* Solid background buffer — the Wayland equivalent of X11's
      * background pixel. Wayland compositors map nothing until a
@@ -616,7 +616,7 @@ struct fdk_platform_window {
     struct wl_buffer *buffer;   /* current background buffer, NULL when none */
     fdk_size buffer_size;       /* dimensions of `buffer` */
     int buffer_attached;        /* nonzero while `buffer` is committed to the surface */
-    /* 1.3.2 — every background buffer the COMPOSITOR may still hold:
+    /* 1.0.0 — every background buffer the COMPOSITOR may still hold:
      * the current one (== `buffer` above, pre-render) plus any
      * REPLACED ones whose wl_buffer::release has not arrived yet.
      * The release listener removes its own entry (and destroys the
@@ -662,7 +662,7 @@ struct fdk_platform_window {
     struct wl_buffer *render_pending; /* acquired but not yet presented */
     int rendered_ever;                /* first render present() completed */
 
-    /* --- GPU present lane (1.2.0 / D-1, wayland_egl.c) --------------
+    /* --- GPU present lane (1.0.0 / D-1, wayland_egl.c) --------------
      *
      * egl_win: the per-window lane state (EGL surface + context +
      * wl_egl_window + texture + staging buffer) while this window
@@ -728,7 +728,7 @@ struct fdk_platform_window {
 
     /* Last time (monotonic ms) the slot-exhaustion path refused an
      * acquisition at WARN volume — see FDK_WL_REFUSE_WARN_INTERVAL_MS
-     * (the 1.1.6 log-spam guard; 0 = never). */
+     * (the 1.0.0 log-spam guard; 0 = never). */
     fdk_i64 last_refuse_warn_ms;
 
     /* The pending wl_surface.frame callback, destroyed when `done`
@@ -776,7 +776,7 @@ struct fdk_platform_window {
      * activated when a window is un-minimized into focus). Flips
      * dispatch FDK_EVENT_WINDOW_STATE.
      *
-     * fullscreen (1.1.5) is likewise derived from the states array,
+     * fullscreen (1.0.0) is likewise derived from the states array,
      * but is NOT public API — FDK exposes no fullscreen request yet —
      * it exists purely as the resize gate: while the toplevel is
      * maximized or fullscreen the compositor owns the geometry, and
@@ -831,7 +831,7 @@ void fdk_wayland_unregister_window(fdk_platform_connection *conn,
 void fdk_wayland_bind_seat_listeners(fdk_platform_connection *conn);
 void fdk_wayland_teardown_seat(fdk_platform_connection *conn);
 
-/* Key repeat (1.3.5, wayland_seat.c): fires one due repeat (returns
+/* Key repeat (1.0.0, wayland_seat.c): fires one due repeat (returns
  * the count), called at every dispatch_pending exit; and the ops:
  * the pump's wakeup cap + the test seams (see platform_internal.h). */
 int fdk_wayland_key_repeat_fire(fdk_platform_connection *conn);
@@ -875,7 +875,7 @@ fdk_result fdk_wayland_clipboard_set_text(fdk_platform_connection *conn,
                                            const char *text);
 char *fdk_wayland_clipboard_get_text(fdk_platform_connection *conn);
 
-/* PRIMARY selection (1.3.4): the wp_primary_selection_unstable_v1
+/* PRIMARY selection (1.0.0): the wp_primary_selection_unstable_v1
  * twins of the two clipboard ops. set is BEST-EFFORT by the public
  * contract (mirror of the X11 side: no verification, the classic
  * model re-owns per selection change). */
@@ -883,7 +883,7 @@ fdk_result fdk_wayland_clipboard_set_primary_text(
     fdk_platform_connection *conn, const char *text);
 char *fdk_wayland_clipboard_get_primary_text(
     fdk_platform_connection *conn);
-/* 1.4.9: the clipboard's image/png surface (data-device pipe
+/* 1.0.0: the clipboard's image/png surface (data-device pipe
  * transfers — no size cap beyond the 32 MiB read bound). */
 fdk_result fdk_wayland_clipboard_set_image(
     fdk_platform_connection *conn, const unsigned char *png,
@@ -1105,9 +1105,9 @@ fdk_result fdk_wayland_window_begin_move(fdk_platform_window *pwindow,
 fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
                                            int edge, fdk_i32 local_x,
                                            fdk_i32 local_y);
-/* The optional pointer-introspection op (1.1.4): the seat's cached
+/* The optional pointer-introspection op (1.0.0): the seat's cached
  * pointer_focus + surface-local position, valid whenever this window
- * holds pointer focus. Cursor SHAPING (window_set_cursor, 1.1.6) is
+ * holds pointer focus. Cursor SHAPING (window_set_cursor, 1.0.0) is
  * implemented in wayland_cursor.c — XCursor theme images uploaded
  * over wl_shm, attached to a shared cursor surface. */
 int fdk_wayland_window_query_pointer(fdk_platform_window *pwindow,
@@ -1141,7 +1141,7 @@ void fdk_wayland_window_update_state(fdk_platform_window *pwindow,
 /* Software rendering (fdk_surface machinery) — see the render_slots
  * comment in struct fdk_platform_window above for the recycling
  * lifecycle. */
-/* GPU lane (1.2.0 / D-1) — see wayland_egl.h; the render_path op
+/* GPU lane (1.0.0 / D-1) — see wayland_egl.h; the render_path op
  * and the shared downgrade helper live in wayland_window.c. */
 int fdk_wayland_window_render_path(fdk_platform_window *pwindow);
 fdk_result fdk__wayland_surface_downgrade_from_lane(

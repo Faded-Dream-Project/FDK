@@ -106,16 +106,16 @@ primitive set — implemented on both backends via optional
 runs before the first xdg configure is DEFERRED and committed by
 the backend at configure time — the deferred-first-frame contract
 that keeps the application's show -> paint -> pump order mapping
-windows on every compositor. Wayland buffer LIFECYCLE (1.1.6):
+windows on every compositor. Wayland buffer LIFECYCLE (1.0.0):
 every wl_buffer rides a dedicated wl_event_queue, so
 wl_buffer::release can be dispatched alone (never re-entrantly
 running input/configure listeners); when every render slot is in
 flight the acquisition path WAITS for a release with a CLASSIFIED
-budget (1.1.7): pure hoarding (every busy slot at the current
+budget (1.0.0): pure hoarding (every busy slot at the current
 size — a release there is recyclable) waits up to
 FDK_WL_RELEASE_WAIT_MS, while CHURN (any busy slot at a wrong
 size — the interactive-resize state) waits only one poll slice
-(FDK_WL_CHURN_WAIT_MS) before reaping, because the 1.1.6 wait
+(FDK_WL_CHURN_WAIT_MS) before reaping, because the 1.0.0 wait
 exited only on a CURRENT-size release that a wrong-size pool can
 never produce and burned its full budget per resize frame
 (~10fps resizing with an idle CPU — the third Cinnamon Wayland
@@ -134,14 +134,14 @@ FDK_EVENT_WINDOW_CONFIGURE whenever it proposes a size different
 from the creation size, because resize-at-map compositors
 (kiosk-shell fullscreen, tiling WMs) state their size exactly there
 and a suppressed event left the window layer laying out at the
-creation size inside a full-compositor buffer (1.1.5, found live
+creation size inside a full-compositor buffer (1.0.0, found live
 under weston kiosk-shell), regression-tested in
 `tests/test_wayland_integration.c`); on X11 the anti-flicker
-background LIFECYCLE (1.1.4, found live on a compositing desktop;
-re-tinted 1.2.1): top-levels are created with a background pixel
+background LIFECYCLE (1.0.0, found live on a compositing desktop;
+re-tinted 1.0.0): top-levels are created with a background pixel
 set to the theme's window-background token (the same fill the
 root default background paints on the first rendered frame —
-before 1.2.1 this was white, and the pre-first-paint frame
+before 1.0.0 this was white, and the pre-first-paint frame
 flashed white→dark) + NorthWest
 bit gravity, and the FIRST framebuffer acquisition flips the
 background to None — a window the app never renders into shows its
@@ -151,7 +151,7 @@ never server-cleared again, and every resize step retains its old
 pixels anchored top-left (the combination that removed the
 white-flash-during-resize; a background clear is a full frame of
 background between the WM's resize and the client's repaint).
-The 1.2.1 ROOT DEFAULT BACKGROUND is the other half of that story:
+The 1.0.0 ROOT DEFAULT BACKGROUND is the other half of that story:
 `fdk_window_get_root` fills every window root with the theme's
 window-background token (an explicit `fdk_widget_set_background`
 on the root still wins and survives theme switches — the default
@@ -160,7 +160,7 @@ root's theme hook). Before the default, transparent stock text
 surfaces (Labels, List rows) painted over whatever the retained
 framebuffer held — the PREVIOUS frame — so a label rewrite or a
 re-listed directory stamped new text over old on both backends
-(the live 1.2.0 report: “the old text doesn't get removed”, file
+(the live 1.0.0 report: “the old text doesn't get removed”, file
 names over file names, selection bands over selection bands).
 The window layer closes the remaining gap itself: a
 configure/state-flip/first-expose event sets the window's
@@ -176,7 +176,7 @@ the pointer-affordance pair below). Batched, not per-event: an
 interactive resize queues one ConfigureNotify per drag step, and
 repainting inline per QUEUED event (full repaint + framebuffer
 reallocation + round trips, each at a stale size) drained the
-backlog slower than the WM filled it — the 1.2.2 wedge: one core
+backlog slower than the WM filled it — the 1.0.0 wedge: one core
 pegged forever, the window stuck at a stale size, input queued
 behind the backlog. One repaint per batch at the batch's final
 size closes both the flash (a lone configure still paints within
@@ -204,7 +204,7 @@ FDK-drawn themed title band under the window's root with
 vector-glyph minimize/maximize-restore/close buttons, double-click
 maximize, and FDK-drawn resize edges, over a set of new OPTIONAL
 platform ops: `window_set_wm_decorations` — X11 _MOTIF_WM_HINTS,
-Wayland xdg-decoration set_mode, or (1.1.5) plain success without
+Wayland xdg-decoration set_mode, or (1.0.0) plain success without
 the protocol for the client-side direction: a compositor that
 doesn't advertise zxdg_decoration_manager_v1 never draws chrome
 itself — client-side is the xdg-shell default — so FDK's band is
@@ -216,8 +216,8 @@ tracking on X11 (with honest bare-X fallbacks where FDK is its own
 WM; the fallback never runs under a detected WM, because it
 optimistically dispatches the state flip as if FDK's own action were
 the outcome — a lie under a WM that clamps or reinterprets the
-geometry request, and the source of the 1.1.3 maximized-state
-desync), xdg_toplevel requests on Wayland (1.1.5 gates client-driven
+geometry request, and the source of the 1.0.0 maximized-state
+desync), xdg_toplevel requests on Wayland (1.0.0 gates client-driven
 `fdk_window_resize` while the configure states say MAXIMIZED or
 FULLSCREEN — compositor-owned geometry must be committed exactly as
 configured or strict compositors kill the connection; the FULLSCREEN
@@ -232,17 +232,17 @@ starts; and the window layer cancels the widget tree's implicit
 grab at the same handover, because the WM consumes the button
 release and the tree's press-to-release pairing would stay broken
 — see fdk__widget_tree_cancel_grab). The press filter's ORDER
-matters as much as the ops (1.1.7, the third Cinnamon Wayland
+matters as much as the ops (1.0.0, the third Cinnamon Wayland
 report): the compositor-driven begin_resize is tried FIRST — it
 needs no origin knowledge, the WM owns the geometry from the
 serial onward — while the origin gate (origin-moving edges need
 window_get_position) guards ONLY the FDK-driven fallback it was
-built for. 1.1.6 ran the gate first, and since the Wayland ops
+built for. 1.0.0 ran the gate first, and since the Wayland ops
 table has no window_get_position at all, every origin-moving
 edge (N/NE/NW/W/SW) fell through the filter into the deco
 band's move path: a titlebar-edge press MOVED the window while
 the cursor promised a resize; `window_move_resize_to` for
-FDK-driven atomic resize drags. The 1.1.4 pointer-affordance pair
+FDK-driven atomic resize drags. The 1.0.0 pointer-affordance pair
 completes the set: `window_query_pointer` (X11 XQueryPointer
 window-local + bounds check; Wayland's seat cache — pointer_focus +
 the last surface-local position) lets the window layer RE-DERIVE
@@ -255,7 +255,7 @@ the application's event callback never sees these synthesized
 positions). `window_set_cursor` (X11: lazily created XCreateFontCursor
 glyphs from the server's built-in cursor font — core protocol, no
 libXcursor — cached per connection and freed at disconnect; Wayland
-since 1.1.6: a hand-rolled XCursor THEME loader in
+since 1.0.0: a hand-rolled XCursor THEME loader in
 src/platform/wayland/wayland_cursor.c — $XCURSOR_PATH or the
 libxcursor search roots walked through index.theme `Inherits=`
 chains to the "default" theme, closest-size image, ARGB upload
@@ -274,7 +274,7 @@ origin (no window_get_position) must not advertise its
 origin-moving edges — the cursor may never promise what a press
 cannot deliver. The ENTER event carries its surface-local
 position on both backends (the Wayland seat handler forgot it
-until 1.1.6 — every entry armed the NW cursor and seeded hover at
+until 1.0.0 — every entry armed the NW cursor and seeded hover at
 the top-left corner until the first motion). FDK_EVENT_WINDOW_STATE /
 FDK_EVENT_WINDOW_DECORATION report platform truth, never request
 optimism — see platform_internal.h, which documents the EWMH vs
@@ -374,7 +374,7 @@ to `src/` (via `widget_internal.h`); applications extend widgets via
 callbacks, user data, and the base style setters until the ABI
 freeze (see `docs/abi-policy.md`).
 
-## Drag and drop (1.2.0)
+## Drag and drop (1.0.0)
 
 The public contract lives in include/fdk/fdk_dnd.h; the seam
 additions are `window_set_drop_formats` and `drag_begin` (see
@@ -409,7 +409,7 @@ the post-drop receive->finish->destroy, this wlroots signals the
 source with ::cancelled rather than ::dnd_finished; the payload
 path is unaffected and the suite pins the protocol tail.
 
-## File dialogs (1.2.0; 1.2.3 the release-quality browser)
+## File dialogs (1.0.0; 1.0.0 the release-quality browser)
 
 fdk_dialog_open_file builds a toolkit-owned window from the stock
 catalog (the message-dialog lifecycle in dialog.c, generalized):
@@ -425,7 +425,7 @@ app can't misread. The scan (fdk__file_dialog_scan) is the
 headless seam in widgets_internal.h: dirs-first alphabetical
 ordering, hidden filtering, entry cap, full ownership.
 
-1.2.3 grew it into the native-desktop shape. SAVE_FILE (the
+1.0.0 grew it into the native-desktop shape. SAVE_FILE (the
 dedicated entry point fdk_dialog_save_file) adds the Name row:
 seeded from start_name, filled by clicking a listed file, with
 total validation (non-empty, no '/', not "."/"..", <= 255 bytes,
@@ -447,7 +447,7 @@ browses (absolute, ~-expanded, or relative to the current
 folder); a failed browse probes first and never abandons the
 working directory.
 
-The List itself carries a 1.2.3 fix with architecture weight:
+The List itself carries a 1.0.0 fix with architecture weight:
 fdk_widget_set_bounds() is pure geometry and does not run
 arrange hooks, and the List only synced its internal scrollview
 in the append path — a list positioned by hand (every dialog,

@@ -250,7 +250,7 @@ int main(void) {
     fdk_radio_set_checked(r3, true);
     set_status(status, "Selection: South — arrow keys move it");
 
-    /* --- frame: the 1.4.8 multi-line editor --- */
+    /* --- frame: the 1.0.0 multi-line editor --- */
     fdk_widget *edit_frame = NULL;
     (void)fdk_frame_create(content, f16, "Editor", &edit_frame);
     fdk_widget_set_background_token(edit_frame, FDK_TK_CONTROL_BACKGROUND);

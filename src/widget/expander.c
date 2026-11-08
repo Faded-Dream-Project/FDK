@@ -1,5 +1,5 @@
 /*
- * expander.c — the disclosure section (1.4.1).
+ * expander.c — the disclosure section (1.0.0).
  *
  * GTK's GtkExpander / Qt's collapsible group: a header row (a
  * rotating disclosure triangle + label) that reveals or collapses
@@ -7,7 +7,7 @@
  * loud INVALID_ARGUMENT). Activation: click anywhere on the header,
  * or Space/Enter while focused.
  *
- * THE REVEAL IS ANIMATED on the 1.3.8 animator: the header stays
+ * THE REVEAL IS ANIMATED on the 1.0.0 animator: the header stays
  * put, the content slides out from under it. The mechanics: the
  * expander's measured height = header + reveal * content-natural;
  * the child is ALWAYS arranged at its full natural size below the
@@ -247,7 +247,7 @@ static void expander_paint(fdk_widget *w, fdk_surface *surface,
     }
 
     /* Focus ring: the header is the focusable surface — a ring
-     * around the header band (themed color/width, 1.4.0 rules). */
+     * around the header band (themed color/width, 1.0.0 rules). */
     if ((w->flags & FDK_WF_FOCUSED) != 0 && !disabled) {
         fdk_i32 fw = fdk_theme_get_metric(NULL, FDK_TM_FOCUS_RING_WIDTH);
         fdk_rect ring = {bounds.x + fw, bounds.y + fw,

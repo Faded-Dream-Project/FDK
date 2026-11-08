@@ -1,4 +1,4 @@
-# LSan suppressions for third-party GL driver allocations (1.4.18).
+# LSan suppressions for third-party GL driver allocations (1.0.0).
 #
 # The GPU present lane (src/platform/x11/x11_gl.c) dlopens libGL and
 # pins it for process lifetime. Mesa/GLVND allocate per-display caches
@@ -58,7 +58,7 @@ leak:libdrm
 
 # fontconfig (added 1.0.0, the notifyd rig): the COLD-CACHE write
 # path. src/text/fontscan.c brackets the first FcInit + query walk
-# with __lsan_disable (the warm-cache allocations, 1.1.5's fix), but
+# with __lsan_disable (the warm-cache allocations, 1.0.0's fix), but
 # when fontconfig's on-disk cache is cold it writes new cache files
 # through the FcAtomic machinery, whose small bookkeeping pools
 # (256 B + 2 x 32 B) are allocated OUTSIDE that bracket and held for

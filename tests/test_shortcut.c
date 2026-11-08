@@ -1,5 +1,5 @@
 /*
- * test_shortcut.c — the 1.3.3 shortcut parser/format/matcher battery
+ * test_shortcut.c — the 1.0.0 shortcut parser/format/matcher battery
  *
  * Headless and pure: every table entry pins the grammar exactly
  * (modifiers, key names, case/whitespace tolerance, and the loud

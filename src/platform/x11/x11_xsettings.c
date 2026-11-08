@@ -13,7 +13,7 @@
  * desktop's LIVE icon-theme statement instead of guessing from files.
  *
  * THE WIRE FORMAT was decoded byte-for-byte from a REAL xsettingsd
- * 1.0.2 (Debian package) running under Xvfb, cross-checked against
+ * 1.0.0 (Debian package) running under Xvfb, cross-checked against
  * its own reference reader (dump_xsettings) — not from memory of the
  * spec. Layout, for a property of N bytes:
  *

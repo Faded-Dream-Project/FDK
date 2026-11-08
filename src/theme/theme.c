@@ -1,16 +1,16 @@
 /*
  * theme.c — theme object lifecycle, the built-in default, the
- * current-default switch, and the global-settings boot (1.4.13)
+ * current-default switch, and the global-settings boot (1.0.0)
  *
- * The built-in default is the 1.4.16 "Faded Dream" palette — the
+ * The built-in default is the 1.0.0 "Faded Dream" palette — the
  * gray-with-violet calm retune requested as the toolkit's home face
  * (FDK IS the Faded Dream ToolKit; the default finally says so on
- * screen). What changed from the 1.4.0 "Modern" palette and why:
+ * screen). What changed from the 1.0.0 "Modern" palette and why:
  *
  *  - SURFACES went NEUTRAL: Modern carried a blue undertone in every
  *    gray (0.13/0.15/0.20); Faded Dream is a true gray ramp
  *    (#232329 window, #33333C controls) — calm means no hue pressure
- *    at rest. The 1.4.0 Modern values survive as a documented .fdk
+ *    at rest. The 1.0.0 Modern values survive as a documented .fdk
  *    recipe in docs/fdk-theme-format.md, exactly as v1's did.
  *  - THE ACCENT family went VIOLET (#8F79D9, hover #A18DE3, pressed
  *    #7763C2): "purple, small parts around" — checked boxes, focus
@@ -43,7 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- The built-in default (the 1.4.16 "Faded Dream" palette) ---- */
+/* ---- The built-in default (the 1.0.0 "Faded Dream" palette) ---- */
 
 /* The built-in name lives in a static array so the struct needs no
  * const-dropping cast: the instance is never mutated or freed. */
@@ -70,7 +70,7 @@ static fdk_theme g_builtin = {
         /* The one voice of color: violet, kept to small parts. */
         [FDK_TK_ACCENT] = {C8(143), C8(121), C8(217), 1.0f},
         [FDK_TK_TRACK] = {C8(42), C8(42), C8(49), 1.0f},
-        /* 1.3.2 tokens, recalibrated for the gray field: tooltips go
+        /* 1.0.0 tokens, recalibrated for the gray field: tooltips go
          * near-white (the calm popup), selection is the violet at a
          * whisper, semantics desaturated to the same register. */
         [FDK_TK_TOOLTIP_BACKGROUND] = {C8(240), C8(239), C8(245), 1.0f},
@@ -83,7 +83,7 @@ static fdk_theme g_builtin = {
         [FDK_TK_SUCCESS] = {C8(123), C8(185), C8(138), 1.0f},
         [FDK_TK_WARNING] = {C8(217), C8(178), C8(95), 1.0f},
         [FDK_TK_DANGER] = {C8(217), C8(124), C8(140), 1.0f},
-        /* 1.4.0: the modern-face families, retuned onto the gray ramp
+        /* 1.0.0: the modern-face families, retuned onto the gray ramp
          * — sidebar/menu a step off the control fill, the violet's
          * own hover/pressed, flat entries sunk one step below the
          * window, the soft row hover. */
@@ -96,9 +96,9 @@ static fdk_theme g_builtin = {
         [FDK_TK_ENTRY_BACKGROUND] = {C8(30), C8(30), C8(36), 1.0f},
         [FDK_TK_ENTRY_BORDER] = {C8(59), C8(59), C8(71), 1.0f},
         [FDK_TK_ROW_HOVER] = {C8(58), C8(58), C8(70), C8(89)}, /* 0x59 */
-        /* 1.4.16: the titlebar family — deliberately UNSET here (see
+        /* 1.0.0: the titlebar family — deliberately UNSET here (see
          * colors_set below): the band falls back to the control/text/
-         * border tokens above, pixel-identical to 1.4.15, and a theme
+         * border tokens above, pixel-identical to 1.0.0, and a theme
          * opts into a distinct chrome by setting the keys. The values
          * in this initializer are inert placeholders the fallback
          * never reads (create_default copies them but the mask says
@@ -154,7 +154,7 @@ static fdk_theme g_builtin = {
         [FDK_TM_SCROLLBAR_WIDTH] = 12,
         [FDK_TM_MENU_ITEM_HEIGHT] = 26,
         [FDK_TM_TOOLTIP_CORNER_RADIUS] = 6,
-        /* 1.4.0: fields round softer than buttons, menus round like
+        /* 1.0.0: fields round softer than buttons, menus round like
          * tooltips, rows breathe at 30px, rings stroke at 2px. */
         [FDK_TM_ENTRY_CORNER_RADIUS] = 6,
         [FDK_TM_MENU_CORNER_RADIUS] = 8,
@@ -164,7 +164,7 @@ static fdk_theme g_builtin = {
         [FDK_TM_ICONVIEW_CELL_HEIGHT] = 84,
         [FDK_TM_TEXTVIEW_PAD] = 8,
         [FDK_TM_FOCUS_RING_WIDTH] = 2,
-        /* 1.4.16: ROUNDED — the calm default; the shape story is a
+        /* 1.0.0: ROUNDED — the calm default; the shape story is a
          * per-theme decision (Mono Chromatic ships CIRCLE). */
         [FDK_TM_BUTTON_SHAPE] = 0,
     },
@@ -178,7 +178,7 @@ const fdk_theme *fdk__theme_builtin(void) {
     return &g_builtin;
 }
 
-/* ---- The fallback map (1.4.16) ---------------------------------------- */
+/* ---- The fallback map (1.0.0) ---------------------------------------- */
 
 /* One step of the titlebar family's read-through. The chain is a
  * single level deep by construction (every fallback target is a base
@@ -203,7 +203,7 @@ fdk_theme_token fdk__token_fallback(fdk_theme_token token) {
 
 /* ---- The current default ---- */
 
-/* The global-settings boot (1.4.13, reworked 1.4.14). The ONE-SHOT
+/* The global-settings boot (1.0.0, reworked 1.0.0). The ONE-SHOT
  * guard lives here; the resolution itself — $FDK_THEME, then the
  * application's own store, then the global "fdk" store, clamped by
  * the developer whitelist — lives in settings.c, which also owns
@@ -421,7 +421,7 @@ fdk_color fdk_theme_get_color(const fdk_theme *theme,
      * theme never overrode reads through to its base token — which
      * may itself be overridden (a partial theme that sets only
      * control_background re-themes the band, exactly as every theme
-     * before 1.4.16 did). */
+     * before 1.0.0 did). */
     if (!t->colors_set[token]) {
         token = fdk__token_fallback(token);
     }

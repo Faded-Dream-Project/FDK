@@ -71,7 +71,7 @@
  * No system headers are included: the libraries are dlopen'd, so
  * their types and constants are re-declared here, byte-compatible
  * with the installed headers (verified against harfbuzz 10.2 and
- * fribidi 1.0.16; both sets are stable ABI since harfbuzz 2.0,
+ * fribidi 1.0.0; both sets are stable ABI since harfbuzz 2.0,
  * 2017). If a future major breaks one of these, the probe fails,
  * the symbol table stays NULL, and FDK silently keeps the legacy
  * walk — that is the whole point of the posture. */

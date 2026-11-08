@@ -109,7 +109,7 @@ GetServerInformation, and a clean exit 0 — e.g.
 
 ```
 notifyd: org.freedesktop.Notifications is already owned by :1.23
-notifyd: ...it is dunst 1.9.2 (vendor knopwob); exiting (--replace to take over)
+notifyd: ...it is dunst 1.0.0 (vendor knopwob); exiting (--replace to take over)
 ```
 
 Then the takeover dance:

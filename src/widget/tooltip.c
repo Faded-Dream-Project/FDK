@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * tooltip.c — the tooltip layer (1.3.2)
+ * tooltip.c — the tooltip layer (1.0.0)
  *
  * One tooltip at a time, process-wide (the same single-instance shape
  * as the a11y subscriber registry): the pointer rests on a widget
@@ -42,7 +42,7 @@
 #include "widgets_internal.h"
 #include "../theme/theme_internal.h"
 #include "../window/window_internal.h"
-#include "../text/text_internal.h" /* 1.4.11: fdk__span_flatten/draw_runs */
+#include "../text/text_internal.h" /* 1.0.0: fdk__span_flatten/draw_runs */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -71,7 +71,7 @@ typedef struct fdk_tooltip_state {
     fdk_window *win;              /* the popup (owned)                */
     fdk_widget *shown_target;     /* compared by address only         */
     char *text;                   /* owned copy the popup paints      */
-    fdk_span *spans;              /* owned copy (markup tips, 1.4.11) */
+    fdk_span *spans;              /* owned copy (markup tips, 1.0.0) */
     size_t span_count;
     fdk_font *font;               /* owned; loaded per show           */
 } fdk_tooltip_state;
@@ -134,7 +134,7 @@ static void tip_dismiss(void) {
 
 /* Wraps `text` at the tip width, writing the line array (caller
  * frees with fdk_free) and the widest line's advance. The span
- * parameters (1.4.11) may be NULL/0: plain tooltips wrap exactly as
+ * parameters (1.0.0) may be NULL/0: plain tooltips wrap exactly as
  * before; markup tooltips wrap by STYLED widths (a bold word is
  * BOLD-wide — the line it lands on is measured as it will paint).
  * Returns false on failure (nothing to show). */
@@ -219,7 +219,7 @@ static void tip_paint(fdk_widget *canvas, fdk_surface *surface,
     fdk_i32 pitch = fm.ascent + fm.descent;
     fdk_i32 y = bounds.y + TIP_PAD_Y + fm.ascent;
     if (g_tip.spans != NULL && g_tip.span_count > 0) {
-        /* Markup (1.4.11): styled glyphs + run colors + decoration
+        /* Markup (1.0.0): styled glyphs + run colors + decoration
          * bars, per wrapped line, over one flatten of the module's
          * own span copy (the target may have died — never touched
          * from here). */
@@ -347,7 +347,7 @@ static void tip_delay_elapsed(fdk_timer *timer, void *user) {
 
     /* Module-owned state from here on: the text COPY (the target may
      * die while shown — its string must not dangle under tip_paint)
-     * and the font. Markup tips (1.4.11) copy the span array too —
+     * and the font. Markup tips (1.0.0) copy the span array too —
      * the same "never touch the target after show" rule. */
     g_tip.text = fdk__strdup(target->tooltip);
     if (g_tip.text == NULL) {

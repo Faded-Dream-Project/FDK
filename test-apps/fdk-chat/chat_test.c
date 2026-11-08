@@ -301,7 +301,7 @@ static void test_net_layer(void) {
 
     g_lines = 0;
     g_state = CHAT_CONNECTING;
-    chat_conn *c = chat_connect(ctx, "127.0.0.1", port, on_line,
+    chat_conn *c = chat_connect(ctx, "121.0.0.1", port, on_line,
                                 on_state, NULL);
     assert(c != NULL);
     int peer = peer_accept(lfd);

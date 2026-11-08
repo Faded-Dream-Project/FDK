@@ -37,9 +37,9 @@ interfaces. Not excluded.
 
 | Dependency | Anticipated phase | Purpose | License (to verify at add-time) | Notes |
 |---|---|---|---|---|
-| (none currently) | | | | fontconfig was the long-standing entry here; resolved in 1.0.1 — see the runtime table below |
+| (none currently) | | | | fontconfig was the long-standing entry here; resolved in 1.0.0 — see the runtime table below |
 
-**Added in 1.0.1 — runtime-only, never linked, never a build
+**Added in 1.0.0 — runtime-only, never linked, never a build
 requirement:**
 
 | Dependency | Purpose | License | Build/Runtime | Optional | Replaceable |
@@ -62,7 +62,7 @@ library:**
 | Dependency | Purpose | License | Build/Runtime | Optional | Replaceable |
 |---|---|---|---|---|---|
 | [stb_truetype](https://github.com/nothings/stb) v1.26 (vendored at `third_party/stb/`) | TrueType/OpenType parsing + anti-aliased glyph rasterization for the text layer (`src/text/`) | Dual MIT / public domain — both allow-listed; see `THIRD-PARTY-NOTICES.md` and `third_party/stb/README.md` (provenance + SHA-256 + update procedure) | Compiled in (one TU, `src/text/stb_truetype_impl.c`, with the aggressive warning set scoped off for that file and allocations routed through `fdk_alloc`); no pkg-config, no system library, no ABI surface | No | Yes in principle (harfbuzz+FreeType would be the heavyweight route) — but a from-scratch parser/rasterizer is explicitly out of scope per the original anticipation note, and stb is the established minimal choice (raylib et al.) |
-| [nanosvg](https://github.com/memononen/nanosvg) (vendored at `third_party/nanosvg/`) | SVG parsing + anti-aliased rasterization for icon-theme assets in the file dialogs (1.5.2): PNG is preferred when a directory carries both, SVG rasterizes at the requested size | zlib license — allow-listed; see `THIRD-PARTY-NOTICES.md` and `third_party/nanosvg/README.md` (provenance + SHA-256 + update procedure + the honest subset limits) | Compiled in (one TU, `src/theme/nanosvg_impl.c`, same warning-scoping pattern as the stb TUs); no pkg-config, no system library, no ABI surface | No | Yes in principle (librsvg is the heavyweight route — and rejected with Cairo/GLib below, since it would drag that entire stack into every FDK application's link line); the icon-shaped SVG subset is exactly what icon themes ship |
+| [nanosvg](https://github.com/memononen/nanosvg) (vendored at `third_party/nanosvg/`) | SVG parsing + anti-aliased rasterization for icon-theme assets in the file dialogs (1.0.0): PNG is preferred when a directory carries both, SVG rasterizes at the requested size | zlib license — allow-listed; see `THIRD-PARTY-NOTICES.md` and `third_party/nanosvg/README.md` (provenance + SHA-256 + update procedure + the honest subset limits) | Compiled in (one TU, `src/theme/nanosvg_impl.c`, same warning-scoping pattern as the stb TUs); no pkg-config, no system library, no ABI surface | No | Yes in principle (librsvg is the heavyweight route — and rejected with Cairo/GLib below, since it would drag that entire stack into every FDK application's link line); the icon-shaped SVG subset is exactly what icon themes ship |
 
 **Explicitly rejected:** Pango, Cairo, GLib, GObject, GIO — large
 desktop-stack dependencies FDK's minimalism goal excludes (Cairo/Pango
@@ -105,7 +105,7 @@ never an error):
 | `libXi.so.6` | XI2 touch events (M-3) | No touch events; the pointer/keyboard streams unchanged ($FDK_NO_XI2 pins it off) |
 | `libXrender.so.1` | The RENDER cursor lane — themed ARGB cursors (S-5) | The core cursor font's nearest-glyph table (every shape keeps an honest twin) |
 | `libGL.so.1` | The X11 GPU present lane | The CPU present path (always the design center) |
-| `libEGL.so.1` + `libwayland-egl.so.1` | The Wayland GPU present lane (1.2.0 / D-1) | The CPU present path — wl_shm, the platform's own design center |
+| `libEGL.so.1` + `libwayland-egl.so.1` | The Wayland GPU present lane (1.0.0 / D-1) | The CPU present path — wl_shm, the platform's own design center |
 
 The audit trail sentence below was also stale: the link line has
 carried `-lXrandr` since M-6 (see the table above) and `-lz` since

@@ -72,7 +72,7 @@ struct fdk_context {
     size_t window_count;
     size_t window_capacity;
 
-    /* Timers (1.3.1): pointer array so public fdk_timer* handles stay
+    /* Timers (1.0.0): pointer array so public fdk_timer* handles stay
      * stable across growth. See fdk_core.h for the contract. */
     fdk_timer **timers;
     size_t timer_count;

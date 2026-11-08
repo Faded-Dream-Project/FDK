@@ -10,7 +10,7 @@
 
 /*
  * THE PUBLIC VERSION IS 1.0.0 — THE OWNER'S DECISION OF 2026-11-08
- * (docs/versioning.md): the FIRST RELEASE. The 1.1.0-rcN candidate
+ * (docs/versioning.md): the FIRST RELEASE. The 1.0.0-rcN candidate
  * numbering is retired (its rc1/rc2 candidates never shipped; the
  * cycle labels across the tree now read 1.0.0), the pre-release
  * suffix is dropped (the release is final), and MINOR goes to 0 —

@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "x11"
 
 /*
- * x11_dnd.c — XDND drag and drop (1.2.0)
+ * x11_dnd.c — XDND drag and drop (1.0.0)
  *
  * RECEIVER: FDK windows carry the XdndAware property (version 5,
  * set at window creation). The four client messages a source sends
@@ -12,7 +12,7 @@
  * translation. Each Position is answered with an XDndStatus whose
  * accept bit is the intersection of the source's offered types and
  * the window's registered fdk_drag_format mask and whose action
- * field names XdndActionCopy (1.4.19: action-strict sources — the
+ * field names XdndActionCopy (1.0.0: action-strict sources — the
  * Qt family, several XWayland bridges — treat a None action as a
  * refusal and never commit the drop), the cursor feedback the
  * dragging client shows. A Drop triggers the same bounded
@@ -66,13 +66,13 @@ static char *dnd_strdup(const char *s) {
 
 #define FDK_XDND_VERSION 5
 #define FDK_XDND_DROP_TIMEOUT_MS 2000
-/* The drop fetch's per-convert notify wait. History: 250 ms (1.2.0,
- * toolkit-to-toolkit peers) -> 600 ms (1.4.14: a real file manager
+/* The drop fetch's per-convert notify wait. History: 250 ms (1.0.0,
+ * toolkit-to-toolkit peers) -> 600 ms (1.0.0: a real file manager
  * under load answers its SelectionRequests later than that — the
- * "hovered fine, dropped nothing" report) -> 1000 ms (1.4.19: a file
+ * "hovered fine, dropped nothing" report) -> 1000 ms (1.0.0: a file
  * manager waking cold — GVFS mounts resolving, caches faulting — can
  * genuinely take longer still, and the failure shape is the
- * silent-vanish class this file's other 1.4.19 fixes close; still
+ * silent-vanish class this file's other 1.0.0 fixes close; still
  * bounded because the fetch runs inside the event loop). INCR flights
  * carry their own (longer) deadlines inside the shared read engine. */
 #define FDK_XDND_WAIT_MS 1000
@@ -146,7 +146,7 @@ static int xdnd_types_to_formats(fdk_platform_connection *conn,
 }
 
 /* Reads the source's XdndTypeList property in slabs and accumulates
- * the offered formats (1.4.19). The old single read capped at 64
+ * the offered formats (1.0.0). The old single read capped at 64
  * atoms and ignored the `after` remainder — invisible for the small
  * lists toolkit peers send each other, but a browser or office-suite
  * drag can carry many dozens of flavors, and a text/uri-list sitting
@@ -216,7 +216,7 @@ static void xdnd_send_status(fdk_platform_connection *conn, Window source,
      *
      * l[4] = the ACTION the target will perform (spec, v2+). FDK's
      * drag model is copy-only, so an accepting answer names
-     * XdndActionCopy; a refusal names None. 1.4.19: this field was
+     * XdndActionCopy; a refusal names None. 1.0.0: this field was
      * always 0 — GTK sources tolerate a None action with the accept
      * bit set, but action-STRICT sources (the Qt family's qxcbdrag
      * resolves the status action first and an unresolvable action
@@ -240,7 +240,7 @@ static void xdnd_dispatch_drag(fdk_platform_window *pwindow,
     ev.drag.offered_formats = offered;
     ev.drag.accepted_formats = accepted;
     /* Root coordinates arrive PHYSICAL; drag events speak logical
-     * tree space like every other pointer event (1.4.5). */
+     * tree space like every other pointer event (1.0.0). */
     int ds = pwindow->conn->scale;
     ev.drag.position.x = (ds > 1) ? (x / (fdk_f32)ds) : x;
     ev.drag.position.y = (ds > 1) ? (y / (fdk_f32)ds) : y;
@@ -304,7 +304,7 @@ int fdk_x11_dnd_handle_client_message(fdk_platform_connection *conn,
          * XDND halves are SIGNED 16-bit: a monitor left of / above
          * the primary has negative root coordinates, and the v1
          * unsigned decode reported drags ~65500 px off on exactly
-         * those layouts (1.3.0). */
+         * those layouts (1.0.0). */
         int rx = (fdk_i16)((msg->data.l[2] >> 16) & 0xFFFF);
         int ry = (fdk_i16)(msg->data.l[2] & 0xFFFF);
         /* The MESSAGE's coordinates are the drag's position (S-9:
@@ -467,7 +467,7 @@ static void xdnd_send_finished_ok(fdk_platform_connection *conn,
               (long)conn->atom_xdnd_action_copy, 0, 0);
 }
 
-/* The drop fetch (1.4.14, reworked): ONE shared selection-read
+/* The drop fetch (1.0.0, reworked): ONE shared selection-read
  * engine (fdk__x11_read_selection) against the DROP TARGET window as
  * requestor — atomic answers, multi-part atomics, and INCR flights
  * all flow through it. Before this existed the fetch did its own
@@ -482,7 +482,7 @@ static void xdnd_send_finished_ok(fdk_platform_connection *conn,
  * (uri-list -> UTF-8 text) instead of failing the whole drop — the
  * spec-correct retry a picker owes the user.
  *
- * 1.4.19: a fetch where EVERY format failed used to return without
+ * 1.0.0: a fetch where EVERY format failed used to return without
  * dispatching anything — the drop vanished SILENTLY (no event, no
  * app-visible signal; the live report was "hovered fine, released,
  * nothing happened"). The gesture is now still delivered as an
@@ -543,7 +543,7 @@ static void xdnd_fetch_and_drop(fdk_platform_connection *conn,
     }
     if (payload == NULL) {
         /* Every format failed (refusal / timeout / malformed) or the
-         * widen alloc died: deliver the EMPTY gesture anyway (1.4.19
+         * widen alloc died: deliver the EMPTY gesture anyway (1.0.0
          * — see the function comment), then answer Finished as a
          * consumed drop. */
         FDK_WARN("dnd: drop transfer failed for all %d format(s) — "

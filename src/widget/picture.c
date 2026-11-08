@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * picture.c — the image display widget (1.4.9)
+ * picture.c — the image display widget (1.0.0)
  *
  * The GtkPicture-shaped hole: one owned fdk_surface (decoded from
  * a file or taken over from the app), painted into the widget's

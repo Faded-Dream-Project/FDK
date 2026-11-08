@@ -32,11 +32,11 @@
 #define BTN_PAD_Y 8
 /* BTN_RADIUS moved to the theme: FDK_TM_BUTTON_CORNER_RADIUS,
  * built-in default 8 (Phase 7). The focus-ring inset/width moved to
- * the theme too: FDK_TM_FOCUS_RING_WIDTH, built-in default 2 (1.4.0). */
+ * the theme too: FDK_TM_FOCUS_RING_WIDTH, built-in default 2 (1.0.0). */
 
-/* The hover fade flight (1.4.1): 120 ms of quad-out — hover is a
- * whisper, not a wave. Shared by Button, the check family (1.4.1),
- * the StackSwitcher's pills and the menu/combo rows (1.4.2). */
+/* The hover fade flight (1.0.0): 120 ms of quad-out — hover is a
+ * whisper, not a wave. Shared by Button, the check family (1.0.0),
+ * the StackSwitcher's pills and the menu/combo rows (1.0.0). */
 #define HOVER_FADE_MS 120
 
 /* Toggle: track 34x18, knob 12, gap 8 before optional label. */
@@ -53,7 +53,7 @@
 #define RADIO_EXTENT 16
 #define RADIO_GAP 8
 
-/* ---- 1.4.1: the hover fade (shared by Button + check family) ---- */
+/* ---- 1.0.0: the hover fade (shared by Button + check family) ---- */
 
 /* Linear channel blend, clamped — the paint-time hover ladder. */
 static fdk_color blend_colors(fdk_color a, fdk_color b, fdk_f32 t) {
@@ -69,7 +69,7 @@ static fdk_color blend_colors(fdk_color a, fdk_color b, fdk_f32 t) {
 }
 
 /* Arms (or retargets) the fade toward 1 (entering) / 0 (leaving) —
- * the shared machinery in statics.c (1.4.2 promoted it so the
+ * the shared machinery in statics.c (1.0.0 promoted it so the
  * switcher pills and menu rows ride what the buttons ride): cancels
  * any running flight first, departing from the CURRENT blend,
  * never teleporting. */
@@ -89,7 +89,7 @@ static void button_measure(fdk_widget *w, fdk_size *out) {
     fdk_button *b = button_of(w);
     fdk_i32 tw = 0, th = 0;
     if (b->span_count > 0 && b->text != NULL && b->font != NULL) {
-        /* Markup (1.4.11): styled widths — a bold word is BOLD-wide.
+        /* Markup (1.0.0): styled widths — a bold word is BOLD-wide.
          * Height stays the font's pitch (synthesis never changes it). */
         fdk_text_metrics m;
         if (fdk_ok(fdk_font_measure_spans_utf8(
@@ -123,7 +123,7 @@ static void button_measure(fdk_widget *w, fdk_size *out) {
     }
 }
 
-/* ---- 1.4.16: the themed button SHAPE ----
+/* ---- 1.0.0: the themed button SHAPE ----
  *
  * The effective corner radius for a button-shaped (w, h) box under
  * the current theme's FDK_TM_BUTTON_SHAPE: ROUNDED defers to the
@@ -162,7 +162,7 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
     if (bounds.width <= 0 || bounds.height <= 0) {
         return;
     }
-    /* The active-state ladder, per role (1.4.0; 1.4.1 fades the
+    /* The active-state ladder, per role (1.0.0; 1.0.0 fades the
      * HOVER rungs). NORMAL rides the control family as v1 did;
      * SUGGESTED is accent-filled with the accent's own hover/
      * pressed states and accent-text label; DESTRUCTIVE is
@@ -214,7 +214,7 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
         label_col = disabled ? fdk__pal_text_disabled() : fdk__pal_text();
         break;
     }
-    /* Themed corner shape (1.4.16): ROUNDED rides the
+    /* Themed corner shape (1.0.0): ROUNDED rides the
      * button_corner_radius metric (default 8 = the v1 BTN_RADIUS
      * exactly; radius 0 = square corners — the renderer's
      * rounded-rect treats that as a plain fill), CIRCLE rounds to
@@ -228,7 +228,7 @@ static void button_paint(fdk_widget *w, fdk_surface *surface,
     }
 
     /* Focus ring: a themed-color, themed-width rounded outline just
-     * inside the fill (1.4.0: FOCUS_RING token + FOCUS_RING_WIDTH
+     * inside the fill (1.0.0: FOCUS_RING token + FOCUS_RING_WIDTH
      * metric, replacing the hardcoded accent hairline). LINK draws
      * it too — a flat button is still a keyboard citizen. */
     if ((w->flags & FDK_WF_FOCUSED) != 0 && !disabled) {
@@ -439,7 +439,7 @@ fdk_result fdk_button_set_text(fdk_widget *button, const char *text) {
     return FDK_OK;
 }
 
-/* fdk_button_set_markup (1.4.11): the Label's markup contract on a
+/* fdk_button_set_markup (1.0.0): the Label's markup contract on a
  * button — tags parse to plain text + spans, get_text reports the
  * PLAIN label (what the a11y tree narrates), and measure/paint use
  * the styled widths. The role machinery (fills, focus ring, the
@@ -476,7 +476,7 @@ fdk_result fdk_button_set_markup(fdk_widget *button, const char *markup) {
 
 /* The button's current label (toolkit-owned copy; valid until the
  * next set_text/destroy). NULL when the button has no text — the
- * same convention as fdk_label_get_text (1.3.0: every text-bearing
+ * same convention as fdk_label_get_text (1.0.0: every text-bearing
  * widget now has its getter). */
 const char *fdk_button_get_text(fdk_widget *button) {
     if (button == NULL || button->klass != &fdk_button_class_def) {
@@ -496,7 +496,7 @@ void fdk_button_set_on_activate(fdk_widget *button,
     b->on_activate_data = user_data;
 }
 
-/* ---- 1.4.0: role + toggle-button state ---- */
+/* ---- 1.0.0: role + toggle-button state ---- */
 
 void fdk_button_set_role(fdk_widget *button, fdk_button_role role) {
     if (button == NULL || button->klass != &fdk_button_class_def) {

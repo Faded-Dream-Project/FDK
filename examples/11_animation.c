@@ -1,6 +1,6 @@
 /* 11_animation.c — the animation engine, end to end.
  *
- * Two live demos, both driving the 1.3.8 engine through the real
+ * Two live demos, both driving the 1.0.0 engine through the real
  * ~16 ms ticker (the pump loop the shared example helper runs):
  *
  *   The easing race — seven lanes, one per curve family, each with

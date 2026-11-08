@@ -5,7 +5,7 @@
 #define FDK_LOG_TAG "wayland"
 
 /*
- * wayland_dnd.c — wl_data_device drag and drop (1.2.0)
+ * wayland_dnd.c — wl_data_device drag and drop (1.0.0)
  *
  * RECEIVER: a drag arriving at FDK is a sequence on the wl_data_device
  * we already own for the clipboard: ::data_offer announces the drag

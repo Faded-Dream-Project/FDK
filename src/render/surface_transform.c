@@ -284,7 +284,7 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
      * exact paths — fdk_surface_blit is an OPAQUE raw copy, so
      * routing a sprite with transparent padding through it splats the
      * padding's RGB (typically 0,0,0) as opaque black. That was the
-     * 1.5.3 defect: every icon decoded at exactly its cell size
+     * 1.0.0 defect: every icon decoded at exactly its cell size
      * (16-px list rows, 48-px grid cells, the sidebar's 16-px places)
      * blitted 1:1 through the translation fast path and wore a black
      * box around the artwork; only scaled blits took the compositing
@@ -318,7 +318,7 @@ fdk_result fdk_surface_blit_transformed(fdk_surface *dst, fdk_matrix m,
     }
 
     /* Integer scale-up: nearest neighbor over the scaled bbox —
-     * exact pixels, no filtering. Format-aware (1.3.0):
+     * exact pixels, no filtering. Format-aware (1.0.0):
      *
      *   - XRGB source (any dst): raw copy, forced opaque into ARGB
      *     destinations (the rule blit_blend applies).

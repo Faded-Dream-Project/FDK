@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The GPU presentation lane on Wayland (1.2.0 / D-1) — implementation.
+/* The GPU presentation lane on Wayland (1.0.0 / D-1) — implementation.
  *
  * This file mirrors x11_gl.c's structure decision for decision: the
  * same hybrid model (CPU rasterization + GPU composite), the same
@@ -343,7 +343,7 @@ struct fdk_wayland_egl {
     int has_bgra_ext;              /* GL_EXT_texture_format_BGRA8888     */
     int has_rowlen_ext;            /* GL_EXT_unpack_subimage             */
     /* The UPLOAD CONTRACT's operative state (the probe + ladder,
-     * 1.1.1): `shape` is the connection's current upload shape —
+     * 1.0.0): `shape` is the connection's current upload shape —
      * the probe picks the first shape the DRIVER accepts (a real
      * 4x4 upload, not the extension string), and the present
      * ladder can rotate it at runtime when a present fails.
@@ -845,7 +845,7 @@ struct fdk_wayland_egl *fdk_wayland_egl_try_load(
         }
     }
 
-    /* The SHARE-ROOT context (the 1.1.1 fix, live-caught by the §19
+    /* The SHARE-ROOT context (the 1.0.0 fix, live-caught by the §19
      * trace rig): one context that is never made current — it exists
      * only to anchor the share GROUP every per-window context joins
      * at creation (eglCreateContext's share parameter). The quad
@@ -1103,7 +1103,7 @@ static void lane_setup_texture(struct fdk_wayland_egl *egl,
                             GLC_CLAMP_TO_EDGE);
 }
 
-/* ---- THE PROBE (the 1.1.1 fix): ask the driver, not the string ----
+/* ---- THE PROBE (the 1.0.0 fix): ask the driver, not the string ----
  *
  * The GTX 1050 Ti report proved extension strings are not truth: both
  * extensions advertised, the fast path chosen, the first present
@@ -1345,7 +1345,7 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
                                 EGLC_NONE };
     /* Share the ROOT: this window's context joins the connection's
      * share group, so the quad program/VBO (minted once, under the
-     * first window's context) are valid objects here — the 1.1.1
+     * first window's context) are valid objects here — the 1.0.0
      * fix for the every-second-window glUseProgram failure the trace
      * rig caught (see the try_load root comment). */
     EGLContext ctx = egl->fn.eglCreateContext(egl->egl_display, egl->config,
@@ -1448,7 +1448,7 @@ struct fdk_wayland_egl_window *fdk_wayland_egl_window_try_init(
      * whatever they raised stays here. */
     lane_stale_drain(egl, "lane engagement (extension detection)");
 
-    /* THE PROBE (the 1.1.1 fix): once per connection, with this
+    /* THE PROBE (the 1.0.0 fix): once per connection, with this
      * first context current — every shape's upload calls tried for
      * real, and the first the DRIVER accepts becomes the
      * connection's shape. Extension strings are input, not verdict
@@ -1701,7 +1701,7 @@ void fdk_wayland_egl_window_destroy(struct fdk_wayland_egl *egl,
      * All shutdown paths (normal, downgrade, dead connection) go
      * through this one order.
      *
-     * THE SHARE-GROUP CORRECTION (1.1.1): with every context sharing
+     * THE SHARE-GROUP CORRECTION (1.0.0): with every context sharing
      * the connection's root, the texture does NOT die with this
      * context (share-group members die with the GROUP) — it is queued
      * in the connection's graveyard and deleted by the next present
@@ -2016,7 +2016,7 @@ int fdk_wayland_egl_window_present(struct fdk_wayland_egl_window *ewin,
         egl->graveyard_count = 0;
     }
 
-    /* === THE RETRY LADDER (the 1.1.1 fix) ==============================
+    /* === THE RETRY LADDER (the 1.0.0 fix) ==============================
      *
      * A failed present is not a verdict until every shape has had its
      * chance: the probe validated the shape against 4x4 uploads, but
@@ -2125,7 +2125,7 @@ static int lane_present_attempt(struct fdk_wayland_egl_window *ewin,
     LANE_GL_OP("glBindTexture(TEXTURE_2D, window texture)",
                egl->fn.glBindTexture(GLC_TEXTURE_2D, ewin->tex));
 
-    /* === the UPLOAD CONTRACT (§19 + the 1.1.1 probe/ladder) ==========
+    /* === the UPLOAD CONTRACT (§19 + the 1.0.0 probe/ladder) ==========
      *
      * The four shapes (fastest first): BGRA + ROW_LENGTH, BGRA with
      * tightly packed sub-rects, a CPU-swizzled RGBA twin + ROW_LENGTH,
@@ -2164,7 +2164,7 @@ static int lane_present_attempt(struct fdk_wayland_egl_window *ewin,
     char desc[128];
     /* ROW_LENGTH is touched ONLY when the extension exists — on a
      * context without GL_EXT_unpack_subimage the pname itself is
-     * GL_INVALID_ENUM (value 0 included; the pre-1.1.1 code set it
+     * GL_INVALID_ENUM (value 0 included; the pre-1.0.0 code set it
      * unconditionally, poisoning strict drivers on the fallback
      * shapes too). With the extension, it carries the window stride
      * for rowlen shapes and resets to 0 (tight) for packed ones. */

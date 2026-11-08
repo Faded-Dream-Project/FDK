@@ -9,14 +9,14 @@
 #include <X11/Xatom.h>
 #include <X11/XKBlib.h>
 #include <X11/Xlocale.h>
-#include <X11/extensions/shape.h> /* XShape input regions (1.3.2) */
+#include <X11/extensions/shape.h> /* XShape input regions (1.0.0) */
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <setjmp.h>
 #include <locale.h>
 
-/* ---- Display-death discipline (1.3.0) ---------------------------------
+/* ---- Display-death discipline (1.0.0) ---------------------------------
  *
  * Xlib's default XIO error handler calls exit(1): a lost X server
  * (logout, WM crash, ssh -X disconnect) killed the process with no
@@ -59,7 +59,7 @@ static int x11_io_error_handler(Display *display) {
     return 0; /* unreachable when armed; lets Xlib exit when not */
 }
 
-/* Protocol-error handler (1.4.12, the INCR milestone): LOG and
+/* Protocol-error handler (1.0.0, the INCR milestone): LOG and
  * continue, never die. Xlib's default handler EXITS the process on
  * any recoverable protocol error — unacceptable for a toolkit that
  * writes properties and selects events on FOREIGN windows (an INCR
@@ -80,7 +80,7 @@ static int x11_error_handler(Display *display, XErrorEvent *ev) {
 }
 
 
-/* HiDPI scale detection (1.4.5).
+/* HiDPI scale detection (1.0.0).
  *
  * X11 has no scale protocol; two conventions exist, and we read
  * them in priority order, pure Xlib (no Xsettings daemon, no
@@ -155,7 +155,7 @@ void fdk__x11_ensure_xim(fdk_platform_connection *conn) {
     if (cur == NULL || strcmp(cur, "C") == 0) {
         (void)setlocale(LC_CTYPE, "");
     }
-    /* FDK_NO_XIM=1 (1.4.20): the escape hatch when a protocol IM
+    /* FDK_NO_XIM=1 (1.0.0): the escape hatch when a protocol IM
      * server (ibus/fcitx over the XIM transport) misbehaves —
      * XFilterEvent consults the server for every key event, and a
      * wedged bridge can swallow them ALL. The diagnostic log stamps
@@ -201,7 +201,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->screen = DefaultScreen(display);
     conn->root = RootWindow(display, conn->screen);
 
-    /* HiDPI scale (1.4.5): detected ONCE at connect - see
+    /* HiDPI scale (1.0.0): detected ONCE at connect - see
      * fdk__x11_detect_scale below for the two conventions and the
      * integer-only rule. */
     conn->scale = fdk__x11_detect_scale(display);
@@ -249,7 +249,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     (void)XSetIOErrorHandler(x11_io_error_handler);
     (void)XSetErrorHandler(x11_error_handler);
 
-    /* Key-repeat discipline (1.3.0): ask the XKB extension for
+    /* Key-repeat discipline (1.0.0): ask the XKB extension for
      * DETECTABLE auto-repeat — real KeyReleases only, repeats as
      * plain KeyPresses — the same request GTK issues at startup.
      * The event translator's key-down bitmap turns those into
@@ -269,7 +269,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
         }
     }
 
-    /* X Input Method (1.3.1; LAZY since 1.0.0-rc1, the X1 report):
+    /* X Input Method (1.0.0; LAZY since 1.0.0-rc1, the X1 report):
      * XOpenIM used to run right here for every application — and on a
      * desktop with an input-method daemon configured but slow or gone
      * (the classic XSetLocaleModifiers + XOpenIM stall), it cost
@@ -284,7 +284,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->xim = NULL;
     conn->xim_tried = 0;
 
-    /* XSHAPE probe (1.3.2): the empty-input-region primitive behind
+    /* XSHAPE probe (1.0.0): the empty-input-region primitive behind
      * click-through tooltips. */
     {
         int dummy = 0;
@@ -331,7 +331,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->shm_ok = 0;
     conn->shm_event_base = 0;
 
-    /* GPU present lane (1.4.18): NOT loaded here — see x11_gl.h. The
+    /* GPU present lane (1.0.0): NOT loaded here — see x11_gl.h. The
      * fields just start NULL/0; the first framebuffer acquisition on
      * any window pays the one-shot dlopen. */
     conn->gl = NULL;
@@ -365,7 +365,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
     conn->wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", False);
     conn->wm_save_yourself = XInternAtom(display, "WM_SAVE_YOURSELF", False);
 
-    /* WM_TAKE_FOCUS (1.4.19): the ICCCM take-focus model. WMs in the
+    /* WM_TAKE_FOCUS (1.0.0): the ICCCM take-focus model. WMs in the
      * mutter/Muffin family hand keyboard focus to a window by sending
      * this ClientMessage — the client is expected to call
      * XSetInputFocus on receipt. Without LISTING the atom the WM may
@@ -409,7 +409,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
      * nobody else uses, so the _NET_SUPPORTED probe below never
      * matches it, every WM looks "maximize-incapable", and the
      * maximize path silently degrades to the bare-X fallback under
-     * real window managers (exactly the 1.1.3 bug: window maximized
+     * real window managers (exactly the 1.0.0 bug: window maximized
      * by the WM, FDK's flag disagreeing). tests/test_x11_integration.c
      * pins the spec spelling against this. */
     conn->net_wm_state_maximized_horiz =
@@ -478,7 +478,7 @@ fdk_result fdk_x11_connect(fdk_platform_dispatch_fn dispatch,
         FDK_DEBUG("clipboard helper window ready (Phase 9)");
     }
 
-    /* XDND atoms + idle state (1.2.0); cannot fail in practice
+    /* XDND atoms + idle state (1.0.0); cannot fail in practice
      * (interning only), and a failure leaves the DnD ops inert
      * rather than broken — same tolerance as the clipboard. */
     (void)fdk_x11_dnd_init(conn);
@@ -541,7 +541,7 @@ void fdk_x11_disconnect(fdk_platform_connection *conn) {
 
     fdk_x11_cursor_shutdown(conn);
 
-    /* GPU lane state (1.4.18): per-window contexts died with their
+    /* GPU lane state (1.0.0): per-window contexts died with their
      * windows above; what remains is the loader state. libGL itself
      * stays pinned for process lifetime (x11_gl.c header comment). */
     fdk_x11_gl_shutdown(conn->gl);

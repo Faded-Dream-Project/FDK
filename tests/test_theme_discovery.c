@@ -1,5 +1,5 @@
 /* test_theme_discovery.c — theme discovery + global-settings boot
- * tests (1.4.13).
+ * tests (1.0.0).
  *
  * Everything is sandboxed through the environment the discovery
  * layer already reads: $FDK_THEME_DIR / $HOME/.FDKThemes /
@@ -237,7 +237,7 @@ static void test_find_no_dirs(void) {
 }
 
 
-/* ---- discovery: the 1.4.16 custom folder ------------------------------ */
+/* ---- discovery: the 1.0.0 custom folder ------------------------------ */
 
 static void mkdirs(const char *path) {
     char cmd[600];
@@ -513,7 +513,7 @@ static void test_boot_empty_env_is_unset(void) {
     assert(streq(fdk_theme_name(t), "Alpha Test"));
 }
 
-/* ---- 1.4.14: the per-app leg + the whitelist + the live recheck -------- */
+/* ---- 1.0.0: the per-app leg + the whitelist + the live recheck -------- */
 
 /* The app prefs file under the same sandbox dir as the global one —
  * what `fdk-set theme set NAME --app APP` writes for the app whose
@@ -788,7 +788,7 @@ int main(void) {
     struct stat st;
     assert(stat(fixture("alpha.fdk"), &st) == 0);
 
-    /* 1.4.16: the custom per-user folder is part of the search path
+    /* 1.0.0: the custom per-user folder is part of the search path
      * now — pin $HOME to the (themeless) sandbox so this binary is
      * hermetic on a host that happens to have ~/.FDKThemes. */
     use_env("HOME", g_dir2);

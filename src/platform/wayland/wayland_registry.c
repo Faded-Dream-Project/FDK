@@ -138,7 +138,7 @@ void fdk_wayland_track_output(fdk_platform_connection *conn,
     wl_output_add_listener(output, &g_output_listener, conn);
 }
 
-/* Retires the record whose registry global went away (1.3.1): the
+/* Retires the record whose registry global went away (1.0.0): the
  * scale walk already treats 0 as "gone"; releasing the proxy now is
  * the honest bookkeeping (the global — and therefore the object —
  * no longer exists server-side). */

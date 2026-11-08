@@ -1,4 +1,4 @@
-/* test_animation.c — headless animation-engine tests (1.3.8).
+/* test_animation.c — headless animation-engine tests (1.0.0).
  *
  * Everything runs on the synthetic clock: the engine's test seam
  * pins fdk_widget_animate()'s start stamping and the suite drives
@@ -34,7 +34,7 @@
 #include "fdk/fdk_animation.h"
 
 #include "widget/widget_internal.h"
-#include "widget/widgets_internal.h" /* fdk_hover_fade + the arm (1.4.17) */
+#include "widget/widgets_internal.h" /* fdk_hover_fade + the arm (1.0.0) */
 
 #include <assert.h>
 #include <stdio.h>
@@ -481,7 +481,7 @@ static void test_concurrent(void) {
            "independent completions, one pump for all)\n");
 }
 
-/* 1.4.17 regression: the shared hover fade's STORED handle must be
+/* 1.0.0 regression: the shared hover fade's STORED handle must be
  * cleared when the flight ends — the animation engine reaps
  * finished handles after its ~1 s zombie grace, and hover events
  * can be minutes apart. Pre-fix, the stale pointer sat in the fade

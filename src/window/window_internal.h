@@ -154,7 +154,7 @@ struct fdk_window {
     fdk_event_callback_fn event_callback;
     void *event_callback_user_data;
 
-    /* ---- Drag and drop (1.2.0) ----
+    /* ---- Drag and drop (1.0.0) ----
      *
      * The formats this window accepts as a DROP TARGET (0 = none;
      * fdk_window_set_drop_formats). Kept here so the public query is
@@ -232,7 +232,7 @@ struct fdk_window {
      * these caches, mirroring how last_size mirrors CONFIGURE). */
     bool maximized;
     bool minimized;
-    bool fullscreen; /* 1.4.10 */
+    bool fullscreen; /* 1.0.0 */
 
     /* Size limits last handed to fdk_window_set_size_limits — the
      * hints go to the platform, but FDK's own resize-edge drag ALSO
@@ -313,7 +313,7 @@ struct fdk_window {
     long long popup_button_ms;
     int popup_close_reason;
 
-    /* ---- 1.2.2: batched geometry repaint ----
+    /* ---- 1.0.0: batched geometry repaint ----
      *
      * Set by the dispatch tail when an event changed what should be
      * under the pointer or on the screen (configure / state flip /
@@ -335,7 +335,7 @@ struct fdk_window {
      * event in the batch marks it; the flush is idempotent. */
     bool geo_repaint_pending;
 
-    /* ---- 1.3.3: application shortcut table ----
+    /* ---- 1.0.0: application shortcut table ----
      *
      * fdk_window_add_shortcut registrations: (id, parsed pair,
      * callback, user). Tested BEFORE the widget tree on every
@@ -450,7 +450,7 @@ fdk_surface *fdk__window_tree_surface(fdk_widget *root);
  * toolkit owns (menu popup, dialog) so dispatch auto-paints it. */
 void fdk__window_set_auto_paint(fdk_window *window, bool auto_paint);
 
-/* Popup creation with the passive flag (1.3.2): input_transparent
+/* Popup creation with the passive flag (1.0.0): input_transparent
  * popups (tooltips) take an empty input region and never grab — the
  * create-time contract both backends answer (see
  * platform_internal.h). The public fdk_window_create_popup() is the
@@ -486,7 +486,7 @@ void fdk__ext_kinds_detach(fdk_context *ctx);
  * outside src/platform/wayland/, so this is the sanctioned seam. */
 int fdk__window_ever_presented(const fdk_window *window);
 
-/* Diagnostic / regression seams (1.1.4), same rationale as
+/* Diagnostic / regression seams (1.0.0), same rationale as
  * fdk__window_ever_presented: the hover-revalidation and cursor-
  * shaping logic lives in the dispatch path where an external test
  * cannot observe it any other way.
@@ -522,7 +522,7 @@ int fdk__window_cursor_applied(const fdk_window *window);
 void fdk__window_set_destroy_notify(fdk_window *window,
                                     void (*notify)(fdk_window *, void *),
                                     void *user);
-/* ---- 1.2.2: batched geometry repaint (see the flag above) ----
+/* ---- 1.0.0: batched geometry repaint (see the flag above) ----
  *
  * Runs, once per EVENT BATCH (from the pump, after the backend's
  * dispatch_pending drained the queue), the pointer revalidation +
@@ -533,7 +533,7 @@ void fdk__window_set_destroy_notify(fdk_window *window,
  * pointer revalidation may destroy windows mid-flush. */
 void fdk__window_flush_geo_repaints(fdk_context *ctx);
 
-/* ---- the theme-settings bridge (1.4.14) --------------------------------
+/* ---- the theme-settings bridge (1.0.0) --------------------------------
  *
  * The core layer's crossing point to the theme settings engine
  * (src/theme/settings.c — per-app + global theme resolution, the
@@ -572,7 +572,7 @@ void fdk__window_regrab(fdk_window *window);
  * cannot (NULL op maps to the same). */
 fdk_result fdk__window_set_modal(fdk_window *window, bool modal);
 
-/* ---- Drag and drop (1.2.0) ----
+/* ---- Drag and drop (1.0.0) ----
  *
  * The backend-side completion closure: fdk_drag_begin (src/window/
  * dnd.c) allocates one and hands it to the backend's drag_begin op as

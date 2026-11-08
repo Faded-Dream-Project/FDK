@@ -1,4 +1,4 @@
-/* 09_capabilities.c — the real-world capability showcase (1.2.1).
+/* 09_capabilities.c — the real-world capability showcase (1.0.0).
  *
  * One application that answers "what can FDK do with the desktop?"
  * in five sections, because that is the honest way to validate the
@@ -36,9 +36,9 @@
  *                files it advertises into a file manager. The status
  *                line reports how the drag ended.
  *
- * The window repaints when its tree has damage (the 1.2.0 build
+ * The window repaints when its tree has damage (the 1.0.0 build
  * forgot, which read as "dead between interactions"), and its root
- * background is the toolkit default (1.2.1) — status lines now
+ * background is the toolkit default (1.0.0) — status lines now
  * CLEAR their old text before drawing the new.
  *
  * For the GUI test rigs the demo prints:
@@ -313,9 +313,9 @@ static void typing_report(void) {
         lo = anchor <= caret2 ? anchor : caret2;
         hi = anchor <= caret2 ? caret2 : anchor;
     }
-    /* 1.3.3: the undo history rides along — Ctrl+Z / Ctrl+Y are
+    /* 1.0.0: the undo history rides along — Ctrl+Z / Ctrl+Y are
      * live in the entry (typing runs coalesce; deletes reselect on
-     * undo). 1.3.4: any selection owns the PRIMARY buffer (the
+     * undo). 1.0.0: any selection owns the PRIMARY buffer (the
      * classic Unix model) — middle-click pastes it at the click. */
     size_t undo = fdk_entry_can_undo(app.typing) ? 1u : 0u;
     size_t redo = fdk_entry_can_redo(app.typing) ? 1u : 0u;
@@ -483,7 +483,7 @@ static void dlg_folders_clicked(fdk_widget *w, void *user) {
     open_dialog(FDK_FILE_DIALOG_OPEN_FOLDERS);
 }
 static void dlg_icons_clicked(fdk_widget *w, void *user) {
-    /* 1.4.7: OPEN_FILE on the item grid — the GTK list/icon toggle,
+    /* 1.0.0: OPEN_FILE on the item grid — the GTK list/icon toggle,
      * seeded through options.view (the dialog's own "Icons" checkbox
      * flips it live). */
     (void)w; (void)user;
@@ -668,7 +668,7 @@ static void relayout(void) {
     if (w < 320) {
         w = 320;
     }
-    /* The FDK title band (1.4.14) owns the top strip: the absolute
+    /* The FDK title band (1.0.0) owns the top strip: the absolute
      * layout starts below it when the window is decorated. */
     fdk_i32 y = 10 + (fdk_window_get_decorated(app.window)
                           ? fdk_theme_get_metric(NULL,
@@ -759,7 +759,7 @@ int main(void) {
         return 1;
     }
     fdk_window_set_event_callback(app.window, window_event, NULL);
-    /* 1.4.14: the FDK title bar — every example wears the toolkit's
+    /* 1.0.0: the FDK title bar — every example wears the toolkit's
      * own drawn chrome (themed band + close + FDK resize). */
     (void)fdk_window_set_decorated(app.window, true);
     fdk_window_set_drop_formats(app.window,
@@ -835,7 +835,7 @@ int main(void) {
                             &app.dlg_btns[2]);
     (void)fdk_button_create(app.root, app.font, "Select Folders",
                             &app.dlg_btns[3]);
-    /* 1.4.7: the icon-mode browsing surface (options.view). */
+    /* 1.0.0: the icon-mode browsing surface (options.view). */
     (void)fdk_button_create(app.root, app.font, "Icons View",
                             &app.dlg_btns[4]);
     (void)fdk_button_create(app.root, app.font, "Ask Yes/No",
@@ -881,7 +881,7 @@ int main(void) {
     rig_announce("btn-folders", app.dlg_btns[3]);
     rig_announce("btn-ask", app.dlg_btns[4]);
 
-    /* The render path (1.4.18): the hybrid model's observable — CPU
+    /* The render path (1.0.0): the hybrid model's observable — CPU
      * rasterization either way, with the presentation riding the GPU
      * lane when the machine has one (and the policy accepts it). One
      * paint first: the lane engages at the surface's first framebuffer
@@ -904,7 +904,7 @@ int main(void) {
         if (fdk_pump_events(app.ctx, 15) < 0) {
             break; /* platform connection lost — leave the loop */
         }
-        /* The 1.2.0 build never painted here — every interaction's
+        /* The 1.0.0 build never painted here — every interaction's
          * damage waited for a resize to reach the screen (and the
          * resize-time repaint stamped new text over old, the ghosting
          * report). Paint the tree whenever it has damage: the

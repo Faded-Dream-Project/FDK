@@ -204,7 +204,7 @@ static fdk_u8 *synthesize_italic(fdk_u8 *bits, int w, int h,
      * horizontal bearing; the vertical offset (yoff) is untouched by
      * the shear. v1 computed it from yoff — an axis mixup that
      * shoved ascender-heavy glyphs ~17 px left at 24 px (found by
-     * the 1.3.0 audit; only advances were ever tested). */
+     * the 1.0.0 audit; only advances were ever tested). */
     *out_xoff = xoff + min_shift;
     return out;
 }
@@ -287,7 +287,7 @@ static fdk_u8 *cff_glyph_bitmap(const fdk_font *font, int glyph_index,
  * key, rasterizing on miss and evicting LRU when full. Returns the
  * entry (never NULL). `key` = glyph_index * FDK_TEXT_KEY_STRIDE +
  * variant * FDK_TEXT_SUBPIXEL_PHASES + phase; `style_flags` is the
- * ABSOLUTE synthetic style to bake in (1.4.11: the font's own style
+ * ABSOLUTE synthetic style to bake in (1.0.0: the font's own style
  * for the single-style entry points, the run's style for span walks
  * — the variant component of the key keeps the rasterizations from
  * colliding). */
@@ -451,7 +451,7 @@ static fdk_glyph *glyph_slot(fdk_font *font, int key,
 
         /* Synthetic styles — applied to the bitmap and (for bold) the
          * advance, before the entry is cached, so measure and draw
-         * agree by construction. 1.4.11: the REQUESTED style is baked
+         * agree by construction. 1.0.0: the REQUESTED style is baked
          * in, not the font's current one — the key's variant
          * component keeps regular/bold/italic rasters of the same
          * glyph distinct. */

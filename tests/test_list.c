@@ -19,7 +19,7 @@
 #include "fdk/fdk_widgets.h"
 #include "../src/widget/widgets_internal.h" /* the test seams */
 
-#include "widget/widget_internal.h" /* animation test seam (1.3.8) */
+#include "widget/widget_internal.h" /* animation test seam (1.0.0) */
 
 #include <assert.h>
 #include <stdio.h>
@@ -158,7 +158,7 @@ static void test_single(void) {
     g_changes = 0;
     fdk_list_set_on_selection_changed(list, on_changed, NULL);
 
-    /* 1.4.0: rows lay out at the theme's LIST_ROW_HEIGHT floor (30
+    /* 1.0.0: rows lay out at the theme's LIST_ROW_HEIGHT floor (30
      * with the default Modern theme; the font's own metrics when
      * taller) — every click y below is computed from the PUBLIC
      * row-height getter, not a hardcoded constant. */
@@ -455,7 +455,7 @@ static void test_scrolling(void) {
     /* The internal scrollview did the work; observable: clicking a
      * row that is only reachable SCROLLED hits that row. */
     /* Scroll to the bottom via End-ish: many wheel notches. The
-     * internal scrollview EASES to the accumulated target (1.3.8),
+     * internal scrollview EASES to the accumulated target (1.0.0),
      * so the burst settles before the click: pin the engine's
      * synthetic clock, pump far past any flight. */
     fdk__animation_set_test_clock(0);
@@ -515,7 +515,7 @@ static void test_paint(void) {
            "(pixel-diff verified)\n");
 }
 
-/* ---- columns (1.5.0) ---- */
+/* ---- columns (1.0.0) ---- */
 
 static void test_columns(void) {
     fdk_widget *root = fresh_root();
@@ -584,7 +584,7 @@ static void test_columns(void) {
     assert(fdk_widget_tree_handle_event(root, &up));
     assert(fdk_list_selected_count(list) == 3);
 
-    /* ---- 1.5.1: the right-edge anchor (the owner's round-8
+    /* ---- 1.0.0: the right-edge anchor (the owner's round-8
      * report: the columns clustered at the LEFT, must hug the far
      * end and follow resizes) ---- */
     assert(fdk_list_get_column_count(list) == 3);
@@ -650,7 +650,7 @@ static void test_columns(void) {
            "columns, clear-to-plain)\n");
 }
 
-/* ---- the row-press band start (1.5.0, the round-6 wall-to-wall case) ---- */
+/* ---- the row-press band start (1.0.0, the round-6 wall-to-wall case) ---- */
 
 static void test_row_press_band(void) {
     fdk_widget *root = fresh_root();
@@ -728,7 +728,7 @@ static void test_row_press_band(void) {
     printf("[ok] list: row-press band, armed rows, grab-broken\n");
 }
 
-/* ---- the rubber-band sweep (1.4.2) ---- */
+/* ---- the rubber-band sweep (1.0.0) ---- */
 
 static int g_band_changes;
 
@@ -1091,7 +1091,7 @@ static void test_round10_header_strip(void) {
     }
 
     /* And the no-columns list is unchanged: content_top == 0, a
-     * press at local y = rh+5 is row 1 (the pre-1.5.0 layout). */
+     * press at local y = rh+5 is row 1 (the pre-1.0.0 layout). */
     fdk_widget *plain = NULL;
     assert(fdk_ok(fdk_list_create(root, g_font, &plain)));
     fdk_list_set_selection_mode(plain, FDK_LIST_SELECTION_MULTIPLE);

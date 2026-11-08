@@ -1009,7 +1009,7 @@ static void test_transformed_alpha(void) {
                                                src)));
     /* Interior pixel: exactly the 50% blue-over-white blend
      * (127 = 255 * (1 - 128/255), the honest sa=128 arithmetic).
-     * 1.3.0: integer scale-ups now take the NEAREST-neighbor path
+     * 1.0.0: integer scale-ups now take the NEAREST-neighbor path
      * (with per-pixel source-over compositing for ARGB-over-XRGB) —
      * the interior math is identical, and the edge below stays
      * CRISP instead of the bilinear half-blend v1 produced. */
@@ -1029,7 +1029,7 @@ static void test_transformed_alpha(void) {
 }
 
 static void test_transformed_argb_exact_blit(void) {
-    /* THE 1.5.3 REGRESSION: an ARGB8888 sprite blitted at EXACTLY
+    /* THE 1.0.0 REGRESSION: an ARGB8888 sprite blitted at EXACTLY
      * 1:1 (identity or integer translation — the fast paths) must
      * composite source-over, honoring per-pixel alpha. The old fast
      * paths routed ARGB sources through the OPAQUE raw-copy blit, so
@@ -1234,7 +1234,7 @@ static void test_aa_primitives(void) {
            "monotone falloff, rounded-rect SDF\n");
 }
 
-/* 1.4.17: the AA rounded-rect OUTLINE. The stroke's boundary runs
+/* 1.0.0: the AA rounded-rect OUTLINE. The stroke's boundary runs
  * through the pixel centers of the rect's edge rows, so radius 0
  * collapses to a byte-identical crisp draw_rect, straight sides of
  * a rounded outline land FULL coverage on the boundary pixels (the

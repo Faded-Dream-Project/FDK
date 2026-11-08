@@ -132,7 +132,7 @@ fdk_result fdk_surface_create_from_image(const char *path,
     return FDK_OK;
 }
 
-/* The memory twin (1.4.9): decodes an in-memory image stream
+/* The memory twin (1.0.0): decodes an in-memory image stream
  * (PNG/JPEG/BMP/... — the clipboard's image/png reads ride this).
  * Same validation ladder as the file variant minus the stat checks;
  * a documented hard cap on input length keeps hostile "images" from

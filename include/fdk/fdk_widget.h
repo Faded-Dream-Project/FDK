@@ -73,7 +73,7 @@
 #include "fdk_event.h"
 #include "fdk_surface.h"
 #include "fdk_types.h"
-#include "fdk_theme.h" /* 1.4.16: fdk_theme_token (background_token) */
+#include "fdk_theme.h" /* 1.0.0: fdk_theme_token (background_token) */
 #include "fdk_window.h"
 
 #ifdef __cplusplus
@@ -113,7 +113,7 @@ typedef enum fdk_widget_event_type {
     FDK_WIDGET_IME_PREEDIT   = 11, /* .ime: composition text changed */
     FDK_WIDGET_IME_COMMIT    = 12, /* .ime: final text delivered     */
 
-    /* The implicit pointer grab ended WITHOUT its release (1.5.0).
+    /* The implicit pointer grab ended WITHOUT its release (1.0.0).
      * Delivered to the grabbed widget only, when FDK hands the
      * pointer to something that owns it from then on — today that
      * is fdk_drag_begin_ex: the backend drag's own pointer grab
@@ -231,7 +231,7 @@ typedef struct fdk_widget_class {
      * defaults to NULL). */
     const struct fdk_a11y_class *a11y;
 
-    /* Child capacity cap (1.4.1): 0 = unlimited (the default every
+    /* Child capacity cap (1.0.0): 0 = unlimited (the default every
      * existing class relies on); N > 0 = fdk_widget_create(parent,
      * ...) is refused with FDK_ERR_INVALID_ARGUMENT once the parent
      * already has N children. For fixed-slot containers (Paned's two
@@ -306,7 +306,7 @@ void *fdk_widget_get_user_data(const fdk_widget *widget);
 void fdk_widget_set_name(fdk_widget *widget, const char *name);
 const char *fdk_widget_get_name(const fdk_widget *widget);
 
-/* ---- Tooltips (1.3.2) ---- */
+/* ---- Tooltips (1.0.0) ---- */
 
 /* The hint shown after the pointer rests on the widget for ~500ms:
  * a toolkit-owned, input-TRANSPARENT popup near the widget's lower
@@ -317,7 +317,7 @@ const char *fdk_widget_get_name(const fdk_widget *widget);
  * is parented there) — detached trees store the text but never show
  * it. Returns FDK_ERR_OUT_OF_MEMORY if the copy fails. */
 fdk_result fdk_widget_set_tooltip(fdk_widget *widget, const char *text);
-/* The tooltip's MARKUP twin (1.4.11): the tiny tag vocabulary from
+/* The tooltip's MARKUP twin (1.0.0): the tiny tag vocabulary from
  * fdk_text.h (<b> <i> <u> <s> <color=#rrggbb[aa]> + entities) parses
  * into plain text + attribute spans; the tip wraps by STYLED widths
  * (a bold word is BOLD-wide) and paints styled glyphs, run colors,
@@ -506,7 +506,7 @@ void fdk_widget_arrange(fdk_widget *widget, fdk_rect assigned);
 void fdk_widget_set_background(fdk_widget *widget, fdk_color color);
 /* Rounded-corner radius for the background fill (0 = square). */
 void fdk_widget_set_corner_radius(fdk_widget *widget, fdk_i32 radius);
-/* 1.4.16: the token-following background — the twin of
+/* 1.0.0: the token-following background — the twin of
  * fdk_widget_set_background(). The fill resolves `token` against the
  * CURRENT default theme at paint time (see fdk_theme.h for the token
  * vocabulary), so the widget's surface tracks every theme switch live:

@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * iconview.c — the item GRID (1.4.5)
+ * iconview.c — the item GRID (1.0.0)
  *
  * The canvas-based item layout the parity ledger parked since its
  * first draft: a scrolling field of fixed-size cells (glyph over
@@ -9,9 +9,9 @@
  * columns as the current width fits. The List's whole discipline
  * applies — ScrollView internals (bars, wheel, clipping), the
  * selection model (NONE/SINGLE/MULTIPLE with click / ctrl / shift
- * in reading order), activation by double-click (1.4.7 — the
- * header claimed it since 1.4.5; the cells now deliver it) or
- * Enter, the 1.4.7 band auto-scroll (BOTH axes — the grid scrolls
+ * in reading order), activation by double-click (1.0.0 — the
+ * header claimed it since 1.0.0; the cells now deliver it) or
+ * Enter, the 1.0.0 band auto-scroll (BOTH axes — the grid scrolls
  * sideways too), batched bulk mutation, and the a11y LIST with the
  * cells as real child widgets.
  *
@@ -80,13 +80,13 @@ typedef struct fdk_iconview {
     void *on_selection_data;
     fdk_iconview_item_fn on_activate;
     void *on_activate_data;
-    /* ---- the rubber-band sweep (1.4.6) ----
+    /* ---- the rubber-band sweep (1.0.0) ----
      *
      * The List's drag-select, grid-shaped: a left press on EMPTY
      * grid space sweeps a 2-D rect; every cell whose slot INTERSECTS
      * the rect selects live, plain replacing / ctrl unioning over
      * the press-time snapshot. The anchor is glued to CONTENT space
-     * (captured at press with the offset) so the 1.4.7 auto-scroll
+     * (captured at press with the offset) so the 1.0.0 auto-scroll
      * extension composes: the moving edge rides the offset, the
      * anchor does not, and the sweep GROWS as the view chases the
      * pointer. MULTIPLE mode only. */
@@ -104,7 +104,7 @@ typedef struct fdk_iconview {
                                     * invalidate this replaces
                                     * repainted every cell every
                                     * motion pixel */
-    /* ---- band auto-scroll (1.4.7) ----
+    /* ---- band auto-scroll (1.0.0) ----
      *
      * The List's edge-chasing timer, grid-shaped: while the sweep
      * pointer rests outside the viewport's edge zone on EITHER
@@ -115,7 +115,7 @@ typedef struct fdk_iconview {
      * the sweep simply GROWS as the view chases. Disarmed at the
      * release, on destruction, and when the pointer re-enters. */
     fdk_timer *band_scroll_timer;
-    /* ---- double-click activation (1.4.7) ----
+    /* ---- double-click activation (1.0.0) ----
      * The List's predicate discipline: same item, same press
      * semantics (fdk__window_is_double_click; the second press is
      * on the same cell, so dx/dy are 0). A triple click re-arms
@@ -138,7 +138,7 @@ static fdk_i64 iv_now_ms(void) {
 extern const fdk_widget_class fdk_iconview_class_def;
 static const fdk_widget_class fdk_iv_cell_class_def;
 
-/* The band auto-scroll constants (1.4.7): the List's cadence, step,
+/* The band auto-scroll constants (1.0.0): the List's cadence, step,
  * and edge zone — applied to BOTH axes (the grid scrolls sideways). */
 #define IV_BAND_SCROLL_MS 40
 #define IV_BAND_SCROLL_STEP 24
@@ -194,7 +194,7 @@ static void iv_relayout(fdk_iconview *iv) {
                                              iv->cell_h});
         }
         /* Self-sync the internal scrollview to the view's CURRENT
-         * bounds (the List's rule, found live by the 1.4.7 file
+         * bounds (the List's rule, found live by the 1.0.0 file
          * dialog integration): set_bounds does not run arrange
          * hooks — fdk_widget_arrange is the layout engine's entry —
          * and dialogs that position surfaces by hand (the file
@@ -237,7 +237,7 @@ static void iv_arrange(fdk_widget *w, fdk_rect assigned) {
         /* INNER rect: the scrollview is the view's full-area child —
          * the List's pattern. (Passing `assigned` through verbatim
          * double-offseted the scrollview by the view's own x/y — a
-         * latent 1.4.5 bug every arrange site at x=0 hid.) */
+         * latent 1.0.0 bug every arrange site at x=0 hid.) */
         fdk_rect inner = { 0, 0, assigned.width, assigned.height };
         fdk_widget_set_bounds(iv->scroll, inner);
         fdk_widget_child_layout_changed(iv->scroll);
@@ -438,8 +438,8 @@ static bool iv_cell_handle_event(fdk_widget *w,
             (void)fdk_widget_focus(iv_w);
         }
         iv_cursor_select(iv, index, ev->pointer.modifiers);
-        /* Double-click = activation (1.4.7 — the doc's claim since
-         * 1.4.5, now delivered by the cells): the List's predicate,
+        /* Double-click = activation (1.0.0 — the doc's claim since
+         * 1.0.0, now delivered by the cells): the List's predicate,
          * the same press semantics (the second press is on the SAME
          * cell, so the slop dx/dy are 0). */
         fdk_i64 now = iv_now_ms();
@@ -508,7 +508,7 @@ static const fdk_widget_class fdk_iv_cell_class_def = {
     .a11y = &iv_cell_a11y,
 };
 
-/* ---- the rubber-band sweep (1.4.6) ---- */
+/* ---- the rubber-band sweep (1.0.0) ---- */
 
 /* The sweep's selection pass: the CONTENT-space band rect vs every
  * cell's slot rect — plain intersection, ctrl unions the snapshot. */
@@ -591,7 +591,7 @@ static void iv_apply_band(fdk_iconview *iv) {
     }
 }
 
-/* ---- band auto-scroll (1.4.7, grid-shaped) ---- */
+/* ---- band auto-scroll (1.0.0, grid-shaped) ---- */
 
 static void iv_band_scroll_disarm(fdk_iconview *iv);
 
@@ -698,7 +698,7 @@ static bool iv_handle_event(fdk_widget *w,
                             const fdk_widget_event *ev) {
     fdk_iconview *iv = iv_of(w);
 
-    /* ---- the rubber-band sweep (1.4.6) ----
+    /* ---- the rubber-band sweep (1.0.0) ----
      *
      * A left press reaching the VIEW itself is by construction on
      * EMPTY space (cells consume their own presses; the scrollview
@@ -747,7 +747,7 @@ static bool iv_handle_event(fdk_widget *w,
         }
         iv_apply_band(iv);
         /* A press that STARTS at the edge chases immediately (the
-         * List's 1.4.3 rule, applied at the gesture's birth). */
+         * List's 1.0.0 rule, applied at the gesture's birth). */
         iv_band_scroll_track(iv);
         iv_fire_selection_changed(iv);
         return true;
@@ -865,7 +865,7 @@ static void iv_view_paint(fdk_widget *w, fdk_surface *surface,
                           fdk_rect bounds, fdk_rect clip) {
     (void)clip;
     fdk_iconview *iv = iv_of(w);
-    /* The rubber band (1.4.6), painted UNDER the cells (the view's
+    /* The rubber band (1.0.0), painted UNDER the cells (the view's
      * paint runs before its scrollview subtree): the List's accent
      * tint + border, clamped to the view's bounds. The anchor's
      * on-screen position tracks the CONTENT it is glued to. */
@@ -1007,7 +1007,7 @@ fdk_result fdk_iconview_create(fdk_widget *parent, fdk_font *font,
     iv->selected_count = 0;
     iv->batch_depth = 0;
     iv->batch_dirty = false;
-    /* The themed defaults (LAYOUT metrics — 1.4.6): a theme can
+    /* The themed defaults (LAYOUT metrics — 1.0.0): a theme can
      * re-slot every grid; set_item_size overrides per-widget. */
     iv->cell_w = fdk_theme_get_metric(NULL, FDK_TM_ICONVIEW_CELL_WIDTH);
     iv->cell_h = fdk_theme_get_metric(NULL,
@@ -1185,7 +1185,7 @@ fdk_result fdk__iconview_reflow(fdk_widget *iconview) {
      * is normally derived. This is the hand-placement counterpart:
      * re-derive the column count from the CURRENT bounds and re-slot
      * when it moved. Found live by the icon-theme pixel group: the
-     * dialog's grid had been a single column since 1.4.7 — every
+     * dialog's grid had been a single column since 1.0.0 — every
      * navigation test used two items, where one column is
      * indistinguishable from the intended flow. */
     if (iconview == NULL || iconview->klass != &fdk_iconview_class_def) {

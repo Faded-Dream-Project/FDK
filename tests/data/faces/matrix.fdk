@@ -1,5 +1,5 @@
 # matrix.fdk — the high-contrast green-on-black theme FDK ships
-# (1.4.13).
+# (1.0.0).
 #
 # Deliberately sparse: only seven colors and one metric are
 # overridden; everything else inherits the built-in defaults —

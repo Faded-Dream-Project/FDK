@@ -331,7 +331,7 @@ fdk_result fdk_x11_window_get_framebuffer(fdk_platform_window *pwindow,
     if (w <= 0) w = 1;
     if (h <= 0) h = 1;
 
-    /* --- GPU present lane (1.4.18) ----------------------------------
+    /* --- GPU present lane (1.0.0) ----------------------------------
      *
      * Engages lazily HERE — the first framebuffer acquisition of any
      * window on the connection pays the one-shot libGL dlopen (never
@@ -488,7 +488,7 @@ static void put_region(fdk_platform_window *pwindow, XImage *img,
     }
 }
 
-/* THE lane downgrade (1.4.18, shared since 1.0.0-rc1): a lane
+/* THE lane downgrade (1.0.0, shared since 1.0.0-rc1): a lane
  * verdict against this window — a failed present OR the self-check
  * tick's REAL-failure decision (which lands between presents) —
  * salvages the current frame and re-presents it through the classic
@@ -584,7 +584,7 @@ fdk_result fdk_x11_window_present(fdk_platform_window *pwindow,
         }
     }
 
-    /* --- GPU present lane (1.4.18) -------------------------------
+    /* --- GPU present lane (1.0.0) -------------------------------
      *
      * Fast path: upload the damaged rects into the window's GL
      * texture, composite the fullscreen quad, swap. A nonzero return
@@ -766,7 +766,7 @@ void fdk_x11_surface_cleanup(fdk_platform_window *pwindow) {
     if (pwindow == NULL) {
         return;
     }
-    /* GPU lane teardown (1.4.18): destroys the GLX context while the
+    /* GPU lane teardown (1.0.0): destroys the GLX context while the
      * display is still alive; libGL itself stays pinned (loader state
      * belongs to the connection and dies at disconnect). */
     if (pwindow->gl_win != NULL) {
@@ -807,7 +807,7 @@ int fdk_x11_window_ever_presented(fdk_platform_window *pwindow) {
  * same two exceptions Wayland grants (nothing presented yet — always
  * allowed; capacity — both SHM slots still awaiting ShmCompletion
  * means a present would sync-wait inside acquire, so let the app
- * spin its loop instead, exactly the 1.1.6 Wayland capacity gate's
+ * spin its loop instead, exactly the 1.0.0 Wayland capacity gate's
  * reasoning). Popup/override-redirect windows skip the pace: their
  * first-present latency is their correctness (menus must appear in
  * the frame they open), they present once or twice in a lifetime,
@@ -833,7 +833,7 @@ int fdk_x11_window_frame_ready(fdk_platform_window *pwindow) {
 }
 
 int fdk_x11_window_render_path(fdk_platform_window *pwindow) {
-    /* The window_render_path op (1.4.18): 1 while this window presents
+    /* The window_render_path op (1.0.0): 1 while this window presents
      * through the GPU lane, 0 on the classic CPU path (including
      * never-engaged and downgraded windows — the honest, current
      * answer, read live off the backend's own state). */

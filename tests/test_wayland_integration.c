@@ -26,7 +26,7 @@
  *    answer. Compositors WITHOUT the protocol (kiosk-shell weston
  *    here, Muffin's experimental Wayland session on real desktops)
  *    never draw chrome at all — client-side is the xdg-shell
- *    default, so the band must simply come up (1.1.5: it used to
+ *    default, so the band must simply come up (1.0.0: it used to
  *    return FDK_ERR_UNSUPPORTED, which killed the decorations demo
  *    before it ever mapped a window).
  */
@@ -43,11 +43,11 @@
  * through the sanctioned ops wrapper — the Wayland platform header
  * itself never leaves src/platform/wayland/. */
 #include "window/window_internal.h"
-/* 1.3.5: the key-repeat section drives the platform's keyboard
+/* 1.0.0: the key-repeat section drives the platform's keyboard
  * listener state machine through the ops test seams (see
  * platform_internal.h) — same internal-seam discipline. */
 #include "core/context_internal.h"
-/* GPU-lane group (1.2.0 / D-1): the test-reset seam — the exact
+/* GPU-lane group (1.0.0 / D-1): the test-reset seam — the exact
  * x11_gl.h discipline test_x11_integration.c uses for its own GL
  * group. */
 #include "platform/wayland/wayland_egl.h"
@@ -80,7 +80,7 @@
 static fdk_dialog_response g_wayland_dlg_last =
     (fdk_dialog_response)-99;
 
-/* 1.3.5 key-repeat counters (the repeat section's window callback). */
+/* 1.0.0 key-repeat counters (the repeat section's window callback). */
 static int g_rep_downs = 0;
 static int g_rep_repeats = 0;
 static long long g_rep_first_ms = 0;
@@ -97,7 +97,7 @@ typedef struct {
 } wl_touch_capture;
 static wl_touch_capture g_wl_touch;
 
-/* GPU-lane self-check leg (1.2.0 / D-1): counts the lane's
+/* GPU-lane self-check leg (1.0.0 / D-1): counts the lane's
  * REAL-failure warnings — the contract is one per CONNECTION, never
  * one per window (the x11_gl.c leg's counting-sink shape). */
 static void wlgl_sc_counting_sink(fdk_log_level level, const char *tag,
@@ -110,7 +110,7 @@ static void wlgl_sc_counting_sink(fdk_log_level level, const char *tag,
     }
 }
 
-/* §21 (1.1.1): the GL-lane legs' capture sink — records every INFO+
+/* §21 (1.0.0): the GL-lane legs' capture sink — records every INFO+
  * lane line into a big buffer (probe verdicts, ladder rotations,
  * FDK_GL_TRACE lines) so the legs can assert on the exact wording,
  * WHILE still teeing to stderr (a failing leg's console output keeps
@@ -449,7 +449,7 @@ static bool pixel_is_band_fill(fdk_u32 px) {
            (px & 0xFFu) == b;
 }
 
-/* ---- 1.2.0 DnD receive accounting (the drop-target section) ---- */
+/* ---- 1.0.0 DnD receive accounting (the drop-target section) ---- */
 static struct {
     int enters, motions, leaves, drops;
     char uris[2][512];
@@ -555,7 +555,7 @@ static void wl_dnd_rx_event(fdk_window *w, const fdk_event_data *ev,
     }
 }
 
-/* ---- 1.3.3 accelerator section callbacks ---- */
+/* ---- 1.0.0 accelerator section callbacks ---- */
 
 static void wl_accel_app_shortcut(fdk_window *window, void *user) {
     (void)window;
@@ -1345,7 +1345,7 @@ int main(void) {
     assert(size.width > 0 && size.height > 0);
 
     /* ---- Decorations: the band must come up on ANY compositor ----
-     * (1.1.5) A compositor without zxdg_decoration_manager_v1 never
+     * (1.0.0) A compositor without zxdg_decoration_manager_v1 never
      * draws chrome itself — client-side is the xdg-shell default —
      * so set_decorated(true) must succeed everywhere: kiosk-shell
      * here, Muffin/Cinnamon Wayland on a real desktop, tiling WMs.
@@ -1469,7 +1469,7 @@ int main(void) {
     printf("[ok] minimize: request sent, optimistic state flagged, "
            "restore honestly UNSUPPORTED\n");
 
-    /* ---- Fullscreen (1.4.10): request + configure-driven state ----
+    /* ---- Fullscreen (1.0.0): request + configure-driven state ----
      *
      * The same three-world honesty as maximize: (a) compositor
      * honors it -> configure carries FULLSCREEN -> is_fullscreen
@@ -1579,7 +1579,7 @@ int main(void) {
             /* COMPOSITOR-OWNED geometry: either the compositor tiles
              * windows (a client resize is overridden by the layout,
              * so the growth never lands) or it configured the window
-             * fullscreen/maximized — under which FDK (1.1.5) REFUSES
+             * fullscreen/maximized — under which FDK (1.0.0) REFUSES
              * the resize outright, because committing a non-
              * configured size under those states is a protocol error
              * on strict compositors (weston kills the connection).
@@ -1700,7 +1700,7 @@ int main(void) {
      *
      * Seat-less compositors honestly skip: weston kiosk-shell
      * advertises wl_data_device_manager but has NO wl_seat, so no
-     * data device can exist (found live when the 1.1.5 manager-less
+     * data device can exist (found live when the 1.0.0 manager-less
      * rig started running this suite under kiosk-shell; the sway rig
      * has a seat and runs the full assertions). */
     {
@@ -1730,7 +1730,7 @@ int main(void) {
         }
     }
 
-    /* ---- PRIMARY selection (1.3.4) ----
+    /* ---- PRIMARY selection (1.0.0) ----
      *
      * The classic Unix "current selection" buffer over
      * wp_primary_selection_unstable_v1: own-source round trip +
@@ -1775,13 +1775,13 @@ int main(void) {
         }
     }
 
-    /* ---- Key repeat (1.3.5) ----
+    /* ---- Key repeat (1.0.0) ----
      *
      * Wayland repeat is CLIENT-driven off wl_keyboard::repeat_info —
      * this is the machinery the X11 backend gets from the server for
      * free. sway headless cannot deliver wl_keyboard.key at all (the
      * seat never adopts a virtual keyboard's keymap — protocol-traced
-     * in 1.3.3), so the suite drives the REAL listener bodies through
+     * in 1.0.0), so the suite drives the REAL listener bodies through
      * the ops test seams: press arms (after the delay), the pump's
      * next_wakeup cap keeps the loop waking at period speed,
      * dispatch_pending fires the repeats, the release disarms, and
@@ -2097,7 +2097,7 @@ int main(void) {
             fdk_menu_destroy(menu);
             /* The opener button BORROWS `font` — destroy it before the
              * font or every later repaint of this window's tree reads
-             * freed metrics (a latent UAF the 1.1.6 pacing section's
+             * freed metrics (a latent UAF the 1.0.0 pacing section's
              * configure-repaint first detonated, live under ASan). */
             fdk_widget_destroy(btn);
             fdk_font_destroy(font);
@@ -2430,7 +2430,7 @@ int main(void) {
         }
     }
 
-    /* ---- 1.1.6: buffer starvation / frame pacing ----
+    /* ---- 1.0.0: buffer starvation / frame pacing ----
      *
      * The live report from Muffin's experimental Wayland session: the
      * 250ms starvation guard expired while the compositor was (legally)
@@ -2493,7 +2493,7 @@ int main(void) {
          * release (bounded, release-queue-dispatched: the wait's own
          * flush finally hands sway the buffered commits, and its
          * answers arrive within the window) and LAND the frame —
-         * pre-1.1.6 this was an instant refusal + WARN + dropped
+         * pre-1.0.0 this was an instant refusal + WARN + dropped
          * frame (the rig's zero-refusal check pins that half; the
          * pre-fix control build fails it, proving the probe sees the
          * bug). The guard-time full-pool state itself only persists
@@ -2516,10 +2516,10 @@ int main(void) {
         printf("[ok] wayland pacing: pumping recovers readiness "
                "(release + frame callback credited)\n");
 
-        /* 1.1.7: the RESIZE-CHURN path. Re-exhaust the pool at the
+        /* 1.0.0: the RESIZE-CHURN path. Re-exhaust the pool at the
          * current size with unflushed presents, then move the window
          * to a NEW size and repaint: every busy slot is now at the
-         * wrong size, so the 1.1.6 wait — which exits only on a
+         * wrong size, so the 1.0.0 wait — which exits only on a
          * CURRENT-size release — could never be satisfied on a
          * compositor that holds its buffers past the wait window; it
          * burned the full 100ms budget per frame before the
@@ -2529,7 +2529,7 @@ int main(void) {
          * classified churn budget reaches progress after ONE poll
          * slice instead.
          *
-         * HONEST LIMITATION (same class as the 1.1.6 pacing note):
+         * HONEST LIMITATION (same class as the 1.0.0 pacing note):
          * sway releases buffers within a frame, crediting the pool
          * before the acquisition wait even starts — so on THIS
          * compositor pre-fix and post-fix converge to a few ms and
@@ -2581,10 +2581,10 @@ int main(void) {
         fdk_window_destroy(pw);
     }
 
-    /* ---- 1.1.6: cursor shaping (edge affordance) ----
+    /* ---- 1.0.0: cursor shaping (edge affordance) ----
      *
-     * The resize cursor that was X11-only in 1.1.4: on Wayland the
-     * client owns its cursor pixels, and 1.1.6 ships the XCursor
+     * The resize cursor that was X11-only in 1.0.0: on Wayland the
+     * client owns its cursor pixels, and 1.0.0 ships the XCursor
      * theme loader (wayland_cursor.c) behind the same window_set_cursor
      * op. Driven with REAL injected motion — the serial a set_cursor
      * request must cite is only minted by real input. The rig's sway
@@ -2625,8 +2625,8 @@ int main(void) {
         printf("[ok] wayland cursor: interior motion restored the "
                "default shape\n");
 
-        /* 1.1.7: a TOP-EDGE press must RESIZE, not move. The cursor
-         * has promised N here since 1.1.6, but the press filter's
+        /* 1.0.0: a TOP-EDGE press must RESIZE, not move. The cursor
+         * has promised N here since 1.0.0, but the press filter's
          * origin gate ran BEFORE the compositor-driven begin_resize,
          * and Wayland's ops table has no window_get_position — so
          * every origin-moving edge (N/NE/NW/W/SW) dead-ended out of
@@ -2785,7 +2785,7 @@ int main(void) {
 
         fdk_window_destroy(cw);
 
-        /* ---- 1.2.5: query_pointer hit-testing unification ----
+        /* ---- 1.0.0: query_pointer hit-testing unification ----
          *
          * The contract the X11 side always ran: "inside" means
          * inside the CURRENT geometry. The Wayland op used to answer
@@ -2855,7 +2855,7 @@ int main(void) {
                "here)\n");
     }
 
-    /* ---- 1.2.0: drag and drop (external raw-libwayland source) ----
+    /* ---- 1.0.0: drag and drop (external raw-libwayland source) ----
      *
      * The interop rig: scripts/wl_dnd_source is a REAL external
      * client (plain libwayland + the generated xdg-shell protocol,
@@ -3137,7 +3137,7 @@ int main(void) {
         }
     }
 
-    /* ---- 1.3.3: shortcuts + menu accelerators through the REAL
+    /* ---- 1.0.0: shortcuts + menu accelerators through the REAL
      * window dispatch ----
      *
      * sway headless cannot deliver wl_keyboard.key to clients at all
@@ -3581,7 +3581,7 @@ int main(void) {
     }
     }
 
-    /* ---- GPU present lane (1.2.0 / D-1) --------------------------------
+    /* ---- GPU present lane (1.0.0 / D-1) --------------------------------
      *
      * The EGL mirror of test_x11_integration.c's GL-lane group,
      * same contract, platform-appropriate proofs:
@@ -3927,7 +3927,7 @@ int main(void) {
         }
         unsetenv("FDK_GL_CORE_ONLY");
 
-        /* ---- §21 (1.1.1): the probe's shape ladder -------------------
+        /* ---- §21 (1.0.0): the probe's shape ladder -------------------
          * FDK_GL_PROBE_SKIP=<n> makes the probe reject the first n
          * shapes as if the driver refused them, so EVERY shape gets a
          * deterministic live-EGL leg on any stack: skip=1 -> BGRA +
@@ -4079,7 +4079,7 @@ int main(void) {
             gl_lane_capture_reset();
         }
 
-        /* ---- §21 (1.1.1): the present ladder -------------------------
+        /* ---- §21 (1.0.0): the present ladder -------------------------
          * FDK_GL_POISON_FIRST=1 injects a REAL driver error (a
          * guaranteed-invalid format enum) at the first present's
          * first upload attempt: the lane must ROTATE to the next
@@ -4257,7 +4257,7 @@ int main(void) {
             gl_lane_capture_reset();
         }
 
-        /* ---- §21 (1.1.1): FDK_GL_TRACE -------------------------------
+        /* ---- §21 (1.0.0): FDK_GL_TRACE -------------------------------
          * One present under the trace: the engagement dump and the
          * per-call lines must appear (counted through the capture
          * sink), and the lane must still deliver the frame — the

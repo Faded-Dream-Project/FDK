@@ -1,5 +1,5 @@
 /*
- * fdk-theme.c — the theme face of the FDK command line (1.4.13)
+ * fdk-theme.c — the theme face of the FDK command line (1.0.0)
  *
  *     fdk-theme list              what is installed, where
  *     fdk-theme get               what a new FDK app would use
@@ -272,7 +272,7 @@ static int cmd_set(const char *name) {
            fdk_theme_file_path(t) != NULL ? fdk_theme_file_path(t)
                                           : "(built-in)");
     printf("running FDK applications re-theme the moment this lands "
-           "(1.4.14: they watch the settings file)\n");
+           "(1.0.0: they watch the settings file)\n");
     fdk_theme_destroy(t);
     return 0;
 }

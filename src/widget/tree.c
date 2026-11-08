@@ -22,7 +22,7 @@
  * jumps to its parent; Right expands a parent or enters its first
  * child; Home/End/PageUp/PageDown behave like List.
  *
- * 1.4.3 — the parked multi-select tree, shipped: the List's exact
+ * 1.0.0 — the parked multi-select tree, shipped: the List's exact
  * model (fdk_tree_selection_mode), ctrl/shift/ctrl+shift click
  * semantics over the VISIBLE sequence, and the rubber band with
  * ctrl-union sweeps over empty tree space, auto-scrolling when the
@@ -54,7 +54,7 @@ typedef struct fdk_tree_node_rec {
     bool dead;         /* removed: tombstone keeps every
                        * OTHER handle stable (the store
                        * never reuses an index)          */
-    fdk_row_icon icon; /* 1.4.2: the glyph before the text
+    fdk_row_icon icon; /* 1.0.0: the glyph before the text
                        * (rides the MODEL, so it survives
                        * collapses and re-expansions)    */
 } fdk_tree_node_rec;
@@ -78,7 +78,7 @@ typedef struct fdk_tree {
     size_t anchor;         /* keyboard/selection position (visible idx) */
     fdk_tree_selection_fn on_selection_changed;
     void *on_selection_data;
-    /* ---- 1.4.3: multi-selection + the rubber band ---- */
+    /* ---- 1.0.0: multi-selection + the rubber band ---- */
     fdk_tree_selection_mode mode;   /* default SINGLE                */
     bool banding;
     bool band_ctrl;      /* the union modifier at press           */
@@ -445,7 +445,7 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     fdk_tree_node_rec *n = &t->nodes[row->node];
 
     if (n->selected) {
-        /* The 1.3.2 SELECTION_BACKGROUND token, wired in 1.4.0. */
+        /* The 1.0.0 SELECTION_BACKGROUND token, wired in 1.0.0. */
         fdk_surface_fill_rect(surface, bounds, fdk__pal_selection());
     } else if ((w->flags & FDK_WF_HOVERED) != 0 &&
                (w->flags & FDK_WF_ENABLED) != 0) {
@@ -487,7 +487,7 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     }
     fdk_i32 baseline = fdk__center_baseline(t->font, bounds.y,
                                             bounds.height);
-    /* The symbolic glyph (1.4.2): the List's language, between the
+    /* The symbolic glyph (1.0.0): the List's language, between the
      * expander zone and the text, vertically centered in its 16-px
      * box. */
     fdk_i32 text_x = x;
@@ -538,7 +538,7 @@ static bool row_handle_event(fdk_widget *w,
             return true;
         }
     }
-    /* 1.4.3: the multi-select click semantics (SINGLE reads every
+    /* 1.0.0: the multi-select click semantics (SINGLE reads every
      * modifier as a plain click — the classic behavior). */
     for (size_t i = 0; i < t->row_count; i++) {
         if (t->row_widgets[i]->node == row->node) {
@@ -648,7 +648,7 @@ static const fdk_widget_class fdk_tree_row_class_def = {
     .a11y = &tree_row_a11y,
 };
 
-/* ---- tree-level events: keyboard + the 1.4.3 rubber band ---- */
+/* ---- tree-level events: keyboard + the 1.0.0 rubber band ---- */
 
 /* Applies the band's live selection: every VISIBLE row whose
  * content-space extent intersects the band (viewport y + scroll
@@ -777,7 +777,7 @@ static bool tree_handle_event(fdk_widget *w,
                               const fdk_widget_event *ev) {
     fdk_tree *t = tree_of(w);
 
-    /* ---- the rubber-band sweep (1.4.3) ----
+    /* ---- the rubber-band sweep (1.0.0) ----
      *
      * A left press reaching the TREE itself is on EMPTY space (rows
      * consume their own presses; the scrollview does not consume
@@ -962,7 +962,7 @@ static bool tree_handle_event(fdk_widget *w,
     }
     if (next != cur || sel == FDK_TREE_NODE_NONE) {
         if (next >= 0) {
-            /* 1.4.3: shift extends the range from the anchor in
+            /* 1.0.0: shift extends the range from the anchor in
              * MULTIPLE mode (the keyboard twin of shift-click); plain
              * keys take the classic single-select walk. */
             bool shift = (ev->key.modifiers & FDK_MOD_SHIFT) != 0;
@@ -1190,7 +1190,7 @@ fdk_result fdk_tree_node_add(fdk_widget *tree, fdk_tree_node parent,
     return FDK_OK;
 }
 
-/* ---- node icons (1.4.2) ---- */
+/* ---- node icons (1.0.0) ---- */
 
 fdk_result fdk_tree_node_set_icon(fdk_widget *tree,
                                   fdk_tree_node node, fdk_row_icon icon) {
@@ -1235,7 +1235,7 @@ fdk_row_icon fdk_tree_node_get_icon(fdk_widget *tree,
     return t->nodes[node].icon;
 }
 
-/* ---- node removal (1.3.0) ----
+/* ---- node removal (1.0.0) ----
  *
  * Handles are indices into the node store, and the store NEVER
  * reuses an index — removal TOMBSTONES the record (dead = true,
@@ -1439,7 +1439,7 @@ void fdk_tree_set_on_selection_changed(fdk_widget *tree,
     t->on_selection_data = user_data;
 }
 
-/* ---- selection mode + multi-selection API (1.4.3) ---- */
+/* ---- selection mode + multi-selection API (1.0.0) ---- */
 
 void fdk_tree_set_selection_mode(fdk_widget *tree,
                                  fdk_tree_selection_mode mode) {

@@ -13,7 +13,7 @@
 #include <string.h>
 #include <time.h> /* nanosleep — the self-check retry budget */
 
-/* The GPU presentation lane (1.4.18) — implementation.
+/* The GPU presentation lane (1.0.0) — implementation.
  *
  * Everything in this file deliberately avoids GL headers: the API
  * subset FDK needs (fixed-function compat profile: one textured
@@ -51,8 +51,8 @@
  * the staging buffer's little-endian bytes [B][G][R][X] in that
  * order, NEAREST at 1:1 maps window pixel (x, y) to texel (x, y),
  * and the X byte rides along as a texture alpha the RGB visual
- * discards. The 1.4.17 pixel battery pins the CPU path's bytes; the
- * 1.4.18 tests pin the GL path to those SAME bytes.
+ * discards. The 1.0.0 pixel battery pins the CPU path's bytes; the
+ * 1.0.0 tests pin the GL path to those SAME bytes.
  *
  * Library pinning: libGL is dlopen'd once per process and NEVER
  * dlclose'd. Mesa/GLVND register process-global state (dispatch
@@ -95,7 +95,7 @@ enum {
     GLC_TEXTURE_ENV_MODE = 0x2200,
     GLC_REPLACE = 0x1E01,
     GLC_QUADS = 7, /* GL_TRIANGLES is 4 — a quad is 7 (the value, not the
-                        * count; the 1.4.18 bring-up tripped over exactly this) */
+                        * count; the 1.0.0 bring-up tripped over exactly this) */
     GLC_PROJECTION = 0x1701,
     GLC_MODELVIEW = 0x1700,
     GLC_UNPACK_ROW_LENGTH = 0x0CF2,

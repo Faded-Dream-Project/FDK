@@ -1,5 +1,5 @@
 /*
- * undo.c — the generic undo/redo stack (1.3.3)
+ * undo.c — the generic undo/redo stack (1.0.0)
  *
  * See include/fdk/fdk_undo.h for the full contract. Implementation
  * notes:

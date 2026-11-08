@@ -6,7 +6,7 @@ model that makes partial redraws correct, the clip stack, offscreen
 surfaces (two pixel formats), image decoding, per-pixel alpha
 compositing, affine-transformed blits, antialiased primitives, frame
 pacing, HiDPI scale handling, and how the X11 (MIT-SHM double
-buffer, plus the 1.4.18 GPU present lane) and Wayland (buffer scale /
+buffer, plus the 1.0.0 GPU present lane) and Wayland (buffer scale /
 fractional viewport) backends present pixels without any backend type
 leaking into application code.
 
@@ -275,7 +275,7 @@ one — pinned by test; a zero-radius AA outline is byte-identical to
 `draw_rect`), and every blended value stays inside the convex hull
 of background and shape color.
 
-Since 1.4.17 the **widget layer paints its themed chrome through
+Since 1.0.0 the **widget layer paints its themed chrome through
 the `_aa` variants** — buttons, check/radio indicators, entry and
 combo fields, menus, tooltips, pills, sliders, scrollbars, focus
 rings, window-band buttons: interior pixels stay byte-identical to
@@ -321,7 +321,7 @@ pixel-identical). Damage rects convert to surface-local logical
 coordinates at present time, rounding outward. Verified end-to-end
 against sway at output scale 2 (physical exactly 2x logical).
 
-## The GPU present lane (1.4.18)
+## The GPU present lane (1.0.0)
 
 FDK is a HYBRID renderer, and the split is deliberate: **every pixel
 is rasterized on the CPU** (the surface layer's exact, antialiased
@@ -337,9 +337,9 @@ frame** takes one of two paths:
   composite carries the frame to the screen — `glTexSubImage2D`
   (BGRA/UNSIGNED_BYTE, the framebuffer's little-endian XRGB8888
   bytes read in place, zero conversion), a NEAREST 1:1 quad, and the
-  platform's swap: `glXSwapBuffers` on X11 (1.4.18),
+  platform's swap: `glXSwapBuffers` on X11 (1.0.0),
   `eglSwapBuffers` through a `wl_egl_window`-backed EGL surface on
-  Wayland (1.2.0 / D-1 — `src/platform/wayland/wayland_egl.c`, the
+  Wayland (1.0.0 / D-1 — `src/platform/wayland/wayland_egl.c`, the
   exact contract of the GLX lane carried over: CPU rasterization
   unchanged, the lane replaces only the "pixels → compositor" half
   of present(), with the quad's fragment shader pinning alpha 1.0
@@ -359,7 +359,7 @@ frame** takes one of two paths:
   no XGetImage equivalent a client may call against another
   surface).
 
-**The Wayland lane's upload contract (1.1.1, the §21 round) is
+**The Wayland lane's upload contract (1.0.0, the §21 round) is
 decided by the DRIVER, not the extension string**: at engagement
 each of the four upload shapes (BGRA + UNPACK_ROW_LENGTH, BGRA with
 tightly packed sub-rects, a CPU-swizzled RGBA twin + ROW_LENGTH,
@@ -491,8 +491,8 @@ rendering is `src/text/`'s AA glyph masks — Subpixel RGB glyph
 rasterization is a possible later refinement); fractional HiDPI is
 exercised by the code paths but the sway test rig runs integer scale 2
 (headless outputs with true fractional scales are a compositor-config
-matter); the GPU present lane covers both backends since 1.2.0
-(X11/GLX since 1.4.18, Wayland/EGL per the section above — hardware
+matter); the GPU present lane covers both backends since 1.0.0
+(X11/GLX since 1.0.0, Wayland/EGL per the section above — hardware
 renderers only; Mesa's software rasterizers stay on wl_shm, where
 the CPU path is faster, unless FDK_GL_FORCE=1). None of
 these reshape this layer's contracts.

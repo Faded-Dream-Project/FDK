@@ -61,7 +61,7 @@
 #define MENU_FONT_PAD 8    /* row height = font extent + this   */
 
 /* Depth bound for every recursive model walk (submenu recursion in
- * the 1.3.3 accelerator scan and the cycle check in
+ * the 1.0.0 accelerator scan and the cycle check in
  * fdk_menu_item_set_submenu). set_submenu refuses cycles outright;
  * the bound is defense-in-depth so a hand-corrupted model can never
  * hang a walk. */
@@ -85,7 +85,7 @@ struct fdk_menu_item {
     char *text;       /* owned; NULL for separators; mnemonic
                       * markers ("&F") already stripped      */
     char *shortcut;   /* owned display-only label            */
-    /* 1.3.6 — the mnemonic (underlined-letter Alt+letter
+    /* 1.0.0 — the mnemonic (underlined-letter Alt+letter
      * navigation): the lowercased marker letter (0 = none) and its
      * byte range in `text` (start inclusive, end exclusive — the
      * underline's x-extent is measured over exactly this span). */
@@ -101,7 +101,7 @@ struct fdk_menu_item {
     fdk_menu *owner;  /* the menu that appended us — set once
                       * at creation, never changed; lets the radio
                       * group rule run from the DIRECT setter
-                      * (1.3.0), matching fdk_radio_set_checked. */
+                      * (1.0.0), matching fdk_radio_set_checked. */
 };
 
 struct fdk_menu {
@@ -111,7 +111,7 @@ struct fdk_menu {
     size_t cap;
     fdk_menu_activate_fn on_activate; /* menu-wide fallback */
     void *on_activate_user;
-    /* 1.3.2 — bars currently listing this model (fdk_menu_bar_append
+    /* 1.0.0 — bars currently listing this model (fdk_menu_bar_append
      * registers; bar_destroy detaches; fdk_menu_destroy removes the
      * listing). Sessions are swept globally at destroy instead (the
      * session table is file-static). Without this registry a model
@@ -155,13 +155,13 @@ void fdk_menu_destroy(fdk_menu *menu) {
     if (menu == NULL) {
         return;
     }
-    /* 1.3.2 — close everything still showing this model BEFORE the
+    /* 1.0.0 — close everything still showing this model BEFORE the
      * memory goes: every active session level whose chain entry
      * borrowed it (popup windows die topmost-first inside the close,
      * taking their views with them), then every menu bar listing it
      * (the title is removed from the bar; the bar relayouts). This
      * is the GTK-shaped contract: destroying a model closes its
-     * menus. The pre-1.3.2 code freed the rows and left the popups
+     * menus. The pre-1.0.0 code freed the rows and left the popups
      * painting freed memory the moment anything drove a paint (the
      * Wayland first-configure EXPOSE detonated it under ASan; X11's
      * map-Expose always could have). */
@@ -205,7 +205,7 @@ static fdk_u32 mn_decode(const char *p, size_t len) {
     return (fdk_u32)u[0];
 }
 
-/* ---- 1.3.6: mnemonic parsing ----------------------------------------
+/* ---- 1.0.0: mnemonic parsing ----------------------------------------
  *
  * Labels may carry "&X" markers: the NEXT character (a full UTF-8
  * codepoint) becomes the item's mnemonic — rendered underlined, and
@@ -499,7 +499,7 @@ void fdk_menu_item_set_checked(fdk_menu_item *item, bool checked) {
         /* All radios of the same menu are one group: checking one
          * unchecks its radio siblings — the same rule the activation
          * path enforces, now reachable from the DIRECT setter via
-         * the item's owner back-pointer (1.3.0; before, the setter
+         * the item's owner back-pointer (1.0.0; before, the setter
          * could produce two checked radios in one group, a state the
          * keyboard/activation paths never create). */
         if (item->owner != NULL) {
@@ -537,7 +537,7 @@ fdk_result fdk_menu_item_set_shortcut(fdk_menu_item *item,
     return FDK_OK;
 }
 
-/* 1.3.3: is `target` reachable from `from` via item->submenu links?
+/* 1.0.0: is `target` reachable from `from` via item->submenu links?
  * Bounded depth — this walks developer-built models, and the refusal
  * below is what actually keeps the graph acyclic; the bound only
  * guarantees this walk terminates even on a pre-existing cycle. */
@@ -563,7 +563,7 @@ fdk_result fdk_menu_item_set_submenu(fdk_menu_item *item,
     if (item == NULL || item->kind != FDK_MIK_NORMAL) {
         return FDK_ERR_INVALID_ARGUMENT;
     }
-    /* 1.3.3 — cycle refusal: wiring a submenu that already reaches
+    /* 1.0.0 — cycle refusal: wiring a submenu that already reaches
      * this item's own menu would build an infinite menu tree. Every
      * walker of that tree (the session's chain-open recursion, the
      * accelerator scan, a11y tree walkers) would hang or balloon;
@@ -737,7 +737,7 @@ typedef struct fdk_menu_view {
     int highlight;     /* pointer-hover row, -1 none              */
     int key_row;       /* keyboard cursor, -1 none                */
     int open_row;      /* row whose submenu is open, -1 none      */
-    /* 1.4.2: per-row hover blends — the pill fades in/out on the
+    /* 1.0.0: per-row hover blends — the pill fades in/out on the
      * same 120-ms machinery the buttons ride (the SEMANTIC
      * highlight flips instantly; keyboard cursor rows and open
      * submenu-parent rows still snap — state, not whisper). NULL
@@ -766,7 +766,7 @@ static fdk_menu_view *view_of(fdk_widget *w) {
     return (fdk_menu_view *)(void *)w;
 }
 
-/* ---- 1.4.2: the row-pill hover fades ----
+/* ---- 1.0.0: the row-pill hover fades ----
  *
  * The pill fades through the shared hover-fade machinery (statics.c):
  * the SEMANTIC highlight still flips instantly (submenu opening,
@@ -1032,7 +1032,7 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
     menu_gutters(v->model, &cg, &ag);
     fdk_i32 rh = fdk__menu_row_height(v->model);
 
-    /* Chrome: the menu surface + hairline border (1.4.0: the dedicated
+    /* Chrome: the menu surface + hairline border (1.0.0: the dedicated
      * MENU_BACKGROUND surface with rounded corners, one step above the
      * control fill — popups read as elevated layers, not as buttons).
      * Radius 0 degenerates to the plain square chrome. */
@@ -1061,14 +1061,14 @@ void fdk__menu_view_paint(fdk_widget *w, fdk_surface *surface,
         if ((int)i == v->open_row && it->enabled) {
             /* The submenu-parent row stays lit while its child is
              * open — the selection fill so it reads "active", not
-             * merely hovered (1.4.0: the token replaces the hardcoded
+             * merely hovered (1.0.0: the token replaces the hardcoded
              * accent-alpha). State, not whisper: it snaps. */
             fdk_surface_fill_rect(surface, row, fdk__pal_selection());
         } else if (lit) {
-            /* 1.4.0: the hover state is an inset rounded PILL, not a
+            /* 1.0.0: the hover state is an inset rounded PILL, not a
              * full-width band — the modern menu-row look. The inset
              * keeps the pill inside the popup's rounded corners.
-             * 1.4.2: the POINTER-hover pill fades (120 ms, the
+             * 1.0.0: the POINTER-hover pill fades (120 ms, the
              * shared machinery); the keyboard cursor's row snaps —
              * input and navigation state are answers, not whispers. */
             fdk_f32 t = 1.0f;
@@ -1147,7 +1147,7 @@ static void session_open_submenu(fdk_menu_session *s, fdk_menu_view *parent,
                                  int row);
 static void session_close_above(fdk_menu_session *s, int level);
 
-/* 1.3.2: close every active session level whose chain borrowed this
+/* 1.0.0: close every active session level whose chain borrowed this
  * model (fdk_menu_destroy's first sweep — popups showing the model
  * die topmost-first, taking their views with them, while the model
  * is still whole). */
@@ -1344,7 +1344,7 @@ bool fdk__menu_view_handle_event(fdk_widget *w,
             }
             return true;
         }
-        /* 1.3.6 — mnemonics: a letter press (plain, or with Alt —
+        /* 1.0.0 — mnemonics: a letter press (plain, or with Alt —
          * the classic both work; Ctrl/Super belong to accelerators)
          * activates the FIRST enabled item in THIS menu whose
          * mnemonic matches. First-match-wins is deterministic and
@@ -1808,10 +1808,10 @@ fdk_result fdk_menu_popup_at(fdk_menu *menu, fdk_widget *anchor,
  * ===================================================================== */
 
 typedef struct fdk_menu_bar_title {
-    char *title;    /* owned; mnemonic markers stripped (1.3.6) */
+    char *title;    /* owned; mnemonic markers stripped (1.0.0) */
     fdk_menu *menu; /* borrowed */
     fdk_rect rect;  /* bar-local layout slot */
-    /* 1.3.6 — Alt+letter opens this title's menu. */
+    /* 1.0.0 — Alt+letter opens this title's menu. */
     fdk_u32 mnemonic;
     size_t mn_start;
     size_t mn_end;
@@ -1854,7 +1854,7 @@ static void bar_layout(fdk_widget *w) {
         x += b->titles[i].rect.width;
     }
 }
-/* 1.3.2: remove this model's listing from every registered bar —
+/* 1.0.0: remove this model's listing from every registered bar —
  * called by fdk_menu_destroy while the model is still whole. The
  * bar drops the title, relayouts, and repaints; the model's registry
  * entry is cleared by the caller's free of menu->bars. */
@@ -1882,7 +1882,7 @@ static void menu_detach_bars(fdk_menu *menu) {
     menu->bar_cap = 0;
 }
 
-/* 1.3.2: register a bar on the model it lists (fdk_menu_bar_append).
+/* 1.0.0: register a bar on the model it lists (fdk_menu_bar_append).
  * Returns false only on allocation failure — the append then fails
  * rather than leaving an unregistered dangling listing behind. */
 static bool menu_attach_bar(fdk_menu *menu, fdk_menu_bar *bar) {
@@ -1909,7 +1909,7 @@ static bool menu_attach_bar(fdk_menu *menu, fdk_menu_bar *bar) {
     return true;
 }
 
-/* 1.3.2: drop one bar from the model's registry (bar_destroy). */
+/* 1.0.0: drop one bar from the model's registry (bar_destroy). */
 static void menu_unattach_bar(fdk_menu *menu, fdk_menu_bar *bar) {
     for (size_t i = 0; i < menu->bar_count; i++) {
         if (menu->bars[i] == bar) {
@@ -1979,7 +1979,7 @@ static void bar_destroy(fdk_widget *w) {
         session_close_above(s, 0);
     }
     for (size_t i = 0; i < b->count; i++) {
-        /* 1.3.2: detach from the model's registry so a later
+        /* 1.0.0: detach from the model's registry so a later
          * fdk_menu_destroy does not sweep a freed bar. */
         if (b->titles[i].menu != NULL) {
             menu_unattach_bar(b->titles[i].menu, b);
@@ -2313,7 +2313,7 @@ fdk_result fdk_menu_bar_append(fdk_widget *bar, const char *title,
         b->titles = nt;
         b->cap = ncap;
     }
-    /* 1.3.2: register the bar on the model FIRST — if this fails
+    /* 1.0.0: register the bar on the model FIRST — if this fails
      * the listing is refused rather than left unregistered (an
      * unregistered listing would dangle at model destroy). */
     if (menu != NULL && !menu_attach_bar(menu, b)) {
@@ -2355,7 +2355,7 @@ fdk_result fdk_menu_bar_remove(fdk_widget *bar, size_t index) {
         (int)index == b->open_index) {
         session_close_above(b->session, 0);
     }
-    /* 1.3.2: detach the dropped listing from the model's registry —
+    /* 1.0.0: detach the dropped listing from the model's registry —
      * the model must not sweep this bar at destroy for a title it no
      * longer carries (found live by test_menu's remove-then-destroy
      * ordering under ASan). */
@@ -2387,7 +2387,7 @@ void fdk_menu_bar_close(fdk_widget *bar) {
 }
 
 /* =====================================================================
- * 1.3.3 — menu accelerators
+ * 1.0.0 — menu accelerators
  *
  * The window's KEY_DOWN dispatch calls fdk__menu_bar_accel_hit with
  * its root; the scan below is the whole feature. It is LIVE by
@@ -2456,7 +2456,7 @@ static bool accel_scan_widget(fdk_widget *w, const fdk_key_event *key,
     return false;
 }
 
-/* 1.3.6 — Alt+letter with no chain open: open the first bar title
+/* 1.0.0 — Alt+letter with no chain open: open the first bar title
  * whose mnemonic matches (the keyboard twin of clicking the title).
  * Walks like the accelerator scan (tree order, first bar wins);
  * runs no user code; the open itself is the only thing that can

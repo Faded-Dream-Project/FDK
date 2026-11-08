@@ -1,5 +1,5 @@
 /*
- * statusbar.c — the context-scoped message bar (1.4.2).
+ * statusbar.c — the context-scoped message bar (1.0.0).
  *
  * GTK's GtkStatusbar: the strip along a window's bottom edge where
  * an application reports transient state ("Row 3 of 12", "Sorting…",

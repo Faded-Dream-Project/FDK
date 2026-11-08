@@ -1,5 +1,5 @@
 /* test_cli_tools.c — end-to-end tests for the command-line face
- * (fdk-theme, fdk-prefs) (1.4.13).
+ * (fdk-theme, fdk-prefs) (1.0.0).
  *
  * The tools are REAL subprocesses: popen() runs the binaries the
  * build produced (located relative to this test binary, so the
@@ -119,7 +119,7 @@ static void sandbox_env(void) {
     assert(unsetenv("XDG_CONFIG_HOME") == 0);
 }
 
-/* The XDG sandbox layout for the PER-APP stores (1.4.14): under
+/* The XDG sandbox layout for the PER-APP stores (1.0.0): under
  * $FDK_PREFS_FILE every store resolves to the same single file, so
  * `--app` separation needs XDG_CONFIG_HOME/<store>.prefs — the real
  * desktop layout. Both files live in g_root. */
@@ -395,7 +395,7 @@ static void test_first_run_creates_config_dir(void) {
     assert(file_contains(deep, "width = 100"));
 }
 
-/* ---- fdk-set (1.4.14) --------------------------------------------------- */
+/* ---- fdk-set (1.0.0) --------------------------------------------------- */
 
 static void test_set_help_version(void) {
     char out[8192];

@@ -1,11 +1,11 @@
 /*
- * stackswitcher.c — the stack's pill row (1.4.2).
+ * stackswitcher.c — the stack's pill row (1.0.0).
  *
  * GTK's GtkStackSwitcher: the horizontal row of rounded pills that
  * switches a Stack's pages — the modern face of the tab strip
  * (GNOME's Settings wears one). Active page = an accent-filled pill
  * with the accent's own text ink (a "checked" semantic: it snaps,
- * the 1.4.1 rule); inactive pills are flat text that blends the
+ * the 1.0.0 rule); inactive pills are flat text that blends the
  * soft ROW_HOVER fill in over the 120-ms hover fade — the exact
  * machinery the buttons ride.
  *
@@ -236,7 +236,7 @@ static void sw_paint(fdk_widget *w, fdk_surface *surface,
         fdk_i32 pw = sw_pill_w(sw, i);
         fdk_rect pill = {x, cy, pw, SWITCHER_PILL_H};
         if (i == active) {
-            /* The checked semantic SNAPS (1.4.1 rule): accent fill,
+            /* The checked semantic SNAPS (1.0.0 rule): accent fill,
              * accent ink, no fade on state. */
             fdk_color fill = disabled ? fdk__pal_control_disabled()
                                       : fdk__pal_accent();

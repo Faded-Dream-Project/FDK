@@ -85,27 +85,27 @@ typedef enum fdk_a11y_role {
     FDK_A11Y_ROLE_CANVAS = 41,   /* custom-drawn region              */
     FDK_A11Y_ROLE_STATUS_BAR = 42,
 
-    /* 1.4.1 append — the interactive furniture. Same append-only
+    /* 1.0.0 append — the interactive furniture. Same append-only
      * policy as the token enum: new values at the end, never
      * renumbered. */
     FDK_A11Y_ROLE_SPINNER = 43,  /* busy indicator (GtkSpinner)      */
     FDK_A11Y_ROLE_SPLIT_PANE = 44, /* Paned: two resizable panes     */
     FDK_A11Y_ROLE_EXPANDER = 45, /* disclosure section header         */
 
-    /* 1.4.2 append — the app furniture. */
+    /* 1.0.0 append — the app furniture. */
     FDK_A11Y_ROLE_LEVEL_BAR = 46, /* segmented value readout (meter)  */
 
-    /* 1.4.3 append — the chooser furniture. */
+    /* 1.0.0 append — the chooser furniture. */
     FDK_A11Y_ROLE_MENU_BUTTON = 47, /* pops an attached menu (the
                                       * hamburger; EXPANDED tracks the
                                       * chain)                          */
     FDK_A11Y_ROLE_COLOR_CHOOSER = 48, /* HSV wheel + hex field         */
     FDK_A11Y_ROLE_FONT_CHOOSER = 49,  /* family list + size + preview  */
 
-    /* 1.4.8 append — the text document. */
+    /* 1.0.0 append — the text document. */
     FDK_A11Y_ROLE_TEXT_VIEW = 50, /* multi-line editor (GtkTextView) */
 
-    /* 1.4.9 append — the image display. */
+    /* 1.0.0 append — the image display. */
     FDK_A11Y_ROLE_IMAGE = 51,   /* a picture widget (GtkPicture)   */
 
     /* 1.0.0 append (S-10) — the calendar family. Same append-only

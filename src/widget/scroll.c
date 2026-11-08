@@ -62,14 +62,14 @@
 #define SCROLL_NOTCH_NUM 4 /* one notch = viewport / 4 */
 #define SCROLL_KEY_STEP 32
 #define SCROLL_MIN_THUMB 24
-/* Overlay-mode rhythm (1.4.4): a bar holds ~800 ms after the last
+/* Overlay-mode rhythm (1.0.0): a bar holds ~800 ms after the last
  * activity on its axis, then fades over ~300 ms (quad-out — a
  * departure is softer than an arrival). Activity = any scroll on
  * the axis, the pointer approaching the strip, a hover, or a drag;
  * every touch of it re-arms the clock. */
 #define BAR_IDLE_MS 800
 #define BAR_FADE_MS 300
-/* Smooth-scroll flight (1.3.8): the input-gesture path (wheel,
+/* Smooth-scroll flight (1.0.0): the input-gesture path (wheel,
  * keyboard) eases to the target over this many ms; the public
  * scroll_to/scroll_by and every value-interface path (a11y
  * SET_VALUE, scrollbar thumb drags) stay INSTANT — the programmatic
@@ -98,10 +98,10 @@ typedef struct fdk_scrollview {
     fdk_animation *flight;
     fdk_i32 flight_from_x, flight_from_y;
     fdk_i32 flight_target_x, flight_target_y;
-    /* 1.4.4: CLASSIC (layout-owned strips) or OVERLAY (transient
+    /* 1.0.0: CLASSIC (layout-owned strips) or OVERLAY (transient
      * thumbs that fade when idle — see fdk_scrollview_set_bar_mode). */
     fdk_scroll_bar_mode mode;
-    /* 1.4.17: vertical-only scrolling — the content is arranged at
+    /* 1.0.0: vertical-only scrolling — the content is arranged at
      * the VIEWPORT's width (never wider), no horizontal bar, and
      * scroll_x is pinned to 0. The recipe the internal List has
      * always used, now public: a tall column in a box layout keeps
@@ -116,9 +116,9 @@ typedef struct fdk_scrollbar {
     bool horizontal;
     bool dragging;         /* thumb drag in progress                */
     fdk_f32 grab_offset;   /* pointer-to-thumb-top delta at grab    */
-    /* ---- overlay fade state (1.4.4) ----
+    /* ---- overlay fade state (1.0.0) ----
      *
-     * alpha rides the 1.4.3 paint-group engine (set_paint_alpha on
+     * alpha rides the 1.0.0 paint-group engine (set_paint_alpha on
      * the BAR: its subtree blits at the blend). 1.0 at rest = the
      * plain walk, zero cost. `idle` is the one-shot countdown timer
      * (needs a window context — detached trees never arm it, and
@@ -182,14 +182,14 @@ static void axis_extents(fdk_scrollview *sv, bool horizontal,
      * axis overflows — evaluated on the content's natural extents,
      * which is what bar visibility is decided from). Overlay bars
      * steal NOTHING: the viewport is the full bounds, the bars are
-     * transient guests over the content (1.4.4). */
+     * transient guests over the content (1.0.0). */
     fdk_i32 other_bar = 0;
     if (sv->mode == FDK_SCROLL_BARS_CLASSIC) {
         if (horizontal) {
             other_bar = (ch > h && h > 0) ? bar_width() : 0;
         } else {
             /* Vertical-only never shows an h-bar, so the vertical
-             * viewport never pays for one (1.4.17). */
+             * viewport never pays for one (1.0.0). */
             other_bar = (cw > w && w > 0 && !sv->vertical_only)
                             ? bar_width()
                             : 0;
@@ -551,7 +551,7 @@ static bool scroll_apply_delta_damage(fdk_widget *w, fdk_scrollview *sv,
     return true;
 }
 
-/* ---- overlay fade machinery (1.4.4) --------------------------------
+/* ---- overlay fade machinery (1.0.0) --------------------------------
  *
  * A bar's VISIBILITY is two-ANDed facts: the axis overflows (the
  * structural need, decided by the layout) and the bar is AWAKE —
@@ -745,7 +745,7 @@ static bool scrollview_layout_ex(fdk_widget *w, fdk_i32 old_x,
      * children out — set_bounds moved the box but left every child
      * at its creation bounds, so a box content rendered nothing
      * (found live by example 11's 40-row list: zero rows painted).
-     * Vertical-only (1.4.17): the content's WIDTH is the viewport —
+     * Vertical-only (1.0.0): the content's WIDTH is the viewport —
      * a column whose natural width exceeds the viewport keeps the
      * box cross-clamp behavior it had before adoption instead of
      * growing a horizontal scroll range. */
@@ -822,7 +822,7 @@ static void scrollview_arrange(fdk_widget *w, fdk_rect assigned) {
     scrollview_layout(w);
 }
 
-/* ---- the smooth-scroll flight (1.3.8) -----------------------------------
+/* ---- the smooth-scroll flight (1.0.0) -----------------------------------
  * Input gestures ease to their target; everything programmatic
  * snaps. The flight interpolates BOTH axes from the live position
  * (a wheel tick mid-flight retargets from where the eye actually
@@ -1449,7 +1449,7 @@ void fdk__scrollview_layout_changed(fdk_widget *w) {
     scrollview_layout(w);
 }
 
-/* ---- bar-mode public API (1.4.4) ---- */
+/* ---- bar-mode public API (1.0.0) ---- */
 
 /* Settles one bar's overlay state after a mode switch: fades and
  * clocks gone, alpha restored. */
@@ -1498,7 +1498,7 @@ fdk_result fdk_scrollview_set_bar_mode(fdk_widget *scrollview,
     return FDK_OK;
 }
 
-/* Internal (list columns' anchor math, 1.5.1): the viewport width
+/* Internal (list columns' anchor math, 1.0.0): the viewport width
  * the scrollview actually reserves for content in its CURRENT bar
  * mode — full width under OVERLAY bars, minus the v-bar's strip
  * under CLASSIC ones (when a v-bar is showing). */

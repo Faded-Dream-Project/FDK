@@ -1,5 +1,5 @@
 /*
- * fdk_dnd.h — drag and drop (1.2.0)
+ * fdk_dnd.h — drag and drop (1.0.0)
  *
  * Two halves, both text and files, both backends:
  *
@@ -195,7 +195,7 @@ fdk_result fdk_widget_set_drag_source(fdk_widget *widget,
 /* True when `widget` carries an armed drag-source controller. */
 bool fdk_widget_get_drag_source(const fdk_widget *widget);
 
-/* Per-press drag veto (1.5.0, round 11): when set, a press that
+/* Per-press drag veto (1.0.0, round 11): when set, a press that
  * hits THIS widget disarms every drag source for that press — the
  * gesture belongs to the widget's own press handling, and a
  * drag-source begin riding the same motion would fire two gestures

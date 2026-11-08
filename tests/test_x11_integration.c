@@ -345,11 +345,11 @@ static void test_close_request_delivered(void) {
  * 0x00RRGGBB value is exact. */
 
 
-/* The themed window-background pixel the 1.2.1 root default background
+/* The themed window-background pixel the 1.0.0 root default background
  * paints (and the X11 creation-time background pixel matches): the
  * default theme's FDK_TK_WINDOW_BACKGROUND token, channel-packed the
  * renderer's way (R<<16|G<<8|B). Grid gaps show the ROOT's fill, not
- * the pre-1.2.1 raw server black — the stale == 0x00000000u gap
+ * the pre-1.0.0 raw server black — the stale == 0x00000000u gap
  * assertions this replaces failed live against 0x121721. */
 static unsigned long theme_window_bg_pixel(void) {
     fdk_color c = fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND);
@@ -754,7 +754,7 @@ static void test_xi2_touch(void) {
 
 static fdk_color wcol(int r, int g, int b);
 
-/* ---- 1.2.2 regression: the resize-storm wedge ----
+/* ---- 1.0.0 regression: the resize-storm wedge ----
  *
  * An interactive resize queues one ConfigureNotify per drag step
  * (plus Exposes) before the application pumps once — several hundred
@@ -1398,7 +1398,7 @@ static void x11_send_key_event(Display *dpy, unsigned long xid, int type,
 
 
 /* KeyPress with Mod1Mask set (Alt+letter — the mnemonic combos,
- * 1.3.6). Same shape as the ctrl variant. */
+ * 1.0.0). Same shape as the ctrl variant. */
 static void x11_send_key_event_alt(Display *dpy, unsigned long xid,
                                     unsigned int keycode) {
     XEvent ev;
@@ -2695,7 +2695,7 @@ static void test_theme_switch_gui(void) {
     Display *rb_dpy = NULL;
     unsigned long xid = fdk_window_xid(win);
 
-    /* Faded Dream defaults (1.4.16): control fill #33333C; border
+    /* Faded Dream defaults (1.0.0): control fill #33333C; border
      * #464653; radius 8 cuts the corner pixel; 1px rule at
      * y = 70 + 10/2 = 75. */
     assert(x11_readback_pixel(&rb_dpy, xid, 80, 35) == 0x0033333Cu);
@@ -3047,7 +3047,7 @@ static void test_decorations_gui(void) {
 
 
 
-/* ---- 1.4.16: the titlebar family, end to end on a real server --------
+/* ---- 1.0.0: the titlebar family, end to end on a real server --------
  *
  * The maintainer's theming ask, pixel-verified: the DECORATION is a
  * theme surface. Mono Chromatic paints a near-black band over a
@@ -3142,7 +3142,7 @@ static void test_titlebar_theming_gui(void) {
 static int state_gui_events = 0;
 static int state_gui_last_max = -1;
 static int state_gui_last_min = -1;
-static int state_gui_last_fs = -1; /* 1.4.10 */
+static int state_gui_last_fs = -1; /* 1.0.0 */
 
 static void state_window_callback(fdk_window *window,
                                   const fdk_event_data *event,
@@ -3242,7 +3242,7 @@ static void test_window_state_gui(void) {
         assert(wa.map_state == IsViewable);
     }
 
-    /* Fullscreen (1.4.10): fills the screen like maximize but is
+    /* Fullscreen (1.0.0): fills the screen like maximize but is
      * its OWN state; unfullscreen restores the remembered geometry.
      * The saved geometry comes from the last restore (300x200 at
      * 0,0 — the fullscreen fallback only saves when nothing was
@@ -3460,7 +3460,7 @@ static void test_resize_edges_gui(void) {
            "min-size clamps hold\n");
 }
 
-/* ---- 1.1.4: resize-flash, hover-revalidation, cursor regressions ----
+/* ---- 1.0.0: resize-flash, hover-revalidation, cursor regressions ----
  *
  * The three symptoms reported from a real Cinnamon desktop: windows
  * flashing white during interactive resizes, the maximize/minimize
@@ -4337,7 +4337,7 @@ static void fake_wm_install(fake_wm *wm) {
     wm->net_wm_state = XInternAtom(wm->dpy, "_NET_WM_STATE", False);
     wm->net_wm_state_maximized_vert =
         XInternAtom(wm->dpy, "_NET_WM_STATE_MAXIMIZED_VERT", False);
-    /* SPEC spelling (...HORZ, not ...HORIZ). The 1.1.3 lesson: this
+    /* SPEC spelling (...HORZ, not ...HORIZ). The 1.0.0 lesson: this
      * fake WM once interned the same misspelling FDK's connection
      * code had, so the test verified the library against a copy of
      * its own bug and the typo shipped — under real WMs the probe
@@ -4560,7 +4560,7 @@ static void ewmh_window_callback(fdk_window *window,
 }
 
 static void test_ewmh_atom_spelling(void) {
-    /* The 1.1.3 regression, pinned directly: FDK interned
+    /* The 1.0.0 regression, pinned directly: FDK interned
      * _NET_WM_STATE_MAXIMIZED_HORIZ where the EWMH spec atom is
      * ..._HORZ. XInternAtom(only_if_exists=True) is the oracle — it
      * succeeds ONLY when the exact spec string was already interned
@@ -4886,7 +4886,7 @@ static void test_mitm_shm_and_double_buffer(void) {
     fdk_surface_info info2;
     assert(fdk_ok(fdk_surface_get_info(surface, &info2)));
     if (lane == FDK_RENDER_PATH_GL) {
-        /* 1.4.18: the GPU lane double-buffers INSIDE GL — its back
+        /* 1.0.0: the GPU lane double-buffers INSIDE GL — its back
          * buffer swaps at glXSwapBuffers — so the CPU-side staging
          * buffer is legitimately the SAME pointer across presents.
          * The semantic this test actually pins (un-presented drawing
@@ -5307,7 +5307,7 @@ static void clip_latin1_requestor_main(int sock, const char *want) {
     }
 }
 
-/* ---- INCR (incremental) transfer roles (1.4.12) ----
+/* ---- INCR (incremental) transfer roles (1.0.0) ----
  *
  * The ICCCM chunked protocol exercised with raw-Xlib children, both
  * directions: an OWNER that serves a multi-megabyte payload via INCR
@@ -5721,7 +5721,7 @@ static void test_clipboard(void) {
     printf("[ok] clipboard: FDK round trip, replace semantics, "
            "empty-as-NULL\n");
 
-    /* --- 1b. The image round trip (1.4.9): encode a gradient
+    /* --- 1b. The image round trip (1.0.0): encode a gradient
      * surface onto the clipboard, read it back, compare pixels.
      * Own-ownership fast path + the encode/decode seam. --- */
     {
@@ -5943,7 +5943,7 @@ static void test_clipboard(void) {
                "round-trips exactly\n");
     }
 
-    /* --- 8. INCR READ (1.4.12): a foreign owner serves ~4.7 MiB in
+    /* --- 8. INCR READ (1.0.0): a foreign owner serves ~4.7 MiB in
      * chunks; FDK's read pump reassembles and returns the WHOLE
      * payload, byte-exact against the locally-built twin. --- */
     {
@@ -5981,7 +5981,7 @@ static void test_clipboard(void) {
                want_len);
     }
 
-    /* --- 9. INCR SERVE (1.4.12): FDK owns the big text; a foreign
+    /* --- 9. INCR SERVE (1.0.0): FDK owns the big text; a foreign
      * reader drives the delete choreography against FDK's chunk
      * writer (the parent pumps dispatch — the chunks are
      * event-driven). --- */
@@ -6031,7 +6031,7 @@ static void test_clipboard(void) {
                want_len);
     }
 
-    /* --- 10. INCR IMAGE (1.4.12): a noisy ~5 MP surface encodes to
+    /* --- 10. INCR IMAGE (1.0.0): a noisy ~5 MP surface encodes to
      * >4 MiB of PNG; the clipboard streams it incrementally to a
      * foreign reader (signature + length floor verified there), and
      * FDK's own fast path still decodes pixel-exact. --- */
@@ -6103,7 +6103,7 @@ static void test_clipboard(void) {
     fdk_shutdown(ctx);
 }
 
-/* ---- PRIMARY selection (1.3.4) ----
+/* ---- PRIMARY selection (1.0.0) ----
  *
  * The classic Unix "current selection" buffer (XA_PRIMARY): the same
  * ICCCM machinery as CLIPBOARD, a different atom, and total
@@ -6886,7 +6886,7 @@ static void test_menu_gui(void) {
      * diffs the ROOT's child list. */
     Window root_scr = DefaultRootWindow(send);
 
-    /* 1.4.18: child-count checks are BOUNDED wait-until-state loops
+    /* 1.0.0: child-count checks are BOUNDED wait-until-state loops
      * (the suite's pump-timeout-is-a-ceiling lesson), not fixed-sleep
      * races — the GPU lane adds real create/teardown latency for
      * popup windows (GLX contexts), which made fixed 200 ms pumps
@@ -6919,7 +6919,7 @@ static void test_menu_gui(void) {
     printf("[ok] menu: clicking the bar title maps the popup\n");
 
     /* Auto-paint: the popup's surface color, server-side, without
-     * the test ever calling fdk_window_paint on it. 1.4.0: the
+     * the test ever calling fdk_window_paint on it. 1.0.0: the
      * surface is MENU_BACKGROUND and the corners round at the menu
      * radius — sample the TOP-CENTER (clear of both corner arcs and
      * of the first row's vertically-centered text). */
@@ -7110,7 +7110,7 @@ static void test_combo_gui(void) {
     Window pop = x11_new_child(before, n_before, now, n_now);
     assert(pop != 0);
 
-    /* The dropdown is auto-painted (menu surface color; 1.4.0:
+    /* The dropdown is auto-painted (menu surface color; 1.0.0:
      * MENU_BACKGROUND, sampled top-center — clear of the rounded
      * corner arcs). */
     Display *rb = NULL;
@@ -7618,11 +7618,11 @@ static void test_dialog_gui(void) {
     assert(dlg_xid != 0);
     fdk_widget *dlg_root = NULL;
     assert(fdk_ok(fdk_window_get_root(dlg, &dlg_root)));
-    /* 1.4.15 dressed the dialogs in the FDK title band: root child 0
-     * is the BAND, the body is child 1. (Found live at 1.4.16: the
+    /* 1.0.0 dressed the dialogs in the FDK title band: root child 0
+     * is the BAND, the body is child 1. (Found live at 1.0.0: the
      * old child-0 navigation silently grabbed the band, whose only
      * child is the title label, and the OK-button lookup went NULL —
-     * the 1.4.15 "dialog groups all-pass" claim had run a stale
+     * the 1.0.0 "dialog groups all-pass" claim had run a stale
      * binary. The band is part of the dialog's shape now; navigate
      * past it honestly.) */
     assert(fdk_widget_child_at(dlg_root, 0) != NULL); /* the band */
@@ -7762,7 +7762,7 @@ static void test_dialog_close_damages_parent(void) {
            "repaint consumes it\n");
 }
 
-/* ---- 1.2.0: list row activation ---------------------------------- */
+/* ---- 1.0.0: list row activation ---------------------------------- */
 
 static struct {
     int activations;
@@ -7909,7 +7909,7 @@ static void test_list_activation_gui(void) {
            "re-click does not\n");
 }
 
-/* ---- 1.2.0: file dialogs ------------------------------------------ */
+/* ---- 1.0.0: file dialogs ------------------------------------------ */
 
 static struct {
     fdk_file_dialog_outcome outcome;
@@ -8044,7 +8044,7 @@ static void test_file_dialog_gui(void) {
     printf("[ok] file dialog: Escape answers CANCELLED (count 0)\n");
 
     /* --- 3. OPEN_FOLDER via the accept BUTTON (the click path):
-     * body child order is fixed by creation — 1.4.7: [up, home,
+     * body child order is fixed by creation — 1.0.0: [up, home,
      * hidden, view_toggle, combo, path_bar, path_entry, places,
      * list, grid, status, accept, cancel]; accept is index 11 (the
      * breadcrumb bar and its hidden location entry are indices 5
@@ -8058,12 +8058,12 @@ static void test_file_dialog_gui(void) {
     {
         fdk_widget *droot = NULL;
         assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
-        /* 1.4.15's band is root child 0; the body is child 1. */
+        /* 1.0.0's band is root child 0; the body is child 1. */
         fdk_widget *body = fdk_widget_child_at(droot, 1);
         assert(body != NULL);
         fdk_widget *accept = fdk_widget_child_at(body, 11);
         assert(accept != NULL);
-        /* ABSOLUTE bounds: the body sits below the 1.4.15 title
+        /* ABSOLUTE bounds: the body sits below the 1.0.0 title
          * band, so parent-relative y would click 28px too high. */
         fdk_rect ab = fdk_widget_get_absolute_bounds(accept);
         /* The list holds one row (sub/): select it first. */
@@ -8089,7 +8089,7 @@ static void test_file_dialog_gui(void) {
     printf("[ok] file dialog: OPEN_FOLDER button accept -> %s "
            "(stat-verified directory)\n", fd_result.paths[0]);
 
-    /* --- 3b. ICON MODE (1.4.7): options.view starts the grid; the
+    /* --- 3b. ICON MODE (1.0.0): options.view starts the grid; the
      * keyboard accept path runs through the IconView (the surface
      * abstraction reads the grid's selection); the cell labels drop
      * the list view's trailing slash (the glyph carries dir-ness). */
@@ -8120,7 +8120,7 @@ static void test_file_dialog_gui(void) {
         assert(fdk_list_row_count(rows) == 0);
     }
     /* Right Right -> note.txt: the grid flows in COLUMNS (as many
-     * as the width fits — the 1.4.7 design), so the item step is
+     * as the width fits — the 1.0.0 design), so the item step is
      * Right, not Down. (This sequence previously "worked" only
      * because the dialog's grid was stuck at one column — the
      * re-flow fix in fdlg_body_arrange corrected the layout, and
@@ -8368,7 +8368,7 @@ static void test_file_dialog_gui(void) {
     printf("[ok] file dialog: empty SAVE name never answers "
            "(validation keeps the dialog up)\n");
 
-    /* --- 8. (1.4.0) The breadcrumb path bar + Ctrl+L location mode:
+    /* --- 8. (1.0.0) The breadcrumb path bar + Ctrl+L location mode:
      * at rest the bar is the path row and the raw entry is hidden;
      * Ctrl+L swaps them (entry seeded with the current dir, focused);
      * Escape there returns to breadcrumbs WITHOUT cancelling; the
@@ -8419,7 +8419,7 @@ static void test_file_dialog_gui(void) {
         assert(fd_result.outcome == FDK_FILE_DIALOG_ERROR);
 
         /* The root crumb click navigates to "/". ABSOLUTE bounds
-         * (the body now sits below the 1.4.15 title band — the old
+         * (the body now sits below the 1.0.0 title band — the old
          * body-relative click landed in the band); crumb 0 ("/")
          * starts at FD_PB_PAD_X = 10px inside. */
         fdk_rect pb = fdk_widget_get_absolute_bounds(pbar);
@@ -8943,13 +8943,13 @@ static void test_file_dialog_icons_gui(void) {
     unsetenv("FDK_FILE_DIALOG_PORTAL");
 }
 
-/* ---- 1.5.3: XSETTINGS live icon-theme detection -------------------
+/* ---- 1.0.0: XSETTINGS live icon-theme detection -------------------
  *
  * A FAKE settings manager plays the other side of the real protocol:
  * it takes the _XSETTINGS_S0 selection and publishes the
  * _XSETTINGS_SETTINGS property on ITS window. The WIRE FORMAT this
  * writer emits was decoded byte-for-byte from a REAL xsettingsd
- * 1.0.2 under Xvfb and cross-checked against its own reference
+ * 1.0.0 under Xvfb and cross-checked against its own reference
  * reader (dump_xsettings); the live-daemon end-to-end proof lives in
  * the manual rig (scripts/probe_xsettings.c, run against the real
  * xsettingsd binary). This group pins the engine-side behavior:
@@ -9351,7 +9351,7 @@ static void test_xsettings_detection_gui(void) {
            "fallback)\n");
 }
 
-/* ---- 1.2.0: drag and drop ---------------------------------------- */
+/* ---- 1.0.0: drag and drop ---------------------------------------- */
 
 static struct {
     int enters, motions, leaves, drops;
@@ -9498,7 +9498,7 @@ static void test_dnd_receiver_gui(void) {
     fdk_shutdown(ctx);
 }
 
-/* 1.4.14: INCR-served drops — what GTK/Qt file managers do for larger
+/* 1.0.0: INCR-served drops — what GTK/Qt file managers do for larger
  * uri-lists. The old atomic-only fetch read the INCR seed as a
  * format-32 property and silently discarded the drop (the live
  * "hovered fine, dropped nothing" report); the shared read engine
@@ -9577,7 +9577,7 @@ static void test_dnd_receiver_incr_gui(void) {
     fdk_shutdown(ctx);
 }
 
-/* 1.4.19: the GTK-faithful source — what a real file manager puts on
+/* 1.0.0: the GTK-faithful source — what a real file manager puts on
  * the wire. Three pins:
  *   - gtk-files: XdndEnter v5 with bit0 + the XdndTypeList property
  *     (EIGHT types, text/uri-list at index 4, NOT among the inline
@@ -9679,7 +9679,7 @@ static void test_dnd_receiver_gtk_gui(void) {
     fdk_shutdown(ctx);
 }
 
-/* ---- 1.4.14: the settings live follow ---------------------------------- */
+/* ---- 1.0.0: the settings live follow ---------------------------------- */
 
 /* Writes `body` to `path` (NULL body removes the file) — the exact
  * write pattern fdk_prefs_save() uses matters here: the IN_MOVED_TO
@@ -10747,7 +10747,7 @@ static void test_dnd_source_gui(void) {
 }
 
 
-/* ---- timers (1.3.1) -----------------------------------------------------
+/* ---- timers (1.0.0) -----------------------------------------------------
  *
  * The event loop's clock, exercised through the real pump against the
  * real backend: one-shot death, repeating cadence, removal (including
@@ -10881,7 +10881,7 @@ static void test_timers(void) {
 }
 
 
-/* ---- tooltips (1.3.2) ----------------------------------------------------
+/* ---- tooltips (1.0.0) ----------------------------------------------------
  *
  * Real hover in, delay elapses (the pump's timer clock), and the
  * toolkit-owned popup lands on the SERVER: found by window-tree
@@ -10917,7 +10917,7 @@ static unsigned long find_tooltip_child(Display *dpy, unsigned long owner) {
     return found;
 }
 
-/* ---- animation (1.3.8) ---------------------------------------------------
+/* ---- animation (1.0.0) ---------------------------------------------------
  *
  * The headless suite drives the engine's pump on a synthetic clock;
  * this test drives it the way production does: through the shared
@@ -11178,7 +11178,7 @@ static void test_tooltip_gui(void) {
         unsigned long bot = x11_readback_pixel(&rb_dpy, tip,
                                                wa.width / 2,
                                                (int)wa.height - 3);
-        /* Faded Dream's tooltip fill #F0EFF5 (the 1.4.16 default;
+        /* Faded Dream's tooltip fill #F0EFF5 (the 1.0.0 default;
          * was Modern's 0xF2F5FC). */
         assert(top == 0xF0EFF5u);
         assert(bot == 0xF0EFF5u);
@@ -11233,7 +11233,7 @@ static void test_modern_widgets_gui(void);
 static void test_app_furniture_gui(void);
 static void test_choosers_gui(void);
 
-/* ---- 1.4.4: the modern batch — reorder, entry icons, overlay bars,
+/* ---- 1.0.0: the modern batch — reorder, entry icons, overlay bars,
  * the color button, and the recents place — end to end. ---- */
 
 static int nbx_reorders = 0;
@@ -11606,7 +11606,7 @@ static void test_modern_batch_gui(void) {
         {
             fdk_widget *droot = NULL;
             assert(fdk_ok(fdk_window_get_root(dlg, &droot)));
-            /* 1.4.15's band is root child 0; the body is child 1. */
+            /* 1.0.0's band is root child 0; the body is child 1. */
             fdk_widget *body = fdk_widget_child_at(droot, 1);
             assert(body != NULL);
             fdk_widget *places = fdk_widget_child_at(body, 7);
@@ -11695,12 +11695,12 @@ static void test_modern_batch_gui(void) {
     fdk_font_destroy(font);
     fdk_shutdown(ctx);
     unsetenv("FDK_FILE_DIALOG_PORTAL");
-    printf("[ok] modern batch GUI: all five 1.4.4 features through "
+    printf("[ok] modern batch GUI: all five 1.0.0 features through "
            "real X input\n");
 }
 
 
-/* ---- 1.4.5: X11 HiDPI, end to end on a private 192-dpi Xvfb ---- */
+/* ---- 1.0.0: X11 HiDPI, end to end on a private 192-dpi Xvfb ---- */
 
 static int hidpi_hits = 0;
 static void hidpi_button_cb(fdk_widget *w, void *user) {
@@ -11924,7 +11924,7 @@ static void test_x11_hidpi_gui(void) {
 }
 
 
-/* ---- 1.4.5: the IconView through real input ---- */
+/* ---- 1.0.0: the IconView through real input ---- */
 
 static int ivgui_sels = 0;
 static void ivgui_sel(fdk_widget *w, void *user) {
@@ -12019,7 +12019,7 @@ static void test_iconview_gui(void) {
     assert(fdk_iconview_get_selected(iv) == 8);
     printf("[ok] iconview GUI: Down steps a whole grid row\n");
 
-    /* --- 1.4.7: double-click activation through real input. The
+    /* --- 1.0.0: double-click activation through real input. The
      * pair lands on item 8's cell (row 2, column 0: center (48,
      * 218) in view space -> window (58, 228)). */
     ivgui_acts = 0;
@@ -12032,7 +12032,7 @@ static void test_iconview_gui(void) {
     printf("[ok] iconview GUI: a real double-click pair activates "
            "the cell's item\n");
 
-    /* --- 1.4.7: the band's edge-chasing auto-scroll (grid-shaped,
+    /* --- 1.0.0: the band's edge-chasing auto-scroll (grid-shaped,
      * vertical — the horizontal chase is structurally dormant: the
      * grid's columns always fit the arranged width, so x never
      * clamps away from 0). A held press on EMPTY grid space at the
@@ -12108,7 +12108,7 @@ static void test_iconview_gui(void) {
            "navigation through real X input\n");
 }
 
-/* ---- 1.4.8: the TextView through real input ---- */
+/* ---- 1.0.0: the TextView through real input ---- */
 
 static void test_textview_gui(void) {
     static const char *font_candidates[] = {
@@ -12226,7 +12226,7 @@ static void test_textview_gui(void) {
 }
 
 
-/* ---- GPU present lane (1.4.18) ------------------------------------------- */
+/* ---- GPU present lane (1.0.0) ------------------------------------------- */
 
 /* Policy matrix: FDK_NO_GL=1 is a STRICT CPU answer; FDK_GL_FORCE=1
  * engages the lane wherever the GLX machinery exists (this rig: Xvfb
@@ -15203,7 +15203,7 @@ static void test_session_save_yourself_gui(void) {
 }
 
 int main(void) {
-    /* Hermeticity (1.4.13): pin the global-settings boot (the "fdk"
+    /* Hermeticity (1.0.0): pin the global-settings boot (the "fdk"
      * prefs store + $FDK_THEME) to nothing so this suite's pixel
      * expectations — sampled against the built-in Modern palette —
      * hold on any machine, including one with a global theme set. */
@@ -15316,7 +15316,7 @@ int main(void) {
     return 0;
 }
 
-/* ---- 1.3.6: menu mnemonics (e2e) ----
+/* ---- 1.0.0: menu mnemonics (e2e) ----
  *
  * REAL Alt+letter keys through XSendEvent into a REAL window with a
  * REAL menu bar: Alt+F opens the File title's menu (the keyboard
@@ -15552,7 +15552,7 @@ static void test_menu_mnemonics_gui(void) {
            "input\n");
 }
 
-/* ---- 1.3.3: application shortcuts + menu accelerators (e2e) ----
+/* ---- 1.0.0: application shortcuts + menu accelerators (e2e) ----
  *
  * REAL keys through XSendEvent into a REAL window with a REAL menu
  * bar and a focused Entry — the full dispatch chain: window shortcut
@@ -15815,7 +15815,7 @@ static void test_window_shortcuts_and_accelerators_gui(void) {
            "re-arms the bar, entry undo/redo over real keys\n");
 }
 
-/* ---- 1.4.1: the modern furniture (e2e) ----------------------------------
+/* ---- 1.0.0: the modern furniture (e2e) ----------------------------------
  *
  * Four surfaces, each proven through the REAL window: the Paned's
  * divider drag moves REAL pane fills (server-side pixel truth), the
@@ -16166,7 +16166,7 @@ static void test_modern_widgets_gui(void) {
            "rotates (snapshot diff)\n");
 }
 
-/* ==== 1.4.2: the app furniture — stack/switcher, revealer, ======
+/* ==== 1.0.0: the app furniture — stack/switcher, revealer, ======
  * statusbar, search entry, rubber band, all against the real
  * server (clicks and keys through XSendEvent, pixels through the
  * readback seam, the animation clock REAL — bounded wait-until
@@ -16237,7 +16237,7 @@ static void test_app_furniture_gui(void) {
         (void)fdk_stack_add(stack, pg2, "beta", "Beta");
         /* ARRANGE (not set_bounds): the pages sync to the bounds —
          * set_bounds is pure geometry and bypasses the hook (the
-         * 1.2.3 lesson, now true of the stack too). */
+         * 1.0.0 lesson, now true of the stack too). */
         fdk_widget_arrange(stack, (fdk_rect){0, 40, 300, 220});
 
         fdk_widget *sw = NULL;
@@ -16562,9 +16562,9 @@ static void test_app_furniture_gui(void) {
            "press + Esc ladder, rubber-band sweep selects live\n");
 }
 
-/* ---- 1.4.3: the chooser batch (e2e) --------------------------------
+/* ---- 1.0.0: the chooser batch (e2e) --------------------------------
  *
- * The window-requiring half of the 1.4.3 features, through REAL
+ * The window-requiring half of the 1.0.0 features, through REAL
  * input where input is the point: the MenuButton's popup chain
  * (click opens, item activates, the app-owned model survives), the
  * search debounce's REAL timer (rapid edits collapse to one fire
@@ -16890,7 +16890,7 @@ static void test_choosers_gui(void) {
         about_website_hits = 0;
         fdk_about_dialog_options aopts = {
             .program_name = "FDK Test Suite",
-            .version = "1.4.3",
+            .version = "1.0.0",
             .comments = "The about dialog's identity card, through "
                         "real input.",
             .copyright = "(c) the FDK authors",
@@ -16908,7 +16908,7 @@ static void test_choosers_gui(void) {
          * the URL callback fires and the dialog STAYS OPEN. */
         fdk_widget *root = NULL;
         (void)fdk_window_get_root(win, &root);
-        /* 1.4.15's band is root child 0; the body is child 1. */
+        /* 1.0.0's band is root child 0; the body is child 1. */
         fdk_widget *body = fdk_widget_child_at(root, 1);
         assert(body != NULL);
         /* Find the link button among the body's children by role. */
@@ -16965,7 +16965,7 @@ static void test_choosers_gui(void) {
              * is self-scrolling — no wrapper). */
             fdk_widget *root = NULL;
             (void)fdk_window_get_root(win, &root);
-            /* 1.4.15's band is root child 0; the body is child 1. */
+            /* 1.0.0's band is root child 0; the body is child 1. */
             fdk_widget *body = fdk_widget_child_at(root, 1);
             assert(body != NULL);
             fdk_widget *list = fdk_widget_child_at(body, 0);
@@ -17018,7 +17018,7 @@ static void test_choosers_gui(void) {
          * Sample the ring's right and upper-left mid-radius points —
          * readback proofs of the per-pixel rasterization. */
         Display *rb = NULL;
-        /* Pad + wheel center — in WINDOW coordinates, so the 1.4.15
+        /* Pad + wheel center — in WINDOW coordinates, so the 1.0.0
          * title band (the theme's title_bar_height) shifts the body
          * down; read the metric instead of assuming 28. */
         int band = fdk_theme_get_metric(NULL, FDK_TM_TITLE_BAR_HEIGHT);
@@ -17044,7 +17044,7 @@ static void test_choosers_gui(void) {
          * color (the honest no-interaction answer). */
         fdk_widget *root = NULL;
         (void)fdk_window_get_root(win, &root);
-        /* 1.4.15's band is root child 0; the body is child 1. */
+        /* 1.0.0's band is root child 0; the body is child 1. */
         fdk_widget *body = fdk_widget_child_at(root, 1);
         size_t n = fdk_widget_child_count(body);
         fdk_widget *ok = fdk_widget_child_at(body, n - 2);
@@ -17063,6 +17063,6 @@ static void test_choosers_gui(void) {
     XCloseDisplay(send);
     fdk_font_destroy(font);
     fdk_shutdown(ctx);
-    printf("[ok] choosers GUI: the 1.4.3 window batch end-to-end\n");
+    printf("[ok] choosers GUI: the 1.0.0 window batch end-to-end\n");
     #undef CHOOSER_WAIT
 }

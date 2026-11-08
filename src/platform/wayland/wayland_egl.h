@@ -1,5 +1,5 @@
 /*
- * wayland_egl.h — the GPU presentation lane (1.2.0 / D-1), Wayland/EGL side
+ * wayland_egl.h — the GPU presentation lane (1.0.0 / D-1), Wayland/EGL side
  *
  * The exact contract of the X11/GLX lane (x11_gl.h), carried over to
  * Wayland with the platform's own mechanism: FDK rasterizes every

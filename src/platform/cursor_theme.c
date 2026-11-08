@@ -2,7 +2,7 @@
 
 #define FDK_LOG_TAG "cursor"
 
-/* cursor_theme.c — the shared XCursor theme loader (1.1.4 Wayland,
+/* cursor_theme.c — the shared XCursor theme loader (1.0.0 Wayland,
  * shared + candidate lists 1.0.0-rc2 S-5).
  *
  * Both backends need cursor images as raw ARGB pixels from the
@@ -29,7 +29,7 @@
  * pass is needed. The theme itself: $XCURSOR_THEME, else "default".
  *
  * This file originated as the static parser inside
- * src/platform/wayland/wayland_cursor.c (1.1.4); the bytes of the
+ * src/platform/wayland/wayland_cursor.c (1.0.0); the bytes of the
  * format knowledge were earned there against Debian's Adwaita theme
  * files and moved here verbatim when X11 needed them too. */
 

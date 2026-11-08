@@ -6,8 +6,8 @@
  * control surfaces and their hover/pressed/disabled states, accent,
  * track, border) plus the paint-time metrics (corner radii, separator
  * thickness, row heights, focus ring width). The built-in default is
- * the 1.4.16 "Faded Dream" palette — the calm gray-with-violet retune
- * of the 1.4.0 "Modern" look (the Modern values survive as a
+ * the 1.0.0 "Faded Dream" palette — the calm gray-with-violet retune
+ * of the 1.0.0 "Modern" look (the Modern values survive as a
  * documented .fdk theme recipe, and the Phase 6 v1 values before
  * them).
  *
@@ -95,7 +95,7 @@ typedef enum fdk_theme_token {
     FDK_TK_ACCENT                    = 8, /* checked, progress, focus*/
     FDK_TK_TRACK                     = 9, /* progress/toggle track   */
 
-    /* 1.3.2 append — the vocabulary the production audit found
+    /* 1.0.0 append — the vocabulary the production audit found
      * missing. Tooltips (the new popup layer); explicit selection
      * colors (v1 hardcoded accent-with-0.45-alpha at every call
      * site — a translucent accent is now a first-class token light
@@ -111,7 +111,7 @@ typedef enum fdk_theme_token {
     FDK_TK_WARNING                   = 17,/* caution                  */
     FDK_TK_DANGER                    = 18,/* destructive/error        */
 
-    /* 1.4.0 append — the modern-face vocabulary. Surfaces beyond the
+    /* 1.0.0 append — the modern-face vocabulary. Surfaces beyond the
      * control fill (sidebars, popup menus); the accent family a filled
      * button needs (hover/pressed states of the accent itself, and the
      * text color that stays legible on an accent fill); the flat-entry
@@ -129,7 +129,7 @@ typedef enum fdk_theme_token {
     FDK_TK_ENTRY_BORDER              = 26,/* text-field edge          */
     FDK_TK_ROW_HOVER                 = 27,/* dense-row hover fill     */
 
-    /* 1.4.16 append — the titlebar family. FDK-drawn decorations
+    /* 1.0.0 append — the titlebar family. FDK-drawn decorations
      * (fdk_window_set_decorated) paint through these tokens: the
      * band fill, its title text and glyphs, the bottom rule, and the
      * window-management buttons' hover/pressed states. They are
@@ -137,7 +137,7 @@ typedef enum fdk_theme_token {
      * base token it derives from (titlebar_background falls back to
      * control_background, titlebar_text to text, titlebar_border to
      * control_border, titlebar_button_hover/pressed to the control
-     * hover/pressed) — so every pre-1.4.16 partial theme keeps the
+     * hover/pressed) — so every pre-1.0.0 partial theme keeps the
      * exact band it always had, and a theme that wants a distinct
      * chrome (a black band over white content, a hot-pink rave bar)
      * says so in five keys. Same append-only policy as ever. */
@@ -164,7 +164,7 @@ typedef enum fdk_theme_metric {
     FDK_TM_MENU_ITEM_HEIGHT    = 4, /* Menu bar/row minimum height, 16..48 */
     FDK_TM_TOOLTIP_CORNER_RADIUS = 5, /* Tooltip box radius,         0..16 */
 
-    /* 1.4.0 append — the modern-face metrics: entry corner radius
+    /* 1.0.0 append — the modern-face metrics: entry corner radius
      * (fields round softer than buttons by convention), menu/combo
      * popup radius, the list row height (a LAYOUT metric: switching
      * it re-arranges lists — the FDK_TM_TITLE_BAR_HEIGHT rule), and
@@ -173,19 +173,19 @@ typedef enum fdk_theme_metric {
     FDK_TM_MENU_CORNER_RADIUS   = 7, /* Menu/combo popup corners,   0..16 */
     FDK_TM_LIST_ROW_HEIGHT      = 8, /* List row height,            16..48 */
     FDK_TM_FOCUS_RING_WIDTH     = 9, /* Focus ring stroke,          1..4  */
-    /* 1.4.4: the overlay scrollbar's thickness — the CLASSIC bar
+    /* 1.0.0: the overlay scrollbar's thickness — the CLASSIC bar
      * keeps FDK_TM_SCROLLBAR_WIDTH; the overlay bar is deliberately
      * thinner (the modern transient indicator). */
     FDK_TM_SCROLLBAR_OVERLAY_WIDTH = 10, /* Overlay bar thickness, 4..12 */
-    /* 1.4.6: the IconView's default cell geometry (LAYOUT metrics:
+    /* 1.0.0: the IconView's default cell geometry (LAYOUT metrics:
      * switching them re-slots every grid). fdk_iconview_set_item_size
      * overrides per-widget. */
     FDK_TM_ICONVIEW_CELL_WIDTH  = 11, /* Cell width,            64..192 */
     FDK_TM_ICONVIEW_CELL_HEIGHT = 12, /* Cell height,           64..224 */
-    /* 1.4.8: the TextView's inner padding (LAYOUT metric: switching
+    /* 1.0.0: the TextView's inner padding (LAYOUT metric: switching
      * it re-wraps every document). */
     FDK_TM_TEXTVIEW_PAD         = 13, /* Text inset, both axes,   0..32 */
-    /* 1.4.16: the BUTTON SHAPE — how a button's corners are cut,
+    /* 1.0.0: the BUTTON SHAPE — how a button's corners are cut,
      * independent of the radius number. 0 ROUNDED (the
      * button_corner_radius metric, the historical look), 1 CIRCLE
      * (radius = min(width, height)/2 — a true circle on square
@@ -201,7 +201,7 @@ typedef enum fdk_theme_metric {
 
 /* ---- Lifecycle ---- */
 
-/* A fresh copy of the built-in default theme (the 1.4.16 "Faded
+/* A fresh copy of the built-in default theme (the 1.0.0 "Faded
  * Dream" palette and metrics). Modify it with the setters below and
  * install it with fdk_theme_set_default(). Returns NULL only on
  * allocation failure. */
@@ -296,11 +296,11 @@ void fdk_theme_set_default(fdk_theme *theme);
  * installed. */
 fdk_theme *fdk_theme_get_default(void);
 
-/* ---- Theme discovery (1.4.13) ------------------------------------------ */
+/* ---- Theme discovery (1.0.0) ------------------------------------------ */
 
 /* Where themes come from when nobody spells out a path. The search
  * path, in priority order (first wins), mirrors the font layer's
- * discovery over the XDG basedir spec, plus the 1.4.16 custom folder:
+ * discovery over the XDG basedir spec, plus the 1.0.0 custom folder:
  *
  *   1. $FDK_THEME_DIR          — one explicit directory (absolute;
  *                                the test suite and sandboxed rigs)
@@ -311,7 +311,7 @@ fdk_theme *fdk_theme_get_default(void);
  *   3. $XDG_DATA_HOME/fdk/.FDKThemes   (default
  *      ~/.local/share/fdk/.FDKThemes — the canonical folder
  *      `make install` fills)
- *   4. $XDG_DATA_HOME/fdk/themes       (the 1.4.13 location, still
+ *   4. $XDG_DATA_HOME/fdk/themes       (the 1.0.0 location, still
  *      scanned so themes an older FDK installed keep resolving)
  *   5. each $XDG_DATA_DIRS entry's fdk/.FDKThemes then its
  *      fdk/themes (default /usr/local/share:/usr/share — the pair
@@ -333,7 +333,7 @@ fdk_theme *fdk_theme_get_default(void);
  * entries are ignored (XDG rules).
  *
  * THE GLOBAL SETTING. FDK keeps one toolkit-level preference: the
- * theme name, read (1.4.14) in priority order:
+ * theme name, read (1.0.0) in priority order:
  *
  *   1. $FDK_THEME — the per-process override (the GTK_THEME
  *      precedent: first run of a new app, a screenshot rig, a
@@ -358,7 +358,7 @@ fdk_theme *fdk_theme_get_default(void);
  * choice: that call opts the process out of the global setting
  * entirely (same contract as GTK's explicit theme override).
  *
- * THE LIVE FOLLOW (1.4.14). While a display context runs, FDK
+ * THE LIVE FOLLOW (1.0.0). While a display context runs, FDK
  * watches the settings files (inotify on their directories) and
  * re-resolves whenever one changes: `fdk-theme set` re-themes every
  * RUNNING FDK application the moment it lands, through the same
@@ -376,7 +376,7 @@ fdk_theme *fdk_theme_get_default(void);
  * and stays on the built-in theme. A themed launch must never be a
  * failed launch — and neither must a live re-theme.
  *
- * THE WHITELIST (1.4.14). fdk_theme_set_allowed_themes() is the
+ * THE WHITELIST (1.0.0). fdk_theme_set_allowed_themes() is the
  * developer's side of the contract: an application whose brand is
  * ONE theme (or a curated set) restricts what any settings source
  * above may install. See the API block below for the exact clamp
@@ -428,7 +428,7 @@ size_t fdk_theme_available_count(void);
 const char *fdk_theme_available_name(size_t index);
 const char *fdk_theme_available_path(size_t index);
 
-/* ---- The developer whitelist (1.4.14) ---------------------------------- */
+/* ---- The developer whitelist (1.0.0) ---------------------------------- */
 
 /* Restricts which themes the SETTINGS sources ($FDK_THEME, the
  * per-app store, the global store) may install in this process —

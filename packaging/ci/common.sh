@@ -73,7 +73,7 @@ fdk_packver() {
 # (libfdk.so.1.0.0-rc1) produced 'provides = so:libfdk.so.1=1.0.0-rc1'
 # and apk index rejected the whole package ("package file format
 # error", proven live on CI 2026-10-25 and reproduced locally with
-# apk-tools 2.14.12 — even a hyphenless '1.0.0rc1' tail is rejected;
+# apk-tools 1.0.0 — even a hyphenless '1.0.0rc1' tail is rejected;
 # only numeric tails are valid). The suffix lives in the version
 # string, pkg-config, and package metadata — never in the .so name.
 fdk_sover() {

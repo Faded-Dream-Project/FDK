@@ -97,7 +97,7 @@ unaffected. No public API change (internal to `src/widget/dialog.c`).
   `pane_new_tab()` both call `pane_navigate(p, t->dir)` — and
   pane_navigate did `snprintf(t->dir, sizeof t->dir, "%.400s",
   abs_path)` where abs_path IS t->dir: overlapping snprintf is
-  undefined behavior (C11 7.21.6.5) and this glibc EMPTIES the
+  undefined behavior (C11 1.0.0.0) and this glibc EMPTIES the
   string (scripts/overlap_repro.c isolates it in 8 lines). So every
   watch-fired reload navigated to `""` → `opendir("")` fails →
   fmodel_load's failure path **cleared the whole store** (also
@@ -573,7 +573,7 @@ unaffected. No public API change (internal to `src/widget/dialog.c`).
   set_cell + icon per row used to relayout the whole list per
   row, per rebuild — the second O(N²) of the storm).
 - **The `-Wunused-but-set-variable` warning the owner reported**
-  (list.c:358, `fixed_w`): a 1.5.1 leftover — a dead duplicate of
+  (list.c:358, `fixed_w`): a 1.0.0 leftover — a dead duplicate of
   the `fixed_nat` sum computed above it (the anchored-branch math
   derives positions from the viewport directly). Removed; the
   zero-warnings rule holds again (full -Werror build clean).
@@ -603,7 +603,7 @@ unaffected. No public API change (internal to `src/widget/dialog.c`).
   mnemonic-stripped "PHASE: act" telemetry under FDK_FILES_DRIG
   (the new menu rig's channel).
 - **List/IconView: the rubber band was DEAD in a populated view —
-  the drag-source controller owned every press.** The 1.5.0 veto
+  the drag-source controller owned every press.** The 1.0.0 veto
   (`fdk_widget_set_drag_veto`) is checked on the press's HIT
   TARGET, but a press inside a list hit-tests to a ROW (or the
   scrollview/scrollbar), never to the list — so the list's own
@@ -658,7 +658,7 @@ unaffected. No public API change (internal to `src/widget/dialog.c`).
 ### Fixed — owner round 10: the wrong-row selection (and the X11 paint pace)
 
 - **List: every list-level press selected ONE ROW LOWER than the
-  pointer.** The 1.5.0 columns round inset the rows below the
+  pointer.** The 1.0.0 columns round inset the rows below the
   header strip but left the rubber-band math dividing raw
   list-local y by the row height — so a press on the header
   selected row 0, a press in a row's empty right half (round 9's
@@ -684,7 +684,7 @@ unaffected. No public API change (internal to `src/widget/dialog.c`).
   "one core pegged during drags" report's mechanism. X11 now ships
   `window_frame_ready`: a 17ms minimum present interval (both render
   lanes stamp `last_present_ms`), the same capacity gate Wayland's
-  1.1.6 op uses (both SHM slots in flight → not ready, instead of
+  1.0.0 op uses (both SHM slots in flight → not ready, instead of
   blocking inside the next acquire), and the two exceptions
   (nothing presented yet; popup windows — first-present latency is
   their correctness). Measured on the drag rig (250 injected
@@ -2728,7 +2728,7 @@ docs/EXTENDING.md.
 
 ### Packaging / build
 
-- The shared library file becomes the numeric `libfdk.so.1.1.0`
+- The shared library file becomes the numeric `libfdk.so.1.0.0`
   (pre-release suffixes never appear in the .so file name — the rc
   lives in the version string, pkg-config, and package metadata);
   the SONAME symlink stays `libfdk.so.1` (the additions are
@@ -2758,10 +2758,10 @@ candidate's first pushes:
    (`sover=${file##*.so.}`) — producing
    `provides = so:libfdk.so.1=1.0.0-rc1`, which `apk index`
    rejects with "package file format error" (reproduced locally
-   with apk-tools 2.14.12; even a hyphenless `1.0.0rc1` tail is
+   with apk-tools 1.0.0; even a hyphenless `1.0.0rc1` tail is
    rejected — only numeric tails are valid). The Makefile now names
    the real file with the numeric `FDK_SO_VERSION`
-   (`libfdk.so.1.1.0`) — the GNU convention; pre-release suffixes
+   (`libfdk.so.1.0.0`) — the GNU convention; pre-release suffixes
    never appear in the .so file name.
 
 The dividing line in both fixes: pkg-config `Version` and the smoke
@@ -2944,7 +2944,7 @@ path connects it to this round.
 
 Four root causes found by running the fdk-shell-overlay demo bar on real
 desktops, each reproduced in this environment first (headless sway
-AND labwc 0.8.3 for the Wayland legs; a real Openbox 3.6.1 under
+AND labwc 0.8.3 for the Wayland legs; a real Openbox 1.0.0 under
 Xvfb for the X11 legs) and each pinned by a permanent test:
 
 1. **Wayland: the layer surface's startup sequence** — the bar

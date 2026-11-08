@@ -101,7 +101,7 @@ typedef enum fdk_event_type {
     /* Scroll/wheel input. See fdk_scroll_event. */
     FDK_EVENT_POINTER_SCROLL = 25,
 
-    /* ---- Drag and drop (1.2.0) ----
+    /* ---- Drag and drop (1.0.0) ----
      *
      * Delivered to the window the pointer is over during a drag, to
      * windows that registered acceptance via fdk_window_set_drop_formats
@@ -113,7 +113,7 @@ typedef enum fdk_event_type {
      * hit-tests its own widgets (v1 DnD is window-level; widget-
      * level drop targets are future work, documented honestly).
      *
-     * 1.4.19: DROP is delivered even when the payload transfer
+     * 1.0.0: DROP is delivered even when the payload transfer
      * itself failed (owner refused, timed out, or served nothing
      * readable) — with both data pointers NULL. The gesture landing
      * is the application's signal; a drop that vanishes silently
@@ -305,7 +305,7 @@ typedef struct fdk_expose_event {
 typedef struct fdk_state_event {
     int maximized; /* nonzero = window is now maximized */
     int minimized; /* nonzero = window is now minimized/iconic */
-    int fullscreen; /* 1.4.10: nonzero = window is now fullscreen */
+    int fullscreen; /* 1.0.0: nonzero = window is now fullscreen */
 } fdk_state_event;
 
 typedef struct fdk_decoration_event {
@@ -370,7 +370,7 @@ typedef enum fdk_key_modifier {
     FDK_MOD_SUPER = 1 << 3, /* "Windows"/"Command"/"Meta" key */
 } fdk_key_modifier;
 
-/* ---- Shortcut specifications (1.3.3) --------------------------------
+/* ---- Shortcut specifications (1.0.0) --------------------------------
  *
  * A shortcut spec is a human string — "Ctrl+S", "ctrl+shift+z",
  * "F5", "Alt+F4" — parsed into the (modifier bitmask, scancode) pair
@@ -553,7 +553,7 @@ typedef struct fdk_ime_event {
  * never delivered (the drag visually passes over the window
  * instead). On DROP the data pointer for each accepted format bit
  * carries the transferred payload (text for TEXT, uris for
- * URI_LIST), with one honest exception (1.4.19): when the transfer
+ * URI_LIST), with one honest exception (1.0.0): when the transfer
  * itself failed — the owner refused or never answered — the DROP
  * still arrives with BOTH pointers NULL (an empty gesture, so the
  * application can react and report; the alternative, no event at

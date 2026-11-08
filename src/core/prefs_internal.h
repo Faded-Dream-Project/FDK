@@ -1,5 +1,5 @@
 /*
- * prefs_internal.h — core-internal preferences surface (1.4.14)
+ * prefs_internal.h — core-internal preferences surface (1.0.0)
  *
  * Not part of the public API — never installed. The public contract
  * lives in include/fdk/fdk_prefs.h.

@@ -2,7 +2,7 @@
 
 #define FDK_LOG_TAG "wayland"
 
-/* Cursor shaping on Wayland (1.1.6; the full named set 1.0.0-rc2).
+/* Cursor shaping on Wayland (1.0.0; the full named set 1.0.0-rc2).
  *
  * Wayland clients own their cursor PIXELS: after wl_pointer::enter the
  * client must answer with wl_pointer.set_cursor(serial, surface, hx,
@@ -10,11 +10,11 @@
  * a wl_shm buffer. FDK loads those images from the system's XCursor
  * theme files through the shared loader (src/platform/cursor_theme.c
  * — the same no-libxcursor call the X11 backend's RENDER path makes;
- * the format knowledge was earned here in 1.1.4 and moved to the
+ * the format knowledge was earned here in 1.0.0 and moved to the
  * common file when X11 needed it too).
  *
  * Honest degradation: a machine with NO cursor theme anywhere keeps
- * the compositor's own default arrow (pre-1.1.6 behavior), with one
+ * the compositor's own default arrow (pre-1.0.0 behavior), with one
  * DEBUG line per miss — never a wrong shape, never a hidden cursor.
  *
  * The window layer drives this through the optional window_set_cursor

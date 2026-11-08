@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * choosers.c — the 1.4.3 dialog trio: About, FontChooser, ColorChooser
+ * choosers.c — the 1.0.0 dialog trio: About, FontChooser, ColorChooser
  *
  * All three ride the dialog.c lifecycle contract: a toolkit-owned
  * window, auto-painted, exactly one callback, self-destroying after
@@ -168,7 +168,7 @@ static void about_logo_paint(fdk_widget *canvas, fdk_surface *surface,
      * blit_BLEND, not the plain blit: the logo decodes to ARGB8888
      * (fdk_surface_create_from_image's contract) and a transparent
      * margin around the artwork must show the dialog's background,
-     * not the padding's raw RGB (the 1.5.3 black-box defect — the
+     * not the padding's raw RGB (the 1.0.0 black-box defect — the
      * icon blit fast paths had the same bug). */
     (void)fdk_surface_blit_blend(surface, bounds.x, bounds.y, a->logo_img,
                                  (fdk_rect){0, 0, w, h});
@@ -181,7 +181,7 @@ static void about_body_arrange(fdk_widget *w, fdk_rect assigned) {
         return;
     }
     /* The Close button: bottom-right, the message dialog's rule.
-     * Children in the BODY's local coordinates (1.4.16: the 1.4.15
+     * Children in the BODY's local coordinates (1.0.0: the 1.0.0
      * band made assigned.y nonzero and the old assigned.y + ... bases
      * double-offset the content below the band). */
     fdk_size bn = {0, 0};
@@ -424,7 +424,7 @@ fdk_result fdk_dialog_show_about(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = name,
         .width = width,
-        /* 1.4.15: the FDK title bar (see dialog.c). */
+        /* 1.0.0: the FDK title bar (see dialog.c). */
         .height = height + fdk_theme_get_metric(NULL,
                                                 FDK_TM_TITLE_BAR_HEIGHT),
     };
@@ -780,7 +780,7 @@ static void fc_body_arrange(fdk_widget *w, fdk_rect assigned) {
             bh = cancel_n.height;
         }
     }
-    /* Children in the BODY's local coordinates (the 1.4.16
+    /* Children in the BODY's local coordinates (the 1.0.0
      * double-offset fix — see about_body_arrange). */
     fdk_i32 by = assigned.height - CHOOSE_PAD - bh;
     fdk_i32 x = assigned.width - CHOOSE_PAD;
@@ -938,7 +938,7 @@ fdk_result fdk_dialog_choose_font(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        /* 1.4.15: the FDK title bar (see dialog.c). */
+        /* 1.0.0: the FDK title bar (see dialog.c). */
         .height = height + fdk_theme_get_metric(NULL,
                                                 FDK_TM_TITLE_BAR_HEIGHT),
     };
@@ -1533,8 +1533,8 @@ static void cc_body_arrange(fdk_widget *w, fdk_rect assigned) {
             bh = cancel_n.height;
         }
     }
-    /* Children in the BODY's local coordinates (the 1.4.16
-     * double-offset fix — the wheel rode 28px low under the 1.4.15
+    /* Children in the BODY's local coordinates (the 1.0.0
+     * double-offset fix — the wheel rode 28px low under the 1.0.0
      * band; caught by the chooser's own pixel test). */
     fdk_i32 by = assigned.height - CHOOSE_PAD - bh;
     fdk_i32 x = assigned.width - CHOOSE_PAD;
@@ -1649,7 +1649,7 @@ fdk_result fdk_dialog_choose_color(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        /* 1.4.15: the FDK title bar (see dialog.c). */
+        /* 1.0.0: the FDK title bar (see dialog.c). */
         .height = height + fdk_theme_get_metric(NULL,
                                                 FDK_TM_TITLE_BAR_HEIGHT),
     };
@@ -1768,7 +1768,7 @@ fail:
 }
 
 /* ===================================================================
- * Color button (1.4.4) — the color-well swatch
+ * Color button (1.0.0) — the color-well swatch
  * =================================================================== */
 
 #define CB_W 44
@@ -1782,7 +1782,7 @@ typedef struct fdk_colorbutton {
     char *title;             /* owned; the chooser's title (or NULL) */
     bool pressed;            /* pointer down inside                  */
     bool hovering;           /* semantic hover flag                  */
-    fdk_hover_fade fade;     /* the 1.4.1 hover paint blend          */
+    fdk_hover_fade fade;     /* the 1.0.0 hover paint blend          */
     fdk_color_button_fn on_set;
     void *on_set_data;
     /* The live chooser's token (NULL when none is up): the dialog's
@@ -1947,7 +1947,7 @@ static void cbtn_paint(fdk_widget *w, fdk_surface *surface,
         return;
     }
     /* The button face: control family, the hover blend riding the
-     * 1.4.1 machinery, pressed snapping (presses never fade). */
+     * 1.0.0 machinery, pressed snapping (presses never fade). */
     fdk_color face = fdk__pal_control();
     if (cb->fade.t > 0.0f) {
         fdk_color hover = fdk__pal_control_hover();

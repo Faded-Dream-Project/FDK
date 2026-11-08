@@ -39,7 +39,7 @@ int main(void) {
     }
     checks++;
 
-    /* ---- PRIMARY selection (1.3.4): the same argument-safety
+    /* ---- PRIMARY selection (1.0.0): the same argument-safety
      * contract. Protocol-shaped coverage (round trips, foreign
      * owners, middle-click paste) lives in the X11/Wayland
      * integration suites; the headless layer pins the guards. ---- */

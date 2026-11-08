@@ -4,7 +4,7 @@ Every image here is a real captured frame from the test rigs — not a
 mockup. Captures come from Xvfb + `x11grab` on the X11 side, and from
 compositor screenshot paths (weston/sway headless, wlr-screencopy) on
 the Wayland side. Since the Wayland deferred-first-frame fix
-(milestone 1.1.1) the whole example suite runs on both backends under
+(milestone 1.0.0) the whole example suite runs on both backends under
 the test rigs: every example is launched in the same
 show -> paint -> pump order a real application uses,
 screenshot-verified, then closed through the real close path. Some
@@ -173,7 +173,7 @@ Adwaita here). The list view resolves the theme's 16-px PNGs; the
 grid's 48-px cells are RASTERIZED FROM SVG (Adwaita ships no 48-px
 PNGs — the vendored nanosvg renders the scalable assets at the
 requested size, verified pixel-level against an independent cairo
-reference). Since 1.5.3 the icons composite with true per-pixel
+reference). Since 1.0.0 the icons composite with true per-pixel
 alpha — the transparent surround around every artwork shows the row
 or cell background (the earlier builds painted an opaque black box
 there), and the detection chain reads the LIVE desktop through

@@ -62,15 +62,15 @@ working-tree writes to HEAD within seconds — the committed
 objects are the durable layer, and the worktree follows via
 reset --hard.
 
-## Round 38 (2026-11-08) — the first release is 1.0.0: the 1.1.0 identity retired repo-wide
+## Round 38 (2026-11-08) — the first release is 1.0.0: the 1.0.0 identity retired repo-wide
 
 The owner's call (recorded in docs/versioning.md History,
-2026-11-08): the first release is **1.0.0** — the 1.1.0-rcN
+2026-11-08): the first release is **1.0.0** — the 1.0.0-rcN
 candidate numbering is retired, the pre-release suffix is dropped,
 MINOR 1 → 0, and every cycle label in the tree reads 1.0.0.
 
 **The sweep:** 153 files, 853 occurrences (boundary-aware regex;
-rc-forms first so "1.1.0-rc2" became "1.0.0-rc2" in the
+rc-forms first so "1.0.0-rc2" became "1.0.0-rc2" in the
 changelog's historical candidate entries, then the bare triple),
 zero residuals outside .git/build/third_party. The version macros
 moved specially: FDK_VERSION_MINOR 0, FDK_VERSION_SUFFIX "",
@@ -334,7 +334,7 @@ Last audited: 2026-10-31, on the rc2 line after the history rewrite
 §20 single-owner rule [D-036], the extreme-scale re-land's
 completion [D-037], and the shaped-selection geometry [D-038] —
 see the Implemented inventory's "2026-10-31 rounds" subsection).
-Before those: 2026-10-30, at milestone **1.7.9** (D-5 session
+Before those: 2026-10-30, at milestone **1.0.0** (D-5 session
 save/restore, both lanes: include/fdk/fdk_session.h + fdk_window_
 set_command/join_session/leave_session + FDK_EVENT_SESSION_SAVE/
 RESTORED (enum 58/59), 869 exports (+8) — the X11 ICCCM lane
@@ -353,7 +353,7 @@ sanitize-off, release+examples+verify-exports (869), the FULL sway
 suite (the session section: live degradation + seam bodies + join
 validation), fdk-shell-overlay's four suites. Prior state below.)
 
-Last audited: 2026-10-30, at milestone **1.7.8** (D-4 foreign
+Last audited: 2026-10-30, at milestone **1.0.0** (D-4 foreign
 toplevels: include/fdk/fdk_toplevel.h, 861 exports (+6) — the
 taskbar substrate on wlr-foreign-toplevel-management (lazy bind)
 + EWMH _NET_CLIENT_LIST; the coarse changed-callback model; the
@@ -361,7 +361,7 @@ X11 retitle gap documented (D-031); the full battery green incl.
 the X11 fake-WM round trip and sway's LIVE section. Prior state
 below.)
 
-Last audited: 2026-10-30, at milestone **1.7.7** (D-3 tablets/stylus,
+Last audited: 2026-10-30, at milestone **1.0.0** (D-3 tablets/stylus,
 both backends: FDK_EVENT_TABLET_* (enum 52-57) + fdk_tablet_event —
 Wayland zwp_tablet_v2 (vendored generated protocol code) + the X11
 valuator path through dlopen'd libXi (the XIQueryDevice scan); the
@@ -369,7 +369,7 @@ frame batching absorbed, the XI2-no-proximity gap documented (D-030);
 855 exports unchanged; the full battery green incl. both suites' new
 seam-driven legs. Prior state below.)
 
-Last audited: 2026-10-30, at milestone **1.7.6** (D-2 subsurfaces,
+Last audited: 2026-10-30, at milestone **1.0.0** (D-2 subsurfaces,
 extension API v2: `fdk_ext_subsurface_create`/`_create_ex` +
 set_position/resize/set_desync/place_above/place_below — the
 FDK-owned child-surface primitive, X11 child windows + Wayland
@@ -388,8 +388,8 @@ Full narrative history lives in `ROADMAP.md` (the phase-by-phase
 account and the GTK/Qt feature-parity ledger); this file is the fast,
 authoritative index of that ledger.
 
-Last audited: 2026-10-25, at milestone **1.7.2** (the rc1
-packaging matrix's first live CI pass — the 1.7.1 commits were
+Last audited: 2026-10-25, at milestone **1.0.0** (the rc1
+packaging matrix's first live CI pass — the 1.0.0 commits were
 pushed and four of the six CI jobs failed, every defect a
 packaging-script defect, none in library code: the fdk-shell-overlay
 install-test smoke needs X11 DEV headers as test infrastructure
@@ -430,7 +430,7 @@ Xlib readback carries -lX11 on its link line [modern ld refuses
 transitive resolution: 'DSO missing from command line', reproduced
 locally], and pkg-config discovery failures now print the real
 diagnostic [2>/dev/null swallowed the void failure's evidence;
-pkgconf 3.0.7 was built from source locally and PROVEN to accept
+pkgconf 1.0.0 was built from source locally and PROVEN to accept
 the old bytes, so the void cause is pending its diagnostic].
 The third push closed void: the corrected .pc made the build-phase
 smoke discover/link the installed fdk-shell-overlay (the old 'cannot find'
@@ -446,7 +446,7 @@ still green. docs/testing.md's 1.0.0-rc1
 packaging-matrix lesson + CHANGELOG rc1 Fixed section carry the
 full narratives. Prior state below.)
 
-Last audited: 2026-10-27, at milestone **1.7.5** (the owner-directed
+Last audited: 2026-10-27, at milestone **1.0.0** (the owner-directed
 verification pass + the CI-red day: the 0.2.0 packaging red's root
 cause was fdk-shell-overlay's Makefile carrying its own hand-maintained
 0.1.0 next to the header's 0.2.0 — every install-test caught the
@@ -470,8 +470,8 @@ D-004/D-005 record the reconciliation and the core/add-on split;
 ROADMAP-1.0.0 gained the verified-status table [this commit]. Prior
 state below.)
 
-Last audited: 2026-10-26, at milestone **1.7.4** (the push of the
-1.7.3 fixes + the sixth CI defect class it exposed: the live-desktop
+Last audited: 2026-10-26, at milestone **1.0.0** (the push of the
+1.0.0 fixes + the sixth CI defect class it exposed: the live-desktop
 commits landed on origin [three commits, core 1041 lines / fdk-shell-overlay
 947 / docs 247] and five of six CI jobs went red at the identical
 line — `tests/test_x11.c: fatal error:
@@ -500,7 +500,7 @@ testing.md's sixth-class lesson, CHANGELOG's matrix section
 [now "six defect classes"], fdk-shell-overlay/Makefile. No tags, no
 releases; 1.0.0 untouched. Prior state below.)
 
-Last audited: 2026-10-26, at milestone **1.7.3** (the live-desktop
+Last audited: 2026-10-26, at milestone **1.0.0** (the live-desktop
 bar findings — sway/labwc + Openbox, all four reproduced in this
 environment BEFORE fixing: [1] the Wayland layer-surface startup
 sequence — the demo bar painted before its role's first configure
@@ -538,7 +538,7 @@ examples, fdk-shell-overlay's 11-test X11 suite [twice], the Wayland suite
 + bar rig [sway+labwc+kill legs], and the isolation proof all
 green. Prior state below.)
 
-Last audited: 2026-10-25, at milestone **1.7.1** (the rc1
+Last audited: 2026-10-25, at milestone **1.0.0** (the rc1
 desktop-integration hardening, found live on a real NVIDIA GTX
 1050 Ti desktop: the GPU present lane's self-check now decides
 INCONCLUSIVE vs PASS vs REAL-FAILURE per connection with a
@@ -559,12 +559,12 @@ and every build compiles against the INSTALLED FDK — the isolation
 proof re-run per packaging container; CI's ubuntu job runs the
 fdk-shell-overlay suites + the isolation proof]. Prior state below.)
 
-Last audited: 2026-10-25, at milestone **1.7.0** (the extension API
+Last audited: 2026-10-25, at milestone **1.0.0** (the extension API
 + fdk-shell-overlay — the 1.0.0-rc1 candidate: the owner directed FDK to
 grow a public extension API ["add an extension API to FDK so
 add-on packages can be built on top of it, and prove it by building
 a layer-shell add-on as a SEPARATE package that uses only that
-public API"] and set the version to 1.0.0-rc1 [minor, not 1.0.1,
+public API"] and set the version to 1.0.0-rc1 [minor, not 1.0.0,
 because public API is added; a CANDIDATE — no git tag, the v1.0.0
 release and its tag untouched, the owner decides the final 1.0.0].
 What landed: include/fdk/fdk_extend.h [the versioned extension API
@@ -608,9 +608,9 @@ format error": abuild derives the apk so:provides version from
 the .so FILENAME tail (sover=${file##*.so.}), so the raw-named
 libfdk.so.1.0.0-rc1 produced provides = so:libfdk.so.1=1.0.0-rc1
 which apk index rejects (reproduced locally with apk-tools
-2.14.12 — even hyphenless 1.0.0rc1 is rejected; only numeric
+1.0.0 — even hyphenless 1.0.0rc1 is rejected; only numeric
 tails are valid) — fixed at the root: the Makefile now installs
-the real .so as the numeric FDK_SO_VERSION (libfdk.so.1.1.0;
+the real .so as the numeric FDK_SO_VERSION (libfdk.so.1.0.0;
 suffixes never appear in the .so file name), and the debian/void
 packaging scripts follow via fdk_sover(). The third push then
 exposed an independent 1-in-400 CI flake: the HiDPI test's private
@@ -624,7 +624,7 @@ both ways locally, docs/testing.md 1.0.0-rc1 lesson). See
 CHANGELOG's rc1 Fixed section and docs/packaging.md's
 pre-release-versions section.
 
-Prior audit at milestone **1.6.1** (the one-face
+Prior audit at milestone **1.0.0** (the one-face
 alignment — the 1.0.0 re-cut: the owner inspected the live v1.0.0
 release and set the product posture ["it needs to ship only one the
 next ones must be in (.FDKthemes) btw the default one being
@@ -647,7 +647,7 @@ include/fdk/fdk_theme.h, the tools' usage lines, and
 packaging/ci/release-notes.sh all record the one-face posture; the
 v1.0.0 tag was re-created on this commit and the release assets
 replaced on the main repository), on top of the prior audit at
-milestone **1.6.0** (the public 1.0.0
+milestone **1.0.0** (the public 1.0.0
 decision — the real release: the project owner, having validated
 the 1.5.x picker overhaul on real hardware [native Wayland under
 labwc included — "works native wayland", the FDK-drawn decorations
@@ -673,7 +673,7 @@ the disclosed PACKAGING-SKIP guard [green checkmark, zero
 packages], and the Void family's CI-env failure the owner
 remembered was from the retracted attempt — its fixes landed
 afterward and were proven green in the matrix before this
-release), building on **1.5.4** (the picker's
+release), building on **1.0.0** (the picker's
 crash fix — the maintainer's fourth report ["it crashes anytime I
 try to open anything that has to do with the filepicker", an ASan
 heap-buffer-overflow inside nsvg__parseNameValue] resolved at the
@@ -685,7 +685,7 @@ name right-trim dereferenced *str with str == end, one byte past
 the NUL of the strndup'ed class-properties text, whenever a CSS
 declaration block ends in ';' + trailing whitespace (the standard
 multiline rule every real theme authors, so EVERY dialog open on
-a class-using theme aborted; 1.5.3's live XSETTINGS detection had
+a class-using theme aborted; 1.0.0's live XSETTINGS detection had
 just made FDK finally select those real themes, which is why the
 crash surfaced exactly then); fixed with a marked one-function
 bounds patch in the vendored header [trim by str[-1] — identical
@@ -701,7 +701,7 @@ permanent assertion], and the full headless + X11 suites green;
 honest fidelity boundary documented [class rules with
 presentation properties apply; color:/currentColor-only rules
 leave the default fill]; public API and its 621 exports
-unchanged), building on **1.5.3** (the picker's
+unchanged), building on **1.0.0** (the picker's
 polish pass — the maintainer's third report ["black boxes or bars
 around folder icons, worst in the grid, present in the list; the
 active desktop theme still not detected without an override; the
@@ -713,7 +713,7 @@ paths routed ARGB8888 icon sources through fdk_surface_blit — the
 documented OPAQUE raw copy — so every icon decoded at exactly its
 cell size (16-px list rows, 48-px grid cells, the sidebar's places)
 painted its transparent margins as opaque BLACK; scaled blits
-composited correctly, which is exactly why 1.5.2's verifications
+composited correctly, which is exactly why 1.0.0's verifications
 missed it — the fixture icons were full-bleed squares and the
 template matches sampled only the reference's opaque pixels; now
 ARGB sources composite source-over on both fast paths, XRGB sources
@@ -729,7 +729,7 @@ detection now hears the LIVE desktop through XSETTINGS
 short-lived X connection — pure Xlib, no D-Bus, the no-bus policy
 intact; the channel the desktop's own GTK apps obey on X11/XLibre:
 xfsettingsd, gsd-under-XWayland, mate/cinnamon, xsettingsd; the
-wire format decoded byte-for-byte from a REAL xsettingsd 1.0.2 and
+wire format decoded byte-for-byte from a REAL xsettingsd 1.0.0 and
 the reader verified end-to-end against that daemon including a
 live theme change; precedence: FDK_ICON_THEME > XSETTINGS > user
 gtk ini > xfconf xsettings.xml > kdeglobals > classic icon-theme
@@ -740,7 +740,7 @@ DISPLAY unset]; tests: headless detection groups for the new file
 channels, an X11 XSETTINGS group with an in-repo spec-conformant
 fake manager (both byte orders, int/string/color skip, precedence,
 fallbacks), and both picker rigs re-verified pixel-level + VLM on
-X11 AND Wayland), building on **1.5.2** (the exhaustive
+X11 AND Wayland), building on **1.0.0** (the exhaustive
 pre-1.0 audit pass — the maintainer's second desktop report
 ["only recognizable folder icons; text files indistinguishable"]
 traced to THREE root causes, all fixed internally [public API and
@@ -768,7 +768,7 @@ through pkg-config against the INSTALLED tree, run under Xvfb with
 the file dialog + icon engine live]; repo-wide TODO/stub/no-op
 sweep clean, both-backend batteries green, sway/X11 example rigs
 refreshed for the 1.0.06 theme colors and 1.0.07 scrolled catalog;
-full narrative: ROADMAP.md "1.5.2"), building on **1.5.1**
+full narrative: ROADMAP.md "1.0.0"), building on **1.0.0**
 (the picker
 stabilization — the file/folder pickers wear the desktop's icon
 theme through a new internal freedesktop icon-theme engine
@@ -789,7 +789,7 @@ Directories line] and produced the docs/screenshots gallery pair;
 also fixed: FDK_ROW_ICON_RECENT silently reading as NONE, the
 dialog icon-grid's one-column layout [fdk__iconview_reflow], and
 the engine's uninitialized chain-slot read [found by a 30-run
-sweep]), building on **1.5.0** (the
+sweep]), building on **1.0.0** (the
 release-engineering pass — RETRACTED same-day, see below; the
 packaging/CI infrastructure below remains on main as dormant
 release tooling): the version decision itself [1.0.0 adopted, then
@@ -867,7 +867,7 @@ file picker) were double-offsetting their children by the band
 height — every dialog's content rode 28px too low since 1.0.05.
 Both fixed and pinned at 1.0.06; the tree is always the truth,
 including over this file. THE AUDIT'S OWN FIRST CATCH: the ledger's "themed
-tooltips" candidate was stale (the 1.3.2 tooltip has been fully
+tooltips" candidate was stale (the 1.0.0 tooltip has been fully
 themed since birth — tokens, parser, Modern retune, tests); the tree
 is always the truth, including over this file.
 
@@ -1011,7 +1011,7 @@ the retraction is the next ledger entry.
   X11 groups repaired and re-run for real. 1.0.05 the chrome
   uniformity tail; 1.0.04 the live settings desktop; 1.0.03 the
   command-line face; 1.0.02 INCR clipboard transfers; 1.0.01
-  markup; 1.0.00 fullscreen; 1.4.9 PNG codec + Picture +
+  markup; 1.0.00 fullscreen; 1.0.0 PNG codec + Picture +
   clipboard images)
 - **Build:** green in debug (ASan+UBSan) and release, X11 + Wayland
   backends both linked (Wayland protocols wired: xdg-shell,
@@ -1023,8 +1023,8 @@ the retraction is the next ledger entry.
   fdk_window_get_render_path),
   `make verify-exports` OK in debug AND release
 - **Tests:** headless suite all-pass — **570 [ok] checks** (incl.
-  the 1.4.4 + iconview suites, the eight 1.4.8 textview groups,
-  the 1.4.9 png/picture suite, the 1.0.01 markup suite, the
+  the 1.0.0 + iconview suites, the eight 1.0.0 textview groups,
+  the 1.0.0 png/picture suite, the 1.0.01 markup suite, the
   1.0.03 theme-discovery + CLI-tools suites, the 1.0.04
   per-app-priority / whitelist / live-recheck / fdk-set groups,
   and the 1.0.06 additions: the titlebar-fallback, button-shape
@@ -1110,16 +1110,16 @@ viewport's width, horizontal range collapsed, the recipe for a
 scrolling whole-window catalog), menu /
 menu-bar / context menu (accelerators + mnemonics), combo (editable),
 slider (marks/ticks + labels; vertical orientation), **iconview**
-(the 1.4.5 item grid: glyph cells in a re-flowing column field,
+(the 1.0.0 item grid: glyph cells in a re-flowing column field,
 the List's selection model, grid keyboard nav, batch fills; the
-1.4.6 rubber band + themed cell metrics; the 1.4.7 band
+1.0.0 rubber band + themed cell metrics; the 1.0.0 band
 edge-chasing auto-scroll BOTH axes + cell double-click
 activation),
 spinbutton,
-**picture** (1.4.9 — the image display: an owned surface under
+**picture** (1.0.0 — the image display: an owned surface under
 NONE/CONTAIN/COVER/FILL fit policies, scaled paints on the
 transformed-blit engine, the IMAGE a11y role),
-**textview** (1.4.8 — the multi-line editor: word-wrap through the
+**textview** (1.0.0 — the multi-line editor: word-wrap through the
 break engine + no-wrap mode, caret/selection across visual lines
 with the goal column, PageUp/PageDown, paragraph triple-click,
 the Entry's whole splice/undo/clipboard/PRIMARY/preedit
@@ -1131,17 +1131,17 @@ PLAIN text), spinner, link-button (role on button), paned,
 expander, statusbar, stack + stackswitcher, revealer (slide modes;
 crossfade via the paint group), levelbar, canvas (drawing area),
 search entry (preset; debounced search-changed; BUILT on the
-entry's icon slots since 1.4.4), **menu button**
+entry's icon slots since 1.0.0), **menu button**
 (attached-popup hybrid — the hamburger), dialog (+ modal run),
 **file dialog** (OPEN/SAVE, places sidebar, filters, breadcrumb path
-bar, Ctrl+L location entry — modernized 1.4.0; XDG recently-used
-place + accept-time recording since 1.4.4; **icon mode since
-1.4.7** — options.view seeds the IconView browsing surface, the
+bar, Ctrl+L location entry — modernized 1.0.0; XDG recently-used
+place + accept-time recording since 1.0.0; **icon mode since
+1.0.0** — options.view seeds the IconView browsing surface, the
 toolbar's Icons checkbox flips it live, and every accept path
 reads through the surface abstraction; **the 1.0.04 size retune**
 — 866x614 window, 15px face, 34px rows, 184px places, 640x420
 list: the "small picker, small text" report closed), **color button** (the
-color-well swatch that opens the ColorChooser — 1.4.4; alpha
+color-well swatch that opens the ColorChooser — 1.0.0; alpha
 checkerboard, heap-token lifetime guard), path-bar composite,
 window decorations (the FDK-drawn title band — themed fill, title,
   **its every pixel theme data since 1.0.06: the TITLEBAR token
@@ -1154,12 +1154,12 @@ example since 1.0.04** — example_window.h decorates the standard
 window, 06/07/09/10 decorate their own, 02 stays bare because its
 subject is raw-surface rendering that never paints the tree). Entry icon slots
 (leading/trailing glyphs + custom painters + press callbacks,
-1.4.4). List activate-on-single-click (1.4.4 — the places
+1.0.0). List activate-on-single-click (1.0.0 — the places
 sidebar rhythm).
 
-### Dialogs & pickers (SHIPPED 1.4.3 — choosers.c; icons 1.5.1)
+### Dialogs & pickers (SHIPPED 1.0.0 — choosers.c; icons 1.0.0)
 
-- **FilePicker / FolderPicker iconography (1.5.1)** — every row and
+- **FilePicker / FolderPicker iconography (1.0.0)** — every row and
   grid cell wears the DESKTOP's icons via the internal icon-theme
   engine (src/theme/icon_theme.c): user-theme detection (GTK/KDE
   settings + the system default/index.theme channel + $FDK_ICON_THEME
@@ -1173,7 +1173,7 @@ sidebar rhythm).
   glyphs as the floor. List rows 16 px, grid cells 48 px.
   Fixed on the way: the RECENT glyph's silent drop in
   fdk_list_row_set_icon's switch; the dialog icon-grid's stuck-at-
-  one-column layout (fdk__iconview_reflow, the 1.4.7 lesson's third
+  one-column layout (fdk__iconview_reflow, the 1.0.0 lesson's third
   instance); the chain walk's uninitialized-slot read.
 
 - **AboutDialog** — logo/name/version/comments/copyright, LINK
@@ -1188,14 +1188,14 @@ sidebar rhythm).
 ### Platform / input (SHIPPED)
 
 - X11 backend: full window lifecycle, EWMH/ICCCM, XIM **full-Unicode**
-  input, resize edges, decorations, **HiDPI** (1.4.5: Xft.dpi /
+  input, resize edges, decorations, **HiDPI** (1.0.0: Xft.dpi /
   screen-metric detection at connect, integer scale [1,3],
   physical-sized windows + divided input — the same core
   compositing the Wayland side rides)
 - Wayland backend: xdg-shell lifecycle, libxkbcommon keymap, client
-  key repeat (1.3.5), output hot-plug/unplug, compositor-death
+  key repeat (1.0.0), output hot-plug/unplug, compositor-death
   resilience, cursor shapes
-- Clipboard: text + URI formats, **PRIMARY selection** (1.3.4)
+- Clipboard: text + URI formats, **PRIMARY selection** (1.0.0)
 - DnD: both directions (X11 + Wayland), `fdk_drag_begin`; **the
   1.0.04 INCR-drop fix** — X11 drops now read through the shared
   requestor-parameterized selection engine (atomic, multi-part,
@@ -1219,7 +1219,7 @@ sidebar rhythm).
   configure states array as truth
 - **HiDPI on Wayland: SHIPPED** — fractional-scale-v1 listener,
   viewport source rectangles, `fdk_window_get_scale`
-- **HiDPI on X11: SHIPPED (1.4.5)** — Xft.dpi / screen-metric
+- **HiDPI on X11: SHIPPED (1.0.0)** — Xft.dpi / screen-metric
   detection, integer scales, physical windows, divided input
 - **The AT-SPI text interface + relations export: SHIPPED (1.0.0,
   C-2 / B-10 level 2)** — org.freedesktop.atspi.Text on the bridge
@@ -1400,7 +1400,7 @@ sidebar rhythm).
 - Theme engine: `.fdk` format, **33 color tokens + 15 metrics**
   (`FDK_TK_*` / `FDK_TM_*`), runtime switching, the Faded Dream /
   Modern / v1 recipes; button roles (suggested/destructive/link),
-  placeholder text, hover fades (1.0.0/1.4.2). **The 1.0.06
+  placeholder text, hover fades (1.0.0/1.0.0). **The 1.0.06
   additions: the TITLEBAR family** (titlebar_background/text/
   border/button_hover/button_pressed — FALLBACK tokens: unset keys
   read through to control/text/border so pre-1.0.06 partial themes
@@ -1449,19 +1449,19 @@ sidebar rhythm).
   reference
 - Animation: easing library (**11 functions**), animator, smooth
   scroll, menu/combo fades, revealer slides, expander door
-- **Paint group (1.4.3): per-widget subtree opacity** — the ARGB
+- **Paint group (1.0.0): per-widget subtree opacity** — the ARGB
   offscreen + global-alpha source-over blit engine (the crossfade
   rides it; nested groups composite naturally)
-- **Font surface (1.4.3): `fdk_font_enumerate`** (name-table parse,
+- **Font surface (1.0.0): `fdk_font_enumerate`** (name-table parse,
   TTC faces, family/style/path sorted) + **`fdk_font_load_face`**
 - Accessibility: a11y tree (**41 roles**), narrator, announcements,
   per-widget value interfaces
 - i18n: catalog, plurals, dates, locale
 - Undo/redo: generic undo stack + entry integration
-- Preferences: `.fdk-prefs` persistence, atomic saves (1.3.7)
+- Preferences: `.fdk-prefs` persistence, atomic saves (1.0.0)
 - Text: fontconfig scan, stb_truetype shaping, AA rendering,
   ellipsize, line breaking
-- **Images (1.4.9)**: stb_image decode (file + memory), the PNG
+- **Images (1.0.0)**: stb_image decode (file + memory), the PNG
   ENCODER over zlib (fdk_surface_save_png), the Picture widget,
   clipboard image/png (X11 atomic property + Wayland data-device
   pipe, one-content-at-a-time)
@@ -1476,7 +1476,7 @@ sidebar rhythm).
   object), decoration bars in run colors, kerning resets at
   style-run boundaries. NO size markup (a font is one face at
   one pixel size — the documented tradeoff)
-- Shortcuts/accelerators/mnemonics (1.3.3 / 1.3.6)
+- Shortcuts/accelerators/mnemonics (1.0.0 / 1.0.0)
 - Versioned shared-library export surface (version script +
   verify-exports gate)
 
@@ -2767,7 +2767,7 @@ WIP push every step; webfetch specs, record URLs.
 ## The four reports, four root causes (all fixed this round)
 
 1. **"hold and drag to highlight does not work / I want multi-file
-   selection"** — the 1.5.0 drag veto was checked on the press's HIT
+   selection"** — the 1.0.0 drag veto was checked on the press's HIT
    TARGET, but a press inside a list hits a ROW, never the list: the
    list's own veto (list.c:2301) was dead code. The controller fired
    pane_begin_drag at 6px, the DnD grab broke the band. FIX: vetoes on
@@ -2842,7 +2842,7 @@ says it matches, and any round whose push failed must be assumed LOST, not "pend
    (X11 core + XI2 + Wayland seat, fractional viewporter) were audited first and are
    scale-correct by design; the Xvfb event trace proved widget-local coordinates exact
    (`row-DOWN local=(60,7)` for a click 7px into row 1's rect).
-   ROOT CAUSE, engine: the 1.5.0 columns round inset the rows 26px below the header strip but
+   ROOT CAUSE, engine: the 1.0.0 columns round inset the rows 26px below the header strip but
    left the rubber-band math dividing RAW list-local y by the row height. Every list-level
    press mapped one row LOWER than the pointer: a header press "selected" row 0, a press right
    of a row's text (round 9's gate falling through to the band) selected the row BELOW — the
@@ -2865,7 +2865,7 @@ says it matches, and any round whose push failed must be assumed LOST, not "pend
       drag kept damaging (every motion). X11 motion COALESCING already existed (1.0.0-rc1,
       the XPeekIfEvent collapse) — the pegging was paint RATE, not event rate. FIX: X11 now
       ships the op — 17ms minimum present interval stamped by both render lanes (GLX and
-      SHM/CPU), the 1.1.6 Wayland capacity gate's reasoning (both SHM slots in flight →
+      SHM/CPU), the 1.0.0 Wayland capacity gate's reasoning (both SHM slots in flight →
       not-ready, so the next acquire doesn't block), and two exceptions (nothing presented
       yet; popups — first-present latency is their correctness). Measured with the new
       perf_drag rig (250 XTEST motions/s, 6s, /proc/<pid>/stat sampling): steady-state
@@ -2962,7 +2962,7 @@ divergence is a stop-and-reconcile event, never an overwrite.
    screen. `fdk__list_cancel_bands_all_roots()` (list.c, seam in widgets_internal.h) now fires
    from menu.c's teardown paths (session_close_above level-0, menu_popup_destroyed): walks every
    root, ends every live band exactly as an UP would. PORT EXTRA beyond the alien version: it
-   also clears the rows' pending_band flags (1.5.0's row-born gestures) — a stale armed row
+   also clears the rows' pending_band flags (1.0.0's row-born gestures) — a stale armed row
    would have synthesized a phantom band from stale coordinates on the next motion.
 2. **ROW HIT BANDS (presses right of the content are empty space)** — a row now accepts presses
    only over icon + name text + padding (`row_press_on_content`, columns-aware: the 1.5.x column
@@ -3010,7 +3010,7 @@ org.fdk.testapps.files, PHASE: boot).
 origin/main == this round's code commit + docs commit. Tree clean at that commit.
 
 ## Round 8 delivered (the owner's three reports)
-1. **THE COLUMNS HUG THE FAR END + FOLLOW RESIZES (engine, 1.5.1)** — round 7 summed widths from
+1. **THE COLUMNS HUG THE FAR END + FOLLOW RESIZES (engine, 1.0.0)** — round 7 summed widths from
    the left, so the fixed columns clustered right after the shortest filename and never moved on
    resize. The layout is now RESOLVED, not summed: `list_columns_layout()` runs on every viewport
    change (arrange / the app's set_bounds / the paint self-heal — all funneled through one sync)
@@ -3051,7 +3051,7 @@ or the app will prefer the Wayland backend (the backend picker prefers WAYLAND_D
 origin/main == this round's code commit + docs commit. Tree clean at that commit.
 
 ## Round 7 delivered
-1. **LIST COLUMNS (engine, 1.5.0)** — the file-manager list view as a first-class fdk_list
+1. **LIST COLUMNS (engine, 1.0.0)** — the file-manager list view as a first-class fdk_list
    capability, NOT app code: `fdk_list_set_columns()` (fdk_list_column: title/min_width/
    align_left; column 0 = the primary text column, expands, keeps the v1 contract; columns
    1..N fixed-width right-aligned default), `fdk_list_row_set_cell()`, `fdk_list_get_column_count()`.

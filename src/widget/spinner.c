@@ -1,5 +1,5 @@
 /*
- * spinner.c — the busy indicator (1.4.1).
+ * spinner.c — the busy indicator (1.0.0).
  *
  * GTK's GtkSpinner / Qt's busy QProgressBar, drawn as FDK can draw
  * it with the primitive set: a rotating arc synthesized from

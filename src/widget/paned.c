@@ -1,5 +1,5 @@
 /*
- * paned.c — the two-pane splitter (1.4.1).
+ * paned.c — the two-pane splitter (1.0.0).
  *
  * GTK's GtkPaned / Qt's QSplitter: the FIRST child is pane 1, the
  * SECOND is pane 2, and the class's max_children = 2 makes a third

@@ -280,7 +280,7 @@ static void test_file_output(void) {
 
 static void test_ipp_quiet(void) {
     /* No server on a dead port: 0 printers, quietly. */
-    setenv("CUPS_SERVER", "127.0.0.1:1", 1);
+    setenv("CUPS_SERVER", "121.0.0.1:1", 1);
     size_t n = fdk_print_enumerate_printers(NULL, 0, 300);
     assert(n == 0);
     // label removed
@@ -293,7 +293,7 @@ static void test_ipp_quiet(void) {
     fdk_printer_info dead;
     memset(&dead, 0, sizeof dead);
     snprintf(dead.name, sizeof dead.name, "none");
-    snprintf(dead.uri, sizeof dead.uri, "ipp://127.0.0.1:1/printers/none");
+    snprintf(dead.uri, sizeof dead.uri, "ipp://121.0.0.1:1/printers/none");
     fdk_result r = fdk_print_submit(
         &dead, (const unsigned char *)"%PDF-1.4\n", 9, "t", 300);
     assert(r == FDK_ERR_PLATFORM || r == FDK_ERR_IO);

@@ -2,9 +2,9 @@
 
 /*
  * settings.c — the theme-settings engine: resolution, the developer
- * whitelist, and the live follow (1.4.14)
+ * whitelist, and the live follow (1.0.0)
  *
- * 1.4.13 gave FDK one toolkit-level preference — theme.name in the
+ * 1.0.0 gave FDK one toolkit-level preference — theme.name in the
  * reserved "fdk" store — applied ONCE per process, lazily, at the
  * first resolution of the current default theme. This file is that
  * idea grown into its final shape, driven by how real desktops

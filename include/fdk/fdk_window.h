@@ -43,8 +43,8 @@ typedef struct fdk_window_options {
     int popup;               /* nonzero = popup window             */
     fdk_i32 x;               /* parent-relative popup position     */
     fdk_i32 y;
-    /* 1.3.2 appended: INPUT-TRANSPARENT popup (tooltips). Zero-init
-     * (and every pre-1.3.2 caller) keeps the interactive-popup
+    /* 1.0.0 appended: INPUT-TRANSPARENT popup (tooltips). Zero-init
+     * (and every pre-1.0.0 caller) keeps the interactive-popup
      * contract. Nonzero with popup: the window takes an EMPTY input
      * region — pointer events fall through to whatever is underneath
      * — and never grabs pointer or keyboard: a passive hint window
@@ -324,7 +324,7 @@ void fdk_window_set_cursor(fdk_window *window, fdk_cursor_shape shape);
  * inside which the window receives pointer and touch input. Clicks
  * on the window but OUTSIDE the region fall through to whatever is
  * beneath it — the mechanism notification overlays, auto-hide
- * reveal strips and shaped panels are built on (the 1.3.2
+ * reveal strips and shaped panels are built on (the 1.0.0
  * input_transparent tooltip was the degenerate whole-window case).
  *
  * The region is a HINT shaped by the platform's native mechanism
@@ -435,7 +435,7 @@ void fdk_window_resize(fdk_window *window, fdk_i32 width, fdk_i32 height);
  * Returns FDK_ERR_INVALID_ARGUMENT if window or out_size is NULL. */
 fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
 
-/* ---- HiDPI (Phase 3 completion; X11 since 1.4.5) ----
+/* ---- HiDPI (Phase 3 completion; X11 since 1.0.0) ----
  *
  * Reports the window's current scale factor: the number of BUFFER
  * (physical) pixels per logical unit. 1.0 = the window's pixels are
@@ -445,7 +445,7 @@ fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
  *   - Wayland: the live wl_surface buffer scale / fractional-scale
  *     preference, updated by the compositor as the window moves
  *     between outputs.
- *   - X11 (1.4.5): detected ONCE at connect from the desktop's two
+ *   - X11 (1.0.0): detected ONCE at connect from the desktop's two
  *     conventions — the Xft.dpi resource string (xrdb /
  *     XSETTINGS-synced sessions; what GDK's X11 backend trusts) or,
  *     failing that, the screen's own pixels-per-millimeter metric
@@ -474,7 +474,7 @@ fdk_result fdk_window_get_size(const fdk_window *window, fdk_size *out_size);
 fdk_result fdk_window_get_scale(const fdk_window *window,
                                 fdk_f32 *out_scale);
 
-/* ---- Render-path introspection (1.4.18) ---------------------------------
+/* ---- Render-path introspection (1.0.0) ---------------------------------
  *
  * FDK is a HYBRID renderer: every pixel is rasterized on the CPU
  * (the surface layer's exact, antialiased software rasterizer —
@@ -486,7 +486,7 @@ fdk_result fdk_window_get_scale(const fdk_window *window,
  *       on X11, wl_shm on Wayland).
  *
  *   FDK_RENDER_PATH_GL — the GPU present lane (both backends:
- *       X11/GLX since 1.4.18, Wayland/EGL since 1.2.0). The
+ *       X11/GLX since 1.0.0, Wayland/EGL since 1.0.0). The
  *       damaged rects upload into a GL texture and one fullscreen
  *       composite carries the frame to the screen through GLX or
  *       EGL — byte-identical pixels, hardware-accelerated blit.
@@ -552,7 +552,7 @@ void fdk_window_set_size_limits(fdk_window *window, fdk_size min_size, fdk_size 
  * arrives as FDK_EVENT_WINDOW_STATE; fdk_window_is_fullscreen()
  * reads FDK's last-known truth. Returns FDK_ERR_UNSUPPORTED when
  * the backend cannot (e.g. a Wayland popup with no toplevel).
- * (1.4.10) */
+ * (1.0.0) */
 fdk_result fdk_window_fullscreen(fdk_window *window);
 
 /* Returns a fullscreen window to its former state. The compositor
@@ -647,7 +647,7 @@ bool fdk_window_get_decorated(const fdk_window *window);
 fdk_result fdk_window_set_decoration_font(fdk_window *window,
                                           fdk_font *font);
 
-/* ---- Application shortcuts (1.3.3) -----------------------------------
+/* ---- Application shortcuts (1.0.0) -----------------------------------
  *
  * A per-window table of key bindings the application registers and
  * the toolkit dispatches. On every KEY_DOWN (including auto-repeat

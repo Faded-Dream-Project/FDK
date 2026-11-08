@@ -39,12 +39,12 @@ struct fdk_theme {
     /* Straight RGBA. Indexed by fdk_theme_token. */
     fdk_color colors[FDK_TK_COUNT];
 
-    /* The OVERRIDE mask (1.4.16): colors_set[t] is true when a
+    /* The OVERRIDE mask (1.0.0): colors_set[t] is true when a
      * [colors] key (or fdk_theme_set_color) put the value there,
      * false when it is merely the inherited built-in default. The
      * FALLBACK tokens (the titlebar family — see fdk__token_fallback)
      * consult it: an unset titlebar_background reads through to
-     * control_background, so pre-1.4.16 partial themes theme the
+     * control_background, so pre-1.0.0 partial themes theme the
      * band exactly as they always did. Base tokens are always
      * effectively set (the built-in initializes them), so only the
      * fallback family ever sees a false bit in practice. */
@@ -78,7 +78,7 @@ fdk_theme *fdk__theme_current(void);
  * never part of the installed API. */
 void fdk__theme_boot_reset_for_tests(void);
 
-/* ---- the settings engine (theme/settings.c, 1.4.14) --------------------
+/* ---- the settings engine (theme/settings.c, 1.0.0) --------------------
  *
  * Resolution ($FDK_THEME -> the app's own store -> the global store),
  * the developer whitelist, and the inotify live follow live in

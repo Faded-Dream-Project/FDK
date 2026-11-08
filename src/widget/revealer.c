@@ -1,9 +1,9 @@
 /*
- * revealer.c — the generalized reveal flight (1.4.2).
+ * revealer.c — the generalized reveal flight (1.0.0).
  *
  * GTK's GtkRevealer: a container that shows or hides its ONE child
  * (max_children = 1 — a second child is a loud INVALID_ARGUMENT)
- * with a sliding animation instead of a pop. The Expander (1.4.1)
+ * with a sliding animation instead of a pop. The Expander (1.0.0)
  * proved the mechanics — the door SELF-CROPS: the revealer's own
  * bounds track reveal * child-extent every tick, so the paint walk's
  * clip stack does the cropping with no parent cooperation, and the
@@ -22,14 +22,14 @@
  * self-crop's edge anchoring is what plain-parented, hand-positioned
  * revealers get (the expander's documented contract, generalized).
  *
- * CROSSFADE arrived in 1.4.3 — the honest way: the paint-group
+ * CROSSFADE arrived in 1.0.0 — the honest way: the paint-group
  * machinery (widget.c) renders the revealer's subtree into a cached
  * ARGB offscreen and composites it once with a global-alpha
  * source-over blit, so the fade is per-pixel REAL, the door keeps
  * the child's full geometry (a fade is opacity, not size), and at
  * rest (reveal 0 or 1) the plain walk runs at zero cost.
  *
- * The flight rides the 1.3.8 animator (~160 ms cubic-out by
+ * The flight rides the 1.0.0 animator (~160 ms cubic-out by
  * default, settable); standalone trees snap — the headless-honesty
  * rule every animation obeys. on_revealed fires when the flight
  * lands (either direction — the natural completion point for

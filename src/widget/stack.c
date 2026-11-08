@@ -1,5 +1,5 @@
 /*
- * stack.c — the named page stack (1.4.2).
+ * stack.c — the named page stack (1.0.0).
  *
  * GTK's GtkStack: a container of NAMED pages with exactly one
  * visible at a time — the structure every settings dialog and

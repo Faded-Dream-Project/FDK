@@ -46,7 +46,7 @@ static char *dup_string(const char *s) {
     return copy;
 }
 
-/* ---- timers (1.3.1) ----------------------------------------------------
+/* ---- timers (1.0.0) ----------------------------------------------------
  *
  * One queue on the context, fired from the pump between event
  * batches (deadline order, LATE allowed / never early). See
@@ -480,7 +480,7 @@ fdk_result fdk_init(fdk_context **out_ctx, const fdk_init_options *options) {
     ctx->ops = ops;
     ctx->conn = conn;
 
-    /* The theme-settings engine (1.4.14): bind this application's
+    /* The theme-settings engine (1.0.0): bind this application's
      * identity (the per-app <app_id>.prefs override leg) and arm the
      * inotify watch that makes `fdk-theme set` / `fdk-set theme set`
      * re-theme THIS process while it runs. Bridged through the
@@ -591,10 +591,10 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             return fired;
         }
         if (buffered > 0) {
-            /* 1.2.2: the batch is drained — paint any geometry the
+            /* 1.0.0: the batch is drained — paint any geometry the
              * batch changed, ONCE per window at the batch's final
              * size (see window_internal.h; the resize backlog that
-             * wedged the main thread at 100% CPU pre-1.2.2). */
+             * wedged the main thread at 100% CPU pre-1.0.0). */
             fdk__window_flush_geo_repaints(ctx);
             return buffered;
         }
@@ -631,7 +631,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
                 }
             }
         }
-        /* Platform-deadline cap (1.3.5, Wayland's client-driven key
+        /* Platform-deadline cap (1.0.0, Wayland's client-driven key
          * repeat): the backend may hold its own timer the core queue
          * knows nothing about; never sleep past it either — an
          * indefinite fdk_run() with no core timers still wakes to
@@ -649,7 +649,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
             }
         }
 
-        /* The poll set: backend fd, theme-settings watch (1.4.14),
+        /* The poll set: backend fd, theme-settings watch (1.0.0),
          * and the extension fd sources (1.0.0) — the fixed pair the
          * pump always polled became a stack array sized for all
          * three. The backend fd stays entry 0 (its POLLERR|POLLNVAL
@@ -668,7 +668,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
         pfds[1].revents = 0;
         int nfds = 1;
         int has_theme = 0;
-        /* The theme-settings watch (1.4.14): one more fd in the same
+        /* The theme-settings watch (1.0.0): one more fd in the same
          * wait. poll() on both; the settings fd's readable path runs
          * BELOW the backend's, so a settings change coalesces with
          * whatever input also arrived. -1 means no watch (tools,
@@ -760,7 +760,7 @@ int fdk_pump_events(fdk_context *ctx, int timeout_ms) {
                                              finite);
             }
             if (dispatched > 0) {
-                /* 1.2.2: same batch-end flush as the loop head — the
+                /* 1.0.0: same batch-end flush as the loop head — the
                  * poll-visible batch just drained, paint its geometry
                  * fallout once before reporting the events up. */
                 fdk__window_flush_geo_repaints(ctx);
@@ -822,9 +822,9 @@ void fdk_run(fdk_context *ctx) {
      * through the normal dispatch path. X11's XOpenDisplay doesn't
      * pre-queue anything to drain, so this is a near no-op for X11.) */
     (void)ctx->ops->dispatch_pending(ctx->conn);
-    /* 1.2.2: the initial drain can carry a configure (Wayland's
+    /* 1.0.0: the initial drain can carry a configure (Wayland's
      * first xdg configure lands here on resize-at-map compositors —
-     * the 1.1.5 first-configure size fix); its repaint belongs to
+     * the 1.0.0 first-configure size fix); its repaint belongs to
      * the same batch. */
     fdk__window_flush_geo_repaints(ctx);
 
@@ -895,7 +895,7 @@ void fdk_shutdown(fdk_context *ctx) {
      * this clears the font/text copies). */
     fdk__tooltip_shutdown();
 
-    /* The theme-settings watch (1.4.14): stop watching the settings
+    /* The theme-settings watch (1.0.0): stop watching the settings
      * files — there is no pump left to drain them. The installed
      * theme (if any) stays: theme state is process-wide. */
     fdk__window_theme_settings_shutdown();

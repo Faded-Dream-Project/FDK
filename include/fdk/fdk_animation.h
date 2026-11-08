@@ -1,5 +1,5 @@
 /*
- * fdk_animation.h — time-based animation and easing (1.3.8)
+ * fdk_animation.h — time-based animation and easing (1.0.0)
  *
  * The polish half of the interaction contract: things that MOVE
  * should move like physical objects, not teleport. FDK's answer is

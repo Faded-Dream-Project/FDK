@@ -1,9 +1,9 @@
 /*
- * 12_settings.c — the app-furniture showcase (1.4.2)
+ * 12_settings.c — the app-furniture showcase (1.0.0)
  *
  * A settings dialog in the shape every desktop app ships: a search
  * field, a pill switcher over a named-page Stack, and a context-
- * scoped Statusbar reporting what the app is doing. Every 1.4.2
+ * scoped Statusbar reporting what the app is doing. Every 1.0.0
  * widget earns its keep here —
  *
  *   SearchEntry     the magnifier field (Esc clears, X empties)
@@ -17,7 +17,7 @@
  *   Revealer        the Advanced details drawer (SLIDE_UP door)
  *   List + icons    the storage list, multi-select with the
  *                   rubber-band sweep (drag on the empty space)
- *   + the 1.4.1 furniture: frames, checkboxes, radios, link button
+ *   + the 1.0.0 furniture: frames, checkboxes, radios, link button
  *
  * Interactions to try: type in the search field (the statusbar's
  * "action" context echoes it; Esc clears), flip pages, drag the
@@ -252,7 +252,7 @@ static fdk_widget *build_storage_page(settings_app *app,
 
     fdk_font *font = app->ex->ui;
 
-    /* The multi-select list with the 1.4.1 symbolic row icons —
+    /* The multi-select list with the 1.0.0 symbolic row icons —
      * sweep-select by dragging on the EMPTY space below the rows
      * (the rubber band), ctrl-sweep to union. */
     fdk_widget *list = NULL;

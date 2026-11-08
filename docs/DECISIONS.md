@@ -490,7 +490,7 @@ XIMPreeditCallbacks | XIMStatusNothing first (inline composition —
 what CSD toolkits do); the PreeditNothing posture remains the
 fallback for input methods that refuse the style (composition is
 then unavailable but full-Unicode commits still flow
-Xutf8LookupString — the 1.3.1 guarantee). The composition buffer
+Xutf8LookupString — the 1.0.0 guarantee). The composition buffer
 splice is a PURE function (character indices ↔ byte offsets —
 where XIM clients historically corrupt their buffers; it was: the
 first run of its own test battery caught the mid-character offset
@@ -697,7 +697,7 @@ new build+CI dependency for one call), the X11 backend dlopens
 libXrender.so.1 (the house pattern — the GL lane, HarfBuzz,
 FriBidi, libXi all went this way) and builds ARGB cursors from the
 SHARED XCursor theme loader — the same no-libxcursor parser the
-Wayland backend earned against Adwaita in 1.1.4, extracted to
+Wayland backend earned against Adwaita in 1.0.0, extracted to
 src/platform/cursor_theme.c when X11 needed it. Which shapes try
 the theme first is table-driven; shapes with exact font twins skip
 the theme entirely (faster, and pixel-identical to the desktop).
@@ -725,7 +725,7 @@ test seam — real set_shape requests against sway 1.10.
 
 ## D-017 — input regions: logical rects at the window layer, the platform's native shape beneath (S-4 / A-06 / A-07)
 
-**Context.** The 1.3.2 input_transparent popups proved the
+**Context.** The 1.0.0 input_transparent popups proved the
 whole-window degenerate case (an EMPTY input region); the audit's
 A-06 gap was arbitrary partial regions — what notification
 overlays with close buttons, auto-hide reveal strips (C-5's
@@ -921,7 +921,7 @@ main queue and re-enter FDK's own handlers; instead the token proxy
 moves to a private wl_event_queue and the exchange rides
 wl_display_roundtrip_queue — exactly one event is dispatched (the
 token's own done), and nothing else in the connection is disturbed.
-This is the buffer-release-queue pattern (1.1.6) applied to a
+This is the buffer-release-queue pattern (1.0.0) applied to a
 protocol object for the first time, and it is the reason minting is
 reentrancy-safe with no flags, no locks, no deferred completion.
 

@@ -14,7 +14,7 @@
  * Horizontal only in v1 (the roadmap says "Slider"; vertical is a
  * documented parked remainder).
  *
- * 1.4.2 — marks: gtk_scale_add_mark's ticks (and optional labels)
+ * 1.0.0 — marks: gtk_scale_add_mark's ticks (and optional labels)
  * under the trough. Labels render in the lazy system default font
  * (the tooltip's precedent: loaded on first use, owned by the
  * slider, destroyed with it); a system without a loadable font
@@ -22,7 +22,7 @@
  * the natural height by one label line; the track centers in the
  * remaining extent so a marked slider keeps its thumb geometry.
  *
- * 1.4.3 — the parked vertical remainder, shipped: FDK_SLIDER_VERTICAL
+ * 1.0.0 — the parked vertical remainder, shipped: FDK_SLIDER_VERTICAL
  * rotates the whole geometry (min at the BOTTOM, max at the top);
  * marks tick to the LEFT of the trough with right-aligned labels,
  * and labeled marks widen the natural WIDTH by one label line. The
@@ -44,7 +44,7 @@
 #define SLIDER_MIN_W 40
 #define SLIDER_MIN_H 24
 #define SLIDER_KEY_PCT 10
-#define SLIDER_TICK_H 6    /* 1.4.2: the tick stroke below the trough */
+#define SLIDER_TICK_H 6    /* 1.0.0: the tick stroke below the trough */
 
 /* A mark: tick + optional label at a value (GTK's scale marks). */
 typedef struct fdk_slider_mark {
@@ -61,12 +61,12 @@ typedef struct fdk_slider {
     bool dragging;
     fdk_slider_changed_fn on_changed;
     void *on_changed_data;
-    fdk_slider_mark *marks;   /* 1.4.2, owned array */
+    fdk_slider_mark *marks;   /* 1.0.0, owned array */
     size_t mark_count;
     size_t mark_cap;
-    fdk_font *label_font;     /* 1.4.2: lazy system default          */
+    fdk_font *label_font;     /* 1.0.0: lazy system default          */
     bool label_font_failed;   /* one honest attempt, then ticks only */
-    fdk_slider_orientation orientation; /* 1.4.3 */
+    fdk_slider_orientation orientation; /* 1.0.0 */
 } fdk_slider;
 
 static fdk_slider *slider_of(fdk_widget *w) {
@@ -101,7 +101,7 @@ static double slider_span(const fdk_slider *s) {
     return s->max - s->min;
 }
 
-/* 1.4.2: whether any mark carries a label (drives the height and
+/* 1.0.0: whether any mark carries a label (drives the height and
  * the track zone). */
 static bool slider_has_labeled_mark(const fdk_slider *s) {
     for (size_t i = 0; i < s->mark_count; i++) {
@@ -253,7 +253,7 @@ static void slider_paint(fdk_widget *w, fdk_surface *surface,
                                           fdk__pal_accent());
         }
     }
-    /* 1.4.2 — the marks (1.4.3: rotated). Horizontal: ticks at each
+    /* 1.0.0 — the marks (1.0.0: rotated). Horizontal: ticks at each
      * mark's thumb-center position (a 1-px stroke below the trough),
      * labels centered under their ticks. Vertical: ticks stroke to
      * the LEFT of the trough, labels right-aligned against the tick.
@@ -639,7 +639,7 @@ void fdk_slider_set_on_changed(fdk_widget *slider,
     s->on_changed_data = user_data;
 }
 
-/* ---- marks (1.4.2) ---- */
+/* ---- marks (1.0.0) ---- */
 
 fdk_result fdk_slider_add_mark(fdk_widget *slider, double value,
                                const char *label) {
@@ -711,7 +711,7 @@ size_t fdk_slider_mark_count(fdk_widget *slider) {
     return slider_of(slider)->mark_count;
 }
 
-/* ---- orientation (1.4.3) ---- */
+/* ---- orientation (1.0.0) ---- */
 
 void fdk_slider_set_orientation(fdk_widget *slider,
                                 fdk_slider_orientation orientation) {

@@ -8,8 +8,8 @@
 
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
-#include <X11/cursorfont.h> /* XC_* cursor glyph indices (1.1.4) */
-#include <X11/extensions/shape.h> /* XShape input regions (1.3.2) */
+#include <X11/cursorfont.h> /* XC_* cursor glyph indices (1.0.0) */
+#include <X11/extensions/shape.h> /* XShape input regions (1.0.0) */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,7 +21,7 @@
  * forward-declared so window_create's create line can use it. */
 static void popup_trace(const char *fmt, ...);
 
-/* The creation-time window fill (1.2.1): the theme's window-
+/* The creation-time window fill (1.0.0): the theme's window-
  * background token instead of WhitePixel, so the frame a compositor
  * shows before the app's first paint matches the FIRST PAINTED frame
  * (the root default background, fdk_window_get_root) instead of
@@ -78,7 +78,7 @@ void fdk__x11_window_ensure_xic(fdk_platform_window *pwindow) {
     if (pwindow->xic == NULL) {
         /* The IM refused the callbacks style (or the array alloc
          * failed): composition is unavailable for this window — the
-         * 1.3.1 PreeditNothing posture still gives full-Unicode
+         * 1.0.0 PreeditNothing posture still gives full-Unicode
          * COMMIT text through Xutf8LookupString. */
         fdk_free(pwindow->ime_cbs);
         pwindow->ime_cbs = NULL;
@@ -123,7 +123,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
      * parent's client-area origin + (x, y) in ROOT coordinates —
      * override-redirect windows place directly, no WM frame math.
      * Top-levels stay WM-managed at (0,0) as before. */
-    /* HiDPI (1.4.5): the X WINDOW is PHYSICAL — logical x
+    /* HiDPI (1.0.0): the X WINDOW is PHYSICAL — logical x
      * conn->scale. The core's paint path composites the logical
      * widget tree up onto this physical framebuffer (the same
      * machinery the Wayland backend rides with viewporter), and
@@ -264,7 +264,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
      * stays the only click a touch produces. */
     fdk_x11_xi2_select_window(conn, (unsigned long)xwindow);
 
-    /* XDND awareness (1.2.0): without the XdndAware property no
+    /* XDND awareness (1.0.0): without the XdndAware property no
      * dragging client ever begins a drag over this window. */
     {
         Atom xdnd_version = 5;
@@ -323,13 +323,13 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
                                                    : None),
                     pw, ph, win_x, win_y);
     }
-    /* GPU present lane (1.4.18): engages lazily at the first
+    /* GPU present lane (1.0.0): engages lazily at the first
      * framebuffer acquisition (x11_surface.c), not here — window
      * creation must never depend on libGL existing. gl_downgraded is
      * the permanent per-window fallback verdict. */
     pwindow->gl_win = NULL;
     pwindow->gl_downgraded = 0;
-    /* Input-transparent popups (1.3.2, tooltips): the EMPTY XShape
+    /* Input-transparent popups (1.0.0, tooltips): the EMPTY XShape
      * input region at CREATE time — the window is unmapped here, so
      * the very first mapping is already click-through. Servers
      * without XSHAPE degrade honestly (the popup then swallows the
@@ -373,7 +373,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     /* Window identity, the M-4 set (1.0.0): _NET_WM_PID +
      * WM_CLIENT_MACHINE (the process identity — session managers,
      * EWMH pagers, and taskbar correlators read the pair; the PID
-     * alone is ambiguous across hosts) + WM_WINDOW_ROLE (ICCCM 5.5.1;
+     * alone is ambiguous across hosts) + WM_WINDOW_ROLE (ICCCM 1.0.0;
      * role = "popup" for the popup family, "main" for toplevels —
      * fdk_window_set_role rewrites it per app). All three are
      * write-once at create: they never change over a window's life,
@@ -412,7 +412,7 @@ fdk_result fdk_x11_window_create(fdk_platform_connection *conn,
     pwindow->render_size.width = 0;
     pwindow->render_size.height = 0;
 
-    /* Input context (1.3.1; LAZY since 1.0.0-rc1, X1): the XIC is
+    /* Input context (1.0.0; LAZY since 1.0.0-rc1, X1): the XIC is
      * created when this window first sees FocusIn or a KeyPress
      * (fdk__x11_window_ensure_xic, x11_events.c) — together with the
      * lazy XOpenIM this takes pointer-only apps (panels, the demo
@@ -467,7 +467,7 @@ void fdk_x11_window_destroy(fdk_platform_window *pwindow) {
          * (and risks re-entering Xlib's fatal IO path). Unregister
          * and free only — the XIDs vanish with the connection. The
          * pixel buffers leak here, a bounded one-time cost during
-         * process teardown on a dead display (1.3.0). */
+         * process teardown on a dead display (1.0.0). */
         fdk_x11_ime_window_cleanup(pwindow);
         fdk_free(pwindow->command_argv);
         pwindow->command_argv = NULL;
@@ -1085,7 +1085,7 @@ void fdk_x11_window_set_icon(fdk_platform_window *pwindow,
     XFlush(dpy);
 }
 
-/* WM_WINDOW_ROLE (ICCCM 5.5.1): the STRING that distinguishes same-
+/* WM_WINDOW_ROLE (ICCCM 1.0.0): the STRING that distinguishes same-
  * class windows for session managers. NULL/empty reverts to the
  * create-time default ("main"/"popup"). */
 void fdk_x11_window_set_role(fdk_platform_window *pwindow,
@@ -1154,7 +1154,7 @@ fdk_result fdk_x11_window_bell(fdk_platform_window *pwindow,
 /* ---- WM_COMMAND / WM_SAVE_YOURSELF (1.0.0, D-5) -----------------------
  *
  * The X11 session lane. WM_COMMAND is the restart command a session
- * manager re-executes at the next login (ICCCM 4.1.2.9: type STRING,
+ * manager re-executes at the next login (ICCCM 1.0.0.0: type STRING,
  * the argv strings NUL-concatenated). The COPY lives in the platform
  * window because of the ack: when WM_SAVE_YOURSELF arrives, the
  * application handles FDK_EVENT_SESSION_SAVE (possibly updating the
@@ -1521,7 +1521,7 @@ fdk_result fdk_x11_window_set_maximized(fdk_platform_window *pwindow,
          *    restore request while they consider the window
          *    maximized). Result: the window stays maximized while
          *    FDK's flag — and the title-bar button glyph driven by
-         *    it — flip back (the 1.1.3 user report).
+         *    it — flip back (the 1.0.0 user report).
          *
          * A WM that doesn't advertise the two maximized atoms in
          * _NET_SUPPORTED simply ignores the message; the honest
@@ -1659,7 +1659,7 @@ fdk_result fdk_x11_window_begin_move(fdk_platform_window *pwindow,
     Window child = 0;
     int rx = 0, ry = 0;
     /* local_x/local_y are LOGICAL (widget space); the translation and
-     * the WM message want physical root coordinates (1.4.5). */
+     * the WM message want physical root coordinates (1.0.0). */
     fdk_i32 scale = pwindow->conn->scale;
     if (!XTranslateCoordinates(pwindow->conn->display, pwindow->xwindow,
                                pwindow->conn->root,
@@ -1704,7 +1704,7 @@ fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
     }
     Window child = 0;
     int rx = 0, ry = 0;
-    /* Logical local coords -> physical root coords (1.4.5). */
+    /* Logical local coords -> physical root coords (1.0.0). */
     fdk_i32 rscale = pwindow->conn->scale;
     if (!XTranslateCoordinates(pwindow->conn->display, pwindow->xwindow,
                                pwindow->conn->root,
@@ -1720,7 +1720,7 @@ fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-/* ---- HiDPI scale query (1.4.5) ---- */
+/* ---- HiDPI scale query (1.0.0) ---- */
 
 fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
                                     fdk_f32 *out_scale) {
@@ -1736,7 +1736,7 @@ fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-/* ---- Pointer introspection + cursor shaping (1.1.4) ---- */
+/* ---- Pointer introspection + cursor shaping (1.0.0) ---- */
 
 int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
                                  fdk_i32 *out_x, fdk_i32 *out_y) {
@@ -1753,7 +1753,7 @@ int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
      * honest. Returns False when the pointer is on a different
      * screen, which is simply "not over this window".
      *
-     * UNIFIED CONTRACT (1.2.5, same words as the Wayland side):
+     * UNIFIED CONTRACT (1.0.0, same words as the Wayland side):
      * nonzero only when the pointer is within the window's CURRENT
      * geometry — last_size is the most recent ConfigureNotify size,
      * in the same window-local space win_x/win_y come in. The
@@ -1766,7 +1766,7 @@ int fdk_x11_window_query_pointer(fdk_platform_window *pwindow,
         return 0;
     }
     /* Physical bounds check (last_size is physical); LOGICAL outputs
-     * — the core synthesizes motion events from these (1.4.5). */
+     * — the core synthesizes motion events from these (1.0.0). */
     *out_x = pwindow->conn->scale > 1
         ? win_x / pwindow->conn->scale : win_x;
     *out_y = pwindow->conn->scale > 1
@@ -1834,7 +1834,7 @@ void fdk_x11_window_set_cursor(fdk_platform_window *pwindow, int edge) {
  * documented removal idiom), restoring the window's natural full
  * input. Servers without XSHAPE degrade honestly: the window stays
  * fully interactive (the same posture the input-transparent popups
- * documented in 1.3.2). */
+ * documented in 1.0.0). */
 void fdk_x11_window_set_input_region(fdk_platform_window *pwindow,
                                      const fdk_rect *rects, int count) {
     if (pwindow == NULL || count < 0 ||

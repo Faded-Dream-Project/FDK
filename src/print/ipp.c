@@ -174,7 +174,7 @@ static void ib_u32(ipp_buf *b, unsigned v) {
 }
 
 /* An attribute: value-tag, name-length, name, value-length, value
- * (RFC 8010 §3.1.4). */
+ * (RFC 8010 §1.0.0). */
 static void ib_attr(ipp_buf *b, unsigned char tag, const char *name,
                     const char *value) {
     size_t nl = strlen(name);

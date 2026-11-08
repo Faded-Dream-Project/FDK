@@ -1,7 +1,7 @@
 # The FDK Command-Line Tools
 
 FDK's settings face for shells and scripts: `fdk-theme`,
-`fdk-prefs` (1.4.13), and `fdk-set` (1.4.14). Every desktop toolkit
+`fdk-prefs` (1.0.0), and `fdk-set` (1.0.0). Every desktop toolkit
 ends up needing this — GTK has `gsettings`, Qt has its
 platform-theme configuration — for one reason: **most applications
 never ship a settings UI**, and a desktop where changing the theme
@@ -39,7 +39,7 @@ name = matrix
 
 Key consumers can rely on today: `theme.name`. Applications are
 expected to keep their OWN settings under their own app id (that is
-the 1.3.7 prefs contract); the `fdk` store is the toolkit's, and
+the 1.0.0 prefs contract); the `fdk` store is the toolkit's, and
 `fdk-prefs -a fdk` is how you touch anything in it deliberately.
 
 ### How applications pick it up
@@ -49,7 +49,7 @@ the first theme resolution** (usually the first paint):
 
 ```
 $FDK_THEME                   (per-process override, like GTK_THEME)
-  else theme.name in the application's own store (1.4.14)
+  else theme.name in the application's own store (1.0.0)
   else theme.name in the fdk store
   else the built-in "Faded Dream"
 ```
@@ -67,7 +67,7 @@ and a name that does not resolve on the search path logs one
 warning and stays on the current theme. **A themed launch must
 never be a failed launch.**
 
-### Live re-theming (1.4.14)
+### Live re-theming (1.0.0)
 
 Running applications **follow the settings files live**. While a
 display context exists, FDK watches the settings files' directories
@@ -85,7 +85,7 @@ The developer's side of the contract is
 theme (or a curated set) clamps every settings source above to the
 list — see `fdk_theme.h` for the exact semantics.
 
-### The per-application store (1.4.14)
+### The per-application store (1.0.0)
 
 The second and third resolution legs live in the application's OWN
 prefs store — the `<app_id>.prefs` file under the same XDG
@@ -109,7 +109,7 @@ $FDK_THEME_DIR                        (one explicit directory)
 ```
 
 `make install` puts FDK's shipped theme into
-`$(PREFIX)/share/fdk/.FDKThemes` (1.4.16: the custom folder; 1.0.0:
+`$(PREFIX)/share/fdk/.FDKThemes` (1.0.0: the custom folder; 1.0.0:
 exactly one face — `faded-dream`, the packaged copy of the
 built-in default) — the default `XDG_DATA_DIRS` already covers
 `/usr/local/share` and `/usr/share`, so an installed FDK finds it
@@ -121,9 +121,9 @@ The full search path, first match wins:
 
 ```
 $FDK_THEME_DIR                     one explicit directory (absolute)
-$HOME/.FDKThemes                   the per-user custom folder (1.4.16)
+$HOME/.FDKThemes                   the per-user custom folder (1.0.0)
 $XDG_DATA_HOME/fdk/.FDKThemes      (default ~/.local/share/fdk/.FDKThemes)
-$XDG_DATA_HOME/fdk/themes          the 1.4.13 location, still scanned
+$XDG_DATA_HOME/fdk/themes          the 1.0.0 location, still scanned
 each $XDG_DATA_DIRS entry's fdk/.FDKThemes, then its fdk/themes
 ```
 
@@ -198,7 +198,7 @@ pink-rave
 $ FDK_THEME=faded-dream some-fdk-app &      # one launch, one theme
 ```
 
-## fdk-set (1.4.14)
+## fdk-set (1.0.0)
 
 The per-application face: the same theme setting, scoped to one
 application instead of every FDK app on the desktop. Without

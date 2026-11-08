@@ -75,7 +75,7 @@ bool fdk__cff_glyph_box(fdk_cff_font *f, int gid, int *x0, int *y0,
  * makes. */
 #define FDK_TEXT_SUBPIXEL_PHASES 4
 
-/* Style VARIANTS the cache keys apart (1.4.11): normal / bold /
+/* Style VARIANTS the cache keys apart (1.0.0): normal / bold /
  * italic / bold-italic. Rich-text runs flip styles per run; baking
  * the style into the KEY (instead of into the font object alone)
  * lets a bold word and the regular text around it share one font
@@ -258,14 +258,14 @@ int fdk_text_utf8_next(const char *s, size_t len, size_t i,
  * populated; entry->bits is NULL exactly when the glyph has no ink
  * (space, empty bitmaps) — such glyphs still advance the pen.
  *
- * The styled twin (below) is the 1.4.11 core: it rasterizes with
+ * The styled twin (below) is the 1.0.0 core: it rasterizes with
  * the REQUESTED style flags (absolute — they replace the font's
  * current style for that glyph) under a variant-keyed cache entry.
  * This one keeps its Phase-6 semantics: the font object's own
  * fdk_font_set_style() style is what gets baked. */
 const fdk_glyph *fdk_text_glyph_for(fdk_font *font, fdk_u32 codepoint);
 
-/* The styled run core (1.4.11): same lookup/rasterize contract, but
+/* The styled run core (1.0.0): same lookup/rasterize contract, but
  * the synthetic style comes from `style_flags` instead of the font's
  * current style. Regular and bold rasters of the same glyph coexist
  * in the cache under different keys. Unknown style bits are ignored
@@ -293,7 +293,7 @@ const fdk_glyph *fdk_text_glyph_for_styled(fdk_font *font,
  * arithmetic.
  *
  * `style_flags` is the ABSOLUTE synthetic style for THIS glyph
- * (1.4.11): the single-style entry points pass the font's own
+ * (1.0.0): the single-style entry points pass the font's own
  * fdk_font_get_style(), the span-aware walks pass the effective
  * style of the byte being consumed. Callers that reset the pen
  * (line breaks, run boundaries) pass *io_prev_g = -1 so kerning
@@ -303,7 +303,7 @@ int fdk_text_shape_step(fdk_font *font, const char *utf8, size_t len,
                         unsigned style_flags,
                         const fdk_glyph **out_glyph, fdk_i32 *out_pen_x);
 
-/* ---- Flattened attribute runs (1.4.11, src/text/span.c) -----------
+/* ---- Flattened attribute runs (1.0.0, src/text/span.c) -----------
 
  * The span-aware passes (measure/draw/break/ellipsize with attributes,
  * and the Label/Button/tooltip markup paint hooks) never walk the
@@ -323,7 +323,7 @@ typedef struct fdk__text_run {
 
     /* ---- §23/B2c range attributes (2026-11-01, fdk_attr.h) -------
      * Everything below defaults to zero/false/NULL: a run built only
-     * from spans (the 1.4.11 path) is identical to before — the
+     * from spans (the 1.0.0 path) is identical to before — the
      * span flattener memsets the whole struct first. The attr
      * flattener (src/text/attr.c) fills them. */
     fdk_i32 size_px;   /* 0: the base font's size; else an absolute

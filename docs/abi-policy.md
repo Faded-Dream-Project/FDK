@@ -137,7 +137,7 @@ The 1.0.0 additions are append-only against 1.0.0: new functions
 (620 -> 641 exported symbols at rc1, 855 at the D-2 landing), new
 opaque types, no layout change to any existing public struct — the
 SONAME stays `libfdk.so.1`, only the file name moves (the numeric
-`libfdk.so.1.1.0`; pre-release suffixes never appear in the .so file
+`libfdk.so.1.0.0`; pre-release suffixes never appear in the .so file
 name — Alpine's abuild derives apk so:provides versions from the
 filename tail, which rejected a suffixed name outright).
 

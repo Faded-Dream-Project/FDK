@@ -7,7 +7,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * file_dialog.c — file / folder selection dialogs (1.2.0; 1.2.3 the
+ * file_dialog.c — file / folder selection dialogs (1.0.0; 1.0.0 the
  * release-quality browser)
  *
  * A real FDK window built from the stock catalog, following the
@@ -33,7 +33,7 @@
  * /proc/self/mounts, and one level of /media and /mnt — no udev,
  * no D-Bus, per the toolkit's no-bus policy. Every place is
  * stat()-verified to exist at discovery time and deduplicated by
- * canonical path. Leading the sidebar (since 1.4.4): the Recent
+ * canonical path. Leading the sidebar (since 1.0.0): the Recent
  * place — the XDG recently-used surface (see the recents engine
  * above), shown in the OPEN kinds unless options.hide_recents.
  *
@@ -93,7 +93,7 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Dialog geometry (1.4.14, the "small picker" retune): the 1.2.0
+/* Dialog geometry (1.0.0, the "small picker" retune): the 1.0.0
  * values (636x472 with a 14px face) read as a toy on modern
  * 1080p+ desktops — GTK's chooser opens ~30% larger. The retune:
  * 864x~620, a 15px face, taller rows, a wider places sidebar, and
@@ -141,7 +141,7 @@ static bool fd_name_hidden(const char *name) {
     return name[0] == '.';
 }
 
-/* ---- glob matching (1.2.3) ---- */
+/* ---- glob matching (1.0.0) ---- */
 
 static char fd_ascii_lower(char c) {
     if (c >= 'A' && c <= 'Z') {
@@ -259,7 +259,7 @@ static bool fd_name_matches(char **patterns, size_t pattern_count,
     return false;
 }
 
-/* ---- path helpers (1.2.3) ---- */
+/* ---- path helpers (1.0.0) ---- */
 
 char *fdk__path_join(const char *dir, const char *name) {
     if (dir == NULL || name == NULL) {
@@ -448,7 +448,7 @@ void fdk__file_dialog_entries_free(fdk_fd_entries *entries) {
     memset(entries, 0, sizeof(*entries));
 }
 
-/* ---- filesystem discovery — the Places sidebar's data (1.2.3) ----
+/* ---- filesystem discovery — the Places sidebar's data (1.0.0) ----
  *
  * Pure POSIX, in priority order, all stat()-verified and deduped
  * by canonical path (realpath): $HOME; the conventional XDG user
@@ -458,7 +458,7 @@ void fdk__file_dialog_entries_free(fdk_fd_entries *entries) {
  * — pseudo filesystems (proc, sysfs, tmpfs, cgroup, overlay,
  * squashfs, ...) are noise a file dialog should not show. */
 
-/* The place's symbolic glyph (1.4.1): the house for HOME, the drive
+/* The place's symbolic glyph (1.0.0): the house for HOME, the drive
  * slab for the root and real-filesystem mounts, the folder for
  * user directories. Label-based for Home (the one place whose path
  * is $HOME, whatever that is), path-based for the rest. */
@@ -698,7 +698,7 @@ void fdk__fs_places_free(fdk_fs_place *places, size_t count) {
     fdk_free(places);
 }
 
-/* ---- recents engine (1.4.4): the XDG recently-used.xbel surface ---
+/* ---- recents engine (1.0.0): the XDG recently-used.xbel surface ---
  *
  * The shared "recently used" list every desktop converges on:
  * $XDG_DATA_HOME/recently-used.xbel (falling back to
@@ -1366,14 +1366,14 @@ typedef struct fdk_file_dialog {
     fdk_widget *home_btn;
     fdk_widget *hidden_toggle;
     fdk_widget *filter_combo;
-    fdk_widget *path_bar;    /* the breadcrumb row (1.4.0)          */
+    fdk_widget *path_bar;    /* the breadcrumb row (1.0.0)          */
     fdk_widget *path_entry;  /* the Ctrl+L location entry           */
     bool location_mode;      /* true = entry shown, bar hidden      */
     fdk_widget *places_list;
     fdk_widget *list;
-    fdk_widget *grid;       /* the icon-mode browsing surface (1.4.7)*/
-    fdk_widget *view_toggle;/* the toolbar's Icons checkbox (1.4.7)  */
-    bool icon_mode;         /* grid shown, list hidden (1.4.7)       */
+    fdk_widget *grid;       /* the icon-mode browsing surface (1.0.0)*/
+    fdk_widget *view_toggle;/* the toolbar's Icons checkbox (1.0.0)  */
+    bool icon_mode;         /* grid shown, list hidden (1.0.0)       */
     fdk_widget *name_label;  /* SAVE only                          */
     fdk_widget *name_entry;  /* SAVE only                          */
     fdk_widget *status;
@@ -1390,7 +1390,7 @@ typedef struct fdk_file_dialog {
     size_t pattern_count;
     size_t active_filter;        /* index into patterns,
                                     pattern_count = "All files"    */
-    /* ---- recents (1.4.4) ----
+    /* ---- recents (1.0.0) ----
      *
      * recent_mode: the file list shows the XDG recently-used rows
      * instead of a directory listing (d->entries is untouched and
@@ -1406,7 +1406,7 @@ typedef struct fdk_file_dialog {
     void *on_done_user;
     fdk_file_dialog_result pending; /* built during accept         */
     bool answered;
-    /* Construction-succeeded marker (1.3.0): the fail: paths destroy
+    /* Construction-succeeded marker (1.0.0): the fail: paths destroy
      * the window BEFORE it was ever shown; without this flag the
      * destroy-notify answered the app with CANCELLED while the
      * constructor simultaneously returned an error — the
@@ -1509,7 +1509,7 @@ static char **fdlg_active_patterns(fdk_file_dialog *d, size_t *count) {
 /* ---- browsing ---- */
 
 /* The active browsing surface's selection, abstracted over the
- * two views (1.4.7): the List and the IconView carry the SAME
+ * two views (1.0.0): the List and the IconView carry the SAME
  * entry indexes, so every accept/validation path reads through
  * these and never knows which surface is up. */
 static size_t fdlg_surface_selected_count(const fdk_file_dialog *d) {
@@ -1584,7 +1584,7 @@ static fdk_surface *fdlg_entry_icon(fdk_file_dialog *d, size_t i,
     return fdk__icon_theme_surface_chain(chain, size);
 }
 
-/* The icon-mode fill (1.4.7): same data, grid-shaped. The labels
+/* The icon-mode fill (1.0.0): same data, grid-shaped. The labels
  * drop the list view's trailing "/" — the icon carries dir-ness in
  * the grid (the slash was a text-mode affordance). */
 static void fdlg_fill_grid(fdk_file_dialog *d) {
@@ -1622,9 +1622,9 @@ static void fdlg_fill_grid(fdk_file_dialog *d) {
  * cannot keep stale selections alive). The whole rebuild runs in ONE
  * list batch: a directory with 8192 entries is 8192 appends that
  * settle in a single relayout instead of re-placing the list per
- * append (the O(N^2) shape the 1.3.0 audit measured). The icon
+ * append (the O(N^2) shape the 1.0.0 audit measured). The icon
  * mode fills the GRID instead — the same data, the other surface
- * (1.4.7); the idle surface stays stale until the next flip.
+ * (1.0.0); the idle surface stays stale until the next flip.
  *
  * Every row wears an icon: the themed raster when the desktop's
  * icon theme serves one (the shared engine — folders, file types,
@@ -1639,7 +1639,7 @@ static void fdlg_fill_list(fdk_file_dialog *d) {
     fdk_list_begin_batch(d->list);
     fdk_list_clear(d->list);
     if (d->recent_mode) {
-        /* Recents view (1.4.4): one row per recent FILE — the
+        /* Recents view (1.0.0): one row per recent FILE — the
          * basename (the full path is what activation resolves,
          * not what the row shows), themed by what it is. */
         for (size_t i = 0; i < d->recent_count; i++) {
@@ -1678,7 +1678,7 @@ static void fdlg_fill_list(fdk_file_dialog *d) {
     fdk_list_end_batch(d->list);
 }
 
-/* ---- recents view (1.4.4) ---------------------------------------- */
+/* ---- recents view (1.0.0) ---------------------------------------- */
 
 /* The Recent place exists in the OPEN kinds only (a SAVE target is
  * a place you are going, not a place you have been). */
@@ -1692,7 +1692,7 @@ static void fdlg_leave_recents(fdk_file_dialog *d) {
     d->recent_mode = false;
 }
 
-static void fdlg_sync_path_bar(fdk_file_dialog *d); /* below (1.4.0) */
+static void fdlg_sync_path_bar(fdk_file_dialog *d); /* below (1.0.0) */
 
 /* Enters the recents view: reload from the XDG file, rebuild the
  * rows, and say what happened in the status line. */
@@ -1724,7 +1724,7 @@ static void fdlg_show_recents(fdk_file_dialog *d) {
     fdlg_set_status(d, status);
 }
 
-/* ---- the breadcrumb path bar (1.4.0) ----
+/* ---- the breadcrumb path bar (1.0.0) ----
  *
  * The modern path display: the current directory split into clickable
  * segments separated by small vector chevrons — "Home  >  user  >
@@ -2085,7 +2085,7 @@ static bool pbar_handle_event(fdk_widget *w,
                 if (seg < pb->seg_count) {
                     /* The recents pseudo-root is display-only — the
                      * view is not a directory a crumb can navigate
-                     * back to (1.4.4). */
+                     * back to (1.0.0). */
                     if (pb->dialog->recent_mode &&
                         strcmp(pb->seg_path[seg],
                                "Recently Used") == 0) {
@@ -2150,7 +2150,7 @@ static void fdlg_sync_path_bar(fdk_file_dialog *d) {
     }
 }
 
-/* 1.4.0 — Ctrl+L: swap the breadcrumb bar for the raw location Entry
+/* 1.0.0 — Ctrl+L: swap the breadcrumb bar for the raw location Entry
  * (and back). Entering location mode seeds the entry with the current
  * directory, shows it, hides the bar, and focuses the entry with the
  * whole path selected (type-over replaces; arrows edit). Leaving
@@ -2180,7 +2180,7 @@ static void fdlg_set_location_mode(fdk_file_dialog *d, bool on) {
     fdk_widget_arrange(d->body, fdk_widget_get_bounds(d->body));
 }
 
-/* ---- icon mode (1.4.7) -------------------------------------------- */
+/* ---- icon mode (1.0.0) -------------------------------------------- */
 
 /* Flips the browsing surface (the toolbar's "Icons" checkbox). The
  * fdlg_set_location_mode discipline: flip the mode, swap visibility,
@@ -2316,7 +2316,7 @@ static void fdlg_respond(fdk_file_dialog *d,
         return;
     }
     d->answered = true;
-    /* 1.4.4 — the recents contract's record half: every ACCEPTED
+    /* 1.0.0 — the recents contract's record half: every ACCEPTED
      * path moves to the front of the XDG file (unless the app opted
      * out). BEFORE the callback: the strings are ours until the
      * body teardown, and the callback may destroy anything. */
@@ -2362,7 +2362,7 @@ static void fdlg_try_accept(fdk_file_dialog *d) {
         fdlg_save_accept(d);
         return;
     }
-    /* Recents view (1.4.4): the paths are already absolute — the
+    /* Recents view (1.0.0): the paths are already absolute — the
      * validation is stat + the kind's file/folder contract + the
      * lone-directory descend rule, same shape as the browse case. */
     if (d->recent_mode) {
@@ -2789,7 +2789,7 @@ static void fdlg_place_activated(fdk_widget *list, size_t row,
                                  void *user) {
     (void)list;
     fdk_file_dialog *d = user;
-    /* The Recent place rides index 0 when it exists (1.4.4). */
+    /* The Recent place rides index 0 when it exists (1.0.0). */
     if (fdlg_recents_on(d)) {
         if (row == 0) {
             fdlg_show_recents(d);
@@ -2822,7 +2822,7 @@ static void fdlg_selection_changed(fdk_widget *surface, void *user) {
 }
 
 static void fdlg_entry_activated(fdk_file_dialog *d, size_t row) {
-    /* Recents view (1.4.4): activation resolves the remembered
+    /* Recents view (1.0.0): activation resolves the remembered
      * path against the CURRENT filesystem — gone files are
      * honestly dropped from the view, directories descend, files
      * accept directly (the recents affordance). */
@@ -2873,7 +2873,7 @@ static void fdlg_entry_activated(fdk_file_dialog *d, size_t row) {
     }
 }
 
-/* The two surfaces' activation callbacks (1.4.7): the List's row
+/* The two surfaces' activation callbacks (1.0.0): the List's row
  * gesture and the IconView's cell gesture land in the same body —
  * the entry indexes are shared. */
 static void fdlg_row_activated(fdk_widget *list, size_t row, void *user) {
@@ -2913,7 +2913,7 @@ static void fdlg_window_event(fdk_window *window,
         return;
     }
     if (ev->type == FDK_EVENT_KEY_DOWN) {
-        /* Ctrl+L toggles the location entry (1.4.0, the GTK file
+        /* Ctrl+L toggles the location entry (1.0.0, the GTK file
          * chooser's binding). Matched on the PHYSICAL L (evdev 38)
          * with exactly Ctrl held — the shortcut-scancode discipline:
          * layout-stable, and no dependence on what codepoint Ctrl+L
@@ -2988,7 +2988,7 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
     if (d == NULL) {
         return;
     }
-    /* Children in the BODY's local coordinates (1.4.16: the 1.4.15
+    /* Children in the BODY's local coordinates (1.0.0: the 1.0.0
      * title band made a.y nonzero and the old a.y + FD_PAD base
      * double-offset the whole picker below its band). */
     fdk_i32 x = FD_PAD;
@@ -3071,7 +3071,7 @@ static void fdlg_body_arrange(fdk_widget *w, fdk_rect a) {
     }
 
     /* Middle: places sidebar + the browsing surface (the List or
-     * the 1.4.7 IconView — one occupant, same slot either way, the
+     * the 1.0.0 IconView — one occupant, same slot either way, the
      * location_mode discipline). The sidebar rect is remembered for
      * body_paint's sidebar-surface fill. */
     fdk_i32 list_h = list_bottom - y;
@@ -3153,7 +3153,7 @@ static const fdk_widget_class fdk_file_dialog_body_class = {
     .size = sizeof(fdk_file_dialog_body),
     .name = "file-dialog-body",
     .handle_event = NULL,
-    .paint = fdlg_body_paint, /* window + sidebar surfaces (1.4.0) */
+    .paint = fdlg_body_paint, /* window + sidebar surfaces (1.0.0) */
     .measure = NULL,
     .arrange = fdlg_body_arrange,
     .destroy = fdlg_body_destroy,
@@ -3404,7 +3404,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     if (fdlg_kind_save(kind)) {
         height += FD_ROW_H + FD_GAP;
     }
-    /* 1.4.15: the FDK title bar — the picker wears the chrome its
+    /* 1.0.0: the FDK title bar — the picker wears the chrome its
      * applications do (band + close + drag + FDK resize), the window
      * grows by the band so the browsing area keeps its designed
      * size, and a resize floor keeps the shrunk case honest. */
@@ -3443,11 +3443,11 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     d->body = body;
     fdk_widget_set_accessible_name(body, title);
     /* No set_background snapshot: fdlg_body_paint fills both surfaces
-     * through the live theme (1.4.0). */
+     * through the live theme (1.0.0). */
 
     /* The dialog's font: the system default (dialogs are toolkit
      * chrome; there is no options.font to borrow). 15px since the
-     * 1.4.14 retune — the picker's text was the "too small" half of
+     * 1.0.0 retune — the picker's text was the "too small" half of
      * the maintainer's report, and 15px is the size the widget
      * examples' UI chrome already reads best at. */
     d->font = fdk_font_load_system_default(fdk__ui_derived_px(15));
@@ -3477,7 +3477,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     }
     fdk_toggle_set_on_changed(d->hidden_toggle, fdlg_hidden_toggled, d);
 
-    /* View toggle (1.4.7): the Icons checkbox — the GTK list/icon
+    /* View toggle (1.0.0): the Icons checkbox — the GTK list/icon
      * browsing switch, in the toggle language the toolbar already
      * speaks. Set BEFORE the callback wiring so the construction
      * state never fires the flip. */
@@ -3506,7 +3506,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
                          (fdk_i64)d->active_filter);
     fdk_combo_set_on_changed(d->filter_combo, fdlg_filter_changed, d);
 
-    /* Path row (1.4.0): the breadcrumb bar at rest, the location
+    /* Path row (1.0.0): the breadcrumb bar at rest, the location
      * Entry behind Ctrl+L. Both are created; the entry starts
      * hidden (location_mode = false) — the swap flips visibility,
      * placement follows in fdlg_body_arrange. */
@@ -3534,11 +3534,11 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
                                 FDK_LIST_SELECTION_SINGLE);
     fdk_list_set_on_row_activate(d->places_list,
                                  fdlg_place_activated, d);
-    /* 1.4.4: places navigate on a SINGLE click (the GTK sidebar
+    /* 1.0.0: places navigate on a SINGLE click (the GTK sidebar
      * rhythm — double-clicking a place was a wart the Recent place
      * made obvious). File rows keep the classic double-click. */
     fdk_list_set_activate_on_single_click(d->places_list, true);
-    /* The Recent place leads the sidebar (1.4.4) — OPEN kinds only.
+    /* The Recent place leads the sidebar (1.0.0) — OPEN kinds only.
      * Every place row resolves its themed icon first (symbolic-
      * first chains: the desktop sidebar norm), the procedural
      * glyph set underneath as the fallback. */
@@ -3556,7 +3556,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     for (size_t i = 0; i < d->place_count; i++) {
         (void)fdk_list_append(d->places_list, d->places[i].label,
                               NULL);
-        /* 1.4.1: the symbolic place glyphs — Home gets the house,
+        /* 1.0.0: the symbolic place glyphs — Home gets the house,
          * the root and real mounts get the drive slab, everything
          * else (XDG user dirs) the folder. The chain follows the
          * same mapping. */
@@ -3590,7 +3590,7 @@ static fdk_result fdk_dialog_show_impl(fdk_context *ctx,
     fdk_list_set_on_selection_changed(d->list,
                                       fdlg_selection_changed, d);
 
-    /* The icon-mode surface (1.4.7): the same data, grid-shaped.
+    /* The icon-mode surface (1.0.0): the same data, grid-shaped.
      * Both carry the same entry indexes (the abstraction above is
      * what every accept path reads); the iconview starts hidden
      * unless options asked for it — visibility + the first fill

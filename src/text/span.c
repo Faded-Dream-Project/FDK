@@ -1,5 +1,5 @@
 /*
- * span.c — the attribute-run layer over the shaping engine (1.4.11,
+ * span.c — the attribute-run layer over the shaping engine (1.0.0,
  * the markup milestone).
  *
  * Rich text in FDK is NOT a second text engine: the shaping walk,
@@ -515,7 +515,7 @@ fdk_result fdk_surface_draw_spans_utf8(fdk_surface *surface,
  * SINGLE/LOW/DOUBLE are bars at metrics-derived offsets; ERROR is
  * the squiggle — a sine walked over the run's extent at the bar
  * thickness. All draw in the run's underline color when set, the
- * text color otherwise (the 1.4.11 rule). */
+ * text color otherwise (the 1.0.0 rule). */
 static void attrs_paint_underline(fdk_surface *surface,
                                   const fdk__text_run *run,
                                   fdk_font *rfont, fdk_i32 x, fdk_i32 w,

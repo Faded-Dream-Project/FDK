@@ -1,5 +1,5 @@
 /*
- * test_picture.c — headless tests for the 1.4.9 image milestone
+ * test_picture.c — headless tests for the 1.0.0 image milestone
  *
  * The PNG codec round-trip (encode -> decode -> pixel compare),
  * the file save/load path, and the Picture widget: fit policies

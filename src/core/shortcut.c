@@ -1,5 +1,5 @@
 /*
- * shortcut.c — keyboard shortcut specification parser (1.3.3)
+ * shortcut.c — keyboard shortcut specification parser (1.0.0)
  *
  * FDK's shortcut layer has two halves:
  *

@@ -298,7 +298,7 @@ static const key_entry k_color_keys[] = {
     {"success", FDK_TK_SUCCESS},
     {"warning", FDK_TK_WARNING},
     {"danger", FDK_TK_DANGER},
-    /* 1.4.0 modern-face vocabulary. */
+    /* 1.0.0 modern-face vocabulary. */
     {"sidebar_background", FDK_TK_SIDEBAR_BACKGROUND},
     {"menu_background", FDK_TK_MENU_BACKGROUND},
     {"accent_hover", FDK_TK_ACCENT_HOVER},
@@ -308,7 +308,7 @@ static const key_entry k_color_keys[] = {
     {"entry_background", FDK_TK_ENTRY_BACKGROUND},
     {"entry_border", FDK_TK_ENTRY_BORDER},
     {"row_hover", FDK_TK_ROW_HOVER},
-    /* 1.4.16 titlebar vocabulary (the FALLBACK family — unset keys
+    /* 1.0.0 titlebar vocabulary (the FALLBACK family — unset keys
      * read through to their base tokens at lookup time, not here;
      * the parser just records the override). */
     {"titlebar_background", FDK_TK_TITLEBAR_BACKGROUND},
@@ -325,19 +325,19 @@ static const key_entry k_metric_keys[] = {
     {"scrollbar_width", FDK_TM_SCROLLBAR_WIDTH},
     {"menu_item_height", FDK_TM_MENU_ITEM_HEIGHT},
     {"tooltip_corner_radius", FDK_TM_TOOLTIP_CORNER_RADIUS},
-    /* 1.4.0 modern-face metrics. */
+    /* 1.0.0 modern-face metrics. */
     {"entry_corner_radius", FDK_TM_ENTRY_CORNER_RADIUS},
     {"menu_corner_radius", FDK_TM_MENU_CORNER_RADIUS},
     {"list_row_height", FDK_TM_LIST_ROW_HEIGHT},
     {"focus_ring_width", FDK_TM_FOCUS_RING_WIDTH},
-    /* 1.4.4: the overlay bar's thickness. */
+    /* 1.0.0: the overlay bar's thickness. */
     {"scrollbar_overlay_width", FDK_TM_SCROLLBAR_OVERLAY_WIDTH},
-    /* 1.4.6: the IconView's default cell geometry. */
+    /* 1.0.0: the IconView's default cell geometry. */
     {"iconview_cell_width", FDK_TM_ICONVIEW_CELL_WIDTH},
     {"iconview_cell_height", FDK_TM_ICONVIEW_CELL_HEIGHT},
-    /* 1.4.8: the TextView's inner padding. */
+    /* 1.0.0: the TextView's inner padding. */
     {"textview_pad", FDK_TM_TEXTVIEW_PAD},
-    /* 1.4.16: the button SHAPE (0 rounded / 1 circle / 2 square) —
+    /* 1.0.0: the button SHAPE (0 rounded / 1 circle / 2 square) —
      * the radius number stays button_corner_radius's job. */
     {"button_shape", FDK_TM_BUTTON_SHAPE},
 };
@@ -401,7 +401,7 @@ typedef struct {
     unsigned sections_seen; /* bit 0=[theme] 1=[colors] 2=[metrics] */
     unsigned seen_theme;   /* bit per k_theme_keys entry        */
     /* Duplicate tracking for colors/metrics crossed into array
-     * territory at 1.4.16: the token vocabulary hit 33 entries
+     * territory at 1.0.0: the token vocabulary hit 33 entries
      * (FDK_TK_COUNT), and the old `unsigned` bitmask's 1u << id
      * would be undefined behavior for the last token — a silent
      * hole waiting for the first theme that used it. The honest
@@ -538,7 +538,7 @@ static fdk_result handle_color_entry(parse_state *st, const char *key,
         return r;
     }
     st->theme->colors[e->id] = c;
-    st->theme->colors_set[e->id] = true; /* the override mask (1.4.16):
+    st->theme->colors_set[e->id] = true; /* the override mask (1.0.0):
                                           * a set key stops the titlebar
                                           * fallback read-through */
     st->seen_colors[e->id] = true;

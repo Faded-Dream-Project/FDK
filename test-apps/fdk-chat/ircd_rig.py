@@ -107,7 +107,7 @@ def client_thread(conn, addr):
 def main():
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", PORT))
+    srv.bind(("121.0.0.1", PORT))
     srv.listen(4)
     LOG.write("== ircd rig on %d (storm=%d)\n" % (PORT, STORM))
     LOG.flush()

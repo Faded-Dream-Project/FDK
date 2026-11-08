@@ -125,9 +125,9 @@ fdk_color fdk__pal_border(void) {
     return fdk_theme_get_color(NULL, FDK_TK_CONTROL_BORDER);
 }
 
-/* 1.4.0 modern-face accessors — same single-seam contract as the
+/* 1.0.0 modern-face accessors — same single-seam contract as the
  * family above: resolve against the CURRENT default at paint time.
- * The selection/focus-ring pair finally wires the 1.3.2 tokens into
+ * The selection/focus-ring pair finally wires the 1.0.0 tokens into
  * the catalog (they were theme-file-only until now; the hardcoded
  * accent-alpha call sites are gone). */
 fdk_color fdk__pal_selection(void) {
@@ -167,9 +167,9 @@ fdk_color fdk__pal_selection_text(void) {
     return fdk_theme_get_color(NULL, FDK_TK_SELECTION_TEXT);
 }
 
-/* ---- 1.4.1: the shared symbolic row glyphs ----------------------
+/* ---- 1.0.0: the shared symbolic row glyphs ----------------------
  *
- * Promoted from list.c's statics in 1.4.2 so the Tree wears the same
+ * Promoted from list.c's statics in 1.0.0 so the Tree wears the same
  * vector language. Font-independent strokes in the same idiom as the
  * title-bar and disclosure glyphs: neutral foreground ink, no fills
  * that would fight theme changes (the folder's tab keeps a soft
@@ -275,7 +275,7 @@ void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
         break;
     }
     case FDK_ROW_ICON_RECENT: {
-        /* Clock (1.4.4, the recents place): a circled face with the
+        /* Clock (1.0.0, the recents place): a circled face with the
          * hands at ten-past-ten — the classic recents glyph. */
         fdk_surface_draw_circle_aa(surface, x + 8, cy + 8, 6, ink);
         fdk_surface_draw_line_aa(surface, x + 8, cy + 8, x + 8, cy + 3,
@@ -289,10 +289,10 @@ void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
     }
 }
 
-/* ---- 1.4.2: the shared hover-fade flight (promoted from
+/* ---- 1.0.0: the shared hover-fade flight (promoted from
  * controls.c) ------------------------------------------------------
  *
- * The 1.4.1 Button/check-family machinery, shared verbatim by the
+ * The 1.0.0 Button/check-family machinery, shared verbatim by the
  * StackSwitcher's pills and the menu rows: 120 ms of quad-out, one
  * flight at a time per fade state, retarget-from-live (the
  * animator's compose rule). The SEMANTIC hover flag still flips
@@ -311,7 +311,7 @@ static void fdk__hover_fade_tick(fdk_animation *anim, double eased,
      * this tick owns nothing but the blend). */
 }
 
-/* 1.4.17: the done callback is the whole fix for the reaped-handle
+/* 1.0.0: the done callback is the whole fix for the reaped-handle
  * read. The fade struct stores its flight's handle so a later arm
  * can retarget-from-live — but the animation engine reaps finished
  * handles after its ~1 s zombie grace, and hover events can be
@@ -383,7 +383,7 @@ static void label_reset_cache(fdk_label *l) {
 }
 
 /* Rebuilds the flattened attribute-run cache for the CURRENT text
- * (1.4.11). Cheap (single-digit spans in practice) and coherent with
+ * (1.0.0). Cheap (single-digit spans in practice) and coherent with
  * whatever the font's style is RIGHT NOW — a rebuild happens on the
  * same triggers the line cache does, so the two never disagree. On
  * OOM the runs stay empty and the label degrades to its plain-text
@@ -404,7 +404,7 @@ static void label_rebuild_runs(fdk_label *l) {
 /* Rebuilds the display cache for `width` pixels. Pure toolkit code:
  * no callbacks run, allocation failures degrade to an empty cache
  * (a paint that draws nothing rather than a crash). The span-aware
- * paths (1.4.11) ride the SAME engines the plain ones do, over the
+ * paths (1.0.0) ride the SAME engines the plain ones do, over the
  * flattened run cache — one rounding rule, one whitespace policy. */
 static void label_rebuild(fdk_label *l, fdk_i32 width) {
     label_reset_cache(l);
@@ -631,7 +631,7 @@ static void label_paint(fdk_widget *w, fdk_surface *surface,
 
         if (line->byte_len > 0) {
             if (l->run_count > 0) {
-                /* Markup (1.4.11): styled glyphs, run colors, and the
+                /* Markup (1.0.0): styled glyphs, run colors, and the
                  * decoration bars, over the line's byte range of the
                  * SAME run array the layout pass broke on. */
                 (void)fdk__draw_runs(surface, l->font, l->text,
@@ -871,7 +871,7 @@ fdk_result fdk_label_set_text(fdk_widget *label, const char *text) {
     return FDK_OK;
 }
 
-/* fdk_label_set_markup (1.4.11): parses the tiny tag vocabulary into
+/* fdk_label_set_markup (1.0.0): parses the tiny tag vocabulary into
  * plain text + attribute spans; fdk_label_get_text then reports the
  * PLAIN text (screen readers never hear tags), and every display
  * mode (NOWRAP / WRAP / ELLIPSIZE) lays out and paints through the
@@ -923,7 +923,7 @@ void fdk_label_set_color(fdk_widget *label, fdk_color color) {
 }
 
 /* The label's text color (the theme's text color when never set —
- * 1.3.0 getter symmetry with set_color). */
+ * 1.0.0 getter symmetry with set_color). */
 fdk_color fdk_label_get_color(fdk_widget *label) {
     if (label == NULL || label->klass != &fdk_label_class_def) {
         return fdk__pal_text();
@@ -1422,7 +1422,7 @@ fdk_result fdk_frame_set_title(fdk_widget *frame, const char *title) {
 }
 
 /* The frame's current title (toolkit-owned; valid until the next
- * set_title/destroy). NULL when the frame has no title (1.3.0
+ * set_title/destroy). NULL when the frame has no title (1.0.0
  * getter symmetry with set_title). */
 const char *fdk_frame_get_title(fdk_widget *frame) {
     if (frame == NULL || frame->klass != &fdk_frame_class_def) {

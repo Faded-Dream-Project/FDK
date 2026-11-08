@@ -15,7 +15,7 @@
 
 /* ---- Keyboard ---- */
 
-/* THE keymap application, shared by the listener and the 1.3.5 test
+/* THE keymap application, shared by the listener and the 1.0.0 test
  * seam: compile the XKB text and swap the live state. */
 static void keyboard_keymap_apply_str(fdk_platform_connection *conn,
                                       const char *map_str) {
@@ -157,7 +157,7 @@ static void keyboard_leave(void *data, struct wl_keyboard *keyboard, uint32_t se
     (void)surface;
     fdk_platform_connection *conn = data;
 
-    /* 1.3.5: focus loss disarms the repeat — an unfocused window
+    /* 1.0.0: focus loss disarms the repeat — an unfocused window
      * receives no repeats (and no repeats fire into a window that
      * is being torn down mid-hold). Re-pressing after refocus re-arms
      * on the real press. */
@@ -202,13 +202,13 @@ static long long seat_now_ms(void) {
 }
 
 /* THE key event body, shared by the wl_keyboard listener and the
- * 1.3.5 test seam (sway headless cannot deliver wl_keyboard.key —
+ * 1.0.0 test seam (sway headless cannot deliver wl_keyboard.key —
  * the seat never adopts a virtual keyboard's keymap). Returns 1 when
  * the event was delivered to a focused window, 0 when the
  * seat/keymap/focus configuration made it a no-op (the suite's skip
  * signal).
  *
- * 1.3.5: presses ARM the client-driven repeat (rate > 0), re-arming
+ * 1.0.0: presses ARM the client-driven repeat (rate > 0), re-arming
  * on every press — one key repeats at a time, the LATEST press wins
  * (the GTK rule); the armed key's release disarms. Arming happens
  * even for undelivered presses (the physical key is down; a later
@@ -270,7 +270,7 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t seri
     (void)seat_key_event(data, serial, key, state);
 }
 
-/* ---- key repeat (1.3.5) ----
+/* ---- key repeat (1.0.0) ----
  *
  * Fires every overdue repeat, up to a small cap per call — the X11
  * shape: the server queues repeats at cadence and an app pumping
@@ -338,7 +338,7 @@ int fdk_wayland_next_wakeup_ms(fdk_platform_connection *conn,
 static void keyboard_repeat_info_store(fdk_platform_connection *conn,
                                         int32_t rate, int32_t delay);
 
-/* Test seams (1.3.5) — the REAL listener bodies; see
+/* Test seams (1.0.0) — the REAL listener bodies; see
  * platform_internal.h for why they exist. */
 int fdk_wayland_test_key(fdk_platform_connection *conn, uint32_t key,
                          int pressed) {
@@ -451,7 +451,7 @@ static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t seria
                                      conn->windows[i]->cursor_shape);
 
             fdk_event_data event = { .type = FDK_EVENT_POINTER_ENTER };
-            /* 1.1.6: the enter must carry its surface-local position —
+            /* 1.0.0: the enter must carry its surface-local position —
              * the window layer hit-tests ENTER through the resize-edge
              * compass (the cursor affordance) and the widget tree
              * seeds hover from it; a (0,0)-positioned enter armed the
@@ -613,7 +613,7 @@ static const struct wl_pointer_listener g_pointer_listener = {
  *
  * The bodies are plain-argument functions so the test seam
  * (fdk_wayland_test_touch) drives the REAL listener paths — the
- * 1.3.5 test_key discipline: sway headless's seat exposes no touch
+ * 1.0.0 test_key discipline: sway headless's seat exposes no touch
  * capability (no virtual-touch protocol exists in wlroots), so the
  * listener bodies would otherwise be unreachable from the rig. */
 

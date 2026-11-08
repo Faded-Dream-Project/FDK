@@ -31,7 +31,7 @@
 #include "fdk/fdk_widgets.h"
 
 #include "widget/widget_internal.h"
-#include "widget/widgets_internal.h" /* 1.4.16: fdk__button_shape_radius */
+#include "widget/widgets_internal.h" /* 1.0.0: fdk__button_shape_radius */
 
 #include <assert.h>
 #include <stdio.h>
@@ -111,7 +111,7 @@ static void write_file(const char *path, const char *text) {
     fclose(f);
 }
 
-/* ---- 1. the built-in default IS the 1.4.16 Faded Dream palette ---- */
+/* ---- 1. the built-in default IS the 1.0.0 Faded Dream palette ---- */
 
 /* k/255, the same construction the engine's own palette uses, so the
  * pins and the .fdk hex stay byte-identical by construction. */
@@ -123,9 +123,9 @@ static fdk_color c8(int r, int g, int b) {
 
 static void test_builtin_pin(void) {
     /* The core colors, component for component. If this ever fails,
-    * the built-in "Faded Dream" palette (the 1.4.16 gray-with-violet
+    * the built-in "Faded Dream" palette (the 1.0.0 gray-with-violet
     * retune) changed without its test — the pin IS the palette's
-    * regression net. The 1.4.0 Modern values it replaced are
+    * regression net. The 1.0.0 Modern values it replaced are
     * preserved as a documented .fdk recipe in
     * docs/fdk-theme-format.md, exactly as v1's were before them. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_TEXT),
@@ -151,7 +151,7 @@ static void test_builtin_pin(void) {
                     c8(42, 42, 49), "track");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_WINDOW_BACKGROUND),
                     c8(35, 35, 41), "window background");
-    /* The 1.4.0 modern-face families, pinned with the rest. */
+    /* The 1.0.0 modern-face families, pinned with the rest. */
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_SIDEBAR_BACKGROUND),
                     c8(41, 41, 49), "sidebar bg");
     assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_MENU_BACKGROUND),
@@ -175,7 +175,7 @@ static void test_builtin_pin(void) {
         assert_color_eq(fdk_theme_get_color(NULL, FDK_TK_ROW_HOVER),
                         rh_want, "row hover");
     }
-    /* 1.4.16: the titlebar family is UNSET in the built-in — every
+    /* 1.0.0: the titlebar family is UNSET in the built-in — every
      * one reads through to its base token (the fallback contract,
      * pinned here so the band cannot silently drift off the control
      * family for themes that never opted into chrome). */
@@ -191,12 +191,12 @@ static void test_builtin_pin(void) {
     assert_color_eq(
         fdk_theme_get_color(NULL, FDK_TK_TITLEBAR_BUTTON_PRESSED),
         c8(74, 74, 87), "titlebar btn pressed (fallback)");
-    /* 1.4.16: ROUNDED is the default shape. */
+    /* 1.0.0: ROUNDED is the default shape. */
     assert(fdk_theme_get_metric(NULL, FDK_TM_BUTTON_SHAPE) == 0);
 
     assert(fdk_theme_get_metric(NULL, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
     assert(fdk_theme_get_metric(NULL, FDK_TM_SEPARATOR_THICKNESS) == 1);
-    /* The 1.4.0 metrics. */
+    /* The 1.0.0 metrics. */
     assert(fdk_theme_get_metric(NULL, FDK_TM_ENTRY_CORNER_RADIUS) == 6);
     assert(fdk_theme_get_metric(NULL, FDK_TM_MENU_CORNER_RADIUS) == 8);
     assert(fdk_theme_get_metric(NULL, FDK_TM_LIST_ROW_HEIGHT) == 30);
@@ -224,7 +224,7 @@ static void test_builtin_pin(void) {
     assert(fdk_theme_get_metric(t, FDK_TM_BUTTON_CORNER_RADIUS) == 8);
     assert(strcmp(fdk_theme_name(t), "Faded Dream") == 0);
     fdk_theme_destroy(t);
-    printf("[ok] built-in default theme = the 1.4.0 Modern palette, "
+    printf("[ok] built-in default theme = the 1.0.0 Modern palette, "
            "component for component\n");
 }
 
@@ -306,7 +306,7 @@ static const char *k_full_theme =
     "control_border = #171819\n"
     "accent = #1a1B1c\n"
     "track = #1D1e1F\n"
-    "# 1.4.0 modern-face keys:\n"
+    "# 1.0.0 modern-face keys:\n"
     "sidebar_background = #202122\n"
     "menu_background = #232425\n"
     "accent_hover = #262728\n"
@@ -349,7 +349,7 @@ static void test_parse_full(void) {
     assert_color_eq(fdk_theme_get_color(t, FDK_TK_TRACK),
                     exact(29.0f / 255, 30.0f / 255, 31.0f / 255),
                     "track");
-    /* The 1.4.0 keys parse to their tokens (row_hover carries an
+    /* The 1.0.0 keys parse to their tokens (row_hover carries an
      * explicit alpha — the 8-digit form on the new vocabulary too). */
     assert_color_eq(fdk_theme_get_color(t, FDK_TK_SIDEBAR_BACKGROUND),
                     exact(32.0f / 255, 33.0f / 255, 34.0f / 255),
@@ -812,7 +812,7 @@ static void test_root_registry(void) {
            "order, switches before/during/after all safe\n");
 }
 
-/* ---- 9. the documented v1 recipe round-trips (1.4.0) ----
+/* ---- 9. the documented v1 recipe round-trips (1.0.0) ----
  *
  * docs/fdk-theme-format.md promises: loading the printed "v1.fdk"
  * recipe reproduces the Phase 6 v1 palette exactly. This test keeps
@@ -924,7 +924,7 @@ static void test_v1_recipe(void) {
            "Phase 6 palette exactly\n");
 }
 
-/* ---- 1.4.16: the titlebar fallback family ---- */
+/* ---- 1.0.0: the titlebar fallback family ---- */
 
 static void test_titlebar_fallback(void) {
     /* The contract in three layers:
@@ -1016,7 +1016,7 @@ static void test_titlebar_fallback(void) {
            "base tokens, set keys win, programmatic counts as set\n");
 }
 
-/* ---- 1.4.16: the button SHAPE metric ---- */
+/* ---- 1.0.0: the button SHAPE metric ---- */
 
 static void test_button_shape(void) {
     /* Parse + range + default + the shared radius arithmetic. */
@@ -1097,7 +1097,7 @@ static void test_button_shape(void) {
            "radius arithmetic (rounded/circle/square) + pixel proof\n");
 }
 
-/* ---- 1.4.16: the token-following widget background ---- */
+/* ---- 1.0.0: the token-following widget background ---- */
 
 static void test_background_token(void) {
     /* A plain widget whose background is a TOKEN paints the token's
@@ -1155,7 +1155,7 @@ static void test_background_token(void) {
 }
 
 int main(void) {
-    /* Hermeticity (1.4.13): the lazy global-settings boot reads the
+    /* Hermeticity (1.0.0): the lazy global-settings boot reads the
      * reserved "fdk" prefs store and $FDK_THEME at the first theme
      * resolution. Pin both to nothing so this binary's built-in-
      * palette pins hold on ANY machine — including one where the

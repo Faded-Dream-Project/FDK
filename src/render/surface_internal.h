@@ -156,7 +156,7 @@ void fdk_surface_blend_mask(fdk_surface *surface, fdk_rect rect,
 void fdk_surface_blend_rgba(fdk_surface *surface, fdk_rect rect,
                             const fdk_u8 *rgba, fdk_i32 rgba_stride);
 
-/* Global-alpha blit (1.4.3) — source-over compositing of a WHOLE
+/* Global-alpha blit (1.0.0) — source-over compositing of a WHOLE
  * source surface at (dst_x, dst_y) with every source pixel's alpha
  * scaled by `alpha` (0..1): the paint-group atom the widget layer
  * renders crossfades with. `src` must be ARGB8888 (straight alpha)
@@ -171,7 +171,7 @@ fdk_result fdk__surface_blit_alpha(fdk_surface *dst, fdk_i32 dst_x,
                                    fdk_i32 dst_y, fdk_surface *src,
                                    fdk_f32 alpha);
 
-/* PNG encoder (png_encode.c, 1.4.9): a complete 8-bit RGBA PNG
+/* PNG encoder (png_encode.c, 1.0.0): a complete 8-bit RGBA PNG
  * stream in one heap buffer (fdk_free). The clipboard's image/png
  * target and fdk_surface_save_png ride it. */
 fdk_result fdk__png_encode(const fdk_surface *surface,

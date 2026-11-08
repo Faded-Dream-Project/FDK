@@ -40,7 +40,7 @@ the font AND every fallback render as the font's `.notdef` glyph,
 and invalid UTF-8 decodes to U+FFFD one bad byte at a time, never
 reading past `byte_len`.
 
-## System font discovery (1.0.1)
+## System font discovery (1.0.0)
 
 `fdk_font_load_system_default(pixel_size)` picks a UI font without
 the application naming a file. FDK bundles no font (licensing

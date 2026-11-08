@@ -254,7 +254,7 @@ fdk_i32 fdk_date_days_in_month(fdk_i32 year, fdk_i32 month);
 /* ---- Date / time formatting ---- */
 
 typedef enum fdk_date_style {
-    FDK_DATE_SHORT  = 0, /* numeric:       12/25/25, 25.12.2025    */
+    FDK_DATE_SHORT  = 0, /* numeric:       12/25/25, 21.0.0    */
     FDK_DATE_MEDIUM = 1, /* abbreviated:  Dec 25, 2025, 25. Dez. 2025 */
     FDK_DATE_LONG   = 2, /* full month:   December 25, 2025        */
     FDK_DATE_FULL   = 3, /* with weekday: Thursday, December 25, 2025 */

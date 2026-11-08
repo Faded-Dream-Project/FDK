@@ -179,7 +179,7 @@ Two scope rules keep this honest. First, the mapping touches
 **package metadata only** — the `Version` fields, the package
 filenames, and the tarball/top-dir names the metadata-driven builds
 derive (rpm `%setup`, makepkg `$srcdir`, abuild `builddir`). The
-`.so` real-file name is **numeric-only** (`libfdk.so.1.1.0`, from
+`.so` real-file name is **numeric-only** (`libfdk.so.1.0.0`, from
 the Makefile's `FDK_SO_VERSION` — pre-release suffixes never appear
 in the .so file name, both because that is the GNU convention and
 because Alpine's abuild derives the apk `so:`provides version from

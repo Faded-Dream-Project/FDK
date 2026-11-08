@@ -1,5 +1,5 @@
 /*
- * test_dnd_logic.c — headless DnD logic (1.2.0)
+ * test_dnd_logic.c — headless DnD logic (1.0.0)
  *
  * The protocol halves (XDND, wl_data_device) need a display and live
  * in the integration suites. What CAN be pinned headlessly is the

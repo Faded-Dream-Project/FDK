@@ -41,24 +41,24 @@
 #define LIST_ROW_PAD_Y 5
 #define LIST_ROW_PAD_X 10
 
-/* Row icon geometry (1.4.1): a 16-px glyph box, 6-px gap to the
+/* Row icon geometry (1.0.0): a 16-px glyph box, 6-px gap to the
  * text — the sidebar-symbolic set. The glyph PAINTERS themselves
- * moved to statics.c in 1.4.2 (fdk__row_icon_advance /
+ * moved to statics.c in 1.0.0 (fdk__row_icon_advance /
  * fdk__row_icon_paint) so the Tree wears the same language. */
 #define LIST_ICON 16
 #define LIST_ICON_GAP 6
 
 typedef struct fdk_list_row {
     fdk_widget base;
-    bool drag_armed; /* 1.5.0: a selected-row press may arm a drag
+    bool drag_armed; /* 1.0.0: a selected-row press may arm a drag
                       * source (see fdk_list_row_set_drag_armed)   */
-    char **cells;    /* 1.5.0: columns 1..N's text (owned, parallel
+    char **cells;    /* 1.0.0: columns 1..N's text (owned, parallel
                       * to the list's column set; NULL when the list
                       * has no columns)                            */
     size_t cells_cap; /* slots in `cells' — the row frees its own
                        * cells at destroy WITHOUT the list (the
                        * parent chain is already unlinked by then) */
-    /* 1.5.0: the pending-band press (the wall-to-wall-rows case).
+    /* 1.0.0: the pending-band press (the wall-to-wall-rows case).
      * The press on an unselected plain row is remembered, not
      * consumed; when the pointer moves past the slop the ROW
      * forwards the gesture to the LIST as a rubber band (the row
@@ -69,7 +69,7 @@ typedef struct fdk_list_row {
     fdk_f32 pending_x, pending_y;
     char *text;   /* owned */
     bool selected;
-    fdk_row_icon icon; /* 1.4.1: the vector glyph before the text */
+    fdk_row_icon icon; /* 1.0.0: the vector glyph before the text */
     fdk_surface *image; /* borrowed raster icon (the icon-theme
                          * engine's cache owns it; NULL = symbolic
                          * only). Paint order: image wins. */
@@ -116,14 +116,14 @@ typedef struct fdk_list {
      * (0 = the primary/name column). */
     fdk_list_header_click_fn on_header_click;
     void *on_header_click_data;
-    /* ---- Row activation (1.2.0) ----
+    /* ---- Row activation (1.0.0) ----
      *
      * Double-click and Enter both fire on_row_activate — the
      * "open this" gesture file managers and file dialogs are built
      * on. The click tracking uses the shared double-click predicate
      * (same window, same slop policy as the title bar).
      *
-     * 1.4.4: SINGLE-CLICK activation mode (GtkListBox's
+     * 1.0.0: SINGLE-CLICK activation mode (GtkListBox's
      * activate_on_single_click / GtkTreeView's setuptools): the
      * places-sidebar rhythm — one click navigates. The double-click
      * branch goes quiet in this mode (the first press already
@@ -133,8 +133,8 @@ typedef struct fdk_list {
     fdk_i64 last_click_ms;   /* last left-press, for dbl detection */
     size_t last_click_row;   /* the row that press selected        */
     bool have_last_click;
-    bool single_activate;    /* 1.4.4: press fires activation      */
-    /* ---- Bulk-mutation batching (1.3.0) ----
+    bool single_activate;    /* 1.0.0: press fires activation      */
+    /* ---- Bulk-mutation batching (1.0.0) ----
      *
      * Between begin_batch/end_batch, row mutations skip the
      * per-mutation O(N) relayout and the selection-changed fire —
@@ -150,7 +150,7 @@ typedef struct fdk_list {
      * the new row (the common bulk-fill shape) instead of re-placing
      * the whole list. 80 = the v1 minimum content width. */
     fdk_i32 content_width;
-    /* ---- List columns (1.5.0) ----------------------------------
+    /* ---- List columns (1.0.0) ----------------------------------
      *
      * The file-manager list view: a header strip + per-row cells
      * right of the primary text, all PAINT-TIME geometry on the
@@ -173,7 +173,7 @@ typedef struct fdk_list {
     char **col_titles;          /* owned title copies, parallel      */
     fdk_i32 *col_widths;        /* resolved widths, parallel        */
     fdk_i32 columns_width;      /* sum(col_widths) + separators     */
-    /* ---- 1.5.1: the ADAPTIVE column geometry (owner round 8) ----
+    /* ---- 1.0.0: the ADAPTIVE column geometry (owner round 8) ----
      *
      * The round-7 layout summed widths from the LEFT — the fixed
      * columns clustered right after the shortest filename, nowhere
@@ -204,7 +204,7 @@ typedef struct fdk_list {
     fdk_i32 name_nat;           /* the name column's natural width   */
     fdk_i32 *col_x;             /* resolved x per column (incl. 0)   */
     fdk_i32 col_name_width;     /* the name column's resolved width  */
-    /* ---- Rubber-band drag-select (1.4.2) ----
+    /* ---- Rubber-band drag-select (1.0.0) ----
      *
      * A press on the list's EMPTY space (below the rows / outside
      * the content) starts a sweep-selection band: the rect between
@@ -220,7 +220,7 @@ typedef struct fdk_list {
     bool band_ctrl;      /* the union modifier was held at press     */
     fdk_f32 band_x, band_y;      /* the anchor, list-local           */
     fdk_f32 band_now_x, band_now_y; /* the pointer, list-local      */
-    fdk_f32 band_anchor_cy; /* the anchor's CONTENT-space y (1.4.3:
+    fdk_f32 band_anchor_cy; /* the anchor's CONTENT-space y (1.0.0:
                               * captured at press, glued to the content
                               * — the auto-scroll extension rule: the
                               * moving edge rides the offset, the anchor
@@ -235,7 +235,7 @@ typedef struct fdk_list {
      * want-test (the O(count)-per-motion loop this replaced). */
     fdk_i64 band_prev_lo;
     fdk_i64 band_prev_hi;
-    /* ---- Band auto-scroll (1.4.3) ----
+    /* ---- Band auto-scroll (1.0.0) ----
      *
      * When the sweep's pointer leaves the viewport's visible band,
      * a repeating timer scrolls the scrollview toward it. The band
@@ -268,7 +268,7 @@ static fdk_i32 list_row_height(const fdk_list *l) {
     fdk_font_metrics m;
     fdk_font_get_metrics(l->font, &m);
     fdk_i32 h = m.ascent + m.descent + LIST_ROW_PAD_Y * 2;
-    /* 1.4.0: the theme's LIST_ROW_HEIGHT is the FLOOR — the modern
+    /* 1.0.0: the theme's LIST_ROW_HEIGHT is the FLOOR — the modern
      * airy default (30) wins when the font fits inside it; a font
      * taller than the metric still wins (rows must fit their text;
      * the metric's range tops out at 48). */
@@ -283,7 +283,7 @@ static fdk_i32 list_row_height(const fdk_list *l) {
 /* Re-places every row inside the rows container + refreshes the
  * container's natural size (so the scrollview's bars/clamps follow).
  * Called after any non-batched mutation (and once at end_batch). */
-/* The column geometry (1.5.0). Separators double as the horizontal
+/* The column geometry (1.0.0). Separators double as the horizontal
  * gutters between columns: PAD on each side of the divider keeps
  * dense right-aligned cells off each other's pixels. */
 #define LIST_COL_SEP 24
@@ -310,7 +310,7 @@ static fdk_i32 list_header_height(const fdk_list *l) {
  * declared, 0 otherwise. The band's content math (which rows a sweep
  * covers, where the anchor sits in content space) MUST go through
  * this: a list-local y includes the header, content-space y does
- * not. The 1.5.0 columns round introduced the strip but left the
+ * not. The 1.0.0 columns round introduced the strip but left the
  * band math dividing raw list-local y by the row height — every
  * sweep and every empty-space press selected ONE ROW LOWER than the
  * pointer (a press on the header itself selected row 0; a press
@@ -322,7 +322,7 @@ static fdk_i32 list_content_top(const fdk_list *l) {
     return (l->column_count > 0) ? list_header_height(l) : 0;
 }
 
-/* 1.5.1: the resolved column geometry — see the struct block. The
+/* 1.0.0: the resolved column geometry — see the struct block. The
  * name column's natural width comes from the widest row (text +
  * icon band + padding, the v1 measure). Must be re-run whenever
  * col_widths, the row content, or the viewport width changes; every
@@ -412,7 +412,7 @@ static void list_columns_layout(fdk_list *l, fdk_i32 name_nat_hint) {
 /* The x where column `col` starts, in CONTENT space (list-local +
  * the scroll offset applied by the caller). Column 0 starts at 0
  * (it IS the primary text column; its icon band and padding are the
- * row's own). 1.5.1: reads the RESOLVED geometry — anchored or
+ * row's own). 1.0.0: reads the RESOLVED geometry — anchored or
  * content mode, whatever the last list_columns_layout() decided. */
 static fdk_i32 list_col_x(const fdk_list *l, size_t col) {
     if (col < l->column_count && l->col_x != NULL) {
@@ -473,7 +473,7 @@ static void list_sync_scroll_bounds(fdk_list *l) {
     fdk_rect inner = { 0, top, l->base.bounds.width,
                        l->base.bounds.height - top };
     fdk_widget_set_bounds(l->scroll, inner);
-    /* 1.5.1: the viewport just moved (resize, or the list's first
+    /* 1.0.0: the viewport just moved (resize, or the list's first
      * arrangement) — the right-anchored columns re-resolve here.
      * This is the RESIZE ADAPTATION: every path that changes the
      * scrollview's bounds (arrange, the app's set_bounds, the
@@ -505,7 +505,7 @@ static void list_relayout(fdk_list *l) {
     fdk_i32 rh = list_row_height(l);
     fdk_i32 w = 80;
     /* Width: the widest row's text (min 80) — rows stretch to it.
-     * Iconed rows account for the glyph box + gap (1.4.1). Round
+     * Iconed rows account for the glyph box + gap (1.0.0). Round
      * 12: ONE measure pass — the width this loop computes IS the
      * name column's natural width, handed to the columns layout
      * (which used to re-shape every row for the same number; the
@@ -518,7 +518,7 @@ static void list_relayout(fdk_list *l) {
             w = tw + LIST_ROW_PAD_X * 2;
         }
     }
-    /* 1.5.1: the adaptive column geometry runs FIRST — the
+    /* 1.0.0: the adaptive column geometry runs FIRST — the
      * content-mode floor below reads the resolved col_x[] tail. */
     if (l->column_count > 0) {
         list_columns_layout(l, w);
@@ -572,7 +572,7 @@ static void list_place_appended(fdk_list *l) {
                        l->content_width, rh };
         fdk_widget_set_bounds(&row->base, r);
     }
-    /* 1.5.1: a widening append can flip content mode (the name
+    /* 1.0.0: a widening append can flip content mode (the name
      * column's natural width grew) — re-resolve the anchor before
      * the natural size lands. */
     if (l->column_count > 0) {
@@ -886,13 +886,13 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
 
     fdk_color fill;
     if (row->selected) {
-        /* The 1.3.2 SELECTION_BACKGROUND token, wired in 1.4.0 (the
+        /* The 1.0.0 SELECTION_BACKGROUND token, wired in 1.0.0 (the
          * hardcoded accent-with-0.45-alpha is gone). */
         fill = fdk__pal_selection();
         fdk_surface_fill_rect(surface, bounds, fill);
     } else if ((w->flags & FDK_WF_HOVERED) != 0 &&
                (w->flags & FDK_WF_ENABLED) != 0) {
-        /* 1.4.0: the soft ROW_HOVER fill (subtler than a control
+        /* 1.0.0: the soft ROW_HOVER fill (subtler than a control
          * hover — dense lists must not strobe under the pointer). */
         fdk_surface_fill_rect(surface, bounds, fdk__pal_row_hover());
     }
@@ -915,7 +915,7 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     fdk_i32 baseline = fdk__center_baseline(font, bounds.y,
                                             bounds.height);
     fdk_i32 text_x = bounds.x + LIST_ROW_PAD_X;
-    /* The symbolic glyph before the text (1.4.1): vertically
+    /* The symbolic glyph before the text (1.0.0): vertically
      * centered in its own 16-px box. */
     if (row->image != NULL || row->icon != FDK_ROW_ICON_NONE) {
         fdk_i32 gy = bounds.y + (bounds.height - LIST_ICON) / 2;
@@ -936,7 +936,7 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
     fdk__draw_text(surface, font, row->text, fdk__pal_text(),
                    text_x, baseline);
 
-    /* 1.5.0 columns: the fixed cells right of the primary text,
+    /* 1.0.0 columns: the fixed cells right of the primary text,
      * drawn at the column offsets in the ROW's local space (the row
      * spans the full content width, so content x == row x). Cells
      * render in the muted text color — the primary text stays the
@@ -974,7 +974,7 @@ static void row_paint(fdk_widget *w, fdk_surface *surface,
 static bool list_handle_event(fdk_widget *w,
                               const fdk_widget_event *ev);
 
-/* 1.5.0: the row-press-to-band slop (px, root space) — a press on
+/* 1.0.0: the row-press-to-band slop (px, root space) — a press on
  * an unselected row becomes a rubber band only past this distance;
  * inside it, the release is the classic click-select. */
 #define BAND_SLOP 6
@@ -1044,7 +1044,7 @@ static bool row_handle_event(fdk_widget *w,
                     return false;
                 }
                 /* MULTIPLE-mode press on an UNSELECTED row with no
-                 * range modifier is a POTENTIAL rubber band (1.5.0):
+                 * range modifier is a POTENTIAL rubber band (1.0.0):
                  * a full directory view is wall-to-wall rows — there
                  * is no empty space to start a sweep from, and the
                  * press users actually make is ON a row (the round-6
@@ -1066,7 +1066,7 @@ static bool row_handle_event(fdk_widget *w,
                                   * now (click or band, its call) */
                 }
                 list_row_clicked(l, i, ev->pointer.modifiers);
-                /* Double-click = activation (1.2.0). Same row, same
+                /* Double-click = activation (1.0.0). Same row, same
                  * press semantics as the title bar's dblclick window
                  * (fdk__window_is_double_click; dx/dy are 0 because
                  * the SECOND click is on the same row widget — the
@@ -1087,7 +1087,7 @@ static bool row_handle_event(fdk_widget *w,
                     l->last_click_row = i;
                     l->last_click_ms = now;
                     if (l->single_activate) {
-                        /* The sidebar rhythm (1.4.4): ONE click
+                        /* The sidebar rhythm (1.0.0): ONE click
                          * navigates. */
                         list_fire_activated(l, i);
                     }
@@ -1322,12 +1322,12 @@ static const fdk_widget_class fdk_list_row_class_def = {
     .a11y = &list_row_a11y,
 };
 
-/* ---- list-level events (keyboard + the 1.4.2 rubber band) ---- */
+/* ---- list-level events (keyboard + the 1.0.0 rubber band) ---- */
 
 static void list_apply_band(fdk_list *l);
 static void list_band_scroll_disarm(fdk_list *l);
 
-/* The band auto-scroll constants (1.4.3): tick rate, step, and the
+/* The band auto-scroll constants (1.0.0): tick rate, step, and the
  * edge zone that arms it. */
 #define LIST_BAND_SCROLL_MS 40
 #define LIST_BAND_SCROLL_STEP 24
@@ -1437,7 +1437,7 @@ static bool list_handle_event(fdk_widget *w,
                               const fdk_widget_event *ev) {
     fdk_list *l = list_of(w);
 
-    /* ---- the rubber-band sweep (1.4.2) ----
+    /* ---- the rubber-band sweep (1.0.0) ----
      *
      * A left press reaching the LIST itself is by construction on
      * EMPTY space (rows consume their own presses; the scrollview
@@ -1590,7 +1590,7 @@ static bool list_handle_event(fdk_widget *w,
         l->count == 0) {
         return false;
     }
-    /* Enter activates the keyboard cursor's row (1.2.0) — the
+    /* Enter activates the keyboard cursor's row (1.0.0) — the
      * keyboard's "open this", same callback as the double-click. */
     if (ev->key.scancode == FDK_KEY_ENTER) {
         if (l->key_cursor != (size_t)-1 && l->key_cursor < l->count) {
@@ -1700,7 +1700,7 @@ static void list_destroy(fdk_widget *w) {
 static void list_measure(fdk_widget *w, fdk_size *out) {
     fdk_list *l = list_of(w);
     /* Natural: up to 8 rows tall, wide enough for the widest row
-     * (icons account for their glyph box + gap, 1.4.1). */
+     * (icons account for their glyph box + gap, 1.0.0). */
     fdk_i32 rh = list_row_height(l);
     fdk_i32 width = 80;
     for (size_t i = 0; i < l->count; i++) {
@@ -1713,7 +1713,7 @@ static void list_measure(fdk_widget *w, fdk_size *out) {
     }
     size_t shown = (l->count < 8) ? l->count : 8;
     if (l->column_count > 0) {
-        /* 1.5.1: the natural size is the CONTENT-mode spread — the
+        /* 1.0.0: the natural size is the CONTENT-mode spread — the
          * anchored mode's whole point is that it fits the viewport,
          * so the natural (unanchored) answer is the fallback one. */
         list_columns_layout(l, -1);
@@ -1906,19 +1906,19 @@ static void list_apply_band(fdk_list *l) {
  * internal scrollview to the list's then-current bounds, so a list
  * sized AFTER its last append (or appended-to while still 0x0)
  * kept a 0x0/stale scrollview: the paint walk skips empty children,
- * so every row stayed invisible forever — found live by the 1.2.3
+ * so every row stayed invisible forever — found live by the 1.0.0
  * dialog rig (places sidebar). Syncing here, in the paint hook
  * that runs before the subtree is walked, heals any staleness with
  * one compare; the set_bounds inside damages the region, which
  * merely schedules one more (identical) frame — it converges.
  *
- * 1.4.2: the rubber band draws FIRST (under the rows — the accent
+ * 1.0.0: the rubber band draws FIRST (under the rows — the accent
  * tint + border; selection fills land over it). */
 static void list_paint(fdk_widget *w, fdk_surface *surface,
                        fdk_rect bounds, fdk_rect clip) {
     (void)clip;
     fdk_list *l = list_of(w);
-    /* 1.5.0: the header strip. Painted FIRST (under everything the
+    /* 1.0.0: the header strip. Painted FIRST (under everything the
      * scrollview draws over it — the strip is pinned above the
      * viewport, and the scrollview's inset below keeps the rows out
      * of its pixels; the pinning is the arrangement in
@@ -1972,7 +1972,7 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
                                baseline);
                 /* the column divider: a vertical hair the strip's
                  * height, at the separator's center — the desktop
-                 * pane-header look (1.5.1) */
+                 * pane-header look (1.0.0) */
                 fdk_i32 dx = bounds.x + cx - LIST_COL_SEP / 2 - off_x;
                 if (dx >= bounds.x && dx < bounds.x + bounds.width) {
                     fdk_rect div = { dx, bounds.y, 1, hh };
@@ -1982,7 +1982,7 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
             }
         }
     }
-    /* The rubber band (1.4.2), painted UNDER the rows (the list's
+    /* The rubber band (1.0.0), painted UNDER the rows (the list's
      * paint runs before its scrollview subtree): selection fills
      * draw over the tint, which reads exactly as GTK's translucent
      * band does once row selections land in it. Accent-derived:
@@ -2048,7 +2048,7 @@ static void list_paint(fdk_widget *w, fdk_surface *surface,
         l->scroll->bounds.x != 0 ||
         l->scroll->bounds.width != w->bounds.width ||
         l->scroll->bounds.height != w->bounds.height - top) {
-        list_sync_scroll_bounds(l); /* 1.5.1: the shared sync — the
+        list_sync_scroll_bounds(l); /* 1.0.0: the shared sync — the
                                      * column anchor re-resolves
                                      * here too (this is the paint
                                      * self-heal path a direct
@@ -2105,11 +2105,11 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
     l->batch_dirty = false;
     l->batch_sel_at_start = 0;
     l->content_width = 80; /* the v1 minimum, until a row widens it */
-    l->columns = NULL;      /* 1.5.0: the plain list until set_columns */
+    l->columns = NULL;      /* 1.0.0: the plain list until set_columns */
     l->column_count = 0;
     l->col_titles = NULL;
     l->col_widths = NULL;
-    l->name_nat = 80;       /* 1.5.1: until rows/callers widen it  */
+    l->name_nat = 80;       /* 1.0.0: until rows/callers widen it  */
     l->col_x = NULL;
     l->col_name_width = 80;
     l->columns_width = 0;
@@ -2156,9 +2156,9 @@ fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
     return FDK_OK;
 }
 
-/* ---- columns (1.5.0) ---- */
+/* ---- columns (1.0.0) ---- */
 
-/* TEST SEAM (1.5.1): the resolved column geometry — col_x[c] and
+/* TEST SEAM (1.0.0): the resolved column geometry — col_x[c] and
  * the width of column c — so the rig can assert the right-edge
  * anchor and the resize adaptation without pixel-divining. Also
  * hands back content_width (the h-scroll floor). Never called by
@@ -2444,7 +2444,7 @@ void fdk_list_set_selection_mode(fdk_widget *list,
             !l->row_widgets[i]->selected &&
                 mode == FDK_LIST_SELECTION_MULTIPLE);
     }
-    /* 1.5.0: MULTIPLE owns the plain press (the rubber band — any
+    /* 1.0.0: MULTIPLE owns the plain press (the rubber band — any
      * press that reaches the list can start one, rows included), so
      * the widget vetoes drag-source arming for its own presses. A
      * drag from list content then begins only from a row the app
@@ -2457,7 +2457,7 @@ void fdk_list_set_selection_mode(fdk_widget *list,
     }
 }
 
-/* 1.4.0 — the row height this list actually lays rows out at (the
+/* 1.0.0 — the row height this list actually lays rows out at (the
  * theme's LIST_ROW_HEIGHT floor, the font's metrics, whichever is
  * taller; 20 for a fontless list). Apps use it to map mouse coords
  * to row indices over a list, and to predict how many rows a fixed
@@ -2559,7 +2559,7 @@ static fdk_result list_insert_internal(fdk_list *l, size_t index,
      * truthful afterwards). */
     fdk_widget_set_drag_veto(
         row_w, l->mode == FDK_LIST_SELECTION_MULTIPLE);
-    /* 1.5.0: the row's cell array parallels the list's column set
+    /* 1.0.0: the row's cell array parallels the list's column set
      * (NULL when there are no fixed columns — the common v1 list). */
     if (l->column_count > 1) {
         row->cells = fdk_alloc_array(l->column_count - 1,
@@ -2679,7 +2679,7 @@ void fdk_list_clear(fdk_widget *list) {
     l->key_cursor = (size_t)-1;
     l->have_last_click = false;
     l->content_width = 80;
-    /* 1.5.0: the fixed columns' cell-driven widening resets with
+    /* 1.0.0: the fixed columns' cell-driven widening resets with
      * the rows (the widths' floors are the declared + title
      * minimums — recompute from the set). */
     if (l->column_count > 0) {
@@ -2741,7 +2741,7 @@ fdk_result fdk_list_set_row_text(fdk_widget *list, size_t row,
     return FDK_OK;
 }
 
-/* ---- Row icons (1.4.1) ---- */
+/* ---- Row icons (1.0.0) ---- */
 
 fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
                                  fdk_row_icon icon) {
@@ -2758,7 +2758,7 @@ fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
     case FDK_ROW_ICON_HOME:
     case FDK_ROW_ICON_DRIVE:
     case FDK_ROW_ICON_FILE:
-    case FDK_ROW_ICON_RECENT: /* 1.4.4's glyph was silently dropped
+    case FDK_ROW_ICON_RECENT: /* 1.0.0's glyph was silently dropped
                                * here (read as NONE) — the Recent
                                * place lost its clock face; fixed. */
         break;
@@ -2886,7 +2886,7 @@ bool fdk_list_get_activate_on_single_click(fdk_widget *list) {
     return list_of(list)->single_activate;
 }
 
-/* ---- Bulk-mutation batching (1.3.0) ---- */
+/* ---- Bulk-mutation batching (1.0.0) ---- */
 
 void fdk_list_begin_batch(fdk_widget *list) {
     if (list == NULL || list->klass != &fdk_list_class_def) {
@@ -2955,7 +2955,7 @@ void fdk__list_cancel_bands_all_roots(void) {
 /* Recursive half: pre-order. A list's band lives on the list itself,
  * and menus can be nowhere inside a list (popups are separate
  * windows), so there is no ordering constraint with the subtree
- * walk. The pending_band flags (1.5.0's row-born gestures) are
+ * walk. The pending_band flags (1.0.0's row-born gestures) are
  * cleared too: their POINTER_UP was swallowed with the popup's, and
  * a stale armed row would synthesize a phantom band from stale
  * coordinates on the next motion. */

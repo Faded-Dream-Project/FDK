@@ -495,7 +495,7 @@ static void test_paint(void) {
            "underline are pixel-visible\n");
 }
 
-/* ---- 1.4.0: placeholder text ---- */
+/* ---- 1.0.0: placeholder text ---- */
 
 static void test_placeholder(void) {
     fdk_widget *root = fresh_root();
@@ -614,7 +614,7 @@ static void test_scroll(void) {
            "hold, paint round-trips)\n");
 }
 
-/* Forward declarations for the 1.3.3 undo group (defined after
+/* Forward declarations for the 1.0.0 undo group (defined after
  * main to keep the original file's flow; declared here so main can
  * call them). */
 static void test_undo_redo(void);
@@ -661,7 +661,7 @@ int main(void) {
     return 0;
 }
 
-/* ---- undo / redo (1.3.3) -----------------------------------------------
+/* ---- undo / redo (1.0.0) -----------------------------------------------
  *
  * All through the REAL event path: FDK_WIDGET_KEY_DOWN on the tree
  * with proper scancode/codepoint/modifier shapes — the same events
@@ -840,13 +840,13 @@ static void test_undo_redo(void) {
            "read-only refuses, on_changed parity\n");
 }
 
-/* 1.3.3 undo test's own changed counter (int *user). */
+/* 1.0.0 undo test's own changed counter (int *user). */
 static void on_changed_count(fdk_widget *w, void *user) {
     (void)w;
     (*(int *)user)++;
 }
 
-/* ---- the search preset (1.4.2) ---- */
+/* ---- the search preset (1.0.0) ---- */
 
 static void test_search_entry(void) {
     fdk_widget *root = fresh_root();
@@ -996,7 +996,7 @@ static void test_search_entry(void) {
            "ladder, magnifier/X pixel proofs\n");
 }
 
-/* ---- icon slots (1.4.4) ---- */
+/* ---- icon slots (1.0.0) ---- */
 
 static int g_icon_presses = 0;
 static fdk_entry_slot g_icon_slot = (fdk_entry_slot)-1;
@@ -1054,7 +1054,7 @@ static void test_icon_slots(void) {
     /* Width accounting: a leading icon adds 22 to the natural (the
      * empty plain entry sits at the 32 floor; FOLDER + CLEAR-empty
      * = 32 + 22 — CLEAR reserves nothing while the field is empty,
-     * the 1.4.2 rule generalized). With text, the trailing zone
+     * the 1.0.0 rule generalized). With text, the trailing zone
      * appears too. */
     fdk_size nat = {0, 0};
     fdk_widget_measure(e, &nat);
@@ -1149,7 +1149,7 @@ static void test_icon_slots(void) {
            FDK_ENTRY_ICON_CLEAR);
     fdk_size snat = {0, 0};
     fdk_widget_measure(se, &snat);
-    CHECK_EQ(snat.width, 38, "snat.width"); /* 8 + 22 + 8, the 1.4.2 number      */
+    CHECK_EQ(snat.width, 38, "snat.width"); /* 8 + 22 + 8, the 1.0.0 number      */
 
     fdk_widget_destroy(root);
     printf("[ok] entry icon slots: set/get + width accounting (the "

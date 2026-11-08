@@ -1,7 +1,7 @@
-/* 10_file_manager.c — FDK Files: a real small file manager (1.2.1).
+/* 10_file_manager.c — FDK Files: a real small file manager (1.0.0).
  *
  * The "can FDK build an actual application?" proof, rewritten after
- * the 1.2.0 live report ("too simple to be the default") into
+ * the 1.0.0 live report ("too simple to be the default") into
  * something that behaves like a file manager people recognize:
  *
  *   PLACES        Home, Desktop, Documents, Downloads, Pictures,
@@ -33,7 +33,7 @@
  * Enter live in the list; Backspace = Up, F5 = Refresh, Ctrl+H =
  * Hidden, Alt+Left/Right = history, Escape quits. The main loop
  * paints when the tree has damage — the missing piece that made the
- * 1.2.0 build feel dead between interactions.
+ * 1.0.0 build feel dead between interactions.
  *
  * For the GUI test rigs the demo prints:
  *   RIG: places|filelist|btn-up|btn-refresh|btn-hidden|btn-back|
@@ -49,7 +49,7 @@
  *
  * Close the window, Escape, or FDK_DEMO_FRAMES=N to exit. Fonts from
  * fdk_font_load_system_default(). The window background is the
- * TOOLKIT default (the theme's window-background token — 1.2.1);
+ * TOOLKIT default (the theme's window-background token — 1.0.0);
  * panels that need to read as panels set their own.
  *
  * INIT-tier helper user (see example_window.h): the demo owns its
@@ -114,7 +114,7 @@ static struct {
     bool sort_desc;
     history_t back;
     history_t fwd;
-    fdk_prefs *prefs;      /* 1.3.7: view state + geometry across runs */
+    fdk_prefs *prefs;      /* 1.0.0: view state + geometry across runs */
     /* widgets */
     fdk_widget *places;
     fdk_widget *btn_back, *btn_fwd, *btn_up, *btn_refresh;
@@ -364,7 +364,7 @@ static void load_dir(void) {
     /* Permute the STORE into sorted order, so the list's display row
      * i IS store index i — every row -> name/size/dir lookup (the
      * selection report, activation, rename, delete) then indexes the
-     * store directly. The rig caught the 1.2.1 draft reporting the
+     * store directly. The rig caught the 1.0.0 draft reporting the
      * READDIR-order name for a clicked row (readdir order is hash
      * order, nothing like the sorted listing). */
     {
@@ -964,7 +964,7 @@ static void relayout(void) {
     fdk_size ws;
     (void)fdk_window_get_size(app.window, &ws);
     fdk_i32 pad = 8;
-    /* The FDK title band (1.4.14) owns the top strip: the absolute
+    /* The FDK title band (1.0.0) owns the top strip: the absolute
      * layout starts below it when the window is decorated. */
     fdk_i32 top = fdk_window_get_decorated(app.window)
                       ? fdk_theme_get_metric(NULL, FDK_TM_TITLE_BAR_HEIGHT)
@@ -1062,7 +1062,7 @@ int main(void) {
         return 1;
     }
 
-    /* Application preferences (1.3.7): the window geometry, the
+    /* Application preferences (1.0.0): the window geometry, the
      * view toggles, the sort mode, and the last browsed directory
      * survive restarts. A corrupt file fails soft — defaults, the
      * app runs — so this can never block startup. The rigs point
@@ -1102,7 +1102,7 @@ int main(void) {
         return 1;
     }
     fdk_window_set_event_callback(app.window, window_event, NULL);
-    /* 1.4.14: the FDK title bar — every example wears the toolkit's
+    /* 1.0.0: the FDK title bar — every example wears the toolkit's
      * own drawn chrome (themed band + close + FDK resize). */
     (void)fdk_window_set_decorated(app.window, true);
 
@@ -1226,7 +1226,7 @@ int main(void) {
         if (fdk_pump_events(app.ctx, 15) < 0) {
             break; /* platform connection lost — leave the loop */
         }
-        /* The 1.2.0 build never painted here: after the first frame
+        /* The 1.0.0 build never painted here: after the first frame
          * the window only updated on resizes, and the damage that
          * HAD accumulated repainted as new text stamped straight
          * over the old frame (the ghosting report). Paint whenever

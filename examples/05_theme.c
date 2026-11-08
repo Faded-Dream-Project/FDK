@@ -1,8 +1,8 @@
-/* 05_theme.c — the theme engine, live (Phase 7; 1.4.16; the 1.0.0
+/* 05_theme.c — the theme engine, live (Phase 7; 1.0.0; the 1.0.0
  * alignment).
  *
  * One panel of catalog widgets cycling the toolkit's theme faces
- * at hand: the built-in "Faded Dream" (the 1.4.16 default — gray
+ * at hand: the built-in "Faded Dream" (the 1.0.0 default — gray
  * with violet accents), two .fdk files from examples/data/
  * ("Daylight" and "Matrix" — authored demo fixtures, the documented
  * load-your-own-file path), and the ONE face the package ships:
@@ -60,9 +60,9 @@ static const char *THEME_FILES[] = {
 
 /* Applies the app's own themed styling on top of the engine's
  * repaint: the title accent comes from a token of the theme that is
- * CURRENT now. 1.4.14: the example's chrome — the FDK title band
+ * CURRENT now. 1.0.0: the example's chrome — the FDK title band
  * the window now wears — themes ITSELF through the same tokens
- * (that is the toolkit's chrome doing what it preaches); 1.4.16:
+ * (that is the toolkit's chrome doing what it preaches); 1.0.0:
  * the root surface rides the window_background TOKEN (the new
  * token-following background — no re-set needed on a switch), so
  * the only app-owned restyle left is this title label. */

@@ -30,7 +30,7 @@
 #define WAYLAND_DEFAULT_HEIGHT 480
 #define WAYLAND_DEFAULT_TITLE  "FDK Application"
 
-/* Background pixel (1.2.1): the theme's window-background token —
+/* Background pixel (1.0.0): the theme's window-background token —
  * the same fill the root default background paints on the first
  * rendered frame (fdk_window_get_root), so the pre-first-frame
  * window and the first painted frame agree instead of flashing
@@ -145,7 +145,7 @@ static fdk_result create_shm_buffer(fdk_platform_connection *conn,
         return FDK_ERR_OUT_OF_MEMORY;
     }
 
-    /* 1.1.6: wl_buffer events ride the connection's DEDICATED queue,
+    /* 1.0.0: wl_buffer events ride the connection's DEDICATED queue,
      * so the slot-exhaustion wait (get_framebuffer below) can block
      * on wl_buffer::release alone — dispatching that queue never runs
      * unrelated listeners re-entrantly, which is what makes the
@@ -176,7 +176,7 @@ static const struct zxdg_toplevel_decoration_v1_listener
 static fdk_result commit_render_pending(fdk_platform_window *pwindow,
                                         const fdk_platform_damage *damage);
 
-/* Defined below (GPU lane path, 1.2.0 / D-1): the EGL lane's
+/* Defined below (GPU lane path, 1.0.0 / D-1): the EGL lane's
  * permanent downgrade + salvage. The deferred-first-frame flush above
  * needs it before its definition point. */
 fdk_result fdk__wayland_surface_downgrade_from_lane(
@@ -344,7 +344,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
      * fullscreen, tiling WMs) propose their size right there, and
      * the window layer must learn it or it keeps laying out at the
      * creation size inside a full-compositor buffer — found live by
-     * the 1.1.5 manager-less rig: 320x240 of UI islanded in the
+     * the 1.0.0 manager-less rig: 320x240 of UI islanded in the
      * top-left of a 1024x640 framebuffer, rest zero-black. */
     if (was_configured || size_changed) {
         fdk_event_data event = { .type = FDK_EVENT_WINDOW_CONFIGURE };
@@ -352,7 +352,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
         pwindow->conn->dispatch(pwindow, &event, pwindow->conn->dispatch_user_data);
     }
 
-    /* 1.3.2 — first-map EXPOSE: X11 parity for toolkit-owned popups.
+    /* 1.0.0 — first-map EXPOSE: X11 parity for toolkit-owned popups.
      *
      * The X server sends Expose when a window maps, and THAT event is
      * what drives the auto-paint of menu/combo/tooltip popups whose
@@ -401,7 +401,7 @@ static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
      * clears the (request-optimistic) minimized flag — the protocol
      * has no minimized state and no unminimize request, but
      * compositors report activated when a window is brought back.
-     * FULLSCREEN (1.1.5) is tracked as the resize gate only — kiosk
+     * FULLSCREEN (1.0.0) is tracked as the resize gate only — kiosk
      * shells and fullscreen windows get their geometry from the
      * compositor, and a client buffer at any other size is a
      * protocol error there. */
@@ -418,7 +418,7 @@ static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel,
             activated = 1;
         }
     }
-    /* 1.4.10: fullscreen flows INTO update_state as a parameter —
+    /* 1.0.0: fullscreen flows INTO update_state as a parameter —
      * the handler must NOT pre-write pwindow->fullscreen, or the
      * helper's change detection goes tautological for fullscreen-
      * only flips (found live by the sway suite: the unset configure
@@ -548,7 +548,7 @@ static void background_buffer_release(void *data, struct wl_buffer *buffer) {
         pwindow->buffer = NULL;
         pwindow->buffer_attached = 0;
     }
-    /* 1.3.2: leave the pending set — the entry dies with the proxy
+    /* 1.0.0: leave the pending set — the entry dies with the proxy
      * right below, and the window may already be gone (the zombie
      * path dispatched a queued release after window destroy). */
     for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
@@ -662,7 +662,7 @@ static fdk_result attach_background_buffer(fdk_platform_window *pwindow, fdk_siz
     pwindow->buffer = buffer;
     pwindow->buffer_size = size;
     pwindow->buffer_attached = 1;
-    /* 1.3.2: track this buffer in the compositor-held set. A
+    /* 1.0.0: track this buffer in the compositor-held set. A
      * REPLACED buffer stays tracked until its own wl_buffer::release
      * destroys it (the listener removes the entry) — destroying it
      * here instead raced the listener into a double destroy (found
@@ -1068,7 +1068,7 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                                    : pwindow->last_size.height,
                                pwindow->scale_x120);
 
-    /* --- GPU present lane (1.2.0 / D-1, wayland_egl.c) ----------------
+    /* --- GPU present lane (1.0.0 / D-1, wayland_egl.c) ----------------
      *
      * The EGL mirror of x11_surface.c's engagement block, same
      * decisions: engage once per window (never after a downgrade),
@@ -1203,9 +1203,9 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
      * wrong-size reaper after the wait cites the same number. */
     int wait_budget = FDK_WL_RELEASE_WAIT_MS;
     if (slot < 0) {
-        /* 1.1.6: every slot is busy — WAIT, don't drop the frame.
+        /* 1.0.0: every slot is busy — WAIT, don't drop the frame.
          *
-         * The pre-1.1.6 behavior (refuse immediately, loudly) was
+         * The pre-1.0.0 behavior (refuse immediately, loudly) was
          * built on the assumption that a compositor holding all four
          * buffers for long is misbehaving. The live report that
          * broke it: Muffin's experimental Wayland session on older
@@ -1223,7 +1223,7 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
          * reached from inside a listener (the dispatch tail's
          * synchronous repaint).
          *
-         * 1.1.7: the budget is classified, not flat. The 1.1.6 wait
+         * 1.0.0: the budget is classified, not flat. The 1.0.0 wait
          * exited ONLY on a release at the CURRENT size — during an
          * interactive resize every busy slot is at a WRONG size (each
          * configure step changes the target), so no release could
@@ -1231,7 +1231,7 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
          * wrong-size reaper below fired anyway: ~10fps resizing with
          * an idle CPU (the "still laggy when resize / CPU not being
          * fully used" live report). Now: pure hoarding (every busy
-         * slot at the current size) keeps the full 1.1.6 budget — a
+         * slot at the current size) keeps the full 1.0.0 budget — a
          * release there is recyclable and worth waiting for — while
          * churn (any busy slot at a wrong size) gets ONE bounded
          * poll slice, because every exit from a churn wait ends in
@@ -1338,7 +1338,7 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
                 /* The RELEASE queue has events waiting (the only
                  * reason the queue-scoped prepare refuses): dispatch
                  * them right now — one of them may be the release this
-                 * wait exists for — and loop immediately. The 1.1.6
+                 * wait exists for — and loop immediately. The 1.0.0
                  * code slept a millisecond here instead, which under a
                  * busy default queue turned the whole budget into a
                  * fixed sleep with zero events ever read (the W1
@@ -1358,8 +1358,8 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
          * every configure step changes the size, so the pool fills
          * with wrong-size slots the compositor has not released yet,
          * and refusing there stalled the whole maximize cycle on
-         * slow compositors (the 1.1.5 live report's burst of 40+
-         * refusals during maximize toggling). Since 1.1.7 the churn
+         * slow compositors (the 1.0.0 live report's burst of 40+
+         * refusals during maximize toggling). Since 1.0.0 the churn
          * budget reaches this reaper after ONE poll slice instead of
          * the full release wait — the wait could never satisfy a
          * current-size recycle while every busy slot is wrong-size
@@ -1391,7 +1391,7 @@ fdk_result fdk_wayland_window_get_framebuffer(fdk_platform_window *pwindow,
         /* Genuine refusal: every slot holds a buffer at the CURRENT
          * size the compositor has not released — it is hoarding
          * frames it asked for. Rate-limit the warning (one per stall
-         * episode; the 1.1.5 live report counted ~80 identical lines
+         * episode; the 1.0.0 live report counted ~80 identical lines
          * in a single session) and hand the caller an honest error;
          * the damage stays set and the frame goes out on the next
          * successful acquisition. */
@@ -1611,7 +1611,7 @@ fdk_result fdk_wayland_window_present(fdk_platform_window *pwindow,
         return FDK_ERR_INVALID_ARGUMENT;
     }
 
-    /* --- GPU present lane (1.2.0 / D-1) ------------------------------
+    /* --- GPU present lane (1.0.0 / D-1) ------------------------------
      *
      * Fast path: upload the damaged rects into the window's GL
      * texture, composite the fullscreen quad, eglSwapBuffers (the
@@ -1703,10 +1703,10 @@ int fdk_wayland_window_frame_ready(fdk_platform_window *pwindow) {
     if (!pwindow->rendered_ever) {
         return 1; /* nothing presented yet — always allowed */
     }
-    /* 1.1.6 capacity gate: the starvation guard below exists so a
+    /* 1.0.0 capacity gate: the starvation guard below exists so a
      * hidden surface (compositor never sends frame callbacks) does
      * not starve. But "ready" while every render slot is in flight
-     * is a LIE the pre-1.1.6 code told ~70 times per interaction on
+     * is a LIE the pre-1.0.0 code told ~70 times per interaction on
      * Muffin's experimental Wayland session: the guard expired, the
      * app painted, acquisition refused, the frame dropped, repeat
      * every loop pass. Gating on capacity means the app's paint
@@ -1735,7 +1735,7 @@ int fdk_wayland_window_ever_presented(fdk_platform_window *pwindow) {
     return pwindow != NULL && pwindow->rendered_ever != 0;
 }
 
-/* The render_path op (1.2.0 / D-1): 1 while this window presents
+/* The render_path op (1.0.0 / D-1): 1 while this window presents
  * through the EGL lane, 0 on the classic wl_shm path (including
  * never-engaged and downgraded windows — the honest, current
  * answer, read live off the backend's own state). The exact mirror
@@ -1744,7 +1744,7 @@ int fdk_wayland_window_render_path(fdk_platform_window *pwindow) {
     return (pwindow != NULL && pwindow->egl_win != NULL) ? 1 : 0;
 }
 
-/* The GPU-lane downgrade path (1.2.0 / D-1) — the mirror of
+/* The GPU-lane downgrade path (1.0.0 / D-1) — the mirror of
  * fdk__x11_surface_downgrade_from_lane: salvage the staging frame
  * into a fresh wl_shm slot, destroy the lane state, mark the window
  * downgraded (sticky), and re-present through the classic path with
@@ -1915,12 +1915,12 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
     pwindow->buffer_attached = 0;
     pwindow->cursor_shape = 0; /* default arrow until shaped (W2) */
     for (int i = 0; i < FDK_WL_BG_SLOTS; i++) {
-        pwindow->bg_pending[i] = NULL; /* 1.3.2: fdk_alloc not zeroed */
+        pwindow->bg_pending[i] = NULL; /* 1.0.0: fdk_alloc not zeroed */
     }
     pwindow->render_pending = NULL;
     pwindow->rendered_ever = 0;
     pwindow->last_refuse_warn_ms = 0;
-    /* GPU lane (1.2.0 / D-1): engaged at the first framebuffer
+    /* GPU lane (1.0.0 / D-1): engaged at the first framebuffer
      * acquisition, never here (fdk_alloc does not zero). */
     pwindow->egl_win = NULL;
     pwindow->egl_downgraded = 0;
@@ -2082,7 +2082,7 @@ fdk_result fdk_wayland_window_create(fdk_platform_connection *conn,
          * dismiss it on focus loss instead). On a seat-less
          * compositor (kiosk-shell weston) the grab would marshal a
          * NULL object: libwayland logs an argument error and drops
-         * the whole request (1.1.5, seen live in the manager-less
+         * the whole request (1.0.0, seen live in the manager-less
          * rig's stderr); skip it cleanly instead.
          *
          * Input-TRANSPARENT popups (tooltips) skip the grab on
@@ -2232,7 +2232,7 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
     if (pwindow == NULL) {
         return;
     }
-    /* GPU lane first (1.2.0 / D-1): the EGL surface wraps this
+    /* GPU lane first (1.0.0 / D-1): the EGL surface wraps this
      * wl_surface, so it must die BEFORE wl_surface_destroy below —
      * the lane's own destroy path (context, surface, wl_egl_window,
      * staging) runs against a still-live surface. */
@@ -2285,7 +2285,7 @@ void fdk_wayland_window_destroy(fdk_platform_window *pwindow) {
     pwindow->entered_count = 0;
     pwindow->entered_capacity = 0;
 
-    /* 1.3.2: reap every background buffer the compositor may still
+    /* 1.0.0: reap every background buffer the compositor may still
      * hold — the current one (`buffer`, unless the render slots
      * above already consumed it) AND any replaced-but-unreleased
      * ones. Their proxies die here; any release event still queued
@@ -2465,7 +2465,7 @@ void fdk_wayland_window_set_title(fdk_platform_window *pwindow, const char *titl
      * marshaling a toplevel request on the NULL proxy is a crash in
      * the generated inline (wl_proxy_get_version(NULL)). A popup's
      * "title" has no protocol meaning anyway: quietly ignore, the
-     * same answer X11 gives override-redirect windows. (1.3.0: the
+     * same answer X11 gives override-redirect windows. (1.0.0: the
      * v1 code NULL-deref'd here — six public entry points shared
      * the bug, found by the production audit.) */
     if (pwindow == NULL || pwindow->xdg_toplevel == NULL) {
@@ -2854,14 +2854,14 @@ void fdk_wayland_window_resize(fdk_platform_window *pwindow, fdk_i32 width, fdk_
         FDK_WARN("fdk_window_resize() ignored non-positive size %dx%d", width, height);
         return;
     }
-    /* Compositor-owned geometry (1.1.5): while the toplevel is
+    /* Compositor-owned geometry (1.0.0): while the toplevel is
      * maximized or fullscreen — kiosk-shell weston configures EVERY
      * window fullscreen — xdg-shell requires the client to commit
      * the CONFIGURED size. A client-driven buffer at another size
      * is a protocol error on strict compositors: weston kills the
      * whole connection ("xdg_surface geometry (512 x 760) is larger
      * than the configured fullscreen state (1024 x 640)" — found
-     * live by the 1.1.5 manager-less rig; the suite kept "passing"
+     * live by the 1.0.0 manager-less rig; the suite kept "passing"
      * on the dead connection afterwards). Refuse honestly and keep
      * the compositor's size; a resize after restore works normally. */
     if (pwindow->maximized || pwindow->fullscreen) {
@@ -3147,14 +3147,14 @@ fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
     return FDK_OK;
 }
 
-/* The optional pointer-introspection op (1.1.4): Wayland has no
+/* The optional pointer-introspection op (1.0.0): Wayland has no
  * query-the-server equivalent of XQueryPointer, but the seat's
  * listener state is the same truth — wl_pointer::enter/motion maintain
  * pointer_focus + surface-local pointer_x/y, and a compositor keeps
  * sending motion/leave events when surfaces move under the pointer,
  * so the cache is never stale while the pointer is over this surface.
  *
- * UNIFIED CONTRACT (1.2.5, same words as the X11 side): nonzero
+ * UNIFIED CONTRACT (1.0.0, same words as the X11 side): nonzero
  * only when the pointer is within the window's CURRENT geometry —
  * the bounds check runs against last_size, the last acked+committed
  * size, in the same logical surface space wl_pointer delivers. The
@@ -3172,7 +3172,7 @@ fdk_result fdk_wayland_window_begin_resize(fdk_platform_window *pwindow,
  * backend-independent.
  *
  * (Cursor SHAPING: the XCursor-theme loader lives in
- * wayland_cursor.c since 1.1.6, behind the same window_set_cursor
+ * wayland_cursor.c since 1.0.0, behind the same window_set_cursor
  * op the X11 cursor-font glyphs use.) */
 int fdk_wayland_window_query_pointer(fdk_platform_window *pwindow,
                                      fdk_i32 *out_x, fdk_i32 *out_y) {

@@ -113,7 +113,7 @@ static void about_dialog_cb(fdk_menu_item *item, void *user) {
     (void)fdk_dialog_show_message(app.ctx, &opts, NULL, NULL, NULL);
 }
 
-/* 1.3.3 — an APPLICATION shortcut (fdk_window_add_shortcut): F1 is
+/* 1.0.0 — an APPLICATION shortcut (fdk_window_add_shortcut): F1 is
  * the universal help key. The menu items' Ctrl+O/C/Q/V strings are
  * live accelerators on their own (the window's key dispatch scans
  * the bar); this one shows the app-registered half of the feature —
@@ -233,7 +233,7 @@ static void layout_all(fdk_i32 w, fdk_i32 h) {
     fdk_i32 bar_h = 26;
     fdk_i32 tool_h = 38;
     fdk_i32 status_h = 26;
-    /* The FDK title band (1.4.14) owns the top strip: the whole
+    /* The FDK title band (1.0.0) owns the top strip: the whole
      * stack starts below it when the window is decorated. */
     fdk_i32 top = (app.window != NULL &&
                    fdk_window_get_decorated(app.window))
@@ -350,7 +350,7 @@ int main(void) {
         return 1;
     }
     fdk_window_set_event_callback(app.window, window_event, NULL);
-    /* 1.4.14: the FDK title bar — every example wears the toolkit's
+    /* 1.0.0: the FDK title bar — every example wears the toolkit's
      * own drawn chrome (themed band + close + FDK resize). */
     (void)fdk_window_set_decorated(app.window, true);
     fdk_widget *root = NULL;

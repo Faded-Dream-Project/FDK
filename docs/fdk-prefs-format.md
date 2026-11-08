@@ -3,7 +3,7 @@
 Specification for FDK's application preference files. Version 1.
 
 This document is the normative grammar reference for
-`fdk_prefs_open()` / `fdk_prefs_save()` (1.3.7 — application
+`fdk_prefs_open()` / `fdk_prefs_save()` (1.0.0 — application
 preferences). It is FDK's third strict line-based dialect, after
 the `.fdk` theme format and the `.fmo` message catalog; the family
 rules are the same, with ONE deliberate difference in failure

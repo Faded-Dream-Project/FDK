@@ -25,7 +25,7 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
-#include "widget/widget_internal.h" /* animation test seam (1.3.8) */
+#include "widget/widget_internal.h" /* animation test seam (1.0.0) */
 
 #include <assert.h>
 #include <stdio.h>
@@ -282,7 +282,7 @@ static void test_scrolling(void) {
     wheel.scroll.position.y = 80;
     wheel.scroll.delta_y = -1;
     /* The internal scrollview eases to the accumulated target
-     * (1.3.8): pin the engine's synthetic clock and settle the
+     * (1.0.0): pin the engine's synthetic clock and settle the
      * burst before the click below. */
     fdk__animation_set_test_clock(0);
     for (int i = 0; i < 40; i++) {
@@ -304,7 +304,7 @@ static void test_scrolling(void) {
            "after wheeling\n");
 }
 
-/* ---- row icons (1.4.2) ---- */
+/* ---- row icons (1.0.0) ---- */
 
 static void test_row_icons(void) {
     fdk_widget *root = fresh_root();
@@ -319,7 +319,7 @@ static void test_row_icons(void) {
                                     "root node", &b)));
 
     /* Default NONE; round-trip; unknown values refused (not coerced
-     * — the setter is fdk_result, unlike the List's 1.4.1 getter). */
+     * — the setter is fdk_result, unlike the List's 1.0.0 getter). */
     assert(fdk_tree_node_get_icon(tree, a) == FDK_ROW_ICON_NONE);
     assert(fdk_tree_node_set_icon(tree, a, FDK_ROW_ICON_FOLDER) ==
            FDK_OK);

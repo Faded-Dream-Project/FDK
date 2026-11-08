@@ -195,7 +195,7 @@ struct fdk_xi2_device_event {
      * structurally (D-3) because the tablet translation reads the
      * valuator state. NOTE (1.0.0-rc2): the library-level mask_len is
      * in BYTES — libXi converts the wire's 4-byte units on the way
-     * out (verified empirically against libXi 1.8.2 cookies: a
+     * out (verified empirically against libXi 1.0.0 cookies: a
      * 2-axis motion event carries mask_len == 8). The old *4 here
      * was a 4x over-read even where the offsets were right. */
     struct {

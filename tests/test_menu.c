@@ -17,7 +17,7 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
-#include "widget/widget_internal.h" /* 1.4.2: the animation test
+#include "widget/widget_internal.h" /* 1.0.0: the animation test
                                        * clock — the hover pill fades */
 
 #include "widget/menu_internal.h"
@@ -362,7 +362,7 @@ static void test_view_paint(void) {
     fdk_surface *s = NULL;
     assert(fdk_ok(fdk_surface_create(w, h, &s)));
 
-    /* Paint: menu surface = the MENU_BACKGROUND token (1.4.0: popups
+    /* Paint: menu surface = the MENU_BACKGROUND token (1.0.0: popups
      * are their own surface, not the control fill; the sample point is
      * the mid-height right edge — clear of the rounded corners AND of
      * any row's text). */
@@ -378,10 +378,10 @@ static void test_view_paint(void) {
            mb == (int)(ctl.b * 255.0f + 0.5f));
 
     /* Hover highlight: motion over the row changes its pixels.
-     * 1.4.2: the pill FADES in (120 ms quad-out on the shared
+     * 1.0.0: the pill FADES in (120 ms quad-out on the shared
      * machinery), so the change lands after the flight — pin the
      * synthetic clock BEFORE the arming motion (animate stamps its
-     * start from it), then pump past the duration: the 1.4.1
+     * start from it), then pump past the duration: the 1.0.0
      * hover-fade tests' discipline. */
     fdk_u32 before = px_at(s, w / 2, rh / 2);
     fdk__animation_set_test_clock(1000);
@@ -503,7 +503,7 @@ int main(void) {
     return 0;
 }
 
-/* ---- menu accelerators (1.3.3) ---------------------------------------
+/* ---- menu accelerators (1.0.0) ---------------------------------------
  *
  * Headless coverage of the scan + the session-less activation:
  * the scan starts at a tree ROOT (exactly what the window dispatch
@@ -715,7 +715,7 @@ static void test_menu_accelerators(void) {
     fdk_menu_destroy(b);
 
     /* Teardown (bars before models, the conventional order; the
-     * 1.3.2 registry makes model-first safe too, but conventional
+     * 1.0.0 registry makes model-first safe too, but conventional
      * is the documented contract). */
     fdk_widget_destroy(root);
     fdk_menu_destroy(fm);
@@ -730,7 +730,7 @@ static void test_menu_accelerators(void) {
 }
 
 
-/* ---- 1.3.6: mnemonics ------------------------------------------------
+/* ---- 1.0.0: mnemonics ------------------------------------------------
  *
  * Parsing (markers strip, && collapse, case folding, byte ranges),
  * the query API, bar-title storage, and — through the same

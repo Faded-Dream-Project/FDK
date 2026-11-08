@@ -162,7 +162,7 @@ typedef struct fdk_platform_damage {
 
 /* ---- Shared XCursor theme loader (src/platform/cursor_theme.c) ----
  *
- * Both backends need the same thing the 1.1.4 Wayland backend built:
+ * Both backends need the same thing the 1.0.0 Wayland backend built:
  * cursor images as ARGB pixels from the system's XCursor theme files,
  * with no libxcursor dependency (the container format is small and
  * documented — see cursor_theme.c's format block). Wayland uploads
@@ -225,7 +225,7 @@ typedef struct fdk_platform_ops {
      * see fdk_run()'s handling in src/core/context.c). */
     int (*dispatch_pending)(fdk_platform_connection *conn);
 
-    /* OPTIONAL (1.3.5): the backend's own next timer deadline, in
+    /* OPTIONAL (1.0.0): the backend's own next timer deadline, in
      * monotonic milliseconds from NOW — the one piece of timing the
      * core timer queue cannot know about (Wayland's client-driven
      * key repeat). Returns 1 with *out_ms_until set when a deadline
@@ -238,12 +238,12 @@ typedef struct fdk_platform_ops {
     int (*next_wakeup_ms)(fdk_platform_connection *conn,
                           long long *out_ms_until);
 
-    /* ---- OPTIONAL test seams (1.3.5) ----
+    /* ---- OPTIONAL test seams (1.0.0) ----
      *
      * Production code NEVER calls these. sway headless cannot
      * deliver wl_keyboard.key to clients at all (the seat never
      * adopts a virtual keyboard's keymap — protocol-traced in
-     * 1.3.3), which leaves the Wayland keyboard listener bodies
+     * 1.0.0), which leaves the Wayland keyboard listener bodies
      * unreachable from the integration rig. These two hooks run
      * those REAL listener bodies (key press/release with the full
      * key-repeat arm/disarm discipline, and repeat_info rate/delay
@@ -425,7 +425,7 @@ typedef struct fdk_platform_ops {
      * saved for restore) and dispatches the state event. Wayland:
      * xdg_toplevel.set_maximized/unset; state arrives via configure.
      * NULL = backend cannot maximize at all. */
-    /* 1.4.10: the fullscreen request pair (one op, bool — the
+    /* 1.0.0: the fullscreen request pair (one op, bool — the
      * maximize pattern). State truth flows back through
      * FDK_EVENT_WINDOW_STATE exactly like maximized. */
     fdk_result (*window_set_fullscreen)(fdk_platform_window *pwindow,
@@ -462,7 +462,7 @@ typedef struct fdk_platform_ops {
                                       int edge, fdk_i32 local_x,
                                       fdk_i32 local_y);
 
-    /* --- OPTIONAL pointer introspection + cursor shaping (1.1.4) ---
+    /* --- OPTIONAL pointer introspection + cursor shaping (1.0.0) ---
      *
      * Both exist for the same class of bug: FDK's chrome has to
      * REACT to pointer position at moments the platform generates no
@@ -563,7 +563,7 @@ typedef struct fdk_platform_ops {
      * answer to "is this window actually on screen yet". */
     int (*window_ever_presented)(fdk_platform_window *pwindow);
 
-    /* OPTIONAL render-path introspection (1.4.18) behind
+    /* OPTIONAL render-path introspection (1.0.0) behind
      * fdk_window_get_render_path(): returns the presentation path
      * this window actually uses RIGHT NOW — 0 = the CPU/software
      * path (MIT-SHM or XPutImage copy, or the Wayland wl_shm commit),
@@ -612,7 +612,7 @@ typedef struct fdk_platform_ops {
                                      const char *text);
     char *(*clipboard_get_text)(fdk_platform_connection *conn);
 
-    /* ---- OPTIONAL PRIMARY selection operations (1.3.4) ----
+    /* ---- OPTIONAL PRIMARY selection operations (1.0.0) ----
      *
      * The classic Unix "current selection" buffer distinct from the
      * copy/paste CLIPBOARD: text becomes PRIMARY by being SELECTED
@@ -637,7 +637,7 @@ typedef struct fdk_platform_ops {
         fdk_platform_connection *conn, const char *text);
     char *(*clipboard_get_primary_text)(fdk_platform_connection *conn);
 
-    /* ---- OPTIONAL clipboard image operations (1.4.9) ----
+    /* ---- OPTIONAL clipboard image operations (1.0.0) ----
      *
      * The clipboard's image/png surface behind the core's
      * encode/decode (fdk_clipboard_set_image / get_image). The
@@ -703,7 +703,7 @@ typedef struct fdk_platform_ops {
     fdk_result (*window_set_modal)(fdk_platform_window *pwindow,
                                    bool modal);
 
-    /* Input-transparent popups (1.3.2, tooltips) are a CREATE-TIME
+    /* Input-transparent popups (1.0.0, tooltips) are a CREATE-TIME
      * contract carried by fdk_window_options.input_transparent, not
      * a post-create op: Wayland's xdg_popup.grab must be decided
      * when the role object is built, and X11's grab lives in show —
@@ -717,7 +717,7 @@ typedef struct fdk_platform_ops {
      * Backends without the input-region primitive degrade honestly:
      * the popup swallows clicks that land on it (logged). */
 
-    /* ---- OPTIONAL drag-and-drop operations (1.2.0) ----
+    /* ---- OPTIONAL drag-and-drop operations (1.0.0) ----
      *
      * Behind include/fdk/fdk_dnd.h. Formats are the public
      * fdk_drag_format OR-mask (plain int here so this header needn't

@@ -7,7 +7,7 @@
  *   unix:path=/run/user/1000/bus          filesystem socket
  *   unix:abstract=/tmp/dbus-abcdef,guid=… abstract namespace socket
  *   unix:dir=/tmp                         scan for dbus-* sockets
- *   tcp:host=127.0.0.1,port=5556,family=ipv4
+ *   tcp:host=121.0.0.1,port=5556,family=ipv4
  *   nonce-tcp:host=…,port=…,noncefile=/tmp/nonce
  *
  * Multiple ';'-separated addresses are tried in order (the

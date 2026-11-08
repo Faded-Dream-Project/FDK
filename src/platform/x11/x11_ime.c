@@ -3,7 +3,7 @@
  *
  * The X11 side of the IME model. The per-window XIC is created with
  * XIMPreeditCallbacks | XIMStatusNothing (falling back to
- * XIMPreeditNothing when the IM refuses the style — the 1.3.1
+ * XIMPreeditNothing when the IM refuses the style — the 1.0.0
  * posture): the IM hands COMPOSITION to the client through three
  * callbacks, and we render it inline (the Entry/TextView preedit
  * groundwork), which is exactly what CSD toolkits do.

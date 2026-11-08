@@ -43,7 +43,7 @@ char *fdk_clipboard_get_text(fdk_context *ctx) {
     return ctx->ops->clipboard_get_text(ctx->conn);
 }
 
-/* ---- PRIMARY selection (1.3.4) ---- */
+/* ---- PRIMARY selection (1.0.0) ---- */
 
 fdk_result fdk_clipboard_set_primary_text(fdk_context *ctx,
                                           const char *text) {
@@ -75,7 +75,7 @@ char *fdk_clipboard_get_primary_text(fdk_context *ctx) {
     return ctx->ops->clipboard_get_primary_text(ctx->conn);
 }
 
-/* ---- clipboard images (1.4.9) ---- */
+/* ---- clipboard images (1.0.0) ---- */
 
 fdk_result fdk_clipboard_set_image(fdk_context *ctx,
                                    const fdk_surface *surface) {

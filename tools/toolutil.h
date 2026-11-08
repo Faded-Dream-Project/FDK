@@ -1,6 +1,6 @@
 /*
  * toolutil.h — tiny shared helpers for the FDK command-line tools
- * (1.4.13)
+ * (1.0.0)
  *
  * Static-inline only: both tools compile this header straight in and
  * nothing about the tools leaks back into the library (they are

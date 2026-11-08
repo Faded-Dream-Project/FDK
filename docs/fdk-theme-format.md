@@ -3,7 +3,7 @@
 Specification for FDK's theme files. Version 1.
 
 This document is the normative grammar reference for `fdk_theme_load()`
-and `fdk_theme_parse()` (Phase 7 — Theme Engine; the 1.4.16
+and `fdk_theme_parse()` (Phase 7 — Theme Engine; the 1.0.0
 additions — the titlebar family, `button_shape`, the `.FDKThemes`
 folders — are marked inline). The parser is
 deliberately strict: anything not described here is a parse error, not a
@@ -111,34 +111,34 @@ permitted and stored verbatim.
 | `control_border`           | Separators, frame rules, outlines                   |
 | `accent`                   | Checked state, progress fill, focus ring            |
 | `track`                    | Progress bar / toggle track                         |
-| `tooltip_background`       | Tooltip popup fill (1.3.2)                          |
+| `tooltip_background`       | Tooltip popup fill (1.0.0)                          |
 | `tooltip_text`             | Tooltip label                                       |
 | `tooltip_border`           | Tooltip popup edge                                  |
-| `selection_background`     | Selected text/rows/entries (1.3.2; default is a translucent accent — light themes can set it opaque) |
+| `selection_background`     | Selected text/rows/entries (1.0.0; default is a translucent accent — light themes can set it opaque) |
 | `selection_text`           | Text ON a selection                                 |
 | `focus_ring`               | Keyboard-focus indicator                            |
 | `success`                  | Positive/validated semantic state                   |
 | `warning`                  | Caution semantic state                              |
 | `danger`                   | Destructive/error semantic state                    |
-| `sidebar_background`       | Places/panel sidebar surfaces (1.4.0; the file dialog's Places column) |
-| `menu_background`          | Menu/combo POPUP surface (1.4.0)                    |
-| `accent_hover`             | Filled-button accent under the pointer (1.4.0)      |
-| `accent_pressed`           | Filled-button accent while pressed (1.4.0)          |
-| `accent_text`              | Text ON an accent fill (1.4.0: suggested buttons)   |
-| `link`                     | Hyperlink text (1.4.0; reserved for link-styled controls) |
-| `entry_background`         | Text-field fill (1.4.0; the flat modern field)      |
-| `entry_border`             | Text-field edge (1.4.0)                             |
-| `row_hover`                | Dense-row hover fill (1.4.0; lists, menus, breadcrumbs) |
-| `titlebar_background`      | FDK-drawn decoration band fill (1.4.16; FALLBACK: `control_background`) |
-| `titlebar_text`            | Band title text + window-button glyphs (1.4.16; FALLBACK: `text`) |
-| `titlebar_border`          | Band bottom rule (1.4.16; FALLBACK: `control_border`) |
-| `titlebar_button_hover`    | Band button under the pointer (1.4.16; FALLBACK: `control_background_hover`) |
-| `titlebar_button_pressed`  | Band button while pressed (1.4.16; FALLBACK: `control_background_pressed`) |
+| `sidebar_background`       | Places/panel sidebar surfaces (1.0.0; the file dialog's Places column) |
+| `menu_background`          | Menu/combo POPUP surface (1.0.0)                    |
+| `accent_hover`             | Filled-button accent under the pointer (1.0.0)      |
+| `accent_pressed`           | Filled-button accent while pressed (1.0.0)          |
+| `accent_text`              | Text ON an accent fill (1.0.0: suggested buttons)   |
+| `link`                     | Hyperlink text (1.0.0; reserved for link-styled controls) |
+| `entry_background`         | Text-field fill (1.0.0; the flat modern field)      |
+| `entry_border`             | Text-field edge (1.0.0)                             |
+| `row_hover`                | Dense-row hover fill (1.0.0; lists, menus, breadcrumbs) |
+| `titlebar_background`      | FDK-drawn decoration band fill (1.0.0; FALLBACK: `control_background`) |
+| `titlebar_text`            | Band title text + window-button glyphs (1.0.0; FALLBACK: `text`) |
+| `titlebar_border`          | Band bottom rule (1.0.0; FALLBACK: `control_border`) |
+| `titlebar_button_hover`    | Band button under the pointer (1.0.0; FALLBACK: `control_background_hover`) |
+| `titlebar_button_pressed`  | Band button while pressed (1.0.0; FALLBACK: `control_background_pressed`) |
 
 All optional; each inherits from the built-in default theme when
 absent. The five `titlebar_*` keys are the FALLBACK family: a theme
 that omits one reads the base token named after it — including a
-base the theme itself overrode — so every pre-1.4.16 theme paints
+base the theme itself overrode — so every pre-1.0.0 theme paints
 exactly the band it always painted, and a theme that wants a
 distinct chrome (Mono Chromatic's black band over white content,
 Pink Rave's hot-pink one) says so in five keys. A theme may set
@@ -151,22 +151,22 @@ independently.
 |------------------------|--------|---------|---------------------------------|
 | `button_corner_radius` | 0–32   | 8       | Button fill + focus-ring corner radius |
 | `separator_thickness`  | 1–8    | 1       | Separator band thickness        |
-| `tooltip_corner_radius` | 0–16  | 6       | Tooltip box corner radius (1.3.2) |
+| `tooltip_corner_radius` | 0–16  | 6       | Tooltip box corner radius (1.0.0) |
 | `title_bar_height`     | 12–64  | 28      | FDK-drawn title band height     |
 | `menu_item_height`     | 16–48  | 26      | Menu bar/row minimum height     |
 | `scrollbar_width`      | 6–24   | 12      | ScrollView bar thickness        |
-| `entry_corner_radius`  | 0–16   | 6       | Entry-field corners (1.4.0; also the combo field and the breadcrumb bar) |
-| `menu_corner_radius`   | 0–16   | 8       | Menu/combo popup corners (1.4.0) |
-| `list_row_height`      | 16–48  | 30      | List row height FLOOR (1.4.0)   |
-| `focus_ring_width`     | 1–4    | 2       | Focus ring stroke (1.4.0; buttons and entries) |
-| `scrollbar_overlay_width` | 4–12 | 6       | Overlay bar thickness (1.4.4; the transient thumb) |
-| `iconview_cell_width`   | 64–192 | 96     | IconView cell width (1.4.6; LAYOUT metric) |
-| `iconview_cell_height`  | 64–224 | 84     | IconView cell height (1.4.6; LAYOUT metric) |
-| `textview_pad`          | 0–32   | 8      | TextView inner inset, both axes (1.4.8; LAYOUT metric) |
-| `button_shape`          | 0–2    | 0      | 0 rounded, 1 CIRCLE, 2 square (1.4.16) |
+| `entry_corner_radius`  | 0–16   | 6       | Entry-field corners (1.0.0; also the combo field and the breadcrumb bar) |
+| `menu_corner_radius`   | 0–16   | 8       | Menu/combo popup corners (1.0.0) |
+| `list_row_height`      | 16–48  | 30      | List row height FLOOR (1.0.0)   |
+| `focus_ring_width`     | 1–4    | 2       | Focus ring stroke (1.0.0; buttons and entries) |
+| `scrollbar_overlay_width` | 4–12 | 6       | Overlay bar thickness (1.0.0; the transient thumb) |
+| `iconview_cell_width`   | 64–192 | 96     | IconView cell width (1.0.0; LAYOUT metric) |
+| `iconview_cell_height`  | 64–224 | 84     | IconView cell height (1.0.0; LAYOUT metric) |
+| `textview_pad`          | 0–32   | 8      | TextView inner inset, both axes (1.0.0; LAYOUT metric) |
+| `button_shape`          | 0–2    | 0      | 0 rounded, 1 CIRCLE, 2 square (1.0.0) |
 
 All optional; each inherits from the built-in default theme when absent.
-`button_shape` (1.4.16) is the SHAPE story: `0` defers to
+`button_shape` (1.0.0) is the SHAPE story: `0` defers to
 `button_corner_radius` (the historical look), `1` rounds to half the
 button's short side — a true circle on a square button, a pill on a
 wide one; Mono Chromatic ships this — and `2` forces square corners
@@ -228,16 +228,16 @@ separator_thickness  = 1
 
 ## The v1 look as a theme file (the legacy recipe)
 
-The built-in default is the 1.4.16 "Faded Dream" palette — the calm
+The built-in default is the 1.0.0 "Faded Dream" palette — the calm
 gray-with-violet retune (window #232329, controls #33333C, one violet
-accent family #8F79D9 kept to the small parts); before it, the 1.4.0
+accent family #8F79D9 kept to the small parts); before it, the 1.0.0
 "Modern" palette carried a blue undertone in every gray, and before
 that the Phase 6 "v1" look. Every pixel any of them painted is
 reproducible exactly by loading a theme
 (`fdk_theme_load` + `fdk_theme_set_default`) — v1 first:
 
 ```
-# v1.fdk — the Phase 6 v1 palette, exact (the pre-1.4.0 built-in)
+# v1.fdk — the Phase 6 v1 palette, exact (the pre-1.0.0 built-in)
 version = 1
 name    = "FDK Dark (v1)"
 
@@ -288,21 +288,21 @@ list_row_height      = 26
 focus_ring_width     = 1
 ```
 
-(Values are the 8-bit roundings of the v1 floats; the 1.4.0-only keys
+(Values are the 8-bit roundings of the v1 floats; the 1.0.0-only keys
 carry v1-calibrated analogues so the recipe stays complete — a v1
-strict reconstruction of the pre-1.4.0 pixels ignores them, since no
-pre-1.4.0 widget consumed them.)
+strict reconstruction of the pre-1.0.0 pixels ignores them, since no
+pre-1.0.0 widget consumed them.)
 
-## The 1.4.0 Modern look as a theme file (the 1.4.16 migration recipe)
+## The 1.0.0 Modern look as a theme file (the 1.0.0 migration recipe)
 
 Faded Dream replaced Modern's blue-grained grays with a true gray
 ramp and its sky-blue accent with violet. The Modern look survives
 the same way v1's does — as a recipe:
 
 ```
-# modern.fdk — the 1.4.0 "Modern" palette, exact (the pre-1.4.16
+# modern.fdk — the 1.0.0 "Modern" palette, exact (the pre-1.0.0
 # built-in; every value is the renderer's own rounding of the
-# Modern floats, extracted from the 1.4.15 tree byte-for-byte)
+# Modern floats, extracted from the 1.0.0 tree byte-for-byte)
 version = 1
 name    = "FDK Modern"
 
@@ -356,7 +356,7 @@ shipped by a major toolkit. Adding keys later is backward-compatible
 needs a key this FDK does not know should fail loudly, not render
 wrong); adding *sections* later bumps `version`.
 
-## Discovery and installation (1.4.13; folders grew in 1.4.16)
+## Discovery and installation (1.0.0; folders grew in 1.0.0)
 
 A theme file does not need to be loaded by path. The discovery layer
 (`fdk_theme_find`, the engine behind the `fdk-theme` CLI) resolves a
@@ -366,11 +366,11 @@ normative reference for that half is `docs/cli.md` and
 
 - A theme is installed by placing `<stem>.fdk` in a search directory
   (first match wins):
-  `$FDK_THEME_DIR`, `$HOME/.FDKThemes` (1.4.16: the custom per-user
+  `$FDK_THEME_DIR`, `$HOME/.FDKThemes` (1.0.0: the custom per-user
   folder — drop a file here and it beats every system location),
   `$XDG_DATA_HOME/fdk/.FDKThemes` (default
   `~/.local/share/fdk/.FDKThemes` — the canonical folder `make
-  install` fills), `$XDG_DATA_HOME/fdk/themes` (the 1.4.13
+  install` fills), `$XDG_DATA_HOME/fdk/themes` (the 1.0.0
   location, still scanned), then each `$XDG_DATA_DIRS` entry's
   `fdk/.FDKThemes` followed by its `fdk/themes` (default
   `/usr/local/share:/usr/share`). FDK's own shipped face —

@@ -262,7 +262,7 @@ static void combo_paint(fdk_widget *w, fdk_surface *surface,
         return;
     }
     /* The field (the Entry paints itself above it in editable mode —
-     * but the field chrome still frames it). 1.4.0: rounded corners
+     * but the field chrome still frames it). 1.0.0: rounded corners
      * at the entry radius (the combo is a field-shaped control; the
      * fill ladder is unchanged). */
     fdk_color fill = fdk__pal_control();

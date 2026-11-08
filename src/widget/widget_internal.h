@@ -29,8 +29,8 @@
 
 #include "fdk/fdk_layout.h"
 #include "fdk/fdk_widget.h"
-#include "fdk/fdk_text.h" /* 1.4.11: fdk_span (tooltip/label/button markup) */
-#include "fdk/fdk_theme.h" /* 1.4.16: background_token (token-following bg) */
+#include "fdk/fdk_text.h" /* 1.0.0: fdk_span (tooltip/label/button markup) */
+#include "fdk/fdk_theme.h" /* 1.0.0: background_token (token-following bg) */
 #include "fdk/fdk_animation.h" /* round 14: fdk__animation_set_self_damage */
 #include "fdk/fdk_dnd.h"  /* 1.0.0, S-9: drag_formats/drag_fn fields */
 
@@ -74,11 +74,11 @@
  * fdk_widget_set_background() on the root — an application's explicit
  * choice always wins and then survives theme switches. While the bit
  * is set, the root's theme hook re-reads the token on every
- * fdk_theme_set_default() switch (1.2.1: the stale-paint fix — see
+ * fdk_theme_set_default() switch (1.0.0: the stale-paint fix — see
  * fdk_window_get_root). */
 #define FDK_WF_ROOT_BG_DEFAULT 0x100u
 
-/* 1.4.16: the widget's background is TOKEN-FOLLOWING — set by
+/* 1.0.0: the widget's background is TOKEN-FOLLOWING — set by
  * fdk_widget_set_background_token(), cleared by an explicit
  * fdk_widget_set_background() (an application's fixed color always
  * wins). While set, the default paint hook resolves the stored
@@ -119,11 +119,11 @@ struct fdk_widget {
     void *user_data;
     char *name;                      /* owned copy, NULL when unset      */
 
-    /* Tooltip text (1.3.2): owned copy, NULL when unset; shown by
+    /* Tooltip text (1.0.0): owned copy, NULL when unset; shown by
      * the tooltip module (tooltip.c) when the pointer rests on this
      * widget. Freed by teardown like name.
      *
-     * 1.4.11 markup: tooltip_spans are the parsed attribute runs of
+     * 1.0.0 markup: tooltip_spans are the parsed attribute runs of
      * tooltipMarkup (fdk_widget_set_tooltip_markup); tooltip then
      * holds the PLAIN text, and the tooltip module wraps and paints
      * through the span-aware passes. set_tooltip clears both;
@@ -154,7 +154,7 @@ struct fdk_widget {
     bool drag_source_armed;
     fdk_f32 drag_source_x, drag_source_y;
     bool drag_source_fired;
-    /* 1.5.0: a press whose HIT TARGET vetoes disarms every source
+    /* 1.0.0: a press whose HIT TARGET vetoes disarms every source
      * for that press (the widget owns the gesture — e.g. a list's
      * rubber band; see fdk_widget_set_drag_veto). */
     bool drag_veto;
@@ -177,7 +177,7 @@ struct fdk_widget {
     size_t a11y_relation_cap;
 
     /* Base style (Phase 4 theme seed): background fill + corner
-     * radius used by the default paint hook. 1.4.16: when the
+     * radius used by the default paint hook. 1.0.0: when the
      * FDK_WF_BG_TOKEN flag is set, `background` is inert and
      * `background_token` resolves at paint time instead. */
     fdk_color background;            /* a == 0 -> no background          */
@@ -218,14 +218,14 @@ struct fdk_widget {
     * the child's size request (the classic request/allocate split). */
     fdk_i32 natural_w, natural_h;
 
-    /* ---- Paint group (1.4.3) ----------------------------------
+    /* ---- Paint group (1.0.0) ----------------------------------
      *
      * A per-widget subtree OPACITY: while paint_alpha < 1.0, the
      * paint walk renders this widget's whole subtree (its paint
      * hook + children, recursively) into the cached ARGB offscreen
      * `group_surface` (resized on demand, freed at teardown) and
      * composites it ONCE with a global-alpha source-over blit — the
-     * compositor-level alpha decision the 1.4.2 revealer entry
+     * compositor-level alpha decision the 1.0.0 revealer entry
      * deferred. The offscreen render runs at alpha 1.0 (the flag
      * lifts for the duration), so nested groups composite
      * naturally. 1.0 (the permanent default) is the plain walk —
@@ -350,7 +350,7 @@ void fdk__widget_set_theme_hook(fdk_widget *widget,
  * or -1 for "none". Measured by the public fdk_widget_get_baseline. */
 void fdk__widget_set_baseline(fdk_widget *widget, fdk_i32 y);
 
-/* Internal paint-group opacity (1.4.3): while alpha < 1.0 the paint
+/* Internal paint-group opacity (1.0.0): while alpha < 1.0 the paint
  * walk renders the widget's subtree into a cached offscreen and
  * composites once with a global-alpha blit (see struct fdk_widget's
  * paint_alpha field). Clamps to [0,1]; invalidates on every real

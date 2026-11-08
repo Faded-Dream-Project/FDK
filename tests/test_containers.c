@@ -1,4 +1,4 @@
-/* test_containers.c — headless tests for the 1.4.1 container pair
+/* test_containers.c — headless tests for the 1.0.0 container pair
  * (Paned, the two-pane splitter; Expander, the disclosure section).
  *
  * Same discipline as the catalog suites: standalone roots, offscreen
@@ -561,7 +561,7 @@ static void test_row_icons(void) {
            "NONE, 22-px width accounting, glyph ink, batch settle\n");
 }
 
-/* ---- Stack (1.4.2) ---- */
+/* ---- Stack (1.0.0) ---- */
 
 static int g_stack_changes;
 static size_t g_stack_last_index;
@@ -699,7 +699,7 @@ static void test_stack(void) {
            "pages without notifier recursion\n");
 }
 
-/* ---- Revealer (1.4.2) ---- */
+/* ---- Revealer (1.0.0) ---- */
 
 static int g_reveal_events;
 static bool g_reveal_last;
@@ -826,7 +826,7 @@ static void test_revealer(void) {
            "anchoring, NONE + duration-0 snaps, retargets from live\n");
 }
 
-/* ---- StackSwitcher (1.4.2) ---- */
+/* ---- StackSwitcher (1.0.0) ---- */
 
 static void test_stackswitcher(void) {
     fdk_widget *root = fresh_root();

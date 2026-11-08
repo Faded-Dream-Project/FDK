@@ -1,5 +1,5 @@
 /*
- * test_undo.c — the 1.3.3 generic undo stack battery
+ * test_undo.c — the 1.0.0 generic undo stack battery
  *
  * A mock "document" (an int and a log) drives the ops, so every
  * stack semantic is pinned against observable state:

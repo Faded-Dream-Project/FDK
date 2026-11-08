@@ -22,7 +22,7 @@
 #include <string.h>
 #include <time.h>
 
-/* ---- 1.3.3: the application shortcut table ----
+/* ---- 1.0.0: the application shortcut table ----
  *
  * One row per fdk_window_add_shortcut registration. The struct is
  * window.c-private (window_internal.h only carries the array
@@ -90,11 +90,11 @@ static bool window_shortcut_dispatch(fdk_window *window,
 
 static void window_arrange_deco(fdk_window *window);
 
-/* 1.2.1: re-reads the root's DEFAULT window background on a theme
+/* 1.0.0: re-reads the root's DEFAULT window background on a theme
  * switch (defined beside fdk_window_get_root, its only setter). */
 static void window_root_theme_changed(fdk_widget *root);
 
-/* Cursor shaping + hover revalidation (1.1.4) — defined above the
+/* Cursor shaping + hover revalidation (1.0.0) — defined above the
  * interactive-resize section, forward-declared here because
  * fdk_window_set_resizable and fdk_window_set_decorated (both earlier
  * in the file) also reset the cursor when the edge zones change. */
@@ -195,7 +195,7 @@ bool fdk__window_is_double_click(fdk_i64 now_ms, fdk_i64 last_ms,
  * (begin_resize) never needs the origin — the WM owns the geometry —
  * so this only gates the FDK fallback and the cursor affordance.
  * Shared by both so the cursor can never promise what a press
- * cannot deliver (the 1.1.7 top-edge report: cursor said resize,
+ * cannot deliver (the 1.0.0 top-edge report: cursor said resize,
  * press delivered a move). */
 static bool window_edge_needs_origin(fdk_window_resize_edge edge) {
     return edge == FDK_WRES_W || edge == FDK_WRES_NW ||
@@ -352,11 +352,11 @@ static bool deco_has_minimize(const fdk_window *window) {
 /* ---- Band painting (fill + rule + vector-glyph buttons) ---- */
 
 /* Button fill by interaction state: the TITLEBAR family's own
- * hover/pressed tokens (1.4.16) — which fall back to the control
+ * hover/pressed tokens (1.0.0) — which fall back to the control
  * family's when the theme did not opt into a distinct chrome, so
  * the band buttons theme-switch for free exactly as they always
  * did. Resting state paints the band fill itself (the buttons are
- * invisible until the pointer arrives — the pre-1.4.16 posture,
+ * invisible until the pointer arrives — the pre-1.0.0 posture,
  * kept deliberately). */
 static fdk_color deco_button_fill(const fdk_window *window, int which) {
     if (window->deco_pressed == which) {
@@ -422,9 +422,9 @@ static void deco_bar_paint(fdk_widget *w, fdk_surface *surface,
     if (bounds.width <= 0 || bounds.height <= 0) {
         return;
     }
-    /* The band's own surface: the TITLEBAR_BACKGROUND token (1.4.16)
+    /* The band's own surface: the TITLEBAR_BACKGROUND token (1.0.0)
      * — which falls back to control_background when the theme never
-     * opted into a distinct chrome, so every pre-1.4.16 theme keeps
+     * opted into a distinct chrome, so every pre-1.0.0 theme keeps
      * its exact band and a theme that WANTS a black band over white
      * content (Mono Chromatic) or a hot-pink one (Pink Rave) says so
      * in one key. */
@@ -434,7 +434,7 @@ static void deco_bar_paint(fdk_widget *w, fdk_surface *surface,
 
     /* Window-management buttons (bounds are root/window-local, which
      * is exactly where the hit rects live). The button shape follows
-     * the theme's button_shape story like every other button (1.4.16
+     * the theme's button_shape story like every other button (1.0.0
      * — a CIRCLE theme gets circular window buttons; the hit rects
      * stay rectangular, the same honesty as the catalog Button whose
      * hit box is its bounds). */
@@ -691,7 +691,7 @@ static bool deco_bar_event(fdk_widget *w, const fdk_widget_event *ev,
 /* Theme switches may change title_bar_height (a LAYOUT metric): re-
  * run the band arrangement + content layout. Called from the widget
  * root registry's theme-notify walk; the same walk damages the root
- * afterwards, so no explicit invalidate is needed. 1.4.16: the walk
+ * afterwards, so no explicit invalidate is needed. 1.0.0: the walk
  * also re-applies the title label's TITLEBAR_TEXT color — an
  * explicitly-set label color would otherwise survive the switch
  * frozen, and the title must follow the band's chrome like the
@@ -1543,7 +1543,7 @@ static void window_apply_resize(fdk_window *window, fdk_i32 x, fdk_i32 y) {
     }
 }
 
-/* ---- Cursor shaping + hover revalidation (1.1.4; the resolution
+/* ---- Cursor shaping + hover revalidation (1.0.0; the resolution
  * order + the named set 1.0.0-rc2) ----
  *
  * Two affordances a WM frame gives for free that FDK's chrome must
@@ -1594,7 +1594,7 @@ static void window_update_cursor(fdk_window *window, fdk_i32 x,
          * show a resize cursor for an edge this backend cannot drag.
          * With a compositor-driven begin_resize every edge works; a
          * backend with neither begin_resize nor window_get_position
-         * must not advertise its origin-moving edges (the 1.1.7 live
+         * must not advertise its origin-moving edges (the 1.0.0 live
          * report: Wayland showed top-edge resize cursors while the
          * press fell through to the band and MOVED the window). */
         if (edge != FDK_WRES_NONE &&
@@ -1652,7 +1652,7 @@ static void window_reset_cursor(fdk_window *window) {
 static void window_revalidate_pointer(fdk_window *window) {
     if (window->ops->window_query_pointer == NULL) {
         return; /* backend cannot answer; hover waits for the next
-                   real motion (the pre-1.1.4 behavior) */
+                   real motion (the pre-1.0.0 behavior) */
     }
     fdk_i32 x = 0;
     fdk_i32 y = 0;
@@ -1758,7 +1758,7 @@ static bool window_handle_resize_event(fdk_window *window,
      * the compositor-driven path needs NO origin knowledge at all:
      * xdg_toplevel.resize / _NET_WM_MOVERESIZE carry an edge and a
      * serial, and the WM owns every pixel of the geometry from
-     * there. 1.1.7 live report: this used to run AFTER the origin
+     * there. 1.0.0 live report: this used to run AFTER the origin
      * gate below, so on Wayland — whose ops table has no
      * window_get_position at all — every origin-moving edge (N, NE,
      * NW, W, SW) bailed out of the resize filter and the press fell
@@ -1813,7 +1813,7 @@ void fdk_window_set_event_callback(fdk_window *window,
     window->event_callback_user_data = user_data;
 }
 
-/* ---- 1.3.3: application shortcuts (public API) ---- */
+/* ---- 1.0.0: application shortcuts (public API) ---- */
 
 int fdk_window_add_shortcut(fdk_window *window, const char *spec,
                             fdk_shortcut_fn on_press, void *user_data) {
@@ -2032,7 +2032,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * application to handle FDK_EVENT_WINDOW_CONFIGURE itself just to
      * keep FDK's own bookkeeping in sync.
      *
-     * The 1.1.4 fallout flags (geo_changed / state_flipped /
+     * The 1.0.0 fallout flags (geo_changed / state_flipped /
      * first_expose) mark the events that change what SHOULD be under
      * the pointer or on the screen without generating any further
      * input events of their own; the dispatch tail below uses them
@@ -2190,7 +2190,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         return;
     }
 
-    /* ---- 1.3.3: keyboard accelerators, before the tree ----
+    /* ---- 1.0.0: keyboard accelerators, before the tree ----
      *
      * Application shortcuts (fdk_window_add_shortcut) and menu-bar
      * accelerators run BEFORE the widget tree sees a KEY_DOWN —
@@ -2241,7 +2241,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
                        event->key.codepoint != 0 &&
                        fdk__menu_bar_mnemonic_open(window->root,
                                                    &event->key)) {
-                /* 1.3.6 — Alt+letter opens the matching bar title
+                /* 1.0.0 — Alt+letter opens the matching bar title
                  * (the keyboard twin of clicking it). Runs after the
                  * accelerator scan: an explicit accelerator beats a
                  * same-key title mnemonic. The open may destroy the
@@ -2386,7 +2386,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
         }
     }
 
-    /* ---- 1.1.4→1.2.2: geometry-change fallout ----
+    /* ---- 1.0.0→1.0.0: geometry-change fallout ----
      *
      * Events that change what SHOULD be under the pointer or on the
      * screen (configure / state flip / first expose) mark the window
@@ -2394,7 +2394,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * inline here. The flush (fdk__window_flush_geo_repaints) runs
      * from the pump the moment this event batch is fully drained.
      *
-     * Same-batch rationale (found live, 1.2.2): an interactive resize
+     * Same-batch rationale (found live, 1.0.0): an interactive resize
      * queues one ConfigureNotify per drag step, each carrying an
      * Expose; repainting inline meant a FULL repaint + framebuffer
      * reallocation + pointer-query round trip PER QUEUED EVENT. The
@@ -2411,7 +2411,7 @@ void fdk_window_dispatch_event(fdk_window *window, const fdk_event_data *event) 
      * authoritative mid-batch. Only the expensive tail defers, and it
      * defers by microseconds: the pump flushes before it returns to
      * the application, so a lone configure still repaints within its
-     * own pump call — the 1.1.4 synchronous-repaint contract (close
+     * own pump call — the 1.0.0 synchronous-repaint contract (close
      * the resize-to-paint gap to sub-frame) is preserved, just once
      * per batch instead of once per queued event. */
     if (geo_changed || state_flipped || first_expose) {
@@ -2466,7 +2466,7 @@ fdk_result fdk_window_get_root(fdk_window *window, fdk_widget **out_root) {
             return r;
         }
         window->root->flags |= FDK_WF_WINDOW_ROOT;
-        /* 1.2.1 — the window-background DEFAULT.
+        /* 1.0.0 — the window-background DEFAULT.
          *
          * Before this, a window root painted NOTHING unless the
          * application set a background itself, and every stock text
@@ -2477,7 +2477,7 @@ fdk_result fdk_window_get_root(fdk_window *window, fdk_widget **out_root) {
          * buffer held" is the PREVIOUS FRAME — so changing a label's
          * text, re-listing a directory, or moving a list selection
          * drew the new glyphs straight over the old ones (the live
-         * 1.2.0 report: "the old text doesn't get removed", file
+         * 1.0.0 report: "the old text doesn't get removed", file
          * names stacking on file names, selection bands on selection
          * bands). Examples 03/04/08 had dodged this by setting their
          * own root background; 09/10 exposed the trap.
@@ -2509,7 +2509,7 @@ fdk_result fdk_window_get_root(fdk_window *window, fdk_widget **out_root) {
     return FDK_OK;
 }
 
-/* Theme hook for the root default background (1.2.1): re-reads the
+/* Theme hook for the root default background (1.0.0): re-reads the
  * window-background token on a default-theme switch unless the
  * application overrode it (FDK_WF_ROOT_BG_DEFAULT cleared by
  * fdk_widget_set_background). The invalidating walk that CALLS this
@@ -2616,7 +2616,7 @@ void fdk__window_flush_geo_repaints(fdk_context *ctx) {
     }
 
     /* One pass over the window list, one repaint per flagged window.
-     * The 1.1.4 fallout tail (hover revalidation + the synchronous
+     * The 1.0.0 fallout tail (hover revalidation + the synchronous
      * geometry repaint), lifted out of per-event dispatch and run at
      * batch end — see window_internal.h's flag comment for the resize
      * backlog this closes.
@@ -2664,7 +2664,7 @@ void fdk__window_flush_geo_repaints(fdk_context *ctx) {
     }
 }
 
-/* ---- the theme-settings bridge (1.4.14) --------------------------------
+/* ---- the theme-settings bridge (1.0.0) --------------------------------
  *
  * Core cannot reach into the theme module (layering runs the other
  * way); the window layer already includes both sides' internals, so

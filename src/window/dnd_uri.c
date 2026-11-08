@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "dnd"
 
 /*
- * dnd_uri.c — the text/uri-list codec (1.2.0)
+ * dnd_uri.c — the text/uri-list codec (1.0.0)
  *
  * One implementation of the file-drag wire format, shared by the X11
  * (XDND) and Wayland (wl_data_device) backends and unit-tested

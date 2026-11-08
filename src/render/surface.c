@@ -1153,7 +1153,7 @@ void fdk_surface_fill_rect(fdk_surface *surface, fdk_rect rect,
     if (!clip_and_damage(surface, rect, &x0, &y0, &x1, &y1)) {
         return;
     }
-    /* Opaque fast path (1.3.0): a fully-opaque fill replaces the
+    /* Opaque fast path (1.0.0): a fully-opaque fill replaces the
      * destination outright — one packed write per pixel, no float
      * blend math. This is THE hot path of the widget layer (every
      * control background, every track, every panel is an opaque
@@ -1482,7 +1482,7 @@ void fdk_surface_fill_rounded_rect(fdk_surface *surface, fdk_rect rect,
     fdk_i32 cyt = rect.y + r;
     fdk_i32 cyb = rect.y + rect.height - 1 - r;
 
-    /* Opaque fast path (1.3.0): with a fully-opaque color the blend
+    /* Opaque fast path (1.0.0): with a fully-opaque color the blend
      * is the identity — write the packed pixel directly (the same
      * optimization fill_rect got; buttons and every rounded control
      * background ride this path on every paint). */

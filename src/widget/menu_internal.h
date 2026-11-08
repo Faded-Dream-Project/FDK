@@ -85,7 +85,7 @@ bool fdk__menu_bar_popup_anchor(fdk_widget *bar, fdk_i32 *out_x,
                                 fdk_i32 *out_y);
 int fdk__menu_bar_hit(fdk_widget *bar, fdk_i32 x, fdk_i32 y);
 
-/* ---- menu accelerators (1.3.3; menu.c) ----
+/* ---- menu accelerators (1.0.0; menu.c) ----
  *
  * The window's KEY_DOWN dispatch calls fdk__menu_bar_accel_hit to
  * find the item whose shortcut label matches the live key, then
@@ -111,7 +111,7 @@ bool fdk__menu_bar_accel_hit(fdk_widget *root, const fdk_key_event *key,
  * them, but the guard is defense in depth). */
 void fdk__menu_item_accel_activate(fdk_menu_item *item);
 
-/* ---- mnemonics (1.3.6; menu.c) ----
+/* ---- mnemonics (1.0.0; menu.c) ----
  *
  * The window's KEY_DOWN dispatch calls this when it sees Alt+letter
  * (exactly Alt — no Ctrl/Super; those belong to accelerators) and no

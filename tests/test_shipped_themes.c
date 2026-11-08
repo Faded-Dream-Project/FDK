@@ -1,6 +1,6 @@
 /*
  * test_shipped_themes.c — the shipped face + the engine fixture
- * corpus (1.4.16; the 1.0.0 alignment, 2026-10-12)
+ * corpus (1.0.0; the 1.0.0 alignment, 2026-10-12)
  *
  * Two contracts in one suite:
  *
@@ -15,7 +15,7 @@
  * the discovery slot), never package content.
  *
  * THE ENGINE FIXTURE CORPUS: the nine faces FDK grew between
- * 1.4.13 and 1.4.17, kept in tests/data/faces/ as parser and
+ * 1.0.0 and 1.0.0, kept in tests/data/faces/ as parser and
  * read-through fixtures — never installed, never shipped. Each
  * is a real authored file exercising a different region of the
  * grammar and the read-through rules:
@@ -33,9 +33,9 @@
  *   catppuccin pair  the official v0.4.5 palettes, mocha + latte
  *   nordic-frost     Nord's official sixteen, nord8 cyan accent
  *   solar-flare      midnight navy under amber energy
- *   daylight         the complete light theme (1.4.13) — its own
+ *   daylight         the complete light theme (1.0.0) — its own
  *                    values stand alone
- *   matrix           the partial green-on-black theme (1.4.13) —
+ *   matrix           the partial green-on-black theme (1.0.0) —
  *                    still partial (seven colors, one metric)
  *
  * Plus the enumeration-level facts: $FDK_THEME_DIR pointed at
@@ -342,7 +342,7 @@ static void test_nordic_frost_and_solar_flare(void) {
 }
 
 static void test_daylight_and_matrix_unchanged(void) {
-    /* The 1.4.13 pair: the retune must not have drifted them.
+    /* The 1.0.0 pair: the retune must not have drifted them.
      * daylight is complete (its own values stand alone); matrix is
      * PARTIAL — its unpinned tokens inherit the Faded Dream
      * grays instead of Modern's blue-grays, which is the documented
@@ -368,7 +368,7 @@ static void test_daylight_and_matrix_unchanged(void) {
     assert_channel(fdk_theme_get_color(mx, FDK_TK_TITLEBAR_BACKGROUND),
                    12, 36, 18, "matrix band (fallback: its control)");
     fdk_theme_destroy(mx);
-    printf("[ok] fixtures daylight.fdk + matrix.fdk: the 1.4.13 pair "
+    printf("[ok] fixtures daylight.fdk + matrix.fdk: the 1.0.0 pair "
            "intact, matrix's band follows its own control fill\n");
 }
 

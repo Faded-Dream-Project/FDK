@@ -2,7 +2,7 @@
  *
  * pane_reload/pane_new_tab pass t->dir to pane_navigate, which does
  * snprintf(t->dir, sizeof t->dir, "%.400s", abs_path) — dst == src.
- * C11 7.21.6.5: overlapping snprintf is undefined behavior. This
+ * C11 1.0.0.0: overlapping snprintf is undefined behavior. This
  * repro shows what this glibc actually does (built with the same
  * sanitizer flags as the app).
  */

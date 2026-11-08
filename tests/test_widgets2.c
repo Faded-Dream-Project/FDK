@@ -156,7 +156,7 @@ static void test_slider(void) {
            "keyboard stepping, programmatic set\n");
 }
 
-/* ---- slider marks (1.4.2) ---- */
+/* ---- slider marks (1.0.0) ---- */
 
 static void test_slider_marks(void) {
     fdk_widget *root = fresh_root();
@@ -437,7 +437,7 @@ static void test_notebook(void) {
            "counts, pixel-verified pages\n");
 }
 
-/* ---- Notebook tab reordering (1.4.4) ---- */
+/* ---- Notebook tab reordering (1.0.0) ---- */
 
 static int g_reorders = 0;
 static size_t g_reorder_from = 0, g_reorder_to = 0;

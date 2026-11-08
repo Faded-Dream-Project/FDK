@@ -76,7 +76,7 @@ typedef struct term {
     /* the alt array's own row count: term_resize's primary path
      * regrids the main screen without touching alt, so ngrid and
      * rows both drift away from the alt allocation — freeing it by
-     * t->rows overflowed the heap (ASan, the 1.4.20 close report) */
+     * t->rows overflowed the heap (ASan, the 1.0.0 close report) */
     int nalt;              /* == rows                              */
 
     trow *alt;              /* the alternate grid                   */

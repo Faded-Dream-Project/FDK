@@ -1,5 +1,5 @@
 /*
- * test_textview.c — headless tests for the 1.4.8 TextView
+ * test_textview.c — headless tests for the 1.0.0 TextView
  *
  * The Entry-suite discipline applied to the second dimension:
  * standalone roots, synthetic tree events, offscreen paint

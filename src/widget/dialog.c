@@ -85,7 +85,7 @@ typedef struct fdk_dialog {
      * was ever visible) must not deliver a destroy-notify answer —
      * the caller already got the error result, and the v1
      * double-signal (error return AND on_response(NEGATIVE)) made
-     * both sides lie (1.3.0). */
+     * both sides lie (1.0.0). */
     bool surfaced;
 } fdk_dialog;
 
@@ -266,10 +266,10 @@ static void dialog_body_arrange(fdk_widget *w, fdk_rect assigned) {
         bw -= DLG_BTN_GAP;
     }
     /* Children are placed in the BODY's own (local) coordinates —
-     * 1.4.15's band made assigned.y nonzero for the first time and
+     * 1.0.0's band made assigned.y nonzero for the first time and
      * the old assigned.y + ... bases double-offset every child by
      * the band height (the content rode 28px too low; caught live
-     * by the color chooser's wheel pixels at 1.4.16). */
+     * by the color chooser's wheel pixels at 1.0.0). */
     fdk_i32 x = assigned.width - DLG_PAD - bw;
     if (x < DLG_PAD) {
         x = DLG_PAD;
@@ -516,7 +516,7 @@ fdk_result fdk_dialog_show_message(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        /* 1.4.15: the FDK title bar — the toolkit's dialogs wear the
+        /* 1.0.0: the FDK title bar — the toolkit's dialogs wear the
          * chrome its applications do; the window grows by the band so
          * the content keeps its designed size. */
         .height = height + fdk_theme_get_metric(NULL,
@@ -621,7 +621,7 @@ fail:
     return r;
 }
 
-/* ---- prompt dialogs (1.2.1) ---- */
+/* ---- prompt dialogs (1.0.0) ---- */
 
 /* Enter inside the prompt's Entry = the affirmative answer (the
  * stock Entry activation contract, wired to the dialog's response
@@ -735,7 +735,7 @@ fdk_result fdk_dialog_show_prompt(fdk_context *ctx,
     fdk_window_options wopts = {
         .title = title,
         .width = width,
-        /* 1.4.15: the FDK title bar (see the message-dialog site). */
+        /* 1.0.0: the FDK title bar (see the message-dialog site). */
         .height = height + fdk_theme_get_metric(NULL,
                                                 FDK_TM_TITLE_BAR_HEIGHT),
     };

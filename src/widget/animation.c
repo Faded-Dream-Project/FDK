@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * animation.c — the easing library + the animator engine (1.3.8)
+ * animation.c — the easing library + the animator engine (1.0.0)
  *
  * One process-wide list of active animations, one shared ~16 ms
  * repeating timer (created when the first animation starts, removed
@@ -368,7 +368,7 @@ void fdk__animation_pump(long long now_ms) {
      * through the grace would leave a 16 ms repeating timer firing
      * ~64 times after the last animation ends, and every fire wakes
      * the app's pump at the timer deadline — a 50 ms pump budget
-     * becomes ~16 ms of wall clock. Found live in 1.4.1: the hover
+     * becomes ~16 ms of wall clock. Found live in 1.0.0: the hover
      * fade (the first animation the Wayland suite ever ran) armed
      * the ticker, and the pacing test's "400 ms" of pumping shrank
      * to ~128 ms — not enough for the compositor's frame callbacks

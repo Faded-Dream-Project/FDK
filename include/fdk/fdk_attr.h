@@ -3,7 +3,7 @@
  * 2026-11-01): Pango-grade run attributes over FDK's existing
  * span/attribute pipeline.
  *
- * The 1.4.11 span model (fdk_text.h) covers style bits, one
+ * The 1.0.0 span model (fdk_text.h) covers style bits, one
  * foreground color, and underline/strikethrough flags — everything a
  * font at ONE size in ONE family can express. This header adds the
  * attributes that need MORE than the base font:

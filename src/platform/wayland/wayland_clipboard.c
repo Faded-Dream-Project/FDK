@@ -8,7 +8,7 @@
 /*
  * wayland_clipboard.c — wl_data_device clipboard (Phase 9); the
  * wp_primary_selection_unstable_v1 PRIMARY selection joined it in
- * 1.3.4 (the half Wayland clients traditionally lost — the classic
+ * 1.0.0 (the half Wayland clients traditionally lost — the classic
  * Unix "whatever is selected" buffer that middle-click pastes)
  *
  * Set: wl_data_source offered as "text/plain;charset=utf-8" (the
@@ -31,7 +31,7 @@
  * end, and a bounded poll() read collects the bytes without further
  * protocol traffic.
  *
- * PRIMARY (1.3.4) mirrors every shape above one protocol over — the
+ * PRIMARY (1.0.0) mirrors every shape above one protocol over — the
  * zwp_* twins of device/source/offer with the same MIME discipline,
  * the same pipe transfer, the same own-source fast path — with two
  * differences worth naming: the manager global is OPTIONAL (absent
@@ -73,7 +73,7 @@ static void offer_offer(void *data, struct wl_data_offer *offer,
         conn->pending_offer_has_text = 1;
     }
     if (strcmp(mime_type, "text/uri-list") == 0) {
-        /* 1.2.0: drag offers (and clipboard managers) may carry
+        /* 1.0.0: drag offers (and clipboard managers) may carry
          * files; the DnD enter path reads this flag. */
         conn->pending_offer_has_uris = 1;
     }
@@ -155,7 +155,7 @@ static void device_selection(void *data, struct wl_data_device *device,
     conn->selection_offer_has_image = has_image;
     conn->selection_offer_has_uris = has_uris;
 
-    /* 1.2.4: this event does NOT mean our own source was replaced.
+    /* 1.0.0: this event does NOT mean our own source was replaced.
      * wlroots 0.18 echoes the freshly-set selection back to the
      * keyboard-focused client — the setter itself — so destroying
      * our source here self-destructed EVERY set under sway/wlroots
@@ -171,7 +171,7 @@ static void device_selection(void *data, struct wl_data_device *device,
 }
 
 /* The DnD half of the device protocol — routed to wayland_dnd.c
- * (1.2.0), which owns acceptance (set_actions), the drag events,
+ * (1.0.0), which owns acceptance (set_actions), the drag events,
  * and the drop transfer. These thin forwarders exist so the device
  * listener stays assembled in this file next to the selection
  * handling it shares state with. */
@@ -217,7 +217,7 @@ static void source_send(void *data, struct wl_data_source *source,
     (void)source;
     fdk_platform_connection *conn = data;
     if (strcmp(mime_type, "image/png") == 0) {
-        /* 1.4.9: the image content. */
+        /* 1.0.0: the image content. */
         const unsigned char *png = conn->clip_owned_png;
         size_t len = conn->clip_owned_png_len;
         if (png == NULL) {
@@ -287,7 +287,7 @@ static void source_cancelled(void *data, struct wl_data_source *source) {
     fdk_platform_connection *conn = data;
     /* The compositor replaced our selection (or shut down). The
      * source is inert from here — destroy it and drop the text.
-     * 1.2.4: also drop the selection offer — if it wrapped OUR source
+     * 1.0.0: also drop the selection offer — if it wrapped OUR source
      * (wlroots echoes the freshly-set selection back to the focused
      * setter), it just died with the source; a later get_text must
      * not touch it. The next selection event stores the new owner's
@@ -332,10 +332,10 @@ static const struct wl_data_source_listener g_source_listener = {
     .action = source_action,
 };
 
-/* ---- PRIMARY selection (1.3.4, wp_primary_selection_unstable_v1) ----
+/* ---- PRIMARY selection (1.0.0, wp_primary_selection_unstable_v1) ----
  *
  * The zwp_* twins of the three listeners above, with the shapes
- * learned in 1.2.4 already baked in: ::selection NEVER destroys our
+ * learned in 1.0.0 already baked in: ::selection NEVER destroys our
  * source (wlroots echoes the freshly-set selection back to the
  * keyboard-focused setter — the exact trap that self-destructed
  * every clipboard set under sway until ::cancelled was recognized
@@ -479,7 +479,7 @@ void fdk_wayland_clipboard_device_ready(fdk_platform_connection *conn) {
              * conn->selection_offer. */
         }
     }
-    /* PRIMARY device (1.3.4): same convergence rule — manager
+    /* PRIMARY device (1.0.0): same convergence rule — manager
      * global + seat. Absent manager (compositor without the
      * protocol) leaves primary_device NULL and the primary ops
      * report UNSUPPORTED; that is a supported configuration, not
@@ -535,7 +535,7 @@ void fdk_wayland_clipboard_teardown(fdk_platform_connection *conn) {
         wl_data_device_manager_destroy(conn->data_device_manager);
         conn->data_device_manager = NULL;
     }
-    /* PRIMARY half (1.3.4): same teardown discipline — sources and
+    /* PRIMARY half (1.0.0): same teardown discipline — sources and
      * text first, then offers, then the device, then the manager. */
     if (conn->primary_source != NULL) {
         zwp_primary_selection_source_v1_destroy(conn->primary_source);
@@ -599,7 +599,7 @@ fdk_result fdk_wayland_clipboard_set_text(fdk_platform_connection *conn,
         wl_data_source_destroy(conn->clip_source);
     }
     conn->clip_source = source;
-    /* One content at a time: text replaces the image (1.4.9). */
+    /* One content at a time: text replaces the image (1.0.0). */
     fdk_free(conn->clip_owned_png);
     conn->clip_owned_png = NULL;
     conn->clip_owned_png_len = 0;
@@ -750,7 +750,7 @@ char *fdk_wayland_clipboard_get_text(fdk_platform_connection *conn) {
     return text;
 }
 
-/* ---- the two PRIMARY ops (1.3.4) ---- */
+/* ---- the two PRIMARY ops (1.0.0) ---- */
 
 fdk_result fdk_wayland_clipboard_set_primary_text(
     fdk_platform_connection *conn, const char *text) {
@@ -847,7 +847,7 @@ char *fdk_wayland_clipboard_get_primary_text(
 }
 
 
-/* ---- the two IMAGE ops (1.4.9) ---- */
+/* ---- the two IMAGE ops (1.0.0) ---- */
 
 fdk_result fdk_wayland_clipboard_set_image(fdk_platform_connection *conn,
                                            const unsigned char *png,

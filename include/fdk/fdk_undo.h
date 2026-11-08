@@ -1,5 +1,5 @@
 /*
- * fdk_undo.h — FDK's generic undo/redo stack (1.3.3)
+ * fdk_undo.h — FDK's generic undo/redo stack (1.0.0)
  *
  * One small, composable service every editable thing in an
  * application can share: the Entry widget ships an

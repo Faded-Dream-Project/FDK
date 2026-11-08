@@ -21,7 +21,7 @@ static void test_version(void) {
     /* The public version is PINNED to 1.0.0 by policy
      * (docs/versioning.md — the recorded 2026-10-25 decision: the
      * extension-API release candidate; the owner chose the minor
-     * bump over 1.0.1 because it adds public API, and no git tag
+     * bump over 1.0.0 because it adds public API, and no git tag
      * exists for the candidate). If these asserts fail, someone
      * bumped the version without a recorded project-owner decision —
      * read docs/versioning.md (including the 2026-10-11 retraction

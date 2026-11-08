@@ -129,7 +129,7 @@ static int flush_output(fdk_platform_connection *conn) {
     return 0;
 }
 
-/* Drains the dedicated wl_buffer release queue (1.1.6): every
+/* Drains the dedicated wl_buffer release queue (1.0.0): every
  * wl_buffer created by create_shm_buffer() has its proxy assigned to
  * conn->release_queue, so this dispatches ONLY wl_buffer::release
  * listeners — never input/configure/frame listeners — which is what
@@ -176,9 +176,9 @@ int fdk_wayland_release_queue_dispatch(fdk_platform_connection *conn) {
  * After every dispatch, the dedicated release queue is drained too:
  * buffer releases are the render path's fuel, and leaving them
  * queued behind the default queue would starve get_framebuffer()
- * even though the bytes arrived (1.1.6). */
+ * even though the bytes arrived (1.0.0). */
 int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
-    /* Dead connection (1.3.2): the circuit breaker — one fatal
+    /* Dead connection (1.0.0): the circuit breaker — one fatal
      * result per pump call, zero repeated logging, zero syscalls
      * against a socket the compositor stopped owning. fdk_run()
      * exits its loop on this; application-owned loops learn the
@@ -198,7 +198,7 @@ int fdk_wayland_dispatch_pending(fdk_platform_connection *conn) {
                                    errno);
         }
         (void)fdk_wayland_release_queue_dispatch(conn);
-        /* Key repeat (1.3.5) fires AFTER the real events: a queued
+        /* Key repeat (1.0.0) fires AFTER the real events: a queued
          * RELEASE of the held key must win over a synthetic repeat. */
         int repeats = fdk_wayland_key_repeat_fire(conn);
         return flush_output(conn) < 0 ? (int)FDK_ERR_NO_DISPLAY

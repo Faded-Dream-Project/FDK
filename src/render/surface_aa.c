@@ -20,7 +20,7 @@
  *
  * The crisp (_non-_aa) variants remain the primitive-level defaults:
  * exact integer geometry, zero float math in the hot path. Since
- * 1.4.17 the WIDGET layer paints its themed chrome through the _aa
+ * 1.0.0 the WIDGET layer paints its themed chrome through the _aa
  * variants (buttons, fields, pills, rings — the polish pass); the
  * crisp calls live on in the renderer's own contract, the examples'
  * crisp-vs-AA demo, and applications that want raw integer geometry.
@@ -128,7 +128,7 @@ void fdk_surface_draw_line_aa(fdk_surface *surface,
      * pixels). The bbox is just the enclosing box — width spans x,
      * height spans y, regardless of which axis is major (v1's steep
      * branch had the two transposed, under-covering the y extent of
-     * steep lines under partial redraw — found by the 1.3.0 audit). */
+     * steep lines under partial redraw — found by the 1.0.0 audit). */
     int dxall = (x1 - x0) < 0 ? -(x1 - x0) : (x1 - x0);
     int dyall = (y1 - y0) < 0 ? -(y1 - y0) : (y1 - y0);
     fdk_rect bbox;
@@ -285,7 +285,7 @@ void fdk_surface_fill_rounded_rect_aa(fdk_surface *surface, fdk_rect rect,
                              .width = x1 - x0, .height = y1 - y0 });
 }
 
-/* ---- antialiased rounded-rectangle OUTLINE (1.4.17) --------------------
+/* ---- antialiased rounded-rectangle OUTLINE (1.0.0) --------------------
  *
  * A 1-px stroke evaluated against the rounded rect INSET BY HALF A
  * PIXEL, so the stroke's boundary runs through the pixel centers of

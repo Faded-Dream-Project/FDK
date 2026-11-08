@@ -2,7 +2,7 @@
  * attr.c — the range-attribute layer over the span engine (§23/B2c,
  * 2026-11-01; include/fdk/fdk_attr.h).
  *
- * The 1.4.11 span engine (span.c) gave rich text ONE axis: the
+ * The 1.0.0 span engine (span.c) gave rich text ONE axis: the
  * base font, restyled per run. This file adds the attributes that
  * need a DIFFERENT rasterization or extra paint geometry:
  *

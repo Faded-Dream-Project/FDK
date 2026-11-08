@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "dnd"
 
 /*
- * dnd.c — drag and drop frontend (1.2.0)
+ * dnd.c — drag and drop frontend (1.0.0)
  *
  * Thin validation + plumbing layer behind include/fdk/fdk_dnd.h, the
  * same shape as core/clipboard.c: check the context/window, hand the

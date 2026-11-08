@@ -404,7 +404,7 @@ fdk_result fdk_font_ellipsize_utf8(const fdk_font *font,
  * fdk_font_load() — see fdk_window_set_decoration_font(). */
 fdk_font *fdk_font_load_system_default(fdk_i32 pixel_size);
 
-/* ---- The terminal-default face (1.4.4) ----
+/* ---- The terminal-default face (1.0.0) ----
  *
  * Terminal-shaped font resolution as core policy: the caller passes
  * its preferred monospace families in priority order; the stack
@@ -419,7 +419,7 @@ fdk_font *fdk_font_load_terminal_default(
     fdk_i32 pixel_size, const char *const *preferred,
     size_t n_preferred);
 
-/* ---- Face loading with a collection index (1.4.3) ----
+/* ---- Face loading with a collection index (1.0.0) ----
  *
  * fdk_font_load's twin for TrueType COLLECTIONS (.ttc): loads face
  * `face_index` (0-based) from the file. face_index 0 on a plain
@@ -429,7 +429,7 @@ fdk_font *fdk_font_load_terminal_default(
 fdk_font *fdk_font_load_face(const char *path, fdk_i32 face_index,
                              fdk_i32 pixel_size);
 
-/* ---- Rich text: attribute spans (1.4.11) ---------------------------
+/* ---- Rich text: attribute spans (1.0.0) ---------------------------
  *
  * A SPAN layers presentation attributes over a byte range of plain
  * UTF-8 text: synthetic style flags, an optional color override, and
@@ -515,7 +515,7 @@ fdk_result fdk_font_ellipsize_spans_utf8(
     const fdk_span *spans, size_t span_count, fdk_i32 max_width,
     size_t *out_prefix_bytes, bool *out_fits);
 
-/* ---- Markup: the tiny tag scanner (1.4.11) -------------------------
+/* ---- Markup: the tiny tag scanner (1.0.0) -------------------------
  *
  * fdk_markup_parse() turns a markup STRING into the plain text +
  * fdk_span list the entry points above take — what
@@ -557,7 +557,7 @@ fdk_result fdk_markup_parse(const char *markup, char **out_plain,
  * the plain string). */
 void fdk_markup_free(char *plain, fdk_span *spans);
 
-/* ---- System font enumeration (1.4.3) ----
+/* ---- System font enumeration (1.0.0) ----
  *
  * The font-scan surface exposed: every LOADABLE face under the
  * discovery chain's user-prioritized and standard roots

@@ -1,6 +1,6 @@
 /*
  * fdk-set.c — the per-application settings face of the FDK command
- * line (1.4.14)
+ * line (1.0.0)
  *
  *     fdk-set theme set "faded-dream"         the global default
  *                               (the one shipped face; further faces
@@ -18,7 +18,7 @@
  *     fdk-set theme reset [--app APP]            forget the override
  *     fdk-set theme list [--paths]               what is installed
  *
- * Why this tool exists: the 1.4.13 CLI made the DESKTOP rethemable
+ * Why this tool exists: the 1.0.0 CLI made the DESKTOP rethemable
  * from the shell (fdk-theme set — every FDK app, launch or live);
  * this is the other half real desktops grow — per-application
  * preferences for the app whose brand wants one theme while the

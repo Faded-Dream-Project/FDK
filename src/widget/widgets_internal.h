@@ -18,9 +18,9 @@
 #include "fdk/fdk_a11y.h"
 #include "fdk/fdk_widgets.h"
 #include "fdk/fdk_model.h" /* §28/G-9: the listener-list decls    */
-#include "fdk/fdk_dialog.h" /* 1.4.4: the colorbutton test seam    */
-#include "fdk/fdk_animation.h" /* 1.4.1: the Expander's reveal anim */
-#include "fdk/fdk_core.h"      /* 1.4.1: fdk_timer (the Spinner)    */
+#include "fdk/fdk_dialog.h" /* 1.0.0: the colorbutton test seam    */
+#include "fdk/fdk_animation.h" /* 1.0.0: the Expander's reveal anim */
+#include "fdk/fdk_core.h"      /* 1.0.0: fdk_timer (the Spinner)    */
 
 #include "widget_internal.h"
 #include "../layout/layout_internal.h"
@@ -39,25 +39,25 @@ extern const fdk_widget_class fdk_separator_class_def;
 extern const fdk_widget_class fdk_frame_class_def;
 extern const fdk_widget_class fdk_scrollview_class_def;
 extern const fdk_widget_class fdk_toolbar_class_def;
-extern const fdk_widget_class fdk_spinner_class_def;   /* 1.4.1 */
-extern const fdk_widget_class fdk_paned_class_def;     /* 1.4.1 */
-extern const fdk_widget_class fdk_expander_class_def;  /* 1.4.1 */
-extern const fdk_widget_class fdk_statusbar_class_def; /* 1.4.2 */
-extern const fdk_widget_class fdk_levelbar_class_def; /* 1.4.2 */
-extern const fdk_widget_class fdk_revealer_class_def; /* 1.4.2 */
-extern const fdk_widget_class fdk_stack_class_def;     /* 1.4.2 */
-extern const fdk_widget_class fdk_stackswitcher_class_def; /* 1.4.2 */
+extern const fdk_widget_class fdk_spinner_class_def;   /* 1.0.0 */
+extern const fdk_widget_class fdk_paned_class_def;     /* 1.0.0 */
+extern const fdk_widget_class fdk_expander_class_def;  /* 1.0.0 */
+extern const fdk_widget_class fdk_statusbar_class_def; /* 1.0.0 */
+extern const fdk_widget_class fdk_levelbar_class_def; /* 1.0.0 */
+extern const fdk_widget_class fdk_revealer_class_def; /* 1.0.0 */
+extern const fdk_widget_class fdk_stack_class_def;     /* 1.0.0 */
+extern const fdk_widget_class fdk_stackswitcher_class_def; /* 1.0.0 */
 
 /* toolbar.c: relayout hook for the layout notifier (box.c). */
 void fdk__toolbar_layout_changed(fdk_widget *w);
 
-/* paned.c / expander.c: the same relayout hooks for the 1.4.1
+/* paned.c / expander.c: the same relayout hooks for the 1.0.0
  * containers — the notifier (box.c) calls them when a child is
  * added to (or re-measured inside) one of these. */
 void fdk__paned_layout_changed(fdk_widget *w);
 void fdk__expander_layout_changed(fdk_widget *w);
 
-/* revealer.c / stack.c (1.4.2): the same relayout hooks for the
+/* revealer.c / stack.c (1.0.0): the same relayout hooks for the
  * reveal container and the page stack. */
 void fdk__revealer_layout_changed(fdk_widget *w);
 void fdk__stack_layout_changed(fdk_widget *w);
@@ -72,7 +72,7 @@ void fdk__scrollview_layout_changed(fdk_widget *w);
 void fdk__scrollview_viewport(fdk_widget *w, fdk_i32 *out_w,
                               fdk_i32 *out_h);
 
-/* scroll.c (1.5.1, list columns' anchor math): the HORIZONTAL
+/* scroll.c (1.0.0, list columns' anchor math): the HORIZONTAL
  * viewport width — bounds minus the v-bar's reserved strip under
  * CLASSIC bars, full width under OVERLAY ones. */
 fdk_i32 fdk__scrollview_viewport_width(fdk_widget *w);
@@ -89,7 +89,7 @@ fdk_i32 fdk__scrollview_viewport_width(fdk_widget *w);
  * setup. */
 void fdk__scrollview_veto_input(fdk_widget *scrollview);
 
-/* list.c TEST SEAM (1.5.1): the resolved column geometry —
+/* list.c TEST SEAM (1.0.0): the resolved column geometry —
  * col_x[c], column c's width (col 0 = the expanded name column),
  * and the list's content_width. Tests only. */
 void fdk__list_test_column_x(fdk_widget *list, size_t col,
@@ -170,7 +170,7 @@ fdk_color fdk__pal_control_disabled(void);
 fdk_color fdk__pal_accent(void);
 fdk_color fdk__pal_track(void);
 fdk_color fdk__pal_border(void);
-/* 1.4.0 modern-face family (statics.c, same paint-time resolution). */
+/* 1.0.0 modern-face family (statics.c, same paint-time resolution). */
 fdk_color fdk__pal_selection(void);
 fdk_color fdk__pal_focus_ring(void);
 fdk_color fdk__pal_sidebar(void);
@@ -184,7 +184,7 @@ fdk_color fdk__pal_entry_border(void);
 fdk_color fdk__pal_row_hover(void);
 fdk_color fdk__pal_selection_text(void);
 
-/* ---- 1.4.16: the themed button SHAPE (controls.c) ------------------
+/* ---- 1.0.0: the themed button SHAPE (controls.c) ------------------
  *
  * The FDK_TM_BUTTON_SHAPE metric's effective corner radius for a
  * button-shaped box of (w, h): CIRCLE clips to min(w,h)/2 (a true
@@ -195,16 +195,16 @@ fdk_color fdk__pal_selection_text(void);
  * size request changes anywhere. */
 fdk_i32 fdk__button_shape_radius(fdk_i32 w, fdk_i32 h);
 
-/* ---- 1.4.1: the shared symbolic row glyphs (statics.c) ----------
+/* ---- 1.0.0: the shared symbolic row glyphs (statics.c) ----------
  *
- * Font-independent vector strokes shared by the List (1.4.1) and
- * the Tree (1.4.2): a 16-px glyph box, 6-px gap to the text. */
+ * Font-independent vector strokes shared by the List (1.0.0) and
+ * the Tree (1.0.0): a 16-px glyph box, 6-px gap to the text. */
 
 /* The glyph box + gap a row must reserve for `icon` (0 for NONE). */
 fdk_i32 fdk__row_icon_advance(fdk_row_icon icon);
 
 /* Paints the glyph with its box's top-left at (x, cy) — the SAME
- * (x, cy) convention as the list's 1.4.1 call sites. */
+ * (x, cy) convention as the list's 1.0.0 call sites. */
 void fdk__row_icon_paint(fdk_surface *surface, fdk_row_icon icon,
                          fdk_i32 x, fdk_i32 cy, bool disabled);
 
@@ -278,7 +278,7 @@ typedef struct fdk_label {
     fdk_color color;   /* text color                          */
     bool color_set;    /* false: resolve the theme's text color
                        * at paint time (the default) — the getter
-                       * reports the SAME resolution (1.3.0)      */
+                       * reports the SAME resolution (1.0.0)      */
     fdk_label_mode mode;    /* NOWRAP / WRAP / ELLIPSIZE        */
     fdk_align align;        /* horizontal, FILL treated as START */
     fdk_text_line *lines;   /* owned cache, may be NULL           */
@@ -290,7 +290,7 @@ typedef struct fdk_label {
     fdk_i32 ellipsis_x;     /* ELLIPSIZE mode: prefix advance (pen) */
     fdk_i32 ellipsis_w;     /* ELLIPSIZE mode: the "..." run's advance */
     bool ellipsized;        /* ELLIPSIZE mode: text did not fit   */
-    /* 1.4.11 markup: the parsed attribute spans (owned; NULL for a
+    /* 1.0.0 markup: the parsed attribute spans (owned; NULL for a
      * plain set_text label) and the flattened-run cache the paint
      * path builds alongside the line cache (rebuilt on the same
      * dirty/width triggers, freed with the label). The run type is
@@ -303,7 +303,7 @@ typedef struct fdk_label {
     size_t run_count;
 } fdk_label;
 
-/* The shared hover-fade state (1.4.1): the visual blend a control
+/* The shared hover-fade state (1.0.0): the visual blend a control
  * paints with while the pointer's enter/leave transition animates
  * (the SEMANTIC hover flag flips immediately; only the paint
  * blends — press feedback stays instant by design). One flight
@@ -318,11 +318,11 @@ typedef struct fdk_hover_fade {
 } fdk_hover_fade;
 
 /* statics.c: arms (or retargets) a shared hover fade toward 1
- * (entering) / 0 (leaving) — the 1.4.1 Button/check machinery,
+ * (entering) / 0 (leaving) — the 1.0.0 Button/check machinery,
  * shared by the StackSwitcher's pills and the menu rows since
- * 1.4.2. Cancels the running flight first (retarget-from-live).
+ * 1.0.0. Cancels the running flight first (retarget-from-live).
  * The flight's done callback clears f->anim on completion AND on
- * cancel (1.4.17), so the stored handle is non-NULL only while the
+ * cancel (1.0.0), so the stored handle is non-NULL only while the
  * flight is RUNNING — safe against the animation engine's zombie
  * reaping. */
 void fdk__hover_fade_arm(fdk_widget *w, fdk_hover_fade *f,
@@ -337,10 +337,10 @@ typedef struct fdk_button {
     void *on_activate_data;
     bool pressed;      /* pointer down inside */
     bool hovering;
-    fdk_button_role role; /* 1.4.0 paint role (default NORMAL) */
-    bool checked;      /* 1.4.0 toggle-button state */
-    fdk_hover_fade fade; /* 1.4.1: hover paint blend */
-    /* 1.4.11 markup: parsed attribute spans (owned; NULL when the
+    fdk_button_role role; /* 1.0.0 paint role (default NORMAL) */
+    bool checked;      /* 1.0.0 toggle-button state */
+    fdk_hover_fade fade; /* 1.0.0: hover paint blend */
+    /* 1.0.0 markup: parsed attribute spans (owned; NULL when the
      * text was set with fdk_button_set_text). Buttons are single-
      * line: measure/paint flatten per call (no cache to keep
      * coherent with anything). */
@@ -357,7 +357,7 @@ typedef struct fdk_check_widget {
     bool checked;
     bool pressed;      /* visual state only */
     bool hovering;
-    fdk_hover_fade fade; /* 1.4.1: hover paint blend */
+    fdk_hover_fade fade; /* 1.0.0: hover paint blend */
     void (*on_change)(fdk_widget *w, bool checked, void *user);
     void *on_change_data;
 } fdk_check_widget;
@@ -366,7 +366,7 @@ typedef struct fdk_check_widget {
 typedef struct fdk_progress {
     fdk_widget base;
     fdk_f32 fraction; /* [0,1], determinate mode only */
-    /* Indeterminate mode (1.3.1): an animated block sweeping the
+    /* Indeterminate mode (1.0.0): an animated block sweeping the
      * track, driven by the timer queue ("busy" — work is happening
      * with no known fraction). NULL timer when detached from any
      * window: the block parks at phase 0 (headless tests see a
@@ -391,7 +391,7 @@ typedef struct fdk_frame {
     char *title;       /* owned, may be NULL */
 } fdk_frame;
 
-/* Spinner (1.4.1, spinner.c): the busy indicator. Phase in RADIANS
+/* Spinner (1.0.0, spinner.c): the busy indicator. Phase in RADIANS
  * [0, 2*pi), advanced by the repeating tick while spinning; the arc
  * parks at the last phase when stopped (GTK semantics — restart
  * continues, it does not reset). NULL timer when not spinning or
@@ -404,7 +404,7 @@ typedef struct fdk_spinner {
     fdk_f32 phase;        /* radians, the arc head's angle */
 } fdk_spinner;
 
-/* Paned (1.4.1, paned.c): the two-pane splitter. `position` is the
+/* Paned (1.0.0, paned.c): the two-pane splitter. `position` is the
  * divider's offset from the pane-1 edge in paned-local px;
  * `position_set` false = auto split (natural sizes, leftover even).
  * `dragging` rides the implicit grab from a press inside the divider
@@ -420,7 +420,7 @@ typedef struct fdk_paned {
     bool div_hovering;   /* divider band under the pointer          */
 } fdk_paned;
 
-/* Expander (1.4.1, expander.c): the disclosure section. Header =
+/* Expander (1.0.0, expander.c): the disclosure section. Header =
  * triangle + label; the ONE child is the content. `reveal` is the
  * animated 0..1 blend of the content's extent (0 = collapsed); the
  * child is FDK_WF_VISIBLE-off while fully collapsed so it is
@@ -441,7 +441,7 @@ typedef struct fdk_expander {
     void *on_changed_data;
 } fdk_expander;
 
-/* Statusbar (1.4.2, statusbar.c): the context-scoped message bar.
+/* Statusbar (1.0.0, statusbar.c): the context-scoped message bar.
  * `msgs` is the global message stack in GTK order — the TOP of the
  * stack is what paints, pop(context) removes the topmost message OF
  * THAT context, remove(context, id) removes one by handle. Each
@@ -462,7 +462,7 @@ typedef struct fdk_statusbar {
     fdk_u32 next_id;
 } fdk_statusbar;
 
-/* LevelBar (1.4.2, levelbar.c): the segmented value readout. */
+/* LevelBar (1.0.0, levelbar.c): the segmented value readout. */
 typedef struct fdk_levelbar {
     fdk_widget base;
     double min;
@@ -472,7 +472,7 @@ typedef struct fdk_levelbar {
     size_t segments;          /* DISCRETE mode's block count */
 } fdk_levelbar;
 
-/* Revealer (1.4.2, revealer.c): the expander's flight generalized
+/* Revealer (1.0.0, revealer.c): the expander's flight generalized
  * to any child. `reveal` is the animated 0..1 blend of the child's
  * extent along the transition axis; the child is FDK_WF_VISIBLE-off
  * at exactly 0. `anim` is the running flight (NULL when idle);
@@ -489,7 +489,7 @@ typedef struct fdk_revealer {
     void *on_revealed_data;
 } fdk_revealer;
 
-/* Stack (1.4.2, stack.c): named pages, exactly one visible. Pages
+/* Stack (1.0.0, stack.c): named pages, exactly one visible. Pages
  * are reparented in (the notebook's adoption model); `current` is
  * the shown page index. */
 typedef struct fdk_stack_page {
@@ -509,13 +509,13 @@ typedef struct fdk_stack {
     void *on_changed_data;
 } fdk_stack;
 
-/* StackSwitcher (1.4.2, stackswitcher.c): the pill row bound to a
+/* StackSwitcher (1.0.0, stackswitcher.c): the pill row bound to a
  * stack. `stack_watch` is a persistent reentrancy watch on the
  * bound stack: paint/arrange re-check it, so a stack destroyed by
  * another hand cleanly unbinds (the switcher paints its empty row,
  * it never dereferences a dangling pointer). `hover_pill` rides
  * MOTION like the notebook's hover_tab; pill blends fade on the
- * 1.4.1 hover-fade machinery. */
+ * 1.0.0 hover-fade machinery. */
 typedef struct fdk_stackswitcher {
     fdk_widget base;
     fdk_font *font;         /* borrowed */
@@ -573,12 +573,12 @@ static inline fdk_stackswitcher *switcher_of(fdk_widget *w) {
     return (fdk_stackswitcher *)w;
 }
 
-/* ---- File dialog scan seam (1.2.0, file_dialog.c) ----
+/* ---- File dialog scan seam (1.0.0, file_dialog.c) ----
  *
  * The directory scan/sort is pure logic the headless suite pins
  * (tests/test_file_dialog_logic.c) without a display: hidden-file
  * filtering, dirs-only filtering, dirs-first ordering, the entry
- * cap, and the ownership contract of the entries array. The 1.2.3
+ * cap, and the ownership contract of the entries array. The 1.0.0
  * additions (glob matching, filesystem discovery, path helpers)
  * live under the same seam for the same reason. */
 typedef struct fdk_fd_entry {
@@ -613,7 +613,7 @@ int fdk__file_dialog_scan(const char *dir, bool dirs_only,
                           fdk_fd_entries *out);
 void fdk__file_dialog_entries_free(fdk_fd_entries *entries);
 
-/* ---- Filesystem discovery seam (1.2.3, file_dialog.c) ----
+/* ---- Filesystem discovery seam (1.0.0, file_dialog.c) ----
  *
  * The places sidebar's data source: pure POSIX (getenv + stat +
  * /proc/self/mounts + one-level scans of /media and /mnt) — no udev,
@@ -646,7 +646,7 @@ int fdk__save_name_validate(const char *name);
  * `path` when no expansion applies (NULL on OOM). */
 char *fdk__path_expand_tilde(const char *path);
 
-/* ---- Recents seam (1.4.4, file_dialog.c) ---------------------------
+/* ---- Recents seam (1.0.0, file_dialog.c) ---------------------------
  *
  * The XDG recently-used.xbel surface as pure logic the headless
  * suite pins (tests/test_file_dialog_logic.c): a text-level XBEL
@@ -678,7 +678,7 @@ void fdk__recent_free(fdk_fd_recent *v, size_t count);
  * rename). 0 on success, -1 on failure (nothing written). */
 int fdk__recent_touch(const char *xbel, const char *path);
 
-/* ColorButton test seam (choosers.c, 1.4.4): drives the acceptance
+/* ColorButton test seam (choosers.c, 1.0.0): drives the acceptance
  * path exactly as the chooser dialog's done callback would — the
  * token hop between the dialog and a possibly-destroyed button is
  * the only difference, and the X11 GUI group covers that half. */

@@ -1,4 +1,4 @@
-/* test_prefs.c — headless preferences-store tests (1.3.7).
+/* test_prefs.c — headless preferences-store tests (1.0.0).
  *
  * Everything runs against temp-directory files and the
  * FDK_PREFS_FILE override: no display, no window, deterministic.

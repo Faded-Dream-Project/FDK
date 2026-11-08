@@ -2,7 +2,7 @@
 
 /*
  * x11_clipboard.c — ICCCM CLIPBOARD + PRIMARY selections (Phase 9;
- * 1.3.4 adds PRIMARY)
+ * 1.0.0 adds PRIMARY)
  *
  * The design follows the ICCCM selection model exactly, and the SAME
  * machinery serves BOTH selections through a tiny descriptor —
@@ -41,11 +41,11 @@
  * (we serve UTF8_STRING/TEXT/STRING, which every modern client
  * accepts).
  *
- * 1.4.9 adds the IMAGE surface: image/png as a served/read target.
+ * 1.0.0 adds the IMAGE surface: image/png as a served/read target.
  * One clipboard content at a time: owning an image clears the owned
  * text and vice versa.
  *
- * 1.4.12 adds INCR (incremental) transfers, BOTH directions: the
+ * 1.0.0 adds INCR (incremental) transfers, BOTH directions: the
  * ICCCM's chunked protocol for payloads beyond the atomic cap
  * (4 MiB). SERVING is event-driven — the requestor's deletes of the
  * property (PropertyNotify on ITS window, which we select) trigger
@@ -77,12 +77,12 @@
 #define FDK_CLIP_WAIT_MS 250
 /* The atomic property cap: payloads at or under this size serve (and
  * read) in ONE property write/read, exactly as every FDK clipboard
- * transfer did before 1.4.12. Comfortably inside every real server's
+ * transfer did before 1.0.0. Comfortably inside every real server's
  * max-request size while covering ordinary screenshots and UI
  * renders. */
 #define FDK_CLIP_ATOMIC_MAX_BYTES (4u * 1024u * 1024u)
 
-/* ---- INCR (incremental) transfer parameters (1.4.12) -------------
+/* ---- INCR (incremental) transfer parameters (1.0.0) -------------
  *
  * Payloads beyond the atomic cap stream in chunks, per the ICCCM's
  * incremental-transfer protocol: the owner seeds the requestor's
@@ -146,7 +146,7 @@ fdk_result fdk_x11_clipboard_init(fdk_platform_connection *conn) {
         FDK_WARN("clipboard: could not create helper window");
         return FDK_ERR_PLATFORM;
     }
-    /* 1.4.12: the helper watches its own properties — the read side
+    /* 1.0.0: the helper watches its own properties — the read side
      * of INCR pumps PropertyNotify (NewValue) on atom_fdk_selection.
      * Event masks are per-client per-window, so this cannot disturb
      * anyone else's selections on the helper (XDND replies are
@@ -264,7 +264,7 @@ static fdk_result selection_set_text(fdk_platform_connection *conn,
 
 fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
                                       const char *text) {
-    /* One content at a time (1.4.9): text replaces the clipboard's
+    /* One content at a time (1.0.0): text replaces the clipboard's
      * image. (PRIMARY's set does NOT touch the clipboard image —
      * different selection, different content.) */
     fdk_free(conn->clip_owned_png);
@@ -292,7 +292,7 @@ static void serve_targets(fdk_platform_connection *conn, Window requestor,
     targets[n++] = conn->atom_text;
     targets[n++] = XA_STRING;
     if (conn->clip_owned_png != NULL) {
-        targets[n++] = conn->atom_image_png; /* 1.4.9 */
+        targets[n++] = conn->atom_image_png; /* 1.0.0 */
     }
     XChangeProperty(conn->display, requestor, property, XA_ATOM, 32,
                     PropModeReplace, (const unsigned char *)targets, n);
@@ -339,7 +339,7 @@ static char *latin1_from_utf8(const char *utf8, size_t *out_len) {
     return out;
 }
 
-/* ---- INCR serving (1.4.12): we own a payload beyond the atomic cap --
+/* ---- INCR serving (1.0.0): we own a payload beyond the atomic cap --
  *
  * The ICCCM incremental dance, owner side: seed the requestor's
  * property with type INCR and a 32-bit byte estimate; watch the
@@ -348,7 +348,7 @@ static char *latin1_from_utf8(const char *utf8, size_t *out_len) {
  * of the property answers with the next chunk; a zero-length chunk
  * ends the flight. All chunk writes are event-driven from dispatch —
  * the serve side never blocks. A dead requestor surfaces as a
- * tolerated protocol error (the connection's 1.4.12 error handler)
+ * tolerated protocol error (the connection's 1.0.0 error handler)
  * and the flight simply stalls until the next content change
  * supersedes it. */
 
@@ -459,7 +459,7 @@ static void serve_text(fdk_platform_connection *conn, sel_desc sel,
     if (target == conn->utf8_string || target == conn->atom_text_plain) {
         size_t len = strlen(owned);
         if (len > FDK_CLIP_ATOMIC_MAX_BYTES) {
-            /* 1.4.12: beyond the atomic cap, stream incrementally. */
+            /* 1.0.0: beyond the atomic cap, stream incrementally. */
             incr_serve_begin(conn, requestor, property, target,
                              (const unsigned char *)owned, len);
             return;
@@ -496,7 +496,7 @@ static void serve_text(fdk_platform_connection *conn, sel_desc sel,
 
 int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
                                    const XEvent *xevent) {
-    /* INCR chunk pump FIRST (1.4.12): PropertyNotify arrives on the
+    /* INCR chunk pump FIRST (1.0.0): PropertyNotify arrives on the
      * REQUESTOR's (foreign) window for an in-flight serve, and on
      * the helper for read-side traffic — both BEFORE the helper
      * guard, which would otherwise discard foreign-window events. */
@@ -555,7 +555,7 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
         } else if (req->target == conn->atom_image_png &&
                    req->selection == conn->atom_clipboard &&
                    conn->clip_owned_png != NULL) {
-            /* 1.4.9: the image target. 1.4.12: beyond the atomic cap,
+            /* 1.0.0: the image target. 1.0.0: beyond the atomic cap,
              * stream incrementally. */
             if (conn->clip_owned_png_len > FDK_CLIP_ATOMIC_MAX_BYTES) {
                 incr_serve_begin(conn, req->requestor, property,
@@ -673,7 +673,7 @@ static uint64_t now_ms(void) {
 }
 
 /* Waits up to FDK_CLIP_WAIT_MS for the SelectionNotify answering a
- * convert of `selection` by `requestor` (1.4.14: parameterized — the
+ * convert of `selection` by `requestor` (1.0.0: parameterized — the
  * clipboard's helper window and a DnD drop target share this). 
  * Non-matching events are left in Xlib's queue untouched
  * (XCheckTypedWindowEvent removes only the match), so no event is
@@ -697,7 +697,7 @@ static int wait_selection_notify_on(fdk_platform_connection *conn,
                 return 1;
             }
             /* Notification for the OTHER selection (we now convert
-             * both): keep waiting on the remaining budget — 1.3.4
+             * both): keep waiting on the remaining budget — 1.0.0
              * closed the "can't happen today" gap this comment used
              * to guard. */
             continue;
@@ -788,7 +788,7 @@ static char *utf8_from_property(Atom type, const unsigned char *data,
 }
 
 /* Waits for one PropertyNotify (NewValue) on `requestor`'s selection
- * property — the INCR read pump (1.4.14: parameterized requestor).
+ * property — the INCR read pump (1.0.0: parameterized requestor).
  * Delete notifications are SKIPPED (each chunk we read+delete
  * generates one); foreign events are left in Xlib's queue
  * untouched. Returns 1 with *out filled, 0 on the deadline. */
@@ -822,7 +822,7 @@ static int wait_property_new_value(fdk_platform_connection *conn,
     }
 }
 
-/* The INCR read loop (1.4.12; requestor-parameterized 1.4.14): the
+/* The INCR read loop (1.0.0; requestor-parameterized 1.0.0): the
  * seed property (type INCR, a 32-bit byte estimate) is already
  * consumed by the caller; chunks arrive as NewValue notifications on
  * `requestor`'s selection property, each read WITH delete (the
@@ -951,7 +951,7 @@ out:
  * / or an INCR flight's already-concatenated payload — the type the
  * owner NAMED). Returns NULL on refusal/timeout/malformation.
  * Thin wrapper: the engine (below) is requestor-parameterized since
- * 1.4.14 — the DnD drop fetch shares it with the app-window drop
+ * 1.0.0 — the DnD drop fetch shares it with the app-window drop
  * target as requestor. */
 static unsigned char *convert_selection_bytes(
     fdk_platform_connection *conn, sel_desc sel, Atom target,
@@ -961,7 +961,7 @@ static unsigned char *convert_selection_bytes(
                                    FDK_CLIP_WAIT_MS, out_type, out_len);
 }
 
-/* THE selection-read engine (1.4.14): convert `selection`/`target`
+/* THE selection-read engine (1.0.0): convert `selection`/`target`
  * onto `requestor`'s atom_fdk_selection property, wait the bounded
  * notify window, then read the answer — atomic (possibly multi-part)
  * or INCR (the seed's 32-bit value is the estimate; the read-with-
@@ -1011,7 +1011,7 @@ unsigned char *fdk__x11_read_selection(fdk_platform_connection *conn,
         return NULL;
     }
     if (type == conn->atom_incr) {
-        /* Incremental transfer (1.4.12): the seed's single 32-bit
+        /* Incremental transfer (1.0.0): the seed's single 32-bit
          * value is the byte estimate; the delete above (read with
          * delete=True) is already the protocol's go signal. Pump the
          * chunks. */
@@ -1137,7 +1137,7 @@ char *fdk_x11_clipboard_get_primary_text(fdk_platform_connection *conn) {
     return selection_get_text(conn, sel_of_primary(conn));
 }
 
-/* ---- clipboard images (1.4.9) ---- */
+/* ---- clipboard images (1.0.0) ---- */
 
 fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
                                        const unsigned char *png,
@@ -1146,7 +1146,7 @@ fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
         return FDK_ERR_INVALID_ARGUMENT;
     }
     if (len > FDK_CLIP_INCR_MAX_BYTES) {
-        /* 1.4.12: the atomic cap lifted — payloads up to the hard
+        /* 1.0.0: the atomic cap lifted — payloads up to the hard
          * 64 MiB bound are owned and streamed incrementally past the
          * atomic threshold. Beyond THAT is not a clipboard. */
         FDK_WARN("clipboard: image payload %zu bytes exceeds the "
@@ -1182,7 +1182,7 @@ fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
     return FDK_OK;
 }
 
-/* Raw bytes from a property read: retired in 1.4.12 — the shared
+/* Raw bytes from a property read: retired in 1.0.0 — the shared
  * convert_selection_bytes (atomic, multi-part atomic, and INCR)
  * replaced it; image reads are just typed raw reads now. */
 
@@ -1210,7 +1210,7 @@ unsigned char *fdk_x11_clipboard_get_image(fdk_platform_connection *conn,
         return NULL; /* nobody owns it: empty */
     }
     /* Convert image/png from the current owner (bounded wait; the
-     * shared raw reader handles the atomic case AND, since 1.4.12,
+     * shared raw reader handles the atomic case AND, since 1.0.0,
      * an INCR offer from owners past the atomic cap). */
     Atom type = None;
     unsigned char *raw = convert_selection_bytes(

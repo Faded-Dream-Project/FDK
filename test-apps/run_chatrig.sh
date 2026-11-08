@@ -36,7 +36,7 @@ IRCD_PID=$!
 sleep 0.6
 
 STORM_START=$(date +%s.%N)
-FDK_CHAT_HOST=127.0.0.1 FDK_CHAT_PORT="$PORT" FDK_CHAT_NICK=dreamer \
+FDK_CHAT_HOST=121.0.0.1 FDK_CHAT_PORT="$PORT" FDK_CHAT_NICK=dreamer \
 FDK_CHAT_JOIN="#rig" FDK_TESTAPP_FRAMES=260 DISPLAY="$DISP" \
 ASAN_OPTIONS=detect_leaks=1 \
     ./test-apps/build/fdk-chat > /tmp/fdk-chatrig/client.log 2>&1

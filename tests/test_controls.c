@@ -15,7 +15,7 @@
 #include "fdk/fdk.h"
 #include "fdk/fdk_widgets.h"
 
-/* 1.4.1: the hover-fade blend and the spinner's parked phase are
+/* 1.0.0: the hover-fade blend and the spinner's parked phase are
  * internal state the public API has no reason to expose — the tests
  * read them through the same internal header the catalog builds on
  * (the established test-seam discipline: see test_animation.c). */
@@ -258,7 +258,7 @@ static void test_button(void) {
            "checks\n");
 }
 
-/* ---- 1.4.0: button roles + toggle-button state ---- */
+/* ---- 1.0.0: button roles + toggle-button state ---- */
 
 static void test_button_roles(void) {
     fdk_widget *root = fresh_root();
@@ -968,7 +968,7 @@ static void test_frame(void) {
            "stack below it, title ink paints, fontless = plain box\n");
 }
 
-/* ---- 1.4.1: the LINK role ---- */
+/* ---- 1.0.0: the LINK role ---- */
 
 static void test_button_link(void) {
     fdk_widget *root = fresh_root();
@@ -1046,7 +1046,7 @@ static void test_button_link(void) {
            "unchanged\n");
 }
 
-/* ---- 1.4.1: the Spinner ---- */
+/* ---- 1.0.0: the Spinner ---- */
 
 static void test_spinner(void) {
     fdk_widget *root = fresh_root();
@@ -1140,7 +1140,7 @@ static void test_spinner(void) {
            "comet ink, park-on-stop, detached-tree honesty\n");
 }
 
-/* ---- 1.4.1: the hover fade ---- */
+/* ---- 1.0.0: the hover fade ---- */
 
 static void test_hover_fades(void) {
     fdk_widget *root = fresh_root();
@@ -1301,7 +1301,7 @@ static void test_argument_safety(void) {
            "no-op setters\n");
 }
 
-/* ---- Statusbar (1.4.2) ---- */
+/* ---- Statusbar (1.0.0) ---- */
 
 static void test_statusbar(void) {
     fdk_widget *root = fresh_root();
@@ -1397,7 +1397,7 @@ static void test_statusbar(void) {
            "diff, argument safety\n");
 }
 
-/* ---- LevelBar (1.4.2) ---- */
+/* ---- LevelBar (1.0.0) ---- */
 
 static void test_levelbar(void) {
     fdk_widget *root = fresh_root();

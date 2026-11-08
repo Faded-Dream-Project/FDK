@@ -73,7 +73,7 @@ fdk_result fdk_label_create(fdk_widget *parent, fdk_font *font,
  * container. NULL or "" clears the text. */
 fdk_result fdk_label_set_text(fdk_widget *label, const char *text);
 
-/* Replaces the text with MARKUP (1.4.11): the tiny tag vocabulary
+/* Replaces the text with MARKUP (1.0.0): the tiny tag vocabulary
  * from fdk_text.h (<b> <i> <u> <s> <color=#rrggbb[aa]> + entities)
  * parses into plain text + attribute spans, and every display mode
  * lays out and paints styled — a bold word measures BOLD-wide in
@@ -153,7 +153,7 @@ fdk_result fdk_button_create(fdk_widget *parent, fdk_font *font,
 /* Replaces the label (copied; re-measures). */
 fdk_result fdk_button_set_text(fdk_widget *button, const char *text);
 
-/* Replaces the label with MARKUP (1.4.11) — the Label's markup
+/* Replaces the label with MARKUP (1.0.0) — the Label's markup
  * contract on a button: tags parse to plain text + spans, the
  * natural size uses styled widths, paint draws styled glyphs, run
  * colors, and decoration bars. get_text reports the PLAIN label;
@@ -176,7 +176,7 @@ void fdk_button_set_on_activate(fdk_widget *button,
                                 fdk_button_activate_fn on_activate,
                                 void *user_data);
 
-/* 1.4.0 — the button's visual role (GTK/Qt action styles): NORMAL
+/* 1.0.0 — the button's visual role (GTK/Qt action styles): NORMAL
  * paints with the control family; SUGGESTED paints accent-filled
  * (the "Open"/"Save" button of a dialog — the one action that makes
  * the dialog happen); DESTRUCTIVE paints danger-filled (the
@@ -186,7 +186,7 @@ typedef enum fdk_button_role {
     FDK_BUTTON_ROLE_NORMAL = 0,
     FDK_BUTTON_ROLE_SUGGESTED = 1,
     FDK_BUTTON_ROLE_DESTRUCTIVE = 2,
-    /* 1.4.1 append — the link-styled button (GTK LinkButton / Qt
+    /* 1.0.0 append — the link-styled button (GTK LinkButton / Qt
      * flat link): no fill, link-colored text (the FDK_TK_LINK token),
      * an underline while hovered, the regular focus ring. Paint-only,
      * like every role. */
@@ -198,7 +198,7 @@ void fdk_button_set_role(fdk_widget *button, fdk_button_role role);
 /* The current role (FDK_BUTTON_ROLE_NORMAL for non-buttons). */
 fdk_button_role fdk_button_get_role(fdk_widget *button);
 
-/* 1.4.0 — the toggle-button state (a Button that stays "pressed in"
+/* 1.0.0 — the toggle-button state (a Button that stays "pressed in"
  * when checked, like GTK's GtkToggleButton / Qt's checkable QPushButton).
  * A checked NORMAL button paints the pressed fill persistently; a
  * checked SUGGESTED/DESTRUCTIVE button paints the accent/danger
@@ -285,7 +285,7 @@ fdk_result fdk_progress_create(fdk_widget *parent,
 void fdk_progress_set_fraction(fdk_widget *progress, fdk_f32 fraction);
 /* The current fraction, as last set (already clamped). */
 fdk_f32 fdk_progress_get_fraction(fdk_widget *progress);
-/* Indeterminate ("busy") mode (1.3.1): an accent block sweeps the
+/* Indeterminate ("busy") mode (1.0.0): an accent block sweeps the
  * track on the timer clock (~1.9s per traversal) — the visual answer
  * to "work is happening, no fraction exists". Entering it clears the
  * fraction; any set_fraction leaves it (a known fraction beats
@@ -386,7 +386,7 @@ void fdk_entry_select_all(fdk_widget *entry);
  * and fires no callbacks. */
 fdk_result fdk_entry_set_preedit(fdk_widget *entry, const char *preedit);
 
-/* 1.4.0 — PLACEHOLDER TEXT, shown in the disabled-text color while
+/* 1.0.0 — PLACEHOLDER TEXT, shown in the disabled-text color while
  * the buffer is empty (and no preedit is showing). It is never
  * selectable, never copied, never in the buffer, and disappears the
  * moment text exists. Copied; NULL clears it. The placeholder has
@@ -421,7 +421,7 @@ void fdk_entry_set_max_length(fdk_widget *entry, size_t max_bytes);
 /* The byte cap (0 = unlimited). */
 size_t fdk_entry_get_max_length(fdk_widget *entry);
 
-/* ---- UNDO / REDO (1.3.3) ----
+/* ---- UNDO / REDO (1.0.0) ----
  *
  * Every user edit — typed characters, Backspace/Delete runs, cut,
  * paste, selection-deletes — is recorded onto an undo history the
@@ -462,9 +462,9 @@ void fdk_entry_set_on_activate(fdk_widget *entry,
                                fdk_entry_activate_fn on_activate,
                                void *user_data);
 
-/* ---- Entry icon slots (1.4.4) -------------------------------------
+/* ---- Entry icon slots (1.0.0) -------------------------------------
  *
- * The Entry's generalized prefix/suffix surface — the 1.4.2 search
+ * The Entry's generalized prefix/suffix surface — the 1.0.0 search
  * preset's magnifier and clear zones promoted to a public, symmetric
  * API. Each slot (LEADING = before the text, TRAILING = after it)
  * reserves a 16-px glyph box + 6-px gap when an icon is set: the
@@ -486,7 +486,7 @@ void fdk_entry_set_on_activate(fdk_widget *entry,
  * press empties the field through the UNDOABLE splice path (records
  * undo, fires on_changed) unless the entry is read-only or the slot
  * was marked insensitive, and its zone EXISTS ONLY WHILE THE FIELD
- * HAS TEXT (the button appears with the first character — the 1.4.2
+ * HAS TEXT (the button appears with the first character — the 1.0.0
  * rule, now every entry's rule). A leading icon that is decorative
  * (no callback) lets presses fall through to caret placement; an
  * interactive slot (callback set, or CLEAR) consumes its presses.
@@ -494,7 +494,7 @@ void fdk_entry_set_on_activate(fdk_widget *entry,
  *
  * The search PRESET is now built on the slots (leading SEARCH,
  * trailing CLEAR) — its Esc-ladder and debounced search-changed stay
- * preset-specific behavior, geometry identical to 1.4.2. */
+ * preset-specific behavior, geometry identical to 1.0.0. */
 
 typedef enum fdk_entry_icon {
     FDK_ENTRY_ICON_NONE = 0,  /* no icon: the slot reserves nothing  */
@@ -571,7 +571,7 @@ void fdk_entry_set_on_icon_press(fdk_widget *entry,
 fdk_result fdk_scrollview_create(fdk_widget *parent,
                                  fdk_widget **out_scrollview);
 
-/* ---- Bar modes (1.4.4) -------------------------------------------
+/* ---- Bar modes (1.0.0) -------------------------------------------
  *
  * CLASSIC (the default, the historic behavior): the bars are
  * LAYOUT-OWNED — an overflowing axis reserves its strip, the
@@ -582,7 +582,7 @@ fdk_result fdk_scrollview_create(fdk_widget *parent,
  * bounds (nothing is reserved; the content renders underneath),
  * the bars are thinner (themed metric scrollbar_overlay_width,
  * 4..12, default 6) and paint only their thumb over the content.
- * After ~800 ms of idleness a bar fades out (~300 ms, the 1.4.3
+ * After ~800 ms of idleness a bar fades out (~300 ms, the 1.0.0
  * paint-group engine doing the blending) and becomes input-
  * transparent; any scrolling on its axis, the pointer approaching
  * its strip, a hover, or a thumb drag pops it back at full opacity
@@ -602,7 +602,7 @@ fdk_result fdk_scrollview_set_bar_mode(fdk_widget *scrollview,
                                        fdk_scroll_bar_mode mode);
 fdk_scroll_bar_mode fdk_scrollview_get_bar_mode(fdk_widget *scrollview);
 
-/* 1.4.17: vertical-only scrolling. The content is ARRANGED at the
+/* 1.0.0: vertical-only scrolling. The content is ARRANGED at the
  * viewport's width (never wider), the horizontal bar never appears,
  * and scroll_x is pinned to 0 — a tall column inside a box layout
  * keeps the box's cross-clamp behavior it had before adoption,
@@ -665,7 +665,7 @@ typedef void (*fdk_list_selection_fn)(fdk_widget *list,
 fdk_result fdk_list_create(fdk_widget *parent, fdk_font *font,
                            fdk_widget **out_list);
 
-/* Arms this row as a drag-source launch point (1.5.0). In
+/* Arms this row as a drag-source launch point (1.0.0). In
  * MULTIPLE selection mode a plain press on an UNSELECTED row starts
  * the rubber band instead (the wall-to-wall-rows case — see
  * fdk_widget_set_drag_veto); a drag therefore begins from a row the
@@ -679,7 +679,7 @@ bool fdk_list_row_set_drag_armed(fdk_widget *list, size_t row,
 void fdk_list_set_selection_mode(fdk_widget *list,
                                  fdk_list_selection_mode mode);
 
-/* 1.4.0 — the row height rows are actually placed at (the theme's
+/* 1.0.0 — the row height rows are actually placed at (the theme's
  * list_row_height floor or the font's metrics, whichever is taller;
  * 20 for a fontless list). For mouse-to-row math over a list and
  * "how many rows fit" planning. 0 for a non-list. */
@@ -777,7 +777,7 @@ void fdk_list_set_on_selection_changed_bounds(
     fdk_widget *list, fdk_list_selection_bounds_fn fn,
     void *user_data);
 
-/* ---- Bulk-mutation batching (1.3.0) ----
+/* ---- Bulk-mutation batching (1.0.0) ----
  *
  * Between begin_batch and end_batch, row mutations (append / insert /
  * remove / clear / set_row_text) skip their per-mutation O(N)
@@ -795,7 +795,7 @@ void fdk_list_set_on_selection_changed_bounds(
 void fdk_list_begin_batch(fdk_widget *list);
 void fdk_list_end_batch(fdk_widget *list);
 
-/* ---- Row activation (1.2.0) ----
+/* ---- Row activation (1.0.0) ----
  *
  * The "open this" gesture: double-click on a row, or Enter on the
  * keyboard cursor's row, fires the callback once with that row's
@@ -810,7 +810,7 @@ void fdk_list_set_on_row_activate(fdk_widget *list,
                                   fdk_list_row_activate_fn fn,
                                   void *user_data);
 
-/* ---- Single-click activation (1.4.4) --------------------------------
+/* ---- Single-click activation (1.0.0) --------------------------------
  *
  * The sidebar rhythm: when enabled, a single left PRESS on a row
  * fires on_row_activate at once (GtkListBox's
@@ -823,7 +823,7 @@ void fdk_list_set_activate_on_single_click(fdk_widget *list,
                                            bool single);
 bool fdk_list_get_activate_on_single_click(fdk_widget *list);
 
-/* ---- Row icons (1.4.1) ----
+/* ---- Row icons (1.0.0) ----
  *
  * A row may carry a small vector glyph (drawn by the toolkit —
  * the same font-independent stroke language as the disclosure
@@ -837,7 +837,7 @@ typedef enum fdk_row_icon {
     FDK_ROW_ICON_HOME,    /* house + door                          */
     FDK_ROW_ICON_DRIVE,   /* rounded slab + activity LED           */
     FDK_ROW_ICON_FILE,    /* page with folded corner               */
-    FDK_ROW_ICON_RECENT,  /* clock face (1.4.4: the recents place) */
+    FDK_ROW_ICON_RECENT,  /* clock face (1.0.0: the recents place) */
 } fdk_row_icon;
 
 /* Sets/clears the row's icon (unknown enum values are ignored as
@@ -846,7 +846,7 @@ typedef enum fdk_row_icon {
 fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
                                  fdk_row_icon icon);
 
-/* ---- List columns (1.5.0) ------------------------------------------
+/* ---- List columns (1.0.0) ------------------------------------------
  *
  * The file-manager list view: a header strip and per-row cells in
  * additional columns, laid out right of the primary text — the
@@ -871,7 +871,7 @@ fdk_result fdk_list_row_set_icon(fdk_widget *list, size_t row,
  * offsets, in text-disabled color; selection/hover fills span the
  * full row width as before.
  *
- * 1.5.1 (the owner's round-8 report): the fixed columns are
+ * 1.0.0 (the owner's round-8 report): the fixed columns are
  * RIGHT-ANCHORED — they hug the viewport's far end (clear of the
  * v-scrollbar's reserved strip), and the name column stretches
  * across the slack between the names and them; the anchor re-solves
@@ -935,7 +935,7 @@ fdk_row_icon fdk_list_row_get_icon(fdk_widget *list, size_t row);
 fdk_result fdk_list_row_set_icon_surface(fdk_widget *list, size_t row,
                                          fdk_surface *image);
 
-/* ---- IconView (1.4.5) ----------------------------------------------
+/* ---- IconView (1.0.0) ----------------------------------------------
  *
  * The canvas-based item GRID the parity ledger parked since its
  * first draft (GtkIconView / QListView-icon-mode): a scrolling
@@ -1028,7 +1028,7 @@ void fdk_iconview_set_on_item_activate(fdk_widget *iconview,
 void fdk_iconview_begin_batch(fdk_widget *iconview);
 void fdk_iconview_end_batch(fdk_widget *iconview);
 
-/* ---- TextView (1.4.8) ----
+/* ---- TextView (1.0.0) ----
  *
  * The multi-line text editor — the last widget-family hole. One
  * UTF-8 document in the Entry's whole discipline: caret + selection
@@ -1095,7 +1095,7 @@ fdk_result fdk_textview_redo(fdk_widget *textview);
 
 /* ---- TextView's EDITOR surface (§30/STEP-2a; the fdk-edit round)
  * ----------------------------------------------------------------------
- * The four things every real text editor needs and the 1.4.8
+ * The four things every real text editor needs and the 1.0.0
  * TextView never grew. GTK4's GtkTextView/GtkSourceView shape, so
  * the APP builds the rest (tabs, find bar, the highlighting rules).
  *
@@ -1215,7 +1215,7 @@ fdk_result fdk_textview_link_at(fdk_widget *textview, fdk_f32 x,
                                 fdk_f32 y, char *out_href,
                                 size_t cap);
 
-/* ---- Picture (1.4.9) ----
+/* ---- Picture (1.0.0) ----
  *
  * The image display widget: one owned surface (decoded from a
  * file, or ownership transferred from the app's own render),
@@ -1453,7 +1453,7 @@ fdk_result fdk_toolbar_add_separator(fdk_widget *toolbar);
  * paint walk). Tab clicks switch; the switch callback fires after
  * the switch settles. Pages can be removed (remove_page destroys the
  * page widget — the notebook owns what it adopts, like every FDK
- * container). Tab DRAG REORDERING ships since 1.4.4 (see
+ * container). Tab DRAG REORDERING ships since 1.0.0 (see
  * fdk_notebook_reorder_page); close-button chrome stays parked. */
 
 typedef void (*fdk_notebook_switch_fn)(fdk_widget *notebook,
@@ -1510,7 +1510,7 @@ void fdk_notebook_set_on_switch(fdk_widget *notebook,
                                 fdk_notebook_switch_fn fn,
                                 void *user_data);
 
-/* ---- Tab reordering (1.4.4) --------------------------------------
+/* ---- Tab reordering (1.0.0) --------------------------------------
  *
  * Tabs reorder by drag: press a tab (it switches pages, the existing
  * behavior), move past ~4 px and the tab FOLLOWS THE POINTER — the
@@ -1601,7 +1601,7 @@ void fdk_canvas_invalidate(fdk_widget *canvas);
  * closes one level. The bar itself, when focused, walks titles with
  * Left/Right and opens with Down/Enter.
  *
- * ACCELERATORS (1.3.3): an item's `shortcut` string ("Ctrl+S" —
+ * ACCELERATORS (1.0.0): an item's `shortcut` string ("Ctrl+S" —
  * see fdk_shortcut_parse's grammar) is not just the right-aligned
  * label: for as long as the item's menu hangs under a window's
  * MENU BAR, the binding is LIVE. The window's KEY_DOWN dispatch
@@ -1617,7 +1617,7 @@ void fdk_canvas_invalidate(fdk_widget *canvas);
  * fdk_window_add_shortcut alongside. Application shortcuts run
  * BEFORE bar accelerators when both match (see fdk_window.h).
  *
- * Mnemonics (1.3.6): label text may carry "&X" markers — the next
+ * Mnemonics (1.0.0): label text may carry "&X" markers — the next
  * character becomes the item's (or bar title's) underlined mnemonic
  * letter. Alt+X opens the matching bar title; with a menu open, X
  * alone (or Alt+X) activates the matching item — first
@@ -1803,7 +1803,7 @@ void fdk_combo_set_on_changed(fdk_widget *combo,
                               fdk_combo_changed_fn on_changed,
                               void *user_data);
 
-/* ---- Spinner (1.4.1) ----
+/* ---- Spinner (1.0.0) ----
  *
  * A busy indicator (GTK's GtkSpinner, Qt's busy QProgressBar): a
  * continuously rotating arc that says "work is happening, no
@@ -1828,7 +1828,7 @@ void fdk_spinner_stop(fdk_widget *spinner);
 /* Whether the rotation is active. */
 bool fdk_spinner_is_spinning(fdk_widget *spinner);
 
-/* ---- Paned (1.4.1) ----
+/* ---- Paned (1.0.0) ----
  *
  * The two-pane splitter (GTK's GtkPaned, Qt's QSplitter): a
  * container whose FIRST child fills pane 1 and SECOND child fills
@@ -1872,12 +1872,12 @@ bool fdk_paned_position_is_set(fdk_widget *paned);
 /* Returns to the auto split (natural sizes + even leftover). */
 void fdk_paned_unset_position(fdk_widget *paned);
 
-/* ---- Expander (1.4.1) ----
+/* ---- Expander (1.0.0) ----
  *
  * The disclosure section (GTK's GtkExpander, Qt's collapsible
  * group): a header row (rotating disclosure triangle + label) that
  * reveals or collapses its FIRST child. Further children are
- * refused like Paned's. The reveal is ANIMATED (the 1.3.8 animator,
+ * refused like Paned's. The reveal is ANIMATED (the 1.0.0 animator,
  * ~160 ms) when a window clock is running; standalone trees toggle
  * instantly — the same headless-honesty rule as every animation.
  *
@@ -1907,7 +1907,7 @@ void fdk_expander_set_on_changed(fdk_widget *expander,
                                  fdk_expander_changed_fn on_changed,
                                  void *user_data);
 
-/* ---- Statusbar (1.4.2) ----
+/* ---- Statusbar (1.0.0) ----
  *
  * GTK's GtkStatusbar: the bottom-edge strip for transient
  * application state. The API is the classic STACK WITH CONTEXTS:
@@ -1945,7 +1945,7 @@ void fdk_statusbar_remove(fdk_widget *statusbar, fdk_u32 context_id,
  * empty. Toolkit-owned. */
 const char *fdk_statusbar_get_text(fdk_widget *statusbar);
 
-/* ---- SearchEntry (1.4.2) ----
+/* ---- SearchEntry (1.0.0) ----
  *
  * GTK's GtkSearchEntry as an Entry PRESET: fdk_search_entry_create
  * returns a regular Entry (every Entry API applies) with the search
@@ -1963,7 +1963,7 @@ fdk_result fdk_search_entry_create(fdk_widget *parent, fdk_font *font,
 /* Whether the entry carries the search preset. */
 bool fdk_entry_is_search(fdk_widget *entry);
 
-/* ---- LevelBar (1.4.2) ----
+/* ---- LevelBar (1.0.0) ----
  *
  * GTK's GtkLevelBar / the battery-and-volume meter: a value in
  * [min, max] as a row of discrete blocks (DISCRETE, the default — 5
@@ -1993,7 +1993,7 @@ fdk_levelbar_mode fdk_levelbar_get_mode(fdk_widget *levelbar);
 void fdk_levelbar_set_segments(fdk_widget *levelbar, size_t segments);
 size_t fdk_levelbar_get_segments(fdk_widget *levelbar);
 
-/* ---- Revealer (1.4.2) ----
+/* ---- Revealer (1.0.0) ----
  *
  * GTK's GtkRevealer: shows/hides its ONE child (a second child is
  * refused) with a sliding animation instead of a pop. The
@@ -2015,7 +2015,7 @@ size_t fdk_levelbar_get_segments(fdk_widget *levelbar);
  * not an alpha scene graph — an honest slide, not a half-faked
  * fade).
  *
- * The flight is ~160 ms cubic-out (settable) on the 1.3.8
+ * The flight is ~160 ms cubic-out (settable) on the 1.0.0
  * animator; standalone trees snap (the headless-honesty rule).
  * on_revealed fires when the flight LANDS (either direction) —
  * the natural point for chained teardown. */
@@ -2026,7 +2026,7 @@ typedef enum fdk_revealer_transition {
     FDK_REVEAL_SLIDE_UP = 2,
     FDK_REVEAL_SLIDE_LEFT = 3,
     FDK_REVEAL_SLIDE_RIGHT = 4,
-    /* 1.4.3 — the deferred compositor-level alpha decision, shipped
+    /* 1.0.0 — the deferred compositor-level alpha decision, shipped
      * via the paint-group machinery: the door keeps the child's FULL
      * geometry at every reveal value (no crop — a fade is opacity,
      * not size), and the revealer's subtree composites through a
@@ -2065,7 +2065,7 @@ void fdk_revealer_set_on_revealed(fdk_widget *revealer,
                                   fdk_revealer_revealed_fn on_revealed,
                                   void *user_data);
 
-/* ---- Stack + StackSwitcher (1.4.2) ----
+/* ---- Stack + StackSwitcher (1.0.0) ----
  *
  * GTK's GtkStack: NAMED pages, exactly one visible — the structure
  * settings dialogs and master-detail panes are built on. add()
@@ -2139,9 +2139,9 @@ void fdk_stackswitcher_set_stack(fdk_widget *switcher,
 /* The bound stack, or NULL once unbound/destroyed. */
 fdk_widget *fdk_stackswitcher_get_stack(fdk_widget *switcher);
 
-/* ---- Tree row icons (1.4.2) ----
+/* ---- Tree row icons (1.0.0) ----
  *
- * The List's 1.4.1 symbolic glyphs, extended to the Tree: a
+ * The List's 1.0.0 symbolic glyphs, extended to the Tree: a
  * 16-px vector glyph before the node's text (folder / home / drive
  * / page), accounted in the tree's width computation. The icon
  * rides the MODEL NODE (not the row widget), so it survives
@@ -2152,7 +2152,7 @@ fdk_result fdk_tree_node_set_icon(fdk_widget *tree,
 fdk_row_icon fdk_tree_node_get_icon(fdk_widget *tree,
                                     fdk_tree_node node);
 
-/* ---- Slider marks (1.4.2) ----
+/* ---- Slider marks (1.0.0) ----
  *
  * GTK's gtk_scale_add_mark: tick marks (and optional labels) under
  * the trough. add_mark registers a mark at `value` (clamped into
@@ -2167,7 +2167,7 @@ fdk_result fdk_slider_add_mark(fdk_widget *slider, double value,
 void fdk_slider_clear_marks(fdk_widget *slider);
 size_t fdk_slider_mark_count(fdk_widget *slider);
 
-/* ---- Slider orientation (1.4.3) ----
+/* ---- Slider orientation (1.0.0) ----
  *
  * The parked vertical remainder, shipped: a vertical slider runs
  * its trough down the widget's height (min at the BOTTOM, max at
@@ -2188,7 +2188,7 @@ void fdk_slider_set_orientation(fdk_widget *slider,
                                 fdk_slider_orientation orientation);
 fdk_slider_orientation fdk_slider_get_orientation(fdk_widget *slider);
 
-/* ---- SearchEntry debounce (1.4.3) ----
+/* ---- SearchEntry debounce (1.0.0) ----
  *
  * The search preset's debounced twin of on_changed: the
  * search-changed callback fires once, `ms` milliseconds (default
@@ -2211,7 +2211,7 @@ void fdk_search_entry_set_debounce(fdk_widget *entry,
                                     fdk_u32 debounce_ms);
 bool fdk_search_entry_has_pending(fdk_widget *entry);
 
-/* ---- MenuButton (1.4.3) ----
+/* ---- MenuButton (1.0.0) ----
  *
  * GtkMenuButton's role: a button-shaped widget that pops up an
  * ATTACHED menu model when clicked (the hamburger, the "options"
@@ -2255,7 +2255,7 @@ void fdk_menu_button_set_arrow(fdk_widget *button,
 /* True while this button's popup chain is open. */
 bool fdk_menu_button_is_open(fdk_widget *button);
 
-/* ---- Tree selection mode (1.4.3) ----
+/* ---- Tree selection mode (1.0.0) ----
  *
  * The parked multi-select tree, shipped — mirroring the List's
  * model exactly: MULTIPLE clicks select, ctrl+click toggles one

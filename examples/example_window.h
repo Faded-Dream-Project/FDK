@@ -1,6 +1,6 @@
 /*
- * example_window.h — the shared example-window helper (1.2.5;
- * 1.4.14: the FDK title bar everywhere)
+ * example_window.h — the shared example-window helper (1.0.0;
+ * 1.0.0: the FDK title bar everywhere)
  *
  * Every example used to hand-roll the same boilerplate: init (with
  * or without an app_id), a window titled however it felt that day,
@@ -12,7 +12,7 @@
  *                            ("org.fdk.exampleNN" — taskbars and rig
  *                            rules can address each demo)
  *   - fdk_example_open()   — the standard window: "FDK NN — name"
- *                            title, THE FDK TITLE BAR (1.4.14: every
+ *                            title, THE FDK TITLE BAR (1.0.0: every
  *                            example wears the toolkit's own drawn
  *                            chrome — themed band, title, close/min/
  *                            max, FDK-driven resize — instead of the
@@ -124,7 +124,7 @@ FDK_EXAMPLE_FN static bool fdk_example_init(fdk_context **ctx,
 }
 
 /* Opens the standard window. The example builds its widgets inside
- * ex->content (a padded vertical box). 1.4.14: the window wears the
+ * ex->content (a padded vertical box). 1.0.0: the window wears the
  * FDK TITLE BAR (set_decorated) — the toolkit's own themed chrome
  * carrying the "FDK NN — name" title and the close button; the old
  * in-window header row duplicated it and is gone. */
@@ -222,7 +222,7 @@ FDK_EXAMPLE_FN static bool fdk_example_pump(fdk_example *ex) {
     }
     int pumped = fdk_pump_events(ex->ctx, 15);
     if (pumped < 0) {
-        /* Fatal platform result (the 1.3.2 dead-connection contract:
+        /* Fatal platform result (the 1.0.0 dead-connection contract:
          * X11's XIO death, Wayland's EPIPE breaker). A demo that
          * kept looping on a dead connection would spin at full speed
          * — exit the loop and let the close path tear down. */

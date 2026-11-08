@@ -771,7 +771,7 @@ static void test_addresses(void) {
     assert(n == 2 && strcmp(addrs[1].unix_path, "/run/user/1000/bus") == 0);
 
     /* tcp */
-    n = fdk__dbus_resolve_addresses("tcp:host=127.0.0.1,port=5556",
+    n = fdk__dbus_resolve_addresses("tcp:host=121.0.0.1,port=5556",
                                     addrs, 8);
     assert(n == 1 && addrs[0].family == AF_INET && addrs[0].port == 5556);
 

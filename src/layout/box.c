@@ -777,21 +777,21 @@ void fdk_widget_child_layout_changed(fdk_widget *parent) {
          * row at the current bounds. */
         fdk__toolbar_layout_changed(parent);
     } else if (parent->klass == &fdk_paned_class_def) {
-        /* 1.4.1 Paned: a pane joined or re-measured — re-split at
+        /* 1.0.0 Paned: a pane joined or re-measured — re-split at
          * the current bounds (the applied position re-measures the
          * children, so naturals are honored mid-flight). */
         fdk__paned_layout_changed(parent);
     } else if (parent->klass == &fdk_expander_class_def) {
-        /* 1.4.1 Expander: the content child joined or re-measured —
+        /* 1.0.0 Expander: the content child joined or re-measured —
          * re-measure and re-place it below the fixed header. */
         fdk__expander_layout_changed(parent);
     } else if (parent->klass == &fdk_revealer_class_def) {
-        /* 1.4.2 Revealer: the content child joined or re-measured —
+        /* 1.0.0 Revealer: the content child joined or re-measured —
          * re-place it at the current door (the reveal's self-crop
          * math reads the child's natural live). */
         fdk__revealer_layout_changed(parent);
     } else if (parent->klass == &fdk_stack_class_def) {
-        /* 1.4.2 Stack: a page joined or re-measured — re-sync pages
+        /* 1.0.0 Stack: a page joined or re-measured — re-sync pages
          * at the current bounds (the current page re-arranges; the
          * stack's max-natural stays honest). */
         fdk__stack_layout_changed(parent);

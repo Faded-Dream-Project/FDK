@@ -35,7 +35,7 @@ typedef XID Picture;
 #include <stddef.h>
 #include <stdint.h>
 
-/* 1.4.5: HiDPI detection (x11_connection.c) + the scale query op
+/* 1.0.0: HiDPI detection (x11_connection.c) + the scale query op
  * (x11_window.c, registered in the ops table). */
 int fdk__x11_detect_scale(Display *display);
 
@@ -83,7 +83,7 @@ void fdk_x11_xsettings_rearm_tick(fdk_platform_connection *conn);
 fdk_result fdk_x11_window_get_scale(fdk_platform_window *pwindow,
                                     fdk_f32 *out_scale);
 
-/* 1.4.18: render-path introspection op (x11_surface.c) behind
+/* 1.0.0: render-path introspection op (x11_surface.c) behind
  * fdk_window_get_render_path() — 1 while this window presents
  * through the GPU lane, 0 on the CPU path. */
 int fdk_x11_window_render_path(fdk_platform_window *pwindow);
@@ -98,7 +98,7 @@ struct fdk_platform_connection {
     int screen;
     Window root;
 
-    /* HiDPI scale (1.4.5): X11 has no scale protocol — the window
+    /* HiDPI scale (1.0.0): X11 has no scale protocol — the window
      * is created at logical x scale physical pixels and the core's
      * paint path composites the logical tree up (the same
      * intermediate + integer-scale blit the Wayland backend rides
@@ -122,7 +122,7 @@ struct fdk_platform_connection {
      * FDK_EVENT_SESSION_SAVE then rewrites WM_COMMAND (the
      * PropertyNotify ack a session manager waits for). */
     Atom wm_save_yourself;
-    Atom wm_take_focus; /* ICCCM take-focus model (1.4.19) */
+    Atom wm_take_focus; /* ICCCM take-focus model (1.0.0) */
     Atom net_wm_name;
     Atom utf8_string;
     Atom motif_wm_hints; /* _MOTIF_WM_HINTS, Phase 8 decorations */
@@ -131,7 +131,7 @@ struct fdk_platform_connection {
      * ARGB icon list a taskbar/dock/switcher reads), _NET_WM_PID +
      * WM_CLIENT_MACHINE (the process identity session managers and
      * EWMH pagers correlate — set once per window at create), and
-     * WM_WINDOW_ROLE (ICCCM 5.5.1, the per-window role string).
+     * WM_WINDOW_ROLE (ICCCM 1.0.0, the per-window role string).
      * Interned unconditionally at connect: a property write to an
      * atom no WM ever reads is one round-trip wasted, not an error
      * — and the bare-X test rigs READ them back. */
@@ -179,7 +179,7 @@ struct fdk_platform_connection {
     Atom net_wm_state;
     Atom net_wm_state_maximized_vert;
     Atom net_wm_state_maximized_horiz;
-    Atom net_wm_state_fullscreen; /* 1.4.10 */
+    Atom net_wm_state_fullscreen; /* 1.0.0 */
     Atom net_wm_state_hidden; /* 1.0.0 D-4: minimized (iconic)     */
     Atom net_client_list;     /* 1.0.0 D-4: the taskbar roster     */
     Atom net_close_window;    /* 1.0.0 D-4: the polite close       */
@@ -217,7 +217,7 @@ struct fdk_platform_connection {
      * which dismisses every grabbed popup (they belong to the world
      * they opened in). */
     int desktop_changed;
-    /* Display death (1.3.0): set by the XIO error handler the moment
+    /* Display death (1.0.0): set by the XIO error handler the moment
      * the connection to the X server is lost. Every teardown path
      * checks it and skips server requests (they cannot succeed and —
      * worse — each one risks re-entering Xlib's fatal IO path, whose
@@ -226,7 +226,7 @@ struct fdk_platform_connection {
      * negative result so fdk_run()/pump loops exit cleanly. */
     int display_dead;
 
-    /* Key-repeat discipline (1.3.0): XkbSetDetectableAutoRepeat(True)
+    /* Key-repeat discipline (1.0.0): XkbSetDetectableAutoRepeat(True)
      * is requested at connect — when the server accepts, KeyRelease
      * events are REAL releases only (repeats arrive as additional
      * KeyPresses). key_down[] is the 256-bit keycode bitmap the
@@ -238,7 +238,7 @@ struct fdk_platform_connection {
     int detectable_repeat;
     unsigned char key_down[32];
 
-    /* X Input Method (1.3.1): the connection-wide XIM created at
+    /* X Input Method (1.0.0): the connection-wide XIM created at
      * connect (XOpenIM) when the locale supports it; every window
      * gets an XIC (input context) so Xutf8LookupString can resolve
      * full-Unicode text from the user's ACTUAL keyboard layout —
@@ -250,7 +250,7 @@ struct fdk_platform_connection {
     XIM xim;
     int xim_tried; /* lazy bring-up guard (1.0.0-rc1, X1): one attempt */
 
-    /* XSHAPE (1.3.2): probed at connect; the empty-input-region
+    /* XSHAPE (1.0.0): probed at connect; the empty-input-region
      * primitive tooltips need (click-through popups). 0 = extension
      * unavailable (tooltip popups then swallow clicks that land on
      * them — the honest degradation, logged when it happens). */
@@ -267,7 +267,7 @@ struct fdk_platform_connection {
     int shm_ok;
     int shm_event_base;
 
-    /* --- GPU present lane (1.4.18, x11_gl.c) ---
+    /* --- GPU present lane (1.0.0, x11_gl.c) ---
      *
      * gl: the per-connection lane state — libGL handle, resolved
      * entry points, renderer-policy verdict. Loaded LAZILY at the
@@ -295,7 +295,7 @@ struct fdk_platform_connection {
      * PropertyNotify hook notifies (x11_toplevel.c). */
     struct fdk_platform_toplevels *x11_toplevels;
 
-    /* --- Resize cursors (1.1.4) ---
+    /* --- Resize cursors (1.0.0) ---
      *
      * Directional resize cursors, lazily created from the server's
      * built-in cursor font (XCreateFontCursor — core protocol, no
@@ -335,7 +335,7 @@ struct fdk_platform_connection {
     fdk_platform_dispatch_fn dispatch;
     void *dispatch_user_data;
 
-    /* --- Clipboard (Phase 9, ICCCM CLIPBOARD selection; 1.3.4 adds
+    /* --- Clipboard (Phase 9, ICCCM CLIPBOARD selection; 1.0.0 adds
      * PRIMARY) ---
      *
      * clip_helper is a never-mapped InputOnly window that acts as
@@ -357,8 +357,8 @@ struct fdk_platform_connection {
     Atom atom_fdk_selection;  /* private property for convert replies */
     char *clip_owned_text;    /* fdk_alloc'd, NULL when not owner     */
     char *primary_owned_text; /* fdk_alloc'd, NULL when not PRIMARY's
-                               * owner (1.3.4; XA_PRIMARY)             */
-    /* 1.4.9: the clipboard's owned image (encoded PNG). One content
+                               * owner (1.0.0; XA_PRIMARY)             */
+    /* 1.0.0: the clipboard's owned image (encoded PNG). One content
      * at a time: owning an image clears owned text and vice versa.
      * atom_image_png is the target we serve/read. */
     unsigned char *clip_owned_png; /* fdk_alloc'd, NULL when no image  */
@@ -369,7 +369,7 @@ struct fdk_platform_connection {
                                * spec); NULL when none             */
     Atom atom_uri_list;       /* text/uri-list                        */
 
-    /* 1.4.12: the INCR (incremental) transfer machinery — both
+    /* 1.0.0: the INCR (incremental) transfer machinery — both
      * directions ride the helper window. TX is an in-flight SERVE of
      * a payload beyond the atomic cap: chunks stream to the
      * REQUESTOR's window+property, each triggered by its delete of
@@ -393,7 +393,7 @@ struct fdk_platform_connection {
         bool active;
     } clip_incr_tx;
 
-    /* --- Drag and drop (1.2.0, XDND) — x11_dnd.c ---
+    /* --- Drag and drop (1.0.0, XDND) — x11_dnd.c ---
      *
      * Receiver state: the XDND handshake runs on client messages
      * to our windows (XdndEnter/Position/Leave/Drop), routed from
@@ -480,7 +480,7 @@ struct fdk_platform_window {
      * never manages a subwindow) and gates the popup-anchor and
      * stacking ops to subsurface-only callers. */
     int is_subsurface;
-    /* Per-window X Input Context (1.3.1): created at window create
+    /* Per-window X Input Context (1.0.0): created at window create
      * when the connection has an XIM; Xutf8LookupString resolves
      * full-Unicode text through it. NULL = ASCII fallback. Destroyed
      * (and focus-unset) with the window. */
@@ -502,7 +502,7 @@ struct fdk_platform_window {
      * them (translated to a close request in x11_events.c, never
      * delivered as a button event). */
     int popup;
-    /* Input-transparent popup (1.3.2, tooltips): set at CREATE from
+    /* Input-transparent popup (1.0.0, tooltips): set at CREATE from
      * fdk_window_options.input_transparent — empty XShape input
      * region applied at create, popup grab never taken (see
      * fdk_x11_window_show), so the hint is click-through and never
@@ -556,7 +556,7 @@ struct fdk_platform_window {
     uint64_t popup_grab_ms;
     char popup_release_reason[32];
 
-    /* 1.2.0 DnD: the formats this window accepts as a drop target
+    /* 1.0.0 DnD: the formats this window accepts as a drop target
      * (mirror of the fdk_window's public mask, kept live by the
      * window_set_drop_formats op — the XDND accept/reject reply in
      * every Status message reads THIS copy). */
@@ -579,7 +579,7 @@ struct fdk_platform_window {
      * pre-maximize geometry for the bare-X fallback's restore. */
     int maximized;
     int minimized;
-    int fullscreen; /* 1.4.10: tracked via _NET_WM_STATE property */
+    int fullscreen; /* 1.0.0: tracked via _NET_WM_STATE property */
     int has_saved;
     fdk_i32 saved_x, saved_y, saved_w, saved_h;
 
@@ -615,7 +615,7 @@ struct fdk_platform_window {
                                clears again — the resize-flash fix;
                                see x11_window.c) */
 
-    /* GPU present lane state (1.4.18, x11_gl.c): non-NULL while this
+    /* GPU present lane state (1.0.0, x11_gl.c): non-NULL while this
      * window presents through GLX (staging buffer + context +
      * texture). NULL = the classic SHM/copy path — including after a
      * mid-session downgrade, which is permanent per window.
@@ -792,7 +792,7 @@ fdk_result fdk_x11_window_begin_resize(fdk_platform_window *pwindow,
                                        int edge, fdk_i32 local_x,
                                        fdk_i32 local_y);
 
-/* Pointer introspection + cursor shaping (1.1.4; the optional ops
+/* Pointer introspection + cursor shaping (1.0.0; the optional ops
  * behind the same-named platform_internal.h entries).
  * fdk_x11_window_query_pointer returns nonzero only when the pointer
  * is inside the window's current bounds. fdk_x11_window_set_cursor
@@ -1118,14 +1118,14 @@ int fdk_x11_clipboard_handle_event(fdk_platform_connection *conn,
 fdk_result fdk_x11_clipboard_set_text(fdk_platform_connection *conn,
                                       const char *text);
 char *fdk_x11_clipboard_get_text(fdk_platform_connection *conn);
-/* 1.3.4: the PRIMARY selection (XA_PRIMARY) over the same helper
+/* 1.0.0: the PRIMARY selection (XA_PRIMARY) over the same helper
  * window and the same ICCCM machinery. set is BEST-EFFORT (no
  * ownership-verification round-trip — the classic model re-owns per
  * selection change). */
 fdk_result fdk_x11_clipboard_set_primary_text(
     fdk_platform_connection *conn, const char *text);
 char *fdk_x11_clipboard_get_primary_text(fdk_platform_connection *conn);
-/* 1.4.9: the clipboard's image/png surface (atomic property
+/* 1.0.0: the clipboard's image/png surface (atomic property
  * transfers; the 4 MiB documented cap). */
 fdk_result fdk_x11_clipboard_set_image(fdk_platform_connection *conn,
                                        const unsigned char *png,
@@ -1138,7 +1138,7 @@ fdk_result fdk_x11_clipboard_set_uris(fdk_platform_connection *conn,
                                       size_t count);
 char *fdk_x11_clipboard_get_uris(fdk_platform_connection *conn);
 
-/* THE selection-read engine (1.4.14, x11_clipboard.c): convert
+/* THE selection-read engine (1.0.0, x11_clipboard.c): convert
  * `selection`/`target` onto `requestor`'s atom_fdk_selection
  * property, wait the bounded notify, read atomic/multi-part/INCR
  * (foreign requestors get PropertyChangeMask for the flight, their

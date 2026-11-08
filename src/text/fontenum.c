@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "text"
 
 /*
- * fontenum.c — system font enumeration (1.4.3)
+ * fontenum.c — system font enumeration (1.0.0)
  *
  * The font-scan surface exposed as an API: every LOADABLE face under
  * the discovery chain's user-prioritized and standard roots, one

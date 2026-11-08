@@ -1,8 +1,8 @@
 /*
  * discover.c — theme discovery: the search path, name lookup, and
- * the available-theme enumeration (1.4.13)
+ * the available-theme enumeration (1.0.0)
  *
- * The library half of the CLI story. Until 1.4.13 a theme was a path
+ * The library half of the CLI story. Until 1.0.0 a theme was a path
  * an application already knew (fdk_theme_load) or a string it parsed
  * itself; there was no way to ASK the system what is installed, and
  * no way for a user to say "my desktop is Matrix now" once, for every
@@ -119,12 +119,12 @@ static bool theme_dirs_add(char dirs[THEME_MAX_DIRS][1024], size_t *n,
  * and stack buffers copied into `storage` — the caller copies what it
  * needs before the storage goes out of scope.
  *
- * 1.4.16: the custom folder. $HOME/.FDKThemes joins right after the
+ * 1.0.0: the custom folder. $HOME/.FDKThemes joins right after the
  * environment override (the ~/.fonts precedent applied to themes —
  * a user's personal folder outranks every system location), and the
  * XDG entries each scan TWO subfolders: the canonical fdk/.FDKThemes
  * (where `make install` now puts the shipped set) first, then the
- * 1.4.13 fdk/themes (still honored, so a system an older FDK
+ * 1.0.0 fdk/themes (still honored, so a system an older FDK
  * installed into keeps resolving its themes). Same-stem shadowing
  * follows list order: canonical wins over legacy within one entry. */
 static size_t theme_dirs(char dirs[THEME_MAX_DIRS][1024]) {

@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "prefs"
 
 /*
- * prefs.c — application preferences (1.3.7)
+ * prefs.c — application preferences (1.0.0)
  *
  * A tiny strict key-value store: one ordered array of
  * (section, name, value) rows, an ordered section list for layout,

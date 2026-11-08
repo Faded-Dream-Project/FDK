@@ -7,19 +7,19 @@
  *
  *   Profile frame   — a Toggle and two Checkboxes
  *   Renderer frame  — a radio group (the frame's children)
- *   Session frame   — the 1.4.1 furniture: an Expander whose door
+ *   Session frame   — the 1.0.0 furniture: an Expander whose door
  *                     reveals advanced options, and a Paned whose
  *                     divider DRAGS (and answers the arrows when
  *                     focused — Tab to it)
- *   1.4.5 frame     — the item grid: an IconView of glyph cells
- *   1.4.11 frame    — markup: rich text (bold/italic/color/underline
+ *   1.0.0 frame     — the item grid: an IconView of glyph cells
+ *   1.0.0 frame    — markup: rich text (bold/italic/color/underline
  *                     /strikethrough) in NOWRAP/WRAP/ELLIPSIZE
  *                     labels, a button, and the tooltips
  *                      (click, ctrl/shift, keyboard grid nav)
- *   1.4.4 frame     — the modern batch: a REORDERABLE notebook, a
+ *   1.0.0 frame     — the modern batch: a REORDERABLE notebook, a
  *                      color-well button, an icon-slot entry, an
  *                      overlay-scrollbar list
- *   1.4.3 frame     — the chooser batch's furniture: a MenuButton
+ *   1.0.0 frame     — the chooser batch's furniture: a MenuButton
  *                     whose attached model pops up (the app keeps
  *                     owning the model), a VERTICAL slider with
  *                     marks, a CROSSFADE revealer (a real per-pixel
@@ -45,7 +45,7 @@
  *
  * The progress bar sweeps once on startup (so a screenshot shows it
  * mid-fill) and then holds; Tab moves focus through the controls.
- * 1.4.17: the whole catalog scrolls — the window opens screen-sized
+ * 1.0.0: the whole catalog scrolls — the window opens screen-sized
  * (560x860) with the column inside a ScrollView, so nothing hides
  * below the fold; wheel it, drag the classic edge bars, or grow the
  * window tall enough that the scroll range collapses to zero.
@@ -115,7 +115,7 @@ static void on_docs(fdk_widget *w, void *user) {
     set_status("The documentation would open in a viewer.");
 }
 
-/* ---- 1.4.4: the modern-batch callbacks ---- */
+/* ---- 1.0.0: the modern-batch callbacks ---- */
 
 static void on_page_reordered(fdk_widget *notebook, size_t from,
                               size_t to, void *user) {
@@ -148,7 +148,7 @@ static void on_path_icon(fdk_widget *entry, fdk_entry_slot slot,
                "through to the caret.");
 }
 
-/* ---- 1.4.5: the grid callbacks ---- */
+/* ---- 1.0.0: the grid callbacks ---- */
 
 static void on_iv_selection(fdk_widget *view, void *user) {
     (void)view;
@@ -165,7 +165,7 @@ static void on_iv_activate(fdk_widget *view, size_t index, void *user) {
     set_status(buf);
 }
 
-/* ---- 1.4.3: the chooser-batch callbacks ---- */
+/* ---- 1.0.0: the chooser-batch callbacks ---- */
 
 static fdk_context *g_ctx = NULL; /* the dialogs' context */
 static fdk_widget *g_fade_revealer = NULL; /* the crossfade door  */
@@ -195,7 +195,7 @@ static void on_about(fdk_widget *w, void *user) {
     (void)user;
     fdk_about_dialog_options opts = {
         .program_name = "FDK Widget Catalog",
-        .version = "Milestone 1.4.3",
+        .version = "Milestone 1.0.0",
         .comments = "The About dialog: an identity card built from the "
                     "stock catalog — logo, name, version, comments, "
                     "copyright, a website row, and a scrolling license.",
@@ -246,7 +246,7 @@ int main(int argc, char **argv) {
     g_ctx = ctx;
 
     fdk_example ex;
-    /* 1.4.17: the catalog's natural height (~2200 px) is taller than
+    /* 1.0.0: the catalog's natural height (~2200 px) is taller than
      * any screen — the window now opens at a screen-friendly height
      * and the WHOLE column rides a ScrollView, so every frame is
      * reachable without resizing. The status line and the title band
@@ -282,7 +282,7 @@ int main(int argc, char **argv) {
     fdk_widget *profile = NULL;
     (void)fdk_frame_create(content, font16, "Profile", &profile);
     fdk_widget_set_background_token(profile, FDK_TK_CONTROL_BACKGROUND);
-    /* 1.4.0: an entry with PLACEHOLDER text — the hint paints in the
+    /* 1.0.0: an entry with PLACEHOLDER text — the hint paints in the
      * disabled-text color only while the field is empty. */
     fdk_widget *search = NULL;
     (void)fdk_entry_create(profile, font16, "", &search);
@@ -325,7 +325,7 @@ int main(int argc, char **argv) {
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 
-    /* --- frame: session (the 1.4.1 interactive furniture) ---
+    /* --- frame: session (the 1.0.0 interactive furniture) ---
      *
      * The Expander's door reveals the "advanced" options (click the
      * header, or Tab to it and press Space; the chevron rotates as
@@ -370,7 +370,7 @@ int main(int argc, char **argv) {
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 
-    /* --- frame: the 1.4.3 furniture (the chooser batch) ---
+    /* --- frame: the 1.0.0 furniture (the chooser batch) ---
      *
      * A MenuButton with an ATTACHED model (the model stays the
      * demo's — reusable, app-owned); a VERTICAL slider with marks
@@ -380,7 +380,7 @@ int main(int argc, char **argv) {
      * choosers. */
     {
         fdk_widget *f143 = NULL;
-        (void)fdk_frame_create(content, font16, "1.4.3 — choosers",
+        (void)fdk_frame_create(content, font16, "1.0.0 — choosers",
                                &f143);
         fdk_widget_set_background_token(f143,
                                 FDK_TK_CONTROL_BACKGROUND);
@@ -457,7 +457,7 @@ int main(int argc, char **argv) {
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 
-    /* --- frame: the 1.4.4 furniture (the modern batch) ---
+    /* --- frame: the 1.0.0 furniture (the modern batch) ---
      *
      * A REORDERABLE notebook (drag any tab — the page keeps
      * showing while its tab moves); a COLOR-WELL button whose
@@ -467,7 +467,7 @@ int main(int argc, char **argv) {
      * idle — wheel it and watch the bar breathe). */
     {
         fdk_widget *f144 = NULL;
-        (void)fdk_frame_create(content, font16, "1.4.4 — modern batch",
+        (void)fdk_frame_create(content, font16, "1.0.0 — modern batch",
                                &f144);
         fdk_widget_set_background_token(f144,
                                 FDK_TK_CONTROL_BACKGROUND);
@@ -559,7 +559,7 @@ int main(int argc, char **argv) {
 
     (void)fdk_separator_create(content, FDK_HORIZONTAL, NULL);
 
-    /* --- frame: the 1.4.5 furniture (the item grid) ---
+    /* --- frame: the 1.0.0 furniture (the item grid) ---
      *
      * An IconView: fixed-size cells (glyph over label) flowing in
      * as many columns as the width fits; the whole selection model
@@ -567,7 +567,7 @@ int main(int argc, char **argv) {
      * navigation (Down steps a ROW). */
     {
         fdk_widget *f145 = NULL;
-        (void)fdk_frame_create(content, font16, "1.4.5 — item grid",
+        (void)fdk_frame_create(content, font16, "1.0.0 — item grid",
                                &f145);
         fdk_widget_set_background_token(f145,
                                 FDK_TK_CONTROL_BACKGROUND);
@@ -595,7 +595,7 @@ int main(int argc, char **argv) {
                 "(Down steps a whole row; Enter opens)");
     }
 
-    /* --- frame: the 1.4.9 picture (the image display) ---
+    /* --- frame: the 1.0.0 picture (the image display) ---
      *
      * The logo under all four fit policies is a four-way viewer:
      * NONE (1:1 clipped), CONTAIN (letterbox), COVER (crop), FILL
@@ -604,7 +604,7 @@ int main(int argc, char **argv) {
     {
         fdk_widget *f149 = NULL;
         (void)fdk_frame_create(content, font16,
-                               "1.4.9 — picture (four fits)",
+                               "1.0.0 — picture (four fits)",
                                &f149);
         fdk_widget_set_background_token(f149,
                                 FDK_TK_CONTROL_BACKGROUND);
@@ -642,7 +642,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* --- frame: the 1.4.11 markup (rich text everywhere) ---
+    /* --- frame: the 1.0.0 markup (rich text everywhere) ---
      *
      * One tiny tag vocabulary (<b> <i> <u> <s> <color=#rrggbb> +
      * entities) driving every text surface: a NOWRAP label with
@@ -653,7 +653,7 @@ int main(int argc, char **argv) {
     {
         fdk_widget *f1411 = NULL;
         (void)fdk_frame_create(content, font16,
-                               "1.4.11 — markup (rich text)", &f1411);
+                               "1.0.0 — markup (rich text)", &f1411);
         fdk_widget_set_background_token(f1411,
                                 FDK_TK_CONTROL_BACKGROUND);
 
@@ -755,7 +755,7 @@ int main(int argc, char **argv) {
     (void)fdk_grid_attach(cells, gc[3], 0, 1, 2, 1); /* colspan 2 */
     (void)fdk_grid_attach(cells, gc[4], 2, 1, 1, 1);
 
-    /* --- button row (1.4.0 roles) --- */
+    /* --- button row (1.0.0 roles) --- */
     fdk_widget *row = NULL;
     (void)fdk_box_create(content, FDK_HORIZONTAL, &row);
     fdk_box_set_spacing(row, 10);
@@ -774,7 +774,7 @@ int main(int argc, char **argv) {
     (void)fdk_widget_set_tooltip(
         reset, "Clear the progress bar and the apply counter");
     /* A toggle-BUTTON (stays pressed in) and a destructive one —
-     * the 1.4.0 role/state vocabulary. */
+     * the 1.0.0 role/state vocabulary. */
     fdk_widget *pin = NULL;
     (void)fdk_button_create(row, font16, "Pin", &pin);
     fdk_button_set_checked(pin, true);
@@ -791,7 +791,7 @@ int main(int argc, char **argv) {
     fdk_widget *filler = NULL;
     (void)fdk_widget_create(row, NULL, (fdk_rect){0, 0, 0, 1}, &filler);
     fdk_widget_set_expand(filler, true, false);
-    /* 1.4.1: the LINK-styled button (flat, link-colored, the
+    /* 1.0.0: the LINK-styled button (flat, link-colored, the
      * underline fades in under the pointer) and the busy SPINNER
      * (scanning for the duration of the startup sweep — then it
      * parks, which is what a screenshot shows). */
@@ -848,7 +848,7 @@ int main(int argc, char **argv) {
         /* One startup sweep so a screenshot shows the bar mid-fill;
          * then it holds (an idle app presents nothing). The spinner
          * scans for the same duration, then parks (the "door" on
-         * the 1.4.1 furniture stays as the user left it). */
+         * the 1.0.0 furniture stays as the user left it). */
         if (ex.frames < 120) {
             fdk_progress_set_fraction(
                 progress, (fdk_f32)ex.frames / 120.0f);

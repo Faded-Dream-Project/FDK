@@ -14,7 +14,7 @@
 /* Translates an XKeyEvent's state field (the modifier mask X reports
  * on THIS event, not a separate query) into fdk_key_modifier bits.
  * Shared with the DnD layer (XQueryPointer's state field uses the
- * same mask encoding) — hence non-static (1.3.0). */
+ * same mask encoding) — hence non-static (1.0.0). */
 fdk_u32 fdk__x11_translate_modifiers(unsigned int x_state) {
     fdk_u32 mods = 0;
     if (x_state & ShiftMask)   mods |= FDK_MOD_SHIFT;
@@ -39,7 +39,7 @@ static fdk_scancode x11_keycode_to_scancode(unsigned int keycode) {
 }
 
 /* Resolves the Unicode codepoint an XKeyEvent produces given its
- * current modifier state. With a per-window input context (1.3.1)
+ * current modifier state. With a per-window input context (1.0.0)
  * this is Xutf8LookupString — layout-aware, full Unicode (the user's
  * ACTUAL keyboard, é/ä/中 included); without one it falls back to
  * XLookupString, which resolves ASCII reliably and approximates the
@@ -167,7 +167,7 @@ static fdk_u32 x11_lookup_codepoint(fdk_platform_window *pwindow,
     return 0;
 }
 
-/* HiDPI (1.4.5): physical window coordinates -> logical tree
+/* HiDPI (1.0.0): physical window coordinates -> logical tree
  * coordinates. The X window is logical x conn->scale pixels; every
  * coordinate handed to the core (and thus to widget hit-testing)
  * divides back down. Integer division by an integer scale is the
@@ -287,7 +287,7 @@ int fdk_x11_translate_event(fdk_platform_window *pwindow, XEvent *xevent,
                 xevent->xkey.keycode == 9) {
                 fdk_x11_window_popup_set_release_reason(pwindow, "escape");
             }
-            /* Repeat detection (1.3.0): with XKB detectable
+            /* Repeat detection (1.0.0): with XKB detectable
              * auto-repeat (requested at connect), a KeyPress of an
              * already-down keycode IS the repeat — track the 256-bit
              * down bitmap. v1 hardcoded 0 while a comment claimed

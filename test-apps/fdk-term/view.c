@@ -39,7 +39,7 @@ static void paint(tview *v, fdk_surface *s, fdk_rect bounds) {
      * with bounds.x/y; the terminal used to paint at local (0,0),
      * which shifted the whole grid up by the menubar+tabbar height —
      * the prompt landed inside the clipped chrome strip and never
-     * showed (the 1.4.20 "can't type" report: the keys were reaching
+     * showed (the 1.0.0 "can't type" report: the keys were reaching
      * the pty all along, the echo was drawn off the viewport). */
     const fdk_i32 ox = bounds.x, oy = bounds.y;
 

@@ -1,7 +1,7 @@
 /*
  * test_textview_editor.c — the §30/STEP-2a editor-surface gaps in
  * TextView, test-first. fdk-edit (a real text editor, the §24 spec)
- * needs four things the 1.4.8 TextView never grew:
+ * needs four things the 1.0.0 TextView never grew:
  *
  *   1. CARET POSITION I/O — get/set the caret as a byte offset
  *      (goto-line, find-result jumps, session restore all want to

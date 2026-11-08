@@ -20,7 +20,7 @@ committed):
 
 Reading them honestly: opening a 50k directory costs ~105 ms (the
 opendir/stat walk — I/O bound, not FDK); filling the view ~102 ms
-with `fdk_iconview_begin_batch` (the 1.3.0 batching is what makes
+with `fdk_iconview_begin_batch` (the 1.0.0 batching is what makes
 this O(N) instead of O(N²)); average scroll frames 2.55 ms —
 comfortably inside a 60 Hz frame budget — with one 77 ms worst-case
 spike (the first frame after a large jump, allocation + full

@@ -43,12 +43,12 @@
 #define ENTRY_MAX_TEXT (64u * 1024u) /* bounded input (security.md) */
 #define ENTRY_DBLCLICK_MS 400
 #define ENTRY_DBLCLICK_SLOP 4
-/* 1.4.2 search preset geometry (superseded 1.4.4 by entry_zone_w,
+/* 1.0.0 search preset geometry (superseded 1.0.0 by entry_zone_w,
  * kept only as the shared glyph-box constants): a 16-px glyph box
  * + 6-px gap, the symbolic-row-icon geometry. */
 #define ENTRY_SEARCH_GLYPH 16
 #define ENTRY_SEARCH_GLYPH_GAP 6
-/* Caret blink cadence (1.3.1, timers): GTK's 530ms, the desktop
+/* Caret blink cadence (1.0.0, timers): GTK's 530ms, the desktop
  * convention — two full blinks per second reads as "alive" without
  * distracting. The phase RESETS on every caret move/edit (the same
  * restart-on-activity rule GTK applies). */
@@ -64,7 +64,7 @@ typedef struct fdk_entry {
     size_t anchor;         /* selection anchor (== caret: no sel)     */
     char *preedit;         /* owned, NULL when no preedit             */
     size_t preedit_len;
-    char *placeholder;     /* owned, NULL when unset (1.4.0)         */
+    char *placeholder;     /* owned, NULL when unset (1.0.0)         */
     fdk_entry_changed_fn on_changed;
     void *on_changed_data;
     fdk_entry_activate_fn on_activate;
@@ -79,13 +79,13 @@ typedef struct fdk_entry {
     bool password;         /* render bullets, not glyphs            */
     bool read_only;        /* selection + copy yes, edits no        */
     size_t max_len;        /* editable cap in bytes; 0 = 64 KiB     */
-    /* Caret blink (1.3.1): NULL when unfocused or detached from any
+    /* Caret blink (1.0.0): NULL when unfocused or detached from any
      * window (a detached tree has no context — the caret stays solid
      * there, which is exactly why the headless tests never see it
      * blink). */
     fdk_timer *blink_timer;
     bool caret_on;
-    /* ---- Undo history (1.3.3) ----
+    /* ---- Undo history (1.0.0) ----
      *
      * Lazily created on the FIRST recorded edit (display-only and
      * read-only entries never allocate one). undo_applying guards
@@ -103,7 +103,7 @@ typedef struct fdk_entry {
     fdk_undo_stack *undo;
     bool undo_applying;
     bool undo_group_pending;
-    /* ---- PRIMARY selection (1.3.4) ----
+    /* ---- PRIMARY selection (1.0.0) ----
      *
      * True while THIS entry believes it last pushed a non-empty
      * text to the PRIMARY selection (the classic Unix "current
@@ -114,7 +114,7 @@ typedef struct fdk_entry {
      * classic observable: middle-click pastes nothing). Headless /
      * standalone trees never set it — no context, no pushes. */
     bool primary_pushed;
-    /* ---- Search preset (1.4.2) + icon slots (1.4.4) ----
+    /* ---- Search preset (1.0.0) + icon slots (1.0.0) ----
      *
      * The GtkSearchEntry face is now BUILT on the generic slots
      * (leading SEARCH + trailing CLEAR): search_mode keeps only the
@@ -123,12 +123,12 @@ typedef struct fdk_entry {
      * carry the geometry, the glyphs, the hover pills, and the
      * presses. */
     bool search_mode;
-    /* ---- Icon slots (1.4.4) ----
+    /* ---- Icon slots (1.0.0) ----
      *
      * Per-slot: the built-in glyph, an optional custom painter that
      * replaces it, the sensitivity flag (dimmed + non-interactive),
      * the hover flag (the soft pill), and the press callback. The
-     * CLEAR glyph keeps its 1.4.2 semantics: zone exists only while
+     * CLEAR glyph keeps its 1.0.0 semantics: zone exists only while
      * there is text, press = the honest splice. */
     fdk_entry_icon icon[2];
     fdk_entry_icon_paint_fn icon_paint[2];
@@ -137,7 +137,7 @@ typedef struct fdk_entry {
     bool icon_hover[2];
     fdk_entry_icon_fn on_icon[2];
     void *on_icon_data[2];
-    /* ---- Search debounce (1.4.3) ----
+    /* ---- Search debounce (1.0.0) ----
      *
      * The debounced twin of on_changed (GTK's search-changed): fires
      * `search_ms` after the LAST edit (set_text included — the clear
@@ -159,7 +159,7 @@ static const fdk_entry *entry_of_const(const fdk_widget *w) {
     return (const fdk_entry *)(const void *)w;
 }
 
-/* ---- caret blink (1.3.1) ---- */
+/* ---- caret blink (1.0.0) ---- */
 
 static void entry_blink_tick(fdk_timer *timer, void *user) {
     (void)timer;
@@ -206,7 +206,7 @@ static void entry_blink_restart(fdk_entry *e) {
     fdk_timer_reset(e->blink_timer, ENTRY_BLINK_MS);
 }
 
-/* ---- search debounce (1.4.3) ----
+/* ---- search debounce (1.0.0) ----
  *
  * Both on_changed fire sites call this after firing the regular
  * callback: a search entry with a search callback re-arms the timer
@@ -352,7 +352,7 @@ static void word_range(const char *s, size_t len, size_t i,
 
 /* ---- geometry ---- */
 
-/* ---- icon slot geometry (1.4.4; the 1.4.2 search zones generalized) ----
+/* ---- icon slot geometry (1.0.0; the 1.0.0 search zones generalized) ----
  *
  * One zone per side: the glyph box (16 px) + its gap (6 px),
  * reserved only while the slot carries something. The TRAILING
@@ -384,7 +384,7 @@ static fdk_i32 entry_right_inset(const fdk_entry *e) {
 
 /* The slot whose zone contains local x (-1 when none / decorative).
  * The leading zone spans the inset (padding + glyph box + gap); the
- * trailing zone mirrors the 1.4.2 clear-zone math (the glyph box +
+ * trailing zone mirrors the 1.0.0 clear-zone math (the glyph box +
  * its gap off the right edge, padding excluded). */
 static int entry_slot_at(const fdk_entry *e, fdk_f32 x) {
     if (entry_zone_w(e, FDK_ENTRY_SLOT_LEADING) > 0 &&
@@ -400,7 +400,7 @@ static int entry_slot_at(const fdk_entry *e, fdk_f32 x) {
 
 /* A slot serves its presses when it is sensitive AND either carries
  * a callback or is the trailing CLEAR with something to clear (its
- * clear action is built in — the 1.4.2 contract generalized).
+ * clear action is built in — the 1.0.0 contract generalized).
  * Decorative slots fall through to the caret machinery. */
 static bool entry_slot_interactive(const fdk_entry *e, int slot) {
     if (slot < 0 || !e->icon_sensitive[slot]) {
@@ -678,7 +678,7 @@ static fdk_result entry_ensure_cap(fdk_entry *e, size_t need) {
     return FDK_OK;
 }
 
-/* ---- undo history (1.3.3) ---------------------------------------------
+/* ---- undo history (1.0.0) ---------------------------------------------
  *
  * Every mutation routes through entry_splice, so the recorder lives
  * there and sees one uniform op shape: "range [from,to) was
@@ -972,7 +972,7 @@ static void entry_undo_record(fdk_entry *e, size_t from, size_t to,
  * Maintains every invariant and fires on_changed. Returns FDK_ERR_*,
  * leaves the entry untouched on failure.
  *
- * 1.3.3: this is the single mutation primitive, so it is also the
+ * 1.0.0: this is the single mutation primitive, so it is also the
  * undo recorder. Applications driven by an op's undo/redo closure
  * set undo_applying (see entry_apply_op) and skip the recording.
  * Copies for the record are taken BEFORE the text moves; if the
@@ -1123,7 +1123,7 @@ static void entry_clipboard_paste(fdk_entry *e) {
     (void)r; /* oversized paste is refused with a warning; fine */
 }
 
-/* ---- PRIMARY selection (1.3.4) ---- */
+/* ---- PRIMARY selection (1.0.0) ---- */
 
 /* The classic Unix "current selection" buffer, distinct from the
  * copy/paste CLIPBOARD: text becomes PRIMARY by being SELECTED, and
@@ -1206,7 +1206,7 @@ static void entry_delete_selection(fdk_entry *e) {
     }
     size_t lo = (e->anchor < e->caret) ? e->anchor : e->caret;
     size_t hi = (e->anchor < e->caret) ? e->caret : e->anchor;
-    /* 1.3.3 gesture grouping: typing over a selection runs this
+    /* 1.0.0 gesture grouping: typing over a selection runs this
      * delete and then an insert in the SAME keystroke — the user
      * performed ONE "replace" and undo must step it as one. The
      * flag is set AFTER the delete's own record (the delete record
@@ -1239,7 +1239,7 @@ static fdk_i64 now_ms(void) {
  * select_range) can never silently skip a repaint — the exact bug
  * the entry paint tests caught in the first cut.
  *
- * 1.3.4: this is also THE PRIMARY-selection sync point — the classic
+ * 1.0.0: this is also THE PRIMARY-selection sync point — the classic
  * Unix model is "the selection owns PRIMARY", so every real change
  * re-owns it (best-effort, no round-trip: drag-selects fire this at
  * pointer rate). See entry_primary_sync for the politeness rules. */
@@ -1296,8 +1296,8 @@ static bool entry_handle_event(fdk_widget *w,
         if ((w->flags & FDK_WF_ENABLED) == 0) {
             return false;
         }
-        /* 1.4.4 — the icon slots: a press inside a reserved zone
-         * serves the slot, not the caret. CLEAR carries its 1.4.2
+        /* 1.0.0 — the icon slots: a press inside a reserved zone
+         * serves the slot, not the caret. CLEAR carries its 1.0.0
          * semantics everywhere (the honest, undoable splice — the
          * click-count machinery never sees a consumed press); any
          * interactive slot fires its callback AFTER the built-in
@@ -1379,9 +1379,9 @@ static bool entry_handle_event(fdk_widget *w,
             entry_move_caret(e, hit, true);
             return true;
         }
-        /* 1.4.4 — the slots' hover pills (MOTION carries real
+        /* 1.0.0 — the slots' hover pills (MOTION carries real
          * coordinates; synthesized ENTER/LEAVE do not — the paned's
-         * 1.4.1 lesson). One walk serves both slots. */
+         * 1.0.0 lesson). One walk serves both slots. */
         {
             int hslot = entry_slot_at(e, ev->position.x);
             bool any = false;
@@ -1435,7 +1435,7 @@ static bool entry_handle_event(fdk_widget *w,
             }
         }
 
-        /* Undo/redo (1.3.3): Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y
+        /* Undo/redo (1.0.0): Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y
          * redo — the two spellings every desktop ships. Read-only
          * entries refuse (the mutator contract above) and BUBBLE the
          * key: a dialog's Escape handling must not be shadowed. */
@@ -1513,7 +1513,7 @@ static bool entry_handle_event(fdk_widget *w,
             }
             return true;
         case FDK_KEY_ESC:
-            /* The search preset's Esc ladder (1.4.2): with text on
+            /* The search preset's Esc ladder (1.0.0): with text on
              * board, the FIRST Escape clears it (GtkSearchEntry
              * semantics — consumed); an empty search field falls
              * through to the selection-collapse rule below, and a
@@ -1527,7 +1527,7 @@ static bool entry_handle_event(fdk_widget *w,
              * nothing selected there is nothing to collapse: bubble
              * the Escape instead of eating it — a prompt dialog's
              * Cancel rides the window layer's Escape handling, and a
-             * lone Entry swallowing it would wedge that (1.2.1). */
+             * lone Entry swallowing it would wedge that (1.0.0). */
             if (e->anchor != e->caret) {
                 entry_set_selection(e, e->caret, e->caret);
                 return true;
@@ -1600,10 +1600,10 @@ static bool entry_handle_event(fdk_widget *w,
     return false;
 }
 
-/* ---- icon slot paint (1.4.4) ---------------------------------------
+/* ---- icon slot paint (1.0.0) ---------------------------------------
  *
  * The slot's glyph box origin (widget-local top-left, vertically
- * centered like the 1.4.2 glyphs were) and the shared painter: the
+ * centered like the 1.0.0 glyphs were) and the shared painter: the
  * hover pill behind interactive slots, then the glyph — the custom
  * painter when one owns the slot, else the built-in vector language
  * (SEARCH's lens, CLEAR's X, and the four symbolic row glyphs at the
@@ -1682,7 +1682,7 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         return;
     }
 
-    /* The modern field (1.4.0): a FLAT, slightly sunken surface —
+    /* The modern field (1.0.0): a FLAT, slightly sunken surface —
      * ENTRY_BACKGROUND fill with a 1px ENTRY_BORDER outline — instead
      * of v1's raised control fill. Focus reads as the themed ring
      * (FOCUS_RING token, FOCUS_RING_WIDTH metric) drawn over the
@@ -1772,8 +1772,8 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
                                     spans[i].x1 - spans[i].x0,
                                     bounds.height - 4};
                     if (sel.width > 0 && sel.height > 0) {
-                        /* The 1.3.2 SELECTION_BACKGROUND token, wired
-                         * in 1.4.0 (the hardcoded accent-alpha is
+                        /* The 1.0.0 SELECTION_BACKGROUND token, wired
+                         * in 1.0.0 (the hardcoded accent-alpha is
                          * gone). */
                         fdk_surface_fill_rect(surface, sel,
                                               fdk__pal_selection());
@@ -1821,7 +1821,7 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
                        baseline);
     }
 
-    /* Placeholder (1.4.0): shown only when there is nothing else to
+    /* Placeholder (1.0.0): shown only when there is nothing else to
      * draw — empty buffer, no preedit — in the disabled-text color.
      * It never joins selection/caret geometry: hit-testing, the caret
      * position, and copy all see a genuinely empty field. Overlong
@@ -1862,7 +1862,7 @@ static void entry_paint(fdk_widget *w, fdk_surface *surface,
         }
     }
 
-    /* 1.4.4 — both icon slots, painted over the field fill and the
+    /* 1.0.0 — both icon slots, painted over the field fill and the
      * text (the zones are reserved: nothing overlaps). The glyphs
      * are font-independent vector strokes, so they paint even when
      * the entry has no font for its text. */
@@ -2072,8 +2072,8 @@ fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
     e->caret_on = true;
     e->undo = NULL;       /* lazy: first recorded edit allocates it */
     e->undo_applying = false;
-    e->search_mode = false; /* the plain entry (1.4.2 preset below) */
-    /* 1.4.4 icon slots: bare defaults (the widget zero-allocates,
+    e->search_mode = false; /* the plain entry (1.0.0 preset below) */
+    /* 1.0.0 icon slots: bare defaults (the widget zero-allocates,
     * but the semantic fields stay explicit like the rest above). */
     e->icon[0] = FDK_ENTRY_ICON_NONE;
     e->icon[1] = FDK_ENTRY_ICON_NONE;
@@ -2089,7 +2089,7 @@ fdk_result fdk_entry_create(fdk_widget *parent, fdk_font *font,
     e->on_icon[1] = NULL;
     e->on_icon_data[0] = NULL;
     e->on_icon_data[1] = NULL;
-    e->on_search = NULL;      /* 1.4.3 debounce */
+    e->on_search = NULL;      /* 1.0.0 debounce */
     e->on_search_data = NULL;
     e->search_timer = NULL;
     e->search_ms = 250;       /* GTK's search-changed default */
@@ -2121,7 +2121,7 @@ const char *fdk_entry_get_text(fdk_widget *entry) {
     return entry_of(entry)->text;
 }
 
-/* ---- search preset (1.4.2) ---- */
+/* ---- search preset (1.0.0) ---- */
 
 fdk_result fdk_search_entry_create(fdk_widget *parent, fdk_font *font,
                                    fdk_widget **out_entry) {
@@ -2129,7 +2129,7 @@ fdk_result fdk_search_entry_create(fdk_widget *parent, fdk_font *font,
     if (!fdk_ok(r)) {
         return r;
     }
-    /* The preset IS the slots now (1.4.4): leading SEARCH glyph,
+    /* The preset IS the slots now (1.0.0): leading SEARCH glyph,
      * trailing CLEAR with its text-conditional zone. search_mode
      * itself only carries the Esc ladder and the debounce. */
     fdk_entry *e = entry_of(*out_entry);
@@ -2148,7 +2148,7 @@ bool fdk_entry_is_search(fdk_widget *entry) {
     return entry_of(entry)->search_mode;
 }
 
-/* ---- search debounce API (1.4.3) ---- */
+/* ---- search debounce API (1.0.0) ---- */
 
 void fdk_search_entry_set_on_search(fdk_widget *entry,
                                     fdk_search_changed_fn on_search,
@@ -2207,7 +2207,7 @@ fdk_result fdk_entry_set_text(fdk_widget *entry, const char *text) {
     e->len = len;
     e->caret = len;
     e->anchor = len;
-    /* 1.3.3: a programmatic overwrite is a mode change, not an edit —
+    /* 1.0.0: a programmatic overwrite is a mode change, not an edit —
      * the old text's history cannot meaningfully undo INTO it (the
      * ops' byte offsets reference a buffer that no longer exists),
      * so the history is cleared. set_text stays the "reset the
@@ -2452,7 +2452,7 @@ size_t fdk_entry_get_max_length(fdk_widget *entry) {
     return (e->max_len > 0) ? e->max_len : ENTRY_MAX_TEXT;
 }
 
-/* ---- undo/redo (1.3.3 public API) ---- */
+/* ---- undo/redo (1.0.0 public API) ---- */
 
 bool fdk_entry_can_undo(fdk_widget *entry) {
     if (entry == NULL || entry->klass != &fdk_entry_class_def) {
@@ -2499,7 +2499,7 @@ fdk_result fdk_entry_redo(fdk_widget *entry) {
     return fdk_undo_stack_redo(e->undo);
 }
 
-/* ---- icon slots (1.4.4 public API) ---- */
+/* ---- icon slots (1.0.0 public API) ---- */
 
 /* The zone changed (or may have): relayout the container (the
  * natural size moved) and repaint. */

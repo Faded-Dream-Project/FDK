@@ -288,14 +288,14 @@ corner press, and IconicState from the iconify request. It installs
 after the bare-X tests and uninstalls before the suite ends so
 nothing downstream sees a phantom WM.
 
-**The self-confirming-test lesson (1.1.3)**: the fake WM above once
+**The self-confirming-test lesson (1.0.0)**: the fake WM above once
 interned its "maximized" atoms with the same misspelling the
 library had (`_NET_WM_STATE_MAXIMIZED_HORIZ` — the EWMH spec atom
 is `..._HORZ`), so the test verified FDK against a copy of FDK's
 own bug. The typo shipped: under real WMs the capability probe
 never matched, maximize silently degraded to the bare-X fallback,
 and the maximized state desynced from the WM (a user report from
-Cinnamon, reproduced and fixed in milestone 1.1.3). Two guards now
+Cinnamon, reproduced and fixed in milestone 1.0.0). Two guards now
 exist. `test_ewmh_atom_spelling` checks the library's interned
 atoms against the SPEC strings through a second X connection
 (XInternAtom with only-if-exists is the oracle: it returns None for
@@ -321,9 +321,9 @@ state event delivered, unmaximize restores the geometry, an edge
 resize grows the window, and — the regression that motivated the
 rig — the first CONTENT click after a WM-driven drag still
 activates the widget it hit-tests (the stale-grab check). This rig
-found and verified the fixes for all three 1.1.3 bugs.
+found and verified the fixes for all three 1.0.0 bugs.
 
-**The resize-flash probe (1.1.4)**: the second Cinnamon report —
+**The resize-flash probe (1.0.0)**: the second Cinnamon report —
 "the window flashes white while resizing" — is a TIMING bug: the
 flash exists only for the frames between the WM's resize and the
 client's repaint, so it cannot be asserted by the request/response
@@ -424,7 +424,7 @@ Real, observable behavior against a live X server (see
   test that proves the event loop, X11 event translation, and
   callback dispatch all work together, not just that individual
   pieces compile.
-- **Resize-storm backlog drain** (1.2.2): 300 `XResizeWindow` calls
+- **Resize-storm backlog drain** (1.0.0): 300 `XResizeWindow` calls
   from a SECOND X connection — exactly what a WM produces during an
   interactive drag, all queued server-side before one pump — must
   drain to the final size within a bounded alarm, the batched
@@ -432,7 +432,7 @@ Real, observable behavior against a live X server (see
   separate connection at the final size's far corner, a region that
   only exists once a framebuffer at that size was painted), and a
   NEW resize after the storm must still process in one pump. The
-  last check is liveness — the pre-1.2.2 wedge never returned to the
+  last check is liveness — the pre-1.0.0 wedge never returned to the
   caller at all (one core pegged forever inside a single
   `dispatch_pending`, input queued behind the backlog: "it doesn't
   update anymore and the title bar buttons stop working"). Post-fix
@@ -638,7 +638,7 @@ cannot run from a non-root prefix, which is why sway won (the
 Phase 3-era runs used weston's kiosk shell; the compositor was
 switched when Phase 8 needed xdg-decoration).
 
-Since 1.1.5 that weston "limitation" is a second, deliberate
+Since 1.0.0 that weston "limitation" is a second, deliberate
 verification world: `scripts/run_wayland_deco_weston.sh` runs the
 SAME suite plus the decorations demo against weston kiosk-shell
 headless — a real compositor that advertises no
@@ -686,7 +686,7 @@ all under ASan+UBSan with leak checking:
   runs (the xdg-decoration object ordering, and a leaked
   wl_surface.frame callback proxy when a window died before
   `done` arrived).
-- The GPU present lane's whole state machine (1.2.0 / D-1): the
+- The GPU present lane's whole state machine (1.0.0 / D-1): the
   policy matrix (FDK_NO_GL strict CPU; the small-surface size
   gate, deterministic on every machine; the large-window default
   OBSERVED because it is renderer-driven), engagement + presents
@@ -765,13 +765,13 @@ This section stays in the docs as a record of what was found and why,
 not just what the fix was — useful if similar flakiness ever
 resurfaces in a different environment.
 
-## The fontconfig 320 B exit "leak" (RESOLVED in 1.1.5 — was an FDK LSan-scoping bug)
+## The fontconfig 320 B exit "leak" (RESOLVED in 1.0.0 — was an FDK LSan-scoping bug)
 
 History: both suites intermittently failed ASan at exit with 320 B
 leaked entirely inside libfontconfig.so. The Task-22 investigation
 attributed it to cache temperature (failed-then-passed on identical
 trees; the cold/warm pattern was real) and waved it off as
-third-party noise. The 1.1.5 sway-rig work made it persistent and
+third-party noise. The 1.0.0 sway-rig work made it persistent and
 therefore investigable, and a minimal probe (three
 `fdk_font_load_system_default` calls, no display, no compositor)
 reproduced it deterministically — no compositor involved at all.
@@ -799,13 +799,13 @@ allocation(s)` — every stack frame inside `libfontconfig.so.1`. All
 test cases had already passed; the report came from ASan's exit-time
 leak scan. The failing run and a passing run of the IDENTICAL tree
 differed only in cache temperature, which is why it was filed as
-environment noise at the time — the 1.1.5 investigation (above)
+environment noise at the time — the 1.0.0 investigation (above)
 found the deterministic mechanism underneath the pattern and the
 FDK-side fix. The "re-run once, then investigate" protocol stands,
 with the amendment that PERSISTENCE (not stack framing alone)
 decides what is real.
 
-## The weston kiosk-shell proxy "leak" (RESOLVED in 1.1.5 — was collateral of a protocol-error kill)
+## The weston kiosk-shell proxy "leak" (RESOLVED in 1.0.0 — was collateral of a protocol-error kill)
 
 Running the Wayland suite against weston kiosk-shell tripped
 LeakSanitizer on one 96-byte wl_proxy inside libwayland-client —
@@ -815,7 +815,7 @@ FULLSCREEN, and the suite's client-driven resize committed a buffer
 larger than the configured state — a protocol error weston enforces
 by killing the connection. Everything after the kill "passed"
 vacuously on the dead connection, and the never-delivered teardown
-left the proxy behind at exit. The resize gate (roadmap 1.1.5 item
+left the proxy behind at exit. The resize gate (roadmap 1.0.0 item
 4) keeps the connection alive; the suite now runs leak-clean under
 weston with LeakSanitizer fully enabled — no ASAN_OPTIONS
 carve-outs anywhere in the rigs.
@@ -840,9 +840,9 @@ performance numbers are machine-dependent. The reference baseline and
 the findings it produced (including the 515x layout-batching win)
 live in `docs/performance.md`.
 
-## The Wayland rigs' 1.1.6 hardening (buffer pacing + cursors)
+## The Wayland rigs' 1.0.0 hardening (buffer pacing + cursors)
 
-The second Cinnamon-Wayland report (see roadmap 1.1.6) forced three
+The second Cinnamon-Wayland report (see roadmap 1.0.0) forced three
 test-infrastructure rebuilds and found two latent bugs — recorded
 here because every piece of them will bite again otherwise.
 
@@ -905,7 +905,7 @@ and the live re-test on the reported machine is the real control.
 **Cursor evidence is protocol-level.** The window-layer seam
 (fdk__window_cursor_edge) proves the compass armed; the actual
 wire proof is the suite's WAYLAND_DEBUG stderr (captured separately
-from stdout since 1.1.6) grepped for wl_pointer.set_cursor —
+from stdout since 1.0.0) grepped for wl_pointer.set_cursor —
 requests that can only exist if the theme loader found a real
 cursor file, parsed it, and uploaded it. Debian's Adwaita and
 "default" (Inherits=Adwaita) themes are present on the test image;
@@ -918,11 +918,11 @@ debug) mixes flags-silently and fails at link or run with no
 obvious cause ("FAIL: build", suite exit 2). `make clean` between
 battery phases is mandatory, not cosmetic.
 
-**1.1.7 — the churn budget is provably right but not sway-visible.**
+**1.0.0 — the churn budget is provably right but not sway-visible.**
 The resize-churn regression (exhaust the pool at size A, resize to
 size B inside a measured call) pins that the churned acquisition
 completes under a ceiling and the window settles — but the
-100ms-vs-10ms difference between the 1.1.6 and 1.1.7 budgets
+100ms-vs-10ms difference between the 1.0.0 and 1.0.0 budgets
 cannot be discriminated on sway: a probe trace of the PRE-FIX
 build shows sway releasing superseded wrong-size buffers within
 the resize call itself, crediting the pool before the acquisition
@@ -933,12 +933,12 @@ release window (Muffin under load — the live report). The suite's
 wall-clock assert is therefore a ceiling tripwire against a
 catastrophic reintroduction, NOT the discriminator; the live
 re-test on the reported machine is the control, exactly like the
-1.1.6 WARN-storm limitation above. Under kiosk-shell weston the
+1.0.0 WARN-storm limitation above. Under kiosk-shell weston the
 same block takes the honest compositor-owned skip (fullscreen
 refuses the client resize; the churn then rides the kiosk
 configure's own synchronous repaint).
 
-**1.1.7 — the top-edge press is protocol-asserted, both ways.**
+**1.0.0 — the top-edge press is protocol-asserted, both ways.**
 The titlebar-edge regression injects a REAL tap at the N edge
 over the deco band and the rig asserts >=1 xdg_toplevel.resize and
 ZERO xdg_toplevel.move in the suite's WAYLAND_DEBUG trace. The
@@ -959,7 +959,7 @@ earlier. Re-run the sed prefix fix after EVERY deb-extracting
 script, then verify with `pkg-config --cflags wayland-client`
 pointing at the prefix before blaming the rig.
 
-## 1.2.0 — capability validation rigs
+## 1.0.0 — capability validation rigs
 
 The headless suite grew two files: test_dnd_logic.c (the uri codec
 both backends share — CR/LF tolerance, comments, percent-decoding,
@@ -969,7 +969,7 @@ safety) and test_file_dialog_logic.c (the scan seam — hidden and
 dirs-only filtering, dirs-first ordering, no ./.. rows, unreadable
 dirs fail closed, entries ownership, result_free tolerance).
 
-1.5.1 grew the icon-theme suite, tests/test_icon_theme.c: a fully
+1.0.0 grew the icon-theme suite, tests/test_icon_theme.c: a fully
 synthetic theme tree (a fixture theme with an inheritance chain, a
 scalable directory, scale!=1 decoys, SVG decoys, a pixmaps fallback,
 deliberately-missing names — every fixture icon a SOLID-COLOR PNG so
@@ -986,14 +986,14 @@ sweep (30 consecutive runs) caught a real chain-walk bug reading
 uninitialized stack slots — the suite is run in a loop when the
 engine changes.
 
-The GUI/interop layer is where 1.2.0's real coverage lives, all
+The GUI/interop layer is where 1.0.0's real coverage lives, all
 against REAL external applications (no FDK-to-FDK):
 
   - scripts/xdnd_source.c — raw-Xlib XDND SOURCE (an external app
     dragging INTO FDK). Full handshake; exit 0 only on Finished
     success=1. The X11 suite spawns it against a registered window
     and asserts the decoded drops (files -> POSIX paths, text).
-    The incr-files / incr-text modes (1.4.14) serve the payload
+    The incr-files / incr-text modes (1.0.0) serve the payload
     through the ICCM INCR protocol in 64-byte chunks — what GTK/Qt
     file managers do for larger uri-lists, and exactly the drop that
     silently vanished before the shared selection-read engine
@@ -1048,10 +1048,10 @@ wlroots 0.18 ends the drag source with ::cancelled after a clean
 receive->finish->destroy tail (payload unaffected; suite asserts
 either end signal, rig verifies the tail in WAYLAND_DEBUG).
 
-## 1.2.5 — the query-pointer contract test, and the rigs that were caught lying
+## 1.0.0 — the query-pointer contract test, and the rigs that were caught lying
 
 The Wayland suite gained the load-bearing regression for the
-unified cursor hit-test (see roadmap 1.2.5): after REAL injected
+unified cursor hit-test (see roadmap 1.0.0): after REAL injected
 input hovers the maximize button, a client-side shrink under the
 stationary pointer, and the window_query_pointer op is interrogated
 BEFORE any pump — the client resize path updates last_size
@@ -1089,7 +1089,7 @@ rig without it happily verifies stale captures) into
 /home/z/apt/prefix, .pc prefix fixes, and a headless startup
 verification.
 
-## 1.3.2 — the tooltip rigs, the compositor-death rig, and the EXPOSE
+## 1.0.0 — the tooltip rigs, the compositor-death rig, and the EXPOSE
 lesson
 
 The tooltip feature added two live-GUI rigs and one resilience rig,
@@ -1139,9 +1139,9 @@ suite section — the third occurrence of the lost-pin class (a
 tiled drag source makes the DnD test wait forever), so its suite
 section is also timeout-bounded now.
 
-## 1.3.3 — the shortcut/undo test loop that paid for itself
+## 1.0.0 — the shortcut/undo test loop that paid for itself
 
-The 1.3.3 work ran the tests BEFORE the feature was trusted, and
+The 1.0.0 work ran the tests BEFORE the feature was trusted, and
 the loop caught five real bugs in implementation order — each one
 documented where the fix landed. Two lessons worth keeping:
 
@@ -1175,7 +1175,7 @@ Delete over 'abcd', one undo step restores all") and let the
 geometry be the implementation's problem; that is the right shape
 for widget-behavior tests generally.
 
-## 1.3.4 — the PRIMARY selection coverage map
+## 1.0.0 — the PRIMARY selection coverage map
 
 The PRIMARY work followed the same layer-per-test discipline, and
 one test-design mistake is worth recording because it is easy to
@@ -1207,14 +1207,14 @@ free the CLIPBOARD copy and vice versa — one shared helper window
 makes cross-talk the natural failure mode, and the isolation test
 is what keeps the descriptor honest).
 
-The Wayland side kept the 1.2.4 lesson in the test plan itself:
+The Wayland side kept the 1.0.0 lesson in the test plan itself:
 the interop rig greps the pholder's log for the primary-set line
 BEFORE spawning the reader (a set that never happened is a serial
 problem, not a read problem), and treats the no-device WARN as a
 clean skip so the same rig runs on protocol-less compositors
 without weakening sway's assertions.
 
-## 1.3.5 — testing a timer without a keyboard
+## 1.0.0 — testing a timer without a keyboard
 
 The key-repeat test could not be driven the way the X11 suite
 drives its key paths (XSendEvent): sway headless cannot deliver
@@ -1245,7 +1245,7 @@ the test window must still cover delay + N periods with margin
 asserted 20..70, so neither a missing wakeup cap nor a missing
 delay can slip through).
 
-## 1.3.6 — the pixel-diff discipline for paint-level features
+## 1.0.0 — the pixel-diff discipline for paint-level features
 
 The mnemonic underline needed proof it PAINTS, not just that the
 code path runs. The first attempt at that proof was wrong twice,
@@ -1271,7 +1271,7 @@ menu bar with no bounds paints nothing while its KEYBOARD paths
 still work (the mnemonic scan walks by widget class) — a
 window-visibility assertion needs the bounds set first.
 
-## 1.3.8 — testing an animation engine on two clocks
+## 1.0.0 — testing an animation engine on two clocks
 
 The animation engine has exactly one pump; production drives it
 from the shared ~16 ms ticker (a repeating timer the pump's timer
@@ -1282,7 +1282,7 @@ so the suite's chosen pump times and the engine's elapsed-time
 arithmetic share one clock — no display, no sleeps, and the exact
 production code path (cadence, easing application, completion,
 cancel-inside-tick, destroy-detach) runs under both drivers. The
-discipline is the 1.3.5 test-seam rule restated: production never
+discipline is the 1.0.0 test-seam rule restated: production never
 calls the seam; tests never need the platform.
 
 Three lessons from this milestone's test loop:
@@ -1325,9 +1325,9 @@ sits on the header, the 500 ms delay fires, and the app is closed
 with the tip on screen — exactly the shutdown path whose
 use-after-free the run found.
 
-## 1.3.9 — verify-exports: a battery member that checks the BINARY
+## 1.0.0 — verify-exports: a battery member that checks the BINARY
 
-The export-surface check (`make verify-exports`, new in 1.3.9) is
+The export-surface check (`make verify-exports`, new in 1.0.0) is
 a different kind of battery member: it asserts properties of the
 LINKED ARTIFACT, not of the source. Two lessons from bringing it
 up:
@@ -1337,7 +1337,7 @@ attempt at the map link died inside make on an unterminated
 `@echo` string — and the tree was left with the PREVIOUS `.so`
 still on disk, exporting all 787 symbols. Nothing that compiles
 code or reads the Makefile can notice that; only reading the
-`.so`'s own dynamic symbol table does. This is the 1.2.5
+`.so`'s own dynamic symbol table does. This is the 1.0.0
 stale-PNG rig lesson (verify the artifact you BUILT, not the
 artifact that happens to be present) restated for the build
 itself, which is why verify-exports greps `nm -D` output instead
@@ -1360,7 +1360,7 @@ Both configurations run the check: the debug archive carries
 ASan `__odr_asan.*` aliases the release archive does not, and the
 exported surface must be identical (441) either way.
 
-## 1.4.1 — four timing lessons from one widget batch
+## 1.0.0 — four timing lessons from one widget batch
 
 The interactive-furniture milestone (spinner, paned, expander,
 hover fades) spent more debugging time on WHEN than on WHAT. Four
@@ -1373,7 +1373,7 @@ from the CURRENT clock, which was the real wall clock, so pinning
 afterwards made every `elapsed` hugely negative (clamped to zero
 forever). The rule: `fdk__animation_set_test_clock(t)` (plus a
 pump) must precede the event or API call that starts the
-animation. Same class of bug as the 1.3.8 lesson "settle loops
+animation. Same class of bug as the 1.0.0 lesson "settle loops
 out-count the TICK budget, not the milliseconds" — the clock is
 fixture state, set it before the system under test touches it.
 
@@ -1422,10 +1422,10 @@ whose timing assumptions predate the animation layer should
 re-audit its pump arithmetic the first time an animation runs in
 it.
 
-## 1.4.2 — five more lessons from the app furniture
+## 1.0.0 — five more lessons from the app furniture
 
 **Pin the clock BEFORE the arming event.** The menu paint test
-asserted a pixel diff right after a hover motion; 1.4.2 made the
+asserted a pixel diff right after a hover motion; 1.0.0 made the
 pill fade, so the diff lands only after the flight. The fix looks
 like "pin + pump past the duration" — but the seam pins the clock
 that `fdk_widget_animate` stamps its START from, so pinning after
@@ -1447,7 +1447,7 @@ the wrong predicate for "the closing flight finished".
 **Arrange, don't set_bounds, anything with children.** The X11
 stack test placed the stack with `fdk_widget_set_bounds` and the
 pages kept their 0x0 slots — set_bounds is pure geometry and
-bypasses the arrange hook (the 1.2.3 list lesson, now true of
+bypasses the arrange hook (the 1.0.0 list lesson, now true of
 every container whose hook syncs children: stack, revealer). The
 telltale is a pixel-perfect widget tree that paints nothing.
 
@@ -1467,7 +1467,7 @@ Hand-computed pixel offsets (the X of the search entry's clear
 button at "width - 14") were wrong by 4 px in this very milestone;
 the geometry the toolkit PUBLISHES is the geometry to use.
 
-## 1.4.3 — five lessons from the chooser batch
+## 1.0.0 — five lessons from the chooser batch
 
 **Press-to-press is not a click.** The tree's multi-select test
 clicked twice without a release between: the implicit grab routes
@@ -1512,11 +1512,11 @@ ButtonPress directly TO the popup — the exact shape the grab
 produces, which x11_events turns into the close request. The
 MenuButton's dismissal test reuses it verbatim.
 
-## 1.4.4 — six lessons from the modern batch
+## 1.0.0 — six lessons from the modern batch
 
 **The ledger itself can be stale — grep the tree first, always.**
-The parity ledger's top 1.4.4 candidate ("themed tooltips — the
-tooltip carries no theme hook today") was wrong: the 1.3.2
+The parity ledger's top 1.0.0 candidate ("themed tooltips — the
+tooltip carries no theme hook today") was wrong: the 1.0.0
 tooltip has been fully themed since birth (tokens, parser
 entries, Modern retune, pinned by test_theme). The PROGRESS.md
 contract's check-before-build rule caught it in five minutes;
@@ -1572,7 +1572,7 @@ still up. Every pixel assertion that follows state changes during
 pumping needs its `fdk_window_paint` between the pumps and the
 XGetImage.
 
-## 1.4.5 — three lessons from HiDPI and the grid
+## 1.0.0 — three lessons from HiDPI and the grid
 
 **Integer division is the exact inverse of integer block
 scaling.** A widget at logical x occupies physical [x*s, (x+1)*s);
@@ -1599,7 +1599,7 @@ grid-shaped reading of "step a row"), where every list since v1
 lands the first key on the first item. The cold-start flag has to
 override EVERY navigation case, not just the row-stepping one.
 
-## 1.4.6 — three lessons from the grid's band
+## 1.0.0 — three lessons from the grid's band
 
 **Union members alias — fill one, don't memset the other.** A
 synthetic motion event built by filling `pointer_button.position`
@@ -1624,7 +1624,7 @@ Compute the gap coordinate from the slot math, and when a gesture
 test needs empty space, assert the band state (not just the
 consumed flag) before sweeping.
 
-## 1.4.7 — two lessons from the dialog integration
+## 1.0.0 — two lessons from the dialog integration
 
 **Composite widgets need the self-sync, not just the arrange
 hook.** The IconView's internal scrollview sized itself only in
@@ -1653,7 +1653,7 @@ gesture in the test: press in the margin, DRAG diagonally over
 real columns, then hold at the edge. The chase then extends the
 selection through the growing offset exactly as designed.
 
-## 1.4.8 — three lessons from the textview's first tests
+## 1.0.0 — three lessons from the textview's first tests
 
 **Keys route to the FOCUSED widget — headless trees start
 cold.** A headless suite that types without a click (or an
@@ -1679,7 +1679,7 @@ string's own '[' bracket had been swallowed by the TERMINAL
 rendering of an output byte, not by the text engine. When a
 probe's output looks impossible, hexdump before theorizing.
 
-## 1.4.9 — one lesson from the image milestone
+## 1.0.0 — one lesson from the image milestone
 
 **A taller example breaks the rigs that pixel-pin it — check the
 screens before the frames.** Adding a 360-px frame to example 04
@@ -1693,7 +1693,7 @@ FDK sources with its own cc line needs -lz the moment the PNG
 encoder lands (the interop rig's compile failed before its own
 checks could run).
 
-## 1.4.10 — the pre-write that neutered the change detector
+## 1.0.0 — the pre-write that neutered the change detector
 
 **A state helper must own its own writes.** The Wayland configure
 handler set pwindow->fullscreen BEFORE calling the compare-and-flip
@@ -1707,7 +1707,7 @@ what the public getter reads — went stale. The suite caught it as
 Rule: exactly one function writes a state field — the one that
 decides whether the write is a change.
 
-## 1.4.13 — testing the command-line face
+## 1.0.0 — testing the command-line face
 
 Two new binaries in the plain `make test` battery, and both had to
 earn their place differently from every headless test before them:
@@ -1747,7 +1747,7 @@ including one where the developer ran `fdk-theme set matrix`
 before `make test`. Any future binary that pins theme pixels
 should copy those two lines.
 
-## 1.4.18 — testing the GPU present lane
+## 1.0.0 — testing the GPU present lane
 
 The lane's test design follows its failure model: everything that
 can break must be observable, and every observation must be
@@ -1953,8 +1953,8 @@ counts to the suite's own bounded wait-until-state pattern (poll +
 pump, ceiling 2 s), which hardens the test for BOTH policies.
 
 **Rig maintenance found by this milestone** (pre-existing,
-reproduced on pristine 1.4.17): both tooltip rigs had been stale
-since the 1.4.16 palette change and the 1.4.17 scrolling-catalog
+reproduced on pristine 1.0.0): both tooltip rigs had been stale
+since the 1.0.0 palette change and the 1.0.0 scrolling-catalog
 restructure — the hover target (the progress bar) went below the
 fold, the X11 rig inherited the machine's global theme, and the
 pixel expectations were Modern-era. Both rigs now pin hermetic
@@ -1964,10 +1964,10 @@ check the tooltip fill baseline-relative (Faded Dream's light text
 glyphs legitimately fall inside the fill tolerance class; the
 tooltip is the DELTA over that baseline). The examples pixel rig's
 color constants are still Modern-era (its failure reproduces on
-pristine 1.4.17; the battery runs the frame-budget smoke plus the
+pristine 1.0.0; the battery runs the frame-budget smoke plus the
 GL equivalence rig instead) — known debt, recorded in the roadmap.
 
-## 1.4.19 — testing the GTK-faithful DnD receiver
+## 1.0.0 — testing the GTK-faithful DnD receiver
 
 The maintainer's live report (drops from a real file manager hover
 fine, release vanishes) exposed a rig blind spot: every XDND test
@@ -1986,7 +1986,7 @@ directory URI), ICCCM-style SelectionNotify answers, and four extra
 modes: `gtk-folder` (folder classification), `incr-files`, plus
 `strict-files` (an action-strict source that ABORTS with XdndLeave
 and exit 9 when the receiver's XdndStatus carries no action atom —
-the Qt behavior 1.4.18 actually had) and `refuse-files` (every
+the Qt behavior 1.0.0 actually had) and `refuse-files` (every
 ConvertSelection answered property=None — the ICCCM refusal the
 empty-gesture delivery exists for).
 
@@ -2007,7 +2007,7 @@ refused conversion delivering `drops == 1` with empty payload plus
 `Finished(accepted=1)`. The group honors `FDK_XDND_GTK_SOURCE_BIN`
 and skips honestly when the rig binary is absent.
 
-## 1.5.1 — testing the icon-theme engine and the picker's icons
+## 1.0.0 — testing the icon-theme engine and the picker's icons
 
 **The engine's contract is pinnable headlessly; only the PAINT is
 GUI work.** The icon-theme engine (src/theme/icon_theme.c) got a
@@ -2036,7 +2036,7 @@ proved nothing.
 **A test that passes can still be pinning a bug.** The icon-mode
 keyboard test ("Down Down -> note.txt") had been passing for a year
 against a dialog whose grid was STUCK AT ONE COLUMN — the re-flow
-fix (fdk__iconview_reflow, the third instance of the 1.4.7 lesson:
+fix (fdk__iconview_reflow, the third instance of the 1.0.0 lesson:
 hand-placed composites must self-sync EVERYTHING derived from their
 bounds, columns included) laid the two items side by side and the
 test's Down-Down became a no-op. The corrected sequence (Right,
@@ -2055,9 +2055,9 @@ directory of every real theme), and hicolor's Directories= line is
 Both rigs (fixture + real) live in scripts/ and their screenshots
 land in docs/screenshots/ and download/fdk-picker-demo/.
 
-## 1.5.2 — the audit lessons: detection, refusal, and the independent reference
+## 1.0.0 — the audit lessons: detection, refusal, and the independent reference
 
-**The user's report is the spec.** 1.5.1 shipped a large green test
+**The user's report is the spec.** 1.0.0 shipped a large green test
 report — fixture theme pixel proofs, X-server template matches, a
 VLM review — and the maintainer's next desktop session still saw
 "only recognizable folder icons, text files indistinguishable."
@@ -2103,8 +2103,8 @@ strongest available ground truth, and the same pattern applies to
 any future decode path (image scaling, PNG encode).
 
 **Rigs outside the tree rot quietly.** The sway/X11 example rigs
-still pinned the pre-1.4.16 window backgrounds and the 1.4.13-era
-example geometry (04 grew a ScrollView in 1.4.17 and its grid moved
+still pinned the pre-1.0.0 window backgrounds and the 1.0.0-era
+example geometry (04 grew a ScrollView in 1.0.0 and its grid moved
 below the fold). The rigs "failed" against a perfectly healthy
 tree — and had they been silently skipped, the failure mode would
 have been invisible. Session-owned rigs need the same re-verification
@@ -2122,9 +2122,9 @@ is now the standing proof that the install actually serves a
 developer outside the source tree; the .pc's prefix stamp keeps
 it honest across prefix changes.
 
-## 1.5.3 — the black-box lessons: the fast path nobody composited
+## 1.0.0 — the black-box lessons: the fast path nobody composited
 
-**The exact-size path is the one nobody tests.** 1.5.2 shipped
+**The exact-size path is the one nobody tests.** 1.0.0 shipped
 pixel-verified icon rendering — and every icon still wore an opaque
 black box wherever the artwork had transparent margins. The root
 cause: `fdk_surface_blit_transformed`'s identity and integer-
@@ -2157,7 +2157,7 @@ the About logo needed its own call-site change.
 **Decode the wire format from a real implementation.** The XSETTINGS
 reader's property layout was not taken from memory of the spec (the
 spec's prose is ambiguous about the per-setting header): a REAL
-xsettingsd 1.0.2 ran under Xvfb, its `_XSETTINGS_SETTINGS` bytes
+xsettingsd 1.0.0 ran under Xvfb, its `_XSETTINGS_SETTINGS` bytes
 were dumped from the selection owner's window, and the layout was
 decoded byte-for-byte (type, 1 pad byte, u16 name_len, name,
 pad-to-4, serial, value — with the property on the MANAGER's window,
@@ -2191,7 +2191,7 @@ Wayland, where no manager is reachable, the chain falls through to
 the files honestly (kdeglobals on KDE, xfconf on XFCE, the gtk ini
 when written; verified under sway with DISPLAY unset).
 
-## 1.5.4 — the misdocumented-vendor lessons
+## 1.0.0 — the misdocumented-vendor lessons
 
 **Vendored means read, not remembered.** The repo's own docs said
 the vendored nanosvg had no CSS-class support; the vendored bytes
@@ -2200,7 +2200,7 @@ README) parsed class rules all along. Capability claims about
 third-party code must be verified against the actual vendored
 revision — a remembered subset from an older era created the exact
 blind spot under which an upstream one-byte heap overflow shipped
-through two milestones of "exhaustive" verification. The 1.5.4
+through two milestones of "exhaustive" verification. The 1.0.0
 audit starts at the vendored bytes and the recorded sums, not at
 the prose describing them.
 
@@ -2208,7 +2208,7 @@ the prose describing them.
 rule ending in `;` plus a trailing newline — one declaration per
 line, the way every human and every icon-theme generator authors
 CSS — was the heap-overflow trigger; the exotic shapes (trailing
-comments, colonless tokens) were NOT. The 1.5.2/1.5.3 fixtures
+comments, colonless tokens) were NOT. The 1.0.0/1.0.0 fixtures
 used single-line authoring-style CSS, the one shape that happens
 to be safe, so the suites stayed green while every real theme
 crashed. Fixture sets for parser-adjacent code must include the
@@ -2239,7 +2239,7 @@ flow (dialog open on a class-only theme, fills read back from the
 X server). A crash report is a test specification arriving for
 free; file it, don't just fix it.
 
-## 1.6.0 — the release-blocking pair (allocator identity + runner timing)
+## 1.0.0 — the release-blocking pair (allocator identity + runner timing)
 
 **Pointer identity after free is not an assertion.** The icon-theme
 surfaces group ended with "reset drops decoded surfaces (new
@@ -2374,8 +2374,8 @@ bookworm container reports 1696 bytes/20 allocations on FDK's own
 suite and one 128-byte object on fdk-shell-overlay's — all stacks
 stripped-distro frames, zero first-party; not reproducible outside
 the container by swapping bookworm's libX11/libxcb/libxkbcommon/
-libasan under a newer glibc, and absent on libX11 1.8.7 (ubuntu,
-strict) and 1.8.12 (dev machines, strict)) — and the alpine/void
+libasan under a newer glibc, and absent on libX11 1.0.0 (ubuntu,
+strict) and 1.0.0 (dev machines, strict)) — and the alpine/void
 copies carried the flag where the sanitizer toolchain is OFF
 entirely (`FDKSHELL_SANITIZE=0`, musl/minimal images), where it was
 inert noise (removed). The same audit found the el10 shape bug
@@ -2414,7 +2414,7 @@ swallowing it with 2>/dev/null — a bare "not found" cost this whole
 round (the void failure mode closed itself empirically: the next run,
 with the corrected .pc, discovered and linked the installed
 fdk-shell-overlay cleanly — the diagnostic never fired; the lite pkgconf
-3.0.7 build used for the local proof evidently lacks whatever
+1.0.0 build used for the local proof evidently lacks whatever
 strictness void's full build applies to the OLD .pc shape). The
 same run then exposed the LAST defect, void's shlib resolution:
 xbps resolves a package's DECLARED shlib-requires only against

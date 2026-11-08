@@ -1,4 +1,4 @@
-/* test_choosers.c — headless tests for the 1.4.3 batch: the vertical
+/* test_choosers.c — headless tests for the 1.0.0 batch: the vertical
  * slider, the search debounce, the MenuButton, the paint group (the
  * revealer's crossfade engine), the tree's multi-selection + rubber
  * band, and the font enumeration surface.
@@ -605,7 +605,7 @@ static void test_font_enumerate(void) {
  * main
  * =================================================================== */
 
-/* ---- Color button (1.4.4) ---- */
+/* ---- Color button (1.0.0) ---- */
 
 static void test_color_button(void); /* defined below (this file's
                                        * post-main definition style) */
@@ -756,6 +756,6 @@ int main(void) {
         fdk_font_destroy(g_font);
     }
     fdk__animation_drain_all();
-    printf("all 1.4.3 chooser-suite tests passed\n");
+    printf("all 1.0.0 chooser-suite tests passed\n");
     return 0;
 }

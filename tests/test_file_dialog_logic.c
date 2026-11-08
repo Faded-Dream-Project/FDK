@@ -1,12 +1,12 @@
 /*
- * test_file_dialog_logic.c — headless file-dialog logic (1.2.0; 1.2.3)
+ * test_file_dialog_logic.c — headless file-dialog logic (1.0.0; 1.0.0)
  *
  * The interactive dialog is GUI-tested in the integration suites and
  * the examples rig. What CAN be pinned headlessly is the scan seam
  * the dialog is built on (widgets_internal.h): hidden filtering,
  * dirs-only filtering, dirs-first ordering, the "."/".." exclusion,
  * unreadable directories, the entries' ownership contract — plus,
- * since 1.2.3, the glob matcher, filter parsing, filesystem
+ * since 1.0.0, the glob matcher, filter parsing, filesystem
  * discovery's invariants, the path helpers, and SAVE name
  * validation — plus the result-model free function's tolerance.
  */
@@ -167,7 +167,7 @@ static void test_scan_unreadable(void) {
     fdk__file_dialog_entries_free(&e);
 }
 
-/* ---- 1.2.3: filters ---- */
+/* ---- 1.0.0: filters ---- */
 
 static void test_glob_match(void) {
     CHECK(fdk__file_dialog_glob_match("*", "anything.at-all"),
@@ -261,7 +261,7 @@ static void test_scan_filtered(void) {
     fdk__file_dialog_entries_free(&e);
 }
 
-/* ---- 1.2.3: filesystem discovery ---- */
+/* ---- 1.0.0: filesystem discovery ---- */
 
 static void test_places(void) {
     fdk_fs_place *places = NULL;
@@ -309,7 +309,7 @@ static void test_places(void) {
     fdk__fs_places_free(places, count);
 }
 
-/* ---- 1.2.3: path helpers ---- */
+/* ---- 1.0.0: path helpers ---- */
 
 static void test_path_helpers(void) {
     char *j = fdk__path_join("/a/b", "c.txt");
@@ -390,7 +390,7 @@ static void test_result_free(void) {
     CHECK(r.paths == NULL && r.count == 0, "result_free resets");
 }
 
-/* ---- recents engine (1.4.4) ---- */
+/* ---- recents engine (1.0.0) ---- */
 
 /* Writes `text` to `path` (truncate). */
 static void put_file(const char *path, const char *text) {

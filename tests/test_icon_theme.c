@@ -479,7 +479,7 @@ static void test_current_name(void) {
     CHECK(strcmp(fdk__icon_theme_current_name(), "fdktest") == 0,
           "kdeglobals [Icons] Theme detected");
 
-    /* ---- 1.5.3 channels ---- */
+    /* ---- 1.0.0 channels ---- */
 
     /* XFCE xfconf xsettings.xml (nested property, the real layout
      * xfsettingsd persists). Beats kdeglobals (channel 5 > 7). */

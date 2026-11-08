@@ -1,7 +1,7 @@
 #define FDK_LOG_TAG "widgets"
 
 /*
- * textview.c — the multi-line text editor (1.4.8)
+ * textview.c — the multi-line text editor (1.0.0)
  *
  * The last widget-family hole: a scrolling, wrapping text document
  * with the Entry's whole editing discipline. One UTF-8 buffer (the
@@ -29,7 +29,7 @@
  * selection rects, caret, and preedit — the IconView-cell owner
  * reach-through). The view paints the entry-style rounded field +
  * focus ring itself (the scrollview is transparent). The scrollview
- * self-sync rule (1.4.7's lesson, the List's since 1.2) applies:
+ * self-sync rule (1.0.0's lesson, the List's since 1.2) applies:
  * relayout re-syncs the internals at the view's CURRENT bounds.
  *
  * The wrap cache is O(document) per rebreak and rebreaks on every
@@ -359,7 +359,7 @@ static void tv_rebreak(fdk_textview *tv) {
 }
 
 /* The full relayout: rebreak (when stale) + self-sync the
- * scrollview at the view's CURRENT bounds (the 1.4.7 rule —
+ * scrollview at the view's CURRENT bounds (the 1.0.0 rule —
  * set_bounds runs no hooks, dialogs place surfaces by hand) +
  * re-place the page. */
 static void tv_scroll_to_caret(fdk_textview *tv);
@@ -1479,7 +1479,7 @@ static bool tv_handle_event(fdk_widget *w,
             return true;
         case FDK_KEY_ESC:
             /* Collapse the selection; a quiescent view bubbles (the
-             * Entry's 1.2.1 rule — a dialog's Cancel must live). */
+             * Entry's 1.0.0 rule — a dialog's Cancel must live). */
             if (tv->anchor != tv->caret) {
                 tv_set_selection(tv, tv->caret, tv->caret);
                 return true;

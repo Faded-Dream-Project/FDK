@@ -85,7 +85,7 @@ For building against the tree without installing, compile with
 the Wayland libs when built with Wayland enabled) — the same flags
 the Makefile computes.
 
-### Install layout (1.4.13)
+### Install layout (1.0.0)
 
 `make install` lays out, under `PREFIX` (default `/usr/local`, all
 overridable: `LIBDIR`, `INCDIR`, `BINDIR`, `DATADIR`):
@@ -204,7 +204,7 @@ needed:
 ## Why debug and release share object *paths* but never objects (the config stamp)
 
 The same class of bug as the obj/obj-pic split above, found live in
-1.3.4: `make release && make` used to produce a silently MIXED
+1.0.0: `make release && make` used to produce a silently MIXED
 binary. The old `release:` target was a target-specific
 `CFLAGS := ... -O2 -DNDEBUG` override over the same `build/obj/`
 paths — and make's up-to-date check compares timestamps only, so the
@@ -230,7 +230,7 @@ because the second axis is environment-derived (pkg-config
 visibility of libwayland-dev/libxkbcommon-dev) and can flip without
 any source change; a rig or environment reset that hides the
 toolchain would otherwise leave the enabled-backend objects "up to
-date" inside a build that no longer contains them (the 1.3.7 find:
+date" inside a build that no longer contains them (the 1.0.0 find:
 sway-rig apps linked against the disabled stub ignored a valid
 `WAYLAND_DISPLAY`). Same-config builds keep normal
 incremental behavior — the stamp rule runs on every invocation but
@@ -250,7 +250,7 @@ by path.
 
 ## Why the static archive is removed before re-archiving
 
-The third member of the same bug family, found live in 1.3.7:
+The third member of the same bug family, found live in 1.0.0:
 `ar rcs` REPLACES the members it is handed but never DROPS members
 that fell out of the list. When a build configuration switch removes
 objects (the Wayland toolchain disappearing from the environment
@@ -266,13 +266,13 @@ The fix: the `$(STATIC_LIB)` rule does `rm -f $@` before
 `$(AR) rcs`, so the archive is always exactly the current member
 list. Together with the config stamp above, this closes the whole
 family: objects can no longer outlive the configuration that
-produced them, whether through shared paths (1.3.4) or through
-archive accumulation (1.3.7).
+produced them, whether through shared paths (1.0.0) or through
+archive accumulation (1.0.0).
 
 ## Why the shared library links with a generated version script
 
 Without a version script, a shared library exports every global
-object linked into it. FDK's `.so` linked that way through 1.3.8:
+object linked into it. FDK's `.so` linked that way through 1.0.0:
 787 symbols under the debug build, of which 441 are the public
 API — the rest was backend internals (`fdk_x11_*`,
 `fdk_wayland_*`), cross-module seams (`fdk__*`), the vendored stb

@@ -1,5 +1,5 @@
 /*
- * levelbar.c — the segmented value readout (1.4.2).
+ * levelbar.c — the segmented value readout (1.0.0).
  *
  * GTK's GtkLevelBar / the classic battery-and-volume meter: a value
  * in [min, max] displayed as a row of discrete blocks (DISCRETE mode,

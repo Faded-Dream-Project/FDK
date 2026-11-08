@@ -4,7 +4,7 @@
  * notebook.c — Notebook / TabView (Phase 9)
  *
  * A tab strip (labels only — close buttons are parked; drag
- * reordering ships since 1.4.4) over a page area. Pages are ordinary
+ * reordering ships since 1.0.0) over a page area. Pages are ordinary
  * widgets the notebook adopts (append_page reparents them in, like
  * ScrollView's content); exactly one page is visible at a time — the
  * notebook sets the others invisible, which makes them
@@ -16,7 +16,7 @@
  * pages' own focusables take keys); Ctrl+Tab-style cycling is
  * parked with the window-level key bindings it belongs to.
  *
- * Reorder (1.4.4): a press on a tab arms the gesture (and switches
+ * Reorder (1.0.0): a press on a tab arms the gesture (and switches
  * pages, the existing behavior); motion past NB_REORDER_SLOP px
  * makes the tab FOLLOW THE POINTER. Swaps are LIVE on the model —
  * when the dragged tab's center crosses a neighbor slot's midpoint
@@ -63,7 +63,7 @@ typedef struct fdk_notebook {
                            * strip's hover itself from MOTION) */
     fdk_notebook_switch_fn on_switch;
     void *on_switch_data;
-    /* ---- reorder drag (1.4.4) ---- */
+    /* ---- reorder drag (1.0.0) ---- */
     bool press_armed;     /* a tab press is down; motion may promote */
     bool dragging;        /* the promotion happened */
     size_t drag_index;    /* the dragged page's CURRENT slot */
@@ -225,7 +225,7 @@ static void nb_paint(fdk_widget *w, fdk_surface *surface,
     }
 }
 
-/* ---- reorder (1.4.4) ---------------------------------------------
+/* ---- reorder (1.0.0) ---------------------------------------------
  */
 
 /* Moves pages[from] to slot `to` (0 <= to < count) on the MODEL:
@@ -277,7 +277,7 @@ static void nb_reorder_move(fdk_notebook *nb, size_t from, size_t to) {
  * tab's center crossing neighbor midpoints), THEN clamp the tab
  * inside the strip (clamping first would freeze the tab in the slot
  * it started in, forbidding the very swaps the pointer asked for —
- * the bug the 1.4.4 drag test caught live). */
+ * the bug the 1.0.0 drag test caught live). */
 static void nb_drag_step(fdk_notebook *nb, fdk_f32 x) {
     if (nb->drag_index >= nb->count) {
         return; /* pages vanished mid-drag (programmatic removal) */
@@ -757,7 +757,7 @@ void fdk_notebook_set_on_switch(fdk_widget *notebook,
     nb->on_switch_data = user_data;
 }
 
-/* ---- public reordering API (1.4.4) ---- */
+/* ---- public reordering API (1.0.0) ---- */
 
 fdk_result fdk_notebook_reorder_page(fdk_widget *notebook,
                                      size_t index, size_t new_index) {

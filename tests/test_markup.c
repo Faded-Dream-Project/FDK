@@ -1,5 +1,5 @@
 /*
- * test_markup.c — headless tests for the 1.4.11 markup milestone.
+ * test_markup.c — headless tests for the 1.0.0 markup milestone.
  *
  * Everything runs on offscreen surfaces and standalone fonts: no
  * display, no window, deterministic. The font is DejaVu Sans from

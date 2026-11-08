@@ -277,7 +277,7 @@ static void test_entry_commit_replaces_selection(void) {
 
 static void test_entry_commit_is_undoable(void) {
     /* The commit rides the single mutation primitive — undo must
-     * revert it as one step (the 1.3.3 discipline). */
+     * revert it as one step (the 1.0.0 discipline). */
     fdk_widget *root = fresh_root();
     fdk_widget *entry = NULL;
     assert(fdk_ok(fdk_entry_create(root, NULL, "abc", &entry)));

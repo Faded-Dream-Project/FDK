@@ -2,7 +2,7 @@
 
 #include "widget/widget_internal.h"
 #include "widgets_internal.h" /* fdk__a11y_notify */
-#include "../render/surface_internal.h" /* fdk__surface_blit_alpha (1.4.3) */
+#include "../render/surface_internal.h" /* fdk__surface_blit_alpha (1.0.0) */
 
 #include "core/alloc_internal.h"
 #include "core/log_internal.h"
@@ -215,7 +215,7 @@ static void child_move_to_front(fdk_widget *parent, fdk_widget *child) {
 static void base_paint(fdk_widget *widget, fdk_surface *surface,
                        fdk_rect bounds, fdk_rect clip) {
     (void)clip;
-    /* 1.4.16: a TOKEN-FOLLOWING background resolves against the
+    /* 1.0.0: a TOKEN-FOLLOWING background resolves against the
      * current default theme HERE, at paint time — which is the whole
      * point: a theme switch already damages every root, and the
      * repaint that follows re-resolves, so the fill tracks the theme
@@ -379,7 +379,7 @@ static fdk_result deferred_append(fdk_widget *root, fdk_widget *w) {
  * fdk_widget_destroy() from any hook is a no-op rather than a double
  * free. */
 static void teardown_free(fdk_widget *w) {
-    /* Animations first (1.3.8): every animation inside this subtree
+    /* Animations first (1.0.0): every animation inside this subtree
      * dies here, before any pointer the engine could touch — the
      * parent chains it walks are still intact, and no animator
      * callback ever runs against a widget mid-funeral. */
@@ -413,7 +413,7 @@ static void teardown_free(fdk_widget *w) {
     fdk_free(w->tooltip_spans);
     fdk_free(w->a11y_name);
     fdk_free(w->a11y_description);
-    /* The paint group's offscreen (1.4.3): after the subclass hook,
+    /* The paint group's offscreen (1.0.0): after the subclass hook,
      * with the tree walk off the stack — nothing else references it
      * (the paint path only ever touches it while this subtree is
      * being painted, and this free runs outside that). */
@@ -712,7 +712,7 @@ static bool set_hovered(fdk_widget *root, fdk_widget *hit) {
         fdk_widget_invalidate(hit);
     }
 
-    /* Tooltips (1.3.2): the hover transition is the module's single
+    /* Tooltips (1.0.0): the hover transition is the module's single
      * trigger — every path that moves the pointer between widgets
      * funnels through here. Runs AFTER the events settle so a
      * callback that destroyed the new target is caught by the
@@ -942,7 +942,7 @@ fdk_result fdk_widget_create(fdk_widget *parent,
         /* Fixed-slot container (Paned's two panes, Expander's one
          * content child) at capacity: the class's layout contract
          * names every child slot, so an extra child is a usage error,
-         * not a silent zero-sized layout. (1.4.1) */
+         * not a silent zero-sized layout. (1.0.0) */
         FDK_WARN("widget class \"%s\" accepts at most %zu children; "
                  "refusing create",
                  (parent->klass->name != NULL) ? parent->klass->name
@@ -975,7 +975,7 @@ fdk_result fdk_widget_create(fdk_widget *parent,
     w->bounds = bounds;
     w->natural_w = bounds.width;
     w->natural_h = bounds.height;
-    w->paint_alpha = 1.0f;  /* 1.4.3: no group until asked */
+    w->paint_alpha = 1.0f;  /* 1.0.0: no group until asked */
     w->group_surface = NULL;
     w->align_h = FDK_ALIGN_FILL;
     w->align_v = FDK_ALIGN_FILL;
@@ -1384,7 +1384,7 @@ static void drag_source_note_release(fdk_widget *root) {
     drag_sources_stand_down(root);
 }
 
-/* fdk_widget_set_tooltip_markup (1.4.11): the tooltip's markup twin —
+/* fdk_widget_set_tooltip_markup (1.0.0): the tooltip's markup twin —
  * tags parse to plain text + spans, get_tooltip reports the PLAIN
  * text, and the tooltip module wraps and paints through the
  * span-aware passes. NULL clears the tooltip entirely. */
@@ -1913,7 +1913,7 @@ bool fdk_widget_tree_has_damage(fdk_widget *any) {
     return root != NULL && root->has_damage;
 }
 
-/* ---- paint group (1.4.3) ----------------------------------------------
+/* ---- paint group (1.0.0) ----------------------------------------------
  *
  * Renders w's whole subtree (paint hook + children) into the cached
  * ARGB offscreen at alpha 1.0, then composites it onto `surface`
@@ -2008,7 +2008,7 @@ static void paint_rec(fdk_widget *w, fdk_surface *surface,
         return;
     }
 
-    /* 1.4.3 — the paint group: an opacity below 1.0 renders this
+    /* 1.0.0 — the paint group: an opacity below 1.0 renders this
      * whole subtree into the cached offscreen and composites once.
      * (Placed after the empty/damage early-outs: an invisible group
      * costs nothing. A failed offscreen lifts the alpha and falls
@@ -2493,7 +2493,7 @@ void fdk_widget_set_background(fdk_widget *widget, fdk_color color) {
     /* An explicit background is an OVERRIDE: from here on the widget
      * (window roots included) owns this color outright — theme
      * switches no longer re-default it, and any token-following mode
-     * is off (1.2.1 root default, 1.4.16 token mode: an application's
+     * is off (1.0.0 root default, 1.0.0 token mode: an application's
      * fixed color always wins). */
     widget->flags &= ~((unsigned)FDK_WF_ROOT_BG_DEFAULT |
                        (unsigned)FDK_WF_BG_TOKEN);

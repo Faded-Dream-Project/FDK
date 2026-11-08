@@ -121,7 +121,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   in third_party/nanosvg/README.md)
 - Source: https://github.com/memononen/nanosvg (Mikko Mononen)
 - SHA-256 (upstream base; the vendored nanosvg.h carries one
-  marked local patch since 1.5.4):
+  marked local patch since 1.0.0):
   - nanosvg.h     e34fd5d084be106cea972d19ce5d27fd96d17ba89f8d06bdceee058420c8b2b0
   - nanosvgrast.h 79a9c5f4db19debf9f3a648a1589e96d92854f245a5cb4f3d823f263785234d8
 - Local diff from upstream: one marked bounds fix in nanosvg.h
@@ -162,7 +162,7 @@ freely, subject to the following restrictions:
   `-lz` in the Makefile's LDFLAGS.
 - Source: https://zlib.net/ — Jean-loup Gailly and Mark Adler.
 - Used for: the PNG encoder's IDAT compression and chunk CRCs
-  (src/render/png_encode.c, 1.4.9). The DECODE side needs nothing
+  (src/render/png_encode.c, 1.0.0). The DECODE side needs nothing
   from zlib (PNG decode is stb_image's own inflated).
 
 License (zlib license, permissive and FDK-compatible):

@@ -1,8 +1,8 @@
-# daylight.fdk — the light theme FDK ships (1.4.13).
+# daylight.fdk — the light theme FDK ships (1.0.0).
 #
 # A complete theme on purpose: every token overridden, so it doubles
 # as a worked example of the full [colors]/[metrics] vocabulary. The
-# dark default is the built-in "Faded Dream" (1.4.16 — gray with
+# dark default is the built-in "Faded Dream" (1.0.0 — gray with
 # violet accents; before that the blue-toned "FDK Modern"); this is
 # the daylight counterpart — same calm surfaces, same flat fields,
 # inverted.

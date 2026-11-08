@@ -199,7 +199,7 @@ static void test_paint_clipping(void) {
 
 /* ---- wheel + keyboard ---- */
 
-/* The animation clock (1.3.8): wheel/keyboard gestures now EASE to
+/* The animation clock (1.0.0): wheel/keyboard gestures now EASE to
  * their target over 140 ms instead of teleporting. The suite pins
  * the engine to a synthetic clock (start stamps and pump reads all
  * come from it) and settles flights by advancing far past their
@@ -345,7 +345,7 @@ static void test_input(void) {
 
 /* ---- scrollbar interaction ---- */
 
-/* ---- container content (the 1.3.8 regression) ----------------------------
+/* ---- container content (the 1.0.0 regression) ----------------------------
  * A BOX as scrollview content must LAY OUT ITS CHILDREN: the old
  * code positioned the content with set_bounds, which never runs the
  * content's arrange hook — a box of rows rendered nothing at all
@@ -392,7 +392,7 @@ static void test_container_content(void) {
     fdk_widget_destroy(root);
     printf("[ok] scrollview: container CONTENT lays out its children "
            "(box rows positioned, slots stable under scrolling — the "
-           "1.3.8 set_bounds-vs-arrange regression)\n");
+           "1.0.0 set_bounds-vs-arrange regression)\n");
 }
 
 static void test_scrollbar(void) {
@@ -580,7 +580,7 @@ static void test_hit_testing(void) {
            "offset (scrolled-in button receives the click)\n");
 }
 
-/* ---- overlay bar mode (1.4.4) ---- */
+/* ---- overlay bar mode (1.0.0) ---- */
 
 static fdk_u32 pack_rgb(float r, float g, float b) {
     fdk_u32 ru = (fdk_u32)(r * 255.0f + 0.5f);
@@ -731,7 +731,7 @@ static void test_overlay_bars(void) {
            "round-trip, no phantom bars on fitting axes\n");
 }
 
-/* ---- vertical-only scrolling (1.4.17) ---- */
+/* ---- vertical-only scrolling (1.0.0) ---- */
 
 static void test_vertical_only(void) {
     assert(fdk_scrollview_set_vertical_only(NULL, true) ==

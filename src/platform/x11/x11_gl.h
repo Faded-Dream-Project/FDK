@@ -1,5 +1,5 @@
 /*
- * x11_gl.h — the GPU presentation lane (1.4.18), X11/GLX side
+ * x11_gl.h — the GPU presentation lane (1.0.0), X11/GLX side
  *
  * The lane's contract, in one paragraph: FDK rasterizes every pixel
  * on the CPU exactly as before (src/render/ is untouched — the same

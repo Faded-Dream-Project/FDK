@@ -1,6 +1,6 @@
 /*
  * fontscan.c — system default font discovery for
- * fdk_font_load_system_default() (post-1.0.1 rework).
+ * fdk_font_load_system_default() (post-1.0.0 rework).
  *
  * The original probe was a fixed list of exact file paths, which broke
  * on any layout it did not enumerate — most visibly Arch Linux, whose
@@ -344,7 +344,7 @@ static bool fs_try_fontconfig(char **out_path, long *out_face) {
      * investigations). Scoping only FcInit left the walk's pools
      * in the exit report; found live as a persistent 320 B
      * fontconfig leak failing both integration suites' ASan runs
-     * (1.1.5). */
+     * (1.0.0). */
     fs_lsan_off();
     fdk__startup_trace_begin("font: fontconfig first query");
     bool found = false;

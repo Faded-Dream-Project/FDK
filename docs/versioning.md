@@ -7,7 +7,7 @@ is whatever `include/fdk/fdk_version.h` says — currently a `1.0.0`
 pre-release iteration (`rcN`) carrying the owner's 2026-10-25
 directive that FDK grow a public **extension API** (add-on packages
 building on `fdk/extend.h`); the owner explicitly chose `1.0.0-rc1`
-over `1.0.1` because new public API is a minor bump ("not 1.0.1,
+over `1.0.0` because new public API is a minor bump ("not 1.0.0,
 since this adds public API"). The `-rcN` suffix is the owner's
 brake: **no git tag exists and nothing is published** — the project
 has no releases page, no release branch, and no tags; the owner
@@ -31,7 +31,7 @@ below proved, why it should not.
 The extension-API additions are ABI-append-only (opaque types, new
 functions, `struct_size`-forwarded input structs), so the SONAME
 stays `libfdk.so.1`; the file name moves to the numeric
-`libfdk.so.1.1.0` with the SONAME symlink unchanged (the .so file
+`libfdk.so.1.0.0` with the SONAME symlink unchanged (the .so file
 name is always numeric MAJOR.MINOR.PATCH — pre-release suffixes
 never appear in it; they live in the version string, pkg-config,
 and package metadata).
@@ -42,10 +42,10 @@ The 2026-10-11 retraction named its blockers precisely: the file
 and folder pickers were not release-ready (unfinished file-type
 iconography, no system icon-theme integration, picker-quality
 defects). The milestones that closed them — picker stabilization
-(1.5.1), the audit pass (the default detection channel, SVG
-rasterization, the refusal set — 1.5.2), the polish pass (per-pixel
-alpha compositing, the live XSETTINGS desktop — 1.5.3), and the
-crash fix (CSS-class SVGs — 1.5.4) — are recorded in
+(1.0.0), the audit pass (the default detection channel, SVG
+rasterization, the refusal set — 1.0.0), the polish pass (per-pixel
+alpha compositing, the live XSETTINGS desktop — 1.0.0), and the
+crash fix (CSS-class SVGs — 1.0.0) — are recorded in
 `ROADMAP.md`, each pixel-verified and regression-pinned. The
 project owner then tested the result on real hardware (native
 Wayland under labwc included) and demanded the release. Component
@@ -82,7 +82,7 @@ with nothing published anywhere.
 ## Internal milestones are not versions
 
 `ROADMAP.md` tracks work with Phase numbers and internal
-milestone labels (`1.0.0`, `1.0.1`, `1.0.0`, …, `1.4.19`). These
+milestone labels (`1.0.0`, `1.0.0`, `1.0.0`, …, `1.0.0`). These
 are **engineering milestones** — history markers for when work
 landed. **Disambiguation, which matters:** the *roadmap milestone
 labelled "1.0.0"* (Phase 11 stabilization, 2024) is a different
@@ -138,7 +138,7 @@ document was updated in the same commit that moved the macros.
 
 The 1.0.0-rc1 bump of 2026-10-25 satisfies both again: the owner set
 the release target and the number in the same breath as the feature
-directive ("Bump FDK to 1.0.0-rc1 (not 1.0.1, since this adds public
+directive ("Bump FDK to 1.0.0-rc1 (not 1.0.0, since this adds public
 API)... Do NOT create or move any git tag and do NOT touch the 1.0.0
 release. I'll decide on the final tag.") — that directive's tag
 embargo posture is the one the project still keeps today: no tags,
@@ -146,11 +146,11 @@ no releases, until the owner says otherwise.
 
 ## History
 
-- 2024: the tree briefly reported `1.0.0` … `1.1.1` because
+- 2024: the tree briefly reported `1.0.0` … `1.0.0` because
   internal milestone labels leaked into the public version macros.
   That was a bookkeeping mistake, not a promotion decision. The
   public version was reset to `0.0.1` and pinned (roadmap milestone
-  1.1.2), and this "0.0.1 on purpose" joke became the project's
+  1.0.0), and this "0.0.1 on purpose" joke became the project's
   longest-running bit: *this absurdly capable toolkit is still
   called 0.0.1.*
 - 2026-10-11 (morning): a distribution pass bumped the public
@@ -171,8 +171,8 @@ no releases, until the owner says otherwise.
   that now also carries the lesson that *component quality, not
   pipeline greenness, gates the number.*
 - 2026-10-12: **the real 1.0.0.** The retraction's named blockers
-  were closed by the picker overhaul (milestones 1.5.1 through
-  1.5.4: file-type iconography + system icon-theme integration,
+  were closed by the picker overhaul (milestones 1.0.0 through
+  1.0.0: file-type iconography + system icon-theme integration,
   SVG rasterization with the refusal set, per-pixel alpha
   compositing + the live XSETTINGS desktop, and the CSS-class SVG
   crash fix — each pixel-verified and regression-pinned), the
@@ -204,7 +204,7 @@ no releases, until the owner says otherwise.
   of FDK — proved by fdk-layer-shell, a separate layer-shell package that
   compiles against FDK's installed public headers and library only —
   and set the number explicitly: 1.0.0-rc1, a MINOR bump because the
-  change ADDS public API (the owner's own words ruled out 1.0.1).
+  change ADDS public API (the owner's own words ruled out 1.0.0).
   The additions are ABI-append-only (new
   functions, opaque types, no layout changes to existing public
   structs), so the SONAME stays `libfdk.so.1`.
