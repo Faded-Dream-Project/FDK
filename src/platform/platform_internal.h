@@ -990,8 +990,7 @@ char *fdk__dnd_build_uri_list(const char *const *uris, size_t count);
  * popup-creation path when the popup's parent is an extension
  * surface: an xdg_popup was created with NO xdg parent (the parent
  * has no xdg_surface — its role belongs to the add-on), and the
- * add-on's kind must adopt it (e.g.
- * zwlr_layer_surface_v1.get_popup).
+ * add-on's kind must adopt it (the role's own get_popup request).
  *
  * `ctx` is the owning context — the SAME value the backend stored as
  * dispatch_user_data at connect() time (context.c passes the context

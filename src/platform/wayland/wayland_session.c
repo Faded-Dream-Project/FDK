@@ -366,7 +366,7 @@ fdk_result fdk_wayland_window_join_session(
     }
     if (pwindow->xdg_toplevel == NULL) {
         /* Popups (xdg_popup role), subsurfaces (no role), ext kind
-         * surfaces (layer-shell &c): no xdg_toplevel, no join — the
+         * surfaces (shell-surface roles &c): no xdg_toplevel, no join — the
          * public header documents the refusal. A window that can
          * NEVER join is an argument problem, checked before the
          * session's own liveness (a dead session does not make a

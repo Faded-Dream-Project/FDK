@@ -4,9 +4,9 @@
  * (XRRGetScreenResourcesCurrent — the cached, non-reprobing form)
  * and refreshed on RRNotify. INTERNAL ONLY by design — the core's
  * Wayland backend tracks outputs without an app-facing output API
- * too (the audit's parity note), and the add-on that needs output
- * EVENTS (fdk-shell-overlay) drives its OWN X connection for them (the
- * same own-channel posture as its own wl_registry on Wayland —
+ * too (the audit's parity note), and an add-on that needs output
+ * EVENTS drives its OWN X connection for them (the same own-channel
+ * posture its own wl_registry keeps on Wayland —
  * docs/DECISIONS.md D-015).
  *
  * The consumers here:

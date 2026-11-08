@@ -99,5 +99,5 @@ XMLCONF
 
 RUN "$VOID_IMAGE" 'sh packaging/void/install-test.sh'
 
-echo "===== FDK void pipeline OK (FDK; the layer-shell add-on lives in FDK-Layer-Shell) ====="
+echo "===== FDK void pipeline OK ====="
 ls -la dist/

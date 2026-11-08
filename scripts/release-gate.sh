@@ -30,11 +30,12 @@ else
 fi
 
 # ---------- G2 zero open P0/P1 ----------
-openbugs=$(awk '/^## Current state/,/^## Last audited|^## 2026/' PROGRESS.md | grep -ci "Open bug" || true)
-layer=$(grep -c "Open bug (top priority)" PROGRESS.md || true)
-if grep -q "Open bug \*\*(top priority)\*\*:\*\* the hud" PROGRESS.md 2>/dev/null || \
-   grep -q "Open bug (top priority)" PROGRESS.md; then
-    bad 2 "PROGRESS.md still records an open bug (the layer-shell first-commit kill)"
+# a line declaring "Open bugs: NONE" is the healthy shape; any OTHER
+# line mentioning an open bug in the current-state block fails.
+openbugs=$(awk '/^## Current state/,/^## Last audited|^## 2026/' PROGRESS.md \
+    | grep -i '^[-*]* *Open bugs*:' | grep -icv "NONE" || true)
+if [ "$openbugs" -gt 0 ]; then
+    bad 2 "PROGRESS.md still records an open bug in its current-state block"
 else
     ok 2 "no open bug recorded in PROGRESS.md's current-state block"
 fi
@@ -56,7 +57,7 @@ fi
 if [ -f docs/REAL-DESKTOP-SIGNOFF.md ] && grep -q "sign-off" docs/REAL-DESKTOP-SIGNOFF.md; then
     ok 4 "docs/REAL-DESKTOP-SIGNOFF.md exists and is signed"
 else
-    bad 4 "docs/REAL-DESKTOP-SIGNOFF.md missing — the 28-section walkthrough is the owner's hardware (M-9)"
+    bad 4 "docs/REAL-DESKTOP-SIGNOFF.md missing — the walkthrough is the owner's hardware (M-9)"
 fi
 
 # ---------- G5 clean build + battery ----------

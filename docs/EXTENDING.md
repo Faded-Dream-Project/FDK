@@ -4,10 +4,10 @@ FDK stays small and stays the ROOT: the core and the fdk tools ship
 together as one package, and everything else — panel layers,
 notification shells, custom surface roles, input methods, whatever a
 desktop grows — is a SEPARATE package that depends on FDK and uses
-exactly what `include/fdk/fdk_extend.h` exposes. The first such
-package is **fdk-layer-shell** (wlr-layer-shell / EWMH dock surfaces); its
-source is the reference consumer of every function here and the
-proof the API is complete enough to build on.
+exactly what `include/fdk/fdk_extend.h` exposes.
+`examples/19_extension_surfaces.c` is the in-tree reference consumer
+of every function here and the proof the API is complete enough to
+build on.
 
 This document is the contract. The header carries the per-function
 reference comments; this file is the narrative: the model, the
@@ -140,18 +140,16 @@ Rules that matter:
 - **Wayland**: do NOT commit in create. Your role's initial
   configure handshake comes first; commit ordering is yours to obey,
   and FDK's present path commits only when the add-on renders. (For
-  layer-shell: create the role, set your parameters, and commit an
-  EMPTY surface at show-time to start the configure — exactly what
-  fdk-layer-shell's `fdk_layer_shell_layer_show` does.)
+  a shell-surface role: create the role, set your parameters, and
+  commit an EMPTY surface at show-time to start the configure.)
 - **Wayland, the buffer side (1.0.0-rc1)**: FDK now ENFORCES the
   "no buffer before the first configure" rule on the present path —
   a present before your first `fdk_ext_surface_notify_configure()`
   is deferred and committed post-ack by that call (or re-driven via
   EXPOSE when the configure changed the size). An add-on that paints
   eagerly right after `show()` — the way every FDK example does —
-  can no longer trip the protocol error that killed the demo bar on
-  labwc and sway (`zwlr_layer_surface_v1: error 2: layer_surface has
-  never been configured`). Your obligation narrows to: ack your
+  can no longer trip the never-configured protocol error that killed
+  the demo bar on labwc and sway. Your obligation narrows to: ack your
   role's configure, then report it.
 
 ### The destroy callback — role teardown
@@ -166,7 +164,8 @@ OTHER surfaces.
 
 FDK created an `xdg_popup` parented to your surface's `wl_surface`
 and hands the popup proxy over so your ROLE can adopt it — the
-wlr-layer-shell pattern:
+shell-surface pattern (the role adopts the popup through its own
+get_popup request):
 
 ```c
 static void my_popup_attached(fdk_ext_surface *surface,
@@ -204,21 +203,20 @@ The SAME backend-neutral stream applications receive on windows
 - **X11**: from the server's ConfigureNotify, automatically.
 - **Wayland**: when the add-on reports its role's assigned size via
   `fdk_ext_surface_notify_configure(surface, w, h)` — call it from
-  your role's configure callback, after acking (fdk-layer-shell's layer
-  configure listener is the reference). FDK resizes its render
+  your role's configure callback, after acking. FDK resizes its render
   machinery and delivers the event.
 
 **EXPOSE is a repaint obligation, not a notification** (found live,
-2026-10-25, in fdk-layer-shell's demo bar): an add-on that drives its
+2026-10-25, in an add-on's demo bar): an add-on that drives its
 surface directly has no widget tree to auto-repaint it, so the
 `FDK_EVENT_WINDOW_EXPOSE` branch must re-draw and re-present the
 surface itself. The retained-damage model otherwise concludes
 nothing changed and paints nothing — and on X11 (where an unmapped
 or unoccluded window's pixels are gone) that leaves whatever the
 desktop painted underneath showing in the surface's region. The
-canonical shape is fdk-layer-shell's demo bar handler: `EXPOSE -> re-fill
--> fdk_surface_present()` (see the desktop-switch rig in
-the FDK-Layer-Shell repository's tests/test_x11.c for the end-to-end proof).
+canonical shape is the demo bar handler: `EXPOSE -> re-fill
+-> fdk_surface_present()` (the desktop-switch legs of the
+integration suites pin the end-to-end behavior).
 
 ## 6. Rendering
 
@@ -260,8 +258,7 @@ falling back to `wl_pointer.set_cursor` with an XCursor-theme image;
 on X11 it is a `XDefineCursor` with the cursor-font hand. A backend
 without the mechanism keeps the platform default — a hint, never an
 error. Typical panel usage: the hand while the pointer hovers a
-clickable region, the arrow otherwise (the demo bar's `set_cursor`
-calls in `the FDK-Layer-Shell repository's examples/bar.c` are the worked example).
+clickable region, the arrow otherwise.
 
 ## 7. Popups (dropdowns)
 
@@ -378,12 +375,13 @@ trip is harmless at any time.
 - The isolation proof: build your package against an INSTALLED FDK
   in a throwaway prefix, with no other FDK include path on the
   compile line — a private reach is then a compile error, not a
-  review finding. fdk-layer-shell's `tests/isolation.sh` is the template
-  (it also audits the dynamic boundary: every imported `fdk_*`
+  review finding. FDK's own packaging install-tests
+  (`packaging/*/install-test.sh`) are the template (they also bound
+  the dynamic side: every imported `fdk_*`
   symbol must resolve from `libfdk.so.1`).
 - Your package's shared library should export only its own
-  namespace (a version script — see fdk-layer-shell's
-  `src/libfdk-layer-shell.exports.map`): the `fdk_*` namespace belongs to
+  namespace (a version script listing exactly your package's
+  symbols): the `fdk_*` namespace belongs to
   FDK alone.
 - Run your tests under ASan/UBSan like FDK's own suites; suppress
   only third-party allocations by module (the GL-driver pattern in
@@ -399,16 +397,16 @@ trip is harmless at any time.
   add-on needing RAW seat access would need a new accessor — raise
   it as an API proposal, never work around it.
 - X11 per-output geometry exists since 1.0.0 (M-6: RandR
-  enumeration, per-output anchoring, output events through
-  fdk-layer-shell's own connection). The X11 residue is the EWMH one:
+  enumeration, per-output anchoring; output events ride the
+  add-on's own connection). The X11 residue is the EWMH one:
   _NET_WM_STRUT_PARTIAL is screen-global, so an exclusive-zone
   layer on a SECONDARY monitor reserves space the way the running
   WM interprets per-monitor struts (modern WMs clamp to the
   window's monitor; simpler ones apply it screen-wide) — the
   honest limit of the X11 protocol, documented rather than faked.
 - Layer stacking LEVELS are protocol truth on Wayland; on X11 they
-  ride whatever the WM gives dock-typed windows (fdk-layer-shell documents
-  this delta instead of faking fidelity).
+  ride whatever the WM gives dock-typed windows (document this
+  delta in your add-on instead of faking fidelity).
 
 ---
 
@@ -617,31 +615,25 @@ LayoutUpdated + the AboutToShow dirty handshake, New*/Properties-
 Changed receipts, activation/scroll, and the watcher
 vanish/return cycle with re-registration.
 
-## 16. The desktop HOST models — fdk-layer-shell's other half (1.0.0)
+## 16. The desktop HOST models — add-on territory (1.0.0)
 
 Sections 14-15 are the APP side (FDK core: a client and an item).
-The HOST side lives in the fdk-layer-shell package:
-`the FDK-Layer-Shell repository's include/fdk-layer-shell/fdk-layer-shell-desktop.h` — the
-org.kde.StatusNotifierWatcher host model (`fdk_layer_shell_tray_host`)
-and the org.freedesktop.Notifications server model
-(`fdk_layer_shell_notify_server`), DATA AND EVENTS ONLY. A panel or OSD
-creates the model on its own `fdk_dbus_connection` (created in the
-connection's ready callback — the model refuses a not-yet-ready
-connection), receives coarse events
+The HOST side — the org.kde.StatusNotifierWatcher host model and the
+org.freedesktop.Notifications server model, DATA AND EVENTS ONLY —
+belongs to shell/panel add-on packages by decision D-005, and its
+shape decisions are recorded in D-014: a host model is created on
+its own `fdk_dbus_connection` (created in the connection's ready
+callback — the model refuses a not-yet-ready connection), receives
+coarse events
 (ITEMS_CHANGED / ITEM_STATE / MENU_CHANGED / HOST_STATE; ADDED /
 REPLACED / CLOSED / SERVER_STATE), snapshots state through the
 struct_size read APIs, and forwards user interactions through the
 action entry points (Activate / SecondaryActivate / Scroll, the
 menu open/close/event round, action_invoke / close). Rendering is
-entirely the caller's: the reference UIs are
-`the FDK-Layer-Shell repository's examples/trayhost.c` (the bar + menu cascades) and
-`the FDK-Layer-Shell repository's examples/notifyd.c` (the card stack) — thin over the
-models, with the rigs (`make -C fdk-layer-shell test-tray`,
-`test-notifyd`) proving the pairs end to end and
-`make -C fdk-layer-shell test-desktop` proving the models headlessly on
-a private bus (D-014 records the shape decisions, including the
-one-model-per-connection rule and the asynchronous name
-etiquette).
+entirely the caller's: a panel or OSD draws its own tray bar or
+notification cards as thin UIs over the models. FDK core pins the
+protocol behavior both sides need through the mock daemon/watcher
+rigs in `make test-dbus`.
 
 ## 17. The UI font size — one number, everywhere (1.0.0)
 
@@ -746,7 +738,7 @@ right there); X11 parents popups to subsurfaces naturally and the
 same call succeeds there.
 
 **Nesting is legal on both backends** (`fdk_ext_subsurface_
-create_ex` on a subsurface, a popup, a kind surface — a layer-shell
+create_ex` on a subsurface, a popup, a kind surface — a shell-surface
 bar carrying an inset video region works). The destroy sweep is
 depth-first: destroying a parent sweeps its subsurfaces (and their
 children, recursively) before its own native surface — the popup
@@ -850,44 +842,22 @@ the chooser widgets below.
 
 ---
 
-## The reference consumer: fdk-layer-shell (its own repository)
+## The reference consumer: examples/19_extension_surfaces.c (in-tree)
 
-The model this document describes has its proof: the
-`fdk-layer-shell` package — the FDK-Layer-Shell repository —
-2026-11-01) is the first surface add-on, built on exactly the API
-above and nothing else — the shell-surface substrate (panels,
-docks, notification shells, OSDs) fdk_extend.h was designed for.
+The model this document describes has its proof in the tree:
+`examples/19_extension_surfaces.c` registers its OWN surface kind
+and exercises exactly the API above and nothing else — create and
+adopt, configure reporting, the present gate, popups, input, the
+hover cursor, widget hosting (§19), and clean teardown — on the
+X11 backend, with the same API carrying the Wayland shape (a
+role-carrying surface speaking its own protocol through its own
+registry on the shared display, acking every configure and
+reporting it through the extension API so FDK's present gate owns
+the never-commit-before-configure rule, adopting popups via
+`get_popup` in the `popup_attached` hook, vendored protocol XMLs +
+committed scanner output where a custom role needs generated
+bindings).
 
-- its `include/fdk-layer-shell/fdk-layer-shell.h`
-  — the add-on's public API: layer surfaces (`fdk_layer_shell_layer_*`:
-  live setters for level/anchors/margins/exclusive-zone/size/
-  keyboard mode, show/hide/reveal/auto-hide), output enumeration
-  with a hotplug callback (`fdk_layer_shell_output_*`), popup surfaces
-  (3-deep cascade-tested), a notification server
-  (`fdk_layer_shell_notify_*`), and a tray host (`fdk_layer_shell_tray_*`).
-- Wayland: a `zwlr_layer_surface_v1` client speaking through its
-  OWN registry on the shared display, acking every configure and
-  reporting it through the extension API (so FDK's present gate
-  owns the never-commit-before-configure rule), and adopting
-  popups via `get_popup` in the `popup_attached` hook. Vendored
-  protocol XMLs + committed scanner output (no wayland-scanner
-  needed at build).
-- X11: an EWMH dock — override-redirect, `_NET_WM_WINDOW_TYPE_
-  DOCK`, `_NET_WM_STRUT_PARTIAL`, sticky across workspaces,
-  per-level stacking state — honored by the EWMH world's window
-  managers.
-- Its own build/version/pkg-config/packaging (alpine, arch,
-  debian, fedora, void) and its own tests: X11 suite (verified in
-  this sandbox: outputs, anchoring, popup cascades, family sweep
-  all pass), the Wayland suite (self-skips without a compositor),
-  the prefix-ISOLATION proof (builds against an installed FDK
-  alone — a private reach would be a compile error), and the
-  notifyd/trayhost rigs.
-- `make -C fdk-layer-shell` builds it; `make -C
-  fdk-layer-shell examples` builds the bar, notifyd and
-  trayhost demos.
-
-Reading the FDK-Layer-Shell repository's `src/shell.c` after this document is
-the intended path for every future add-on author: dispatch plus
-two backend files (wl/, x11/), and it never touches an FDK
-private struct.
+The intended path for every future add-on author is this document
+plus the example: dispatch plus two backend files (wl/, x11/), and
+it never touches an FDK private struct.

@@ -42,8 +42,8 @@ int fdk__x11_detect_scale(Display *display);
 /* 1.0.0 M-6/B-05: the RandR output model (x11_randr.c) — per-CRTC
  * geometry probed at connect, refreshed on RRNotify. Internal only
  * (the Wayland core tracks outputs without an app-facing output
- * API too; fdk-shell-overlay drives its OWN X connection for output
- * events). Consumers: window placement (maximize/fullscreen to the
+ * API too; an add-on wanting output events drives its OWN
+ * connection for them). Consumers: window placement (maximize/fullscreen to the
  * containing monitor). */
 typedef struct fdk_x11_output {
     int x, y;             /* the CRTC's geometry, root coordinates  */

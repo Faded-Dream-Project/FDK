@@ -12791,7 +12791,7 @@ static void test_gl_lane_resize_gui(void) {
  * live X server, driven the way a REAL add-on would drive it: a
  * registered kind whose create callback builds its own X window
  * through the documented native-display accessor (dock-type
- * properties included — the exact shape fdk-shell-overlay's X11 backend
+ * properties included — the exact shape a shell add-on's X11 backend
  * has), adopted by FDK, rendered through the public fdk_surface
  * path, receiving real input events, parenting popups, and joining
  * the event loop with fd sources. The add-on code below uses ONLY
@@ -12800,8 +12800,8 @@ static void test_gl_lane_resize_gui(void) {
  * verification channels, exactly like every other section here.
  */
 
-/* The test add-on's per-surface state: what a real add-on (fdk-shell-overlay)
- * keeps beside the FDK handle. */
+/* The test add-on's per-surface state: what a real add-on keeps
+ * beside the FDK handle. */
 typedef struct ext_kind_state {
     int creates;   /* create callbacks run                       */
     int destroys;  /* destroy callbacks run                      */
@@ -12814,7 +12814,7 @@ static ext_kind_state g_ext_state;
 
 /* The kind's create callback: build an UNMAPPED X window with the
  * add-on's own properties (a dock-type window here — the strut
- * semantics themselves are fdk-shell-overlay's business; this is the shape),
+ * semantics themselves are the add-on's business; this is the shape),
  * and hand the native handle back to FDK for adoption. Public API +
  * Xlib only — the documented accessor pattern from docs/EXTENDING.md. */
 static fdk_result ext_test_create(fdk_ext_surface *surface,

@@ -15,8 +15,9 @@
 *.so
 *.so.*
 
-# Core dumps
-/core
+# Core dumps (any depth — a tracked test-apps/core once slipped past the
+# root-anchored form)
+core
 core.*
 
 # Local, machine-specific
@@ -29,7 +30,8 @@ compile_commands.json
 /build-rpm/
 test-apps/build-rel/
 test-apps/*.deb
+/*.deb
 
-# an old install tree from the pre-rename days (fdk-shell ->
-# fdk-layer-shell, its own repository now); build debris only, never commit it
+# an old install tree from the pre-rename days; build debris only,
+# never commit it
 /fdk-shell/

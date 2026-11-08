@@ -478,9 +478,8 @@ $(SHARED_LIB): $(LIB_OBJS_PIC) $(EXPORT_MAP)
 	$(CC) $(CFLAGS) -fPIC -shared -Wl,-soname,$(FDK_SONAME) -Wl,--version-script=$(EXPORT_MAP) -o $@ $(LIB_OBJS_PIC) $(LDFLAGS)
 	@# the SONAME link in-tree: anything linking -lfdk needs
 	# libfdk.so.<major> at RUN time, not just at install time
-	# (the add-on host dlopens a plugin against the shared lib and
-	# could not start from a clean build without it — found live
-	# by the smoke matrix)
+	# (any dlopen consumer resolves the same libfdk.so.1 —
+	# found live by the smoke matrix)
 	ln -sf libfdk.so $(BUILD_DIR)/$(FDK_SONAME)
 
 # Generates the export map: intersection of header-declared names and
@@ -693,15 +692,6 @@ examples: $(EXAMPLE_BINS)
 $(BUILD_DIR)/examples/%: examples/%.c $(STATIC_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(X11_CFLAGS) $(WAYLAND_CFLAGS) -Wno-cast-qual $< $(STATIC_LIB) -o $@ $(LDFLAGS)
-
-# --- fdk-layer-shell (the shell-surface add-on) ---------------------------
-#
-# The add-on package moved to its own repository:
-#   https://github.com/Faded-Dream-Project/FDK-Layer-Shell
-# (renamed from fdk-shell-overlay; C prefix fdk_layer_shell_*). It
-# builds against FDK's installed public API only — clone it beside
-# this checkout (../fdk is its default FDK_ROOT) and run its own
-# Makefile (make test / isolation).
 
 # --- Tools (1.0.0) ------------------------------------------------------
 

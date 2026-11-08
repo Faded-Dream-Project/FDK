@@ -89,5 +89,5 @@ else
     echo "== INFO: ubuntu:22.04 (glibc 2.35) install-test did NOT pass — documented as unsupported; NOT a release blocker =="
 fi
 
-echo "===== FDK debian pipeline OK (FDK; the layer-shell add-on lives in FDK-Layer-Shell) ====="
+echo "===== FDK debian pipeline OK ====="
 ls -la dist/

@@ -31,7 +31,7 @@ desktops** walking the 28-section verification checklist. Then tag.
 ## 2. The verification gate (M-9 — the only roadmap item left)
 
 No code remains. These need YOUR hardware because the sandbox
-cannot produce them; TESTING-ON-DESKTOP.md §1–28 is the walkthrough:
+cannot produce them; TESTING-ON-DESKTOP.md §1–19 is the walkthrough:
 
 - **Wayland desktop (labwc or sway)**: notifyd/trayhost vs the real
   incumbents (§1–7), the UI font-size following (§8), text_demo's
@@ -124,8 +124,8 @@ Run it: `bash scripts/release-gate.sh`. Exit 0 only when G1–G6 pass.
 ## 7. Housekeeping done alongside this document
 
 
-- `fdk-shell/` in the worktree is an old INSTALL tree (renamed to
-  `fdk-shell-overlay/` long ago; sources live there) — gitignored so
+- `fdk-shell/` in the worktree is an old INSTALL tree from the
+  pre-rename days — gitignored so
   it can never be committed by accident.
 - The uncommitted wayland_egl patch the sandbox rollback orphaned
   was verified already re-landed upstream (`3d989c8`, `5a67416`) —

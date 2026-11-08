@@ -5,9 +5,9 @@
  * stays the ROOT: the core and the fdk tools ship together as one
  * package, and everything else — panel layers, notification shells,
  * custom surface roles, input methods — is a SEPARATE package that
- * depends on FDK and uses exactly what this header exposes. The
- * first such package is fdk-layer-shell (wlr-layer-shell surfaces; its
- * source is the reference consumer of every function here.
+ * depends on FDK and uses exactly what this header exposes.
+ * examples/19_extension_surfaces.c (the in-tree demo) is the
+ * reference consumer of every function here.
  *
  * The model in one paragraph: an add-on REGISTERS a surface KIND
  * (a name plus a small table of callbacks). Creating a surface of
@@ -129,7 +129,7 @@ typedef enum fdk_ext_capability {
     /* EWMH dock semantics are settable by an X11 add-on itself
      * (_NET_WM_WINDOW_TYPE_DOCK + struts): reported for the X11
      * backend. On Wayland, layering is the add-on's own protocol
-     * negotiation (wlr-layer-shell) — FDK cannot vouch for it, so
+     * negotiation — FDK cannot vouch for it, so
      * this capability reports false there and the add-on binds the
      * protocol itself. */
     FDK_EXT_CAP_EWMH_DOCK    = 3,
@@ -254,8 +254,8 @@ typedef struct fdk_ext_surface_ops {
 
     /* Wayland only: FDK created an xdg_popup parented to this
      * surface's wl_surface and hands the popup proxy over so the
-     * role can adopt it (the wlr-layer-shell pattern:
-     * zwlr_layer_surface_v1.get_popup(xdg_popup)). `native_popup`
+     * role can adopt it (the shell-surface pattern: the role's
+     * own get_popup request adopts the xdg_popup). `native_popup`
      * is the struct xdg_popup* — cast it in the add-on, which is
      * the only place wayland-client types may appear. May be NULL
      * (the add-on's role is not a popup parent; Wayland popups on
@@ -415,7 +415,7 @@ fdk_result fdk_ext_surface_get_size(const fdk_ext_surface *surface,
  * the documented contract above, acked). The first notified
  * configure commits the deferred first frame post-ack; a configure
  * that changes the size re-drives the paint via EXPOSE instead.
- * The layer-shell rule "never commit a buffer before the first
+ * The role rule "never commit a buffer before the first
  * configure" is therefore enforced BY FDK: an add-on that paints
  * eagerly (immediately after show(), the way every example does)
  * cannot trip the compositor's protocol error (found live on labwc
@@ -439,7 +439,7 @@ void fdk_ext_surface_set_event_callback(fdk_ext_surface *surface,
  * The whole widget catalog — labels, entries, buttons, boxes, the
  * choosers, everything in fdk_widgets.h — on an extension surface.
  * This is the "text on extension surfaces" gap closed: a label is
- * one fdk_label_create away on a layer-shell bar, a notification
+ * one fdk_label_create away on a shell-surface bar, a notification
  * card, a dock.
  *
  * fdk_ext_surface_host_widgets() creates the surface's WINDOW-OWNED
@@ -598,7 +598,7 @@ fdk_result fdk_ext_subsurface_create(fdk_window *parent, fdk_i32 x,
                                      fdk_ext_surface **out_surface);
 
 /* The same primitive parented to an EXTENSION surface (an add-on's
- * role surface — a layer shell bar carrying an inset video region,
+ * role surface — a shell-surface bar carrying an inset video region,
  * an overlay on a notification card). Both kind surfaces and FDK-
  * owned ones (popups, other subsurfaces — nesting is legal on both
  * backends: the protocol nests Wayland subsurfaces freely, and X11

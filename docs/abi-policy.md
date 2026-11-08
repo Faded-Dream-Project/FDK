@@ -128,7 +128,7 @@ this document's rules, with one addition of its own: the extension
 API is **versioned separately** (`FDK_EXT_API_VERSION` + the
 runtime `fdk_ext_api_version()` twin), additions bump the number,
 and nothing is ever removed or renamed from it either. The
-`fdk_ext_surface_ops` table and the `fdk_shell`-style desc structs
+`fdk_ext_surface_ops` table and the desc structs
 that ride the same pattern carry `struct_size` so callers compiled
 against an older header keep working as fields are APPENDED — the
 input-struct rule, made executable.

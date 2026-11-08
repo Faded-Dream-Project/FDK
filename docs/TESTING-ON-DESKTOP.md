@@ -10,270 +10,58 @@ trace environment variable, and the output to expect.
 
 Current open items:
 
-1. [notifyd on Wayland (sway / labwc)](#1-notifyd-on-wayland)
-2. [notifyd on X11 (Openbox)](#2-notifyd-on-x11)
-3. [notifyd against a real incumbent daemon](#3-notifyd-vs-another-daemon)
-4. [notifyd with real clients](#4-notifyd-with-real-clients)
-5. [trayhost on Wayland (sway / labwc)](#5-trayhost-on-wayland)
-6. [trayhost on X11 (Openbox / any EWMH WM)](#6-trayhost-on-x11)
-7. [trayhost against real incumbents](#7-trayhost-against-real-incumbents)
-8. [the UI font size on your desktop (TASK C)](#8-the-ui-font-size-on-your-desktop-task-c--needs-your-eyes)
-9. [the app-facing API against YOUR desktop (TASK B)](#9-the-app-facing-api-against-your-desktop-task-b--needs-your-eyes)
-10. [text_demo: complex scripts, bidi, fallback, caret (M-2)](#10-text_demo-complex-scripts-bidi-fallback-caret-m-2--needs-your-eyes)
+1. [the UI font size on your desktop (TASK C)](#1-the-ui-font-size-on-your-desktop-task-c--needs-your-eyes)
+2. [the app-facing API against YOUR desktop (TASK B)](#2-the-app-facing-api-against-your-desktop-task-b--needs-your-eyes)
+3. [text_demo: complex scripts, bidi, fallback, caret (M-2)](#3-text_demo-complex-scripts-bidi-fallback-caret-m-2--needs-your-eyes)
 
 ---
 
-## 1. notifyd on Wayland
+## 1. the UI font size on your desktop (TASK C — needs your eyes)
 
-Build and run against your compositor session:
-
-```sh
-make -C fdk-layer-shell examples
-export FDK_NOTIFYD_TRACE=1     # one log line per bus call + placement
-./fdk-layer-shell/build/examples/notifyd
-```
-
-Expected first lines (stderr):
-
-```
-notifyd: serving org.freedesktop.Notifications as :1.NN
-```
-
-Send a test notification from another terminal (notify-send, or
-gdbus if notify-send is not installed):
-
-```sh
-gdbus call --session \
-  --dest org.freedesktop.Notifications \
-  --object-path /org/freedesktop/Notifications \
-  --method org.freedesktop.Notifications.Notify \
-  "Manual test" 0 "dialog-information" \
-  "A summary" "A body with <b>bold</b> and a <a href='x'>link</a>" \
-  "[]" "{}" 4000
-```
-
-What to verify (the card appears at the TOP-RIGHT of every output):
-
-- the card renders with your theme's colors and the system font;
-  the summary is bold, the body wraps, the link is underlined;
-- an icon arrives (notify-send `-i dialog-information` resolves
-  through your icon theme; the trace logs the resolution);
-- the card expires after ~4 s and the space below the stack is
-  clickable desktop — a click in the 8 px gap BETWEEN two cards
-  passes through (a click on a card's rounded CORNER does not —
-  that is the documented S-4 input-region limit);
-- with two cards live, the newer one is on top and the older slid
-  down with no flicker when it re-anchored;
-- run `swaymsg create_output` (sway): the card re-appears on the
-  new output too (the "every output" placement), and unplugging an
-  output self-heals the card onto the survivors;
-- the trace (`FDK_NOTIFYD_TRACE=1`) prints one `place id=...`
-  line per card with anchor, margin, and size.
-
-Known sandbox-verified limits you should NOT see violated: no
-protocol errors under sway 1.10/labwc (the rig pins the
-configure/ack handshake), no busy loop while idle.
-
-## 2. notifyd on X11
-
-Same binary, from your X11 session (Openbox):
-
-```sh
-export FDK_NOTIFYD_TRACE=1
-./fdk-layer-shell/build/examples/notifyd
-```
-
-Verify with the same gdbus call as above, plus:
-
-- `xprop` on the card window reports `_NET_WM_WINDOW_TYPE_DOCK`,
-  `_NET_WM_STATE_ABOVE`, and `_NET_WM_STATE_SKIP_TASKBAR` (the
-  EWMH mapping of the overlay layer);
-- the card never takes keyboard focus and never appears in the
-  taskbar;
-- a click on the card body dismisses it (reason 2 in the trace);
-  with a `default` action (notify-send always sends one), the click
-  also emits ActionInvoked — visible in the trace;
-- full-screen windows stay ABOVE the card (the documented EWMH
-  ceiling for docks — the README's fullscreen-over-docks note).
-
-## 3. notifyd vs another daemon
-
-With dunst/mako/swaync already running:
-
-```sh
-./fdk-layer-shell/build/examples/notifyd
-```
-
-Expected: ONE clear line naming the incumbent through its own
-GetServerInformation, and a clean exit 0 — e.g.
-
-```
-notifyd: org.freedesktop.Notifications is already owned by :1.23
-notifyd: ...it is dunst 1.0.0 (vendor knopwob); exiting (--replace to take over)
-```
-
-Then the takeover dance:
-
-```sh
-./fdk-layer-shell/build/examples/notifyd --replace
-```
-
-Expected: notifyd takes the name (if the incumbent allowed
-replacement), the incumbent exits on its NameLost, and notifyd
-serves. Against an incumbent that REFUSED replacement
-(RequestName without ALLOW_REPLACEMENT), expect the one-line
-refusal and exit 0. `--wait` queues instead of exiting.
-
-Stop it with SIGINT/SIGTERM — the trace ends with a clean
-shutdown (and no sanitizer findings in a debug build).
-
-## 4. notifyd with real clients
-
-The rig already drives dbus-send (libdbus), gdbus (GLib), and
-FDK's own client at it. Worth one round with the real world:
-
-- `notify-send` normal, `-u critical` (must NOT auto-expire),
-  `-t 0` (must never expire), `-A` actions (buttons must render and
-  fire ActionInvoked);
-- a real `image-data` sender (e.g. an application screenshot
-  notification) — the raw-icon path;
-- a burst (`for i in $(seq 1 40); do notify-send "n$i" & done`):
-  every call answered, the flood noted once, the daemon alive;
-- a volume/brightness OSD applet if you use one.
-
----
-
-## 5. trayhost on Wayland (sway / labwc)
-
-The StatusNotifier tray host against your compositor session:
-
-```sh
-make -C fdk-layer-shell examples
-export FDK_TRAYHOST_TRACE=1    # one log line per registration,
-                               # property fetch, menu transaction
-./fdk-layer-shell/build/examples/trayhost
-```
-
-Expected first lines (stderr):
-
-```
-trayhost: serving org.kde.StatusNotifierWatcher as :1.xx
-trayhost[trace]: self-registered as host: :1.xx
-```
-
-1. Run it under your normal session; the floating tray strip
-   appears top-right (a rounded pill, `--margin`/`--cell`/
-   `--bar-height` to taste).
-2. Start real items — `nm-applet`, `blueman-applet`,
-   `udiskie -t`, or anything StatusNotifier-speaking. Each
-   registration logs:
-
-   ```
-   trayhost[trace]: registered :1.yy (KDE bus-name dialect, sender :1.yy)
-   trayhost[trace]: GetAll(org.kde.StatusNotifierItem) on :1.yy ...
-   trayhost[trace]: bar relayout: N items, WxH at ...
-   ```
-
-3. Left-click an icon: the app activates (nm-applet opens its
-   menu, etc. — for ItemIsMenu items left-click opens the
-   dbusmenu; trace logs `Activate x=... y=...`).
-4. Right-click an icon: its dbusmenu opens right-aligned under
-   the cell, cascading submenus flip at the screen edge (trace:
-   `submenu flip: ...`).
-5. Middle-click: SecondaryActivate.
-6. Kill an item (e.g. `pkill nm-applet`): it vanishes within a
-   second (trace: `item drop: ...`; the strip relayouts).
-7. A Passive item fades to ~45% alpha (never disappears);
-   NeedsAttention draws the attention pixmap plus the accent
-   marker strip under the cell.
-8. Start a second tray host (any other panel's tray): one clear
-   line, exit 0. `--replace` takes over from hosts that allow
-   replacement.
-
-Known honest limits (docs/DECISIONS.md D-007): no tooltip
-windows on hover (the data is parsed; nothing renders it), the
-IconTheme property answers the override channel or "default",
-Activate coordinates are layer-local where the backend has no
-global space (Wayland), and menu refreshes mid-open are
-discarded (stale-safe) until the next open.
-
-## 6. trayhost on X11 (Openbox / any EWMH WM)
-
-Same binary, DISPLAY set:
-
-```sh
-DISPLAY=:0 FDK_TRAYHOST_TRACE=1 \
-    ./fdk-layer-shell/build/examples/trayhost
-```
-
-1. Same steps 2-8 as above; on X11 the trace additionally logs
-   the bar's computed screen origin (`bar relayout: ... at
-   (x,y)`), and Activate coordinates are true screen coordinates.
-2. With a real WM: the strip is `_NET_WM_WINDOW_TYPE_DOCK` +
-   sticky (visible on every workspace — switch and confirm).
-3. `xprop` on the strip window: WINDOW_TYPE_DOCK, state STICKY +
-   ABOVE (the fdk-layer-shell TOP layer mapping).
-
-## 7. trayhost against real incumbents
-
-- Against an incumbent watcher (e.g. a running panel's tray):
-  the one-line decline, exit 0; `--replace` only when the
-  incumbent allowed replacement.
-- Items that register through a real session bus (not
-  dbus-run-session): same round as above — this is the
-  deployment shape the rigs approximate.
-
-## 8. the UI font size on your desktop (TASK C — needs your eyes)
-
-The shells and FDK's chrome now scale off one answer: the
+FDK's chrome now scales off one answer: the
 theme/settings (`ui.font_size`, `ui.scale`), the desktop's own
 statement (XSETTINGS on X11, the portal on Wayland), or the 16 px
-default. On your labwc setup the visible change is notifyd /
-trayhost rendering at 16 px instead of the old 14.
+default. On your desktop the visible change is any FDK application
+rendering its chrome at 16 px-derived sizes instead of the old 14
+(the test apps under `test-apps/build/` are real FDK applications —
+use them as the subjects).
 
 1. The default (nothing set anywhere):
 
 ```sh
-DISPLAY=:0 ./fdk-layer-shell/build/examples/notifyd
-notify-send "Default size" "should read comfortably at 16 px"
-DISPLAY=:0 ./fdk-layer-shell/build/examples/trayhost   # bar taller than before
+DISPLAY=:0 ./test-apps/build/fdk-notes
+DISPLAY=:0 ./test-apps/build/fdk-edit
 ```
 
-Expected: cards and the tray strip are ~14% larger than the old
-builds (font 16 vs the old 14); nothing clipped — summary and
-body inside the card, menu rows inside the menu.
+Expected: menus, dialogs, statusbar and tooltips read comfortably
+at the 16 px-derived sizes (about 14% larger than the old 14 px
+baseline); nothing clipped — menu rows inside their menus, prompt
+text inside its dialog.
 
 2. Each size, explicitly (the rig's XS sweep, by hand):
 
 ```sh
 for S in 12 16 24 32; do
-  DISPLAY=:0 FDK_UI_FONT_SIZE=$S FDK_NOTIFYD_TRACE=1 \
-    ./fdk-layer-shell/build/examples/notifyd &
-  notify-send "Size $S" "the card grows with the font; nothing clips"
-  sleep 4; pkill -f 'examples/notifyd'
+  DISPLAY=:0 FDK_UI_FONT_SIZE=$S ./test-apps/build/fdk-notes & 
+  sleep 4; kill %1
 done
-FDK_TRAYHOST_TRACE=1 FDK_UI_FONT_SIZE=32 \
-  DISPLAY=:0 ./fdk-layer-shell/build/examples/trayhost
+DISPLAY=:0 FDK_UI_FONT_SIZE=32 ./test-apps/build/fdk-edit
 ```
 
-Expected: each daemon's first trace line reads
-`ui: font <S>px (k=...) card_w=...` (trayhost: `bar_h=...`) —
-the number you asked for; the card/bar/menu grow with it; at 32
-px the menu's 10 rows still fit the screen and no label touches
-a card edge.
+Expected: every app's chrome grows with the number you asked for;
+at 32 px the menus' rows still fit the screen and no label touches
+a dialog edge; the text editors' bodies reflow under the larger
+metrics.
 
 3. The desktop's own statement (the follow-by-default channel):
 run your session's settings (labwc + xsettingsd / gsettings
 portal) with a different font (`gsettings set
 org.gnome.desktop.interface font-name 'Sans 11'` where a portal
-exists), restart notifyd, and confirm the trace line follows.
+exists), restart the app, and confirm the chrome follows.
 `FDK_UI_FONT_SIZE` beats it; `fdk-set fdk ui.font_size 18` beats
 it too (the FDK-settings-wins rule).
 
-4. Trace variable: `FDK_NOTIFYD_TRACE=1` / `FDK_TRAYHOST_TRACE=1`
-prints the `ui:` metrics line (the one the rigs parse).
-
-## 9. the app-facing API against YOUR desktop (TASK B — needs your eyes)
+## 2. the app-facing API against YOUR desktop (TASK B — needs your eyes)
 
 The core client (`fdk_notify.h`) and tray item (`fdk_tray.h`)
 are proven against in-test mocks; against your real daemon/host
@@ -285,13 +73,13 @@ or use the rig's probe binary as the item):
    reason arrive; kill the daemon mid-flight and confirm the
    status moves to NO_DAEMON and back on restart.
 2. Your tray host (Waybar / the panel's) — register an item with
-   the snippet in docs/EXTENDING.md §15, confirm the icon, the
+   the snippet in docs/EXTENDING.md §7, confirm the icon, the
    tooltip, the menu tree (including radios and a submenu), and
    a live `set_label` (the host re-fetches on LayoutUpdated).
 3. Restart the host (or the watcher service) and confirm the
    item re-registers (on_host flips 0 then 1).
 
-## 10. text_demo: complex scripts, bidi, fallback, caret (M-2 — needs your eyes)
+## 3. text_demo: complex scripts, bidi, fallback, caret (M-2 — needs your eyes)
 
 The shaping pipeline (HarfBuzz + FriBidi + per-script fontconfig
 fallback) is proven headlessly (tests/test_shaping.c: RTL visual
@@ -369,7 +157,7 @@ face did not map the codepoint.
 **Status: DONE (should work; owner verification pending — re-run
 after the 2026-10-31 fallback fix).**
 
-## 11. IME against a real input method (M-1 — needs your eyes)
+## 4. IME against a real input method (M-1 — needs your eyes)
 
 The sandbox has no fcitx5/ibus; the sway rig proved the protocol
 both ways with a hand-rolled input-method client, and the XIM
@@ -409,39 +197,7 @@ compatibility rule, not a bug.
 
 **Status: DONE (should work; owner verification pending).**
 
-## 12. Multi-monitor X11 (M-6 — needs your real monitors)
-
-The headless rigs pin the single-monitor identity and the origin
-math (a synthetic two-monitor table through the internal test
-seam); what only your desktop can prove is REAL output hotplug and
-a WM's per-monitor strut interpretation.
-
-```sh
-# What the toolkit sees (real connector names, per-CRTC geometry):
-xrandr                       # compare against:
-fdk-layer-shell/build/examples/bar --anchor tr          # output 0
-fdk-layer-shell/build/examples/bar --anchor tr --output 1
-```
-
-Expectations:
-
-- `bar` with `--output 1` docks against THAT monitor's top-right
-  corner (its own edges, not the screen's).
-- `xrandr --output <second> --off` fires the REMOVED output event
-  (the bar's logs); `--auto` re-adds it with ADDED. A layer on the
-  removed output is the app's business — the enumeration keeps the
-  gone output's record until shutdown.
-- A bar with an exclusive zone on a SECONDARY monitor: how much
-  space it reserves is the WM's per-monitor strut interpretation
-  (modern WMs clamp to the window's monitor; simpler ones reserve
-  screen-wide) — the documented EWMH limit, not a bug.
-- Maximize/fullscreen (bare-X, no WM path): fill the monitor the
-  window is ON. Under a real EWMH WM the WM owns the outcome —
-  compare against what it does for other clients.
-
-**Status: DONE (should work; owner verification pending).**
-
-## 13. Activation + startup notification on your desktop (S-6 — needs your eyes)
+## 5. Activation + startup notification on your desktop (S-6 — needs your eyes)
 
 What the headless rigs proved: the xdg-activation round trip (mint
 through the private-queue roundtrip, bogus voucher REFUSED, the full
@@ -467,8 +223,8 @@ Expectations, Wayland:
 - The launcher flow — your launcher mints with
   `fdk_window_activation_token()` at button-press, the child spends
   `XDG_ACTIVATION_TOKEN`: the child's first window arrives focused,
-  no focus steal. (Taskbar/launcher integration is the fdk-layer-shell
-  consumer of this.)
+  no focus steal. (Taskbar/launcher integration is the shell
+  add-ons' consumer of this.)
 - A stale/bogus token: refused, focus unchanged — that refusal is
   the feature.
 - labwc's `focus_on_window_activation` setting (smart/urgent/focus/
@@ -490,7 +246,7 @@ Expectations, X11 (Openbox):
 
 **Status: DONE (should work; owner verification pending).**
 
-## 14. Drag icons + widget drop targets on your desktop (S-9 — needs your eyes)
+## 6. Drag icons + widget drop targets on your desktop (S-9 — needs your eyes)
 
 What the rigs proved: the icon window's geometry/shape/tracking/
 destruction through a real X11 drag, the per-position acceptance
@@ -525,7 +281,7 @@ Expectations:
 
 **Status: DONE (should work; owner verification pending).**
 
-## 15. The portal FileChooser on your desktop (C-1 — needs your eyes)
+## 7. The portal FileChooser on your desktop (C-1 — needs your eyes)
 
 What the rig proved: the whole protocol dance against a mock portal
 (the call's option shape, the race-free subscription, the Response
@@ -556,7 +312,7 @@ Expectations:
 
 **Status: DONE (should work; owner verification pending).**
 
-## 16. The AT-SPI bridge against a real screen reader (S-8 — needs your eyes)
+## 8. The AT-SPI bridge against a real screen reader (S-8 — needs your eyes)
 
 What the rig proved: the whole level-1 surface against a mock stack
 (two-bus handshake, discovery, tree enumeration with virtual rows,
@@ -588,38 +344,7 @@ Expectations:
 **Status: DONE level 1 (should work; owner verification pending;
 text interfaces are C-2's next tier).**
 
-## 17. Runtime re-anchoring + auto-hide on your desktop (C-5 — needs your eyes)
-
-What the rigs proved: the live placement changes on both backends
-(geometry/strut readback on X11, configure-through on sway, the role
-swap, the auto-hide cycle with a REAL XTEST strip entry). What only
-your desktop shows is a real WM's take on a moving dock and a real
-compositor's slide.
-
-```sh
-# any fdk-layer-shell layer, live:
-#   fdk_layer_shell_layer_set_anchor(layer, ...)   # watch it slide
-#   fdk_layer_shell_layer_set_auto_hide(layer, 3, 300)  # hover the edge
-```
-
-Expectations:
-
-- A top bar re-anchored BOTTOM moves to the floor; other windows
-  follow the strut change on their next layout (EWMH WMs re-flow on
-  _NET_WM_STRUT_PARTIAL changes — verify your WM does).
-- set_level to OVERLAY: the layer jumps above normal windows
-  (Wayland: a brief unconfigure/configure blink is legal; X11: no
-  blink).
-- Auto-hide: the bar slides off leaving 3px; windows maximize into
-  the freed space; touching the edge (or the strip) reveals; moving
-  away for the dwell hides it again. On X11 your WM must not fight
-  the off-screen move (USPosition claims it; some WMs clamp dock
-  windows to the screen — a visible clamp is a WM difference to
-  report, not an fdk-layer-shell bug).
-
-**Status: DONE (should work; owner verification pending).**
-
-## 18. Gestures on your touchscreen (C-6 — needs your fingers)
+## 9. Gestures on your touchscreen (C-6 — needs your fingers)
 
 What the rig proved: the engine's whole gesture policy headless
 (span arithmetic, both swipe directions, every reject, the CANCEL
@@ -639,7 +364,7 @@ Expectations:
 
 **Status: DONE (should work; owner verification pending).**
 
-## 19. The Wayland GPU present lane on your hardware (D-1 / B-15 — needs your GPU)
+## 10. The Wayland GPU present lane on your hardware (D-1 / B-15 — needs your GPU)
 
 What the rig proved: the lane's whole state machine against a REAL
 compositor (sway headless, through Mesa's software EGL under
@@ -676,7 +401,7 @@ session — labwc, sway, KDE, GNOME all qualify):
 **Status: DONE (should work; owner verification pending on real
 hardware — the rig's coverage is the Mesa swrast path).**
 
-## 20. Subsurfaces on your desktop (D-2 / B-16 — needs your eyes)
+## 11. Subsurfaces on your desktop (D-2 / B-16 — needs your eyes)
 
 What the rigs proved: the X11 child-window half against a real Xvfb
 server (the child is a REAL X child — XQueryTree both directions,
@@ -729,7 +454,7 @@ X11):
 - Tearing the window down (or the app quitting) with the sub alive
   is clean — no protocol errors on either backend (the sweep).
 
-## 21. Your drawing tablet (D-3 / B-17 — needs your pen)
+## 12. Your drawing tablet (D-3 / B-17 — needs your pen)
 
 What the rigs proved: the full event alphabet through the test
 seams, the Wayland frame batching, distinct simultaneous tool ids,
@@ -806,7 +531,7 @@ Expectations (Wayland: labwc, sway, KDE, GNOME; X11: any WM):
   proximity for XI2 clients — the events simply stop when the pen
   leaves range). On Wayland PROXIMITY_OUT arrives with zeros.
 
-## 22. The foreign toplevel list on your desktop (D-4 — needs your apps)
+## 13. The foreign toplevel list on your desktop (D-4 — needs your apps)
 
 What the rigs proved: both halves end to end — the X11 leg as a
 full fake-WM round trip (the roster read from real server state,
@@ -854,7 +579,7 @@ Expectations (Wayland: sway, labwc; X11: any EWMH WM):
 - GNOME (no wlr-foreign-toplevel) answers NULL from open — the
   documented degradation; treat NULL as "no taskbar substrate".
 
-## 23. Session save/restore on your desktop (D-5 / B-19 — needs your
+## 14. Session save/restore on your desktop (D-5 / B-19 — needs your
 logout)
 
 What the rigs proved: the X11 lane end to end — a second connection
@@ -917,7 +642,7 @@ fdk_window_show(win);
 - `fdk_session_remove(s)` is the "forget me" call — the next launch
   with the old id mints a fresh session instead.
 
-## 24. Idle inhibition on your desktop (S-3 / B-11 — needs your
+## 15. Idle inhibition on your desktop (S-3 / B-11 — needs your
 screensaver)
 
 The rigs proved both mechanisms: the live D-Bus battery's mock
@@ -949,7 +674,7 @@ fdk_idle_uninhibit(inh);
   in the B-11 row); on a GNOME X11 session the freedesktop name
   carries it.
 
-## 25. The cursor shape set on your desktop (S-5 / B-12 — needs your
+## 16. The cursor shape set on your desktop (S-5 / B-12 — needs your
 pointer)
 
 The rigs pinned the set both sides (the sway suite's enum-table row
@@ -970,12 +695,12 @@ own artwork for each shape.
   nearest-glyph substitutions (D-016). Wayland with cursor-shape-v1
   (sway, labwc): the compositor's own themed shapes.
 
-## 26. Touch basics on your touchscreen (M-3 / B-03 — needs your
+## 17. Touch basics on your touchscreen (M-3 / B-03 — needs your
 fingers)
 
 The engine (tap→click, two-finger scroll, the slot model) is pinned
 headless by tests/test_touch.c and both backends' translation paths
-run through the ops seam; §18 covers the gestures above it. What
+run through the ops seam; §9 covers the gestures above it. What
 only your touchscreen shows is the real feel.
 
 - Tap any FDK button: one click (the tap synthesis is the ONLY
@@ -988,12 +713,12 @@ only your touchscreen shows is the real feel.
 - Press-drag-release inside a List or Tree selects exactly as the
   mouse does (the same hit tests, no touch-only surprises).
 
-## 27. The GTX 1050 Ti acceptance: the GL lane under the proprietary
-NVIDIA driver on labwc (the §20 report's hardware — needs your GPU)
+## 18. The GTX 1050 Ti acceptance: the GL lane under the proprietary
+NVIDIA driver on labwc (the §11 report's hardware — needs your GPU)
 
 **Status: implemented — should work (untested on real hardware).**
-The §20 crash (two presenters on one wl_surface) is fixed and pinned
-on the sway/llvmpipe rig by the attach-count assertion; the §21 round
+The §11 crash (two presenters on one wl_surface) is fixed and pinned
+on the sway/llvmpipe rig by the attach-count assertion; the §12 round
 then made the lane pick its upload shape by PROBING the driver (a
 real 4x4 upload per shape, both BGRA internalformat spellings tried —
 the spec row first) instead of trusting the extension string, added a
@@ -1026,7 +751,7 @@ and look for, in order:
 - `GPU present lane active on Wayland (renderer "NVIDIA GeForce
   GTX 1050 Ti/PCIe/SSE2")` — the lane engaged.
 - `GL lane: compositor advertises wp_linux_drm_syncobj_manager_v1 —
-  ...` — the relevance note (ONE line, at connect, plus the §20 note
+  ...` — the relevance note (ONE line, at connect, plus the §11 note
   at engagement).
 - `GPU lane upload path: <shape> — driver-probed (a real 4x4 upload
   picked this shape; ...)` — **THE PROBE'S VERDICT**. If this says
@@ -1069,7 +794,7 @@ reports, both suppressed with proof and BOTH fully explained: the
 driver's `libdbus-1` one-time state (670-766 B in 3 allocations —
 184 B direct at libdbus+0x276d7, 582 B indirect at +0x3774d) and
 `libEGL_nvidia`'s state (256 B in 4 allocations, every frame
-inside `libEGL_nvidia.so.0+0xc94e1`). The §22 round audited FDK's
+inside `libEGL_nvidia.so.0+0xc94e1`). The §13 round audited FDK's
 teardown call-by-call before suppressing and fixed the one missing
 canonical call (eglReleaseThread, now the connection shutdown's
 tail). Your two post-fix runs then closed the last question from
@@ -1090,7 +815,7 @@ dbus API with no DT_NEEDED, and the GLX twin libnvidia-glcore
 carries the same client). The suppression file's proof blocks
 carry the full stories. If an FDK frame appears in any leak
 report, that is a real bug — file it; the negative control in the
-§22 record proves the suppressions cannot hide one.
+§13 record proves the suppressions cannot hide one.
 
 THE SIGN-OFF RUN (2026-11-01, GTX 1050 Ti, this recipe on
 text_demo): "exited cleanly after 587 frames", and LSan ended the
@@ -1108,7 +833,7 @@ directly with a controlled probe; see docs/testing.md's
 "Reading the Suppressions-used footer"). So this run retired
 libdbus-1's 3-allocation block and NOTHING ELSE — no
 libEGL_nvidia row (that block did not appear this run), no leak
-report above the footer, exit 0. That is the §22 clean-exit
+report above the footer, exit 0. That is the §13 clean-exit
 contract delivered on the driver desktop: the full stack (GL
 lane engaged, driver-probed upload path, HarfBuzz+FriBidi,
 atspi) runs, exits cleanly, and the footer accounts for every
@@ -1116,10 +841,10 @@ byte LSan would otherwise have reported. A future run that
 prints a different template set or a leak report above the
 footer is telling you something changed — read it the same way.
 
-## 28. The Wayland/NVIDIA sign-off round (the desktop's answer, not
+## 19. The Wayland/NVIDIA sign-off round (the desktop's answer, not
 the rig's)
 
-The §27 recipe is the single-window acceptance; this is the
+The §18 recipe is the single-window acceptance; this is the
 half-hour round that says "the lane is fine on this desktop" as a
 property, not an anecdote. All of it on your real session
 (labwc/sway + the proprietary driver):
@@ -1147,6 +872,6 @@ property, not an anecdote. All of it on your real session
   is expected to name third-party modules — on the NVIDIA chain
   specifically the two known ones (libdbus-1's one-time state and
   libEGL_nvidia's per-thread 256 B; both suppressed with proof in
-  `tests/data/lsan-gl.supp`, see §27's clean-exit note); FDK-owned
+  `tests/data/lsan-gl.supp`, see §18's clean-exit note); FDK-owned
   allocations report zero. If an FDK frame appears in the report,
   that is a real bug — file it.

@@ -4,7 +4,7 @@
  * The Wayland half of include/fdk/fdk_extend.h's ext_surface_adopt
  * platform op: an add-on created a wl_surface through the wl_display*
  * the extension API handed out and gave it whatever protocol role it
- * speaks (a zwlr_layer_surface_v1, for fdk-shell-overlay) — FDK now wraps
+ * speaks (a shell-surface role surface, say) — FDK now wraps
  * that surface so it participates in everything a normal FDK window
  * gets: seat event routing (wayland_seat.c resolves wl_surface ->
  * pwindow through the registry this adopt joins), the recycled
@@ -25,7 +25,7 @@
  * and size: it reports the role's configure through
  * fdk_ext_surface_notify_configure(), which (wayland_ext.c below)
  * flips `configured` and commits any buffer whose present was
- * deferred by the pre-configure gate — the layer-shell rule "wait
+ * deferred by the pre-configure gate — the role rule "wait
  * for the initial configure before committing" is enforced by FDK's
  * present() for EVERY surface it renders, add-on or not.
  */
@@ -194,7 +194,7 @@ void *fdk_wayland_native_display(fdk_platform_connection *conn) {
  * 1.0.0-rc1 (found live on labwc and sway, 2026-10-26): this op ALSO
  * flips `configured` — the flag present()'s first-configure gate
  * reads — and commits the deferred first frame. The add-on contract
- * (fdk_extend.h, and fdk-shell-overlay's layer_configure): notify_configure
+ * (fdk_extend.h): notify_configure
  * runs AFTER the role's configure was acked, so a commit happening
  * here is post-ack on the wire. The bug it closes: the demo bar
  * painted immediately after show() (before the role's configure
@@ -290,7 +290,7 @@ fdk_result fdk_wayland_ext_surface_native(fdk_platform_window *pwindow,
  * the TOPMOST ancestor (empty = no buffer attach, purely a state
  * application; legal on any surface, and invisible to the app's own
  * frame pacing). Gated on the ancestor being CONFIGURED — an
- * unconfigured role surface (layer-shell pre-configure, an unshown
+ * unconfigured role surface (pre-first-configure, an unshown
  * window) must not receive a stray commit; its own handshake commit
  * will carry the child in (correct by construction). */
 static void subsurface_apply_tree_state(fdk_platform_window *child) {

@@ -72,5 +72,5 @@ XMLCONF
 
 RUN archlinux:base 'sh packaging/arch/install-test.sh'
 
-echo "===== FDK arch pipeline OK (FDK; the layer-shell add-on lives in FDK-Layer-Shell) ====="
+echo "===== FDK arch pipeline OK ====="
 ls -la dist/

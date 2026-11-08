@@ -69,13 +69,16 @@ session-bus rig below); inotify through the ext-fd loop hook.
   rename, trash, split on/off, bookmark add/reorder/persist,
   worker-copy round-trip, quit — zero-warning build, LSan clean.
 - Tray + notification (§26/3b): `fdk-files/run_files_tray_bus.sh`
-  against a real `dbus-daemon --session` with fdk-shell-overlay's
-  trayhost (77-PASS rig) + notifyd. T1 (watcher name) and T2 (the
-  tray item registers) PASS. T3 (the notification card placed) is
-  SHOULD WORK: in this sandbox the app's notify connect fails in the
-  fresh-app-after-daemon order ("session bus connect failed",
-  src/desktop/notify_client.c on_ready); the module connects cleanly
-  when the app boots before the daemon. Recorded for the next round.
+  against a real `dbus-daemon --session` with a real StatusNotifier
+  watcher and notification daemon (TRAYHOST_BIN / NOTIFYD_BIN, or
+  whatever the running desktop already provides; legs without a
+  counterpart SKIP honestly). T1 (watcher name) and T2 (the
+  tray item registers) PASS. T3 (the Notify call witnessed on the
+  bus) is SHOULD WORK: in this sandbox the app's notify connect
+  fails in the fresh-app-after-daemon order ("session bus connect
+  failed", src/desktop/notify_client.c on_ready); the module
+  connects cleanly when the app boots before the daemon. Recorded
+  for the next round.
 - Screenshots (this dir): `fdk-files-main.png`, `fdk-files-dark.png`,
   `fdk-files-smoke-split.png` — all 1080x700, non-blank verified.
 
@@ -120,7 +123,7 @@ StartupWMClass=the app's real id). Icons:
 
 Sources: desktop-entry-spec 1.5 (freedesktop.org, above); the KDE
 StatusNotifier item/watcher protocol (notably the item registers its
-UNIQUE bus name — verified live against fdk-shell-overlay's
+UNIQUE bus name — verified live against a real watcher
 implementation); XDG basedir spec for the cache/config locations
 (the icons use the hicolor theme layout per the Icon Theme
 Specification).

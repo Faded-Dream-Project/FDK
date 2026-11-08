@@ -124,45 +124,6 @@ $(BUILD)/fdk-keys: $(filter-out %/gen_app_icon.c %/perf_50k.c,$(wildcard fdk-key
 $(FDK_LIB):
 	$(MAKE) -C $(ROOT) static
 
-# ---- the fdk-hud add-on + its dlopen host (the release proof) ----
-#
-# The host links the SHARED libfdk, never the archive: host and
-# dlopen'd add-on must resolve fdk_* from the ONE libfdk.so.1 in the
-# process (the soname dedup) — the model docs/EXTENDING.md §11
-# states and fdk-addon/isolated_build.sh proves against an installed
-# prefix. The .so builds with the same warning set; its exported
-# namespace is fdk_hud_* only (the version script).
-
-WL_CFLAGS := $(shell pkg-config --cflags wayland-client 2>/dev/null)
-
-$(BUILD)/libfdk-hud.so: fdk-addon/hud.c fdk-addon/hud.h \
-                        fdk-addon/gen/layer-shell.h \
-                        fdk-addon/gen/layer-shell-impl.c \
-                        fdk-addon/gen/xdg-shell.h \
-                        fdk-addon/gen/xdg-shell-impl.c \
-                        fdk-addon/fdk-hud.exports.map
-	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(WL_CFLAGS) $(CFLAGS) -fPIC -shared -o $@ \
-	    fdk-addon/gen/layer-shell-impl.c fdk-addon/gen/xdg-shell-impl.c \
-	    fdk-addon/hud.c \
-	    -L$(ROOT)/build -lfdk -lX11 \
-	    $(shell pkg-config --libs wayland-client 2>/dev/null) -lm \
-	    -Wl,--version-script=fdk-addon/fdk-hud.exports.map \
-	    -Wl,-rpath,$(CURDIR)/../build
-
-$(BUILD)/fdk-addon-host: fdk-addon-host/main.c $(COMMON_SRCS) \
-                         $(wildcard common/*.h)
-	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) \
-	    -DPO_DIR='"$(CURDIR)/fdk-addon-host/po"' -o $@ \
-	    fdk-addon-host/main.c $(COMMON_SRCS) \
-	    -L$(ROOT)/build -lfdk -Wl,-rpath,$(CURDIR)/../build \
-	    $(LIBS)
-
-.PHONY: addon
-addon: $(BUILD)/libfdk-hud.so $(BUILD)/fdk-addon-host
-	sh fdk-addon/isolated_build.sh $(ISOLATE_STAGE)
-
 # Smoke: each app under a throwaway Xvfb (the repo Makefile's own
 # test-x11 pattern — xvfb-run needs xauth, which headless containers
 # lack), frame-budgeted exit. A smoke PASS is "opened a window,
@@ -170,7 +131,7 @@ addon: $(BUILD)/libfdk-hud.so $(BUILD)/fdk-addon-host
 # suppressions" — not a feature verification (those are the apps' own
 # README checklists and the scripted rigs).
 SMOKE_APPS := fdk-files fdk-monitor fdk-notes fdk-edit fdk-term \
-               fdk-chat fdk-addon-host fdk-stress fdk-workbench \
+               fdk-chat fdk-stress fdk-workbench \
                fdk-keys fdk-langs
 
 test-apps-smoke:

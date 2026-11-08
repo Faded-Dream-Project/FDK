@@ -130,13 +130,6 @@ jobs:
         # back to debug (sanitizer builds). FDK_CONFIG pinned throughout.
         run: make FDK_CONFIG=release all examples verify-exports
 
-      - name: fdk-layer-shell (the add-on) — moved to its own repository
-        # The layer-shell add-on package now lives in
-        # Faded-Dream-Project/FDK-Layer-Shell (renamed fdk-layer-shell,
-        # C prefix fdk_layer_shell_*), with its own CI: build + X11
-        # suite + desktop models + the isolation proof against THIS
-        # tree's main. Nothing in FDK's own battery references it.
-
   distro-packages:
     name: distro packages
     uses: ./.github/workflows/distro-packages.yml

@@ -1,6 +1,7 @@
 /* 19_extension_surfaces.c — the extension API (fdk_extend.h), live.
  *
- * The surface add-on API fdk-shell-overlay is BUILT on, exercised
+ * The surface add-on API that external shell add-ons are BUILT
+ * on, exercised
  * directly: the demo registers its OWN surface kind, creates a
  * surface, renders to it through the ordinary fdk_surface path,
  * sets a cursor + input region, shows/hides it, and opens a real
@@ -94,7 +95,7 @@ static fdk_result kind_create(fdk_ext_surface *surface,
          * (wl_compositor create_surface + a role) is the overlay
          * package's job. Report honestly and stay out. */
         log_line("[ext] create: backend is not X11 — this demo's "
-                 "kind is X11-only (see fdk-shell-overlay for the "
+                 "kind is X11-only (the same API carries the "
                  "Wayland shape)");
         return FDK_ERR_UNSUPPORTED;
     }
@@ -105,7 +106,7 @@ static fdk_result kind_create(fdk_ext_surface *surface,
         dpy, parent, 80, 80, 320, 200, 0,
         BlackPixel(dpy, screen), WhitePixel(dpy, screen));
     /* The add-on's own properties, before show: the class hint +
-     * a title — the exact pattern fdk-shell-overlay's X11 leg
+     * a title — the exact pattern a shell add-on's X11 leg
      * uses. */
     XClassHint *class_hint = XAllocClassHint();
     if (class_hint != NULL) {

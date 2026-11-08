@@ -38,14 +38,7 @@ dlopen'd, never linked; an absent library degrades, never fails.
 |-----------|---------|-----------|-----|------------|
 | stb_truetype, stb_image, stb_rect_pack | Public Domain / MIT | third_party/stb | glyph rasterization; image decode (JPEG/PNG/BMP/TGA/PSD/GIF-static/HDR/PIC/PNM); icon packing | stb project (no gram of copyleft; headers carry their licenses verbatim) |
 | nanosvg | Zlib | third_party/nanosvg | SVG icon rendering (paths, fills — no filters/masks/text) | nanosvg project, header license kept |
-| wlr-layer-shell-unstable-v1 XML | MIT (Havoc Pennington-style ?— see below) | fdk-layer-shell/proto/ | the layer-shell protocol definition fdk-layer-shell's scanner bindings are generated from | the swaywm/wlr-protocols GitHub mirror (gitlab.freedesktop.org raw is blocked by an anti-bot wall); the XML's own copyright/license header is preserved in the file |
 
-The layer-shell XML's file header (kept verbatim) states it is
-© 2008 Havoc Pennington / Kristian Høgsberg lineage, licensed for
-use "without limitation" style permissive terms as historically
-published by the wlr-protocols project — the same lineage every
-Wayland client vendors. It is a protocol DESCRIPTION, not code:
-no copyleft code exists in this tree from any source.
 
 ## Protocol definitions FDK speaks (implemented from public specifications)
 
@@ -66,7 +59,6 @@ LGPL/AGPL projects (the licensing-policy rule):
   is validated by dual-decoder agreement: the module's vertex
   streams must match the vendored stb_truetype's own Type 2 decode
   glyph-for-glyph on real fonts (tests/test_cff.c).
-- wlr-layer-shell v4 (fdk-layer-shell, from the vendored XML).
 - xdg-shell, xdg-decoration, viewporter, fractional-scale-v1,
   primary-selection-unstable-v1, cursor-shape-v1 (Wayland scanner
   bindings generated from the wayland protocol XMLs).

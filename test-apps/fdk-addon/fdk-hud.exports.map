@@ -1,6 +1,0 @@
-{
-  global:
-    fdk_hud_*;
-  local:
-    *;
-};

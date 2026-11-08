@@ -217,8 +217,8 @@ application doing heavy per-frame vector work draws on CPU.
 - D-Bus: a NATIVE wire client (fdk_dbus.h, 105 decls — bus,
   calls, signals, properties, watch; no libdbus linkage).
 - Notifications (org.freedesktop.Notifications: send/withdraw/
-  capabilities/status) plus the SERVER side (fdk-shell-overlay's
-  notifyd), system tray host AND item (StatusNotifierItem, both
+  capabilities/status; the SERVER side is add-on territory by D-005),
+  system tray host AND item (StatusNotifierItem, both
   directions), toplevel control (foreign-toplevel-management:
   list/activate/close), session manager (session save/restore,
   join/leave, command), idle inhibit, portal prefs (theme/scheme/
@@ -257,7 +257,7 @@ toolkit's spine; see docs/threading.md).
 
 | # | Gap (as this document last stated it) | Status |
 |---|---|---|
-| 1 | fdk-shell-overlay (shell surfaces) | **CLOSED** — the package (formerly `fdk-shell/`, renamed this round); X11 suite green in-sandbox, live re-anchoring + auto-hide + outputs + popups verified on Xvfb |
+| 1 | shell surfaces (the first add-on package) | **CLOSED** — shipped as an add-on package in its own repository; X11 suite green in-sandbox, live re-anchoring + auto-hide + outputs + popups verified on Xvfb |
 | 2 | Clipboard: image + URI-list formats | **CLOSED** — image since 1.0.0 + INCR 1.0.0; text/uri-list set/get added this round (§23/B2a-close), both backends, two-process verified |
 | 3 | Gestures + multi-touch | **CLOSED** — touch slots + PINCH/SWIPE events since 1.0.0; the RECOGNIZER layer (click/long-press/drag/pan/swipe/zoom/rotate) added this round (§23/B2b) |
 | 4 | Text on extension surfaces | **CLOSED** (this round) — extension API v3: `fdk_ext_surface_host_widgets()` puts the whole widget catalog (any label's text with it) on any extension surface through the window layer's own root machinery; the X11 integration test pins render, input, resize, the add-on callback contract, and teardown |
@@ -286,51 +286,12 @@ application core — windows, input, 36+ widget classes,
 complex-script text WITH range attributes, gesture recognizers,
 the model/view split, AT-SPI accessibility, theming,
 D-Bus/tray/notifications/session, i18n, undo, animation, shell
-surfaces (the fdk-shell-overlay package), and now printing —
+surfaces (an add-on package), and now printing —
 with the deliberate shape differences (no GObject/moc, token
 themes, immediate-mode rendering, one-clipboard-content-at-a-
 time) documented above. What remains open is stated in the table:
 text-on-extension-surfaces, the inline chooser widget forms, the
 deeper Pango attribute tail.
-
----
-
-## fdk-shell-overlay/ — the shell-surface add-on package
-
-`fdk-shell-overlay/` (formerly `fdk-shell/`) is the first surface
-add-on package — the docs/EXTENDING.md model's reference consumer:
-a `zwlr_layer_surface_v1` client for Wayland shells and an EWMH
-dock client for X11, with its own build, version, pkg-config
-file, packaging for five distros, and test suites.
-
-- `fdk_shell_layer_create()` with a description struct (level,
-  anchors, margins, exclusive zone, keyboard mode, desired size,
-  output index), then LIVE setters — `fdk_shell_layer_set_level/
-  set_anchor/set_margin/set_exclusive_zone/set_desired_size/
-  set_keyboard_mode`, show/hide/reveal, auto-hide with edge
-  behavior — an `fdk_ext_surface*` back, so rendering, events,
-  input regions, popups and subsurfaces ride the extension API
-  unchanged.
-- Output enumeration (`fdk_shell_output_count/name/get_info`)
-  plus a hotplug callback; per-output layer surfaces (the
-  shell-panel shape) or one output pinned by index. X11 reads the
-  RandR monitor table.
-- Keyboard modes NONE/EXCLUSIVE/ON_DEMAND (ON_DEMAND is the
-  layer-shell v4 semantic; the package binds the highest version
-  the compositor offers and degrades with documented behavior
-  below v4).
-- Popup surfaces (`fdk_shell_popup_create/_create_child`), a
-  notification server (`fdk_shell_notify_*`), a tray host
-  (`fdk_shell_tray_*`) — the add-on is itself a small desktop
-  shell stack.
-
-**Verified in this sandbox**: the package builds warning-clean
-after the rename and its full X11 suite passes (output info and
-per-output anchoring, RandR probing with stale-index fallback,
-3-deep popup cascades, family sweep). The Wayland suite and the
-distro builds are exercised in CI (should work here — no
-compositor in the sandbox). See its own README and
-fdk-shell-overlay/packaging for the full inventory.
 
 ---
 
@@ -359,9 +320,6 @@ classified; 0 rot, 0 stale, 0 unclassified.
 - GTK4 gesture model + long-press default (the B2b thresholds):
   https://docs.gtk.org/gtk4/class.Gesture.html
   https://docs.gtk.org/gtk4/property.Settings.gtk-long-press-time.html
-- wlr-layer-shell-unstable-v1 (requests/events/enums — the B1
-  verification):
-  https://wayland.app/protocols/wlr-layer-shell-unstable-v1
 - IPP encoding + transport (the B2f wire):
   RFC 8010 https://www.rfc-editor.org/rfc/rfc8010.txt
   RFC 8011 https://www.rfc-editor.org/rfc/rfc8011.txt

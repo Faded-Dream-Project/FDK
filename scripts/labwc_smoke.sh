@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# labwc_smoke.sh — run the full smoke matrix (all nine apps) against a
+# labwc_smoke.sh — run the full smoke matrix (all eight apps) against a
 # headless labwc compositor, the same way test-apps-smoke runs them
 # against Xvfb. Proves the Wayland backend end to end on a SECOND,
 # independent wlroots compositor (sway was the first).
@@ -46,27 +46,16 @@ fi
 
 BUILD="$ROOT_DIR/test-apps/build"
 SMOKE_APPS="fdk-files fdk-monitor fdk-notes fdk-edit fdk-term \
-            fdk-chat fdk-addon-host fdk-stress fdk-workbench"
+            fdk-chat fdk-stress fdk-workbench"
 rc=0
 for app in $SMOKE_APPS; do
-    if [ ! -x "$BUILD/$app" ] && [ "$app" = fdk-addon-host ]; then
-        echo "=== smoke: $app NOT BUILT (make addon first)"; rc=1; continue
+    if [ ! -x "$BUILD/$app" ]; then
+        echo "=== smoke: $app NOT BUILT (make -C test-apps first)"; rc=1; continue
     fi
     echo "=== smoke (wayland/labwc): $app"
-    extra=""
-    # FDK_HUD_WAYLAND=1: the layer-shell role is no longer opt-in-only
-    # for the smoke — the round-30 version-gate fix closed the kill, so
-    # the smoke pins it (the host must PASS its full receipt here)
-    [ "$app" = fdk-addon-host ] && \
-        extra="FDK_HUD_LIB=$BUILD/libfdk-hud.so FDK_HUD_WAYLAND=1"
     # shellcheck disable=SC2086
-    # the addon-host's scripted commands are timer-fed; the wayland
-    # pump is frame-callback-paced, so 40 frames (~0.7 s under pixman)
-    # served too few of them — give that leg a frame budget its feed
-    # timer can actually fill (X11's unhinged pump needs only 40)
     frames=40
-    [ "$app" = fdk-addon-host ] && frames=600
-    env $extra FDK_TESTAPP_FRAMES=$frames "$BUILD/$app" --smoke \
+    env FDK_TESTAPP_FRAMES=$frames "$BUILD/$app" --smoke \
         > "/tmp/labwc_smoke_$app.log" 2>&1 || rc=1
     grep -h "receipt\|PASS\|FAIL" "/tmp/labwc_smoke_$app.log" | tail -2
 done

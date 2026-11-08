@@ -112,5 +112,5 @@ for img in almalinux:10 fedora:42; do
     RUN "$img" 'sh packaging/fedora/install-test.sh'
 done
 
-echo "===== FDK rpm pipeline OK (FDK; the layer-shell add-on lives in FDK-Layer-Shell) ====="
+echo "===== FDK rpm pipeline OK ====="
 ls -la dist/

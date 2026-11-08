@@ -18,9 +18,8 @@ pacman -Sy --noconfirm --needed \
     gcc pkgconf libx11 libxext zlib wayland libxkbcommon \
     xorg-server-xvfb ttf-dejavu >/dev/null
 
-# fdk-[0-9]* — FDK's own package ONLY (the layer-shell add-on ships
-# from its own repository, FDK-Layer-Shell, so nothing else lands in
-# dist/; the digit-right-after-fdk- pattern stays deterministic).
+# fdk-[0-9]* — FDK's own package ONLY (the digit-right-after-fdk-
+# pattern stays deterministic and matches nothing else in dist/).
 PKG="$(ls dist/fdk-[0-9]*.pkg.tar.* 2>/dev/null | head -1)"
 [ -n "$PKG" ] || { echo "INSTALL-TEST FAIL: no arch package in dist/"; exit 1; }
 

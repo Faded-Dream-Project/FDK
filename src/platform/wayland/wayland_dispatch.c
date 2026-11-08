@@ -76,7 +76,7 @@ int fdk__wayland_connection_dead(fdk_platform_connection *conn,
                  * prepare/dispatch pattern), and an out-of-loop
                  * present could then hang forever on a connection
                  * that will never produce another event (the
-                 * layer-shell HUD hang) */
+                 * shell-surface hang) */
                 if (wl_display_prepare_read(conn->display) == 0) {
                     (void)wl_display_read_events(conn->display);
                 } else {

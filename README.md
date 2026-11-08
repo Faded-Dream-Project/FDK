@@ -38,11 +38,9 @@ set (`docs/dependencies.md`).
 **extension API** (`fdk/extend.h`, `docs/EXTENDING.md`) is the
 landmark of the current tree: a small, documented, stable, versioned
 surface that add-on packages build on so FDK stays simple and becomes
-the root other libraries grow from. The first add-on, **fdk-layer-shell**
-(layer-shell surfaces — panels, docks, overlays — on wlr-layer-shell
-and EWMH dock hints, behind one API), lives in its own repository,
-**FDK-Layer-Shell**, and compiles against FDK's installed public headers
-and library only (the `tests/isolation.sh` proof in that repository). The
+the root other libraries grow from (`examples/19_extension_surfaces.c`
+is the in-tree worked example; an add-on compiles against FDK's
+installed public headers and library only). The
 versioning policy and the SONAME scheme (`libfdk.so.1`, ABI
 append-only) are development-time policy — they govern how the tree
 evolves as it heads toward a first stable release, which the owner
@@ -116,9 +114,11 @@ suite (`docs/testing.md`).
 - **Desktop integration (1.0.0)** — the services a desktop
   application actually needs, all on FDK's own zero-dependency
   implementations: a native D-Bus client (raw C from the wire
-  spec, no libdbus) riding a StatusNotifier **tray host** and a
-  full **notification server** (both as fdk-layer-shell examples with
-  their own rigs); **dark mode** following the desktop's setting
+  spec, no libdbus) carrying the StatusNotifier **tray item**
+  export with its DBusMenu server and the **notification client**
+  (the daemon/watcher side of both protocols is pinned by the
+  mock rigs in `make test-dbus`; host-side models are add-on
+  territory by decision D-005); **dark mode** following the desktop's setting
   on every channel that exists (color-scheme portal, XSETTINGS,
   the settings daemon, a fallback file); **portal dialogs** — the
   xdg-desktop-portal FileChooser where the portal exists, the

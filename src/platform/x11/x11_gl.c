@@ -807,7 +807,7 @@ static void draw_fullscreen_quad(struct fdk_x11_gl *gl, int w, int h) {
  *     clock. The first XGetImage can therefore read the window's
  *     PRE-FRAME content — typically its creation background pixel
  *     (the live report's "server (000000) vs CPU (color)" was exactly
- *     the fdk-shell-overlay bar's BlackPixel background). One retry budget
+ *     a shell-surface bar's BlackPixel background). One retry budget
  *     (~3 vblanks) separates the timing case (a retry matches: PASS)
  *     from the real limitation (every retry mismatches: FAIL). Only
  *     the REAL case refuses the lane for the whole PROCESS (the
