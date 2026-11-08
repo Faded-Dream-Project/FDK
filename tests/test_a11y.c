@@ -16,6 +16,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 static int g_fail = 0;
 
@@ -106,6 +107,18 @@ static void load_font(void) {
     };
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]);
          i++) {
+        /* Existence gate first: a candidate for ANOTHER distro's
+         * layout is a normal miss, not an error — the loader's
+         * ERROR log stays loud for candidates that exist but fail. */
+        if (access(candidates[i], R_OK) != 0) {
+            continue;
+        }
+        /* Existence gate first: a candidate for ANOTHER distro's
+         * layout is a normal miss, not an error — the loader's
+         * ERROR log stays loud for candidates that exist but fail. */
+        if (access(candidates[i], R_OK) != 0) {
+            continue;
+        }
         g_font = fdk_font_load(candidates[i], 14);
         if (g_font != NULL) {
             return;

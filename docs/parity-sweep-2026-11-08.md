@@ -29,7 +29,7 @@ Qt6 catalog: 153 widget classes
 - **GtkShortcutLabel, GtkShortcutsWindow, GtkShortcutsGroup, GtkShortcutsSection, GtkShortcutsShortcut** — the shortcut REGISTRY is shipped; the presentation window (ShortcutsWindow) is a composition the app builds — stated
 - **GtkTreeExpander / QDataWidgetMapper** — tree rows expand inline already; the form-to-model mapper is the named model-tail (the binding half is fdk_model_listen)
 - **GtkAssistant / QWizard, QProgressDialog, QInputDialog** — Assistant/Wizard = deliberate OUT (PARITY policy); progress/input = message dialog + entry compositions
-- ** / QMdiArea, QMdiSubWindow** — MDI is a deprecated interaction model (GTK dropped it too); policy-OUT
+- **QMdiArea, QMdiSubWindow** — MDI is a deprecated interaction model (GTK dropped it too); policy-OUT
 
 ## Drift
 

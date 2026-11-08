@@ -27,19 +27,33 @@
  *                         XSETTINGS poll runs on a real display)
  *   $FDK_THEME unset      no developer-shell theme leaking in
  *   $FDK_PREFS_FILE unset no one-file override leaking in
- *   XDG_CONFIG_HOME -> build/tests/hermetic-home/config
- *                         an empty directory (created best-effort;
- *                         left nonexistent is equally hermetic) —
- *                         the owner's real fdk.prefs / app prefs
- *                         cannot leak a theme or ui.* keys in.
- *                         Tests with their own fixtures setenv their
- *                         own XDG_CONFIG_HOME in main(); theirs
- *                         lands later and wins. HOME is
- *                         deliberately NOT sandboxed: fontconfig
- *                         discovery is part of what the tests
- *                         exercise, and XDG_CONFIG_HOME set means
- *                         the HOME/.config prefs fallback never
- *                         runs anyway.
+ *   XDG_CONFIG_HOME -> <repo>/build/tests/hermetic-home/config
+ *                         an ABSOLUTE path to an empty directory
+ *                         (created best-effort; left nonexistent is
+ *                         equally hermetic) — the owner's real
+ *                         fdk.prefs / app prefs cannot leak a theme
+ *                         or ui.* keys in. ABSOLUTE matters: the
+ *                         prefs resolver ignores non-absolute XDG
+ *                         vars (the XDG spec rule) and falls back to
+ *                         $HOME/.config/fdk.prefs, so the old
+ *                         relative pin silently no-opped on a
+ *                         desktop that HAS real prefs — the owner's
+ *                         2026-11-08 run: ~/.config/fdk.prefs
+ *                         carried theme.name = Pink Rave, the
+ *                         progress test's fill painted pink, and the
+ *                         blue-pixel scan counted 0. Reproduced,
+ *                         fixed here; guarded by test_core's
+ *                         hermetic-pin check. Tests with their own
+ *                         fixtures setenv their own XDG_CONFIG_HOME
+ *                         in main(); theirs lands later and wins.
+ *                         HOME is deliberately NOT sandboxed:
+ *                         fontconfig discovery is part of what the
+ *                         tests exercise. Known residual channel,
+ *                         accepted and documented: a developer's
+ *                         $HOME/.FDKThemes outranks the shipped set
+ *                         for same-stem loads — a custom pink-rave
+ *                         .fdk there may red content-sensitive theme
+ *                         tests; move it aside for a clean run.
  *
  *   The env pins are also the "no portal influence" guarantee in
  *   disguise: with the override set, ui_metrics' resolve() never
@@ -74,6 +88,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -89,11 +104,27 @@ __attribute__((constructor)) static void fdk_test_hermetic_pin(void) {
 #endif
     /* The settings store points at a directory that never holds a
      * file: mkdir best-effort (a read-only CWD leaves it
-     * nonexistent — equally silent), never fatal. */
+     * nonexistent — equally silent), never fatal. The path must be
+     * ABSOLUTE — see the block comment above (a relative XDG var is
+     * spec-ignored by the resolver, which then falls through to the
+     * developer's real $HOME/.config/fdk.prefs). */
     (void)mkdir("build/tests/hermetic-home", 0755);
     (void)mkdir("build/tests/hermetic-home/config", 0755);
-    (void)setenv("XDG_CONFIG_HOME", "build/tests/hermetic-home/config",
-                 1);
+    {
+        char cwd[2048];
+        char abs[2304];
+        if (getcwd(cwd, sizeof cwd) != NULL &&
+            snprintf(abs, sizeof abs,
+                     "%s/build/tests/hermetic-home/config", cwd) <
+                (int)sizeof abs) {
+            (void)setenv("XDG_CONFIG_HOME", abs, 1);
+        } else {
+            /* No usable CWD: relative is the old (leaky) best
+             * effort — better than nothing, never fatal. */
+            (void)setenv("XDG_CONFIG_HOME",
+                         "build/tests/hermetic-home/config", 1);
+        }
+    }
     /* No theme / prefs-file overrides leaking in from the shell. */
     (void)unsetenv("FDK_THEME");
     (void)unsetenv("FDK_PREFS_FILE");

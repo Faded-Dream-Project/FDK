@@ -132,6 +132,13 @@ static bool record_event(fdk_widget *w, const fdk_widget_event *e,
         case FDK_WIDGET_KEY_UP: r->key_up++; break;
         case FDK_WIDGET_FOCUS_IN: r->focus_in++; break;
         case FDK_WIDGET_FOCUS_OUT: r->focus_out++; break;
+        /* informational to this recorder: IME composition and
+         * grab-broken are delivered to focused targets and carry no
+         * counter here — named so -Wswitch flags any FUTURE event
+         * kind as a real review point */
+        case FDK_WIDGET_IME_PREEDIT:
+        case FDK_WIDGET_IME_COMMIT:
+        case FDK_WIDGET_GRAB_BROKEN: break;
     }
     return r->handle;
 }

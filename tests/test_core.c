@@ -9,9 +9,11 @@
 
 #include "hermetic_env.h"
 #include "fdk/fdk.h"
+#include "fdk/fdk_prefs.h"
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void test_version(void) {
@@ -73,7 +75,37 @@ static void test_quit_null_is_safe(void) {
     printf("[ok] fdk_quit(NULL) no-op\n");
 }
 
+/* The suite's own hermeticity, asserted where it is consumed: the
+ * pin in hermetic_env.h must have set XDG_CONFIG_HOME to an
+ * ABSOLUTE path inside build/tests/hermetic-home — the prefs
+ * resolver spec-ignores relative XDG vars and falls back to the
+ * developer's real $HOME/.config/fdk.prefs (the 2026-11-08 Pink
+ * Rave leak: test_controls' progress fill painted the owner's
+ * theme, the blue-pixel scan counted 0). A relative pin reds HERE
+ * on every machine, CI included, because the assertion reads the
+ * string, not the desktop. */
+static void test_hermetic_pin(void) {
+    const char *xdg = getenv("XDG_CONFIG_HOME");
+    CHECK_GE(xdg != NULL ? 1 : 0, 1, "XDG_CONFIG_HOME is set by the pin");
+    CHECK_EQ(xdg[0] == '/', 1, "XDG_CONFIG_HOME is absolute");
+    CHECK_NE(strstr(xdg, "/build/tests/hermetic-home/config"), NULL,
+             "XDG_CONFIG_HOME points at the hermetic home");
+
+    /* The resolution the tests actually consume: opening the global
+     * store lands in the hermetic home, never in $HOME. */
+    fdk_prefs *p = NULL;
+    assert(fdk_ok(fdk_prefs_open("fdk", &p)));
+    const char *path = fdk_prefs_path(p);
+    CHECK_GE(path != NULL ? 1 : 0, 1, "global prefs path resolves");
+    CHECK_NE(strstr(path, "/build/tests/hermetic-home/config/fdk.prefs"),
+             NULL, "global prefs resolve INSIDE the hermetic home");
+    fdk_prefs_destroy(p);
+    printf("[ok] hermetic pin: XDG_CONFIG_HOME absolute, global prefs "
+           "land in the hermetic home\n");
+}
+
 int main(void) {
+    test_hermetic_pin();
     test_version();
     test_error_strings();
     test_init_rejects_null_out();

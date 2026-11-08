@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static fdk_font *g_font = NULL;
 
@@ -479,6 +480,12 @@ int main(void) {
         NULL,
     };
     for (int i = 0; candidates[i] != NULL; i++) {
+        /* Existence gate first: a candidate for ANOTHER distro's
+         * layout is a normal miss, not an error — the loader's
+         * ERROR log stays loud for candidates that exist but fail. */
+        if (access(candidates[i], R_OK) != 0) {
+            continue;
+        }
         g_font = fdk_font_load(candidates[i], 16);
         if (g_font != NULL) {
             break;

@@ -657,8 +657,12 @@ def main():
     lines.append("")
     for row in MAPPING:
         if row["status"] in ("missing", "partial", "out"):
-            names = ", ".join("Gtk" + g for g in row.get("gtk", []))
-            names += (" / " + ", ".join(row["qt"])) if row.get("qt") else ""
+            sides = []
+            if row.get("gtk"):
+                sides.append(", ".join("Gtk" + g for g in row["gtk"]))
+            if row.get("qt"):
+                sides.append(", ".join(row["qt"]))
+            names = " / ".join(sides)
             lines.append(f"- **{names}** — {row['note']}")
     lines.append("")
     lines.append("## Drift")
