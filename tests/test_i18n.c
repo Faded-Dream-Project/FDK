@@ -444,7 +444,7 @@ static void test_format_date(void) {
 
     assert(fdk_ok(fdk_format_date(buf, sizeof(buf), &de, &d,
                                   FDK_DATE_SHORT)));
-    check_eq("de short", buf, "21.0.0");
+    check_eq("de short", buf, "25.12.2025");
     assert(fdk_ok(fdk_format_date(buf, sizeof(buf), &de, &d,
                                   FDK_DATE_LONG)));
     check_eq("de long", buf, "25. Dezember 2025");
